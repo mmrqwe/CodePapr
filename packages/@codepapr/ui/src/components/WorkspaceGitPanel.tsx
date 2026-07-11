@@ -242,10 +242,6 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   const [deselectedPaths, setDeselectedPaths] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!isExpanded) {
-      return;
-    }
-
     let cancelled = false;
 
     const loadGitStatus = async () => {
@@ -324,7 +320,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
      return () => {
       cancelled = true;
     };
-  }, [isExpanded, refreshVersion, workspacePath, historyLimit]);
+  }, [refreshVersion, workspacePath, historyLimit]);
 
   useEffect(() => {
     setExpandedGitDiffKey(null);

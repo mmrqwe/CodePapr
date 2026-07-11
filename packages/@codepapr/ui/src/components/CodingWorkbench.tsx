@@ -227,15 +227,19 @@ export function CodingWorkbench({
   const workspaceSwitchingPathRef = useRef<string | null>(null);
   const workspaceSwitchingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isInitialGraphLoadRef = useRef(true);
+  const graphLoadStartedRef = useRef(false);
 
   const handleProjectGraphProgress = useCallback((progress: { phase: string; current: number; total: number } | null, isLoading: boolean) => {
     setProjectGraphProgress(progress);
     setProjectGraphLoading(isLoading);
     if (isInitialGraphLoadRef.current) {
-      useAgentStore.getState().setProjectGraphLoading(isLoading, progress ?? undefined);
-    }
-    if (!isLoading) {
-      isInitialGraphLoadRef.current = false;
+      if (isLoading) {
+        graphLoadStartedRef.current = true;
+        useAgentStore.getState().setProjectGraphLoading(true, progress ?? undefined);
+      } else if (graphLoadStartedRef.current) {
+        isInitialGraphLoadRef.current = false;
+        graphLoadStartedRef.current = false;
+      }
     }
   }, []);
 
@@ -335,6 +339,7 @@ export function CodingWorkbench({
 
   useEffect(() => {
     isInitialGraphLoadRef.current = true;
+    graphLoadStartedRef.current = false;
   }, [workspacePath]);
 
   useEffect(() => {
