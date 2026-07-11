@@ -41,7 +41,7 @@ export const ConversationRoundsIndicator = memo(
         result.push({
           id: m.id,
           index: idx,
-          content: getFirstSentence(m.promptContent ?? m.content),
+          content: getFirstSentence(m.content),
         });
       }
       return result;

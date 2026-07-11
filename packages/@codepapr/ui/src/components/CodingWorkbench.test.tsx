@@ -129,8 +129,9 @@ describe('CodingWorkbench', () => {
       useAgentStore.getState().noteWorkspaceMutation(['NEW.md']);
     });
 
-    await flushEffects();
-    expect(invokeMock.mock.calls.length).toBeGreaterThan(initialCalls);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    });
     expect(container.textContent).toContain('NEW.md');
   });
 

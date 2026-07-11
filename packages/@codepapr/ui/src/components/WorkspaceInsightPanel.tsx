@@ -182,6 +182,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [debugLog, setDebugLog] = useState<string[]>([]);
+  const lastWorkspacePathRef = useRef<string | null>(null);
   const appendDebug = (msg: string) => {
     if (!settings.debugEnabled) return;
     setDebugLog((prev) => [...prev, `${new Date().toLocaleTimeString()} ${msg}`]);
@@ -335,9 +336,11 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   const [prewarmingProgress, setPrewarmingProgress] = useState('');
   const prewarmingGenRef = useRef(0);
   const prevWorkspaceRef = useRef<string>('');
+  const prewarmingInitializedRef = useRef(false);
 
   useEffect(() => {
     if (!workspacePath) return;
+    prewarmingInitializedRef.current = false;
     const prev = prevWorkspaceRef.current;
     prevWorkspaceRef.current = workspacePath;
     prewarmingGenRef.current += 1;
@@ -359,7 +362,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   }, [workspacePath]);
 
   useEffect(() => {
-    if (!workspacePath || !entries || entries.length === 0) return;
+    if (!workspacePath || !entries || entries.length === 0 || prewarmingInitializedRef.current) return;
     const extToLang: Record<string, string> = {
       '.ts': 'typescript', '.tsx': 'typescriptreact', '.js': 'javascript', '.jsx': 'javascriptreact',
       '.py': 'python', '.rs': 'rust', '.go': 'go', '.swift': 'swift',
@@ -441,6 +444,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
       if (!cancelled && gen === prewarmingGenRef.current) {
         setPrewarming(false);
         setPrewarmingProgress('');
+        prewarmingInitializedRef.current = true;
       }
     })();
 
@@ -459,9 +463,14 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
       appendDebug(`跳过: canStartLoading=${canStartLoading} workspacePath=${workspacePath?.slice(-20)}`);
       setIsLoading(false);
       setProjectGraphProgress(null);
-      setProjectGraph(null);
+      if (lastWorkspacePathRef.current !== workspacePath) {
+        setProjectGraph(null);
+      }
+      lastWorkspacePathRef.current = workspacePath ?? null;
       return;
     }
+
+    lastWorkspacePathRef.current = workspacePath;
 
     appendDebug(`开始加载: path=${workspacePath.slice(-30)} entries=${entriesRef.current.length} depth=${insightMaxDepth} bytes=${insightMaxFileBytes} files=${insightMaxSourceFiles}`);
 
