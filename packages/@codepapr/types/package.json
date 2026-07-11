@@ -1,0 +1,20 @@
+{
+  "name": "@codepapr/types",
+  "version": "0.1.0",
+  "description": "Shared type definitions for CodePapr",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "node ../../../scripts/run-tsc-build.mjs",
+    "dev": "node ../../../scripts/run-module-bin.mjs typescript/bin/tsc --watch"
+  },
+  "dependencies": {},
+  "license": "MIT"
+}

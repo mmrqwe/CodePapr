@@ -1,0 +1,293 @@
+use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
+use std::{env, fs};
+
+static EXPANDED_PATH: OnceLock<String> = OnceLock::new();
+
+fn append_if_dir(paths: &mut Vec<PathBuf>, path: impl Into<PathBuf>) {
+    let path = path.into();
+    if path.is_dir() && !paths.iter().any(|existing| existing == &path) {
+        paths.push(path);
+    }
+}
+
+fn append_common_command_dirs(paths: &mut Vec<PathBuf>) {
+    #[cfg(target_os = "macos")]
+    {
+        append_if_dir(paths, "/opt/homebrew/bin");
+        append_if_dir(paths, "/usr/local/bin");
+        append_if_dir(paths, "/usr/bin");
+        append_if_dir(paths, "/bin");
+    }
+    if let Ok(home) = env::var("HOME").or_else(|_| env::var("USERPROFILE")) {
+        let home = Path::new(&home);
+        append_if_dir(paths, home.join(".volta/bin"));
+        append_if_dir(paths, home.join(".fnm"));
+        append_if_dir(paths, home.join(".local/bin"));
+        append_if_dir(paths, home.join(".cargo/bin"));
+        if let Ok(entries) = fs::read_dir(home.join(".nvm/versions/node")) {
+            let mut node_bins: Vec<PathBuf> = entries
+                .flatten()
+                .map(|entry| entry.path().join("bin"))
+                .filter(|path| path.is_dir())
+                .collect();
+            node_bins.sort();
+            for path in node_bins.into_iter().rev() {
+                append_if_dir(paths, path);
+            }
+        }
+        append_if_dir(paths, home.join(".yarn/bin"));
+        append_if_dir(paths, home.join(".config/yarn/global/node_modules/.bin"));
+    }
+}
+
+fn join_paths_or_current(paths: Vec<PathBuf>) -> String {
+    env::join_paths(paths)
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|_| env::var("PATH").unwrap_or_default())
+}
+
+pub(crate) fn expanded_path() -> String {
+    EXPANDED_PATH
+        .get_or_init(|| {
+            #[cfg(target_os = "macos")]
+            {
+                if let Ok(output) = std::process::Command::new("/usr/libexec/path_helper")
+                    .arg("-s")
+                    .output()
+                {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    if let Some(line) = stdout.lines().find(|line| line.starts_with("PATH=")) {
+                        let shell_path = line
+                            .strip_prefix("PATH=")
+                            .unwrap_or("")
+                            .trim_matches('"')
+                            .trim_matches('\'');
+                        if !shell_path.is_empty() {
+                            let home = env::var("HOME").unwrap_or_default();
+                            let mut paths: Vec<PathBuf> = env::split_paths(shell_path)
+                                .map(|path| {
+                                    let s = path.to_string_lossy().to_string();
+                                    if s.starts_with('~') {
+                                        PathBuf::from(s.replacen('~', &home, 1))
+                                    } else {
+                                        path
+                                    }
+                                })
+                                .collect();
+                            append_common_command_dirs(&mut paths);
+                            return join_paths_or_current(paths);
+                        }
+                    }
+                }
+            }
+
+            let mut paths: Vec<PathBuf> = env::var_os("PATH")
+                .map(|value| env::split_paths(&value).collect())
+                .unwrap_or_default();
+            append_common_command_dirs(&mut paths);
+            join_paths_or_current(paths)
+        })
+        .clone()
+}
+
+/// Parsed user input for a workspace-relative path with optional line/column anchor.
+#[derive(Debug, Clone)]
+pub(crate) struct PathLocationInput {
+    pub(crate) path: String,
+    pub(crate) line: Option<usize>,
+    pub(crate) column: Option<usize>,
+}
+
+/// Resolve the user's home directory from environment variables.
+pub(crate) fn home_dir() -> Result<PathBuf, String> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(profile) = std::env::var_os("USERPROFILE") {
+            if !profile.is_empty() {
+                return Ok(PathBuf::from(profile));
+            }
+        }
+    }
+
+    if let Some(home) = std::env::var_os("HOME") {
+        if !home.is_empty() {
+            return Ok(PathBuf::from(home));
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Some(profile) = std::env::var_os("USERPROFILE") {
+            if !profile.is_empty() {
+                return Ok(PathBuf::from(profile));
+            }
+        }
+    }
+
+    Err("无法定位用户主目录".to_string())
+}
+
+/// Canonicalise a workspace path and verify it is a directory.
+pub(crate) fn canonical_workspace(workspace_path: &str) -> Result<PathBuf, String> {
+    let workspace = std::fs::canonicalize(workspace_path)
+        .map_err(|err| format!("无法访问项目文件夹: {err}"))?;
+    if !workspace.is_dir() {
+        return Err("项目文件夹不是目录".to_string());
+    }
+    Ok(workspace)
+}
+
+/// Normalise a relative path, rejecting `..`, absolute paths and prefixes.
+pub(crate) fn normalize_relative_path(relative_path: Option<&str>) -> Result<PathBuf, String> {
+    let mut normalized = PathBuf::new();
+    let raw = relative_path.unwrap_or("").trim();
+    if raw.is_empty() || raw == "." {
+        return Ok(normalized);
+    }
+
+    for component in Path::new(raw).components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => return Err("路径不能包含 ..".to_string()),
+            Component::RootDir | Component::Prefix(_) => {
+                return Err("请使用相对于项目文件夹的路径".to_string())
+            }
+        }
+    }
+
+    Ok(normalized)
+}
+
+/// Parse a workspace path input that may contain line/column anchors
+/// (e.g. `src/main.ts#L10C5` or `src/main.ts:10:5`).
+pub(crate) fn parse_workspace_path_input(relative_path: Option<&str>) -> PathLocationInput {
+    let raw = relative_path.unwrap_or("").trim();
+    if raw.is_empty() {
+        return PathLocationInput {
+            path: String::new(),
+            line: None,
+            column: None,
+        };
+    }
+
+    let mut line = None;
+    let mut column = None;
+
+    let without_fragment = match raw.rsplit_once('#') {
+        Some((base, fragment)) => {
+            let upper = fragment.to_ascii_uppercase();
+            if let Some(line_digits) = upper.strip_prefix('L') {
+                let line_part = line_digits
+                    .split_once('C')
+                    .map(|(head, _)| head)
+                    .unwrap_or(line_digits)
+                    .split('-')
+                    .next()
+                    .unwrap_or("");
+                if !line_part.is_empty() && line_part.chars().all(|ch| ch.is_ascii_digit()) {
+                    line = line_part.parse::<usize>().ok().filter(|value| *value > 0);
+                    if let Some((_, column_part)) = upper.split_once('C') {
+                        let column_digits = column_part.split('-').next().unwrap_or("");
+                        if !column_digits.is_empty()
+                            && column_digits.chars().all(|ch| ch.is_ascii_digit())
+                        {
+                            column = column_digits
+                                .parse::<usize>()
+                                .ok()
+                                .filter(|value| *value > 0);
+                        }
+                    }
+                    base
+                } else {
+                    raw
+                }
+            } else {
+                raw
+            }
+        }
+        _ => raw,
+    };
+
+    let stripped = if line.is_none() {
+        let mut end = without_fragment.len();
+        let mut values = Vec::new();
+        while values.len() < 2 {
+            let prefix = &without_fragment[..end];
+            let Some(colon) = prefix.rfind(':') else {
+                break;
+            };
+            let digits = &prefix[colon + 1..];
+            if digits.is_empty() || !digits.chars().all(|ch| ch.is_ascii_digit()) {
+                break;
+            }
+            values.push(digits.parse::<usize>().ok().filter(|value| *value > 0));
+            end = colon;
+        }
+
+        if !values.is_empty() {
+            values.reverse();
+            line = values.first().and_then(|value| *value);
+            column = values.get(1).and_then(|value| *value);
+            without_fragment[..end].trim().to_string()
+        } else {
+            without_fragment.trim().to_string()
+        }
+    } else {
+        without_fragment.trim().to_string()
+    };
+
+    PathLocationInput {
+        path: stripped,
+        line,
+        column,
+    }
+}
+
+/// Return only the path component from a workspace path input.
+pub(crate) fn sanitize_workspace_path_input(relative_path: Option<&str>) -> String {
+    parse_workspace_path_input(relative_path).path
+}
+
+/// Resolve a relative path against a workspace, canonicalising and
+/// enforcing that the result stays inside the workspace.
+pub(crate) fn resolve_existing_path(
+    workspace_path: &str,
+    relative_path: Option<&str>,
+) -> Result<(PathBuf, PathBuf), String> {
+    let workspace = canonical_workspace(workspace_path)?;
+    let raw = sanitize_workspace_path_input(relative_path);
+    let candidate = if raw.is_empty() || raw == "." {
+        workspace.clone()
+    } else {
+        let raw_path = PathBuf::from(&raw);
+        if raw_path.is_absolute() {
+            raw_path
+        } else {
+            workspace.join(normalize_relative_path(Some(&raw))?)
+        }
+    };
+    let target =
+        std::fs::canonicalize(candidate).map_err(|err| format!("路径不存在或无法访问: {err}"))?;
+    Ok((workspace, target))
+}
+
+/// Convert an absolute path to a workspace-relative forward-slash string.
+pub(crate) fn relative_string(workspace: &Path, path: &Path) -> String {
+    path.strip_prefix(workspace)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+/// Normalise an optional workspace filter, canonicalising if present.
+pub(crate) fn normalize_workspace_filter(
+    workspace_path: Option<String>,
+) -> Result<Option<String>, String> {
+    workspace_path
+        .map(|path| {
+            canonical_workspace(&path).map(|workspace| workspace.to_string_lossy().to_string())
+        })
+        .transpose()
+}

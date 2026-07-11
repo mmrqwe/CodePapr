@@ -1,0 +1,249 @@
+import type { IImageContent, QuestionData } from '@codepapr/types';
+import type { WorkMode } from '../../utils/agentPrompts';
+import type { TaskModelRoute } from '../../utils/modelRouting';
+import type { ContextCheckpointPayload } from '../../utils/contextCompaction';
+import type { McpSettings } from '../../utils/mcpTypes';
+import type { AgentDefinition, EditHistory, SkillDefinition } from '@codepapr/core';
+import type { CacheValidator, RequestBuilder } from '@codepapr/api';
+import type { AgentRuntimeHandle } from '../../agent/WorkerBackedAgent';
+import type { ProjectDiagnosticsReport } from '../../utils/projectDiagnostics';
+import type { TaskChecklist } from '../../utils/taskChecklistTypes';
+
+export type ApiMode = 'deepseek' | 'custom' | 'local';
+export type ApiFormat = 'openai' | 'claude';
+export type ProviderName = 'deepseek' | ApiFormat;
+export type Lang = 'zh-CN' | 'zh-TW' | 'en';
+
+export interface Settings {
+  apiMode: ApiMode;
+  apiFormat: ApiFormat;
+  provider: ProviderName;
+  baseURL: string;
+  model: string;
+  fastModelEnabled: boolean;
+  fastModel: string;
+  apiKey: string;
+  systemPrompt: string;
+  thinkingEnabled: boolean;
+  thinkingEffort: 'high' | 'max';
+  debugEnabled: boolean;
+  chatBordersEnabled: boolean;
+  temperature: number;
+  topP: number;
+  maxTokens: number;
+  maxToolRounds: number;
+  maxContextTokens: number;
+  maxConversationRounds: number;
+  compactionModel: 'fast' | 'primary';
+  compactionMaxTokens: number;
+  compactionTemperature: number;
+  projectGraphMaxDepth: number;
+  projectGraphMaxFiles: number;
+  projectGraphMaxEdges: number;
+  projectGraphMaxSymbolsPerFile: number;
+  projectGraphMaxFileBytes: number;
+  projectGraphMaxTreeEntries: number;
+  lang?: Lang;
+  recentWorkspaces: WorkspaceEntry[];
+  mentorEnabled: boolean;
+  mentorModel: string;
+  mentorBaseURL: string;
+  mentorApiKey: string;
+  mentorApiFormat: ApiFormat;
+  mentorMaxTokens: number;
+  maxMentorConsultations: number;
+  mentorThinkingEnabled: boolean;
+  explorePrompt: string;
+  scoutPrompt: string;
+  mentorPrompt: string;
+  exploreModelTier: 'primary' | 'fast';
+  scoutModelTier: 'primary' | 'fast';
+  exploreTopP: number;
+  exploreMaxTokens: number;
+  exploreThinkingEnabled: boolean;
+  exploreTemperature: number;
+  exploreMaxToolRounds: number;
+  exploreMaxDepth: number;
+  scoutTopP: number;
+  scoutMaxTokens: number;
+  scoutThinkingEnabled: boolean;
+  scoutTemperature: number;
+  scoutMaxToolRounds: number;
+  scoutMaxDepth: number;
+  todoMaxRetries: number;
+  // Goal 自主循环配置
+  goalMaxIterations: number;
+  goalMaxWallClockMs: number;
+  goalRequireGitClean: boolean;
+  // Verifier 子代理配置（默认快速模型，高级设置可切换）
+  verifierModelTier: 'fast' | 'primary';
+  verifierMaxTokens: number;
+  verifierTemperature: number;
+  searxngEnabled: boolean;
+  searxngBaseUrl: string;
+  searxngCategories: string;
+  searxngTimeRange: string;
+  searxngLanguage: string;
+  searxngSafeSearch: number;
+  searxngEngines: string;
+  mcp: McpSettings;
+  graphToolTimeoutMs: number;
+  toolIpcTimeoutMs: number;
+}
+
+export interface WorkspaceEntry {
+  path: string;
+  name: string;
+  lastOpenedAt: number;
+  pinned: boolean;
+}
+
+export interface SessionMeta {
+  id: string;
+  name: string;
+  provider: ProviderName;
+  model: string;
+  createdAt: number;
+}
+
+export interface UIToolInvocation {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  status: 'running' | 'success' | 'error';
+  error?: string;
+  statusText?: string;
+  output?: string;
+}
+
+export interface UIMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'error';
+  workMode?: WorkMode;
+  content: string;
+  promptContent?: string;
+  reasoningContent?: string;
+  displayReasoningContent?: string;
+  images?: IImageContent[];
+  modelTier?: TaskModelRoute['tier'];
+  modelName?: string;
+  agentStep?: number;
+  isStreaming?: boolean;
+  statusText?: string;
+  toolInvocations?: UIToolInvocation[];
+  relatedFilePaths?: string[];
+  hidden?: boolean;
+  synthetic?: boolean;
+  carryForwardInContext?: boolean;
+  contextCheckpoint?: ContextCheckpointPayload;
+  question?: QuestionData;
+  timestamp: number;
+}
+
+export interface CumulativeStats {
+  totalCacheRead: number;
+  totalCacheCreation: number;
+  totalInput: number;
+  totalOutput: number;
+  promptCacheHitTokens: number;
+  promptCacheMissTokens: number;
+  rounds: number;
+}
+
+export interface ModelTierStats {
+  totalCacheRead: number;
+  totalCacheCreation: number;
+  totalInput: number;
+  totalOutput: number;
+  promptCacheHitTokens: number;
+  promptCacheMissTokens: number;
+  calls: number;
+  rounds: number;
+}
+
+export interface ConversationStats {
+  primary: ModelTierStats;
+  fast: ModelTierStats;
+}
+
+export type ResetToMessageResult =
+  | {
+      ok: true;
+      codeReset: 'git' | 'none';
+      filesChanged: number;
+      messagesRemoved: number;
+      restoredInput: string;
+      restoredImages?: IImageContent[];
+    }
+  | { ok: false; reason: 'no-checkpoint' | 'message-not-found' | 'git-failed'; error?: string };
+
+export interface AgentState {
+  settings: Settings;
+  workspacePath: string;
+  workspaceMutationVersion: number;
+  sessions: SessionMeta[];
+  activeSessionId: string | null;
+  messages: UIMessage[];
+  sessionMessages: Record<string, UIMessage[]>;
+  skillEnabledById: Record<string, boolean>;
+  conversationStats: ConversationStats;
+  sessionConversationStats: Record<string, ConversationStats>;
+  projectDiagnosticsReport: ProjectDiagnosticsReport | null;
+  isLoading: boolean;
+  projectGraphLoading: boolean;
+  projectGraphPhase: null | { phase: string; current: number; total: number };
+  showSettings: boolean;
+  settingsLoaded: boolean;
+  // 运行时（不持久化）
+  _agent: AgentRuntimeHandle | null;
+  _agentModel: string | null;
+  _agentPromptKey: string | null;
+  _requestBuilder: RequestBuilder;
+  _cacheValidator: CacheValidator;
+  _editHistory: EditHistory;
+  _projectRulesSection: string;
+  _skillDefinitions: SkillDefinition[];
+  _agentDefinitions: AgentDefinition[];
+  _taskChecklists: Record<string, TaskChecklist | null>;
+  _messageCheckpoints: Record<string, string>;
+  _gitReady: boolean;
+  _gitReadyError: string | null;
+  _checkpointSeq: number;
+  _pendingMemoryConsolidation: boolean;
+}
+
+export interface AgentActions {
+  loadSettings: () => Promise<void>;
+  setSettings: (s: Partial<Settings>) => void;
+  setWorkspacePath: (path: string) => void;
+  openWorkspace: (path: string) => Promise<void>;
+  noteWorkspaceMutation: (paths?: string[]) => void;
+  setShowSettings: (v: boolean) => void;
+  setProjectGraphLoading: (
+    loading: boolean,
+    phase?: { phase: string; current: number; total: number },
+  ) => void;
+  newSession: () => void;
+  selectSession: (id: string) => void;
+  deleteSession: (id: string) => void;
+  sendMessage: (
+    input: string,
+    displayContent?: string,
+    mode?: WorkMode,
+    projectDiagnosticsReport?: ProjectDiagnosticsReport | null,
+    images?: IImageContent[]
+  ) => Promise<void>;
+  cancelMessage: () => void;
+  clearMessages: () => void;
+  resetToMessage: (messageId: string) => Promise<ResetToMessageResult>;
+  setProjectDiagnosticsReport: (report: ProjectDiagnosticsReport | null) => void;
+  refreshProjectDiagnostics: () => Promise<ProjectDiagnosticsReport | null>;
+  setSkillEnabledState: (skillId: string, enabled: boolean | null) => void;
+  _loadProjectConfig: (path: string) => Promise<void>;
+  _ensureWorkspaceGitReady: (path: string) => Promise<void>;
+}
+
+export type StoreGet = () => AgentState & AgentActions;
+export type StoreSet = (
+  partial: Partial<AgentState> | ((state: AgentState) => Partial<AgentState>)
+) => void;

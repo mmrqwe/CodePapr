@@ -1,0 +1,904 @@
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useAgentStore } from '../store/agentStore';
+import {
+  fetchMarketServers,
+  searchListings,
+  filterListings,
+  type FetchMarketOptions,
+} from '../tools/mcpMarketApi';
+import {
+  type MarketMCPListing,
+  type RegistryEnvVar,
+} from '../utils/mcpMarketTypes';
+import {
+  normalizeMcpServer,
+  type McpServerConfig,
+} from '../utils/mcpTypes';
+import { previewMcpServer, type McpPreviewResult } from '../tools/mcpTools';
+import type { Lang } from '../utils/i18n';
+
+function copy(lang: Lang | undefined) {
+  if (lang === 'en') {
+    return {
+      title: 'MCP Market',
+      search: 'Search servers...',
+      transport: 'Transport',
+      runtime: 'Runtime',
+      category: 'Category',
+      all: 'All',
+      install: 'Install',
+      installing: 'Installing...',
+      installed: 'Installed',
+      loadMore: 'Load More',
+      loading: 'Loading servers...',
+      empty: 'No servers found.',
+      error: 'Failed to load servers.',
+      retry: 'Retry',
+      close: 'Close',
+      detail: 'Details',
+      envVars: 'Environment Variables',
+      required: 'Required',
+      optional: 'Optional',
+      secret: 'Secret',
+      packages: 'Packages',
+      repository: 'Repository',
+      website: 'Website',
+      back: 'Back to results',
+      byCount: 'uses',
+      verifiedBadge: 'Verified',
+      installedBadge: 'Installed',
+      addToMyServers: 'Add to My Servers',
+      added: 'Server added to MCP settings',
+      serverAdded: 'added to your MCP servers. Configure it in MCP Settings.',
+    };
+  }
+  if (lang === 'zh-TW') {
+    return {
+      title: 'MCP 市場',
+      search: '搜尋服務...',
+      transport: '傳輸',
+      runtime: '執行環境',
+      category: '分類',
+      all: '全部',
+      install: '安裝',
+      installing: '安裝中...',
+      installed: '已安裝',
+      loadMore: '載入更多',
+      loading: '載入中...',
+      empty: '沒有找到服務。',
+      error: '載入失敗。',
+      retry: '重試',
+      close: '關閉',
+      detail: '詳情',
+      envVars: '環境變數',
+      required: '必須',
+      optional: '可選',
+      secret: '密鑰',
+      packages: '套件',
+      repository: '倉庫',
+      website: '網站',
+      back: '返回結果',
+      byCount: '次使用',
+      verifiedBadge: '已驗證',
+      installedBadge: '已安裝',
+      addToMyServers: '加入我的服務',
+      added: '已加入 MCP 設定',
+      serverAdded: '已加入你的 MCP 服務。在 MCP 設定中進行配置。',
+    };
+  }
+  return {
+    title: 'MCP 市场',
+    search: '搜索服务...',
+    transport: '传输',
+    runtime: '运行环境',
+    category: '分类',
+    all: '全部',
+    install: '安装',
+    installing: '安装中...',
+    installed: '已安装',
+    loadMore: '加载更多',
+    loading: '加载中...',
+    empty: '没有找到服务。',
+    error: '加载失败。',
+    retry: '重试',
+    close: '关闭',
+    detail: '详情',
+    envVars: '环境变量',
+    required: '必须',
+    optional: '可选',
+    secret: '密钥',
+    packages: '包',
+    repository: '仓库',
+    website: '网站',
+    back: '返回结果',
+    byCount: '次使用',
+    verifiedBadge: '已验证',
+    installedBadge: '已安装',
+    addToMyServers: '加入我的服务',
+    added: '已加入 MCP 设置',
+    serverAdded: '已加入你的 MCP 服务。在 MCP 设置中进行配置。',
+  };
+}
+
+interface McpMarketModalProps {
+  onClose: () => void;
+}
+
+function useInstalledServerIds(): Set<string> {
+  const mcp = useAgentStore((s) => s.settings.mcp);
+  return useMemo(() => {
+    const ids = new Set<string>();
+    for (const server of mcp.servers) {
+      ids.add(server.id);
+      if (server.name) ids.add(server.name.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase());
+    }
+    return ids;
+  }, [mcp.servers]);
+}
+
+function listingToServerConfig(listing: MarketMCPListing): McpServerConfig {
+  const baseId = listing.id || listing.name.replace(/[./]/g, '_');
+
+  const envLines: string[] = [];
+  for (const ev of listing.envVars) {
+    if (ev.default !== undefined && ev.default !== '') {
+      envLines.push(`${ev.name}=${ev.default}`);
+    } else if (ev.isRequired) {
+      envLines.push(`${ev.name}=YOUR_${ev.name.toUpperCase()}_HERE`);
+    }
+  }
+
+  const desc = listing.needsManualConfig
+    ? `${listing.description}\n\n⚠ ${listing.manualConfigNote}`
+    : listing.description;
+
+  const hasCommand = !!(listing.command && listing.command.trim());
+  const hasUrl = !!(listing.url && listing.url.trim());
+  const derivedTransport = listing.transport?.type === 'sse' || listing.transport?.type === 'streamable-http'
+    ? listing.transport.type
+    : 'stdio';
+
+  // For manual-config servers with no command and no URL, use streamable-http as
+  // placeholder to avoid "stdio command is required" on Test. User changes it in MCP Settings.
+  const transport = listing.needsManualConfig && !hasCommand && !hasUrl
+    ? 'streamable-http'
+    : derivedTransport;
+
+  const isRemote = transport === 'streamable-http' || transport === 'sse';
+  const hasRequiredEnv = envLines.some((l) => l.includes('YOUR_') && l.includes('_HERE'));
+
+  return normalizeMcpServer({
+    id: baseId,
+    name: listing.title || listing.name.split('/').pop() || listing.name,
+    description: desc,
+    enabled: isRemote && !hasRequiredEnv,
+    category: listing.categories[0] || 'custom',
+    transport,
+    command: listing.command || '',
+    args: listing.args || '',
+    url: listing.url || '',
+    env: envLines.join('\n'),
+    headers: '',
+    allowedTools: '*',
+    deniedTools: '',
+    permissionMode: 'read-only',
+    timeoutSeconds: 60,
+  });
+}
+
+function TransportIcon({ type }: { type: string }) {
+  if (type === 'stdio') {
+    return (
+      <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <polyline points="4 17 10 11 4 5" />
+        <line x1="12" y1="19" x2="20" y2="19" />
+      </svg>
+    );
+  }
+  if (type === 'sse' || type === 'streamable-http') {
+    return (
+      <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+      </svg>
+    );
+  }
+  return null;
+}
+
+function ListingCard({
+  listing,
+  isInstalled,
+  isInstalling,
+  onInstall,
+  onSelect,
+  c,
+}: {
+  listing: MarketMCPListing;
+  isInstalled: boolean;
+  isInstalling: boolean;
+  onInstall: (listing: MarketMCPListing) => void;
+  onSelect: (listing: MarketMCPListing) => void;
+  c: ReturnType<typeof copy>;
+}) {
+  const initial = (listing.title || listing.name).charAt(0).toUpperCase();
+  const isRemote = listing.transport.type === 'streamable-http' || listing.transport.type === 'sse';
+  const hostname = isRemote && listing.url ? (() => { try { return new URL(listing.url).hostname; } catch { return ''; } })() : '';
+  const cardGlow = 'hover:border-cyan-500/40';
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(listing)}
+      className={`group relative flex flex-col gap-3 rounded-2xl border border-[#2a2d3a] bg-[#121722] p-4 text-left transition-all ${cardGlow} hover:bg-[#161b27]`}
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-[#1d2332] text-sm font-bold text-slate-300">
+          {listing.iconUrl ? (
+            <img src={listing.iconUrl} alt="" className="h-8 w-8 rounded-lg object-contain" />
+          ) : (
+            initial
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-sm font-semibold text-slate-100">{listing.title}</h3>
+          <p className="mt-0.5 truncate text-[11px] text-slate-500">
+            {hostname || listing.name}
+          </p>
+        </div>
+        {listing.verified && (
+          <svg className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-cyan-400" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+          </svg>
+        )}
+      </div>
+
+      <p className="line-clamp-3 text-xs leading-relaxed text-slate-400">{listing.description}</p>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${
+          isRemote
+            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+            : 'border-[#2a2d3a] text-slate-400'
+        }`}>
+          <TransportIcon type={listing.transport.type} />
+          {isRemote ? 'Remote' : listing.transport.type}
+        </span>
+        {hostname && (
+          <span className="inline-flex items-center gap-1 rounded-md border border-[#2a2d3a] px-1.5 py-0.5 text-[10px] text-slate-400">
+            {hostname}
+          </span>
+        )}
+        {listing.categories.slice(0, 2).map((cat) => (
+          <span key={cat} className="inline-flex items-center gap-1 rounded-md border border-[#2a2d3a] px-1.5 py-0.5 text-[10px] text-slate-400">
+            {cat}
+          </span>
+        ))}
+      </div>
+
+      <div className="mt-auto flex items-center justify-between border-t border-[#2a2d3a] pt-2.5">
+        {listing.useCount > 0 && (
+          <span className="text-[10px] text-slate-600">{listing.useCount.toLocaleString()} {c.byCount}</span>
+        )}
+        {listing.useCount <= 0 && <span />}
+        {isInstalled ? (
+          <span className="rounded-lg bg-emerald-500/15 px-3 py-1.5 text-[10px] font-semibold text-emerald-200">{c.installedBadge}</span>
+        ) : isInstalling ? (
+          <span className="rounded-lg bg-slate-500/20 px-3 py-1.5 text-[10px] font-semibold text-slate-300">
+            <svg className="mr-1 inline h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+              <circle cx="12" cy="12" r="10" opacity="0.25" />
+              <path d="M22 12a10 10 0 0 0-10-10" opacity="0.9" />
+            </svg>
+            {c.installing}
+          </span>
+        ) : (
+          <span
+            role="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onInstall(listing);
+            }}
+            className="rounded-lg bg-cyan-500/20 px-3 py-1.5 text-[10px] font-semibold text-cyan-100 transition-colors hover:bg-cyan-500/35"
+          >
+            {c.install}
+          </span>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function ListingDetail({
+  listing,
+  isInstalled,
+  isInstalling,
+  onInstall,
+  onClose,
+  onCloseModal,
+  c,
+}: {
+  listing: MarketMCPListing;
+  isInstalled: boolean;
+  isInstalling: boolean;
+  onInstall: (listing: MarketMCPListing) => void;
+  onClose: () => void;
+  onCloseModal: () => void;
+  c: ReturnType<typeof copy>;
+}) {
+  const isRemote = listing.transport.type === 'streamable-http' || listing.transport.type === 'sse';
+  const hostname = isRemote && listing.url ? (() => { try { return new URL(listing.url).hostname; } catch { return ''; } })() : '';
+
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewResult, setPreviewResult] = useState<McpPreviewResult | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const handlePreview = async () => {
+    if (!listing.url || !listing.transport) return;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setPreviewResult(null);
+    try {
+      const result = await previewMcpServer(listing.url, listing.transport.type, 30);
+      setPreviewResult(result);
+    } catch (e) {
+      setPreviewError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  // Auto-preview remote servers when detail panel opens
+  useEffect(() => {
+    if (isRemote && listing.url) {
+      void handlePreview();
+    }
+  }, [listing.id]);
+
+  const isAuthRequired = previewError && /auth required|unauthorized|401/i.test(previewError);
+  const previewDone = !previewLoading && (previewResult || previewError);
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b border-[#2a2d3a] px-6 py-4">
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex items-center gap-2 text-xs text-slate-400 transition-colors hover:text-slate-200"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M19 12H5M12 19l-7-7 7-7" />
+          </svg>
+          {c.back}
+        </button>
+        <button onClick={onCloseModal} title={c.close} className="text-2xl leading-none text-slate-500 hover:text-slate-300">×</button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <div className="flex items-start gap-4">
+          <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-[#1d2332] text-xl font-bold text-slate-300">
+            {listing.iconUrl ? (
+              <img src={listing.iconUrl} alt="" className="h-12 w-12 rounded-xl object-contain" />
+            ) : (
+              (listing.title || listing.name).charAt(0).toUpperCase()
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-bold text-slate-100">{listing.title}</h2>
+            <p className="mt-0.5 text-xs text-slate-500">{listing.name}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="rounded-md border border-[#2a2d3a] px-2 py-0.5 text-[10px] text-slate-400">
+                v{listing.version}
+              </span>
+              <span className="rounded-md border border-[#2a2d3a] px-2 py-0.5 text-[10px] text-slate-400">
+                {listing.registryType}
+              </span>
+              <span className="rounded-md border border-[#2a2d3a] px-2 py-0.5 text-[10px] text-slate-400">
+                {listing.runtimeHint}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <p className="mt-5 text-sm leading-relaxed text-slate-300">{listing.description}</p>
+
+        {isRemote && (
+          <div className="mt-4">
+            {/* Status badge */}
+            {previewLoading && (
+              <div className="inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800/50 px-3 py-1.5 text-[11px] text-slate-300">
+                <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                  <circle cx="12" cy="12" r="10" opacity="0.25" />
+                  <path d="M22 12a10 10 0 0 0-10-10" opacity="0.9" />
+                </svg>
+                Checking availability...
+              </div>
+            )}
+            {previewDone && previewResult && (
+              <div className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-medium text-emerald-200">
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                </svg>
+                Available — {previewResult.toolCount} tools
+              </div>
+            )}
+            {previewDone && isAuthRequired && (
+              <div className="inline-flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[11px] font-medium text-red-200">
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                Requires authentication — not usable without credentials
+              </div>
+            )}
+            {previewDone && previewError && !isAuthRequired && (
+              <div className="inline-flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-medium text-amber-200">
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 8v4M12 16h.01" />
+                </svg>
+                Connection failed
+              </div>
+            )}
+
+            {/* Retry button for failed previews */}
+            {previewDone && previewError && (
+              <button
+                type="button"
+                onClick={handlePreview}
+                className="ml-2 text-[10px] text-slate-500 underline transition-colors hover:text-slate-300"
+              >
+                Retry
+              </button>
+            )}
+
+            {/* Tool list */}
+            {previewResult && previewResult.tools.length > 0 && (
+              <div className="mt-3 rounded-xl border border-[#2a2d3a] bg-[#0f1117]">
+                <div className="max-h-[240px] overflow-y-auto p-2">
+                  {previewResult.tools.map((tool) => (
+                    <div key={tool.name} className="rounded-lg px-3 py-2 transition-colors hover:bg-[#141a25]">
+                      <code className="text-xs font-semibold text-cyan-200">{tool.name}</code>
+                      {tool.description && (
+                        <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400">{tool.description}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Links */}
+        {(listing.websiteUrl || listing.repositoryUrl) && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {listing.websiteUrl && (
+              <a
+                href={listing.websiteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[11px] font-medium text-cyan-200 transition-colors hover:bg-cyan-500/20"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                </svg>
+                {c.website}
+              </a>
+            )}
+            {listing.repositoryUrl && (
+              <a
+                href={listing.repositoryUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#2a2d3a] bg-[#0f1117] px-3 py-1.5 text-[11px] font-medium text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
+                </svg>
+                {c.repository}
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* Configuration Guide */}
+        <div className="mt-4 rounded-xl border border-[#2a2d3a] bg-[#0f1117] p-4">
+          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">How to use</h4>
+          {isRemote && !listing.envVars.some(e => e.isRequired) ? (
+            <ol className="space-y-1.5 text-[11px] leading-relaxed text-slate-400">
+              <li><span className="text-cyan-300">1.</span> Click "Add to My Servers" below — server is auto-enabled.</li>
+              <li><span className="text-cyan-300">2.</span> Send any message in chat — tools load automatically.</li>
+              <li><span className="text-cyan-300">3.</span> The agent will offer to call MCP tools when relevant.</li>
+            </ol>
+          ) : isRemote && listing.envVars.some(e => e.isRequired) ? (
+            <ol className="space-y-1.5 text-[11px] leading-relaxed text-slate-400">
+              <li><span className="text-cyan-300">1.</span> Click "Add to My Servers" below.</li>
+              <li><span className="text-cyan-300">2.</span> Open <strong className="text-slate-300">MCP Settings</strong> → select this server.</li>
+              <li><span className="text-cyan-300">3.</span> Fill in required environment variables (marked <span className="text-red-300">Required</span>).</li>
+              <li><span className="text-cyan-300">4.</span> Enable the server checkbox → click <strong className="text-slate-300">Save</strong>.</li>
+              <li><span className="text-cyan-300">5.</span> Send any message in chat — tools load automatically.</li>
+            </ol>
+          ) : (
+            <ol className="space-y-1.5 text-[11px] leading-relaxed text-slate-400">
+              <li><span className="text-cyan-300">1.</span> Click "Add to My Servers" below.</li>
+              <li><span className="text-cyan-300">2.</span> Open <strong className="text-slate-300">MCP Settings</strong> → select this server.</li>
+              <li><span className="text-cyan-300">3.</span> Ensure the command is correct (e.g. <code className="text-slate-300">npx -y @package/name</code>).</li>
+              <li><span className="text-cyan-300">4.</span> Fill in required environment variables if any.</li>
+              <li><span className="text-cyan-300">5.</span> Enable the server checkbox → click <strong className="text-slate-300">Save</strong>.</li>
+              <li><span className="text-cyan-300">6.</span> Send any message in chat — tools load automatically.</li>
+            </ol>
+          )}
+        </div>
+
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <div className="rounded-2xl border border-[#2a2d3a] bg-[#0f1117] p-4">
+            <h4 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{c.transport}</h4>
+            <p className={`mt-1 text-sm font-medium ${isRemote ? 'text-emerald-200' : 'text-slate-200'}`}>
+              {listing.transport.type}
+              {isRemote && <span className="ml-1.5 text-[10px] font-normal text-emerald-400/70">remote</span>}
+            </p>
+            {hostname && (
+              <p className="mt-1 truncate text-[11px] text-slate-500">{listing.url}</p>
+            )}
+          </div>
+          <div className="rounded-2xl border border-[#2a2d3a] bg-[#0f1117] p-4">
+            <h4 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{c.category}</h4>
+            <p className="mt-1 text-sm text-slate-200">{listing.categories.join(', ')}</p>
+          </div>
+        </div>
+
+        {listing.envVars.length > 0 && (
+          <div className="mt-4">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{c.envVars}</h3>
+            <div className="space-y-2">
+              {listing.envVars.map((ev: RegistryEnvVar) => (
+                <div key={ev.name} className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <code className="text-sm font-medium text-slate-200">{ev.name}</code>
+                    {ev.isRequired ? (
+                      <span className="rounded border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-red-200">{c.required}</span>
+                    ) : (
+                      <span className="rounded border border-[#2a2d3a] px-1.5 py-0.5 text-[9px] text-slate-500">{c.optional}</span>
+                    )}
+                    {ev.isSecret && (
+                      <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-amber-200">{c.secret}</span>
+                    )}
+                  </div>
+                  {ev.description && <p className="mt-1 text-[11px] text-slate-500">{ev.description}</p>}
+                  {ev.default !== undefined && ev.default !== '' && (
+                    <p className="mt-1 text-[10px] text-slate-600">
+                      Default: <code className="text-slate-400">{ev.default}</code>
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {listing.command && (
+          <div className="mt-4">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{c.packages}</h3>
+            <div className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2.5">
+              <code className="text-xs text-slate-200">
+                {listing.command} {listing.args}
+              </code>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-[#2a2d3a] px-6 py-4">
+        {listing.needsManualConfig && (
+          <div className="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
+            {listing.manualConfigNote || 'This server requires manual configuration after adding.'}
+          </div>
+        )}
+        {isRemote && previewDone && isAuthRequired && !isInstalled && (
+          <div className="mb-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-[11px] leading-relaxed text-red-200">
+            ⚠ This server requires authentication. Installing it will fail at tool discovery unless you provide credentials in MCP Settings.
+          </div>
+        )}
+        {isInstalled ? (
+          <span className="inline-flex w-full items-center justify-center rounded-xl bg-emerald-500/15 py-3 text-sm font-semibold text-emerald-200">
+            <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+            </svg>
+            {c.installedBadge}
+          </span>
+        ) : isInstalling ? (
+          <span className="inline-flex w-full items-center justify-center rounded-xl bg-slate-500/15 py-3 text-sm font-semibold text-slate-300">
+            <svg className="mr-2 h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+              <circle cx="12" cy="12" r="10" opacity="0.25" />
+              <path d="M22 12a10 10 0 0 0-10-10" opacity="0.9" />
+            </svg>
+            {c.installing}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onInstall(listing)}
+            className="flex w-full items-center justify-center rounded-xl border border-cyan-500/50 bg-cyan-500/15 py-3 text-sm font-semibold text-cyan-100 transition-colors hover:bg-cyan-500/25"
+          >
+            {c.addToMyServers}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SkeletonCard() {
+  return (
+    <div className="rounded-2xl border border-[#2a2d3a] bg-[#121722] p-4">
+      <div className="flex items-start gap-3">
+        <div className="h-10 w-10 flex-shrink-0 animate-pulse rounded-xl bg-[#1d2332]" />
+        <div className="flex-1 space-y-2">
+          <div className="h-4 w-2/3 animate-pulse rounded bg-[#1d2332]" />
+          <div className="h-3 w-1/3 animate-pulse rounded bg-[#1d2332]" />
+        </div>
+      </div>
+      <div className="mt-3 space-y-1.5">
+        <div className="h-3 w-full animate-pulse rounded bg-[#1d2332]" />
+        <div className="h-3 w-4/5 animate-pulse rounded bg-[#1d2332]" />
+      </div>
+      <div className="mt-3 flex gap-1.5">
+        <div className="h-5 w-16 animate-pulse rounded-md bg-[#1d2332]" />
+        <div className="h-5 w-12 animate-pulse rounded-md bg-[#1d2332]" />
+      </div>
+    </div>
+  );
+}
+
+export function McpMarketModal({ onClose }: McpMarketModalProps) {
+  const settings = useAgentStore((s) => s.settings);
+  const setSettings = useAgentStore((s) => s.setSettings);
+  const c = copy(settings.lang);
+  const installedIds = useInstalledServerIds();
+
+  const [listings, setListings] = useState<MarketMCPListing[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [transportFilter, setTransportFilter] = useState('');
+  const [runtimeFilter, setRuntimeFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [officialCursor, setOfficialCursor] = useState<string | undefined>();
+  const [hasMoreOfficial, setHasMoreOfficial] = useState(false);
+  const [selectedListing, setSelectedListing] = useState<MarketMCPListing | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const loadServers = useCallback(async (options: FetchMarketOptions = {}) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await fetchMarketServers({
+        cursor: options.cursor,
+      });
+      setListings((prev) => (options.cursor ? [...prev, ...result.listings] : result.listings));
+      setOfficialCursor(result.pagination.nextCursor);
+      setHasMoreOfficial(result.pagination.hasMore);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    setListings([]);
+    setOfficialCursor(undefined);
+    setHasMoreOfficial(false);
+    setSelectedListing(null);
+    void loadServers({ cursor: undefined });
+  }, []);
+
+  const handleLoadMore = useCallback(() => {
+    if (hasMoreOfficial) {
+      void loadServers({ cursor: officialCursor });
+    }
+  }, [hasMoreOfficial, officialCursor, loadServers]);
+
+  const filteredListings = useMemo(() => {
+    let result = searchListings(listings, searchQuery);
+    result = filterListings(result, {
+      transport: transportFilter,
+      runtime: runtimeFilter,
+      category: categoryFilter,
+    });
+    return result;
+  }, [listings, searchQuery, transportFilter, runtimeFilter, categoryFilter]);
+
+  const [installingId, setInstallingId] = useState<string | null>(null);
+
+  const handleInstall = useCallback(async (listing: MarketMCPListing) => {
+    setInstallingId(listing.id);
+    try {
+      const config = listingToServerConfig(listing);
+
+      const mcp = settings.mcp;
+      const exists = mcp.servers.find(
+        (s) => s.id === config.id || s.name.toLowerCase() === config.name.toLowerCase(),
+      );
+      if (!exists) {
+        const newServers = [...mcp.servers, config];
+        // Auto-enable global MCP when installing a server
+        setSettings({
+          ...settings,
+          mcp: { ...mcp, servers: newServers, enabled: true, exposeTools: true },
+        });
+        if (config.enabled) {
+          setToastMessage(`✓ ${listing.title} installed and enabled. Send a message to use its tools.`);
+        } else {
+          setToastMessage(`✓ ${listing.title} installed. Open MCP Settings → enable the server → send a message.`);
+        }
+        setTimeout(() => setToastMessage(null), 6000);
+      }
+    } finally {
+      setInstallingId(null);
+    }
+  }, [settings, setSettings, c]);
+
+  const handleSearchChange = useCallback((value: string) => {
+    setSearchQuery(value);
+  }, []);
+
+  const hasMore = hasMoreOfficial;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+      <div className="flex h-[90vh] w-[min(96vw,1100px)] flex-col rounded-3xl border border-[#2a2d3a] bg-[#1a1d27] shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-[#2a2d3a] px-6 py-4">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold text-slate-100">{c.title}</h2>
+          </div>
+          <button onClick={onClose} title={c.close} className="text-2xl leading-none text-slate-500 hover:text-slate-300">×</button>
+        </div>
+
+        {/* Search + Filters */}
+        <div className="border-b border-[#2a2d3a] px-6 py-3">
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1">
+              <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8" />
+                <path d="M21 21l-4.35-4.35" />
+              </svg>
+              <input
+                ref={searchRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                placeholder={c.search}
+                className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] py-2 pl-9 pr-3 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-500/60 focus:outline-none"
+              />
+            </div>
+            <select
+              value={transportFilter}
+              onChange={(e) => setTransportFilter(e.target.value)}
+              className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-xs text-slate-300 focus:border-cyan-500/60 focus:outline-none"
+            >
+              <option value="">{c.transport}: {c.all}</option>
+              <option value="stdio">stdio</option>
+              <option value="sse">SSE</option>
+              <option value="streamable-http">Streamable HTTP</option>
+            </select>
+            <select
+              value={runtimeFilter}
+              onChange={(e) => setRuntimeFilter(e.target.value)}
+              className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-xs text-slate-300 focus:border-cyan-500/60 focus:outline-none"
+            >
+              <option value="">{c.runtime}: {c.all}</option>
+              <option value="npx">npx</option>
+              <option value="uvx">uvx</option>
+              <option value="docker">docker</option>
+            </select>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-xs text-slate-300 focus:border-cyan-500/60 focus:outline-none"
+            >
+              <option value="">{c.category}: {c.all}</option>
+              <option value="search">{c.all === 'All' ? 'Search' : '搜索'}</option>
+              <option value="database">{c.all === 'All' ? 'Database' : '数据库'}</option>
+              <option value="custom">{c.all === 'All' ? 'Custom' : '自订'}</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Content: Grid + Detail (slide-out) */}
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          {/* Main grid */}
+          <div className={`h-full overflow-y-auto px-6 py-5 transition-all ${selectedListing ? 'pr-[420px]' : ''}`}>
+            {isLoading && listings.length === 0 && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {Array.from({ length: 12 }).map((_, i) => (
+                  <SkeletonCard key={i} />
+                ))}
+              </div>
+            )}
+
+            {error && listings.length === 0 && (
+              <div className="flex h-64 flex-col items-center justify-center gap-4">
+                <p className="text-sm text-red-400">{c.error}</p>
+                <p className="text-xs text-slate-600">{error}</p>
+                <button
+                  type="button"
+                  onClick={() => loadServers()}
+                  className="rounded-xl border border-red-500/30 px-4 py-2 text-xs font-medium text-red-300 transition-colors hover:bg-red-500/10"
+                >
+                  {c.retry}
+                </button>
+              </div>
+            )}
+
+            {!isLoading && !error && filteredListings.length === 0 && listings.length > 0 && (
+              <div className="flex h-64 items-center justify-center">
+                <p className="text-sm text-slate-500">{c.empty}</p>
+              </div>
+            )}
+
+            {!isLoading && !error && filteredListings.length === 0 && listings.length === 0 && (
+              <div className="flex h-64 items-center justify-center">
+                <p className="text-sm text-slate-500">{c.empty}</p>
+              </div>
+            )}
+
+            {filteredListings.length > 0 && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {filteredListings.map((listing) => (
+                  <ListingCard
+                    key={listing.id}
+                    listing={listing}
+                    isInstalled={installedIds.has(listing.id) || installedIds.has(listing.name.toLowerCase())}
+                    isInstalling={installingId === listing.id}
+                    onInstall={handleInstall}
+                    onSelect={setSelectedListing}
+                    c={c}
+                  />
+                ))}
+              </div>
+            )}
+
+            {hasMore && filteredListings.length > 0 && (
+              <div className="mt-5 flex justify-center pb-4">
+                <button
+                  type="button"
+                  onClick={handleLoadMore}
+                  disabled={isLoading}
+                  className="rounded-xl border border-[#2a2d3a] px-6 py-2.5 text-xs font-medium text-slate-400 transition-colors hover:border-cyan-500/40 hover:text-cyan-200 disabled:opacity-50"
+                >
+                  {isLoading ? c.loading : c.loadMore}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Detail slide-out panel */}
+          {selectedListing && (
+            <div className="absolute right-0 top-0 h-full w-[400px] border-l border-[#2a2d3a] bg-[#161922]">
+              <ListingDetail
+                listing={selectedListing}
+                isInstalled={installedIds.has(selectedListing.id) || installedIds.has(selectedListing.name.toLowerCase())}
+                isInstalling={installingId === selectedListing.id}
+                onInstall={handleInstall}
+                onClose={() => setSelectedListing(null)}
+                onCloseModal={onClose}
+                c={c}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Toast */}
+        {toastMessage && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-2xl border border-emerald-500/30 bg-emerald-500/15 px-5 py-3 text-sm text-emerald-100 shadow-lg backdrop-blur">
+            {toastMessage}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

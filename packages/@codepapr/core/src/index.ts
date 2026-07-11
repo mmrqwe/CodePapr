@@ -1,0 +1,284 @@
+/**
+ * CodePapr Core: Agent framework with three-partition cache
+ */
+
+// Cache exports
+export { Serializer } from './cache/Serializer';
+export { ImmutablePrefix, ImmutablePrefixFactory } from './cache/ImmutablePrefix';
+export { AppendOnlyLog } from './cache/AppendOnlyLog';
+export { VolatileScratch } from './cache/VolatileScratch';
+export { CachePartition } from './cache/CachePartition';
+
+// Agent / Session / Tool / Message
+export { Agent, DEFAULT_AGENT_MAX_TOOL_ROUNDS } from './agent/Agent';
+export type { AgentOptions, IRequestBuilder, ICacheValidator } from './agent/Agent';
+export { Session } from './agent/Session';
+export type { SessionOptions } from './agent/Session';
+export { ToolRegistry } from './tool/ToolRegistry';
+export type { ToolHandler } from './tool/ToolRegistry';
+export { EditHistory } from './tool/editHistory';
+export type { EditRecord, RevertAction } from './tool/editHistory';
+export { applySearchReplaceDiff, applySearchReplacePatch } from './tool/searchReplaceDiff';
+export type {
+  ApplySearchReplaceDiffFile,
+  ApplySearchReplaceDiffPatch,
+  ApplySearchReplaceDiffResult,
+  ApplySearchReplacePatchPlan,
+} from './tool/searchReplaceDiff';
+export { buildWorkspaceProjectGraph, enrichProjectGraphEdges, extractStructuralSymbols, stripGraphNoise } from './tool/projectGraph';
+export type {
+  BuildWorkspaceProjectGraphParams,
+  ProjectGraphEdge,
+  ProjectGraphEdgeKind,
+  ProjectGraphFileContent,
+  ProjectGraphFileEntry,
+  ProjectGraphFileInput,
+  ProjectGraphNode,
+  ProjectGraphNodeKind,
+  ProjectGraphSymbolInput,
+  ProjectGraphSymbolSource,
+  ProjectGraphQualityMetrics,
+  LspProjectGraphEnhancer,
+  LspMode,
+  StructuralSymbol,
+  WorkspaceProjectGraphResult,
+} from './tool/projectGraph';
+export { createProjectDiagnosticsPlan, runProjectDiagnostics } from './tool/workspace/diagnostics';
+export type {
+  ProjectDiagnosticsCommandResult,
+  ProjectDiagnosticStagePlan,
+  ProjectDiagnosticStageResult,
+  ProjectDiagnosticsListEntry,
+  ProjectDiagnosticsReport,
+} from './tool/workspace/diagnostics';
+export type {
+  WorkspaceHost,
+  WorkspaceHostCommandResult,
+  WorkspaceHostListEntry,
+  WorkspaceHostListFilesOptions,
+  WorkspaceHostListFilesResult,
+  WorkspaceHostReadTextFileOptions,
+  WorkspaceHostReadTextFileResult,
+  WorkspaceHostRunCommandOptions,
+  WorkspaceHostWriteTextFileOptions,
+  WorkspaceHostWriteTextFileResult,
+  WorkspaceLanguageServiceHost,
+  WorkspaceLanguageServiceRequestOptions,
+} from './tool/workspace/host';
+export {
+  buildWorkspaceDependencySubgraph,
+  findWorkspaceEntrypoints,
+  findWorkspaceSymbolImplementations,
+  lookupWorkspaceSymbols,
+  analyzeWorkspaceChangeImpact,
+  getWorkspaceSmartContext,
+  planProjectGraphRename,
+  detectCircularDependencies,
+  detectDeadCode,
+  buildTypeHierarchy,
+  discoverAndMapTests,
+  suggestRefactorings,
+  selectTestsByChangeImpact,
+  checkArchitectureLayers,
+  computeSemanticDiff,
+  generateTestSkeletons,
+  planExtractMethod,
+  planMoveSymbol,
+  planInlineVariable,
+  suggestInlineVariables,
+  generateSmartTestSkeletons,
+  computeIncrementalUpdate,
+  applyIncrementalUpdate,
+} from './tool/workspace/graphQuery';
+export type {
+  WorkspaceChangeImpactOptions,
+  WorkspaceChangeImpactResult,
+  WorkspaceDependencySubgraphOptions,
+  WorkspaceDependencySubgraphResult,
+  WorkspaceEntrypointCandidate,
+  WorkspaceEntrypointsResult,
+  WorkspaceGraphSymbolMatch,
+  WorkspaceSymbolImplementationsOptions,
+  WorkspaceSymbolImplementationsResult,
+  WorkspaceSymbolLookupOptions,
+  WorkspaceSymbolLookupResult,
+  WorkspaceSmartContextOptions,
+  WorkspaceSmartContextResult,
+  ProjectGraphRenameParams,
+  ProjectGraphRenameResult,
+  CircularDependency,
+  CircularDependencyResult,
+  DeadCodeSymbol,
+  DeadCodeResult,
+  TypeNode,
+  TypeHierarchyResult,
+  TestDiscoveryResult,
+  MethodExtractionSuggestion,
+  SymbolMovePlan,
+  RefactorSuggestionResult,
+  ImpactBasedTestSelectionResult,
+  ArchitectureLayer,
+  LayerViolation,
+  ArchitectureCheckResult,
+  SemanticChangeKind,
+  SemanticSymbolChange,
+  SemanticEdgeChange,
+  SemanticDiffResult,
+  GeneratedTest,
+  TestGenerationResult,
+  ExtractMethodPlan,
+  MoveSymbolEdits,
+  InlineVariablePlan,
+  InlineVariableSuggestion,
+  SmartTestSkeleton,
+  SmartTestGenerationResult,
+  IncrementalGraphUpdate,
+} from './tool/workspace/graphQuery';
+export {
+  performWorkspaceApplyCodeAction,
+  performWorkspaceFixDiagnostics,
+  performWorkspaceFormatFiles,
+  performWorkspaceOrganizeImports,
+  performWorkspaceRename,
+  performProjectGraphRename,
+  requestWorkspaceSymbolDefinition,
+  requestWorkspaceSymbolReferences,
+} from './tool/workspace/languageTools';
+export type {
+  WorkspaceCodeOperationResult,
+  WorkspaceLanguagePositionArgs,
+  WorkspaceNavigationResult,
+  WorkspaceSymbolLocation,
+} from './tool/workspace/languageTools';
+export { WORKSPACE_INTELLIGENCE_TOOL_DEFINITIONS } from './tool/workspace/toolDefinitions';
+export { NEW_TOOL_DEFINITIONS, MERGE_TOOL_DEFINITIONS, OLD_MERGE_TOOL_NAMES } from './tool/workspace/mergeToolDefs';
+export { registerSharedToolDispatchers, registerSharedMergeToolDispatchers } from './tool/workspace/registerSharedWorkspaceTools';
+export type { SharedToolDispatcherOptions } from './tool/workspace/registerSharedWorkspaceTools';
+export {
+  asString,
+  asOptionalString,
+  asOptionalNumber,
+  asPositiveInteger,
+  asOptionalPositiveInteger,
+  asOptionalBoolean,
+  asOptionalStringArray,
+  asPatchArray,
+  asSafeSkillName,
+  boundedNumber,
+} from './tool/workspace/toolArgHelpers';
+export { MessageFactory } from './message/Message';
+
+// 项目规则 / 声明式子代理 / 自定义聊天命令（纯逻辑，IO 由各入口注入）
+export {
+  PROJECT_AGENTS_FILE,
+  PROJECT_RULE_FILES,
+  getDefaultAgentsTemplate,
+  buildProjectRulesSection,
+} from './agent/projectRules';
+export type { ProjectRuleFile } from './agent/projectRules';
+export { parseAgentMarkdown, filterToolsForAgent, buildTaskToolDefinition, isExecutionHeavyTask, sanitizeAgentPrompt, resolveAgentPrompt, resolveAgentDescription, mergeAgentDefinitions, BUILTIN_AGENTS, SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS, SUBAGENT_MAX_DEPTH, MAX_CUSTOM_PROMPT_LENGTH, EXECUTION_HEAVY_PATTERNS } from './agent/agentConfig';
+export type { AgentDefinition, AgentMode } from './agent/agentConfig';
+export {
+  TODO_TOOL_NAME,
+  DEFAULT_TODO_MAX_RETRIES,
+  buildTodoToolDefinition,
+  createEmptyTodoListContext,
+  writeTodoList,
+  updateTodoList,
+  completeCurrentTodo,
+  renderTodoListDigest,
+} from './agent/todoList';
+export type { TodoUpdatePatch } from './agent/todoList';
+export { selectSubagentExecutionRoute } from './agent/subagentRoute';
+export type { SubagentExecutionRoute, SubagentRouteSettings } from './agent/subagentRoute';
+export {
+  SKILLS_DIR,
+  DEFAULT_SEARCH_SKILL_NAME,
+  DEFAULT_SEARCH_SKILL_TEMPLATE,
+  parseSkillMarkdown,
+  applySkillEnablement,
+  buildSkillsSection,
+} from './agent/skillConfig';
+export type { SkillDefinition, SkillEnablementMap } from './agent/skillConfig';
+export {
+  DEFAULT_CODING_SYSTEM_PROMPT,
+  DEFAULT_PROMPT_TOOL_NAMES,
+  USER_PROMPT_SECTION_ORDER,
+  buildModeSystemPrompt,
+  buildSessionBootstrapPrompt,
+  buildRuntimeSystemPrompt,
+  buildRuntimeUserPrompt,
+  buildStructuredUserPrompt,
+  createDefaultUserPromptSections,
+  parseStructuredUserPrompt,
+  validateUserPrompt,
+} from './agent/promptSystem';
+export type {
+  BuildModeSystemPromptOptions,
+  BuildSessionBootstrapPromptOptions,
+  BuildRuntimeSystemPromptOptions,
+  BuildRuntimeUserPromptOptions,
+  PromptLang,
+  PromptMode,
+  PromptValidationResult,
+  UserPromptSectionKey,
+  UserPromptSections,
+} from './agent/promptSystem';
+export {
+  BUILTIN_PROMPT_COMMANDS,
+  parseCommandMarkdown,
+  parseInlineCommandLine,
+  parseSlashInput,
+  expandCommandTemplate,
+  getBuiltinPromptCommand,
+  listBuiltinPromptCommandNames,
+} from './agent/slashCommand';
+export type {
+  CommandDefinition,
+  ParsedSlashInput,
+  ParsedInlineCommandLine,
+  CommandExpandContext,
+} from './agent/slashCommand';
+
+// Goal 自主循环（Worker + Evaluator 双模型）
+export {
+  parseGoalCondition,
+  evaluateGoalCondition,
+  GoalConditionParseError,
+} from './agent/goalCondition';
+export type {
+  ConditionExecutor,
+} from './agent/goalCondition';
+export {
+  GoalRunner,
+  DEFAULT_GOAL_MAX_ITERATIONS,
+  DEFAULT_GOAL_MAX_WALL_CLOCK_MS,
+  DEFAULT_GOAL_COMPACTION_INTERVAL,
+  serializeGoalState,
+} from './agent/GoalRunner';
+export type {
+  WorkerTurnResult,
+  GoalRunnerCallbacks,
+  GoalRunnerOptions,
+} from './agent/GoalRunner';
+
+// Re-export types from types package
+export * from '@codepapr/types';
+
+// Unified symbol provider types (LSP → AST → Regex fallback)
+export type {
+  SymbolSource,
+  SymbolConfidence,
+  ProviderCapability,
+  UnifiedSymbolDefinition,
+  SymbolLocation,
+  HoverResult,
+  ResolvedProviderInfo,
+  SymbolProvider,
+  DispatchResult,
+} from './tool/unifiedSymbols';
+export {
+  sourceToConfidence,
+  SymbolProviderRegistry,
+  UnifiedSymbolDispatcher,
+} from './tool/unifiedSymbols';

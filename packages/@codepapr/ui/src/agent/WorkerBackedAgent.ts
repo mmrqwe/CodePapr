@@ -1,0 +1,565 @@
+import { AppendOnlyLog, ToolRegistry, type EditHistory } from '@codepapr/core';
+import type { IAgentResponse, IChatRequest, IChatStreamEvent, IImageContent, IMessage, IToolDefinition } from '@codepapr/types';
+import { OpenAIProvider, ClaudeProvider, ProviderRequestError } from '@codepapr/api';
+import { createId } from '../utils/createId';
+import { registerWorkspaceTools, type WorkspaceMutationListener } from '../tools/workspaceTools';
+import { registerTodoListTools } from '../tools/todoListTool';
+import { registerMcpTools } from '../tools/mcpTools';
+import { hasEnabledMcpSearch } from '../utils/mcpTypes';
+import {
+  runStreamingWorkspaceCommand,
+  type CommandResult,
+} from '../tools/streamingWorkspaceCommand';
+import type {
+  AgentWorkerChatPayload,
+  AgentWorkerToMainMessage,
+  MainToAgentWorkerMessage,
+  WorkerAgentParameters,
+  WorkerAgentRuntimeConfig,
+  WorkerAgentSettings,
+} from './agentWorkerProtocol';
+
+interface PendingToolCall {
+  toolCallId: string;
+  toolName: string;
+  argumentsKey: string;
+}
+
+export interface ToolProgressStreamEvent {
+  type: 'tool-call-progress';
+  toolCallId?: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+  statusText?: string;
+  output?: string;
+}
+
+export type AgentRuntimeStreamEvent = IChatStreamEvent | ToolProgressStreamEvent;
+
+interface ToolExecutionContext {
+  toolCallId?: string;
+  onProgress?: (event: ToolProgressStreamEvent) => void;
+}
+
+type WorkerToolExecutor = (
+  toolName: string,
+  args: Record<string, unknown>,
+  context: ToolExecutionContext
+) => Promise<unknown>;
+
+interface PendingWorkerRequest {
+  pendingToolCalls: PendingToolCall[];
+  streamListener?: (event: AgentRuntimeStreamEvent) => void;
+  resolve: (value: IAgentResponse) => void;
+  reject: (error: Error) => void;
+  bufferedContentDelta: string;
+  bufferedReasoningDelta: string;
+  flushTimerId: ReturnType<typeof setTimeout> | null;
+}
+
+const STREAM_DELTA_FLUSH_INTERVAL_MS = 240;
+const MAX_BUFFERED_STREAM_DELTA_CHARS = 4096;
+const STREAM_SNAPSHOT_INTERVAL_MS = 2000;
+
+/** Error thrown when the agent worker crashes (OOM, uncaught exception, etc.).
+ *  The `chat()` promise rejects with this so the store's catch block can
+ *  reset `isLoading` and offer recovery. */
+export class WorkerCrashError extends Error {
+  readonly isWorkerCrash = true;
+  constructor(message: string, readonly detail?: string) {
+    super(message);
+    this.name = 'WorkerCrashError';
+  }
+}
+
+export interface AgentRuntimeHandle {
+  chat(
+    userInput: string,
+    onStreamEvent?: (event: AgentRuntimeStreamEvent) => void,
+    images?: IImageContent[]
+  ): Promise<IAgentResponse>;
+  getSession(): { logStore: AppendOnlyLog };
+  cancel(): void;
+  destroy(): void;
+  /** Returns true if the worker has crashed and can no longer process messages. */
+  isCrashed(): boolean;
+}
+
+export interface WorkerBackedAgentConfig {
+  sessionId: string;
+  workspacePath: string;
+  initialMessages: IMessage[];
+  settings: WorkerAgentSettings;
+  providerName: WorkerAgentSettings['provider'];
+  model: string;
+  systemPrompt: string;
+  parameters: WorkerAgentParameters;
+  runtime: WorkerAgentRuntimeConfig & {
+    editHistory?: EditHistory;
+    onWorkspaceMutated?: WorkspaceMutationListener;
+  };
+  /** Called periodically during streaming so the store can persist a
+   *  debounced snapshot of in-flight content for crash recovery. */
+  onStreamSnapshot?: () => void;
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
+    left.localeCompare(right)
+  );
+  return `{${entries.map(([key, nested]) => `${JSON.stringify(key)}:${stableStringify(nested)}`).join(',')}}`;
+}
+
+function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
+  toolDefinitions: IToolDefinition[];
+  execute: WorkerToolExecutor;
+} {
+  const registry = new ToolRegistry();
+  registerWorkspaceTools(
+    registry,
+    config.workspacePath,
+    config.runtime.editHistory,
+    config.runtime.onWorkspaceMutated,
+    { disableWebSearchTools: hasEnabledMcpSearch(config.settings.mcp) },
+  );
+
+  // TodoList 工具：handler 改主线程的 store，由 Worker 通过 tool-request 桥回执行
+  registerTodoListTools(registry, config.sessionId, '');
+
+  registerMcpTools(registry, config.settings.mcp, config.runtime.mcpToolDefinitions ?? [], config.runtime.mcpToolMappings);
+
+  const definitions = [...registry.getAll()];
+
+  return {
+    toolDefinitions: definitions,
+    execute: async (toolName, args, context) => {
+      if (toolName === 'workspace_run_command') {
+        const command = typeof args.command === 'string' ? args.command.trim() : '';
+        if (!command) {
+          throw new Error('workspace_run_command.command 必须是非空字符串');
+        }
+
+        const result = await runStreamingWorkspaceCommand({
+          workspacePath: config.workspacePath,
+          command,
+          args: Array.isArray(args.args)
+            ? args.args.filter((value): value is string => typeof value === 'string')
+            : [],
+          timeoutSeconds:
+            typeof args.timeoutSeconds === 'number' ? args.timeoutSeconds : undefined,
+          lang: config.settings.lang,
+          onProgress: (progress) => {
+            context.onProgress?.({
+              type: 'tool-call-progress',
+              toolCallId: context.toolCallId,
+              toolName,
+              arguments: args,
+              statusText: progress.statusText,
+              output: progress.output,
+            });
+          },
+        });
+
+        return result satisfies CommandResult;
+      }
+
+      return await registry.execute(toolName, args);
+    },
+  };
+}
+
+function reconstructWorkerError(message: {
+  error: string;
+  errorName?: string;
+  errorDetails?: {
+    provider?: string;
+    status?: number;
+    requestId?: string;
+    responseBody?: string;
+    retriable?: boolean;
+  };
+}): Error {
+  if (message.errorName === 'ProviderRequestError' && message.errorDetails) {
+    return new ProviderRequestError({
+      provider: message.errorDetails.provider ?? 'unknown',
+      message: message.error,
+      status: message.errorDetails.status,
+      requestId: message.errorDetails.requestId,
+      responseBody: message.errorDetails.responseBody,
+      retriable: message.errorDetails.retriable,
+    });
+  }
+  const error = new Error(message.error);
+  if (message.errorName) {
+    error.name = message.errorName;
+  }
+  return error;
+}
+
+export class WorkerBackedAgent implements AgentRuntimeHandle {
+  private readonly worker: Worker;
+  private readonly logStore: AppendOnlyLog;
+  private readonly toolDefinitions: IToolDefinition[];
+  private readonly toolExecutor: WorkerToolExecutor;
+  private readonly pendingRequests = new Map<string, PendingWorkerRequest>();
+  private activeRequestId: string | null = null;
+  private cancelTimer: ReturnType<typeof setTimeout> | null = null;
+  private crashed = false;
+  private snapshotTimerId: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(private readonly config: WorkerBackedAgentConfig) {
+    this.logStore = new AppendOnlyLog(config.sessionId);
+    if (config.initialMessages.length > 0) {
+      this.logStore.loadFromSnapshot({
+        messages: config.initialMessages,
+        lastMessageIndex: config.initialMessages.length - 1,
+        totalBytes: config.initialMessages.reduce(
+          (sum, message) => sum + new TextEncoder().encode(JSON.stringify(message)).length,
+          0
+        ),
+      });
+    }
+
+    const toolBridge = createWorkerToolExecutor(config);
+    this.toolDefinitions = toolBridge.toolDefinitions;
+    this.toolExecutor = toolBridge.execute;
+    this.worker = new Worker(new URL('./agentRuntime.worker.ts', import.meta.url), {
+      type: 'module',
+    });
+    this.worker.addEventListener('message', this.handleWorkerMessage);
+    this.worker.addEventListener('error', this.handleWorkerError);
+    this.worker.addEventListener('messageerror', this.handleWorkerMessageError);
+  }
+
+  isCrashed(): boolean {
+    return this.crashed;
+  }
+
+  getSession(): { logStore: AppendOnlyLog } {
+    return {
+      logStore: this.logStore,
+    };
+  }
+
+  cancel(): void {
+    const requestId = this.activeRequestId;
+    if (!requestId) return;
+
+    const pending = this.pendingRequests.get(requestId);
+    if (!pending) {
+      this.activeRequestId = null;
+      return;
+    }
+
+    this.clearCancelTimer();
+    this.clearSnapshotTimer();
+
+    this.worker.postMessage({
+      type: 'cancel-session',
+      requestId,
+    } satisfies MainToAgentWorkerMessage);
+
+    this.cancelTimer = setTimeout(() => {
+      this.worker.terminate();
+      pending.reject(new DOMException('Agent was terminated', 'AbortError'));
+      this.pendingRequests.delete(requestId);
+      this.activeRequestId = null;
+      this.cancelTimer = null;
+    }, 2000);
+  }
+
+  destroy(): void {
+    this.cancel();
+    this.clearCancelTimer();
+    this.clearSnapshotTimer();
+    try {
+      this.worker.terminate();
+    } catch {
+      // worker may already be terminated
+    }
+  }
+
+  async chat(
+    userInput: string,
+    onStreamEvent?: (event: AgentRuntimeStreamEvent) => void,
+    images?: IImageContent[]
+  ): Promise<IAgentResponse> {
+    if (this.crashed) {
+      throw new WorkerCrashError('Agent worker has crashed and cannot process messages. Create a new agent to retry.');
+    }
+    const requestId = createId();
+    this.activeRequestId = requestId;
+
+    const payload: AgentWorkerChatPayload = {
+      requestId,
+      sessionId: this.config.sessionId,
+      workspacePath: this.config.workspacePath,
+      messages: [...this.logStore.getAllMessages()],
+      userInput,
+      images,
+      settings: this.config.settings,
+      providerName: this.config.providerName,
+      model: this.config.model,
+      systemPrompt: this.config.systemPrompt,
+      parameters: this.config.parameters,
+      toolDefinitions: this.toolDefinitions,
+      runtime: {
+        rulesSection: this.config.runtime.rulesSection,
+        customPrompt: this.config.runtime.customPrompt,
+        lang: this.config.runtime.lang,
+        skillDefinitions: this.config.runtime.skillDefinitions,
+        agentDefinitions: this.config.runtime.agentDefinitions,
+      },
+    };
+
+    const response = await new Promise<IAgentResponse>((resolve, reject) => {
+      this.pendingRequests.set(requestId, {
+        pendingToolCalls: [],
+        streamListener: onStreamEvent,
+        resolve,
+        reject,
+        bufferedContentDelta: '',
+        bufferedReasoningDelta: '',
+        flushTimerId: null,
+      });
+      this.worker.postMessage({ type: 'chat', payload } satisfies MainToAgentWorkerMessage);
+    });
+
+    return response;
+  }
+
+  private readonly handleWorkerMessage = (event: MessageEvent<AgentWorkerToMainMessage>) => {
+    const message = event.data;
+
+    if (message.type === 'cancelled') {
+      const pending = this.pendingRequests.get(message.requestId);
+      if (pending) {
+        this.clearCancelTimer();
+        this.clearSnapshotTimer();
+        this.pendingRequests.delete(message.requestId);
+        this.activeRequestId = null;
+        this.flushDeltas(pending);
+        pending.reject(new DOMException('Session was cancelled', 'AbortError'));
+      }
+      return;
+    }
+
+    const pending = this.pendingRequests.get(message.requestId);
+    if (!pending) {
+      return;
+    }
+
+    if (message.type === 'stream') {
+      this.scheduleStreamSnapshot();
+      if (message.event.type === 'tool-call-start') {
+        pending.pendingToolCalls.push({
+          toolCallId: message.event.toolCallId,
+          toolName: message.event.toolName,
+          argumentsKey: stableStringify(message.event.arguments),
+        });
+      } else if (message.event.type === 'tool-call-end') {
+        const finishedToolCallId = message.event.toolCallId;
+        pending.pendingToolCalls = pending.pendingToolCalls.filter(
+          (item) => item.toolCallId !== finishedToolCallId
+        );
+      }
+
+      if (message.event.type === 'content-delta') {
+        pending.bufferedContentDelta += message.event.delta;
+        if (pending.bufferedContentDelta.length >= MAX_BUFFERED_STREAM_DELTA_CHARS) {
+          this.flushDeltas(pending);
+          return;
+        }
+        this.scheduleFlush(pending);
+        return;
+      }
+
+      if (message.event.type === 'reasoning-delta') {
+        pending.bufferedReasoningDelta += message.event.delta;
+        if (pending.bufferedReasoningDelta.length >= MAX_BUFFERED_STREAM_DELTA_CHARS) {
+          this.flushDeltas(pending);
+          return;
+        }
+        this.scheduleFlush(pending);
+        return;
+      }
+
+      this.flushDeltas(pending);
+      pending.streamListener?.(message.event);
+      return;
+    }
+
+    if (message.type === 'tool-request') {
+      const match = pending.pendingToolCalls.find(
+        (item) =>
+          item.toolName === message.toolName &&
+          item.argumentsKey === stableStringify(message.arguments)
+      );
+
+      void this.toolExecutor(message.toolName, message.arguments, {
+        toolCallId: match?.toolCallId,
+        onProgress: pending.streamListener
+          ? (progressEvent) => {
+              pending.streamListener?.(progressEvent);
+            }
+          : undefined,
+      })
+        .then((result) => {
+          this.worker.postMessage({
+            type: 'tool-response',
+            payload: {
+              requestId: message.requestId,
+              toolRequestId: message.toolRequestId,
+              success: true,
+              result,
+            },
+          } satisfies MainToAgentWorkerMessage);
+        })
+        .catch((error) => {
+          this.worker.postMessage({
+            type: 'tool-response',
+            payload: {
+              requestId: message.requestId,
+              toolRequestId: message.toolRequestId,
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          } satisfies MainToAgentWorkerMessage);
+        });
+      return;
+    }
+
+    if (message.type === 'proxy-chat') {
+      const ProviderClass = message.config.format === 'claude' ? ClaudeProvider : OpenAIProvider;
+      const provider = new ProviderClass({
+        apiKey: message.config.apiKey,
+        ...(message.config.baseURL ? { baseURL: message.config.baseURL } : {}),
+      });
+      provider.chat(message.chatRequest as IChatRequest)
+        .then((resp) => {
+          this.worker.postMessage({
+            type: 'proxy-chat-response',
+            proxyChatId: message.proxyChatId,
+            success: true,
+            result: resp,
+          } satisfies MainToAgentWorkerMessage);
+        })
+        .catch((error) => {
+          this.worker.postMessage({
+            type: 'proxy-chat-response',
+            proxyChatId: message.proxyChatId,
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          } satisfies MainToAgentWorkerMessage);
+        });
+      return;
+    }
+
+    if (message.type === 'result') {
+      this.clearCancelTimer();
+      this.clearSnapshotTimer();
+      this.flushDeltas(pending);
+      this.pendingRequests.delete(message.requestId);
+      this.activeRequestId = null;
+      void this.logStore.appendBatch(message.deltaMessages).then(() => {
+        pending.resolve(message.response);
+      }, (error) => {
+        pending.reject(error instanceof Error ? error : new Error(String(error)));
+      });
+      return;
+    }
+
+    this.clearCancelTimer();
+    this.clearSnapshotTimer();
+    this.flushDeltas(pending);
+    this.pendingRequests.delete(message.requestId);
+    this.activeRequestId = null;
+    pending.reject(reconstructWorkerError(message));
+  };
+
+  private readonly handleWorkerError = (event: ErrorEvent) => {
+    this.handleCrash(
+      `Agent worker crashed: ${event.message || 'unknown error'}`,
+      event.filename ? `${event.filename}:${event.lineno}:${event.colno}` : undefined,
+    );
+  };
+
+  private readonly handleWorkerMessageError = (_event: MessageEvent) => {
+    this.handleCrash(
+      'Agent worker message could not be deserialized (structured clone failure)',
+    );
+  };
+
+  private handleCrash(message: string, detail?: string): void {
+    if (this.crashed) return;
+    this.crashed = true;
+    this.clearSnapshotTimer();
+
+    const error = new WorkerCrashError(message, detail);
+    for (const [requestId, pending] of this.pendingRequests) {
+      this.flushDeltas(pending);
+      pending.reject(error);
+      this.pendingRequests.delete(requestId);
+    }
+    this.activeRequestId = null;
+
+    try {
+      this.worker.terminate();
+    } catch {
+      // already terminated
+    }
+  }
+
+  private scheduleStreamSnapshot(): void {
+    if (!this.config.onStreamSnapshot) return;
+    if (this.snapshotTimerId !== null) return;
+    this.snapshotTimerId = setTimeout(() => {
+      this.snapshotTimerId = null;
+      this.config.onStreamSnapshot?.();
+    }, STREAM_SNAPSHOT_INTERVAL_MS);
+  }
+
+  private clearSnapshotTimer(): void {
+    if (this.snapshotTimerId !== null) {
+      clearTimeout(this.snapshotTimerId);
+      this.snapshotTimerId = null;
+    }
+  }
+
+  private clearCancelTimer(): void {
+    if (this.cancelTimer !== null) {
+      clearTimeout(this.cancelTimer);
+      this.cancelTimer = null;
+    }
+  }
+
+  private flushDeltas(pending: PendingWorkerRequest): void {
+    if (pending.flushTimerId !== null) {
+      clearTimeout(pending.flushTimerId);
+      pending.flushTimerId = null;
+    }
+    if (pending.bufferedContentDelta) {
+      pending.streamListener?.({ type: 'content-delta', delta: pending.bufferedContentDelta });
+      pending.bufferedContentDelta = '';
+    }
+    if (pending.bufferedReasoningDelta) {
+      pending.streamListener?.({ type: 'reasoning-delta', delta: pending.bufferedReasoningDelta });
+      pending.bufferedReasoningDelta = '';
+    }
+  }
+
+  private scheduleFlush(pending: PendingWorkerRequest): void {
+    if (pending.flushTimerId !== null) return;
+    pending.flushTimerId = setTimeout(() => {
+      pending.flushTimerId = null;
+      this.flushDeltas(pending);
+    }, STREAM_DELTA_FLUSH_INTERVAL_MS);
+  }
+}

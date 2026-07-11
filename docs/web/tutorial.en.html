@@ -1,0 +1,2057 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CodePapr Tutorial — Local Coding Agent Workbench</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 1024 1024' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3ClinearGradient id='a' x1='320' y1='280' x2='720' y2='780'%3E%3Cstop stop-color='%23D9673E'/%3E%3Cstop offset='1' stop-color='%23B84E2A'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z' fill='%23FFF8EF'/%3E%3Cpath d='M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z' fill='%23F0D5B2'/%3E%3Cpath d='M392 350h244' stroke='url(%23a)' stroke-width='40' stroke-linecap='round'/%3E%3Cpath d='M392 450h156' stroke='url(%23a)' stroke-width='40' stroke-linecap='round' opacity='.86'/%3E%3Cpath d='m432 592-80 80 80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='m592 592 80 80-80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M540 560 484 784' stroke='url(%23a)' stroke-width='42' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:0.01ms!important;transition-duration:0.01ms!important}}
+
+:root{
+  --bg-deep:#06070a;--bg-base:#0a0c12;--bg-elevated:#0f121a;--bg-card:rgba(15,18,26,0.85);
+  --surface:rgba(255,255,255,0.035);--surface-hover:rgba(255,255,255,0.06);
+  --border:rgba(255,255,255,0.07);--border-hover:rgba(99,102,241,0.25);
+  --foreground:#edeff5;--foreground-muted:#8b90a0;--foreground-dim:#5c6170;
+  --accent:#6366f1;--accent-glow:rgba(99,102,241,0.18);--accent-soft:rgba(99,102,241,0.09);
+  --green:#22c55e;--green-glow:rgba(34,197,94,0.15);--amber:#f59e0b;--red:#ef4444;
+  --radius:12px;--radius-sm:8px;--radius-xs:6px;
+  --font-mono:'JetBrains Mono','Cascadia Code','SF Mono',monospace;
+  --font-sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  --easing:cubic-bezier(0.16,1,0.3,1);
+  --sidebar-w:280px;
+  --texture-opacity:0;
+}
+[data-theme="light"] {
+  --bg-deep:#f7f4ef;--bg-base:#fffdf9;--bg-elevated:#f5f0e9;--bg-card:rgba(245,241,236,0.85);
+  --surface:rgba(54,32,17,0.05);--surface-hover:rgba(54,32,17,0.08);
+  --border:rgba(27,18,10,0.08);--border-hover:rgba(217,103,62,0.35);
+  --foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;
+  --accent:#d9673e;--accent-glow:rgba(217,103,62,0.15);--accent-soft:rgba(217,103,62,0.1);
+  --green:#15803d;--green-glow:rgba(21,128,61,0.1);--amber:#a56a1d;--red:#c53b19;
+  --texture-opacity:1;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg-deep:#f7f4ef;--bg-base:#fffdf9;--bg-elevated:#f5f0e9;--bg-card:rgba(245,241,236,0.85);
+    --surface:rgba(54,32,17,0.05);--surface-hover:rgba(54,32,17,0.08);
+    --border:rgba(27,18,10,0.08);--border-hover:rgba(217,103,62,0.35);
+    --foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;
+    --accent:#d9673e;--accent-glow:rgba(217,103,62,0.15);--accent-soft:rgba(217,103,62,0.1);
+    --green:#15803d;--green-glow:rgba(21,128,61,0.1);--amber:#a56a1d;--red:#c53b19;
+    --texture-opacity:1;
+  }
+}
+
+body{font-family:var(--font-sans);background:var(--bg-deep);color:var(--foreground);line-height:1.7;overflow-x:hidden;-webkit-font-smoothing:antialiased;transition:background-color 0.4s,color 0.4s}
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opacity:calc(var(--texture-opacity) * 0.035);background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:256px 256px}
+
+/* Ambient */
+.ambient{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
+.ambient::before{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(99,102,241,0.05) 0%,transparent 60%),
+             radial-gradient(ellipse 60% 50% at 70% 85%,rgba(34,197,94,0.03) 0%,transparent 60%),
+             radial-gradient(ellipse 70% 80% at 50% 50%,rgba(99,102,241,0.025) 0%,transparent 70%);
+}
+[data-theme="light"] .ambient::before{
+  background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.05) 0%,transparent 60%),
+             radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.03) 0%,transparent 60%),
+             radial-gradient(ellipse 70% 80% at 50% 50%,rgba(217,103,62,0.03) 0%,transparent 70%);
+}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .ambient::before{background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.05) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.03) 0%,transparent 60%),radial-gradient(ellipse 70% 80% at 50% 50%,rgba(217,103,62,0.03) 0%,transparent 70%)}}
+.ambient .blob{position:absolute;border-radius:50%;filter:blur(120px);opacity:0.06;transition:opacity 0.4s}
+[data-theme="light"] .ambient .blob{opacity:0.04}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .ambient .blob{opacity:0.04}}
+.blob-1{width:600px;height:600px;background:var(--accent);top:-10%;left:-5%;animation:drift 30s ease-in-out infinite}
+.blob-2{width:450px;height:450px;background:var(--green);bottom:-8%;right:-5%;animation:drift 34s ease-in-out infinite reverse}
+@keyframes drift{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(40px,-25px) scale(1.06)}66%{transform:translate(-18px,30px) scale(0.95)}}
+
+.grid-overlay{position:fixed;inset:0;pointer-events:none;z-index:0;opacity:0.25;transition:opacity 0.4s;
+  background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);
+  background-size:64px 64px;mask-image:radial-gradient(ellipse 60% 60% at 50% 50%,black 25%,transparent 70%)}
+[data-theme="light"] .grid-overlay{opacity:0.5}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .grid-overlay{opacity:0.5}}
+
+/* Layout */
+.layout{display:flex;min-height:100vh;position:relative;z-index:1}
+.sidebar{width:var(--sidebar-w);position:fixed;top:0;left:0;height:100vh;background:rgba(6,7,10,0.88);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border-right:1px solid var(--border);overflow-y:auto;z-index:50;padding:24px 0;display:flex;flex-direction:column;transition:background-color 0.4s}
+[data-theme="light"] .sidebar{background:rgba(245,241,236,0.92)}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .sidebar{background:rgba(245,241,236,0.92)}}
+.sidebar::-webkit-scrollbar{width:4px}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+.sidebar-header{padding:0 24px 20px;border-bottom:1px solid var(--border);margin-bottom:8px}
+.sidebar-logo{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:700;font-size:1.1rem;color:var(--foreground);letter-spacing:-0.01em}
+.sidebar-logo .l-icon{width:32px;height:32px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sidebar-logo .l-icon svg{width:100%;height:100%}
+.sidebar-version{font-size:0.72rem;color:var(--foreground-dim);margin-top:6px;padding-left:42px}
+
+.sidebar-nav{flex:1;overflow-y:auto;padding:8px 0}
+.sidebar-nav::-webkit-scrollbar{width:3px}
+.sidebar-nav::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+.nav-section{padding:0 12px;margin-bottom:4px}
+.nav-section-title{font-size:0.68rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--foreground-dim);font-weight:600;padding:12px 12px 6px;font-family:var(--font-mono)}
+.nav-item{display:block;padding:7px 12px;margin:1px 0;border-radius:var(--radius-xs);color:var(--foreground-muted);text-decoration:none;font-size:0.84rem;font-weight:400;transition:all 0.15s;cursor:pointer;border:none;background:none;width:100%;text-align:left;font-family:var(--font-sans)}
+.nav-item:hover{color:var(--foreground);background:var(--surface-hover)}
+.nav-item.active{color:var(--accent);background:var(--accent-soft);font-weight:500}
+.nav-item .dot{display:inline-block;width:4px;height:4px;border-radius:50%;background:var(--accent);margin-right:8px;opacity:0;transition:opacity 0.2s;vertical-align:middle}
+.nav-item.active .dot{opacity:1}
+
+.sidebar-footer{padding:16px 24px;border-top:1px solid var(--border);margin-top:auto;display:flex;align-items:center;gap:12px}
+.sidebar-footer a{color:var(--foreground-dim);text-decoration:none;font-size:0.78rem;transition:color 0.15s}
+.sidebar-footer a:hover{color:var(--foreground-muted)}
+.theme-toggle{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;transition:all 0.2s;flex-shrink:0}
+.theme-toggle:hover{border-color:var(--border-hover);color:var(--foreground)}
+.theme-toggle svg{width:15px;height:15px}
+.theme-toggle .icon-sun{display:none}
+.theme-toggle .icon-moon{display:block}
+[data-theme="light"] .theme-toggle .icon-sun{display:block}
+[data-theme="light"] .theme-toggle .icon-moon{display:none}
+@media (prefers-color-scheme: light) {:root:not([data-theme="dark"]) .theme-toggle .icon-sun{display:block}:root:not([data-theme="dark"]) .theme-toggle .icon-moon{display:none}}
+
+/* Content */
+.main{margin-left:var(--sidebar-w);flex:1;min-width:0;padding:32px 48px 80px;max-width:1000px}
+@media(max-width:1100px){.main{padding:24px 28px 60px}}
+@media(max-width:860px){
+  .sidebar{display:none}
+  .main{margin-left:0;padding:20px 18px 60px}
+  .mobile-header{display:flex!important}
+}
+
+/* Mobile Header */
+.mobile-header{display:none;position:sticky;top:0;z-index:40;background:rgba(6,7,10,0.88);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 18px;align-items:center;gap:10px;transition:background-color 0.4s}
+[data-theme="light"] .mobile-header{background:rgba(245,241,236,0.92)}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .mobile-header{background:rgba(245,241,236,0.92)}}
+.mobile-header .l-icon{width:28px;height:28px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.mobile-header .l-icon svg{width:100%;height:100%}
+.mobile-header .logo-text{font-weight:700;font-size:0.95rem;color:var(--foreground)}
+.mobile-header .menu-toggle{margin-left:auto;background:none;border:1px solid var(--border);color:var(--foreground-muted);padding:6px 12px;border-radius:var(--radius-xs);font-size:0.8rem;cursor:pointer;font-family:var(--font-sans)}
+.mobile-nav{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg-deep);z-index:45;padding:70px 20px 20px;overflow-y:auto}
+.mobile-nav.open{display:block}
+.mobile-nav .nav-item{font-size:0.9rem;padding:10px 12px}
+.mobile-nav .nav-section-title{font-size:0.72rem}
+
+/* Typography */
+.section{margin-bottom:64px;scroll-margin-top:32px}
+.section-header{margin-bottom:28px}
+.section-header h1{font-size:2rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:8px;line-height:1.2}
+.section-header h2{font-size:1.5rem;font-weight:700;letter-spacing:-0.015em;margin-bottom:8px;line-height:1.25}
+.section-header p{color:var(--foreground-muted);font-size:0.95rem;line-height:1.7}
+
+.content h3{font-size:1.1rem;font-weight:600;margin:32px 0 12px;letter-spacing:-0.01em;color:var(--foreground)}
+.content h3:first-child{margin-top:0}
+.content h4{font-size:0.95rem;font-weight:600;margin:24px 0 10px;color:var(--foreground)}
+.content p{margin:0 0 14px;color:var(--foreground-muted);font-size:0.9rem;line-height:1.75}
+.content ul,.content ol{margin:0 0 16px;padding-left:22px;color:var(--foreground-muted);font-size:0.9rem;line-height:1.75}
+.content li{margin-bottom:6px}
+.content strong{color:var(--foreground);font-weight:600}
+.content a{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--border-hover);transition:border-color 0.15s}
+.content a:hover{border-color:var(--accent)}
+
+/* Code */
+.content code{font-family:var(--font-mono);font-size:0.82em;background:var(--surface);padding:2px 6px;border-radius:4px;color:#c4b5fd}
+[data-theme="light"] .content code{color:#bf4f28;background:rgba(217,103,62,0.08)}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .content code{color:#bf4f28;background:rgba(217,103,62,0.08)}}
+.content pre{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:20px 24px;overflow-x:auto;margin:16px 0 22px;font-size:0.82rem;line-height:1.75}
+.content pre code{background:none;padding:0;color:var(--foreground-muted);font-size:inherit}
+.content pre .hl-keyword{color:#818cf8}
+[data-theme="light"] .content pre .hl-keyword{color:#bf4f28}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .content pre .hl-keyword{color:#bf4f28}}
+.content pre .hl-string{color:#4ade80}
+[data-theme="light"] .content pre .hl-string{color:#166534}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .content pre .hl-string{color:#166534}}
+.content pre .hl-comment{color:var(--foreground-dim)}
+.content pre .hl-func{color:#c084fc}
+[data-theme="light"] .content pre .hl-func{color:#7c3aed}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .content pre .hl-func{color:#7c3aed}}
+
+/* Tables */
+.content table{width:100%;border-collapse:collapse;margin:16px 0 22px;font-size:0.85rem}
+.content thead th{text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);color:var(--foreground);font-weight:600;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap}
+.content tbody td{padding:9px 14px;border-bottom:1px solid rgba(255,255,255,0.04);color:var(--foreground-muted);vertical-align:top;line-height:1.6}
+.content tbody tr:hover td{background:var(--surface)}
+.content tbody td:first-child{color:var(--foreground);font-family:var(--font-mono);font-size:0.82em}
+
+/* Cards */
+.card{border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);padding:24px;margin:16px 0 22px}
+.card h4{margin-top:0}
+.card-row{display:flex;gap:20px;flex-wrap:wrap}
+.card-col{flex:1;min-width:240px}
+
+/* Badge */
+.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:100px;font-size:0.72rem;font-weight:600;font-family:var(--font-mono)}
+.badge-ask{background:rgba(99,102,241,0.12);color:#a5b4fc}
+.badge-plan{background:rgba(245,158,11,0.12);color:#fbbf24}
+.badge-agent{background:rgba(34,197,94,0.12);color:#4ade80}
+.badge-note{background:rgba(139,92,246,0.1);color:#c4b5fd}
+[data-theme="light"] .badge-ask{color:#bf4f28;background:rgba(217,103,62,0.1)}
+[data-theme="light"] .badge-plan{color:#a56a1d}
+[data-theme="light"] .badge-agent{color:#15803d}
+[data-theme="light"] .badge-note{color:#bf4f28;background:rgba(217,103,62,0.08)}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .badge-ask{color:#bf4f28;background:rgba(217,103,62,0.1)}:root:not([data-theme="dark"]) .badge-plan{color:#a56a1d}:root:not([data-theme="dark"]) .badge-agent{color:#15803d}:root:not([data-theme="dark"]) .badge-note{color:#bf4f28;background:rgba(217,103,62,0.08)}}
+
+/* Tip/Info/Warning boxes */
+.callout{border-left:2px solid var(--accent);padding:14px 18px;margin:18px 0;background:var(--accent-soft);border-radius:0 var(--radius-xs) var(--radius-xs) 0;font-size:0.85rem;color:var(--foreground-muted)}
+.callout strong{color:#a5b4fc}
+[data-theme="light"] .callout strong{color:#bf4f28}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .callout strong{color:#bf4f28}}
+.callout.warn{border-color:var(--amber);background:rgba(245,158,11,0.07)}
+.callout.warn strong{color:#fbbf24}
+[data-theme="light"] .callout.warn strong{color:#a56a1d}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .callout.warn strong{color:#a56a1d}}
+.callout.success{border-color:var(--green);background:var(--green-glow)}
+.callout.success strong{color:#4ade80}
+[data-theme="light"] .callout.success strong{color:#15803d}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .callout.success strong{color:#15803d}}
+
+/* Mermaid-style diagram container */
+.diagram{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:20px 24px;margin:16px 0 22px;font-family:var(--font-mono);font-size:0.78rem;line-height:2;overflow-x:auto;white-space:pre;color:#818cf8}
+[data-theme="light"] .diagram{color:#bf4f28}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .diagram{color:#bf4f28}}
+
+/* Hero section on main page */
+.tutorial-hero{padding:16px 0 40px;border-bottom:1px solid var(--border);margin-bottom:40px}
+.tutorial-hero .badge-group{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+.tutorial-hero h1{font-size:2.6rem;font-weight:800;letter-spacing:-0.03em;line-height:1.15;margin-bottom:16px}
+.tutorial-hero h1 .gradient{background:linear-gradient(135deg,#f0f2f8 0%,#c7ccf0 30%,var(--accent) 55%,#a78bfa 80%,var(--foreground) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+[data-theme="light"] .tutorial-hero h1 .gradient{background:linear-gradient(135deg,#1e1b18 0%,var(--accent) 40%,#bf4f28 70%,#1e1b18 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .tutorial-hero h1 .gradient{background:linear-gradient(135deg,#1e1b18 0%,var(--accent) 40%,#bf4f28 70%,#1e1b18 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}}
+.tutorial-hero p{font-size:1.05rem;color:var(--foreground-muted);max-width:700px;line-height:1.75}
+
+/* Divider */
+hr{border:none;border-top:1px solid var(--border);margin:40px 0}
+
+/* Scroll progress */
+.scroll-progress{position:fixed;top:0;left:0;height:2px;background:linear-gradient(90deg,var(--accent),#8b5cf6);z-index:100;transition:width 0.1s linear}
+[data-theme="light"] .scroll-progress{background:linear-gradient(90deg,var(--accent),#bf4f28)}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .scroll-progress{background:linear-gradient(90deg,var(--accent),#bf4f28)}}
+
+/* Tooltip/tag stacks */
+.tag-stack{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.tag{padding:3px 10px;border-radius:100px;font-size:0.73rem;font-family:var(--font-mono);border:1px solid var(--border);color:var(--foreground-dim);background:var(--surface)}
+
+/* Animations */
+@keyframes fadeInUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+.fade-in{animation:fadeInUp 0.5s var(--easing) both}
+
+/* Sidebar toggle on mobile */
+.sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:44}
+.sidebar-backdrop.show{display:block}
+@media(max-width:860px){
+  .sidebar{transform:translateX(-100%);transition:transform 0.25s var(--easing);width:var(--sidebar-w)}
+  .sidebar.open{transform:translateX(0)}
+  .sidebar-backdrop.show{display:block}
+}
+
+/* Comparison table highlight */
+.highlight-cell{color:var(--green)!important;font-weight:500}
+
+  .modal-overlay{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity 0.3s var(--easing)}
+  .modal-overlay.open{opacity:1;pointer-events:auto}
+  .modal-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:48px 40px;text-align:center;max-width:420px;width:90%;transform:translateY(20px) scale(0.96);transition:transform 0.35s var(--easing);box-shadow:0 24px 80px rgba(0,0,0,0.6)}
+  [data-theme="light"] .modal-card{box-shadow:0 16px 60px rgba(0,0,0,0.1)}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .modal-card{box-shadow:0 16px 60px rgba(0,0,0,0.1)}}
+  .modal-overlay.open .modal-card{transform:translateY(0) scale(1)}
+  .modal-icon{display:inline-flex;width:56px;height:56px;border-radius:50%;align-items:center;justify-content:center;margin-bottom:20px;font-size:1.5rem;background:linear-gradient(135deg,var(--accent-glow),rgba(99,102,241,0.05))}
+  .modal-card h2{font-size:1.3rem;font-weight:700;color:var(--foreground);margin-bottom:10px;letter-spacing:-0.01em}
+  .modal-card p{font-size:0.9rem;color:var(--foreground-muted);line-height:1.65;margin-bottom:24px}
+  .modal-close{display:inline-block;padding:10px 28px;border-radius:var(--radius-xs);background:var(--accent);color:#fff;font-size:0.88rem;font-weight:600;cursor:pointer;border:none;transition:all 0.2s;font-family:var(--font-sans)}
+  .modal-close:hover{box-shadow:0 4px 20px var(--accent-glow);transform:translateY(-1px)}
+
+</style>
+<script>
+(function(){
+  var LANG_KEY = 'codepapr-lang';
+  var stored = localStorage.getItem(LANG_KEY);
+  if (stored) return;
+  var lang = (navigator.language || '').toLowerCase();
+  if (lang.startsWith('zh')) {
+    localStorage.setItem(LANG_KEY, 'zh');
+    location.replace('tutorial.html');
+  }
+})();
+</script>
+</head>
+<body>
+
+<div class="ambient"><div class="blob blob-1"></div><div class="blob blob-2"></div></div>
+<div class="grid-overlay"></div>
+<div class="scroll-progress" id="scrollProgress"></div>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <a href="#" class="sidebar-logo" onclick="scrollToSection('intro')">
+        <span class="l-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="sip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="sip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="sip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#sip)"/><rect x="96" y="96" width="832" height="832" rx="208" stroke="#FFF7EF" stroke-opacity=".52" stroke-width="12"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#sip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#sip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#sip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#sip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#sip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#sip3)" stroke-width="42" stroke-linecap="round"/></svg></span> CodePapr Tutorial
+      </a>
+      <div class="sidebar-version">v0.1.0</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">
+        <div class="nav-section-title">Getting Started</div>
+        <a class="nav-item active" onclick="scrollToSection('intro')"><span class="dot"></span>Introduction</a>
+        <a class="nav-item" onclick="scrollToSection('install')"><span class="dot"></span>Installation &amp; Environment Setup</a>
+        <a class="nav-item" onclick="scrollToSection('api-setup')"><span class="dot"></span>API Setup &amp; Model Configuration</a>
+        <a class="nav-item" onclick="scrollToSection('first-use')"><span class="dot"></span>First Use</a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-title">Core Concepts</div>
+        <a class="nav-item" onclick="scrollToSection('modes')"><span class="dot"></span>Work Modes: Ask / Plan / Agent</a>
+        <a class="nav-item" onclick="scrollToSection('workbench')"><span class="dot"></span>Desktop Workbench</a>
+        <a class="nav-item" onclick="scrollToSection('tools')"><span class="dot"></span>Tool Capabilities</a>
+        <a class="nav-item" onclick="scrollToSection('characters')"><span class="dot"></span>Character Roleplay</a>
+        <a class="nav-item" onclick="scrollToSection('tts')"><span class="dot"></span>Voice Synthesis (TTS)</a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-title">Project Configuration</div>
+        <a class="nav-item" onclick="scrollToSection('project-config')"><span class="dot"></span>Config Files &amp; Rules</a>
+        <a class="nav-item" onclick="scrollToSection('diff')"><span class="dot"></span>Code Editing &amp; Diff</a>
+        <a class="nav-item" onclick="scrollToSection('skills')"><span class="dot"></span>Skills System</a>
+        <a class="nav-item" onclick="scrollToSection('agents')"><span class="dot"></span>Agents &amp; Sub-agents</a>
+        <a class="nav-item" onclick="scrollToSection('commands')"><span class="dot"></span>Custom Commands</a>
+        <a class="nav-item" onclick="scrollToSection('goal')"><span class="dot"></span>Goal Autonomous Loop</a>
+        <a class="nav-item" onclick="scrollToSection('mcp')"><span class="dot"></span>MCP Tool Integration</a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-title">Deep Dive</div>
+        <a class="nav-item" onclick="scrollToSection('architecture')"><span class="dot"></span>System Architecture</a>
+        <a class="nav-item" onclick="scrollToSection('cache')"><span class="dot"></span>DeepSeek Cache Optimization</a>
+        <a class="nav-item" onclick="scrollToSection('lsp')"><span class="dot"></span>Language Intelligence &amp; LSP</a>
+        <a class="nav-item" onclick="scrollToSection('verify')"><span class="dot"></span>Verification &amp; Release</a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-title">Practice</div>
+        <a class="nav-item" onclick="scrollToSection('workflows')"><span class="dot"></span>Typical Workflows</a>
+        <a class="nav-item" onclick="scrollToSection('cost')"><span class="dot"></span>Cost &amp; Model Selection</a>
+        <a class="nav-item" onclick="scrollToSection('faq')"><span class="dot"></span>FAQ</a>
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <a href="index.html">← Home</a>
+      <a href="tutorial.html" style="font-weight:600" onclick="localStorage.setItem('codepapr-lang','zh')">中</a>
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
+        <svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <a href="#" onclick="showComingSoon(event)">Release →</a>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="main" id="main">
+    <!-- Mobile Header -->
+    <div class="mobile-header">
+      <span class="l-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="mip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="mip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="mip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#mip)"/><rect x="96" y="96" width="832" height="832" rx="208" stroke="#FFF7EF" stroke-opacity=".52" stroke-width="12"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#mip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#mip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#mip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#mip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#mip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#mip3)" stroke-width="42" stroke-linecap="round"/></svg></span>
+      <span class="logo-text">CodePapr Tutorial</span>
+      <button class="menu-toggle" onclick="toggleMobileMenu()">Contents</button>
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme" style="margin-left:8px">
+        <svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+    <div class="mobile-nav" id="mobileNav">
+      <a class="nav-item" onclick="mobileNavTo('intro')">Introduction</a>
+      <a class="nav-item" onclick="mobileNavTo('install')">Installation &amp; Environment Setup</a>
+      <a class="nav-item" onclick="mobileNavTo('api-setup')">API Setup &amp; Model Configuration</a>
+      <a class="nav-item" onclick="mobileNavTo('first-use')">First Use</a>
+      <a class="nav-item" onclick="mobileNavTo('modes')">Work Modes</a>
+      <a class="nav-item" onclick="mobileNavTo('workbench')">Desktop Workbench</a>
+      <a class="nav-item" onclick="mobileNavTo('tools')">Tool Capabilities</a>
+      <a class="nav-item" onclick="mobileNavTo('characters')">Character Roleplay</a>
+      <a class="nav-item" onclick="mobileNavTo('tts')">Voice Synthesis</a>
+      <a class="nav-item" onclick="mobileNavTo('project-config')">Config Files</a>
+      <a class="nav-item" onclick="mobileNavTo('diff')">Code Editing &amp; Diff</a>
+      <a class="nav-item" onclick="mobileNavTo('skills')">Skills System</a>
+      <a class="nav-item" onclick="mobileNavTo('agents')">Agents &amp; Sub-agents</a>
+      <a class="nav-item" onclick="mobileNavTo('commands')">Custom Commands</a>
+      <a class="nav-item" onclick="mobileNavTo('goal')">Goal Autonomous Loop</a>
+      <a class="nav-item" onclick="mobileNavTo('mcp')">MCP Tool Integration</a>
+      <a class="nav-item" onclick="mobileNavTo('architecture')">System Architecture</a>
+      <a class="nav-item" onclick="mobileNavTo('cache')">Cache Optimization</a>
+      <a class="nav-item" onclick="mobileNavTo('lsp')">LSP</a>
+      <a class="nav-item" onclick="mobileNavTo('verify')">Verification &amp; Release</a>
+      <a class="nav-item" onclick="mobileNavTo('workflows')">Workflows</a>
+      <a class="nav-item" onclick="mobileNavTo('cost')">Cost</a>
+      <a class="nav-item" onclick="mobileNavTo('faq')">FAQ</a>
+    </div>
+
+    <!-- Tutorial Hero -->
+    <div class="tutorial-hero">
+      <div class="badge-group">
+        <span class="badge badge-agent">v0.1.0</span>
+        <span class="badge badge-note">macOS + Windows</span>
+        <span class="badge badge-ask">Tauri Desktop</span>
+        <a href="index.html" style="font-size:0.78rem;color:var(--accent);text-decoration:none;margin-left:4px">← Home</a>
+        <a href="tutorial.html" style="font-size:0.78rem;color:var(--accent);text-decoration:none;margin-left:4px;font-weight:600" onclick="localStorage.setItem('codepapr-lang','zh')">中</a>
+      </div>
+      <h1><span class="gradient">CodePapr Tutorial</span></h1>
+      <p>CodePapr is a <strong>DeepSeek cache-friendly local coding agent system</strong>. It's not just a code generator — it's an intelligent agent workbench with comprehension and execution capabilities: reading projects, searching code, running commands, modifying files, and previewing results — all done locally.</p>
+    </div>
+
+    <!-- 1. Intro -->
+    <section class="section" id="intro">
+      <div class="section-header"><h2>CodePapr Introduction</h2></div>
+      <div class="content">
+        <h3>What is CodePapr</h3>
+        <p>CodePapr is a <strong>cache-first coding agent system</strong> offering two entry points: a Tauri desktop workbench and a CLI terminal interface. It shares a common Agent Runtime to provide desktop and terminal CLI with the same capabilities, enabling AI agents to <strong>read, modify, execute, verify, and preview</strong> within real project repositories.</p>
+
+        <p>CodePapr is neither a traditional AI chat tool nor an IDE plugin. It is an <strong>autonomous agent running in the terminal/desktop</strong> that genuinely understands your project context and automatically executes development tasks.</p>
+
+        <h3>Core Design Principles</h3>
+        <ul>
+          <li><strong>Local-first</strong>: Project context stays within the workspace as much as possible; file and command execution happen locally</li>
+          <li><strong>Single Runtime, Multiple Entry Points</strong>: The desktop workbench and CLI terminal share the same Agent, Session, ToolRegistry, and Provider semantics</li>
+          <li><strong>DeepSeek Cache Optimization</strong>: Stable content upfront, volatile content at the end, maximizing prefix cache hit rates to reduce token costs</li>
+          <li><strong>Structured Code Editing</strong>: Uses Search/Replace Diff mechanism, validates before writing, avoids line-number drift</li>
+          <li><strong>Verifiable Execution Chain</strong>: Every round of request, response, tool call, and cache statistics is traceable</li>
+        </ul>
+
+        <h3>CodePapr vs. Mainstream AI Coding Tools</h3>
+        <p style="margin-bottom:16px;font-size:0.85rem;color:var(--foreground-dim)">By 2026, AI coding tools are already very mature. The comparison below is based on each tool's current public capabilities, presented truthfully.</p>
+        <table>
+          <thead><tr><th>Dimension</th><th>Cline (62k⭐)</th><th>Aider (46k⭐)</th><th>Devin Desktop</th><th class="highlight-cell">CodePapr</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Form Factor</strong></td><td>SDK / VS Code / JetBrains / CLI / Kanban</td><td>Terminal Command</td><td>Standalone Desktop IDE</td><td class="highlight-cell">Standalone Desktop App (Tauri 2)</td></tr>
+            <tr><td><strong>Multi-Agent</strong></td><td>✅ Team + Coordinator + Scheduled Dispatch</td><td>❌ Single Agent</td><td>✅ Multi-Agent Fleet + ACP Protocol</td><td class="highlight-cell">✅ Main Agent + 3 Built-in Sub-agents + Custom</td></tr>
+            <tr><td><strong>Task Planning</strong></td><td>Kanban Board</td><td>❌</td><td>Spaces + Kanban</td><td class="highlight-cell">TodoList: auto-create / progress tracking / re-plan</td></tr>
+            <tr><td><strong>Code Understanding</strong></td><td>Read Files + grep + LSP</td><td>Repo Map</td><td>Fast Context (milliseconds)</td><td class="highlight-cell">ProjectGraph Semantic Graph: 14 analysis actions</td></tr>
+            <tr><td><strong>Rollback</strong></td><td>Checkpoints Snapshot</td><td>Git commit rollback</td><td>Diff review</td><td class="highlight-cell">Git auto-commit checkpoint + <code>reset --hard</code>: atomic code and message recovery</td></tr>
+            <tr><td><strong>Cache Optimization</strong></td><td>❌</td><td>❌</td><td>❌</td><td class="highlight-cell">DeepSeek three-layer prefix caching, reusable across sessions</td></tr>
+            <tr><td><strong>Model Support</strong></td><td>Almost all (incl. local)</td><td>Almost all (incl. local)</td><td>Built-in free model + third-party</td><td class="highlight-cell">DeepSeek / OpenAI / Claude / Local</td></tr>
+            <tr><td><strong>Extensibility</strong></td><td>SDK + MCP + Plugin System</td><td>Config Files</td><td>MCP + Extension + ACP</td><td class="highlight-cell">Custom Agents / Skills / Commands / Rules</td></tr>
+            <tr><td><strong>Pricing</strong></td><td>Open Source Free + API Costs</td><td>Open Source Free + API Costs</td><td>Free / $20 Pro / $200 Max</td><td class="highlight-cell">Open Source Free + API Costs</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>CodePapr's Unique Value:</strong> Complementary rather than a replacement for other tools. If you need <strong>deep IDE integration</strong> and a rich plugin ecosystem, Cline/Aider/Devin Desktop are more mature. If you value <strong>a standalone desktop workbench</strong>, <strong>extreme cost savings through DeepSeek prefix caching</strong>, <strong>a multi-sub-agent collaboration system</strong>, and <strong>in-place conversation rollback</strong> — CodePapr is the best choice.
+        </div>
+
+        <h3>Who Should Use CodePapr</h3>
+        <ul>
+          <li>You have mastered at least one programming language and can read basic syntax and project structure</li>
+          <li>Engineers looking to dramatically boost development efficiency with AI</li>
+          <li>Independent developers or tech leads maintaining complex projects long-term</li>
+          <li>Developers comfortable switching between command line and visual interfaces</li>
+          <li>Teams concerned about token costs who want to leverage DeepSeek cache optimization to reduce expenses</li>
+        </ul>
+
+        <h3>Prerequisites</h3>
+        <ul>
+          <li>Basic programming skills (can read and write simple code)</li>
+          <li>Basic code reading and comprehension ability</li>
+          <li>Familiarity with common dev tools (editor, command line, Git)</li>
+          <li>Basic understanding of project structure (directories, module organization)</li>
+          <li>Willingness to understand code rather than fully relying on AI</li>
+        </ul>
+
+        <h3>Supported LLM Providers</h3>
+        <div class="card"><div class="tag-stack">
+          <span class="tag">DeepSeek (Native)</span>
+          <span class="tag">OpenAI (Compatible)</span>
+          <span class="tag">Claude / Anthropic (Compatible)</span>
+          <span class="tag">Local OpenAI-Compatible Endpoint</span>
+        </div></div>
+      </div>
+    </section>
+
+    <!-- 2. Installation -->
+    <section class="section" id="install">
+      <div class="section-header"><h2>Installation &amp; Environment Setup</h2></div>
+      <div class="content">
+        <h3>Requirements</h3>
+        <table>
+          <thead><tr><th>Component</th><th>Minimum Version</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td>Node.js</td><td>18+</td><td>Runtime and package management</td></tr>
+            <tr><td>npm</td><td>9+</td><td>Dependency management</td></tr>
+            <tr><td>Rust toolchain + Cargo</td><td>stable</td><td>Desktop build (debug/release/publish)</td></tr>
+            <tr><td>.NET SDK</td><td>-</td><td>C# Roslyn analyzer (required for release builds)</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>Note:</strong> If you only do frontend development or source code reading, running <code>npm install</code> and <code>npm run build</code> is usually enough. Desktop debugging and packaging require the Rust toolchain.
+        </div>
+
+        <h3>Standard Installation</h3>
+        <pre><code><span class="hl-comment"># After cloning the repository</span>
+<span class="hl-keyword">npm</span> install
+<span class="hl-keyword">npm</span> run build</code></pre>
+
+        <h3>Installation Verification</h3>
+        <pre><code><span class="hl-keyword">npm</span> run verify</code></pre>
+        <p>Passing this step confirms that your machine at least satisfies: correct Node dependencies, successful workspace build, passing workspace tests, passing CLI E2E tests, and passing Tauri cargo check.</p>
+
+        <h3>Supported Platforms</h3>
+        <table>
+          <thead><tr><th>Platform</th><th>Architecture</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>macOS</td><td>arm64 (Apple Silicon)</td><td>Supported (outputs .dmg installer)</td></tr>
+            <tr><td>Windows</td><td>x64</td><td>Supported (outputs .msi installer)</td></tr>
+          </tbody>
+        </table>
+        <p>Both platforms share the same Rust backend and frontend codebase; the release pipeline outputs dmg/msi installers simultaneously.</p>
+
+        <h3>External Dependencies</h3>
+        <p>Depending on your operations, you may also need:</p>
+        <ul>
+          <li>A valid model API key (DeepSeek / OpenAI / Claude or a local compatible endpoint)</li>
+          <li>Chrome or a Chromium-compatible browser (for browser interaction and screenshots)</li>
+          <li>VS Code (optional, for workspace tasks and debugging configuration)</li>
+        </ul>
+
+        <h3>Three Launch Modes</h3>
+        <table>
+          <thead><tr><th>Command</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>npm run debug</code></td><td>Development debugging with hot reload; suitable for long sessions and daily use</td></tr>
+            <tr><td><code>npm run release</code></td><td>Directly launch the optimized desktop runtime (no installer packaging)</td></tr>
+            <tr><td><code>npm run publish</code></td><td>Generate platform installer (.dmg / .msi) and organize into <code>Release/</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 3. API Setup -->
+    <section class="section" id="api-setup">
+      <div class="section-header"><h2>API Setup &amp; Model Configuration</h2></div>
+      <div class="content">
+        <h3>Configuration Storage Locations</h3>
+        <table>
+          <thead><tr><th>Level</th><th>Path</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td>App-level</td><td><code>~/.codepapr/codepapr.sqlite</code></td><td>Provider, model, API key, language, sampling parameters</td></tr>
+            <tr><td>Project-level</td><td><code>&lt;workspace&gt;/.CodePapr/</code></td><td>Project state, session records, rules, Agents, Skills</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Provider Modes</h3>
+        <table>
+          <thead><tr><th>Mode</th><th>Description</th><th>Use Case</th></tr></thead>
+          <tbody>
+            <tr><td><code>deepseek</code></td><td>DeepSeek official provider</td><td>Recommended default; best cache optimization</td></tr>
+            <tr><td><code>openai</code></td><td>OpenAI-compatible format</td><td>Connecting to OpenAI or compatible services</td></tr>
+            <tr><td><code>claude</code></td><td>Claude/Anthropic-compatible format</td><td>Connecting to Claude or compatible endpoints</td></tr>
+          </tbody>
+        </table>
+
+        <h3>DeepSeek API Reference URL</h3>
+        <pre><code><span class="hl-comment"># OpenAI format (used by DeepSeek provider by default)</span>
+https://api.deepseek.com/v1</code></pre>
+        <p>CodePapr's DeepSeek provider always uses the OpenAI-compatible <code>https://api.deepseek.com/v1</code>. If you want to use the Anthropic protocol with DeepSeek, select Claude as the provider and set baseURL to DeepSeek's Anthropic-compatible endpoint.</p>
+
+        <h3>Environment Variable Fallback Order</h3>
+        <p>The desktop and CLI provider compatibility layer reads API keys in the following order:</p>
+        <ol>
+          <li><code>DEEPSEEK_API_KEY</code></li>
+          <li><code>OPENAI_API_KEY</code></li>
+          <li><code>ANTHROPIC_API_KEY</code></li>
+        </ol>
+
+        <h3>App-Level Settings</h3>
+        <div class="card">
+          <div class="card-row">
+            <div class="card-col">
+              <h4>LLM Settings</h4>
+              <ul>
+                <li>provider — Model provider</li>
+                <li>model — Model name</li>
+                <li>baseURL — Custom endpoint URL</li>
+                <li>API key — Authentication key</li>
+                <li>temperature — Generation temperature</li>
+                <li>maxTokens — Maximum output tokens</li>
+                <li>thinkingEnabled / thinkingEffort — Thinking mode</li>
+              </ul>
+            </div>
+            <div class="card-col">
+              <h4>Routing Settings</h4>
+              <ul>
+                <li>fast model switch — Whether to enable the fast model</li>
+                <li>fast model name — Fast model name (default <code>deepseek-v4-flash</code>)</li>
+                <li>max tool rounds — Maximum tool rounds (default 500)</li>
+                <li>max context tokens — Maximum context tokens (default 200k)</li>
+                <li>max conversation rounds — Maximum conversation rounds (default 24)</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <h3>Fast Model Routing</h3>
+        <table>
+          <thead><tr><th>Scenario</th><th>Model Used</th><th>Temperature</th></tr></thead>
+          <tbody>
+            <tr><td>Main Agent conversation</td><td>Primary model (default <code>deepseek-v4-pro</code>)</td><td>Default</td></tr>
+            <tr><td>Context compression</td><td>Fast model (default <code>deepseek-v4-flash</code>)</td><td>0.1</td></tr>
+            <tr><td>Sub-agent dispatch (heavy/execution type)</td><td>Primary model</td><td>User configured</td></tr>
+            <tr><td>Sub-agent dispatch (Explore/Scout fast mode)</td><td>Fast model (switchable to primary)</td><td>User configured</td></tr>
+            <tr><td>Slash commands declaring <code>model: fast</code> (e.g. <code>/search</code>, <code>/lint</code>, <code>/clean</code>, <code>/commit</code>, <code>/summary</code>, <code>/build</code>)</td><td>Fast model (falls back to primary if not enabled)</td><td>0.3</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout success">
+           <strong>Tip:</strong> The desktop settings panel is divided into five tabs: <code>General / LLM / Search / Mentor / Advanced</code>. <strong>General</strong> covers language, debugging, and license; <strong>LLM</strong> covers primary model, fast model, sampling parameters, and thinking effort; <strong>Search</strong> configures self-hosted SearXNG search backend (SearXNG first, with automatic fallback to built-in multi-source aggregation — Bing / Mojeek / Qwant / Wikipedia — when unavailable; engine selector removed; category/time/language/safe search moved to collapsible Advanced section); <strong>Mentor</strong> configures an independent API key, base URL, and model selection for the mentor sub-agent; <strong>Advanced</strong> covers context compression, TodoList retry, Goal autonomous loop, Verifier model config, ProjectGraph limits, and more. Voice settings are not in the main settings panel but are configured per character in the Voice Tab of the Character Modal.
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. First Use -->
+    <section class="section" id="first-use">
+      <div class="section-header"><h2>First Use</h2></div>
+      <div class="content">
+        <h3>Three Steps to Start</h3>
+        <ol>
+          <li><strong>Prepare configuration:</strong> Fill in your API key, provider, and model in the desktop settings</li>
+          <li><strong>Choose entry point:</strong> Use the desktop workbench directly (the current public product entry only exposes the desktop workbench)</li>
+          <li><strong>Choose mode:</strong> Ask for explanation and analysis, Plan for breaking down solutions, Agent for actual execution</li>
+        </ol>
+
+        <h3>Shortest Path</h3>
+        <pre><code><span class="hl-keyword">npm</span> install
+<span class="hl-keyword">npm</span> run build
+<span class="hl-keyword">npm</span> run debug</code></pre>
+
+        <h3>First Use Workflow</h3>
+        <ol>
+          <li>Open settings, fill in provider, model, and API key</li>
+          <li>Select a project folder</li>
+          <li>Choose the current task mode among Ask, Plan, and Agent</li>
+          <li>Enter a task description and let the agent execute or analyze</li>
+          <li>Review results in the file tree, editor, Git, and preview panels</li>
+        </ol>
+
+        <div class="callout success">
+          <strong>Auto-recovery:</strong> The desktop app remembers your last opened project directory and automatically restores that project and its project-level chat history on next launch. You will only see an empty workspace if the project path is invalid or you open a different directory.
+        </div>
+
+        <h3>Entry Points</h3>
+        <table>
+          <thead><tr><th>Entry Point</th><th>Best For</th></tr></thead>
+          <tbody>
+            <tr><td>Desktop Workbench</td><td>Long sessions, file tree, Git, preview, browser interaction — a visual workbench</td></tr>
+            <tr><td>CLI (<code>codepapr</code> command)</td><td>Terminal interaction, scripted automation; provides <code>chat</code> / <code>ask</code> / <code>plan</code> / <code>agent</code> / <code>init</code> / <code>session</code> / <code>stats</code> / <code>config</code> subcommands</td></tr>
+          </tbody>
+        </table>
+
+        <p class="callout">
+          <strong>Note:</strong> The CLI includes two built-in sub-agents: Explore and Scout; Mentor is only available and configurable in the desktop's "Sub-agents" tab.
+        </p>
+      </div>
+    </section>
+
+    <!-- 5. Modes -->
+    <section class="section" id="modes">
+      <div class="section-header"><h2>Work Modes: Ask / Plan / Agent</h2></div>
+      <div class="content">
+        <p>Ask, Plan, and Agent are not different products but <strong>three working modes of the same Runtime</strong>.</p>
+
+        <h3><span class="badge badge-ask">Ask</span> Analysis Mode</h3>
+        <p><strong>Best for:</strong> Explaining architecture, clarifying module responsibilities, analyzing error causes, asking questions before deciding whether to execute.</p>
+        <p><strong>Characteristics:</strong></p>
+        <ul>
+          <li>Does not modify files or run commands by default</li>
+          <li>For time-sensitive questions, prefers read-only time/web tools for verification</li>
+          <li>Only enters the read-only toolchain when you explicitly request project-based verification</li>
+        </ul>
+
+        <h3><span class="badge badge-plan">Plan</span> Planning Mode</h3>
+        <p><strong>Best for:</strong> Producing execution plans before large changes, seeing affected files and verification paths, breaking complex tasks into clear steps.</p>
+        <p><strong>Characteristics:</strong></p>
+        <ul>
+          <li>Provides a task checklist by default</li>
+          <li>Shows affected files, execution order, verification methods, and risks</li>
+          <li>Best for planning first, then switching to Agent for execution</li>
+        </ul>
+
+        <h3><span class="badge badge-agent">Agent</span> Execution Mode</h3>
+        <p><strong>Best for:</strong> Fixing bugs, implementing features, running tests and verification, tasks that require actual file read/write and tool invocation.</p>
+        <p><strong>Characteristics:</strong></p>
+        <ul>
+          <li>Actively searches projects, reads/writes files, runs commands, performs verification</li>
+          <li>Uses workspace tools, background commands, shell, preview, and browser capabilities</li>
+          <li>The main Agent execution loop runs in a Web Worker; long tasks won't block the UI</li>
+          <li>Long-running commands like <code>exec</code> display execution status and logs in tool call cards</li>
+          <li>Main execution defaults to a maximum of 500 consecutive internal tool rounds</li>
+          <li>After file changes, background diagnostics are dispatched asynchronously; identical failure fingerprints won't trigger repeated fixes</li>
+        </ul>
+
+        <h3>How to Write Effective Tasks</h3>
+        <p>CodePapr's actual performance depends heavily on task description quality. The most effective prompts typically include:</p>
+        <ul>
+          <li><strong>What is the goal</strong></li>
+          <li><strong>Where is the scope of changes</strong></li>
+          <li><strong>Where is the reference implementation</strong></li>
+          <li><strong>What must not be touched</strong></li>
+          <li><strong>What are the verification criteria</strong></li>
+        </ul>
+
+        <h4>Recommended Style</h4>
+        <pre><code>Fix the issue in packages/@codepapr/ui where background processes aren't stopped after preview closes.
+First find the binding logic between the current preview session and background processes, then make a minimal fix.
+After the change, at least run verification for the affected scope; if no narrow verification exists, explain why.</code></pre>
+
+        <h4>Less Effective Style</h4>
+        <pre><code>Help me fix the preview.</code></pre>
+
+        <div class="callout success">
+          <strong>Pro tip:</strong> Treat it as an engineering agent capable of executing tasks, not a pure chatbot, and you will get more consistent results.
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. Workbench -->
+    <section class="section" id="workbench">
+      <div class="section-header"><h2>Desktop Workbench</h2></div>
+      <div class="content">
+        <h3>Interface Structure</h3>
+        <ul>
+          <li><strong>Left:</strong> Session list and quick access</li>
+          <li><strong>Center:</strong> Chat area showing messages, tool calls, status, and execution summaries</li>
+          <li><strong>Right:</strong> File tree and code preview</li>
+          <li><strong>Auxiliary areas:</strong> Git panel, background processes, web preview</li>
+        </ul>
+
+        <h3>Full Desktop Capabilities</h3>
+        <div class="card">
+          <div class="card-row">
+            <div class="card-col">
+              <ul>
+                <li>Project file tree browsing</li>
+                <li>Monaco code preview (VS Code engine)</li>
+                <li>Multi-language LSP hover, definition, and problem markers</li>
+                <li>Ask / Plan / Agent mode switching</li>
+                <li>Tool call process visualization</li>
+              </ul>
+            </div>
+            <div class="card-col">
+              <ul>
+                <li>Git diff, recent commits, branch switching, and safe rollback</li>
+                <li>Background process management</li>
+                <li>In-app web preview</li>
+                <li>Browser page interaction and screenshots</li>
+                <li>Project configuration entry (Rules, Agents, Skills)</li>
+                <li>Visual Code Review panel (line-by-line comments, review status)</li>
+                <li>Non-blocking Toast notifications</li>
+                <li>External path access permission dialog</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <h3>Code Review Panel</h3>
+        <p>Click <strong>Review</strong> in the top AgentOps toolbar to open the Code Review panel:</p>
+        <ul>
+          <li>Default diff compares <code>HEAD~1..HEAD</code></li>
+          <li>Left file list shows added/modified/deleted/renamed files</li>
+          <li>Monaco diff editor displays both original / modified sides</li>
+          <li>Click the line number gutter on either side to add line-level comments</li>
+          <li>Comments can be marked as resolved / unresolved</li>
+          <li>Overall review status can be set: Pending Review / Approved / Changes Requested / Commented</li>
+        </ul>
+
+        <h3>Round Navigation</h3>
+        <p>A compact indicator bar on the right edge of the chat area shows one tick per user message:</p>
+        <ul>
+          <li><strong>Hover</strong> the bar → panel opens, listing all rounds (<code>#1</code> number + user's first sentence)</li>
+          <li>The currently visible round is <strong>highlighted</strong> in both the bar and panel</li>
+          <li><strong>Click</strong> any round → smooth-scroll to that message</li>
+          <li>Panel auto-closes when mouse leaves (200ms delay to prevent accidental dismiss)</li>
+        </ul>
+
+        <h3>Global Search</h3>
+        <p>The toolbar search box supports both conversation and file search via <strong>Chat | Files</strong> tabs:</p>
+        <ul>
+          <li><strong>Chat tab</strong>: Search current session messages, filter by role (All / You / AI), <code>↑↓</code> navigate <code>Enter</code> jump</li>
+          <li><strong>Files tab — Content mode</strong>: Search file contents across the workspace, results show path + line + matching line</li>
+          <li><strong>Files tab — Filename mode</strong>: Search file paths and names</li>
+          <li>Click a file result → open the file and jump to the matching line in the editor</li>
+          <li>Results panel is viewport-centered, 300ms debounced, backend search only runs when Files tab is active</li>
+        </ul>
+
+        <h3>Toast Notifications</h3>
+        <p>The desktop uses non-blocking toasts instead of alerts:</p>
+        <ul>
+          <li>Four colors: <code>info</code> / <code>success</code> / <code>warning</code> / <code>error</code></li>
+          <li>Default 4.5 seconds auto-dismiss; <code>error</code> defaults to 8 seconds</li>
+          <li>Maximum 5 simultaneously displayed; drops the oldest when exceeded</li>
+        </ul>
+
+        <h3>External Path Permissions</h3>
+        <p>When the Agent requests to read or list absolute paths outside the project, the desktop shows a permission dialog:</p>
+        <ul>
+          <li><strong>Deny</strong>: Block this access</li>
+          <li><strong>Allow this file</strong>: Only permit this file</li>
+          <li><strong>Allow this folder</strong>: Permit this directory and its children</li>
+        </ul>
+        <p>Authorization results are saved in a whitelist; subsequent accesses to the same path won't trigger the dialog again. Write, edit, and command execution remain restricted to the workspace.</p>
+
+        <h3>When to Prefer the Desktop</h3>
+        <ul>
+          <li>You are doing multi-round fixes or refactoring</li>
+          <li>You need to see the file tree while the agent works</li>
+          <li>You need Git diff, page preview, or page automation</li>
+          <li>You want to consolidate sessions, files, and verification in one interface</li>
+        </ul>
+
+        <h3>Git Integration</h3>
+        <ul>
+          <li><strong>Git Panel:</strong> Shows staged/unstaged diff, recent commit history, branch creation/switch, local commits, safe discard of local changes</li>
+          <li><strong>8 Agent Git Tools:</strong> status, diff, history, branch_checkout, stage, commit, restore, reset</li>
+          <li><strong>Auto-init:</strong> If the current workspace is not yet a Git repository, the panel can directly execute <code>git init</code></li>
+        </ul>
+
+        <h3>Conversation Reset (Git Checkpoint)</h3>
+        <p><strong>Before</strong> each user message enters the conversation history, CodePapr captures a code snapshot as an anchor:</p>
+        <pre><code>git add -A &amp;&amp; git commit -m "codepapr:checkpoint:&lt;userMsgId&gt;"</code></pre>
+        <p>When you need to roll back:</p>
+        <ul>
+          <li>Hover over any user message and click "Reset to here"</li>
+          <li>The system <code>git reset --hard</code> to the checkpoint commit before that message was sent</li>
+          <li>All files are atomically restored to the state before sending that message</li>
+          <li>The message list is synchronously truncated; all subsequent conversation is removed</li>
+          <li>If the workspace is not a Git repository, CodePapr will first attempt <code>git init</code>; if initialization fails, the "Reset to here" button on that message remains disabled</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 7. Tools -->
+    <section class="section" id="tools">
+      <div class="section-header"><h2>Tool Capabilities</h2></div>
+      <div class="content">
+        <p>The Agent registers a <strong>comprehensive toolset</strong> covering file operations, ProjectGraph analysis, Git, preview, browser, Shell, LSP, and all local development scenarios. Below are the key tools grouped by capability.</p>
+
+        <h3>graph — Core Project Understanding</h3>
+        <p>A unified project semantic graph tool that selects operations via the <code>action</code> parameter. Simultaneously returns a directory tree, code structure skeleton, and file/symbol relationship graph, serving as the foundation for all symbol lookup, dependency analysis, and impact analysis.</p>
+        <table>
+          <thead><tr><th>Tool / Action</th><th>Capability</th></tr></thead>
+          <tbody>
+            <tr><td><code>graph</code> full</td><td>Generate full ProjectGraph: directory tree + code structure skeleton + dependency graph</td></tr>
+            <tr><td><code>graph</code> overview</td><td>Lightweight overview (no full code skeleton); good for quickly perceiving project shape</td></tr>
+            <tr><td><code>graph</code> lookup</td><td>Look up symbols by name/path; returns symbolId, file, and line number</td></tr>
+            <tr><td><code>graph</code> dependency</td><td>Extract dependency subgraph; supports incoming / outgoing / both</td></tr>
+            <tr><td><code>graph</code> entrypoints</td><td>Find project entry files and entry symbols</td></tr>
+            <tr><td><code>graph</code> impact</td><td>Reverse impact analysis: what would be affected by modifying a given symbol</td></tr>
+            <tr><td><code>graph</code> implementations</td><td>Find implementations/derived symbols of an interface or base class</td></tr>
+            <tr><td><code>graph</code> smart_context</td><td>Intelligently retrieve the most relevant project context based on a task description</td></tr>
+            <tr><td><code>graph</code> dead_code</td><td>Detect unused symbols (classes, functions, variables)</td></tr>
+            <tr><td><code>graph</code> circular_deps</td><td>Detect circular import dependencies between files</td></tr>
+            <tr><td><code>graph</code> type_hierarchy</td><td>Build inheritance/implementation hierarchy tree for classes, interfaces, and types</td></tr>
+            <tr><td><code>graph</code> suggest_refactors</td><td>Based on code structure analysis, suggest extractable methods and symbols that could become standalone files</td></tr>
+            <tr><td><code>graph</code> test_impact</td><td>Analyze which existing tests would be affected by a list of changed files</td></tr>
+            <tr><td><code>graph</code> generate_tests</td><td>Auto-generate test skeletons for exported testable symbols in the project</td></tr>
+          </tbody>
+        </table>
+
+        <h3>File Operations</h3>
+        <table>
+          <thead><tr><th>Tool</th><th>Capability</th></tr></thead>
+          <tbody>
+            <tr><td><code>read</code></td><td>Read file content; supports line ranges, line windows, context lines, and byte limits</td></tr>
+            <tr><td><code>write</code></td><td>Create or fully overwrite a file; use edit for partial modifications</td></tr>
+            <tr><td><code>edit</code></td><td>Single-file precise SEARCH/REPLACE modification; search must exactly match source file</td></tr>
+            <tr><td><code>patch</code></td><td>Multi-file atomic SEARCH/REPLACE; all blocks validated successfully before writing together; any failure rolls back all</td></tr>
+            <tr><td><code>grep</code></td><td>Regex search file contents; returns match locations with context</td></tr>
+            <tr><td><code>glob</code></td><td>Search project files by filename glob patterns; supports regex union</td></tr>
+            <tr><td><code>list</code></td><td>Browse project directory tree structure; supports recursive depth control</td></tr>
+          </tbody>
+        </table>
+
+        <h3>LSP Language Intelligence</h3>
+        <table>
+          <thead><tr><th>Tool / Action</th><th>Capability</th></tr></thead>
+          <tbody>
+            <tr><td><code>lsp</code> definition / references</td><td>Language service read-only navigation: jump to definition, find all references</td></tr>
+            <tr><td><code>lsp_edit</code> rename / code_action / format</td><td>Language service semantic edits: rename, code actions, formatting</td></tr>
+            <tr><td><code>diagnostics</code></td><td>Single-file LSP diagnostics or project-level lint / typecheck</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Command Execution</h3>
+        <table>
+          <thead><tr><th>Tool / Action</th><th>Capability</th></tr></thead>
+          <tbody>
+            <tr><td><code>exec</code></td><td>Run a command: blocks by default; background:true for background execution; previewUrl to launch with preview</td></tr>
+            <tr><td><code>shell</code> open / send / read / close / list</td><td>Persistent shell sessions supporting multi-step commands and interactive terminals</td></tr>
+            <tr><td><code>proc</code> list / stop / stop_all</td><td>Background process management</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Git Operations</h3>
+        <table>
+          <thead><tr><th>Tool / Action</th><th>Capability</th></tr></thead>
+          <tbody>
+            <tr><td><code>git</code> status / diff / log</td><td>Read workspace status, diff, and commit history</td></tr>
+            <tr><td><code>git</code> branch / stage / commit</td><td>Switch or create branches, stage changes, create commits</td></tr>
+            <tr><td><code>git</code> restore / reset</td><td>Restore changes or safe rollback (auto-creates backup branch and snapshot)</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Browser &amp; Preview</h3>
+        <table>
+          <thead><tr><th>Tool / Action</th><th>Capability</th></tr></thead>
+          <tbody>
+            <tr><td><code>browser</code> open / navigate / reload / close</td><td>Built-in browser: open URL, navigate, refresh, close</td></tr>
+            <tr><td><code>browser</code> click / type / read / screenshot / get</td><td>Browser interaction: click elements, type text, read DOM, screenshot, read state</td></tr>
+            <tr><td><code>open</code></td><td>Open URL or project HTML file in the system default browser</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Web Tools</h3>
+        <table>
+          <thead><tr><th>Tool</th><th>Capability</th></tr></thead>
+          <tbody>
+            <tr><td><code>web_search</code></td><td>Online web search, aggregating multi-source results</td></tr>
+            <tr><td><code>web_fetch</code></td><td>Read web page content, auto-extracting body text and converting to plain text</td></tr>
+            <tr><td><code>web_download</code></td><td>Download files to the project's .CodePapr/downloads/ folder</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Other Tools</h3>
+        <table>
+          <thead><tr><th>Tool</th><th>Capability</th></tr></thead>
+          <tbody>
+            <tr><td><code>skill</code></td><td>Load Skill instruction files from the project's .CodePapr/skills/ directory</td></tr>
+            <tr><td><code>local_time_now</code></td><td>Get current local time, date, and timezone; suitable for time-sensitive queries (market open/close, event deadlines, etc.)</td></tr>
+            <tr><td><code>question</code></td><td>Ask the user questions in Plan mode; supports predefined options and multi-select</td></tr>
+            <tr><td><code>task</code></td><td>Delegate sub-tasks to declarative sub-agents (Explore / Scout / Mentor) for execution</td></tr>
+            <tr><td><code>todo</code></td><td>Plan and track multi-step task checklists; supports initialization, progress reporting, and re-planning</td></tr>
+          </tbody>
+        </table>
+
+        <h3>External Path Permissions</h3>
+        <p>In the desktop, <code>read</code> / <code>list</code> operations on absolute paths outside the project trigger a <strong>PermissionDialog</strong> popup for authorization; the CLI's read boundaries are more lenient, while writes remain restricted to the workspace.</p>
+
+        <h3>File Size Limits</h3>
+        <p>A single <code>read</code> / <code>write</code> / <code>edit</code> / <code>patch</code> operation is capped at <strong>20MB</strong>, covering most source code and binary resource files, though large files will significantly increase token consumption.</p>
+
+        <div class="callout success">
+          <strong>Tool Design Principle:</strong> The LLM sees simplified "merged tools" (25 total), which delegate to 40+ independent tools under the hood. The Agent can use all tools simultaneously; sub-agents are restricted by <code>tools</code> config allowlists. For code modifications, prefer <code>edit</code>/<code>patch</code> via Search/Replace Diff; use <code>write</code> only for new files. For command execution: short commands use <code>exec</code>, long-lived processes use <code>exec</code> with background:true, and interactive terminals use <code>shell</code>.
+        </div>
+      </div>
+    </section>
+
+    <!-- Character Roleplay -->
+    <section class="section" id="characters">
+      <div class="section-header"><h2>Character Roleplay</h2></div>
+      <div class="content">
+        <p>CodePapr supports creating, importing, and managing AI characters, allowing the Agent to converse with you in a specific persona. Once a character is activated, their identity, tone, and style are injected into the LLM system prompt, and the Agent responds in that character's persona.</p>
+
+        <h3>Character Data Model</h3>
+        <p>Each character includes the following fields:</p>
+        <table>
+          <thead><tr><th>Field</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Name</strong></td><td>Character display name</td></tr>
+            <tr><td><strong>Avatar</strong></td><td>Uploaded image, also shown in the chat interface</td></tr>
+            <tr><td><strong>Description</strong></td><td>Appearance, backstory, identity setting</td></tr>
+            <tr><td><strong>Personality</strong></td><td>Speaking style, character traits, behavioral habits</td></tr>
+            <tr><td><strong>Scenario</strong></td><td>The situation in which the current conversation takes place</td></tr>
+            <tr><td><strong>First Message</strong></td><td>What the character would say in their first conversation</td></tr>
+            <tr><td><strong>Example Dialogues</strong></td><td>Multiple dialogue groups separated by <code>&lt;START&gt;</code>, guiding the LLM to understand the character's style</td></tr>
+            <tr><td><strong>System Prompt</strong></td><td>Additional instructions appended after the character persona</td></tr>
+            <tr><td><strong>Tags</strong></td><td>Custom tags for categorization and search</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Roleplay Format Conventions</h3>
+        <p>When a character is activated, the system prompt specifies the following format rules to ensure TTS can correctly distinguish dialogue from actions:</p>
+        <table>
+          <thead><tr><th>Format</th><th>Meaning</th><th>TTS Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>*Action description*</code></td><td>Narration, scene description, character actions</td><td>Not spoken</td></tr>
+            <tr><td>Plain text</td><td>Character speech</td><td>Spoken</td></tr>
+            <tr><td><code>**Bold text**</code></td><td>Emphasis, stress</td><td>Spoken with emphasis</td></tr>
+            <tr><td><code>(Parentheses) or (whisper)</code></td><td>Tone cues</td><td>Not spoken</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Creating a Character</h3>
+        <ol>
+          <li>Click the <strong>Character Button</strong> (avatar icon) in the toolbar to open the character management panel</li>
+          <li>Click <strong>"New Character"</strong></li>
+          <li>In the <strong>Basic</strong> tab, fill in name, description, personality, scenario, first message, example dialogues, etc.</li>
+          <li>Optionally upload an avatar image (PNG/JPG)</li>
+          <li>In the <strong>Voice</strong> tab, configure voice synthesis (optional; see next section)</li>
+          <li>Click <strong>Save</strong></li>
+        </ol>
+
+        <h3>Importing Character Cards (CCv3 / SillyTavern Compatible)</h3>
+        <p>CodePapr is compatible with the chara-card-v3 specification and can import characters from other tools:</p>
+        <ol>
+          <li>Click the <strong>"Import Character Card"</strong> button in the character panel</li>
+          <li>Select a PNG file (JSON embedded in the image's tEXt/iTXt chunk) or a JSON file</li>
+          <li>Character information is automatically parsed; PNG images are automatically set as avatars</li>
+          <li>Review and adjust the imported fields, then click save</li>
+        </ol>
+
+        <p>Supported PNG chunk keywords: <code>chara</code>, <code>ccv3</code>, <code>character</code>, <code>character_card</code></p>
+
+        <h3>Exporting Character Cards</h3>
+        <p>Click a character's <strong>Export</strong> button in the character list to export it as a PNG character card. The PNG embeds the complete CCv3 JSON and can be used in tools like SillyTavern.</p>
+
+        <h3>Activating/Switching Characters</h3>
+        <p><strong>Click a character name</strong> in the character list to activate it. The currently active character will display an "Active" marker. Every Agent response will be delivered in that character's persona.</p>
+        <p>Character personas are placed in the Session Bootstrap (<strong>not in the system prompt's ImmutablePrefix</strong>), so switching characters does not break the DeepSeek prefix cache.</p>
+
+        <div class="callout success">
+          <strong>Tip:</strong> Character roleplay does not affect the Agent's code understanding and execution abilities. The Agent can still search projects, modify files, and run commands — only the output tone and style will match the character setting.
+        </div>
+      </div>
+    </section>
+
+    <!-- Voice Synthesis (TTS) -->
+    <section class="section" id="tts">
+      <div class="section-header"><h2>Voice Synthesis (TTS)</h2></div>
+      <div class="content">
+        <p>CodePapr integrates the <strong>GPT-SoVITS</strong> voice cloning engine, capable of synthesizing a character's text replies into speech locally. Only 3-10 seconds of reference audio are needed to clone a character's voice.</p>
+
+        <div class="diagram">
+TTS Data Flow:
+  ChatPanel
+    → useTtsPlayer (React Hook): streaming text → sentence splitting → queue management
+    → Rust TTS module
+      → GPT-SoVITS Python Server (local port 9880)
+        → rodio (Rust audio library) playback
+        </div>
+
+        <h3>Installing GPT-SoVITS</h3>
+        <p>First-time voice usage requires installing GPT-SoVITS. There are two installation entry points:</p>
+        <ul>
+          <li>Click the TTS speaker button on the ChatPanel; if not installed, an installation wizard will auto-launch</li>
+          <li>Trigger installation in the Voice Tab of the character editing panel</li>
+        </ul>
+        <p>The installation wizard auto-completes 5 steps: check Python → clone GPT-SoVITS repository → pip install dependencies → download pretrained models (about 2GB, using hf-mirror source) → verify.</p>
+        <p>Requires <strong>Python 3.10+</strong> already installed on the system. The installation process writes to <code>~/.codepapr/gpt-sovits/</code>.</p>
+
+        <h3>Configuring Voice for a Character</h3>
+        <ol>
+          <li>Click the <strong>Character Avatar Button</strong> in the toolbar to open the character editing panel</li>
+          <li>Switch to the <strong>Voice Tab</strong> and enable <strong>"Enable Voice Output"</strong></li>
+          <li><strong>Upload Reference Audio</strong>:
+            <ul>
+              <li>Duration 3-10 seconds (5 seconds recommended); too short gives poor cloning, too long gets truncated</li>
+              <li>Format WAV / MP3 / M4A / AAC; sample rate 16kHz or higher</li>
+              <li>Content: clear human voice, no background music, noise, or reverb</li>
+            </ul>
+          </li>
+          <li>Fill in <strong>Reference Text</strong>: must match the audio content word-for-word; otherwise cloning quality will be poor</li>
+          <li>Select <strong>Reference Audio Language</strong> and <strong>Speaking Language</strong> (supports Chinese, Cantonese, English, Japanese, Korean, and mixed modes)</li>
+          <li>Adjust parameters:
+            <ul>
+              <li><strong>Speed</strong>: 50% - 200%</li>
+              <li><strong>Synthesis Speed</strong>: only 4 / 8 / 16 tiers. 4=fastest, 8=balanced, 16=highest quality</li>
+              <li><strong>Merge Sentences</strong>: 1-5, merge this many sentences in one synthesis batch to reduce round trips</li>
+            </ul>
+          </li>
+          <li>Click the <strong>"Preview"</strong> button to preview the effect</li>
+          <li>Click <strong>Save</strong> when satisfied</li>
+        </ol>
+
+        <h3>Current Playback Mode</h3>
+        <p>The current UI uses <strong>WebSocket batch streaming (<code>ws-batch</code>)</strong> as the default and only effective mode: all sentences are sent in bulk over a single persistent WebSocket connection and returned one by one, with first-word latency around 1-2 seconds and smooth inter-sentence transitions.</p>
+        <p>The code layer retains three modes: <code>whole</code>, <code>streamed-pipeline</code>, and <code>streamed-pcm</code>, but the character editing panel has not yet exposed a switch for them; users need not worry about this.</p>
+
+        <h3>Voice Fine-tuning</h3>
+        <p>For higher audio quality requirements, use the fine-tuning feature in the Voice Tab:</p>
+        <ol>
+          <li>Ensure reference audio and reference text are configured and the preview passes</li>
+          <li>Click <strong>"Generate Training Data"</strong>: the LLM generates about 500 words of dialogue script based on the character setting; GPT-SoVITS auto-synthesizes about 2 minutes of training audio, no manual recording needed</li>
+          <li>Click <strong>"Start Fine-tuning"</strong>: background training, typically 30-60 minutes; you can close the window</li>
+          <li>After training completes, check <strong>"Use Fine-tuned Model"</strong>: timbre is more stable, synthesis is faster, synthesis speed can drop to 4 (fastest tier)</li>
+        </ol>
+
+        <h3>Playback Controls</h3>
+        <ul>
+          <li><strong>Auto-read:</strong> Characters with voice enabled will auto-read their AI replies aloud</li>
+          <li><strong>Replay:</strong> Hover over any AI reply to see a “Replay” button to re-read that message</li>
+          <li><strong>Stop:</strong> Canceling the current Agent message will interrupt ongoing reading</li>
+          <li><strong>Service Control:</strong> The TTS speaker button on the ChatPanel starts the GPT-SoVITS service or views service logs/status</li>
+        </ul>
+
+        <div class="callout">
+          <strong>GPU Warmup (Apple Silicon):</strong> On M-series Macs, after starting the TTS service for the first time, you can manually click the <strong>“GPU Warmup”</strong> button in the Voice Tab of the character editing panel. This pre-compiles the Metal GPU kernel to avoid a 5-15 second stall on the first synthesis. Warmup is only effective on Apple Silicon.
+        </div>
+
+        <div class="callout success">
+          <strong>Audio Quality Tip:</strong> Reference audio is best recorded in a quiet environment, avoiding background noise. Reference text must match the audio content exactly. Quality improves significantly after fine-tuning, especially for Chinese and Japanese.
+        </div>
+      </div>
+    </section>
+
+    <!-- 8. Project Config -->
+    <section class="section" id="project-config">
+      <div class="section-header"><h2>Config Files &amp; Rules</h2></div>
+      <div class="content">
+        <h3>.CodePapr/AGENTS.md — Global Project Rules</h3>
+        <p>Project-wide rules are injected into the main Agent and all sub-agents. Good for:</p>
+        <ul>
+          <li>Code style and directory conventions</li>
+          <li>Build, test, and release commands</li>
+          <li>Paths or behaviors that must not be changed</li>
+          <li>Project background and acceptance criteria</li>
+        </ul>
+
+        <div class="callout">
+          <strong>Auto-injection Flow:</strong> The agent looks up rule files in the following priority order and merges them into the stable system prompt:<br>
+          1. <code>.CodePapr/AGENTS.md</code><br>
+          2. <code>.CodePapr/rules.md</code><br>
+          Missing files are silently skipped.
+        </div>
+
+        <h3>.CodePapr/memory.md — Cross-Session Project Memory (Auto-Organized)</h3>
+        <p>During work, the Agent automatically discovers project-specific patterns, pitfalls, and conventions and writes them into the memory file. Automatically loaded at the start of the next session, helping the Agent avoid repeating past mistakes. The file is automatically reorganized when it exceeds 200 lines to prevent unbounded growth.</p>
+        <ul>
+          <li><strong>Auto-accumulation:</strong> When the Agent discovers project-specific knowledge, it uses <code>write</code> to append to <code>.CodePapr/memory.md</code>, with each entry prefixed by <code>## YYYY-MM-DD Topic</code></li>
+          <li><strong>Auto-loading:</strong> Injected into bootstrap context at the start of each session, without affecting system prompt cache</li>
+          <li><strong>Auto-organization:</strong> At session start, if memory.md &gt; 200 lines, or context compression / <code>/compact</code> triggers a pending flag; after the current round's Agent reply completes, the fast model asynchronously deduplicates, merges, and condenses the memory, then writes it back to the file</li>
+          <li><strong>Non-blocking:</strong> Organization is fire-and-forget async; the current session uses old memory, the next session uses the organized version; on failure, silently degrades to rule-based dedup without affecting the main flow</li>
+          <li><strong>No new tools:</strong> Organization is triggered by store-layer background logic, invisible to the model, not breaking ImmutablePrefix cache</li>
+          <li><strong>Recording principles:</strong> User preferences, project conventions, error patterns and solutions, architectural decisions; do not record general programming knowledge, temporary task states, or rules already in <code>.CodePapr/AGENTS.md</code></li>
+        </ul>
+
+        <div class="callout">
+          <strong>Organization Trigger Chain:</strong><br>
+          T1: session start reads memory.md, lines &gt; 200 → mark pending<br>
+          T2: context compression (auto or <code>/compact</code>) → mark pending<br>
+          T3: each agent reply complete → pending? → async fast model organize → write back memory.md<br>
+          Goal: retain user preferences / project conventions / error patterns / architectural decisions, keep within 200 lines.
+        </div>
+
+        <h3>/compact — Force Context Compression</h3>
+        <p>Manually trigger conversation compression, merging earlier messages into structured checkpoints to free token space:</p>
+        <ul>
+          <li><strong>Force mode:</strong> Not limited by <code>maxConversationRounds</code> and <code>maxContextTokens</code> thresholds</li>
+          <li><strong>Local command:</strong> Zero token cost; calls the existing compression pipeline to generate checkpoints</li>
+          <li><strong>Incidentally triggers memory organization:</strong> After successful compression, marks memory.md as pending; next round's agent reply triggers async organization</li>
+          <li><strong>Use case:</strong> When approaching context limits or responses slow down, compress to restore smooth conversation</li>
+        </ul>
+
+        <h3>Configuration Entry Points</h3>
+        <p>The "Config" entry in the desktop project header can:</p>
+        <ul>
+          <li>Create/edit <code>.CodePapr/AGENTS.md</code> (generates a default template if none exists)</li>
+          <li>Create/edit/delete custom sub-agents (<code>.CodePapr/agents/*.md</code>)</li>
+          <li>Create/edit/enable/disable/delete Skills (<code>.CodePapr/skills/**/SKILL.md</code>)</li>
+        </ul>
+
+        <h3>Data Location Overview</h3>
+        <table>
+          <thead><tr><th>Path</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>~/.codepapr/codepapr.sqlite</code></td><td>App-level settings, sessions, and cache statistics</td></tr>
+            <tr><td><code>~/.codepapr/lsp-tools/</code></td><td>Managed LSP tool download cache (downloaded on first need, reused afterwards)</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/project.sqlite</code></td><td>Project-level state, chat history, cache statistics</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/memory.md</code></td><td>Cross-session project memory; auto-accumulated by Agent + auto-organized when exceeding 200 lines</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/skills</code></td><td>Project-level skill files</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/agents</code></td><td>Project-level sub-agent definitions</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/commands</code></td><td>Project-level custom commands</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/downloads/</code></td><td>Default download directory for the Scout sub-agent</td></tr>
+            <tr><td><code>~/.codepapr/voices/</code></td><td>Character reference audio files</td></tr>
+            <tr><td><code>~/.codepapr/gpt-sovits/</code></td><td>GPT-SoVITS installation and pretrained models</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 9. Diff -->
+    <section class="section" id="diff">
+      <div class="section-header"><h2>Code Editing &amp; Diff Mechanism</h2></div>
+      <div class="content">
+        <h3>Search/Replace Diff (YOLO Diff)</h3>
+        <p>CodePapr's automated modifications <strong>do not rely on standard Git diff line numbers</strong>. Multiple localized modifications are preferentially generated as Search/Replace blocks:</p>
+
+        <pre><code><span class="hl-keyword">&lt;&lt;&lt;&lt;&lt;&lt;&lt; SEARCH</span>
+<span class="hl-string">Existing code already in the file</span>
+<span class="hl-keyword">=======</span>
+<span class="hl-string">Replacement new code</span>
+<span class="hl-keyword">&gt;&gt;&gt;&gt;&gt;&gt;&gt; REPLACE</span></code></pre>
+
+        <h3>Application Rules</h3>
+        <ul>
+          <li><code>SEARCH</code> must exactly match content in the target file</li>
+          <li>If the same <code>SEARCH</code> matches multiple locations, it is rejected to prevent unintended changes</li>
+          <li>A single batch modification validates all files and all blocks first; if any block fails, no file is written</li>
+          <li>Line endings are compatible with LF / CRLF</li>
+          <li>Failure information is fed back to the Agent context, triggering a re-read of the original file and self-healing retry</li>
+        </ul>
+
+        <h3>Recommended Use Cases</h3>
+        <ul>
+          <li>Localized modifications across multiple files</li>
+          <li>Fixing tests, lint, or type errors where context precision must be maintained</li>
+          <li>Agent mode requiring a machine-parseable, verifiable, and rollback-friendly modification format</li>
+        </ul>
+
+        <h3>Not Recommended For</h3>
+        <ul>
+          <li>Creating new files or full file rewrites → use the write file tool</li>
+          <li>Changing only a very small localized block → regular patch is more direct</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 10. Skills -->
+    <section class="section" id="skills">
+      <div class="section-header"><h2>Skills System</h2></div>
+      <div class="content">
+        <h3>What is a Skill</h3>
+        <p>A Skill is the main Agent's <strong>reusable operations manual</strong>, suitable for codifying search strategies, troubleshooting workflows, release checklists, review manifests, and project-specific working methods. It <strong>does not create an independent sub-agent</strong> but serves as project-level context for the model to select on demand.</p>
+
+        <h3>Skill File Format</h3>
+        <p>Organized as directory packages, placed under <code>.CodePapr/skills/**/SKILL.md</code>. Each directory can contain <code>assets/</code>, <code>references/</code>, <code>scripts/</code>, and other resources.</p>
+
+        <pre><code><span class="hl-comment">---</span>
+<span class="hl-keyword">name:</span> search
+<span class="hl-keyword">description:</span> Conduct verifiable searches using public web, official docs, and community resources
+<span class="hl-comment">---</span>
+
+<span class="hl-comment"># Search Skill</span>
+
+When a task requires public information, current facts, third-party API usage, or error troubleshooting:
+
+- Official docs first, then GitHub issues/PRs, then community answers.
+- Use double quotes for exact error strings, e.g. "Cannot find module".
+- Limit to specific sites using site:, e.g. site:developer.mozilla.org fetch abort.
+- Include the library name, version, runtime environment, and key error codes together.</code></pre>
+
+        <h3>Skill Loading Mechanism</h3>
+        <ul>
+          <li>At runtime, only the <strong>name + description</strong> of user-enabled Skills are injected into stable context</li>
+          <li>The model decides autonomously whether a Skill is needed</li>
+          <li>Only after selection is <code>skill</code> called to read the full content</li>
+          <li>Enable status is saved in <code>.CodePapr/project.sqlite</code></li>
+        </ul>
+
+        <h3>Built-in search Skill</h3>
+        <p>The default <code>search</code> Skill includes common reference sources and methods:</p>
+        <ul>
+          <li><strong>Official Documentation:</strong> Microsoft Learn, OpenAI, MDN, Node.js, npm, PyPI, Rust, Tauri, Vite, React</li>
+          <li><strong>Code &amp; Issues:</strong> GitHub repositories, issues, pull requests</li>
+          <li><strong>Community Resources:</strong> Stack Overflow, package manager pages, maintainer blogs</li>
+          <li><strong>Search Methods:</strong> <code>site:</code> to scope to a domain, double quotes for exact errors, package name plus version number</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 11. Agents -->
+    <section class="section" id="agents">
+      <div class="section-header"><h2>Agents &amp; Sub-agents</h2></div>
+      <div class="content">
+        <h3>Built-in Sub-agents</h3>
+        <p>CodePapr comes with four built-in sub-agents that the main Agent can dispatch via the <code>task</code> tool (except verifier, which is internal to the Goal loop) without additional configuration:</p>
+        <table>
+          <thead><tr><th>Agent</th><th>Purpose</th><th>Model</th><th>Tools</th></tr></thead>
+          <tbody>
+            <tr><td><strong>explore</strong></td><td>Read-only code analysis: search project files, locate symbols, analyze dependencies</td><td>fast</td><td>read, graph, lsp, diagnostics, grep</td></tr>
+            <tr><td><strong>scout</strong></td><td>Web search: find documentation, API references, latest resources</td><td>fast</td><td>web_search, web_fetch, web_download, browser</td></tr>
+            <tr><td><strong>mentor</strong></td><td>High-level architecture/algorithm/debugging guidance (no code writing, no tool usage)</td><td>mentor*</td><td>None</td></tr>
+            <tr><td><strong>verifier</strong></td><td>Goal verifier (internal): objectively determines whether the goal condition is met, prevents Worker from fabricating success</td><td>fast**</td><td>None</td></tr>
+          </tbody>
+        </table>
+        <p><small>* Mentor uses the primary model by default; an independent mentor model can be enabled in settings (supports independent API Key, Base URL, and model selection).<br>** Verifier is the internal evaluator for the Goal autonomous loop, not exposed to the main Agent's <code>task</code> tool; uses the fast model by default, switchable to primary in advanced settings.</small></p>
+
+        <h3>Custom Sub-agents</h3>
+        <p>Declare a sub-agent in <code>.CodePapr/agents/&lt;name&gt;.md</code> with YAML frontmatter + body. The main agent can delegate subtasks to it. An agent with the same name will override the built-in definition.</p>
+
+        <pre><code><span class="hl-comment">---</span>
+<span class="hl-keyword">description:</span> reviewer is responsible for reviewing current changes, identifying risks, and providing minimal fix suggestions
+<span class="hl-keyword">mode:</span> subagent
+<span class="hl-keyword">model:</span> fast
+<span class="hl-keyword">temperature:</span> 0.2
+<span class="hl-keyword">tools:</span>
+<span class="hl-keyword">  read:</span> true
+<span class="hl-keyword">  grep:</span> true
+<span class="hl-keyword">  diagnostics:</span> true
+<span class="hl-keyword">  git:</span> true
+<span class="hl-keyword">  write:</span> false
+<span class="hl-keyword">  exec:</span> false
+<span class="hl-comment">---</span>
+
+You are reviewer, a read-only code review sub-agent.
+
+Responsibilities:
+- Read the goal, relevant files, and current diff delegated by the main agent.
+- Prioritize finding real bugs, behavioral regressions, missing edge-case handling, and absent verification.
+- Provide minimal fix suggestions, indicating which files to modify and what verification commands to run.
+
+Boundaries:
+- Do not directly modify files by default.
+- Do not repeatedly summarize irrelevant code style; only report findings that affect correctness, reliability, or maintainability.
+
+Output Format:
+1. Findings: List issues by severity
+2. Suggested Fix: Provide the minimal fix direction
+3. Verification: List recommended verification commands</code></pre>
+
+        <h3>Sub-agent Configuration Reference</h3>
+        <ul>
+          <li><code>model</code>: Override model; options: <code>fast</code> (fast model) or a specific model name</li>
+          <li><code>temperature</code>: Temperature parameter; optional numeric value</li>
+          <li><code>tools</code>: Tool switches; defaults to inheriting all tools; declaring an empty object <code>{}</code> means no tools</li>
+          <li>The filename (without <code>.md</code>) is the sub-agent name; same name overrides built-in agents</li>
+          <li>Modify <code>description</code> to tell the main agent when to invoke it</li>
+          <li>Modify <code>tools</code> to control read/write/command permissions</li>
+        </ul>
+
+        <h3>Sub-task Mechanism (Two Approaches)</h3>
+        <table>
+          <thead><tr><th>Approach</th><th>Trigger</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>Orchestration-layer auto-decomposition</td><td>System auto-decision</td><td>In Agent mode, when a task contains execution verbs and is sufficiently complex, the LLM decides whether to break it into 2-5 sub-tasks for parallel/serial execution</td></tr>
+            <tr><td>Task tool active delegation</td><td>Agent actively invokes</td><td>The main Agent explicitly calls the <code>task</code> tool during reasoning to delegate a sub-task to an independent sub-agent (including built-in and custom)</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Sub-agent Runtime Model</h3>
+        <ul>
+          <li>Each sub-agent has an independent Session, ToolRegistry (filtered by tools), and Provider</li>
+          <li>Maximum nesting depth: 2 levels (sub-agents cannot delegate to other sub-agents)</li>
+          <li>Sub-agents can execute up to 50 internal tool rounds (main agent: 500)</li>
+          <li>Individual tool calls have a 90-second timeout — errors are returned to the LLM for autonomous decision</li>
+          <li>Each sub-agent has a 5-minute overall wall-clock timeout with automatic cancellation</li>
+          <li>Explore and Scout use the fast model; Mentor uses the independent mentor model or primary model</li>
+          <li>Custom prompts can be overridden in the Mentor tab of the settings panel</li>
+        </ul>
+
+        <h3>Difference from AGENTS.md</h3>
+        <p><code>.CodePapr/AGENTS.md</code> contains global project rules inherited by all modes and all sub-agents; custom Agents are dedicated sub-agents, only activated when the main Agent delegates sub-tasks via the task tool. The former is for writing "what all tasks must comply with," the latter for "who handles a certain type of task and which tools they can use."</p>
+      </div>
+    </section>
+
+    <!-- 12. Commands -->
+    <section class="section" id="commands">
+      <div class="section-header"><h2>Custom Commands</h2></div>
+      <div class="content">
+        <h3>Built-in Commands</h3>
+        <p>Commands support both <code>--name</code> (recommended) and <code>/name</code> (legacy compatibility) formats. A command's <code>model</code> field determines routing: undeclared uses the primary model, <code>fast</code> uses the fast model, and local commands cost zero tokens.</p>
+        <table>
+          <thead><tr><th>Command</th><th>Function</th><th>Model</th><th>Example</th></tr></thead>
+          <tbody>
+            <tr><td><code>/help</code></td><td>List all commands and descriptions</td><td>Local</td><td><code>/help</code></td></tr>
+            <tr><td><code>/commands</code></td><td>Alias for <code>/help</code></td><td>Local</td><td><code>/commands</code></td></tr>
+            <tr><td><code>/compact</code></td><td>Force compress current session context, generate checkpoint to free tokens</td><td>Local</td><td><code>/compact</code></td></tr>
+            <tr><td><code>/goal</code></td><td>Autonomous loop: Worker executes + Verifier validates, until condition is met</td><td>Local</td><td><code>/goal exec:npm test</code></td></tr>
+            <tr><td><code>/review</code></td><td>Review current changes or specified scope</td><td>Primary</td><td><code>/review src/App.tsx</code></td></tr>
+            <tr><td><code>/fix</code></td><td>Locate and fix a specified issue</td><td>Primary</td><td><code>/fix Login button not responding</code></td></tr>
+            <tr><td><code>/test</code></td><td>Add tests or run relevant tests</td><td>Primary</td><td><code>/test src/utils/format.ts</code></td></tr>
+            <tr><td><code>/explain</code></td><td>Explain a file, symbol, error, or implementation</td><td>Primary</td><td><code>/explain handleSubmit function</code></td></tr>
+            <tr><td><code>/diagnose</code></td><td>Diagnose errors, slow operations, or abnormal behavior</td><td>Primary</td><td><code>/diagnose Page load exceeds 5 seconds</code></td></tr>
+            <tr><td><code>/refactor</code></td><td>Reorganize code while preserving behavior</td><td>Primary</td><td><code>/refactor src/components/Modal.tsx</code></td></tr>
+            <tr><td><code>/doc</code></td><td>Update documentation for changes or features</td><td>Primary</td><td><code>/doc New refund endpoint</code></td></tr>
+            <tr><td><code>/new</code></td><td>Create new files, components, or features from scratch based on description</td><td>Primary</td><td><code>/new Create user password reset REST API</code></td></tr>
+            <tr><td><code>/optimize</code></td><td>Analyze and fix performance bottlenecks</td><td>Primary</td><td><code>/optimize src/pages/Dashboard.tsx</code></td></tr>
+            <tr><td><code>/search</code></td><td>Search codebase for patterns, usages, definitions, or references</td><td>Fast</td><td><code>/search auth middleware</code></td></tr>
+            <tr><td><code>/lint</code></td><td>Run linter and fix violations</td><td>Fast</td><td><code>/lint src/</code></td></tr>
+            <tr><td><code>/clean</code></td><td>Clean up dead code, unused imports, and leftover debug statements</td><td>Fast</td><td><code>/clean src/utils/</code></td></tr>
+            <tr><td><code>/commit</code></td><td>Stage changes and generate a well-formed commit message</td><td>Fast</td><td><code>/commit</code></td></tr>
+            <tr><td><code>/summary</code></td><td>Provide a high-level overview of a file, module, or entire project</td><td>Fast</td><td><code>/summary src/core/</code></td></tr>
+            <tr><td><code>/build</code></td><td>Build the project and diagnose/fix build errors</td><td>Fast</td><td><code>/build</code></td></tr>
+          </tbody>
+        </table>
+
+        <h3>Custom Command Templates</h3>
+        <p>Declare reusable prompt templates in <code>.CodePapr/commands/&lt;name&gt;.md</code>:</p>
+
+        <pre><code><span class="hl-comment">---</span>
+<span class="hl-keyword">description:</span> Review and fix lint
+<span class="hl-keyword">agent:</span> code-reviewer
+<span class="hl-comment">---</span>
+Please review the changes for $ARGUMENTS and fix any lint issues.
+See rules at @.CodePapr/AGENTS.md
+Current status: !`git status -s`</code></pre>
+
+        <h3>Template Syntax</h3>
+        <table>
+          <thead><tr><th>Syntax</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>$ARGUMENTS</code></td><td>All arguments</td></tr>
+            <tr><td><code>$1 $2 ...</code></td><td>The Nth argument</td></tr>
+            <tr><td><code>@path</code></td><td>Inline file content</td></tr>
+            <tr><td><code>!`cmd`</code></td><td>Execute a command and embed its output (simple commands only)</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>Usage:</strong> Type <code>/</code> in the input box to bring up the command palette, listing all available commands and supporting keyboard ↑↓ navigation. Type <code>/command-name arguments</code> to invoke. <code>--</code> format is compatible with legacy usage.
+        </div>
+      </div>
+    </section>
+
+    <!-- 12.4 Goal Autonomous Loop -->
+    <section class="section" id="goal">
+      <div class="section-header"><h2>Goal Autonomous Loop</h2></div>
+      <div class="content">
+        <h3>What is the Goal Loop</h3>
+        <p><code>/goal</code> is a control command (same level as <code>/compact</code>) that starts a <strong>Worker + Evaluator dual-model autonomous loop</strong>. It transforms the AI coding assistant from a single-turn Q&amp;A mode into a long-running autonomous agent that continues until a machine-verifiable condition is satisfied.</p>
+        <p>The core mechanism is not adding "keep working until done" to the prompt — it's an engineered self-play system:</p>
+        <ul>
+          <li><strong>Worker (primary model)</strong>: has full tool permissions, responsible for planning, writing code, running tests</li>
+          <li><strong>Verifier (fast model, no tools)</strong>: reads the Worker's execution transcript, determines if success is being fabricated</li>
+          <li><strong>Objective condition function</strong>: executes verification commands, uses exit codes and output matching for objective judgment</li>
+        </ul>
+        <p>The three work together: <strong>condition function + Verifier anti-forgery = double insurance</strong>. Only when the condition is met AND the Verifier confirms the Worker didn't cheat is it judged SATISFIED.</p>
+
+        <h3>Basic Usage</h3>
+        <pre><code><span class="hl-comment"># Exit code 0 satisfies the condition</span>
+/goal exec:npm test
+
+<span class="hl-comment"># Exit code 0 AND stdout matches regex</span>
+/goal exec:npm test match:"\d+ passed"
+
+<span class="hl-comment"># Compound condition, all must pass</span>
+/goal exec:npm run lint && exec:npm test
+
+<span class="hl-comment"># Natural language goal + verification condition (| separator)</span>
+/goal fix auth tests | exec:npm test</code></pre>
+
+        <h3>Condition Syntax</h3>
+        <table>
+          <thead><tr><th>Syntax</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>exec:&lt;command&gt;</code></td><td>Execute command, exit code must be 0</td></tr>
+            <tr><td><code>exec:&lt;cmd&gt; match:"&lt;pattern&gt;"</code></td><td>Exit code 0 AND stdout matches regex pattern</td></tr>
+            <tr><td><code>exec:&lt;cmd1&gt; &amp;&amp; exec:&lt;cmd2&gt;</code></td><td>Compound condition, all clauses must pass</td></tr>
+            <tr><td><code>&lt;goal&gt; | exec:&lt;cmd&gt;</code></td><td>Natural language goal + verification condition, separated by <code>|</code></td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>Key constraint:</strong> Conditions must be "machine-verifiable" (e.g. tests pass, exit code 0, lint clean), not subjective (e.g. "write a nice login page"). The tool-less Verifier can only judge via terminal logs.
+        </div>
+
+        <h3>How It Works</h3>
+        <ol>
+          <li><strong>Worker turn</strong>: the main Agent executes one round of work (read files, write code, run commands)</li>
+          <li><strong>Objective condition evaluation</strong>: the system automatically runs the verification command and gets exit code + output</li>
+          <li><strong>Verifier anti-forgery check</strong>: the tool-less Verifier sub-agent reads the Worker's execution transcript, detecting completion bias like "claiming tests pass without actually running them"</li>
+          <li><strong>Judgment</strong>: condition met AND Verifier confirms → <strong>SATISFIED</strong>, loop ends; otherwise detailed feedback is injected into the next round</li>
+          <li><strong>Context rot mitigation</strong>: auto-compaction every 5 iterations; state persisted to <code>.CodePapr/goal-state.md</code></li>
+        </ol>
+
+        <h3>Safety Guardrails</h3>
+        <table>
+          <thead><tr><th>Limit</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>Max iterations</td><td>20</td><td>Maximum outer loop iterations, auto-stops when exceeded</td></tr>
+            <tr><td>Max wall clock</td><td>30 minutes</td><td>Wall clock timeout, auto-stops</td></tr>
+            <tr><td>User interrupt</td><td>Anytime</td><td>"Stop" button on GoalBanner or Ctrl+C in CLI</td></tr>
+            <tr><td>State persistence</td><td>Every iteration</td><td>Writes to <code>.CodePapr/goal-state.md</code>, prevents context rot</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Configuration</h3>
+        <p>Configure Goal loop parameters in the <strong>Advanced</strong> tab of the settings panel:</p>
+        <ul>
+          <li><strong>Max iterations</strong>: default 20, adjustable 1-100</li>
+          <li><strong>Max wall clock</strong>: default 30 minutes, configured in minutes</li>
+          <li><strong>Verifier model</strong>: default fast model (faster, cheaper), switchable to primary model (more accurate)</li>
+          <li><strong>Verifier token limit</strong>: default 1000</li>
+          <li><strong>Verifier temperature</strong>: default 0.1 (lower is more deterministic)</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 12.5 MCP -->
+    <section class="section" id="mcp">
+      <div class="section-header"><h2>MCP Tool Integration</h2></div>
+      <div class="content">
+        <h3>What is MCP</h3>
+        <p>The <strong>Model Context Protocol</strong> (MCP) is an open protocol that allows Agents to extend their capabilities through external tool servers. CodePapr includes a built-in MCP host that can connect to multiple MCP servers simultaneously, exposing external tools to the main Agent for invocation.</p>
+        <p>Each MCP tool is registered in the form <code>mcp__&lt;serverId&gt;__&lt;toolName&gt;</code>, appearing alongside the 25 built-in tools in the ToolRegistry.</p>
+
+        <h3>Three Transport Modes</h3>
+        <table>
+          <thead><tr><th>Transport</th><th>Description</th><th>Use Case</th></tr></thead>
+          <tbody>
+            <tr><td><code>stdio</code></td><td>Subprocess + stdin/stdout JSON-RPC</td><td>Local command-line MCP servers (npx / uvx / python, etc.)</td></tr>
+            <tr><td><code>sse</code></td><td>Server-Sent Events</td><td>Remote HTTP MCP servers, unidirectional streaming</td></tr>
+            <tr><td><code>streamable-http</code></td><td>Streamable HTTP</td><td>Remote HTTP MCP servers, bidirectional streaming</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Per-MCP Server Fields</h3>
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>name</code></td><td>string</td><td>Display name</td></tr>
+            <tr><td><code>category</code></td><td><code>search</code> / <code>database</code> / <code>custom</code></td><td>Category; <code>search</code> replaces <code>web_search</code> routing when enabled</td></tr>
+            <tr><td><code>transport</code></td><td><code>stdio</code> / <code>sse</code> / <code>streamable-http</code></td><td>Transport mode</td></tr>
+            <tr><td><code>command</code> / <code>args</code></td><td>string</td><td>stdio only: executable command and arguments (arguments support quoted grouping)</td></tr>
+            <tr><td><code>url</code></td><td>string</td><td>sse / streamable-http only: HTTP endpoint URL</td></tr>
+            <tr><td><code>env</code></td><td>multi-line KEY=value</td><td>stdio only: environment variables; not exposed to model context</td></tr>
+            <tr><td><code>headers</code></td><td>multi-line Header-Name: value</td><td>sse / streamable-http only: HTTP request headers, typically for authentication</td></tr>
+            <tr><td><code>allowedTools</code></td><td>comma-separated, supports <code>*</code> wildcard</td><td>Allowlist; empty means allow all</td></tr>
+            <tr><td><code>deniedTools</code></td><td>comma-separated, supports <code>*</code> wildcard</td><td>Denylist; higher priority than allowlist</td></tr>
+            <tr><td><code>permissionMode</code></td><td><code>read-only</code> / <code>read-write</code> / <code>dangerous</code></td><td>Permission tier; determines whether confirmation is required before invocation</td></tr>
+            <tr><td><code>requireConfirmation</code></td><td>boolean</td><td>Requires confirmation for every invocation</td></tr>
+            <tr><td><code>timeoutSeconds</code></td><td>5–600</td><td>Per-tool invocation timeout</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Preset Examples</h3>
+        <p>The desktop provides three ready-to-use MCP servers by default (all disabled; must be manually enabled):</p>
+        <table>
+          <thead><tr><th>Name</th><th>Category</th><th>Command</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td>DuckDuckGo Search MCP</td><td>search</td><td><code>npx -y duckduckgo-mcp-server</code></td><td>API-key-free web search</td></tr>
+            <tr><td>Postgres MCP</td><td>database</td><td><code>npx -y @modelcontextprotocol/server-postgres &lt;DSN&gt;</code></td><td>SQL queries, schema discovery; write-disabled by default</td></tr>
+            <tr><td>SQLite MCP</td><td>database</td><td><code>uvx mcp-server-sqlite --db-path ./database.sqlite</code></td><td>Local SQLite database analysis</td></tr>
+          </tbody>
+        </table>
+
+        <h3>stdio Server Example</h3>
+        <pre><code><span class="hl-comment"># Name</span>
+DuckDuckGo Search MCP
+
+<span class="hl-comment"># Transport</span>
+stdio
+
+<span class="hl-comment"># Command / Arguments</span>
+<span class="hl-keyword">command:</span> npx
+<span class="hl-keyword">args:</span> -y duckduckgo-mcp-server
+
+<span class="hl-comment"># Environment variables (one KEY=value per line)</span>
+<span class="hl-keyword">env:</span>
+HTTP_PROXY=http://127.0.0.1:7890
+USER_AGENT=CodePapr/0.1.0
+
+<span class="hl-comment"># Tool filtering</span>
+<span class="hl-keyword">allowedTools:</span> duckduckgo_web_search</code></pre>
+
+        <h3>sse / streamable-http Server Example</h3>
+        <pre><code><span class="hl-comment"># Name</span>
+Remote Knowledge Base
+
+<span class="hl-comment"># Transport</span>
+streamable-http
+
+<span class="hl-comment"># URL</span>
+<span class="hl-keyword">url:</span> https://example.com/mcp
+
+<span class="hl-comment"># Headers (one Header-Name: value per line)</span>
+<span class="hl-keyword">headers:</span>
+Authorization: Bearer your-token-here
+X-API-Key: your-api-key</code></pre>
+
+        <h3>Permission Modes</h3>
+        <ul>
+          <li><strong>read-only</strong>: Read-only tools, no confirmation required for invocation (suitable for search, queries)</li>
+          <li><strong>read-write</strong>: Writable tools, used with <code>requireConfirmation</code></li>
+          <li><strong>dangerous</strong>: Dangerous tools (e.g., execute shell, delete data); strongly recommended to enable <code>requireConfirmation</code></li>
+        </ul>
+
+        <h3>Tool Filtering</h3>
+        <p>Control the subset of tools exposed by each server via <code>allowedTools</code> and <code>deniedTools</code>:</p>
+        <ul>
+          <li>Supports <code>*</code> wildcards (e.g. <code>describe*</code>, <code>list_*</code>)</li>
+          <li>Comma-separated for multiple patterns</li>
+          <li>Denylist takes priority over allowlist</li>
+          <li>Typical scenario: Postgres MCP defaults to <code>allowedTools=query,describe*,list*</code> + <code>deniedTools=delete*,drop*,truncate*,update*,insert*</code>, ensuring read-only access</li>
+        </ul>
+
+        <h3>Global Switches</h3>
+        <table>
+          <thead><tr><th>Setting</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>enabled</code></td><td>false</td><td>MCP master switch; all MCP servers are disabled when off</td></tr>
+            <tr><td><code>exposeTools</code></td><td>true</td><td>Whether to expose MCP tools to the Agent; when off, MCP is only a background connection and does not appear in the tool list</td></tr>
+            <tr><td><code>resultMaxBytes</code></td><td>200,000</td><td>Maximum bytes per tool call result (1KB – 5MB)</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Recommended Common MCP Servers</h3>
+        <ul>
+          <li><strong>@modelcontextprotocol/server-filesystem</strong>: Restricted filesystem access</li>
+          <li><strong>@modelcontextprotocol/server-postgres</strong>: Postgres database</li>
+          <li><strong>@modelcontextprotocol/server-github</strong>: GitHub API</li>
+          <li><strong>@modelcontextprotocol/server-slack</strong>: Slack integration</li>
+          <li><strong>mcp-server-sqlite</strong>: SQLite database</li>
+          <li><strong>duckduckgo-mcp-server</strong>: Free web search</li>
+        </ul>
+
+        <div class="callout">
+          <strong>Cache Impact:</strong> The enabled MCP server list enters the <code>ImmutablePrefix</code> tool definition hash. Adding/removing/modifying MCP servers will break the prefix cache, requiring cache rebuild on the next request. It is recommended to finalize MCP configuration before starting a long session.
+        </div>
+
+        <div class="callout success">
+          <strong>Test Connection:</strong> The MCP settings panel provides a "Test" button, allowing you to connect to a server, list tools, and apply filter rules without entering a session, to confirm the configuration is correct before enabling.
+        </div>
+      </div>
+    </section>
+
+    <!-- 13. Architecture -->
+    <section class="section" id="architecture">
+      <div class="section-header"><h2>System Architecture</h2></div>
+      <div class="content">
+        <h3>Architecture Overview</h3>
+        <div class="diagram">User → Desktop Workbench → Shared Agent Runtime
+                                  ↓
+                    ┌─────────────┼──────────────┐
+              Provider          SQLite        Tool Registry
+              Adapters      (App/Project)   (Workspace Tools)
+                              State
+                    ↓
+        ┌──────────┼──────────┐
+    DeepSeek   OpenAI   Claude
+</div>
+
+        <h3>Package-Level Responsibilities</h3>
+        <table>
+          <thead><tr><th>Package</th><th>Role</th><th>Primary Responsibility</th></tr></thead>
+          <tbody>
+            <tr><td><code>@codepapr/types</code></td><td>Shared protocol layer</td><td>Unified message, request, response, tool, and statistics types</td></tr>
+            <tr><td><code>@codepapr/common</code></td><td>Common infrastructure</td><td>Logging, hashing, and general utilities</td></tr>
+            <tr><td><code>@codepapr/core</code></td><td>Runtime core</td><td>Agent, Session, ToolRegistry, cache partitioning, ProjectGraph, Prompt assembly</td></tr>
+            <tr><td><code>@codepapr/api</code></td><td>Provider adapter layer</td><td>RequestBuilder, CacheValidator, provider implementations</td></tr>
+            <tr><td><code>@codepapr/db</code></td><td>Persistence layer</td><td>SQLite wrapper and repository</td></tr>
+            <tr><td><code>@codepapr/cli</code></td><td>Terminal Agent entry</td><td>Assembles provider, workspace tools, <code>codepapr</code> CLI entry (chat / ask / plan / agent / init / session / stats / config)</td></tr>
+            <tr><td><code>@codepapr/editor</code></td><td>Editor contract</td><td>Framework-agnostic Monaco types, markers, navigation, and static check contracts</td></tr>
+            <tr><td><code>@codepapr/ui</code></td><td>Desktop workbench</td><td>React, Zustand, Tauri, WorkerBackedAgent</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Rust Backend Domain Modules</h3>
+        <p>The Tauri backend is split into multiple modules by responsibility:</p>
+        <ul>
+          <li><code>browser</code>: Headless Chromium browser automation</li>
+          <li><code>shell</code>: Foreground/background commands, persistent shell sessions, command safety guards</li>
+          <li><code>web</code>: HTTP fetch, web page extraction, multi-engine search (SearXNG first, with automatic fallback)</li>
+          <li><code>workspace_fs</code>: File listing, reading, writing, SEARCH/REPLACE diff, searching</li>
+          <li><code>task_queue</code>: Heavy I/O operation serialization queue</li>
+          <li><code>db</code>: App and project-level SQLite persistence</li>
+          <li><code>lsp</code>: LSP server process management</li>
+          <li><code>symbol_provider</code>: Tree-sitter fallback symbol extraction</li>
+          <li><code>mcp_host</code>: MCP tool server host</li>
+          <li><code>shared</code>: Path normalization, workspace path resolution, general utilities</li>
+        </ul>
+
+        <h3>Desktop Agent Bridge</h3>
+        <div class="diagram">ChatPanel → agentStore.sendMessage() → WorkerBackedAgent.chat()
+                                         ├─ Worker Thread: Agent.chat() → LLM
+                                         └─ Main Thread: tool execution → Tauri invoke
+</div>
+        <p>The desktop does not invoke the core Agent directly; instead, it offloads the LLM chat loop into a Web Worker via <code>WorkerBackedAgent</code>, ensuring long tasks do not block the UI.</p>
+
+        <h3>Worker Crash Recovery &amp; Streaming Snapshots</h3>
+        <ul>
+          <li><strong>Crash capture</strong>: The main thread catches <code>WorkerCrashError</code>, automatically clears the current agent instance (next send creates a new Worker), and prepends "Agent Worker crashed." to the error message</li>
+          <li><strong>Streaming snapshots</strong>: During streaming responses, approximately every 2 seconds (<code>STREAM_SNAPSHOT_INTERVAL_MS</code>), <code>onStreamSnapshot</code> is triggered to persist in-flight content to the project SQLite</li>
+          <li><strong>Power-loss recovery</strong>: After a crash / forced quit / power loss, the next launch shows the conversation fragments written before the crash, preventing large chunks of progress from being lost</li>
+        </ul>
+
+        <h3>Tech Stack Overview</h3>
+        <table>
+          <thead><tr><th>Layer</th><th>Technology</th></tr></thead>
+          <tbody>
+            <tr><td>Frontend UI</td><td>React 18, TypeScript, Zustand 5, Monaco Editor, Tailwind CSS 3, Vite 8</td></tr>
+            <tr><td>Desktop Framework</td><td>Tauri 2 (Rust)</td></tr>
+            <tr><td>Rust Backend</td><td>rusqlite (SQLite), headless_chrome (browser), tree-sitter (16 languages), LSP stdio bridge (15 language families)</td></tr>
+            <tr><td>Agent Offload</td><td>Web Workers</td></tr>
+            <tr><td>Testing</td><td>Vitest 4, Playwright (UI E2E)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 14. Cache -->
+    <section class="section" id="cache">
+      <div class="section-header"><h2>DeepSeek Cache Optimization</h2></div>
+      <div class="content">
+        <h3>Three-Layer Prompt Injection</h3>
+        <p>The system injects prompts in three layers, ordered from most to least stable to maximize DeepSeek automatic prefix cache hits:</p>
+
+        <table>
+          <thead><tr><th>Layer</th><th>Injection Location</th><th>Content</th><th>Stability</th></tr></thead>
+          <tbody>
+            <tr><td>Layer 1</td><td>System Prompt</td><td>Base Identity + Rules + Mode + Workspace Path + Core Constraints</td><td>Reused across sessions</td></tr>
+            <tr><td>Layer 2</td><td>Session Bootstrap</td><td>Skills Summary + ProjectGraph + Custom Guidance</td><td>Fully stable across rounds</td></tr>
+            <tr><td>Layer 3</td><td>Runtime User Prompt</td><td>Mode Header + User Input + Diagnostics</td><td>Changes each round</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Cache Hit Patterns</h3>
+        <div class="diagram">Multi-round tool calls in the same session:
+  Round 1: [system][bootstrap][user]                                   ← Fully cached
+  Round 2: [system][bootstrap][user][asst_1][tool_1]                   ← Prefix hit
+  Round 3: [system][bootstrap][user][asst_1][tool_1][asst_2][tool_2]   ← Prefix hit
+
+Cross-session (same project):
+  Session A: [system][bootstrap][user_A]  → system+bootstrap cache reused by Session B
+
+Cross-session (different projects):
+  Each has a different workspace path → the base+constraints portion of system prompt can still be reused
+</div>
+
+        <h3>Key Invariants</h3>
+        <ul>
+          <li>User-custom prompts go into session bootstrap, not each round's user prompt</li>
+          <li>Skills go into bootstrap, not the system prefix</li>
+          <li>The workspace path only appears in the system prompt, not duplicated in bootstrap</li>
+          <li>Custom guidance appears only once in bootstrap</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 15. LSP -->
+    <section class="section" id="lsp">
+      <div class="section-header"><h2>Language Intelligence &amp; LSP</h2></div>
+      <div class="content">
+        <h3>LSP Bridge Architecture</h3>
+        <p>The desktop LSP uses a <strong>Tauri native host + stdio JSON-RPC</strong> architecture, managing language server subprocesses, stdin writes, stdout reader threads, and message queues via <code>src-tauri/src/lsp.rs</code>.</p>
+
+        <h3>Supported Language Families (15)</h3>
+        <table>
+          <thead><tr><th>Language</th><th>Primary LSP Server</th><th>Type</th><th>Built-in</th></tr></thead>
+          <tbody>
+            <tr><td>TypeScript / JS / TSX / JSX</td><td>typescript-language-server</td><td>Node.js npm</td><td>Yes</td></tr>
+            <tr><td>HTML</td><td>vscode-html-language-server</td><td>Node.js npm</td><td>Yes</td></tr>
+            <tr><td>CSS / SCSS / LESS</td><td>vscode-css-language-server</td><td>Node.js npm</td><td>Yes</td></tr>
+            <tr><td>JSON / JSONC</td><td>vscode-json-language-server</td><td>Node.js npm</td><td>Yes</td></tr>
+            <tr><td>YAML</td><td>yaml-language-server</td><td>Node.js npm</td><td>Yes</td></tr>
+            <tr><td>Python</td><td>pyright</td><td>Node.js npm</td><td>Yes</td></tr>
+            <tr><td>ShellScript</td><td>bash-language-server</td><td>Node.js npm</td><td>Yes</td></tr>
+            <tr><td>C#</td><td>csharp-ls / CodePapr.CSharp.Analyzer / omnisharp</td><td>.NET binary</td><td>Yes</td></tr>
+            <tr><td>Rust</td><td>rust-analyzer</td><td>Native binary</td><td>Yes</td></tr>
+            <tr><td>Java</td><td>Eclipse JDTLS + Temurin JRE 21</td><td>Java binary</td><td>Yes</td></tr>
+            <tr><td>C / C++</td><td>clangd v22.1.6</td><td>Native binary</td><td>Yes</td></tr>
+            <tr><td>Go</td><td>gopls</td><td>Native binary</td><td>Yes (best effort)</td></tr>
+            <tr><td>Swift</td><td>sourcekit-lsp (macOS Xcode toolchain)</td><td>System</td><td>No</td></tr>
+            <tr><td>SQL</td><td>sqls</td><td>Native binary</td><td>Yes</td></tr>
+            <tr><td>Markdown</td><td>marksman</td><td>Native binary</td><td>Yes</td></tr>
+          </tbody>
+        </table>
+
+        <h3>C# LSP Priority Chain</h3>
+        <p>C# has a <strong>multi-layer fallback</strong> mechanism for LSP:</p>
+        <ol>
+          <li><code>csharp-ls</code> on system PATH or in <code>~/.dotnet/tools</code></li>
+          <li>Release package built-in <code>csharp-ls</code> binary (<code>generated/lsp-tools/csharp-ls/bin/</code>)</li>
+          <li>Built-in <code>CodePapr.CSharp.Analyzer</code> (custom Roslyn sidecar, supports cross-file and cross-ProjectReference resolution)</li>
+          <li><code>dotnet run --project CodePapr.CSharp.Analyzer.csproj</code> (development / source code fallback)</li>
+          <li><code>omnisharp -lsp</code> or <code>OmniSharp -lsp</code> on system PATH (static candidate only)</li>
+          <li>Built-in tree-sitter symbol parsing (final fallback)</li>
+        </ol>
+
+        <h3>Managed Installation (Managed LSP)</h3>
+        <p>The desktop manages on-demand installation of missing LSP tools at runtime:</p>
+        <ul>
+          <li><strong>Node-based (5 npm packages, providing 7 language services):</strong> typescript-language-server (TypeScript / JavaScript), vscode-langservers-extracted (HTML / CSS / JSON), yaml-language-server, pyright, bash-language-server — installed via npm using the built-in Node.js runtime v20.12.2</li>
+          <li><strong>Binary-based (6):</strong> clangd v22.1.6, rust-analyzer, JDTLS + Temurin JRE 21, sqls, marksman, gopls — downloaded from official sources</li>
+          <li><strong>C#:</strong> Installed via <code>dotnet tool install -g csharp-ls</code>, or uses the built-in Roslyn sidecar</li>
+          <li>Auto managed downloads can be disabled with <code>CODEPAPR_DISABLE_MANAGED_LSP_DOWNLOAD=1</code></li>
+        </ul>
+
+        <h3>Tree-sitter Syntax Parsing (16 Languages)</h3>
+        <p>Built-in tree-sitter syntax tree parsing used for ProjectGraph and fallback symbol extraction: TypeScript, JavaScript, Python, Rust, Java, Go, C++, Bash, C#, CSS, HTML, JSON, PHP, Ruby, Kotlin, Swift.</p>
+
+        <h3>LSP Loading Strategy</h3>
+        <ul>
+          <li><strong>No batch warm-up of LSP</strong> at workspace startup</li>
+          <li>The LSP for a file is asynchronously loaded only after the file is displayed</li>
+          <li>After generation/modification/save-to-disk, asynchronously refreshes diagnostics and symbol cache for the related file</li>
+          <li>The LSP backend caches full workspace diagnostics; cross-file errors are also detectable</li>
+          <li>The code area only shows hints when there are problems; stays clean when there are none</li>
+          <li>When upper-layer LSP is unavailable, falls back to built-in tree-sitter symbol parsing</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 16. Verify & Release -->
+    <section class="section" id="verify">
+      <div class="section-header"><h2>Verification &amp; Release</h2></div>
+      <div class="content">
+        <h3>Verification Command Matrix</h3>
+        <table>
+          <thead><tr><th>Command</th><th>Scope</th><th>Suitable Scenario</th></tr></thead>
+          <tbody>
+            <tr><td><code>npm run build</code></td><td>Full workspace build</td><td>After source changes, confirm artifacts can be generated</td></tr>
+            <tr><td><code>npm run test</code></td><td>Full workspace tests</td><td>Daily main regression</td></tr>
+            <tr><td><code>npm run test:e2e</code></td><td>CLI E2E</td><td>Changes to CLI, session assembly, or scripted provider</td></tr>
+            <tr><td><code>npm run test:e2e:ui</code></td><td>Playwright UI E2E</td><td>Changes to desktop UI components, Toast, permissions, Code Review</td></tr>
+            <tr><td><code>npm run test:e2e:ui:install</code></td><td>Install Playwright Chromium</td><td>Preparation before first UI E2E run</td></tr>
+            <tr><td><code>npm run lint</code></td><td>Static analysis</td><td>Pre-commit quality gate</td></tr>
+            <tr><td><code>npm run audit</code></td><td>Security audit</td><td>Before release or after dependency changes</td></tr>
+            <tr><td><code>npm run smoke:agent-tools</code></td><td>Real model tool smoke test</td><td>Changes to tool selection, shell, browser interaction</td></tr>
+            <tr><td><code>npm run smoke:lsp-preview</code></td><td>Multi-language LSP smoke test</td><td>Changes to LSP hover, definition</td></tr>
+            <tr><td><code>npm run verify</code></td><td>Most comprehensive verification</td><td>Before local release (includes cargo check)</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Recommended Pre-commit Regression Order</h3>
+        <pre><code><span class="hl-keyword">npm</span> run build
+<span class="hl-keyword">npm</span> run test
+<span class="hl-keyword">npm</span> run test:e2e
+<span class="hl-keyword">npm</span> run test:e2e:ui
+<span class="hl-keyword">npm</span> run verify</code></pre>
+
+        <p>Browser dependencies must be installed before the first UI E2E run:</p>
+        <pre><code><span class="hl-keyword">npm</span> run test:e2e:ui:install</code></pre>
+
+        <h3>Desktop Release</h3>
+        <pre><code><span class="hl-comment"># Development debugging</span>
+<span class="hl-keyword">npm</span> run debug
+
+<span class="hl-comment"># Optimized desktop runtime (no packaging)</span>
+<span class="hl-keyword">npm</span> run release
+
+<span class="hl-comment"># Generate installer (.dmg / .msi) and organize into Release/</span>
+<span class="hl-keyword">npm</span> run publish</code></pre>
+
+        <h3>Release Helper Scripts</h3>
+        <ul>
+          <li>macOS: <code>./publish-codepapr.command</code></li>
+          <li>Windows: <code>publish-codepapr.cmd</code></li>
+        </ul>
+
+        <h3>Pre-release Checks</h3>
+        <pre><code><span class="hl-keyword">npm</span> run release:prep
+<span class="hl-keyword">npm</span> run publish:dry-run</code></pre>
+
+        <div class="callout success">
+          <strong>Release Package Bundled Contents:</strong> The official desktop release package bundles the Node.js runtime v20.12.2 required for default LSP, 5 Node-based npm packages (typescript-language-server, vscode-langservers-extracted, yaml-language-server, pyright, bash-language-server, providing TypeScript / JavaScript / HTML / CSS / JSON / YAML / Python / ShellScript — 8 language services total), C# Roslyn sidecar + .NET SDK 10.0, JDTLS + Temurin JRE 21, clangd v22.1.6, rust-analyzer, sqls, marksman, and gopls. Users do not need to download these components separately for first-time use of default languages.
+        </div>
+      </div>
+    </section>
+
+    <!-- 17. Workflows -->
+    <section class="section" id="workflows">
+      <div class="section-header"><h2>Typical Workflows</h2></div>
+      <div class="content">
+        <h3>1. Understand First, Then Execute</h3>
+        <p>Best when working with a repository for the first time or when requirements are unclear:</p>
+        <ol>
+          <li><strong>Ask:</strong> Explain system structure, locate modules</li>
+          <li><strong>Plan:</strong> Output task checklist and verification plan</li>
+          <li><strong>Agent:</strong> Execute according to the checklist</li>
+        </ol>
+
+        <h3>2. Direct Fix</h3>
+        <p>Best when you already know the target but don't want to manually search and fix:</p>
+        <pre><code>Fix the incorrect cache statistics in packages/@codepapr/api.
+First locate the statistics aggregation logic, then make a minimal fix, and finally run related tests.</code></pre>
+
+        <h3>3. Start Frontend and Preview In-App</h3>
+        <p>Best for UI adjustments, page behavior verification, and preview integration:</p>
+        <ol>
+          <li>Let the Agent start a preview session or background command</li>
+          <li>View the page in the in-app preview</li>
+          <li>If you need to click pages, fill forms, or take screenshots, continue using browser tools</li>
+        </ol>
+
+        <h3>4. Persist Terminal Context for Sequential Operations</h3>
+        <p>Best for scripts, REPL, interactive CLI, or multi-step shell workflows:</p>
+        <ol>
+          <li>Open a shell session</li>
+          <li>Send commands continuously</li>
+          <li>Proceed based on output</li>
+          <li>Close the session when done</li>
+        </ol>
+
+        <h3>5. Review Historical Sessions and Costs</h3>
+        <ul>
+          <li>View the session list</li>
+          <li>View stats for a specific session (cache hits/misses/token usage)</li>
+          <li>Assess whether costs are reasonable against the current model settings</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 18. Cost -->
+    <section class="section" id="cost">
+      <div class="section-header"><h2>Cost &amp; Model Selection</h2></div>
+      <div class="content">
+        <h3>DeepSeek Model Reference</h3>
+        <table>
+          <thead><tr><th>Model</th><th>Context</th><th>Max Output</th><th>Cache Hit Input</th><th>Cache Miss Input</th><th>Output</th><th>Concurrency</th></tr></thead>
+          <tbody>
+            <tr><td><code>deepseek-v4-flash</code></td><td>1M</td><td>384K</td><td>0.02 CNY/M tokens</td><td>1 CNY/M tokens</td><td>2 CNY/M tokens</td><td>2500</td></tr>
+            <tr><td><code>deepseek-v4-pro</code></td><td>1M</td><td>384K</td><td>0.025 CNY/M tokens</td><td>3 CNY/M tokens</td><td>6 CNY/M tokens</td><td>500</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout warn">
+          <strong>Note:</strong> Prices are subject to change; always refer to the <a href="https://api-docs.deepseek.com/zh-cn/quick_start/pricing" target="_blank" rel="noopener">DeepSeek official pricing page</a> as the final authority.
+        </div>
+
+        <h3>How to Choose in CodePapr</h3>
+        <ul>
+          <li>Primary model defaults to <code>deepseek-v4-pro</code> — used for Ask, Plan, and Agent main execution flow</li>
+          <li>Fast model defaults to <code>deepseek-v4-flash</code> — used for context compression, sub-task planning, read-only lightweight sub-agents</li>
+          <li>Thinking effort (thinkingEffort) defaults to <code>max</code> (strongest reasoning); can be switched to <code>high</code> in the LLM settings tab</li>
+        </ul>
+
+        <h3>Cost Optimization Tips</h3>
+        <ul>
+          <li>Prefer cheaper models for Ask and lightweight analysis tasks</li>
+          <li>Use Plan before large changes to reduce ineffective execution rounds</li>
+          <li>Make task descriptions more specific to reduce the number of rounds the model spends searching and fixing</li>
+          <li>Keep system prompts and tool boundaries stable to maximize prefix cache hits</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 19. FAQ -->
+    <section class="section" id="faq">
+      <div class="section-header"><h2>FAQ</h2></div>
+      <div class="content">
+        <h3>1. Prompt says no API key after startup</h3>
+        <p>First check whether the desktop settings have been saved, and whether the corresponding environment variables are set (<code>DEEPSEEK_API_KEY</code> / <code>OPENAI_API_KEY</code> / <code>ANTHROPIC_API_KEY</code>).</p>
+
+        <h3>2. Installation or CLI commands won't run / not found</h3>
+        <p>Confirm whether <code>npm install</code> and <code>npm run build</code> have been executed, and whether the current repository is under a OneDrive path causing .bin shim anomalies.</p>
+
+        <h3>3. Agent encounters vite, tsc, eslint, or missing module errors</h3>
+        <p>First suspect uninstalled dependencies or unbuilt local packages, rather than cloud sync or disk issues.</p>
+
+        <h3>4. Browser tool unavailable</h3>
+        <p>Usually because no detectable Chrome or Chromium-compatible browser is installed on the machine.</p>
+
+        <h3>5. Tests still show old results after code changes</h3>
+        <p>Many packages in this repository participate in tests or references through their respective dist entry points. After changing source files, if results look unchanged, first rebuild the affected packages, then run verification.</p>
+
+        <h3>6. Build principles after modifying source code</h3>
+        <p class="callout success">
+          <strong>Important:</strong> Modify source → build first → run affected tests → run broader verification. When results appear "not taking effect," first suspect the build wasn't applied, rather than suspecting a runtime anomaly.
+        </p>
+
+        <h3>7. How to use local models</h3>
+        <p>In settings, you can connect to a local model provider (OpenAI-compatible endpoint) for offline or private deployment scenarios. With supported models, you can paste or drag images directly into the chat box as input.</p>
+
+        <h3>8. Why does a popup appear when reading certain absolute paths</h3>
+        <p>This is the desktop's external path permission mechanism. When the Agent attempts to read or list absolute paths outside the project, it requests your explicit authorization to ensure system files are not accessed without permission.</p>
+
+        <h3>9. UI E2E tests won't run</h3>
+        <p>First confirm whether Playwright browser dependencies have been installed:</p>
+        <pre><code><span class="hl-keyword">npm</span> run test:e2e:ui:install</code></pre>
+        <p>UI E2E uses Chromium running in a mock environment without Tauri webview; real model configuration is not required.</p>
+
+        <h3>Usage Tips</h3>
+        <p><strong>Beginners:</strong> First use Ask to understand the system → then Plan to see the scope of changes clearly → finally use Agent for actual execution.</p>
+        <p><strong>Experienced users:</strong> Give clear goals directly in Agent mode → specify affected files and verification requirements → use the desktop to complete conversation, Git, preview, and browser integration.</p>
+      </div>
+    </section>
+
+    <hr>
+    <p style="color:var(--foreground-dim);font-size:0.8rem;text-align:center;padding:20px 0">
+      CodePapr v0.1.0 · This tutorial is based on the project source code and documentation · Content is continuously updated
+    </p>
+  </main>
+</div>
+
+<script>
+// Scroll progress bar
+window.addEventListener('scroll', () => {
+  const winScroll = document.documentElement.scrollTop;
+  const height = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+  const scrolled = (winScroll / height) * 100;
+  document.getElementById('scrollProgress').style.width = scrolled + '%';
+});
+
+// Active nav tracking
+const sections = document.querySelectorAll('.section');
+const navItems = document.querySelectorAll('.nav-item');
+
+function updateActiveNav() {
+  let current = '';
+  sections.forEach(section => {
+    const sectionTop = section.offsetTop - 120;
+    if (window.scrollY >= sectionTop) {
+      current = section.getAttribute('id');
+    }
+  });
+  navItems.forEach(item => {
+    item.classList.remove('active');
+    const href = item.getAttribute('onclick');
+    if (href && href.includes(`'${current}'`)) {
+      item.classList.add('active');
+    }
+  });
+}
+window.addEventListener('scroll', updateActiveNav);
+
+function scrollToSection(id) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    closeSidebar();
+  }
+}
+
+// Sidebar toggle on mobile
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebarBackdrop').classList.toggle('show');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarBackdrop').classList.remove('show');
+}
+document.getElementById('sidebarBackdrop').addEventListener('click', closeSidebar);
+
+// Mobile menu
+function toggleMobileMenu() {
+  document.getElementById('mobileNav').classList.toggle('open');
+}
+function mobileNavTo(id) {
+  scrollToSection(id);
+  document.getElementById('mobileNav').classList.remove('open');
+}
+
+// Keyboard shortcut
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebarBackdrop').classList.toggle('show');
+  }
+});
+
+// Initial active state
+updateActiveNav();
+
+// Theme
+(function(){
+  const html=document.documentElement;
+  const stored=localStorage.getItem('codepapr-theme');
+  if(stored==='light'){html.setAttribute('data-theme','light')}
+  else if(stored==='dark'){html.setAttribute('data-theme','dark')}
+  window.toggleTheme=function(){
+    const cur=html.getAttribute('data-theme');
+    const next=(!cur||cur==='dark')?'light':'dark';
+    html.setAttribute('data-theme',next);
+    localStorage.setItem('codepapr-theme',next);
+  };
+})();
+
+  window.showComingSoon=function(e){
+    e&&e.preventDefault();
+    document.getElementById('comingSoonModal').classList.add('open');
+  };
+  window.closeComingSoon=function(e){
+    if(e&&e.target!==e.currentTarget)return;
+    document.getElementById('comingSoonModal').classList.remove('open');
+  };
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')closeComingSoon()});
+
+</script>
+
+<div class="modal-overlay" id="comingSoonModal" onclick="closeComingSoon(event)">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-icon">🚀</div>
+    <h2>Coming Soon</h2>
+    <p>CodePapr is being actively refined and will be officially released soon. Thank you for your interest!</p>
+    <button class="modal-close" onclick="closeComingSoon()">Got it</button>
+  </div>
+</div>
+
+</body>
+</html>

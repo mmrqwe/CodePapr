@@ -1,0 +1,37 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="plate" x1="164" y1="120" x2="876" y2="940" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF1E0"/>
+      <stop offset="0.52" stop-color="#F6C58B"/>
+      <stop offset="1" stop-color="#E79057"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="230" y1="160" x2="790" y2="860" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF8EF"/>
+      <stop offset="1" stop-color="#F3E5D0"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="320" y1="280" x2="720" y2="780" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D9673E"/>
+      <stop offset="1" stop-color="#B84E2A"/>
+    </linearGradient>
+    <filter id="plateShadow" x="64" y="72" width="896" height="920" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#884821" flood-opacity="0.28"/>
+    </filter>
+    <filter id="shadow" x="120" y="110" width="760" height="820" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="36" stdDeviation="34" flood-color="#7C4A2D" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+  <g filter="url(#plateShadow)">
+    <rect x="96" y="96" width="832" height="832" rx="208" fill="url(#plate)"/>
+    <rect x="96" y="96" width="832" height="832" rx="208" stroke="#FFF7EF" stroke-opacity="0.52" stroke-width="12"/>
+  </g>
+  <path d="M156 230C156 189.131 189.131 156 230 156H794C834.869 156 868 189.131 868 230V794C868 834.869 834.869 868 794 868H230C189.131 868 156 834.869 156 794V230Z" fill="url(#plate)" fill-opacity="0.18"/>
+  <g filter="url(#shadow)">
+    <path d="M280 170C280 147.909 297.909 130 320 130H612L744 262V814C744 836.091 726.091 854 704 854H320C297.909 854 280 836.091 280 814V170Z" fill="url(#paper)"/>
+    <path d="M612 130L744 262H642C625.431 262 612 248.569 612 232V130Z" fill="#F0D5B2"/>
+  </g>
+  <path d="M392 350H636" stroke="url(#ink)" stroke-width="40" stroke-linecap="round"/>
+  <path d="M392 450H548" stroke="url(#ink)" stroke-width="40" stroke-linecap="round" opacity="0.86"/>
+  <path d="M432 592L352 672L432 752" stroke="url(#ink)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M592 592L672 672L592 752" stroke="url(#ink)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M540 560L484 784" stroke="url(#ink)" stroke-width="42" stroke-linecap="round"/>
+</svg>

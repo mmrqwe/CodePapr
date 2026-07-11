@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RollForward>Major</RollForward>
+    <RootNamespace>CodePapr.CSharp.Analyzer</RootNamespace>
+    <AssemblyName>CodePapr.CSharp.Analyzer</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="bin/**/*.cs;obj/**/*.cs" />
+    <EmbeddedResource Remove="bin/**;obj/**" />
+    <None Remove="bin/**;obj/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+  </ItemGroup>
+</Project>

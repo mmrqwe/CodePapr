@@ -1,0 +1,330 @@
+/**
+ * OpenAIProvider: OpenAI 兼容的 API 适配器
+ *
+ * 用于 OpenAI 官方 API 及其他兼容服务（Azure OpenAI、本地模型等）
+ */
+
+import {
+  IChatRequest,
+  IChatResponse,
+  IChatStreamEvent,
+  IToolCall,
+} from '@codepapr/types';
+import { Logger, sortedStringify } from '@codepapr/common';
+import { BaseLLMProvider, ProviderConfig } from './ILLMProvider';
+import {
+  applyStreamingToolCallDeltas,
+  finalizeStreamingToolCalls,
+  readSseStream,
+  safeParseToolArguments,
+  sanitizeToolCallArguments,
+} from './streaming';
+import { buildOpenAIImageContent } from './imageContent';
+
+const log = new Logger('OpenAIProvider');
+
+interface OpenAIResponse {
+  id: string;
+  choices: Array<{
+    message: {
+      role: 'assistant';
+      content: string | Array<{ type?: string; text?: string }>;
+      reasoning_content?: string;
+      tool_calls?: Array<{
+        id: string;
+        type: 'function';
+        function: { name: string; arguments: string };
+      }>;
+    };
+    finish_reason: string;
+  }>;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    prompt_tokens_details?: {
+      cached_tokens?: number;
+    };
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+  system_fingerprint?: string;
+}
+
+interface OpenAIStreamChunk {
+  id?: string;
+  choices?: Array<{
+    index: number;
+    delta?: {
+      content?: string;
+      reasoning_content?: string;
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: 'function';
+        function?: {
+          name?: string;
+          arguments?: string;
+        };
+      }>;
+    };
+    finish_reason?: string | null;
+  }>;
+  usage?: OpenAIResponse['usage'];
+  system_fingerprint?: string;
+}
+
+function getOpenAICachedTokens(usage: OpenAIResponse['usage'] | undefined): number {
+  return usage?.cache_read_input_tokens ?? usage?.prompt_tokens_details?.cached_tokens ?? 0;
+}
+
+function getOpenAICreationTokens(usage: OpenAIResponse['usage'] | undefined): number {
+  return usage?.cache_creation_input_tokens ?? 0;
+}
+
+function getOpenAIInputTokens(usage: OpenAIResponse['usage'] | undefined): number {
+  if (typeof usage?.input_tokens === 'number') {
+    return usage.input_tokens;
+  }
+
+  const totalPromptTokens = usage?.prompt_tokens ?? 0;
+  return Math.max(0, totalPromptTokens - getOpenAICachedTokens(usage));
+}
+
+function getOpenAIOutputTokens(usage: OpenAIResponse['usage'] | undefined): number {
+  return usage?.output_tokens ?? usage?.completion_tokens ?? 0;
+}
+
+function normalizeOpenAIContent(
+  content: OpenAIResponse['choices'][number]['message']['content']
+): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  return content
+    .map((part) => (part.type === 'text' || !part.type ? part.text ?? '' : ''))
+    .join('');
+}
+
+export class OpenAIProvider extends BaseLLMProvider {
+  name = 'openai';
+  models = ['gpt-4o', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'];
+
+  constructor(config: ProviderConfig) {
+    super({
+      baseURL: 'https://api.openai.com/v1',
+      ...config,
+    });
+  }
+
+  async streamChat(
+    request: IChatRequest,
+    onEvent: (event: IChatStreamEvent) => void,
+    signal?: AbortSignal
+  ): Promise<IChatResponse> {
+    const url = `${this.config.baseURL}/chat/completions`;
+    const payload = this.buildPayload(request, true);
+
+    log.info('LLM request started', {
+      model: payload.model,
+      stream: true,
+      messageCount: payload.messages.length,
+    });
+
+    const response = await this.fetchWithRetry(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.config.apiKey}`,
+      },
+      body: sortedStringify(payload),
+    }, signal);
+
+    let responseId = '';
+    let content = '';
+    let reasoningContent = '';
+    let finishReason = 'stop';
+    let usage: OpenAIResponse['usage'];
+    let systemFingerprint: string | undefined;
+    const toolCallStates: Array<{ id: string; name: string; argumentsText: string }> = [];
+
+    await readSseStream(response, (payloadLine) => {
+      if (payloadLine === '[DONE]') {
+        return;
+      }
+
+      const chunk = JSON.parse(payloadLine) as OpenAIStreamChunk;
+      responseId = chunk.id ?? responseId;
+      usage = chunk.usage ?? usage;
+      systemFingerprint = chunk.system_fingerprint ?? systemFingerprint;
+
+      for (const choice of chunk.choices ?? []) {
+        const delta = choice.delta;
+        if (!delta) {
+          finishReason = choice.finish_reason ?? finishReason;
+          continue;
+        }
+
+        if (delta.content) {
+          content += delta.content;
+          onEvent({ type: 'content-delta', delta: delta.content });
+        }
+
+        if (delta.reasoning_content) {
+          reasoningContent += delta.reasoning_content;
+          onEvent({ type: 'reasoning-delta', delta: delta.reasoning_content });
+        }
+
+        if (delta.tool_calls?.length) {
+          applyStreamingToolCallDeltas(toolCallStates, delta.tool_calls);
+        }
+
+        finishReason = choice.finish_reason ?? finishReason;
+      }
+    });
+
+    const result: IChatResponse = {
+      id: responseId,
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content,
+            reasoningContent: reasoningContent || undefined,
+            toolCalls: finalizeStreamingToolCalls(toolCallStates),
+          },
+          finishReason,
+        },
+      ],
+      usage: {
+        cache_read_input_tokens: getOpenAICachedTokens(usage),
+        cache_creation_input_tokens: getOpenAICreationTokens(usage),
+        input_tokens: getOpenAIInputTokens(usage),
+        output_tokens: getOpenAIOutputTokens(usage),
+      },
+      system_fingerprint: systemFingerprint,
+    };
+
+    log.info('LLM request completed', {
+      model: payload.model,
+      stream: true,
+      finishReason,
+      inputTokens: result.usage?.input_tokens ?? 0,
+      outputTokens: result.usage?.output_tokens ?? 0,
+    });
+
+    return result;
+  }
+
+  async chat(request: IChatRequest, signal?: AbortSignal): Promise<IChatResponse> {
+    const url = `${this.config.baseURL}/chat/completions`;
+    const payload = this.buildPayload(request);
+
+    log.info('LLM request started', {
+      messageCount: payload.messages.length,
+      model: payload.model,
+      stream: false,
+    });
+
+    const response = await this.fetchWithRetry(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.config.apiKey}`,
+      },
+      body: sortedStringify(payload),
+    }, signal);
+
+    const data = (await response.json()) as OpenAIResponse;
+    log.info('LLM request completed', {
+      model: payload.model,
+      stream: false,
+      finishReason: data.choices[0]?.finish_reason,
+      inputTokens: data.usage?.prompt_tokens ?? 0,
+      outputTokens: data.usage?.completion_tokens ?? 0,
+    });
+    return this.transformResponse(data);
+  }
+
+  private buildPayload(request: IChatRequest, stream: boolean = false) {
+    return {
+      model: request.model,
+      messages: request.messages.map((m) => ({
+        role: m.role,
+        content: buildOpenAIImageContent(m.content, m.images) ?? m.content,
+        ...(m.toolCalls && {
+          tool_calls: m.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: {
+              name: tc.name,
+              arguments: sortedStringify(sanitizeToolCallArguments(tc.arguments)),
+            },
+          })),
+        }),
+        ...(m.toolResult && {
+          tool_call_id: m.toolResult.toolCallId,
+        }),
+      })),
+      temperature: request.temperature ?? 0.7,
+      top_p: request.topP ?? 0.9,
+      max_tokens: request.maxTokens ?? 16_384,
+      ...(request.thinking && {
+        thinking: {
+          type: request.thinking.type,
+        },
+      }),
+      ...(request.thinking?.reasoningEffort && {
+        reasoning_effort: request.thinking.reasoningEffort,
+      }),
+      ...(request.tools &&
+        request.tools.length > 0 && {
+          tools: request.tools.map((t) => ({
+            type: 'function' as const,
+            function: {
+              name: t.name,
+              description: t.description,
+              parameters: t.parameters,
+            },
+          })),
+        }),
+      ...(stream && {
+        stream: true,
+        stream_options: {
+          include_usage: true,
+        },
+      }),
+    };
+  }
+
+  private transformResponse(data: OpenAIResponse): IChatResponse {
+    return {
+      id: data.id,
+      choices: data.choices.map((c) => ({
+        message: {
+          role: 'assistant' as const,
+          content: normalizeOpenAIContent(c.message.content),
+          reasoningContent: c.message.reasoning_content,
+          toolCalls: c.message.tool_calls?.map(
+            (tc): IToolCall => ({
+              id: tc.id,
+              name: tc.function.name,
+              arguments: safeParseToolArguments(tc.function.arguments),
+            })
+          ),
+        },
+        finishReason: c.finish_reason,
+      })),
+      usage: {
+        cache_read_input_tokens: getOpenAICachedTokens(data.usage),
+        cache_creation_input_tokens: getOpenAICreationTokens(data.usage),
+        input_tokens: getOpenAIInputTokens(data.usage),
+        output_tokens: getOpenAIOutputTokens(data.usage),
+      },
+      system_fingerprint: data.system_fingerprint,
+    };
+  }
+}

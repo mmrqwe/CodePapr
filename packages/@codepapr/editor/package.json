@@ -1,0 +1,22 @@
+{
+  "name": "@codepapr/editor",
+  "version": "0.1.0",
+  "description": "CodePapr - editor module",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "node ../../../scripts/run-tsc-build.mjs",
+    "dev": "node ../../../scripts/run-module-bin.mjs typescript/bin/tsc --watch",
+    "test": "node ../../../scripts/run-module-bin.mjs vitest/vitest.mjs"
+  },
+  "dependencies": {
+    "@codepapr/types": "*",
+    "@codepapr/common": "*",
+    "@codepapr/core": "*"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.6"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@codepapr/common",
+  "version": "0.1.0",
+  "description": "Shared utilities for CodePapr",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "node ../../../scripts/run-tsc-build.mjs",
+    "test": "node ../../../scripts/run-module-bin.mjs vitest/vitest.mjs",
+    "dev": "node ../../../scripts/run-module-bin.mjs typescript/bin/tsc --watch"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.2.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.6"
+  },
+  "license": "MIT"
+}

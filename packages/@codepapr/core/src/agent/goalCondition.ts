@@ -1,0 +1,329 @@
+/**
+ * goalCondition: /goal 指令的验证条件解析与评估（纯逻辑）。
+ *
+ * 条件语法：
+ *   exec:<command>                         — 退出码必须为 0
+ *   exec:<command> match:<pattern>         — 退出码 0 且 stdout 匹配正则
+ *   exec:<cmd1> && exec:<cmd2>             — 所有子句都必须通过
+ *
+ * 可选的自然语言目标用 | 分隔：
+ *   修复 auth 测试 | exec:npm test
+ *   fix auth tests | exec:npm test match:"\\d+ passed"
+ *
+ * 如果没有 |，整个输入被当作验证条件处理。
+ */
+
+import type {
+  GoalCondition,
+  GoalConditionClause,
+  ConditionResult,
+  ConditionClauseResult,
+} from '@codepapr/types';
+
+/** 条件执行器接口：由 UI/CLI 层注入具体命令执行实现 */
+export interface ConditionExecutor {
+  runCommand(
+    workspacePath: string,
+    command: string,
+    args: string[]
+  ): Promise<{
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    timedOut: boolean;
+  }>;
+}
+
+export class GoalConditionParseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GoalConditionParseError';
+  }
+}
+
+/**
+ * 将命令行字符串拆分为 command + args。
+ * 支持引号包裹的参数（单引号和双引号）。
+ */
+function tokenizeCommand(line: string): { command: string; args: string[] } {
+  const tokens: string[] = [];
+  let current = '';
+  let quote: 'single' | 'double' | null = null;
+  let escaped = false;
+
+  for (const ch of line) {
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\' && quote !== 'single') {
+      escaped = true;
+      continue;
+    }
+    if (quote === 'single') {
+      if (ch === "'") {
+        quote = null;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+    if (quote === 'double') {
+      if (ch === '"') {
+        quote = null;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+    if (ch === "'") {
+      quote = 'single';
+      continue;
+    }
+    if (ch === '"') {
+      quote = 'double';
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (current) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+    current += ch;
+  }
+
+  if (current) {
+    tokens.push(current);
+  }
+
+  if (quote) {
+    throw new GoalConditionParseError(`引号未闭合: ${line}`);
+  }
+
+  const [command, ...args] = tokens;
+  if (!command) {
+    throw new GoalConditionParseError(`命令不能为空: ${line}`);
+  }
+  return { command, args };
+}
+
+/**
+ * 解析单个子句字符串，如 `exec:npm test match:"\\d+ passed"`
+ */
+function parseClause(clauseStr: string): GoalConditionClause {
+  const trimmed = clauseStr.trim();
+  if (!trimmed) {
+    throw new GoalConditionParseError('条件子句不能为空');
+  }
+
+  // 提取 exec: 前缀
+  const execMatch = trimmed.match(/^exec:\s*(.*)$/s);
+  if (!execMatch) {
+    throw new GoalConditionParseError(
+      `条件必须以 exec: 开头（当前仅支持命令退出码/输出验证）。无效条件: ${trimmed}`
+    );
+  }
+
+  const rest = execMatch[1].trim();
+  if (!rest) {
+    throw new GoalConditionParseError('exec: 后必须跟命令');
+  }
+
+  // 提取可选的 match:"pattern" 后缀
+  let matchPattern: string | undefined;
+  let commandPart = rest;
+
+  const matchMatch = rest.match(/\s+match:\s*"((?:[^"\\]|\\.)*)"\s*$/);
+  if (matchMatch) {
+    matchPattern = matchMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    commandPart = rest.slice(0, matchMatch.index).trim();
+  } else {
+    const matchSingle = rest.match(/\s+match:\s*'((?:[^'\\]|\\.)*)'\s*$/);
+    if (matchSingle) {
+      matchPattern = matchSingle[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+      commandPart = rest.slice(0, matchSingle.index).trim();
+    }
+  }
+
+  if (!commandPart) {
+    throw new GoalConditionParseError('exec: 后必须跟命令');
+  }
+
+  const { command, args } = tokenizeCommand(commandPart);
+
+  const clause: GoalConditionClause = {
+    type: 'exec',
+    command,
+    args,
+  };
+  if (matchPattern) {
+    clause.matchPattern = matchPattern;
+  }
+  return clause;
+}
+
+/**
+ * 解析 /goal 后的完整输入，生成结构化的验证条件。
+ *
+ * 两种模式：
+ * 1. 客观验证模式：输入包含 exec: 条件（可选自然语言目标 | 分隔）
+ *    示例: exec:npm test | 修复测试 | exec:npm test match:"\d+ passed"
+ * 2. 主观验证模式：输入是纯自然语言目标，无 exec: 条件
+ *    示例: 给我补充足够的真实图片，让这个网站真正丰富起来
+ *    此时 clauses 为空数组，由 Verifier 主观判定
+ *
+ * @param input /goal 之后的所有参数（空格连接后的原始字符串）
+ * @returns 解析后的 GoalCondition
+ * @throws GoalConditionParseError 当输入为空时
+ */
+export function parseGoalCondition(input: string): GoalCondition {
+  const rawText = input.trim();
+  if (!rawText) {
+    throw new GoalConditionParseError(
+      '/goal 需要指定目标。示例:\n  /goal exec:npm test（客观验证）\n  /goal 修复登录页的样式问题（主观验证）'
+    );
+  }
+
+  // 分离自然语言目标和验证条件
+  let goalText = '';
+  let conditionText = rawText;
+
+  const pipeIndex = rawText.indexOf('|');
+  if (pipeIndex > 0) {
+    goalText = rawText.slice(0, pipeIndex).trim();
+    conditionText = rawText.slice(pipeIndex + 1).trim();
+  }
+
+  if (!conditionText) {
+    throw new GoalConditionParseError('| 后必须跟验证条件');
+  }
+
+  // 检查是否包含 exec: 前缀
+  const hasExecCondition = conditionText.includes('exec:');
+
+  if (!hasExecCondition) {
+    // 主观验证模式：整个输入是自然语言目标
+    // 如果有 | 但后面不是 exec:，把 goalText + conditionText 合并作为目标
+    const fullGoalText = goalText
+      ? `${goalText} | ${conditionText}`
+      : conditionText;
+    return {
+      clauses: [],
+      rawText,
+      humanReadable: fullGoalText,
+    };
+  }
+
+  // 客观验证模式：按 && 拆分多个子句
+  const clauseStrings = conditionText.split(/\s*&&\s*/);
+  const clauses: GoalConditionClause[] = clauseStrings.map(parseClause);
+
+  const humanReadable = buildHumanReadable(clauses);
+
+  return {
+    clauses,
+    rawText,
+    humanReadable: goalText
+      ? `${goalText}（验收: ${humanReadable}）`
+      : humanReadable,
+  };
+}
+
+function buildHumanReadable(clauses: GoalConditionClause[]): string {
+  const parts = clauses.map((clause) => {
+    const cmd = [clause.command, ...clause.args].join(' ');
+    if (clause.matchPattern) {
+      return `命令 "${cmd}" 退出码为 0 且输出匹配 /${clause.matchPattern}/`;
+    }
+    return `命令 "${cmd}" 退出码为 0`;
+  });
+  return parts.join(' 且 ');
+}
+
+/**
+ * 评估验证条件：执行所有子句的命令，检查退出码和输出匹配。
+ */
+export async function evaluateGoalCondition(
+  condition: GoalCondition,
+  workspacePath: string,
+  executor: ConditionExecutor
+): Promise<ConditionResult> {
+  // 主观验证模式：无 exec: 条件，跳过命令执行
+  if (condition.clauses.length === 0) {
+    return {
+      met: false,
+      evidence: '主观验证模式：无客观验证条件，由 Verifier 主观判定目标是否达成。',
+      details: [],
+    };
+  }
+
+  const details: ConditionClauseResult[] = [];
+
+  for (let i = 0; i < condition.clauses.length; i++) {
+    const clause = condition.clauses[i];
+    const result = await executor.runCommand(
+      workspacePath,
+      clause.command,
+      clause.args
+    );
+
+    let met = result.exitCode === 0 && !result.timedOut;
+
+    if (met && clause.matchPattern) {
+      try {
+        const regex = new RegExp(clause.matchPattern);
+        met = regex.test(result.stdout);
+      } catch {
+        met = false;
+      }
+    }
+
+    if (clause.negate) {
+      met = !met;
+    }
+
+    const evidenceLines: string[] = [
+      `命令: ${clause.command} ${clause.args.join(' ')}`,
+      `退出码: ${result.exitCode ?? 'null'}${result.timedOut ? ' (超时)' : ''}`,
+    ];
+    if (clause.matchPattern) {
+      evidenceLines.push(`匹配模式: /${clause.matchPattern}/`);
+      evidenceLines.push(
+        met ? '输出匹配 ✓' : '输出不匹配 ✗'
+      );
+    }
+    const stdoutTrimmed = result.stdout.trim();
+    if (stdoutTrimmed) {
+      const tail = stdoutTrimmed.slice(-2000);
+      evidenceLines.push(`stdout (末尾 2000 字符):\n${tail}`);
+    }
+    const stderrTrimmed = result.stderr.trim();
+    if (stderrTrimmed) {
+      const tail = stderrTrimmed.slice(-1000);
+      evidenceLines.push(`stderr (末尾 1000 字符):\n${tail}`);
+    }
+
+    details.push({
+      clauseIndex: i,
+      met,
+      exitCode: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      evidence: evidenceLines.join('\n'),
+    });
+  }
+
+  const allMet = details.every((d) => d.met);
+  const evidence = details
+    .map((d, i) => `--- 子句 ${i + 1} ${d.met ? '✓ 通过' : '✗ 未通过'} ---\n${d.evidence}`)
+    .join('\n\n');
+
+  return {
+    met: allMet,
+    evidence,
+    details,
+  };
+}

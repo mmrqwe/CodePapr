@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default permissions for the CodePapr desktop window","local":true,"windows":["main"],"permissions":["core:default","dialog:default","stronghold:default",{"identifier":"http:default","allow":[{"url":"https://**"},{"url":"http://**"},{"url":"http://localhost:**"}]}]}}

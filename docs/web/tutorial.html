@@ -1,0 +1,2057 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CodePapr 教程 — 本地编程 Agent 工作台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 1024 1024' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3ClinearGradient id='a' x1='320' y1='280' x2='720' y2='780'%3E%3Cstop stop-color='%23D9673E'/%3E%3Cstop offset='1' stop-color='%23B84E2A'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z' fill='%23FFF8EF'/%3E%3Cpath d='M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z' fill='%23F0D5B2'/%3E%3Cpath d='M392 350h244' stroke='url(%23a)' stroke-width='40' stroke-linecap='round'/%3E%3Cpath d='M392 450h156' stroke='url(%23a)' stroke-width='40' stroke-linecap='round' opacity='.86'/%3E%3Cpath d='m432 592-80 80 80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='m592 592 80 80-80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M540 560 484 784' stroke='url(%23a)' stroke-width='42' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:0.01ms!important;transition-duration:0.01ms!important}}
+
+:root{
+  --bg-deep:#06070a;--bg-base:#0a0c12;--bg-elevated:#0f121a;--bg-card:rgba(15,18,26,0.85);
+  --surface:rgba(255,255,255,0.035);--surface-hover:rgba(255,255,255,0.06);
+  --border:rgba(255,255,255,0.07);--border-hover:rgba(99,102,241,0.25);
+  --foreground:#edeff5;--foreground-muted:#8b90a0;--foreground-dim:#5c6170;
+  --accent:#6366f1;--accent-glow:rgba(99,102,241,0.18);--accent-soft:rgba(99,102,241,0.09);
+  --green:#22c55e;--green-glow:rgba(34,197,94,0.15);--amber:#f59e0b;--red:#ef4444;
+  --radius:12px;--radius-sm:8px;--radius-xs:6px;
+  --font-mono:'JetBrains Mono','Cascadia Code','SF Mono',monospace;
+  --font-sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  --easing:cubic-bezier(0.16,1,0.3,1);
+  --sidebar-w:280px;
+  --texture-opacity:0;
+}
+[data-theme="light"] {
+  --bg-deep:#f7f4ef;--bg-base:#fffdf9;--bg-elevated:#f5f0e9;--bg-card:rgba(245,241,236,0.85);
+  --surface:rgba(54,32,17,0.05);--surface-hover:rgba(54,32,17,0.08);
+  --border:rgba(27,18,10,0.08);--border-hover:rgba(217,103,62,0.35);
+  --foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;
+  --accent:#d9673e;--accent-glow:rgba(217,103,62,0.15);--accent-soft:rgba(217,103,62,0.1);
+  --green:#15803d;--green-glow:rgba(21,128,61,0.1);--amber:#a56a1d;--red:#c53b19;
+  --texture-opacity:1;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg-deep:#f7f4ef;--bg-base:#fffdf9;--bg-elevated:#f5f0e9;--bg-card:rgba(245,241,236,0.85);
+    --surface:rgba(54,32,17,0.05);--surface-hover:rgba(54,32,17,0.08);
+    --border:rgba(27,18,10,0.08);--border-hover:rgba(217,103,62,0.35);
+    --foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;
+    --accent:#d9673e;--accent-glow:rgba(217,103,62,0.15);--accent-soft:rgba(217,103,62,0.1);
+    --green:#15803d;--green-glow:rgba(21,128,61,0.1);--amber:#a56a1d;--red:#c53b19;
+    --texture-opacity:1;
+  }
+}
+
+body{font-family:var(--font-sans);background:var(--bg-deep);color:var(--foreground);line-height:1.7;overflow-x:hidden;-webkit-font-smoothing:antialiased;transition:background-color 0.4s,color 0.4s}
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opacity:calc(var(--texture-opacity) * 0.035);background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:256px 256px}
+
+/* Ambient */
+.ambient{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
+.ambient::before{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(99,102,241,0.05) 0%,transparent 60%),
+             radial-gradient(ellipse 60% 50% at 70% 85%,rgba(34,197,94,0.03) 0%,transparent 60%),
+             radial-gradient(ellipse 70% 80% at 50% 50%,rgba(99,102,241,0.025) 0%,transparent 70%);
+}
+[data-theme="light"] .ambient::before{
+  background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.05) 0%,transparent 60%),
+             radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.03) 0%,transparent 60%),
+             radial-gradient(ellipse 70% 80% at 50% 50%,rgba(217,103,62,0.03) 0%,transparent 70%);
+}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .ambient::before{background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.05) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.03) 0%,transparent 60%),radial-gradient(ellipse 70% 80% at 50% 50%,rgba(217,103,62,0.03) 0%,transparent 70%)}}
+.ambient .blob{position:absolute;border-radius:50%;filter:blur(120px);opacity:0.06;transition:opacity 0.4s}
+[data-theme="light"] .ambient .blob{opacity:0.04}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .ambient .blob{opacity:0.04}}
+.blob-1{width:600px;height:600px;background:var(--accent);top:-10%;left:-5%;animation:drift 30s ease-in-out infinite}
+.blob-2{width:450px;height:450px;background:var(--green);bottom:-8%;right:-5%;animation:drift 34s ease-in-out infinite reverse}
+@keyframes drift{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(40px,-25px) scale(1.06)}66%{transform:translate(-18px,30px) scale(0.95)}}
+
+.grid-overlay{position:fixed;inset:0;pointer-events:none;z-index:0;opacity:0.25;transition:opacity 0.4s;
+  background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);
+  background-size:64px 64px;mask-image:radial-gradient(ellipse 60% 60% at 50% 50%,black 25%,transparent 70%)}
+[data-theme="light"] .grid-overlay{opacity:0.5}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .grid-overlay{opacity:0.5}}
+
+/* Layout */
+.layout{display:flex;min-height:100vh;position:relative;z-index:1}
+.sidebar{width:var(--sidebar-w);position:fixed;top:0;left:0;height:100vh;background:rgba(6,7,10,0.88);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border-right:1px solid var(--border);overflow-y:auto;z-index:50;padding:24px 0;display:flex;flex-direction:column;transition:background-color 0.4s}
+[data-theme="light"] .sidebar{background:rgba(245,241,236,0.92)}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .sidebar{background:rgba(245,241,236,0.92)}}
+.sidebar::-webkit-scrollbar{width:4px}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+.sidebar-header{padding:0 24px 20px;border-bottom:1px solid var(--border);margin-bottom:8px}
+.sidebar-logo{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:700;font-size:1.1rem;color:var(--foreground);letter-spacing:-0.01em}
+.sidebar-logo .l-icon{width:32px;height:32px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sidebar-logo .l-icon svg{width:100%;height:100%}
+.sidebar-version{font-size:0.72rem;color:var(--foreground-dim);margin-top:6px;padding-left:42px}
+
+.sidebar-nav{flex:1;overflow-y:auto;padding:8px 0}
+.sidebar-nav::-webkit-scrollbar{width:3px}
+.sidebar-nav::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+.nav-section{padding:0 12px;margin-bottom:4px}
+.nav-section-title{font-size:0.68rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--foreground-dim);font-weight:600;padding:12px 12px 6px;font-family:var(--font-mono)}
+.nav-item{display:block;padding:7px 12px;margin:1px 0;border-radius:var(--radius-xs);color:var(--foreground-muted);text-decoration:none;font-size:0.84rem;font-weight:400;transition:all 0.15s;cursor:pointer;border:none;background:none;width:100%;text-align:left;font-family:var(--font-sans)}
+.nav-item:hover{color:var(--foreground);background:var(--surface-hover)}
+.nav-item.active{color:var(--accent);background:var(--accent-soft);font-weight:500}
+.nav-item .dot{display:inline-block;width:4px;height:4px;border-radius:50%;background:var(--accent);margin-right:8px;opacity:0;transition:opacity 0.2s;vertical-align:middle}
+.nav-item.active .dot{opacity:1}
+
+.sidebar-footer{padding:16px 24px;border-top:1px solid var(--border);margin-top:auto;display:flex;align-items:center;gap:12px}
+.sidebar-footer a{color:var(--foreground-dim);text-decoration:none;font-size:0.78rem;transition:color 0.15s}
+.sidebar-footer a:hover{color:var(--foreground-muted)}
+.theme-toggle{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;transition:all 0.2s;flex-shrink:0}
+.theme-toggle:hover{border-color:var(--border-hover);color:var(--foreground)}
+.theme-toggle svg{width:15px;height:15px}
+.theme-toggle .icon-sun{display:none}
+.theme-toggle .icon-moon{display:block}
+[data-theme="light"] .theme-toggle .icon-sun{display:block}
+[data-theme="light"] .theme-toggle .icon-moon{display:none}
+@media (prefers-color-scheme: light) {:root:not([data-theme="dark"]) .theme-toggle .icon-sun{display:block}:root:not([data-theme="dark"]) .theme-toggle .icon-moon{display:none}}
+
+/* Content */
+.main{margin-left:var(--sidebar-w);flex:1;min-width:0;padding:32px 48px 80px;max-width:1000px}
+@media(max-width:1100px){.main{padding:24px 28px 60px}}
+@media(max-width:860px){
+  .sidebar{display:none}
+  .main{margin-left:0;padding:20px 18px 60px}
+  .mobile-header{display:flex!important}
+}
+
+/* Mobile Header */
+.mobile-header{display:none;position:sticky;top:0;z-index:40;background:rgba(6,7,10,0.88);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 18px;align-items:center;gap:10px;transition:background-color 0.4s}
+[data-theme="light"] .mobile-header{background:rgba(245,241,236,0.92)}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .mobile-header{background:rgba(245,241,236,0.92)}}
+.mobile-header .l-icon{width:28px;height:28px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.mobile-header .l-icon svg{width:100%;height:100%}
+.mobile-header .logo-text{font-weight:700;font-size:0.95rem;color:var(--foreground)}
+.mobile-header .menu-toggle{margin-left:auto;background:none;border:1px solid var(--border);color:var(--foreground-muted);padding:6px 12px;border-radius:var(--radius-xs);font-size:0.8rem;cursor:pointer;font-family:var(--font-sans)}
+.mobile-nav{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg-deep);z-index:45;padding:70px 20px 20px;overflow-y:auto}
+.mobile-nav.open{display:block}
+.mobile-nav .nav-item{font-size:0.9rem;padding:10px 12px}
+.mobile-nav .nav-section-title{font-size:0.72rem}
+
+/* Typography */
+.section{margin-bottom:64px;scroll-margin-top:32px}
+.section-header{margin-bottom:28px}
+.section-header h1{font-size:2rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:8px;line-height:1.2}
+.section-header h2{font-size:1.5rem;font-weight:700;letter-spacing:-0.015em;margin-bottom:8px;line-height:1.25}
+.section-header p{color:var(--foreground-muted);font-size:0.95rem;line-height:1.7}
+
+.content h3{font-size:1.1rem;font-weight:600;margin:32px 0 12px;letter-spacing:-0.01em;color:var(--foreground)}
+.content h3:first-child{margin-top:0}
+.content h4{font-size:0.95rem;font-weight:600;margin:24px 0 10px;color:var(--foreground)}
+.content p{margin:0 0 14px;color:var(--foreground-muted);font-size:0.9rem;line-height:1.75}
+.content ul,.content ol{margin:0 0 16px;padding-left:22px;color:var(--foreground-muted);font-size:0.9rem;line-height:1.75}
+.content li{margin-bottom:6px}
+.content strong{color:var(--foreground);font-weight:600}
+.content a{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--border-hover);transition:border-color 0.15s}
+.content a:hover{border-color:var(--accent)}
+
+/* Code */
+.content code{font-family:var(--font-mono);font-size:0.82em;background:var(--surface);padding:2px 6px;border-radius:4px;color:#c4b5fd}
+[data-theme="light"] .content code{color:#bf4f28;background:rgba(217,103,62,0.08)}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .content code{color:#bf4f28;background:rgba(217,103,62,0.08)}}
+.content pre{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:20px 24px;overflow-x:auto;margin:16px 0 22px;font-size:0.82rem;line-height:1.75}
+.content pre code{background:none;padding:0;color:var(--foreground-muted);font-size:inherit}
+.content pre .hl-keyword{color:#818cf8}
+[data-theme="light"] .content pre .hl-keyword{color:#bf4f28}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .content pre .hl-keyword{color:#bf4f28}}
+.content pre .hl-string{color:#4ade80}
+[data-theme="light"] .content pre .hl-string{color:#166534}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .content pre .hl-string{color:#166534}}
+.content pre .hl-comment{color:var(--foreground-dim)}
+.content pre .hl-func{color:#c084fc}
+[data-theme="light"] .content pre .hl-func{color:#7c3aed}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .content pre .hl-func{color:#7c3aed}}
+
+/* Tables */
+.content table{width:100%;border-collapse:collapse;margin:16px 0 22px;font-size:0.85rem}
+.content thead th{text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);color:var(--foreground);font-weight:600;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap}
+.content tbody td{padding:9px 14px;border-bottom:1px solid rgba(255,255,255,0.04);color:var(--foreground-muted);vertical-align:top;line-height:1.6}
+.content tbody tr:hover td{background:var(--surface)}
+.content tbody td:first-child{color:var(--foreground);font-family:var(--font-mono);font-size:0.82em}
+
+/* Cards */
+.card{border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);padding:24px;margin:16px 0 22px}
+.card h4{margin-top:0}
+.card-row{display:flex;gap:20px;flex-wrap:wrap}
+.card-col{flex:1;min-width:240px}
+
+/* Badge */
+.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:100px;font-size:0.72rem;font-weight:600;font-family:var(--font-mono)}
+.badge-ask{background:rgba(99,102,241,0.12);color:#a5b4fc}
+.badge-plan{background:rgba(245,158,11,0.12);color:#fbbf24}
+.badge-agent{background:rgba(34,197,94,0.12);color:#4ade80}
+.badge-note{background:rgba(139,92,246,0.1);color:#c4b5fd}
+[data-theme="light"] .badge-ask{color:#bf4f28;background:rgba(217,103,62,0.1)}
+[data-theme="light"] .badge-plan{color:#a56a1d}
+[data-theme="light"] .badge-agent{color:#15803d}
+[data-theme="light"] .badge-note{color:#bf4f28;background:rgba(217,103,62,0.08)}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .badge-ask{color:#bf4f28;background:rgba(217,103,62,0.1)}:root:not([data-theme="dark"]) .badge-plan{color:#a56a1d}:root:not([data-theme="dark"]) .badge-agent{color:#15803d}:root:not([data-theme="dark"]) .badge-note{color:#bf4f28;background:rgba(217,103,62,0.08)}}
+
+/* Tip/Info/Warning boxes */
+.callout{border-left:2px solid var(--accent);padding:14px 18px;margin:18px 0;background:var(--accent-soft);border-radius:0 var(--radius-xs) var(--radius-xs) 0;font-size:0.85rem;color:var(--foreground-muted)}
+.callout strong{color:#a5b4fc}
+[data-theme="light"] .callout strong{color:#bf4f28}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .callout strong{color:#bf4f28}}
+.callout.warn{border-color:var(--amber);background:rgba(245,158,11,0.07)}
+.callout.warn strong{color:#fbbf24}
+[data-theme="light"] .callout.warn strong{color:#a56a1d}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .callout.warn strong{color:#a56a1d}}
+.callout.success{border-color:var(--green);background:var(--green-glow)}
+.callout.success strong{color:#4ade80}
+[data-theme="light"] .callout.success strong{color:#15803d}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .callout.success strong{color:#15803d}}
+
+/* Mermaid-style diagram container */
+.diagram{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:20px 24px;margin:16px 0 22px;font-family:var(--font-mono);font-size:0.78rem;line-height:2;overflow-x:auto;white-space:pre;color:#818cf8}
+[data-theme="light"] .diagram{color:#bf4f28}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .diagram{color:#bf4f28}}
+
+/* Hero section on main page */
+.tutorial-hero{padding:16px 0 40px;border-bottom:1px solid var(--border);margin-bottom:40px}
+.tutorial-hero .badge-group{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+.tutorial-hero h1{font-size:2.6rem;font-weight:800;letter-spacing:-0.03em;line-height:1.15;margin-bottom:16px}
+.tutorial-hero h1 .gradient{background:linear-gradient(135deg,#f0f2f8 0%,#c7ccf0 30%,var(--accent) 55%,#a78bfa 80%,var(--foreground) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+[data-theme="light"] .tutorial-hero h1 .gradient{background:linear-gradient(135deg,#1e1b18 0%,var(--accent) 40%,#bf4f28 70%,#1e1b18 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .tutorial-hero h1 .gradient{background:linear-gradient(135deg,#1e1b18 0%,var(--accent) 40%,#bf4f28 70%,#1e1b18 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}}
+.tutorial-hero p{font-size:1.05rem;color:var(--foreground-muted);max-width:700px;line-height:1.75}
+
+/* Divider */
+hr{border:none;border-top:1px solid var(--border);margin:40px 0}
+
+/* Scroll progress */
+.scroll-progress{position:fixed;top:0;left:0;height:2px;background:linear-gradient(90deg,var(--accent),#8b5cf6);z-index:100;transition:width 0.1s linear}
+[data-theme="light"] .scroll-progress{background:linear-gradient(90deg,var(--accent),#bf4f28)}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .scroll-progress{background:linear-gradient(90deg,var(--accent),#bf4f28)}}
+
+/* Tooltip/tag stacks */
+.tag-stack{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.tag{padding:3px 10px;border-radius:100px;font-size:0.73rem;font-family:var(--font-mono);border:1px solid var(--border);color:var(--foreground-dim);background:var(--surface)}
+
+/* Animations */
+@keyframes fadeInUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+.fade-in{animation:fadeInUp 0.5s var(--easing) both}
+
+/* Sidebar toggle on mobile */
+.sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:44}
+.sidebar-backdrop.show{display:block}
+@media(max-width:860px){
+  .sidebar{transform:translateX(-100%);transition:transform 0.25s var(--easing);width:var(--sidebar-w)}
+  .sidebar.open{transform:translateX(0)}
+  .sidebar-backdrop.show{display:block}
+}
+
+/* Comparison table highlight */
+.highlight-cell{color:var(--green)!important;font-weight:500}
+
+  .modal-overlay{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity 0.3s var(--easing)}
+  .modal-overlay.open{opacity:1;pointer-events:auto}
+  .modal-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:48px 40px;text-align:center;max-width:420px;width:90%;transform:translateY(20px) scale(0.96);transition:transform 0.35s var(--easing);box-shadow:0 24px 80px rgba(0,0,0,0.6)}
+  [data-theme="light"] .modal-card{box-shadow:0 16px 60px rgba(0,0,0,0.1)}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .modal-card{box-shadow:0 16px 60px rgba(0,0,0,0.1)}}
+  .modal-overlay.open .modal-card{transform:translateY(0) scale(1)}
+  .modal-icon{display:inline-flex;width:56px;height:56px;border-radius:50%;align-items:center;justify-content:center;margin-bottom:20px;font-size:1.5rem;background:linear-gradient(135deg,var(--accent-glow),rgba(99,102,241,0.05))}
+  .modal-card h2{font-size:1.3rem;font-weight:700;color:var(--foreground);margin-bottom:10px;letter-spacing:-0.01em}
+  .modal-card p{font-size:0.9rem;color:var(--foreground-muted);line-height:1.65;margin-bottom:24px}
+  .modal-close{display:inline-block;padding:10px 28px;border-radius:var(--radius-xs);background:var(--accent);color:#fff;font-size:0.88rem;font-weight:600;cursor:pointer;border:none;transition:all 0.2s;font-family:var(--font-sans)}
+  .modal-close:hover{box-shadow:0 4px 20px var(--accent-glow);transform:translateY(-1px)}
+
+</style>
+<script>
+(function(){
+  var LANG_KEY = 'codepapr-lang';
+  var stored = localStorage.getItem(LANG_KEY);
+  if (stored) return;
+  var lang = (navigator.language || '').toLowerCase();
+  if (!lang.startsWith('zh')) {
+    localStorage.setItem(LANG_KEY, 'en');
+    location.replace('tutorial.en.html');
+  }
+})();
+</script>
+</head>
+<body>
+
+<div class="ambient"><div class="blob blob-1"></div><div class="blob blob-2"></div></div>
+<div class="grid-overlay"></div>
+<div class="scroll-progress" id="scrollProgress"></div>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <a href="#" class="sidebar-logo" onclick="scrollToSection('intro')">
+        <span class="l-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="sip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="sip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="sip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#sip)"/><rect x="96" y="96" width="832" height="832" rx="208" stroke="#FFF7EF" stroke-opacity=".52" stroke-width="12"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#sip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#sip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#sip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#sip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#sip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#sip3)" stroke-width="42" stroke-linecap="round"/></svg></span> CodePapr 教程
+      </a>
+      <div class="sidebar-version">v0.1.0</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">
+        <div class="nav-section-title">入门</div>
+        <a class="nav-item active" onclick="scrollToSection('intro')"><span class="dot"></span>简介</a>
+        <a class="nav-item" onclick="scrollToSection('install')"><span class="dot"></span>安装与环境配置</a>
+        <a class="nav-item" onclick="scrollToSection('api-setup')"><span class="dot"></span>API 设置与模型配置</a>
+        <a class="nav-item" onclick="scrollToSection('first-use')"><span class="dot"></span>第一次使用</a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-title">核心概念</div>
+        <a class="nav-item" onclick="scrollToSection('modes')"><span class="dot"></span>工作模式：Ask / Plan / Agent</a>
+        <a class="nav-item" onclick="scrollToSection('workbench')"><span class="dot"></span>桌面工作台</a>
+        <a class="nav-item" onclick="scrollToSection('tools')"><span class="dot"></span>工具能力详解</a>
+        <a class="nav-item" onclick="scrollToSection('characters')"><span class="dot"></span>角色扮演</a>
+        <a class="nav-item" onclick="scrollToSection('tts')"><span class="dot"></span>语音合成（TTS）</a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-title">项目配置</div>
+        <a class="nav-item" onclick="scrollToSection('project-config')"><span class="dot"></span>配置文件与规则</a>
+        <a class="nav-item" onclick="scrollToSection('diff')"><span class="dot"></span>代码修改与 Diff</a>
+        <a class="nav-item" onclick="scrollToSection('skills')"><span class="dot"></span>Skills 技能系统</a>
+        <a class="nav-item" onclick="scrollToSection('agents')"><span class="dot"></span>Agent 与子代理</a>
+        <a class="nav-item" onclick="scrollToSection('commands')"><span class="dot"></span>自定义命令</a>
+        <a class="nav-item" onclick="scrollToSection('goal')"><span class="dot"></span>Goal 自主循环</a>
+        <a class="nav-item" onclick="scrollToSection('mcp')"><span class="dot"></span>MCP 工具集成</a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-title">深入</div>
+        <a class="nav-item" onclick="scrollToSection('architecture')"><span class="dot"></span>系统架构</a>
+        <a class="nav-item" onclick="scrollToSection('cache')"><span class="dot"></span>DeepSeek 缓存优化</a>
+        <a class="nav-item" onclick="scrollToSection('lsp')"><span class="dot"></span>语言智能与 LSP</a>
+        <a class="nav-item" onclick="scrollToSection('verify')"><span class="dot"></span>验证与发布</a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-title">实践</div>
+        <a class="nav-item" onclick="scrollToSection('workflows')"><span class="dot"></span>典型工作流</a>
+        <a class="nav-item" onclick="scrollToSection('cost')"><span class="dot"></span>成本与模型选择</a>
+        <a class="nav-item" onclick="scrollToSection('faq')"><span class="dot"></span>常见问题</a>
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <a href="index.html">← 首页</a>
+      <a href="tutorial.en.html" style="font-size:0.78rem;font-weight:500" onclick="localStorage.setItem('codepapr-lang','en')">EN</a>
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="切换主题">
+        <svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <a href="#" onclick="showComingSoon(event)">发布 →</a>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="main" id="main">
+    <!-- Mobile Header -->
+    <div class="mobile-header">
+      <span class="l-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="mip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="mip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="mip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#mip)"/><rect x="96" y="96" width="832" height="832" rx="208" stroke="#FFF7EF" stroke-opacity=".52" stroke-width="12"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#mip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#mip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#mip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#mip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#mip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#mip3)" stroke-width="42" stroke-linecap="round"/></svg></span>
+      <span class="logo-text">CodePapr 教程</span>
+      <button class="menu-toggle" onclick="toggleMobileMenu()">目录</button>
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="切换主题" style="margin-left:8px">
+        <svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+    <div class="mobile-nav" id="mobileNav">
+      <a class="nav-item" onclick="mobileNavTo('intro')">简介</a>
+      <a class="nav-item" onclick="mobileNavTo('install')">安装与环境配置</a>
+      <a class="nav-item" onclick="mobileNavTo('api-setup')">API 设置与模型配置</a>
+      <a class="nav-item" onclick="mobileNavTo('first-use')">第一次使用</a>
+      <a class="nav-item" onclick="mobileNavTo('modes')">工作模式</a>
+      <a class="nav-item" onclick="mobileNavTo('workbench')">桌面工作台</a>
+      <a class="nav-item" onclick="mobileNavTo('tools')">工具能力</a>
+      <a class="nav-item" onclick="mobileNavTo('characters')">角色扮演</a>
+      <a class="nav-item" onclick="mobileNavTo('tts')">语音合成</a>
+      <a class="nav-item" onclick="mobileNavTo('project-config')">配置文件</a>
+      <a class="nav-item" onclick="mobileNavTo('diff')">代码修改与 Diff</a>
+      <a class="nav-item" onclick="mobileNavTo('skills')">Skills 技能系统</a>
+      <a class="nav-item" onclick="mobileNavTo('agents')">Agent 与子代理</a>
+      <a class="nav-item" onclick="mobileNavTo('commands')">自定义命令</a>
+      <a class="nav-item" onclick="mobileNavTo('goal')">Goal 自主循环</a>
+      <a class="nav-item" onclick="mobileNavTo('mcp')">MCP 工具集成</a>
+      <a class="nav-item" onclick="mobileNavTo('architecture')">系统架构</a>
+      <a class="nav-item" onclick="mobileNavTo('cache')">缓存优化</a>
+      <a class="nav-item" onclick="mobileNavTo('lsp')">LSP</a>
+      <a class="nav-item" onclick="mobileNavTo('verify')">验证与发布</a>
+      <a class="nav-item" onclick="mobileNavTo('workflows')">工作流</a>
+      <a class="nav-item" onclick="mobileNavTo('cost')">成本</a>
+      <a class="nav-item" onclick="mobileNavTo('faq')">常见问题</a>
+    </div>
+
+    <!-- Tutorial Hero -->
+    <div class="tutorial-hero">
+      <div class="badge-group">
+        <span class="badge badge-agent">v0.1.0</span>
+        <span class="badge badge-note">macOS + Windows</span>
+        <span class="badge badge-ask">Tauri Desktop</span>
+        <a href="index.html" style="font-size:0.78rem;color:var(--accent);text-decoration:none;margin-left:4px">← 返回首页</a>
+      <a href="tutorial.en.html" style="font-size:0.78rem;color:var(--accent);text-decoration:none;margin-left:8px" onclick="localStorage.setItem('codepapr-lang','en')">EN</a>
+      </div>
+      <h1><span class="gradient">CodePapr 教程</span></h1>
+      <p>CodePapr 是一个基于 <strong>DeepSeek 缓存友好的本地编码 Agent 系统</strong>。它不只是代码生成器，而是具备理解 + 执行能力的智能体工作台——能读取项目、搜索代码、执行命令、修改文件、预览结果，全部在本地完成。</p>
+    </div>
+
+    <!-- 1. Intro -->
+    <section class="section" id="intro">
+      <div class="section-header"><h2>CodePapr 简介</h2></div>
+      <div class="content">
+        <h3>什么是 CodePapr</h3>
+        <p>CodePapr 是一个<strong>缓存优先的编码代理（Agent）系统</strong>，提供 Tauri 桌面工作台和 CLI 终端入口两种入口。它通过共享 Agent Runtime 为桌面端与终端 CLI 提供能力，使 AI 代理能够在真实项目仓库里完成<strong>读取、修改、执行、验证与预览</strong>。</p>
+
+        <p>CodePapr 不是传统的 AI 聊天工具，也不是 IDE 插件。它是一个<strong>在终端/桌面中运行的自主代理</strong>，能真正理解你的项目上下文并自动执行开发任务。</p>
+
+        <h3>核心设计理念</h3>
+        <ul>
+          <li><strong>本地优先</strong>：项目上下文尽量不离开工作区，文件和命令执行都在本地完成</li>
+          <li><strong>单一 Runtime，多入口复用</strong>：桌面工作台与 CLI 终端入口共用同一套 Agent、Session、ToolRegistry、Provider 语义</li>
+          <li><strong>DeepSeek 缓存优化</strong>：稳定内容前置、易变内容后置，最大化前缀缓存命中率以降低 token 成本</li>
+          <li><strong>结构化代码修改</strong>：使用 Search/Replace Diff 机制，先校验再写入，避免行号错位</li>
+          <li><strong>可验证执行链路</strong>：每一轮请求、响应、工具调用和缓存统计都可追踪</li>
+        </ul>
+
+        <h3>CodePapr 与主流 AI 编程工具对比</h3>
+        <p style="margin-bottom:16px;font-size:0.85rem;color:var(--foreground-dim)">2026 年，AI 编程工具已经很成熟。以下对比基于各工具当前公开能力，如实呈现差异。</p>
+        <table>
+          <thead><tr><th>维度</th><th>Cline (62k⭐)</th><th>Aider (46k⭐)</th><th>Devin Desktop</th><th class="highlight-cell">CodePapr</th></tr></thead>
+          <tbody>
+            <tr><td><strong>形态</strong></td><td>SDK / VS Code / JetBrains / CLI / Kanban</td><td>终端命令</td><td>独立桌面 IDE</td><td class="highlight-cell">独立桌面应用（Tauri 2）</td></tr>
+            <tr><td><strong>多 Agent</strong></td><td>✅ 团队 + 协调者 + 定时调度</td><td>❌ 单 Agent</td><td>✅ 多 Agent 舰队 + ACP 协议</td><td class="highlight-cell">✅ 主 Agent + 3 内置子代理 + 自定义</td></tr>
+            <tr><td><strong>任务规划</strong></td><td>Kanban 看板</td><td>❌</td><td>Spaces + Kanban</td><td class="highlight-cell">TodoList：自动创建 / 进度追踪 / re-plan</td></tr>
+            <tr><td><strong>代码理解</strong></td><td>读取文件 + grep + LSP</td><td>Repo Map</td><td>Fast Context（毫秒级）</td><td class="highlight-cell">ProjectGraph 语义图：14 个分析 action</td></tr>
+            <tr><td><strong>回退机制</strong></td><td>Checkpoints 快照</td><td>Git commit 回退</td><td>Diff review</td><td class="highlight-cell">Git auto-commit checkpoint + <code>reset --hard</code>：代码与消息原子性恢复</td></tr>
+            <tr><td><strong>缓存优化</strong></td><td>❌</td><td>❌</td><td>❌</td><td class="highlight-cell">DeepSeek 三层前缀缓存，跨会话复用</td></tr>
+            <tr><td><strong>模型支持</strong></td><td>几乎所有（含本地）</td><td>几乎所有（含本地）</td><td>内置免费模型 + 第三方</td><td class="highlight-cell">DeepSeek / OpenAI / Claude / 本地</td></tr>
+            <tr><td><strong>扩展性</strong></td><td>SDK + MCP + 插件系统</td><td>配置文件</td><td>MCP + Extension + ACP</td><td class="highlight-cell">自定义 Agent / Skills / 命令 / 规则</td></tr>
+            <tr><td><strong>价格</strong></td><td>开源免费 + API 费用</td><td>开源免费 + API 费用</td><td>免费 / $20 Pro / $200 Max</td><td class="highlight-cell">开源免费 + API 费用</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>CodePapr 的独特价值：</strong>与其他工具互补而非替代。如果你需要 <strong>IDE 深度集成</strong>和丰富的插件生态，Cline/Aider/Devin Desktop 更成熟。如果你看重 <strong>独立桌面工作台</strong>、<strong>DeepSeek 前缀缓存极致省成本</strong>、<strong>多子代理协作体系</strong>和<strong>对话即可回退的原地重置</strong>——CodePapr 是最佳选择。
+        </div>
+
+        <h3>谁适合使用 CodePapr</h3>
+        <ul>
+          <li>已掌握至少一门编程语言，能读懂基础语法和项目结构</li>
+          <li>希望借助 AI 大幅提升开发效率的工程师</li>
+          <li>独立开发者或需要长期维护复杂项目的技术负责人</li>
+          <li>习惯在命令行和可视化界面之间切换的开发者</li>
+          <li>关注 token 成本，希望利用 DeepSeek 缓存优化降低开销的团队</li>
+        </ul>
+
+        <h3>需要具备的基础能力</h3>
+        <ul>
+          <li>基础编程能力（能读懂并编写简单代码）</li>
+          <li>基本的代码阅读与理解能力</li>
+          <li>会使用常见开发工具（编辑器、命令行、Git）</li>
+          <li>具备基本的项目结构认知（目录、模块划分）</li>
+          <li>愿意理解代码，而不是完全依赖 AI</li>
+        </ul>
+
+        <h3>支持的 LLM Provider</h3>
+        <div class="card"><div class="tag-stack">
+          <span class="tag">DeepSeek（原生）</span>
+          <span class="tag">OpenAI（兼容）</span>
+          <span class="tag">Claude / Anthropic（兼容）</span>
+          <span class="tag">本地 OpenAI 兼容端点</span>
+        </div></div>
+      </div>
+    </section>
+
+    <!-- 2. Installation -->
+    <section class="section" id="install">
+      <div class="section-header"><h2>安装与环境配置</h2></div>
+      <div class="content">
+        <h3>环境要求</h3>
+        <table>
+          <thead><tr><th>组件</th><th>最低版本</th><th>用途</th></tr></thead>
+          <tbody>
+            <tr><td>Node.js</td><td>18+</td><td>运行时和包管理</td></tr>
+            <tr><td>npm</td><td>9+</td><td>依赖管理</td></tr>
+            <tr><td>Rust toolchain + Cargo</td><td>stable</td><td>桌面端编译（debug/release/publish）</td></tr>
+            <tr><td>.NET SDK</td><td>-</td><td>C# Roslyn analyzer（release 构建需要）</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>注意：</strong>如果只做前端开发或只阅读源码，完成 <code>npm install</code> 和 <code>npm run build</code> 通常就够了。桌面端调试和打包才需要 Rust toolchain。
+        </div>
+
+        <h3>标准安装</h3>
+        <pre><code><span class="hl-comment"># 克隆仓库后</span>
+<span class="hl-keyword">npm</span> install
+<span class="hl-keyword">npm</span> run build</code></pre>
+
+        <h3>安装验收</h3>
+        <pre><code><span class="hl-keyword">npm</span> run verify</code></pre>
+        <p>通过这一步，说明当前机器至少满足：Node 依赖正确、workspace 构建正常、workspace 测试正常、CLI E2E 正常、Tauri cargo check 正常。</p>
+
+        <h3>支持平台</h3>
+        <table>
+          <thead><tr><th>平台</th><th>架构</th><th>状态</th></tr></thead>
+          <tbody>
+            <tr><td>macOS</td><td>arm64 (Apple Silicon)</td><td>支持（输出 .dmg 安装包）</td></tr>
+            <tr><td>Windows</td><td>x64</td><td>支持（输出 .msi 安装包）</td></tr>
+          </tbody>
+        </table>
+        <p>两个平台共用同一套 Rust 后端与前端代码，发布流程会同时输出 dmg / msi 安装包。</p>
+
+        <h3>外部依赖</h3>
+        <p>根据你要执行的操作，可能还需要：</p>
+        <ul>
+          <li>可用的模型 API key（DeepSeek / OpenAI / Claude 或本地兼容端点）</li>
+          <li>Chrome 或 Chromium 兼容浏览器（用于浏览器交互和截图）</li>
+          <li>VS Code（可选，用于工作区任务和调试配置）</li>
+        </ul>
+
+        <h3>三种启动方式</h3>
+        <table>
+          <thead><tr><th>命令</th><th>用途</th></tr></thead>
+          <tbody>
+            <tr><td><code>npm run debug</code></td><td>开发调试，热重载，适合长会话和日常使用</td></tr>
+            <tr><td><code>npm run release</code></td><td>直接启动优化后的桌面端运行文件（不打包安装包）</td></tr>
+            <tr><td><code>npm run publish</code></td><td>生成当前平台的安装包（.dmg / .msi）并整理到 <code>Release/</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 3. API Setup -->
+    <section class="section" id="api-setup">
+      <div class="section-header"><h2>API 设置与模型配置</h2></div>
+      <div class="content">
+        <h3>配置存放位置</h3>
+        <table>
+          <thead><tr><th>层级</th><th>路径</th><th>作用</th></tr></thead>
+          <tbody>
+            <tr><td>应用级</td><td><code>~/.codepapr/codepapr.sqlite</code></td><td>provider、model、API key、语言、采样参数</td></tr>
+            <tr><td>项目级</td><td><code>&lt;workspace&gt;/.CodePapr/</code></td><td>项目状态、会话记录、规则、Agents、Skills</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Provider 模式</h3>
+        <table>
+          <thead><tr><th>模式</th><th>说明</th><th>适用场景</th></tr></thead>
+          <tbody>
+            <tr><td><code>deepseek</code></td><td>DeepSeek 官方 provider</td><td>推荐默认，缓存优化效果最好</td></tr>
+            <tr><td><code>openai</code></td><td>OpenAI 兼容格式</td><td>接入 OpenAI 或兼容服务</td></tr>
+            <tr><td><code>claude</code></td><td>Claude/Anthropic 兼容格式</td><td>接入 Claude 或兼容端点</td></tr>
+          </tbody>
+        </table>
+
+        <h3>DeepSeek 接口参考地址</h3>
+        <pre><code><span class="hl-comment"># OpenAI 格式（DeepSeek provider 默认使用）</span>
+https://api.deepseek.com/v1</code></pre>
+        <p>CodePapr 的 DeepSeek provider 固定使用 OpenAI 兼容的 <code>https://api.deepseek.com/v1</code>。如果你想用 Anthropic 协议接 DeepSeek，可在 provider 中选择 Claude，并把 baseURL 设为 DeepSeek 提供的 Anthropic 兼容端点。</p>
+
+        <h3>环境变量回退顺序</h3>
+        <p>桌面端与 CLI 提供 provider 兼容层会按以下顺序读取 API key：</p>
+        <ol>
+          <li><code>DEEPSEEK_API_KEY</code></li>
+          <li><code>OPENAI_API_KEY</code></li>
+          <li><code>ANTHROPIC_API_KEY</code></li>
+        </ol>
+
+        <h3>应用级设置项</h3>
+        <div class="card">
+          <div class="card-row">
+            <div class="card-col">
+              <h4>LLM 设置</h4>
+              <ul>
+                <li>provider — 模型提供商</li>
+                <li>model — 模型名称</li>
+                <li>baseURL — 自定义端点地址</li>
+                <li>API key — 认证密钥</li>
+                <li>temperature — 生成温度</li>
+                <li>maxTokens — 最大输出 tokens</li>
+                <li>thinkingEnabled / thinkingEffort — 思考模式</li>
+              </ul>
+            </div>
+            <div class="card-col">
+              <h4>路由设置</h4>
+              <ul>
+                <li>fast model 开关 — 是否启用快速模型</li>
+                <li>fast model name — 快速模型名称（默认 <code>deepseek-v4-flash</code>）</li>
+                <li>max tool rounds — 最大工具轮次（默认 500）</li>
+                <li>max context tokens — 最大上下文 tokens（默认 200k）</li>
+                <li>max conversation rounds — 最大对话轮数（默认 24）</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <h3>快速模型路由</h3>
+        <table>
+          <thead><tr><th>场景</th><th>使用模型</th><th>温度</th></tr></thead>
+          <tbody>
+            <tr><td>主 Agent 对话</td><td>主模型（默认 <code>deepseek-v4-pro</code>）</td><td>默认</td></tr>
+            <tr><td>上下文压缩</td><td>快速模型（默认 <code>deepseek-v4-flash</code>）</td><td>0.1</td></tr>
+            <tr><td>子代理派发（重型/执行类）</td><td>主模型</td><td>用户配置</td></tr>
+            <tr><td>子代理派发（Explore/Scout 快速模式）</td><td>快速模型（可切换为主模型）</td><td>用户配置</td></tr>
+            <tr><td>Slash 命令声明 <code>model: fast</code>（如 <code>/search</code>、<code>/lint</code>、<code>/clean</code>、<code>/commit</code>、<code>/summary</code>、<code>/build</code>）</td><td>快速模型（未启用时回退主模型）</td><td>0.3</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout success">
+           <strong>提示：</strong>桌面端设置面板分为 <code>通用 / LLM / 搜索 / Mentor / 高级</code> 五个 Tab。<strong>通用</strong>含语言、调试、许可证；<strong>LLM</strong>含主模型、快速模型、采样参数与思考强度；<strong>搜索</strong>用于配置自托管 SearXNG 搜索后端（SearXNG 优先，失败自动降级到内置 Bing / Mojeek / Qwant / Wikipedia 等多源聚合；搜索引擎选择器已移除；分类/时间/语言/安全搜索等高级参数收入折叠区）；<strong>Mentor</strong>配置导师子代理的独立 API Key、Base URL 和模型选择；<strong>高级</strong>含上下文压缩、TodoList 重试、Goal 自主循环、Verifier 模型、ProjectGraph 限制等。语音配置不在主设置面板，而在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. First Use -->
+    <section class="section" id="first-use">
+      <div class="section-header"><h2>第一次使用</h2></div>
+      <div class="content">
+        <h3>三步启动</h3>
+        <ol>
+          <li><strong>准备配置：</strong>在桌面端设置中填写 API key、provider 和 model</li>
+          <li><strong>选择入口：</strong>直接使用桌面端（当前公开产品入口只保留桌面工作台）</li>
+          <li><strong>选择模式：</strong>Ask 负责解释和分析，Plan 负责拆解方案，Agent 负责实际执行</li>
+        </ol>
+
+        <h3>最短路径</h3>
+        <pre><code><span class="hl-keyword">npm</span> install
+<span class="hl-keyword">npm</span> run build
+<span class="hl-keyword">npm</span> run debug</code></pre>
+
+        <h3>首次使用流程</h3>
+        <ol>
+          <li>打开设置，填写 provider、model 和 API key</li>
+          <li>选择项目文件夹</li>
+          <li>在 Ask、Plan、Agent 中选择当前任务模式</li>
+          <li>输入任务描述，让代理执行或分析</li>
+          <li>在文件树、编辑器、Git、预览面板中复核结果</li>
+        </ol>
+
+        <div class="callout success">
+          <strong>自动恢复：</strong>桌面端会记住你上次打开的项目目录，并在下次启动时自动恢复该项目及其项目级聊天记录。只有当项目路径失效或你改为打开其它目录时，才会看到空工作区。
+        </div>
+
+        <h3>使用入口</h3>
+        <table>
+          <thead><tr><th>入口</th><th>适合场景</th></tr></thead>
+          <tbody>
+            <tr><td>Desktop Workbench</td><td>长会话、文件树、Git、预览、浏览器交互——可视化工作台</td></tr>
+            <tr><td>CLI（<code>codepapr</code> 命令）</td><td>终端交互、脚本化自动化；提供 <code>chat</code> / <code>ask</code> / <code>plan</code> / <code>agent</code> / <code>init</code> / <code>session</code> / <code>stats</code> / <code>config</code> 子命令</td></tr>
+          </tbody>
+        </table>
+
+        <p class="callout">
+          <strong>注意：</strong>CLI 内置 Explore、Scout 两个子代理；Mentor 仅在桌面端的"子Agent"标签页可启用并配置。
+        </p>
+      </div>
+    </section>
+
+    <!-- 5. Modes -->
+    <section class="section" id="modes">
+      <div class="section-header"><h2>工作模式：Ask / Plan / Agent</h2></div>
+      <div class="content">
+        <p>Ask、Plan、Agent 不是不同产品，而是<strong>同一套 Runtime 的三种工作方式</strong>。</p>
+
+        <h3><span class="badge badge-ask">Ask</span> 分析模式</h3>
+        <p><strong>适合：</strong>解释架构、梳理模块职责、分析报错原因、先问清楚再决定是否执行。</p>
+        <p><strong>特点：</strong></p>
+        <ul>
+          <li>默认不改文件、不跑命令</li>
+          <li>遇到时效性问题时，优先走只读时间/网页工具核实</li>
+          <li>只有你明确要求基于项目核实，它才会进入只读工具链</li>
+        </ul>
+
+        <h3><span class="badge badge-plan">Plan</span> 规划模式</h3>
+        <p><strong>适合：</strong>大改动前先出执行方案、想看影响文件和验证路径、把复杂任务拆成清晰步骤。</p>
+        <p><strong>特点：</strong></p>
+        <ul>
+          <li>默认先给任务清单</li>
+          <li>会给影响文件、执行顺序、验证方式和风险</li>
+          <li>适合先规划，再切到 Agent 执行</li>
+        </ul>
+
+        <h3><span class="badge badge-agent">Agent</span> 执行模式</h3>
+        <p><strong>适合：</strong>修复 bug、实现功能、跑测试与验证、需要真正读写文件和调用工具的任务。</p>
+        <p><strong>特点：</strong></p>
+        <ul>
+          <li>会主动搜索项目、读写文件、跑命令、做验证</li>
+          <li>会使用工作区工具、后台命令、shell、预览和浏览器能力</li>
+          <li>Agent 主执行循环在 Web Worker 中运行，长任务不会阻塞界面</li>
+          <li><code>exec</code> 等长命令会在工具调用卡片中显示运行状态和日志</li>
+          <li>主执行默认最多连续运行 500 个内部工具轮次</li>
+          <li>文件改动后会异步派发后台诊断；同一失败指纹不会重复触发修复</li>
+        </ul>
+
+        <h3>如何给出有效任务</h3>
+        <p>CodePapr 的实际表现很依赖任务描述质量。最有效的提示词通常包含：</p>
+        <ul>
+          <li><strong>目标是什么</strong></li>
+          <li><strong>改动范围在哪里</strong></li>
+          <li><strong>参考实现在哪</strong></li>
+          <li><strong>不能动什么</strong></li>
+          <li><strong>验证标准是什么</strong></li>
+        </ul>
+
+        <h4>推荐写法</h4>
+        <pre><code>修复 packages/@codepapr/ui 里预览关闭后后台进程未停止的问题。
+先找当前预览会话和后台进程的绑定逻辑，再做最小修改。
+改完后至少跑受影响范围的验证，如果没有窄验证，再说明原因。</code></pre>
+
+        <h4>不够好的写法</h4>
+        <pre><code>帮我修一下预览。</code></pre>
+
+        <div class="callout success">
+          <strong>经验之谈：</strong>把它当作一个能执行任务的工程代理，而不是纯聊天机器人，会得到更稳定的结果。
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. Workbench -->
+    <section class="section" id="workbench">
+      <div class="section-header"><h2>桌面工作台</h2></div>
+      <div class="content">
+        <h3>界面结构</h3>
+        <ul>
+          <li><strong>左侧：</strong>会话列表和快捷入口</li>
+          <li><strong>中间：</strong>聊天区，展示消息、工具调用、状态和执行总结</li>
+          <li><strong>右侧：</strong>文件树与代码预览</li>
+          <li><strong>辅助区域：</strong>Git 面板、后台进程、网页预览</li>
+        </ul>
+
+        <h3>桌面端完整能力</h3>
+        <div class="card">
+          <div class="card-row">
+            <div class="card-col">
+              <ul>
+                <li>项目文件树浏览</li>
+                <li>Monaco 代码预览（VS Code 引擎）</li>
+                <li>多语言 LSP hover、definition 和问题标记</li>
+                <li>Ask / Plan / Agent 模式切换</li>
+                <li>工具调用过程可视化</li>
+              </ul>
+            </div>
+            <div class="card-col">
+              <ul>
+                <li>Git diff、最近提交、分支切换与安全回退</li>
+                <li>后台进程管理</li>
+                <li>应用内网页预览</li>
+                <li>浏览器页面交互与截图</li>
+                <li>项目配置入口（规则、Agents、Skills）</li>
+                <li>可视化 Code Review 面板（逐行评论、审批状态）</li>
+                <li>非阻塞 Toast 通知</li>
+                <li>外部路径访问权限弹窗</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <h3>代码审查面板</h3>
+        <p>顶部 AgentOps 工具栏点击 <strong>审查</strong> 可打开 Code Review 面板：</p>
+        <ul>
+          <li>默认对比 <code>HEAD~1..HEAD</code> 的 diff</li>
+          <li>左侧文件列表展示新增/修改/删除/重命名</li>
+          <li>Monaco diff 编辑器展示 original / modified 两侧</li>
+          <li>点击行号边栏可在任意一侧添加行级评论</li>
+          <li>评论可标记为已解决 / 未解决</li>
+          <li>可设置整体审批状态：待审查 / 已批准 / 需修改 / 已评论</li>
+        </ul>
+
+        <h3>对话轮次导航</h3>
+        <p>对话区域右侧有一个紧凑的轮次指示条，每条横线对应一个用户消息：</p>
+        <ul>
+          <li><strong>悬停</strong>指示条 → 自动展开面板，列出所有对话轮次（<code>#1</code> 编号 + 用户输入首句）</li>
+          <li>当前可视轮次在指示条和面板中同步<strong>高亮</strong></li>
+          <li><strong>点击</strong>任意轮 → 对话平滑滚动到对应消息位置</li>
+          <li>鼠标移开面板或指示条 → 面板自动关闭（200ms 延迟防误关）</li>
+        </ul>
+
+        <h3>全局搜索</h3>
+        <p>顶部工具栏搜索框，支持对话和文件搜索，通过 <strong>对话 | 文件</strong> 双 Tab 切换：</p>
+        <ul>
+          <li><strong>对话 Tab</strong>：搜索当前会话消息，可按角色过滤（全部 / 你 / AI），<code>↑↓</code> 选择 <code>Enter</code> 跳转</li>
+          <li><strong>文件 Tab — 内容模式</strong>：搜索工作区文件内部文本，结果展示文件路径 + 行号 + 匹配行</li>
+          <li><strong>文件 Tab — 文件名模式</strong>：搜索文件路径和名称</li>
+          <li>文件结果点击 → 打开文件并跳转到对应行</li>
+          <li>搜索面板视口居中弹出，300ms 防抖，仅文件 Tab 激活时才触发后端搜索</li>
+        </ul>
+
+        <h3>Toast 通知</h3>
+        <p>桌面端使用非阻塞 Toast 替代 alert：</p>
+        <ul>
+          <li>四色：<code>info</code> / <code>success</code> / <code>warning</code> / <code>error</code></li>
+          <li>默认 4.5 秒自动消失，<code>error</code> 默认 8 秒</li>
+          <li>最多同时显示 5 条，超出时丢弃最早的</li>
+        </ul>
+
+        <h3>外部路径权限</h3>
+        <p>当 Agent 请求读取或列出项目外的绝对路径时，桌面端会弹出权限对话框：</p>
+        <ul>
+          <li><strong>拒绝</strong>：阻断此次访问</li>
+          <li><strong>允许此文件</strong>：仅放行该文件</li>
+          <li><strong>允许此文件夹</strong>：放行该目录及其子内容</li>
+        </ul>
+        <p>授权结果保存在白名单中，后续同路径不再弹窗。写入、编辑、命令执行仍限制在工作区内。</p>
+
+        <h3>什么时候优先用桌面端</h3>
+        <ul>
+          <li>你在做多轮修复或重构</li>
+          <li>你需要一边看文件树一边让代理工作</li>
+          <li>你需要 Git diff、页面预览或页面自动化</li>
+          <li>你希望把会话、文件和验证收拢在一个界面里</li>
+        </ul>
+
+        <h3>Git 集成</h3>
+        <ul>
+          <li><strong>Git 面板：</strong>展示 staged/unstaged diff、最近提交历史、分支创建/切换、本地提交、安全擦除本地改动</li>
+          <li><strong>8 个 Agent Git 工具：</strong>status、diff、history、branch_checkout、stage、commit、restore、reset</li>
+          <li><strong>自动初始化：</strong>如果当前工作区还不是 Git 仓库，面板可直接执行 <code>git init</code></li>
+        </ul>
+
+        <h3>对话重置（Git Checkpoint）</h3>
+        <p>每条用户消息进入对话历史<strong>之前</strong>，CodePapr 会先抓取一份代码快照作为锚点：</p>
+        <pre><code>git add -A &amp;&amp; git commit -m "codepapr:checkpoint:&lt;userMsgId&gt;"</code></pre>
+        <p>当你需要回退时：</p>
+        <ul>
+          <li>Hover 任意用户消息，点击"重置到此点"</li>
+          <li>系统 <code>git reset --hard</code> 到该消息发送前的 checkpoint commit</li>
+          <li>所有文件原子性恢复到发送这条消息之前的状态</li>
+          <li>消息列表同步截断，后续对话全部移除</li>
+          <li>如果工作区不是 Git 仓库，CodePapr 会先尝试 <code>git init</code>；初始化失败时该消息上的"重置到此点"按钮会保持 disabled</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 7. Tools -->
+    <section class="section" id="tools">
+      <div class="section-header"><h2>工具能力详解</h2></div>
+      <div class="content">
+        <p>Agent 注册了 <strong>全面的工具集</strong>，覆盖文件操作、ProjectGraph 分析、Git、预览、浏览器、Shell、LSP 等全部本地开发场景。以下是按能力分组的关键工具。</p>
+
+        <h3>graph — 项目理解核心</h3>
+        <p>统一的项目语义图工具，通过 <code>action</code> 参数选择操作。同时返回目录树、代码结构骨架和文件/符号关系图，是所有符号查找、依赖分析、影响分析的基础。</p>
+        <table>
+          <thead><tr><th>工具 / Action</th><th>能力</th></tr></thead>
+          <tbody>
+            <tr><td><code>graph</code> full</td><td>生成完整 ProjectGraph：目录树 + 代码结构骨架 + 依赖图</td></tr>
+            <tr><td><code>graph</code> overview</td><td>轻量概览（不含完整代码骨架），适合快速感知项目轮廓</td></tr>
+            <tr><td><code>graph</code> lookup</td><td>按名称/路径查找符号，返回 symbolId、文件和行号</td></tr>
+            <tr><td><code>graph</code> dependency</td><td>提取依赖子图，支持 incoming / outgoing / both</td></tr>
+            <tr><td><code>graph</code> entrypoints</td><td>查找项目入口文件和入口符号</td></tr>
+            <tr><td><code>graph</code> impact</td><td>反向影响分析：修改某符号会影响哪些地方</td></tr>
+            <tr><td><code>graph</code> implementations</td><td>查找接口或基类的实现/派生符号</td></tr>
+            <tr><td><code>graph</code> smart_context</td><td>根据任务描述智能获取最相关项目上下文</td></tr>
+            <tr><td><code>graph</code> dead_code</td><td>检测未使用的符号（类、函数、变量）</td></tr>
+            <tr><td><code>graph</code> circular_deps</td><td>检测文件间循环导入依赖</td></tr>
+            <tr><td><code>graph</code> type_hierarchy</td><td>构建类、接口、类型的继承/实现层次树</td></tr>
+            <tr><td><code>graph</code> suggest_refactors</td><td>基于代码结构分析，建议可提取的方法和可独立成文件的符号</td></tr>
+            <tr><td><code>graph</code> test_impact</td><td>根据变更文件列表，分析哪些现有测试会受影响</td></tr>
+            <tr><td><code>graph</code> generate_tests</td><td>为项目中导出的可测试符号自动生成测试骨架</td></tr>
+          </tbody>
+        </table>
+
+        <h3>文件操作</h3>
+        <table>
+          <thead><tr><th>工具</th><th>能力</th></tr></thead>
+          <tbody>
+            <tr><td><code>read</code></td><td>读取文件内容，支持行范围、行窗口、上下文行数、字节限制</td></tr>
+            <tr><td><code>write</code></td><td>创建或完整覆盖写入文件；局部修改请用 edit</td></tr>
+            <tr><td><code>edit</code></td><td>单文件精确 SEARCH/REPLACE 修改；search 必须精确匹配源文件</td></tr>
+            <tr><td><code>patch</code></td><td>多文件原子 SEARCH/REPLACE；全部校验成功后一起写入，任一失败即回滚</td></tr>
+            <tr><td><code>grep</code></td><td>正则搜索文件内容，返回匹配位置与上下文</td></tr>
+            <tr><td><code>glob</code></td><td>按文件名 glob 模式搜索项目文件，支持正则合并</td></tr>
+            <tr><td><code>list</code></td><td>浏览项目目录树结构，支持递归深度控制</td></tr>
+          </tbody>
+        </table>
+
+        <h3>LSP 语言智能</h3>
+        <table>
+          <thead><tr><th>工具 / Action</th><th>能力</th></tr></thead>
+          <tbody>
+            <tr><td><code>lsp</code> definition / references</td><td>语言服务只读导航：跳转到定义、查找所有引用</td></tr>
+            <tr><td><code>lsp_edit</code> rename / code_action / format</td><td>语言服务语义修改：重命名、代码动作、格式化</td></tr>
+            <tr><td><code>diagnostics</code></td><td>单文件 LSP 诊断或项目级 lint / typecheck</td></tr>
+          </tbody>
+        </table>
+
+        <h3>命令执行</h3>
+        <table>
+          <thead><tr><th>工具 / Action</th><th>能力</th></tr></thead>
+          <tbody>
+            <tr><td><code>exec</code></td><td>运行命令：默认阻塞等待；background:true 后台运行；previewUrl 启动后预览</td></tr>
+            <tr><td><code>shell</code> open / send / read / close / list</td><td>持久 Shell 会话，支持多步命令和交互式终端</td></tr>
+            <tr><td><code>proc</code> list / stop / stop_all</td><td>后台进程管理</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Git 操作</h3>
+        <table>
+          <thead><tr><th>工具 / Action</th><th>能力</th></tr></thead>
+          <tbody>
+            <tr><td><code>git</code> status / diff / log</td><td>读取工作区状态、差异、提交历史</td></tr>
+            <tr><td><code>git</code> branch / stage / commit</td><td>切换或创建分支、暂存改动、创建提交</td></tr>
+            <tr><td><code>git</code> restore / reset</td><td>恢复改动或安全回退（自动创建备份分支和快照）</td></tr>
+          </tbody>
+        </table>
+
+        <h3>浏览器与预览</h3>
+        <table>
+          <thead><tr><th>工具 / Action</th><th>能力</th></tr></thead>
+          <tbody>
+            <tr><td><code>browser</code> open / navigate / reload / close</td><td>内置浏览器：打开 URL、导航、刷新、关闭</td></tr>
+            <tr><td><code>browser</code> click / type / read / screenshot / get</td><td>浏览器交互：点击元素、输入文本、读取 DOM、截图、读状态</td></tr>
+            <tr><td><code>open</code></td><td>在系统默认浏览器打开 URL 或项目内 HTML 文件</td></tr>
+          </tbody>
+        </table>
+
+        <h3>网络工具</h3>
+        <table>
+          <thead><tr><th>工具</th><th>能力</th></tr></thead>
+          <tbody>
+            <tr><td><code>web_search</code></td><td>在线搜索网页，聚合多源结果</td></tr>
+            <tr><td><code>web_fetch</code></td><td>读取网页内容，自动提取正文并转为纯文本</td></tr>
+            <tr><td><code>web_download</code></td><td>下载文件到项目 .CodePapr/downloads/ 文件夹</td></tr>
+          </tbody>
+        </table>
+
+        <h3>其他工具</h3>
+        <table>
+          <thead><tr><th>工具</th><th>能力</th></tr></thead>
+          <tbody>
+            <tr><td><code>skill</code></td><td>加载项目 .CodePapr/skills/ 下的 Skill 说明文件</td></tr>
+            <tr><td><code>local_time_now</code></td><td>获取当前本地时间、日期和时区，适合时效性问题（市场开闭盘、活动截止时间等）</td></tr>
+            <tr><td><code>question</code></td><td>Plan 模式下向用户提问，支持预定义选项和多选</td></tr>
+            <tr><td><code>task</code></td><td>把子任务委派给声明式子代理（Explore / Scout / Mentor）执行</td></tr>
+            <tr><td><code>todo</code></td><td>规划和追踪多步任务清单，支持初始化、进度汇报、重规划</td></tr>
+          </tbody>
+        </table>
+
+        <h3>外部路径权限</h3>
+        <p>桌面端对项目外绝对路径的 <code>read</code> / <code>list</code> 操作会触发 <strong>PermissionDialog</strong> 弹窗授权；CLI 的读取边界较宽松，写入仍限制在工作区内。</p>
+
+        <h3>文件大小限制</h3>
+        <p>单次 <code>read</code> / <code>write</code> / <code>edit</code> / <code>patch</code> 操作的上限为 <strong>20MB</strong>，可覆盖大多数源码和二进制资源文件，但大文件会显著增加 token 消耗。</p>
+
+        <div class="callout success">
+          <strong>工具设计原则：</strong>LLM 看到的工具名是精简的"合并工具"（共 25 个），底层委托给 40+ 独立工具。Agent 可同时使用所有工具，子代理按 <code>tools</code> 配置白名单限制权限。代码修改优先用 <code>edit</code>/<code>patch</code> 走 Search/Replace Diff，新建文件才用 <code>write</code>。命令执行：短命令用 <code>exec</code>，长驻进程用 <code>exec</code> background:true，交互式终端用 <code>shell</code>。
+        </div>
+      </div>
+    </section>
+
+    <!-- 角色扮演 -->
+    <section class="section" id="characters">
+      <div class="section-header"><h2>角色扮演</h2></div>
+      <div class="content">
+        <p>CodePapr 支持创建、导入和管理 AI 角色，让 Agent 以特定人设与你对话。激活角色后，角色的身份、语气、风格会被注入 LLM 系统提示词，Agent 以角色人设作出回应。</p>
+
+        <h3>角色数据模型</h3>
+        <p>每个角色包含以下字段：</p>
+        <table>
+          <thead><tr><th>字段</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><strong>名称</strong></td><td>角色显示名</td></tr>
+            <tr><td><strong>头像</strong></td><td>上传的图片，也会显示在聊天界面</td></tr>
+            <tr><td><strong>描述</strong></td><td>外貌、背景故事、身份设定</td></tr>
+            <tr><td><strong>个性</strong></td><td>说话风格、性格特征、行为习惯</td></tr>
+            <tr><td><strong>场景</strong></td><td>当前对话发生的情境</td></tr>
+            <tr><td><strong>开场白</strong></td><td>角色第一次对话时会说的话</td></tr>
+            <tr><td><strong>示例对话</strong></td><td>用 <code>&lt;START&gt;</code> 分隔的多组对话，引导 LLM 理解角色风格</td></tr>
+            <tr><td><strong>系统提示词</strong></td><td>追加到角色人设后面的额外指令</td></tr>
+            <tr><td><strong>标签</strong></td><td>自定义标签，用于分类和检索</td></tr>
+          </tbody>
+        </table>
+
+        <h3>角色扮演格式约定</h3>
+        <p>激活角色后，系统提示词会明确以下格式规则，确保 TTS 能正确区分对话和动作：</p>
+        <table>
+          <thead><tr><th>格式</th><th>含义</th><th>TTS 行为</th></tr></thead>
+          <tbody>
+            <tr><td><code>*动作描述*</code></td><td>叙述、场景描写、角色动作</td><td>不朗读</td></tr>
+            <tr><td>纯文本</td><td>角色说的话</td><td>朗读</td></tr>
+            <tr><td><code>**加粗文字**</code></td><td>重读、强调</td><td>朗读时加重语气</td></tr>
+            <tr><td><code>（括号）或 （轻声）</code></td><td>语气提示</td><td>不朗读</td></tr>
+          </tbody>
+        </table>
+
+        <h3>创建角色</h3>
+        <ol>
+          <li>点击工具栏的<strong>角色按钮</strong>（头像图标），打开角色管理面板</li>
+          <li>点击 <strong>"新建角色"</strong></li>
+          <li>在<strong>基础</strong> Tab 中填写名称、描述、个性、场景、开场白、示例对话等信息</li>
+          <li>可上传头像图片（PNG/JPG）</li>
+          <li>在<strong>语音</strong> Tab 中配置语音合成（可选，详见下节）</li>
+          <li>点击<strong>保存</strong></li>
+        </ol>
+
+        <h3>导入角色卡（CCv3 / SillyTavern 兼容）</h3>
+        <p>CodePapr 兼容 chara-card-v3 规范，可从其他工具导入角色：</p>
+        <ol>
+          <li>点击角色面板中的 <strong>"导入角色卡"</strong> 按钮</li>
+          <li>选择 PNG 文件（JSON 嵌入在图片的 tEXt/iTXt chunk 中）或 JSON 文件</li>
+          <li>角色信息自动解析，PNG 图片自动作为头像</li>
+          <li>检查并调整导入的字段，点击保存</li>
+        </ol>
+
+        <p>支持的 PNG chunk 关键字：<code>chara</code>、<code>ccv3</code>、<code>character</code>、<code>character_card</code></p>
+
+        <h3>导出角色卡</h3>
+        <p>在角色列表中点击角色的<strong>导出</strong>按钮，角色将被导出为 PNG 角色卡。PNG 中嵌入完整的 CCv3 JSON，可在 SillyTavern 等工具中使用。</p>
+
+        <h3>启用/切换角色</h3>
+        <p>在角色列表中<strong>点击角色名称</strong>即可激活。当前激活的角色会显示"已启用"标记。Agent 的每次回复都会以该角色的人设进行。</p>
+        <p>角色人设放在 Session Bootstrap 中（<strong>不在系统提示词的 ImmutablePrefix 中</strong>），因此切换角色不会破坏 DeepSeek 前缀缓存。</p>
+
+        <div class="callout success">
+          <strong>提示：</strong>角色扮演不影响 Agent 的代码理解和执行能力。Agent 仍然能搜索项目、修改文件、运行命令——只是输出的语气和风格会匹配角色设定。
+        </div>
+      </div>
+    </section>
+
+    <!-- 语音合成（TTS） -->
+    <section class="section" id="tts">
+      <div class="section-header"><h2>语音合成（TTS）</h2></div>
+      <div class="content">
+        <p>CodePapr 集成了 <strong>GPT-SoVITS</strong> 语音克隆引擎，可在本地将角色的文字回复合成为语音。只需 3-10 秒的参考音频即可克隆一个角色的声音。</p>
+
+        <div class="diagram">
+TTS 数据流：
+  ChatPanel
+    → useTtsPlayer (React Hook)：流式文本 → 句子分割 → 队列管理
+    → Rust TTS 模块
+      → GPT-SoVITS Python Server（本地端口 9880）
+        → rodio（Rust 音频库）播放
+        </div>
+
+        <h3>安装 GPT-SoVITS</h3>
+        <p>首次使用语音功能需要安装 GPT-SoVITS。安装入口有两处：</p>
+        <ul>
+          <li>点击 ChatPanel 上的 TTS 喇叭按钮，若检测到未安装，会自动弹出安装向导</li>
+          <li>在角色编辑面板的 Voice Tab 中触发安装</li>
+        </ul>
+        <p>安装向导会自动完成 5 步：检查 Python → 克隆 GPT-SoVITS 仓库 → pip 安装依赖 → 下载预训练模型（约 2GB，使用 hf-mirror 源）→ 验证。</p>
+        <p>需要本机已安装 <strong>Python 3.10+</strong>。安装过程会写入 <code>~/.codepapr/gpt-sovits/</code>。</p>
+
+        <h3>为角色配置语音</h3>
+        <ol>
+          <li>点击工具栏的<strong>角色头像按钮</strong>，打开角色编辑面板</li>
+          <li>切换到 <strong>Voice Tab</strong>，开启 <strong>“启用语音输出”</strong></li>
+          <li><strong>上传参考音频</strong>：
+            <ul>
+              <li>时长 3-10 秒（推荐 5 秒），太短克隆不准、太长会被截断</li>
+              <li>格式 WAV / MP3 / M4A / AAC，采样率 16kHz 或更高</li>
+              <li>内容：清晰人声，无背景音乐、噪声、混响</li>
+            </ul>
+          </li>
+          <li>填写 <strong>参考文本</strong>：必须与音频内容逐字对应，否则克隆效果会很差</li>
+          <li>选择 <strong>参考音频语言</strong> 和 <strong>说话语言</strong>（支持中文、粤语、英语、日语、韩语及混合模式）</li>
+          <li>调整参数：
+            <ul>
+              <li><strong>语速</strong>：50% - 200%</li>
+              <li><strong>合成速度</strong>：仅 4 / 8 / 16 三档。4=极速、8=均衡、16=最高质量</li>
+              <li><strong>合并句数</strong>：1-5，一次合成合并几句一起推理，减少往返次数</li>
+            </ul>
+          </li>
+          <li>点击 <strong>“试听”</strong> 按钮预览效果</li>
+          <li>满意后点击 <strong>保存</strong></li>
+        </ol>
+
+        <h3>当前播放模式</h3>
+        <p>当前 UI 采用 <strong>WebSocket 批量流式（<code>ws-batch</code>）</strong>作为默认且唯一实际生效的模式：所有句子通过一条持久 WebSocket 连接批量发送、逐个返回，首字延迟约 1-2 秒，句间衔接流畅。</p>
+        <p>代码层保留了 <code>whole</code>、<code>streamed-pipeline</code>、<code>streamed-pcm</code> 三种模式，但角色编辑面板暂未开放切换，用户无需关注。</p>
+
+        <h3>语音微调</h3>
+        <p>对音质有更高要求时，可在 Voice Tab 中使用微调功能：</p>
+        <ol>
+          <li>确保参考音频和参考文本已配置并试听通过</li>
+          <li>点击 <strong>“生成训练数据”</strong>：LLM 根据角色设定生成约 500 字的台词脚本，GPT-SoVITS 自动合成约 2 分钟训练语音，无需手动录音</li>
+          <li>点击 <strong>“开始微调”</strong>：后台训练，通常 30-60 分钟，可关闭窗口</li>
+          <li>训练完成后勾选 <strong>“使用微调模型”</strong>：音色更稳定、合成更快，合成速度可降至 4（极速档）</li>
+        </ol>
+
+        <h3>播放控制</h3>
+        <ul>
+          <li><strong>自动朗读：</strong>启用语音的角色在 AI 回复时会自动朗读</li>
+          <li><strong>重播：</strong>鼠标悬停在任意 AI 回复上，会出现“重播”按钮，可重新朗读该条内容</li>
+          <li><strong>停止：</strong>取消当前 Agent 消息可中断正在进行的朗读</li>
+          <li><strong>服务控制：</strong>ChatPanel 上的 TTS 喇叭按钮用于启动 GPT-SoVITS 服务或查看服务日志/状态</li>
+        </ul>
+
+        <div class="callout">
+          <strong>GPU 预热（Apple Silicon）：</strong>在 M 系列 Mac 上，首次启动 TTS 服务后，可在角色编辑面板的 Voice Tab 中手动点击 <strong>“GPU 预热”</strong> 按钮。它会提前编译 Metal GPU kernel，避免首次合成卡顿 5-15 秒。预热仅在 Apple Silicon 上有效。
+        </div>
+
+        <div class="callout success">
+          <strong>音质建议：</strong>参考音频最好在安静环境中录制，避免背景噪音。参考文本需要与音频内容完全一致。微调后音质提升明显，尤其是中文和日语。
+        </div>
+      </div>
+    </section>
+
+    <!-- 8. Project Config -->
+    <section class="section" id="project-config">
+      <div class="section-header"><h2>配置文件与规则</h2></div>
+      <div class="content">
+        <h3>.CodePapr/AGENTS.md — 全局项目规则</h3>
+        <p>全项目规则会注入主 Agent 和所有子代理。适合写：</p>
+        <ul>
+          <li>代码风格和目录约定</li>
+          <li>构建、测试、发布命令</li>
+          <li>禁止改动的路径或行为</li>
+          <li>项目背景和验收标准</li>
+        </ul>
+
+        <div class="callout">
+          <strong>自动注入流程：</strong>代理会按以下优先级查找规则文件并拼进稳定系统提示词：<br>
+          1. <code>.CodePapr/AGENTS.md</code><br>
+          2. <code>.CodePapr/rules.md</code><br>
+          文件不存在会被自动跳过。
+        </div>
+
+        <h3>.CodePapr/memory.md — 跨会话项目记忆（自动整理）</h3>
+        <p>Agent 在工作过程中会自动发现项目特有的模式、坑和约定，并将其写入记忆文件。下次会话启动时自动加载，帮助 Agent 避免重复踩坑。文件超过 200 行后会自动整理，避免无限膨胀。</p>
+        <ul>
+          <li><strong>自动积累：</strong>Agent 发现项目特有知识后，用 <code>write</code> 追加到 <code>.CodePapr/memory.md</code>，每条以 <code>## YYYY-MM-DD 主题</code> 开头</li>
+          <li><strong>自动加载：</strong>每次会话启动时注入到 bootstrap 上下文，不影响系统提示词缓存</li>
+          <li><strong>自动整理：</strong>会话启动时若 memory.md &gt; 200 行，或上下文压缩 / <code>/compact</code> 触发，标记为待整理；当前轮 Agent 回复完成后，异步用快速模型对记忆做去重、合并、精简，写回文件</li>
+          <li><strong>不阻塞：</strong>整理是 fire-and-forget 异步执行，当前会话用旧记忆，下次启动用整理后的版本；失败时静默降级为规则去重，不影响主流程</li>
+          <li><strong>不新增工具：</strong>整理由 store 层后台逻辑触发，模型无感知，不破坏 ImmutablePrefix 缓存</li>
+          <li><strong>记录原则：</strong>用户偏好、项目约定、错误模式与解法、架构决策；不记录通用编程知识、临时任务状态、已在 <code>.CodePapr/AGENTS.md</code> 中的规则</li>
+        </ul>
+
+        <div class="callout">
+          <strong>整理触发链路：</strong><br>
+          T1: session 启动读 memory.md，行数 &gt; 200 → 标记 pending<br>
+          T2: 上下文压缩（自动或 <code>/compact</code>）→ 标记 pending<br>
+          T3: 每次 agent 回复完成 → pending? → 异步调 fast model 整理 → 写回 memory.md<br>
+          整理目标：保留用户偏好/项目约定/错误模式/架构决策，控制在 200 行以内。
+        </div>
+
+        <h3>/compact — 强制压缩上下文</h3>
+        <p>手动触发对话压缩，将早前消息合并为结构化检查点释放 token 空间：</p>
+        <ul>
+          <li><strong>强制模式：</strong>不受 <code>maxConversationRounds</code> 和 <code>maxContextTokens</code> 阈值限制</li>
+          <li><strong>本地命令：</strong>零 token 消耗，调用现有压缩管线生成检查点</li>
+          <li><strong>顺带触发记忆整理：</strong>压缩成功后会标记 memory.md 为待整理，下一轮 agent 回复后异步整理</li>
+          <li><strong>使用场景：</strong>接近上下文上限或响应变慢时，压缩即可恢复流畅对话</li>
+        </ul>
+
+        <h3>配置入口</h3>
+        <p>桌面端项目头部的"配置"入口可以：</p>
+        <ul>
+          <li>创建/编辑 <code>.CodePapr/AGENTS.md</code>（不存在时生成默认模板）</li>
+          <li>创建/编辑/删除自定义子代理（<code>.CodePapr/agents/*.md</code>）</li>
+          <li>创建/编辑/启用/停用/删除 Skills（<code>.CodePapr/skills/**/SKILL.md</code>）</li>
+        </ul>
+
+        <h3>数据位置总览</h3>
+        <table>
+          <thead><tr><th>路径</th><th>作用</th></tr></thead>
+          <tbody>
+            <tr><td><code>~/.codepapr/codepapr.sqlite</code></td><td>应用级设置、会话和缓存统计</td></tr>
+            <tr><td><code>~/.codepapr/lsp-tools/</code></td><td>托管 LSP 工具下载缓存（首次需要时下载，下次复用）</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/project.sqlite</code></td><td>项目级状态、聊天记录、缓存统计</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/memory.md</code></td><td>跨会话项目记忆，Agent 自动积累 + 超 200 行自动整理</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/skills</code></td><td>项目级技能文件</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/agents</code></td><td>项目级子代理定义</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/commands</code></td><td>项目级自定义命令</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/downloads/</code></td><td>Scout 子代理下载文件的默认目录</td></tr>
+            <tr><td><code>~/.codepapr/voices/</code></td><td>角色参考音频文件</td></tr>
+            <tr><td><code>~/.codepapr/gpt-sovits/</code></td><td>GPT-SoVITS 安装与预训练模型</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 9. Diff -->
+    <section class="section" id="diff">
+      <div class="section-header"><h2>代码修改与 Diff 机制</h2></div>
+      <div class="content">
+        <h3>Search/Replace Diff（YOLO Diff）</h3>
+        <p>CodePapr 的自动修改<strong>不依赖标准 Git diff 行号</strong>。多处局部修改会优先生成 Search/Replace 块：</p>
+
+        <pre><code><span class="hl-keyword">&lt;&lt;&lt;&lt;&lt;&lt;&lt; SEARCH</span>
+<span class="hl-string">文件里已经存在的旧代码</span>
+<span class="hl-keyword">=======</span>
+<span class="hl-string">替换后的新代码</span>
+<span class="hl-keyword">&gt;&gt;&gt;&gt;&gt;&gt;&gt; REPLACE</span></code></pre>
+
+        <h3>应用规则</h3>
+        <ul>
+          <li><code>SEARCH</code> 必须能在目标文件中精确匹配</li>
+          <li>同一个 <code>SEARCH</code> 如果匹配多处，会被拒绝，避免误改</li>
+          <li>同一次批量修改会先校验所有文件和所有块，任意块失败则不写入任何文件</li>
+          <li>换行会兼容 LF / CRLF</li>
+          <li>失败信息会回到 Agent 上下文，触发重新读取原文件和自愈重试</li>
+        </ul>
+
+        <h3>推荐使用场景</h3>
+        <ul>
+          <li>跨多个文件但每个文件只是局部修改</li>
+          <li>修复测试、lint、类型错误时需要保持上下文精确</li>
+          <li>Agent 模式下需要程序可解析、可校验、可回滚的修改格式</li>
+        </ul>
+
+        <h3>不推荐使用场景</h3>
+        <ul>
+          <li>新建文件或整文件重写 → 使用写文件工具</li>
+          <li>只改一个很小的局部块 → 普通 patch 更直接</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 10. Skills -->
+    <section class="section" id="skills">
+      <div class="section-header"><h2>Skills 技能系统</h2></div>
+      <div class="content">
+        <h3>什么是 Skill</h3>
+        <p>Skill 是主 Agent 的<strong>可复用操作手册</strong>，适合沉淀搜索策略、排错流程、发布检查、审查清单和项目固定工作方法。它<strong>不会创建独立子代理</strong>，而是作为项目级上下文供模型按需选择。</p>
+
+        <h3>Skill 文件格式</h3>
+        <p>以目录包为标准，放在 <code>.CodePapr/skills/**/SKILL.md</code>，目录里可放 <code>assets/</code>、<code>references/</code>、<code>scripts/</code> 等资源。</p>
+
+        <pre><code><span class="hl-comment">---</span>
+<span class="hl-keyword">name:</span> search
+<span class="hl-keyword">description:</span> 使用公开网页、官方文档和社区资料进行可验证搜索
+<span class="hl-comment">---</span>
+
+<span class="hl-comment"># 搜索 Skill</span>
+
+当任务需要公开资料、当前事实、第三方 API 用法或报错排查时：
+
+- 官方文档优先，其次 GitHub issue / PR，再看社区答案。
+- 精确报错使用双引号，例如 "Cannot find module"。
+- 限定站点使用 site:，例如 site:developer.mozilla.org fetch abort。
+- 同时带上库名、版本号、运行环境和关键错误码。</code></pre>
+
+        <h3>Skill 加载机制</h3>
+        <ul>
+          <li>运行时只把<strong>用户启用 Skill 的 name + description</strong> 注入稳定上下文</li>
+          <li>模型自行判断是否需要某个 Skill</li>
+          <li>只有选定后才调用 <code>skill</code> 读取完整内容</li>
+          <li>启用状态保存在 <code>.CodePapr/project.sqlite</code></li>
+        </ul>
+
+        <h3>内置 search Skill</h3>
+        <p>默认 <code>search</code> Skill 包含常用资料源和方法：</p>
+        <ul>
+          <li><strong>官方文档：</strong>Microsoft Learn、OpenAI、MDN、Node.js、npm、PyPI、Rust、Tauri、Vite、React</li>
+          <li><strong>代码与问题：</strong>GitHub repositories、issues、pull requests</li>
+          <li><strong>社区资料：</strong>Stack Overflow、包管理器页面、维护者博客</li>
+          <li><strong>搜索方法：</strong><code>site:</code> 限定站点、双引号精确报错、包名加版本号</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 11. Agents -->
+    <section class="section" id="agents">
+      <div class="section-header"><h2>Agent 与子代理</h2></div>
+      <div class="content">
+        <h3>内置子代理</h3>
+        <p>CodePapr 自带四个内置子代理，主 Agent 可通过 <code>task</code> 工具直接调度（verifier 除外，仅供 Goal 循环内部使用），无需额外配置：</p>
+        <table>
+          <thead><tr><th>Agent</th><th>用途</th><th>模型</th><th>工具</th></tr></thead>
+          <tbody>
+            <tr><td><strong>explore</strong></td><td>只读代码分析：搜索项目文件、定位符号、分析依赖关系</td><td>fast</td><td>read, graph, lsp, diagnostics, grep</td></tr>
+            <tr><td><strong>scout</strong></td><td>网络搜索：查找文档、API 参考、最新资料</td><td>fast</td><td>web_search, web_fetch, web_download, browser</td></tr>
+            <tr><td><strong>mentor</strong></td><td>架构/算法/调试高层指导（不写代码、不调工具）</td><td>mentor*</td><td>无</td></tr>
+            <tr><td><strong>verifier</strong></td><td>Goal 验收器（内部）：客观判定目标条件是否达成，防 Worker 伪造成功假象</td><td>fast**</td><td>无</td></tr>
+          </tbody>
+        </table>
+        <p><small>* Mentor 默认使用主模型，可在设置中启用独立导师模型（支持独立的 API Key、Base URL 和模型选择）。<br>** Verifier 是 Goal 自主循环的内部验收器，不暴露给主 Agent 的 <code>task</code> 工具；默认使用快速模型，可在高级设置中切换为主模型。</small></p>
+
+        <h3>自定义子代理</h3>
+        <p>在 <code>.CodePapr/agents/&lt;name&gt;.md</code> 中用 YAML frontmatter + 正文声明一个子代理，主代理可以把子任务委派给它。同名 Agent 会覆盖内置定义。</p>
+
+        <pre><code><span class="hl-comment">---</span>
+<span class="hl-keyword">description:</span> reviewer 负责审查当前改动、定位风险并给出最小修复建议
+<span class="hl-keyword">mode:</span> subagent
+<span class="hl-keyword">model:</span> fast
+<span class="hl-keyword">temperature:</span> 0.2
+<span class="hl-keyword">tools:</span>
+<span class="hl-keyword">  read:</span> true
+<span class="hl-keyword">  grep:</span> true
+<span class="hl-keyword">  diagnostics:</span> true
+<span class="hl-keyword">  git:</span> true
+<span class="hl-keyword">  write:</span> false
+<span class="hl-keyword">  exec:</span> false
+<span class="hl-comment">---</span>
+
+你是 reviewer，一个只读代码审查子代理。
+
+职责：
+- 阅读主代理委派的目标、相关文件和当前 diff。
+- 优先找真实 bug、行为回归、边界条件遗漏和缺失验证。
+- 给出最小修复建议，指出应修改的文件和验证命令。
+
+边界：
+- 默认不直接改文件。
+- 不重复总结无关代码风格，只报告影响正确性、可靠性或可维护性的发现。
+
+输出格式：
+1. Findings：按严重程度列出问题
+2. Suggested Fix：给出最小修改方向
+3. Verification：列出建议运行的验证命令</code></pre>
+
+        <h3>子代理配置说明</h3>
+        <ul>
+          <li><code>model</code>：覆盖模型，可选 <code>fast</code>（快速模型）或具体模型名</li>
+          <li><code>temperature</code>：温度参数，可选数字</li>
+          <li><code>tools</code>：工具开关，缺省继承全部工具，声明空对象 <code>{}</code> 表示无工具</li>
+          <li>文件名（不含 <code>.md</code>）即子代理名称，与内置 Agent 同名则覆盖</li>
+          <li>改 <code>description</code> 让主代理知道何时调用它</li>
+          <li>改 <code>tools</code> 控制读写/命令权限</li>
+        </ul>
+
+        <h3>子任务机制（两种方式）</h3>
+        <table>
+          <thead><tr><th>方式</th><th>触发</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>编排层自动拆解</td><td>系统自动决策</td><td>Agent 模式下，任务含执行动词且够复杂时，LLM 判断是否需要拆成 2-5 个子任务并行/串行执行</td></tr>
+            <tr><td>Task 工具主动委派</td><td>Agent 主动调用</td><td>主 Agent 推理过程中显式调用 <code>task</code> 工具，将子任务委派给独立子 Agent（含内置和自定义）</td></tr>
+          </tbody>
+        </table>
+
+        <h3>子代理运行模型</h3>
+        <ul>
+          <li>每个子代理拥有独立 Session、ToolRegistry（按 tools 过滤）、Provider</li>
+          <li>最大嵌套深度 2 层（子代理不能再委派子代理给自己）</li>
+          <li>子代理最多执行 50 个内部工具轮次（主代理 500）</li>
+          <li>单次工具调用有 90 秒超时保护，超时返回错误给 LLM 自主决策</li>
+          <li>子代理整体有 5 分钟 wall-clock 超时，超时自动取消</li>
+          <li>Explore、Scout 使用快速模型；Mentor 使用独立导师模型或主模型</li>
+          <li>自定义 prompt 可在设置面板的 Mentor 标签页中覆盖</li>
+        </ul>
+
+        <h3>与 AGENTS.md 的区别</h3>
+        <p><code>.CodePapr/AGENTS.md</code> 是全局项目规则，所有模式、所有子代理都会继承；自定义 Agent 是专职子代理，只有主代理通过 task 工具委派子任务时才启用。前者适合写"所有任务都遵守什么"，后者适合写"某一类任务交给谁做、能用哪些工具"。</p>
+      </div>
+    </section>
+
+    <!-- 12. Commands -->
+    <section class="section" id="commands">
+      <div class="section-header"><h2>自定义命令</h2></div>
+      <div class="content">
+        <h3>内置命令</h3>
+        <p>命令支持 <code>--name</code>（推荐）和 <code>/name</code>（兼容旧版）两种格式。命令的 <code>model</code> 字段决定路由：未声明时使用主模型，声明 <code>fast</code> 时使用快速模型，本地命令不消耗 token。</p>
+        <table>
+          <thead><tr><th>命令</th><th>作用</th><th>模型</th><th>示例</th></tr></thead>
+          <tbody>
+            <tr><td><code>/help</code></td><td>列出所有命令及说明</td><td>本地</td><td><code>/help</code></td></tr>
+            <tr><td><code>/commands</code></td><td><code>/help</code> 的别名</td><td>本地</td><td><code>/commands</code></td></tr>
+            <tr><td><code>/compact</code></td><td>强制压缩当前会话上下文，生成检查点释放 token</td><td>本地</td><td><code>/compact</code></td></tr>
+            <tr><td><code>/goal</code></td><td>自主循环：Worker 执行 + Verifier 验收，直到验证条件通过</td><td>本地</td><td><code>/goal exec:npm test</code></td></tr>
+            <tr><td><code>/review</code></td><td>审查当前改动或指定范围</td><td>主模型</td><td><code>/review src/App.tsx</code></td></tr>
+            <tr><td><code>/fix</code></td><td>定位并修复指定问题</td><td>主模型</td><td><code>/fix 登录按钮无响应</code></td></tr>
+            <tr><td><code>/test</code></td><td>补测试或运行相关测试</td><td>主模型</td><td><code>/test src/utils/format.ts</code></td></tr>
+            <tr><td><code>/explain</code></td><td>解释文件、符号、错误或实现</td><td>主模型</td><td><code>/explain handleSubmit 函数</code></td></tr>
+            <tr><td><code>/diagnose</code></td><td>诊断报错、慢操作或异常行为</td><td>主模型</td><td><code>/diagnose 页面加载超过 5 秒</code></td></tr>
+            <tr><td><code>/refactor</code></td><td>保持行为不变的前提下整理代码</td><td>主模型</td><td><code>/refactor src/components/Modal.tsx</code></td></tr>
+            <tr><td><code>/doc</code></td><td>为变更或功能更新文档</td><td>主模型</td><td><code>/doc 新增的退款接口</code></td></tr>
+            <tr><td><code>/new</code></td><td>根据描述从零创建新文件、组件或功能</td><td>主模型</td><td><code>/new 创建用户重置密码 REST API</code></td></tr>
+            <tr><td><code>/optimize</code></td><td>分析并修复性能瓶颈</td><td>主模型</td><td><code>/optimize src/pages/Dashboard.tsx</code></td></tr>
+            <tr><td><code>/search</code></td><td>搜索代码库中的模式、用法、定义或引用</td><td>快速模型</td><td><code>/search auth middleware</code></td></tr>
+            <tr><td><code>/lint</code></td><td>运行 linter 并修复违规</td><td>快速模型</td><td><code>/lint src/</code></td></tr>
+            <tr><td><code>/clean</code></td><td>清理死代码、未用导入和遗留调试语句</td><td>快速模型</td><td><code>/clean src/utils/</code></td></tr>
+            <tr><td><code>/commit</code></td><td>暂存改动并生成规范的 commit message</td><td>快速模型</td><td><code>/commit</code></td></tr>
+            <tr><td><code>/summary</code></td><td>对文件、模块或整个项目做高层概述</td><td>快速模型</td><td><code>/summary src/core/</code></td></tr>
+            <tr><td><code>/build</code></td><td>构建项目并诊断/修复构建错误</td><td>快速模型</td><td><code>/build</code></td></tr>
+          </tbody>
+        </table>
+
+        <h3>自定义命令模板</h3>
+        <p>在 <code>.CodePapr/commands/&lt;name&gt;.md</code> 中声明可复用的提示词模板：</p>
+
+        <pre><code><span class="hl-comment">---</span>
+<span class="hl-keyword">description:</span> 审查并修复 lint
+<span class="hl-keyword">agent:</span> code-reviewer
+<span class="hl-comment">---</span>
+请审查 $ARGUMENTS 的改动，并修复其中的 lint 问题。
+参考规则见 @.CodePapr/AGENTS.md
+当前状态：!`git status -s`</code></pre>
+
+        <h3>模板语法</h3>
+        <table>
+          <thead><tr><th>语法</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>$ARGUMENTS</code></td><td>全部参数</td></tr>
+            <tr><td><code>$1 $2 ...</code></td><td>第 N 个参数</td></tr>
+            <tr><td><code>@path</code></td><td>内联文件内容</td></tr>
+            <tr><td><code>!`cmd`</code></td><td>执行命令并嵌入输出（仅简单命令）</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>使用方式：</strong>在输入框输入 <code>/</code> 会弹出命令面板，列出所有可用命令并支持键盘 ↑↓ 选择。输入 <code>/命令名 参数</code> 即可调用。<code>--</code> 格式兼容旧版。
+        </div>
+      </div>
+    </section>
+
+    <!-- 12.4 Goal 自主循环 -->
+    <section class="section" id="goal">
+      <div class="section-header"><h2>Goal 自主循环</h2></div>
+      <div class="content">
+        <h3>什么是 Goal 循环</h3>
+        <p><code>/goal</code> 是控制命令（与 <code>/compact</code> 同级），启动 <strong>Worker + Evaluator 双模型自主循环</strong>。它将 AI 编程助手从"一问一答"模式变成一个长周期自主运行代理——直到机器可验证的验收条件通过才结束。</p>
+        <p>核心机制不是在 prompt 里加"请一直工作到完成为止"，而是建立了一套工程化的自对弈系统：</p>
+        <ul>
+          <li><strong>Worker（主模型）</strong>：拥有全套工具权限，负责规划、写代码、跑测试</li>
+          <li><strong>Verifier（快速模型，无工具）</strong>：阅读 Worker 的执行记录，判定是否有伪造成功假象</li>
+          <li><strong>客观条件函数</strong>：执行验证命令，用退出码和输出匹配做客观判定</li>
+        </ul>
+        <p>三者协作：<strong>条件函数判定 + Verifier 反伪造 = 双保险</strong>。只有条件满足且 Verifier 确认 Worker 没有作弊，才判定为 SATISFIED。</p>
+
+        <h3>基本用法</h3>
+        <pre><code><span class="hl-comment"># 退出码为 0 即满足</span>
+/goal exec:npm test
+
+<span class="hl-comment"># 退出码 0 且 stdout 匹配正则</span>
+/goal exec:npm test match:"\d+ passed"
+
+<span class="hl-comment"># 复合条件，全部满足</span>
+/goal exec:npm run lint && exec:npm test
+
+<span class="hl-comment"># 自然语言目标 + 验收条件（| 分隔）</span>
+/goal 修复 auth 测试 | exec:npm test</code></pre>
+
+        <h3>条件语法</h3>
+        <table>
+          <thead><tr><th>语法</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>exec:&lt;command&gt;</code></td><td>执行命令，退出码必须为 0</td></tr>
+            <tr><td><code>exec:&lt;cmd&gt; match:"&lt;pattern&gt;"</code></td><td>退出码 0 且 stdout 匹配正则模式</td></tr>
+            <tr><td><code>exec:&lt;cmd1&gt; &amp;&amp; exec:&lt;cmd2&gt;</code></td><td>复合条件，所有子句都必须通过</td></tr>
+            <tr><td><code>&lt;目标&gt; | exec:&lt;cmd&gt;</code></td><td>自然语言目标 + 验收条件，<code>|</code> 分隔</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>关键约束：</strong>条件必须"机器可被客观验证"（如测试通过、退出码为 0、lint 无报错），而不是主观的（如"写一个好看的登录页"）。因为没有工具权限的 Verifier 只能通过终端日志来判定目标是否达成。
+        </div>
+
+        <h3>运行机制</h3>
+        <ol>
+          <li><strong>Worker turn</strong>：主 Agent 执行一轮工作（读文件、写代码、跑命令）</li>
+          <li><strong>客观条件评估</strong>：系统自动执行验证命令，获取退出码和输出</li>
+          <li><strong>Verifier 反伪造检查</strong>：无工具的 Verifier 子代理阅读 Worker 的执行记录，检测是否有"声称测试通过但实际没跑"等完工偏见</li>
+          <li><strong>判定</strong>：条件满足且 Verifier 确认 → <strong>SATISFIED</strong>，循环结束；否则生成详细反馈注入下一轮</li>
+          <li><strong>上下文腐烂治理</strong>：每 5 轮触发自动压缩；状态持久化到 <code>.CodePapr/goal-state.md</code></li>
+        </ol>
+
+        <h3>安全护栏</h3>
+        <table>
+          <thead><tr><th>限制</th><th>默认值</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>最大迭代轮数</td><td>20</td><td>外循环最大轮数，超过自动停止</td></tr>
+            <tr><td>最大运行时间</td><td>30 分钟</td><td>墙钟超时自动停止</td></tr>
+            <tr><td>用户中断</td><td>随时</td><td>GoalBanner 上的"停止"按钮或 CLI 的 Ctrl+C</td></tr>
+            <tr><td>状态持久化</td><td>每轮</td><td>写入 <code>.CodePapr/goal-state.md</code>，防上下文腐烂</td></tr>
+          </tbody>
+        </table>
+
+        <h3>配置</h3>
+        <p>在设置面板的<strong>高级</strong>标签页中配置 Goal 循环参数：</p>
+        <ul>
+          <li><strong>最大迭代轮数</strong>：默认 20，可调 1-100</li>
+          <li><strong>最大运行时间</strong>：默认 30 分钟，按分钟配置</li>
+          <li><strong>Verifier 模型</strong>：默认快速模型（更快更便宜），可切换为主模型（更准确）</li>
+          <li><strong>Verifier Token 上限</strong>：默认 1000</li>
+          <li><strong>Verifier 温度</strong>：默认 0.1（越低越确定）</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 12.5 MCP -->
+    <section class="section" id="mcp">
+      <div class="section-header"><h2>MCP 工具集成</h2></div>
+      <div class="content">
+        <h3>什么是 MCP</h3>
+        <p><strong>Model Context Protocol</strong>（MCP）是一种开放协议，允许 Agent 通过外部工具服务器扩展能力。CodePapr 内置 MCP host，可同时连接多个 MCP 服务器，把外部工具透出给主 Agent 调用。</p>
+        <p>每个 MCP 工具会以 <code>mcp__&lt;serverId&gt;__&lt;toolName&gt;</code> 形式注册，与内置 25 个工具并列出现在 ToolRegistry 中。</p>
+
+        <h3>三种传输模式</h3>
+        <table>
+          <thead><tr><th>Transport</th><th>说明</th><th>适用场景</th></tr></thead>
+          <tbody>
+            <tr><td><code>stdio</code></td><td>子进程 + stdin/stdout JSON-RPC</td><td>本地命令行 MCP 服务器（npx / uvx / python 等）</td></tr>
+            <tr><td><code>sse</code></td><td>Server-Sent Events</td><td>远程 HTTP MCP 服务器，单向流式</td></tr>
+            <tr><td><code>streamable-http</code></td><td>Streamable HTTP</td><td>远程 HTTP MCP 服务器，双向流式</td></tr>
+          </tbody>
+        </table>
+
+        <h3>每个 MCP 服务器的字段</h3>
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>name</code></td><td>string</td><td>显示名称</td></tr>
+            <tr><td><code>category</code></td><td><code>search</code> / <code>database</code> / <code>custom</code></td><td>分类，<code>search</code> 启用后会替代 <code>web_search</code> 路由</td></tr>
+            <tr><td><code>transport</code></td><td><code>stdio</code> / <code>sse</code> / <code>streamable-http</code></td><td>传输模式</td></tr>
+            <tr><td><code>command</code> / <code>args</code></td><td>string</td><td>仅 stdio 使用：可执行命令和参数（参数支持引号分组）</td></tr>
+            <tr><td><code>url</code></td><td>string</td><td>仅 sse / streamable-http 使用：HTTP 端点 URL</td></tr>
+            <tr><td><code>env</code></td><td>多行 KEY=value</td><td>仅 stdio 使用：环境变量；不会进入模型上下文</td></tr>
+            <tr><td><code>headers</code></td><td>多行 Header-Name: value</td><td>仅 sse / streamable-http 使用：HTTP 请求头，常用于认证</td></tr>
+            <tr><td><code>allowedTools</code></td><td>逗号分隔，支持 <code>*</code> 通配</td><td>白名单，留空表示允许全部</td></tr>
+            <tr><td><code>deniedTools</code></td><td>逗号分隔，支持 <code>*</code> 通配</td><td>黑名单，优先级高于白名单</td></tr>
+            <tr><td><code>permissionMode</code></td><td><code>read-only</code> / <code>read-write</code> / <code>dangerous</code></td><td>权限分级，决定调用前是否需要确认</td></tr>
+            <tr><td><code>requireConfirmation</code></td><td>boolean</td><td>每次调用前都弹出确认</td></tr>
+            <tr><td><code>timeoutSeconds</code></td><td>5–600</td><td>单次工具调用超时</td></tr>
+          </tbody>
+        </table>
+
+        <h3>预置示例</h3>
+        <p>桌面端默认提供三个开箱可用的 MCP 服务器（默认全部禁用，需手动启用）：</p>
+        <table>
+          <thead><tr><th>名称</th><th>分类</th><th>命令</th><th>用途</th></tr></thead>
+          <tbody>
+            <tr><td>DuckDuckGo Search MCP</td><td>search</td><td><code>npx -y duckduckgo-mcp-server</code></td><td>免 API key 网页搜索</td></tr>
+            <tr><td>Postgres MCP</td><td>database</td><td><code>npx -y @modelcontextprotocol/server-postgres &lt;DSN&gt;</code></td><td>SQL 查询、表结构发现，默认禁写</td></tr>
+            <tr><td>SQLite MCP</td><td>database</td><td><code>uvx mcp-server-sqlite --db-path ./database.sqlite</code></td><td>本地 SQLite 数据库分析</td></tr>
+          </tbody>
+        </table>
+
+        <h3>stdio 服务器示例</h3>
+        <pre><code><span class="hl-comment"># 名称</span>
+DuckDuckGo Search MCP
+
+<span class="hl-comment"># Transport</span>
+stdio
+
+<span class="hl-comment"># 命令 / 参数</span>
+<span class="hl-keyword">command:</span> npx
+<span class="hl-keyword">args:</span> -y duckduckgo-mcp-server
+
+<span class="hl-comment"># 环境变量（每行一个 KEY=value）</span>
+<span class="hl-keyword">env:</span>
+HTTP_PROXY=http://127.0.0.1:7890
+USER_AGENT=CodePapr/0.1.0
+
+<span class="hl-comment"># 工具过滤</span>
+<span class="hl-keyword">allowedTools:</span> duckduckgo_web_search</code></pre>
+
+        <h3>sse / streamable-http 服务器示例</h3>
+        <pre><code><span class="hl-comment"># 名称</span>
+Remote Knowledge Base
+
+<span class="hl-comment"># Transport</span>
+streamable-http
+
+<span class="hl-comment"># URL</span>
+<span class="hl-keyword">url:</span> https://example.com/mcp
+
+<span class="hl-comment"># Headers（每行一个 Header-Name: value）</span>
+<span class="hl-keyword">headers:</span>
+Authorization: Bearer your-token-here
+X-API-Key: your-api-key</code></pre>
+
+        <h3>权限模式</h3>
+        <ul>
+          <li><strong>read-only</strong>：只读工具，调用无需确认（适合搜索、查询）</li>
+          <li><strong>read-write</strong>：可写工具，配合 <code>requireConfirmation</code> 使用</li>
+          <li><strong>dangerous</strong>：危险工具（如执行 shell、删除数据），强烈建议开启 <code>requireConfirmation</code></li>
+        </ul>
+
+        <h3>工具过滤</h3>
+        <p>通过 <code>allowedTools</code> 和 <code>deniedTools</code> 控制每个服务器暴露的工具子集：</p>
+        <ul>
+          <li>支持 <code>*</code> 通配符（如 <code>describe*</code>、<code>list_*</code>）</li>
+          <li>逗号分隔多个模式</li>
+          <li>黑名单优先级高于白名单</li>
+          <li>典型场景：Postgres MCP 默认 <code>allowedTools=query,describe*,list*</code> + <code>deniedTools=delete*,drop*,truncate*,update*,insert*</code>，确保只读</li>
+        </ul>
+
+        <h3>全局开关</h3>
+        <table>
+          <thead><tr><th>设置</th><th>默认</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>enabled</code></td><td>false</td><td>MCP 总开关，关闭后所有 MCP 服务器停用</td></tr>
+            <tr><td><code>exposeTools</code></td><td>true</td><td>是否把 MCP 工具透出给 Agent；关闭后 MCP 仅作为后台连接，不进入工具列表</td></tr>
+            <tr><td><code>resultMaxBytes</code></td><td>200,000</td><td>单次工具调用结果的最大字节数（1KB – 5MB）</td></tr>
+          </tbody>
+        </table>
+
+        <h3>常用 MCP 服务器推荐</h3>
+        <ul>
+          <li><strong>@modelcontextprotocol/server-filesystem</strong>：受限文件系统访问</li>
+          <li><strong>@modelcontextprotocol/server-postgres</strong>：Postgres 数据库</li>
+          <li><strong>@modelcontextprotocol/server-github</strong>：GitHub API</li>
+          <li><strong>@modelcontextprotocol/server-slack</strong>：Slack 集成</li>
+          <li><strong>mcp-server-sqlite</strong>：SQLite 数据库</li>
+          <li><strong>duckduckgo-mcp-server</strong>：免费网页搜索</li>
+        </ul>
+
+        <div class="callout">
+          <strong>缓存影响：</strong>启用的 MCP 服务器列表会进入 <code>ImmutablePrefix</code> 的工具定义哈希。新增/删除/修改 MCP 服务器都会破坏前缀缓存，下一轮请求需要重新建立缓存。建议在长会话开始前就完成 MCP 配置。
+        </div>
+
+        <div class="callout success">
+          <strong>测试连接：</strong>MCP 设置面板提供"测试"按钮，可在不进入会话的情况下连接服务器、列出工具、应用过滤规则，确认配置无误后再启用。
+        </div>
+      </div>
+    </section>
+
+    <!-- 13. Architecture -->
+    <section class="section" id="architecture">
+      <div class="section-header"><h2>系统架构</h2></div>
+      <div class="content">
+        <h3>架构概览</h3>
+        <div class="diagram">User → Desktop Workbench → Shared Agent Runtime
+                                  ↓
+                    ┌─────────────┼──────────────┐
+              Provider          SQLite        Tool Registry
+              Adapters      (App/Project)   (Workspace Tools)
+                              State
+                    ↓
+        ┌──────────┼──────────┐
+    DeepSeek   OpenAI   Claude
+</div>
+
+        <h3>包级职责</h3>
+        <table>
+          <thead><tr><th>包</th><th>角色</th><th>主要责任</th></tr></thead>
+          <tbody>
+            <tr><td><code>@codepapr/types</code></td><td>共享协议层</td><td>统一消息、请求、响应、工具和统计类型</td></tr>
+            <tr><td><code>@codepapr/common</code></td><td>公共基础设施</td><td>日志、哈希与通用工具</td></tr>
+            <tr><td><code>@codepapr/core</code></td><td>运行时核心</td><td>Agent、Session、ToolRegistry、缓存分区、ProjectGraph、Prompt 组装</td></tr>
+            <tr><td><code>@codepapr/api</code></td><td>Provider 适配层</td><td>RequestBuilder、CacheValidator、provider 实现</td></tr>
+            <tr><td><code>@codepapr/db</code></td><td>持久化层</td><td>SQLite 封装与 repository</td></tr>
+            <tr><td><code>@codepapr/cli</code></td><td>终端 Agent 入口</td><td>组装 provider、workspace tools、`codepapr` 命令行入口（chat / ask / plan / agent / init / session / stats / config）</td></tr>
+            <tr><td><code>@codepapr/editor</code></td><td>编辑器契约</td><td>框架无关的 Monaco 类型、标记、导航与静态检查契约</td></tr>
+            <tr><td><code>@codepapr/ui</code></td><td>桌面工作台</td><td>React、Zustand、Tauri、WorkerBackedAgent</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Rust 后端领域模块</h3>
+        <p>Tauri 后端按职责拆分为多个模块：</p>
+        <ul>
+          <li><code>browser</code>：headless Chromium 浏览器自动化</li>
+          <li><code>shell</code>：前台/后台命令、持久 Shell 会话、命令安全守卫</li>
+          <li><code>web</code>：HTTP fetch、网页提取、多引擎搜索（SearXNG 优先，失败自动降级）</li>
+          <li><code>workspace_fs</code>：文件列表、读取、写入、SEARCH/REPLACE diff、搜索</li>
+          <li><code>task_queue</code>：重 I/O 操作串行化队列</li>
+          <li><code>db</code>：应用与项目级 SQLite 持久化</li>
+          <li><code>lsp</code>：LSP server 进程管理</li>
+          <li><code>symbol_provider</code>：tree-sitter fallback 符号提取</li>
+          <li><code>mcp_host</code>：MCP 工具服务器宿主</li>
+          <li><code>shared</code>：路径归一化、workspace 路径解析、通用工具</li>
+        </ul>
+
+        <h3>桌面端 Agent 桥接</h3>
+        <div class="diagram">ChatPanel → agentStore.sendMessage() → WorkerBackedAgent.chat()
+                                         ├─ Worker Thread: Agent.chat() → LLM
+                                         └─ Main Thread: tool execution → Tauri invoke
+</div>
+        <p>桌面端不直接调用 core Agent，而是通过 <code>WorkerBackedAgent</code> 将 LLM 聊天循环卸载到 Web Worker 中，确保长任务不阻塞 UI。</p>
+
+        <h3>Worker 崩溃恢复 &amp; 流式快照</h3>
+        <ul>
+          <li><strong>崩溃捕获</strong>：主线程会捕获 <code>WorkerCrashError</code>，自动清空当前 agent 实例（下次发送会创建新 Worker），并在错误消息前追加"Agent Worker 崩溃。"前缀</li>
+          <li><strong>流式快照</strong>：流式响应过程中每约 2 秒（<code>STREAM_SNAPSHOT_INTERVAL_MS</code>）触发一次 <code>onStreamSnapshot</code>，把 in-flight 内容持久化到项目 SQLite</li>
+          <li><strong>掉电恢复</strong>：崩溃 / 强退 / 掉电后下次启动可看到崩溃前已写入的对话片段，不会丢失大块进度</li>
+        </ul>
+
+        <h3>技术栈总览</h3>
+        <table>
+          <thead><tr><th>层</th><th>技术</th></tr></thead>
+          <tbody>
+            <tr><td>前端 UI</td><td>React 18、TypeScript、Zustand 5、Monaco Editor、Tailwind CSS 3、Vite 8</td></tr>
+            <tr><td>桌面框架</td><td>Tauri 2（Rust）</td></tr>
+            <tr><td>Rust 后端</td><td>rusqlite (SQLite)、headless_chrome (浏览器)、tree-sitter (16 种语言)、LSP stdio 桥接（15 个语言族）</td></tr>
+            <tr><td>Agent 卸载</td><td>Web Workers</td></tr>
+            <tr><td>测试</td><td>Vitest 4、Playwright（UI E2E）</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 14. Cache -->
+    <section class="section" id="cache">
+      <div class="section-header"><h2>DeepSeek 缓存优化</h2></div>
+      <div class="content">
+        <h3>三层 Prompt 注入</h3>
+        <p>系统将 prompt 分为三层注入，按稳定度从高到低排列以最大化 DeepSeek 自动前缀缓存命中：</p>
+
+        <table>
+          <thead><tr><th>层</th><th>注入位置</th><th>内容</th><th>稳定性</th></tr></thead>
+          <tbody>
+            <tr><td>第一层</td><td>System Prompt</td><td>Base Identity + Rules + Mode + Workspace Path + Core Constraints</td><td>跨会话复用</td></tr>
+            <tr><td>第二层</td><td>Session Bootstrap</td><td>Skills Summary + ProjectGraph + Custom Guidance</td><td>跨轮次完全稳定</td></tr>
+            <tr><td>第三层</td><td>Runtime User Prompt</td><td>Mode Header + User Input + Diagnostics</td><td>每轮可变</td></tr>
+          </tbody>
+        </table>
+
+        <h3>缓存命中模式</h3>
+        <div class="diagram">同一会话多轮工具调用：
+  Round 1: [system][bootstrap][user]                                   ← 全部缓存
+  Round 2: [system][bootstrap][user][asst_1][tool_1]                   ← 前缀命中
+  Round 3: [system][bootstrap][user][asst_1][tool_1][asst_2][tool_2]   ← 前缀命中
+
+跨会话（同项目）：
+  Session A: [system][bootstrap][user_A]  → system+bootstrap 缓存复用于 Session B
+
+跨会话（不同项目）：
+  各有不同 workspace path → system prompt 的 base+constraints 部分仍可复用
+</div>
+
+        <h3>关键不变量</h3>
+        <ul>
+          <li>用户自定义提示词进入 session bootstrap 而非每轮 user prompt</li>
+          <li>Skills 进入 bootstrap 而非 system prefix</li>
+          <li>Workspace 路径只出现在 system prompt，不在 bootstrap 中重复</li>
+          <li>Custom guidance 只在 bootstrap 中出现一次</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 15. LSP -->
+    <section class="section" id="lsp">
+      <div class="section-header"><h2>语言智能与 LSP</h2></div>
+      <div class="content">
+        <h3>LSP 桥接架构</h3>
+        <p>桌面端 LSP 采用<strong>Tauri 原生宿主 + stdio JSON-RPC</strong> 的结构，通过 <code>src-tauri/src/lsp.rs</code> 管理 language server 子进程、stdin 写入、stdout reader 线程和消息队列。</p>
+
+        <h3>支持的语言族（15 种）</h3>
+        <table>
+          <thead><tr><th>语言</th><th>主 LSP Server</th><th>类型</th><th>内置</th></tr></thead>
+          <tbody>
+            <tr><td>TypeScript / JS / TSX / JSX</td><td>typescript-language-server</td><td>Node.js npm</td><td>是</td></tr>
+            <tr><td>HTML</td><td>vscode-html-language-server</td><td>Node.js npm</td><td>是</td></tr>
+            <tr><td>CSS / SCSS / LESS</td><td>vscode-css-language-server</td><td>Node.js npm</td><td>是</td></tr>
+            <tr><td>JSON / JSONC</td><td>vscode-json-language-server</td><td>Node.js npm</td><td>是</td></tr>
+            <tr><td>YAML</td><td>yaml-language-server</td><td>Node.js npm</td><td>是</td></tr>
+            <tr><td>Python</td><td>pyright</td><td>Node.js npm</td><td>是</td></tr>
+            <tr><td>ShellScript</td><td>bash-language-server</td><td>Node.js npm</td><td>是</td></tr>
+            <tr><td>C#</td><td>csharp-ls / CodePapr.CSharp.Analyzer / omnisharp</td><td>.NET binary</td><td>是</td></tr>
+            <tr><td>Rust</td><td>rust-analyzer</td><td>Native binary</td><td>是</td></tr>
+            <tr><td>Java</td><td>Eclipse JDTLS + Temurin JRE 21</td><td>Java binary</td><td>是</td></tr>
+            <tr><td>C / C++</td><td>clangd v22.1.6</td><td>Native binary</td><td>是</td></tr>
+            <tr><td>Go</td><td>gopls</td><td>Native binary</td><td>是（尽力）</td></tr>
+            <tr><td>Swift</td><td>sourcekit-lsp（macOS Xcode toolchain）</td><td>系统</td><td>否</td></tr>
+            <tr><td>SQL</td><td>sqls</td><td>Native binary</td><td>是</td></tr>
+            <tr><td>Markdown</td><td>marksman</td><td>Native binary</td><td>是</td></tr>
+          </tbody>
+        </table>
+
+        <h3>C# LSP 优先级链</h3>
+        <p>C# 的 LSP 有<strong>多层回退</strong>机制：</p>
+        <ol>
+          <li>系统 PATH 或 <code>~/.dotnet/tools</code> 中的 <code>csharp-ls</code></li>
+          <li>发布包内置的 <code>csharp-ls</code> 二进制（<code>generated/lsp-tools/csharp-ls/bin/</code>）</li>
+          <li>内置 <code>CodePapr.CSharp.Analyzer</code>（自定义 Roslyn sidecar，支持跨文件和跨 ProjectReference 解析）</li>
+          <li><code>dotnet run --project CodePapr.CSharp.Analyzer.csproj</code>（开发态 / 源码 fallback）</li>
+          <li>系统 PATH 上的 <code>omnisharp -lsp</code> 或 <code>OmniSharp -lsp</code>（仅静态候选）</li>
+          <li>内建 tree-sitter 符号解析（最终兜底）</li>
+        </ol>
+
+        <h3>管理安装（Managed LSP）</h3>
+        <p>桌面端会在运行时按需托管安装缺失的 LSP：</p>
+        <ul>
+          <li><strong>Node 系（5 个 npm 包，提供 7 种语言服务）：</strong>typescript-language-server（TypeScript / JavaScript）、vscode-langservers-extracted（HTML / CSS / JSON）、yaml-language-server、pyright、bash-language-server — 通过 npm 安装，使用内置 Node.js runtime v20.12.2</li>
+          <li><strong>二进制系（6 个）：</strong>clangd v22.1.6、rust-analyzer、JDTLS + Temurin JRE 21、sqls、marksman、gopls — 从官方源下载</li>
+          <li><strong>C#：</strong>通过 <code>dotnet tool install -g csharp-ls</code> 安装，或使用内置 Roslyn sidecar</li>
+          <li>可通过 <code>CODEPAPR_DISABLE_MANAGED_LSP_DOWNLOAD=1</code> 禁用自动托管下载</li>
+        </ul>
+
+        <h3>Tree-sitter 语法解析（16 种语言）</h3>
+        <p>内建 tree-sitter 语法树解析，用于 ProjectGraph 和 fallback 符号提取：TypeScript、JavaScript、Python、Rust、Java、Go、C++、Bash、C#、CSS、HTML、JSON、PHP、Ruby、Kotlin、Swift。</p>
+
+        <h3>LSP 加载策略</h3>
+        <ul>
+          <li>工作区启动时<strong>不会批量预热 LSP</strong></li>
+          <li>当前文件显示后才异步加载该文件的 LSP</li>
+          <li>生成/修改/保存写盘后异步刷新相关文件的 diagnostics 和符号缓存</li>
+          <li>LSP 后端缓存全 workspace diagnostics，跨文件错误也能被检测</li>
+          <li>代码区只有有问题时才显示提示，没有问题时保持干净</li>
+          <li>上层 LSP 不可用时，回退到内建 tree-sitter fallback 符号解析</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 16. Verify & Release -->
+    <section class="section" id="verify">
+      <div class="section-header"><h2>验证与发布</h2></div>
+      <div class="content">
+        <h3>验证命令矩阵</h3>
+        <table>
+          <thead><tr><th>命令</th><th>范围</th><th>适合场景</th></tr></thead>
+          <tbody>
+            <tr><td><code>npm run build</code></td><td>全 workspace 构建</td><td>改完源码后确认产物可生成</td></tr>
+            <tr><td><code>npm run test</code></td><td>全 workspace 测试</td><td>日常主回归</td></tr>
+            <tr><td><code>npm run test:e2e</code></td><td>CLI E2E</td><td>改到 CLI、会话装配或 scripted provider</td></tr>
+            <tr><td><code>npm run test:e2e:ui</code></td><td>Playwright UI E2E</td><td>改到桌面端 UI 组件、Toast、权限、Code Review</td></tr>
+            <tr><td><code>npm run test:e2e:ui:install</code></td><td>安装 Playwright Chromium</td><td>首次运行 UI E2E 前准备</td></tr>
+            <tr><td><code>npm run lint</code></td><td>静态检查</td><td>提交前质量门禁</td></tr>
+            <tr><td><code>npm run audit</code></td><td>安全审计</td><td>发布前或依赖变更后</td></tr>
+            <tr><td><code>npm run smoke:agent-tools</code></td><td>真实模型工具烟测</td><td>改到工具选择、shell、浏览器交互</td></tr>
+            <tr><td><code>npm run smoke:lsp-preview</code></td><td>多语言 LSP 烟测</td><td>改到 LSP hover、definition</td></tr>
+            <tr><td><code>npm run verify</code></td><td>最完整验证</td><td>本地发布前（含 cargo check）</td></tr>
+          </tbody>
+        </table>
+
+        <h3>推荐提交前回归顺序</h3>
+        <pre><code><span class="hl-keyword">npm</span> run build
+<span class="hl-keyword">npm</span> run test
+<span class="hl-keyword">npm</span> run test:e2e
+<span class="hl-keyword">npm</span> run test:e2e:ui
+<span class="hl-keyword">npm</span> run verify</code></pre>
+
+        <p>首次运行 UI E2E 前需要安装浏览器依赖：</p>
+        <pre><code><span class="hl-keyword">npm</span> run test:e2e:ui:install</code></pre>
+
+        <h3>桌面端发布</h3>
+        <pre><code><span class="hl-comment"># 开发调试</span>
+<span class="hl-keyword">npm</span> run debug
+
+<span class="hl-comment"># 优化后的桌面运行版本（不打包）</span>
+<span class="hl-keyword">npm</span> run release
+
+<span class="hl-comment"># 生成安装包（.dmg / .msi）并整理到 Release/</span>
+<span class="hl-keyword">npm</span> run publish</code></pre>
+
+        <h3>发布辅助脚本</h3>
+        <ul>
+          <li>macOS: <code>./publish-codepapr.command</code></li>
+          <li>Windows: <code>publish-codepapr.cmd</code></li>
+        </ul>
+
+        <h3>发布前检查</h3>
+        <pre><code><span class="hl-keyword">npm</span> run release:prep
+<span class="hl-keyword">npm</span> run publish:dry-run</code></pre>
+
+        <div class="callout success">
+          <strong>发布包内置内容：</strong>官方桌面发布包会同时内置默认 LSP 所需的 Node.js runtime v20.12.2、5 个 Node 系 npm 包（typescript-language-server、vscode-langservers-extracted、yaml-language-server、pyright、bash-language-server，提供 TypeScript / JavaScript / HTML / CSS / JSON / YAML / Python / ShellScript 共 8 种语言服务）、C# Roslyn sidecar + .NET SDK 10.0、JDTLS + Temurin JRE 21、clangd v22.1.6、rust-analyzer、sqls、marksman 和 gopls。用户首次使用默认语言时不需要再额外下载这些组件。
+        </div>
+      </div>
+    </section>
+
+    <!-- 17. Workflows -->
+    <section class="section" id="workflows">
+      <div class="section-header"><h2>典型工作流</h2></div>
+      <div class="content">
+        <h3>1. 先理解再执行</h3>
+        <p>适合第一次接手仓库或需求还不够清晰时：</p>
+        <ol>
+          <li><strong>Ask：</strong>解释系统结构、定位模块</li>
+          <li><strong>Plan：</strong>输出任务清单和验证方案</li>
+          <li><strong>Agent：</strong>按清单实施</li>
+        </ol>
+
+        <h3>2. 直接修复问题</h3>
+        <p>适合你已经知道目标，只是不想手动查和改：</p>
+        <pre><code>修复 packages/@codepapr/api 里缓存统计不正确的问题。
+先定位统计汇总逻辑，再做最小修改，最后跑相关测试。</code></pre>
+
+        <h3>3. 启动前端并在应用内预览</h3>
+        <p>适合 UI 调整、页面行为验证和预览联动：</p>
+        <ol>
+          <li>让 Agent 启动 preview session 或后台命令</li>
+          <li>在应用内预览中查看页面</li>
+          <li>如果还要点页面、填表单或截图，继续用浏览器工具</li>
+        </ol>
+
+        <h3>4. 保留终端上下文做连续操作</h3>
+        <p>适合脚本、REPL、交互式 CLI 或多步 shell 流程：</p>
+        <ol>
+          <li>打开 shell session</li>
+          <li>连续发送命令</li>
+          <li>按输出继续推进</li>
+          <li>完成后关闭 session</li>
+        </ol>
+
+        <h3>5. 复盘历史会话与成本</h3>
+        <ul>
+          <li>查看 session 列表</li>
+          <li>查看指定 session 的 stats（缓存命中/未命中/token 使用）</li>
+          <li>对照当前模型设置判断成本是否合理</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 18. Cost -->
+    <section class="section" id="cost">
+      <div class="section-header"><h2>成本与模型选择</h2></div>
+      <div class="content">
+        <h3>DeepSeek 模型参考</h3>
+        <table>
+          <thead><tr><th>模型</th><th>上下文</th><th>最大输出</th><th>缓存命中输入</th><th>缓存未命中输入</th><th>输出</th><th>并发</th></tr></thead>
+          <tbody>
+            <tr><td><code>deepseek-v4-flash</code></td><td>1M</td><td>384K</td><td>0.02 元/M tokens</td><td>1 元/M tokens</td><td>2 元/M tokens</td><td>2500</td></tr>
+            <tr><td><code>deepseek-v4-pro</code></td><td>1M</td><td>384K</td><td>0.025 元/M tokens</td><td>3 元/M tokens</td><td>6 元/M tokens</td><td>500</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout warn">
+          <strong>注意：</strong>价格会变更，最终请始终以 <a href="https://api-docs.deepseek.com/zh-cn/quick_start/pricing" target="_blank" rel="noopener">DeepSeek 官方价格页</a> 为准。
+        </div>
+
+        <h3>在 CodePapr 里怎么选</h3>
+        <ul>
+          <li>主模型默认是 <code>deepseek-v4-pro</code>——用于 Ask、Plan、Agent 主执行流程</li>
+          <li>快速模型默认是 <code>deepseek-v4-flash</code>——用于上下文压缩、子任务规划、只读轻型子代理</li>
+          <li>思考强度（thinkingEffort）默认为 <code>max</code>（最强推理），可在 LLM 设置 tab 中切换为 <code>high</code></li>
+        </ul>
+
+        <h3>成本优化建议</h3>
+        <ul>
+          <li>Ask 和轻分析任务优先用更便宜模型</li>
+          <li>大改动前先走 Plan，减少无效执行轮次</li>
+          <li>让任务描述更具体，减少模型反复搜索和修复的轮数</li>
+          <li>保持系统提示与工具边界稳定，最大化前缀缓存命中</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 19. FAQ -->
+    <section class="section" id="faq">
+      <div class="section-header"><h2>常见问题</h2></div>
+      <div class="content">
+        <h3>1. 启动后提示没有 API key</h3>
+        <p>先检查桌面端设置是否已保存，以及是否设置了对应环境变量（<code>DEEPSEEK_API_KEY</code> / <code>OPENAI_API_KEY</code> / <code>ANTHROPIC_API_KEY</code>）。</p>
+
+        <h3>2. 安装或 CLI 命令跑不起来 / 找不到</h3>
+        <p>确认是否执行过 <code>npm install</code> 和 <code>npm run build</code>，以及当前仓库是否位于 OneDrive 路径下导致 .bin shim 异常。</p>
+
+        <h3>3. Agent 遇到 vite、tsc、eslint、模块缺失错误</h3>
+        <p>优先当成依赖未安装或本地包未构建，而不是先怀疑云同步或磁盘问题。</p>
+
+        <h3>4. 浏览器工具不可用</h3>
+        <p>通常是因为本机没有可检测到的 Chrome 或 Chromium 兼容浏览器。</p>
+
+        <h3>5. 改完代码后测试还是旧结果</h3>
+        <p>这个仓库里不少包会通过各自的 dist 入口参与测试或引用。改了源文件后，如果结果看起来没变，先重新 build 受影响包，再跑验证。</p>
+
+        <h3>6. 修改源码后构建原则</h3>
+        <p class="callout success">
+          <strong>重要：</strong>改源码 → 先 build → 再跑受影响测试 → 再跑更大范围验证。当结果看起来像"没生效"时，先怀疑 build 没补，而不是先怀疑运行时异常。
+        </p>
+
+        <h3>7. 如何使用本地模型</h3>
+        <p>在设置中可以接入本地模型 provider（OpenAI 兼容端点），用于离线或私有部署场景。在支持的模型下，可直接向聊天框粘贴或拖入图片作为输入。</p>
+
+        <h3>8. 为什么读取某些绝对路径会弹窗</h3>
+        <p>这是桌面端的外部路径权限机制。当 Agent 尝试读取或列出项目外的绝对路径时，会请求你显式授权，保证不会未经允许访问系统文件。</p>
+
+        <h3>9. UI E2E 跑不起来</h3>
+        <p>先确认是否已安装 Playwright 浏览器依赖：</p>
+        <pre><code><span class="hl-keyword">npm</span> run test:e2e:ui:install</code></pre>
+        <p>UI E2E 使用 Chromium 在无 Tauri webview 的 mock 环境下运行，不需要真实模型配置。</p>
+
+        <h3>使用建议</h3>
+        <p><strong>新手：</strong>先用 Ask 理解系统 → 再用 Plan 看清楚改动范围 → 最后用 Agent 做真正执行。</p>
+        <p><strong>老手：</strong>直接在 Agent 模式里给明确目标 → 明确影响文件和验证要求 → 用桌面端完成对话、Git、预览和浏览器联动。</p>
+      </div>
+    </section>
+
+    <hr>
+    <p style="color:var(--foreground-dim);font-size:0.8rem;text-align:center;padding:20px 0">
+      CodePapr v0.1.0 · 本教程基于项目源码及文档编写 · 内容持续更新中
+    </p>
+  </main>
+</div>
+
+<script>
+// Scroll progress bar
+window.addEventListener('scroll', () => {
+  const winScroll = document.documentElement.scrollTop;
+  const height = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+  const scrolled = (winScroll / height) * 100;
+  document.getElementById('scrollProgress').style.width = scrolled + '%';
+});
+
+// Active nav tracking
+const sections = document.querySelectorAll('.section');
+const navItems = document.querySelectorAll('.nav-item');
+
+function updateActiveNav() {
+  let current = '';
+  sections.forEach(section => {
+    const sectionTop = section.offsetTop - 120;
+    if (window.scrollY >= sectionTop) {
+      current = section.getAttribute('id');
+    }
+  });
+  navItems.forEach(item => {
+    item.classList.remove('active');
+    const href = item.getAttribute('onclick');
+    if (href && href.includes(`'${current}'`)) {
+      item.classList.add('active');
+    }
+  });
+}
+window.addEventListener('scroll', updateActiveNav);
+
+function scrollToSection(id) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    closeSidebar();
+  }
+}
+
+// Sidebar toggle on mobile
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebarBackdrop').classList.toggle('show');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarBackdrop').classList.remove('show');
+}
+document.getElementById('sidebarBackdrop').addEventListener('click', closeSidebar);
+
+// Mobile menu
+function toggleMobileMenu() {
+  document.getElementById('mobileNav').classList.toggle('open');
+}
+function mobileNavTo(id) {
+  scrollToSection(id);
+  document.getElementById('mobileNav').classList.remove('open');
+}
+
+// Keyboard shortcut
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebarBackdrop').classList.toggle('show');
+  }
+});
+
+// Initial active state
+updateActiveNav();
+
+// Theme
+(function(){
+  const html=document.documentElement;
+  const stored=localStorage.getItem('codepapr-theme');
+  if(stored==='light'){html.setAttribute('data-theme','light')}
+  else if(stored==='dark'){html.setAttribute('data-theme','dark')}
+  window.toggleTheme=function(){
+    const cur=html.getAttribute('data-theme');
+    const next=(!cur||cur==='dark')?'light':'dark';
+    html.setAttribute('data-theme',next);
+    localStorage.setItem('codepapr-theme',next);
+  };
+})();
+
+  window.showComingSoon=function(e){
+    e&&e.preventDefault();
+    document.getElementById('comingSoonModal').classList.add('open');
+  };
+  window.closeComingSoon=function(e){
+    if(e&&e.target!==e.currentTarget)return;
+    document.getElementById('comingSoonModal').classList.remove('open');
+  };
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')closeComingSoon()});
+
+</script>
+
+<div class="modal-overlay" id="comingSoonModal" onclick="closeComingSoon(event)">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-icon">🚀</div>
+    <h2>敬请期待</h2>
+    <p>CodePapr 正在紧锣密鼓地完善中，即将正式发布。感谢你的关注！</p>
+    <button class="modal-close" onclick="closeComingSoon()">我知道了</button>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,617 @@
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useAgentStore } from '../store/agentStore';
+import {
+  clearMcpToolDefinitionCache,
+  clearNativeMcpToolCache,
+  disconnectAllMcpServers,
+  disconnectMcpServer,
+  listMcpServerStatus,
+  loadMcpToolDefinitions,
+  testMcpServer,
+} from '../tools/mcpTools';
+import {
+  createBlankMcpServer,
+  normalizeMcpSettings,
+  type McpServerConfig,
+  type McpServerStatus,
+  type McpSettings,
+} from '../utils/mcpTypes';
+import type { Lang } from '../utils/i18n';
+
+function copy(lang: Lang | undefined) {
+  if (lang === 'en') {
+    return {
+      title: 'MCP Host',
+      desc: 'Let the agent call external MCP servers through the Rust rmcp client/host.',
+      global: 'Global',
+      enabled: 'Enable MCP',
+      expose: 'Expose MCP tools to agent',
+      resultLimit: 'Result limit bytes',
+      presets: 'Presets',
+      servers: 'Servers',
+      add: 'Add custom server',
+      test: 'Refresh tools',
+      testing: 'Refreshing...',
+      save: 'Save',
+      cancel: 'Cancel',
+      command: 'Command',
+      args: 'Arguments',
+      url: 'URL',
+      env: 'Environment',
+      headers: 'Headers',
+      allowed: 'Allowed tools',
+      denied: 'Denied tools',
+      timeout: 'Timeout seconds',
+      transport: 'Transport',
+      permission: 'Permission',
+      confirmation: 'Confirm risky calls',
+      remove: 'Remove',
+      search: 'Search',
+      database: 'Database',
+      custom: 'Custom',
+      readOnly: 'Read-only',
+      readWrite: 'Read-write',
+      dangerous: 'Dangerous',
+      discovered: 'Discovered tools',
+      errors: 'Errors',
+      status: 'Status',
+      refreshStatus: 'Refresh status',
+      disconnect: 'Disconnect all',
+      connected: 'Connected',
+      disconnected: 'Disconnected',
+      enabledServers: 'Enabled servers',
+      empty: 'Enable at least one server, then discover tools.',
+      searchHint: 'No API key needed. Uses DuckDuckGo HTML scraping with rate limiting. Best for quick web searches.',
+      dbHint: 'Read-only by default. Write operations are denylisted. Change permission to read-write to allow queries, inserts, and updates.',
+      customHint: 'stdio: command + args. sse / streamable-http: URL + headers.',
+      testServer: 'Test',
+      testingServer: 'Testing...',
+      disconnectServer: 'Disconnect',
+      confirmationLabel: 'Confirm risky calls (not implemented)',
+      confirmationDisabled: 'Confirmation dialog is not implemented yet. This setting has no effect on tool execution.',
+      permissionHint: 'Read-only blocks tool names starting with create/insert/update/delete/drop/etc. Read-write and Dangerous behave the same. Use Allowed/Denied tools below for precise control.',
+      dangerousNote: 'Dangerous and Read-write behave identically; this label is informational only.',
+    };
+  }
+  if (lang === 'zh-TW') {
+    return {
+      title: 'MCP Host',
+      desc: '讓 Agent 透過 Rust rmcp Client/Host 呼叫外部 MCP 服務。',
+      global: '全域',
+      enabled: '啟用 MCP',
+      expose: '向 Agent 暴露 MCP 工具',
+      resultLimit: '結果上限 bytes',
+      presets: '預設服務',
+      servers: '服務',
+      add: '新增自訂服務',
+      test: '刷新工具',
+      testing: '刷新中...',
+      save: '保存',
+      cancel: '取消',
+      command: '命令',
+      args: '參數',
+      url: 'URL',
+      env: '環境變數',
+      headers: 'Headers',
+      allowed: '允許工具',
+      denied: '拒絕工具',
+      timeout: '超時秒數',
+      transport: '傳輸',
+      permission: '權限',
+      confirmation: '高風險呼叫確認',
+      remove: '刪除',
+      search: '搜尋',
+      database: '資料庫',
+      custom: '自訂',
+      readOnly: '唯讀',
+      readWrite: '讀寫',
+      dangerous: '危險',
+      discovered: '已發現工具',
+      errors: '錯誤',
+      status: '狀態',
+      refreshStatus: '刷新狀態',
+      disconnect: '斷開全部',
+      connected: '已連接',
+      disconnected: '未連接',
+      enabledServers: '已啟用服務',
+      empty: '先啟用至少一個服務，然後發現工具。',
+      searchHint: '無需 API Key。使用 DuckDuckGo HTML 抓取，有請求頻率限制。適合快速網頁搜尋。',
+      dbHint: '預設唯讀。寫入操作已列入拒絕列表。如需查詢、插入和更新，請將權限改為讀寫。',
+      customHint: 'stdio：命令 + 參數。sse / streamable-http：URL + headers。',
+      testServer: '測試',
+      testingServer: '測試中...',
+      disconnectServer: '斷開',
+      confirmationLabel: '高風險呼叫確認（尚未實現）',
+      confirmationDisabled: '確認對話框尚未實現，此選項目前對工具執行無任何影響。',
+      permissionHint: '唯讀模式僅攔截以 create/insert/update/delete/drop 等前綴開頭的工具名。讀寫與危險模式行為完全一致。如需精確控制，請使用下方允許/拒絕工具列表。',
+      dangerousNote: '危險與讀寫模式行為完全一致，此標籤僅為提示作用。',
+    };
+  }
+  return {
+    title: 'MCP Host',
+    desc: '让 Agent 通过 Rust rmcp Client/Host 调用外部 MCP 服务。',
+    global: '全局',
+    enabled: '启用 MCP',
+    expose: '向 Agent 暴露 MCP 工具',
+    resultLimit: '结果上限 bytes',
+    presets: '预设服务',
+    servers: '服务',
+    add: '新增自定义服务',
+    test: '刷新工具',
+    testing: '刷新中...',
+    save: '保存',
+    cancel: '取消',
+    command: '命令',
+    args: '参数',
+    url: 'URL',
+    env: '环境变量',
+    headers: 'Headers',
+    allowed: '允许工具',
+    denied: '拒绝工具',
+    timeout: '超时秒数',
+    transport: '传输',
+    permission: '权限',
+    confirmation: '高风险调用确认',
+    remove: '删除',
+    search: '搜索',
+    database: '数据库',
+    custom: '自定义',
+    readOnly: '只读',
+    readWrite: '读写',
+    dangerous: '危险',
+    discovered: '已发现工具',
+    errors: '错误',
+    status: '状态',
+    refreshStatus: '刷新状态',
+    disconnect: '断开全部',
+    connected: '已连接',
+    disconnected: '未连接',
+    enabledServers: '已启用服务',
+    empty: '先启用至少一个服务，然后发现工具。',
+    searchHint: '无需 API Key。使用 DuckDuckGo HTML 抓取，有请求频率限制。适合快速网页搜索。',
+    dbHint: '默认只读。写入操作已列入拒绝列表。如需查询、插入和更新，请将权限改为读写。',
+    customHint: 'stdio：命令 + 参数。sse / streamable-http：URL + headers。',
+    testServer: '测试',
+    testingServer: '测试中...',
+    disconnectServer: '断开',
+    confirmationLabel: '高风险调用确认（尚未实现）',
+    confirmationDisabled: '确认对话框尚未实现，此选项目前对工具执行无任何影响。',
+    permissionHint: '只读模式仅拦截以 create/insert/update/delete/drop 等前缀开头的工具名。读写与危险模式行为完全一致。如需精确控制，请使用下方允许/拒绝工具列表。',
+    dangerousNote: '危险与读写模式行为完全一致，此标签仅作提示之用。',
+  };
+}
+
+function getServerHint(server: McpServerConfig, c: ReturnType<typeof copy>): string {
+  if (server.description) return server.description;
+  if (server.category === 'search') return c.searchHint;
+  if (server.category === 'database') return c.dbHint;
+  return c.customHint;
+}
+
+function panelClass(active: boolean): string {
+  return `rounded-2xl border px-4 py-4 transition-colors ${
+    active ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-[#2a2d3a] bg-[#10131b]'
+  }`;
+}
+
+function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">{label}</label>
+      {children}
+      {hint && <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{hint}</p>}
+    </div>
+  );
+}
+
+function updateServer(servers: McpServerConfig[], id: string, patch: Partial<McpServerConfig>): McpServerConfig[] {
+  return servers.map((server) => (server.id === id ? { ...server, ...patch } : server));
+}
+
+export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => void; onOpenMarket?: () => void }) {
+  const { settings, setSettings } = useAgentStore();
+  const c = copy(settings.lang);
+  const [local, setLocal] = useState<McpSettings>(() => normalizeMcpSettings(settings.mcp));
+  const [activeId, setActiveId] = useState(local.servers[0]?.id ?? '');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [message, setMessage] = useState('');
+  const [tools, setTools] = useState<string[]>([]);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [serverStatus, setServerStatus] = useState<McpServerStatus[]>([]);
+  const [busyServerId, setBusyServerId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const next = normalizeMcpSettings(settings.mcp);
+    setLocal(next);
+    setActiveId((current) => current || next.servers[0]?.id || '');
+  }, [settings.mcp]);
+
+  const activeServer = useMemo(
+    () => local.servers.find((server) => server.id === activeId) ?? local.servers[0],
+    [activeId, local.servers],
+  );
+  const enabledCount = local.servers.filter((server) => server.enabled).length;
+  const connectedCount = serverStatus.filter((server) => server.connected).length;
+  const activeStatus = activeServer
+    ? serverStatus.find((server) => server.serverId === activeServer.id)
+    : undefined;
+
+  const update = (patch: Partial<McpSettings>) => {
+    setLocal((current) => normalizeMcpSettings({ ...current, ...patch }));
+  };
+
+  const patchServer = (id: string, patch: Partial<McpServerConfig>) => {
+    setLocal((current) => normalizeMcpSettings({ ...current, servers: updateServer(current.servers, id, patch) }));
+  };
+
+  const addServer = () => {
+    const server = createBlankMcpServer();
+    setLocal((current) => normalizeMcpSettings({ ...current, servers: [...current.servers, server] }));
+    setActiveId(server.id);
+  };
+
+  const removeServer = (id: string) => {
+    const nextServers = local.servers.filter((server) => server.id !== id);
+    setLocal((current) => normalizeMcpSettings({ ...current, servers: nextServers }));
+    setActiveId(nextServers[0]?.id ?? '');
+  };
+
+  const refreshStatus = async () => {
+    try {
+      setServerStatus(await listMcpServerStatus(local));
+    } catch (err) {
+      setErrors((current) => [...current, (err as Error).message]);
+    }
+  };
+
+  const disconnectAll = async () => {
+    try {
+      const closed = await disconnectAllMcpServers();
+      setMessage(`Disconnected ${closed} MCP servers`);
+      await refreshStatus();
+    } catch (err) {
+      setErrors((current) => [...current, (err as Error).message]);
+    }
+  };
+
+  const handleTestServer = async (serverId: string) => {
+    setBusyServerId(serverId);
+    setStatus('loading');
+    setMessage('');
+    try {
+      const result = await testMcpServer(local, serverId);
+      if (result.success) {
+        setStatus('success');
+        setMessage(`✓ ${result.serverName}: ${result.message}`);
+      } else {
+        setStatus('error');
+        setMessage(`✗ ${result.serverName}: ${result.message}`);
+      }
+      await refreshStatus();
+    } catch (err) {
+      setStatus('error');
+      setMessage((err as Error).message);
+    } finally {
+      setBusyServerId(null);
+    }
+  };
+
+  const handleDisconnectServer = async (serverId: string) => {
+    setBusyServerId(serverId);
+    try {
+      const closed = await disconnectMcpServer(local, serverId);
+      setMessage(closed > 0 ? `Disconnected '${serverId}'` : `'${serverId}' was not connected`);
+      await refreshStatus();
+    } catch (err) {
+      setErrors((current) => [...current, (err as Error).message]);
+    } finally {
+      setBusyServerId(null);
+    }
+  };
+
+  const discoverTools = async (serverIdFilter?: string) => {
+    setStatus('loading');
+    setMessage('');
+    setErrors([]);
+    try {
+      clearMcpToolDefinitionCache();
+      await clearNativeMcpToolCache();
+      const result = await loadMcpToolDefinitions(local, { refresh: true });
+      const allTexts = result.definitions.map((definition) => `${definition.name} — ${definition.description}`);
+      if (serverIdFilter) {
+        const allowed = new Set((result.toolMappings ?? [])
+          .filter((m) => m.serverId === serverIdFilter)
+          .map((m) => m.displayName));
+        setTools(allTexts.filter((text) => allowed.has(text.split(' — ')[0])));
+      } else {
+        setTools(allTexts);
+      }
+      setErrors(result.errors.map((error) => `${error.serverId}: ${error.message}`));
+      setStatus('success');
+      setMessage(`${result.definitions.length} tools · cache refreshed`);
+      await refreshStatus();
+    } catch (err) {
+      setStatus('error');
+      setMessage((err as Error).message);
+    }
+  };
+
+  // Auto-refresh tools when switching servers (only when MCP globally enabled)
+  useEffect(() => {
+    if (local.enabled && activeId) {
+      const active = local.servers.find((s) => s.id === activeId);
+      if (active?.enabled) {
+        void discoverTools(active.id);
+      } else {
+        setTools([]);
+        setMessage('');
+        setStatus('idle');
+      }
+    } else {
+      setTools([]);
+    }
+  }, [activeId, local.enabled]);
+
+  const save = () => {
+    setSettings({ mcp: local });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex select-none items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fade-in">
+      <div className="flex h-[92vh] w-[min(96vw,1280px)] flex-col overflow-hidden rounded-3xl border border-[#2a2d3a] bg-[#1a1d27] shadow-2xl">
+        <div className="flex items-start justify-between border-b border-[#2a2d3a] px-7 py-5">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200">rmcp</span>
+              <h2 className="text-lg font-semibold text-slate-100">{c.title}</h2>
+            </div>
+            <p className="mt-1 text-sm text-slate-500">{c.desc}</p>
+          </div>
+          <button onClick={onClose} title={c.cancel} className="text-2xl leading-none text-slate-500 hover:text-slate-300">×</button>
+        </div>
+
+        <div className="grid min-h-0 flex-1 grid-cols-[340px_minmax(0,1fr)] overflow-hidden">
+          <aside className="min-h-0 overflow-y-auto border-r border-[#2a2d3a] bg-[#161922] p-4">
+            <div className={panelClass(local.enabled)}>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{c.global}</h3>
+              <label className="mb-3 flex cursor-pointer items-start gap-3">
+                <input type="checkbox" checked={local.enabled} onChange={(event) => update({ enabled: event.target.checked })} className="mt-0.5 h-5 w-5 rounded accent-cyan-500" />
+                <span className="text-sm font-medium text-slate-200">{c.enabled}</span>
+              </label>
+              <label className="mb-4 flex cursor-pointer items-start gap-3">
+                <input type="checkbox" checked={local.exposeTools} onChange={(event) => update({ exposeTools: event.target.checked })} className="mt-0.5 h-5 w-5 rounded accent-cyan-500" />
+                <span className="text-sm font-medium text-slate-200">{c.expose}</span>
+              </label>
+              <Field label={c.resultLimit}>
+                <input
+                  type="number"
+                  value={local.resultMaxBytes}
+                  onChange={(event) => update({ resultMaxBytes: Number(event.target.value) })}
+                  className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none"
+                />
+              </Field>
+              <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2">
+                  <div className="text-slate-500">{c.enabledServers}</div>
+                  <div className="mt-1 font-semibold text-slate-100">{enabledCount}</div>
+                </div>
+                <div className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2">
+                  <div className="text-slate-500">{c.connected}</div>
+                  <div className="mt-1 font-semibold text-cyan-100">{connectedCount}</div>
+                </div>
+              </div>
+              <div className="mt-3 flex gap-2">
+                <button onClick={refreshStatus} className="flex-1 rounded-lg border border-[#2a2d3a] px-2.5 py-1.5 text-[10px] font-medium text-slate-300 hover:border-cyan-500/40 hover:text-cyan-100">{c.refreshStatus}</button>
+                <button onClick={disconnectAll} className="flex-1 rounded-lg border border-red-500/20 px-2.5 py-1.5 text-[10px] font-medium text-red-300 hover:bg-red-500/10">{c.disconnect}</button>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{c.servers}</h3>
+              <div className="flex items-center gap-2">
+                {onOpenMarket && (
+                  <button onClick={onOpenMarket} className="rounded-lg border border-purple-500/30 px-2.5 py-1.5 text-[10px] font-medium text-purple-200 hover:bg-purple-500/10">Browse Market</button>
+                )}
+                <button onClick={addServer} className="rounded-lg border border-cyan-500/30 px-2.5 py-1.5 text-[10px] font-medium text-cyan-200 hover:bg-cyan-500/10">{c.add}</button>
+              </div>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              {local.servers.map((server) => (
+                <button
+                  key={server.id}
+                  type="button"
+                  onClick={() => setActiveId(server.id)}
+                  className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
+                    activeServer?.id === server.id
+                      ? 'border-cyan-500/50 bg-cyan-500/10 text-slate-100'
+                      : 'border-[#2a2d3a] bg-[#0f1117] text-slate-400 hover:border-slate-500/60 hover:text-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-semibold">{server.name}</span>
+                    <span className={`h-2.5 w-2.5 rounded-full ${server.enabled ? 'bg-emerald-300' : 'bg-slate-600'}`} />
+                  </div>
+                  <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-slate-600">{server.category} · {server.transport}</div>
+                </button>
+              ))}
+            </div>
+          </aside>
+
+          <main className="min-h-0 overflow-y-auto p-6">
+            {activeServer ? (
+              <div className="space-y-5">
+                <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-5">
+                  <div className="mb-5 flex items-start justify-between gap-4">
+                    <label className="flex cursor-pointer items-start gap-3">
+                      <input type="checkbox" checked={activeServer.enabled} onChange={(event) => patchServer(activeServer.id, { enabled: event.target.checked })} className="mt-0.5 h-5 w-5 rounded accent-cyan-500" />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <div className="text-sm font-semibold text-slate-100">{activeServer.name}</div>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${activeStatus?.connected ? 'bg-emerald-500/10 text-emerald-300' : 'bg-slate-700/50 text-slate-400'}`}>
+                            {activeStatus?.connected ? c.connected : c.disconnected}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500">{getServerHint(activeServer, c)}</p>
+                      </div>
+                    </label>
+                    <button onClick={() => removeServer(activeServer.id)} className="rounded-lg border border-red-500/20 px-3 py-2 text-xs text-red-300 hover:bg-red-500/10">{c.remove}</button>
+                  </div>
+
+                  <div className="mb-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleTestServer(activeServer.id)}
+                      disabled={!activeServer.enabled || busyServerId === activeServer.id}
+                      className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-100 transition-colors hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {busyServerId === activeServer.id ? c.testingServer : c.testServer}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDisconnectServer(activeServer.id)}
+                      disabled={!activeStatus?.connected || busyServerId === activeServer.id}
+                      className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-xs font-medium text-amber-200 transition-colors hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {c.disconnectServer}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="ID">
+                      <input value={activeServer.id} disabled className="w-full rounded-xl border border-[#2a2d3a] bg-[#0b0e14] px-3 py-2 text-sm text-slate-500" />
+                    </Field>
+                    <Field label="Name">
+                      <input value={activeServer.name} onChange={(event) => patchServer(activeServer.id, { name: event.target.value })} className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                    </Field>
+                    <Field label={c.transport}>
+                      <select value={activeServer.transport} onChange={(event) => patchServer(activeServer.id, { transport: event.target.value as McpServerConfig['transport'] })} className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none">
+                        <option value="stdio">stdio</option>
+                        <option value="sse">sse</option>
+                        <option value="streamable-http">streamable-http</option>
+                      </select>
+                    </Field>
+                    <Field label="Category">
+                      <select value={activeServer.category} onChange={(event) => patchServer(activeServer.id, { category: event.target.value as McpServerConfig['category'] })} className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none">
+                        <option value="search">{c.search}</option>
+                        <option value="database">{c.database}</option>
+                        <option value="custom">{c.custom}</option>
+                      </select>
+                    </Field>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-5">
+                  {activeServer.transport === 'stdio' ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-4">
+                        <Field label={c.command}>
+                          <input value={activeServer.command} onChange={(event) => patchServer(activeServer.id, { command: event.target.value })} placeholder="npx / uvx / python" className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                        </Field>
+                        <Field label={c.timeout}>
+                          <input type="number" value={activeServer.timeoutSeconds} onChange={(event) => patchServer(activeServer.id, { timeoutSeconds: Number(event.target.value) })} className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                        </Field>
+                      </div>
+                      <div className="mt-4">
+                        <Field label={c.args}>
+                          <input value={activeServer.args} onChange={(event) => patchServer(activeServer.id, { args: event.target.value })} className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                        </Field>
+                      </div>
+                      <div className="mt-4">
+                        <Field label={c.env} hint="KEY=value，每行一个。不会进入模型上下文。">
+                          <textarea value={activeServer.env} onChange={(event) => patchServer(activeServer.id, { env: event.target.value })} rows={4} className="w-full resize-none rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 font-mono text-xs text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                        </Field>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 gap-4">
+                        <Field label={c.url} hint={activeServer.transport === 'sse' ? 'SSE endpoint URL' : 'Streamable HTTP endpoint URL'}>
+                          <input value={activeServer.url} onChange={(event) => patchServer(activeServer.id, { url: event.target.value })} placeholder="https://example.com/mcp" className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                        </Field>
+                        <Field label={c.timeout}>
+                          <input type="number" value={activeServer.timeoutSeconds} onChange={(event) => patchServer(activeServer.id, { timeoutSeconds: Number(event.target.value) })} className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                        </Field>
+                      </div>
+                      <div className="mt-4">
+                        <Field label={c.headers} hint="Header-Name: value，每行一个。用于 HTTP/SSE 认证。">
+                          <textarea value={activeServer.headers} onChange={(event) => patchServer(activeServer.id, { headers: event.target.value })} rows={4} placeholder={'Authorization: Bearer token\nX-API-Key: key'} className="w-full resize-none rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 font-mono text-xs text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                        </Field>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-5">
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label={c.allowed} hint="逗号分隔，支持 * 通配；留空表示全部允许。">
+                      <input value={activeServer.allowedTools} onChange={(event) => patchServer(activeServer.id, { allowedTools: event.target.value })} placeholder="query,search*,list*" className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                    </Field>
+                    <Field label={c.denied} hint="逗号分隔，拒绝规则优先。">
+                      <input value={activeServer.deniedTools} onChange={(event) => patchServer(activeServer.id, { deniedTools: event.target.value })} placeholder="delete*,drop*,truncate*" className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                    </Field>
+                    <Field label={c.permission} hint={c.permissionHint}>
+                      <select value={activeServer.permissionMode} onChange={(event) => patchServer(activeServer.id, { permissionMode: event.target.value as McpServerConfig['permissionMode'] })} className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none">
+                        <option value="read-only">{c.readOnly}</option>
+                        <option value="read-write">{c.readWrite}</option>
+                        <option value="dangerous">{c.dangerous}</option>
+                      </select>
+                      {activeServer.permissionMode === 'dangerous' && (
+                        <p className="mt-1 text-[10px] leading-relaxed text-amber-400/80">{c.dangerousNote}</p>
+                      )}
+                    </Field>
+                    <label
+                      className="mt-6 flex cursor-not-allowed items-start gap-3 rounded-xl border border-[#2a2d3a] bg-[#0b0e14] px-3 py-2 opacity-60"
+                      title={c.confirmationDisabled}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={activeServer.requireConfirmation}
+                        disabled
+                        readOnly
+                        className="mt-0.5 h-5 w-5 rounded accent-cyan-500"
+                      />
+                      <div>
+                        <span className="text-sm text-slate-400">{c.confirmationLabel}</span>
+                        <p className="mt-0.5 text-[10px] leading-relaxed text-slate-600">{c.confirmationDisabled}</p>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-100">{c.discovered}</h3>
+                      <p className="mt-1 text-xs text-slate-500">{message || c.empty}</p>
+                    </div>
+                    <button onClick={() => discoverTools(activeServer?.id)} disabled={status === 'loading'} className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-xs font-semibold text-cyan-100 transition-colors hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60">
+                      {status === 'loading' ? c.testing : c.test}
+                    </button>
+                  </div>
+                  {(tools.length > 0 || errors.length > 0) && (
+                    <div className="mt-4 grid grid-cols-2 gap-4">
+                      <div className="max-h-52 overflow-y-auto rounded-xl border border-[#2a2d3a] bg-[#0f1117] p-3">
+                        {tools.map((tool) => <div key={tool} className="mb-2 break-all text-xs leading-relaxed text-slate-300">{tool}</div>)}
+                      </div>
+                      <div className="max-h-52 overflow-y-auto rounded-xl border border-[#2a2d3a] bg-[#0f1117] p-3">
+                        <div className="mb-2 text-xs font-semibold text-slate-500">{c.errors}</div>
+                        {errors.length === 0 ? <div className="text-xs text-emerald-300">OK</div> : errors.map((error) => <div key={error} className="mb-2 break-all text-xs leading-relaxed text-red-300">{error}</div>)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </main>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 border-t border-[#2a2d3a] px-7 py-4">
+          <button onClick={onClose} className="rounded-xl border border-[#2a2d3a] px-4 py-2 text-sm text-slate-400 hover:text-slate-200">{c.cancel}</button>
+          <button onClick={save} className="rounded-xl border border-cyan-500/40 bg-cyan-500/15 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/25">{c.save}</button>
+        </div>
+      </div>
+    </div>
+  );
+}

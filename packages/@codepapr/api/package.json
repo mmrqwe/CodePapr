@@ -1,0 +1,33 @@
+{
+  "name": "@codepapr/api",
+  "version": "0.1.0",
+  "description": "LLM API adapters (DeepSeek, OpenAI, Claude)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./tokenLimits": {
+      "types": "./dist/tokenLimits.d.ts",
+      "import": "./dist/tokenLimits.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "node ../../../scripts/run-tsc-build.mjs",
+    "test": "node ../../../scripts/run-module-bin.mjs vitest/vitest.mjs",
+    "dev": "node ../../../scripts/run-module-bin.mjs typescript/bin/tsc --watch"
+  },
+  "dependencies": {
+    "@codepapr/types": "*",
+    "@codepapr/common": "*",
+    "@codepapr/core": "*"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.6"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,54 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/schema.json",
+  "productName": "CodePapr",
+  "version": "0.1.0",
+  "identifier": "com.codepapr.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build:frontend",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "CodePapr",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 680,
+        "resizable": true,
+        "fullscreen": false,
+        "devtools": false
+      }
+    ],
+    "security": {
+      "assetProtocol": { "enable": true, "scope": ["$HOME/**", "/**", "C:/**", "D:/**", "E:/**", "F:/**"] },
+      "csp": "default-src 'self' customprotocol: asset:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost https: data:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420 https:; frame-src 'self' http://localhost:* http://127.0.0.1:* https:; worker-src 'self' blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "msi"],
+    "publisher": "CodePapr",
+    "shortDescription": "CodePapr - DeepSeek Cache-Optimized Local AI Coding Agent",
+    "longDescription": "CodePapr is a local-first coding agent runtime with CLI automation, built on Tauri 2. It features DeepSeek prefix cache optimization, multi-agent collaboration, ProjectGraph semantic analysis, LSP support for 15+ languages, and TodoList task planning -- all running natively on your machine.",
+    "resources": [
+      "../generated/lsp-tools/**/*"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "wix": {
+        "language": "zh-CN",
+        "fragmentPaths": ["wix/custom.wxs"]
+      }
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@codepapr/core",
+  "version": "0.1.0",
+  "description": "Core Agent framework with three-partition cache",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "node ../../../scripts/run-tsc-build.mjs",
+    "test": "node ../../../scripts/run-module-bin.mjs vitest/vitest.mjs",
+    "dev": "node ../../../scripts/run-module-bin.mjs typescript/bin/tsc --watch"
+  },
+  "dependencies": {
+    "@codepapr/types": "*",
+    "@codepapr/common": "*"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.6"
+  },
+  "license": "MIT"
+}
