@@ -23,6 +23,7 @@ import {
   safeParseToolArguments,
 } from './streaming';
 import { buildOpenAIImageContent } from './imageContent';
+import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
 
 const log = new Logger('DeepSeekProvider');
 
@@ -327,7 +328,7 @@ export class DeepSeekProvider extends BaseLLMProvider {
         }),
       temperature: request.temperature ?? 0.7,
       top_p: request.topP ?? 0.9,
-      max_tokens: request.maxTokens ?? 393_216,
+      max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
       ...(request.tools &&
         request.tools.length > 0 && {
           tools: request.tools.map((t) => ({

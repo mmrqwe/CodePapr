@@ -27,7 +27,7 @@ import {
   type EditHistory,
   type SkillDefinition,
 } from '@codepapr/core';
-import { RequestBuilder, CacheValidator, OpenAIProvider, ClaudeProvider } from '@codepapr/api';
+import { DEFAULT_MAX_TOKENS, RequestBuilder, CacheValidator, OpenAIProvider, ClaudeProvider } from '@codepapr/api';
 import type { ICacheStatistics, ILLMProvider, IToolDefinition, MentorConfig } from '@codepapr/types';
 import { registerWorkspaceTools } from '../tools/workspaceTools';
 import { startSubagentProgress, pushSubagentStep, completeSubagentProgress } from '../utils/subagentProgress';
@@ -212,7 +212,7 @@ async function runSubagent(
   const parameters = {
     temperature: isExplore ? (context.exploreTemperature ?? 0.5) : isScout ? (context.scoutTemperature ?? 0.3) : 0.5,
     topP: isExplore ? (context.exploreTopP ?? 0.9) : isScout ? (context.scoutTopP ?? 0.9) : 0.9,
-    maxTokens: isExplore ? (context.exploreMaxTokens ?? 393_216) : isScout ? (context.scoutMaxTokens ?? 393_216) : 393_216,
+    maxTokens: isExplore ? (context.exploreMaxTokens ?? DEFAULT_MAX_TOKENS) : isScout ? (context.scoutMaxTokens ?? DEFAULT_MAX_TOKENS) : DEFAULT_MAX_TOKENS,
     thinkingEnabled: definition.model === 'mentor'
       ? (context.mentor?.thinkingEnabled ?? false)
       : isExplore

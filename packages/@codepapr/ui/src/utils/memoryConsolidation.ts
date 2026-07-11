@@ -4,7 +4,7 @@ import { buildProviderInstance } from '../store/internals/providerFactory';
 import { resolveProviderName } from '../store/internals/settingsNormalizer';
 import type { Settings } from '../store/internals/types';
 
-export const MEMORY_CONSOLIDATION_MAX_LINES = 200;
+export const MEMORY_CONSOLIDATION_MAX_LINES = 300;
 
 export function planMemoryConsolidation(content: string | undefined, maxLines: number = MEMORY_CONSOLIDATION_MAX_LINES): boolean {
   if (!content) return false;

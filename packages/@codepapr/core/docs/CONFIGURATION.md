@@ -17,7 +17,7 @@
 | `thinkingEffort` | 枚举 | `max` | `high` / `max` | 推理强度 |
 | `temperature` | 数字 | `0.7` | `0` - `2` | 生成温度，越高输出越随机，越低越确定 |
 | `topP` | 数字 | `0.9` | `0` - `1` | 核采样参数，控制 token 候选池大小。0 仅保留最高概率 token，1 保留全部 |
-| `maxTokens` | 数字 | `393216` | `100` - `393216` | 单次响应最大输出 token 数 |
+| `maxTokens` | 数字 | `200000` | `100` - `200000` | 单次响应最大输出 token 数 |
 | `maxToolRounds` | 数字 | `500` | `1` - `∞` | 单次对话中 Agent 连续调用工具的最大轮数 |
 | `debugEnabled` | 布尔 | `false` | — | 调试模式，记录完整提示词 |
 | `systemPrompt` | 字符串 | `''` | — | 自定义系统提示词。留空则使用内置默认 |
@@ -27,7 +27,7 @@
 | 参数 | 类型 | 默认值 | 范围 | 说明 |
 |---|---|---|---|---|
 | `compactionModel` | 枚举 | `fast` | `fast` / `primary` | 执行上下文压缩的模型 |
-| `compactionMaxTokens` | 数字 | `1800` | `100` - `100000` | 压缩 LLM 调用的最大输出 token |
+| `compactionMaxTokens` | 数字 | `8000` | `100` - `100000` | 压缩 LLM 调用的最大输出 token |
 | `compactionTemperature` | 数字 | `0.1` | `0` - `2` | 压缩 LLM 调用的温度，越低越确定 |
 | `maxContextTokens` | 数字 | `200000` | `1000` - `1000000` | 上下文窗口 token 上限，超出时触发压缩 |
 | `maxConversationRounds` | 数字 | `24` | `2` - `500` | 触发上下文压缩前保留的最大对话轮数 |
@@ -42,26 +42,45 @@
 
 | 参数 | 类型 | 默认值 | 范围 | 说明 |
 |---|---|---|---|---|
-| `projectGraphMaxDepth` | 数字 | `8` | `1` - `∞` | 目录扫描最大深度 |
-| `projectGraphMaxFiles` | 数字 | `120` | `1` - `∞` | 参与图谱构建的最大文件数 |
-| `projectGraphMaxEdges` | 数字 | `960` | `1` - `∞` | 关系边（导入/调用/继承）数量上限 |
-| `projectGraphMaxSymbolsPerFile` | 数字 | `24` | `1` - `∞` | 每文件提取的符号上限 |
-| `projectGraphMaxFileBytes` | 数字 | `180000` | `1000` - `∞` | 单文件最大字节数，超大文件不扫描 |
-| `projectGraphMaxTreeEntries` | 数字 | `320` | `20` - `∞` | 目录树最大条目数 |
+| `projectGraphMaxDepth` | 数字 | `0` | `0` - `∞` | 目录扫描最大深度。0 表示不限制 |
+| `projectGraphMaxFiles` | 数字 | `0` | `0` - `∞` | 参与图谱构建的最大文件数。0 表示不限制 |
+| `projectGraphMaxEdges` | 数字 | `0` | `0` - `∞` | 关系边（导入/调用/继承）数量上限。0 表示不限制 |
+| `projectGraphMaxSymbolsPerFile` | 数字 | `0` | `0` - `∞` | 每文件提取的符号上限。0 表示不限制 |
+| `projectGraphMaxFileBytes` | 数字 | `0` | `0` - `∞` | 单文件最大字节数，超大文件不扫描。0 表示不限制 |
+| `projectGraphMaxTreeEntries` | 数字 | `0` | `0` - `∞` | 目录树最大条目数。0 表示不限制 |
 
 ## 子代理设置
 
+### Explore（代码分析子代理）
+
 | 参数 | 类型 | 默认值 | 范围 | 说明 |
 |---|---|---|---|---|
-| `subagentTemperature` | 数字 | `0.5` | `0` - `2` | 子代理生成温度 |
-| `subagentTopP` | 数字 | `0.9` | `0` - `1` | 子代理核采样参数 |
-| `subagentMaxTokens` | 数字 | `393216` | `100` - `393216` | 子代理单次响应最大输出 token |
-| `subagentThinkingEnabled` | 布尔 | `true` | — | 子代理启用推理模式 |
-| `subagentMaxToolRounds` | 数字 | `100` | `1` - `500` | 子代理最大工具调用轮数 |
-| `subagentMaxDepth` | 数字 | `2` | `1` - `5` | 子代理嵌套深度上限。子代理可委派其他子代理，此值限制嵌套层数 |
-| `explorePrompt` | 字符串 | `''` | — | Explore 子代理的自定义系统提示词 |
-| `scoutPrompt` | 字符串 | `''` | — | Scout 子代理的自定义系统提示词 |
-| `mentorPrompt` | 字符串 | `''` | — | Mentor 子代理的自定义系统提示词 |
+| `exploreTemperature` | 数字 | `0.5` | `0` - `2` | Explore 生成温度 |
+| `exploreTopP` | 数字 | `0.9` | `0` - `1` | Explore 核采样参数 |
+| `exploreMaxTokens` | 数字 | `200000` | `100` - `200000` | Explore 单次响应最大输出 token |
+| `exploreMaxToolRounds` | 数字 | `200` | `1` - `500` | Explore 最大工具调用轮数 |
+| `exploreMaxDepth` | 数字 | `2` | `1` - `5` | Explore 嵌套深度上限 |
+| `exploreThinkingEnabled` | 布尔 | `true` | — | Explore 启用推理模式 |
+| `explorePrompt` | 字符串 | `''` | — | Explore 的自定义系统提示词 |
+
+### Scout（网页搜索子代理）
+
+| 参数 | 类型 | 默认值 | 范围 | 说明 |
+|---|---|---|---|---|
+| `scoutTemperature` | 数字 | `0.3` | `0` - `2` | Scout 生成温度 |
+| `scoutTopP` | 数字 | `0.9` | `0` - `1` | Scout 核采样参数 |
+| `scoutMaxTokens` | 数字 | `200000` | `100` - `200000` | Scout 单次响应最大输出 token |
+| `scoutMaxToolRounds` | 数字 | `200` | `1` - `500` | Scout 最大工具调用轮数 |
+| `scoutMaxDepth` | 数字 | `2` | `1` - `5` | Scout 嵌套深度上限 |
+| `scoutThinkingEnabled` | 布尔 | `false` | — | Scout 启用推理模式 |
+| `scoutPrompt` | 字符串 | `''` | — | Scout 的自定义系统提示词 |
+
+### 自定义子代理
+
+| 参数 | 类型 | 默认值 | 范围 | 说明 |
+|---|---|---|---|---|
+| `SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS` | 数字 | `50` | — | 自定义子代理默认最大工具调用轮数 |
+| `SUBAGENT_MAX_DEPTH` | 数字 | `2` | `1` - `5` | 子代理嵌套深度上限。子代理可委派其他子代理，此值限制嵌套层数 |
 
 ## Mentor 设置
 
@@ -74,13 +93,15 @@
 | `mentorApiFormat` | 枚举 | `openai` | `openai` / `claude` | Mentor API 格式 |
 | `mentorMaxTokens` | 数字 | `10000` | `100` - `∞` | Mentor 单次响应最大输出 token |
 | `maxMentorConsultations` | 数字 | `2` | `0` - `∞` | 单次对话中 Mentor 最大咨询次数 |
+| `mentorPrompt` | 字符串 | `''` | — | Mentor 的自定义系统提示词 |
+| `mentorThinkingEnabled` | 布尔 | `false` | — | Mentor 启用推理模式 |
 
 ## 硬编码常量（不可通过设置面板配置）
 
 | 常量 | 值 | 位置 | 说明 |
 |---|---|---|---|
 | `EditHistory` 撤销栈上限 | `100` | `editHistory.ts:29` | 编辑历史最多记录 100 次编辑操作 |
-| 自定义提示词最大长度 | `8000` 字符 | `agentConfig.ts:161` | 防止恶意长输入 |
+| 自定义提示词最大长度 | `32000` 字符 | `agentConfig.ts` | 防止恶意长输入 |
 | 拖拽文件最大大小 | `1` MB | `ChatPanel.tsx:55` | 文件拖拽上传的大小限制 |
 
 ## 语言设置

@@ -1,5 +1,5 @@
-export const DEFAULT_MAX_TOKENS = 393_216;
-export const DEEPSEEK_MAX_TOKENS = 393_216;
+export const DEFAULT_MAX_TOKENS = 200_000;
+export const DEEPSEEK_MAX_TOKENS = 200_000;
 
 export const CONTEXT_LIMITS: Record<string, number> = {
   deepseek: 1_048_565,

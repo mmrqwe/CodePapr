@@ -8,7 +8,7 @@ import process from 'node:process';
 import readline from 'node:readline';
 import chalk from 'chalk';
 import { Command } from 'commander';
-import { DeepSeekProvider, OpenAIProvider, ClaudeProvider, LocalProvider, RequestBuilder, CacheValidator } from '@codepapr/api';
+import { DEFAULT_MAX_TOKENS, DeepSeekProvider, OpenAIProvider, ClaudeProvider, LocalProvider, RequestBuilder, CacheValidator } from '@codepapr/api';
 import {
   Agent,
   AppendOnlyLog,
@@ -76,6 +76,8 @@ interface StoredAppSettings {
   mentorMaxTokens?: number;
   maxMentorConsultations?: number;
   mentorThinkingEnabled?: boolean;
+  goalMaxIterations?: number;
+  goalMaxWallClockMs?: number;
 }
 
 interface DataLocation {
@@ -115,6 +117,8 @@ interface PreparedRuntime {
   allToolDefinitions: import('@codepapr/types').IToolDefinition[];
   toolRegistry: ToolRegistry;
   maxToolRounds: number;
+  goalMaxIterations: number;
+  goalMaxWallClockMs: number;
   close: () => void;
 }
 
@@ -314,7 +318,7 @@ async function prepareRuntime(opts: BaseCommandOptions): Promise<PreparedRuntime
     systemPrompt,
     tools: allTools,
     model,
-    parameters: { temperature: 0.7, topP: 0.9, maxTokens: 393_216, thinkingEnabled: true },
+    parameters: { temperature: 0.7, topP: 0.9, maxTokens: DEFAULT_MAX_TOKENS, thinkingEnabled: true },
   });
 
   const sessionId = sessionRepo.create({
@@ -322,7 +326,7 @@ async function prepareRuntime(opts: BaseCommandOptions): Promise<PreparedRuntime
     provider: key,
     tools: allTools,
     systemPrompt,
-    parameters: { temperature: 0.7, topP: 0.9, maxTokens: 393_216, thinkingEnabled: true },
+    parameters: { temperature: 0.7, topP: 0.9, maxTokens: DEFAULT_MAX_TOKENS, thinkingEnabled: true },
     isPrefixFrozen: true,
     prefixHash: prefix.computeHash(),
   });
@@ -439,6 +443,8 @@ async function prepareRuntime(opts: BaseCommandOptions): Promise<PreparedRuntime
     allToolDefinitions: toolRegistry.getAll(),
     toolRegistry,
     maxToolRounds: DEFAULT_AGENT_MAX_TOOL_ROUNDS,
+    goalMaxIterations: storedSettings.goalMaxIterations ?? 20,
+    goalMaxWallClockMs: storedSettings.goalMaxWallClockMs ?? 1_800_000,
     close: () => {
       db.close();
     },
@@ -450,14 +456,14 @@ function createEphemeralAgent(runtime: PreparedRuntime, model: string): Agent {
     systemPrompt: runtime.systemPrompt,
     tools: runtime.allToolDefinitions,
     model,
-    parameters: { temperature: 0.3, topP: 0.9, maxTokens: 393_216, thinkingEnabled: false },
+    parameters: { temperature: 0.3, topP: 0.9, maxTokens: DEFAULT_MAX_TOKENS, thinkingEnabled: false },
   });
   const sessionId = runtime.sessionRepo.create({
     model,
     provider: runtime.providerName,
     tools: runtime.allToolDefinitions,
     systemPrompt: runtime.systemPrompt,
-    parameters: { temperature: 0.3, topP: 0.9, maxTokens: 393_216, thinkingEnabled: false },
+    parameters: { temperature: 0.3, topP: 0.9, maxTokens: DEFAULT_MAX_TOKENS, thinkingEnabled: false },
     isPrefixFrozen: true,
     prefixHash: prefix.computeHash(),
   });
@@ -715,8 +721,8 @@ async function runCliGoalLoop(goalArgs: string, runtime: PreparedRuntime): Promi
       userGoalText,
       lang: 'zh-CN',
       limits: {
-        maxIterations: 20,
-        maxWallClockMs: 1_800_000,
+        maxIterations: runtime.goalMaxIterations,
+        maxWallClockMs: runtime.goalMaxWallClockMs,
       },
       callbacks: {
         runWorkerTurn: async (turnPrompt, isFeedback) => {

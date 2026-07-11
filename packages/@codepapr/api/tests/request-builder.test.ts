@@ -102,7 +102,7 @@ describe('RequestBuilder - DeepSeek cache stability', () => {
       maxTokens: 1_024_000,
     });
 
-    expect(req.maxTokens).toBe(393_216);
+    expect(req.maxTokens).toBe(200_000);
   });
 
   it('只为支持显式缓存提示的 provider 生成 cacheControl', () => {

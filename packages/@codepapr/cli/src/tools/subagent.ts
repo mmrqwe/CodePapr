@@ -16,7 +16,7 @@ import {
   sanitizeAgentPrompt,
   resolveAgentPrompt,
 } from '@codepapr/core';
-import { RequestBuilder, CacheValidator, OpenAIProvider, ClaudeProvider } from '@codepapr/api';
+import { DEFAULT_MAX_TOKENS, RequestBuilder, CacheValidator, OpenAIProvider, ClaudeProvider } from '@codepapr/api';
 import type { ICacheStatistics, ILLMProvider, IToolDefinition, MentorConfig } from '@codepapr/types';
 import type { AgentDefinition, EditHistory, SkillDefinition } from '@codepapr/core';
 import type { CacheStatsRepository } from '@codepapr/db';
@@ -136,7 +136,7 @@ async function runSubagent(
   const parameters = {
     temperature,
     topP: context.subagentParameters?.topP ?? 0.9,
-    maxTokens: context.subagentParameters?.maxTokens ?? 393_216,
+    maxTokens: context.subagentParameters?.maxTokens ?? DEFAULT_MAX_TOKENS,
     thinkingEnabled: context.subagentParameters?.thinkingEnabled ?? true,
   };
 

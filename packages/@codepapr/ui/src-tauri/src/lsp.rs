@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use std::os::windows::process::CommandExt;
 use std::{
     collections::{HashMap, VecDeque},
+    fs,
     io::{BufRead, BufReader, Read, Write},
     path::{Component, Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
@@ -408,6 +409,26 @@ fn python_initialization_options() -> Option<serde_json::Value> {
     }))
 }
 
+fn load_pyright_project_config(workspace: &Path) -> Option<serde_json::Value> {
+    let pyrightconfig = workspace.join("pyrightconfig.json");
+    if let Ok(content) = fs::read_to_string(&pyrightconfig) {
+        if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+            return Some(config);
+        }
+    }
+    let pyproject = workspace.join("pyproject.toml");
+    if let Ok(content) = fs::read_to_string(&pyproject) {
+        if let Ok(toml_val) = content.parse::<toml::Value>() {
+            if let Some(pyright) = toml_val.get("tool").and_then(|t| t.get("pyright")) {
+                if let Ok(config) = serde_json::to_value(pyright) {
+                    return Some(config);
+                }
+            }
+        }
+    }
+    None
+}
+
 fn rust_initialization_options() -> Option<serde_json::Value> {
     Some(json!({
         "checkOnSave": true,
@@ -439,6 +460,21 @@ fn workspace_initialization_options(
                 if let Value::Object(ref mut map) = opts {
                     for (key, value) in base {
                         map.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+            Some(opts)
+        }
+        "python" => {
+            let mut opts = config.initialization_options.clone().unwrap_or_default();
+            if let Some(project_config) = load_pyright_project_config(workspace) {
+                if let Some(analysis) = opts.pointer_mut("/settings/python/analysis") {
+                    if let Value::Object(ref mut base_analysis) = *analysis {
+                        if let Value::Object(proj) = &project_config {
+                            for (key, value) in proj {
+                                base_analysis.insert(key.clone(), value.clone());
+                            }
+                        }
                     }
                 }
             }
@@ -884,6 +920,34 @@ fn send_request(
     Ok(response)
 }
 
+fn downgrade_pyright_diagnostics(mut params: Value) -> Value {
+    let diagnostics = match params.get_mut("diagnostics") {
+        Some(Value::Array(arr)) => arr,
+        _ => return params,
+    };
+    for diag in diagnostics.iter_mut() {
+        let code = diag.get("code").and_then(Value::as_str).unwrap_or("");
+        let severity = diag.get("severity").and_then(|v| v.as_i64()).unwrap_or(1);
+        let new_severity = match code {
+            "reportMissingImports" | "reportMissingModuleSource" if severity <= 2 => 2,
+            "reportUnknownMemberType"
+            | "reportUnknownVariableType"
+            | "reportUnknownArgumentType"
+                if severity <= 2 =>
+            {
+                3
+            }
+            "reportGeneralTypeIssues" if severity <= 2 => 2,
+            _ => severity,
+        };
+        if new_severity != severity {
+            diag["severity"] =
+                Value::Number(serde_json::Number::from(new_severity));
+        }
+    }
+    params
+}
+
 fn collect_publish_diagnostics(
     server: &mut ManagedLspServer,
     uri: &str,
@@ -923,6 +987,11 @@ fn collect_publish_diagnostics(
             if message_uri == uri {
                 saw_current_diagnostics = true;
             }
+            let params = if server.server_family == "python" {
+                downgrade_pyright_diagnostics(params)
+            } else {
+                params
+            };
             server.diagnostics_by_uri.insert(message_uri, params);
         }
 

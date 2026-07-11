@@ -163,7 +163,7 @@ export function filterToolsForAgent(
   return all.filter((tool) => tools[tool.name] === true);
 }
 
-export const MAX_CUSTOM_PROMPT_LENGTH = 8000;
+export const MAX_CUSTOM_PROMPT_LENGTH = 32000;
 
 export function buildTaskToolDefinition(agents: AgentDefinition[], lang?: string): IToolDefinition | null {
   // 过滤掉内部 agent（如 verifier 仅供 GoalRunner 内部使用，不暴露给主 Agent）

@@ -14,6 +14,7 @@ import { Logger, sortedStringify } from '@codepapr/common';
 import { BaseLLMProvider, ProviderConfig } from './ILLMProvider';
 import { readSseStream, safeParseToolArguments, sanitizeToolCallArguments } from './streaming';
 import { buildClaudeImageContent } from './imageContent';
+import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
 
 const log = new Logger('ClaudeProvider');
 
@@ -289,7 +290,7 @@ export class ClaudeProvider extends BaseLLMProvider {
 
     return {
       model: request.model,
-      max_tokens: request.maxTokens ?? 8192,
+      max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
       temperature: request.temperature ?? 0.7,
       top_p: request.topP ?? 0.9,
       system: systemPrompt

@@ -20,6 +20,7 @@ import {
   sanitizeToolCallArguments,
 } from './streaming';
 import { buildOpenAIImageContent } from './imageContent';
+import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
 
 const log = new Logger('OpenAIProvider');
 
@@ -271,7 +272,7 @@ export class OpenAIProvider extends BaseLLMProvider {
       })),
       temperature: request.temperature ?? 0.7,
       top_p: request.topP ?? 0.9,
-      max_tokens: request.maxTokens ?? 16_384,
+      max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
       ...(request.thinking && {
         thinking: {
           type: request.thinking.type,

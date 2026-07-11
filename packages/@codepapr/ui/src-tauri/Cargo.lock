@@ -672,6 +672,7 @@ dependencies = [
  "tauri-plugin-stronghold",
  "tokio",
  "tokio-tungstenite",
+ "toml 0.8.2",
  "tree-sitter",
  "tree-sitter-bash",
  "tree-sitter-c-sharp",

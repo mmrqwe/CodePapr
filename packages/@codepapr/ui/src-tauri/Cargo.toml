@@ -50,6 +50,7 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 tauri-plugin-stronghold = { version = "2", features = ["kdf"] }
 rand = "0.8"
 zeroize = "1"
+toml = "0.8"
 
 tree-sitter = "0.24"
 tree-sitter-typescript = "0.23"

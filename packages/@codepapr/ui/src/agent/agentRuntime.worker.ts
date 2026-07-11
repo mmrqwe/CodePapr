@@ -20,6 +20,7 @@ import {
   type AgentDefinition,
 } from '@codepapr/core';
 import {
+  DEFAULT_MAX_TOKENS,
   ClaudeProvider,
   DeepSeekProvider,
   LocalProvider,
@@ -356,10 +357,10 @@ async function runSubagent(
     maxTokens: definition.model === 'mentor'
       ? (s.mentorMaxTokens ?? 10000)
       : isExplore
-      ? (s.exploreMaxTokens ?? 393_216)
+      ? (s.exploreMaxTokens ?? DEFAULT_MAX_TOKENS)
       : isScout
-      ? (s.scoutMaxTokens ?? 393_216)
-      : 393_216,
+      ? (s.scoutMaxTokens ?? DEFAULT_MAX_TOKENS)
+      : DEFAULT_MAX_TOKENS,
     thinkingEnabled: definition.model === 'mentor'
       ? (s.mentorThinkingEnabled ?? false)
       : isExplore
