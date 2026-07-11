@@ -1982,7 +1982,7 @@ describe('normalizeSettings', () => {
       maxTokens: 1_024_000,
     });
 
-    expect(settings.maxTokens).toBe(393216);
+    expect(settings.maxTokens).toBe(200000);
   });
 });
 
