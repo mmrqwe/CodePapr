@@ -40,7 +40,7 @@ function computeInsightCacheKey(
   insightMaxDepth: number,
   insightMaxSourceFiles: number,
 ): string {
-  const entrySummary = entries.slice(0, 200).map((e) => `${e.path}:${e.bytes}`).join(',');
+  const entrySummary = entries.slice(0, 200).map((e) => `${e.path}`).join(',');
   return `${workspacePath}|${entries.length}|${insightMaxDepth}|${insightMaxSourceFiles}|${hash32(entrySummary)}`;
 }
 

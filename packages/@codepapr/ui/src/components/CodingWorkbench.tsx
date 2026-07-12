@@ -239,6 +239,7 @@ export function CodingWorkbench({
       } else if (graphLoadStartedRef.current) {
         isInitialGraphLoadRef.current = false;
         graphLoadStartedRef.current = false;
+        useAgentStore.getState().setProjectGraphLoading(false);
       }
     }
   }, []);
