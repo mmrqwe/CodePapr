@@ -1106,7 +1106,7 @@ const MessageBubble = memo(function MessageBubble({
   })();
 
   return (
-    <div className={`mb-4 flex fade-in ${isUser ? 'justify-end' : 'justify-start'}`} style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 120px' }}>
+    <div className={`mb-4 flex fade-in ${isUser ? 'justify-end' : 'justify-start'}`} data-message-id={msg.id}>
       {!isUser && avatarElement}
       <div
         className={`min-w-0 ${frameClassName}`}

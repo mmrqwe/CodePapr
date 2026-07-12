@@ -49,7 +49,6 @@ export const ConversationRoundsIndicator = memo(
 
     const [currentRoundIndex, setCurrentRoundIndex] = useState(1);
     const [panelOpen, setPanelOpen] = useState(false);
-    const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
     const indicatorRef = useRef<HTMLDivElement | null>(null);
     const panelRef = useRef<HTMLDivElement | null>(null);
     const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -123,23 +122,15 @@ export const ConversationRoundsIndicator = memo(
         >
           {rounds.map((round, i) => {
             const isCurrent = round.index === currentRoundIndex;
-            const isHovered = round.index === hoveredIndex;
             return (
               <div
                 key={round.id}
-                className={`rounds-indicator-tick${isCurrent ? ' current' : ''}${isHovered ? ' hovered' : ''}`}
+                className={`rounds-indicator-tick${isCurrent ? ' current' : ''}`}
                 style={{ top: 2 + i * tickSpacing }}
-                onMouseEnter={(e) => { e.stopPropagation(); setHoveredIndex(round.index); }}
-                onMouseLeave={() => setHoveredIndex(null)}
                 title={round.content}
               />
             );
           })}
-          {hoveredIndex !== null && (
-            <div className="rounds-indicator-tooltip">
-              {rounds.find((r) => r.index === hoveredIndex)?.content ?? ''}
-            </div>
-          )}
         </div>
 
         {panelOpen && (
