@@ -73,7 +73,7 @@ interface SubagentStep {
   summary: string;
 }
 
-const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 300_000;
+const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 600_000;
 
 async function withWallClockTimeout<T>(
   agent: Agent,
