@@ -280,7 +280,7 @@ describe('CodingWorkbench', () => {
     expect(container.textContent).toContain('README.md');
 
     const insightPanel = container.querySelector('[data-testid="workspace-insight-panel"]');
-    expect(insightPanel?.parentElement?.classList.contains('hidden')).toBe(true);
+    expect(insightPanel?.parentElement?.classList.contains('hidden')).toBe(false);
 
     await act(async () => {
       projectGraphButton?.click();

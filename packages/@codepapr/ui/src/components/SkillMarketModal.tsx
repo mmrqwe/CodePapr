@@ -348,6 +348,8 @@ function buildExternalCandidates(externalRepo: string, name: string): string[] {
   const shortName = name.replace(/-skill$/, '');
   const base = `https://raw.githubusercontent.com/${externalRepo}/main`;
   return [
+    `${base}/.CodePapr/skills/${shortName}/SKILL.md`,
+    `${base}/.CodePapr/skills/${name}/SKILL.md`,
     `${base}/.claude/skills/${shortName}/SKILL.md`,
     `${base}/.claude/skills/${name}/SKILL.md`,
     `${base}/${shortName}/SKILL.md`,
@@ -377,6 +379,25 @@ async function findExternalRepoFromInstall(name: string): Promise<string | null>
     }
   }
   return null;
+}
+
+async function discoverRepoSkills(repoPath: string): Promise<string[]> {
+  try {
+    const response = await fetch(`https://api.github.com/repos/${repoPath}/contents/skills`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) return [];
+    const entries: Array<{ name: string; type: string }> = await response.json();
+    return entries.filter((e) => e.type === 'dir').map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+
+async function downloadSubSkillMarkdown(repoPath: string, subSkill: string): Promise<string | null> {
+  return tryFetchText(
+    `https://raw.githubusercontent.com/${repoPath}/main/skills/${subSkill}/SKILL.md`
+  );
 }
 
 async function downloadSkillMarkdown(name: string, sourceRepo?: string): Promise<string | null> {
@@ -412,17 +433,47 @@ async function installSkillToWorkspace(
   workspacePath: string,
   sourceRepo: string,
   invokeFn: typeof invoke,
-): Promise<boolean> {
+): Promise<{ ok: boolean; installed: string[] }> {
   const content = await downloadSkillMarkdown(name, sourceRepo);
-  if (!content) return false;
+  if (content) {
+    const relativePath = `.CodePapr/skills/${name}/SKILL.md`;
+    try {
+      await invokeFn('write_text_file', {
+        workspacePath,
+        relativePath,
+        content,
+      });
+      return { ok: true, installed: [name] };
+    } catch {
+      return { ok: false, installed: [] };
+    }
+  }
 
-  const relativePath = `.CodePapr/skills/${name}/SKILL.md`;
-  await invokeFn('write_text_file', {
-    workspacePath,
-    relativePath,
-    content,
-  });
-  return true;
+  const repoPath = extractRepoPath(sourceRepo);
+  if (repoPath && !repoPath.includes('agent-use-skills')) {
+    const subSkills = await discoverRepoSkills(repoPath);
+    if (subSkills.length > 0) {
+      const installed: string[] = [];
+      for (const subSkill of subSkills) {
+        const subContent = await downloadSubSkillMarkdown(repoPath, subSkill);
+        if (!subContent) continue;
+        const relativePath = `.CodePapr/skills/${subSkill}/SKILL.md`;
+        try {
+          await invokeFn('write_text_file', {
+            workspacePath,
+            relativePath,
+            content: subContent,
+          });
+          installed.push(subSkill);
+        } catch {
+          // skip failed sub-skill
+        }
+      }
+      return { ok: installed.length > 0, installed };
+    }
+  }
+
+  return { ok: false, installed: [] };
 }
 
 async function refreshSkills(workspacePath: string) {
@@ -489,11 +540,21 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
     setInstallingIds((prev) => new Set(prev).add(listing.id));
     setInstallErrors((prev) => { const n = { ...prev }; delete n[listing.id]; return n; });
 
-    const ok = await installSkillToWorkspace(listing.name, workspacePath, listing.sourceRepo, invoke);
+    const result = await installSkillToWorkspace(listing.name, workspacePath, listing.sourceRepo, invoke);
 
-    if (ok) {
-      setInstalledIds((prev) => new Set(prev).add(listing.id));
-      setToastMessage(`${listing.title} ${c.installSuccess}`);
+    if (result.ok) {
+      setInstalledIds((prev) => {
+        const next = new Set(prev).add(listing.id);
+        for (const sub of result.installed) {
+          next.add(sub);
+        }
+        return next;
+      });
+      if (result.installed.length > 1) {
+        setToastMessage(`${listing.title}: ${result.installed.length} skills installed`);
+      } else {
+        setToastMessage(`${listing.title} ${c.installSuccess}`);
+      }
       await refreshSkills(workspacePath);
     } else {
       setInstallErrors((prev) => ({ ...prev, [listing.id]: c.installError }));

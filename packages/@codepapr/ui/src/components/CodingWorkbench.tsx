@@ -228,6 +228,7 @@ export function CodingWorkbench({
   const workspaceSwitchingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isInitialGraphLoadRef = useRef(true);
   const graphLoadStartedRef = useRef(false);
+  const [isInitialGraphPreload, setIsInitialGraphPreload] = useState(false);
 
   const handleProjectGraphProgress = useCallback((progress: { phase: string; current: number; total: number } | null, isLoading: boolean) => {
     setProjectGraphProgress(progress);
@@ -240,6 +241,7 @@ export function CodingWorkbench({
         isInitialGraphLoadRef.current = false;
         graphLoadStartedRef.current = false;
         useAgentStore.getState().setProjectGraphLoading(false);
+        setIsInitialGraphPreload(false);
       }
     }
   }, []);
@@ -341,6 +343,7 @@ export function CodingWorkbench({
   useEffect(() => {
     isInitialGraphLoadRef.current = true;
     graphLoadStartedRef.current = false;
+    setIsInitialGraphPreload(false);
   }, [workspacePath]);
 
   useEffect(() => {
@@ -436,6 +439,13 @@ export function CodingWorkbench({
   }, [workspacePath]);
 
   const canStartProjectGraph = !isLoadingTree && entries.length > 0 && !!workspacePath;
+
+  useEffect(() => {
+    if (canStartProjectGraph && isInitialGraphLoadRef.current) {
+      setIsInitialGraphPreload(true);
+      useAgentStore.getState().setProjectGraphLoading(true);
+    }
+  }, [canStartProjectGraph]);
 
   useEffect(() => {
     if (isWorkspaceSwitching && !isLoadingTree) {
@@ -870,8 +880,12 @@ export function CodingWorkbench({
                   </span>
                 </div>
               )}
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <div className={hiddenSidebarTab === 'tree' ? 'hidden' : 'h-full'}>
+              <div className="min-h-0 flex-1 overflow-hidden relative">
+                <div className={
+                  hiddenSidebarTab === 'projectgraph' ? 'h-full' :
+                  isInitialGraphPreload ? 'absolute inset-0 opacity-0 pointer-events-none' :
+                  'hidden'
+                }>
                   <WorkspaceInsightPanel
                     workspacePath={workspacePath}
                     entries={entries}
