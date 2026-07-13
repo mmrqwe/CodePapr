@@ -101,7 +101,7 @@ interface WorkspaceInsightPanelProps {
 }
 
 interface ProjectGraphProgressState {
-  phase: 'reading-files' | 'resolving-symbols' | 'building' | 'enriching' | 'init-git';
+  phase: 'reading-files' | 'resolving-symbols' | 'building' | 'enriching' | 'init-git' | 'prewarming-lsp';
   current: number;
   total: number;
 }
@@ -183,6 +183,10 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   const [error, setError] = useState('');
   const [debugLog, setDebugLog] = useState<string[]>([]);
   const lastWorkspacePathRef = useRef<string | null>(null);
+  const hasSignaledLoadingRef = useRef(false);
+  const [loadingInProgress, setLoadingInProgress] = useState(false);
+  const [prewarming, setPrewarming] = useState(false);
+  const [prewarmingProgress, setPrewarmingProgress] = useState('');
   const appendDebug = (msg: string) => {
     if (!settings.debugEnabled) return;
     setDebugLog((prev) => [...prev, `${new Date().toLocaleTimeString()} ${msg}`]);
@@ -329,11 +333,16 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   }, [workspacePath]);
 
   useEffect(() => {
-    onProgressChange?.(projectGraphProgress, isLoading);
-  }, [projectGraphProgress, isLoading, onProgressChange]);
+    const effectiveLoading = isLoading || prewarming || loadingInProgress;
+    if (effectiveLoading) hasSignaledLoadingRef.current = true;
+    if (!effectiveLoading && !hasSignaledLoadingRef.current) return;
+    let progress: ProjectGraphProgressState | null = projectGraphProgress;
+    if (!isLoading && !loadingInProgress && prewarming) {
+      progress = { phase: 'prewarming-lsp', current: 0, total: 0 };
+    }
+    onProgressChange?.(progress, effectiveLoading);
+  }, [projectGraphProgress, isLoading, prewarming, loadingInProgress, onProgressChange]);
 
-  const [prewarming, setPrewarming] = useState(false);
-  const [prewarmingProgress, setPrewarmingProgress] = useState('');
   const prewarmingGenRef = useRef(0);
   const prevWorkspaceRef = useRef<string>('');
   const prewarmingInitializedRef = useRef(false);
@@ -463,6 +472,8 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
       appendDebug(`跳过: canStartLoading=${canStartLoading} workspacePath=${workspacePath?.slice(-20)}`);
       setIsLoading(false);
       setProjectGraphProgress(null);
+      setLoadingInProgress(false);
+      hasSignaledLoadingRef.current = false;
       if (lastWorkspacePathRef.current !== workspacePath) {
         setProjectGraph(null);
       }
@@ -475,6 +486,8 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
     appendDebug(`开始加载: path=${workspacePath.slice(-30)} entries=${entriesRef.current.length} depth=${insightMaxDepth} bytes=${insightMaxFileBytes} files=${insightMaxSourceFiles}`);
 
     const thisGeneration = ++loadGenerationRef.current;
+
+    setLoadingInProgress(true);
 
     const loadInsights = async () => {
       const currentCacheKey = computeInsightCacheKey(
@@ -491,7 +504,8 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
           if (cached.cacheKey === currentCacheKey && cached.projectGraph) {
             if (!cancelled) {
               setProjectGraph(cached.projectGraph as WorkspaceProjectGraphResult);
-              onProgressChange?.(null, false);
+              hasSignaledLoadingRef.current = true;
+              setLoadingInProgress(false);
             }
             return;
           }
@@ -752,6 +766,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
         if (loadGenerationRef.current === thisGeneration) {
           setIsLoading(false);
         }
+        setLoadingInProgress(false);
         setProjectGraphProgress(null);
         if (worker) {
           worker.terminate();

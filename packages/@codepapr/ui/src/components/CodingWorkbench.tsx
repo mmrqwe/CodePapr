@@ -228,23 +228,16 @@ export function CodingWorkbench({
   const workspaceSwitchingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isInitialGraphLoadRef = useRef(true);
   const graphLoadStartedRef = useRef(false);
-  const panelFirstCallbackRef = useRef(false);
   const [isInitialGraphPreload, setIsInitialGraphPreload] = useState(false);
 
   const handleProjectGraphProgress = useCallback((progress: { phase: string; current: number; total: number } | null, isLoading: boolean) => {
     setProjectGraphProgress(progress);
     setProjectGraphLoading(isLoading);
-
-    if (!panelFirstCallbackRef.current) {
-      panelFirstCallbackRef.current = true;
-      return;
-    }
-
     if (isInitialGraphLoadRef.current) {
       if (isLoading) {
         graphLoadStartedRef.current = true;
         useAgentStore.getState().setProjectGraphLoading(true, progress ?? undefined);
-      } else {
+      } else if (graphLoadStartedRef.current) {
         isInitialGraphLoadRef.current = false;
         graphLoadStartedRef.current = false;
         useAgentStore.getState().setProjectGraphLoading(false);
@@ -350,7 +343,6 @@ export function CodingWorkbench({
   useEffect(() => {
     isInitialGraphLoadRef.current = true;
     graphLoadStartedRef.current = false;
-    panelFirstCallbackRef.current = false;
     setIsInitialGraphPreload(false);
   }, [workspacePath]);
 
@@ -451,6 +443,7 @@ export function CodingWorkbench({
   useEffect(() => {
     if (canStartProjectGraph && isInitialGraphLoadRef.current) {
       setIsInitialGraphPreload(true);
+      graphLoadStartedRef.current = true;
       useAgentStore.getState().setProjectGraphLoading(true);
     }
   }, [canStartProjectGraph]);

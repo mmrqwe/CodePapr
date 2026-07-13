@@ -238,6 +238,7 @@ export default function App() {
                     'building': 'Building semantic graph',
                     'enriching': 'Enriching graph metadata',
                     'init-git': 'Initializing git tracking',
+                    'prewarming-lsp': 'Warming up LSP servers…',
                   }[projectGraphPhase.phase] ?? 'Loading…'
                 : 'Please wait, scanning workspace…'}
             </p>
