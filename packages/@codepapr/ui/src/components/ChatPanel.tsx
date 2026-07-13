@@ -643,7 +643,6 @@ function ReasoningPanel({
           }${
             isStreaming ? 'max-h-[4.5rem]' : 'max-h-56'
           }`}
-          style={{ overflowAnchor: 'none' }}
         >
           <p className="whitespace-pre-wrap text-slate-300/90 select-text">{visibleContent}</p>
         </div>
@@ -1598,6 +1597,11 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
 
     if (shouldStickToBottomRef.current || lastVisibleMessageIdRef.current === null) {
       scrollContainerToBottom(container, behavior);
+      requestAnimationFrame(() => {
+        if (container.isConnected) {
+          scrollContainerToBottom(container, 'auto');
+        }
+      });
     }
 
     lastVisibleMessageIdRef.current = tailMessageId;
@@ -1939,7 +1943,6 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
           shouldStickToBottomRef.current = isScrollContainerNearBottom(event.currentTarget);
         }}
         className="h-full overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable px-4 py-4"
-        style={{ overflowAnchor: 'none' }}
       >
         <div ref={messageListContentRef}>
           {visibleMessages.length === 0 && (
