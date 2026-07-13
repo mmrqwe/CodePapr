@@ -491,6 +491,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
           if (cached.cacheKey === currentCacheKey && cached.projectGraph) {
             if (!cancelled) {
               setProjectGraph(cached.projectGraph as WorkspaceProjectGraphResult);
+              onProgressChange?.(null, false);
             }
             return;
           }
