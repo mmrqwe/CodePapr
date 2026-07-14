@@ -643,6 +643,7 @@ function ReasoningPanel({
           }${
             isStreaming ? 'max-h-[4.5rem]' : 'max-h-56'
           }`}
+          style={{ overflowAnchor: 'none' }}
         >
           <p className="whitespace-pre-wrap text-slate-300/90 select-text">{visibleContent}</p>
         </div>
@@ -1597,11 +1598,6 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
 
     if (shouldStickToBottomRef.current || lastVisibleMessageIdRef.current === null) {
       scrollContainerToBottom(container, behavior);
-      requestAnimationFrame(() => {
-        if (container.isConnected) {
-          scrollContainerToBottom(container, 'auto');
-        }
-      });
     }
 
     lastVisibleMessageIdRef.current = tailMessageId;
@@ -1622,9 +1618,22 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
     }
 
     const observer = new ResizeObserver(() => {
+      const container = messageListRef.current;
+      if (!container) return;
+
       if (hasStreamingMessage || shouldStickToBottomRef.current) {
         scrollContainerToBottom(container, hasStreamingMessage ? 'auto' : 'smooth');
+        return;
       }
+
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      requestAnimationFrame(() => {
+        if (!container.isConnected) return;
+        const targetScrollTop = container.scrollHeight - distanceFromBottom - container.clientHeight;
+        if (Math.abs(targetScrollTop - container.scrollTop) > 1) {
+          container.scrollTop = targetScrollTop;
+        }
+      });
     });
 
     observer.observe(content);
@@ -1943,6 +1952,7 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
           shouldStickToBottomRef.current = isScrollContainerNearBottom(event.currentTarget);
         }}
         className="h-full overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable px-4 py-4"
+        style={{ overflowAnchor: 'none' }}
       >
         <div ref={messageListContentRef}>
           {visibleMessages.length === 0 && (
