@@ -68,7 +68,7 @@ interface TextFileAttachment {
 }
 
 const SUPPORTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
-const MAX_TEXT_FILE_BYTES = 1 * 1024 * 1024;
+const MAX_TEXT_FILE_BYTES = 1_000_000;
 const MAX_PENDING_FILES = 20;
 
 /** 把 File 读取为 base64 图片内容（剥离 data URI 前缀）。 */
@@ -107,7 +107,8 @@ function buildUserPromptWithFiles(userText: string, files: TextFileAttachment[])
   }
   for (let i = 0; i < files.length; i++) {
     const sep = parts.length > 0 ? '\n\n' : '';
-    parts.push(`${sep}--- ${files[i].name} ---\n${files[i].content}`);
+    const safeName = files[i].name.replace(/---/g, '\\-\\-\\-').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+    parts.push(`${sep}--- ${safeName} ---\n${files[i].content}`);
   }
   return parts.join('');
 }
@@ -603,7 +604,7 @@ function ReasoningPanel({
       return;
     }
 
-    if (isStreaming || shouldStickToBottomRef.current) {
+    if (shouldStickToBottomRef.current) {
       scrollContainerToBottom(container, 'auto');
     }
   }, [isOpen, isStreaming, visibleContent.length]);
@@ -1295,6 +1296,9 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const [pendingImages, setPendingImages] = useState<ImagePreview[]>([]);
   const [pendingFiles, setPendingFiles] = useState<TextFileAttachment[]>([]);
+  useEffect(() => {
+    setPendingFiles([]);
+  }, [activeSessionId]);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const onPreviewImage = useCallback((src: string) => setPreviewImage(src), []);
   const [mode, setMode] = useState<WorkMode>('agent');
@@ -1323,6 +1327,12 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
   const lastVisibleMessageIdRef = useRef<string | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const isComposingRef = useRef(false);
+
+  useLayoutEffect(() => {
+    if (isLoading) {
+      shouldStickToBottomRef.current = true;
+    }
+  }, [isLoading]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const settingsError = getSettingsError(settings);
   const isConfigured = !settingsError;
@@ -1621,7 +1631,7 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
       const container = messageListRef.current;
       if (!container) return;
 
-      if (hasStreamingMessage || shouldStickToBottomRef.current) {
+      if (shouldStickToBottomRef.current) {
         scrollContainerToBottom(container, hasStreamingMessage ? 'auto' : 'smooth');
         return;
       }
@@ -1650,6 +1660,7 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
       refreshProjectDiagnostics().catch(() => {});
     }
 
+    shouldStickToBottomRef.current = true;
     await sendMessage(taskText, displayText, nextMode, null, images);
   }, [
     refreshProjectDiagnostics,
@@ -1673,9 +1684,18 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
 
   const addImageFiles = async (files: File[]) => {
     if (files.length === 0) return;
-    const previews = (await Promise.all(files.map(readFileAsImagePreview))).filter(
-      (item): item is ImagePreview => item !== null
-    );
+    const results = await Promise.all(files.map(readFileAsImagePreview));
+    const previews = results.filter((item): item is ImagePreview => item !== null);
+    const skipped = files.length - previews.length;
+    if (skipped > 0) {
+      toast.warning(
+        settings.lang === 'en'
+          ? `${skipped} image(s) skipped (unsupported format)`
+          : settings.lang === 'zh-TW'
+            ? `已跳過 ${skipped} 張不支援格式的圖片`
+            : `已跳过 ${skipped} 张不支持格式的图片`
+      );
+    }
     if (previews.length > 0) {
       setPendingImages((current) => [...current, ...previews]);
     }
@@ -1687,18 +1707,17 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
     const imageFiles = allFiles.filter((f) => f.type.startsWith('image/'));
     const textFiles = allFiles.filter((f) => !f.type.startsWith('image/'));
     if (imageFiles.length > 0 || textFiles.length > 0) {
-      event.preventDefault();
       void handleIncomingFiles(imageFiles, textFiles);
     }
   };
 
   const handleDrop = (event: DragEvent<HTMLTextAreaElement>) => {
+    event.preventDefault();
     const allFiles = Array.from(event.dataTransfer.files ?? []);
     if (allFiles.length === 0) return;
     const imageFiles = allFiles.filter((f) => f.type.startsWith('image/'));
     const textFiles = allFiles.filter((f) => !f.type.startsWith('image/'));
     if (imageFiles.length > 0 || textFiles.length > 0) {
-      event.preventDefault();
       void handleIncomingFiles(imageFiles, textFiles);
     }
   };
@@ -2283,7 +2302,7 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".txt,.md,.json,.ts,.tsx,.js,.jsx,.py,.rs,.go,.java,.c,.cpp,.h,.html,.css,.yaml,.yml,.toml,.xml,.csv,.log,.env,.sh,.bash,.zsh,.rb,.swift,.kt,.dart,.vue,.svelte,.graphql,.sql,.prisma,.proto,.cmake,.dockerfile,.editorconfig,.gitignore,image/*"
+              accept=".txt,.md,.json,.ts,.tsx,.js,.jsx,.py,.rs,.go,.java,.c,.cpp,.h,.html,.css,.yaml,.yml,.toml,.xml,.csv,.log,.env,.sh,.bash,.zsh,.rb,.swift,.kt,.dart,.vue,.svelte,.graphql,.sql,.prisma,.proto,.cmake,.editorconfig,.gitignore,.dockerignore,.php,.scss,.less,Dockerfile,image/*"
               multiple
               onChange={handleFileSelect}
               className="hidden"

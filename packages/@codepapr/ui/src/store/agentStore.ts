@@ -999,11 +999,24 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           // 首次发消息时自动创建会话；恢复后的旧会话则原地重建 agent。
           if (!agent || agentModel !== route.model || (agentPromptKey !== null && agentPromptKey !== runtimePromptKey)) {
             if (activeSessionId) {
+              let contextMessages = sessionMessages[activeSessionId] ?? [];
+              if (mode !== 'ask' && contextMessages.some((m) => m.role === 'assistant' && m.workMode === 'ask')) {
+                contextMessages = [...contextMessages, {
+                  id: createId(),
+                  role: 'assistant' as const,
+                  workMode: mode,
+                  content: `[Mode: ${mode.toUpperCase()}] You are now in ${mode} mode with full tool access. Previous ask-mode responses are for context only; use tools proactively for this task.`,
+                  synthetic: true,
+                  hidden: true,
+                  carryForwardInContext: true,
+                  timestamp: Date.now(),
+                }];
+              }
               agent = createAgent(
                 normalizedSettings,
                 activeSessionId,
                 workspacePath,
-                sessionMessages[activeSessionId] ?? [],
+                contextMessages,
                 {
                   model: route.model,
                   thinkingEnabled: route.thinkingEnabled,
@@ -1085,7 +1098,19 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             }
           }
 
-          const retryBaseMessages = [...(sessionMessages[activeSessionId!] ?? []), userMsg!];
+          let retryBaseMessages = [...(sessionMessages[activeSessionId!] ?? []), userMsg!];
+          if (mode !== 'ask' && retryBaseMessages.some((m) => m.role === 'assistant' && m.workMode === 'ask')) {
+            retryBaseMessages = [...retryBaseMessages, {
+              id: createId(),
+              role: 'assistant' as const,
+              workMode: mode,
+              content: `[Mode: ${mode.toUpperCase()}] You are now in ${mode} mode with full tool access. Previous ask-mode responses are for context only; use tools proactively for this task.`,
+              synthetic: true,
+              hidden: true,
+              carryForwardInContext: true,
+              timestamp: Date.now(),
+            }];
+          }
           assistantMessageId = createId();
 
           const createStreamingAssistantMsg = (messageId: string, statusText: string): UIMessage => ({

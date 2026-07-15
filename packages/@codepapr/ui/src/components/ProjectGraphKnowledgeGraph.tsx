@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useCallback, useState } from 'react';
 import { Graph } from '@antv/g6';
-import type { GraphOptions, NodeData, EdgeData, IElementEvent } from '@antv/g6';
+import type { GraphOptions, NodeData, EdgeData } from '@antv/g6';
 import { Renderer as WebGLRenderer } from '@antv/g-webgl';
 import type {
   ProjectGraphNode,
@@ -16,6 +16,8 @@ const EDGE_COLORS: Record<string, string> = {
   implements: '#8b949e',
   calls: '#f78166',
   contains: '#6e7681',
+  tested_by: '#2dd4bf',
+  configures: '#c084fc',
 };
 
 const SYMBOL_COLORS: Record<string, string> = {
@@ -27,6 +29,16 @@ const SYMBOL_COLORS: Record<string, string> = {
   typedef: '#d29922',
   constructor: '#f0883e',
   arrow: '#58a6ff',
+};
+
+const FILE_TYPE_COLORS: Record<string, string> = {
+  test: '#f59e0b',
+  config: '#c084fc',
+  doc: '#2dd4bf',
+  docker: '#06b6d4',
+  cicd: '#e879f9',
+  sql: '#f472b6',
+  source: '#6366f1',
 };
 
 const FOLDER_COLORS = [
@@ -101,6 +113,7 @@ function computeDegrees(
   }
   for (const edge of edges) {
     if (edge.kind === 'contains') continue;
+    if (edge.kind === 'tested_by' || edge.kind === 'configures') continue;
     const fromDeg = map.get(edge.from);
     const toDeg = map.get(edge.to);
     if (fromDeg) { fromDeg.out++; fromDeg.total++; }
@@ -116,6 +129,7 @@ interface G6NodeData {
   fullPath: string;
   language?: string;
   isEntry: boolean;
+  fileType?: string;
   symbolKind?: string;
   line?: number;
   signature?: string;
@@ -199,6 +213,7 @@ function buildG6Data(
     const deg = degrees.get(fileNode.id)?.total ?? 0;
     const isEntry = Boolean(fileNode.entryPoint);
     const folder = topFolder(fileNode.path);
+    const ft = fileNode.fileType;
 
     g6Nodes.push({
       id: fileNode.id,
@@ -209,12 +224,13 @@ function buildG6Data(
         fullPath: fileNode.path,
         language: fileNode.language,
         isEntry,
+        fileType: ft,
         inDegree: degrees.get(fileNode.id)?.in ?? 0,
         outDegree: degrees.get(fileNode.id)?.out ?? 0,
         topFolder: folder,
       },
       style: {
-        fill: topFolderColor(folder),
+        fill: ft && ft !== 'source' ? (FILE_TYPE_COLORS[ft] ?? topFolderColor(folder)) : topFolderColor(folder),
         stroke: isEntry ? '#f0883e' : '#30363d',
         size: scaleSize(deg, minFileDeg, maxFileDeg, 30, 70),
       },
@@ -346,7 +362,7 @@ function buildG6Data(
   const includedEdges = edges.filter((e) => {
     if (e.kind === 'contains') return false;
     if (e.kind === 'calls') return false;
-    if (showDeps && (e.kind === 'imports' || e.kind === 'reexports')) return true;
+    if (showDeps && (e.kind === 'imports' || e.kind === 'reexports' || e.kind === 'tested_by' || e.kind === 'configures')) return true;
     if (showHierarchy && (e.kind === 'extends' || e.kind === 'implements')) return true;
     return false;
   });
@@ -390,6 +406,7 @@ interface SelectedNodeInfo {
   fullPath: string;
   nodeKind: 'file' | 'symbol';
   language?: string;
+  fileType?: string;
   symbolKind?: string;
   line?: number;
   signature?: string;
@@ -416,6 +433,79 @@ export interface ProjectGraphKnowledgeGraphHandle {
   fitView: () => void;
 }
 
+function fuzzyMatch(target: string, query: string): boolean {
+  if (query.length < 2) return false;
+  let qi = 0;
+  for (let i = 0; i < target.length && qi < query.length; i++) {
+    if (target[i] === query[qi]) {
+      qi++;
+    }
+  }
+  return qi === query.length;
+}
+
+interface EdgeRelation {
+  edgeId: string;
+  kind: string;
+  direction: 'in' | 'out';
+  targetNodeId: string;
+  targetLabel: string;
+  targetPath: string;
+  targetKind: 'file' | 'symbol';
+  targetLine?: number;
+  targetSymbolKind?: string;
+}
+
+interface ConnectedEdges {
+  inbound: EdgeRelation[];
+  outbound: EdgeRelation[];
+}
+
+function computeConnectedEdges(
+  nodeId: string | undefined,
+  nodes: ProjectGraphNode[],
+  edges: ProjectGraphEdge[],
+): ConnectedEdges {
+  const result: ConnectedEdges = { inbound: [], outbound: [] };
+  if (!nodeId) return result;
+
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+
+  for (const edge of edges) {
+    if (edge.kind === 'contains') continue;
+    const isOut = edge.from === nodeId;
+    const isIn = edge.to === nodeId;
+    if (!isOut && !isIn) continue;
+
+    const targetId = isOut ? edge.to : edge.from;
+    const targetNode = nodeMap.get(targetId);
+    if (!targetNode) continue;
+
+    const rel: EdgeRelation = {
+      edgeId: edge.id,
+      kind: edge.kind,
+      direction: isOut ? 'out' : 'in',
+      targetNodeId: targetId,
+      targetLabel: targetNode.label,
+      targetPath: targetNode.path,
+      targetKind: targetNode.kind,
+      targetLine: targetNode.symbol?.line,
+      targetSymbolKind: targetNode.symbol?.kind,
+    };
+
+    if (isOut) {
+      result.outbound.push(rel);
+    } else {
+      result.inbound.push(rel);
+    }
+  }
+
+  result.inbound.sort((a, b) => a.kind.localeCompare(b.kind) || a.targetLabel.localeCompare(b.targetLabel));
+  result.outbound.sort((a, b) => a.kind.localeCompare(b.kind) || a.targetLabel.localeCompare(b.targetLabel));
+
+  return result;
+}
+
 const ProjectGraphKnowledgeGraph = forwardRef<
   ProjectGraphKnowledgeGraphHandle,
   ProjectGraphKnowledgeGraphProps
@@ -425,9 +515,12 @@ const ProjectGraphKnowledgeGraph = forwardRef<
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Graph | null>(null);
+  const onNodeClickRef = useRef(onNodeClick);
+  onNodeClickRef.current = onNodeClick;
   const [tooltipInfo, setTooltipInfo] = useState<TooltipInfo | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<SelectedNodeInfo | null>(null);
+  const [connectedEdges, setConnectedEdges] = useState<ConnectedEdges>({ inbound: [], outbound: [] });
   const t = getTranslation(lang ?? 'zh-CN');
   const edgeKindLabel = (kind: string): string => {
     switch (kind) {
@@ -436,22 +529,59 @@ const ProjectGraphKnowledgeGraph = forwardRef<
       case 'extends': return t.workspaceProjectGraphExtends;
       case 'implements': return t.workspaceProjectGraphImplements;
       case 'calls': return lang === 'en' ? 'Calls' : '调用';
+      case 'tested_by': return lang === 'en' ? 'Tested By' : '测试';
+      case 'configures': return lang === 'en' ? 'Configures' : '配置';
       default: return kind;
     }
   };
 
   const handleNodeClick = useCallback(
     (filePath: string, line?: number) => {
-      onNodeClick?.(filePath, line);
+      onNodeClickRef.current?.(filePath, line);
     },
-    [onNodeClick],
+    [],
   );
 
   const handleOpenFile = useCallback(() => {
     if (selectedNode) {
-      onNodeClick?.(selectedNode.fullPath, selectedNode.line);
+      onNodeClickRef.current?.(selectedNode.fullPath, selectedNode.line);
     }
-  }, [selectedNode, onNodeClick]);
+  }, [selectedNode]);
+
+  const navigateToNode = useCallback((targetNodeId: string) => {
+    const nodeMap = new Map(projectGraph.nodes.map((n) => [n.id, n]));
+    const targetNode = nodeMap.get(targetNodeId);
+    if (!targetNode) return;
+
+    const degrees = new Map<string, { in: number; out: number }>();
+    for (const edge of projectGraph.edges) {
+      if (edge.kind === 'contains') continue;
+      if (!degrees.has(edge.from)) degrees.set(edge.from, { in: 0, out: 0 });
+      if (!degrees.has(edge.to)) degrees.set(edge.to, { in: 0, out: 0 });
+      degrees.get(edge.from)!.out++;
+      degrees.get(edge.to)!.in++;
+    }
+
+    const fileTypeVal = targetNode.fileType;
+    setSelectedNode({
+      label: targetNode.qualifiedName ?? targetNode.label,
+      fullPath: targetNode.path,
+      nodeKind: targetNode.kind,
+      language: targetNode.language,
+      fileType: fileTypeVal,
+      symbolKind: targetNode.symbol?.kind,
+      line: targetNode.symbol?.line,
+      signature: targetNode.symbol?.signature,
+      exported: targetNode.symbol?.exported,
+      async: targetNode.symbol?.async,
+      inDegree: degrees.get(targetNode.id)?.in ?? 0,
+      outDegree: degrees.get(targetNode.id)?.out ?? 0,
+      topFolder: nodeMap.get(targetNodeId)?.path ? topFolder(targetNode.path) : undefined,
+      isEntry: Boolean(targetNode.entryPoint),
+    });
+    setConnectedEdges(computeConnectedEdges(targetNodeId, projectGraph.nodes, projectGraph.edges));
+    onNodeClickRef.current?.(targetNode.path, targetNode.symbol?.line);
+  }, [projectGraph.nodes, projectGraph.edges]);
 
   useImperativeHandle(ref, () => ({
     zoomIn: () => {
@@ -569,7 +699,35 @@ const ProjectGraphKnowledgeGraph = forwardRef<
       behaviors: [
         'drag-canvas',
         'zoom-canvas',
-        'drag-element',
+        {
+          type: 'click-select',
+          onClick: (event: unknown) => {
+            const e = event as { targetType?: string; target?: { id?: string } };
+            if (e.targetType !== 'node' || !e.target?.id) return;
+            const nodeId = e.target.id;
+            const nd = graph.getNodeData(nodeId);
+            const g6Data = nd?.data as G6NodeData | undefined;
+            if (!g6Data?.fullPath) return;
+            setSelectedNode({
+              label: g6Data.fullLabel ?? g6Data.label,
+              fullPath: g6Data.fullPath,
+              nodeKind: g6Data.nodeKind,
+              language: g6Data.language,
+              fileType: g6Data.fileType,
+              symbolKind: g6Data.symbolKind,
+              line: g6Data.line,
+              signature: g6Data.signature,
+              exported: g6Data.exported,
+              async: g6Data.async,
+              inDegree: g6Data.inDegree,
+              outDegree: g6Data.outDegree,
+              topFolder: g6Data.topFolder,
+              isEntry: g6Data.isEntry,
+            });
+            setConnectedEdges(computeConnectedEdges(nodeId, projectGraph.nodes, projectGraph.edges));
+            handleNodeClick(g6Data.fullPath, g6Data.line);
+          },
+        },
       ],
     };
 
@@ -582,28 +740,6 @@ const ProjectGraphKnowledgeGraph = forwardRef<
     } catch { /* fallback to Canvas 2D */ }
 
     const graph = new Graph(graphOptions);
-
-    graph.on('node:click', (evt: IElementEvent) => {
-      const eventData = (evt as IElementEvent & { data: NodeData }).data;
-      const nodeData = eventData?.data as G6NodeData | undefined;
-      if (nodeData?.fullPath) {
-        setSelectedNode({
-          label: nodeData.fullLabel ?? nodeData.label,
-          fullPath: nodeData.fullPath,
-          nodeKind: nodeData.nodeKind,
-          language: nodeData.language,
-          symbolKind: nodeData.symbolKind,
-          line: nodeData.line,
-          signature: nodeData.signature,
-          exported: nodeData.exported,
-          async: nodeData.async,
-          inDegree: nodeData.inDegree,
-          outDegree: nodeData.outDegree,
-          topFolder: nodeData.topFolder,
-          isEntry: nodeData.isEntry,
-        });
-      }
-    });
 
     const clearHoverStates = () => {
       if (!graphRef.current) return;
@@ -692,10 +828,13 @@ const ProjectGraphKnowledgeGraph = forwardRef<
       setTooltipInfo(null);
     });
 
-    graph.on('canvas:click', () => {
+    graph.on('canvas:click', (evt: unknown) => {
+      const e = evt as { targetType?: string };
+      if (e.targetType === 'node' || e.targetType === 'edge') return;
       clearHoverStates();
       setTooltipInfo(null);
       setSelectedNode(null);
+      setConnectedEdges({ inbound: [], outbound: [] });
     });
 
     graph.render().catch((err) => {
@@ -758,7 +897,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
         const data = n.data as G6NodeData | undefined;
         const label = (data?.label ?? '').toLowerCase();
         const fullPath = (data?.fullPath ?? '').toLowerCase();
-        if (label.includes(q) || fullPath.includes(q)) {
+        if (label.includes(q) || fullPath.includes(q) || fuzzyMatch(label, q) || fuzzyMatch(fullPath, q)) {
           matchingIds.add(n.id);
         }
       }
@@ -797,6 +936,21 @@ const ProjectGraphKnowledgeGraph = forwardRef<
           <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-[#2a2d3a] bg-[#1a1d27]' : 'border-slate-200 bg-white'}`}>
             {lang === 'en' ? 'Files' : '文件'} {summary.files}
           </span>
+          {(summary.testFiles ?? 0) > 0 && (
+            <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-amber-500/30 bg-amber-500/10 text-amber-400' : 'border-amber-400/30 bg-amber-50 text-amber-600'}`}>
+              测试 {(summary.testFiles ?? 0)}
+            </span>
+          )}
+          {(summary.configFiles ?? 0) > 0 && (
+            <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-purple-500/30 bg-purple-500/10 text-purple-400' : 'border-purple-400/30 bg-purple-50 text-purple-600'}`}>
+              配置 {(summary.configFiles ?? 0)}
+            </span>
+          )}
+          {(summary.docFiles ?? 0) > 0 && (
+            <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-teal-500/30 bg-teal-500/10 text-teal-400' : 'border-teal-400/30 bg-teal-50 text-teal-600'}`}>
+              文档 {(summary.docFiles ?? 0)}
+            </span>
+          )}
           <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-[#2a2d3a] bg-[#1a1d27]' : 'border-slate-200 bg-white'}`}>
             {lang === 'en' ? 'Symbols' : '符号'} {summary.symbols}
           </span>
@@ -815,6 +969,11 @@ const ProjectGraphKnowledgeGraph = forwardRef<
           <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-[#2a2d3a] bg-[#1a1d27]' : 'border-slate-200 bg-white'}`}>
             {lang === 'en' ? 'Calls' : '调用'} {summary.calls}
           </span>
+          {(summary.testedBy ?? 0) > 0 && (
+            <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : 'border-emerald-400/30 bg-emerald-50 text-emerald-600'}`}>
+              测试覆盖 {summary.testedBy}
+            </span>
+          )}
           <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-[#2a2d3a] bg-[#1a1d27]' : 'border-slate-200 bg-white'}`}>
             {lang === 'en' ? 'Entry Points' : '入口点'} {summary.entryPoints}
           </span>
@@ -825,93 +984,151 @@ const ProjectGraphKnowledgeGraph = forwardRef<
           )}
         </div>
       )}
-      {/* 图谱 + 详情面板 */}
-      <div className="flex min-h-0 flex-1 gap-2">
+      {/* 图谱 */}
+      <div className="flex min-h-0 flex-1">
         {!graphError && (
         <div
           ref={containerRef}
-          className={`min-h-0 flex-1 overflow-hidden rounded-xl border ${dark ? 'border-[#2a2d3a] bg-[#0d1117]' : 'border-slate-200 bg-[#f5f0e9]'}`}
-        />
-        )}
-        {/* 详情面板 */}
-        {selectedNode && (
-          <div className={`flex w-64 shrink-0 flex-col rounded-xl border p-3 text-[11px] leading-relaxed ${dark ? 'border-[#2a2d3a] bg-[#1a1d27] text-slate-200' : 'border-slate-200 bg-white text-slate-700'}`}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-500">
-                {lang === 'en' ? 'Details' : '详情'}
-              </span>
-              <button
-                type="button"
-                onClick={() => setSelectedNode(null)}
-                className="text-slate-500 hover:text-slate-300 text-sm leading-none"
-              >
-                &times;
-              </button>
-            </div>
-            <div className="mb-2 font-semibold text-xs break-all">
-              {selectedNode.symbolKind && (
-                <span className={`mr-1.5 rounded px-1 py-0.5 text-[9px] uppercase ${dark ? 'bg-[#2a2d3a] text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
-                  {selectedNode.symbolKind}
-                </span>
-              )}
-              {selectedNode.exported && <span className="mr-1 text-amber-400" title="exported">★</span>}
-              {selectedNode.async && <span className="mr-1 text-blue-400" title="async">▸</span>}
-              {selectedNode.label}
-            </div>
-            <div className={`mb-1.5 rounded px-2 py-1 font-mono text-[9px] break-all ${dark ? 'bg-[#0d1117] text-slate-400' : 'bg-slate-50 text-slate-500'}`}>
-              {selectedNode.fullPath}
-            </div>
-            <div className="space-y-1 text-[10px]">
-              <div className="flex justify-between">
-                <span className="opacity-50">{lang === 'en' ? 'Type' : '类型'}</span>
-                <span>{selectedNode.nodeKind === 'file' ? (lang === 'en' ? 'File' : '文件') : (lang === 'en' ? 'Symbol' : '符号')}</span>
-              </div>
-              {selectedNode.language && (
-                <div className="flex justify-between">
-                  <span className="opacity-50">{lang === 'en' ? 'Language' : '语言'}</span>
-                  <span>{selectedNode.language}</span>
-                </div>
-              )}
-              {selectedNode.line != null && (
-                <div className="flex justify-between">
-                  <span className="opacity-50">{lang === 'en' ? 'Line' : '行号'}</span>
-                  <span>L{selectedNode.line}</span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span className="opacity-50">{lang === 'en' ? 'In-degree' : '入度'}</span>
-                <span className="text-blue-400">↓ {selectedNode.inDegree}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="opacity-50">{lang === 'en' ? 'Out-degree' : '出度'}</span>
-                <span className="text-amber-400">↑ {selectedNode.outDegree}</span>
-              </div>
-              {selectedNode.isEntry && (
-                <div className="flex justify-between">
-                  <span className="opacity-50">{lang === 'en' ? 'Entry' : '入口'}</span>
-                  <span className="text-emerald-400">✓</span>
-                </div>
-              )}
-              {selectedNode.topFolder && (
-                <div className="flex justify-between">
-                  <span className="opacity-50">{lang === 'en' ? 'Folder' : '目录'}</span>
-                  <span className="text-[9px] truncate max-w-[130px] text-right">{selectedNode.topFolder}</span>
-                </div>
-              )}
-            </div>
-            {selectedNode.signature && (
-              <div className={`mt-2 rounded px-2 py-1.5 font-mono text-[9px] leading-relaxed break-all ${dark ? 'bg-[#0d1117] text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
-                {selectedNode.signature}
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={handleOpenFile}
-              className={`mt-3 w-full rounded-md border px-3 py-1.5 text-[10px] font-medium transition-colors ${dark ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20' : 'border-indigo-300 bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}
+          className={`relative min-h-0 flex-1 overflow-hidden rounded-xl border ${dark ? 'border-[#2a2d3a] bg-[#0d1117]' : 'border-slate-200 bg-[#f5f0e9]'}`}
+        >
+          {/* 居中详情浮层 */}
+          {selectedNode && (
+            <div
+              className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+              onClick={() => { setSelectedNode(null); setConnectedEdges({ inbound: [], outbound: [] }); }}
             >
-              {lang === 'en' ? 'Open File' : '打开文件'}
-            </button>
-          </div>
+              <div
+                className={`flex max-h-[75vh] w-[440px] max-w-[92vw] flex-col overflow-y-auto rounded-2xl border p-5 shadow-2xl text-[12px] leading-relaxed ${dark ? 'border-[#2a2d3a] bg-[#1a1d27] text-slate-200' : 'border-slate-200 bg-white text-slate-700'}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-500">
+                    {lang === 'en' ? 'Node Details' : '节点详情'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedNode(null); setConnectedEdges({ inbound: [], outbound: [] }); }}
+                    className="text-slate-500 hover:text-slate-300 text-base leading-none"
+                  >
+                    &times;
+                  </button>
+                </div>
+                <div className="mb-2 font-semibold text-sm break-all">
+                  {selectedNode.symbolKind && (
+                    <span className={`mr-1.5 rounded px-1.5 py-0.5 text-[10px] uppercase ${dark ? 'bg-[#2a2d3a] text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                      {selectedNode.symbolKind}
+                    </span>
+                  )}
+                  {selectedNode.exported && <span className="mr-1 text-amber-400" title="exported">★</span>}
+                  {selectedNode.async && <span className="mr-1 text-blue-400" title="async">▸</span>}
+                  {selectedNode.label}
+                </div>
+                <div className={`mb-3 rounded px-2.5 py-1.5 font-mono text-[10px] break-all ${dark ? 'bg-[#0d1117] text-slate-400' : 'bg-slate-50 text-slate-500'}`}>
+                  {selectedNode.fullPath}
+                </div>
+                <div className="space-y-1.5 text-[11px]">
+                  <div className="flex justify-between">
+                    <span className="opacity-50">{lang === 'en' ? 'Type' : '类型'}</span>
+                    <span>{selectedNode.nodeKind === 'file' ? (lang === 'en' ? 'File' : '文件') : (lang === 'en' ? 'Symbol' : '符号')}</span>
+                  </div>
+                  {selectedNode.fileType && selectedNode.fileType !== 'source' && (
+                    <div className="flex justify-between">
+                      <span className="opacity-50">{lang === 'en' ? 'Category' : '分类'}</span>
+                      <span style={{ color: FILE_TYPE_COLORS[selectedNode.fileType] ?? '#8b949e' }}>
+                        {selectedNode.fileType === 'test' ? (lang === 'en' ? 'Test' : '测试') :
+                         selectedNode.fileType === 'config' ? (lang === 'en' ? 'Config' : '配置') :
+                         selectedNode.fileType === 'doc' ? (lang === 'en' ? 'Docs' : '文档') :
+                         selectedNode.fileType === 'docker' ? 'Docker' :
+                         selectedNode.fileType === 'cicd' ? 'CI/CD' :
+                         selectedNode.fileType === 'sql' ? 'SQL' : selectedNode.fileType}
+                      </span>
+                    </div>
+                  )}
+                  {selectedNode.language && (
+                    <div className="flex justify-between">
+                      <span className="opacity-50">{lang === 'en' ? 'Language' : '语言'}</span>
+                      <span>{selectedNode.language}</span>
+                    </div>
+                  )}
+                  {selectedNode.line != null && (
+                    <div className="flex justify-between">
+                      <span className="opacity-50">{lang === 'en' ? 'Line' : '行号'}</span>
+                      <span>L{selectedNode.line}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="opacity-50">{lang === 'en' ? 'In-degree' : '入度'}</span>
+                    <span className="text-blue-400">↓ {selectedNode.inDegree}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="opacity-50">{lang === 'en' ? 'Out-degree' : '出度'}</span>
+                    <span className="text-amber-400">↑ {selectedNode.outDegree}</span>
+                  </div>
+                  {selectedNode.isEntry && (
+                    <div className="flex justify-between">
+                      <span className="opacity-50">{lang === 'en' ? 'Entry' : '入口'}</span>
+                      <span className="text-emerald-400">✓</span>
+                    </div>
+                  )}
+                </div>
+                {selectedNode.signature && (
+                  <div className={`mt-3 rounded px-2.5 py-1.5 font-mono text-[10px] leading-relaxed break-all ${dark ? 'bg-[#0d1117] text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
+                    {selectedNode.signature}
+                  </div>
+                )}
+                {connectedEdges.inbound.length > 0 && (
+                  <div className="mt-3">
+                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                      {lang === 'en' ? 'Dependents' : '被依赖'} ({connectedEdges.inbound.length})
+                    </div>
+                    <div className="flex flex-col gap-0.5 max-h-36 overflow-y-auto">
+                      {connectedEdges.inbound.map((rel) => (
+                        <button
+                          key={rel.edgeId}
+                          type="button"
+                          onClick={() => navigateToNode(rel.targetNodeId)}
+                          className={`flex items-center gap-1.5 rounded px-2 py-1 text-[10px] text-left transition-colors ${dark ? 'hover:bg-[#2a2d3a]' : 'hover:bg-slate-100'}`}
+                        >
+                          <span className="inline-block h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: EDGE_COLORS[rel.kind] ?? '#6e7681' }} />
+                          <span className="shrink-0 text-[10px] opacity-60">{edgeKindLabel(rel.kind)}</span>
+                          <span className="truncate">{rel.targetLabel}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {connectedEdges.outbound.length > 0 && (
+                  <div className="mt-2">
+                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                      {lang === 'en' ? 'Depends On' : '依赖'} ({connectedEdges.outbound.length})
+                    </div>
+                    <div className="flex flex-col gap-0.5 max-h-36 overflow-y-auto">
+                      {connectedEdges.outbound.map((rel) => (
+                        <button
+                          key={rel.edgeId}
+                          type="button"
+                          onClick={() => navigateToNode(rel.targetNodeId)}
+                          className={`flex items-center gap-1.5 rounded px-2 py-1 text-[10px] text-left transition-colors ${dark ? 'hover:bg-[#2a2d3a]' : 'hover:bg-slate-100'}`}
+                        >
+                          <span className="inline-block h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: EDGE_COLORS[rel.kind] ?? '#6e7681' }} />
+                          <span className="shrink-0 text-[10px] opacity-60">{edgeKindLabel(rel.kind)}</span>
+                          <span className="truncate">{rel.targetLabel}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={handleOpenFile}
+                  className={`mt-4 w-full rounded-lg border px-3 py-2 text-[11px] font-medium transition-colors ${dark ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20' : 'border-indigo-300 bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}
+                >
+                  {lang === 'en' ? 'Open File' : '打开文件'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
         )}
       </div>
       {tooltipInfo && (
@@ -947,7 +1164,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
       <div className={`pointer-events-none absolute bottom-2 right-2 rounded-lg border px-2.5 py-2 text-[9px] leading-relaxed ${dark ? 'border-[#2a2d3a] bg-[#1a1d27]/90 text-slate-400' : 'border-slate-200 bg-white/90 text-slate-500'}`}>
         <div className="mb-1.5 font-semibold opacity-70">图例</div>
         <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-          {(['imports', 'reexports', 'extends', 'implements', 'calls'] as const).map((kind) => (
+          {(['imports', 'reexports', 'extends', 'implements', 'calls', 'tested_by', 'configures'] as const).map((kind) => (
             <div key={kind} className="flex items-center gap-1.5">
               <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: EDGE_COLORS[kind] }} />
               <span>{edgeKindLabel(kind)}</span>

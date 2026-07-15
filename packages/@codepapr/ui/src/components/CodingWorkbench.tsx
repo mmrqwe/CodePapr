@@ -323,7 +323,7 @@ export function CodingWorkbench({
     try {
       const result = await invoke<ListFilesResult>('list_workspace_files', {
         workspacePath: path,
-        maxDepth: 4,
+        maxDepth: 6,
       });
       lastTreeSignatureRef.current = computeTreeSignature({ root: result.root, entries: result.entries, truncated: result.truncated });
       setEntries(result.entries);
@@ -364,7 +364,7 @@ export function CodingWorkbench({
       try {
         const result = await invoke<ListFilesResult>('list_workspace_files', {
           workspacePath,
-          maxDepth: 4,
+          maxDepth: 6,
         });
 
         if (disposed) {

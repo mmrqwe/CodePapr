@@ -1,7 +1,8 @@
 import { estimateTokens } from '@codepapr/common';
 
 export type ProjectGraphNodeKind = 'file' | 'symbol';
-export type ProjectGraphEdgeKind = 'contains' | 'imports' | 'reexports' | 'extends' | 'implements' | 'calls';
+export type ProjectGraphFileType = 'source' | 'test' | 'config' | 'doc' | 'docker' | 'cicd' | 'sql';
+export type ProjectGraphEdgeKind = 'contains' | 'imports' | 'reexports' | 'extends' | 'implements' | 'calls' | 'tested_by' | 'configures';
 export type ProjectGraphSymbolSource = 'lsp' | 'ast' | 'pattern';
 export type LspMode = 'overrides-only' | 'full-integration';
 
@@ -57,6 +58,7 @@ export interface ProjectGraphNode {
   path: string;
   language?: string;
   bytes?: number;
+  fileType?: ProjectGraphFileType;
   symbol?: ProjectGraphSymbolInput;
   symbolSource?: ProjectGraphSymbolSource;
   qualifiedName?: string;
@@ -88,17 +90,24 @@ export interface WorkspaceProjectGraphResult {
   edges: ProjectGraphEdge[];
   summary: {
     files: number;
+    testFiles: number;
+    configFiles: number;
+    docFiles: number;
     symbols: number;
     imports: number;
     reexports: number;
     extends: number;
     implements: number;
     calls: number;
+    testedBy: number;
+    configures: number;
     lspSymbols: number;
     entryPoints: number;
+    orphanNodes: number;
     edges: number;
     truncated: boolean;
     lspEnhanced?: boolean;
+    validated?: boolean;
   };
   quality?: ProjectGraphQualityMetrics;
   truncated: boolean;
@@ -410,6 +419,127 @@ function basenameWithoutExtension(path: string): string {
   const name = basename(path);
   const index = name.lastIndexOf('.');
   return index > 0 ? name.slice(0, index) : name;
+}
+
+function classifyFileType(path: string): ProjectGraphFileType {
+  const normalized = normalizePath(path).toLowerCase();
+  const segments = normalized.split('/');
+  const filename = segments[segments.length - 1];
+  const dirnameStr = segments.length > 1 ? segments[segments.length - 2] : '';
+
+  if (
+    normalized.includes('/.github/workflows/') ||
+    normalized.includes('/.gitlab-ci') ||
+    filename === 'jenkinsfile' ||
+    filename.startsWith('jenkinsfile') ||
+    normalized.startsWith('.github/workflows/')
+  ) {
+    return 'cicd';
+  }
+
+  if (
+    filename.startsWith('dockerfile') ||
+    filename === 'docker-compose.yml' ||
+    filename === 'docker-compose.yaml' ||
+    filename === '.dockerignore'
+  ) {
+    return 'docker';
+  }
+
+  if (
+    filename.endsWith('.sql') ||
+    normalized.includes('/migrations/') ||
+    normalized.includes('/migration/')
+  ) {
+    return 'sql';
+  }
+
+  if (
+    filename.endsWith('.md') ||
+    filename.endsWith('.mdx') ||
+    filename === 'readme' ||
+    filename.startsWith('readme.') ||
+    filename === 'changelog' ||
+    filename.startsWith('changelog.') ||
+    filename === 'contributing' ||
+    filename.startsWith('contributing.')
+  ) {
+    return 'doc';
+  }
+
+  if (
+    filename.endsWith('.test.ts') ||
+    filename.endsWith('.test.tsx') ||
+    filename.endsWith('.spec.ts') ||
+    filename.endsWith('.spec.tsx') ||
+    filename.endsWith('.test.js') ||
+    filename.endsWith('.test.jsx') ||
+    filename.endsWith('.spec.js') ||
+    filename.endsWith('.spec.jsx') ||
+    filename.endsWith('.test.mts') ||
+    filename.endsWith('.spec.mts') ||
+    filename.endsWith('.test.mjs') ||
+    filename.endsWith('.spec.mjs') ||
+    filename.endsWith('_test.py') ||
+    filename.endsWith('_test.rs') ||
+    filename.endsWith('_test.go') ||
+    filename.startsWith('test_') ||
+    filename.endsWith('_test.rb') ||
+    filename.endsWith('_test.dart') ||
+    filename.endsWith('_test.kt') ||
+    filename.endsWith('_test.php') ||
+    filename.endsWith('_test.swift') ||
+    filename.endsWith('_test.cs') ||
+    dirnameStr === '__tests__' ||
+    dirnameStr === '__test__' ||
+    dirnameStr === 'test' ||
+    dirnameStr === 'tests' ||
+    dirnameStr === 'spec' ||
+    dirnameStr === 'specs' ||
+    normalized.includes('/__tests__/') ||
+    normalized.includes('/__test__/') ||
+    normalized.includes('/test/') ||
+    normalized.includes('/tests/') ||
+    normalized.includes('/spec/') ||
+    normalized.includes('/specs/')
+  ) {
+    return 'test';
+  }
+
+  if (
+    filename.endsWith('.json') ||
+    filename.endsWith('.yaml') ||
+    filename.endsWith('.yml') ||
+    filename.endsWith('.toml') ||
+    filename.startsWith('.env') ||
+    filename === '.env' ||
+    filename === '.eslintrc' ||
+    filename.startsWith('.eslintrc') ||
+    filename === '.prettierrc' ||
+    filename.startsWith('.prettierrc') ||
+    filename.startsWith('tsconfig') ||
+    filename.startsWith('jsconfig') ||
+    filename.startsWith('.babelrc') ||
+    filename.startsWith('.npmrc') ||
+    filename.startsWith('.nvmrc') ||
+    filename.startsWith('package') ||
+    filename.startsWith('vite.config') ||
+    filename.startsWith('webpack.config') ||
+    filename.startsWith('rollup.config') ||
+    filename.startsWith('tailwind.config') ||
+    filename.startsWith('postcss.config') ||
+    filename.startsWith('.gitignore') ||
+    filename.startsWith('.dockerignore') ||
+    filename.startsWith('.editorconfig') ||
+    filename.endsWith('.config.ts') ||
+    filename.endsWith('.config.js') ||
+    filename.endsWith('.config.mjs') ||
+    filename.endsWith('.config.mts')
+  ) {
+    return 'config';
+  }
+
+  return 'source';
 }
 
 function joinRelativePath(baseDir: string, specifier: string): string | null {
@@ -2213,6 +2343,7 @@ function buildDegradedProjectGraph(
     kind: 'file' as const,
     label: basename(normalizePath(file.path)) || file.path,
     path: normalizePath(file.path),
+    fileType: classifyFileType(normalizePath(file.path)),
     ...(file.language ? { language: file.language } : {}),
     ...(typeof file.bytes === 'number' ? { bytes: file.bytes } : {}),
     ...(file.entryPoint ? { entryPoint: true } : {}),
@@ -2226,17 +2357,24 @@ function buildDegradedProjectGraph(
     edges: [],
     summary: {
       files: fileNodes.length,
+      testFiles: 0,
+      configFiles: 0,
+      docFiles: 0,
       symbols: 0,
       imports: 0,
       reexports: 0,
       extends: 0,
       implements: 0,
       calls: 0,
+      testedBy: 0,
+      configures: 0,
       lspSymbols: 0,
       entryPoints: 0,
+      orphanNodes: 0,
       edges: 0,
       truncated,
       lspEnhanced: false,
+      validated: false,
     },
     quality: {
       lspCoverage: 0,
@@ -2297,7 +2435,10 @@ function buildWorkspaceProjectGraphImpl(params: BuildWorkspaceProjectGraphParams
   const prioritizedFiles = [...params.files]
     .map((file) => {
       const normalizedPath = normalizePath(file.path);
-      const score = fileEntryPointScore(file, params.fileContents?.[normalizedPath]?.content ?? params.fileContents?.[file.path]?.content);
+      const contentForScore = params.fileContents?.[normalizedPath]?.content
+        ?? params.fileContents?.[file.path]?.content
+        ?? params.fileContents?.[normalizePath(file.path)]?.content;
+      const score = fileEntryPointScore(file, contentForScore);
       return {
         ...file,
         path: normalizedPath,
@@ -2320,6 +2461,7 @@ function buildWorkspaceProjectGraphImpl(params: BuildWorkspaceProjectGraphParams
         kind: 'file',
         label: basename(normalizedPath) || normalizedPath,
         path: normalizedPath,
+        fileType: classifyFileType(normalizedPath),
         ...(file.language ? { language: file.language } : {}),
         ...(typeof file.bytes === 'number' ? { bytes: file.bytes } : {}),
         ...(file.entryPoint ? { entryPoint: true } : {}),
@@ -2535,6 +2677,57 @@ function buildWorkspaceProjectGraphImpl(params: BuildWorkspaceProjectGraphParams
     }
   }
 
+  // ============= Phase 2.4b: tested_by / configures 边 =============
+  const testNodeIds = new Set<string>();
+  const configNodeIds = new Set<string>();
+  for (const node of nodes) {
+    if (node.kind !== 'file') continue;
+    if (node.fileType === 'test') testNodeIds.add(node.id);
+    if (node.fileType === 'config') configNodeIds.add(node.id);
+  }
+
+  if (testNodeIds.size > 0) {
+    for (const edge of edges) {
+      if (edge.kind !== 'imports' && edge.kind !== 'reexports') continue;
+      const fromNode = nodes.find((n) => n.id === edge.from);
+      const toNode = nodes.find((n) => n.id === edge.to);
+      if (!fromNode || !toNode) continue;
+      if (testNodeIds.has(edge.from) && fromNode.kind === 'file' && toNode.fileType === 'source') {
+        const testedById = `tested_by:${edge.from}->${edge.to}`;
+        if (seenEdges.has(testedById)) continue;
+        seenEdges.add(testedById);
+        edges.push({
+          id: testedById,
+          kind: 'tested_by',
+          from: edge.from,
+          to: edge.to,
+          label: 'tested_by',
+        });
+      }
+    }
+  }
+
+  if (configNodeIds.size > 0) {
+    for (const edge of edges) {
+      if (edge.kind !== 'imports' && edge.kind !== 'reexports') continue;
+      const fromNode = nodes.find((n) => n.id === edge.from);
+      const toNode = nodes.find((n) => n.id === edge.to);
+      if (!fromNode || !toNode) continue;
+      if (configNodeIds.has(edge.to) && toNode.fileType === 'config') {
+        const configuresId = `configures:${edge.from}->${edge.to}`;
+        if (seenEdges.has(configuresId)) continue;
+        seenEdges.add(configuresId);
+        edges.push({
+          id: configuresId,
+          kind: 'configures',
+          from: edge.from,
+          to: edge.to,
+          label: 'configures',
+        });
+      }
+    }
+  }
+
   const duplicateCounts = new Map<string, number>();
   for (const node of nodes) {
     if (node.kind !== 'symbol') {
@@ -2567,9 +2760,14 @@ function buildWorkspaceProjectGraphImpl(params: BuildWorkspaceProjectGraphParams
   const extendsCount = edges.filter((edge) => edge.kind === 'extends').length;
   const implementsCount = edges.filter((edge) => edge.kind === 'implements').length;
   const calls = edges.filter((edge) => edge.kind === 'calls').length;
+  const testedBy = edges.filter((edge) => edge.kind === 'tested_by').length;
+  const configuresEdges = edges.filter((edge) => edge.kind === 'configures').length;
 
   // ============= Phase 2.6: Quality Metrics =============
   const quality = computeQualityMetrics(prioritizedFiles, nodes, edges, lspSymbols, moduleContexts, allFileSet);
+
+  // ============= Phase 2.7: Validation & Orphan Detection =============
+  const validation = validateProjectGraph(nodes, edges);
 
   // ============= Phase 3: LSP 关系增强 =============
   // 注意：这里只是参数配置齐全，真正的 LSP 语义增强是异步的 enrichProjectGraphEdges，
@@ -2588,21 +2786,84 @@ function buildWorkspaceProjectGraphImpl(params: BuildWorkspaceProjectGraphParams
     edges,
     summary: {
       files: prioritizedFiles.length,
+      testFiles: nodes.filter((n) => n.kind === 'file' && n.fileType === 'test').length,
+      configFiles: nodes.filter((n) => n.kind === 'file' && n.fileType === 'config').length,
+      docFiles: nodes.filter((n) => n.kind === 'file' && n.fileType === 'doc').length,
       symbols: nodes.filter((node) => node.kind === 'symbol').length,
       imports,
       reexports,
       extends: extendsCount,
       implements: implementsCount,
       calls,
+      testedBy,
+      configures: configuresEdges,
       lspSymbols,
       entryPoints: prioritizedFiles.filter((file) => file.entryPoint).length,
+      orphanNodes: validation.orphanCount,
       edges: edges.length,
       truncated,
       lspEnhanced,
+      validated: validation.valid,
     },
     quality,
     truncated,
   };
+}
+
+interface ProjectGraphValidationResult {
+  valid: boolean;
+  orphanCount: number;
+  danglingEdgeCount: number;
+  duplicateEdgeCount: number;
+  issues: string[];
+}
+
+function validateProjectGraph(
+  nodes: ProjectGraphNode[],
+  edges: ProjectGraphEdge[],
+): ProjectGraphValidationResult {
+  const issues: string[] = [];
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  let danglingEdgeCount = 0;
+  let duplicateEdgeCount = 0;
+
+  const edgeKeySet = new Set<string>();
+  for (const edge of edges) {
+    const key = `${edge.kind}:${edge.from}->${edge.to}`;
+    if (edgeKeySet.has(key)) {
+      duplicateEdgeCount++;
+      issues.push(`Duplicate edge: ${key}`);
+      continue;
+    }
+    edgeKeySet.add(key);
+
+    if (!nodeIds.has(edge.from)) {
+      danglingEdgeCount++;
+      issues.push(`Dangling edge source: ${edge.kind} ${edge.from} -> ${edge.to}`);
+    }
+    if (!nodeIds.has(edge.to)) {
+      danglingEdgeCount++;
+      issues.push(`Dangling edge target: ${edge.kind} ${edge.from} -> ${edge.to}`);
+    }
+  }
+
+  const connectedNodes = new Set<string>();
+  for (const edge of edges) {
+    if (edge.kind === 'contains') continue;
+    connectedNodes.add(edge.from);
+    connectedNodes.add(edge.to);
+  }
+
+  let orphanCount = 0;
+  for (const node of nodes) {
+    if (node.kind === 'file' && !connectedNodes.has(node.id)) {
+      orphanCount++;
+    }
+  }
+
+  const valid = danglingEdgeCount === 0;
+
+  return { valid, orphanCount, danglingEdgeCount, duplicateEdgeCount, issues };
 }
 
 function computeQualityMetrics(

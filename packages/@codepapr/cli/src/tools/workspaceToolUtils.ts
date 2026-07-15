@@ -772,8 +772,9 @@ export function buildWorkspaceProjectGraph(params: BuildWorkspaceProjectGraphPar
     })
   );
 
-  for (const [path, file] of Object.entries(params.fileContents)) {
-    if (projectGraphFiles.has(path) || !isProjectGraphContextCandidate(path, file.content)) {
+  for (const path of Object.keys(params.fileContents).sort()) {
+    const file = params.fileContents[path];
+    if (!file || projectGraphFiles.has(path) || !isProjectGraphContextCandidate(path, file.content)) {
       continue;
     }
 

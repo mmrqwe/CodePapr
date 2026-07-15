@@ -2163,12 +2163,15 @@ export async function buildWorkspaceProjectGraphSummary(
   if (useCache) {
     const cached = await cache.load();
     if (cached) {
-      // Check for changed files
-      const changes = await cache.getChangedFiles(cached.fileMtimes, listResult.entries);
-      const hasChanges = changes.newFiles.length > 0 || changes.changedFiles.length > 0 || changes.deletedFiles.length > 0;
+      const changes = await cache.getChangedFiles(cached, listResult.entries);
+      const hasStructuralChanges = changes.newFiles.length > 0 || changes.structuralFiles.length > 0 || changes.deletedFiles.length > 0;
+      const hasAnyChanges = hasStructuralChanges || changes.cosmeticFiles.length > 0;
 
-      if (!hasChanges) {
-        // No changes, return cached result
+      if (!hasAnyChanges) {
+        return cached.projectGraph;
+      }
+
+      if (!hasStructuralChanges) {
         return cached.projectGraph;
       }
     }
@@ -2213,13 +2216,13 @@ export async function buildWorkspaceProjectGraphSummary(
 
   // Save to cache
   if (useCache) {
-    const fileMtimes = await cache.computeFileMtimes(listResult.entries);
+    const fingerprints = await cache.computeFileFingerprints(listResult.entries);
     await cache.save({
       workspacePath,
       projectGraph,
-      fileMtimes,
+      fingerprints,
       createdAt: Date.now(),
-      version: 1,
+      version: 2,
     });
   }
 

@@ -1,17 +1,40 @@
 import { promises as fs, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import type { WorkspaceProjectGraphResult } from '@codepapr/core';
+
+export interface FileFingerprintEntry {
+  contentHash: string;
+  mtime: number;
+}
 
 export interface ProjectGraphCacheEntry {
   workspacePath: string;
   projectGraph: WorkspaceProjectGraphResult;
-  fileMtimes: Record<string, number>; // 文件名 -> 修改时间
+  /** @deprecated retained for migration — use fingerprints instead */
+  fileMtimes?: Record<string, number>;
+  fingerprints?: Record<string, FileFingerprintEntry>;
   createdAt: number;
   version: number;
 }
 
-const CACHE_VERSION = 1;
+export interface FingerprintChanges {
+  /** 全新文件（缓存中不存在） */
+  newFiles: string[];
+  /** 内容变更的文件（SHA-256 不同） */
+  structuralFiles: string[];
+  /** 仅 mtime 变更但内容相同的文件（注释/格式修改，无需重新分析符号） */
+  cosmeticFiles: string[];
+  /** 已删除的文件（缓存中有但实际不存在） */
+  deletedFiles: string[];
+}
+
+const CACHE_VERSION = 2;
 const CACHE_FILE = 'codepapr-projectgraph-cache.json';
+
+function normalizeCachePath(path: string): string {
+  return path.trim().replace(/^\.\//, '').replace(/\\/g, '/').replace(/\/+/g, '/');
+}
 
 export class WorkspaceProjectGraphCache {
   private workspacePath: string;
@@ -33,12 +56,10 @@ export class WorkspaceProjectGraphCache {
       const content = await fs.readFile(this.cacheFile, 'utf8');
       const data = JSON.parse(content);
 
-      // 验证缓存版本
       if (data.version !== CACHE_VERSION) {
         return null;
       }
 
-      // 验证工作区路径匹配
       if (data.workspacePath !== this.workspacePath) {
         return null;
       }
@@ -51,7 +72,6 @@ export class WorkspaceProjectGraphCache {
 
   async save(entry: ProjectGraphCacheEntry): Promise<void> {
     try {
-      // 确保缓存目录存在
       if (!existsSync(this.cacheDir)) {
         await fs.mkdir(this.cacheDir, { recursive: true });
       }
@@ -65,62 +85,72 @@ export class WorkspaceProjectGraphCache {
   invalidate(): void {
     try {
       if (existsSync(this.cacheFile)) {
-        fs.unlink(this.cacheFile).catch(() => { /* 忽略 */ });
+        fs.unlink(this.cacheFile).catch(() => { /* ignore */ });
       }
     } catch (e) {
       console.warn('ProjectGraph cache delete failed:', e);
     }
   }
 
-  async getChangedFiles(knownMtimes: Record<string, number>, allFiles: Array<{ path: string }>): Promise<{
-    newFiles: string[];
-    changedFiles: string[];
-    deletedFiles: string[];
-  }> {
+  async getChangedFiles(
+    cached: ProjectGraphCacheEntry,
+    allFiles: Array<{ path: string }>,
+  ): Promise<FingerprintChanges> {
+    const existingFingerprints = cached.fingerprints ?? {};
     const newFiles: string[] = [];
-    const changedFiles: string[] = [];
-    const knownPaths = new Set(Object.keys(knownMtimes));
+    const structuralFiles: string[] = [];
+    const cosmeticFiles: string[] = [];
+    const knownPaths = new Set(Object.keys(existingFingerprints));
 
-    // 检查现有文件
     for (const file of allFiles) {
-      const normalizedPath = file.path;
+      const normalizedPath = normalizeCachePath(file.path);
       knownPaths.delete(normalizedPath);
 
-      const cachedMtime = knownMtimes[normalizedPath];
-      const currentMtime = await this.getFileMtime(normalizedPath);
+      const cachedEntry = existingFingerprints[normalizedPath];
+      const currentFingerprint = await this.getFileFingerprint(normalizedPath);
+      if (!currentFingerprint) continue;
 
-      if (cachedMtime === undefined) {
+      if (!cachedEntry) {
         newFiles.push(normalizedPath);
-      } else if (currentMtime !== null && currentMtime !== cachedMtime) {
-        changedFiles.push(normalizedPath);
+        continue;
+      }
+
+      if (currentFingerprint.contentHash !== cachedEntry.contentHash) {
+        structuralFiles.push(normalizedPath);
+      } else if (currentFingerprint.mtime !== cachedEntry.mtime) {
+        cosmeticFiles.push(normalizedPath);
       }
     }
 
-    // 剩下的就是已删除的文件
     const deletedFiles = Array.from(knownPaths);
 
-    return { newFiles, changedFiles, deletedFiles };
+    return { newFiles, structuralFiles, cosmeticFiles, deletedFiles };
   }
 
-  private async getFileMtime(relativePath: string): Promise<number | null> {
+  async computeFileFingerprints(
+    files: Array<{ path: string }>,
+  ): Promise<Record<string, FileFingerprintEntry>> {
+    const fingerprints: Record<string, FileFingerprintEntry> = {};
+    for (const file of files) {
+      const normalizedPath = normalizeCachePath(file.path);
+      const fp = await this.getFileFingerprint(normalizedPath);
+      if (fp) {
+        fingerprints[normalizedPath] = fp;
+      }
+    }
+    return fingerprints;
+  }
+
+  private async getFileFingerprint(relativePath: string): Promise<FileFingerprintEntry | null> {
     try {
       const fullPath = join(this.workspacePath, relativePath);
-      const stat = await fs.stat(fullPath);
-      return stat.mtimeMs;
+      const content = await fs.readFile(fullPath, 'utf8');
+      return {
+        contentHash: createHash('sha256').update(content).digest('hex'),
+        mtime: (await fs.stat(fullPath)).mtimeMs,
+      };
     } catch {
       return null;
     }
-  }
-
-  async computeFileMtimes(files: Array<{ path: string }>): Promise<Record<string, number>> {
-    const mtimes: Record<string, number> = {};
-    for (const file of files) {
-      const normalizedPath = file.path;
-      const mtime = await this.getFileMtime(normalizedPath);
-      if (mtime !== null) {
-        mtimes[normalizedPath] = mtime;
-      }
-    }
-    return mtimes;
   }
 }

@@ -33,6 +33,7 @@ export type {
   ProjectGraphFileContent,
   ProjectGraphFileEntry,
   ProjectGraphFileInput,
+  ProjectGraphFileType,
   ProjectGraphNode,
   ProjectGraphNodeKind,
   ProjectGraphSymbolInput,
