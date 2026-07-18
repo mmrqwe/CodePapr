@@ -76,11 +76,16 @@ fn browser_action_timeout(timeout_seconds: Option<u64>) -> Duration {
 fn build_browser_launch_options() -> Result<headless_chrome::LaunchOptions<'static>, String> {
     let mut builder = LaunchOptionsBuilder::default();
     builder
-        .headless(true)
-        .enable_gpu(false)
+        .headless(false)
+        .enable_gpu(true)
         .enable_logging(false)
         .window_size(Some((1440, 900)))
-        .idle_browser_timeout(Duration::from_secs(120));
+        .idle_browser_timeout(Duration::from_secs(120))
+        .args(vec![
+            std::ffi::OsStr::new("--headless=new"),
+            std::ffi::OsStr::new("--enable-webgl"),
+            std::ffi::OsStr::new("--ignore-gpu-blocklist"),
+        ]);
 
     builder
         .build()

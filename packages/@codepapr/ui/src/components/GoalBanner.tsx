@@ -5,6 +5,7 @@
  * 仅在 isGoalActive 时渲染。
  */
 
+import { useState, useEffect } from 'react';
 import { useGoalStore } from '../store/goalStore';
 import { useAgentStore } from '../store/agentStore';
 import './GoalBanner.css';
@@ -14,6 +15,15 @@ export function GoalBanner() {
   const abortGoal = useGoalStore((s) => s.abortGoal);
   const settings = useAgentStore((s) => s.settings);
   const lang = settings.lang ?? 'zh-CN';
+  const [liveMs, setLiveMs] = useState(0);
+
+  useEffect(() => {
+    if (!goalState || goalState.status !== 'running') return;
+    const timer = setInterval(() => {
+      setLiveMs(Date.now() - goalState.startedAt);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [goalState?.status, goalState?.startedAt]);
 
   if (!isGoalActive || !goalState) return null;
 
@@ -39,7 +49,8 @@ export function GoalBanner() {
     error: lang === 'en' ? 'Error' : 'Error',
   };
 
-  const elapsedSec = Math.round(goalState.elapsedMs / 1000);
+  const displayMs = goalState.status === 'running' ? liveMs : goalState.elapsedMs;
+  const elapsedSec = Math.round(displayMs / 1000);
   const elapsedDisplay =
     elapsedSec >= 60
       ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`

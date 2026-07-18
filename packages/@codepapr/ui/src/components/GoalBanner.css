@@ -89,6 +89,10 @@
   background: rgba(255, 255, 255, 0.1);
 }
 
+:root:not(.dark) .goal-banner__stop:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
 @keyframes goal-banner-fade-in {
   from {
     opacity: 0;

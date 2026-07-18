@@ -34,6 +34,15 @@
   --shadow-sm: 0 2px 8px rgba(0,0,0,0.04);
   --shadow-md: 0 8px 24px rgba(0,0,0,0.06);
   --surface-gradient: linear-gradient(180deg, #faf7f3 0%, #f5f0e9 100%);
+  --goal-banner-running-bg: rgba(217,103,62,0.08);
+  --goal-banner-running-border: rgba(217,103,62,0.25);
+  --goal-banner-running-fg: #4a2815;
+  --goal-banner-satisfied-bg: rgba(21,128,61,0.08);
+  --goal-banner-satisfied-border: rgba(21,128,61,0.25);
+  --goal-banner-satisfied-fg: #0f5c2a;
+  --goal-banner-error-bg: rgba(185,28,28,0.06);
+  --goal-banner-error-border: rgba(185,28,28,0.25);
+  --goal-banner-error-fg: #7a1212;
 }
 
 .dark {
