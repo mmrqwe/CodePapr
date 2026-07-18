@@ -115,6 +115,27 @@ export type MainToAgentWorkerMessage =
       error?: string;
     }
   | {
+      type: 'fetch-response-start';
+      fetchId: string;
+      status: number;
+      statusText: string;
+      headers: Array<[string, string]>;
+    }
+  | {
+      type: 'fetch-response-chunk';
+      fetchId: string;
+      chunk: Uint8Array;
+    }
+  | {
+      type: 'fetch-response-end';
+      fetchId: string;
+    }
+  | {
+      type: 'fetch-response-error';
+      fetchId: string;
+      error: string;
+    }
+  | {
       type: 'cancel-session';
       requestId: string;
     };
@@ -144,6 +165,18 @@ export type AgentWorkerToMainMessage =
       proxyChatId: string;
       config: AgentWorkerProxyChatConfig;
       chatRequest: IChatRequest;
+    }
+  | {
+      type: 'fetch-request';
+      fetchId: string;
+      url: string;
+      method: string;
+      headers: Array<[string, string]>;
+      body: Uint8Array | null;
+    }
+  | {
+      type: 'fetch-cancel';
+      fetchId: string;
     }
   | {
       type: 'result';

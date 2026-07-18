@@ -135,4 +135,9 @@ CREATE TABLE IF NOT EXISTS snapshots (
   created_at INTEGER NOT NULL,
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS cache (
+  key TEXT PRIMARY KEY, value TEXT NOT NULL,
+  expires_at INTEGER, created_at INTEGER NOT NULL
+);
 `;

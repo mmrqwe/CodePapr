@@ -1,8 +1,8 @@
 import type { SkillMarketListing } from '../utils/marketSkillTypes';
+import { cacheGet, cacheSet } from '../utils/cacheStorage';
 
 const AGENTUSE_REPO = 'zerone-agent/agent-use-skills';
 const INTROS_PATH = 'awesome-skills/introductions/en';
-const CACHE_TTL_MS = 5 * 60 * 1000;
 
 interface GitHubFileEntry {
   name: string;
@@ -14,29 +14,6 @@ interface GitHubFileEntry {
   git_url: string;
   download_url: string | null;
   type: string;
-}
-
-function getCache<T>(key: string): T | null {
-  try {
-    const raw = localStorage.getItem(`codepapr.skillmarket.${key}`);
-    if (!raw) return null;
-    const entry = JSON.parse(raw);
-    if (Date.now() - entry.ts > CACHE_TTL_MS) {
-      localStorage.removeItem(`codepapr.skillmarket.${key}`);
-      return null;
-    }
-    return entry.data as T;
-  } catch {
-    return null;
-  }
-}
-
-function setCache<T>(key: string, data: T): void {
-  try {
-    localStorage.setItem(`codepapr.skillmarket.${key}`, JSON.stringify({ ts: Date.now(), data }));
-  } catch {
-    // ignore
-  }
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -160,8 +137,8 @@ function parseMarkdownIntro(markdown: string, filename: string): SkillMarketList
 }
 
 export async function fetchSkillListings(): Promise<SkillMarketListing[]> {
-  const cacheKey = 'listings';
-  const cached = getCache<SkillMarketListing[]>(cacheKey);
+  const ck = 'codepapr.skillmarket.listings';
+  const cached = await cacheGet<SkillMarketListing[]>(ck);
   if (cached) return cached;
 
   const apiUrl = `https://api.github.com/repos/${AGENTUSE_REPO}/contents/${INTROS_PATH}`;
@@ -189,7 +166,7 @@ export async function fetchSkillListings(): Promise<SkillMarketListing[]> {
     return a.title.localeCompare(b.title);
   });
 
-  setCache(cacheKey, sorted);
+  await cacheSet(ck, sorted, 5 * 60 * 1000);
   return sorted;
 }
 

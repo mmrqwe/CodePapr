@@ -1,6 +1,7 @@
 import type { IImageContent, IMessage } from '@codepapr/types';
 import { estimateTokens } from '@codepapr/common';
 import type { Lang } from './i18n';
+import type { UIToolInvocation } from '../store/internals/types';
 
 export const CONTEXT_COMPACTION_VERSION = 2;
 export const CONTEXT_COMPACTION_DEFAULT_MAX_ROUNDS = 24;
@@ -38,6 +39,7 @@ export interface ContextMessageLike {
   content: string;
   promptContent?: string;
   reasoningContent?: string;
+  toolInvocations?: UIToolInvocation[];
   images?: IImageContent[];
   timestamp: number;
   synthetic?: boolean;
@@ -157,17 +159,51 @@ function toCoreTailMessages(messages: readonly ContextMessageLike[]): IMessage[]
         (message.role === 'user' || message.role === 'assistant') &&
         (!message.synthetic || (message.role === 'assistant' && message.carryForwardInContext === true))
     )
-    .map((message) => ({
-      id: message.id,
-      role: message.role as 'user' | 'assistant',
-      content:
-        message.role === 'user' ? message.promptContent ?? message.content : message.content,
-      images:
-        message.role === 'user' && message.images && message.images.length > 0
-          ? message.images
-          : undefined,
-      timestamp: message.timestamp,
-    }));
+    .flatMap((message): IMessage[] => {
+      if (message.role === 'assistant' && message.toolInvocations && message.toolInvocations.length > 0) {
+        const assistantMsg: IMessage = {
+          id: message.id,
+          role: 'assistant',
+          content: message.content || '',
+          reasoningContent: message.reasoningContent || undefined,
+          toolCalls: message.toolInvocations.map((ti) => ({
+            id: ti.id,
+            name: ti.name,
+            arguments: ti.arguments,
+          })),
+          timestamp: message.timestamp,
+        };
+        const toolMsgs: IMessage[] = message.toolInvocations.map((ti) => ({
+          id: `${message.id}-tool-${ti.id}`,
+          role: 'tool' as const,
+          content: ti.output ?? '',
+          timestamp: message.timestamp,
+          toolResult: {
+            toolCallId: ti.id,
+            success: ti.status === 'success',
+            result: ti.output,
+            error: ti.error,
+          },
+        }));
+        return [assistantMsg, ...toolMsgs];
+      }
+      const rawContent =
+        message.role === 'user' ? message.promptContent ?? message.content : message.content;
+      const content = message.role === 'assistant' && !rawContent ? ' ' : rawContent;
+      return [
+        {
+          id: message.id,
+          role: message.role as 'user' | 'assistant',
+          content,
+          reasoningContent: message.role === 'assistant' ? (message.reasoningContent || undefined) : undefined,
+          images:
+            message.role === 'user' && message.images && message.images.length > 0
+              ? message.images
+              : undefined,
+          timestamp: message.timestamp,
+        },
+      ];
+    });
 }
 
 function getMessageChars(messages: readonly IMessage[]): number {

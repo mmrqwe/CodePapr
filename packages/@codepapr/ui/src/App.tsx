@@ -16,6 +16,10 @@ import type { GitFileSelection } from './utils/workspaceGitPanel';
 import type { ReviewScope } from './utils/codeReview';
 import { getTranslation } from './utils/i18n';
 import type { PreviewLocation } from './utils/projectDiagnosticLocations';
+import { cacheGet, cacheSet } from './utils/cacheStorage';
+
+const THEME_CACHE_KEY = 'ui.theme';
+let storedTheme: 'dark' | 'light' | null = null;
 
 // Code-split: these only render conditionally, so keep them out of the main bundle.
 const SettingsModal = lazy(() =>
@@ -62,9 +66,8 @@ const OnboardingPanel = lazy(() =>
 );
 
 function isDarkTheme(): boolean {
-  const stored = localStorage.getItem('codepapr-theme');
-  if (stored === 'light') return false;
-  if (stored === 'dark') return true;
+  if (storedTheme === 'light') return false;
+  if (storedTheme === 'dark') return true;
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
@@ -141,7 +144,8 @@ export default function App() {
   const toggleTheme = useCallback(() => {
     const next = !isDark;
     setIsDark(next);
-    localStorage.setItem('codepapr-theme', next ? 'dark' : 'light');
+    storedTheme = next ? 'dark' : 'light';
+    void cacheSet(THEME_CACHE_KEY, storedTheme);
   }, [isDark]);
 
   useEffect(() => {
@@ -150,14 +154,22 @@ export default function App() {
   }, [loadSettings]);
 
   useEffect(() => {
+    cacheGet<'dark' | 'light'>(THEME_CACHE_KEY).then((theme) => {
+      if (theme === 'dark' || theme === 'light') {
+        storedTheme = theme;
+        setIsDark(theme === 'dark');
+      }
+    });
+  }, []);
+
+  useEffect(() => {
     applyTheme(isDark);
   }, [isDark]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const onChange = (e: MediaQueryListEvent) => {
-      const stored = localStorage.getItem('codepapr-theme');
-      if (!stored) {
+      if (!storedTheme) {
         setIsDark(e.matches);
       }
     };

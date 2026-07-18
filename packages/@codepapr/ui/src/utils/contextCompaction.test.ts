@@ -29,6 +29,29 @@ function createAssistant(id: string, content: string): ContextMessageLike {
   };
 }
 
+function createAssistantWithTools(
+  id: string,
+  content: string,
+  tools: Array<{ id: string; name: string; arguments: Record<string, unknown>; status: 'success' | 'error'; output?: string; error?: string }>,
+  reasoningContent?: string,
+): ContextMessageLike {
+  return {
+    id,
+    role: 'assistant',
+    content,
+    reasoningContent,
+    toolInvocations: tools.map((t) => ({
+      id: t.id,
+      name: t.name,
+      arguments: t.arguments,
+      status: t.status,
+      output: t.output,
+      error: t.error,
+    })),
+    timestamp: Number(id.replace(/\D/g, '')) || 1,
+  };
+}
+
 describe('contextCompaction', () => {
   it('builds effective context from the latest checkpoint plus tail messages', () => {
     const checkpoint: ContextCheckpointPayload = {
@@ -177,14 +200,14 @@ describe('contextCompaction', () => {
     ]);
   });
 
-  it('drops assistant reasoning from effective context and compaction transcripts', () => {
+  it('keeps assistant reasoning in effective context for API round-tripping but excludes from compaction transcripts', () => {
     const messages: ContextMessageLike[] = [
       createUser('u1', '把系统回复改成 Copilot 风格'),
       {
         id: 'a1',
         role: 'assistant',
         content: '会把正式回答平铺显示，并单独折叠思考内容。',
-        reasoningContent: '这里的内部思考不应该进入后续上下文。',
+        reasoningContent: '这里的内部思考需要回传给 DeepSeek 以保持工具调用链路完整。',
         timestamp: 2,
       },
     ];
@@ -192,9 +215,70 @@ describe('contextCompaction', () => {
     const effective = buildEffectiveContextMessages(messages);
     const transcript = buildContextCompactionTranscript(effective);
 
-    expect(effective[1]?.reasoningContent).toBeUndefined();
+    // reasoningContent 必须保留在 effective context 中，DeepSeek 要求工具调用轮次回传 reasoning_content
+    expect(effective[1]?.reasoningContent).toBe('这里的内部思考需要回传给 DeepSeek 以保持工具调用链路完整。');
+    // 但 compaction transcript 不应包含 reasoning（仅用于摘要可读性）
     expect(transcript).toContain('会把正式回答平铺显示');
-    expect(transcript).not.toContain('内部思考不应该进入后续上下文');
+    expect(transcript).not.toContain('这里的内部思考需要回传给 DeepSeek');
+  });
+
+  it('includes tool calls and tool results in effective context for API continuity', () => {
+    const messages: ContextMessageLike[] = [
+      createUser('u1', '读取 src/index.ts'),
+      createAssistantWithTools(
+        'a1',
+        '',
+        [
+          {
+            id: 'call-1',
+            name: 'read',
+            arguments: { path: 'src/index.ts' },
+            status: 'success',
+            output: 'export default function main() { ... }',
+          },
+        ],
+        '思考：先读取文件',
+      ),
+      createAssistant('a2', '文件已读取，内容是一个默认导出的函数。'),
+    ];
+
+    const effective = buildEffectiveContextMessages(messages);
+
+    // user + assistant(toolCalls) + tool(result) + assistant(text)
+    expect(effective).toHaveLength(4);
+    expect(effective[0]?.role).toBe('user');
+    expect(effective[0]?.content).toBe('读取 src/index.ts');
+
+    const toolAssistant = effective[1];
+    expect(toolAssistant?.role).toBe('assistant');
+    expect(toolAssistant?.content).toBe('');
+    expect(toolAssistant?.toolCalls).toHaveLength(1);
+    expect(toolAssistant?.toolCalls?.[0]?.name).toBe('read');
+    expect(toolAssistant?.reasoningContent).toBe('思考：先读取文件');
+
+    const toolResult = effective[2];
+    expect(toolResult?.role).toBe('tool');
+    expect(toolResult?.toolResult?.toolCallId).toBe('call-1');
+    expect(toolResult?.toolResult?.success).toBe(true);
+    expect(toolResult?.toolResult?.result).toBe('export default function main() { ... }');
+
+    expect(effective[3]?.role).toBe('assistant');
+    expect(effective[3]?.content).toBe('文件已读取，内容是一个默认导出的函数。');
+  });
+
+  it('uses space placeholder for old assistant messages without toolInvocations and empty content', () => {
+    const messages: ContextMessageLike[] = [
+      createUser('u1', '修复 bug'),
+      createAssistant('a1', ''),
+      createAssistant('a2', '已修复。'),
+    ];
+
+    const effective = buildEffectiveContextMessages(messages);
+
+    expect(effective).toHaveLength(3);
+    expect(effective[1]?.role).toBe('assistant');
+    expect(effective[1]?.content).toBe(' ');
+    expect(effective[1]?.toolCalls).toBeUndefined();
   });
 
   it('plans compaction when conversation round count exceeds maxRounds', () => {

@@ -1,7 +1,13 @@
 import {
-  saveProjectState,
-  saveProjectStateWithPurge,
+  saveProjectStateDirect,
+  saveSession,
+  saveMessageBatch,
+  deleteSessionById,
+  saveProjectMeta,
+  enqueueProjectStateSave,
+  loadSessions,
   type ProjectStateSnapshot,
+  type ProjectMessage,
 } from '../../utils/projectStorage';
 import { getAllTodoListContexts } from '../../tools/todoListTool';
 import { sanitizeSessionMessagesForPersistence } from './persistence';
@@ -34,11 +40,100 @@ export function toProjectSnapshot(state: AgentState): ProjectStateSnapshot {
   };
 }
 
+async function saveProjectStateNormalized(
+  state: AgentState,
+  options?: { purgeDeletedContent?: boolean }
+): Promise<void> {
+  if (!state.workspacePath) return;
+
+  const path = state.workspacePath;
+  const sanitizedMessages = sanitizeSessionMessagesForPersistence(
+    state.sessionMessages,
+    state.settings.debugEnabled
+  );
+
+  const knownSessionIds = new Set<string>();
+
+  for (const session of state.sessions) {
+    knownSessionIds.add(session.id);
+    try {
+      await saveSession(path, session);
+    } catch (err) {
+      console.warn('[CodePapr] 保存会话失败:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  for (const [sessionId, messages] of Object.entries(sanitizedMessages)) {
+    if (!knownSessionIds.has(sessionId)) continue;
+    try {
+      await saveMessageBatch(path, sessionId, messages as ProjectMessage[]);
+    } catch (err) {
+      console.warn('[CodePapr] 保存消息失败:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  if (options?.purgeDeletedContent) {
+    try {
+      const persisted = await loadSessions(path);
+      for (const persistedSession of persisted) {
+        if (!knownSessionIds.has(persistedSession.id)) {
+          await deleteSessionById(path, persistedSession.id);
+        }
+      }
+    } catch (err) {
+      console.warn('[CodePapr] 清理已删除会话失败:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  const todoContexts = getAllTodoListContexts();
+  const sessionTodoLists: Record<string, unknown> = {};
+  for (const [sessionId, ctx] of todoContexts) {
+    if (ctx.tasks.length > 0) {
+      sessionTodoLists[sessionId] = ctx;
+    }
+  }
+
+  const metaPairs: [string, unknown][] = [
+    ['active_session_id', state.activeSessionId],
+    ['conversation_stats', state.conversationStats],
+    ['session_conversation_stats', state.sessionConversationStats],
+    ['session_todo_lists', sessionTodoLists],
+    ['skill_enabled_by_id', state.skillEnabledById],
+    ['project_diagnostics_report', state.projectDiagnosticsReport],
+    ['message_checkpoints', state._messageCheckpoints],
+  ];
+
+  for (const [key, value] of metaPairs) {
+    try {
+      await saveProjectMeta(path, key, value);
+    } catch (err) {
+      console.warn('[CodePapr] 保存元数据失败:', err instanceof Error ? err.message : err);
+    }
+  }
+}
+
 export function saveCurrentProjectState(
   state: AgentState,
   options?: { purgeDeletedContent?: boolean }
 ): void {
   if (!state.workspacePath) return;
-  const save = options?.purgeDeletedContent ? saveProjectStateWithPurge : saveProjectState;
-  void save(state.workspacePath, toProjectSnapshot(state));
+
+  const workspacePath = state.workspacePath;
+
+  enqueueProjectStateSave(workspacePath, async () => {
+    // Use saveProjectStateDirect (no nested enqueueProjectStateSave) to avoid
+    // a circular promise dependency that would deadlock the save queue and
+    // prevent any data from ever reaching disk.
+    try {
+      await saveProjectStateDirect(workspacePath, toProjectSnapshot(state), {
+        purgeDeletedContent: options?.purgeDeletedContent ?? false,
+      });
+    } catch (err) {
+      console.warn('[CodePapr] 保存项目状态(兼容)失败:', err instanceof Error ? err.message : err);
+    }
+
+    await saveProjectStateNormalized(state, options);
+  }).catch((err) => {
+    console.warn('[CodePapr] 保存项目状态失败:', err instanceof Error ? err.message : err);
+  });
 }

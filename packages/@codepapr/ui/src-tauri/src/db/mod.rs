@@ -28,7 +28,7 @@ const LEGACY_PROJECT_FILE: &str = ".CodePapr/project.json";
 const LEGACY_STATE_FILE: &str = ".CodePapr/state.json";
 const MAX_SETTINGS_JSON_BYTES: usize = 200_000;
 const MAX_CHARACTERS_JSON_BYTES: usize = 50_000_000;
-const MAX_PROJECT_STATE_JSON_BYTES: usize = 5_000_000;
+const MAX_PROJECT_STATE_JSON_BYTES: usize = 20_000_000;
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -73,6 +73,12 @@ fn open_app_db() -> Result<(Connection, PathBuf), String> {
            value TEXT NOT NULL,
            data_type TEXT DEFAULT 'string',
            updated_at INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS cache (
+           key   TEXT PRIMARY KEY,
+           value TEXT NOT NULL,
+           expires_at INTEGER,
+           created_at INTEGER NOT NULL
          );",
     )
     .map_err(|err| format!("初始化配置表失败: {err}"))?;
@@ -102,11 +108,177 @@ fn open_project_db(workspace_path: &str) -> Result<(Connection, PathBuf, PathBuf
            key TEXT PRIMARY KEY,
            value TEXT NOT NULL,
            updated_at INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS sessions (
+           id TEXT PRIMARY KEY,
+           name TEXT NOT NULL,
+           provider TEXT NOT NULL,
+           model TEXT NOT NULL,
+           created_at INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS messages (
+           id TEXT PRIMARY KEY,
+           session_id TEXT NOT NULL,
+           message_index INTEGER NOT NULL,
+           role TEXT NOT NULL,
+           work_mode TEXT,
+           content TEXT NOT NULL,
+           reasoning_content TEXT,
+           tool_invocations TEXT,
+           timestamp INTEGER NOT NULL,
+           FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+           UNIQUE(session_id, message_index)
+         );
+         CREATE TABLE IF NOT EXISTS project_meta (
+           key TEXT PRIMARY KEY,
+           value TEXT NOT NULL,
+           updated_at INTEGER NOT NULL
          );",
     )
     .map_err(|err| format!("初始化项目状态表失败: {err}"))?;
 
+    migrate_project_db(&conn, &workspace)?;
+
     Ok((conn, workspace, db_path))
+}
+
+fn migrate_project_db(conn: &Connection, workspace: &Path) -> Result<(), String> {
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|err| format!("读取数据库版本失败: {err}"))?;
+
+    if version >= 1 {
+        return Ok(());
+    }
+
+    // 获取要迁移的 JSON：先查 project_state 表，再查 legacy 文件
+    let legacy_json = match read_project_state_value(conn)? {
+        Some(json) => json,
+        None => match import_legacy_project_state(conn, workspace)? {
+            Some(json) => json,
+            None => {
+                // 没有任何旧数据，直接标记为已迁移
+                conn.pragma_update(None, "user_version", 1_i64)
+                    .map_err(|err| format!("设置数据库版本失败: {err}"))?;
+                return Ok(());
+            }
+        },
+    };
+
+    let parsed: serde_json::Value = serde_json::from_str(&legacy_json)
+        .map_err(|err| format!("解析旧项目状态 JSON 失败: {err}"))?;
+
+    // 收集所有已知 session ID，用于过滤 FK 违规消息
+    let sessions = parsed
+        .get("sessions")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let known_session_ids: std::collections::HashSet<String> = sessions
+        .iter()
+        .filter_map(|s| s.get("id").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+
+    // 整个迁移在单个事务中执行，保证原子性
+    let tx = conn.unchecked_transaction()
+        .map_err(|err| format!("开启迁移事务失败: {err}"))?;
+
+    for session in &sessions {
+        let id = session.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        if id.is_empty() {
+            continue;
+        }
+        let name = session.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let provider = session.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+        let model = session.get("model").and_then(|v| v.as_str()).unwrap_or("");
+        let created_at = session.get("createdAt").and_then(|v| v.as_i64()).unwrap_or(0);
+
+        tx.execute(
+            "INSERT OR IGNORE INTO sessions (id, name, provider, model, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, name, provider, model, created_at],
+        )
+        .map_err(|err| format!("迁移会话 {id} 失败: {err}"))?;
+    }
+
+    let session_messages = parsed
+        .get("sessionMessages")
+        .and_then(|v| v.as_object());
+
+    if let Some(sm) = session_messages {
+        for (session_id, messages) in sm {
+            // 跳过不在 sessions 列表中的消息（避免 FK 违规）
+            if !known_session_ids.contains(session_id) {
+                continue;
+            }
+            let msgs = messages.as_array().cloned().unwrap_or_default();
+            for (idx, msg) in msgs.iter().enumerate() {
+                let msg_id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                if msg_id.is_empty() {
+                    continue;
+                }
+                let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                let work_mode = msg.get("workMode").and_then(|v| v.as_str());
+                let content = msg.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                let reasoning_content = msg.get("reasoningContent").and_then(|v| v.as_str());
+                let tool_invocations_raw = msg.get("toolInvocations");
+                let tool_invocations = tool_invocations_raw
+                    .filter(|v| !v.is_null())
+                    .and_then(|v| serde_json::to_string(v).ok());
+                let timestamp = msg.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0);
+                let message_index = idx as i64;
+
+                tx.execute(
+                    "INSERT OR IGNORE INTO messages (id, session_id, message_index, role, work_mode, content, reasoning_content, tool_invocations, timestamp)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![
+                        msg_id, session_id.as_str(), message_index,
+                        role, work_mode, content,
+                        reasoning_content, tool_invocations,
+                        timestamp,
+                    ],
+                )
+                .map_err(|err| format!("迁移消息 {msg_id} 失败: {err}"))?;
+            }
+        }
+    }
+
+    let meta_keys: &[(&str, &str)] = &[
+        ("activeSessionId", "active_session_id"),
+        ("conversationStats", "conversation_stats"),
+        ("sessionConversationStats", "session_conversation_stats"),
+        ("sessionTodoLists", "session_todo_lists"),
+        ("skillEnabledById", "skill_enabled_by_id"),
+        ("projectDiagnosticsReport", "project_diagnostics_report"),
+        ("messageCheckpoints", "message_checkpoints"),
+        ("cumulativeStats", "cumulative_stats"),
+        ("sessionCumulativeStats", "session_cumulative_stats"),
+    ];
+
+    let now = unix_millis()?;
+    for (json_key, meta_key) in meta_keys {
+        if let Some(val) = parsed.get(json_key) {
+            if val.is_null() {
+                continue;
+            }
+            let val_str = serde_json::to_string(val)
+                .map_err(|err| format!("序列化 {json_key} 失败: {err}"))?;
+            tx.execute(
+                "INSERT OR IGNORE INTO project_meta (key, value, updated_at)
+                 VALUES (?1, ?2, ?3)",
+                params![meta_key, val_str, now],
+            )
+            .map_err(|err| format!("迁移元数据 {json_key} 失败: {err}"))?;
+        }
+    }
+
+    tx.commit().map_err(|err| format!("提交迁移事务失败: {err}"))?;
+
+    conn.pragma_update(None, "user_version", 1_i64)
+        .map_err(|err| format!("设置数据库版本失败: {err}"))?;
+
+    Ok(())
 }
 
 fn validate_project_state_json(state_json: &str) -> Result<(), String> {
@@ -472,6 +644,252 @@ pub(crate) fn save_project_state(
 }
 
 #[tauri::command]
+pub(crate) fn save_session(workspace_path: String, session_json: String) -> Result<(), String> {
+    let parsed: serde_json::Value = serde_json::from_str(&session_json)
+        .map_err(|err| format!("会话 JSON 不合法: {err}"))?;
+
+    let id = parsed.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    if id.is_empty() {
+        return Err("会话 ID 不能为空".to_string());
+    }
+    let name = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let provider = parsed.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+    let model = parsed.get("model").and_then(|v| v.as_str()).unwrap_or("");
+    let created_at = parsed.get("createdAt").and_then(|v| v.as_i64()).unwrap_or(0);
+
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    conn.execute(
+        "INSERT INTO sessions (id, name, provider, model, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(id) DO UPDATE SET
+           name = excluded.name,
+           provider = excluded.provider,
+           model = excluded.model,
+           created_at = excluded.created_at",
+        params![id, name, provider, model, created_at],
+    )
+    .map_err(|err| format!("保存会话失败: {err}"))?;
+
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionListResult {
+    pub(crate) sessions_json: String,
+}
+
+#[tauri::command]
+pub(crate) fn load_sessions(workspace_path: String) -> Result<SessionListResult, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, provider, model, created_at FROM sessions ORDER BY created_at DESC, id ASC")
+        .map_err(|err| format!("查询会话失败: {err}"))?;
+
+    let sessions: Vec<serde_json::Value> = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "provider": row.get::<_, String>(2)?,
+                "model": row.get::<_, String>(3)?,
+                "createdAt": row.get::<_, i64>(4)?,
+            }))
+        })
+        .map_err(|err| format!("读取会话列表失败: {err}"))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(SessionListResult {
+        sessions_json: serde_json::to_string(&sessions)
+            .map_err(|err| format!("序列化会话列表失败: {err}"))?,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn delete_session(workspace_path: String, session_id: String) -> Result<(), String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    conn.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])
+        .map_err(|err| format!("删除会话失败: {err}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn save_message_batch(
+    workspace_path: String,
+    session_id: String,
+    messages_json: String,
+) -> Result<(), String> {
+    let messages: Vec<serde_json::Value> = serde_json::from_str(&messages_json)
+        .map_err(|err| format!("消息列表 JSON 不合法: {err}"))?;
+
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let tx = conn.unchecked_transaction()
+        .map_err(|err| format!("开启事务失败: {err}"))?;
+
+    // 全量替换语义：先删除该 session 的所有旧消息，再插入新消息。
+    // 这样 clearMessages(空数组) 和 resetToMessage(截断数组) 才能正确清理旧数据。
+    tx.execute("DELETE FROM messages WHERE session_id = ?1", params![session_id])
+        .map_err(|err| format!("清理旧消息失败: {err}"))?;
+
+    for (idx, msg) in messages.iter().enumerate() {
+        let msg_id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        if msg_id.is_empty() {
+            continue;
+        }
+        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
+        let work_mode = msg.get("workMode").and_then(|v| v.as_str());
+        let content = msg.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        let reasoning_content = msg.get("reasoningContent").and_then(|v| v.as_str());
+        let tool_invocations_raw = msg.get("toolInvocations");
+        let tool_invocations = tool_invocations_raw
+            .filter(|v| !v.is_null())
+            .and_then(|v| serde_json::to_string(v).ok());
+        let timestamp = msg.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0);
+        let message_index = idx as i64;
+
+        // 使用 INSERT OR IGNORE：DELETE 已清空当前 session 的消息，
+        // 如果 id 冲突（来自其他 session 的消息），跳过而非覆盖，避免跨 session 数据破坏
+        tx.execute(
+            "INSERT OR IGNORE INTO messages (id, session_id, message_index, role, work_mode, content, reasoning_content, tool_invocations, timestamp)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                msg_id, session_id.as_str(), message_index,
+                role, work_mode, content,
+                reasoning_content, tool_invocations,
+                timestamp,
+            ],
+        )
+        .map_err(|err| format!("保存消息 {msg_id} 失败: {err}"))?;
+    }
+
+    tx.commit().map_err(|err| format!("提交消息事务失败: {err}"))?;
+
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MessageListResult {
+    pub(crate) messages_json: String,
+}
+
+#[tauri::command]
+pub(crate) fn load_session_messages(
+    workspace_path: String,
+    session_id: String,
+) -> Result<MessageListResult, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, role, work_mode, content, reasoning_content, tool_invocations, timestamp, message_index
+             FROM messages WHERE session_id = ?1 ORDER BY message_index ASC",
+        )
+        .map_err(|err| format!("查询消息失败: {err}"))?;
+
+    let messages: Vec<serde_json::Value> = stmt
+        .query_map(params![session_id], |row| {
+            let tool_raw: Option<String> = row.get(5)?;
+            let tool_invocations: serde_json::Value = match tool_raw {
+                Some(s) => serde_json::from_str(&s).unwrap_or(serde_json::Value::Null),
+                None => serde_json::Value::Null,
+            };
+
+            let work_mode: Option<String> = row.get(2)?;
+            let reasoning: Option<String> = row.get(4)?;
+
+            let mut obj = serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "role": row.get::<_, String>(1)?,
+                "content": row.get::<_, String>(3)?,
+                "timestamp": row.get::<_, i64>(6)?,
+            });
+
+            if let Some(wm) = work_mode {
+                obj["workMode"] = serde_json::Value::String(wm);
+            }
+            if let Some(rc) = reasoning {
+                obj["reasoningContent"] = serde_json::Value::String(rc);
+            }
+            if !tool_invocations.is_null() {
+                obj["toolInvocations"] = tool_invocations;
+            }
+
+            Ok(obj)
+        })
+        .map_err(|err| format!("读取消息列表失败: {err}"))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(MessageListResult {
+        messages_json: serde_json::to_string(&messages)
+            .map_err(|err| format!("序列化消息列表失败: {err}"))?,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn save_project_meta(
+    workspace_path: String,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    conn.execute(
+        "INSERT INTO project_meta (key, value, updated_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           updated_at = excluded.updated_at",
+        params![key, value, unix_millis()?],
+    )
+    .map_err(|err| format!("保存项目元数据失败: {err}"))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn load_project_meta(
+    workspace_path: String,
+    key: String,
+) -> Result<Option<String>, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    conn.query_row(
+        "SELECT value FROM project_meta WHERE key = ?1",
+        params![key],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(|err| format!("读取项目元数据失败: {err}"))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProjectMetaResult {
+    pub(crate) meta_json: String,
+}
+
+#[tauri::command]
+pub(crate) fn load_all_project_meta(workspace_path: String) -> Result<ProjectMetaResult, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let mut stmt = conn
+        .prepare("SELECT key, value FROM project_meta")
+        .map_err(|err| format!("查询元数据失败: {err}"))?;
+
+    let meta: std::collections::HashMap<String, String> = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|err| format!("读取元数据列表失败: {err}"))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(ProjectMetaResult {
+        meta_json: serde_json::to_string(&meta)
+            .map_err(|err| format!("序列化元数据失败: {err}"))?,
+    })
+}
+
+#[tauri::command]
 pub(crate) fn save_projectgraph_cache(
     workspace_path: String,
     cache_data: String,
@@ -499,6 +917,57 @@ pub(crate) fn load_projectgraph_cache(workspace_path: String) -> Result<Option<S
     )
     .optional()
     .map_err(|err| format!("读取 ProjectGraph 缓存失败: {err}"))
+}
+
+// ── Cache commands (app-level, replaces localStorage) ─────────────────
+
+#[tauri::command]
+pub(crate) fn cache_get(key: String) -> Result<Option<String>, String> {
+    let (conn, _db_path) = open_app_db()?;
+    let now = unix_millis()?;
+    let result: Option<(String, Option<i64>)> = conn
+        .query_row(
+            "SELECT value, expires_at FROM cache WHERE key = ?1",
+            params![key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|err| format!("读取缓存失败: {err}"))?;
+
+    match result {
+        None => Ok(None),
+        Some((_, Some(expires_at))) if expires_at <= now => {
+            let _ = conn.execute("DELETE FROM cache WHERE key = ?1", params![key]);
+            Ok(None)
+        }
+        Some((value, _)) => Ok(Some(value)),
+    }
+}
+
+#[tauri::command]
+pub(crate) fn cache_set(key: String, value: String, ttl_ms: Option<i64>) -> Result<(), String> {
+    let (conn, _db_path) = open_app_db()?;
+    let now = unix_millis()?;
+    let expires_at = ttl_ms.map(|ms| now + ms);
+    conn.execute(
+        "INSERT INTO cache (key, value, expires_at, created_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           expires_at = excluded.expires_at,
+           created_at = excluded.created_at",
+        params![key, value, expires_at, now],
+    )
+    .map_err(|err| format!("保存缓存失败: {err}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn cache_remove(key: String) -> Result<(), String> {
+    let (conn, _db_path) = open_app_db()?;
+    conn.execute("DELETE FROM cache WHERE key = ?1", params![key])
+        .map_err(|err| format!("删除缓存失败: {err}"))?;
+    Ok(())
 }
 
 // ── Tests ────────────────────────────────────────────────────────────

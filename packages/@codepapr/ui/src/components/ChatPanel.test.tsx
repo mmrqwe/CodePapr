@@ -41,11 +41,33 @@ describe('ChatPanel', () => {
     observe: ReturnType<typeof vi.fn>;
     disconnect: ReturnType<typeof vi.fn>;
   }>;
+  let rAFQueue: Array<() => void>;
+  let rAFIdCounter: number;
+
+  function flushRAF() {
+    while (rAFQueue.length > 0) {
+      const pending = rAFQueue;
+      rAFQueue = [];
+      pending.forEach((cb) => cb());
+    }
+  }
 
   beforeEach(() => {
     invokeMock.mockReset();
     colorizeMock.mockClear();
     resizeObservers = [];
+    rAFQueue = [];
+    rAFIdCounter = 1;
+    vi.stubGlobal('requestAnimationFrame', (cb: () => void) => {
+      rAFQueue.push(cb);
+      return rAFIdCounter++;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => {
+      const idx = id - 1;
+      if (idx >= 0 && idx < rAFQueue.length) {
+        rAFQueue[idx] = () => {};
+      }
+    });
     Element.prototype.scrollIntoView = vi.fn();
     scrollToMock = vi.fn(function (
       this: HTMLElement,
@@ -411,12 +433,34 @@ describe('ChatPanel', () => {
       root.render(<ChatPanel />);
     });
 
+    const chatScroll = container.querySelector('[data-chat-scroll="true"]') as HTMLDivElement;
     const reasoningScroll = container.querySelector('[data-reasoning-scroll="true"]') as HTMLDivElement;
     expect(reasoningScroll).not.toBeNull();
-    expect(scrollToMock).toHaveBeenCalled();
     expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
 
-    const initialCallCount = scrollToMock.mock.calls.length;
+    const chatObserver = resizeObservers.find(
+      (ro) => !(ro.observe.mock.calls[0]?.[0] instanceof HTMLParagraphElement)
+    );
+    expect(chatObserver).toBeTruthy();
+
+    Object.defineProperty(chatScroll, 'scrollHeight', {
+      value: 1000,
+      writable: true,
+      configurable: true,
+    });
+
+    await act(async () => {
+      chatObserver!.callback([], {} as ResizeObserver);
+    });
+    flushRAF();
+
+    expect(chatScroll.scrollTop).toBe(1000);
+
+    const reasoningObserver = resizeObservers.find(
+      (ro) => ro.observe.mock.calls[0]?.[0] instanceof HTMLParagraphElement
+    );
+    expect(reasoningObserver).toBeTruthy();
+
     await act(async () => {
       useAgentStore.setState((state) => ({
         ...state,
@@ -446,7 +490,17 @@ describe('ChatPanel', () => {
       root.render(<ChatPanel />);
     });
 
-    expect(scrollToMock.mock.calls.length).toBeGreaterThan(initialCallCount);
+    Object.defineProperty(reasoningScroll, 'scrollHeight', {
+      value: 800,
+      writable: true,
+      configurable: true,
+    });
+
+    await act(async () => {
+      reasoningObserver!.callback([], {} as ResizeObserver);
+    });
+
+    expect(reasoningScroll.scrollTop).toBe(800);
   });
 
   it('keeps the chat list pinned to the bottom when content height grows asynchronously', async () => {
@@ -478,15 +532,22 @@ describe('ChatPanel', () => {
       root.render(<ChatPanel />);
     });
 
-    const initialCallCount = scrollToMock.mock.calls.length;
     const observer = resizeObservers[0];
     expect(observer).toBeTruthy();
+
+    const chatScroll = container.querySelector('[data-chat-scroll="true"]') as HTMLDivElement;
+    Object.defineProperty(chatScroll, 'scrollHeight', {
+      value: 1200,
+      writable: true,
+      configurable: true,
+    });
 
     await act(async () => {
       observer?.callback([], {} as ResizeObserver);
     });
+    flushRAF();
 
-    expect(scrollToMock.mock.calls.length).toBeGreaterThan(initialCallCount);
+    expect(chatScroll.scrollTop).toBe(1200);
   });
 
   it('does not collapse textual summary-style conversations', async () => {

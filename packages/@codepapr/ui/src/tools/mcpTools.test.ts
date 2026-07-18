@@ -26,30 +26,27 @@ function norm(input: PartialTestSettings): McpSettings {
   return normalizeMcpSettings(input as Partial<McpSettings>);
 }
 
-let storedItems: Record<string, string> = {};
+let storedCache: Record<string, string> = {};
 
 const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
 }));
 
-Object.defineProperty(globalThis, 'localStorage', {
-  value: {
-    getItem: vi.fn((key: string) => storedItems[key] ?? null),
-    setItem: vi.fn((key: string, value: string) => {
-      storedItems[key] = value;
-    }),
-    removeItem: vi.fn((key: string) => {
-      delete storedItems[key];
-    }),
-    clear: vi.fn(() => {
-      storedItems = {};
-    }),
-  },
-  writable: true,
-});
-
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
+}));
+
+vi.mock('../utils/cacheStorage', () => ({
+  cacheGet: vi.fn(async (key: string) => {
+    const raw = storedCache[key];
+    return raw ? JSON.parse(raw) : null;
+  }),
+  cacheSet: vi.fn(async (key: string, data: unknown, _ttlMs?: number) => {
+    storedCache[key] = JSON.stringify(data);
+  }),
+  cacheRemove: vi.fn(async (key: string) => {
+    delete storedCache[key];
+  }),
 }));
 
 const SAMPLE_TOOLS_RESULT = {
@@ -82,14 +79,10 @@ const ENABLED_SETTINGS = norm({
   servers: [{ id: 'search', enabled: true, category: 'search' }],
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   invokeMock.mockReset();
-  clearMcpToolDefinitionCache();
-  (localStorage.clear as ReturnType<typeof vi.fn>).mockClear();
-  (localStorage.getItem as ReturnType<typeof vi.fn>).mockReset();
-  (localStorage.setItem as ReturnType<typeof vi.fn>).mockReset();
-  (localStorage.removeItem as ReturnType<typeof vi.fn>).mockReset();
-  storedItems = {};
+  storedCache = {};
+  await clearMcpToolDefinitionCache();
 });
 
 describe('loadMcpToolDefinitions', () => {
@@ -202,11 +195,11 @@ describe('registerMcpTools', () => {
 });
 
 describe('clearMcpToolDefinitionCache', () => {
-  it('removes in-memory and localStorage cache', async () => {
+  it('removes in-memory and persisted cache', async () => {
     invokeMock.mockResolvedValueOnce(SAMPLE_TOOLS_RESULT);
     await loadMcpToolDefinitions(ENABLED_SETTINGS);
 
-    clearMcpToolDefinitionCache();
+    await clearMcpToolDefinitionCache();
 
     invokeMock.mockClear();
     invokeMock.mockResolvedValueOnce(SAMPLE_TOOLS_RESULT);

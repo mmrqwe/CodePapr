@@ -314,7 +314,7 @@ const USER_PROMPT_SECTION_DEFAULTS: Record<PromptLang, UserPromptSections> = {
     risk:
       '优先保持向后兼容和低回归风险。若修改会影响运行行为、构建链路或发布结果，需要在最终说明里简短指出风险点。',
     response:
-      '回答保持直接、简洁、可执行。总结时优先说明完成结果、关键改动、验证方式和剩余风险，避免空泛表述。',
+      '回答保持直接、简洁、可执行。总结时优先说明完成结果、关键改动、验证方式和剩余风险，避免空泛表述。当引用项目文件时，请使用 codepapr-file: 格式：[路径/文件名](codepapr-file:路径/文件名)。',
     appendix: '',
   },
   'zh-TW': {
@@ -327,7 +327,7 @@ const USER_PROMPT_SECTION_DEFAULTS: Record<PromptLang, UserPromptSections> = {
     risk:
       '優先保持向後兼容和低回歸風險。若修改會影響運行行為、構建鏈路或發布結果，需要在最終說明裡簡短指出風險點。',
     response:
-      '回答保持直接、簡潔、可執行。總結時優先說明完成結果、關鍵改動、驗證方式和剩餘風險，避免空泛表述。',
+      '回答保持直接、簡潔、可執行。總結時優先說明完成結果、關鍵改動、驗證方式和剩餘風險，避免空泛表述。引用專案檔案時，請使用 codepapr-file: 格式：[路徑/檔名](codepapr-file:路徑/檔名)。',
     appendix: '',
   },
   en: {
@@ -340,7 +340,7 @@ const USER_PROMPT_SECTION_DEFAULTS: Record<PromptLang, UserPromptSections> = {
     risk:
       'Prefer backward compatibility and low regression risk. If a change can affect runtime behavior, the build chain, or publish output, call that out briefly in the final summary.',
     response:
-      'Keep answers direct, concise, and actionable. In summaries, prioritize completed result, key changes, validation, and remaining risk over generic narration.',
+      'Keep answers direct, concise, and actionable. In summaries, prioritize completed results, key changes, validation, and remaining risk over generic narration. When referencing project files, use the codepapr-file: scheme: [path/to/file.ts](codepapr-file:path/to/file.ts).',
     appendix: '',
   },
 };

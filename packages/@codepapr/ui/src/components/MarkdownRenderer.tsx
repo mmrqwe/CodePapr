@@ -108,6 +108,21 @@ function CodeBlock({
   );
 }
 
+function preprocessFileLinks(content: string): string {
+  return content.replace(
+    /`([\w./-]+\.\w{1,8}(?::\d+)?)`/g,
+    (match, path) => {
+      const cleanedPath = (path as string).replace(/:\d+$/, '');
+      // Require at least one directory separator to avoid matching
+      // single words with dots (e.g. `true` in a backtick-delimited code span).
+      if (!/\//.test(cleanedPath)) {
+        return match;
+      }
+      return `[\`${path}\`](codepapr-file:${encodeURIComponent(cleanedPath)})`;
+    }
+  );
+}
+
 interface MarkdownRendererProps {
   content: string;
   copyLabel: string;
@@ -219,7 +234,7 @@ export function MarkdownRenderer({
   return (
     <div className={`markdown-body text-sm leading-relaxed${className ? ` ${className}` : ''}`}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-        {content}
+        {preprocessFileLinks(content)}
       </ReactMarkdown>
     </div>
   );

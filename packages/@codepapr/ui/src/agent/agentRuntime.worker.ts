@@ -28,6 +28,7 @@ import {
   DEFAULT_LOCAL_BASE_URL,
   RequestBuilder,
   CacheValidator,
+  setGlobalFetchFn,
 } from '@codepapr/api';
 import type { IChatRequest, IChatResponse, ICacheStatistics, IMessage, ILLMProvider } from '@codepapr/types';
 import type {
@@ -62,8 +63,217 @@ let nextChatRequestId = 0;
 
 let nextToolRequestId = 0;
 
+let nextFetchId = 0;
+
 const TOOL_IPC_TIMEOUT_MS = 120_000;
 const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 300_000;
+
+interface PendingFetch {
+  resolve: (response: Response) => void;
+  reject: (error: Error) => void;
+  bodyController: ReadableStreamDefaultController<Uint8Array> | null;
+  bodyStream: ReadableStream<Uint8Array> | null;
+  signal: AbortSignal | undefined;
+  abortHandler: () => void;
+  settled: boolean;
+}
+
+const pendingFetches = new Map<string, PendingFetch>();
+
+function detachPendingFetch(fetchId: string): PendingFetch | undefined {
+  const pending = pendingFetches.get(fetchId);
+  if (!pending) {
+    return undefined;
+  }
+  pendingFetches.delete(fetchId);
+  if (pending.signal) {
+    pending.signal.removeEventListener('abort', pending.abortHandler);
+  }
+  return pending;
+}
+
+function finalizePendingFetch(
+  fetchId: string,
+  action: 'close' | 'error',
+  error?: Error
+): void {
+  const pending = detachPendingFetch(fetchId);
+  if (!pending) {
+    return;
+  }
+  if (action === 'close') {
+    try {
+      pending.bodyController?.close();
+    } catch {
+      // controller already closed or errored
+    }
+    if (!pending.settled) {
+      // Defensive: end arrived without start; synthesize an empty 200 response.
+      pending.resolve(new Response(null, { status: 200, statusText: 'OK' }));
+      pending.settled = true;
+    }
+  } else {
+    const err = error ?? new Error('fetch failed');
+    try {
+      pending.bodyController?.error(err);
+    } catch {
+      // controller already closed or errored
+    }
+    if (!pending.settled) {
+      pending.settled = true;
+      pending.reject(err);
+    }
+  }
+}
+
+async function encodeFetchBody(body: BodyInit | null | undefined): Promise<Uint8Array | null> {
+  if (body === null || body === undefined) {
+    return null;
+  }
+  if (typeof body === 'string') {
+    return new TextEncoder().encode(body);
+  }
+  if (body instanceof Uint8Array) {
+    return body;
+  }
+  if (body instanceof ArrayBuffer) {
+    return new Uint8Array(body);
+  }
+  if (body instanceof Blob) {
+    return new Uint8Array(await body.arrayBuffer());
+  }
+  if (body instanceof URLSearchParams) {
+    return new TextEncoder().encode(body.toString());
+  }
+  if (body instanceof ReadableStream) {
+    const reader = body.getReader();
+    const chunks: Uint8Array[] = [];
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) chunks.push(value);
+    }
+    const total = chunks.reduce((sum, c) => sum + c.length, 0);
+    const result = new Uint8Array(total);
+    let offset = 0;
+    for (const c of chunks) {
+      result.set(c, offset);
+      offset += c.length;
+    }
+    return result;
+  }
+  return new TextEncoder().encode(String(body));
+}
+
+async function proxyFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  let url: string;
+  let method = init?.method ?? 'GET';
+  const headers = new Headers(init?.headers);
+  let bodyData: Uint8Array | null = null;
+
+  if (typeof input === 'string') {
+    url = input;
+  } else if (input instanceof URL) {
+    url = input.toString();
+  } else if (input instanceof Request) {
+    url = input.url;
+    method = init?.method ?? input.method;
+    const merged = new Headers(input.headers);
+    if (init?.headers) {
+      const override = new Headers(init.headers);
+      for (const [k, v] of override.entries()) {
+        merged.set(k, v);
+      }
+    }
+    headers.delete('content-type');
+    headers.delete('content-length');
+    for (const [k, v] of merged.entries()) {
+      headers.set(k, v);
+    }
+    if (init?.body !== undefined) {
+      bodyData = await encodeFetchBody(init.body);
+    } else if (input.body !== null && input.body !== undefined) {
+      bodyData = await encodeFetchBody(input.body);
+    }
+  } else {
+    url = String(input);
+  }
+
+  if (init?.body !== undefined && bodyData === null) {
+    bodyData = await encodeFetchBody(init.body);
+  }
+
+  const fetchId = `fetch-${++nextFetchId}`;
+
+  let bodyController: ReadableStreamDefaultController<Uint8Array> | null = null;
+  const bodyStream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      bodyController = controller;
+    },
+    cancel() {
+      postMessageToMain({ type: 'fetch-cancel', fetchId });
+    },
+  });
+
+  const signal = init?.signal ?? undefined;
+  const pending: PendingFetch = {
+    resolve: () => {},
+    reject: () => {},
+    bodyController,
+    bodyStream,
+    signal,
+    abortHandler: () => {
+      postMessageToMain({ type: 'fetch-cancel', fetchId });
+      const p = pendingFetches.get(fetchId);
+      if (!p) {
+        return;
+      }
+      if (!p.settled) {
+        // fetch-response-start hasn't arrived yet; reject immediately and clean up.
+        p.settled = true;
+        pendingFetches.delete(fetchId);
+        if (p.signal) {
+          p.signal.removeEventListener('abort', p.abortHandler);
+        }
+        p.reject(new DOMException('The user aborted a request.', 'AbortError'));
+        return;
+      }
+      // fetch-response-start already resolved the promise; leave the entry in
+      // the map so the subsequent fetch-response-error/end can close or error
+      // the bodyController and unblock the provider's body reader.
+    },
+    settled: false,
+  };
+
+  const promise = new Promise<Response>((resolve, reject) => {
+    pending.resolve = resolve;
+    pending.reject = reject;
+  });
+
+  pendingFetches.set(fetchId, pending);
+
+  if (signal) {
+    if (signal.aborted) {
+      pending.abortHandler();
+      return promise;
+    }
+    signal.addEventListener('abort', pending.abortHandler, { once: true });
+  }
+
+  postMessageToMain({
+    type: 'fetch-request',
+    fetchId,
+    url,
+    method,
+    headers: Array.from(headers.entries()),
+    body: bodyData,
+  });
+
+  return await promise;
+}
+
+setGlobalFetchFn(proxyFetch);
 
 const subagentCacheStatsMap = new Map<
   string,
@@ -615,6 +825,49 @@ self.onmessage = (event: MessageEvent<MainToAgentWorkerMessage>) => {
     } else {
       waiter.reject(new Error(message.error || 'Chat proxy failed'));
     }
+    return;
+  }
+
+  if (message.type === 'fetch-response-start') {
+    const pending = pendingFetches.get(message.fetchId);
+    if (!pending || pending.settled) {
+      return;
+    }
+    const noBodyStatus = [101, 103, 204, 205, 304].includes(message.status);
+    const responseInit: ResponseInit = {
+      status: message.status,
+      statusText: message.statusText,
+      headers: new Headers(message.headers),
+    };
+    const response = new Response(
+      noBodyStatus ? null : pending.bodyStream,
+      responseInit
+    );
+    pending.settled = true;
+    pending.resolve(response);
+    return;
+  }
+
+  if (message.type === 'fetch-response-chunk') {
+    const pending = pendingFetches.get(message.fetchId);
+    if (!pending || !pending.bodyController) {
+      return;
+    }
+    try {
+      pending.bodyController.enqueue(message.chunk);
+    } catch {
+      // controller already closed or errored
+    }
+    return;
+  }
+
+  if (message.type === 'fetch-response-end') {
+    finalizePendingFetch(message.fetchId, 'close');
+    return;
+  }
+
+  if (message.type === 'fetch-response-error') {
+    finalizePendingFetch(message.fetchId, 'error', new Error(message.error));
     return;
   }
 

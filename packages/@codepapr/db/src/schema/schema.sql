@@ -113,3 +113,11 @@ CREATE TABLE IF NOT EXISTS snapshots (
 
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
+
+-- 通用缓存表（替代 localStorage，键值 + TTL）
+CREATE TABLE IF NOT EXISTS cache (
+  key         TEXT PRIMARY KEY,
+  value       TEXT NOT NULL,
+  expires_at  INTEGER,
+  created_at  INTEGER NOT NULL
+);

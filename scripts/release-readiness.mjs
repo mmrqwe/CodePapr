@@ -28,7 +28,6 @@ const packagePaths = [
   'packages/@codepapr/core/package.json',
   'packages/@codepapr/api/package.json',
   'packages/@codepapr/db/package.json',
-  'packages/@codepapr/cli/package.json',
   'packages/@codepapr/editor/package.json',
   'packages/@codepapr/ui/package.json',
 ];
@@ -39,7 +38,6 @@ for (const packagePath of packagePaths) {
 }
 
 const requiredScripts = [
-  'test:e2e',
   'verify:ci',
   'verify',
   'debug',
@@ -64,8 +62,6 @@ const requiredFiles = [
   'docs/ARCHITECTURE.md',
   'docs/SETUP.md',
   'docs/USAGE.md',
-  'run-codepapr-cli.command',
-  'run-codepapr-cli.cmd',
   'publish-codepapr.command',
   'publish-codepapr.cmd',
   'packages/@codepapr/ui/src-tauri/Cargo.toml',

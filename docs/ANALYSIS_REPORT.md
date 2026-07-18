@@ -82,10 +82,9 @@ CodePapr 是一个**本地优先（local-first）的编码 Agent 运行时**，�
 | 文件 | 规模（估算） | 承担的职责 |
 |---|---|---|
 | [packages/@codepapr/core/src/tool/workspace/graphQuery.ts](../packages/@codepapr/core/src/tool/workspace/graphQuery.ts) | 约 1900+ 行 | 13 个 graph action 的查询逻辑 + 死代码检测 + 循环依赖检测 + 重构建议生成（提取函数/移动符号的具体 diff 规划）等，职责跨度较大 |
-| [packages/@codepapr/cli/src/tools/registerCliWorkspaceTools.ts](../packages/@codepapr/cli/src/tools/registerCliWorkspaceTools.ts) | 约 1600+ 行 | CLI 侧全部 workspace 工具的注册与实现，几乎是"CLI 工具大杂烩" |
 | [packages/@codepapr/ui/src/store/agentStore.ts](../packages/@codepapr/ui/src/store/agentStore.ts) | 约 1600+ 行 | `sendMessage` 主流程、模型路由、流式消息、会话恢复、TodoList 管理、对话重置、记忆整理触发等多重职责集中在一个 Zustand store 里 |
 
-这三个文件都属于"越用越重"的中枢型模块，随着功能增加，未来的维护成本会继续上升。值得肯定的是 `agentStore` 已经把部分逻辑拆到了 `store/internals/`（如 `agentFactory.ts`、`settingsNormalizer.ts`、`providerFactory.ts`），说明团队已经意识到这个问题并在推进拆分，**建议延续这个方向**，把 `graphQuery.ts` 的"查询"与"重构建议生成"拆成两个模块，把 `agentStore.ts` 里非状态相关的纯函数（模型路由、prompt 构建）继续下沉到 `internals/`。
+这两个文件都属于"越用越重"的中枢型模块，随着功能增加，未来的维护成本会继续上升。值得肯定的是 `agentStore` 已经把部分逻辑拆到了 `store/internals/`（如 `agentFactory.ts`、`settingsNormalizer.ts`、`providerFactory.ts`），说明团队已经意识到这个问题并在推进拆分，**建议延续这个方向**，把 `graphQuery.ts` 的"查询"与"重构建议生成"拆成两个模块，把 `agentStore.ts` 里非状态相关的纯函数（模型路由、prompt 构建）继续下沉到 `internals/`。
 
 ### 2.5 工具系统设计：合并式 Action 是好的取舍
 

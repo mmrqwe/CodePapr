@@ -38,7 +38,6 @@
 | @codepapr/core | 运行时核心 | Agent、Session、ToolRegistry、缓存分区、ProjectGraph、TodoList、Built-in Agents |
 | @codepapr/api | provider 适配层 | RequestBuilder、CacheValidator、provider 实现 |
 | @codepapr/db | 持久化层 | SQLite 封装与 repository |
-| @codepapr/cli | CLI 自动化宿主 | 组装 provider、workspace tools、工程调试入口 |
 | @codepapr/editor | 编辑器契约 | 框架无关的 Monaco 类型、标记、导航与静态检查契约 |
 | @codepapr/ui | 桌面工作台 | React、Zustand、Tauri、WorkerBackedAgent |
 
@@ -507,7 +506,6 @@ ImmutablePrefix 的 SHA256 hash 包含整个 `parameters` 对象——`temperatu
 - `packages/@codepapr/ui/src-tauri/src/tts/ws.rs`：WebSocket 批量合成客户端
 - `packages/@codepapr/ui/src-tauri/src/tts/installer.rs`：GPT-SoVITS 一键安装器
 - `packages/@codepapr/ui/src-tauri/src/tts/finetune.rs`：语音微调运行器
-- `packages/@codepapr/cli/src/tools/registerCliWorkspaceTools.ts`：CLI 工具注册
 - `packages/@codepapr/ui/src-tauri/src/lsp.rs`：LSP server 管理
 - `packages/@codepapr/ui/src-tauri/src/browser/page.rs`：浏览器自动化
 - `packages/@codepapr/ui/src-tauri/src/shell/background.rs`：前台/后台命令与 Shell 会话

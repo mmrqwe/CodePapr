@@ -6,31 +6,12 @@ import type {
   RegistryServerEntry,
   RegistryPackage,
 } from '../utils/mcpMarketTypes';
+import { cacheGet, cacheSet } from '../utils/cacheStorage';
 
 const OFFICIAL_REGISTRY_URL = 'https://registry.modelcontextprotocol.io/v0.1/servers';
-const CACHE_TTL_MS = 5 * 60 * 1000;
 
-function getCache<T>(key: string): T | null {
-  try {
-    const raw = localStorage.getItem(`codepapr.market.${key}`);
-    if (!raw) return null;
-    const entry = JSON.parse(raw);
-    if (Date.now() - entry.ts > CACHE_TTL_MS) {
-      localStorage.removeItem(`codepapr.market.${key}`);
-      return null;
-    }
-    return entry.data as T;
-  } catch {
-    return null;
-  }
-}
-
-function setCache<T>(key: string, data: T): void {
-  try {
-    localStorage.setItem(`codepapr.market.${key}`, JSON.stringify({ ts: Date.now(), data }));
-  } catch {
-    // localStorage full or unavailable
-  }
+function cacheKey(namespace: string): string {
+  return `codepapr.market.${namespace}`;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -153,8 +134,8 @@ export async function fetchOfficialRegistry(cursor?: string): Promise<{
     ? `${OFFICIAL_REGISTRY_URL}?limit=50&cursor=${encodeURIComponent(cursor)}`
     : `${OFFICIAL_REGISTRY_URL}?limit=50`;
 
-  const cacheKey = cursor ? `official_${cursor}` : 'official_page1';
-  const cached = getCache<ReturnType<typeof fetchOfficialRegistry>>(cacheKey);
+  const ck = cursor ? `official_${cursor}` : 'official_page1';
+  const cached = await cacheGet<ReturnType<typeof fetchOfficialRegistry>>(cacheKey(ck));
   if (cached) return cached;
 
   const data = await fetchJson<RegistryListResponse>(url);
@@ -173,7 +154,7 @@ export async function fetchOfficialRegistry(cursor?: string): Promise<{
     },
   };
 
-  setCache(cacheKey, result);
+  await cacheSet(cacheKey(ck), result, 5 * 60 * 1000);
   return result;
 }
 

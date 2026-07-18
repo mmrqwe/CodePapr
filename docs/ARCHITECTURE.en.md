@@ -38,7 +38,6 @@ This document describes the formal system design of CodePapr, focusing on:
 | @codepapr/core | Runtime Core | Agent, Session, ToolRegistry, cache partitions, ProjectGraph, TodoList, Built-in Agents |
 | @codepapr/api | Provider Adapter | RequestBuilder, CacheValidator, provider implementations |
 | @codepapr/db | Persistence Layer | SQLite wrapper and repositories |
-| @codepapr/cli | CLI Automation Host | Assembles provider, workspace tools, engineering debugging entry point |
 | @codepapr/editor | Editor Contracts | Framework-agnostic Monaco types, markers, navigation, and static analysis contracts |
 | @codepapr/ui | Desktop Workbench | React, Zustand, Tauri, WorkerBackedAgent |
 
@@ -508,7 +507,6 @@ Voice configuration is not in the main settings panel — it is configured per c
 - `packages/@codepapr/ui/src-tauri/src/tts/ws.rs`: WebSocket batch synthesis client
 - `packages/@codepapr/ui/src-tauri/src/tts/installer.rs`: GPT-SoVITS one-click installer
 - `packages/@codepapr/ui/src-tauri/src/tts/finetune.rs`: Voice fine-tuning runner
-- `packages/@codepapr/cli/src/tools/registerCliWorkspaceTools.ts`: CLI tool registration
 - `packages/@codepapr/ui/src-tauri/src/lsp.rs`: LSP server management
 - `packages/@codepapr/ui/src-tauri/src/browser/page.rs`: Browser automation
 - `packages/@codepapr/ui/src-tauri/src/shell/background.rs`: Foreground/background commands and shell sessions

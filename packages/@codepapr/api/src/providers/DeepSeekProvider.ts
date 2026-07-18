@@ -15,7 +15,7 @@ import {
 } from '@codepapr/types';
 import { Logger, sortedStringify } from '@codepapr/common';
 import { sanitizeToolCallArguments } from './streaming';
-import { BaseLLMProvider, ProviderConfig } from './ILLMProvider';
+import { BaseLLMProvider, ProviderConfig, ProviderRequestError } from './ILLMProvider';
 import {
   applyStreamingToolCallDeltas,
   finalizeStreamingToolCalls,
@@ -152,10 +152,11 @@ export class DeepSeekProvider extends BaseLLMProvider {
     let systemFingerprint: string | undefined;
     const toolCallStates: Array<{ id: string; name: string; argumentsText: string }> = [];
 
-    await readSseStream(response, (payloadLine) => {
-      if (payloadLine === '[DONE]') {
-        return;
-      }
+    try {
+      await readSseStream(response, (payloadLine) => {
+        if (payloadLine === '[DONE]') {
+          return;
+        }
 
       let chunk: DeepSeekStreamChunk;
       try {
@@ -192,6 +193,16 @@ export class DeepSeekProvider extends BaseLLMProvider {
         finishReason = choice.finish_reason ?? finishReason;
       }
     });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw err;
+      }
+      throw new ProviderRequestError({
+        provider: this.name,
+        message: `Stream interrupted: ${err instanceof Error ? err.message : String(err)}`,
+        retriable: true,
+      });
+    }
 
     const normalizedUsage = normalizeDeepSeekUsage(usage);
 

@@ -13,12 +13,74 @@ import {
   RequestBuilder,
 } from '../packages/@codepapr/api/src/index';
 import type { IMessage } from '../packages/@codepapr/types/src/index';
-import {
-  listWorkspaceFiles,
-  readWorkspaceFile,
-  runWorkspaceCommand,
-} from '../packages/@codepapr/cli/src/tools/workspaceFs';
-import { runProjectDiagnostics } from '../packages/@codepapr/cli/src/tools/projectDiagnostics';
+import { runProjectDiagnostics } from '../packages/@codepapr/core/src/tool/workspace/diagnostics';
+
+interface SmokeListEntry { path: string; name: string; isDir: boolean; bytes: number }
+interface SmokeProjectDiagEntry { path: string; name: string; isDir: boolean; bytes: number }
+interface SmokeReadFileResult { path: string; content: string; bytes: number; startLine: number; endLine: number; totalLines: number; truncatedByRange: boolean; truncatedByBytes: boolean }
+interface SmokeCmdResult { command: string; args: string[]; status: number | null; stdout: string; stderr: string; timedOut: boolean }
+
+async function smokeListWorkspaceFiles(workspacePath: string, relativePath?: string, maxDepth?: number): Promise<{ root: string; entries: SmokeListEntry[]; truncated: boolean }> {
+  const maxD = Math.min(6, Math.max(1, maxDepth ?? 2));
+  const root = relativePath ? path.join(workspacePath, relativePath) : workspacePath;
+  const entries: SmokeListEntry[] = [];
+  const collect = async (current: string, depth: number): Promise<boolean> => {
+    if (depth > maxD) return false;
+    const children = await fsp.readdir(current, { withFileTypes: true });
+    children.sort((a, b) => a.name.localeCompare(b.name));
+    let truncated = false;
+    for (const child of children) {
+      if (child.name === 'node_modules' || child.name === '.git') continue;
+      const childPath = path.join(current, child.name);
+      const stat = await fsp.stat(childPath);
+      entries.push({ path: path.relative(workspacePath, childPath).replace(/\\/g, '/'), name: child.name, isDir: child.isDirectory(), bytes: child.isDirectory() ? 0 : stat.size });
+      if (child.isDirectory() && depth < maxD) truncated = (await collect(childPath, depth + 1)) || truncated;
+    }
+    return truncated;
+  };
+  const truncated = await collect(root, 0);
+  return { root: relativePath || '.', entries, truncated };
+}
+
+async function smokeReadWorkspaceFile(workspacePath: string, relativePath: string, maxBytes: number): Promise<SmokeReadFileResult> {
+  const [parsedPath, lineColumn] = parsePathWithAnchor(relativePath);
+  const fullPath = parsedPath ? path.join(workspacePath, parsedPath) : path.join(workspacePath, relativePath);
+  const content = await fsp.readFile(fullPath, 'utf8');
+  const totalLines = content.split('\n').length;
+  const sliced = content.slice(0, maxBytes);
+  return {
+    path: path.relative(workspacePath, fullPath).replace(/\\/g, '/'),
+    content: sliced,
+    bytes: Math.min(Buffer.byteLength(content, 'utf8'), maxBytes),
+    startLine: 1, endLine: totalLines, totalLines,
+    truncatedByRange: false, truncatedByBytes: Buffer.byteLength(content, 'utf8') > maxBytes,
+    ...(lineColumn ? { locationLine: lineColumn.line, locationColumn: lineColumn.column } : {}),
+  };
+}
+
+function parsePathWithAnchor(input: string): [string, { line?: number; column?: number } | null] {
+  const hashIdx = input.lastIndexOf('#');
+  if (hashIdx > 0) {
+    const frag = input.slice(hashIdx + 1);
+    const m = frag.match(/^L(\d+)(?:C(\d+))?/i);
+    if (m) return [input.slice(0, hashIdx), { line: Number(m[1]), column: m[2] ? Number(m[2]) : undefined }];
+  }
+  const colon = input.match(/^(.*?):(\d+)(?::(\d+))?$/);
+  if (colon?.[1]) return [colon[1], { line: Number(colon[2]), column: colon[3] ? Number(colon[3]) : undefined }];
+  return [input, null];
+}
+
+async function smokeRunWorkspaceCommand(workspacePath: string, command: string, args: string[], timeoutSeconds: number): Promise<SmokeCmdResult> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { cwd: workspacePath, stdio: 'pipe', env: process.env });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (c: Buffer) => { stdout += c.toString(); });
+    child.stderr.on('data', (c: Buffer) => { stderr += c.toString(); });
+    const timer = setTimeout(() => { child.kill(); resolve({ command, args, status: null, stdout, stderr, timedOut: true }); }, timeoutSeconds * 1000);
+    child.on('close', (code) => { clearTimeout(timer); resolve({ command, args, status: code, stdout, stderr, timedOut: false }); });
+    child.on('error', (err) => { clearTimeout(timer); resolve({ command, args, status: -1, stdout: '', stderr: err.message, timedOut: false }); });
+  });
+}
 
 interface AppSettings {
   apiMode?: 'deepseek' | 'custom';
@@ -312,7 +374,7 @@ function createToolRegistry(workspacePath: string): {
         throw new Error('relativePath 不能为空');
       }
       const maxBytes = Number.isFinite(args.maxBytes) ? Number(args.maxBytes) : 50_000;
-      return await readWorkspaceFile(workspacePath, relativePath, maxBytes);
+      return await smokeReadWorkspaceFile(workspacePath, relativePath, maxBytes);
     }
   );
 
@@ -335,7 +397,7 @@ function createToolRegistry(workspacePath: string): {
       const command = String(args.command ?? '').trim();
       const commandArgs = Array.isArray(args.args) ? args.args.map((item) => String(item)) : [];
       const timeoutSeconds = Number.isFinite(args.timeoutSeconds) ? Number(args.timeoutSeconds) : 20;
-      return await runWorkspaceCommand(workspacePath, command, commandArgs, timeoutSeconds);
+      return await smokeRunWorkspaceCommand(workspacePath, command, commandArgs, timeoutSeconds);
     }
   );
 
@@ -350,34 +412,27 @@ function createToolRegistry(workspacePath: string): {
       },
     },
     async () => {
-      return await runProjectDiagnostics(workspacePath, async (command, args) => {
-        if (command === 'list_workspace_files') {
-          return await listWorkspaceFiles(
-            workspacePath,
-            typeof args?.relativePath === 'string' ? args.relativePath : undefined,
-            Number.isFinite(args?.maxDepth) ? Number(args.maxDepth) : 2
-          );
-        }
-
-        if (command === 'read_text_file') {
-          return await readWorkspaceFile(
-            workspacePath,
-            String(args?.relativePath ?? ''),
-            Number.isFinite(args?.maxBytes) ? Number(args.maxBytes) : 300_000
-          );
-        }
-
-        if (command === 'run_workspace_command') {
-          return await runWorkspaceCommand(
-            workspacePath,
-            String(args?.command ?? ''),
-            Array.isArray(args?.args) ? args.args.map((item) => String(item)) : [],
-            Number.isFinite(args?.timeoutSeconds) ? Number(args.timeoutSeconds) : 30
-          );
-        }
-
-        throw new Error(`unexpected diagnostics command: ${command}`);
-      });
+      return await runProjectDiagnostics(
+        {
+          workspacePath,
+          async listFiles(options) {
+            const result = await smokeListWorkspaceFiles(workspacePath, options.relativePath, options.maxDepth);
+            return { root: result.root, entries: result.entries as SmokeProjectDiagEntry[], truncated: result.truncated };
+          },
+          async readTextFile(options) {
+            const result = await smokeReadWorkspaceFile(workspacePath, options.relativePath, options.maxBytes ?? 300_000);
+            return { path: result.path, content: result.content, bytes: result.bytes };
+          },
+          async runCommand(options) {
+            return await smokeRunWorkspaceCommand(
+              workspacePath,
+              options.command,
+              options.args ?? [],
+              options.timeoutSeconds ?? 30
+            );
+          },
+        },
+      );
     }
   );
 

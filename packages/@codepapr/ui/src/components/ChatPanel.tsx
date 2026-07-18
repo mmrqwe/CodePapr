@@ -33,7 +33,6 @@ import {
   type DecisionOptionItem,
 } from '../utils/planMode';
 import {
-  getChatAutoScrollBehavior,
   isScrollContainerNearBottom,
   scrollContainerToBottom,
 } from '../utils/chatScroll';
@@ -453,7 +452,52 @@ function buildDiffCards(tool: UIToolInvocation): ReactNode {
   );
 }
 
-function ToolInvocationsPanel({ msg, lang }: { msg: UIMessage; lang: 'zh-CN' | 'zh-TW' | 'en' }) {
+function extractToolPath(args: Record<string, unknown>): string {
+  return (
+    (typeof args.relativePath === 'string' ? (args.relativePath as string) : '') ||
+    (typeof args.path === 'string' ? (args.path as string) : '') ||
+    (typeof args.filePath === 'string' ? (args.filePath as string) : '')
+  );
+}
+
+function ToolPathLink({
+  summary,
+  args,
+  onOpenWorkspacePath,
+}: {
+  summary: string;
+  args: Record<string, unknown>;
+  onOpenWorkspacePath?: (path: string) => void;
+}) {
+  const path = extractToolPath(args);
+  if (!path || !onOpenWorkspacePath) {
+    return <span className="flex-1 leading-snug text-slate-300">{summary}</span>;
+  }
+
+  const idx = summary.indexOf(path);
+  if (idx === -1) {
+    return <span className="flex-1 leading-snug text-slate-300">{summary}</span>;
+  }
+
+  const before = summary.slice(0, idx);
+  const after = summary.slice(idx + path.length);
+
+  return (
+    <span className="flex-1 leading-snug text-slate-300">
+      {before}
+      <button
+        type="button"
+        onClick={() => onOpenWorkspacePath(path)}
+        className="text-sky-300 underline decoration-sky-500/40 underline-offset-2 hover:text-sky-200"
+      >
+        {path}
+      </button>
+      {after}
+    </span>
+  );
+}
+
+function ToolInvocationsPanel({ msg, lang, onOpenWorkspacePath }: { msg: UIMessage; lang: 'zh-CN' | 'zh-TW' | 'en'; onOpenWorkspacePath?: (path: string) => void }) {
   const t = getTranslation(lang);
   const bordered = useAgentStore((state) => state.settings.chatBordersEnabled);
   const toolInvocations = msg.toolInvocations ?? [];
@@ -510,6 +554,9 @@ function ToolInvocationsPanel({ msg, lang }: { msg: UIMessage; lang: 'zh-CN' | '
             const isFailed = tool.status === 'error';
             const summary = getToolInvocationSummary(tool);
             const diffCards = buildDiffCards(tool);
+            const args = tool.arguments ?? {};
+            const toolPath =
+              extractToolPath(args) && onOpenWorkspacePath ? summary : null;
 
             return (
               <div key={tool.id} className="px-3.5 py-2 text-[11px] text-slate-300">
@@ -517,7 +564,15 @@ function ToolInvocationsPanel({ msg, lang }: { msg: UIMessage; lang: 'zh-CN' | '
                   <span className={`mt-0.5 h-1.5 w-1.5 flex-shrink-0 rounded-full ${
                     isRunning ? 'bg-amber-400 animate-pulse' : isFailed ? 'bg-red-400' : 'bg-emerald-400'
                   }`} />
-                  <span className="flex-1 leading-snug text-slate-300">{summary}</span>
+                  {toolPath ? (
+                    <ToolPathLink
+                      summary={toolPath}
+                      args={args}
+                      onOpenWorkspacePath={onOpenWorkspacePath}
+                    />
+                  ) : (
+                    <span className="flex-1 leading-snug text-slate-300">{summary}</span>
+                  )}
                   <span className={`flex-shrink-0 text-[10px] ${
                     isRunning ? 'text-amber-400' : isFailed ? 'text-red-400' : 'text-emerald-500'
                   }`}>
@@ -581,6 +636,7 @@ function ReasoningPanel({
   const bordered = useAgentStore((state) => state.settings.chatBordersEnabled);
   const [isOpen, setIsOpen] = useState(Boolean(isStreaming));
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const reasoningContentRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const visibleContent = isStreaming
     ? getStreamingPreviewContent(content, MAX_STREAMING_REASONING_CHARS)
@@ -599,15 +655,25 @@ function ReasoningPanel({
   }, [isStreaming]);
 
   useLayoutEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container || !isOpen) {
-      return;
-    }
+    if (!isOpen) return;
 
-    if (shouldStickToBottomRef.current) {
+    shouldStickToBottomRef.current = true;
+    scrollContainerToBottom(scrollContainerRef.current!, 'auto');
+  }, [isOpen]);
+
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    const content = reasoningContentRef.current;
+    if (!container || !content || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(() => {
+      if (!shouldStickToBottomRef.current) return;
       scrollContainerToBottom(container, 'auto');
-    }
-  }, [isOpen, isStreaming, visibleContent.length]);
+    });
+
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <div
@@ -646,7 +712,7 @@ function ReasoningPanel({
           }`}
           style={{ overflowAnchor: 'none' }}
         >
-          <p className="whitespace-pre-wrap text-slate-300/90 select-text">{visibleContent}</p>
+          <p ref={reasoningContentRef} className="whitespace-pre-wrap text-slate-300/90 select-text">{visibleContent}</p>
         </div>
       )}
     </div>
@@ -1143,7 +1209,7 @@ const MessageBubble = memo(function MessageBubble({
             lang={lang}
           />
         )}
-        <ToolInvocationsPanel msg={msg} lang={lang} />
+        <ToolInvocationsPanel msg={msg} lang={lang} onOpenWorkspacePath={onOpenWorkspacePath} />
         <RelatedFileLinks paths={msg.relatedFilePaths ?? []} onOpenWorkspacePath={onOpenWorkspacePath} />
         {showRunningStatusIndicator && msg.statusText && (
           <RunningStatusIndicator label={msg.statusText} />
@@ -1326,6 +1392,8 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
   const messageListContentRef = useRef<HTMLDivElement | null>(null);
   const lastVisibleMessageIdRef = useRef<string | null>(null);
   const shouldStickToBottomRef = useRef(true);
+  const hasStreamingMessageRef = useRef(false);
+  const isProgrammaticScrollRef = useRef(false);
   const isComposingRef = useRef(false);
 
   useLayoutEffect(() => {
@@ -1351,6 +1419,7 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
     ),
     [visibleMessages]
   );
+  hasStreamingMessageRef.current = hasStreamingMessage;
   const tailMessageId = useMemo(
     () => visibleMessages[visibleMessages.length - 1]?.id ?? null,
     [visibleMessages]
@@ -1360,18 +1429,6 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
       (message) => message.role === 'assistant' && message.isStreaming
     ),
     [visibleMessages]
-  );
-  const streamingUpdateKey = useMemo(
-    () => streamingMessage
-      ? [
-          streamingMessage.id,
-          streamingMessage.content.length,
-          (streamingMessage.displayReasoningContent ?? streamingMessage.reasoningContent ?? '').length,
-          streamingMessage.toolInvocations?.length ?? 0,
-          streamingMessage.statusText ?? '',
-        ].join(':')
-      : '',
-    [streamingMessage]
   );
   const t = getTranslation(settings.lang);
   const { feedStream: ttsFeedStream, stop: ttsStop, isPlaying: ttsIsPlaying, lastError: ttsError, clearError: ttsClearError, serverStatus: ttsServerStatus, serverModelVersion: ttsServerModelVersion, serverHalfPrecision: ttsServerHalfPrecision, serverDevice: ttsServerDevice, installed: ttsInstalled, refreshInstalled: ttsRefreshInstalled, startServer: ttsStartServer, replayText: ttsReplayText, setVoiceConfig: ttsSetVoiceConfig, setTextLanguage: ttsSetTextLanguage, setVoiceModel: ttsSetVoiceModel, setFineTunedModel: ttsSetFineTunedModel, preloadModel: ttsPreloadModel, setPlaybackMode: ttsSetPlaybackMode, setSampleSteps: ttsSetSampleSteps, setSpeed: ttsSetSpeed, setSentencesPerChunk: ttsSetSentencesPerChunk, serverLog: ttsServerLog, clearServerLog: ttsClearServerLog } = useTtsPlayer();
@@ -1594,24 +1651,8 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
   }, [visibleMessages, tailExecutionProcessGroup]);
 
   useLayoutEffect(() => {
-    const container = messageListRef.current;
-    if (!container) {
-      lastVisibleMessageIdRef.current = tailMessageId;
-      return;
-    }
-
-    const behavior = getChatAutoScrollBehavior({
-      previousTailMessageId: lastVisibleMessageIdRef.current,
-      nextTailMessageId: tailMessageId,
-      hasStreamingMessage,
-    });
-
-    if (shouldStickToBottomRef.current || lastVisibleMessageIdRef.current === null) {
-      scrollContainerToBottom(container, behavior);
-    }
-
     lastVisibleMessageIdRef.current = tailMessageId;
-  }, [tailMessageId, hasStreamingMessage, streamingUpdateKey]);
+  }, [tailMessageId]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -1627,28 +1668,40 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
       return;
     }
 
+    let rafId = 0;
+
     const observer = new ResizeObserver(() => {
-      const container = messageListRef.current;
-      if (!container) return;
+      const currentContainer = messageListRef.current;
+      if (!currentContainer) return;
+
+      cancelAnimationFrame(rafId);
 
       if (shouldStickToBottomRef.current) {
-        scrollContainerToBottom(container, hasStreamingMessage ? 'auto' : 'smooth');
+        isProgrammaticScrollRef.current = true;
+        rafId = requestAnimationFrame(() => {
+          rafId = 0;
+          scrollContainerToBottom(currentContainer, hasStreamingMessageRef.current ? 'auto' : 'smooth');
+        });
         return;
       }
 
-      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-      requestAnimationFrame(() => {
-        if (!container.isConnected) return;
-        const targetScrollTop = container.scrollHeight - distanceFromBottom - container.clientHeight;
-        if (Math.abs(targetScrollTop - container.scrollTop) > 1) {
-          container.scrollTop = targetScrollTop;
+      const distanceFromBottom = currentContainer.scrollHeight - currentContainer.scrollTop - currentContainer.clientHeight;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        if (!currentContainer.isConnected) return;
+        const targetScrollTop = currentContainer.scrollHeight - distanceFromBottom - currentContainer.clientHeight;
+        if (Math.abs(targetScrollTop - currentContainer.scrollTop) > 1) {
+          currentContainer.scrollTop = targetScrollTop;
         }
       });
     });
 
     observer.observe(content);
-    return () => observer.disconnect();
-  }, [hasStreamingMessage]);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(rafId);
+    };
+  }, []);
 
   const submitMessage = useCallback(async (
     taskText: string,
@@ -1968,7 +2021,12 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
         ref={messageListRef}
         data-chat-scroll="true"
         onScroll={(event) => {
-          shouldStickToBottomRef.current = isScrollContainerNearBottom(event.currentTarget);
+          if (!isProgrammaticScrollRef.current) {
+            shouldStickToBottomRef.current = isScrollContainerNearBottom(event.currentTarget);
+          }
+          if (isScrollContainerNearBottom(event.currentTarget)) {
+            isProgrammaticScrollRef.current = false;
+          }
         }}
         className="h-full overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable px-4 py-4"
         style={{ overflowAnchor: 'none' }}

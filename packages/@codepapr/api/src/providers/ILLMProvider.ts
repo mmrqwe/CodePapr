@@ -177,6 +177,17 @@ export abstract class BaseLLMProvider implements ILLMProvider {
     }
 
     log.error(`${this.name} request exhausted retries`, lastError);
-    throw lastError ?? new Error('Unknown fetch error');
+
+    if (lastError instanceof ProviderRequestError) {
+      throw lastError;
+    }
+    if (lastError instanceof DOMException && lastError.name === 'AbortError') {
+      throw lastError;
+    }
+    throw new ProviderRequestError({
+      provider: this.name,
+      message: `Network error after ${maxRetries} attempts: ${lastError?.message ?? 'unknown'}`,
+      retriable: false,
+    });
   }
 }

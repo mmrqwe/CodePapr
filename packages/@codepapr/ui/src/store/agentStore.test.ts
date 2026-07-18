@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IChatStreamEvent, IMessage } from '@codepapr/types';
-import type { ProjectStateSnapshot } from '../utils/projectStorage';
+import type { ProjectStateSnapshot, ProjectSessionMeta, ProjectMessage } from '../utils/projectStorage';
 import type { Settings } from './agentStore';
 import { createMockAgent } from './__test-utils__/createMockAgent';
 
@@ -18,7 +18,7 @@ const { invokeMock } = vi.hoisted(() => ({
   }),
 }));
 
-const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMock } = vi.hoisted(() => ({
+const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMock, saveProjectStateDirectMock, loadSessionsMock, loadSessionMessagesMock, loadAllProjectMetaMock, saveSessionMock, saveMessageBatchMock, deleteSessionByIdMock, saveProjectMetaMock, enqueueProjectStateSaveMock } = vi.hoisted(() => ({
   loadProjectStateMock: vi.fn(async (): Promise<ProjectStateSnapshot> => ({
     version: 1,
     sessions: [],
@@ -34,6 +34,15 @@ const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMoc
   })),
   saveProjectStateMock: vi.fn(async () => undefined),
   saveProjectStateWithPurgeMock: vi.fn(async () => undefined),
+  saveProjectStateDirectMock: vi.fn(async () => undefined),
+  loadSessionsMock: vi.fn(async (): Promise<ProjectSessionMeta[]> => []),
+  loadSessionMessagesMock: vi.fn(async (): Promise<ProjectMessage[]> => []),
+  loadAllProjectMetaMock: vi.fn(async () => ({})),
+  saveSessionMock: vi.fn(async () => undefined),
+  saveMessageBatchMock: vi.fn(async () => undefined),
+  deleteSessionByIdMock: vi.fn(async () => undefined),
+  saveProjectMetaMock: vi.fn(async () => undefined),
+  enqueueProjectStateSaveMock: vi.fn(async (_path: string, writer: () => Promise<void>) => { await writer(); }),
 }));
 
 const { loadAppSettingsMock, saveAppSettingsMock } = vi.hoisted(() => ({
@@ -62,6 +71,15 @@ vi.mock('../utils/projectStorage', () => ({
   loadProjectState: loadProjectStateMock,
   saveProjectState: saveProjectStateMock,
   saveProjectStateWithPurge: saveProjectStateWithPurgeMock,
+  saveProjectStateDirect: saveProjectStateDirectMock,
+  loadSessions: loadSessionsMock,
+  loadSessionMessages: loadSessionMessagesMock,
+  loadAllProjectMeta: loadAllProjectMetaMock,
+  saveSession: saveSessionMock,
+  saveMessageBatch: saveMessageBatchMock,
+  deleteSessionById: deleteSessionByIdMock,
+  saveProjectMeta: saveProjectMetaMock,
+  enqueueProjectStateSave: enqueueProjectStateSaveMock,
 }));
 
 vi.mock('../utils/appSettingsStorage', () => ({
@@ -198,6 +216,7 @@ describe('useAgentStore.sendMessage', () => {
     loadProjectStateMock.mockClear();
     saveProjectStateMock.mockClear();
     saveProjectStateWithPurgeMock.mockClear();
+    saveProjectStateDirectMock.mockClear();
     loadAppSettingsMock.mockClear();
     saveAppSettingsMock.mockClear();
     invokeMock.mockImplementation(async (command: string) => {
@@ -226,11 +245,12 @@ describe('useAgentStore.sendMessage', () => {
     useAgentStore.getState().setProjectDiagnosticsReport(report);
 
     expect(useAgentStore.getState().projectDiagnosticsReport).toEqual(report);
-    expect(saveProjectStateMock).toHaveBeenCalledWith(
+    expect(saveProjectStateDirectMock).toHaveBeenCalledWith(
       '/tmp/codepapr-test',
       expect.objectContaining({
         projectDiagnosticsReport: report,
-      })
+      }),
+      expect.anything()
     );
   });
 
@@ -239,40 +259,36 @@ describe('useAgentStore.sendMessage', () => {
       apiKey: 'sk-restored',
       recentWorkspaces: [{ path: '/tmp/restored-workspace', name: 'restored-workspace', lastOpenedAt: 1, pinned: false }],
     });
-    loadProjectStateMock.mockResolvedValueOnce({
-      version: 1,
-      sessions: [
-        {
-          id: 'session-restored',
-          name: '恢复会话',
-          provider: 'deepseek',
-          model: 'deepseek-v4-pro',
-          createdAt: 1,
-        },
-      ],
-      activeSessionId: 'session-restored',
-      sessionMessages: {
-        'session-restored': [
-          {
-            id: 'message-1',
-            role: 'user',
-            content: '之前的聊天',
-            timestamp: 1,
-          },
-        ],
+    loadSessionsMock.mockResolvedValueOnce([
+      {
+        id: 'session-restored',
+        name: '恢复会话',
+        provider: 'deepseek',
+        model: 'deepseek-v4-pro',
+        createdAt: 1,
       },
-      conversationStats: createEmptyConversation(),
-      sessionConversationStats: {
+    ]);
+    loadSessionMessagesMock.mockResolvedValueOnce([
+      {
+        id: 'message-1',
+        role: 'user',
+        content: '之前的聊天',
+        timestamp: 1,
+      },
+    ]);
+    loadAllProjectMetaMock.mockResolvedValueOnce({
+      active_session_id: 'session-restored',
+      conversation_stats: createEmptyConversation(),
+      session_conversation_stats: {
         'session-restored': createEmptyConversation(),
       },
-      projectDiagnosticsReport: null,
-        updatedAt: Date.now(),
+      project_diagnostics_report: null,
     });
 
     await useAgentStore.getState().loadSettings();
 
     const state = useAgentStore.getState();
-    expect(loadProjectStateMock).toHaveBeenCalledWith('/tmp/restored-workspace');
+    expect(loadSessionsMock).toHaveBeenCalledWith('/tmp/restored-workspace');
     expect(state.workspacePath).toBe('/tmp/restored-workspace');
     expect(state.activeSessionId).toBe('session-restored');
     expect(state.sessions[0]?.id).toBe('session-restored');
@@ -393,14 +409,15 @@ describe('useAgentStore.sendMessage', () => {
         rounds: 0,
       },
     });
-    expect(saveProjectStateMock).toHaveBeenLastCalledWith(
+    expect(saveProjectStateDirectMock).toHaveBeenLastCalledWith(
       '/tmp/codepapr-test',
       expect.objectContaining({
         sessionConversationStats: expect.objectContaining({
           'session-1': expect.objectContaining({ primary: expect.objectContaining({ totalCacheRead: 100 }) }),
           'session-2': expect.objectContaining({ primary: expect.objectContaining({ totalCacheRead: 7 }) }),
         }),
-      })
+      }),
+      expect.anything()
     );
 
     useAgentStore.getState().selectSession('session-1');
@@ -473,7 +490,7 @@ describe('useAgentStore.sendMessage', () => {
         timestamp: 1,
       },
     ]);
-    expect(saveProjectStateMock).toHaveBeenLastCalledWith(
+    expect(saveProjectStateDirectMock).toHaveBeenLastCalledWith(
       '/tmp/codepapr-test',
       expect.objectContaining({
         sessionMessages: expect.objectContaining({
@@ -483,7 +500,8 @@ describe('useAgentStore.sendMessage', () => {
             }),
           ]),
         }),
-      })
+      }),
+      expect.anything()
     );
   });
 
@@ -501,18 +519,14 @@ describe('useAgentStore.sendMessage', () => {
   });
 
   it('applies sqlite-backed skill enablement when loading project config', async () => {
-    loadProjectStateMock.mockResolvedValueOnce({
-      version: 1,
-      sessions: [],
-      activeSessionId: null,
-      sessionMessages: {},
-      skillEnabledById: {
+    loadAllProjectMetaMock.mockResolvedValueOnce({
+      active_session_id: null,
+      skill_enabled_by_id: {
         search: false,
       },
-      conversationStats: createEmptyConversation(),
-      sessionConversationStats: {},
-      projectDiagnosticsReport: null,
-        updatedAt: Date.now(),
+      conversation_stats: createEmptyConversation(),
+      session_conversation_stats: {},
+      project_diagnostics_report: null,
     });
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       if (command === 'list_workspace_files') {
@@ -722,12 +736,13 @@ describe('useAgentStore.sendMessage', () => {
 
     useAgentStore.getState().deleteSession('session-1');
 
-    expect(saveProjectStateWithPurgeMock).toHaveBeenCalledWith(
+    expect(saveProjectStateDirectMock).toHaveBeenCalledWith(
       '/tmp/codepapr-test',
       expect.objectContaining({
         sessions: [],
         sessionMessages: {},
-      })
+      }),
+      expect.objectContaining({ purgeDeletedContent: true })
     );
     expect(useAgentStore.getState().sessions).toEqual([]);
   });
@@ -761,13 +776,14 @@ describe('useAgentStore.sendMessage', () => {
 
     useAgentStore.getState().clearMessages();
 
-    expect(saveProjectStateWithPurgeMock).toHaveBeenCalledWith(
+    expect(saveProjectStateDirectMock).toHaveBeenCalledWith(
       '/tmp/codepapr-test',
       expect.objectContaining({
         sessionMessages: {
           'session-1': [],
         },
-                                                          })
+      }),
+      expect.objectContaining({ purgeDeletedContent: true })
     );
     expect(useAgentStore.getState().messages).toEqual([]);
     expect(useAgentStore.getState()._agent).toBeNull();

@@ -38,6 +38,11 @@ export function scrollContainerToBottom(
   container: ScrollContainerLike,
   behavior: ScrollBehavior
 ): void {
+  if (behavior === 'auto') {
+    container.scrollTop = container.scrollHeight;
+    return;
+  }
+
   if (typeof container.scrollTo === 'function') {
     container.scrollTo({ top: container.scrollHeight, behavior });
     return;

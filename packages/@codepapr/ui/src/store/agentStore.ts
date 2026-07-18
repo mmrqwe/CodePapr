@@ -29,6 +29,11 @@ import type {
 import { CacheValidator, RequestBuilder } from '@codepapr/api';
 import { createId } from '../utils/createId';
 import { loadProjectState } from '../utils/projectStorage';
+import {
+  loadSessions,
+  loadSessionMessages,
+  loadAllProjectMeta,
+} from '../utils/projectStorage';
 import { runProjectDiagnostics } from '../utils/projectDiagnostics';
 import { loadAppSettings, saveAppSettings } from '../utils/appSettingsStorage';
 import {
@@ -57,6 +62,7 @@ import {
   accumulateCacheStats,
   buildExecutionContextSummary,
   collectExecutedTools,
+  type ExecutedToolSummary,
 } from '../utils/agentExecution';
 import { restoreTodoListContexts } from '../tools/todoListTool';
 import { loadMcpToolDefinitions } from '../tools/mcpTools';
@@ -124,6 +130,7 @@ import type {
   ResetToMessageResult,
   SessionMeta,
   UIMessage,
+  UIToolInvocation,
   WorkspaceEntry,
 } from './internals/types';
 
@@ -181,6 +188,42 @@ function sortRecentWorkspaces(recent: WorkspaceEntry[]): WorkspaceEntry[] {
   const unpinned = recent.filter((e) => !e.pinned);
   unpinned.sort((a, b) => b.lastOpenedAt - a.lastOpenedAt);
   return [...pinned, ...unpinned];
+}
+
+function extractFilePathsFromToolInvocations(
+  invocations: readonly UIToolInvocation[] = [],
+): string[] {
+  const paths = new Set<string>();
+  for (const tool of invocations) {
+    const args = tool.arguments ?? {};
+    const path = extractFilePathFromArgs(args);
+    if (path) {
+      paths.add(path);
+    }
+  }
+  return Array.from(paths);
+}
+
+function extractFilePathsFromExecutedTools(
+  tools: readonly ExecutedToolSummary[] = [],
+): string[] {
+  const paths = new Set<string>();
+  for (const tool of tools) {
+    const args = tool.arguments ?? {};
+    const path = extractFilePathFromArgs(args);
+    if (path) {
+      paths.add(path);
+    }
+  }
+  return Array.from(paths);
+}
+
+function extractFilePathFromArgs(args: Record<string, unknown>): string {
+  return (
+    (typeof args.relativePath === 'string' ? (args.relativePath as string) : '') ||
+    (typeof args.path === 'string' ? (args.path as string) : '') ||
+    (typeof args.filePath === 'string' ? (args.filePath as string) : '')
+  );
 }
 
 export const useAgentStore = create<AgentState & AgentActions>()((set, get) => ({
@@ -301,26 +344,95 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       openWorkspace: async (path) => {
-        const snapshot = normalizeProjectSnapshot(await loadProjectState(path), {
-          debugEnabled: get().settings.debugEnabled,
-        });
+        const normalizedWorkspacePath = path.trim();
+
+        let sessions: SessionMeta[] = [];
+        let sessionMessages: Record<string, UIMessage[]> = {};
+        let activeSessionId: string | null = null;
+        let skillEnabledById: Record<string, boolean> = {};
+        let conversationStats = createEmptyConversationStats();
+        let sessionConversationStats: Record<string, unknown> = {};
+        let projectDiagnosticsReport: unknown = null;
+        let messageCheckpoints: Record<string, string> = {};
+        let sessionTodoLists: Record<string, unknown> = {};
+
+        try {
+          sessions = (await loadSessions(normalizedWorkspacePath)).map((meta) => ({
+            ...meta,
+            createdAt: meta.createdAt,
+          })) as unknown as SessionMeta[];
+
+          for (const s of sessions) {
+            try {
+              const msgs = await loadSessionMessages(normalizedWorkspacePath, s.id);
+              sessionMessages[s.id] = msgs as unknown as UIMessage[];
+            } catch {
+              sessionMessages[s.id] = [];
+            }
+          }
+
+          const meta = await loadAllProjectMeta(normalizedWorkspacePath);
+          const rawActiveSessionId = (meta.active_session_id as string) ?? null;
+          activeSessionId = rawActiveSessionId && sessions.some(s => s.id === rawActiveSessionId)
+            ? rawActiveSessionId
+            : null;
+          skillEnabledById = (meta.skill_enabled_by_id as Record<string, boolean>) ?? {};
+          const rawStats = meta.conversation_stats as { primary?: unknown; fast?: unknown } | null;
+          conversationStats = rawStats && rawStats.primary && rawStats.fast
+            ? rawStats as typeof conversationStats
+            : createEmptyConversationStats();
+          const rawSessionStats = meta.session_conversation_stats as Record<string, unknown> | null;
+          sessionConversationStats = rawSessionStats ?? {};
+          projectDiagnosticsReport = meta.project_diagnostics_report ?? null;
+          messageCheckpoints = (meta.message_checkpoints as Record<string, string>) ?? {};
+          sessionTodoLists = (meta.session_todo_lists as Record<string, unknown>) ?? {};
+
+          // 安全兜底：如果新表完全无数据（sessions 和 meta 都空），回退到旧格式
+          if (sessions.length === 0 && Object.keys(meta).length === 0) {
+            throw new Error('新表无数据，尝试旧格式');
+          }
+        } catch (metaErr) {
+          console.warn('[CodePapr] 从新表加载失败，回退到旧格式:', metaErr);
+          const snapshot = normalizeProjectSnapshot(await loadProjectState(normalizedWorkspacePath), {
+            debugEnabled: get().settings.debugEnabled,
+          });
+          sessions = snapshot.sessions as SessionMeta[];
+          sessionMessages = snapshot.sessionMessages as Record<string, UIMessage[]>;
+          activeSessionId = snapshot.activeSessionId;
+          skillEnabledById = normalizeSkillEnabledState(snapshot.skillEnabledById);
+          conversationStats = snapshot.activeSessionId
+            ? getSessionConversationStats(snapshot.sessionConversationStats ?? {}, snapshot.activeSessionId)
+            : createEmptyConversationStats();
+          sessionConversationStats = snapshot.sessionConversationStats ?? {};
+          projectDiagnosticsReport = snapshot.projectDiagnosticsReport;
+          messageCheckpoints = snapshot.messageCheckpoints ?? {};
+          sessionTodoLists = snapshot.sessionTodoLists ?? {};
+        }
+
+        const messages = activeSessionId
+          ? (sessionMessages[activeSessionId] ?? [])
+          : [];
+
+        const finalConversationStats = activeSessionId
+          ? getSessionConversationStats(
+              sessionConversationStats as Record<string, import('./internals/types').ConversationStats>,
+              activeSessionId
+            )
+          : conversationStats;
+
         set({
           workspacePath: path,
           workspaceMutationVersion: 0,
           projectGraphLoading: false,
           projectGraphPhase: null,
-          sessions: snapshot.sessions as SessionMeta[],
-          activeSessionId: snapshot.activeSessionId,
-          messages: snapshot.activeSessionId
-            ? (snapshot.sessionMessages[snapshot.activeSessionId] as UIMessage[] | undefined) ?? []
-            : [],
-          sessionMessages: snapshot.sessionMessages as Record<string, UIMessage[]>,
-          skillEnabledById: normalizeSkillEnabledState(snapshot.skillEnabledById),
-          conversationStats: snapshot.activeSessionId
-            ? getSessionConversationStats(snapshot.sessionConversationStats ?? {}, snapshot.activeSessionId)
-            : createEmptyConversationStats(),
-          sessionConversationStats: snapshot.sessionConversationStats ?? {},
-          projectDiagnosticsReport: snapshot.projectDiagnosticsReport,
+          sessions,
+          activeSessionId,
+          messages,
+          sessionMessages,
+          skillEnabledById,
+          conversationStats: finalConversationStats,
+          sessionConversationStats: sessionConversationStats as Record<string, import('./internals/types').ConversationStats>,
+          projectDiagnosticsReport: projectDiagnosticsReport as import('../utils/projectDiagnostics').ProjectDiagnosticsReport | null,
           _agent: null,
           _agentModel: null,
           _agentPromptKey: null,
@@ -328,26 +440,28 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _projectRulesSection: '',
           _skillDefinitions: [],
           _agentDefinitions: [...BUILTIN_AGENTS],
-      _taskChecklists: {},
-      _messageCheckpoints: { ...(snapshot.messageCheckpoints ?? {}) },
-      _gitReady: false,
-      _gitReadyError: null,
-      _checkpointSeq: 0,
+          _taskChecklists: {},
+          _messageCheckpoints: { ...messageCheckpoints },
+          _gitReady: false,
+          _gitReadyError: null,
+          _checkpointSeq: 0,
         });
 
-        // 恢复持久化的 TodoList 上下文
-        if (snapshot.sessionTodoLists) {
-          restoreTodoListContexts(snapshot.sessionTodoLists as Record<string, unknown> as Record<string, import('@codepapr/types').TodoListContext>);
+        if (sessionTodoLists && Object.keys(sessionTodoLists).length > 0) {
+          restoreTodoListContexts(sessionTodoLists as Record<string, import('@codepapr/types').TodoListContext>);
         }
 
-        saveCurrentProjectState(get());
+        // 仅当确实加载到会话时才回写，避免用空状态覆盖磁盘上的历史数据
+        // （加载失败/数据库为空等场景下不应触发回写）
+        if (sessions.length > 0) {
+          saveCurrentProjectState(get());
+        }
         await get()._loadProjectConfig(path);
         void get()._ensureWorkspaceGitReady(path);
 
-        const normalizedPath = path.trim();
         const currentSettings = get().settings;
-        if (get().settingsLoaded && normalizedPath) {
-          const nextRecent = upsertRecentWorkspace(currentSettings.recentWorkspaces, normalizedPath);
+        if (get().settingsLoaded && normalizedWorkspacePath) {
+          const nextRecent = upsertRecentWorkspace(currentSettings.recentWorkspaces, normalizedWorkspacePath);
           const nextSettings = normalizeSettings({
             ...currentSettings,
             recentWorkspaces: nextRecent,
@@ -1535,6 +1649,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           }
 
           const currentAssistantMessage = getCurrentAssistantMessage();
+          const executedTools = collectExecutedTools(getAgentMessagesSince(agent, sessionLogStartIndex));
+          const toolFilePaths = extractFilePathsFromToolInvocations([
+            ...(currentAssistantMessage?.toolInvocations ?? []),
+          ]);
+          const executedToolPaths = extractFilePathsFromExecutedTools(executedTools);
+          const relatedFilePaths = Array.from(new Set([...toolFilePaths, ...executedToolPaths]));
           const assistantMsg: UIMessage = {
             id: assistantMessageId,
             role: 'assistant',
@@ -1549,12 +1669,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             modelName: route.model,
             agentStep: assistantStep,
             toolInvocations: currentAssistantMessage?.toolInvocations,
+            relatedFilePaths,
             question: resp.question,
             isStreaming: false,
             timestamp: Date.now(),
           };
           const finalizedAssistantMsg: UIMessage = assistantMsg;
-          const executedTools = collectExecutedTools(getAgentMessagesSince(agent, sessionLogStartIndex));
           const executionContextSummary =
             mode === 'agent'
               ? buildExecutionContextSummary({
@@ -1733,7 +1853,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           // Worker crash: null out the agent so a fresh one is created on retry.
           const isWorkerCrash = err instanceof WorkerCrashError;
           if (isWorkerCrash) {
-            set({ _agent: null });
+            set({ _agent: null, isLoading: false });
+          } else {
+            set({ isLoading: false });
           }
 
           if (assistantMessageId && get().activeSessionId) {

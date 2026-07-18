@@ -1,6 +1,6 @@
 import { AppendOnlyLog, ToolRegistry, type EditHistory } from '@codepapr/core';
 import type { IAgentResponse, IChatRequest, IChatStreamEvent, IImageContent, IMessage, IToolDefinition } from '@codepapr/types';
-import { OpenAIProvider, ClaudeProvider, ProviderRequestError } from '@codepapr/api';
+import { OpenAIProvider, ClaudeProvider, ProviderRequestError, getGlobalFetchFn } from '@codepapr/api';
 import { createId } from '../utils/createId';
 import { registerWorkspaceTools, type WorkspaceMutationListener } from '../tools/workspaceTools';
 import { registerTodoListTools } from '../tools/todoListTool';
@@ -209,6 +209,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   private readonly toolDefinitions: IToolDefinition[];
   private readonly toolExecutor: WorkerToolExecutor;
   private readonly pendingRequests = new Map<string, PendingWorkerRequest>();
+  private readonly pendingFetchControllers = new Map<string, AbortController>();
   private activeRequestId: string | null = null;
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
   private crashed = false;
@@ -267,6 +268,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     } satisfies MainToAgentWorkerMessage);
 
     this.cancelTimer = setTimeout(() => {
+      this.crashed = true;
       this.worker.terminate();
       pending.reject(new DOMException('Agent was terminated', 'AbortError'));
       this.pendingRequests.delete(requestId);
@@ -279,6 +281,8 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.cancel();
     this.clearCancelTimer();
     this.clearSnapshotTimer();
+    this.abortAllPendingFetches();
+    this.crashed = true;
     try {
       this.worker.terminate();
     } catch {
@@ -347,6 +351,23 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         this.activeRequestId = null;
         this.flushDeltas(pending);
         pending.reject(new DOMException('Session was cancelled', 'AbortError'));
+      }
+      return;
+    }
+
+    if (message.type === 'fetch-request') {
+      void this.handleFetchRequest(message);
+      return;
+    }
+
+    if (message.type === 'fetch-cancel') {
+      const controller = this.pendingFetchControllers.get(message.fetchId);
+      if (controller) {
+        try {
+          controller.abort();
+        } catch {
+          // already aborted
+        }
       }
       return;
     }
@@ -510,10 +531,119 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     }
     this.activeRequestId = null;
 
+    this.abortAllPendingFetches();
+
     try {
       this.worker.terminate();
     } catch {
       // already terminated
+    }
+  }
+
+  private abortAllPendingFetches(): void {
+    for (const [, controller] of this.pendingFetchControllers) {
+      try {
+        controller.abort();
+      } catch {
+        // already aborted
+      }
+    }
+    this.pendingFetchControllers.clear();
+  }
+
+  private async handleFetchRequest(message: {
+    fetchId: string;
+    url: string;
+    method: string;
+    headers: Array<[string, string]>;
+    body: Uint8Array | null;
+  }): Promise<void> {
+    const { fetchId, url, method, headers, body } = message;
+    const fetchFn = getGlobalFetchFn();
+    const controller = new AbortController();
+    this.pendingFetchControllers.set(fetchId, controller);
+
+    const requestHeaders = new Headers();
+    for (const [name, value] of headers) {
+      try {
+        requestHeaders.set(name, value);
+      } catch {
+        // invalid header name/value - skip
+      }
+    }
+
+    try {
+      const response = await fetchFn(url, {
+        method,
+        headers: requestHeaders,
+        body: body ? (body as unknown as BodyInit) : undefined,
+        signal: controller.signal,
+      });
+
+      this.worker.postMessage({
+        type: 'fetch-response-start',
+        fetchId,
+        status: response.status,
+        statusText: response.statusText,
+        headers: Array.from(response.headers.entries()),
+      } satisfies MainToAgentWorkerMessage);
+
+      if (!this.pendingFetchControllers.has(fetchId)) {
+        // Cancelled while waiting for response headers; stop reading.
+        return;
+      }
+
+      const reader = response.body?.getReader();
+      if (reader) {
+        try {
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              break;
+            }
+            if (!value) {
+              continue;
+            }
+            // Copy into a fresh buffer so we can safely transfer it without
+            // detaching a shared backing buffer (some fetch implementations
+            // return sub-views).
+            const chunk = (value instanceof Uint8Array ? value : new Uint8Array(value)).slice();
+            this.worker.postMessage(
+              {
+                type: 'fetch-response-chunk',
+                fetchId,
+                chunk,
+              } satisfies MainToAgentWorkerMessage,
+              [chunk.buffer]
+            );
+          }
+        } finally {
+          try {
+            reader.releaseLock();
+          } catch {
+            // reader already released
+          }
+        }
+      }
+
+      if (this.pendingFetchControllers.has(fetchId)) {
+        this.worker.postMessage({
+          type: 'fetch-response-end',
+          fetchId,
+        } satisfies MainToAgentWorkerMessage);
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      if (this.pendingFetchControllers.has(fetchId)) {
+        this.worker.postMessage({
+          type: 'fetch-response-error',
+          fetchId,
+          error: errorMessage,
+        } satisfies MainToAgentWorkerMessage);
+      }
+    } finally {
+      this.pendingFetchControllers.delete(fetchId);
     }
   }
 

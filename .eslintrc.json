@@ -24,7 +24,7 @@
   },
   "overrides": [
     {
-      "files": ["packages/@codepapr/cli/src/**/*.ts", "packages/@codepapr/common/src/index.ts"],
+      "files": ["packages/@codepapr/common/src/index.ts"],
       "rules": {
         "no-console": "off"
       }

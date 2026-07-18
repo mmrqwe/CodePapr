@@ -2,7 +2,7 @@
   "name": "codepapr",
   "version": "0.1.0",
   "license": "MIT",
-  "description": "Local-first coding agent with Tauri desktop workbench and CLI automation. Multi-agent collaboration with built-in Explore/Scout/Mentor sub-agents.",
+  "description": "Local-first coding agent with Tauri desktop workbench. Multi-agent collaboration with built-in Explore/Scout/Mentor sub-agents.",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -11,7 +11,6 @@
     "packages/@codepapr/core",
     "packages/@codepapr/api",
     "packages/@codepapr/db",
-    "packages/@codepapr/cli",
     "packages/@codepapr/editor",
     "packages/@codepapr/ui"
   ],
@@ -19,7 +18,6 @@
     "build": "npm run build --workspaces --if-present",
     "test": "node ./scripts/run-workspace-tests.mjs",
     "test:coverage": "node ./scripts/run-workspace-tests.mjs --run --coverage",
-    "test:e2e": "node ./scripts/run-module-bin.mjs vitest/vitest.mjs run scripts/cli-e2e.test.ts",
     "test:e2e:ui": "npm run test:e2e:ui --workspace=@codepapr/ui",
     "test:e2e:ui:install": "npm run test:e2e:ui:install --workspace=@codepapr/ui",
     "smoke:agent-tools": "node ./scripts/run-agent-tool-smoke.mjs",
@@ -28,7 +26,7 @@
     "lint": "node ./scripts/run-module-bin.mjs eslint/bin/eslint.js \"packages/**/*.{ts,tsx,html}\" --max-warnings=0",
     "audit": "node ./scripts/run-audit.mjs --audit-level=low",
     "check:tauri": "node ./scripts/run-desktop-workflow.mjs root-check-tauri",
-    "verify:ci": "npm run lint && npm run audit && npm run build && npm run test && npm run test:e2e",
+    "verify:ci": "npm run lint && npm run audit && npm run build && npm run test",
     "verify": "npm run verify:ci && npm run check:tauri",
     "debug": "node ./scripts/run-desktop-workflow.mjs root-debug",
     "release": "node ./scripts/run-desktop-workflow.mjs root-release",

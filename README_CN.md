@@ -155,7 +155,6 @@ packages/
 ├── @codepapr/core         # Agent/Session/缓存/ToolRegistry/BUILTIN_AGENTS/TodoList
 ├── @codepapr/api          # Provider (DeepSeek/OpenAI/Claude) 抽象
 ├── @codepapr/db           # SQLite 数据层
-├── @codepapr/cli          # CLI 入口 + 工具实现
 ├── @codepapr/editor       # 编辑器集成
 ├── @codepapr/ui           # Tauri 桌面端 (React + Monaco)
 │   └── src-tauri/         # Rust 后端

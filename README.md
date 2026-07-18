@@ -155,7 +155,6 @@ packages/
 ├── @codepapr/core         # Agent/Session/Cache/ToolRegistry/BUILTIN_AGENTS/TodoList
 ├── @codepapr/api          # Provider (DeepSeek/OpenAI/Claude) abstraction
 ├── @codepapr/db           # SQLite data layer
-├── @codepapr/cli          # CLI entry point + tool implementations
 ├── @codepapr/editor       # Editor integration
 ├── @codepapr/ui           # Tauri desktop (React + Monaco)
 │   └── src-tauri/         # Rust backend

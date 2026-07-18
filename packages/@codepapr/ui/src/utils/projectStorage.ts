@@ -117,7 +117,7 @@ export function createEmptyProjectState(): ProjectStateSnapshot {
   };
 }
 
-function enqueueProjectStateSave(
+export function enqueueProjectStateSave(
   workspacePath: string,
   writer: () => Promise<void>
 ): Promise<void> {
@@ -403,7 +403,15 @@ async function saveProjectStateWithOptions(
   const normalizedWorkspacePath = workspacePath.trim();
   if (!normalizedWorkspacePath) return;
 
-  const serializedState = JSON.stringify(
+  const serializedState = serializeProjectState(state);
+
+  await enqueueProjectStateSave(normalizedWorkspacePath, async () => {
+    await invokeProjectStateSave(normalizedWorkspacePath, serializedState, options);
+  });
+}
+
+function serializeProjectState(state: ProjectStateSnapshot): string {
+  return JSON.stringify(
     {
       ...state,
       version: 1,
@@ -412,13 +420,17 @@ async function saveProjectStateWithOptions(
     null,
     2
   );
+}
 
-  await enqueueProjectStateSave(normalizedWorkspacePath, async () => {
-    await invoke<ProjectStateStorageResult>('save_project_state', {
-      workspacePath: normalizedWorkspacePath,
-      stateJson: serializedState,
-      purgeDeletedContent: options.purgeDeletedContent ?? false,
-    });
+async function invokeProjectStateSave(
+  workspacePath: string,
+  serializedState: string,
+  options: SaveProjectStateOptions
+): Promise<void> {
+  await invoke<ProjectStateStorageResult>('save_project_state', {
+    workspacePath,
+    stateJson: serializedState,
+    purgeDeletedContent: options.purgeDeletedContent ?? false,
   });
 }
 
@@ -427,4 +439,114 @@ export async function saveProjectStateWithPurge(
   state: ProjectStateSnapshot
 ): Promise<void> {
   await saveProjectStateWithOptions(workspacePath, state, { purgeDeletedContent: true });
+}
+
+export async function saveProjectStateDirect(
+  workspacePath: string,
+  state: ProjectStateSnapshot,
+  options: SaveProjectStateOptions = {}
+): Promise<void> {
+  const normalizedWorkspacePath = workspacePath.trim();
+  if (!normalizedWorkspacePath) return;
+  const serializedState = serializeProjectState(state);
+  await invokeProjectStateSave(normalizedWorkspacePath, serializedState, options);
+}
+
+export async function saveSession(workspacePath: string, session: ProjectSessionMeta): Promise<void> {
+  await invoke('save_session', {
+    workspacePath: workspacePath.trim(),
+    sessionJson: JSON.stringify(session),
+  });
+}
+
+interface SessionListResult {
+  sessionsJson: string;
+}
+
+export async function loadSessions(workspacePath: string): Promise<ProjectSessionMeta[]> {
+  const result = await invoke<SessionListResult>('load_sessions', {
+    workspacePath: workspacePath.trim(),
+  });
+  const parsed: unknown = JSON.parse(result.sessionsJson);
+  if (!Array.isArray(parsed)) return [];
+  return parsed as ProjectSessionMeta[];
+}
+
+export async function deleteSessionById(workspacePath: string, sessionId: string): Promise<void> {
+  await invoke('delete_session', {
+    workspacePath: workspacePath.trim(),
+    sessionId,
+  });
+}
+
+export async function saveMessageBatch(
+  workspacePath: string,
+  sessionId: string,
+  messages: ProjectMessage[]
+): Promise<void> {
+  if (messages.length === 0) return;
+  await invoke('save_message_batch', {
+    workspacePath: workspacePath.trim(),
+    sessionId,
+    messagesJson: JSON.stringify(messages),
+  });
+}
+
+interface MessageListResult {
+  messagesJson: string;
+}
+
+export async function loadSessionMessages(
+  workspacePath: string,
+  sessionId: string
+): Promise<ProjectMessage[]> {
+  const result = await invoke<MessageListResult>('load_session_messages', {
+    workspacePath: workspacePath.trim(),
+    sessionId,
+  });
+  const parsed: unknown = JSON.parse(result.messagesJson);
+  if (!Array.isArray(parsed)) return [];
+  return parsed as ProjectMessage[];
+}
+
+export async function saveProjectMeta(workspacePath: string, key: string, value: unknown): Promise<void> {
+  await invoke('save_project_meta', {
+    workspacePath: workspacePath.trim(),
+    key,
+    value: JSON.stringify(value),
+  });
+}
+
+export async function loadProjectMeta(workspacePath: string, key: string): Promise<unknown | null> {
+  const result = await invoke<string | null>('load_project_meta', {
+    workspacePath: workspacePath.trim(),
+    key,
+  });
+  if (!result) return null;
+  try {
+    return JSON.parse(result);
+  } catch {
+    return null;
+  }
+}
+
+interface ProjectMetaResult {
+  metaJson: string;
+}
+
+export async function loadAllProjectMeta(workspacePath: string): Promise<Record<string, unknown>> {
+  const result = await invoke<ProjectMetaResult>('load_all_project_meta', {
+    workspacePath: workspacePath.trim(),
+  });
+  const parsed: unknown = JSON.parse(result.metaJson);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  return Object.fromEntries(
+    Object.entries(parsed as Record<string, string>).map(([k, v]) => {
+      try {
+        return [k, JSON.parse(v)];
+      } catch {
+        return [k, v];
+      }
+    })
+  );
 }

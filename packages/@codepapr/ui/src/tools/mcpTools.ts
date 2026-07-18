@@ -15,6 +15,7 @@ import {
   type McpSettings,
   type McpTestServerResult,
 } from '../utils/mcpTypes';
+import { cacheGet, cacheSet, cacheRemove } from '../utils/cacheStorage';
 
 interface NativeMcpServerConfig {
   id: string;
@@ -51,7 +52,7 @@ interface McpToolCacheEntry {
   expiresAt: number;
 }
 
-const MCP_TOOL_CACHE_STORAGE_KEY = 'codepapr.mcp.toolCache.v1';
+const MCP_TOOL_CACHE_KEY = 'codepapr.mcp.toolCache.v1';
 let memoryToolCache: McpToolCacheEntry | null = null;
 
 /** In-memory bidirectional mapping: displayName -> { serverId, toolName }.
@@ -99,49 +100,28 @@ function toNativeSettings(settings: McpSettings): NativeMcpSettings {
   };
 }
 
-function readStoredToolCache(): McpToolCacheEntry | null {
-  if (memoryToolCache) {
-    if (isCacheExpired(memoryToolCache)) {
-      memoryToolCache = null;
-      return null;
-    }
+async function readPersistedToolCache(): Promise<McpToolCacheEntry | null> {
+  if (memoryToolCache && !isCacheExpired(memoryToolCache)) {
     return memoryToolCache;
   }
-  if (typeof localStorage === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(MCP_TOOL_CACHE_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as McpToolCacheEntry;
-    if (!parsed || typeof parsed.cacheKey !== 'string' || !Array.isArray(parsed.tools)) return null;
-    if (isCacheExpired(parsed)) {
-      localStorage.removeItem(MCP_TOOL_CACHE_STORAGE_KEY);
-      return null;
-    }
-    memoryToolCache = parsed;
-    return parsed;
-  } catch {
+  const cached = await cacheGet<McpToolCacheEntry>(MCP_TOOL_CACHE_KEY);
+  if (!cached || typeof cached.cacheKey !== 'string' || !Array.isArray(cached.tools)) return null;
+  if (isCacheExpired(cached)) {
+    await cacheRemove(MCP_TOOL_CACHE_KEY);
     return null;
   }
+  memoryToolCache = cached;
+  return cached;
 }
 
-function writeStoredToolCache(entry: McpToolCacheEntry): void {
+async function writeStoredToolCache(entry: McpToolCacheEntry): Promise<void> {
   memoryToolCache = entry;
-  if (typeof localStorage === 'undefined') return;
-  try {
-    localStorage.setItem(MCP_TOOL_CACHE_STORAGE_KEY, JSON.stringify(entry));
-  } catch {
-    // Best-effort cache only.
-  }
+  await cacheSet(MCP_TOOL_CACHE_KEY, entry, MCP_TOOL_CACHE_TTL_MS);
 }
 
-export function clearMcpToolDefinitionCache(): void {
+export async function clearMcpToolDefinitionCache(): Promise<void> {
   memoryToolCache = null;
-  if (typeof localStorage === 'undefined') return;
-  try {
-    localStorage.removeItem(MCP_TOOL_CACHE_STORAGE_KEY);
-  } catch {
-    // Best-effort cache only.
-  }
+  await cacheRemove(MCP_TOOL_CACHE_KEY);
 }
 
 async function listMcpTools(settings: McpSettings, refresh = false): Promise<McpListToolsResult> {
@@ -151,7 +131,7 @@ async function listMcpTools(settings: McpSettings, refresh = false): Promise<Mcp
 
   const cacheKey = createMcpSettingsCacheKey(settings);
   if (!refresh) {
-    const cached = readStoredToolCache();
+    const cached = await readPersistedToolCache();
     if (cached?.cacheKey === cacheKey) {
       return { tools: cached.tools, errors: cached.errors };
     }
@@ -162,7 +142,7 @@ async function listMcpTools(settings: McpSettings, refresh = false): Promise<Mcp
     refresh,
   });
   const now = Date.now();
-  writeStoredToolCache({ cacheKey, tools: result.tools, errors: result.errors, updatedAt: now, expiresAt: now + MCP_TOOL_CACHE_TTL_MS });
+  await writeStoredToolCache({ cacheKey, tools: result.tools, errors: result.errors, updatedAt: now, expiresAt: now + MCP_TOOL_CACHE_TTL_MS });
   return result;
 }
 
@@ -223,7 +203,7 @@ export async function testMcpServer(settings: McpSettings, serverId: string): Pr
 
 export async function disconnectMcpServer(settings: McpSettings, serverId: string): Promise<number> {
   // Drop frontend tool cache so the next list_tools call hits the backend.
-  clearMcpToolDefinitionCache();
+  await clearMcpToolDefinitionCache();
   return await invoke<number>('mcp_disconnect_server', {
     settings: toNativeSettings(settings),
     serverId,

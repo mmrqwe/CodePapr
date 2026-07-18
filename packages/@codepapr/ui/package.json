@@ -46,7 +46,7 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^6.0.2",
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.0",
     "autoprefixer": "^10.4.0",
     "esbuild": "^0.28.0",
     "jsdom": "^29.1.1",

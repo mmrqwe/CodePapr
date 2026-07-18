@@ -27,6 +27,12 @@ export function sanitizeMessageForPersistence(message: UIMessage, _debugEnabled:
     statusText: undefined,
     promptContent: undefined,
     images: undefined,
+    toolInvocations: message.toolInvocations?.map((ti) => ({
+      ...ti,
+      statusText: undefined,
+      status: ti.status === 'running' ? 'error' : ti.status,
+      error: ti.status === 'running' ? '未完成的工具调用' : ti.error,
+    })),
   };
 }
 
