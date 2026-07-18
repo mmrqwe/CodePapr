@@ -2002,6 +2002,60 @@ describe('normalizeSettings', () => {
   });
 });
 
+describe('useAgentStore.closeWorkspace', () => {
+  it('清空 workspacePath 及所有相关状态（含 projectGraphLoading/Phase）', () => {
+    useAgentStore.setState({
+      workspacePath: '/tmp/codepapr-close-test',
+      projectGraphLoading: true,
+      projectGraphPhase: { phase: 'reading-files', current: 3, total: 10 },
+      sessions: [
+        { id: 's1', name: '任务 1', provider: 'deepseek', model: 'deepseek-chat', createdAt: 1 },
+      ],
+      activeSessionId: 's1',
+      messages: [{ id: 'm1', role: 'user', content: 'hi', timestamp: 1 }],
+      sessionMessages: { s1: [{ id: 'm1', role: 'user', content: 'hi', timestamp: 1 }] },
+      _gitReady: true,
+      _checkpointSeq: 5,
+    });
+
+    useAgentStore.getState().closeWorkspace();
+
+    const state = useAgentStore.getState();
+    expect(state.workspacePath).toBe('');
+    expect(state.projectGraphLoading).toBe(false);
+    expect(state.projectGraphPhase).toBeNull();
+    expect(state.sessions).toEqual([]);
+    expect(state.activeSessionId).toBeNull();
+    expect(state.messages).toEqual([]);
+    expect(state.sessionMessages).toEqual({});
+    expect(state._gitReady).toBe(false);
+    expect(state._checkpointSeq).toBe(0);
+  });
+
+  it('openWorkspace 两步化：切换到新项目后 projectGraphLoading 不卡在 true', async () => {
+    // 模拟前一项目正在加载 projectGraph 的状态
+    useAgentStore.setState({
+      workspacePath: '/tmp/codepapr-old',
+      projectGraphLoading: true,
+      projectGraphPhase: { phase: 'reading-files', current: 3, total: 10 },
+      sessions: [
+        { id: 's-old', name: '旧任务', provider: 'deepseek', model: 'deepseek-chat', createdAt: 1 },
+      ],
+      activeSessionId: 's-old',
+      messages: [{ id: 'm-old', role: 'user', content: 'hi', timestamp: 1 }],
+    });
+
+    await useAgentStore.getState().openWorkspace('/tmp/codepapr-new');
+
+    const state = useAgentStore.getState();
+    expect(state.workspacePath).toBe('/tmp/codepapr-new');
+    expect(state.projectGraphLoading).toBe(false);
+    expect(state.projectGraphPhase).toBeNull();
+    expect(state.activeSessionId).toBeNull();
+    expect(state.sessions).toEqual([]);
+  });
+});
+
 describe('sendMessage /goal', () => {
   it('runs the goal loop and completes when condition is met', async () => {
     // Mock the worker agent to return a simple response

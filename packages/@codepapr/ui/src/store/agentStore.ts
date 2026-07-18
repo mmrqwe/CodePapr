@@ -322,14 +322,16 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             skillEnabledById: {},
             conversationStats: createEmptyConversationStats(),
             sessionConversationStats: {},
-            projectDiagnosticsReport: null,
-            _agent: null,
-            _agentModel: null,
-            _agentPromptKey: null,
-            _editHistory: new EditHistory(),
-            _projectRulesSection: '',
-            _skillDefinitions: [],
-            _agentDefinitions: [...BUILTIN_AGENTS],
+      projectDiagnosticsReport: null,
+      projectGraphLoading: false,
+      projectGraphPhase: null,
+      _agent: null,
+      _agentModel: null,
+      _agentPromptKey: null,
+      _editHistory: new EditHistory(),
+      _projectRulesSection: '',
+      _skillDefinitions: [],
+      _agentDefinitions: [...BUILTIN_AGENTS],
       _taskChecklists: {},
       _messageCheckpoints: {},
       _gitReady: false,
@@ -343,7 +345,39 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         }
       },
 
+      closeWorkspace: () => {
+        set({
+          workspacePath: '',
+          workspaceMutationVersion: 0,
+          projectGraphLoading: false,
+          projectGraphPhase: null,
+          sessions: [],
+          activeSessionId: null,
+          messages: [],
+          sessionMessages: {},
+          skillEnabledById: {},
+          conversationStats: createEmptyConversationStats(),
+          sessionConversationStats: {},
+          projectDiagnosticsReport: null,
+          _agent: null,
+          _agentModel: null,
+          _agentPromptKey: null,
+          _editHistory: new EditHistory(),
+          _projectRulesSection: '',
+          _skillDefinitions: [],
+          _agentDefinitions: [...BUILTIN_AGENTS],
+          _taskChecklists: {},
+          _messageCheckpoints: {},
+          _gitReady: false,
+          _gitReadyError: null,
+          _checkpointSeq: 0,
+        });
+      },
+
       openWorkspace: async (path) => {
+        // 切换 = 先关闭（同步清空 UI，避免 async 加载期间显示旧浮层）+ 再打开
+        get().closeWorkspace();
+
         const normalizedWorkspacePath = path.trim();
 
         let sessions: SessionMeta[] = [];

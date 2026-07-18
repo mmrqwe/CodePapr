@@ -445,6 +445,13 @@ export function CodingWorkbench({
       setIsInitialGraphPreload(true);
       graphLoadStartedRef.current = true;
       useAgentStore.getState().setProjectGraphLoading(true);
+    } else if (!canStartProjectGraph && graphLoadStartedRef.current) {
+      // 不再满足加载条件（如切换到空项目/关闭项目）时，主动关闭 loading 并重置 refs，
+      // 避免 store 中的 projectGraphLoading 卡在 true。
+      graphLoadStartedRef.current = false;
+      isInitialGraphLoadRef.current = false;
+      setIsInitialGraphPreload(false);
+      useAgentStore.getState().setProjectGraphLoading(false);
     }
   }, [canStartProjectGraph]);
 

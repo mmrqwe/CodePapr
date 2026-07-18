@@ -289,4 +289,51 @@ describe('CodingWorkbench', () => {
     const visibleInsightPanel = container.querySelector('[data-testid="workspace-insight-panel"]');
     expect(visibleInsightPanel?.parentElement?.classList.contains('hidden')).toBe(false);
   });
+
+  it('closeWorkspace 后 projectGraphLoading 重置为 false，不再卡在初始化浮层', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_workspace_files') {
+        return {
+          root: '/tmp/proj-A',
+          entries: [{ path: 'README.md', name: 'README.md', isDir: false, bytes: 12 }],
+          truncated: false,
+        };
+      }
+      return undefined;
+    });
+
+    useAgentStore.setState({
+      workspacePath: '/tmp/proj-A',
+      projectGraphLoading: false,
+    });
+
+    await act(async () => {
+      root.render(
+        <CodingWorkbench
+          selectedPath={null}
+          selectedGitFile={null}
+          selectedLocation={null}
+          previewPlacement="hidden"
+          onSelectPath={() => undefined}
+        />
+      );
+    });
+
+    await flushEffects();
+
+    // 有文件的项目会触发 line 447 effect 设 setProjectGraphLoading(true)
+    expect(useAgentStore.getState().projectGraphLoading).toBe(true);
+
+    // 关闭当前项目
+    await act(async () => {
+      useAgentStore.getState().closeWorkspace();
+    });
+
+    await flushEffects();
+
+    // 关闭后 projectGraphLoading 应为 false，UI 不再卡在「正在初始化工作区」
+    expect(useAgentStore.getState().projectGraphLoading).toBe(false);
+    expect(useAgentStore.getState().workspacePath).toBe('');
+    expect(useAgentStore.getState().projectGraphPhase).toBeNull();
+  });
 });

@@ -27,7 +27,7 @@ function timeLabel(ms: number, t: ReturnType<typeof getTranslation>): string {
 }
 
 export function ProjectSwitcherModal({ onClose }: { onClose: () => void }) {
-  const { settings, workspacePath, openWorkspace, setSettings } = useAgentStore();
+  const { settings, workspacePath, openWorkspace, closeWorkspace, setSettings } = useAgentStore();
   const t = getTranslation(settings.lang);
 
   const handleOpenWorkspace = async (path: string) => {
@@ -73,6 +73,12 @@ export function ProjectSwitcherModal({ onClose }: { onClose: () => void }) {
     } catch {
       // User cancelled
     }
+  };
+
+  const handleCloseWorkspace = () => {
+    if (!workspacePath) return;
+    onClose();
+    closeWorkspace();
   };
 
   const pinned: WorkspaceEntry[] = [];
@@ -168,7 +174,15 @@ export function ProjectSwitcherModal({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        <div className="border-t border-[#2a2d3a] bg-[#161922] px-6 py-4">
+        <div className="space-y-2 border-t border-[#2a2d3a] bg-[#161922] px-6 py-4">
+          <button
+            onClick={handleCloseWorkspace}
+            disabled={!workspacePath}
+            title={t.closeProjectTip}
+            className="w-full rounded-xl border border-[#2a2d3a] px-4 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {t.closeProject}
+          </button>
           <button
             onClick={() => void handleChooseFolder()}
             className="w-full rounded-xl border border-dashed border-indigo-500/30 px-4 py-2.5 text-sm font-medium text-indigo-200 transition-colors hover:border-indigo-400 hover:bg-indigo-500/10"

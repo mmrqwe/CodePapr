@@ -216,6 +216,7 @@ export interface AgentActions {
   loadSettings: () => Promise<void>;
   setSettings: (s: Partial<Settings>) => void;
   setWorkspacePath: (path: string) => void;
+  closeWorkspace: () => void;
   openWorkspace: (path: string) => Promise<void>;
   noteWorkspaceMutation: (paths?: string[]) => void;
   setShowSettings: (v: boolean) => void;
