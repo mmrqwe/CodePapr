@@ -133,7 +133,8 @@ async function runSubagent(
     registry,
     context.workspacePath,
     context.editHistory,
-    context.onWorkspaceMutated
+    context.onWorkspaceMutated,
+    { multimodalEnabled: true }
   );
   const allTools = registry.getAll();
   const tools = filterToolsForAgent(allTools, definition.tools);

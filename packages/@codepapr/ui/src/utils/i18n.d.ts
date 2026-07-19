@@ -248,6 +248,10 @@ export declare const I18N_DICTS: {
         thinkingModeDesc: string;
         thinkingEffort: string;
         thinkingEffortDesc: string;
+        multimodalLabel: string;
+        multimodalDesc: string;
+        multimodalModelTierLabel: string;
+        multimodalModelTierDesc: string;
         apiKey: string;
         systemPrompt: string;
         temperature: string;
@@ -642,6 +646,10 @@ export declare const I18N_DICTS: {
         thinkingModeDesc: string;
         thinkingEffort: string;
         thinkingEffortDesc: string;
+        multimodalLabel: string;
+        multimodalDesc: string;
+        multimodalModelTierLabel: string;
+        multimodalModelTierDesc: string;
         apiKey: string;
         systemPrompt: string;
         temperature: string;
@@ -1034,6 +1042,10 @@ export declare const I18N_DICTS: {
         thinkingModeDesc: string;
         thinkingEffort: string;
         thinkingEffortDesc: string;
+        multimodalLabel: string;
+        multimodalDesc: string;
+        multimodalModelTierLabel: string;
+        multimodalModelTierDesc: string;
         settingsProjectGraphTitle: string;
         settingsProjectGraphDesc: string;
         projectGraphMaxDepthLabel: string;

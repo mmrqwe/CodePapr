@@ -95,6 +95,7 @@ describe('agentConfig - BUILTIN_AGENTS', () => {
     expect(explore).toBeDefined();
     expect(explore.tools).toEqual({
       read: true,
+      read_image: true,
       graph: true,
       lsp: true,
       diagnostics: true,
@@ -110,6 +111,7 @@ describe('agentConfig - BUILTIN_AGENTS', () => {
       web_fetch: true,
       web_download: true,
       browser: true,
+      read_image: true,
     });
   });
 

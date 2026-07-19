@@ -423,6 +423,17 @@ export class Agent {
             multiple: q.multiple === true,
           };
         }
+
+        if (result && typeof result === 'object' && '__images' in result) {
+          const images = (result as Record<string, unknown>).__images as IImageContent[] | undefined;
+          if (images && images.length > 0) {
+            const imageMsg = MessageFactory.user(
+              `[Image from tool ${call.name}]`,
+              images
+            );
+            await this.session.logStore.append(imageMsg);
+          }
+        }
       }
 
       if (question) {

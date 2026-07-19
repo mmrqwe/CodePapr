@@ -799,7 +799,7 @@ pub async fn preview_mcp_server(
     };
 
     let client = connect_client(&server).await?;
-    let mut client = client.lock().await;
+    let client = client.lock().await;
     let tools = client
         .list_all_tools()
         .await

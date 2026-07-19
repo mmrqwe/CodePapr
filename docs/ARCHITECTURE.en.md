@@ -111,11 +111,12 @@ All heavy-I/O Tauri commands (file listing, reading, command execution, etc.) ex
 
 ### 4.6 Tool Architecture
 
-The LLM can invoke 25 discrete tools (including `task`/`todo` as dynamic tools), each with a single responsibility. The 7 tools with `action` parameters all use `enum` constraints. File read/write/SEARCH/REPLACE operations have a 20MB cap:
+The LLM can invoke 26 discrete tools (including `task`/`todo` as dynamic tools), each with a single responsibility. The 7 tools with `action` parameters all use `enum` constraints. File read/write/SEARCH/REPLACE operations have a 20MB cap:
 
 | Unified Tool | Action | Delegated Tool |
 |---|---|---|
 | `read` | Line range / window / context read | workspace_read_file |
+| `read_image` | Image file read (PNG/JPEG/WebP/GIF) | workspace_read_image |
 | `write` | Create / overwrite file | workspace_write_file |
 | `edit` | SEARCH/REPLACE single-file modification | workspace_apply_patch |
 | `patch` | Multi-file atomic SEARCH/REPLACE | workspace_apply_diff |
@@ -141,7 +142,7 @@ The LLM can invoke 25 discrete tools (including `task`/`todo` as dynamic tools),
 | `task` | Delegate subtask to sub-agent | subagent |
 | `todo` | tasks / updates task planning | TodoList |
 
-All 25 tools are registered in ToolRegistry, frozen and hashed for cache consistency. `todo` and `task` are dynamically generated.
+All 26 tools are registered in ToolRegistry, frozen and hashed for cache consistency. `todo` and `task` are dynamically generated.
 
 **External path permissions**: The desktop app shows a `PermissionDialog` for `read`/`list` operations on absolute paths outside the project. The user can choose "Deny / Allow this file / Allow this folder". Authorizations are stored in the `permissionStore` allowlist. CLI read boundaries are more permissive; writes remain workspace-scoped.
 
@@ -196,8 +197,8 @@ On Apple Silicon Macs, users can manually click "GPU Warmup" in the Voice Tab of
 
 | Agent | Purpose | Model | Tools |
 |-------|------|------|------|
-| explore | Read-only code analysis | fast | read, graph, lsp, diagnostics, time |
-| scout | Web search + download | fast | web_search, web_fetch, web_download, browser, open, time |
+| explore | Read-only code analysis | fast | read, read_image, graph, lsp, diagnostics, time |
+| scout | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image, open, time |
 | mentor | Architecture/algorithm guidance | Configurable independent model | None |
 
 ### 6.2 Sub-Agent Independent Context

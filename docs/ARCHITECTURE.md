@@ -111,11 +111,12 @@ Tauri Rust 后端已从单文件 `main.rs` 拆分为多个领域模块，每个�
 
 ### 4.6 工具架构
 
-LLM 可调用 25 个独立工具（含 `task` / `todo` 两个动态工具），每个职责单一，有 `action` 的 7 个均带 `enum` 约束。文件读取/写入/SEARCH/REPLACE 的单次上限为 20MB：
+LLM 可调用 26 个独立工具（含 `task` / `todo` 两个动态工具），每个职责单一，有 `action` 的 7 个均带 `enum` 约束。文件读取/写入/SEARCH/REPLACE 的单次上限为 20MB：
 
 | 合并工具 | Action | 委托工具 |
 |---|---|---|
 | `read` | 行范围/窗口/上下文读取 | workspace_read_file |
+| `read_image` | 图片文件读取（PNG/JPEG/WebP/GIF） | workspace_read_image |
 | `write` | 创建/覆写文件 | workspace_write_file |
 | `edit` | SEARCH/REPLACE 单文件修改 | workspace_apply_patch |
 | `patch` | 多文件原子 SEARCH/REPLACE | workspace_apply_diff |
@@ -141,7 +142,7 @@ LLM 可调用 25 个独立工具（含 `task` / `todo` 两个动态工具），�
 | `task` | 委派子代理执行子任务 | subagent |
 | `todo` | tasks / updates 任务规划 | TodoList |
 
-25 个工具统一注册在 ToolRegistry 中，冻结后 hash 确保缓存一致性。`todo` 和 `task` 为动态生成。
+26 个工具统一注册在 ToolRegistry 中，冻结后 hash 确保缓存一致性。`todo` 和 `task` 为动态生成。
 
 **外部路径权限**：桌面端对 `read` / `list` 操作的项目外绝对路径会弹出 `PermissionDialog`，由用户选择“拒绝 / 允许此文件 / 允许此文件夹”，授权结果保存在 `permissionStore` 白名单中。CLI 的读取路径边界相对宽松，写入仍限制在工作区内。
 
@@ -195,8 +196,8 @@ ChatPanel → useTtsPlayer hook → Rust TTS Module → GPT-SoVITS Python Server
 
 | Agent | 用途 | 模型 | 工具 |
 |-------|------|------|------|
-| explore | 只读代码分析 | fast | read, graph, lsp, diagnostics, time |
-| scout | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, open, time |
+| explore | 只读代码分析 | fast | read, read_image, graph, lsp, diagnostics, time |
+| scout | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image, open, time |
 | mentor | 架构/算法指导 | 可配置独立模型 | 无 |
 
 ### 6.2 子代理的独立上下文

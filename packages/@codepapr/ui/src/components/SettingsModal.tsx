@@ -80,7 +80,7 @@ export function SettingsModal() {
     const defaults = normalizeSettings({} as Settings);
     const tabKeys: Record<SettingsTab, (keyof Settings)[]> = {
       general: ['lang', 'debugEnabled', 'chatBordersEnabled'],
-      llm: ['apiMode', 'apiFormat', 'baseURL', 'apiKey', 'model', 'fastModelEnabled', 'fastModel', 'thinkingEnabled', 'thinkingEffort', 'temperature', 'topP', 'maxTokens', 'maxToolRounds'],
+      llm: ['apiMode', 'apiFormat', 'deepseek', 'custom', 'local', 'baseURL', 'apiKey', 'model', 'fastModelEnabled', 'fastModel', 'thinkingEnabled', 'thinkingEffort', 'temperature', 'topP', 'maxTokens', 'maxToolRounds'],
       search: ['searxngEnabled', 'searxngBaseUrl', 'searxngCategories', 'searxngTimeRange', 'searxngLanguage', 'searxngSafeSearch'],
       mentor: ['mentorEnabled', 'mentorApiFormat', 'mentorBaseURL', 'mentorApiKey', 'mentorModel', 'mentorMaxTokens', 'mentorThinkingEnabled', 'maxMentorConsultations', 'explorePrompt', 'scoutPrompt', 'mentorPrompt', 'exploreTemperature', 'exploreMaxToolRounds', 'exploreMaxTokens', 'exploreTopP', 'exploreMaxDepth', 'exploreThinkingEnabled', 'scoutTemperature', 'scoutMaxToolRounds', 'scoutMaxTokens', 'scoutTopP', 'scoutMaxDepth', 'scoutThinkingEnabled'],
       advanced: ['compactionModel', 'compactionMaxTokens', 'compactionTemperature', 'maxContextTokens', 'maxConversationRounds', 'todoMaxRetries', 'goalMaxIterations', 'goalMaxWallClockMs', 'goalRequireGitClean', 'verifierModelTier', 'verifierMaxTokens', 'verifierTemperature', 'projectGraphMaxDepth', 'projectGraphMaxFiles', 'projectGraphMaxEdges', 'projectGraphMaxSymbolsPerFile', 'projectGraphMaxFileBytes', 'projectGraphMaxTreeEntries'],
@@ -93,31 +93,23 @@ export function SettingsModal() {
   };
 
   const setApiMode = (apiMode: ApiMode) => {
-    update({
-      apiMode,
-      model:
-        apiMode === 'deepseek'
-          ? 'deepseek-v4-pro'
-          : apiMode === 'local' && !local.model.trim()
-          ? 'local-model'
-          : local.model,
-      fastModel: apiMode === 'deepseek' && !local.fastModel.trim() ? 'deepseek-v4-flash' : local.fastModel,
-      baseURL: apiMode === 'deepseek' ? '' : local.baseURL,
-    });
+    update({ apiMode });
   };
 
   const setApiFormat = (apiFormat: ApiFormat) => {
     update({
       apiFormat,
-      model: MODEL_PRESETS[apiFormat][0] ?? local.model,
+      custom: { ...local.custom, model: MODEL_PRESETS[apiFormat][0] ?? local.custom.model },
     });
   };
+
+  const activeModeConfig = local[local.apiMode];
 
   const handleTestMentorConnection = async () => {
     setMentorTestStatus('connecting');
     setMentorTestMessage('');
     try {
-      const apiKey = (local.mentorApiKey || local.apiKey).trim();
+      const apiKey = (local.mentorApiKey || activeModeConfig.apiKey).trim();
       if (!apiKey) {
         throw new Error(
           currentLang === 'en'
@@ -127,7 +119,7 @@ export function SettingsModal() {
             : '请填写 API Key',
         );
       }
-      const baseURL = (local.mentorBaseURL || local.baseURL).trim().replace(/\/+$/, '');
+      const baseURL = (local.mentorBaseURL || activeModeConfig.baseURL).trim().replace(/\/+$/, '');
       if (!baseURL) {
         throw new Error(
           currentLang === 'en'
@@ -385,8 +377,8 @@ export function SettingsModal() {
                     {t.apiUrl}
                   </label>
                   <input
-                    value={local.baseURL}
-                    onChange={(e) => update({ baseURL: e.target.value })}
+                    value={activeModeConfig.baseURL}
+                    onChange={(e) => update({ [local.apiMode]: { ...activeModeConfig, baseURL: e.target.value } })}
                     title={t.apiUrl}
                     placeholder={LOCAL_URL_PLACEHOLDER}
                     className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 placeholder-slate-700 focus:border-indigo-500/60 focus:outline-none"
@@ -416,8 +408,8 @@ export function SettingsModal() {
                       {t.apiUrl}
                     </label>
                     <input
-                      value={local.baseURL}
-                      onChange={(e) => update({ baseURL: e.target.value })}
+                      value={activeModeConfig.baseURL}
+                      onChange={(e) => update({ [local.apiMode]: { ...activeModeConfig, baseURL: e.target.value } })}
                       title={t.apiUrl}
                       placeholder={CUSTOM_URL_PLACEHOLDERS[local.apiFormat]}
                       className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 placeholder-slate-700 focus:border-indigo-500/60 focus:outline-none"
@@ -437,10 +429,10 @@ export function SettingsModal() {
                   <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                     {t.modelName}
                   </label>
-                  <input
-                    value={local.model}
+                   <input
+                    value={activeModeConfig.model}
                     list="model-presets"
-                    onChange={(e) => update({ model: e.target.value })}
+                    onChange={(e) => update({ [local.apiMode]: { ...activeModeConfig, model: e.target.value } })}
                     title={t.modelName}
                     placeholder={currentLang === 'en' ? 'Enter model name...' : '输入模型名称...'}
                     className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 placeholder-slate-700 focus:border-indigo-500/60 focus:outline-none"
@@ -457,8 +449,8 @@ export function SettingsModal() {
                     {t.fastModelName}
                   </label>
                   <input
-                    value={local.fastModel}
-                    onChange={(e) => update({ fastModel: e.target.value })}
+                    value={activeModeConfig.fastModel}
+                    onChange={(e) => update({ [local.apiMode]: { ...activeModeConfig, fastModel: e.target.value } })}
                     title={t.fastModelHint}
                     placeholder={local.apiMode === 'deepseek' ? 'deepseek-v4-flash' : t.fastModelPlaceholder}
                     disabled={!local.fastModelEnabled}
@@ -525,6 +517,43 @@ export function SettingsModal() {
                 </>
               )}
 
+              <label
+                className="flex cursor-pointer items-start gap-3 rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-4"
+                title={t.multimodalDesc}
+              >
+                <input
+                  type="checkbox"
+                  checked={local.multimodalEnabled}
+                  onChange={(e) => update({ multimodalEnabled: e.target.checked })}
+                  title={t.multimodalDesc}
+                  className="mt-0.5 h-4 w-4 cursor-pointer rounded border-[#3a3f55] bg-[#0b0d12] accent-indigo-500"
+                />
+                <span className="block">
+                  <span className="block text-sm font-medium text-slate-100">{t.multimodalLabel}</span>
+                  <span className="mt-1 block text-xs leading-relaxed text-slate-500">{t.multimodalDesc}</span>
+                </span>
+              </label>
+
+              {local.multimodalEnabled && (
+                <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="block">
+                      <span className="block text-sm font-medium text-slate-100">{t.multimodalModelTierLabel}</span>
+                      <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">{t.multimodalModelTierDesc}</span>
+                    </span>
+                    <select
+                      value={local.multimodalModelTier}
+                      onChange={(e) => update({ multimodalModelTier: e.target.value as 'primary' | 'fast' | 'all' })}
+                      className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-2.5 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+                    >
+                      <option value="primary">{t.primaryModelTag}</option>
+                      <option value="fast">{t.fastModelTag}</option>
+                      <option value="all">{currentLang === 'en' ? 'All' : '全部'}</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
               <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr]">
                 <div>
                   <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -533,8 +562,8 @@ export function SettingsModal() {
                   </label>
                   <input
                     type="password"
-                    value={local.apiKey}
-                    onChange={(e) => update({ apiKey: e.target.value })}
+                    value={activeModeConfig.apiKey}
+                    onChange={(e) => update({ [local.apiMode]: { ...activeModeConfig, apiKey: e.target.value } })}
                     title={t.apiKey}
                     placeholder={
                       isLocal

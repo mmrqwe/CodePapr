@@ -50,6 +50,7 @@ export type UserPromptSections = Record<UserPromptSectionKey, string>;
 
 const UI_TOOL_DEFAULTS = [
   'read',
+  'read_image',
   'write',
   'edit',
   'patch',
@@ -458,6 +459,15 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
         : lang === 'zh-TW'
         ? '- [read] 讀取檔案內容（startLine/endLine/aroundLine）。`list` 瀏覽目錄，`glob` 按檔名查找，`grep` 正則搜索內容。'
         : '- [read] 读取文件内容（startLine/endLine/aroundLine）。`list` 浏览目录，`glob` 按文件名查找，`grep` 正则搜索内容。'
+    );
+  }
+  if (hasTool(toolNames, 'read_image')) {
+    common.push(
+      lang === 'en'
+        ? '- [read_image] Read image files (PNG/JPEG/WebP/GIF) as base64 for multimodal vision analysis. Use maxBytes to limit size (default 5MB).'
+        : lang === 'zh-TW'
+        ? '- [read_image] 讀取圖片檔案（PNG/JPEG/WebP/GIF）為 base64 編碼，供多模態模型識別分析。使用 maxBytes 限制大小（預設 5MB）。'
+        : '- [read_image] 读取图片文件（PNG/JPEG/WebP/GIF）为 base64 编码，供多模态模型识别分析。使用 maxBytes 限制大小（默认 5MB）。'
     );
   }
   if (hasTool(toolNames, 'write') && mode === 'agent') {

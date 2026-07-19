@@ -34,6 +34,22 @@ import {
 } from './promptBuilders';
 import type { ApiFormat, Lang, Settings, UIMessage } from './types';
 
+function resolveMultimodalEnabled(settings: Settings, currentModel: string): boolean {
+  if (!settings.multimodalEnabled) return false;
+  if (settings.multimodalModelTier === 'all') return true;
+  const fastModel = settings.fastModel.trim();
+  const isFastModel = settings.fastModelEnabled && fastModel.length > 0 && currentModel === fastModel;
+  if (settings.multimodalModelTier === 'primary' && !isFastModel) return true;
+  if (settings.multimodalModelTier === 'fast' && isFastModel) return true;
+  return false;
+}
+
+function subagentMultimodalAllowed(settings: Settings, agentTier: 'primary' | 'fast'): boolean {
+  if (!settings.multimodalEnabled) return false;
+  if (settings.multimodalModelTier === 'all') return true;
+  return settings.multimodalModelTier === agentTier;
+}
+
 export interface AgentRuntimeConfig {
   editHistory?: EditHistory;
   rulesSection?: string;
@@ -180,6 +196,7 @@ function _createLocalAgent(
     onWorkspaceMutated(paths);
   }, {
     disableWebSearchTools: hasEnabledMcpSearch(settings.mcp),
+    multimodalEnabled: resolveMultimodalEnabled(settings, overrides.model ?? settings.model),
   });
 
   // TodoList 工具：主 Agent 的"短期工作记忆"，与 task 工具正交协作
@@ -200,10 +217,22 @@ function _createLocalAgent(
     ).map((agent) => {
       // Override model based on tier selection for explore/scout
       if (agent.name === 'explore') {
-        return { ...agent, model: settings.exploreModelTier === 'primary' ? undefined : 'fast' };
+        const tier = settings.exploreModelTier;
+        const agentDef = { ...agent, model: tier === 'primary' ? undefined : 'fast' };
+        if (!subagentMultimodalAllowed(settings, tier) && agentDef.tools) {
+          agentDef.tools = { ...agentDef.tools };
+          delete (agentDef.tools as Record<string, boolean>)['read_image'];
+        }
+        return agentDef;
       }
       if (agent.name === 'scout') {
-        return { ...agent, model: settings.scoutModelTier === 'primary' ? undefined : 'fast' };
+        const tier = settings.scoutModelTier;
+        const agentDef = { ...agent, model: tier === 'primary' ? undefined : 'fast' };
+        if (!subagentMultimodalAllowed(settings, tier) && agentDef.tools) {
+          agentDef.tools = { ...agentDef.tools };
+          delete (agentDef.tools as Record<string, boolean>)['read_image'];
+        }
+        return agentDef;
       }
       return agent;
     });
@@ -335,10 +364,22 @@ export function createAgent(
           ).map((agent) => {
             // Override model based on tier selection for explore/scout
             if (agent.name === 'explore') {
-              return { ...agent, model: settings.exploreModelTier === 'primary' ? undefined : 'fast' };
+              const tier = settings.exploreModelTier;
+              const agentDef = { ...agent, model: tier === 'primary' ? undefined : 'fast' };
+              if (!subagentMultimodalAllowed(settings, tier) && agentDef.tools) {
+                agentDef.tools = { ...agentDef.tools };
+                delete (agentDef.tools as Record<string, boolean>)['read_image'];
+              }
+              return agentDef;
             }
             if (agent.name === 'scout') {
-              return { ...agent, model: settings.scoutModelTier === 'primary' ? undefined : 'fast' };
+              const tier = settings.scoutModelTier;
+              const agentDef = { ...agent, model: tier === 'primary' ? undefined : 'fast' };
+              if (!subagentMultimodalAllowed(settings, tier) && agentDef.tools) {
+                agentDef.tools = { ...agentDef.tools };
+                delete (agentDef.tools as Record<string, boolean>)['read_image'];
+              }
+              return agentDef;
             }
             return agent;
           }),

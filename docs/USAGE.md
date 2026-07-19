@@ -54,8 +54,8 @@ Plan 模式下，当需求模糊时 Agent 会调用 `question` 工具向你提�
 
 | Agent | 用途 | 模型 | 工具 |
 |-------|------|------|------|
-| **explore** | 只读代码分析 | fast | read, graph, lsp, diagnostics, time |
-| **scout** | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, open, time |
+| **explore** | 只读代码分析 | fast | read, read_image, graph, lsp, diagnostics, time |
+| **scout** | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image, open, time |
 | **mentor** | 架构/算法指导 | 可配置独立模型 | 无 |
 | **verifier** | Goal 验收器（内部） | fast | 无 |
 

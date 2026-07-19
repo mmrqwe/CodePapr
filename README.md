@@ -132,8 +132,8 @@ See `packages/@codepapr/core/docs/CONFIGURATION.md` for the full parameter refer
 
 | Agent | Purpose | Model | Tools |
 |-------|---------|-------|-------|
-| **explore** | Read-only code analysis | fast | read, graph, lsp, diagnostics, time |
-| **scout** | Web search + download | fast | web_search, web_fetch, web_download, browser, open, time |
+| **explore** | Read-only code analysis | fast | read, read_image, graph, lsp, diagnostics, time |
+| **scout** | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image, open, time |
 | **mentor** | Architecture/algorithm guidance | Configurable model | None |
 
 The main agent dispatches sub-agents via the `task` tool. Each sub-agent has its own **isolated session and blank context**, receiving only the delegated task description — uncontaminated by the main agent's conversation history. Sub-agents have a 5-minute overall timeout and a 90-second per-tool-call timeout.

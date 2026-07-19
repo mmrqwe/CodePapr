@@ -54,8 +54,8 @@ Full parameter reference: `packages/@codepapr/core/docs/CONFIGURATION.md`.
 
 | Agent | Purpose | Model | Tools |
 |-------|------|------|------|
-| **explore** | Read-only code analysis | fast | read, graph, lsp, diagnostics, time |
-| **scout** | Web search + download | fast | web_search, web_fetch, web_download, browser, open, time |
+| **explore** | Read-only code analysis | fast | read, read_image, graph, lsp, diagnostics, time |
+| **scout** | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image, open, time |
 | **mentor** | Architecture/algorithm guidance | Configurable independent model | None |
 | **verifier** | Goal evaluator (internal) | fast | None |
 

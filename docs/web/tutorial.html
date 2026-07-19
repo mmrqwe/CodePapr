@@ -934,7 +934,7 @@ https://api.deepseek.com/v1</code></pre>
         <p>单次 <code>read</code> / <code>write</code> / <code>edit</code> / <code>patch</code> 操作的上限为 <strong>20MB</strong>，可覆盖大多数源码和二进制资源文件，但大文件会显著增加 token 消耗。</p>
 
         <div class="callout success">
-          <strong>工具设计原则：</strong>LLM 看到的工具名是精简的"合并工具"（共 25 个），底层委托给 40+ 独立工具。Agent 可同时使用所有工具，子代理按 <code>tools</code> 配置白名单限制权限。代码修改优先用 <code>edit</code>/<code>patch</code> 走 Search/Replace Diff，新建文件才用 <code>write</code>。命令执行：短命令用 <code>exec</code>，长驻进程用 <code>exec</code> background:true，交互式终端用 <code>shell</code>。
+          <strong>工具设计原则：</strong>LLM 看到的工具名是精简的"合并工具"（共 26 个），底层委托给 40+ 独立工具。Agent 可同时使用所有工具，子代理按 <code>tools</code> 配置白名单限制权限。代码修改优先用 <code>edit</code>/<code>patch</code> 走 Search/Replace Diff，新建文件才用 <code>write</code>。命令执行：短命令用 <code>exec</code>，长驻进程用 <code>exec</code> background:true，交互式终端用 <code>shell</code>。
         </div>
       </div>
     </section>
@@ -1251,8 +1251,8 @@ TTS 数据流：
         <table>
           <thead><tr><th>Agent</th><th>用途</th><th>模型</th><th>工具</th></tr></thead>
           <tbody>
-            <tr><td><strong>explore</strong></td><td>只读代码分析：搜索项目文件、定位符号、分析依赖关系</td><td>fast</td><td>read, graph, lsp, diagnostics, grep</td></tr>
-            <tr><td><strong>scout</strong></td><td>网络搜索：查找文档、API 参考、最新资料</td><td>fast</td><td>web_search, web_fetch, web_download, browser</td></tr>
+            <tr><td><strong>explore</strong></td><td>只读代码分析：搜索项目文件、定位符号、分析依赖关系</td><td>fast</td><td>read, read_image, graph, lsp, diagnostics, grep</td></tr>
+            <tr><td><strong>scout</strong></td><td>网络搜索：查找文档、API 参考、最新资料</td><td>fast</td><td>web_search, web_fetch, web_download, browser, read_image</td></tr>
             <tr><td><strong>mentor</strong></td><td>架构/算法/调试高层指导（不写代码、不调工具）</td><td>mentor*</td><td>无</td></tr>
             <tr><td><strong>verifier</strong></td><td>Goal 验收器（内部）：客观判定目标条件是否达成，防 Worker 伪造成功假象</td><td>fast**</td><td>无</td></tr>
           </tbody>
@@ -1466,7 +1466,7 @@ TTS 数据流：
       <div class="content">
         <h3>什么是 MCP</h3>
         <p><strong>Model Context Protocol</strong>（MCP）是一种开放协议，允许 Agent 通过外部工具服务器扩展能力。CodePapr 内置 MCP host，可同时连接多个 MCP 服务器，把外部工具透出给主 Agent 调用。</p>
-        <p>每个 MCP 工具会以 <code>mcp__&lt;serverId&gt;__&lt;toolName&gt;</code> 形式注册，与内置 25 个工具并列出现在 ToolRegistry 中。</p>
+        <p>每个 MCP 工具会以 <code>mcp__&lt;serverId&gt;__&lt;toolName&gt;</code> 形式注册，与内置 26 个工具并列出现在 ToolRegistry 中。</p>
 
         <h3>三种传输模式</h3>
         <table>

@@ -344,7 +344,20 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
       required: ['name'],
     },
   },
-  // ──── 21. question ────
+  // ──── 21. read_image ────
+  {
+    name: 'read_image',
+    description: '读取项目中的图片文件（PNG、JPEG、WebP、GIF），返回 base64 编码的图片数据供多模态模型识别分析。支持 maxBytes 限制。',
+    parameters: {
+      type: 'object',
+      properties: {
+        relativePath: { type: 'string', description: '图片文件相对路径。' },
+        maxBytes: { type: 'number', description: '最大读取字节数，默认 5000000（5MB）。' },
+      },
+      required: ['relativePath'],
+    },
+  },
+  // ──── 22. question ────
   {
     name: 'question',
     description: '向用户提问（Plan 模式），可提供预定义选项和多选支持。',

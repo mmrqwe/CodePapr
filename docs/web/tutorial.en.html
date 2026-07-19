@@ -934,7 +934,7 @@ After the change, at least run verification for the affected scope; if no narrow
         <p>A single <code>read</code> / <code>write</code> / <code>edit</code> / <code>patch</code> operation is capped at <strong>20MB</strong>, covering most source code and binary resource files, though large files will significantly increase token consumption.</p>
 
         <div class="callout success">
-          <strong>Tool Design Principle:</strong> The LLM sees simplified "merged tools" (25 total), which delegate to 40+ independent tools under the hood. The Agent can use all tools simultaneously; sub-agents are restricted by <code>tools</code> config allowlists. For code modifications, prefer <code>edit</code>/<code>patch</code> via Search/Replace Diff; use <code>write</code> only for new files. For command execution: short commands use <code>exec</code>, long-lived processes use <code>exec</code> with background:true, and interactive terminals use <code>shell</code>.
+          <strong>Tool Design Principle:</strong> The LLM sees simplified "merged tools" (26 total), which delegate to 40+ independent tools under the hood. The Agent can use all tools simultaneously; sub-agents are restricted by <code>tools</code> config allowlists. For code modifications, prefer <code>edit</code>/<code>patch</code> via Search/Replace Diff; use <code>write</code> only for new files. For command execution: short commands use <code>exec</code>, long-lived processes use <code>exec</code> with background:true, and interactive terminals use <code>shell</code>.
         </div>
       </div>
     </section>
@@ -1251,8 +1251,8 @@ When a task requires public information, current facts, third-party API usage, o
         <table>
           <thead><tr><th>Agent</th><th>Purpose</th><th>Model</th><th>Tools</th></tr></thead>
           <tbody>
-            <tr><td><strong>explore</strong></td><td>Read-only code analysis: search project files, locate symbols, analyze dependencies</td><td>fast</td><td>read, graph, lsp, diagnostics, grep</td></tr>
-            <tr><td><strong>scout</strong></td><td>Web search: find documentation, API references, latest resources</td><td>fast</td><td>web_search, web_fetch, web_download, browser</td></tr>
+            <tr><td><strong>explore</strong></td><td>Read-only code analysis: search project files, locate symbols, analyze dependencies</td><td>fast</td><td>read, read_image, graph, lsp, diagnostics, grep</td></tr>
+            <tr><td><strong>scout</strong></td><td>Web search: find documentation, API references, latest resources</td><td>fast</td><td>web_search, web_fetch, web_download, browser, read_image</td></tr>
             <tr><td><strong>mentor</strong></td><td>High-level architecture/algorithm/debugging guidance (no code writing, no tool usage)</td><td>mentor*</td><td>None</td></tr>
             <tr><td><strong>verifier</strong></td><td>Goal verifier (internal): objectively determines whether the goal condition is met, prevents Worker from fabricating success</td><td>fast**</td><td>None</td></tr>
           </tbody>
@@ -1466,7 +1466,7 @@ Current status: !`git status -s`</code></pre>
       <div class="content">
         <h3>What is MCP</h3>
         <p>The <strong>Model Context Protocol</strong> (MCP) is an open protocol that allows Agents to extend their capabilities through external tool servers. CodePapr includes a built-in MCP host that can connect to multiple MCP servers simultaneously, exposing external tools to the main Agent for invocation.</p>
-        <p>Each MCP tool is registered in the form <code>mcp__&lt;serverId&gt;__&lt;toolName&gt;</code>, appearing alongside the 25 built-in tools in the ToolRegistry.</p>
+        <p>Each MCP tool is registered in the form <code>mcp__&lt;serverId&gt;__&lt;toolName&gt;</code>, appearing alongside the 26 built-in tools in the ToolRegistry.</p>
 
         <h3>Three Transport Modes</h3>
         <table>

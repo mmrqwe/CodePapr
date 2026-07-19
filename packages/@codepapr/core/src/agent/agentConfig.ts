@@ -227,6 +227,7 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
       model: 'fast',
       tools: {
         read: true,
+        read_image: true,
         graph: true,
         lsp: true,
         diagnostics: true,
@@ -305,6 +306,7 @@ UserLoginForm → handleSubmit → /api/auth/login → userStore.login()
         web_fetch: true,
         web_download: true,
         browser: true,
+        read_image: true,
       },
     prompt: `You are a web search Agent (Scout), responsible for obtaining the latest resources, documentation, examples, and resource files from the internet. You can search, read web pages, and download files to the project's \`.CodePapr/downloads/\` folder.
 

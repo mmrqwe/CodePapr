@@ -1,7 +1,56 @@
 import { sanitizeMaxTokens } from '@codepapr/api';
 import { normalizeMcpSettings } from '../../utils/mcpTypes';
 import { DEFAULT_SETTINGS, normalizeCustomSystemPrompt } from './defaults';
-import type { ApiFormat, ApiMode, ProviderName, Settings, WorkspaceEntry } from './types';
+import type { ApiFormat, ApiMode, ModeConfig, ProviderName, Settings, WorkspaceEntry } from './types';
+
+function normalizeModeConfig(
+  input: unknown,
+  defaults: ModeConfig,
+): ModeConfig {
+  if (input && typeof input === 'object') {
+    const obj = input as Record<string, unknown>;
+    return {
+      apiKey: typeof obj.apiKey === 'string' ? obj.apiKey : defaults.apiKey,
+      baseURL: typeof obj.baseURL === 'string' ? obj.baseURL : defaults.baseURL,
+      model: typeof obj.model === 'string' ? obj.model.trim() : defaults.model,
+      fastModel: typeof obj.fastModel === 'string' ? obj.fastModel.trim() : defaults.fastModel,
+    };
+  }
+  return { ...defaults };
+}
+
+function migrateLegacySettings(
+  input: Partial<Settings>,
+  apiMode: ApiMode,
+  existingDeepseek?: ModeConfig,
+  existingCustom?: ModeConfig,
+  existingLocal?: ModeConfig,
+): { deepseek: ModeConfig; custom: ModeConfig; local: ModeConfig } {
+  const legacyModel = typeof input.model === 'string' ? input.model.trim() : '';
+  const legacyApiKey = typeof input.apiKey === 'string' ? input.apiKey : '';
+  const legacyBaseURL = typeof input.baseURL === 'string' ? input.baseURL : '';
+  const legacyFastModel = typeof input.fastModel === 'string' ? input.fastModel.trim() : '';
+
+  const deepseek = existingDeepseek ?? { ...DEFAULT_SETTINGS.deepseek };
+  const custom = existingCustom ?? { ...DEFAULT_SETTINGS.custom };
+  const local = existingLocal ?? { ...DEFAULT_SETTINGS.local };
+
+  // If per-mode configs already exist, no migration needed
+  if (existingDeepseek || existingCustom || existingLocal) {
+    return { deepseek, custom, local };
+  }
+
+  // Only migrate if legacy flat fields are present
+  if (!legacyModel && !legacyApiKey && !legacyBaseURL && !legacyFastModel) {
+    return { deepseek, custom, local };
+  }
+
+  // Populate the active mode's config from legacy flat fields
+  const active = { apiKey: legacyApiKey, baseURL: legacyBaseURL, model: legacyModel || deepseek.model, fastModel: legacyFastModel || deepseek.fastModel };
+  if (apiMode === 'deepseek') return { deepseek: active, custom, local };
+  if (apiMode === 'custom') return { deepseek, custom: active, local };
+  return { deepseek, custom, local: active };
+}
 
 function normalizeRecentWorkspaces(
   input: unknown,
@@ -39,16 +88,25 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     input.apiFormat ?? (input.provider === 'claude' ? 'claude' : 'openai');
   const provider: ProviderName =
     apiMode === 'deepseek' ? 'deepseek' : apiMode === 'local' ? 'openai' : apiFormat;
-  const normalizedModel =
-    apiMode === 'deepseek' && (!input.model || input.model === 'deepseek-chat')
-      ? 'deepseek-v4-pro'
-      : input.model;
-  const normalizedFastModel =
-    input.fastModel === undefined
-      ? apiMode === 'deepseek'
-        ? DEFAULT_SETTINGS.fastModel
-        : DEFAULT_SETTINGS.fastModel
-      : input.fastModel;
+
+  // Per-mode configs with migration
+  const migrated = migrateLegacySettings(
+    input,
+    apiMode,
+    input.deepseek ? normalizeModeConfig(input.deepseek, DEFAULT_SETTINGS.deepseek) : undefined,
+    input.custom ? normalizeModeConfig(input.custom, DEFAULT_SETTINGS.custom) : undefined,
+    input.local ? normalizeModeConfig(input.local, DEFAULT_SETTINGS.local) : undefined,
+  );
+  const deepseek = migrated.deepseek;
+  const custom = migrated.custom;
+  const local = migrated.local;
+
+  // Active mode config (source of truth for flat fields)
+  const activeConfig = apiMode === 'deepseek' ? deepseek : apiMode === 'custom' ? custom : local;
+  const model = activeConfig.model;
+  const fastModel = activeConfig.fastModel;
+  const apiKey = activeConfig.apiKey;
+  const baseURL = activeConfig.baseURL;
   const temperature =
     typeof input.temperature === 'number' && Number.isFinite(input.temperature)
       ? Math.max(0, Math.min(2, input.temperature))
@@ -58,6 +116,14 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
       ? Math.max(0, Math.min(1, input.topP))
       : DEFAULT_SETTINGS.topP;
   const systemPrompt = normalizeCustomSystemPrompt(input.systemPrompt);
+  const multimodalEnabled =
+    typeof input.multimodalEnabled === 'boolean'
+      ? input.multimodalEnabled
+      : DEFAULT_SETTINGS.multimodalEnabled;
+  const multimodalModelTier: 'primary' | 'fast' | 'all' =
+    input.multimodalModelTier === 'primary' || input.multimodalModelTier === 'fast'
+      ? input.multimodalModelTier
+      : 'all';
   const maxTokens = sanitizeMaxTokens(
     input.maxTokens ?? DEFAULT_SETTINGS.maxTokens,
     provider,
@@ -242,15 +308,19 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     apiMode,
     apiFormat,
     provider,
-    model: normalizedModel ?? DEFAULT_SETTINGS.model,
+    deepseek,
+    custom,
+    local,
+    model,
     fastModelEnabled: input.fastModelEnabled ?? DEFAULT_SETTINGS.fastModelEnabled,
-    fastModel: normalizedFastModel ?? DEFAULT_SETTINGS.fastModel,
+    fastModel,
+    apiKey,
+    baseURL,
     systemPrompt,
     temperature,
     topP,
-    debugEnabled: input.debugEnabled ?? DEFAULT_SETTINGS.debugEnabled,
-    chatBordersEnabled: input.chatBordersEnabled ?? DEFAULT_SETTINGS.chatBordersEnabled,
-    baseURL: input.baseURL ?? '',
+    multimodalEnabled,
+    multimodalModelTier,
     maxTokens,
     maxToolRounds,
     maxContextTokens,
@@ -317,6 +387,13 @@ export function resolveProviderName(settings: Settings): ProviderName {
   return settings.apiFormat;
 }
 
+export function getActiveModeConfig(settings: Settings): ModeConfig & { apiFormat: ApiFormat } {
+  const cfg = settings.apiMode === 'deepseek' ? settings.deepseek
+    : settings.apiMode === 'custom' ? settings.custom
+    : settings.local;
+  return { ...cfg, apiFormat: settings.apiFormat };
+}
+
 export function getProviderLabel(settings: Settings): string {
   const lang = settings.lang || 'zh-CN';
   if (settings.apiMode === 'deepseek') return lang === 'en' ? 'DeepSeek Official' : lang === 'zh-TW' ? 'DeepSeek 官方' : 'DeepSeek 官方';
@@ -328,7 +405,9 @@ export function getProviderLabel(settings: Settings): string {
 
 export function getSettingsError(settings: Settings): string | null {
   const lang = settings.lang || 'zh-CN';
-  if (settings.apiMode !== 'local' && !settings.apiKey.trim()) {
+  const apiKey = settings.apiKey.trim();
+  const model = settings.model.trim();
+  if (settings.apiMode !== 'local' && !apiKey) {
     return lang === 'en'
       ? 'Please enter API Key in settings first'
       : lang === 'zh-TW'
@@ -342,7 +421,7 @@ export function getSettingsError(settings: Settings): string | null {
       ? '該模式需要填寫 API 地址'
       : '该模式需要填写 API 地址';
   }
-  if (!settings.model.trim()) {
+  if (!model) {
     return lang === 'en'
       ? 'Please fill in the model name'
       : lang === 'zh-TW'

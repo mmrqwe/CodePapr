@@ -27,6 +27,26 @@ export const DEFAULT_SETTINGS: Settings = {
   apiMode: 'deepseek',
   apiFormat: 'openai',
   provider: 'deepseek',
+
+  deepseek: {
+    apiKey: '',
+    baseURL: '',
+    model: 'deepseek-v4-pro',
+    fastModel: 'deepseek-v4-flash',
+  },
+  custom: {
+    apiKey: '',
+    baseURL: '',
+    model: '',
+    fastModel: '',
+  },
+  local: {
+    apiKey: '',
+    baseURL: 'http://127.0.0.1:8080/v1',
+    model: 'local-model',
+    fastModel: '',
+  },
+
   baseURL: '',
   model: 'deepseek-v4-pro',
   fastModelEnabled: true,
@@ -35,6 +55,8 @@ export const DEFAULT_SETTINGS: Settings = {
   systemPrompt: '',
   thinkingEnabled: true,
   thinkingEffort: 'max',
+  multimodalEnabled: false,
+  multimodalModelTier: 'all',
   debugEnabled: false,
   chatBordersEnabled: true,
   temperature: 0.7,

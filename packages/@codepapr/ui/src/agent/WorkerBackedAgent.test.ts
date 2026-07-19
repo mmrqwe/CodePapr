@@ -78,6 +78,8 @@ function createAgent(): WorkerBackedAgent {
       mcp: normalizeMcpSettings(),
       graphToolTimeoutMs: 600_000,
       toolIpcTimeoutMs: 120_000,
+      multimodalEnabled: false,
+      multimodalModelTier: 'all',
     },
     providerName: 'deepseek',
     model: 'deepseek-test',

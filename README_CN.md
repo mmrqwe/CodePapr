@@ -132,8 +132,8 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 
 | Agent | 用途 | 模型 | 工具 |
 |-------|------|------|------|
-| **explore** | 只读代码分析 | fast | read, graph, lsp, diagnostics, time |
-| **scout** | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, open, time |
+| **explore** | 只读代码分析 | fast | read, read_image, graph, lsp, diagnostics, time |
+| **scout** | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image, open, time |
 | **mentor** | 架构/算法指导 | 可配置独立模型 | 无 |
 
 主 Agent 通过 `task` 工具调度子代理。每个子代理拥有**独立的 Session 和空白上下文**，只接收委派的任务描述，不受主 Agent 历史对话污染。子代理有 5 分钟整体超时，单次工具调用有 90 秒超时保护。

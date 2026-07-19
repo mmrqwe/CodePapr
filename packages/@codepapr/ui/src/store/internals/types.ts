@@ -13,19 +13,36 @@ export type ApiMode = 'deepseek' | 'custom' | 'local';
 export type ApiFormat = 'openai' | 'claude';
 export type ProviderName = 'deepseek' | ApiFormat;
 export type Lang = 'zh-CN' | 'zh-TW' | 'en';
+export type MultimodalModelTier = 'primary' | 'fast' | 'all';
+
+export interface ModeConfig {
+  apiKey: string;
+  baseURL: string;
+  model: string;
+  fastModel: string;
+}
 
 export interface Settings {
   apiMode: ApiMode;
   apiFormat: ApiFormat;
   provider: ProviderName;
+
+  // Per-mode independent configs (source of truth)
+  deepseek: ModeConfig;
+  custom: ModeConfig;
+  local: ModeConfig;
+
+  // Flat derivatives synced from active mode (for ease of use)
   baseURL: string;
   model: string;
-  fastModelEnabled: boolean;
   fastModel: string;
   apiKey: string;
+  fastModelEnabled: boolean;
   systemPrompt: string;
   thinkingEnabled: boolean;
   thinkingEffort: 'high' | 'max';
+  multimodalEnabled: boolean;
+  multimodalModelTier: MultimodalModelTier;
   debugEnabled: boolean;
   chatBordersEnabled: boolean;
   temperature: number;

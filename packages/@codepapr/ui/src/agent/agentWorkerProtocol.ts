@@ -54,6 +54,8 @@ export interface WorkerAgentSettings {
   mcp: McpSettings;
   graphToolTimeoutMs: number;
   toolIpcTimeoutMs: number;
+  multimodalEnabled: boolean;
+  multimodalModelTier: 'primary' | 'fast' | 'all';
 }
 
 export interface WorkerAgentParameters {

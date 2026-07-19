@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::Read;
 
+use base64::Engine;
 use serde::Serialize;
 
 use crate::shared::{
@@ -8,7 +9,7 @@ use crate::shared::{
     run_blocking_workspace_task, PathLocationInput,
 };
 
-use super::types::{ReadFileResult, ReadWindow};
+use super::types::{ReadFileResult, ReadImageFileResult, ReadWindow};
 use super::{
     DEFAULT_ANCHORED_CONTEXT_LINES, DEFAULT_MAX_READ_BYTES, MAX_RANGE_SOURCE_BYTES, MAX_READ_BYTES,
     MAX_READ_CONTEXT_LINES,
@@ -316,6 +317,85 @@ pub(crate) async fn read_text_files_batch(
         Ok(results)
     })
     .await
+}
+
+const DEFAULT_MAX_READ_IMAGE_BYTES: usize = 5_000_000;
+const MAX_READ_IMAGE_BYTES: usize = 25_000_000;
+
+const IMAGE_EXTENSIONS: &[(&str, &str)] = &[
+    ("png", "image/png"),
+    ("jpg", "image/jpeg"),
+    ("jpeg", "image/jpeg"),
+    ("webp", "image/webp"),
+    ("gif", "image/gif"),
+    ("bmp", "image/bmp"),
+    ("svg", "image/svg+xml"),
+];
+
+fn detect_media_type(path: &std::path::Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    IMAGE_EXTENSIONS
+        .iter()
+        .find(|(e, _)| *e == ext)
+        .map(|(_, mt)| *mt)
+}
+
+#[tauri::command]
+pub(crate) async fn read_image_file(
+    workspace_path: String,
+    relative_path: String,
+    max_bytes: Option<usize>,
+) -> Result<ReadImageFileResult, String> {
+    run_blocking_workspace_task(move || {
+        read_image_file_impl(workspace_path, relative_path, max_bytes)
+    })
+    .await
+}
+
+pub(crate) fn read_image_file_impl(
+    workspace_path: String,
+    relative_path: String,
+    max_bytes: Option<usize>,
+) -> Result<ReadImageFileResult, String> {
+    let max_bytes = max_bytes
+        .unwrap_or(DEFAULT_MAX_READ_IMAGE_BYTES)
+        .clamp(1_000, MAX_READ_IMAGE_BYTES);
+
+    let path_input = parse_workspace_path_input(Some(&relative_path));
+    let (workspace, target) = resolve_existing_path(&workspace_path, Some(&path_input.path))?;
+    if !target.is_file() {
+        return Err("read_image 需要传入文件路径".to_string());
+    }
+
+    let media_type = detect_media_type(&target)
+        .ok_or_else(|| "不支持的文件格式，仅支持 PNG、JPEG、WebP、GIF、BMP、SVG".to_string())?
+        .to_string();
+
+    let metadata = fs::metadata(&target)
+        .map_err(|err| format!("无法读取文件信息: {err}"))?;
+    let file_size = metadata.len() as usize;
+
+    if file_size > max_bytes {
+        return Err(format!(
+            "图片文件过大（{} bytes），超过限制（{} bytes）",
+            file_size, max_bytes
+        ));
+    }
+
+    let mut file = fs::File::open(&target)
+        .map_err(|err| format!("无法打开文件 {}: {err}", target.display()))?;
+    let mut buffer = Vec::with_capacity(file_size);
+    file.read_to_end(&mut buffer)
+        .map_err(|err| format!("读取文件失败: {err}"))?;
+
+    let data = base64::engine::general_purpose::STANDARD.encode(&buffer);
+
+    Ok(ReadImageFileResult {
+        path: relative_string(&workspace, &target),
+        media_type,
+        data,
+        bytes: file_size,
+    })
 }
 
 pub(crate) fn decode_text_bytes(bytes: Vec<u8>) -> Result<String, String> {

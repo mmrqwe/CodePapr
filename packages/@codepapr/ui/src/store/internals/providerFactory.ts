@@ -69,6 +69,8 @@ export function toWorkerAgentSettings(settings: Settings): WorkerAgentSettings {
   mcp: settings.mcp,
   graphToolTimeoutMs: settings.graphToolTimeoutMs,
   toolIpcTimeoutMs: settings.toolIpcTimeoutMs,
+  multimodalEnabled: settings.multimodalEnabled,
+  multimodalModelTier: settings.multimodalModelTier,
 };
 }
 

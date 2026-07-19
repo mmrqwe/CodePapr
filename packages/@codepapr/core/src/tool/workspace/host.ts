@@ -17,6 +17,13 @@ export interface WorkspaceHostReadTextFileResult {
   bytes: number;
 }
 
+export interface WorkspaceHostReadImageFileResult {
+  path?: string;
+  mediaType: string;
+  data: string;
+  bytes: number;
+}
+
 export interface WorkspaceHostWriteTextFileResult {
   path: string;
   bytes: number;

@@ -33,6 +33,15 @@ pub(crate) struct ReadFileResult {
     pub(crate) location_column: Option<usize>,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReadImageFileResult {
+    pub(crate) path: String,
+    pub(crate) media_type: String,
+    pub(crate) data: String,
+    pub(crate) bytes: usize,
+}
+
 pub(crate) struct ReadWindow {
     pub(crate) start_line: usize,
     pub(crate) end_line: usize,

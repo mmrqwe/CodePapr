@@ -48,7 +48,7 @@ CodePapr 是一个**本地优先（local-first）的编码 Agent 运行时**，�
 | Workspace 包数量 | 8（types / common / core / api / db / cli / editor / ui） |
 | TypeScript 文件总数 | 约 233 个（含约 70 个 `*.test.ts` / `*.test.tsx`） |
 | Rust 源文件数量 | 约 53 个（`src-tauri/`，含各模块内联 `tests.rs`） |
-| LLM 可调用工具数 | 25 个合并工具（含 `task` / `todo` 两个动态工具） |
+| LLM 可调用工具数 | 26 个合并工具（含 `task` / `todo` 两个动态工具） |
 | 内置子代理 | 3 个（explore / scout / mentor） |
 | 文档 | 中英双语（`ARCHITECTURE`、`SETUP`、`USAGE`）+ `PROBLEMS.md` 踩坑记录 |
 
@@ -88,7 +88,7 @@ CodePapr 是一个**本地优先（local-first）的编码 Agent 运行时**，�
 
 ### 2.5 工具系统设计：合并式 Action 是好的取舍
 
-25 个工具里有 7 个通过 `action` 枚举复用同一个工具入口（如 `git` 承担 status/diff/log/branch/stage/commit/restore/reset 八个动作），这种设计有效控制了暴露给 LLM 的工具数量，减少了系统提示词膨胀，同时通过 `enum` 约束降低了 LLM 传错 action 的概率。`ToolRegistry` 统一注册并在冻结后计算 hash 保证缓存一致性，这个设计与"最大化 DeepSeek 前缀缓存命中"的项目目标是自洽的。
+26 个工具里有 7 个通过 `action` 枚举复用同一个工具入口（如 `git` 承担 status/diff/log/branch/stage/commit/restore/reset 八个动作），这种设计有效控制了暴露给 LLM 的工具数量，减少了系统提示词膨胀，同时通过 `enum` 约束降低了 LLM 传错 action 的概率。`ToolRegistry` 统一注册并在冻结后计算 hash 保证缓存一致性，这个设计与"最大化 DeepSeek 前缀缓存命中"的项目目标是自洽的。
 
 ---
 

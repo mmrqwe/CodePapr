@@ -52,6 +52,7 @@ import {
 } from '@codepapr/core';
 import type { EditHistory } from '@codepapr/core';
 import type { IToolDefinition } from '@codepapr/types';
+import type { IImageContent } from '@codepapr/types';
 import { usePreviewStore, type PreviewSession } from '../store/previewStore';
 import { useAgentStore } from '../store/agentStore';
 import { usePermissionStore, isAbsolutePath } from '../store/permissionStore';
@@ -109,6 +110,18 @@ interface ReadFileResult {
   truncatedByBytes: boolean;
   locationLine?: number;
   locationColumn?: number;
+}
+
+interface ReadImageFileArgs {
+  relativePath: string;
+  maxBytes?: number;
+}
+
+interface ReadImageFileResult {
+  path: string;
+  mediaType: string;
+  data: string;
+  bytes: number;
 }
 
 interface WriteFileArgs {
@@ -1661,6 +1674,7 @@ name: 'web_download_file',
 
 export interface RegisterWorkspaceToolsOptions {
   disableWebSearchTools?: boolean;
+  multimodalEnabled?: boolean;
 }
 
 export function registerWorkspaceTools(
@@ -1954,6 +1968,31 @@ export function registerWorkspaceTools(
       contextLines: parsed.contextLines,
     });
   });
+
+  if (options.multimodalEnabled) {
+    registry.register(toolByName('workspace_read_image'), async (args: Record<string, unknown>) => {
+      const parsed: ReadImageFileArgs = {
+        relativePath: asString(args.relativePath, 'relativePath'),
+        maxBytes: asOptionalNumber(args.maxBytes),
+      };
+      await ensureExternalPathAllowed(parsed.relativePath, 'read');
+      const result = await invoke<ReadImageFileResult>('read_image_file', {
+        workspacePath: workspace(),
+        relativePath: parsed.relativePath,
+        maxBytes: parsed.maxBytes,
+      });
+      const images: IImageContent[] = [{
+        mediaType: result.mediaType,
+        data: result.data,
+      }];
+      return {
+        path: result.path,
+        mediaType: result.mediaType,
+        bytes: result.bytes,
+        __images: images,
+      };
+    });
+  }
 
   registry.register(toolByName('workspace_write_file'), async (args: Record<string, unknown>) => {
     const parsed: WriteFileArgs = {
@@ -2439,7 +2478,7 @@ export function registerWorkspaceTools(
       timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
     };
 
-    return await invoke<BrowserPageScreenshotResult>('screenshot_browser_page', {
+    const result = await invoke<BrowserPageScreenshotResult>('screenshot_browser_page', {
       workspacePath: workspace(),
       relativePath: parsed.relativePath,
       selector: parsed.selector,
@@ -2447,6 +2486,26 @@ export function registerWorkspaceTools(
       format: parsed.format,
       timeoutSeconds: parsed.timeoutSeconds,
     });
+
+    if (options.multimodalEnabled) {
+      const ext = result.format.toLowerCase();
+      const mediaType = ext === 'jpeg' ? 'image/jpeg' : 'image/png';
+      const imgResult = await invoke<ReadImageFileResult>('read_image_file', {
+        workspacePath: workspace(),
+        relativePath: result.path,
+        maxBytes: undefined,
+      });
+      const images: IImageContent[] = [{
+        mediaType: imgResult.mediaType || mediaType,
+        data: imgResult.data,
+      }];
+      return {
+        ...result,
+        __images: images,
+      };
+    }
+
+    return result;
   });
 
   registry.register(toolByName('browser_close_page'), async (args: Record<string, unknown>) => {
@@ -3287,7 +3346,7 @@ export function registerWorkspaceTools(
 
   // ── 细粒度工具（对 LLM 隐藏）─────────────────────
   const oldToolNames = [
-    'workspace_list_files', 'workspace_read_file', 'workspace_write_file',
+    'workspace_list_files', 'workspace_read_file', 'workspace_read_image', 'workspace_write_file',
     'workspace_search_text', 'workspace_search_files',
     'workspace_apply_patch', 'workspace_apply_diff',
     'workspace_project_graph', 'workspace_symbol_lookup', 'workspace_dependency_subgraph',
@@ -3375,6 +3434,12 @@ export function registerWorkspaceTools(
       };
     },
   });
+
+  if (options.multimodalEnabled) {
+    registry.register(toolByName('read_image'), async (args) => {
+      return registry.execute('workspace_read_image', args);
+    });
+  }
 
   for (const name of oldToolNames) {
     registry.hideFromLlm(name);

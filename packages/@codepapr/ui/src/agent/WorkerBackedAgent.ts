@@ -19,6 +19,16 @@ import type {
   WorkerAgentSettings,
 } from './agentWorkerProtocol';
 
+function resolveWorkerMultimodalEnabled(settings: WorkerAgentSettings, currentModel: string): boolean {
+  if (!settings.multimodalEnabled) return false;
+  if (settings.multimodalModelTier === 'all') return true;
+  const fastModel = settings.fastModel.trim();
+  const isFastModel = settings.fastModelEnabled && fastModel.length > 0 && currentModel === fastModel;
+  if (settings.multimodalModelTier === 'primary' && !isFastModel) return true;
+  if (settings.multimodalModelTier === 'fast' && isFastModel) return true;
+  return false;
+}
+
 interface PendingToolCall {
   toolCallId: string;
   toolName: string;
@@ -127,7 +137,10 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
     config.workspacePath,
     config.runtime.editHistory,
     config.runtime.onWorkspaceMutated,
-    { disableWebSearchTools: hasEnabledMcpSearch(config.settings.mcp) },
+    {
+      disableWebSearchTools: hasEnabledMcpSearch(config.settings.mcp),
+      multimodalEnabled: resolveWorkerMultimodalEnabled(config.settings, config.model),
+    },
   );
 
   // TodoList 工具：handler 改主线程的 store，由 Worker 通过 tool-request 桥回执行
