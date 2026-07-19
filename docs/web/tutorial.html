@@ -190,12 +190,14 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opac
 .badge-ask{background:rgba(99,102,241,0.12);color:#a5b4fc}
 .badge-plan{background:rgba(245,158,11,0.12);color:#fbbf24}
 .badge-agent{background:rgba(34,197,94,0.12);color:#4ade80}
+.badge-app{background:rgba(45,212,191,0.12);color:#2dd4bf}
 .badge-note{background:rgba(139,92,246,0.1);color:#c4b5fd}
 [data-theme="light"] .badge-ask{color:#bf4f28;background:rgba(217,103,62,0.1)}
 [data-theme="light"] .badge-plan{color:#a56a1d}
 [data-theme="light"] .badge-agent{color:#15803d}
+[data-theme="light"] .badge-app{color:#0f766e}
 [data-theme="light"] .badge-note{color:#bf4f28;background:rgba(217,103,62,0.08)}
-@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .badge-ask{color:#bf4f28;background:rgba(217,103,62,0.1)}:root:not([data-theme="dark"]) .badge-plan{color:#a56a1d}:root:not([data-theme="dark"]) .badge-agent{color:#15803d}:root:not([data-theme="dark"]) .badge-note{color:#bf4f28;background:rgba(217,103,62,0.08)}}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .badge-ask{color:#bf4f28;background:rgba(217,103,62,0.1)}:root:not([data-theme="dark"]) .badge-plan{color:#a56a1d}:root:not([data-theme="dark"]) .badge-agent{color:#15803d}:root:not([data-theme="dark"]) .badge-app{color:#0f766e}:root:not([data-theme="dark"]) .badge-note{color:#bf4f28;background:rgba(217,103,62,0.08)}}
 
 /* Tip/Info/Warning boxes */
 .callout{border-left:2px solid var(--accent);padding:14px 18px;margin:18px 0;background:var(--accent-soft);border-radius:0 var(--radius-xs) var(--radius-xs) 0;font-size:0.85rem;color:var(--foreground-muted)}
@@ -684,6 +686,44 @@ https://api.deepseek.com/v1</code></pre>
           <li>文件改动后会异步派发后台诊断；同一失败指纹不会重复触发修复</li>
         </ul>
 
+        <h3><span class="badge badge-app">App</span> 应用生成模式</h3>
+        <p><strong>适合：</strong>数据探索与可视化、生成交互式图表和仪表盘、一句话将分析结果变成可交互的 HTML 应用。</p>
+        <p><strong>核心理念：</strong></p>
+        <ul>
+          <li>你的直接产出<strong>不是 Markdown 回答</strong>——而是一个完整的 HTML 应用</li>
+          <li>就像即时开发一个针对当前问题的专用工具</li>
+          <li>与编码 Agent 完全不同——它是"应用工厂"，不是"写代码的人"</li>
+        </ul>
+        <p><strong>工作流程：</strong></p>
+        <ol>
+          <li>探索数据源：用 workspace_read_file / MCP 工具理解数据结构</li>
+          <li>生成应用：用 workspace_write_file 写完整 HTML 到 <code>.CodePapr/apps/&lt;appId&gt;/index.html</code></li>
+          <li>渲染结果：调用 <code>app_render</code> 工具渲染到右侧"应用"面板</li>
+        </ol>
+        <p><strong>HTML 应用规范：</strong></p>
+        <ul>
+          <li>单文件内联 HTML——不需要组件拆分或构建系统</li>
+          <li>通过 CDN 引用图表库（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js 等）</li>
+          <li>在沙箱 iframe 中运行（<code>sandbox="allow-scripts"</code>），无法访问本地文件系统或 Tauri 内部 API</li>
+          <li>appId 必须是 kebab-case，相同 appId 再次调用覆盖更新——支持迭代改进</li>
+        </ul>
+        <p><strong>会话隔离：</strong></p>
+        <ul>
+          <li>App 会话与其他模式<strong>完全隔离</strong>——选定后 🔒 锁定，不可中途切换</li>
+          <li>编码会话（Ask/Plan/Agent）中 App 选项被隐藏</li>
+          <li>切换模式 → 新建会话</li>
+        </ul>
+        <p><strong>模型策略：</strong>始终使用主模型（deepseek-v4-pro）以保证 HTML 生成质量。</p>
+
+        <h3>App 模式典型场景</h3>
+        <ul>
+          <li><strong>数据库分析：</strong>"分析这个 SQLite 的表结构，生成一个 Database Explorer"</li>
+          <li><strong>人物关系图：</strong>"把人物关系做成 D3 力导向图"</li>
+          <li><strong>股票仪表盘：</strong>"生成带有 K 线图和龙虎榜的 dashboard"</li>
+          <li><strong>文件分析：</strong>"分析 paper-map——引用网络、作者关系、Topic Cluster"</li>
+          <li><strong>地域可视化：</strong>"分析唐朝宰相的地域分布，做成可缩放地图"</li>
+        </ul>
+
         <h3>如何给出有效任务</h3>
         <p>CodePapr 的实际表现很依赖任务描述质量。最有效的提示词通常包含：</p>
         <ul>
@@ -902,6 +942,14 @@ https://api.deepseek.com/v1</code></pre>
             <tr><td><code>browser</code> open / navigate / reload / close</td><td>内置浏览器：打开 URL、导航、刷新、关闭</td></tr>
             <tr><td><code>browser</code> click / type / read / screenshot / get</td><td>浏览器交互：点击元素、输入文本、读取 DOM、截图、读状态</td></tr>
             <tr><td><code>open</code></td><td>在系统默认浏览器打开 URL 或项目内 HTML 文件</td></tr>
+          </tbody>
+        </table>
+
+        <h3>应用渲染</h3>
+        <table>
+          <thead><tr><th>工具</th><th>能力</th></tr></thead>
+          <tbody>
+            <tr><td><code>app_render</code></td><td>将 HTML 应用渲染到右侧"应用"面板；相同 appId 覆盖更新。与 workspace_write_file 配合使用，先写 HTML 再渲染。HTML 在沙箱 iframe 中运行（allow-scripts），通过 CDN 引用图表库。</td></tr>
           </tbody>
         </table>
 

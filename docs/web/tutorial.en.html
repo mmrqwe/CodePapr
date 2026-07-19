@@ -190,12 +190,14 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opac
 .badge-ask{background:rgba(99,102,241,0.12);color:#a5b4fc}
 .badge-plan{background:rgba(245,158,11,0.12);color:#fbbf24}
 .badge-agent{background:rgba(34,197,94,0.12);color:#4ade80}
+.badge-app{background:rgba(45,212,191,0.12);color:#2dd4bf}
 .badge-note{background:rgba(139,92,246,0.1);color:#c4b5fd}
 [data-theme="light"] .badge-ask{color:#bf4f28;background:rgba(217,103,62,0.1)}
 [data-theme="light"] .badge-plan{color:#a56a1d}
 [data-theme="light"] .badge-agent{color:#15803d}
+[data-theme="light"] .badge-app{color:#0f766e}
 [data-theme="light"] .badge-note{color:#bf4f28;background:rgba(217,103,62,0.08)}
-@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .badge-ask{color:#bf4f28;background:rgba(217,103,62,0.1)}:root:not([data-theme="dark"]) .badge-plan{color:#a56a1d}:root:not([data-theme="dark"]) .badge-agent{color:#15803d}:root:not([data-theme="dark"]) .badge-note{color:#bf4f28;background:rgba(217,103,62,0.08)}}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .badge-ask{color:#bf4f28;background:rgba(217,103,62,0.1)}:root:not([data-theme="dark"]) .badge-plan{color:#a56a1d}:root:not([data-theme="dark"]) .badge-agent{color:#15803d}:root:not([data-theme="dark"]) .badge-app{color:#0f766e}:root:not([data-theme="dark"]) .badge-note{color:#bf4f28;background:rgba(217,103,62,0.08)}}
 
 /* Tip/Info/Warning boxes */
 .callout{border-left:2px solid var(--accent);padding:14px 18px;margin:18px 0;background:var(--accent-soft);border-radius:0 var(--radius-xs) var(--radius-xs) 0;font-size:0.85rem;color:var(--foreground-muted)}
@@ -684,6 +686,44 @@ https://api.deepseek.com/v1</code></pre>
           <li>After file changes, background diagnostics are dispatched asynchronously; identical failure fingerprints won't trigger repeated fixes</li>
         </ul>
 
+        <h3><span class="badge badge-app">App</span> Application Generation Mode</h3>
+        <p><strong>Best for:</strong> Data exploration and visualization, generating interactive charts and dashboards, turning analysis results into interactive HTML apps with a single sentence.</p>
+        <p><strong>Core Philosophy:</strong></p>
+        <ul>
+          <li>Your output is <strong>not a Markdown answer</strong> — it is a complete HTML application</li>
+          <li>Like instantly building a purpose-built tool for the current problem</li>
+          <li>Fundamentally different from the coding Agent — it's an "app factory," not a "code writer"</li>
+        </ul>
+        <p><strong>Workflow:</strong></p>
+        <ol>
+          <li>Explore data: use workspace_read_file / MCP tools to understand data structure</li>
+          <li>Generate the app: use workspace_write_file to save a complete HTML to <code>.CodePapr/apps/&lt;appId&gt;/index.html</code></li>
+          <li>Render result: call <code>app_render</code> to render in the right-side Application panel</li>
+        </ol>
+        <p><strong>HTML App Conventions:</strong></p>
+        <ul>
+          <li>Single-file inline HTML — no component splitting or build systems</li>
+          <li>Reference chart libraries via CDN (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js, etc.)</li>
+          <li>Runs in a sandboxed iframe (<code>sandbox="allow-scripts"</code>) — cannot access local file system or Tauri internal APIs</li>
+          <li>appId must be kebab-case; calling with the same appId updates in place — supports iterative refinement</li>
+        </ul>
+        <p><strong>Session Isolation:</strong></p>
+        <ul>
+          <li>App sessions are <strong>fully isolated</strong> from other modes — locked 🔒 once selected, cannot switch mid-session</li>
+          <li>Coding sessions (Ask/Plan/Agent) hide the App option</li>
+          <li>To switch modes → create a new session</li>
+        </ul>
+        <p><strong>Model Strategy:</strong> Always uses the primary model (deepseek-v4-pro) to ensure HTML generation quality.</p>
+
+        <h3>App Mode Example Scenarios</h3>
+        <ul>
+          <li><strong>Database analysis:</strong> "Analyze this SQLite schema and generate a Database Explorer"</li>
+          <li><strong>Relationship diagrams:</strong> "Make a D3 force-directed graph of character relationships"</li>
+          <li><strong>Stock dashboards:</strong> "Generate a dashboard with candlestick charts and order flow"</li>
+          <li><strong>Document analysis:</strong> "Analyze paper-map — citation network, author relationships, topic clusters"</li>
+          <li><strong>Geo-visualization:</strong> "Analyze the geographic distribution of Tang Dynasty chancellors as a zoomable map"</li>
+        </ul>
+
         <h3>How to Write Effective Tasks</h3>
         <p>CodePapr's actual performance depends heavily on task description quality. The most effective prompts typically include:</p>
         <ul>
@@ -902,6 +942,14 @@ After the change, at least run verification for the affected scope; if no narrow
             <tr><td><code>browser</code> open / navigate / reload / close</td><td>Built-in browser: open URL, navigate, refresh, close</td></tr>
             <tr><td><code>browser</code> click / type / read / screenshot / get</td><td>Browser interaction: click elements, type text, read DOM, screenshot, read state</td></tr>
             <tr><td><code>open</code></td><td>Open URL or project HTML file in the system default browser</td></tr>
+          </tbody>
+        </table>
+
+        <h3>App Render</h3>
+        <table>
+          <thead><tr><th>Tool</th><th>Capability</th></tr></thead>
+          <tbody>
+            <tr><td><code>app_render</code></td><td>Render HTML apps to the right-side Application panel; same appId updates in place. Use with workspace_write_file — write HTML first, then render. HTML runs in a sandboxed iframe (allow-scripts), reference chart libraries via CDN.</td></tr>
           </tbody>
         </table>
 
