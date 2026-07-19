@@ -86,77 +86,81 @@ fn write_text_file_impl(
 }
 
 #[tauri::command]
-pub(crate) fn delete_workspace_file(
+pub(crate) async fn delete_workspace_file(
     workspace_path: String,
     relative_path: String,
 ) -> Result<bool, String> {
-    let workspace = canonical_workspace(&workspace_path)?;
-    let raw = sanitize_workspace_path_input(Some(&relative_path));
-    if raw.is_empty() || raw == "." {
-        return Err("删除文件路径不能为空".to_string());
-    }
-
-    let target = {
-        let raw_path = PathBuf::from(&raw);
-        if raw_path.is_absolute() {
-            raw_path
-        } else {
-            workspace.join(normalize_relative_path(Some(&raw))?)
+    run_blocking_workspace_task(move || {
+        let workspace = canonical_workspace(&workspace_path)?;
+        let raw = sanitize_workspace_path_input(Some(&relative_path));
+        if raw.is_empty() || raw == "." {
+            return Err("删除文件路径不能为空".to_string());
         }
-    };
-    if !target.exists() {
-        return Ok(false);
-    }
 
-    let parent = target
-        .parent()
-        .ok_or_else(|| "无法确定目标文件目录".to_string())?;
-    let canonical_parent =
-        fs::canonicalize(parent).map_err(|err| format!("无法访问目标目录: {err}"))?;
-    if !canonical_parent.starts_with(&workspace) {
-        return Err("拒绝删除项目文件夹之外的路径".to_string());
-    }
-    if !target.is_file() {
-        return Err("仅支持删除文件".to_string());
-    }
+        let target = {
+            let raw_path = PathBuf::from(&raw);
+            if raw_path.is_absolute() {
+                raw_path
+            } else {
+                workspace.join(normalize_relative_path(Some(&raw))?)
+            }
+        };
+        if !target.exists() {
+            return Ok(false);
+        }
 
-    fs::remove_file(&target).map_err(|err| format!("删除文件 {} 失败: {err}", target.display()))?;
-    Ok(true)
+        let parent = target
+            .parent()
+            .ok_or_else(|| "无法确定目标文件目录".to_string())?;
+        let canonical_parent =
+            fs::canonicalize(parent).map_err(|err| format!("无法访问目标目录: {err}"))?;
+        if !canonical_parent.starts_with(&workspace) {
+            return Err("拒绝删除项目文件夹之外的路径".to_string());
+        }
+        if !target.is_file() {
+            return Err("仅支持删除文件".to_string());
+        }
+
+        fs::remove_file(&target).map_err(|err| format!("删除文件 {} 失败: {err}", target.display()))?;
+        Ok(true)
+    }).await
 }
 
 #[tauri::command]
-pub(crate) fn delete_workspace_dir(
+pub(crate) async fn delete_workspace_dir(
     workspace_path: String,
     relative_path: String,
 ) -> Result<bool, String> {
-    let workspace = canonical_workspace(&workspace_path)?;
-    let raw = sanitize_workspace_path_input(Some(&relative_path));
-    if raw.is_empty() || raw == "." {
-        return Err("删除目录路径不能为空".to_string());
-    }
-
-    let target = {
-        let raw_path = PathBuf::from(&raw);
-        if raw_path.is_absolute() {
-            raw_path
-        } else {
-            workspace.join(normalize_relative_path(Some(&raw))?)
+    run_blocking_workspace_task(move || {
+        let workspace = canonical_workspace(&workspace_path)?;
+        let raw = sanitize_workspace_path_input(Some(&relative_path));
+        if raw.is_empty() || raw == "." {
+            return Err("删除目录路径不能为空".to_string());
         }
-    };
-    if !target.exists() {
-        return Ok(false);
-    }
-    if !target.is_dir() {
-        return Err("仅支持删除目录".to_string());
-    }
 
-    let canonical_target =
-        fs::canonicalize(&target).map_err(|err| format!("无法访问目标目录: {err}"))?;
-    if !canonical_target.starts_with(&workspace) {
-        return Err("拒绝删除项目文件夹之外的路径".to_string());
-    }
+        let target = {
+            let raw_path = PathBuf::from(&raw);
+            if raw_path.is_absolute() {
+                raw_path
+            } else {
+                workspace.join(normalize_relative_path(Some(&raw))?)
+            }
+        };
+        if !target.exists() {
+            return Ok(false);
+        }
+        if !target.is_dir() {
+            return Err("仅支持删除目录".to_string());
+        }
 
-    fs::remove_dir_all(&target)
-        .map_err(|err| format!("删除目录 {} 失败: {err}", target.display()))?;
-    Ok(true)
+        let canonical_target =
+            fs::canonicalize(&target).map_err(|err| format!("无法访问目标目录: {err}"))?;
+        if !canonical_target.starts_with(&workspace) {
+            return Err("拒绝删除项目文件夹之外的路径".to_string());
+        }
+
+        fs::remove_dir_all(&target)
+            .map_err(|err| format!("删除目录 {} 失败: {err}", target.display()))?;
+        Ok(true)
+    }).await
 }

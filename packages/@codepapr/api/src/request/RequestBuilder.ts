@@ -18,6 +18,7 @@ import {
   IImmutablePrefix,
   IAppendOnlyLog,
   IToolDefinition,
+  IMessage,
   CacheConsistencyError,
 } from '@codepapr/types';
 import { Logger, sha256, estimateTokens } from '@codepapr/common';
@@ -79,7 +80,12 @@ export class RequestBuilder {
     // ✅ 检查 5: 构造消息数组（前缀 + 日志）
     const prefixMessages = opts.prefix.toMessageArray();
     const logMessages = opts.appendLog.toMessageArray();
-    const messages = [...prefixMessages, ...logMessages];
+    let messages = [...prefixMessages, ...logMessages];
+
+    // Strip images from consumed user messages
+    // Only the LAST user message with images keeps them; all earlier ones are stripped.
+    // This prevents old base64 data from bloating every subsequent request.
+    messages = stripConsumedImages(messages);
 
     // ✅ 检查 6: 确定性序列化
     const cacheRelevantMessages = this.toCacheRelevantMessages(messages);
@@ -262,6 +268,16 @@ export class RequestBuilder {
     this.lastPrefixHash = '';
   }
 
+  /**
+   * 同步日志计数器（用于 popLastMessage 后的恢复场景）
+   * 避免 validateAppendOnly 因消息减少而抛出 CacheConsistencyError
+   */
+  syncAfterPop(appendLog: IAppendOnlyLog): void {
+    const currentMessages = appendLog.toMessageArray();
+    this.lastLogMessagesHash = this.hashMessages(currentMessages);
+    this.lastLogMessageCount = appendLog.length();
+  }
+
   private hashMessages(messages: ReadonlyArray<unknown>): string {
     return sha256(Serializer.stringify(messages));
   }
@@ -303,4 +319,15 @@ export class RequestBuilder {
       ...(message.toolResult ? { toolCallId: message.toolResult.toolCallId } : {}),
     }));
   }
+}
+
+export function stripConsumedImages(messages: IMessage[]): IMessage[] {
+  return messages.map((msg, i) => {
+    if (msg.role !== 'user' || !msg.images || msg.images.length === 0) return msg;
+    const hasAssistantAfter = messages.slice(i + 1).some(m => m.role === 'assistant');
+    if (hasAssistantAfter) {
+      return { ...msg, images: undefined };
+    }
+    return msg;
+  });
 }

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppendOnlyLog, ImmutablePrefix } from '@codepapr/core';
 import { CacheConsistencyError, type IMessage, type IToolDefinition } from '@codepapr/types';
-import { RequestBuilder } from '../src';
+import { RequestBuilder, stripConsumedImages } from '../src';
 
 const parameters = { temperature: 0.7, topP: 0.9, maxTokens: 100 };
 
@@ -132,5 +132,63 @@ describe('RequestBuilder - DeepSeek cache stability', () => {
       type: 'session',
     });
     expect(claudeReq.cacheControl?.budgetTokens).toBeGreaterThan(0);
+  });
+});
+
+describe('stripConsumedImages', () => {
+  function user(content: string, images?: IMessage['images']): IMessage {
+    return { id: `u-${content}`, role: 'user', content, images, timestamp: 1 } as IMessage;
+  }
+  function assistant(content: string): IMessage {
+    return { id: `a-${content}`, role: 'assistant', content, timestamp: 2 } as IMessage;
+  }
+  function tool(id: string): IMessage {
+    return { id: `t-${id}`, role: 'tool', content: 'result', toolResult: { toolCallId: id, success: true, result: 'ok' }, timestamp: 3 } as IMessage;
+  }
+  const img = [{ mediaType: 'image/png', data: 'fakebase64' }];
+
+  it('strips image after model has responded (assistant after)', () => {
+    const msgs = [user('img', img), assistant('seen'), user('text')];
+    const result = stripConsumedImages(msgs);
+    expect(result[0].images).toBeUndefined();
+    expect(result[2].images).toBeUndefined();  // no images
+  });
+
+  it('keeps image not yet responded (no assistant after)', () => {
+    const msgs = [user('img', img), tool('t1')];
+    const result = stripConsumedImages(msgs);
+    expect(result[0].images).toEqual(img);
+  });
+
+  it('keeps first image, strips second (both consumed)', () => {
+    const msgs = [
+      user('img1', img),
+      assistant('a1'),
+      user('img2', img),
+      assistant('a2'),
+    ];
+    const result = stripConsumedImages(msgs);
+    expect(result[0].images).toBeUndefined();
+    expect(result[2].images).toBeUndefined();
+  });
+
+  it('returns unchanged when no images', () => {
+    const msgs = [user('hi'), assistant('hey')];
+    const result = stripConsumedImages(msgs);
+    expect(result).toEqual(msgs);
+  });
+
+  it('keeps new image, strips old consumed one', () => {
+    const msgs = [
+      user('img1', img),
+      assistant('a1'),
+      user('img2-noimg'),
+      assistant('a2'),
+      user('img3', img),  // last, no assistant after
+    ];
+    const result = stripConsumedImages(msgs);
+    expect(result[0].images).toBeUndefined();
+    expect(result[2].images).toBeUndefined(); // no images
+    expect(result[4].images).toEqual(img);
   });
 });

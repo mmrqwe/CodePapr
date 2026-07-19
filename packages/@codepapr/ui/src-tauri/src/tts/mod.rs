@@ -15,6 +15,7 @@ use std::sync::Mutex;
 use reqwest::blocking::Client;
 use tauri::Emitter;
 
+use crate::shared::run_blocking_workspace_task;
 use server::GptSovitsServer;
 
 static TTS_SERVER: std::sync::OnceLock<Mutex<Option<GptSovitsServer>>> =
@@ -719,7 +720,8 @@ pub fn tts_check_installed() -> Result<TtsInstallStatus, String> {
 /// Used to preload the fine-tuned model right after server start so the
 /// first synthesis doesn't fall back to the default pretrained model.
 #[tauri::command]
-pub fn tts_set_model(model_name: String) -> Result<(), String> {
+pub async fn tts_set_model(model_name: String) -> Result<(), String> {
+    run_blocking_workspace_task(move || {
     {
         let lock = tts_server_lock();
         let guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
@@ -772,6 +774,7 @@ pub fn tts_set_model(model_name: String) -> Result<(), String> {
         *g = Some(model_name);
     }
     Ok(())
+    }).await
 }
 
 // ---- Synthesis ----

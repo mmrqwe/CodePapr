@@ -2506,28 +2506,6 @@ export function registerWorkspaceTools(
       timeoutSeconds: parsed.timeoutSeconds,
     });
 
-    if (options.multimodalEnabled) {
-      const ext = result.format.toLowerCase();
-      const mediaType = ext === 'jpeg' ? 'image/jpeg' : 'image/png';
-      try {
-        const imgResult = await invoke<ReadImageFileResult>('read_image_file', {
-          workspacePath: workspace(),
-          relativePath: result.path,
-          maxBytes: undefined,
-        });
-        const images: IImageContent[] = [{
-          mediaType: imgResult.mediaType || mediaType,
-          data: imgResult.data,
-        }];
-        return {
-          ...result,
-          __images: images,
-        };
-      } catch {
-        // Image read-back failed (e.g. too large, timeout); still return the screenshot result
-      }
-    }
-
     return result;
   });
 

@@ -22,6 +22,7 @@ use crate::lsp_managed_tools::{
     dotnet_binary, ensure_managed_language_server, managed_lsp_commands, ManagedLspCommand,
     ManagedLspProgress,
 };
+use crate::shared::run_blocking_workspace_task;
 
 const LSP_STARTUP_TIMEOUT: Duration = Duration::from_secs(8);
 // 常规语义请求（hover/definition/references/rename/...）单独用更长的超时：大型项目里
@@ -1394,36 +1395,38 @@ pub fn stop_all_servers() {
 }
 
 #[tauri::command]
-pub fn lsp_start_server(
+pub async fn lsp_start_server(
     workspace_path: String,
     language_id: String,
 ) -> Result<LspServerStatus, String> {
-    let sanitized_language_id = language_id.trim().to_lowercase();
-    if sanitized_language_id.is_empty() {
-        return Err("language_id 不能为空".to_string());
-    }
-    if sanitized_language_id
-        .contains(|c: char| c.is_control() || c == '`' || c == '$' || c == '|' || c == ';')
-    {
-        return Err(format!("language_id 包含非法字符: {language_id}"));
-    }
-    let sanitized_workspace = workspace_path.trim().to_string();
-    if sanitized_workspace.is_empty() {
-        return Err("workspace_path 不能为空".to_string());
-    }
-
-    match ensure_running_server_handle(None, &sanitized_workspace, &sanitized_language_id).and_then(
-        |server| {
-            let server = lock_server(&server)?;
-            Ok(server_status(&sanitized_language_id, &server))
-        },
-    ) {
-        Ok(status) => Ok(status),
-        Err(err) if lsp_fallback::supports_language(&sanitized_language_id) => {
-            fallback_server_status(&sanitized_language_id, &sanitized_workspace).map_err(|_| err)
+    run_blocking_workspace_task(move || {
+        let sanitized_language_id = language_id.trim().to_lowercase();
+        if sanitized_language_id.is_empty() {
+            return Err("language_id 不能为空".to_string());
         }
-        Err(err) => Err(err),
-    }
+        if sanitized_language_id
+            .contains(|c: char| c.is_control() || c == '`' || c == '$' || c == '|' || c == ';')
+        {
+            return Err(format!("language_id 包含非法字符: {language_id}"));
+        }
+        let sanitized_workspace = workspace_path.trim().to_string();
+        if sanitized_workspace.is_empty() {
+            return Err("workspace_path 不能为空".to_string());
+        }
+
+        match ensure_running_server_handle(None, &sanitized_workspace, &sanitized_language_id).and_then(
+            |server| {
+                let server = lock_server(&server)?;
+                Ok(server_status(&sanitized_language_id, &server))
+            },
+        ) {
+            Ok(status) => Ok(status),
+            Err(err) if lsp_fallback::supports_language(&sanitized_language_id) => {
+                fallback_server_status(&sanitized_language_id, &sanitized_workspace).map_err(|_| err)
+            }
+            Err(err) => Err(err),
+        }
+    }).await
 }
 
 pub(crate) fn lsp_open_document_with_app(
@@ -1584,13 +1587,24 @@ pub fn lsp_close_document(
 }
 
 #[tauri::command]
-pub fn lsp_request(
+pub async fn lsp_request(
     workspace_path: String,
     language_id: String,
     method: String,
     params: Value,
 ) -> Result<LspResponse, String> {
-    let server_handle = match ensure_running_server_handle(None, &workspace_path, &language_id) {
+    run_blocking_workspace_task(move || {
+        lsp_request_impl(&workspace_path, &language_id, &method, &params)
+    }).await
+}
+
+pub(crate) fn lsp_request_impl(
+    workspace_path: &str,
+    language_id: &str,
+    method: &str,
+    params: &Value,
+) -> Result<LspResponse, String> {
+    let server_handle = match ensure_running_server_handle(None, workspace_path, language_id) {
         Ok(h) => Some(h),
         Err(_) => None,
     };
@@ -1656,8 +1670,8 @@ pub fn lsp_request(
 
     match request_result {
         Ok(response) => Ok(response),
-        Err(err) if lsp_fallback::supports_language(&language_id) => {
-            let result = lsp_fallback::request(&workspace_path, &language_id, &method, &params)
+        Err(err) if lsp_fallback::supports_language(language_id) => {
+            let result = lsp_fallback::request(workspace_path, language_id, method, params)
                 .ok_or(err.clone())??;
             Ok(LspResponse {
                 message: json!({ "result": result }),

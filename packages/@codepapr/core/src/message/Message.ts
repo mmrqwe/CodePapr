@@ -32,11 +32,13 @@ export class MessageFactory {
   }
 
   static tool(toolCallId: string, result: unknown, success: boolean = true): IMessage {
-    const toolResult: IToolResult = { toolCallId, success, result };
+    const cleanedResult =
+      typeof result === 'string' ? result : stripInternalFields(result);
+    const toolResult: IToolResult = { toolCallId, success, result: cleanedResult };
     const content =
-      typeof result === 'string'
-        ? result
-        : sortedStringify(stripInternalFields(result));
+      typeof cleanedResult === 'string'
+        ? cleanedResult
+        : sortedStringify(cleanedResult);
     return deepFreeze({
       id: generateUUID(),
       role: 'tool',
@@ -49,7 +51,7 @@ export class MessageFactory {
 
 const INTERNAL_FIELDS = new Set(['__images', '__question']);
 
-function stripInternalFields(value: unknown): unknown {
+export function stripInternalFields(value: unknown): unknown {
   if (value === null || value === undefined) return value;
   if (Array.isArray(value)) {
     return value.map(stripInternalFields);

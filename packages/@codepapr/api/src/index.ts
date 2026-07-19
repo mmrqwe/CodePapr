@@ -15,7 +15,7 @@ export {
 } from './providers/imageContent';
 
 // Request / Response
-export { RequestBuilder } from './request/RequestBuilder';
+export { RequestBuilder, stripConsumedImages } from './request/RequestBuilder';
 export { CacheValidator } from './response/CacheValidator';
 export { DEFAULT_MAX_TOKENS, DEEPSEEK_MAX_TOKENS, getProviderMaxTokensLimit, sanitizeMaxTokens } from './tokenLimits';
 

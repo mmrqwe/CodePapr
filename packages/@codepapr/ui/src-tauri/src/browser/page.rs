@@ -362,77 +362,85 @@ pub(crate) fn open_browser_target(
 }
 
 #[tauri::command]
-pub(crate) fn open_browser_page(
+pub(crate) async fn open_browser_page(
     workspace_path: String,
     url: String,
 ) -> Result<BrowserPageSessionResult, String> {
-    open_or_navigate_browser_page_session(&workspace_path, &url)
+    run_blocking_workspace_task(move || {
+        open_or_navigate_browser_page_session(&workspace_path, &url)
+    }).await
 }
 
 #[tauri::command]
-pub(crate) fn navigate_browser_page(
+pub(crate) async fn navigate_browser_page(
     workspace_path: String,
     url: String,
 ) -> Result<BrowserPageSessionResult, String> {
-    open_or_navigate_browser_page_session(&workspace_path, &url)
+    run_blocking_workspace_task(move || {
+        open_or_navigate_browser_page_session(&workspace_path, &url)
+    }).await
 }
 
 #[tauri::command]
-pub(crate) fn reload_browser_page(
+pub(crate) async fn reload_browser_page(
     workspace_path: String,
 ) -> Result<BrowserPageSessionResult, String> {
-    let workspace_key = browser_workspace_key(&workspace_path)?;
+    run_blocking_workspace_task(move || {
+        let workspace_key = browser_workspace_key(&workspace_path)?;
 
-    with_browser_page_sessions(|sessions| {
-        let session = sessions
-            .get_mut(&workspace_key)
-            .ok_or_else(|| "当前工作区没有活动中的浏览页会话，请先打开页面。".to_string())?;
+        with_browser_page_sessions(|sessions| {
+            let session = sessions
+                .get_mut(&workspace_key)
+                .ok_or_else(|| "当前工作区没有活动中的浏览页会话，请先打开页面。".to_string())?;
 
-        reload_browser_tab(&session.tab)?;
-        browser_page_state(session)
-    })
+            reload_browser_tab(&session.tab)?;
+            browser_page_state(session)
+        })
+    }).await
 }
 
 #[tauri::command]
-pub(crate) fn click_browser_page_element(
+pub(crate) async fn click_browser_page_element(
     workspace_path: String,
     selector: String,
     selector_type: Option<String>,
     wait_for_navigation: Option<bool>,
     timeout_seconds: Option<u64>,
 ) -> Result<BrowserPageActionResult, String> {
-    let workspace_key = browser_workspace_key(&workspace_path)?;
-    let selector_kind = parse_browser_selector_kind(selector_type.as_deref())?;
-    let timeout = browser_action_timeout(timeout_seconds);
+    run_blocking_workspace_task(move || {
+        let workspace_key = browser_workspace_key(&workspace_path)?;
+        let selector_kind = parse_browser_selector_kind(selector_type.as_deref())?;
+        let timeout = browser_action_timeout(timeout_seconds);
 
-    with_browser_page_sessions(|sessions| {
-        let session = sessions
-            .get_mut(&workspace_key)
-            .ok_or_else(|| "当前工作区没有活动中的浏览页会话，请先打开页面。".to_string())?;
+        with_browser_page_sessions(|sessions| {
+            let session = sessions
+                .get_mut(&workspace_key)
+                .ok_or_else(|| "当前工作区没有活动中的浏览页会话，请先打开页面。".to_string())?;
 
-        let element =
-            find_browser_element(session.tab.as_ref(), &selector, selector_kind, timeout)?;
-        element
-            .scroll_into_view()
-            .map_err(|err| format!("滚动到页面元素失败: {err}"))?;
-        element
-            .click()
-            .map_err(|err| format!("点击页面元素失败: {err}"))?;
+            let element =
+                find_browser_element(session.tab.as_ref(), &selector, selector_kind, timeout)?;
+            element
+                .scroll_into_view()
+                .map_err(|err| format!("滚动到页面元素失败: {err}"))?;
+            element
+                .click()
+                .map_err(|err| format!("点击页面元素失败: {err}"))?;
 
-        if wait_for_navigation.unwrap_or(false) {
-            session
-                .tab
-                .wait_until_navigated()
-                .map_err(|err| format!("等待页面完成跳转失败: {err}"))?;
-        }
+            if wait_for_navigation.unwrap_or(false) {
+                session
+                    .tab
+                    .wait_until_navigated()
+                    .map_err(|err| format!("等待页面完成跳转失败: {err}"))?;
+            }
 
-        browser_page_action_result("click", session, Some(selector), Some(selector_kind))
-    })
+            browser_page_action_result("click", session, Some(selector), Some(selector_kind))
+        })
+    }).await
 }
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn input_browser_page_text(
+pub(crate) async fn input_browser_page_text(
     workspace_path: String,
     selector: String,
     text: String,
@@ -442,132 +450,136 @@ pub(crate) fn input_browser_page_text(
     wait_for_navigation: Option<bool>,
     timeout_seconds: Option<u64>,
 ) -> Result<BrowserPageActionResult, String> {
-    let workspace_key = browser_workspace_key(&workspace_path)?;
-    let selector_kind = parse_browser_selector_kind(selector_type.as_deref())?;
-    let timeout = browser_action_timeout(timeout_seconds);
+    run_blocking_workspace_task(move || {
+        let workspace_key = browser_workspace_key(&workspace_path)?;
+        let selector_kind = parse_browser_selector_kind(selector_type.as_deref())?;
+        let timeout = browser_action_timeout(timeout_seconds);
 
-    with_browser_page_sessions(|sessions| {
-        let session = sessions
-            .get_mut(&workspace_key)
-            .ok_or_else(|| "当前工作区没有活动中的浏览页会话，请先打开页面。".to_string())?;
+        with_browser_page_sessions(|sessions| {
+            let session = sessions
+                .get_mut(&workspace_key)
+                .ok_or_else(|| "当前工作区没有活动中的浏览页会话，请先打开页面。".to_string())?;
 
-        let element =
-            find_browser_element(session.tab.as_ref(), &selector, selector_kind, timeout)?;
-        element
-            .scroll_into_view()
-            .map_err(|err| format!("滚动到输入元素失败: {err}"))?;
-        if clear.unwrap_or(true) {
-            let _ = element.call_js_fn(
-                r#"
-                function clearInputValue() {
-                    if ('value' in this) {
-                        this.value = '';
-                        this.dispatchEvent(new Event('input', { bubbles: true }));
-                        this.dispatchEvent(new Event('change', { bubbles: true }));
+            let element =
+                find_browser_element(session.tab.as_ref(), &selector, selector_kind, timeout)?;
+            element
+                .scroll_into_view()
+                .map_err(|err| format!("滚动到输入元素失败: {err}"))?;
+            if clear.unwrap_or(true) {
+                let _ = element.call_js_fn(
+                    r#"
+                    function clearInputValue() {
+                        if ('value' in this) {
+                            this.value = '';
+                            this.dispatchEvent(new Event('input', { bubbles: true }));
+                            this.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                        return true;
                     }
-                    return true;
-                }
-                "#,
-                vec![],
-                false,
-            );
-        }
-        element
-            .click()
-            .map_err(|err| format!("聚焦输入元素失败: {err}"))?;
-        element
-            .type_into(&text)
-            .map_err(|err| format!("向页面输入文本失败: {err}"))?;
+                    "#,
+                    vec![],
+                    false,
+                );
+            }
+            element
+                .click()
+                .map_err(|err| format!("聚焦输入元素失败: {err}"))?;
+            element
+                .type_into(&text)
+                .map_err(|err| format!("向页面输入文本失败: {err}"))?;
 
-        if submit.unwrap_or(false) {
-            session
-                .tab
-                .press_key("Enter")
-                .map_err(|err| format!("提交页面输入失败: {err}"))?;
-        }
-        if wait_for_navigation.unwrap_or(false) {
-            session
-                .tab
-                .wait_until_navigated()
-                .map_err(|err| format!("等待页面完成跳转失败: {err}"))?;
-        }
+            if submit.unwrap_or(false) {
+                session
+                    .tab
+                    .press_key("Enter")
+                    .map_err(|err| format!("提交页面输入失败: {err}"))?;
+            }
+            if wait_for_navigation.unwrap_or(false) {
+                session
+                    .tab
+                    .wait_until_navigated()
+                    .map_err(|err| format!("等待页面完成跳转失败: {err}"))?;
+            }
 
-        browser_page_action_result("input", session, Some(selector), Some(selector_kind))
-    })
+            browser_page_action_result("input", session, Some(selector), Some(selector_kind))
+        })
+    }).await
 }
 
 #[tauri::command]
-pub(crate) fn read_browser_page_dom(
+pub(crate) async fn read_browser_page_dom(
     workspace_path: String,
     selector: Option<String>,
     selector_type: Option<String>,
     content_type: Option<String>,
     timeout_seconds: Option<u64>,
 ) -> Result<BrowserPageDomResult, String> {
-    let workspace_key = browser_workspace_key(&workspace_path)?;
-    let timeout = browser_action_timeout(timeout_seconds);
-    let selector_kind = parse_browser_selector_kind(selector_type.as_deref())?;
-    let dom_content_type = parse_browser_dom_content_type(content_type.as_deref())?;
+    run_blocking_workspace_task(move || {
+        let workspace_key = browser_workspace_key(&workspace_path)?;
+        let timeout = browser_action_timeout(timeout_seconds);
+        let selector_kind = parse_browser_selector_kind(selector_type.as_deref())?;
+        let dom_content_type = parse_browser_dom_content_type(content_type.as_deref())?;
 
-    with_browser_page_sessions(|sessions| {
-        let session = sessions
-            .get_mut(&workspace_key)
-            .ok_or_else(|| "当前工作区没有活动中的浏览页会话，请先打开页面。".to_string())?;
+        with_browser_page_sessions(|sessions| {
+            let session = sessions
+                .get_mut(&workspace_key)
+                .ok_or_else(|| "当前工作区没有活动中的浏览页会话，请先打开页面。".to_string())?;
 
-        let content = if let Some(selector) = selector.as_ref() {
-            let element =
-                find_browser_element(session.tab.as_ref(), selector, selector_kind, timeout)?;
-            match dom_content_type {
-                BrowserDomContentType::Html => element
-                    .get_content()
-                    .map_err(|err| format!("读取页面元素 HTML 失败: {err}"))?,
-                BrowserDomContentType::Text => element
-                    .get_inner_text()
-                    .map_err(|err| format!("读取页面元素文本失败: {err}"))?,
-            }
-        } else {
-            match dom_content_type {
-                BrowserDomContentType::Html => session
-                    .tab
-                    .get_content()
-                    .map_err(|err| format!("读取页面 HTML 失败: {err}"))?,
-                BrowserDomContentType::Text => {
-                    let remote = session
-                        .tab
-                        .evaluate(
-                            "document.body ? document.body.innerText : (document.documentElement ? document.documentElement.innerText : '')",
-                            false,
-                        )
-                        .map_err(|err| format!("读取页面文本失败: {err}"))?;
-                    remote
-                        .value
-                        .map(|value| match value {
-                            serde_json::Value::String(text) => text,
-                            other => other.to_string(),
-                        })
-                        .unwrap_or_default()
+            let content = if let Some(selector) = selector.as_ref() {
+                let element =
+                    find_browser_element(session.tab.as_ref(), selector, selector_kind, timeout)?;
+                match dom_content_type {
+                    BrowserDomContentType::Html => element
+                        .get_content()
+                        .map_err(|err| format!("读取页面元素 HTML 失败: {err}"))?,
+                    BrowserDomContentType::Text => element
+                        .get_inner_text()
+                        .map_err(|err| format!("读取页面元素文本失败: {err}"))?,
                 }
-            }
-        };
-
-        let (content, truncated) = truncate_browser_dom(content);
-        let state = browser_page_state(session)?;
-        let has_selector = selector.is_some();
-
-        Ok(BrowserPageDomResult {
-            url: state.url,
-            title: state.title,
-            selector,
-            selector_type: if has_selector {
-                Some(selector_kind.label().to_string())
             } else {
-                None
-            },
-            content_type: dom_content_type.label().to_string(),
-            content,
-            truncated,
+                match dom_content_type {
+                    BrowserDomContentType::Html => session
+                        .tab
+                        .get_content()
+                        .map_err(|err| format!("读取页面 HTML 失败: {err}"))?,
+                    BrowserDomContentType::Text => {
+                        let remote = session
+                            .tab
+                            .evaluate(
+                                "document.body ? document.body.innerText : (document.documentElement ? document.documentElement.innerText : '')",
+                                false,
+                            )
+                            .map_err(|err| format!("读取页面文本失败: {err}"))?;
+                        remote
+                            .value
+                            .map(|value| match value {
+                                serde_json::Value::String(text) => text,
+                                other => other.to_string(),
+                            })
+                            .unwrap_or_default()
+                    }
+                }
+            };
+
+            let (content, truncated) = truncate_browser_dom(content);
+            let state = browser_page_state(session)?;
+            let has_selector = selector.is_some();
+
+            Ok(BrowserPageDomResult {
+                url: state.url,
+                title: state.title,
+                selector,
+                selector_type: if has_selector {
+                    Some(selector_kind.label().to_string())
+                } else {
+                    None
+                },
+                content_type: dom_content_type.label().to_string(),
+                content,
+                truncated,
+            })
         })
-    })
+    }).await
 }
 
 #[tauri::command]
@@ -629,22 +641,24 @@ pub(crate) async fn screenshot_browser_page(
 }
 
 #[tauri::command]
-pub(crate) fn close_browser_page(workspace_path: String) -> Result<BrowserPageCloseResult, String> {
-    let workspace_key = browser_workspace_key(&workspace_path)?;
+pub(crate) async fn close_browser_page(workspace_path: String) -> Result<BrowserPageCloseResult, String> {
+    run_blocking_workspace_task(move || {
+        let workspace_key = browser_workspace_key(&workspace_path)?;
 
-    with_browser_page_sessions(|sessions| {
-        let Some(session) = sessions.remove(&workspace_key) else {
-            return Ok(BrowserPageCloseResult {
+        with_browser_page_sessions(|sessions| {
+            let Some(session) = sessions.remove(&workspace_key) else {
+                return Ok(BrowserPageCloseResult {
+                    workspace_path: workspace_key,
+                    closed: false,
+                });
+            };
+
+            let _ = session.tab.close(true);
+
+            Ok(BrowserPageCloseResult {
                 workspace_path: workspace_key,
-                closed: false,
-            });
-        };
-
-        let _ = session.tab.close(true);
-
-        Ok(BrowserPageCloseResult {
-            workspace_path: workspace_key,
-            closed: true,
+                closed: true,
+            })
         })
-    })
+    }).await
 }

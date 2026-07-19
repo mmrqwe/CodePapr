@@ -1,5 +1,6 @@
 import type { IImageContent, IMessage } from '@codepapr/types';
 import { estimateTokens } from '@codepapr/common';
+import { stripInternalFields } from '@codepapr/core';
 import type { Lang } from './i18n';
 import type { UIToolInvocation } from '../store/internals/types';
 
@@ -173,18 +174,22 @@ function toCoreTailMessages(messages: readonly ContextMessageLike[]): IMessage[]
           })),
           timestamp: message.timestamp,
         };
-        const toolMsgs: IMessage[] = message.toolInvocations.map((ti) => ({
-          id: `${message.id}-tool-${ti.id}`,
-          role: 'tool' as const,
-          content: ti.output ?? '',
-          timestamp: message.timestamp,
-          toolResult: {
-            toolCallId: ti.id,
-            success: ti.status === 'success',
-            result: ti.output,
-            error: ti.error,
-          },
-        }));
+        const toolMsgs: IMessage[] = message.toolInvocations.map((ti) => {
+          const cleanedOutput =
+            typeof ti.output === 'string' ? ti.output : stripInternalFields(ti.output);
+          return {
+            id: `${message.id}-tool-${ti.id}`,
+            role: 'tool' as const,
+            content: typeof cleanedOutput === 'string' ? cleanedOutput : JSON.stringify(cleanedOutput),
+            timestamp: message.timestamp,
+            toolResult: {
+              toolCallId: ti.id,
+              success: ti.status === 'success',
+              result: cleanedOutput,
+              error: ti.error,
+            },
+          };
+        });
         return [assistantMsg, ...toolMsgs];
       }
       const rawContent =

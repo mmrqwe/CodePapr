@@ -731,11 +731,11 @@ impl SymbolProvider for LspSymbolProvider {
             1,
         );
 
-        let response = crate::lsp::lsp_request(
-            workspace_path.clone(),
-            self.language_id.clone(),
-            "textDocument/documentSymbol".to_string(),
-            json!({ "textDocument": { "uri": uri } }),
+        let response = crate::lsp::lsp_request_impl(
+            &workspace_path,
+            &self.language_id,
+            "textDocument/documentSymbol",
+            &json!({ "textDocument": { "uri": uri } }),
         )?;
 
         let _ =
@@ -765,11 +765,11 @@ impl SymbolProvider for LspSymbolProvider {
             1,
         );
 
-        let response = crate::lsp::lsp_request(
-            workspace_path.clone(),
-            self.language_id.clone(),
-            "textDocument/hover".to_string(),
-            json!({
+        let response = crate::lsp::lsp_request_impl(
+            &workspace_path,
+            &self.language_id,
+            "textDocument/hover",
+            &json!({
                 "textDocument": { "uri": uri },
                 "position": { "line": line, "character": character },
             }),
@@ -818,11 +818,11 @@ impl SymbolProvider for LspSymbolProvider {
             1,
         );
 
-        let response = crate::lsp::lsp_request(
-            workspace_path.clone(),
-            self.language_id.clone(),
-            "textDocument/definition".to_string(),
-            json!({
+        let response = crate::lsp::lsp_request_impl(
+            &workspace_path,
+            &self.language_id,
+            "textDocument/definition",
+            &json!({
                 "textDocument": { "uri": uri },
                 "position": { "line": line, "character": character },
             }),
@@ -856,11 +856,11 @@ impl SymbolProvider for LspSymbolProvider {
             1,
         );
 
-        let response = crate::lsp::lsp_request(
-            workspace_path.clone(),
-            self.language_id.clone(),
-            "textDocument/references".to_string(),
-            json!({
+        let response = crate::lsp::lsp_request_impl(
+            &workspace_path,
+            &self.language_id,
+            "textDocument/references",
+            &json!({
                 "textDocument": { "uri": uri },
                 "position": { "line": line, "character": character },
                 "context": { "includeDeclaration": false },

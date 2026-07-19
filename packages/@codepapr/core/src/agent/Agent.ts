@@ -201,6 +201,7 @@ export interface IRequestBuilder {
     maxTokens?: number;
     tools?: IToolDefinition[];
   }): IChatRequest;
+  syncAfterPop?(appendLog: IAppendOnlyLog): void;
 }
 
 export interface ICacheValidator {
@@ -335,7 +336,17 @@ export class Agent {
           const lastMsg = this.session.logStore.getLastMessage();
           if (lastMsg?.role === 'user' && lastMsg.images && lastMsg.images.length > 0) {
             this.session.logStore.popLastMessage();
+            this.requestBuilder.syncAfterPop?.(this.session.logStore);
           }
+          onStreamEvent?.({
+            type: 'tool-call-end',
+            toolCallId: '',
+            toolName: 'multimodal',
+            success: false,
+            error: `Image rejected: ${(err as Error).message}`,
+            output: '',
+          });
+          continue;
         }
         throw err;
       }
