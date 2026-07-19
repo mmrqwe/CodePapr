@@ -54,6 +54,7 @@ import type { EditHistory } from '@codepapr/core';
 import type { IToolDefinition } from '@codepapr/types';
 import type { IImageContent } from '@codepapr/types';
 import { usePreviewStore, type PreviewSession } from '../store/previewStore';
+import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { useAgentStore } from '../store/agentStore';
 import { usePermissionStore, isAbsolutePath } from '../store/permissionStore';
 import {
@@ -1687,6 +1688,33 @@ name: 'web_download_file',
       required: ['patches'],
     },
   },
+  {
+    name: 'app_render',
+    description:
+      '在右侧"应用"面板中渲染一个交互式 HTML 应用。用于把分析结果、数据可视化、仪表盘、关系图等以完整 HTML 应用形式呈现，而不是 Markdown。HTML 会写入 .CodePapr/apps/<appId>/index.html 并自动在"应用"面板打开。可以内联 CSS 和 JS，可以引用 CDN 上的库（如 D3、ECharts、Mermaid、MapLibre、Three.js）。相同 appId 会覆盖已有应用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        appId: {
+          type: 'string',
+          description: '应用唯一标识符，kebab-case（仅小写字母、数字、连字符）。相同 appId 会覆盖已有应用。例如：history-explorer、stock-dashboard。',
+        },
+        title: {
+          type: 'string',
+          description: '应用标题，显示在应用标签上。',
+        },
+        html: {
+          type: 'string',
+          description: '完整 HTML 文档内容。应包含 <!DOCTYPE html>、<html>、<head>、<body>。可以内联 CSS/JS，可以引用 CDN。应用运行在 sandbox 中（allow-scripts），无法访问本地文件系统。',
+        },
+        icon: {
+          type: 'string',
+          description: '可选。应用图标，支持 emoji 或 1-2 个字符的文字。例如：📊、📈、🗺️、DB。',
+        },
+      },
+      required: ['appId', 'title', 'html'],
+    },
+  },
   ...EXTENDED_WORKSPACE_INTELLIGENCE_TOOL_DEFINITIONS,
   ...MERGE_TOOL_DEFINITIONS,
 ];
@@ -1860,7 +1888,7 @@ export function registerWorkspaceTools(
 
   const readGitStatus = async (): Promise<GitStatusSummary> => {
     try {
-      const result = await runGitCommand(['status', '--porcelain=1', '--branch', '--untracked-files=all'], 15);
+      const result = await runGitCommand(['status', '--porcelain=1', '--branch', '--untracked-files=normal'], 15);
       return parseGitStatusCommandResult(result) satisfies GitStatusSummary;
     } catch (error) {
       return buildGitUnavailableStatus((error as Error).message) satisfies GitStatusSummary;
@@ -2031,6 +2059,49 @@ export function registerWorkspaceTools(
     });
     notifyWorkspaceMutation([result.path]);
     return result;
+  });
+
+  registry.register(toolByName('app_render'), async (args: Record<string, unknown>) => {
+    const rawAppId = asString(args.appId, 'appId');
+    const title = asString(args.title, 'title');
+    const html = asString(args.html, 'html');
+    const icon = asOptionalString(args.icon);
+
+    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(rawAppId)) {
+      throw new Error(
+        `appId 必须是 kebab-case（仅小写字母、数字、连字符，1-63 字符），收到: ${rawAppId}`
+      );
+    }
+
+    if (html.length > 2_000_000) {
+      throw new Error(`HTML 内容超过 2MB 上限（当前 ${html.length} 字节），请精简后重试。`);
+    }
+
+    const relativePath = `.CodePapr/apps/${rawAppId}/index.html`;
+
+    const writeResult = await invoke<WriteTextFileResult>('write_text_file', {
+      workspacePath: workspace(),
+      relativePath,
+      content: html,
+    });
+
+    useAppRuntimeStore.getState().mountApp({
+      appId: rawAppId,
+      title,
+      icon,
+      html,
+      filePath: relativePath,
+    });
+
+    return {
+      appId: rawAppId,
+      title,
+      icon: icon ?? null,
+      filePath: relativePath,
+      bytes: writeResult.bytes,
+      mounted: true,
+      hint: '应用已渲染到右侧"应用"面板。用户可直接交互。如需修改应用，用相同 appId 再次调用 app_render 即可覆盖更新。',
+    };
   });
 
   registry.register(toolByName('workspace_run_command'), async (args: Record<string, unknown>) => {

@@ -18,6 +18,8 @@ import {
   sanitizeAgentPrompt,
   resolveAgentPrompt,
   type AgentDefinition,
+  type ToolOutputTruncationOptions,
+  type PruneOptions,
 } from '@codepapr/core';
 import {
   DEFAULT_MAX_TOKENS,
@@ -609,6 +611,8 @@ async function runSubagent(
     cacheValidator: new CacheValidator(),
     maxToolRounds: subagentMaxToolRounds,
     toolTimeouts: { graph: payload.settings.graphToolTimeoutMs },
+    toolOutputTruncation: buildToolOutputTruncation(payload.settings),
+    pruneOptions: buildPruneOptions(payload.settings),
   });
   let response;
   try {
@@ -701,6 +705,25 @@ function createRegistry(
   return registry;
 }
 
+const PRUNE_PROTECTED_TOOLS = new Set(['todo', 'question', 'skill']);
+
+function buildToolOutputTruncation(s: WorkerAgentSettings): ToolOutputTruncationOptions {
+  return {
+    maxBytes: s.toolOutputMaxBytes,
+    previewChars: s.toolOutputPreviewChars,
+  };
+}
+
+function buildPruneOptions(s: WorkerAgentSettings): PruneOptions {
+  return {
+    enabled: s.pruneOldToolResults,
+    protectRecentRounds: s.pruneProtectRounds,
+    minPrunableChars: s.pruneMinChars,
+    protectedTools: PRUNE_PROTECTED_TOOLS,
+    placeholder: '[Old tool result content cleared]',
+  };
+}
+
 async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
   const abortController = new AbortController();
   sessionAbortControllers.set(payload.requestId, abortController);
@@ -733,6 +756,8 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     requestBuilder: new RequestBuilder(),
     cacheValidator: new CacheValidator(),
     toolTimeouts: { graph: payload.settings.graphToolTimeoutMs },
+    toolOutputTruncation: buildToolOutputTruncation(payload.settings),
+    pruneOptions: buildPruneOptions(payload.settings),
   });
 
   const response = await agent.chat(

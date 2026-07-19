@@ -20,6 +20,7 @@ export interface ContextCheckpointSections {
   validationNotes: string[];
   pendingWork: string[];
   openQuestions: string[];
+  todoList: string[];
 }
 
 export interface ContextCheckpointPayload {
@@ -76,6 +77,7 @@ interface ContextCopy {
   validationHeading: string;
   pendingHeading: string;
   openQuestionsHeading: string;
+  todoListHeading: string;
 }
 
 function getContextCopy(lang: Lang | undefined): ContextCopy {
@@ -83,7 +85,7 @@ function getContextCopy(lang: Lang | undefined): ContextCopy {
     case 'zh-TW':
       return {
         checkpointPreamble:
-          '以下是先前長會話的上下文檢查點。把它視為已驗證的歷史摘要；若與後續原始訊息衝突，以後續原始訊息為準。',
+          '以下是先前長會話的上下文檢查點。把它視為已驗證的歷史摘要；若與後續原始訊息衝突，以後續原始訊息為準。如果你看不到當前任務清單，立即調用 `todo(action: list)` 恢復。',
         summaryHeading: '檢查點摘要',
         userGoalHeading: '用戶目標',
         constraintsHeading: '約束與偏好',
@@ -93,11 +95,12 @@ function getContextCopy(lang: Lang | undefined): ContextCopy {
         validationHeading: '驗證狀態 / 結果',
         pendingHeading: '待繼續事項',
         openQuestionsHeading: '待確認問題',
+        todoListHeading: '當前任務清單',
       };
     case 'en':
       return {
         checkpointPreamble:
-          'The block below is a checkpoint summary for earlier conversation context. Treat it as verified history; if it conflicts with later raw messages, trust the later raw messages.',
+          'The block below is a checkpoint summary for earlier conversation context. Treat it as verified history; if it conflicts with later raw messages, trust the later raw messages. If you do not see your current task list, call `todo(action: list)` immediately to restore it.',
         summaryHeading: 'Checkpoint Summary',
         userGoalHeading: 'User Goal',
         constraintsHeading: 'Constraints & Preferences',
@@ -107,11 +110,12 @@ function getContextCopy(lang: Lang | undefined): ContextCopy {
         validationHeading: 'Validation Status / Results',
         pendingHeading: 'Remaining Work',
         openQuestionsHeading: 'Open Questions',
+        todoListHeading: 'Current Task List',
       };
     default:
       return {
         checkpointPreamble:
-          '以下是先前长会话的上下文检查点。把它视为已验证的历史摘要；如果与后续原始消息冲突，以后续原始消息为准。',
+          '以下是先前长会话的上下文检查点。把它视为已验证的历史摘要；如果与后续原始消息冲突，以后续原始消息为准。如果你看不到当前任务清单，立即调用 `todo(action: list)` 恢复。',
         summaryHeading: '检查点摘要',
         userGoalHeading: '用户目标',
         constraintsHeading: '约束与偏好',
@@ -121,6 +125,7 @@ function getContextCopy(lang: Lang | undefined): ContextCopy {
         validationHeading: '验证状态 / 结果',
         pendingHeading: '待继续事项',
         openQuestionsHeading: '待确认问题',
+        todoListHeading: '当前任务清单',
       };
   }
 }
@@ -135,6 +140,7 @@ function createEmptySections(): ContextCheckpointSections {
     validationNotes: [],
     pendingWork: [],
     openQuestions: [],
+    todoList: [],
   };
 }
 
@@ -286,6 +292,7 @@ function normalizeSections(sections: Partial<ContextCheckpointSections> | null |
     validationNotes: dedupeItems(coerceStringArray(sections?.validationNotes), 6, 240),
     pendingWork: dedupeItems(coerceStringArray(sections?.pendingWork), 5, 240),
     openQuestions: dedupeItems(coerceStringArray(sections?.openQuestions), 4, 220),
+    todoList: dedupeItems(coerceStringArray(sections?.todoList), 8, 240),
   };
 
   return normalized;
@@ -378,6 +385,7 @@ export function renderContextCheckpointSummary(
     ...renderSection(copy.importantHeading, normalized.importantContext),
     ...renderSection(copy.assumptionsHeading, normalized.assumptions),
     ...renderSection(copy.validationHeading, normalized.validationNotes),
+    ...renderSection(copy.todoListHeading, normalized.todoList),
     ...renderSection(copy.pendingHeading, normalized.pendingWork),
     ...renderSection(copy.openQuestionsHeading, normalized.openQuestions),
   ];
@@ -390,7 +398,10 @@ export function renderContextCheckpointContent(summary: string, lang: Lang | und
   return `${copy.checkpointPreamble}\n\n${copy.summaryHeading}：\n${summary.trim()}`;
 }
 
-export function buildEffectiveContextMessages(messages: readonly ContextMessageLike[]): IMessage[] {
+export function buildEffectiveContextMessages(
+  messages: readonly ContextMessageLike[],
+  options?: { todoListDigest?: string }
+): IMessage[] {
   const checkpoint = getLatestCheckpoint(messages);
   const tailStart = checkpoint ? checkpoint.index + 1 : 0;
   const tailMessages = toCoreTailMessages(messages.slice(tailStart));
@@ -399,7 +410,7 @@ export function buildEffectiveContextMessages(messages: readonly ContextMessageL
     return tailMessages;
   }
 
-  return [
+  const result: IMessage[] = [
     {
       id: checkpoint.message.id,
       role: 'assistant',
@@ -411,8 +422,20 @@ export function buildEffectiveContextMessages(messages: readonly ContextMessageL
         modelName: checkpoint.payload.modelName,
       },
     },
-    ...tailMessages,
   ];
+
+  const todoDigest = options?.todoListDigest?.trim();
+  if (todoDigest) {
+    result.push({
+      id: `${checkpoint.message.id}-todo-restore`,
+      role: 'user',
+      content: todoDigest,
+      timestamp: checkpoint.message.timestamp + 1,
+    });
+  }
+
+  result.push(...tailMessages);
+  return result;
 }
 
 export function planContextCompaction(
@@ -482,9 +505,42 @@ export function planContextCompaction(
 }
 
 export function buildContextCompactionTranscript(messages: readonly IMessage[]): string {
+  const toolCallMap = new Map<string, { name: string; args: string }>();
+  for (const msg of messages) {
+    if (msg.role === 'assistant' && msg.toolCalls) {
+      for (const tc of msg.toolCalls) {
+        toolCallMap.set(tc.id, {
+          name: tc.name,
+          args: JSON.stringify(tc.arguments).slice(0, 200),
+        });
+      }
+    }
+  }
+
   return messages
     .map((message, index) => {
-      return `${index + 1}. ${message.role.toUpperCase()}: ${truncateLine(message.content ?? '', 640)}`;
+      const prefix = `${index + 1}. ${message.role.toUpperCase()}`;
+
+      if (message.role === 'tool' && message.toolResult) {
+        const callInfo = toolCallMap.get(message.toolResult.toolCallId);
+        const toolName = callInfo?.name ?? 'unknown';
+        const toolArgs = callInfo?.args ?? '';
+        const status = message.toolResult.success ? 'ok' : 'failed';
+        const output = truncateLine(message.content ?? '', 1500);
+        return `${prefix} [${toolName}(${toolArgs}) ${status}]: ${output}`;
+      }
+
+      if (message.role === 'assistant' && message.toolCalls && message.toolCalls.length > 0) {
+        const tools = message.toolCalls
+          .map((tc) => `${tc.name}(${JSON.stringify(tc.arguments).slice(0, 100)})`)
+          .join(', ');
+        const content = truncateLine(message.content ?? '', 640);
+        return content
+          ? `${prefix}: ${content}\n   [calls: ${tools}]`
+          : `${prefix} [calls: ${tools}]`;
+      }
+
+      return `${prefix}: ${truncateLine(message.content ?? '', 640)}`;
     })
     .join('\n\n');
 }
@@ -572,6 +628,15 @@ export function buildLocalContextCheckpointSections(params: {
         220
       ),
     ],
+    todoList: [
+      ...previous.todoList,
+      ...collectPatternHighlights(
+        allMessages,
+        /\[TodoList\]|← current|✗.*err|目标:/i,
+        8,
+        240
+      ),
+    ],
   });
 }
 
@@ -606,7 +671,8 @@ export function parseContextCheckpointSections(content: string): ContextCheckpoi
       normalized.assumptions.length +
       normalized.validationNotes.length +
       normalized.pendingWork.length +
-      normalized.openQuestions.length;
+      normalized.openQuestions.length +
+      normalized.todoList.length;
 
     return totalItems > 0 ? normalized : null;
   } catch {
@@ -647,20 +713,20 @@ export function buildContextCheckpointPrompt(params: {
     case 'zh-TW':
       return {
         systemPrompt:
-          '你負責把長編程會話壓縮成可恢復的上下文檢查點。你必須合併已有檢查點與較早原始對話，只保留後續繼續工作真正需要的事實：用戶目標、約束、已完成修改、重要文件/命令/錯誤、尚未完成事項。不要杜撰，不要丟掉仍然有效的約束。輸出必須是 JSON 對象，且只能包含 userGoal、constraints、completedWork、importantContext、pendingWork 這五個鍵，每個鍵的值都必須是字符串數組。',
+          '你負責把長編程會話壓縮成可恢復的上下文檢查點。你必須合併已有檢查點與較早原始對話，只保留後續繼續工作真正需要的事實：用戶目標、約束、已完成修改、重要文件/命令/錯誤、當前任務清單、尚未完成事項。對話中包含工具調用及其結果（標記為 TOOL），這些是事實的主要來源，務必從中提取任務清單狀態和已完成的工作。不要杜撰，不要丟掉仍然有效的約束。輸出必須是 JSON 對象，且只能包含 userGoal、constraints、completedWork、importantContext、todoList、pendingWork 這六個鍵，每個鍵的值都必須是字符串數組。',
         userPrompt: `請根據已有檢查點和新增較早對話，輸出新的恢復檢查點 JSON。\n\n已有檢查點：\n${priorCheckpointBlock}\n\n新增較早對話原文：\n${params.transcript}`,
       };
     case 'en':
       return {
         systemPrompt:
-          'Compress a long coding conversation into a recoverable checkpoint. Merge the existing checkpoint with the earlier raw transcript and keep only facts needed for future execution: user goals, constraints, completed work, important files/commands/errors, and remaining work. Do not invent details or drop still-valid constraints. Output JSON only with exactly five keys: userGoal, constraints, completedWork, importantContext, pendingWork. Every value must be an array of strings.',
+          'Compress a long coding conversation into a recoverable checkpoint. Merge the existing checkpoint with the earlier raw transcript and keep only facts needed for future execution: user goals, constraints, completed work, important files/commands/errors, current task list, and remaining work. The transcript includes tool calls and their results (marked as TOOL); these are the primary source of facts - extract task list state and completed work from them. Do not invent details or drop still-valid constraints. Output JSON only with exactly six keys: userGoal, constraints, completedWork, importantContext, todoList, pendingWork. Every value must be an array of strings.',
         userPrompt:
           `Update the recovery checkpoint JSON using the existing checkpoint and the earlier raw transcript below.\n\nExisting checkpoint:\n${priorCheckpointBlock}\n\nEarlier raw transcript:\n${params.transcript}`,
       };
     default:
       return {
         systemPrompt:
-          '你负责把长编程会话压缩成可恢复的上下文检查点。你必须合并已有检查点与较早原始对话，只保留后续继续工作真正需要的事实：用户目标、约束、已完成修改、重要文件/命令/错误、尚未完成事项。不要杜撰，不要丢掉仍然有效的约束。输出必须是 JSON 对象，且只能包含 userGoal、constraints、completedWork、importantContext、pendingWork 这五个键，每个键的值都必须是字符串数组。',
+          '你负责把长编程会话压缩成可恢复的上下文检查点。你必须合并已有检查点与较早原始对话，只保留后续继续工作真正需要的事实：用户目标、约束、已完成修改、重要文件/命令/错误、当前任务清单、尚未完成事项。对话中包含工具调用及其结果（标记为 TOOL），这些是事实的主要来源，务必从中提取任务清单状态和已完成的工作。不要杜撰，不要丢掉仍然有效的约束。输出必须是 JSON 对象，且只能包含 userGoal、constraints、completedWork、importantContext、todoList、pendingWork 这六个键，每个键的值都必须是字符串数组。',
         userPrompt: `请根据已有检查点和新增较早对话，输出新的恢复检查点 JSON。\n\n已有检查点：\n${priorCheckpointBlock}\n\n新增较早对话原文：\n${params.transcript}`,
       };
   }

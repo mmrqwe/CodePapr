@@ -22,7 +22,7 @@ import {
   CacheConsistencyError,
 } from '@codepapr/types';
 import { Logger, sha256, estimateTokens } from '@codepapr/common';
-import { Serializer } from '@codepapr/core';
+import { Serializer, pruneOldToolResults, type PruneOptions } from '@codepapr/core';
 import { DEFAULT_MAX_TOKENS, sanitizeMaxTokens, getProviderContextLimit } from '../tokenLimits';
 
 const log = new Logger('RequestBuilder');
@@ -37,6 +37,7 @@ interface BuildOptions {
   topP?: number;
   maxTokens?: number;
   tools?: IToolDefinition[];
+  pruneOptions?: PruneOptions;
 }
 
 function buildProviderCacheControl(
@@ -86,6 +87,10 @@ export class RequestBuilder {
     // Only the LAST user message with images keeps them; all earlier ones are stripped.
     // This prevents old base64 data from bloating every subsequent request.
     messages = stripConsumedImages(messages);
+
+    // Prune old tool results to prevent context bloat from accumulated tool outputs.
+    // Only modifies the request copy — the AppendOnlyLog itself stays immutable.
+    messages = pruneOldToolResults(messages, opts.pruneOptions);
 
     // ✅ 检查 6: 确定性序列化
     const cacheRelevantMessages = this.toCacheRelevantMessages(messages);

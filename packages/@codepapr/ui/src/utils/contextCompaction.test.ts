@@ -66,6 +66,7 @@ describe('contextCompaction', () => {
           validationNotes: [],
           pendingWork: ['验证崩溃复现路径'],
           openQuestions: [],
+          todoList: [],
         },
         'zh-CN'
       ),
@@ -80,6 +81,7 @@ describe('contextCompaction', () => {
             validationNotes: [],
             pendingWork: ['验证崩溃复现路径'],
             openQuestions: [],
+            todoList: [],
           },
           'zh-CN'
         ),
@@ -99,6 +101,7 @@ describe('contextCompaction', () => {
           validationNotes: [],
           pendingWork: ['验证崩溃复现路径'],
           openQuestions: [],
+          todoList: [],
         },
       };
     const messages: ContextMessageLike[] = [
@@ -321,6 +324,7 @@ describe('contextCompaction', () => {
       validationNotes: ['npm run test -> 退出码 0'],
       pendingWork: ['改长上下文压缩策略'],
       openQuestions: ['是否保留旧 prompt 兼容层'],
+      todoList: [],
     };
     const priorCheckpoint: ContextCheckpointPayload = {
       version: 2,

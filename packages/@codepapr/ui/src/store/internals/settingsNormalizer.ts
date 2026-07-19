@@ -153,6 +153,26 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     typeof input.compactionTemperature === 'number' && Number.isFinite(input.compactionTemperature)
       ? Math.max(0, Math.min(2, input.compactionTemperature))
       : DEFAULT_SETTINGS.compactionTemperature;
+  const toolOutputMaxBytes =
+    typeof input.toolOutputMaxBytes === 'number' && Number.isFinite(input.toolOutputMaxBytes)
+      ? Math.max(1000, Math.floor(input.toolOutputMaxBytes))
+      : DEFAULT_SETTINGS.toolOutputMaxBytes;
+  const toolOutputPreviewChars =
+    typeof input.toolOutputPreviewChars === 'number' && Number.isFinite(input.toolOutputPreviewChars)
+      ? Math.max(100, Math.floor(input.toolOutputPreviewChars))
+      : DEFAULT_SETTINGS.toolOutputPreviewChars;
+  const pruneOldToolResults =
+    typeof input.pruneOldToolResults === 'boolean'
+      ? input.pruneOldToolResults
+      : DEFAULT_SETTINGS.pruneOldToolResults;
+  const pruneProtectRounds =
+    typeof input.pruneProtectRounds === 'number' && Number.isFinite(input.pruneProtectRounds)
+      ? Math.max(1, Math.floor(input.pruneProtectRounds))
+      : DEFAULT_SETTINGS.pruneProtectRounds;
+  const pruneMinChars =
+    typeof input.pruneMinChars === 'number' && Number.isFinite(input.pruneMinChars)
+      ? Math.max(0, Math.floor(input.pruneMinChars))
+      : DEFAULT_SETTINGS.pruneMinChars;
   const projectGraphMaxDepth =
     typeof input.projectGraphMaxDepth === 'number' && Number.isFinite(input.projectGraphMaxDepth)
       ? Math.max(0, Math.floor(input.projectGraphMaxDepth))
@@ -330,6 +350,11 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     compactionModel,
     compactionMaxTokens,
     compactionTemperature,
+    toolOutputMaxBytes,
+    toolOutputPreviewChars,
+    pruneOldToolResults,
+    pruneProtectRounds,
+    pruneMinChars,
     projectGraphMaxDepth,
     projectGraphMaxFiles,
     projectGraphMaxEdges,

@@ -33,6 +33,8 @@ import {
 import { Logger } from '@codepapr/common';
 import { Session, mergeOptionalTokenCount } from './Session';
 import { MessageFactory } from '../message/Message';
+import { truncateToolOutput, type ToolOutputTruncationOptions } from '../tool/toolOutputTruncation';
+import type { PruneOptions } from '../tool/pruneToolResults';
 
 const log = new Logger('Agent');
 
@@ -200,6 +202,7 @@ export interface IRequestBuilder {
     topP?: number;
     maxTokens?: number;
     tools?: IToolDefinition[];
+    pruneOptions?: PruneOptions;
   }): IChatRequest;
   syncAfterPop?(appendLog: IAppendOnlyLog): void;
 }
@@ -221,6 +224,8 @@ export interface AgentOptions {
   cacheValidator: ICacheValidator;
   maxToolRounds?: number;
   toolTimeouts?: Record<string, number>;
+  toolOutputTruncation?: ToolOutputTruncationOptions;
+  pruneOptions?: PruneOptions;
 }
 
 export const DEFAULT_AGENT_MAX_TOOL_ROUNDS = 500;
@@ -241,6 +246,8 @@ export class Agent {
   private cacheValidator: ICacheValidator;
   private maxToolRounds: number;
   private toolTimeouts: Record<string, number>;
+  private toolOutputTruncation?: ToolOutputTruncationOptions;
+  private pruneOptions?: PruneOptions;
   private abortController: AbortController | null = null;
 
   constructor(opts: AgentOptions) {
@@ -251,6 +258,8 @@ export class Agent {
     this.cacheValidator = opts.cacheValidator;
     this.maxToolRounds = normalizeMaxToolRounds(opts.maxToolRounds);
     this.toolTimeouts = opts.toolTimeouts ?? {};
+    this.toolOutputTruncation = opts.toolOutputTruncation;
+    this.pruneOptions = opts.pruneOptions;
   }
 
   getSession(): Session {
@@ -317,6 +326,7 @@ export class Agent {
         topP: params.topP,
         maxTokens: params.maxTokens,
         tools: [...this.session.prefix.getToolDefinitions()],
+        pruneOptions: this.pruneOptions,
       });
 
       onStreamEvent?.({
@@ -433,7 +443,7 @@ export class Agent {
             log.error(`Tool execution failed: ${call.name}`, { error: err });
           }
         }
-        const toolMsg = MessageFactory.tool(call.id, result, success);
+        const toolMsg = await this.buildToolMessage(call, result, success);
         await this.session.logStore.append(toolMsg);
         onStreamEvent?.({
           type: 'tool-call-end',
@@ -482,5 +492,13 @@ export class Agent {
       cacheStats: aggregatedStats,
       question,
     };
+  }
+
+  private async buildToolMessage(call: IToolCall, result: unknown, success: boolean) {
+    if (this.toolOutputTruncation) {
+      const truncated = await truncateToolOutput(result, call.name, this.toolOutputTruncation);
+      return MessageFactory.tool(call.id, truncated.content, success);
+    }
+    return MessageFactory.tool(call.id, result, success);
   }
 }

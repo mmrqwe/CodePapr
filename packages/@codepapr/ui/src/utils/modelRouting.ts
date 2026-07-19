@@ -1,6 +1,6 @@
 import { isExecutionHeavyTask as coreIsExecutionHeavyTask } from '@codepapr/core';
 
-export type RoutingWorkMode = 'agent' | 'plan' | 'ask';
+export type RoutingWorkMode = 'agent' | 'plan' | 'ask' | 'app';
 
 export interface RoutingSettings {
   model: string;
@@ -21,6 +21,7 @@ export interface TaskModelRoute {
   reason:
     | 'default'
     | 'plan-mode'
+    | 'app-mode'
     | 'execution-heavy'
     | 'context-compaction'
     | 'fast-fallback';
@@ -95,10 +96,10 @@ export function selectTaskModelRoute(
 
   const primary = buildPrimaryModelRoute(settings);
 
-  if (mode === 'plan') {
+  if (mode === 'plan' || mode === 'app') {
     return {
       ...primary,
-      reason: 'plan-mode',
+      reason: mode === 'plan' ? 'plan-mode' : 'app-mode',
     };
   }
 

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState, useCallback } from 'react';
 import { useAgentStore, isApiConfigured } from './store/agentStore';
 import { usePreviewStore } from './store/previewStore';
+import { useAppRuntimeStore } from './store/appRuntimeStore';
 import { useCharactersStore } from './store/charactersStore';
 import { SessionManager } from './components/SessionManager';
 import { ChatPanel } from './components/ChatPanel';
@@ -119,6 +120,7 @@ export default function App() {
     projectGraphPhase,
   } = useAgentStore();
   const activePreviewSession = usePreviewStore((state) => state.activePreviewSession);
+  const clearApps = useAppRuntimeStore((state) => state.clearApps);
   const t = getTranslation(settings.lang);
   const [isDark, setIsDark] = useState(isDarkTheme);
   const [showCacheStats, setShowCacheStats] = useState(false);
@@ -185,7 +187,8 @@ export default function App() {
     setSelectedPath(null);
     setSelectedGitFile(null);
     setSelectedDiagnosticLocation(null);
-  }, [workspacePath]);
+    clearApps();
+  }, [workspacePath, clearApps]);
 
   useEffect(() => {
     if (!settings.debugEnabled) {

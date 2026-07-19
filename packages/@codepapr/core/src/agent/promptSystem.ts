@@ -1,4 +1,4 @@
-export type PromptMode = 'ask' | 'plan' | 'agent';
+export type PromptMode = 'ask' | 'plan' | 'agent' | 'app';
 export type PromptLang = 'zh-CN' | 'zh-TW' | 'en';
 
 export interface PromptValidationResult {
@@ -70,6 +70,7 @@ const UI_TOOL_DEFAULTS = [
   'web_fetch',
   'web_download',
   'open',
+  'app_render',
   'skill',
   'question',
   'task',
@@ -131,6 +132,30 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '每改完一个文件立即 `diagnostics(relativePath)` 检查增量错误；全部完成后跑 `diagnostics(project: true)` 做终检。',
       '遇到复杂的多步骤任务，立即调用 `todo` 管理（`tasks` 初始化/re-plan，`updates` 汇报进度）。状态流转：pending → running → completed/failed。方向错误直接传 `tasks` 重写，无需确认。简单单步任务跳过 TodoList 直接执行。',
     ],
+    app: [
+      '你处于 App 模式。你的任务是根据用户的请求，即时开发一个交互式 HTML 应用程序用于数据探索和可视化。',
+      '',
+      '## 核心理念',
+      '你的直接产出不是 Markdown 回答，而是一个完整的 HTML 应用。',
+      '用户说一句话，你生成一个可交互的应用——就像即时开发一个针对当前问题的专用工具。',
+      '',
+      '## 工作流程',
+      '① 先用 workspace_read_file / workspace_list_files / workspace_search_text / MCP 工具探索数据源，理解数据结构。',
+      '② 如有必要，用 workspace_run_command 执行查询或数据处理脚本获取数据。',
+      '③ 用 workspace_write_file 将 HTML 保存到 .CodePapr/apps/<appId>/index.html。',
+      '④ 最后调用 `app_render` 工具渲染到应用面板。',
+      '',
+      '## HTML 应用规范',
+      '- 生成带有内联 CSS 和 JS 的完整 HTML 文档（<!DOCTYPE html><html><head>...</head><body>...</body></html>）。',
+      '- 优先使用单文件内联方式，不需要组件拆分或构建系统。',
+      '- 如需图表、地图、图形库，通过 CDN 在 <script> 中引用（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js 等）。',
+      '- 保持界面简洁实用，注重数据可读性和交互性。',
+      '- appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 再次调用 app_render 会覆盖更新。',
+      '',
+      '## 你不是在写生产代码',
+      '目标不是可维护的软件工程，而是立即可用的数据可视化工具。',
+      '不要输出长篇 Markdown 解释——如果必须补充说明，用 app_render 渲染后在 tool result 里简短总结即可。',
+    ],
   },
   'zh-TW': {
     ask: [
@@ -151,6 +176,30 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '每改完一個檔案立即 `diagnostics(relativePath)` 檢查增量錯誤；全部完成後跑 `diagnostics(project: true)` 做終檢。',
       '遇到複雜的多步驟任務，立即調用 `todo` 管理（`tasks` 初始化/re-plan，`updates` 匯報進度）。狀態流轉：pending → running → completed/failed。方向錯誤直接傳 `tasks` 重寫，無需確認。簡單單步任務跳過 TodoList 直接執行。',
     ],
+    app: [
+      '你處於 App 模式。你的任務是根據用戶的請求，即時開發一個互動式 HTML 應用程式用於資料探索和視覺化。',
+      '',
+      '## 核心理念',
+      '你的直接產出不是 Markdown 回答，而是一個完整的 HTML 應用。',
+      '用戶說一句話，你生成一個可互動的應用——就像即時開發一個針對當前問題的專用工具。',
+      '',
+      '## 工作流程',
+      '① 先用 workspace_read_file / workspace_list_files / workspace_search_text / MCP 工具探索資料源，理解資料結構。',
+      '② 如有必要，用 workspace_run_command 執行查詢或資料處理腳本獲取資料。',
+      '③ 用 workspace_write_file 將 HTML 儲存到 .CodePapr/apps/<appId>/index.html。',
+      '④ 最後調用 `app_render` 工具渲染到應用面板。',
+      '',
+      '## HTML 應用規範',
+      '- 生成帶有內聯 CSS 和 JS 的完整 HTML 文件（<!DOCTYPE html><html><head>...</head><body>...</body></html>）。',
+      '- 優先使用單文件內聯方式，不需要組件拆分或構建系統。',
+      '- 如需圖表、地圖、圖形庫，通過 CDN 在 <script> 中引用（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js 等）。',
+      '- 保持介面簡潔實用，注重資料可讀性和互動性。',
+      '- appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 再次調用 app_render 會覆蓋更新。',
+      '',
+      '## 你不是在寫生產程式碼',
+      '目標不是可維護的軟體工程，而是立即可用的資料視覺化工具。',
+      '不要輸出長篇 Markdown 解釋——如果必須補充說明，用 app_render 渲染後在 tool result 裡簡短總結即可。',
+    ],
   },
   en: {
     ask: [
@@ -170,6 +219,30 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       'For fix, implement, and modify requests, prefer using tools to complete the work instead of stopping at "I will modify" narration.',
       'After editing each file, immediately run `diagnostics(relativePath)` for incremental error checking; after all edits, run `diagnostics(project: true)` for a final check.',
       'For complex multi-step tasks, immediately call `todo` to manage (`tasks` to init/re-plan, `updates` to report progress). State flow: pending → running → completed/failed. Rewrite the plan freely by passing `tasks` again — no user confirmation needed. Skip TodoList for simple single-step tasks.',
+    ],
+    app: [
+      'You are in App mode. Your job is to instantly build an interactive HTML application for data exploration and visualization based on the user\'s request.',
+      '',
+      '## Core Philosophy',
+      'Your output is not a Markdown answer — it is a complete HTML application.',
+      'The user says one thing, and you generate an interactive app — like instantly building a purpose-built tool for the current problem.',
+      '',
+      '## Workflow',
+      '① First, explore data sources using workspace_read_file / workspace_list_files / workspace_search_text / MCP tools to understand the data structure.',
+      '② If needed, use workspace_run_command to execute queries or data processing scripts.',
+      '③ Save the HTML with workspace_write_file to .CodePapr/apps/<appId>/index.html.',
+      '④ Finally, call `app_render` to render the app in the application panel.',
+      '',
+      '## HTML App Guidelines',
+      '- Generate a complete HTML document with inline CSS and JS (<!DOCTYPE html><html><head>...</head><body>...</body></html>).',
+      '- Prefer single-file inline approach — no component splitting or build systems.',
+      '- For charts, maps, and visualization libraries, reference them via CDN in <script> tags (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js, etc.).',
+      '- Keep the interface clean and practical, focusing on data readability and interactivity.',
+      '- appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling app_render with the same appId updates the existing app.',
+      '',
+      '## You are NOT writing production code',
+      'The goal is an instantly usable data visualization tool — not maintainable software engineering.',
+      'Do not output lengthy Markdown explanations. If additional context is necessary, briefly summarize in the tool result after rendering with app_render.',
     ],
   },
 };
@@ -197,6 +270,7 @@ const SECTION_LABELS: Record<
     constraints: string;
     task: string;
     question: string;
+    app: string;
     skills: string;
     memory: string;
     diagnostics: string;
@@ -209,6 +283,7 @@ const SECTION_LABELS: Record<
     constraints: '## 核心约束',
     task: '## 目标',
     question: '## 问题',
+    app: '## 生成应用',
     skills: '## 项目 Skills',
     memory: '## 项目记忆',
     diagnostics: '## 项目诊断',
@@ -220,6 +295,7 @@ const SECTION_LABELS: Record<
     constraints: '## 核心約束',
     task: '## 目標',
     question: '## 問題',
+    app: '## 生成應用',
     skills: '## 項目 Skills',
     memory: '## 項目記憶',
     diagnostics: '## 項目診斷',
@@ -231,6 +307,7 @@ const SECTION_LABELS: Record<
     constraints: '## Core Constraints',
     task: '## Objective',
     question: '## Question',
+    app: '## Generate App',
     skills: '## Relevant Skills',
     memory: '## Project Memory',
     diagnostics: '## Project Diagnostics',
@@ -353,10 +430,11 @@ function hasTool(toolNames: ReadonlySet<string>, name: string): boolean {
 function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, mode: PromptMode, mentorEnabled: boolean = false): string[] {
   const lines: string[] = [];
   const isAsk = mode === 'ask';
+  const isApp = mode === 'app';
 
   // === 高优先级工具 ===
   const highPriority: string[] = [];
-  if (hasTool(toolNames, 'graph')) {
+  if (hasTool(toolNames, 'graph') && !isApp) {
     highPriority.push(
       lang === 'en'
         ? '- [graph] Get the map before acting: `graph(action: full)` for global structure → `graph(action: lookup)` to pinpoint targets → `graph(action: dependency)` for dependency chains, `graph(action: impact)` for blast radius before edits. Deep analysis: `implementations` (interface impls), `entrypoints` (startup chains), `smart_context` (task-aware context). Do NOT read files blindly before step ①.'
@@ -365,7 +443,7 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
         : '- [graph] 先拿地图再行动：`graph(action: full)` 拿全局结构 → `graph(action: lookup)` 定位目标 → `graph(action: dependency)` 看依赖链、`graph(action: impact)` 改前看影响面。深度分析用 `implementations`（找实现）、`entrypoints`（找入口链）、`smart_context`（任务感知上下文）。不要跳过第一步直接盲读文件。'
     );
   }
-  if (hasTool(toolNames, 'lsp')) {
+  if (hasTool(toolNames, 'lsp') && !isApp) {
     highPriority.push(
       lang === 'en'
         ? '- [lsp] `lsp(action: references)` finds ALL callers of a symbol (including renamed imports that grep misses) — run it before editing any exported symbol. `lsp(action: definition)` jumps to the canonical source, faster and more precise than grep.'
@@ -374,7 +452,7 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
         : '- [lsp] `lsp(action: references)` 找出符号的所有引用者（包括重命名引用，grep 会漏掉）——修改导出符号前必查。`lsp(action: definition)` 跳转到规范定义源头，比 grep 快且精确。'
     );
   }
-  if (hasTool(toolNames, 'diagnostics')) {
+  if (hasTool(toolNames, 'diagnostics') && !isApp) {
     highPriority.push(
       lang === 'en'
         ? '- [diagnostics] ① After editing each file → `diagnostics(relativePath)` for incremental error check. ② After all edits → `diagnostics(project: true)` for final check. Faster than `npm run lint`.'
@@ -383,7 +461,7 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
         : '- [diagnostics] ① 每改完一个文件立即 `diagnostics(relativePath)` 查增量错误 ② 全部完成后跑 `diagnostics(project: true)` 做终检。比 `npm run lint` 快。'
     );
   }
-  if (hasTool(toolNames, 'task')) {
+  if (hasTool(toolNames, 'task') && !isApp) {
     if (mentorEnabled) {
       highPriority.push(
         lang === 'en'
@@ -443,7 +521,7 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
         : '- [exec] 执行一次性命令、`exec(background: true)` 启动 dev server。直接调用程序名（如 `npm test`），不要包装在 cmd/bash/powershell 里（被安全策略阻止）。参数通过 args 数组传递。'
     );
   }
-  if (hasTool(toolNames, 'git')) {
+  if (hasTool(toolNames, 'git') && !isApp) {
     common.push(
       lang === 'en'
         ? '- [git] Inspect: `git(action: status/diff/log)`. Stage & commit: `git(action: stage)` then `git(action: commit)`. Branch: `git(action: branch)`. restore/reset auto-creates backups — do NOT manually `git stash`.'
@@ -488,7 +566,7 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
 
   // === 辅助工具 ===
   const auxiliary: string[] = [];
-  if (hasTool(toolNames, 'lsp_edit')) {
+  if (hasTool(toolNames, 'lsp_edit') && !isApp) {
     auxiliary.push(
       lang === 'en'
         ? '- [lsp_edit] Semantics-aware edits: `rename`, `code_action` (kind: "source.organizeImports"), `format`.'
@@ -497,7 +575,7 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
         : '- [lsp_edit] 语义修改：`rename`、`code_action`（kind: "source.organizeImports"）、`format`。'
     );
   }
-  if (hasTool(toolNames, 'shell') && !isAsk) {
+  if (hasTool(toolNames, 'shell') && !isAsk && !isApp) {
     auxiliary.push(
       lang === 'en'
         ? '- [shell] Multi-step interactions (REPL, interactive prompts): `shell(action: open)` → `shell(action: send)` → `shell(action: read)` → `shell(action: close)`.'
@@ -506,7 +584,7 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
         : '- [shell] 多步交互（REPL、交互提示）：`shell(action: open)` → `shell(action: send)` → `shell(action: read)` → `shell(action: close)`。'
     );
   }
-  if (hasTool(toolNames, 'proc') && !isAsk) {
+  if (hasTool(toolNames, 'proc') && !isAsk && !isApp) {
     auxiliary.push(
       lang === 'en'
         ? '- [proc] Manage background processes from `exec(background: true)`: list, stop by pid, stop_all.'
@@ -515,7 +593,7 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
         : '- [proc] 管理 `exec(background: true)` 启动的后台进程：列出、按 pid 停止、stop_all。'
     );
   }
-  if (hasTool(toolNames, 'browser') && !isAsk) {
+  if (hasTool(toolNames, 'browser') && !isAsk && !isApp) {
     auxiliary.push(
       lang === 'en'
         ? '- [browser] UI verification: `browser(action: open)` load page, then `click/type/read/screenshot` to interact. Do NOT use `exec` + curl for rendered pages.'
@@ -551,7 +629,7 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
 
   // === 特殊模式工具 ===
   const special: string[] = [];
-  if (hasTool(toolNames, 'question') && mode === 'plan') {
+  if (hasTool(toolNames, 'question') && (mode === 'plan' || mode === 'app')) {
     special.push(
       lang === 'en'
         ? '- [question] When requirements are ambiguous, call `question` with clear question and optional options. Wait for user response.'
@@ -565,6 +643,31 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
       lang === 'en' ? '### Special Mode Tools' : lang === 'zh-TW' ? '### 特殊模式工具' : '### 特殊模式工具'
     );
     lines.push(...special);
+  }
+
+  if (hasTool(toolNames, 'app_render')) {
+    const appRender: string[] = [];
+    if (isApp) {
+      appRender.push(
+        lang === 'en'
+          ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps to the application panel. Call this after writing HTML with workspace_write_file to `.CodePapr/apps/<appId>/index.html`. appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. The HTML runs in a sandboxed iframe — use CDN for libraries (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js).'
+          : lang === 'zh-TW'
+          ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用渲染到應用面板。先用 workspace_write_file 將 HTML 寫入 `.CodePapr/apps/<appId>/index.html`，再調用此工具。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。HTML 在沙箱 iframe 中運行——通過 CDN 引用函式庫。'
+          : '- [app_render] 你的主要输出工具。将交互式 HTML 应用渲染到应用面板。先用 workspace_write_file 将 HTML 写入 `.CodePapr/apps/<appId>/index.html`，再调用此工具。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。HTML 在沙箱 iframe 中运行——通过 CDN 引用库。'
+      );
+    } else {
+      appRender.push(
+        lang === 'en'
+          ? '- [app_render] Render data visualizations, dashboards, and interactive HTML apps in the application panel. Use with workspace_write_file for analysis results that are better shown as interactive apps than Markdown.'
+          : lang === 'zh-TW'
+          ? '- [app_render] 將資料視覺化、儀表板和互動式 HTML 應用渲染到應用面板。當分析結果更適合以互動應用而非 Markdown 呈現時使用。'
+          : '- [app_render] 将数据可视化、仪表板和交互式 HTML 应用渲染到应用面板。当分析结果更适合以交互应用而非 Markdown 呈现时使用。'
+      );
+    }
+    lines.push(
+      lang === 'en' ? '### App Render' : lang === 'zh-TW' ? '### 應用渲染' : '### 应用渲染'
+    );
+    lines.push(...appRender);
   }
 
   return lines;
@@ -810,7 +913,7 @@ export function buildRuntimeUserPrompt(options: BuildRuntimeUserPromptOptions): 
   return [
     `# CodePapr ${options.mode.toUpperCase()} ${lang === 'en' ? 'Mode' : '模式'}`,
     '',
-    options.mode === 'ask' ? labels.question : labels.task,
+    options.mode === 'ask' ? labels.question : options.mode === 'app' ? labels.app : labels.task,
     options.input.trim(),
     ...(runtimeContext ? ['', runtimeContextTitle, runtimeContext] : []),
     ...(options.diagnosticsSection?.trim() ? ['', labels.diagnostics, options.diagnosticsSection.trim()] : []),

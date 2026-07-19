@@ -476,6 +476,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
       hasSignaledLoadingRef.current = false;
       if (lastWorkspacePathRef.current !== workspacePath) {
         setProjectGraph(null);
+        setError('');
       }
       lastWorkspacePathRef.current = workspacePath ?? null;
       return;
@@ -504,6 +505,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
           if (cached.cacheKey === currentCacheKey && cached.projectGraph) {
             if (!cancelled) {
               setProjectGraph(cached.projectGraph as WorkspaceProjectGraphResult);
+              setError('');
               hasSignaledLoadingRef.current = true;
               setLoadingInProgress(false);
             }
@@ -511,6 +513,10 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
           }
         }
       } catch { /* cache miss - rebuild */ }
+
+      if (cancelled) {
+        return;
+      }
 
       setIsLoading(true);
       setError('');
@@ -765,9 +771,9 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
       } finally {
         if (loadGenerationRef.current === thisGeneration) {
           setIsLoading(false);
+          setLoadingInProgress(false);
+          setProjectGraphProgress(null);
         }
-        setLoadingInProgress(false);
-        setProjectGraphProgress(null);
         if (worker) {
           worker.terminate();
           worker = null;

@@ -136,4 +136,133 @@ describe('WorkspaceInsightPanel', () => {
     expect(container.textContent).toContain('ProjectGraph');
     expect(container.textContent).toContain('刷新');
   });
+
+  it('does not show "0 files" error when workspace switches during cache lookup (race condition fix)', async () => {
+    let resolveCacheLookup: ((value: string | null) => void) | null = null;
+
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'load_projectgraph_cache') {
+        return new Promise<string | null>((resolve) => {
+          resolveCacheLookup = resolve;
+        });
+      }
+      if (command === 'read_text_file') {
+        return { path: String(args?.relativePath ?? ''), content: 'export const x = 1;', bytes: 20 };
+      }
+      if (command === 'read_text_files_batch') {
+        const paths: string[] = (args as Record<string, unknown>)?.relativePaths as string[] ?? [];
+        return paths.map((p) => ({ path: p, content: 'export const x = 1;', bytes: 20 }));
+      }
+      if (command === 'save_projectgraph_cache') {
+        return undefined;
+      }
+      if (command === 'lsp_start_server') {
+        return { running: true, serverFamily: 'test', command: 'test', toolLabel: 'test' };
+      }
+      if (command === 'lsp_open_document') {
+        return { message: { server: { toolSource: 'managed-cache' } } };
+      }
+      if (command === 'lsp_get_diagnostics') {
+        return { diagnostics: {} };
+      }
+      if (command === 'run_workspace_command') {
+        const a = args as { command?: string; args?: string[] } | undefined;
+        if (a?.command === 'git' && a?.args?.[0] === 'rev-parse') {
+          return { command: 'git', args: ['rev-parse'], status: 0, stdout: '/tmp/repo', stderr: '', timedOut: false };
+        }
+        return { command: 'git', args: a?.args ?? [], status: 0, stdout: '', stderr: '', timedOut: false };
+      }
+      return undefined;
+    });
+
+    const validEntries = [
+      { path: 'src/main.ts', name: 'main.ts', isDir: false, bytes: 100 },
+    ];
+
+    await act(async () => {
+      root.render(
+        <WorkspaceInsightPanel
+          workspacePath="/tmp/project-a"
+          entries={validEntries}
+          lang="zh-CN"
+          selectedPath={null}
+          onSelectPath={() => undefined}
+          canStartLoading={true}
+        />
+      );
+    });
+
+    await flushEffects();
+    expect(resolveCacheLookup).not.toBeNull();
+
+    await act(async () => {
+      root.render(
+        <WorkspaceInsightPanel
+          workspacePath="/tmp/project-b"
+          entries={[]}
+          lang="zh-CN"
+          selectedPath={null}
+          onSelectPath={() => undefined}
+          canStartLoading={false}
+        />
+      );
+    });
+
+    await act(async () => {
+      resolveCacheLookup!(null);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    for (let i = 0; i < 10; i++) {
+      await flushEffects();
+    }
+
+    expect(container.textContent).not.toContain('文件读取全部失败');
+    expect(container.textContent).not.toContain('0 个文件');
+  });
+
+  it('clears stale error when switching workspaces after a failed build', async () => {
+    const nonCodeEntries = [
+      { path: 'readme.txt', name: 'readme.txt', isDir: false, bytes: 100 },
+    ];
+
+    await act(async () => {
+      root.render(
+        <WorkspaceInsightPanel
+          workspacePath="/tmp/project-a"
+          entries={nonCodeEntries}
+          lang="zh-CN"
+          selectedPath={null}
+          onSelectPath={() => undefined}
+          canStartLoading={true}
+        />
+      );
+    });
+
+    for (let i = 0; i < 30; i++) {
+      await flushEffects();
+    }
+
+    expect(container.textContent).toContain('文件读取全部失败');
+    expect(container.textContent).toContain('0 个文件');
+
+    await act(async () => {
+      root.render(
+        <WorkspaceInsightPanel
+          workspacePath="/tmp/project-b"
+          entries={[]}
+          lang="zh-CN"
+          selectedPath={null}
+          onSelectPath={() => undefined}
+          canStartLoading={false}
+        />
+      );
+    });
+
+    for (let i = 0; i < 10; i++) {
+      await flushEffects();
+    }
+
+    expect(container.textContent).not.toContain('文件读取全部失败');
+  });
 });

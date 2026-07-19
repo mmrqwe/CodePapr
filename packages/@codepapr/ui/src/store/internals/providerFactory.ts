@@ -71,6 +71,11 @@ export function toWorkerAgentSettings(settings: Settings): WorkerAgentSettings {
   toolIpcTimeoutMs: settings.toolIpcTimeoutMs,
   multimodalEnabled: settings.multimodalEnabled,
   multimodalModelTier: settings.multimodalModelTier,
+  toolOutputMaxBytes: settings.toolOutputMaxBytes,
+  toolOutputPreviewChars: settings.toolOutputPreviewChars,
+  pruneOldToolResults: settings.pruneOldToolResults,
+  pruneProtectRounds: settings.pruneProtectRounds,
+  pruneMinChars: settings.pruneMinChars,
 };
 }
 

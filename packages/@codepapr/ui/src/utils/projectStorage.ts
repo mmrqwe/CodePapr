@@ -23,7 +23,7 @@ export interface ProjectSessionMeta {
 export interface ProjectMessage {
   id: string;
   role: 'user' | 'assistant' | 'error';
-  workMode?: 'agent' | 'plan' | 'ask';
+  workMode?: 'agent' | 'plan' | 'ask' | 'app';
   content: string;
   promptContent?: string;
   reasoningContent?: string;

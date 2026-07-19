@@ -305,7 +305,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
       </div>
       <div class="nav-section">
         <div class="nav-section-title">Core Concepts</div>
-        <a class="nav-item" onclick="scrollToSection('modes')"><span class="dot"></span>Work Modes: Ask / Plan / Agent</a>
+        <a class="nav-item" onclick="scrollToSection('modes')"><span class="dot"></span>Work Modes: Ask / Plan / Agent / App</a>
         <a class="nav-item" onclick="scrollToSection('workbench')"><span class="dot"></span>Desktop Workbench</a>
         <a class="nav-item" onclick="scrollToSection('tools')"><span class="dot"></span>Tool Capabilities</a>
         <a class="nav-item" onclick="scrollToSection('characters')"><span class="dot"></span>Character Roleplay</a>
@@ -612,7 +612,7 @@ https://api.deepseek.com/v1</code></pre>
         <ol>
           <li><strong>Prepare configuration:</strong> Fill in your API key, provider, and model in the desktop settings</li>
           <li><strong>Choose entry point:</strong> Use the desktop workbench directly (the current public product entry only exposes the desktop workbench)</li>
-          <li><strong>Choose mode:</strong> Ask for explanation and analysis, Plan for breaking down solutions, Agent for actual execution</li>
+          <li><strong>Choose mode:</strong> Ask for explanation and analysis, Plan for breaking down solutions, Agent for actual execution, App for generating visualization apps</li>
         </ol>
 
         <h3>Shortest Path</h3>
@@ -624,7 +624,7 @@ https://api.deepseek.com/v1</code></pre>
         <ol>
           <li>Open settings, fill in provider, model, and API key</li>
           <li>Select a project folder</li>
-          <li>Choose the current task mode among Ask, Plan, and Agent</li>
+          <li>Choose the current task mode among Ask, Plan, Agent, and App</li>
           <li>Enter a task description and let the agent execute or analyze</li>
           <li>Review results in the file tree, editor, Git, and preview panels</li>
         </ol>
@@ -650,9 +650,9 @@ https://api.deepseek.com/v1</code></pre>
 
     <!-- 5. Modes -->
     <section class="section" id="modes">
-      <div class="section-header"><h2>Work Modes: Ask / Plan / Agent</h2></div>
+      <div class="section-header"><h2>Work Modes: Ask / Plan / Agent / App</h2></div>
       <div class="content">
-        <p>Ask, Plan, and Agent are not different products but <strong>three working modes of the same Runtime</strong>.</p>
+        <p>Ask, Plan, Agent, and App are not different products but <strong>four working modes of the same Runtime</strong>.</p>
 
         <h3><span class="badge badge-ask">Ask</span> Analysis Mode</h3>
         <p><strong>Best for:</strong> Explaining architecture, clarifying module responsibilities, analyzing error causes, asking questions before deciding whether to execute.</p>
@@ -728,7 +728,7 @@ After the change, at least run verification for the affected scope; if no narrow
                 <li>Project file tree browsing</li>
                 <li>Monaco code preview (VS Code engine)</li>
                 <li>Multi-language LSP hover, definition, and problem markers</li>
-                <li>Ask / Plan / Agent mode switching</li>
+                <li>Ask / Plan / Agent / App mode switching</li>
                 <li>Tool call process visualization</li>
               </ul>
             </div>
@@ -1883,7 +1883,7 @@ First locate the statistics aggregation logic, then make a minimal fix, and fina
 
         <h3>How to Choose in CodePapr</h3>
         <ul>
-          <li>Primary model defaults to <code>deepseek-v4-pro</code> — used for Ask, Plan, and Agent main execution flow</li>
+          <li>Primary model defaults to <code>deepseek-v4-pro</code> — used for Ask, Plan, Agent, and App main execution flow; App mode always uses the primary model for generation quality</li>
           <li>Fast model defaults to <code>deepseek-v4-flash</code> — used for context compression, sub-task planning, read-only lightweight sub-agents</li>
           <li>Thinking effort (thinkingEffort) defaults to <code>max</code> (strongest reasoning); can be switched to <code>high</code> in the LLM settings tab</li>
         </ul>
@@ -1934,7 +1934,7 @@ First locate the statistics aggregation logic, then make a minimal fix, and fina
         <p>UI E2E uses Chromium running in a mock environment without Tauri webview; real model configuration is not required.</p>
 
         <h3>Usage Tips</h3>
-        <p><strong>Beginners:</strong> First use Ask to understand the system → then Plan to see the scope of changes clearly → finally use Agent for actual execution.</p>
+        <p><strong>Beginners:</strong> First use Ask to understand the system → then Plan to see the scope of changes clearly → finally use Agent for actual execution. Need data visualization? Switch to App mode and generate interactive charts in one sentence.</p>
         <p><strong>Experienced users:</strong> Give clear goals directly in Agent mode → specify affected files and verification requirements → use the desktop to complete conversation, Git, preview, and browser integration.</p>
       </div>
     </section>

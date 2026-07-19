@@ -11,8 +11,10 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useAgentStore } from '../store/agentStore';
+import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { SplitPane } from './SplitPane';
 import { WorkspaceInsightPanel } from './WorkspaceInsightPanel';
+import { AppDockPanel } from './AppDockPanel';
 import { getTranslation } from '../utils/i18n';
 
 // Code-split: only rendered when previewPlacement === 'split', and the code
@@ -200,7 +202,7 @@ interface CodingWorkbenchProps {
   onNavigateToLocation?: (location: PreviewLocation) => void;
 }
 
-type HiddenSidebarTab = 'tree' | 'projectgraph';
+type HiddenSidebarTab = 'tree' | 'projectgraph' | 'apps';
 
 export function CodingWorkbench({
   selectedPath,
@@ -214,6 +216,8 @@ export function CodingWorkbench({
 }: CodingWorkbenchProps) {
   const { settings, workspacePath, workspaceMutationVersion, openWorkspace } = useAgentStore();
   const t = getTranslation(settings.lang);
+  const appCount = useAppRuntimeStore((state) => state.apps.length);
+  const appMountSignal = useAppRuntimeStore((state) => state.mountSignal);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [activePath, setActivePath] = useState<string | null>(selectedPath);
   const [expandedDirectories, setExpandedDirectories] = useState<string[]>([]);
@@ -229,6 +233,12 @@ export function CodingWorkbench({
   const isInitialGraphLoadRef = useRef(true);
   const graphLoadStartedRef = useRef(false);
   const [isInitialGraphPreload, setIsInitialGraphPreload] = useState(false);
+
+  useEffect(() => {
+    if (appMountSignal > 0) {
+      setHiddenSidebarTab('apps');
+    }
+  }, [appMountSignal]);
 
   const handleProjectGraphProgress = useCallback((progress: { phase: string; current: number; total: number } | null, isLoading: boolean) => {
     setProjectGraphProgress(progress);
@@ -844,17 +854,35 @@ export function CodingWorkbench({
                    >
                      {t.fileTree}
                    </button>
-                   <button
-                     type="button"
-                     onClick={() => setHiddenSidebarTab('projectgraph')}
-                     aria-pressed={hiddenSidebarTab === 'projectgraph'}
-                     className={`rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${
+                  <button
+                    type="button"
+                    onClick={() => setHiddenSidebarTab('projectgraph')}
+                    aria-pressed={hiddenSidebarTab === 'projectgraph'}
+                    className={`rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${
                       hiddenSidebarTab === 'projectgraph'
                         ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-100'
                         : 'border-[#2a2d3a] text-slate-400 hover:border-indigo-500/50 hover:text-slate-100'
                     }`}
                   >
                     {t.workspaceProjectGraph}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHiddenSidebarTab('apps')}
+                    aria-pressed={hiddenSidebarTab === 'apps'}
+                    title={t.appDockTabTip}
+                    className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${
+                      hiddenSidebarTab === 'apps'
+                        ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-100'
+                        : 'border-[#2a2d3a] text-slate-400 hover:border-indigo-500/50 hover:text-slate-100'
+                    }`}
+                  >
+                    {t.appDockTab}
+                    {appCount > 0 && (
+                      <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-indigo-500/80 px-1 text-[10px] font-semibold text-white">
+                        {appCount}
+                      </span>
+                    )}
                   </button>
                 </div>
                 {hiddenSidebarTab === 'tree' && (
@@ -906,6 +934,11 @@ export function CodingWorkbench({
                 </div>
                 {hiddenSidebarTab === 'tree' && (
                   <div className="flex h-full flex-col">{fileTreeContent}</div>
+                )}
+                {hiddenSidebarTab === 'apps' && (
+                  <div className="flex h-full flex-col">
+                    <AppDockPanel lang={settings.lang} />
+                  </div>
                 )}
               </div>
             </section>

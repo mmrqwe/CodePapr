@@ -18,8 +18,12 @@ import { buildEffectiveContextMessages } from '../../utils/contextCompaction';
 import { getActiveCharacterPrompt } from '../charactersStore';
 import type { Settings, UIMessage } from './types';
 
-export function toCoreMessages(messages: UIMessage[], sessionBootstrapPrompt?: string): IMessage[] {
-  const restoredMessages = buildEffectiveContextMessages(messages);
+export function toCoreMessages(
+  messages: UIMessage[],
+  sessionBootstrapPrompt?: string,
+  todoListDigest?: string
+): IMessage[] {
+  const restoredMessages = buildEffectiveContextMessages(messages, { todoListDigest });
   const normalizedBootstrapPrompt = sessionBootstrapPrompt?.trim();
   if (!normalizedBootstrapPrompt) {
     return restoredMessages;
@@ -42,10 +46,11 @@ export function toCoreMessages(messages: UIMessage[], sessionBootstrapPrompt?: s
 export function createLogFromMessages(
   sessionId: string,
   messages: UIMessage[],
-  sessionBootstrapPrompt?: string
+  sessionBootstrapPrompt?: string,
+  todoListDigest?: string
 ): AppendOnlyLog {
   const log = new AppendOnlyLog(sessionId);
-  const restoredMessages = toCoreMessages(messages, sessionBootstrapPrompt);
+  const restoredMessages = toCoreMessages(messages, sessionBootstrapPrompt, todoListDigest);
   if (restoredMessages.length === 0) return log;
 
   log.loadFromSnapshot({
@@ -161,7 +166,7 @@ export function buildAgentRuntimeUserPrompt(params: {
   projectDiagnosticsReport?: ProjectDiagnosticsReport | null;
 }): string {
   const diagnosticsSection =
-    params.mode === 'ask'
+    params.mode === 'ask' || params.mode === 'app'
       ? ''
       : buildProjectDiagnosticsPromptSection({
           lang: params.settings.lang ?? 'zh-CN',

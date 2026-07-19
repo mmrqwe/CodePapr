@@ -4,9 +4,13 @@ import {
   ImmutablePrefix,
   Session,
   ToolRegistry,
+  renderTodoListDigest,
+  generateToolOutputFilename,
   type AgentDefinition,
   type EditHistory,
   type SkillDefinition,
+  type ToolOutputTruncationOptions,
+  type PruneOptions,
 } from '@codepapr/core';
 import { CacheValidator, RequestBuilder } from '@codepapr/api';
 import type { ICacheStatistics, IAgentResponse, IImageContent, IMessage, IToolDefinition } from '@codepapr/types';
@@ -17,7 +21,7 @@ import {
 } from '../../agent/WorkerBackedAgent';
 import { registerWorkspaceTools } from '../../tools/workspaceTools';
 import { registerUiTaskTool, type UiTaskToolContext } from '../../tools/uiTaskTool';
-import { registerTodoListTools } from '../../tools/todoListTool';
+import { getTodoListContext, registerTodoListTools } from '../../tools/todoListTool';
 import { registerMcpTools } from '../../tools/mcpTools';
 import { hasEnabledMcpSearch } from '../../utils/mcpTypes';
 import {
@@ -48,6 +52,43 @@ function subagentMultimodalAllowed(settings: Settings, agentTier: 'primary' | 'f
   if (!settings.multimodalEnabled) return false;
   if (settings.multimodalModelTier === 'all') return true;
   return settings.multimodalModelTier === agentTier;
+}
+
+const PRUNE_PROTECTED_TOOLS = new Set(['todo', 'question', 'skill']);
+
+function buildToolOutputTruncation(
+  settings: Settings,
+  workspacePath: string
+): ToolOutputTruncationOptions {
+  return {
+    maxBytes: settings.toolOutputMaxBytes,
+    previewChars: settings.toolOutputPreviewChars,
+    spillToDisk: async (content: string, toolName: string): Promise<string | null> => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const filename = generateToolOutputFilename(toolName);
+        const relativePath = `.CodePapr/tool-output/${filename}`;
+        await invoke('write_text_file', {
+          workspacePath,
+          relativePath,
+          content,
+        });
+        return relativePath;
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
+function buildPruneOptions(settings: Settings): PruneOptions {
+  return {
+    enabled: settings.pruneOldToolResults,
+    protectRecentRounds: settings.pruneProtectRounds,
+    minPrunableChars: settings.pruneMinChars,
+    protectedTools: PRUNE_PROTECTED_TOOLS,
+    placeholder: '[Old tool result content cleared]',
+  };
 }
 
 export interface AgentRuntimeConfig {
@@ -285,11 +326,16 @@ function _createLocalAgent(
       reasoningEffort: overrides.thinkingEffort ?? settings.thinkingEffort,
     },
   });
+  const todoListDigest = (() => {
+    const ctx = getTodoListContext(sessionId);
+    if (!ctx || ctx.tasks.length === 0) return undefined;
+    return renderTodoListDigest(ctx);
+  })();
   const session = new Session({
     sessionId,
     prefix,
     toolRegistry,
-    log: createLogFromMessages(sessionId, messages, sessionBootstrapPrompt),
+    log: createLogFromMessages(sessionId, messages, sessionBootstrapPrompt, todoListDigest),
   });
   return new _MainThreadAgentHandle(new Agent({
     session,
@@ -299,6 +345,8 @@ function _createLocalAgent(
     cacheValidator: new CacheValidator(),
     maxToolRounds: settings.maxToolRounds,
     toolTimeouts: { graph: settings.graphToolTimeoutMs },
+    toolOutputTruncation: buildToolOutputTruncation(settings, workspacePath),
+    pruneOptions: buildPruneOptions(settings),
   }), () => uiTaskToolContext?.subagentCacheStats ?? []);
 }
 
@@ -339,7 +387,11 @@ export function createAgent(
       return new WorkerBackedAgent({
         sessionId,
         workspacePath,
-        initialMessages: toCoreMessages(messages, sessionBootstrapPrompt),
+        initialMessages: toCoreMessages(messages, sessionBootstrapPrompt, (() => {
+          const ctx = getTodoListContext(sessionId);
+          if (!ctx || ctx.tasks.length === 0) return undefined;
+          return renderTodoListDigest(ctx);
+        })()),
         settings: toWorkerAgentSettings(settings),
         providerName: provider,
         model: baseModel,

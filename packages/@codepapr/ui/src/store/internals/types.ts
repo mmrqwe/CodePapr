@@ -55,6 +55,11 @@ export interface Settings {
   compactionModel: 'fast' | 'primary';
   compactionMaxTokens: number;
   compactionTemperature: number;
+  toolOutputMaxBytes: number;
+  toolOutputPreviewChars: number;
+  pruneOldToolResults: boolean;
+  pruneProtectRounds: number;
+  pruneMinChars: number;
   projectGraphMaxDepth: number;
   projectGraphMaxFiles: number;
   projectGraphMaxEdges: number;

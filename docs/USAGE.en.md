@@ -13,15 +13,16 @@
 
 1. **Configure**: Enter API key, provider, and model in desktop settings.
 2. **Choose entry**: Use the desktop workbench.
-3. **Choose mode**: Ask (explain/analyze), Plan (decompose strategy), Agent (actually execute).
+3. **Choose mode**: Ask (explain/analyze), Plan (decompose strategy), Agent (actually execute), App (generate visualization apps).
 
-## Three Working Modes
+## Four Working Modes
 
 | Mode | Best For | Behavior |
 |------|------|------|
 | **Ask** | Explanation, analysis, suggestions | Read-only; no file modifications or command execution |
 | **Plan** | Complex task decomposition | Output a plan with options, execute after confirmation |
 | **Agent** | Bug fixes, feature implementation | Autonomous execution: search → modify → verify |
+| **App** | Data visualization, exploration | Instantly generates interactive HTML apps; supports D3/ECharts/Mermaid libraries |
 
 In Plan mode, when requirements are ambiguous, the Agent will call the `question` tool to ask you instead of guessing.
 
@@ -298,7 +299,10 @@ Not great:
 ### 2. Direct Bug Fix
 Go straight to Agent mode with a clear objective and affected file scope.
 
-### 3. Conversation Reset Rollback
+### 3. Generate Data Visualizations
+Switch to App mode to let the Agent explore data and generate an interactive HTML app — perfect for database analysis, relationship diagrams, dashboards, and more.
+
+### 4. Conversation Reset Rollback
 If the Agent goes off track, hover the previous correct user message and click "Reset to here" to continue from that state.
 
 ## Data Locations

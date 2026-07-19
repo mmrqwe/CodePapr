@@ -16,7 +16,7 @@ CodePapr is a local coding agent system built with DeepSeek cache optimization. 
 
 | Capability | Description |
 |-----------|-------------|
-| **Ask / Plan / Agent modes** | Single runtime for explanation through to execution |
+| **Ask / Plan / Agent / App modes** | Single runtime for explanation, execution, and interactive HTML app generation |
 | **Multi-agent collaboration** | Main agent dispatches Explore/Scout/Mentor and custom sub-agents via the `task` tool |
 | **TodoList task planning** | Agents auto-create and track task lists with progress reporting and re-planning |
 | **Project memory auto-management** | `.CodePapr/memory.md` accumulates user profiles, error patterns, and project conventions across sessions; auto-deduplicates with a fast model once exceeding 200 lines, without blocking the session |
@@ -82,13 +82,14 @@ npm run release    # Run optimized build directly
 npm run publish    # Generate installer (.dmg/.msi)
 ```
 
-## Three Work Modes
+## Four Work Modes
 
 | Mode | Best for | Behavior |
 |------|----------|----------|
 | **Ask** | Explanation, analysis, suggestions | Read-only — no file edits or command execution |
 | **Plan** | Complex task breakdown | Proposes a plan and options, then executes on confirmation |
 | **Agent** | Bug fixes, feature implementation | Autonomous execution: search → modify → verify |
+| **App** | Data visualization, exploration | Instantly generates interactive HTML apps; renders D3/ECharts/Mermaid in a sandboxed panel |
 
 ## Project Configuration
 

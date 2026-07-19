@@ -19,6 +19,19 @@ export type { ToolHandler } from './tool/ToolRegistry';
 export { EditHistory } from './tool/editHistory';
 export type { EditRecord, RevertAction } from './tool/editHistory';
 export { applySearchReplaceDiff, applySearchReplacePatch } from './tool/searchReplaceDiff';
+export {
+  truncateToolOutput,
+  stringifyToolResult,
+  getByteSize,
+  formatTruncatedContent,
+  generateToolOutputFilename,
+} from './tool/toolOutputTruncation';
+export type {
+  ToolOutputTruncationOptions,
+  TruncationResult,
+} from './tool/toolOutputTruncation';
+export { pruneOldToolResults } from './tool/pruneToolResults';
+export type { PruneOptions } from './tool/pruneToolResults';
 export type {
   ApplySearchReplaceDiffFile,
   ApplySearchReplaceDiffPatch,

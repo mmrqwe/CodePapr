@@ -305,7 +305,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
       </div>
       <div class="nav-section">
         <div class="nav-section-title">核心概念</div>
-        <a class="nav-item" onclick="scrollToSection('modes')"><span class="dot"></span>工作模式：Ask / Plan / Agent</a>
+        <a class="nav-item" onclick="scrollToSection('modes')"><span class="dot"></span>工作模式：Ask / Plan / Agent / App</a>
         <a class="nav-item" onclick="scrollToSection('workbench')"><span class="dot"></span>桌面工作台</a>
         <a class="nav-item" onclick="scrollToSection('tools')"><span class="dot"></span>工具能力详解</a>
         <a class="nav-item" onclick="scrollToSection('characters')"><span class="dot"></span>角色扮演</a>
@@ -612,7 +612,7 @@ https://api.deepseek.com/v1</code></pre>
         <ol>
           <li><strong>准备配置：</strong>在桌面端设置中填写 API key、provider 和 model</li>
           <li><strong>选择入口：</strong>直接使用桌面端（当前公开产品入口只保留桌面工作台）</li>
-          <li><strong>选择模式：</strong>Ask 负责解释和分析，Plan 负责拆解方案，Agent 负责实际执行</li>
+          <li><strong>选择模式：</strong>Ask 负责解释和分析，Plan 负责拆解方案，Agent 负责实际执行，App 负责生成可视化应用</li>
         </ol>
 
         <h3>最短路径</h3>
@@ -624,7 +624,7 @@ https://api.deepseek.com/v1</code></pre>
         <ol>
           <li>打开设置，填写 provider、model 和 API key</li>
           <li>选择项目文件夹</li>
-          <li>在 Ask、Plan、Agent 中选择当前任务模式</li>
+          <li>在 Ask、Plan、Agent、App 中选择当前任务模式</li>
           <li>输入任务描述，让代理执行或分析</li>
           <li>在文件树、编辑器、Git、预览面板中复核结果</li>
         </ol>
@@ -650,9 +650,9 @@ https://api.deepseek.com/v1</code></pre>
 
     <!-- 5. Modes -->
     <section class="section" id="modes">
-      <div class="section-header"><h2>工作模式：Ask / Plan / Agent</h2></div>
+      <div class="section-header"><h2>工作模式：Ask / Plan / Agent / App</h2></div>
       <div class="content">
-        <p>Ask、Plan、Agent 不是不同产品，而是<strong>同一套 Runtime 的三种工作方式</strong>。</p>
+        <p>Ask、Plan、Agent、App 不是不同产品，而是<strong>同一套 Runtime 的四种工作方式</strong>。</p>
 
         <h3><span class="badge badge-ask">Ask</span> 分析模式</h3>
         <p><strong>适合：</strong>解释架构、梳理模块职责、分析报错原因、先问清楚再决定是否执行。</p>
@@ -728,7 +728,7 @@ https://api.deepseek.com/v1</code></pre>
                 <li>项目文件树浏览</li>
                 <li>Monaco 代码预览（VS Code 引擎）</li>
                 <li>多语言 LSP hover、definition 和问题标记</li>
-                <li>Ask / Plan / Agent 模式切换</li>
+                <li>Ask / Plan / Agent / App 模式切换</li>
                 <li>工具调用过程可视化</li>
               </ul>
             </div>
@@ -1883,7 +1883,7 @@ X-API-Key: your-api-key</code></pre>
 
         <h3>在 CodePapr 里怎么选</h3>
         <ul>
-          <li>主模型默认是 <code>deepseek-v4-pro</code>——用于 Ask、Plan、Agent 主执行流程</li>
+          <li>主模型默认是 <code>deepseek-v4-pro</code>——用于 Ask、Plan、Agent、App 主执行流程；App 模式始终使用主模型以确保生成质量</li>
           <li>快速模型默认是 <code>deepseek-v4-flash</code>——用于上下文压缩、子任务规划、只读轻型子代理</li>
           <li>思考强度（thinkingEffort）默认为 <code>max</code>（最强推理），可在 LLM 设置 tab 中切换为 <code>high</code></li>
         </ul>
@@ -1934,7 +1934,7 @@ X-API-Key: your-api-key</code></pre>
         <p>UI E2E 使用 Chromium 在无 Tauri webview 的 mock 环境下运行，不需要真实模型配置。</p>
 
         <h3>使用建议</h3>
-        <p><strong>新手：</strong>先用 Ask 理解系统 → 再用 Plan 看清楚改动范围 → 最后用 Agent 做真正执行。</p>
+        <p><strong>新手：</strong>先用 Ask 理解系统 → 再用 Plan 看清楚改动范围 → 最后用 Agent 做真正执行。需要数据可视化时切到 App 模式，一句话生成交互式图表。</p>
         <p><strong>老手：</strong>直接在 Agent 模式里给明确目标 → 明确影响文件和验证要求 → 用桌面端完成对话、Git、预览和浏览器联动。</p>
       </div>
     </section>

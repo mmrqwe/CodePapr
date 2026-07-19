@@ -8,7 +8,7 @@ import type { Lang } from './i18n';
 import type { ProjectDiagnosticsReport } from './projectDiagnostics';
 import { parseProjectDiagnosticLocations } from './projectDiagnosticLocations';
 
-export type WorkMode = 'agent' | 'plan' | 'ask';
+export type WorkMode = 'agent' | 'plan' | 'ask' | 'app';
 
 const SECTION_LABELS: Record<
   PromptLang,
@@ -104,6 +104,12 @@ export const MODE_PROMPTS: Record<WorkMode, string> = {
     lang: 'zh-CN',
     toolNames: DEFAULT_PROMPT_TOOL_NAMES,
   }),
+  app: buildSharedModeSystemPrompt({
+    mode: 'app',
+    workspacePath: '/tmp/project',
+    lang: 'zh-CN',
+    toolNames: DEFAULT_PROMPT_TOOL_NAMES,
+  }),
 };
 
 export function buildProjectDiagnosticsPromptSection(params: {
@@ -170,7 +176,7 @@ export function buildModeSystemPrompt(
 ): string {
   const promptLang = normalizeLang(lang);
   const diagnosticsSection =
-    mode === 'ask'
+    mode === 'ask' || mode === 'app'
       ? []
       : buildProjectDiagnosticsPromptSection({
           lang: promptLang,
