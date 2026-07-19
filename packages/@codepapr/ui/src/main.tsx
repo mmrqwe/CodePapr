@@ -5,6 +5,7 @@ import { LogicalPosition } from '@tauri-apps/api/window';
 import { fetch } from '@tauri-apps/plugin-http';
 import { setGlobalFetchFn } from '@codepapr/api';
 import App from './App';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import './index.css';
 
 setGlobalFetchFn(fetch);
@@ -53,6 +54,8 @@ window.addEventListener('keydown', (e) => {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>
 );

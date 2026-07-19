@@ -207,9 +207,6 @@ async function warmPreviewFile(workspacePath: string, relativePath: string): Pro
 
     return result.content;
   })()
-    .catch((error) => {
-      throw error;
-    })
     .finally(() => {
       previewWarmPromises.delete(cacheKey);
     });
@@ -981,7 +978,7 @@ export function CodePreviewPanel({
           relativePath: source.path,
           maxBytes: 300_000,
         });
-        return result.content;
+        return result.content ?? '';
       }
 
       const revisionPrefix = source.revision === 'HEAD' ? 'HEAD:' : ':';
@@ -992,15 +989,15 @@ export function CodePreviewPanel({
         timeoutSeconds: 15,
       });
 
-      if (commandResult.status !== 0) {
+      if ((commandResult.status ?? 1) !== 0) {
         throw new Error(
-          commandResult.stderr.trim() ||
-            commandResult.stdout.trim() ||
+          (commandResult.stderr ?? '').trim() ||
+            (commandResult.stdout ?? '').trim() ||
             t.workspaceGitFileDiffUnavailable
         );
       }
 
-      return commandResult.stdout;
+      return commandResult.stdout ?? '';
     };
 
     const loadGitDiffView = async () => {
@@ -1036,7 +1033,7 @@ export function CodePreviewPanel({
             originalContent: '',
             modifiedContent: '',
             isLoading: false,
-            error: (err as Error).message,
+            error: err instanceof Error ? err.message : String(err),
           });
         }
       }

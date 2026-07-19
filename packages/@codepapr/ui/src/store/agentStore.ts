@@ -256,6 +256,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _messageCheckpoints: {},
       _gitReady: false,
       _gitReadyError: null,
+      _checkpointError: null,
       _checkpointSeq: 0,
       _pendingMemoryConsolidation: false,
 
@@ -336,6 +337,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _messageCheckpoints: {},
       _gitReady: false,
       _gitReadyError: null,
+      _checkpointError: null,
       _checkpointSeq: 0,
           };
         });
@@ -370,6 +372,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _messageCheckpoints: {},
           _gitReady: false,
           _gitReadyError: null,
+          _checkpointError: null,
           _checkpointSeq: 0,
         });
       },
@@ -478,6 +481,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _messageCheckpoints: { ...messageCheckpoints },
           _gitReady: false,
           _gitReadyError: null,
+          _checkpointError: null,
           _checkpointSeq: 0,
         });
 
@@ -556,7 +560,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
       _ensureWorkspaceGitReady: async (path) => {
         if (!path) {
-          set({ _gitReady: false, _gitReadyError: null });
+          set({ _gitReady: false, _gitReadyError: null, _checkpointError: null });
           return;
         }
         try {
@@ -598,6 +602,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           set({
             _gitReady: false,
             _gitReadyError: err instanceof Error ? err.message : String(err),
+            _checkpointError: null,
           });
         }
       },
@@ -728,6 +733,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agentModel: null,
           _agentPromptKey: null,
           _checkpointSeq: 0,
+          _checkpointError: null,
         }));
         saveCurrentProjectState(get(), { purgeDeletedContent: true });
       },
@@ -780,6 +786,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             ? { ...get().sessionMessages, [activeSessionId]: truncatedMessages }
             : get().sessionMessages,
           _messageCheckpoints: nextCheckpoints,
+          _taskChecklists: activeSessionId
+            ? { ...get()._taskChecklists, [activeSessionId]: null }
+            : get()._taskChecklists,
           _agent: null,
           _agentModel: null,
           _agentPromptKey: null,
@@ -1240,9 +1249,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
               set((s) => ({
                 _messageCheckpoints: { ...s._messageCheckpoints, [userMsg!.id]: cp.sha },
                 _checkpointSeq: sequence,
+                _checkpointError: null,
               }));
-            } catch {
-              // checkpoint write failure doesn't block conversation
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              console.warn('[CodePapr] checkpoint 创建失败:', msg);
+              set({ _checkpointError: msg });
             }
           }
 

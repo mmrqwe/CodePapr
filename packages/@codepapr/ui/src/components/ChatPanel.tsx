@@ -1351,6 +1351,7 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
     messageCheckpoints,
     gitReady,
     gitReadyError,
+    checkpointError,
     _agentDefinitions,
     _skillDefinitions,
     mentorEnabled,
@@ -1370,6 +1371,7 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
       messageCheckpoints: state._messageCheckpoints,
       gitReady: state._gitReady,
       gitReadyError: state._gitReadyError,
+      checkpointError: state._checkpointError,
       _agentDefinitions: state._agentDefinitions,
       _skillDefinitions: state._skillDefinitions,
       mentorEnabled: state.settings.mentorEnabled ?? true,
@@ -2047,6 +2049,18 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
             : `代码重置不可用：${gitReadyError}`}
         </div>
       )}
+      {checkpointError && gitReady && (
+        <div
+          role="status"
+          className="pointer-events-none absolute inset-x-0 top-2 z-30 mx-auto w-fit max-w-[90%] rounded-full border border-amber-500/30 bg-amber-500/15 px-4 py-1.5 text-xs text-amber-200 shadow-lg backdrop-blur-sm"
+        >
+          {settings.lang === 'en'
+            ? `Code snapshot failed: ${checkpointError} (see console)`
+            : settings.lang === 'zh-TW'
+            ? `程式碼快照失敗：${checkpointError}（詳見控制台）`
+            : `代码快照创建失败：${checkpointError}（详见控制台）`}
+        </div>
+      )}
       <GoalBanner />
       {/* 消息列表 */}
       <div className="relative flex-1 min-h-0">
@@ -2298,6 +2312,15 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
                         // 把被截掉的用户消息内容回填到输入框，方便用户修改后重发
                         if (result.restoredInput) {
                           setInput(result.restoredInput);
+                        }
+                        if (result.restoredImages && result.restoredImages.length > 0) {
+                          setPendingImages(result.restoredImages.map((img) => ({
+                            ...img,
+                            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                            dataUri: `data:${img.mediaType};base64,${img.data}`,
+                          })));
+                        } else {
+                          setPendingImages([]);
                         }
                         let text: string;
                         if (result.codeReset === 'none') {

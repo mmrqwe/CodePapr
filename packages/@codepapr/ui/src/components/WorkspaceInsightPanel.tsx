@@ -199,6 +199,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
     staged: createEmptyGitDiffLoadState(),
   });
   const [gitFileDiffs, setGitFileDiffs] = useState<Record<string, GitDiffLoadState>>({});
+  const loadingDiffKeysRef = useRef<Set<string>>(new Set());
   const [expandedGitDiffKey, setExpandedGitDiffKey] = useState<string | null>(null);
   const [gitCopyState, setGitCopyState] = useState<{ key: string; success: boolean } | null>(null);
   const [isInitializingGit, setIsInitializingGit] = useState(false);
@@ -744,7 +745,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                   : parsedStatus;
             }
           } catch (gitError) {
-            nextGitStatus = buildGitUnavailableStatus((gitError as Error).message);
+            nextGitStatus = buildGitUnavailableStatus(gitError instanceof Error ? gitError.message : String(gitError));
           }
         }
 
@@ -882,7 +883,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
       setRefreshVersion((value) => value + 1);
     } catch (error) {
       setProjectGraphProgress(null);
-      setGitActionMessage((error as Error).message || t.workspaceGitUnavailable);
+      setGitActionMessage((error instanceof Error ? error.message : String(error)) || t.workspaceGitUnavailable);
     } finally {
       setIsInitializingGit(false);
     }
@@ -974,7 +975,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
           ...current,
           [gitMode]: {
             summary: buildGitUnavailableDiff(
-              (gitError as Error).message,
+              gitError instanceof Error ? gitError.message : String(gitError),
               commandArgs.staged,
               pathspecs
             ),
@@ -1003,9 +1004,10 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   async function loadGitFileDiff(file: GitStatusFile, mode: GitDiffMode): Promise<void> {
     const cacheKey = gitDiffCacheKey(mode, file.path);
     const existing = gitFileDiffs[cacheKey];
-    if (existing?.summary || existing?.isLoading) {
+    if (existing?.summary || existing?.isLoading || loadingDiffKeysRef.current.has(cacheKey)) {
       return;
     }
+    loadingDiffKeysRef.current.add(cacheKey);
 
     setGitFileDiffs((current) => ({
       ...current,
@@ -1025,7 +1027,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
           relativePath: file.path,
           maxBytes: 180_000,
         });
-        summary = buildSyntheticUntrackedGitDiff(file.path, result.content, 220);
+        summary = buildSyntheticUntrackedGitDiff(file.path, result.content ?? '', 220);
       } else {
         const pathspecs = file.originalPath ? [file.originalPath, file.path] : [file.path];
         const commandArgs = buildGitDiffCommandArgs({
@@ -1071,10 +1073,12 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
         ...current,
         [cacheKey]: {
           summary: null,
-          error: (gitError as Error).message,
+          error: gitError instanceof Error ? gitError.message : String(gitError),
           isLoading: false,
         },
       }));
+    } finally {
+      loadingDiffKeysRef.current.delete(cacheKey);
     }
   }
 

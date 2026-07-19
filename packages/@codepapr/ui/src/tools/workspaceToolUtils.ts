@@ -981,7 +981,7 @@ export function buildGitUnavailableStatus(message: string): GitStatusSummary {
     isRepo: false,
     files: [],
     raw: '',
-    message: message.trim() || 'Git 不可用。',
+    message: (message ?? '').trim() || 'Git 不可用。',
   };
 }
 
@@ -994,7 +994,7 @@ export function buildGitUnavailableDiff(message: string, staged: boolean, pathsp
     stat: '',
     diff: '',
     truncated: false,
-    message: message.trim() || 'Git 不可用。',
+    message: (message ?? '').trim() || 'Git 不可用。',
   };
 }
 

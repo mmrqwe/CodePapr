@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use std::{env, fs};
@@ -138,6 +139,29 @@ pub(crate) fn canonical_workspace(workspace_path: &str) -> Result<PathBuf, Strin
     Ok(workspace)
 }
 
+/// Reject filename components that would break git checkpoint or the
+/// filesystem: control characters (0x00–0x1F, including NUL) and backslash
+/// (`\`, which git treats as a path separator, causing `index.add_all` to
+/// fail and silently breaking "reset to here").
+fn validate_filename_component(part: &OsStr) -> Result<(), String> {
+    let s = match part.to_str() {
+        Some(s) => s,
+        None => return Err("文件名包含非 UTF-8 字符".to_string()),
+    };
+    for (idx, ch) in s.char_indices() {
+        if ch == '\\' {
+            return Err(format!(
+                "文件名不能包含反斜杠 '\\'（git 路径冲突），位置 {}",
+                idx
+            ));
+        }
+        if (ch as u32) < 0x20 {
+            return Err(format!("文件名不能包含控制字符，位置 {}", idx));
+        }
+    }
+    Ok(())
+}
+
 /// Normalise a relative path, rejecting `..`, absolute paths and prefixes.
 pub(crate) fn normalize_relative_path(relative_path: Option<&str>) -> Result<PathBuf, String> {
     let mut normalized = PathBuf::new();
@@ -148,7 +172,10 @@ pub(crate) fn normalize_relative_path(relative_path: Option<&str>) -> Result<Pat
 
     for component in Path::new(raw).components() {
         match component {
-            Component::Normal(part) => normalized.push(part),
+            Component::Normal(part) => {
+                validate_filename_component(part)?;
+                normalized.push(part)
+            }
             Component::CurDir => {}
             Component::ParentDir => return Err("路径不能包含 ..".to_string()),
             Component::RootDir | Component::Prefix(_) => {

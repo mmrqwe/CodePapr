@@ -718,7 +718,7 @@ const tools: IToolDefinition[] = [
       properties: {
         relativePath: {
           type: 'string',
-          description: '要写入的相对文件路径。',
+          description: '要写入的相对文件路径。路径分隔符用 /，不要包含 \\ 或控制字符。',
         },
         content: {
           type: 'string',
@@ -1566,7 +1566,7 @@ name: 'web_download_file',
       properties: {
         relativePath: {
           type: 'string',
-          description: '要修改的相对文件路径。',
+          description: '要修改的相对文件路径。路径分隔符用 /，不要包含 \\ 或控制字符。',
         },
         search: {
           type: 'string',
@@ -1662,7 +1662,7 @@ name: 'web_download_file',
             properties: {
               relativePath: {
                 type: 'string',
-                description: '要修改的相对文件路径。',
+                description: '要修改的相对文件路径。路径分隔符用 /，不要包含 \\ 或控制字符。',
               },
               search: {
                 type: 'string',

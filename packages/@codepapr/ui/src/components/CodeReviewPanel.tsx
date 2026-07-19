@@ -42,7 +42,7 @@ async function loadFileContent(workspacePath: string, ref: string, filePath: str
       relativePath: filePath,
       maxBytes: 5_000_000,
     });
-    return result.content;
+    return result.content ?? '';
   }
   const result = await invoke<CommandResult>('run_workspace_command', {
     workspacePath,
@@ -50,7 +50,12 @@ async function loadFileContent(workspacePath: string, ref: string, filePath: str
     args: ['show', `${ref}:${filePath}`],
     timeoutSeconds: 15,
   });
-  return result.stdout;
+  if ((result.status ?? 1) !== 0) {
+    throw new Error(
+      (result.stderr ?? '').trim() || (result.stdout ?? '').trim() || `git show ${ref}:${filePath} failed`
+    );
+  }
+  return result.stdout ?? '';
 }
 
 /**
@@ -69,7 +74,12 @@ async function loadFileList(workspacePath: string, base: string, head: string): 
     args,
     timeoutSeconds: 15,
   });
-  return parseDiffFileList(result.stdout);
+  if ((result.status ?? 1) !== 0) {
+    throw new Error(
+      (result.stderr ?? '').trim() || (result.stdout ?? '').trim() || 'git diff failed'
+    );
+  }
+  return parseDiffFileList(result.stdout ?? '');
 }
 
 const STATUS_COLORS: Record<FileEntry['status'], string> = {

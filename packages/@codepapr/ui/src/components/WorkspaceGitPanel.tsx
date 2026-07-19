@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   buildGitBackupBranchName,
@@ -118,7 +118,10 @@ function isUntrackedGitFile(file: GitStatusFile): boolean {
 }
 
 function commandResultMessage(result: CommandResult): string {
-  return result.stderr.trim() || result.stdout.trim() || `git ${result.args.join(' ')} failed`;
+  const stderr = result.stderr ?? '';
+  const stdout = result.stdout ?? '';
+  const args = result.args ?? [];
+  return stderr.trim() || stdout.trim() || `git ${args.join(' ')} failed`;
 }
 
 function statusBadgeClassName(kind: ReturnType<typeof describeGitChange>['kind']): string {
@@ -219,6 +222,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [gitFileDiffs, setGitFileDiffs] = useState<Record<string, GitDiffLoadState>>({});
+  const loadingDiffKeysRef = useRef<Set<string>>(new Set());
   const [expandedGitDiffKey, setExpandedGitDiffKey] = useState<string | null>(null);
   const [gitCopyState, setGitCopyState] = useState<{ key: string; success: boolean } | null>(null);
   const [isInitializingGit, setIsInitializingGit] = useState(false);
@@ -306,7 +310,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
       } catch (gitError) {
         if (!cancelled) {
           setGitHistory(null);
-          setGitStatus(buildGitUnavailableStatus((gitError as Error).message));
+          setGitStatus(buildGitUnavailableStatus(gitError instanceof Error ? gitError.message : String(gitError)));
         }
       } finally {
         if (!cancelled) {
@@ -407,9 +411,10 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   async function loadGitFileDiff(file: GitStatusFile, mode: GitDiffMode): Promise<void> {
     const cacheKey = gitDiffCacheKey(mode, file.path);
     const existing = gitFileDiffs[cacheKey];
-    if (existing?.summary || existing?.isLoading) {
+    if (existing?.summary || existing?.isLoading || loadingDiffKeysRef.current.has(cacheKey)) {
       return;
     }
+    loadingDiffKeysRef.current.add(cacheKey);
 
     setGitFileDiffs((current) => ({
       ...current,
@@ -479,11 +484,13 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
       setGitFileDiffs((current) => ({
         ...current,
         [cacheKey]: {
-          summary: buildGitUnavailableDiff((gitError as Error).message, fallbackArgs.staged, [file.path]),
+          summary: buildGitUnavailableDiff(gitError instanceof Error ? gitError.message : String(gitError), fallbackArgs.staged, [file.path]),
           error: '',
           isLoading: false,
         },
       }));
+    } finally {
+      loadingDiffKeysRef.current.delete(cacheKey);
     }
   }
 
@@ -529,7 +536,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
       setGitActionMessage(t.workspaceGitInitDone);
       setRefreshVersion((value) => value + 1);
     } catch (error) {
-      setGitActionMessage((error as Error).message || t.workspaceGitUnavailable);
+      setGitActionMessage((error instanceof Error ? error.message : String(error)) || t.workspaceGitUnavailable);
     } finally {
       setIsInitializingGit(false);
     }
@@ -594,7 +601,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
       setDeselectedPaths(new Set());
       queueGitRefresh(gitCommitDoneText);
     } catch (error) {
-      setGitActionMessage((error as Error).message || gitActionFailedText);
+      setGitActionMessage((error instanceof Error ? error.message : String(error)) || gitActionFailedText);
     } finally {
       setActiveGitActionKey(null);
     }
@@ -620,7 +627,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
       setBranchName('');
       queueGitRefresh(`${gitBranchDonePrefixText} ${trimmedBranchName}`);
     } catch (error) {
-      setGitActionMessage((error as Error).message || gitActionFailedText);
+      setGitActionMessage((error instanceof Error ? error.message : String(error)) || gitActionFailedText);
     } finally {
       setActiveGitActionKey(null);
     }
@@ -655,7 +662,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
           : gitRestoreDoneText
       );
     } catch (error) {
-      setGitActionMessage((error as Error).message || gitActionFailedText);
+      setGitActionMessage((error instanceof Error ? error.message : String(error)) || gitActionFailedText);
     } finally {
       setActiveGitActionKey(null);
     }
@@ -701,7 +708,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
       }
       queueGitRefresh(messages.join(' · '));
     } catch (error) {
-      setGitActionMessage((error as Error).message || gitActionFailedText);
+      setGitActionMessage((error instanceof Error ? error.message : String(error)) || gitActionFailedText);
     } finally {
       setActiveGitActionKey(null);
     }
@@ -822,6 +829,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
           const isFilesLoading = commitFilesLoading.has(entry.hash);
           const filesError = commitFilesError.get(entry.hash);
           const isAuto = subjectInfo.kind !== 'user';
+          const isRootCommit = entry === entries[entries.length - 1];
           const titleTone =
             subjectInfo.kind === 'user'
               ? 'text-slate-100 font-semibold'
@@ -954,6 +962,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                       </button>
                       <button
                         type="button"
+                        disabled={isRootCommit}
                         onClick={(e) => {
                           e.stopPropagation();
                           onOpenCommitReview({
@@ -962,11 +971,13 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                           });
                         }}
                         title={
-                          lang === 'en'
+                          isRootCommit
+                            ? (lang === 'en' ? 'This is the initial commit; no parent to compare.' : '这是初始提交，没有父提交可对比。')
+                            : lang === 'en'
                             ? 'Compare this commit against its parent commit.'
                             : '对比该提交与它的上一次提交。'
                         }
-                        className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] text-slate-300 transition-colors hover:border-indigo-500/50 hover:text-slate-100"
+                        className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] text-slate-300 transition-colors hover:border-indigo-500/50 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[#2a2d3a] disabled:hover:text-slate-300"
                       >
                         {gitCompareWithParentText}
                       </button>

@@ -231,6 +231,7 @@ export interface AgentState {
   _messageCheckpoints: Record<string, string>;
   _gitReady: boolean;
   _gitReadyError: string | null;
+  _checkpointError: string | null;
   _checkpointSeq: number;
   _pendingMemoryConsolidation: boolean;
 }
