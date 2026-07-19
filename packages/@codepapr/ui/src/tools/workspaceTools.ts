@@ -690,6 +690,25 @@ const tools: IToolDefinition[] = [
     },
   },
   {
+    name: 'workspace_read_image',
+    description:
+      '读取项目中的图片文件（PNG、JPEG、WebP、GIF），返回 base64 编码的图片数据供多模态模型识别分析。支持 maxBytes 限制大小。',
+    parameters: {
+      type: 'object',
+      properties: {
+        relativePath: {
+          type: 'string',
+          description: '图片文件相对路径。',
+        },
+        maxBytes: {
+          type: 'number',
+          description: '最大读取字节数，默认 5000000（5MB）。',
+        },
+      },
+      required: ['relativePath'],
+    },
+  },
+  {
     name: 'workspace_write_file',
     description:
       '写入当前项目文件夹内的 UTF-8 文本文件。适合创建或替换源码文件。路径必须是相对于项目文件夹的路径，不能使用绝对路径或 ..。',
@@ -2490,19 +2509,23 @@ export function registerWorkspaceTools(
     if (options.multimodalEnabled) {
       const ext = result.format.toLowerCase();
       const mediaType = ext === 'jpeg' ? 'image/jpeg' : 'image/png';
-      const imgResult = await invoke<ReadImageFileResult>('read_image_file', {
-        workspacePath: workspace(),
-        relativePath: result.path,
-        maxBytes: undefined,
-      });
-      const images: IImageContent[] = [{
-        mediaType: imgResult.mediaType || mediaType,
-        data: imgResult.data,
-      }];
-      return {
-        ...result,
-        __images: images,
-      };
+      try {
+        const imgResult = await invoke<ReadImageFileResult>('read_image_file', {
+          workspacePath: workspace(),
+          relativePath: result.path,
+          maxBytes: undefined,
+        });
+        const images: IImageContent[] = [{
+          mediaType: imgResult.mediaType || mediaType,
+          data: imgResult.data,
+        }];
+        return {
+          ...result,
+          __images: images,
+        };
+      } catch {
+        // Image read-back failed (e.g. too large, timeout); still return the screenshot result
+      }
     }
 
     return result;

@@ -20,6 +20,7 @@ export interface ModeConfig {
   baseURL: string;
   model: string;
   fastModel: string;
+  maxTokens: number;
 }
 
 export interface Settings {

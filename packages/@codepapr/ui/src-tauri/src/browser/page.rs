@@ -5,7 +5,7 @@ use crate::browser::types::{
 };
 use crate::shared::{
     canonical_workspace, normalize_relative_path, parse_browser_url, relative_string,
-    resolve_existing_path, unix_millis,
+    resolve_existing_path, run_blocking_workspace_task, unix_millis,
 };
 use headless_chrome::{Browser, LaunchOptionsBuilder, Tab};
 #[cfg(windows)]
@@ -18,11 +18,12 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
+use std::sync::mpsc;
 
 const MAX_BROWSER_DOM_BYTES: usize = 500_000;
 const MAX_BROWSER_SCREENSHOT_BYTES: usize = 25_000_000;
 const DEFAULT_BROWSER_TIMEOUT_SECONDS: u64 = 10;
-const MAX_BROWSER_TIMEOUT_SECONDS: u64 = 30;
+const MAX_BROWSER_TIMEOUT_SECONDS: u64 = 120;
 
 pub(crate) static BROWSER_PAGE_SESSIONS: OnceLock<
     Mutex<HashMap<String, ManagedBrowserPageSession>>,
@@ -71,6 +72,40 @@ fn browser_action_timeout(timeout_seconds: Option<u64>) -> Duration {
             .unwrap_or(DEFAULT_BROWSER_TIMEOUT_SECONDS)
             .clamp(1, MAX_BROWSER_TIMEOUT_SECONDS),
     )
+}
+
+fn capture_screenshot_with_timeout(
+    timeout: Duration,
+    tab: Arc<Tab>,
+    selector: Option<String>,
+    selector_kind: BrowserSelectorKind,
+    screenshot_format: BrowserScreenshotFormat,
+) -> Result<Vec<u8>, String> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let result = (|| {
+            if let Some(sel) = selector.as_ref() {
+                let el = find_browser_element(&tab, sel, selector_kind, timeout)?;
+                el.capture_screenshot(screenshot_format.capture_format())
+                    .map_err(|err| format!("截取页面元素截图失败: {err}"))
+            } else {
+                tab.capture_screenshot(
+                    screenshot_format.capture_format(),
+                    if matches!(screenshot_format, BrowserScreenshotFormat::Jpeg) {
+                        Some(85)
+                    } else {
+                        None
+                    },
+                    None,
+                    true,
+                )
+                .map_err(|err| format!("截取页面截图失败: {err}"))
+            }
+        })();
+        let _ = tx.send(result);
+    });
+    rx.recv_timeout(timeout)
+        .map_err(|_| format!("截图超时（最长 {} 秒），页面可能过于复杂", timeout.as_secs()))?
 }
 
 fn build_browser_launch_options() -> Result<headless_chrome::LaunchOptions<'static>, String> {
@@ -536,7 +571,7 @@ pub(crate) fn read_browser_page_dom(
 }
 
 #[tauri::command]
-pub(crate) fn screenshot_browser_page(
+pub(crate) async fn screenshot_browser_page(
     workspace_path: String,
     relative_path: Option<String>,
     selector: Option<String>,
@@ -544,62 +579,53 @@ pub(crate) fn screenshot_browser_page(
     format: Option<String>,
     timeout_seconds: Option<u64>,
 ) -> Result<BrowserPageScreenshotResult, String> {
-    let workspace = canonical_workspace(&workspace_path)?;
-    let workspace_key = workspace.to_string_lossy().to_string();
-    let screenshot_format = parse_browser_screenshot_format(format.as_deref())?;
-    let timeout = browser_action_timeout(timeout_seconds);
-    let selector_kind = parse_browser_selector_kind(selector_type.as_deref())?;
+    run_blocking_workspace_task(move || {
+        let workspace = canonical_workspace(&workspace_path)?;
+        let workspace_key = workspace.to_string_lossy().to_string();
+        let screenshot_format = parse_browser_screenshot_format(format.as_deref())?;
+        let timeout = browser_action_timeout(timeout_seconds);
+        let selector_kind = parse_browser_selector_kind(selector_type.as_deref())?;
 
-    with_browser_page_sessions(|sessions| {
-        let session = sessions
-            .get_mut(&workspace_key)
-            .ok_or_else(|| "当前工作区没有活动中的浏览页会话，请先打开页面。".to_string())?;
+        with_browser_page_sessions(|sessions| {
+            let session = sessions
+                .get_mut(&workspace_key)
+                .ok_or_else(|| "当前工作区没有活动中的浏览页会话，请先打开页面。".to_string())?;
 
-        let bytes = if let Some(selector) = selector.as_ref() {
-            let element =
-                find_browser_element(session.tab.as_ref(), selector, selector_kind, timeout)?;
-            element
-                .capture_screenshot(screenshot_format.capture_format())
-                .map_err(|err| format!("截取页面元素截图失败: {err}"))?
-        } else {
-            session
-                .tab
-                .capture_screenshot(
-                    screenshot_format.capture_format(),
-                    if matches!(screenshot_format, BrowserScreenshotFormat::Jpeg) {
-                        Some(85)
-                    } else {
-                        None
-                    },
-                    None,
-                    true,
-                )
-                .map_err(|err| format!("截取页面截图失败: {err}"))?
-        };
+            let has_selector = selector.is_some();
+            let selector_for_result = selector.clone();
+            let tab = Arc::clone(&session.tab);
+            let bytes = capture_screenshot_with_timeout(
+                timeout,
+                tab,
+                selector,
+                selector_kind,
+                screenshot_format,
+            )?;
 
-        let path = write_browser_binary_file(
-            &workspace,
-            relative_path,
-            default_browser_screenshot_path(screenshot_format)?,
-            &bytes,
-        )?;
-        let state = browser_page_state(session)?;
-        let has_selector = selector.is_some();
+            let path = write_browser_binary_file(
+                &workspace,
+                relative_path,
+                default_browser_screenshot_path(screenshot_format)?,
+                &bytes,
+            )?;
+            let state = browser_page_state(session)?;
 
-        Ok(BrowserPageScreenshotResult {
-            url: state.url,
-            title: state.title,
-            path,
-            bytes: bytes.len(),
-            format: screenshot_format.label().to_string(),
-            selector,
-            selector_type: if has_selector {
-                Some(selector_kind.label().to_string())
-            } else {
-                None
-            },
+            Ok(BrowserPageScreenshotResult {
+                url: state.url,
+                title: state.title,
+                path,
+                bytes: bytes.len(),
+                format: screenshot_format.label().to_string(),
+                selector: selector_for_result,
+                selector_type: if has_selector {
+                    Some(selector_kind.label().to_string())
+                } else {
+                    None
+                },
+            })
         })
     })
+    .await
 }
 
 #[tauri::command]

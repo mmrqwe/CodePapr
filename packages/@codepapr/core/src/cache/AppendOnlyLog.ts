@@ -128,6 +128,22 @@ export class AppendOnlyLog implements IAppendOnlyLog {
   }
 
   /**
+   * Remove and return the last message (RECOVERY ONLY: breaks append-only contract).
+   * Used exclusively for image-injection rollback.
+   */
+  popLastMessage(): IMessage | null {
+    if (this.messages.length === 0) {
+      return null;
+    }
+    const index = this.messages.length - 1;
+    const msg = this.messages.pop()!;
+    this.hashes.delete(index);
+    this.totalBytes -= Serializer.getByteLength(msg);
+    this.lastComputedHash = '';
+    return msg;
+  }
+
+  /**
    * Get message count
    */
   length(): number {

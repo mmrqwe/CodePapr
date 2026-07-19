@@ -181,6 +181,14 @@ function buildDeepSeekThinking(params: Record<string, unknown>): IChatThinking {
   return reasoningEffort ? { type, reasoningEffort } : { type };
 }
 
+function isImageError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const error = err as Record<string, unknown>;
+  if (error.status !== 400 && error.status !== '400') return false;
+  const msg = typeof error.message === 'string' ? error.message : '';
+  return /image|dimension|pixel/i.test(msg);
+}
+
 export interface IRequestBuilder {
   build(opts: {
     prefix: IImmutablePrefix;
@@ -316,10 +324,21 @@ export class Agent {
         content: buildRequestContextDebugText(request, roundNumber),
       });
 
-      const response =
-        onStreamEvent && this.provider.streamChat
-          ? await this.provider.streamChat(request, onStreamEvent, effectiveSignal)
-          : await this.provider.chat(request, effectiveSignal);
+      let response: IChatResponse;
+      try {
+        response =
+          onStreamEvent && this.provider.streamChat
+            ? await this.provider.streamChat(request, onStreamEvent, effectiveSignal)
+            : await this.provider.chat(request, effectiveSignal);
+      } catch (err) {
+        if (isImageError(err)) {
+          const lastMsg = this.session.logStore.getLastMessage();
+          if (lastMsg?.role === 'user' && lastMsg.images && lastMsg.images.length > 0) {
+            this.session.logStore.popLastMessage();
+          }
+        }
+        throw err;
+      }
 
       const validation = this.cacheValidator.validate(
         request,

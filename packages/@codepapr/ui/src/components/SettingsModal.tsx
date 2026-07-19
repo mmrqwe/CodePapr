@@ -620,10 +620,10 @@ export function SettingsModal() {
                     min="100"
                     max={maxTokensLimit}
                     step="500"
-                    value={local.maxTokens}
+                    value={activeModeConfig.maxTokens}
                     onChange={(e) => {
                       const parsed = parseInt(e.target.value, 10);
-                      update({ maxTokens: Number.isFinite(parsed) ? parsed : local.maxTokens });
+                      update({ [local.apiMode]: { ...activeModeConfig, maxTokens: Number.isFinite(parsed) ? parsed : activeModeConfig.maxTokens } });
                     }}
                     title={t.maxTokens}
                     className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"

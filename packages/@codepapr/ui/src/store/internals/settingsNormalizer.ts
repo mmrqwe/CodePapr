@@ -14,6 +14,7 @@ function normalizeModeConfig(
       baseURL: typeof obj.baseURL === 'string' ? obj.baseURL : defaults.baseURL,
       model: typeof obj.model === 'string' ? obj.model.trim() : defaults.model,
       fastModel: typeof obj.fastModel === 'string' ? obj.fastModel.trim() : defaults.fastModel,
+      maxTokens: typeof obj.maxTokens === 'number' && Number.isFinite(obj.maxTokens) ? Math.floor(obj.maxTokens) : defaults.maxTokens,
     };
   }
   return { ...defaults };
@@ -30,6 +31,7 @@ function migrateLegacySettings(
   const legacyApiKey = typeof input.apiKey === 'string' ? input.apiKey : '';
   const legacyBaseURL = typeof input.baseURL === 'string' ? input.baseURL : '';
   const legacyFastModel = typeof input.fastModel === 'string' ? input.fastModel.trim() : '';
+  const legacyMaxTokens = typeof input.maxTokens === 'number' ? input.maxTokens : 0;
 
   const deepseek = existingDeepseek ?? { ...DEFAULT_SETTINGS.deepseek };
   const custom = existingCustom ?? { ...DEFAULT_SETTINGS.custom };
@@ -46,7 +48,7 @@ function migrateLegacySettings(
   }
 
   // Populate the active mode's config from legacy flat fields
-  const active = { apiKey: legacyApiKey, baseURL: legacyBaseURL, model: legacyModel || deepseek.model, fastModel: legacyFastModel || deepseek.fastModel };
+  const active = { apiKey: legacyApiKey, baseURL: legacyBaseURL, model: legacyModel || deepseek.model, fastModel: legacyFastModel || deepseek.fastModel, maxTokens: legacyMaxTokens || deepseek.maxTokens };
   if (apiMode === 'deepseek') return { deepseek: active, custom, local };
   if (apiMode === 'custom') return { deepseek, custom: active, local };
   return { deepseek, custom, local: active };
@@ -125,7 +127,7 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
       ? input.multimodalModelTier
       : 'all';
   const maxTokens = sanitizeMaxTokens(
-    input.maxTokens ?? DEFAULT_SETTINGS.maxTokens,
+    activeConfig.maxTokens,
     provider,
     DEFAULT_SETTINGS.maxTokens
   );

@@ -33,18 +33,21 @@ export const DEFAULT_SETTINGS: Settings = {
     baseURL: '',
     model: 'deepseek-v4-pro',
     fastModel: 'deepseek-v4-flash',
+    maxTokens: DEFAULT_MAX_TOKENS,
   },
   custom: {
     apiKey: '',
     baseURL: '',
     model: '',
     fastModel: '',
+    maxTokens: DEFAULT_MAX_TOKENS,
   },
   local: {
     apiKey: '',
     baseURL: 'http://127.0.0.1:8080/v1',
     model: 'local-model',
     fastModel: '',
+    maxTokens: DEFAULT_MAX_TOKENS,
   },
 
   baseURL: '',
