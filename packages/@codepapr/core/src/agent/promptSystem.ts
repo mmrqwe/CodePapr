@@ -551,10 +551,10 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
   if (hasTool(toolNames, 'write') && mode === 'agent') {
     common.push(
       lang === 'en'
-        ? '- [Project Memory] Write to `.CodePapr/memory.md` only when: ① the same error was encountered twice in this session, ② a project-specific build/deploy/config convention was discovered, or ③ the user explicitly asks you to remember something. Each entry: `## YYYY-MM-DD Topic`. Auto-loaded at session start. Do NOT write general knowledge, temporary state, or routine findings.'
+        ? '- [Project Memory] `.CodePapr/memory.md` is cross-session project memory, auto-loaded each session. Write when: ① you discover project directory structure, tech stack, or build/lint/test commands worth reusing across sessions; ② the same error was encountered twice in this session; ③ a project-specific build/deploy/config convention was discovered; ④ the user explicitly asks you to remember something. Each entry: `## YYYY-MM-DD Topic`. After exploring the project at session start, if this file is empty or missing, proactively record project structure + build/lint/test commands + key conventions. Do NOT write general knowledge or temporary state.'
         : lang === 'zh-TW'
-        ? '- [項目記憶] 只有在以下情況才寫入 `.CodePapr/memory.md`：① 本次會話中同一錯誤踩了兩次，② 發現項目特有的構建/部署/配置約定，③ 用戶明確要求記住。每條：`## YYYY-MM-DD 主題`。每次會話自動載入。不要記錄通用知識、臨時狀態或常規發現。'
-        : '- [项目记忆] 只有在以下情况才写入 `.CodePapr/memory.md`：① 本次会话中同一错误踩了两次，② 发现项目特有的构建/部署/配置约定，③ 用户明确要求记住。每条：`## YYYY-MM-DD 主题`。每次会话自动加载。不要记录通用知识、临时状态或常规发现。'
+        ? '- [項目記憶] `.CodePapr/memory.md` 是跨工作階段項目記憶，每次工作階段自動載入。寫入場景：① 發現項目目錄結構、技術棧、建置/lint/test 命令等值得跨工作階段重用的事實；② 本次工作階段中同一錯誤踩了兩次；③ 發現項目特有的建置/部署/設定約定；④ 用戶明確要求記住。每條：`## YYYY-MM-DD 主題`。工作階段開始探索項目後若此檔案為空或不存在，主動記錄項目結構 + 建置/lint/test 命令 + 關鍵約定。不要記錄通用知識或臨時狀態。'
+        : '- [项目记忆] `.CodePapr/memory.md` 是跨会话项目记忆，每次会话自动加载。写入场景：① 发现项目目录结构、技术栈、构建/lint/test 命令等值得跨会话复用的事实；② 本次会话中同一错误踩了两次；③ 发现项目特有的构建/部署/配置约定；④ 用户明确要求记住。每条：`## YYYY-MM-DD 主题`。会话开始探索项目后若此文件为空或不存在，主动记录项目结构 + 构建/lint/test 命令 + 关键约定。不要记录通用知识或临时状态。'
     );
   }
   if (common.length > 0) {

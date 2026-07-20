@@ -42,6 +42,86 @@ describe('WorkspaceGitPanel', () => {
 
     invokeMock.mockReset();
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      // New Tauri commands (replacing git CLI)
+      if (command === 'git_status') {
+        return {
+          available: true,
+          isRepo: true,
+          branch: currentBranch,
+          headShort: 'aaaaaaa',
+          entries: gitState === 'initial'
+            ? [
+                { path: 'README.md', oldPath: null, indexStatus: ' ', worktreeStatus: 'M', isUntracked: false },
+                { path: 'src/app.ts', oldPath: null, indexStatus: 'M', worktreeStatus: ' ', isUntracked: false },
+                { path: '.CodePapr/project.sqlite', oldPath: null, indexStatus: ' ', worktreeStatus: 'M', isUntracked: false },
+                { path: 'nested/', oldPath: null, indexStatus: '?', worktreeStatus: '?', isUntracked: true },
+              ]
+            : [],
+          message: null,
+        };
+      }
+
+      if (command === 'git_log') {
+        return [
+          {
+            sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            shortHash: 'aaaaaaa',
+            author: 'Alice',
+            email: 'alice@test',
+            timestamp: Math.floor(Date.now() / 1000) - 3600,
+            message: 'Improve parser',
+            refs: [`HEAD -> ${currentBranch}`],
+            isHead: true,
+          },
+          {
+            sha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            shortHash: 'bbbbbbb',
+            author: 'Bob',
+            email: 'bob@test',
+            timestamp: Math.floor(Date.now() / 1000) - 7200,
+            message: 'Baseline commit',
+            refs: ['origin/main'],
+            isHead: false,
+          },
+        ];
+      }
+
+      if (command === 'snapshot_changed_files') {
+        return {
+          sha: args?.sha ?? 'aaaaaaaa',
+          parentSha: null,
+          files: [],
+          totalAdditions: 0,
+          totalDeletions: 0,
+        };
+      }
+
+      if (command === 'restore_execute') {
+        currentBranch = 'main';
+        gitState = 'committed';
+        return {
+          ok: true,
+          filesRestored: 2,
+          filesDeleted: 0,
+          backupRef: 'refs/codepapr-backup-before-reset',
+          error: null,
+        };
+      }
+
+      if (command === 'snapshot_ensure') {
+        return { ready: true, createdRepo: false, headSha: 'aaaaaaaa', error: null };
+      }
+
+      if (command === 'git_restore_files' || command === 'git_stage' || command === 'git_commit') {
+        return { ok: true, action: 'stage', message: 'ok' };
+      }
+
+      if (command === 'git_branch_checkout') {
+        currentBranch = (args?.branchName as string) ?? currentBranch;
+        return { ok: true, action: 'branch_checkout', message: `切换到 ${currentBranch}` };
+      }
+
+      // Legacy git CLI commands via run_workspace_command
       if (command !== 'run_workspace_command') {
         throw new Error(`Unexpected command: ${command}`);
       }
@@ -472,23 +552,8 @@ describe('WorkspaceGitPanel', () => {
     expect(
       invokeMock.mock.calls.some(
         ([command, payload]) =>
-          command === 'run_workspace_command' &&
-          payload?.command === 'git' &&
-          Array.isArray(payload?.args) &&
-          payload.args[0] === 'branch' &&
-          typeof payload.args[1] === 'string' &&
-          payload.args[1].startsWith('codepapr/backup/') &&
-          payload.args[2] === 'HEAD'
-      )
-    ).toBe(true);
-    expect(
-      invokeMock.mock.calls.some(
-        ([command, payload]) =>
-          command === 'run_workspace_command' &&
-          payload?.command === 'git' &&
-          Array.isArray(payload?.args) &&
-          payload.args.join(' ') ===
-            'reset --hard aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+          command === 'restore_execute' &&
+          payload?.targetSha === 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
       )
     ).toBe(true);
   });

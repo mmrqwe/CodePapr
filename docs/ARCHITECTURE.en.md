@@ -262,14 +262,16 @@ todo tool
 - **Auto-expand**: Expands when new tasks arrive or status updates occur
 - Manual click to expand/collapse
 
-### 7.5 Conversation Reset (Git Rollback)
+### 7.5 Conversation Reset (Shadow Git Rollback)
 
 Hover a user message → "Reset to here" button appears:
 
-- **Code rollback**: Auto `git commit` checkpoint after each Agent response; reset uses `git reset --hard` to target commit, atomically restoring all files
-- **Non-Git fallback**: Automatically degrades to EditHistory per-file undo
-- **Message truncation**: Deletes all conversation after that message
-- **State cleanup**: Resets TodoList, EditHistory, Agent session
+- **Shadow Git Architecture**: CodePapr maintains an independent internal Git repo at `.CodePapr/git/` (no conflict with the user's `.git`). All git operations use libgit2 — **no system Git CLI required**
+- **Snapshot Engine**: On each user message, `IgnoreResolver` (via `ignore` crate) traverses workspace files (auto-excludes `node_modules/`, `dist/`, large files, etc.), creates snapshot commits file-by-file via `index.add_path`, validates file count > 0
+- **Restore Engine** (three-phase): `restore_plan` computes file changes → preview (files to restore/delete/unchanged) → user confirms → `restore_execute` performs reset (creates backup ref `refs/codepapr-backup-before-reset` + refuses empty tree)
+- **Undo**: `restore_undo` restores to pre-reset state via backup ref
+- **Message truncation**: Removes all messages after the target; restores truncated message input and images
+- **Checkpoint Timeline**: `checkpoint_timeline` table in `project.sqlite` records each snapshot's message_id, sha, file count, and timestamp
 - **Confirmation dialog** prevents accidental operations
 
 ## 8. Project Memory System
@@ -286,13 +288,16 @@ Hover a user message → "Reset to here" button appears:
 
 ### 8.2 Write Mechanism
 
-The Agent has no dedicated memory tool — it uses the generic `write` tool to append entries through prompt conventions in three cases:
+The Agent has no dedicated memory tool - it uses the generic `write` tool to append entries through prompt conventions in these scenarios:
 
-1. The same error was encountered twice in the current session
-2. A project-specific build/deploy/config convention was discovered
-3. The user explicitly asks to remember
+1. It discovers project directory structure, tech stack, or build/lint/test commands worth reusing across sessions
+2. The same error was encountered twice in the current session
+3. A project-specific build/deploy/config convention was discovered
+4. The user explicitly asks to remember
 
 Each entry starts with `## YYYY-MM-DD Topic`, pure Markdown, manually editable.
+
+> The write conditions are intentionally relaxed: project structure and build commands are the highest-value cross-session facts and must not be banned as "routine findings." General knowledge and temporary state are still not written.
 
 ### 8.3 Load Mechanism
 
@@ -300,6 +305,8 @@ On session start, `agentStore.sendMessage` invokes Tauri `read_text_file` to rea
 
 - Memory content changes do not break system prompt caching
 - All sessions get full load at startup, no on-demand retrieval (keeps it simple)
+
+**Cold-start auto-generation**: If `memory.md` is missing or empty at session start and a ProjectGraph cache summary is available, `bootstrapMemoryContent` is triggered asynchronously in the background. It uses the fast model to generate an initial memory (project structure / tech stack / build commands / key conventions) from the ProjectGraph summary + project rules + the user's first message, then writes it to `.CodePapr/memory.md`. The task is fire-and-forget, does not block the current session, and is deduped via a module-level `memoryBootstrapInFlight` guard. If the ProjectGraph cache is also empty, it is skipped until the next session. This breaks the "explore from zero every session" cold-start loop.
 
 ### 8.4 Auto-Consolidation
 
@@ -337,9 +344,9 @@ Consolidation reuses the `selectContextCompactionModelRoute` fast-model route, s
 
 ### 8.7 Key Source Locations
 
-- `packages/@codepapr/ui/src/utils/memoryConsolidation.ts`: Consolidation logic, trilingual prompts, LLM calls, rule-based fallback
+- `packages/@codepapr/ui/src/utils/memoryConsolidation.ts`: Consolidation logic, cold-start bootstrap, trilingual prompts, LLM calls, rule-based fallback
 - `packages/@codepapr/ui/src/store/internals/types.ts`: `_pendingMemoryConsolidation: boolean` state
-- `packages/@codepapr/ui/src/store/agentStore.ts`: Three trigger points (startup/compaction/post-reply)
+- `packages/@codepapr/ui/src/store/agentStore.ts`: Three consolidation trigger points (startup/compaction/post-reply) + cold-start bootstrap trigger (after startup read)
 - `packages/@codepapr/core/src/agent/promptSystem.ts`: Write-condition prompts, Memory section bootstrap rendering
 
 ## 9. ProjectGraph Semantic Analysis

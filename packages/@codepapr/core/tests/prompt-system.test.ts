@@ -143,6 +143,8 @@ describe('promptSystem', () => {
     });
     expect(prompt).toContain('项目记忆');
     expect(prompt).toContain('.CodePapr/memory.md');
+    expect(prompt).toContain('项目结构');
+    expect(prompt).not.toContain('常规发现');
   });
 
   it('does NOT include project memory in ask mode even with write tool', () => {

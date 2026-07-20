@@ -4,7 +4,7 @@
 mod browser;
 mod character_card;
 mod db;
-mod git_checkpoint;
+mod git_operations;
 mod lsp;
 mod lsp_fallback;
 mod lsp_managed_tools;
@@ -12,6 +12,7 @@ mod mcp_host;
 mod secrets;
 mod shared;
 mod shell;
+mod snapshot;
 mod symbol_provider;
 mod task_queue;
 mod tts;
@@ -228,6 +229,10 @@ fn main() {
             db::save_project_meta,
             db::load_project_meta,
             db::load_all_project_meta,
+            db::save_checkpoint_record,
+            db::load_checkpoint_records,
+            db::delete_checkpoint_by_message,
+            db::delete_checkpoints_for_session,
             db::save_projectgraph_cache,
             db::load_projectgraph_cache,
             db::cache_get,
@@ -241,11 +246,24 @@ fn main() {
             workspace_fs::write::delete_workspace_file,
             workspace_fs::write::delete_workspace_dir,
             shell::background::run_workspace_command,
-            git_checkpoint::git_checkpoint_ensure,
-            git_checkpoint::git_checkpoint_create,
-            git_checkpoint::git_checkpoint_reset,
-            git_checkpoint::git_checkpoint_head_sha,
-            git_checkpoint::git_checkpoint_changed_files,
+            snapshot::snapshot_ensure,
+            snapshot::snapshot_create,
+            snapshot::snapshot_list,
+            snapshot::snapshot_head_sha,
+            snapshot::restore_plan,
+            snapshot::restore_execute,
+            snapshot::restore_undo,
+            snapshot::snapshot_changed_files,
+            snapshot::diff_snapshots,
+            snapshot::snapshot_file_content,
+            git_operations::status::git_status,
+            git_operations::diff::git_diff,
+            git_operations::log::git_log,
+            git_operations::stage::git_stage,
+            git_operations::commit::git_commit,
+            git_operations::branch::git_branch_list,
+            git_operations::branch::git_branch_checkout,
+            git_operations::restore_files::git_restore_files,
             task_queue::enqueue_workspace_task,
             task_queue::poll_workspace_task,
             shell::background::start_workspace_background_command,

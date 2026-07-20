@@ -1,19 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import {
-  buildGitBackupBranchName,
-  buildGitBranchCheckoutPlans,
-  buildGitCommitCommandArgs as buildSharedGitCommitCommandArgs,
-  buildGitHistoryCommandArgs,
-  buildGitLatestStashCommandArgs,
-  buildGitResetCommandArgs,
-  buildGitRestoreCommandPlans,
-  buildGitSafetyStashMessage,
-  buildGitStageCommandArgs,
-  buildGitStashPushArgs,
-  parseGitHistoryCommandResult,
-  parseGitLatestStashCommandResult,
-  type GitHistorySummary,
-} from '@codepapr/common';
+import { type GitHistorySummary } from '@codepapr/common';
 import {
   ToolRegistry,
   WORKSPACE_INTELLIGENCE_TOOL_DEFINITIONS,
@@ -62,12 +48,10 @@ import {
   applySearchReplacePatch,
   buildWorkspaceProjectGraph,
   enrichWorkspaceProjectGraph,
-  buildGitDiffSummary,
   buildGitUnavailableDiff,
   buildGitUnavailableStatus,
   buildWorkspaceProjectMap,
   filterWorkspaceInsightEntries,
-  parseGitStatusCommandResult,
   selectProjectMapFiles,
   type GitDiffSummary,
   type GitStatusSummary,
@@ -150,7 +134,7 @@ interface RunCommandArgs {
   timeoutSeconds?: number;
 }
 
-interface CommandResult {
+interface _CommandResult {
   command: string;
   args: string[];
   status: number | null;
@@ -310,49 +294,7 @@ interface ProjectGraphArgs {
   maxBytes?: number;
 }
 
-interface GitDiffArgs {
-  staged?: boolean;
-  pathspecs?: string[];
-}
-
-interface GitHistoryArgs {
-  limit?: number;
-}
-
-interface GitBranchCheckoutArgs {
-  branchName: string;
-  startPoint?: string;
-  create?: boolean;
-  createIfMissing?: boolean;
-}
-
-interface GitStageArgs {
-  all?: boolean;
-  pathspecs?: string[];
-}
-
-interface GitCommitArgs {
-  message: string;
-  stageAll?: boolean;
-  pathspecs?: string[];
-  allowEmpty?: boolean;
-}
-
-interface GitRestoreArgs {
-  pathspecs?: string[];
-  snapshot?: boolean;
-  includeUntracked?: boolean;
-  source?: string;
-}
-
-interface GitResetArgs {
-  target: string;
-  snapshot?: boolean;
-  includeUntracked?: boolean;
-  backupBranchPrefix?: string;
-}
-
-interface GitOperationResult {
+interface _GitOperationResult {
   available: boolean;
   isRepo: boolean;
   ok: boolean;
@@ -1533,28 +1475,24 @@ name: 'web_download_file',
   },
   {
     name: 'workspace_git_reset',
-    description: '安全回退到指定提交。会先创建备份分支，并可选生成安全 stash 快照。',
+    description: '安全回退到指定提交。会先创建备份引用和自动安全快照，可通过 workspace_restore_undo 撤销。',
     parameters: {
       type: 'object',
       properties: {
         target: {
           type: 'string',
-          description: '要回退到的提交、标签或其他 Git 引用。',
-        },
-        snapshot: {
-          type: 'boolean',
-          description: '回退前是否先创建安全快照，默认 true。',
-        },
-        includeUntracked: {
-          type: 'boolean',
-          description: '创建快照时是否包含未跟踪文件，默认 true。',
-        },
-        backupBranchPrefix: {
-          type: 'string',
-          description: '备份分支前缀，默认 codepapr/backup。',
+          description: '要回退到的提交 SHA 或其他 Git 引用。',
         },
       },
       required: ['target'],
+    },
+  },
+  {
+    name: 'workspace_restore_undo',
+    description: '撤销上一次 workspace_git_reset 或恢复操作，通过备份引用恢复。',
+    parameters: {
+      type: 'object',
+      properties: {},
     },
   },
   {
@@ -1877,109 +1815,28 @@ export function registerWorkspaceTools(
     }
   };
 
-  const runGitCommand = async (args: string[], timeoutSeconds: number = 20): Promise<CommandResult> => {
-    return await invoke<CommandResult>('run_workspace_command', {
-      workspacePath: workspace(),
-      command: 'git',
-      args,
-      timeoutSeconds,
-    });
-  };
-
   const readGitStatus = async (): Promise<GitStatusSummary> => {
     try {
-      const result = await runGitCommand(['status', '--porcelain=1', '--branch', '--untracked-files=normal'], 15);
-      return parseGitStatusCommandResult(result) satisfies GitStatusSummary;
+      const result = await invoke<import('../utils/snapshot').GitStatusResult>('git_status', {
+        workspacePath: workspace(),
+      });
+      return {
+        available: result.available,
+        isRepo: result.isRepo,
+        files: result.entries.map((e) => ({
+          path: e.path,
+          oldPath: e.oldPath ?? undefined,
+          indexStatus: e.indexStatus,
+          worktreeStatus: e.worktreeStatus,
+        })),
+        raw: '',
+        ...(result.branch ? { branch: result.branch } : {}),
+        ...(result.headShort ? { headShort: result.headShort } : {}),
+        ...(result.message ? { message: result.message } : {}),
+      } satisfies GitStatusSummary;
     } catch (error) {
       return buildGitUnavailableStatus((error as Error).message) satisfies GitStatusSummary;
     }
-  };
-
-  const summarizeGitStatusCounts = (status: GitStatusSummary): {
-    changedFiles: number;
-    stagedFiles: number;
-    unstagedFiles: number;
-  } => {
-    let stagedFiles = 0;
-    let unstagedFiles = 0;
-    for (const file of status.files) {
-      if (file.indexStatus && file.indexStatus !== '?') {
-        stagedFiles += 1;
-      }
-      if (file.worktreeStatus || (file.indexStatus === '?' && file.worktreeStatus === '?')) {
-        unstagedFiles += 1;
-      }
-    }
-
-    return {
-      changedFiles: status.files.length,
-      stagedFiles,
-      unstagedFiles,
-    };
-  };
-
-  const buildGitActionUnavailableResult = (
-    action: GitOperationResult['action'],
-    status: GitStatusSummary
-  ): GitOperationResult => {
-    const counts = status.available && status.isRepo ? summarizeGitStatusCounts(status) : undefined;
-    return {
-      available: status.available,
-      isRepo: status.isRepo,
-      ok: false,
-      action,
-      message: status.message || '当前工作区不是 Git 仓库。',
-      raw: status.raw,
-      ...(status.branch ? { branch: status.branch } : {}),
-      ...(counts ?? {}),
-    };
-  };
-
-  const runGitCommandPlan = async (
-    plans: readonly string[][],
-    timeoutSeconds: number = 20
-  ): Promise<{ args: string[]; result: CommandResult }> => {
-    let lastFailure: { args: string[]; result: CommandResult } | null = null;
-
-    for (const args of plans) {
-      const result = await runGitCommand(args, timeoutSeconds);
-      if ((result.status ?? 1) === 0) {
-        return { args, result };
-      }
-      lastFailure = { args: [...args], result };
-    }
-
-    if (lastFailure) {
-      return lastFailure;
-    }
-
-    throw new Error('Git 命令计划为空');
-  };
-
-  const buildGitOperationResult = async (params: {
-    action: GitOperationResult['action'];
-    ok: boolean;
-    message: string;
-    rawParts: string[];
-    backupBranch?: string;
-    stashRef?: string;
-    target?: string;
-  }): Promise<GitOperationResult> => {
-    const status = await readGitStatus();
-    const counts = status.available && status.isRepo ? summarizeGitStatusCounts(status) : undefined;
-    return {
-      available: status.available,
-      isRepo: status.isRepo,
-      ok: params.ok,
-      action: params.action,
-      message: params.message,
-      raw: params.rawParts.filter(Boolean).join('\n').trim(),
-      ...(status.branch ? { branch: status.branch } : {}),
-      ...(counts ?? {}),
-      ...(params.backupBranch ? { backupBranch: params.backupBranch } : {}),
-      ...(params.stashRef ? { stashRef: params.stashRef } : {}),
-      ...(params.target ? { target: params.target } : {}),
-    };
   };
 
   registry.register(toolByName('workspace_list_files'), async (args: Record<string, unknown>) => {
@@ -2908,61 +2765,8 @@ export function registerWorkspaceTools(
     return await readGitStatus();
   });
 
-  registry.register(toolByName('workspace_git_diff'), async (args: Record<string, unknown>) => {
-    const parsed: GitDiffArgs = {
-      staged: asOptionalBoolean(args.staged, 'staged'),
-      pathspecs: asOptionalStringArray(args.pathspecs),
-    };
-
-    const staged = parsed.staged === true;
-    const pathspecs = parsed.pathspecs ?? [];
-    const statArgs = ['diff', '--no-ext-diff'];
-    const diffArgs = ['diff', '--no-ext-diff'];
-
-    if (staged) {
-      statArgs.push('--cached');
-      diffArgs.push('--cached');
-    }
-
-    statArgs.push('--stat');
-    diffArgs.push('--unified=0');
-
-    if (pathspecs.length > 0) {
-      statArgs.push('--', ...pathspecs);
-      diffArgs.push('--', ...pathspecs);
-    }
-
-    try {
-      const [statResult, diffResult] = await Promise.all([
-        invoke<CommandResult>('run_workspace_command', {
-          workspacePath: workspace(),
-          command: 'git',
-          args: statArgs,
-          timeoutSeconds: 15,
-        }),
-        invoke<CommandResult>('run_workspace_command', {
-          workspacePath: workspace(),
-          command: 'git',
-          args: diffArgs,
-          timeoutSeconds: 20,
-        }),
-      ]);
-
-      return buildGitDiffSummary({
-        staged,
-        pathspecs,
-        statResult,
-        diffResult,
-      }) satisfies GitDiffSummary;
-    } catch (error) {
-      return buildGitUnavailableDiff((error as Error).message, staged, pathspecs) satisfies GitDiffSummary;
-    }
-  });
-
   registry.register(toolByName('workspace_git_history'), async (args: Record<string, unknown>) => {
-    const parsed: GitHistoryArgs = {
-      limit: asOptionalPositiveInteger(args.limit, 'limit'),
-    };
+    const limit = Math.min(asOptionalPositiveInteger(args.limit, 'limit') ?? 20, 100);
 
     const status = await readGitStatus();
     if (!status.available || !status.isRepo) {
@@ -2975,290 +2779,172 @@ export function registerWorkspaceTools(
       } satisfies GitHistorySummary;
     }
 
-    const result = await runGitCommand(buildGitHistoryCommandArgs(Math.min(parsed.limit ?? 20, 100)), 15);
-    return parseGitHistoryCommandResult(result) satisfies GitHistorySummary;
+    const entries = await invoke<import('../utils/snapshot').GitLogEntry[]>('git_log', {
+      workspacePath: workspace(),
+      limit,
+    });
+    return {
+      available: true,
+      isRepo: true,
+      entries: entries.map((e) => ({
+        hash: e.sha,
+        shortHash: e.shortHash,
+        committedAt: new Date(e.timestamp * 1000).toISOString(),
+        authorName: e.author,
+        refNames: e.refs,
+        subject: e.message,
+        isHead: e.isHead,
+      })),
+      raw: '',
+    } satisfies GitHistorySummary;
+  });
+
+  registry.register(toolByName('workspace_git_diff'), async (args: Record<string, unknown>) => {
+    const staged = asOptionalBoolean(args.staged, 'staged') === true;
+    const pathspecs = asOptionalStringArray(args.pathspecs) ?? [];
+
+    try {
+      const result = await invoke<import('../utils/snapshot').GitDiffResult>('git_diff', {
+        workspacePath: workspace(),
+        staged: staged ? true : false,
+        pathspecs: pathspecs.length > 0 ? pathspecs : undefined,
+      });
+      return {
+        available: result.available,
+        isRepo: true,
+        staged,
+        pathspecs,
+        stat: result.stat,
+        diff: result.diff,
+        truncated: result.truncated,
+        ...(result.message ? { message: result.message } : {}),
+      } satisfies GitDiffSummary;
+    } catch (error) {
+      return buildGitUnavailableDiff((error as Error).message, staged, pathspecs) satisfies GitDiffSummary;
+    }
   });
 
   registry.register(toolByName('workspace_git_branch_checkout'), async (args: Record<string, unknown>) => {
-    const parsed: GitBranchCheckoutArgs = {
-      branchName: asString(args.branchName, 'branchName'),
-      startPoint: asOptionalString(args.startPoint),
-      create: asOptionalBoolean(args.create, 'create'),
-      createIfMissing: asOptionalBoolean(args.createIfMissing, 'createIfMissing'),
-    };
+    const branchName = asString(args.branchName, 'branchName');
+    const create = asOptionalBoolean(args.create, 'create');
+    const createIfMissing = asOptionalBoolean(args.createIfMissing, 'createIfMissing');
 
-    const status = await readGitStatus();
-    if (!status.available || !status.isRepo) {
-      return buildGitActionUnavailableResult('branch_checkout', status);
-    }
-
-    const plan = await runGitCommandPlan(
-      buildGitBranchCheckoutPlans({
-        branchName: parsed.branchName,
-        startPoint: parsed.startPoint,
-        create: parsed.create,
-        createIfMissing: parsed.createIfMissing,
-      })
-    );
-    const raw = [plan.result.stdout.trim(), plan.result.stderr.trim()].filter(Boolean).join('\n');
-    if ((plan.result.status ?? 1) !== 0) {
-      return await buildGitOperationResult({
-        action: 'branch_checkout',
-        ok: false,
-        message: raw || `切换分支 ${parsed.branchName} 失败。`,
-        rawParts: [raw],
+    try {
+      const result = await invoke<import('../utils/snapshot').GitOperationResult>('git_branch_checkout', {
+        workspacePath: workspace(),
+        branchName,
+        create: create ?? undefined,
+        createIfMissing: createIfMissing ?? undefined,
       });
+      return { available: true, isRepo: true, ok: result.ok, raw: result.message ?? '', action: 'branch_checkout', message: result.message };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { available: false, isRepo: false, ok: false, raw: msg, action: 'branch_checkout', message: `切换分支失败: ${msg}` };
     }
-
-    return await buildGitOperationResult({
-      action: 'branch_checkout',
-      ok: true,
-      message: `已切换到分支 ${parsed.branchName}。`,
-      rawParts: [raw],
-    });
   });
 
   registry.register(toolByName('workspace_git_stage'), async (args: Record<string, unknown>) => {
-    const parsed: GitStageArgs = {
-      all: asOptionalBoolean(args.all, 'all'),
-      pathspecs: asOptionalStringArray(args.pathspecs),
-    };
+    const all = asOptionalBoolean(args.all, 'all');
+    const pathspecs = asOptionalStringArray(args.pathspecs);
 
-    const status = await readGitStatus();
-    if (!status.available || !status.isRepo) {
-      return buildGitActionUnavailableResult('stage', status);
-    }
-
-    const result = await runGitCommand(
-      buildGitStageCommandArgs({ all: parsed.all, pathspecs: parsed.pathspecs }),
-      20
-    );
-    const raw = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
-    if ((result.status ?? 1) !== 0) {
-      return await buildGitOperationResult({
-        action: 'stage',
-        ok: false,
-        message: raw || '暂存 Git 改动失败。',
-        rawParts: [raw],
+    try {
+      const result = await invoke<import('../utils/snapshot').GitOperationResult>('git_stage', {
+        workspacePath: workspace(),
+        all: all ?? undefined,
+        pathspecs: pathspecs ?? undefined,
       });
+      return { available: true, isRepo: true, ok: result.ok, raw: result.message ?? '', action: 'stage', message: result.message };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { available: false, isRepo: false, ok: false, raw: msg, action: 'stage', message: `暂存失败: ${msg}` };
     }
-
-    return await buildGitOperationResult({
-      action: 'stage',
-      ok: true,
-      message: parsed.pathspecs?.length ? `已暂存 ${parsed.pathspecs.length} 个路径。` : '已暂存当前工作区改动。',
-      rawParts: [raw],
-    });
   });
 
   registry.register(toolByName('workspace_git_commit'), async (args: Record<string, unknown>) => {
-    const parsed: GitCommitArgs = {
-      message: asString(args.message, 'message'),
-      stageAll: asOptionalBoolean(args.stageAll, 'stageAll'),
-      pathspecs: asOptionalStringArray(args.pathspecs),
-      allowEmpty: asOptionalBoolean(args.allowEmpty, 'allowEmpty'),
-    };
+    const message = asString(args.message, 'message');
+    const stageAll = asOptionalBoolean(args.stageAll, 'stageAll');
+    const pathspecs = asOptionalStringArray(args.pathspecs);
+    const allowEmpty = asOptionalBoolean(args.allowEmpty, 'allowEmpty');
 
-    const status = await readGitStatus();
-    if (!status.available || !status.isRepo) {
-      return buildGitActionUnavailableResult('commit', status);
-    }
-
-    const rawParts: string[] = [];
-    if (parsed.stageAll === true || (parsed.pathspecs?.length ?? 0) > 0) {
-      const stageResult = await runGitCommand(
-        buildGitStageCommandArgs({ all: parsed.stageAll, pathspecs: parsed.pathspecs }),
-        20
-      );
-      rawParts.push(stageResult.stdout.trim(), stageResult.stderr.trim());
-      if ((stageResult.status ?? 1) !== 0) {
-        return await buildGitOperationResult({
-          action: 'commit',
-          ok: false,
-          message: stageResult.stderr.trim() || stageResult.stdout.trim() || '提交前暂存失败。',
-          rawParts,
-        });
-      }
-    }
-
-    const commitResult = await runGitCommand(
-      buildSharedGitCommitCommandArgs(parsed.message, { allowEmpty: parsed.allowEmpty }),
-      20
-    );
-    rawParts.push(commitResult.stdout.trim(), commitResult.stderr.trim());
-    if ((commitResult.status ?? 1) !== 0) {
-      return await buildGitOperationResult({
-        action: 'commit',
-        ok: false,
-        message: commitResult.stderr.trim() || commitResult.stdout.trim() || 'Git 提交失败。',
-        rawParts,
+    try {
+      const result = await invoke<import('../utils/snapshot').GitOperationResult>('git_commit', {
+        workspacePath: workspace(),
+        message,
+        stageAll: stageAll ?? undefined,
+        pathspecs: pathspecs ?? undefined,
+        allowEmpty: allowEmpty ?? undefined,
       });
+      return { available: true, isRepo: true, ok: result.ok, raw: result.message ?? '', action: 'commit', message: result.message };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { available: false, isRepo: false, ok: false, raw: msg, action: 'commit', message: `提交失败: ${msg}` };
     }
-
-    return await buildGitOperationResult({
-      action: 'commit',
-      ok: true,
-      message: '已创建本地提交。',
-      rawParts,
-    });
   });
 
   registry.register(toolByName('workspace_git_restore'), async (args: Record<string, unknown>) => {
-    const parsed: GitRestoreArgs = {
-      pathspecs: asOptionalStringArray(args.pathspecs),
-      snapshot: asOptionalBoolean(args.snapshot, 'snapshot'),
-      includeUntracked: asOptionalBoolean(args.includeUntracked, 'includeUntracked'),
-      source: asOptionalString(args.source),
-    };
+    const pathspecs = asOptionalStringArray(args.pathspecs);
+    const source = asOptionalString(args.source);
 
-    const status = await readGitStatus();
-    if (!status.available || !status.isRepo) {
-      return buildGitActionUnavailableResult('restore', status);
-    }
-    if (status.files.length === 0) {
-      return await buildGitOperationResult({
-        action: 'restore',
-        ok: true,
-        message: '当前工作区已经是干净状态。',
-        rawParts: [],
+    try {
+      const result = await invoke<import('../utils/snapshot').GitOperationResult>('git_restore_files', {
+        workspacePath: workspace(),
+        pathspecs: pathspecs ?? undefined,
+        source: source ?? undefined,
       });
+      return { available: true, isRepo: true, ok: result.ok, raw: result.message ?? '', action: 'restore', message: result.message };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { available: false, isRepo: false, ok: false, raw: msg, action: 'restore', message: `恢复失败: ${msg}` };
     }
-
-    const rawParts: string[] = [];
-    let stashRef: string | undefined;
-    if (parsed.snapshot !== false) {
-      const stashMessage = buildGitSafetyStashMessage(
-        'restore',
-        parsed.pathspecs?.join(', ') || 'workspace'
-      );
-      const stashResult = await runGitCommand(
-        buildGitStashPushArgs(stashMessage, {
-          includeUntracked: parsed.includeUntracked !== false,
-          pathspecs: parsed.pathspecs,
-        }),
-        20
-      );
-      rawParts.push(stashResult.stdout.trim(), stashResult.stderr.trim());
-      if ((stashResult.status ?? 1) !== 0) {
-        return await buildGitOperationResult({
-          action: 'restore',
-          ok: false,
-          message: stashResult.stderr.trim() || stashResult.stdout.trim() || '创建安全快照失败。',
-          rawParts,
-        });
-      }
-      const latestStash = parseGitLatestStashCommandResult(
-        await runGitCommand(buildGitLatestStashCommandArgs(), 15)
-      );
-      stashRef = latestStash?.ref ?? undefined;
-    }
-
-    const restorePlan = await runGitCommandPlan(
-      buildGitRestoreCommandPlans({
-        pathspecs: parsed.pathspecs,
-        source: parsed.source,
-      }),
-      20
-    );
-    rawParts.push(restorePlan.result.stdout.trim(), restorePlan.result.stderr.trim());
-    if ((restorePlan.result.status ?? 1) !== 0) {
-      return await buildGitOperationResult({
-        action: 'restore',
-        ok: false,
-        message: restorePlan.result.stderr.trim() || restorePlan.result.stdout.trim() || '恢复工作区失败。',
-        rawParts,
-        ...(stashRef ? { stashRef } : {}),
-      });
-    }
-
-    return await buildGitOperationResult({
-      action: 'restore',
-      ok: true,
-      message: stashRef ? `已恢复工作区改动，安全快照保存在 ${stashRef}。` : '已恢复工作区改动。',
-      rawParts,
-      ...(stashRef ? { stashRef } : {}),
-    });
   });
 
   registry.register(toolByName('workspace_git_reset'), async (args: Record<string, unknown>) => {
-    const parsed: GitResetArgs = {
-      target: asString(args.target, 'target'),
-      snapshot: asOptionalBoolean(args.snapshot, 'snapshot'),
-      includeUntracked: asOptionalBoolean(args.includeUntracked, 'includeUntracked'),
-      backupBranchPrefix: asOptionalString(args.backupBranchPrefix),
-    };
+    const target = asString(args.target, 'target');
 
-    const status = await readGitStatus();
-    if (!status.available || !status.isRepo) {
-      return buildGitActionUnavailableResult('reset', status);
-    }
-
-    const rawParts: string[] = [];
-    const backupBranch = buildGitBackupBranchName(parsed.backupBranchPrefix ?? 'codepapr/backup');
-    const backupResult = await runGitCommand(['branch', backupBranch, 'HEAD'], 20);
-    rawParts.push(backupResult.stdout.trim(), backupResult.stderr.trim());
-    if ((backupResult.status ?? 1) !== 0) {
-      return await buildGitOperationResult({
-        action: 'reset',
-        ok: false,
-        message: backupResult.stderr.trim() || backupResult.stdout.trim() || '创建备份分支失败。',
-        rawParts,
-        backupBranch,
-        target: parsed.target,
-      });
-    }
-
-    let stashRef: string | undefined;
-    if (parsed.snapshot !== false && status.files.length > 0) {
-      const stashMessage = buildGitSafetyStashMessage('reset', parsed.target);
-      const stashResult = await runGitCommand(
-        buildGitStashPushArgs(stashMessage, {
-          includeUntracked: parsed.includeUntracked !== false,
-        }),
-        20
+    try {
+      const result = await invoke<{ ok: boolean; filesRestored: number; filesDeleted: number; backupRef: string | null; error: string | null }>(
+        'restore_execute',
+        { workspacePath: workspace(), targetSha: target }
       );
-      rawParts.push(stashResult.stdout.trim(), stashResult.stderr.trim());
-      if ((stashResult.status ?? 1) !== 0) {
-        return await buildGitOperationResult({
-          action: 'reset',
-          ok: false,
-          message: stashResult.stderr.trim() || stashResult.stdout.trim() || '创建回退前安全快照失败。',
-          rawParts,
-          backupBranch,
-          target: parsed.target,
-        });
+
+      if (result.ok) {
+        return {
+          available: true, isRepo: true, ok: true, action: 'reset', raw: '',
+          message: `已回退到 ${target}，备份引用 ${result.backupRef ?? 'N/A'}，恢复 ${result.filesRestored} 个文件。`,
+          backupBranch: result.backupRef ?? undefined,
+          target,
+        };
       }
-      const latestStash = parseGitLatestStashCommandResult(
-        await runGitCommand(buildGitLatestStashCommandArgs(), 15)
-      );
-      stashRef = latestStash?.ref ?? undefined;
+      return {
+        available: true, isRepo: true, ok: false, action: 'reset', raw: '',
+        message: result.error ?? '回退失败。',
+        backupBranch: result.backupRef ?? undefined,
+        target,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        available: true, isRepo: true, ok: false, action: 'reset', raw: '',
+        message: `回退失败: ${msg}`,
+        target,
+      };
     }
+  });
 
-    const resetResult = await runGitCommand(buildGitResetCommandArgs(parsed.target), 20);
-    rawParts.push(resetResult.stdout.trim(), resetResult.stderr.trim());
-    if ((resetResult.status ?? 1) !== 0) {
-      return await buildGitOperationResult({
-        action: 'reset',
-        ok: false,
-        message: resetResult.stderr.trim() || resetResult.stdout.trim() || '回退到目标提交失败。',
-        rawParts,
-        backupBranch,
-        ...(stashRef ? { stashRef } : {}),
-        target: parsed.target,
-      });
+  registry.register(toolByName('workspace_restore_undo'), async (_args: Record<string, unknown>) => {
+    try {
+      await invoke<void>('restore_undo', { workspacePath: workspace() });
+      return {
+        available: true, isRepo: true, ok: true, action: 'undo', raw: '',
+        message: '已撤销上一次恢复操作。',
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        available: true, isRepo: true, ok: false, action: 'undo', raw: '',
+        message: `撤销失败: ${msg}`,
+      };
     }
-
-    return await buildGitOperationResult({
-      action: 'reset',
-      ok: true,
-      message: stashRef
-        ? `已回退到 ${parsed.target}，备份分支 ${backupBranch}，安全快照 ${stashRef}。`
-        : `已回退到 ${parsed.target}，备份分支 ${backupBranch}。`,
-      rawParts,
-      backupBranch,
-      ...(stashRef ? { stashRef } : {}),
-      target: parsed.target,
-    });
   });
 
   registry.register(toolByName('workspace_apply_patch'), async (args: Record<string, unknown>) => {

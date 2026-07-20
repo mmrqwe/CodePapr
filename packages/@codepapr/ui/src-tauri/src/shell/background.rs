@@ -225,12 +225,6 @@ pub(crate) fn run_workspace_command_impl(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    if command == "git" {
-        let code_papr_git = std::path::Path::new(&workspace_path).join(".CodePapr/git");
-        cmd.env("GIT_DIR", code_papr_git.join(".git"))
-            .env("GIT_WORK_TREE", &workspace_path);
-    }
-
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
     let mut child = match cmd.spawn() {

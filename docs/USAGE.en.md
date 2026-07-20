@@ -81,7 +81,7 @@ In Agent mode, complex tasks automatically create a TodoList:
 
 Hover any user message → "Reset to here" and "Copy" buttons appear below:
 
-- **Reset to here**: Rolls back all conversation and code changes after that message. Uses Git auto-commit checkpoint + `git reset --hard` for atomic file restoration. Non-Git repos automatically degrade to per-file undo.
+- **Reset to here**: Rolls back all conversation and code changes after that message. Auto-snapshot created on every user message (excluding `node_modules/`, `dist/`, etc.). Reset shows a restore plan preview (files to restore/delete/unchanged), then executes after confirmation (auto-creates backup reference, supports undo).
 - **Copy**: One-click copy of the message text to clipboard.
 
 ## Round Navigation Indicator
@@ -132,15 +132,18 @@ The toolbar search box supports **conversation search** and **file search**, swi
 
 `.CodePapr/memory.md` is cross-session long-term memory, storing user profiles, preferences, project conventions, error patterns with solutions, and architecture decisions.
 
-**Writing**: The Agent auto-appends (using the generic `write` tool) in three cases:
+**Writing**: The Agent auto-appends (using the generic `write` tool) in these scenarios:
 
-1. The same error was encountered twice in the current session
-2. A project-specific build/deploy/config convention was discovered
-3. The user explicitly asks to remember
+1. It discovers project directory structure, tech stack, or build/lint/test commands worth reusing across sessions
+2. The same error was encountered twice in the current session
+3. A project-specific build/deploy/config convention was discovered
+4. The user explicitly asks to remember
 
 Each entry starts with `## YYYY-MM-DD Topic` and is manually editable.
 
 **Loading**: Injected into the bootstrap context on each session start (does not enter system prompt cache).
+
+**Cold-start auto-generation**: If `memory.md` is missing or empty at session start and a ProjectGraph cache is available, the fast model auto-generates an initial memory (project structure / tech stack / build commands / key conventions) in the background. It does not block the current session; benefits apply on the next session.
 
 **Auto-consolidation**: Prevents unbounded file growth via three triggers:
 

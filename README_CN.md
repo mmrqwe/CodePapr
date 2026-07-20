@@ -19,13 +19,13 @@ CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主
 | **Ask / Plan / Agent / App 四种模式** | 同一个 Runtime，从解释到执行再到交互式应用生成 |
 | **多 Agent 协作** | 主 Agent 通过 `task` 工具调度 Explore/Scout/Mentor 及自定义子代理 |
 | **TodoList 任务规划** | Agent 自动创建并跟踪任务清单，支持进度汇报与重规划 |
-| **项目记忆自动整理** | `.CodePapr/memory.md` 跨会话累积用户画像、错误模式、项目约定；超 200 行后异步用快速模型去重合并，不阻塞会话 |
+| **项目记忆自动管理** | `.CodePapr/memory.md` 冷启动时基于 ProjectGraph 自动生成项目结构/构建命令/约定；跨会话累积错误模式与项目约定；超 200 行后异步用快速模型去重合并，不阻塞会话 |
 | **ProjectGraph 语义分析** | 项目级代码结构骨架 + 符号 + 依赖关系图，支持死代码检测、循环依赖、重构建议等 13 个 action |
 | **DeepSeek 前缀缓存优化** | 三层提示词注入策略，最大化缓存命中降低成本 |
 | **SEARCH/REPLACE Diff** | 先校验再写入，支持原子性多文件 patch |
 | **MCP 协议支持** | 集成外部 MCP 工具服务器，支持 DuckDuckGo Search、Postgres、SQLite 等 |
-| **Git 深度集成** | 8 个 Git action + diff 面板 + 安全回退 + 备份分支 |
-| **对话重置** | 一键将代码和对话重置到任意历史消息位置 |
+| **Git 深度集成** | 8 个 Git action + diff 面板 + 安全回退（备份引用+撤销） |
+| **对话重置** | 一键重置代码和对话到任意历史消息；恢复前预览受影响的文件 |
 | **对话轮次导航** | 右侧轮次指示条，悬停展开面板，点击跳转到任意轮次 |
 | **全局搜索** | 工具栏搜索框，支持对话搜索和文件搜索双 Tab，键盘全操作 |
 | **TaskChecklist 折叠** | 任务全部完成后自动折叠，新任务到达自动展开 |
@@ -98,7 +98,7 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 | 文件/目录 | 用途 |
 |-----------|------|
 | `.CodePapr/AGENTS.md` | 全项目规则，注入所有 Agent 和子代理的系统提示词 |
-| `.CodePapr/memory.md` | 跨会话项目记忆，Agent 自动追加，超 200 行后自动整理 |
+| `.CodePapr/memory.md` | 跨会话项目记忆；冷启动时基于 ProjectGraph 自动生成，Agent 自动追加，超 200 行后自动整理 |
 | `.CodePapr/agents/*.md` | 自定义子代理（YAML frontmatter + Markdown 正文） |
 | `.CodePapr/skills/*/SKILL.md` | 可复用技能（搜索策略、排错流程、发布检查） |
 | `.CodePapr/commands/*.md` | 自定义提示词模板（`--name` 调用） |

@@ -19,13 +19,13 @@ CodePapr is a local coding agent system built with DeepSeek cache optimization. 
 | **Ask / Plan / Agent / App modes** | Single runtime for explanation, execution, and interactive HTML app generation |
 | **Multi-agent collaboration** | Main agent dispatches Explore/Scout/Mentor and custom sub-agents via the `task` tool |
 | **TodoList task planning** | Agents auto-create and track task lists with progress reporting and re-planning |
-| **Project memory auto-management** | `.CodePapr/memory.md` accumulates user profiles, error patterns, and project conventions across sessions; auto-deduplicates with a fast model once exceeding 200 lines, without blocking the session |
+| **Project memory auto-management** | `.CodePapr/memory.md` is auto-generated on cold start from ProjectGraph (structure/commands/conventions); accumulates error patterns and project conventions across sessions; auto-deduplicates with a fast model once exceeding 200 lines, without blocking the session |
 | **ProjectGraph semantic analysis** | Project-level code structure skeleton + symbols + dependency graph, supporting 13 actions including dead code detection, circular dependency checks, and refactoring suggestions |
 | **DeepSeek prefix cache optimization** | Three-layer prompt injection strategy to maximize cache hits and reduce costs |
 | **SEARCH/REPLACE Diff** | Validate before writing, with atomic multi-file patch support |
 | **MCP protocol support** | Integrate external MCP tool servers including DuckDuckGo Search, Postgres, SQLite, and more |
-| **Deep Git integration** | 8 Git actions + diff panel + safe rollback + backup branches |
-| **Conversation reset** | One-click reset code and conversation to any point in message history |
+| **Deep Git integration** | 8 Git actions + diff panel + safe rollback with backup ref + undo |
+| **Conversation reset** | One-click reset code and conversation to any point; restore plan preview shows affected files before execution |
 | **Conversation turn navigation** | Right-side turn indicator bar with hover-to-expand panel and click-to-jump |
 | **Global search** | Toolbar search with conversation and file search tabs, fully keyboard-operable |
 | **TaskChecklist collapse** | Auto-collapse when all tasks complete, auto-expand when new tasks arrive |
@@ -98,7 +98,7 @@ Create a `.CodePapr/` directory at the project root:
 | File/Directory | Purpose |
 |----------------|---------|
 | `.CodePapr/AGENTS.md` | Project-wide rules injected into the system prompt of all agents and sub-agents |
-| `.CodePapr/memory.md` | Cross-session project memory, auto-appended by agents, auto-compacted after 200 lines |
+| `.CodePapr/memory.md` | Cross-session project memory; cold-start auto-generated from ProjectGraph, auto-appended by agents, auto-compacted after 200 lines |
 | `.CodePapr/agents/*.md` | Custom sub-agents (YAML frontmatter + Markdown body) |
 | `.CodePapr/skills/*/SKILL.md` | Reusable skills (search strategies, debugging workflows, release checklists) |
 | `.CodePapr/commands/*.md` | Custom prompt templates (invoked with `--name`) |

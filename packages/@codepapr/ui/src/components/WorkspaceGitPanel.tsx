@@ -1,15 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
-  buildGitBackupBranchName,
   buildGitBranchCheckoutPlans,
-  buildGitHistoryCommandArgs,
   buildGitLatestStashCommandArgs,
-  buildGitResetCommandArgs,
   buildGitRestoreCommandPlans,
   buildGitSafetyStashMessage,
   buildGitStashPushArgs,
-  parseGitHistoryCommandResult,
   parseGitLatestStashCommandResult,
   type GitHistoryEntry,
   type GitHistorySummary,
@@ -17,9 +13,6 @@ import {
 import {
   buildGitDiffSummary,
   buildGitUnavailableDiff,
-  buildGitUnavailableStatus,
-  parseGitRepositoryRootCommandResult,
-  parseGitStatusCommandResult,
   type GitDiffSummary,
   type GitStatusFile,
   type GitStatusSummary,
@@ -44,9 +37,13 @@ import {
   type GitFileSelection,
 } from '../utils/workspaceGitPanel';
 import {
-  gitCheckpointChangedFiles,
+  snapshotChangedFiles,
+  snapshotEnsure,
+  restoreExecute,
+  gitStatus as gitStatusCmd,
+  gitLog as gitLogCmd,
   type CommitChangedFiles,
-} from '../utils/gitCheckpoint';
+} from '../utils/snapshot';
 import { getTranslation, type Lang } from '../utils/i18n';
 import { GitDiffPreview } from './GitDiffPreview';
 
@@ -257,60 +254,63 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
 
       setIsLoading(true);
       try {
-        const repoRootResult = parseGitRepositoryRootCommandResult(
-          await invoke<CommandResult>('run_workspace_command', {
-            workspacePath,
-            command: 'git',
-            args: ['rev-parse', '--show-toplevel'],
-            timeoutSeconds: 15,
-          })
-        );
-
-        if (!repoRootResult.available || !repoRootResult.isRepo) {
-          if (!cancelled) {
-            setGitHistory(null);
-            setGitStatus({
-              available: repoRootResult.available,
-              isRepo: false,
-              files: [],
-              raw: repoRootResult.raw,
-              ...(repoRootResult.message ? { message: repoRootResult.message } : {}),
-            });
-          }
-          return;
-        }
-
-        const [statusResult, historyResult] = await Promise.all([
-          invoke<CommandResult>('run_workspace_command', {
-            workspacePath,
-            command: 'git',
-            args: ['status', '--porcelain=1', '--branch', '--untracked-files=all'],
-            timeoutSeconds: 15,
-          }),
-          invoke<CommandResult>('run_workspace_command', {
-            workspacePath,
-            command: 'git',
-            args: buildGitHistoryCommandArgs(historyLimit),
-            timeoutSeconds: 15,
-          }),
+        const [statusResult, logResult] = await Promise.all([
+          gitStatusCmd(workspacePath),
+          gitLogCmd(workspacePath, historyLimit),
         ]);
 
         if (!cancelled) {
-          const parsed = parseGitStatusCommandResult(statusResult);
-          setGitHistory(parseGitHistoryCommandResult(historyResult));
-          setGitStatus(
-            parsed.isRepo && repoRootResult.repoRoot
-              ? {
-                  ...parsed,
-                  repoRoot: repoRootResult.repoRoot,
-                }
-              : parsed
-          );
+          if (statusResult.available && statusResult.isRepo) {
+            const files: GitStatusFile[] = statusResult.entries.map((e) => ({
+              path: e.path,
+              oldPath: e.oldPath ?? undefined,
+              indexStatus: e.indexStatus,
+              worktreeStatus: e.worktreeStatus,
+            }));
+            setGitStatus({
+              available: true,
+              isRepo: true,
+              files,
+              raw: '',
+              ...(statusResult.branch ? { branch: statusResult.branch } : {}),
+              ...(statusResult.headShort ? { headShort: statusResult.headShort } : {}),
+              ...(statusResult.message ? { message: statusResult.message } : {}),
+            } satisfies GitStatusSummary);
+            setGitHistory({
+              available: true,
+              isRepo: true,
+              entries: logResult.map((e): GitHistoryEntry => ({
+                hash: e.sha,
+                shortHash: e.shortHash,
+                committedAt: new Date(e.timestamp * 1000).toISOString(),
+                authorName: e.author,
+                refNames: e.refs,
+                subject: e.message,
+                isHead: e.isHead,
+              })),
+              raw: '',
+            } satisfies GitHistorySummary);
+          } else {
+            setGitHistory(null);
+            setGitStatus({
+              available: statusResult.available,
+              isRepo: false,
+              files: [],
+              raw: '',
+              ...(statusResult.message ? { message: statusResult.message } : {}),
+            } satisfies GitStatusSummary);
+          }
         }
       } catch (gitError) {
         if (!cancelled) {
           setGitHistory(null);
-          setGitStatus(buildGitUnavailableStatus(gitError instanceof Error ? gitError.message : String(gitError)));
+          setGitStatus({
+            available: false,
+            isRepo: false,
+            files: [],
+            raw: '',
+            message: gitError instanceof Error ? gitError.message : String(gitError),
+          } satisfies GitStatusSummary);
         }
       } finally {
         if (!cancelled) {
@@ -525,16 +525,13 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     setIsInitializingGit(true);
     setGitActionMessage('');
     try {
-      const result = await runGitCommand(['init']);
-      if ((result.status ?? 1) !== 0) {
-        throw new Error(commandResultMessage(result));
+      const result = await snapshotEnsure(workspacePath);
+      if (result.ready) {
+        setGitActionMessage(t.workspaceGitInitDone);
+        setRefreshVersion((value) => value + 1);
+      } else {
+        throw new Error(result.error ?? t.workspaceGitUnavailable);
       }
-      const commitResult = await runGitCommand(['commit', '--allow-empty', '-m', 'Initial commit']);
-      if ((commitResult.status ?? 1) !== 0) {
-        throw new Error(commandResultMessage(commitResult));
-      }
-      setGitActionMessage(t.workspaceGitInitDone);
-      setRefreshVersion((value) => value + 1);
     } catch (error) {
       setGitActionMessage((error instanceof Error ? error.message : String(error)) || t.workspaceGitUnavailable);
     } finally {
@@ -672,41 +669,21 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     setActiveGitActionKey(`reset:${entry.hash}`);
     setGitActionMessage('');
     try {
-      const backupBranch = buildGitBackupBranchName();
-      const backupResult = await runGitCommand(['branch', backupBranch, 'HEAD']);
-      if ((backupResult.status ?? 1) !== 0) {
-        throw new Error(commandResultMessage(backupResult));
-      }
-
-      let stashRef: string | undefined;
-      if (visibleGitFiles.length > 0) {
-        const stashResult = await runGitCommand(
-          buildGitStashPushArgs(buildGitSafetyStashMessage('reset', entry.shortHash), {
-            includeUntracked: true,
-          })
-        );
-        if ((stashResult.status ?? 1) !== 0) {
-          throw new Error(commandResultMessage(stashResult));
+      const result = await restoreExecute(workspacePath, entry.hash);
+      if (result.ok) {
+        const msgs: string[] = [
+          `${gitResetDonePrefixText} ${entry.shortHash}`,
+        ];
+        if (result.backupRef) {
+          msgs.push(`${gitBackupBranchSavedPrefixText} ${result.backupRef}`);
         }
-
-        stashRef =
-          parseGitLatestStashCommandResult(await runGitCommand(buildGitLatestStashCommandArgs()))?.ref ??
-          undefined;
+        if (result.filesRestored > 0) {
+          msgs.push(`${lang === 'en' ? 'Restored' : '恢复了'} ${result.filesRestored} ${lang === 'en' ? 'files' : '个文件'}`);
+        }
+        queueGitRefresh(msgs.join(' · '));
+      } else {
+        throw new Error(result.error ?? gitActionFailedText);
       }
-
-      const resetResult = await runGitCommand(buildGitResetCommandArgs(entry.hash));
-      if ((resetResult.status ?? 1) !== 0) {
-        throw new Error(commandResultMessage(resetResult));
-      }
-
-      const messages = [
-        `${gitResetDonePrefixText} ${entry.shortHash}`,
-        `${gitBackupBranchSavedPrefixText} ${backupBranch}`,
-      ];
-      if (stashRef) {
-        messages.push(`${gitSnapshotSavedPrefixText} ${stashRef}`);
-      }
-      queueGitRefresh(messages.join(' · '));
     } catch (error) {
       setGitActionMessage((error instanceof Error ? error.message : String(error)) || gitActionFailedText);
     } finally {
@@ -738,7 +715,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
       return next;
     });
     try {
-      const result = await gitCheckpointChangedFiles(workspacePath, sha);
+      const result = await snapshotChangedFiles(workspacePath, sha);
       setCommitFilesCache((prev) => {
         const next = new Map(prev);
         next.set(sha, result);

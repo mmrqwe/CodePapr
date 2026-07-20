@@ -846,20 +846,23 @@ https://api.deepseek.com/v1</code></pre>
         <h3>Git 集成</h3>
         <ul>
           <li><strong>Git 面板：</strong>展示 staged/unstaged diff、最近提交历史、分支创建/切换、本地提交、安全擦除本地改动</li>
-          <li><strong>8 个 Agent Git 工具：</strong>status、diff、history、branch_checkout、stage、commit、restore、reset</li>
-          <li><strong>自动初始化：</strong>如果当前工作区还不是 Git 仓库，面板可直接执行 <code>git init</code></li>
+          <li><strong>8 个 Agent Git 工具：</strong>status、diff、history、branch_checkout、stage、commit、restore、reset（全部通过内置 libgit2 Tauri 命令，不依赖系统 git）</li>
+          <li><strong>自动初始化：</strong>如果当前工作区还没有 Git 仓库，面板可直接初始化（通过内置 libgit2，无需系统 Git）</li>
         </ul>
 
-        <h3>对话重置（Git Checkpoint）</h3>
-        <p>每条用户消息进入对话历史<strong>之前</strong>，CodePapr 会先抓取一份代码快照作为锚点：</p>
-        <pre><code>git add -A &amp;&amp; git commit -m "codepapr:checkpoint:&lt;userMsgId&gt;"</code></pre>
+        <h3>对话重置（Shadow Git 快照）</h3>
+        <p>每条用户消息进入对话历史<strong>之前</strong>，CodePapr 会通过独立的 Shadow Git 仓库（<code>.CodePapr/git/</code>，基于 <code>libgit2</code> — <strong>无需系统 Git CLI</strong>）抓取代码快照：</p>
+        <ul>
+          <li><strong>IgnoreResolver</strong> 扫描工作区文件树，遵守 <code>.gitignore</code> 并自动排除 <code>node_modules/</code>、<code>dist/</code>、<code>.next/</code>、大文件（&gt;100MB）等</li>
+          <li>通过 <code>index.add_path</code> 逐文件添加，提交为 <code>checkpoint #N · "消息预览"</code></li>
+        </ul>
         <p>当你需要回退时：</p>
         <ul>
           <li>Hover 任意用户消息，点击"重置到此点"</li>
-          <li>系统 <code>git reset --hard</code> 到该消息发送前的 checkpoint commit</li>
-          <li>所有文件原子性恢复到发送这条消息之前的状态</li>
+          <li><strong>恢复计划预览</strong>：系统先计算哪些文件会变更 — 展示恢复/删除/不变的文件数量，<em>先预览再执行</em></li>
+          <li><strong>执行</strong>：确认后系统回退到快照 checkout</li>
+          <li>自动创建备份引用 <code>refs/codepapr-backup-before-reset</code>，可随时撤销</li>
           <li>消息列表同步截断，后续对话全部移除</li>
-          <li>如果工作区不是 Git 仓库，CodePapr 会先尝试 <code>git init</code>；初始化失败时该消息上的"重置到此点"按钮会保持 disabled</li>
         </ul>
       </div>
     </section>

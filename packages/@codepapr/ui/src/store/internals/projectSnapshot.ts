@@ -35,7 +35,6 @@ export function toProjectSnapshot(state: AgentState): ProjectStateSnapshot {
     conversationStats: state.conversationStats,
     sessionConversationStats: state.sessionConversationStats,
     projectDiagnosticsReport: state.projectDiagnosticsReport,
-    messageCheckpoints: { ...state._messageCheckpoints },
     updatedAt: Date.now(),
   };
 }
@@ -100,7 +99,6 @@ async function saveProjectStateNormalized(
     ['session_todo_lists', sessionTodoLists],
     ['skill_enabled_by_id', state.skillEnabledById],
     ['project_diagnostics_report', state.projectDiagnosticsReport],
-    ['message_checkpoints', state._messageCheckpoints],
   ];
 
   for (const [key, value] of metaPairs) {

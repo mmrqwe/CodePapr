@@ -846,20 +846,23 @@ After the change, at least run verification for the affected scope; if no narrow
         <h3>Git Integration</h3>
         <ul>
           <li><strong>Git Panel:</strong> Shows staged/unstaged diff, recent commit history, branch creation/switch, local commits, safe discard of local changes</li>
-          <li><strong>8 Agent Git Tools:</strong> status, diff, history, branch_checkout, stage, commit, restore, reset</li>
-          <li><strong>Auto-init:</strong> If the current workspace is not yet a Git repository, the panel can directly execute <code>git init</code></li>
+          <li><strong>8 Agent Git Tools:</strong> status, diff, history, branch_checkout, stage, commit, restore, reset — all powered by built-in libgit2 Tauri commands (no system git required)</li>
+          <li><strong>Auto-init:</strong> If the workspace doesn't have a Git repo yet, the panel can initialize one via built-in libgit2 (no system git required)</li>
         </ul>
 
-        <h3>Conversation Reset (Git Checkpoint)</h3>
-        <p><strong>Before</strong> each user message enters the conversation history, CodePapr captures a code snapshot as an anchor:</p>
-        <pre><code>git add -A &amp;&amp; git commit -m "codepapr:checkpoint:&lt;userMsgId&gt;"</code></pre>
+        <h3>Conversation Reset (Shadow Git Snapshot)</h3>
+        <p><strong>Before</strong> each user message, CodePapr captures a code snapshot via its own internal Shadow Git repo at <code>.CodePapr/git/</code> (powered by <code>libgit2</code> — <strong>no system Git CLI required</strong>):</p>
+        <ul>
+          <li><strong>IgnoreResolver</strong> scans the workspace file tree, respecting <code>.gitignore</code> and auto-excluding <code>node_modules/</code>, <code>dist/</code>, <code>.next/</code>, large files (&gt;100MB), etc.</li>
+          <li>Files are added one-by-one via <code>index.add_path</code> and committed as <code>checkpoint #N · "message preview"</code></li>
+        </ul>
         <p>When you need to roll back:</p>
         <ul>
           <li>Hover over any user message and click "Reset to here"</li>
-          <li>The system <code>git reset --hard</code> to the checkpoint commit before that message was sent</li>
-          <li>All files are atomically restored to the state before sending that message</li>
+          <li><strong>Restore Plan</strong>: CodePapr computes exactly which files will change — showing you the count of files to restore/delete/unchanged <em>before</em> executing anything</li>
+          <li><strong>Execute</strong>: After confirmation, the system resets to the checkpoint snapshot</li>
+          <li>A backup ref <code>refs/codepapr-backup-before-reset</code> is created automatically — you can undo the reset anytime</li>
           <li>The message list is synchronously truncated; all subsequent conversation is removed</li>
-          <li>If the workspace is not a Git repository, CodePapr will first attempt <code>git init</code>; if initialization fails, the "Reset to here" button on that message remains disabled</li>
         </ul>
       </div>
     </section>

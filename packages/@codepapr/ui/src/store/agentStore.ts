@@ -37,10 +37,15 @@ import {
 import { runProjectDiagnostics } from '../utils/projectDiagnostics';
 import { loadAppSettings, saveAppSettings } from '../utils/appSettingsStorage';
 import {
-  gitCheckpointCreate,
-  gitCheckpointEnsure,
-  gitCheckpointReset,
-} from '../utils/gitCheckpoint';
+  snapshotEnsure,
+  snapshotCreate,
+  snapshotList,
+  restoreExecute,
+  saveCheckpointRecord,
+  loadCheckpointRecords,
+  deleteCheckpointByMessage,
+  deleteCheckpointsForSession,
+} from '../utils/snapshot';
 import {
   buildCheckpointCommitMessage,
   nextCheckpointSequence,
@@ -54,6 +59,7 @@ import {
   selectTaskModelRoute,
 } from '../utils/modelRouting';
 import {
+  bootstrapMemoryContent,
   consolidateMemoryContent,
   MEMORY_CONSOLIDATION_MAX_LINES,
   planMemoryConsolidation,
@@ -159,6 +165,11 @@ export {
 // Marker to silence unused-import lint for re-exported helpers
 void _getProviderLabel;
 void _isApiConfigured;
+
+// Guards cold-start memory.md bootstrap so concurrent sendMessage calls
+// don't trigger duplicate generation. Module-level on purpose: the guard
+// spans the whole session, not a single store snapshot.
+let memoryBootstrapInFlight = false;
 
 function upsertRecentWorkspace(
   recent: WorkspaceEntry[],
@@ -421,7 +432,6 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           const rawSessionStats = meta.session_conversation_stats as Record<string, unknown> | null;
           sessionConversationStats = rawSessionStats ?? {};
           projectDiagnosticsReport = meta.project_diagnostics_report ?? null;
-          messageCheckpoints = (meta.message_checkpoints as Record<string, string>) ?? {};
           sessionTodoLists = (meta.session_todo_lists as Record<string, unknown>) ?? {};
 
           // 安全兜底：如果新表完全无数据（sessions 和 meta 都空），回退到旧格式
@@ -564,32 +574,34 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           return;
         }
         try {
-          const result = await gitCheckpointEnsure(path);
-          // 仅当仍停留在同一工作区时写回，避免竞态。
+          const result = await snapshotEnsure(path);
           if (get().workspacePath !== path) return;
           set({
             _gitReady: result.ready,
             _gitReadyError: result.error,
           });
-          // ensure 成功后从 git log 推断当前 checkpoint 最大序号，
-          // 避免 App 重启或切换工作区后序号从 1 重新开始。
           if (result.ready) {
             try {
-              const logResult = await invoke<{ stdout: string; status: number | null }>(
-                'run_workspace_command',
-                {
-                  workspacePath: path,
-                  command: 'git',
-                  args: ['log', '--pretty=format:%s', '-n', '200'],
-                  timeoutSeconds: 10,
-                }
-              );
+              const [snapshots, records] = await Promise.all([
+                snapshotList(path, 200),
+                loadCheckpointRecords(path, undefined),
+              ]);
               if (get().workspacePath !== path) return;
-              if ((logResult.status ?? 1) === 0) {
-                const subjects = (logResult.stdout ?? '')
-                  .split('\n')
-                  .map((line) => line.trim())
-                  .filter(Boolean);
+              // 从 timeline 恢复 _messageCheckpoints
+              if (records.length > 0) {
+                const cps: Record<string, string> = {};
+                let maxSeq = 0;
+                for (const r of records) {
+                  cps[r.messageId] = r.sha;
+                  const seqMatch = r.label.match(/checkpoint #(\d+)/);
+                  if (seqMatch) {
+                    maxSeq = Math.max(maxSeq, parseInt(seqMatch[1], 10));
+                  }
+                }
+                set({ _messageCheckpoints: cps, _checkpointSeq: maxSeq });
+              } else {
+                // 没有 timeline 记录，用 git log 推断序号
+                const subjects = snapshots.map((s) => s.label);
                 const next = nextCheckpointSequence(subjects);
                 set({ _checkpointSeq: Math.max(0, next - 1) });
               }
@@ -710,6 +722,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       clearMessages: () => {
+        const sessionId = get().activeSessionId;
         set((s) => ({
           messages: [],
           sessionMessages: s.activeSessionId
@@ -736,6 +749,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _checkpointError: null,
         }));
         saveCurrentProjectState(get(), { purgeDeletedContent: true });
+        if (sessionId) {
+          void deleteCheckpointsForSession(get().workspacePath, sessionId).catch(() => undefined);
+        }
       },
 
       resetToMessage: async (messageId): Promise<ResetToMessageResult> => {
@@ -758,9 +774,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         let filesChanged = 0;
 
         try {
-          const r = await gitCheckpointReset(workspacePath, targetSha);
+          const r = await restoreExecute(workspacePath, targetSha);
           codeReset = 'git';
-          filesChanged = r.filesChanged;
+          filesChanged = r.filesRestored;
         } catch (err) {
           // git2 reset 失败：通常是 .git 损坏或权限问题。本期不再做 EditHistory 降级，
           // 因为 git2 在 ensure 阶段已确保仓库可用，失败是真实异常。
@@ -774,10 +790,17 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         const truncatedMessages = messages.slice(0, cutIndex);
         const keptIds = new Set(truncatedMessages.map((m) => m.id));
         const nextCheckpoints: Record<string, string> = {};
+        const removedIds: string[] = [];
         for (const [id, sha] of Object.entries(_messageCheckpoints)) {
           if (keptIds.has(id)) {
             nextCheckpoints[id] = sha;
+          } else {
+            removedIds.push(id);
           }
+        }
+        // 清理 timeline 表中被截掉的 checkpoint 记录
+        for (const id of removedIds) {
+          void deleteCheckpointByMessage(get().workspacePath, id).catch(() => undefined);
         }
 
         set({
@@ -1050,6 +1073,35 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           if (planMemoryConsolidation(memorySection, MEMORY_CONSOLIDATION_MAX_LINES)) {
             set({ _pendingMemoryConsolidation: true });
           }
+          // Cold-start bootstrap: when memory.md is empty/missing and a
+          // ProjectGraph summary is available, generate an initial memory
+          // in the background so the next session doesn't explore from zero.
+          // Runs only when there's no consolidation pending (avoid clobbering
+          // an over-long file) and deduped via a module-level guard.
+          if (!memorySection && projectGraphBootstrapSummary && !memoryBootstrapInFlight) {
+            memoryBootstrapInFlight = true;
+            const bootstrapInput = {
+              projectGraphSummary: projectGraphBootstrapSummary,
+              rulesSection,
+              firstUserMessage: effectiveInput,
+            };
+            void (async () => {
+              try {
+                const generated = await bootstrapMemoryContent(bootstrapInput, normalizedSettings);
+                if (generated) {
+                  await invoke('write_text_file', {
+                    workspacePath,
+                    relativePath: '.CodePapr/memory.md',
+                    content: generated,
+                  });
+                }
+              } catch {
+                // Silent fail - don't disrupt the session
+              } finally {
+                memoryBootstrapInFlight = false;
+              }
+            })();
+          }
           let mcpToolDefinitions: IToolDefinition[] = [];
           let mcpToolMappings: Array<{ serverId: string; toolName: string; displayName: string }> = [];
           if (normalizedSettings.mcp.enabled && normalizedSettings.mcp.exposeTools) {
@@ -1245,12 +1297,20 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
                 userMessageId: userMsg.id,
                 userMessageText: previewSource,
               });
-              const cp = await gitCheckpointCreate(get().workspacePath, label);
+              const cp = await snapshotCreate(get().workspacePath, label);
               set((s) => ({
                 _messageCheckpoints: { ...s._messageCheckpoints, [userMsg!.id]: cp.sha },
                 _checkpointSeq: sequence,
                 _checkpointError: null,
               }));
+              void saveCheckpointRecord(
+                get().workspacePath,
+                activeSessionId!,
+                userMsg!.id,
+                cp.sha,
+                label,
+                cp.fileCount,
+              ).catch(() => undefined);
             } catch (err) {
               const msg = err instanceof Error ? err.message : String(err);
               console.warn('[CodePapr] checkpoint 创建失败:', msg);

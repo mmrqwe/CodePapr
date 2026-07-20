@@ -129,11 +129,25 @@ fn open_project_db(workspace_path: &str) -> Result<(Connection, PathBuf, PathBuf
            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
            UNIQUE(session_id, message_index)
          );
-         CREATE TABLE IF NOT EXISTS project_meta (
-           key TEXT PRIMARY KEY,
-           value TEXT NOT NULL,
-           updated_at INTEGER NOT NULL
-         );",
+          CREATE TABLE IF NOT EXISTS project_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS checkpoint_timeline (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            sha        TEXT NOT NULL,
+            label      TEXT NOT NULL,
+            file_count INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+          );
+          CREATE INDEX IF NOT EXISTS idx_cp_timeline_msg
+            ON checkpoint_timeline(message_id);
+          CREATE INDEX IF NOT EXISTS idx_cp_timeline_session
+            ON checkpoint_timeline(session_id);",
     )
     .map_err(|err| format!("初始化项目状态表失败: {err}"))?;
 
@@ -887,6 +901,111 @@ pub(crate) fn load_all_project_meta(workspace_path: String) -> Result<ProjectMet
         meta_json: serde_json::to_string(&meta)
             .map_err(|err| format!("序列化元数据失败: {err}"))?,
     })
+}
+
+// ── Checkpoint Timeline ────────────────────────────────────────────────
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CheckpointRecord {
+    pub id: i64,
+    pub session_id: String,
+    pub message_id: String,
+    pub sha: String,
+    pub label: String,
+    pub file_count: i64,
+    pub created_at: i64,
+}
+
+#[tauri::command]
+pub(crate) fn save_checkpoint_record(
+    workspace_path: String,
+    session_id: String,
+    message_id: String,
+    sha: String,
+    label: String,
+    file_count: i64,
+) -> Result<(), String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    conn.execute(
+        "INSERT INTO checkpoint_timeline (session_id, message_id, sha, label, file_count, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![session_id, message_id, sha, label, file_count, unix_millis()?],
+    )
+    .map_err(|err| format!("保存 checkpoint 记录失败: {err}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn load_checkpoint_records(
+    workspace_path: String,
+    session_id: Option<String>,
+) -> Result<Vec<CheckpointRecord>, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let (sql, params): (String, Vec<rusqlite::types::Value>) = if let Some(ref sid) = session_id {
+        (
+            "SELECT id, session_id, message_id, sha, label, file_count, created_at
+             FROM checkpoint_timeline WHERE session_id = ?1 ORDER BY id".into(),
+            vec![sid.clone().into()],
+        )
+    } else {
+        (
+            "SELECT id, session_id, message_id, sha, label, file_count, created_at
+             FROM checkpoint_timeline ORDER BY id".into(),
+            vec![],
+        )
+    };
+
+    let mut stmt = conn.prepare(&sql)
+        .map_err(|err| format!("查询 checkpoint 记录失败: {err}"))?;
+
+    let records = stmt.query_map(
+        rusqlite::params_from_iter(params.iter()),
+        |row| {
+            Ok(CheckpointRecord {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                message_id: row.get(2)?,
+                sha: row.get(3)?,
+                label: row.get(4)?,
+                file_count: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        },
+    )
+    .map_err(|err| format!("读取 checkpoint 记录失败: {err}"))?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    Ok(records)
+}
+
+#[tauri::command]
+pub(crate) fn delete_checkpoint_by_message(
+    workspace_path: String,
+    message_id: String,
+) -> Result<(), String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    conn.execute(
+        "DELETE FROM checkpoint_timeline WHERE message_id = ?1",
+        params![message_id],
+    )
+    .map_err(|err| format!("删除 checkpoint 记录失败: {err}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn delete_checkpoints_for_session(
+    workspace_path: String,
+    session_id: String,
+) -> Result<(), String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    conn.execute(
+        "DELETE FROM checkpoint_timeline WHERE session_id = ?1",
+        params![session_id],
+    )
+    .map_err(|err| format!("删除 checkpoint 记录失败: {err}"))?;
+    Ok(())
 }
 
 #[tauri::command]

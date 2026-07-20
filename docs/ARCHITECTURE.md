@@ -261,15 +261,17 @@ todo 工具
 - **自动展开**：新任务到达或状态更新时自动展开
 - 手动点击可展开/折叠
 
-### 7.5 对话重置（Git 回退）
+### 7.5 对话重置（Shadow Git 回退）
 
 Hover 用户消息 → 显示"重置到此点"按钮：
 
-- 代码回退：每次 Agent 完成响应后自动 `git commit` checkpoint；重置时 `git reset --hard` 到目标 commit，所有文件原子性恢复
-- 非 Git 仓库降级：自动回退到 EditHistory 逐文件撤销
-- 消息截断：删除该消息之后的所有对话
-- 状态清理：重置 TodoList、EditHistory、Agent session
-- 确认对话框防止误操作
+- **Shadow Git 架构**：CodePapr 在 `.CodePapr/git/` 维护独立的内部 Git 仓库（不与用户项目的 `.git` 冲突），所有 git 操作通过 libgit2 实现，**不依赖系统 Git CLI**
+- **快照引擎**：每次用户发消息时，`IgnoreResolver`（`ignore` crate）遍历工作区文件（自动排除 `node_modules/`、`dist/`、大文件等），通过 `index.add_path` 逐文件创建快照 commit，验证文件数量 > 0
+- **恢复引擎**（三阶段）：`restore_plan` 计算文件变更 → 显示预览（恢复/删除/不变文件数） → 用户确认 → `restore_execute` 执行（创建备份 ref `refs/codepapr-backup-before-reset` + 拒绝空 tree）
+- **撤销**：`restore_undo` 通过备份 ref 恢复到 reset 前的状态
+- **消息截断**：删除该消息之后的所有对话；回填被截消息的输入内容和图片
+- **Checkpoint Timeline**：`project.sqlite` 中的 `checkpoint_timeline` 表记录每次快照的 message_id、sha、文件数、时间戳
+- **确认对话框**：防止误操作
 
 ## 8. 项目记忆系统 (Project Memory)
 
@@ -285,13 +287,16 @@ Hover 用户消息 → 显示"重置到此点"按钮：
 
 ### 8.2 写入机制
 
-Agent 没有专用的 memory 工具——通过 prompt 约定，让 Agent 在以下三种情况下用通用 `write` 工具追加条目：
+Agent 没有专用的 memory 工具--通过 prompt 约定，让 Agent 在以下场景下用通用 `write` 工具追加条目：
 
-1. 同一错误在本次会话中踩了两次
-2. 发现项目特有的构建/部署/配置约定
-3. 用户明确要求记住
+1. 发现项目目录结构、技术栈、构建/lint/test 命令等值得跨会话复用的事实
+2. 同一错误在本次会话中踩了两次
+3. 发现项目特有的构建/部署/配置约定
+4. 用户明确要求记住
 
 每条以 `## YYYY-MM-DD 主题` 起始，纯 Markdown，可手动编辑。
+
+> 写入条件刻意放宽：项目结构、构建命令等"项目特定事实"是跨会话复用价值最高的内容，不应归为"常规发现"被禁止写入。通用知识与临时状态仍不写入。
 
 ### 8.3 加载机制
 
@@ -299,6 +304,8 @@ Agent 没有专用的 memory 工具——通过 prompt 约定，让 Agent 在以
 
 - Memory 内容变化不会破坏 system prompt 缓存
 - 所有会话启动时都是一次性全量加载，不做按需检索（保持简单）
+
+**冷启动自动生成**：若读取发现 `memory.md` 不存在或为空，且 ProjectGraph 缓存摘要可用，则在后台异步触发 `bootstrapMemoryContent`：用快速模型基于 ProjectGraph 摘要 + 项目规则 + 用户首条消息生成初始记忆（项目结构/技术栈/构建命令/关键约定），写入 `.CodePapr/memory.md`。该任务 fire-and-forget，不阻塞当前会话；用模块级 `memoryBootstrapInFlight` 标志防重入。若 ProjectGraph 缓存也为空则跳过，等下次会话。这避免了"每次都从零探索项目"的冷启动死循环。
 
 ### 8.4 自动整理
 
@@ -336,9 +343,9 @@ agent 回复完成
 
 ### 8.7 关键源码定位
 
-- `packages/@codepapr/ui/src/utils/memoryConsolidation.ts`：整理逻辑、三语 prompt、LLM 调用、规则降级
+- `packages/@codepapr/ui/src/utils/memoryConsolidation.ts`：整理逻辑、冷启动生成、三语 prompt、LLM 调用、规则降级
 - `packages/@codepapr/ui/src/store/internals/types.ts`：`_pendingMemoryConsolidation: boolean` 状态
-- `packages/@codepapr/ui/src/store/agentStore.ts`：三个触发点（启动/压缩/回复后）
+- `packages/@codepapr/ui/src/store/agentStore.ts`：三个整理触发点（启动/压缩/回复后）+ 冷启动生成触发点（启动读取后）
 - `packages/@codepapr/core/src/agent/promptSystem.ts`：写入条件 prompt、Memory section 的 bootstrap 渲染
 
 ## 9. ProjectGraph 语义分析
