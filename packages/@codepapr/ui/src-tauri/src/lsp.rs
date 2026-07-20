@@ -1834,14 +1834,15 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(20);
         let mut last_result: Option<Value> = None;
         let mut last_error = String::new();
+        let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
 
         loop {
-            match lsp_request(
+            match rt.block_on(lsp_request(
                 workspace_path.to_string(),
                 language_id.to_string(),
                 method.to_string(),
                 params.clone(),
-            ) {
+            )) {
                 Ok(response) => {
                     let result = response
                         .message

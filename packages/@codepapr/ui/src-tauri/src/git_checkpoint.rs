@@ -121,12 +121,19 @@ fn current_head_sha(repo: &Repository) -> Option<String> {
         .map(|oid| oid.to_string())
 }
 
-const CODEPAPR_EXCLUDE_MARKER: &str = "# codepapr:checkpoint-exclude";
-const CODEPAPR_EXCLUDE_BLOCK: &str = "\n# codepapr:checkpoint-exclude\n.CodePapr/\n";
+/// 需要从 checkpoint 跟踪范围排除的路径模式。
+/// - `.CodePapr/`：避免 checkpoint commit 把应用自身的 sqlite/会话状态记进版本。
+/// - `**/.git/`：排除所有嵌套的 .git 目录。libgit2 的 index.add_all 遇到含 .git
+///   的子目录（embedded git repository）会报 "invalid path" 错误；排除 .git 后，
+///   子目录的文件内容会被当作普通文件添加，确保 checkpoint 完整记录工作区内容。
+const EXCLUDE_RULES: &[&str] = &[
+    ".CodePapr/",
+    "**/.git/",
+    "**/.codepapr_git_backup/",
+];
 
-/// 把 `.CodePapr/` 从 git 跟踪范围排除掉，避免 checkpoint commit 把
-/// 应用自身的 sqlite/会话状态一起记进版本。规则只写到 `.git/info/exclude`，
-/// 不会污染用户的 `.gitignore`，也不会跟随 push。幂等：通过 marker 注释判断。
+/// 把排除规则写入 `.git/info/exclude`，不会污染用户的 `.gitignore`，也不会跟随 push。
+/// 幂等：逐条检查是否已存在，只追加缺失的规则。
 fn ensure_codepapr_excluded(repo: &Repository) -> std::io::Result<()> {
     use std::fs;
     use std::io::Write;
@@ -138,26 +145,31 @@ fn ensure_codepapr_excluded(repo: &Repository) -> std::io::Result<()> {
     let exclude_path = info_dir.join("exclude");
 
     let existing = fs::read_to_string(&exclude_path).unwrap_or_default();
-    if existing.contains(CODEPAPR_EXCLUDE_MARKER) {
-        return Ok(());
-    }
-
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&exclude_path)?;
-    // 若已有内容且末尾不是换行，先补一个换行避免规则被吞到上一行
+
     if !existing.is_empty() && !existing.ends_with('\n') {
         file.write_all(b"\n")?;
     }
-    file.write_all(CODEPAPR_EXCLUDE_BLOCK.as_bytes())?;
+
+    for rule in EXCLUDE_RULES {
+        let line = format!("{}\n", rule);
+        if !existing.contains(rule) {
+            file.write_all(line.as_bytes())?;
+        }
+    }
+
     Ok(())
 }
 
 fn ensure_inner(workspace: &Path) -> Result<GitCheckpointEnsureResult, git2::Error> {
     let (repo, created_repo) = open_or_init_repository(workspace)?;
     ensure_signature(&repo)?;
-    // 先排除 .codepapr/ 再打 baseline，确保 baseline commit 也不会带上 .codepapr/。
+    // 恢复可能因崩溃遗留的 .codepapr_git_backup
+    restore_crashed_git_backups(workspace);
+    // 写入排除规则（.CodePapr/ 和 **/.git/），再打 baseline。
     if let Err(err) = ensure_codepapr_excluded(&repo) {
         return Err(git2::Error::from_str(&format!(
             "failed to write .git/info/exclude: {err}"
@@ -197,9 +209,144 @@ pub async fn git_checkpoint_ensure(workspace_path: String) -> GitCheckpointEnsur
     }
 }
 
+/// 递归扫描工作区所有层级，找到 embedded git repo 的 .git 目录。
+/// 跳过 node_modules、.CodePapr 等大目录以提高性能。
+fn find_embedded_git_dirs(workspace: &Path) -> Vec<PathBuf> {
+    const SKIP_DIRS: &[&str] = &[
+        "node_modules",
+        ".CodePapr",
+        ".git",
+        ".codepapr_git_backup",
+        ".next",
+        "dist",
+        "build",
+        "target",
+        "__pycache__",
+        ".cache",
+        ".venv",
+        "venv",
+    ];
+
+    fn scan(dir: &Path, result: &mut Vec<PathBuf>, skip_dirs: &[&str]) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n,
+                None => continue,
+            };
+            if skip_dirs.contains(&name) {
+                continue;
+            }
+            let git_path = path.join(".git");
+            if git_path.is_dir() {
+                result.push(git_path);
+            }
+            scan(&path, result, skip_dirs);
+        }
+    }
+
+    let mut result = Vec::new();
+    scan(workspace, &mut result, SKIP_DIRS);
+    result
+}
+
+/// 递归扫描工作区所有层级，找到崩溃遗留的 .codepapr_git_backup 目录。
+fn find_crashed_backups(workspace: &Path) -> Vec<(PathBuf, PathBuf)> {
+    const SKIP_DIRS: &[&str] = &[
+        "node_modules",
+        ".CodePapr",
+        ".git",
+        ".codepapr_git_backup",
+        ".next",
+        "dist",
+        "build",
+        "target",
+    ];
+
+    fn scan(dir: &Path, result: &mut Vec<(PathBuf, PathBuf)>, skip_dirs: &[&str]) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n,
+                None => continue,
+            };
+            if skip_dirs.contains(&name) {
+                continue;
+            }
+            let backup = path.join(".codepapr_git_backup");
+            let git_path = path.join(".git");
+            if backup.is_dir() && !git_path.exists() {
+                result.push((backup, git_path));
+            }
+            scan(&path, result, skip_dirs);
+        }
+    }
+
+    let mut result = Vec::new();
+    scan(workspace, &mut result, SKIP_DIRS);
+    result
+}
+
+/// RAII guard：临时重命名工作区所有层级 embedded git repo 的 .git 目录，
+/// 防止 libgit2 的 index.add_all 报 "invalid path"。Drop 时自动恢复，
+/// 即使 panic 也能恢复。
+struct EmbeddedGitGuard {
+    backups: Vec<(PathBuf, PathBuf)>,
+}
+
+impl EmbeddedGitGuard {
+    fn new(workspace: &Path) -> Self {
+        let mut backups = Vec::new();
+
+        for git_path in find_embedded_git_dirs(workspace) {
+            let backup_path = git_path.with_file_name(".codepapr_git_backup");
+            if !backup_path.exists() {
+                if std::fs::rename(&git_path, &backup_path).is_ok() {
+                    backups.push((git_path, backup_path));
+                }
+            }
+        }
+
+        EmbeddedGitGuard { backups }
+    }
+}
+
+impl Drop for EmbeddedGitGuard {
+    fn drop(&mut self) {
+        for (git_path, backup_path) in &self.backups {
+            let _ = std::fs::rename(backup_path, git_path);
+        }
+    }
+}
+
+/// 清理可能因崩溃遗留的 .codepapr_git_backup 目录，恢复为 .git。
+fn restore_crashed_git_backups(workspace: &Path) {
+    for (backup, git_path) in find_crashed_backups(workspace) {
+        let _ = std::fs::rename(&backup, &git_path);
+    }
+}
+
 fn create_inner(workspace: &Path, label: &str) -> Result<GitCheckpointCreateResult, git2::Error> {
     let repo = Repository::open(&code_papr_git_path(workspace))?;
     let signature = ensure_signature(&repo)?;
+
+    // 临时移除 embedded git repo 的 .git 目录，避免 libgit2 报 "invalid path"。
+    // Drop 时自动恢复（即使 panic 也恢复）。
+    let _guard = EmbeddedGitGuard::new(workspace);
 
     let mut index = repo.index()?;
     index.add_all(
@@ -260,6 +407,9 @@ fn reset_inner(
         }
         None => target_tree.len(),
     };
+
+    // 临时移除 embedded git repo 的 .git 目录，避免 reset/checkout 报错。
+    let _guard = EmbeddedGitGuard::new(workspace);
 
     let target_object = target_commit.as_object();
     let mut checkout = git2::build::CheckoutBuilder::new();
@@ -550,16 +700,16 @@ mod tests {
             .join("info")
             .join("exclude");
         let exclude_content = fs::read_to_string(&exclude_path).unwrap();
-        assert!(exclude_content.contains(CODEPAPR_EXCLUDE_MARKER));
+        assert!(exclude_content.contains("**/.git/"));
         assert!(exclude_content.contains(".CodePapr/"));
 
         // 二次 ensure 应该幂等：不重复追加
         ensure_inner(&workspace).expect("ensure ok again");
         let exclude_after = fs::read_to_string(&exclude_path).unwrap();
-        let marker_count = exclude_after.matches(CODEPAPR_EXCLUDE_MARKER).count();
+        let git_rule_count = exclude_after.matches("**/.git/").count();
         assert_eq!(
-            marker_count, 1,
-            "exclude block must be written exactly once"
+            git_rule_count, 1,
+            "**/.git/ rule must be written exactly once"
         );
 
         fs::remove_dir_all(workspace).ok();
@@ -664,6 +814,85 @@ mod tests {
             .expect("only.txt");
         assert_eq!(only.status, "A");
         assert_eq!(only.additions, 1);
+
+        fs::remove_dir_all(workspace).ok();
+    }
+
+    #[test]
+    fn checkpoint_includes_embedded_git_repo_file_contents() {
+        let workspace = temp_workspace("embedded-git-repo");
+        ensure_inner(&workspace).expect("ensure ok");
+
+        // 创建一个子目录，含 .git（模拟 embedded git repository）
+        let sub_dir = workspace.join("sub-project");
+        fs::create_dir_all(sub_dir.join(".git")).unwrap();
+        fs::write(sub_dir.join("file.txt"), "hello from sub-project").unwrap();
+
+        // create_inner 应该成功（**/.git/ 被排除，不会报 invalid path）
+        let cp = create_inner(&workspace, "checkpoint:embedded")
+            .expect("create_inner should succeed with embedded git repo excluded");
+
+        // 检查 commit tree 是否包含 sub-project/file.txt 作为普通文件（不是 gitlink）
+        let git_dir = code_papr_git_path(&workspace);
+        let repo = Repository::open(&git_dir).expect("should open repo");
+        let head = repo.head().expect("should get HEAD");
+        let commit = repo.find_commit(head.target().unwrap()).expect("should find commit");
+        let tree = commit.tree().expect("should get tree");
+
+        let entry = tree
+            .get_path(std::path::Path::new("sub-project/file.txt"))
+            .expect("sub-project/file.txt should be in checkpoint tree");
+
+        // 0o100644 = 普通文件；0o160000 = gitlink（不期望）
+        assert_eq!(
+            entry.filemode(),
+            0o100644,
+            "sub-project/file.txt should be a regular file, not a gitlink"
+        );
+
+        fs::remove_dir_all(workspace).ok();
+    }
+
+    #[test]
+    fn checkpoint_includes_nested_embedded_git_repo() {
+        let workspace = temp_workspace("nested-embedded-git");
+        ensure_inner(&workspace).expect("ensure ok");
+
+        // 第一层：sub-project/.git
+        let sub1 = workspace.join("sub-project");
+        fs::create_dir_all(sub1.join(".git")).unwrap();
+        fs::write(sub1.join("file1.txt"), "level 1").unwrap();
+
+        // 多层嵌套：packages/core/lib/.git
+        let sub2 = workspace.join("packages").join("core").join("lib");
+        fs::create_dir_all(sub2.join(".git")).unwrap();
+        fs::write(sub2.join("file2.txt"), "deep nested").unwrap();
+
+        // create_inner 应该成功（递归扫描所有层级的 .git 并临时移除）
+        let cp = create_inner(&workspace, "checkpoint:nested")
+            .expect("create_inner should succeed with nested embedded git repos");
+
+        let git_dir = code_papr_git_path(&workspace);
+        let repo = Repository::open(&git_dir).expect("should open repo");
+        let head = repo.head().expect("should get HEAD");
+        let commit = repo.find_commit(head.target().unwrap()).expect("should find commit");
+        let tree = commit.tree().expect("should get tree");
+
+        // 第一层文件
+        let entry1 = tree
+            .get_path(std::path::Path::new("sub-project/file1.txt"))
+            .expect("sub-project/file1.txt should be in checkpoint");
+        assert_eq!(entry1.filemode(), 0o100644, "should be regular file");
+
+        // 多层嵌套文件
+        let entry2 = tree
+            .get_path(std::path::Path::new("packages/core/lib/file2.txt"))
+            .expect("packages/core/lib/file2.txt should be in checkpoint");
+        assert_eq!(entry2.filemode(), 0o100644, "should be regular file");
+
+        // .git 目录应该已恢复
+        assert!(sub1.join(".git").is_dir(), "sub-project/.git should be restored");
+        assert!(sub2.join(".git").is_dir(), "packages/core/lib/.git should be restored");
 
         fs::remove_dir_all(workspace).ok();
     }

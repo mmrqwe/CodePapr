@@ -250,37 +250,41 @@ fn search_workspace_paths_supports_regex_and_respects_gitignore() {
     assert!(!paths.contains(&"generated/FeatureHidden.ts".to_string()));
 }
 
-#[test]
-fn delete_workspace_file_removes_existing_file() {
+#[tokio::test]
+async fn delete_workspace_file_removes_existing_file() {
     let workspace = TestWorkspace::new("delete-existing");
     fs::write(workspace.file_path("scratch.txt"), b"temp\n").expect("should write fixture");
 
     let removed =
         write::delete_workspace_file(workspace.workspace_arg(), "scratch.txt".to_string())
+            .await
             .expect("delete should succeed");
 
     assert!(removed);
     assert!(!workspace.file_path("scratch.txt").exists());
 }
 
-#[test]
-fn delete_workspace_file_returns_false_when_missing() {
+#[tokio::test]
+async fn delete_workspace_file_returns_false_when_missing() {
     let workspace = TestWorkspace::new("delete-missing");
 
     let removed = write::delete_workspace_file(workspace.workspace_arg(), "nope.txt".to_string())
+        .await
         .expect("missing file should not error");
 
     assert!(!removed);
 }
 
-#[test]
-fn delete_workspace_file_rejects_escaping_paths() {
+#[tokio::test]
+async fn delete_workspace_file_rejects_escaping_paths() {
     let workspace = TestWorkspace::new("delete-escape");
 
     let error = match write::delete_workspace_file(
         workspace.workspace_arg(),
         "../escape.txt".to_string(),
-    ) {
+    )
+    .await
+    {
         Ok(_) => panic!("path traversal should be rejected"),
         Err(error) => error,
     };
@@ -288,8 +292,8 @@ fn delete_workspace_file_rejects_escaping_paths() {
     assert!(!error.is_empty());
 }
 
-#[test]
-fn delete_workspace_dir_removes_existing_directory() {
+#[tokio::test]
+async fn delete_workspace_dir_removes_existing_directory() {
     let workspace = TestWorkspace::new("delete-dir-existing");
     fs::create_dir_all(workspace.file_path("skill/scripts"))
         .expect("should create nested dir fixture");
@@ -298,28 +302,32 @@ fn delete_workspace_dir_removes_existing_directory() {
         .expect("should write nested file");
 
     let removed = write::delete_workspace_dir(workspace.workspace_arg(), "skill".to_string())
+        .await
         .expect("delete dir should succeed");
 
     assert!(removed);
     assert!(!workspace.file_path("skill").exists());
 }
 
-#[test]
-fn delete_workspace_dir_returns_false_when_missing() {
+#[tokio::test]
+async fn delete_workspace_dir_returns_false_when_missing() {
     let workspace = TestWorkspace::new("delete-dir-missing");
 
     let removed = write::delete_workspace_dir(workspace.workspace_arg(), "missing".to_string())
+        .await
         .expect("missing dir should not error");
 
     assert!(!removed);
 }
 
-#[test]
-fn delete_workspace_dir_rejects_escaping_paths() {
+#[tokio::test]
+async fn delete_workspace_dir_rejects_escaping_paths() {
     let workspace = TestWorkspace::new("delete-dir-escape");
 
     let error =
-        match write::delete_workspace_dir(workspace.workspace_arg(), "../escape".to_string()) {
+        match write::delete_workspace_dir(workspace.workspace_arg(), "../escape".to_string())
+            .await
+        {
             Ok(_) => panic!("path traversal should be rejected"),
             Err(error) => error,
         };
