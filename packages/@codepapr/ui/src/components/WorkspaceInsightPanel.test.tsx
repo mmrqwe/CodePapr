@@ -217,7 +217,7 @@ describe('WorkspaceInsightPanel', () => {
       await flushEffects();
     }
 
-    expect(container.textContent).not.toContain('文件读取全部失败');
+    expect(container.textContent).not.toContain('无法读取任何源文件');
     expect(container.textContent).not.toContain('0 个文件');
   });
 
@@ -243,8 +243,8 @@ describe('WorkspaceInsightPanel', () => {
       await flushEffects();
     }
 
-    expect(container.textContent).toContain('文件读取全部失败');
-    expect(container.textContent).toContain('0 个文件');
+    expect(container.textContent).toContain('还没有可展示的 ProjectGraph 节点');
+    expect(container.textContent).not.toContain('0 个文件');
 
     await act(async () => {
       root.render(
@@ -263,6 +263,6 @@ describe('WorkspaceInsightPanel', () => {
       await flushEffects();
     }
 
-    expect(container.textContent).not.toContain('文件读取全部失败');
+    expect(container.textContent).not.toContain('无法读取任何源文件');
   });
 });

@@ -539,6 +539,12 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
         const projectGraphFiles = selectProjectMapFiles(insightEntries, insightMaxSourceFiles);
         appendDebug(`文件列表: ${projectGraphFiles.length} 个文件 [${projectGraphFiles.slice(0,5).map(f => f.path.split('/').pop()).join(', ')}...]`);
 
+        if (projectGraphFiles.length === 0) {
+          appendDebug('工作区没有可分析的源代码文件，跳过 ProjectGraph 构建');
+          setIsLoading(false);
+          return;
+        }
+
         const BATCH_SIZE = 30;
         const fileContents: Record<string, { content: string; bytes: number }> = {};
         const totalBatches = Math.ceil(projectGraphFiles.length / BATCH_SIZE);
@@ -588,7 +594,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
         const firstOk = entriesWithContent[0];
         appendDebug(`文件读取: ${succeeded}/${projectGraphFiles.length} 成功 first=${firstOk?.[0]?.replace(/^.*\//,'')}:${firstOk?.[1]?.content?.length ?? 0}bytes`);
         if (succeeded === 0) {
-          setError(`文件读取全部失败 (${projectGraphFiles.length} 个文件, maxBytes=${insightMaxFileBytes})`);
+          setError(`无法读取任何源文件 (${projectGraphFiles.length} 个文件, maxBytes=${insightMaxFileBytes})`);
           setIsLoading(false);
           return;
         }

@@ -13,17 +13,21 @@ export interface AppInstance {
 interface AppRuntimeState {
   apps: AppInstance[];
   activeAppId: string | null;
+  openedAppId: string | null;
   mountSignal: number;
   mountApp: (input: Omit<AppInstance, 'createdAt' | 'updatedAt'> & { createdAt?: number; updatedAt?: number }) => void;
   closeApp: (appId: string) => void;
   selectApp: (appId: string) => void;
   clearApps: () => void;
+  openAppModal: (appId: string) => void;
+  closeAppModal: () => void;
   reloadActiveApp: () => void;
 }
 
 export const useAppRuntimeStore = create<AppRuntimeState>()((set) => ({
   apps: [],
   activeAppId: null,
+  openedAppId: null,
   mountSignal: 0,
 
   mountApp: (input) => {
@@ -62,7 +66,11 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set) => ({
       const nextApps = state.apps.filter((app) => app.appId !== appId);
       const nextActiveAppId =
         state.activeAppId === appId ? (nextApps[nextApps.length - 1]?.appId ?? null) : state.activeAppId;
-      return { apps: nextApps, activeAppId: nextActiveAppId };
+      return {
+        apps: nextApps,
+        activeAppId: nextActiveAppId,
+        openedAppId: state.openedAppId === appId ? null : state.openedAppId,
+      };
     });
   },
 
@@ -71,7 +79,15 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set) => ({
   },
 
   clearApps: () => {
-    set({ apps: [], activeAppId: null });
+    set({ apps: [], activeAppId: null, openedAppId: null });
+  },
+
+  openAppModal: (appId) => {
+    set({ openedAppId: appId });
+  },
+
+  closeAppModal: () => {
+    set({ openedAppId: null });
   },
 
   reloadActiveApp: () => {

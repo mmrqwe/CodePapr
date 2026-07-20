@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useAgentStore, isApiConfigured } from './store/agentStore';
 import { usePreviewStore } from './store/previewStore';
 import { useAppRuntimeStore } from './store/appRuntimeStore';
@@ -8,6 +9,7 @@ import { ChatPanel } from './components/ChatPanel';
 import { CodingWorkbench } from './components/CodingWorkbench';
 import { AgentOpsPanel } from './components/AgentOpsPanel';
 import { BackgroundProcessPanel } from './components/BackgroundProcessPanel';
+import { AppModal } from './components/AppModal';
 import { SplitPane } from './components/SplitPane';
 import { WorkspaceGitPanel } from './components/WorkspaceGitPanel';
 import { ToastContainer } from './components/ToastContainer';
@@ -120,6 +122,7 @@ export default function App() {
     projectGraphPhase,
   } = useAgentStore();
   const activePreviewSession = usePreviewStore((state) => state.activePreviewSession);
+  const openedAppId = useAppRuntimeStore((state) => state.openedAppId);
   const clearApps = useAppRuntimeStore((state) => state.clearApps);
   const t = getTranslation(settings.lang);
   const [isDark, setIsDark] = useState(isDarkTheme);
@@ -187,6 +190,10 @@ export default function App() {
     setSelectedPath(null);
     setSelectedGitFile(null);
     setSelectedDiagnosticLocation(null);
+    const currentApps = useAppRuntimeStore.getState().apps;
+    for (const app of currentApps) {
+      invoke('unregister_app_workspace', { appId: app.appId }).catch(() => {});
+    }
     clearApps();
   }, [workspacePath, clearApps]);
 
@@ -527,6 +534,8 @@ export default function App() {
                 </div>
               </div>
             )}
+
+            {openedAppId && <AppModal lang={settings.lang} />}
           </div>
         }
       />

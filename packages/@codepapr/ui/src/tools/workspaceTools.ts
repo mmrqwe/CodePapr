@@ -1942,6 +1942,11 @@ export function registerWorkspaceTools(
       content: html,
     });
 
+    await invoke('register_app_workspace', {
+      appId: rawAppId,
+      workspacePath: workspace(),
+    });
+
     useAppRuntimeStore.getState().mountApp({
       appId: rawAppId,
       title,

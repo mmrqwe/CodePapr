@@ -13,8 +13,7 @@ pub(crate) fn open_repo(workspace: &Path) -> Result<Repository, String> {
     let git_path = workspace.join(".CodePapr/git");
     let repo = Repository::open(&git_path)
         .map_err(|e| format!("open repo: {}", e.message()))?;
-    repo.set_workdir(workspace, false)
-        .map_err(|e| format!("set workdir: {}", e.message()))?;
+    let _ = repo.set_workdir(workspace, true);
     Ok(repo)
 }
 

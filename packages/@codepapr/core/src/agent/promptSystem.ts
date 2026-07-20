@@ -149,6 +149,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '- 生成带有内联 CSS 和 JS 的完整 HTML 文档（<!DOCTYPE html><html><head>...</head><body>...</body></html>）。',
       '- 优先使用单文件内联方式，不需要组件拆分或构建系统。',
       '- 如需图表、地图、图形库，通过 CDN 在 <script> 中引用（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js 等）。',
+      '- 应用运行在独立 origin 的沙箱 iframe 中——fetch() 跨域请求和 CDN 资源加载均正常工作。',
       '- 保持界面简洁实用，注重数据可读性和交互性。',
       '- appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 再次调用 app_render 会覆盖更新。',
       '',
@@ -193,6 +194,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '- 生成帶有內聯 CSS 和 JS 的完整 HTML 文件（<!DOCTYPE html><html><head>...</head><body>...</body></html>）。',
       '- 優先使用單文件內聯方式，不需要組件拆分或構建系統。',
       '- 如需圖表、地圖、圖形庫，通過 CDN 在 <script> 中引用（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js 等）。',
+      '- 應用運行在獨立 origin 的沙箱 iframe 中——fetch() 跨域請求與 CDN 資源載入均正常工作。',
       '- 保持介面簡潔實用，注重資料可讀性和互動性。',
       '- appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 再次調用 app_render 會覆蓋更新。',
       '',
@@ -237,6 +239,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '- Generate a complete HTML document with inline CSS and JS (<!DOCTYPE html><html><head>...</head><body>...</body></html>).',
       '- Prefer single-file inline approach — no component splitting or build systems.',
       '- For charts, maps, and visualization libraries, reference them via CDN in <script> tags (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js, etc.).',
+      '- Apps run in a sandboxed iframe with an independent origin — fetch() cross-origin requests and CDN resource loading work normally.',
       '- Keep the interface clean and practical, focusing on data readability and interactivity.',
       '- appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling app_render with the same appId updates the existing app.',
       '',
@@ -650,10 +653,10 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
     if (isApp) {
       appRender.push(
         lang === 'en'
-          ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps to the application panel. Call this after writing HTML with workspace_write_file to `.CodePapr/apps/<appId>/index.html`. appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. The HTML runs in a sandboxed iframe — use CDN for libraries (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js).'
+          ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps to the application panel. Call this after writing HTML with workspace_write_file to `.CodePapr/apps/<appId>/index.html`. appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. The HTML runs in a sandboxed iframe with its own origin — use CDN for libraries (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js) and fetch() for data APIs.'
           : lang === 'zh-TW'
-          ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用渲染到應用面板。先用 workspace_write_file 將 HTML 寫入 `.CodePapr/apps/<appId>/index.html`，再調用此工具。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。HTML 在沙箱 iframe 中運行——通過 CDN 引用函式庫。'
-          : '- [app_render] 你的主要输出工具。将交互式 HTML 应用渲染到应用面板。先用 workspace_write_file 将 HTML 写入 `.CodePapr/apps/<appId>/index.html`，再调用此工具。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。HTML 在沙箱 iframe 中运行——通过 CDN 引用库。'
+          ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用渲染到應用面板。先用 workspace_write_file 將 HTML 寫入 `.CodePapr/apps/<appId>/index.html`，再調用此工具。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。HTML 在具有獨立 origin 的沙箱 iframe 中運行——通過 CDN 引用函式庫，支援 fetch() 存取資料 API。'
+          : '- [app_render] 你的主要输出工具。将交互式 HTML 应用渲染到应用面板。先用 workspace_write_file 将 HTML 写入 `.CodePapr/apps/<appId>/index.html`，再调用此工具。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。HTML 在具有独立 origin 的沙箱 iframe 中运行——通过 CDN 引用库，支持 fetch() 访问数据 API。'
       );
     } else {
       appRender.push(

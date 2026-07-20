@@ -4,7 +4,7 @@
 mod browser;
 mod character_card;
 mod db;
-mod git_operations;
+mod git_checkpoint;
 mod lsp;
 mod lsp_fallback;
 mod lsp_managed_tools;
@@ -12,13 +12,13 @@ mod mcp_host;
 mod secrets;
 mod shared;
 mod shell;
-mod snapshot;
 mod symbol_provider;
 mod task_queue;
 mod tts;
 mod vault;
 mod web;
 mod workspace_fs;
+mod app_runtime;
 
 #[cfg(test)]
 mod test_helpers;
@@ -130,6 +130,7 @@ fn main() {
             })
             .build(),
         )
+        .register_uri_scheme_protocol("codepapr-app", app_runtime::handle_app_protocol)
         .setup(|app| {
             symbol_provider::register_default_providers();
 
@@ -322,7 +323,9 @@ fn main() {
             tts::tts_finetune_status,
             tts::tts_check_training_data_exists,
             tts::tts_generate_training_data,
-            character_card::export_character_card
+            character_card::export_character_card,
+            app_runtime::register_app_workspace,
+            app_runtime::unregister_app_workspace
         ])
         .on_window_event(|_, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
