@@ -709,9 +709,10 @@ https://api.deepseek.com/v1</code></pre>
         </ul>
         <p><strong>会话隔离：</strong></p>
         <ul>
-          <li>App 会话与其他模式<strong>完全隔离</strong>——选定后 🔒 锁定，不可中途切换</li>
-          <li>编码会话（Ask/Plan/Agent）中 App 选项被隐藏</li>
-          <li>切换模式 → 新建会话</li>
+          <li>App 与编码模式（Ask/Plan/Agent）<strong>会话级隔离</strong>--一旦选定 App，该会话锁定为 App 🔒，不可切到其他模式</li>
+          <li>编码会话中 App 选项被隐藏--已开始编码的会话不能切到 App</li>
+          <li>Ask / Plan / Agent 之间<strong>可以自由切换</strong>，无需新建会话</li>
+          <li>App ↔ 编码模式互切换 -> 新建会话</li>
         </ul>
         <p><strong>模型策略：</strong>始终使用主模型（deepseek-v4-pro）以保证 HTML 生成质量。</p>
 

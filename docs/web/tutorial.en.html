@@ -709,9 +709,10 @@ https://api.deepseek.com/v1</code></pre>
         </ul>
         <p><strong>Session Isolation:</strong></p>
         <ul>
-          <li>App sessions are <strong>fully isolated</strong> from other modes — locked 🔒 once selected, cannot switch mid-session</li>
-          <li>Coding sessions (Ask/Plan/Agent) hide the App option</li>
-          <li>To switch modes → create a new session</li>
+          <li>App and coding modes (Ask/Plan/Agent) are <strong>session-level isolated</strong> - once App is selected, the session is locked to App 🔒, cannot switch to other modes</li>
+          <li>Coding sessions hide the App option - a session that started coding cannot switch to App</li>
+          <li>Ask / Plan / Agent can <strong>switch freely</strong> between each other without creating a new session</li>
+          <li>App ↔ coding mode switch -> create a new session</li>
         </ul>
         <p><strong>Model Strategy:</strong> Always uses the primary model (deepseek-v4-pro) to ensure HTML generation quality.</p>
 

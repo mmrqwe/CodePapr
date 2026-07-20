@@ -1283,7 +1283,7 @@ function ModeSelector({ mode, setMode, isLoading, lang, sessionLock }: ModeSelec
     return allModes;
   }, [sessionLock]);
   const active = modes.find((m) => m.id === mode) ?? modes[0];
-  const isLocked = sessionLock !== null;
+  const isLocked = sessionLock === 'app';
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -1298,7 +1298,13 @@ function ModeSelector({ mode, setMode, isLoading, lang, sessionLock }: ModeSelec
       <button
         onClick={() => { if (!isLocked) setOpen(!open); }}
         disabled={isLoading}
-        title={isLocked ? (sessionLock === 'app' ? (lang === 'en' ? 'App session — mode locked' : lang === 'zh-TW' ? 'App 會話 — 模式已鎖定' : 'App 会话 — 模式已锁定') : (lang === 'en' ? 'Coding session — App mode unavailable' : lang === 'zh-TW' ? '編碼會話 — App 模式不可用' : '编码会话 — App 模式不可用')) : undefined}
+        title={
+          sessionLock === 'app'
+            ? (lang === 'en' ? 'App session - mode locked' : lang === 'zh-TW' ? 'App 會話 - 模式已鎖定' : 'App 会话 - 模式已锁定')
+            : sessionLock === 'coding'
+              ? (lang === 'en' ? 'Coding session - App mode unavailable' : lang === 'zh-TW' ? '編碼會話 - App 模式不可用' : '编码会话 - App 模式不可用')
+              : undefined
+        }
         className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 transition-colors disabled:opacity-50"
       >
         {active.label}
