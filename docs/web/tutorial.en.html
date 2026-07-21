@@ -704,7 +704,8 @@ https://api.deepseek.com/v1</code></pre>
         <ul>
           <li>Single-file inline HTML — no component splitting or build systems</li>
           <li>Reference chart libraries via CDN (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js, etc.)</li>
-          <li>Runs in a sandboxed iframe (<code>sandbox="allow-scripts"</code>) — cannot access local file system or Tauri internal APIs</li>
+          <li>Runs in a sandboxed iframe (<code>sandbox="allow-scripts allow-same-origin"</code>)</li>
+          <li>Use <strong>Papr SDK</strong> (<code>window.papr</code>) to call Agent, storage, HTTP, and filesystem capabilities</li>
           <li>appId must be kebab-case; calling with the same appId updates in place — supports iterative refinement</li>
         </ul>
         <p><strong>Session Isolation:</strong></p>
@@ -953,7 +954,7 @@ After the change, at least run verification for the affected scope; if no narrow
         <table>
           <thead><tr><th>Tool</th><th>Capability</th></tr></thead>
           <tbody>
-            <tr><td><code>app_render</code></td><td>Render HTML apps to the right-side Application panel; same appId updates in place. Use with workspace_write_file — write HTML first, then render. HTML runs in a sandboxed iframe (allow-scripts), reference chart libraries via CDN.</td></tr>
+            <tr><td><code>app_render</code></td><td>Generate .papr Apps and render to the Application panel; auto-writes manifest.json + index.html. Supports declaring permissions and AI Agent definitions. HTML can use <code>window.papr</code> SDK for Agent/storage/HTTP/filesystem. Same appId updates in place.</td></tr>
           </tbody>
         </table>
 

@@ -548,3 +548,54 @@ export class PrefixModificationError extends Error {
     this.name = 'PrefixModificationError';
   }
 }
+
+// ============================================================================
+// Papr App Types
+// ============================================================================
+
+export interface PaprAgentDef {
+  name: string;
+  model?: string;
+  systemPrompt?: string;
+  tools?: string[];
+  maxToolRounds?: number;
+}
+
+export type PaprPermission =
+  | 'storage:read'
+  | 'storage:write'
+  | 'http:get'
+  | 'http:post'
+  | 'fs:read'
+  | 'fs:write'
+  | 'llm:chat'
+  | 'workspace:read'
+  | 'workspace:write'
+  | 'workspace:exec'
+  | `agent:run:${string}`;
+
+export interface PaprManifest {
+  spec: string;
+  name: string;
+  version?: string;
+  entry?: string;
+  permissions?: PaprPermission[];
+  agents?: PaprAgentDef[];
+}
+
+export interface PaprIPCRequest {
+  __papr: true;
+  reqId: string;
+  type: string;
+  payload?: unknown;
+}
+
+export interface PaprIPCResponse {
+  __papr: true;
+  reqId: string;
+  result?: unknown;
+  error?: {
+    code: string;
+    message: string;
+  };
+}

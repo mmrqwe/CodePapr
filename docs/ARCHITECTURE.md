@@ -100,6 +100,8 @@ Tauri Rust 后端已从单文件 `main.rs` 拆分为多个领域模块，每个�
 | `symbol_provider` | `src-tauri/src/symbol_provider.rs` | tree-sitter fallback 符号提取 |
 | `mcp_host` | `src-tauri/src/mcp_host.rs` | MCP 工具服务器宿主（stdio / sse / streamable-http） |
 | `shared` | `src-tauri/src/shared/` | 路径归一化、workspace 路径解析、运行时封装、字符串/时间工具 |
+| `papr_runtime` | `src-tauri/src/papr_runtime/` | .papr 应用运行时：manifest 加载、权限校验、SDK 注入、存储/HTTP/FS 命令、app 上下文注册 |
+| `app_runtime` | `src-tauri/src/app_runtime.rs` | 自定义 URI scheme `codepapr-app://`、app 发现与扫描、SDK 注入、workspace 注册 |
 
 ### 4.5 任务队列
 
@@ -145,6 +147,90 @@ LLM 可调用 26 个独立工具（含 `task` / `todo` 两个动态工具），�
 26 个工具统一注册在 ToolRegistry 中，冻结后 hash 确保缓存一致性。`todo` 和 `task` 为动态生成。
 
 **外部路径权限**：桌面端对 `read` / `list` 操作的项目外绝对路径会弹出 `PermissionDialog`，由用户选择“拒绝 / 允许此文件 / 允许此文件夹”，授权结果保存在 `permissionStore` 白名单中。CLI 的读取路径边界相对宽松，写入仍限制在工作区内。
+
+### 4.7 Papr App Runtime
+
+Papr 是 CodePapr 的应用运行时——AI 生成的 `.papr` App 可以直接在桌面端运行，通过 SDK 调用 Agent、LLM、存储、HTTP、文件系统等能力。
+
+**目录结构：**
+
+```
+.CodePapr/apps/<appId>/
+├── manifest.json     ← 应用元数据 + 权限 + Agent 定义
+└── index.html        ← 入口 HTML（可自定义，见 manifest.entry）
+```
+
+**manifest.json 规范：**
+
+```json
+{
+  "spec": "papr/0.1",
+  "name": "Todo App",
+  "version": "0.1.0",
+  "permissions": ["storage:read", "storage:write", "agent:run:assistant"],
+  "agents": [{
+    "name": "assistant",
+    "model": "deepseek",
+    "systemPrompt": "你是一个任务管理助手",
+    "tools": ["read", "web_search"],
+    "maxToolRounds": 20
+  }]
+}
+```
+
+10 种权限：`storage:read/write`、`http:get/post`、`fs:read/write`、`llm:chat`、`workspace:read/write/exec`、`agent:run:<name>`。
+
+**Papr SDK（`window.papr`）：**
+
+注入到每个 app iframe 的 JavaScript SDK，提供统一 API：
+
+| API | 说明 |
+|---|---|
+| `papr.db.get(key)` / `papr.db.set(key, value)` / `papr.db.delete(key)` / `papr.db.keys()` | 键值持久化存储（按 app 隔离） |
+| `papr.agent.run({agent, task}, onProgress?)` | 调用 manifest 中定义的 Agent（流式事件 + steps 追踪） |
+| `papr.http.get(url)` / `papr.http.post(url, body)` | HTTP 请求 |
+| `papr.fs.readFile(path)` / `papr.fs.writeFile(path, content)` / `papr.fs.list(path)` / `papr.fs.delete(path)` | 文件读写（限定 .CodePapr/apps/<appId>/data/） |
+| `papr.app.info()` | 获取应用元数据 |
+
+**IPC 桥接：** iframe 内 SDK 通过 `window.parent.postMessage()` 发送 `{__papr:true, reqId, type, payload}` 协议消息，React 主窗口 `usePaprBridge` hook 监听 → 权限首检 → 路由到 `invoke()`（Rust）或 Worker（Agent）。
+
+**权限系统（两层）：**
+
+1. **React 首检** — `usePaprBridge` 根据 manifest.permissions 做快速拒绝
+2. **Rust 权威** — 每个 `papr_*` Tauri 命令开头调 `check_permission(manifest, capability)`，即使绕过 SDK 直接 postMessage 也被拦截
+
+工具权限映射（`check_tool_permission`）：`read/grep/list` → `workspace:read`、`write/edit` → `workspace:write`、`exec/shell` → `workspace:exec`、`web_search/web_fetch` → `http:get`。
+
+**App Agent 系统：**
+
+与内置子代理（explore/scout/mentor）独立，走专用 Agent loop：
+- manifest `agents[].tools` 声明白名单（仅 15 个允许工具）
+- Worker 端 `handleRunAppAgent` 构建完整 `Session`（`ImmutablePrefix` + `AppendOnlyLog` + `ToolRegistry`）
+- 走 `Agent.chat()` 多轮工具循环（`maxToolRounds` 默认 20，上限 50）
+- 300s wall-clock 超时 + 工具 IPC proxy 到主线程
+- 流式事件通过 `app-agent-stream` 消息转发到 iframe
+
+**协议层 SDK 注入：** `app_runtime.rs::handle_app_protocol` 在返回 HTML 时自动在 `<head>` 后注入 `<script src="__papr_sdk.js">`，SDK 内容编译时嵌入 Rust binary（`include_str!`）。
+
+**Rust 模块（`papr_runtime/`）：**
+
+| 文件 | 责任 |
+|---|---|
+| `manifest.rs` | manifest 加载、校验、缓存 |
+| `permission.rs` | 权限矩阵 + 工具权限映射 |
+| `sdk_inject.rs` | SDK 注入 HTML 响应 + SDK 文件服务 |
+| `app_context.rs` | app_id → workspace_path 内存注册表 |
+| `app_storage.rs` | `papr_storage_*` Tauri 命令（权限校验 + SQLite CRUD） |
+| `services.rs` | `papr_http_*` / `papr_fs_*` Tauri 命令（权限校验 + fs/http 操作） |
+| `protocol.rs` | postMessage 协议类型（预留） |
+
+**存储隔离：**
+
+```
+papr.db.set('key', value) → project.sqlite.app_storage(app_id, key, value)
+```
+
+不同 app 同名 key 完全隔离，通过 `app_id` 主键前缀保证。
 
 ## 5. 角色与语音系统
 
@@ -522,4 +608,12 @@ ImmutablePrefix 的 SHA256 hash 包含整个 `parameters` 对象——`temperatu
 - `packages/@codepapr/ui/src-tauri/src/task_queue/mod.rs`：串行任务队列
 - `packages/@codepapr/ui/src-tauri/src/db/mod.rs`：SQLite 持久化
 - `packages/@codepapr/ui/src-tauri/src/shared/paths.rs`：路径归一化与 workspace 路径解析
+- `packages/@codepapr/ui/src-tauri/src/papr_runtime/manifest.rs`：.papr manifest 加载、校验、缓存
+- `packages/@codepapr/ui/src-tauri/src/papr_runtime/permission.rs`：权限矩阵 + 工具权限映射
+- `packages/@codepapr/ui/src-tauri/src/papr_runtime/app_storage.rs`：papr 存储 Tauri 命令
+- `packages/@codepapr/ui/src-tauri/src/papr_runtime/services.rs`：papr HTTP/FS Tauri 命令
+- `packages/@codepapr/ui/src-tauri/src/papr_runtime/sdk_inject.rs`：SDK 注入 + 文件服务
+- `packages/@codepapr/ui/src-tauri/resources/papr-sdk.js`：Papr SDK（注入 iframe 的 window.papr API）
+- `packages/@codepapr/ui/src/papr/usePaprBridge.ts`：iframe ↔ 主窗口 IPC 桥接
+- `packages/@codepapr/ui/src/papr/agentAdapter.ts`：PaprAgentDef → AgentDefinition 适配器
 - `packages/@codepapr/editor/src/index.ts`：编辑器类型与工具函数

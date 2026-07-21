@@ -250,6 +250,12 @@ describe('CodingWorkbench', () => {
           isDir: false,
           bytes: 12,
         },
+        {
+          path: 'app.ts',
+          name: 'app.ts',
+          isDir: false,
+          bytes: 100,
+        },
       ],
       truncated: false,
     });
@@ -295,7 +301,10 @@ describe('CodingWorkbench', () => {
       if (command === 'list_workspace_files') {
         return {
           root: '/tmp/proj-A',
-          entries: [{ path: 'README.md', name: 'README.md', isDir: false, bytes: 12 }],
+          entries: [
+            { path: 'README.md', name: 'README.md', isDir: false, bytes: 12 },
+            { path: 'main.ts', name: 'main.ts', isDir: false, bytes: 50 },
+          ],
           truncated: false,
         };
       }

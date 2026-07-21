@@ -8,6 +8,12 @@ export interface AppInstance {
   filePath: string;
   createdAt: number;
   updatedAt: number;
+  command?: string;
+  args?: string[];
+  port?: number;
+  pid?: number;
+  url?: string;
+  manifestJson?: string;
 }
 
 interface AppRuntimeState {
@@ -21,6 +27,8 @@ interface AppRuntimeState {
   clearApps: () => void;
   openAppModal: (appId: string) => void;
   closeAppModal: () => void;
+  setAppRunning: (appId: string, pid: number, url: string) => void;
+  setAppStopped: (appId: string) => void;
   reloadActiveApp: () => void;
 }
 
@@ -39,6 +47,10 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set) => ({
         icon: input.icon,
         html: input.html,
         filePath: input.filePath,
+        command: input.command,
+        args: input.args,
+        port: input.port,
+        manifestJson: input.manifestJson,
         createdAt: input.createdAt ?? now,
         updatedAt: input.updatedAt ?? now,
       };
@@ -48,7 +60,7 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set) => ({
         existingIndex >= 0
           ? state.apps.map((app, index) =>
               index === existingIndex
-                ? { ...app, title: instance.title, icon: instance.icon, html: instance.html, updatedAt: now }
+                ? { ...app, title: instance.title, icon: instance.icon, html: instance.html, command: instance.command, args: instance.args, port: instance.port, manifestJson: instance.manifestJson, updatedAt: now }
                 : app
             )
           : [...state.apps, instance];
@@ -88,6 +100,23 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set) => ({
 
   closeAppModal: () => {
     set({ openedAppId: null });
+  },
+
+  setAppRunning: (appId, pid, url) => {
+    set((state) => ({
+      apps: state.apps.map((app) =>
+        app.appId === appId ? { ...app, pid, url } : app
+      ),
+    }));
+  },
+
+  setAppStopped: (appId) => {
+    set((state) => ({
+      apps: state.apps.map((app) =>
+        app.appId === appId ? { ...app, pid: undefined, url: undefined } : app
+      ),
+      openedAppId: state.openedAppId === appId ? null : state.openedAppId,
+    }));
   },
 
   reloadActiveApp: () => {

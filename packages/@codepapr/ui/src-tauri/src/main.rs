@@ -1,24 +1,26 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app_runtime;
 mod browser;
 mod character_card;
 mod db;
-mod git_checkpoint;
+mod git_operations;
 mod lsp;
 mod lsp_fallback;
 mod lsp_managed_tools;
 mod mcp_host;
+mod papr_runtime;
 mod secrets;
 mod shared;
 mod shell;
+mod snapshot;
 mod symbol_provider;
 mod task_queue;
 mod tts;
 mod vault;
 mod web;
 mod workspace_fs;
-mod app_runtime;
 
 #[cfg(test)]
 mod test_helpers;
@@ -325,7 +327,21 @@ fn main() {
             tts::tts_generate_training_data,
             character_card::export_character_card,
             app_runtime::register_app_workspace,
-            app_runtime::unregister_app_workspace
+            app_runtime::unregister_app_workspace,
+            app_runtime::check_port_available,
+            app_runtime::scan_workspace_apps,
+            papr_runtime::app_storage::papr_storage_get,
+            papr_runtime::app_storage::papr_storage_set,
+            papr_runtime::app_storage::papr_storage_delete,
+            papr_runtime::app_storage::papr_storage_keys,
+            papr_runtime::app_storage::papr_get_manifest,
+            papr_runtime::app_storage::papr_agent_run,
+            papr_runtime::services::papr_http_get,
+            papr_runtime::services::papr_http_post,
+            papr_runtime::services::papr_fs_read,
+            papr_runtime::services::papr_fs_write,
+            papr_runtime::services::papr_fs_list,
+            papr_runtime::services::papr_fs_delete
         ])
         .on_window_event(|_, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {

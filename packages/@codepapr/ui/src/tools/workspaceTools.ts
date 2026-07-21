@@ -1629,7 +1629,7 @@ name: 'web_download_file',
   {
     name: 'app_render',
     description:
-      '在右侧"应用"面板中渲染一个交互式 HTML 应用。用于把分析结果、数据可视化、仪表盘、关系图等以完整 HTML 应用形式呈现，而不是 Markdown。HTML 会写入 .CodePapr/apps/<appId>/index.html 并自动在"应用"面板打开。可以内联 CSS 和 JS，可以引用 CDN 上的库（如 D3、ECharts、Mermaid、MapLibre、Three.js）。相同 appId 会覆盖已有应用。',
+      '生成一个交互式 HTML 应用到应用面板。用于数据分析可视化、仪表盘、关系图等。生成的文件写入 .CodePapr/apps/<appId>/ 目录，并自动注册到应用管理面板。相同 appId 会覆盖已有应用。\n\n📦 Papr SDK 可用：生成的 HTML 可通过 window.papr 调用 CodePapr 能力：\n  • papr.db.get(key) / papr.db.set(key, value) — 键值持久化存储\n  • papr.agent.run({agent, task}) — 调用 AI Agent\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 请求\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) — 文件读写（限定 app data 目录）\n  • papr.app.info() — 获取应用信息\n⚠️ 使用前必须在 permissions 参数中声明对应权限（storage:read, storage:write, http:get, http:post, fs:read, fs:write, agent:run:<name>）。',
     parameters: {
       type: 'object',
       properties: {
@@ -1643,11 +1643,63 @@ name: 'web_download_file',
         },
         html: {
           type: 'string',
-          description: '完整 HTML 文档内容。应包含 <!DOCTYPE html>、<html>、<head>、<body>。可以内联 CSS/JS，可以引用 CDN。应用运行在 sandbox 中（allow-scripts），无法访问本地文件系统。',
+          description: '前端 HTML 文档内容（index.html）。可以内联 CSS/JS，可以引用 CDN（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js）。可使用 window.papr SDK 调用 CodePapr 能力（需声明 permissions）。',
+        },
+        permissions: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '可选。应用需要的权限列表。可选值：storage:read, storage:write, http:get, http:post, fs:read, fs:write, llm:chat, agent:run:<agentName>。例如 ["storage:read", "storage:write", "agent:run:assistant"]。',
+        },
+        agents: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Agent 名称（如 assistant）' },
+              model: { type: 'string', description: '模型名（如 deepseek, openai, claude, fast, mentor）' },
+              systemPrompt: { type: 'string', description: '系统提示词' },
+              tools: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Agent 可用的工具白名单。可选：read, grep, list, graph, web_search, web_fetch, write, edit, exec。高危工具（write/edit/exec）需 permissions 中声明 workspace:write/exec。',
+              },
+              maxToolRounds: {
+                type: 'number',
+                description: '最大工具调用轮数，默认 20，上限 50',
+              },
+            },
+            required: ['name'],
+          },
+          description: '可选。应用可调用的 Agent 定义列表。每个 Agent 可在 HTML 中通过 papr.agent.run({agent: name, task}) 调用。',
         },
         icon: {
           type: 'string',
-          description: '可选。应用图标，支持 emoji 或 1-2 个字符的文字。例如：📊、📈、🗺️、DB。',
+          description: '可选。应用图标，支持 emoji 或 1-2 个字符。例如：📊、📈、🗺️。',
+        },
+        files: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              relativePath: { type: 'string', description: '相对于 .CodePapr/apps/<appId>/ 的文件路径。例如：server.js、package.json。' },
+              content: { type: 'string', description: '文件完整内容。' },
+            },
+            required: ['relativePath', 'content'],
+          },
+          description: '可选。额外的后端文件列表（server.js、package.json 等）。每个文件包含 relativePath 和 content。',
+        },
+        command: {
+          type: 'string',
+          description: '可选。后端启动命令名。例如：node。如果提供，应用将具有后端服务，用户可点击"运行"启动。',
+        },
+        args: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '可选。后端启动命令参数。例如：["server.js"]。仅在提供 command 时有效。',
+        },
+        port: {
+          type: 'number',
+          description: '可选。后端服务端口号。例如：3456。如果提供 command，必须同时提供 port。',
         },
       },
       required: ['appId', 'title', 'html'],
@@ -1825,7 +1877,7 @@ export function registerWorkspaceTools(
         isRepo: result.isRepo,
         files: result.entries.map((e) => ({
           path: e.path,
-          oldPath: e.oldPath ?? undefined,
+          originalPath: e.oldPath ?? undefined,
           indexStatus: e.indexStatus,
           worktreeStatus: e.worktreeStatus,
         })),
@@ -1923,6 +1975,12 @@ export function registerWorkspaceTools(
     const title = asString(args.title, 'title');
     const html = asString(args.html, 'html');
     const icon = asOptionalString(args.icon);
+    const command = asOptionalString(args.command);
+    const cmdArgs = asOptionalStringArray(args.args);
+    const port = asOptionalNumber(args.port);
+    const rawFiles = args.files as Array<{ relativePath: string; content: string }> | undefined;
+    const permissions = (args.permissions as string[] | undefined) ?? [];
+    const agents = (args.agents as Array<{name: string; model?: string; systemPrompt?: string; tools?: string[]; maxToolRounds?: number}> | undefined) ?? [];
 
     if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(rawAppId)) {
       throw new Error(
@@ -1934,13 +1992,62 @@ export function registerWorkspaceTools(
       throw new Error(`HTML 内容超过 2MB 上限（当前 ${html.length} 字节），请精简后重试。`);
     }
 
-    const relativePath = `.CodePapr/apps/${rawAppId}/index.html`;
+    if (command && (typeof port !== 'number' || port < 1024 || port > 65535)) {
+      throw new Error(`提供 command 时必须同时提供有效 port（1024-65535）`);
+    }
 
-    const writeResult = await invoke<WriteTextFileResult>('write_text_file', {
+    const manifest = {
+      spec: 'papr/0.1',
+      name: title,
+      version: '0.1.0',
+      entry: 'index.html',
+      permissions,
+      agents: agents.map((a) => ({
+        name: a.name,
+        model: a.model ?? 'deepseek',
+        systemPrompt: a.systemPrompt,
+        ...(a.tools ? { tools: a.tools } : {}),
+        ...(a.maxToolRounds ? { maxToolRounds: a.maxToolRounds } : {}),
+      })),
+    };
+
+    const manifestPath = `.CodePapr/apps/${rawAppId}/manifest.json`;
+    await invoke<WriteTextFileResult>('write_text_file', {
       workspacePath: workspace(),
-      relativePath,
+      relativePath: manifestPath,
+      content: JSON.stringify(manifest, null, 2),
+    });
+
+    const indexRelativePath = `.CodePapr/apps/${rawAppId}/index.html`;
+
+    await invoke<WriteTextFileResult>('write_text_file', {
+      workspacePath: workspace(),
+      relativePath: indexRelativePath,
       content: html,
     });
+
+    let totalBytes = html.length;
+
+    if (rawFiles && rawFiles.length > 0) {
+      for (const file of rawFiles) {
+        if (!file.relativePath || typeof file.relativePath !== 'string') {
+          throw new Error('files 每个元素必须包含 relativePath');
+        }
+        if (!file.content || typeof file.content !== 'string') {
+          throw new Error('files 每个元素必须包含 content');
+        }
+        const filePath = `.CodePapr/apps/${rawAppId}/${file.relativePath}`;
+        if (filePath.includes('..')) {
+          throw new Error(`文件路径不能包含 .. : ${file.relativePath}`);
+        }
+        const writeResult = await invoke<WriteTextFileResult>('write_text_file', {
+          workspacePath: workspace(),
+          relativePath: filePath,
+          content: file.content,
+        });
+        totalBytes += writeResult.bytes;
+      }
+    }
 
     await invoke('register_app_workspace', {
       appId: rawAppId,
@@ -1952,17 +2059,23 @@ export function registerWorkspaceTools(
       title,
       icon,
       html,
-      filePath: relativePath,
+      filePath: indexRelativePath,
+      command: command ?? undefined,
+      args: cmdArgs ?? undefined,
+      port: port ?? undefined,
+      manifestJson: JSON.stringify(manifest),
     });
 
+    const hasBackend = !!command;
     return {
       appId: rawAppId,
       title,
       icon: icon ?? null,
-      filePath: relativePath,
-      bytes: writeResult.bytes,
+      filePath: indexRelativePath,
+      bytes: totalBytes,
       mounted: true,
-      hint: '应用已渲染到右侧"应用"面板。用户可直接交互。如需修改应用，用相同 appId 再次调用 app_render 即可覆盖更新。',
+      hasBackend,
+      ...(hasBackend ? { command, args: cmdArgs, port, hint: '应用已生成并注册后端服务。用户点击"运行"启动后端后，可在管理面板点"打开"查看。后端进程运行在工作区目录下，可直接读写项目文件（如数据库）。' } : { hint: '应用已渲染到应用管理面板。用户可点击"打开"查看。如需修改应用，用相同 appId 再次调用 app_render 即可覆盖更新。' }),
     };
   });
 

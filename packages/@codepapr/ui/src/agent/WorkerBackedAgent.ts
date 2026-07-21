@@ -17,6 +17,8 @@ import type {
   WorkerAgentParameters,
   WorkerAgentRuntimeConfig,
   WorkerAgentSettings,
+  AppAgentPayload,
+  AppAgentResult,
 } from './agentWorkerProtocol';
 
 function resolveWorkerMultimodalEnabled(settings: WorkerAgentSettings, currentModel: string): boolean {
@@ -216,12 +218,24 @@ function reconstructWorkerError(message: {
   return error;
 }
 
+let activeInstance: WorkerBackedAgent | null = null;
+
+export function getActiveAgent(): WorkerBackedAgent | null {
+  return activeInstance;
+}
+
 export class WorkerBackedAgent implements AgentRuntimeHandle {
   private readonly worker: Worker;
   private readonly logStore: AppendOnlyLog;
   private readonly toolDefinitions: IToolDefinition[];
   private readonly toolExecutor: WorkerToolExecutor;
   private readonly pendingRequests = new Map<string, PendingWorkerRequest>();
+  private readonly appAgentRequests = new Map<string, {
+    resolve: (result: AppAgentResult) => void;
+    reject: (error: Error) => void;
+    timeoutTimer: ReturnType<typeof setTimeout> | null;
+    onStream?: (event: IChatStreamEvent) => void;
+  }>();
   private readonly pendingFetchControllers = new Map<string, AbortController>();
   private activeRequestId: string | null = null;
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
@@ -229,6 +243,8 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   private snapshotTimerId: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly config: WorkerBackedAgentConfig) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    activeInstance = this;
     this.logStore = new AppendOnlyLog(config.sessionId);
     if (config.initialMessages.length > 0) {
       this.logStore.loadFromSnapshot({
@@ -295,7 +311,11 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.clearCancelTimer();
     this.clearSnapshotTimer();
     this.abortAllPendingFetches();
+    this.rejectAllAppAgentRequests(new Error('Agent was destroyed'));
     this.crashed = true;
+    if (activeInstance === this) {
+      activeInstance = null;
+    }
     try {
       this.worker.terminate();
     } catch {
@@ -352,6 +372,41 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     return response;
   }
 
+  async runAppAgent(
+    payload: AppAgentPayload,
+    onStream?: (event: IChatStreamEvent) => void,
+  ): Promise<AppAgentResult> {
+    if (this.crashed) {
+      throw new WorkerCrashError('Agent worker has crashed. Create a new agent to retry.');
+    }
+    const requestId = createId();
+
+    const result = await new Promise<AppAgentResult>((resolve, reject) => {
+      const timeoutTimer = setTimeout(() => {
+        this.appAgentRequests.delete(requestId);
+        reject(new Error('App agent request timed out (300s)'));
+      }, 300_000);
+
+      this.appAgentRequests.set(requestId, { resolve, reject, timeoutTimer, onStream });
+
+      this.worker.postMessage({
+        type: 'run-app-agent',
+        requestId,
+        payload,
+      } satisfies MainToAgentWorkerMessage);
+    });
+
+    return result;
+  }
+
+  private rejectAllAppAgentRequests(error: Error): void {
+    for (const [, entry] of this.appAgentRequests) {
+      if (entry.timeoutTimer !== null) clearTimeout(entry.timeoutTimer);
+      entry.reject(error);
+    }
+    this.appAgentRequests.clear();
+  }
+
   private readonly handleWorkerMessage = (event: MessageEvent<AgentWorkerToMainMessage>) => {
     const message = event.data;
 
@@ -381,6 +436,38 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         } catch {
           // already aborted
         }
+      }
+      return;
+    }
+
+    if (message.type === 'app-agent-stream') {
+      const entry = this.appAgentRequests.get(message.requestId);
+      if (entry?.onStream) {
+        entry.onStream(message.event);
+      }
+      return;
+    }
+
+    if (message.type === 'app-agent-result') {
+      const entry = this.appAgentRequests.get(message.requestId);
+      if (entry) {
+        if (entry.timeoutTimer !== null) clearTimeout(entry.timeoutTimer);
+        this.appAgentRequests.delete(message.requestId);
+        entry.resolve({
+          content: message.content,
+          reasoningContent: message.reasoningContent,
+          steps: message.steps,
+        });
+      }
+      return;
+    }
+
+    if (message.type === 'app-agent-error') {
+      const entry = this.appAgentRequests.get(message.requestId);
+      if (entry) {
+        if (entry.timeoutTimer !== null) clearTimeout(entry.timeoutTimer);
+        this.appAgentRequests.delete(message.requestId);
+        entry.reject(new Error(message.error));
       }
       return;
     }
@@ -535,6 +622,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     if (this.crashed) return;
     this.crashed = true;
     this.clearSnapshotTimer();
+    this.rejectAllAppAgentRequests(new WorkerCrashError(message, detail));
 
     const error = new WorkerCrashError(message, detail);
     for (const [requestId, pending] of this.pendingRequests) {

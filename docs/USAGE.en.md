@@ -22,9 +22,84 @@
 | **Ask** | Explanation, analysis, suggestions | Read-only; no file modifications or command execution |
 | **Plan** | Complex task decomposition | Output a plan with options, execute after confirmation |
 | **Agent** | Bug fixes, feature implementation | Autonomous execution: search → modify → verify |
-| **App** | Data visualization, exploration | Instantly generates interactive HTML apps; supports D3/ECharts/Mermaid libraries |
+| **App** | Data visualization, interactive apps | Instantly generates interactive HTML apps; supports Papr SDK (`window.papr`) for Agent/storage/HTTP/filesystem |
 
 In Plan mode, when requirements are ambiguous, the Agent will call the `question` tool to ask you instead of guessing.
+
+## Papr App Development
+
+Papr is CodePapr's application runtime. AI-generated apps run directly in the desktop client, using the SDK to call CodePapr capabilities.
+
+### .papr Format
+
+An app is two files under `.CodePapr/apps/<appId>/`:
+
+```
+.CodePapr/apps/my-app/
+├── manifest.json     ← Metadata + permissions + agents
+└── index.html        ← Entry HTML
+```
+
+manifest.json example:
+
+```json
+{
+  "spec": "papr/0.1",
+  "name": "Todo App",
+  "version": "0.1.0",
+  "permissions": ["storage:read", "storage:write", "agent:run:assistant"],
+  "agents": [{
+    "name": "assistant",
+    "model": "deepseek",
+    "systemPrompt": "You are a task assistant",
+    "tools": ["read", "web_search"],
+    "maxToolRounds": 20
+  }]
+}
+```
+
+### Papr SDK API
+
+`window.papr` is auto-injected into the HTML — no manual import needed:
+
+```javascript
+// Key-value storage (per-app isolation, persisted to SQLite)
+await papr.db.set('theme', 'dark');
+const theme = await papr.db.get('theme');
+
+// AI Agent invocation (with progress callback)
+const result = await papr.agent.run(
+  { agent: 'assistant', task: 'Analyze the data' },
+  (event) => { console.log(event.type); }
+);
+// → { content: "...", steps: [{name:'read', status:'success'}, ...] }
+
+// HTTP requests
+const data = await papr.http.get('https://api.example.com/data');
+
+// File I/O (restricted to app data directory)
+await papr.fs.writeFile('config.json', JSON.stringify(config));
+const files = await papr.fs.list();
+```
+
+### Creating Apps
+
+Switch to **App mode** and describe the app you want in natural language. The Agent calls `app_render` to generate a complete manifest.json and index.html. Same appId updates in place.
+
+### Permissions
+
+Apps must declare required permissions:
+
+| Permission | Capability |
+|---|---|
+| `storage:read/write` | `papr.db` key-value storage |
+| `http:get/post` | `papr.http` HTTP requests |
+| `fs:read/write` | `papr.fs` file I/O |
+| `llm:chat` | Direct LLM calls |
+| `workspace:read/write/exec` | Agent tools: read/write workspace files, execute commands |
+| `agent:run:<name>` | Invoke a specific agent |
+
+Agent tool whitelist (declare in `agents[].tools`): `read`, `grep`, `list`, `graph`, `web_search`, `web_fetch`, `write`, `edit`, `exec`.
 
 ## Configuration
 
@@ -319,6 +394,7 @@ If the Agent goes off track, hover the previous correct user message and click "
 | `<workspace>/.CodePapr/skills` | Project-level skill files |
 | `<workspace>/.CodePapr/agents` | Project-level custom sub-agents |
 | `<workspace>/.CodePapr/commands` | Project-level custom commands |
+| `<workspace>/.CodePapr/apps` | Papr app directory (one subdirectory per app) |
 | `~/.codepapr/voices` | Character reference audio files |
 | `~/.codepapr/gpt-sovits` | GPT-SoVITS installation and models |
 

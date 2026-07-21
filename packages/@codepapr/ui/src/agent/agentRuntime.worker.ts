@@ -32,13 +32,14 @@ import {
   CacheValidator,
   setGlobalFetchFn,
 } from '@codepapr/api';
-import type { IChatRequest, IChatResponse, ICacheStatistics, IMessage, ILLMProvider } from '@codepapr/types';
+import type { IChatRequest, IChatResponse, ICacheStatistics, IMessage, ILLMProvider, IToolDefinition } from '@codepapr/types';
 import type {
   AgentWorkerChatPayload,
   AgentWorkerToMainMessage,
   MainToAgentWorkerMessage,
   WorkerAgentSettings,
   WorkerApiFormat,
+  AppAgentPayload,
 } from './agentWorkerProtocol';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -69,6 +70,10 @@ let nextFetchId = 0;
 
 const TOOL_IPC_TIMEOUT_MS = 120_000;
 const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 300_000;
+
+let cachedSettings: WorkerAgentSettings | null = null;
+let cachedToolDefinitions: IToolDefinition[] = [];
+let cachedWorkspacePath = '';
 
 interface PendingFetch {
   resolve: (response: Response) => void;
@@ -724,7 +729,138 @@ function buildPruneOptions(s: WorkerAgentSettings): PruneOptions {
   };
 }
 
+async function handleRunAppAgent(
+  payload: AppAgentPayload,
+  requestId: string
+): Promise<void> {
+  if (!cachedSettings) {
+    postMessageToMain({
+      type: 'app-agent-error',
+      requestId,
+      error: 'No LLM settings available. Open a chat session first.',
+    });
+    return;
+  }
+
+  const ALLOWED = new Set(['read', 'grep', 'list', 'graph', 'lsp', 'diagnostics', 'read_image', 'web_search', 'web_fetch', 'web_download', 'write', 'edit', 'patch', 'exec', 'shell']);
+  const requestedTools = payload.tools ?? [];
+
+  const registry = new ToolRegistry();
+  for (const tool of cachedToolDefinitions) {
+    if (!ALLOWED.has(tool.name)) continue;
+    if (tool.name === 'task') continue;
+    if (requestedTools.length > 0 && !requestedTools.includes(tool.name)) continue;
+
+    registry.register(tool, async (args) => {
+      return await requestToolExecution(
+        requestId, tool.name, args, TOOL_IPC_TIMEOUT_MS
+      );
+    });
+  }
+
+  let systemPrompt = payload.systemPrompt || 'You are a helpful assistant.';
+  const workspacePath = payload.workspacePath || cachedWorkspacePath;
+
+  if (workspacePath) {
+    const enrichedPrompt = buildRuntimeSystemPrompt({
+      mode: 'agent',
+      workspacePath,
+      lang: cachedSettings.lang,
+      extraSections: [systemPrompt],
+      toolNames: registry.getAll().map(t => t.name),
+      subagent: true,
+    });
+    if (enrichedPrompt.trim()) {
+      systemPrompt = enrichedPrompt;
+    }
+  }
+
+  const model = payload.model || cachedSettings.model || 'deepseek-chat';
+  const provider = buildProvider(cachedSettings);
+  const maxToolRounds = Math.min(payload.maxToolRounds ?? 20, 50);
+
+  const log = new AppendOnlyLog(`app-agent-${payload.appId}-${Date.now()}`);
+  await log.append({
+    id: `app-agent-user-${Date.now()}`,
+    role: 'user',
+    content: payload.task,
+    timestamp: Date.now(),
+  } as unknown as IMessage);
+
+  const prefix = new ImmutablePrefix({
+    systemPrompt,
+    tools: registry.getAll(),
+    model,
+    parameters: {
+      temperature: 0.5,
+      topP: 0.9,
+      maxTokens: cachedSettings.maxTokens,
+      thinkingEnabled: false,
+    },
+  });
+
+  const session = new Session({
+    sessionId: `app-agent-${payload.appId}-${Date.now()}`,
+    prefix,
+    toolRegistry: registry,
+    log,
+  });
+
+  const agent = new Agent({
+    session,
+    provider,
+    providerName: cachedSettings.provider,
+    requestBuilder: new RequestBuilder(),
+    cacheValidator: new CacheValidator(),
+    maxToolRounds,
+    toolTimeouts: { graph: cachedSettings.graphToolTimeoutMs },
+    toolOutputTruncation: buildToolOutputTruncation(cachedSettings),
+    pruneOptions: buildPruneOptions(cachedSettings),
+  });
+
+  const steps: Array<{ name: string; status: string; summary?: string }> = [];
+
+  try {
+    const response = await withWallClockTimeout(
+      agent,
+      () => agent.chat(payload.task, (event) => {
+        postMessageToMain({
+          type: 'app-agent-stream',
+          requestId,
+          event,
+        });
+        if (event.type === 'tool-call-end') {
+          steps.push({
+            name: event.toolName,
+            status: event.success ? 'success' : 'error',
+            summary: event.error || event.toolName,
+          });
+        }
+      }),
+      300_000
+    );
+
+    postMessageToMain({
+      type: 'app-agent-result',
+      requestId,
+      content: response.content,
+      reasoningContent: response.reasoningContent,
+      steps,
+    });
+  } catch (error) {
+    postMessageToMain({
+      type: 'app-agent-error',
+      requestId,
+      error: error instanceof Error ? error.message : String(error),
+      errorName: error instanceof Error ? error.name : undefined,
+    });
+  }
+}
+
 async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
+  cachedSettings = payload.settings;
+  cachedToolDefinitions = payload.toolDefinitions;
+  cachedWorkspacePath = payload.workspacePath;
   const abortController = new AbortController();
   sessionAbortControllers.set(payload.requestId, abortController);
 
@@ -893,6 +1029,18 @@ self.onmessage = (event: MessageEvent<MainToAgentWorkerMessage>) => {
 
   if (message.type === 'fetch-response-error') {
     finalizePendingFetch(message.fetchId, 'error', new Error(message.error));
+    return;
+  }
+
+  if (message.type === 'run-app-agent') {
+    void handleRunAppAgent(message.payload, message.requestId).catch((error) => {
+      postMessageToMain({
+        type: 'app-agent-error',
+        requestId: message.requestId,
+        error: error instanceof Error ? error.message : String(error),
+        errorName: error instanceof Error ? error.name : undefined,
+      });
+    });
     return;
   }
 

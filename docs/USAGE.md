@@ -22,9 +22,84 @@
 | **Ask** | 解释、分析、建议 | 只读，不改文件不跑命令 |
 | **Plan** | 复杂任务拆解 | 先出方案和可选项，确认后执行 |
 | **Agent** | Bug 修复、功能实现 | 自主执行：搜索→修改→验证 |
-| **App** | 数据可视化、探索 | 即时生成交互式 HTML 应用；支持 D3/ECharts/Mermaid 等图表库 |
+| **App** | 数据可视化、交互应用 | 即时生成交互式 HTML 应用；支持 Papr SDK（`window.papr`）调用 Agent/存储/HTTP/文件系统 |
 
 Plan 模式下，当需求模糊时 Agent 会调用 `question` 工具向你提问，而不是猜测。
+
+## Papr App 开发
+
+Papr 是 CodePapr 的应用运行时。AI 生成的 App 可以直接在桌面端运行，通过 SDK 调用 CodePapr 的能力。
+
+### .papr 格式
+
+App 是 `.CodePapr/apps/<appId>/` 目录下的两个文件：
+
+```
+.CodePapr/apps/my-app/
+├── manifest.json     ← 元数据 + 权限 + Agent
+└── index.html        ← 入口 HTML
+```
+
+manifest.json 示例：
+
+```json
+{
+  "spec": "papr/0.1",
+  "name": "Todo App",
+  "version": "0.1.0",
+  "permissions": ["storage:read", "storage:write", "agent:run:assistant"],
+  "agents": [{
+    "name": "assistant",
+    "model": "deepseek",
+    "systemPrompt": "你是一个任务管理助手",
+    "tools": ["read", "web_search"],
+    "maxToolRounds": 20
+  }]
+}
+```
+
+### Papr SDK API
+
+HTML 中自动注入 `window.papr`，无需手动引入：
+
+```javascript
+// 键值存储（按 app 隔离，持久化到 SQLite）
+await papr.db.set('theme', 'dark');
+const theme = await papr.db.get('theme');
+
+// AI Agent 调用（带进度回调）
+const result = await papr.agent.run(
+  { agent: 'assistant', task: '分析数据' },
+  (event) => { console.log(event.type); }
+);
+// → { content: "...", steps: [{name:'read', status:'success'}, ...] }
+
+// HTTP 请求
+const data = await papr.http.get('https://api.example.com/data');
+
+// 文件读写（限定 app data 目录）
+await papr.fs.writeFile('config.json', JSON.stringify(config));
+const files = await papr.fs.list();
+```
+
+### 创建 App
+
+切换 **App 模式**，用自然语言描述想要的 App。Agent 会自动调用 `app_render` 工具生成完整的 manifest.json 和 index.html，注册到应用面板。相同 appId 再次调用会覆盖更新。
+
+### 权限
+
+App 需要声明所需权限：
+
+| 权限 | 能力 |
+|---|---|
+| `storage:read/write` | `papr.db` 键值存储 |
+| `http:get/post` | `papr.http` HTTP 请求 |
+| `fs:read/write` | `papr.fs` 文件读写 |
+| `llm:chat` | 直接 LLM 调用 |
+| `workspace:read/write/exec` | Agent 工具：读写工作区文件、执行命令 |
+| `agent:run:<name>` | 调用指定 Agent |
+
+Agent 工具白名单（在 `agents[].tools` 声明）：`read`、`grep`、`list`、`graph`、`web_search`、`web_fetch`、`write`、`edit`、`exec`。
 
 ## 配置
 
@@ -359,6 +434,7 @@ CLI 的读取路径边界相对宽松（可读取任意绝对路径），写入�
 | `<workspace>/.CodePapr/skills` | 项目级技能文件 |
 | `<workspace>/.CodePapr/agents` | 项目级自定义子代理 |
 | `<workspace>/.CodePapr/commands` | 项目级自定义命令 |
+| `<workspace>/.CodePapr/apps` | Papr App 目录（每个子目录 = 一个 app） |
 | `~/.codepapr/voices` | 角色参考音频文件 |
 | `~/.codepapr/gpt-sovits` | GPT-SoVITS 安装与模型 |
 

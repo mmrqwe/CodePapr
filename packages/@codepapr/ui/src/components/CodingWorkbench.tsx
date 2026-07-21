@@ -34,6 +34,7 @@ import {
 import { type GitFileSelection } from '../utils/workspaceGitPanel';
 import { clearLanguageIntelligenceWorkspace } from '../utils/languageIntelligence';
 import type { PreviewLocation } from '../utils/projectDiagnosticLocations';
+import { hasAnyProjectMapCandidate } from '../tools/workspaceToolUtils';
 
 interface FileEntry {
   path: string;
@@ -232,6 +233,7 @@ export function CodingWorkbench({
   const workspaceSwitchingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isInitialGraphLoadRef = useRef(true);
   const graphLoadStartedRef = useRef(false);
+  const projectGraphLoadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isInitialGraphPreload, setIsInitialGraphPreload] = useState(false);
 
   useEffect(() => {
@@ -448,20 +450,37 @@ export function CodingWorkbench({
     }
   }, [workspacePath]);
 
-  const canStartProjectGraph = !isLoadingTree && entries.length > 0 && !!workspacePath;
+  const canStartProjectGraph = !isLoadingTree && hasAnyProjectMapCandidate(entries) && !!workspacePath;
 
   useEffect(() => {
     if (canStartProjectGraph && isInitialGraphLoadRef.current) {
       setIsInitialGraphPreload(true);
       graphLoadStartedRef.current = true;
       useAgentStore.getState().setProjectGraphLoading(true);
+
+      // 安全超时：如果 15 秒内 handleProjectGraphProgress 没有回调 false，
+      // 强制关闭 loading 浮层，防止 UI 永久卡住。
+      if (projectGraphLoadTimeoutRef.current) {
+        clearTimeout(projectGraphLoadTimeoutRef.current);
+      }
+      projectGraphLoadTimeoutRef.current = setTimeout(() => {
+        if (useAgentStore.getState().projectGraphLoading) {
+          console.warn('[CodePapr] projectGraphLoading 超时 15s，强制关闭');
+          isInitialGraphLoadRef.current = false;
+          graphLoadStartedRef.current = false;
+          setIsInitialGraphPreload(false);
+          useAgentStore.getState().setProjectGraphLoading(false);
+        }
+      }, 15_000);
     } else if (!canStartProjectGraph && graphLoadStartedRef.current) {
-      // 不再满足加载条件（如切换到空项目/关闭项目）时，主动关闭 loading 并重置 refs，
-      // 避免 store 中的 projectGraphLoading 卡在 true。
       graphLoadStartedRef.current = false;
       isInitialGraphLoadRef.current = false;
       setIsInitialGraphPreload(false);
       useAgentStore.getState().setProjectGraphLoading(false);
+      if (projectGraphLoadTimeoutRef.current) {
+        clearTimeout(projectGraphLoadTimeoutRef.current);
+        projectGraphLoadTimeoutRef.current = null;
+      }
     }
   }, [canStartProjectGraph]);
 

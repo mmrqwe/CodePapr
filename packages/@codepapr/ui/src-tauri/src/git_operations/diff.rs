@@ -75,8 +75,8 @@ pub fn git_diff_impl(
             delta.old_file().path().map(|p| p.to_string_lossy().to_string())
         } else { None };
         let (additions, deletions) = if let Ok(Some(patch)) = git2::Patch::from_diff(&diff, i) {
-            let (a, _d2, d) = patch.line_stats().unwrap_or((0, 0, 0));
-            (a, d)
+            let (_context, additions, deletions) = patch.line_stats().unwrap_or((0, 0, 0));
+            (additions, deletions)
         } else { (0, 0) };
 
         stat.push_str(&format!(" {} | {} +{} -{}\n", path, status, additions, deletions));
@@ -106,8 +106,8 @@ pub fn git_diff_impl(
             delta.old_file().path().map(|p| p.to_string_lossy().to_string())
         } else { None };
         let (additions, deletions) = if let Ok(Some(patch)) = git2::Patch::from_diff(&diff, i) {
-            let (a, _d2, d) = patch.line_stats().unwrap_or((0, 0, 0));
-            (a, d)
+            let (_context, additions, deletions) = patch.line_stats().unwrap_or((0, 0, 0));
+            (additions, deletions)
         } else { (0, 0) };
         files.push(FileDiff { path, old_path, status, additions, deletions, patch: None });
     }
@@ -130,4 +130,93 @@ pub async fn git_diff(
 ) -> GitDiffResult {
     let workspace = std::path::PathBuf::from(workspace_path);
     git_diff_impl(&workspace, staged.unwrap_or(false), &pathspecs.unwrap_or_default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::snapshot::SnapshotEngine;
+    use std::fs;
+
+    fn temp_workspace(label: &str) -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        let unique = format!(
+            "codepapr-git-diff-{label}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        path.push(unique);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    /// 回归 #1：line_stats() 返回 (context, additions, deletions)，
+    /// 之前代码把 context 当 additions 返回。这里用真实 diff 验证 additions 计数正确。
+    #[test]
+    fn test_diff_line_stats_additions_deletions() {
+        let workspace = temp_workspace("stats");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        // 基线快照：a.txt 3 行，b.txt 1 行。
+        // engine.create 会 stage 所有文件并提交，提交后 index 持有基线内容。
+        fs::write(workspace.join("a.txt"), "line1\nline2\nline3\n").unwrap();
+        fs::write(workspace.join("b.txt"), "to-remove\n").unwrap();
+        engine.create("baseline").expect("create baseline");
+
+        // 在工作区修改 a.txt（+2 行，不删除旧行），删除 b.txt。
+        // 不再 engine.create，让 index 保留基线，这样 unstaged diff (index vs workdir)
+        // 才能看到 a.txt 的修改和 b.txt 的删除。
+        fs::write(
+            workspace.join("a.txt"),
+            "line1\nline2\nline3\nadded1\nadded2\n",
+        )
+        .unwrap();
+        fs::remove_file(workspace.join("b.txt")).unwrap();
+
+        let result = git_diff_impl(&workspace, false, &[]);
+        assert!(result.available, "diff should be available");
+
+        // a.txt 修改：additions=2, deletions=0
+        let a_entry = result.files.iter().find(|f| f.path == "a.txt");
+        assert!(a_entry.is_some(), "a.txt should appear in diff");
+        let a_entry = a_entry.unwrap();
+        assert_eq!(
+            a_entry.additions, 2,
+            "a.txt additions should be 2 (got {} - line_stats bug regression?)",
+            a_entry.additions
+        );
+        assert_eq!(a_entry.deletions, 0, "a.txt deletions should be 0");
+
+        // b.txt 被删除：additions=0, deletions=1
+        let b_entry = result.files.iter().find(|f| f.path == "b.txt");
+        assert!(b_entry.is_some(), "b.txt should appear in diff");
+        let b_entry = b_entry.unwrap();
+        assert_eq!(b_entry.additions, 0, "b.txt additions should be 0");
+        assert_eq!(b_entry.deletions, 1, "b.txt deletions should be 1");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    /// 验证 staged=true 走 HEAD→index 路径不 panic，且返回结构完整。
+    #[test]
+    fn test_diff_staged_mode_smoke() {
+        let workspace = temp_workspace("staged");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+        fs::write(workspace.join("x.txt"), "hello\n").unwrap();
+        engine.create("baseline").expect("baseline");
+
+        fs::write(workspace.join("x.txt"), "hello world\n").unwrap();
+        // stage_all 路径
+        super::super::stage::git_stage_impl(&workspace, true, &[]);
+
+        let result = git_diff_impl(&workspace, true, &[]);
+        assert!(result.available, "staged diff should be available");
+        assert!(result.files.iter().any(|f| f.path == "x.txt"));
+
+        fs::remove_dir_all(&workspace).ok();
+    }
 }

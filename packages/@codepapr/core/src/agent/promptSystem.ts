@@ -147,6 +147,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '',
       '## HTML 应用规范',
       '- 生成带有内联 CSS 和 JS 的完整 HTML 文档（<!DOCTYPE html><html><head>...</head><body>...</body></html>）。',
+      '- 如需后端服务（读写项目文件、查询数据库等），同时提供 command/args/port 参数和 files 数组（包含 server.js 等后端文件）。后端进程运行在工作区目录下，可直接通过相对路径访问项目文件（如 SQLite 数据库）。',
       '- 优先使用单文件内联方式，不需要组件拆分或构建系统。',
       '- 如需图表、地图、图形库，通过 CDN 在 <script> 中引用（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js 等）。',
       '- 应用运行在独立 origin 的沙箱 iframe 中——fetch() 跨域请求和 CDN 资源加载均正常工作。',
@@ -192,6 +193,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '',
       '## HTML 應用規範',
       '- 生成帶有內聯 CSS 和 JS 的完整 HTML 文件（<!DOCTYPE html><html><head>...</head><body>...</body></html>）。',
+      '- 如需後端服務（讀寫專案檔案、查詢資料庫等），同時提供 command/args/port 參數和 files 陣列（包含 server.js 等後端檔案）。後端行程運行在工作區目錄下，可直接通過相對路徑存取專案檔案（如 SQLite 資料庫）。',
       '- 優先使用單文件內聯方式，不需要組件拆分或構建系統。',
       '- 如需圖表、地圖、圖形庫，通過 CDN 在 <script> 中引用（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js 等）。',
       '- 應用運行在獨立 origin 的沙箱 iframe 中——fetch() 跨域請求與 CDN 資源載入均正常工作。',
@@ -237,6 +239,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '',
       '## HTML App Guidelines',
       '- Generate a complete HTML document with inline CSS and JS (<!DOCTYPE html><html><head>...</head><body>...</body></html>).',
+      '- For backend services (reading/writing project files, querying databases, etc.), provide command/args/port params and a files array containing backend files like server.js. The backend process runs in the workspace directory and can access project files via relative paths (e.g. SQLite databases).',
       '- Prefer single-file inline approach — no component splitting or build systems.',
       '- For charts, maps, and visualization libraries, reference them via CDN in <script> tags (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js, etc.).',
       '- Apps run in a sandboxed iframe with an independent origin — fetch() cross-origin requests and CDN resource loading work normally.',
@@ -653,10 +656,10 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
     if (isApp) {
       appRender.push(
         lang === 'en'
-          ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps to the application panel. Call this after writing HTML with workspace_write_file to `.CodePapr/apps/<appId>/index.html`. appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. The HTML runs in a sandboxed iframe with its own origin — use CDN for libraries (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js) and fetch() for data APIs.'
+          ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps to the application panel. Call this after writing HTML with workspace_write_file to `.CodePapr/apps/<appId>/index.html`. appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. The HTML runs in a sandboxed iframe with its own origin — use CDN for libraries (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js) and fetch() for data APIs.\n\n📦 Papr SDK (available in your HTML via window.papr):\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — persistent key-value storage\n  • papr.agent.run({agent, task}) — invoke an AI agent (define agents in the agents parameter)\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP requests\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — file I/O in app data directory\n  • papr.app.info() — get app metadata\n⚠️ Declare permissions in the permissions parameter for each SDK feature used (storage:read, storage:write, http:get, http:post, fs:read, fs:write, agent:run:<name>).'
           : lang === 'zh-TW'
-          ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用渲染到應用面板。先用 workspace_write_file 將 HTML 寫入 `.CodePapr/apps/<appId>/index.html`，再調用此工具。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。HTML 在具有獨立 origin 的沙箱 iframe 中運行——通過 CDN 引用函式庫，支援 fetch() 存取資料 API。'
-          : '- [app_render] 你的主要输出工具。将交互式 HTML 应用渲染到应用面板。先用 workspace_write_file 将 HTML 写入 `.CodePapr/apps/<appId>/index.html`，再调用此工具。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。HTML 在具有独立 origin 的沙箱 iframe 中运行——通过 CDN 引用库，支持 fetch() 访问数据 API。'
+          ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用渲染到應用面板。先用 workspace_write_file 將 HTML 寫入 `.CodePapr/apps/<appId>/index.html`，再調用此工具。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。HTML 在具有獨立 origin 的沙箱 iframe 中運行——通過 CDN 引用函式庫，支援 fetch() 存取資料 API。\n\n📦 Papr SDK（在 HTML 中可通過 window.papr 使用）：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 鍵值持久化存儲\n  • papr.agent.run({agent, task}) — 調用 AI Agent（在 agents 參數中定義）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 請求\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — app data 目錄內的檔案讀寫\n  • papr.app.info() — 獲取應用資訊\n⚠️ 使用前必須在 permissions 參數中聲明對應權限（storage:read, storage:write, http:get, http:post, fs:read, fs:write, agent:run:<name>）。'
+          : '- [app_render] 你的主要输出工具。将交互式 HTML 应用渲染到应用面板。先用 workspace_write_file 将 HTML 写入 `.CodePapr/apps/<appId>/index.html`，再调用此工具。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。HTML 在具有独立 origin 的沙箱 iframe 中运行——通过 CDN 引用库，支持 fetch() 访问数据 API。\n\n📦 Papr SDK（在 HTML 中可通过 window.papr 使用）：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 键值持久化存储\n  • papr.agent.run({agent, task}, onProgress?) — 调用 AI Agent（在 agents 参数中定义，可声明 tools 和 maxToolRounds）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 请求\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — app data 目录内的文件读写\n  • papr.app.info() — 获取应用信息\n⚠️ 使用前必须在 permissions 参数中声明对应权限（storage:read, storage:write, http:get, http:post, fs:read, fs:write, llm:chat, workspace:read, workspace:write, workspace:exec, agent:run:<name>）。\n🤖 Agent 工具（在 agents[].tools 声明）：read, grep, list, graph, web_search, web_fetch, write, edit, exec。工具运行在 Agent Loop 中，支持多轮调用（maxToolRounds 控制上限）。'
       );
     } else {
       appRender.push(

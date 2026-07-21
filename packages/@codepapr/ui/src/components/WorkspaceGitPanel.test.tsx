@@ -113,6 +113,9 @@ describe('WorkspaceGitPanel', () => {
       }
 
       if (command === 'git_restore_files' || command === 'git_stage' || command === 'git_commit') {
+        if (command === 'git_restore_files' || command === 'git_commit') {
+          gitState = 'committed';
+        }
         return { ok: true, action: 'stage', message: 'ok' };
       }
 
@@ -452,38 +455,34 @@ describe('WorkspaceGitPanel', () => {
     await flushEffects();
     await flushEffects();
 
-    // 一键提交流程：reset HEAD（清空暂存区） → add 选中文件 → commit。
+    // 一键提交流程：git_commit（自动合并 stage + commit）。
     expect(
       invokeMock.mock.calls.some(
         ([command, payload]) =>
-          command === 'run_workspace_command' &&
-          payload?.command === 'git' &&
-          Array.isArray(payload?.args) &&
-          payload.args.join(' ') === 'reset HEAD -- .'
+          command === 'git_commit' &&
+          payload?.message === 'test commit' &&
+          Array.isArray(payload?.pathspecs) &&
+          payload.pathspecs.includes('src/app.ts')
       )
     ).toBe(true);
 
-    // 仅 src/app.ts 被加入暂存区（README.md 被取消勾选）。
+    // README.md 被取消勾选，不在 pathspecs 中。
     expect(
       invokeMock.mock.calls.some(
         ([command, payload]) =>
-          command === 'run_workspace_command' &&
-          payload?.command === 'git' &&
-          Array.isArray(payload?.args) &&
-          payload.args.join(' ') === 'add -A -- src/app.ts'
+          command === 'git_commit' &&
+          Array.isArray(payload?.pathspecs) &&
+          !payload.pathspecs.includes('README.md')
       )
     ).toBe(true);
 
     expect(
       invokeMock.mock.calls.some(
         ([command, payload]) =>
-          command === 'run_workspace_command' &&
-          payload?.command === 'git' &&
-          Array.isArray(payload?.args) &&
-          payload.args.join(' ') === 'commit -m test commit'
+          command === 'git_commit' &&
+          payload?.message === 'test commit'
       )
     ).toBe(true);
-
     expect(container.textContent).toContain('There are no uncommitted changes right now.');
   });
 
@@ -532,11 +531,8 @@ describe('WorkspaceGitPanel', () => {
     expect(
       invokeMock.mock.calls.some(
         ([command, payload]) =>
-          command === 'run_workspace_command' &&
-          payload?.command === 'git' &&
-          Array.isArray(payload?.args) &&
-          payload.args.join(' ') ===
-            'switch -c feature/sandbox aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+          command === 'git_branch_checkout' &&
+          payload?.branchName === 'feature/sandbox'
       )
     ).toBe(true);
     expect(container.textContent).toContain('feature/sandbox');
@@ -584,23 +580,11 @@ describe('WorkspaceGitPanel', () => {
 
     expect(
       invokeMock.mock.calls.some(
-        ([command, payload]) =>
-          command === 'run_workspace_command' &&
-          payload?.command === 'git' &&
-          Array.isArray(payload?.args) &&
-          payload.args[0] === 'stash' &&
-          payload.args[1] === 'push'
+        ([command]) =>
+          command === 'git_restore_files'
       )
     ).toBe(true);
-    expect(
-      invokeMock.mock.calls.some(
-        ([command, payload]) =>
-          command === 'run_workspace_command' &&
-          payload?.command === 'git' &&
-          Array.isArray(payload?.args) &&
-          payload.args.join(' ') === 'restore --source HEAD --staged --worktree -- .'
-      )
-    ).toBe(true);
+    expect(container.textContent).toContain('There are no uncommitted changes right now.');
     expect(container.textContent).toContain('There are no uncommitted changes right now.');
   });
 

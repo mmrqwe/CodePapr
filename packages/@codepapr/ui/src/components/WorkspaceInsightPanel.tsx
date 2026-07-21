@@ -336,7 +336,11 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   useEffect(() => {
     const effectiveLoading = isLoading || prewarming || loadingInProgress;
     if (effectiveLoading) hasSignaledLoadingRef.current = true;
-    if (!effectiveLoading && !hasSignaledLoadingRef.current) return;
+    // 去掉旧 guard `if (!effectiveLoading && !hasSignaledLoadingRef.current) return;`
+    // 该 guard 在 canStartLoading 短暂变 false（文件树刷新等）导致 hasSignaledLoadingRef
+    // 被重置后，会阻止 onProgressChange(null, false) 回调，使 store 中的
+    // projectGraphLoading 永久卡在 true。handleProjectGraphProgress 内部已有
+    // graphLoadStartedRef 保护，不会误触发。
     let progress: ProjectGraphProgressState | null = projectGraphProgress;
     if (!isLoading && !loadingInProgress && prewarming) {
       progress = { phase: 'prewarming-lsp', current: 0, total: 0 };

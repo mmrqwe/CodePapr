@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 use git2::{IndexAddOption, Repository, RepositoryInitOptions, Signature};
-use crate::workspace_fs::should_ignore_dir;
 use super::types::{EnsureResult, SnapshotInfo};
 use super::ignore_resolver::IgnoreResolver;
 
@@ -91,6 +90,16 @@ impl SnapshotEngine {
         let git_path = code_papr_git_path(&self.workspace);
         let dot_git = git_path.join(".git");
 
+        // 清理可能因崩溃遗留的锁文件：
+        // - config.lock: libgit2 写入 config 时创建
+        // - index.lock:  libgit2 写入 index 时创建（stage/commit/snapshot 期间崩溃会残留）
+        for lock_name in &["config.lock", "index.lock"] {
+            let lock_file = dot_git.join(lock_name);
+            if lock_file.exists() {
+                let _ = std::fs::remove_file(&lock_file);
+            }
+        }
+
         if dot_git.is_dir() {
             match Repository::open(&git_path) {
                 Ok(repo) => {
@@ -167,7 +176,7 @@ impl SnapshotEngine {
         let git_path = code_papr_git_path(&self.workspace);
         let repo = Repository::open(&git_path)
             .map_err(|e| format!("open repo: {}", e.message()))?;
-        repo.set_workdir(&self.workspace, false)
+        repo.set_workdir(&self.workspace, true)
             .map_err(|e| format!("set workdir: {}", e.message()))?;
 
         let signature = ensure_signature(&repo)
@@ -280,5 +289,63 @@ impl SnapshotEngine {
         repo.head().ok()
             .and_then(|h| h.target())
             .map(|oid| oid.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn temp_workspace(label: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        let unique = format!("codepapr-snapshot-{label}-{}", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+        path.push(unique);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn test_snapshot_create_and_restore() {
+        let workspace = temp_workspace("smoke");
+        let engine = SnapshotEngine::new(&workspace);
+
+        // 1. Ensure
+        let result = engine.ensure();
+        assert!(result.ready, "ensure should succeed");
+
+        // 2. Create a file and snapshot
+        fs::write(workspace.join("test.txt"), b"hello").unwrap();
+        let cp1 = engine.create("checkpoint #1").expect("create cp1");
+        assert!(cp1.file_count >= 1, "should have files");
+
+        // 3. Modify and snapshot again
+        fs::write(workspace.join("test.txt"), b"modified").unwrap();
+        let cp2 = engine.create("checkpoint #2").expect("create cp2");
+
+        // 4. List
+        let list = engine.list(10);
+        assert!(list.len() >= 2, "should list snapshots");
+
+        // 5. Restore to cp1
+        use crate::snapshot::RestoreEngine;
+        let restore = RestoreEngine::new(&workspace);
+        let plan = restore.plan(&cp1.sha).expect("plan should work");
+        assert!(!plan.target_sha.is_empty());
+
+        let exec = restore.execute(&cp1.sha).expect("execute should work");
+        assert!(exec.ok);
+        assert!(exec.backup_ref.is_some());
+
+        let content = fs::read_to_string(workspace.join("test.txt")).unwrap();
+        assert_eq!(content, "hello", "file should be restored");
+
+        // 6. Undo
+        restore.undo().expect("undo should work");
+        let content2 = fs::read_to_string(workspace.join("test.txt")).unwrap();
+        assert_eq!(content2, "modified", "file should be restored after undo");
+
+        fs::remove_dir_all(&workspace).ok();
     }
 }

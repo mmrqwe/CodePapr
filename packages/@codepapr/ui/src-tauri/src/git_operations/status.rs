@@ -87,3 +87,66 @@ pub async fn git_status(workspace_path: String) -> GitStatusResult {
     let workspace = std::path::PathBuf::from(workspace_path);
     git_status_impl(&workspace)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::snapshot::SnapshotEngine;
+    use std::fs;
+
+    fn temp_workspace(label: &str) -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        let unique = format!(
+            "codepapr-status-{label}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        path.push(unique);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn test_status_reports_untracked_and_modified() {
+        let workspace = temp_workspace("basic");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        fs::write(workspace.join("committed.txt"), "v1\n").unwrap();
+        engine.create("baseline").expect("baseline");
+
+        // 新增未跟踪文件
+        fs::write(workspace.join("new.txt"), "new\n").unwrap();
+        // 修改已提交文件
+        fs::write(workspace.join("committed.txt"), "v2\n").unwrap();
+
+        let result = git_status_impl(&workspace);
+        assert!(result.available, "status should be available");
+        assert!(result.is_repo, "should be a repo");
+
+        let new_entry = result.entries.iter().find(|e| e.path == "new.txt");
+        assert!(new_entry.is_some(), "new.txt 应出现在状态里");
+        let new_entry = new_entry.unwrap();
+        assert!(new_entry.is_untracked, "new.txt 应标记为未跟踪");
+        assert_eq!(new_entry.worktree_status, "?");
+
+        let modified = result.entries.iter().find(|e| e.path == "committed.txt");
+        assert!(modified.is_some(), "committed.txt 应出现在状态里");
+        let modified = modified.unwrap();
+        assert_eq!(modified.worktree_status, "M", "committed.txt 应标记为已修改");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
+    fn test_status_returns_unavailable_when_repo_missing() {
+        let workspace = temp_workspace("no-repo");
+        // 不调用 engine.ensure()，模拟仓库未初始化
+        let result = git_status_impl(&workspace);
+        assert!(!result.available || !result.is_repo, "未初始化时应返回不可用或非 repo");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+}

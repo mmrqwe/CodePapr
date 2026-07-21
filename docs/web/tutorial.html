@@ -704,7 +704,8 @@ https://api.deepseek.com/v1</code></pre>
         <ul>
           <li>单文件内联 HTML——不需要组件拆分或构建系统</li>
           <li>通过 CDN 引用图表库（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js 等）</li>
-          <li>在沙箱 iframe 中运行（<code>sandbox="allow-scripts"</code>），无法访问本地文件系统或 Tauri 内部 API</li>
+          <li>在沙箱 iframe 中运行（<code>sandbox="allow-scripts allow-same-origin"</code>）</li>
+          <li>可使用 <strong>Papr SDK</strong>（<code>window.papr</code>）调用 Agent、存储、HTTP、文件系统</li>
           <li>appId 必须是 kebab-case，相同 appId 再次调用覆盖更新——支持迭代改进</li>
         </ul>
         <p><strong>会话隔离：</strong></p>
@@ -953,7 +954,7 @@ https://api.deepseek.com/v1</code></pre>
         <table>
           <thead><tr><th>工具</th><th>能力</th></tr></thead>
           <tbody>
-            <tr><td><code>app_render</code></td><td>将 HTML 应用渲染到右侧"应用"面板；相同 appId 覆盖更新。与 workspace_write_file 配合使用，先写 HTML 再渲染。HTML 在沙箱 iframe 中运行（allow-scripts），通过 CDN 引用图表库。</td></tr>
+            <tr><td><code>app_render</code></td><td>生成 .papr App 并渲染到应用面板；自动写 manifest.json + index.html。支持声明 permissions（权限）和 agents（AI Agent 定义）。HTML 可使用 <code>window.papr</code> SDK 调用 Agent/存储/HTTP/文件系统能力。相同 appId 覆盖更新。</td></tr>
           </tbody>
         </table>
 

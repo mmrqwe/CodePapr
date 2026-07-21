@@ -354,6 +354,15 @@ function isProjectMapCandidate(entry: WorkspaceListEntry): boolean {
   return stubPatternFamily(entry.path) !== undefined;
 }
 
+/**
+ * 快速判断 entries 中是否存在至少一个源代码文件。
+ * 用于在显示 ProjectGraph 加载浮层之前做预判，避免无源码项目（如纯数据目录）
+ * 也弹出"正在初始化工作区"浮层。
+ */
+export function hasAnyProjectMapCandidate(entries: readonly WorkspaceListEntry[]): boolean {
+  return entries.some(isProjectMapCandidate);
+}
+
 function projectMapPriority(path: string): number {
   const lower = path.toLowerCase();
   let score = lower.split('/').length * 10 + lower.length;

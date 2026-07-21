@@ -81,8 +81,8 @@ impl RestoreEngine {
                 } else { None };
 
                 let (additions, deletions) = if let Ok(Some(patch)) = git2::Patch::from_diff(&diff, i) {
-                    let (a, _d2, d) = patch.line_stats().unwrap_or((0, 0, 0));
-                    (a, d)
+                    let (_context, additions, deletions) = patch.line_stats().unwrap_or((0, 0, 0));
+                    (additions, deletions)
                 } else { (0, 0) };
 
                 if status == "D" {
@@ -129,12 +129,21 @@ impl RestoreEngine {
             .and_then(|h_oid| repo.find_commit(h_oid).ok())
             .and_then(|c| c.tree().ok());
 
-        let files_changed = match &head_tree {
+        let (files_changed, files_deleted) = match &head_tree {
             Some(prev) => {
-                repo.diff_tree_to_tree(Some(prev), Some(&target_tree), None)
-                    .map(|d| d.deltas().count()).unwrap_or(0)
+                let diff = repo.diff_tree_to_tree(Some(prev), Some(&target_tree), None);
+                match diff {
+                    Ok(d) => {
+                        let total = d.deltas().count();
+                        let deleted = d.deltas()
+                            .filter(|delta| delta.status() == git2::Delta::Deleted)
+                            .count();
+                        (total, deleted)
+                    }
+                    Err(_) => (0, 0),
+                }
             }
-            None => target_tree.len(),
+            None => (target_tree.len(), 0),
         };
 
         let mut backup_ref = None;
@@ -160,7 +169,7 @@ impl RestoreEngine {
         Ok(RestoreResult {
             ok: true,
             files_restored: files_changed,
-            files_deleted: 0,
+            files_deleted,
             backup_ref,
             error: None,
         })

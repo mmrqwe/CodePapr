@@ -75,3 +75,79 @@ pub async fn git_stage(
     let workspace = std::path::PathBuf::from(workspace_path);
     git_stage_impl(&workspace, all.unwrap_or(false), &pathspecs.unwrap_or_default())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::snapshot::SnapshotEngine;
+    use std::fs;
+
+    fn temp_workspace(label: &str) -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        let unique = format!(
+            "codepapr-stage-{label}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        path.push(unique);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn test_stage_specific_pathspecs_only_adds_those() {
+        let workspace = temp_workspace("pathspec");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        fs::write(workspace.join("a.txt"), "a\n").unwrap();
+        fs::write(workspace.join("b.txt"), "b\n").unwrap();
+        engine.create("baseline").expect("baseline");
+
+        fs::write(workspace.join("a.txt"), "a-v2\n").unwrap();
+        fs::write(workspace.join("b.txt"), "b-v2\n").unwrap();
+
+        // 只 stage a.txt
+        let result = git_stage_impl(&workspace, false, &["a.txt".to_string()]);
+        assert!(result.ok, "stage should succeed: {}", result.message);
+
+        // 验证 staged diff 里只有 a.txt
+        let diff_result = super::super::diff::git_diff_impl(&workspace, true, &[]);
+        let staged_paths: Vec<&str> = diff_result.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(
+            staged_paths.iter().any(|p| *p == "a.txt"),
+            "a.txt 应该已 staged: {:?}", staged_paths
+        );
+        // b.txt 不应该出现在 staged diff 里（它的改动未 stage）
+        assert!(
+            !staged_paths.iter().any(|p| *p == "b.txt"),
+            "b.txt 不应该 staged: {:?}", staged_paths
+        );
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
+    fn test_stage_all_stages_every_changed_file() {
+        let workspace = temp_workspace("all");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        fs::write(workspace.join("x.txt"), "x\n").unwrap();
+        engine.create("baseline").expect("baseline");
+        fs::write(workspace.join("x.txt"), "x-v2\n").unwrap();
+        fs::write(workspace.join("y.txt"), "y\n").unwrap();
+
+        let result = git_stage_impl(&workspace, true, &[]);
+        assert!(result.ok, "stage_all should succeed: {}", result.message);
+
+        let diff_result = super::super::diff::git_diff_impl(&workspace, true, &[]);
+        let paths: Vec<&str> = diff_result.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.iter().any(|p| *p == "x.txt"), "x.txt 应已 staged");
+        assert!(paths.iter().any(|p| *p == "y.txt"), "y.txt 应已 staged");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+}

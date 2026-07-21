@@ -145,12 +145,34 @@ export type MainToAgentWorkerMessage =
   | {
       type: 'cancel-session';
       requestId: string;
+    }
+  | {
+      type: 'run-app-agent';
+      requestId: string;
+      payload: AppAgentPayload;
     };
 
 export interface AgentWorkerProxyChatConfig {
   apiKey: string;
   baseURL?: string;
   format: WorkerApiFormat;
+}
+
+export interface AppAgentPayload {
+  appId: string;
+  agentName: string;
+  systemPrompt?: string;
+  model?: string;
+  task: string;
+  tools?: string[];
+  maxToolRounds?: number;
+  workspacePath?: string;
+}
+
+export interface AppAgentResult {
+  content: string;
+  reasoningContent?: string;
+  steps?: Array<{ name: string; status: string; summary?: string }>;
 }
 
 export type AgentWorkerToMainMessage =
@@ -207,4 +229,22 @@ export type AgentWorkerToMainMessage =
   | {
       type: 'cancelled';
       requestId: string;
+    }
+  | {
+      type: 'app-agent-result';
+      requestId: string;
+      content: string;
+      reasoningContent?: string;
+      steps?: Array<{ name: string; status: string; summary?: string }>;
+    }
+  | {
+      type: 'app-agent-error';
+      requestId: string;
+      error: string;
+      errorName?: string;
+    }
+  | {
+      type: 'app-agent-stream';
+      requestId: string;
+      event: IChatStreamEvent;
     };

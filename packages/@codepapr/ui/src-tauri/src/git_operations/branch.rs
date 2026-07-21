@@ -2,6 +2,33 @@ use git2::BranchType;
 use crate::snapshot::types::{GitBranch, GitOperationResult};
 use super::open_repo;
 
+/// 校验分支名，与 TS 侧 `assertValidGitBranchName` 对齐，作为纵深防御。
+/// 拒绝：空、`@`、以 `-`/`/` 开头、以 `/`/`.`/`.lock` 结尾、含 `..`/`//`/`@{`/`[`/
+/// 空白/`~^:?*\\`/控制字符。
+fn validate_branch_name(name: &str) -> Result<(), String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("branchName 必须是非空字符串".to_string());
+    }
+    if trimmed == "@"
+        || trimmed.starts_with('-')
+        || trimmed.starts_with('/')
+        || trimmed.ends_with('/')
+        || trimmed.ends_with('.')
+        || trimmed.ends_with(".lock")
+        || trimmed.contains("..")
+        || trimmed.contains("//")
+        || trimmed.contains("@{")
+        || trimmed.contains('[')
+        || trimmed.chars().any(|c| {
+            c.is_whitespace() || "~^:?*\\".contains(c) || (c as u32) < 0x20 || c as u32 == 0x7f
+        })
+    {
+        return Err(format!("非法分支名: {}", name));
+    }
+    Ok(())
+}
+
 pub fn git_branch_list_impl(workspace: &std::path::Path) -> Vec<GitBranch> {
     let repo = match open_repo(workspace) {
         Ok(r) => r,
@@ -34,6 +61,12 @@ pub fn git_branch_checkout_impl(
     create: bool,
     create_if_missing: bool,
 ) -> GitOperationResult {
+    if let Err(e) = validate_branch_name(branch_name) {
+        return GitOperationResult {
+            ok: false, action: "branch_checkout".to_string(), message: e, backup_ref: None,
+        };
+    }
+
     let repo = match open_repo(workspace) {
         Ok(r) => r,
         Err(e) => return GitOperationResult {
@@ -120,4 +153,97 @@ pub async fn git_branch_checkout(
         create.unwrap_or(false),
         create_if_missing.unwrap_or(true),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::snapshot::SnapshotEngine;
+    use std::fs;
+
+    fn temp_workspace(label: &str) -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        let unique = format!(
+            "codepapr-branch-{label}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        path.push(unique);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn test_validate_branch_name_accepts_valid() {
+        assert!(validate_branch_name("main").is_ok());
+        assert!(validate_branch_name("feature/foo").is_ok());
+        assert!(validate_branch_name("release-1.0").is_ok());
+        assert!(validate_branch_name("bugfix/fix-123").is_ok());
+    }
+
+    #[test]
+    fn test_validate_branch_name_rejects_invalid() {
+        // 回归 #8：Tauri 命令缺少分支名校验，恶意/异常 agent 可传特殊字符。
+        assert!(validate_branch_name("").is_err());
+        assert!(validate_branch_name("   ").is_err());
+        assert!(validate_branch_name("@").is_err());
+        assert!(validate_branch_name("-foo").is_err());
+        assert!(validate_branch_name("/foo").is_err());
+        assert!(validate_branch_name("foo/").is_err());
+        assert!(validate_branch_name("foo.").is_err());
+        assert!(validate_branch_name("foo.lock").is_err());
+        assert!(validate_branch_name("foo..bar").is_err());
+        assert!(validate_branch_name("foo//bar").is_err());
+        assert!(validate_branch_name("foo@{bar").is_err());
+        assert!(validate_branch_name("foo[bar").is_err());
+        assert!(validate_branch_name("foo bar").is_err());
+        assert!(validate_branch_name("foo*bar").is_err());
+        assert!(validate_branch_name("foo?bar").is_err());
+        assert!(validate_branch_name("foo\\bar").is_err());
+    }
+
+    /// 回归 #8：调用 git_branch_checkout_impl 时，非法分支名应被拒绝在 Tauri 命令层，
+    /// 不应到达 libgit2。
+    #[test]
+    fn test_branch_checkout_rejects_invalid_name_at_impl_layer() {
+        let workspace = temp_workspace("reject");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        let result = git_branch_checkout_impl(&workspace, "bad name", false, true);
+        assert!(!result.ok, "非法分支名必须被拒绝");
+        assert!(result.message.contains("非法分支名"), "错误消息应说明非法分支名");
+
+        let result = git_branch_checkout_impl(&workspace, "-leading-dash", false, true);
+        assert!(!result.ok, "以 - 开头的分支名必须被拒绝");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
+    fn test_branch_checkout_create_and_switch() {
+        let workspace = temp_workspace("create");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+        fs::write(workspace.join("a.txt"), "a\n").unwrap();
+        engine.create("baseline").expect("baseline");
+
+        let result = git_branch_checkout_impl(
+            &workspace,
+            "feature/test",
+            false,  // 不强制 create
+            true,   // create_if_missing=true
+        );
+        assert!(result.ok, "创建并切换分支应成功: {}", result.message);
+
+        let branches = git_branch_list_impl(&workspace);
+        assert!(
+            branches.iter().any(|b| b.name == "feature/test"),
+            "新分支应在列表中: {:?}", branches.iter().map(|b| &b.name).collect::<Vec<_>>()
+        );
+
+        fs::remove_dir_all(&workspace).ok();
+    }
 }

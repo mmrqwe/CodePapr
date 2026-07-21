@@ -5,7 +5,6 @@ mod restore_engine;
 mod diff_engine;
 
 use std::path::PathBuf;
-use serde::Deserialize;
 
 pub use types::*;
 pub use snapshot_engine::SnapshotEngine;

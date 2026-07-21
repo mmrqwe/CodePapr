@@ -1050,7 +1050,9 @@ function summarizeFileChangeTotals(fileChanges: readonly FileChangeSummary[]): F
 function summarizeGitWorkspace(tools: readonly ExecutedToolSummary[]): GitWorkspaceSummary | undefined {
   for (let index = tools.length - 1; index >= 0; index -= 1) {
     const tool = tools[index];
-    if (tool?.name !== 'git' && tool?.name !== 'workspace_git_status' || !tool.success || !isRecord(tool.result)) {
+    const isGitStatusTool =
+      tool?.name === 'git' || tool?.name === 'workspace_git_status';
+    if (!isGitStatusTool || !tool.success || !isRecord(tool.result)) {
       continue;
     }
 

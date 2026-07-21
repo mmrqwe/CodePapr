@@ -124,6 +124,7 @@ export default function App() {
   const activePreviewSession = usePreviewStore((state) => state.activePreviewSession);
   const openedAppId = useAppRuntimeStore((state) => state.openedAppId);
   const clearApps = useAppRuntimeStore((state) => state.clearApps);
+  const mountApp = useAppRuntimeStore((state) => state.mountApp);
   const t = getTranslation(settings.lang);
   const [isDark, setIsDark] = useState(isDarkTheme);
   const [showCacheStats, setShowCacheStats] = useState(false);
@@ -193,9 +194,42 @@ export default function App() {
     const currentApps = useAppRuntimeStore.getState().apps;
     for (const app of currentApps) {
       invoke('unregister_app_workspace', { appId: app.appId }).catch(() => {});
+      if (app.pid) {
+        invoke('stop_background_process', { pid: app.pid }).catch(() => {});
+      }
     }
     clearApps();
-  }, [workspacePath, clearApps]);
+
+    // 扫描 .CodePapr/apps/ 目录，恢复之前创建的应用。
+    // 应用文件持久化在磁盘上，但注册信息（内存 map + store）在进程重启后丢失，
+    // 因此需要在 workspace 打开时重新注册。
+    if (workspacePath) {
+      void (async () => {
+        try {
+          const discovered = await invoke<Array<{ app_id: string; title: string; html: string; manifest_json: string | null }>>(
+            'scan_workspace_apps',
+            { workspacePath },
+          );
+          for (const app of discovered) {
+            if (useAgentStore.getState().workspacePath !== workspacePath) return;
+            await invoke('register_app_workspace', {
+              appId: app.app_id,
+              workspacePath,
+            }).catch(() => {});
+            mountApp({
+              appId: app.app_id,
+              title: app.title || app.app_id,
+              html: app.html,
+              filePath: `.CodePapr/apps/${app.app_id}/index.html`,
+              manifestJson: app.manifest_json ?? undefined,
+            });
+          }
+        } catch {
+          // 扫描失败不影响正常使用
+        }
+      })();
+    }
+  }, [workspacePath, clearApps, mountApp]);
 
   useEffect(() => {
     if (!settings.debugEnabled) {

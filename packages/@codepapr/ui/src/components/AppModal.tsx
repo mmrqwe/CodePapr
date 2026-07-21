@@ -1,7 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
+import { invoke } from '@tauri-apps/api/core';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
+import type { PaprManifest } from '@codepapr/types';
+import { usePaprBridge } from '../papr/usePaprBridge';
 
 interface AppModalProps {
   lang?: Lang;
@@ -12,21 +15,51 @@ export function AppModal({ lang }: AppModalProps) {
   const openedAppId = useAppRuntimeStore((state) => state.openedAppId);
   const apps = useAppRuntimeStore((state) => state.apps);
   const closeAppModal = useAppRuntimeStore((state) => state.closeAppModal);
+  const setAppStopped = useAppRuntimeStore((state) => state.setAppStopped);
   const reloadActiveApp = useAppRuntimeStore((state) => state.reloadActiveApp);
   const [error, setError] = useState('');
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const openedApp = useMemo(
     () => apps.find((app) => app.appId === openedAppId) ?? null,
     [apps, openedAppId]
   );
 
+  const manifest: PaprManifest | null = useMemo(() => {
+    if (!openedApp?.manifestJson) return null;
+    try {
+      return JSON.parse(openedApp.manifestJson) as PaprManifest;
+    } catch {
+      return null;
+    }
+  }, [openedApp?.manifestJson]);
+
+  usePaprBridge({
+    iframeRef,
+    appId: openedApp?.appId ?? '',
+    manifest,
+  });
+
+  const handleCloseAndStop = useCallback(async () => {
+    if (openedApp?.pid) {
+      try { await invoke('stop_background_process', { pid: openedApp.pid }); } catch { /* best-effort */ }
+      setAppStopped(openedApp.appId);
+    } else {
+      closeAppModal();
+    }
+  }, [openedApp, closeAppModal, setAppStopped]);
+
   if (!openedApp) {
     return null;
   }
 
+  const iframeSrc = openedApp.url
+    ? openedApp.url
+    : `codepapr-app://localhost/${openedApp.appId}/index.html`;
+
   return (
-    <div className="absolute inset-0 z-40 flex items-center justify-center bg-[#07090d]/70 p-6 backdrop-blur-sm">
-      <div className="flex h-full max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#0f1117] shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#07090d]/70 p-6 backdrop-blur-sm">
+      <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#0f1117] shadow-[0_24px_90px_rgba(0,0,0,0.55)]">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#2a2d3a] px-4 py-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
@@ -34,6 +67,9 @@ export function AppModal({ lang }: AppModalProps) {
                 {openedApp.icon && openedApp.icon.trim().length > 0 ? openedApp.icon.trim().slice(0, 2) : '🖥️'}
               </span>
               <div className="truncate text-xs font-semibold text-slate-200">{openedApp.title}</div>
+              {openedApp.url && (
+                <span className="rounded border border-slate-700 px-1.5 py-0.5 text-[9px] text-slate-500">{openedApp.url}</span>
+              )}
             </div>
             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
               <span>{t.appModalFilePath}: {openedApp.filePath}</span>
@@ -52,13 +88,23 @@ export function AppModal({ lang }: AppModalProps) {
             >
               {t.appModalReload}
             </button>
-            <button
-              type="button"
-              onClick={closeAppModal}
-              className="rounded-md border border-red-500/30 px-2 py-1 text-[10px] font-medium text-red-200 transition-colors hover:border-red-400/60 hover:text-red-100"
-            >
-              {t.appModalClose}
-            </button>
+            {openedApp.pid ? (
+              <button
+                type="button"
+                onClick={handleCloseAndStop}
+                className="rounded-md border border-red-500/30 px-2 py-1 text-[10px] font-medium text-red-200 transition-colors hover:border-red-400/60 hover:text-red-100"
+              >
+                {t.appModalClose}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={closeAppModal}
+                className="rounded-md border border-red-500/30 px-2 py-1 text-[10px] font-medium text-red-200 transition-colors hover:border-red-400/60 hover:text-red-100"
+              >
+                {t.appModalClose}
+              </button>
+            )}
           </div>
         </div>
 
@@ -68,10 +114,41 @@ export function AppModal({ lang }: AppModalProps) {
           </div>
         )}
 
+        {manifest && (
+          <div className="border-b border-[#2a2d3a] px-4 py-2">
+            {manifest.permissions && manifest.permissions.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1 mb-1">
+                {manifest.permissions.map((p) => (
+                  <span key={p} className="rounded bg-indigo-500/10 px-1.5 py-0.5 text-[9px] text-indigo-300 font-mono">
+                    {p}
+                  </span>
+                ))}
+              </div>
+            )}
+            {manifest.agents && manifest.agents.length > 0 && (
+              <div className="flex flex-col gap-0.5">
+                {manifest.agents.map((a) => (
+                  <div key={a.name} className="text-[10px] text-slate-500">
+                    {'🤖'} {a.name} ({a.model ?? 'deepseek'})
+                    {a.tools && a.tools.length > 0 && ` · tools: ${a.tools.join(', ')}`}
+                    {a.maxToolRounds && ` · maxRounds: ${a.maxToolRounds}`}
+                    {a.systemPrompt && (
+                      <span className="ml-1 text-slate-600 truncate">
+                        · {a.systemPrompt.slice(0, 80)}{a.systemPrompt.length > 80 ? '...' : ''}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="min-h-0 flex-1 overflow-hidden bg-white">
           <iframe
+            ref={iframeRef}
             key={`${openedApp.appId}-${openedApp.updatedAt}`}
-            src={`codepapr-app://localhost/${openedApp.appId}/index.html`}
+            src={iframeSrc}
             title={openedApp.title}
             sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals"
             className="h-full w-full border-0 bg-white"

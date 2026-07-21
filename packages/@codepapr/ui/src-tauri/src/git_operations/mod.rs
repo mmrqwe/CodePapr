@@ -11,6 +11,15 @@ use git2::Repository;
 
 pub(crate) fn open_repo(workspace: &Path) -> Result<Repository, String> {
     let git_path = workspace.join(".CodePapr/git");
+    // 清理可能因崩溃遗留的锁文件：
+    // - config.lock: libgit2 写入 config 时创建
+    // - index.lock:  libgit2 写入 index 时创建（stage/commit/snapshot 期间崩溃会残留）
+    for lock_name in &["config.lock", "index.lock"] {
+        let lock_file = git_path.join(format!(".git/{}", lock_name));
+        if lock_file.exists() {
+            let _ = std::fs::remove_file(&lock_file);
+        }
+    }
     let repo = Repository::open(&git_path)
         .map_err(|e| format!("open repo: {}", e.message()))?;
     let _ = repo.set_workdir(workspace, true);

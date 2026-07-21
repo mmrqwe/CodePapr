@@ -72,8 +72,8 @@ impl DiffEngine {
             } else { None };
 
             let (additions, deletions) = if let Ok(Some(patch)) = git2::Patch::from_diff(&diff, i) {
-                let (a, _d2, d) = patch.line_stats().unwrap_or((0, 0, 0));
-                (a, d)
+                let (_context, additions, deletions) = patch.line_stats().unwrap_or((0, 0, 0));
+                (additions, deletions)
             } else { (0, 0) };
 
             total_additions += additions;
@@ -124,8 +124,8 @@ impl DiffEngine {
             } else { None };
 
             let (additions, deletions) = if let Ok(Some(patch)) = git2::Patch::from_diff(&diff, i) {
-                let (a, _d2, d) = patch.line_stats().unwrap_or((0, 0, 0));
-                (a, d)
+                let (_context, additions, deletions) = patch.line_stats().unwrap_or((0, 0, 0));
+                (additions, deletions)
             } else { (0, 0) };
 
             files.push(FileDiff { path, old_path, status, additions, deletions, patch: None });
@@ -151,8 +151,18 @@ impl DiffEngine {
             .map_err(|e| format!("get_path {}: {}", path, e.message()))?;
         let blob = repo.find_blob(entry.id())
             .map_err(|e| format!("find_blob: {}", e.message()))?;
-        let content = std::str::from_utf8(blob.content())
+        let content = blob.content();
+
+        // 二进制文件（含 NUL 字节）无法安全转成 UTF-8 字符串，返回占位提示。
+        if content.contains(&0u8) {
+            return Ok(format!(
+                "[binary file: {} bytes, content omitted]",
+                content.len()
+            ));
+        }
+
+        let text = std::str::from_utf8(content)
             .map_err(|e| format!("utf8: {}", e))?;
-        Ok(content.to_string())
+        Ok(text.to_string())
     }
 }

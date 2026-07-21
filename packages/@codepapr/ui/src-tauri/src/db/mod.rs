@@ -109,6 +109,15 @@ fn open_project_db(workspace_path: &str) -> Result<(Connection, PathBuf, PathBuf
            value TEXT NOT NULL,
            updated_at INTEGER NOT NULL
          );
+         CREATE TABLE IF NOT EXISTS app_storage (
+           app_id TEXT NOT NULL,
+           key TEXT NOT NULL,
+           value TEXT NOT NULL,
+           updated_at INTEGER NOT NULL,
+           PRIMARY KEY (app_id, key)
+         );
+         CREATE INDEX IF NOT EXISTS idx_app_storage_app
+           ON app_storage(app_id);
          CREATE TABLE IF NOT EXISTS sessions (
            id TEXT PRIMARY KEY,
            name TEXT NOT NULL,
@@ -1089,6 +1098,72 @@ pub(crate) fn cache_remove(key: String) -> Result<(), String> {
     Ok(())
 }
 
+// ── Papr App Storage ─────────────────────────────────────────────────
+
+pub(crate) fn papr_storage_get(
+    workspace_path: &str,
+    app_id: &str,
+    key: &str,
+) -> Result<Option<String>, String> {
+    let (conn, ..) = open_project_db(workspace_path)?;
+    conn.query_row(
+        "SELECT value FROM app_storage WHERE app_id = ?1 AND key = ?2",
+        params![app_id, key],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(|err| format!("读取 app_storage 失败: {err}"))
+}
+
+pub(crate) fn papr_storage_set(
+    workspace_path: &str,
+    app_id: &str,
+    key: &str,
+    value: &str,
+) -> Result<(), String> {
+    let (conn, ..) = open_project_db(workspace_path)?;
+    conn.execute(
+        "INSERT INTO app_storage (app_id, key, value, updated_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(app_id, key) DO UPDATE SET
+           value = excluded.value,
+           updated_at = excluded.updated_at",
+        params![app_id, key, value, unix_millis()?],
+    )
+    .map_err(|err| format!("保存 app_storage 失败: {err}"))?;
+    Ok(())
+}
+
+pub(crate) fn papr_storage_delete(
+    workspace_path: &str,
+    app_id: &str,
+    key: &str,
+) -> Result<(), String> {
+    let (conn, ..) = open_project_db(workspace_path)?;
+    conn.execute(
+        "DELETE FROM app_storage WHERE app_id = ?1 AND key = ?2",
+        params![app_id, key],
+    )
+    .map_err(|err| format!("删除 app_storage 失败: {err}"))?;
+    Ok(())
+}
+
+pub(crate) fn papr_storage_keys(
+    workspace_path: &str,
+    app_id: &str,
+) -> Result<Vec<String>, String> {
+    let (conn, ..) = open_project_db(workspace_path)?;
+    let mut stmt = conn
+        .prepare("SELECT key FROM app_storage WHERE app_id = ?1 ORDER BY key")
+        .map_err(|err| format!("查询 app_storage keys 失败: {err}"))?;
+    let keys: Vec<String> = stmt
+        .query_map(params![app_id], |row| row.get::<_, String>(0))
+        .map_err(|err| format!("读取 app_storage keys 失败: {err}"))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(keys)
+}
+
 // ── Tests ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1259,5 +1334,56 @@ mod tests {
         assert!(!wal_after
             .windows(marker_bytes.len())
             .any(|window| window == marker_bytes));
+    }
+
+    #[test]
+    fn papr_storage_crud_roundtrip() {
+        let workspace = TestWorkspace::new("papr-storage-crud");
+        let ws = workspace.workspace_arg();
+        let app_id = "test-app-storage";
+
+        assert!(papr_storage_get(&ws, app_id, "key1").unwrap().is_none());
+
+        papr_storage_set(&ws, app_id, "key1", "value1").unwrap();
+        assert_eq!(
+            papr_storage_get(&ws, app_id, "key1").unwrap().as_deref(),
+            Some("value1")
+        );
+
+        papr_storage_set(&ws, app_id, "key1", "updated").unwrap();
+        assert_eq!(
+            papr_storage_get(&ws, app_id, "key1").unwrap().as_deref(),
+            Some("updated")
+        );
+
+        papr_storage_set(&ws, app_id, "key2", "v2").unwrap();
+        let keys = papr_storage_keys(&ws, app_id).unwrap();
+        assert!(keys.contains(&"key1".to_string()));
+        assert!(keys.contains(&"key2".to_string()));
+
+        papr_storage_delete(&ws, app_id, "key1").unwrap();
+        assert!(papr_storage_get(&ws, app_id, "key1").unwrap().is_none());
+        assert_eq!(
+            papr_storage_get(&ws, app_id, "key2").unwrap().as_deref(),
+            Some("v2")
+        );
+    }
+
+    #[test]
+    fn papr_storage_app_isolation() {
+        let workspace = TestWorkspace::new("papr-storage-isolation");
+        let ws = workspace.workspace_arg();
+
+        papr_storage_set(&ws, "app-a", "shared", "data-a").unwrap();
+        papr_storage_set(&ws, "app-b", "shared", "data-b").unwrap();
+
+        assert_eq!(
+            papr_storage_get(&ws, "app-a", "shared").unwrap().as_deref(),
+            Some("data-a")
+        );
+        assert_eq!(
+            papr_storage_get(&ws, "app-b", "shared").unwrap().as_deref(),
+            Some("data-b")
+        );
     }
 }

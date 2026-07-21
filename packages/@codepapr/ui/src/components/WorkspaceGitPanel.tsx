@@ -1,28 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
-  buildGitBranchCheckoutPlans,
-  buildGitLatestStashCommandArgs,
-  buildGitRestoreCommandPlans,
-  buildGitSafetyStashMessage,
-  buildGitStashPushArgs,
-  parseGitLatestStashCommandResult,
   type GitHistoryEntry,
   type GitHistorySummary,
 } from '@codepapr/common';
 import {
-  buildGitDiffSummary,
-  buildGitUnavailableDiff,
   type GitDiffSummary,
   type GitStatusFile,
   type GitStatusSummary,
 } from '../tools/workspaceToolUtils';
 import {
-  buildGitAddPathsCommandArgs,
-  buildGitCommitCommandArgs,
   buildGitDiffClipboardText,
-  buildGitDiffCommandArgs,
-  buildGitResetIndexCommandPlans,
   buildSyntheticUntrackedGitDiff,
   canOpenGitFileWorkspaceVersion,
   describeGitChange,
@@ -42,6 +30,10 @@ import {
   restoreExecute,
   gitStatus as gitStatusCmd,
   gitLog as gitLogCmd,
+  gitDiff as gitDiffCmd,
+  gitCommit as gitCommitCmd,
+  gitBranchCheckout as gitBranchCheckoutCmd,
+  gitRestoreFiles as gitRestoreFilesCmd,
   type CommitChangedFiles,
 } from '../utils/snapshot';
 import { getTranslation, type Lang } from '../utils/i18n';
@@ -51,15 +43,6 @@ interface ReadFileResult {
   path: string;
   content: string;
   bytes: number;
-}
-
-interface CommandResult {
-  command: string;
-  args: string[];
-  status: number | null;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
 }
 
 interface GitDiffLoadState {
@@ -112,13 +95,6 @@ function gitFileDisplayName(file: GitStatusFile): string {
 
 function isUntrackedGitFile(file: GitStatusFile): boolean {
   return file.indexStatus === '?' && file.worktreeStatus === '?';
-}
-
-function commandResultMessage(result: CommandResult): string {
-  const stderr = result.stderr ?? '';
-  const stdout = result.stdout ?? '';
-  const args = result.args ?? [];
-  return stderr.trim() || stdout.trim() || `git ${args.join(' ')} failed`;
 }
 
 function statusBadgeClassName(kind: ReturnType<typeof describeGitChange>['kind']): string {
@@ -201,8 +177,6 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     t.workspaceGitRestoreRunning || (lang === 'en' ? 'Restoring...' : '恢复中...');
   const gitRestoreDoneText =
     t.workspaceGitRestoreDone || (lang === 'en' ? 'Local changes were discarded safely.' : '本地改动已安全擦除。');
-  const gitSnapshotSavedPrefixText =
-    t.workspaceGitSnapshotSavedPrefix || (lang === 'en' ? 'Snapshot' : '安全快照');
   const gitBackupBranchSavedPrefixText =
     t.workspaceGitBackupBranchSavedPrefix || (lang === 'en' ? 'Backup branch' : '备份分支');
   const [internalExpanded, setInternalExpanded] = useState(false);
@@ -263,7 +237,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
           if (statusResult.available && statusResult.isRepo) {
             const files: GitStatusFile[] = statusResult.entries.map((e) => ({
               path: e.path,
-              oldPath: e.oldPath ?? undefined,
+              originalPath: e.oldPath ?? undefined,
               indexStatus: e.indexStatus,
               worktreeStatus: e.worktreeStatus,
             }));
@@ -291,15 +265,27 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
               raw: '',
             } satisfies GitHistorySummary);
           } else {
-            setGitHistory(null);
-            setGitStatus({
-              available: statusResult.available,
+            // 自动初始化 Shadow Git 仓库
+            try {
+              const ensureResult = await snapshotEnsure(workspacePath);
+              if (!cancelled && ensureResult.ready) {
+                void loadGitStatus();
+                return;
+              }
+            } catch {
+              // 自动初始化失败，回退到手动模式
+            }
+            if (!cancelled) {
+              setGitHistory(null);
+              setGitStatus({
+                available: statusResult.available,
               isRepo: false,
               files: [],
               raw: '',
               ...(statusResult.message ? { message: statusResult.message } : {}),
             } satisfies GitStatusSummary);
           }
+        }
         }
       } catch (gitError) {
         if (!cancelled) {
@@ -374,29 +360,6 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   });
   const selectedHistoryEntry = historyEntries.find((entry) => entry.hash === selectedHistoryHash) ?? null;
 
-  async function runGitCommand(args: string[]): Promise<CommandResult> {
-    return invoke<CommandResult>('run_workspace_command', {
-      workspacePath,
-      command: 'git',
-      args,
-      timeoutSeconds: 30,
-    });
-  }
-
-  async function runGitCommandPlans(commandPlans: readonly string[][]): Promise<CommandResult> {
-    let lastResult: CommandResult | null = null;
-
-    for (const args of commandPlans) {
-      const result = await runGitCommand(args);
-      if ((result.status ?? 1) === 0) {
-        return result;
-      }
-      lastResult = result;
-    }
-
-    throw new Error(lastResult ? commandResultMessage(lastResult) : gitActionFailedText);
-  }
-
   function queueGitRefresh(message: string, nextSelection?: GitFileSelection | null): void {
     setGitActionMessage(message);
     setExpandedGitDiffKey(null);
@@ -437,34 +400,21 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
         summary = buildSyntheticUntrackedGitDiff(file.path, result.content, 180);
       } else {
         const pathspecs = file.originalPath ? [file.originalPath, file.path] : [file.path];
-        const commandArgs = buildGitDiffCommandArgs({
-          mode,
+        const diffResult = await gitDiffCmd(
+          workspacePath,
+          mode === 'staged' ? true : false,
           pathspecs,
-          unified: 6,
-          findRenames: Boolean(file.originalPath),
-        });
-        const [statResult, diffResult] = await Promise.all([
-          invoke<CommandResult>('run_workspace_command', {
-            workspacePath,
-            command: 'git',
-            args: commandArgs.statArgs,
-            timeoutSeconds: 15,
-          }),
-          invoke<CommandResult>('run_workspace_command', {
-            workspacePath,
-            command: 'git',
-            args: commandArgs.diffArgs,
-            timeoutSeconds: 20,
-          }),
-        ]);
-
-        summary = buildGitDiffSummary({
-          staged: commandArgs.staged,
+        );
+        summary = {
+          available: diffResult.available,
+          isRepo: true,
+          staged: mode === 'staged',
           pathspecs,
-          statResult,
-          diffResult,
-          truncationThreshold: 160_000,
-        });
+          stat: diffResult.stat,
+          diff: diffResult.diff,
+          truncated: diffResult.truncated,
+          ...(diffResult.message ? { message: diffResult.message } : {}),
+        } satisfies GitDiffSummary;
       }
 
       setGitFileDiffs((current) => ({
@@ -476,15 +426,19 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
         },
       }));
     } catch (gitError) {
-      const fallbackArgs = buildGitDiffCommandArgs({
-        mode,
-        pathspecs: [file.path],
-      });
-
       setGitFileDiffs((current) => ({
         ...current,
         [cacheKey]: {
-          summary: buildGitUnavailableDiff(gitError instanceof Error ? gitError.message : String(gitError), fallbackArgs.staged, [file.path]),
+          summary: {
+            available: false,
+            isRepo: false,
+            staged: false,
+            pathspecs: [file.path],
+            stat: '',
+            diff: '',
+            truncated: false,
+            message: gitError instanceof Error ? gitError.message : String(gitError),
+          } satisfies GitDiffSummary,
           error: '',
           isLoading: false,
         },
@@ -571,32 +525,23 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
       return;
     }
 
-    const addArgs = buildGitAddPathsCommandArgs(selectedChangedFiles);
-    if (!addArgs) {
-      setGitActionMessage(gitCommitNoSelectionText);
-      return;
-    }
-
     setActiveGitActionKey('commit');
     setGitActionMessage('');
     try {
-      // Step 1: 清空暂存区，避免遗留的 staged 状态污染本次提交。
-      await runGitCommandPlans(buildGitResetIndexCommandPlans());
-
-      // Step 2: 把用户勾选的文件加入暂存区。
-      const addResult = await runGitCommand(addArgs);
-      if ((addResult.status ?? 1) !== 0) {
-        throw new Error(commandResultMessage(addResult));
+      const result = await gitCommitCmd(
+        workspacePath,
+        trimmedMessage,
+        false,
+        selectedChangedFiles.map((f) => f.path),
+        false,
+      );
+      if (result.ok) {
+        setCommitMessage('');
+        setDeselectedPaths(new Set());
+        queueGitRefresh(gitCommitDoneText);
+      } else {
+        throw new Error(result.message);
       }
-
-      // Step 3: 提交。
-      const result = await runGitCommand(buildGitCommitCommandArgs(trimmedMessage));
-      if ((result.status ?? 1) !== 0) {
-        throw new Error(commandResultMessage(result));
-      }
-      setCommitMessage('');
-      setDeselectedPaths(new Set());
-      queueGitRefresh(gitCommitDoneText);
     } catch (error) {
       setGitActionMessage((error instanceof Error ? error.message : String(error)) || gitActionFailedText);
     } finally {
@@ -614,13 +559,15 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     setActiveGitActionKey('branch-checkout');
     setGitActionMessage('');
     try {
-      await runGitCommandPlans(
-        buildGitBranchCheckoutPlans({
-          branchName: trimmedBranchName,
-          startPoint: selectedHistoryEntry?.hash,
-          createIfMissing: true,
-        })
+      const result = await gitBranchCheckoutCmd(
+        workspacePath,
+        trimmedBranchName,
+        false,
+        true,
       );
+      if (!result.ok) {
+        throw new Error(result.message);
+      }
       setBranchName('');
       queueGitRefresh(`${gitBranchDonePrefixText} ${trimmedBranchName}`);
     } catch (error) {
@@ -639,25 +586,11 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     setActiveGitActionKey('restore');
     setGitActionMessage('');
     try {
-      const stashResult = await runGitCommand(
-        buildGitStashPushArgs(buildGitSafetyStashMessage('restore', 'workspace'), {
-          includeUntracked: true,
-        })
-      );
-      if ((stashResult.status ?? 1) !== 0) {
-        throw new Error(commandResultMessage(stashResult));
+      const result = await gitRestoreFilesCmd(workspacePath);
+      if (!result.ok) {
+        throw new Error(result.message);
       }
-
-      const latestStash = parseGitLatestStashCommandResult(
-        await runGitCommand(buildGitLatestStashCommandArgs())
-      );
-
-      await runGitCommandPlans(buildGitRestoreCommandPlans());
-      queueGitRefresh(
-        latestStash?.ref
-          ? `${gitRestoreDoneText} ${gitSnapshotSavedPrefixText} ${latestStash.ref}`
-          : gitRestoreDoneText
-      );
+      queueGitRefresh(gitRestoreDoneText);
     } catch (error) {
       setGitActionMessage((error instanceof Error ? error.message : String(error)) || gitActionFailedText);
     } finally {

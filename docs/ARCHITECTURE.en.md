@@ -100,6 +100,8 @@ The Tauri Rust backend is organized into domain modules, each with a single resp
 | `symbol_provider` | `src-tauri/src/symbol_provider.rs` | tree-sitter fallback symbol extraction |
 | `mcp_host` | `src-tauri/src/mcp_host.rs` | MCP tool server host (stdio / sse / streamable-http) |
 | `shared` | `src-tauri/src/shared/` | Path normalization, workspace path resolution, runtime helpers, string/time utilities |
+| `papr_runtime` | `src-tauri/src/papr_runtime/` | .papr app runtime: manifest loading, permission validation, SDK injection, storage/HTTP/FS commands, app context registry |
+| `app_runtime` | `src-tauri/src/app_runtime.rs` | Custom URI scheme `codepapr-app://`, app discovery and scanning, SDK injection, workspace registration |
 
 ### 4.5 Task Queue
 
@@ -145,6 +147,90 @@ The LLM can invoke 26 discrete tools (including `task`/`todo` as dynamic tools),
 All 26 tools are registered in ToolRegistry, frozen and hashed for cache consistency. `todo` and `task` are dynamically generated.
 
 **External path permissions**: The desktop app shows a `PermissionDialog` for `read`/`list` operations on absolute paths outside the project. The user can choose "Deny / Allow this file / Allow this folder". Authorizations are stored in the `permissionStore` allowlist. CLI read boundaries are more permissive; writes remain workspace-scoped.
+
+### 4.7 Papr App Runtime
+
+Papr is CodePapr's application runtime — AI-generated `.papr` apps run directly in the desktop client, using the SDK to call Agent, LLM, storage, HTTP, and filesystem capabilities.
+
+**Directory structure:**
+
+```
+.CodePapr/apps/<appId>/
+├── manifest.json     ← Metadata + permissions + agent definitions
+└── index.html        ← Entry HTML (customizable via manifest.entry)
+```
+
+**manifest.json spec:**
+
+```json
+{
+  "spec": "papr/0.1",
+  "name": "Todo App",
+  "version": "0.1.0",
+  "permissions": ["storage:read", "storage:write", "agent:run:assistant"],
+  "agents": [{
+    "name": "assistant",
+    "model": "deepseek",
+    "systemPrompt": "You are a task management assistant",
+    "tools": ["read", "web_search"],
+    "maxToolRounds": 20
+  }]
+}
+```
+
+10 permission types: `storage:read/write`, `http:get/post`, `fs:read/write`, `llm:chat`, `workspace:read/write/exec`, `agent:run:<name>`.
+
+**Papr SDK (`window.papr`):**
+
+JavaScript SDK injected into every app iframe, providing a unified API:
+
+| API | Description |
+|---|---|
+| `papr.db.get/set/delete/keys()` | Persistent key-value storage (per-app isolation) |
+| `papr.agent.run({agent, task}, onProgress?)` | Invoke manifest-defined agents (streaming events + step tracking) |
+| `papr.http.get/post(url, body)` | HTTP requests |
+| `papr.fs.readFile/writeFile/list/delete(path)` | File I/O (restricted to .CodePapr/apps/<appId>/data/) |
+| `papr.app.info()` | Get app metadata |
+
+**IPC bridge:** The iframe SDK sends `{__papr:true, reqId, type, payload}` protocol messages via `window.parent.postMessage()`. The React main window's `usePaprBridge` hook listens → first-pass permission check → routes to `invoke()` (Rust) or Worker (Agent).
+
+**Permission system (two-layer):**
+
+1. **React first-pass** — `usePaprBridge` fast-rejects based on manifest.permissions
+2. **Rust authoritative** — every `papr_*` Tauri command calls `check_permission(manifest, capability)` at the top, blocking even direct postMessage bypass
+
+Tool permission mapping (`check_tool_permission`): `read/grep/list` → `workspace:read`, `write/edit` → `workspace:write`, `exec/shell` → `workspace:exec`, `web_search/web_fetch` → `http:get`.
+
+**App Agent system:**
+
+Independent from built-in sub-agents (explore/scout/mentor). Uses a dedicated Agent loop:
+- manifest `agents[].tools` specifies a whitelist (15 allowed tools)
+- Worker-side `handleRunAppAgent` builds a full `Session` (`ImmutablePrefix` + `AppendOnlyLog` + `ToolRegistry`)
+- Runs `Agent.chat()` multi-turn tool loop (`maxToolRounds` default 20, max 50)
+- 300s wall-clock timeout + tool IPC proxy to main thread
+- Streaming events forwarded to iframe via `app-agent-stream` messages
+
+**Protocol-level SDK injection:** `app_runtime.rs::handle_app_protocol` injects `<script src="__papr_sdk.js">` after `<head>` when serving HTML. SDK content is embedded in the Rust binary at compile time (`include_str!`).
+
+**Rust modules (`papr_runtime/`):**
+
+| File | Responsibility |
+|---|---|
+| `manifest.rs` | Manifest loading, validation, caching |
+| `permission.rs` | Permission matrix + tool permission mapping |
+| `sdk_inject.rs` | SDK injection into HTML + SDK file serving |
+| `app_context.rs` | app_id → workspace_path in-memory registry |
+| `app_storage.rs` | `papr_storage_*` Tauri commands (permission check + SQLite CRUD) |
+| `services.rs` | `papr_http_*` / `papr_fs_*` Tauri commands (permission check + fs/http operations) |
+| `protocol.rs` | postMessage protocol types (reserved) |
+
+**Storage isolation:**
+
+```
+papr.db.set('key', value) → project.sqlite.app_storage(app_id, key, value)
+```
+
+Same key in different apps is fully isolated via `app_id` primary key prefix.
 
 ## 5. Character and Voice System
 
@@ -523,4 +609,12 @@ Voice configuration is not in the main settings panel — it is configured per c
 - `packages/@codepapr/ui/src-tauri/src/task_queue/mod.rs`: Serial task queue
 - `packages/@codepapr/ui/src-tauri/src/db/mod.rs`: SQLite persistence
 - `packages/@codepapr/ui/src-tauri/src/shared/paths.rs`: Path normalization and workspace path resolution
+- `packages/@codepapr/ui/src-tauri/src/papr_runtime/manifest.rs`: .papr manifest loading, validation, caching
+- `packages/@codepapr/ui/src-tauri/src/papr_runtime/permission.rs`: Permission matrix + tool permission mapping
+- `packages/@codepapr/ui/src-tauri/src/papr_runtime/app_storage.rs`: Papr storage Tauri commands
+- `packages/@codepapr/ui/src-tauri/src/papr_runtime/services.rs`: Papr HTTP/FS Tauri commands
+- `packages/@codepapr/ui/src-tauri/src/papr_runtime/sdk_inject.rs`: SDK injection + file serving
+- `packages/@codepapr/ui/src-tauri/resources/papr-sdk.js`: Papr SDK (window.papr API injected into iframe)
+- `packages/@codepapr/ui/src/papr/usePaprBridge.ts`: iframe ↔ main window IPC bridge
+- `packages/@codepapr/ui/src/papr/agentAdapter.ts`: PaprAgentDef → AgentDefinition adapter
 - `packages/@codepapr/editor/src/index.ts`: Editor types and utility functions
