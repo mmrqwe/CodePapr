@@ -356,6 +356,21 @@ async function recoverMacOsDmgBundle(args) {
 
 cleanupStaleMacOsBundleArtifacts(cliArgs);
 
+// 强制 cargo 重新编译 main.rs，确保 generate_context!() 重新嵌入最新的 dist/ 前端文件。
+// 不这样做的话，如果只改了前端没改 .rs 文件，cargo 增量编译会跳过 main.rs 重编译，
+// 导致二进制内嵌的是旧版前端。
+function touchMainRsForFreshFrontend(args) {
+  if (args[0] !== 'build') return;
+  const mainRs = path.resolve(scriptDir, '../src-tauri/src/main.rs');
+  if (fs.existsSync(mainRs)) {
+    const now = new Date();
+    fs.utimesSync(mainRs, now, now);
+    console.log('[tauri-cli] Touched main.rs to ensure latest frontend is embedded.');
+  }
+}
+
+touchMainRsForFreshFrontend(cliArgs);
+
 const child = spawn(process.execPath, [tauriCliEntry, ...cliArgs], {
   stdio: 'inherit',
   env: sanitizeSpawnEnv(process.env),

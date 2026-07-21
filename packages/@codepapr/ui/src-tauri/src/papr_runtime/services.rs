@@ -310,6 +310,35 @@ pub fn papr_fs_delete(
     Ok(())
 }
 
+// ── App lifecycle ────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn papr_delete_app(app_id: String) -> Result<(), String> {
+    let ctx = crate::papr_runtime::app_context::get(&app_id)?;
+    let workspace = canonical_workspace(&ctx.workspace_path)?;
+    let app_dir = workspace
+        .join(".CodePapr")
+        .join("apps")
+        .join(&app_id);
+
+    if app_dir.exists() {
+        fs::remove_dir_all(&app_dir)
+            .map_err(|err| format!("删除 app 目录失败: {err}"))?;
+    }
+
+    let _ = crate::db::papr_storage_keys(&ctx.workspace_path, &app_id)
+        .map(|keys| {
+            for key in keys {
+                let _ = crate::db::papr_storage_delete(&ctx.workspace_path, &app_id, &key);
+            }
+        });
+
+    crate::papr_runtime::app_context::unregister(&app_id);
+    crate::papr_runtime::manifest::clear_manifest(&app_id);
+
+    Ok(())
+}
+
 // ── Tests ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -331,6 +360,9 @@ mod tests {
             entry: None,
             permissions: Some(perms),
             agents: None,
+            command: None,
+            args: None,
+            port: None,
         };
         manifest::store_manifest(app_id, m);
     }
@@ -417,6 +449,9 @@ mod tests {
             entry: None,
             permissions: Some(vec!["storage:read".to_string()]),
             agents: None,
+            command: None,
+            args: None,
+            port: None,
         };
         manifest::store_manifest("noperm-app", m);
 
@@ -426,5 +461,23 @@ mod tests {
 
         crate::papr_runtime::app_context::unregister("noperm-app");
         manifest::clear_manifest("noperm-app");
+    }
+
+    #[test]
+    fn papr_delete_app_removes_directory_and_storage() {
+        let ws = TestWorkspace::new("papr-delete-app");
+        register_test_app(&ws.workspace_arg(), "del-app", &[]);
+
+        let app_dir = ws.file_path(".CodePapr/apps/del-app");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::write(app_dir.join("index.html"), b"<html></html>").unwrap();
+
+        papr_fs_write("del-app".into(), "settings.json".into(), r#"{"theme":"dark"}"#.into()).unwrap();
+
+        assert!(app_dir.exists());
+
+        papr_delete_app("del-app".into()).unwrap();
+
+        assert!(!app_dir.exists());
     }
 }

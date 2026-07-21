@@ -74,7 +74,7 @@ function AppRow({
     if (app.pid) {
       try { await invoke('stop_background_process', { pid: app.pid }); } catch { /* ignore */ }
     }
-    try { await invoke('unregister_app_workspace', { appId: app.appId }); } catch { /* ignore */ }
+    try { await invoke('papr_delete_app', { appId: app.appId }); } catch { /* ignore */ }
     closeApp(app.appId);
   }, [app, closeApp]);
 

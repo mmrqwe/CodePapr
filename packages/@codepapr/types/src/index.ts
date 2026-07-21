@@ -581,6 +581,9 @@ export interface PaprManifest {
   entry?: string;
   permissions?: PaprPermission[];
   agents?: PaprAgentDef[];
+  command?: string;
+  args?: string[];
+  port?: number;
 }
 
 export interface PaprIPCRequest {

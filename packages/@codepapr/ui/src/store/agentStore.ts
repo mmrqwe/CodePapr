@@ -573,50 +573,59 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           set({ _gitReady: false, _gitReadyError: null, _checkpointError: null });
           return;
         }
-        try {
-          const result = await snapshotEnsure(path);
-          if (get().workspacePath !== path) return;
-          set({
-            _gitReady: result.ready,
-            _gitReadyError: result.error,
-          });
-          if (result.ready) {
-            try {
-              const [snapshots, records] = await Promise.all([
-                snapshotList(path, 200),
-                loadCheckpointRecords(path, undefined),
-              ]);
-              if (get().workspacePath !== path) return;
-              // 从 timeline 恢复 _messageCheckpoints
-              if (records.length > 0) {
-                const cps: Record<string, string> = {};
-                let maxSeq = 0;
-                for (const r of records) {
-                  cps[r.messageId] = r.sha;
-                  const seqMatch = r.label.match(/checkpoint #(\d+)/);
-                  if (seqMatch) {
-                    maxSeq = Math.max(maxSeq, parseInt(seqMatch[1], 10));
+        // 最多重试 2 次：并发初始化时可能因 index.lock 冲突而失败，
+        // 等待 500ms 后重试可以解决绝大多数竞态。
+        let lastError: string | null = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const result = await snapshotEnsure(path);
+            if (get().workspacePath !== path) return;
+            if (result.ready) {
+              set({ _gitReady: true, _gitReadyError: null });
+              try {
+                const [snapshots, records] = await Promise.all([
+                  snapshotList(path, 200),
+                  loadCheckpointRecords(path, undefined),
+                ]);
+                if (get().workspacePath !== path) return;
+                if (records.length > 0) {
+                  const cps: Record<string, string> = {};
+                  let maxSeq = 0;
+                  for (const r of records) {
+                    cps[r.messageId] = r.sha;
+                    const seqMatch = r.label.match(/checkpoint #(\d+)/);
+                    if (seqMatch) {
+                      maxSeq = Math.max(maxSeq, parseInt(seqMatch[1], 10));
+                    }
                   }
+                  set({ _messageCheckpoints: cps, _checkpointSeq: maxSeq });
+                } else {
+                  const subjects = snapshots.map((s) => s.label);
+                  const next = nextCheckpointSequence(subjects);
+                  set({ _checkpointSeq: Math.max(0, next - 1) });
                 }
-                set({ _messageCheckpoints: cps, _checkpointSeq: maxSeq });
-              } else {
-                // 没有 timeline 记录，用 git log 推断序号
-                const subjects = snapshots.map((s) => s.label);
-                const next = nextCheckpointSequence(subjects);
-                set({ _checkpointSeq: Math.max(0, next - 1) });
+              } catch {
+                // 推断失败不影响功能，序号会从 0 开始
               }
-            } catch {
-              // 推断失败不影响功能，序号会从 0 开始
+              return;
             }
+            lastError = result.error ?? null;
+          } catch (err) {
+            if (get().workspacePath !== path) return;
+            lastError = err instanceof Error ? err.message : String(err);
           }
-        } catch (err) {
-          if (get().workspacePath !== path) return;
-          set({
-            _gitReady: false,
-            _gitReadyError: err instanceof Error ? err.message : String(err),
-            _checkpointError: null,
-          });
+          // 等待 500ms 后重试（最后一次不等待）
+          if (attempt < 2) {
+            await new Promise((r) => setTimeout(r, 500));
+          }
         }
+        // 所有重试都失败
+        if (get().workspacePath !== path) return;
+        set({
+          _gitReady: false,
+          _gitReadyError: lastError,
+          _checkpointError: null,
+        });
       },
 
       setSkillEnabledState: (skillId, enabled) => {

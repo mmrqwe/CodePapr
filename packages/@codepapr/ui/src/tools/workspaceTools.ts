@@ -1656,7 +1656,7 @@ name: 'web_download_file',
             type: 'object',
             properties: {
               name: { type: 'string', description: 'Agent 名称（如 assistant）' },
-              model: { type: 'string', description: '模型名（如 deepseek, openai, claude, fast, mentor）' },
+              model: { type: 'string', description: '模型：main（默认，使用用户主模型）、fast（快速模型）、mentor（Mentor 模型）、或具体模型 ID' },
               systemPrompt: { type: 'string', description: '系统提示词' },
               tools: {
                 type: 'array',
@@ -2004,11 +2004,14 @@ export function registerWorkspaceTools(
       permissions,
       agents: agents.map((a) => ({
         name: a.name,
-        model: a.model ?? 'deepseek',
+        model: a.model ?? 'main',
         systemPrompt: a.systemPrompt,
         ...(a.tools ? { tools: a.tools } : {}),
         ...(a.maxToolRounds ? { maxToolRounds: a.maxToolRounds } : {}),
       })),
+      ...(command ? { command } : {}),
+      ...(cmdArgs && cmdArgs.length > 0 ? { args: cmdArgs } : {}),
+      ...(port ? { port } : {}),
     };
 
     const manifestPath = `.CodePapr/apps/${rawAppId}/manifest.json`;

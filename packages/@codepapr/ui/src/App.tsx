@@ -206,7 +206,7 @@ export default function App() {
     if (workspacePath) {
       void (async () => {
         try {
-          const discovered = await invoke<Array<{ app_id: string; title: string; html: string; manifest_json: string | null }>>(
+          const discovered = await invoke<Array<{ app_id: string; title: string; html: string; manifest_json: string | null; command: string | null; args: string[] | null; port: number | null }>>(
             'scan_workspace_apps',
             { workspacePath },
           );
@@ -222,6 +222,9 @@ export default function App() {
               html: app.html,
               filePath: `.CodePapr/apps/${app.app_id}/index.html`,
               manifestJson: app.manifest_json ?? undefined,
+              command: app.command ?? undefined,
+              args: app.args ?? undefined,
+              port: app.port ?? undefined,
             });
           }
         } catch {
@@ -318,6 +321,11 @@ export default function App() {
           </div>
         </div>
       )}
+      {openedAppId ? (
+        <div className="h-screen w-screen overflow-hidden bg-[#0f1117]">
+        <AppModal lang={settings.lang} />
+        </div>
+      ) : (
       <SplitPane
         direction="horizontal"
         defaultRatio={0.18}
@@ -569,10 +577,10 @@ export default function App() {
               </div>
             )}
 
-            {openedAppId && <AppModal lang={settings.lang} />}
           </div>
         }
       />
+      )}
 
       <Suspense fallback={null}>
         {showSettings && <SettingsModal />}

@@ -275,7 +275,7 @@ describe('CodingWorkbench', () => {
     await flushEffects();
 
     const fileTreeButton = [...container.querySelectorAll('button')].find(
-      (button) => button.textContent === '文件夹内容'
+      (button) => button.textContent === '文件夹'
     );
     const projectGraphButton = [...container.querySelectorAll('button')].find(
       (button) => button.textContent === 'ProjectGraph'

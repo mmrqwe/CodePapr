@@ -44,6 +44,9 @@ pub struct PaprManifest {
     pub entry: Option<String>,
     pub permissions: Option<Vec<String>>,
     pub agents: Option<Vec<PaprAgentDef>>,
+    pub command: Option<String>,
+    pub args: Option<Vec<String>>,
+    pub port: Option<u16>,
 }
 
 pub fn load_manifest(apps_dir: &Path, app_id: &str) -> Result<PaprManifest, String> {
@@ -150,6 +153,9 @@ mod tests {
             entry: None,
             permissions: None,
             agents: None,
+            command: None,
+            args: None,
+            port: None,
         };
 
         store_manifest("test-cache", manifest);

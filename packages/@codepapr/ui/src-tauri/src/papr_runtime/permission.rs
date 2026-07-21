@@ -55,6 +55,9 @@ mod tests {
             entry: None,
             permissions: Some(permissions),
             agents: None,
+            command: None,
+            args: None,
+            port: None,
         }
     }
 
@@ -106,6 +109,9 @@ mod tests {
             entry: None,
             permissions: None,
             agents: None,
+            command: None,
+            args: None,
+            port: None,
         };
         assert!(check_permission(&m, "storage:read").is_err());
     }

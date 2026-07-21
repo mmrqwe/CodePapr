@@ -683,14 +683,6 @@ export function CodingWorkbench({
     }
   }, [expandedDirectorySet, onSelectPath, requestPathFocus, toggleDirectory, visibleRowIndexByPath, visibleRows]);
 
-  const expandAllDirectories = useCallback(() => {
-    setExpandedDirectories(directoryPaths);
-  }, [directoryPaths]);
-
-  const collapseAllDirectories = useCallback(() => {
-    setExpandedDirectories([]);
-  }, []);
-
   const chooseFolder = async () => {
     setFolderError('');
     try {
@@ -904,28 +896,6 @@ export function CodingWorkbench({
                     )}
                   </button>
                 </div>
-                {hiddenSidebarTab === 'tree' && (
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={expandAllDirectories}
-                      title={t.expandFoldersTip}
-                      disabled={isLoadingTree || directoryPaths.length === 0}
-                      className="rounded-md border border-[#2a2d3a] px-2 py-1.5 text-xs font-medium text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {t.expand}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={collapseAllDirectories}
-                      title={t.collapseFoldersTip}
-                      disabled={isLoadingTree || directoryPaths.length === 0}
-                      className="rounded-md border border-[#2a2d3a] px-2 py-1.5 text-xs font-medium text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {t.collapse}
-                    </button>
-                  </div>
-                )}
               </div>
               {hiddenSidebarTab === 'tree' && isLoadingTree && entries.length > 0 && (
                 <div className="flex items-center gap-2 border-b border-[#2a2d3a] px-4 py-2 text-[10px] text-slate-500">
@@ -970,28 +940,6 @@ export function CodingWorkbench({
               className="min-h-0 flex-1"
               first={
                 <section className="flex h-full min-h-0 flex-col overflow-hidden border-r border-[#202432] bg-[#10141d]">
-                  <div className="flex items-center justify-end border-b border-[#2a2d3a] px-4 py-2">
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={expandAllDirectories}
-                        title={t.expandFoldersTip}
-                        disabled={isLoadingTree || directoryPaths.length === 0}
-                        className="rounded-md border border-[#2a2d3a] px-2 py-1.5 text-xs font-medium text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {t.expand}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={collapseAllDirectories}
-                        title={t.collapseFoldersTip}
-                        disabled={isLoadingTree || directoryPaths.length === 0}
-                        className="rounded-md border border-[#2a2d3a] px-2 py-1.5 text-xs font-medium text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {t.collapse}
-                      </button>
-                    </div>
-                  </div>
                   <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{fileTreeContent}</div>
                 </section>
               }

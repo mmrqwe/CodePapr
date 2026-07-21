@@ -341,7 +341,8 @@ fn main() {
             papr_runtime::services::papr_fs_read,
             papr_runtime::services::papr_fs_write,
             papr_runtime::services::papr_fs_list,
-            papr_runtime::services::papr_fs_delete
+            papr_runtime::services::papr_fs_delete,
+            papr_runtime::services::papr_delete_app
         ])
         .on_window_event(|_, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {

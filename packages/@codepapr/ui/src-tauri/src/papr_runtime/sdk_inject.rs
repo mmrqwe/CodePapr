@@ -10,7 +10,7 @@ pub fn inject_sdk_into_html(html: &str) -> String {
             let insert_pos = pos + close_bracket + 1;
             let mut modified = String::with_capacity(html.len() + 80);
             modified.push_str(&html[..insert_pos]);
-            modified.push_str("\n<script src=\"codepapr-app://localhost/__papr_sdk.js\"></script>");
+            modified.push_str("\n<script src=\"/__papr_sdk.js\"></script>");
             if insert_pos < html.len() {
                 modified.push_str(&html[insert_pos..]);
             }
@@ -33,12 +33,12 @@ mod tests {
         let html = "<html><head><title>Test</title></head><body></body></html>";
         let result = inject_sdk_into_html(html);
         assert!(result.contains("__papr_sdk.js"));
-        assert!(result.contains("<script src=\"codepapr-app://localhost/__papr_sdk.js\"></script>"));
+        assert!(result.contains("<script src=\"/__papr_sdk.js\"></script>"));
     }
 
     #[test]
     fn does_not_double_inject() {
-        let html = "<html><head><script src=\"codepapr-app://localhost/__papr_sdk.js\"></script></head></html>";
+        let html = "<html><head><script src=\"/__papr_sdk.js\"></script></head></html>";
         let result = inject_sdk_into_html(html);
         assert_eq!(result, html);
     }

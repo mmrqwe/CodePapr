@@ -219,7 +219,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   useEffect(() => {
     let cancelled = false;
 
-    const loadGitStatus = async () => {
+    const loadGitStatus = async (retryCount = 0) => {
       if (!workspacePath) {
         setGitStatus(null);
         setIsLoading(false);
@@ -264,12 +264,12 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
               })),
               raw: '',
             } satisfies GitHistorySummary);
-          } else {
-            // 自动初始化 Shadow Git 仓库
+          } else if (retryCount < 1) {
+            // 自动初始化 Shadow Git 仓库（最多重试 1 次，防止无限递归）
             try {
               const ensureResult = await snapshotEnsure(workspacePath);
               if (!cancelled && ensureResult.ready) {
-                void loadGitStatus();
+                void loadGitStatus(retryCount + 1);
                 return;
               }
             } catch {
@@ -279,13 +279,25 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
               setGitHistory(null);
               setGitStatus({
                 available: statusResult.available,
-              isRepo: false,
-              files: [],
-              raw: '',
-              ...(statusResult.message ? { message: statusResult.message } : {}),
-            } satisfies GitStatusSummary);
+                isRepo: false,
+                files: [],
+                raw: '',
+                ...(statusResult.message ? { message: statusResult.message } : {}),
+              } satisfies GitStatusSummary);
+            }
+          } else {
+            // 重试后仍然不可用，直接展示错误状态
+            if (!cancelled) {
+              setGitHistory(null);
+              setGitStatus({
+                available: statusResult.available,
+                isRepo: false,
+                files: [],
+                raw: '',
+                ...(statusResult.message ? { message: statusResult.message } : {}),
+              } satisfies GitStatusSummary);
+            }
           }
-        }
         }
       } catch (gitError) {
         if (!cancelled) {

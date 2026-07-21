@@ -53,6 +53,19 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
         .or_else(|| uri.strip_prefix("codepapr-app://"))
         .unwrap_or(&uri);
 
+    let path = path.trim_start_matches('/');
+
+    if path == "__papr_sdk.js" {
+        let sdk = papr_runtime::sdk_inject::get_sdk_js();
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/javascript; charset=utf-8")
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Cache-Control", "no-cache")
+            .body(sdk.as_bytes().to_vec())
+            .unwrap();
+    }
+
     let (app_id, file_path) = match path.split_once('/') {
         Some((id, rest)) if !id.is_empty() => (id, rest),
         _ => {
@@ -69,17 +82,6 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
         return Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body("path traversal blocked".into())
-            .unwrap();
-    }
-
-    if file_path == "__papr_sdk.js" {
-        let sdk = papr_runtime::sdk_inject::get_sdk_js();
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/javascript; charset=utf-8")
-            .header("Access-Control-Allow-Origin", "*")
-            .header("Cache-Control", "no-cache")
-            .body(sdk.as_bytes().to_vec())
             .unwrap();
     }
 
@@ -158,6 +160,9 @@ pub struct DiscoveredApp {
     pub title: String,
     pub html: String,
     pub manifest_json: Option<String>,
+    pub command: Option<String>,
+    pub args: Option<Vec<String>>,
+    pub port: Option<u16>,
 }
 
 #[tauri::command]
@@ -208,6 +213,9 @@ pub fn scan_workspace_apps(workspace_path: String) -> Vec<DiscoveredApp> {
             title: manifest.name,
             html,
             manifest_json,
+            command: manifest.command,
+            args: manifest.args,
+            port: manifest.port,
         });
     }
 
@@ -220,6 +228,59 @@ pub fn scan_workspace_apps(workspace_path: String) -> Vec<DiscoveredApp> {
 mod tests {
     use super::*;
     use std::fs;
+
+    fn resolve_protocol_path(uri: &str) -> (String, String) {
+        let path = uri
+            .strip_prefix("codepapr-app://localhost/")
+            .or_else(|| uri.strip_prefix("codepapr-app://"))
+            .unwrap_or(uri);
+
+        let path = path.trim_start_matches('/');
+
+        if path == "__papr_sdk.js" {
+            return ("__system__".into(), "__papr_sdk.js".into());
+        }
+
+        match path.split_once('/') {
+            Some((id, rest)) if !id.is_empty() => (id.to_string(), rest.to_string()),
+            _ => (String::new(), String::new()),
+        }
+    }
+
+    #[test]
+    fn protocol_path_with_scheme_prefix() {
+        let (app_id, file) = resolve_protocol_path("codepapr-app://localhost/my-app/index.html");
+        assert_eq!(app_id, "my-app");
+        assert_eq!(file, "index.html");
+    }
+
+    #[test]
+    fn protocol_path_without_scheme_leading_slash() {
+        let (app_id, file) = resolve_protocol_path("/my-app/index.html");
+        assert_eq!(app_id, "my-app");
+        assert_eq!(file, "index.html");
+    }
+
+    #[test]
+    fn protocol_path_sdk_js() {
+        let (app_id, file) = resolve_protocol_path("/__papr_sdk.js");
+        assert_eq!(app_id, "__system__");
+        assert_eq!(file, "__papr_sdk.js");
+    }
+
+    #[test]
+    fn protocol_path_sdk_js_no_leading_slash() {
+        let (app_id, file) = resolve_protocol_path("__papr_sdk.js");
+        assert_eq!(app_id, "__system__");
+        assert_eq!(file, "__papr_sdk.js");
+    }
+
+    #[test]
+    fn protocol_path_root_returns_index() {
+        let (_app_id, _file) = resolve_protocol_path("/my-app/");
+        // path.trim_start_matches('/') → "my-app/"
+        // split_once('/') → ("my-app", "")
+    }
 
     #[test]
     fn scan_discovers_app_with_valid_manifest() {
@@ -263,6 +324,34 @@ mod tests {
 
         let result = scan_workspace_apps(tmp.to_string_lossy().to_string());
         assert!(result.is_empty());
+
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn e2e_scan_complete_app_with_all_fields() {
+        let tmp = std::env::temp_dir().join(format!("papr-e2e-{}", std::process::id()));
+        let apps_dir = tmp.join(".CodePapr/apps/full-app");
+        fs::create_dir_all(&apps_dir).unwrap();
+
+        let manifest = r#"{"spec":"papr/0.1","name":"Full App","version":"0.1.0","permissions":["storage:read","storage:write","http:get","fs:read","fs:write","agent:run:assistant"],"agents":[{"name":"assistant","model":"main","systemPrompt":"You are a test agent.","tools":["read","web_search"],"maxToolRounds":10}],"command":"node","args":["server.js"],"port":3456}"#;
+        fs::write(apps_dir.join("manifest.json"), manifest).unwrap();
+        fs::write(apps_dir.join("index.html"), "<html><head><title>Full App</title></head><body><h1>Hello</h1></body></html>").unwrap();
+
+        let result = scan_workspace_apps(tmp.to_string_lossy().to_string());
+        assert_eq!(result.len(), 1);
+        let app = &result[0];
+        assert_eq!(app.app_id, "full-app");
+        assert_eq!(app.title, "Full App");
+        assert!(app.html.contains("<h1>Hello</h1>"));
+        assert!(app.manifest_json.is_some());
+        assert_eq!(app.command.as_deref(), Some("node"));
+        assert_eq!(app.port, Some(3456));
+
+        let manifest_json = app.manifest_json.as_deref().unwrap();
+        assert!(manifest_json.contains("agent:run:assistant"));
+        assert!(manifest_json.contains("node"));
+        assert!(manifest_json.contains("server.js"));
 
         fs::remove_dir_all(&tmp).ok();
     }

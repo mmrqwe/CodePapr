@@ -16,7 +16,7 @@ export function paprAgentToCore(
     name: `app-${appId}-${appAgent.name}`,
     description: `App agent "${appAgent.name}" from ${appId}`,
     mode: 'subagent',
-    model: appAgent.model || 'deepseek',
+    model: appAgent.model || 'main',
     prompt: appAgent.systemPrompt ?? 'You are a helpful assistant.',
     tools: appAgent.tools && appAgent.tools.length > 0 ? tools : {},
   };

@@ -21,7 +21,7 @@ describe('paprAgentToCore', () => {
       name: 'helper',
     }, 'test-app');
 
-    expect(result.model).toBe('deepseek');
+    expect(result.model).toBe('main');
   });
 
   it('maps tools array to boolean map', () => {

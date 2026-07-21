@@ -729,6 +729,17 @@ function buildPruneOptions(s: WorkerAgentSettings): PruneOptions {
   };
 }
 
+function resolveAppAgentModel(
+  declaredModel: string | undefined,
+  settings: WorkerAgentSettings,
+): string {
+  const m = declaredModel || 'main';
+  if (m === 'main') return settings.model;
+  if (m === 'fast') return settings.fastModel || settings.model;
+  if (m === 'mentor') return settings.mentorModel || settings.model;
+  return m;
+}
+
 async function handleRunAppAgent(
   payload: AppAgentPayload,
   requestId: string
@@ -775,7 +786,7 @@ async function handleRunAppAgent(
     }
   }
 
-  const model = payload.model || cachedSettings.model || 'deepseek-chat';
+  const model = resolveAppAgentModel(payload.model, cachedSettings);
   const provider = buildProvider(cachedSettings);
   const maxToolRounds = Math.min(payload.maxToolRounds ?? 20, 50);
 
