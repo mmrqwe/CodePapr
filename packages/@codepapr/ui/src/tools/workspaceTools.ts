@@ -1661,7 +1661,7 @@ name: 'web_download_file',
               tools: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Agent 可用的工具白名单。可选：read, grep, list, graph, web_search, web_fetch, write, edit, exec。高危工具（write/edit/exec）需 permissions 中声明 workspace:write/exec。',
+                description: 'Agent 可用的工具白名单（可选）。不声明 = 继承主 Agent 全部工具（含 MCP、skill_load）。始终排除 task 和 app_render。高危工具（write/edit/exec）需 manifest.permissions 中声明 workspace:write/exec。',
               },
               maxToolRounds: {
                 type: 'number',

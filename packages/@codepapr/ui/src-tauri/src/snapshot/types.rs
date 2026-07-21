@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EnsureResult {
     pub ready: bool,
     pub created_repo: bool,
@@ -9,6 +10,7 @@ pub struct EnsureResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SnapshotInfo {
     pub sha: String,
     pub short_hash: String,
@@ -19,6 +21,7 @@ pub struct SnapshotInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileChange {
     pub path: String,
     pub old_path: Option<String>,
@@ -28,6 +31,7 @@ pub struct FileChange {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RestorePlan {
     pub target_sha: String,
     pub target_label: String,
@@ -38,6 +42,7 @@ pub struct RestorePlan {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RestoreResult {
     pub ok: bool,
     pub files_restored: usize,
@@ -47,6 +52,7 @@ pub struct RestoreResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileDiff {
     pub path: String,
     pub old_path: Option<String>,
@@ -57,6 +63,7 @@ pub struct FileDiff {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitStatusEntry {
     pub path: String,
     pub old_path: Option<String>,
@@ -66,6 +73,7 @@ pub struct GitStatusEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitStatusResult {
     pub available: bool,
     pub is_repo: bool,
@@ -76,6 +84,7 @@ pub struct GitStatusResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitDiffResult {
     pub available: bool,
     pub stat: String,
@@ -86,6 +95,7 @@ pub struct GitDiffResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitLogEntry {
     pub sha: String,
     pub short_hash: String,
@@ -98,6 +108,7 @@ pub struct GitLogEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitOperationResult {
     pub ok: bool,
     pub action: String,
@@ -106,6 +117,7 @@ pub struct GitOperationResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitBranch {
     pub name: String,
     pub is_current: bool,
@@ -114,6 +126,7 @@ pub struct GitBranch {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CommitChangedFiles {
     pub sha: String,
     pub parent_sha: Option<String>,

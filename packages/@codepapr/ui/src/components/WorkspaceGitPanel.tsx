@@ -24,6 +24,7 @@ import {
   type GitDiffMode,
   type GitFileSelection,
 } from '../utils/workspaceGitPanel';
+import { pushDebugLog } from '../store/debugLogStore';
 import {
   snapshotChangedFiles,
   snapshotEnsure,
@@ -95,6 +96,12 @@ function gitFileDisplayName(file: GitStatusFile): string {
 
 function isUntrackedGitFile(file: GitStatusFile): boolean {
   return file.indexStatus === '?' && file.worktreeStatus === '?';
+}
+
+function formatLocalTime(isoString: string): string {
+  const d = new Date(isoString);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function statusBadgeClassName(kind: ReturnType<typeof describeGitChange>['kind']): string {
@@ -227,11 +234,20 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
       }
 
       setIsLoading(true);
+      pushDebugLog('git', 'loadGitStatus start', { workspacePath, retryCount, cancelled });
       try {
         const [statusResult, logResult] = await Promise.all([
           gitStatusCmd(workspacePath),
           gitLogCmd(workspacePath, historyLimit),
         ]);
+
+        pushDebugLog('git', 'gitStatusCmd returned', {
+          available: statusResult.available,
+          isRepo: statusResult.isRepo,
+          entries: statusResult.entries?.length,
+          message: statusResult.message,
+          branch: statusResult.branch,
+        });
 
         if (!cancelled) {
           if (statusResult.available && statusResult.isRepo) {
@@ -266,14 +282,16 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
             } satisfies GitHistorySummary);
           } else if (retryCount < 1) {
             // 自动初始化 Shadow Git 仓库（最多重试 1 次，防止无限递归）
+            pushDebugLog('git', 'auto-init branch', { available: statusResult.available, isRepo: statusResult.isRepo });
             try {
               const ensureResult = await snapshotEnsure(workspacePath);
+              pushDebugLog('git', 'snapshotEnsure returned', { ready: ensureResult.ready, error: ensureResult.error });
               if (!cancelled && ensureResult.ready) {
                 void loadGitStatus(retryCount + 1);
                 return;
               }
-            } catch {
-              // 自动初始化失败，回退到手动模式
+            } catch (e) {
+              pushDebugLog('git/error', 'snapshotEnsure failed', e instanceof Error ? e.message : String(e));
             }
             if (!cancelled) {
               setGitHistory(null);
@@ -287,6 +305,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
             }
           } else {
             // 重试后仍然不可用，直接展示错误状态
+            pushDebugLog('git', 'retry exhausted', { available: statusResult.available, isRepo: statusResult.isRepo });
             if (!cancelled) {
               setGitHistory(null);
               setGitStatus({
@@ -300,6 +319,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
           }
         }
       } catch (gitError) {
+        pushDebugLog('git/error', 'loadGitStatus error', gitError instanceof Error ? gitError.message : String(gitError));
         if (!cancelled) {
           setGitHistory(null);
           setGitStatus({
@@ -330,6 +350,8 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     setGitFileDiffs({});
     setGitActionMessage('');
     setGitHistory(null);
+    setGitStatus(null);
+    setIsLoading(false);
     setBranchName('');
     setCommitMessage('');
     setSelectedHistoryHash(null);
@@ -826,7 +848,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
                   <span>{entry.authorName}</span>
                   <span aria-hidden>·</span>
-                  <span>{entry.committedAt.replace('T', ' ').slice(0, 16)}</span>
+                  <span>{formatLocalTime(entry.committedAt)}</span>
                   {cachedFiles && (
                     <>
                       <span aria-hidden>·</span>

@@ -4,6 +4,7 @@ import { useAgentStore, isApiConfigured } from './store/agentStore';
 import { usePreviewStore } from './store/previewStore';
 import { useAppRuntimeStore } from './store/appRuntimeStore';
 import { useCharactersStore } from './store/charactersStore';
+import { useDebugLogStore } from './store/debugLogStore';
 import { SessionManager } from './components/SessionManager';
 import { ChatPanel } from './components/ChatPanel';
 import { CodingWorkbench } from './components/CodingWorkbench';
@@ -51,6 +52,9 @@ const ProjectConfigModal = lazy(() =>
 );
 const ContextDebugModal = lazy(() =>
   import('./components/ContextDebugModal').then((m) => ({ default: m.ContextDebugModal }))
+);
+const DebugLogModal = lazy(() =>
+  import('./components/DebugLogModal').then((m) => ({ default: m.DebugLogModal }))
 );
 const CodePreviewPanel = lazy(() =>
   import('./components/CodePreviewPanel').then((m) => ({ default: m.CodePreviewPanel }))
@@ -137,6 +141,7 @@ export default function App() {
   const [showProjectStats, setShowProjectStats] = useState(false);
   const [showProjectConfig, setShowProjectConfig] = useState(false);
   const [showContextDebug, setShowContextDebug] = useState(false);
+  const [showDebugLog, setShowDebugLog] = useState(false);
   const [showCodeReview, setShowCodeReview] = useState<ReviewScope | null>(null);
   const [activeMainTab, setActiveMainTab] = useState<MainTab>('chat');
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -541,6 +546,21 @@ export default function App() {
                           {t.contextDebugButton}
                         </button>
                       )}
+                      {settings.debugEnabled && (
+                        <button
+                          type="button"
+                          onClick={() => setShowDebugLog(true)}
+                          title={t.debugLogTitle}
+                          className="flex-shrink-0 rounded-lg border border-[#2a2d3a] px-2.5 py-2 text-xs font-medium text-slate-300 transition-colors hover:border-amber-400 hover:text-amber-200"
+                        >
+                          {t.debugLogButton}
+                          {useDebugLogStore.getState().logs.length > 0 && (
+                            <span className="ml-1 inline-flex items-center justify-center rounded-full bg-amber-500/20 px-1.5 text-[9px] text-amber-300">
+                              {useDebugLogStore.getState().logs.length}
+                            </span>
+                          )}
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setShowProjectSwitcher(true)}
@@ -614,6 +634,15 @@ export default function App() {
             lang={settings.lang}
             onClose={() => setShowContextDebug(false)}
           />
+        )}
+
+        {showDebugLog && settings.debugEnabled && (
+          <Suspense fallback={null}>
+            <DebugLogModal
+              lang={settings.lang}
+              onClose={() => setShowDebugLog(false)}
+            />
+          </Suspense>
         )}
 
         {showCacheStats && (

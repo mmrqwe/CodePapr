@@ -753,13 +753,12 @@ async function handleRunAppAgent(
     return;
   }
 
-  const ALLOWED = new Set(['read', 'grep', 'list', 'graph', 'lsp', 'diagnostics', 'read_image', 'web_search', 'web_fetch', 'web_download', 'write', 'edit', 'patch', 'exec', 'shell']);
+  const BLOCKED = new Set(['task', 'app_render']);
   const requestedTools = payload.tools ?? [];
 
   const registry = new ToolRegistry();
   for (const tool of cachedToolDefinitions) {
-    if (!ALLOWED.has(tool.name)) continue;
-    if (tool.name === 'task') continue;
+    if (BLOCKED.has(tool.name)) continue;
     if (requestedTools.length > 0 && !requestedTools.includes(tool.name)) continue;
 
     registry.register(tool, async (args) => {

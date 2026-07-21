@@ -146,6 +146,8 @@ export declare const I18N_DICTS: {
         contextDebugEmpty: string;
         contextDebugRound: string;
         contextDebugNoSelection: string;
+    debugLogButton: string;
+    debugLogTitle: string;
         projectStatsTitle: string;
         projectStatsLoading: string;
         projectStatsUnavailable: string;
@@ -601,6 +603,8 @@ export declare const I18N_DICTS: {
         contextDebugEmpty: string;
         contextDebugRound: string;
         contextDebugNoSelection: string;
+    debugLogButton: string;
+    debugLogTitle: string;
         projectStatsTitle: string;
         projectStatsLoading: string;
         projectStatsUnavailable: string;
@@ -1054,6 +1058,8 @@ export declare const I18N_DICTS: {
         contextDebugEmpty: string;
         contextDebugRound: string;
         contextDebugNoSelection: string;
+    debugLogButton: string;
+    debugLogTitle: string;
         projectStatsTitle: string;
         projectStatsLoading: string;
         projectStatsUnavailable: string;
@@ -1495,6 +1501,8 @@ export declare function getTranslation(lang?: Lang): {
     contextDebugEmpty: string;
     contextDebugRound: string;
     contextDebugNoSelection: string;
+    debugLogButton: string;
+    debugLogTitle: string;
     projectStatsTitle: string;
     projectStatsLoading: string;
     projectStatsUnavailable: string;
@@ -1846,6 +1854,8 @@ export declare function getTranslation(lang?: Lang): {
     contextDebugEmpty: string;
     contextDebugRound: string;
     contextDebugNoSelection: string;
+    debugLogButton: string;
+    debugLogTitle: string;
     projectStatsTitle: string;
     projectStatsLoading: string;
     projectStatsUnavailable: string;
@@ -2197,6 +2207,8 @@ export declare function getTranslation(lang?: Lang): {
     contextDebugEmpty: string;
     contextDebugRound: string;
     contextDebugNoSelection: string;
+    debugLogButton: string;
+    debugLogTitle: string;
     projectStatsTitle: string;
     projectStatsLoading: string;
     projectStatsUnavailable: string;
