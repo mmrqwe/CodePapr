@@ -108,9 +108,13 @@
       info: function () {
         if (appInfo) return Promise.resolve(appInfo);
         return send('papr://app.info').then(function (info) {
+          info.backendUrl = window.__PAPR_BACKEND_URL || null;
           appInfo = info;
           return info;
         });
+      },
+      backendUrl: function () {
+        return window.__PAPR_BACKEND_URL || null;
       }
     }
   };

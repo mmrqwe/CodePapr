@@ -801,10 +801,16 @@ async function handleRunAppAgent(
   const maxToolRounds = Math.min(payload.maxToolRounds ?? 20, 50);
 
   const log = new AppendOnlyLog(`app-agent-${payload.appId}-${Date.now()}`);
+  const userPrompt = buildRuntimeUserPrompt({
+    mode: 'agent',
+    input: payload.task,
+    workspacePath,
+    lang: cachedSettings.lang,
+  });
   await log.append({
     id: `app-agent-user-${Date.now()}`,
     role: 'user',
-    content: payload.task,
+    content: userPrompt,
     timestamp: Date.now(),
   } as unknown as IMessage);
 
@@ -844,7 +850,7 @@ async function handleRunAppAgent(
   try {
     const response = await withWallClockTimeout(
       agent,
-      () => agent.chat(payload.task, (event) => {
+      () => agent.chat(userPrompt, (event) => {
         postMessageToMain({
           type: 'app-agent-stream',
           requestId,

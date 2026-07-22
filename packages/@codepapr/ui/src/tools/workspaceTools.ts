@@ -2087,6 +2087,65 @@ export function registerWorkspaceTools(
     };
   });
 
+  registry.register(toolByName('app_list'), async () => {
+    const apps = useAppRuntimeStore.getState().apps;
+    return apps.map((app) => ({
+      appId: app.appId,
+      title: app.title,
+      hasBackend: !!(app.command && app.port),
+      isRunning: !!(app.pid && app.url),
+      port: app.port ?? null,
+      url: app.url ?? null,
+    }));
+  });
+
+  registry.register(toolByName('app_start'), async (args: Record<string, unknown>) => {
+    const appId = asString(args.appId, 'appId');
+    const store = useAppRuntimeStore.getState();
+    const app = store.apps.find((a) => a.appId === appId);
+    if (!app) throw new Error(`应用 '${appId}' 不存在`);
+    if (!app.command || !app.port) throw new Error(`应用 '${appId}' 没有后端服务`);
+    if (app.pid) throw new Error(`应用 '${appId}' 后端已在运行 (pid: ${app.pid})`);
+
+    const available: boolean = await invoke('check_port_available', { port: app.port });
+    if (!available) throw new Error(`端口 ${app.port} 已被占用`);
+
+    const result = await invoke<{ pid: number }>('start_workspace_background_command', {
+      workspacePath: workspace(),
+      command: app.command,
+      args: app.args ?? [],
+    });
+    const url = `http://localhost:${app.port}/`;
+    useAppRuntimeStore.getState().setAppRunning(appId, result.pid, url);
+    return { appId, pid: result.pid, url, started: true };
+  });
+
+  registry.register(toolByName('app_stop'), async (args: Record<string, unknown>) => {
+    const appId = asString(args.appId, 'appId');
+    const store = useAppRuntimeStore.getState();
+    const app = store.apps.find((a) => a.appId === appId);
+    if (!app) throw new Error(`应用 '${appId}' 不存在`);
+    if (!app.pid) throw new Error(`应用 '${appId}' 后端未在运行`);
+
+    try { await invoke('stop_background_process', { pid: app.pid }); } catch { /* best-effort */ }
+    useAppRuntimeStore.getState().setAppStopped(appId);
+    return { appId, stopped: true };
+  });
+
+  registry.register(toolByName('app_delete'), async (args: Record<string, unknown>) => {
+    const appId = asString(args.appId, 'appId');
+    const store = useAppRuntimeStore.getState();
+    const app = store.apps.find((a) => a.appId === appId);
+    if (!app) throw new Error(`应用 '${appId}' 不存在`);
+
+    if (app.pid) {
+      try { await invoke('stop_background_process', { pid: app.pid }); } catch { /* best-effort */ }
+    }
+    try { await invoke('papr_delete_app', { appId }); } catch { /* best-effort */ }
+    useAppRuntimeStore.getState().closeApp(appId);
+    return { appId, deleted: true };
+  });
+
   registry.register(toolByName('workspace_run_command'), async (args: Record<string, unknown>) => {
     const parsed: RunCommandArgs = {
       command: asString(args.command, 'command'),

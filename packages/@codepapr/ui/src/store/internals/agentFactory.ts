@@ -147,6 +147,10 @@ class _MainThreadAgentHandle implements AgentRuntimeHandle {
   destroy(): void {
     this.cancel();
   }
+
+  runAppAgent(): Promise<never> {
+    return Promise.reject(new Error('App Agent is only available in Worker mode'));
+  }
 }
 
 function buildSubagentCacheStatsByTier(

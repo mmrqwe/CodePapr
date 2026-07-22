@@ -1,6 +1,5 @@
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
-import { invoke } from '@tauri-apps/api/core';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
 import type { PaprManifest } from '@codepapr/types';
@@ -15,7 +14,6 @@ export function AppModal({ lang }: AppModalProps) {
   const openedAppId = useAppRuntimeStore((state) => state.openedAppId);
   const apps = useAppRuntimeStore((state) => state.apps);
   const closeAppModal = useAppRuntimeStore((state) => state.closeAppModal);
-  const setAppStopped = useAppRuntimeStore((state) => state.setAppStopped);
   const reloadActiveApp = useAppRuntimeStore((state) => state.reloadActiveApp);
   const [error, setError] = useState('');
   const [showDetails, setShowDetails] = useState(false);
@@ -41,22 +39,11 @@ export function AppModal({ lang }: AppModalProps) {
     manifest,
   });
 
-  const handleCloseAndStop = useCallback(async () => {
-    if (openedApp?.pid) {
-      try { await invoke('stop_background_process', { pid: openedApp.pid }); } catch { /* best-effort */ }
-      setAppStopped(openedApp.appId);
-    } else {
-      closeAppModal();
-    }
-  }, [openedApp, closeAppModal, setAppStopped]);
-
   if (!openedApp) {
     return null;
   }
 
-  const iframeSrc = openedApp.url
-    ? openedApp.url
-    : `codepapr-app://localhost/${openedApp.appId}/index.html`;
+  const iframeSrc = `codepapr-app://localhost/${openedApp.appId}/index.html`;
 
   const hasMeta = (manifest?.permissions && manifest.permissions.length > 0)
     || (manifest?.agents && manifest.agents.length > 0);
@@ -66,7 +53,7 @@ export function AppModal({ lang }: AppModalProps) {
       <div className="flex shrink-0 items-center gap-2 border-b border-[#2a2d3a] px-3 py-2">
         <button
           type="button"
-          onClick={openedApp.pid ? handleCloseAndStop : closeAppModal}
+          onClick={closeAppModal}
           title={t.appModalClose}
           className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-slate-400 transition-colors hover:bg-[#1a1d28] hover:text-slate-200"
         >

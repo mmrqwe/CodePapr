@@ -3,7 +3,6 @@ import { invoke } from '@tauri-apps/api/core';
 import type { PaprManifest, PaprAgentDef, PaprAppSettings, PaprLevel } from '@codepapr/types';
 import { isPaprMessage, createPaprResponse } from './paprProtocol';
 import { usePermissionStore } from './permissionStore';
-import { getActiveAgent } from '../agent/WorkerBackedAgent';
 import { useAgentStore } from '../store/agentStore';
 
 const LEVEL_GRANTS: Record<number, Set<string>> = {
@@ -161,9 +160,9 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
           return;
         }
 
-        const agent = getActiveAgent();
+        const agent = useAgentStore.getState()._agent;
         if (!agent) {
-          respond(undefined, { code: 'NO_AGENT', message: 'No active agent session. Open a chat first.' });
+          respond(undefined, { code: 'NO_AGENT', message: '请先在对话中发送一条消息以初始化 Agent' });
           return;
         }
 

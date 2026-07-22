@@ -137,7 +137,23 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
 
     let body = if file_path.ends_with(".html") || file_path.ends_with(".htm") {
         let html = String::from_utf8_lossy(&content);
-        let injected = papr_runtime::sdk_inject::inject_sdk_into_html(&html);
+        let mut injected = papr_runtime::sdk_inject::inject_sdk_into_html(&html);
+
+        if let Ok(manifest) = papr_runtime::manifest::get_manifest(app_id) {
+            if let Some(port) = manifest.port {
+                let backend_script = format!(
+                    "\n<script>window.__PAPR_BACKEND_URL='http://localhost:{}';</script>",
+                    port
+                );
+                if let Some(pos) = injected.find("__papr_sdk.js") {
+                    if let Some(end) = injected[pos..].find('>') {
+                        let insert_at = pos + end + 1;
+                        injected.insert_str(insert_at, &backend_script);
+                    }
+                }
+            }
+        }
+
         injected.into_bytes()
     } else {
         content

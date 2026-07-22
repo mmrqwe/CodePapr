@@ -357,6 +357,51 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
       required: ['relativePath'],
     },
   },
+  // ──── 22. app_list ────
+  {
+    name: 'app_list',
+    description: '列出当前工作区中所有已注册的 .papr 应用。返回每个应用的 appId、标题、是否有后端、是否正在运行、端口号等信息。在创建新应用前调用此工具检查是否已存在同名应用。',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  // ──── 23. app_start ────
+  {
+    name: 'app_start',
+    description: '启动指定应用的后端服务。仅对有后端（command/port）的应用有效。启动后应用面板中该应用状态变为"运行中"，用户可点击"打开"查看。启动前会检查端口是否可用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: '要启动的应用 ID（kebab-case）。' },
+      },
+      required: ['appId'],
+    },
+  },
+  // ──── 24. app_stop ────
+  {
+    name: 'app_stop',
+    description: '停止指定应用的后端服务。仅对正在运行的后端应用有效。停止后应用状态恢复为"就绪"，后端进程被终止。',
+    parameters: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: '要停止的应用 ID（kebab-case）。' },
+      },
+      required: ['appId'],
+    },
+  },
+  // ──── 25. app_delete ────
+  {
+    name: 'app_delete',
+    description: '删除指定的 .papr 应用。会同时停止后端进程（如果正在运行）、删除 .CodePapr/apps/<appId>/ 目录、清除应用存储数据、取消工作区注册。删除后不可恢复。',
+    parameters: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: '要删除的应用 ID（kebab-case）。' },
+      },
+      required: ['appId'],
+    },
+  },
   // ──── 22. question ────
   {
     name: 'question',

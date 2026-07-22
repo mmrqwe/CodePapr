@@ -71,6 +71,10 @@ const UI_TOOL_DEFAULTS = [
   'web_download',
   'open',
   'app_render',
+  'app_list',
+  'app_start',
+  'app_stop',
+  'app_delete',
   'skill',
   'question',
   'task',
@@ -141,9 +145,12 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '你不需要写组件框架、路由、构建系统——只需要一个完整的 HTML 文件。',
 
       '## 工作流程',
-      '① 探索数据：用 workspace_read_file / workspace_list_files / workspace_search_text 了解数据源',
-      '② 生成 HTML：用 workspace_write_file 写入 .CodePapr/apps/<appId>/index.html',
-      '③ 调用 app_render：传入 appId、title、html，以及可选的 permissions、agents、command/args/port、icon',
+      '① app_list 检查现有应用（避免覆盖同名 app）',
+      '② 探索数据：用 workspace_read_file / workspace_list_files / workspace_search_text 了解数据源',
+      '③ 生成 HTML：用 workspace_write_file 写入 .CodePapr/apps/<appId>/index.html',
+      '④ 调用 app_render：传入 appId、title、html，以及可选的 permissions、agents、level、command/args/port、icon',
+      '⑤ 如果是后端 app -> app_start 启动后端服务',
+      '⑥ 如需清理旧 app -> app_delete 删除',
 
       '## Papr SDK — 前端可用的全部能力（window.papr）',
       '',
@@ -343,6 +350,9 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '## 後端服務 vs 純前端',
       '純前端（推薦預設）：HTML 內用 papr SDK 完成儲存/HTTP/Agent 調用。不需要後端。',
       '後端服務：需要讀寫專案資料庫、執行複雜查詢時，提供 command/args/port + files。',
+      '⚠️ 後端 app 的 HTML 中，API 調用必須用 window.__PAPR_BACKEND_URL 作為 base URL：',
+      '  const API = window.__PAPR_BACKEND_URL || "";',
+      '  fetch(`${API}/api/data`)  // -> http://localhost:<port>/api/data',
       '大部分場景用純前端 + papr SDK 就夠了。',
 
       '## 前端規範',
@@ -463,7 +473,10 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '## Backend vs Frontend-Only',
       'Frontend-only (recommended): Use papr SDK for storage/HTTP/Agent calls. No backend needed.',
       'Backend: Use command/args/port + files (server.js) when you need to read project databases or run complex queries.',
-      'Frontend communicates with backend via fetch() at localhost.',
+      '⚠️ In backend apps, API calls MUST use window.__PAPR_BACKEND_URL as base URL:',
+      '  const API = window.__PAPR_BACKEND_URL || "";',
+      '  fetch(`${API}/api/data`)  // -> http://localhost:<port>/api/data',
+      'Frontend always loads via codepapr-app:// protocol (SDK auto-injected).',
       'Most apps work fine with frontend-only + papr SDK — no server complexity.',
 
       '## Frontend Conventions',
@@ -914,6 +927,37 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
       lang === 'en' ? '### App Render' : lang === 'zh-TW' ? '### 應用渲染' : '### 应用渲染'
     );
     lines.push(...appRender);
+
+    if (isApp) {
+      lines.push(
+        lang === 'en'
+          ? '- [app_list] List all registered apps (appId, title, hasBackend, isRunning, port). Call before creating to check for duplicates.'
+          : lang === 'zh-TW'
+          ? '- [app_list] 列出所有已註冊應用（appId、標題、是否有後端、是否運行中、端口）。創建前調用檢查重複。'
+          : '- [app_list] 列出所有已注册应用（appId、标题、是否有后端、是否运行中、端口）。创建前调用检查重复。'
+      );
+      lines.push(
+        lang === 'en'
+          ? '- [app_start] Start a backend app\'s server by appId. Checks port availability. Returns {pid, url}.'
+          : lang === 'zh-TW'
+          ? '- [app_start] 按 appId 啟動後端服務。檢查端口可用性。返回 {pid, url}。'
+          : '- [app_start] 按 appId 启动后端服务。检查端口可用性。返回 {pid, url}。'
+      );
+      lines.push(
+        lang === 'en'
+          ? '- [app_stop] Stop a running backend app by appId.'
+          : lang === 'zh-TW'
+          ? '- [app_stop] 按 appId 停止正在運行的後端服務。'
+          : '- [app_stop] 按 appId 停止正在运行的后端服务。'
+      );
+      lines.push(
+        lang === 'en'
+          ? '- [app_delete] Delete an app by appId. Stops backend, removes files, clears storage. Irreversible.'
+          : lang === 'zh-TW'
+          ? '- [app_delete] 按 appId 刪除應用。停止後端、刪除檔案、清除存儲。不可恢復。'
+          : '- [app_delete] 按 appId 删除应用。停止后端、删除文件、清除存储。不可恢复。'
+      );
+    }
   }
 
   return lines;

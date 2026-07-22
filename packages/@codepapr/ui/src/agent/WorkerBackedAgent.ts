@@ -95,6 +95,10 @@ export interface AgentRuntimeHandle {
   destroy(): void;
   /** Returns true if the worker has crashed and can no longer process messages. */
   isCrashed(): boolean;
+  runAppAgent(
+    payload: AppAgentPayload,
+    onStream?: (event: IChatStreamEvent) => void,
+  ): Promise<AppAgentResult>;
 }
 
 export interface WorkerBackedAgentConfig {

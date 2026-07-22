@@ -21,8 +21,8 @@ describe('workspace intelligence tool definitions', () => {
 describe('NEW_TOOL_DEFINITIONS', () => {
   const tools = NEW_TOOL_DEFINITIONS;
 
-  it('contains 22 LLM-facing tools', () => {
-    expect(tools).toHaveLength(22);
+  it('contains 26 LLM-facing tools', () => {
+    expect(tools).toHaveLength(26);
   });
 
   const actionTools = ['graph', 'lsp', 'lsp_edit', 'git', 'browser', 'shell', 'proc'] as const;
