@@ -101,6 +101,37 @@ Apps must declare required permissions:
 
 Agent tool whitelist (declare in `agents[].tools`): `read`, `grep`, `list`, `graph`, `web_search`, `web_fetch`, `write`, `edit`, `exec`.
 
+### Permission Levels
+
+Apps declare a permission level via manifest `level` field (default L1):
+
+| Level | Capabilities |
+|---|---|
+| L0 Pure Compute | No external access, HTML/CSS/JS only |
+| L1 Runtime | `papr.db` + `papr.fs` + AI Agent (read-only tools) |
+| L2 Network | + `papr.http` + Agent web search + MCP |
+| L3 System | + file write/terminal/git (requires global toggle) |
+
+Settings → **App Tab** adjusts global default level, L3 toggle, and per-app overrides.
+
+### Application Management Panel
+
+The right panel's **Apps Tab** shows all registered .papr apps:
+
+- **Green dot** = running, **Red dot** = stopped
+- Click to select, double-click to open
+- Bottom button bar: ▶ Start / Open / ■ Stop / 🗑 Delete
+- Backend apps must be "started" before "open"
+
+### App Agent Management Tools
+
+LLM manages apps via 4 tools:
+
+- `app_list` — list all apps
+- `app_start <appId>` — start backend
+- `app_stop <appId>` — stop backend
+- `app_delete <appId>` — full delete
+
 ## Configuration
 
 ### Configuration Storage Locations
@@ -112,13 +143,14 @@ Agent tool whitelist (declare in `agents[].tools`): `read`, `grep`, `list`, `gra
 
 ### Settings Panel
 
-Five tabs:
+Six tabs:
 
 - **General**: Language, debug toggle, license
 - **LLM**: Primary model, fast model, temperature, topP, maxTokens, thinking mode, maxToolRounds
 - **Search**: Self-hosted SearXNG first, with automatic fallback to built-in multi-source aggregation (Bing / Mojeek / Qwant / Wikipedia); category/time/language/safe search parameters are in the collapsible Advanced section; the engine selector has been removed from the UI
 - **Mentor**: Mentor sub-agent independent API key, Base URL, model selection
 - **Advanced**: Context compaction (model/temperature/tokens/context limit/conversation rounds), TodoList max retries, ProjectGraph limits
+- **App**: .papr app permission management — global default level, Level 3 global toggle, per-app level overrides
 
 Voice configuration is not in the main settings panel — it is configured per character in the CharacterModal Voice Tab.
 

@@ -716,6 +716,8 @@ https://api.deepseek.com/v1</code></pre>
           <li>App ↔ coding mode switch -> create a new session</li>
         </ul>
         <p><strong>Model Strategy:</strong> Always uses the primary model (deepseek-v4-pro) to ensure HTML generation quality.</p>
+        <p><strong>App Management:</strong> The right panel's "Apps" tab shows all registered .papr apps. Green/red dots indicate running status. Bottom toolbar: ▶ Start / Open / ■ Stop / 🗑 Delete. LLM manages app lifecycle via <code>app_list</code>, <code>app_start</code>, <code>app_stop</code>, <code>app_delete</code> tools.</p>
+        <p><strong>Permission Levels:</strong> Apps declare a permission tier via manifest.level (L0 Pure Compute / L1 Runtime / L2 Network / L3 System, default L1). Settings → App Tab manages global default level and per-app overrides.</p>
 
         <h3>App Mode Example Scenarios</h3>
         <ul>
@@ -954,7 +956,11 @@ After the change, at least run verification for the affected scope; if no narrow
         <table>
           <thead><tr><th>Tool</th><th>Capability</th></tr></thead>
           <tbody>
-            <tr><td><code>app_render</code></td><td>Generate .papr Apps and render to the Application panel; auto-writes manifest.json + index.html. Supports declaring permissions and AI Agent definitions. HTML can use <code>window.papr</code> SDK for Agent/storage/HTTP/filesystem. Same appId updates in place.</td></tr>
+            <tr><td><code>app_render</code></td><td>Generate .papr Apps and render to the Application panel; auto-writes manifest.json + index.html. Supports declaring permissions, agents, and level (permission tier 0-3). HTML uses <code>window.papr</code> SDK for Agent/storage/HTTP/filesystem. Same appId updates in place.</td></tr>
+            <tr><td><code>app_list</code></td><td>List all registered .papr apps (name, has backend, is running). Call before creating to check for duplicates.</td></tr>
+            <tr><td><code>app_start</code></td><td>Start backend service by appId. Checks port availability, turns status green.</td></tr>
+            <tr><td><code>app_stop</code></td><td>Stop backend service by appId. Turns status red.</td></tr>
+            <tr><td><code>app_delete</code></td><td>Delete app by appId. Stops backend, removes files, clears storage. Irreversible.</td></tr>
           </tbody>
         </table>
 

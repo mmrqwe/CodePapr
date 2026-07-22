@@ -232,6 +232,40 @@ papr.db.set('key', value) → project.sqlite.app_storage(app_id, key, value)
 
 不同 app 同名 key 完全隔离，通过 `app_id` 主键前缀保证。
 
+**App 管理工具：**
+
+LLM 可通过 4 个工具管理 app 生命周期（在 `workspaceTools.ts` 注册为 merge tool）：
+
+| 工具 | 参数 | 功能 |
+|---|---|---|
+| `app_list` | 无 | 列出所有已注册 app（appId、title、hasBackend、isRunning） |
+| `app_start` | `appId` | 启动后端服务（检查端口 → `start_workspace_background_command` → `setAppRunning`） |
+| `app_stop` | `appId` | 停止后端服务（`stop_background_process` → `setAppStopped`） |
+| `app_delete` | `appId` | 彻底删除（停止 + `papr_delete_app` 删文件 + `closeApp`） |
+
+**AppDockPanel — 应用管理面板：**
+
+应用列表 + 底部固定按钮栏。列表项：绿/红状态圆点 + emoji 图标 + app 名称。底部栏：▶ 启动 / 打开 / ■ 停止 / 🗑 删除。按钮根据选中 app 的状态自动启用/禁用。纯前端 app 的"打开"始终可用；后端 app 的"打开"仅在已启动时可用。
+
+**权限分级（4 级）：**
+
+app 可通过 manifest 的 `level` 字段声明权限级别：
+
+| Level | 名称 | 可用能力 |
+|---|---|---|
+| L0 | 纯计算 | 无外部访问，仅 HTML/CSS/JS 渲染 |
+| L1 | Runtime（默认） | `papr.db` + `papr.fs` + AI Agent（只读工具：read/grep/list/graph/lsp） |
+| L2 | 联网 | + `papr.http` + Agent 联网搜索 + MCP 工具 |
+| L3 | 系统 | + 文件写入/终端/Git。需用户在设置中全局开启 |
+
+权限解析：`effective_level = min(manifest.level, user_override, global_allowLevel3_switch)`。设置面板新增 **App Tab**（`AppPermissionsTab.tsx`）：全局默认级别选择器、Level 3 全局开关、逐 app 覆盖下拉框。
+
+**后端 URL 注入：**
+
+`handle_app_protocol` 检测 manifest 中的 `port` 字段，在 HTML 响应中注入 `window.__PAPR_BACKEND_URL = 'http://localhost:{port}'`。生成的后端 app HTML 使用 `const API = window.__PAPR_BACKEND_URL || ""` 作为 API base URL。SDK 的 `papr.app.info()` 返回 `backendUrl` 字段。前端始终通过 `codepapr-app://` 协议加载（SDK 自动注入），后端只提供 API 端点。
+
+**CSP 修复：** `tauri.conf.json` 的 `frame-src` 和 `script-src` 中添加 `codepapr-app:` 协议，解决 iframe 加载自定义协议 URL 时被 CSP 拦截导致白屏的问题。
+
 ## 5. 角色与语音系统
 
 ### 5.1 角色扮演

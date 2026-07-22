@@ -232,6 +232,40 @@ papr.db.set('key', value) → project.sqlite.app_storage(app_id, key, value)
 
 Same key in different apps is fully isolated via `app_id` primary key prefix.
 
+**App Management Tools:**
+
+LLM can manage app lifecycle via 4 tools (registered as merge tools in `workspaceTools.ts`):
+
+| Tool | Params | Function |
+|---|---|---|
+| `app_list` | none | List all registered apps (appId, title, hasBackend, isRunning) |
+| `app_start` | `appId` | Start backend (check port → `start_workspace_background_command` → `setAppRunning`) |
+| `app_stop` | `appId` | Stop backend (`stop_background_process` → `setAppStopped`) |
+| `app_delete` | `appId` | Full delete (stop + `papr_delete_app` delete files + `closeApp`) |
+
+**AppDockPanel — Application Management Panel:**
+
+App list + fixed bottom action bar. List items: green/red status dot + emoji icon + app name. Bottom bar: ▶ Start / Open / ■ Stop / 🗑 Delete. Buttons auto-enable/disable based on selected app state. "Open" for pure frontend apps is always enabled; for backend apps, only when running.
+
+**Permission Level System (4 Tiers):**
+
+Apps declare a permission level via manifest `level` field:
+
+| Level | Name | Capabilities |
+|---|---|---|
+| L0 | Pure Compute | No external access, HTML/CSS/JS only |
+| L1 | Runtime (default) | `papr.db` + `papr.fs` + AI Agent (read-only tools: read/grep/list/graph/lsp) |
+| L2 | Network | + `papr.http` + Agent web search + MCP tools |
+| L3 | System | + file write/terminal/git. Requires global user enable in Settings |
+
+Resolution: `effective_level = min(manifest.level, user_override, global_allowLevel3_switch)`. Settings has a new **App Tab** (`AppPermissionsTab.tsx`): global default level selector, Level 3 global toggle, per-app override dropdowns.
+
+**Backend URL Injection:**
+
+`handle_app_protocol` detects the `port` field in manifest and injects `window.__PAPR_BACKEND_URL = 'http://localhost:{port}'` into HTML responses. Generated backend app HTML uses `const API = window.__PAPR_BACKEND_URL || ""` as API base URL. SDK's `papr.app.info()` returns `backendUrl`. Frontend always loads via `codepapr-app://` protocol (SDK auto-injected), backend only serves API endpoints.
+
+**CSP Fix:** Added `codepapr-app:` to `frame-src` and `script-src` in `tauri.conf.json` CSP, fixing white screen when iframe loads custom protocol URLs that were blocked by CSP.
+
 ## 5. Character and Voice System
 
 ### 5.1 Character Roleplay

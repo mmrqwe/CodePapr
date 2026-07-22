@@ -716,6 +716,8 @@ https://api.deepseek.com/v1</code></pre>
           <li>App ↔ 编码模式互切换 -> 新建会话</li>
         </ul>
         <p><strong>模型策略：</strong>始终使用主模型（deepseek-v4-pro）以保证 HTML 生成质量。</p>
+        <p><strong>应用管理：</strong>右侧面板的"应用"Tab 显示所有已注册的 .papr App。绿/红圆点指示运行状态。底部工具栏：▶ 启动 / 打开 / ■ 停止 / 🗑 删除。LLM 可通过 <code>app_list</code>、<code>app_start</code>、<code>app_stop</code>、<code>app_delete</code> 工具管理应用生命周期。</p>
+        <p><strong>权限分级：</strong>App 通过 manifest.level 声明权限级别（L0 纯计算 / L1 Runtime / L2 联网 / L3 系统，默认 L1）。设置 → App Tab 管理全局默认级别和逐 app 覆盖。</p>
 
         <h3>App 模式典型场景</h3>
         <ul>
@@ -954,7 +956,11 @@ https://api.deepseek.com/v1</code></pre>
         <table>
           <thead><tr><th>工具</th><th>能力</th></tr></thead>
           <tbody>
-            <tr><td><code>app_render</code></td><td>生成 .papr App 并渲染到应用面板；自动写 manifest.json + index.html。支持声明 permissions（权限）和 agents（AI Agent 定义）。HTML 可使用 <code>window.papr</code> SDK 调用 Agent/存储/HTTP/文件系统能力。相同 appId 覆盖更新。</td></tr>
+            <tr><td><code>app_render</code></td><td>生成 .papr App 并渲染到应用面板；自动写 manifest.json + index.html。支持声明 permissions、agents、level（权限级别 0-3）。HTML 可使用 <code>window.papr</code> SDK 调用 Agent/存储/HTTP/文件系统。相同 appId 覆盖更新。</td></tr>
+            <tr><td><code>app_list</code></td><td>列出所有已注册 .papr App（名称、是否有后端、是否运行中）。创建前调用检查重复。</td></tr>
+            <tr><td><code>app_start</code></td><td>按 appId 启动后端服务。检查端口可用性，成功后绿点亮起。</td></tr>
+            <tr><td><code>app_stop</code></td><td>按 appId 停止后端服务。停止后绿点变红。</td></tr>
+            <tr><td><code>app_delete</code></td><td>按 appId 彻底删除 App。停止后端、删除文件、清除存储。不可恢复。</td></tr>
           </tbody>
         </table>
 

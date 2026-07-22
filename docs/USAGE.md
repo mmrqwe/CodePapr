@@ -101,6 +101,37 @@ App 需要声明所需权限：
 
 Agent 工具白名单（在 `agents[].tools` 声明）：`read`、`grep`、`list`、`graph`、`web_search`、`web_fetch`、`write`、`edit`、`exec`。
 
+### 权限分级
+
+App 通过 manifest 的 `level` 字段声明权限级别（默认 L1）：
+
+| Level | 可用能力 |
+|---|---|
+| L0 纯计算 | 无外部访问，仅 HTML/CSS/JS 渲染 |
+| L1 Runtime | `papr.db` + `papr.fs` + AI Agent（只读工具） |
+| L2 联网 | + `papr.http` + Agent 联网搜索 + MCP |
+| L3 系统 | + 文件写入/终端/Git（需全局开关） |
+
+设置 → **App Tab** 可调整全局默认级别、开启 L3 开关、逐 app 覆盖。
+
+### 应用管理面板
+
+右侧面板的 **应用 Tab** 显示所有已注册的 .papr App：
+
+- **绿点** = 运行中，**红点** = 已停止
+- 单击行选中，双击打开
+- 底部按钮栏：▶ 启动 / 打开 / ■ 停止 / 🗑 删除
+- 后端 app 必须先"启动"才能"打开"
+
+### App Agent 管理工具
+
+LLM 可通过 4 个工具管理 app：
+
+- `app_list` — 列出所有 app
+- `app_start <appId>` — 启动后端
+- `app_stop <appId>` — 停止后端
+- `app_delete <appId>` — 彻底删除
+
 ## 配置
 
 ### 配置存放位置
@@ -112,13 +143,14 @@ Agent 工具白名单（在 `agents[].tools` 声明）：`read`、`grep`、`list
 
 ### 设置面板
 
-五个标签页：
+六个标签页：
 
 - **General**：语言、调试、许可证
 - **LLM**：主模型、快速模型、temperature、topP、maxTokens、thinking 模式、maxToolRounds
 - **Search**：自部署 SearXNG 优先，失败自动降级到内置多源聚合（Bing / Mojeek / Qwant / Wikipedia）；分类/时间/语言/安全搜索等高级参数收入折叠区，搜索引擎选择器已移除
 - **Mentor**：Mentor 子代理独立 API key、Base URL、模型选择
 - **高级**：上下文压缩（模型/温度/token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 限制
+- **App**：.papr 应用权限管理——全局默认级别、Level 3 全局开关、逐应用级别覆盖
 
 语音配置不在主设置面板，而在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。
 
