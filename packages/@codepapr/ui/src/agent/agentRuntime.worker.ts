@@ -755,10 +755,21 @@ async function handleRunAppAgent(
 
   const BLOCKED = new Set(['task', 'app_render']);
   const requestedTools = payload.tools ?? [];
+  const level = payload.level ?? 1;
+
+  const LEVEL_TOOLS: Record<number, Set<string>> = {
+    0: new Set(),
+    1: new Set(['read', 'grep', 'list', 'graph', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'question', 'todo', 'local_time_now']),
+    2: new Set(['read', 'grep', 'list', 'graph', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'question', 'todo', 'local_time_now', 'web_search', 'web_fetch', 'web_download']),
+    3: new Set(['read', 'grep', 'list', 'graph', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'question', 'todo', 'local_time_now', 'web_search', 'web_fetch', 'web_download', 'write', 'edit', 'patch', 'exec', 'shell']),
+  };
+  const levelAllowed = LEVEL_TOOLS[level] ?? LEVEL_TOOLS[1];
 
   const registry = new ToolRegistry();
   for (const tool of cachedToolDefinitions) {
     if (BLOCKED.has(tool.name)) continue;
+    if (!levelAllowed.has(tool.name) && !tool.name.startsWith('mcp__')) continue;
+    if (level < 2 && tool.name.startsWith('mcp__')) continue;
     if (requestedTools.length > 0 && !requestedTools.includes(tool.name)) continue;
 
     registry.register(tool, async (args) => {

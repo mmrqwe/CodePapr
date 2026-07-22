@@ -1,10 +1,43 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import type { PaprManifest, PaprAgentDef } from '@codepapr/types';
+import type { PaprManifest, PaprAgentDef, PaprAppSettings, PaprLevel } from '@codepapr/types';
 import { isPaprMessage, createPaprResponse } from './paprProtocol';
 import { usePermissionStore } from './permissionStore';
 import { getActiveAgent } from '../agent/WorkerBackedAgent';
 import { useAgentStore } from '../store/agentStore';
+
+const LEVEL_GRANTS: Record<number, Set<string>> = {
+  0: new Set(),
+  1: new Set(['storage:read', 'storage:write', 'fs:read', 'fs:write', 'llm:chat', 'agent:run:*', 'workspace:read']),
+  2: new Set(['storage:read', 'storage:write', 'fs:read', 'fs:write', 'llm:chat', 'agent:run:*', 'workspace:read', 'http:get', 'http:post']),
+  3: new Set(['storage:read', 'storage:write', 'fs:read', 'fs:write', 'llm:chat', 'agent:run:*', 'workspace:read', 'http:get', 'http:post', 'workspace:write', 'workspace:exec']),
+};
+
+function levelAllows(level: number, capability: string): boolean {
+  const grants = LEVEL_GRANTS[level] ?? LEVEL_GRANTS[1];
+  if (grants.has(capability)) return true;
+  const prefix = capability.split(':')[0];
+  if (grants.has(prefix)) return true;
+  if (capability.startsWith('agent:run:')) return grants.has('agent:run:*');
+  return false;
+}
+
+function resolveEffectiveLevel(
+  manifestLevel: PaprLevel | undefined,
+  settings: PaprAppSettings | null,
+  appId: string,
+): PaprLevel {
+  if (!settings) return 1;
+  const manifestLvl = (manifestLevel ?? settings.defaultLevel) as PaprLevel;
+  const userOverride = settings.appOverrides[appId] as PaprLevel | undefined;
+  let effective: PaprLevel = userOverride !== undefined
+    ? Math.min(userOverride, manifestLvl) as PaprLevel
+    : manifestLvl;
+  if (effective >= 3 && !settings.allowLevel3) {
+    effective = 2 as PaprLevel;
+  }
+  return effective;
+}
 
 interface UsePaprBridgeOptions {
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
@@ -14,12 +47,16 @@ interface UsePaprBridgeOptions {
 
 export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptions) {
   const cacheManifest = usePermissionStore((s) => s.cacheManifest);
+  const [appSettings, setAppSettings] = useState<PaprAppSettings | null>(null);
 
   useEffect(() => {
     if (manifest) {
       cacheManifest(appId, manifest);
     }
+    invoke<PaprAppSettings>('papr_get_app_settings').then(setAppSettings).catch(() => {});
   }, [appId, manifest, cacheManifest]);
+
+  const effectiveLevel: PaprLevel = resolveEffectiveLevel(manifest?.level, appSettings, appId);
 
   const handleMessage = useCallback(
     (event: MessageEvent) => {
@@ -39,6 +76,8 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
       const permissions = resolvedManifest.permissions ?? [];
 
       function hasPermission(capability: string): boolean {
+        if (!levelAllows(effectiveLevel, capability)) return false;
+        if (permissions.length === 0 && levelAllows(effectiveLevel, capability)) return true;
         if (permissions.includes(capability as never)) return true;
         const prefix = capability.split(':')[0];
         return permissions.includes(prefix as never);
@@ -47,7 +86,7 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
       function deny(capability: string) {
         const resp = createPaprResponse(data.reqId, undefined, {
           code: 'PERMISSION_DENIED',
-          message: `Permission denied: '${capability}' not in manifest`,
+          message: `Permission denied: '${capability}' (app level ${effectiveLevel})`,
         });
         iframeRef.current?.contentWindow?.postMessage(resp, '*');
       }
@@ -59,7 +98,6 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
 
       const type = data.type;
 
-      // ── db.* ─────────────────────────────────────────────────────
       if (type === 'papr://db.get') {
         if (!hasPermission('storage:read')) return deny('storage:read');
         const key = (data.payload as Record<string, unknown>)?.key as string;
@@ -95,13 +133,13 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
         return;
       }
 
-      // ── app.info ─────────────────────────────────────────────────
       if (type === 'papr://app.info') {
         respond({
           appId,
           name: resolvedManifest.name,
           version: resolvedManifest.version ?? '0.0.0',
           permissions: resolvedManifest.permissions ?? [],
+          level: effectiveLevel,
         });
         return;
       }
@@ -141,6 +179,7 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
             tools: agentDef.tools,
             maxToolRounds: agentDef.maxToolRounds,
             workspacePath,
+            level: effectiveLevel,
           },
           (event) => {
             iframeRef.current?.contentWindow?.postMessage({
@@ -156,7 +195,6 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
         return;
       }
 
-      // ── http.* ────────────────────────────────────────────────────
       if (type === 'papr://http.get') {
         if (!hasPermission('http:get')) return deny('http:get');
         const payload = data.payload as Record<string, unknown> | undefined;
@@ -184,7 +222,6 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
         return;
       }
 
-      // ── fs.* ──────────────────────────────────────────────────────
       if (type === 'papr://fs.read') {
         if (!hasPermission('fs:read')) return deny('fs:read');
         const payload = data.payload as Record<string, unknown> | undefined;
@@ -240,7 +277,7 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
         message: `Unknown request type: ${type}`,
       });
     },
-    [appId, manifest, iframeRef],
+    [appId, manifest, iframeRef, effectiveLevel, appSettings],
   );
 
   useEffect(() => {

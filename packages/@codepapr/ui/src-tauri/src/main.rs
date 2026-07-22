@@ -336,6 +336,8 @@ fn main() {
             papr_runtime::app_storage::papr_storage_keys,
             papr_runtime::app_storage::papr_get_manifest,
             papr_runtime::app_storage::papr_agent_run,
+            papr_runtime::app_storage::papr_get_app_settings,
+            papr_runtime::app_storage::papr_set_app_settings,
             papr_runtime::services::papr_http_get,
             papr_runtime::services::papr_http_post,
             papr_runtime::services::papr_fs_read,

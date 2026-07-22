@@ -66,7 +66,7 @@ pub async fn papr_http_get(
     max_bytes: Option<usize>,
 ) -> Result<PaprHttpResult, String> {
     let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
-    permission::check_permission(&manifest, "http:get")?;
+    permission::check_permission(&manifest, &app_id, "http:get")?;
 
     let parsed_url = parse_browser_url(&url)?;
     if !parsed_url.starts_with("https://") && !parsed_url.starts_with("http://") {
@@ -122,7 +122,7 @@ pub async fn papr_http_post(
     content_type: Option<String>,
 ) -> Result<PaprHttpResult, String> {
     let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
-    permission::check_permission(&manifest, "http:post")?;
+    permission::check_permission(&manifest, &app_id, "http:post")?;
 
     let parsed_url = parse_browser_url(&url)?;
     if !parsed_url.starts_with("https://") && !parsed_url.starts_with("http://") {
@@ -176,7 +176,7 @@ pub fn papr_fs_read(
     max_bytes: Option<usize>,
 ) -> Result<String, String> {
     let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
-    permission::check_permission(&manifest, "fs:read")?;
+    permission::check_permission(&manifest, &app_id, "fs:read")?;
 
     let ctx = crate::papr_runtime::app_context::get(&app_id)?;
     if path.contains("..") || path.contains('\\') {
@@ -207,7 +207,7 @@ pub fn papr_fs_write(
     content: String,
 ) -> Result<(), String> {
     let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
-    permission::check_permission(&manifest, "fs:write")?;
+    permission::check_permission(&manifest, &app_id, "fs:write")?;
 
     let ctx = crate::papr_runtime::app_context::get(&app_id)?;
     if path.contains("..") || path.contains('\\') || path.is_empty() {
@@ -246,7 +246,7 @@ pub fn papr_fs_list(
     path: Option<String>,
 ) -> Result<Vec<PaprFsEntry>, String> {
     let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
-    permission::check_permission(&manifest, "fs:read")?;
+    permission::check_permission(&manifest, &app_id, "fs:read")?;
 
     let ctx = crate::papr_runtime::app_context::get(&app_id)?;
     let subpath = path.unwrap_or_else(|| ".".to_string());
@@ -287,7 +287,7 @@ pub fn papr_fs_delete(
     path: String,
 ) -> Result<(), String> {
     let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
-    permission::check_permission(&manifest, "fs:write")?;
+    permission::check_permission(&manifest, &app_id, "fs:write")?;
 
     let ctx = crate::papr_runtime::app_context::get(&app_id)?;
     if path.contains("..") || path.contains('\\') || path.is_empty() {
@@ -363,6 +363,7 @@ mod tests {
             command: None,
             args: None,
             port: None,
+            level: None,
         };
         manifest::store_manifest(app_id, m);
     }
@@ -452,6 +453,7 @@ mod tests {
             command: None,
             args: None,
             port: None,
+            level: None,
         };
         manifest::store_manifest("noperm-app", m);
 

@@ -8,12 +8,13 @@ import {
   useAgentStore,
 } from '../store/agentStore';
 import { DEEPSEEK_MAX_TOKENS } from '@codepapr/api/tokenLimits';
+import { AppPermissionsTab } from './AppPermissionsTab';
 import { OpenAIProvider, ClaudeProvider } from '@codepapr/api';
 import { BUILTIN_AGENTS, resolveAgentPrompt } from '@codepapr/core';
 import { getTranslation, Lang } from '../utils/i18n';
 import { LicenseModal } from './LicenseModal';
 
-type SettingsTab = 'general' | 'llm' | 'search' | 'mentor' | 'advanced';
+type SettingsTab = 'general' | 'llm' | 'search' | 'mentor' | 'advanced' | 'app';
 
 const MODEL_PRESETS: Record<ApiMode | ApiFormat, string[]> = {
   deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner'],
@@ -84,6 +85,7 @@ export function SettingsModal() {
       search: ['searxngEnabled', 'searxngBaseUrl', 'searxngCategories', 'searxngTimeRange', 'searxngLanguage', 'searxngSafeSearch'],
       mentor: ['mentorEnabled', 'mentorApiFormat', 'mentorBaseURL', 'mentorApiKey', 'mentorModel', 'mentorMaxTokens', 'mentorThinkingEnabled', 'maxMentorConsultations', 'explorePrompt', 'scoutPrompt', 'mentorPrompt', 'exploreTemperature', 'exploreMaxToolRounds', 'exploreMaxTokens', 'exploreTopP', 'exploreMaxDepth', 'exploreThinkingEnabled', 'scoutTemperature', 'scoutMaxToolRounds', 'scoutMaxTokens', 'scoutTopP', 'scoutMaxDepth', 'scoutThinkingEnabled'],
       advanced: ['compactionModel', 'compactionMaxTokens', 'compactionTemperature', 'maxContextTokens', 'maxConversationRounds', 'todoMaxRetries', 'goalMaxIterations', 'goalMaxWallClockMs', 'goalRequireGitClean', 'verifierModelTier', 'verifierMaxTokens', 'verifierTemperature', 'projectGraphMaxDepth', 'projectGraphMaxFiles', 'projectGraphMaxEdges', 'projectGraphMaxSymbolsPerFile', 'projectGraphMaxFileBytes', 'projectGraphMaxTreeEntries'],
+      app: [],
     };
     const resetPart: Partial<Settings> = {};
     for (const key of tabKeys[tab]) {
@@ -218,6 +220,13 @@ export function SettingsModal() {
       type: t.settingsAdvancedType,
       desc: t.settingsAdvancedDesc,
       tip: t.settingsAdvancedTabTip,
+    },
+    {
+      id: 'app',
+      label: 'App',
+      type: 'Application',
+      desc: 'App 权限管理',
+      tip: '管理 .papr 应用的权限级别',
     },
   ];
 
@@ -1421,6 +1430,12 @@ export function SettingsModal() {
               </div>
           </div>
         )}
+
+          {activeTab === 'app' && (
+            <div className="flex flex-col gap-4">
+              <AppPermissionsTab />
+            </div>
+          )}
 
           {settingsError && (
             <div className="mt-5 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">

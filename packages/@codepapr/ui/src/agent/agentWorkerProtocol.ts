@@ -167,6 +167,7 @@ export interface AppAgentPayload {
   tools?: string[];
   maxToolRounds?: number;
   workspacePath?: string;
+  level?: number;
 }
 
 export interface AppAgentResult {

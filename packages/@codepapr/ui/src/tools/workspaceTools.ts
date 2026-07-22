@@ -1648,7 +1648,11 @@ name: 'web_download_file',
         permissions: {
           type: 'array',
           items: { type: 'string' },
-          description: '可选。应用需要的权限列表。可选值：storage:read, storage:write, http:get, http:post, fs:read, fs:write, llm:chat, agent:run:<agentName>。例如 ["storage:read", "storage:write", "agent:run:assistant"]。',
+          description: '可选。应用需要的权限列表（必须是 level 允许范围内的子集）。可选值：storage:read, storage:write, http:get, http:post, fs:read, fs:write, llm:chat, agent:run:<agentName>, workspace:read, workspace:write, workspace:exec。',
+        },
+        level: {
+          type: 'number',
+          description: '权限级别 0-3。L0=纯计算, L1=Runtime（存储+LLM+只读工作区，默认）, L2=联网（+HTTP+搜索+MCP）, L3=系统（+文件写入+终端+Git，需用户全局开启）。',
         },
         agents: {
           type: 'array',
@@ -2002,6 +2006,7 @@ export function registerWorkspaceTools(
       version: '0.1.0',
       entry: 'index.html',
       permissions,
+      level: typeof args.level === 'number' ? args.level : 1,
       agents: agents.map((a) => ({
         name: a.name,
         model: a.model ?? 'main',

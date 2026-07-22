@@ -574,6 +574,14 @@ export type PaprPermission =
   | 'workspace:exec'
   | `agent:run:${string}`;
 
+export type PaprLevel = 0 | 1 | 2 | 3;
+
+export interface PaprAppSettings {
+  defaultLevel: PaprLevel;
+  allowLevel3: boolean;
+  appOverrides: Record<string, PaprLevel>;
+}
+
 export interface PaprManifest {
   spec: string;
   name: string;
@@ -584,6 +592,7 @@ export interface PaprManifest {
   command?: string;
   args?: string[];
   port?: number;
+  level?: PaprLevel;
 }
 
 export interface PaprIPCRequest {
