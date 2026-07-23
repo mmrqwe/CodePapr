@@ -30,7 +30,8 @@ export function AgentOpsPanel({
   onOpenSettings, onOpenMcpSettings, onOpenCharacters, onOpenCacheStats,
   onOpenAbout, isDark, onToggleTheme, onNavigateToFile,
 }: AgentOpsPanelProps) {
-  const { settings, isLoading } = useAgentStore();
+  const settings = useAgentStore((state) => state.settings);
+  const isLoading = useAgentStore((state) => state.isLoading);
   const t = getTranslation(settings.lang);
   const copy = getOpsCopy(settings.lang);
   const activeCharacterId = useCharactersStore((state) => state.activeCharacterId);

@@ -275,6 +275,8 @@ fn main() {
             shell::background::stop_all_background_processes,
             workspace_fs::search::search_workspace_text,
             workspace_fs::search::search_workspace_paths,
+            workspace_fs::watcher::start_workspace_watcher,
+            workspace_fs::watcher::stop_workspace_watcher,
             web::search::search_web,
             web::fetch::fetch_web_url,
             web::fetch::download_web_file,
@@ -351,6 +353,7 @@ fn main() {
                 lsp::stop_all_servers();
                 tts::tts_server_stop_internal();
                 let _ = shell::background::stop_all_background_processes(None);
+                workspace_fs::watcher::stop_workspace_watcher_impl();
             }
         })
         .run(tauri::generate_context!())

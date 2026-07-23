@@ -119,8 +119,11 @@ export interface CacheStatsDashboardProps {
 }
 
 export function CacheStatsDashboard({ lang, collapsible = true }: CacheStatsDashboardProps) {
-  const agentStore = useAgentStore();
-  const { settings, sessions, activeSessionId, conversationStats, sessionConversationStats } = agentStore;
+  const settings = useAgentStore((state) => state.settings);
+  const sessions = useAgentStore((state) => state.sessions);
+  const activeSessionId = useAgentStore((state) => state.activeSessionId);
+  const conversationStats = useAgentStore((state) => state.conversationStats);
+  const sessionConversationStats = useAgentStore((state) => state.sessionConversationStats);
   const [collapsed, setCollapsed] = useState(collapsible);
   const [viewMode, setViewMode] = useState<'conversation' | 'project'>('conversation');
   const t = getTranslation(lang ?? settings.lang);

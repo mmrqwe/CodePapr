@@ -133,7 +133,6 @@ interface CodePreviewPanelProps {
   onNavigateToLocation?: (location: PreviewLocation) => void;
   lang?: Lang;
   prewarmPaths?: readonly string[];
-  workspaceMutationVersion?: number;
 }
 
 const PREVIEW_MAX_BYTES = 300_000;
@@ -438,9 +437,9 @@ export function CodePreviewPanel({
   onNavigateToLocation,
   lang,
   prewarmPaths = [],
-  workspaceMutationVersion = 0,
 }: CodePreviewPanelProps) {
   const settings = useAgentStore((state) => state.settings);
+  const workspaceMutationVersion = useAgentStore((state) => state.workspaceMutationVersion) ?? 0;
   const activeLang: Lang = lang ?? settings.lang ?? 'zh-CN';
   const t = getTranslation(activeLang);
   const lspMissingServerSummaryText =

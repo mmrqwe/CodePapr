@@ -32,6 +32,7 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 reqwest_0_13_tls = { package = "reqwest", version = "0.13.3", default-features = false, features = ["json", "rustls"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 ignore = "0.4"
+notify = "6"
 regex = "1"
 scraper = "0.20"
 flate2 = "1"

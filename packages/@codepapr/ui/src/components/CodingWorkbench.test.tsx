@@ -4,13 +4,18 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { invokeMock, openMock } = vi.hoisted(() => ({
+const { invokeMock, openMock, listenMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
   openMock: vi.fn(),
+  listenMock: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
+}));
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: listenMock,
 }));
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
@@ -45,10 +50,21 @@ async function flushEffects(): Promise<void> {
 describe('CodingWorkbench', () => {
   let container: HTMLDivElement;
   let root: Root;
+  let watcherCallback: (() => void) | null;
 
   beforeEach(() => {
     invokeMock.mockReset();
     openMock.mockReset();
+    listenMock.mockReset();
+    watcherCallback = null;
+    // `listen` captures the `workspace-files-changed` handler so tests can
+    // simulate native watcher events (replacing the old 1.5s poll).
+    listenMock.mockImplementation(async (event: string, cb: () => void) => {
+      if (event === 'workspace-files-changed') {
+        watcherCallback = cb;
+      }
+      return () => undefined;
+    });
     useAgentStore.setState((state) => ({
       ...state,
       settings: normalizeSettings(),
@@ -129,8 +145,11 @@ describe('CodingWorkbench', () => {
       useAgentStore.getState().noteWorkspaceMutation(['NEW.md']);
     });
 
+    // Simulate the native watcher emitting a change event (the agent's file
+    // write would trigger this in the real app).
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      watcherCallback?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(container.textContent).toContain('NEW.md');
   });
@@ -140,7 +159,11 @@ describe('CodingWorkbench', () => {
 
     try {
       invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
-        if (command === 'save_project_state') {
+        if (
+          command === 'save_project_state' ||
+          command === 'start_workspace_watcher' ||
+          command === 'stop_workspace_watcher'
+        ) {
           return undefined;
         }
 
@@ -241,23 +264,28 @@ describe('CodingWorkbench', () => {
   });
 
   it('shows the file tree tab first and switches to the ProjectGraph panel in hidden preview mode', async () => {
-    invokeMock.mockResolvedValueOnce({
-      root: '/tmp/codepapr-workspace',
-      entries: [
-        {
-          path: 'README.md',
-          name: 'README.md',
-          isDir: false,
-          bytes: 12,
-        },
-        {
-          path: 'app.ts',
-          name: 'app.ts',
-          isDir: false,
-          bytes: 100,
-        },
-      ],
-      truncated: false,
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_workspace_files') {
+        return {
+          root: '/tmp/codepapr-workspace',
+          entries: [
+            {
+              path: 'README.md',
+              name: 'README.md',
+              isDir: false,
+              bytes: 12,
+            },
+            {
+              path: 'app.ts',
+              name: 'app.ts',
+              isDir: false,
+              bytes: 100,
+            },
+          ],
+          truncated: false,
+        };
+      }
+      return undefined;
     });
 
     await act(async () => {

@@ -17,8 +17,10 @@ const BACKGROUND_DIAGNOSTICS_DELAY_MS = 700;
 const BACKGROUND_REPAIR_RETRY_DELAY_MS = 1000;
 const BACKGROUND_REPAIR_MAX_WAIT_ATTEMPTS = 60;
 const BACKGROUND_REPAIR_MAX_ATTEMPTS_PER_CLEAN_PASS = 1;
+const MUTATION_VERSION_DEBOUNCE_MS = 150;
 
 let backgroundDiagnosticsTimer: ReturnType<typeof setTimeout> | null = null;
+let mutationVersionTimer: ReturnType<typeof setTimeout> | null = null;
 let backgroundDiagnosticsRunId = 0;
 const backgroundRepairAttemptsByWorkspace = new Map<string, number>();
 const backgroundRepairFingerprints = new Set<string>();
@@ -189,9 +191,18 @@ export function handleWorkspaceMutation(params: {
   scheduleDiagnostics: boolean;
   autoRepair: boolean;
 }): void {
-  params.set((state) => ({
-    workspaceMutationVersion: state.workspaceMutationVersion + 1,
-  }));
+  // Debounce the version bump so a burst of writes (e.g. 8 files in one turn)
+  // coalesces into a single re-render for subscribers (CodePreviewPanel
+  // prewarming), instead of one re-render per write.
+  if (mutationVersionTimer) {
+    clearTimeout(mutationVersionTimer);
+  }
+  mutationVersionTimer = setTimeout(() => {
+    mutationVersionTimer = null;
+    params.set((state) => ({
+      workspaceMutationVersion: state.workspaceMutationVersion + 1,
+    }));
+  }, MUTATION_VERSION_DEBOUNCE_MS);
 
   const workspacePath = params.get().workspacePath.trim();
   const changedPaths = params.paths ?? [];

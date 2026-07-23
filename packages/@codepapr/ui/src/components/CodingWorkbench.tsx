@@ -9,6 +9,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useAgentStore } from '../store/agentStore';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
@@ -48,8 +49,6 @@ interface ListFilesResult {
   entries: FileEntry[];
   truncated: boolean;
 }
-
-const FILE_TREE_WATCH_INTERVAL_MS = 1500;
 
 function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -215,7 +214,9 @@ export function CodingWorkbench({
   onSelectPath,
   onNavigateToLocation,
 }: CodingWorkbenchProps) {
-  const { settings, workspacePath, workspaceMutationVersion, openWorkspace } = useAgentStore();
+  const settings = useAgentStore((state) => state.settings);
+  const workspacePath = useAgentStore((state) => state.workspacePath);
+  const openWorkspace = useAgentStore((state) => state.openWorkspace);
   const t = getTranslation(settings.lang);
   const appCount = useAppRuntimeStore((state) => state.apps.length);
   const appMountSignal = useAppRuntimeStore((state) => state.mountSignal);
@@ -403,10 +404,6 @@ export function CodingWorkbench({
       }
     };
 
-    const intervalId = window.setInterval(() => {
-      void refreshFromWatcher();
-    }, FILE_TREE_WATCH_INTERVAL_MS);
-
     const handleWindowFocus = () => {
       void refreshFromWatcher();
     };
@@ -420,11 +417,29 @@ export function CodingWorkbench({
     window.addEventListener('focus', handleWindowFocus);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
+    // Native OS-level file watcher: emits `workspace-files-changed` whenever
+    // something under the workspace changes, replacing the old 1.5s polling
+    // loop that kept the process perpetually active (macOS "后台运行").
+    let unlisten: (() => void) | null = null;
+    void invoke('start_workspace_watcher', { workspacePath }).catch((e) => {
+      console.warn('Failed to start workspace watcher:', e);
+    });
+    void listen<void>('workspace-files-changed', () => {
+      void refreshFromWatcher();
+    }).then((cleanup) => {
+      if (disposed) {
+        cleanup();
+      } else {
+        unlisten = cleanup;
+      }
+    });
+
     void refreshFromWatcher();
 
     return () => {
       disposed = true;
-      window.clearInterval(intervalId);
+      unlisten?.();
+      void invoke('stop_workspace_watcher').catch(() => {});
       window.removeEventListener('focus', handleWindowFocus);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
@@ -953,7 +968,6 @@ export function CodingWorkbench({
                     onNavigateToLocation={onNavigateToLocation}
                     lang={settings.lang}
                     prewarmPaths={previewPrewarmPaths}
-                    workspaceMutationVersion={workspaceMutationVersion}
                   />
                 </Suspense>
               }

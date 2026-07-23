@@ -106,7 +106,8 @@ function shortRef(ref: string, lang: 'zh-CN' | 'zh-TW' | 'en'): string {
 }
 
 export function CodeReviewPanel({ scope, onClose }: CodeReviewPanelProps) {
-  const { workspacePath, settings } = useAgentStore();
+  const workspacePath = useAgentStore((state) => state.workspacePath);
+  const settings = useAgentStore((state) => state.settings);
   const lang = settings.lang ?? 'zh-CN';
 
   const [files, setFiles] = useState<FileEntry[]>([]);

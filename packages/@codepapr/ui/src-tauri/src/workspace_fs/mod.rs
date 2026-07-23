@@ -8,6 +8,7 @@ pub(crate) mod list;
 pub(crate) mod read;
 pub(crate) mod search;
 pub(crate) mod types;
+pub(crate) mod watcher;
 pub(crate) mod write;
 
 // Only re-export what external modules (task_queue, invoke_handler) actually need.
@@ -39,6 +40,22 @@ pub(crate) fn should_ignore_dir(name: &str) -> bool {
     name.starts_with('.') || IGNORED_DIRS.contains(&name)
 }
 
+/// Returns true when any path component is an ignored directory (e.g.
+/// `node_modules`, `target`) or a dot-directory. Used by the native file
+/// watcher to suppress noise from build outputs and dependency folders
+/// without having to walk the tree.
+pub(crate) fn path_touches_ignored_dir(path: &std::path::Path) -> bool {
+    path.components().any(|component| {
+        match component {
+            std::path::Component::Normal(name) => {
+                let s = name.to_string_lossy();
+                should_ignore_dir(&s)
+            }
+            _ => false,
+        }
+    })
+}
+
 /// Filters OS-generated noise files (e.g. macOS `.DS_Store`, Windows `Thumbs.db`)
 /// so they never enter workspace listings or the project graph tree.
 pub(crate) fn should_ignore_file(name: &str) -> bool {
@@ -53,7 +70,7 @@ const IGNORED_FILES: &[&str] = &[
     "desktop.ini",
 ];
 
-const IGNORED_DIRS: &[&str] = &[
+pub(crate) const IGNORED_DIRS: &[&str] = &[
     "node_modules",
     "target",
     "dist",

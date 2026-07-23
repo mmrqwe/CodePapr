@@ -2,7 +2,9 @@ import { useAgentStore, SessionMeta } from '../store/agentStore';
 import { getTranslation } from '../utils/i18n';
 
 function SessionItem({ session, isActive }: { session: SessionMeta; isActive: boolean }) {
-  const { selectSession, deleteSession, settings } = useAgentStore();
+  const selectSession = useAgentStore((state) => state.selectSession);
+  const deleteSession = useAgentStore((state) => state.deleteSession);
+  const settings = useAgentStore((state) => state.settings);
   const t = getTranslation(settings.lang);
 
   return (
@@ -29,7 +31,10 @@ function SessionItem({ session, isActive }: { session: SessionMeta; isActive: bo
 }
 
 export function SessionManager() {
-  const { sessions, activeSessionId, newSession, settings } = useAgentStore();
+  const sessions = useAgentStore((state) => state.sessions);
+  const activeSessionId = useAgentStore((state) => state.activeSessionId);
+  const newSession = useAgentStore((state) => state.newSession);
+  const settings = useAgentStore((state) => state.settings);
   const t = getTranslation(settings.lang);
 
   return (
