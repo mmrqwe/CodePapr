@@ -51,6 +51,9 @@ export interface WorkerAgentSettings {
   scoutMaxToolRounds: number;
   scoutMaxDepth: number;
   scoutModelTier: 'primary' | 'fast';
+  appSubAgentModelTier: 'primary' | 'fast';
+  appSubAgentThinkingEnabled: boolean;
+  appSubAgentMaxToolRounds: number;
   mcp: McpSettings;
   graphToolTimeoutMs: number;
   toolIpcTimeoutMs: number;
@@ -150,6 +153,10 @@ export type MainToAgentWorkerMessage =
       type: 'run-app-agent';
       requestId: string;
       payload: AppAgentPayload;
+    }
+  | {
+      type: 'cancel-app-agent';
+      requestId: string;
     };
 
 export interface AgentWorkerProxyChatConfig {
@@ -168,6 +175,12 @@ export interface AppAgentPayload {
   maxToolRounds?: number;
   workspacePath?: string;
   level?: number;
+  inheritContext?: {
+    skills?: boolean;
+    projectRules?: boolean;
+    projectMemory?: boolean;
+    customPrompt?: boolean;
+  };
 }
 
 export interface AppAgentResult {

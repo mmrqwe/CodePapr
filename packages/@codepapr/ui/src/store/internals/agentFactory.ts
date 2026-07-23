@@ -151,6 +151,10 @@ class _MainThreadAgentHandle implements AgentRuntimeHandle {
   runAppAgent(): Promise<never> {
     return Promise.reject(new Error('App Agent is only available in Worker mode'));
   }
+
+  cancelAppAgent(): void {
+    // Main-thread agent doesn't support app agents
+  }
 }
 
 function buildSubagentCacheStatsByTier(

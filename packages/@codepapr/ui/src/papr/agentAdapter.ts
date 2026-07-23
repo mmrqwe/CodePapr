@@ -5,12 +5,10 @@ export function paprAgentToCore(
   appAgent: PaprAgentDef,
   appId: string
 ): AgentDefinition {
-  const tools: Record<string, boolean> = {};
-  if (appAgent.tools && appAgent.tools.length > 0) {
-    for (const t of appAgent.tools) {
-      tools[t] = true;
-    }
-  }
+  const hasExplicitTools = appAgent.tools && appAgent.tools.length > 0;
+  const tools: Record<string, boolean> | undefined = hasExplicitTools
+    ? Object.fromEntries(appAgent.tools!.map((t) => [t, true]))
+    : undefined;
 
   return {
     name: `app-${appId}-${appAgent.name}`,
@@ -18,6 +16,6 @@ export function paprAgentToCore(
     mode: 'subagent',
     model: appAgent.model || 'main',
     prompt: appAgent.systemPrompt ?? 'You are a helpful assistant.',
-    tools: appAgent.tools && appAgent.tools.length > 0 ? tools : {},
+    tools,
   };
 }

@@ -99,6 +99,7 @@ export interface AgentRuntimeHandle {
     payload: AppAgentPayload,
     onStream?: (event: IChatStreamEvent) => void,
   ): Promise<AppAgentResult>;
+  cancelAppAgent(requestId: string): void;
 }
 
 export interface WorkerBackedAgentConfig {
@@ -239,6 +240,9 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     reject: (error: Error) => void;
     timeoutTimer: ReturnType<typeof setTimeout> | null;
     onStream?: (event: IChatStreamEvent) => void;
+    bufferedContentDelta: string;
+    bufferedReasoningDelta: string;
+    flushTimerId: ReturnType<typeof setTimeout> | null;
   }>();
   private readonly pendingFetchControllers = new Map<string, AbortController>();
   private activeRequestId: string | null = null;
@@ -391,7 +395,15 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         reject(new Error('App agent request timed out (300s)'));
       }, 300_000);
 
-      this.appAgentRequests.set(requestId, { resolve, reject, timeoutTimer, onStream });
+      this.appAgentRequests.set(requestId, {
+        resolve,
+        reject,
+        timeoutTimer,
+        onStream,
+        bufferedContentDelta: '',
+        bufferedReasoningDelta: '',
+        flushTimerId: null,
+      });
 
       this.worker.postMessage({
         type: 'run-app-agent',
@@ -401,6 +413,20 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     });
 
     return result;
+  }
+
+  cancelAppAgent(requestId: string): void {
+    this.worker.postMessage({
+      type: 'cancel-app-agent',
+      requestId,
+    } satisfies MainToAgentWorkerMessage);
+    const entry = this.appAgentRequests.get(requestId);
+    if (entry) {
+      this.flushAppAgentDeltas(entry);
+      if (entry.timeoutTimer !== null) clearTimeout(entry.timeoutTimer);
+      this.appAgentRequests.delete(requestId);
+      entry.reject(new DOMException('App agent was cancelled', 'AbortError'));
+    }
   }
 
   private rejectAllAppAgentRequests(error: Error): void {
@@ -446,15 +472,37 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
     if (message.type === 'app-agent-stream') {
       const entry = this.appAgentRequests.get(message.requestId);
-      if (entry?.onStream) {
-        entry.onStream(message.event);
+      if (!entry?.onStream) return;
+
+      if (message.event.type === 'content-delta') {
+        entry.bufferedContentDelta += message.event.delta;
+        if (entry.bufferedContentDelta.length >= MAX_BUFFERED_STREAM_DELTA_CHARS) {
+          this.flushAppAgentDeltas(entry);
+          return;
+        }
+        this.scheduleAppAgentFlush(entry);
+        return;
       }
+
+      if (message.event.type === 'reasoning-delta') {
+        entry.bufferedReasoningDelta += message.event.delta;
+        if (entry.bufferedReasoningDelta.length >= MAX_BUFFERED_STREAM_DELTA_CHARS) {
+          this.flushAppAgentDeltas(entry);
+          return;
+        }
+        this.scheduleAppAgentFlush(entry);
+        return;
+      }
+
+      this.flushAppAgentDeltas(entry);
+      entry.onStream(message.event);
       return;
     }
 
     if (message.type === 'app-agent-result') {
       const entry = this.appAgentRequests.get(message.requestId);
       if (entry) {
+        this.flushAppAgentDeltas(entry);
         if (entry.timeoutTimer !== null) clearTimeout(entry.timeoutTimer);
         this.appAgentRequests.delete(message.requestId);
         entry.resolve({
@@ -469,6 +517,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     if (message.type === 'app-agent-error') {
       const entry = this.appAgentRequests.get(message.requestId);
       if (entry) {
+        this.flushAppAgentDeltas(entry);
         if (entry.timeoutTimer !== null) clearTimeout(entry.timeoutTimer);
         this.appAgentRequests.delete(message.requestId);
         entry.reject(new Error(message.error));
@@ -795,6 +844,36 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     pending.flushTimerId = setTimeout(() => {
       pending.flushTimerId = null;
       this.flushDeltas(pending);
+    }, STREAM_DELTA_FLUSH_INTERVAL_MS);
+  }
+
+  private flushAppAgentDeltas(entry: {
+    onStream?: (event: IChatStreamEvent) => void;
+    bufferedContentDelta: string;
+    bufferedReasoningDelta: string;
+    flushTimerId: ReturnType<typeof setTimeout> | null;
+  }): void {
+    if (entry.flushTimerId !== null) {
+      clearTimeout(entry.flushTimerId);
+      entry.flushTimerId = null;
+    }
+    if (entry.bufferedContentDelta) {
+      entry.onStream?.({ type: 'content-delta', delta: entry.bufferedContentDelta });
+      entry.bufferedContentDelta = '';
+    }
+    if (entry.bufferedReasoningDelta) {
+      entry.onStream?.({ type: 'reasoning-delta', delta: entry.bufferedReasoningDelta });
+      entry.bufferedReasoningDelta = '';
+    }
+  }
+
+  private scheduleAppAgentFlush(entry: {
+    flushTimerId: ReturnType<typeof setTimeout> | null;
+  } & Parameters<typeof this.flushAppAgentDeltas>[0]): void {
+    if (entry.flushTimerId !== null) return;
+    entry.flushTimerId = setTimeout(() => {
+      entry.flushTimerId = null;
+      this.flushAppAgentDeltas(entry);
     }, STREAM_DELTA_FLUSH_INTERVAL_MS);
   }
 }

@@ -13,7 +13,7 @@ describe('paprAgentToCore', () => {
     expect(result.mode).toBe('subagent');
     expect(result.model).toBe('deepseek');
     expect(result.prompt).toBe('You are helpful.');
-    expect(result.tools).toEqual({});
+    expect(result.tools).toBeUndefined();
   });
 
   it('uses default model when not specified', () => {
@@ -43,7 +43,7 @@ describe('paprAgentToCore', () => {
       tools: [],
     }, 'app');
 
-    expect(result.tools).toEqual({});
+    expect(result.tools).toBeUndefined();
   });
 
   it('handles undefined tools', () => {
@@ -51,7 +51,7 @@ describe('paprAgentToCore', () => {
       name: 'notools',
     }, 'app');
 
-    expect(result.tools).toEqual({});
+    expect(result.tools).toBeUndefined();
   });
 
   it('uses default system prompt when not specified', () => {

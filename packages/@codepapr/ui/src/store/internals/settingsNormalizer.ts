@@ -287,6 +287,13 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     typeof input.verifierTemperature === 'number' && Number.isFinite(input.verifierTemperature)
       ? Math.max(0, Math.min(2, input.verifierTemperature))
       : DEFAULT_SETTINGS.verifierTemperature;
+  const appSubAgentModelTier: 'primary' | 'fast' =
+    input.appSubAgentModelTier === 'fast' ? 'fast' : 'primary';
+  const appSubAgentThinkingEnabled = input.appSubAgentThinkingEnabled ?? DEFAULT_SETTINGS.appSubAgentThinkingEnabled;
+  const appSubAgentMaxToolRounds =
+    typeof input.appSubAgentMaxToolRounds === 'number' && Number.isFinite(input.appSubAgentMaxToolRounds)
+      ? Math.max(1, Math.min(200, Math.floor(input.appSubAgentMaxToolRounds)))
+      : DEFAULT_SETTINGS.appSubAgentMaxToolRounds;
   const searxngEnabled = input.searxngEnabled ?? DEFAULT_SETTINGS.searxngEnabled;
   const searxngBaseUrl =
     typeof input.searxngBaseUrl === 'string'
@@ -395,6 +402,9 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     verifierModelTier,
     verifierMaxTokens,
     verifierTemperature,
+    appSubAgentModelTier,
+    appSubAgentThinkingEnabled,
+    appSubAgentMaxToolRounds,
     searxngEnabled,
     searxngBaseUrl,
     searxngCategories,

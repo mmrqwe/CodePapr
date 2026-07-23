@@ -147,6 +147,7 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
         const payload = data.payload as Record<string, unknown> | undefined;
         const agentName = String(payload?.agentName ?? '');
         const task = String(payload?.task ?? '');
+        const runtimeModel = typeof payload?.model === 'string' ? payload.model : undefined;
         if (!agentName) {
           respond(undefined, { code: 'INVALID_REQUEST', message: 'agentName is required' });
           return;
@@ -173,12 +174,13 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
             appId,
             agentName,
             systemPrompt: agentDef.systemPrompt,
-            model: agentDef.model,
+            model: runtimeModel || agentDef.model,
             task,
             tools: agentDef.tools,
             maxToolRounds: agentDef.maxToolRounds,
             workspacePath,
             level: effectiveLevel,
+            inheritContext: agentDef.inheritContext,
           },
           (event) => {
             iframeRef.current?.contentWindow?.postMessage({

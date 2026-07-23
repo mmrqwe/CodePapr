@@ -559,6 +559,12 @@ export interface PaprAgentDef {
   systemPrompt?: string;
   tools?: string[];
   maxToolRounds?: number;
+  inheritContext?: {
+    skills?: boolean;
+    projectRules?: boolean;
+    projectMemory?: boolean;
+    customPrompt?: boolean;
+  };
 }
 
 export type PaprPermission =

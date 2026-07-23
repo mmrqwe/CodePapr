@@ -212,6 +212,7 @@ describe('useAgentStore.sendMessage', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     invokeMock.mockClear();
     loadProjectStateMock.mockClear();
     saveProjectStateMock.mockClear();
@@ -1155,27 +1156,29 @@ describe('useAgentStore.sendMessage', () => {
 
   it('does not issue an extra fast-model summary request at the end', async () => {
     const chat = vi.fn(async () => createAgentResponse('已完成修改。'));
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          id: 'fast-summary-1',
-          choices: [
-            {
-              message: { role: 'assistant', content: '快模型收尾总结' },
-              finish_reason: 'stop',
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: 'fast-summary-1',
+            choices: [
+              {
+                message: { role: 'assistant', content: '快模型收尾总结' },
+                finish_reason: 'stop',
+              },
+            ],
+            usage: {
+              prompt_tokens: 100,
+              completion_tokens: 20,
+              prompt_cache_hit_tokens: 80,
+              prompt_cache_miss_tokens: 20,
             },
-          ],
-          usage: {
-            prompt_tokens: 100,
-            completion_tokens: 20,
-            prompt_cache_hit_tokens: 80,
-            prompt_cache_miss_tokens: 20,
-          },
-        }),
-        {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        )
       )
     );
     vi.stubGlobal('fetch', fetchMock);
@@ -2072,6 +2075,17 @@ describe('sendMessage /goal', () => {
     };
     const chat = vi.fn(async (_prompt: string) => mockResponse);
 
+    // Mock fetch for verifier LLM calls
+    vi.stubGlobal('fetch', vi.fn(() =>
+      Promise.resolve(new Response(
+        JSON.stringify({
+          choices: [{ message: { role: 'assistant', content: '{"verdict":"SATISFIED","evidence":"Condition met."}' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      ))
+    ));
+
     // Mock run_workspace_command to return success (exit code 0)
     invokeMock.mockImplementation(async (command: string): Promise<Record<string, unknown>> => {
       if (command === 'list_workspace_files') {
@@ -2133,12 +2147,9 @@ describe('sendMessage /goal', () => {
     const errorMessages = sessionMessages.filter((m) => m.role === 'error');
     expect(errorMessages).toHaveLength(0);
 
-    // There should be an info message with goal completion
-    const infoMessages = sessionMessages.filter(
-      (m) => m.role === 'assistant' && m.synthetic && !m.carryForwardInContext
-    );
-    const goalSummary = infoMessages.find((m) =>
-      m.content.includes('Goal') || m.content.includes('目标')
+    // There should be an assistant message with goal completion status
+    const goalSummary = sessionMessages.find((m) =>
+      m.role === 'assistant' && (m.content.includes('目标达成') || m.content.includes('目標達成') || m.content.includes('Goal satisfied'))
     );
     expect(goalSummary).toBeTruthy();
   });
@@ -2151,6 +2162,17 @@ describe('sendMessage /goal', () => {
       cacheStats: { cacheCreationTokens: 0, cacheReadTokens: 0, newInputTokens: 1, outputTokens: 1, calls: 1 },
     };
     const chat = vi.fn(async (_prompt: string) => mockResponse);
+
+    // Mock fetch for verifier LLM calls
+    vi.stubGlobal('fetch', vi.fn(() =>
+      Promise.resolve(new Response(
+        JSON.stringify({
+          choices: [{ message: { role: 'assistant', content: '{"verdict":"SATISFIED","evidence":"Task completed."}' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      ))
+    ));
 
     invokeMock.mockImplementation(async (command: string): Promise<Record<string, unknown>> => {
       if (command === 'list_workspace_files') return { root: '', entries: [], truncated: false };

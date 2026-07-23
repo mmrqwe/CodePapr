@@ -25,7 +25,7 @@
       setTimeout(function () {
         if (pending[reqId]) {
           delete pending[reqId];
-          reject(new Error('Papr IPC timeout'));
+          reject(new Error('Papr IPC timeout: ' + type + ' (reqId=' + reqId + ')'));
         }
       }, 300000);
     });
@@ -45,7 +45,10 @@
 
     delete pending[reqId];
     if (data.error) {
-      p.reject(new Error(data.error.message || 'Papr IPC error'));
+      var err = new Error(data.error.message || 'Papr IPC error');
+      if (data.error.code) err.code = data.error.code;
+      if (data.error.detail) err.detail = data.error.detail;
+      p.reject(err);
     } else {
       p.resolve(data.result);
     }

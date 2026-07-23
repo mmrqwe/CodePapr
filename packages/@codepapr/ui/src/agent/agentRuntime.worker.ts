@@ -32,12 +32,13 @@ import {
   CacheValidator,
   setGlobalFetchFn,
 } from '@codepapr/api';
-import type { IChatRequest, IChatResponse, ICacheStatistics, IMessage, ILLMProvider, IToolDefinition } from '@codepapr/types';
+import type { IChatRequest, IChatResponse, ICacheStatistics, IChatStreamEvent, IMessage, ILLMProvider, IToolDefinition } from '@codepapr/types';
 import type {
   AgentWorkerChatPayload,
   AgentWorkerToMainMessage,
   MainToAgentWorkerMessage,
   WorkerAgentSettings,
+  WorkerAgentRuntimeConfig,
   WorkerApiFormat,
   AppAgentPayload,
 } from './agentWorkerProtocol';
@@ -53,6 +54,7 @@ const toolResponseWaiters = new Map<
 >();
 
 const sessionAbortControllers = new Map<string, AbortController>();
+const appAgentAbortControllers = new Map<string, AbortController>();
 
 const chatResponseWaiters = new Map<
   string,
@@ -71,9 +73,18 @@ let nextFetchId = 0;
 const TOOL_IPC_TIMEOUT_MS = 120_000;
 const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 300_000;
 
+const APP_AGENT_LEVEL_TOOLS: Record<number, ReadonlySet<string>> = {
+  0: new Set(),
+  1: new Set(['read', 'grep', 'list', 'graph', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'todo', 'local_time_now']),
+  2: new Set(['read', 'grep', 'list', 'graph', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'todo', 'local_time_now', 'web_search', 'web_fetch', 'web_download']),
+  3: new Set(['read', 'grep', 'list', 'graph', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'todo', 'local_time_now', 'web_search', 'web_fetch', 'web_download', 'write', 'edit', 'patch', 'exec', 'shell']),
+};
+
 let cachedSettings: WorkerAgentSettings | null = null;
 let cachedToolDefinitions: IToolDefinition[] = [];
 let cachedWorkspacePath = '';
+let cachedRuntimeConfig: WorkerAgentRuntimeConfig | null = null;
+const appAgentPrefixCache = new Map<string, ImmutablePrefix>();
 
 interface PendingFetch {
   resolve: (response: Response) => void;
@@ -290,14 +301,21 @@ const subagentCacheStatsMap = new Map<
 async function withWallClockTimeout<T>(
   agent: Agent,
   promiseFactory: () => Promise<T>,
-  timeoutMs: number
+  timeoutMs: number,
+  lang?: string
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await new Promise<T>((resolve, reject) => {
       timer = setTimeout(() => {
         agent.cancel();
-        reject(new Error(`子代理执行超时 (${timeoutMs / 1000}s)`));
+        reject(new Error(
+          lang === 'zh-TW'
+            ? `子代理執行超時 (${timeoutMs / 1000}秒)`
+            : lang === 'zh-CN'
+            ? `子代理执行超时 (${timeoutMs / 1000}秒)`
+            : `Sub-agent execution timed out (${timeoutMs / 1000}s)`
+        ));
       }, timeoutMs);
 
       promiseFactory().then(
@@ -633,7 +651,8 @@ async function runSubagent(
             });
           }
         }),
-      SUBAGENT_WALL_CLOCK_TIMEOUT_MS
+      SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
+      payload.runtime.lang
     );
   } catch (err) {
     // 附上 subagent 上下文后重抛，避免 400 "Load fail" 等被吞成无信息短串
@@ -729,17 +748,6 @@ function buildPruneOptions(s: WorkerAgentSettings): PruneOptions {
   };
 }
 
-function resolveAppAgentModel(
-  declaredModel: string | undefined,
-  settings: WorkerAgentSettings,
-): string {
-  const m = declaredModel || 'main';
-  if (m === 'main') return settings.model;
-  if (m === 'fast') return settings.fastModel || settings.model;
-  if (m === 'mentor') return settings.mentorModel || settings.model;
-  return m;
-}
-
 async function handleRunAppAgent(
   payload: AppAgentPayload,
   requestId: string
@@ -757,24 +765,46 @@ async function handleRunAppAgent(
   const requestedTools = payload.tools ?? [];
   const level = payload.level ?? 1;
 
-  const LEVEL_TOOLS: Record<number, Set<string>> = {
-    0: new Set(),
-    1: new Set(['read', 'grep', 'list', 'graph', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'question', 'todo', 'local_time_now']),
-    2: new Set(['read', 'grep', 'list', 'graph', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'question', 'todo', 'local_time_now', 'web_search', 'web_fetch', 'web_download']),
-    3: new Set(['read', 'grep', 'list', 'graph', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'question', 'todo', 'local_time_now', 'web_search', 'web_fetch', 'web_download', 'write', 'edit', 'patch', 'exec', 'shell']),
-  };
-  const levelAllowed = LEVEL_TOOLS[level] ?? LEVEL_TOOLS[1];
+  const levelAllowed = APP_AGENT_LEVEL_TOOLS[level] ?? APP_AGENT_LEVEL_TOOLS[1];
+
+  const sandboxPrefix = `.CodePapr/apps/${payload.appId}/sandbox/`;
+  const SANDWICH_WRITABLE_TOOLS = new Set(['write', 'edit', 'patch']);
+
+  function sandboxWriteArgs(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
+    if (!SANDWICH_WRITABLE_TOOLS.has(toolName)) return args;
+    if (toolName === 'patch') {
+      if (Array.isArray(args.patches)) {
+        return {
+          ...args,
+          patches: (args.patches as Array<Record<string, unknown>>).map((p) => ({
+            ...p,
+            relativePath: typeof p.relativePath === 'string' ? sandboxPrefix + p.relativePath : p.relativePath,
+          })),
+        };
+      }
+      return args;
+    }
+    if (typeof args.relativePath === 'string') {
+      return { ...args, relativePath: sandboxPrefix + args.relativePath };
+    }
+    return args;
+  }
 
   const registry = new ToolRegistry();
   for (const tool of cachedToolDefinitions) {
     if (BLOCKED.has(tool.name)) continue;
-    if (!levelAllowed.has(tool.name) && !tool.name.startsWith('mcp__')) continue;
-    if (level < 2 && tool.name.startsWith('mcp__')) continue;
-    if (requestedTools.length > 0 && !requestedTools.includes(tool.name)) continue;
+    if (tool.name.startsWith('mcp__')) {
+      if (level < 2) continue;
+      if (requestedTools.length === 0 || !requestedTools.includes(tool.name)) continue;
+    } else {
+      if (!levelAllowed.has(tool.name)) continue;
+      if (requestedTools.length > 0 && !requestedTools.includes(tool.name)) continue;
+    }
 
     registry.register(tool, async (args) => {
+      const sandboxedArgs = sandboxWriteArgs(tool.name, args);
       return await requestToolExecution(
-        requestId, tool.name, args, TOOL_IPC_TIMEOUT_MS
+        requestId, tool.name, sandboxedArgs, TOOL_IPC_TIMEOUT_MS
       );
     });
   }
@@ -782,12 +812,18 @@ async function handleRunAppAgent(
   let systemPrompt = payload.systemPrompt || 'You are a helpful assistant.';
   const workspacePath = payload.workspacePath || cachedWorkspacePath;
 
+  const extraSections: string[] = [systemPrompt];
+  const ctx = payload.inheritContext;
+  if (ctx?.projectRules && cachedRuntimeConfig?.rulesSection) {
+    extraSections.push(cachedRuntimeConfig.rulesSection);
+  }
+
   if (workspacePath) {
     const enrichedPrompt = buildRuntimeSystemPrompt({
       mode: 'agent',
       workspacePath,
       lang: cachedSettings.lang,
-      extraSections: [systemPrompt],
+      extraSections,
       toolNames: registry.getAll().map(t => t.name),
       subagent: true,
     });
@@ -796,11 +832,81 @@ async function handleRunAppAgent(
     }
   }
 
-  const model = resolveAppAgentModel(payload.model, cachedSettings);
-  const provider = buildProvider(cachedSettings);
-  const maxToolRounds = Math.min(payload.maxToolRounds ?? 20, 50);
+  let model: string = payload.model || 'main';
+  if (model === 'main') {
+    model = cachedSettings.appSubAgentModelTier === 'fast'
+      ? (cachedSettings.fastModel || cachedSettings.model)
+      : cachedSettings.model;
+  } else if (model === 'fast') {
+    model = cachedSettings.fastModel || cachedSettings.model;
+  } else if (model === 'mentor') {
+    model = cachedSettings.mentorModel || cachedSettings.model;
+  }
+
+  let agentProvider: ILLMProvider = buildProvider(cachedSettings);
+  let agentProviderName: 'deepseek' | 'openai' | 'claude' = cachedSettings.provider;
+
+  const isMentor = payload.model === 'mentor' && cachedSettings.mentorEnabled;
+  if (isMentor) {
+    const s = cachedSettings;
+    if (s.mentorModel.trim()) {
+      model = s.mentorModel.trim();
+      const apiKey = s.mentorApiKey.trim() || s.apiKey.trim();
+      const mentorBaseURL = s.mentorBaseURL.trim().replace(/\/+$/, '');
+      const baseURL = mentorBaseURL || s.baseURL.trim().replace(/\/+$/, '') || undefined;
+      const config = { apiKey, ...(baseURL ? { baseURL } : {}) };
+      if (s.mentorApiFormat === 'claude') {
+        agentProvider = new ClaudeProvider(config);
+        agentProviderName = 'claude';
+      } else {
+        agentProvider = new OpenAIProvider(config);
+        agentProviderName = 'openai';
+      }
+    } else {
+      console.warn('[App Agent] Mentor model not set, falling back to main provider');
+      model = cachedSettings.model;
+    }
+  }
+
+  const maxToolRounds = Math.min(
+    payload.maxToolRounds ?? cachedSettings.appSubAgentMaxToolRounds,
+    cachedSettings.maxToolRounds
+  );
+  const parameters = {
+    temperature: 0.5,
+    topP: 0.9,
+    maxTokens: isMentor ? (cachedSettings.mentorMaxTokens ?? 10000) : cachedSettings.maxTokens,
+    thinkingEnabled: isMentor ? (cachedSettings.mentorThinkingEnabled ?? false) : cachedSettings.appSubAgentThinkingEnabled,
+  };
 
   const log = new AppendOnlyLog(`app-agent-${payload.appId}-${Date.now()}`);
+
+  if (ctx && (ctx.skills || ctx.customPrompt) && cachedRuntimeConfig) {
+    const skillsSection = ctx.skills
+      ? buildSkillsSection(cachedRuntimeConfig.skillDefinitions ?? [], cachedSettings.lang)
+      : undefined;
+    const customPromptSection = ctx.customPrompt
+      ? ((cachedRuntimeConfig.customPrompt ?? '').trim() || undefined)
+      : undefined;
+    if (skillsSection || customPromptSection) {
+      const bootstrapPrompt = buildSessionBootstrapPrompt({
+        workspacePath,
+        lang: cachedSettings.lang,
+        skillsSection,
+        customPromptSection,
+      });
+      if (bootstrapPrompt.trim()) {
+        await log.append({
+          id: `app-agent-bootstrap-${Date.now()}`,
+          role: 'assistant',
+          content: bootstrapPrompt.trim(),
+          timestamp: Date.now(),
+          metadata: { sessionBootstrap: true },
+        } as unknown as IMessage);
+      }
+    }
+  }
+
   const userPrompt = buildRuntimeUserPrompt({
     mode: 'agent',
     input: payload.task,
@@ -814,17 +920,17 @@ async function handleRunAppAgent(
     timestamp: Date.now(),
   } as unknown as IMessage);
 
-  const prefix = new ImmutablePrefix({
-    systemPrompt,
-    tools: registry.getAll(),
-    model,
-    parameters: {
-      temperature: 0.5,
-      topP: 0.9,
-      maxTokens: cachedSettings.maxTokens,
-      thinkingEnabled: false,
-    },
-  });
+  const prefixKey = [model, ...registry.getAll().map(t => t.name).sort(), JSON.stringify(parameters), systemPrompt].join('|');
+  let prefix = appAgentPrefixCache.get(prefixKey);
+  if (!prefix) {
+    prefix = new ImmutablePrefix({
+      systemPrompt,
+      tools: registry.getAll(),
+      model,
+      parameters,
+    });
+    appAgentPrefixCache.set(prefixKey, prefix);
+  }
 
   const session = new Session({
     sessionId: `app-agent-${payload.appId}-${Date.now()}`,
@@ -835,8 +941,8 @@ async function handleRunAppAgent(
 
   const agent = new Agent({
     session,
-    provider,
-    providerName: cachedSettings.provider,
+    provider: agentProvider,
+    providerName: agentProviderName,
     requestBuilder: new RequestBuilder(),
     cacheValidator: new CacheValidator(),
     maxToolRounds,
@@ -846,11 +952,62 @@ async function handleRunAppAgent(
   });
 
   const steps: Array<{ name: string; status: string; summary?: string }> = [];
+  const abortController = new AbortController();
+  appAgentAbortControllers.set(requestId, abortController);
+
+  const STREAM_FLUSH_INTERVAL_MS = 80;
+  const STREAM_BUFFER_CHARS = 4096;
+  let bufferedContent = '';
+  let bufferedReasoning = '';
+  let flushTimerId: ReturnType<typeof setTimeout> | null = null;
+
+  function flushStreamBuffer() {
+    if (flushTimerId !== null) {
+      clearTimeout(flushTimerId);
+      flushTimerId = null;
+    }
+    const events: IChatStreamEvent[] = [];
+    if (bufferedContent) {
+      events.push({ type: 'content-delta', delta: bufferedContent } as IChatStreamEvent);
+      bufferedContent = '';
+    }
+    if (bufferedReasoning) {
+      events.push({ type: 'reasoning-delta', delta: bufferedReasoning } as IChatStreamEvent);
+      bufferedReasoning = '';
+    }
+    for (const evt of events) {
+      postMessageToMain({ type: 'app-agent-stream', requestId, event: evt });
+    }
+  }
+
+  function scheduleStreamFlush() {
+    if (flushTimerId !== null) return;
+    flushTimerId = setTimeout(flushStreamBuffer, STREAM_FLUSH_INTERVAL_MS);
+  }
 
   try {
     const response = await withWallClockTimeout(
       agent,
       () => agent.chat(userPrompt, (event) => {
+        if (event.type === 'content-delta') {
+          bufferedContent += event.delta;
+          if (bufferedContent.length >= STREAM_BUFFER_CHARS) {
+            flushStreamBuffer();
+          } else {
+            scheduleStreamFlush();
+          }
+          return;
+        }
+        if (event.type === 'reasoning-delta') {
+          bufferedReasoning += event.delta;
+          if (bufferedReasoning.length >= STREAM_BUFFER_CHARS) {
+            flushStreamBuffer();
+          } else {
+            scheduleStreamFlush();
+          }
+          return;
+        }
+        flushStreamBuffer();
         postMessageToMain({
           type: 'app-agent-stream',
           requestId,
@@ -863,9 +1020,11 @@ async function handleRunAppAgent(
             summary: event.error || event.toolName,
           });
         }
-      }),
-      300_000
+      }, undefined, abortController.signal),
+      300_000,
+      cachedSettings.lang
     );
+    flushStreamBuffer();
 
     postMessageToMain({
       type: 'app-agent-result',
@@ -881,6 +1040,8 @@ async function handleRunAppAgent(
       error: error instanceof Error ? error.message : String(error),
       errorName: error instanceof Error ? error.name : undefined,
     });
+  } finally {
+    appAgentAbortControllers.delete(requestId);
   }
 }
 
@@ -888,6 +1049,8 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
   cachedSettings = payload.settings;
   cachedToolDefinitions = payload.toolDefinitions;
   cachedWorkspacePath = payload.workspacePath;
+  cachedRuntimeConfig = payload.runtime;
+  appAgentPrefixCache.clear();
   const abortController = new AbortController();
   sessionAbortControllers.set(payload.requestId, abortController);
 
@@ -984,6 +1147,14 @@ self.onmessage = (event: MessageEvent<MainToAgentWorkerMessage>) => {
       type: 'cancelled',
       requestId: message.requestId,
     });
+    return;
+  }
+
+  if (message.type === 'cancel-app-agent') {
+    const controller = appAgentAbortControllers.get(message.requestId);
+    if (controller) {
+      controller.abort();
+    }
     return;
   }
 

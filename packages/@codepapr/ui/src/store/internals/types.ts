@@ -102,6 +102,10 @@ export interface Settings {
   verifierModelTier: 'fast' | 'primary';
   verifierMaxTokens: number;
   verifierTemperature: number;
+  // App 子代理配置（papr.agent.run 调用的 Agent）
+  appSubAgentModelTier: 'primary' | 'fast';
+  appSubAgentThinkingEnabled: boolean;
+  appSubAgentMaxToolRounds: number;
   searxngEnabled: boolean;
   searxngBaseUrl: string;
   searxngCategories: string;

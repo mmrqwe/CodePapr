@@ -118,6 +118,10 @@ export const DEFAULT_SETTINGS: Settings = {
   verifierModelTier: 'fast',
   verifierMaxTokens: 4000,
   verifierTemperature: 0.1,
+  // App 子代理（papr.agent.run，默认主模型，不开启思考，50 轮工具调用）
+  appSubAgentModelTier: 'primary',
+  appSubAgentThinkingEnabled: false,
+  appSubAgentMaxToolRounds: 50,
   searxngEnabled: false,
   searxngBaseUrl: '',
   searxngCategories: '',
