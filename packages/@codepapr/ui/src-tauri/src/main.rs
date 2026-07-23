@@ -350,6 +350,7 @@ fn main() {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 lsp::stop_all_servers();
                 tts::tts_server_stop_internal();
+                let _ = shell::background::stop_all_background_processes(None);
             }
         })
         .run(tauri::generate_context!())

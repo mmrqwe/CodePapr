@@ -149,8 +149,19 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '② 探索数据：用 workspace_read_file / workspace_list_files / workspace_search_text 了解数据源',
       '③ 生成 HTML：用 workspace_write_file 写入 .CodePapr/apps/<appId>/index.html',
       '④ 调用 app_render：传入 appId、title、html，以及可选的 permissions、agents、level、command/args/port、icon',
-      '⑤ 如果是后端 app -> app_start 启动后端服务',
-      '⑥ 如需清理旧 app -> app_delete 删除',
+      '⑤ 如果是后端 app -> 使用 app_start 工具启动（不要手动执行 node/npm/命令）',
+      '⑥ 如需清理旧 app -> 使用 app_delete 工具删除（不要手动 rm -rf）',
+      '',
+      'ℹ️ 用户可通过右侧面板的按钮（▶启动/打开/停止/删除）管理 app——',
+      '如果用户说"启动 xxx"或"停止 xxx"，使用 app_start/app_stop 工具，不要重复用户已做的操作。',
+      '',
+      '## 关键约束',
+      '- 创建后端 app 后不要自动启动——先告知用户 app 已创建，让用户决定是否启动',
+      '- 不要用 exec 或 shell 工具启动/停止/删除 app——始终使用 app_start/app_stop/app_delete 工具',
+      '- 不要输出 Markdown 解释——用 app_render 渲染后在 tool result 简短总结',
+      '- 相同 appId 再次调用会覆盖更新',
+      '- 优先用 papr SDK 而非后端服务——更简单，用户无需"运行"',
+      '- Agent 调用会消耗 token，避免不必要的调用（如每次都重新分析全部数据）',
 
       '## Papr SDK — 前端可用的全部能力（window.papr）',
       '',
@@ -251,6 +262,8 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '```',
 
       '## 关键约束',
+      '- 创建后端 app 后不要自动启动——先告知用户 app 已创建，让用户决定是否启动',
+      '- 不要用 exec 或 shell 工具启动/停止/删除 app——始终使用 app_start/app_stop/app_delete 工具',
       '- 不要输出 Markdown 解释——用 app_render 渲染后在 tool result 简短总结',
       '- 相同 appId 再次调用会覆盖更新',
       '- 优先用 papr SDK 而非后端服务——更简单，用户无需"运行"',
@@ -285,9 +298,15 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '你不需要寫組件框架、路由、構建系統——只需要一個完整的 HTML 檔案。',
 
       '## 工作流程',
-      '① 探索資料：用 workspace_read_file / workspace_list_files / workspace_search_text 了解資料源',
-      '② 生成 HTML：用 workspace_write_file 寫入 .CodePapr/apps/<appId>/index.html',
-      '③ 調用 app_render：傳入 appId、title、html，以及可選的 permissions、agents、command/args/port、icon',
+      '① app_list 檢查現有應用（避免覆蓋同名 app）',
+      '② 探索資料：用 workspace_read_file / workspace_list_files / workspace_search_text 了解資料源',
+      '③ 生成 HTML：用 workspace_write_file 寫入 .CodePapr/apps/<appId>/index.html',
+      '④ 調用 app_render：傳入 appId、title、html，以及可選的 permissions、agents、level、command/args/port、icon',
+      '⑤ 如果是後端 app -> 使用 app_start 工具啟動（不要手動執行 node/npm/命令）',
+      '⑥ 如需清理舊 app -> 使用 app_delete 工具刪除（不要手動 rm -rf）',
+      '',
+      'ℹ️ 用戶可通過右側面板的按鈕（▶啟動/打開/停止/刪除）管理 app——',
+      '如果用戶說"啟動 xxx"或"停止 xxx"，使用 app_start/app_stop 工具，不要重複用戶已做的操作。',
 
       '## Papr SDK — 前端可用的全部能力（window.papr）',
       '',
@@ -373,6 +392,8 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '```',
 
       '## 關鍵約束',
+      '- 創建後端 app 後不要自動啟動——先告知用戶 app 已創建，讓用戶決定是否啟動',
+      '- 不要用 exec 或 shell 工具啟動/停止/刪除 app——始終使用 app_start/app_stop/app_delete 工具',
       '- 不要輸出 Markdown 解釋——用 app_render 渲染後在 tool result 簡短總結',
       '- 相同 appId 再次調用會覆蓋更新',
       '- 優先用 papr SDK 而非後端服務',
@@ -406,9 +427,15 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       'No frameworks, routers, or build systems — just a single complete HTML file.',
 
       '## Workflow',
-      '① Explore data: workspace_read_file / workspace_list_files / workspace_search_text',
-      '② Generate HTML: workspace_write_file to .CodePapr/apps/<appId>/index.html',
-      '③ Call app_render: pass appId, title, html, and optional permissions, agents, command/args/port, icon',
+      '① app_list to check existing apps (avoid overwriting)',
+      '② Explore data: workspace_read_file / workspace_list_files / workspace_search_text',
+      '③ Generate HTML: workspace_write_file to .CodePapr/apps/<appId>/index.html',
+      '④ Call app_render: pass appId, title, html, and optional permissions, agents, level, command/args/port, icon',
+      '⑤ If backend app -> use app_start tool (never manually run node/npm/commands)',
+      '⑥ To clean up old apps -> use app_delete tool (never manually rm -rf)',
+      '',
+      'ℹ️ The user can manage apps via right-panel buttons (▶Start/Open/Stop/Delete) —',
+      'if user says "start xxx" or "stop xxx", use app_start/app_stop, don\'t duplicate user actions.',
 
       '## Papr SDK — Complete Frontend Capabilities (window.papr)',
       '',
@@ -498,6 +525,8 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '```',
 
       '## Key Rules',
+      '- Do not auto-start backend apps after creating them — tell the user and let them decide',
+      '- Never use exec/shell to start/stop/delete apps — always use app_start/app_stop/app_delete tools',
       '- No Markdown explanations — briefly summarize in tool result after app_render',
       '- Same appId updates in place',
       '- Prefer papr SDK over backend services',
@@ -930,6 +959,9 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
 
     if (isApp) {
       lines.push(
+        lang === 'en' ? '### App Management' : lang === 'zh-TW' ? '### 應用管理' : '### 应用管理'
+      );
+      lines.push(
         lang === 'en'
           ? '- [app_list] List all registered apps (appId, title, hasBackend, isRunning, port). Call before creating to check for duplicates.'
           : lang === 'zh-TW'
@@ -938,17 +970,17 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
       );
       lines.push(
         lang === 'en'
-          ? '- [app_start] Start a backend app\'s server by appId. Checks port availability. Returns {pid, url}.'
+          ? '- [app_start] Start a backend app\'s server by appId. Check port, start backend, set state to running. Use this instead of manually running node/commands.'
           : lang === 'zh-TW'
-          ? '- [app_start] 按 appId 啟動後端服務。檢查端口可用性。返回 {pid, url}。'
-          : '- [app_start] 按 appId 启动后端服务。检查端口可用性。返回 {pid, url}。'
+          ? '- [app_start] 按 appId 啟動後端服務。檢查端口、啟動後端、設為運行中。用此工具而非手動執行 node/命令。'
+          : '- [app_start] 按 appId 启动后端服务。检查端口、启动后端、设为运行中。用此工具而非手动执行 node/命令。'
       );
       lines.push(
         lang === 'en'
-          ? '- [app_stop] Stop a running backend app by appId.'
+          ? '- [app_stop] Stop a running backend app by appId. Stops the process, sets state to stopped.'
           : lang === 'zh-TW'
-          ? '- [app_stop] 按 appId 停止正在運行的後端服務。'
-          : '- [app_stop] 按 appId 停止正在运行的后端服务。'
+          ? '- [app_stop] 按 appId 停止正在運行的後端服務。停止進程、設為已停止。'
+          : '- [app_stop] 按 appId 停止正在运行的后端服务。停止进程、设为已停止。'
       );
       lines.push(
         lang === 'en'

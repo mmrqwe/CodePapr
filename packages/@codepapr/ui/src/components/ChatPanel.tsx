@@ -644,7 +644,7 @@ function ReasoningPanel({
 
   const collapsedText = content.replace(/\s+/g, ' ').trim();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (isStreaming) {
       setIsOpen(true);
       shouldStickToBottomRef.current = true;
