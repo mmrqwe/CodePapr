@@ -696,7 +696,40 @@ effectiveMaxContextTokens = min(maxContextTokens, providerContextLimit − maxTo
 
 语音配置不在主设置面板，而是在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。
 
-## 15. 关键源码定位
+## 15. 项目统计系统
+
+项目统计弹窗（`ProjectStatsModal`）提供两类视图：**代码库统计**与 **Agent 贡献统计**。
+
+### 15.1 原生 Rust 统计引擎
+
+代码库统计由 Rust 命令 `compute_project_stats`（`workspace_fs/stats.rs`）一次性计算，替代了早期"前端逐文件经 IPC 读取"的慢方案：
+
+- **gitignore-aware 并行遍历**：复用搜索模块的 `ignore::WalkBuilder`（`.git_ignore(true).git_exclude(true).ignore(true)` + `should_ignore_dir` 过滤），`build_parallel()` 多线程遍历，与项目实际 `.gitignore` 一致（而非硬编码忽略列表）。
+- **语言检测**：`language_from_path`（移植自 `editorLanguage.ts`）按文件名特例（dockerfile/makefile/.env 等）与扩展名映射语言 id。
+- **code/blank/comment 分类**：每语言注释语法表（`//`、`#`、`--`、`;`、`/* */`、`<!-- -->`、`""" """` 等）+ 跨行块注释状态机；代码+行尾注释的混合行计为代码（cloc 惯例）。
+- **二进制排除**：`decode_text_bytes` 拒绝二进制文件（计入 skipped）。
+- **聚合**：按语言/顶层目录/文件大小分桶聚合，计算最大文件、平均/中位/最大行数、代码/配置/文档占比。
+- **结果结构**：`#[serde(rename_all="camelCase")]` 镜像前端接口，含 `blankLines`/`commentLines` 及每语言 code/blank/comment。
+
+前端 `loadProjectStats` 单次 `invoke('compute_project_stats')` 获取结果，仅在前端补充语言显示名（`formatLanguageLabel`）。
+
+### 15.2 前端可视化与交互
+
+- **目录 Treemap**：自绘平衡分割算法 `computeTreemap`（按行数加权、沿长轴递归对半切分，无第三方依赖）；色块按面积占比渲染，悬停高亮/淡出 + tooltip。
+- **可排序/可筛选语言表**：`LanguageTable` 列头点击排序（语言/文件/行数/代码行/空行/注释行，升/降序），语言筛选输入框，行悬停高亮；顶部保留堆叠比例条。
+- **结果缓存 + 时间戳**：模块级 `statsCache` 先展示缓存、后台刷新（失败回退缓存不报错），头部显示"统计于 HH:MM:SS"。
+- **动效**：分区错峰渐显（`statsReveal`）、treemap 色块弹入（`treemapPop`）、条形生长（`barStretch`），见 `index.css`。
+
+### 15.3 Agent 贡献统计
+
+`AgentContribution` 组件复用**已有后端命令**（无需新 Rust 代码）计算 Agent 改动量：
+
+- **数据来源**：影子 Git 仓库（`.CodePapr/git`）的 checkpoint。每次用户消息触发 `snapshotCreate` 并写入 `checkpoint_timeline` 表。
+- **累计贡献**：`loadCheckpointRecords` 取全部检查点，`diffSnapshots(首个 checkpoint → HEAD)` 得到改动文件与增删行数（`FileDiff.additions/deletions`）。
+- **展示**：累计卡片（改动文件/新增行/删除行/净增行）、改动最多的文件 Top 8（按 churn 排序，绿/红条）、会话活动（每会话检查点数 + 时间范围）。
+- **说明**：基于 Git checkpoint 的累计改动，含 Agent 与手动编辑；无检查点时优雅降级。
+
+## 16. 关键源码定位
 
 - `packages/@codepapr/core/src/agent/Agent.ts`：核心工具循环与会话执行入口
 - `packages/@codepapr/core/src/agent/Session.ts`：会话对象与分区聚合
@@ -712,6 +745,10 @@ effectiveMaxContextTokens = min(maxContextTokens, providerContextLimit − maxTo
 - `packages/@codepapr/ui/src/utils/contextLimits.ts`：`effectiveMaxContextTokens`（provider-aware 有效阈值）
 - `packages/@codepapr/ui/src/utils/contextCompaction.ts`：压缩计划 / checkpoint / `buildEffectiveContextMessages`
 - `packages/@codepapr/ui/src/store/internals/contextCheckpoint.ts`：checkpoint 生成（`maybeGenerateContextCheckpoint`）
+- `packages/@codepapr/ui/src-tauri/src/workspace_fs/stats.rs`：原生项目统计引擎（语言检测 + code/blank/comment 分类 + 并行遍历聚合 + `compute_project_stats`）
+- `packages/@codepapr/ui/src/components/ProjectStatsModal.tsx`：项目统计弹窗（treemap、可排序语言表、结果缓存）
+- `packages/@codepapr/ui/src/components/AgentContribution.tsx`：Agent 贡献统计（checkpoint diff）
+- `packages/@codepapr/ui/src/utils/snapshot.ts`：checkpoint / diff 的 invoke 封装
 - `packages/@codepapr/ui/src/store/agentStore.ts`：桌面端主编排器（含 memory 整理三个触发点）
 - `packages/@codepapr/ui/src/store/permissionStore.ts`：外部路径访问权限管理
 - `packages/@codepapr/ui/src/store/toastStore.ts`：全局 Toast 通知

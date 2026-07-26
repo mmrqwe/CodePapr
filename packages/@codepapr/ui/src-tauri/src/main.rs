@@ -252,6 +252,7 @@ fn main() {
             db::cache_set,
             db::cache_remove,
             workspace_fs::list::list_workspace_files,
+            workspace_fs::stats::compute_project_stats,
             workspace_fs::read::read_text_file,
             workspace_fs::read::read_text_files_batch,
             workspace_fs::read::read_image_file,

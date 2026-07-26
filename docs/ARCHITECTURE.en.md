@@ -697,7 +697,40 @@ The settings panel has six tabs. Full parameter reference: `packages/@codepapr/c
 
 Voice configuration is not in the main settings panel — it is configured per character in the CharacterModal Voice Tab.
 
-## 15. Key Source Locations
+## 15. Project Statistics
+
+The project statistics modal (`ProjectStatsModal`) provides two views: **codebase statistics** and **Agent contribution statistics**.
+
+### 15.1 Native Rust Statistics Engine
+
+Codebase statistics are computed in one pass by the Rust command `compute_project_stats` (`workspace_fs/stats.rs`), replacing the earlier slow "frontend reads every file over IPC" approach:
+
+- **Gitignore-aware parallel walk**: reuses the search module's `ignore::WalkBuilder` (`.git_ignore(true).git_exclude(true).ignore(true)` + `should_ignore_dir` filter) with `build_parallel()` multi-threaded traversal, honoring the project's actual `.gitignore` (not a hardcoded ignore list).
+- **Language detection**: `language_from_path` (ported from `editorLanguage.ts`) maps filename special cases (dockerfile/makefile/.env, etc.) and extensions to language ids.
+- **code/blank/comment classification**: per-language comment-syntax table (`//`, `#`, `--`, `;`, `/* */`, `<!-- -->`, `""" """`, etc.) + a cross-line block-comment state machine; lines mixing code with a trailing comment count as code (cloc convention).
+- **Binary exclusion**: `decode_text_bytes` rejects binary files (counted as skipped).
+- **Aggregation**: aggregates by language / top-level directory / file-size bucket, computing largest file, average/median/max lines per file, and the code/config/doc ratio.
+- **Result shape**: `#[serde(rename_all="camelCase")]` mirrors the frontend interface, including `blankLines`/`commentLines` and per-language code/blank/comment.
+
+The frontend `loadProjectStats` makes a single `invoke('compute_project_stats')` and only adds display labels (`formatLanguageLabel`) on the frontend.
+
+### 15.2 Frontend Visualization & Interaction
+
+- **Directory treemap**: a self-contained balanced-split algorithm `computeTreemap` (weighted by line count, recursively splitting along the longer axis; no third-party dependency). Cells are sized by area proportion, with hover highlight/dim + tooltip.
+- **Sortable/filterable language table**: `LanguageTable` with clickable sortable headers (language/files/lines/code/blank/comment, asc/desc), a language filter input, and row hover; the stacked ratio bar is kept on top.
+- **Result caching + timestamp**: a module-level `statsCache` shows cached data immediately and refreshes in the background (falling back to cache on error); the header shows an "As of HH:MM:SS" timestamp.
+- **Motion**: staggered section reveal (`statsReveal`), treemap cell pop-in (`treemapPop`), bar growth (`barStretch`) — see `index.css`.
+
+### 15.3 Agent Contribution Statistics
+
+The `AgentContribution` component reuses **existing backend commands** (no new Rust code) to compute the agent's changes:
+
+- **Data source**: checkpoints in the shadow Git repo (`.CodePapr/git`). Each user message triggers `snapshotCreate` and writes to the `checkpoint_timeline` table.
+- **Cumulative contribution**: `loadCheckpointRecords` fetches all checkpoints; `diffSnapshots(first checkpoint → HEAD)` yields changed files and added/deleted lines (`FileDiff.additions/deletions`).
+- **Display**: cumulative cards (files changed / additions / deletions / net), top 8 changed files (sorted by churn, green/red bars), and session activity (checkpoint count + time range per session).
+- **Note**: cumulative changes based on Git checkpoints, including both agent and manual edits; degrades gracefully when there are no checkpoints.
+
+## 16. Key Source Locations
 
 - `packages/@codepapr/core/src/agent/Agent.ts`: Core tool loop and session execution entry point
 - `packages/@codepapr/core/src/agent/Session.ts`: Session object and partition aggregation
@@ -713,6 +746,10 @@ Voice configuration is not in the main settings panel — it is configured per c
 - `packages/@codepapr/ui/src/utils/contextLimits.ts`: `effectiveMaxContextTokens` (provider-aware effective threshold)
 - `packages/@codepapr/ui/src/utils/contextCompaction.ts`: Compaction planning / checkpoint / `buildEffectiveContextMessages`
 - `packages/@codepapr/ui/src/store/internals/contextCheckpoint.ts`: Checkpoint generation (`maybeGenerateContextCheckpoint`)
+- `packages/@codepapr/ui/src-tauri/src/workspace_fs/stats.rs`: Native project statistics engine (language detection + code/blank/comment classification + parallel walk aggregation + `compute_project_stats`)
+- `packages/@codepapr/ui/src/components/ProjectStatsModal.tsx`: Project statistics modal (treemap, sortable language table, result caching)
+- `packages/@codepapr/ui/src/components/AgentContribution.tsx`: Agent contribution statistics (checkpoint diff)
+- `packages/@codepapr/ui/src/utils/snapshot.ts`: invoke wrappers for checkpoint / diff
 - `packages/@codepapr/ui/src/store/agentStore.ts`: Desktop master orchestrator (with three memory consolidation trigger points)
 - `packages/@codepapr/ui/src/store/permissionStore.ts`: External path access permission management
 - `packages/@codepapr/ui/src/store/toastStore.ts`: Global toast notifications

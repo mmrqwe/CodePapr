@@ -7,6 +7,7 @@ pub(crate) mod diff;
 pub(crate) mod list;
 pub(crate) mod read;
 pub(crate) mod search;
+pub(crate) mod stats;
 pub(crate) mod types;
 pub(crate) mod watcher;
 pub(crate) mod write;

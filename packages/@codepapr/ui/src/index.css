@@ -604,6 +604,24 @@ body {
 }
 .fade-in { animation: fadeIn 0.15s ease-out; }
 
+@keyframes statsReveal {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.stats-reveal { animation: statsReveal 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes treemapPop {
+  from { opacity: 0; transform: scale(0.8); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.treemap-cell { animation: treemapPop 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes barStretch {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+.bar-grow { transform-origin: left center; animation: barStretch 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
 .loading-spinner {
   border-color: var(--foreground-dim);
   border-top-color: var(--accent);

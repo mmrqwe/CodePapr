@@ -1,32 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getTranslation, type Lang } from '../utils/i18n';
-import { languageFromPath } from '../utils/editorLanguage';
-
-interface FileEntry {
-  path: string;
-  name: string;
-  isDir: boolean;
-  bytes: number;
-}
-
-interface ListFilesResult {
-  root: string;
-  entries: FileEntry[];
-  truncated: boolean;
-}
-
-interface ReadFileResult {
-  path: string;
-  content: string;
-  bytes: number;
-}
+import { AgentContribution } from './AgentContribution';
 
 interface ProjectLanguageStat {
   id: string;
   label: string;
   files: number;
   lines: number;
+  code: number;
+  blank: number;
+  comment: number;
 }
 
 interface DirectoryStat {
@@ -37,7 +21,6 @@ interface DirectoryStat {
 
 interface FileSizeBucket {
   label: string;
-  range: [number, number | null];
   files: number;
   lines: number;
 }
@@ -63,6 +46,8 @@ interface ProjectStatsResult {
   skippedFiles: number;
   totalLines: number;
   codeLines: number;
+  blankLines: number;
+  commentLines: number;
   languages: ProjectLanguageStat[];
   largestFile: {
     path: string;
@@ -80,13 +65,6 @@ interface ProjectStatsModalProps {
   lang?: Lang;
   onClose: () => void;
 }
-
-const LIST_DEPTH = 6;
-const MAX_BYTES_PER_FILE = 400_000;
-const BATCH_SIZE = 16;
-const NON_CODE_LANGUAGES = new Set(['plaintext', 'markdown']);
-const CONFIG_LANGUAGES = new Set(['json', 'ini', 'yaml', 'xml', 'bicep', 'toml']);
-const DOC_LANGUAGES = new Set(['markdown', 'plaintext']);
 
 const LANGUAGE_COLORS: Record<string, string> = {
   typescript: '#3178c6',
@@ -137,11 +115,6 @@ function resolveLanguageColor(language: string): string {
   return LANGUAGE_COLORS[language] ?? LANGUAGE_COLORS[language.toLowerCase()] ?? '#4a5568';
 }
 
-function countLines(content: string): number {
-  if (!content) return 0;
-  return content.replace(/\r\n/g, '\n').split('\n').length;
-}
-
 function formatLanguageLabel(language: string): string {
   switch (language) {
     case 'typescript': return 'TypeScript';
@@ -163,162 +136,42 @@ function formatLanguageLabel(language: string): string {
   }
 }
 
-function isCodeLanguage(language: string): boolean {
-  return !NON_CODE_LANGUAGES.has(language);
+interface RawLanguageStat {
+  id: string;
+  files: number;
+  lines: number;
+  code: number;
+  blank: number;
+  comment: number;
 }
 
-function resolveFileCategory(language: string): 'code' | 'config' | 'doc' {
-  if (DOC_LANGUAGES.has(language)) return 'doc';
-  if (CONFIG_LANGUAGES.has(language)) return 'config';
-  return 'code';
-}
-
-function getTopLevelDirectory(path: string): string {
-  const normalized = path.replace(/^\.\//, '');
-  const idx = normalized.indexOf('/');
-  if (idx === -1) return '(root)';
-  return normalized.substring(0, idx);
-}
-
-function computeMedian(values: number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+interface RawProjectStats {
+  totalFiles: number;
+  totalDirectories: number;
+  textFiles: number;
+  codeFiles: number;
+  skippedFiles: number;
+  totalLines: number;
+  codeLines: number;
+  blankLines: number;
+  commentLines: number;
+  languages: RawLanguageStat[];
+  largestFile: { path: string; lines: number } | null;
+  truncated: boolean;
+  directoryBreakdown: DirectoryStat[];
+  fileSizeDistribution: FileSizeBucket[];
+  codeRatio: CodeRatio;
+  avgMetrics: AverageMetrics;
 }
 
 async function loadProjectStats(workspacePath: string): Promise<ProjectStatsResult> {
-  const listResult = await invoke<ListFilesResult>('list_workspace_files', {
-    workspacePath,
-    maxDepth: LIST_DEPTH,
-  });
-  const files = listResult.entries.filter((entry) => !entry.isDir);
-  const directories = listResult.entries.filter((entry) => entry.isDir);
-  const languageMap = new Map<string, ProjectLanguageStat>();
-  const dirMap = new Map<string, { files: number; lines: number }>();
-  const fileLineLengths: number[] = [];
-  let textFiles = 0;
-  let codeFiles = 0;
-  let skippedFiles = 0;
-  let totalLines = 0;
-  let codeLines = 0;
-  let largestFile: ProjectStatsResult['largestFile'] = null;
-  let codeLinesCount = 0;
-  let configLinesCount = 0;
-  let docLinesCount = 0;
-
-  for (let index = 0; index < files.length; index += BATCH_SIZE) {
-    const batch = files.slice(index, index + BATCH_SIZE);
-    const results = await Promise.all(
-      batch.map(async (file) => {
-        try {
-          const result = await invoke<ReadFileResult>('read_text_file', {
-            workspacePath,
-            relativePath: file.path,
-            maxBytes: MAX_BYTES_PER_FILE,
-          });
-          return { path: file.path, content: result.content };
-        } catch {
-          return null;
-        }
-      })
-    );
-
-    for (const result of results) {
-      if (!result) {
-        skippedFiles += 1;
-        continue;
-      }
-
-      const lines = countLines(result.content);
-      const language = languageFromPath(result.path);
-      const codeLike = isCodeLanguage(language);
-      textFiles += 1;
-      totalLines += lines;
-      fileLineLengths.push(lines);
-
-      if (codeLike) {
-        codeFiles += 1;
-        codeLines += lines;
-      }
-
-      const category = resolveFileCategory(language);
-      if (category === 'code') codeLinesCount += lines;
-      else if (category === 'config') configLinesCount += lines;
-      else docLinesCount += lines;
-
-      const topDir = getTopLevelDirectory(result.path);
-      const dir = dirMap.get(topDir) ?? { files: 0, lines: 0 };
-      dir.files += 1;
-      dir.lines += lines;
-      dirMap.set(topDir, dir);
-
-      const currentLanguage = languageMap.get(language) ?? {
-        id: language,
-        label: formatLanguageLabel(language),
-        files: 0,
-        lines: 0,
-      };
-      currentLanguage.files += 1;
-      currentLanguage.lines += lines;
-      languageMap.set(language, currentLanguage);
-
-      if (!largestFile || lines > largestFile.lines) {
-        largestFile = { path: result.path, lines };
-      }
-    }
-  }
-
-  const sizeBuckets: FileSizeBucket[] = [
-    { label: 'small', range: [0, 199], files: 0, lines: 0 },
-    { label: 'medium', range: [200, 999], files: 0, lines: 0 },
-    { label: 'large', range: [1000, null], files: 0, lines: 0 },
-  ];
-
-  for (const lines of fileLineLengths) {
-    if (lines < 200) {
-      sizeBuckets[0].files += 1;
-      sizeBuckets[0].lines += lines;
-    } else if (lines < 1000) {
-      sizeBuckets[1].files += 1;
-      sizeBuckets[1].lines += lines;
-    } else {
-      sizeBuckets[2].files += 1;
-      sizeBuckets[2].lines += lines;
-    }
-  }
-
-  const directoryBreakdown = Array.from(dirMap.entries())
-    .map(([name, stat]) => ({ name, ...stat }))
-    .sort((a, b) => b.lines - a.lines)
-    .slice(0, 8);
-
+  const raw = await invoke<RawProjectStats>('compute_project_stats', { workspacePath });
   return {
-    totalFiles: files.length,
-    totalDirectories: directories.length,
-    textFiles,
-    codeFiles,
-    skippedFiles,
-    totalLines,
-    codeLines,
-    languages: Array.from(languageMap.values()).sort((left, right) => right.lines - left.lines),
-    largestFile,
-    truncated: listResult.truncated,
-    directoryBreakdown,
-    fileSizeDistribution: sizeBuckets.filter((b) => b.files > 0),
-    codeRatio: {
-      code: codeLinesCount,
-      config: configLinesCount,
-      doc: docLinesCount,
-    },
-    avgMetrics: {
-      avgLinesPerFile: fileLineLengths.length > 0
-        ? Math.round(totalLines / fileLineLengths.length)
-        : 0,
-      medianLinesPerFile: Math.round(computeMedian(fileLineLengths)),
-      maxLinesPerFile: fileLineLengths.length > 0 ? Math.max(...fileLineLengths) : 0,
-      totalTextFiles: textFiles,
-    },
+    ...raw,
+    languages: raw.languages.map((lang) => ({
+      ...lang,
+      label: formatLanguageLabel(lang.id),
+    })),
   };
 }
 
@@ -459,6 +312,184 @@ function SizeDistribution({ buckets }: { buckets: FileSizeBucket[] }) {
   );
 }
 
+// ── Directory treemap ──────────────────────────────────────────────────
+
+interface TreemapRect {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  value: number;
+}
+
+const TREEMAP_COLORS = ['#6366f1', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#84cc16', '#14b8a6', '#f97316'];
+
+// Balanced-split treemap: recursively split the space along its longer axis,
+// keeping the two halves as close to equal total weight as possible.
+export function computeTreemap(items: { id: string; value: number }[], width: number, height: number): TreemapRect[] {
+  const positive = items.filter((item) => item.value > 0);
+  if (positive.length === 0 || width <= 0 || height <= 0) return [];
+
+  const layout = (list: { id: string; value: number }[], x: number, y: number, w: number, h: number): TreemapRect[] => {
+    const sum = list.reduce((s, item) => s + item.value, 0);
+    if (sum <= 0 || w <= 0 || h <= 0) return [];
+    if (list.length === 1) {
+      return [{ id: list[0].id, x, y, w, h, value: list[0].value }];
+    }
+    const sorted = [...list].sort((a, b) => b.value - a.value);
+    let acc = 0;
+    let split = 0;
+    for (let i = 0; i < sorted.length - 1; i++) {
+      acc += sorted[i].value;
+      split = i;
+      if (acc >= sum / 2) break;
+    }
+    const left = sorted.slice(0, split + 1);
+    const right = sorted.slice(split + 1);
+    const leftSum = left.reduce((s, item) => s + item.value, 0);
+    const frac = leftSum / sum;
+    if (w >= h) {
+      const lw = w * frac;
+      return [...layout(left, x, y, lw, h), ...layout(right, x + lw, y, w - lw, h)];
+    }
+    const lh = h * frac;
+    return [...layout(left, x, y, w, lh), ...layout(right, x, y + lh, w, h - lh)];
+  };
+
+  return layout(positive, 0, 0, width, height);
+}
+
+function DirectoryTreemap({ dirs, totalLines }: { dirs: DirectoryStat[]; totalLines: number }) {
+  const [hovered, setHovered] = useState<string | null>(null);
+  const rects = useMemo(
+    () => computeTreemap(dirs.map((d) => ({ id: d.name, value: d.lines })), 100, 100),
+    [dirs],
+  );
+  const byName = useMemo(() => new Map(dirs.map((d) => [d.name, d])), [dirs]);
+  if (rects.length === 0) return null;
+
+  return (
+    <div className="relative h-44 w-full overflow-hidden rounded-lg border border-[#2a2d3a] bg-[#0a0d14]">
+      {rects.map((rect, i) => {
+        const stat = byName.get(rect.id);
+        const color = TREEMAP_COLORS[i % TREEMAP_COLORS.length];
+        const pct = totalLines > 0 ? ((rect.value / totalLines) * 100).toFixed(1) : '0';
+        const isHovered = hovered === rect.id;
+        const dimmed = hovered !== null && !isHovered;
+        const showLabel = rect.w > 20 && rect.h > 16;
+        return (
+          <div
+            key={rect.id}
+            className="treemap-cell absolute flex flex-col justify-between overflow-hidden border border-[#0a0d14] p-1.5 transition-[opacity,filter] duration-200"
+            style={{
+              left: `${rect.x}%`,
+              top: `${rect.y}%`,
+              width: `${rect.w}%`,
+              height: `${rect.h}%`,
+              backgroundColor: color,
+              opacity: dimmed ? 0.3 : 0.85,
+              filter: isHovered ? 'brightness(1.25)' : undefined,
+              zIndex: isHovered ? 10 : 1,
+              animationDelay: `${i * 45}ms`,
+            }}
+            onMouseEnter={() => setHovered(rect.id)}
+            onMouseLeave={() => setHovered(null)}
+            title={`${rect.id} · ${stat?.files ?? 0} files · ${rect.value.toLocaleString()} lines (${pct}%)`}
+          >
+            {showLabel && (
+              <>
+                <span className="truncate text-[10px] font-semibold leading-tight text-white/90">{rect.id}</span>
+                {rect.h > 26 && (
+                  <span className="truncate text-[9px] leading-tight text-white/70">
+                    {rect.value.toLocaleString()} lines
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Sortable / filterable language table ───────────────────────────────
+
+type LangSortKey = 'label' | 'files' | 'lines' | 'code' | 'blank' | 'comment';
+
+function LanguageTable({
+  languages,
+  sortKey,
+  sortDir,
+  onSort,
+  t,
+}: {
+  languages: ProjectLanguageStat[];
+  sortKey: LangSortKey;
+  sortDir: 'asc' | 'desc';
+  onSort: (key: LangSortKey) => void;
+  t: Record<string, string>;
+}) {
+  const columns: { key: LangSortKey; label: string; numeric: boolean }[] = [
+    { key: 'label', label: t.projectStatsLanguage, numeric: false },
+    { key: 'files', label: t.projectStatsFiles, numeric: true },
+    { key: 'lines', label: t.projectStatsLines, numeric: true },
+    { key: 'code', label: t.projectStatsCodeLines, numeric: true },
+    { key: 'blank', label: t.projectStatsBlankLines, numeric: true },
+    { key: 'comment', label: t.projectStatsCommentLines, numeric: true },
+  ];
+
+  const header = (col: { key: LangSortKey; label: string; numeric: boolean }) => {
+    const active = sortKey === col.key;
+    const arrow = active ? (sortDir === 'desc' ? '↓' : '↑') : '';
+    return (
+      <th
+        key={col.key}
+        onClick={() => onSort(col.key)}
+        className={`cursor-pointer select-none whitespace-nowrap px-2 py-1.5 font-medium transition-colors hover:text-indigo-300 ${
+          col.numeric ? 'text-right' : 'text-left'
+        } ${active ? 'text-indigo-300' : 'text-slate-500'}`}
+      >
+        {col.label} {arrow}
+      </th>
+    );
+  };
+
+  return (
+    <table className="w-full border-collapse text-[11px]">
+      <thead>
+        <tr className="border-b border-[#2a2d3a]">{columns.map(header)}</tr>
+      </thead>
+      <tbody>
+        {languages.map((lang) => (
+          <tr key={lang.id} className="border-b border-[#1a1f2c] transition-colors last:border-0 hover:bg-white/[0.04]">
+            <td className="px-2 py-1.5">
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block h-2 w-2 flex-shrink-0 rounded-sm" style={{ backgroundColor: resolveLanguageColor(lang.id) }} />
+                <span className="text-slate-300">{lang.label}</span>
+              </span>
+            </td>
+            <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">{lang.files.toLocaleString()}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums text-slate-300">{lang.lines.toLocaleString()}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums text-indigo-300">{lang.code.toLocaleString()}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{lang.blank.toLocaleString()}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums text-green-300">{lang.comment.toLocaleString()}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function formatClock(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+const statsCache = new Map<string, { stats: ProjectStatsResult; at: number }>();
+
 export function ProjectStatsModal({
   workspacePath,
   lang,
@@ -468,6 +499,10 @@ export function ProjectStatsModal({
   const [stats, setStats] = useState<ProjectStatsResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [statsAt, setStatsAt] = useState<number | null>(null);
+  const [langSortKey, setLangSortKey] = useState<LangSortKey>('lines');
+  const [langSortDir, setLangSortDir] = useState<'asc' | 'desc'>('desc');
+  const [langFilter, setLangFilter] = useState('');
 
   const refreshStats = useCallback(async () => {
     if (!workspacePath) {
@@ -475,14 +510,24 @@ export function ProjectStatsModal({
       setError('');
       return;
     }
+    const cached = statsCache.get(workspacePath);
+    if (cached) {
+      setStats(cached.stats);
+      setStatsAt(cached.at);
+    }
     setIsLoading(true);
     setError('');
     try {
       const result = await loadProjectStats(workspacePath);
+      const now = Date.now();
+      statsCache.set(workspacePath, { stats: result, at: now });
       setStats(result);
+      setStatsAt(now);
     } catch (err) {
-      setStats(null);
-      setError((err as Error).message);
+      if (!statsCache.get(workspacePath)) {
+        setStats(null);
+        setError((err as Error).message);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -491,6 +536,30 @@ export function ProjectStatsModal({
   useEffect(() => {
     void refreshStats();
   }, [refreshStats]);
+
+  const handleLangSort = (key: LangSortKey) => {
+    if (langSortKey === key) {
+      setLangSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    } else {
+      setLangSortKey(key);
+      setLangSortDir(key === 'label' ? 'asc' : 'desc');
+    }
+  };
+
+  const visibleLanguages = useMemo(() => {
+    if (!stats) return [];
+    const query = langFilter.trim().toLowerCase();
+    const filtered = query
+      ? stats.languages.filter(
+          (l) => l.label.toLowerCase().includes(query) || l.id.toLowerCase().includes(query),
+        )
+      : stats.languages;
+    const dir = langSortDir === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      if (langSortKey === 'label') return a.label.localeCompare(b.label) * dir;
+      return (a[langSortKey] - b[langSortKey]) * dir;
+    });
+  }, [stats, langFilter, langSortKey, langSortDir]);
 
   const dirMaxFiles = useMemo(() => {
     if (!stats) return 1;
@@ -507,7 +576,14 @@ export function ProjectStatsModal({
         <div className="flex items-center justify-between border-b border-[#2a2d3a] px-5 py-4">
           <div>
             <h2 className="text-sm font-semibold text-slate-200">{t.projectStatsTitle}</h2>
-            <p className="mt-1 text-xs text-slate-500">{t.projectStatsAnalysisDepth}</p>
+            <p className="mt-1 text-xs text-slate-500">
+              {t.projectStatsAnalysisDepth}
+              {statsAt !== null && (
+                <span className="ml-2 text-slate-600">
+                  · {t.projectStatsAsOf} {formatClock(statsAt)}
+                </span>
+              )}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -545,7 +621,7 @@ export function ProjectStatsModal({
 
           {!isLoading && !error && stats && (
             <>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="stats-reveal grid grid-cols-3 gap-3">
                 <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] px-4 py-3">
                   <div className="text-[11px] text-slate-500">{t.projectStatsTotalFiles}</div>
                   <div className="mt-1 text-lg font-semibold text-slate-100">{stats.totalFiles.toLocaleString()}</div>
@@ -565,7 +641,7 @@ export function ProjectStatsModal({
                 </div>
               </div>
 
-              <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4">
+              <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '60ms' }}>
                 <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsAvgMetrics}</p>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
@@ -583,20 +659,65 @@ export function ProjectStatsModal({
                 </div>
               </div>
 
-              <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4">
-                <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsLanguages}</p>
-                <LanguageBar languages={stats.languages.slice(0, 12)} totalLines={stats.totalLines} />
+              <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '90ms' }}>
+                <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsLineComposition}</p>
+                <StackedBar
+                  segments={[
+                    { color: '#6366f1', width: stats.codeLines, label: t.projectStatsCodeLines },
+                    { color: '#64748b', width: stats.blankLines, label: t.projectStatsBlankLines },
+                    { color: '#22c55e', width: stats.commentLines, label: t.projectStatsCommentLines },
+                  ]}
+                  height={12}
+                />
+                <div className="mt-3 grid grid-cols-3 gap-3">
+                  <div>
+                    <div className="text-[11px] text-slate-500">{t.projectStatsCodeLines}</div>
+                    <div className="text-base font-semibold text-indigo-300">{stats.codeLines.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-slate-500">{t.projectStatsBlankLines}</div>
+                    <div className="text-base font-semibold text-slate-300">{stats.blankLines.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-slate-500">{t.projectStatsCommentLines}</div>
+                    <div className="text-base font-semibold text-green-300">{stats.commentLines.toLocaleString()}</div>
+                  </div>
+                </div>
               </div>
 
-              <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4">
+              <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '120ms' }}>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold text-slate-300">{t.projectStatsLanguages}</p>
+                  <input
+                    type="text"
+                    value={langFilter}
+                    onChange={(e) => setLangFilter(e.target.value)}
+                    placeholder={t.projectStatsFilterPlaceholder}
+                    className="w-36 rounded-lg border border-[#2a2d3a] bg-[#0a0d14] px-2.5 py-1 text-[11px] text-slate-300 placeholder-slate-600 transition-colors focus:border-indigo-500/50 focus:outline-none"
+                  />
+                </div>
+                <LanguageBar languages={stats.languages.slice(0, 12)} totalLines={stats.totalLines} />
+                <div className="mt-3 max-h-52 overflow-y-auto">
+                  <LanguageTable
+                    languages={visibleLanguages}
+                    sortKey={langSortKey}
+                    sortDir={langSortDir}
+                    onSort={handleLangSort}
+                    t={t}
+                  />
+                </div>
+              </div>
+
+              <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '150ms' }}>
                 <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsCodeRatio}</p>
                 <RatioBar code={stats.codeRatio.code} config={stats.codeRatio.config} doc={stats.codeRatio.doc} />
               </div>
 
               {stats.directoryBreakdown.length > 0 && (
-                <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4">
+                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '180ms' }}>
                   <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsDirectories}</p>
-                  <div className="space-y-1.5">
+                  <DirectoryTreemap dirs={stats.directoryBreakdown} totalLines={stats.totalLines} />
+                  <div className="mt-3 space-y-1.5">
                     {stats.directoryBreakdown.map((dir) => (
                       <HorizontalBar
                         key={dir.name}
@@ -612,14 +733,14 @@ export function ProjectStatsModal({
               )}
 
               {stats.fileSizeDistribution.length > 0 && (
-                <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4">
+                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '210ms' }}>
                   <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsFileSize}</p>
                   <SizeDistribution buckets={stats.fileSizeDistribution} />
                 </div>
               )}
 
               {stats.largestFile && (
-                <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] px-4 py-3">
+                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] px-4 py-3" style={{ animationDelay: '240ms' }}>
                   <div className="text-xs font-semibold text-slate-200">{t.projectStatsLargestFile}</div>
                   <div className="mt-2 text-sm text-slate-300">
                     {stats.largestFile.path} · {stats.largestFile.lines.toLocaleString()} lines
@@ -631,6 +752,10 @@ export function ProjectStatsModal({
               )}
             </>
           )}
+
+          <div className="border-t border-[#2a2d3a] pt-4">
+            <AgentContribution workspacePath={workspacePath} lang={lang} />
+          </div>
         </div>
       </div>
     </div>
