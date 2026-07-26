@@ -606,8 +606,16 @@ export function createLspProjectGraphEnhancer(
   const findSymbolColumn = (content: string, zeroBasedLine: number, name: string): number => {
     const lineText = content.split(/\r?\n/)[zeroBasedLine] ?? '';
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const match = lineText.match(new RegExp(`(?<![\\w$])${escaped}(?![\\w$])`));
-    return match && typeof match.index === 'number' ? match.index : 0;
+    // 不用后行断言 (?<!...)（需 Safari 16.4+ / macOS 13.3+，旧 WebView 会抛 SyntaxError）；
+    // 改用 lookahead + 手动检查前导字符，返回第一个构成完整标识符的匹配位置。
+    const pattern = new RegExp(`${escaped}(?![\\w$])`, 'g');
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(lineText)) !== null) {
+      const before = match.index > 0 ? lineText[match.index - 1] : '';
+      if (before && /[\w$]/.test(before)) continue;
+      return match.index;
+    }
+    return 0;
   };
   const resolveRelativePath = (uri: string): string => {
     let path = uri.startsWith('file://') ? uri.replace(/^file:\/\//, '') : uri;

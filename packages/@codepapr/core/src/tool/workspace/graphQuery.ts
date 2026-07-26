@@ -722,7 +722,10 @@ export function computeRenameEditsForContent(
 ): ProjectGraphRenameEdit[] {
   const edits: ProjectGraphRenameEdit[] = [];
   if (!oldName || !newName || oldName === newName) return edits;
-  const pattern = new RegExp(`(?<![\\w$])${escapeRegExp(oldName)}(?![\\w$])`, 'g');
+  // 注意：不使用后行断言 (?<!...)——它需要 Safari 16.4+（macOS 13.3+），而本应用目标 macOS 版本更低，
+  // 旧 WebView 会在构造 RegExp 时抛 SyntaxError。这里改用 lookahead（全平台支持）+ 手动检查前导字符，
+  // 等价地实现「完整标识符」匹配（含 $ 前缀的标识符边界）。
+  const pattern = new RegExp(`${escapeRegExp(oldName)}(?![\\w$])`, 'g');
   const lines = content.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const lineText = lines[i];
@@ -731,6 +734,8 @@ export function computeRenameEditsForContent(
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(lineText)) !== null) {
       const start = match.index;
+      const before = start > 0 ? lineText[start - 1] : '';
+      if (before && /[\w$]/.test(before)) continue;
       if (isInsideStringLiteral(lineText, start)) continue;
       edits.push({
         line: i + 1,
