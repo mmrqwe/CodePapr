@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useCallback, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useCallback, useState, useMemo } from 'react';
 import { Graph } from '@antv/g6';
 import type { GraphOptions, NodeData, EdgeData } from '@antv/g6';
 import { Renderer as WebGLRenderer } from '@antv/g-webgl';
@@ -47,13 +47,13 @@ const FOLDER_COLORS = [
   '#a855f7', '#db2777', '#ea580c', '#ca8a04', '#16a34a',
 ];
 
-function topFolder(filePath: string): string {
+function parentFolder(filePath: string): string {
   const segments = filePath.replace(/\\/g, '/').split('/');
   if (segments.length <= 1) return '.';
   return segments.slice(0, -1).join('/');
 }
 
-function topFolderColor(folder: string): string {
+function folderColor(folder: string): string {
   let hash = 0;
   for (let i = 0; i < folder.length; i++) {
     hash = ((hash << 5) - hash) + folder.charCodeAt(i);
@@ -137,7 +137,7 @@ interface G6NodeData {
   async?: boolean;
   inDegree: number;
   outDegree: number;
-  topFolder?: string;
+  parentFolder?: string;
   [key: string]: unknown;
 }
 
@@ -149,6 +149,8 @@ interface G6Data {
       fill: string;
       stroke: string;
       size: number;
+      x?: number;
+      y?: number;
     };
   }>;
   edges: Array<{
@@ -212,7 +214,7 @@ function buildG6Data(
     includedNodeIds.add(fileNode.id);
     const deg = degrees.get(fileNode.id)?.total ?? 0;
     const isEntry = Boolean(fileNode.entryPoint);
-    const folder = topFolder(fileNode.path);
+    const folder = parentFolder(fileNode.path);
     const ft = fileNode.fileType;
 
     g6Nodes.push({
@@ -227,10 +229,10 @@ function buildG6Data(
         fileType: ft,
         inDegree: degrees.get(fileNode.id)?.in ?? 0,
         outDegree: degrees.get(fileNode.id)?.out ?? 0,
-        topFolder: folder,
+        parentFolder: folder,
       },
       style: {
-        fill: ft && ft !== 'source' ? (FILE_TYPE_COLORS[ft] ?? topFolderColor(folder)) : topFolderColor(folder),
+        fill: ft && ft !== 'source' ? (FILE_TYPE_COLORS[ft] ?? folderColor(folder)) : folderColor(folder),
         stroke: isEntry ? '#f0883e' : '#30363d',
         size: scaleSize(deg, minFileDeg, maxFileDeg, 30, 70),
       },
@@ -414,7 +416,7 @@ interface SelectedNodeInfo {
   async?: boolean;
   inDegree: number;
   outDegree: number;
-  topFolder?: string;
+  parentFolder?: string;
   isEntry: boolean;
 }
 
@@ -444,6 +446,48 @@ function fuzzyMatch(target: string, query: string): boolean {
   return qi === query.length;
 }
 
+// 按当前搜索词给图中节点应用 searchDim 状态。抽成独立函数，使得「悬停清除高亮后」也能用当前搜索词
+// 重新恢复搜索 dimming（否则悬停一次就会永久抹掉搜索高亮）。使用批量 setElementState 一次性更新，
+// 避免对每个节点单独调用（大图下逐个调用会触发大量重绘）。
+function applySearchDimming(graph: Graph, query: string): void {
+  const q = query.trim().toLowerCase();
+  try {
+    const allNodes = graph.getNodeData();
+    const stateMap: Record<string, string | string[]> = {};
+    if (!q) {
+      for (const n of allNodes) { if (n.id) stateMap[n.id] = []; }
+      void graph.setElementState(stateMap);
+      return;
+    }
+    const matchingIds = new Set<string>();
+    const neighborIds = new Set<string>();
+    for (const n of allNodes) {
+      if (!n.id) continue;
+      const data = n.data as G6NodeData | undefined;
+      const label = (data?.label ?? '').toLowerCase();
+      const fullPath = (data?.fullPath ?? '').toLowerCase();
+      if (label.includes(q) || fullPath.includes(q) || fuzzyMatch(label, q) || fuzzyMatch(fullPath, q)) {
+        matchingIds.add(n.id);
+      }
+    }
+    if (matchingIds.size === 0) {
+      for (const n of allNodes) { if (n.id) stateMap[n.id] = []; }
+      void graph.setElementState(stateMap);
+      return;
+    }
+    const allEdges = graph.getEdgeData();
+    for (const edge of allEdges) {
+      if (edge.source && matchingIds.has(edge.source) && edge.target) neighborIds.add(edge.target);
+      if (edge.target && matchingIds.has(edge.target) && edge.source) neighborIds.add(edge.source);
+    }
+    for (const n of allNodes) {
+      if (!n.id) continue;
+      stateMap[n.id] = matchingIds.has(n.id) || neighborIds.has(n.id) ? [] : 'searchDim';
+    }
+    void graph.setElementState(stateMap);
+  } catch { /* ignore */ }
+}
+
 interface EdgeRelation {
   edgeId: string;
   kind: string;
@@ -463,13 +507,11 @@ interface ConnectedEdges {
 
 function computeConnectedEdges(
   nodeId: string | undefined,
-  nodes: ProjectGraphNode[],
   edges: ProjectGraphEdge[],
+  nodeMap: Map<string, ProjectGraphNode>,
 ): ConnectedEdges {
   const result: ConnectedEdges = { inbound: [], outbound: [] };
   if (!nodeId) return result;
-
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
   for (const edge of edges) {
     if (edge.kind === 'contains') continue;
@@ -517,6 +559,22 @@ const ProjectGraphKnowledgeGraph = forwardRef<
   const graphRef = useRef<Graph | null>(null);
   const onNodeClickRef = useRef(onNodeClick);
   onNodeClickRef.current = onNodeClick;
+  const searchQueryRef = useRef(searchQuery);
+  searchQueryRef.current = searchQuery;
+  // 复用的节点索引与度数表：避免每次点击/导航都重新遍历整张图（O(n+e)）。
+  const graphNodeMap = useMemo(
+    () => new Map(projectGraph.nodes.map((n) => [n.id, n])),
+    [projectGraph.nodes],
+  );
+  const graphDegrees = useMemo(
+    () => computeDegrees(projectGraph.nodes, projectGraph.edges),
+    [projectGraph.nodes, projectGraph.edges],
+  );
+  // 位置缓存：当图数据未变（仅主题切换等导致重建）时，复用上一次的节点坐标并跳过昂贵的力导布局，
+  // 避免每次重建都重跑 1200 次迭代。
+  const positionsCacheRef = useRef<Map<string, [number, number]> | null>(null);
+  const lastGraphRef = useRef<WorkspaceProjectGraphResult | null>(null);
+  const lastViewModeKeyRef = useRef<string>('');
   const [tooltipInfo, setTooltipInfo] = useState<TooltipInfo | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<SelectedNodeInfo | null>(null);
@@ -549,18 +607,8 @@ const ProjectGraphKnowledgeGraph = forwardRef<
   }, [selectedNode]);
 
   const navigateToNode = useCallback((targetNodeId: string) => {
-    const nodeMap = new Map(projectGraph.nodes.map((n) => [n.id, n]));
-    const targetNode = nodeMap.get(targetNodeId);
+    const targetNode = graphNodeMap.get(targetNodeId);
     if (!targetNode) return;
-
-    const degrees = new Map<string, { in: number; out: number }>();
-    for (const edge of projectGraph.edges) {
-      if (edge.kind === 'contains') continue;
-      if (!degrees.has(edge.from)) degrees.set(edge.from, { in: 0, out: 0 });
-      if (!degrees.has(edge.to)) degrees.set(edge.to, { in: 0, out: 0 });
-      degrees.get(edge.from)!.out++;
-      degrees.get(edge.to)!.in++;
-    }
 
     const fileTypeVal = targetNode.fileType;
     setSelectedNode({
@@ -574,14 +622,14 @@ const ProjectGraphKnowledgeGraph = forwardRef<
       signature: targetNode.symbol?.signature,
       exported: targetNode.symbol?.exported,
       async: targetNode.symbol?.async,
-      inDegree: degrees.get(targetNode.id)?.in ?? 0,
-      outDegree: degrees.get(targetNode.id)?.out ?? 0,
-      topFolder: nodeMap.get(targetNodeId)?.path ? topFolder(targetNode.path) : undefined,
+      inDegree: graphDegrees.get(targetNode.id)?.in ?? 0,
+      outDegree: graphDegrees.get(targetNode.id)?.out ?? 0,
+      parentFolder: targetNode.path ? parentFolder(targetNode.path) : undefined,
       isEntry: Boolean(targetNode.entryPoint),
     });
-    setConnectedEdges(computeConnectedEdges(targetNodeId, projectGraph.nodes, projectGraph.edges));
+    setConnectedEdges(computeConnectedEdges(targetNodeId, projectGraph.edges, graphNodeMap));
     onNodeClickRef.current?.(targetNode.path, targetNode.symbol?.line);
-  }, [projectGraph.nodes, projectGraph.edges]);
+  }, [graphNodeMap, graphDegrees, projectGraph.edges]);
 
   useImperativeHandle(ref, () => ({
     zoomIn: () => {
@@ -618,6 +666,33 @@ const ProjectGraphKnowledgeGraph = forwardRef<
     if (graphRef.current) {
       graphRef.current.destroy();
       graphRef.current = null;
+    }
+
+    // 空图（没有任何节点）时不创建 G6 实例：autoFit:'view' 作用于空数据会产生无效变换/告警。
+    // 上层（WorkspaceInsightPanel）会展示「暂无节点」占位，这里直接跳过渲染。
+    if (nodes.length === 0) {
+      return;
+    }
+
+    // 若图数据未变（同一 projectGraph 引用 + 同一视图模式），仅是主题切换等导致重建，
+    // 则复用上一次布局得到的节点坐标并跳过昂贵的力导布局（否则每次重建都重跑 1200 次迭代）。
+    const canReusePositions =
+      positionsCacheRef.current !== null &&
+      lastGraphRef.current === projectGraph &&
+      lastViewModeKeyRef.current === viewModeKey &&
+      nodes.every((n) => {
+        const p = positionsCacheRef.current!.get(n.id);
+        return !!p && Number.isFinite(p[0]) && Number.isFinite(p[1]);
+      });
+    if (canReusePositions && positionsCacheRef.current) {
+      const cache = positionsCacheRef.current;
+      for (const n of nodes) {
+        const p = cache.get(n.id);
+        if (p) {
+          n.style.x = p[0];
+          n.style.y = p[1];
+        }
+      }
     }
 
     const rect = container.getBoundingClientRect();
@@ -680,22 +755,27 @@ const ProjectGraphKnowledgeGraph = forwardRef<
           },
         },
       },
-      layout: {
-        type: 'force',
-        preventOverlap: true,
-        nodeSize: (d: NodeData) => {
-          const size = d.style?.size as number | undefined;
-          return size ?? 30;
-        },
-        nodeSpacing: 24,
-        collideStrength: 1,
-        linkDistance: 260,
-        nodeStrength: 3000,
-        edgeStrength: 0.2,
-        clustering: false,
-        animation: false,
-        maxIteration: 1200,
-      },
+      // 复用坐标时不下发 layout，G6 会按节点 style.x/y 直接定位，跳过力导计算。
+      ...(canReusePositions
+        ? {}
+        : {
+            layout: {
+              type: 'force',
+              preventOverlap: true,
+              nodeSize: (d: NodeData) => {
+                const size = d.style?.size as number | undefined;
+                return size ?? 30;
+              },
+              nodeSpacing: 24,
+              collideStrength: 1,
+              linkDistance: 260,
+              nodeStrength: 3000,
+              edgeStrength: 0.2,
+              clustering: false,
+              animation: false,
+              maxIteration: 1200,
+            },
+          }),
       behaviors: [
         'drag-canvas',
         'zoom-canvas',
@@ -721,10 +801,10 @@ const ProjectGraphKnowledgeGraph = forwardRef<
               async: g6Data.async,
               inDegree: g6Data.inDegree,
               outDegree: g6Data.outDegree,
-              topFolder: g6Data.topFolder,
+              parentFolder: g6Data.parentFolder,
               isEntry: g6Data.isEntry,
             });
-            setConnectedEdges(computeConnectedEdges(nodeId, projectGraph.nodes, projectGraph.edges));
+            setConnectedEdges(computeConnectedEdges(nodeId, projectGraph.edges, graphNodeMap));
             handleNodeClick(g6Data.fullPath, g6Data.line);
           },
         },
@@ -741,14 +821,50 @@ const ProjectGraphKnowledgeGraph = forwardRef<
 
     const graph = new Graph(graphOptions);
 
+    // 邻接表惰性构建并缓存：悬停高亮只需查表（O(度数)），避免每次悬停都遍历全部边（O(E)）。
+    // 在首次悬停时（此时图已渲染、元素 id 已确定）构建一次。
+    let adjacencyCache: {
+      nodeIds: string[];
+      edgeIds: string[];
+      neighbors: Map<string, Set<string>>;
+      edgeIdsByNode: Map<string, Set<string>>;
+    } | null = null;
+    const getAdjacency = () => {
+      if (adjacencyCache) return adjacencyCache;
+      const neighbors = new Map<string, Set<string>>();
+      const edgeIdsByNode = new Map<string, Set<string>>();
+      const nodeIds: string[] = [];
+      const edgeIds: string[] = [];
+      for (const n of graph.getNodeData()) {
+        if (!n.id) continue;
+        nodeIds.push(n.id);
+        neighbors.set(n.id, new Set());
+        edgeIdsByNode.set(n.id, new Set());
+      }
+      for (const ed of graph.getEdgeData()) {
+        if (!ed.id || !ed.source || !ed.target) continue;
+        edgeIds.push(ed.id);
+        neighbors.get(ed.source)?.add(ed.target);
+        neighbors.get(ed.target)?.add(ed.source);
+        edgeIdsByNode.get(ed.source)?.add(ed.id);
+        edgeIdsByNode.get(ed.target)?.add(ed.id);
+      }
+      adjacencyCache = { nodeIds, edgeIds, neighbors, edgeIdsByNode };
+      return adjacencyCache;
+    };
+
     const clearHoverStates = () => {
       if (!graphRef.current) return;
       try {
-        const allNodeData = graph.getNodeData();
-        const allEdgeData = graph.getEdgeData();
-        for (const n of allNodeData) { if (n.id) graph.setElementState(n.id, []); }
-        for (const e of allEdgeData) { if (e.id) graph.setElementState(e.id, []); }
+        // 批量一次性重置所有元素状态，避免逐个调用触发大量重绘。
+        const { nodeIds, edgeIds } = getAdjacency();
+        const reset: Record<string, string[]> = {};
+        for (const id of nodeIds) reset[id] = [];
+        for (const id of edgeIds) reset[id] = [];
+        void graph.setElementState(reset);
       } catch { /* ignore cleanup errors */ }
+      // 悬停会把节点状态重置为空，从而抹掉搜索 dimming；这里用当前搜索词恢复搜索高亮。
+      applySearchDimming(graph, searchQueryRef.current);
     };
 
     graph.on('node:pointerenter', (evt: unknown) => {
@@ -758,36 +874,18 @@ const ProjectGraphKnowledgeGraph = forwardRef<
 
       const g = graphRef.current;
       try {
-        const allNodes = g.getNodeData();
-        const allEdges = g.getEdgeData();
-        const neighborSet = new Set<string>();
-        const connectingEdgeIds = new Set<string>();
-
-        for (const edge of allEdges) {
-          if (edge.source === nodeId && edge.target) {
-            neighborSet.add(edge.target);
-            if (edge.id) connectingEdgeIds.add(edge.id);
-          } else if (edge.target === nodeId && edge.source) {
-            neighborSet.add(edge.source);
-            if (edge.id) connectingEdgeIds.add(edge.id);
-          }
+        const { nodeIds, edgeIds, neighbors, edgeIdsByNode } = getAdjacency();
+        const nb = neighbors.get(nodeId);
+        const ce = edgeIdsByNode.get(nodeId);
+        // 汇总成一张状态表后单次批量下发（O(1) 次 setElementState 调用，而非 O(N+E) 次）。
+        const stateMap: Record<string, string> = {};
+        for (const id of nodeIds) {
+          stateMap[id] = id === nodeId ? 'highlight' : nb?.has(id) ? 'neighbour' : 'dim';
         }
-
-        for (const n of allNodes) {
-          if (!n.id) continue;
-          if (n.id === nodeId) {
-            g.setElementState(n.id, 'highlight');
-          } else if (neighborSet.has(n.id)) {
-            g.setElementState(n.id, 'neighbour');
-          } else {
-            g.setElementState(n.id, 'dim');
-          }
+        for (const id of edgeIds) {
+          stateMap[id] = ce?.has(id) ? 'active' : 'dim';
         }
-
-        for (const edge of allEdges) {
-          if (!edge.id) continue;
-          g.setElementState(edge.id, connectingEdgeIds.has(edge.id) ? 'active' : 'dim');
-        }
+        void g.setElementState(stateMap);
       } catch { /* ignore */ }
 
       const canvasPos = (e as { canvas?: { x?: number; y?: number } }).canvas;
@@ -820,9 +918,13 @@ const ProjectGraphKnowledgeGraph = forwardRef<
       const e = evt as Record<string, unknown>;
       const canvasPos = (e as { canvas?: { x?: number; y?: number } }).canvas;
       if (canvasPos) {
+        // 与 pointerenter 一致，加上 canvas 容器在外层 relative 容器中的偏移，否则移动时 tooltip 会跳变错位。
+        const containerEl = containerRef.current;
+        const offsetX = containerEl?.offsetLeft ?? 0;
+        const offsetY = containerEl?.offsetTop ?? 0;
         setTooltipInfo((prev) =>
           prev
-            ? { ...prev, x: canvasPos.x! + 12, y: canvasPos.y! - 10 }
+            ? { ...prev, x: canvasPos.x! + offsetX + 12, y: canvasPos.y! + offsetY - 10 }
             : null,
         );
       }
@@ -848,6 +950,22 @@ const ProjectGraphKnowledgeGraph = forwardRef<
     });
 
     graphRef.current = graph;
+
+    // 布局完成后缓存节点坐标，供下次「数据未变、仅主题切换等」的重建复用，从而跳过昂贵的力导布局。
+    graph.on('afterlayout', () => {
+      try {
+        const posMap = new Map<string, [number, number]>();
+        for (const n of graph.getNodeData()) {
+          const style = (n as { style?: { x?: number; y?: number } }).style;
+          if (n.id && typeof style?.x === 'number' && typeof style?.y === 'number') {
+            posMap.set(n.id, [style.x, style.y]);
+          }
+        }
+        if (posMap.size > 0) positionsCacheRef.current = posMap;
+      } catch { /* ignore */ }
+    });
+    lastGraphRef.current = projectGraph;
+    lastViewModeKeyRef.current = viewModeKey;
 
     graph.setSize(initWidth, initHeight);
 
@@ -883,48 +1001,12 @@ const ProjectGraphKnowledgeGraph = forwardRef<
       console.error('G6 init error:', err);
       setGraphError(err instanceof Error ? err.message : String(err));
     }
-  }, [projectGraph, handleNodeClick, dark, viewModeKey]);
+  }, [projectGraph, handleNodeClick, dark, viewModeKey, graphNodeMap]);
 
   useEffect(() => {
     const graph = graphRef.current;
     if (!graph) return;
-
-    const q = searchQuery.trim().toLowerCase();
-    try {
-      const allNodes = graph.getNodeData();
-      if (!q) {
-        for (const n of allNodes) { if (n.id) graph.setElementState(n.id, []); }
-        return;
-      }
-      const matchingIds = new Set<string>();
-      const neighborIds = new Set<string>();
-      for (const n of allNodes) {
-        if (!n.id) continue;
-        const data = n.data as G6NodeData | undefined;
-        const label = (data?.label ?? '').toLowerCase();
-        const fullPath = (data?.fullPath ?? '').toLowerCase();
-        if (label.includes(q) || fullPath.includes(q) || fuzzyMatch(label, q) || fuzzyMatch(fullPath, q)) {
-          matchingIds.add(n.id);
-        }
-      }
-      if (matchingIds.size === 0) {
-        for (const n of allNodes) { if (n.id) graph.setElementState(n.id, []); }
-        return;
-      }
-      const allEdges = graph.getEdgeData();
-      for (const edge of allEdges) {
-        if (edge.source && matchingIds.has(edge.source) && edge.target) neighborIds.add(edge.target);
-        if (edge.target && matchingIds.has(edge.target) && edge.source) neighborIds.add(edge.source);
-      }
-      for (const n of allNodes) {
-        if (!n.id) continue;
-        if (matchingIds.has(n.id) || neighborIds.has(n.id)) {
-          graph.setElementState(n.id, []);
-        } else {
-          graph.setElementState(n.id, 'searchDim');
-        }
-      }
-    } catch { /* ignore */ }
+    applySearchDimming(graph, searchQuery);
   }, [searchQuery, projectGraph, viewModeKey]);
 
   const summary = projectGraph.summary;
