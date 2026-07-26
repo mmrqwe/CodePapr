@@ -1998,7 +1998,7 @@ export function registerWorkspaceTools(
       if (a.model !== undefined && !['main', 'fast', 'mentor'].includes(a.model)) {
         throw new Error(`agent model 必须是 main/fast/mentor，收到: ${a.model}`);
       }
-      if (a.maxToolRounds !== undefined && (typeof a.maxToolRounds !== 'number' || a.maxToolRounds < 1)) {
+      if (a.maxToolRounds !== undefined && (typeof a.maxToolRounds !== 'number' || !Number.isInteger(a.maxToolRounds) || a.maxToolRounds < 1)) {
         throw new Error(`agent maxToolRounds 必须是正整数: ${a.maxToolRounds}`);
       }
     }
@@ -2110,6 +2110,9 @@ export function registerWorkspaceTools(
         if (filePath.includes('..') || file.relativePath.includes('\\') || file.relativePath.startsWith('/') || file.relativePath.includes('\0')) {
           throw new Error(`文件路径不合法（不能包含 ..、\\、绝对路径或 null 字节）: ${file.relativePath}`);
         }
+        if (file.relativePath === 'manifest.json' || file.relativePath === 'index.html') {
+          throw new Error(`不能通过 files 覆盖保留文件: ${file.relativePath}`);
+        }
         const fileBefore = await readBeforeContent(filePath);
         const writeResult = await invoke<WriteTextFileResult>('write_text_file', {
           workspacePath: workspace(),
@@ -2168,10 +2171,10 @@ export function registerWorkspaceTools(
     const storeApps = useAppRuntimeStore.getState().apps;
     const storeIds = new Set(storeApps.map((a) => a.appId));
 
-    let diskApps: Array<{ appId: string; title: string; command?: string; port?: number }> = [];
+    let diskApps: Array<{ app_id: string; title: string; command?: string; port?: number }> = [];
     try {
-      const discovered = await invoke<Array<{ appId: string; title: string; command?: string; port?: number }>>('scan_workspace_apps', { workspacePath: workspace() });
-      diskApps = discovered.filter((d) => !storeIds.has(d.appId));
+      const discovered = await invoke<Array<{ app_id: string; title: string; command?: string; port?: number }>>('scan_workspace_apps', { workspacePath: workspace() });
+      diskApps = discovered.filter((d) => !storeIds.has(d.app_id));
     } catch { /* best-effort */ }
 
     const fromStore = storeApps.map((app) => ({
@@ -2183,7 +2186,7 @@ export function registerWorkspaceTools(
       url: app.url ?? null,
     }));
     const fromDisk = diskApps.map((d) => ({
-      appId: d.appId,
+      appId: d.app_id,
       title: d.title,
       hasBackend: !!(d.command && d.port),
       isRunning: false,

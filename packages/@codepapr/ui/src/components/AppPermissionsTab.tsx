@@ -219,10 +219,10 @@ export function AppPermissionsTab({ lang }: AppPermissionsTabProps) {
       <div className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] p-4">
         <h4 className="mb-2 text-xs font-semibold text-slate-300">{t.appPermLevelInfo}</h4>
         <div className="flex flex-col gap-1.5 text-[10px] leading-relaxed text-slate-500">
-          <div><span className="text-slate-400 font-mono">L0</span> · 纯计算：无外部访问</div>
-          <div><span className="text-slate-400 font-mono">L1</span> · Runtime：papr.db 存储 + papr.fs 文件 + AI Agent（只读工具）</div>
-          <div><span className="text-slate-400 font-mono">L2</span> · 联网：+ papr.http + Agent 联网搜索 + MCP 工具</div>
-          <div><span className="text-amber-400 font-mono">L3</span> · 系统：+ 文件写入 + 终端 + Git（需全局开关）</div>
+          <div><span className="text-slate-400 font-mono">L0</span> · {LEVEL_DESC[0]}</div>
+          <div><span className="text-slate-400 font-mono">L1</span> · {LEVEL_DESC[1]}</div>
+          <div><span className="text-slate-400 font-mono">L2</span> · {LEVEL_DESC[2]}</div>
+          <div><span className="text-amber-400 font-mono">L3</span> · {LEVEL_DESC[3]}</div>
         </div>
       </div>
     </div>
