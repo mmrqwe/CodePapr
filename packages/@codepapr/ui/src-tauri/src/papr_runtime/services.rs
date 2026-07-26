@@ -10,6 +10,37 @@ use crate::web::text::{collapse_whitespace, html_to_text, truncate_text_to_bytes
 
 const MAX_PAPR_HTTP_BYTES: usize = 500_000;
 
+fn is_private_or_internal_url(url: &str) -> bool {
+    let host = url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split(['/', ':', '?', '#'])
+        .next()
+        .unwrap_or("")
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_lowercase();
+
+    if host.is_empty() || host == "localhost" || host == "::1" || host == "0.0.0.0" {
+        return true;
+    }
+    if host == "169.254.169.254" || host == "metadata.google.internal" {
+        return true;
+    }
+    let octets: Vec<&str> = host.split('.').collect();
+    if octets.len() == 4 {
+        if let (Ok(a), Ok(b)) = (octets[0].parse::<u8>(), octets[1].parse::<u8>()) {
+            if a == 127 || a == 10 || (a == 172 && (16..=31).contains(&b)) || (a == 192 && b == 168) || a == 169 {
+                return true;
+            }
+        }
+    }
+    if host.starts_with("fc") || host.starts_with("fd") || host.starts_with("fe80") {
+        return true;
+    }
+    false
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaprHttpResult {
@@ -72,6 +103,9 @@ pub async fn papr_http_get(
     if !parsed_url.starts_with("https://") && !parsed_url.starts_with("http://") {
         return Err("url 必须是 http 或 https URL".to_string());
     }
+    if is_private_or_internal_url(&parsed_url) {
+        return Err("安全限制：不允许访问内网/本地地址".to_string());
+    }
 
     let max = max_bytes.unwrap_or(50_000).clamp(1_000, MAX_PAPR_HTTP_BYTES);
     let client = build_web_client()?;
@@ -127,6 +161,9 @@ pub async fn papr_http_post(
     let parsed_url = parse_browser_url(&url)?;
     if !parsed_url.starts_with("https://") && !parsed_url.starts_with("http://") {
         return Err("url 必须是 http 或 https URL".to_string());
+    }
+    if is_private_or_internal_url(&parsed_url) {
+        return Err("安全限制：不允许访问内网/本地地址".to_string());
     }
 
     let ct = content_type.unwrap_or_else(|| "application/json".to_string());
@@ -218,8 +255,24 @@ pub fn papr_fs_write(
         return Err("文件内容超过上限 5MB".to_string());
     }
 
-    let dir = ensure_app_data_dir(&ctx.workspace_path, &app_id)?;
-    let resolved = dir.join(&path);
+    let _ = ensure_app_data_dir(&ctx.workspace_path, &app_id)?;
+    let resolved = resolve_app_path(&ctx.workspace_path, &app_id, &path)
+        .or_else(|_| {
+            let base = app_data_dir(&ctx.workspace_path, &app_id)?;
+            let candidate = base.join(&path);
+            if let Some(parent) = candidate.parent() {
+                let canonical_parent = parent.canonicalize().map_err(|_| {
+                    "parent directory does not exist".to_string()
+                })?;
+                let canonical_base = base.canonicalize().map_err(|_| {
+                    "app data directory does not exist".to_string()
+                })?;
+                if !canonical_parent.starts_with(&canonical_base) {
+                    return Err("path traversal blocked".to_string());
+                }
+            }
+            Ok(candidate)
+        })?;
 
     if let Some(parent) = resolved.parent() {
         fs::create_dir_all(parent)
@@ -254,8 +307,8 @@ pub fn papr_fs_list(
         return Err("path traversal blocked".to_string());
     }
 
-    let dir = ensure_app_data_dir(&ctx.workspace_path, &app_id)?;
-    let target = dir.join(&subpath);
+    let _ = ensure_app_data_dir(&ctx.workspace_path, &app_id)?;
+    let target = resolve_app_path(&ctx.workspace_path, &app_id, &subpath)?;
     if !target.exists() {
         return Ok(vec![]);
     }
@@ -315,7 +368,14 @@ pub fn papr_fs_delete(
 #[tauri::command]
 pub fn papr_delete_app(app_id: String) -> Result<(), String> {
     let ctx = crate::papr_runtime::app_context::get(&app_id)?;
-    let workspace = canonical_workspace(&ctx.workspace_path)?;
+
+    if let Ok(manifest) = crate::papr_runtime::manifest::get_manifest(&app_id) {
+        if let Some(port) = manifest.port {
+            let _ = stop_app_backend_processes(&ctx.workspace_path, port);
+        }
+    }
+
+    let workspace = crate::shared::canonical_workspace(&ctx.workspace_path)?;
     let app_dir = workspace
         .join(".CodePapr")
         .join("apps")
@@ -337,6 +397,43 @@ pub fn papr_delete_app(app_id: String) -> Result<(), String> {
     crate::papr_runtime::manifest::clear_manifest(&app_id);
 
     Ok(())
+}
+
+fn stop_app_backend_processes(workspace_path: &str, port: u16) -> Result<usize, String> {
+    let target_url = format!("http://localhost:{}/", port);
+    let target_url_no_slash = format!("http://localhost:{}", port);
+
+    crate::shell::background::with_background_processes(|processes| {
+        let target_pids: Vec<u32> = processes
+            .iter()
+            .filter(|(_, p)| p.workspace_path == workspace_path)
+            .filter(|(_, p)| {
+                if let Some(url) = &p.preview_url {
+                    url == &target_url || url == &target_url_no_slash
+                } else {
+                    false
+                }
+            })
+            .map(|(pid, _)| *pid)
+            .collect();
+
+        let mut stopped = 0usize;
+        for pid in target_pids {
+            if let Some(mut process) = processes.remove(&pid) {
+                let still_running = match process.child.try_wait() {
+                    Ok(Some(_)) => false,
+                    Ok(None) => true,
+                    Err(_) => true,
+                };
+                if still_running {
+                    let _ = process.child.kill();
+                    let _ = process.child.wait();
+                    stopped += 1;
+                }
+            }
+        }
+        Ok(stopped)
+    })
 }
 
 // ── Tests ────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 import { sanitizeMaxTokens } from '@codepapr/api';
 import { normalizeMcpSettings } from '../../utils/mcpTypes';
 import { DEFAULT_SETTINGS, normalizeCustomSystemPrompt } from './defaults';
-import type { ApiFormat, ApiMode, ModeConfig, ProviderName, Settings, WorkspaceEntry } from './types';
+import type { ApiFormat, ApiMode, Lang, ModeConfig, ProviderName, Settings, WorkspaceEntry } from './types';
 
 function normalizeModeConfig(
   input: unknown,
@@ -126,6 +126,24 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     input.multimodalModelTier === 'primary' || input.multimodalModelTier === 'fast'
       ? input.multimodalModelTier
       : 'all';
+  const thinkingEnabled =
+    typeof input.thinkingEnabled === 'boolean'
+      ? input.thinkingEnabled
+      : DEFAULT_SETTINGS.thinkingEnabled;
+  const thinkingEffort: 'high' | 'max' =
+    input.thinkingEffort === 'high' ? 'high' : 'max';
+  const debugEnabled =
+    typeof input.debugEnabled === 'boolean'
+      ? input.debugEnabled
+      : DEFAULT_SETTINGS.debugEnabled;
+  const chatBordersEnabled =
+    typeof input.chatBordersEnabled === 'boolean'
+      ? input.chatBordersEnabled
+      : DEFAULT_SETTINGS.chatBordersEnabled;
+  const lang: Lang =
+    input.lang === 'zh-CN' || input.lang === 'zh-TW' || input.lang === 'en'
+      ? input.lang
+      : DEFAULT_SETTINGS.lang ?? 'zh-CN';
   const maxTokens = sanitizeMaxTokens(
     activeConfig.maxTokens,
     provider,
@@ -289,12 +307,18 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
       : DEFAULT_SETTINGS.verifierTemperature;
   const appSubAgentModelTier: 'primary' | 'fast' =
     input.appSubAgentModelTier === 'fast' ? 'fast' : 'primary';
-  const appSubAgentThinkingEnabled = input.appSubAgentThinkingEnabled ?? DEFAULT_SETTINGS.appSubAgentThinkingEnabled;
+  const appSubAgentThinkingEnabled =
+    typeof input.appSubAgentThinkingEnabled === 'boolean'
+      ? input.appSubAgentThinkingEnabled
+      : DEFAULT_SETTINGS.appSubAgentThinkingEnabled;
   const appSubAgentMaxToolRounds =
     typeof input.appSubAgentMaxToolRounds === 'number' && Number.isFinite(input.appSubAgentMaxToolRounds)
       ? Math.max(1, Math.min(200, Math.floor(input.appSubAgentMaxToolRounds)))
       : DEFAULT_SETTINGS.appSubAgentMaxToolRounds;
-  const searxngEnabled = input.searxngEnabled ?? DEFAULT_SETTINGS.searxngEnabled;
+  const searxngEnabled =
+    typeof input.searxngEnabled === 'boolean'
+      ? input.searxngEnabled
+      : DEFAULT_SETTINGS.searxngEnabled;
   const searxngBaseUrl =
     typeof input.searxngBaseUrl === 'string'
       ? input.searxngBaseUrl.trim().replace(/\/+$/, '')
@@ -341,11 +365,18 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     custom,
     local,
     model,
-    fastModelEnabled: input.fastModelEnabled ?? DEFAULT_SETTINGS.fastModelEnabled,
+    fastModelEnabled:
+      typeof input.fastModelEnabled === 'boolean'
+        ? input.fastModelEnabled
+        : DEFAULT_SETTINGS.fastModelEnabled,
     fastModel,
     apiKey,
     baseURL,
     systemPrompt,
+    thinkingEnabled,
+    thinkingEffort,
+    debugEnabled,
+    chatBordersEnabled,
     temperature,
     topP,
     multimodalEnabled,
@@ -368,9 +399,12 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     projectGraphMaxSymbolsPerFile,
     projectGraphMaxFileBytes,
     projectGraphMaxTreeEntries,
-    lang: input.lang ?? DEFAULT_SETTINGS.lang,
+    lang,
     recentWorkspaces: normalizeRecentWorkspaces(input.recentWorkspaces),
-    mentorEnabled: input.mentorEnabled ?? DEFAULT_SETTINGS.mentorEnabled,
+    mentorEnabled:
+      typeof input.mentorEnabled === 'boolean'
+        ? input.mentorEnabled
+        : DEFAULT_SETTINGS.mentorEnabled,
     mentorModel: (input.mentorModel ?? DEFAULT_SETTINGS.mentorModel).trim(),
     mentorBaseURL: (input.mentorBaseURL ?? DEFAULT_SETTINGS.mentorBaseURL).trim(),
     mentorApiKey: (input.mentorApiKey ?? DEFAULT_SETTINGS.mentorApiKey).trim(),

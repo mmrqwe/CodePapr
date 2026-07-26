@@ -163,5 +163,6 @@ export function createEmptyConversationStats(): ConversationStats {
   return {
     primary: createEmptyModelTierStats(),
     fast: createEmptyModelTierStats(),
+    mentor: createEmptyModelTierStats(),
   };
 }

@@ -123,6 +123,11 @@ function parseMarkdownIntro(markdown: string, filename: string): SkillMarketList
 
   if (!title) title = id.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
+  const isPlugin =
+    markdown.toLowerCase().includes('claude code plugin') ||
+    markdown.toLowerCase().includes('plugin install') ||
+    markdown.toLowerCase().includes('must be installed through the official plugin system');
+
   return {
     id,
     name: id,
@@ -133,6 +138,7 @@ function parseMarkdownIntro(markdown: string, filename: string): SkillMarketList
     sourceRepo: sourceRepo || `https://github.com/${AGENTUSE_REPO}`,
     websiteUrl,
     features,
+    isPlugin,
   };
 }
 

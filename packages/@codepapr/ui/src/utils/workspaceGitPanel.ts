@@ -117,9 +117,14 @@ export function listGitFilesForMode(
  */
 export function listAllChangedGitFiles(files: readonly GitStatusFile[]): GitStatusFile[] {
   return filterVisibleGitFiles(files).filter((file) => {
-    const hasIndexChange = Boolean(file.indexStatus) && file.indexStatus !== '?';
-    const hasWorktreeChange = Boolean(file.worktreeStatus);
-    const isUntracked = file.indexStatus === '?' && file.worktreeStatus === '?';
+    const indexTrimmed = file.indexStatus?.trim() ?? '';
+    const worktreeTrimmed = file.worktreeStatus?.trim() ?? '';
+    const hasIndexChange = indexTrimmed.length > 0 && indexTrimmed !== '?';
+    const hasWorktreeChange = worktreeTrimmed.length > 0 && worktreeTrimmed !== '?';
+    const isUntracked = file.isUntracked ?? (
+      (indexTrimmed === '?' || indexTrimmed === '') &&
+      (worktreeTrimmed === '?' || (worktreeTrimmed === '' && indexTrimmed === '?'))
+    );
     return hasIndexChange || hasWorktreeChange || isUntracked;
   });
 }
@@ -130,18 +135,18 @@ export function listAllChangedGitFiles(files: readonly GitStatusFile[]): GitStat
  * - 否则优先用 worktreeStatus（如果有），否则用 indexStatus。
  */
 export function gitStatusCodeForChange(file: GitStatusFile): string {
-  if (file.indexStatus === '?' && file.worktreeStatus === '?') {
+  if (file.isUntracked ?? (file.indexStatus === '?' && file.worktreeStatus === '?')) {
     return '??';
   }
-  if (file.worktreeStatus) {
-    return file.worktreeStatus;
+  if (file.worktreeStatus && file.worktreeStatus.trim()) {
+    return file.worktreeStatus.trim();
   }
-  return file.indexStatus || '??';
+  return (file.indexStatus?.trim()) || '??';
 }
 
 /** 与 describeGitFileStatus 类似，但不需要区分模式（统一从"未提交改动"角度判定）。 */
 export function describeGitChange(file: GitStatusFile): GitDisplayStatus {
-  if (file.indexStatus === '?' && file.worktreeStatus === '?') {
+  if (file.isUntracked ?? (file.indexStatus === '?' && file.worktreeStatus === '?')) {
     return { code: '??', kind: 'untracked' };
   }
 

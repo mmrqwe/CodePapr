@@ -16,6 +16,7 @@
 import type {
   GoalCondition,
   GoalConditionClause,
+  GoalStrictness,
   ConditionResult,
   ConditionClauseResult,
 } from '@codepapr/types';
@@ -166,7 +167,51 @@ function parseClause(clauseStr: string): GoalConditionClause {
 }
 
 /**
+ * 从输入文本开头提取标志参数，如 --strict、--loose、--plan-first。
+ * 返回提取后的剩余文本和解析出的标志。
+ */
+function extractFlags(input: string): {
+  rest: string;
+  strictness: GoalStrictness;
+  planFirst: boolean;
+} {
+  let rest = input.trim();
+  let strictness: GoalStrictness = 'normal';
+  let strictnessSet = false;
+  let planFirst = false;
+
+  // 持续提取开头的 --flag
+  const flagPattern = /^--(\S+)\s*/;
+  let match: RegExpMatchArray | null;
+  while ((match = rest.match(flagPattern))) {
+    const flag = match[1].toLowerCase();
+    if (flag === 'strict' || flag === 'loose' || flag === 'normal') {
+      if (strictnessSet && strictness !== flag as GoalStrictness) {
+        throw new GoalConditionParseError(
+          `冲突的标志: --${strictness} 和 --${flag} 不能同时使用。请只指定一个严格度。`
+        );
+      }
+      strictness = flag as GoalStrictness;
+      strictnessSet = true;
+    } else if (flag === 'plan-first' || flag === 'planfirst' || flag === 'plan') {
+      planFirst = true;
+    } else {
+      // 不认识的 flag，停止提取，保留原样
+      break;
+    }
+    rest = rest.slice(match[0].length).trim();
+  }
+
+  return { rest, strictness, planFirst };
+}
+
+/**
  * 解析 /goal 后的完整输入，生成结构化的验证条件。
+ *
+ * 支持在开头加标志：
+ *   /goal --strict exec:npm test
+ *   /goal --loose 美化登录页
+ *   /goal --plan-first 重构 auth 模块
  *
  * 两种模式：
  * 1. 客观验证模式：输入包含 exec: 条件（可选自然语言目标 | 分隔）
@@ -176,25 +221,32 @@ function parseClause(clauseStr: string): GoalConditionClause {
  *    此时 clauses 为空数组，由 Verifier 主观判定
  *
  * @param input /goal 之后的所有参数（空格连接后的原始字符串）
- * @returns 解析后的 GoalCondition
+ * @returns 解析后的 GoalCondition + planFirst 标志
  * @throws GoalConditionParseError 当输入为空时
  */
 export function parseGoalCondition(input: string): GoalCondition {
   const rawText = input.trim();
   if (!rawText) {
     throw new GoalConditionParseError(
-      '/goal 需要指定目标。示例:\n  /goal exec:npm test（客观验证）\n  /goal 修复登录页的样式问题（主观验证）'
+      '/goal 需要指定目标。示例:\n  /goal exec:npm test（客观验证）\n  /goal 修复登录页的样式问题（主观验证）\n  /goal --strict exec:npm test（严格模式）'
     );
+  }
+
+  // 提取标志参数
+  const { rest, strictness, planFirst } = extractFlags(rawText);
+
+  if (!rest) {
+    throw new GoalConditionParseError('标志参数后必须跟目标描述或验证条件');
   }
 
   // 分离自然语言目标和验证条件
   let goalText = '';
-  let conditionText = rawText;
+  let conditionText = rest;
 
-  const pipeIndex = rawText.indexOf('|');
+  const pipeIndex = rest.indexOf('|');
   if (pipeIndex > 0) {
-    goalText = rawText.slice(0, pipeIndex).trim();
-    conditionText = rawText.slice(pipeIndex + 1).trim();
+    goalText = rest.slice(0, pipeIndex).trim();
+    conditionText = rest.slice(pipeIndex + 1).trim();
   }
 
   if (!conditionText) {
@@ -214,6 +266,8 @@ export function parseGoalCondition(input: string): GoalCondition {
       clauses: [],
       rawText,
       humanReadable: fullGoalText,
+      strictness,
+      planFirst,
     };
   }
 
@@ -229,6 +283,8 @@ export function parseGoalCondition(input: string): GoalCondition {
     humanReadable: goalText
       ? `${goalText}（验收: ${humanReadable}）`
       : humanReadable,
+    strictness,
+    planFirst,
   };
 }
 

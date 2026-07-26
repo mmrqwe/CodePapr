@@ -3,21 +3,41 @@ pub fn inject_sdk_into_html(html: &str) -> String {
         return html.to_string();
     }
 
+    let script_tag = "\n<script src=\"/__papr_sdk.js\"></script>";
     let lower = html.to_lowercase();
+
     if let Some(pos) = lower.find("<head") {
         let after_tag_start = &lower[pos..];
         if let Some(close_bracket) = after_tag_start.find('>') {
             let insert_pos = pos + close_bracket + 1;
             let mut modified = String::with_capacity(html.len() + 80);
             modified.push_str(&html[..insert_pos]);
-            modified.push_str("\n<script src=\"/__papr_sdk.js\"></script>");
+            modified.push_str(script_tag);
             if insert_pos < html.len() {
                 modified.push_str(&html[insert_pos..]);
             }
             return modified;
         }
     }
-    html.to_string()
+
+    if let Some(pos) = lower.find("<html") {
+        let after_tag_start = &lower[pos..];
+        if let Some(close_bracket) = after_tag_start.find('>') {
+            let insert_pos = pos + close_bracket + 1;
+            let mut modified = String::with_capacity(html.len() + 80);
+            modified.push_str(&html[..insert_pos]);
+            modified.push_str(script_tag);
+            if insert_pos < html.len() {
+                modified.push_str(&html[insert_pos..]);
+            }
+            return modified;
+        }
+    }
+
+    let mut modified = String::with_capacity(html.len() + 80);
+    modified.push_str(script_tag);
+    modified.push_str(html);
+    modified
 }
 
 pub fn get_sdk_js() -> &'static str {
@@ -47,7 +67,15 @@ mod tests {
     fn handles_no_head_tag() {
         let html = "<html><body>No head</body></html>";
         let result = inject_sdk_into_html(html);
-        assert_eq!(result, html);
+        assert!(result.contains("__papr_sdk.js"));
+    }
+
+    #[test]
+    fn handles_no_head_no_html_tag() {
+        let html = "<body>Bare body</body>";
+        let result = inject_sdk_into_html(html);
+        assert!(result.contains("__papr_sdk.js"));
+        assert!(result.starts_with("\n<script"));
     }
 
     #[test]

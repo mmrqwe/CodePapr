@@ -34,6 +34,10 @@ function copy(lang: Lang | undefined) {
       installSuccess: 'Skill installed to .CodePapr/skills/',
       tags: 'Tags',
       back: 'Back to results',
+      pluginNoticeTitle: 'This is a Claude Code Plugin',
+      pluginNoticeDesc: 'This skill is designed as a Claude Code plugin with commands, hooks, and multi-agent orchestration. CodePapr can only install the SKILL.md instruction files; full plugin features may not work correctly.',
+      pluginNoticeHint: 'Installing will attempt to extract available sub-skills as best-effort.',
+      tryInstallSubskills: 'Try Install (sub-skills only)',
     };
   }
   if (lang === 'zh-TW') {
@@ -62,6 +66,10 @@ function copy(lang: Lang | undefined) {
       installSuccess: 'Skill 已安裝到 .CodePapr/skills/',
       tags: '標籤',
       back: '返回結果',
+      pluginNoticeTitle: '這是 Claude Code 外掛',
+      pluginNoticeDesc: '此 Skill 設計為 Claude Code 外掛，包含指令、鉤子與多 Agent 協作。CodePapr 僅能安裝 SKILL.md 指令檔，完整外掛功能可能無法正常運作。',
+      pluginNoticeHint: '安裝將盡力提取可用的子技能。',
+      tryInstallSubskills: '嘗試安裝（僅子技能）',
     };
   }
   return {
@@ -89,6 +97,10 @@ function copy(lang: Lang | undefined) {
     installSuccess: 'Skill 已安装到 .CodePapr/skills/',
     tags: '标签',
     back: '返回结果',
+    pluginNoticeTitle: '这是 Claude Code 插件',
+    pluginNoticeDesc: '此 Skill 设计为 Claude Code 插件，包含命令、钩子与多 Agent 协作。CodePapr 仅能安装 SKILL.md 指令文件，完整插件功能可能无法正常运行。',
+    pluginNoticeHint: '安装将尽力提取可用的子技能。',
+    tryInstallSubskills: '尝试安装（仅子技能）',
   };
 }
 
@@ -274,6 +286,21 @@ function SkillDetail({
           <code className="mt-2 block truncate text-[11px] text-slate-400">{listing.sourceRepo}</code>
         </div>
 
+        {listing.isPlugin && (
+          <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+            <div className="flex items-start gap-2.5">
+              <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              </svg>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-amber-300">{c.pluginNoticeTitle}</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-amber-200/70">{c.pluginNoticeDesc}</p>
+                <p className="mt-2 text-[11px] text-amber-200/60">{c.pluginNoticeHint}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="mt-4 flex flex-wrap gap-2">
           {listing.sourceRepo && (
             <a
@@ -321,6 +348,14 @@ function SkillDetail({
               {c.retry}
             </button>
           </div>
+        ) : listing.isPlugin ? (
+          <button
+            type="button"
+            onClick={() => onInstall(listing)}
+            className="flex w-full items-center justify-center rounded-xl border border-amber-500/40 bg-amber-500/10 py-3 text-sm font-semibold text-amber-200 transition-colors hover:bg-amber-500/20"
+          >
+            {c.tryInstallSubskills}
+          </button>
         ) : (
           <button
             type="button"
@@ -388,16 +423,80 @@ async function discoverRepoSkills(repoPath: string): Promise<string[]> {
     });
     if (!response.ok) return [];
     const entries: Array<{ name: string; type: string }> = await response.json();
-    return entries.filter((e) => e.type === 'dir').map((e) => e.name);
+    return entries.filter((e) => e.type === 'dir' || e.type === 'symlink').map((e) => e.name);
   } catch {
     return [];
   }
 }
 
 async function downloadSubSkillMarkdown(repoPath: string, subSkill: string): Promise<string | null> {
-  return tryFetchText(
-    `https://raw.githubusercontent.com/${repoPath}/main/skills/${subSkill}/SKILL.md`
-  );
+  const urls = [
+    `https://raw.githubusercontent.com/${repoPath}/main/skills/${subSkill}/SKILL.md`,
+    `https://raw.githubusercontent.com/${repoPath}/main/${subSkill}/SKILL.md`,
+  ];
+  for (const url of urls) {
+    const content = await tryFetchText(url);
+    if (content) return content;
+  }
+  return null;
+}
+
+async function discoverRepoDirFiles(repoPath: string, dirPath: string): Promise<string[]> {
+  try {
+    const response = await fetch(`https://api.github.com/repos/${repoPath}/contents/${dirPath}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) return [];
+    const entries: Array<{ name: string; type: string }> = await response.json();
+    return entries.filter((e) => e.type === 'file' && e.name.endsWith('.md')).map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+
+async function downloadDirToWorkspace(
+  repoPath: string,
+  repoDir: string,
+  targetDir: string,
+  invokeFn: typeof invoke,
+  workspacePath: string,
+): Promise<number> {
+  const files = await discoverRepoDirFiles(repoPath, repoDir);
+  let count = 0;
+  for (const file of files) {
+    const content = await tryFetchText(
+      `https://raw.githubusercontent.com/${repoPath}/main/${repoDir}/${file}`
+    );
+    if (!content) continue;
+    try {
+      await invokeFn('write_text_file', {
+        workspacePath,
+        relativePath: `${targetDir}/${file}`,
+        content,
+      });
+      count++;
+    } catch {
+      // skip failed file
+    }
+  }
+  return count;
+}
+
+const PACK_RESOURCE_DIRS = ['agents', 'references', 'templates'] as const;
+
+async function downloadSkillPackResources(
+  repoPath: string,
+  subSkill: string,
+  workspacePath: string,
+  invokeFn: typeof invoke,
+): Promise<number> {
+  let total = 0;
+  for (const dir of PACK_RESOURCE_DIRS) {
+    const repoDir = `${subSkill}/${dir}`;
+    const targetDir = `.CodePapr/skills/${subSkill}/${dir}`;
+    total += await downloadDirToWorkspace(repoPath, repoDir, targetDir, invokeFn, workspacePath);
+  }
+  return total;
 }
 
 async function downloadSkillMarkdown(name: string, sourceRepo?: string): Promise<string | null> {
@@ -428,12 +527,16 @@ async function downloadSkillMarkdown(name: string, sourceRepo?: string): Promise
   return null;
 }
 
+type InstallResult =
+  | { ok: true; installed: string[]; resources: number; error?: never }
+  | { ok: false; installed: string[]; resources: number; error: string };
+
 async function installSkillToWorkspace(
   name: string,
   workspacePath: string,
   sourceRepo: string,
   invokeFn: typeof invoke,
-): Promise<{ ok: boolean; installed: string[] }> {
+): Promise<InstallResult> {
   const content = await downloadSkillMarkdown(name, sourceRepo);
   if (content) {
     const relativePath = `.CodePapr/skills/${name}/SKILL.md`;
@@ -443,9 +546,15 @@ async function installSkillToWorkspace(
         relativePath,
         content,
       });
-      return { ok: true, installed: [name] };
-    } catch {
-      return { ok: false, installed: [] };
+      const repoPath = extractRepoPath(sourceRepo);
+      let resources = 0;
+      if (repoPath && !repoPath.includes('agent-use-skills')) {
+        resources = await downloadSkillPackResources(repoPath, name, workspacePath, invokeFn);
+      }
+      return { ok: true, installed: [name], resources };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, installed: [], resources: 0, error: `写入失败: ${msg}` };
     }
   }
 
@@ -454,6 +563,7 @@ async function installSkillToWorkspace(
     const subSkills = await discoverRepoSkills(repoPath);
     if (subSkills.length > 0) {
       const installed: string[] = [];
+      let resources = 0;
       for (const subSkill of subSkills) {
         const subContent = await downloadSubSkillMarkdown(repoPath, subSkill);
         if (!subContent) continue;
@@ -465,15 +575,33 @@ async function installSkillToWorkspace(
             content: subContent,
           });
           installed.push(subSkill);
+          resources += await downloadSkillPackResources(repoPath, subSkill, workspacePath, invokeFn);
         } catch {
           // skip failed sub-skill
         }
       }
-      return { ok: installed.length > 0, installed };
+      if (installed.length > 0) {
+        const cmdCount = await downloadDirToWorkspace(
+          repoPath, 'commands', `.CodePapr/skills/${name}/commands`, invokeFn, workspacePath
+        );
+        resources += cmdCount;
+        return { ok: true, installed, resources };
+      }
+      return {
+        ok: false,
+        installed: [],
+        resources: 0,
+        error: `发现 ${subSkills.length} 个子技能但全部下载失败`,
+      };
     }
   }
 
-  return { ok: false, installed: [] };
+  return {
+    ok: false,
+    installed: [],
+    resources: 0,
+    error: '无法下载 SKILL.md：请检查网络或确认该 Skill 是否支持 CodePapr',
+  };
 }
 
 async function refreshSkills(workspacePath: string) {
@@ -551,13 +679,16 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
         return next;
       });
       if (result.installed.length > 1) {
-        setToastMessage(`${listing.title}: ${result.installed.length} skills installed`);
+        const resInfo = result.resources > 0 ? ` + ${result.resources} resources` : '';
+        setToastMessage(`${listing.title}: ${result.installed.length} skills${resInfo} installed`);
+      } else if (result.resources > 0) {
+        setToastMessage(`${listing.title}: SKILL.md + ${result.resources} resources installed`);
       } else {
         setToastMessage(`${listing.title} ${c.installSuccess}`);
       }
       await refreshSkills(workspacePath);
     } else {
-      setInstallErrors((prev) => ({ ...prev, [listing.id]: c.installError }));
+      setInstallErrors((prev) => ({ ...prev, [listing.id]: result.error || c.installError }));
     }
 
     setInstallingIds((prev) => {

@@ -13,6 +13,8 @@ describe('slashCommand - parseCommandMarkdown', () => {
     const raw = [
       '---',
       'description: 运行测试并总结',
+      'usage: 运行测试。用法: /test <目标>',
+      "example: '/test src/'",
       'agent: explore',
       'model: deepseek-v4-pro',
       '---',
@@ -21,6 +23,8 @@ describe('slashCommand - parseCommandMarkdown', () => {
     const def = parseCommandMarkdown('test', raw);
     expect(def.name).toBe('test');
     expect(def.description).toBe('运行测试并总结');
+    expect(def.usage).toBe('运行测试。用法: /test <目标>');
+    expect(def.example).toBe('/test src/');
     expect(def.agent).toBe('explore');
     expect(def.model).toBe('deepseek-v4-pro');
     expect(def.template).toBe('请运行 $ARGUMENTS 并总结结果。');
@@ -92,6 +96,14 @@ describe('slashCommand - built-in prompt commands', () => {
     expect(getBuiltinPromptCommand('new')?.model).toBeUndefined();
     expect(getBuiltinPromptCommand('optimize')?.model).toBeUndefined();
   });
+
+  it('所有内置命令都声明 usage 和 example', () => {
+    for (const name of listBuiltinPromptCommandNames()) {
+      const cmd = getBuiltinPromptCommand(name);
+      expect(cmd?.usage, `${name} missing usage`).toBeTruthy();
+      expect(cmd?.example, `${name} missing example`).toBeTruthy();
+    }
+  });
 });
 
 describe('slashCommand - expandCommandTemplate', () => {
@@ -128,6 +140,26 @@ describe('slashCommand - expandCommandTemplate', () => {
       },
     });
     expect(result).toContain('命令执行失败: boom');
+  });
+
+  it('多个内联命令按位置精确替换', async () => {
+    const result = await expandCommandTemplate('!`git branch` 和 !`git rev-parse HEAD`', [], {
+      runShell: async (cmd) => {
+        if (cmd === 'git branch') return 'main';
+        return 'abc123';
+      },
+    });
+    expect(result).toBe('main 和 abc123');
+  });
+
+  it('shell 输出包含另一个 token 文本时不会误替换', async () => {
+    const result = await expandCommandTemplate('!`cmd1` 然后 !`cmd2`', [], {
+      runShell: async (cmd) => {
+        if (cmd === 'cmd1') return '!`cmd2`';
+        return 'real-output';
+      },
+    });
+    expect(result).toBe('!`cmd2` 然后 real-output');
   });
 });
 

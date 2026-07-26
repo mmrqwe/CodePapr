@@ -1260,6 +1260,10 @@ fn spawn_server_candidate(
         "processId": std::process::id(),
         "rootUri": root_uri,
         "capabilities": {
+            // 注意：这里【没有】声明 general.positionEncodings，因此按 LSP 规范服务器一律使用默认的
+            // UTF-16 位置编码。前端（core/src/tool/workspace/languageTools.ts 的 positionToOffset）
+            // 正是按 UTF-16（JS 字符串下标）换算偏移的。若在此处加入 positionEncodings（如 utf-8/utf-32），
+            // 必须同步修改前端偏移换算，否则含非 ASCII 字符的文件编辑会错位。
             "textDocument": {
                 "synchronization": { "didSave": true, "didClose": true },
                 "hover": { "contentFormat": ["markdown", "plaintext"] },

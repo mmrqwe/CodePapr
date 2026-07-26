@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
@@ -9,6 +9,11 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 import { resolveProjectMapSymbolOverrides, globalLspPool } from './workspaceProjectMapLsp';
+
+afterEach(async () => {
+  invokeMock.mockResolvedValue(undefined);
+  await globalLspPool.closeAll();
+});
 
 describe('resolveProjectMapSymbolOverrides', () => {
   beforeEach(() => {
@@ -188,15 +193,34 @@ describe('globalLspPool eviction', () => {
     invokeMock.mockResolvedValue(undefined);
   });
 
-  it('stops the backend LSP server when the oldest connection is evicted', async () => {
-    // 连接池上限是 10，第 11 次 acquire 一个新的 (language, workspace) 组合会淘汰最早的一个。
-    for (let i = 0; i < 11; i++) {
-      await globalLspPool.acquire('typescript', `/workspace-${i}`);
+  it('stops the backend LSP server when the least-recently-used idle connection is evicted', async () => {
+    // 连接池上限是 10。模拟真实用法：每个连接 acquire 后立即 release（refCount 归零变为空闲）。
+    // 第 11 个新的 (language, workspace) 组合会淘汰「最久未使用且空闲」的连接（workspace-0），
+    // 而绝不会淘汰仍有 in-flight 请求（refCount>0）的连接。
+    for (let i = 0; i < 10; i++) {
+      const handle = await globalLspPool.acquire('typescript', `/workspace-${i}`);
+      globalLspPool.release(handle);
     }
+    await globalLspPool.acquire('typescript', '/workspace-10');
 
     expect(invokeMock).toHaveBeenCalledWith(
       'lsp_stop_server',
       expect.objectContaining({ workspacePath: '/workspace-0', languageId: 'typescript' })
+    );
+  });
+
+  it('never evicts a connection that still has in-flight work', async () => {
+    // 全部 10 个连接都持有 in-flight 请求（acquire 后不 release，refCount>0），
+    // 此时第 11 个连接进来也不应淘汰任何在用连接（池可临时超出上限，但绝不打断在用请求）。
+    for (let i = 0; i < 10; i++) {
+      await globalLspPool.acquire('typescript', `/busy-${i}`);
+    }
+    invokeMock.mockClear();
+    await globalLspPool.acquire('typescript', '/busy-10');
+
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      'lsp_stop_server',
+      expect.anything()
     );
   });
 });

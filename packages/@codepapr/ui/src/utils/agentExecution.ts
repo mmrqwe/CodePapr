@@ -807,7 +807,27 @@ export function collectUnresolvedToolFailures(
     latestByKey.set(buildToolRetryKey(tool), tool);
   }
 
-  return [...latestByKey.values()].filter((tool) => !tool.success);
+  return [...latestByKey.values()].filter(
+    (tool) => !tool.success && hasMeaningfulFailureInfo(tool)
+  );
+}
+
+function hasMeaningfulFailureInfo(tool: ExecutedToolSummary): boolean {
+  const resultRecord = isRecord(tool.result) ? tool.result : undefined;
+  const error =
+    tool.error ??
+    (typeof resultRecord?.error === 'string' ? resultRecord.error : '') ??
+    '';
+  if (error && error.trim() && error.trim() !== 'unknown') {
+    return true;
+  }
+  if (typeof resultRecord?.stderr === 'string' && resultRecord.stderr.trim()) {
+    return true;
+  }
+  if (typeof resultRecord?.message === 'string' && resultRecord.message.trim()) {
+    return true;
+  }
+  return false;
 }
 
 function buildCommandRetryKey(command: string, args: readonly string[]): string {
@@ -1288,7 +1308,7 @@ export function buildExecutionContextSummary(params: {
   }
 
   if (failedTools.length > 0) {
-    lines.push('', copy.failures);
+    const failureLines: string[] = [];
     for (const tool of failedTools) {
       const resultRecord = isRecord(tool.result) ? tool.result : undefined;
       const error =
@@ -1301,7 +1321,12 @@ export function buildExecutionContextSummary(params: {
           : typeof resultRecord?.message === 'string'
           ? truncateEvidenceBlock(resultRecord.message)
           : '';
-      lines.push(`- ${copy.toolFailure(tool.name, truncateEvidenceBlock(error || fallbackText || 'unknown'))}`);
+      const errorText = error || fallbackText;
+      if (!errorText) continue;
+      failureLines.push(`- ${copy.toolFailure(tool.name, truncateEvidenceBlock(errorText))}`);
+    }
+    if (failureLines.length > 0) {
+      lines.push('', copy.failures, ...failureLines);
     }
   }
 

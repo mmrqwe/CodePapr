@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAgentStore } from '../store/agentStore';
 import {
   clearMcpToolDefinitionCache,
-  clearNativeMcpToolCache,
   disconnectAllMcpServers,
   disconnectMcpServer,
   listMcpServerStatus,
@@ -67,10 +66,14 @@ function copy(lang: Lang | undefined) {
       testServer: 'Test',
       testingServer: 'Testing...',
       disconnectServer: 'Disconnect',
-      confirmationLabel: 'Confirm risky calls (not implemented)',
-      confirmationDisabled: 'Confirmation dialog is not implemented yet. This setting has no effect on tool execution.',
+      confirmationLabel: 'Confirm risky calls',
+      confirmationHint: 'When enabled, a confirmation dialog will appear before executing tools on this server.',
       permissionHint: 'Read-only blocks tool names starting with create/insert/update/delete/drop/etc. Read-write and Dangerous behave the same. Use Allowed/Denied tools below for precise control.',
       dangerousNote: 'Dangerous and Read-write behave identically; this label is informational only.',
+      forceMutating: 'Force mutating',
+      forceReadonly: 'Force read-only',
+      forceMutatingHint: 'Comma-separated patterns. These tools are always treated as mutating (blocked in read-only mode).',
+      forceReadonlyHint: 'Comma-separated patterns. These tools are always treated as read-only (allowed even in read-only mode).',
     };
   }
   if (lang === 'zh-TW') {
@@ -121,10 +124,14 @@ function copy(lang: Lang | undefined) {
       testServer: '測試',
       testingServer: '測試中...',
       disconnectServer: '斷開',
-      confirmationLabel: '高風險呼叫確認（尚未實現）',
-      confirmationDisabled: '確認對話框尚未實現，此選項目前對工具執行無任何影響。',
+      confirmationLabel: '高風險呼叫確認',
+      confirmationHint: '啟用後，執行此服務的工具前將彈出確認對話框。',
       permissionHint: '唯讀模式僅攔截以 create/insert/update/delete/drop 等前綴開頭的工具名。讀寫與危險模式行為完全一致。如需精確控制，請使用下方允許/拒絕工具列表。',
       dangerousNote: '危險與讀寫模式行為完全一致，此標籤僅為提示作用。',
+      forceMutating: '強制視為寫入',
+      forceReadonly: '強制視為唯讀',
+      forceMutatingHint: '逗號分隔，支持 * 通配。這些工具始終被視為寫入操作（唯讀模式下被攔截）。',
+      forceReadonlyHint: '逗號分隔，支持 * 通配。這些工具始終被視為唯讀操作（唯讀模式下允許執行）。',
     };
   }
   return {
@@ -151,33 +158,37 @@ function copy(lang: Lang | undefined) {
     timeout: '超时秒数',
     transport: '传输',
     permission: '权限',
-    confirmation: '高风险调用确认',
-    remove: '删除',
-    search: '搜索',
-    database: '数据库',
-    custom: '自定义',
-    readOnly: '只读',
-    readWrite: '读写',
-    dangerous: '危险',
-    discovered: '已发现工具',
-    errors: '错误',
-    status: '状态',
-    refreshStatus: '刷新状态',
-    disconnect: '断开全部',
-    connected: '已连接',
-    disconnected: '未连接',
-    enabledServers: '已启用服务',
-    empty: '先启用至少一个服务，然后发现工具。',
-    searchHint: '无需 API Key。使用 DuckDuckGo HTML 抓取，有请求频率限制。适合快速网页搜索。',
-    dbHint: '默认只读。写入操作已列入拒绝列表。如需查询、插入和更新，请将权限改为读写。',
-    customHint: 'stdio：命令 + 参数。sse / streamable-http：URL + headers。',
-    testServer: '测试',
-    testingServer: '测试中...',
-    disconnectServer: '断开',
-    confirmationLabel: '高风险调用确认（尚未实现）',
-    confirmationDisabled: '确认对话框尚未实现，此选项目前对工具执行无任何影响。',
-    permissionHint: '只读模式仅拦截以 create/insert/update/delete/drop 等前缀开头的工具名。读写与危险模式行为完全一致。如需精确控制，请使用下方允许/拒绝工具列表。',
-    dangerousNote: '危险与读写模式行为完全一致，此标签仅作提示之用。',
+confirmation: '高风险调用确认',
+      remove: '删除',
+      search: '搜索',
+      database: '数据库',
+      custom: '自定义',
+      readOnly: '只读',
+      readWrite: '读写',
+      dangerous: '危险',
+      discovered: '已发现工具',
+      errors: '错误',
+      status: '状态',
+      refreshStatus: '刷新状态',
+      disconnect: '断开全部',
+      connected: '已连接',
+      disconnected: '未连接',
+      enabledServers: '已启用服务',
+      empty: '先启用至少一个服务，然后发现工具。',
+      searchHint: '无需 API Key。使用 DuckDuckGo HTML 抓取，有请求频率限制。适合快速网页搜索。',
+      dbHint: '默认只读。写入操作已列入拒绝列表。如需查询、插入和更新，请将权限改为读写。',
+      customHint: 'stdio：命令 + 参数。sse / streamable-http：URL + headers。',
+      testServer: '测试',
+      testingServer: '测试中...',
+      disconnectServer: '断开',
+      confirmationLabel: '高风险调用确认',
+      confirmationHint: '启用后，执行此服务的工具前将弹出确认对话框。',
+      permissionHint: '只读模式仅拦截以 create/insert/update/delete/drop 等前缀开头的工具名。读写与危险模式行为完全一致。如需精确控制，请使用下方允许/拒绝工具列表。',
+      dangerousNote: '危险与读写模式行为完全一致，此标签仅作提示之用。',
+      forceMutating: '强制视为写入',
+      forceReadonly: '强制视为只读',
+      forceMutatingHint: '逗号分隔，支持 * 通配。这些工具始终被视为写入操作（只读模式下被拦截）。',
+      forceReadonlyHint: '逗号分隔，支持 * 通配。这些工具始终被视为只读操作（只读模式下允许执行）。',
   };
 }
 
@@ -314,8 +325,7 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
     setMessage('');
     setErrors([]);
     try {
-      clearMcpToolDefinitionCache();
-      await clearNativeMcpToolCache();
+      await clearMcpToolDefinitionCache();
       const result = await loadMcpToolDefinitions(local, { refresh: true });
       const allTexts = result.definitions.map((definition) => `${definition.name} — ${definition.description}`);
       if (serverIdFilter) {
@@ -551,6 +561,12 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
                     <Field label={c.denied} hint="逗号分隔，拒绝规则优先。">
                       <input value={activeServer.deniedTools} onChange={(event) => patchServer(activeServer.id, { deniedTools: event.target.value })} placeholder="delete*,drop*,truncate*" className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
                     </Field>
+                    <Field label={c.forceMutating} hint={c.forceMutatingHint}>
+                      <input value={activeServer.forceMutating} onChange={(event) => patchServer(activeServer.id, { forceMutating: event.target.value })} placeholder="do_delete,execute*" className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                    </Field>
+                    <Field label={c.forceReadonly} hint={c.forceReadonlyHint}>
+                      <input value={activeServer.forceReadonly} onChange={(event) => patchServer(activeServer.id, { forceReadonly: event.target.value })} placeholder="create_report*,run_query" className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                    </Field>
                     <Field label={c.permission} hint={c.permissionHint}>
                       <select value={activeServer.permissionMode} onChange={(event) => patchServer(activeServer.id, { permissionMode: event.target.value as McpServerConfig['permissionMode'] })} className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none">
                         <option value="read-only">{c.readOnly}</option>
@@ -562,19 +578,17 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
                       )}
                     </Field>
                     <label
-                      className="mt-6 flex cursor-not-allowed items-start gap-3 rounded-xl border border-[#2a2d3a] bg-[#0b0e14] px-3 py-2 opacity-60"
-                      title={c.confirmationDisabled}
+                      className="mt-6 flex cursor-pointer items-start gap-3 rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2"
                     >
                       <input
                         type="checkbox"
                         checked={activeServer.requireConfirmation}
-                        disabled
-                        readOnly
+                        onChange={(event) => patchServer(activeServer.id, { requireConfirmation: event.target.checked })}
                         className="mt-0.5 h-5 w-5 rounded accent-cyan-500"
                       />
                       <div>
-                        <span className="text-sm text-slate-400">{c.confirmationLabel}</span>
-                        <p className="mt-0.5 text-[10px] leading-relaxed text-slate-600">{c.confirmationDisabled}</p>
+                        <span className="text-sm text-slate-200">{c.confirmationLabel}</span>
+                        <p className="mt-0.5 text-[10px] leading-relaxed text-slate-600">{c.confirmationHint}</p>
                       </div>
                     </label>
                   </div>

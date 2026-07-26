@@ -13,6 +13,7 @@ pub fn git_log_impl(workspace: &std::path::Path, limit: usize) -> Vec<GitLogEntr
         Ok(rw) => rw,
         Err(_) => return vec![],
     };
+    revwalk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL).ok();
     if revwalk.push_head().is_err() {
         return vec![];
     }

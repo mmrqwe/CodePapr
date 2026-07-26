@@ -18,6 +18,8 @@ export interface McpServerConfig {
   headers: string;
   allowedTools: string;
   deniedTools: string;
+  forceMutating: string;
+  forceReadonly: string;
   permissionMode: McpPermissionMode;
   requireConfirmation: boolean;
   timeoutSeconds: number;
@@ -112,6 +114,8 @@ export function createMcpSettingsCacheKey(settings: McpSettings): string {
       headers: server.headers,
       allowedTools: server.allowedTools,
       deniedTools: server.deniedTools,
+      forceMutating: server.forceMutating,
+      forceReadonly: server.forceReadonly,
       permissionMode: server.permissionMode,
       requireConfirmation: server.requireConfirmation,
       timeoutSeconds: server.timeoutSeconds,
@@ -158,6 +162,20 @@ export function parseMcpEnv(value: string): Record<string, string> {
   return env;
 }
 
+export function parseMcpHeaders(value: string): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const line of value.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const index = trimmed.indexOf(':');
+    if (index <= 0) continue;
+    const key = trimmed.slice(0, index).trim();
+    const val = trimmed.slice(index + 1).trim();
+    if (key) headers[key] = val;
+  }
+  return headers;
+}
+
 export function createDefaultMcpSettings(): McpSettings {
   return {
     enabled: false,
@@ -177,6 +195,8 @@ export function createDefaultMcpSettings(): McpSettings {
         headers: '',
         allowedTools: 'duckduckgo_web_search',
         deniedTools: '',
+        forceMutating: '',
+        forceReadonly: '',
         permissionMode: 'read-only',
         requireConfirmation: false,
         timeoutSeconds: 60,
@@ -194,6 +214,8 @@ export function createDefaultMcpSettings(): McpSettings {
         headers: '',
         allowedTools: 'query,describe*,list*',
         deniedTools: 'delete*,drop*,truncate*,update*,insert*',
+        forceMutating: '',
+        forceReadonly: '',
         permissionMode: 'read-only',
         requireConfirmation: false,
         timeoutSeconds: 60,
@@ -211,6 +233,8 @@ export function createDefaultMcpSettings(): McpSettings {
         headers: '',
         allowedTools: 'query,describe*,list*',
         deniedTools: 'delete*,drop*,truncate*,update*,insert*',
+        forceMutating: '',
+        forceReadonly: '',
         permissionMode: 'read-only',
         requireConfirmation: false,
         timeoutSeconds: 60,
@@ -284,6 +308,8 @@ export function normalizeMcpServer(input: Partial<McpServerConfig>): McpServerCo
     headers: input.headers || '',
     allowedTools: (input.allowedTools || '').trim(),
     deniedTools: (input.deniedTools || '').trim(),
+    forceMutating: (input.forceMutating || '').trim(),
+    forceReadonly: (input.forceReadonly || '').trim(),
     permissionMode,
     requireConfirmation: input.requireConfirmation ?? false,
     timeoutSeconds:

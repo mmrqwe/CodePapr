@@ -2872,8 +2872,9 @@ function computeQualityMetrics(
   edges: ProjectGraphEdge[],
   lspSymbols: number,
   moduleContexts: Map<string, FileModuleContext>,
-  allFiles: ReadonlySet<string>,
+  _allFiles: ReadonlySet<string>,
 ): ProjectGraphQualityMetrics {
+  const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
   const symbolNodes = nodes.filter((n) => n.kind === 'symbol');
   const totalSymbols = symbolNodes.length;
   const lspCoverage = totalSymbols > 0 ? lspSymbols / totalSymbols : 0;
@@ -2885,7 +2886,7 @@ function computeQualityMetrics(
   const totalCallEdges = callEdges.length;
   const callsWithReceiver = callEdges.filter((e) => e.label?.includes('.') || e.label?.includes('::')).length;
   const callsToExportedTargets = callEdges.filter((e) => {
-    const targetNode = nodes.find((n) => n.id === e.to);
+    const targetNode = nodeById.get(e.to);
     return targetNode?.symbol?.exported ?? false;
   }).length;
   const callGraphPrecision = totalCallEdges > 0
@@ -2898,23 +2899,12 @@ function computeQualityMetrics(
     totalImports += ctx.references.length;
   }
   for (const edge of edges) {
-    if (edge.kind === 'imports') {
-      const toNode = nodes.find((n) => n.id === edge.to);
-      if (toNode && allFiles.has(toNode.path)) {
-        resolvedImports++;
-      }
+    if (edge.kind !== 'imports') continue;
+    const from = nodeById.get(edge.from);
+    const to = nodeById.get(edge.to);
+    if (from?.kind === 'file' && to?.kind === 'file') {
+      resolvedImports++;
     }
-  }
-
-  const fileEdges = edges.filter((e) => {
-    const from = nodes.find((n) => n.id === e.from);
-    const to = nodes.find((n) => n.id === e.to);
-    return from?.kind === 'file' && to?.kind === 'file';
-  });
-  resolvedImports = fileEdges.filter((e) => e.kind === 'imports').length;
-  totalImports = 0;
-  for (const ctx of moduleContexts.values()) {
-    totalImports += ctx.references.length;
   }
   const importResolutionRate = totalImports > 0 ? resolvedImports / totalImports : 0;
 
@@ -3317,6 +3307,13 @@ export async function enrichProjectGraphEdges(
   };
 
   const symbolNodes = result.nodes.filter((n) => n.kind === 'symbol' && n.symbol);
+  const symbolsByName = new Map<string, ProjectGraphNode[]>();
+  for (const n of symbolNodes) {
+    const name = n.symbol!.name;
+    const list = symbolsByName.get(name) ?? [];
+    list.push(n);
+    symbolsByName.set(name, list);
+  }
   const prioritized = symbolNodes.sort(
     (a, b) => (b.entryPointScore ?? 0) - (a.entryPointScore ?? 0)
   );
@@ -3357,13 +3354,14 @@ export async function enrichProjectGraphEdges(
           );
 
           for (const inh of inheritances) {
-            const fromNode = result.nodes.find(
-              (n) => n.kind === 'symbol' && n.symbol?.name === inh.fromSymbol
-            );
-            const toNode = result.nodes.find(
-              (n) => n.kind === 'symbol' && n.symbol?.name === inh.toSymbol
-            );
-            if (!fromNode || !toNode || fromNode.id === toNode.id) continue;
+            const fromNode = node;
+            const candidates = symbolsByName.get(inh.toSymbol);
+            if (!candidates || candidates.length === 0) continue;
+            const toNode =
+              candidates.find((n) => n.path === node.path) ??
+              candidates.find((n) => n.symbol?.exported) ??
+              candidates[0];
+            if (!toNode || fromNode.id === toNode.id) continue;
 
             addEdge({
               id: `${inh.kind}:${fromNode.id}->${toNode.id}:lsp`,

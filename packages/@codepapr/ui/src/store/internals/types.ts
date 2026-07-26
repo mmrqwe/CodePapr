@@ -191,6 +191,7 @@ export interface ModelTierStats {
 export interface ConversationStats {
   primary: ModelTierStats;
   fast: ModelTierStats;
+  mentor: ModelTierStats;
 }
 
 export type ResetToMessageResult =

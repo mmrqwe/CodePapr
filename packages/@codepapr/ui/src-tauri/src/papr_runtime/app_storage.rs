@@ -39,14 +39,6 @@ pub fn papr_get_manifest(app_id: String) -> Result<crate::papr_runtime::manifest
 }
 
 #[tauri::command]
-pub fn papr_agent_run(app_id: String, agent_name: String) -> Result<(), String> {
-    let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
-    let capability = format!("agent:run:{}", agent_name);
-    permission::check_permission(&manifest, &app_id, &capability)?;
-    Ok(())
-}
-
-#[tauri::command]
 pub fn papr_get_app_settings() -> Result<AppPermissionSettings, String> {
     Ok(permission::get_app_settings())
 }

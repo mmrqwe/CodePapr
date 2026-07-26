@@ -423,7 +423,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
           <thead><tr><th>维度</th><th>Cline (62k⭐)</th><th>Aider (46k⭐)</th><th>Devin Desktop</th><th class="highlight-cell">CodePapr</th></tr></thead>
           <tbody>
             <tr><td><strong>形态</strong></td><td>SDK / VS Code / JetBrains / CLI / Kanban</td><td>终端命令</td><td>独立桌面 IDE</td><td class="highlight-cell">独立桌面应用（Tauri 2）</td></tr>
-            <tr><td><strong>多 Agent</strong></td><td>✅ 团队 + 协调者 + 定时调度</td><td>❌ 单 Agent</td><td>✅ 多 Agent 舰队 + ACP 协议</td><td class="highlight-cell">✅ 主 Agent + 3 内置子代理 + 自定义</td></tr>
+            <tr><td><strong>多 Agent</strong></td><td>✅ 团队 + 协调者 + 定时调度</td><td>❌ 单 Agent</td><td>✅ 多 Agent 舰队 + ACP 协议</td><td class="highlight-cell">✅ 主 Agent + 4 内置子代理 + 自定义</td></tr>
             <tr><td><strong>任务规划</strong></td><td>Kanban 看板</td><td>❌</td><td>Spaces + Kanban</td><td class="highlight-cell">TodoList：自动创建 / 进度追踪 / re-plan</td></tr>
             <tr><td><strong>代码理解</strong></td><td>读取文件 + grep + LSP</td><td>Repo Map</td><td>Fast Context（毫秒级）</td><td class="highlight-cell">ProjectGraph 语义图：14 个分析 action</td></tr>
             <tr><td><strong>回退机制</strong></td><td>Checkpoints 快照</td><td>Git commit 回退</td><td>Diff review</td><td class="highlight-cell">Git auto-commit checkpoint + <code>reset --hard</code>：代码与消息原子性恢复</td></tr>
@@ -601,7 +601,7 @@ https://api.deepseek.com/v1</code></pre>
         </table>
 
         <div class="callout success">
-           <strong>提示：</strong>桌面端设置面板分为 <code>通用 / LLM / 搜索 / Mentor / 高级</code> 五个 Tab。<strong>通用</strong>含语言、调试、许可证；<strong>LLM</strong>含主模型、快速模型、采样参数与思考强度；<strong>搜索</strong>用于配置自托管 SearXNG 搜索后端（SearXNG 优先，失败自动降级到内置 Bing / Mojeek / Qwant / Wikipedia 等多源聚合；搜索引擎选择器已移除；分类/时间/语言/安全搜索等高级参数收入折叠区）；<strong>Mentor</strong>配置导师子代理的独立 API Key、Base URL 和模型选择；<strong>高级</strong>含上下文压缩、TodoList 重试、Goal 自主循环、Verifier 模型、ProjectGraph 限制等。语音配置不在主设置面板，而在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。
+           <strong>提示：</strong>桌面端设置面板分为 <code>通用 / LLM / 搜索 / Mentor / 高级 / App</code> 六个 Tab。<strong>通用</strong>含语言、调试、许可证；<strong>LLM</strong>含主模型、快速模型、采样参数与思考强度；<strong>搜索</strong>用于配置自托管 SearXNG 搜索后端（SearXNG 优先，失败自动降级到内置 Bing / Mojeek / Qwant / Wikipedia 等多源聚合；搜索引擎选择器已移除；分类/时间/语言/安全搜索等高级参数收入折叠区）；<strong>Mentor</strong>配置导师子代理的独立 API Key、Base URL 和模型选择；<strong>高级</strong>含上下文压缩、TodoList 重试、Goal 自主循环、Verifier 模型、ProjectGraph 限制等；<strong>App</strong>管理 .papr 应用权限级别——全局默认级别、Level 3 全局开关、逐应用覆盖。语音配置不在主设置面板，而在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。
         </div>
       </div>
     </section>
@@ -993,7 +993,7 @@ https://api.deepseek.com/v1</code></pre>
         <p>单次 <code>read</code> / <code>write</code> / <code>edit</code> / <code>patch</code> 操作的上限为 <strong>20MB</strong>，可覆盖大多数源码和二进制资源文件，但大文件会显著增加 token 消耗。</p>
 
         <div class="callout success">
-          <strong>工具设计原则：</strong>LLM 看到的工具名是精简的"合并工具"（共 26 个），底层委托给 40+ 独立工具。Agent 可同时使用所有工具，子代理按 <code>tools</code> 配置白名单限制权限。代码修改优先用 <code>edit</code>/<code>patch</code> 走 Search/Replace Diff，新建文件才用 <code>write</code>。命令执行：短命令用 <code>exec</code>，长驻进程用 <code>exec</code> background:true，交互式终端用 <code>shell</code>。
+          <strong>工具设计原则：</strong>LLM 看到的工具名是精简的"合并工具"（共 30 个），底层委托给 40+ 独立工具。Agent 可同时使用所有工具，子代理按 <code>tools</code> 配置白名单限制权限。代码修改优先用 <code>edit</code>/<code>patch</code> 走 Search/Replace Diff，新建文件才用 <code>write</code>。命令执行：短命令用 <code>exec</code>，长驻进程用 <code>exec</code> background:true，交互式终端用 <code>shell</code>。
         </div>
       </div>
     </section>
@@ -1525,7 +1525,7 @@ TTS 数据流：
       <div class="content">
         <h3>什么是 MCP</h3>
         <p><strong>Model Context Protocol</strong>（MCP）是一种开放协议，允许 Agent 通过外部工具服务器扩展能力。CodePapr 内置 MCP host，可同时连接多个 MCP 服务器，把外部工具透出给主 Agent 调用。</p>
-        <p>每个 MCP 工具会以 <code>mcp__&lt;serverId&gt;__&lt;toolName&gt;</code> 形式注册，与内置 26 个工具并列出现在 ToolRegistry 中。</p>
+        <p>每个 MCP 工具会以 <code>mcp__&lt;serverId&gt;__&lt;toolName&gt;</code> 形式注册，与内置 30 个工具并列出现在 ToolRegistry 中。</p>
 
         <h3>三种传输模式</h3>
         <table>

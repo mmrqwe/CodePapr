@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   ApiFormat,
   ApiMode,
@@ -69,19 +69,50 @@ export function SettingsModal() {
     defaultPrompts[agent.name] = resolveAgentPrompt(agent, currentLang);
   }
 
-  useEffect(() => {
-    setLocal(normalizeSettings(settings));
-  }, [settings]);
+  // No effect syncing store -> draft while open: the modal mounts on open, so
+  // the initial state above captures the latest settings, and re-syncing on
+  // every store change would silently discard unsaved edits when a background
+  // action (e.g. openWorkspace upserting recent workspaces) updates settings.
 
   const update = (partial: Partial<Settings>) => {
-    setLocal((current) => normalizeSettings({ ...current, ...partial }));
+    setLocal((current) => {
+      const merged = { ...current, ...partial };
+      // Shallow merge plus lightweight re-derivation of the flat fields that
+      // validation reads (getSettingsError uses flat apiKey/model/baseURL).
+      // We deliberately do NOT run normalizeSettings here: doing so on every
+      // keystroke trimmed free-text inputs (dropping spaces in prompts/URLs)
+      // and clamped numeric inputs mid-entry. Clamping/trimming happens on
+      // save (setSettings) and on blur (clampOnBlur) instead.
+      const activeConfig = merged[merged.apiMode];
+      return {
+        ...merged,
+        provider:
+          merged.apiMode === 'deepseek'
+            ? 'deepseek'
+            : merged.apiMode === 'local'
+            ? 'openai'
+            : merged.apiFormat,
+        model: activeConfig.model,
+        fastModel: activeConfig.fastModel,
+        apiKey: activeConfig.apiKey,
+        baseURL: activeConfig.baseURL,
+      };
+    });
+  };
+
+  const clampOnBlur = () => {
+    setLocal((current) => normalizeSettings(current));
   };
 
   const resetTab = (tab: SettingsTab) => {
-    const defaults = normalizeSettings({} as Settings);
+    const defaults = normalizeSettings({});
     const tabKeys: Record<SettingsTab, (keyof Settings)[]> = {
       general: ['lang', 'debugEnabled', 'chatBordersEnabled'],
-      llm: ['apiMode', 'apiFormat', 'deepseek', 'custom', 'local', 'baseURL', 'apiKey', 'model', 'fastModelEnabled', 'fastModel', 'thinkingEnabled', 'thinkingEffort', 'temperature', 'topP', 'maxTokens', 'maxToolRounds'],
+      // Reset only the active mode's config (local.apiMode); the other two
+      // modes' configs — and therefore their API keys — are preserved. The flat
+      // fields (model/apiKey/baseURL/fastModel/maxTokens) are re-derived from
+      // the active mode config by update(), so they need not be listed here.
+      llm: ['apiMode', 'apiFormat', 'fastModelEnabled', 'thinkingEnabled', 'thinkingEffort', 'temperature', 'topP', 'maxToolRounds', local.apiMode],
       search: ['searxngEnabled', 'searxngBaseUrl', 'searxngCategories', 'searxngTimeRange', 'searxngLanguage', 'searxngSafeSearch'],
       mentor: ['mentorEnabled', 'mentorApiFormat', 'mentorBaseURL', 'mentorApiKey', 'mentorModel', 'mentorMaxTokens', 'mentorThinkingEnabled', 'maxMentorConsultations', 'explorePrompt', 'scoutPrompt', 'mentorPrompt', 'exploreTemperature', 'exploreMaxToolRounds', 'exploreMaxTokens', 'exploreTopP', 'exploreMaxDepth', 'exploreThinkingEnabled', 'scoutTemperature', 'scoutMaxToolRounds', 'scoutMaxTokens', 'scoutTopP', 'scoutMaxDepth', 'scoutThinkingEnabled'],
       advanced: ['compactionModel', 'compactionMaxTokens', 'compactionTemperature', 'maxContextTokens', 'maxConversationRounds', 'todoMaxRetries', 'goalMaxIterations', 'goalMaxWallClockMs', 'goalRequireGitClean', 'verifierModelTier', 'verifierMaxTokens', 'verifierTemperature', 'projectGraphMaxDepth', 'projectGraphMaxFiles', 'projectGraphMaxEdges', 'projectGraphMaxSymbolsPerFile', 'projectGraphMaxFileBytes', 'projectGraphMaxTreeEntries'],
@@ -232,7 +263,12 @@ export function SettingsModal() {
 
   return (
     <div className="fixed inset-0 z-50 flex select-none items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in">
-      <div className="flex max-h-[94vh] h-[94vh] w-[min(96vw,1480px)] flex-col overflow-hidden rounded-3xl border border-[#2a2d3a] bg-[#1a1d27] shadow-2xl">
+      {/* onBlur bubbles (React focusout), so leaving any field clamps/trims the
+          whole draft once — numeric ranges snap on blur instead of mid-typing. */}
+      <div
+        onBlur={clampOnBlur}
+        className="flex max-h-[94vh] h-[94vh] w-[min(96vw,1480px)] flex-col overflow-hidden rounded-3xl border border-[#2a2d3a] bg-[#1a1d27] shadow-2xl"
+      >
         <div className="flex items-start justify-between border-b border-[#2a2d3a] px-7 py-5">
           <div>
             <h2 className="text-lg font-semibold text-slate-100">{t.modelSettings}</h2>
@@ -1433,7 +1469,7 @@ export function SettingsModal() {
 
           {activeTab === 'app' && (
             <div className="flex flex-col gap-4">
-              <AppPermissionsTab />
+              <AppPermissionsTab lang={currentLang} />
             </div>
           )}
 

@@ -1,6 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useAppRuntimeStore, type AppInstance } from '../store/appRuntimeStore';
 import { useAgentStore } from '../store/agentStore';
+import { usePermissionStore } from '../papr/permissionStore';
 import { invoke } from '@tauri-apps/api/core';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
@@ -48,6 +49,7 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
         workspacePath,
         command: selected.command,
         args: selected.args ?? [],
+        previewUrl: `http://localhost:${selected.port}/`,
       });
       setAppRunning(selected.appId, result.pid, `http://localhost:${selected.port}/`);
     } catch (e) {
@@ -81,6 +83,8 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
       try { await invoke('stop_background_process', { pid: selected.pid }); } catch { /* ignore */ }
     }
     try { await invoke('papr_delete_app', { appId: selected.appId }); } catch { /* ignore */ }
+    try { await invoke('unregister_app_workspace', { appId: selected.appId }); } catch { /* ignore */ }
+    usePermissionStore.getState().clearManifest(selected.appId);
     if (selectedId === selected.appId) setSelectedId(null);
     closeApp(selected.appId);
     setBusy(false);
@@ -90,6 +94,22 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
   const canOpen = !!(selected && !busy && (!hasBackend || isRunning));
   const canStop = !!(selected && isRunning && !busy);
   const canDelete = !!(selected && !busy);
+
+  useEffect(() => {
+    const runningApps = apps.filter((a) => a.pid && a.port);
+    if (runningApps.length === 0) return;
+    const timer = setInterval(async () => {
+      for (const app of runningApps) {
+        try {
+          const available: boolean = await invoke('check_port_available', { port: app.port });
+          if (available) {
+            useAppRuntimeStore.getState().setAppStopped(app.appId);
+          }
+        } catch { /* ignore */ }
+      }
+    }, 15_000);
+    return () => clearInterval(timer);
+  }, [apps]);
 
   if (apps.length === 0) {
     return (

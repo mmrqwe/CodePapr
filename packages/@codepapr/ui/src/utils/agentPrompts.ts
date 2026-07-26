@@ -206,7 +206,7 @@ export function buildModePrompt(
 ): string {
   const promptLang = normalizeLang(lang);
   const diagnosticsSection =
-    mode === 'ask'
+    mode === 'ask' || mode === 'app'
       ? ''
       : buildProjectDiagnosticsPromptBody({
           lang: promptLang,

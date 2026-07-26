@@ -4,7 +4,7 @@
 
 **本地优先的编码 Agent 运行时。Tauri 桌面 + CLI 自动化。**
 
-CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主 Agent 调度 **Explore**（代码分析）、**Scout**（网页搜索）、**Mentor**（架构指导）三个内置子代理协作，支持自定义扩展。文件读写、命令执行、Git 操作、浏览器预览、LSP 诊断——全在本地完成。
+CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主 Agent 调度 **Explore**（代码分析）、**Scout**（网页搜索）、**Mentor**（架构指导）、**Verifier**（Goal 验收，内部）四个内置子代理协作，支持自定义扩展。文件读写、命令执行、Git 操作、浏览器预览、LSP 诊断——全在本地完成。
 
 ---
 
@@ -23,7 +23,7 @@ CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主
 | **ProjectGraph 语义分析** | 项目级代码结构骨架 + 符号 + 依赖关系图，支持死代码检测、循环依赖、重构建议等 13 个 action |
 | **DeepSeek 前缀缓存优化** | 三层提示词注入策略，最大化缓存命中降低成本 |
 | **SEARCH/REPLACE Diff** | 先校验再写入，支持原子性多文件 patch |
-| **MCP 协议支持** | 集成外部 MCP 工具服务器，支持 DuckDuckGo Search、Postgres、SQLite 等 |
+| **MCP 协议支持** | 集成外部 MCP 工具服务器（stdio / SSE / Streamable HTTP）；内置 DuckDuckGo Search、Postgres、SQLite 预设；MCP 市场一键安装官方注册表服务器；逐服务器权限模式（只读 / 读写 / 危险）与变更操作确认流 |
 | **Git 深度集成** | 8 个 Git action + diff 面板 + 安全回退（备份引用+撤销） |
 | **对话重置** | 一键重置代码和对话到任意历史消息；恢复前预览受影响的文件 |
 | **对话轮次导航** | 右侧轮次指示条，悬停展开面板，点击跳转到任意轮次 |
@@ -100,7 +100,7 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 | `.CodePapr/AGENTS.md` | 全项目规则，注入所有 Agent 和子代理的系统提示词 |
 | `.CodePapr/memory.md` | 跨会话项目记忆；冷启动时基于 ProjectGraph 自动生成，Agent 自动追加，超 200 行后自动整理 |
 | `.CodePapr/agents/*.md` | 自定义子代理（YAML frontmatter + Markdown 正文） |
-| `.CodePapr/skills/*/SKILL.md` | 可复用技能（搜索策略、排错流程、发布检查） |
+| `.CodePapr/skills/*/SKILL.md` | 可复用技能（搜索策略、排错流程、发布检查）；也支持平铺布局 `.CodePapr/skills/<name>.md`；技能市场一键安装 GitHub 技能 |
 | `.CodePapr/commands/*.md` | 自定义提示词模板（`--name` 调用） |
 
 ### 内置命令
@@ -111,7 +111,7 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 
 **快速模型（更快、更便宜）：** `/search` `/lint` `/clean` `/commit` `/summary` `/build`
 
-**本地（零 token）：** `/help` `/commands` `/compact` `/goal`
+**本地（零 token）：** `/help` `/commands` `/compact`
 
 **自主循环（双模型 Worker+Verifier）：** `/goal exec:<验证命令>` — 启动自主循环，Worker 执行 + Verifier 验收 + 客观条件判定，直到验证条件通过或限制耗尽。示例：`/goal exec:npm test`、`/goal 修复 auth 测试 | exec:npm test match:"\\d+ passed"`
 
@@ -119,13 +119,14 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 
 ## 设置面板
 
-`General / LLM / Search / Mentor / 高级` 五个标签页：
+`General / LLM / Search / Mentor / 高级 / App` 六个标签页：
 
 - **General**：语言、调试、许可证
 - **LLM**：主模型、快速模型、temperature、topP、maxTokens、thinking 模式、maxToolRounds
 - **Search**：自部署 SearXNG 搜索（优先使用，失败自动降级到内置 Bing / Mojeek / Qwant / Wikipedia 等多源聚合）
 - **Mentor**：子代理选择、自定义提示词、子代理参数（temperature/topP/thinking/maxTokens/maxToolRounds/maxDepth）、独立 Mentor 模型配置
 - **高级**：上下文压缩（模型/温度/token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 深度/文件数限制
+- **App**：.papr 应用权限管理——全局默认级别、Level 3 全局开关、逐应用级别覆盖
 
 详见 `packages/@codepapr/core/docs/CONFIGURATION.md` 完整参数参考。
 
@@ -133,9 +134,12 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 
 | Agent | 用途 | 模型 | 工具 |
 |-------|------|------|------|
-| **explore** | 只读代码分析 | fast | read, read_image, graph, lsp, diagnostics, time |
-| **scout** | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image, open, time |
+| **explore** | 只读代码分析 | fast | read, read_image, graph, lsp, diagnostics, grep |
+| **scout** | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image |
 | **mentor** | 架构/算法指导 | 可配置独立模型 | 无 |
+| **verifier** | Goal 验收器（内部） | fast | 无 |
+
+> `verifier` 是 Goal 自主循环的内部验收器，不暴露给主 Agent 的 `task` 工具。
 
 主 Agent 通过 `task` 工具调度子代理。每个子代理拥有**独立的 Session 和空白上下文**，只接收委派的任务描述，不受主 Agent 历史对话污染。子代理有 5 分钟整体超时，单次工具调用有 90 秒超时保护。
 

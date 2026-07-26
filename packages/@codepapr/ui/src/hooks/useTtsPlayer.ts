@@ -292,7 +292,6 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
       if (requestedMode === 'streamed-pcm') {
         if (!pcmFallbackWarnedRef.current) {
           pcmFallbackWarnedRef.current = true;
-          // eslint-disable-next-line no-console
           console.warn('[tts] streamed-pcm failed, falling back to streamed-pipeline:', e);
         }
         await safeInvoke('tts_synthesize_and_play', {

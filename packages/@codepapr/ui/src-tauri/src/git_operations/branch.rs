@@ -1,6 +1,6 @@
 use git2::BranchType;
 use crate::snapshot::types::{GitBranch, GitOperationResult};
-use super::open_repo;
+use super::{open_repo, validate_git_ref};
 
 /// 校验分支名，与 TS 侧 `assertValidGitBranchName` 对齐，作为纵深防御。
 /// 拒绝：空、`@`、以 `-`/`/` 开头、以 `/`/`.`/`.lock` 结尾、含 `..`/`//`/`@{`/`[`/
@@ -60,6 +60,7 @@ pub fn git_branch_checkout_impl(
     branch_name: &str,
     create: bool,
     create_if_missing: bool,
+    start_point: Option<&str>,
 ) -> GitOperationResult {
     if let Err(e) = validate_branch_name(branch_name) {
         return GitOperationResult {
@@ -74,22 +75,38 @@ pub fn git_branch_checkout_impl(
         },
     };
 
+    // 解析起始点引用：优先用 start_point，否则回退到 HEAD
+    let resolve_start_oid = || -> Result<git2::Oid, String> {
+        if let Some(sp) = start_point {
+            validate_git_ref(sp, "startPoint")?;
+            let obj = repo.revparse_single(sp)
+                .map_err(|e| format!("resolve startPoint {}: {}", sp, e.message()))?;
+            let commit = obj.into_commit()
+                .map_err(|_| format!("startPoint {} 不是一个有效的提交对象", sp))?;
+            Ok(commit.id())
+        } else {
+            repo.head().ok()
+                .and_then(|h| h.target())
+                .ok_or_else(|| "no HEAD".to_string())
+        }
+    };
+
     let branch = repo.find_branch(branch_name, BranchType::Local);
-    let target_oid = if create || (create_if_missing && branch.is_err()) {
-        let head_oid = repo.head().ok()
-            .and_then(|h| h.target())
-            .ok_or_else(|| "no HEAD".to_string());
-        let head_oid = match head_oid { Ok(o) => o, Err(e) => return GitOperationResult {
-            ok: false, action: "branch_checkout".to_string(), message: e, backup_ref: None,
-        }};
-        let commit = match repo.find_commit(head_oid) {
+    let _target_oid = if create || (create_if_missing && branch.is_err()) {
+        let start_oid = match resolve_start_oid() {
+            Ok(o) => o,
+            Err(e) => return GitOperationResult {
+                ok: false, action: "branch_checkout".to_string(), message: e, backup_ref: None,
+            },
+        };
+        let commit = match repo.find_commit(start_oid) {
             Ok(c) => c, Err(e) => return GitOperationResult {
                 ok: false, action: "branch_checkout".to_string(),
                 message: format!("find commit: {}", e.message()), backup_ref: None,
             },
         };
         match repo.branch(branch_name, &commit, false) {
-            Ok(b) => b.get().target().unwrap_or(head_oid),
+            Ok(b) => b.get().target().unwrap_or(start_oid),
             Err(e) => return GitOperationResult {
                 ok: false, action: "branch_checkout".to_string(),
                 message: format!("create branch: {}", e.message()), backup_ref: None,
@@ -146,12 +163,14 @@ pub async fn git_branch_checkout(
     branch_name: String,
     create: Option<bool>,
     create_if_missing: Option<bool>,
+    start_point: Option<String>,
 ) -> GitOperationResult {
     let workspace = std::path::PathBuf::from(workspace_path);
     git_branch_checkout_impl(
         &workspace, &branch_name,
         create.unwrap_or(false),
         create_if_missing.unwrap_or(true),
+        start_point.as_deref(),
     )
 }
 
@@ -212,11 +231,11 @@ mod tests {
         let engine = SnapshotEngine::new(&workspace);
         engine.ensure();
 
-        let result = git_branch_checkout_impl(&workspace, "bad name", false, true);
+        let result = git_branch_checkout_impl(&workspace, "bad name", false, true, None);
         assert!(!result.ok, "非法分支名必须被拒绝");
         assert!(result.message.contains("非法分支名"), "错误消息应说明非法分支名");
 
-        let result = git_branch_checkout_impl(&workspace, "-leading-dash", false, true);
+        let result = git_branch_checkout_impl(&workspace, "-leading-dash", false, true, None);
         assert!(!result.ok, "以 - 开头的分支名必须被拒绝");
 
         fs::remove_dir_all(&workspace).ok();
@@ -235,6 +254,7 @@ mod tests {
             "feature/test",
             false,  // 不强制 create
             true,   // create_if_missing=true
+            None,   // start_point=None
         );
         assert!(result.ok, "创建并切换分支应成功: {}", result.message);
 

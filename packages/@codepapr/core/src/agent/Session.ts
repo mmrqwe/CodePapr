@@ -70,13 +70,15 @@ export class Session {
         cacheHitRate: 0,
       };
     }
-    const agg = this.statsHistory.reduce(
+    type AggregateAccumulator = ICacheStatistics & { calls: number };
+    const agg = this.statsHistory.reduce<AggregateAccumulator>(
       (acc, s) => ({
         cacheCreationTokens: acc.cacheCreationTokens + s.cacheCreationTokens,
         cacheReadTokens: acc.cacheReadTokens + s.cacheReadTokens,
         newInputTokens: acc.newInputTokens + s.newInputTokens,
         outputTokens: acc.outputTokens + s.outputTokens,
         cacheHitRate: 0,
+        calls: acc.calls + (s.calls ?? 0),
         promptCacheHitTokens: mergeOptionalTokenCount(
           acc.promptCacheHitTokens,
           s.promptCacheHitTokens
@@ -92,6 +94,7 @@ export class Session {
         newInputTokens: 0,
         outputTokens: 0,
         cacheHitRate: 0,
+        calls: 0,
         promptCacheHitTokens: undefined,
         promptCacheMissTokens: undefined,
       }

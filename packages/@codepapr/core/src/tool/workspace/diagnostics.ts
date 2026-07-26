@@ -512,22 +512,37 @@ export async function runProjectDiagnostics(
 
   const stages: ProjectDiagnosticStageResult[] = [];
   for (const stage of plan.stages) {
-    const result = asProjectDiagnosticsCommandResult(
-      await host.runCommand({
-        command: stage.command,
-        args: stage.args,
-        timeoutSeconds: 270,
-      })
-    );
-    stages.push({
-      ...stage,
-      success: !result.timedOut && (result.status ?? 1) === 0,
-      status: result.status,
-      timedOut: result.timedOut,
-      stdout: result.stdout,
-      stderr: result.stderr,
-      excerpt: buildExcerpt(result.stdout, result.stderr),
-    });
+    try {
+      const result = asProjectDiagnosticsCommandResult(
+        await host.runCommand({
+          command: stage.command,
+          args: stage.args,
+          timeoutSeconds: 270,
+        })
+      );
+      stages.push({
+        ...stage,
+        success: !result.timedOut && (result.status ?? 1) === 0,
+        status: result.status,
+        timedOut: result.timedOut,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        excerpt: buildExcerpt(result.stdout, result.stderr),
+      });
+    } catch (error) {
+      // 单个阶段（如缺少 dotnet/cargo/go 等工具链）spawn 失败时，记录为失败阶段并继续后续阶段，
+      // 而不是让整个诊断流程中断、丢失其余阶段的结果。
+      const message = error instanceof Error ? error.message : String(error);
+      stages.push({
+        ...stage,
+        success: false,
+        status: null,
+        timedOut: false,
+        stdout: '',
+        stderr: message,
+        excerpt: buildExcerpt('', message),
+      });
+    }
   }
 
   return {

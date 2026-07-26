@@ -41,28 +41,32 @@ function StatRow({ label, value, color = 'text-slate-300' }: { label: string; va
 interface ModelStatsBlockProps {
   title: string;
   stats: ModelTierStats;
-  pricing: DeepSeekPricing;
+  pricing?: DeepSeekPricing;
   t: Record<string, string>;
   showsDeepSeekPromptMiss: boolean;
+  showCost?: boolean;
+  footnote?: string;
 }
 
-function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss }: ModelStatsBlockProps) {
+function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss, showCost = true, footnote }: ModelStatsBlockProps) {
   const { totalCacheRead, totalCacheCreation, totalInput, totalOutput, calls, rounds } = stats;
 
   const totalTokens = totalCacheRead + totalCacheCreation + totalInput;
   const totalCacheMissInput = totalCacheCreation + totalInput;
   const hitRate = totalTokens > 0 ? totalCacheRead / totalTokens : 0;
 
-  const costWithCache =
-    (
-      totalCacheRead * pricing.cacheReadPerMillionRmb +
-      totalCacheMissInput * pricing.cacheMissInputPerMillionRmb +
-      totalOutput * pricing.outputPerMillionRmb
-    ) /
-    1_000_000;
-  const costWithoutCache =
-    (totalTokens * pricing.cacheMissInputPerMillionRmb + totalOutput * pricing.outputPerMillionRmb) /
-    1_000_000;
+  const costWithCache = pricing
+    ? (
+        totalCacheRead * pricing.cacheReadPerMillionRmb +
+        totalCacheMissInput * pricing.cacheMissInputPerMillionRmb +
+        totalOutput * pricing.outputPerMillionRmb
+      ) /
+      1_000_000
+    : 0;
+  const costWithoutCache = pricing
+    ? (totalTokens * pricing.cacheMissInputPerMillionRmb + totalOutput * pricing.outputPerMillionRmb) /
+      1_000_000
+    : 0;
   const savings = costWithoutCache > 0 ? 1 - costWithCache / costWithoutCache : 0;
 
   const hitColor =
@@ -97,18 +101,24 @@ function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss }: 
         <StatRow label={t.output} value={totalOutput.toLocaleString()} />
       </div>
 
-      <div>
-        <p className="mb-2 text-[11px] font-medium text-slate-500">{t.costEstimation}</p>
-        <StatRow label={t.actualCost} value={formatRmb(costWithCache)} color="text-indigo-400" />
-        <StatRow label={t.withoutCache} value={formatRmb(costWithoutCache)} color="text-slate-500" />
-        <div className="mt-2 border-t border-[#2a2d3a] pt-2">
-          <StatRow
-            label={t.savings}
-            value={`${(savings * 100).toFixed(1)}%`}
-            color={savings > 0.5 ? 'text-green-400' : 'text-slate-400'}
-          />
+      {showCost && pricing && (
+        <div>
+          <p className="mb-2 text-[11px] font-medium text-slate-500">{t.costEstimation}</p>
+          <StatRow label={t.actualCost} value={formatRmb(costWithCache)} color="text-indigo-400" />
+          <StatRow label={t.withoutCache} value={formatRmb(costWithoutCache)} color="text-slate-500" />
+          <div className="mt-2 border-t border-[#2a2d3a] pt-2">
+            <StatRow
+              label={t.savings}
+              value={`${(savings * 100).toFixed(1)}%`}
+              color={savings > 0.5 ? 'text-green-400' : 'text-slate-400'}
+            />
+          </div>
         </div>
-      </div>
+      )}
+
+      {footnote && (
+        <p className="mt-2 text-[10px] leading-relaxed text-slate-600">{footnote}</p>
+      )}
     </div>
   );
 }
@@ -131,15 +141,18 @@ export function CacheStatsDashboard({ lang, collapsible = true }: CacheStatsDash
 
   const normalizedProvider = settings.provider?.trim().toLowerCase() ?? '';
   const normalizedModel = settings.model?.trim().toLowerCase() ?? '';
-  const showsDeepSeekPromptMiss =
-    (normalizedProvider === 'deepseek' || normalizedModel.includes('deepseek')) &&
-    conversationStats.primary.totalCacheCreation === 0 &&
-    conversationStats.primary.promptCacheMissTokens > 0;
 
   const displayedStats: ConversationStats =
     viewMode === 'project'
       ? aggregateProjectStats(sessionConversationStats)
       : conversationStats;
+
+  // Derive the flag from the stats actually being displayed so the "Entire
+  // Project" view doesn't reflect the current conversation's primary tier.
+  const showsDeepSeekPromptMiss =
+    (normalizedProvider === 'deepseek' || normalizedModel.includes('deepseek')) &&
+    displayedStats.primary.totalCacheCreation === 0 &&
+    displayedStats.primary.promptCacheMissTokens > 0;
 
   const showContent = !collapsible || !collapsed;
 
@@ -209,11 +222,14 @@ export function CacheStatsDashboard({ lang, collapsible = true }: CacheStatsDash
           />
 
           {settings.mentorEnabled && settings.mentorModel && (
-            <div className="rounded-xl border border-indigo-500/15 bg-[#1a1d27] p-3">
-              <p className="mb-1 text-xs font-semibold text-indigo-400">{t.mentorModelTag}</p>
-              <p className="text-[11px] text-slate-500">{settings.mentorModel}</p>
-              <p className="mt-1 text-[10px] text-slate-600">{t.mentorStatsIncludedNote}</p>
-            </div>
+            <ModelStatsBlock
+              title={`${t.mentorModelTag} · ${settings.mentorModel}`}
+              stats={displayedStats.mentor}
+              t={t}
+              showsDeepSeekPromptMiss={false}
+              showCost={false}
+              footnote={t.mentorStatsIncludedNote}
+            />
           )}
         </div>
       )}

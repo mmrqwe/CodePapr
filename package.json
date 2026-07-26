@@ -41,25 +41,25 @@
     "dev": "npm run dev --workspaces --if-present"
   },
   "devDependencies": {
-    "@html-eslint/eslint-plugin": "^0.60.0",
-    "@html-eslint/parser": "^0.60.0",
-    "@types/eslint": "^8.56.12",
+    "@eslint/js": "^10.0.1",
+    "@html-eslint/eslint-plugin": "^0.64.0",
+    "@html-eslint/parser": "^0.64.0",
     "@types/node": "^20.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.59.4",
-    "@typescript-eslint/parser": "^8.59.4",
+    "@typescript-eslint/eslint-plugin": "^8.65.0",
+    "@typescript-eslint/parser": "^8.65.0",
     "@vitest/coverage-v8": "^4.1.9",
-    "eslint": "^8.57.1",
+    "eslint": "^10.8.0",
     "prettier": "^3.0.0",
     "pyright": "^1.1.410",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0",
     "typescript-language-server": "^5.3.0",
     "vitest": "^4.1.6",
     "vscode-langservers-extracted": "^4.10.0",
     "yaml-language-server": "^1.23.0"
   },
   "overrides": {
-    "brace-expansion@1.1.14": "1.1.16",
-    "brace-expansion@5.0.6": "5.0.7",
+    "brace-expansion@5.0.6": "5.0.8",
     "js-yaml": "^4.3.0"
   }
 }

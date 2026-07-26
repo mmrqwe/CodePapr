@@ -6,6 +6,8 @@ use super::ignore_resolver::IgnoreResolver;
 const CODEPAPR_GIT_SUBDIR: &str = ".CodePapr/git";
 const EXCLUDE_RULES: &[&str] = &[
     ".CodePapr/",
+    ".git",
+    "**/.git",
     "**/.git/",
     "**/.codepapr_git_backup/",
     "node_modules/",
@@ -60,6 +62,19 @@ fn ensure_codepapr_excluded(repo: &Repository) -> std::io::Result<()> {
     }
     let exclude_path = info_dir.join("exclude");
     let existing = fs::read_to_string(&exclude_path).unwrap_or_default();
+    let existing_lines: Vec<&str> = existing.lines().map(|l| l.trim()).collect();
+
+    let mut to_append: Vec<&str> = Vec::new();
+    for rule in EXCLUDE_RULES {
+        if !existing_lines.iter().any(|l| l == rule) {
+            to_append.push(rule);
+        }
+    }
+
+    if to_append.is_empty() {
+        return Ok(());
+    }
+
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -68,11 +83,8 @@ fn ensure_codepapr_excluded(repo: &Repository) -> std::io::Result<()> {
     if !existing.is_empty() && !existing.ends_with('\n') {
         file.write_all(b"\n")?;
     }
-    for rule in EXCLUDE_RULES {
-        let line = format!("{}\n", rule);
-        if !existing.contains(rule) {
-            file.write_all(line.as_bytes())?;
-        }
+    for rule in to_append {
+        file.write_all(format!("{}\n", rule).as_bytes())?;
     }
     Ok(())
 }
@@ -91,9 +103,11 @@ impl SnapshotEngine {
         let dot_git = git_path.join(".git");
 
         // 清理可能因崩溃遗留的锁文件：
-        // - config.lock: libgit2 写入 config 时创建
-        // - index.lock:  libgit2 写入 index 时创建（stage/commit/snapshot 期间崩溃会残留）
-        for lock_name in &["config.lock", "index.lock"] {
+        // - config.lock:       libgit2 写入 config 时创建
+        // - index.lock:        libgit2 写入 index 时创建（stage/commit/snapshot 期间崩溃会残留）
+        // - HEAD.lock:         libgit2 更新 HEAD 引用时创建
+        // - packed-refs.lock:  libgit2 写入 packed-refs 时创建
+        for lock_name in &["config.lock", "index.lock", "HEAD.lock", "packed-refs.lock"] {
             let lock_file = dot_git.join(lock_name);
             if lock_file.exists() {
                 let _ = std::fs::remove_file(&lock_file);
@@ -103,7 +117,7 @@ impl SnapshotEngine {
         if dot_git.is_dir() {
             match Repository::open(&git_path) {
                 Ok(repo) => {
-                    let _ = repo.set_workdir(&self.workspace, true);
+                    let _ = repo.set_workdir(&self.workspace, false);
                     let _ = ensure_codepapr_excluded(&repo);
                     let head_sha = repo.head().ok()
                         .and_then(|h| h.target())
@@ -141,7 +155,7 @@ impl SnapshotEngine {
             let _ = config.set_str("core.worktree", &self.workspace.to_string_lossy());
         }
 
-        let _ = repo.set_workdir(&self.workspace, true);
+        let _ = repo.set_workdir(&self.workspace, false);
         let _ = ensure_codepapr_excluded(&repo);
 
         if repo.head().is_err() {
@@ -176,7 +190,7 @@ impl SnapshotEngine {
         let git_path = code_papr_git_path(&self.workspace);
         let repo = Repository::open(&git_path)
             .map_err(|e| format!("open repo: {}", e.message()))?;
-        repo.set_workdir(&self.workspace, true)
+        repo.set_workdir(&self.workspace, false)
             .map_err(|e| format!("set workdir: {}", e.message()))?;
 
         let signature = ensure_signature(&repo)
@@ -230,9 +244,8 @@ impl SnapshotEngine {
 
         let head_sha = commit_oid.to_string();
         let short_hash = head_sha[..7.min(head_sha.len())].to_string();
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
+        let timestamp = repo.find_commit(commit_oid)
+            .map(|c| c.time().seconds())
             .unwrap_or(0);
 
         eprintln!("[CodePapr] snapshot_create: commit {}, {} files", head_sha, added);
@@ -253,13 +266,14 @@ impl SnapshotEngine {
             Ok(r) => r,
             Err(_) => return vec![],
         };
-        let _ = repo.set_workdir(&self.workspace, true);
+        let _ = repo.set_workdir(&self.workspace, false);
 
         let head_oid = repo.head().ok().and_then(|h| h.target());
         let mut revwalk = match repo.revwalk() {
             Ok(rw) => rw,
             Err(_) => return vec![],
         };
+        revwalk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL).ok();
         if revwalk.push_head().is_err() {
             return vec![];
         }
@@ -345,6 +359,219 @@ mod tests {
         restore.undo().expect("undo should work");
         let content2 = fs::read_to_string(workspace.join("test.txt")).unwrap();
         assert_eq!(content2, "modified", "file should be restored after undo");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
+    fn test_restore_removes_untracked_files_created_after_snapshot() {
+        let workspace = temp_workspace("untracked-cleanup");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        fs::write(workspace.join("existing.txt"), "original\n").unwrap();
+        let cp = engine.create("baseline").expect("baseline snapshot");
+
+        // 在快照之后新建一个未跟踪文件
+        fs::write(workspace.join("untracked.txt"), "should be removed\n").unwrap();
+        assert!(workspace.join("untracked.txt").exists(), "untracked file should exist before restore");
+
+        // 恢复到快照
+        use crate::snapshot::RestoreEngine;
+        let restore = RestoreEngine::new(&workspace);
+        let exec = restore.execute(&cp.sha).expect("restore execute");
+        assert!(exec.ok, "restore should succeed");
+
+        // 未跟踪文件应被清理
+        assert!(
+            !workspace.join("untracked.txt").exists(),
+            "untracked file should be removed after restore (bug: hard reset leaves untracked files)"
+        );
+        // 已有文件应正确恢复
+        assert_eq!(
+            fs::read_to_string(workspace.join("existing.txt")).unwrap(),
+            "original\n"
+        );
+
+        // Undo 后，untracked 文件不应回来了（因为它在备份快照中也不存在）
+        // 但备份快照是 restore 前的 HEAD，也就是包含 untracked 之前的状态...
+        // 实际上 backup_ref 指向的是 restore 前的 HEAD，那里没有 untracked.txt，
+        // 因为 untracked 文件从未被 snapshot 过。所以 undo 后它也不存在。
+        // 这里只验证 undo 不报错即可。
+        restore.undo().expect("undo should work");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
+    fn test_ensure_does_not_create_git_file() {
+        let workspace = temp_workspace("no-git-file");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        assert!(
+            !workspace.join(".git").exists(),
+            "ensure() must not create a .git file in the workspace"
+        );
+        assert!(
+            workspace.join(".CodePapr/git/.git").is_dir(),
+            "snapshot repo .git dir should exist"
+        );
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
+    fn test_git_file_not_collected() {
+        use crate::snapshot::ignore_resolver::IgnoreResolver;
+
+        let workspace = temp_workspace("git-file-exclude");
+        fs::write(workspace.join("normal.txt"), "hello\n").unwrap();
+        fs::write(workspace.join(".git"), "gitdir: /some/path/.git\n").unwrap();
+
+        let resolver = IgnoreResolver::new(&workspace);
+        let files = resolver.collect_files();
+        let names: Vec<String> = files.iter()
+            .map(|f| f.to_string_lossy().to_string())
+            .collect();
+
+        assert!(names.contains(&"normal.txt".to_string()), "normal file should be collected");
+        assert!(!names.contains(&".git".to_string()), ".git file must not be collected");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
+    fn test_codepapr_dir_not_collected() {
+        use crate::snapshot::ignore_resolver::IgnoreResolver;
+
+        let workspace = temp_workspace("codepapr-exclude");
+        fs::write(workspace.join("app.rs"), "fn main() {}\n").unwrap();
+        fs::create_dir_all(workspace.join(".CodePapr")).unwrap();
+        fs::write(workspace.join(".CodePapr/project.sqlite"), "data").unwrap();
+
+        let resolver = IgnoreResolver::new(&workspace);
+        let files = resolver.collect_files();
+
+        assert!(
+            !files.iter().any(|f| f.to_string_lossy().contains(".CodePapr")),
+            ".CodePapr files must not be collected"
+        );
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
+    fn test_restore_preserves_git_file_and_codepapr_dir() {
+        let workspace = temp_workspace("preserve-git");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        fs::write(workspace.join("code.txt"), "v1\n").unwrap();
+        fs::write(workspace.join(".git"), "gitdir: /some/path/.git\n").unwrap();
+        fs::create_dir_all(workspace.join(".CodePapr")).unwrap();
+        fs::write(workspace.join(".CodePapr/project.sqlite"), "data").unwrap();
+
+        let cp = engine.create("baseline").expect("baseline snapshot");
+
+        fs::write(workspace.join("code.txt"), "v2\n").unwrap();
+
+        use crate::snapshot::RestoreEngine;
+        let restore = RestoreEngine::new(&workspace);
+        let exec = restore.execute(&cp.sha).expect("restore should succeed");
+        assert!(exec.ok);
+
+        assert_eq!(fs::read_to_string(workspace.join("code.txt")).unwrap(), "v1\n");
+        assert!(
+            workspace.join(".git").exists(),
+            ".git file must survive restore"
+        );
+        assert!(
+            workspace.join(".CodePapr/project.sqlite").exists(),
+            ".CodePapr data must survive restore"
+        );
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
+    fn test_full_agent_workflow_stage_commit_status_diff_restore() {
+        use crate::git_operations::stage::git_stage_impl;
+        use crate::git_operations::commit::git_commit_impl;
+        use crate::git_operations::status::git_status_impl;
+        use crate::git_operations::diff::git_diff_impl;
+        use crate::git_operations::restore_files::git_restore_files_impl;
+        use crate::snapshot::RestoreEngine;
+
+        let workspace = temp_workspace("e2e-agent");
+        let engine = SnapshotEngine::new(&workspace);
+        let ensure = engine.ensure();
+        assert!(ensure.ready, "ensure should succeed");
+        assert!(!workspace.join(".git").exists(), "no .git file after ensure");
+
+        fs::write(workspace.join("main.rs"), "fn main() {}\n").unwrap();
+        fs::write(workspace.join("lib.rs"), "pub fn add() {}\n").unwrap();
+        let baseline = engine.create("baseline").expect("baseline");
+
+        fs::write(workspace.join("main.rs"), "fn main() { println!(\"v2\"); }\n").unwrap();
+
+        let status = git_status_impl(&workspace);
+        assert!(status.available, "status should be available");
+        assert!(
+            status.entries.iter().any(|e| e.path == "main.rs" && e.worktree_status == "M"),
+            "main.rs should show as modified"
+        );
+
+        let diff = git_diff_impl(&workspace, false, &[]);
+        assert!(diff.available, "diff should be available");
+        assert!(diff.diff.contains("main.rs"), "diff should contain main.rs");
+
+        let stage = git_stage_impl(&workspace, false, &["main.rs".to_string()]);
+        assert!(stage.ok, "stage should succeed: {}", stage.message);
+
+        let commit = git_commit_impl(&workspace, "update main", false, &["main.rs".to_string()], false);
+        assert!(commit.ok, "commit should succeed: {}", commit.message);
+
+        let diff_after = git_diff_impl(&workspace, false, &[]);
+        assert!(
+            !diff_after.diff.contains("main.rs"),
+            "main.rs should not appear in diff after commit"
+        );
+
+        let checkpoint = engine.create("checkpoint").expect("checkpoint");
+
+        fs::write(workspace.join("main.rs"), "fn main() { println!(\"v3\"); }\n").unwrap();
+        fs::write(workspace.join("new_file.txt"), "should be removed\n").unwrap();
+
+        let restore = RestoreEngine::new(&workspace);
+        let exec = restore.execute(&checkpoint.sha).expect("restore should succeed");
+        assert!(exec.ok);
+
+        assert_eq!(
+            fs::read_to_string(workspace.join("main.rs")).unwrap(),
+            "fn main() { println!(\"v2\"); }\n",
+            "main.rs should be restored to checkpoint content"
+        );
+        assert!(
+            !workspace.join("new_file.txt").exists(),
+            "untracked file should be removed after restore"
+        );
+        assert!(
+            !workspace.join(".git").exists(),
+            "no .git file should exist after restore"
+        );
+        assert!(
+            workspace.join(".CodePapr/git/.git").is_dir(),
+            "shadow repo should be intact"
+        );
+
+        let restore_file = git_restore_files_impl(&workspace, &["main.rs".to_string()], None);
+        assert!(restore_file.ok, "git_restore_files should succeed: {}", restore_file.message);
+
+        restore.undo().expect("undo should work");
+
+        let snapshots = engine.list(10);
+        assert!(snapshots.len() >= 2, "should have at least 2 snapshots");
 
         fs::remove_dir_all(&workspace).ok();
     }

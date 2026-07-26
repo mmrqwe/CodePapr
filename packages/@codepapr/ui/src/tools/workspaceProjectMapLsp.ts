@@ -53,6 +53,8 @@ export interface LspConnectionHandle {
   languageId: string;
   workspacePath: string;
   acquiredAt: number;
+  lastUsedAt: number;
+  refCount: number;
   activeDocuments: Set<string>;
 }
 
@@ -60,6 +62,7 @@ export interface LspConnectionPool {
   acquire(languageId: string, workspacePath: string): Promise<LspConnectionHandle>;
   release(handle: LspConnectionHandle): void;
   closeAll(): Promise<void>;
+  closeWorkspace?(workspacePath: string): Promise<void>;
 }
 
 // 全局 LSP 连接池实例
@@ -72,6 +75,8 @@ class GlobalLspConnectionPool implements LspConnectionPool {
     const key = `${languageId}:${workspacePath}`;
     let handle = this.connections.get(key);
     if (handle) {
+      handle.lastUsedAt = Date.now();
+      handle.refCount += 1;
       return handle;
     }
 
@@ -80,24 +85,28 @@ class GlobalLspConnectionPool implements LspConnectionPool {
       languageId,
       workspacePath,
       acquiredAt: Date.now(),
+      lastUsedAt: Date.now(),
+      refCount: 1,
       activeDocuments: new Set(),
     };
     this.connections.set(key, handle);
     this.poolSize++;
 
-    // 如果连接池满了，停止并移除最早的连接，避免被淘汰的后端 LSP 进程变成孤儿
+    // 如果连接池满了，停止并移除「最久未使用且当前空闲」的连接，避免被淘汰的后端 LSP 进程变成孤儿，
+    // 同时绝不淘汰仍有 in-flight 请求（refCount>0）的连接，否则会在请求进行中杀掉其语言服务器。
     if (this.poolSize > this.maxPoolSize) {
-      let oldestKey: string | null = null;
+      let evictKey: string | null = null;
       let oldestTime = Infinity;
       for (const [k, v] of this.connections.entries()) {
-        if (v.acquiredAt < oldestTime) {
-          oldestTime = v.acquiredAt;
-          oldestKey = k;
+        if (v.refCount > 0) continue;
+        if (v.lastUsedAt < oldestTime) {
+          oldestTime = v.lastUsedAt;
+          evictKey = k;
         }
       }
-      if (oldestKey) {
-        const evicted = this.connections.get(oldestKey);
-        this.connections.delete(oldestKey);
+      if (evictKey) {
+        const evicted = this.connections.get(evictKey);
+        this.connections.delete(evictKey);
         this.poolSize--;
         if (evicted) {
           await this.shutdownConnection(evicted);
@@ -108,8 +117,10 @@ class GlobalLspConnectionPool implements LspConnectionPool {
     return handle;
   }
 
-  release(_handle: LspConnectionHandle): void {
-    // 保持连接在池中，下次可以复用
+  release(handle: LspConnectionHandle): void {
+    // 保持连接在池中，下次可以复用；仅递减引用计数并刷新最近使用时间。
+    handle.refCount = Math.max(0, handle.refCount - 1);
+    handle.lastUsedAt = Date.now();
   }
 
   private async shutdownConnection(handle: LspConnectionHandle): Promise<void> {
@@ -131,6 +142,15 @@ class GlobalLspConnectionPool implements LspConnectionPool {
       });
     } catch {
       // 忽略：进程可能已经退出
+    }
+  }
+
+  async closeWorkspace(workspacePath: string): Promise<void> {
+    for (const [key, handle] of [...this.connections.entries()]) {
+      if (handle.workspacePath !== workspacePath) continue;
+      this.connections.delete(key);
+      this.poolSize = Math.max(0, this.poolSize - 1);
+      await this.shutdownConnection(handle);
     }
   }
 
@@ -338,14 +358,14 @@ async function loadProjectMapSymbolsFromLsp(
     return [];
   } finally {
     if (opened) {
-      // 如果有连接池，不立即关闭文档，保持复用
-      if (!connectionPool) {
-        await invoke<boolean>('lsp_close_document', {
-          workspacePath,
-          languageId,
-          relativePath,
-        }).catch(() => undefined);
-      }
+      // 连接池复用的是「语言服务器」而非「已打开的文档」：documentSymbol 是一次性请求，
+      // 读取完符号后立即关闭文档，避免数百个文件长期挂在语言服务器上占用内存。
+      handle?.activeDocuments.delete(relativePath);
+      await invoke<boolean>('lsp_close_document', {
+        workspacePath,
+        languageId,
+        relativePath,
+      }).catch(() => undefined);
       // 释放连接
       if (handle) {
         connectionPool?.release(handle);
@@ -358,7 +378,8 @@ export async function resolveProjectMapSymbolOverrides(
   workspacePath: string,
   fileContents: Record<string, ProjectMapFileContent>,
   maxSymbols: number,
-  concurrencyLimit: number = 5
+  concurrencyLimit: number = 5,
+  isCancelled?: () => boolean
 ): Promise<Record<string, WorkspaceMapSymbolSummary[]>> {
   const overrides: Record<string, WorkspaceMapSymbolSummary[]> = {};
 
@@ -373,8 +394,10 @@ export async function resolveProjectMapSymbolOverrides(
 
   // 分批并发处理，避免同时请求太多 LSP 连接
   for (let i = 0; i < lspSupportedFiles.length; i += concurrencyLimit) {
+    if (isCancelled?.()) break;
     const batch = lspSupportedFiles.slice(i, i + concurrencyLimit);
     const batchPromises = batch.map(async ({ path, languageId, content }) => {
+      if (isCancelled?.()) return { path, symbols: [] as WorkspaceMapSymbolSummary[] };
       const symbols = await loadProjectMapSymbolsFromLsp(
         workspacePath,
         path,
@@ -395,162 +418,4 @@ export async function resolveProjectMapSymbolOverrides(
   }
 
   return overrides;
-}
-
-// ============= LSP ProjectGraph 增强器 =============
-
-export interface LspSymbolReference {
-  filePath: string;
-  line: number;
-  character: number;
-  fromSymbol?: string;
-  toSymbol?: string;
-}
-
-export interface LspInheritanceRelation {
-  fromSymbol: string;
-  toSymbol: string;
-  kind: 'extends' | 'implements';
-  toFilePath?: string;
-}
-
-export interface LspProjectGraphEnhancer {
-  enhanceReferences(
-    filePath: string,
-    content: string,
-    symbols: Array<{ name: string; line: number; kind: string }>
-  ): Promise<LspSymbolReference[]>;
-  enhanceInheritance(
-    filePath: string,
-    content: string,
-    symbols: Array<{ name: string; line: number; kind: string }>
-  ): Promise<LspInheritanceRelation[]>;
-}
-
-// 创建 LSP 增强器
-export function createLspProjectGraphEnhancer(
-  workspacePath: string,
-  _connectionPool: LspConnectionPool = globalLspPool
-): LspProjectGraphEnhancer {
-  return {
-    async enhanceReferences(filePath, content, symbols) {
-      const languageId = lspLanguageFromPath(filePath);
-      if (!languageId || !describeLspSupport(languageId) || symbols.length === 0) {
-        return [];
-      }
-
-      try {
-        await invoke('lsp_open_document', {
-          workspacePath,
-          languageId,
-          relativePath: filePath,
-          content,
-          version: 1,
-        });
-
-        const refPromises = symbols.map(async (symbol) => {
-          try {
-            const requestResult = await invoke<LspRequestEnvelope<unknown>>('lsp_request', {
-              workspacePath,
-              languageId,
-              method: 'textDocument/references',
-              params: {
-                textDocument: { uri: workspaceFileUri(workspacePath, filePath) },
-                position: { line: Math.max(0, symbol.line - 1), character: 0 },
-                context: { includeDeclaration: false },
-              },
-            });
-
-            const result = requestResult.message?.result;
-            const symbolRefs: LspSymbolReference[] = [];
-            if (Array.isArray(result)) {
-              for (const ref of result) {
-                if (ref && typeof ref === 'object' && 'uri' in ref && 'range' in ref) {
-                  const uri = ref.uri;
-                  const range = ref.range;
-                  if (uri && range?.start?.line != null) {
-                    const refFilePath = uri.startsWith('file://')
-                      ? decodeURIComponent(uri.slice(7))
-                      : uri;
-                    let relativeRefPath = refFilePath;
-                    if (relativeRefPath.startsWith(workspacePath)) {
-                      relativeRefPath = relativeRefPath.slice(workspacePath.length);
-                      if (relativeRefPath.startsWith('/') || relativeRefPath.startsWith('\\')) {
-                        relativeRefPath = relativeRefPath.slice(1);
-                      }
-                    }
-                    symbolRefs.push({
-                      filePath: relativeRefPath,
-                      line: range.start.line + 1,
-                      character: range.start.character ?? 0,
-                      fromSymbol: symbol.name,
-                    });
-                  }
-                }
-              }
-            }
-            return symbolRefs;
-          } catch {
-            return [];
-          }
-        });
-
-        const results = await Promise.all(refPromises);
-        return results.flat();
-      } catch {
-        return [];
-      } finally {
-        await invoke('lsp_close_document', {
-          workspacePath,
-          languageId,
-          relativePath: filePath,
-        }).catch(() => {});
-      }
-    },
-
-    async enhanceInheritance(filePath, content, symbols) {
-      const languageId = lspLanguageFromPath(filePath);
-      if (!languageId || !describeLspSupport(languageId)) {
-        return [];
-      }
-
-      const classSymbols = symbols.filter((s) => ['class', 'interface', 'struct'].includes(s.kind));
-      if (classSymbols.length === 0) return [];
-
-      try {
-        await invoke('lsp_open_document', {
-          workspacePath,
-          languageId,
-          relativePath: filePath,
-          content,
-          version: 1,
-        });
-
-        const typeDefPromises = classSymbols.map(async (symbol) => {
-          try {
-            await invoke<LspRequestEnvelope<unknown>>('lsp_request', {
-              workspacePath,
-              languageId,
-              method: 'textDocument/typeDefinition',
-              params: {
-                textDocument: { uri: workspaceFileUri(workspacePath, filePath) },
-                position: { line: Math.max(0, symbol.line - 1), character: 0 },
-              },
-            });
-          } catch { /* skip failed go-to-definition */ }
-        });
-
-        await Promise.all(typeDefPromises);
-        return [];
-      } catch {
-        return [];
-      } finally {
-        await invoke('lsp_close_document', {
-          workspacePath,
-          languageId,
-          relativePath: filePath,
-        }).catch(() => {});
-      }
-    },
-  };
 }

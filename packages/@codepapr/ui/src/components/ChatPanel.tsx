@@ -1447,7 +1447,7 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
   const isConfigured = !settingsError;
   const canSubmit = (!!input.trim() || pendingImages.length > 0 || pendingFiles.length > 0) && !isLoading;
   const visibleMessages = useMemo(
-    () => messages.filter((message) => !message.hidden),
+    () => messages.filter((message) => !message.hidden && !(message.synthetic && message.carryForwardInContext)),
     [messages]
   );
   const tailExecutionProcessGroup = useMemo(
@@ -2518,6 +2518,11 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
                       if (!afterSlash.includes('\n')) {
                         slashDetected = true;
                       }
+                    } else if (value.startsWith('--')) {
+                      const afterDash = value.slice(2);
+                      if (!afterDash.includes('\n')) {
+                        slashDetected = true;
+                      }
                     }
                   }
 
@@ -2529,7 +2534,7 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
                   }
 
                   if (slashDetected) {
-                    setSlashFilter(value.slice(1));
+                    setSlashFilter(value.startsWith('--') ? value.slice(2) : value.slice(1));
                   } else if (atDetected) {
                     setSlashFilter(null);
                   } else {

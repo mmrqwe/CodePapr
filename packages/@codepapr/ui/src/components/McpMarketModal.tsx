@@ -166,12 +166,13 @@ function listingToServerConfig(listing: MarketMCPListing): McpServerConfig {
 
   const isRemote = transport === 'streamable-http' || transport === 'sse';
   const hasRequiredEnv = envLines.some((l) => l.includes('YOUR_') && l.includes('_HERE'));
+  const needsAuth = listing.envVars.some((ev) => ev.isRequired && (ev.isSecret || /key|token|secret|password|auth/i.test(ev.name)));
 
   return normalizeMcpServer({
     id: baseId,
     name: listing.title || listing.name.split('/').pop() || listing.name,
     description: desc,
-    enabled: isRemote && !hasRequiredEnv,
+    enabled: isRemote && !hasRequiredEnv && !needsAuth,
     category: listing.categories[0] || 'custom',
     transport,
     command: listing.command || '',
@@ -332,7 +333,7 @@ function ListingDetail({
   const [previewResult, setPreviewResult] = useState<McpPreviewResult | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
-  const handlePreview = async () => {
+  const handlePreview = useCallback(async () => {
     if (!listing.url || !listing.transport) return;
     setPreviewLoading(true);
     setPreviewError(null);
@@ -345,14 +346,13 @@ function ListingDetail({
     } finally {
       setPreviewLoading(false);
     }
-  };
+  }, [listing.url, listing.transport]);
 
-  // Auto-preview remote servers when detail panel opens
   useEffect(() => {
     if (isRemote && listing.url) {
       void handlePreview();
     }
-  }, [listing.id]);
+  }, [listing.id, isRemote, listing.url, handlePreview]);
 
   const isAuthRequired = previewError && /auth required|unauthorized|401/i.test(previewError);
   const previewDone = !previewLoading && (previewResult || previewError);

@@ -10,6 +10,7 @@ export interface SkillMarketListing {
   sourceRepo: string;
   websiteUrl: string;
   features: string[];
+  isPlugin: boolean;
 }
 
 export interface SkillMarketFetchResult {

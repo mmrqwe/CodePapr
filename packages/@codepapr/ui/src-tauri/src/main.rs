@@ -51,12 +51,13 @@ async fn mcp_list_tools(
 
 #[tauri::command]
 async fn mcp_call_tool(
-    settings: mcp_host::McpSettings,
+    app: tauri::AppHandle,
+    settings: Option<mcp_host::McpSettings>,
     server_id: String,
     tool_name: String,
     arguments: serde_json::Value,
 ) -> Result<mcp_host::McpCallToolResult, String> {
-    mcp_host::call_tool(settings, server_id, tool_name, arguments).await
+    mcp_host::call_tool(Some(app), settings, server_id, tool_name, arguments).await
 }
 
 #[tauri::command]
@@ -69,11 +70,6 @@ async fn mcp_list_status(
 #[tauri::command]
 async fn mcp_disconnect_all() -> Result<usize, String> {
     mcp_host::disconnect_all().await
-}
-
-#[tauri::command]
-async fn mcp_clear_tool_cache() -> Result<usize, String> {
-    Ok(mcp_host::clear_tool_cache().await)
 }
 
 #[tauri::command]
@@ -99,6 +95,19 @@ async fn mcp_disconnect_server(
     server_id: String,
 ) -> Result<usize, String> {
     mcp_host::disconnect_server(settings, server_id).await
+}
+
+#[tauri::command]
+async fn mcp_confirm_response(
+    request_id: String,
+    approved: bool,
+) -> Result<(), String> {
+    mcp_host::resolve_confirmation(request_id, approved).await
+}
+
+#[tauri::command]
+async fn mcp_health_check() -> Result<Vec<String>, String> {
+    Ok(mcp_host::health_check().await)
 }
 
 fn main() {
@@ -218,10 +227,11 @@ fn main() {
             mcp_call_tool,
             mcp_list_status,
             mcp_disconnect_all,
-            mcp_clear_tool_cache,
             mcp_test_server,
             mcp_preview_server,
             mcp_disconnect_server,
+            mcp_confirm_response,
+            mcp_health_check,
             db::load_project_state,
             db::save_project_state,
             db::save_session,
@@ -337,7 +347,6 @@ fn main() {
             papr_runtime::app_storage::papr_storage_delete,
             papr_runtime::app_storage::papr_storage_keys,
             papr_runtime::app_storage::papr_get_manifest,
-            papr_runtime::app_storage::papr_agent_run,
             papr_runtime::app_storage::papr_get_app_settings,
             papr_runtime::app_storage::papr_set_app_settings,
             papr_runtime::services::papr_http_get,

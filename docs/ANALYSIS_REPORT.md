@@ -36,7 +36,7 @@ CodePapr 是一个**本地优先（local-first）的编码 Agent 运行时**，�
 |---|---|---|
 | DeepSeek 三层前缀缓存 | `ImmutablePrefix` / `AppendOnlyLog` / `VolatileScratch` 分区，最大化命中自动前缀缓存 | 面向 DeepSeek 计费模型做的针对性成本优化，思路清晰，是本项目最具辨识度的架构决策 |
 | ProjectGraph 语义分析 | 13 个 action：overview/lookup/dependency/dead_code/circular_deps/suggest_refactors/test_impact 等 | 功能完整度超过一般"grep + LSP"式代码助手，`suggest_refactors` 甚至能生成"提取函数/移动符号"的具体编辑计划（见 [graphQuery.ts](../packages/@codepapr/core/src/tool/workspace/graphQuery.ts)） |
-| 子代理隔离上下文 | Explore/Scout/Mentor 三个内置子代理，独立 Session + 白名单工具 + 三层超时保护 | 避免主 Agent 上下文被子任务污染，是较成熟的多代理工程模式 |
+| 子代理隔离上下文 | Explore/Scout/Mentor/Verifier 四个内置子代理，独立 Session + 白名单工具 + 三层超时保护 | 避免主 Agent 上下文被子任务污染，是较成熟的多代理工程模式 |
 | TodoList 单工具双模式 | `tasks` 全量覆盖 + `updates` 增量更新，替代旧的三工具设计 | 工具数量精简，减少了 prompt 膨胀，是好的迭代方向 |
 | 角色扮演 + 本地 TTS | GPT-SoVITS 语音克隆、CCv3 角色卡导入导出 | 功能有趣但与"编码 Agent"主线定位有一定距离，见第七节讨论 |
 | Git 深度集成 | 8 个 Git action + 对话级一键回退（`git reset --hard` 到历史 checkpoint） | 对"Agent 写坏代码"的兜底设计到位 |
@@ -48,8 +48,8 @@ CodePapr 是一个**本地优先（local-first）的编码 Agent 运行时**，�
 | Workspace 包数量 | 8（types / common / core / api / db / cli / editor / ui） |
 | TypeScript 文件总数 | 约 233 个（含约 70 个 `*.test.ts` / `*.test.tsx`） |
 | Rust 源文件数量 | 约 53 个（`src-tauri/`，含各模块内联 `tests.rs`） |
-| LLM 可调用工具数 | 26 个合并工具（含 `task` / `todo` 两个动态工具） |
-| 内置子代理 | 3 个（explore / scout / mentor） |
+| LLM 可调用工具数 | 30 个合并工具（含 `task` / `todo` 两个动态工具） |
+| 内置子代理 | 4 个（explore / scout / mentor / verifier） |
 | 文档 | 中英双语（`ARCHITECTURE`、`SETUP`、`USAGE`）+ `PROBLEMS.md` 踩坑记录 |
 
 ---
@@ -88,7 +88,7 @@ CodePapr 是一个**本地优先（local-first）的编码 Agent 运行时**，�
 
 ### 2.5 工具系统设计：合并式 Action 是好的取舍
 
-26 个工具里有 7 个通过 `action` 枚举复用同一个工具入口（如 `git` 承担 status/diff/log/branch/stage/commit/restore/reset 八个动作），这种设计有效控制了暴露给 LLM 的工具数量，减少了系统提示词膨胀，同时通过 `enum` 约束降低了 LLM 传错 action 的概率。`ToolRegistry` 统一注册并在冻结后计算 hash 保证缓存一致性，这个设计与"最大化 DeepSeek 前缀缓存命中"的项目目标是自洽的。
+30 个工具里有 7 个通过 `action` 枚举复用同一个工具入口（如 `git` 承担 status/diff/log/branch/stage/commit/restore/reset 八个动作），这种设计有效控制了暴露给 LLM 的工具数量，减少了系统提示词膨胀，同时通过 `enum` 约束降低了 LLM 传错 action 的概率。`ToolRegistry` 统一注册并在冻结后计算 hash 保证缓存一致性，这个设计与"最大化 DeepSeek 前缀缓存命中"的项目目标是自洽的。
 
 ---
 

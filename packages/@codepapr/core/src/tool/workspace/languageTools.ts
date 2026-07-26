@@ -1,6 +1,8 @@
 import type { WorkspaceHost } from './host';
 import {
   planProjectGraphRename,
+  computeRenameEditsForContent,
+  applyRenameEditsToContent,
   type ProjectGraphRenameParams,
 } from './graphQuery';
 
@@ -32,6 +34,7 @@ export interface WorkspaceCodeOperationResult {
   appliedEdits: number;
   message: string;
   actionTitle?: string;
+  failedFiles?: string[];
 }
 
 interface LspPosition {
@@ -84,7 +87,9 @@ function normalizeAbsolutePath(value: string): string {
 function workspaceFileUri(workspacePath: string, relativePath: string): string {
   const workspace = normalizeAbsolutePath(workspacePath);
   const relative = normalizePath(relativePath).replace(/^\.\//, '');
-  return encodeURI(`file://${workspace}/${relative}`).replace(/#/g, '%23');
+  const fullPath = `${workspace}/${relative}`;
+  const prefix = /^[A-Za-z]:\//.test(fullPath) ? 'file:///' : 'file://';
+  return encodeURI(`${prefix}${fullPath}`).replace(/[?#]/g, (ch) => (ch === '?' ? '%3F' : '%23'));
 }
 
 function relativePathFromFileUri(workspacePath: string, uri: string | undefined): string | null {
@@ -120,6 +125,12 @@ function toLspPosition(line: number, column?: number): LspPosition {
   };
 }
 
+// 将 LSP 位置转换为 JS 字符串偏移。LSP 的 character 以「编码单元」计，具体编码由客户端与服务器
+// 在 initialize 阶段通过 general.positionEncodings 协商。本项目的 Rust 客户端【没有】声明支持
+// utf-8/utf-32（见 src-tauri/src/lsp.rs 的 initialize capabilities），因此服务器一律回退到规范默认的
+// UTF-16；而 JS 字符串索引恰好就是 UTF-16 编码单元，故这里直接用字符串下标换算是正确的。
+// 注意：若将来在 Rust 侧加入 positionEncodings 协商（如支持 utf-8），必须同步在此按协商结果转换 character，
+// 否则含非 ASCII 字符（CJK/emoji）的文件会出现偏移错位。
 function positionToOffset(content: string, position: LspPosition): number {
   const targetLine = Math.max(0, position.line);
   const targetCharacter = Math.max(0, position.character);
@@ -139,13 +150,19 @@ function positionToOffset(content: string, position: LspPosition): number {
 }
 
 function applyTextEdits(content: string, edits: readonly LspTextEdit[]): { content: string; appliedEdits: number } {
-  const normalized = [...edits]
-    .map((edit) => ({
+  const normalized = edits
+    .map((edit, index) => ({
       edit,
+      index,
       startOffset: positionToOffset(content, edit.range.start),
       endOffset: positionToOffset(content, edit.range.end),
     }))
-    .sort((left, right) => right.startOffset - left.startOffset || right.endOffset - left.endOffset);
+    .sort(
+      (left, right) =>
+        right.startOffset - left.startOffset ||
+        right.endOffset - left.endOffset ||
+        right.index - left.index,
+    );
 
   let nextContent = content;
   for (const item of normalized) {
@@ -201,7 +218,25 @@ function normalizeLocations(workspacePath: string, result: unknown): WorkspaceSy
     if (locations.length >= MAX_LOCATIONS) break;
   }
 
-  return locations.sort((left, right) => `${left.relativePath}:${left.line}:${left.column}`.localeCompare(`${right.relativePath}:${right.line}:${right.column}`));
+  return locations.sort((left, right) => {
+    if (left.relativePath !== right.relativePath) {
+      return left.relativePath < right.relativePath ? -1 : 1;
+    }
+    if (left.line !== right.line) return left.line - right.line;
+    return left.column - right.column;
+  });
+}
+
+const LSP_REQUEST_TIMEOUT_MS = 30_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} 超时（${ms}ms）。`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  }) as Promise<T>;
 }
 
 async function requestLanguageService<TResult>(
@@ -219,17 +254,21 @@ async function requestLanguageService<TResult>(
     maxBytes: 1_000_000,
   });
 
-  return await host.languageService.request<TResult>({
-    relativePath: args.relativePath,
-    languageId: args.languageId,
+  return await withTimeout(
+    host.languageService.request<TResult>({
+      relativePath: args.relativePath,
+      languageId: args.languageId,
+      method,
+      content: file.content,
+      params: {
+        textDocument: { uri: workspaceFileUri(host.workspacePath, args.relativePath) },
+        position: toLspPosition(args.line, args.column),
+        ...params,
+      },
+    }),
+    LSP_REQUEST_TIMEOUT_MS,
     method,
-    content: file.content,
-    params: {
-      textDocument: { uri: workspaceFileUri(host.workspacePath, args.relativePath) },
-      position: toLspPosition(args.line, args.column),
-      ...params,
-    },
-  });
+  );
 }
 
 function unavailableNavigation(message: string): WorkspaceNavigationResult {
@@ -258,11 +297,15 @@ export async function requestWorkspaceSymbolDefinition(
     return unavailableNavigation('当前运行时没有可用的定义跳转能力。');
   }
 
-  const result = await requestLanguageService<unknown>(host, args, 'textDocument/definition', {});
-  return {
-    available: true,
-    locations: normalizeLocations(host.workspacePath, result),
-  };
+  try {
+    const result = await requestLanguageService<unknown>(host, args, 'textDocument/definition', {});
+    return {
+      available: true,
+      locations: normalizeLocations(host.workspacePath, result),
+    };
+  } catch (error) {
+    return unavailableNavigation(error instanceof Error ? error.message : '定义跳转失败。');
+  }
 }
 
 export async function requestWorkspaceSymbolReferences(
@@ -273,15 +316,19 @@ export async function requestWorkspaceSymbolReferences(
     return unavailableNavigation('当前运行时没有可用的引用查找能力。');
   }
 
-  const result = await requestLanguageService<unknown>(host, args, 'textDocument/references', {
-    context: {
-      includeDeclaration: args.includeDeclaration !== false,
-    },
-  });
-  return {
-    available: true,
-    locations: normalizeLocations(host.workspacePath, result),
-  };
+  try {
+    const result = await requestLanguageService<unknown>(host, args, 'textDocument/references', {
+      context: {
+        includeDeclaration: args.includeDeclaration !== false,
+      },
+    });
+    return {
+      available: true,
+      locations: normalizeLocations(host.workspacePath, result),
+    };
+  } catch (error) {
+    return unavailableNavigation(error instanceof Error ? error.message : '引用查找失败。');
+  }
 }
 
 function collectWorkspaceEditChanges(
@@ -293,12 +340,17 @@ function collectWorkspaceEditChanges(
     return changes;
   }
 
-  for (const [uri, edits] of Object.entries(edit.changes ?? {})) {
-    const relativePath = relativePathFromFileUri(workspacePath, uri);
-    if (!relativePath || !Array.isArray(edits) || edits.length === 0) {
-      continue;
+  const hasDocumentChanges = Array.isArray(edit.documentChanges) && edit.documentChanges.length > 0;
+
+  if (!hasDocumentChanges) {
+    for (const [uri, edits] of Object.entries(edit.changes ?? {})) {
+      const relativePath = relativePathFromFileUri(workspacePath, uri);
+      if (!relativePath || !Array.isArray(edits) || edits.length === 0) {
+        continue;
+      }
+      changes.set(relativePath, edits);
     }
-    changes.set(relativePath, edits);
+    return changes;
   }
 
   for (const change of edit.documentChanges ?? []) {
@@ -334,21 +386,37 @@ async function applyWorkspaceEdit(host: WorkspaceHost, edit: LspWorkspaceEdit | 
   }
 
   const changedFiles: string[] = [];
+  const failedFiles: string[] = [];
   let appliedEdits = 0;
   for (const [relativePath, edits] of groupedChanges.entries()) {
-    const current = await host.readTextFile({ relativePath, maxBytes: 1_000_000 });
-    const next = applyTextEdits(current.content, edits);
-    await host.writeTextFile({ relativePath, content: next.content });
-    changedFiles.push(relativePath);
-    appliedEdits += next.appliedEdits;
+    try {
+      const current = await host.readTextFile({ relativePath, maxBytes: 1_000_000 });
+      if (current.truncatedByBytes) {
+        failedFiles.push(relativePath);
+        continue;
+      }
+      const next = applyTextEdits(current.content, edits);
+      await host.writeTextFile({ relativePath, content: next.content });
+      changedFiles.push(relativePath);
+      appliedEdits += next.appliedEdits;
+    } catch {
+      failedFiles.push(relativePath);
+    }
   }
+
+  const failedNote = failedFiles.length > 0
+    ? `（${failedFiles.length} 个文件未能应用：${failedFiles.join('、')}）`
+    : '';
 
   return {
     available: true,
-    ok: true,
+    ok: changedFiles.length > 0,
     changedFiles,
     appliedEdits,
-    message: `已应用 ${appliedEdits} 处语言服务改动。`,
+    message: changedFiles.length > 0
+      ? `已应用 ${appliedEdits} 处语言服务改动。${failedNote}`
+      : `没有可应用的改动。${failedNote}`,
+    ...(failedFiles.length > 0 ? { failedFiles } : {}),
   };
 }
 
@@ -418,9 +486,12 @@ export async function performWorkspaceRename(
     newName: args.newName,
   });
   const result = await applyWorkspaceEdit(host, edit);
+  const failureNote = result.failedFiles?.length
+    ? `（${result.failedFiles.length} 个文件未能应用：${result.failedFiles.join('、')}）`
+    : '';
   return {
     ...result,
-    message: result.ok ? `已重命名符号为 ${args.newName}。` : result.message,
+    message: result.ok ? `已重命名符号为 ${args.newName}。${failureNote}` : result.message,
   };
 }
 
@@ -542,10 +613,18 @@ export async function performWorkspaceFixDiagnostics(
   host: WorkspaceHost,
   args: WorkspaceLanguagePositionArgs
 ): Promise<WorkspaceCodeOperationResult> {
-  return await performWorkspaceApplyCodeAction(host, {
+  const preferred = await performWorkspaceApplyCodeAction(host, {
     ...args,
     kind: 'quickfix',
     preferredOnly: true,
+  });
+  if (preferred.ok) {
+    return preferred;
+  }
+  return await performWorkspaceApplyCodeAction(host, {
+    ...args,
+    kind: 'quickfix',
+    preferredOnly: false,
   });
 }
 
@@ -553,12 +632,12 @@ export async function performProjectGraphRename(
   host: WorkspaceHost,
   args: ProjectGraphRenameParams,
 ): Promise<WorkspaceCodeOperationResult> {
-  const { edits, symbol } = planProjectGraphRename(args);
+  const plan = planProjectGraphRename(args);
 
-  if (!symbol) {
+  if (!plan.symbol) {
     return { available: true, ok: false, changedFiles: [], appliedEdits: 0, message: '未找到要重命名的符号。' };
   }
-  if (edits.size === 0) {
+  if (plan.targetFiles.length === 0) {
     return { available: true, ok: false, changedFiles: [], appliedEdits: 0, message: '未找到该符号的引用位置。' };
   }
   if (!host.writeTextFile) {
@@ -566,35 +645,37 @@ export async function performProjectGraphRename(
   }
 
   const changedFiles: string[] = [];
+  const skippedFiles: string[] = [];
   let appliedEdits = 0;
 
-  for (const [relativePath, fileEdits] of edits) {
-    const readResult = await host.readTextFile({ relativePath, maxBytes: 500_000 });
+  for (const relativePath of plan.targetFiles) {
+    const readResult = await host.readTextFile({ relativePath, maxBytes: 1_000_000 });
+    if (readResult.truncatedByBytes) {
+      skippedFiles.push(relativePath);
+      continue;
+    }
     const content = readResult.content;
     if (!content) continue;
-    const lines = content.split(/\r?\n/);
-    const sortedEdits = fileEdits.sort((a, b) => {
-      if (a.line !== b.line) return b.line - a.line;
-      return b.startColumn - a.startColumn;
-    });
-
-    for (const edit of sortedEdits) {
-      if (edit.line < 1 || edit.line > lines.length) continue;
-      const lineIdx = edit.line - 1;
-      const line = lines[lineIdx];
-      lines[lineIdx] = line.slice(0, edit.startColumn) + edit.replacement + line.slice(edit.endColumn);
-      appliedEdits++;
-    }
-
-    await host.writeTextFile({ relativePath, content: lines.join('\n') });
+    const edits = computeRenameEditsForContent(content, plan.oldName, args.newName);
+    if (edits.length === 0) continue;
+    const next = applyRenameEditsToContent(content, edits);
+    if (next === content) continue;
+    await host.writeTextFile({ relativePath, content: next });
     changedFiles.push(relativePath);
+    appliedEdits += edits.length;
   }
+
+  const skippedNote = skippedFiles.length > 0
+    ? `（跳过 ${skippedFiles.length} 个过大而被截断的文件，避免数据丢失）`
+    : '';
 
   return {
     available: true,
-    ok: true,
+    ok: changedFiles.length > 0,
     changedFiles,
     appliedEdits,
-    message: `已将 ${changedFiles.length} 个文件中的符号重命名为 ${args.newName}（${appliedEdits} 处引用）。`,
+    message: changedFiles.length > 0
+      ? `已将 ${changedFiles.length} 个文件中的符号重命名为 ${args.newName}（${appliedEdits} 处引用）。${skippedNote}`
+      : `没有可安全重命名的文件。${skippedNote}`,
   };
 }

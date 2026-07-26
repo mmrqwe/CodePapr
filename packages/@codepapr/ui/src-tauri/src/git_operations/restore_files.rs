@@ -1,5 +1,5 @@
 use crate::snapshot::types::GitOperationResult;
-use super::open_repo;
+use super::{open_repo, validate_git_ref};
 
 pub fn git_restore_files_impl(
     workspace: &std::path::Path,
@@ -14,7 +14,11 @@ pub fn git_restore_files_impl(
     };
 
     let source_ref = source.unwrap_or("HEAD");
-
+    if let Err(e) = validate_git_ref(source_ref, "source") {
+        return GitOperationResult {
+            ok: false, action: "restore".to_string(), message: e, backup_ref: None,
+        };
+    }
     // 优先用 revparse_single 解析 ref，支持 "HEAD"、分支名、tag、SHA 等所有 git 引用语法。
     // 旧实现只尝试 Oid::from_str + refs/heads/{name}，导致默认 "HEAD" 会去找
     // refs/heads/HEAD（不存在），使整个 restore 功能在默认参数下一直报错。

@@ -128,39 +128,4 @@ export class CacheValidator {
 
     return result;
   }
-
-  /**
-   * 估算节省的成本（DeepSeek 缓存命中按 10% 计费）
-   */
-  estimateCostSavings(validation: ICacheValidation): {
-    actualCost: number;
-    estimatedFullCost: number;
-    savings: number;
-    savingsRate: number;
-  } {
-    // DeepSeek 价格（每百万 token，单位 USD）
-    const PRICE_INPUT = 0.27;
-    const PRICE_CACHE_HIT = 0.027; // 10% of input
-    const PRICE_OUTPUT = 1.1;
-
-    const actualCost =
-      (validation.cacheReadTokens / 1_000_000) * PRICE_CACHE_HIT +
-      (validation.newInputTokens / 1_000_000) * PRICE_INPUT +
-      (validation.outputTokens / 1_000_000) * PRICE_OUTPUT;
-
-    const estimatedFullCost =
-      ((validation.cacheReadTokens + validation.newInputTokens) / 1_000_000) *
-        PRICE_INPUT +
-      (validation.outputTokens / 1_000_000) * PRICE_OUTPUT;
-
-    const savings = estimatedFullCost - actualCost;
-    const savingsRate = estimatedFullCost > 0 ? savings / estimatedFullCost : 0;
-
-    return {
-      actualCost,
-      estimatedFullCost,
-      savings,
-      savingsRate,
-    };
-  }
 }

@@ -84,17 +84,16 @@ function computeArgs(pkg?: RegistryPackage): string {
     parts.push('run');
     parts.push(pkg.identifier);
   } else if (pkg.runtimeHint === 'uvx' || pkg.registryType === 'pypi') {
+    parts.push(pkg.identifier);
     if (pkg.packageArguments?.length) {
       parts.push(...pkg.packageArguments);
-    } else {
-      parts.push(pkg.identifier);
     }
   } else {
     parts.push('-y');
     parts.push(pkg.identifier);
-  }
-  if (pkg.packageArguments?.length && pkg.runtimeHint !== 'uvx') {
-    parts.push(...pkg.packageArguments);
+    if (pkg.packageArguments?.length) {
+      parts.push(...pkg.packageArguments);
+    }
   }
   return parts.join(' ');
 }
@@ -144,7 +143,15 @@ export async function fetchOfficialRegistry(cursor?: string): Promise<{
     if (metas.length === 0) return true;
     return metas.some((m) => m.isLatest === true);
   });
-  const listings = latestOnly.map(mapOfficialRegistry);
+  const listings = latestOnly
+    .map((entry) => {
+      try {
+        return mapOfficialRegistry(entry);
+      } catch {
+        return null;
+      }
+    })
+    .filter((item): item is MarketMCPListing => item !== null);
   const result = {
     listings,
     pagination: {
@@ -154,7 +161,7 @@ export async function fetchOfficialRegistry(cursor?: string): Promise<{
     },
   };
 
-  await cacheSet(cacheKey(ck), result, 5 * 60 * 1000);
+  await cacheSet(cacheKey(ck), result, 30 * 60 * 1000);
   return result;
 }
 

@@ -794,9 +794,14 @@ const ProjectGraphKnowledgeGraph = forwardRef<
       const nodeModel = (e as { target?: { data?: G6NodeData } }).target?.data;
 
       if (nodeModel) {
+        // e.canvas.x/y 是相对于 canvas 元素的坐标，而 tooltip 绝对定位在外层 relative 容器中；
+        // canvas 容器位于统计栏下方，需加上其在外层容器中的偏移，否则 tooltip 会整体向上错位。
+        const containerEl = containerRef.current;
+        const offsetX = containerEl?.offsetLeft ?? 0;
+        const offsetY = containerEl?.offsetTop ?? 0;
         setTooltipInfo({
-          x: (canvasPos?.x ?? 0) + 12,
-          y: (canvasPos?.y ?? 0) - 10,
+          x: (canvasPos?.x ?? 0) + offsetX + 12,
+          y: (canvasPos?.y ?? 0) + offsetY - 10,
           label: nodeModel.fullLabel ?? nodeModel.label,
           fullPath: nodeModel.fullPath,
           nodeKind: nodeModel.nodeKind,
@@ -839,6 +844,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
 
     graph.render().catch((err) => {
       console.error('G6 render error:', err);
+      setGraphError(err instanceof Error ? err.message : String(err));
     });
 
     graphRef.current = graph;
@@ -919,7 +925,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
         }
       }
     } catch { /* ignore */ }
-  }, [searchQuery]);
+  }, [searchQuery, projectGraph, viewModeKey]);
 
   const summary = projectGraph.summary;
 

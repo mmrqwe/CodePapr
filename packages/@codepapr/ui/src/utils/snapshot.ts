@@ -189,11 +189,13 @@ export async function gitBranchCheckout(
   branchName: string,
   create?: boolean,
   createIfMissing?: boolean,
+  startPoint?: string,
 ): Promise<GitOperationResult> {
   return invoke<GitOperationResult>('git_branch_checkout', {
     workspacePath, branchName,
     create: create ?? null,
     createIfMissing: createIfMissing ?? null,
+    startPoint: startPoint ?? null,
   });
 }
 

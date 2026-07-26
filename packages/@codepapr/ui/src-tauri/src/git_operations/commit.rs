@@ -22,6 +22,14 @@ pub fn git_commit_impl(
         },
     };
 
+    let trimmed_msg = message.trim();
+    if trimmed_msg.is_empty() {
+        return GitOperationResult {
+            ok: false, action: "commit".to_string(),
+            message: "commit message 不能为空".to_string(), backup_ref: None,
+        };
+    }
+
     if stage_all || !pathspecs.is_empty() {
         // 当仅提交指定 pathspecs（非 stage_all）时，先把 index 重置到 HEAD 的树，
         // 再在同一 index 对象上 stage 指定 pathspecs。这样最终提交的树 = HEAD 内容 +
@@ -30,28 +38,71 @@ pub fn git_commit_impl(
         //
         // 注意：必须在同一个 idx 对象上完成 read_tree + add_path + write，不能委托给
         // git_stage_impl（它会另开 Repository，其 index 对象不反映此处的 read_tree）。
+        //
+        // 任何一步失败都必须显式返回错误，绝不能静默跳过——
+        // 否则残留的 staged 内容会污染本次选择性提交（bug #3 回归）。
         if !stage_all && !pathspecs.is_empty() {
-            let head_tree = repo.head().ok()
-                .and_then(|h| h.target())
-                .and_then(|oid| repo.find_commit(oid).ok())
-                .and_then(|c| c.tree().ok());
-            if let Some(ref tree) = head_tree {
-                if let Ok(mut idx) = repo.index() {
-                    let _ = idx.clear();
-                    if idx.read_tree(tree).is_ok() {
-                        for spec in pathspecs {
-                            let p = std::path::Path::new(spec);
-                            if let Err(e) = idx.add_path(p) {
-                                return GitOperationResult {
-                                    ok: false, action: "commit".to_string(),
-                                    message: format!("add {:?}: {}", spec, e.message()),
-                                    backup_ref: None,
-                                };
-                            }
-                        }
-                        let _ = idx.write();
-                    }
+            let head_oid = match repo.head().ok().and_then(|h| h.target()) {
+                Some(oid) => oid,
+                None => return GitOperationResult {
+                    ok: false, action: "commit".to_string(),
+                    message: "无法获取 HEAD（空仓库？）".to_string(),
+                    backup_ref: None,
+                },
+            };
+            let head_commit = match repo.find_commit(head_oid) {
+                Ok(c) => c,
+                Err(e) => return GitOperationResult {
+                    ok: false, action: "commit".to_string(),
+                    message: format!("find HEAD commit: {}", e.message()),
+                    backup_ref: None,
+                },
+            };
+            let head_tree = match head_commit.tree() {
+                Ok(t) => t,
+                Err(e) => return GitOperationResult {
+                    ok: false, action: "commit".to_string(),
+                    message: format!("HEAD tree: {}", e.message()),
+                    backup_ref: None,
+                },
+            };
+
+            let mut idx = match repo.index() {
+                Ok(idx) => idx,
+                Err(e) => return GitOperationResult {
+                    ok: false, action: "commit".to_string(),
+                    message: format!("index: {}", e.message()), backup_ref: None,
+                },
+            };
+            if let Err(e) = idx.clear() {
+                return GitOperationResult {
+                    ok: false, action: "commit".to_string(),
+                    message: format!("clear index: {}", e.message()), backup_ref: None,
+                };
+            }
+            if let Err(e) = idx.read_tree(&head_tree) {
+                return GitOperationResult {
+                    ok: false, action: "commit".to_string(),
+                    message: format!("read_tree: {}", e.message()), backup_ref: None,
+                };
+            }
+
+            for spec in pathspecs {
+                let p = std::path::Path::new(spec);
+                if let Err(e) = idx.add_path(p) {
+                    return GitOperationResult {
+                        ok: false, action: "commit".to_string(),
+                        message: format!("add {:?}: {}", spec, e.message()),
+                        backup_ref: None,
+                    };
                 }
+            }
+
+            if let Err(e) = idx.write() {
+                return GitOperationResult {
+                    ok: false, action: "commit".to_string(),
+                    message: format!("write index: {}", e.message()), backup_ref: None,
+                };
             }
         } else {
             // stage_all=true 或 pathspecs 为空但 stage_all=true 的路径：复用 git_stage_impl

@@ -21,14 +21,14 @@ fn app_workspaces() -> &'static Mutex<HashMap<String, String>> {
 
 #[tauri::command]
 pub fn register_app_workspace(app_id: String, workspace_path: String) {
-    let mut map = app_workspaces().lock().unwrap();
+    let mut map = app_workspaces().lock().unwrap_or_else(|e| e.into_inner());
     map.insert(app_id.clone(), workspace_path.clone());
     papr_runtime::app_context::register(&app_id, &workspace_path);
 }
 
 #[tauri::command]
 pub fn unregister_app_workspace(app_id: String) {
-    let mut map = app_workspaces().lock().unwrap();
+    let mut map = app_workspaces().lock().unwrap_or_else(|e| e.into_inner());
     map.remove(&app_id);
     papr_runtime::app_context::unregister(&app_id);
     papr_runtime::manifest::clear_manifest(&app_id);
@@ -85,7 +85,7 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
             .unwrap();
     }
 
-    let map = app_workspaces().lock().unwrap();
+    let map = app_workspaces().lock().unwrap_or_else(|e| e.into_inner());
     let workspace = match map.get(app_id) {
         Some(ws) => ws.clone(),
         None => {
@@ -97,9 +97,37 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
     };
     drop(map);
 
-    let full_path = format!("{}/.CodePapr/apps/{}/{}", workspace, app_id, file_path);
+    let app_base = format!("{}/.CodePapr/apps/{}", workspace, app_id);
+    let raw_path = format!("{}/{}", app_base, file_path);
 
-    let content = match fs::read(&full_path) {
+    let canonical_base = match std::path::Path::new(&app_base).canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body("app not found".into())
+                .unwrap();
+        }
+    };
+
+    let canonical_path = match std::path::Path::new(&raw_path).canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body("file not found".into())
+                .unwrap();
+        }
+    };
+
+    if !canonical_path.starts_with(&canonical_base) {
+        return Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body("path traversal blocked".into())
+            .unwrap();
+    }
+
+    let content = match fs::read(&canonical_path) {
         Ok(c) => c,
         Err(_) => {
             return Response::builder()
@@ -139,18 +167,21 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
         let html = String::from_utf8_lossy(&content);
         let mut injected = papr_runtime::sdk_inject::inject_sdk_into_html(&html);
 
+        let mut pre_scripts = String::new();
+        pre_scripts.push_str("<script>window.__PAPR_PARENT_ORIGIN='tauri://localhost';</script>\n");
+
         if let Ok(manifest) = papr_runtime::manifest::get_manifest(app_id) {
             if let Some(port) = manifest.port {
-                let backend_script = format!(
-                    "\n<script>window.__PAPR_BACKEND_URL='http://localhost:{}';</script>",
+                pre_scripts.push_str(&format!(
+                    "<script>window.__PAPR_BACKEND_URL='http://localhost:{}';</script>\n",
                     port
-                );
-                if let Some(pos) = injected.find("__papr_sdk.js") {
-                    if let Some(end) = injected[pos..].find('>') {
-                        let insert_at = pos + end + 1;
-                        injected.insert_str(insert_at, &backend_script);
-                    }
-                }
+                ));
+            }
+        }
+
+        if let Some(pos) = injected.find("__papr_sdk.js") {
+            if let Some(start) = injected[..pos].rfind("<script") {
+                injected.insert_str(start, &pre_scripts);
             }
         }
 

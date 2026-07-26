@@ -4,7 +4,7 @@
 
 **Local-first coding agent runtime. Tauri desktop + CLI automation.**
 
-CodePapr is a local coding agent system built with DeepSeek cache optimization. The main agent orchestrates three built-in sub-agents — **Explore** (code analysis), **Scout** (web search), and **Mentor** (architecture guidance) — with support for custom extensions. File I/O, command execution, Git operations, browser preview, and LSP diagnostics all run locally.
+CodePapr is a local coding agent system built with DeepSeek cache optimization. The main agent orchestrates four built-in sub-agents — **Explore** (code analysis), **Scout** (web search), **Mentor** (architecture guidance), and **Verifier** (Goal acceptance, internal) — with support for custom extensions. File I/O, command execution, Git operations, browser preview, and LSP diagnostics all run locally.
 
 ---
 
@@ -23,7 +23,7 @@ CodePapr is a local coding agent system built with DeepSeek cache optimization. 
 | **ProjectGraph semantic analysis** | Project-level code structure skeleton + symbols + dependency graph, supporting 13 actions including dead code detection, circular dependency checks, and refactoring suggestions |
 | **DeepSeek prefix cache optimization** | Three-layer prompt injection strategy to maximize cache hits and reduce costs |
 | **SEARCH/REPLACE Diff** | Validate before writing, with atomic multi-file patch support |
-| **MCP protocol support** | Integrate external MCP tool servers including DuckDuckGo Search, Postgres, SQLite, and more |
+| **MCP protocol support** | Integrate external MCP tool servers (stdio / SSE / Streamable HTTP); built-in DuckDuckGo Search, Postgres, SQLite presets; MCP marketplace with one-click install from the official registry; per-server permission modes (read-only / read-write / dangerous) and mutating-tool confirmation flow |
 | **Deep Git integration** | 8 Git actions + diff panel + safe rollback with backup ref + undo |
 | **Conversation reset** | One-click reset code and conversation to any point; restore plan preview shows affected files before execution |
 | **Conversation turn navigation** | Right-side turn indicator bar with hover-to-expand panel and click-to-jump |
@@ -100,7 +100,7 @@ Create a `.CodePapr/` directory at the project root:
 | `.CodePapr/AGENTS.md` | Project-wide rules injected into the system prompt of all agents and sub-agents |
 | `.CodePapr/memory.md` | Cross-session project memory; cold-start auto-generated from ProjectGraph, auto-appended by agents, auto-compacted after 200 lines |
 | `.CodePapr/agents/*.md` | Custom sub-agents (YAML frontmatter + Markdown body) |
-| `.CodePapr/skills/*/SKILL.md` | Reusable skills (search strategies, debugging workflows, release checklists) |
+| `.CodePapr/skills/*/SKILL.md` | Reusable skills (search strategies, debugging workflows, release checklists); also supports flat layout `.CodePapr/skills/<name>.md`; skill marketplace with one-click install from GitHub |
 | `.CodePapr/commands/*.md` | Custom prompt templates (invoked with `--name`) |
 
 ### Built-in Commands
@@ -111,7 +111,7 @@ Type `/` to bring up the command palette (`/` format is backward-compatible):
 
 **Fast model (faster, cheaper):** `/search` `/lint` `/clean` `/commit` `/summary` `/build`
 
-**Local (zero tokens):** `/help` `/commands` `/compact` `/goal`
+**Local (zero tokens):** `/help` `/commands` `/compact`
 
 **Autonomous loop (dual-model Worker+Verifier):** `/goal exec:<verify command>` — Launches an autonomous loop where the Worker executes and the Verifier validates against an objective condition, continuing until the condition passes or limits are exhausted. Examples: `/goal exec:npm test`, `/goal fix auth tests | exec:npm test match:"\\d+ passed"`
 
@@ -119,13 +119,14 @@ Commands auto-route by `model` field: commands declaring `model: 'fast'` use the
 
 ## Settings Panel
 
-Five tabs — `General / LLM / Search / Mentor / Advanced`:
+Six tabs — `General / LLM / Search / Mentor / Advanced / App`:
 
 - **General**: Language, debug, license
 - **LLM**: Main model, fast model, temperature, topP, maxTokens, thinking mode, maxToolRounds
 - **Search**: Self-hosted SearXNG search (preferred, with automatic fallback to built-in Bing / Mojeek / Qwant / Wikipedia multi-source aggregation)
 - **Mentor**: Sub-agent selection, custom prompts, sub-agent parameters (temperature/topP/thinking/maxTokens/maxToolRounds/maxDepth), independent Mentor model configuration
 - **Advanced**: Context compression (model/temperature/tokens/context limit/turn count), TodoList max retries, ProjectGraph depth/file limits
+- **App**: .papr app permission management — global default level, Level 3 global toggle, per-app level overrides
 
 See `packages/@codepapr/core/docs/CONFIGURATION.md` for the full parameter reference.
 
@@ -133,9 +134,12 @@ See `packages/@codepapr/core/docs/CONFIGURATION.md` for the full parameter refer
 
 | Agent | Purpose | Model | Tools |
 |-------|---------|-------|-------|
-| **explore** | Read-only code analysis | fast | read, read_image, graph, lsp, diagnostics, time |
-| **scout** | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image, open, time |
+| **explore** | Read-only code analysis | fast | read, read_image, graph, lsp, diagnostics, grep |
+| **scout** | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image |
 | **mentor** | Architecture/algorithm guidance | Configurable model | None |
+| **verifier** | Goal acceptance checker (internal) | fast | None |
+
+> `verifier` is an internal evaluator for the Goal autonomous loop, not exposed to the main Agent's `task` tool.
 
 The main agent dispatches sub-agents via the `task` tool. Each sub-agent has its own **isolated session and blank context**, receiving only the delegated task description — uncontaminated by the main agent's conversation history. Sub-agents have a 5-minute overall timeout and a 90-second per-tool-call timeout.
 

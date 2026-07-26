@@ -55,6 +55,7 @@ export interface ProjectModelTierStats {
 export interface ProjectConversationStats {
   primary: ProjectModelTierStats;
   fast: ProjectModelTierStats;
+  mentor: ProjectModelTierStats;
 }
 
 export interface ProjectStateSnapshot {
@@ -97,6 +98,7 @@ const EMPTY_MODEL_TIER_STATS: ProjectModelTierStats = {
 const EMPTY_CONVERSATION_STATS: ProjectConversationStats = {
   primary: { ...EMPTY_MODEL_TIER_STATS },
   fast: { ...EMPTY_MODEL_TIER_STATS },
+  mentor: { ...EMPTY_MODEL_TIER_STATS },
 };
 
 export function createEmptyProjectState(): ProjectStateSnapshot {
@@ -244,6 +246,7 @@ function parseConversationStats(value: unknown): ProjectConversationStats {
   return {
     primary: parseModelTierStats(value.primary),
     fast: parseModelTierStats(value.fast),
+    mentor: parseModelTierStats(value.mentor),
   };
 }
 
@@ -260,6 +263,7 @@ function migrateCumulativeToConversationStats(cumulative: ProjectCumulativeStats
       rounds: cumulative.rounds,
     },
     fast: { ...EMPTY_MODEL_TIER_STATS },
+    mentor: { ...EMPTY_MODEL_TIER_STATS },
   };
 }
 

@@ -19,6 +19,7 @@ import type {
   GoalRunnerLimits,
   GoalIterationFeedback,
   ConditionResult,
+  ConditionClauseResult,
 } from '@codepapr/types';
 
 export interface WorkerTurnResult {
@@ -121,29 +122,30 @@ export class GoalRunner {
         return this.getState();
       }
 
-        this.state.iteration = iteration + 1;
-        this.state.elapsedMs = elapsed;
-        this.notifyAndPersist();
+      this.state.iteration = iteration + 1;
+      this.state.elapsedMs = elapsed;
+      this.notifyAndPersist();
 
       // ── Worker turn ──────────────────────────────────────────
       const isFeedback = iteration > 0;
-      const workerPrompt = isFeedback
+      // plan-first 跳过第 1 轮评估后，第 2 轮 feedbackHistory 为空，用初始提示
+      const useFeedback = isFeedback && this.state.feedbackHistory.length > 0;
+      const workerPrompt = useFeedback
         ? this.buildFeedbackPrompt()
         : this.buildInitialPrompt();
-        // eslint-disable-next-line no-console
-        console.log('[GoalRunner] iteration', iteration + 1, { isFeedback, promptLength: workerPrompt.length });
+      // eslint-disable-next-line no-console
+      console.log('[GoalRunner] iteration', iteration + 1, { isFeedback, promptLength: workerPrompt.length });
 
-        let workerResult: WorkerTurnResult;
-        try {
-          // eslint-disable-next-line no-console
+      let workerResult: WorkerTurnResult;
+      try {
+        // eslint-disable-next-line no-console
         console.log('[GoalRunner] calling runWorkerTurn', { iteration: iteration + 1, isFeedback });
-          workerResult = await this.callbacks.runWorkerTurn(workerPrompt, isFeedback);
-          // eslint-disable-next-line no-console
+        workerResult = await this.callbacks.runWorkerTurn(workerPrompt, isFeedback);
+        // eslint-disable-next-line no-console
         console.log('[GoalRunner] runWorkerTurn completed', { iteration: iteration + 1, contentLength: workerResult.content.length, outputTokens: workerResult.outputTokens });
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.error('[GoalRunner] runWorkerTurn failed', err);
-          this.state.status = 'error';
+      } catch (err) {
+        console.error('[GoalRunner] runWorkerTurn failed', err);
+        this.state.status = 'error';
         this.state.error = (err as Error).message;
         this.state.elapsedMs = Date.now() - this.state.startedAt;
         this.notifyAndPersist();
@@ -152,6 +154,15 @@ export class GoalRunner {
 
       this.state.totalOutputTokens += workerResult.outputTokens;
       this.state.elapsedMs = Date.now() - this.state.startedAt;
+
+      // ── plan-first 模式：第 1 轮只规划，跳过评估 ──────────────
+      if (this.limits.planFirst && iteration === 0) {
+        // eslint-disable-next-line no-console
+        console.log('[GoalRunner] plan-first: skipping evaluation for iteration 1');
+        this.state.elapsedMs = Date.now() - this.state.startedAt;
+        this.notifyAndPersist();
+        continue;
+      }
 
       // ── 客观条件评估 ──────────────────────────────────────────
       let conditionResult: ConditionResult;
@@ -179,6 +190,8 @@ export class GoalRunner {
         verdict = {
           verdict: conditionResult.met ? 'SATISFIED' : 'NOT_MET',
           evidence: 'Verifier 调用失败，降级为仅条件评估',
+          progress: conditionResult.met ? 1 : 0,
+          failureMode: conditionResult.met ? undefined : 'unknown',
         };
       }
       this.state.lastVerdict = verdict;
@@ -236,141 +249,156 @@ export class GoalRunner {
     const isEn = this.lang === 'en';
     const isTw = this.lang === 'zh-TW';
     const isSubjective = this.condition.clauses.length === 0;
+    const maxIter = this.limits.maxIterations;
+    const planFirst = !!this.limits.planFirst;
+    const strictLabel = this.condition.strictness === 'strict'
+      ? (isEn ? 'strict' : isTw ? '嚴格' : '严格')
+      : this.condition.strictness === 'loose'
+      ? (isEn ? 'loose' : isTw ? '寬鬆' : '宽松')
+      : (isEn ? 'normal' : isTw ? '一般' : '一般');
 
     if (isEn) {
-      if (isSubjective) {
-        return `You are working toward a goal that will be verified by an AI reviewer.
-
-## Goal
-${goalText}
-
-## How This Works
-1. Work toward the goal using your tools (read, write, edit, exec, web_search, browser, etc.)
-2. When you stop, an AI verifier reviews your execution transcript to judge if the goal is met
-3. If not met, you'll receive feedback about what's still needed
-4. Continue working — do NOT repeat approaches that already failed
-
-## Critical Rules
-- Do NOT declare success without doing real work — the verifier checks your actual tool calls
-- Use your tools to actually make changes, don't just talk about what you would do
-- Each iteration the verifier reviews what you actually did — make it count
-- **IMPORTANT: As you work, explain to the user what you're doing, what you found, and what you're fixing. Don't work silently.**
-
-When you finish a round, summarize what you accomplished and what's left to do. The user is watching this conversation.`;
-      }
-      return `You are working toward a goal that will be objectively verified by a machine.
-
-## Goal
-${goalText}
-
-## Verification Condition
-${this.condition.humanReadable}
-
-## How This Works
-1. Work toward the goal using your tools (read, write, edit, exec, etc.)
-2. When you stop, the system runs the verification command automatically
-3. If verification fails, you'll receive detailed feedback about what's still broken
-4. Fix the issues and try again — do NOT repeat the same approach that already failed
-
-## Critical Rules
-- Do NOT declare success based on your own judgment — the verification command is the only judge
-- Do NOT fabricate or assume test output — actually run the commands
-- If a command fails, read the error carefully before changing your approach
-- Each iteration you'll see the real verification output — use it to guide your next steps
-- **IMPORTANT: As you work, explain to the user what you're doing, what you found, and what you're fixing. Don't work silently.**
-
-When you finish a round, summarize what you accomplished. The user is watching this conversation.`;
+      return this.buildInitialPromptEn(goalText, isSubjective, maxIter, strictLabel, planFirst);
     }
 
-    const instructions = (() => {
-      if (isSubjective) {
-        return isTw
-          ? `你正在朝一個由 AI 審查者驗收的目標工作。
+    return this.buildInitialPromptZh(goalText, isSubjective, maxIter, strictLabel, planFirst, isTw);
+  }
 
-## 目標
-${goalText}
+  private buildInitialPromptEn(
+    goalText: string,
+    isSubjective: boolean,
+    maxIter: number,
+    strictLabel: string,
+    planFirst: boolean,
+  ): string {
+    const verificationSection = isSubjective
+      ? `## Verification
+An AI verifier will review your tool-call transcript after each round. It judges based on what you ACTUALLY did, not what you say you'll do.
 
-## 運作方式
-1. 使用你的工具（read、write、edit、exec、web_search、browser 等）朝目標工作
-2. 當你停止時，AI 審查者會檢查你的執行記錄來判斷目標是否達成
-3. 如果未達成，你會收到關於還需要什麼的回饋
-4. 繼續工作——不要重複已經失敗的方法
-
-## 關鍵規則
-- 不要不做實際工作就宣佈成功——審查者檢查的是你實際的工具調用
-- 用工具真正做出改變，不要只說你會做什麼
-- 每輪審查者都會評估你實際做了什麼——讓它有意義
-- **重要：邊工作邊向用戶解釋你在做什麼、發現了什麼、正在修復什麼。不要默默幹活。**
-
-完成一輪後總結你完成了什麼。用戶正在看著這段對話。`
-          : `你正在朝一个由 AI 审查者验收的目标工作。
-
-## 目标
-${goalText}
-
-## 运作方式
-1. 使用你的工具（read、write、edit、exec、web_search、browser 等）朝目标工作
-2. 当你停止时，AI 审查者会检查你的执行记录来判断目标是否达成
-3. 如果未达成，你会收到关于还需要什么的反馈
-4. 继续工作——不要重复已经失败的方法
-
-## 关键规则
-- 不要不做实际工作就宣布成功——审查者检查的是你实际的工具调用
-- 用工具真正做出改变，不要只说你会做什么
-- 每轮审查者都会评估你实际做了什么——让它有意义
-- **重要：边工作边向用户解释你在做什么、发现了什么、正在修复什么。不要默默干活。**
-
-完成一轮后总结你完成了什么。用户正在看着这段对话。`;
-      }
-
-      return isTw
-        ? `你正在朝一個由機器客觀驗證的目標工作。
-
-## 目標
-${goalText}
-
-## 驗收條件
+Strictness level: **${strictLabel}**`
+      : `## Verification Condition
 ${this.condition.humanReadable}
 
-## 運作方式
-1. 使用你的工具（read、write、edit、exec 等）朝目標工作
-2. 當你停止時，系統會自動執行驗收命令
-3. 如果驗收失敗，你會收到關於哪裡還有問題的詳細回饋
-4. 修復問題再試一次——不要重複已經失敗的方法
+After each round, the system runs this command automatically. The exit code is the final judge.`;
 
-## 關鍵規則
-- 不要根據自己的判斷宣佈成功——驗收命令是唯一的裁判
-- 不要偽造或假設測試輸出——實際執行命令
-- 如果命令失敗，先仔細閱讀錯誤再改變策略
-- 每輪你都會看到真實的驗收輸出——用它來指導下一步
-- **重要：邊工作邊向用戶解釋你在做什麼、發現了什麼、正在修復什麼。不要默默幹活。**
+    const planSection = planFirst
+      ? `## First-Round Strategy (Iteration 1)
+This is iteration 1 of ${maxIter} total. Use this round for:
+1. **Read-only exploration** — understand the codebase, find relevant files, reproduce the issue
+2. **Output a concrete sub-plan** — break the goal into 3-5 ordered steps with specific deliverables
+3. **Identify risks and unknowns** — flag what could go wrong
 
-完成一輪後總結你完成了什麼。用戶正在看著這段對話。`
-        : `你正在朝一个由机器客观验证的目标工作。
+Do NOT start implementing in round 1. Planning saves iterations.`
+      : `## First-Round Strategy (Iteration 1)
+This is iteration 1 of ${maxIter} total. Before changing anything:
+1. **Explore first** — read relevant files, reproduce the issue, understand the root cause
+2. **Prioritize the biggest blocker** — don't nibble at edges, attack the core problem
+3. **Make substantive progress** — each round should visibly move the needle`;
 
-## 目标
+    return `You are in a goal-driven autonomous loop. Your mission: achieve the goal in as few iterations as possible.
+
+## Goal
 ${goalText}
 
-## 验收条件
+${verificationSection}
+
+## How the Loop Works
+1. You work for one round using all your tools
+2. Verification runs automatically when you stop
+3. If not met, you get detailed feedback + failure history
+4. You try again with a different approach — same approach = wasted iteration
+
+## Budget & Pressure
+- **Max iterations: ${maxIter}** — you have limited rounds. Use them wisely.
+- Each wasted iteration brings you closer to failure.
+- Quality matters more than speed, but progress must be visible every round.
+
+${planSection}
+
+## Non-Negotiable Rules
+1. **No empty talk.** Don't describe what you "would" do — actually do it. The verifier checks tool calls.
+2. **No self-declared victory.** Never claim the goal is done — verification decides.
+3. **No fabricated output.** Never make up test results or command output.
+4. **No repeating failures.** If an approach failed, analyze why and pivot before trying again.
+5. **Read errors carefully.** When a command fails, the full output is your most valuable signal.
+
+## Round-End Routine
+When you finish working this round, end with this structure:
+- **What I did**: 1-2 sentence summary of concrete changes
+- **What I think the result will be**: your best guess, with low confidence
+- **What's next if this fails**: your backup plan
+
+Focus on execution. Make this round count.`;
+  }
+
+  private buildInitialPromptZh(
+    goalText: string,
+    isSubjective: boolean,
+    maxIter: number,
+    strictLabel: string,
+    planFirst: boolean,
+    isTw: boolean,
+  ): string {
+    const t = (s: string, tw: string) => (isTw ? tw : s);
+
+    const verificationSection = isSubjective
+      ? `## ${t('验收方式', '驗收方式')}
+${t('每轮结束后，AI 审查者会检查你的工具调用记录。它只看你实际做了什么，不看你说了什么。', '每輪結束後，AI 審查者會檢查你的工具調用記錄。它只看你實際做了什麼，不看你說了什麼。')}
+
+${t('严格度', '嚴格度')}：**${strictLabel}**`
+      : `## ${t('验收条件', '驗收條件')}
 ${this.condition.humanReadable}
 
-## 运作方式
-1. 使用你的工具（read、write、edit、exec 等）朝目标工作
-2. 当你停止时，系统会自动执行验收命令
-3. 如果验收失败，你会收到关于哪里还有问题的详细反馈
-4. 修复问题再试一次——不要重复已经失败的方法
+${t('每轮结束后系统自动执行此命令，退出码为最终判定依据。', '每輪結束後系統自動執行此命令，退出碼為最終判定依據。')}`;
 
-## 关键规则
-- 不要根据自己的判断宣布成功——验收命令是唯一的裁判
-- 不要伪造或假设测试输出——实际执行命令
-- 如果命令失败，先仔细阅读错误再改变策略
-- 每轮你都会看到真实的验收输出——用它来指导下一步
-- **重要：边工作边向用户解释你在做什么、发现了什么、正在修复什么。不要默默干活。**
+    const planSection = planFirst
+      ? `## ${t('第 1 轮策略', '第 1 輪策略')}（${t('第 1 轮', '第 1 輪')} / ${t('共', '共')} ${maxIter} ${t('轮', '輪')}）
+${t('本轮只做规划，不动手实现：', '本輪只做規劃，不動手實現：')}
+1. **${t('只读探索', '唯讀探索')}** — ${t('理解代码结构、定位相关文件、复现问题', '理解代碼結構、定位相關文件、重現問題')}
+2. **${t('输出具体子计划', '輸出具體子計劃')}** — ${t('把目标拆成 3-5 个有序步骤，明确每步交付物', '把目標拆成 3-5 個有序步驟，明確每步交付物')}
+3. **${t('识别风险和未知项', '識別風險和未知項')}** — ${t('标出可能出问题的地方', '標出可能出問題的地方')}
 
-完成一轮后总结你完成了什么。用户正在看着这段对话。`;
-    })();
+${t('第 1 轮不要写代码。规划是为了节省后续迭代。', '第 1 輪不要寫代碼。規劃是為了節省後續疊代。')}`
+      : `## ${t('第 1 轮策略', '第 1 輪策略')}（${t('第 1 轮', '第 1 輪')} / ${t('共', '共')} ${maxIter} ${t('轮', '輪')}）
+${t('动手之前先想清楚：', '動手之前先想清楚：')}
+1. **${t('先探索', '先探索')}** — ${t('读相关文件、复现问题、理解根因', '讀相關文件、重現問題、理解根因')}
+2. **${t('先打最大的阻塞点', '先打最大的阻塞點')}** — ${t('不要在边缘问题上磨蹭，直击核心', '不要在邊緣問題上磨蹭，直擊核心')}
+3. **${t('每轮都要有实质性进展', '每輪都要有實質性進展')}** — ${t('不能原地踏步', '不能原地踏步')}`;
 
-    return instructions;
+    return `${t('你处于一个目标驱动的自主循环中。你的任务：用尽可能少的轮次达成目标。', '你處於一個目標驅動的自主循環中。你的任務：用盡可能少的輪次達成目標。')}
+
+## ${t('目标', '目標')}
+${goalText}
+
+${verificationSection}
+
+## ${t('循环机制', '循環機制')}
+1. ${t('你使用所有工具工作一轮', '你使用所有工具工作一輪')}
+2. ${t('停止后自动运行验收', '停止後自動運行驗收')}
+3. ${t('未通过 → 你会收到详细反馈 + 历史失败记录', '未通過 → 你會收到詳細回饋 + 歷史失敗記錄')}
+4. ${t('换方法重试 —— 同样的方法 = 浪费一轮', '換方法重試 —— 同樣的方法 = 浪費一輪')}
+
+## ${t('预算与压力', '預算與壓力')}
+- **${t('最多', '最多')} ${maxIter} ${t('轮', '輪')}** —— ${t('轮次有限，请善用。', '輪次有限，請善用。')}
+- ${t('每浪费一轮，离失败就近一步。', '每浪費一輪，離失敗就近一步。')}
+- ${t('质量比速度重要，但每轮必须有可见进展。', '質量比速度重要，但每輪必須有可見進展。')}
+
+${planSection}
+
+## ${t('铁律', '鐵律')}
+1. **${t('不说空话。', '不說空話。')}** ${t('不要描述你"将会"做什么 —— 实际去做。审查者看的是工具调用记录。', '不要描述你「將會」做什麼 —— 實際去做。審查者看的是工具調用記錄。')}
+2. **${t('不自我宣告胜利。', '不自我宣告勝利。')}** ${t('永远不要声称目标已完成 —— 验收说了算。', '永遠不要聲稱目標已完成 —— 驗收說了算。')}
+3. **${t('不伪造输出。', '不偽造輸出。')}** ${t('绝不编造测试结果或命令输出。', '絕不編造測試結果或命令輸出。')}
+4. **${t('不重复失败。', '不重複失敗。')}** ${t('一个方法失败了，先分析原因再换方向重试。', '一個方法失敗了，先分析原因再換方向重試。')}
+5. **${t('认真读错误。', '認真讀錯誤。')}** ${t('命令失败时，完整的错误输出是最有价值的信号。', '命令失敗時，完整的錯誤輸出是最有價值的信號。')}
+
+## ${t('本轮结束时', '本輪結束時')}
+${t('工作结束时，按以下结构收尾：', '工作結束時，按以下結構收尾：')}
+- **${t('做了什么', '做了什麼')}**：${t('1-2 句话概述具体改动', '1-2 句話概述具體改動')}
+- **${t('预期结果', '預期結果')}**：${t('你对结果的最佳猜测（保持低自信）', '你對結果的最佳猜測（保持低自信）')}
+- **${t('如果失败的备选方案', '如果失敗的備選方案')}**：${t('你的 Plan B', '你的 Plan B')}
+
+${t('专注执行。让这一轮物有所值。', '專注執行。讓這一輪物有所值。')}`;
   }
 
   private buildFeedbackPrompt(): string {
@@ -383,181 +411,262 @@ ${this.condition.humanReadable}
 
     const failedClauses = conditionResult.details.filter((d) => !d.met);
     const previousAttempts = this.state.feedbackHistory.length;
+    const remaining = this.limits.maxIterations - this.state.iteration;
+    const historySummary = this.buildFailureHistorySummary(isEn, isTw);
 
     if (isEn) {
-      const lines: string[] = [
-        `## Goal NOT Yet Met (iteration ${this.state.iteration}, attempt ${previousAttempts + 1})`,
-        '',
-      ];
-
-      if (isSubjective) {
-        lines.push('The AI verifier reviewed your work and determined the goal is NOT yet met.');
-        lines.push('');
-        lines.push('### Verifier Assessment');
-        lines.push(`${verdict.verdict}: ${verdict.evidence}`);
-        if (verdict.missing) {
-          lines.push(`Still needed: ${verdict.missing}`);
-        }
-        lines.push('');
-        lines.push('### What to Do');
-        lines.push('The verifier checks your ACTUAL tool calls, not just your words.');
-        lines.push('- Use your tools to make real changes (write files, edit code, download resources, etc.)');
-        lines.push('- Do NOT just describe what you would do — actually do it');
-        lines.push('- Do NOT repeat the same approach that already failed');
-        lines.push('- If you\'re stuck after multiple attempts, explain what you\'ve tried and what\'s blocking you');
-        lines.push('');
-        lines.push('Continue working. The verifier will review again after you stop.');
-        lines.push('**Explain to the user what you\'re going to do next, and why.**');
-      } else {
-        lines.push('The verification command was run and the goal is NOT yet satisfied.');
-        lines.push('');
-        lines.push('### Verification Results');
-        lines.push('```');
-        lines.push(conditionResult.evidence);
-        lines.push('```');
-        lines.push('');
-
-        if (failedClauses.length > 0) {
-          lines.push('### Failed Checks');
-          for (const clause of failedClauses) {
-            lines.push(`- ${clause.evidence.split('\n')[0]} → exit code ${clause.exitCode ?? 'null'}`);
-          }
-          lines.push('');
-        }
-
-        lines.push('### Verifier Assessment');
-        lines.push(`${verdict.verdict}: ${verdict.evidence}`);
-        if (verdict.missing) {
-          lines.push(`Missing: ${verdict.missing}`);
-        }
-        lines.push('');
-        lines.push('### What to Do');
-        lines.push('Analyze the above output carefully. The verification output is REAL — do not ignore it.');
-        lines.push('- If tests fail, READ the actual error messages above');
-        lines.push('- If the exit code is non-zero, find what caused it');
-        lines.push('- Do NOT repeat the same fix that already failed');
-        lines.push('- If you\'re stuck after multiple attempts, explain what you\'ve tried and what\'s blocking you');
-        lines.push('');
-        lines.push('Fix the issues. The verification will run again after you stop.');
-        lines.push('**Explain to the user what you\'re going to do next, and why.**');
-      }
-
-      return lines.join('\n');
+      return this.buildFeedbackPromptEn(
+        isSubjective, failedClauses, conditionResult, verdict,
+        previousAttempts, remaining, historySummary,
+      );
     }
 
-    const lines: string[] = (() => {
-      if (isTw) {
-        if (isSubjective) {
-          return [
-            `## 目標尚未達成（第 ${this.state.iteration} 輪，第 ${previousAttempts + 1} 次嘗試）`,
-            '',
-            'AI 審查者檢視了你的工作，判定目標尚未達成。',
-            '',
-            '### Verifier 評估',
-            `${verdict.verdict}: ${verdict.evidence}`,
-            ...(verdict.missing ? [`還需要: ${verdict.missing}`] : []),
-            '',
-            '### 接下來怎麼做',
-            '審查者檢查的是你實際的工具調用，不只是你說的話。',
-            '- 用工具做出真正的改變（寫文件、編輯代碼、下載資源等）',
-            '- 不要只描述你會做什麼——實際去做',
-            '- 不要重複已經失敗的方法',
-            '- 如果多次嘗試後仍卡住，說明你試過什麼以及什麼在阻擋你',
-            '',
-            '繼續工作。審查者會在你停止後再次審核。',
-            '**請向用戶解釋你接下來打算做什麼，以及為什麼。**',
-          ];
+    return this.buildFeedbackPromptZh(
+      isSubjective, failedClauses, conditionResult, verdict,
+      previousAttempts, remaining, historySummary, isTw,
+    );
+  }
+
+  private buildFailureHistorySummary(isEn: boolean, isTw: boolean): string {
+    const history = this.state.feedbackHistory;
+    if (history.length <= 1) return '';
+
+    const MAX_SHOWN = 5;
+    const shown = history.slice(-MAX_SHOWN);
+    const olderCount = history.length - shown.length;
+
+    const lines: string[] = [];
+    const label = isEn ? '## Failure History' : isTw ? '## 失敗歷史' : '## 失败历史';
+    lines.push(label);
+    lines.push(isEn
+      ? `You've failed ${history.length} times already. Learn from each one — don't repeat the same pattern.`
+      : isTw
+      ? `你已經失敗了 ${history.length} 次。從每次失敗中學習 —— 不要重複同樣的模式。`
+      : `你已经失败了 ${history.length} 次。从每次失败中学习 —— 不要重复同样的模式。`
+    );
+    if (olderCount > 0) {
+      lines.push(isEn
+        ? `(Showing last ${MAX_SHOWN} of ${history.length} failures)`
+        : isTw
+        ? `（顯示最近 ${MAX_SHOWN} 條，共 ${history.length} 條失敗）`
+        : `（显示最近 ${MAX_SHOWN} 条，共 ${history.length} 条失败）`);
+    }
+    lines.push('');
+
+    for (let i = 0; i < shown.length; i++) {
+      const fb = shown[i];
+      const roundNum = history.length - shown.length + i + 1;
+      const v = fb.verdict;
+      const cond = fb.conditionResult;
+
+      let reason = '';
+      if (cond.details.length > 0) {
+        const failed = cond.details.filter(d => !d.met);
+        const firstFailed = failed[0];
+        if (firstFailed) {
+          const firstLine = firstFailed.evidence.split('\n').find(
+            l => l.includes('stdout') || l.includes('退出碼') || l.includes('退出码')
+          ) ?? firstFailed.evidence.split('\n')[0];
+          reason = firstLine.slice(0, 120);
         }
-        return [
-          `## 目標尚未達成（第 ${this.state.iteration} 輪，第 ${previousAttempts + 1} 次嘗試）`,
-          '',
-          '驗收命令已執行，目標尚未滿足。',
-          '',
-          '### 驗收結果',
-          '```',
-          conditionResult.evidence,
-          '```',
-          '',
-          ...(failedClauses.length > 0
-            ? [
-                '### 未通過的檢查',
-                ...failedClauses.map(
-                  (c) => `- ${c.evidence.split('\n')[0]} → 退出碼 ${c.exitCode ?? 'null'}`
-                ),
-                '',
-              ]
-            : []),
-          '### Verifier 評估',
-          `${verdict.verdict}: ${verdict.evidence}`,
-          ...(verdict.missing ? [`缺失: ${verdict.missing}`] : []),
-          '',
-          '### 接下來怎麼做',
-          '仔細分析上面的輸出。驗收輸出是真實的——不要忽略它。',
-          '- 如果測試失敗，閱讀上面的實際錯誤訊息',
-          '- 如果退出碼非零，找出原因',
-          '- 不要重複已經失敗的修復方法',
-          '- 如果多次嘗試後仍卡住，說明你試過什麼以及什麼在阻擋你',
-          '',
-          '修復問題。你停止後驗收會再次執行。',
-          '**請向用戶解釋你接下來打算做什麼，以及為什麼。**',
-        ];
+      } else if (v.missing) {
+        reason = v.missing.slice(0, 120);
+      } else {
+        reason = v.evidence.slice(0, 120);
       }
 
-      if (isSubjective) {
-        return [
-          `## 目标尚未达成（第 ${this.state.iteration} 轮，第 ${previousAttempts + 1} 次尝试）`,
-          '',
-          'AI 审查者检视了你的工作，判定目标尚未达成。',
-          '',
-          '### Verifier 评估',
-          `${verdict.verdict}: ${verdict.evidence}`,
-          ...(verdict.missing ? [`还需要: ${verdict.missing}`] : []),
-          '',
-          '### 接下来怎么做',
-          '审查者检查的是你实际的工具调用，不只是你说的话。',
-          '- 用工具做出真正的改变（写文件、编辑代码、下载资源等）',
-          '- 不要只描述你会做什么——实际去做',
-          '- 不要重复已经失败的方法',
-          '- 如果多次尝试后仍卡住，说明你试过什么以及什么在阻挡你',
-          '',
-          '继续工作。审查者会在你停止后再次审核。',
-          '**请向用户解释你接下来打算做什么，以及为什么。**',
-        ];
+      const progressInfo = typeof v.progress === 'number'
+        ? (isEn ? ` | progress: ${Math.round(v.progress * 100)}%` : isTw ? ` | 進展: ${Math.round(v.progress * 100)}%` : ` | 进展: ${Math.round(v.progress * 100)}%`)
+        : '';
+
+      const failureModeInfo = v.failureMode
+        ? (isEn ? ` | mode: ${v.failureMode}` : isTw ? ` | 模式: ${v.failureMode}` : ` | 模式: ${v.failureMode}`)
+        : '';
+
+      lines.push(`- ${isEn ? 'Round' : isTw ? '第' : '第'} ${roundNum}${isEn ? '' : isTw ? '輪' : '轮'}: ${reason}${progressInfo}${failureModeInfo}`);
+    }
+
+    lines.push('');
+    lines.push(isEn
+      ? '### Retrospective Required'
+      : isTw ? '### 必須復盤' : '### 必须复盘');
+    lines.push(isEn
+      ? 'Before writing any code this round, answer these questions in your head:'
+      : isTw
+      ? '本輪寫任何代碼之前，先在腦中回答這些問題：'
+      : '本轮写任何代码之前，先在脑中回答这些问题：');
+    lines.push(isEn
+      ? '1. What pattern is repeating across failures?'
+      : isTw ? '1. 失敗中有什麼重複的模式？' : '1. 失败中有什么重复的模式？');
+    lines.push(isEn
+      ? '2. What assumption was wrong last time?'
+      : isTw ? '2. 上次哪個假設是錯的？' : '2. 上次哪个假设是错的？');
+    lines.push(isEn
+      ? '3. What completely different approach could I try?'
+      : isTw ? '3. 我可以嘗試什麼完全不同的方法？' : '3. 我可以尝试什么完全不同的方法？');
+    lines.push('');
+
+    return lines.join('\n');
+  }
+
+  private buildFeedbackPromptEn(
+    isSubjective: boolean,
+    failedClauses: ConditionClauseResult[],
+    conditionResult: ConditionResult,
+    verdict: GoalVerdict,
+    previousAttempts: number,
+    remaining: number,
+    historySummary: string,
+  ): string {
+    const lines: string[] = [
+      `## GOAL NOT MET — Iteration ${this.state.iteration} | ${remaining} attempts remaining`,
+      '',
+      `You have failed ${previousAttempts} times. ${remaining} rounds left. Don't waste them.`,
+      '',
+    ];
+
+    if (isSubjective) {
+      lines.push('### Verifier Assessment');
+      lines.push(`**Verdict:** ${verdict.verdict}`);
+      lines.push(`**Evidence:** ${verdict.evidence}`);
+      if (verdict.missing) {
+        lines.push(`**Still needed:** ${verdict.missing}`);
       }
-      return [
-        `## 目标尚未达成（第 ${this.state.iteration} 轮，第 ${previousAttempts + 1} 次尝试）`,
-        '',
-        '验收命令已执行，目标尚未满足。',
-        '',
-        '### 验收结果',
-        '```',
-        conditionResult.evidence,
-        '```',
-        '',
-        ...(failedClauses.length > 0
-          ? [
-              '### 未通过的检查',
-              ...failedClauses.map(
-                (c) => `- ${c.evidence.split('\n')[0]} → 退出码 ${c.exitCode ?? 'null'}`
-              ),
-              '',
-            ]
-          : []),
-        '### Verifier 评估',
-        `${verdict.verdict}: ${verdict.evidence}`,
-        ...(verdict.missing ? [`缺失: ${verdict.missing}`] : []),
-        '',
-        '### 接下来怎么做',
-        '仔细分析上面的输出。验收输出是真实的——不要忽略它。',
-        '- 如果测试失败，阅读上面的实际错误信息',
-        '- 如果退出码非零，找出原因',
-        '- 不要重复已经失败的修复方法',
-        '- 如果多次尝试后仍卡住，说明你试过什么以及什么在阻挡你',
-        '',
-        '修复问题。你停止后验收会再次执行。',
-        '**请向用户解释你接下来打算做什么，以及为什么。**',
-      ];
-    })();
+      if (typeof verdict.progress === 'number') {
+        lines.push(`**Progress:** ${Math.round(verdict.progress * 100)}%`);
+      }
+      if (verdict.failureMode) {
+        lines.push(`**Failure mode:** ${verdict.failureMode}`);
+      }
+      lines.push('');
+    } else {
+      lines.push('### Verification Result');
+      lines.push('```');
+      lines.push(conditionResult.evidence);
+      lines.push('```');
+      lines.push('');
+
+      if (failedClauses.length > 0) {
+        lines.push('### Failed Checks');
+        for (const clause of failedClauses) {
+          lines.push(`- ${clause.evidence.split('\n')[0]} → exit code ${clause.exitCode ?? 'null'}`);
+        }
+        lines.push('');
+      }
+
+      lines.push('### Verifier Assessment');
+      lines.push(`**Verdict:** ${verdict.verdict}`);
+      lines.push(`**Evidence:** ${verdict.evidence}`);
+      if (verdict.missing) {
+        lines.push(`**Missing:** ${verdict.missing}`);
+      }
+      if (typeof verdict.progress === 'number') {
+        lines.push(`**Progress:** ${Math.round(verdict.progress * 100)}%`);
+      }
+      if (verdict.failureMode) {
+        lines.push(`**Failure mode:** ${verdict.failureMode}`);
+      }
+      lines.push('');
+    }
+
+    if (historySummary) {
+      lines.push(historySummary);
+    }
+
+    lines.push('### Strategy for This Round');
+    lines.push(isSubjective
+      ? 'The verifier checks your ACTUAL tool calls, not your words. Make real changes.'
+      : 'The verification output above is REAL. Read it. Understand the root cause. Don\'t guess.');
+    lines.push('');
+    lines.push('- **Pivot hard.** If the same approach has failed multiple times, try something fundamentally different.');
+    lines.push('- **Go deeper.** If you\'ve been making surface-level changes, dig into the underlying cause.');
+    lines.push('- **Read before writing.** Don\'t modify code you don\'t fully understand.');
+    lines.push('- **If stuck after 3+ attempts, consider:** asking a sub-agent for a second opinion, or trying a completely different approach.');
+    lines.push('');
+    lines.push(`You have ${remaining} rounds left. Make this one count.`);
+
+    return lines.join('\n');
+  }
+
+  private buildFeedbackPromptZh(
+    isSubjective: boolean,
+    failedClauses: ConditionClauseResult[],
+    conditionResult: ConditionResult,
+    verdict: GoalVerdict,
+    previousAttempts: number,
+    remaining: number,
+    historySummary: string,
+    isTw: boolean,
+  ): string {
+    const t = (s: string, tw: string) => (isTw ? tw : s);
+
+    const lines: string[] = [
+      `## 目標未達成 — 第 ${this.state.iteration} 輪 | 剩餘 ${remaining} 次機會`,
+      '',
+      `你已經失敗了 ${previousAttempts} 次。還剩 ${remaining} 輪。不要浪費它們。`.replace('剩餘', t('剩余', '剩餘')).replace('還剩', t('还剩', '還剩')),
+      '',
+    ];
+
+    if (isSubjective) {
+      lines.push('### Verifier 評估'.replace('評估', t('评估', '評估')));
+      lines.push(`**判定：** ${verdict.verdict}`);
+      lines.push(`**依據：** ${verdict.evidence}`);
+      if (verdict.missing) {
+        lines.push(`**還需要：** ${verdict.missing}`.replace('還需要', t('还需要', '還需要')));
+      }
+      if (typeof verdict.progress === 'number') {
+        lines.push(`**進展：** ${Math.round(verdict.progress * 100)}%`.replace('進展', t('进展', '進展')));
+      }
+      if (verdict.failureMode) {
+        lines.push(`**失敗模式：** ${verdict.failureMode}`.replace('失敗模式', t('失败模式', '失敗模式')));
+      }
+      lines.push('');
+    } else {
+      lines.push('### 驗收結果'.replace('驗收', t('验收', '驗收')));
+      lines.push('```');
+      lines.push(conditionResult.evidence);
+      lines.push('```');
+      lines.push('');
+
+      if (failedClauses.length > 0) {
+        lines.push('### 未通過的檢查'.replace('未通過', t('未通过', '未通過')).replace('檢查', t('检查', '檢查')));
+        for (const clause of failedClauses) {
+          const line0 = clause.evidence.split('\n')[0];
+          lines.push(`- ${line0} → ${t('退出码', '退出碼')} ${clause.exitCode ?? 'null'}`);
+        }
+        lines.push('');
+      }
+
+      lines.push('### Verifier 評估'.replace('評估', t('评估', '評估')));
+      lines.push(`**判定：** ${verdict.verdict}`);
+      lines.push(`**依據：** ${verdict.evidence}`);
+      if (verdict.missing) {
+        lines.push(`**缺失：** ${verdict.missing}`);
+      }
+      if (typeof verdict.progress === 'number') {
+        lines.push(`**進展：** ${Math.round(verdict.progress * 100)}%`.replace('進展', t('进展', '進展')));
+      }
+      if (verdict.failureMode) {
+        lines.push(`**失敗模式：** ${verdict.failureMode}`.replace('失敗模式', t('失败模式', '失敗模式')));
+      }
+      lines.push('');
+    }
+
+    if (historySummary) {
+      lines.push(historySummary);
+    }
+
+    lines.push('### 本輪策略'.replace('本輪', t('本轮', '本輪')));
+    lines.push(isSubjective
+      ? t('审查者看的是你实际的工具调用，不是你说的话。做出真正的改变。', '審查者看的是你實際的工具調用，不是你說的話。做出真正的改變。')
+      : t('上面的验收输出是真实的。认真读。理解根因。不要猜。', '上面的驗收輸出是真實的。認真讀。理解根因。不要猜。'));
+    lines.push('');
+    lines.push(`- ${t('果断换方向。', '果斷換方向。')}${t('同样的方法已经失败多次，试试完全不同的思路。', '同樣的方法已經失敗多次，試試完全不同的思路。')}`);
+    lines.push(`- ${t('挖得更深。', '挖得更深。')}${t('如果你一直在做表面修改，去深挖根本原因。', '如果你一直在做表面修改，去深挖根本原因。')}`);
+    lines.push(`- ${t('先读再写。', '先讀再寫。')}${t('不要修改你不完全理解的代码。', '不要修改你不完全理解的代碼。')}`);
+    lines.push(`- ${t('如果连续 3 次以上失败，考虑：', '如果連續 3 次以上失敗，考慮：')}${t('调用子代理征求第二意见，或尝试完全不同的方法。', '調用子代理徵求第二意見，或嘗試完全不同的方法。')}`);
+    lines.push('');
+    lines.push(t(`你还剩 ${remaining} 轮。好好珍惜。`, `你還剩 ${remaining} 輪。好好珍惜。`));
 
     return lines.join('\n');
   }
@@ -575,6 +684,8 @@ export function serializeGoalState(state: GoalRunnerState, condition: GoalCondit
     `**Started:** ${new Date(state.startedAt).toISOString()}`,
     `**Elapsed:** ${Math.round(state.elapsedMs / 1000)}s`,
     `**Output tokens:** ${state.totalOutputTokens}`,
+    `**Strictness:** ${condition.strictness}`,
+    `**Plan first:** ${condition.planFirst}`,
     '',
     '## Goal',
     userGoalText || condition.humanReadable,
@@ -598,6 +709,12 @@ export function serializeGoalState(state: GoalRunnerState, condition: GoalCondit
     if (state.lastVerdict.missing) {
       lines.push(`Missing: ${state.lastVerdict.missing}`);
     }
+    if (typeof state.lastVerdict.progress === 'number') {
+      lines.push(`Progress: ${Math.round(state.lastVerdict.progress * 100)}%`);
+    }
+    if (state.lastVerdict.failureMode) {
+      lines.push(`Failure mode: ${state.lastVerdict.failureMode}`);
+    }
     lines.push('');
   }
 
@@ -605,7 +722,9 @@ export function serializeGoalState(state: GoalRunnerState, condition: GoalCondit
     lines.push('## Iteration History');
     for (const fb of state.feedbackHistory) {
       const met = fb.conditionResult.met ? '✓' : '✗';
-      lines.push(`- Iteration ${fb.iteration}: ${met} condition | Verifier: ${fb.verdict.verdict}`);
+      const prog = typeof fb.verdict.progress === 'number' ? ` | progress: ${Math.round(fb.verdict.progress * 100)}%` : '';
+      const fm = fb.verdict.failureMode ? ` | mode: ${fb.verdict.failureMode}` : '';
+      lines.push(`- Iteration ${fb.iteration}: ${met} condition | Verifier: ${fb.verdict.verdict}${prog}${fm}`);
     }
     lines.push('');
   }

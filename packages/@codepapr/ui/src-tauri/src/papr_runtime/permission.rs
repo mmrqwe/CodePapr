@@ -6,7 +6,28 @@ use std::sync::{Mutex, OnceLock};
 static APP_SETTINGS: OnceLock<Mutex<AppPermissionSettings>> = OnceLock::new();
 
 fn app_settings() -> &'static Mutex<AppPermissionSettings> {
-    APP_SETTINGS.get_or_init(|| Mutex::new(AppPermissionSettings::default()))
+    APP_SETTINGS.get_or_init(|| {
+        let persisted = crate::db::papr_load_permission_settings()
+            .ok()
+            .flatten()
+            .and_then(|json| serde_json::from_str::<AppPermissionSettings>(&json).ok());
+        Mutex::new(persisted.unwrap_or_default())
+    })
+}
+
+fn persist_settings(settings: &AppPermissionSettings) {
+    if let Ok(json) = serde_json::to_string(settings) {
+        let _ = crate::db::papr_save_permission_settings(&json);
+    }
+}
+
+#[cfg(test)]
+fn reset_test_settings() {
+    let default = AppPermissionSettings::default();
+    persist_settings(&default);
+    if let Some(guard) = APP_SETTINGS.get() {
+        *guard.lock().unwrap_or_else(|e| e.into_inner()) = default;
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -28,11 +49,12 @@ impl Default for AppPermissionSettings {
 }
 
 pub fn get_app_settings() -> AppPermissionSettings {
-    app_settings().lock().unwrap().clone()
+    app_settings().lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 pub fn set_app_settings(settings: AppPermissionSettings) {
-    *app_settings().lock().unwrap() = settings;
+    persist_settings(&settings);
+    *app_settings().lock().unwrap_or_else(|e| e.into_inner()) = settings;
 }
 
 const LEVEL_GRANTS: &[&[&str]] = &[
@@ -40,14 +62,12 @@ const LEVEL_GRANTS: &[&[&str]] = &[
     &[
         "storage:read", "storage:write",
         "fs:read", "fs:write",
-        "llm:chat",
         "agent:run:*",
         "workspace:read",
     ],
     &[
         "storage:read", "storage:write",
         "fs:read", "fs:write",
-        "llm:chat",
         "agent:run:*",
         "workspace:read",
         "http:get", "http:post",
@@ -55,7 +75,6 @@ const LEVEL_GRANTS: &[&[&str]] = &[
     &[
         "storage:read", "storage:write",
         "fs:read", "fs:write",
-        "llm:chat",
         "agent:run:*",
         "workspace:read",
         "http:get", "http:post",
@@ -69,27 +88,10 @@ pub fn level_allows(level: u8, capability: &str) -> bool {
     if grants.iter().any(|&g| g == capability) {
         return true;
     }
-    if let Some((prefix, _)) = capability.split_once(':') {
-        if grants.iter().any(|&g| g == prefix) {
-            return true;
-        }
-    }
     if capability.starts_with("agent:run:") {
         return grants.iter().any(|&g| g == "agent:run:*");
     }
     false
-}
-
-pub fn level_allows_tool(level: u8, tool_name: &str) -> bool {
-    let required = match tool_name {
-        "read" | "grep" | "list" | "graph" | "lsp" | "diagnostics" | "read_image" | "skill_load" | "question" | "todo" => "workspace:read",
-        "write" | "edit" | "patch" => "workspace:write",
-        "exec" | "shell" => "workspace:exec",
-        "web_search" | "web_fetch" | "web_download" => "http:get",
-        _ if tool_name.starts_with("mcp__") => "http:get",
-        _ => return true,
-    };
-    level_allows(level, required)
 }
 
 pub fn resolve_effective_level(manifest: &PaprManifest, app_id: &str) -> u8 {
@@ -146,28 +148,6 @@ pub fn check_permission(manifest: &PaprManifest, app_id: &str, capability: &str)
         "permission denied: '{}' not in manifest permissions (app '{}' level {})",
         capability, app_id, level
     ))
-}
-
-pub fn check_tool_permission(manifest: &PaprManifest, app_id: &str, tool_name: &str) -> Result<(), String> {
-    let level = resolve_effective_level(manifest, app_id);
-
-    if !level_allows_tool(level, tool_name) {
-        return Err(format!(
-            "tool '{}' not allowed at level {} (app '{}')",
-            tool_name, level, app_id
-        ));
-    }
-
-    let required = match tool_name {
-        "read" | "grep" | "list" | "graph" | "lsp" | "diagnostics" | "read_image" | "skill_load" | "question" | "todo" => "workspace:read",
-        "write" | "edit" | "patch" => "workspace:write",
-        "exec" | "shell" => "workspace:exec",
-        "web_search" | "web_fetch" | "web_download" => "http:get",
-        _ if tool_name.starts_with("mcp__") => "http:get",
-        _ => return Ok(()),
-    };
-
-    check_permission(manifest, app_id, required)
 }
 
 fn required_level_for_capability(capability: &str) -> u8 {
@@ -240,42 +220,14 @@ mod tests {
     }
 
     #[test]
-    fn level_allows_tool_read_at_l1() {
-        assert!(level_allows_tool(1, "read"));
-        assert!(level_allows_tool(1, "grep"));
-        assert!(!level_allows_tool(1, "web_search"));
-        assert!(!level_allows_tool(1, "write"));
-        assert!(!level_allows_tool(1, "exec"));
-    }
-
-    #[test]
-    fn level_allows_tool_web_at_l2() {
-        assert!(level_allows_tool(2, "web_search"));
-        assert!(level_allows_tool(2, "web_fetch"));
-        assert!(!level_allows_tool(2, "write"));
-    }
-
-    #[test]
-    fn level_allows_tool_write_at_l3() {
-        assert!(level_allows_tool(3, "write"));
-        assert!(level_allows_tool(3, "exec"));
-    }
-
-    #[test]
-    fn level_allows_mcp_at_l2() {
-        assert!(level_allows_tool(2, "mcp__server__tool"));
-        assert!(!level_allows_tool(1, "mcp__server__tool"));
-    }
-
-    #[test]
     fn level_blocks_everything_at_l0() {
         assert!(!level_allows(0, "storage:read"));
         assert!(!level_allows(0, "http:get"));
-        assert!(!level_allows_tool(0, "read"));
     }
 
     #[test]
     fn resolve_effective_level_caps_l3_when_disabled() {
+        reset_test_settings();
         set_app_settings(AppPermissionSettings {
             default_level: 1,
             allow_level3: false,
@@ -287,6 +239,7 @@ mod tests {
 
     #[test]
     fn resolve_effective_level_allows_l3_when_enabled() {
+        reset_test_settings();
         set_app_settings(AppPermissionSettings {
             default_level: 1,
             allow_level3: true,
@@ -298,6 +251,7 @@ mod tests {
 
     #[test]
     fn resolve_effective_level_user_override_caps() {
+        reset_test_settings();
         set_app_settings(AppPermissionSettings {
             default_level: 1,
             allow_level3: true,
@@ -313,6 +267,7 @@ mod tests {
 
     #[test]
     fn check_permission_l1_blocks_http() {
+        reset_test_settings();
         set_app_settings(AppPermissionSettings::default());
         let m = make_manifest_level(1, vec!["storage:read".into(), "http:get".into()]);
         assert!(check_permission(&m, "test-app", "storage:read").is_ok());
@@ -321,6 +276,7 @@ mod tests {
 
     #[test]
     fn check_permission_l2_allows_http() {
+        reset_test_settings();
         set_app_settings(AppPermissionSettings {
             default_level: 1,
             allow_level3: true,
@@ -332,6 +288,7 @@ mod tests {
 
     #[test]
     fn check_permission_empty_perms_with_level_grants() {
+        reset_test_settings();
         set_app_settings(AppPermissionSettings::default());
         let m = make_manifest_level(1, vec![]);
         assert!(check_permission(&m, "test-app", "storage:read").is_ok());

@@ -12,16 +12,29 @@ fn manifest_cache() -> &'static Mutex<HashMap<String, PaprManifest>> {
 }
 
 pub fn store_manifest(app_id: &str, manifest: PaprManifest) {
-    manifest_cache().lock().unwrap().insert(app_id.to_string(), manifest);
+    manifest_cache().lock().unwrap_or_else(|e| e.into_inner()).insert(app_id.to_string(), manifest);
 }
 
 pub fn get_manifest(app_id: &str) -> Result<PaprManifest, String> {
     manifest_cache()
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(app_id)
         .cloned()
         .ok_or_else(|| format!("app '{}' manifest not loaded", app_id))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaprInheritContext {
+    #[serde(default)]
+    pub skills: bool,
+    #[serde(default)]
+    pub project_rules: bool,
+    #[serde(default)]
+    pub project_memory: bool,
+    #[serde(default)]
+    pub custom_prompt: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +46,7 @@ pub struct PaprAgentDef {
     pub tools: Option<Vec<String>>,
     #[serde(default)]
     pub max_tool_rounds: Option<usize>,
+    pub inherit_context: Option<PaprInheritContext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,7 +92,7 @@ pub fn load_manifest(apps_dir: &Path, app_id: &str) -> Result<PaprManifest, Stri
 }
 
 pub fn clear_manifest(app_id: &str) {
-    manifest_cache().lock().unwrap().remove(app_id);
+    manifest_cache().lock().unwrap_or_else(|e| e.into_inner()).remove(app_id);
 }
 
 #[cfg(test)]

@@ -27,6 +27,7 @@ const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMoc
     conversationStats: {
       primary: { totalCacheRead: 0, totalCacheCreation: 0, totalInput: 0, totalOutput: 0, promptCacheHitTokens: 0, promptCacheMissTokens: 0, calls: 0, rounds: 0 },
       fast: { totalCacheRead: 0, totalCacheCreation: 0, totalInput: 0, totalOutput: 0, promptCacheHitTokens: 0, promptCacheMissTokens: 0, calls: 0, rounds: 0 },
+      mentor: { totalCacheRead: 0, totalCacheCreation: 0, totalInput: 0, totalOutput: 0, promptCacheHitTokens: 0, promptCacheMissTokens: 0, calls: 0, rounds: 0 },
     },
     sessionConversationStats: {},
     projectDiagnosticsReport: null,
@@ -63,6 +64,7 @@ vi.mock('../utils/projectStorage', () => ({
     conversationStats: {
       primary: { totalCacheRead: 0, totalCacheCreation: 0, totalInput: 0, totalOutput: 0, promptCacheHitTokens: 0, promptCacheMissTokens: 0, calls: 0, rounds: 0 },
       fast: { totalCacheRead: 0, totalCacheCreation: 0, totalInput: 0, totalOutput: 0, promptCacheHitTokens: 0, promptCacheMissTokens: 0, calls: 0, rounds: 0 },
+      mentor: { totalCacheRead: 0, totalCacheCreation: 0, totalInput: 0, totalOutput: 0, promptCacheHitTokens: 0, promptCacheMissTokens: 0, calls: 0, rounds: 0 },
     },
     sessionConversationStats: {},
     projectDiagnosticsReport: null,
@@ -112,6 +114,7 @@ function createEmptyConversation() {
   return {
     primary: { totalCacheRead: 0, totalCacheCreation: 0, totalInput: 0, totalOutput: 0, promptCacheHitTokens: 0, promptCacheMissTokens: 0, calls: 0, rounds: 0 },
     fast: { totalCacheRead: 0, totalCacheCreation: 0, totalInput: 0, totalOutput: 0, promptCacheHitTokens: 0, promptCacheMissTokens: 0, calls: 0, rounds: 0 },
+    mentor: { totalCacheRead: 0, totalCacheCreation: 0, totalInput: 0, totalOutput: 0, promptCacheHitTokens: 0, promptCacheMissTokens: 0, calls: 0, rounds: 0 },
   };
 }
 
@@ -336,6 +339,16 @@ describe('useAgentStore.sendMessage', () => {
             calls: 0,
             rounds: 0,
           },
+          mentor: {
+            totalCacheRead: 0,
+            totalCacheCreation: 0,
+            totalInput: 0,
+            totalOutput: 0,
+            promptCacheHitTokens: 0,
+            promptCacheMissTokens: 0,
+            calls: 0,
+            rounds: 0,
+          },
         },
         'session-2': {
           primary: {
@@ -349,6 +362,16 @@ describe('useAgentStore.sendMessage', () => {
             rounds: 1,
           },
           fast: {
+            totalCacheRead: 0,
+            totalCacheCreation: 0,
+            totalInput: 0,
+            totalOutput: 0,
+            promptCacheHitTokens: 0,
+            promptCacheMissTokens: 0,
+            calls: 0,
+            rounds: 0,
+          },
+          mentor: {
             totalCacheRead: 0,
             totalCacheCreation: 0,
             totalInput: 0,
@@ -372,6 +395,16 @@ describe('useAgentStore.sendMessage', () => {
           rounds: 2,
         },
         fast: {
+          totalCacheRead: 0,
+          totalCacheCreation: 0,
+          totalInput: 0,
+          totalOutput: 0,
+          promptCacheHitTokens: 0,
+          promptCacheMissTokens: 0,
+          calls: 0,
+          rounds: 0,
+        },
+        mentor: {
           totalCacheRead: 0,
           totalCacheCreation: 0,
           totalInput: 0,
@@ -409,6 +442,16 @@ describe('useAgentStore.sendMessage', () => {
         calls: 0,
         rounds: 0,
       },
+      mentor: {
+        totalCacheRead: 0,
+        totalCacheCreation: 0,
+        totalInput: 0,
+        totalOutput: 0,
+        promptCacheHitTokens: 0,
+        promptCacheMissTokens: 0,
+        calls: 0,
+        rounds: 0,
+      },
     });
     expect(saveProjectStateDirectMock).toHaveBeenLastCalledWith(
       '/tmp/codepapr-test',
@@ -435,6 +478,16 @@ describe('useAgentStore.sendMessage', () => {
         rounds: 2,
       },
       fast: {
+        totalCacheRead: 0,
+        totalCacheCreation: 0,
+        totalInput: 0,
+        totalOutput: 0,
+        promptCacheHitTokens: 0,
+        promptCacheMissTokens: 0,
+        calls: 0,
+        rounds: 0,
+      },
+      mentor: {
         totalCacheRead: 0,
         totalCacheCreation: 0,
         totalInput: 0,
@@ -894,7 +947,7 @@ describe('useAgentStore.sendMessage', () => {
     );
   });
 
-  it('shows command descriptions in /help and keeps removed undo/redo out of the command surface', async () => {
+  it('shows command descriptions in /help', async () => {
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       if (command === 'list_workspace_files') {
         return {
@@ -919,11 +972,9 @@ describe('useAgentStore.sendMessage', () => {
 
     const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
     const helpMessage = sessionMessages.at(-1)?.content ?? '';
-    expect(helpMessage).toContain('/help: 查看命令说明');
+    expect(helpMessage).toContain('/help (或 /commands): 查看命令说明');
     expect(helpMessage).toContain('/review: 审查当前改动或指定范围');
     expect(helpMessage).toContain('/ship: 发布当前工作区改动');
-    expect(helpMessage).not.toContain('/undo');
-    expect(helpMessage).not.toContain('/redo');
   });
 
   it('keeps auto-continuing until a final execution result arrives', async () => {
@@ -1219,6 +1270,16 @@ describe('useAgentStore.sendMessage', () => {
         rounds: 1,
       },
       fast: {
+        totalCacheRead: 0,
+        totalCacheCreation: 0,
+        totalInput: 0,
+        totalOutput: 0,
+        promptCacheHitTokens: 0,
+        promptCacheMissTokens: 0,
+        calls: 0,
+        rounds: 0,
+      },
+      mentor: {
         totalCacheRead: 0,
         totalCacheCreation: 0,
         totalInput: 0,

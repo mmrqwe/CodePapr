@@ -21,15 +21,39 @@ pub fn git_stage_impl(
         },
     };
 
-    if all || pathspecs.is_empty() {
-        use crate::snapshot::ignore_resolver::IgnoreResolver;
-        let resolver = IgnoreResolver::new(workspace);
-        let files = resolver.collect_files();
-        let mut added = 0;
-        for file in &files {
-            if index.add_path(file).is_ok() {
-                added += 1;
+    if all || !pathspecs.is_empty() {
+        if all || pathspecs.is_empty() {
+            use crate::snapshot::ignore_resolver::IgnoreResolver;
+            let resolver = IgnoreResolver::new(workspace);
+            let files = resolver.collect_files();
+            let mut added = 0;
+            for file in &files {
+                if index.add_path(file).is_ok() {
+                    added += 1;
+                }
             }
+            if let Err(e) = index.write() {
+                return GitOperationResult {
+                    ok: false, action: "stage".to_string(),
+                    message: format!("write index: {}", e.message()), backup_ref: None,
+                };
+            }
+            return GitOperationResult {
+                ok: true, action: "stage".to_string(),
+                message: format!("已暂存 {} 个文件", added), backup_ref: None,
+            };
+        }
+
+        let mut added = 0;
+        for path in pathspecs {
+            let p = std::path::Path::new(path);
+            if let Err(e) = index.add_path(p) {
+                return GitOperationResult {
+                    ok: false, action: "stage".to_string(),
+                    message: format!("add {:?}: {}", path, e.message()), backup_ref: None,
+                };
+            }
+            added += 1;
         }
         if let Err(e) = index.write() {
             return GitOperationResult {
@@ -37,32 +61,15 @@ pub fn git_stage_impl(
                 message: format!("write index: {}", e.message()), backup_ref: None,
             };
         }
-        return GitOperationResult {
+        GitOperationResult {
             ok: true, action: "stage".to_string(),
-            message: format!("已暂存 {} 个文件", added), backup_ref: None,
-        };
-    }
-
-    let mut added = 0;
-    for path in pathspecs {
-        let p = std::path::Path::new(path);
-        if let Err(e) = index.add_path(p) {
-            return GitOperationResult {
-                ok: false, action: "stage".to_string(),
-                message: format!("add {:?}: {}", path, e.message()), backup_ref: None,
-            };
+            message: format!("已暂存 {} 个路径", added), backup_ref: None,
         }
-        added += 1;
-    }
-    if let Err(e) = index.write() {
-        return GitOperationResult {
-            ok: false, action: "stage".to_string(),
-            message: format!("write index: {}", e.message()), backup_ref: None,
-        };
-    }
-    GitOperationResult {
-        ok: true, action: "stage".to_string(),
-        message: format!("已暂存 {} 个路径", added), backup_ref: None,
+    } else {
+        GitOperationResult {
+            ok: true, action: "stage".to_string(),
+            message: "已暂存 0 个文件（未指定文件）".to_string(), backup_ref: None,
+        }
     }
 }
 

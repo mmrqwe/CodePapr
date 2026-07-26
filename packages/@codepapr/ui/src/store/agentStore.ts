@@ -6,7 +6,6 @@ import {
   BUILTIN_AGENTS,
   CommandDefinition,
   EditHistory,
-  Serializer,
   type AgentDefinition,
   type SkillDefinition,
   expandCommandTemplate,
@@ -90,7 +89,7 @@ import {
   normalizeSettings,
   resolveProviderName,
 } from './internals/settingsNormalizer';
-import { addConversationStats, getSessionConversationStats } from './internals/stats';
+import { addConversationStats, cloneConversationStats, getSessionConversationStats } from './internals/stats';
 import {
   normalizeProjectSnapshot,
   normalizeSkillEnabledState,
@@ -180,9 +179,7 @@ function upsertRecentWorkspace(
     return recent;
   }
   const name = normalizedPath.split(/[\\/]/).filter(Boolean).pop() ?? normalizedPath;
-  const existingIndex = recent.findIndex(
-    (entry) => entry.path === normalizedPath || entry.path === path.trim(),
-  );
+  const existingIndex = recent.findIndex((entry) => entry.path === normalizedPath);
   const now = Date.now();
   if (existingIndex >= 0) {
     const entry = recent[existingIndex];
@@ -237,6 +234,19 @@ function extractFilePathFromArgs(args: Record<string, unknown>): string {
   );
 }
 
+function buildModeSwitchMessage(mode: WorkMode): UIMessage {
+  return {
+    id: createId(),
+    role: 'assistant' as const,
+    workMode: mode,
+    content: `[Mode: ${mode.toUpperCase()}] ${mode === 'app' ? 'You are now in App mode. Generate interactive HTML applications for data visualization and exploration. Use tools to analyze data, write HTML, and then render with app_render.' : `You are now in ${mode} mode with full tool access. Previous ask-mode responses are for context only; use tools proactively for this task.`}`,
+    synthetic: true,
+    hidden: true,
+    carryForwardInContext: true,
+    timestamp: Date.now(),
+  };
+}
+
 export const useAgentStore = create<AgentState & AgentActions>()((set, get) => ({
       settings: DEFAULT_SETTINGS,
       workspacePath: '',
@@ -278,12 +288,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           settings = normalizeSettings(storedSettings ?? get().settings);
           set({ settings, settingsLoaded: true, _agent: null, _agentModel: null, _agentPromptKey: null });
 
-          // Only write back when there are real stored settings to migrate.
-          // On first launch `storedSettings` is null; saving defaults here would
-          // erase any API key that the backend just injected from the vault.
-          if (storedSettings && Serializer.stringify(storedSettings) !== Serializer.stringify(settings)) {
-            await saveAppSettings(settings);
-          }
+          // No proactive write-back on load: legacy plaintext-key migration is
+          // already handled (and re-persisted) by the backend's
+          // migrate_and_inject_secrets. Writing normalized settings back here
+          // would run on every launch and could feed an empty apiKey into the
+          // vault (interpreted as "user cleared the key") when vault injection
+          // returns nothing, destroying a stored key.
         } catch {
           settings = get().settings;
           set({ settingsLoaded: true, _agent: null, _agentModel: null, _agentPromptKey: null });
@@ -426,11 +436,19 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             : null;
           skillEnabledById = (meta.skill_enabled_by_id as Record<string, boolean>) ?? {};
           const rawStats = meta.conversation_stats as { primary?: unknown; fast?: unknown } | null;
+          // cloneConversationStats fills in any tier missing from older persisted
+          // data (e.g. the mentor tier added later), so loaded stats always have
+          // a complete primary/fast/mentor shape.
           conversationStats = rawStats && rawStats.primary && rawStats.fast
-            ? rawStats as typeof conversationStats
+            ? cloneConversationStats(rawStats as Parameters<typeof cloneConversationStats>[0])
             : createEmptyConversationStats();
           const rawSessionStats = meta.session_conversation_stats as Record<string, unknown> | null;
-          sessionConversationStats = rawSessionStats ?? {};
+          sessionConversationStats = {};
+          for (const [id, stats] of Object.entries(rawSessionStats ?? {})) {
+            sessionConversationStats[id] = cloneConversationStats(
+              stats as Parameters<typeof cloneConversationStats>[0]
+            );
+          }
           projectDiagnosticsReport = meta.project_diagnostics_report ?? null;
           sessionTodoLists = (meta.session_todo_lists as Record<string, unknown>) ?? {};
 
@@ -450,7 +468,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           conversationStats = snapshot.activeSessionId
             ? getSessionConversationStats(snapshot.sessionConversationStats ?? {}, snapshot.activeSessionId)
             : createEmptyConversationStats();
-          sessionConversationStats = snapshot.sessionConversationStats ?? {};
+          sessionConversationStats = {};
+          for (const [id, stats] of Object.entries(snapshot.sessionConversationStats ?? {})) {
+            sessionConversationStats[id] = cloneConversationStats(
+              stats as Parameters<typeof cloneConversationStats>[0]
+            );
+          }
           projectDiagnosticsReport = snapshot.projectDiagnosticsReport;
           messageCheckpoints = snapshot.messageCheckpoints ?? {};
           sessionTodoLists = snapshot.sessionTodoLists ?? {};
@@ -906,17 +929,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         if (slash) {
           const workspaceForSlash = get().workspacePath;
           const lower = slash.name.toLowerCase();
-          if (lower === 'undo' || lower === 'redo') {
-            appendInfoMessage(
-              set,
-              '命令已移除。请直接让代理执行回滚，或在 Git 面板中做显式恢复/回退。'
-            );
-            return;
-          }
           if (lower === 'help' || lower === 'commands') {
-            const customCommands = await listCommandDefinitions(invoke, workspaceForSlash).catch(
-              () => [] as CommandDefinition[]
-            );
+            const customCommands = workspaceForSlash
+              ? await listCommandDefinitions(invoke, workspaceForSlash).catch(() => [] as CommandDefinition[])
+              : [];
             appendInfoMessage(set, buildCommandHelpMessage(customCommands));
             return;
           }
@@ -972,8 +988,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             try {
               const condition = parseGoalCondition(goalArgs);
               goalCondition = condition;
-              const pipeIndex = goalArgs.indexOf('|');
-              goalUserText = pipeIndex > 0 ? goalArgs.slice(0, pipeIndex).trim() : '';
+              const hr = condition.humanReadable;
+              const parenIdx = hr.indexOf('（验收:');
+              goalUserText = parenIdx > 0 ? hr.slice(0, parenIdx).trim() : (condition.clauses.length === 0 ? hr : '');
               isGoalMode = true;
               effectiveInput = goalUserText || condition.humanReadable;
               effectiveDisplay = input;
@@ -985,23 +1002,39 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
               return;
             }
           }
-          // 自定义命令优先；找不到时使用内置提示模板。
-          const def = await loadCommandDefinition(invoke, workspaceForSlash, slash.name).catch(() => null);
-          const promptCommand = def ?? getBuiltinPromptCommand(lower);
-          if (promptCommand) {
-            if (promptCommand.model === 'fast') {
-              slashCommandModelHint = 'fast';
+          if (!isGoalMode && workspaceForSlash) {
+            const def = await loadCommandDefinition(invoke, workspaceForSlash, slash.name).catch(() => null);
+            const promptCommand = def ?? getBuiltinPromptCommand(lower);
+            if (promptCommand) {
+              if (promptCommand.model === 'fast') {
+                slashCommandModelHint = 'fast';
+              }
+              try {
+                const expanded = await expandCommandTemplate(promptCommand.template, slash.args, {
+                  readFile: (p) => readWorkspaceTextFile(invoke, workspaceForSlash, p),
+                  runShell: (command) => runWorkspaceInlineCommand(invoke, workspaceForSlash, command),
+                });
+                effectiveInput = expanded;
+                effectiveDisplay = input;
+              } catch (err) {
+                appendErrorMessage(set, formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'));
+                return;
+              }
             }
-            try {
-              const expanded = await expandCommandTemplate(promptCommand.template, slash.args, {
-                readFile: (p) => readWorkspaceTextFile(invoke, workspaceForSlash, p),
-                runShell: (command) => runWorkspaceInlineCommand(invoke, workspaceForSlash, command),
-              });
-              effectiveInput = expanded;
-              effectiveDisplay = input;
-            } catch (err) {
-              appendErrorMessage(set, formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'));
-              return;
+          } else if (!isGoalMode) {
+            const promptCommand = getBuiltinPromptCommand(lower);
+            if (promptCommand) {
+              if (promptCommand.model === 'fast') {
+                slashCommandModelHint = 'fast';
+              }
+              try {
+                const expanded = await expandCommandTemplate(promptCommand.template, slash.args, {});
+                effectiveInput = expanded;
+                effectiveDisplay = input;
+              } catch (err) {
+                appendErrorMessage(set, formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'));
+                return;
+              }
             }
           }
         }
@@ -1133,6 +1166,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             mcpToolDefinitions,
             mcpToolMappings,
             rulesSection,
+            memorySection,
             customPrompt: normalizedSettings.systemPrompt,
             lang: normalizedSettings.lang,
             skillDefinitions,
@@ -1189,6 +1223,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           let accumulatedStats: ICacheStatistics | undefined;
           let accumulatedSubagentFast: ICacheStatistics | undefined;
           let accumulatedSubagentPrimary: ICacheStatistics | undefined;
+          let accumulatedSubagentMentor: ICacheStatistics | undefined;
           let route = selectTaskModelRoute(
             {
               model: normalizedSettings.model,
@@ -1219,16 +1254,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             if (activeSessionId) {
               let contextMessages = sessionMessages[activeSessionId] ?? [];
               if (mode !== 'ask' && contextMessages.some((m) => m.role === 'assistant' && m.workMode === 'ask')) {
-                contextMessages = [...contextMessages, {
-                  id: createId(),
-                  role: 'assistant' as const,
-                  workMode: mode,
-                  content: `[Mode: ${mode.toUpperCase()}] ${mode === 'app' ? 'You are now in App mode. Generate interactive HTML applications for data visualization and exploration. Use tools to analyze data, write HTML, and then render with app_render.' : `You are now in ${mode} mode with full tool access. Previous ask-mode responses are for context only; use tools proactively for this task.`}`,
-                  synthetic: true,
-                  hidden: true,
-                  carryForwardInContext: true,
-                  timestamp: Date.now(),
-                }];
+                contextMessages = [...contextMessages, buildModeSwitchMessage(mode)];
               }
               agent = createAgent(
                 normalizedSettings,
@@ -1329,16 +1355,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
           let retryBaseMessages = [...(sessionMessages[activeSessionId!] ?? []), userMsg!];
           if (mode !== 'ask' && retryBaseMessages.some((m) => m.role === 'assistant' && m.workMode === 'ask')) {
-            retryBaseMessages = [...retryBaseMessages, {
-              id: createId(),
-              role: 'assistant' as const,
-              workMode: mode,
-              content: `[Mode: ${mode.toUpperCase()}] ${mode === 'app' ? 'You are now in App mode. Generate interactive HTML applications for data visualization and exploration. Use tools to analyze data, write HTML, and then render with app_render.' : `You are now in ${mode} mode with full tool access. Previous ask-mode responses are for context only; use tools proactively for this task.`}`,
-              synthetic: true,
-              hidden: true,
-              carryForwardInContext: true,
-              timestamp: Date.now(),
-            }];
+            retryBaseMessages = [...retryBaseMessages, buildModeSwitchMessage(mode)];
           }
           assistantMessageId = createId();
 
@@ -1463,6 +1480,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
                 response.subagentCacheStatsByTier.primary
               );
             }
+            if (response.subagentCacheStatsByTier?.mentor) {
+              accumulatedSubagentMentor = accumulateCacheStats(
+                accumulatedSubagentMentor,
+                response.subagentCacheStatsByTier.mentor
+              );
+            }
             return response;
           };
 
@@ -1491,6 +1514,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
               limits: {
                 maxIterations: normalizedSettings.goalMaxIterations,
                 maxWallClockMs: normalizedSettings.goalMaxWallClockMs,
+                planFirst: goalCondition.planFirst,
               },
               callbacks: {
                 runWorkerTurn: async (turnPrompt, isFeedback) => {
@@ -1574,14 +1598,25 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
                 },
                 runVerifier: async (transcript, conditionResult) => {
                   const isSubjective = goalCondition!.clauses.length === 0;
-                  const verifierResult = await runVerifier(transcript, conditionResult, goalCondition!.humanReadable, isSubjective, {
-                    provider: verifierProvider,
-                    providerName: verifierProviderName,
-                    settings: normalizedSettings,
-                    primaryModel: normalizedSettings.model,
-                    fastModel: normalizedSettings.fastModel,
-                    fastModelEnabled: normalizedSettings.fastModelEnabled,
-                  });
+                  const currentState = goalRunner.getState();
+                  const verifierResult = await runVerifier(
+                    transcript,
+                    conditionResult,
+                    goalCondition!.humanReadable,
+                    isSubjective,
+                    goalCondition!.strictness,
+                    (normalizedSettings.lang ?? 'zh-CN') as 'zh-CN' | 'zh-TW' | 'en',
+                    currentState.iteration,
+                    normalizedSettings.goalMaxIterations,
+                    {
+                      provider: verifierProvider,
+                      providerName: verifierProviderName,
+                      settings: normalizedSettings,
+                      primaryModel: normalizedSettings.model,
+                      fastModel: normalizedSettings.fastModel,
+                      fastModelEnabled: normalizedSettings.fastModelEnabled,
+                    }
+                  );
                   if (verifierResult.cacheStats) {
                     if (verifierResult.tier === 'fast') {
                       accumulatedSubagentFast = accumulateCacheStats(
@@ -1675,7 +1710,6 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             try {
               goalResult = await goalRunner.run();
             } catch (goalErr) {
-              // eslint-disable-next-line no-console
               console.error('[Goal] loop threw:', goalErr);
               useGoalStore.getState().clearGoal();
               const goalErrMsg = normalizedSettings.lang === 'en'
@@ -1830,7 +1864,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
               : nextMessages;
 
             const tierDeltas: Array<{
-              tier: 'primary' | 'fast';
+              tier: 'primary' | 'fast' | 'mentor';
               stats: ICacheStatistics;
               incrementRounds?: boolean;
             }> = [];
@@ -1842,6 +1876,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             }
             if (accumulatedSubagentPrimary) {
               tierDeltas.push({ tier: 'primary', stats: accumulatedSubagentPrimary });
+            }
+            if (accumulatedSubagentMentor) {
+              tierDeltas.push({ tier: 'mentor', stats: accumulatedSubagentMentor });
             }
             const applyTierDeltas = (
               base: ConversationStats,
@@ -1954,7 +1991,6 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           }
           saveCurrentProjectState(get());
         } catch (err) {
-          // eslint-disable-next-line no-console
           console.error('[sendMessage] outer catch:', err);
           if (err instanceof DOMException && err.name === 'AbortError') {
             set({ isLoading: false });

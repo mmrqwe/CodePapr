@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { type GitHistorySummary } from '@codepapr/common';
+import { type GitHistorySummary, assertValidGitReference } from '@codepapr/common';
 import {
   ToolRegistry,
   WORKSPACE_INTELLIGENCE_TOOL_DEFINITIONS,
@@ -43,6 +43,7 @@ import { usePreviewStore, type PreviewSession } from '../store/previewStore';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { useAgentStore } from '../store/agentStore';
 import { usePermissionStore, isAbsolutePath } from '../store/permissionStore';
+import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
 import {
   applySearchReplaceDiff,
   applySearchReplacePatch,
@@ -1648,7 +1649,7 @@ name: 'web_download_file',
         permissions: {
           type: 'array',
           items: { type: 'string' },
-          description: '可选。应用需要的权限列表（必须是 level 允许范围内的子集）。可选值：storage:read, storage:write, http:get, http:post, fs:read, fs:write, llm:chat, agent:run:<agentName>, workspace:read, workspace:write, workspace:exec。',
+          description: '可选。应用需要的权限列表（必须是 level 允许范围内的子集）。可选值：storage:read, storage:write, http:get, http:post, fs:read, fs:write, agent:run:<agentName>, workspace:read, workspace:write, workspace:exec。',
         },
         level: {
           type: 'number',
@@ -1884,6 +1885,7 @@ export function registerWorkspaceTools(
           originalPath: e.oldPath ?? undefined,
           indexStatus: e.indexStatus,
           worktreeStatus: e.worktreeStatus,
+          isUntracked: e.isUntracked,
         })),
         raw: '',
         ...(result.branch ? { branch: result.branch } : {}),
@@ -1986,6 +1988,21 @@ export function registerWorkspaceTools(
     const permissions = (args.permissions as string[] | undefined) ?? [];
     const agents = (args.agents as Array<{name: string; model?: string; systemPrompt?: string; tools?: string[]; maxToolRounds?: number}> | undefined) ?? [];
 
+    for (const a of agents) {
+      if (!a.name || typeof a.name !== 'string' || a.name.trim().length === 0) {
+        throw new Error('agents 每个元素必须包含非空 name 字段');
+      }
+      if (a.name.length > 64) {
+        throw new Error(`agent name 超过 64 字符限制: ${a.name}`);
+      }
+      if (a.model !== undefined && !['main', 'fast', 'mentor'].includes(a.model)) {
+        throw new Error(`agent model 必须是 main/fast/mentor，收到: ${a.model}`);
+      }
+      if (a.maxToolRounds !== undefined && (typeof a.maxToolRounds !== 'number' || a.maxToolRounds < 1)) {
+        throw new Error(`agent maxToolRounds 必须是正整数: ${a.maxToolRounds}`);
+      }
+    }
+
     if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(rawAppId)) {
       throw new Error(
         `appId 必须是 kebab-case（仅小写字母、数字、连字符，1-63 字符），收到: ${rawAppId}`
@@ -1993,11 +2010,41 @@ export function registerWorkspaceTools(
     }
 
     if (html.length > 2_000_000) {
-      throw new Error(`HTML 内容超过 2MB 上限（当前 ${html.length} 字节），请精简后重试。`);
+      throw new Error(`HTML 内容超过 2MB 上限（当前 ${html.length} 字符），请精简后重试。`);
     }
 
     if (command && (typeof port !== 'number' || port < 1024 || port > 65535)) {
       throw new Error(`提供 command 时必须同时提供有效 port（1024-65535）`);
+    }
+    if (!command && port !== undefined) {
+      throw new Error(`提供 port 时必须同时提供 command`);
+    }
+    if (!command && cmdArgs && cmdArgs.length > 0) {
+      throw new Error(`提供 args 时必须同时提供 command`);
+    }
+    if (title.trim().length === 0) {
+      throw new Error(`title 不能为空`);
+    }
+
+    const appLevel = typeof args.level === 'number' ? args.level : 1;
+    if (![0, 1, 2, 3].includes(appLevel)) {
+      throw new Error(`level 必须是 0/1/2/3，收到: ${args.level}`);
+    }
+
+    const LEVEL_GRANTS: Record<number, Set<string>> = {
+      0: new Set(),
+      1: new Set(['storage:read', 'storage:write', 'fs:read', 'fs:write', 'agent:run:*', 'workspace:read']),
+      2: new Set(['storage:read', 'storage:write', 'fs:read', 'fs:write', 'agent:run:*', 'workspace:read', 'http:get', 'http:post']),
+      3: new Set(['storage:read', 'storage:write', 'fs:read', 'fs:write', 'agent:run:*', 'workspace:read', 'http:get', 'http:post', 'workspace:write', 'workspace:exec']),
+    };
+    const grants = LEVEL_GRANTS[appLevel] ?? LEVEL_GRANTS[1];
+    const invalidPerms = permissions.filter((p) => {
+      if (grants.has(p)) return false;
+      if (p.startsWith('agent:run:') && grants.has('agent:run:*')) return false;
+      return true;
+    });
+    if (invalidPerms.length > 0) {
+      throw new Error(`permissions ${JSON.stringify(invalidPerms)} 超出 level ${appLevel} 允许范围，请提升 level 或移除这些权限。`);
     }
 
     const manifest = {
@@ -2006,13 +2053,13 @@ export function registerWorkspaceTools(
       version: '0.1.0',
       entry: 'index.html',
       permissions,
-      level: typeof args.level === 'number' ? args.level : 1,
+      level: appLevel,
       agents: agents.map((a) => ({
         name: a.name,
         model: a.model ?? 'main',
         systemPrompt: a.systemPrompt,
         ...(a.tools ? { tools: a.tools } : {}),
-        ...(a.maxToolRounds ? { maxToolRounds: a.maxToolRounds } : {}),
+        ...(a.maxToolRounds ? { maxToolRounds: Math.min(a.maxToolRounds, 50) } : {}),
       })),
       ...(command ? { command } : {}),
       ...(cmdArgs && cmdArgs.length > 0 ? { args: cmdArgs } : {}),
@@ -2020,39 +2067,61 @@ export function registerWorkspaceTools(
     };
 
     const manifestPath = `.CodePapr/apps/${rawAppId}/manifest.json`;
-    await invoke<WriteTextFileResult>('write_text_file', {
+    const manifestJson = JSON.stringify(manifest, null, 2);
+    const manifestBefore = await readBeforeContent(manifestPath);
+    const manifestResult = await invoke<WriteTextFileResult>('write_text_file', {
       workspacePath: workspace(),
       relativePath: manifestPath,
-      content: JSON.stringify(manifest, null, 2),
+      content: manifestJson,
+    });
+    editHistory?.record({
+      path: manifestResult.path,
+      before: manifestBefore,
+      after: manifestJson,
     });
 
     const indexRelativePath = `.CodePapr/apps/${rawAppId}/index.html`;
+    const indexBefore = await readBeforeContent(indexRelativePath);
 
-    await invoke<WriteTextFileResult>('write_text_file', {
+    const indexResult = await invoke<WriteTextFileResult>('write_text_file', {
       workspacePath: workspace(),
       relativePath: indexRelativePath,
       content: html,
     });
+    editHistory?.record({
+      path: indexResult.path,
+      before: indexBefore,
+      after: html,
+    });
 
-    let totalBytes = html.length;
+    const writtenPaths: string[] = [manifestResult.path, indexResult.path];
+
+    let totalBytes = new TextEncoder().encode(html).length;
 
     if (rawFiles && rawFiles.length > 0) {
       for (const file of rawFiles) {
         if (!file.relativePath || typeof file.relativePath !== 'string') {
           throw new Error('files 每个元素必须包含 relativePath');
         }
-        if (!file.content || typeof file.content !== 'string') {
+        if (file.content == null || typeof file.content !== 'string') {
           throw new Error('files 每个元素必须包含 content');
         }
         const filePath = `.CodePapr/apps/${rawAppId}/${file.relativePath}`;
-        if (filePath.includes('..')) {
-          throw new Error(`文件路径不能包含 .. : ${file.relativePath}`);
+        if (filePath.includes('..') || file.relativePath.includes('\\') || file.relativePath.startsWith('/') || file.relativePath.includes('\0')) {
+          throw new Error(`文件路径不合法（不能包含 ..、\\、绝对路径或 null 字节）: ${file.relativePath}`);
         }
+        const fileBefore = await readBeforeContent(filePath);
         const writeResult = await invoke<WriteTextFileResult>('write_text_file', {
           workspacePath: workspace(),
           relativePath: filePath,
           content: file.content,
         });
+        editHistory?.record({
+          path: writeResult.path,
+          before: fileBefore,
+          after: file.content,
+        });
+        writtenPaths.push(writeResult.path);
         totalBytes += writeResult.bytes;
       }
     }
@@ -2061,6 +2130,12 @@ export function registerWorkspaceTools(
       appId: rawAppId,
       workspacePath: workspace(),
     });
+
+    const existingApp = useAppRuntimeStore.getState().apps.find((a) => a.appId === rawAppId);
+    if (existingApp?.pid) {
+      try { await invoke('stop_background_process', { pid: existingApp.pid }); } catch { /* best-effort */ }
+      useAppRuntimeStore.getState().setAppStopped(rawAppId);
+    }
 
     useAppRuntimeStore.getState().mountApp({
       appId: rawAppId,
@@ -2073,6 +2148,8 @@ export function registerWorkspaceTools(
       port: port ?? undefined,
       manifestJson: JSON.stringify(manifest),
     });
+
+    notifyWorkspaceMutation(writtenPaths);
 
     const hasBackend = !!command;
     return {
@@ -2088,8 +2165,16 @@ export function registerWorkspaceTools(
   });
 
   registry.register(toolByName('app_list'), async () => {
-    const apps = useAppRuntimeStore.getState().apps;
-    return apps.map((app) => ({
+    const storeApps = useAppRuntimeStore.getState().apps;
+    const storeIds = new Set(storeApps.map((a) => a.appId));
+
+    let diskApps: Array<{ appId: string; title: string; command?: string; port?: number }> = [];
+    try {
+      const discovered = await invoke<Array<{ appId: string; title: string; command?: string; port?: number }>>('scan_workspace_apps', { workspacePath: workspace() });
+      diskApps = discovered.filter((d) => !storeIds.has(d.appId));
+    } catch { /* best-effort */ }
+
+    const fromStore = storeApps.map((app) => ({
       appId: app.appId,
       title: app.title,
       hasBackend: !!(app.command && app.port),
@@ -2097,6 +2182,15 @@ export function registerWorkspaceTools(
       port: app.port ?? null,
       url: app.url ?? null,
     }));
+    const fromDisk = diskApps.map((d) => ({
+      appId: d.appId,
+      title: d.title,
+      hasBackend: !!(d.command && d.port),
+      isRunning: false,
+      port: d.port ?? null,
+      url: null,
+    }));
+    return [...fromStore, ...fromDisk];
   });
 
   registry.register(toolByName('app_start'), async (args: Record<string, unknown>) => {
@@ -2110,13 +2204,22 @@ export function registerWorkspaceTools(
     const available: boolean = await invoke('check_port_available', { port: app.port });
     if (!available) throw new Error(`端口 ${app.port} 已被占用`);
 
+    const url = `http://localhost:${app.port}/`;
     const result = await invoke<{ pid: number }>('start_workspace_background_command', {
       workspacePath: workspace(),
       command: app.command,
       args: app.args ?? [],
+      previewUrl: url,
     });
-    const url = `http://localhost:${app.port}/`;
     useAppRuntimeStore.getState().setAppRunning(appId, result.pid, url);
+
+    await new Promise((r) => setTimeout(r, 800));
+    const stillAvailable: boolean = await invoke('check_port_available', { port: app.port });
+    if (stillAvailable) {
+      useAppRuntimeStore.getState().setAppStopped(appId);
+      throw new Error(`应用 '${appId}' 后端启动失败：进程已退出或端口 ${app.port} 未被监听，请检查 command/args 配置。`);
+    }
+
     return { appId, pid: result.pid, url, started: true };
   });
 
@@ -2127,9 +2230,10 @@ export function registerWorkspaceTools(
     if (!app) throw new Error(`应用 '${appId}' 不存在`);
     if (!app.pid) throw new Error(`应用 '${appId}' 后端未在运行`);
 
-    try { await invoke('stop_background_process', { pid: app.pid }); } catch { /* best-effort */ }
+    let killFailed = false;
+    try { await invoke('stop_background_process', { pid: app.pid }); } catch { killFailed = true; }
     useAppRuntimeStore.getState().setAppStopped(appId);
-    return { appId, stopped: true };
+    return { appId, stopped: true, ...(killFailed ? { warning: '进程停止命令失败，后端进程可能仍在运行并占用端口。' } : {}) };
   });
 
   registry.register(toolByName('app_delete'), async (args: Record<string, unknown>) => {
@@ -2138,10 +2242,9 @@ export function registerWorkspaceTools(
     const app = store.apps.find((a) => a.appId === appId);
     if (!app) throw new Error(`应用 '${appId}' 不存在`);
 
-    if (app.pid) {
-      try { await invoke('stop_background_process', { pid: app.pid }); } catch { /* best-effort */ }
-    }
     try { await invoke('papr_delete_app', { appId }); } catch { /* best-effort */ }
+    try { await invoke('unregister_app_workspace', { appId }); } catch { /* best-effort */ }
+    usePaprPermissionStore.getState().clearManifest(appId);
     useAppRuntimeStore.getState().closeApp(appId);
     return { appId, deleted: true };
   });
@@ -3013,13 +3116,19 @@ export function registerWorkspaceTools(
     const branchName = asString(args.branchName, 'branchName');
     const create = asOptionalBoolean(args.create, 'create');
     const createIfMissing = asOptionalBoolean(args.createIfMissing, 'createIfMissing');
+    const startPoint = asOptionalString(args.startPoint);
 
     try {
+      assertValidGitReference(branchName, 'branchName');
+      if (startPoint) {
+        assertValidGitReference(startPoint, 'startPoint');
+      }
       const result = await invoke<import('../utils/snapshot').GitOperationResult>('git_branch_checkout', {
         workspacePath: workspace(),
         branchName,
         create: create ?? undefined,
         createIfMissing: createIfMissing ?? undefined,
+        startPoint: startPoint ?? undefined,
       });
       return { available: true, isRepo: true, ok: result.ok, raw: result.message ?? '', action: 'branch_checkout', message: result.message };
     } catch (err) {
@@ -3069,24 +3178,50 @@ export function registerWorkspaceTools(
   registry.register(toolByName('workspace_git_restore'), async (args: Record<string, unknown>) => {
     const pathspecs = asOptionalStringArray(args.pathspecs);
     const source = asOptionalString(args.source);
+    const snapshot = asOptionalBoolean(args.snapshot, 'snapshot') ?? true;
+    const includeUntracked = asOptionalBoolean(args.includeUntracked, 'includeUntracked');
 
     try {
+      if (source) {
+        assertValidGitReference(source, 'source');
+      }
+
+      let backupRef: string | undefined;
+      if (snapshot) {
+        const snap = await invoke<import('../utils/snapshot').SnapshotInfo>('snapshot_create', {
+          workspacePath: workspace(),
+          label: `CodePapr safety snapshot | restore | ${source ?? 'HEAD'} | ${Date.now()}`,
+        });
+        backupRef = snap.shortHash;
+      }
+
       const result = await invoke<import('../utils/snapshot').GitOperationResult>('git_restore_files', {
         workspacePath: workspace(),
         pathspecs: pathspecs ?? undefined,
         source: source ?? undefined,
+        includeUntracked: includeUntracked ?? false,
       });
-      return { available: true, isRepo: true, ok: result.ok, raw: result.message ?? '', action: 'restore', message: result.message };
+      return {
+        available: true,
+        isRepo: true,
+        ok: result.ok,
+        raw: result.message ?? '',
+        action: 'restore' as const,
+        message: result.ok && backupRef
+          ? `${result.message}（安全快照 ${backupRef}）`
+          : result.message,
+        ...(backupRef ? { backupBranch: backupRef } : {}),
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return { available: false, isRepo: false, ok: false, raw: msg, action: 'restore', message: `恢复失败: ${msg}` };
+      return { available: false, isRepo: false, ok: false, raw: msg, action: 'restore' as const, message: `恢复失败: ${msg}` };
     }
   });
 
   registry.register(toolByName('workspace_git_reset'), async (args: Record<string, unknown>) => {
     const target = asString(args.target, 'target');
-
     try {
+      assertValidGitReference(target, 'target');
       const result = await invoke<{ ok: boolean; filesRestored: number; filesDeleted: number; backupRef: string | null; error: string | null }>(
         'restore_execute',
         { workspacePath: workspace(), targetSha: target }

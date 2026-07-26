@@ -198,12 +198,14 @@ export interface IAgentResponse {
   reasoningContent?: string;
   toolCalls?: IToolCall[];
   cacheStats?: ICacheStatistics;
-  /** Per-tier cache stats accumulated from subagent (task/explore/scout) runs,
-   *  kept separate from `cacheStats` (which reflects the main agent only) so
-   *  the dashboard can attribute fast vs primary model usage correctly. */
+  /** Per-tier cache stats accumulated from subagent (task/explore/scout/mentor)
+   *  runs, kept separate from `cacheStats` (which reflects the main agent only)
+   *  so the dashboard can attribute fast vs primary vs mentor model usage
+   *  correctly. */
   subagentCacheStatsByTier?: {
     primary?: ICacheStatistics;
     fast?: ICacheStatistics;
+    mentor?: ICacheStatistics;
   };
   question?: QuestionData;
 }
@@ -455,6 +457,9 @@ export interface GoalConditionClause {
   negate?: boolean;
 }
 
+/** Verifier 严格度：strict=零容忍，normal=默认，loose=有明显进展即可 */
+export type GoalStrictness = 'strict' | 'normal' | 'loose';
+
 /** 完整的验证条件，多个子句 AND 在一起 */
 export interface GoalCondition {
   clauses: GoalConditionClause[];
@@ -462,6 +467,10 @@ export interface GoalCondition {
   rawText: string;
   /** 人类可读的条件描述 */
   humanReadable: string;
+  /** Verifier 严格度（默认 normal） */
+  strictness: GoalStrictness;
+  /** 第 1 轮是否只做规划不执行 */
+  planFirst: boolean;
 }
 
 /** 单个子句的执行结果 */
@@ -486,6 +495,10 @@ export interface GoalVerdict {
   verdict: 'SATISFIED' | 'NOT_MET' | 'AMBIGUOUS';
   evidence: string;
   missing?: string;
+  /** 本轮相对进展评估 0-1（0=完全没动，1=完成），用于衡量 Worker 是否在有效推进 */
+  progress?: number;
+  /** 失败模式分类，用于反馈给 Worker 指导下一轮策略调整 */
+  failureMode?: 'no_action' | 'wrong_approach' | 'partial_fix' | 'regression' | 'unknown';
 }
 
 /** Goal 运行状态 */
@@ -522,6 +535,8 @@ export interface GoalRunnerLimits {
   maxWallClockMs: number;
   maxCostTokens?: number;
   compactionEveryNIterations?: number;
+  /** 第 1 轮是否只做规划不执行（只读探索 + 输出子计划） */
+  planFirst?: boolean;
 }
 
 // ============================================================================
@@ -574,7 +589,6 @@ export type PaprPermission =
   | 'http:post'
   | 'fs:read'
   | 'fs:write'
-  | 'llm:chat'
   | 'workspace:read'
   | 'workspace:write'
   | 'workspace:exec'

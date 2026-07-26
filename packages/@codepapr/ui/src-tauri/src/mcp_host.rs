@@ -17,7 +17,9 @@ use std::{
     sync::{Arc, OnceLock},
     time::Duration,
 };
+use tauri::{AppHandle, Emitter};
 use tokio::{process::Command, sync::Mutex as AsyncMutex};
+use futures_util::future::join_all;
 
 const DEFAULT_RESULT_MAX_BYTES: usize = 200_000;
 
@@ -25,8 +27,53 @@ type McpRunningClient = RunningService<RoleClient, ()>;
 type SharedMcpClient = Arc<AsyncMutex<McpRunningClient>>;
 
 static MCP_CLIENTS: OnceLock<AsyncMutex<HashMap<String, SharedMcpClient>>> = OnceLock::new();
-static MCP_TOOL_CACHE: OnceLock<AsyncMutex<HashMap<String, McpListToolsResult>>> = OnceLock::new();
 static EXPANDED_PATH_CACHE: OnceLock<String> = OnceLock::new();
+static PENDING_CONFIRMATIONS: OnceLock<AsyncMutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>> = OnceLock::new();
+static STORED_SETTINGS: OnceLock<AsyncMutex<Option<McpSettings>>> = OnceLock::new();
+
+fn stored_settings() -> &'static AsyncMutex<Option<McpSettings>> {
+    STORED_SETTINGS.get_or_init(|| AsyncMutex::new(None))
+}
+
+pub async fn update_settings(settings: McpSettings) {
+    *stored_settings().lock().await = Some(settings);
+}
+
+async fn resolve_settings(explicit: Option<McpSettings>) -> Result<McpSettings, String> {
+    if let Some(s) = explicit {
+        update_settings(s.clone()).await;
+        return Ok(s);
+    }
+    stored_settings()
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "MCP settings not initialized. Call list_tools or update_settings first.".to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpConfirmRequest {
+    pub request_id: String,
+    pub server_id: String,
+    pub server_name: String,
+    pub tool_name: String,
+    pub arguments: Value,
+}
+
+fn pending_confirmations() -> &'static AsyncMutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>> {
+    PENDING_CONFIRMATIONS.get_or_init(|| AsyncMutex::new(HashMap::new()))
+}
+
+pub async fn resolve_confirmation(request_id: String, approved: bool) -> Result<(), String> {
+    let sender = pending_confirmations()
+        .lock()
+        .await
+        .remove(&request_id)
+        .ok_or_else(|| format!("No pending confirmation with id: {request_id}"))?;
+    let _ = sender.send(approved);
+    Ok(())
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,6 +100,10 @@ pub struct McpServerConfig {
     pub headers: HashMap<String, String>,
     pub allowed_tools: Vec<String>,
     pub denied_tools: Vec<String>,
+    #[serde(default)]
+    pub force_mutating: Vec<String>,
+    #[serde(default)]
+    pub force_readonly: Vec<String>,
     pub permission_mode: String,
     pub require_confirmation: bool,
     pub timeout_seconds: Option<u64>,
@@ -136,10 +187,6 @@ fn clients() -> &'static AsyncMutex<HashMap<String, SharedMcpClient>> {
     MCP_CLIENTS.get_or_init(|| AsyncMutex::new(HashMap::new()))
 }
 
-fn tool_cache() -> &'static AsyncMutex<HashMap<String, McpListToolsResult>> {
-    MCP_TOOL_CACHE.get_or_init(|| AsyncMutex::new(HashMap::new()))
-}
-
 fn sanitize_name_part(value: &str) -> String {
     let mut out = String::new();
     for ch in value.trim().chars() {
@@ -163,10 +210,6 @@ fn build_display_name(server_id: &str, tool_name: &str) -> String {
         sanitize_name_part(server_id),
         sanitize_name_part(tool_name)
     )
-}
-
-fn settings_cache_key(settings: &McpSettings) -> String {
-    serde_json::to_string(settings).unwrap_or_else(|_| "invalid".to_string())
 }
 
 fn expanded_path() -> String {
@@ -354,24 +397,32 @@ fn looks_mutating_tool(tool_name: &str) -> bool {
         name == *prefix
             || name.starts_with(&format!("{prefix}_"))
             || name.starts_with(&format!("{prefix}-"))
+            || name.starts_with(&format!("{prefix}."))
     })
+}
+
+fn is_mutating_with_overrides(server: &McpServerConfig, tool_name: &str) -> bool {
+    if server.force_readonly.iter().any(|p| matches_pattern(p, tool_name)) {
+        return false;
+    }
+    if server.force_mutating.iter().any(|p| matches_pattern(p, tool_name)) {
+        return true;
+    }
+    looks_mutating_tool(tool_name)
 }
 
 fn validate_tool_policy(server: &McpServerConfig, tool_name: &str) -> Result<(), String> {
     if !is_tool_allowed(server, tool_name) {
         return Err(format!("MCP tool is not allowed by policy: {tool_name}"));
     }
-    if server.permission_mode == "read-only" && looks_mutating_tool(tool_name) {
+    if server.permission_mode == "read-only" && is_mutating_with_overrides(server, tool_name) {
+        if server.allowed_tools.iter().any(|p| matches_pattern(p, tool_name)) {
+            return Ok(());
+        }
         return Err(format!(
             "MCP tool '{tool_name}' looks mutating but server '{}' is read-only. Allow it explicitly by changing permission mode or tool policy.",
             server.name
         ));
-    }
-    // Note: require_confirmation is currently not enforced because there is no
-    // built-in confirmation dialog. Future: surface confirmation via UI before
-    // executing the tool when require_confirmation is true.
-    if server.require_confirmation && server.permission_mode != "read-only" {
-        eprintln!("[MCP] Tool '{tool_name}' on server '{}' requires confirmation, but confirmation dialog is not implemented yet", server.id);
     }
     Ok(())
 }
@@ -515,10 +566,34 @@ async fn get_or_connect_client(server: &McpServerConfig) -> Result<SharedMcpClie
         }
     }
 
-    let client = connect_client(server).await?;
-    let mut guard = clients().lock().await;
-    guard.insert(key, client.clone());
-    Ok(client)
+    const MAX_RETRIES: u32 = 2;
+    let mut last_err = String::new();
+    for attempt in 0..=MAX_RETRIES {
+        if attempt > 0 {
+            let backoff = Duration::from_millis(500 * 2u64.pow(attempt - 1));
+            eprintln!(
+                "[MCP] Retry {attempt}/{MAX_RETRIES} for server '{}' in {}ms",
+                server.name,
+                backoff.as_millis()
+            );
+            tokio::time::sleep(backoff).await;
+        }
+        match connect_client(server).await {
+            Ok(client) => {
+                let mut guard = clients().lock().await;
+                guard.insert(key, client.clone());
+                return Ok(client);
+            }
+            Err(err) => {
+                last_err = err;
+                if server.transport != "stdio" {
+                    break;
+                }
+            }
+        }
+    }
+
+    Err(last_err)
 }
 
 fn truncate_json(value: Value, max_bytes: usize) -> Value {
@@ -548,6 +623,8 @@ pub async fn list_tools(
     settings: McpSettings,
     refresh: bool,
 ) -> Result<McpListToolsResult, String> {
+    update_settings(settings.clone()).await;
+
     if !settings.enabled || !settings.expose_tools {
         let _ = disconnect_all().await;
         return Ok(McpListToolsResult {
@@ -556,34 +633,42 @@ pub async fn list_tools(
         });
     }
 
-    let cache_key = settings_cache_key(&settings);
-    if !refresh {
-        if let Some(cached) = tool_cache().lock().await.get(&cache_key).cloned() {
-            return Ok(cached);
+    let enabled_servers: Vec<McpServerConfig> = settings
+        .servers
+        .iter()
+        .filter(|server| server.enabled)
+        .cloned()
+        .collect();
+
+    let futures = enabled_servers.iter().map(|server| {
+        let server = server.clone();
+        async move {
+            let server_id = sanitize_name_part(&server.id);
+            let result = async {
+                let client = get_or_connect_client(&server).await?;
+                let client = client.lock().await;
+                client
+                    .list_all_tools()
+                    .await
+                    .map_err(|err| format!("Failed to list tools: {err}"))
+            }
+            .await;
+            (server, server_id, result)
         }
-    }
+    });
+
+    let results = join_all(futures).await;
 
     let mut tools = Vec::new();
     let mut errors = Vec::new();
 
-    for server in settings.servers.iter().filter(|server| server.enabled) {
-        let server_id = sanitize_name_part(&server.id);
-        let result = async {
-            let client = get_or_connect_client(server).await?;
-            let client = client.lock().await;
-            client
-                .list_all_tools()
-                .await
-                .map_err(|err| format!("Failed to list tools: {err}"))
-        }
-        .await;
-
+    for (server, server_id, result) in results {
         match result {
             Ok(list) => {
                 let mut filtered = 0u32;
                 for tool in list {
                     let tool_name = tool.name.to_string();
-                    if let Err(reason) = validate_tool_policy(server, &tool_name) {
+                    if let Err(reason) = validate_tool_policy(&server, &tool_name) {
                         eprintln!(
                             "[MCP] Tool '{tool_name}' on server '{}' filtered by policy: {reason}",
                             server.name
@@ -615,17 +700,18 @@ pub async fn list_tools(
     }
 
     tools.sort_by(|left, right| left.display_name.cmp(&right.display_name));
-    let result = McpListToolsResult { tools, errors };
-    tool_cache().lock().await.insert(cache_key, result.clone());
-    Ok(result)
+    Ok(McpListToolsResult { tools, errors })
 }
 
 pub async fn call_tool(
-    settings: McpSettings,
+    app: Option<AppHandle>,
+    settings: Option<McpSettings>,
     server_id: String,
     tool_name: String,
     arguments: Value,
 ) -> Result<McpCallToolResult, String> {
+    let settings = resolve_settings(settings).await?;
+
     if !settings.enabled || !settings.expose_tools {
         let _ = disconnect_all().await;
         return Err("MCP is disabled".to_string());
@@ -633,6 +719,44 @@ pub async fn call_tool(
     let server = find_server(&settings, &server_id)
         .ok_or_else(|| format!("MCP server not found: {server_id}"))?;
     validate_tool_policy(&server, &tool_name)?;
+
+    if server.require_confirmation && server.permission_mode != "read-only" {
+        if let Some(app_handle) = &app {
+            let request_id = format!("mcp_{}_{}", sanitize_name_part(&server_id), uuid_v4());
+            let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+            pending_confirmations().lock().await.insert(request_id.clone(), tx);
+
+            let _ = app_handle.emit(
+                "mcp-confirm-request",
+                McpConfirmRequest {
+                    request_id: request_id.clone(),
+                    server_id: sanitize_name_part(&server_id),
+                    server_name: server.name.clone(),
+                    tool_name: tool_name.clone(),
+                    arguments: arguments.clone(),
+                },
+            );
+
+            let approved = match tokio::time::timeout(Duration::from_secs(120), rx).await {
+                Ok(Ok(approved)) => approved,
+                Ok(Err(_)) => {
+                    pending_confirmations().lock().await.remove(&request_id);
+                    return Err("Confirmation channel closed".to_string());
+                }
+                Err(_) => {
+                    pending_confirmations().lock().await.remove(&request_id);
+                    return Err("Confirmation timed out".to_string());
+                }
+            };
+
+            if !approved {
+                return Err(format!(
+                    "MCP tool '{tool_name}' on server '{}' was denied by user",
+                    server.name
+                ));
+            }
+        }
+    }
 
     let max_bytes = settings
         .result_max_bytes
@@ -663,6 +787,20 @@ pub async fn call_tool(
     })
 }
 
+fn uuid_v4() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    let counter = {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    };
+    format!("{nanos:08x}_{counter:08x}")
+}
+
 pub async fn list_status(settings: McpSettings) -> Vec<McpServerStatus> {
     let guard = clients().lock().await;
     let mut result = Vec::new();
@@ -687,11 +825,33 @@ pub async fn list_status(settings: McpSettings) -> Vec<McpServerStatus> {
     result
 }
 
-pub async fn clear_tool_cache() -> usize {
-    let mut guard = tool_cache().lock().await;
-    let count = guard.len();
-    guard.clear();
-    count
+/// Prune dead connections and return the list of server ids that were removed.
+pub async fn health_check() -> Vec<String> {
+    let mut guard = clients().lock().await;
+    let dead_keys: Vec<String> = guard
+        .iter()
+        .filter_map(|(key, client)| {
+            let closed = client
+                .try_lock()
+                .map(|locked| locked.is_closed())
+                .unwrap_or(false);
+            if closed {
+                Some(key.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let mut pruned = Vec::new();
+    for key in dead_keys {
+        guard.remove(&key);
+        let server_id = key.split('\u{1e}').next().unwrap_or(&key).to_string();
+        if !pruned.contains(&server_id) {
+            pruned.push(server_id);
+        }
+    }
+    pruned
 }
 
 pub async fn disconnect_all() -> Result<usize, String> {
@@ -793,6 +953,8 @@ pub async fn preview_mcp_server(
         headers: HashMap::new(),
         allowed_tools: vec![],
         denied_tools: vec![],
+        force_mutating: vec![],
+        force_readonly: vec![],
         permission_mode: "read-only".to_string(),
         require_confirmation: false,
         timeout_seconds,
@@ -860,8 +1022,6 @@ pub async fn disconnect_server(settings: McpSettings, server_id: String) -> Resu
         closed += 1;
     }
 
-    // Also drop the cached tool list for this server (best-effort: clear all since cache is keyed on full settings).
-    tool_cache().lock().await.clear();
     Ok(closed)
 }
 
@@ -889,6 +1049,8 @@ mod tests {
             headers: hdrs,
             allowed_tools: vec![],
             denied_tools: vec![],
+            force_mutating: vec![],
+            force_readonly: vec![],
             permission_mode: "read-only".to_string(),
             require_confirmation: false,
             timeout_seconds: Some(60),

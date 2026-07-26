@@ -267,6 +267,37 @@ describe('GoalRunner', () => {
     expect(DEFAULT_GOAL_MAX_ITERATIONS).toBe(20);
     expect(DEFAULT_GOAL_MAX_WALL_CLOCK_MS).toBe(1_800_000);
   });
+
+  it('plan-first 模式第 1 轮跳过条件评估和 Verifier', async () => {
+    const condition = parseGoalCondition('--plan-first exec:npm test');
+    let evalCount = 0;
+
+    const runner = new GoalRunner({
+      condition,
+      userGoalText: '',
+      limits: { maxIterations: 5, maxWallClockMs: 60_000, planFirst: true },
+      callbacks: {
+        runWorkerTurn: vi.fn().mockResolvedValue(makeWorkerResult('plan')),
+        runVerifier: vi.fn().mockImplementation(async (_transcript, conditionResult) => {
+          return makeVerdict(conditionResult.met ? 'SATISFIED' : 'NOT_MET');
+        }),
+        evaluateCondition: vi.fn().mockImplementation(async () => {
+          evalCount += 1;
+          return makeConditionResult(evalCount >= 2);
+        }),
+        onStateChange: vi.fn(),
+        isAborted: () => false,
+      },
+    });
+
+    const result = await runner.run();
+    expect(result.status).toBe('satisfied');
+    // 第 1 轮跳过评估，evaluateCondition 从第 2 轮开始调用
+    // 第 2 轮 evalCount=1 (false), 第 3 轮 evalCount=2 (true) → satisfied
+    expect(result.iteration).toBe(3);
+    // feedbackHistory 只有 2 条（第 1 轮被跳过）
+    expect(result.feedbackHistory).toHaveLength(2);
+  });
 });
 
 describe('serializeGoalState', () => {

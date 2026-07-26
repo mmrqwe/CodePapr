@@ -20,7 +20,7 @@ import {
   type WorkspaceMapSymbolSummary,
   type WorkspaceProjectGraphResult,
 } from '../tools/workspaceToolUtils';
-import { resolveProjectMapSymbolOverrides } from '../tools/workspaceProjectMapLsp';
+import { resolveProjectMapSymbolOverrides, globalLspPool } from '../tools/workspaceProjectMapLsp';
 import { getTranslation, type Lang } from '../utils/i18n';
 import ProjectGraphKnowledgeGraph, { type ProjectGraphKnowledgeGraphHandle } from './ProjectGraphKnowledgeGraph';
 import {
@@ -37,11 +37,17 @@ import type { ProjectGraphWorkerBuildRequest, ProjectGraphWorkerMessage } from '
 function computeInsightCacheKey(
   workspacePath: string,
   entries: WorkspaceListEntry[],
-  insightMaxDepth: number,
-  insightMaxSourceFiles: number,
+  settings: {
+    insightMaxDepth: number;
+    insightMaxSourceFiles: number;
+    insightMaxFileBytes: number;
+    insightMaxSymbols: number;
+    insightMaxEdges: number;
+    insightMaxTreeEntries: number;
+  },
 ): string {
   const entrySummary = entries.slice(0, 200).map((e) => `${e.path}`).join(',');
-  return `${workspacePath}|${entries.length}|${insightMaxDepth}|${insightMaxSourceFiles}|${hash32(entrySummary)}`;
+  return `${workspacePath}|${entries.length}|${settings.insightMaxDepth}|${settings.insightMaxSourceFiles}|${settings.insightMaxFileBytes}|${settings.insightMaxSymbols}|${settings.insightMaxEdges}|${settings.insightMaxTreeEntries}|${hash32(entrySummary)}`;
 }
 
 function hash32(str: string): string {
@@ -53,6 +59,7 @@ function hash32(str: string): string {
 }
 
 const WORKER_AVAILABLE = typeof Worker !== 'undefined';
+const WORKER_BUILD_TIMEOUT_MS = 60_000;
 
 interface DiagProviderResult {
   languageId: string;
@@ -208,6 +215,18 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   const gitInitAttemptedRef = useRef(false);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
+  const isMountedRef = useRef(true);
+  const gitCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (gitCopyTimerRef.current) {
+        clearTimeout(gitCopyTimerRef.current);
+        gitCopyTimerRef.current = null;
+      }
+    };
+  }, []);
   const loadGenerationRef = useRef(0);
   const [showDiagModal, setShowDiagModal] = useState(false);
   const [diagResult, setDiagResult] = useState<DiagCheckResult | null>(null);
@@ -248,8 +267,10 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
       const rawProviders = await invoke<unknown>('list_available_symbol_providers');
       const providers = rawProviders as Array<Record<string, unknown>>;
       if (!Array.isArray(providers)) {
-        setDiagError(`list_available_symbol_providers 返回非数组: ${typeof rawProviders}`);
-        setIsCheckingDiag(false);
+        if (isMountedRef.current) {
+          setDiagError(`list_available_symbol_providers 返回非数组: ${typeof rawProviders}`);
+          setIsCheckingDiag(false);
+        }
         return;
       }
 
@@ -319,12 +340,18 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
         return (order[a.status] ?? 4) - (order[b.status] ?? 4);
       });
 
-      setDiagResult({ workspacePath, providers: results, checkedAt: Date.now(), rawProviders });
-      setShowDiagModal(true);
+      if (isMountedRef.current) {
+        setDiagResult({ workspacePath, providers: results, checkedAt: Date.now(), rawProviders });
+        setShowDiagModal(true);
+      }
     } catch (e) {
-      setDiagError(e instanceof Error ? e.message : String(e));
+      if (isMountedRef.current) {
+        setDiagError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
-      setIsCheckingDiag(false);
+      if (isMountedRef.current) {
+        setIsCheckingDiag(false);
+      }
     }
   };
 
@@ -362,6 +389,8 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
     setPrewarmingProgress('');
     if (prev && prev !== workspacePath) {
       void (async () => {
+        // 先同步连接池：丢弃并关闭池中属于旧工作区的所有连接句柄，避免池持有已死服务器的陈旧句柄。
+        try { await globalLspPool.closeWorkspace?.(prev); } catch { /* ignore */ }
         // 覆盖 lsp.rs 里全部 15 个 family_key（同一 family 下的多个别名，如 typescriptreact/jsonc，
         // 停止其中任意一个即可命中同一个 server_key，无需逐个枚举），避免旧工作区遗留孤儿 LSP 进程。
         const langIds = [
@@ -404,6 +433,9 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
     }
 
     const gen = ++prewarmingGenRef.current;
+    // 一旦开始预热就标记为已初始化，避免父组件传入新的 entries 数组引用时（如文件监听刷新）
+    // 在预热进行中反复触发 cleanup→restart 循环，重复调用 lsp_start_server / lsp_open_document。
+    prewarmingInitializedRef.current = true;
     setPrewarming(true);
     setPrewarmingProgress('');
     let cancelled = false;
@@ -452,7 +484,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
           const diagCount = Object.values(diagResult.diagnostics ?? {}).reduce((s, d) => s + (d.diagnostics?.length ?? 0), 0);
           // eslint-disable-next-line no-console
           console.log(`[prewarm] ${langId}: ${uriCount} uris, ${diagCount} diagnostics`);
-        } catch (e) { /* eslint-disable-next-line no-console */ console.warn(`[prewarm] ${langId} diag failed:`, e); }
+        } catch (e) { console.warn(`[prewarm] ${langId} diag failed:`, e); }
       }
 
       if (!cancelled && gen === prewarmingGenRef.current) {
@@ -472,6 +504,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   useEffect(() => {
     let cancelled = false;
     let worker: Worker | null = null;
+    let workerReject: ((reason: Error) => void) | null = null;
 
     if (!canStartLoading || !workspacePath) {
       appendDebug(`跳过: canStartLoading=${canStartLoading} workspacePath=${workspacePath?.slice(-20)}`);
@@ -495,9 +528,52 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
 
     setLoadingInProgress(true);
 
+    const computeGitStatus = async (): Promise<GitStatusSummary | null> => {
+      if (!showGitPanel) return null;
+      try {
+        const repoRootResult = parseGitRepositoryRootCommandResult(
+          await invoke<CommandResult>('run_workspace_command', {
+            workspacePath,
+            command: 'git',
+            args: ['rev-parse', '--show-toplevel'],
+            timeoutSeconds: 15,
+          })
+        );
+
+        if (!repoRootResult.available || !repoRootResult.isRepo) {
+          return {
+            available: repoRootResult.available,
+            isRepo: false,
+            files: [],
+            raw: repoRootResult.raw,
+            ...(repoRootResult.message ? { message: repoRootResult.message } : {}),
+          };
+        }
+        const statusResult = await invoke<CommandResult>('run_workspace_command', {
+          workspacePath,
+          command: 'git',
+          args: ['status', '--porcelain=1', '--branch', '--untracked-files=all'],
+          timeoutSeconds: 15,
+        });
+        const parsedStatus = parseGitStatusCommandResult(statusResult);
+        return parsedStatus.isRepo && repoRootResult.repoRoot
+          ? { ...parsedStatus, repoRoot: repoRootResult.repoRoot }
+          : parsedStatus;
+      } catch (gitError) {
+        return buildGitUnavailableStatus(gitError instanceof Error ? gitError.message : String(gitError));
+      }
+    };
+
     const loadInsights = async () => {
       const currentCacheKey = computeInsightCacheKey(
-        workspacePath, entriesRef.current, insightMaxDepth, insightMaxSourceFiles
+        workspacePath, entriesRef.current, {
+          insightMaxDepth,
+          insightMaxSourceFiles,
+          insightMaxFileBytes,
+          insightMaxSymbols,
+          insightMaxEdges,
+          insightMaxTreeEntries,
+        }
       );
 
       try {
@@ -513,6 +589,10 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
               setError('');
               hasSignaledLoadingRef.current = true;
               setLoadingInProgress(false);
+              const cachedGitStatus = await computeGitStatus();
+              if (!cancelled) {
+                setGitStatus(cachedGitStatus);
+              }
             }
             return;
           }
@@ -611,7 +691,9 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
           symbolOverrides = await resolveProjectMapSymbolOverrides(
             workspacePath,
             fileContents,
-            insightMaxSymbols
+            insightMaxSymbols,
+            5,
+            () => cancelled
           );
         } catch {
           // LSP symbol resolution failed, proceed with structural extraction
@@ -671,6 +753,14 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                 new URL('../workers/projectGraphWorker.ts', import.meta.url),
                 { type: 'module' }
               );
+              workerReject = reject;
+              let settled = false;
+              const timer = setTimeout(() => {
+                if (!settled) {
+                  settled = true;
+                  reject(new Error('Worker 构建超时'));
+                }
+              }, WORKER_BUILD_TIMEOUT_MS);
 
               worker.onmessage = (event: MessageEvent<ProjectGraphWorkerMessage>) => {
                 const msg = event.data;
@@ -683,24 +773,40 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                     }
                   }
                 } else if (msg.type === 'result') {
-                  resolve(msg.projectGraph);
+                  if (!settled) {
+                    settled = true;
+                    clearTimeout(timer);
+                    resolve(msg.projectGraph);
+                  }
                 } else if (msg.type === 'error') {
-                  reject(new Error(msg.error));
+                  if (!settled) {
+                    settled = true;
+                    clearTimeout(timer);
+                    reject(new Error(msg.error));
+                  }
                 }
               };
 
               worker.onerror = (event: ErrorEvent) => {
-                reject(new Error(event.message || 'Worker error'));
+                if (!settled) {
+                  settled = true;
+                  clearTimeout(timer);
+                  reject(new Error(event.message || 'Worker error'));
+                }
               };
 
               worker.postMessage(workerRequest);
             });
           } catch (workerError) {
+            if (cancelled) {
+              return;
+            }
             appendDebug(`Worker 失败，回退到主线程: ${(workerError as Error).message}`);
             if (worker) {
               worker.terminate();
               worker = null;
             }
+            workerReject = null;
             rawProjectGraph = await buildViaFallback();
           }
         } else {
@@ -718,46 +824,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
 
         setProjectGraphProgress(null);
 
-        let nextGitStatus: GitStatusSummary | null = null;
-        if (showGitPanel) {
-          try {
-            const repoRootResult = parseGitRepositoryRootCommandResult(
-              await invoke<CommandResult>('run_workspace_command', {
-                workspacePath,
-                command: 'git',
-                args: ['rev-parse', '--show-toplevel'],
-                timeoutSeconds: 15,
-              })
-            );
-
-            if (!repoRootResult.available || !repoRootResult.isRepo) {
-              nextGitStatus = {
-                available: repoRootResult.available,
-                isRepo: false,
-                files: [],
-                raw: repoRootResult.raw,
-                ...(repoRootResult.message ? { message: repoRootResult.message } : {}),
-              };
-            } else {
-              const statusResult = await invoke<CommandResult>('run_workspace_command', {
-                workspacePath,
-                command: 'git',
-                args: ['status', '--porcelain=1', '--branch', '--untracked-files=all'],
-                timeoutSeconds: 15,
-              });
-              const parsedStatus = parseGitStatusCommandResult(statusResult);
-              nextGitStatus =
-                parsedStatus.isRepo && repoRootResult.repoRoot
-                  ? {
-                      ...parsedStatus,
-                      repoRoot: repoRootResult.repoRoot,
-                    }
-                  : parsedStatus;
-            }
-          } catch (gitError) {
-            nextGitStatus = buildGitUnavailableStatus(gitError instanceof Error ? gitError.message : String(gitError));
-          }
-        }
+        const nextGitStatus = await computeGitStatus();
 
         if (cancelled) {
           return;
@@ -789,6 +856,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
           worker.terminate();
           worker = null;
         }
+        workerReject = null;
       }
     };
 
@@ -796,12 +864,16 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
 
     return () => {
       cancelled = true;
+      if (workerReject) {
+        workerReject(new DOMException('Aborted', 'AbortError'));
+        workerReject = null;
+      }
       if (worker) {
         worker.terminate();
         worker = null;
       }
     };
-  }, [canStartLoading, refreshVersion, workspacePath]);
+  }, [canStartLoading, refreshVersion, workspacePath, showGitPanel, insightMaxDepth, insightMaxFileBytes, insightMaxSymbols, insightMaxEdges, insightMaxSourceFiles, insightMaxTreeEntries]);
 
   const stagedFiles =
     gitStatus?.available && gitStatus.isRepo ? listGitFilesForMode(gitStatus.files, 'staged') : [];
@@ -1107,54 +1179,62 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   async function copyGitDiff(cacheKey: string, summary: GitDiffSummary): Promise<void> {
     try {
       await navigator.clipboard.writeText(buildGitDiffClipboardText(summary));
-      setGitCopyState({ key: cacheKey, success: true });
+      if (isMountedRef.current) setGitCopyState({ key: cacheKey, success: true });
     } catch {
-      setGitCopyState({ key: cacheKey, success: false });
+      if (isMountedRef.current) setGitCopyState({ key: cacheKey, success: false });
     }
 
-    window.setTimeout(() => {
-      setGitCopyState((current) => (current?.key === cacheKey ? null : current));
+    if (gitCopyTimerRef.current) clearTimeout(gitCopyTimerRef.current);
+    gitCopyTimerRef.current = setTimeout(() => {
+      gitCopyTimerRef.current = null;
+      if (isMountedRef.current) {
+        setGitCopyState((current) => (current?.key === cacheKey ? null : current));
+      }
     }, 1600);
   }
 
   const highlightedProjectGraphFiles = projectGraph?.files ?? [];
   const visibleGitFiles = activeGitFiles.slice(0, MAX_GIT_CHANGED_FILES);
-  const projectGraphNodeById = new Map((projectGraph?.nodes ?? []).map((node) => [node.id, node] as const));
-  const projectGraphSymbolsByPath = new Map<string, WorkspaceProjectGraphResult['nodes']>();
-  const projectGraphRelationsByPath = new Map<string, ProjectGraphFileRelationSummary>();
+  const projectGraphMaps = useMemo(() => {
+    const nodeById = new Map((projectGraph?.nodes ?? []).map((node) => [node.id, node] as const));
+    const symbolsByPath = new Map<string, WorkspaceProjectGraphResult['nodes']>();
+    const relationsByPath = new Map<string, ProjectGraphFileRelationSummary>();
 
-  for (const node of projectGraph?.nodes ?? []) {
-    if (node.kind !== 'symbol') {
-      continue;
+    for (const node of projectGraph?.nodes ?? []) {
+      if (node.kind !== 'symbol') {
+        continue;
+      }
+      const existing = symbolsByPath.get(node.path) ?? [];
+      existing.push(node);
+      symbolsByPath.set(node.path, existing);
     }
 
-    const existing = projectGraphSymbolsByPath.get(node.path) ?? [];
-    existing.push(node);
-    projectGraphSymbolsByPath.set(node.path, existing);
-  }
-
-  for (const edge of projectGraph?.edges ?? []) {
-    if (edge.kind === 'contains') {
-      continue;
+    for (const edge of projectGraph?.edges ?? []) {
+      if (edge.kind === 'contains') {
+        continue;
+      }
+      const sourceNode = nodeById.get(edge.from);
+      if (!sourceNode) {
+        continue;
+      }
+      const summary = relationsByPath.get(sourceNode.path) ?? createEmptyProjectGraphRelationSummary();
+      if (edge.kind === 'imports') {
+        summary.imports += 1;
+      } else if (edge.kind === 'reexports') {
+        summary.reexports += 1;
+      } else if (edge.kind === 'extends') {
+        summary.extends += 1;
+      } else if (edge.kind === 'implements') {
+        summary.implements += 1;
+      }
+      relationsByPath.set(sourceNode.path, summary);
     }
 
-    const sourceNode = projectGraphNodeById.get(edge.from);
-    if (!sourceNode) {
-      continue;
-    }
+    return { nodeById, symbolsByPath, relationsByPath };
+  }, [projectGraph]);
 
-    const summary = projectGraphRelationsByPath.get(sourceNode.path) ?? createEmptyProjectGraphRelationSummary();
-    if (edge.kind === 'imports') {
-      summary.imports += 1;
-    } else if (edge.kind === 'reexports') {
-      summary.reexports += 1;
-    } else if (edge.kind === 'extends') {
-      summary.extends += 1;
-    } else if (edge.kind === 'implements') {
-      summary.implements += 1;
-    }
-    projectGraphRelationsByPath.set(sourceNode.path, summary);
-  }
+  const projectGraphSymbolsByPath = projectGraphMaps.symbolsByPath;
+  const projectGraphRelationsByPath = projectGraphMaps.relationsByPath;
 
   const projectGraphFolderGroups = useMemo<ProjectGraphFolderGroup[]>(() => {
     const groups = new Map<string, ProjectGraphFolderGroup>();

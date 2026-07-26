@@ -15,6 +15,8 @@ export interface WorkspaceHostReadTextFileResult {
   path?: string;
   content: string;
   bytes: number;
+  truncatedByBytes?: boolean;
+  truncatedByRange?: boolean;
 }
 
 export interface WorkspaceHostReadImageFileResult {

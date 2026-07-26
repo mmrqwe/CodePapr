@@ -94,6 +94,75 @@ describe('parseGoalCondition', () => {
     expect(result.humanReadable).toContain('匹配');
     expect(result.humanReadable).toContain('passed');
   });
+
+  describe('标志参数', () => {
+    it('--strict 设置严格模式', () => {
+      const result = parseGoalCondition('--strict exec:npm test');
+      expect(result.strictness).toBe('strict');
+      expect(result.clauses).toHaveLength(1);
+    });
+
+    it('--loose 设置宽松模式', () => {
+      const result = parseGoalCondition('--loose exec:npm test');
+      expect(result.strictness).toBe('loose');
+    });
+
+    it('--normal 设置一般模式', () => {
+      const result = parseGoalCondition('--normal exec:npm test');
+      expect(result.strictness).toBe('normal');
+    });
+
+    it('默认 strictness 为 normal', () => {
+      const result = parseGoalCondition('exec:npm test');
+      expect(result.strictness).toBe('normal');
+    });
+
+    it('--plan-first 设置规划首轮', () => {
+      const result = parseGoalCondition('--plan-first exec:npm test');
+      expect(result.planFirst).toBe(true);
+    });
+
+    it('--plan 是 plan-first 的别名', () => {
+      const result = parseGoalCondition('--plan 重构 auth 模块');
+      expect(result.planFirst).toBe(true);
+    });
+
+    it('默认 planFirst 为 false', () => {
+      const result = parseGoalCondition('exec:npm test');
+      expect(result.planFirst).toBe(false);
+    });
+
+    it('多个标志可以组合', () => {
+      const result = parseGoalCondition('--strict --plan-first exec:npm test');
+      expect(result.strictness).toBe('strict');
+      expect(result.planFirst).toBe(true);
+      expect(result.clauses).toHaveLength(1);
+    });
+
+    it('标志 + 主观目标', () => {
+      const result = parseGoalCondition('--loose 美化登录页');
+      expect(result.strictness).toBe('loose');
+      expect(result.clauses).toHaveLength(0);
+      expect(result.humanReadable).toContain('美化登录页');
+    });
+
+    it('标志 + 自然语言目标 + | + 客观条件', () => {
+      const result = parseGoalCondition('--strict 修复测试 | exec:npm test');
+      expect(result.strictness).toBe('strict');
+      expect(result.clauses).toHaveLength(1);
+      expect(result.humanReadable).toContain('修复测试');
+    });
+
+    it('--strict --loose 冲突时抛出错误', () => {
+      expect(() => parseGoalCondition('--strict --loose exec:npm test')).toThrow(GoalConditionParseError);
+      expect(() => parseGoalCondition('--loose --strict exec:npm test')).toThrow(GoalConditionParseError);
+    });
+
+    it('相同标志重复不报错', () => {
+      const result = parseGoalCondition('--strict --strict exec:npm test');
+      expect(result.strictness).toBe('strict');
+    });
+  });
 });
 
 describe('evaluateGoalCondition', () => {

@@ -54,6 +54,7 @@ export interface GitStatusFile {
   indexStatus: string;
   worktreeStatus: string;
   originalPath?: string;
+  isUntracked?: boolean;
 }
 
 export interface GitStatusSummary {
@@ -602,6 +603,26 @@ function isProjectGraphContextCandidate(path: string, content: string): boolean 
 export function createLspProjectGraphEnhancer(
   fileContents: Record<string, { content: string; bytes: number }>,
 ): LspProjectGraphEnhancer {
+  const findSymbolColumn = (content: string, zeroBasedLine: number, name: string): number => {
+    const lineText = content.split(/\r?\n/)[zeroBasedLine] ?? '';
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = lineText.match(new RegExp(`(?<![\\w$])${escaped}(?![\\w$])`));
+    return match && typeof match.index === 'number' ? match.index : 0;
+  };
+  const resolveRelativePath = (uri: string): string => {
+    let path = uri.startsWith('file://') ? uri.replace(/^file:\/\//, '') : uri;
+    try {
+      path = decodeURIComponent(path);
+    } catch {
+      /* keep raw */
+    }
+    const normalized = path.replace(/\\/g, '/').replace(/^\/+/, '');
+    for (const key of Object.keys(fileContents)) {
+      const nk = key.replace(/^\/+/, '');
+      if (normalized === nk || normalized.endsWith(`/${nk}`)) return nk;
+    }
+    return normalized;
+  };
   return {
     enhanceReferences: async (
       filePath: string,
@@ -615,10 +636,11 @@ export function createLspProjectGraphEnhancer(
         const fileContent = fileContents[filePath]?.content;
         if (!fileContent) continue;
         try {
-          const refs = await WorkspaceSymbolProvider.references(lang, filePath, fileContent, sym.line - 1, 0);
+          const column = findSymbolColumn(fileContent, sym.line - 1, sym.name);
+          const refs = await WorkspaceSymbolProvider.references(lang, filePath, fileContent, sym.line - 1, column);
           for (const ref of refs) {
             results.push({
-              filePath: ref.uri.replace(/^file:\/\//, ''),
+              filePath: resolveRelativePath(ref.uri),
               line: ref.line,
               character: ref.character,
               fromSymbol: sym.name,
@@ -644,9 +666,10 @@ export function createLspProjectGraphEnhancer(
         const fileContent = fileContents[filePath]?.content;
         if (!fileContent) continue;
         try {
-          const defs = await WorkspaceSymbolProvider.definition(lang, filePath, fileContent, sym.line - 1, 0);
+          const column = findSymbolColumn(fileContent, sym.line - 1, sym.name);
+          const defs = await WorkspaceSymbolProvider.definition(lang, filePath, fileContent, sym.line - 1, column);
           if (defs.length === 0) continue;
-          const hoverResult = await WorkspaceSymbolProvider.hover(lang, filePath, fileContent, sym.line - 1, 0);
+          const hoverResult = await WorkspaceSymbolProvider.hover(lang, filePath, fileContent, sym.line - 1, column);
           if (!hoverResult) continue;
           const extendsMatch = hoverResult.contents.match(/\bextends\s+(\w+)/i);
           if (extendsMatch) {

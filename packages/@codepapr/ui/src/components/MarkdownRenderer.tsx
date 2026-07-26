@@ -2,6 +2,9 @@ import { useEffect, useState, type ReactNode } from 'react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { normalizeMarkdownCodeLanguage } from '../utils/markdownCodeLanguage';
 import { configureMonacoLanguageServices } from './MonacoTextEditor';
 
@@ -233,7 +236,7 @@ export function MarkdownRenderer({
 
   return (
     <div className={`markdown-body text-sm leading-relaxed${className ? ` ${className}` : ''}`}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>
         {preprocessFileLinks(content)}
       </ReactMarkdown>
     </div>

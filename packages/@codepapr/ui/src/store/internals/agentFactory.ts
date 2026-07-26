@@ -95,6 +95,7 @@ export interface AgentRuntimeConfig {
   editHistory?: EditHistory;
   rulesSection?: string;
   customPrompt?: string;
+  memorySection?: string;
   lang?: Lang;
   skillDefinitions?: SkillDefinition[];
   agentDefinitions?: AgentDefinition[];
@@ -109,7 +110,7 @@ class _MainThreadAgentHandle implements AgentRuntimeHandle {
 
   constructor(
     private readonly agent: Agent,
-    private readonly subagentCacheStatsRef?: () => Array<{ tier: 'primary' | 'fast'; stats: ICacheStatistics }>,
+    private readonly subagentCacheStatsRef?: () => Array<{ tier: 'primary' | 'fast' | 'mentor'; stats: ICacheStatistics }>,
   ) {}
 
   isCrashed(): boolean {
@@ -158,9 +159,9 @@ class _MainThreadAgentHandle implements AgentRuntimeHandle {
 }
 
 function buildSubagentCacheStatsByTier(
-  subStats: Array<{ tier: 'primary' | 'fast'; stats: ICacheStatistics }>,
-): { primary?: ICacheStatistics; fast?: ICacheStatistics } {
-  const byTier: { primary?: ICacheStatistics; fast?: ICacheStatistics } = {};
+  subStats: Array<{ tier: 'primary' | 'fast' | 'mentor'; stats: ICacheStatistics }>,
+): { primary?: ICacheStatistics; fast?: ICacheStatistics; mentor?: ICacheStatistics } {
+  const byTier: { primary?: ICacheStatistics; fast?: ICacheStatistics; mentor?: ICacheStatistics } = {};
   for (const entry of subStats) {
     const existing = byTier[entry.tier];
     byTier[entry.tier] = existing ? mergeTwoCacheStats(existing, entry.stats) : { ...entry.stats };
@@ -415,6 +416,7 @@ export function createAgent(
           editHistory: runtime.editHistory,
           rulesSection: runtime.rulesSection,
           customPrompt: runtime.customPrompt ? runtime.customPrompt : customPromptWithCharacter,
+          memorySection: runtime.memorySection,
           lang: runtime.lang ?? settings.lang,
           skillDefinitions: runtime.skillDefinitions,
           mcpToolDefinitions: runtime.mcpToolDefinitions,

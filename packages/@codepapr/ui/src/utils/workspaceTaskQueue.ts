@@ -78,7 +78,6 @@ async function enqueueAndWait<T>(
       const start = Date.now();
       let iterations = 0;
 
-      // eslint-disable-next-line no-constant-condition
       while (true) {
         if (signal?.aborted) {
           throw new Error('Task aborted');

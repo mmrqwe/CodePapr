@@ -77,6 +77,7 @@ export interface WorkerAgentParameters {
 export interface WorkerAgentRuntimeConfig {
   rulesSection?: string;
   customPrompt?: string;
+  memorySection?: string;
   lang?: Lang;
   skillDefinitions?: SkillDefinition[];
   agentDefinitions?: AgentDefinition[];

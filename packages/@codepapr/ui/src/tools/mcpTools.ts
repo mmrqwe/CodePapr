@@ -1,11 +1,14 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { ToolRegistry } from '@codepapr/core';
 import type { IToolDefinition } from '@codepapr/types';
 import {
+  buildMcpToolName,
   createMcpSettingsCacheKey,
   mcpToolInfoToDefinition,
   parseMcpToolName,
   parseMcpEnv,
+  parseMcpHeaders,
   splitMcpArgs,
   type McpCallToolResult,
   type McpListToolsResult,
@@ -16,6 +19,46 @@ import {
   type McpTestServerResult,
 } from '../utils/mcpTypes';
 import { cacheGet, cacheSet, cacheRemove } from '../utils/cacheStorage';
+
+export interface McpConfirmRequest {
+  requestId: string;
+  serverId: string;
+  serverName: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+}
+
+export type McpConfirmHandler = (request: McpConfirmRequest) => Promise<boolean>;
+
+let confirmHandler: McpConfirmHandler | null = null;
+let confirmUnlisten: UnlistenFn | null = null;
+
+export function setMcpConfirmHandler(handler: McpConfirmHandler | null): void {
+  confirmHandler = handler;
+}
+
+export async function initMcpConfirmListener(): Promise<void> {
+  if (confirmUnlisten) return;
+  confirmUnlisten = await listen<McpConfirmRequest>('mcp-confirm-request', async (event) => {
+    const request = event.payload;
+    let approved = false;
+    if (confirmHandler) {
+      try {
+        approved = await confirmHandler(request);
+      } catch {
+        approved = false;
+      }
+    }
+    await invoke('mcp_confirm_response', { requestId: request.requestId, approved });
+  });
+}
+
+export function disposeMcpConfirmListener(): void {
+  if (confirmUnlisten) {
+    confirmUnlisten();
+    confirmUnlisten = null;
+  }
+}
 
 interface NativeMcpServerConfig {
   id: string;
@@ -30,6 +73,8 @@ interface NativeMcpServerConfig {
   headers: Record<string, string>;
   allowedTools: string[];
   deniedTools: string[];
+  forceMutating: string[];
+  forceReadonly: string[];
   permissionMode: string;
   requireConfirmation: boolean;
   timeoutSeconds: number;
@@ -53,12 +98,31 @@ interface McpToolCacheEntry {
 }
 
 const MCP_TOOL_CACHE_KEY = 'codepapr.mcp.toolCache.v1';
+const MCP_TOOL_NAME_MAP_KEY = 'codepapr.mcp.toolNameMap.v1';
 let memoryToolCache: McpToolCacheEntry | null = null;
 
-/** In-memory bidirectional mapping: displayName -> { serverId, toolName }.
- *  This acts as a fallback when the cache is cleared and the original toolName
- *  may have been mangled by sanitization. */
+/** Bidirectional mapping: displayName -> { serverId, toolName }.
+ *  Persisted to cacheStorage so it survives page refresh. */
 const toolNameMap = new Map<string, { serverId: string; toolName: string }>();
+let toolNameMapLoaded = false;
+
+async function ensureToolNameMapLoaded(): Promise<void> {
+  if (toolNameMapLoaded) return;
+  toolNameMapLoaded = true;
+  const stored = await cacheGet<Array<[string, { serverId: string; toolName: string }]>>(MCP_TOOL_NAME_MAP_KEY);
+  if (Array.isArray(stored)) {
+    for (const [key, value] of stored) {
+      if (!toolNameMap.has(key)) {
+        toolNameMap.set(key, value);
+      }
+    }
+  }
+}
+
+async function persistToolNameMap(): Promise<void> {
+  const entries = Array.from(toolNameMap.entries());
+  await cacheSet(MCP_TOOL_NAME_MAP_KEY, entries);
+}
 
 function isCacheExpired(entry: McpToolCacheEntry): boolean {
   return Date.now() >= entry.expiresAt;
@@ -82,9 +146,11 @@ function toNativeServerConfig(server: McpServerConfig): NativeMcpServerConfig {
     args: splitMcpArgs(server.args),
     url: server.url,
     env: parseMcpEnv(server.env),
-    headers: parseMcpEnv(server.headers),
+    headers: parseMcpHeaders(server.headers),
     allowedTools: splitPatterns(server.allowedTools),
     deniedTools: splitPatterns(server.deniedTools),
+    forceMutating: splitPatterns(server.forceMutating),
+    forceReadonly: splitPatterns(server.forceReadonly),
     permissionMode: server.permissionMode,
     requireConfirmation: server.requireConfirmation,
     timeoutSeconds: server.timeoutSeconds,
@@ -122,6 +188,7 @@ async function writeStoredToolCache(entry: McpToolCacheEntry): Promise<void> {
 export async function clearMcpToolDefinitionCache(): Promise<void> {
   memoryToolCache = null;
   await cacheRemove(MCP_TOOL_CACHE_KEY);
+  await cacheRemove(MCP_TOOL_NAME_MAP_KEY);
 }
 
 async function listMcpTools(settings: McpSettings, refresh = false): Promise<McpListToolsResult> {
@@ -154,6 +221,33 @@ export async function listMcpServerStatus(settings: McpSettings): Promise<McpSer
 
 export async function disconnectAllMcpServers(): Promise<number> {
   return await invoke<number>('mcp_disconnect_all');
+}
+
+export async function mcpHealthCheck(): Promise<string[]> {
+  return await invoke<string[]>('mcp_health_check');
+}
+
+let healthCheckTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startMcpHealthCheck(intervalMs = 30_000, onPruned?: (serverIds: string[]) => void): void {
+  stopMcpHealthCheck();
+  healthCheckTimer = setInterval(async () => {
+    try {
+      const pruned = await mcpHealthCheck();
+      if (pruned.length > 0 && onPruned) {
+        onPruned(pruned);
+      }
+    } catch {
+      // best-effort
+    }
+  }, intervalMs);
+}
+
+export function stopMcpHealthCheck(): void {
+  if (healthCheckTimer) {
+    clearInterval(healthCheckTimer);
+    healthCheckTimer = null;
+  }
 }
 
 export interface McpToolPreviewItem {
@@ -202,41 +296,89 @@ export async function testMcpServer(settings: McpSettings, serverId: string): Pr
 }
 
 export async function disconnectMcpServer(settings: McpSettings, serverId: string): Promise<number> {
-  // Drop frontend tool cache so the next list_tools call hits the backend.
-  await clearMcpToolDefinitionCache();
+  await invalidateServerToolCache(serverId);
   return await invoke<number>('mcp_disconnect_server', {
     settings: toNativeSettings(settings),
     serverId,
   });
 }
 
-export async function clearNativeMcpToolCache(): Promise<number> {
-  return await invoke<number>('mcp_clear_tool_cache');
+async function invalidateServerToolCache(serverId: string): Promise<void> {
+  const cached = await readPersistedToolCache();
+  if (!cached) return;
+  const remainingTools = cached.tools.filter((t) => t.serverId !== serverId);
+  const remainingErrors = cached.errors.filter((e) => e.serverId !== serverId);
+  if (remainingTools.length === cached.tools.length && remainingErrors.length === cached.errors.length) return;
+  const now = Date.now();
+  await writeStoredToolCache({
+    cacheKey: cached.cacheKey,
+    tools: remainingTools,
+    errors: remainingErrors,
+    updatedAt: now,
+    expiresAt: cached.expiresAt,
+  });
+  for (const [displayName, mapping] of toolNameMap) {
+    if (mapping.serverId === serverId) {
+      toolNameMap.delete(displayName);
+    }
+  }
+  await persistToolNameMap();
 }
 
-function resolveOriginalToolName(displayName: string): { serverId: string; toolName: string } | null {
-  // 1. Fast path: in-memory registration map (survives cache clears).
+async function resolveOriginalToolName(displayName: string): Promise<{ serverId: string; toolName: string } | null> {
+  await ensureToolNameMapLoaded();
+
   const mapped = toolNameMap.get(displayName);
   if (mapped) return mapped;
 
-  // 2. Fallback: try to decode from the displayName itself.
   const parsed = parseMcpToolName(displayName);
   if (!parsed) return null;
   return { serverId: parsed.serverId, toolName: parsed.sanitizedToolName };
 }
 
 async function callMcpTool(settings: McpSettings, displayName: string, args: Record<string, unknown>): Promise<McpCallToolResult> {
-  const resolved = resolveOriginalToolName(displayName);
+  const resolved = await resolveOriginalToolName(displayName);
   if (!resolved) {
     throw new Error(`Invalid MCP tool name: ${displayName}`);
   }
 
+  await validateToolArguments(displayName, args);
+
   return await invoke<McpCallToolResult>('mcp_call_tool', {
-    settings: toNativeSettings(settings),
     serverId: resolved.serverId,
     toolName: resolved.toolName,
     arguments: args,
   });
+}
+
+async function validateToolArguments(displayName: string, args: Record<string, unknown>): Promise<void> {
+  const cached = await readPersistedToolCache();
+  if (!cached) return;
+  const tool = cached.tools.find((t) => buildMcpToolName(t.serverId, t.toolName) === displayName);
+  if (!tool?.inputSchema) return;
+
+  const schema = tool.inputSchema as Record<string, unknown>;
+  const required = Array.isArray(schema.required) ? (schema.required as string[]) : [];
+  const properties = (schema.properties && typeof schema.properties === 'object')
+    ? (schema.properties as Record<string, Record<string, unknown>>)
+    : {};
+
+  const missing = required.filter((key) => args[key] === undefined || args[key] === null);
+  if (missing.length > 0) {
+    throw new Error(`MCP tool '${displayName}' missing required arguments: ${missing.join(', ')}`);
+  }
+
+  for (const [key, value] of Object.entries(args)) {
+    const propSchema = properties[key];
+    if (!propSchema || value === undefined || value === null) continue;
+    const expectedType = propSchema.type as string | undefined;
+    if (!expectedType) continue;
+    const actualType = Array.isArray(value) ? 'array' : typeof value;
+    const typeMap: Record<string, string> = { string: 'string', number: 'number', boolean: 'boolean', object: 'object', array: 'array' };
+    if (typeMap[expectedType] && actualType !== typeMap[expectedType]) {
+      throw new Error(`MCP tool '${displayName}' argument '${key}' expects type '${expectedType}' but got '${actualType}'`);
+    }
+  }
 }
 
 export async function loadMcpToolDefinitions(settings: McpSettings, options: { refresh?: boolean } = {}): Promise<{
@@ -269,7 +411,6 @@ export function registerMcpTools(
 ): void {
   if (!settings.enabled || !settings.exposeTools) return;
 
-  // Remove stale mappings for servers that are no longer enabled or gone.
   const activeServerIds = new Set(settings.servers.filter((s) => s.enabled).map((s) => s.id));
   for (const [displayName, mapping] of toolNameMap) {
     if (!activeServerIds.has(mapping.serverId)) {
@@ -277,12 +418,14 @@ export function registerMcpTools(
     }
   }
 
-  // Register displayName -> {serverId, toolName} mapping for reliable reverse lookup.
   if (toolMappings && toolMappings.length > 0) {
     for (const mapping of toolMappings) {
       toolNameMap.set(mapping.displayName, { serverId: mapping.serverId, toolName: mapping.toolName });
     }
+    void persistToolNameMap();
   }
+
+  toolNameMapLoaded = true;
 
   for (const definition of definitions) {
     registry.register(definition, async (args) => {

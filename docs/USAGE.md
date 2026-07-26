@@ -162,8 +162,8 @@ LLM 可通过 4 个工具管理 app：
 
 | Agent | 用途 | 模型 | 工具 |
 |-------|------|------|------|
-| **explore** | 只读代码分析 | fast | read, read_image, graph, lsp, diagnostics, time |
-| **scout** | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image, open, time |
+| **explore** | 只读代码分析 | fast | read, read_image, graph, lsp, diagnostics, grep |
+| **scout** | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image |
 | **mentor** | 架构/算法指导 | 可配置独立模型 | 无 |
 | **verifier** | Goal 验收器（内部） | fast | 无 |
 
@@ -335,11 +335,14 @@ tools:
 
 ### Skills
 
-Skill 是主 Agent 的可复用操作手册，放在 `.CodePapr/skills/**/SKILL.md`：
+Skill 是主 Agent 的可复用操作手册，放在 `.CodePapr/skills/` 下，支持两种布局：
 
-- 运行时不创建子代理，而是作为项目级上下文供模型按需选择
-- 默认包含 `search` Skill（搜索策略）
-- 启用状态保存在 `.CodePapr/project.sqlite`
+- 嵌套：`.CodePapr/skills/<name>/SKILL.md`
+- 平铺：`.CodePapr/skills/<name>.md`
+
+运行时不创建子代理，而是作为项目级上下文供模型按需选择。仅 name + description 注入稳定上下文，完整内容通过 `skill` 工具按需加载（上限 500KB）。默认包含 `search` Skill（搜索策略）。启用状态保存在 `.CodePapr/project.sqlite`。
+
+**技能市场**：桌面端内置技能市场，从 GitHub（`zerone-agent/agent-use-skills`）拉取技能列表，支持一键安装到项目。已安装技能记录在 `skills-lock.json` 中（含 SHA-256 校验）。
 
 ### 自定义聊天命令
 

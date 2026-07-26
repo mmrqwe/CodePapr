@@ -5,10 +5,12 @@
 
   var pending = {};
   var appInfo = null;
+  var parentOrigin = window.__PAPR_PARENT_ORIGIN || '*';
 
   function send(type, payload, onProgress) {
-    return new Promise(function (resolve, reject) {
-      var reqId = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+    var reqId = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+
+    var promise = new Promise(function (resolve, reject) {
       pending[reqId] = {
         resolve: resolve,
         reject: reject,
@@ -20,7 +22,7 @@
         reqId: reqId,
         type: type,
         payload: payload
-      }, '*');
+      }, parentOrigin);
 
       setTimeout(function () {
         if (pending[reqId]) {
@@ -29,6 +31,9 @@
         }
       }, 300000);
     });
+
+    promise.reqId = reqId;
+    return promise;
   }
 
   window.addEventListener('message', function (event) {
@@ -75,10 +80,14 @@
     agent: {
       run: function (opts, onProgress) {
         return send('papr://agent.run', {
+          agent: opts.agent,
           agentName: opts.agent,
           task: opts.task,
           model: opts.model
         }, onProgress);
+      },
+      cancel: function (reqId) {
+        return send('papr://agent.cancel', { reqId: reqId });
       }
     },
     http: {

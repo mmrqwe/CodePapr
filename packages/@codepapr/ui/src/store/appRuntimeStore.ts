@@ -29,7 +29,7 @@ interface AppRuntimeState {
   closeAppModal: () => void;
   setAppRunning: (appId: string, pid: number, url: string) => void;
   setAppStopped: (appId: string) => void;
-  reloadActiveApp: () => void;
+  reloadApp: (appId: string) => void;
 }
 
 export const useAppRuntimeStore = create<AppRuntimeState>()((set) => ({
@@ -119,15 +119,11 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set) => ({
     }));
   },
 
-  reloadActiveApp: () => {
-    set((state) =>
-      state.activeAppId
-        ? {
-            apps: state.apps.map((app) =>
-              app.appId === state.activeAppId ? { ...app, updatedAt: Date.now() } : app
-            ),
-          }
-        : state
-    );
+  reloadApp: (appId) => {
+    set((state) => ({
+      apps: state.apps.map((app) =>
+        app.appId === appId ? { ...app, updatedAt: Date.now() } : app
+      ),
+    }));
   },
 }));

@@ -63,6 +63,7 @@ pub fn git_diff_impl(
 
     let mut stat = String::new();
     let mut diff_text = String::new();
+    let mut truncated = false;
 
     let deltas: Vec<_> = diff.deltas().collect();
     for (i, delta) in deltas.iter().enumerate() {
@@ -81,7 +82,7 @@ pub fn git_diff_impl(
 
         stat.push_str(&format!(" {} | {} +{} -{}\n", path, status, additions, deletions));
 
-        if diff_text.len() < MAX_DIFF_BYTES {
+        if !truncated && diff_text.len() < MAX_DIFF_BYTES {
             if let Ok(Some(mut patch)) = git2::Patch::from_diff(&diff, i) {
                 let mut buf = Vec::new();
                 let _ = patch.print(&mut |_d: git2::DiffDelta, _h: Option<git2::DiffHunk>, line: git2::DiffLine| {
@@ -90,10 +91,10 @@ pub fn git_diff_impl(
                 });
                 diff_text.push_str(&String::from_utf8_lossy(&buf));
             }
+        } else if diff_text.len() >= MAX_DIFF_BYTES && i < deltas.len() {
+            truncated = true;
         }
     }
-
-    let truncated = diff_text.len() >= MAX_DIFF_BYTES;
 
     let mut files = Vec::new();
     for (i, delta) in deltas.iter().enumerate() {

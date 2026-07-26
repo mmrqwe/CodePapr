@@ -11,6 +11,14 @@ import {
   computeSemanticDiff,
   generateTestSkeletons,
   planProjectGraphRename,
+  computeRenameEditsForContent,
+  applyRenameEditsToContent,
+  applyIncrementalUpdate,
+} from '../src';
+import type {
+  WorkspaceProjectGraphResult,
+  ProjectGraphEdge,
+  IncrementalGraphUpdate,
 } from '../src';
 
 function makeGraph(overrides: Partial<Parameters<typeof buildWorkspaceProjectGraph>[0]> = {}) {
@@ -235,16 +243,51 @@ describe('ProjectGraph Analysis Functions', () => {
   });
 
   describe('planProjectGraphRename', () => {
-    it('finds symbol and references for rename', () => {
+    it('finds symbol and scopes rename to referencing files', () => {
       const graph = makeGraph();
       const result = planProjectGraphRename({
-        relativePath: 'src/main.ts',
-        line: 3,
-        character: 16,
-        newName: 'entry',
+        relativePath: 'src/lib.ts',
+        line: 2,
+        character: 17,
+        newName: 'util',
         graph,
       });
       expect(result.symbol).toBeDefined();
+      expect(result.oldName).toBe('helper');
+      expect(result.targetFiles).toContain('src/lib.ts');
+      expect(result.targetFiles).toContain('src/main.ts');
+    });
+  });
+
+  describe('computeRenameEditsForContent', () => {
+    it('renames whole-word occurrences at their real columns, not line start', () => {
+      const content = 'export function main() { helper(); return helper; }\n';
+      const edits = computeRenameEditsForContent(content, 'helper', 'util');
+      expect(edits.length).toBe(2);
+      const applied = applyRenameEditsToContent(content, edits);
+      expect(applied).toBe('export function main() { util(); return util; }\n');
+    });
+
+    it('does not rename substrings of larger identifiers', () => {
+      const content = 'const helperFn = helperValue;\n';
+      const edits = computeRenameEditsForContent(content, 'helper', 'util');
+      expect(edits.length).toBe(0);
+    });
+
+    it('skips occurrences inside strings and comments', () => {
+      const content = '// helper comment\nconst s = "helper";\nconst x = helper;\n';
+      const edits = computeRenameEditsForContent(content, 'helper', 'util');
+      expect(edits.length).toBe(1);
+      expect(edits[0].line).toBe(3);
+    });
+  });
+
+  describe('applyRenameEditsToContent', () => {
+    it('preserves CRLF line endings', () => {
+      const content = 'a helper\r\nb helper\r\n';
+      const edits = computeRenameEditsForContent(content, 'helper', 'util');
+      const applied = applyRenameEditsToContent(content, edits);
+      expect(applied).toBe('a util\r\nb util\r\n');
     });
   });
 });
@@ -285,5 +328,78 @@ describe('Edge Cases', () => {
   it('handles empty graph for semantic diff', () => {
     const result = computeSemanticDiff(emptyGraph, emptyGraph);
     expect(result.symbolChanges.length).toBe(0);
+  });
+});
+
+describe('Regression: audited graphQuery bugs', () => {
+  function makeCyclicGraph() {
+    return buildWorkspaceProjectGraph({
+      root: '.',
+      tree: '.\n- src/',
+      allFiles: [{ path: 'src/a.ts' }, { path: 'src/b.ts' }],
+      fileContents: {
+        'src/a.ts': { content: 'import { b } from "./b";\nexport function a() { return b(); }\n' },
+        'src/b.ts': { content: 'import { a } from "./a";\nexport function b() { return a(); }\n' },
+      },
+      files: [
+        {
+          path: 'src/a.ts', language: 'TypeScript', bytes: 60, symbolSource: 'ast',
+          symbols: [{ name: 'a', kind: 'function', signature: 'export function a()', line: 2, exported: true }],
+        },
+        {
+          path: 'src/b.ts', language: 'TypeScript', bytes: 60, symbolSource: 'ast',
+          symbols: [{ name: 'b', kind: 'function', signature: 'export function b()', line: 2, exported: true }],
+        },
+      ],
+      maxEdges: 200,
+    });
+  }
+
+  it('H1: detects a real import cycle (a -> b -> a)', () => {
+    const result = detectCircularDependencies(makeCyclicGraph());
+    expect(result.cycles.length).toBeGreaterThanOrEqual(1);
+    const cycleFiles = result.cycles[0].files;
+    expect(cycleFiles).toContain('src/a.ts');
+    expect(cycleFiles).toContain('src/b.ts');
+  });
+
+  it('H2: maps a test file to the source file it imports', () => {
+    const result = discoverAndMapTests(makeGraph());
+    expect(result.testFiles).toContain('src/lib.test.ts');
+    const mapped = result.mappedSources.get('src/lib.test.ts') ?? [];
+    expect(mapped).toContain('src/lib.ts');
+  });
+
+  it('M8: computeSemanticDiff reports true added/removed edges, not a net delta', () => {
+    const g = makeGraph();
+    const n0 = g.nodes[0].id;
+    const n1 = g.nodes[1].id;
+    const mk = (id: string, kind: ProjectGraphEdge['kind']): ProjectGraphEdge =>
+      ({ id, kind, from: n0, to: n1 });
+    const before: WorkspaceProjectGraphResult = { ...g, edges: [mk('old1', 'imports'), mk('old2', 'calls')] };
+    const after: WorkspaceProjectGraphResult = { ...g, edges: [mk('new1', 'imports'), mk('new2', 'calls')] };
+
+    const diff = computeSemanticDiff(before, after);
+    expect(diff.edgeChanges.added).toBe(2);
+    expect(diff.edgeChanges.removed).toBe(2);
+  });
+
+  it('M12: applyIncrementalUpdate dedupes nodes and edges by id', () => {
+    const g = makeGraph();
+    const dupNode = { ...g.nodes[0] };
+    const dupEdge = { ...g.edges[0] };
+    const update: IncrementalGraphUpdate = {
+      addedNodes: [dupNode],
+      removedNodeIds: [],
+      addedEdges: [dupEdge],
+      removedEdgeIds: [],
+      changedNodes: [],
+      summaryDelta: { filesDelta: 0, symbolsDelta: 0, importsDelta: 0, callsDelta: 0, edgesDelta: 0 },
+    };
+    const result = applyIncrementalUpdate(g, update);
+    const nodeIds = result.nodes.map((n) => n.id);
+    const edgeIds = result.edges.map((e) => e.id);
+    expect(new Set(nodeIds).size).toBe(nodeIds.length);
+    expect(new Set(edgeIds).size).toBe(edgeIds.length);
   });
 });

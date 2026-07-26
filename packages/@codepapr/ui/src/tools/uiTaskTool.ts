@@ -63,7 +63,7 @@ export interface UiTaskToolContext {
   scoutTemperature?: number;
   scoutMaxToolRounds?: number;
   scoutMaxDepth?: number;
-  subagentCacheStats?: Array<{ tier: 'primary' | 'fast'; stats: ICacheStatistics }>;
+  subagentCacheStats?: Array<{ tier: 'primary' | 'fast' | 'mentor'; stats: ICacheStatistics }>;
   graphToolTimeoutMs: number;
 }
 
@@ -114,7 +114,7 @@ async function runSubagent(
   context: UiTaskToolContext,
   definition: AgentDefinition,
   prompt: string
-): Promise<{ content: string; steps: SubagentStep[]; cacheStats?: ICacheStatistics; tier: 'primary' | 'fast' }> {
+): Promise<{ content: string; steps: SubagentStep[]; cacheStats?: ICacheStatistics; tier: 'primary' | 'fast' | 'mentor' }> {
   const currentDepth = context.currentDepth ?? 0;
   const agentMaxDepth = definition.name === 'explore'
     ? context.exploreMaxDepth
@@ -178,6 +178,7 @@ async function runSubagent(
   let resolvedModel: string | undefined = definition.model;
   let provider = context.provider;
   let providerName: 'deepseek' | 'openai' | 'claude' = context.providerName;
+  let usingMentor = false;
 
   if (definition.model === 'fast') {
     resolvedModel = context.fastModel || context.baseModel;
@@ -194,6 +195,7 @@ async function runSubagent(
         provider = new OpenAIProvider(config);
         providerName = 'openai';
       }
+      usingMentor = true;
     } catch (e) {
       console.warn('[UI Subagent] Mentor provider build failed, falling back to main provider', e);
     }
@@ -287,7 +289,7 @@ async function runSubagent(
     throw wrapped;
   }
   completeSubagentProgress(response.content);
-  return { content: response.content, steps, cacheStats: response.cacheStats, tier: route.tier };
+  return { content: response.content, steps, cacheStats: response.cacheStats, tier: usingMentor ? 'mentor' : route.tier };
 }
 
 /**

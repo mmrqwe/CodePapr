@@ -31,6 +31,7 @@ export function cloneConversationStats(
   return {
     primary: { ...createEmptyModelTierStats(), ...(stats.primary ?? {}) },
     fast: { ...createEmptyModelTierStats(), ...(stats.fast ?? {}) },
+    mentor: { ...createEmptyModelTierStats(), ...(stats.mentor ?? {}) },
   };
 }
 
@@ -67,7 +68,7 @@ export function addCacheStats(
   };
 }
 
-export type ModelTier = 'primary' | 'fast';
+export type ModelTier = 'primary' | 'fast' | 'mentor';
 
 export function addModelTierStats(
   current: ModelTierStats,
@@ -137,6 +138,7 @@ export function aggregateProjectStats(
   for (const stats of Object.values(sessionConversationStats)) {
     result.primary = addModelTierStatsToStats(result.primary, stats.primary);
     result.fast = addModelTierStatsToStats(result.fast, stats.fast);
+    result.mentor = addModelTierStatsToStats(result.mentor, stats.mentor ?? createEmptyModelTierStats());
   }
   return result;
 }
@@ -156,5 +158,6 @@ export function migrateCumulativeToConversationStats(
       rounds: cumulativeStats.rounds,
     },
     fast: createEmptyModelTierStats(),
+    mentor: createEmptyModelTierStats(),
   };
 }

@@ -1,40 +1,54 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
+import { getTranslation } from '../utils/i18n';
+import type { Lang } from '../utils/i18n';
 import type { PaprAppSettings, PaprLevel } from '@codepapr/types';
 
 const LEVEL_LABELS: Record<number, string> = {
-  0: 'Level 0 · 纯计算',
+  0: 'Level 0 · Pure',
   1: 'Level 1 · Runtime',
-  2: 'Level 2 · 联网',
-  3: 'Level 3 · 系统',
+  2: 'Level 2 · Network',
+  3: 'Level 3 · System',
 };
 
 const LEVEL_DESC: Record<number, string> = {
-  0: '无外部访问，仅 HTML/CSS/JS 渲染',
-  1: '存储 + LLM + 只读工作区（默认）',
-  2: '+ HTTP + 搜索 + MCP 工具',
-  3: '+ 文件写入 + 终端 + Git（需全局开关）',
+  0: 'No external access, HTML/CSS/JS only',
+  1: 'Storage + LLM + read-only workspace (default)',
+  2: '+ HTTP + search + MCP tools',
+  3: '+ file write + terminal + Git (requires global toggle)',
 };
 
-export function AppPermissionsTab() {
+interface AppPermissionsTabProps {
+  lang?: Lang;
+}
+
+export function AppPermissionsTab({ lang }: AppPermissionsTabProps) {
+  const t = getTranslation(lang);
   const apps = useAppRuntimeStore((state) => state.apps);
   const [settings, setSettings] = useState<PaprAppSettings | null>(null);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [saveError, setSaveError] = useState('');
 
   useEffect(() => {
     invoke<PaprAppSettings>('papr_get_app_settings')
       .then(setSettings)
-      .catch(() => {});
+      .catch((err) => setLoadError(String(err)));
   }, []);
 
   const save = useCallback((updated: PaprAppSettings) => {
     setSaving(true);
+    setSaveError('');
     invoke('papr_set_app_settings', { settings: updated })
       .then(() => setSettings(updated))
-      .catch(() => {})
+      .catch((err) => setSaveError(String(err)))
       .finally(() => setSaving(false));
   }, []);
+
+  if (loadError) {
+    return <div className="p-4 text-xs text-red-400">{t.appPermLoadFailed}: {loadError}</div>;
+  }
 
   if (!settings) {
     return <div className="p-4 text-xs text-slate-500">Loading...</div>;
@@ -85,13 +99,13 @@ export function AppPermissionsTab() {
     <div className="flex flex-col gap-5">
       <div>
         <p className="text-xs leading-relaxed text-slate-400">
-          管理 .papr 应用的权限级别。Level 越高，能力越强，风险也越大。
+          {t.appPermTitle}
         </p>
       </div>
 
       <div className="rounded-xl border border-[#2a2d3a] bg-[#11141c] p-4">
         <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
-          全局默认级别
+          {t.appPermGlobalLevel}
         </label>
         <div className="flex gap-2">
           {([0, 1, 2, 3] as PaprLevel[]).map((lvl) => (
@@ -118,10 +132,10 @@ export function AppPermissionsTab() {
         <div className="flex items-center justify-between">
           <div>
             <label className="text-xs font-semibold text-amber-200">
-              ⚠️ 允许 Level 3 应用
+              ⚠️ {t.appPermAllowL3}
             </label>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-              开启后，应用可申请文件写入/终端/Git 权限。默认关闭。
+              {t.appPermAllowL3Desc}
             </p>
           </div>
           <button
@@ -143,7 +157,7 @@ export function AppPermissionsTab() {
       {apps.length > 0 && (
         <div>
           <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
-            应用列表
+            {t.appPermAppList}
           </label>
           <div className="flex flex-col gap-2">
             {apps.map((app) => {
@@ -175,7 +189,7 @@ export function AppPermissionsTab() {
                     <option value="auto">Auto (L{manifestLevel})</option>
                     {[0, 1, 2, 3].filter((l) => l <= manifestLevel).map((l) => (
                       <option key={l} value={l} disabled={l === 3 && !settings.allowLevel3}>
-                        L{l}{l === 3 && !settings.allowLevel3 ? ' (需全局开关)' : ''}
+                        L{l}{l === 3 && !settings.allowLevel3 ? ` (${t.appPermNeedGlobal})` : ''}
                       </option>
                     ))}
                   </select>
@@ -188,7 +202,7 @@ export function AppPermissionsTab() {
 
       {apps.length === 0 && (
         <div className="rounded-xl border border-[#2a2d3a] bg-[#11141c] p-6 text-center text-xs text-slate-600">
-          暂无已注册的应用。在 App 模式下生成应用后会出现在这里。
+          {t.appPermNoApps}
         </div>
       )}
 
@@ -196,8 +210,14 @@ export function AppPermissionsTab() {
         <div className="text-[10px] text-slate-600">Saving...</div>
       )}
 
+      {saveError && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[10px] text-red-300">
+          {t.appPermSaveFailed}: {saveError}
+        </div>
+      )}
+
       <div className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] p-4">
-        <h4 className="mb-2 text-xs font-semibold text-slate-300">权限级别说明</h4>
+        <h4 className="mb-2 text-xs font-semibold text-slate-300">{t.appPermLevelInfo}</h4>
         <div className="flex flex-col gap-1.5 text-[10px] leading-relaxed text-slate-500">
           <div><span className="text-slate-400 font-mono">L0</span> · 纯计算：无外部访问</div>
           <div><span className="text-slate-400 font-mono">L1</span> · Runtime：papr.db 存储 + papr.fs 文件 + AI Agent（只读工具）</div>

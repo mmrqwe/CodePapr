@@ -7,10 +7,9 @@ export function formatCommandSummary(command: Pick<CommandDefinition, 'name' | '
 export function buildCommandHelpMessage(customCommands: readonly CommandDefinition[]): string {
   const lines = [
     '本地命令:',
-    '/help: 查看命令说明',
-    '/commands: 查看命令说明',
+    '/help (或 /commands): 查看命令说明',
     '/compact: 强制压缩对话上下文',
-    '/goal exec:<验证命令>: 启动 Goal 自主循环（Worker+Verifier 双模型，直到验证条件通过）',
+    '/goal exec:<验证命令>: 启动 Goal 自主循环（Worker+Verifier 双模型，直到验证条件通过）\n            标志: --strict 严格模式 / --loose 宽松模式 / --plan-first 首轮规划',
   ];
 
   if (BUILTIN_PROMPT_COMMANDS.length > 0) {

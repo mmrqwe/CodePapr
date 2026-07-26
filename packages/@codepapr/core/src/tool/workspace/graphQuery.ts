@@ -200,7 +200,10 @@ export function lookupWorkspaceSymbols(
       if (rightScore !== leftScore) {
         return rightScore - leftScore;
       }
-      return `${left.path}:${left.symbol?.line ?? 0}`.localeCompare(`${right.path}:${right.symbol?.line ?? 0}`);
+      if (left.path !== right.path) {
+        return left.path < right.path ? -1 : 1;
+      }
+      return (left.symbol?.line ?? 0) - (right.symbol?.line ?? 0);
     });
 
   return {
@@ -251,9 +254,7 @@ function resolveSeedNodeIds(
       const exactQualifiedName = normalizeText(node.qualifiedName) === normalizeText(options.symbolName);
       return exactName || exactQualifiedName;
     });
-    if (matches.length > 0) {
-      return matches.map((node) => node.id);
-    }
+    return matches.map((node) => node.id);
   }
 
   if (options.relativePath) {
@@ -345,6 +346,7 @@ function collectSubgraph(params: {
   const edges = [...selectedEdgeIds]
     .map((edgeId) => edgeById.get(edgeId))
     .filter((edge): edge is ProjectGraphEdge => Boolean(edge))
+    .filter((edge) => visited.has(edge.from) && visited.has(edge.to))
     .sort((left, right) => left.id.localeCompare(right.id));
   const summary = summarizeNodes(nodes);
 
@@ -447,7 +449,10 @@ export function analyzeWorkspaceChangeImpact(
   const impactedSymbols = impactedNodes
     .filter((node) => node.kind === 'symbol' && node.symbol)
     .map(toGraphSymbolMatch)
-    .sort((left, right) => `${left.path}:${left.line ?? 0}`.localeCompare(`${right.path}:${right.line ?? 0}`));
+    .sort((left, right) => {
+      if (left.path !== right.path) return left.path < right.path ? -1 : 1;
+      return (left.line ?? 0) - (right.line ?? 0);
+    });
   const summary = summarizeNodes(impactedNodes);
 
   return {
@@ -476,7 +481,8 @@ export function findWorkspaceSymbolImplementations(
     relativePath: options.relativePath,
     symbolName: options.symbolName,
   });
-  const targetNodeId = seedIds.find((id) => nodeMap.get(id)?.kind === 'symbol');
+  const targetNodeIds = seedIds.filter((id) => nodeMap.get(id)?.kind === 'symbol');
+  const targetNodeId = targetNodeIds[0];
 
   if (!targetNodeId) {
     return {
@@ -501,15 +507,19 @@ export function findWorkspaceSymbolImplementations(
     };
   }
 
+  const targetIdSet = new Set(targetNodeIds);
   const implementationIdSet = new Set(
     graph.edges
-      .filter((edge) => (edge.kind === 'extends' || edge.kind === 'implements') && edge.to === targetNodeId)
+      .filter((edge) => (edge.kind === 'extends' || edge.kind === 'implements') && targetIdSet.has(edge.to))
       .map((edge) => edge.from)
   );
   const implementations = graph.nodes
     .filter((node) => implementationIdSet.has(node.id) && node.kind === 'symbol' && node.symbol)
     .map(toGraphSymbolMatch)
-    .sort((left, right) => `${left.path}:${left.line ?? 0}`.localeCompare(`${right.path}:${right.line ?? 0}`));
+    .sort((left, right) => {
+      if (left.path !== right.path) return left.path < right.path ? -1 : 1;
+      return (left.line ?? 0) - (right.line ?? 0);
+    });
 
   return {
     available: true,
@@ -590,6 +600,7 @@ export function getWorkspaceSmartContext(
     relevantSymbols: symbolLookup.matches,
     relevantFiles,
     entryPoints: entryPoints.entries,
+    ...(dependencySubgraph ? { dependencySubgraph } : {}),
   };
 }
 
@@ -608,111 +619,152 @@ export interface ProjectGraphRenameResult {
   message: string;
 }
 
+export interface ProjectGraphRenameEdit {
+  line: number;
+  startColumn: number;
+  endColumn: number;
+  replacement: string;
+}
+
+export interface ProjectGraphRenamePlan {
+  symbol: ProjectGraphNode | null;
+  oldName: string;
+  targetFiles: string[];
+}
+
 export function planProjectGraphRename(
   params: ProjectGraphRenameParams,
-): { edits: Map<string, Array<{ line: number; startColumn: number; endColumn: number; replacement: string }>>; symbol: ProjectGraphNode | null } {
+): ProjectGraphRenamePlan {
   const symbol = findSymbolAtPosition(params.graph, params.relativePath, params.line, params.character);
   if (!symbol || !symbol.symbol) {
-    return { edits: new Map(), symbol: null };
+    return { symbol: null, oldName: '', targetFiles: [] };
   }
+  return {
+    symbol,
+    oldName: symbol.symbol.name,
+    targetFiles: collectRenameTargetFiles(params.graph, symbol),
+  };
+}
 
-  const oldName = symbol.symbol.name;
-  const refs = findAllReferences(params.graph, symbol.id, oldName);
-  const edits = new Map<string, Array<{ line: number; startColumn: number; endColumn: number; replacement: string }>>();
-
-  for (const ref of refs) {
-    const fileEdits = edits.get(ref.path) ?? [];
-    fileEdits.push({
-      line: ref.line,
-      startColumn: ref.column,
-      endColumn: ref.column + oldName.length,
-      replacement: params.newName,
-    });
-    edits.set(ref.path, fileEdits);
+function collectRenameTargetFiles(
+  graph: WorkspaceProjectGraphResult,
+  symbol: ProjectGraphNode,
+): string[] {
+  const nodeMap = buildNodeMap(graph);
+  const files = new Set<string>();
+  if (symbol.path) files.add(symbol.path);
+  const targetFileId = symbol.path ? `file:${symbol.path}` : null;
+  for (const edge of graph.edges) {
+    if (edge.to === symbol.id && edge.from.startsWith('symbol:')) {
+      const fromNode = nodeMap.get(edge.from);
+      if (fromNode?.path) files.add(fromNode.path);
+    }
+    if (edge.kind === 'imports' && targetFileId && edge.to === targetFileId && edge.from.startsWith('file:')) {
+      files.add(edge.from.slice('file:'.length));
+    }
   }
-
-  return { edits, symbol };
+  return [...files];
 }
 
 function findSymbolAtPosition(
   graph: WorkspaceProjectGraphResult,
   relativePath: string,
   line: number,
-  character: number,
+  _character: number,
 ): ProjectGraphNode | null {
   const nodeMap = buildNodeMap(graph);
-  const candidates: ProjectGraphNode[] = [];
+  let nearest: ProjectGraphNode | null = null;
   for (const node of nodeMap.values()) {
-    if (node.kind === 'symbol' && node.path === relativePath && node.symbol && node.symbol.line <= line) {
-      candidates.push(node);
-    }
-  }
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => (b.symbol?.line ?? 0) - (a.symbol?.line ?? 0));
-  const nearest = candidates[0] ?? null;
-  if (nearest?.symbol?.line === line && character > 0) {
-    const sameLine = candidates.filter((n) => n.symbol?.line === line);
-    if (sameLine.length > 1) {
-      return sameLine.reduce((best, n) => {
-        const bestDist = Math.abs((best.symbol?.line ?? 0) - line);
-        const nDist = Math.abs((n.symbol?.line ?? 0) - line);
-        return nDist < bestDist ? n : best;
-      });
+    if (node.kind !== 'symbol' || node.path !== relativePath || !node.symbol) continue;
+    if (node.symbol.line > line) continue;
+    if (!nearest || (node.symbol.line > (nearest.symbol?.line ?? 0))) {
+      nearest = node;
     }
   }
   return nearest;
 }
 
-interface RawReference {
-  path: string;
-  line: number;
-  column: number;
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function findAllReferences(
-  graph: WorkspaceProjectGraphResult,
-  symbolId: string,
-  symbolName: string,
-): RawReference[] {
-  const refs: RawReference[] = [];
-  const seen = new Set<string>();
-  const nodeMap = buildNodeMap(graph);
-
-  for (const node of nodeMap.values()) {
-    if (node.kind === 'symbol' && node.symbol) {
-      if (node.id === symbolId) {
-        addRef(refs, seen, node.path, node.symbol.line, 0, symbolName);
-        continue;
-      }
-      if (node.symbol.name === symbolName) {
-        addRef(refs, seen, node.path, node.symbol.line, 0, symbolName);
-      }
-    }
-  }
-
-  const incoming = graph.edges.filter((e) => e.to === symbolId && e.from.startsWith('symbol:'));
-  for (const edge of incoming) {
-    const fromNode = nodeMap.get(edge.from);
-    if (fromNode?.symbol) {
-      addRef(refs, seen, fromNode.path, fromNode.symbol.line, 0, symbolName);
-    }
-  }
-
-  return refs;
+function isCommentLine(line: string): boolean {
+  const trimmed = line.trimStart();
+  return (
+    trimmed.startsWith('//') ||
+    trimmed.startsWith('/*') ||
+    trimmed.startsWith('*') ||
+    trimmed.startsWith('#')
+  );
 }
 
-function addRef(
-  refs: RawReference[],
-  seen: Set<string>,
-  path: string,
-  line: number,
-  column: number,
-  name: string,
-) {
-  const key = `${path}:${line}:${name}`;
-  if (seen.has(key)) return;
-  seen.add(key);
-  refs.push({ path, line, column });
+function isInsideStringLiteral(line: string, index: number): boolean {
+  let quote: string | null = null;
+  for (let i = 0; i < index; i++) {
+    const ch = line[i];
+    if (ch === '\\') {
+      i++;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+    }
+  }
+  return quote !== null;
+}
+
+export function computeRenameEditsForContent(
+  content: string,
+  oldName: string,
+  newName: string,
+): ProjectGraphRenameEdit[] {
+  const edits: ProjectGraphRenameEdit[] = [];
+  if (!oldName || !newName || oldName === newName) return edits;
+  const pattern = new RegExp(`(?<![\\w$])${escapeRegExp(oldName)}(?![\\w$])`, 'g');
+  const lines = content.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const lineText = lines[i];
+    if (isCommentLine(lineText)) continue;
+    pattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(lineText)) !== null) {
+      const start = match.index;
+      if (isInsideStringLiteral(lineText, start)) continue;
+      edits.push({
+        line: i + 1,
+        startColumn: start,
+        endColumn: start + oldName.length,
+        replacement: newName,
+      });
+    }
+  }
+  return edits;
+}
+
+export function applyRenameEditsToContent(
+  content: string,
+  edits: readonly ProjectGraphRenameEdit[],
+): string {
+  if (edits.length === 0) return content;
+  const lineStarts: number[] = [0];
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === '\n') lineStarts.push(i + 1);
+  }
+  const offsetEdits = edits
+    .filter((e) => e.line >= 1 && e.line <= lineStarts.length)
+    .map((e) => ({
+      start: lineStarts[e.line - 1] + e.startColumn,
+      end: lineStarts[e.line - 1] + e.endColumn,
+      replacement: e.replacement,
+    }))
+    .sort((a, b) => b.start - a.start);
+  let next = content;
+  for (const e of offsetEdits) {
+    next = next.slice(0, e.start) + e.replacement + next.slice(e.end);
+  }
+  return next;
 }
 
 export interface CircularDependency {
@@ -771,8 +823,6 @@ export function detectCircularDependencies(
       if (done) {
         color.set(top.node, NodeColor.BLACK);
         onStack.delete(top.node);
-        const p = parent.get(top.node);
-        if (p !== undefined) onStack.delete(p);
         stack.pop();
         continue;
       }
@@ -785,8 +835,8 @@ export function detectCircularDependencies(
           cur = parent.get(cur) ?? '';
         }
         cycleIds.push(neighbor);
-        const files = cycleIds.map((id) => nodeIdToPath.get(id) ?? id);
-        cycles.push({ cycle: cycleIds, files, length: cycleIds.length });
+        const files = [...new Set(cycleIds.map((id) => nodeIdToPath.get(id) ?? id))];
+        cycles.push({ cycle: cycleIds, files, length: cycleIds.length - 1 });
         continue;
       }
 
@@ -808,18 +858,19 @@ export function detectCircularDependencies(
 
   const summary = cycles.length === 0
     ? '未检测到循环依赖。'
-    : `检测到 ${cycles.length} 个循环依赖，涉及 ${cycles.reduce((s, c) => s + c.length, 0)} 个文件。`;
+    : `检测到 ${cycles.length} 个循环依赖，涉及 ${new Set(cycles.flatMap((c) => c.files)).size} 个文件。`;
 
   return { cycles, total: cycles.length, summary };
 }
 
 function extractFileId(nodeId: string): string | null {
-  const colon = nodeId.lastIndexOf(':');
-  if (colon < 0) return null;
-  const prefix = nodeId.substring(0, colon);
-  if (prefix.startsWith('file:') || prefix.startsWith('symbol:')) return null;
   if (nodeId.startsWith('file:')) return nodeId;
-  if (nodeId.startsWith('symbol:')) return `file:${nodeId.substring('symbol:'.length, colon)}`;
+  if (nodeId.startsWith('symbol:')) {
+    const rest = nodeId.substring('symbol:'.length);
+    const nextColon = rest.indexOf(':');
+    const path = nextColon < 0 ? rest : rest.substring(0, nextColon);
+    return path ? `file:${path}` : null;
+  }
   return null;
 }
 
@@ -852,7 +903,8 @@ export function detectDeadCode(
     // 注意：'contains' 是文件/容器到符号的结构性归属边，每个符号必然有且仅有一条，
     // 不代表真实引用/调用，绝不能计入"被使用"的证据，否则死代码检测永远不会命中。
     if (edge.kind === 'imports' || edge.kind === 'calls' ||
-        edge.kind === 'extends' || edge.kind === 'implements') {
+        edge.kind === 'extends' || edge.kind === 'implements' ||
+        edge.kind === 'reexports' || edge.kind === 'tested_by') {
       const current = inbound.get(edge.to) ?? 0;
       inbound.set(edge.to, current + 1);
     }
@@ -923,7 +975,7 @@ export function buildTypeHierarchy(
       line: s.symbol!.line,
       parents: [],
       children: [],
-      depth: 0,
+      depth: -1,
     });
   }
 
@@ -940,8 +992,11 @@ export function buildTypeHierarchy(
 
   for (const [, node] of nodes) {
     if (node.parents.length === 0) {
-      assignDepth(node, nodes, new Set(), 0);
+      assignDepth(node, nodes, 0, new Set());
     }
+  }
+  for (const [, node] of nodes) {
+    if (node.depth < 0) node.depth = 0;
   }
 
   const roots: TypeNode[] = [];
@@ -976,16 +1031,18 @@ function isCallableSymbolKind(kind: string): boolean {
 function assignDepth(
   node: TypeNode,
   nodes: Map<string, TypeNode>,
-  visited: Set<string>,
   depth: number,
+  visiting: Set<string>,
 ) {
-  if (visited.has(node.symbolId)) return;
-  visited.add(node.symbolId);
-  node.depth = Math.max(node.depth, depth);
+  if (visiting.has(node.symbolId)) return;
+  if (depth < node.depth) return;
+  node.depth = depth;
+  visiting.add(node.symbolId);
   for (const childId of node.children) {
     const child = nodes.get(childId);
-    if (child) assignDepth(child, nodes, visited, depth + 1);
+    if (child) assignDepth(child, nodes, depth + 1, visiting);
   }
+  visiting.delete(node.symbolId);
 }
 
 function buildAncestorChain(
@@ -1047,7 +1104,7 @@ export function discoverAndMapTests(
   const mappedSources = new Map<string, string[]>();
   for (const testFile of testFiles) {
     const sources: string[] = [];
-    const outEdges = edgeMap.outgoing.get(testFile) ?? [];
+    const outEdges = edgeMap.outgoing.get(`file:${testFile}`) ?? [];
     for (const edge of outEdges) {
       if (edge.kind !== 'imports' && edge.kind !== 'calls') continue;
       const toNode = nodeMap.get(edge.to);
@@ -1191,7 +1248,7 @@ function countFunctionLines(content: string, startLine: number): number {
         }
       }
     }
-    if (i === startLine - 1 && !started && depth === 0) {
+    if (!started && i - (startLine - 1) >= 3) {
       return 0;
     }
   }
@@ -1258,7 +1315,7 @@ function estimateNestingDepth(content: string, startLine: number): number {
         if (started && depth <= 0) return Math.max(1, Math.round(maxDepth / 2));
       }
     }
-    if (i === startLine - 1 && !started && depth === 0) {
+    if (!started && i - (startLine - 1) >= 3) {
       return 1;
     }
   }
@@ -1317,8 +1374,9 @@ function planSymbolMoves(
 }
 
 function getExtension(path: string): string {
-  const parts = path.split('.');
-  return parts.length > 1 ? parts.slice(1).join('.') : 'ts';
+  const base = path.split('/').pop() ?? path;
+  const idx = base.lastIndexOf('.');
+  return idx > 0 ? base.slice(idx + 1) : 'ts';
 }
 
 export interface ImpactBasedTestSelectionResult {
@@ -1391,23 +1449,20 @@ function analyzeChangeImpactInternal(
   );
   if (!fileNode) return [];
 
+  const DEPENDENCY_KINDS = new Set(['imports', 'reexports', 'calls', 'extends', 'implements']);
+  const MAX_DEPTH = 6;
   const impacted = new Set<string>();
-  const queue = [fileNode.id];
+  const queue: Array<{ id: string; depth: number }> = [{ id: fileNode.id, depth: 0 }];
 
   while (queue.length > 0) {
     const current = queue.shift()!;
-    const outEdges = edgeMap.outgoing.get(current) ?? [];
-    for (const edge of outEdges) {
-      if (!impacted.has(edge.to)) {
-        impacted.add(edge.to);
-        queue.push(edge.to);
-      }
-    }
-    const inEdges = edgeMap.incoming.get(current) ?? [];
+    if (current.depth >= MAX_DEPTH) continue;
+    const inEdges = edgeMap.incoming.get(current.id) ?? [];
     for (const edge of inEdges) {
+      if (!DEPENDENCY_KINDS.has(edge.kind)) continue;
       if (!impacted.has(edge.from)) {
         impacted.add(edge.from);
-        queue.push(edge.from);
+        queue.push({ id: edge.from, depth: current.depth + 1 });
       }
     }
   }
@@ -1445,7 +1500,15 @@ export function checkArchitectureLayers(
 
   const compiledLayers = layers.map((layer) => ({
     ...layer,
-    compiledPatterns: layer.patterns.map((p) => new RegExp(p)),
+    compiledPatterns: layer.patterns
+      .map((p) => {
+        try {
+          return new RegExp(p);
+        } catch {
+          return null;
+        }
+      })
+      .filter((re): re is RegExp => re !== null),
   }));
 
   const classifyFile = (path: string): string => {
@@ -1550,6 +1613,9 @@ export function computeSemanticDiff(
 
   const changes: SemanticSymbolChange[] = [];
   const breakingChanges: SemanticSymbolChange[] = [];
+  const beforeExported = new Set(
+    before.nodes.filter((n) => n.kind === 'symbol' && n.symbol?.exported).map((n) => n.id),
+  );
 
   for (const [id, beforeSym] of beforeSymbols) {
     const afterSym = afterSymbols.get(id);
@@ -1559,7 +1625,7 @@ export function computeSemanticDiff(
         symbol: beforeSym,
       };
       changes.push(change);
-      if (isExportedSymbol(before, id)) {
+      if (beforeExported.has(id)) {
         breakingChanges.push(change);
       }
     } else if (beforeSym.signature !== afterSym.signature) {
@@ -1572,7 +1638,7 @@ export function computeSemanticDiff(
       if (beforeSym.name !== afterSym.name) {
         change.kind = 'renamed';
       }
-      if (isExportedSymbol(before, id)) {
+      if (beforeExported.has(id)) {
         breakingChanges.push(change);
       }
     }
@@ -1584,8 +1650,16 @@ export function computeSemanticDiff(
     }
   }
 
-  const edgeAdded = after.edges.length - before.edges.length;
-  const edgeRemoved = Math.max(0, before.edges.length - after.edges.length);
+  const beforeEdgeIds = new Set(before.edges.map((e) => e.id));
+  const afterEdgeIds = new Set(after.edges.map((e) => e.id));
+  let edgeAdded = 0;
+  let edgeRemoved = 0;
+  for (const id of afterEdgeIds) {
+    if (!beforeEdgeIds.has(id)) edgeAdded++;
+  }
+  for (const id of beforeEdgeIds) {
+    if (!afterEdgeIds.has(id)) edgeRemoved++;
+  }
   const newImports = after.edges.filter((e) => e.kind === 'imports').length -
     before.edges.filter((e) => e.kind === 'imports').length;
   const newCalls = after.edges.filter((e) => e.kind === 'calls').length -
@@ -1607,11 +1681,6 @@ export function computeSemanticDiff(
       (breakingChanges.length > 0 ? `，${breakingChanges.length} 个破坏性变更` : '') +
       (edgeDetails.length > 0 ? `，${edgeDetails.join('，')}` : ''),
   };
-}
-
-function isExportedSymbol(graph: WorkspaceProjectGraphResult, symbolId: string): boolean {
-  const node = graph.nodes.find((n) => n.id === symbolId);
-  return node?.symbol?.exported ?? false;
 }
 
 export interface GeneratedTest {
@@ -1648,7 +1717,13 @@ export function generateTestSkeletons(
 }
 
 function detectTestLanguage(langOrPath: string): string {
-  const ext = langOrPath.split('.').pop()?.toLowerCase() ?? '';
+  const normalized = langOrPath.trim().toLowerCase();
+  const NAME_MAP: Record<string, string> = {
+    typescript: 'typescript', javascript: 'javascript', python: 'python', rust: 'rust',
+    go: 'go', golang: 'go', java: 'java', ruby: 'ruby', php: 'php', kotlin: 'kotlin', swift: 'swift',
+  };
+  if (NAME_MAP[normalized]) return NAME_MAP[normalized];
+  const ext = normalized.split('.').pop() ?? '';
   const LANG_MAP: Record<string, string> = {
     ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
     py: 'python', rs: 'rust', go: 'go', java: 'java',
@@ -1699,17 +1774,44 @@ function generateSingleTest(
   }
 }
 
+function splitTopLevelCommas(value: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let angle = 0;
+  let paren = 0;
+  let bracket = 0;
+  let brace = 0;
+  for (const ch of value) {
+    if (ch === '<') angle++;
+    else if (ch === '>' && angle > 0) angle--;
+    else if (ch === '(') paren++;
+    else if (ch === ')' && paren > 0) paren--;
+    else if (ch === '[') bracket++;
+    else if (ch === ']' && bracket > 0) bracket--;
+    else if (ch === '{') brace++;
+    else if (ch === '}' && brace > 0) brace--;
+    if (ch === ',' && angle === 0 && paren === 0 && bracket === 0 && brace === 0) {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim().length > 0) parts.push(current);
+  return parts;
+}
+
 function extractParams(signature: string): string[] {
   const match = signature.match(/\(([^)]*)\)/);
   if (!match?.[1]) return [];
-  return match[1]
-    .split(',')
+  return splitTopLevelCommas(match[1])
     .map((p) => p.trim())
     .filter((p) => p.length > 0)
     .map((p) => {
-      const parts = p.split(/[\s:=]+/);
-      return parts[parts.length - 1].replace(/[,?]$/, '');
-    });
+      const name = p.split(/[\s:=]+/)[0] ?? '';
+      return name.replace(/^\.{3}/, '').replace(/[?+]$/, '');
+    })
+    .filter((name) => name.length > 0);
 }
 
 function capitalize(s: string): string {
@@ -1878,18 +1980,19 @@ export function planMoveSymbol(
   if (!node || !node.symbol) return null;
   if (!isTypeSymbolKind(node.symbol.kind)) return null;
 
+  const nodeMap = buildNodeMap(graph);
   const importers: string[] = [];
   const dependencies: string[] = [];
 
   for (const edge of graph.edges) {
     if (edge.to === symbolId) {
-      const fromNode = graph.nodes.find((n) => n.id === edge.from);
+      const fromNode = nodeMap.get(edge.from);
       if (fromNode && fromNode.path !== node.path && !importers.includes(fromNode.path)) {
         importers.push(fromNode.path);
       }
     }
     if (edge.from === symbolId && (edge.kind === 'imports' || edge.kind === 'calls')) {
-      const toNode = graph.nodes.find((n) => n.id === edge.to);
+      const toNode = nodeMap.get(edge.to);
       if (toNode && toNode.path !== node.path && !dependencies.includes(toNode.path)) {
         dependencies.push(toNode.path);
       }
@@ -1900,7 +2003,10 @@ export function planMoveSymbol(
 
   const ext = getExtension(node.path);
   const safeName = node.symbol.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-  const targetPath = node.path.replace(/\/[^/]+$/, `/${safeName}.${ext}`);
+  const targetPath = node.path.includes('/')
+    ? node.path.replace(/\/[^/]+$/, `/${safeName}.${ext}`)
+    : `${safeName}.${ext}`;
+  if (targetPath === node.path) return null;
 
   const sourceContent = fileContents[node.path]?.content ?? '';
   const sourceLines = sourceContent.split(/\r?\n/);
@@ -1976,21 +2082,30 @@ export function planInlineVariable(
   const usageSites: Array<{ path: string; line: number; column: number }> = [];
   const varName = node.symbol.name;
 
+  const candidatePaths = new Set<string>();
   for (const otherNode of graph.nodes) {
     if (otherNode.kind !== 'symbol' || !otherNode.symbol) continue;
     if (otherNode.id === symbolId) continue;
+    candidatePaths.add(otherNode.path);
+  }
 
-    const otherContent = fileContents[otherNode.path]?.content;
+  const seenSites = new Set<string>();
+  for (const otherPath of candidatePaths) {
+    const otherContent = fileContents[otherPath]?.content;
     if (!otherContent) continue;
 
     const otherLines = otherContent.split(/\r?\n/);
     for (let i = 0; i < otherLines.length; i++) {
+      if (otherPath === node.path && i + 1 === node.symbol.line) continue;
       const pattern = new RegExp(`\\b${escapeRegex(varName)}\\b`, 'g');
       let match: RegExpExecArray | null;
       while ((match = pattern.exec(otherLines[i])) !== null) {
         const beforeChar = otherLines[i][match.index - 1];
         if (beforeChar && /[a-zA-Z0-9_$.]/.test(beforeChar)) continue;
-        usageSites.push({ path: otherNode.path, line: i + 1, column: match.index + 1 });
+        const siteKey = `${otherPath}:${i + 1}:${match.index + 1}`;
+        if (seenSites.has(siteKey)) continue;
+        seenSites.add(siteKey);
+        usageSites.push({ path: otherPath, line: i + 1, column: match.index + 1 });
       }
     }
   }
@@ -2020,8 +2135,8 @@ export function suggestInlineVariables(
     const kind = node.symbol.kind.toLowerCase();
     if (kind !== 'variable' && kind !== 'constant' && kind !== 'const' && kind !== 'let') continue;
 
-    const outgoing = edgeMap.outgoing.get(node.id) ?? [];
-    const incoming = edgeMap.incoming.get(node.id) ?? [];
+    const outgoing = (edgeMap.outgoing.get(node.id) ?? []).filter((e) => e.kind !== 'contains');
+    const incoming = (edgeMap.incoming.get(node.id) ?? []).filter((e) => e.kind !== 'contains');
     const usageCount = outgoing.length + incoming.length;
 
     if (usageCount <= 3 && usageCount > 0) {
@@ -2085,7 +2200,10 @@ function buildDependencyImports(dependencies: string[], sourcePath: string, ext:
 function computeRelativePath(fromPath: string, toPath: string): string {
   const fromDir = fromPath.split('/').slice(0, -1);
   const toParts = toPath.split('/');
-  const prefix = fromDir.filter((p, i) => p === toParts[i]).length;
+  let prefix = 0;
+  while (prefix < fromDir.length && prefix < toParts.length && fromDir[prefix] === toParts[prefix]) {
+    prefix++;
+  }
   const upCount = fromDir.length - prefix;
   const up = '../'.repeat(Math.max(0, upCount));
   const down = toParts.slice(prefix).join('/');
@@ -2416,25 +2534,28 @@ export function applyIncrementalUpdate(
   const removedNodeSet = new Set(update.removedNodeIds);
   const removedEdgeSet = new Set(update.removedEdgeIds);
 
-  const nodes = [
-    ...graph.nodes.filter((n) => !removedNodeSet.has(n.id)),
-    ...update.addedNodes,
-  ];
-
-  const changedNodeMap = new Map(update.changedNodes.map((n) => [n.id, n]));
-  for (let i = 0; i < nodes.length; i++) {
-    const updated = changedNodeMap.get(nodes[i].id);
-    if (updated) {
-      nodes[i] = updated;
-    }
+  const nodeMap = new Map<string, ProjectGraphNode>();
+  for (const node of graph.nodes) {
+    if (!removedNodeSet.has(node.id)) nodeMap.set(node.id, node);
+  }
+  for (const node of update.addedNodes) {
+    nodeMap.set(node.id, node);
   }
 
-  const edges = [
-    ...graph.edges.filter((e) => !removedEdgeSet.has(e.id)),
-    ...update.addedEdges,
-  ];
+  const changedNodeMap = new Map(update.changedNodes.map((n) => [n.id, n]));
+  for (const [id, updated] of changedNodeMap) {
+    if (nodeMap.has(id)) nodeMap.set(id, updated);
+  }
+  const nodes = [...nodeMap.values()];
 
-  const uniqueEdges = edges.filter((e, i, arr) => arr.findIndex((x) => x.id === e.id) === i);
+  const edgeMap = new Map<string, ProjectGraphEdge>();
+  for (const edge of graph.edges) {
+    if (!removedEdgeSet.has(edge.id)) edgeMap.set(edge.id, edge);
+  }
+  for (const edge of update.addedEdges) {
+    edgeMap.set(edge.id, edge);
+  }
+  const uniqueEdges = [...edgeMap.values()];
 
   return {
     ...graph,

@@ -16,6 +16,8 @@ interface ReadFileResult {
   path?: string;
   content: string;
   bytes: number;
+  truncatedByBytes?: boolean;
+  truncatedByRange?: boolean;
 }
 
 interface WriteTextFileResult {

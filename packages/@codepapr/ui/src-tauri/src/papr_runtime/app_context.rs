@@ -15,7 +15,7 @@ pub struct AppContext {
 }
 
 pub fn register(app_id: &str, workspace_path: &str) {
-    app_contexts().lock().unwrap().insert(
+    app_contexts().lock().unwrap_or_else(|e| e.into_inner()).insert(
         app_id.to_string(),
         AppContext {
             app_id: app_id.to_string(),
@@ -25,13 +25,13 @@ pub fn register(app_id: &str, workspace_path: &str) {
 }
 
 pub fn unregister(app_id: &str) {
-    app_contexts().lock().unwrap().remove(app_id);
+    app_contexts().lock().unwrap_or_else(|e| e.into_inner()).remove(app_id);
 }
 
 pub fn get(app_id: &str) -> Result<AppContext, String> {
     app_contexts()
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(app_id)
         .cloned()
         .ok_or_else(|| format!("app context '{}' not registered", app_id))

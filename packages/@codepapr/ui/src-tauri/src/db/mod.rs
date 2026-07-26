@@ -21,6 +21,7 @@ const APP_DATA_DIR: &str = ".codepapr";
 const APP_DB_FILE: &str = "codepapr.sqlite";
 const APP_SETTINGS_KEY: &str = "ui.settings";
 const APP_CHARACTERS_KEY: &str = "ui.characters";
+const PAPR_APP_PERMISSION_SETTINGS_KEY: &str = "papr.appPermissionSettings";
 const PROJECT_STORAGE_DIR: &str = ".CodePapr";
 const PROJECT_DB_FILE: &str = "project.sqlite";
 const PROJECT_STATE_KEY: &str = "project.state";
@@ -1162,6 +1163,34 @@ pub(crate) fn papr_storage_keys(
         .filter_map(|r| r.ok())
         .collect();
     Ok(keys)
+}
+
+// ── Papr App Permission Settings ────────────────────────────────────
+
+pub(crate) fn papr_load_permission_settings() -> Result<Option<String>, String> {
+    let (conn, _) = open_app_db()?;
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        params![PAPR_APP_PERMISSION_SETTINGS_KEY],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(|err| format!("读取 Papr 权限设置失败: {err}"))
+}
+
+pub(crate) fn papr_save_permission_settings(settings_json: &str) -> Result<(), String> {
+    let (conn, _) = open_app_db()?;
+    conn.execute(
+        "INSERT INTO settings (key, value, data_type, updated_at)
+         VALUES (?1, ?2, 'json', ?3)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           data_type = excluded.data_type,
+           updated_at = excluded.updated_at",
+        params![PAPR_APP_PERMISSION_SETTINGS_KEY, settings_json, unix_millis()?],
+    )
+    .map_err(|err| format!("保存 Papr 权限设置失败: {err}"))?;
+    Ok(())
 }
 
 // ── Tests ────────────────────────────────────────────────────────────

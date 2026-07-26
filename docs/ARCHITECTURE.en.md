@@ -98,7 +98,7 @@ The Tauri Rust backend is organized into domain modules, each with a single resp
 | `tts` | `src-tauri/src/tts/` | GPT-SoVITS TTS subsystem: server management, voice synthesis, WebSocket batch synthesis, audio playback, installer, fine-tuning |
 | `lsp` | `src-tauri/src/lsp.rs` | LSP server process management, stdin/stdout JSON-RPC bridging |
 | `symbol_provider` | `src-tauri/src/symbol_provider.rs` | tree-sitter fallback symbol extraction |
-| `mcp_host` | `src-tauri/src/mcp_host.rs` | MCP tool server host (stdio / sse / streamable-http) |
+| `mcp_host` | `src-tauri/src/mcp_host.rs` | MCP tool server host (stdio / sse / streamable-http); dynamic tool discovery (`mcp__<serverId>__<toolName>`); 3 permission modes (read-only / read-write / dangerous); mutating-tool confirmation flow; 24h tool definition cache; MCP marketplace (official registry one-click install) |
 | `shared` | `src-tauri/src/shared/` | Path normalization, workspace path resolution, runtime helpers, string/time utilities |
 | `papr_runtime` | `src-tauri/src/papr_runtime/` | .papr app runtime: manifest loading, permission validation, SDK injection, storage/HTTP/FS commands, app context registry |
 | `app_runtime` | `src-tauri/src/app_runtime.rs` | Custom URI scheme `codepapr-app://`, app discovery and scanning, SDK injection, workspace registration |
@@ -113,7 +113,7 @@ All heavy-I/O Tauri commands (file listing, reading, command execution, etc.) ex
 
 ### 4.6 Tool Architecture
 
-The LLM can invoke 26 discrete tools (including `task`/`todo` as dynamic tools), each with a single responsibility. The 7 tools with `action` parameters all use `enum` constraints. File read/write/SEARCH/REPLACE operations have a 20MB cap:
+The LLM can invoke 30 discrete tools (including `task`/`todo` as dynamic tools), each with a single responsibility. The 7 tools with `action` parameters all use `enum` constraints. File read/write/SEARCH/REPLACE operations have a 20MB cap:
 
 | Unified Tool | Action | Delegated Tool |
 |---|---|---|
@@ -138,13 +138,17 @@ The LLM can invoke 26 discrete tools (including `task`/`todo` as dynamic tools),
 | `web_fetch` | Read web page content | web_fetch_url |
 | `web_download` | Download file to project | web_download_file |
 | `open` | Open URL/HTML in system browser | workspace_open_in_browser |
+| `app_render` | Render .papr App | app_render |
+| `app_list` | List all registered apps | app_list |
+| `app_start` | Start app backend | app_start |
+| `app_stop` | Stop app backend | app_stop |
+| `app_delete` | Delete app | app_delete |
 | `skill` | Load skill documentation | skill_load |
-| `time` | Get local time | local_time_now |
 | `question` | Ask user a question | question |
 | `task` | Delegate subtask to sub-agent | subagent |
 | `todo` | tasks / updates task planning | TodoList |
 
-All 26 tools are registered in ToolRegistry, frozen and hashed for cache consistency. `todo` and `task` are dynamically generated.
+All 30 tools are registered in ToolRegistry, frozen and hashed for cache consistency. `todo` and `task` are dynamically generated.
 
 **External path permissions**: The desktop app shows a `PermissionDialog` for `read`/`list` operations on absolute paths outside the project. The user can choose "Deny / Allow this file / Allow this folder". Authorizations are stored in the `permissionStore` allowlist. CLI read boundaries are more permissive; writes remain workspace-scoped.
 
@@ -317,16 +321,19 @@ On Apple Silicon Macs, users can manually click "GPU Warmup" in the Voice Tab of
 
 | Agent | Purpose | Model | Tools |
 |-------|------|------|------|
-| explore | Read-only code analysis | fast | read, read_image, graph, lsp, diagnostics, time |
-| scout | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image, open, time |
+| explore | Read-only code analysis | fast | read, read_image, graph, lsp, diagnostics, grep |
+| scout | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image |
 | mentor | Architecture/algorithm guidance | Configurable independent model | None |
+| verifier | Goal acceptance checker (internal) | fast | None |
+
+> `verifier` is an internal evaluator for the Goal autonomous loop (`internal: true`), not exposed to the main Agent's `task` tool; used only by GoalRunner.
 
 ### 6.2 Sub-Agent Independent Context
 
 **Each sub-agent gets a fresh Session**, with no access to the main Agent's conversation history:
 
 - Creates a new `AppendOnlyLog` — blank log
-- Tool set is filtered by the allowlist in the definition (Explore has only 5 tools)
+- Tool set is filtered by the allowlist in the definition (Explore has 6 tools)
 - Only receives the task description from `task.prompt` as its sole context
 - Nesting depth is configurable (`subagentMaxDepth`, default 2)
 
@@ -580,7 +587,7 @@ ImmutablePrefix SHA256 hash includes the entire `parameters` object — `tempera
 
 ## 14. Settings Structure
 
-The settings panel has five tabs. Full parameter reference: `packages/@codepapr/core/docs/CONFIGURATION.md`.
+The settings panel has six tabs. Full parameter reference: `packages/@codepapr/core/docs/CONFIGURATION.md`.
 
 | Tab | Content |
 |---|---|
@@ -589,6 +596,7 @@ The settings panel has five tabs. Full parameter reference: `packages/@codepapr/
 | Search | Self-hosted SearXNG first, with automatic fallback to built-in multi-source aggregation when unavailable; engine selector removed from UI; category/time/language/safe search parameters moved to collapsible Advanced Options section |
 | Mentor | Mentor sub-agent independent API key, Base URL, model selection |
 | Advanced | Context compaction (model/temperature/tokens/context limit/conversation rounds), TodoList max retries, ProjectGraph depth/file limits |
+| App | .papr app permission management — global default level, Level 3 global toggle, per-app level overrides |
 
 Voice configuration is not in the main settings panel — it is configured per character in the CharacterModal Voice Tab.
 

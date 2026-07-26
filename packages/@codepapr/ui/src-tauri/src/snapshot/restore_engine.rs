@@ -1,8 +1,61 @@
 use std::path::{Path, PathBuf};
-use git2::{Repository, ResetType, Oid};
+use git2::{Repository, ResetType, Oid, Tree};
 use super::types::{RestorePlan, RestoreResult, FileChange};
 use super::snapshot_engine::SnapshotEngine;
 use super::ignore_resolver::IgnoreResolver;
+use crate::git_operations::validate_git_ref;
+
+/// 在 hard reset 之后清理"目标树中不存在但当前工作区存在"的未跟踪文件。
+/// 这一步是必须的：libgit2 的 reset --hard 只恢复被跟踪的文件，
+/// 不会删除自目标快照之后新增的未跟踪文件，导致恢复不彻底。
+fn remove_untracked_not_in_tree(
+    repo: &Repository,
+    workspace: &Path,
+    target_tree: &Tree,
+) -> usize {
+    let resolver = IgnoreResolver::new(workspace);
+    let files = resolver.collect_files();
+    let mut removed = 0usize;
+
+    for relative in &files {
+        if relative.components().any(|c| {
+            matches!(c.as_os_str().to_str(), Some(".git" | ".CodePapr" | ".codepapr_git_backup"))
+        }) {
+            continue;
+        }
+        if target_tree.get_path(relative).is_ok() {
+            continue;
+        }
+        let abs = workspace.join(relative);
+        if abs.is_file() || abs.is_symlink() {
+            if std::fs::remove_file(&abs).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+
+    if removed > 0 {
+        // 尝试清理空目录（自底向上），失败静默忽略
+        let mut dirs: Vec<PathBuf> = files.iter()
+            .filter_map(|f| f.parent().map(|p| p.to_path_buf()))
+            .collect();
+        dirs.sort_by(|a, b| b.components().count().cmp(&a.components().count()));
+        dirs.dedup();
+        for dir in dirs {
+            let abs_dir = workspace.join(&dir);
+            if abs_dir.is_dir() {
+                // 如果目录为空则删除
+                if let Ok(mut entries) = std::fs::read_dir(&abs_dir) {
+                    if entries.next().is_none() {
+                        let _ = std::fs::remove_dir(&abs_dir);
+                    }
+                }
+            }
+        }
+    }
+
+    removed
+}
 
 const BACKUP_REF: &str = "refs/codepapr-backup-before-reset";
 
@@ -32,6 +85,8 @@ impl RestoreEngine {
     }
 
     pub fn plan(&self, target_sha: &str) -> Result<RestorePlan, String> {
+        validate_git_ref(target_sha, "targetSha")?;
+
         let git_path = code_papr_git_path(&self.workspace);
         let repo = Repository::open(&git_path)
             .map_err(|e| format!("open repo: {}", e.message()))?;
@@ -107,6 +162,8 @@ impl RestoreEngine {
     }
 
     pub fn execute(&self, target_sha: &str) -> Result<RestoreResult, String> {
+        validate_git_ref(target_sha, "targetSha")?;
+
         let git_path = code_papr_git_path(&self.workspace);
         let repo = Repository::open(&git_path)
             .map_err(|e| format!("open repo: {}", e.message()))?;
@@ -164,7 +221,12 @@ impl RestoreEngine {
         repo.reset(target_commit.as_object(), ResetType::Hard, Some(&mut checkout))
             .map_err(|e| format!("reset: {}", e.message()))?;
 
-        eprintln!("[CodePapr] restore_execute: reset to {}, {} files changed", target_sha, files_changed);
+        // 清理目标树中不存在的未跟踪文件，确保恢复后工作区与目标快照完全一致
+        let untracked_removed = remove_untracked_not_in_tree(&repo, &self.workspace, &target_tree);
+        let files_changed = files_changed + untracked_removed;
+        let files_deleted = files_deleted + untracked_removed;
+
+        eprintln!("[CodePapr] restore_execute: reset to {}, {} files changed ({} untracked removed)", target_sha, files_changed, untracked_removed);
 
         Ok(RestoreResult {
             ok: true,
@@ -188,13 +250,17 @@ impl RestoreEngine {
             .ok_or_else(|| "backup ref has no target".to_string())?;
         let target_commit = repo.find_commit(target_oid)
             .map_err(|e| format!("find backup commit: {}", e.message()))?;
+        let target_tree = target_commit.tree()
+            .map_err(|e| format!("backup tree: {}", e.message()))?;
 
         let mut checkout = git2::build::CheckoutBuilder::new();
         checkout.force();
         repo.reset(target_commit.as_object(), ResetType::Hard, Some(&mut checkout))
             .map_err(|e| format!("undo reset: {}", e.message()))?;
 
-        eprintln!("[CodePapr] restore_undo: restored to {}", target_oid);
+        let removed = remove_untracked_not_in_tree(&repo, &self.workspace, &target_tree);
+
+        eprintln!("[CodePapr] restore_undo: restored to {} ({} untracked removed)", target_oid, removed);
 
         Ok(())
     }

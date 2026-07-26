@@ -162,8 +162,8 @@ Full parameter reference: `packages/@codepapr/core/docs/CONFIGURATION.md`.
 
 | Agent | Purpose | Model | Tools |
 |-------|------|------|------|
-| **explore** | Read-only code analysis | fast | read, read_image, graph, lsp, diagnostics, time |
-| **scout** | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image, open, time |
+| **explore** | Read-only code analysis | fast | read, read_image, graph, lsp, diagnostics, grep |
+| **scout** | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image |
 | **mentor** | Architecture/algorithm guidance | Configurable independent model | None |
 | **verifier** | Goal evaluator (internal) | fast | None |
 
@@ -295,11 +295,14 @@ You are a reviewer, a read-only code-review sub-agent.
 
 ### Skills
 
-Skills are reusable playbooks for the main Agent, placed in `.CodePapr/skills/**/SKILL.md`:
+Skills are reusable playbooks for the main Agent, placed under `.CodePapr/skills/` in two layouts:
 
-- Do not create sub-agents at runtime; instead serve as project-level context the model can choose from
-- Default includes a `search` Skill (search strategy)
-- Enable/disable state is saved in `.CodePapr/project.sqlite`
+- Nested: `.CodePapr/skills/<name>/SKILL.md`
+- Flat: `.CodePapr/skills/<name>.md`
+
+They do not create sub-agents at runtime; instead they serve as project-level context the model can choose from. Only name + description are injected into stable context; full content is loaded on demand via the `skill` tool (max 500KB). Default includes a `search` Skill (search strategy). Enable/disable state is saved in `.CodePapr/project.sqlite`.
+
+**Skill Marketplace**: The desktop app includes a built-in skill marketplace that pulls listings from GitHub (`zerone-agent/agent-use-skills`), supporting one-click install into the project. Installed skills are tracked in `skills-lock.json` (with SHA-256 checksums).
 
 ### Custom Chat Commands
 

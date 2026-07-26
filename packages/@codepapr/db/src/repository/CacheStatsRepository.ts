@@ -21,7 +21,6 @@ interface CacheStatsAggregateRow {
   total_cache_creation: number | null;
   total_input: number | null;
   total_output: number | null;
-  avg_hit_rate: number | null;
   count: number;
 }
 
@@ -95,18 +94,27 @@ export class CacheStatsRepository {
           SUM(cache_creation_tokens) as total_cache_creation,
           SUM(input_tokens) as total_input,
           SUM(output_tokens) as total_output,
-          AVG(cache_hit_rate) as avg_hit_rate,
           COUNT(*) as count
          FROM cache_stats WHERE session_id = ?`
       )
       .get(sessionId) as CacheStatsAggregateRow;
 
+    const totalCacheRead = row.total_cache_read ?? 0;
+    const totalCacheCreation = row.total_cache_creation ?? 0;
+    const totalInput = row.total_input ?? 0;
+    const totalOutput = row.total_output ?? 0;
+    // Weighted aggregate hit rate: sum(read) / sum(all input tokens). Averaging
+    // the per-row rates (AVG(cache_hit_rate)) would mis-weight calls that
+    // processed very different token volumes.
+    const totalInputTokens = totalCacheRead + totalCacheCreation + totalInput;
+    const avgHitRate = totalInputTokens > 0 ? totalCacheRead / totalInputTokens : 0;
+
     return {
-      totalCacheRead: row.total_cache_read ?? 0,
-      totalCacheCreation: row.total_cache_creation ?? 0,
-      totalInput: row.total_input ?? 0,
-      totalOutput: row.total_output ?? 0,
-      avgHitRate: row.avg_hit_rate ?? 0,
+      totalCacheRead,
+      totalCacheCreation,
+      totalInput,
+      totalOutput,
+      avgHitRate,
       count: row.count ?? 0,
     };
   }

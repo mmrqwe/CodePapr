@@ -601,7 +601,7 @@ https://api.deepseek.com/v1</code></pre>
         </table>
 
         <div class="callout success">
-           <strong>Tip:</strong> The desktop settings panel is divided into five tabs: <code>General / LLM / Search / Mentor / Advanced</code>. <strong>General</strong> covers language, debugging, and license; <strong>LLM</strong> covers primary model, fast model, sampling parameters, and thinking effort; <strong>Search</strong> configures self-hosted SearXNG search backend (SearXNG first, with automatic fallback to built-in multi-source aggregation — Bing / Mojeek / Qwant / Wikipedia — when unavailable; engine selector removed; category/time/language/safe search moved to collapsible Advanced section); <strong>Mentor</strong> configures an independent API key, base URL, and model selection for the mentor sub-agent; <strong>Advanced</strong> covers context compression, TodoList retry, Goal autonomous loop, Verifier model config, ProjectGraph limits, and more. Voice settings are not in the main settings panel but are configured per character in the Voice Tab of the Character Modal.
+           <strong>Tip:</strong> The desktop settings panel is divided into six tabs: <code>General / LLM / Search / Mentor / Advanced / App</code>. <strong>General</strong> covers language, debugging, and license; <strong>LLM</strong> covers primary model, fast model, sampling parameters, and thinking effort; <strong>Search</strong> configures self-hosted SearXNG search backend (SearXNG first, with automatic fallback to built-in multi-source aggregation — Bing / Mojeek / Qwant / Wikipedia — when unavailable; engine selector removed; category/time/language/safe search moved to collapsible Advanced section); <strong>Mentor</strong> configures an independent API key, base URL, and model selection for the mentor sub-agent; <strong>Advanced</strong> covers context compression, TodoList retry, Goal autonomous loop, Verifier model config, ProjectGraph limits, and more; <strong>App</strong> manages .papr app permission levels — global default level, Level 3 global toggle, per-app overrides. Voice settings are not in the main settings panel but are configured per character in the Voice Tab of the Character Modal.
         </div>
       </div>
     </section>
@@ -993,7 +993,7 @@ After the change, at least run verification for the affected scope; if no narrow
         <p>A single <code>read</code> / <code>write</code> / <code>edit</code> / <code>patch</code> operation is capped at <strong>20MB</strong>, covering most source code and binary resource files, though large files will significantly increase token consumption.</p>
 
         <div class="callout success">
-          <strong>Tool Design Principle:</strong> The LLM sees simplified "merged tools" (26 total), which delegate to 40+ independent tools under the hood. The Agent can use all tools simultaneously; sub-agents are restricted by <code>tools</code> config allowlists. For code modifications, prefer <code>edit</code>/<code>patch</code> via Search/Replace Diff; use <code>write</code> only for new files. For command execution: short commands use <code>exec</code>, long-lived processes use <code>exec</code> with background:true, and interactive terminals use <code>shell</code>.
+          <strong>Tool Design Principle:</strong> The LLM sees simplified "merged tools" (30 total), which delegate to 40+ independent tools under the hood. The Agent can use all tools simultaneously; sub-agents are restricted by <code>tools</code> config allowlists. For code modifications, prefer <code>edit</code>/<code>patch</code> via Search/Replace Diff; use <code>write</code> only for new files. For command execution: short commands use <code>exec</code>, long-lived processes use <code>exec</code> with background:true, and interactive terminals use <code>shell</code>.
         </div>
       </div>
     </section>
@@ -1525,7 +1525,7 @@ Current status: !`git status -s`</code></pre>
       <div class="content">
         <h3>What is MCP</h3>
         <p>The <strong>Model Context Protocol</strong> (MCP) is an open protocol that allows Agents to extend their capabilities through external tool servers. CodePapr includes a built-in MCP host that can connect to multiple MCP servers simultaneously, exposing external tools to the main Agent for invocation.</p>
-        <p>Each MCP tool is registered in the form <code>mcp__&lt;serverId&gt;__&lt;toolName&gt;</code>, appearing alongside the 26 built-in tools in the ToolRegistry.</p>
+        <p>Each MCP tool is registered in the form <code>mcp__&lt;serverId&gt;__&lt;toolName&gt;</code>, appearing alongside the 30 built-in tools in the ToolRegistry.</p>
 
         <h3>Three Transport Modes</h3>
         <table>

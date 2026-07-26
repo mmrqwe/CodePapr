@@ -304,6 +304,8 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       requestId,
     } satisfies MainToAgentWorkerMessage);
 
+    this.cancelAllAppAgents();
+
     this.cancelTimer = setTimeout(() => {
       this.crashed = true;
       this.worker.terminate();
@@ -427,6 +429,16 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       this.appAgentRequests.delete(requestId);
       entry.reject(new DOMException('App agent was cancelled', 'AbortError'));
     }
+  }
+
+  private cancelAllAppAgents(): void {
+    for (const [reqId] of this.appAgentRequests) {
+      this.worker.postMessage({
+        type: 'cancel-app-agent',
+        requestId: reqId,
+      } satisfies MainToAgentWorkerMessage);
+    }
+    this.rejectAllAppAgentRequests(new DOMException('Session was cancelled', 'AbortError'));
   }
 
   private rejectAllAppAgentRequests(error: Error): void {
@@ -750,7 +762,6 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       const reader = response.body?.getReader();
       if (reader) {
         try {
-          // eslint-disable-next-line no-constant-condition
           while (true) {
             const { done, value } = await reader.read();
             if (done) {

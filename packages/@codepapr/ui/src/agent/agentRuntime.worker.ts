@@ -85,6 +85,18 @@ let cachedToolDefinitions: IToolDefinition[] = [];
 let cachedWorkspacePath = '';
 let cachedRuntimeConfig: WorkerAgentRuntimeConfig | null = null;
 const appAgentPrefixCache = new Map<string, ImmutablePrefix>();
+const APP_AGENT_PREFIX_CACHE_MAX = 32;
+
+function evictPrefixCacheIfNeeded() {
+  if (appAgentPrefixCache.size <= APP_AGENT_PREFIX_CACHE_MAX) return;
+  const excess = appAgentPrefixCache.size - APP_AGENT_PREFIX_CACHE_MAX;
+  const keys = appAgentPrefixCache.keys();
+  for (let i = 0; i < excess; i++) {
+    const { value: oldest } = keys.next();
+    if (!oldest) break;
+    appAgentPrefixCache.delete(oldest);
+  }
+}
 
 interface PendingFetch {
   resolve: (response: Response) => void;
@@ -166,7 +178,6 @@ async function encodeFetchBody(body: BodyInit | null | undefined): Promise<Uint8
   if (body instanceof ReadableStream) {
     const reader = body.getReader();
     const chunks: Uint8Array[] = [];
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -295,7 +306,7 @@ setGlobalFetchFn(proxyFetch);
 
 const subagentCacheStatsMap = new Map<
   string,
-  Array<{ tier: 'primary' | 'fast'; stats: ICacheStatistics }>
+  Array<{ tier: 'primary' | 'fast' | 'mentor'; stats: ICacheStatistics }>
 >();
 
 async function withWallClockTimeout<T>(
@@ -346,15 +357,15 @@ function postMessageToMain(message: AgentWorkerToMainMessage): void {
 
 function buildSubagentCacheStatsByTier(
   mainStats: ICacheStatistics | undefined,
-  subEntries: Array<{ tier: 'primary' | 'fast'; stats: ICacheStatistics }>,
+  subEntries: Array<{ tier: 'primary' | 'fast' | 'mentor'; stats: ICacheStatistics }>,
 ): {
   cacheStats: ICacheStatistics | undefined;
-  byTier: { primary?: ICacheStatistics; fast?: ICacheStatistics };
+  byTier: { primary?: ICacheStatistics; fast?: ICacheStatistics; mentor?: ICacheStatistics };
 } {
   if (subEntries.length === 0) {
     return { cacheStats: mainStats, byTier: {} };
   }
-  const byTier: { primary?: ICacheStatistics; fast?: ICacheStatistics } = {};
+  const byTier: { primary?: ICacheStatistics; fast?: ICacheStatistics; mentor?: ICacheStatistics } = {};
   for (const entry of subEntries) {
     const existing = byTier[entry.tier];
     byTier[entry.tier] = existing
@@ -502,7 +513,7 @@ async function runSubagent(
   definition: AgentDefinition,
   prompt: string,
   currentDepth: number
-): Promise<{ content: string; steps: Array<{ name: string; status: 'success' | 'error'; summary: string }>; cacheStats?: ICacheStatistics; tier: 'primary' | 'fast' }> {
+): Promise<{ content: string; steps: Array<{ name: string; status: 'success' | 'error'; summary: string }>; cacheStats?: ICacheStatistics; tier: 'primary' | 'fast' | 'mentor' }> {
   if (currentDepth >= SUBAGENT_MAX_DEPTH) {
     throw new Error(`子代理嵌套深度已达上限（${SUBAGENT_MAX_DEPTH} 层），无法继续委派`);
   }
@@ -551,6 +562,7 @@ async function runSubagent(
   let resolvedModel: string | undefined = definition.model;
   let subagentProvider: ILLMProvider = buildProvider(payload.settings);
   let subagentProviderName: 'deepseek' | 'openai' | 'claude' = payload.providerName;
+  let usingMentor = false;
 
   if (definition.model === 'fast') {
     resolvedModel = payload.settings.fastModel || payload.model;
@@ -568,6 +580,7 @@ async function runSubagent(
         subagentProvider = new OpenAIProvider(config);
         subagentProviderName = 'openai';
       }
+      usingMentor = true;
     } else {
       console.warn('[Worker Subagent] Mentor provider not configured or build failed, falling back to main provider');
       resolvedModel = payload.model;
@@ -669,7 +682,7 @@ async function runSubagent(
     }
     throw wrapped;
   }
-  return { content: response.content, steps, cacheStats: response.cacheStats, tier: route.tier };
+  return { content: response.content, steps, cacheStats: response.cacheStats, tier: usingMentor ? 'mentor' : route.tier };
 }
 
 function createRegistry(
@@ -768,23 +781,35 @@ async function handleRunAppAgent(
   const levelAllowed = APP_AGENT_LEVEL_TOOLS[level] ?? APP_AGENT_LEVEL_TOOLS[1];
 
   const sandboxPrefix = `.CodePapr/apps/${payload.appId}/sandbox/`;
-  const SANDWICH_WRITABLE_TOOLS = new Set(['write', 'edit', 'patch']);
+  const SANDBOX_WRITABLE_TOOLS = new Set(['write', 'edit', 'patch']);
+
+  function isSafeSandboxPath(p: string): boolean {
+    if (!p) return false;
+    if (p.startsWith('/') || p.startsWith('\\')) return false;
+    if (p.includes('..')) return false;
+    if (p.includes('\\')) return false;
+    if (/^[a-zA-Z]:[\\/]/.test(p)) return false;
+    return true;
+  }
 
   function sandboxWriteArgs(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
-    if (!SANDWICH_WRITABLE_TOOLS.has(toolName)) return args;
+    if (!SANDBOX_WRITABLE_TOOLS.has(toolName)) return args;
     if (toolName === 'patch') {
       if (Array.isArray(args.patches)) {
-        return {
-          ...args,
-          patches: (args.patches as Array<Record<string, unknown>>).map((p) => ({
-            ...p,
-            relativePath: typeof p.relativePath === 'string' ? sandboxPrefix + p.relativePath : p.relativePath,
-          })),
-        };
+        const safePatches = (args.patches as Array<Record<string, unknown>>).map((p) => {
+          if (typeof p.relativePath !== 'string' || !isSafeSandboxPath(p.relativePath)) {
+            throw new Error(`sandbox: invalid path in patch: ${String(p.relativePath)}`);
+          }
+          return { ...p, relativePath: sandboxPrefix + p.relativePath };
+        });
+        return { ...args, patches: safePatches };
       }
       return args;
     }
     if (typeof args.relativePath === 'string') {
+      if (!isSafeSandboxPath(args.relativePath)) {
+        throw new Error(`sandbox: invalid path: ${args.relativePath}`);
+      }
       return { ...args, relativePath: sandboxPrefix + args.relativePath };
     }
     return args;
@@ -833,6 +858,10 @@ async function handleRunAppAgent(
   }
 
   let model: string = payload.model || 'main';
+  const ALLOWED_MODEL_TIERS = new Set(['main', 'fast', 'mentor']);
+  if (!ALLOWED_MODEL_TIERS.has(model)) {
+    model = 'main';
+  }
   if (model === 'main') {
     model = cachedSettings.appSubAgentModelTier === 'fast'
       ? (cachedSettings.fastModel || cachedSettings.model)
@@ -870,6 +899,7 @@ async function handleRunAppAgent(
 
   const maxToolRounds = Math.min(
     payload.maxToolRounds ?? cachedSettings.appSubAgentMaxToolRounds,
+    cachedSettings.appSubAgentMaxToolRounds,
     cachedSettings.maxToolRounds
   );
   const parameters = {
@@ -881,19 +911,23 @@ async function handleRunAppAgent(
 
   const log = new AppendOnlyLog(`app-agent-${payload.appId}-${Date.now()}`);
 
-  if (ctx && (ctx.skills || ctx.customPrompt) && cachedRuntimeConfig) {
+  if (ctx && (ctx.skills || ctx.customPrompt || ctx.projectMemory) && cachedRuntimeConfig) {
     const skillsSection = ctx.skills
       ? buildSkillsSection(cachedRuntimeConfig.skillDefinitions ?? [], cachedSettings.lang)
       : undefined;
     const customPromptSection = ctx.customPrompt
       ? ((cachedRuntimeConfig.customPrompt ?? '').trim() || undefined)
       : undefined;
-    if (skillsSection || customPromptSection) {
+    const memorySection = ctx.projectMemory
+      ? ((cachedRuntimeConfig.memorySection ?? '').trim() || undefined)
+      : undefined;
+    if (skillsSection || customPromptSection || memorySection) {
       const bootstrapPrompt = buildSessionBootstrapPrompt({
         workspacePath,
         lang: cachedSettings.lang,
         skillsSection,
         customPromptSection,
+        memorySection,
       });
       if (bootstrapPrompt.trim()) {
         await log.append({
@@ -920,7 +954,7 @@ async function handleRunAppAgent(
     timestamp: Date.now(),
   } as unknown as IMessage);
 
-  const prefixKey = [model, ...registry.getAll().map(t => t.name).sort(), JSON.stringify(parameters), systemPrompt].join('|');
+  const prefixKey = [payload.appId, model, ...registry.getAll().map(t => t.name).sort(), JSON.stringify(parameters), systemPrompt].join('|');
   let prefix = appAgentPrefixCache.get(prefixKey);
   if (!prefix) {
     prefix = new ImmutablePrefix({
@@ -930,6 +964,7 @@ async function handleRunAppAgent(
       parameters,
     });
     appAgentPrefixCache.set(prefixKey, prefix);
+    evictPrefixCacheIfNeeded();
   }
 
   const session = new Session({
@@ -1034,6 +1069,10 @@ async function handleRunAppAgent(
       steps,
     });
   } catch (error) {
+    if (flushTimerId !== null) {
+      clearTimeout(flushTimerId);
+      flushTimerId = null;
+    }
     postMessageToMain({
       type: 'app-agent-error',
       requestId,

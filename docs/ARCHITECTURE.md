@@ -98,7 +98,7 @@ Tauri Rust 后端已从单文件 `main.rs` 拆分为多个领域模块，每个�
 | `tts` | `src-tauri/src/tts/` | GPT-SoVITS TTS 子系统：server 管理、语音合成、WebSocket 批量合成、音频播放、安装器、微调 |
 | `lsp` | `src-tauri/src/lsp.rs` | LSP server 进程管理、stdin/stdout JSON-RPC 桥接 |
 | `symbol_provider` | `src-tauri/src/symbol_provider.rs` | tree-sitter fallback 符号提取 |
-| `mcp_host` | `src-tauri/src/mcp_host.rs` | MCP 工具服务器宿主（stdio / sse / streamable-http） |
+| `mcp_host` | `src-tauri/src/mcp_host.rs` | MCP 工具服务器宿主（stdio / sse / streamable-http）；动态工具发现（`mcp__<serverId>__<toolName>`）；3 种权限模式（read-only / read-write / dangerous）；变更操作确认流；工具定义 24h 缓存；MCP 市场（官方注册表一键安装） |
 | `shared` | `src-tauri/src/shared/` | 路径归一化、workspace 路径解析、运行时封装、字符串/时间工具 |
 | `papr_runtime` | `src-tauri/src/papr_runtime/` | .papr 应用运行时：manifest 加载、权限校验、SDK 注入、存储/HTTP/FS 命令、app 上下文注册 |
 | `app_runtime` | `src-tauri/src/app_runtime.rs` | 自定义 URI scheme `codepapr-app://`、app 发现与扫描、SDK 注入、workspace 注册 |
@@ -113,7 +113,7 @@ Tauri Rust 后端已从单文件 `main.rs` 拆分为多个领域模块，每个�
 
 ### 4.6 工具架构
 
-LLM 可调用 26 个独立工具（含 `task` / `todo` 两个动态工具），每个职责单一，有 `action` 的 7 个均带 `enum` 约束。文件读取/写入/SEARCH/REPLACE 的单次上限为 20MB：
+LLM 可调用 30 个独立工具（含 `task` / `todo` 两个动态工具），每个职责单一，有 `action` 的 7 个均带 `enum` 约束。文件读取/写入/SEARCH/REPLACE 的单次上限为 20MB：
 
 | 合并工具 | Action | 委托工具 |
 |---|---|---|
@@ -138,13 +138,17 @@ LLM 可调用 26 个独立工具（含 `task` / `todo` 两个动态工具），�
 | `web_fetch` | 读取网页内容 | web_fetch_url |
 | `web_download` | 下载文件到项目 | web_download_file |
 | `open` | 系统浏览器打开 URL/HTML | workspace_open_in_browser |
+| `app_render` | 渲染 .papr App | app_render |
+| `app_list` | 列出所有已注册 app | app_list |
+| `app_start` | 启动 app 后端 | app_start |
+| `app_stop` | 停止 app 后端 | app_stop |
+| `app_delete` | 删除 app | app_delete |
 | `skill` | 加载 Skill 文档 | skill_load |
-| `time` | 获取本地时间 | local_time_now |
 | `question` | 向用户提问 | question |
 | `task` | 委派子代理执行子任务 | subagent |
 | `todo` | tasks / updates 任务规划 | TodoList |
 
-26 个工具统一注册在 ToolRegistry 中，冻结后 hash 确保缓存一致性。`todo` 和 `task` 为动态生成。
+30 个工具统一注册在 ToolRegistry 中，冻结后 hash 确保缓存一致性。`todo` 和 `task` 为动态生成。
 
 **外部路径权限**：桌面端对 `read` / `list` 操作的项目外绝对路径会弹出 `PermissionDialog`，由用户选择“拒绝 / 允许此文件 / 允许此文件夹”，授权结果保存在 `permissionStore` 白名单中。CLI 的读取路径边界相对宽松，写入仍限制在工作区内。
 
@@ -316,16 +320,19 @@ ChatPanel → useTtsPlayer hook → Rust TTS Module → GPT-SoVITS Python Server
 
 | Agent | 用途 | 模型 | 工具 |
 |-------|------|------|------|
-| explore | 只读代码分析 | fast | read, read_image, graph, lsp, diagnostics, time |
-| scout | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image, open, time |
+| explore | 只读代码分析 | fast | read, read_image, graph, lsp, diagnostics, grep |
+| scout | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image |
 | mentor | 架构/算法指导 | 可配置独立模型 | 无 |
+| verifier | Goal 验收器（内部） | fast | 无 |
+
+> `verifier` 是 Goal 自主循环的内部验收器（`internal: true`），不暴露给主 Agent 的 `task` 工具，仅由 GoalRunner 调用。
 
 ### 6.2 子代理的独立上下文
 
 **每个子代理拥有全新的 Session**，不继承主 Agent 的历史对话：
 
 - 创建全新的 `AppendOnlyLog` — 空白日志
-- 工具集按定义中的白名单过滤（Explore 只有 5 个工具）
+- 工具集按定义中的白名单过滤（Explore 有 6 个工具）
 - 只接收 `task.prompt` 传入的任务描述作为唯一下文
 - 嵌套深度上限可配置（`subagentMaxDepth`，默认 2）
 
@@ -579,7 +586,7 @@ ImmutablePrefix 的 SHA256 hash 包含整个 `parameters` 对象——`temperatu
 
 ## 14. Settings 结构
 
-设置面板分为五个 tab，完整参数参考 `packages/@codepapr/core/docs/CONFIGURATION.md`：
+设置面板分为六个 tab，完整参数参考 `packages/@codepapr/core/docs/CONFIGURATION.md`：
 
 | 标签页 | 内容 |
 |---|---|
@@ -588,6 +595,7 @@ ImmutablePrefix 的 SHA256 hash 包含整个 `parameters` 对象——`temperatu
 | Search | 自部署 SearXNG 优先，失败自动降级到内置多源聚合；搜索引擎选择器已移除；分类/时间/语言/安全搜索等高级参数收入折叠区 |
 | Mentor | Mentor 子代理独立 API key、Base URL、模型选择 |
 | 高级 | 上下文压缩（模型/温度/token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 深度/文件限制 |
+| App | .papr 应用权限管理——全局默认级别、Level 3 全局开关、逐应用级别覆盖 |
 
 语音配置不在主设置面板，而是在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。
 

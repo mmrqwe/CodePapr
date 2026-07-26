@@ -89,6 +89,7 @@ function sourcePriority(source: SymbolSource): number {
     case 'ast': return 1;
     case 'regex': return 2;
     case 'none': return 3;
+    default: return 3;
   }
 }
 
@@ -98,6 +99,7 @@ export function sourceToConfidence(source: SymbolSource): SymbolConfidence {
     case 'ast': return 'medium';
     case 'regex': return 'low';
     case 'none': return 'low';
+    default: return 'low';
   }
 }
 
@@ -112,7 +114,7 @@ export class SymbolProviderRegistry {
   }
 
   getProviders(languageId: string): SymbolProvider[] {
-    return this.providersByLanguage.get(languageId) ?? [];
+    return [...(this.providersByLanguage.get(languageId) ?? [])];
   }
 
   hasProviders(languageId: string): boolean {
@@ -125,14 +127,29 @@ export class SymbolProviderRegistry {
 }
 
 export class UnifiedSymbolDispatcher {
+  private static readonly PROVIDER_TIMEOUT_MS = 20_000;
+
   constructor(private registry: SymbolProviderRegistry) {}
+
+  private withProviderTimeout<T>(promise: Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`Symbol provider 超时（${UnifiedSymbolDispatcher.PROVIDER_TIMEOUT_MS}ms）。`)),
+        UnifiedSymbolDispatcher.PROVIDER_TIMEOUT_MS,
+      );
+    });
+    return Promise.race([promise, timeout]).finally(() => {
+      if (timer) clearTimeout(timer);
+    }) as Promise<T>;
+  }
 
   async extractSymbols(languageId: string, path: string, content: string): Promise<DispatchResult> {
     const providers = this.registry.getProviders(languageId);
     for (const provider of providers) {
       if (!provider.capability.includes('symbols')) continue;
       try {
-        const symbols = await provider.extractSymbols(path, content);
+        const symbols = await this.withProviderTimeout(provider.extractSymbols(path, content));
         if (symbols.length > 0) {
           return { symbols, source: provider.source, confidence: sourceToConfidence(provider.source) };
         }
@@ -148,7 +165,7 @@ export class UnifiedSymbolDispatcher {
     for (const provider of providers) {
       if (!provider.capability.includes('hover') || !provider.hover) continue;
       try {
-        const result = await provider.hover(path, content, line, character);
+        const result = await this.withProviderTimeout(provider.hover(path, content, line, character));
         if (result) return result;
       } catch {
         continue;
@@ -162,7 +179,7 @@ export class UnifiedSymbolDispatcher {
     for (const provider of providers) {
       if (!provider.capability.includes('definition') || !provider.definition) continue;
       try {
-        const result = await provider.definition(path, content, line, character);
+        const result = await this.withProviderTimeout(provider.definition(path, content, line, character));
         if (result.length > 0) return result;
       } catch {
         continue;
@@ -176,7 +193,7 @@ export class UnifiedSymbolDispatcher {
     for (const provider of providers) {
       if (!provider.capability.includes('references') || !provider.references) continue;
       try {
-        const result = await provider.references(path, content, line, character);
+        const result = await this.withProviderTimeout(provider.references(path, content, line, character));
         if (result.length > 0) return result;
       } catch {
         continue;

@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use git2::{Repository, Oid, DiffOptions};
 use super::types::{FileDiff, CommitChangedFiles, FileChange};
+use crate::git_operations::validate_git_ref;
 
 fn code_papr_git_path(workspace: &Path) -> PathBuf {
     workspace.join(".CodePapr/git")
@@ -28,6 +29,8 @@ impl DiffEngine {
     }
 
     pub fn changed_files(&self, sha: &str) -> Result<CommitChangedFiles, String> {
+        validate_git_ref(sha, "sha")?;
+
         let git_path = code_papr_git_path(&self.workspace);
         let repo = Repository::open(&git_path)
             .map_err(|e| format!("open repo: {}", e.message()))?;
@@ -91,6 +94,9 @@ impl DiffEngine {
     }
 
     pub fn diff_snapshots(&self, from_sha: &str, to_sha: &str) -> Result<Vec<FileDiff>, String> {
+        validate_git_ref(from_sha, "fromSha")?;
+        validate_git_ref(to_sha, "toSha")?;
+
         let git_path = code_papr_git_path(&self.workspace);
         let repo = Repository::open(&git_path)
             .map_err(|e| format!("open repo: {}", e.message()))?;
@@ -134,6 +140,8 @@ impl DiffEngine {
     }
 
     pub fn file_content(&self, sha: &str, path: &str) -> Result<String, String> {
+        validate_git_ref(sha, "sha")?;
+
         let git_path = code_papr_git_path(&self.workspace);
         let repo = Repository::open(&git_path)
             .map_err(|e| format!("open repo: {}", e.message()))?;

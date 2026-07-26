@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
@@ -12,17 +12,40 @@ interface AppModalProps {
 export function AppModal({ lang }: AppModalProps) {
   const t = getTranslation(lang);
   const openedAppId = useAppRuntimeStore((state) => state.openedAppId);
-  const apps = useAppRuntimeStore((state) => state.apps);
+  const openedApp = useAppRuntimeStore((state) =>
+    state.openedAppId ? state.apps.find((app) => app.appId === state.openedAppId) ?? null : null
+  );
   const closeAppModal = useAppRuntimeStore((state) => state.closeAppModal);
-  const reloadActiveApp = useAppRuntimeStore((state) => state.reloadActiveApp);
+  const reloadApp = useAppRuntimeStore((state) => state.reloadApp);
   const [error, setError] = useState('');
   const [showDetails, setShowDetails] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const loadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const openedApp = useMemo(
-    () => apps.find((app) => app.appId === openedAppId) ?? null,
-    [apps, openedAppId]
-  );
+  const handleIframeLoad = useCallback(() => {
+    setLoaded(true);
+    if (loadTimerRef.current) {
+      clearTimeout(loadTimerRef.current);
+      loadTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    setLoaded(false);
+    setError('');
+    loadTimerRef.current = setTimeout(() => {
+      if (!loaded) {
+        setError(t.appModalLoadFailed);
+      }
+    }, 10_000);
+    return () => {
+      if (loadTimerRef.current) {
+        clearTimeout(loadTimerRef.current);
+        loadTimerRef.current = null;
+      }
+    };
+  }, [openedAppId, openedApp?.updatedAt]);
 
   const manifest: PaprManifest | null = useMemo(() => {
     if (!openedApp?.manifestJson) return null;
@@ -82,7 +105,7 @@ export function AppModal({ lang }: AppModalProps) {
 
         <button
           type="button"
-          onClick={() => { setError(''); reloadActiveApp(); }}
+          onClick={() => { setError(''); reloadApp(openedApp.appId); }}
           className="shrink-0 rounded px-1.5 py-1 text-[10px] text-slate-500 transition-colors hover:text-slate-300"
           title={t.appModalReload}
         >
@@ -134,6 +157,7 @@ export function AppModal({ lang }: AppModalProps) {
           title={openedApp.title}
           sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals"
           className="h-full w-full border-0"
+          onLoad={handleIframeLoad}
           onError={() => setError(t.appModalLoadFailed)}
         />
       </div>
