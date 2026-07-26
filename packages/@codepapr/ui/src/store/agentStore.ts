@@ -18,6 +18,7 @@ import {
   GoalRunner,
   serializeGoalState,
   GoalConditionParseError,
+  renderTodoListDigest,
 } from '@codepapr/core';
 import type {
   IAgentResponse,
@@ -69,7 +70,8 @@ import {
   collectExecutedTools,
   type ExecutedToolSummary,
 } from '../utils/agentExecution';
-import { restoreTodoListContexts } from '../tools/todoListTool';
+import { restoreTodoListContexts, getTodoListContext } from '../tools/todoListTool';
+import { getActiveCharacterPrompt } from './charactersStore';
 import { loadMcpToolDefinitions } from '../tools/mcpTools';
 import {
   listCommandDefinitions,
@@ -169,6 +171,40 @@ void _isApiConfigured;
 // don't trigger duplicate generation. Module-level on purpose: the guard
 // spans the whole session, not a single store snapshot.
 let memoryBootstrapInFlight = false;
+
+// Snapshot the current todo digest so a context checkpoint can freeze it. The
+// frozen digest is reused on every rebuild (instead of re-rendering from live
+// todo state), keeping the rebuilt context byte-stable for the prefix cache.
+function currentTodoDigest(sessionId: string | null): string | undefined {
+  if (!sessionId) return undefined;
+  const ctx = getTodoListContext(sessionId);
+  if (!ctx || ctx.tasks.length === 0) return undefined;
+  return renderTodoListDigest(ctx);
+}
+
+// Per-session cache of the session-bootstrap prompt. The bootstrap embeds
+// volatile disk state (memory.md, project-graph summary) that changes on file
+// edits; rebuilding the agent whenever that changes breaks DeepSeek's prefix
+// cache for the whole history. We freeze the bootstrap per (session × stable
+// signature) so volatile changes do NOT force a rebuild — memory/graph updates
+// take effect on the next session or when a stable input (mode/rules/lang/
+// skills/system prompt/character) changes.
+const sessionBootstrapCache = new Map<string, { signature: string; bootstrap: string }>();
+
+function resolveSessionBootstrap(
+  sessionId: string | null,
+  signature: string,
+  computeFresh: () => string
+): string {
+  if (!sessionId) return computeFresh();
+  const cached = sessionBootstrapCache.get(sessionId);
+  if (cached && cached.signature === signature) {
+    return cached.bootstrap;
+  }
+  const bootstrap = computeFresh();
+  sessionBootstrapCache.set(sessionId, { signature, bootstrap });
+  return bootstrap;
+}
 
 function upsertRecentWorkspace(
   recent: WorkspaceEntry[],
@@ -941,7 +977,8 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             const checkpointResult = await maybeGenerateContextCheckpoint(
               normalizedSettings,
               sessionMsgs,
-              true
+              true,
+              currentTodoDigest(get().activeSessionId)
             );
             if (checkpointResult) {
               if (checkpointResult.cacheStats) {
@@ -1169,6 +1206,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             memorySection,
             customPrompt: normalizedSettings.systemPrompt,
             lang: normalizedSettings.lang,
+            mode,
             skillDefinitions,
             agentDefinitions: get()._agentDefinitions,
             onWorkspaceMutated: (paths) => {
@@ -1197,12 +1235,26 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
               agentDefinitions: get()._agentDefinitions,
             }
           );
-          const runtimeSessionBootstrapPrompt = buildAgentSessionBootstrapPrompt(
-            normalizedSettings,
-            workspacePath,
-            skillDefinitions,
-            projectGraphBootstrapSummary,
-            memorySection
+          // Signature of the STABLE bootstrap inputs. Volatile disk state
+          // (memory.md, project-graph summary) is deliberately excluded so its
+          // changes don't rebuild the agent and break the prefix cache.
+          const bootstrapSignature = [
+            runtimeSystemPrompt,
+            JSON.stringify(skillDefinitions),
+            normalizedSettings.systemPrompt ?? '',
+            getActiveCharacterPrompt() ?? '',
+          ].join('\u0000');
+          const runtimeSessionBootstrapPrompt = resolveSessionBootstrap(
+            get().activeSessionId,
+            bootstrapSignature,
+            () =>
+              buildAgentSessionBootstrapPrompt(
+                normalizedSettings,
+                workspacePath,
+                skillDefinitions,
+                projectGraphBootstrapSummary,
+                memorySection
+              )
           );
           const runtimePromptKey = [
             runtimeSystemPrompt,
@@ -1463,6 +1515,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
                   };
                 }
 
+                if (event.type === 'context-compacted') {
+                  // Context epoch reset happened inside the agent loop; no message
+                  // mutation is needed here (the log was replaced internally).
+                  return message;
+                }
+
                 return applyToolStreamEvent(message, event);
               });
             }, passImages);
@@ -1661,7 +1719,8 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
                   const cp = await maybeGenerateContextCheckpoint(
                     normalizedSettings,
                     sessionMsgs,
-                    true
+                    true,
+                    currentTodoDigest(activeSessionId)
                   );
                   if (cp) {
                     if (cp.cacheStats) {
@@ -1907,7 +1966,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           });
           const checkpointResult = await maybeGenerateContextCheckpoint(
             normalizedSettings,
-            get().sessionMessages[activeSessionId] ?? []
+            get().sessionMessages[activeSessionId] ?? [],
+            undefined,
+            currentTodoDigest(activeSessionId)
           );
           if (checkpointResult) {
             set((s) => {

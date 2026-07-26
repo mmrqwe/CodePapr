@@ -9,17 +9,13 @@ import {
   buildRuntimeUserPrompt,
   ImmutablePrefix,
   Session,
-  selectSubagentExecutionRoute,
+  resolveSubagentExecution,
+  runSubagentSession,
   ToolRegistry,
   filterToolsForAgent,
   buildTaskToolDefinition,
-  SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS,
-  SUBAGENT_MAX_DEPTH,
-  sanitizeAgentPrompt,
-  resolveAgentPrompt,
   type AgentDefinition,
   type ToolOutputTruncationOptions,
-  type PruneOptions,
 } from '@codepapr/core';
 import {
   DEFAULT_MAX_TOKENS,
@@ -42,6 +38,8 @@ import type {
   WorkerApiFormat,
   AppAgentPayload,
 } from './agentWorkerProtocol';
+import { createContextCompactionHandler } from './compactionHandler';
+import type { Settings } from '../store/internals/types';
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -514,175 +512,80 @@ async function runSubagent(
   prompt: string,
   currentDepth: number
 ): Promise<{ content: string; steps: Array<{ name: string; status: 'success' | 'error'; summary: string }>; cacheStats?: ICacheStatistics; tier: 'primary' | 'fast' | 'mentor' }> {
-  if (currentDepth >= SUBAGENT_MAX_DEPTH) {
-    throw new Error(`子代理嵌套深度已达上限（${SUBAGENT_MAX_DEPTH} 层），无法继续委派`);
-  }
-
-  const steps: Array<{ name: string; status: 'success' | 'error'; summary: string }> = [];
   const registry = createRegistry(requestId, payload, false, currentDepth);
-  const allTools = registry.getAll();
-  const tools = filterToolsForAgent(allTools, definition.tools);
-  const systemPrompt = buildRuntimeSystemPrompt({
-    mode: 'agent',
-    workspacePath: payload.workspacePath,
-    lang: payload.runtime.lang,
-    extraSections: [sanitizeAgentPrompt(resolveAgentPrompt(definition, payload.runtime.lang))],
-    toolNames: tools.map((tool) => tool.name),
-    subagent: true,
-  });
-  const log = new AppendOnlyLog(`subagent-${definition.name}-${Date.now()}`);
-  const sessionBootstrapPrompt = buildSessionBootstrapPrompt({
-    workspacePath: payload.workspacePath,
-    lang: payload.runtime.lang,
-    skillsSection: buildSkillsSection(payload.runtime.skillDefinitions ?? [], payload.runtime.lang),
-    customPromptSection: payload.runtime.customPrompt,
-  });
-  if (sessionBootstrapPrompt.trim()) {
-    await log.append({
-      id: 'session-bootstrap',
-      role: 'assistant',
-      content: sessionBootstrapPrompt.trim(),
-      timestamp: Date.now(),
-      metadata: { sessionBootstrap: true },
-    });
-  }
-  const userPrompt = buildRuntimeUserPrompt({
-    mode: 'agent',
-    input: prompt,
-    workspacePath: payload.workspacePath,
-    lang: payload.runtime.lang,
-  });
-  await log.append({
-    id: `subagent-${definition.name}-user`,
-    role: 'user',
-    content: userPrompt,
-    timestamp: Date.now(),
+  const tools = filterToolsForAgent(registry.getAll(), definition.tools);
+  const s = payload.settings;
+
+  const exec = resolveSubagentExecution({
+    definition,
+    currentDepth,
+    taskPrompt: prompt,
+    baseModel: payload.model,
+    fastModel: s.fastModel,
+    fastModelEnabled: s.fastModelEnabled,
+    defaultMaxTokens: DEFAULT_MAX_TOKENS,
+    globalMaxToolRounds: s.maxToolRounds,
+    thinkingFallback: s.thinkingEnabled ?? true,
+    explore: {
+      topP: s.exploreTopP,
+      maxTokens: s.exploreMaxTokens,
+      thinkingEnabled: s.exploreThinkingEnabled,
+      temperature: s.exploreTemperature,
+      maxToolRounds: s.exploreMaxToolRounds,
+      maxDepth: s.exploreMaxDepth,
+    },
+    scout: {
+      topP: s.scoutTopP,
+      maxTokens: s.scoutMaxTokens,
+      thinkingEnabled: s.scoutThinkingEnabled,
+      temperature: s.scoutTemperature,
+      maxToolRounds: s.scoutMaxToolRounds,
+      maxDepth: s.scoutMaxDepth,
+    },
+    mentor: {
+      enabled: s.mentorEnabled,
+      model: s.mentorModel,
+      apiKey: s.mentorApiKey,
+      baseURL: s.mentorBaseURL,
+      apiFormat: s.mentorApiFormat,
+      maxTokens: s.mentorMaxTokens,
+      thinkingEnabled: s.mentorThinkingEnabled,
+    },
+    fallbackApiKey: s.apiKey,
+    fallbackBaseURL: s.baseURL,
   });
 
-  let resolvedModel: string | undefined = definition.model;
   let subagentProvider: ILLMProvider = buildProvider(payload.settings);
   let subagentProviderName: 'deepseek' | 'openai' | 'claude' = payload.providerName;
-  let usingMentor = false;
-
-  if (definition.model === 'fast') {
-    resolvedModel = payload.settings.fastModel || payload.model;
-  } else if (definition.model === 'mentor') {
-    const s = payload.settings;
-    if (s.mentorEnabled && s.mentorModel.trim()) {
-      resolvedModel = s.mentorModel.trim();
-      const apiKey = s.mentorApiKey.trim() || s.apiKey.trim();
-      const baseURL = s.mentorBaseURL.trim().replace(/\/+$/, '') || s.baseURL.trim().replace(/\/+$/, '') || undefined;
-      const config = { apiKey, ...(baseURL ? { baseURL } : {}) };
-      if (s.mentorApiFormat === 'claude') {
-        subagentProvider = new ClaudeProvider(config);
-        subagentProviderName = 'claude';
-      } else {
-        subagentProvider = new OpenAIProvider(config);
-        subagentProviderName = 'openai';
-      }
-      usingMentor = true;
+  if (exec.mentor) {
+    const config = { apiKey: exec.mentor.apiKey, ...(exec.mentor.baseURL ? { baseURL: exec.mentor.baseURL } : {}) };
+    if (exec.mentor.apiFormat === 'claude') {
+      subagentProvider = new ClaudeProvider(config);
+      subagentProviderName = 'claude';
     } else {
-      console.warn('[Worker Subagent] Mentor provider not configured or build failed, falling back to main provider');
-      resolvedModel = payload.model;
+      subagentProvider = new OpenAIProvider(config);
+      subagentProviderName = 'openai';
     }
   }
 
-  const route = selectSubagentExecutionRoute({
-    baseModel: payload.model,
-    fastModelEnabled: payload.settings.fastModelEnabled,
-    fastModel: payload.settings.fastModel,
-    taskPrompt: prompt,
-    explicitModel: resolvedModel,
-    defaultTemperature: payload.parameters.temperature,
-    explicitTemperature: definition.temperature,
-  });
-  const isExplore = definition.name === 'explore';
-  const isScout = definition.name === 'scout';
-  const s = payload.settings;
-  const parameters = {
-    temperature: isExplore ? (s.exploreTemperature ?? 0.5) : isScout ? (s.scoutTemperature ?? 0.3) : 0.5,
-    topP: isExplore ? (s.exploreTopP ?? 0.9) : isScout ? (s.scoutTopP ?? 0.9) : 0.9,
-    maxTokens: definition.model === 'mentor'
-      ? (s.mentorMaxTokens ?? 10000)
-      : isExplore
-      ? (s.exploreMaxTokens ?? DEFAULT_MAX_TOKENS)
-      : isScout
-      ? (s.scoutMaxTokens ?? DEFAULT_MAX_TOKENS)
-      : DEFAULT_MAX_TOKENS,
-    thinkingEnabled: definition.model === 'mentor'
-      ? (s.mentorThinkingEnabled ?? false)
-      : isExplore
-      ? (s.exploreThinkingEnabled ?? true)
-      : isScout
-      ? (s.scoutThinkingEnabled ?? false)
-      : s.thinkingEnabled ?? true,
-  };
-  const agentMaxToolRounds = isExplore
-    ? s.exploreMaxToolRounds
-    : isScout
-    ? s.scoutMaxToolRounds
-    : SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS;
-  const subagentMaxToolRounds = Math.min(
-    payload.settings.maxToolRounds,
-    agentMaxToolRounds ?? SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS
-  );
-  const prefix = new ImmutablePrefix({
-    systemPrompt,
+  return await runSubagentSession({
+    definition,
+    prompt,
+    workspacePath: payload.workspacePath,
+    lang: payload.runtime.lang,
+    exec,
+    registry,
     tools,
-    model: route.model,
-    parameters,
-  });
-  const session = new Session({
-    sessionId: `subagent-${definition.name}-${Date.now()}`,
-    prefix,
-    toolRegistry: registry,
-    log,
-  });
-
-  const agent = new Agent({
-    session,
     provider: subagentProvider,
     providerName: subagentProviderName,
     requestBuilder: new RequestBuilder(),
     cacheValidator: new CacheValidator(),
-    maxToolRounds: subagentMaxToolRounds,
-    toolTimeouts: { graph: payload.settings.graphToolTimeoutMs },
+    skillsSection: buildSkillsSection(payload.runtime.skillDefinitions ?? [], payload.runtime.lang),
+    customPromptSection: payload.runtime.customPrompt,
+    graphToolTimeoutMs: s.graphToolTimeoutMs,
+    maxWallClockMs: SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
     toolOutputTruncation: buildToolOutputTruncation(payload.settings),
-    pruneOptions: buildPruneOptions(payload.settings),
   });
-  let response;
-  try {
-    response = await withWallClockTimeout(
-      agent,
-      () =>
-        agent.chat(userPrompt, (event) => {
-          if (event.type === 'tool-call-end') {
-            steps.push({
-              name: event.toolName,
-              status: event.success ? 'success' : 'error',
-              summary: event.error || event.toolName,
-            });
-          }
-        }),
-      SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
-      payload.runtime.lang
-    );
-  } catch (err) {
-    // 附上 subagent 上下文后重抛，避免 400 "Load fail" 等被吞成无信息短串
-    const errName = err instanceof Error ? err.name : undefined;
-    const errMsg = err instanceof Error ? err.message : String(err);
-    const contextTag = `[WorkerSubagent=${definition.name} model=${route.model} tier=${route.tier}]`;
-    const wrapped = new Error(`${contextTag} ${errMsg}`);
-    wrapped.name = errName ?? 'SubagentError';
-    if (err instanceof Error && 'provider' in err) {
-      (wrapped as { provider?: string }).provider = (err as { provider?: string }).provider;
-      (wrapped as { status?: number }).status = (err as { status?: number }).status;
-      (wrapped as { responseBody?: string }).responseBody = (err as { responseBody?: string }).responseBody;
-      (wrapped as { requestId?: string }).requestId = (err as { requestId?: string }).requestId;
-    }
-    throw wrapped;
-  }
-  return { content: response.content, steps, cacheStats: response.cacheStats, tier: usingMentor ? 'mentor' : route.tier };
 }
 
 function createRegistry(
@@ -742,22 +645,10 @@ function createRegistry(
   return registry;
 }
 
-const PRUNE_PROTECTED_TOOLS = new Set(['todo', 'question', 'skill']);
-
 function buildToolOutputTruncation(s: WorkerAgentSettings): ToolOutputTruncationOptions {
   return {
     maxBytes: s.toolOutputMaxBytes,
     previewChars: s.toolOutputPreviewChars,
-  };
-}
-
-function buildPruneOptions(s: WorkerAgentSettings): PruneOptions {
-  return {
-    enabled: s.pruneOldToolResults,
-    protectRecentRounds: s.pruneProtectRounds,
-    minPrunableChars: s.pruneMinChars,
-    protectedTools: PRUNE_PROTECTED_TOOLS,
-    placeholder: '[Old tool result content cleared]',
   };
 }
 
@@ -947,12 +838,6 @@ async function handleRunAppAgent(
     workspacePath,
     lang: cachedSettings.lang,
   });
-  await log.append({
-    id: `app-agent-user-${Date.now()}`,
-    role: 'user',
-    content: userPrompt,
-    timestamp: Date.now(),
-  } as unknown as IMessage);
 
   const prefixKey = [payload.appId, model, ...registry.getAll().map(t => t.name).sort(), JSON.stringify(parameters), systemPrompt].join('|');
   let prefix = appAgentPrefixCache.get(prefixKey);
@@ -983,7 +868,6 @@ async function handleRunAppAgent(
     maxToolRounds,
     toolTimeouts: { graph: cachedSettings.graphToolTimeoutMs },
     toolOutputTruncation: buildToolOutputTruncation(cachedSettings),
-    pruneOptions: buildPruneOptions(cachedSettings),
   });
 
   const steps: Array<{ name: string; status: string; summary?: string }> = [];
@@ -1120,9 +1004,14 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     providerName: payload.providerName,
     requestBuilder: new RequestBuilder(),
     cacheValidator: new CacheValidator(),
+    maxToolRounds: payload.settings.maxToolRounds,
     toolTimeouts: { graph: payload.settings.graphToolTimeoutMs },
     toolOutputTruncation: buildToolOutputTruncation(payload.settings),
-    pruneOptions: buildPruneOptions(payload.settings),
+    contextCompaction: createContextCompactionHandler(
+      payload.settings as unknown as Settings,
+      payload.providerName,
+      payload.sessionId
+    ),
   });
 
   const response = await agent.chat(

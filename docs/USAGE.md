@@ -149,7 +149,7 @@ LLM 可通过 4 个工具管理 app：
 - **LLM**：主模型、快速模型、temperature、topP、maxTokens、thinking 模式、maxToolRounds
 - **Search**：自部署 SearXNG 优先，失败自动降级到内置多源聚合（Bing / Mojeek / Qwant / Wikipedia）；分类/时间/语言/安全搜索等高级参数收入折叠区，搜索引擎选择器已移除
 - **Mentor**：Mentor 子代理独立 API key、Base URL、模型选择
-- **高级**：上下文压缩（模型/温度/token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 限制
+- **高级**：上下文压缩（模型/温度/摘要输出 token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 限制。上下文上限 `maxContextTokens` 默认 500K，达到后自动压缩（摘要旧消息并清理旧工具结果）；实际生效值按所选服务商上下文上限自动钳制（DeepSeek ~500K、Claude ~200K、OpenAI ~128K，扣除输出预留）
 - **App**：.papr 应用权限管理——全局默认级别、Level 3 全局开关、逐应用级别覆盖
 
 语音配置不在主设置面板，而在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。

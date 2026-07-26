@@ -6,6 +6,7 @@ import { ImmutablePrefix } from '../cache/ImmutablePrefix';
 import { AppendOnlyLog } from '../cache/AppendOnlyLog';
 import { VolatileScratch } from '../cache/VolatileScratch';
 import { CachePartition } from '../cache/CachePartition';
+import { Serializer } from '../cache/Serializer';
 import { ToolRegistry } from '../tool/ToolRegistry';
 import { ICacheStatistics, IMessage } from '@codepapr/types';
 import { Logger } from '@codepapr/common';
@@ -106,5 +107,28 @@ export class Session {
 
   getMessages(): IMessage[] {
     return this.partition.toMessageArray();
+  }
+
+  /**
+   * Replace the active history with a compacted message set (checkpoint summary
+   * + retained tail), starting a new context epoch. Used by mid-loop context
+   * compaction. The prefix (system + tools) is unchanged; only the log is reset
+   * and reloaded. Callers must also reset the RequestBuilder's append-only
+   * tracking after this.
+   */
+  replaceLog(messages: IMessage[]): void {
+    this.logStore.reset();
+    if (messages.length === 0) {
+      return;
+    }
+    const totalBytes = messages.reduce(
+      (sum, message) => sum + Serializer.getByteLength(message),
+      0
+    );
+    this.logStore.loadFromSnapshot({
+      messages,
+      lastMessageIndex: messages.length - 1,
+      totalBytes,
+    });
   }
 }

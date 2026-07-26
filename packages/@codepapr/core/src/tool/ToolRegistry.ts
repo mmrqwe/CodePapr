@@ -71,6 +71,10 @@ export class ToolRegistry {
     this.tools.delete(name);
   }
 
+  has(name: string): boolean {
+    return this.tools.has(name);
+  }
+
   validateUnchanged(expectedHash: string): void {
     const current = this.computeHash();
     if (current !== expectedHash) {
@@ -78,5 +82,20 @@ export class ToolRegistry {
         `Tool registry modified! Expected hash ${expectedHash.slice(0, 12)}, got ${current.slice(0, 12)}`
       );
     }
+  }
+}
+
+/**
+ * 注册时按谓词过滤的 ToolRegistry：不满足谓词的工具被静默跳过（既不进入工具集，也不注册 handler）。
+ * 用于 ask/plan 等只读模式对变更类工具的硬拦截。
+ */
+export class FilteringToolRegistry extends ToolRegistry {
+  constructor(private readonly allowPredicate: (tool: IToolDefinition) => boolean) {
+    super();
+  }
+
+  register(tool: IToolDefinition, handler: ToolHandler): void {
+    if (!this.allowPredicate(tool)) return;
+    super.register(tool, handler);
   }
 }

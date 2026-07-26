@@ -288,6 +288,22 @@ export class AppendOnlyLog implements IAppendOnlyLog {
   }
 
   /**
+   * Reset the log to empty so a fresh snapshot can be loaded.
+   *
+   * SANCTIONED break of the append-only invariant, used exclusively by context
+   * compaction: when the conversation overflows the context budget, the active
+   * history is replaced by a checkpoint summary + retained tail, starting a new
+   * "context epoch" (mirrors OpenCode's Context Epoch). Callers must also reset
+   * the RequestBuilder's append-only tracking after this.
+   */
+  reset(): void {
+    this.messages = [];
+    this.hashes.clear();
+    this.totalBytes = 0;
+    this.lastComputedHash = '';
+  }
+
+  /**
    * Load from snapshot (for restoration)
    */
   loadFromSnapshot(snapshot: IAppendLogEntry): void {

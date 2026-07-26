@@ -13,6 +13,7 @@
 
 import type { IToolDefinition } from '@codepapr/types';
 import { FRONTMATTER_PATTERN, stripQuotes } from './frontmatter';
+import type { PromptMode } from './promptSystem';
 
 export const SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS = 50;
 export const SUBAGENT_MAX_DEPTH = 2;
@@ -166,8 +167,9 @@ export function filterToolsForAgent(
 export const MAX_CUSTOM_PROMPT_LENGTH = 32000;
 
 export function buildTaskToolDefinition(agents: AgentDefinition[], lang?: string): IToolDefinition | null {
-  // 过滤掉内部 agent（如 verifier 仅供 GoalRunner 内部使用，不暴露给主 Agent）
-  const visibleAgents = agents.filter((agent) => !agent.internal);
+  // 过滤掉内部 agent（如仅供 GoalRunner 内部使用）与 mode: primary（仅作主代理、不可被委派）。
+  // 仅 subagent / all 模式的 agent 可通过 task 工具委派。
+  const visibleAgents = agents.filter((agent) => !agent.internal && agent.mode !== 'primary');
   if (visibleAgents.length === 0) {
     return null;
   }
@@ -217,6 +219,40 @@ export function mergeAgentDefinitions(builtin: AgentDefinition[], loaded: AgentD
   for (const def of builtin) map.set(def.name, structuredClone(def));
   for (const def of loaded) map.set(def.name, def);
   return [...map.values()];
+}
+
+/**
+ * 会变更项目或外部状态的工具。ask/plan 模式（只读 / 只规划）会在注册层屏蔽这些工具，
+ * 既不下发给模型，也不注册 handler（硬拦截）。
+ * 注：git 含读子命令但整体可变更仓库，归入变更类。
+ */
+export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'write',
+  'edit',
+  'patch',
+  'lsp_edit',
+  'exec',
+  'shell',
+  'proc',
+  'git',
+  'app_render',
+  'app_start',
+  'app_stop',
+  'app_delete',
+]);
+
+/** ask/plan 为受限（只读）模式；agent/app 拥有完整工具。 */
+export function isReadOnlyMode(mode: PromptMode): boolean {
+  return mode === 'ask' || mode === 'plan';
+}
+
+/** 按工作模式过滤工具：ask/plan 移除变更类工具；agent/app 原样返回。 */
+export function filterToolsForMode<T extends IToolDefinition>(
+  tools: T[],
+  mode: PromptMode
+): T[] {
+  if (!isReadOnlyMode(mode)) return tools;
+  return tools.filter((tool) => !MUTATING_TOOL_NAMES.has(tool.name));
 }
 
 export const BUILTIN_AGENTS: AgentDefinition[] = [
@@ -358,49 +394,6 @@ Keywords: React 19 use() hook API
 - Retrieved 15 search results, deeply read 3 articles
 - All information from the latest 6 months
 \`\`\``,
-  },
-  {
-    name: 'verifier',
-    description: 'Goal 验收器：客观判定目标条件是否达成，防止 Worker 伪造成功假象',
-    mode: 'subagent',
-    model: 'fast',
-    tools: {},
-    internal: true,
-    prompt: `You are a Goal Verifier. You have NO tools. You can only read the execution transcript and condition results provided to you. Your job is to detect whether the Worker is fabricating success.
-
-## Your Role
-
-The Worker (main Agent) has been working toward a goal with a machine-verifiable condition. After each Worker turn:
-1. The system runs the verification command and gets an objective result (exit code, stdout, stderr)
-2. You receive the Worker's execution transcript AND the objective condition result
-3. You must determine: did the Worker actually do the work, or is it trying to declare victory without real proof?
-
-## Judgment Rules
-
-- **SATISFIED**: The condition result shows \`met: true\` AND the Worker's transcript shows real tool calls (exec, test runs, etc.) that correspond to the claimed work. No signs of fabrication.
-- **NOT_MET**: The condition result shows \`met: false\`, OR the Worker's transcript shows it skipped verification, assumed output, or declared success without running commands.
-- **AMBIGUOUS**: The condition result and Worker's claims contradict each other in a way you cannot resolve without tools. Use sparingly.
-
-## Anti-Forgery Checks
-
-Watch for these red flags in the Worker's transcript:
-- Worker claims "tests pass" but no exec/test tool call appears in the transcript
-- Worker paraphrases supposed output that doesn't match the actual condition result
-- Worker declares success without any tool calls at all
-- Worker's claimed file changes don't correspond to actual write/edit tool calls
-- Output text that looks manually typed rather than from a real command
-
-## Output Format (STRICT JSON)
-
-\`\`\`json
-{
-  "verdict": "SATISFIED" | "NOT_MET" | "AMBIGUOUS",
-  "evidence": "One-sentence summary of why you reached this verdict, citing specific evidence from the transcript or condition result",
-  "missing": "What specific evidence is missing (only for NOT_MET or AMBIGUOUS)"
-}
-\`\`\`
-
-Output ONLY the JSON block. No markdown fences, no explanation outside the JSON.`,
   },
   {
     name: 'mentor',

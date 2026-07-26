@@ -66,7 +66,7 @@ export const DEFAULT_SETTINGS: Settings = {
   topP: 0.9,
   maxTokens: DEFAULT_MAX_TOKENS,
   maxToolRounds: DEFAULT_AGENT_MAX_TOOL_ROUNDS,
-  maxContextTokens: 200_000,
+  maxContextTokens: 500_000,
   maxConversationRounds: 24,
   compactionModel: 'fast',
   compactionMaxTokens: 8_000,

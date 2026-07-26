@@ -11,10 +11,10 @@ export { CachePartition } from './cache/CachePartition';
 
 // Agent / Session / Tool / Message
 export { Agent, DEFAULT_AGENT_MAX_TOOL_ROUNDS } from './agent/Agent';
-export type { AgentOptions, IRequestBuilder, ICacheValidator } from './agent/Agent';
+export type { AgentOptions, IRequestBuilder, ICacheValidator, ContextCompactionConfig } from './agent/Agent';
 export { Session } from './agent/Session';
 export type { SessionOptions } from './agent/Session';
-export { ToolRegistry } from './tool/ToolRegistry';
+export { ToolRegistry, FilteringToolRegistry } from './tool/ToolRegistry';
 export type { ToolHandler } from './tool/ToolRegistry';
 export { EditHistory } from './tool/editHistory';
 export type { EditRecord, RevertAction } from './tool/editHistory';
@@ -194,7 +194,7 @@ export {
   buildProjectRulesSection,
 } from './agent/projectRules';
 export type { ProjectRuleFile } from './agent/projectRules';
-export { parseAgentMarkdown, filterToolsForAgent, buildTaskToolDefinition, isExecutionHeavyTask, sanitizeAgentPrompt, resolveAgentPrompt, resolveAgentDescription, mergeAgentDefinitions, BUILTIN_AGENTS, SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS, SUBAGENT_MAX_DEPTH, MAX_CUSTOM_PROMPT_LENGTH, EXECUTION_HEAVY_PATTERNS } from './agent/agentConfig';
+export { parseAgentMarkdown, filterToolsForAgent, filterToolsForMode, isReadOnlyMode, MUTATING_TOOL_NAMES, buildTaskToolDefinition, isExecutionHeavyTask, sanitizeAgentPrompt, resolveAgentPrompt, resolveAgentDescription, mergeAgentDefinitions, BUILTIN_AGENTS, SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS, SUBAGENT_MAX_DEPTH, MAX_CUSTOM_PROMPT_LENGTH, EXECUTION_HEAVY_PATTERNS } from './agent/agentConfig';
 export type { AgentDefinition, AgentMode } from './agent/agentConfig';
 export {
   TODO_TOOL_NAME,
@@ -209,6 +209,22 @@ export {
 export type { TodoUpdatePatch } from './agent/todoList';
 export { selectSubagentExecutionRoute } from './agent/subagentRoute';
 export type { SubagentExecutionRoute, SubagentRouteSettings } from './agent/subagentRoute';
+export {
+  resolveSubagentExecution,
+  runSubagentSession,
+  SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
+} from './agent/subagentConfig';
+export type {
+  SubagentTierSettings,
+  SubagentMentorSettings,
+  SubagentExecutionInput,
+  ResolvedSubagentExecution,
+  ResolvedSubagentParameters,
+  ResolvedSubagentMentor,
+  SubagentStep,
+  SubagentSessionDeps,
+  SubagentSessionResult,
+} from './agent/subagentConfig';
 export {
   SKILLS_DIR,
   DEFAULT_SEARCH_SKILL_NAME,

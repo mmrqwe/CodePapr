@@ -4,14 +4,17 @@ import {
   ImmutablePrefix,
   Session,
   ToolRegistry,
+  FilteringToolRegistry,
+  MUTATING_TOOL_NAMES,
+  isReadOnlyMode,
   renderTodoListDigest,
   generateToolOutputFilename,
   type AgentDefinition,
   type EditHistory,
   type SkillDefinition,
   type ToolOutputTruncationOptions,
-  type PruneOptions,
 } from '@codepapr/core';
+import type { PromptMode } from '@codepapr/core';
 import { CacheValidator, RequestBuilder } from '@codepapr/api';
 import type { ICacheStatistics, IAgentResponse, IImageContent, IMessage, IToolDefinition } from '@codepapr/types';
 import {
@@ -19,6 +22,7 @@ import {
   type AgentRuntimeHandle,
   type AgentRuntimeStreamEvent,
 } from '../../agent/WorkerBackedAgent';
+import { createContextCompactionHandler, buildPruneOptions } from '../../agent/compactionHandler';
 import { registerWorkspaceTools } from '../../tools/workspaceTools';
 import { registerUiTaskTool, type UiTaskToolContext } from '../../tools/uiTaskTool';
 import { getTodoListContext, registerTodoListTools } from '../../tools/todoListTool';
@@ -54,8 +58,6 @@ function subagentMultimodalAllowed(settings: Settings, agentTier: 'primary' | 'f
   return settings.multimodalModelTier === agentTier;
 }
 
-const PRUNE_PROTECTED_TOOLS = new Set(['todo', 'question', 'skill']);
-
 function buildToolOutputTruncation(
   settings: Settings,
   workspacePath: string
@@ -81,22 +83,14 @@ function buildToolOutputTruncation(
   };
 }
 
-function buildPruneOptions(settings: Settings): PruneOptions {
-  return {
-    enabled: settings.pruneOldToolResults,
-    protectRecentRounds: settings.pruneProtectRounds,
-    minPrunableChars: settings.pruneMinChars,
-    protectedTools: PRUNE_PROTECTED_TOOLS,
-    placeholder: '[Old tool result content cleared]',
-  };
-}
-
 export interface AgentRuntimeConfig {
   editHistory?: EditHistory;
   rulesSection?: string;
   customPrompt?: string;
   memorySection?: string;
   lang?: Lang;
+  /** 当前工作模式：ask/plan 会在注册层屏蔽变更类工具。缺省 agent。 */
+  mode?: PromptMode;
   skillDefinitions?: SkillDefinition[];
   agentDefinitions?: AgentDefinition[];
   mcpToolDefinitions?: IToolDefinition[];
@@ -221,7 +215,10 @@ function _createLocalAgent(
   > = {},
   runtime: AgentRuntimeConfig = {}
 ): AgentRuntimeHandle {
-  const toolRegistry = new ToolRegistry();
+  const mode: PromptMode = runtime.mode ?? 'agent';
+  const toolRegistry = isReadOnlyMode(mode)
+    ? new FilteringToolRegistry((tool) => !MUTATING_TOOL_NAMES.has(tool.name))
+    : new ToolRegistry();
   const onWorkspaceMutated = runtime.onWorkspaceMutated ?? defaultOnWorkspaceMutatedResolver();
   const sessionBootstrapPrompt = buildAgentSessionBootstrapPrompt(
     settings,
@@ -302,6 +299,9 @@ function _createLocalAgent(
         agents: availableAgents,
       mentor: { enabled: settings.mentorEnabled, model: settings.mentorModel, baseURL: settings.mentorBaseURL, apiKey: settings.mentorApiKey, apiFormat: settings.mentorApiFormat as ApiFormat, maxTokens: settings.mentorMaxTokens, maxConsultations: settings.maxMentorConsultations, thinkingEnabled: settings.mentorThinkingEnabled },
       baseURL: settings.baseURL,
+      apiKey: settings.apiKey,
+      multimodalEnabled: resolveMultimodalEnabled(settings, baseModel),
+      toolOutputTruncation: buildToolOutputTruncation(settings, workspacePath),
       thinkingEnabled: settings.thinkingEnabled,
       editHistory: runtime.editHistory,
       onWorkspaceMutated,
@@ -344,7 +344,7 @@ function _createLocalAgent(
     sessionId,
     prefix,
     toolRegistry,
-    log: createLogFromMessages(sessionId, messages, sessionBootstrapPrompt, todoListDigest),
+    log: createLogFromMessages(sessionId, messages, sessionBootstrapPrompt, todoListDigest, buildPruneOptions(settings)),
   });
   return new _MainThreadAgentHandle(new Agent({
     session,
@@ -355,7 +355,7 @@ function _createLocalAgent(
     maxToolRounds: settings.maxToolRounds,
     toolTimeouts: { graph: settings.graphToolTimeoutMs },
     toolOutputTruncation: buildToolOutputTruncation(settings, workspacePath),
-    pruneOptions: buildPruneOptions(settings),
+    contextCompaction: createContextCompactionHandler(settings, providerName, sessionId),
   }), () => uiTaskToolContext?.subagentCacheStats ?? []);
 }
 
@@ -400,7 +400,7 @@ export function createAgent(
           const ctx = getTodoListContext(sessionId);
           if (!ctx || ctx.tasks.length === 0) return undefined;
           return renderTodoListDigest(ctx);
-        })()),
+        })(), buildPruneOptions(settings)),
         settings: toWorkerAgentSettings(settings),
         providerName: provider,
         model: baseModel,
@@ -418,6 +418,7 @@ export function createAgent(
           customPrompt: runtime.customPrompt ? runtime.customPrompt : customPromptWithCharacter,
           memorySection: runtime.memorySection,
           lang: runtime.lang ?? settings.lang,
+          mode: runtime.mode,
           skillDefinitions: runtime.skillDefinitions,
           mcpToolDefinitions: runtime.mcpToolDefinitions,
           mcpToolMappings: runtime.mcpToolMappings,

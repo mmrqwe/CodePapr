@@ -28,13 +28,14 @@ import {
   IImmutablePrefix,
   IAppendOnlyLog,
   IToolDefinition,
+  IMessage,
   QuestionData,
 } from '@codepapr/types';
-import { Logger } from '@codepapr/common';
+import { Logger, estimateTokens } from '@codepapr/common';
 import { Session, mergeOptionalTokenCount } from './Session';
 import { MessageFactory } from '../message/Message';
+import { Serializer } from '../cache/Serializer';
 import { truncateToolOutput, type ToolOutputTruncationOptions } from '../tool/toolOutputTruncation';
-import type { PruneOptions } from '../tool/pruneToolResults';
 
 const log = new Logger('Agent');
 
@@ -202,9 +203,9 @@ export interface IRequestBuilder {
     topP?: number;
     maxTokens?: number;
     tools?: IToolDefinition[];
-    pruneOptions?: PruneOptions;
   }): IChatRequest;
   syncAfterPop?(appendLog: IAppendOnlyLog): void;
+  resetLogTracking?(): void;
 }
 
 export interface ICacheValidator {
@@ -216,6 +217,22 @@ export interface ICacheValidator {
   ): ICacheValidation;
 }
 
+/**
+ * Mid-loop context compaction (OpenCode-style "Context Epoch").
+ *
+ * Before each tool-loop round the Agent estimates the context size; when it
+ * exceeds `maxContextTokens` the `handler` compacts the current history into a
+ * checkpoint summary + retained tail, and the Agent replaces its log (a new
+ * epoch) and continues. This bounds context within a single agent pass without
+ * mutating the prefix on every round (which would break the prompt cache).
+ */
+export interface ContextCompactionConfig {
+  maxContextTokens: number;
+  handler: (
+    messages: IMessage[]
+  ) => Promise<{ messages: IMessage[]; cacheStats?: ICacheStatistics } | null>;
+}
+
 export interface AgentOptions {
   session: Session;
   provider: ILLMProvider;
@@ -225,7 +242,7 @@ export interface AgentOptions {
   maxToolRounds?: number;
   toolTimeouts?: Record<string, number>;
   toolOutputTruncation?: ToolOutputTruncationOptions;
-  pruneOptions?: PruneOptions;
+  contextCompaction?: ContextCompactionConfig;
 }
 
 export const DEFAULT_AGENT_MAX_TOOL_ROUNDS = 500;
@@ -247,8 +264,10 @@ export class Agent {
   private maxToolRounds: number;
   private toolTimeouts: Record<string, number>;
   private toolOutputTruncation?: ToolOutputTruncationOptions;
-  private pruneOptions?: PruneOptions;
+  private contextCompaction?: ContextCompactionConfig;
   private abortController: AbortController | null = null;
+  private cachedPrefixTokens?: number;
+  private lastCompactionRound = -Infinity;
 
   constructor(opts: AgentOptions) {
     this.session = opts.session;
@@ -259,7 +278,7 @@ export class Agent {
     this.maxToolRounds = normalizeMaxToolRounds(opts.maxToolRounds);
     this.toolTimeouts = opts.toolTimeouts ?? {};
     this.toolOutputTruncation = opts.toolOutputTruncation;
-    this.pruneOptions = opts.pruneOptions;
+    this.contextCompaction = opts.contextCompaction;
   }
 
   getSession(): Session {
@@ -272,6 +291,20 @@ export class Agent {
 
   destroy(): void {
     this.cancel();
+  }
+
+  /**
+   * Rough context size estimate (tokens) = prefix (system + tools, immutable so
+   * cached once) + current log bytes, using the bytes/4 heuristic. Used only to
+   * decide when to trigger mid-loop compaction; precision is not critical.
+   */
+  private estimateContextTokens(): number {
+    if (this.cachedPrefixTokens === undefined) {
+      this.cachedPrefixTokens = estimateTokens(
+        Serializer.stringify(this.session.prefix.toJSON())
+      );
+    }
+    return this.cachedPrefixTokens + Math.ceil(this.session.logStore.getContentBytes() / 4);
   }
 
   async chat(
@@ -312,6 +345,31 @@ export class Agent {
         });
       }
 
+      // Mid-loop context compaction (round-start check): if the context exceeds
+      // the budget, compact into a new epoch BEFORE building this round's
+      // request, so no request is ever sent with an over-limit context. This
+      // catches overflow produced by the previous round's tool results. Guarded
+      // by lastCompactionRound to avoid compacting on consecutive rounds.
+      if (
+        this.contextCompaction &&
+        round - this.lastCompactionRound >= 2 &&
+        this.estimateContextTokens() > this.contextCompaction.maxContextTokens
+      ) {
+        const compacted = await this.contextCompaction.handler(
+          this.session.logStore.getAllMessages().slice()
+        );
+        if (compacted && compacted.messages.length > 0) {
+          this.session.replaceLog(compacted.messages);
+          this.requestBuilder.resetLogTracking?.();
+          this.lastCompactionRound = round;
+          if (compacted.cacheStats) {
+            this.session.recordStats(compacted.cacheStats);
+            aggregatedStats = accumulateStats(aggregatedStats, compacted.cacheStats);
+          }
+          onStreamEvent?.({ type: 'context-compacted', round: roundNumber });
+        }
+      }
+
       const params = this.session.prefix.getParameters();
       const request = this.requestBuilder.build({
         prefix: this.session.prefix,
@@ -326,7 +384,6 @@ export class Agent {
         topP: params.topP,
         maxTokens: params.maxTokens,
         tools: [...this.session.prefix.getToolDefinitions()],
-        pruneOptions: this.pruneOptions,
       });
 
       onStreamEvent?.({

@@ -1,4 +1,12 @@
-import { AppendOnlyLog, ToolRegistry, type EditHistory } from '@codepapr/core';
+import {
+  AppendOnlyLog,
+  ToolRegistry,
+  FilteringToolRegistry,
+  MUTATING_TOOL_NAMES,
+  isReadOnlyMode,
+  type EditHistory,
+  type PromptMode,
+} from '@codepapr/core';
 import type { IAgentResponse, IChatRequest, IChatStreamEvent, IImageContent, IMessage, IToolDefinition } from '@codepapr/types';
 import { OpenAIProvider, ClaudeProvider, ProviderRequestError, getGlobalFetchFn } from '@codepapr/api';
 import { createId } from '../utils/createId';
@@ -138,7 +146,10 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
   toolDefinitions: IToolDefinition[];
   execute: WorkerToolExecutor;
 } {
-  const registry = new ToolRegistry();
+  const mode: PromptMode = config.runtime.mode ?? 'agent';
+  const registry = isReadOnlyMode(mode)
+    ? new FilteringToolRegistry((tool) => !MUTATING_TOOL_NAMES.has(tool.name))
+    : new ToolRegistry();
   registerWorkspaceTools(
     registry,
     config.workspacePath,

@@ -22,7 +22,7 @@ import {
   CacheConsistencyError,
 } from '@codepapr/types';
 import { Logger, sha256, estimateTokens } from '@codepapr/common';
-import { Serializer, pruneOldToolResults, type PruneOptions } from '@codepapr/core';
+import { Serializer } from '@codepapr/core';
 import { DEFAULT_MAX_TOKENS, sanitizeMaxTokens, getProviderContextLimit } from '../tokenLimits';
 
 const log = new Logger('RequestBuilder');
@@ -37,7 +37,6 @@ interface BuildOptions {
   topP?: number;
   maxTokens?: number;
   tools?: IToolDefinition[];
-  pruneOptions?: PruneOptions;
 }
 
 function buildProviderCacheControl(
@@ -88,9 +87,13 @@ export class RequestBuilder {
     // This prevents old base64 data from bloating every subsequent request.
     messages = stripConsumedImages(messages);
 
-    // Prune old tool results to prevent context bloat from accumulated tool outputs.
-    // Only modifies the request copy — the AppendOnlyLog itself stays immutable.
-    messages = pruneOldToolResults(messages, opts.pruneOptions);
+    // NOTE: Old tool results are NOT pruned here. Pruning on every request build
+    // used a sliding protection window, so a tool message flipped from full
+    // content to a placeholder as rounds accumulated — mutating bytes in the
+    // middle of the already-cached prefix and invalidating DeepSeek's byte-exact
+    // prefix cache on essentially every round. Pruning now happens once, at
+    // context-rebuild time (buildEffectiveContextMessages), where it coincides
+    // with the compaction prefix rewrite and is idempotent for identical input.
 
     // ✅ 检查 6: 确定性序列化
     const cacheRelevantMessages = this.toCacheRelevantMessages(messages);
@@ -143,6 +146,18 @@ export class RequestBuilder {
     });
 
     return request;
+  }
+
+  /**
+   * Reset the append-only log tracking so the next build() treats the log as a
+   * fresh baseline. Used after context compaction replaces the active history
+   * (a sanctioned epoch reset); without this, validateAppendOnly would report a
+   * false "log messages removed / history changed" violation. Prefix/tool
+   * tracking is intentionally preserved (the prefix is unchanged).
+   */
+  resetLogTracking(): void {
+    this.lastLogMessagesHash = '';
+    this.lastLogMessageCount = 0;
   }
 
   /**

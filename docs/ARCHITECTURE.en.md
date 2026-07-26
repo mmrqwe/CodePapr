@@ -542,6 +542,8 @@ Built on each user input:
 - Workspace path appears only once in system prompt
 - Custom guidance appears only once in bootstrap
 - `topP`, `temperature`, `maxTokens`, `thinkingEnabled` are frozen together in ImmutablePrefix; any change breaks the cache hash
+- Session bootstrap is cached per "session × stable signature"; volatile disk state (memory.md / project graph) does not trigger rebuilds (see §13.6)
+- Per-turn dynamic content (date / diagnostics) is placed at the tail, not in the existing prefix
 
 ## 11. Model Routing
 
@@ -570,20 +572,109 @@ User → Surface → Agent.chat() → RequestBuilder → Provider → CacheValid
 - Continue as long as tool calls are detected
 - Limited by `maxToolRounds` (configurable, default 500)
 - Tool results are written to AppendOnlyLog; subsequent requests are based on the full execution history
+- **Context overflow is checked before building each round's request**: if the effective threshold is exceeded, compaction runs (resetting the log into a new epoch) before continuing, so no request ever uses an over-limit context (see §13.3)
 
-## 13. Cache Consistency Model
+## 13. Cache-First Architecture
+
+CodePapr's central architectural decision is **prompt partitioning and context management built around DeepSeek's implicit prefix caching**. DeepSeek caches automatically by byte-exact prefix match (no explicit breakpoints): as long as the request's `tools → system → messages` prefix is byte-identical to a recent request, the matched portion is billed at the cache rate (~¥0.025/M) and only the new tail is billed as input. Hence the first principle:
+
+> **Keep the prefix byte-stable (append-only) within an epoch; reset it deliberately only across epochs via compaction.**
 
 ### 13.1 Three-Partition Structure
 
 | Partition | Content | Design Purpose |
 | --- | --- | --- |
-| ImmutablePrefix | System prompt, tool definitions, model parameters (including topP/temperature/maxTokens/thinkingEnabled) | Lock prefix byte sequence |
+| ImmutablePrefix | System prompt, tool definitions, model parameters (incl. topP/temperature/maxTokens/thinkingEnabled) | Lock the prefix byte sequence; immutable for the agent's lifetime |
 | AppendOnlyLog | User messages, assistant messages, tool results | Append only, no rewrite |
-| VolatileScratch | Temporary reasoning, intermediate plans, per-turn drafts | Isolate unstable content |
+| VolatileScratch | Temporary reasoning, intermediate plans, per-turn drafts | Isolate unstable content; never sent |
 
-### 13.2 Hash Calculation
+### 13.2 Context Epoch Model
 
-ImmutablePrefix SHA256 hash includes the entire `parameters` object — `temperature`, `topP`, `maxTokens`, `thinkingEnabled` all participate in hashing. Any parameter change → hash change → cache miss.
+An **epoch** = a span within one agent lifetime during which the prefix stays byte-stable. Within an epoch:
+
+- ImmutablePrefix is unchanged (the system prompt has no dynamic content, enforced by `RequestBuilder.validateStaticSystemPrompt`, which forbids template interpolation / timestamp placeholders, etc.).
+- Tool definitions are frozen and sorted (`canonicalToolDefinition` + `localeCompare`); `validateToolsImmutable` verifies byte-for-byte stability.
+- AppendOnlyLog only grows: each tool-loop round appends the assistant message and tool results to the tail; the prefix (all prior messages) is reused byte-for-byte → the multiple calls within a tool loop naturally hit the cache.
+
+**The epoch boundary = context compaction.** Compaction is the **only** sanctioned prefix reset: when the context threshold is reached, history is summarized into a checkpoint + retained tail, starting a new epoch (a one-time miss, then stable hit accumulation resumes). This mirrors OpenCode's Context Epoch and Claude Code's auto-compact.
+
+### 13.3 Mid-Loop Overflow → Compaction
+
+Context grows with tool results during the tool loop. `Agent.chat` performs an overflow check **before building each round's request** (`estimateContextTokens`: a rough estimate of prefix bytes + log bytes / 4):
+
+1. When the effective threshold (`contextCompaction.maxContextTokens`) is exceeded, the injected compaction handler runs:
+   - Convert the current log (core `IMessage`) into ui `ContextMessageLike` (`coreMessagesToContextMessages`, re-attaching tool results to the assistant's `toolInvocations`, round-trip faithful);
+   - Run the same pipeline as between-turn compaction (`maybeGenerateContextCheckpoint` produces the checkpoint summary and freezes the current TodoList digest);
+   - `buildEffectiveContextMessages` replaces history with the checkpoint + prunes old tool results in the tail;
+   - `Session.replaceLog` resets the log (`AppendOnlyLog.reset` + reload) and `RequestBuilder.resetLogTracking` resets append-only tracking to avoid false violations;
+   - Merge the compaction's cacheStats, emit a `context-compacted` stream event, and continue the loop.
+2. **Check timing: round-start only.** Tool results are appended at the end of a round; the overflow they cause is caught at the **next round's start** — no LLM request is ever sent with an over-limit context; the tool-calling task continues after compaction from "summary + recent tail".
+3. **No mid-tool-execution compaction:** a round's multiple tool calls are executed atomically before compacting at the round boundary, preserving tool-call↔result pairing.
+4. **Anti-loop:** `lastCompactionRound` guarantees at least 2 rounds between compactions; a null handler result does not reset it.
+5. **Defense in depth:** `toolOutputTruncation` bounds each tool result to ~50KB (or spills to disk with a preview), so per-round growth is bounded and cannot blow the provider's hard limit in a single round.
+
+### 13.4 Pruning Is a Compaction Sub-Step (Not a Separate Mechanism)
+
+`pruneOldToolResults` replaces large old tool results (beyond the protection window `pruneProtectRounds`, default 6 rounds, and ≥ `pruneMinChars`, default 20KB) with a placeholder. It has **no independent trigger**; it runs only inside `buildEffectiveContextMessages` (at compaction/rebuild) as an internal slimming sub-step of compaction (mirroring OpenCode's `SessionCompaction.prune`). The only trigger is the context threshold:
+
+```
+context reaches threshold → compaction (shouldCompact) → rebuild agent → prune at the end of buildEffectiveContextMessages
+```
+
+Compaction summarizes away the head (incl. old tool results); pruning slims the retained tail. The pruning settings (`pruneOldToolResults` / `pruneProtectRounds` / `pruneMinChars`) are internal tuning knobs, not exposed in the UI. Note this differs from `compactionMaxTokens` (the compaction summary's output limit): the latter is how long the summary LLM call may write, not a trigger threshold.
+
+### 13.5 Effective Context Threshold (provider-aware)
+
+`maxContextTokens` (default **500K**, tuned for DeepSeek's 1M context) is the compaction trigger threshold. To avoid compaction lagging behind the limit (causing 400s) on smaller-context providers, the effective value is clamped per provider (`effectiveMaxContextTokens`):
+
+```
+effectiveMaxContextTokens = min(maxContextTokens, providerContextLimit − maxTokens)
+```
+
+| Provider | Hard context limit | Default effective threshold |
+| --- | --- | --- |
+| DeepSeek | ~1M | 500K |
+| Claude | 200K | ≈ 200K − maxTokens |
+| OpenAI | 128K | ≈ 128K − maxTokens |
+
+Higher threshold → fewer compactions → fewer epoch resets → higher hit rate (cache reads are cheap). This effective value is used for both between-turn compaction (`planContextCompaction`) and the mid-loop overflow check.
+
+### 13.6 Prefix-Stability Guarantees (avoiding per-round prefix breaks)
+
+These measures keep the prefix byte-stable within an epoch (any break invalidates everything from that point on):
+
+| Guarantee | Implementation |
+| --- | --- |
+| No per-request prefix mutation | Pruning runs only at compaction/rebuild, not as a sliding window on every request build |
+| Byte-identical rebuild serialization | `toCoreTailMessages` uses `sortedStringify` for object tool results (matching the live path `Message.tool`); empty assistant content is `''` (not `' '`) |
+| Fewer rebuilds | Session bootstrap is cached per "session × stable signature" (`resolveSessionBootstrap`); volatile disk state (memory.md / project graph) no longer triggers rebuilds |
+| Stable reasoning round-trip | `reasoning_content` is round-tripped based on "presence + model capability (`supportsThinkingPayload`)", decoupled from the per-request thinking toggle, so rebuilds don't add/remove reasoning on history |
+| Frozen TodoList digest | The current digest is frozen into the checkpoint payload at generation and reused on rebuild instead of re-rendered live |
+| Frozen parameters | topP / temperature / maxTokens / thinkingEnabled are frozen in ImmutablePrefix; any change flips the hash |
+| Dynamic content placed at the tail | Per-turn dynamic content (date / diagnostics) goes into the new user message (tail), not the existing prefix |
+
+### 13.7 Hashing and Validation
+
+- ImmutablePrefix's SHA256 hash includes the entire `parameters` object — `temperature`, `topP`, `maxTokens`, `thinkingEnabled` all participate. Any parameter change → hash change → cache miss.
+- `RequestBuilder` 8-point validation: static system prompt, immutable tools, runtime tools match the frozen prefix, append-only log (`validateAppendOnly`, unchanged prefix, etc.).
+- `resetLogTracking`: after compaction resets the log, append-only tracking (`lastLogMessagesHash` / `lastLogMessageCount`) is reset so the next build treats the new log as the baseline (no false "history modified" error); prefix/tool tracking is preserved (prefix unchanged).
+- `CacheValidator` parses the response's `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` and normalizes hit-rate statistics.
+
+### 13.8 Known Limitations
+
+- **Server-side cache TTL:** DeepSeek's prefix cache has a lifetime; after a long idle period the first call re-misses the whole prefix (unavoidable, independent of the client). The higher the threshold, the larger the re-miss cost after TTL expiry.
+- **Compaction is lossy:** the checkpoint summary loses some detail; the higher `maxContextTokens`, the more history a single compaction covers and the greater the summarization pressure.
+
+### 13.9 Comparison with Industry Approaches
+
+| Approach | Caching mechanism | Context convergence |
+| --- | --- | --- |
+| OpenCode | Context Epoch + Anthropic cache breakpoints (last tool / system / user message) | `isOverflow` check before each turn → compaction (incl. `SessionCompaction.prune`) |
+| Claude Code | Anthropic prompt caching (prefix stability + breakpoints) | auto-compact summary at ~95% context |
+| CodePapr | DeepSeek implicit prefix caching (three partitions + byte-stable within epoch) | Between-turn compaction + mid-loop round-start overflow check → compaction (incl. pruning sub-step) |
+
+Shared principle: **bound context with overflow-triggered compaction, keep the prefix byte-stable between compactions, and never mutate the already-sent prefix per round.**
+
 
 ## 14. Settings Structure
 
@@ -595,7 +686,7 @@ The settings panel has six tabs. Full parameter reference: `packages/@codepapr/c
 | LLM | API type, model name, fast model, temperature, topP, maxTokens, thinking mode, maxToolRounds |
 | Search | Self-hosted SearXNG first, with automatic fallback to built-in multi-source aggregation when unavailable; engine selector removed from UI; category/time/language/safe search parameters moved to collapsible Advanced Options section |
 | Mentor | Mentor sub-agent independent API key, Base URL, model selection |
-| Advanced | Context compaction (model/temperature/tokens/context limit/conversation rounds), TodoList max retries, ProjectGraph depth/file limits |
+| Advanced | Context compaction (model/temperature/summary output tokens/context limit/conversation rounds), TodoList max retries, ProjectGraph depth/file limits. The context limit `maxContextTokens` defaults to 500K; its effective value is clamped to the selected provider's context limit (see §13.5) |
 | App | .papr app permission management — global default level, Level 3 global toggle, per-app level overrides |
 
 Voice configuration is not in the main settings panel — it is configured per character in the CharacterModal Voice Tab.
@@ -607,10 +698,15 @@ Voice configuration is not in the main settings panel — it is configured per c
 - `packages/@codepapr/core/src/agent/promptSystem.ts`: Three-layer prompt assembly + MODE_INTROS + character profile injection
 - `packages/@codepapr/core/src/agent/todoList.ts`: TodoList core logic
 - `packages/@codepapr/core/src/agent/agentConfig.ts`: BUILTIN_AGENTS definition
-- `packages/@codepapr/core/src/cache/`: Three-partition cache core
+- `packages/@codepapr/core/src/cache/`: Three-partition cache core (`AppendOnlyLog.reset` used by compaction to start a new epoch)
+- `packages/@codepapr/core/src/tool/pruneToolResults.ts`: Old tool-result pruning (compaction sub-step)
 - `packages/@codepapr/core/src/tool/workspace/graphQuery.ts`: ProjectGraph query engine (14 actions)
-- `packages/@codepapr/api/src/request/RequestBuilder.ts`: Request construction
+- `packages/@codepapr/api/src/request/RequestBuilder.ts`: Request construction (8-point validation + `resetLogTracking`)
 - `packages/@codepapr/api/src/response/CacheValidator.ts`: Response validation
+- `packages/@codepapr/ui/src/agent/compactionHandler.ts`: Mid-loop compaction handler + core↔ui message conversion
+- `packages/@codepapr/ui/src/utils/contextLimits.ts`: `effectiveMaxContextTokens` (provider-aware effective threshold)
+- `packages/@codepapr/ui/src/utils/contextCompaction.ts`: Compaction planning / checkpoint / `buildEffectiveContextMessages`
+- `packages/@codepapr/ui/src/store/internals/contextCheckpoint.ts`: Checkpoint generation (`maybeGenerateContextCheckpoint`)
 - `packages/@codepapr/ui/src/store/agentStore.ts`: Desktop master orchestrator (with three memory consolidation trigger points)
 - `packages/@codepapr/ui/src/store/permissionStore.ts`: External path access permission management
 - `packages/@codepapr/ui/src/store/toastStore.ts`: Global toast notifications

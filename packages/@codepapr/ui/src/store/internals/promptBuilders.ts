@@ -7,6 +7,7 @@ import {
   buildRuntimeUserPrompt,
   Serializer,
   type AgentDefinition,
+  type PruneOptions,
   type SkillDefinition,
   type WorkspaceProjectGraphResult,
 } from '@codepapr/core';
@@ -21,9 +22,10 @@ import type { Settings, UIMessage } from './types';
 export function toCoreMessages(
   messages: UIMessage[],
   sessionBootstrapPrompt?: string,
-  todoListDigest?: string
+  todoListDigest?: string,
+  pruneOptions?: PruneOptions
 ): IMessage[] {
-  const restoredMessages = buildEffectiveContextMessages(messages, { todoListDigest });
+  const restoredMessages = buildEffectiveContextMessages(messages, { todoListDigest, pruneOptions });
   const normalizedBootstrapPrompt = sessionBootstrapPrompt?.trim();
   if (!normalizedBootstrapPrompt) {
     return restoredMessages;
@@ -47,10 +49,11 @@ export function createLogFromMessages(
   sessionId: string,
   messages: UIMessage[],
   sessionBootstrapPrompt?: string,
-  todoListDigest?: string
+  todoListDigest?: string,
+  pruneOptions?: PruneOptions
 ): AppendOnlyLog {
   const log = new AppendOnlyLog(sessionId);
-  const restoredMessages = toCoreMessages(messages, sessionBootstrapPrompt, todoListDigest);
+  const restoredMessages = toCoreMessages(messages, sessionBootstrapPrompt, todoListDigest, pruneOptions);
   if (restoredMessages.length === 0) return log;
 
   log.loadFromSnapshot({

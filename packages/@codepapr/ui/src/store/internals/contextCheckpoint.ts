@@ -13,6 +13,7 @@ import {
   type ContextCheckpointPayload,
 } from '../../utils/contextCompaction';
 import { runCachedModelRequest } from '../../utils/cachedModelRequest';
+import { effectiveMaxContextTokens } from '../../utils/contextLimits';
 import { buildProviderInstance } from './providerFactory';
 import { resolveProviderName } from './settingsNormalizer';
 import type { Settings, UIMessage } from './types';
@@ -20,11 +21,12 @@ import type { Settings, UIMessage } from './types';
 export async function maybeGenerateContextCheckpoint(
   settings: Settings,
   messages: UIMessage[],
-  force?: boolean
+  force?: boolean,
+  todoDigest?: string
 ): Promise<{ message: UIMessage; cacheStats?: ICacheStatistics; modelTier: 'primary' | 'fast' | 'local' } | null> {
   const plan = planContextCompaction(messages, {
     maxRounds: settings.maxConversationRounds,
-    maxTokens: settings.maxContextTokens,
+    maxTokens: effectiveMaxContextTokens(settings, resolveProviderName(settings)),
     force,
   });
   if (!plan.shouldCompact) {
@@ -109,6 +111,7 @@ export async function maybeGenerateContextCheckpoint(
         modelName,
         modelTier,
         sections,
+        todoDigest: todoDigest?.trim() || undefined,
       },
     },
     cacheStats,

@@ -276,7 +276,8 @@ export type IChatStreamEvent =
       success: boolean;
       error?: string;
       output?: string;
-    };
+    }
+  | { type: 'context-compacted'; round: number };
 
 // ============================================================================
 // LLM Provider Types

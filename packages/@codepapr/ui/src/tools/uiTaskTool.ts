@@ -7,25 +7,17 @@
  */
 
 import {
-  Agent,
-  AppendOnlyLog,
-  buildSessionBootstrapPrompt,
   buildSkillsSection,
-  buildRuntimeSystemPrompt,
-  buildRuntimeUserPrompt,
-  ImmutablePrefix,
-  Session,
-  selectSubagentExecutionRoute,
+  resolveSubagentExecution,
+  runSubagentSession,
   ToolRegistry,
   filterToolsForAgent,
   buildTaskToolDefinition,
-  SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS,
-  SUBAGENT_MAX_DEPTH,
-  sanitizeAgentPrompt,
-  resolveAgentPrompt,
   type AgentDefinition,
   type EditHistory,
   type SkillDefinition,
+  type SubagentStep,
+  type ToolOutputTruncationOptions,
 } from '@codepapr/core';
 import { DEFAULT_MAX_TOKENS, RequestBuilder, CacheValidator, OpenAIProvider, ClaudeProvider } from '@codepapr/api';
 import type { ICacheStatistics, ILLMProvider, IToolDefinition, MentorConfig } from '@codepapr/types';
@@ -49,6 +41,8 @@ export interface UiTaskToolContext {
   onWorkspaceMutated?: (paths: string[]) => void;
   mentor?: MentorConfig;
   baseURL?: string;
+  /** 主 apiKey：mentor 未单独配置 apiKey 时回退使用。 */
+  apiKey?: string;
   currentDepth?: number;
   thinkingEnabled?: boolean;
   exploreTopP?: number;
@@ -65,49 +59,8 @@ export interface UiTaskToolContext {
   scoutMaxDepth?: number;
   subagentCacheStats?: Array<{ tier: 'primary' | 'fast' | 'mentor'; stats: ICacheStatistics }>;
   graphToolTimeoutMs: number;
-}
-
-interface SubagentStep {
-  name: string;
-  status: 'success' | 'error';
-  summary: string;
-}
-
-const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 600_000;
-
-async function withWallClockTimeout<T>(
-  agent: Agent,
-  promiseFactory: () => Promise<T>,
-  timeoutMs: number
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await new Promise<T>((resolve, reject) => {
-      timer = setTimeout(() => {
-        agent.cancel();
-        reject(new Error(`子代理执行超时 (${timeoutMs / 1000}s)`));
-      }, timeoutMs);
-
-      promiseFactory().then(
-        (result) => {
-          if (timer !== undefined) {
-            clearTimeout(timer);
-            timer = undefined;
-          }
-          resolve(result);
-        },
-        (err) => {
-          if (timer !== undefined) {
-            clearTimeout(timer);
-            timer = undefined;
-          }
-          reject(err);
-        }
-      );
-    });
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
+  multimodalEnabled: boolean;
+  toolOutputTruncation?: ToolOutputTruncationOptions;
 }
 
 async function runSubagent(
@@ -115,181 +68,88 @@ async function runSubagent(
   definition: AgentDefinition,
   prompt: string
 ): Promise<{ content: string; steps: SubagentStep[]; cacheStats?: ICacheStatistics; tier: 'primary' | 'fast' | 'mentor' }> {
-  const currentDepth = context.currentDepth ?? 0;
-  const agentMaxDepth = definition.name === 'explore'
-    ? context.exploreMaxDepth
-    : definition.name === 'scout'
-    ? context.scoutMaxDepth
-    : SUBAGENT_MAX_DEPTH;
-  const maxDepth = agentMaxDepth ?? SUBAGENT_MAX_DEPTH;
-  if (currentDepth >= maxDepth) {
-    throw new Error(`子代理嵌套深度已达上限（${maxDepth} 层），无法继续委派`);
-  }
-
-  const steps: SubagentStep[] = [];
   startSubagentProgress(definition.name, prompt);
+
   const registry = new ToolRegistry();
   registerWorkspaceTools(
     registry,
     context.workspacePath,
     context.editHistory,
     context.onWorkspaceMutated,
-    { multimodalEnabled: true }
+    { multimodalEnabled: context.multimodalEnabled }
   );
-  const allTools = registry.getAll();
-  const tools = filterToolsForAgent(allTools, definition.tools);
-  const systemPrompt = buildRuntimeSystemPrompt({
-    mode: 'agent',
-    workspacePath: context.workspacePath,
-    lang: context.lang,
-    extraSections: [sanitizeAgentPrompt(resolveAgentPrompt(definition, context.lang))],
-    toolNames: tools.map((tool) => tool.name),
-    subagent: true,
-  });
-  const log = new AppendOnlyLog(`subagent-${definition.name}-${Date.now()}`);
-  const sessionBootstrapPrompt = buildSessionBootstrapPrompt({
-    workspacePath: context.workspacePath,
-    lang: context.lang,
-    skillsSection: buildSkillsSection(context.skillDefinitions, context.lang),
-    customPromptSection: context.customPrompt,
-  });
-  if (sessionBootstrapPrompt.trim()) {
-    await log.append({
-      id: 'session-bootstrap',
-      role: 'assistant',
-      content: sessionBootstrapPrompt.trim(),
-      timestamp: Date.now(),
-      metadata: { sessionBootstrap: true },
-    });
-  }
-  const userPrompt = buildRuntimeUserPrompt({
-    mode: 'agent',
-    input: prompt,
-    workspacePath: context.workspacePath,
-    lang: context.lang,
-  });
-  await log.append({
-    id: `subagent-${definition.name}-user`,
-    role: 'user',
-    content: userPrompt,
-    timestamp: Date.now(),
+  const tools = filterToolsForAgent(registry.getAll(), definition.tools);
+
+  const exec = resolveSubagentExecution({
+    definition,
+    currentDepth: context.currentDepth ?? 0,
+    taskPrompt: prompt,
+    baseModel: context.baseModel,
+    fastModel: context.fastModel,
+    fastModelEnabled: context.fastModelEnabled,
+    defaultMaxTokens: DEFAULT_MAX_TOKENS,
+    globalMaxToolRounds: context.maxToolRounds,
+    thinkingFallback: context.thinkingEnabled ?? true,
+    explore: {
+      topP: context.exploreTopP,
+      maxTokens: context.exploreMaxTokens,
+      thinkingEnabled: context.exploreThinkingEnabled,
+      temperature: context.exploreTemperature,
+      maxToolRounds: context.exploreMaxToolRounds,
+      maxDepth: context.exploreMaxDepth,
+    },
+    scout: {
+      topP: context.scoutTopP,
+      maxTokens: context.scoutMaxTokens,
+      thinkingEnabled: context.scoutThinkingEnabled,
+      temperature: context.scoutTemperature,
+      maxToolRounds: context.scoutMaxToolRounds,
+      maxDepth: context.scoutMaxDepth,
+    },
+    mentor: context.mentor,
+    fallbackApiKey: context.apiKey ?? '',
+    fallbackBaseURL: context.baseURL ?? '',
   });
 
-  let resolvedModel: string | undefined = definition.model;
   let provider = context.provider;
   let providerName: 'deepseek' | 'openai' | 'claude' = context.providerName;
-  let usingMentor = false;
-
-  if (definition.model === 'fast') {
-    resolvedModel = context.fastModel || context.baseModel;
-  } else if (definition.model === 'mentor' && context.mentor?.enabled) {
-    resolvedModel = context.mentor.model;
-    try {
-      const apiKey = context.mentor.apiKey.trim() || context.mentor.apiKey.trim();
-      const baseURL = context.mentor.baseURL.trim().replace(/\/+$/, '') || (context.baseURL ?? '').trim().replace(/\/+$/, '') || undefined;
-      const config = { apiKey, ...(baseURL ? { baseURL } : {}) };
-      if (context.mentor.apiFormat === 'claude') {
-        provider = new ClaudeProvider(config);
-        providerName = 'claude';
-      } else {
-        provider = new OpenAIProvider(config);
-        providerName = 'openai';
-      }
-      usingMentor = true;
-    } catch (e) {
-      console.warn('[UI Subagent] Mentor provider build failed, falling back to main provider', e);
+  if (exec.mentor) {
+    const config = { apiKey: exec.mentor.apiKey, ...(exec.mentor.baseURL ? { baseURL: exec.mentor.baseURL } : {}) };
+    if (exec.mentor.apiFormat === 'claude') {
+      provider = new ClaudeProvider(config);
+      providerName = 'claude';
+    } else {
+      provider = new OpenAIProvider(config);
+      providerName = 'openai';
     }
   }
 
-  const route = selectSubagentExecutionRoute({
-    baseModel: context.baseModel,
-    fastModelEnabled: context.fastModelEnabled,
-    fastModel: context.fastModel,
-    taskPrompt: prompt,
-    explicitModel: resolvedModel,
-    defaultTemperature: 0.7,
-    explicitTemperature: definition.temperature,
-  });
-  const isExplore = definition.name === 'explore';
-  const isScout = definition.name === 'scout';
-  const parameters = {
-    temperature: isExplore ? (context.exploreTemperature ?? 0.5) : isScout ? (context.scoutTemperature ?? 0.3) : 0.5,
-    topP: isExplore ? (context.exploreTopP ?? 0.9) : isScout ? (context.scoutTopP ?? 0.9) : 0.9,
-    maxTokens: isExplore ? (context.exploreMaxTokens ?? DEFAULT_MAX_TOKENS) : isScout ? (context.scoutMaxTokens ?? DEFAULT_MAX_TOKENS) : DEFAULT_MAX_TOKENS,
-    thinkingEnabled: definition.model === 'mentor'
-      ? (context.mentor?.thinkingEnabled ?? false)
-      : isExplore
-      ? (context.exploreThinkingEnabled ?? true)
-      : isScout
-      ? (context.scoutThinkingEnabled ?? false)
-      : context.thinkingEnabled ?? true,
-  };
-  const agentMaxToolRounds = isExplore
-    ? context.exploreMaxToolRounds
-    : isScout
-    ? context.scoutMaxToolRounds
-    : SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS;
-  const subagentMaxToolRounds = Math.min(
-    context.maxToolRounds,
-    agentMaxToolRounds ?? SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS
-  );
-
-  const prefix = new ImmutablePrefix({ systemPrompt, tools, model: route.model, parameters });
-  const session = new Session({
-    sessionId: `subagent-${definition.name}-${Date.now()}`,
-    prefix,
-    toolRegistry: registry,
-    log,
-  });
-
-  const agent = new Agent({
-    session,
+  const result = await runSubagentSession({
+    definition,
+    prompt,
+    workspacePath: context.workspacePath,
+    lang: context.lang,
+    exec,
+    registry,
+    tools,
     provider,
     providerName,
     requestBuilder: new RequestBuilder(),
     cacheValidator: new CacheValidator(),
-    maxToolRounds: subagentMaxToolRounds,
-    toolTimeouts: { graph: context.graphToolTimeoutMs },
+    skillsSection: buildSkillsSection(context.skillDefinitions, context.lang),
+    customPromptSection: context.customPrompt,
+    graphToolTimeoutMs: context.graphToolTimeoutMs,
+    toolOutputTruncation: context.toolOutputTruncation,
+    onToolCallEnd: (event) => {
+      pushSubagentStep({
+        name: event.toolName,
+        status: event.success ? 'success' : 'error',
+        summary: event.error || event.toolName,
+      });
+    },
   });
-
-  let response;
-  try {
-    response = await withWallClockTimeout(
-      agent,
-      () =>
-        agent.chat(userPrompt, (event) => {
-          if (event.type === 'tool-call-end') {
-            const step: SubagentStep = {
-              name: event.toolName,
-              status: event.success ? 'success' : 'error',
-              summary: event.error || event.toolName,
-            };
-            steps.push(step);
-            pushSubagentStep(step);
-          }
-        }),
-      SUBAGENT_WALL_CLOCK_TIMEOUT_MS
-    );
-  } catch (err) {
-    // 子代理 LLM 调用失败时，附上 agent/model/tier 上下文以便主代理能看清
-    // 真实原因（例：DeepSeek 400 "Load fail" 由于历史 assistant 未回传
-    // reasoning_content）。否则错误会被 task 工具的 try/catch 吞成简短 message。
-    const errName = err instanceof Error ? err.name : undefined;
-    const errMsg = err instanceof Error ? err.message : String(err);
-    const contextTag = `[Subagent=${definition.name} model=${route.model} tier=${route.tier}]`;
-    const wrapped = new Error(`${contextTag} ${errMsg}`);
-    wrapped.name = errName ?? 'SubagentError';
-    if (err instanceof Error && 'provider' in err) {
-      // 透传 ProviderRequestError 的诊断字段，便于上层 worker 透出结构化信息
-      (wrapped as { provider?: string }).provider = (err as { provider?: string }).provider;
-      (wrapped as { status?: number }).status = (err as { status?: number }).status;
-      (wrapped as { responseBody?: string }).responseBody = (err as { responseBody?: string }).responseBody;
-      (wrapped as { requestId?: string }).requestId = (err as { requestId?: string }).requestId;
-    }
-    throw wrapped;
-  }
-  completeSubagentProgress(response.content);
-  return { content: response.content, steps, cacheStats: response.cacheStats, tier: usingMentor ? 'mentor' : route.tier };
+  completeSubagentProgress(result.content);
+  return result;
 }
 
 /**

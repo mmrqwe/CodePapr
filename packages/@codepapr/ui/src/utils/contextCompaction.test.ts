@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { PruneOptions } from '@codepapr/core';
 import {
   buildContextCompactionTranscript,
   buildEffectiveContextMessages,
@@ -269,7 +270,7 @@ describe('contextCompaction', () => {
     expect(effective[3]?.content).toBe('文件已读取，内容是一个默认导出的函数。');
   });
 
-  it('uses space placeholder for old assistant messages without toolInvocations and empty content', () => {
+  it('serializes empty assistant content as empty string to match the live path (cache stability)', () => {
     const messages: ContextMessageLike[] = [
       createUser('u1', '修复 bug'),
       createAssistant('a1', ''),
@@ -280,7 +281,7 @@ describe('contextCompaction', () => {
 
     expect(effective).toHaveLength(3);
     expect(effective[1]?.role).toBe('assistant');
-    expect(effective[1]?.content).toBe(' ');
+    expect(effective[1]?.content).toBe('');
     expect(effective[1]?.toolCalls).toBeUndefined();
   });
 
@@ -387,5 +388,67 @@ describe('contextCompaction', () => {
     expect(parsed?.importantContext[0]).toContain('ChatPanel');
     expect(parsed?.validationNotes).toContain('ui typecheck 通过');
     expect(parseContextCheckpointSections('{"userGoal":[],"constraints":[],"completedWork":[],"importantContext":[],"assumptions":[],"validationNotes":[],"pendingWork":[],"openQuestions":[]}')).toBeNull();
+  });
+
+  it('serializes object tool results with sorted keys to match the live path (cache stability)', () => {
+    const messages: ContextMessageLike[] = [
+      {
+        id: 'a1',
+        role: 'assistant',
+        content: '',
+        timestamp: 1,
+        toolInvocations: [
+          {
+            id: 't1',
+            name: 'todo',
+            arguments: {},
+            status: 'success',
+            output: { zebra: 1, apple: 2 } as unknown as string,
+          },
+        ],
+      },
+    ];
+
+    const effective = buildEffectiveContextMessages(messages);
+    const toolMsg = effective.find((m) => m.role === 'tool');
+    // sortedStringify orders keys alphabetically; JSON.stringify would keep
+    // insertion order ("zebra" first) and diverge from the live wire bytes.
+    expect(toolMsg?.content).toBe('{"apple":2,"zebra":1}');
+  });
+
+  describe('rebuild-time tool-result pruning (prefix-cache friendly)', () => {
+    const bigOutput = 'x'.repeat(300);
+    const pruneOptions: PruneOptions = {
+      enabled: true,
+      protectRecentRounds: 1,
+      minPrunableChars: 100,
+      protectedTools: new Set<string>(),
+      placeholder: '[cleared]',
+    };
+    const makeMessages = (): ContextMessageLike[] => [
+      createAssistantWithTools('a1', '', [
+        { id: 't1', name: 'read', arguments: {}, status: 'success', output: bigOutput },
+      ]),
+      createAssistant('a2', '第二轮'),
+      createAssistant('a3', '第三轮'),
+    ];
+
+    it('prunes old tool results once at rebuild time when pruneOptions is provided', () => {
+      const effective = buildEffectiveContextMessages(makeMessages(), { pruneOptions });
+      const toolMsg = effective.find((m) => m.role === 'tool');
+      expect(toolMsg?.content).toBe('[cleared]');
+    });
+
+    it('leaves tool results intact when pruneOptions is omitted', () => {
+      const effective = buildEffectiveContextMessages(makeMessages());
+      const toolMsg = effective.find((m) => m.role === 'tool');
+      expect(toolMsg?.content).toBe(bigOutput);
+    });
+
+    it('is deterministic across repeated rebuilds (stable prefix bytes)', () => {
+      const first = buildEffectiveContextMessages(makeMessages(), { pruneOptions });
+      const second = buildEffectiveContextMessages(makeMessages(), { pruneOptions });
+      expect(second).toEqual(first);
+    });
   });
 });

@@ -64,6 +64,11 @@ export interface WorkerAgentSettings {
   pruneOldToolResults: boolean;
   pruneProtectRounds: number;
   pruneMinChars: number;
+  maxContextTokens: number;
+  maxConversationRounds: number;
+  compactionModel: 'fast' | 'primary';
+  compactionMaxTokens: number;
+  compactionTemperature: number;
 }
 
 export interface WorkerAgentParameters {
@@ -79,6 +84,8 @@ export interface WorkerAgentRuntimeConfig {
   customPrompt?: string;
   memorySection?: string;
   lang?: Lang;
+  /** 当前工作模式：ask/plan 会在注册层屏蔽变更类工具。缺省 agent。 */
+  mode?: 'ask' | 'plan' | 'agent' | 'app';
   skillDefinitions?: SkillDefinition[];
   agentDefinitions?: AgentDefinition[];
   mcpToolDefinitions?: IToolDefinition[];

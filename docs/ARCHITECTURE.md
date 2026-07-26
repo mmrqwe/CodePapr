@@ -541,6 +541,8 @@ agent 回复完成
 - Workspace 路径只在 system prompt 出现一次
 - Custom guidance 只在 bootstrap 出现一次
 - `topP`、`temperature`、`maxTokens`、`thinkingEnabled` 一起冻结在 ImmutablePrefix 中，任意变化都会破坏缓存 hash
+- session bootstrap 按"会话 × 稳定签名"缓存，memory.md / 项目图等易变磁盘状态变化不触发重建（见 §13.6）
+- 每轮 user prompt 的动态内容（日期 / 诊断）置于尾部，不改既有前缀
 
 ## 11. 模型路由
 
@@ -569,20 +571,109 @@ User → Surface → Agent.chat() → RequestBuilder → Provider → CacheValid
 - 只要检测到 tool call，就继续下一轮
 - 由 `maxToolRounds` 限制（可配置，默认 500）
 - tool 结果写入 AppendOnlyLog，后续请求基于完整执行历史
+- **每轮构建请求前做上下文溢出检查**：超过有效阈值则压缩（重置日志开启新 epoch）后继续，保证任何请求都不用超限上下文（见 §13.3）
 
-## 13. 缓存一致性模型
+## 13. 缓存优先架构（Cache-First Architecture）
+
+CodePapr 的核心架构决策是**围绕 DeepSeek 隐式前缀缓存做提示词分区与上下文管理**。DeepSeek 按字节前缀逐字匹配自动缓存（无显式断点）：请求的 `tools → system → messages` 前缀只要与上一次逐字节相同，命中部分按缓存价计费（约 0.025 元/M），仅新增尾部按输入价计费。因此架构的第一性原则是：
+
+> **epoch 内前缀字节稳定（只追加），epoch 之间通过压缩有意重置。**
 
 ### 13.1 三分区结构
 
 | 分区 | 内容 | 设计目的 |
 | --- | --- | --- |
-| ImmutablePrefix | 系统提示词、工具定义、模型参数（含 topP/temperature/maxTokens/thinkingEnabled） | 锁定前缀字节序列 |
+| ImmutablePrefix | 系统提示词、工具定义、模型参数（含 topP/temperature/maxTokens/thinkingEnabled） | 锁定前缀字节序列，agent 生命周期内不变 |
 | AppendOnlyLog | 用户消息、助手消息、工具结果 | 只追加，不可回写 |
-| VolatileScratch | 临时推理、中间计划、轮次草稿 | 隔离不稳定内容 |
+| VolatileScratch | 临时推理、中间计划、轮次草稿 | 隔离不稳定内容，不进入请求 |
 
-### 13.2 哈希计算
+### 13.2 Context Epoch 模型
 
-ImmutablePrefix 的 SHA256 hash 包含整个 `parameters` 对象——`temperature`、`topP`、`maxTokens`、`thinkingEnabled` 全部参与哈希。任意参数变化 → hash 变化 → 缓存 miss。
+一个 **epoch** = 一个 agent 生命周期内、前缀保持字节稳定的跨度。epoch 内：
+
+- ImmutablePrefix 不变（系统提示词无动态内容，由 `RequestBuilder.validateStaticSystemPrompt` 强制校验，禁止模板插值 / 时间戳占位等）。
+- 工具定义冻结并排序（`canonicalToolDefinition` + `localeCompare`），`validateToolsImmutable` 校验逐字节不变。
+- AppendOnlyLog 只追加：每一轮工具循环把 assistant 消息与 tool 结果追加到尾部，前缀（之前的所有消息）逐字节复用 → 工具循环内多次调用天然高命中。
+
+**epoch 边界 = 上下文压缩**。压缩是**唯一**被许可的前缀重置：达到上下文阈值时，把历史摘要成 checkpoint + 保留尾部，开启新 epoch（一次性 miss，之后重新稳定累积命中）。这对齐 OpenCode 的 Context Epoch 与 Claude Code 的 auto-compact 设计。
+
+### 13.3 中途溢出 → 压缩（mid-loop compaction）
+
+工具循环内上下文会随 tool 结果增长。`Agent.chat` 在**每轮构建请求之前**做溢出检查（`estimateContextTokens`：前缀字节 + 日志字节 / 4 的粗估）：
+
+1. 超过有效阈值（`contextCompaction.maxContextTokens`）时，调用注入的压缩 handler：
+   - 把当前日志（core `IMessage`）转成 ui `ContextMessageLike`（`coreMessagesToContextMessages`，tool 结果回填到 assistant 的 `toolInvocations`，往返保真）；
+   - 走与轮间压缩相同的管线（`maybeGenerateContextCheckpoint` 生成 checkpoint 摘要，并冻结当前 TodoList digest）；
+   - `buildEffectiveContextMessages` 用 checkpoint 替换历史 + 剪枝尾部旧 tool 结果；
+   - `Session.replaceLog` 重置日志（`AppendOnlyLog.reset` + 重载），`RequestBuilder.resetLogTracking` 重置 append-only 跟踪避免误报；
+   - 合并压缩的 cacheStats，发出 `context-compacted` 流事件，循环继续。
+2. **检查时机：仅轮首**。tool 结果在一轮末尾追加，其导致的超限在**下一轮轮首**被拦截——任何 LLM 请求都不会用超限上下文发送；工具调用任务在压缩后基于"摘要 + 近期尾部"继续。
+3. **不在工具执行中途压缩**：一轮内多个工具调用原子执行完再到轮边界压缩，避免破坏"工具调用↔结果"配对。
+4. **防死循环**：`lastCompactionRound` 保证两次压缩至少间隔 2 轮；handler 返回 null 不重置。
+5. **防御纵深**：`toolOutputTruncation` 把单个 tool 结果限制在 ~50KB（或落盘留预览），单轮增长有界，不会单轮撑爆 provider 硬上限。
+
+### 13.4 剪枝是压缩的子步骤（非独立机制）
+
+`pruneOldToolResults` 把超出保护窗口（`pruneProtectRounds`，默认 6 轮）的大块旧 tool 结果（≥ `pruneMinChars`，默认 20KB）替换为占位符。它**没有独立触发器**，只在 `buildEffectiveContextMessages`（压缩 / 重建时）作为压缩的内部瘦身子步骤执行（对齐 OpenCode 的 `SessionCompaction.prune`）。触发器只有上下文阈值一个：
+
+```
+上下文达到阈值 → 压缩(shouldCompact) → 重建 agent → buildEffectiveContextMessages 末尾剪枝
+```
+
+压缩摘要掉头部旧消息（含旧 tool 结果），剪枝给保留尾部瘦身。剪枝设置（`pruneOldToolResults` / `pruneProtectRounds` / `pruneMinChars`）为内部调参，不在 UI 暴露。注意它与 `compactionMaxTokens`（压缩摘要的输出上限）是两个不同概念：后者是压缩那次 LLM 调用能写多长的摘要，不是触发阈值。
+
+### 13.5 有效上下文阈值（provider-aware）
+
+`maxContextTokens`（默认 **500K**，针对 DeepSeek 1M 上下文）是压缩触发阈值。为避免在小上下文 provider 上压缩赶不上上限而 400，实际生效值按 provider 钳制（`effectiveMaxContextTokens`）：
+
+```
+effectiveMaxContextTokens = min(maxContextTokens, providerContextLimit − maxTokens)
+```
+
+| provider | 上下文硬上限 | 默认有效阈值 |
+| --- | --- | --- |
+| DeepSeek | ~1M | 500K |
+| Claude | 200K | ≈ 200K − maxTokens |
+| OpenAI | 128K | ≈ 128K − maxTokens |
+
+阈值越高 → 压缩越少 → epoch 重置越少 → 命中率越高（缓存读取廉价）。该有效值同时用于轮间压缩（`planContextCompaction`）与中途溢出检查。
+
+### 13.6 前缀稳定性保障（避免每轮断前缀）
+
+以下措施确保 epoch 内前缀逐字节稳定（任一破坏都会从破坏点起整段 miss）：
+
+| 保障 | 实现 |
+| --- | --- |
+| 无每请求前缀改动 | 剪枝只在压缩 / 重建时执行，不在每次请求构建时滑动剪枝 |
+| 重建序列化字节一致 | `toCoreTailMessages` 对象 tool 结果用 `sortedStringify`（与实时路径 `Message.tool` 一致）；空助手内容为 `''`（非 `' '`） |
+| 降低重建频率 | session bootstrap 按"会话 × 稳定签名"缓存（`resolveSessionBootstrap`）；memory.md / 项目图等易变磁盘状态变化不再触发重建 |
+| reasoning 回传稳定 | `reasoning_content` 按"是否存在 + 模型能力（`supportsThinkingPayload`）"回传，与每请求 thinking 开关解耦，避免重建时给历史消息增删 reasoning |
+| TodoList digest 冻结 | checkpoint 生成时冻结当前 digest 进 payload，重建时复用而非实时重渲染 |
+| 参数冻结 | topP / temperature / maxTokens / thinkingEnabled 冻结在 ImmutablePrefix，变化即换 hash |
+| 动态内容置于尾部 | 每轮 user prompt 的日期 / 诊断等动态内容放在新 user 消息（尾部），不改既有前缀 |
+
+### 13.7 哈希与校验
+
+- ImmutablePrefix 的 SHA256 hash 包含整个 `parameters` 对象——`temperature`、`topP`、`maxTokens`、`thinkingEnabled` 全部参与哈希。任意参数变化 → hash 变化 → 缓存 miss。
+- `RequestBuilder` 8 点校验：系统提示词无动态内容、工具定义不变、运行时工具与冻结前缀一致、日志只追加（`validateAppendOnly`）、前缀未变等。
+- `resetLogTracking`：压缩重置日志后重置 append-only 跟踪（`lastLogMessagesHash` / `lastLogMessageCount`），使下一次构建以新日志为基线，不误报"历史被改写"；前缀 / 工具跟踪保留（前缀未变）。
+- `CacheValidator` 解析响应的 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`，归一化命中率统计。
+
+### 13.8 已知限制
+
+- **服务端缓存 TTL**：DeepSeek 前缀缓存有存活时间，用户长时间空闲后首次调用会重新 miss 整段前缀（ unavoidable，与客户端无关）。阈值越高，TTL 过期后的重 miss 代价越大。
+- **压缩是有损的**：checkpoint 摘要会丢失部分细节；`maxContextTokens` 越高，单次压缩覆盖的历史越多，摘要压力越大。
+
+### 13.9 与业界方案对照
+
+| 方案 | 缓存机制 | 上下文收敛 |
+| --- | --- | --- |
+| OpenCode | Context Epoch + Anthropic 缓存断点（last tool / system / user message） | 每 turn 前 `isOverflow` 检查 → 压缩（含 `SessionCompaction.prune`） |
+| Claude Code | Anthropic 提示缓存（前缀稳定 + 断点） | ~95% 上下文时 auto-compact 摘要 |
+| CodePapr | DeepSeek 隐式前缀缓存（三分区 + epoch 内字节稳定） | 轮间压缩 + 中途轮首溢出检查 → 压缩（含剪枝子步骤） |
+
+共同原则：**用"溢出触发的压缩"约束上下文，压缩之间保持前缀字节稳定；绝不每轮改动已发送前缀。**
+
 
 ## 14. Settings 结构
 
@@ -594,7 +685,7 @@ ImmutablePrefix 的 SHA256 hash 包含整个 `parameters` 对象——`temperatu
 | LLM | API 类型、模型名称、fast 模型、temperature、topP、maxTokens、thinking 模式、maxToolRounds |
 | Search | 自部署 SearXNG 优先，失败自动降级到内置多源聚合；搜索引擎选择器已移除；分类/时间/语言/安全搜索等高级参数收入折叠区 |
 | Mentor | Mentor 子代理独立 API key、Base URL、模型选择 |
-| 高级 | 上下文压缩（模型/温度/token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 深度/文件限制 |
+| 高级 | 上下文压缩（模型/温度/摘要输出 token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 深度/文件限制。上下文上限 `maxContextTokens` 默认 500K，实际生效值按所选服务商上下文上限自动钳制（见 §13.5） |
 | App | .papr 应用权限管理——全局默认级别、Level 3 全局开关、逐应用级别覆盖 |
 
 语音配置不在主设置面板，而是在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。
@@ -606,10 +697,15 @@ ImmutablePrefix 的 SHA256 hash 包含整个 `parameters` 对象——`temperatu
 - `packages/@codepapr/core/src/agent/promptSystem.ts`：三层 prompt 组装 + MODE_INTROS + 角色人设注入
 - `packages/@codepapr/core/src/agent/todoList.ts`：TodoList 核心逻辑
 - `packages/@codepapr/core/src/agent/agentConfig.ts`：BUILTIN_AGENTS 定义
-- `packages/@codepapr/core/src/cache/`：三分区缓存核心
+- `packages/@codepapr/core/src/cache/`：三分区缓存核心（`AppendOnlyLog.reset` 用于压缩开启新 epoch）
+- `packages/@codepapr/core/src/tool/pruneToolResults.ts`：旧 tool 结果剪枝（压缩子步骤）
 - `packages/@codepapr/core/src/tool/workspace/graphQuery.ts`：ProjectGraph 查询引擎（14 个 action）
-- `packages/@codepapr/api/src/request/RequestBuilder.ts`：请求构造
+- `packages/@codepapr/api/src/request/RequestBuilder.ts`：请求构造（8 点校验 + `resetLogTracking`）
 - `packages/@codepapr/api/src/response/CacheValidator.ts`：响应校验
+- `packages/@codepapr/ui/src/agent/compactionHandler.ts`：中途压缩 handler + core↔ui 消息转换
+- `packages/@codepapr/ui/src/utils/contextLimits.ts`：`effectiveMaxContextTokens`（provider-aware 有效阈值）
+- `packages/@codepapr/ui/src/utils/contextCompaction.ts`：压缩计划 / checkpoint / `buildEffectiveContextMessages`
+- `packages/@codepapr/ui/src/store/internals/contextCheckpoint.ts`：checkpoint 生成（`maybeGenerateContextCheckpoint`）
 - `packages/@codepapr/ui/src/store/agentStore.ts`：桌面端主编排器（含 memory 整理三个触发点）
 - `packages/@codepapr/ui/src/store/permissionStore.ts`：外部路径访问权限管理
 - `packages/@codepapr/ui/src/store/toastStore.ts`：全局 Toast 通知

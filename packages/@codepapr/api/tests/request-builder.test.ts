@@ -93,6 +93,46 @@ describe('RequestBuilder - DeepSeek cache stability', () => {
     ).toThrow(CacheConsistencyError);
   });
 
+  it('keeps prior messages byte-identical across rounds (no per-request pruning)', async () => {
+    const prefix = createPrefix();
+    const log = new AppendOnlyLog('rounds');
+    // A large old tool result that the legacy sliding-window pruner would have
+    // replaced with a placeholder once it fell outside the protection window,
+    // mutating mid-prefix bytes and breaking DeepSeek's prefix cache each round.
+    const bigToolResult = 'x'.repeat(30_000);
+    await log.append({ id: 'u1', role: 'user', content: 'q', timestamp: 1 });
+    await log.append({
+      id: 'a1',
+      role: 'assistant',
+      content: '',
+      toolCalls: [{ id: 'c1', name: 'read', arguments: {} }],
+      timestamp: 2,
+    } as IMessage);
+    await log.append({
+      id: 't1',
+      role: 'tool',
+      content: bigToolResult,
+      toolResult: { toolCallId: 'c1', success: true, result: bigToolResult },
+      timestamp: 3,
+    } as IMessage);
+
+    const builder = new RequestBuilder();
+    const req1 = builder.build({ prefix, appendLog: log, model: 'deepseek-chat', provider: 'deepseek' });
+    const firstSnapshot = JSON.stringify(req1.messages);
+
+    // Append several more assistant rounds so the old tool result sits far
+    // outside any protection window.
+    for (let i = 2; i <= 8; i += 1) {
+      await log.append({ id: `a${i}`, role: 'assistant', content: `round ${i}`, timestamp: 3 + i });
+    }
+    const req2 = builder.build({ prefix, appendLog: log, model: 'deepseek-chat', provider: 'deepseek' });
+
+    // The first four messages (system prefix + user + assistant + the large tool
+    // result) must be unchanged — no placeholder substitution mid-prefix.
+    expect(JSON.stringify(req2.messages.slice(0, req1.messages.length))).toBe(firstSnapshot);
+    expect(req2.messages[3]?.content).toBe(bigToolResult);
+  });
+
   it('会把 DeepSeek 的超限 maxTokens 截断到服务端允许范围', () => {
     const req = new RequestBuilder().build({
       prefix: createPrefix(),
@@ -132,6 +172,39 @@ describe('RequestBuilder - DeepSeek cache stability', () => {
       type: 'session',
     });
     expect(claudeReq.cacheControl?.budgetTokens).toBeGreaterThan(0);
+  });
+
+  it('resetLogTracking 让压缩替换后的日志不再误报 append-only 违规', async () => {
+    const log = new AppendOnlyLog('compact-reset');
+    await log.append({ id: 'm1', role: 'user', content: 'first', timestamp: 1 });
+    await log.append({ id: 'm2', role: 'assistant', content: 'second', timestamp: 2 });
+    const builder = new RequestBuilder();
+    builder.build({ prefix: createPrefix(), appendLog: log, model: 'deepseek-chat', provider: 'deepseek' });
+
+    // Simulate compaction: replace the log with a shorter compacted history.
+    log.reset();
+    await log.append({ id: 'c1', role: 'assistant', content: 'summary', timestamp: 3 });
+    builder.resetLogTracking();
+
+    expect(() =>
+      builder.build({ prefix: createPrefix(), appendLog: log, model: 'deepseek-chat', provider: 'deepseek' })
+    ).not.toThrow();
+  });
+
+  it('未 resetLogTracking 时替换日志仍会触发 append-only 违规', async () => {
+    const log = new AppendOnlyLog('compact-no-reset');
+    await log.append({ id: 'm1', role: 'user', content: 'first', timestamp: 1 });
+    await log.append({ id: 'm2', role: 'assistant', content: 'second', timestamp: 2 });
+    const builder = new RequestBuilder();
+    builder.build({ prefix: createPrefix(), appendLog: log, model: 'deepseek-chat', provider: 'deepseek' });
+
+    log.reset();
+    await log.append({ id: 'c1', role: 'assistant', content: 'summary', timestamp: 3 });
+    // No resetLogTracking → the shrunken log must trip the guard.
+
+    expect(() =>
+      builder.build({ prefix: createPrefix(), appendLog: log, model: 'deepseek-chat', provider: 'deepseek' })
+    ).toThrow(CacheConsistencyError);
   });
 });
 

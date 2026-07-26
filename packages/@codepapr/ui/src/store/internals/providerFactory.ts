@@ -79,6 +79,11 @@ export function toWorkerAgentSettings(settings: Settings): WorkerAgentSettings {
   pruneOldToolResults: settings.pruneOldToolResults,
   pruneProtectRounds: settings.pruneProtectRounds,
   pruneMinChars: settings.pruneMinChars,
+  maxContextTokens: settings.maxContextTokens,
+  maxConversationRounds: settings.maxConversationRounds,
+  compactionModel: settings.compactionModel,
+  compactionMaxTokens: settings.compactionMaxTokens,
+  compactionTemperature: settings.compactionTemperature,
 };
 }
 

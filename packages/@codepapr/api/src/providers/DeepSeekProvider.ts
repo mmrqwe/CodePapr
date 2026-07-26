@@ -277,8 +277,6 @@ export class DeepSeekProvider extends BaseLLMProvider {
 
   private buildPayload(request: IChatRequest, stream: boolean = false) {
     const supportsThinkingPayload = !isLegacyReasonerModel(request.model);
-    const shouldRoundTripReasoning =
-      supportsThinkingPayload && request.thinking?.type === 'enabled';
 
     return {
       model: request.model,
@@ -297,8 +295,15 @@ export class DeepSeekProvider extends BaseLLMProvider {
         const mustRoundTripReasoningContent =
           isAssistantWithToolCalls && hasReasoningContent;
 
+        // 对非工具调用的 assistant 消息，只要模型支持 thinking 载荷且带有
+        // reasoning_content 就回传，与当前 thinking 开关解耦。若按每次请求的
+        // thinking 开关来决定是否回传，重建 agent 时 thinking 取值不同会给所有
+        // 历史消息增删 reasoning_content，改变历史字节、破坏前缀缓存。按"是否
+        // 存在"回传是稳定的（DeepSeek 在 thinking 关闭时也接受 reasoning_content，
+        // 上面 mustRoundTrip 分支正是依赖这一点）。仍保留 supportsThinkingPayload
+        // 门控：legacy reasoner 等不支持 thinking 载荷的模型不回传 reasoning_content。
         const optionallyRoundTripReasoningContent =
-          shouldRoundTripReasoning &&
+          supportsThinkingPayload &&
           !isAssistantWithToolCalls &&
           m.role === 'assistant' &&
           hasReasoningContent;

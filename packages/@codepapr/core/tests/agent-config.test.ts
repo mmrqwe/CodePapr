@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   parseAgentMarkdown,
   filterToolsForAgent,
+  filterToolsForMode,
+  buildTaskToolDefinition,
   BUILTIN_AGENTS,
+  type AgentDefinition,
 } from '../src/agent/agentConfig';
 import type { IToolDefinition } from '@codepapr/types';
 
@@ -86,6 +89,73 @@ describe('agentConfig - filterToolsForAgent', () => {
 
   it('空对象 {} 返回空列表', () => {
     expect(filterToolsForAgent(all, {})).toEqual([]);
+  });
+});
+
+describe('agentConfig - filterToolsForMode', () => {
+  const all = [
+    tool('read'),
+    tool('write'),
+    tool('edit'),
+    tool('exec'),
+    tool('git'),
+    tool('app_render'),
+    tool('question'),
+  ];
+
+  it('ask 模式移除变更类工具，保留只读工具', () => {
+    expect(filterToolsForMode(all, 'ask').map((t) => t.name)).toEqual(['read', 'question']);
+  });
+
+  it('plan 模式移除变更类工具', () => {
+    expect(filterToolsForMode(all, 'plan').map((t) => t.name)).toEqual(['read', 'question']);
+  });
+
+  it('agent 模式保留全部工具', () => {
+    expect(filterToolsForMode(all, 'agent').map((t) => t.name)).toEqual([
+      'read',
+      'write',
+      'edit',
+      'exec',
+      'git',
+      'app_render',
+      'question',
+    ]);
+  });
+
+  it('app 模式保留全部工具', () => {
+    expect(filterToolsForMode(all, 'app')).toHaveLength(all.length);
+  });
+});
+
+describe('agentConfig - buildTaskToolDefinition mode 过滤', () => {
+  const agent = (name: string, mode: AgentDefinition['mode'], internal = false): AgentDefinition => ({
+    name,
+    description: name,
+    mode,
+    prompt: name,
+    internal,
+  });
+
+  it('排除 mode: primary 的 agent', () => {
+    const def = buildTaskToolDefinition([agent('mainish', 'primary'), agent('helper', 'subagent')], 'en');
+    expect(def).not.toBeNull();
+    expect(def!.description).toContain('helper');
+    expect(def!.description).not.toContain('mainish');
+  });
+
+  it('保留 subagent 与 all 模式', () => {
+    const def = buildTaskToolDefinition([agent('a', 'subagent'), agent('b', 'all')], 'en');
+    expect(def!.description).toContain('a');
+    expect(def!.description).toContain('b');
+  });
+
+  it('仅剩 primary 时返回 null', () => {
+    expect(buildTaskToolDefinition([agent('mainish', 'primary')], 'en')).toBeNull();
+  });
+
+  it('排除 internal agent', () => {
+    expect(buildTaskToolDefinition([agent('v', 'subagent', true)], 'en')).toBeNull();
   });
 });
 

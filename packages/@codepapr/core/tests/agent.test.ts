@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { IChatRequest, IChatResponse, ILLMProvider } from '@codepapr/types';
-import { Agent, DEFAULT_AGENT_MAX_TOOL_ROUNDS, ImmutablePrefix, Session, ToolRegistry } from '../src';
+import { Agent, DEFAULT_AGENT_MAX_TOOL_ROUNDS, ImmutablePrefix, Session, ToolRegistry, type ContextCompactionConfig } from '../src';
 
 function createResponse(
   content: string,
@@ -390,5 +390,100 @@ describe('Agent', () => {
       cacheHitRate: 110 / 170,
       calls: 2,
     });
+  });
+});
+
+describe('Agent mid-loop context compaction', () => {
+  const summaryMessage = {
+    id: 'summary',
+    role: 'assistant' as const,
+    content: 'compacted summary',
+    timestamp: 1,
+  };
+
+  function createAgentWithCompaction(
+    handler: ContextCompactionConfig['handler'],
+    maxContextTokens: number
+  ) {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(
+      {
+        name: 'read_file',
+        description: 'Read a file',
+        parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+      },
+      async () => ({ ok: true })
+    );
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi
+        .fn<(_: IChatRequest) => Promise<IChatResponse>>()
+        .mockResolvedValueOnce(
+          createResponse('第一轮', {
+            toolCalls: [{ id: 't1', name: 'read_file', arguments: { path: 'a' } }],
+          })
+        )
+        .mockResolvedValueOnce(createResponse('最终答案')),
+    };
+    const agent = new Agent({
+      session: new Session({
+        sessionId: 'session-compact',
+        prefix: new ImmutablePrefix({
+          systemPrompt: '你是测试助手',
+          tools: toolRegistry.getAll(),
+          model: 'test-model',
+          parameters: { temperature: 0.7, topP: 0.9, maxTokens: 1000 },
+        }),
+        toolRegistry,
+      }),
+      provider,
+      providerName: 'openai',
+      requestBuilder: {
+        build: ({ model }) => ({ model, messages: [] }),
+        resetLogTracking: () => undefined,
+      },
+      cacheValidator: {
+        validate: () => ({
+          prefixCached: false,
+          prefixCreated: false,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          newInputTokens: 1,
+          outputTokens: 1,
+          cacheHitRate: 0,
+        }),
+      },
+      contextCompaction: { maxContextTokens, handler },
+    });
+    return { agent, provider };
+  }
+
+  it('compacts when context exceeds the budget and emits context-compacted', async () => {
+    const handler = vi.fn().mockResolvedValue({
+      messages: [summaryMessage],
+      cacheStats: { cacheCreationTokens: 0, cacheReadTokens: 0, newInputTokens: 5, outputTokens: 2, calls: 1 },
+    });
+    const { agent } = createAgentWithCompaction(handler, 1);
+    const events: string[] = [];
+    await agent.chat('读取并继续', (e) => events.push(e.type));
+    expect(handler).toHaveBeenCalled();
+    expect(events).toContain('context-compacted');
+  });
+
+  it('does not compact when context is within budget', async () => {
+    const handler = vi.fn();
+    const { agent } = createAgentWithCompaction(handler, 1_000_000_000);
+    await agent.chat('读取并继续');
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('replaces the log with the compacted messages (new epoch)', async () => {
+    const handler = vi.fn().mockResolvedValue({ messages: [summaryMessage] });
+    const { agent } = createAgentWithCompaction(handler, 1);
+    await agent.chat('读取并继续');
+    const messages = agent.getSession().logStore.getAllMessages();
+    expect(messages[0]?.content).toBe('compacted summary');
   });
 });

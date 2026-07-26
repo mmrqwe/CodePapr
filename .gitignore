@@ -9,6 +9,7 @@ dist/
 *.swo
 .vscode/
 .idea/
+.opencode/
 *.db
 *.db-wal
 *.db-shm

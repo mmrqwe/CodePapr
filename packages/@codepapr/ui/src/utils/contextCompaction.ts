@@ -1,6 +1,6 @@
 import type { IImageContent, IMessage } from '@codepapr/types';
-import { estimateTokens } from '@codepapr/common';
-import { stripInternalFields } from '@codepapr/core';
+import { estimateTokens, sortedStringify } from '@codepapr/common';
+import { stripInternalFields, pruneOldToolResults, type PruneOptions } from '@codepapr/core';
 import type { Lang } from './i18n';
 import type { UIToolInvocation } from '../store/internals/types';
 
@@ -33,6 +33,10 @@ export interface ContextCheckpointPayload {
   modelName: string;
   modelTier: 'fast' | 'primary' | 'local';
   sections?: ContextCheckpointSections;
+  /** Todo digest frozen at checkpoint generation time. Reusing this (instead of
+   *  re-rendering from live todo state on every rebuild) keeps the rebuilt
+   *  context byte-stable so the prefix cache is not broken on agent rebuild. */
+  todoDigest?: string;
 }
 
 export interface ContextMessageLike {
@@ -186,7 +190,10 @@ function toCoreTailMessages(messages: readonly ContextMessageLike[]): IMessage[]
           return {
             id: `${message.id}-tool-${ti.id}`,
             role: 'tool' as const,
-            content: typeof cleanedOutput === 'string' ? cleanedOutput : JSON.stringify(cleanedOutput),
+            // Use sortedStringify to match the live path (Message.tool), so a
+            // rebuilt history is byte-identical to what was originally sent and
+            // does not break DeepSeek's prefix cache on agent rebuild.
+            content: typeof cleanedOutput === 'string' ? cleanedOutput : sortedStringify(cleanedOutput),
             timestamp: message.timestamp,
             toolResult: {
               toolCallId: ti.id,
@@ -200,7 +207,10 @@ function toCoreTailMessages(messages: readonly ContextMessageLike[]): IMessage[]
       }
       const rawContent =
         message.role === 'user' ? message.promptContent ?? message.content : message.content;
-      const content = message.role === 'assistant' && !rawContent ? ' ' : rawContent;
+      // Match the live path (Agent stores `assistant.content ?? ''`): empty
+      // assistant content serializes as '' not ' ', so rebuilt history stays
+      // byte-identical and does not break the prefix cache.
+      const content = message.role === 'assistant' && !rawContent ? '' : rawContent;
       return [
         {
           id: message.id,
@@ -400,42 +410,48 @@ export function renderContextCheckpointContent(summary: string, lang: Lang | und
 
 export function buildEffectiveContextMessages(
   messages: readonly ContextMessageLike[],
-  options?: { todoListDigest?: string }
+  options?: { todoListDigest?: string; pruneOptions?: PruneOptions }
 ): IMessage[] {
   const checkpoint = getLatestCheckpoint(messages);
   const tailStart = checkpoint ? checkpoint.index + 1 : 0;
   const tailMessages = toCoreTailMessages(messages.slice(tailStart));
 
+  let result: IMessage[];
   if (!checkpoint) {
-    return tailMessages;
-  }
-
-  const result: IMessage[] = [
-    {
-      id: checkpoint.message.id,
-      role: 'assistant',
-      content: checkpoint.payload.renderedContent,
-      timestamp: checkpoint.message.timestamp,
-      metadata: {
-        contextCheckpoint: true,
-        generatedAt: checkpoint.payload.generatedAt,
-        modelName: checkpoint.payload.modelName,
+    result = tailMessages;
+  } else {
+    result = [
+      {
+        id: checkpoint.message.id,
+        role: 'assistant',
+        content: checkpoint.payload.renderedContent,
+        timestamp: checkpoint.message.timestamp,
+        metadata: {
+          contextCheckpoint: true,
+          generatedAt: checkpoint.payload.generatedAt,
+          modelName: checkpoint.payload.modelName,
+        },
       },
-    },
-  ];
+    ];
 
-  const todoDigest = options?.todoListDigest?.trim();
-  if (todoDigest) {
-    result.push({
-      id: `${checkpoint.message.id}-todo-restore`,
-      role: 'user',
-      content: todoDigest,
-      timestamp: checkpoint.message.timestamp + 1,
-    });
+    const todoDigest = (checkpoint.payload.todoDigest ?? options?.todoListDigest)?.trim();
+    if (todoDigest) {
+      result.push({
+        id: `${checkpoint.message.id}-todo-restore`,
+        role: 'user',
+        content: todoDigest,
+        timestamp: checkpoint.message.timestamp + 1,
+      });
+    }
+
+    result.push(...tailMessages);
   }
 
-  result.push(...tailMessages);
-  return result;
+  // Prune old tool results once, at context-rebuild time. This is idempotent for
+  // identical input and coincides with the compaction prefix rewrite, so it does
+  // not add per-round prefix-cache breaks (the old per-request sliding-window
+  // pruning mutated mid-prefix bytes on essentially every round).
+  return pruneOldToolResults(result, options?.pruneOptions);
 }
 
 export function planContextCompaction(

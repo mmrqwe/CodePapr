@@ -27,9 +27,9 @@
 | 参数 | 类型 | 默认值 | 范围 | 说明 |
 |---|---|---|---|---|
 | `compactionModel` | 枚举 | `fast` | `fast` / `primary` | 执行上下文压缩的模型 |
-| `compactionMaxTokens` | 数字 | `8000` | `100` - `100000` | 压缩 LLM 调用的最大输出 token |
+| `compactionMaxTokens` | 数字 | `8000` | `100` - `100000` | 压缩 LLM 调用的最大输出 token（摘要写多长，非触发阈值） |
 | `compactionTemperature` | 数字 | `0.1` | `0` - `2` | 压缩 LLM 调用的温度，越低越确定 |
-| `maxContextTokens` | 数字 | `200000` | `1000` - `1000000` | 上下文窗口 token 上限，超出时触发压缩 |
+| `maxContextTokens` | 数字 | `500000` | `1000` - `1000000` | 上下文窗口 token 上限，超出时触发压缩。实际生效值按所选服务商上下文上限自动钳制（`min(设定值, provider上限 − maxTokens)`）：DeepSeek ~500K、Claude ~200K、OpenAI ~128K |
 | `maxConversationRounds` | 数字 | `24` | `2` - `500` | 触发上下文压缩前保留的最大对话轮数 |
 
 ## TodoList 设置
