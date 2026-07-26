@@ -26,6 +26,8 @@
 
 In Plan mode, when requirements are ambiguous, the Agent will call the `question` tool to ask you instead of guessing.
 
+Ask / Plan are read-only modes: mutating tools (write/edit/patch/exec/shell/git/app_*, etc.) are **blocked at the tool-registration layer** — neither exposed to the model nor executable — preventing accidental file changes by construction, not by prompt alone.
+
 ## Papr App Development
 
 Papr is CodePapr's application runtime. AI-generated apps run directly in the desktop client, using the SDK to call CodePapr capabilities.
@@ -165,10 +167,10 @@ Full parameter reference: `packages/@codepapr/core/docs/CONFIGURATION.md`.
 | **explore** | Read-only code analysis | fast | read, read_image, graph, lsp, diagnostics, grep |
 | **scout** | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image |
 | **mentor** | Architecture/algorithm guidance | Configurable independent model | None |
-| **verifier** | Goal evaluator (internal) | fast | None |
 
-> `verifier` is an internal evaluator for the Goal autonomous loop, not exposed to the main Agent's `task` tool.
 The main Agent dispatches sub-agents via the `task` tool. Each sub-agent has an independent Session and only receives the delegated task description, free from history pollution. The main Agent's TodoList instructions encourage it to proactively delegate code analysis to Explore and web search to Scout.
+
+> The Goal autonomous loop's verifier is a standalone no-tools model call configured in Advanced settings (`verifierModelTier`: fast or primary). It is not a built-in sub-agent and is never exposed via the `task` tool.
 
 Sub-agents have a **5-minute overall wall-clock timeout** (auto-cancels on timeout), individual tool calls have a **90-second timeout**, and Worker IPC has a **120-second timeout**. Timeouts return errors to the LLM instead of hanging indefinitely.
 
@@ -292,6 +294,8 @@ tools:
 ---
 You are a reviewer, a read-only code-review sub-agent.
 ```
+
+`mode` values: `subagent` (default, delegable via the `task` tool), `all` (delegable + usable as an @-mentioned primary agent), `primary` (only as an @-mentioned primary agent; **excluded** from the `task` tool's delegation list). `model` accepts `fast` / `mentor` or a concrete model name; when `mentor` has no dedicated API Key configured, it falls back to the main API Key.
 
 ### Skills
 

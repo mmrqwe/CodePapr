@@ -4,7 +4,7 @@
 
 **Local-first coding agent runtime. Tauri desktop + CLI automation.**
 
-CodePapr is a local coding agent system built with DeepSeek cache optimization. The main agent orchestrates four built-in sub-agents — **Explore** (code analysis), **Scout** (web search), **Mentor** (architecture guidance), and **Verifier** (Goal acceptance, internal) — with support for custom extensions. File I/O, command execution, Git operations, browser preview, and LSP diagnostics all run locally.
+CodePapr is a local coding agent system built with DeepSeek cache optimization. The main agent orchestrates three built-in sub-agents — **Explore** (code analysis), **Scout** (web search), and **Mentor** (architecture guidance) — with support for custom extensions. File I/O, command execution, Git operations, browser preview, and LSP diagnostics all run locally.
 
 ---
 
@@ -137,9 +137,6 @@ See `packages/@codepapr/core/docs/CONFIGURATION.md` for the full parameter refer
 | **explore** | Read-only code analysis | fast | read, read_image, graph, lsp, diagnostics, grep |
 | **scout** | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image |
 | **mentor** | Architecture/algorithm guidance | Configurable model | None |
-| **verifier** | Goal acceptance checker (internal) | fast | None |
-
-> `verifier` is an internal evaluator for the Goal autonomous loop, not exposed to the main Agent's `task` tool.
 
 The main agent dispatches sub-agents via the `task` tool. Each sub-agent has its own **isolated session and blank context**, receiving only the delegated task description — uncontaminated by the main agent's conversation history. Sub-agents have a 5-minute overall timeout and a 90-second per-tool-call timeout.
 

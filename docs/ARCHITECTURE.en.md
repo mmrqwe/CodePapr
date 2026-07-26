@@ -150,6 +150,8 @@ The LLM can invoke 30 discrete tools (including `task`/`todo` as dynamic tools),
 
 All 30 tools are registered in ToolRegistry, frozen and hashed for cache consistency. `todo` and `task` are dynamically generated.
 
+Ask / Plan read-only modes use `FilteringToolRegistry` (a `ToolRegistry` subclass): at registration it skips mutating tools (`MUTATING_TOOL_NAMES`: write/edit/patch/lsp_edit/exec/shell/proc/git/app_*) by predicate, so they appear neither in the tool set nor as registered handlers — a hard block rather than a prompt-level soft constraint. Agent / App modes use the plain `ToolRegistry`.
+
 **External path permissions**: The desktop app shows a `PermissionDialog` for `read`/`list` operations on absolute paths outside the project. The user can choose "Deny / Allow this file / Allow this folder". Authorizations are stored in the `permissionStore` allowlist. CLI read boundaries are more permissive; writes remain workspace-scoped.
 
 ### 4.7 Papr App Runtime
@@ -324,9 +326,10 @@ On Apple Silicon Macs, users can manually click "GPU Warmup" in the Voice Tab of
 | explore | Read-only code analysis | fast | read, read_image, graph, lsp, diagnostics, grep |
 | scout | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image |
 | mentor | Architecture/algorithm guidance | Configurable independent model | None |
-| verifier | Goal acceptance checker (internal) | fast | None |
 
-> `verifier` is an internal evaluator for the Goal autonomous loop (`internal: true`), not exposed to the main Agent's `task` tool; used only by GoalRunner.
+> The Goal autonomous loop's verifier is a standalone no-tools model call configured in Advanced settings (`verifierModelTier`). It is not a built-in sub-agent and is never exposed via the `task` tool.
+
+The `task` tool only exposes agents whose `mode` is `subagent` / `all`; agents with `mode: primary` (only usable as an @-mentioned primary agent) or `internal: true` never appear in the delegation list.
 
 ### 6.2 Sub-Agent Independent Context
 
@@ -335,16 +338,19 @@ On Apple Silicon Macs, users can manually click "GPU Warmup" in the Voice Tab of
 - Creates a new `AppendOnlyLog` — blank log
 - Tool set is filtered by the allowlist in the definition (Explore has 6 tools)
 - Only receives the task description from `task.prompt` as its sole context
-- Nesting depth is configurable (`subagentMaxDepth`, default 2)
+- Nesting depth is configurable (`subagentMaxDepth`, default 2; explore/scout can override via `exploreMaxDepth` / `scoutMaxDepth`)
 
 Design intent: sub-agents are "stateless workers focused on a single task", isolated from the main Agent's context window pollution.
+
+**Single source of truth**: the main-thread (`uiTaskTool.ts`) and Worker (`agentRuntime.worker.ts`) sub-agent paths share `@codepapr/core`'s `subagentConfig.ts` — `resolveSubagentExecution` (resolves model route / parameters / depth / rounds / mentor config) and `runSubagentSession` (builds the Session + Agent and runs it). Each path injects only its differing parts: the ToolRegistry (direct execution vs IPC) and the Provider (including mentor construction), preventing logic drift.
 
 ### 6.3 Model Routing
 
 Sub-agents select models via `selectSubagentExecutionRoute`:
 - Sub-agent definition `model: 'fast'` → fast model (default deepseek-v4-flash)
 - Task contains execution verbs (fix/implement/build) → primary model
-- Mentor defaults to primary model, configurable with independent API key and model
+- Mentor defaults to primary model, configurable with independent API key and model; falls back to the main API key when no dedicated key is configured
+- A custom sub-agent's `temperature` declared in frontmatter takes effect (as the route temperature); explore/scout have their own defaults (0.5 / 0.3)
 - Explore / Scout support tier switching between `primary` and `fast` via settings
 
 ### 6.4 Sub-Agent Timeout Protection
@@ -352,7 +358,7 @@ Sub-agents select models via `selectSubagentExecutionRoute`:
 Sub-agents never wait indefinitely — multiple layers of timeout ensure timely failure:
 
 - **90-second per-tool timeout**: each `toolRegistry.execute()` call in `Agent.ts` is wrapped with `withTimeout`; on timeout, returns `{ error: 'tool execution timeout' }` to the LLM for autonomous decision
-- **5-minute overall wall-clock timeout**: `agent.chat()` in `agentRuntime.worker.ts` and `uiTaskTool.ts` is wrapped with `withWallClockTimeout`; timeout calls `agent.cancel()` to terminate the loop
+- **Overall wall-clock timeout**: `runSubagentSession` in `subagentConfig.ts` has a built-in timeout (5 minutes on the Worker path); timeout calls `agent.cancel()` to terminate the loop
 - **120-second Worker IPC timeout**: `requestToolExecution` promise includes a built-in timeout that cleans up the waiter, preventing permanent hangs when the main thread fails to respond
 
 Timeouts are not silent failures — error information is returned to the LLM, which can decide to retry, switch strategies, or report to the user.

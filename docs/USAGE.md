@@ -26,6 +26,8 @@
 
 Plan 模式下，当需求模糊时 Agent 会调用 `question` 工具向你提问，而不是猜测。
 
+Ask / Plan 是只读模式：变更类工具（write/edit/patch/exec/shell/git/app_* 等）会在**工具注册层被直接屏蔽**——既不下发给模型，也无法执行，从机制上杜绝误改文件，而非仅靠提示词约束。
+
 ## Papr App 开发
 
 Papr 是 CodePapr 的应用运行时。AI 生成的 App 可以直接在桌面端运行，通过 SDK 调用 CodePapr 的能力。
@@ -165,11 +167,10 @@ LLM 可通过 4 个工具管理 app：
 | **explore** | 只读代码分析 | fast | read, read_image, graph, lsp, diagnostics, grep |
 | **scout** | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image |
 | **mentor** | 架构/算法指导 | 可配置独立模型 | 无 |
-| **verifier** | Goal 验收器（内部） | fast | 无 |
-
-> `verifier` 是 Goal 自主循环的内部验收器，不暴露给主 Agent 的 `task` 工具。
 
 主 Agent 通过 `task` 工具调度子代理。每个子代理拥有独立的 Session，只接收委派的任务描述，不受历史对话污染。主 Agent 的 TodoList 指令会提示它主动委派代码分析给 Explore、网页搜索给 Scout。
+
+> Goal 自主循环的验收器（Verifier）是一个独立的无工具模型调用，在高级设置中配置（`verifierModelTier` 可选快速/主模型），不属于内置子代理，也不经 `task` 工具暴露。
 
 子代理有 **5 分钟整体 wall-clock 超时**（超时自动取消），单次工具调用有 **90 秒超时保护**，Worker IPC 通信有 **120 秒超时保护**。超时返回错误给 LLM 自主决策，而非永久等待。
 
@@ -190,7 +191,7 @@ LLM 可通过 4 个工具管理 app：
 
 1. **Worker**（主 Agent）执行一轮工作：规划、写代码、跑测试
 2. **条件评估**：系统自动执行验收命令，获取客观结果（退出码 + stdout）
-3. **Verifier**（无工具子代理）读取 Worker 的执行记录，检查是否伪造成功
+3. **Verifier**（无工具模型调用）读取 Worker 的执行记录，检查是否伪造成功
 4. **双保险判定**：条件函数判定 + Verifier 反伪造，两者都通过才算 SATISFIED
 5. 未达成 → 生成反馈（含真实验收输出）注入下一轮 → 继续循环
 
@@ -332,6 +333,8 @@ tools:
 ---
 你是 reviewer，一个只读代码审查子代理。
 ```
+
+`mode` 取值：`subagent`（默认，可经 `task` 工具委派）、`all`（可委派 + 可作 @ 提及主代理）、`primary`（仅作 @ 提及主代理，**不会**出现在 `task` 工具的委派列表）。`model` 可填 `fast` / `mentor` 或具体模型名；`mentor` 未单独配置 API Key 时自动回退到主 API Key。
 
 ### Skills
 

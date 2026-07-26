@@ -423,7 +423,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
           <thead><tr><th>维度</th><th>Cline (62k⭐)</th><th>Aider (46k⭐)</th><th>Devin Desktop</th><th class="highlight-cell">CodePapr</th></tr></thead>
           <tbody>
             <tr><td><strong>形态</strong></td><td>SDK / VS Code / JetBrains / CLI / Kanban</td><td>终端命令</td><td>独立桌面 IDE</td><td class="highlight-cell">独立桌面应用（Tauri 2）</td></tr>
-            <tr><td><strong>多 Agent</strong></td><td>✅ 团队 + 协调者 + 定时调度</td><td>❌ 单 Agent</td><td>✅ 多 Agent 舰队 + ACP 协议</td><td class="highlight-cell">✅ 主 Agent + 4 内置子代理 + 自定义</td></tr>
+            <tr><td><strong>多 Agent</strong></td><td>✅ 团队 + 协调者 + 定时调度</td><td>❌ 单 Agent</td><td>✅ 多 Agent 舰队 + ACP 协议</td><td class="highlight-cell">✅ 主 Agent + 3 内置子代理 + 自定义</td></tr>
             <tr><td><strong>任务规划</strong></td><td>Kanban 看板</td><td>❌</td><td>Spaces + Kanban</td><td class="highlight-cell">TodoList：自动创建 / 进度追踪 / re-plan</td></tr>
             <tr><td><strong>代码理解</strong></td><td>读取文件 + grep + LSP</td><td>Repo Map</td><td>Fast Context（毫秒级）</td><td class="highlight-cell">ProjectGraph 语义图：14 个分析 action</td></tr>
             <tr><td><strong>回退机制</strong></td><td>Checkpoints 快照</td><td>Git commit 回退</td><td>Diff review</td><td class="highlight-cell">Git auto-commit checkpoint + <code>reset --hard</code>：代码与消息原子性恢复</td></tr>
@@ -660,7 +660,7 @@ https://api.deepseek.com/v1</code></pre>
         <p><strong>适合：</strong>解释架构、梳理模块职责、分析报错原因、先问清楚再决定是否执行。</p>
         <p><strong>特点：</strong></p>
         <ul>
-          <li>默认不改文件、不跑命令</li>
+          <li>只读：变更类工具（write/edit/exec/git 等）在工具注册层被直接屏蔽，从机制上杜绝误改文件</li>
           <li>遇到时效性问题时，优先走只读时间/网页工具核实</li>
           <li>只有你明确要求基于项目核实，它才会进入只读工具链</li>
         </ul>
@@ -671,7 +671,7 @@ https://api.deepseek.com/v1</code></pre>
         <ul>
           <li>默认先给任务清单</li>
           <li>会给影响文件、执行顺序、验证方式和风险</li>
-          <li>适合先规划，再切到 Agent 执行</li>
+          <li>只读（与 Ask 一样在工具层屏蔽变更类工具），适合先规划，再切到 Agent 执行</li>
         </ul>
 
         <h3><span class="badge badge-agent">Agent</span> 执行模式</h3>
@@ -1306,17 +1306,16 @@ TTS 数据流：
       <div class="section-header"><h2>Agent 与子代理</h2></div>
       <div class="content">
         <h3>内置子代理</h3>
-        <p>CodePapr 自带四个内置子代理，主 Agent 可通过 <code>task</code> 工具直接调度（verifier 除外，仅供 Goal 循环内部使用），无需额外配置：</p>
+        <p>CodePapr 自带三个内置子代理，主 Agent 可通过 <code>task</code> 工具直接调度，无需额外配置：</p>
         <table>
           <thead><tr><th>Agent</th><th>用途</th><th>模型</th><th>工具</th></tr></thead>
           <tbody>
             <tr><td><strong>explore</strong></td><td>只读代码分析：搜索项目文件、定位符号、分析依赖关系</td><td>fast</td><td>read, read_image, graph, lsp, diagnostics, grep</td></tr>
             <tr><td><strong>scout</strong></td><td>网络搜索：查找文档、API 参考、最新资料</td><td>fast</td><td>web_search, web_fetch, web_download, browser, read_image</td></tr>
             <tr><td><strong>mentor</strong></td><td>架构/算法/调试高层指导（不写代码、不调工具）</td><td>mentor*</td><td>无</td></tr>
-            <tr><td><strong>verifier</strong></td><td>Goal 验收器（内部）：客观判定目标条件是否达成，防 Worker 伪造成功假象</td><td>fast**</td><td>无</td></tr>
           </tbody>
         </table>
-        <p><small>* Mentor 默认使用主模型，可在设置中启用独立导师模型（支持独立的 API Key、Base URL 和模型选择）。<br>** Verifier 是 Goal 自主循环的内部验收器，不暴露给主 Agent 的 <code>task</code> 工具；默认使用快速模型，可在高级设置中切换为主模型。</small></p>
+        <p><small>* Mentor 默认使用主模型，可在设置中启用独立导师模型（支持独立的 API Key、Base URL 和模型选择；未单独配置 API Key 时回退到主 API Key）。<br>Goal 自主循环的验收器（Verifier）是独立的无工具模型调用，在高级设置中配置（<code>verifierModelTier</code> 可选快速/主模型），不属于内置子代理，也不经 <code>task</code> 工具暴露。</small></p>
 
         <h3>自定义子代理</h3>
         <p>在 <code>.CodePapr/agents/&lt;name&gt;.md</code> 中用 YAML frontmatter + 正文声明一个子代理，主代理可以把子任务委派给它。同名 Agent 会覆盖内置定义。</p>
@@ -1491,7 +1490,7 @@ TTS 数据流：
         <ol>
           <li><strong>Worker turn</strong>：主 Agent 执行一轮工作（读文件、写代码、跑命令）</li>
           <li><strong>客观条件评估</strong>：系统自动执行验证命令，获取退出码和输出</li>
-          <li><strong>Verifier 反伪造检查</strong>：无工具的 Verifier 子代理阅读 Worker 的执行记录，检测是否有"声称测试通过但实际没跑"等完工偏见</li>
+          <li><strong>Verifier 反伪造检查</strong>：无工具的 Verifier 模型调用阅读 Worker 的执行记录，检测是否有"声称测试通过但实际没跑"等完工偏见</li>
           <li><strong>判定</strong>：条件满足且 Verifier 确认 → <strong>SATISFIED</strong>，循环结束；否则生成详细反馈注入下一轮</li>
           <li><strong>上下文腐烂治理</strong>：每 5 轮触发自动压缩；状态持久化到 <code>.CodePapr/goal-state.md</code></li>
         </ol>
@@ -1513,7 +1512,7 @@ TTS 数据流：
           <li><strong>最大迭代轮数</strong>：默认 20，可调 1-100</li>
           <li><strong>最大运行时间</strong>：默认 30 分钟，按分钟配置</li>
           <li><strong>Verifier 模型</strong>：默认快速模型（更快更便宜），可切换为主模型（更准确）</li>
-          <li><strong>Verifier Token 上限</strong>：默认 1000</li>
+           <li><strong>Verifier Token 上限</strong>：默认 4000</li>
           <li><strong>Verifier 温度</strong>：默认 0.1（越低越确定）</li>
         </ul>
       </div>

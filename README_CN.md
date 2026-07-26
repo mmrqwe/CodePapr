@@ -4,7 +4,7 @@
 
 **本地优先的编码 Agent 运行时。Tauri 桌面 + CLI 自动化。**
 
-CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主 Agent 调度 **Explore**（代码分析）、**Scout**（网页搜索）、**Mentor**（架构指导）、**Verifier**（Goal 验收，内部）四个内置子代理协作，支持自定义扩展。文件读写、命令执行、Git 操作、浏览器预览、LSP 诊断——全在本地完成。
+CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主 Agent 调度 **Explore**（代码分析）、**Scout**（网页搜索）、**Mentor**（架构指导）三个内置子代理协作，支持自定义扩展。文件读写、命令执行、Git 操作、浏览器预览、LSP 诊断——全在本地完成。
 
 ---
 
@@ -137,9 +137,6 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 | **explore** | 只读代码分析 | fast | read, read_image, graph, lsp, diagnostics, grep |
 | **scout** | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image |
 | **mentor** | 架构/算法指导 | 可配置独立模型 | 无 |
-| **verifier** | Goal 验收器（内部） | fast | 无 |
-
-> `verifier` 是 Goal 自主循环的内部验收器，不暴露给主 Agent 的 `task` 工具。
 
 主 Agent 通过 `task` 工具调度子代理。每个子代理拥有**独立的 Session 和空白上下文**，只接收委派的任务描述，不受主 Agent 历史对话污染。子代理有 5 分钟整体超时，单次工具调用有 90 秒超时保护。
 

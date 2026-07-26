@@ -150,6 +150,8 @@ LLM 可调用 30 个独立工具（含 `task` / `todo` 两个动态工具），�
 
 30 个工具统一注册在 ToolRegistry 中，冻结后 hash 确保缓存一致性。`todo` 和 `task` 为动态生成。
 
+Ask / Plan 只读模式使用 `FilteringToolRegistry`（`ToolRegistry` 子类）：注册时按谓词跳过变更类工具（`MUTATING_TOOL_NAMES`：write/edit/patch/lsp_edit/exec/shell/proc/git/app_*），使其既不出现在工具集也不注册 handler——硬拦截而非提示词软约束。Agent / App 模式使用普通 `ToolRegistry`。
+
 **外部路径权限**：桌面端对 `read` / `list` 操作的项目外绝对路径会弹出 `PermissionDialog`，由用户选择“拒绝 / 允许此文件 / 允许此文件夹”，授权结果保存在 `permissionStore` 白名单中。CLI 的读取路径边界相对宽松，写入仍限制在工作区内。
 
 ### 4.7 Papr App Runtime
@@ -323,9 +325,10 @@ ChatPanel → useTtsPlayer hook → Rust TTS Module → GPT-SoVITS Python Server
 | explore | 只读代码分析 | fast | read, read_image, graph, lsp, diagnostics, grep |
 | scout | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image |
 | mentor | 架构/算法指导 | 可配置独立模型 | 无 |
-| verifier | Goal 验收器（内部） | fast | 无 |
 
-> `verifier` 是 Goal 自主循环的内部验收器（`internal: true`），不暴露给主 Agent 的 `task` 工具，仅由 GoalRunner 调用。
+> Goal 自主循环的验收器（Verifier）是一个独立的无工具模型调用，在高级设置中配置（`verifierModelTier`），不属于内置子代理，也不经 `task` 工具暴露。
+
+`task` 工具只暴露 `mode` 为 `subagent` / `all` 的 agent；`mode: primary`（仅作 @ 提及主代理）与 `internal: true` 的 agent 都不会出现在委派列表。
 
 ### 6.2 子代理的独立上下文
 
@@ -334,16 +337,19 @@ ChatPanel → useTtsPlayer hook → Rust TTS Module → GPT-SoVITS Python Server
 - 创建全新的 `AppendOnlyLog` — 空白日志
 - 工具集按定义中的白名单过滤（Explore 有 6 个工具）
 - 只接收 `task.prompt` 传入的任务描述作为唯一下文
-- 嵌套深度上限可配置（`subagentMaxDepth`，默认 2）
+- 嵌套深度上限可配置（`subagentMaxDepth`，默认 2；explore/scout 可分别用 `exploreMaxDepth` / `scoutMaxDepth` 覆盖）
 
 设计意图：子代理是"专注执行一条任务的无状态工人"，不受主 Agent 上下文窗口污染。
+
+**单一逻辑来源**：主线程（`uiTaskTool.ts`）与 Worker（`agentRuntime.worker.ts`）两条子代理路径共享 `@codepapr/core` 的 `subagentConfig.ts`——`resolveSubagentExecution`（解析模型路由/参数/深度/轮数/mentor 配置）与 `runSubagentSession`（构建 Session + Agent 并执行）。两条路径仅注入差异部分：ToolRegistry（直接执行 vs IPC）与 Provider（含 mentor 构建），避免逻辑漂移。
 
 ### 6.3 模型路由
 
 子代理通过 `selectSubagentExecutionRoute` 选模型：
 - 子代理定义的 `model: 'fast'` → 快速模型（默认 deepseek-v4-flash）
 - 任务包含执行动词（fix/implement/build）→ 主模型
-- Mentor 默认使用主模型，可配置独立 API key 和模型
+- Mentor 默认使用主模型，可配置独立 API key 和模型；未单独配置 API key 时回退到主 API key
+- 自定义子代理在 frontmatter 声明的 `temperature` 会生效（作为路由温度），explore/scout 各有默认温度（0.5 / 0.3）
 - Explore / Scout 支持按设置里的 `exploreModelTier` / `scoutModelTier` 在 `primary` 与 `fast` 之间切换
 
 ### 6.4 子代理超时保护
@@ -351,7 +357,7 @@ ChatPanel → useTtsPlayer hook → Rust TTS Module → GPT-SoVITS Python Server
 子代理无需等待永久——多层超时机制确保及时止损：
 
 - **单次工具调用 90 秒超时**：`Agent.ts` 中每次 `toolRegistry.execute()` 由 `withTimeout` 包裹，超时返回 `{ error: '工具执行超时' }` 给 LLM 自主决策
-- **子代理整体 5 分钟 wall-clock 超时**：`agentRuntime.worker.ts` 和 `uiTaskTool.ts` 中的 `agent.chat()` 由 `withWallClockTimeout` 包裹，超时调用 `agent.cancel()` 终止循环
+- **子代理整体 wall-clock 超时**：`subagentConfig.ts` 的 `runSubagentSession` 内置超时（Worker 路径 5 分钟），超时调用 `agent.cancel()` 终止循环
 - **Worker IPC 120 秒超时**：`requestToolExecution` 的 Promise 内置超时清理 waiter，防止主线程不回信时永久挂起
 
 超时不是静默失败——错误信息会返回给 LLM，LLM 可看到超时原因并自行决定重试、换策略、或向用户汇报。

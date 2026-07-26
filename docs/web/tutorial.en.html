@@ -660,7 +660,7 @@ https://api.deepseek.com/v1</code></pre>
         <p><strong>Best for:</strong> Explaining architecture, clarifying module responsibilities, analyzing error causes, asking questions before deciding whether to execute.</p>
         <p><strong>Characteristics:</strong></p>
         <ul>
-          <li>Does not modify files or run commands by default</li>
+          <li>Read-only: mutating tools (write/edit/exec/git, etc.) are blocked at the tool-registration layer, preventing accidental file changes by construction</li>
           <li>For time-sensitive questions, prefers read-only time/web tools for verification</li>
           <li>Only enters the read-only toolchain when you explicitly request project-based verification</li>
         </ul>
@@ -671,7 +671,7 @@ https://api.deepseek.com/v1</code></pre>
         <ul>
           <li>Provides a task checklist by default</li>
           <li>Shows affected files, execution order, verification methods, and risks</li>
-          <li>Best for planning first, then switching to Agent for execution</li>
+          <li>Read-only (mutating tools blocked at the tool layer, like Ask); best for planning first, then switching to Agent for execution</li>
         </ul>
 
         <h3><span class="badge badge-agent">Agent</span> Execution Mode</h3>
@@ -1306,17 +1306,16 @@ When a task requires public information, current facts, third-party API usage, o
       <div class="section-header"><h2>Agents &amp; Sub-agents</h2></div>
       <div class="content">
         <h3>Built-in Sub-agents</h3>
-        <p>CodePapr comes with four built-in sub-agents that the main Agent can dispatch via the <code>task</code> tool (except verifier, which is internal to the Goal loop) without additional configuration:</p>
+        <p>CodePapr comes with three built-in sub-agents that the main Agent can dispatch via the <code>task</code> tool without additional configuration:</p>
         <table>
           <thead><tr><th>Agent</th><th>Purpose</th><th>Model</th><th>Tools</th></tr></thead>
           <tbody>
             <tr><td><strong>explore</strong></td><td>Read-only code analysis: search project files, locate symbols, analyze dependencies</td><td>fast</td><td>read, read_image, graph, lsp, diagnostics, grep</td></tr>
             <tr><td><strong>scout</strong></td><td>Web search: find documentation, API references, latest resources</td><td>fast</td><td>web_search, web_fetch, web_download, browser, read_image</td></tr>
             <tr><td><strong>mentor</strong></td><td>High-level architecture/algorithm/debugging guidance (no code writing, no tool usage)</td><td>mentor*</td><td>None</td></tr>
-            <tr><td><strong>verifier</strong></td><td>Goal verifier (internal): objectively determines whether the goal condition is met, prevents Worker from fabricating success</td><td>fast**</td><td>None</td></tr>
           </tbody>
         </table>
-        <p><small>* Mentor uses the primary model by default; an independent mentor model can be enabled in settings (supports independent API Key, Base URL, and model selection).<br>** Verifier is the internal evaluator for the Goal autonomous loop, not exposed to the main Agent's <code>task</code> tool; uses the fast model by default, switchable to primary in advanced settings.</small></p>
+        <p><small>* Mentor uses the primary model by default; an independent mentor model can be enabled in settings (supports independent API Key, Base URL, and model selection; falls back to the main API Key when no dedicated key is configured).<br>The Goal autonomous loop's verifier is a standalone no-tools model call configured in advanced settings (<code>verifierModelTier</code>: fast or primary). It is not a built-in sub-agent and is never exposed via the <code>task</code> tool.</small></p>
 
         <h3>Custom Sub-agents</h3>
         <p>Declare a sub-agent in <code>.CodePapr/agents/&lt;name&gt;.md</code> with YAML frontmatter + body. The main agent can delegate subtasks to it. An agent with the same name will override the built-in definition.</p>
@@ -1454,7 +1453,7 @@ Current status: !`git status -s`</code></pre>
         <p>The core mechanism is not adding "keep working until done" to the prompt — it's an engineered self-play system:</p>
         <ul>
           <li><strong>Worker (primary model)</strong>: has full tool permissions, responsible for planning, writing code, running tests</li>
-          <li><strong>Verifier (fast model, no tools)</strong>: reads the Worker's execution transcript, determines if success is being fabricated</li>
+           <li><strong>Verifier (standalone no-tools model call)</strong>: reads the Worker's execution transcript, determines if success is being fabricated</li>
           <li><strong>Objective condition function</strong>: executes verification commands, uses exit codes and output matching for objective judgment</li>
         </ul>
         <p>The three work together: <strong>condition function + Verifier anti-forgery = double insurance</strong>. Only when the condition is met AND the Verifier confirms the Worker didn't cheat is it judged SATISFIED.</p>
@@ -1491,7 +1490,7 @@ Current status: !`git status -s`</code></pre>
         <ol>
           <li><strong>Worker turn</strong>: the main Agent executes one round of work (read files, write code, run commands)</li>
           <li><strong>Objective condition evaluation</strong>: the system automatically runs the verification command and gets exit code + output</li>
-          <li><strong>Verifier anti-forgery check</strong>: the tool-less Verifier sub-agent reads the Worker's execution transcript, detecting completion bias like "claiming tests pass without actually running them"</li>
+           <li><strong>Verifier anti-forgery check</strong>: the tool-less Verifier model call reads the Worker's execution transcript, detecting completion bias like "claiming tests pass without actually running them"</li>
           <li><strong>Judgment</strong>: condition met AND Verifier confirms → <strong>SATISFIED</strong>, loop ends; otherwise detailed feedback is injected into the next round</li>
           <li><strong>Context rot mitigation</strong>: auto-compaction every 5 iterations; state persisted to <code>.CodePapr/goal-state.md</code></li>
         </ol>
@@ -1513,7 +1512,7 @@ Current status: !`git status -s`</code></pre>
           <li><strong>Max iterations</strong>: default 20, adjustable 1-100</li>
           <li><strong>Max wall clock</strong>: default 30 minutes, configured in minutes</li>
           <li><strong>Verifier model</strong>: default fast model (faster, cheaper), switchable to primary model (more accurate)</li>
-          <li><strong>Verifier token limit</strong>: default 1000</li>
+           <li><strong>Verifier token limit</strong>: default 4000</li>
           <li><strong>Verifier temperature</strong>: default 0.1 (lower is more deterministic)</li>
         </ul>
       </div>
