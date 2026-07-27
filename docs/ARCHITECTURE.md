@@ -729,6 +729,16 @@ effectiveMaxContextTokens = min(maxContextTokens, providerContextLimit − maxTo
 - **展示**：累计卡片（改动文件/新增行/删除行/净增行）、改动最多的文件 Top 8（按 churn 排序，绿/红条）、会话活动（每会话检查点数 + 时间范围）。
 - **说明**：基于 Git checkpoint 的累计改动，含 Agent 与手动编辑；无检查点时优雅降级。
 
+### 15.4 工具调用统计
+
+`ToolUsageStats` 组件从 `agentStore.sessionMessages` 聚合全部会话的工具调用记录（`toolInvocations`），服务于工具设计决策：
+
+- **聚合**：`aggregateToolUsage` 按工具名统计调用次数与成功/失败数，按调用次数降序排列。
+- **展示**：横向条形图（条形长度按调用次数相对最大值缩放）+ 调用次数 + 成功率（≥90% 绿 / ≥60% 黄 / 其余红）；顶部汇总总调用次数与工具种类数。
+- **用途**：直观看出哪些工具高频使用、哪些很少甚至从未被调用（从未调用的工具不会列出），辅助评估工具设计的合理性。
+
+弹窗整体放大至 `w-[min(96vw,1280px)] h-[90vh]`（略小于主界面），并采用多列网格布局（语言表 + 工具统计双列、指标三联、文件大小双列）充分利用宽度。
+
 ## 16. 关键源码定位
 
 - `packages/@codepapr/core/src/agent/Agent.ts`：核心工具循环与会话执行入口
@@ -748,6 +758,7 @@ effectiveMaxContextTokens = min(maxContextTokens, providerContextLimit − maxTo
 - `packages/@codepapr/ui/src-tauri/src/workspace_fs/stats.rs`：原生项目统计引擎（语言检测 + code/blank/comment 分类 + 并行遍历聚合 + `compute_project_stats`）
 - `packages/@codepapr/ui/src/components/ProjectStatsModal.tsx`：项目统计弹窗（treemap、可排序语言表、结果缓存）
 - `packages/@codepapr/ui/src/components/AgentContribution.tsx`：Agent 贡献统计（checkpoint diff）
+- `packages/@codepapr/ui/src/components/ToolUsageStats.tsx`：工具调用统计（按调用次数/成功率聚合）
 - `packages/@codepapr/ui/src/utils/snapshot.ts`：checkpoint / diff 的 invoke 封装
 - `packages/@codepapr/ui/src/store/agentStore.ts`：桌面端主编排器（含 memory 整理三个触发点）
 - `packages/@codepapr/ui/src/store/permissionStore.ts`：外部路径访问权限管理

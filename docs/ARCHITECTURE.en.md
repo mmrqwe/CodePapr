@@ -730,6 +730,16 @@ The `AgentContribution` component reuses **existing backend commands** (no new R
 - **Display**: cumulative cards (files changed / additions / deletions / net), top 8 changed files (sorted by churn, green/red bars), and session activity (checkpoint count + time range per session).
 - **Note**: cumulative changes based on Git checkpoints, including both agent and manual edits; degrades gracefully when there are no checkpoints.
 
+### 15.4 Tool Usage Statistics
+
+The `ToolUsageStats` component aggregates tool call records (`toolInvocations`) from all sessions in `agentStore.sessionMessages`, supporting tool-design decisions:
+
+- **Aggregation**: `aggregateToolUsage` counts calls and success/failure per tool name, sorted by call count descending.
+- **Display**: horizontal bars (bar length scaled relative to the max count) + call count + success rate (≥90% green / ≥60% yellow / else red); a header summarizes total calls and distinct tool count.
+- **Purpose**: makes it obvious which tools are heavily used vs. rarely or never called (never-called tools are not listed), helping evaluate tool-design soundness.
+
+The modal is enlarged to `w-[min(96vw,1280px)] h-[90vh]` (slightly smaller than the main interface) and uses a multi-column grid layout (languages + tool usage in two columns, three metric cards, file size in two columns) to take advantage of the width.
+
 ## 16. Key Source Locations
 
 - `packages/@codepapr/core/src/agent/Agent.ts`: Core tool loop and session execution entry point
@@ -749,6 +759,7 @@ The `AgentContribution` component reuses **existing backend commands** (no new R
 - `packages/@codepapr/ui/src-tauri/src/workspace_fs/stats.rs`: Native project statistics engine (language detection + code/blank/comment classification + parallel walk aggregation + `compute_project_stats`)
 - `packages/@codepapr/ui/src/components/ProjectStatsModal.tsx`: Project statistics modal (treemap, sortable language table, result caching)
 - `packages/@codepapr/ui/src/components/AgentContribution.tsx`: Agent contribution statistics (checkpoint diff)
+- `packages/@codepapr/ui/src/components/ToolUsageStats.tsx`: Tool usage statistics (aggregated by call count / success rate)
 - `packages/@codepapr/ui/src/utils/snapshot.ts`: invoke wrappers for checkpoint / diff
 - `packages/@codepapr/ui/src/store/agentStore.ts`: Desktop master orchestrator (with three memory consolidation trigger points)
 - `packages/@codepapr/ui/src/store/permissionStore.ts`: External path access permission management

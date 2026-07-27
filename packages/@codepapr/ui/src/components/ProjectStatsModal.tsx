@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getTranslation, type Lang } from '../utils/i18n';
 import { AgentContribution } from './AgentContribution';
+import { ToolUsageStats } from './ToolUsageStats';
 
 interface ProjectLanguageStat {
   id: string;
@@ -572,7 +573,7 @@ export function ProjectStatsModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#161922] shadow-2xl">
+      <div className="flex h-[90vh] w-[min(96vw,1280px)] flex-col overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#161922] shadow-2xl">
         <div className="flex items-center justify-between border-b border-[#2a2d3a] px-5 py-4">
           <div>
             <h2 className="text-sm font-semibold text-slate-200">{t.projectStatsTitle}</h2>
@@ -641,76 +642,84 @@ export function ProjectStatsModal({
                 </div>
               </div>
 
-              <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '60ms' }}>
-                <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsAvgMetrics}</p>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <div className="text-[11px] text-slate-500">{t.projectStatsAvgLines}</div>
-                    <div className="text-base font-semibold text-indigo-300">{stats.avgMetrics.avgLinesPerFile.toLocaleString()}</div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '60ms' }}>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <p className="text-xs font-semibold text-slate-300">{t.projectStatsLanguages}</p>
+                    <input
+                      type="text"
+                      value={langFilter}
+                      onChange={(e) => setLangFilter(e.target.value)}
+                      placeholder={t.projectStatsFilterPlaceholder}
+                      className="w-32 rounded-lg border border-[#2a2d3a] bg-[#0a0d14] px-2.5 py-1 text-[11px] text-slate-300 placeholder-slate-600 transition-colors focus:border-indigo-500/50 focus:outline-none"
+                    />
                   </div>
-                  <div>
-                    <div className="text-[11px] text-slate-500">{t.projectStatsMedianLines}</div>
-                    <div className="text-base font-semibold text-indigo-300">{stats.avgMetrics.medianLinesPerFile.toLocaleString()}</div>
+                  <LanguageBar languages={stats.languages.slice(0, 12)} totalLines={stats.totalLines} />
+                  <div className="mt-3 max-h-64 overflow-y-auto">
+                    <LanguageTable
+                      languages={visibleLanguages}
+                      sortKey={langSortKey}
+                      sortDir={langSortDir}
+                      onSort={handleLangSort}
+                      t={t}
+                    />
                   </div>
-                  <div>
-                    <div className="text-[11px] text-slate-500">{t.projectStatsMaxLines}</div>
-                    <div className="text-base font-semibold text-indigo-300">{stats.avgMetrics.maxLinesPerFile.toLocaleString()}</div>
-                  </div>
+                </div>
+
+                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '90ms' }}>
+                  <ToolUsageStats lang={lang} />
                 </div>
               </div>
 
-              <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '90ms' }}>
-                <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsLineComposition}</p>
-                <StackedBar
-                  segments={[
-                    { color: '#6366f1', width: stats.codeLines, label: t.projectStatsCodeLines },
-                    { color: '#64748b', width: stats.blankLines, label: t.projectStatsBlankLines },
-                    { color: '#22c55e', width: stats.commentLines, label: t.projectStatsCommentLines },
-                  ]}
-                  height={12}
-                />
-                <div className="mt-3 grid grid-cols-3 gap-3">
-                  <div>
-                    <div className="text-[11px] text-slate-500">{t.projectStatsCodeLines}</div>
-                    <div className="text-base font-semibold text-indigo-300">{stats.codeLines.toLocaleString()}</div>
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-slate-500">{t.projectStatsBlankLines}</div>
-                    <div className="text-base font-semibold text-slate-300">{stats.blankLines.toLocaleString()}</div>
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-slate-500">{t.projectStatsCommentLines}</div>
-                    <div className="text-base font-semibold text-green-300">{stats.commentLines.toLocaleString()}</div>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '120ms' }}>
+                  <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsAvgMetrics}</p>
+                  <div className="space-y-3">
+                    <div>
+                      <div className="text-[11px] text-slate-500">{t.projectStatsAvgLines}</div>
+                      <div className="text-base font-semibold text-indigo-300">{stats.avgMetrics.avgLinesPerFile.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-slate-500">{t.projectStatsMedianLines}</div>
+                      <div className="text-base font-semibold text-indigo-300">{stats.avgMetrics.medianLinesPerFile.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-slate-500">{t.projectStatsMaxLines}</div>
+                      <div className="text-base font-semibold text-indigo-300">{stats.avgMetrics.maxLinesPerFile.toLocaleString()}</div>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '120ms' }}>
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <p className="text-xs font-semibold text-slate-300">{t.projectStatsLanguages}</p>
-                  <input
-                    type="text"
-                    value={langFilter}
-                    onChange={(e) => setLangFilter(e.target.value)}
-                    placeholder={t.projectStatsFilterPlaceholder}
-                    className="w-36 rounded-lg border border-[#2a2d3a] bg-[#0a0d14] px-2.5 py-1 text-[11px] text-slate-300 placeholder-slate-600 transition-colors focus:border-indigo-500/50 focus:outline-none"
+                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '150ms' }}>
+                  <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsLineComposition}</p>
+                  <StackedBar
+                    segments={[
+                      { color: '#6366f1', width: stats.codeLines, label: t.projectStatsCodeLines },
+                      { color: '#64748b', width: stats.blankLines, label: t.projectStatsBlankLines },
+                      { color: '#22c55e', width: stats.commentLines, label: t.projectStatsCommentLines },
+                    ]}
+                    height={12}
                   />
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <div className="text-[11px] text-slate-500">{t.projectStatsCodeLines}</div>
+                      <div className="text-base font-semibold text-indigo-300">{stats.codeLines.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-slate-500">{t.projectStatsBlankLines}</div>
+                      <div className="text-base font-semibold text-slate-300">{stats.blankLines.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-slate-500">{t.projectStatsCommentLines}</div>
+                      <div className="text-base font-semibold text-green-300">{stats.commentLines.toLocaleString()}</div>
+                    </div>
+                  </div>
                 </div>
-                <LanguageBar languages={stats.languages.slice(0, 12)} totalLines={stats.totalLines} />
-                <div className="mt-3 max-h-52 overflow-y-auto">
-                  <LanguageTable
-                    languages={visibleLanguages}
-                    sortKey={langSortKey}
-                    sortDir={langSortDir}
-                    onSort={handleLangSort}
-                    t={t}
-                  />
-                </div>
-              </div>
 
-              <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '150ms' }}>
-                <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsCodeRatio}</p>
-                <RatioBar code={stats.codeRatio.code} config={stats.codeRatio.config} doc={stats.codeRatio.doc} />
+                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '180ms' }}>
+                  <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsCodeRatio}</p>
+                  <RatioBar code={stats.codeRatio.code} config={stats.codeRatio.config} doc={stats.codeRatio.doc} />
+                </div>
               </div>
 
               {stats.directoryBreakdown.length > 0 && (
@@ -732,24 +741,26 @@ export function ProjectStatsModal({
                 </div>
               )}
 
-              {stats.fileSizeDistribution.length > 0 && (
-                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '210ms' }}>
-                  <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsFileSize}</p>
-                  <SizeDistribution buckets={stats.fileSizeDistribution} />
-                </div>
-              )}
+              <div className="grid grid-cols-2 gap-4">
+                {stats.fileSizeDistribution.length > 0 && (
+                  <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '210ms' }}>
+                    <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsFileSize}</p>
+                    <SizeDistribution buckets={stats.fileSizeDistribution} />
+                  </div>
+                )}
 
-              {stats.largestFile && (
-                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] px-4 py-3" style={{ animationDelay: '240ms' }}>
-                  <div className="text-xs font-semibold text-slate-200">{t.projectStatsLargestFile}</div>
-                  <div className="mt-2 text-sm text-slate-300">
-                    {stats.largestFile.path} · {stats.largestFile.lines.toLocaleString()} lines
+                {stats.largestFile && (
+                  <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] px-4 py-3" style={{ animationDelay: '240ms' }}>
+                    <div className="text-xs font-semibold text-slate-200">{t.projectStatsLargestFile}</div>
+                    <div className="mt-2 break-all text-sm text-slate-300">
+                      {stats.largestFile.path} · {stats.largestFile.lines.toLocaleString()} lines
+                    </div>
+                    <div className="mt-1 text-[11px] text-slate-500">
+                      {stats.truncated ? truncatedLabel : ''}
+                    </div>
                   </div>
-                  <div className="mt-1 text-[11px] text-slate-500">
-                    {stats.truncated ? truncatedLabel : ''}
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
             </>
           )}
 
