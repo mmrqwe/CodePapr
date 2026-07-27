@@ -828,7 +828,7 @@ async function handleRunAppAgent(
           role: 'assistant',
           content: bootstrapPrompt.trim(),
           timestamp: Date.now(),
-          metadata: { sessionBootstrap: true },
+          metadata: { sessionBootstrap: true, isPrefixSystem: true },
         } as unknown as IMessage);
       }
     }

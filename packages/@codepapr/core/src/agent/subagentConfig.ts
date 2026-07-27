@@ -201,6 +201,8 @@ export interface SubagentSessionDeps {
   cacheValidator: ICacheValidator;
   skillsSection?: string;
   customPromptSection?: string;
+  memorySection?: string;
+  projectGraphSummary?: string;
   graphToolTimeoutMs: number;
   maxWallClockMs?: number;
   toolOutputTruncation?: ToolOutputTruncationOptions;
@@ -279,6 +281,8 @@ export async function runSubagentSession(
     lang,
     skillsSection: deps.skillsSection,
     customPromptSection: deps.customPromptSection,
+    memorySection: deps.memorySection,
+    projectGraphSummary: deps.projectGraphSummary,
   });
   if (sessionBootstrapPrompt.trim()) {
     await log.append({
@@ -286,7 +290,7 @@ export async function runSubagentSession(
       role: 'assistant',
       content: sessionBootstrapPrompt.trim(),
       timestamp: Date.now(),
-      metadata: { sessionBootstrap: true },
+      metadata: { sessionBootstrap: true, isPrefixSystem: true },
     });
   }
 

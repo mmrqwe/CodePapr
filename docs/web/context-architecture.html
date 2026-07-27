@@ -309,7 +309,7 @@
             <div class="cchip c-hit">冻结</div>
           </div>
           <div class="desc">全项目规则，<b>所有模式与子代理都继承</b>。工作区打开时载入并缓存于 <code>_projectRulesSection</code>，注入系统提示词。<b>opt-in 文件</b>：只有用户在「配置」面板保存规则时才创建 <code>.CodePapr/AGENTS.md</code>，否则为空、不注入。</div>
-          <div class="more"><div class="mbox">入口：顶部「配置」按钮 → ProjectConfigModal 的 AGENTS.md 标签页编辑保存；文件不存在时用模板预填。注意与 <code>.CodePapr/agents/*.md</code>（子代理定义）区分——后者变成 task 工具，不是规则。</div></div>
+          <div class="more"><div class="mbox">注入链路：<code>.CodePapr/AGENTS.md</code> → <code>projectConfigLoader.ts:loadProjectRulesSection</code> → <code>agentStore._projectRulesSection</code>（缓存）→ <code>buildRuntimeSystemPrompt({ rulesSection })</code> → <code>promptSystem.ts:1168</code>，位于 identity/principles 之后、mode prompt 之前。子代理通过 <code>UiTaskToolContext.rulesSection</code> 继承。<br><br>入口：顶部「配置」按钮 → ProjectConfigModal 的 AGENTS.md 标签页编辑保存；文件不存在时用模板预填。注意与 <code>.CodePapr/agents/*.md</code>（子代理定义）区分——后者变成 task 工具，不是规则。</div></div>
         </div>
 
         <div class="item" data-wire="tool">
@@ -334,7 +334,7 @@
           <div class="more"><div class="mbox">reasoning_content 回传按「历史消息是否存在」决定，与每轮 thinking 开关解耦，避免重建时给历史增删字节（<code>DeepSeekProvider</code>）。</div></div>
         </div>
 
-        <div class="sublabel"><b>Session Bootstrap</b> 会话引导 = log[0] · resolveSessionBootstrap 按 (session × 稳定签名) 记忆化</div>
+        <div class="sublabel"><b>Session Bootstrap</b> 会话引导 = log[0] · role: assistant + metadata.isPrefixSystem（Claude 提取为 system）· resolveSessionBootstrap 按 (session × 稳定签名) 记忆化</div>
 
         <div class="item" data-wire="skill">
           <div class="row">
@@ -343,7 +343,7 @@
             <div class="src"><span class="chip">.CodePapr/skills/*</span><span class="chip">buildSkillsSection</span></div>
             <div class="cchip c-hit">签名内</div>
           </div>
-          <div class="desc">只注入<b>名称 + 一句话描述</b>，稳定且小。全文由模型按需调用 <code>skill_load</code> 工具读取，作为工具结果落在<b>尾部</b>——不进前缀。增删 skill 是用户操作（在签名内），触发一次重建。</div>
+          <div class="desc">只注入<b>名称 + 一句话描述</b>，稳定且小。全文由模型按需调用 <code>skill_load</code> 工具读取，作为工具结果落在<b>尾部</b>——不进前缀。增删 skill 是用户操作（在签名内），触发一次重建。子代理通过 <code>SubagentSessionDeps.skillsSection</code> 继承。</div>
           <div class="more"><div class="mbox">设计意图：「稳定上下文里只注入名称和描述，由模型自行判断是否需要，再按需调用 skill_load 读取完整说明」。</div></div>
         </div>
 
@@ -354,7 +354,7 @@
             <div class="src"><span class="chip">project graph 缓存</span><span class="chip">buildProjectGraphBootstrapSummary</span></div>
             <div class="cchip c-hit">签名外冻结</div>
           </div>
-          <div class="desc">目录 / 文件 / 符号鸟瞰，渲染为「## 项目结构概览」。磁盘上易变，但<b>被排除出 bootstrap 签名</b> → 会话内冻结，改了也不重建。<b>有 graph 缓存才注入</b>。</div>
+          <div class="desc">目录 / 文件 / 符号鸟瞰，渲染为「## 项目结构概览」。磁盘上易变，但<b>被排除出 bootstrap 签名</b> → 会话内冻结，改了也不重建。<b>有 graph 缓存才注入</b>。子代理通过 <code>SubagentSessionDeps.projectGraphSummary</code> 继承。</div>
           <div class="more"><div class="mbox">也用于冷启动：memory.md 为空且有 graph 时，后台用 graph 摘要生成初始 memory（<code>agentStore.ts</code>）。</div></div>
         </div>
 
@@ -365,7 +365,7 @@
             <div class="src"><span class="chip">.CodePapr/memory.md</span><span class="chip">memorySection</span></div>
             <div class="cchip c-hit">签名外冻结</div>
           </div>
-          <div class="desc">跨会话项目知识，渲染为「## 项目记忆」。<b>自动创建</b>（冷启动 bootstrap）。会话中途 agent 写 memory.md <b>不触发重建</b>（签名外）→ 前缀缓存不破，更新<b>次会话生效</b>。这是"缓存稳定 vs 实时性"的明确取舍。</div>
+          <div class="desc">跨会话项目知识，渲染为「## 项目记忆」。<b>自动创建</b>（冷启动 bootstrap）。会话中途 agent 写 memory.md <b>不触发重建</b>（签名外）→ 前缀缓存不破，更新<b>次会话生效</b>。这是"缓存稳定 vs 实时性"的明确取舍。子代理通过 <code>SubagentSessionDeps.memorySection</code> 继承。</div>
           <div class="more"><div class="mbox">对比：项目里 memory.md 往往存在（自动生成）而 AGENTS.md 可能不存在（需用户保存规则）——两者创建机制不同。</div></div>
         </div>
 
@@ -376,8 +376,8 @@
             <div class="src"><span class="chip">settings.systemPrompt</span><span class="chip">character prompt</span></div>
             <div class="cchip c-hit">签名内</div>
           </div>
-          <div class="desc">用户自定义全局指导 + 角色设定，渲染为「## 长期附加指导」。作为附加约束生效，不覆盖系统级规则。</div>
-          <div class="more"><div class="mbox">与 Runtime Rules 区别：rules 来自项目文件（AGENTS.md），custom 来自用户设置 + 角色；两者都在稳定区。</div></div>
+          <div class="desc">用户自定义全局指导 + 角色设定，渲染为「## 长期附加指导」。作为附加约束生效，不覆盖系统级规则。<b>⚠ <code>settings.systemPrompt</code> 目前无 UI 入口</b>（SettingsModal 未暴露编辑控件，i18n key 已备但未引用），仅角色提示词可通过 CharacterModal 设置。</div>
+          <div class="more"><div class="mbox">与 Runtime Rules 区别：rules 来自项目文件（AGENTS.md），custom 来自用户设置 + 角色；两者都在稳定区。子代理通过 <code>UiTaskToolContext.customPrompt</code> 继承。</div></div>
         </div>
       </section>
 
@@ -504,7 +504,7 @@
         <h4>线上字节顺序 · Wire Order</h4>
         <ul class="wire">
           <li class="wnode" data-c="hit" data-wire="sys param tool rules"><b>prefix</b> system + tools + params<span class="wtag">ImmutablePrefix · 命中</span></li>
-          <li class="wnode" data-c="hit" data-wire="skill map mem custom"><b>bootstrap</b> log[0]<span class="wtag">记忆化 · 命中</span></li>
+          <li class="wnode" data-c="hit" data-wire="skill map mem custom"><b>bootstrap</b> log[0] · isPrefixSystem<span class="wtag">记忆化 · 命中 · Claude 提取为 system</span></li>
           <li class="wnode" data-c="epoch" data-wire="ckpt dec"><b>checkpoint</b> 检查点摘要<span class="wtag">epoch 重写</span></li>
           <li class="wnode" data-c="epoch" data-wire="todo"><b>todo</b> 冻结摘要<span class="wtag">随检查点</span></li>
           <li class="wnode" data-c="hit" data-wire="recent code tuse tres"><b>tail</b> 最近对话<span class="wtag">append-only · 历史命中</span></li>
@@ -524,7 +524,7 @@
 
   <!-- MECHANISMS -->
   <section class="mech reveal" id="mechanisms">
-    <h2>四个关键机制</h2>
+    <h2>五个关键机制</h2>
     <div class="sub">让"分层"真正转化为命中率的底层设计。</div>
     <div class="ledger">
       <div class="led">
@@ -542,6 +542,10 @@
       <div class="led">
         <div class="no">M·04</div><h5>动态内容尾部隔离</h5>
         <p>日期、时区、诊断等易变内容只进<b>尾部 user 消息</b>，绝不上前缀。前缀只装"会话内不变"的东西，这是前缀缓存能成立的前提。</p>
+      </div>
+      <div class="led">
+        <div class="no">M·05</div><h5>子代理上下文继承</h5>
+        <p>子代理通过 <code>SubagentSessionDeps</code> 继承主会话的 skills、memory、project-graph 和 customPrompt，注入自己的 Session Bootstrap。Bootstrap 以 <code>role: assistant</code> + <code>metadata.isPrefixSystem: true</code> 注入——Claude 提供商据此将其提取为 system 内容，避免首条消息非 user 的 400 错误；DeepSeek/OpenAI 按原样发送。</p>
       </div>
     </div>
   </section>
@@ -563,7 +567,7 @@
 
 <footer>
   <div class="container">
-    CodePapr &mdash; 上下文分层可视化 · 生成自源码核实（<code>promptSystem.ts</code> / <code>contextCompaction.ts</code> / <code>agentStore.ts</code> / <code>toolOutputTruncation.ts</code>）。三层模型 = Stable Prefix（冻结）/ Session State（epoch）/ Active Context（append-only）。阈值单位：字符。
+    CodePapr &mdash; 上下文分层可视化 · 生成自源码核实（<code>promptSystem.ts</code> / <code>contextCompaction.ts</code> / <code>agentStore.ts</code> / <code>toolOutputTruncation.ts</code> / <code>subagentConfig.ts</code> / <code>uiTaskTool.ts</code>）。三层模型 = Stable Prefix（冻结）/ Session State（epoch）/ Active Context（append-only）。阈值单位：字符。Bootstrap 以 <code>role: assistant</code> + <code>isPrefixSystem</code> 注入，Claude 提取为 system。
   </div>
 </footer>
 

@@ -39,6 +39,7 @@ export function toCoreMessages(
       timestamp: 1,
       metadata: {
         sessionBootstrap: true,
+        isPrefixSystem: true,
       },
     },
     ...restoredMessages,

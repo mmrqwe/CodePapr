@@ -90,6 +90,7 @@ export interface AgentRuntimeConfig {
   rulesSection?: string;
   customPrompt?: string;
   memorySection?: string;
+  projectGraphSummary?: string;
   /** 已按 session 记忆化（冻结）的会话引导，含 skills/memory/project-graph/custom。
    *  优先用它注入 log[0]，兑现 memory.md「每次会话自动加载」；缺省时回退到仅 skills+custom。 */
   sessionBootstrapPrompt?: string;
@@ -297,6 +298,8 @@ function _createLocalAgent(
         maxToolRounds: settings.maxToolRounds,
         rulesSection: runtime.rulesSection ?? '',
         customPrompt: runtime.customPrompt ? runtime.customPrompt : customPromptWithCharacter,
+        memorySection: runtime.memorySection,
+        projectGraphSummary: runtime.projectGraphSummary,
         lang: runtime.lang ?? settings.lang,
         skillDefinitions: runtime.skillDefinitions ?? [],
         agents: availableAgents,

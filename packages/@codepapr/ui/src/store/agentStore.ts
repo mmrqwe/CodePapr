@@ -1204,6 +1204,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             mcpToolMappings,
             rulesSection,
             memorySection,
+            projectGraphSummary: projectGraphBootstrapSummary,
             customPrompt: normalizedSettings.systemPrompt,
             lang: normalizedSettings.lang,
             mode,

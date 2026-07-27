@@ -34,6 +34,8 @@ export interface UiTaskToolContext {
   maxToolRounds: number;
   rulesSection: string;
   customPrompt?: string;
+  memorySection?: string;
+  projectGraphSummary?: string;
   lang?: 'zh-CN' | 'zh-TW' | 'en';
   skillDefinitions: SkillDefinition[];
   agents: AgentDefinition[];
@@ -138,6 +140,8 @@ async function runSubagent(
     cacheValidator: new CacheValidator(),
     skillsSection: buildSkillsSection(context.skillDefinitions, context.lang),
     customPromptSection: context.customPrompt,
+    memorySection: context.memorySection,
+    projectGraphSummary: context.projectGraphSummary,
     graphToolTimeoutMs: context.graphToolTimeoutMs,
     toolOutputTruncation: context.toolOutputTruncation,
     onToolCallEnd: (event) => {
