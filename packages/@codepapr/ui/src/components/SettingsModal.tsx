@@ -1464,6 +1464,19 @@ export function SettingsModal() {
                   </div>
                 </div>
               </div>
+
+              <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-5">
+                <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t.systemPrompt}</h3>
+                <p className="mb-4 text-[10px] leading-relaxed text-slate-600">{t.settingsPromptDesc}</p>
+                <textarea
+                  value={local.systemPrompt}
+                  onChange={(e) => update({ systemPrompt: e.target.value })}
+                  rows={5}
+                  placeholder={currentLang === 'en' ? 'e.g. Always respond in English. Prefer functional style.' : currentLang === 'zh-TW' ? '例如：始終使用繁體中文回覆。偏好函數式風格。' : '例如：始终使用中文回复。偏好函数式风格。'}
+                  className="w-full resize-y rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 placeholder-slate-700 focus:border-indigo-500/60 focus:outline-none"
+                />
+                <p className="mt-2 text-[10px] leading-relaxed text-slate-600">{t.settingsPromptStackDesc}</p>
+              </div>
           </div>
         )}
 

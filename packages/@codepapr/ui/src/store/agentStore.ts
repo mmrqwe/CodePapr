@@ -1269,6 +1269,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             workspacePath,
             input: effectiveInput,
             projectDiagnosticsReport: diagnosticsForPrompt,
+            todoDigest: currentTodoDigest(optimisticSid),
           });
           let { _agent: agent, activeSessionId } = get();
           const { _agentModel: agentModel, _agentPromptKey: agentPromptKey } = get();

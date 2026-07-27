@@ -22,10 +22,9 @@ import type { Settings, UIMessage } from './types';
 export function toCoreMessages(
   messages: UIMessage[],
   sessionBootstrapPrompt?: string,
-  todoListDigest?: string,
   pruneOptions?: PruneOptions
 ): IMessage[] {
-  const restoredMessages = buildEffectiveContextMessages(messages, { todoListDigest, pruneOptions });
+  const restoredMessages = buildEffectiveContextMessages(messages, { pruneOptions });
   const normalizedBootstrapPrompt = sessionBootstrapPrompt?.trim();
   if (!normalizedBootstrapPrompt) {
     return restoredMessages;
@@ -50,11 +49,10 @@ export function createLogFromMessages(
   sessionId: string,
   messages: UIMessage[],
   sessionBootstrapPrompt?: string,
-  todoListDigest?: string,
   pruneOptions?: PruneOptions
 ): AppendOnlyLog {
   const log = new AppendOnlyLog(sessionId);
-  const restoredMessages = toCoreMessages(messages, sessionBootstrapPrompt, todoListDigest, pruneOptions);
+  const restoredMessages = toCoreMessages(messages, sessionBootstrapPrompt, pruneOptions);
   if (restoredMessages.length === 0) return log;
 
   log.loadFromSnapshot({
@@ -168,6 +166,7 @@ export function buildAgentRuntimeUserPrompt(params: {
   workspacePath: string;
   input: string;
   projectDiagnosticsReport?: ProjectDiagnosticsReport | null;
+  todoDigest?: string;
 }): string {
   const diagnosticsSection =
     params.mode === 'ask' || params.mode === 'app'
@@ -186,5 +185,6 @@ export function buildAgentRuntimeUserPrompt(params: {
     workspacePath: params.workspacePath,
     lang: params.settings.lang ?? 'zh-CN',
     diagnosticsSection,
+    todoDigest: params.todoDigest,
   });
 }

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" class="scroll-smooth">
+<html lang="en" class="scroll-smooth">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>上下文分层 · CodePapr</title>
+<title>Context Layering · CodePapr</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 1024 1024' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3ClinearGradient id='a' x1='320' y1='280' x2='720' y2='780'%3E%3Cstop stop-color='%23D9673E'/%3E%3Cstop offset='1' stop-color='%23B84E2A'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z' fill='%23FFF8EF'/%3E%3Cpath d='M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z' fill='%23F0D5B2'/%3E%3Cpath d='M392 350h244' stroke='url(%23a)' stroke-width='40' stroke-linecap='round'/%3E%3Cpath d='M392 450h156' stroke='url(%23a)' stroke-width='40' stroke-linecap='round' opacity='.86'/%3E%3Cpath d='m432 592-80 80 80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='m592 592 80 80-80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M540 560 484 784' stroke='url(%23a)' stroke-width='42' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -76,7 +76,6 @@
   .container{max-width:1200px;margin:0 auto;padding:0 32px;position:relative;z-index:1}
   @media(max-width:768px){.container{padding:0 20px}}
 
-  /* Nav (mirrors index.html) */
   nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(6,7,10,0.82);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);border-bottom:1px solid var(--border);transition:background-color 0.4s}
   [data-theme="light"] nav{background:rgba(245,241,236,0.88)}
   @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) nav{background:rgba(245,241,236,0.88)}}
@@ -98,7 +97,6 @@
   @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .theme-toggle .icon-sun{display:block}:root:not([data-theme="dark"]) .theme-toggle .icon-moon{display:none}}
   @media(max-width:768px){.nav-links{display:none}}
 
-  /* Header */
   .hero{padding:130px 0 30px}
   .section-label{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;border-radius:100px;border:1px solid var(--border);font-size:0.78rem;color:var(--foreground-dim);font-weight:500;margin-bottom:20px;font-family:var(--font-mono)}
   .section-label .dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
@@ -113,7 +111,6 @@
   .lg{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:0.76rem;color:var(--foreground-muted);border:1px solid var(--border);padding:6px 12px;border-radius:100px;background:var(--surface)}
   .lg i{width:9px;height:9px;border-radius:50%;display:inline-block}
 
-  /* dial */
   .dial{display:flex;align-items:center;gap:14px;margin-top:26px;padding:16px 20px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card);width:fit-content}
   .dial svg{width:56px;height:56px;transform:rotate(-90deg)}
   .dial .track{fill:none;stroke:var(--surface-hover);stroke-width:5}
@@ -122,11 +119,9 @@
   .dial .cap{font-size:0.78rem;color:var(--foreground-muted);line-height:1.4}
   .dial .cap b{color:var(--foreground);font-weight:600}
 
-  /* layout */
   .cols{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:30px;padding:34px 0 10px;align-items:start}
   @media(max-width:980px){.cols{grid-template-columns:1fr}.rail{position:static!important}}
 
-  /* tier */
   .tier{position:relative;border:1px solid var(--border);background:var(--bg-card);margin-bottom:24px;border-radius:var(--radius);overflow:hidden;backdrop-filter:blur(8px)}
   .tier::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
   .tier.t1::before{background:var(--green)} .tier.t2::before{background:var(--amber)} .tier.t3::before{background:var(--orange)}
@@ -178,7 +173,6 @@
   .boundary .bl{flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent)}
   .boundary .bt{border:1px dashed var(--border);padding:5px 14px;border-radius:100px;background:var(--bg-elevated)}
 
-  /* rail */
   .rail{position:sticky;top:84px}
   .railcard{border:1px solid var(--border);background:var(--bg-card);border-radius:var(--radius-sm);padding:18px 18px 20px;margin-bottom:18px;backdrop-filter:blur(8px)}
   .railcard h4{font-family:var(--font-mono);font-size:0.7rem;letter-spacing:.14em;color:var(--accent);text-transform:uppercase;margin-bottom:14px}
@@ -200,7 +194,6 @@
   .stat b{font-weight:600;text-align:right}
   .stat .g{color:var(--green)} .stat .a{color:var(--amber)} .stat .r{color:var(--orange)}
 
-  /* mechanisms */
   .mech{padding:46px 0 8px}
   .mech h2,.pipe h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:8px}
   .mech .sub,.pipe .sub{color:var(--foreground-muted);font-size:0.9rem;margin-bottom:26px}
@@ -213,7 +206,6 @@
   .led p{color:var(--foreground-muted);font-size:0.86rem}
   .led p code{color:var(--accent);font-size:0.78rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xs);padding:1px 6px}
 
-  /* pipeline */
   .pipe{padding:46px 0 20px}
   .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
   .fstep{flex:1;min-width:150px;background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--green);padding:14px 16px;transition:transform .2s}
@@ -238,15 +230,15 @@
 
 <nav>
   <div class="container">
-    <a href="index.html" class="logo"><span class="logo-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="lip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="lip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="lip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#lip)"/><rect x="96" y="96" width="832" height="832" rx="208" stroke="#FFF7EF" stroke-opacity=".52" stroke-width="12"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#lip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round"/></svg></span>CodePapr</a>
+    <a href="index.en.html" class="logo"><span class="logo-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="lip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="lip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="lip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#lip)"/><rect x="96" y="96" width="832" height="832" rx="208" stroke="#FFF7EF" stroke-opacity=".52" stroke-width="12"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#lip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round"/></svg></span>CodePapr</a>
     <ul class="nav-links">
-      <li><a href="index.html">首页</a></li>
-      <li><a href="tutorial.html">教程</a></li>
-      <li><a href="#tiers">三层模型</a></li>
-      <li><a href="#mechanisms">机制</a></li>
-      <li><a href="#pipeline">优先序</a></li>
+      <li><a href="index.en.html">Home</a></li>
+      <li><a href="tutorial.en.html">Tutorial</a></li>
+      <li><a href="#tiers">Three Tiers</a></li>
+      <li><a href="#mechanisms">Mechanisms</a></li>
+      <li><a href="#pipeline">Priority</a></li>
     </ul>
-    <button class="theme-toggle" onclick="toggleTheme()" aria-label="切换主题">
+    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
       <svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
       <svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
     </button>
@@ -255,20 +247,20 @@
 
 <section class="hero">
   <div class="container">
-    <div class="section-label"><span class="dot"></span> CONTEXT WINDOW · 缓存优先</div>
-    <h1>上下文分层 · <span class="gradient">按字节稳定性分三层</span></h1>
-    <p>DeepSeek 前缀缓存按请求体<strong>逐字节前缀匹配</strong>——越靠前越稳定，命中率越高。CodePapr 把上下文切成三层：冻结的稳定前缀、压缩时重写的会话状态、每轮追加的活动上下文。点击任意条目展开注入链路与缓存行为。</p>
+    <div class="section-label"><span class="dot"></span> CONTEXT WINDOW · CACHE-FIRST</div>
+    <h1>Context Layering · <span class="gradient">Three Tiers by Byte Stability</span></h1>
+    <p>DeepSeek prefix caching matches the request body <strong>byte-by-byte from the front</strong> — the more stable the prefix, the higher the hit rate. CodePapr splits context into three tiers: a frozen stable prefix, session state rewritten on compaction, and append-only active context. Click any item to expand its injection chain and cache behavior.</p>
     <div class="legend">
-      <span class="lg"><i style="background:var(--green)"></i>稳定 · 命中缓存</span>
-      <span class="lg"><i style="background:var(--amber)"></i>慢变化 · epoch 重写</span>
-      <span class="lg"><i style="background:var(--orange)"></i>高频 · 追加增长</span>
-      <span class="lg"><i style="background:var(--accent)"></i>来源 / 注入点</span>
+      <span class="lg"><i style="background:var(--green)"></i>Stable · cache hit</span>
+      <span class="lg"><i style="background:var(--amber)"></i>Slow-changing · epoch rewrite</span>
+      <span class="lg"><i style="background:var(--orange)"></i>High-freq · append growth</span>
+      <span class="lg"><i style="background:var(--accent)"></i>Source / injection point</span>
     </div>
     <div class="dial">
       <svg viewBox="0 0 52 52"><circle class="track" cx="26" cy="26" r="22"/><circle class="val" id="dialArc" cx="26" cy="26" r="22"/></svg>
       <div>
         <div class="num"><span id="dialNum">0</span>%</div>
-        <div class="cap"><b>实测前缀命中率</b><br>miss 应只剩"本轮新增"</div>
+        <div class="cap"><b>Measured prefix hit rate</b><br>miss should only be "current turn"</div>
       </div>
     </div>
   </div>
@@ -282,196 +274,196 @@
         <div class="tierhead">
           <div class="idx">01</div>
           <div class="tt">
-            <h3>Stable Prefix <span>稳定前缀</span></h3>
-            <div class="tags"><span class="tag">字节级冻结 · 整个会话</span><span class="tag">最大缓存区</span></div>
+            <h3>Stable Prefix <span></span></h3>
+            <div class="tags"><span class="tag">byte-frozen · entire session</span><span class="tag">largest cache zone</span></div>
           </div>
-          <div class="hz"><b>命中率最高</b>会话内逐字节不变</div>
+          <div class="hz"><b>Highest hit rate</b>byte-identical within session</div>
         </div>
 
-        <div class="sublabel"><b>ImmutablePrefix</b> 不可变前缀对象 · prefix.systemPrompt / tools / params</div>
+        <div class="sublabel"><b>ImmutablePrefix</b> immutable prefix object · prefix.systemPrompt / tools / params</div>
 
         <div class="item" data-wire="sys">
           <div class="row">
             <div class="addr">SYS</div>
-            <div class="name">System Prompt<small>系统提示词</small></div>
+            <div class="name">System Prompt<small></small></div>
             <div class="src"><span class="chip">buildRuntimeSystemPrompt</span><span class="chip">runtimeSystemPrompt</span></div>
-            <div class="cchip c-hit">冻结</div>
+            <div class="cchip c-hit">frozen</div>
           </div>
-          <div class="desc">模型身份与行为总纲：<b>身份 + 核心原则 + 模式 intro + workspace + 核心约束 + 工具约束</b>。构造 ImmutablePrefix 时校验禁止任何动态内容（时间戳 / 模板变量直接抛错），并一次性计算 SHA256。</div>
-          <div class="more"><div class="mbox">注入链路：settings + rulesSection + mode → <code>buildRuntimeSystemPrompt</code> → <code>ImmutablePrefix.systemPrompt</code> → 请求 <code>messages[0]</code>。前缀哈希在每次 build 时被 RequestBuilder 校验不可变。</div></div>
+          <div class="desc">Model identity and behavior charter: <b>identity + core principles + mode intro + workspace + core constraints + tool constraints</b>. ImmutablePrefix construction validates that no dynamic content exists (timestamps / template variables throw immediately), and computes SHA256 once.</div>
+          <div class="more"><div class="mbox">Injection chain: settings + rulesSection + mode → <code>buildRuntimeSystemPrompt</code> → <code>ImmutablePrefix.systemPrompt</code> → request <code>messages[0]</code>. Prefix hash is validated immutable by RequestBuilder on every build.</div></div>
         </div>
 
         <div class="item" data-wire="rules">
           <div class="row">
             <div class="addr">RULE</div>
-            <div class="name">Runtime Rules<small>项目规则</small></div>
+            <div class="name">Runtime Rules<small>project rules</small></div>
             <div class="src"><span class="chip">.CodePapr/AGENTS.md</span><span class="chip">buildProjectRulesSection</span></div>
-            <div class="cchip c-hit">冻结</div>
+            <div class="cchip c-hit">frozen</div>
           </div>
-          <div class="desc">全项目规则，<b>所有模式与子代理都继承</b>。工作区打开时载入并缓存于 <code>_projectRulesSection</code>，注入系统提示词。<b>opt-in 文件</b>：只有用户在「配置」面板保存规则时才创建 <code>.CodePapr/AGENTS.md</code>，否则为空、不注入。</div>
-          <div class="more"><div class="mbox">注入链路：<code>.CodePapr/AGENTS.md</code> → <code>projectConfigLoader.ts:loadProjectRulesSection</code> → <code>agentStore._projectRulesSection</code>（缓存）→ <code>buildRuntimeSystemPrompt({ rulesSection })</code> → <code>promptSystem.ts:1168</code>，位于 identity/principles 之后、mode prompt 之前。子代理通过 <code>UiTaskToolContext.rulesSection</code> 继承。<br><br>入口：顶部「配置」按钮 → ProjectConfigModal 的 AGENTS.md 标签页编辑保存；文件不存在时用模板预填。注意与 <code>.CodePapr/agents/*.md</code>（子代理定义）区分——后者变成 task 工具，不是规则。</div></div>
+          <div class="desc">Project-wide rules, <b>inherited by all modes and sub-agents</b>. Loaded and cached in <code>_projectRulesSection</code> when the workspace opens, injected into the system prompt. <b>Opt-in file</b>: <code>.CodePapr/AGENTS.md</code> is only created when the user saves rules in the Config panel; otherwise empty, not injected.</div>
+          <div class="more"><div class="mbox">Injection chain: <code>.CodePapr/AGENTS.md</code> → <code>projectConfigLoader.ts:loadProjectRulesSection</code> → <code>agentStore._projectRulesSection</code> (cached) → <code>buildRuntimeSystemPrompt({ rulesSection })</code> → <code>promptSystem.ts:1168</code>, placed after identity/principles, before mode prompt. Sub-agents inherit via <code>UiTaskToolContext.rulesSection</code>.<br><br>Entry: top "Config" button → ProjectConfigModal AGENTS.md tab; pre-filled with template if file missing. Distinct from <code>.CodePapr/agents/*.md</code> (sub-agent definitions) — those become task tools, not rules.</div></div>
         </div>
 
         <div class="item" data-wire="tool">
           <div class="row">
             <div class="addr">TOOL</div>
-            <div class="name">Tool Schema<small>工具定义</small></div>
-            <div class="src"><span class="chip">ToolRegistry.getAll()</span><span class="chip">按名排序 + canonical</span></div>
-            <div class="cchip c-hit">冻结</div>
+            <div class="name">Tool Schema<small>tool definitions</small></div>
+            <div class="src"><span class="chip">ToolRegistry.getAll()</span><span class="chip">sorted by name + canonical</span></div>
+            <div class="cchip c-hit">frozen</div>
           </div>
-          <div class="desc">会话开始时冻结全部工具定义（名称 + 描述 + 规范化参数）。<b>工具集变化</b>（MCP 加载、task 工具出现）会整体失效前缀——应由用户操作显式触发，避免隐性 churn。</div>
-          <div class="more"><div class="mbox">RequestBuilder 每次 build 校验 tools 不可变（<code>validateToolsImmutable</code>），并对比运行时工具与冻结前缀一致（<code>validateRuntimeToolsMatchPrefix</code>）。</div></div>
+          <div class="desc">All tool definitions frozen at session start (name + description + canonical parameters). <b>Tool set changes</b> (MCP loading, task tool appearing) invalidate the entire prefix — should be explicitly triggered by user action, avoiding implicit churn.</div>
+          <div class="more"><div class="mbox">RequestBuilder validates tools immutability on every build (<code>validateToolsImmutable</code>) and checks runtime tools match the frozen prefix (<code>validateRuntimeToolsMatchPrefix</code>).</div></div>
         </div>
 
         <div class="item" data-wire="param">
           <div class="row">
             <div class="addr">PARAM</div>
-            <div class="name">Model Params<small>模型参数</small></div>
+            <div class="name">Model Params<small></small></div>
             <div class="src"><span class="chip">temperature / topP / maxTokens / thinking</span></div>
-            <div class="cchip c-hit">冻结</div>
+            <div class="cchip c-hit">frozen</div>
           </div>
-          <div class="desc">参与前缀哈希。<b>用户主动调参</b>（调 temperature、切换 thinking）= 一次有意的整体失效，属可接受代价；系统不应在会话中隐式改参。</div>
-          <div class="more"><div class="mbox">reasoning_content 回传按「历史消息是否存在」决定，与每轮 thinking 开关解耦，避免重建时给历史增删字节（<code>DeepSeekProvider</code>）。</div></div>
+          <div class="desc">Participate in prefix hash. <b>User-initiated parameter changes</b> (adjusting temperature, toggling thinking) = one intentional full invalidation, an acceptable cost; the system should never implicitly change params mid-session.</div>
+          <div class="more"><div class="mbox">reasoning_content pass-through is determined by "whether historical messages exist", decoupled from per-turn thinking toggle, avoiding adding/removing bytes from history on rebuild (<code>DeepSeekProvider</code>).</div></div>
         </div>
 
-        <div class="sublabel"><b>Session Bootstrap</b> 会话引导 = log[0] · role: assistant + metadata.isPrefixSystem（Claude 提取为 system）· resolveSessionBootstrap 按 (session × 稳定签名) 记忆化</div>
+        <div class="sublabel"><b>Session Bootstrap</b> session guide = log[0] · role: assistant + metadata.isPrefixSystem (Claude extracts as system) · resolveSessionBootstrap memoized by (session × stable signature)</div>
 
         <div class="item" data-wire="skill">
           <div class="row">
             <div class="addr">SKL</div>
-            <div class="name">Skills 摘要<small>技能目录</small></div>
+            <div class="name">Skills Summary<small>skill catalog</small></div>
             <div class="src"><span class="chip">.CodePapr/skills/*</span><span class="chip">buildSkillsSection</span></div>
-            <div class="cchip c-hit">签名内</div>
+            <div class="cchip c-hit">in signature</div>
           </div>
-          <div class="desc">只注入<b>名称 + 一句话描述</b>，稳定且小。全文由模型按需调用 <code>skill_load</code> 工具读取，作为工具结果落在<b>尾部</b>——不进前缀。增删 skill 是用户操作（在签名内），触发一次重建。子代理通过 <code>SubagentSessionDeps.skillsSection</code> 继承。</div>
-          <div class="more"><div class="mbox">设计意图：「稳定上下文里只注入名称和描述，由模型自行判断是否需要，再按需调用 skill_load 读取完整说明」。</div></div>
+          <div class="desc">Only injects <b>name + one-line description</b>, stable and small. Full text is read on-demand via the <code>skill_load</code> tool, landing in the <b>tail</b> as a tool result — not in the prefix. Adding/removing skills is a user action (in signature), triggering one rebuild. Sub-agents inherit via <code>SubagentSessionDeps.skillsSection</code>.</div>
+          <div class="more"><div class="mbox">Design intent: "Only inject names and descriptions in stable context; let the model decide whether it needs them, then call skill_load on demand to read full instructions."</div></div>
         </div>
 
         <div class="item" data-wire="map">
           <div class="row">
             <div class="addr">MAP</div>
-            <div class="name">Repository Map<small>项目结构概览</small></div>
-            <div class="src"><span class="chip">project graph 缓存</span><span class="chip">buildProjectGraphBootstrapSummary</span></div>
-            <div class="cchip c-hit">签名外冻结</div>
+            <div class="name">Repository Map<small>project structure overview</small></div>
+            <div class="src"><span class="chip">project graph cache</span><span class="chip">buildProjectGraphBootstrapSummary</span></div>
+            <div class="cchip c-hit">frozen outside signature</div>
           </div>
-          <div class="desc">目录 / 文件 / 符号鸟瞰，渲染为「## 项目结构概览」。磁盘上易变，但<b>被排除出 bootstrap 签名</b> → 会话内冻结，改了也不重建。<b>有 graph 缓存才注入</b>。子代理通过 <code>SubagentSessionDeps.projectGraphSummary</code> 继承。</div>
-          <div class="more"><div class="mbox">也用于冷启动：memory.md 为空且有 graph 时，后台用 graph 摘要生成初始 memory（<code>agentStore.ts</code>）。</div></div>
+          <div class="desc">Directory / file / symbol bird's-eye view, rendered as "## Project Structure Overview". Volatile on disk, but <b>excluded from bootstrap signature</b> → frozen within session, changes don't trigger rebuild. <b>Only injected when graph cache exists</b>. Sub-agents inherit via <code>SubagentSessionDeps.projectGraphSummary</code>.</div>
+          <div class="more"><div class="mbox">Also used for cold start: when memory.md is empty and graph exists, background task generates initial memory from graph summary (<code>agentStore.ts</code>).</div></div>
         </div>
 
         <div class="item" data-wire="mem">
           <div class="row">
             <div class="addr">MEM</div>
-            <div class="name">Stable Memory<small>项目记忆</small></div>
+            <div class="name">Stable Memory<small>project memory</small></div>
             <div class="src"><span class="chip">.CodePapr/memory.md</span><span class="chip">memorySection</span></div>
-            <div class="cchip c-hit">签名外冻结</div>
+            <div class="cchip c-hit">frozen outside signature</div>
           </div>
-          <div class="desc">跨会话项目知识，渲染为「## 项目记忆」。<b>自动创建</b>（冷启动 bootstrap）。会话中途 agent 写 memory.md <b>不触发重建</b>（签名外）→ 前缀缓存不破，更新<b>次会话生效</b>。这是"缓存稳定 vs 实时性"的明确取舍。子代理通过 <code>SubagentSessionDeps.memorySection</code> 继承。</div>
-          <div class="more"><div class="mbox">对比：项目里 memory.md 往往存在（自动生成）而 AGENTS.md 可能不存在（需用户保存规则）——两者创建机制不同。</div></div>
+          <div class="desc">Cross-session project knowledge, rendered as "## Project Memory". <b>Auto-created</b> (cold-start bootstrap). Mid-session agent writes to memory.md <b>don't trigger rebuild</b> (outside signature) → prefix cache intact, updates take effect <b>next session</b>. This is an explicit "cache stability vs. freshness" tradeoff. Sub-agents inherit via <code>SubagentSessionDeps.memorySection</code>.</div>
+          <div class="more"><div class="mbox">Contrast: memory.md usually exists (auto-generated) while AGENTS.md may not (requires user to save rules) — different creation mechanisms.</div></div>
         </div>
 
         <div class="item" data-wire="custom">
           <div class="row">
             <div class="addr">CUS</div>
-            <div class="name">Custom Guidance<small>长期附加指导</small></div>
+            <div class="name">Custom Guidance<small>persistent additive guidance</small></div>
             <div class="src"><span class="chip">settings.systemPrompt</span><span class="chip">character prompt</span></div>
-            <div class="cchip c-hit">签名内</div>
+            <div class="cchip c-hit">in signature</div>
           </div>
-          <div class="desc">用户自定义全局指导 + 角色设定，渲染为「## 长期附加指导」。作为附加约束生效，不覆盖系统级规则。<code>settings.systemPrompt</code> 可在设置 → 高级分页编辑；角色提示词通过 CharacterModal 设置。</div>
-          <div class="more"><div class="mbox">与 Runtime Rules 区别：rules 来自项目文件（AGENTS.md），custom 来自用户设置 + 角色；两者都在稳定区。子代理通过 <code>UiTaskToolContext.customPrompt</code> 继承。</div></div>
+          <div class="desc">User-defined global guidance + character persona, rendered as "## Persistent Custom Guidance". Effective as additive constraints, never overriding system-level rules. <code>settings.systemPrompt</code> is editable in Settings → Advanced tab; character prompts are set via CharacterModal.</div>
+          <div class="more"><div class="mbox">Distinction from Runtime Rules: rules come from project files (AGENTS.md), custom comes from user settings + character; both are in the stable zone. Sub-agents inherit via <code>UiTaskToolContext.customPrompt</code>.</div></div>
         </div>
       </section>
 
-      <div class="boundary"><span class="bl"></span><span class="bt">▲ 以上为命中区 · 以下为 epoch 边界（压缩时重写）</span><span class="bl"></span></div>
+      <div class="boundary"><span class="bl"></span><span class="bt">▲ Above = hit zone · Below = epoch boundary (rewritten on compaction)</span><span class="bl"></span></div>
 
       <!-- TIER 2 -->
       <section class="tier t2 reveal">
         <div class="tierhead">
           <div class="idx">02</div>
           <div class="tt">
-            <h3>Session State <span>会话状态</span></h3>
-            <div class="tags"><span class="tag">慢变化</span><span class="tag">压缩 epoch 重写</span></div>
+            <h3>Session State <span></span></h3>
+            <div class="tags"><span class="tag">slow-changing</span><span class="tag">compaction epoch rewrite</span></div>
           </div>
-          <div class="hz"><b>一次性失效</b>仅在压缩时接受</div>
+          <div class="hz"><b>One-time invalidation</b>accepted only on compaction</div>
         </div>
 
         <div class="item" data-wire="ckpt">
           <div class="row">
             <div class="addr">CKPT</div>
-            <div class="name">Conversation Summary<small>检查点摘要</small></div>
-            <div class="src"><span class="chip">renderContextCheckpointContent</span><span class="chip">9 个 section</span></div>
-            <div class="cchip c-epoch">epoch 重写</div>
+            <div class="name">Conversation Summary<small>checkpoint digest</small></div>
+            <div class="src"><span class="chip">renderContextCheckpointContent</span><span class="chip">9 sections</span></div>
+            <div class="cchip c-epoch">epoch rewrite</div>
           </div>
-          <div class="desc">被压缩的历史，作为<b>单条 assistant 消息</b>注入：用户目标 / 约束 / 已完成工作 / 重要文件·命令·错误 / 假设 / 验证状态 / 任务清单 / 待办 / 待确认问题。其中约束、假设与验证结论（即"已知决策"）由压缩模型从原始对话 + 工具结果中提取，<b>不是独立注入点</b>，而是 renderedContent 的内部 section。由<b>轮数上限或 token 上限</b>触发压缩时生成，替换掉更早的原始消息。</div>
-          <div class="more"><div class="mbox">触发器是两个用户设置：<code>maxConversationRounds</code>（对话轮数上限）与 <code>maxContextTokens</code>（输入上下文上限），共同决定 <code>shouldCompact</code>。压缩 = 开启新 context epoch，接受一次前缀失效。本地兜底用正则抽取（<code>buildLocalContextCheckpointSections</code>），可选 LLM 增强生成结构化 sections。</div></div>
+          <div class="desc">Compacted history, injected as a <b>single assistant message</b>: user goals / constraints / completed work / key files·commands·errors / assumptions / validation status / task list / pending items / open questions. The constraints, assumptions, and validation conclusions ("known decisions") are extracted by the compaction model from raw conversation + tool results — <b>not a separate injection point</b>, but internal sections of renderedContent. Generated when <b>round limit or token limit</b> triggers compaction, replacing earlier raw messages.</div>
+          <div class="more"><div class="mbox">Triggers are two user settings: <code>maxConversationRounds</code> (conversation round limit) and <code>maxContextTokens</code> (input context limit), jointly determining <code>shouldCompact</code>. Compaction = opening a new context epoch, accepting one prefix invalidation. Local fallback uses regex extraction (<code>buildLocalContextCheckpointSections</code>), with optional LLM-enhanced structured section generation.</div></div>
         </div>
       </section>
 
-      <div class="boundary"><span class="bl"></span><span class="bt">▲ append-only 边界 · 以下每轮增长</span><span class="bl"></span></div>
+      <div class="boundary"><span class="bl"></span><span class="bt">▲ append-only boundary · below grows every turn</span><span class="bl"></span></div>
 
       <!-- TIER 3 -->
       <section class="tier t3 reveal">
         <div class="tierhead">
           <div class="idx">03</div>
           <div class="tt">
-            <h3>Active Context <span>活动上下文</span></h3>
-            <div class="tags"><span class="tag">高频变化</span><span class="tag">append-only 尾部</span></div>
+            <h3>Active Context <span></span></h3>
+            <div class="tags"><span class="tag">high-frequency</span><span class="tag">append-only tail</span></div>
           </div>
-          <div class="hz"><b>唯一不可约 miss</b>本轮新增</div>
+          <div class="hz"><b>Only irreducible miss</b>current turn additions</div>
         </div>
 
         <div class="item" data-wire="recent">
           <div class="row">
             <div class="addr">TAIL</div>
-            <div class="name">Recent Conversation<small>最近对话</small></div>
-            <div class="src"><span class="chip">pickRetainedTailMessages</span><span class="chip">6~12 条 / ~8k tokens</span></div>
-            <div class="cchip c-miss">追加 · 历史字节稳定</div>
+            <div class="name">Recent Conversation<small></small></div>
+            <div class="src"><span class="chip">pickRetainedTailMessages</span><span class="chip">6–12 msgs / ~8k tokens</span></div>
+            <div class="cchip c-miss">append · history bytes stable</div>
           </div>
-          <div class="desc">压缩后保留的最近原始消息。保留窗口由压缩逻辑决定；一旦写下，字节不再改动（append-only），对后续轮次仍是命中区。</div>
-          <div class="more"><div class="mbox">注意：触发压缩的"轮数上限"是用户设置（maxConversationRounds），但具体保留多少条尾部消息由压缩算法的窗口决定。</div></div>
+          <div class="desc">Recent raw messages retained after compaction. Retention window is determined by the compaction algorithm; once written, bytes are never modified (append-only), remaining a hit zone for subsequent turns.</div>
+          <div class="more"><div class="mbox">Note: the "round limit" triggering compaction is a user setting (maxConversationRounds), but the exact number of retained tail messages is determined by the compaction algorithm's window.</div></div>
         </div>
 
         <div class="item" data-wire="todo">
           <div class="row">
             <div class="addr">PLAN</div>
-            <div class="name">Live Plan<small>实时任务清单 · Todo</small></div>
-            <div class="src"><span class="chip">renderTodoListDigest</span><span class="chip">注入 user prompt 尾部</span></div>
-            <div class="cchip c-miss">每轮实时</div>
+            <div class="name">Live Plan<small>real-time task list · Todo</small></div>
+            <div class="src"><span class="chip">renderTodoListDigest</span><span class="chip">injected at user prompt tail</span></div>
+            <div class="cchip c-miss">real-time per turn</div>
           </div>
-          <div class="desc">每轮从 live TodoListContext 渲染的实时摘要（目标 + 各任务 status/title/error），由 <b>buildRuntimeUserPrompt</b> 追加到 user prompt 尾部。始终反映当前计划状态，<b>零额外缓存成本</b>（user prompt 本身就在 miss 区）。压缩后下一条 user message 自带 live digest，无需单独冻结快照。</div>
-          <div class="more"><div class="mbox">有损快照：仅含 status / title / retry / errorLog 前 200 字符，不含 description / dependsOn / artifacts。完整细节在 live 期间靠 <code>todo</code> 工具每轮回传。<code>checkpoint.payload.todoDigest</code> 仍存储（数据兼容），但不再单独注入为 user 消息。</div></div>
+          <div class="desc">Real-time digest rendered from the live TodoListContext each turn (goal + each task's status/title/error), appended to the user prompt tail by <b>buildRuntimeUserPrompt</b>. Always reflects current plan state with <b>zero additional cache cost</b> (user prompt is already in the miss zone). After compaction, the next user message carries the live digest automatically — no separate frozen snapshot needed.</div>
+          <div class="more"><div class="mbox">Lossy snapshot: only contains status / title / retry / errorLog (first 200 chars), excludes description / dependsOn / artifacts. Full details are passed back every turn via the <code>todo</code> tool during live operation. <code>checkpoint.payload.todoDigest</code> is still stored (data compatibility) but no longer injected as a separate user message.</div></div>
         </div>
 
         <div class="item" data-wire="task">
           <div class="row">
             <div class="addr">TASK</div>
-            <div class="name">Current Task<small>本轮用户消息 · 当前任务</small></div>
-            <div class="src"><span class="chip">buildRuntimeUserPrompt</span><span class="chip">目标 + 运行时上下文 + 诊断 + Live Plan</span><span class="chip">stripConsumedImages</span></div>
-            <div class="cchip c-miss">每轮新增</div>
+            <div class="name">Current Task<small>current turn user message</small></div>
+            <div class="src"><span class="chip">buildRuntimeUserPrompt</span><span class="chip">goal + runtime context + diagnostics + Live Plan</span><span class="chip">stripConsumedImages</span></div>
+            <div class="cchip c-miss">new per turn</div>
           </div>
-          <div class="desc">用户本轮输入（即当前任务）+ 运行时上下文（日期 / 时区）+ 项目诊断 + 实时任务清单，由 <b>buildRuntimeUserPrompt</b> 包装成一条 user 消息。<b>所有动态内容刻意放在尾部</b>，与前缀隔离——这是缓存安全的关键设计。已消费的图片会被剥离，避免 base64 反复膨胀后续请求。</div>
-          <div class="more"><div class="mbox">日期/时间绝不上前缀；<code>buildDefaultRuntimeContext</code> 只在需要精确时间时才加时间行。⚠ <code>stripConsumedImages</code> 按"后面是否有 assistant"条件剥离图片，属中部翻转，多模态场景需改为写时确定性剥离。</div></div>
+          <div class="desc">User's current-turn input (the task) + runtime context (date / timezone) + project diagnostics + live task list, wrapped into a single user message by <b>buildRuntimeUserPrompt</b>. <b>All dynamic content is deliberately placed at the tail</b>, isolated from the prefix — this is the key design for cache safety. Consumed images are stripped to prevent base64 from bloating subsequent requests.</div>
+          <div class="more"><div class="mbox">Date/time never enters the prefix; <code>buildDefaultRuntimeContext</code> only adds a time line when precise time is needed. ⚠ <code>stripConsumedImages</code> strips images based on "whether an assistant message follows", a mid-section flip; multimodal scenarios need write-time deterministic stripping.</div></div>
         </div>
 
         <div class="item" data-wire="tuse">
           <div class="row">
             <div class="addr">CALL</div>
-            <div class="name">Tool Use<small>工具调用</small></div>
-            <div class="src"><span class="chip">assistant.toolCalls</span><span class="chip">sortedStringify 规范化</span></div>
-            <div class="cchip c-miss">追加</div>
+            <div class="name">Tool Use<small>tool calls</small></div>
+            <div class="src"><span class="chip">assistant.toolCalls</span><span class="chip">sortedStringify canonical</span></div>
+            <div class="cchip c-miss">append</div>
           </div>
-          <div class="desc">模型发起的工具调用（名称 + 参数）。参数经确定性序列化，保证重建字节一致。</div>
-          <div class="more"><div class="mbox">带 tool_calls 的 assistant 消息，其 reasoning_content 必须持续回传（DeepSeek 要求），否则 400。</div></div>
+          <div class="desc">Tool calls initiated by the model (name + arguments). Arguments are deterministically serialized to guarantee byte-identical rebuilds.</div>
+          <div class="more"><div class="mbox">Assistant messages with tool_calls must continuously pass back reasoning_content (DeepSeek requirement), otherwise 400.</div></div>
         </div>
 
         <div class="item" data-wire="tres">
           <div class="row">
             <div class="addr">RES</div>
-            <div class="name">Tool Result<small>工具结果</small></div>
-            <div class="src"><span class="chip">truncateToolOutput</span><span class="chip">写时三阶梯</span></div>
-            <div class="cchip c-miss">追加 · 出生即有界</div>
+            <div class="name">Tool Result<small></small></div>
+            <div class="src"><span class="chip">truncateToolOutput</span><span class="chip">write-time 3-tier</span></div>
+            <div class="cchip c-miss">append · bounded at birth</div>
           </div>
-          <div class="desc"><b>&gt;50k 字符</b> → 落盘 + 2k 预览 + 路径（read 可回读）；<b>30k–50k</b> → 中间截断（头尾各半）；<b>150k</b> 硬上限。写时一次性归一化并冻结，<b>废除事后滑动裁剪</b> → 前缀不再中部翻转。代码检索（read / grep / graph / lsp）是最常见的 tool result 来源。</div>
-          <div class="more"><div class="mbox">这是命中率优化的核心：每条工具结果出生即有界，尾部天然受控，miss 收敛到理论下限。阈值按<b>字符</b>（content.length），中文不被字节数误判。重建时直接读取已冻结的工具输出（<code>sortedStringify</code> 保证与实时路径逐字节一致）。</div></div>
+          <div class="desc"><b>&gt;50k chars</b> → spill to disk + 2k preview + path (read can re-read); <b>30k–50k</b> → middle truncation (half head, half tail); <b>150k</b> hard ceiling. Normalized and frozen once at write time, <b>post-hoc sliding trim abolished</b> → no more mid-prefix flips. Code retrieval (read / grep / graph / lsp) is the most common tool result source.</div>
+          <div class="more"><div class="mbox">This is the core of hit-rate optimization: every tool result is bounded at birth, the tail is naturally controlled, and miss converges to the theoretical minimum. Thresholds are in <b>characters</b> (content.length), so CJK text isn't misjudged by byte count. Rebuilds read frozen tool output directly (<code>sortedStringify</code> guarantees byte-identical with the live path).</div></div>
         </div>
       </section>
     </main>
@@ -479,72 +471,72 @@
     <!-- RAIL -->
     <aside class="rail">
       <div class="railcard reveal">
-        <h4>线上字节顺序 · Wire Order</h4>
+        <h4>Wire Order</h4>
         <ul class="wire">
-          <li class="wnode" data-c="hit" data-wire="sys param tool rules"><b>prefix</b> system + tools + params<span class="wtag">ImmutablePrefix · 命中</span></li>
-          <li class="wnode" data-c="hit" data-wire="skill map mem custom"><b>bootstrap</b> log[0] · isPrefixSystem<span class="wtag">记忆化 · 命中 · Claude 提取为 system</span></li>
-          <li class="wnode" data-c="epoch" data-wire="ckpt"><b>checkpoint</b> 检查点摘要<span class="wtag">epoch 重写</span></li>
-          <li class="wnode" data-c="hit" data-wire="recent tuse tres"><b>tail</b> 最近对话<span class="wtag">append-only · 历史命中</span></li>
-          <li class="wnode" data-c="miss" data-wire="todo task tres"><span class="misspulse"></span><b>本轮新增</b> user prompt + Live Plan<span class="wtag">唯一 miss</span></li>
+          <li class="wnode" data-c="hit" data-wire="sys param tool rules"><b>prefix</b> system + tools + params<span class="wtag">ImmutablePrefix · hit</span></li>
+          <li class="wnode" data-c="hit" data-wire="skill map mem custom"><b>bootstrap</b> log[0] · isPrefixSystem<span class="wtag">memoized · hit · Claude extracts as system</span></li>
+          <li class="wnode" data-c="epoch" data-wire="ckpt"><b>checkpoint</b> conversation summary<span class="wtag">epoch rewrite</span></li>
+          <li class="wnode" data-c="hit" data-wire="recent tuse tres"><b>tail</b> recent conversation<span class="wtag">append-only · history hit</span></li>
+          <li class="wnode" data-c="miss" data-wire="todo task tres"><span class="misspulse"></span><b>current turn</b> user prompt + Live Plan<span class="wtag">only miss</span></li>
         </ul>
       </div>
       <div class="railcard reveal">
-        <h4>缓存账本 · Cache Ledger</h4>
-        <div class="stat"><span>稳定区（命中）</span><b class="g">prefix → tail 历史</b></div>
-        <div class="stat"><span>epoch 边界</span><b class="a">压缩时一次性失效</b></div>
-        <div class="stat"><span>不可约 miss</span><b class="r">本轮新增 token</b></div>
-        <div class="stat"><span>中部翻转（已消除）</span><b class="g">滑动裁剪已废除</b></div>
-        <div class="stat"><span>中部翻转（遗留）</span><b class="r">stripConsumedImages</b></div>
+        <h4>Cache Ledger</h4>
+        <div class="stat"><span>Stable zone (hit)</span><b class="g">prefix → tail history</b></div>
+        <div class="stat"><span>Epoch boundary</span><b class="a">one-time invalidation on compaction</b></div>
+        <div class="stat"><span>Irreducible miss</span><b class="r">current turn tokens</b></div>
+        <div class="stat"><span>Mid-flip (eliminated)</span><b class="g">sliding trim abolished</b></div>
+        <div class="stat"><span>Mid-flip (legacy)</span><b class="r">stripConsumedImages</b></div>
       </div>
     </aside>
   </div>
 
   <!-- MECHANISMS -->
   <section class="mech reveal" id="mechanisms">
-    <h2>五个关键机制</h2>
-    <div class="sub">让"分层"真正转化为命中率的底层设计。</div>
+    <h2>Five Key Mechanisms</h2>
+    <div class="sub">The underlying designs that turn "layering" into actual hit rate.</div>
     <div class="ledger">
       <div class="led">
-        <div class="no">M·01</div><h5>签名外冻结</h5>
-        <p>memory.md 与 project-graph 在磁盘上易变，但被排除出 <code>bootstrapSignature</code>。<code>resolveSessionBootstrap</code> 按 (session × 稳定签名) 记忆化 bootstrap——磁盘变化不重建，更新次会话生效。保住整段前缀缓存。</p>
+        <div class="no">M·01</div><h5>Freeze Outside Signature</h5>
+        <p>memory.md and project-graph are volatile on disk but excluded from <code>bootstrapSignature</code>. <code>resolveSessionBootstrap</code> memoizes the bootstrap by (session × stable signature) — disk changes don't rebuild, updates take effect next session. Preserves the entire prefix cache.</p>
       </div>
       <div class="led">
-        <div class="no">M·02</div><h5>写时三阶梯截断</h5>
-        <p>工具输出在写入 AppendOnlyLog 前一次性归一化（<code>truncateToolOutput</code>）：30k 中间截断 / 50k 落盘 / 150k 硬上限。出生即有界，废除事后滑动裁剪，重建逐字节一致。</p>
+        <div class="no">M·02</div><h5>Write-Time 3-Tier Truncation</h5>
+        <p>Tool output is normalized once before writing to AppendOnlyLog (<code>truncateToolOutput</code>): 30k middle truncation / 50k disk spill / 150k hard ceiling. Bounded at birth, post-hoc sliding trim abolished, rebuilds byte-identical.</p>
       </div>
       <div class="led">
-        <div class="no">M·03</div><h5>压缩 Epoch</h5>
-        <p>轮数或 token 超限时，把较早消息折叠成 checkpoint 摘要 + 保留尾部，开启新 context epoch。这是<b>有意</b>的全量前缀重写——接受一次失效，换上下文受控。</p>
+        <div class="no">M·03</div><h5>Compaction Epoch</h5>
+        <p>When rounds or tokens exceed limits, earlier messages are folded into a checkpoint summary + retained tail, opening a new context epoch. This is an <b>intentional</b> full prefix rewrite — accepting one invalidation in exchange for controlled context.</p>
       </div>
       <div class="led">
-        <div class="no">M·04</div><h5>动态内容尾部隔离</h5>
-        <p>日期、时区、诊断等易变内容只进<b>尾部 user 消息</b>，绝不上前缀。前缀只装"会话内不变"的东西，这是前缀缓存能成立的前提。</p>
+        <div class="no">M·04</div><h5>Dynamic Content Tail Isolation</h5>
+        <p>Date, timezone, diagnostics, and other volatile content only enter the <b>tail user message</b>, never the prefix. The prefix only holds "session-invariant" content — this is the prerequisite for prefix caching to work.</p>
       </div>
       <div class="led">
-        <div class="no">M·05</div><h5>子代理上下文继承</h5>
-        <p>子代理通过 <code>SubagentSessionDeps</code> 继承主会话的 skills、memory、project-graph 和 customPrompt，注入自己的 Session Bootstrap。Bootstrap 以 <code>role: assistant</code> + <code>metadata.isPrefixSystem: true</code> 注入——Claude 提供商据此将其提取为 system 内容，避免首条消息非 user 的 400 错误；DeepSeek/OpenAI 按原样发送。</p>
+        <div class="no">M·05</div><h5>Sub-Agent Context Inheritance</h5>
+        <p>Sub-agents inherit the main session's skills, memory, project-graph, and customPrompt via <code>SubagentSessionDeps</code>, injected into their own Session Bootstrap. The bootstrap is injected with <code>role: assistant</code> + <code>metadata.isPrefixSystem: true</code> — the Claude provider extracts it as system content, avoiding a 400 error from a non-user first message; DeepSeek/OpenAI send it as-is.</p>
       </div>
     </div>
   </section>
 
   <!-- PIPELINE -->
   <section class="pipe reveal" id="pipeline">
-    <h2>官方缓存优先序</h2>
-    <div class="sub">摘自设置说明 <code>settingsPromptStackDesc</code> —— 越靠前越稳定，命中率越高。</div>
+    <h2>Official Cache Priority Order</h2>
+    <div class="sub">From settings description <code>settingsPromptStackDesc</code> — earlier = more stable = higher hit rate.</div>
     <div class="flow">
-      <div class="fstep"><span class="fi">L1</span><b>系统核心与工具边界</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L2</span><b>项目规则 AGENTS.md</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L3</span><b>模式约束</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L4</span><b>Skills 摘要与 workspace</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L5</span><b>历史对话</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L6</span><b>本轮诊断 / 任务</b></div>
+      <div class="fstep"><span class="fi">L1</span><b>System core & tool boundaries</b></div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L2</span><b>Project rules AGENTS.md</b></div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L3</span><b>Mode constraints</b></div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L4</span><b>Skills summary & workspace</b></div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L5</span><b>Conversation history</b></div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L6</span><b>Current-turn diagnostics / task</b></div>
     </div>
   </section>
 </div>
 
 <footer>
   <div class="container">
-    CodePapr &mdash; 上下文分层可视化 · 生成自源码核实（<code>promptSystem.ts</code> / <code>contextCompaction.ts</code> / <code>agentStore.ts</code> / <code>toolOutputTruncation.ts</code> / <code>subagentConfig.ts</code> / <code>uiTaskTool.ts</code>）。三层模型 = Stable Prefix（冻结）/ Session State（epoch）/ Active Context（append-only）。阈值单位：字符。Bootstrap 以 <code>role: assistant</code> + <code>isPrefixSystem</code> 注入，Claude 提取为 system。
+    CodePapr &mdash; Context layering visualization · verified against source (<code>promptSystem.ts</code> / <code>contextCompaction.ts</code> / <code>agentStore.ts</code> / <code>toolOutputTruncation.ts</code> / <code>subagentConfig.ts</code> / <code>uiTaskTool.ts</code>). Three-tier model = Stable Prefix (frozen) / Session State (epoch) / Active Context (append-only). Threshold unit: characters. Bootstrap injected with <code>role: assistant</code> + <code>isPrefixSystem</code>, Claude extracts as system.
   </div>
 </footer>
 

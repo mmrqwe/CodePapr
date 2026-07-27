@@ -7,7 +7,6 @@ import {
   FilteringToolRegistry,
   MUTATING_TOOL_NAMES,
   isReadOnlyMode,
-  renderTodoListDigest,
   generateToolOutputFilename,
   type AgentDefinition,
   type EditHistory,
@@ -25,7 +24,7 @@ import {
 import { createContextCompactionHandler } from '../../agent/compactionHandler';
 import { registerWorkspaceTools } from '../../tools/workspaceTools';
 import { registerUiTaskTool, type UiTaskToolContext } from '../../tools/uiTaskTool';
-import { getTodoListContext, registerTodoListTools } from '../../tools/todoListTool';
+import { registerTodoListTools } from '../../tools/todoListTool';
 import { registerMcpTools } from '../../tools/mcpTools';
 import { hasEnabledMcpSearch } from '../../utils/mcpTypes';
 import {
@@ -341,16 +340,11 @@ function _createLocalAgent(
       reasoningEffort: overrides.thinkingEffort ?? settings.thinkingEffort,
     },
   });
-  const todoListDigest = (() => {
-    const ctx = getTodoListContext(sessionId);
-    if (!ctx || ctx.tasks.length === 0) return undefined;
-    return renderTodoListDigest(ctx);
-  })();
   const session = new Session({
     sessionId,
     prefix,
     toolRegistry,
-    log: createLogFromMessages(sessionId, messages, sessionBootstrapPrompt, todoListDigest),
+    log: createLogFromMessages(sessionId, messages, sessionBootstrapPrompt),
   });
   return new _MainThreadAgentHandle(new Agent({
     session,
@@ -400,11 +394,7 @@ export function createAgent(
       return new WorkerBackedAgent({
         sessionId,
         workspacePath,
-        initialMessages: toCoreMessages(messages, sessionBootstrapPrompt, (() => {
-          const ctx = getTodoListContext(sessionId);
-          if (!ctx || ctx.tasks.length === 0) return undefined;
-          return renderTodoListDigest(ctx);
-        })()),
+        initialMessages: toCoreMessages(messages, sessionBootstrapPrompt),
         settings: toWorkerAgentSettings(settings),
         providerName: provider,
         model: baseModel,

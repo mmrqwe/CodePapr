@@ -410,7 +410,7 @@ export function renderContextCheckpointContent(summary: string, lang: Lang | und
 
 export function buildEffectiveContextMessages(
   messages: readonly ContextMessageLike[],
-  options?: { todoListDigest?: string; pruneOptions?: PruneOptions }
+  options?: { pruneOptions?: PruneOptions }
 ): IMessage[] {
   const checkpoint = getLatestCheckpoint(messages);
   const tailStart = checkpoint ? checkpoint.index + 1 : 0;
@@ -433,16 +433,6 @@ export function buildEffectiveContextMessages(
         },
       },
     ];
-
-    const todoDigest = (checkpoint.payload.todoDigest ?? options?.todoListDigest)?.trim();
-    if (todoDigest) {
-      result.push({
-        id: `${checkpoint.message.id}-todo-restore`,
-        role: 'user',
-        content: todoDigest,
-        timestamp: checkpoint.message.timestamp + 1,
-      });
-    }
 
     result.push(...tailMessages);
   }

@@ -27,6 +27,7 @@ export interface BuildRuntimeUserPromptOptions {
   lang?: PromptLang;
   diagnosticsSection?: string;
   runtimeContextSection?: string;
+  todoDigest?: string;
 }
 
 export interface BuildSessionBootstrapPromptOptions {
@@ -1263,5 +1264,6 @@ export function buildRuntimeUserPrompt(options: BuildRuntimeUserPromptOptions): 
     options.input.trim(),
     ...(runtimeContext ? ['', runtimeContextTitle, runtimeContext] : []),
     ...(options.diagnosticsSection?.trim() ? ['', labels.diagnostics, options.diagnosticsSection.trim()] : []),
+    ...(options.todoDigest?.trim() ? ['', options.todoDigest.trim()] : []),
   ].join('\n');
 }
