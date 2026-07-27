@@ -647,8 +647,10 @@ function createRegistry(
 
 function buildToolOutputTruncation(s: WorkerAgentSettings): ToolOutputTruncationOptions {
   return {
-    maxBytes: s.toolOutputMaxBytes,
-    previewChars: s.toolOutputPreviewChars,
+    interceptChars: s.toolOutputInterceptChars,
+    offloadChars: s.toolOutputOffloadChars,
+    offloadPreviewChars: s.toolOutputPreviewChars,
+    ceilingChars: s.toolOutputCeilingChars,
   };
 }
 

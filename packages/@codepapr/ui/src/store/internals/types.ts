@@ -55,7 +55,9 @@ export interface Settings {
   compactionModel: 'fast' | 'primary';
   compactionMaxTokens: number;
   compactionTemperature: number;
-  toolOutputMaxBytes: number;
+  toolOutputInterceptChars: number;
+  toolOutputOffloadChars: number;
+  toolOutputCeilingChars: number;
   toolOutputPreviewChars: number;
   pruneOldToolResults: boolean;
   pruneProtectRounds: number;

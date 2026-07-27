@@ -171,10 +171,18 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     typeof input.compactionTemperature === 'number' && Number.isFinite(input.compactionTemperature)
       ? Math.max(0, Math.min(2, input.compactionTemperature))
       : DEFAULT_SETTINGS.compactionTemperature;
-  const toolOutputMaxBytes =
-    typeof input.toolOutputMaxBytes === 'number' && Number.isFinite(input.toolOutputMaxBytes)
-      ? Math.max(1000, Math.floor(input.toolOutputMaxBytes))
-      : DEFAULT_SETTINGS.toolOutputMaxBytes;
+  const toolOutputCeilingChars =
+    typeof input.toolOutputCeilingChars === 'number' && Number.isFinite(input.toolOutputCeilingChars)
+      ? Math.max(1000, Math.floor(input.toolOutputCeilingChars))
+      : DEFAULT_SETTINGS.toolOutputCeilingChars;
+  const toolOutputInterceptChars =
+    typeof input.toolOutputInterceptChars === 'number' && Number.isFinite(input.toolOutputInterceptChars)
+      ? Math.max(1000, Math.min(toolOutputCeilingChars, Math.floor(input.toolOutputInterceptChars)))
+      : DEFAULT_SETTINGS.toolOutputInterceptChars;
+  const toolOutputOffloadChars =
+    typeof input.toolOutputOffloadChars === 'number' && Number.isFinite(input.toolOutputOffloadChars)
+      ? Math.max(toolOutputInterceptChars, Math.min(toolOutputCeilingChars, Math.floor(input.toolOutputOffloadChars)))
+      : Math.max(toolOutputInterceptChars, DEFAULT_SETTINGS.toolOutputOffloadChars);
   const toolOutputPreviewChars =
     typeof input.toolOutputPreviewChars === 'number' && Number.isFinite(input.toolOutputPreviewChars)
       ? Math.max(100, Math.floor(input.toolOutputPreviewChars))
@@ -388,7 +396,9 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     compactionModel,
     compactionMaxTokens,
     compactionTemperature,
-    toolOutputMaxBytes,
+    toolOutputInterceptChars,
+    toolOutputOffloadChars,
+    toolOutputCeilingChars,
     toolOutputPreviewChars,
     pruneOldToolResults,
     pruneProtectRounds,

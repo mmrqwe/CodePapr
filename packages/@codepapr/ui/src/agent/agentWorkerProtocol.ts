@@ -59,7 +59,9 @@ export interface WorkerAgentSettings {
   toolIpcTimeoutMs: number;
   multimodalEnabled: boolean;
   multimodalModelTier: 'primary' | 'fast' | 'all';
-  toolOutputMaxBytes: number;
+  toolOutputInterceptChars: number;
+  toolOutputOffloadChars: number;
+  toolOutputCeilingChars: number;
   toolOutputPreviewChars: number;
   pruneOldToolResults: boolean;
   pruneProtectRounds: number;

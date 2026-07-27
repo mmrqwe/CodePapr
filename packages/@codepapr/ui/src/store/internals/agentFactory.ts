@@ -22,7 +22,7 @@ import {
   type AgentRuntimeHandle,
   type AgentRuntimeStreamEvent,
 } from '../../agent/WorkerBackedAgent';
-import { createContextCompactionHandler, buildPruneOptions } from '../../agent/compactionHandler';
+import { createContextCompactionHandler } from '../../agent/compactionHandler';
 import { registerWorkspaceTools } from '../../tools/workspaceTools';
 import { registerUiTaskTool, type UiTaskToolContext } from '../../tools/uiTaskTool';
 import { getTodoListContext, registerTodoListTools } from '../../tools/todoListTool';
@@ -63,8 +63,10 @@ function buildToolOutputTruncation(
   workspacePath: string
 ): ToolOutputTruncationOptions {
   return {
-    maxBytes: settings.toolOutputMaxBytes,
-    previewChars: settings.toolOutputPreviewChars,
+    interceptChars: settings.toolOutputInterceptChars,
+    offloadChars: settings.toolOutputOffloadChars,
+    offloadPreviewChars: settings.toolOutputPreviewChars,
+    ceilingChars: settings.toolOutputCeilingChars,
     spillToDisk: async (content: string, toolName: string): Promise<string | null> => {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
@@ -344,7 +346,7 @@ function _createLocalAgent(
     sessionId,
     prefix,
     toolRegistry,
-    log: createLogFromMessages(sessionId, messages, sessionBootstrapPrompt, todoListDigest, buildPruneOptions(settings)),
+    log: createLogFromMessages(sessionId, messages, sessionBootstrapPrompt, todoListDigest),
   });
   return new _MainThreadAgentHandle(new Agent({
     session,
@@ -400,7 +402,7 @@ export function createAgent(
           const ctx = getTodoListContext(sessionId);
           if (!ctx || ctx.tasks.length === 0) return undefined;
           return renderTodoListDigest(ctx);
-        })(), buildPruneOptions(settings)),
+        })()),
         settings: toWorkerAgentSettings(settings),
         providerName: provider,
         model: baseModel,
