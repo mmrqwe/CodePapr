@@ -1160,10 +1160,7 @@ TTS Data Flow:
         </ul>
 
         <div class="callout">
-          <strong>Auto-injection Flow:</strong> The agent looks up rule files in the following priority order and merges them into the stable system prompt:<br>
-          1. <code>.CodePapr/AGENTS.md</code><br>
-          2. <code>.CodePapr/rules.md</code><br>
-          Missing files are silently skipped.
+          <strong>Auto-injection Flow:</strong> The agent reads the rule file <code>.CodePapr/AGENTS.md</code> and merges it into the stable system prompt. Missing files are silently skipped.
         </div>
 
         <h3>.CodePapr/memory.md — Cross-Session Project Memory (Auto-Organized)</h3>

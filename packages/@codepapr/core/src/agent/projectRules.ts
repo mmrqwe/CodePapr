@@ -10,7 +10,6 @@ export const PROJECT_AGENTS_FILE = '.CodePapr/AGENTS.md';
 
 export const PROJECT_RULE_FILES: readonly string[] = [
   PROJECT_AGENTS_FILE,
-  '.CodePapr/rules.md',
 ];
 
 export interface ProjectRuleFile {

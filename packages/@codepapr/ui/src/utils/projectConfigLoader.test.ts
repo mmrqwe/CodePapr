@@ -87,7 +87,7 @@ function createInvoke(files: Record<string, string>): {
 }
 
 describe('projectConfigLoader', () => {
-  it('合并多个规则文件为系统提示词片段', async () => {
+  it('只读取 AGENTS.md，忽略 rules.md', async () => {
     const { invoke } = createInvoke({
       '.CodePapr/AGENTS.md': '# 团队规则\n始终使用 TypeScript。',
       '.CodePapr/rules.md': '保持函数简短。',
@@ -97,8 +97,8 @@ describe('projectConfigLoader', () => {
 
     expect(section).toContain('.CodePapr/AGENTS.md');
     expect(section).toContain('始终使用 TypeScript。');
-    expect(section).toContain('.CodePapr/rules.md');
-    expect(section).toContain('保持函数简短。');
+    expect(section).not.toContain('rules.md');
+    expect(section).not.toContain('保持函数简短。');
   });
 
   it('无规则文件时返回空串', async () => {

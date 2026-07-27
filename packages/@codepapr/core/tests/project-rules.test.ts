@@ -22,7 +22,7 @@ describe('projectRules - buildProjectRulesSection', () => {
   it('跳过空白文件', () => {
     const section = buildProjectRulesSection([
       { path: '.CodePapr/AGENTS.md', content: '   \n  ' },
-      { path: '.CodePapr/rules.md', content: '保持零警告' },
+      { path: 'CLAUDE.md', content: '保持零警告' },
     ]);
     expect(section).not.toContain('AGENTS.md');
     expect(section).toContain('保持零警告');
@@ -35,8 +35,7 @@ describe('projectRules - buildProjectRulesSection', () => {
 
   it('默认查找文件与模板可用', () => {
     expect(PROJECT_AGENTS_FILE).toBe('.CodePapr/AGENTS.md');
-    expect(PROJECT_RULE_FILES[0]).toBe(PROJECT_AGENTS_FILE);
-    expect(PROJECT_RULE_FILES).not.toContain('AGENTS.md');
+    expect(PROJECT_RULE_FILES).toEqual([PROJECT_AGENTS_FILE]);
     const cn = getDefaultAgentsTemplate();
     const en = getDefaultAgentsTemplate('en');
     const tw = getDefaultAgentsTemplate('zh-TW');

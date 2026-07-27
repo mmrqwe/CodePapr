@@ -90,6 +90,9 @@ export interface AgentRuntimeConfig {
   rulesSection?: string;
   customPrompt?: string;
   memorySection?: string;
+  /** 已按 session 记忆化（冻结）的会话引导，含 skills/memory/project-graph/custom。
+   *  优先用它注入 log[0]，兑现 memory.md「每次会话自动加载」；缺省时回退到仅 skills+custom。 */
+  sessionBootstrapPrompt?: string;
   lang?: Lang;
   /** 当前工作模式：ask/plan 会在注册层屏蔽变更类工具。缺省 agent。 */
   mode?: PromptMode;
@@ -222,11 +225,9 @@ function _createLocalAgent(
     ? new FilteringToolRegistry((tool) => !MUTATING_TOOL_NAMES.has(tool.name))
     : new ToolRegistry();
   const onWorkspaceMutated = runtime.onWorkspaceMutated ?? defaultOnWorkspaceMutatedResolver();
-  const sessionBootstrapPrompt = buildAgentSessionBootstrapPrompt(
-    settings,
-    workspacePath,
-    runtime.skillDefinitions ?? []
-  );
+  const sessionBootstrapPrompt =
+    runtime.sessionBootstrapPrompt ??
+    buildAgentSessionBootstrapPrompt(settings, workspacePath, runtime.skillDefinitions ?? []);
   const characterPrompt = getActiveCharacterPrompt();
   const customPromptWithCharacter = [
     runtime.customPrompt ?? settings.systemPrompt,
@@ -386,11 +387,9 @@ export function createAgent(
     .map((part) => part?.trim() ?? '')
     .filter((part) => part.length > 0)
     .join('\n\n');
-  const sessionBootstrapPrompt = buildAgentSessionBootstrapPrompt(
-    settings,
-    workspacePath,
-    runtime.skillDefinitions ?? []
-  );
+  const sessionBootstrapPrompt =
+    runtime.sessionBootstrapPrompt ??
+    buildAgentSessionBootstrapPrompt(settings, workspacePath, runtime.skillDefinitions ?? []);
 
   try {
     if (shouldUseWorkerAgentRuntime()) {

@@ -276,7 +276,7 @@ Consolidation uses the fast model to deduplicate, merge, and compress memory, wr
 
 ### Project Rules
 
-Read in priority order: `.CodePapr/AGENTS.md` → `.CodePapr/rules.md`. Content is injected into the system prompt. Suitable for: project conventions, directory structure, off-limits scope, verification criteria.
+Reads `.CodePapr/AGENTS.md`. Content is injected into the system prompt. Suitable for: project conventions, directory structure, off-limits scope, verification criteria.
 
 ### Custom Sub-Agents
 
