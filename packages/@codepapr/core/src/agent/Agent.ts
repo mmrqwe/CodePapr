@@ -29,6 +29,7 @@ import {
   IAppendOnlyLog,
   IToolDefinition,
   IMessage,
+  ISubagentToolInvocation,
   QuestionData,
 } from '@codepapr/types';
 import { Logger, estimateTokens } from '@codepapr/common';
@@ -500,7 +501,16 @@ export class Agent {
             log.error(`Tool execution failed: ${call.name}`, { error: err });
           }
         }
-        const toolMsg = await this.buildToolMessage(call, result, success);
+        let contextResult: unknown = result;
+        let subagentToolInvocations: ISubagentToolInvocation[] | undefined;
+        if (result && typeof result === 'object' && '__subagentToolInvocations' in result) {
+          const record = result as Record<string, unknown>;
+          subagentToolInvocations = record.__subagentToolInvocations as ISubagentToolInvocation[];
+          const stripped = { ...record };
+          delete stripped.__subagentToolInvocations;
+          contextResult = stripped;
+        }
+        const toolMsg = await this.buildToolMessage(call, contextResult, success);
         await this.session.logStore.append(toolMsg);
         onStreamEvent?.({
           type: 'tool-call-end',
@@ -508,7 +518,8 @@ export class Agent {
           toolName: call.name,
           success,
           error: errorMessage,
-          output: typeof result === 'string' ? result : JSON.stringify(result),
+          output: typeof contextResult === 'string' ? contextResult : JSON.stringify(contextResult),
+          ...(subagentToolInvocations ? { subagentToolInvocations } : {}),
         });
 
         if (result && typeof result === 'object' && '__question' in result && (result as Record<string, unknown>).__question === true) {

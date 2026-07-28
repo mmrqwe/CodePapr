@@ -196,6 +196,7 @@ export function applyToolStreamEvent(
     statusText: undefined,
     output: event.output ?? baseInvocation.output,
     ...(event.error ? { error: event.error } : {}),
+    ...(event.subagentToolInvocations ? { subagentToolInvocations: event.subagentToolInvocations } : {}),
   };
 
   if (existingIndex === -1) {

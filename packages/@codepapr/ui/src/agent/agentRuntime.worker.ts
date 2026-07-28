@@ -15,6 +15,7 @@ import {
   filterToolsForAgent,
   buildTaskToolDefinition,
   type AgentDefinition,
+  type SubagentSessionResult,
   type ToolOutputTruncationOptions,
 } from '@codepapr/core';
 import {
@@ -511,7 +512,7 @@ async function runSubagent(
   definition: AgentDefinition,
   prompt: string,
   currentDepth: number
-): Promise<{ content: string; steps: Array<{ name: string; status: 'success' | 'error'; summary: string }>; cacheStats?: ICacheStatistics; tier: 'primary' | 'fast' | 'mentor' }> {
+): Promise<SubagentSessionResult> {
   const registry = createRegistry(requestId, payload, false, currentDepth);
   const tools = filterToolsForAgent(registry.getAll(), definition.tools);
   const s = payload.settings;
@@ -638,6 +639,7 @@ function createRegistry(
         agent: name,
         content: result.content,
         steps: result.steps,
+        __subagentToolInvocations: result.toolInvocations,
       };
     });
   }

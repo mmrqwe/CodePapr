@@ -12,6 +12,7 @@ import type {
   ICacheStatistics,
   IChatStreamEvent,
   ILLMProvider,
+  ISubagentToolInvocation,
   IToolDefinition,
 } from '@codepapr/types';
 import { Agent, type IRequestBuilder, type ICacheValidator } from './Agent';
@@ -212,6 +213,8 @@ export interface SubagentSessionDeps {
 export interface SubagentSessionResult {
   content: string;
   steps: SubagentStep[];
+  /** 子代理内部完整的工具调用记录，用于持久化与分析。 */
+  toolInvocations: ISubagentToolInvocation[];
   cacheStats?: ICacheStatistics;
   tier: 'primary' | 'fast' | 'mentor';
 }
@@ -264,6 +267,8 @@ export async function runSubagentSession(
   const { definition, exec } = deps;
   const lang = (deps.lang ?? 'zh-CN') as PromptLang;
   const steps: SubagentStep[] = [];
+  const toolInvocations: ISubagentToolInvocation[] = [];
+  const invocationStarts = new Map<string, Record<string, unknown>>();
 
   const tools = deps.tools ?? deps.registry.getAll();
   const systemPrompt = buildRuntimeSystemPrompt({
@@ -331,6 +336,9 @@ export async function runSubagentSession(
       agent,
       () =>
         agent.chat(userPrompt, (event) => {
+          if (event.type === 'tool-call-start') {
+            invocationStarts.set(event.toolCallId, event.arguments);
+          }
           if (event.type === 'tool-call-end') {
             const step: SubagentStep = {
               name: event.toolName,
@@ -338,6 +346,15 @@ export async function runSubagentSession(
               summary: event.error || event.toolName,
             };
             steps.push(step);
+            toolInvocations.push({
+              id: event.toolCallId,
+              name: event.toolName,
+              arguments: invocationStarts.get(event.toolCallId) ?? {},
+              status: event.success ? 'success' : 'error',
+              ...(event.error ? { error: event.error } : {}),
+              ...(event.output !== undefined ? { output: event.output } : {}),
+            });
+            invocationStarts.delete(event.toolCallId);
             deps.onToolCallEnd?.(event);
           }
         }),
@@ -362,6 +379,7 @@ export async function runSubagentSession(
   return {
     content: response.content,
     steps,
+    toolInvocations,
     cacheStats: response.cacheStats,
     tier: exec.tier,
   };

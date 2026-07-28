@@ -16,7 +16,7 @@ import {
   type AgentDefinition,
   type EditHistory,
   type SkillDefinition,
-  type SubagentStep,
+  type SubagentSessionResult,
   type ToolOutputTruncationOptions,
 } from '@codepapr/core';
 import { DEFAULT_MAX_TOKENS, RequestBuilder, CacheValidator, OpenAIProvider, ClaudeProvider } from '@codepapr/api';
@@ -69,7 +69,7 @@ async function runSubagent(
   context: UiTaskToolContext,
   definition: AgentDefinition,
   prompt: string
-): Promise<{ content: string; steps: SubagentStep[]; cacheStats?: ICacheStatistics; tier: 'primary' | 'fast' | 'mentor' }> {
+): Promise<SubagentSessionResult> {
   startSubagentProgress(definition.name, prompt);
 
   const registry = new ToolRegistry();
@@ -192,7 +192,12 @@ export function registerUiTaskTool(
       }
       context.subagentCacheStats.push({ tier: result.tier, stats: result.cacheStats });
     }
-    return { agent: name, content: result.content, steps: result.steps };
+    return {
+      agent: name,
+      content: result.content,
+      steps: result.steps,
+      __subagentToolInvocations: result.toolInvocations,
+    };
   });
 
   return definition;

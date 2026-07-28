@@ -1,4 +1,4 @@
-import type { IImageContent, QuestionData } from '@codepapr/types';
+import type { IImageContent, ISubagentToolInvocation, QuestionData } from '@codepapr/types';
 import type { WorkMode } from '../../utils/agentPrompts';
 import type { TaskModelRoute } from '../../utils/modelRouting';
 import type { ContextCheckpointPayload } from '../../utils/contextCompaction';
@@ -143,6 +143,7 @@ export interface UIToolInvocation {
   error?: string;
   statusText?: string;
   output?: string;
+  subagentToolInvocations?: ISubagentToolInvocation[];
 }
 
 export interface UIMessage {

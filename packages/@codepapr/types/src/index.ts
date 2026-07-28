@@ -244,6 +244,19 @@ export interface MentorConfig {
   thinkingEnabled: boolean;
 }
 
+/**
+ * 子代理内部工具调用记录。用于把 subagent 的 tool_invocations 持久化到父级
+ * task 工具调用上，便于事后分析（不影响主代理 LLM 上下文）。
+ */
+export interface ISubagentToolInvocation {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  status: 'success' | 'error';
+  error?: string;
+  output?: string;
+}
+
 export type IChatStreamEvent =
   | { type: 'assistant-round-start'; round: number }
   | { type: 'request-context'; round: number; content: string }
@@ -269,14 +282,15 @@ export type IChatStreamEvent =
       statusText?: string;
       output?: string;
     }
-  | {
-      type: 'tool-call-end';
-      toolCallId: string;
-      toolName: string;
-      success: boolean;
-      error?: string;
-      output?: string;
-    }
+    | {
+        type: 'tool-call-end';
+        toolCallId: string;
+        toolName: string;
+        success: boolean;
+        error?: string;
+        output?: string;
+        subagentToolInvocations?: ISubagentToolInvocation[];
+      }
   | { type: 'context-compacted'; round: number };
 
 // ============================================================================
