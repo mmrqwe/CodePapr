@@ -22,6 +22,13 @@ import {
   performWorkspaceRename,
   requestWorkspaceSymbolDefinition,
   requestWorkspaceSymbolReferences,
+  requestWorkspaceHover,
+  requestWorkspaceDocumentSymbol,
+  requestWorkspaceSymbol,
+  requestWorkspaceImplementation,
+  requestWorkspacePrepareCallHierarchy,
+  requestWorkspaceIncomingCalls,
+  requestWorkspaceOutgoingCalls,
   selectTestsByChangeImpact,
   suggestRefactorings,
   stripGraphNoise,
@@ -35,8 +42,18 @@ import {
   asSafeSkillName,
   asPositiveInteger,
   boundedNumber,
+  findSymbolAtPosition,
+  extractStructuralSymbols,
 } from '@codepapr/core';
-import type { EditHistory } from '@codepapr/core';
+import type {
+  EditHistory,
+  WorkspaceNavigationResult,
+  WorkspaceHoverResult,
+  WorkspaceDocumentSymbolResult,
+  WorkspaceSymbolSearchResult,
+  WorkspaceCallHierarchyPrepareResult,
+  WorkspaceCallHierarchyCallsResult,
+} from '@codepapr/core';
 import type { IToolDefinition } from '@codepapr/types';
 import type { IImageContent } from '@codepapr/types';
 import { usePreviewStore, type PreviewSession } from '../store/previewStore';
@@ -2909,25 +2926,268 @@ export function registerWorkspaceTools(
     });
   });
 
+  // ── AST/项目图兜底：LSP 不可用或无结果时，用 AST 项目图提供降级答案（source/confidence 标注精度）──
+  const astFallback = {
+    async definition(args: Record<string, unknown>, relativePath: string, line: number, column?: number): Promise<WorkspaceNavigationResult> {
+      const graph = await buildIntelligenceProjectGraph(args);
+      const node = findSymbolAtPosition(graph, relativePath, line, column ?? 1);
+      if (!node) {
+        return { available: false, locations: [], source: 'ast', confidence: 'low', message: 'AST 未能在该位置定位符号。' };
+      }
+      const lookup = lookupWorkspaceSymbols(graph, { query: node.label, limit: 10 });
+      return {
+        available: true,
+        locations: lookup.matches.map((m) => ({ relativePath: m.path, line: m.line ?? 1, column: 1 })),
+        source: 'ast',
+        confidence: 'medium',
+        message: '基于 AST 项目图的定义查找（按符号名匹配，可能不精确）。',
+      };
+    },
+    async references(args: Record<string, unknown>, relativePath: string, line: number, column?: number): Promise<WorkspaceNavigationResult> {
+      const graph = await buildIntelligenceProjectGraph(args);
+      const node = findSymbolAtPosition(graph, relativePath, line, column ?? 1);
+      if (!node) {
+        return { available: false, locations: [], source: 'ast', confidence: 'low', message: 'AST 未能在该位置定位符号。' };
+      }
+      const impact = analyzeWorkspaceChangeImpact(graph, { symbolId: node.id, maxNodes: 100 });
+      return {
+        available: true,
+        locations: impact.impactedSymbols.map((m) => ({ relativePath: m.path, line: m.line ?? 1, column: 1 })),
+        source: 'ast',
+        confidence: 'medium',
+        message: '基于 AST 项目图的引用查找（incoming 依赖，符号级而非精确位置）。',
+      };
+    },
+    async implementation(args: Record<string, unknown>, relativePath: string, line: number, column?: number): Promise<WorkspaceNavigationResult> {
+      const graph = await buildIntelligenceProjectGraph(args);
+      const node = findSymbolAtPosition(graph, relativePath, line, column ?? 1);
+      if (!node) {
+        return { available: false, locations: [], source: 'ast', confidence: 'low', message: 'AST 未能在该位置定位符号。' };
+      }
+      const impl = findWorkspaceSymbolImplementations(graph, { symbolName: node.label, limit: 20 });
+      return {
+        available: true,
+        locations: impl.implementations.map((m) => ({ relativePath: m.path, line: m.line ?? 1, column: 1 })),
+        source: 'ast',
+        confidence: 'medium',
+        message: '基于 AST 项目图的实现查找。',
+      };
+    },
+    async workspaceSymbol(args: Record<string, unknown>, query?: string): Promise<WorkspaceSymbolSearchResult> {
+      const graph = await buildIntelligenceProjectGraph(args);
+      const lookup = lookupWorkspaceSymbols(graph, { query, limit: 50 });
+      return {
+        available: true,
+        symbols: lookup.matches.map((m) => ({
+          name: m.name,
+          kind: m.kind,
+          relativePath: m.path,
+          line: m.line ?? 1,
+          column: 1,
+          ...(m.containerName ? { containerName: m.containerName } : {}),
+        })),
+        source: 'ast',
+        confidence: 'medium',
+        message: '基于 AST 项目图的工作区符号检索。',
+      };
+    },
+    async documentSymbol(relativePath: string): Promise<WorkspaceDocumentSymbolResult> {
+      const file = await invoke<ReadFileResult>('read_text_file', {
+        workspacePath: workspace(),
+        relativePath,
+        maxBytes: 1_000_000,
+      });
+      const symbols = extractStructuralSymbols(relativePath, file.content);
+      return {
+        available: true,
+        symbols: symbols.map((s) => ({
+          name: s.name,
+          kind: s.kind,
+          relativePath,
+          line: s.line,
+          column: 1,
+          ...(s.containerName ? { containerName: s.containerName } : {}),
+        })),
+        source: 'ast',
+        confidence: 'medium',
+        message: '基于 AST 的文件符号大纲。',
+      };
+    },
+    async hover(args: Record<string, unknown>, relativePath: string, line: number, column?: number): Promise<WorkspaceHoverResult> {
+      const graph = await buildIntelligenceProjectGraph(args);
+      const node = findSymbolAtPosition(graph, relativePath, line, column ?? 1);
+      if (!node?.symbol) {
+        return { available: false, source: 'ast', confidence: 'low', message: 'AST 未能在该位置定位符号。' };
+      }
+      const contents = node.symbol.signature || `${node.symbol.kind} ${node.label}`;
+      return { available: true, contents, source: 'ast', confidence: 'medium', message: '基于 AST 的符号签名（无类型信息）。' };
+    },
+    async prepareCallHierarchy(args: Record<string, unknown>, relativePath: string, line: number, column?: number): Promise<WorkspaceCallHierarchyPrepareResult> {
+      const graph = await buildIntelligenceProjectGraph(args);
+      const node = findSymbolAtPosition(graph, relativePath, line, column ?? 1);
+      if (!node) {
+        return { available: false, items: [], source: 'ast', confidence: 'low', message: 'AST 未能在该位置定位符号。' };
+      }
+      return {
+        available: true,
+        items: [{ name: node.label, kind: node.symbol?.kind ?? 'symbol', relativePath: node.path, line: node.symbol?.line ?? line, column: 1 }],
+        source: 'ast',
+        confidence: 'medium',
+        message: '基于 AST 的调用层级项。',
+      };
+    },
+    async incomingCalls(args: Record<string, unknown>, relativePath: string, line: number, column?: number): Promise<WorkspaceCallHierarchyCallsResult> {
+      const graph = await buildIntelligenceProjectGraph(args);
+      const node = findSymbolAtPosition(graph, relativePath, line, column ?? 1);
+      if (!node) {
+        return { available: false, calls: [], source: 'ast', confidence: 'low', message: 'AST 未能在该位置定位符号。' };
+      }
+      const impact = analyzeWorkspaceChangeImpact(graph, { symbolId: node.id, maxNodes: 100 });
+      return {
+        available: true,
+        calls: impact.impactedSymbols.map((m) => ({ name: m.name, relativePath: m.path, line: m.line ?? 1, column: 1 })),
+        source: 'ast',
+        confidence: 'medium',
+        message: '基于 AST 项目图的入调用（incoming 依赖）。',
+      };
+    },
+    async outgoingCalls(args: Record<string, unknown>, relativePath: string, line: number, column?: number): Promise<WorkspaceCallHierarchyCallsResult> {
+      const graph = await buildIntelligenceProjectGraph(args);
+      const node = findSymbolAtPosition(graph, relativePath, line, column ?? 1);
+      if (!node) {
+        return { available: false, calls: [], source: 'ast', confidence: 'low', message: 'AST 未能在该位置定位符号。' };
+      }
+      const sub = buildWorkspaceDependencySubgraph(graph, { symbolId: node.id, direction: 'outgoing', maxNodes: 100 });
+      const calls = sub.nodes
+        .filter((n) => n.kind === 'symbol' && n.id !== node.id)
+        .map((n) => ({ name: n.label, relativePath: n.path, line: n.symbol?.line ?? 1, column: 1 }));
+      return { available: true, calls, source: 'ast', confidence: 'medium', message: '基于 AST 项目图的出调用（outgoing 依赖）。' };
+    },
+  };
+
   registry.register(toolByName('workspace_symbol_definition'), async (args: Record<string, unknown>) => {
     const relativePath = asString(args.relativePath, 'relativePath');
-    return await requestWorkspaceSymbolDefinition(getWorkspaceHost(), {
+    const line = asPositiveInteger(args.line, 'line');
+    const column = asOptionalNumber(args.column);
+    const lsp = await requestWorkspaceSymbolDefinition(getWorkspaceHost(), {
       relativePath,
       languageId: resolveLanguageId(relativePath),
-      line: asPositiveInteger(args.line, 'line'),
-      column: asOptionalNumber(args.column),
+      line,
+      column,
     });
+    if (lsp.available && lsp.locations.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
+    return await astFallback.definition(args, relativePath, line, column);
   });
 
   registry.register(toolByName('workspace_symbol_references'), async (args: Record<string, unknown>) => {
     const relativePath = asString(args.relativePath, 'relativePath');
-    return await requestWorkspaceSymbolReferences(getWorkspaceHost(), {
+    const line = asPositiveInteger(args.line, 'line');
+    const column = asOptionalNumber(args.column);
+    const lsp = await requestWorkspaceSymbolReferences(getWorkspaceHost(), {
       relativePath,
       languageId: resolveLanguageId(relativePath),
-      line: asPositiveInteger(args.line, 'line'),
-      column: asOptionalNumber(args.column),
+      line,
+      column,
       includeDeclaration: asOptionalBoolean(args.includeDeclaration, 'includeDeclaration'),
     });
+    if (lsp.available && lsp.locations.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
+    return await astFallback.references(args, relativePath, line, column);
+  });
+
+  registry.register(toolByName('workspace_symbol_hover'), async (args: Record<string, unknown>) => {
+    const relativePath = asString(args.relativePath, 'relativePath');
+    const line = asPositiveInteger(args.line, 'line');
+    const column = asOptionalNumber(args.column);
+    const lsp = await requestWorkspaceHover(getWorkspaceHost(), {
+      relativePath,
+      languageId: resolveLanguageId(relativePath),
+      line,
+      column,
+    });
+    if (lsp.available && lsp.contents) return { ...lsp, source: 'lsp', confidence: 'high' };
+    return await astFallback.hover(args, relativePath, line, column);
+  });
+
+  registry.register(toolByName('workspace_document_symbol'), async (args: Record<string, unknown>) => {
+    const relativePath = asString(args.relativePath, 'relativePath');
+    const lsp = await requestWorkspaceDocumentSymbol(getWorkspaceHost(), {
+      relativePath,
+      languageId: resolveLanguageId(relativePath),
+      line: asOptionalNumber(args.line) ?? 1,
+      column: asOptionalNumber(args.column),
+    });
+    if (lsp.available && lsp.symbols.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
+    return await astFallback.documentSymbol(relativePath);
+  });
+
+  registry.register(toolByName('workspace_workspace_symbol'), async (args: Record<string, unknown>) => {
+    const relativePath = asString(args.relativePath, 'relativePath');
+    const query = asOptionalString(args.query);
+    const lsp = await requestWorkspaceSymbol(getWorkspaceHost(), {
+      relativePath,
+      languageId: resolveLanguageId(relativePath),
+      line: asOptionalNumber(args.line) ?? 1,
+      column: asOptionalNumber(args.column),
+      query,
+    });
+    if (lsp.available && lsp.symbols.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
+    return await astFallback.workspaceSymbol(args, query);
+  });
+
+  registry.register(toolByName('workspace_implementation'), async (args: Record<string, unknown>) => {
+    const relativePath = asString(args.relativePath, 'relativePath');
+    const line = asPositiveInteger(args.line, 'line');
+    const column = asOptionalNumber(args.column);
+    const lsp = await requestWorkspaceImplementation(getWorkspaceHost(), {
+      relativePath,
+      languageId: resolveLanguageId(relativePath),
+      line,
+      column,
+    });
+    if (lsp.available && lsp.locations.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
+    return await astFallback.implementation(args, relativePath, line, column);
+  });
+
+  registry.register(toolByName('workspace_prepare_call_hierarchy'), async (args: Record<string, unknown>) => {
+    const relativePath = asString(args.relativePath, 'relativePath');
+    const line = asPositiveInteger(args.line, 'line');
+    const column = asOptionalNumber(args.column);
+    const lsp = await requestWorkspacePrepareCallHierarchy(getWorkspaceHost(), {
+      relativePath,
+      languageId: resolveLanguageId(relativePath),
+      line,
+      column,
+    });
+    if (lsp.available && lsp.items.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
+    return await astFallback.prepareCallHierarchy(args, relativePath, line, column);
+  });
+
+  registry.register(toolByName('workspace_incoming_calls'), async (args: Record<string, unknown>) => {
+    const relativePath = asString(args.relativePath, 'relativePath');
+    const line = asPositiveInteger(args.line, 'line');
+    const column = asOptionalNumber(args.column);
+    const lsp = await requestWorkspaceIncomingCalls(getWorkspaceHost(), {
+      relativePath,
+      languageId: resolveLanguageId(relativePath),
+      line,
+      column,
+    });
+    if (lsp.available && lsp.calls.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
+    return await astFallback.incomingCalls(args, relativePath, line, column);
+  });
+
+  registry.register(toolByName('workspace_outgoing_calls'), async (args: Record<string, unknown>) => {
+    const relativePath = asString(args.relativePath, 'relativePath');
+    const line = asPositiveInteger(args.line, 'line');
+    const column = asOptionalNumber(args.column);
+    const lsp = await requestWorkspaceOutgoingCalls(getWorkspaceHost(), {
+      relativePath,
+      languageId: resolveLanguageId(relativePath),
+      line,
+      column,
+    });
+    if (lsp.available && lsp.calls.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
+    return await astFallback.outgoingCalls(args, relativePath, line, column);
   });
 
   registry.register(toolByName('workspace_rename_symbol'), async (args: Record<string, unknown>) => {
@@ -3432,6 +3692,9 @@ export function registerWorkspaceTools(
     'workspace_entrypoints', 'workspace_change_impact', 'workspace_symbol_implementations',
     'workspace_smart_context',
     'workspace_symbol_definition', 'workspace_symbol_references', 'workspace_lsp_diagnostics',
+    'workspace_symbol_hover', 'workspace_document_symbol', 'workspace_workspace_symbol',
+    'workspace_implementation', 'workspace_prepare_call_hierarchy',
+    'workspace_incoming_calls', 'workspace_outgoing_calls',
     'workspace_rename_symbol', 'workspace_organize_imports', 'workspace_apply_code_action',
     'workspace_fix_diagnostics', 'workspace_format_files',
     'workspace_git_status', 'workspace_git_diff', 'workspace_git_history',
@@ -3524,4 +3787,8 @@ export function registerWorkspaceTools(
   for (const name of oldToolNames) {
     registry.hideFromLlm(name);
   }
+
+  // graph 工具对 LLM 隐藏：项目结构改用 list(action: overview)，符号导航改用 lsp。
+  // 细粒度 handler 仍保留注册，供 UI 面板与后续 AST 兜底使用。
+  registry.hideFromLlm('graph');
 }

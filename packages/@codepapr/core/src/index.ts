@@ -112,6 +112,7 @@ export {
   generateSmartTestSkeletons,
   computeIncrementalUpdate,
   applyIncrementalUpdate,
+  findSymbolAtPosition,
 } from './tool/workspace/graphQuery';
 export type {
   WorkspaceChangeImpactOptions,
@@ -168,12 +169,28 @@ export {
   performProjectGraphRename,
   requestWorkspaceSymbolDefinition,
   requestWorkspaceSymbolReferences,
+  requestWorkspaceHover,
+  requestWorkspaceDocumentSymbol,
+  requestWorkspaceSymbol,
+  requestWorkspaceImplementation,
+  requestWorkspacePrepareCallHierarchy,
+  requestWorkspaceIncomingCalls,
+  requestWorkspaceOutgoingCalls,
 } from './tool/workspace/languageTools';
 export type {
   WorkspaceCodeOperationResult,
   WorkspaceLanguagePositionArgs,
   WorkspaceNavigationResult,
   WorkspaceSymbolLocation,
+  WorkspaceHoverResult,
+  WorkspaceDocumentSymbol,
+  WorkspaceDocumentSymbolResult,
+  WorkspaceSymbolInformation,
+  WorkspaceSymbolSearchResult,
+  WorkspaceCallHierarchyItem,
+  WorkspaceCallHierarchyPrepareResult,
+  WorkspaceCallHierarchyCall,
+  WorkspaceCallHierarchyCallsResult,
 } from './tool/workspace/languageTools';
 export { WORKSPACE_INTELLIGENCE_TOOL_DEFINITIONS } from './tool/workspace/toolDefinitions';
 export { NEW_TOOL_DEFINITIONS, MERGE_TOOL_DEFINITIONS, OLD_MERGE_TOOL_NAMES } from './tool/workspace/mergeToolDefs';

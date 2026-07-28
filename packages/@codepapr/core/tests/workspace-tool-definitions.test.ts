@@ -25,7 +25,7 @@ describe('NEW_TOOL_DEFINITIONS', () => {
     expect(tools).toHaveLength(26);
   });
 
-  const actionTools = ['graph', 'lsp', 'lsp_edit', 'git', 'browser', 'shell', 'proc'] as const;
+  const actionTools = ['graph', 'lsp', 'lsp_edit', 'git', 'browser', 'shell', 'proc', 'list'] as const;
   const actionRequiredTools = ['graph', 'lsp', 'lsp_edit', 'git', 'browser', 'shell'] as const;
 
   it.each(actionTools)('%s has action enum constraint', (name) => {
@@ -81,8 +81,8 @@ describe('NEW_TOOL_DEFINITIONS', () => {
     it('graph requires action', () => {
       expect(find('graph')?.parameters.required).toContain('action');
     });
-    it('lsp requires action, relativePath, line', () => {
-      expect(find('lsp')?.parameters.required).toEqual(['action', 'relativePath', 'line']);
+    it('lsp requires action, relativePath', () => {
+      expect(find('lsp')?.parameters.required).toEqual(['action', 'relativePath']);
     });
     it('git requires action', () => {
       expect(find('git')?.parameters.required).toContain('action');
@@ -111,9 +111,16 @@ describe('NEW_TOOL_DEFINITIONS', () => {
         'test_impact', 'generate_tests',
       ]);
     });
-    it('lsp has definition and references (no diagnostics)', () => {
+    it('list has files and overview actions', () => {
+      const e = getEnum('list');
+      expect(e).toEqual(['files', 'overview']);
+    });
+    it('lsp has the 9 opencode navigation actions (no diagnostics)', () => {
       const e = getEnum('lsp');
-      expect(e).toEqual(['definition', 'references']);
+      expect(e).toEqual([
+        'goToDefinition', 'findReferences', 'hover', 'documentSymbol', 'workspaceSymbol',
+        'goToImplementation', 'prepareCallHierarchy', 'incomingCalls', 'outgoingCalls',
+      ]);
       expect(e).not.toContain('diagnostics');
     });
     it('lsp_edit has rename, code_action, format (no organize_imports, fix)', () => {

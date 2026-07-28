@@ -166,7 +166,7 @@ describe('agentConfig - BUILTIN_AGENTS', () => {
     expect(explore.tools).toEqual({
       read: true,
       read_image: true,
-      graph: true,
+      list: true,
       lsp: true,
       diagnostics: true,
       grep: true,

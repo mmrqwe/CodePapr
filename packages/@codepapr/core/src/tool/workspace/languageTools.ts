@@ -1,4 +1,5 @@
 import type { WorkspaceHost } from './host';
+import type { SymbolConfidence, SymbolSource } from '../unifiedSymbols';
 import {
   planProjectGraphRename,
   computeRenameEditsForContent,
@@ -18,6 +19,8 @@ export interface WorkspaceNavigationResult {
   available: boolean;
   locations: WorkspaceSymbolLocation[];
   message?: string;
+  source?: SymbolSource;
+  confidence?: SymbolConfidence;
 }
 
 export interface WorkspaceLanguagePositionArgs {
@@ -329,6 +332,392 @@ export async function requestWorkspaceSymbolReferences(
   } catch (error) {
     return unavailableNavigation(error instanceof Error ? error.message : '引用查找失败。');
   }
+}
+
+export interface WorkspaceHoverResult {
+  available: boolean;
+  contents?: string;
+  message?: string;
+  source?: SymbolSource;
+  confidence?: SymbolConfidence;
+}
+
+export interface WorkspaceDocumentSymbol {
+  name: string;
+  kind: string;
+  relativePath: string;
+  line: number;
+  column: number;
+  endLine?: number;
+  endColumn?: number;
+  containerName?: string;
+}
+
+export interface WorkspaceDocumentSymbolResult {
+  available: boolean;
+  symbols: WorkspaceDocumentSymbol[];
+  message?: string;
+  source?: SymbolSource;
+  confidence?: SymbolConfidence;
+}
+
+export interface WorkspaceSymbolInformation {
+  name: string;
+  kind: string;
+  relativePath: string;
+  line: number;
+  column: number;
+  containerName?: string;
+}
+
+export interface WorkspaceSymbolSearchResult {
+  available: boolean;
+  symbols: WorkspaceSymbolInformation[];
+  message?: string;
+  source?: SymbolSource;
+  confidence?: SymbolConfidence;
+}
+
+export interface WorkspaceCallHierarchyItem {
+  name: string;
+  kind: string;
+  relativePath: string;
+  line: number;
+  column: number;
+}
+
+export interface WorkspaceCallHierarchyPrepareResult {
+  available: boolean;
+  items: WorkspaceCallHierarchyItem[];
+  message?: string;
+  source?: SymbolSource;
+  confidence?: SymbolConfidence;
+}
+
+export interface WorkspaceCallHierarchyCall {
+  name: string;
+  relativePath: string;
+  line: number;
+  column: number;
+}
+
+export interface WorkspaceCallHierarchyCallsResult {
+  available: boolean;
+  calls: WorkspaceCallHierarchyCall[];
+  message?: string;
+  source?: SymbolSource;
+  confidence?: SymbolConfidence;
+}
+
+const LSP_SYMBOL_KINDS: Record<number, string> = {
+  1: 'File', 2: 'Module', 3: 'Namespace', 4: 'Package', 5: 'Class',
+  6: 'Method', 7: 'Property', 8: 'Field', 9: 'Constructor', 10: 'Enum',
+  11: 'Interface', 12: 'Function', 13: 'Variable', 14: 'Constant', 15: 'String',
+  16: 'Number', 17: 'Boolean', 18: 'Array', 19: 'Object', 20: 'Key',
+  21: 'Null', 22: 'EnumMember', 23: 'Struct', 24: 'Event', 25: 'Operator',
+  26: 'TypeParameter',
+};
+
+function symbolKindName(kind: unknown): string {
+  return typeof kind === 'number' ? (LSP_SYMBOL_KINDS[kind] ?? 'Unknown') : 'Unknown';
+}
+
+function normalizeMarkedString(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object' && 'value' in value) {
+    const inner = (value as { value?: unknown }).value;
+    return typeof inner === 'string' ? inner : '';
+  }
+  return '';
+}
+
+function normalizeHoverContents(result: unknown): string | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+  const contents = (result as { contents?: unknown }).contents;
+  if (contents == null) return undefined;
+  if (typeof contents === 'string') return contents;
+  if (Array.isArray(contents)) {
+    const joined = contents.map((entry) => normalizeMarkedString(entry)).filter(Boolean).join('\n\n');
+    return joined || undefined;
+  }
+  const single = normalizeMarkedString(contents);
+  return single || undefined;
+}
+
+function normalizeDocumentSymbols(
+  workspacePath: string,
+  result: unknown,
+  relativePath: string
+): WorkspaceDocumentSymbol[] {
+  const symbols: WorkspaceDocumentSymbol[] = [];
+  const MAX_SYMBOLS = 500;
+
+  const walk = (entries: unknown[], containerName?: string): void => {
+    for (const entry of entries) {
+      if (symbols.length >= MAX_SYMBOLS) return;
+      if (!entry || typeof entry !== 'object') continue;
+      const candidate = entry as {
+        name?: unknown;
+        kind?: unknown;
+        range?: LspRange;
+        selectionRange?: LspRange;
+        location?: { uri?: string; range?: LspRange };
+        containerName?: unknown;
+        children?: unknown;
+      };
+
+      if (candidate.range && candidate.name != null) {
+        const selection = candidate.selectionRange ?? candidate.range;
+        symbols.push({
+          name: String(candidate.name),
+          kind: symbolKindName(candidate.kind),
+          relativePath,
+          line: (selection.start.line ?? 0) + 1,
+          column: (selection.start.character ?? 0) + 1,
+          endLine: (candidate.range.end?.line ?? selection.start.line ?? 0) + 1,
+          endColumn: (candidate.range.end?.character ?? selection.start.character ?? 0) + 1,
+          ...(containerName ? { containerName } : {}),
+        });
+        if (Array.isArray(candidate.children) && candidate.children.length > 0) {
+          walk(candidate.children, String(candidate.name));
+        }
+      } else if (candidate.location && candidate.name != null) {
+        const resolved = relativePathFromFileUri(workspacePath, candidate.location.uri) ?? relativePath;
+        symbols.push({
+          name: String(candidate.name),
+          kind: symbolKindName(candidate.kind),
+          relativePath: resolved,
+          line: (candidate.location.range?.start.line ?? 0) + 1,
+          column: (candidate.location.range?.start.character ?? 0) + 1,
+          ...(typeof candidate.containerName === 'string' && candidate.containerName
+            ? { containerName: candidate.containerName }
+            : {}),
+        });
+      }
+    }
+  };
+
+  if (Array.isArray(result)) walk(result);
+  return symbols;
+}
+
+function normalizeWorkspaceSymbols(workspacePath: string, result: unknown): WorkspaceSymbolInformation[] {
+  const symbols: WorkspaceSymbolInformation[] = [];
+  const MAX_SYMBOLS = 100;
+  if (!Array.isArray(result)) return symbols;
+
+  for (const entry of result) {
+    if (symbols.length >= MAX_SYMBOLS) break;
+    if (!entry || typeof entry !== 'object') continue;
+    const candidate = entry as {
+      name?: unknown;
+      kind?: unknown;
+      containerName?: unknown;
+      location?: { uri?: string; range?: LspRange };
+    };
+    const relativePath = relativePathFromFileUri(workspacePath, candidate.location?.uri);
+    if (!relativePath) continue;
+    symbols.push({
+      name: String(candidate.name ?? ''),
+      kind: symbolKindName(candidate.kind),
+      relativePath,
+      line: (candidate.location?.range?.start.line ?? 0) + 1,
+      column: (candidate.location?.range?.start.character ?? 0) + 1,
+      ...(typeof candidate.containerName === 'string' && candidate.containerName
+        ? { containerName: candidate.containerName }
+        : {}),
+    });
+  }
+  return symbols;
+}
+
+function normalizeCallHierarchyItems(workspacePath: string, result: unknown): WorkspaceCallHierarchyItem[] {
+  const items: WorkspaceCallHierarchyItem[] = [];
+  if (!Array.isArray(result)) return items;
+
+  for (const entry of result) {
+    if (!entry || typeof entry !== 'object') continue;
+    const candidate = entry as {
+      name?: unknown;
+      kind?: unknown;
+      uri?: string;
+      range?: LspRange;
+      selectionRange?: LspRange;
+    };
+    const relativePath = relativePathFromFileUri(workspacePath, candidate.uri);
+    if (!relativePath) continue;
+    const selection = candidate.selectionRange ?? candidate.range;
+    items.push({
+      name: String(candidate.name ?? ''),
+      kind: symbolKindName(candidate.kind),
+      relativePath,
+      line: (selection?.start.line ?? 0) + 1,
+      column: (selection?.start.character ?? 0) + 1,
+    });
+  }
+  return items;
+}
+
+function normalizeCallHierarchyCalls(
+  workspacePath: string,
+  result: unknown,
+  itemKey: 'from' | 'to'
+): WorkspaceCallHierarchyCall[] {
+  const calls: WorkspaceCallHierarchyCall[] = [];
+  const MAX_CALLS = 100;
+  if (!Array.isArray(result)) return calls;
+
+  for (const entry of result) {
+    if (calls.length >= MAX_CALLS) break;
+    if (!entry || typeof entry !== 'object') continue;
+    const item = (entry as Record<string, unknown>)[itemKey] as
+      | { name?: unknown; uri?: string; range?: LspRange; selectionRange?: LspRange }
+      | undefined;
+    if (!item) continue;
+    const relativePath = relativePathFromFileUri(workspacePath, item.uri);
+    if (!relativePath) continue;
+    const selection = item.selectionRange ?? item.range;
+    calls.push({
+      name: String(item.name ?? ''),
+      relativePath,
+      line: (selection?.start.line ?? 0) + 1,
+      column: (selection?.start.character ?? 0) + 1,
+    });
+  }
+  return calls;
+}
+
+export async function requestWorkspaceHover(
+  host: WorkspaceHost,
+  args: WorkspaceLanguagePositionArgs
+): Promise<WorkspaceHoverResult> {
+  if (!host.languageService) {
+    return { available: false, message: '当前运行时没有可用的 hover 能力。' };
+  }
+  try {
+    const result = await requestLanguageService<unknown>(host, args, 'textDocument/hover', {});
+    const contents = normalizeHoverContents(result);
+    if (contents == null) {
+      return { available: true, message: '该位置没有 hover 信息。' };
+    }
+    return { available: true, contents };
+  } catch (error) {
+    return { available: false, message: error instanceof Error ? error.message : 'hover 查询失败。' };
+  }
+}
+
+export async function requestWorkspaceDocumentSymbol(
+  host: WorkspaceHost,
+  args: WorkspaceLanguagePositionArgs
+): Promise<WorkspaceDocumentSymbolResult> {
+  if (!host.languageService) {
+    return { available: false, symbols: [], message: '当前运行时没有可用的符号大纲能力。' };
+  }
+  try {
+    const result = await requestLanguageService<unknown>(host, args, 'textDocument/documentSymbol', {});
+    return {
+      available: true,
+      symbols: normalizeDocumentSymbols(host.workspacePath, result, args.relativePath),
+    };
+  } catch (error) {
+    return { available: false, symbols: [], message: error instanceof Error ? error.message : '符号大纲获取失败。' };
+  }
+}
+
+export async function requestWorkspaceSymbol(
+  host: WorkspaceHost,
+  args: WorkspaceLanguagePositionArgs & { query?: string }
+): Promise<WorkspaceSymbolSearchResult> {
+  if (!host.languageService) {
+    return { available: false, symbols: [], message: '当前运行时没有可用的工作区符号检索能力。' };
+  }
+  try {
+    const result = await requestLanguageService<unknown>(host, args, 'workspace/symbol', {
+      query: args.query ?? '',
+    });
+    return { available: true, symbols: normalizeWorkspaceSymbols(host.workspacePath, result) };
+  } catch (error) {
+    return { available: false, symbols: [], message: error instanceof Error ? error.message : '工作区符号检索失败。' };
+  }
+}
+
+export async function requestWorkspaceImplementation(
+  host: WorkspaceHost,
+  args: WorkspaceLanguagePositionArgs
+): Promise<WorkspaceNavigationResult> {
+  if (!host.languageService) {
+    return unavailableNavigation('当前运行时没有可用的实现跳转能力。');
+  }
+  try {
+    const result = await requestLanguageService<unknown>(host, args, 'textDocument/implementation', {});
+    return { available: true, locations: normalizeLocations(host.workspacePath, result) };
+  } catch (error) {
+    return unavailableNavigation(error instanceof Error ? error.message : '实现跳转失败。');
+  }
+}
+
+export async function requestWorkspacePrepareCallHierarchy(
+  host: WorkspaceHost,
+  args: WorkspaceLanguagePositionArgs
+): Promise<WorkspaceCallHierarchyPrepareResult> {
+  if (!host.languageService) {
+    return { available: false, items: [], message: '当前运行时没有可用的调用层级能力。' };
+  }
+  try {
+    const result = await requestLanguageService<unknown>(host, args, 'textDocument/prepareCallHierarchy', {});
+    return { available: true, items: normalizeCallHierarchyItems(host.workspacePath, result) };
+  } catch (error) {
+    return { available: false, items: [], message: error instanceof Error ? error.message : '调用层级准备失败。' };
+  }
+}
+
+async function requestCallHierarchyCalls(
+  host: WorkspaceHost,
+  args: WorkspaceLanguagePositionArgs,
+  direction: 'incomingCalls' | 'outgoingCalls'
+): Promise<WorkspaceCallHierarchyCallsResult> {
+  const label = direction === 'incomingCalls' ? '入调用' : '出调用';
+  if (!host.languageService) {
+    return { available: false, calls: [], message: '当前运行时没有可用的调用层级能力。' };
+  }
+  try {
+    const prepared = await requestLanguageService<unknown>(host, args, 'textDocument/prepareCallHierarchy', {});
+    const rawItems = Array.isArray(prepared) ? prepared : prepared ? [prepared] : [];
+    const item = rawItems[0];
+    if (!item || typeof item !== 'object') {
+      return { available: true, calls: [], message: '该位置没有可用的调用层级项。' };
+    }
+    const result = await withTimeout(
+      host.languageService.request<unknown>({
+        relativePath: args.relativePath,
+        languageId: args.languageId,
+        method: `callHierarchy/${direction}`,
+        params: { item },
+      }),
+      LSP_REQUEST_TIMEOUT_MS,
+      `callHierarchy/${direction}`,
+    );
+    return {
+      available: true,
+      calls: normalizeCallHierarchyCalls(host.workspacePath, result, direction === 'incomingCalls' ? 'from' : 'to'),
+    };
+  } catch (error) {
+    return { available: false, calls: [], message: error instanceof Error ? error.message : `${label}查询失败。` };
+  }
+}
+
+export async function requestWorkspaceIncomingCalls(
+  host: WorkspaceHost,
+  args: WorkspaceLanguagePositionArgs
+): Promise<WorkspaceCallHierarchyCallsResult> {
+  return requestCallHierarchyCalls(host, args, 'incomingCalls');
+}
+
+export async function requestWorkspaceOutgoingCalls(
+  host: WorkspaceHost,
+  args: WorkspaceLanguagePositionArgs
+): Promise<WorkspaceCallHierarchyCallsResult> {
+  return requestCallHierarchyCalls(host, args, 'outgoingCalls');
 }
 
 function collectWorkspaceEditChanges(

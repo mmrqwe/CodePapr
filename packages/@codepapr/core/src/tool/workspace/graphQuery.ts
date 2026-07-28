@@ -666,7 +666,7 @@ function collectRenameTargetFiles(
   return [...files];
 }
 
-function findSymbolAtPosition(
+export function findSymbolAtPosition(
   graph: WorkspaceProjectGraphResult,
   relativePath: string,
   line: number,

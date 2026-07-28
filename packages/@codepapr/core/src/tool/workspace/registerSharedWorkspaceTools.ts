@@ -60,7 +60,13 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
     const regexQuery = globToRegex(rawQuery);
     return await registry.execute('workspace_search_files', { ...args, query: regexQuery, isRegexp: true });
   });
-  registry.register(findTool('list'), forward(registry, 'workspace_list_files'));
+  registry.register(findTool('list'), async (args) => {
+    const a = typeof args.action === 'string' ? args.action : 'files';
+    if (a === 'overview') {
+      return await registry.execute('workspace_project_graph', { ...args, view: 'overview' });
+    }
+    return await registry.execute('workspace_list_files', args);
+  });
 
   // ──── 项目语义图 ────
   registry.register(findTool('graph'), options.graphHandler ?? createDefaultGraphHandler(registry));
@@ -185,8 +191,15 @@ function createDefaultLspHandler(registry: ToolRegistry): ToolHandler {
   return async (args) => {
     const a = asString(args.action, 'action');
     const m: Record<string, string> = {
-      definition: 'workspace_symbol_definition',
-      references: 'workspace_symbol_references',
+      goToDefinition: 'workspace_symbol_definition',
+      findReferences: 'workspace_symbol_references',
+      hover: 'workspace_symbol_hover',
+      documentSymbol: 'workspace_document_symbol',
+      workspaceSymbol: 'workspace_workspace_symbol',
+      goToImplementation: 'workspace_implementation',
+      prepareCallHierarchy: 'workspace_prepare_call_hierarchy',
+      incomingCalls: 'workspace_incoming_calls',
+      outgoingCalls: 'workspace_outgoing_calls',
     };
     const target = m[a];
     if (!target) throw new Error(`未知的 lsp action: ${a}`);

@@ -258,13 +258,13 @@ export function filterToolsForMode<T extends IToolDefinition>(
 export const BUILTIN_AGENTS: AgentDefinition[] = [
   {
       name: 'explore',
-      description: 'Code analysis (lsp/graph symbol tracing + dependency chains, more accurate than grep)',
+      description: 'Code analysis (lsp symbol navigation + project structure overview, more accurate than grep)',
       mode: 'subagent',
       model: 'fast',
       tools: {
         read: true,
         read_image: true,
-        graph: true,
+        list: true,
         lsp: true,
         diagnostics: true,
         grep: true,
@@ -274,13 +274,13 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
 ## Core Workflow
 
 1. **Choose tools by task, don't blindly read files**:
-   - **Precise query** ("Where is Foo defined", "Who calls bar"): Use \`lsp(action: definition)\` or \`graph(action: lookup)\` directly — no need for \`graph(action: full)\`.
-   - **Fuzzy exploration** ("How is auth implemented", "What's the data flow"): Start with \`graph(action: smart_context, query: "task description")\` to get task-relevant context.
-   - **Global understanding** ("Overall project structure", "What modules exist"): Use \`graph(action: full)\` to build a global map.
-   - **Impact analysis** ("What happens if I change this file"): Use \`graph(action: impact)\`.
-   - After graph/lsp gives you file+line, use \`read\` to precisely read the relevant lines. **Don't skip graph/lsp and blindly read files.**
+   - **Global understanding** ("Overall project structure", "What modules exist"): Use \`list(action: overview)\` to get the project map (directory tree + symbol skeleton).
+   - **Precise query** ("Where is Foo defined"): Use \`lsp(action: goToDefinition)\` or \`lsp(action: workspaceSymbol, query: "Foo")\` directly.
+   - **Fuzzy exploration** ("How is auth implemented", "What's the data flow"): Start with \`lsp(action: workspaceSymbol, query: "auth")\` to locate relevant symbols, then \`lsp(action: documentSymbol)\` for a file's outline.
+   - **Who uses / calls this** ("Who calls bar", "What implements interface I"): Use \`lsp(action: findReferences)\`, \`lsp(action: goToImplementation)\`, or \`lsp(action: incomingCalls)\`.
+   - After lsp/list gives you file+line, use \`read\` to precisely read the relevant lines. **Don't skip lsp/list and blindly read files.**
 
-2. **lsp for references, grep for text**: To find "who calls foo", use \`lsp(action: references)\` — it catches renamed imports like \`import { foo as bar }\` that \`grep "foo"\` would miss. Use \`grep\` only for string literals, log templates, or comments.
+2. **lsp for references, grep for text**: To find "who calls foo", use \`lsp(action: findReferences)\` — it catches renamed imports like \`import { foo as bar }\` that \`grep "foo"\` would miss. Use \`grep\` only for string literals, log templates, or comments.
 
 3. **Exploration depth control**: Trace dependency chains up to 3 levels deep. Stop when you reach external dependencies (node_modules/system libraries), leaf nodes (functions with no further calls), or boundaries (entry points of different modules). Don't trace infinitely.
 
@@ -288,19 +288,17 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
 
 ## Available Tools
 
-- **graph (action: full)** — Generate complete ProjectGraph (directory tree + code skeleton + dependency graph). Use only for global understanding
-- **graph (action: lookup, query: "symbol name")** — Find symbol by name, returns symbolId, file, line number
-- **graph (action: dependency, symbolId: "xxx")** — Extract dependency subgraph, direction can be incoming/outgoing/both
-- **graph (action: impact, relativePath: "src/foo.ts")** — Reverse impact analysis: what changes to this file would affect
-- **graph (action: implementations, symbolId: "xxx")** — Find all implementations of an interface/base class
-- **graph (action: entrypoints)** — Project entry points
-- **graph (action: smart_context, query: "task description")** — Intelligently get context based on task
-- **graph (action: dead_code | circular_deps | type_hierarchy | suggest_refactors | test_impact | generate_tests)** — Deep static analysis
+- **list (action: overview, relativePath?)** — Project structure overview: directory tree + code symbol skeleton (AST-based, works without LSP). Use for global understanding
 
-- **lsp (action: definition, relativePath+line)** — Jump to definition. Prefer over grep for finding symbol sources
-- **lsp (action: references, relativePath+line)** — Find references. Prefer over grep, catches renamed references
+- **lsp (action: goToDefinition, relativePath+line)** — Jump to definition. Prefer over grep for finding symbol sources
+- **lsp (action: findReferences, relativePath+line)** — Find references. Prefer over grep, catches renamed references
+- **lsp (action: hover, relativePath+line)** — Type signature & documentation info for a symbol
+- **lsp (action: documentSymbol, relativePath)** — File symbol outline (flat list)
+- **lsp (action: workspaceSymbol, relativePath+query)** — Search symbols across the whole workspace
+- **lsp (action: goToImplementation, relativePath+line)** — Jump to interface/abstract class implementations
+- **lsp (action: incomingCalls | outgoingCalls, relativePath+line)** — Call hierarchy (callers / callees)
 - **diagnostics** — Query file or project LSP diagnostics (to check if code currently has errors)
-- **read** — Read file content (after graph/lsp gives you file+line, precisely read relevant lines)
+- **read** — Read file content (after lsp/list gives you file+line, precisely read relevant lines)
 - **grep** — Regex search for text literals (not for structural analysis)
 
 ## Output Format
@@ -312,7 +310,7 @@ Simple queries (where is it defined, who calls it) — give conclusions directly
 - Referenced in 3 places: Login.tsx:56, Register.tsx:34, App.tsx:12
 \`\`\`
 
-Complex analysis (dependency chains, impact analysis, architecture understanding) — use full format:
+Complex analysis (dependency chains, call chains, architecture understanding) — use full format:
 \`\`\`
 ## Analysis Result
 

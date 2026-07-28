@@ -117,6 +117,94 @@ export const WORKSPACE_INTELLIGENCE_TOOL_DEFINITIONS: IToolDefinition[] = [
     },
   },
   {
+    name: 'workspace_symbol_hover',
+    description: '使用语言服务获取符号的 hover 信息（类型签名、文档）。若无可用 LSP，会明确返回 unavailable。',
+    parameters: {
+      type: 'object',
+      properties: {
+        relativePath: { type: 'string', description: '当前文件的相对路径。' },
+        line: { type: 'number', description: '符号所在行号，从 1 开始。' },
+        column: { type: 'number', description: '可选。符号所在列号，从 1 开始。默认 1。' },
+      },
+      required: ['relativePath', 'line'],
+    },
+  },
+  {
+    name: 'workspace_document_symbol',
+    description: '使用语言服务获取文件的符号大纲（扁平列表）。若无可用 LSP，会明确返回 unavailable。',
+    parameters: {
+      type: 'object',
+      properties: {
+        relativePath: { type: 'string', description: '要获取符号大纲的文件相对路径。' },
+      },
+      required: ['relativePath'],
+    },
+  },
+  {
+    name: 'workspace_workspace_symbol',
+    description: '使用语言服务在整个工作区按名称检索符号。relativePath 用于确定语言服务器（锚点文件）。若无可用 LSP，会明确返回 unavailable。',
+    parameters: {
+      type: 'object',
+      properties: {
+        relativePath: { type: 'string', description: '锚点文件相对路径，用于确定语言/语言服务器。' },
+        query: { type: 'string', description: '符号名称检索词，空字符串表示列出全部。' },
+      },
+      required: ['relativePath'],
+    },
+  },
+  {
+    name: 'workspace_implementation',
+    description: '使用语言服务跳转到接口/抽象类的实现。若无可用 LSP，会明确返回 unavailable。',
+    parameters: {
+      type: 'object',
+      properties: {
+        relativePath: { type: 'string', description: '当前文件的相对路径。' },
+        line: { type: 'number', description: '符号所在行号，从 1 开始。' },
+        column: { type: 'number', description: '可选。符号所在列号，从 1 开始。默认 1。' },
+      },
+      required: ['relativePath', 'line'],
+    },
+  },
+  {
+    name: 'workspace_prepare_call_hierarchy',
+    description: '使用语言服务在指定位置准备调用层级项。若无可用 LSP，会明确返回 unavailable。',
+    parameters: {
+      type: 'object',
+      properties: {
+        relativePath: { type: 'string', description: '当前文件的相对路径。' },
+        line: { type: 'number', description: '符号所在行号，从 1 开始。' },
+        column: { type: 'number', description: '可选。符号所在列号，从 1 开始。默认 1。' },
+      },
+      required: ['relativePath', 'line'],
+    },
+  },
+  {
+    name: 'workspace_incoming_calls',
+    description: '使用语言服务查找调用指定符号的位置（入调用）。内部自动准备调用层级项。若无可用 LSP，会明确返回 unavailable。',
+    parameters: {
+      type: 'object',
+      properties: {
+        relativePath: { type: 'string', description: '当前文件的相对路径。' },
+        line: { type: 'number', description: '符号所在行号，从 1 开始。' },
+        column: { type: 'number', description: '可选。符号所在列号，从 1 开始。默认 1。' },
+      },
+      required: ['relativePath', 'line'],
+    },
+  },
+  {
+    name: 'workspace_outgoing_calls',
+    description: '使用语言服务查找指定符号调用的目标（出调用）。内部自动准备调用层级项。若无可用 LSP，会明确返回 unavailable。',
+    parameters: {
+      type: 'object',
+      properties: {
+        relativePath: { type: 'string', description: '当前文件的相对路径。' },
+        line: { type: 'number', description: '符号所在行号，从 1 开始。' },
+        column: { type: 'number', description: '可选。符号所在列号，从 1 开始。默认 1。' },
+      },
+      required: ['relativePath', 'line'],
+    },
+  },
+  {
     name: 'workspace_rename_symbol',
     description: '使用语言服务做语义化重命名并应用返回的 workspace edit。',
     parameters: {

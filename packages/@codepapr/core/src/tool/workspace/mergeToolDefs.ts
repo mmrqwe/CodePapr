@@ -111,11 +111,12 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 7. list ────
   {
     name: 'list',
-    description: '浏览项目目录树结构。',
+    description: 'action: files(默认，浏览目录树)|overview(项目结构概览：目录树+代码符号骨架，AST 实现，无需 LSP)。',
     parameters: {
       type: 'object',
       properties: {
-        relativePath: { type: 'string', description: '子目录路径；省略则列出项目根目录。' },
+        action: { type: 'string', enum: ['files', 'overview'] },
+        relativePath: { type: 'string', description: '子目录路径；省略则列出项目根目录。overview 时用于限定概览范围。' },
         maxDepth: { type: 'number', description: '递归深度，默认 2，最大 6。' },
       },
     },
@@ -156,17 +157,18 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 9. lsp ────
   {
     name: 'lsp',
-    description: '语言服务只读导航。action: definition(跳转定义)|references(查找引用)。需提供文件和行号。',
+    description: '语言服务只读导航与分析。action: goToDefinition(跳转定义)|findReferences(查找引用)|hover(类型/文档信息)|documentSymbol(文件符号大纲)|workspaceSymbol(工作区符号检索，需 query)|goToImplementation(跳转实现)|prepareCallHierarchy(准备调用层级)|incomingCalls(入调用)|outgoingCalls(出调用)。多数 action 需提供文件和行号；documentSymbol/workspaceSymbol 仅需文件。',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['definition', 'references'] },
-        relativePath: { type: 'string', description: '文件相对路径。' },
-        line: { type: 'number', description: '行号，1-based。' },
+        action: { type: 'string', enum: ['goToDefinition', 'findReferences', 'hover', 'documentSymbol', 'workspaceSymbol', 'goToImplementation', 'prepareCallHierarchy', 'incomingCalls', 'outgoingCalls'] },
+        relativePath: { type: 'string', description: '文件相对路径。workspaceSymbol 时作为确定语言服务器的锚点文件。' },
+        line: { type: 'number', description: '行号，1-based。documentSymbol/workspaceSymbol 可省略。' },
         column: { type: 'number', description: '列号，默认 1。' },
-        includeDeclaration: { type: 'boolean', description: 'references 时是否含声明位置。' },
+        includeDeclaration: { type: 'boolean', description: 'findReferences 时是否含声明位置。' },
+        query: { type: 'string', description: 'workspaceSymbol 的符号检索词，空字符串列出全部。' },
       },
-      required: ['action', 'relativePath', 'line'],
+      required: ['action', 'relativePath'],
     },
   },
   // ──── 10. lsp_edit ────

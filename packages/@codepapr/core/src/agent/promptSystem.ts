@@ -756,13 +756,22 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
         : '- [graph] 先拿地图再行动：`graph(action: full)` 拿全局结构 → `graph(action: lookup)` 定位目标 → `graph(action: dependency)` 看依赖链、`graph(action: impact)` 改前看影响面。深度分析用 `implementations`（找实现）、`entrypoints`（找入口链）、`smart_context`（任务感知上下文）。不要跳过第一步直接盲读文件。'
     );
   }
+  if (hasTool(toolNames, 'list') && !isApp) {
+    highPriority.push(
+      lang === 'en'
+        ? '- [list] `list(action: overview)` gives the project structure map (directory tree + symbol skeleton, AST-based, no LSP needed) — get the map before acting instead of reading files blindly.'
+        : lang === 'zh-TW'
+        ? '- [list] `list(action: overview)` 取得專案結構地圖（目錄樹+符號骨架，AST 實現，無需 LSP）——先拿地圖再行動，不要盲讀檔案。'
+        : '- [list] `list(action: overview)` 取得项目结构地图（目录树+符号骨架，AST 实现，无需 LSP）——先拿地图再行动，不要盲读文件。'
+    );
+  }
   if (hasTool(toolNames, 'lsp') && !isApp) {
     highPriority.push(
       lang === 'en'
-        ? '- [lsp] `lsp(action: references)` finds ALL callers of a symbol (including renamed imports that grep misses) — run it before editing any exported symbol. `lsp(action: definition)` jumps to the canonical source, faster and more precise than grep.'
+        ? '- [lsp] `lsp(action: findReferences)` finds ALL callers of a symbol (including renamed imports that grep misses) — run it before editing any exported symbol. `lsp(action: goToDefinition)` jumps to the canonical source, faster and more precise than grep.'
         : lang === 'zh-TW'
-        ? '- [lsp] `lsp(action: references)` 找出符號的所有引用者（包括重命名引用，grep 會漏掉）——修改導出符號前必查。`lsp(action: definition)` 跳轉到規範定義源頭，比 grep 快且精確。'
-        : '- [lsp] `lsp(action: references)` 找出符号的所有引用者（包括重命名引用，grep 会漏掉）——修改导出符号前必查。`lsp(action: definition)` 跳转到规范定义源头，比 grep 快且精确。'
+        ? '- [lsp] `lsp(action: findReferences)` 找出符號的所有引用者（包括重命名引用，grep 會漏掉）——修改導出符號前必查。`lsp(action: goToDefinition)` 跳轉到規範定義源頭，比 grep 快且精確。'
+        : '- [lsp] `lsp(action: findReferences)` 找出符号的所有引用者（包括重命名引用，grep 会漏掉）——修改导出符号前必查。`lsp(action: goToDefinition)` 跳转到规范定义源头，比 grep 快且精确。'
     );
   }
   if (hasTool(toolNames, 'diagnostics') && !isApp) {

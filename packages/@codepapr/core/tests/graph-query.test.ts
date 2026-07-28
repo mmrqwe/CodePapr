@@ -14,6 +14,7 @@ import {
   computeRenameEditsForContent,
   applyRenameEditsToContent,
   applyIncrementalUpdate,
+  findSymbolAtPosition,
 } from '../src';
 import type {
   WorkspaceProjectGraphResult,
@@ -401,5 +402,24 @@ describe('Regression: audited graphQuery bugs', () => {
     const edgeIds = result.edges.map((e) => e.id);
     expect(new Set(nodeIds).size).toBe(nodeIds.length);
     expect(new Set(edgeIds).size).toBe(edgeIds.length);
+  });
+});
+
+describe('findSymbolAtPosition (AST 兜底的位置→符号解析)', () => {
+  it('resolves the nearest symbol at-or-before the given line', () => {
+    const graph = makeGraph();
+    expect(findSymbolAtPosition(graph, 'src/lib.ts', 2, 1)?.label).toBe('helper');
+    expect(findSymbolAtPosition(graph, 'src/models.ts', 2, 1)?.label).toBe('unusedFn');
+  });
+
+  it('returns null when no symbol precedes the position in that file', () => {
+    const graph = makeGraph();
+    expect(findSymbolAtPosition(graph, 'src/main.ts', 1, 1)).toBeNull();
+  });
+
+  it('is scoped to the given file', () => {
+    const graph = makeGraph();
+    // lib.ts 第 1 行无符号（helper 在第 2 行）；models.ts 的 Model@1 不应串入
+    expect(findSymbolAtPosition(graph, 'src/lib.ts', 1, 1)).toBeNull();
   });
 });

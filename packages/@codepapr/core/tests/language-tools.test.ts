@@ -5,6 +5,13 @@ import {
   performWorkspaceRename,
   performWorkspaceFormatFiles,
   requestWorkspaceSymbolDefinition,
+  requestWorkspaceHover,
+  requestWorkspaceDocumentSymbol,
+  requestWorkspaceSymbol,
+  requestWorkspaceImplementation,
+  requestWorkspacePrepareCallHierarchy,
+  requestWorkspaceIncomingCalls,
+  requestWorkspaceOutgoingCalls,
 } from '../src';
 import type {
   WorkspaceHost,
@@ -307,5 +314,181 @@ describe('requestWorkspaceSymbolDefinition (graceful failure)', () => {
     expect(result.available).toBe(false);
     expect(result.locations).toEqual([]);
     expect(result.message).toContain('server crashed');
+  });
+});
+
+describe('requestWorkspaceHover', () => {
+  it('extracts MarkupContent value', async () => {
+    const host = createMockHost({
+      files: { 'src/a.ts': 'const foo = 1;\n' },
+      languageServiceResult: { contents: { kind: 'markdown', value: '```ts\nconst foo: number\n```' } },
+    });
+    const result = await requestWorkspaceHover(host, {
+      relativePath: 'src/a.ts', languageId: 'typescript', line: 1, column: 7,
+    });
+    expect(result.available).toBe(true);
+    expect(result.contents).toContain('const foo: number');
+  });
+
+  it('reports unavailable when the language service errors', async () => {
+    const host = createMockHost({
+      files: { 'src/a.ts': 'foo\n' },
+      languageServiceError: new Error('no server'),
+    });
+    const result = await requestWorkspaceHover(host, {
+      relativePath: 'src/a.ts', languageId: 'typescript', line: 1, column: 1,
+    });
+    expect(result.available).toBe(false);
+    expect(result.message).toContain('no server');
+  });
+});
+
+describe('requestWorkspaceDocumentSymbol', () => {
+  it('flattens a hierarchical DocumentSymbol tree into a list with container names', async () => {
+    const host = createMockHost({
+      files: { 'src/a.ts': 'class MyClass { myMethod() {} }\n' },
+      languageServiceResult: [
+        {
+          name: 'MyClass', kind: 5,
+          range: { start: { line: 0, character: 0 }, end: { line: 10, character: 1 } },
+          selectionRange: { start: { line: 0, character: 6 }, end: { line: 0, character: 13 } },
+          children: [
+            {
+              name: 'myMethod', kind: 6,
+              range: { start: { line: 1, character: 2 }, end: { line: 1, character: 12 } },
+              selectionRange: { start: { line: 1, character: 2 }, end: { line: 1, character: 10 } },
+            },
+          ],
+        },
+      ],
+    });
+    const result = await requestWorkspaceDocumentSymbol(host, {
+      relativePath: 'src/a.ts', languageId: 'typescript', line: 1,
+    });
+    expect(result.available).toBe(true);
+    expect(result.symbols).toHaveLength(2);
+    expect(result.symbols[0]).toMatchObject({ name: 'MyClass', kind: 'Class', relativePath: 'src/a.ts', line: 1, column: 7 });
+    expect(result.symbols[1]).toMatchObject({ name: 'myMethod', kind: 'Method', containerName: 'MyClass', line: 2 });
+  });
+});
+
+describe('requestWorkspaceSymbol', () => {
+  it('parses SymbolInformation results and forwards the query', async () => {
+    const host = createMockHost({
+      files: { 'src/a.ts': 'function foo() {}\n' },
+      languageServiceResult: [
+        {
+          name: 'foo', kind: 12,
+          location: { uri: 'file:///proj/src/a.ts', range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } } },
+        },
+      ],
+    });
+    const result = await requestWorkspaceSymbol(host, {
+      relativePath: 'src/a.ts', languageId: 'typescript', line: 1, query: 'foo',
+    });
+    expect(result.available).toBe(true);
+    expect(result.symbols).toEqual([
+      { name: 'foo', kind: 'Function', relativePath: 'src/a.ts', line: 1, column: 1 },
+    ]);
+    expect(host.lastRequestParams).toMatchObject({ query: 'foo' });
+  });
+});
+
+describe('requestWorkspaceImplementation', () => {
+  it('normalizes locations returned by the language server', async () => {
+    const host = createMockHost({
+      files: { 'src/a.ts': 'interface I {}\n' },
+      languageServiceResult: [
+        { uri: 'file:///proj/src/impl.ts', range: { start: { line: 5, character: 2 }, end: { line: 5, character: 10 } } },
+      ],
+    });
+    const result = await requestWorkspaceImplementation(host, {
+      relativePath: 'src/a.ts', languageId: 'typescript', line: 1, column: 11,
+    });
+    expect(result.available).toBe(true);
+    expect(result.locations[0]).toMatchObject({ relativePath: 'src/impl.ts', line: 6, column: 3 });
+  });
+});
+
+describe('requestWorkspacePrepareCallHierarchy', () => {
+  it('normalizes call hierarchy items', async () => {
+    const host = createMockHost({
+      files: { 'src/a.ts': 'function foo() {}\n' },
+      languageServiceResult: [
+        {
+          name: 'foo', kind: 12, uri: 'file:///proj/src/a.ts',
+          selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+        },
+      ],
+    });
+    const result = await requestWorkspacePrepareCallHierarchy(host, {
+      relativePath: 'src/a.ts', languageId: 'typescript', line: 1, column: 10,
+    });
+    expect(result.available).toBe(true);
+    expect(result.items[0]).toMatchObject({ name: 'foo', kind: 'Function', relativePath: 'src/a.ts', line: 1, column: 1 });
+  });
+});
+
+describe('call hierarchy calls (two-step prepare + calls)', () => {
+  const prepareItem = {
+    name: 'foo', kind: 12, uri: 'file:///proj/src/a.ts',
+    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+    selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+  };
+
+  it('incomingCalls prepares then reads `from` items', async () => {
+    const host = createMockHost({ files: { 'src/a.ts': 'foo\n' } });
+    host.languageService = {
+      async request(req) {
+        if (req.method === 'textDocument/prepareCallHierarchy') return [prepareItem] as never;
+        if (req.method === 'callHierarchy/incomingCalls') {
+          return [
+            {
+              from: { name: 'caller', uri: 'file:///proj/src/b.ts', selectionRange: { start: { line: 3, character: 0 }, end: { line: 3, character: 6 } } },
+              fromRanges: [],
+            },
+          ] as never;
+        }
+        return null as never;
+      },
+    };
+    const result = await requestWorkspaceIncomingCalls(host, {
+      relativePath: 'src/a.ts', languageId: 'typescript', line: 1, column: 1,
+    });
+    expect(result.available).toBe(true);
+    expect(result.calls).toEqual([{ name: 'caller', relativePath: 'src/b.ts', line: 4, column: 1 }]);
+  });
+
+  it('outgoingCalls prepares then reads `to` items', async () => {
+    const host = createMockHost({ files: { 'src/a.ts': 'foo\n' } });
+    host.languageService = {
+      async request(req) {
+        if (req.method === 'textDocument/prepareCallHierarchy') return [prepareItem] as never;
+        if (req.method === 'callHierarchy/outgoingCalls') {
+          return [
+            {
+              to: { name: 'callee', uri: 'file:///proj/src/c.ts', selectionRange: { start: { line: 7, character: 4 }, end: { line: 7, character: 9 } } },
+              fromRanges: [],
+            },
+          ] as never;
+        }
+        return null as never;
+      },
+    };
+    const result = await requestWorkspaceOutgoingCalls(host, {
+      relativePath: 'src/a.ts', languageId: 'typescript', line: 1, column: 1,
+    });
+    expect(result.available).toBe(true);
+    expect(result.calls).toEqual([{ name: 'callee', relativePath: 'src/c.ts', line: 8, column: 5 }]);
+  });
+
+  it('returns an empty available result when prepare yields no item', async () => {
+    const host = createMockHost({ files: { 'src/a.ts': 'foo\n' }, languageServiceResult: [] });
+    const result = await requestWorkspaceIncomingCalls(host, {
+      relativePath: 'src/a.ts', languageId: 'typescript', line: 1, column: 1,
+    });
+    expect(result.available).toBe(true);
+    expect(result.calls).toEqual([]);
+    expect(result.message).toContain('调用层级项');
   });
 });
