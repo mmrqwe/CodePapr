@@ -90,7 +90,7 @@ Tauri Rust 后端已从单文件 `main.rs` 拆分为多个领域模块，每个�
 | 模块 | 文件 | 责任 |
 | --- | --- | --- |
 | `browser` | `src-tauri/src/browser/` | 基于 headless_chrome 的浏览器自动化（open / navigate / click / type / screenshot / read） |
-| `shell` | `src-tauri/src/shell/` | 前台命令、后台进程、持久 Shell 会话与命令安全守卫 |
+| `shell` | `src-tauri/src/shell/` | bash 工具后端：shell 命令执行（穿过 shell）、后台进程管理与命令安全守卫 |
 | `web` | `src-tauri/src/web/` | HTTP fetch、网页正文提取、多引擎搜索（SearXNG 优先，失败自动降级到 Bing / Mojeek / Qwant / Wikipedia 等内置多源聚合） |
 | `workspace_fs` | `src-tauri/src/workspace_fs/` | 文件列表、文本读取、写入、SEARCH/REPLACE diff、文本/路径搜索 |
 | `task_queue` | `src-tauri/src/task_queue/mod.rs` | 重 I/O 操作串行化队列，前端通过 `task_id` 轮询结果 |
@@ -130,9 +130,7 @@ LLM 可调用 30 个独立工具（含 `task` / `todo` 两个动态工具），�
 | `lsp_edit` | rename / code_action / format | workspace_rename_symbol / workspace_apply_code_action / workspace_format_files |
 | `diagnostics` | 单文件 LSP 诊断 / 项目级诊断 | workspace_lsp_diagnostics / workspace_project_diagnostics |
 | `git` | status / diff / log / branch / stage / commit / restore / reset | workspace_git_* |
-| `exec` | 前台/后台命令执行 | workspace_run_command / workspace_start_background_command |
-| `shell` | open / send / read / close / list 持久会话 | shell_* |
-| `proc` | 后台进程管理 | workspace_list_background_processes / workspace_stop_background_process |
+| `bash` | 在项目环境执行 shell 命令（穿过 shell）；action: run/list/stop/stop_all；background:true 后台运行 | workspace_run_shell_command / workspace_start_shell_background_command / workspace_*_background_processes |
 | `browser` | open / navigate / reload / close / click / type / read / screenshot / get | browser_* |
 | `web_search` | 在线搜索 | web_search |
 | `web_fetch` | 读取网页内容 | web_fetch_url |
@@ -150,7 +148,7 @@ LLM 可调用 30 个独立工具（含 `task` / `todo` 两个动态工具），�
 
 30 个工具统一注册在 ToolRegistry 中，冻结后 hash 确保缓存一致性。`todo` 和 `task` 为动态生成。
 
-Ask / Plan 只读模式使用 `FilteringToolRegistry`（`ToolRegistry` 子类）：注册时按谓词跳过变更类工具（`MUTATING_TOOL_NAMES`：write/edit/patch/lsp_edit/exec/shell/proc/git/app_*），使其既不出现在工具集也不注册 handler——硬拦截而非提示词软约束。Agent / App 模式使用普通 `ToolRegistry`。
+Ask / Plan 只读模式使用 `FilteringToolRegistry`（`ToolRegistry` 子类）：注册时按谓词跳过变更类工具（`MUTATING_TOOL_NAMES`：write/edit/patch/lsp_edit/bash/git/app_*），使其既不出现在工具集也不注册 handler——硬拦截而非提示词软约束。Agent / App 模式使用普通 `ToolRegistry`。
 
 **外部路径权限**：桌面端对 `read` / `list` 操作的项目外绝对路径会弹出 `PermissionDialog`，由用户选择“拒绝 / 允许此文件 / 允许此文件夹”，授权结果保存在 `permissionStore` 白名单中。CLI 的读取路径边界相对宽松，写入仍限制在工作区内。
 
@@ -205,7 +203,7 @@ Papr 是 CodePapr 的应用运行时——AI 生成的 `.papr` App 可以直接�
 1. **React 首检** — `usePaprBridge` 根据 manifest.permissions 做快速拒绝
 2. **Rust 权威** — 每个 `papr_*` Tauri 命令开头调 `check_permission(manifest, capability)`，即使绕过 SDK 直接 postMessage 也被拦截
 
-工具权限映射（`check_tool_permission`）：`read/grep/list` → `workspace:read`、`write/edit` → `workspace:write`、`exec/shell` → `workspace:exec`、`web_search/web_fetch` → `http:get`。
+工具权限映射（`check_tool_permission`）：`read/grep/list` → `workspace:read`、`write/edit` → `workspace:write`、`bash` → `workspace:exec`、`web_search/web_fetch` → `http:get`。
 
 **App Agent 系统：**
 

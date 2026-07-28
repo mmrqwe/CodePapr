@@ -459,42 +459,20 @@
           <div class="idx">03</div>
           <div class="tt">
             <h3>Command &amp; Process <span>命令与进程</span></h3>
-            <div class="tags"><span class="tag">exec / shell / proc</span></div>
+            <div class="tags"><span class="tag">bash</span></div>
           </div>
           <div class="hz"><b>执行面</b>阻塞 / 后台 / 持久会话</div>
         </div>
 
         <div class="item">
           <div class="row">
-            <div class="addr">EXEC</div>
-            <div class="name">exec<small>→ workspace_run_command / start_background / start_preview · :2253 / :2403 / :2418</small></div>
-            <div class="src"><span class="chip">background:true → 后台</span><span class="chip">previewUrl → 预览</span></div>
+            <div class="addr">BASH</div>
+            <div class="name">bash<small>→ workspace_run_shell_command / workspace_start_shell_background_command / workspace_*_background_processes</small></div>
+            <div class="src"><span class="chip">action: run|list|stop|stop_all</span><span class="chip">background:true → 后台</span></div>
             <div class="cchip c-text">纯文本</div>
           </div>
-          <div class="desc">运行命令，默认阻塞等待。<code>background:true</code> 后台运行返回 pid；带 <code>previewUrl</code> 则启动预览会话。<code>timeoutSeconds</code> 默认 30 最大 600。</div>
-          <div class="more"><div class="mbox">分发：<code>exec</code> → background? → <code>workspace_start_background_command</code> / <code>workspace_start_preview_session</code>，否则 <code>workspace_run_command</code>。</div></div>
-        </div>
-
-        <div class="item">
-          <div class="row">
-            <div class="addr">SHELL</div>
-            <div class="name">shell<small>→ shell_* · :2546 / :2557 / :2563 / :2573 / :2601</small></div>
-            <div class="src"><span class="chip">action: open|send|read|close|list</span></div>
-            <div class="cchip c-text">纯文本</div>
-          </div>
-          <div class="desc">持久 Shell 会话：open 启动、send 发命令、read 读输出尾部、close 关闭、list 列出全部。send 传 command+args 或 input（仅交互提示）。</div>
-          <div class="more"><div class="mbox">分发：<code>shell</code> → <code>shell_open_session</code> / <code>shell_send_input</code> / <code>shell_read_output</code> / <code>shell_close_session</code> / <code>shell_list_sessions</code>。</div></div>
-        </div>
-
-        <div class="item">
-          <div class="row">
-            <div class="addr">PROC</div>
-            <div class="name">proc<small>→ workspace_*_background_processes · :2441 / :2447 / :2457</small></div>
-            <div class="src"><span class="chip">action: list|stop|stop_all</span></div>
-            <div class="cchip c-text">纯文本</div>
-          </div>
-          <div class="desc">后台进程管理（由 exec background 创建）。不传 action 默认列出；stop 停指定 pid；stop_all 停全部。</div>
-          <div class="more"><div class="mbox">分发：<code>proc</code> → <code>workspace_list_background_processes</code> / <code>workspace_stop_background_process</code> / <code>workspace_stop_all_background_processes</code>。</div></div>
+          <div class="desc">在项目环境执行 shell 命令（穿过 shell，支持管道/&&/变量）。<code>action: run</code> 默认阻塞等待；<code>background:true</code> 后台运行（dev server / 长驻命令）返回 pid；<code>workdir</code> 指定工作目录（相对项目根或绝对）。<code>list/stop/stop_all</code> 管理后台进程。</div>
+          <div class="more"><div class="mbox">分发：<code>bash</code> → run + background? → <code>workspace_start_shell_background_command</code>，否则 <code>workspace_run_shell_command</code>；list/stop/stop_all → <code>workspace_list_background_processes</code> / <code>workspace_stop_background_process</code> / <code>workspace_stop_all_background_processes</code>。</div></div>
         </div>
       </section>
 
@@ -643,7 +621,7 @@
           <b>模式 2（+联网）</b><br>
           <span class="mk">+ web_search web_fetch web_download</span><br><br>
           <b>模式 3（+写执行）</b><br>
-          <span class="mk">+ write edit patch exec shell</span>
+          <span class="mk">+ write edit patch bash</span>
         </div>
       </div>
     </aside>

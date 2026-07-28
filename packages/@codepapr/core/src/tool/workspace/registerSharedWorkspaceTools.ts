@@ -113,42 +113,23 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
     return await registry.execute(target, args);
   });
 
-  // ──── 命令执行 ────
-  registry.register(findTool('exec'), async (args) => {
-    if (args.background === true) {
-      if (typeof args.previewUrl === 'string') {
-        return await registry.execute('workspace_start_preview_session', args);
-      }
-      return await registry.execute('workspace_start_background_command', args);
+  // ──── bash：shell 命令执行 + 后台进程管理 ────
+  registry.register(findTool('bash'), async (args) => {
+    const a = typeof args.action === 'string' ? args.action : 'run';
+    if (a === 'list') {
+      return await registry.execute('workspace_list_background_processes', args);
     }
-    return await registry.execute('workspace_run_command', args);
-  });
-
-  // ──── 持久 Shell ────
-  registry.register(findTool('shell'), async (args) => {
-    const a = asString(args.action, 'action');
-    const m: Record<string, string> = {
-      open: 'shell_open_session',
-      list: 'shell_list_sessions',
-      send: 'shell_send_input',
-      read: 'shell_read_output',
-      close: 'shell_close_session',
-    };
-    const target = m[a];
-    if (!target) throw new Error(`未知的 shell action: ${a}`);
-    return await registry.execute(target, args);
-  });
-
-  // ──── 进程管理 ────
-  registry.register(findTool('proc'), async (args) => {
-    const a = typeof args.action === 'string' ? args.action : 'list';
     if (a === 'stop') {
       return await registry.execute('workspace_stop_background_process', args);
     }
     if (a === 'stop_all') {
       return await registry.execute('workspace_stop_all_background_processes', args);
     }
-    return await registry.execute('workspace_list_background_processes', args);
+    if (a !== 'run') throw new Error(`未知的 bash action: ${a}`);
+    if (args.background === true) {
+      return await registry.execute('workspace_start_shell_background_command', args);
+    }
+    return await registry.execute('workspace_run_shell_command', args);
   });
 
   // ──── 浏览器 ────

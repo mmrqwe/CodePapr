@@ -26,7 +26,7 @@
 
 Plan 模式下，当需求模糊时 Agent 会调用 `question` 工具向你提问，而不是猜测。
 
-Ask / Plan 是只读模式：变更类工具（write/edit/patch/exec/shell/git/app_* 等）会在**工具注册层被直接屏蔽**——既不下发给模型，也无法执行，从机制上杜绝误改文件，而非仅靠提示词约束。
+Ask / Plan 是只读模式：变更类工具（write/edit/patch/bash/git/app_* 等）会在**工具注册层被直接屏蔽**——既不下发给模型，也无法执行，从机制上杜绝误改文件，而非仅靠提示词约束。
 
 ## Papr App 开发
 
@@ -101,7 +101,7 @@ App 需要声明所需权限：
 | `workspace:read/write/exec` | Agent 工具：读写工作区文件、执行命令 |
 | `agent:run:<name>` | 调用指定 Agent |
 
-Agent 工具白名单（在 `agents[].tools` 声明）：`read`、`grep`、`list`、`lsp`、`web_search`、`web_fetch`、`write`、`edit`、`exec`。
+Agent 工具白名单（在 `agents[].tools` 声明）：`read`、`grep`、`list`、`lsp`、`web_search`、`web_fetch`、`write`、`edit`、`bash`。
 
 ### 权限分级
 

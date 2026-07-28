@@ -48,10 +48,20 @@ const AGENT_EXECUTION_SUMMARY_TRIGGER_TOOLS = new Set([
   'browser_take_screenshot',
   'terminal',
   'exec',
+  'bash',
   'workspace_run_command',
+  'workspace_run_shell_command',
   'workspace_start_background_command',
+  'workspace_start_shell_background_command',
   'workspace_start_preview_session',
   'workspace_project_diagnostics',
+]);
+
+const BLOCKING_COMMAND_TOOL_NAMES = new Set(['workspace_run_command', 'workspace_run_shell_command']);
+const BACKGROUND_COMMAND_TOOL_NAMES = new Set([
+  'workspace_start_background_command',
+  'workspace_start_preview_session',
+  'workspace_start_shell_background_command',
 ]);
 
 const FILE_MUTATION_TOOL_NAMES = new Set([
@@ -800,7 +810,7 @@ export function collectUnresolvedToolFailures(
   const latestByKey = new Map<string, ExecutedToolSummary>();
 
   for (const tool of tools) {
-    if (tool.name === 'workspace_run_command') {
+    if (BLOCKING_COMMAND_TOOL_NAMES.has(tool.name)) {
       continue;
     }
 
@@ -844,12 +854,8 @@ function collectCommandExecutionRecords(
       }
 
       if (
-        tool.name !== 'workspace_run_command' &&
-        !(
-          (tool.name === 'workspace_start_background_command' ||
-            tool.name === 'workspace_start_preview_session') &&
-          tool.success
-        )
+        !BLOCKING_COMMAND_TOOL_NAMES.has(tool.name) &&
+        !(BACKGROUND_COMMAND_TOOL_NAMES.has(tool.name) && tool.success)
       ) {
         return [];
       }
@@ -872,15 +878,11 @@ function collectCommandExecutionRecords(
               ? tool.result.status
               : null,
           timedOut: tool.result.timedOut === true,
-          background:
-            tool.name === 'workspace_start_background_command' ||
-            tool.name === 'workspace_start_preview_session',
+          background: BACKGROUND_COMMAND_TOOL_NAMES.has(tool.name),
           pid: typeof tool.result.pid === 'number' ? tool.result.pid : null,
-          started:
-            tool.name === 'workspace_start_background_command' ||
-            tool.name === 'workspace_start_preview_session'
-              ? tool.success && tool.result.started !== false
-              : false,
+          started: BACKGROUND_COMMAND_TOOL_NAMES.has(tool.name)
+            ? tool.success && tool.result.started !== false
+            : false,
           stdout: typeof tool.result.stdout === 'string' ? tool.result.stdout : '',
           stderr: typeof tool.result.stderr === 'string' ? tool.result.stderr : '',
         } satisfies CommandExecutionRecord,
@@ -1202,12 +1204,9 @@ export function buildExecutionContextSummary(params: {
   const fileChanges = summarizeFileChanges(params.executedTools);
   const commandTools = params.executedTools.filter(
     (tool) =>
-      (
-        tool.name === 'workspace_run_command' ||
-        ((tool.name === 'workspace_start_background_command' ||
-          tool.name === 'workspace_start_preview_session') &&
-          tool.success)
-      ) && isRecord(tool.result)
+      (BLOCKING_COMMAND_TOOL_NAMES.has(tool.name) ||
+        (BACKGROUND_COMMAND_TOOL_NAMES.has(tool.name) && tool.success)) &&
+      isRecord(tool.result)
   );
   const failedTools = collectUnresolvedToolFailures(params.executedTools);
   const diagnosticsTool = getLatestDiagnosticsTool(params.executedTools);
@@ -1239,9 +1238,7 @@ export function buildExecutionContextSummary(params: {
           ? result.status
           : null;
       const timedOut = result.timedOut === true;
-      const background =
-        tool.name === 'workspace_start_background_command' ||
-        tool.name === 'workspace_start_preview_session';
+      const background = BACKGROUND_COMMAND_TOOL_NAMES.has(tool.name);
       const started = background ? result.started !== false : false;
       const pid = typeof result.pid === 'number' ? result.pid : null;
       const stdout =
@@ -1482,7 +1479,7 @@ export function buildAgentCompletionSummary(params: {
     nextSteps.push(copy.failedCommandNextStep(formatCommand(commandExecution.command, commandExecution.args)));
   }
   for (const tool of collectUnresolvedToolFailures(params.executedTools)) {
-    if (tool.name !== 'workspace_run_command') {
+    if (!BLOCKING_COMMAND_TOOL_NAMES.has(tool.name)) {
       nextSteps.push(copy.failedToolNextStep(tool.name));
     }
   }

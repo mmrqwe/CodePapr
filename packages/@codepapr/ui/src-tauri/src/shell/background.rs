@@ -10,8 +10,8 @@ use std::{
     collections::{HashMap, VecDeque},
     fs,
     io::{BufRead, BufReader, Read},
-    path::Path,
-    process::{Command, Stdio},
+    path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
     sync::{Arc, Mutex, OnceLock},
     thread,
     time::{Duration, Instant},
@@ -241,6 +241,23 @@ pub(crate) fn run_workspace_command_impl(
         }
     };
 
+    let (status, stdout, stderr, timed_out) = collect_command_output(child, timeout)?;
+
+    Ok(CommandResult {
+        command,
+        args,
+        status,
+        stdout,
+        stderr,
+        timed_out,
+    })
+}
+
+/// 等待子进程退出并收集 stdout/stderr；超时则终止进程并标记 timed_out。
+fn collect_command_output(
+    mut child: Child,
+    timeout: Duration,
+) -> Result<(Option<i32>, String, String, bool), String> {
     let stdout = child
         .stdout
         .take()
@@ -306,12 +323,95 @@ pub(crate) fn run_workspace_command_impl(
         &stderr
     };
 
+    Ok((
+        status,
+        truncate_utf8(stdout_bytes),
+        truncate_utf8(stderr_bytes),
+        timed_out,
+    ))
+}
+
+/// 解析 bash 工具的工作目录：相对路径基于 workspace 解析，绝对路径直接使用；缺省为 workspace 根。
+fn resolve_shell_workdir(workspace: &Path, workdir: Option<String>) -> Result<PathBuf, String> {
+    match workdir.map(|w| w.trim().to_string()).filter(|w| !w.is_empty()) {
+        Some(w) => {
+            let p = Path::new(&w);
+            let resolved = if p.is_absolute() {
+                p.to_path_buf()
+            } else {
+                workspace.join(p)
+            };
+            if !resolved.is_dir() {
+                return Err(format!("工作目录不存在: {}", resolved.display()));
+            }
+            Ok(resolved)
+        }
+        None => Ok(workspace.to_path_buf()),
+    }
+}
+
+/// 构建「穿过 shell 执行」的 Command：unix 用 $SHELL -c（缺省 /bin/bash），windows 用 cmd /C。
+fn build_shell_spawn_command(command: &str, cwd: &Path) -> Command {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW_SHELL: u32 = 0x08000000;
+        let mut cmd = Command::new("cmd");
+        cmd.arg("/C").arg(command);
+        cmd.creation_flags(CREATE_NO_WINDOW_SHELL);
+        cmd.current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        cmd
+    }
+    #[cfg(not(windows))]
+    {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+        let mut cmd = Command::new(shell);
+        cmd.arg("-c").arg(command);
+        cmd.env("PATH", expanded_path())
+            .current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        cmd
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn run_workspace_shell_command(
+    workspace_path: String,
+    command: String,
+    workdir: Option<String>,
+    timeout_seconds: Option<u64>,
+) -> Result<CommandResult, String> {
+    run_blocking_workspace_task(move || {
+        run_workspace_shell_command_impl(workspace_path, command, workdir, timeout_seconds)
+    })
+    .await
+}
+
+pub(crate) fn run_workspace_shell_command_impl(
+    workspace_path: String,
+    command: String,
+    workdir: Option<String>,
+    timeout_seconds: Option<u64>,
+) -> Result<CommandResult, String> {
+    if command.trim().is_empty() {
+        return Err("命令不能为空".to_string());
+    }
+    let workspace = canonical_workspace(&workspace_path)?;
+    let cwd = resolve_shell_workdir(&workspace, workdir)?;
+    let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30).clamp(1, MAX_COMMAND_SECONDS));
+    let mut cmd = build_shell_spawn_command(&command, &cwd);
+    let child = cmd.spawn().map_err(|err| format!("启动命令失败: {err}"))?;
+    let (status, stdout, stderr, timed_out) = collect_command_output(child, timeout)?;
     Ok(CommandResult {
         command,
-        args,
+        args: Vec::new(),
         status,
-        stdout: truncate_utf8(stdout_bytes),
-        stderr: truncate_utf8(stderr_bytes),
+        stdout,
+        stderr,
         timed_out,
     })
 }
@@ -346,6 +446,29 @@ pub(crate) fn start_workspace_background_command(
         .transpose()?;
     let workspace_path = workspace.to_string_lossy().to_string();
 
+    #[cfg(windows)]
+    const CREATE_NO_WINDOW_BG: u32 = 0x08000000;
+    let mut bg_cmd = Command::new(&command);
+    bg_cmd
+        .args(&args)
+        .current_dir(&workspace)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    bg_cmd.creation_flags(CREATE_NO_WINDOW_BG);
+
+    spawn_and_register_background(workspace_path, command, args, preview_url, bg_cmd)
+}
+
+/// 启动子进程并登记到后台进程注册表（含去重、日志捕获）。供直接 spawn 与 shell spawn 复用。
+fn spawn_and_register_background(
+    workspace_path: String,
+    command: String,
+    args: Vec<String>,
+    preview_url: Option<String>,
+    mut cmd: Command,
+) -> Result<BackgroundCommandResult, String> {
     if let Some(existing_result) = with_background_processes(|processes| {
         for (pid, process) in processes.iter_mut() {
             if process.workspace_path == workspace_path
@@ -371,18 +494,7 @@ pub(crate) fn start_workspace_background_command(
         return Ok(existing_result);
     }
 
-    #[cfg(windows)]
-    const CREATE_NO_WINDOW_BG: u32 = 0x08000000;
-    let mut bg_cmd = Command::new(&command);
-    bg_cmd
-        .args(&args)
-        .current_dir(&workspace)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(windows)]
-    bg_cmd.creation_flags(CREATE_NO_WINDOW_BG);
-    let mut child = bg_cmd
+    let mut child = cmd
         .spawn()
         .map_err(|err| format!("启动后台命令失败: {err}"))?;
 
@@ -421,6 +533,26 @@ pub(crate) fn start_workspace_background_command(
         started: true,
         preview_url,
     })
+}
+
+#[tauri::command]
+pub(crate) fn start_workspace_shell_background_command(
+    workspace_path: String,
+    command: String,
+    workdir: Option<String>,
+    preview_url: Option<String>,
+) -> Result<BackgroundCommandResult, String> {
+    if command.trim().is_empty() {
+        return Err("命令不能为空".to_string());
+    }
+    let workspace = canonical_workspace(&workspace_path)?;
+    let cwd = resolve_shell_workdir(&workspace, workdir)?;
+    let preview_url = preview_url
+        .map(|raw_url| parse_browser_url(&raw_url))
+        .transpose()?;
+    let workspace_path = workspace.to_string_lossy().to_string();
+    let cmd = build_shell_spawn_command(&command, &cwd);
+    spawn_and_register_background(workspace_path, command, Vec::new(), preview_url, cmd)
 }
 
 #[tauri::command]

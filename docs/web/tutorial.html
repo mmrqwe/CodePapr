@@ -660,7 +660,7 @@ https://api.deepseek.com/v1</code></pre>
         <p><strong>适合：</strong>解释架构、梳理模块职责、分析报错原因、先问清楚再决定是否执行。</p>
         <p><strong>特点：</strong></p>
         <ul>
-          <li>只读：变更类工具（write/edit/exec/git 等）在工具注册层被直接屏蔽，从机制上杜绝误改文件</li>
+          <li>只读：变更类工具（write/edit/bash/git 等）在工具注册层被直接屏蔽，从机制上杜绝误改文件</li>
           <li>遇到时效性问题时，优先走只读时间/网页工具核实</li>
           <li>只有你明确要求基于项目核实，它才会进入只读工具链</li>
         </ul>
@@ -679,9 +679,9 @@ https://api.deepseek.com/v1</code></pre>
         <p><strong>特点：</strong></p>
         <ul>
           <li>会主动搜索项目、读写文件、跑命令、做验证</li>
-          <li>会使用工作区工具、后台命令、shell、预览和浏览器能力</li>
+          <li>会使用工作区工具、bash 命令执行、预览和浏览器能力</li>
           <li>Agent 主执行循环在 Web Worker 中运行，长任务不会阻塞界面</li>
-          <li><code>exec</code> 等长命令会在工具调用卡片中显示运行状态和日志</li>
+          <li><code>bash</code> 等长命令会在工具调用卡片中显示运行状态和日志</li>
           <li>主执行默认最多连续运行 500 个内部工具轮次</li>
           <li>文件改动后会异步派发后台诊断；同一失败指纹不会重复触发修复</li>
         </ul>
@@ -926,9 +926,7 @@ https://api.deepseek.com/v1</code></pre>
         <table>
           <thead><tr><th>工具 / Action</th><th>能力</th></tr></thead>
           <tbody>
-            <tr><td><code>exec</code></td><td>运行命令：默认阻塞等待；background:true 后台运行；previewUrl 启动后预览</td></tr>
-            <tr><td><code>shell</code> open / send / read / close / list</td><td>持久 Shell 会话，支持多步命令和交互式终端</td></tr>
-            <tr><td><code>proc</code> list / stop / stop_all</td><td>后台进程管理</td></tr>
+            <tr><td><code>bash</code> run / list / stop / stop_all</td><td>在项目环境执行 shell 命令（穿过 shell，支持管道/&&/变量）；默认阻塞，background:true 后台运行返回 pid，workdir 指定工作目录；list/stop/stop_all 管理后台进程</td></tr>
           </tbody>
         </table>
 
@@ -993,7 +991,7 @@ https://api.deepseek.com/v1</code></pre>
         <p>单次 <code>read</code> / <code>write</code> / <code>edit</code> / <code>patch</code> 操作的上限为 <strong>20MB</strong>，可覆盖大多数源码和二进制资源文件，但大文件会显著增加 token 消耗。</p>
 
         <div class="callout success">
-          <strong>工具设计原则：</strong>LLM 看到的工具名是精简的"合并工具"（共 30 个），底层委托给 40+ 独立工具。Agent 可同时使用所有工具，子代理按 <code>tools</code> 配置白名单限制权限。代码修改优先用 <code>edit</code>/<code>patch</code> 走 Search/Replace Diff，新建文件才用 <code>write</code>。命令执行：短命令用 <code>exec</code>，长驻进程用 <code>exec</code> background:true，交互式终端用 <code>shell</code>。
+          <strong>工具设计原则：</strong>LLM 看到的工具名是精简的"合并工具"（共 30 个），底层委托给 40+ 独立工具。Agent 可同时使用所有工具，子代理按 <code>tools</code> 配置白名单限制权限。代码修改优先用 <code>edit</code>/<code>patch</code> 走 Search/Replace Diff，新建文件才用 <code>write</code>。命令执行统一用 <code>bash</code>：短命令直接 <code>bash(command: ...)</code>，长驻进程用 <code>bash(command: ..., background: true)</code>，后台进程用 <code>bash(action: list/stop)</code> 管理。
         </div>
       </div>
     </section>

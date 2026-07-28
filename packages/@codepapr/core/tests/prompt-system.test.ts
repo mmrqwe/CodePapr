@@ -53,40 +53,16 @@ describe('promptSystem', () => {
     expect(prompt).toContain('先拿地图再行动');
   });
 
-  it('includes exec and shell constraints when present', () => {
+  it('includes bash constraint when present', () => {
     const prompt = buildRuntimeSystemPrompt({
       mode: 'agent',
       workspacePath: '/tmp/project',
       lang: 'zh-CN',
-      toolNames: ['exec', 'shell'],
+      toolNames: ['bash'],
     });
-    expect(prompt).toContain('exec');
-    expect(prompt).toContain('shell');
+    expect(prompt).toContain('bash');
     expect(prompt).toContain('background');
-    expect(prompt).toContain('安全策略');
-    expect(prompt).toContain('cmd');
-  });
-
-  it('includes exec security policy warning about blocked shells', () => {
-    const prompt = buildRuntimeSystemPrompt({
-      mode: 'agent',
-      workspacePath: '/tmp/project',
-      lang: 'en',
-      toolNames: ['exec'],
-    });
-    expect(prompt).toContain('do NOT wrap with cmd/bash/powershell');
-    expect(prompt).toContain('do NOT wrap with cmd/bash/powershell');
-  });
-
-  it('includes proc constraint in agent mode', () => {
-    const prompt = buildRuntimeSystemPrompt({
-      mode: 'agent',
-      workspacePath: '/tmp/project',
-      lang: 'zh-CN',
-      toolNames: ['proc'],
-    });
-    expect(prompt).toContain('proc');
-    expect(prompt).toContain('后台进程');
+    expect(prompt).toContain('workdir');
   });
 
   it('lsp constraint does not mention diagnostics as lsp action', () => {

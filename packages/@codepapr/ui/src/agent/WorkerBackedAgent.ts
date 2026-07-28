@@ -14,10 +14,6 @@ import { registerWorkspaceTools, type WorkspaceMutationListener } from '../tools
 import { registerTodoListTools } from '../tools/todoListTool';
 import { registerMcpTools } from '../tools/mcpTools';
 import { hasEnabledMcpSearch } from '../utils/mcpTypes';
-import {
-  runStreamingWorkspaceCommand,
-  type CommandResult,
-} from '../tools/streamingWorkspaceCommand';
 import type {
   AgentWorkerChatPayload,
   AgentWorkerToMainMessage,
@@ -170,37 +166,7 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
 
   return {
     toolDefinitions: definitions,
-    execute: async (toolName, args, context) => {
-      if (toolName === 'workspace_run_command') {
-        const command = typeof args.command === 'string' ? args.command.trim() : '';
-        if (!command) {
-          throw new Error('workspace_run_command.command 必须是非空字符串');
-        }
-
-        const result = await runStreamingWorkspaceCommand({
-          workspacePath: config.workspacePath,
-          command,
-          args: Array.isArray(args.args)
-            ? args.args.filter((value): value is string => typeof value === 'string')
-            : [],
-          timeoutSeconds:
-            typeof args.timeoutSeconds === 'number' ? args.timeoutSeconds : undefined,
-          lang: config.settings.lang,
-          onProgress: (progress) => {
-            context.onProgress?.({
-              type: 'tool-call-progress',
-              toolCallId: context.toolCallId,
-              toolName,
-              arguments: args,
-              statusText: progress.statusText,
-              output: progress.output,
-            });
-          },
-        });
-
-        return result satisfies CommandResult;
-      }
-
+    execute: async (toolName, args) => {
       return await registry.execute(toolName, args);
     },
   };

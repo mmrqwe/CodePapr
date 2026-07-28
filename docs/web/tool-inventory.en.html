@@ -459,42 +459,20 @@
           <div class="idx">03</div>
           <div class="tt">
             <h3>Command &amp; Process <span>Command & Process</span></h3>
-            <div class="tags"><span class="tag">exec / shell / proc</span></div>
+            <div class="tags"><span class="tag">bash</span></div>
           </div>
           <div class="hz"><b>Execution surface</b>blocking / background / persistent session</div>
         </div>
 
         <div class="item">
           <div class="row">
-            <div class="addr">EXEC</div>
-            <div class="name">exec<small>→ workspace_run_command / start_background / start_preview · :2253 / :2403 / :2418</small></div>
-            <div class="src"><span class="chip">background:true → background</span><span class="chip">previewUrl → preview</span></div>
+            <div class="addr">BASH</div>
+            <div class="name">bash<small>→ workspace_run_shell_command / workspace_start_shell_background_command / workspace_*_background_processes</small></div>
+            <div class="src"><span class="chip">action: run|list|stop|stop_all</span><span class="chip">background:true → background</span></div>
             <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc">Runs a command, blocking by default. <code>background:true</code> runs in the background and returns a pid; with <code>previewUrl</code> it starts a preview session. <code>timeoutSeconds</code> defaults to 30, max 600.</div>
-          <div class="more"><div class="mbox">Dispatch: <code>exec</code> → background? → <code>workspace_start_background_command</code> / <code>workspace_start_preview_session</code>, otherwise <code>workspace_run_command</code>.</div></div>
-        </div>
-
-        <div class="item">
-          <div class="row">
-            <div class="addr">SHELL</div>
-            <div class="name">shell<small>→ shell_* · :2546 / :2557 / :2563 / :2573 / :2601</small></div>
-            <div class="src"><span class="chip">action: open|send|read|close|list</span></div>
-            <div class="cchip c-text">Plain text</div>
-          </div>
-          <div class="desc">Persistent shell sessions: open starts one, send issues a command, read reads the output tail, close closes it, list lists them all. send takes command+args or input (interactive prompts only).</div>
-          <div class="more"><div class="mbox">Dispatch: <code>shell</code> → <code>shell_open_session</code> / <code>shell_send_input</code> / <code>shell_read_output</code> / <code>shell_close_session</code> / <code>shell_list_sessions</code>.</div></div>
-        </div>
-
-        <div class="item">
-          <div class="row">
-            <div class="addr">PROC</div>
-            <div class="name">proc<small>→ workspace_*_background_processes · :2441 / :2447 / :2457</small></div>
-            <div class="src"><span class="chip">action: list|stop|stop_all</span></div>
-            <div class="cchip c-text">Plain text</div>
-          </div>
-          <div class="desc">Background process management (created by exec background). With no action it lists by default; stop stops a given pid; stop_all stops them all.</div>
-          <div class="more"><div class="mbox">Dispatch: <code>proc</code> → <code>workspace_list_background_processes</code> / <code>workspace_stop_background_process</code> / <code>workspace_stop_all_background_processes</code>.</div></div>
+          <div class="desc">Runs shell commands in the project environment (through a shell; pipes/&&/variables supported). <code>action: run</code> blocks by default; <code>background:true</code> runs in the background (dev servers / long-running commands) and returns a pid; <code>workdir</code> sets the working directory (relative to project root or absolute). <code>list/stop/stop_all</code> manage background processes.</div>
+          <div class="more"><div class="mbox">Dispatch: <code>bash</code> → run + background? → <code>workspace_start_shell_background_command</code>, otherwise <code>workspace_run_shell_command</code>; list/stop/stop_all → <code>workspace_list_background_processes</code> / <code>workspace_stop_background_process</code> / <code>workspace_stop_all_background_processes</code>.</div></div>
         </div>
       </section>
 
@@ -642,8 +620,8 @@
           <span class="mk">read grep list lsp diagnostics</span> read_image skill_load todo local_time_now<br><br>
           <b>Mode 2 (+web)</b><br>
           <span class="mk">+ web_search web_fetch web_download</span><br><br>
-          <b>Mode 3 (+write/exec)</b><br>
-          <span class="mk">+ write edit patch exec shell</span>
+          <b>Mode 3 (+write/bash)</b><br>
+          <span class="mk">+ write edit patch bash</span>
         </div>
       </div>
     </aside>

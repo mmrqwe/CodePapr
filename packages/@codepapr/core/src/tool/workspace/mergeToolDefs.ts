@@ -232,49 +232,20 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
       required: ['action'],
     },
   },
-  // ──── 13. exec ────
+  // ──── 13. bash ────
   {
-    name: 'exec',
-    description: '运行命令。默认阻塞等待结果。设 background:true 后台运行并返回 pid；设 previewUrl 则启动后预览。',
+    name: 'bash',
+    description: '在项目环境中执行 shell 命令（穿过 shell 解释，支持管道、&&、变量展开等）。默认阻塞等待并返回完整输出；background:true 后台运行并返回 pid。action: run(默认，执行命令)|list(列出后台进程及日志尾部)|stop(停止指定 pid)|stop_all(停止全部后台进程)。长命令（dev server、构建、测试）建议用 background:true。更换工作目录请用 workdir 参数，不要在命令里 cd（不跨调用保留）。',
     parameters: {
       type: 'object',
       properties: {
-        command: { type: 'string', description: '命令名。' },
-        args: { type: 'array', items: { type: 'string' }, description: '命令参数。' },
-        timeoutSeconds: { type: 'number', description: '超时秒数，默认 30，最大 600。' },
-        background: { type: 'boolean', description: '设为 true 则后台运行。' },
-        previewUrl: { type: 'string', description: '后台启动后预览的 URL。' },
-        title: { type: 'string', description: '后台进程标题。' },
-      },
-      required: ['command'],
-    },
-  },
-  // ──── 14. shell ────
-  {
-    name: 'shell',
-    description: '持久 Shell 会话。action: open(启动)|send(发送命令)|read(读输出尾部)|close(关闭)|list(列出全部)。send 时传 command+args 或 input（仅交互提示用）。',
-    parameters: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', enum: ['open', 'send', 'read', 'close', 'list'] },
-        shell: { type: 'string', description: 'open 时指定 shell 路径。' },
-        sessionId: { type: 'string', description: 'send/read/close 时必填。会话 ID。' },
-        command: { type: 'string', description: 'send 时发送的命令名。' },
-        args: { type: 'array', items: { type: 'string' }, description: 'send 时命令参数。' },
-        input: { type: 'string', description: 'send 时原始输入（仅用于回复交互提示）。' },
-      },
-      required: ['action'],
-    },
-  },
-  // ──── 15. proc ────
-  {
-    name: 'proc',
-    description: '后台进程管理（由 exec background:true 创建的进程）。不传 action 默认列出；action: stop(停止指定 pid)|stop_all(停止全部)。',
-    parameters: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', enum: ['list', 'stop', 'stop_all'], description: '操作；默认 list。' },
-        pid: { type: 'number', description: 'stop 时必填。进程 ID。' },
+        action: { type: 'string', enum: ['run', 'list', 'stop', 'stop_all'], description: '操作，默认 run。' },
+        command: { type: 'string', description: 'run 时必填。要执行的 shell 命令，如 npm install、git status、ls -la | grep foo。' },
+        workdir: { type: 'string', description: 'run 时可选。命令的工作目录（相对项目根或绝对路径），默认项目根。' },
+        timeout: { type: 'number', description: 'run 阻塞执行的超时秒数，默认 30，最大 600。' },
+        background: { type: 'boolean', description: 'run 时设为 true 则后台运行并返回 pid。' },
+        previewUrl: { type: 'string', description: 'background 时可选。后台服务启动后预览的 URL。' },
+        pid: { type: 'number', description: 'stop 时必填。要停止的进程 ID。' },
       },
     },
   },

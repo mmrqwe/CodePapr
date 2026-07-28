@@ -660,7 +660,7 @@ https://api.deepseek.com/v1</code></pre>
         <p><strong>Best for:</strong> Explaining architecture, clarifying module responsibilities, analyzing error causes, asking questions before deciding whether to execute.</p>
         <p><strong>Characteristics:</strong></p>
         <ul>
-          <li>Read-only: mutating tools (write/edit/exec/git, etc.) are blocked at the tool-registration layer, preventing accidental file changes by construction</li>
+          <li>Read-only: mutating tools (write/edit/bash/git, etc.) are blocked at the tool-registration layer, preventing accidental file changes by construction</li>
           <li>For time-sensitive questions, prefers read-only time/web tools for verification</li>
           <li>Only enters the read-only toolchain when you explicitly request project-based verification</li>
         </ul>
@@ -679,9 +679,9 @@ https://api.deepseek.com/v1</code></pre>
         <p><strong>Characteristics:</strong></p>
         <ul>
           <li>Actively searches projects, reads/writes files, runs commands, performs verification</li>
-          <li>Uses workspace tools, background commands, shell, preview, and browser capabilities</li>
+          <li>Uses workspace tools, bash command execution, preview, and browser capabilities</li>
           <li>The main Agent execution loop runs in a Web Worker; long tasks won't block the UI</li>
-          <li>Long-running commands like <code>exec</code> display execution status and logs in tool call cards</li>
+          <li>Long-running commands like <code>bash</code> display execution status and logs in tool call cards</li>
           <li>Main execution defaults to a maximum of 500 consecutive internal tool rounds</li>
           <li>After file changes, background diagnostics are dispatched asynchronously; identical failure fingerprints won't trigger repeated fixes</li>
         </ul>
@@ -926,9 +926,7 @@ After the change, at least run verification for the affected scope; if no narrow
         <table>
           <thead><tr><th>Tool / Action</th><th>Capability</th></tr></thead>
           <tbody>
-            <tr><td><code>exec</code></td><td>Run a command: blocks by default; background:true for background execution; previewUrl to launch with preview</td></tr>
-            <tr><td><code>shell</code> open / send / read / close / list</td><td>Persistent shell sessions supporting multi-step commands and interactive terminals</td></tr>
-            <tr><td><code>proc</code> list / stop / stop_all</td><td>Background process management</td></tr>
+            <tr><td><code>bash</code> run / list / stop / stop_all</td><td>Run shell commands in the project (through a shell; pipes/&&/variables supported); blocks by default, background:true runs in background returning a pid, workdir sets the working directory; list/stop/stop_all manage background processes</td></tr>
           </tbody>
         </table>
 
@@ -993,7 +991,7 @@ After the change, at least run verification for the affected scope; if no narrow
         <p>A single <code>read</code> / <code>write</code> / <code>edit</code> / <code>patch</code> operation is capped at <strong>20MB</strong>, covering most source code and binary resource files, though large files will significantly increase token consumption.</p>
 
         <div class="callout success">
-          <strong>Tool Design Principle:</strong> The LLM sees simplified "merged tools" (30 total), which delegate to 40+ independent tools under the hood. The Agent can use all tools simultaneously; sub-agents are restricted by <code>tools</code> config allowlists. For code modifications, prefer <code>edit</code>/<code>patch</code> via Search/Replace Diff; use <code>write</code> only for new files. For command execution: short commands use <code>exec</code>, long-lived processes use <code>exec</code> with background:true, and interactive terminals use <code>shell</code>.
+          <strong>Tool Design Principle:</strong> The LLM sees simplified "merged tools" (30 total), which delegate to 40+ independent tools under the hood. The Agent can use all tools simultaneously; sub-agents are restricted by <code>tools</code> config allowlists. For code modifications, prefer <code>edit</code>/<code>patch</code> via Search/Replace Diff; use <code>write</code> only for new files. For command execution, use <code>bash</code> uniformly: short commands via <code>bash(command: ...)</code>, long-lived processes via <code>bash(command: ..., background: true)</code>, and manage background processes via <code>bash(action: list/stop)</code>.
         </div>
       </div>
     </section>

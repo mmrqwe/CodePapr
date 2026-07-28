@@ -26,7 +26,7 @@
 
 In Plan mode, when requirements are ambiguous, the Agent will call the `question` tool to ask you instead of guessing.
 
-Ask / Plan are read-only modes: mutating tools (write/edit/patch/exec/shell/git/app_*, etc.) are **blocked at the tool-registration layer** — neither exposed to the model nor executable — preventing accidental file changes by construction, not by prompt alone.
+Ask / Plan are read-only modes: mutating tools (write/edit/patch/bash/git/app_*, etc.) are **blocked at the tool-registration layer** — neither exposed to the model nor executable — preventing accidental file changes by construction, not by prompt alone.
 
 ## Papr App Development
 
@@ -101,7 +101,7 @@ Apps must declare required permissions:
 | `workspace:read/write/exec` | Agent tools: read/write workspace files, execute commands |
 | `agent:run:<name>` | Invoke a specific agent |
 
-Agent tool whitelist (declare in `agents[].tools`): `read`, `grep`, `list`, `lsp`, `web_search`, `web_fetch`, `write`, `edit`, `exec`.
+Agent tool whitelist (declare in `agents[].tools`): `read`, `grep`, `list`, `lsp`, `web_search`, `web_fetch`, `write`, `edit`, `bash`.
 
 ### Permission Levels
 

@@ -21,12 +21,12 @@ describe('workspace intelligence tool definitions', () => {
 describe('NEW_TOOL_DEFINITIONS', () => {
   const tools = NEW_TOOL_DEFINITIONS;
 
-  it('contains 26 LLM-facing tools', () => {
-    expect(tools).toHaveLength(26);
+  it('contains 24 LLM-facing tools', () => {
+    expect(tools).toHaveLength(24);
   });
 
-  const actionTools = ['graph', 'lsp', 'lsp_edit', 'git', 'browser', 'shell', 'proc', 'list'] as const;
-  const actionRequiredTools = ['graph', 'lsp', 'lsp_edit', 'git', 'browser', 'shell'] as const;
+  const actionTools = ['graph', 'lsp', 'lsp_edit', 'git', 'browser', 'bash', 'list'] as const;
+  const actionRequiredTools = ['graph', 'lsp', 'lsp_edit', 'git', 'browser'] as const;
 
   it.each(actionTools)('%s has action enum constraint', (name) => {
     const tool = tools.find((t) => t.name === name);
@@ -42,12 +42,12 @@ describe('NEW_TOOL_DEFINITIONS', () => {
     expect(tool?.parameters.required).toContain('action');
   });
 
-  it('proc action is optional (defaults to list)', () => {
-    const proc = tools.find((t) => t.name === 'proc')!;
-    const required: string[] | undefined = proc.parameters.required;
+  it('bash action is optional (defaults to run)', () => {
+    const bash = tools.find((t) => t.name === 'bash')!;
+    const required: string[] | undefined = bash.parameters.required;
     expect(required ? required.includes('action') : true).toBe(true);
-    // proc has action in properties but not in required
-    expect(proc.parameters.properties.action).toBeDefined();
+    // bash has action in properties but not in required
+    expect(bash.parameters.properties.action).toBeDefined();
     expect(required || []).not.toContain('action');
   });
 
@@ -86,12 +86,6 @@ describe('NEW_TOOL_DEFINITIONS', () => {
     });
     it('git requires action', () => {
       expect(find('git')?.parameters.required).toContain('action');
-    });
-    it('exec requires command', () => {
-      expect(find('exec')?.parameters.required).toContain('command');
-    });
-    it('shell requires action', () => {
-      expect(find('shell')?.parameters.required).toContain('action');
     });
     it('web_fetch requires url', () => {
       expect(find('web_fetch')?.parameters.required).toContain('url');
@@ -135,13 +129,9 @@ describe('NEW_TOOL_DEFINITIONS', () => {
       const e = getEnum('browser');
       expect(e).toEqual(['open', 'navigate', 'reload', 'close', 'click', 'type', 'read', 'screenshot', 'get']);
     });
-    it('shell has 5 actions', () => {
-      const e = getEnum('shell');
-      expect(e).toEqual(['open', 'send', 'read', 'close', 'list']);
-    });
-    it('proc has 3 actions', () => {
-      const e = getEnum('proc');
-      expect(e).toEqual(['list', 'stop', 'stop_all']);
+    it('bash has 4 actions', () => {
+      const e = getEnum('bash');
+      expect(e).toEqual(['run', 'list', 'stop', 'stop_all']);
     });
   });
 

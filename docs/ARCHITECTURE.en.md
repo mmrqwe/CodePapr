@@ -90,7 +90,7 @@ The Tauri Rust backend is organized into domain modules, each with a single resp
 | Module | File | Responsibility |
 | --- | --- | --- |
 | `browser` | `src-tauri/src/browser/` | Headless Chrome automation (open / navigate / click / type / screenshot / read) |
-| `shell` | `src-tauri/src/shell/` | Foreground commands, background processes, persistent shell sessions, command safety guards |
+| `shell` | `src-tauri/src/shell/` | Backend for the `bash` tool: shell command execution (through a shell), background process management, command safety guards |
 | `web` | `src-tauri/src/web/` | HTTP fetch, web page content extraction, multi-engine search (SearXNG first, with automatic fallback to built-in multi-source aggregation: Bing / Mojeek / Qwant / Wikipedia) |
 | `workspace_fs` | `src-tauri/src/workspace_fs/` | File listing, text reading, writing, SEARCH/REPLACE diff, text/path search |
 | `task_queue` | `src-tauri/src/task_queue/mod.rs` | Heavy I/O serialization queue; frontend polls `task_id` for results |
@@ -130,9 +130,7 @@ The LLM can invoke 30 discrete tools (including `task`/`todo` as dynamic tools),
 | `lsp_edit` | rename / code_action / format | workspace_rename_symbol / workspace_apply_code_action / workspace_format_files |
 | `diagnostics` | Single-file LSP diagnostics / project-level diagnostics | workspace_lsp_diagnostics / workspace_project_diagnostics |
 | `git` | status / diff / log / branch / stage / commit / restore / reset | workspace_git_* |
-| `exec` | Foreground / background command execution | workspace_run_command / workspace_start_background_command |
-| `shell` | open / send / read / close / list persistent sessions | shell_* |
-| `proc` | Background process management | workspace_list_background_processes / workspace_stop_background_process |
+| `bash` | Run shell commands in the project (through a shell); action: run/list/stop/stop_all; background:true for background | workspace_run_shell_command / workspace_start_shell_background_command / workspace_*_background_processes |
 | `browser` | open / navigate / reload / close / click / type / read / screenshot / get | browser_* |
 | `web_search` | Online search | web_search |
 | `web_fetch` | Read web page content | web_fetch_url |
@@ -150,7 +148,7 @@ The LLM can invoke 30 discrete tools (including `task`/`todo` as dynamic tools),
 
 All 30 tools are registered in ToolRegistry, frozen and hashed for cache consistency. `todo` and `task` are dynamically generated.
 
-Ask / Plan read-only modes use `FilteringToolRegistry` (a `ToolRegistry` subclass): at registration it skips mutating tools (`MUTATING_TOOL_NAMES`: write/edit/patch/lsp_edit/exec/shell/proc/git/app_*) by predicate, so they appear neither in the tool set nor as registered handlers — a hard block rather than a prompt-level soft constraint. Agent / App modes use the plain `ToolRegistry`.
+Ask / Plan read-only modes use `FilteringToolRegistry` (a `ToolRegistry` subclass): at registration it skips mutating tools (`MUTATING_TOOL_NAMES`: write/edit/patch/lsp_edit/bash/git/app_*) by predicate, so they appear neither in the tool set nor as registered handlers — a hard block rather than a prompt-level soft constraint. Agent / App modes use the plain `ToolRegistry`.
 
 **External path permissions**: The desktop app shows a `PermissionDialog` for `read`/`list` operations on absolute paths outside the project. The user can choose "Deny / Allow this file / Allow this folder". Authorizations are stored in the `permissionStore` allowlist. CLI read boundaries are more permissive; writes remain workspace-scoped.
 
@@ -205,7 +203,7 @@ JavaScript SDK injected into every app iframe, providing a unified API:
 1. **React first-pass** — `usePaprBridge` fast-rejects based on manifest.permissions
 2. **Rust authoritative** — every `papr_*` Tauri command calls `check_permission(manifest, capability)` at the top, blocking even direct postMessage bypass
 
-Tool permission mapping (`check_tool_permission`): `read/grep/list` → `workspace:read`, `write/edit` → `workspace:write`, `exec/shell` → `workspace:exec`, `web_search/web_fetch` → `http:get`.
+Tool permission mapping (`check_tool_permission`): `read/grep/list` → `workspace:read`, `write/edit` → `workspace:write`, `bash` → `workspace:exec`, `web_search/web_fetch` → `http:get`.
 
 **App Agent system:**
 

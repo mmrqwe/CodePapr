@@ -713,6 +713,52 @@ const tools: IToolDefinition[] = [
     },
   },
   {
+    name: 'workspace_run_shell_command',
+    description:
+      '在项目环境中穿过 shell 执行一条命令（支持管道、&&、变量展开），阻塞等待并返回完整 stdout/stderr 与退出码。由 bash 工具调用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: {
+          type: 'string',
+          description: '要执行的完整 shell 命令。',
+        },
+        workdir: {
+          type: 'string',
+          description: '工作目录（相对项目根或绝对路径），默认项目根。',
+        },
+        timeoutSeconds: {
+          type: 'number',
+          description: '超时秒数，默认 30，最大 600。',
+        },
+      },
+      required: ['command'],
+    },
+  },
+  {
+    name: 'workspace_start_shell_background_command',
+    description:
+      '在项目环境中穿过 shell 后台执行一条命令，返回 pid；输出写入日志尾部，可用 workspace_list_background_processes 查看。由 bash 工具调用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: {
+          type: 'string',
+          description: '要执行的完整 shell 命令。',
+        },
+        workdir: {
+          type: 'string',
+          description: '工作目录（相对项目根或绝对路径），默认项目根。',
+        },
+        previewUrl: {
+          type: 'string',
+          description: '后台服务启动后预览的 URL。',
+        },
+      },
+      required: ['command'],
+    },
+  },
+  {
     name: 'workspace_search_text',
     description:
       '在当前项目文件夹内搜索文本内容，返回文件路径、行号、列号、上下文和匹配预览。支持 smart-case、正则，并默认遵守常见忽略目录与根级 .gitignore/.ignore。',
@@ -2281,6 +2327,24 @@ export function registerWorkspaceTools(
     });
   });
 
+  registry.register(toolByName('workspace_run_shell_command'), async (args: Record<string, unknown>) => {
+    return await invoke('run_workspace_shell_command', {
+      workspacePath: workspace(),
+      command: asString(args.command, 'command'),
+      workdir: asOptionalString(args.workdir),
+      timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
+    });
+  });
+
+  registry.register(toolByName('workspace_start_shell_background_command'), async (args: Record<string, unknown>) => {
+    return await invoke<BackgroundCommandResult>('start_workspace_shell_background_command', {
+      workspacePath: workspace(),
+      command: asString(args.command, 'command'),
+      workdir: asOptionalString(args.workdir),
+      previewUrl: asOptionalString(args.previewUrl),
+    });
+  });
+
   registry.register(toolByName('workspace_search_text'), async (args: Record<string, unknown>) => {
     const parsed: SearchTextArgs = {
       query: asString(args.query, 'query'),
@@ -3701,6 +3765,7 @@ export function registerWorkspaceTools(
     'workspace_git_branch_checkout', 'workspace_git_stage', 'workspace_git_commit',
     'workspace_git_restore', 'workspace_git_reset',
     'workspace_run_command', 'workspace_project_diagnostics',
+    'workspace_run_shell_command', 'workspace_start_shell_background_command',
     'workspace_start_background_command', 'workspace_start_preview_session',
     'workspace_list_background_processes', 'workspace_stop_background_process',
     'workspace_stop_all_background_processes',

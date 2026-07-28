@@ -58,14 +58,11 @@ const UI_TOOL_DEFAULTS = [
   'grep',
   'glob',
   'list',
-  'graph',
   'lsp',
   'lsp_edit',
   'diagnostics',
   'git',
-  'exec',
-  'shell',
-  'proc',
+  'bash',
   'browser',
   'web_search',
   'web_fetch',
@@ -500,10 +497,10 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '| storage:read, storage:write | papr.db | L1 |',
       '| fs:read, fs:write | papr.fs | L1 |',
       '| agent:run:<name> | papr.agent.run | L1 |',
-      '| workspace:read | Agent read tools (read/grep/list/graph/lsp/diagnostics/read_image/skill_load/todo) | L1 |',
+      '| workspace:read | Agent read tools (read/grep/list/lsp/diagnostics/read_image/skill_load/todo) | L1 |',
       '| http:get, http:post | papr.http + Agent web_search/web_fetch/web_download + MCP | L2 |',
       '| workspace:write | Agent write tools (write/edit/patch) | L3 |',
-      '| workspace:exec | Agent exec tools (exec/shell) | L3 |',
+      '| workspace:exec | Agent exec tool (bash) | L3 |',
       'Only declare permissions the app actually needs.',
 
       '## Agent Definitions',
@@ -834,13 +831,13 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
         : '- [edit/patch/write] 单文件用 `edit`（SEARCH/REPLACE），多文件原子修改用 `patch`，整文件重写或新文件才用 `write`（需带 relativePath + content）。search 块必须精确匹配文件内容。'
     );
   }
-  if (hasTool(toolNames, 'exec') && !isAsk) {
+  if (hasTool(toolNames, 'bash') && !isAsk) {
     common.push(
       lang === 'en'
-        ? '- [exec] One-shot commands, `exec(background: true)` for dev servers. Invoke programs directly (e.g. `npm test`) — do NOT wrap with cmd/bash/powershell (blocked by security policy). Pass arguments via args array.'
+        ? '- [bash] Runs shell commands (pipes, &&, variables supported), e.g. `bash(command: "npm test")`. Use `background: true` for dev servers / long-running commands (returns pid; manage via `bash(action: list/stop)`). Set the working directory with `workdir` (do not `cd` inside the command — it does not persist across calls).'
         : lang === 'zh-TW'
-        ? '- [exec] 執行一次性命令、`exec(background: true)` 啟動 dev server。直接調用程序名（如 `npm test`），不要包裝在 cmd/bash/powershell 裡（被安全策略阻止）。參數通過 args 數組傳遞。'
-        : '- [exec] 执行一次性命令、`exec(background: true)` 启动 dev server。直接调用程序名（如 `npm test`），不要包装在 cmd/bash/powershell 里（被安全策略阻止）。参数通过 args 数组传递。'
+        ? '- [bash] 執行 shell 命令（支援管道、&&、變數），如 `bash(command: "npm test")`。dev server / 長命令用 `background: true`（返回 pid，用 `bash(action: list/stop)` 管理）。用 `workdir` 指定工作目錄（不要在命令裡 cd，不跨調用保留）。'
+        : '- [bash] 执行 shell 命令（支持管道、&&、变量），如 `bash(command: "npm test")`。dev server / 长命令用 `background: true`（返回 pid，用 `bash(action: list/stop)` 管理）。用 `workdir` 指定工作目录（不要在命令里 cd，不跨调用保留）。'
     );
   }
   if (hasTool(toolNames, 'git') && !isApp) {
@@ -897,31 +894,13 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
         : '- [lsp_edit] 语义修改：`rename`、`code_action`（kind: "source.organizeImports"）、`format`。'
     );
   }
-  if (hasTool(toolNames, 'shell') && !isAsk && !isApp) {
-    auxiliary.push(
-      lang === 'en'
-        ? '- [shell] Multi-step interactions (REPL, interactive prompts): `shell(action: open)` → `shell(action: send)` → `shell(action: read)` → `shell(action: close)`.'
-        : lang === 'zh-TW'
-        ? '- [shell] 多步交互（REPL、互動提示）：`shell(action: open)` → `shell(action: send)` → `shell(action: read)` → `shell(action: close)`。'
-        : '- [shell] 多步交互（REPL、交互提示）：`shell(action: open)` → `shell(action: send)` → `shell(action: read)` → `shell(action: close)`。'
-    );
-  }
-  if (hasTool(toolNames, 'proc') && !isAsk && !isApp) {
-    auxiliary.push(
-      lang === 'en'
-        ? '- [proc] Manage background processes from `exec(background: true)`: list, stop by pid, stop_all.'
-        : lang === 'zh-TW'
-        ? '- [proc] 管理 `exec(background: true)` 啟動的後台進程：列出、按 pid 停止、stop_all。'
-        : '- [proc] 管理 `exec(background: true)` 启动的后台进程：列出、按 pid 停止、stop_all。'
-    );
-  }
   if (hasTool(toolNames, 'browser') && !isAsk && !isApp) {
     auxiliary.push(
       lang === 'en'
-        ? '- [browser] UI verification: `browser(action: open)` load page, then `click/type/read/screenshot` to interact. Do NOT use `exec` + curl for rendered pages.'
+        ? '- [browser] UI verification: `browser(action: open)` load page, then `click/type/read/screenshot` to interact. Do NOT use `bash` + curl for rendered pages.'
         : lang === 'zh-TW'
-        ? '- [browser] UI 驗證：`browser(action: open)` 載入頁面，再用 `click/type/read/screenshot` 交互。不要用 `exec` + curl 檢查渲染頁面。'
-        : '- [browser] UI 验证：`browser(action: open)` 加载页面，再用 `click/type/read/screenshot` 交互。不要用 `exec` + curl 检查渲染页面。'
+        ? '- [browser] UI 驗證：`browser(action: open)` 載入頁面，再用 `click/type/read/screenshot` 交互。不要用 `bash` + curl 檢查渲染頁面。'
+        : '- [browser] UI 验证：`browser(action: open)` 加载页面，再用 `click/type/read/screenshot` 交互。不要用 `bash` + curl 检查渲染页面。'
     );
   }
   if (hasTool(toolNames, 'open')) {
