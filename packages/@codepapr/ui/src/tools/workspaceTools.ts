@@ -1931,30 +1931,28 @@ export function registerWorkspaceTools(
     });
   });
 
-  if (options.multimodalEnabled) {
-    registry.register(toolByName('workspace_read_image'), async (args: Record<string, unknown>) => {
-      const parsed: ReadImageFileArgs = {
-        relativePath: asString(args.relativePath, 'relativePath'),
-        maxBytes: asOptionalNumber(args.maxBytes),
-      };
-      await ensureExternalPathAllowed(parsed.relativePath, 'read');
-      const result = await invoke<ReadImageFileResult>('read_image_file', {
-        workspacePath: workspace(),
-        relativePath: parsed.relativePath,
-        maxBytes: parsed.maxBytes,
-      });
-      const images: IImageContent[] = [{
-        mediaType: result.mediaType,
-        data: result.data,
-      }];
-      return {
-        path: result.path,
-        mediaType: result.mediaType,
-        bytes: result.bytes,
-        __images: images,
-      };
+  registry.register(toolByName('workspace_read_image'), async (args: Record<string, unknown>) => {
+    const parsed: ReadImageFileArgs = {
+      relativePath: asString(args.relativePath, 'relativePath'),
+      maxBytes: asOptionalNumber(args.maxBytes),
+    };
+    await ensureExternalPathAllowed(parsed.relativePath, 'read');
+    const result = await invoke<ReadImageFileResult>('read_image_file', {
+      workspacePath: workspace(),
+      relativePath: parsed.relativePath,
+      maxBytes: parsed.maxBytes,
     });
-  }
+    const images: IImageContent[] = [{
+      mediaType: result.mediaType,
+      data: result.data,
+    }];
+    return {
+      path: result.path,
+      mediaType: result.mediaType,
+      bytes: result.bytes,
+      __images: images,
+    };
+  });
 
   registry.register(toolByName('workspace_write_file'), async (args: Record<string, unknown>) => {
     const parsed: WriteFileArgs = {
@@ -3303,7 +3301,7 @@ export function registerWorkspaceTools(
     const verified = await invoke<ReadFileResult>('read_text_file', {
       workspacePath: workspace(),
       relativePath: parsed.relativePath,
-      maxBytes: Math.max(patched.content.length + 1024, 16384),
+      maxBytes: Math.max(new TextEncoder().encode(patched.content).length + 1024, 16384),
     });
     if (verified.content !== patched.content) {
       throw new Error(
@@ -3365,7 +3363,7 @@ export function registerWorkspaceTools(
       const verified = await invoke<ReadFileResult>('read_text_file', {
         workspacePath: workspace(),
         relativePath: file.path,
-        maxBytes: Math.max(file.content.length + 1024, 16384),
+        maxBytes: Math.max(new TextEncoder().encode(file.content).length + 1024, 16384),
       });
       if (verified.content !== file.content) {
         throw new Error(
@@ -3516,10 +3514,11 @@ export function registerWorkspaceTools(
     },
   });
 
-  if (options.multimodalEnabled) {
-    registry.register(toolByName('read_image'), async (args) => {
-      return registry.execute('workspace_read_image', args);
-    });
+  registry.register(toolByName('read_image'), async (args) => {
+    return registry.execute('workspace_read_image', args);
+  });
+  if (!options.multimodalEnabled) {
+    registry.hideFromLlm('read_image');
   }
 
   for (const name of oldToolNames) {

@@ -138,6 +138,22 @@ describe('safeParseToolArguments', () => {
     expect(safeParseToolArguments('{"a":1,')).toEqual({ a: 1 });
   });
 
+  it('repairs raw newlines inside string values', () => {
+    expect(safeParseToolArguments('{"args":["-c","line1\nline2"]}')).toEqual({
+      args: ['-c', 'line1\nline2'],
+    });
+  });
+
+  it('repairs raw tabs and carriage returns inside string values', () => {
+    expect(safeParseToolArguments('{"sql":"col1\tcol2\r\nend"}')).toEqual({
+      sql: 'col1\tcol2\r\nend',
+    });
+  });
+
+  it('does not double-escape existing escape sequences', () => {
+    expect(safeParseToolArguments('{"text":"a\\nb"}')).toEqual({ text: 'a\nb' });
+  });
+
   it('returns _parseError for unrepairable JSON', () => {
     const result = safeParseToolArguments('not json at all');
     expect(result._parseError).toBe(true);

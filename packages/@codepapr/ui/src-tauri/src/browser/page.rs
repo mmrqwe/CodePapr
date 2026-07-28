@@ -158,6 +158,12 @@ fn reload_browser_tab(tab: &Arc<Tab>) -> Result<(), String> {
     Ok(())
 }
 
+fn is_browser_connection_closed(err: &str) -> bool {
+    err.contains("underlying connection is closed")
+        || err.contains("Unable to make method calls")
+        || err.contains("connection is closed")
+}
+
 fn find_browser_element<'a>(
     tab: &'a Tab,
     selector: &str,
@@ -296,6 +302,30 @@ fn open_target_in_browser(target: &str) -> Result<(), String> {
     Err("当前平台暂不支持打开浏览器".to_string())
 }
 
+fn launch_browser_page_session(
+    sessions: &mut HashMap<String, ManagedBrowserPageSession>,
+    workspace_key: &str,
+    parsed_url: &str,
+) -> Result<BrowserPageSessionResult, String> {
+    let browser = Browser::new(build_browser_launch_options()?)
+        .map_err(|err| format!("启动浏览器自动化会话失败: {err}"))?;
+    let tab = browser
+        .new_tab()
+        .map_err(|err| format!("创建浏览器页面失败: {err}"))?;
+    tab.set_default_timeout(browser_action_timeout(None));
+    navigate_browser_tab(&tab, parsed_url)?;
+
+    let session = ManagedBrowserPageSession {
+        _browser: browser,
+        tab,
+        workspace_path: workspace_key.to_string(),
+        started_at: unix_millis()?,
+    };
+    let result = browser_page_state(&session)?;
+    sessions.insert(workspace_key.to_string(), session);
+    Ok(result)
+}
+
 fn open_or_navigate_browser_page_session(
     workspace_path: &str,
     url: &str,
@@ -304,28 +334,22 @@ fn open_or_navigate_browser_page_session(
     let parsed_url = parse_browser_url(url)?;
 
     with_browser_page_sessions(|sessions| {
+        let mut needs_relaunch = false;
         if let Some(session) = sessions.get_mut(&workspace_key) {
-            navigate_browser_tab(&session.tab, &parsed_url)?;
-            return browser_page_state(session);
+            match navigate_browser_tab(&session.tab, &parsed_url) {
+                Ok(()) => return browser_page_state(session),
+                Err(err) if is_browser_connection_closed(&err) => {
+                    needs_relaunch = true;
+                }
+                Err(err) => return Err(err),
+            }
         }
-
-        let browser = Browser::new(build_browser_launch_options()?)
-            .map_err(|err| format!("启动浏览器自动化会话失败: {err}"))?;
-        let tab = browser
-            .new_tab()
-            .map_err(|err| format!("创建浏览器页面失败: {err}"))?;
-        tab.set_default_timeout(browser_action_timeout(None));
-        navigate_browser_tab(&tab, &parsed_url)?;
-
-        let session = ManagedBrowserPageSession {
-            _browser: browser,
-            tab,
-            workspace_path: workspace_key.clone(),
-            started_at: unix_millis()?,
-        };
-        let result = browser_page_state(&session)?;
-        sessions.insert(workspace_key, session);
-        Ok(result)
+        if needs_relaunch {
+            if let Some(stale) = sessions.remove(&workspace_key) {
+                let _ = stale.tab.close(true);
+            }
+        }
+        launch_browser_page_session(sessions, &workspace_key, &parsed_url)
     })
 }
 

@@ -50,6 +50,8 @@ function attemptJsonRepair(text: string): string | null {
 
   repaired = repaired.replace(/```(?:json)?\s*([\s\S]*?)```/g, '$1').trim();
 
+  repaired = escapeRawControlCharsInStrings(repaired);
+
   repaired = repaired.replace(/,\s*$/, '');
 
   const openBraces = (repaired.match(/{/g) || []).length;
@@ -70,6 +72,50 @@ function attemptJsonRepair(text: string): string | null {
     return repaired;
   }
   return null;
+}
+
+// 模型常把多行 SQL/脚本直接塞进 JSON 字符串值，留下未转义的换行/制表符，
+// 导致 "Unterminated string" 解析失败。这里在字符串字面量内把这些原始控制字符转义掉。
+function escapeRawControlCharsInStrings(text: string): string {
+  let out = '';
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === '\\') {
+        out += ch;
+        if (i + 1 < text.length) {
+          out += text[i + 1];
+          i++;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+        out += ch;
+        continue;
+      }
+      if (ch === '\n') {
+        out += '\\n';
+        continue;
+      }
+      if (ch === '\r') {
+        out += '\\r';
+        continue;
+      }
+      if (ch === '\t') {
+        out += '\\t';
+        continue;
+      }
+      out += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    }
+    out += ch;
+  }
+  return out;
 }
 
 export function sanitizeToolCallArguments(
