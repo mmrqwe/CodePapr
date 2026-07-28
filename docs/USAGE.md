@@ -101,7 +101,7 @@ App 需要声明所需权限：
 | `workspace:read/write/exec` | Agent 工具：读写工作区文件、执行命令 |
 | `agent:run:<name>` | 调用指定 Agent |
 
-Agent 工具白名单（在 `agents[].tools` 声明）：`read`、`grep`、`list`、`graph`、`web_search`、`web_fetch`、`write`、`edit`、`exec`。
+Agent 工具白名单（在 `agents[].tools` 声明）：`read`、`grep`、`list`、`lsp`、`web_search`、`web_fetch`、`write`、`edit`、`exec`。
 
 ### 权限分级
 
@@ -164,7 +164,7 @@ LLM 可通过 4 个工具管理 app：
 
 | Agent | 用途 | 模型 | 工具 |
 |-------|------|------|------|
-| **explore** | 只读代码分析 | fast | read, read_image, graph, lsp, diagnostics, grep |
+| **explore** | 只读代码分析 | fast | read, read_image, list, lsp, diagnostics, grep |
 | **scout** | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image |
 | **mentor** | 架构/算法指导 | 可配置独立模型 | 无 |
 
@@ -303,13 +303,15 @@ Hover 任意用户消息 → 下方出现"重置到此点"和"复制"按钮：
 
 整理用快速模型对记忆做去重、合并、精简，写回文件；失败时降级为规则去重（按标题去重 + 按日期保留最近的）。整理是 fire-and-forget 的，不阻塞当前会话，收益在下次启动生效。
 
-## ProjectGraph 语义分析
+## 代码智能（lsp / list overview）
 
-`graph` 是统一的项目语义图工具，主 Agent 和 Explore 子代理均可调用。
+LLM 侧的代码智能由 `lsp` 工具与 `list(action: overview)` 承担。
 
-**基础导航**：`full`（完整图）、`overview`（轻量概览）、`lookup`（符号查找）、`dependency`（依赖子图）、`entrypoints`（入口点）、`impact`（影响分析）、`implementations`（实现查找）、`smart_context`（智能上下文）
+**lsp 导航（9 个 action，LSP 优先、AST 项目图兜底，结果带 source/confidence）**：`goToDefinition`（跳转定义）、`findReferences`（查找引用）、`hover`（类型/文档信息）、`documentSymbol`（文件符号大纲）、`workspaceSymbol`（工作区符号检索）、`goToImplementation`（跳转实现）、`prepareCallHierarchy`（调用层级项）、`incomingCalls`（入调用）、`outgoingCalls`（出调用）。LSP 不可用或无结果时自动降级到 AST 项目图，结果以 `source`（lsp/ast）与 `confidence`（high/medium/low）标注精度。
 
-**高级分析**：`dead_code`（死代码检测）、`circular_deps`（循环依赖）、`type_hierarchy`（类型层次）、`suggest_refactors`（重构建议）、`test_impact`（变更影响测试）、`generate_tests`（测试骨架生成）
+**项目结构概览**：`list(action: overview)` 返回 AST 项目结构概览（目录树 + 符号骨架）；`list()` 默认（`action: files`）浏览目录树。
+
+> `graph` 工具（full / lookup / dependency / impact / implementations / entrypoints / smart_context / dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests 等 14 个 action）现已**对 LLM 隐藏**，仅供 UI 面板与作为 `lsp` 点查询的 AST 兜底后端。
 
 ## 项目级定制
 

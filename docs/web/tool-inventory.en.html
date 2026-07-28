@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" class="scroll-smooth">
+<html lang="en" class="scroll-smooth">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>工具全景 · CodePapr</title>
+<title>Tool Inventory · CodePapr</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 1024 1024' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3ClinearGradient id='a' x1='320' y1='280' x2='720' y2='780'%3E%3Cstop stop-color='%23D9673E'/%3E%3Cstop offset='1' stop-color='%23B84E2A'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z' fill='%23FFF8EF'/%3E%3Cpath d='M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z' fill='%23F0D5B2'/%3E%3Cpath d='M392 350h244' stroke='url(%23a)' stroke-width='40' stroke-linecap='round'/%3E%3Cpath d='M392 450h156' stroke='url(%23a)' stroke-width='40' stroke-linecap='round' opacity='.86'/%3E%3Cpath d='m432 592-80 80 80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='m592 592 80 80-80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M540 560 484 784' stroke='url(%23a)' stroke-width='42' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -234,15 +234,15 @@
   <div class="container">
     <a href="index.html" class="logo"><span class="logo-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="lip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="lip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="lip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#lip)"/><rect x="96" y="96" width="832" height="832" rx="208" stroke="#FFF7EF" stroke-opacity=".52" stroke-width="12"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#lip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round"/></svg></span>CodePapr</a>
     <ul class="nav-links">
-      <li><a href="#overview">总览</a></li>
-      <li><a href="#fileops">文件操作</a></li>
-      <li><a href="#intel">代码智能</a></li>
-      <li><a href="#cmd">命令·Git·Web</a></li>
-      <li><a href="#mechanisms">现状机制</a></li>
-      <li><a href="#pipeline">分发链路</a></li>
-      <li><a href="tool-inventory.en.html">EN</a></li>
+      <li><a href="#overview">Overview</a></li>
+      <li><a href="#fileops">File Ops</a></li>
+      <li><a href="#intel">Code Intelligence</a></li>
+      <li><a href="#cmd">Cmd·Git·Web</a></li>
+      <li><a href="#mechanisms">Mechanisms</a></li>
+      <li><a href="#pipeline">Pipeline</a></li>
+      <li><a href="tool-inventory.html">中文</a></li>
     </ul>
-    <button class="theme-toggle" onclick="toggleTheme()" aria-label="切换主题">
+    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
       <svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
       <svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
     </button>
@@ -251,23 +251,23 @@
 
 <section class="hero" id="overview">
   <div class="container">
-    <div class="section-label"><span class="dot"></span> TOOL SURFACE · LSP / AST 盘点</div>
-    <h1>工具全景 · <span class="gradient">两层架构 × 语言智能</span></h1>
-    <p>CodePapr 对 LLM 暴露 <strong>25 个合并工具</strong>（<code>graph</code> 已转 UI-only），经分发器路由到 <strong>61 个细粒度 workspace_* 工具</strong>（对 LLM 隐藏），最终落到 Tauri / Rust 后端。代码智能（<code>lsp</code> 的 9 个导航 action）已接入 <strong>LSP → AST 项目图</strong> 降级，并以 <code>source</code>/<code>confidence</code> 标注精度；<code>list(action: overview)</code> 提供 AST 项目结构概览。文件读写改（read / write / edit / patch）尚未利用语言智能。点击任意条目展开分发链路与接入现状。</p>
+    <div class="section-label"><span class="dot"></span> TOOL SURFACE · LSP / AST Inventory</div>
+    <h1>Tool Inventory · <span class="gradient">Two-Layer Architecture × Language Intelligence</span></h1>
+    <p>CodePapr exposes <strong>25 merged tools</strong> to the LLM (<code>graph</code> is now UI-only), routed by dispatchers to <strong>61 fine-grained workspace_* tools</strong> (hidden from the LLM), ultimately landing on the Tauri / Rust backend. Code intelligence (the <code>lsp</code> tool's 9 navigation actions) is wired to an <strong>LSP → AST project-graph</strong> fallback, tagged with <code>source</code>/<code>confidence</code> for precision; <code>list(action: overview)</code> provides an AST project-structure overview. File read/write/edit (read / write / edit / patch) do not yet leverage language intelligence. Click any entry to expand its dispatch chain and integration status.</p>
     <div class="legend">
-      <span class="lg"><i style="background:var(--green)"></i>LSP 接入</span>
-      <span class="lg"><i style="background:var(--amber)"></i>AST 接入</span>
+      <span class="lg"><i style="background:var(--green)"></i>LSP-backed</span>
+      <span class="lg"><i style="background:var(--amber)"></i>AST-backed</span>
       <span class="lg"><i style="background:var(--accent)"></i>LSP + AST</span>
-      <span class="lg"><i style="background:var(--orange)"></i>纯文本</span>
-      <span class="lg"><i style="background:var(--violet)"></i>多模态</span>
+      <span class="lg"><i style="background:var(--orange)"></i>Plain text</span>
+      <span class="lg"><i style="background:var(--violet)"></i>Multimodal</span>
     </div>
     <div class="stats">
-      <div class="stat-card"><div class="num n-green">25</div><div class="cap">LLM 可见合并工具<br>graph 转 UI-only</div></div>
-      <div class="stat-card"><div class="num n-accent">61</div><div class="cap">隐藏细粒度工具<br>workspace_* / shell_* / browser_*</div></div>
-      <div class="stat-card"><div class="num n-amber">15</div><div class="cap">真实 LSP 语言<br>Rust symbol_provider.rs</div></div>
-      <div class="stat-card"><div class="num n-violet">17</div><div class="cap">AST 语言<br>tree-sitter</div></div>
-      <div class="stat-card"><div class="num n-teal">11</div><div class="cap">regex 兜底语言</div></div>
-      <div class="stat-card"><div class="num n-orange">0</div><div class="cap">read/write/edit/patch<br>接入 LSP/AST 的数量</div></div>
+      <div class="stat-card"><div class="num n-green">25</div><div class="cap">LLM-visible merged tools<br>graph now UI-only</div></div>
+      <div class="stat-card"><div class="num n-accent">61</div><div class="cap">Hidden fine-grained tools<br>workspace_* / shell_* / browser_*</div></div>
+      <div class="stat-card"><div class="num n-amber">15</div><div class="cap">Real LSP languages<br>Rust symbol_provider.rs</div></div>
+      <div class="stat-card"><div class="num n-violet">17</div><div class="cap">AST languages<br>tree-sitter</div></div>
+      <div class="stat-card"><div class="num n-teal">11</div><div class="cap">regex fallback languages</div></div>
+      <div class="stat-card"><div class="num n-orange">0</div><div class="cap">read/write/edit/patch<br>tools wired to LSP/AST</div></div>
     </div>
   </div>
 </section>
@@ -276,28 +276,28 @@
   <div class="cols">
     <main>
 
-      <!-- ═══ TIER 1 · 文件操作 ═══ -->
+      <!-- ═══ TIER 1 · File Operations ═══ -->
       <section class="tier t1 reveal" id="fileops">
         <div class="tierhead">
           <div class="idx">01</div>
           <div class="tt">
-            <h3>File Ops <span>文件操作</span></h3>
-            <div class="tags"><span class="tag">read / write / edit / patch</span><span class="tag">grep / glob / list</span><span class="tag">全部纯文本</span></div>
+            <h3>File Ops <span>File Operations</span></h3>
+            <div class="tags"><span class="tag">read / write / edit / patch</span><span class="tag">grep / glob / list</span><span class="tag">All plain text</span></div>
           </div>
-          <div class="hz"><b>改造目标</b>尚未接入 LSP/AST</div>
+          <div class="hz"><b>Refactor target</b>Not yet wired to LSP/AST</div>
         </div>
 
-        <div class="sublabel"><b>读写改</b> 直接操作文件内容 · 均为纯文本语义</div>
+        <div class="sublabel"><b>Read/Write/Edit</b> Direct file-content ops · all plain-text semantics</div>
 
         <div class="item">
           <div class="row">
             <div class="addr">READ</div>
             <div class="name">read<small>→ workspace_read_file · workspaceTools.ts:1913</small></div>
             <div class="src"><span class="chip">invoke read_text_file</span><span class="chip">Rust read.rs:42</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc">读取项目文件原文。支持 <code>startLine/endLine</code> 行范围、<code>aroundLine</code> 窗口、<code>maxBytes</code>（原始读取默认 500KB）。<b>完全不知道 LSP/AST 存在</b>，返回纯文本，进上下文前被截断层钳制。</div>
-          <div class="more"><div class="mbox">分发：<code>read</code> → <code>workspace_read_file</code> → <code>invoke('read_text_file')</code>。输出经 <code>truncateToolOutput</code>：&gt;30k 字符中间截断 / &gt;50k 落盘 + 2k 预览 / 150k 硬顶。无符号大纲、无所属文件结构信息。</div></div>
+          <div class="desc">Reads the raw contents of a project file. Supports <code>startLine/endLine</code> line ranges, an <code>aroundLine</code> window, and <code>maxBytes</code> (raw read defaults to 500KB). <b>Completely unaware of LSP/AST</b>; returns plain text, clamped by the truncation layer before entering context.</div>
+          <div class="more"><div class="mbox">Dispatch: <code>read</code> → <code>workspace_read_file</code> → <code>invoke('read_text_file')</code>. Output passes through <code>truncateToolOutput</code>: &gt;30k chars middle-truncated / &gt;50k offloaded to disk + 2k preview / 150k hard cap. No symbol outline, no owning-file structure info.</div></div>
         </div>
 
         <div class="item">
@@ -305,10 +305,10 @@
             <div class="addr">WRITE</div>
             <div class="name">write<small>→ workspace_write_file · workspaceTools.ts:1957</small></div>
             <div class="src"><span class="chip">invoke write_text_file</span><span class="chip">editHistory.record</span><span class="chip">notifyWorkspaceMutation</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc">创建或完整覆盖文件。写入后记录编辑历史并广播 mutation。<b>写完不跑任何诊断</b>——语法错误要等 LLM 自己想起调 diagnostics 才发现。</div>
-          <div class="more"><div class="mbox">分发：<code>write</code> → <code>workspace_write_file</code> → <code>invoke('write_text_file')</code>。写后 <code>notifyWorkspaceMutation([path])</code>（缓存失效的天然挂点）。无 AST 解析校验、无 LSP 诊断反馈。</div></div>
+          <div class="desc">Creates or fully overwrites a file. After writing, records edit history and broadcasts the mutation. <b>Runs no diagnostics after writing</b>—syntax errors only surface when the LLM remembers to call diagnostics itself.</div>
+          <div class="more"><div class="mbox">Dispatch: <code>write</code> → <code>workspace_write_file</code> → <code>invoke('write_text_file')</code>. Post-write <code>notifyWorkspaceMutation([path])</code> (a natural hook for cache invalidation). No AST parse validation, no LSP diagnostic feedback.</div></div>
         </div>
 
         <div class="item">
@@ -316,34 +316,34 @@
             <div class="addr">EDIT</div>
             <div class="name">edit<small>→ workspace_apply_patch · workspaceTools.ts:3271</small></div>
             <div class="src"><span class="chip">applySearchReplacePatch</span><span class="chip">searchReplaceDiff.ts</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc">单文件精确 SEARCH/REPLACE。<b>纯字面 <code>String.indexOf</code> 匹配</b>（CRLF→LF 归一化后），零模糊。重读原文独立于 read（<code>maxBytes 20MB</code>），写后再重读校验一致性。</div>
-          <div class="more"><div class="mbox">匹配语义：search 必须逐字节命中；<code>expectedOccurrences</code> 校验次数；多匹配需 <code>replaceAll</code>。同一段文本出现在多个函数里时只能靠加长 search 或 expectedOccurrences 硬猜——<b>无符号锚点</b>可用。改完无诊断反馈。</div></div>
+          <div class="desc">Precise single-file SEARCH/REPLACE. <b>Pure literal <code>String.indexOf</code> matching</b> (after CRLF→LF normalization), zero fuzzy. Re-reads the source independently of read (<code>maxBytes 20MB</code>), then re-reads after writing to verify consistency.</div>
+          <div class="more"><div class="mbox">Matching semantics: search must match byte-for-byte; <code>expectedOccurrences</code> validates the count; multiple matches require <code>replaceAll</code>. When the same text appears in several functions, you can only guess by lengthening search or via expectedOccurrences—<b>no symbol anchor</b> available. No diagnostic feedback after the change.</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">PATCH</div>
             <div class="name">patch<small>→ workspace_apply_diff · workspaceTools.ts:3325</small></div>
-            <div class="src"><span class="chip">applySearchReplaceDiff</span><span class="chip">多文件原子</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="src"><span class="chip">applySearchReplaceDiff</span><span class="chip">multi-file atomic</span></div>
+            <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc">多文件原子 SEARCH/REPLACE：所有补丁全部精确匹配后一起写入，任一失败回滚。匹配机制与 edit 相同（纯字面），仅多了跨文件原子性。</div>
-          <div class="more"><div class="mbox">分发：<code>patch</code> → <code>workspace_apply_diff</code>。逐文件重读原文 → <code>applySearchReplaceDiff</code> 顺序应用 → 逐文件写入 + 重读校验 → 批量 <code>notifyWorkspaceMutation</code>。</div></div>
+          <div class="desc">Multi-file atomic SEARCH/REPLACE: all patches are written together only after every one matches exactly; any failure rolls back. Matching mechanism is identical to edit (pure literal), only adding cross-file atomicity.</div>
+          <div class="more"><div class="mbox">Dispatch: <code>patch</code> → <code>workspace_apply_diff</code>. Re-reads source per file → <code>applySearchReplaceDiff</code> applies sequentially → writes per file + re-read verification → batch <code>notifyWorkspaceMutation</code>.</div></div>
         </div>
 
-        <div class="sublabel"><b>检索</b> 词法级搜索 · 与语义符号索引（graph lookup）互补</div>
+        <div class="sublabel"><b>Search</b> Lexical-level search · complements the semantic symbol index (graph lookup)</div>
 
         <div class="item">
           <div class="row">
             <div class="addr">GREP</div>
             <div class="name">grep<small>→ workspace_search_text · workspaceTools.ts:2267</small></div>
             <div class="src"><span class="chip">isRegexp:true</span><span class="chip">smart-case</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc">按正则搜索文件内容，返回匹配位置与上下文。<code>contextLines</code> 默认 0 最大 8，<code>maxResults</code> 默认 80。纯词法，不标注命中所属符号。</div>
-          <div class="more"><div class="mbox">分发：<code>grep</code> → <code>workspace_search_text</code>（强制 <code>isRegexp:true</code>）。语义级"找符号"应走 <code>graph action=lookup</code>。</div></div>
+          <div class="desc">Searches file contents by regex, returning match positions and context. <code>contextLines</code> defaults to 0, max 8; <code>maxResults</code> defaults to 80. Purely lexical; does not annotate which symbol a hit belongs to.</div>
+          <div class="more"><div class="mbox">Dispatch: <code>grep</code> → <code>workspace_search_text</code> (forces <code>isRegexp:true</code>). Semantic-level "find symbol" should go through <code>graph action=lookup</code>.</div></div>
         </div>
 
         <div class="item">
@@ -351,10 +351,10 @@
             <div class="addr">GLOB</div>
             <div class="name">glob<small>→ workspace_search_files · workspaceTools.ts:2289</small></div>
             <div class="src"><span class="chip">globToRegex</span><span class="chip">registerSharedWorkspaceTools.ts:216</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc">按 glob 模式搜文件名（如 <code>**/*.test.ts</code>）。分发器先把 glob 转成正则再交给 <code>workspace_search_files</code>。</div>
-          <div class="more"><div class="mbox">分发：<code>glob</code> → <code>globToRegex()</code> → <code>workspace_search_files</code>（<code>isRegexp:true</code>）。</div></div>
+          <div class="desc">Searches file names by glob pattern (e.g. <code>**/*.test.ts</code>). The dispatcher first converts the glob to a regex, then hands it to <code>workspace_search_files</code>.</div>
+          <div class="more"><div class="mbox">Dispatch: <code>glob</code> → <code>globToRegex()</code> → <code>workspace_search_files</code> (<code>isRegexp:true</code>).</div></div>
         </div>
 
         <div class="item">
@@ -362,10 +362,10 @@
             <div class="addr">LIST</div>
             <div class="name">list<small>→ workspace_list_files / workspace_project_graph · workspaceTools.ts:1917</small></div>
             <div class="src"><span class="chip">action: files | overview</span><span class="chip">invoke list_workspace_files</span></div>
-            <div class="cchip c-mix">文本 + AST</div>
+            <div class="cchip c-mix">Text + AST</div>
           </div>
-          <div class="desc"><code>action: files</code>（默认）浏览目录树（<code>maxDepth</code> 默认 2 最大 6）；<code>action: overview</code> 返回 <b>AST 项目结构概览</b>（目录树 + 符号骨架），转发 <code>workspace_project_graph(view=overview)</code>。overview 是原 <code>graph action=overview</code> 的 LLM 入口（graph 已对 LLM 隐藏）。</div>
-          <div class="more"><div class="mbox">分发：<code>list</code> → <code>action=overview</code> ? <code>workspace_project_graph(view=overview)</code> : <code>workspace_list_files</code> → <code>invoke('list_workspace_files')</code>。</div></div>
+          <div class="desc"><code>action: files</code> (default) browses the directory tree (<code>maxDepth</code> defaults to 2, max 6); <code>action: overview</code> returns an <b>AST project structure overview</b> (directory tree + symbol skeleton), forwarding to <code>workspace_project_graph(view=overview)</code>. overview is the LLM entry point for the former <code>graph action=overview</code> (graph is now hidden from the LLM).</div>
+          <div class="more"><div class="mbox">Dispatch: <code>list</code> → <code>action=overview</code> ? <code>workspace_project_graph(view=overview)</code> : <code>workspace_list_files</code> → <code>invoke('list_workspace_files')</code>.</div></div>
         </div>
 
         <div class="item">
@@ -373,48 +373,48 @@
             <div class="addr">IMG</div>
             <div class="name">read_image<small>→ workspace_read_image · workspaceTools.ts:1934</small></div>
             <div class="src"><span class="chip">invoke read_image_file</span><span class="chip">base64</span></div>
-            <div class="cchip c-mm">多模态</div>
+            <div class="cchip c-mm">Multimodal</div>
           </div>
-          <div class="desc">读取图片（PNG/JPEG/WebP/GIF）为 base64 供视觉模型识别。<code>maxBytes</code> 默认 5MB。<b>仅 multimodalEnabled 时对 LLM 可见</b>，否则 hideFromLlm。</div>
-          <div class="more"><div class="mbox">注册于 <code>workspaceTools.ts:3517</code>（直接转发 workspace_read_image）；<code>:3521</code> 在非多模态时 <code>hideFromLlm('read_image')</code>。结果带 <code>__images</code> 内部字段，截断时会被 stripInternalFields 剥离。</div></div>
+          <div class="desc">Reads an image (PNG/JPEG/WebP/GIF) as base64 for vision-model recognition. <code>maxBytes</code> defaults to 5MB. <b>Visible to the LLM only when multimodalEnabled</b>; otherwise hideFromLlm.</div>
+          <div class="more"><div class="mbox">Registered at <code>workspaceTools.ts:3517</code> (forwards directly to workspace_read_image); <code>:3521</code> calls <code>hideFromLlm('read_image')</code> when not multimodal. The result carries an internal <code>__images</code> field, stripped by stripInternalFields on truncation.</div></div>
         </div>
       </section>
 
-      <!-- ═══ TIER 2 · 代码智能 ═══ -->
+      <!-- ═══ TIER 2 · Code Intelligence ═══ -->
       <section class="tier t2 reveal" id="intel">
         <div class="tierhead">
           <div class="idx">02</div>
           <div class="tt">
-            <h3>Code Intelligence <span>代码智能</span></h3>
-            <div class="tags"><span class="tag">lsp / lsp_edit / diagnostics</span><span class="tag">graph 转 UI-only</span><span class="tag">LSP→AST 降级</span></div>
+            <h3>Code Intelligence <span>Code Intelligence</span></h3>
+            <div class="tags"><span class="tag">lsp / lsp_edit / diagnostics</span><span class="tag">graph now UI-only</span><span class="tag">LSP→AST degradation</span></div>
           </div>
-          <div class="hz"><b>点查询已接降级</b>lsp 9 action · source/confidence</div>
+          <div class="hz"><b>Point queries wired to degradation</b>lsp 9 actions · source/confidence</div>
         </div>
 
-        <div class="sublabel"><b>语义图</b> ProjectGraph · 符号来源 lsp / ast / pattern</div>
+        <div class="sublabel"><b>Semantic graph</b> ProjectGraph · symbol source lsp / ast / pattern</div>
 
         <div class="item">
           <div class="row">
             <div class="addr">GRAPH</div>
-            <div class="name">graph<small>→ workspace_project_graph 等 · workspaceTools.ts:2777 · <b>对 LLM 隐藏</b></small></div>
-            <div class="src"><span class="chip">14 个 action（UI-only）</span><span class="chip">hideFromLlm:3793</span></div>
-            <div class="cchip c-ast">UI + AST 兜底</div>
+            <div class="name">graph<small>→ workspace_project_graph etc. · workspaceTools.ts:2777 · <b>hidden from the LLM</b></small></div>
+            <div class="src"><span class="chip">14 actions (UI-only)</span><span class="chip">hideFromLlm:3793</span></div>
+            <div class="cchip c-ast">UI + AST fallback</div>
           </div>
-          <div class="desc"><b>已对 LLM 隐藏（UI-only）</b>。14 个 action 仍在：<b>full / overview / lookup / dependency / entrypoints / impact / implementations / smart_context</b> + 6 个分析（<b>dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests</b>）。细粒度 handler 保留注册，服务 UI 面板并作为 <code>lsp</code> 点查询的 <b>AST 兜底后端</b>；项目结构概览改由 <code>list(action: overview)</code> 对 LLM 暴露。</div>
-          <div class="more"><div class="mbox">构建链：<code>list_workspace_files</code> → 逐文件 <code>read_text_file</code> → LSP documentSymbol 覆盖 → <code>buildWorkspaceProjectMap</code> → <code>buildWorkspaceProjectGraph</code> → LSP 边增强。<b>每次调用全量重建，零缓存</b>（故仅作兜底/UI，不作主路径）。符号经 <code>UnifiedSymbolDispatcher.extractSymbols</code>（lsp→ast→regex 降级）。</div></div>
+          <div class="desc"><b>Now hidden from the LLM (UI-only)</b>. The 14 actions remain: <b>full / overview / lookup / dependency / entrypoints / impact / implementations / smart_context</b> + 6 analyses (<b>dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests</b>). The fine-grained handlers stay registered, serving UI panels and acting as the <b>AST fallback backend</b> for <code>lsp</code> point queries; the project structure overview is now exposed to the LLM via <code>list(action: overview)</code>.</div>
+          <div class="more"><div class="mbox">Build chain: <code>list_workspace_files</code> → per-file <code>read_text_file</code> → LSP documentSymbol coverage → <code>buildWorkspaceProjectMap</code> → <code>buildWorkspaceProjectGraph</code> → LSP edge enrichment. <b>Full rebuild on every call, zero caching</b> (hence only used as fallback/UI, not the main path). Symbols go through <code>UnifiedSymbolDispatcher.extractSymbols</code> (lsp→ast→regex degradation).</div></div>
         </div>
 
-        <div class="sublabel"><b>LSP 导航与语义编辑</b> 精确到 file:line:column</div>
+        <div class="sublabel"><b>LSP navigation & semantic editing</b> precise to file:line:column</div>
 
         <div class="item">
           <div class="row">
             <div class="addr">LSP</div>
             <div class="name">lsp<small>→ workspace_symbol_* / document_symbol / workspace_symbol / implementation / *_call_hierarchy · :3068+</small></div>
-            <div class="src"><span class="chip">9 个 action（opencode 命名）</span><span class="chip">astFallback:2930</span></div>
+            <div class="src"><span class="chip">9 actions (opencode naming)</span><span class="chip">astFallback:2930</span></div>
             <div class="cchip c-mix">LSP → AST</div>
           </div>
-          <div class="desc">语言服务只读导航与分析，<b>9 个 action</b>：<b>goToDefinition / findReferences / hover / documentSymbol / workspaceSymbol / goToImplementation / prepareCallHierarchy / incomingCalls / outgoingCalls</b>。每个 action <b>LSP 优先</b>，LSP 不可用或无结果时<b>自动降级 AST 项目图</b>（graph 查询），结果以 <code>source</code>(lsp/ast) 与 <code>confidence</code>(high/medium/low) 标注精度。需 file:line（:column 可选）。</div>
-          <div class="more"><div class="mbox">分发：<code>lsp</code> → <code>createDefaultLspHandler</code> → <code>workspace_symbol_definition/references/hover/...</code>。每个 handler 先调 <code>requestWorkspace*</code>（LSP，30s 超时）；若 <code>!available</code> 或结果为空 → <code>astFallback</code>（workspaceTools.ts:2930）经 <code>findSymbolAtPosition</code> 定位符号后走 graph 查询（lookup / changeImpact / implementations / dependency）。AST 兜底为符号级（图符号仅有行号、无列号），confidence=medium。</div></div>
+          <div class="desc">Read-only language-service navigation and analysis, <b>9 actions</b>: <b>goToDefinition / findReferences / hover / documentSymbol / workspaceSymbol / goToImplementation / prepareCallHierarchy / incomingCalls / outgoingCalls</b>. Each action is <b>LSP-first</b>; when LSP is unavailable or returns nothing it <b>automatically degrades to the AST project graph</b> (a graph query), with results tagged by <code>source</code>(lsp/ast) and <code>confidence</code>(high/medium/low) precision. Requires file:line (:column optional).</div>
+          <div class="more"><div class="mbox">Dispatch: <code>lsp</code> → <code>createDefaultLspHandler</code> → <code>workspace_symbol_definition/references/hover/...</code>. Each handler first calls <code>requestWorkspace*</code> (LSP, 30s timeout); if <code>!available</code> or the result is empty → <code>astFallback</code> (workspaceTools.ts:2930) locates the symbol via <code>findSymbolAtPosition</code>, then runs a graph query (lookup / changeImpact / implementations / dependency). The AST fallback is symbol-level (graph symbols have line numbers only, no column), confidence=medium.</div></div>
         </div>
 
         <div class="item">
@@ -424,8 +424,8 @@
             <div class="src"><span class="chip">action: rename | code_action | format</span></div>
             <div class="cchip c-lsp">LSP</div>
           </div>
-          <div class="desc">语言服务语义修改：重命名（应用 workspace edit）、按 title/kind 选代码动作、批量格式化。<b>这是"语义编辑"的现有种子</b>，但与 edit/patch 完全割裂。</div>
-          <div class="more"><div class="mbox">分发：<code>lsp_edit</code> → <code>workspace_rename_symbol</code> / <code>workspace_apply_code_action</code> / <code>workspace_format_files</code>。rename 经 LSP <code>textDocument/rename</code> 拿 WorkspaceEdit 后落盘。</div></div>
+          <div class="desc">Language-service semantic modifications: rename (applies a workspace edit), pick a code action by title/kind, batch formatting. <b>This is the existing seed of "semantic editing"</b>, but it is completely disconnected from edit/patch.</div>
+          <div class="more"><div class="mbox">Dispatch: <code>lsp_edit</code> → <code>workspace_rename_symbol</code> / <code>workspace_apply_code_action</code> / <code>workspace_format_files</code>. rename obtains a WorkspaceEdit via LSP <code>textDocument/rename</code>, then persists to disk.</div></div>
         </div>
 
         <div class="item">
@@ -435,44 +435,44 @@
             <div class="src"><span class="chip">invoke lsp_get_diagnostics</span><span class="chip">Rust lsp.rs:1689</span></div>
             <div class="cchip c-lsp">LSP</div>
           </div>
-          <div class="desc">传 <code>relativePath</code> 查单文件 LSP 诊断；传 <code>project:true</code> 跑项目级 lint/typecheck。<b>独立工具——要 LLM 自己记得调</b>，write/edit 后不会自动触发。</div>
-          <div class="more"><div class="mbox">单文件：<code>invoke('lsp_get_diagnostics',{languageId})</code> 返回按 uri 分组的诊断，按路径后缀匹配取本文件。全项目：遍历可用 provider 语言聚合 topIssues。</div></div>
+          <div class="desc">Pass <code>relativePath</code> to query single-file LSP diagnostics; pass <code>project:true</code> to run project-level lint/typecheck. <b>A standalone tool—the LLM must remember to call it itself</b>; it is not auto-triggered after write/edit.</div>
+          <div class="more"><div class="mbox">Single file: <code>invoke('lsp_get_diagnostics',{languageId})</code> returns diagnostics grouped by uri, matched to this file by path suffix. Whole project: iterates available provider languages and aggregates topIssues.</div></div>
         </div>
 
-        <div class="sublabel"><b>隐藏细粒度</b> 被合并工具遮蔽 · 经 graph/lsp 分发触达</div>
+        <div class="sublabel"><b>Hidden fine-grained</b> shadowed by merged tools · reached via graph/lsp dispatch</div>
 
         <div class="item">
           <div class="row">
             <div class="addr">FINE</div>
-            <div class="name">symbol / graph 细粒度<small>lookup · dependency · entrypoints · impact · implementations · smart_context · organize_imports · fix_diagnostics</small></div>
+            <div class="name">symbol / graph fine-grained<small>lookup · dependency · entrypoints · impact · implementations · smart_context · organize_imports · fix_diagnostics</small></div>
             <div class="src"><span class="chip">workspaceTools.ts:2849–2967</span><span class="chip">graphQuery.ts</span></div>
             <div class="cchip c-mix">LSP + AST</div>
           </div>
-          <div class="desc">隐藏的语义查询工具，由 <code>lsp_edit</code> 分发触达（整理导入、快速修复），并作为 <code>lsp</code> 点查询的 <b>AST 兜底后端</b>（符号查找、依赖子图、入口点、变更影响、接口实现、智能上下文）。<code>graph</code> 公共工具本身也已 <code>hideFromLlm</code>。全部基于 ProjectGraph 或 LSP。</div>
-          <div class="more"><div class="mbox">这些工具注册后由 <code>oldToolNames</code> 统一 <code>hideFromLlm</code>；<code>graph</code> 公共工具另在 workspaceTools.ts:3793 单独 <code>hideFromLlm</code>。smart_context = <code>getWorkspaceSmartContext</code>(lookup + entrypoints(5) + dependency)。</div></div>
+          <div class="desc">Hidden semantic query tools, reached via <code>lsp_edit</code> dispatch (organize imports, quick fixes), and serving as the <b>AST fallback backend</b> for <code>lsp</code> point queries (symbol lookup, dependency subgraph, entry points, change impact, interface implementations, smart context). The public <code>graph</code> tool itself is also <code>hideFromLlm</code>. All built on ProjectGraph or LSP.</div>
+          <div class="more"><div class="mbox">After registration these tools are uniformly <code>hideFromLlm</code> via <code>oldToolNames</code>; the public <code>graph</code> tool is additionally <code>hideFromLlm</code>'d separately at workspaceTools.ts:3793. smart_context = <code>getWorkspaceSmartContext</code>(lookup + entrypoints(5) + dependency).</div></div>
         </div>
       </section>
 
-      <!-- ═══ TIER 3 · 命令与进程 ═══ -->
+      <!-- ═══ TIER 3 · Command & Process ═══ -->
       <section class="tier t3 reveal" id="cmd">
         <div class="tierhead">
           <div class="idx">03</div>
           <div class="tt">
-            <h3>Command &amp; Process <span>命令与进程</span></h3>
+            <h3>Command &amp; Process <span>Command & Process</span></h3>
             <div class="tags"><span class="tag">exec / shell / proc</span></div>
           </div>
-          <div class="hz"><b>执行面</b>阻塞 / 后台 / 持久会话</div>
+          <div class="hz"><b>Execution surface</b>blocking / background / persistent session</div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">EXEC</div>
             <div class="name">exec<small>→ workspace_run_command / start_background / start_preview · :2253 / :2403 / :2418</small></div>
-            <div class="src"><span class="chip">background:true → 后台</span><span class="chip">previewUrl → 预览</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="src"><span class="chip">background:true → background</span><span class="chip">previewUrl → preview</span></div>
+            <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc">运行命令，默认阻塞等待。<code>background:true</code> 后台运行返回 pid；带 <code>previewUrl</code> 则启动预览会话。<code>timeoutSeconds</code> 默认 30 最大 600。</div>
-          <div class="more"><div class="mbox">分发：<code>exec</code> → background? → <code>workspace_start_background_command</code> / <code>workspace_start_preview_session</code>，否则 <code>workspace_run_command</code>。</div></div>
+          <div class="desc">Runs a command, blocking by default. <code>background:true</code> runs in the background and returns a pid; with <code>previewUrl</code> it starts a preview session. <code>timeoutSeconds</code> defaults to 30, max 600.</div>
+          <div class="more"><div class="mbox">Dispatch: <code>exec</code> → background? → <code>workspace_start_background_command</code> / <code>workspace_start_preview_session</code>, otherwise <code>workspace_run_command</code>.</div></div>
         </div>
 
         <div class="item">
@@ -480,10 +480,10 @@
             <div class="addr">SHELL</div>
             <div class="name">shell<small>→ shell_* · :2546 / :2557 / :2563 / :2573 / :2601</small></div>
             <div class="src"><span class="chip">action: open|send|read|close|list</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc">持久 Shell 会话：open 启动、send 发命令、read 读输出尾部、close 关闭、list 列出全部。send 传 command+args 或 input（仅交互提示）。</div>
-          <div class="more"><div class="mbox">分发：<code>shell</code> → <code>shell_open_session</code> / <code>shell_send_input</code> / <code>shell_read_output</code> / <code>shell_close_session</code> / <code>shell_list_sessions</code>。</div></div>
+          <div class="desc">Persistent shell sessions: open starts one, send issues a command, read reads the output tail, close closes it, list lists them all. send takes command+args or input (interactive prompts only).</div>
+          <div class="more"><div class="mbox">Dispatch: <code>shell</code> → <code>shell_open_session</code> / <code>shell_send_input</code> / <code>shell_read_output</code> / <code>shell_close_session</code> / <code>shell_list_sessions</code>.</div></div>
         </div>
 
         <div class="item">
@@ -491,10 +491,10 @@
             <div class="addr">PROC</div>
             <div class="name">proc<small>→ workspace_*_background_processes · :2441 / :2447 / :2457</small></div>
             <div class="src"><span class="chip">action: list|stop|stop_all</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc">后台进程管理（由 exec background 创建）。不传 action 默认列出；stop 停指定 pid；stop_all 停全部。</div>
-          <div class="more"><div class="mbox">分发：<code>proc</code> → <code>workspace_list_background_processes</code> / <code>workspace_stop_background_process</code> / <code>workspace_stop_all_background_processes</code>。</div></div>
+          <div class="desc">Background process management (created by exec background). With no action it lists by default; stop stops a given pid; stop_all stops them all.</div>
+          <div class="more"><div class="mbox">Dispatch: <code>proc</code> → <code>workspace_list_background_processes</code> / <code>workspace_stop_background_process</code> / <code>workspace_stop_all_background_processes</code>.</div></div>
         </div>
       </section>
 
@@ -503,10 +503,10 @@
         <div class="tierhead">
           <div class="idx">04</div>
           <div class="tt">
-            <h3>Git <span>版本空间</span></h3>
-            <div class="tags"><span class="tag">8 个 action</span><span class="tag">CodePapr 独立版本空间</span></div>
+            <h3>Git <span>Version Space</span></h3>
+            <div class="tags"><span class="tag">8 actions</span><span class="tag">CodePapr isolated version space</span></div>
           </div>
-          <div class="hz"><b>不影响用户仓库</b>自动备份分支</div>
+          <div class="hz"><b>Does not touch the user's repo</b>auto backup branch</div>
         </div>
 
         <div class="item">
@@ -514,33 +514,33 @@
             <div class="addr">GIT</div>
             <div class="name">git<small>→ workspace_git_* · :3053 / :3057 / :3091 / :3116 / :3141 / :3158 / :3179 / :3222</small></div>
             <div class="src"><span class="chip">action: status|diff|log|branch|stage|commit|restore|reset</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc">CodePapr 独立版本空间（不影响用户自身 Git 仓库）。commit 需 message；branch 需 branchName；reset 需 target 且自动创建备份分支；restore/reset 前默认创建安全快照。</div>
-          <div class="more"><div class="mbox">分发：<code>git</code> → <code>workspace_git_status/diff/history/branch_checkout/stage/commit/restore/reset</code>。另有隐藏的 <code>workspace_restore_undo</code>（:3255）。参数含 snapshot / includeUntracked / backupBranchPrefix。</div></div>
+          <div class="desc">CodePapr's isolated version space (does not touch the user's own Git repo). commit requires message; branch requires branchName; reset requires target and auto-creates a backup branch; restore/reset create a safety snapshot by default beforehand.</div>
+          <div class="more"><div class="mbox">Dispatch: <code>git</code> → <code>workspace_git_status/diff/history/branch_checkout/stage/commit/restore/reset</code>. There is also a hidden <code>workspace_restore_undo</code> (:3255). Parameters include snapshot / includeUntracked / backupBranchPrefix.</div></div>
         </div>
       </section>
 
-      <!-- ═══ TIER 5 · Web 与浏览器 ═══ -->
+      <!-- ═══ TIER 5 · Web & Browser ═══ -->
       <section class="tier t5 reveal">
         <div class="tierhead">
           <div class="idx">05</div>
           <div class="tt">
-            <h3>Web &amp; Browser <span>网络与浏览器</span></h3>
+            <h3>Web &amp; Browser <span>Web & Browser</span></h3>
             <div class="tags"><span class="tag">web_fetch / web_download / web_search / browser / open</span></div>
           </div>
-          <div class="hz"><b>内置浏览器</b>桌面端完整支持</div>
+          <div class="hz"><b>Built-in browser</b>full support on desktop</div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">WEB</div>
             <div class="name">web_fetch / web_download / web_search<small>→ web_fetch_url / web_download_file / web_search · :2375 / :2387 / :2342</small></div>
-            <div class="src"><span class="chip">web_search 原生可见</span><span class="chip">searxng</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="src"><span class="chip">web_search natively visible</span><span class="chip">searxng</span></div>
+            <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc"><b>web_fetch</b> 读网页正文转纯文本（maxBytes 默认 20000）；<b>web_download</b> 下载文件到 .CodePapr/downloads/；<b>web_search</b> 是原生细粒度工具（不经合并层），走 searxng，可直接对 LLM 见。</div>
-          <div class="more"><div class="mbox">web_fetch/web_download 经合并层转发；web_search 直接注册（<code>!disableWebSearchTools</code> 时），参数 query/maxResults/searxng*。</div></div>
+          <div class="desc"><b>web_fetch</b> reads a web page body and converts it to plain text (maxBytes defaults to 20000); <b>web_download</b> downloads a file to .CodePapr/downloads/; <b>web_search</b> is a native fine-grained tool (not via the merge layer), goes through searxng, and can be directly visible to the LLM.</div>
+          <div class="more"><div class="mbox">web_fetch/web_download are forwarded via the merge layer; web_search is registered directly (when <code>!disableWebSearchTools</code>), with parameters query/maxResults/searxng*.</div></div>
         </div>
 
         <div class="item">
@@ -548,55 +548,55 @@
             <div class="addr">BRWS</div>
             <div class="name">browser<small>→ browser_*_page · :2611 / :2625 / :2639 / :2647 / :2666 / :2691 / :2708 / :2729</small></div>
             <div class="src"><span class="chip">action: open|navigate|reload|close|click|type|read|screenshot|get</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc">内置浏览器交互：打开/导航/刷新/关闭、点击元素、输入文本、读 DOM、截图、取状态。open/navigate 需 url；click/type 需 selector；type 需 text。仅桌面端完整支持。</div>
-          <div class="more"><div class="mbox">分发：<code>browser</code> → browserHandler → <code>browser_open_page/navigate_page/reload_page/click/input_text/read_dom/take_screenshot/close_page</code>。另有 preview 变体（browser_*_preview）服务 exec previewUrl。</div></div>
+          <div class="desc">Built-in browser interaction: open/navigate/reload/close, click an element, type text, read the DOM, screenshot, get state. open/navigate require url; click/type require selector; type requires text. Full support on desktop only.</div>
+          <div class="more"><div class="mbox">Dispatch: <code>browser</code> → browserHandler → <code>browser_open_page/navigate_page/reload_page/click/input_text/read_dom/take_screenshot/close_page</code>. There are also preview variants (browser_*_preview) serving exec previewUrl.</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">OPEN</div>
             <div class="name">open<small>→ workspace_open_in_browser · :2305</small></div>
-            <div class="src"><span class="chip">系统默认浏览器</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="src"><span class="chip">system default browser</span></div>
+            <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc">在系统默认浏览器打开 URL 或项目内 HTML 文件。</div>
-          <div class="more"><div class="mbox">分发：<code>open</code> → openHandler → <code>workspace_open_in_browser</code>。</div></div>
+          <div class="desc">Opens a URL or an in-project HTML file in the system default browser.</div>
+          <div class="more"><div class="mbox">Dispatch: <code>open</code> → openHandler → <code>workspace_open_in_browser</code>.</div></div>
         </div>
       </section>
 
-      <!-- ═══ TIER 6 · 应用与辅助 ═══ -->
+      <!-- ═══ TIER 6 · App & Misc ═══ -->
       <section class="tier t6 reveal">
         <div class="tierhead">
           <div class="idx">06</div>
           <div class="tt">
-            <h3>App &amp; Misc <span>应用与辅助</span></h3>
+            <h3>App &amp; Misc <span>App & Misc</span></h3>
             <div class="tags"><span class="tag">app_render / app_* / skill / question / todo</span></div>
           </div>
-          <div class="hz"><b>App 模式</b>app_render 是主输出</div>
+          <div class="hz"><b>App mode</b>app_render is the primary output</div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">APP</div>
             <div class="name">app_render / app_list / app_start / app_stop / app_delete<small>· :1977 / :2168 / :2197 / :2227 / :2240</small></div>
-            <div class="src"><span class="chip">app_render 原生可见</span><span class="chip">.CodePapr/apps/&lt;appId&gt;</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="src"><span class="chip">app_render natively visible</span><span class="chip">.CodePapr/apps/&lt;appId&gt;</span></div>
+            <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc"><b>app_render</b> 是 App 模式的主输出工具：渲染交互式 HTML 应用到面板（沙箱 iframe + Papr SDK）。app_list/start/stop/delete 管理已注册 .papr 应用的后端生命周期。app_render 对子代理始终排除（防套娃）。</div>
-          <div class="more"><div class="mbox">app_render 参数：appId(kebab-case) / title / html / permissions / agents / level / command+args+port。app_list 等 4 个经合并层对 LLM 可见。</div></div>
+          <div class="desc"><b>app_render</b> is the primary output tool of App mode: it renders an interactive HTML app into the panel (sandboxed iframe + Papr SDK). app_list/start/stop/delete manage the backend lifecycle of registered .papr apps. app_render is always excluded from subagents (to prevent nesting).</div>
+          <div class="more"><div class="mbox">app_render parameters: appId(kebab-case) / title / html / permissions / agents / level / command+args+port. app_list and the other 3 are visible to the LLM via the merge layer.</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">AUX</div>
             <div class="name">skill / question / todo / local_time_now<small>→ skill_load · :2321 · question handler :3494</small></div>
-            <div class="src"><span class="chip">skill 经合并层</span><span class="chip">question 仅 Plan 模式</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="src"><span class="chip">skill via merge layer</span><span class="chip">question Plan mode only</span></div>
+            <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc"><b>skill</b> 加载 .CodePapr/skills/ 说明文件；<b>question</b> 向用户提问（Plan 模式，返回 __question 结构）；<b>todo</b> 实时任务清单；<b>local_time_now</b> 本地时间（细粒度，模式白名单内）。</div>
-          <div class="more"><div class="mbox">skill 经合并层转发 <code>skill_load</code>；question 经 questionHandler 返回结构化标记；模式工具白名单见 agentRuntime.worker.ts:76-78。</div></div>
+          <div class="desc"><b>skill</b> loads instruction files from .CodePapr/skills/; <b>question</b> asks the user a question (Plan mode, returns a __question structure); <b>todo</b> is a live task list; <b>local_time_now</b> is local time (fine-grained, within the mode whitelist).</div>
+          <div class="more"><div class="mbox">skill forwards to <code>skill_load</code> via the merge layer; question returns structured markers via questionHandler; see agentRuntime.worker.ts:76-78 for the mode tool whitelist.</div></div>
         </div>
       </section>
 
@@ -605,44 +605,44 @@
     <!-- ═══ RAIL ═══ -->
     <aside class="rail">
       <div class="railcard reveal">
-        <h4>两层架构 · Dispatch</h4>
+        <h4>Two-layer architecture · Dispatch</h4>
         <ul class="wire">
-          <li class="wnode"><b>LLM</b> 看见 25 个合并工具<span class="wtag">graph 转 UI-only</span></li>
-          <li class="wnode"><b>分发器</b> 合并 → 细粒度映射<span class="wtag">registerSharedWorkspaceTools.ts</span></li>
-          <li class="wnode"><b>细粒度</b> 61 个 workspace_* handler<span class="wtag">workspaceTools.ts（hideFromLlm）</span></li>
-          <li class="wnode"><b>Tauri</b> invoke → Rust 后端<span class="wtag">read_text_file / lsp_* / symbol_provider</span></li>
-          <li class="wnode"><b>Rust</b> LSP→AST→regex 降级引擎<span class="wtag">symbol_provider.rs:1343</span></li>
+          <li class="wnode"><b>LLM</b> sees 25 merged tools<span class="wtag">graph now UI-only</span></li>
+          <li class="wnode"><b>Dispatcher</b> merged → fine-grained mapping<span class="wtag">registerSharedWorkspaceTools.ts</span></li>
+          <li class="wnode"><b>Fine-grained</b> 61 workspace_* handlers<span class="wtag">workspaceTools.ts (hideFromLlm)</span></li>
+          <li class="wnode"><b>Tauri</b> invoke → Rust backend<span class="wtag">read_text_file / lsp_* / symbol_provider</span></li>
+          <li class="wnode"><b>Rust</b> LSP→AST→regex degradation engine<span class="wtag">symbol_provider.rs:1343</span></li>
         </ul>
       </div>
 
       <div class="railcard reveal">
-        <h4>LSP / AST 覆盖账本</h4>
-        <div class="stat"><span>真实 LSP 服务器（Rust）</span><b class="g">15 语言</b></div>
-        <div class="stat"><span>TS 侧声明 LSP 适配器</span><b class="a">26 语言</b></div>
-        <div class="stat"><span>AST（tree-sitter）</span><b class="v">17 语言</b></div>
-        <div class="stat"><span>regex 兜底</span><b class="ac">11 语言</b></div>
-        <div class="stat"><span>降级链</span><b class="g">lsp→ast→regex</b></div>
-        <div class="stat"><span>声明 26 vs 真实 15 的差</span><b class="r">落到 AST/regex</b></div>
+        <h4>LSP / AST coverage ledger</h4>
+        <div class="stat"><span>Real LSP servers (Rust)</span><b class="g">15 languages</b></div>
+        <div class="stat"><span>TS-side declared LSP adapters</span><b class="a">26 languages</b></div>
+        <div class="stat"><span>AST (tree-sitter)</span><b class="v">17 languages</b></div>
+        <div class="stat"><span>regex fallback</span><b class="ac">11 languages</b></div>
+        <div class="stat"><span>degradation chain</span><b class="g">lsp→ast→regex</b></div>
+        <div class="stat"><span>Gap of declared 26 vs real 15</span><b class="r">falls to AST/regex</b></div>
       </div>
 
       <div class="railcard reveal">
-        <h4>三层限制 · 别混淆</h4>
-        <div class="stat"><span>全局上下文预算</span><b class="ac">500k tokens</b></div>
-        <div class="stat"><span>· 位置</span><b>defaults.ts:69</b></div>
-        <div class="stat"><span>工具结果截断 intercept</span><b class="a">30k 字符</b></div>
+        <h4>Three limit layers · don't confuse them</h4>
+        <div class="stat"><span>Global context budget</span><b class="ac">500k tokens</b></div>
+        <div class="stat"><span>· location</span><b>defaults.ts:69</b></div>
+        <div class="stat"><span>Tool result truncation intercept</span><b class="a">30k chars</b></div>
         <div class="stat"><span>· offload / ceiling</span><b class="a">50k / 150k</b></div>
-        <div class="stat"><span>read 原始读取上限</span><b class="r">500KB 字节</b></div>
-        <div class="stat"><span>· 位置</span><b>workspace_fs/mod.rs:25</b></div>
+        <div class="stat"><span>read raw read cap</span><b class="r">500KB bytes</b></div>
+        <div class="stat"><span>· location</span><b>workspace_fs/mod.rs:25</b></div>
       </div>
 
       <div class="railcard reveal">
-        <h4>模式工具面 · Whitelist</h4>
+        <h4>Mode tool surface · Whitelist</h4>
         <div class="modelist">
-          <b>模式 1（只读）</b><br>
+          <b>Mode 1 (read-only)</b><br>
           <span class="mk">read grep list lsp diagnostics</span> read_image skill_load todo local_time_now<br><br>
-          <b>模式 2（+联网）</b><br>
+          <b>Mode 2 (+web)</b><br>
           <span class="mk">+ web_search web_fetch web_download</span><br><br>
-          <b>模式 3（+写执行）</b><br>
+          <b>Mode 3 (+write/exec)</b><br>
           <span class="mk">+ write edit patch exec shell</span>
         </div>
       </div>
@@ -651,55 +651,55 @@
 
   <!-- ═══ MECHANISMS ═══ -->
   <section class="mech reveal" id="mechanisms">
-    <h2>现状五个事实</h2>
-    <div class="sub">为什么"工具臃肿、没接好 LSP/AST"——改造的出发点。</div>
+    <h2>Five facts about the current state</h2>
+    <div class="sub">Why "tools are bloated and LSP/AST aren't wired well" — the starting point for refactoring.</div>
     <div class="ledger">
       <div class="led">
-        <div class="no">F·01</div><h5>降级链已接入 lsp 点查询（已改造）</h5>
-        <p><code>UnifiedSymbolDispatcher</code> 的 <code>lsp→ast→regex</code> 降级（Rust symbol_provider.rs 为引擎）原本只服务 project-map 符号提取。<b>现已扩展</b>：<code>lsp</code> 的 9 个导航 action 在 LSP 不可用/无结果时经 <code>astFallback</code>（workspaceTools.ts:2930）降级到 AST 项目图，并以 source/confidence 标注。<b>read/write/edit/patch 仍未接入</b>语言智能。</p>
+        <div class="no">F·01</div><h5>degradation chain wired into lsp point queries (refactored)</h5>
+        <p>The <code>lsp→ast→regex</code> degradation in <code>UnifiedSymbolDispatcher</code> (with Rust symbol_provider.rs as the engine) originally only served project-map symbol extraction. <b>Now extended</b>: the 9 navigation actions of <code>lsp</code> degrade to the AST project graph via <code>astFallback</code> (workspaceTools.ts:2930) when LSP is unavailable/returns nothing, tagged with source/confidence. <b>read/write/edit/patch are still not wired</b> to language intelligence.</p>
       </div>
       <div class="led">
-        <div class="no">F·02</div><h5>read 是哑的</h5>
-        <p><code>workspace_read_file</code> 直接 <code>invoke('read_text_file')</code> 返回纯文本（workspaceTools.ts:1913）。不辨文件类型、不给符号大纲、不告诉 LLM 这个文件在依赖图里的位置。</p>
+        <div class="no">F·02</div><h5>read is dumb</h5>
+        <p><code>workspace_read_file</code> directly <code>invoke('read_text_file')</code> returns plain text (workspaceTools.ts:1913). It doesn't distinguish file types, gives no symbol outline, and doesn't tell the LLM where this file sits in the dependency graph.</p>
       </div>
       <div class="led">
-        <div class="no">F·03</div><h5>改完没有反馈回路</h5>
-        <p>write/edit/patch 落盘即结束。<code>diagnostics</code> 是独立工具，要 LLM 自己记得调。agent 改坏了类型检查，<b>下一次调用前毫不知情</b>——这是好 harness 最大的缺口。</p>
+        <div class="no">F·03</div><h5>no feedback loop after a change</h5>
+        <p>write/edit/patch end once they hit disk. <code>diagnostics</code> is a standalone tool; the LLM must remember to call it itself. If the agent breaks type checking, it has <b>no idea until the next call</b>—this is the biggest gap in a good harness.</p>
       </div>
       <div class="led">
-        <div class="no">F·04</div><h5>graph 每次全量重建</h5>
-        <p>每个 graph action 都重新 list 全工作区 + 逐文件读盘 + 查 LSP + 建图 + 增强（buildIntelligenceProjectGraph:1785）。<b>零缓存</b>。lookup→dependency→impact 三连就是三次全量重建。</p>
+        <div class="no">F·04</div><h5>graph does a full rebuild every time</h5>
+        <p>Every graph action re-lists the whole workspace + reads each file from disk + queries LSP + builds the graph + enriches it (buildIntelligenceProjectGraph:1785). <b>Zero caching</b>. A lookup→dependency→impact triple is three full rebuilds.</p>
       </div>
       <div class="led">
-        <div class="no">F·05</div><h5>edit 是纯字面匹配</h5>
-        <p><code>applySearchReplacePatch</code> 用 <code>String.indexOf</code> 精确匹配（searchReplaceDiff.ts:51-78）。同一段文本在多个函数里出现时只能靠 <code>expectedOccurrences</code> 或加长 search 硬猜——<b>没有符号锚点</b>可用。</p>
+        <div class="no">F·05</div><h5>edit is pure literal matching</h5>
+        <p><code>applySearchReplacePatch</code> uses <code>String.indexOf</code> for exact matching (searchReplaceDiff.ts:51-78). When the same text appears in multiple functions, you can only guess via <code>expectedOccurrences</code> or by lengthening search—<b>no symbol anchor</b> available.</p>
       </div>
       <div class="led">
-        <div class="no">F·06</div><h5>重叠的心智模型（已收敛）</h5>
-        <p>原 read / graph(overview) / list 都返回结构、graph(lookup) 与 lsp(definition) 都在"找符号"、graph(impact)=dependency(incoming) 的职责重叠，<b>现已收敛</b>：<code>graph</code> 对 LLM 隐藏，项目结构归 <code>list(action: overview)</code>，点查询（定义/引用/实现/调用层级）统一进 <code>lsp</code> 并按需内部降级 AST。LLM 面对单一 <code>lsp</code> 工具，无需在重叠工具间裁决。</p>
+        <div class="no">F·06</div><h5>overlapping mental models (consolidated)</h5>
+        <p>The former read / graph(overview) / list all returned structure, graph(lookup) and lsp(definition) were both "finding symbols", and graph(impact)=dependency(incoming) had overlapping responsibilities—<b>now consolidated</b>: <code>graph</code> is hidden from the LLM, project structure goes to <code>list(action: overview)</code>, and point queries (definition/references/implementation/call hierarchy) are unified into <code>lsp</code>, which degrades to AST internally as needed. The LLM faces a single <code>lsp</code> tool, with no need to arbitrate between overlapping tools.</p>
       </div>
     </div>
   </section>
 
   <!-- ═══ PIPELINE ═══ -->
   <section class="pipe reveal" id="pipeline">
-    <h2>一次工具调用的完整链路</h2>
-    <div class="sub">以 <code>edit</code> 为例——从 LLM 发起到 Rust 落盘。</div>
+    <h2>The full chain of a single tool call</h2>
+    <div class="sub">Using <code>edit</code> as an example — from LLM invocation to Rust persisting to disk.</div>
     <div class="flow">
-      <div class="fstep"><span class="fi">L0</span><b>LLM 调用 edit</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L1</span><b>合并工具定义</b>mergeToolDefs</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L2</span><b>分发器映射</b>edit→apply_patch</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L3</span><b>细粒度 handler</b>重读原文 20MB</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L4</span><b>字面 SEARCH/REPLACE</b>indexOf 精确匹配</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L0</span><b>LLM calls edit</b></div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L1</span><b>Merged tool definition</b>mergeToolDefs</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L2</span><b>Dispatcher mapping</b>edit→apply_patch</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L3</span><b>Fine-grained handler</b>re-read source 20MB</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L4</span><b>Literal SEARCH/REPLACE</b>indexOf exact match</div><div class="farrow">→</div>
       <div class="fstep"><span class="fi">L5</span><b>invoke write_text_file</b>Tauri → Rust</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L6</span><b>重读校验 + editHistory</b>notifyMutation</div>
+      <div class="fstep"><span class="fi">L6</span><b>Re-read verify + editHistory</b>notifyMutation</div>
     </div>
   </section>
 </div>
 
 <footer>
   <div class="container">
-    CodePapr &mdash; 工具全景盘点 · 生成自源码核实（<code>mergeToolDefs.ts</code> / <code>registerSharedWorkspaceTools.ts</code> / <code>workspaceTools.ts</code> / <code>toolDefinitions.ts</code> / <code>unifiedSymbols.ts</code> / <code>symbol_provider.rs</code> / <code>toolOutputTruncation.ts</code> / <code>workspace_fs/mod.rs</code> / <code>agentRuntime.worker.ts</code>）。两层架构 = 25 合并工具（LLM 可见，graph 转 UI-only）→ 61 细粒度（hideFromLlm）→ Tauri/Rust。降级链 = lsp→ast（点查询）/ lsp→ast→regex（符号提取）。限制三层单位：tokens / 字符 / 字节，勿混淆。
+    CodePapr &mdash; Tool inventory audit · generated from source verification (<code>mergeToolDefs.ts</code> / <code>registerSharedWorkspaceTools.ts</code> / <code>workspaceTools.ts</code> / <code>toolDefinitions.ts</code> / <code>unifiedSymbols.ts</code> / <code>symbol_provider.rs</code> / <code>toolOutputTruncation.ts</code> / <code>workspace_fs/mod.rs</code> / <code>agentRuntime.worker.ts</code>). Two-layer architecture = 25 merged tools (visible to the LLM, graph now UI-only) → 61 fine-grained (hideFromLlm) → Tauri/Rust. Degradation chain = lsp→ast (point queries) / lsp→ast→regex (symbol extraction). Three limit layers in units of tokens / chars / bytes — don't confuse them.
   </div>
 </footer>
 

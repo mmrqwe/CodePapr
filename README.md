@@ -20,7 +20,7 @@ CodePapr is a local coding agent system built with DeepSeek cache optimization. 
 | **Multi-agent collaboration** | Main agent dispatches Explore/Scout/Mentor and custom sub-agents via the `task` tool |
 | **TodoList task planning** | Agents auto-create and track task lists with progress reporting and re-planning |
 | **Project memory auto-management** | `.CodePapr/memory.md` is auto-generated on cold start from ProjectGraph (structure/commands/conventions); accumulates error patterns and project conventions across sessions; auto-deduplicates with a fast model once exceeding 200 lines, without blocking the session |
-| **ProjectGraph semantic analysis** | Project-level code structure skeleton + symbols + dependency graph, supporting 13 actions including dead code detection, circular dependency checks, and refactoring suggestions |
+| **Code intelligence (LSP + AST)** | `lsp` tool with 9 navigation actions (go-to-definition, references, hover, document/workspace symbols, implementations, call hierarchy) — LSP-first with automatic AST project-graph fallback tagged by source/confidence; `list(action: overview)` for project structure. The ProjectGraph (UI-facing) further supports dead code detection, circular dependency checks, and refactoring suggestions |
 | **DeepSeek prefix cache optimization** | Three-layer prompt injection strategy to maximize cache hits and reduce costs |
 | **SEARCH/REPLACE Diff** | Validate before writing, with atomic multi-file patch support |
 | **MCP protocol support** | Integrate external MCP tool servers (stdio / SSE / Streamable HTTP); built-in DuckDuckGo Search, Postgres, SQLite presets; MCP marketplace with one-click install from the official registry; per-server permission modes (read-only / read-write / dangerous) and mutating-tool confirmation flow |
@@ -134,7 +134,7 @@ See `packages/@codepapr/core/docs/CONFIGURATION.md` for the full parameter refer
 
 | Agent | Purpose | Model | Tools |
 |-------|---------|-------|-------|
-| **explore** | Read-only code analysis | fast | read, read_image, graph, lsp, diagnostics, grep |
+| **explore** | Read-only code analysis | fast | read, read_image, list, lsp, diagnostics, grep |
 | **scout** | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image |
 | **mentor** | Architecture/algorithm guidance | Configurable model | None |
 

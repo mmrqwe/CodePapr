@@ -124,9 +124,9 @@ The LLM can invoke 30 discrete tools (including `task`/`todo` as dynamic tools),
 | `patch` | Multi-file atomic SEARCH/REPLACE | workspace_apply_diff |
 | `grep` | Regex search file contents | workspace_search_text |
 | `glob` | Filename pattern search | workspace_search_files |
-| `list` | Directory tree browsing | workspace_list_files |
-| `graph` | full / overview / lookup / implementations / dependency / entrypoints / impact / smart_context / dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests | graphQuery |
-| `lsp` | definition / references | workspace_symbol_definition / workspace_symbol_references |
+| `list` | files (directory tree, default) / overview (AST project structure overview) | workspace_list_files / workspace_project_graph |
+| `graph` | **Hidden from LLM (UI-only)**: full / overview / lookup / implementations / dependency / entrypoints / impact / smart_context / dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests | graphQuery |
+| `lsp` | goToDefinition / findReferences / hover / documentSymbol / workspaceSymbol / goToImplementation / prepareCallHierarchy / incomingCalls / outgoingCalls (LSP-first, AST project-graph fallback, results tagged with source/confidence) | workspace_symbol_definition / references / hover / document_symbol / workspace_symbol / implementation / prepare_call_hierarchy / incoming_calls / outgoing_calls |
 | `lsp_edit` | rename / code_action / format | workspace_rename_symbol / workspace_apply_code_action / workspace_format_files |
 | `diagnostics` | Single-file LSP diagnostics / project-level diagnostics | workspace_lsp_diagnostics / workspace_project_diagnostics |
 | `git` | status / diff / log / branch / stage / commit / restore / reset | workspace_git_* |
@@ -260,7 +260,7 @@ Apps declare a permission level via manifest `level` field:
 | Level | Name | Capabilities |
 |---|---|---|
 | L0 | Pure Compute | No external access, HTML/CSS/JS only |
-| L1 | Runtime (default) | `papr.db` + `papr.fs` + AI Agent (read-only tools: read/grep/list/graph/lsp) |
+| L1 | Runtime (default) | `papr.db` + `papr.fs` + AI Agent (read-only tools: read/grep/list/lsp) |
 | L2 | Network | + `papr.http` + Agent web search + MCP tools |
 | L3 | System | + file write/terminal/git. Requires global user enable in Settings |
 
@@ -323,7 +323,7 @@ On Apple Silicon Macs, users can manually click "GPU Warmup" in the Voice Tab of
 
 | Agent | Purpose | Model | Tools |
 |-------|------|------|------|
-| explore | Read-only code analysis | fast | read, read_image, graph, lsp, diagnostics, grep |
+| explore | Read-only code analysis | fast | read, read_image, list, lsp, diagnostics, grep |
 | scout | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image |
 | mentor | Architecture/algorithm guidance | Configurable independent model | None |
 
@@ -486,7 +486,7 @@ Consolidation reuses the `selectContextCompactionModelRoute` fast-model route, s
 
 ### 9.1 Tool Definition
 
-`graph` is a unified project semantic graph tool accessed via the `action` parameter. Available to both main Agent and Explore sub-agent.
+`graph` is a unified project semantic graph tool accessed via the `action` parameter. **Now hidden from the LLM (UI-only)**: LLM-facing code intelligence is provided by the `lsp` tool (9 navigation actions, LSP-first with AST project-graph fallback) and `list(action: overview)`; `graph`'s fine-grained handlers stay registered to serve UI panels and act as the AST fallback backend for `lsp` point queries.
 
 **Basic navigation (7 actions):**
 | Action | Function |
@@ -749,7 +749,7 @@ The modal is enlarged to `w-[min(96vw,1280px)] h-[90vh]` (slightly smaller than 
 - `packages/@codepapr/core/src/agent/agentConfig.ts`: BUILTIN_AGENTS definition
 - `packages/@codepapr/core/src/cache/`: Three-partition cache core (`AppendOnlyLog.reset` used by compaction to start a new epoch)
 - `packages/@codepapr/core/src/tool/pruneToolResults.ts`: Old tool-result pruning (compaction sub-step)
-- `packages/@codepapr/core/src/tool/workspace/graphQuery.ts`: ProjectGraph query engine (14 actions)
+- `packages/@codepapr/core/src/tool/workspace/graphQuery.ts`: ProjectGraph query engine (14 actions, hidden from LLM, used by UI and lsp AST fallback)
 - `packages/@codepapr/api/src/request/RequestBuilder.ts`: Request construction (8-point validation + `resetLogTracking`)
 - `packages/@codepapr/api/src/response/CacheValidator.ts`: Response validation
 - `packages/@codepapr/ui/src/agent/compactionHandler.ts`: Mid-loop compaction handler + core↔ui message conversion

@@ -101,7 +101,7 @@ Apps must declare required permissions:
 | `workspace:read/write/exec` | Agent tools: read/write workspace files, execute commands |
 | `agent:run:<name>` | Invoke a specific agent |
 
-Agent tool whitelist (declare in `agents[].tools`): `read`, `grep`, `list`, `graph`, `web_search`, `web_fetch`, `write`, `edit`, `exec`.
+Agent tool whitelist (declare in `agents[].tools`): `read`, `grep`, `list`, `lsp`, `web_search`, `web_fetch`, `write`, `edit`, `exec`.
 
 ### Permission Levels
 
@@ -164,7 +164,7 @@ Full parameter reference: `packages/@codepapr/core/docs/CONFIGURATION.md`.
 
 | Agent | Purpose | Model | Tools |
 |-------|------|------|------|
-| **explore** | Read-only code analysis | fast | read, read_image, graph, lsp, diagnostics, grep |
+| **explore** | Read-only code analysis | fast | read, read_image, list, lsp, diagnostics, grep |
 | **scout** | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image |
 | **mentor** | Architecture/algorithm guidance | Configurable independent model | None |
 
@@ -264,13 +264,15 @@ Each entry starts with `## YYYY-MM-DD Topic` and is manually editable.
 
 Consolidation uses the fast model to deduplicate, merge, and compress memory, writing back to file. On failure, it degrades to rule-based dedup (by title + keep latest by date). Consolidation is fire-and-forget; the current session uses old memory, benefits apply on next startup.
 
-## ProjectGraph Semantic Analysis
+## Code Intelligence (lsp / list overview)
 
-`graph` is the unified project semantic graph tool, callable by both the main Agent and Explore sub-agent.
+LLM-facing code intelligence is provided by the `lsp` tool and `list(action: overview)`.
 
-**Basic navigation**: `full` (complete graph), `overview` (lightweight overview), `lookup` (symbol find), `dependency` (subgraph), `entrypoints` (entry points), `impact` (impact analysis), `implementations` (impl find), `smart_context` (intelligent context)
+**lsp navigation (9 actions, LSP-first with AST project-graph fallback, results tagged with source/confidence)**: `goToDefinition` (jump to definition), `findReferences` (find references), `hover` (type/documentation info), `documentSymbol` (file symbol outline), `workspaceSymbol` (workspace symbol search), `goToImplementation` (jump to implementation), `prepareCallHierarchy` (call hierarchy item), `incomingCalls` (incoming calls), `outgoingCalls` (outgoing calls). When LSP is unavailable or returns nothing, it automatically degrades to the AST project graph; results are tagged with `source` (lsp/ast) and `confidence` (high/medium/low).
 
-**Advanced analysis**: `dead_code` (dead code detection), `circular_deps` (circular deps), `type_hierarchy` (type hierarchy), `suggest_refactors` (refactoring suggestions), `test_impact` (change-impact tests), `generate_tests` (test skeleton generation)
+**Project structure overview**: `list(action: overview)` returns an AST project structure overview (directory tree + symbol skeleton); `list()` defaults to (`action: files`) directory-tree browsing.
+
+> The `graph` tool (full / lookup / dependency / impact / implementations / entrypoints / smart_context / dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests — 14 actions) is now **hidden from the LLM**, serving only UI panels and acting as the AST fallback backend for `lsp` point queries.
 
 ## Project-Level Customization
 

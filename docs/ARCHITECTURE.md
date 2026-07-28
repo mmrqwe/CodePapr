@@ -124,9 +124,9 @@ LLM 可调用 30 个独立工具（含 `task` / `todo` 两个动态工具），�
 | `patch` | 多文件原子 SEARCH/REPLACE | workspace_apply_diff |
 | `grep` | 正则搜索文件内容 | workspace_search_text |
 | `glob` | 文件名模式搜索 | workspace_search_files |
-| `list` | 目录树浏览 | workspace_list_files |
-| `graph` | full / overview / lookup / implementations / dependency / entrypoints / impact / smart_context / dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests | graphQuery |
-| `lsp` | definition / references | workspace_symbol_definition / workspace_symbol_references |
+| `list` | files（目录树，默认）/ overview（AST 项目结构概览） | workspace_list_files / workspace_project_graph |
+| `graph` | **对 LLM 隐藏（UI-only）**：full / overview / lookup / implementations / dependency / entrypoints / impact / smart_context / dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests | graphQuery |
+| `lsp` | goToDefinition / findReferences / hover / documentSymbol / workspaceSymbol / goToImplementation / prepareCallHierarchy / incomingCalls / outgoingCalls（LSP 优先、AST 项目图兜底，结果带 source/confidence） | workspace_symbol_definition / references / hover / document_symbol / workspace_symbol / implementation / prepare_call_hierarchy / incoming_calls / outgoing_calls |
 | `lsp_edit` | rename / code_action / format | workspace_rename_symbol / workspace_apply_code_action / workspace_format_files |
 | `diagnostics` | 单文件 LSP 诊断 / 项目级诊断 | workspace_lsp_diagnostics / workspace_project_diagnostics |
 | `git` | status / diff / log / branch / stage / commit / restore / reset | workspace_git_* |
@@ -260,7 +260,7 @@ app 可通过 manifest 的 `level` 字段声明权限级别：
 | Level | 名称 | 可用能力 |
 |---|---|---|
 | L0 | 纯计算 | 无外部访问，仅 HTML/CSS/JS 渲染 |
-| L1 | Runtime（默认） | `papr.db` + `papr.fs` + AI Agent（只读工具：read/grep/list/graph/lsp） |
+| L1 | Runtime（默认） | `papr.db` + `papr.fs` + AI Agent（只读工具：read/grep/list/lsp） |
 | L2 | 联网 | + `papr.http` + Agent 联网搜索 + MCP 工具 |
 | L3 | 系统 | + 文件写入/终端/Git。需用户在设置中全局开启 |
 
@@ -322,7 +322,7 @@ ChatPanel → useTtsPlayer hook → Rust TTS Module → GPT-SoVITS Python Server
 
 | Agent | 用途 | 模型 | 工具 |
 |-------|------|------|------|
-| explore | 只读代码分析 | fast | read, read_image, graph, lsp, diagnostics, grep |
+| explore | 只读代码分析 | fast | read, read_image, list, lsp, diagnostics, grep |
 | scout | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image |
 | mentor | 架构/算法指导 | 可配置独立模型 | 无 |
 
@@ -485,7 +485,7 @@ agent 回复完成
 
 ### 9.1 工具定义
 
-`graph` 是统一的项目语义图工具，通过 `action` 参数选择操作。主 Agent 和 Explore 子代理均可调用。
+`graph` 是统一的项目语义图工具，通过 `action` 参数选择操作。**现已对 LLM 隐藏（UI-only）**：LLM 侧的代码智能改由 `lsp` 工具（9 个导航 action，LSP 优先、AST 项目图兜底）与 `list(action: overview)` 承担；`graph` 的细粒度 handler 保留注册，服务于 UI 面板并作为 `lsp` 点查询的 AST 兜底后端。
 
 **基础导航（7 个 action）：**
 | Action | 功能 |
@@ -748,7 +748,7 @@ effectiveMaxContextTokens = min(maxContextTokens, providerContextLimit − maxTo
 - `packages/@codepapr/core/src/agent/agentConfig.ts`：BUILTIN_AGENTS 定义
 - `packages/@codepapr/core/src/cache/`：三分区缓存核心（`AppendOnlyLog.reset` 用于压缩开启新 epoch）
 - `packages/@codepapr/core/src/tool/pruneToolResults.ts`：旧 tool 结果剪枝（压缩子步骤）
-- `packages/@codepapr/core/src/tool/workspace/graphQuery.ts`：ProjectGraph 查询引擎（14 个 action）
+- `packages/@codepapr/core/src/tool/workspace/graphQuery.ts`：ProjectGraph 查询引擎（14 个 action，对 LLM 隐藏，供 UI 与 lsp AST 兜底）
 - `packages/@codepapr/api/src/request/RequestBuilder.ts`：请求构造（8 点校验 + `resetLogTracking`）
 - `packages/@codepapr/api/src/response/CacheValidator.ts`：响应校验
 - `packages/@codepapr/ui/src/agent/compactionHandler.ts`：中途压缩 handler + core↔ui 消息转换
