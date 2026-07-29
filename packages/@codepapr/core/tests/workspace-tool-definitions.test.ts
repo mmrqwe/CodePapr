@@ -21,8 +21,8 @@ describe('workspace intelligence tool definitions', () => {
 describe('NEW_TOOL_DEFINITIONS', () => {
   const tools = NEW_TOOL_DEFINITIONS;
 
-  it('contains 24 LLM-facing tools', () => {
-    expect(tools).toHaveLength(24);
+  it('contains 22 LLM-facing tools', () => {
+    expect(tools).toHaveLength(22);
   });
 
   const actionTools = ['graph', 'lsp', 'lsp_edit', 'git', 'browser', 'bash', 'list'] as const;
@@ -87,11 +87,8 @@ describe('NEW_TOOL_DEFINITIONS', () => {
     it('git requires action', () => {
       expect(find('git')?.parameters.required).toContain('action');
     });
-    it('web_fetch requires url', () => {
-      expect(find('web_fetch')?.parameters.required).toContain('url');
-    });
-    it('web_download requires url', () => {
-      expect(find('web_download')?.parameters.required).toContain('url');
+    it('webfetch requires url', () => {
+      expect(find('webfetch')?.parameters.required).toContain('url');
     });
   });
 

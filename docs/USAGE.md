@@ -54,7 +54,7 @@ manifest.json 示例：
     "name": "assistant",
     "model": "deepseek",
     "systemPrompt": "你是一个任务管理助手",
-    "tools": ["read", "web_search"],
+    "tools": ["read", "websearch"],
     "maxToolRounds": 20
   }]
 }
@@ -101,7 +101,7 @@ App 需要声明所需权限：
 | `workspace:read/write/exec` | Agent 工具：读写工作区文件、执行命令 |
 | `agent:run:<name>` | 调用指定 Agent |
 
-Agent 工具白名单（在 `agents[].tools` 声明）：`read`、`grep`、`list`、`lsp`、`web_search`、`web_fetch`、`write`、`edit`、`bash`。
+Agent 工具白名单（在 `agents[].tools` 声明）：`read`、`grep`、`list`、`lsp`、`websearch`、`webfetch`、`write`、`edit`、`bash`。
 
 ### 权限分级
 
@@ -165,7 +165,7 @@ LLM 可通过 4 个工具管理 app：
 | Agent | 用途 | 模型 | 工具 |
 |-------|------|------|------|
 | **explore** | 只读代码分析 | fast | read, read_image, list, lsp, diagnostics, grep |
-| **scout** | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image |
+| **scout** | 网页搜索 + 下载 | fast | websearch, webfetch, browser, read_image |
 | **mentor** | 架构/算法指导 | 可配置独立模型 | 无 |
 
 主 Agent 通过 `task` 工具调度子代理。每个子代理拥有独立的 Session，只接收委派的任务描述，不受历史对话污染。主 Agent 的 TodoList 指令会提示它主动委派代码分析给 Explore、网页搜索给 Scout。

@@ -505,7 +505,7 @@
           <div class="idx">05</div>
           <div class="tt">
             <h3>Web &amp; Browser <span>网络与浏览器</span></h3>
-            <div class="tags"><span class="tag">web_fetch / web_download / web_search / browser / open</span></div>
+            <div class="tags"><span class="tag">webfetch / websearch / browser</span></div>
           </div>
           <div class="hz"><b>内置浏览器</b>桌面端完整支持</div>
         </div>
@@ -513,12 +513,12 @@
         <div class="item">
           <div class="row">
             <div class="addr">WEB</div>
-            <div class="name">web_fetch / web_download / web_search<small>→ web_fetch_url / web_download_file / web_search · :2375 / :2387 / :2342</small></div>
-            <div class="src"><span class="chip">web_search 原生可见</span><span class="chip">searxng</span></div>
+            <div class="name">webfetch / websearch<small>webfetch → web_fetch_url / web_download_file；websearch 原生直接注册</small></div>
+            <div class="src"><span class="chip">websearch 原生可见</span><span class="chip">searxng</span></div>
             <div class="cchip c-text">纯文本</div>
           </div>
-          <div class="desc"><b>web_fetch</b> 读网页正文转纯文本（maxBytes 默认 20000）；<b>web_download</b> 下载文件到 .CodePapr/downloads/；<b>web_search</b> 是原生细粒度工具（不经合并层），走 searxng，可直接对 LLM 见。</div>
-          <div class="more"><div class="mbox">web_fetch/web_download 经合并层转发；web_search 直接注册（<code>!disableWebSearchTools</code> 时），参数 query/maxResults/searxng*。</div></div>
+          <div class="desc"><b>webfetch</b> 读网页正文转纯文本（maxBytes 默认 20000）；<code>save: true</code> 下载原始/二进制内容到 .CodePapr/downloads/ 并返回路径；<b>websearch</b> 是原生细粒度工具（不经合并层），走 searxng，可直接对 LLM 见。</div>
+          <div class="more"><div class="mbox">webfetch 经合并层转发（web_fetch_url / web_download_file）；websearch 直接注册（<code>!disableWebSearchTools</code> 时），参数 query/maxResults/searxng*。</div></div>
         </div>
 
         <div class="item">
@@ -532,16 +532,6 @@
           <div class="more"><div class="mbox">分发：<code>browser</code> → browserHandler → <code>browser_open_page/navigate_page/reload_page/click/input_text/read_dom/take_screenshot/close_page</code>。另有 preview 变体（browser_*_preview）服务 exec previewUrl。</div></div>
         </div>
 
-        <div class="item">
-          <div class="row">
-            <div class="addr">OPEN</div>
-            <div class="name">open<small>→ workspace_open_in_browser · :2305</small></div>
-            <div class="src"><span class="chip">系统默认浏览器</span></div>
-            <div class="cchip c-text">纯文本</div>
-          </div>
-          <div class="desc">在系统默认浏览器打开 URL 或项目内 HTML 文件。</div>
-          <div class="more"><div class="mbox">分发：<code>open</code> → openHandler → <code>workspace_open_in_browser</code>。</div></div>
-        </div>
       </section>
 
       <!-- ═══ TIER 6 · 应用与辅助 ═══ -->
@@ -619,7 +609,7 @@
           <b>模式 1（只读）</b><br>
           <span class="mk">read grep list lsp diagnostics</span> read_image skill_load todo local_time_now<br><br>
           <b>模式 2（+联网）</b><br>
-          <span class="mk">+ web_search web_fetch web_download</span><br><br>
+          <span class="mk">+ websearch webfetch</span><br><br>
           <b>模式 3（+写执行）</b><br>
           <span class="mk">+ write edit patch bash</span>
         </div>

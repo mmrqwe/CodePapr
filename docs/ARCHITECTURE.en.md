@@ -132,10 +132,8 @@ The LLM can invoke 30 discrete tools (including `task`/`todo` as dynamic tools),
 | `git` | status / diff / log / branch / stage / commit / restore / reset | workspace_git_* |
 | `bash` | Run shell commands in the project (through a shell); action: run/list/stop/stop_all; background:true for background | workspace_run_shell_command / workspace_start_shell_background_command / workspace_*_background_processes |
 | `browser` | open / navigate / reload / close / click / type / read / screenshot / get | browser_* |
-| `web_search` | Online search | web_search |
-| `web_fetch` | Read web page content | web_fetch_url |
-| `web_download` | Download file to project | web_download_file |
-| `open` | Open URL/HTML in system browser | workspace_open_in_browser |
+| `websearch` | Online search | websearch (registered directly) |
+| `webfetch` | Read a webpage as text; with `save: true` download raw content to project and return path | web_fetch_url / web_download_file |
 | `app_render` | Render .papr App | app_render |
 | `app_list` | List all registered apps | app_list |
 | `app_start` | Start app backend | app_start |
@@ -176,7 +174,7 @@ Papr is CodePapr's application runtime — AI-generated `.papr` apps run directl
     "name": "assistant",
     "model": "deepseek",
     "systemPrompt": "You are a task management assistant",
-    "tools": ["read", "web_search"],
+    "tools": ["read", "websearch"],
     "maxToolRounds": 20
   }]
 }
@@ -203,7 +201,7 @@ JavaScript SDK injected into every app iframe, providing a unified API:
 1. **React first-pass** — `usePaprBridge` fast-rejects based on manifest.permissions
 2. **Rust authoritative** — every `papr_*` Tauri command calls `check_permission(manifest, capability)` at the top, blocking even direct postMessage bypass
 
-Tool permission mapping (`check_tool_permission`): `read/grep/list` → `workspace:read`, `write/edit` → `workspace:write`, `bash` → `workspace:exec`, `web_search/web_fetch` → `http:get`.
+Tool permission mapping (`check_tool_permission`): `read/grep/list` → `workspace:read`, `write/edit` → `workspace:write`, `bash` → `workspace:exec`, `websearch/webfetch` → `http:get`.
 
 **App Agent system:**
 
@@ -322,7 +320,7 @@ On Apple Silicon Macs, users can manually click "GPU Warmup" in the Voice Tab of
 | Agent | Purpose | Model | Tools |
 |-------|------|------|------|
 | explore | Read-only code analysis | fast | read, read_image, list, lsp, diagnostics, grep |
-| scout | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image |
+| scout | Web search + download | fast | websearch, webfetch, browser, read_image |
 | mentor | Architecture/algorithm guidance | Configurable independent model | None |
 
 > The Goal autonomous loop's verifier is a standalone no-tools model call configured in Advanced settings (`verifierModelTier`). It is not a built-in sub-agent and is never exposed via the `task` tool.

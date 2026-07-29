@@ -946,7 +946,6 @@ https://api.deepseek.com/v1</code></pre>
           <tbody>
             <tr><td><code>browser</code> open / navigate / reload / close</td><td>内置浏览器：打开 URL、导航、刷新、关闭</td></tr>
             <tr><td><code>browser</code> click / type / read / screenshot / get</td><td>浏览器交互：点击元素、输入文本、读取 DOM、截图、读状态</td></tr>
-            <tr><td><code>open</code></td><td>在系统默认浏览器打开 URL 或项目内 HTML 文件</td></tr>
           </tbody>
         </table>
 
@@ -966,9 +965,8 @@ https://api.deepseek.com/v1</code></pre>
         <table>
           <thead><tr><th>工具</th><th>能力</th></tr></thead>
           <tbody>
-            <tr><td><code>web_search</code></td><td>在线搜索网页，聚合多源结果</td></tr>
-            <tr><td><code>web_fetch</code></td><td>读取网页内容，自动提取正文并转为纯文本</td></tr>
-            <tr><td><code>web_download</code></td><td>下载文件到项目 .CodePapr/downloads/ 文件夹</td></tr>
+            <tr><td><code>websearch</code></td><td>在线搜索网页，聚合多源结果</td></tr>
+            <tr><td><code>webfetch</code></td><td>读取网页内容，自动提取正文并转为纯文本；<code>save: true</code> 下载原始内容到项目并返回路径</td></tr>
           </tbody>
         </table>
 
@@ -991,7 +989,7 @@ https://api.deepseek.com/v1</code></pre>
         <p>单次 <code>read</code> / <code>write</code> / <code>edit</code> / <code>patch</code> 操作的上限为 <strong>20MB</strong>，可覆盖大多数源码和二进制资源文件，但大文件会显著增加 token 消耗。</p>
 
         <div class="callout success">
-          <strong>工具设计原则：</strong>LLM 看到的工具名是精简的"合并工具"（共 30 个），底层委托给 40+ 独立工具。Agent 可同时使用所有工具，子代理按 <code>tools</code> 配置白名单限制权限。代码修改优先用 <code>edit</code>/<code>patch</code> 走 Search/Replace Diff，新建文件才用 <code>write</code>。命令执行统一用 <code>bash</code>：短命令直接 <code>bash(command: ...)</code>，长驻进程用 <code>bash(command: ..., background: true)</code>，后台进程用 <code>bash(action: list/stop)</code> 管理。
+          <strong>工具设计原则：</strong>LLM 看到的工具名是精简的"合并工具"（共 30 个），底层委托给 40+ 独立工具。Agent 可同时使用所有工具，子代理按 <code>tools</code> 配置白名单限制权限。代码修改优先用 <code>edit</code>/<code>patch</code> 走 Search/Replace Diff，新建文件才用 <code>write</code>。命令执行统一用 <code>bash</code>：短命令直接 <code>bash(command: ...)</code>，长驻进程用 <code>bash(command: ..., background: true)</code>，后台进程用 <code>bash(action: list/stop)</code> 管理。网络访问用 <code>websearch</code>（搜索）和 <code>webfetch</code>（读网页；<code>save: true</code> 下载文件）；在系统浏览器打开用 <code>bash</code>。
         </div>
       </div>
     </section>
@@ -1306,7 +1304,7 @@ TTS 数据流：
           <thead><tr><th>Agent</th><th>用途</th><th>模型</th><th>工具</th></tr></thead>
           <tbody>
             <tr><td><strong>explore</strong></td><td>只读代码分析：搜索项目文件、定位符号、分析依赖关系</td><td>fast</td><td>read, read_image, list, lsp, diagnostics, grep</td></tr>
-            <tr><td><strong>scout</strong></td><td>网络搜索：查找文档、API 参考、最新资料</td><td>fast</td><td>web_search, web_fetch, web_download, browser, read_image</td></tr>
+            <tr><td><strong>scout</strong></td><td>网络搜索：查找文档、API 参考、最新资料</td><td>fast</td><td>websearch, webfetch, browser, read_image</td></tr>
             <tr><td><strong>mentor</strong></td><td>架构/算法/调试高层指导（不写代码、不调工具）</td><td>mentor*</td><td>无</td></tr>
           </tbody>
         </table>

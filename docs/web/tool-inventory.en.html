@@ -505,7 +505,7 @@
           <div class="idx">05</div>
           <div class="tt">
             <h3>Web &amp; Browser <span>Web & Browser</span></h3>
-            <div class="tags"><span class="tag">web_fetch / web_download / web_search / browser / open</span></div>
+            <div class="tags"><span class="tag">webfetch / websearch / browser</span></div>
           </div>
           <div class="hz"><b>Built-in browser</b>full support on desktop</div>
         </div>
@@ -513,12 +513,12 @@
         <div class="item">
           <div class="row">
             <div class="addr">WEB</div>
-            <div class="name">web_fetch / web_download / web_search<small>→ web_fetch_url / web_download_file / web_search · :2375 / :2387 / :2342</small></div>
-            <div class="src"><span class="chip">web_search natively visible</span><span class="chip">searxng</span></div>
+            <div class="name">webfetch / websearch<small>webfetch → web_fetch_url / web_download_file; websearch registered directly</small></div>
+            <div class="src"><span class="chip">websearch natively visible</span><span class="chip">searxng</span></div>
             <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc"><b>web_fetch</b> reads a web page body and converts it to plain text (maxBytes defaults to 20000); <b>web_download</b> downloads a file to .CodePapr/downloads/; <b>web_search</b> is a native fine-grained tool (not via the merge layer), goes through searxng, and can be directly visible to the LLM.</div>
-          <div class="more"><div class="mbox">web_fetch/web_download are forwarded via the merge layer; web_search is registered directly (when <code>!disableWebSearchTools</code>), with parameters query/maxResults/searxng*.</div></div>
+          <div class="desc"><b>webfetch</b> reads a web page body and converts it to plain text (maxBytes defaults to 20000); <code>save: true</code> downloads raw/binary content to .CodePapr/downloads/ and returns the path; <b>websearch</b> is a native fine-grained tool (not via the merge layer), goes through searxng, and can be directly visible to the LLM.</div>
+          <div class="more"><div class="mbox">webfetch is forwarded via the merge layer (web_fetch_url / web_download_file); websearch is registered directly (when <code>!disableWebSearchTools</code>), with parameters query/maxResults/searxng*.</div></div>
         </div>
 
         <div class="item">
@@ -532,16 +532,6 @@
           <div class="more"><div class="mbox">Dispatch: <code>browser</code> → browserHandler → <code>browser_open_page/navigate_page/reload_page/click/input_text/read_dom/take_screenshot/close_page</code>. There are also preview variants (browser_*_preview) serving exec previewUrl.</div></div>
         </div>
 
-        <div class="item">
-          <div class="row">
-            <div class="addr">OPEN</div>
-            <div class="name">open<small>→ workspace_open_in_browser · :2305</small></div>
-            <div class="src"><span class="chip">system default browser</span></div>
-            <div class="cchip c-text">Plain text</div>
-          </div>
-          <div class="desc">Opens a URL or an in-project HTML file in the system default browser.</div>
-          <div class="more"><div class="mbox">Dispatch: <code>open</code> → openHandler → <code>workspace_open_in_browser</code>.</div></div>
-        </div>
       </section>
 
       <!-- ═══ TIER 6 · App & Misc ═══ -->
@@ -619,7 +609,7 @@
           <b>Mode 1 (read-only)</b><br>
           <span class="mk">read grep list lsp diagnostics</span> read_image skill_load todo local_time_now<br><br>
           <b>Mode 2 (+web)</b><br>
-          <span class="mk">+ web_search web_fetch web_download</span><br><br>
+          <span class="mk">+ websearch webfetch</span><br><br>
           <b>Mode 3 (+write/bash)</b><br>
           <span class="mk">+ write edit patch bash</span>
         </div>

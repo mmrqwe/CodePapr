@@ -267,42 +267,19 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
       required: ['action'],
     },
   },
-  // ──── 17. web_fetch ────
+  // ──── 17. webfetch ────
   {
-    name: 'web_fetch',
-    description: '读取网页内容，自动提取正文并转为纯文本。',
+    name: 'webfetch',
+    description: '读取公开网页内容。默认提取页面正文文本返回；设 save:true 则把原始内容（含二进制，如图片/附件）下载到项目并返回路径，relativePath 可选（默认 .CodePapr/downloads/）。由本地后端请求，可绕过前端 CORS。',
     parameters: {
       type: 'object',
       properties: {
-        url: { type: 'string', description: 'http/https URL。' },
-        maxBytes: { type: 'number', description: '最大返回字符数，默认 20000。' },
+        url: { type: 'string', description: '要读取/下载的 http/https URL。' },
+        maxBytes: { type: 'number', description: '文本模式最大返回字符数，默认 20000。' },
+        save: { type: 'boolean', description: '设为 true 则下载原始内容（二进制安全）到项目并返回路径。' },
+        relativePath: { type: 'string', description: 'save 时可选，下载到的相对路径，默认 .CodePapr/downloads/。' },
       },
       required: ['url'],
-    },
-  },
-  // ──── 18. web_download ────
-  {
-    name: 'web_download',
-    description: '下载文件到项目。默认保存到 .CodePapr/downloads/，可指定 relativePath。',
-    parameters: {
-      type: 'object',
-      properties: {
-        url: { type: 'string', description: '文件下载地址。' },
-        relativePath: { type: 'string', description: '保存的相对路径。' },
-      },
-      required: ['url'],
-    },
-  },
-  // ──── 19. open ────
-  {
-    name: 'open',
-    description: '在系统默认浏览器打开 URL 或项目内 HTML 文件。',
-    parameters: {
-      type: 'object',
-      properties: {
-        url: { type: 'string', description: '要打开的 URL。' },
-        relativePath: { type: 'string', description: '项目内 HTML 文件相对路径。' },
-      },
     },
   },
   // ──── 20. skill ────

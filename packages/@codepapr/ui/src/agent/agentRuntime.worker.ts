@@ -75,8 +75,8 @@ const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 300_000;
 const APP_AGENT_LEVEL_TOOLS: Record<number, ReadonlySet<string>> = {
   0: new Set(),
   1: new Set(['read', 'grep', 'list', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'todo', 'local_time_now']),
-  2: new Set(['read', 'grep', 'list', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'todo', 'local_time_now', 'web_search', 'web_fetch', 'web_download']),
-  3: new Set(['read', 'grep', 'list', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'todo', 'local_time_now', 'web_search', 'web_fetch', 'web_download', 'write', 'edit', 'patch', 'bash']),
+  2: new Set(['read', 'grep', 'list', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'todo', 'local_time_now', 'websearch', 'webfetch']),
+  3: new Set(['read', 'grep', 'list', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'todo', 'local_time_now', 'websearch', 'webfetch', 'write', 'edit', 'patch', 'bash']),
 };
 
 let cachedSettings: WorkerAgentSettings | null = null;

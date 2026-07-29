@@ -104,10 +104,10 @@ describe('promptSystem', () => {
       mode: 'ask',
       workspacePath: '/tmp/project',
       lang: 'zh-CN',
-      toolNames: ['web_search', 'web_fetch'],
+      toolNames: ['websearch', 'webfetch'],
     });
-    expect(prompt).toContain('web_search');
-    expect(prompt).toContain('web_fetch');
+    expect(prompt).toContain('websearch');
+    expect(prompt).toContain('webfetch');
   });
 
   it('includes write constraint with project memory in agent mode', () => {

@@ -33,9 +33,6 @@ export interface SharedToolDispatcherOptions {
   /** browser 工具 handler（平台特有——CLI 降级，UI 完整） */
   browserHandler?: ToolHandler;
 
-  /** open 工具 handler（CLI 系统浏览器，UI 委托） */
-  openHandler?: ToolHandler;
-
   /** question 工具 handler（CLI 直接抛错，UI 返回结构化标记） */
   questionHandler?: ToolHandler;
 }
@@ -136,12 +133,21 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
   registry.register(findTool('browser'), options.browserHandler ?? createDefaultBrowserHandler());
 
   // ──── Web ────
-  // web_search 是原生细粒度工具，直接对 LLM 可见，不需要额外分发器
-  registry.register(findTool('web_fetch'), forward(registry, 'web_fetch_url'));
-  registry.register(findTool('web_download'), forward(registry, 'web_download_file'));
+  // websearch 是原生细粒度工具，直接对 LLM 可见，不需要额外分发器
+  registry.register(findTool('webfetch'), async (args) => {
+    if (args.save === true) {
+      return await registry.execute('web_download_file', {
+        url: args.url,
+        relativePath: args.relativePath,
+      });
+    }
+    return await registry.execute('web_fetch_url', {
+      url: args.url,
+      maxBytes: args.maxBytes,
+    });
+  });
 
   // ──── 辅助 ────
-  registry.register(findTool('open'), options.openHandler ?? createDefaultOpenHandler());
   registry.register(findTool('skill'), forward(registry, 'skill_load'));
   registry.register(findTool('question'), options.questionHandler ?? createDefaultQuestionHandler());
 }
@@ -195,12 +201,6 @@ function createDefaultBrowserHandler(): ToolHandler {
   };
 }
 
-function createDefaultOpenHandler(): ToolHandler {
-  return async () => {
-    throw new Error('open 工具在当前环境不可用');
-  };
-}
-
 function createDefaultQuestionHandler(): ToolHandler {
   return async () => {
     throw new Error('question 工具仅在桌面客户端 Plan 模式下可用');
@@ -246,7 +246,6 @@ export function registerSharedMergeToolDispatchers(options: {
   lspHandler?: ToolHandler;
   questionHandler?: ToolHandler;
   browserHandler?: ToolHandler;
-  openHandler?: ToolHandler;
   terminalActionName?: string;
 }): void {
   registerSharedToolDispatchers({
@@ -254,7 +253,6 @@ export function registerSharedMergeToolDispatchers(options: {
     graphHandler: options.projectGraphHandler,
     lspHandler: options.lspHandler,
     browserHandler: options.browserHandler,
-    openHandler: options.openHandler,
     questionHandler: options.questionHandler,
   });
 }

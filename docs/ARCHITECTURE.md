@@ -132,10 +132,8 @@ LLM 可调用 30 个独立工具（含 `task` / `todo` 两个动态工具），�
 | `git` | status / diff / log / branch / stage / commit / restore / reset | workspace_git_* |
 | `bash` | 在项目环境执行 shell 命令（穿过 shell）；action: run/list/stop/stop_all；background:true 后台运行 | workspace_run_shell_command / workspace_start_shell_background_command / workspace_*_background_processes |
 | `browser` | open / navigate / reload / close / click / type / read / screenshot / get | browser_* |
-| `web_search` | 在线搜索 | web_search |
-| `web_fetch` | 读取网页内容 | web_fetch_url |
-| `web_download` | 下载文件到项目 | web_download_file |
-| `open` | 系统浏览器打开 URL/HTML | workspace_open_in_browser |
+| `websearch` | 在线搜索 | websearch（原生直接注册）|
+| `webfetch` | 读取网页正文转纯文本；`save: true` 下载原始内容到项目并返回路径 | web_fetch_url / web_download_file |
 | `app_render` | 渲染 .papr App | app_render |
 | `app_list` | 列出所有已注册 app | app_list |
 | `app_start` | 启动 app 后端 | app_start |
@@ -176,7 +174,7 @@ Papr 是 CodePapr 的应用运行时——AI 生成的 `.papr` App 可以直接�
     "name": "assistant",
     "model": "deepseek",
     "systemPrompt": "你是一个任务管理助手",
-    "tools": ["read", "web_search"],
+    "tools": ["read", "websearch"],
     "maxToolRounds": 20
   }]
 }
@@ -203,7 +201,7 @@ Papr 是 CodePapr 的应用运行时——AI 生成的 `.papr` App 可以直接�
 1. **React 首检** — `usePaprBridge` 根据 manifest.permissions 做快速拒绝
 2. **Rust 权威** — 每个 `papr_*` Tauri 命令开头调 `check_permission(manifest, capability)`，即使绕过 SDK 直接 postMessage 也被拦截
 
-工具权限映射（`check_tool_permission`）：`read/grep/list` → `workspace:read`、`write/edit` → `workspace:write`、`bash` → `workspace:exec`、`web_search/web_fetch` → `http:get`。
+工具权限映射（`check_tool_permission`）：`read/grep/list` → `workspace:read`、`write/edit` → `workspace:write`、`bash` → `workspace:exec`、`websearch/webfetch` → `http:get`。
 
 **App Agent 系统：**
 
@@ -321,7 +319,7 @@ ChatPanel → useTtsPlayer hook → Rust TTS Module → GPT-SoVITS Python Server
 | Agent | 用途 | 模型 | 工具 |
 |-------|------|------|------|
 | explore | 只读代码分析 | fast | read, read_image, list, lsp, diagnostics, grep |
-| scout | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image |
+| scout | 网页搜索 + 下载 | fast | websearch, webfetch, browser, read_image |
 | mentor | 架构/算法指导 | 可配置独立模型 | 无 |
 
 > Goal 自主循环的验收器（Verifier）是一个独立的无工具模型调用，在高级设置中配置（`verifierModelTier`），不属于内置子代理，也不经 `task` 工具暴露。

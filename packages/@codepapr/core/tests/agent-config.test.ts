@@ -177,9 +177,8 @@ describe('agentConfig - BUILTIN_AGENTS', () => {
     const scout = BUILTIN_AGENTS.find((a) => a.name === 'scout')!;
     expect(scout).toBeDefined();
     expect(scout.tools).toEqual({
-      web_search: true,
-      web_fetch: true,
-      web_download: true,
+      websearch: true,
+      webfetch: true,
       browser: true,
       read_image: true,
     });

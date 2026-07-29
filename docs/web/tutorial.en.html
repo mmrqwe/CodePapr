@@ -946,7 +946,6 @@ After the change, at least run verification for the affected scope; if no narrow
           <tbody>
             <tr><td><code>browser</code> open / navigate / reload / close</td><td>Built-in browser: open URL, navigate, refresh, close</td></tr>
             <tr><td><code>browser</code> click / type / read / screenshot / get</td><td>Browser interaction: click elements, type text, read DOM, screenshot, read state</td></tr>
-            <tr><td><code>open</code></td><td>Open URL or project HTML file in the system default browser</td></tr>
           </tbody>
         </table>
 
@@ -966,9 +965,8 @@ After the change, at least run verification for the affected scope; if no narrow
         <table>
           <thead><tr><th>Tool</th><th>Capability</th></tr></thead>
           <tbody>
-            <tr><td><code>web_search</code></td><td>Online web search, aggregating multi-source results</td></tr>
-            <tr><td><code>web_fetch</code></td><td>Read web page content, auto-extracting body text and converting to plain text</td></tr>
-            <tr><td><code>web_download</code></td><td>Download files to the project's .CodePapr/downloads/ folder</td></tr>
+            <tr><td><code>websearch</code></td><td>Online web search, aggregating multi-source results</td></tr>
+            <tr><td><code>webfetch</code></td><td>Read web page content, auto-extracting body text and converting to plain text; <code>save: true</code> downloads raw content to the project and returns the path</td></tr>
           </tbody>
         </table>
 
@@ -991,7 +989,7 @@ After the change, at least run verification for the affected scope; if no narrow
         <p>A single <code>read</code> / <code>write</code> / <code>edit</code> / <code>patch</code> operation is capped at <strong>20MB</strong>, covering most source code and binary resource files, though large files will significantly increase token consumption.</p>
 
         <div class="callout success">
-          <strong>Tool Design Principle:</strong> The LLM sees simplified "merged tools" (30 total), which delegate to 40+ independent tools under the hood. The Agent can use all tools simultaneously; sub-agents are restricted by <code>tools</code> config allowlists. For code modifications, prefer <code>edit</code>/<code>patch</code> via Search/Replace Diff; use <code>write</code> only for new files. For command execution, use <code>bash</code> uniformly: short commands via <code>bash(command: ...)</code>, long-lived processes via <code>bash(command: ..., background: true)</code>, and manage background processes via <code>bash(action: list/stop)</code>.
+          <strong>Tool Design Principle:</strong> The LLM sees simplified "merged tools" (30 total), which delegate to 40+ independent tools under the hood. The Agent can use all tools simultaneously; sub-agents are restricted by <code>tools</code> config allowlists. For code modifications, prefer <code>edit</code>/<code>patch</code> via Search/Replace Diff; use <code>write</code> only for new files. For command execution, use <code>bash</code> uniformly: short commands via <code>bash(command: ...)</code>, long-lived processes via <code>bash(command: ..., background: true)</code>, and manage background processes via <code>bash(action: list/stop)</code>. For web access, use <code>websearch</code> (search) and <code>webfetch</code> (read pages; <code>save: true</code> to download files); opening in the system browser uses <code>bash</code>.
         </div>
       </div>
     </section>
@@ -1306,7 +1304,7 @@ When a task requires public information, current facts, third-party API usage, o
           <thead><tr><th>Agent</th><th>Purpose</th><th>Model</th><th>Tools</th></tr></thead>
           <tbody>
             <tr><td><strong>explore</strong></td><td>Read-only code analysis: search project files, locate symbols, analyze dependencies</td><td>fast</td><td>read, read_image, list, lsp, diagnostics, grep</td></tr>
-            <tr><td><strong>scout</strong></td><td>Web search: find documentation, API references, latest resources</td><td>fast</td><td>web_search, web_fetch, web_download, browser, read_image</td></tr>
+            <tr><td><strong>scout</strong></td><td>Web search: find documentation, API references, latest resources</td><td>fast</td><td>websearch, webfetch, browser, read_image</td></tr>
             <tr><td><strong>mentor</strong></td><td>High-level architecture/algorithm/debugging guidance (no code writing, no tool usage)</td><td>mentor*</td><td>None</td></tr>
           </tbody>
         </table>

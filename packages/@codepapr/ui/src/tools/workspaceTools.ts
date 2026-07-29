@@ -178,11 +178,6 @@ interface StopBackgroundProcessArgs {
   pid: number;
 }
 
-interface OpenInBrowserArgs {
-  url?: string;
-  relativePath?: string;
-}
-
 interface SearchTextArgs {
   query: string;
   caseSensitive?: boolean;
@@ -426,11 +421,6 @@ interface DownloadFileResult {
   bytes: number;
   fileName: string;
   contentType?: string | null;
-}
-
-interface OpenInBrowserResult {
-  target: string;
-  kind: 'url' | 'file';
 }
 
 interface BackgroundCommandResult {
@@ -825,24 +815,6 @@ const tools: IToolDefinition[] = [
     },
   },
   {
-    name: 'workspace_open_in_browser',
-    description:
-      '在系统默认浏览器中打开一个网页 URL，或打开项目内的 HTML/文本页面文件。适合打开现成网站、localhost 地址、dist/index.html 或项目中的静态页面。不要用它启动开发服务器。url 和 relativePath 至少传一个。',
-    parameters: {
-      type: 'object',
-      properties: {
-        url: {
-          type: 'string',
-          description: '要打开的 http/https URL，例如 http://localhost:5173 或 https://example.com。',
-        },
-        relativePath: {
-          type: 'string',
-          description: '项目内相对路径，例如 index.html、dist/index.html。',
-        },
-      },
-    },
-  },
-  {
     name: 'skill_load',
     description:
       '加载当前项目 .CodePapr/skills 下某个 Skill 包的 Markdown 说明。适合在看到 Skill 目录摘要后，按需读取某个项目专属工作流、规范、角色或工具说明。',
@@ -858,7 +830,7 @@ const tools: IToolDefinition[] = [
     },
   },
   {
-    name: 'web_search',
+    name: 'websearch',
     description:
       '在线搜索公开网页，用于收集资料、查找文档或验证事实。聚合多源搜索结果；支持指定搜索分类（通用网页、图片、视频、新闻、科学论文等）、时间范围、语言过滤。',
     parameters: {
@@ -2383,22 +2355,6 @@ export function registerWorkspaceTools(
     });
   });
 
-  registry.register(toolByName('workspace_open_in_browser'), async (args: Record<string, unknown>) => {
-    const parsed: OpenInBrowserArgs = {
-      url: asOptionalString(args.url),
-      relativePath: asOptionalString(args.relativePath),
-    };
-    if (!parsed.url && !parsed.relativePath) {
-      throw new Error('url 和 relativePath 至少需要提供一个');
-    }
-
-    return await invoke<OpenInBrowserResult>('open_browser_target', {
-      workspacePath: workspace(),
-      url: parsed.url,
-      relativePath: parsed.relativePath,
-    });
-  });
-
   registry.register(toolByName('skill_load'), async (args: Record<string, unknown>) => {
     const parsed: SkillLoadArgs = {
       name: asSafeSkillName(args.name, 'name'),
@@ -2420,7 +2376,7 @@ export function registerWorkspaceTools(
   });
 
   if (!options.disableWebSearchTools) {
-    registry.register(toolByName('web_search'), async (args: Record<string, unknown>) => {
+    registry.register(toolByName('websearch'), async (args: Record<string, unknown>) => {
       const storeSettings = useAgentStore.getState().settings;
       const parsed: WebSearchArgs = {
         query: asString(args.query, 'query'),
@@ -3776,7 +3732,6 @@ export function registerWorkspaceTools(
     'browser_open_page', 'browser_navigate_page', 'browser_reload_page',
     'browser_click', 'browser_input_text', 'browser_read_dom',
     'browser_take_screenshot', 'browser_close_page',
-    'workspace_open_in_browser',
     'web_fetch_url', 'web_download_file',
     'skill_load', 'local_time_now',
   ];
@@ -3815,9 +3770,6 @@ export function registerWorkspaceTools(
       const target = m[a];
       if (!target) throw new Error(`未知的 browser action: ${a}`);
       return await registry.execute(target, args);
-    },
-    openHandler: async (args: Record<string, unknown>) => {
-      return await registry.execute('workspace_open_in_browser', args);
     },
     questionHandler: async (args: Record<string, unknown>) => {
       const question = asString(args.question, 'question');

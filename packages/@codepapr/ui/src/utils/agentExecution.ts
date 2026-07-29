@@ -42,7 +42,7 @@ const AGENT_EXECUTION_SUMMARY_TRIGGER_TOOLS = new Set([
   'workspace_git_restore',
   'workspace_git_reset',
   'web_access',
-  'web_download',
+  'webfetch',
   'web_download_file',
   'browser',
   'browser_take_screenshot',
@@ -976,7 +976,7 @@ export function summarizeFileChanges(tools: readonly ExecutedToolSummary[]): Fil
       continue;
     }
 
-    if (tool.name === 'web_access' || tool.name === 'web_download' || tool.name === 'web_download_file' || tool.name === 'browser' || tool.name === 'browser_page' || tool.name === 'browser_take_screenshot') {
+    if (tool.name === 'web_access' || tool.name === 'webfetch' || tool.name === 'web_download_file' || tool.name === 'browser' || tool.name === 'browser_page' || tool.name === 'browser_take_screenshot') {
       const path = typeof tool.result.path === 'string' ? tool.result.path : undefined;
       if (!path) {
         continue;
@@ -1369,8 +1369,8 @@ export function buildAgentCompletionSummary(params: {
       'browser_page',
       'browser_read_dom',
       'web_access',
-      'web_search',
-      'web_fetch',
+      'websearch',
+      'webfetch',
       'web_fetch_url',
     ].includes(tool.name)
   ).length;

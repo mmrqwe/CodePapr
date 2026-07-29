@@ -54,7 +54,7 @@ manifest.json example:
     "name": "assistant",
     "model": "deepseek",
     "systemPrompt": "You are a task assistant",
-    "tools": ["read", "web_search"],
+    "tools": ["read", "websearch"],
     "maxToolRounds": 20
   }]
 }
@@ -101,7 +101,7 @@ Apps must declare required permissions:
 | `workspace:read/write/exec` | Agent tools: read/write workspace files, execute commands |
 | `agent:run:<name>` | Invoke a specific agent |
 
-Agent tool whitelist (declare in `agents[].tools`): `read`, `grep`, `list`, `lsp`, `web_search`, `web_fetch`, `write`, `edit`, `bash`.
+Agent tool whitelist (declare in `agents[].tools`): `read`, `grep`, `list`, `lsp`, `websearch`, `webfetch`, `write`, `edit`, `bash`.
 
 ### Permission Levels
 
@@ -165,7 +165,7 @@ Full parameter reference: `packages/@codepapr/core/docs/CONFIGURATION.md`.
 | Agent | Purpose | Model | Tools |
 |-------|------|------|------|
 | **explore** | Read-only code analysis | fast | read, read_image, list, lsp, diagnostics, grep |
-| **scout** | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image |
+| **scout** | Web search + download | fast | websearch, webfetch, browser, read_image |
 | **mentor** | Architecture/algorithm guidance | Configurable independent model | None |
 
 The main Agent dispatches sub-agents via the `task` tool. Each sub-agent has an independent Session and only receives the delegated task description, free from history pollution. The main Agent's TodoList instructions encourage it to proactively delegate code analysis to Explore and web search to Scout.

@@ -64,10 +64,8 @@ const UI_TOOL_DEFAULTS = [
   'git',
   'bash',
   'browser',
-  'web_search',
-  'web_fetch',
-  'web_download',
-  'open',
+  'websearch',
+  'webfetch',
   'app_render',
   'app_list',
   'app_start',
@@ -903,22 +901,13 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
         : '- [browser] UI 验证：`browser(action: open)` 加载页面，再用 `click/type/read/screenshot` 交互。不要用 `bash` + curl 检查渲染页面。'
     );
   }
-  if (hasTool(toolNames, 'open')) {
+  if (hasTool(toolNames, 'websearch') || hasTool(toolNames, 'webfetch')) {
     auxiliary.push(
       lang === 'en'
-        ? '- [open] Open existing sites/URLs/HTML files.'
+        ? '- [web] `websearch` online research; `webfetch` reads a page as text, or with `save: true` downloads the raw content (binary-safe, e.g. images) to the project and returns the path. To open a URL/file in the system browser, use `bash` (e.g. `open <url>` on macOS).'
         : lang === 'zh-TW'
-        ? '- [open] 開啟現成網站/URL/HTML 檔案。'
-        : '- [open] 打开现成网站/URL/HTML 文件。'
-    );
-  }
-  if (hasTool(toolNames, 'web_search') || hasTool(toolNames, 'web_fetch') || hasTool(toolNames, 'web_download')) {
-    auxiliary.push(
-      lang === 'en'
-        ? '- [web] `web_search` online research, `web_fetch` read pages, `web_download` save files to project.'
-        : lang === 'zh-TW'
-        ? '- [web] `web_search` 線上搜索，`web_fetch` 讀取網頁，`web_download` 下載檔案到項目。'
-        : '- [web] `web_search` 在线搜索，`web_fetch` 读取网页，`web_download` 下载文件到项目。'
+        ? '- [web] `websearch` 線上搜索；`webfetch` 讀取網頁正文，設 `save: true` 則把原始內容（二進位安全，如圖片）下載到項目並返回路徑。在系統瀏覽器開啟 URL/檔案用 `bash`（如 macOS 的 `open <url>`）。'
+        : '- [web] `websearch` 在线搜索；`webfetch` 读取网页正文，设 `save: true` 则把原始内容（二进制安全，如图片）下载到项目并返回路径。在系统浏览器打开 URL/文件用 `bash`（如 macOS 的 `open <url>`）。'
     );
   }
   if (auxiliary.length > 0) {
