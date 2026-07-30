@@ -122,9 +122,9 @@ The LLM can invoke 30 discrete tools (including `task`/`todo` as dynamic tools),
 | `write` | Create / overwrite file | workspace_write_file |
 | `edit` | SEARCH/REPLACE single-file modification | workspace_apply_patch |
 | `patch` | Multi-file atomic SEARCH/REPLACE | workspace_apply_diff |
-| `grep` | Regex search file contents | workspace_search_text |
+| `grep` | Regex search file contents; `semantic:true` switches to LSP workspace symbol search (degrades to regex without LSP) | workspace_search_text / workspace_workspace_symbol |
 | `glob` | Filename pattern search | workspace_search_files |
-| `list` | files (directory tree, default) / overview (AST project structure overview) | workspace_list_files / workspace_project_graph |
+| `list` | Browse directory tree, embeds lightweight per-file symbols (extractSymbols, AST); no-AST languages return path only | workspace_list_files |
 | `graph` | **Hidden from LLM (UI-only)**: full / overview / lookup / implementations / dependency / entrypoints / impact / smart_context / dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests | graphQuery |
 | `lsp` | goToDefinition / findReferences / hover / documentSymbol / workspaceSymbol / goToImplementation / prepareCallHierarchy / incomingCalls / outgoingCalls (LSP-first, AST project-graph fallback, results tagged with source/confidence) | workspace_symbol_definition / references / hover / document_symbol / workspace_symbol / implementation / prepare_call_hierarchy / incoming_calls / outgoing_calls |
 | `lsp_edit` | rename / code_action / format | workspace_rename_symbol / workspace_apply_code_action / workspace_format_files |
@@ -482,7 +482,7 @@ Consolidation reuses the `selectContextCompactionModelRoute` fast-model route, s
 
 ### 9.1 Tool Definition
 
-`graph` is a unified project semantic graph tool accessed via the `action` parameter. **Now hidden from the LLM (UI-only)**: LLM-facing code intelligence is provided by the `lsp` tool (9 navigation actions, LSP-first with AST project-graph fallback) and `list(action: overview)`; `graph`'s fine-grained handlers stay registered to serve UI panels and act as the AST fallback backend for `lsp` point queries.
+`graph` is a unified project semantic graph tool accessed via the `action` parameter. **Now hidden from the LLM (UI-only)**: LLM-facing code intelligence is provided by the `lsp` tool (9 navigation actions, LSP-first with AST project-graph fallback) and `list` (directory tree + per-file lightweight symbols); `graph`'s fine-grained handlers stay registered to serve UI panels and act as the AST fallback backend for `lsp` point queries.
 
 **Basic navigation (7 actions):**
 | Action | Function |

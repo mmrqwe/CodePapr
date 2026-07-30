@@ -320,6 +320,8 @@ fn main() {
             symbol_provider::resolve_symbol_hover,
             symbol_provider::resolve_symbol_definition,
             symbol_provider::resolve_symbol_references,
+            symbol_provider::check_syntax,
+            symbol_provider::extract_file_symbols,
             tts::tts_server_start,
             tts::tts_server_stop,
             tts::tts_server_status,

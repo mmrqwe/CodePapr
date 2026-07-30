@@ -20,7 +20,7 @@ CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主
 | **多 Agent 协作** | 主 Agent 通过 `task` 工具调度 Explore/Scout/Mentor 及自定义子代理 |
 | **TodoList 任务规划** | Agent 自动创建并跟踪任务清单，支持进度汇报与重规划 |
 | **项目记忆自动管理** | `.CodePapr/memory.md` 冷启动时基于 ProjectGraph 自动生成项目结构/构建命令/约定；跨会话累积错误模式与项目约定；超 200 行后异步用快速模型去重合并，不阻塞会话 |
-| **代码智能（LSP + AST）** | `lsp` 工具 9 个导航 action（跳转定义、引用、hover、文件/工作区符号、实现、调用层级），LSP 优先并自动降级 AST 项目图（结果带 source/confidence）；`list(action: overview)` 看项目结构。ProjectGraph（UI 侧）另支持死代码检测、循环依赖、重构建议等 |
+| **代码智能（LSP + AST）** | `lsp` 工具 9 个导航 action（跳转定义、引用、hover、文件/工作区符号、实现、调用层级），LSP 优先并自动降级 AST 项目图（结果带 source/confidence）；`list` 浏览目录树并附带逐文件轻量符号。ProjectGraph（UI 侧）另支持死代码检测、循环依赖、重构建议等 |
 | **DeepSeek 前缀缓存优化** | 三层提示词注入策略，最大化缓存命中降低成本 |
 | **SEARCH/REPLACE Diff** | 先校验再写入，支持原子性多文件 patch |
 | **MCP 协议支持** | 集成外部 MCP 工具服务器（stdio / SSE / Streamable HTTP）；内置 DuckDuckGo Search、Postgres、SQLite 预设；MCP 市场一键安装官方注册表服务器；逐服务器权限模式（只读 / 读写 / 危险）与变更操作确认流 |

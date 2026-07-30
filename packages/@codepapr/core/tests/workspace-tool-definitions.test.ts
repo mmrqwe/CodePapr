@@ -25,7 +25,7 @@ describe('NEW_TOOL_DEFINITIONS', () => {
     expect(tools).toHaveLength(22);
   });
 
-  const actionTools = ['graph', 'lsp', 'lsp_edit', 'git', 'browser', 'bash', 'list'] as const;
+  const actionTools = ['graph', 'lsp', 'lsp_edit', 'git', 'browser', 'bash'] as const;
   const actionRequiredTools = ['graph', 'lsp', 'lsp_edit', 'git', 'browser'] as const;
 
   it.each(actionTools)('%s has action enum constraint', (name) => {
@@ -101,10 +101,6 @@ describe('NEW_TOOL_DEFINITIONS', () => {
         'circular_deps', 'type_hierarchy', 'suggest_refactors',
         'test_impact', 'generate_tests',
       ]);
-    });
-    it('list has files and overview actions', () => {
-      const e = getEnum('list');
-      expect(e).toEqual(['files', 'overview']);
     });
     it('lsp has the 9 opencode navigation actions (no diagnostics)', () => {
       const e = getEnum('lsp');

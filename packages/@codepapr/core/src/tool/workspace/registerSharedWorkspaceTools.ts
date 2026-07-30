@@ -50,6 +50,20 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
     return await registry.execute('workspace_apply_diff', args);
   });
   registry.register(findTool('grep'), async (args) => {
+    if (args.semantic === true) {
+      const relativePath = typeof args.relativePath === 'string' ? args.relativePath : undefined;
+      if (relativePath) {
+        try {
+          const result = await registry.execute('workspace_workspace_symbol', {
+            query: args.query,
+            relativePath,
+          }) as { available?: boolean };
+          if (result && result.available !== false) return result;
+        } catch { /* LSP 不可用，降级正则 */ }
+      }
+      const regexResult = await registry.execute('workspace_search_text', { ...args, isRegexp: true }) as Record<string, unknown>;
+      return { ...regexResult, degraded: true, note: '语义搜索不可用（无 LSP 或未指定锚点文件 relativePath），已降级正则搜索。' };
+    }
     return await registry.execute('workspace_search_text', { ...args, isRegexp: true });
   });
   registry.register(findTool('glob'), async (args) => {
@@ -57,13 +71,7 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
     const regexQuery = globToRegex(rawQuery);
     return await registry.execute('workspace_search_files', { ...args, query: regexQuery, isRegexp: true });
   });
-  registry.register(findTool('list'), async (args) => {
-    const a = typeof args.action === 'string' ? args.action : 'files';
-    if (a === 'overview') {
-      return await registry.execute('workspace_project_graph', { ...args, view: 'overview' });
-    }
-    return await registry.execute('workspace_list_files', args);
-  });
+  registry.register(findTool('list'), forward(registry, 'workspace_list_files'));
 
   // ──── 项目语义图 ────
   registry.register(findTool('graph'), options.graphHandler ?? createDefaultGraphHandler(registry));

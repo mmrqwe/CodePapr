@@ -58,6 +58,34 @@ pub struct ReferenceResult {
     pub locations: Vec<SymbolLocation>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyntaxErrorInfo {
+    pub line: usize,
+    pub column: usize,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyntaxCheckResult {
+    pub supported: bool,
+    pub error_count: usize,
+    pub errors: Vec<SyntaxErrorInfo>,
+}
+
+/// 文件符号信息（含行范围），用于 read 工具的符号切片与文件大纲。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileSymbolInfo {
+    pub name: String,
+    pub kind: String,
+    pub line: usize,
+    pub end_line: usize,
+    pub signature: String,
+    pub container_name: Option<String>,
+}
+
 // ── Provider capability ──────────────────────────────────────────────
 
 bitflags! {
@@ -140,6 +168,16 @@ pub trait SymbolProvider: Send + Sync {
     ) -> Result<Vec<SymbolLocation>, String> {
         Ok(Vec::new())
     }
+
+    /// 语法检查（tree-sitter）。返回 None 表示该 provider 不支持语法检查。
+    fn check_syntax(&self, _content: &str) -> Option<SyntaxCheckResult> {
+        None
+    }
+
+    /// 提取文件符号（含行范围），用于符号切片与文件大纲。返回空表示该 provider 不支持。
+    fn file_symbols(&self, _content: &str) -> Vec<FileSymbolInfo> {
+        Vec::new()
+    }
 }
 
 // ── Provider registry ─────────────────────────────────────────────────
@@ -220,6 +258,56 @@ pub fn register_provider(provider: SharedProvider) -> Result<(), String> {
         .map_err(|_| "ProviderRegistry 锁中毒".to_string())?;
     reg.register(provider);
     Ok(())
+}
+
+/// 对指定语言做 tree-sitter 语法检查。无 AST provider（或解析失败）时返回 `supported: false`，
+/// 调用方据此降级（跳过语法预检），而非报错。
+pub fn check_syntax_for_language(language_id: &str, content: &str) -> SyntaxCheckResult {
+    let Ok(reg) = registry().read() else {
+        return SyntaxCheckResult {
+            supported: false,
+            error_count: 0,
+            errors: vec![],
+        };
+    };
+    for provider in reg.providers_for_language(language_id) {
+        if let Some(result) = provider.check_syntax(content) {
+            return result;
+        }
+    }
+    SyntaxCheckResult {
+        supported: false,
+        error_count: 0,
+        errors: vec![],
+    }
+}
+
+#[tauri::command]
+pub fn check_syntax(language_id: String, content: String) -> Result<SyntaxCheckResult, String> {
+    Ok(check_syntax_for_language(&language_id, &content))
+}
+
+/// 提取文件符号（含行范围），用于 read 工具的符号切片与文件大纲。
+/// 无 AST provider（或解析失败）时返回空 Vec，调用方据此降级，绝不报错。
+pub fn extract_file_symbols_for_language(language_id: &str, content: &str) -> Vec<FileSymbolInfo> {
+    let Ok(reg) = registry().read() else {
+        return Vec::new();
+    };
+    for provider in reg.providers_for_language(language_id) {
+        let symbols = provider.file_symbols(content);
+        if !symbols.is_empty() {
+            return symbols;
+        }
+    }
+    Vec::new()
+}
+
+#[tauri::command]
+pub fn extract_file_symbols(
+    language_id: String,
+    content: String,
+) -> Result<Vec<FileSymbolInfo>, String> {
+    Ok(extract_file_symbols_for_language(&language_id, &content))
 }
 
 // ── Provider selector: LSP → AST → Regex 降级链 ─────────────────────
@@ -1043,6 +1131,31 @@ fn parse_lsp_locations(value: &serde_json::Value) -> Vec<SymbolLocation> {
 
 use tree_sitter::{Language, Node, Parser};
 
+/// 统计语法错误节点数（ERROR / MISSING），并收集前 `limit` 个错误位置（迭代遍历，避免大文件栈溢出）。
+fn collect_syntax_errors(node: Node<'_>, errors: &mut Vec<SyntaxErrorInfo>, limit: usize) -> usize {
+    let mut count = 0;
+    let mut stack = vec![node];
+    while let Some(n) = stack.pop() {
+        if n.is_error() || n.is_missing() {
+            count += 1;
+            if errors.len() < limit {
+                let pos = n.start_position();
+                errors.push(SyntaxErrorInfo {
+                    line: pos.row + 1,
+                    column: pos.column + 1,
+                    kind: if n.is_missing() { "missing" } else { "error" }.to_string(),
+                });
+            }
+        }
+        for i in 0..n.child_count() {
+            if let Some(child) = n.child(i) {
+                stack.push(child);
+            }
+        }
+    }
+    count
+}
+
 #[allow(dead_code)]
 struct AstLanguageConfig {
     language_id: &'static str,
@@ -1137,6 +1250,67 @@ impl AstSymbolProvider {
         }
         None
     }
+
+    fn extract_file_symbols_inner(&self, content: &str) -> Vec<FileSymbolInfo> {
+        let mut parser = Parser::new();
+        let language = (self.config.language_fn)();
+        if parser.set_language(&language).is_err() {
+            return Vec::new();
+        }
+        let tree = match parser.parse(content, None) {
+            Some(t) => t,
+            None => return Vec::new(),
+        };
+        let mut symbols = Vec::new();
+        let bytes = content.as_bytes();
+        self.walk_file_symbols(tree.root_node(), bytes, None, &mut symbols);
+        symbols.sort_by_key(|s| s.line);
+        symbols
+    }
+
+    fn walk_file_symbols(
+        &self,
+        node: Node<'_>,
+        source: &[u8],
+        container: Option<String>,
+        symbols: &mut Vec<FileSymbolInfo>,
+    ) {
+        let kind = node.kind();
+        let mut child_container = container.clone();
+        if self.match_kind(kind).is_some() {
+            if let Some(name_node) = node.child_by_field_name(self.config.name_field) {
+                let name = name_node.utf8_text(source).unwrap_or("");
+                if !name.is_empty() && !is_control_keyword(name) {
+                    let start = node.start_position();
+                    let end = node.end_position();
+                    let sig = node.utf8_text(source).unwrap_or("").to_string();
+                    let signature = sig
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .trim_end_matches('{')
+                        .trim()
+                        .to_string();
+                    symbols.push(FileSymbolInfo {
+                        name: name.to_string(),
+                        kind: kind.to_string(),
+                        line: start.row + 1,
+                        end_line: end.row + 1,
+                        signature,
+                        container_name: container.clone(),
+                    });
+                    child_container = Some(name.to_string());
+                }
+            }
+        }
+        for i in 0..node.child_count() {
+            if let Some(child) = node.child(i) {
+                if child.is_named() {
+                    self.walk_file_symbols(child, source, child_container.clone(), symbols);
+                }
+            }
+        }
+    }
 }
 
 impl SymbolProvider for AstSymbolProvider {
@@ -1168,6 +1342,30 @@ impl SymbolProvider for AstSymbolProvider {
         content: &str,
     ) -> Result<Vec<UnifiedSymbolDefinition>, String> {
         Ok(self.parse_and_extract(content))
+    }
+
+    fn check_syntax(&self, content: &str) -> Option<SyntaxCheckResult> {
+        let mut parser = Parser::new();
+        let language = (self.config.language_fn)();
+        if parser.set_language(&language).is_err() {
+            return Some(SyntaxCheckResult {
+                supported: false,
+                error_count: 0,
+                errors: vec![],
+            });
+        }
+        let tree = parser.parse(content, None)?;
+        let mut errors = Vec::new();
+        let error_count = collect_syntax_errors(tree.root_node(), &mut errors, 10);
+        Some(SyntaxCheckResult {
+            supported: true,
+            error_count,
+            errors,
+        })
+    }
+
+    fn file_symbols(&self, content: &str) -> Vec<FileSymbolInfo> {
+        self.extract_file_symbols_inner(content)
     }
 
     fn hover(
@@ -1868,4 +2066,55 @@ fn register_regex_providers() {
         import_regex: Some(r"import\s+.+\s+from\s+\S+"),
         kind_map: HashMap::from([("class", 5), ("interface", 11), ("enum", 10), ("type", 5)]),
     })));
+}
+
+#[cfg(test)]
+mod syntax_check_tests {
+    use super::*;
+
+    #[test]
+    fn check_syntax_valid_typescript_has_no_errors() {
+        register_ast_providers();
+        let result =
+            check_syntax_for_language("typescript", "const x = 1;\nfunction foo() { return x; }\n");
+        assert!(result.supported);
+        assert_eq!(result.error_count, 0);
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn check_syntax_broken_typescript_reports_errors() {
+        register_ast_providers();
+        let result = check_syntax_for_language("typescript", "const x = ;\nfunction foo( { return x;\n");
+        assert!(result.supported);
+        assert!(result.error_count > 0);
+    }
+
+    #[test]
+    fn check_syntax_unsupported_language_is_not_supported() {
+        register_ast_providers();
+        let result = check_syntax_for_language("nonexistent_language_xyz", "some code");
+        assert!(!result.supported);
+        assert_eq!(result.error_count, 0);
+    }
+
+    #[test]
+    fn extract_file_symbols_typescript_returns_symbols_with_ranges() {
+        register_ast_providers();
+        let content = "const x = 1;\nfunction getUser() {\n  return x;\n}\n";
+        let symbols = extract_file_symbols_for_language("typescript", content);
+        assert!(!symbols.is_empty());
+        let get_user = symbols.iter().find(|s| s.name == "getUser");
+        assert!(get_user.is_some());
+        let s = get_user.unwrap();
+        assert_eq!(s.line, 2);
+        assert!(s.end_line >= 2);
+    }
+
+    #[test]
+    fn extract_file_symbols_unsupported_language_is_empty() {
+        register_ast_providers();
+        let symbols = extract_file_symbols_for_language("nonexistent_language_xyz", "some code");
+        assert!(symbols.is_empty());
+    }
 }

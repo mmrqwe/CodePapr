@@ -100,6 +100,7 @@ interface ReadFileArgs {
   endLine?: number;
   aroundLine?: number;
   contextLines?: number;
+  symbol?: string;
 }
 
 interface ReadFileResult {
@@ -113,6 +114,56 @@ interface ReadFileResult {
   truncatedByBytes: boolean;
   locationLine?: number;
   locationColumn?: number;
+}
+
+interface FileSymbolInfo {
+  name: string;
+  kind: string;
+  line: number;
+  endLine: number;
+  signature: string;
+  containerName?: string;
+}
+
+// 整文件读取超过此行数时自动附带符号大纲
+const OUTLINE_LINE_THRESHOLD = 300;
+
+// list 逐文件轻量符号：最多处理多少个代码文件、单文件字节上限、每文件保留的顶层符号数
+const LIST_SYMBOL_FILE_LIMIT = 40;
+const LIST_SYMBOL_FILE_MAX_BYTES = 200_000;
+const LIST_SYMBOLS_PER_FILE = 6;
+
+// 用 AST 提取文件符号（含行范围）；语言无 AST 支持或解析失败时返回空数组（降级，不报错）。
+async function extractFileSymbols(languageId: string | null, content: string): Promise<FileSymbolInfo[]> {
+  if (!languageId) return [];
+  try {
+    return await invoke<FileSymbolInfo[]>('extract_file_symbols', { languageId, content });
+  } catch {
+    return [];
+  }
+}
+
+// 按名称查找符号：精确 → 忽略大小写 → 包含匹配（取最短名，最可能是目标）。
+function findSymbolByName(symbols: FileSymbolInfo[], name: string): FileSymbolInfo | undefined {
+  const lower = name.toLowerCase();
+  return (
+    symbols.find((s) => s.name === name) ??
+    symbols.find((s) => s.name.toLowerCase() === lower) ??
+    symbols
+      .filter((s) => s.name.toLowerCase().includes(lower))
+      .sort((a, b) => a.name.length - b.name.length)[0]
+  );
+}
+
+function sliceLines(content: string, startLine: number, endLine: number): string {
+  const lines = content.split('\n');
+  return lines.slice(Math.max(0, startLine - 1), Math.min(lines.length, endLine)).join('\n');
+}
+
+function formatOutline(symbols: FileSymbolInfo[]): string {
+  return symbols
+    .map((s) => `${s.containerName ? '  ' : ''}- ${s.name} (${s.kind}) L${s.line}-L${s.endLine}`)
+    .join('\n');
 }
 
 interface ReadImageFileArgs {
@@ -333,6 +384,8 @@ interface ApplyPatchArgs {
 
 interface ApplyPatchResult extends WriteTextFileResult {
   replacements: number;
+  diagnostics?: unknown[];
+  notes?: string[];
 }
 
 interface ApplyDiffPatchArgs extends ApplyPatchArgs {
@@ -346,6 +399,7 @@ interface ApplyDiffArgs {
 interface ApplyDiffFileResult extends WriteTextFileResult {
   patches: number;
   replacements: number;
+  diagnostics?: unknown[];
 }
 
 interface ApplyDiffResult {
@@ -353,6 +407,7 @@ interface ApplyDiffResult {
   totalFiles: number;
   totalPatches: number;
   totalReplacements: number;
+  notes?: string[];
 }
 
 interface WebSearchResult {
@@ -635,6 +690,10 @@ const tools: IToolDefinition[] = [
         contextLines: {
           type: 'number',
           description: '可选。aroundLine 或路径锚点前后各保留多少行，默认 20，最大 200。',
+        },
+        symbol: {
+          type: 'string',
+          description: '可选。按符号名（函数/类等）精确读取该符号代码片段（AST 定位，无 AST 时降级文本搜索）。传入后忽略 startLine/endLine/aroundLine。',
         },
       },
       required: ['relativePath'],
@@ -1800,6 +1859,80 @@ export function registerWorkspaceTools(
     return languageId;
   };
 
+  interface SyntaxCheckResult {
+    supported: boolean;
+    errorCount: number;
+    errors: Array<{ line: number; column: number; kind: string }>;
+  }
+
+  const checkSyntax = async (languageId: string, content: string): Promise<SyntaxCheckResult> => {
+    try {
+      return await invoke<SyntaxCheckResult>('check_syntax', { languageId, content });
+    } catch {
+      return { supported: false, errorCount: 0, errors: [] };
+    }
+  };
+
+  // AST 预检：比较编辑前后语法错误数，仅当错误数增加（改前合法→改后非法）时拦截、不落盘。
+  // 语言无 tree-sitter 支持时降级跳过（返回 note），绝不报错。
+  const astPreCheck = async (
+    relativePath: string,
+    before: string,
+    after: string
+  ): Promise<{ rejected?: string; note?: string }> => {
+    const languageId = lspLanguageFromPath(relativePath);
+    if (!languageId) {
+      return { note: `AST 语法预检跳过：无法识别 ${relativePath} 的语言类型。` };
+    }
+    const [beforeCheck, afterCheck] = await Promise.all([
+      checkSyntax(languageId, before),
+      checkSyntax(languageId, after),
+    ]);
+    if (!beforeCheck.supported || !afterCheck.supported) {
+      return { note: `AST 语法预检跳过：${languageId} 无 tree-sitter 语法支持。` };
+    }
+    if (afterCheck.errorCount > beforeCheck.errorCount) {
+      const sample = afterCheck.errors
+        .slice(0, 5)
+        .map((e) => `L${e.line}:${e.column}(${e.kind})`)
+        .join('、');
+      return {
+        rejected: `AST 语法预检拦截：修改后语法错误从 ${beforeCheck.errorCount} 增至 ${afterCheck.errorCount}（${sample || '未定位到具体位置'}）。修改已取消，请检查括号/引号闭合后重试。`,
+      };
+    }
+    return {};
+  };
+
+  // LSP 诊断后置钩子：写入后获取该文件诊断。无可用 LSP 时降级跳过（返回 note），绝不报错。
+  const lspDiagnosticsHook = async (
+    relativePath: string
+  ): Promise<{ diagnostics: unknown[]; note: string }> => {
+    const languageId = lspLanguageFromPath(relativePath);
+    if (!languageId) {
+      return { diagnostics: [], note: `LSP 诊断跳过：无法识别 ${relativePath} 的语言类型。` };
+    }
+    try {
+      const result = await invoke<{ diagnostics: Record<string, { diagnostics?: unknown[] }> }>(
+        'lsp_get_diagnostics',
+        { workspacePath: workspace(), languageId }
+      );
+      const allDiags = result.diagnostics ?? {};
+      const fileUri = Object.keys(allDiags).find(
+        (uri) => uri.endsWith(relativePath) || uri.endsWith(relativePath.replace(/\\/g, '/'))
+      );
+      const fileDiags = fileUri ? (allDiags[fileUri]?.diagnostics ?? []) : [];
+      if (fileDiags.length === 0) {
+        return { diagnostics: [], note: 'LSP 检查通过，无编译错误。' };
+      }
+      return {
+        diagnostics: fileDiags,
+        note: `修改已应用，但触发 ${fileDiags.length} 个编译诊断，请检查并继续修复。`,
+      };
+    } catch {
+      return { diagnostics: [], note: `LSP 诊断跳过：${languageId} 无可用 LSP。` };
+    }
+  };
+
   const ensureExternalPathAllowed = async (relativePath: string | undefined, operation: 'read' | 'list'): Promise<void> => {
     if (!relativePath || !isAbsolutePath(relativePath)) return;
     if (isWithinWorkspace(relativePath, workspace())) return;
@@ -1938,11 +2071,38 @@ export function registerWorkspaceTools(
       maxDepth: asOptionalNumber(args.maxDepth),
     };
     await ensureExternalPathAllowed(parsed.relativePath, 'list');
-    return await invoke('list_workspace_files', {
+    const result = await invoke<ListFilesResult>('list_workspace_files', {
       workspacePath: workspace(),
       relativePath: parsed.relativePath,
       maxDepth: parsed.maxDepth,
     });
+
+    // 轻量逐文件符号：对代码文件附带顶层符号大纲（AST，无 AST 支持或失败则跳过该文件）
+    const symbolsByFile: Record<string, string> = {};
+    const codeFiles = result.entries
+      .filter((e) => !e.isDir && e.bytes <= LIST_SYMBOL_FILE_MAX_BYTES && lspLanguageFromPath(e.path))
+      .slice(0, LIST_SYMBOL_FILE_LIMIT);
+    await Promise.all(
+      codeFiles.map(async (e) => {
+        try {
+          const languageId = lspLanguageFromPath(e.path);
+          const file = await invoke<ReadFileResult>('read_text_file', {
+            workspacePath: workspace(),
+            relativePath: e.path,
+            maxBytes: LIST_SYMBOL_FILE_MAX_BYTES,
+          });
+          const symbols = await extractFileSymbols(languageId, file.content);
+          const topLevel = symbols.filter((s) => !s.containerName).slice(0, LIST_SYMBOLS_PER_FILE);
+          if (topLevel.length > 0) {
+            symbolsByFile[e.path] = topLevel.map((s) => `${s.name} (${s.kind})`).join(', ');
+          }
+        } catch {
+          // 单文件符号提取失败则跳过（降级）
+        }
+      })
+    );
+
+    return { ...result, symbolsByFile };
   });
 
   registry.register(toolByName('workspace_read_file'), async (args: Record<string, unknown>) => {
@@ -1953,9 +2113,56 @@ export function registerWorkspaceTools(
       endLine: asOptionalNumber(args.endLine),
       aroundLine: asOptionalNumber(args.aroundLine),
       contextLines: asOptionalNumber(args.contextLines),
+      symbol: asOptionalString(args.symbol),
     };
     await ensureExternalPathAllowed(parsed.relativePath, 'read');
-    return await invoke('read_text_file', {
+    const languageId = lspLanguageFromPath(parsed.relativePath);
+    const hasLineAnchor =
+      parsed.startLine != null || parsed.endLine != null || parsed.aroundLine != null;
+
+    // 符号切片：传了 symbol 时，用 AST 定位符号行范围后只读该符号（无 AST 则降级文本搜索）
+    if (parsed.symbol) {
+      const full = await invoke<ReadFileResult>('read_text_file', {
+        workspacePath: workspace(),
+        relativePath: parsed.relativePath,
+        maxBytes: 20_000_000,
+      });
+      const symbols = await extractFileSymbols(languageId, full.content);
+      const target = findSymbolByName(symbols, parsed.symbol);
+      if (target) {
+        return {
+          ...full,
+          content: sliceLines(full.content, target.line, target.endLine),
+          startLine: target.line,
+          endLine: target.endLine,
+          truncatedByRange: false,
+          symbol: target.name,
+          symbolKind: target.kind,
+          note: `已用 AST 定位符号 ${target.name} (${target.kind}) L${target.line}-L${target.endLine}，仅返回该符号代码。`,
+        };
+      }
+      const lines = full.content.split('\n');
+      const lower = parsed.symbol.toLowerCase();
+      const idx = lines.findIndex((l) => l.toLowerCase().includes(lower));
+      if (idx >= 0) {
+        const start = Math.max(1, idx + 1 - 5);
+        const end = Math.min(lines.length, idx + 1 + 20);
+        return {
+          ...full,
+          content: sliceLines(full.content, start, end),
+          startLine: start,
+          endLine: end,
+          truncatedByRange: false,
+          note: `该语言无 AST 支持或未找到符号 "${parsed.symbol}"，已降级文本搜索，返回首个匹配行附近 L${start}-L${end}。`,
+        };
+      }
+      return {
+        ...full,
+        note: `未能定位符号 "${parsed.symbol}"（无 AST 支持且文本未匹配），已返回全文。`,
+      };
+    }
+
+    const result = await invoke<ReadFileResult>('read_text_file', {
       workspacePath: workspace(),
       relativePath: parsed.relativePath,
       maxBytes: parsed.maxBytes,
@@ -1964,6 +2171,25 @@ export function registerWorkspaceTools(
       aroundLine: parsed.aroundLine,
       contextLines: parsed.contextLines,
     });
+
+    // 自动大纲：整文件读取且文件较大、未截断时附带符号大纲（AST 不支持则降级跳过）
+    if (
+      !hasLineAnchor &&
+      languageId &&
+      result.totalLines > OUTLINE_LINE_THRESHOLD &&
+      !result.truncatedByBytes
+    ) {
+      const symbols = await extractFileSymbols(languageId, result.content);
+      if (symbols.length > 0) {
+        return {
+          ...result,
+          outline: formatOutline(symbols),
+          outlineNote: `文件较大（${result.totalLines} 行），已附带 ${symbols.length} 个符号大纲；可用 read(relativePath, symbol: "符号名") 精确读取某个符号。`,
+        };
+      }
+    }
+
+    return result;
   });
 
   registry.register(toolByName('workspace_read_image'), async (args: Record<string, unknown>) => {
@@ -3571,6 +3797,17 @@ export function registerWorkspaceTools(
       replaceAll: parsed.replaceAll,
       expectedOccurrences: parsed.expectedOccurrences,
     });
+
+    // 前置 AST 语法预检：仅当修改引入新语法错误时拦截、不落盘（语言不支持则降级跳过）
+    const notes: string[] = [];
+    const preCheck = await astPreCheck(parsed.relativePath, current.content, patched.content);
+    if (preCheck.rejected) {
+      throw new Error(preCheck.rejected);
+    }
+    if (preCheck.note) {
+      notes.push(preCheck.note);
+    }
+
     const result = await invoke<WriteTextFileResult>('write_text_file', {
       workspacePath: workspace(),
       relativePath: parsed.relativePath,
@@ -3589,6 +3826,10 @@ export function registerWorkspaceTools(
       );
     }
 
+    // 后置 LSP 诊断钩子：返回编译诊断供模型继续修复（无 LSP 则降级跳过）
+    const diag = await lspDiagnosticsHook(parsed.relativePath);
+    notes.push(diag.note);
+
     editHistory?.record({
       path: result.path,
       before: current.content,
@@ -3599,6 +3840,8 @@ export function registerWorkspaceTools(
     return {
       ...result,
       replacements: patched.replacements,
+      diagnostics: diag.diagnostics,
+      notes,
     } satisfies ApplyPatchResult;
   });
 
@@ -3630,6 +3873,19 @@ export function registerWorkspaceTools(
     }
 
     const diff = applySearchReplaceDiff(fileContents, parsed.patches);
+
+    // 前置 AST 语法预检：任一文件引入新语法错误则整体拦截、全部不落盘（语言不支持则降级跳过）
+    const notes: string[] = [];
+    for (const file of diff.files) {
+      const preCheck = await astPreCheck(file.path, fileContents[file.path] ?? '', file.content);
+      if (preCheck.rejected) {
+        throw new Error(`${file.path}: ${preCheck.rejected}`);
+      }
+      if (preCheck.note) {
+        notes.push(`${file.path}: ${preCheck.note}`);
+      }
+    }
+
     const files: ApplyDiffFileResult[] = [];
 
     for (const file of diff.files) {
@@ -3651,6 +3907,10 @@ export function registerWorkspaceTools(
         );
       }
 
+      // 后置 LSP 诊断钩子：返回编译诊断供模型继续修复（无 LSP 则降级跳过）
+      const diag = await lspDiagnosticsHook(file.path);
+      notes.push(`${file.path}: ${diag.note}`);
+
       editHistory?.record({
         path: result.path,
         before: fileContents[file.path] ?? null,
@@ -3660,6 +3920,7 @@ export function registerWorkspaceTools(
         ...result,
         patches: file.patches,
         replacements: file.replacements,
+        diagnostics: diag.diagnostics,
       });
     }
 
@@ -3670,6 +3931,7 @@ export function registerWorkspaceTools(
       totalFiles: diff.totalFiles,
       totalPatches: diff.totalPatches,
       totalReplacements: diff.totalReplacements,
+      notes,
     } satisfies ApplyDiffResult;
   });
 
@@ -3805,7 +4067,7 @@ export function registerWorkspaceTools(
     registry.hideFromLlm(name);
   }
 
-  // graph 工具对 LLM 隐藏：项目结构改用 list(action: overview)，符号导航改用 lsp。
+  // graph 工具对 LLM 隐藏：项目结构改用 list（目录树+逐文件轻量符号），符号导航改用 lsp。
   // 细粒度 handler 仍保留注册，供 UI 面板与后续 AST 兜底使用。
   registry.hideFromLlm('graph');
 }

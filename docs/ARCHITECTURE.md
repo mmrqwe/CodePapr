@@ -122,9 +122,9 @@ LLM 可调用 30 个独立工具（含 `task` / `todo` 两个动态工具），�
 | `write` | 创建/覆写文件 | workspace_write_file |
 | `edit` | SEARCH/REPLACE 单文件修改 | workspace_apply_patch |
 | `patch` | 多文件原子 SEARCH/REPLACE | workspace_apply_diff |
-| `grep` | 正则搜索文件内容 | workspace_search_text |
+| `grep` | 正则搜索文件内容；`semantic:true` 切换 LSP workspace symbol 语义检索（无 LSP 降级正则） | workspace_search_text / workspace_workspace_symbol |
 | `glob` | 文件名模式搜索 | workspace_search_files |
-| `list` | files（目录树，默认）/ overview（AST 项目结构概览） | workspace_list_files / workspace_project_graph |
+| `list` | 浏览目录树，逐文件嵌入轻量符号（extractSymbols，AST）；无 AST 语言仅返回路径 | workspace_list_files |
 | `graph` | **对 LLM 隐藏（UI-only）**：full / overview / lookup / implementations / dependency / entrypoints / impact / smart_context / dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests | graphQuery |
 | `lsp` | goToDefinition / findReferences / hover / documentSymbol / workspaceSymbol / goToImplementation / prepareCallHierarchy / incomingCalls / outgoingCalls（LSP 优先、AST 项目图兜底，结果带 source/confidence） | workspace_symbol_definition / references / hover / document_symbol / workspace_symbol / implementation / prepare_call_hierarchy / incoming_calls / outgoing_calls |
 | `lsp_edit` | rename / code_action / format | workspace_rename_symbol / workspace_apply_code_action / workspace_format_files |
@@ -481,7 +481,7 @@ agent 回复完成
 
 ### 9.1 工具定义
 
-`graph` 是统一的项目语义图工具，通过 `action` 参数选择操作。**现已对 LLM 隐藏（UI-only）**：LLM 侧的代码智能改由 `lsp` 工具（9 个导航 action，LSP 优先、AST 项目图兜底）与 `list(action: overview)` 承担；`graph` 的细粒度 handler 保留注册，服务于 UI 面板并作为 `lsp` 点查询的 AST 兜底后端。
+`graph` 是统一的项目语义图工具，通过 `action` 参数选择操作。**现已对 LLM 隐藏（UI-only）**：LLM 侧的代码智能改由 `lsp` 工具（9 个导航 action，LSP 优先、AST 项目图兜底）与 `list`（目录树 + 逐文件轻量符号）承担；`graph` 的细粒度 handler 保留注册，服务于 UI 面板并作为 `lsp` 点查询的 AST 兜底后端。
 
 **基础导航（7 个 action）：**
 | Action | 功能 |

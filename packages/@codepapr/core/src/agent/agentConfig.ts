@@ -272,7 +272,7 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
 ## Core Workflow
 
 1. **Choose tools by task, don't blindly read files**:
-   - **Global understanding** ("Overall project structure", "What modules exist"): Use \`list(action: overview)\` to get the project map (directory tree + symbol skeleton).
+   - **Global understanding** ("Overall project structure", "What modules exist"): Use \`list\` to get the project structure (directory tree with lightweight per-file symbols).
    - **Precise query** ("Where is Foo defined"): Use \`lsp(action: goToDefinition)\` or \`lsp(action: workspaceSymbol, query: "Foo")\` directly.
    - **Fuzzy exploration** ("How is auth implemented", "What's the data flow"): Start with \`lsp(action: workspaceSymbol, query: "auth")\` to locate relevant symbols, then \`lsp(action: documentSymbol)\` for a file's outline.
    - **Who uses / calls this** ("Who calls bar", "What implements interface I"): Use \`lsp(action: findReferences)\`, \`lsp(action: goToImplementation)\`, or \`lsp(action: incomingCalls)\`.
@@ -286,7 +286,7 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
 
 ## Available Tools
 
-- **list (action: overview, relativePath?)** — Project structure overview: directory tree + code symbol skeleton (AST-based, works without LSP). Use for global understanding
+- **list (relativePath?)** — Directory tree with lightweight per-file symbols (top-level symbols per code file, AST-based, works without LSP). Use for global understanding
 
 - **lsp (action: goToDefinition, relativePath+line)** — Jump to definition. Prefer over grep for finding symbol sources
 - **lsp (action: findReferences, relativePath+line)** — Find references. Prefer over grep, catches renamed references

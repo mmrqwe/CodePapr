@@ -253,7 +253,7 @@
   <div class="container">
     <div class="section-label"><span class="dot"></span> TOOL SURFACE · LSP / AST Inventory</div>
     <h1>Tool Inventory · <span class="gradient">Two-Layer Architecture × Language Intelligence</span></h1>
-    <p>CodePapr exposes <strong>25 merged tools</strong> to the LLM (<code>graph</code> is now UI-only), routed by dispatchers to <strong>61 fine-grained workspace_* tools</strong> (hidden from the LLM), ultimately landing on the Tauri / Rust backend. Code intelligence (the <code>lsp</code> tool's 9 navigation actions) is wired to an <strong>LSP → AST project-graph</strong> fallback, tagged with <code>source</code>/<code>confidence</code> for precision; <code>list(action: overview)</code> provides an AST project-structure overview. File read/write/edit (read / write / edit / patch) do not yet leverage language intelligence. Click any entry to expand its dispatch chain and integration status.</p>
+    <p>CodePapr exposes <strong>25 merged tools</strong> to the LLM (<code>graph</code> is now UI-only), routed by dispatchers to <strong>61 fine-grained workspace_* tools</strong> (hidden from the LLM), ultimately landing on the Tauri / Rust backend. Code intelligence (the <code>lsp</code> tool's 9 navigation actions) is wired to an <strong>LSP → AST project-graph</strong> fallback, tagged with <code>source</code>/<code>confidence</code> for precision; <code>list</code> browses the directory tree with per-file lightweight symbols (AST); <code>read</code> supports a <code>symbol</code> param for AST-based symbol reading and auto-attaches outlines for large files; <code>grep</code> supports <code>semantic:true</code> for LSP workspace symbol search. Only write / edit / patch remain plain-text operations. Click any entry to expand its dispatch chain and integration status.</p>
     <div class="legend">
       <span class="lg"><i style="background:var(--green)"></i>LSP-backed</span>
       <span class="lg"><i style="background:var(--amber)"></i>AST-backed</span>
@@ -267,7 +267,7 @@
       <div class="stat-card"><div class="num n-amber">15</div><div class="cap">Real LSP languages<br>Rust symbol_provider.rs</div></div>
       <div class="stat-card"><div class="num n-violet">17</div><div class="cap">AST languages<br>tree-sitter</div></div>
       <div class="stat-card"><div class="num n-teal">11</div><div class="cap">regex fallback languages</div></div>
-      <div class="stat-card"><div class="num n-orange">0</div><div class="cap">read/write/edit/patch<br>tools wired to LSP/AST</div></div>
+      <div class="stat-card"><div class="num n-orange">3</div><div class="cap">read/grep/list<br>tools wired to LSP/AST</div></div>
     </div>
   </div>
 </section>
@@ -282,22 +282,22 @@
           <div class="idx">01</div>
           <div class="tt">
             <h3>File Ops <span>File Operations</span></h3>
-            <div class="tags"><span class="tag">read / write / edit / patch</span><span class="tag">grep / glob / list</span><span class="tag">All plain text</span></div>
+            <div class="tags"><span class="tag">read / write / edit / patch</span><span class="tag">grep / glob / list</span><span class="tag">read·grep·list wired to AST/LSP</span></div>
           </div>
-          <div class="hz"><b>Refactor target</b>Not yet wired to LSP/AST</div>
+          <div class="hz"><b>Partially refactored</b>read·grep·list wired to LSP/AST</div>
         </div>
 
-        <div class="sublabel"><b>Read/Write/Edit</b> Direct file-content ops · all plain-text semantics</div>
+        <div class="sublabel"><b>Read/Write/Edit</b> Direct file-content ops · write/edit/patch plain-text · read wired to AST</div>
 
         <div class="item">
           <div class="row">
             <div class="addr">READ</div>
             <div class="name">read<small>→ workspace_read_file · workspaceTools.ts:1913</small></div>
-            <div class="src"><span class="chip">invoke read_text_file</span><span class="chip">Rust read.rs:42</span></div>
-            <div class="cchip c-text">Plain text</div>
+            <div class="src"><span class="chip">invoke read_text_file</span><span class="chip">Rust read.rs:42</span><span class="chip">symbol AST targeting</span></div>
+            <div class="cchip c-mix">Text + AST</div>
           </div>
-          <div class="desc">Reads the raw contents of a project file. Supports <code>startLine/endLine</code> line ranges, an <code>aroundLine</code> window, and <code>maxBytes</code> (raw read defaults to 500KB). <b>Completely unaware of LSP/AST</b>; returns plain text, clamped by the truncation layer before entering context.</div>
-          <div class="more"><div class="mbox">Dispatch: <code>read</code> → <code>workspace_read_file</code> → <code>invoke('read_text_file')</code>. Output passes through <code>truncateToolOutput</code>: &gt;30k chars middle-truncated / &gt;50k offloaded to disk + 2k preview / 150k hard cap. No symbol outline, no owning-file structure info.</div></div>
+          <div class="desc">Reads a project file. Supports <code>startLine/endLine</code> line ranges, an <code>aroundLine</code> window, and <code>maxBytes</code> (defaults to 500KB). Pass <code>symbol</code> to read a specific symbol via AST targeting (degrades to text search without AST). Large full-file reads auto-attach a symbol outline.</div>
+          <div class="more"><div class="mbox">Dispatch: <code>read</code> → <code>workspace_read_file</code> → <code>invoke('read_text_file')</code>. With <code>symbol</code>, first runs <code>extract_file_symbols</code> (AST) to locate the symbol's line range, then slices. Output passes through <code>truncateToolOutput</code>: &gt;30k chars middle-truncated / &gt;50k offloaded to disk + 2k preview / 150k hard cap.</div></div>
         </div>
 
         <div class="item">
@@ -333,17 +333,17 @@
           <div class="more"><div class="mbox">Dispatch: <code>patch</code> → <code>workspace_apply_diff</code>. Re-reads source per file → <code>applySearchReplaceDiff</code> applies sequentially → writes per file + re-read verification → batch <code>notifyWorkspaceMutation</code>.</div></div>
         </div>
 
-        <div class="sublabel"><b>Search</b> Lexical-level search · complements the semantic symbol index (graph lookup)</div>
+        <div class="sublabel"><b>Search</b> Regex + semantic search · grep semantic uses LSP workspace symbol · list embeds per-file AST symbols</div>
 
         <div class="item">
           <div class="row">
             <div class="addr">GREP</div>
-            <div class="name">grep<small>→ workspace_search_text · workspaceTools.ts:2267</small></div>
-            <div class="src"><span class="chip">isRegexp:true</span><span class="chip">smart-case</span></div>
-            <div class="cchip c-text">Plain text</div>
+            <div class="name">grep<small>→ workspace_search_text / workspace_workspace_symbol · workspaceTools.ts:2267</small></div>
+            <div class="src"><span class="chip">isRegexp:true</span><span class="chip">smart-case</span><span class="chip">semantic optional</span></div>
+            <div class="cchip c-mix">Text + LSP</div>
           </div>
-          <div class="desc">Searches file contents by regex, returning match positions and context. <code>contextLines</code> defaults to 0, max 8; <code>maxResults</code> defaults to 80. Purely lexical; does not annotate which symbol a hit belongs to.</div>
-          <div class="more"><div class="mbox">Dispatch: <code>grep</code> → <code>workspace_search_text</code> (forces <code>isRegexp:true</code>). Semantic-level "find symbol" should go through <code>graph action=lookup</code>.</div></div>
+          <div class="desc">Searches file contents by regex, returning match positions and context. <code>contextLines</code> defaults to 0, max 8; <code>maxResults</code> defaults to 80. <code>semantic:true</code> switches to semantic mode (LSP workspace symbol search); degrades to regex with a note when no LSP is available.</div>
+          <div class="more"><div class="mbox">Dispatch: default <code>grep</code> → <code>workspace_search_text</code> (forces <code>isRegexp:true</code>); with <code>semantic:true</code> → <code>workspace_workspace_symbol</code> (LSP), degrades to regex with <code>degraded:true</code> if no LSP.</div></div>
         </div>
 
         <div class="item">
@@ -360,12 +360,12 @@
         <div class="item">
           <div class="row">
             <div class="addr">LIST</div>
-            <div class="name">list<small>→ workspace_list_files / workspace_project_graph · workspaceTools.ts:1917</small></div>
-            <div class="src"><span class="chip">action: files | overview</span><span class="chip">invoke list_workspace_files</span></div>
+            <div class="name">list<small>→ workspace_list_files · workspaceTools.ts:1917</small></div>
+            <div class="src"><span class="chip">invoke list_workspace_files</span><span class="chip">extractSymbols</span></div>
             <div class="cchip c-mix">Text + AST</div>
           </div>
-          <div class="desc"><code>action: files</code> (default) browses the directory tree (<code>maxDepth</code> defaults to 2, max 6); <code>action: overview</code> returns an <b>AST project structure overview</b> (directory tree + symbol skeleton), forwarding to <code>workspace_project_graph(view=overview)</code>. overview is the LLM entry point for the former <code>graph action=overview</code> (graph is now hidden from the LLM).</div>
-          <div class="more"><div class="mbox">Dispatch: <code>list</code> → <code>action=overview</code> ? <code>workspace_project_graph(view=overview)</code> : <code>workspace_list_files</code> → <code>invoke('list_workspace_files')</code>.</div></div>
+          <div class="desc">Browses the directory tree (<code>maxDepth</code> defaults to 2, max 6) and <b>auto-attaches lightweight per-file symbols</b> (top-level symbols per code file, AST-based, up to 40 files / 6 symbols per file). Returns <code>entries</code> (file list) + <code>symbolsByFile</code> (file→symbol summary). Files without AST support return path only (still listed).</div>
+          <div class="more"><div class="mbox">Dispatch: <code>list</code> → <code>workspace_list_files</code> → <code>invoke('list_workspace_files')</code>, then per-code-file <code>extract_file_symbols</code> (AST) extracts top-level symbols into <code>symbolsByFile</code>. No action parameter.</div></div>
         </div>
 
         <div class="item">
@@ -400,7 +400,7 @@
             <div class="src"><span class="chip">14 actions (UI-only)</span><span class="chip">hideFromLlm:3793</span></div>
             <div class="cchip c-ast">UI + AST fallback</div>
           </div>
-          <div class="desc"><b>Now hidden from the LLM (UI-only)</b>. The 14 actions remain: <b>full / overview / lookup / dependency / entrypoints / impact / implementations / smart_context</b> + 6 analyses (<b>dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests</b>). The fine-grained handlers stay registered, serving UI panels and acting as the <b>AST fallback backend</b> for <code>lsp</code> point queries; the project structure overview is now exposed to the LLM via <code>list(action: overview)</code>.</div>
+          <div class="desc"><b>Now hidden from the LLM (UI-only)</b>. The 14 actions remain: <b>full / overview / lookup / dependency / entrypoints / impact / implementations / smart_context</b> + 6 analyses (<b>dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests</b>). The fine-grained handlers stay registered, serving UI panels and acting as the <b>AST fallback backend</b> for <code>lsp</code> point queries; the project structure is now exposed to the LLM via <code>list</code> (directory tree + per-file lightweight symbols).</div>
           <div class="more"><div class="mbox">Build chain: <code>list_workspace_files</code> → per-file <code>read_text_file</code> → LSP documentSymbol coverage → <code>buildWorkspaceProjectMap</code> → <code>buildWorkspaceProjectGraph</code> → LSP edge enrichment. <b>Full rebuild on every call, zero caching</b> (hence only used as fallback/UI, not the main path). Symbols go through <code>UnifiedSymbolDispatcher.extractSymbols</code> (lsp→ast→regex degradation).</div></div>
         </div>
 
@@ -623,12 +623,12 @@
     <div class="sub">Why "tools are bloated and LSP/AST aren't wired well" — the starting point for refactoring.</div>
     <div class="ledger">
       <div class="led">
-        <div class="no">F·01</div><h5>degradation chain wired into lsp point queries (refactored)</h5>
-        <p>The <code>lsp→ast→regex</code> degradation in <code>UnifiedSymbolDispatcher</code> (with Rust symbol_provider.rs as the engine) originally only served project-map symbol extraction. <b>Now extended</b>: the 9 navigation actions of <code>lsp</code> degrade to the AST project graph via <code>astFallback</code> (workspaceTools.ts:2930) when LSP is unavailable/returns nothing, tagged with source/confidence. <b>read/write/edit/patch are still not wired</b> to language intelligence.</p>
+        <div class="no">F·01</div><h5>degradation chain wired into lsp point queries + file ops (refactored)</h5>
+        <p>The <code>lsp→ast→regex</code> degradation in <code>UnifiedSymbolDispatcher</code> (with Rust symbol_provider.rs as the engine) originally only served project-map symbol extraction. <b>Now extended</b>: the 9 navigation actions of <code>lsp</code> degrade to the AST project graph via <code>astFallback</code> (workspaceTools.ts:2930) when LSP is unavailable/returns nothing, tagged with source/confidence. <code>read</code>'s <code>symbol</code> param uses AST targeting, <code>list</code> runs per-file extractSymbols, <code>grep semantic:true</code> uses LSP workspace symbol. <b>Only write/edit/patch remain plain-text</b>.</p>
       </div>
       <div class="led">
-        <div class="no">F·02</div><h5>read is dumb</h5>
-        <p><code>workspace_read_file</code> directly <code>invoke('read_text_file')</code> returns plain text (workspaceTools.ts:1913). It doesn't distinguish file types, gives no symbol outline, and doesn't tell the LLM where this file sits in the dependency graph.</p>
+        <div class="no">F·02</div><h5>read is now AST-aware (refactored)</h5>
+        <p><code>workspace_read_file</code> with <code>symbol</code> first runs <code>extract_file_symbols</code> (AST) to locate the symbol's line range, then slices; degrades to text search without AST support. Full-file reads over 300 lines auto-attach a symbol outline (workspaceTools.ts:1913).</p>
       </div>
       <div class="led">
         <div class="no">F·03</div><h5>no feedback loop after a change</h5>
@@ -644,7 +644,7 @@
       </div>
       <div class="led">
         <div class="no">F·06</div><h5>overlapping mental models (consolidated)</h5>
-        <p>The former read / graph(overview) / list all returned structure, graph(lookup) and lsp(definition) were both "finding symbols", and graph(impact)=dependency(incoming) had overlapping responsibilities—<b>now consolidated</b>: <code>graph</code> is hidden from the LLM, project structure goes to <code>list(action: overview)</code>, and point queries (definition/references/implementation/call hierarchy) are unified into <code>lsp</code>, which degrades to AST internally as needed. The LLM faces a single <code>lsp</code> tool, with no need to arbitrate between overlapping tools.</p>
+        <p>The former read / graph(overview) / list all returned structure, graph(lookup) and lsp(definition) were both "finding symbols", and graph(impact)=dependency(incoming) had overlapping responsibilities—<b>now consolidated</b>: <code>graph</code> is hidden from the LLM, project structure goes to <code>list</code> (directory tree + per-file lightweight symbols), and point queries (definition/references/implementation/call hierarchy) are unified into <code>lsp</code>, which degrades to AST internally as needed. The LLM faces a single <code>lsp</code> tool, with no need to arbitrate between overlapping tools.</p>
       </div>
     </div>
   </section>

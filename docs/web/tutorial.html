@@ -906,9 +906,9 @@ https://api.deepseek.com/v1</code></pre>
             <tr><td><code>write</code></td><td>创建或完整覆盖写入文件；局部修改请用 edit</td></tr>
             <tr><td><code>edit</code></td><td>单文件精确 SEARCH/REPLACE 修改；search 必须精确匹配源文件</td></tr>
             <tr><td><code>patch</code></td><td>多文件原子 SEARCH/REPLACE；全部校验成功后一起写入，任一失败即回滚</td></tr>
-            <tr><td><code>grep</code></td><td>正则搜索文件内容，返回匹配位置与上下文</td></tr>
+            <tr><td><code>grep</code></td><td>正则搜索文件内容，返回匹配位置与上下文；<code>semantic:true</code> 切换 LSP 语义检索</td></tr>
             <tr><td><code>glob</code></td><td>按文件名 glob 模式搜索项目文件，支持正则合并</td></tr>
-            <tr><td><code>list</code></td><td>浏览项目目录树结构，支持递归深度控制</td></tr>
+            <tr><td><code>list</code></td><td>浏览项目目录树，逐文件嵌入轻量符号（AST）；无 AST 语言仅返回路径</td></tr>
           </tbody>
         </table>
 

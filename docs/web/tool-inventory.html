@@ -253,7 +253,7 @@
   <div class="container">
     <div class="section-label"><span class="dot"></span> TOOL SURFACE · LSP / AST 盘点</div>
     <h1>工具全景 · <span class="gradient">两层架构 × 语言智能</span></h1>
-    <p>CodePapr 对 LLM 暴露 <strong>25 个合并工具</strong>（<code>graph</code> 已转 UI-only），经分发器路由到 <strong>61 个细粒度 workspace_* 工具</strong>（对 LLM 隐藏），最终落到 Tauri / Rust 后端。代码智能（<code>lsp</code> 的 9 个导航 action）已接入 <strong>LSP → AST 项目图</strong> 降级，并以 <code>source</code>/<code>confidence</code> 标注精度；<code>list(action: overview)</code> 提供 AST 项目结构概览。文件读写改（read / write / edit / patch）尚未利用语言智能。点击任意条目展开分发链路与接入现状。</p>
+    <p>CodePapr 对 LLM 暴露 <strong>25 个合并工具</strong>（<code>graph</code> 已转 UI-only），经分发器路由到 <strong>61 个细粒度 workspace_* 工具</strong>（对 LLM 隐藏），最终落到 Tauri / Rust 后端。代码智能（<code>lsp</code> 的 9 个导航 action）已接入 <strong>LSP → AST 项目图</strong> 降级，并以 <code>source</code>/<code>confidence</code> 标注精度；<code>list</code> 浏览目录树并逐文件嵌入轻量符号（AST）；<code>read</code> 支持 <code>symbol</code> 参数按 AST 定位符号读取，大文件自动附带符号大纲；<code>grep</code> 支持 <code>semantic:true</code> 切换 LSP workspace symbol 语义检索。仅 write / edit / patch 仍为纯文本操作。点击任意条目展开分发链路与接入现状。</p>
     <div class="legend">
       <span class="lg"><i style="background:var(--green)"></i>LSP 接入</span>
       <span class="lg"><i style="background:var(--amber)"></i>AST 接入</span>
@@ -267,7 +267,7 @@
       <div class="stat-card"><div class="num n-amber">15</div><div class="cap">真实 LSP 语言<br>Rust symbol_provider.rs</div></div>
       <div class="stat-card"><div class="num n-violet">17</div><div class="cap">AST 语言<br>tree-sitter</div></div>
       <div class="stat-card"><div class="num n-teal">11</div><div class="cap">regex 兜底语言</div></div>
-      <div class="stat-card"><div class="num n-orange">0</div><div class="cap">read/write/edit/patch<br>接入 LSP/AST 的数量</div></div>
+      <div class="stat-card"><div class="num n-orange">3</div><div class="cap">read/grep/list<br>接入 LSP/AST 的数量</div></div>
     </div>
   </div>
 </section>
@@ -282,22 +282,22 @@
           <div class="idx">01</div>
           <div class="tt">
             <h3>File Ops <span>文件操作</span></h3>
-            <div class="tags"><span class="tag">read / write / edit / patch</span><span class="tag">grep / glob / list</span><span class="tag">全部纯文本</span></div>
+            <div class="tags"><span class="tag">read / write / edit / patch</span><span class="tag">grep / glob / list</span><span class="tag">read·grep·list 已接入 AST/LSP</span></div>
           </div>
-          <div class="hz"><b>改造目标</b>尚未接入 LSP/AST</div>
+          <div class="hz"><b>已部分改造</b>read·grep·list 接入 LSP/AST</div>
         </div>
 
-        <div class="sublabel"><b>读写改</b> 直接操作文件内容 · 均为纯文本语义</div>
+        <div class="sublabel"><b>读写改</b> 直接操作文件内容 · write/edit/patch 纯文本语义 · read 已接入 AST</div>
 
         <div class="item">
           <div class="row">
             <div class="addr">READ</div>
             <div class="name">read<small>→ workspace_read_file · workspaceTools.ts:1913</small></div>
-            <div class="src"><span class="chip">invoke read_text_file</span><span class="chip">Rust read.rs:42</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="src"><span class="chip">invoke read_text_file</span><span class="chip">Rust read.rs:42</span><span class="chip">symbol AST 定位</span></div>
+            <div class="cchip c-mix">文本 + AST</div>
           </div>
-          <div class="desc">读取项目文件原文。支持 <code>startLine/endLine</code> 行范围、<code>aroundLine</code> 窗口、<code>maxBytes</code>（原始读取默认 500KB）。<b>完全不知道 LSP/AST 存在</b>，返回纯文本，进上下文前被截断层钳制。</div>
-          <div class="more"><div class="mbox">分发：<code>read</code> → <code>workspace_read_file</code> → <code>invoke('read_text_file')</code>。输出经 <code>truncateToolOutput</code>：&gt;30k 字符中间截断 / &gt;50k 落盘 + 2k 预览 / 150k 硬顶。无符号大纲、无所属文件结构信息。</div></div>
+          <div class="desc">读取项目文件。支持 <code>startLine/endLine</code> 行范围、<code>aroundLine</code> 窗口、<code>maxBytes</code>（默认 500KB）。传 <code>symbol</code> 参数可按 AST 定位符号精确读取（无 AST 时降级文本搜索）。整文件读取较大文件时自动附带符号大纲。</div>
+          <div class="more"><div class="mbox">分发：<code>read</code> → <code>workspace_read_file</code> → <code>invoke('read_text_file')</code>。传 <code>symbol</code> 时先 <code>extract_file_symbols</code>（AST）定位符号行范围再切片返回。输出经 <code>truncateToolOutput</code>：&gt;30k 字符中间截断 / &gt;50k 落盘 + 2k 预览 / 150k 硬顶。</div></div>
         </div>
 
         <div class="item">
@@ -333,17 +333,17 @@
           <div class="more"><div class="mbox">分发：<code>patch</code> → <code>workspace_apply_diff</code>。逐文件重读原文 → <code>applySearchReplaceDiff</code> 顺序应用 → 逐文件写入 + 重读校验 → 批量 <code>notifyWorkspaceMutation</code>。</div></div>
         </div>
 
-        <div class="sublabel"><b>检索</b> 词法级搜索 · 与语义符号索引（graph lookup）互补</div>
+        <div class="sublabel"><b>检索</b> 正则 + 语义搜索 · grep semantic 走 LSP workspace symbol · list 逐文件 AST 符号</div>
 
         <div class="item">
           <div class="row">
             <div class="addr">GREP</div>
-            <div class="name">grep<small>→ workspace_search_text · workspaceTools.ts:2267</small></div>
-            <div class="src"><span class="chip">isRegexp:true</span><span class="chip">smart-case</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="name">grep<small>→ workspace_search_text / workspace_workspace_symbol · workspaceTools.ts:2267</small></div>
+            <div class="src"><span class="chip">isRegexp:true</span><span class="chip">smart-case</span><span class="chip">semantic 可选</span></div>
+            <div class="cchip c-mix">文本 + LSP</div>
           </div>
-          <div class="desc">按正则搜索文件内容，返回匹配位置与上下文。<code>contextLines</code> 默认 0 最大 8，<code>maxResults</code> 默认 80。纯词法，不标注命中所属符号。</div>
-          <div class="more"><div class="mbox">分发：<code>grep</code> → <code>workspace_search_text</code>（强制 <code>isRegexp:true</code>）。语义级"找符号"应走 <code>graph action=lookup</code>。</div></div>
+          <div class="desc">按正则搜索文件内容，返回匹配位置与上下文。<code>contextLines</code> 默认 0 最大 8，<code>maxResults</code> 默认 80。<code>semantic:true</code> 切换语义模式（LSP workspace symbol 检索），无 LSP 时降级正则并告知。</div>
+          <div class="more"><div class="mbox">分发：默认 <code>grep</code> → <code>workspace_search_text</code>（强制 <code>isRegexp:true</code>）；<code>semantic:true</code> 时 → <code>workspace_workspace_symbol</code>（LSP），无 LSP 则降级正则并返回 <code>degraded:true</code>。</div></div>
         </div>
 
         <div class="item">
@@ -360,12 +360,12 @@
         <div class="item">
           <div class="row">
             <div class="addr">LIST</div>
-            <div class="name">list<small>→ workspace_list_files / workspace_project_graph · workspaceTools.ts:1917</small></div>
-            <div class="src"><span class="chip">action: files | overview</span><span class="chip">invoke list_workspace_files</span></div>
+            <div class="name">list<small>→ workspace_list_files · workspaceTools.ts:1917</small></div>
+            <div class="src"><span class="chip">invoke list_workspace_files</span><span class="chip">extractSymbols</span></div>
             <div class="cchip c-mix">文本 + AST</div>
           </div>
-          <div class="desc"><code>action: files</code>（默认）浏览目录树（<code>maxDepth</code> 默认 2 最大 6）；<code>action: overview</code> 返回 <b>AST 项目结构概览</b>（目录树 + 符号骨架），转发 <code>workspace_project_graph(view=overview)</code>。overview 是原 <code>graph action=overview</code> 的 LLM 入口（graph 已对 LLM 隐藏）。</div>
-          <div class="more"><div class="mbox">分发：<code>list</code> → <code>action=overview</code> ? <code>workspace_project_graph(view=overview)</code> : <code>workspace_list_files</code> → <code>invoke('list_workspace_files')</code>。</div></div>
+          <div class="desc">浏览目录树（<code>maxDepth</code> 默认 2 最大 6），并<b>自动附带逐文件轻量符号</b>（每个代码文件的顶层符号，AST 实现，最多 40 个文件、每文件 6 个符号）。返回 <code>entries</code>（文件列表）+ <code>symbolsByFile</code>（文件→符号摘要）。无 AST 支持的文件仅返回路径（文件仍列出）。</div>
+          <div class="more"><div class="mbox">分发：<code>list</code> → <code>workspace_list_files</code> → <code>invoke('list_workspace_files')</code>，再对代码文件逐个 <code>extract_file_symbols</code>（AST）提取顶层符号附带到 <code>symbolsByFile</code>。无 action 参数。</div></div>
         </div>
 
         <div class="item">
@@ -400,7 +400,7 @@
             <div class="src"><span class="chip">14 个 action（UI-only）</span><span class="chip">hideFromLlm:3793</span></div>
             <div class="cchip c-ast">UI + AST 兜底</div>
           </div>
-          <div class="desc"><b>已对 LLM 隐藏（UI-only）</b>。14 个 action 仍在：<b>full / overview / lookup / dependency / entrypoints / impact / implementations / smart_context</b> + 6 个分析（<b>dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests</b>）。细粒度 handler 保留注册，服务 UI 面板并作为 <code>lsp</code> 点查询的 <b>AST 兜底后端</b>；项目结构概览改由 <code>list(action: overview)</code> 对 LLM 暴露。</div>
+          <div class="desc"><b>已对 LLM 隐藏（UI-only）</b>。14 个 action 仍在：<b>full / overview / lookup / dependency / entrypoints / impact / implementations / smart_context</b> + 6 个分析（<b>dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests</b>）。细粒度 handler 保留注册，服务 UI 面板并作为 <code>lsp</code> 点查询的 <b>AST 兜底后端</b>；项目结构改由 <code>list</code>（目录树 + 逐文件轻量符号）对 LLM 暴露。</div>
           <div class="more"><div class="mbox">构建链：<code>list_workspace_files</code> → 逐文件 <code>read_text_file</code> → LSP documentSymbol 覆盖 → <code>buildWorkspaceProjectMap</code> → <code>buildWorkspaceProjectGraph</code> → LSP 边增强。<b>每次调用全量重建，零缓存</b>（故仅作兜底/UI，不作主路径）。符号经 <code>UnifiedSymbolDispatcher.extractSymbols</code>（lsp→ast→regex 降级）。</div></div>
         </div>
 
@@ -623,12 +623,12 @@
     <div class="sub">为什么"工具臃肿、没接好 LSP/AST"——改造的出发点。</div>
     <div class="ledger">
       <div class="led">
-        <div class="no">F·01</div><h5>降级链已接入 lsp 点查询（已改造）</h5>
-        <p><code>UnifiedSymbolDispatcher</code> 的 <code>lsp→ast→regex</code> 降级（Rust symbol_provider.rs 为引擎）原本只服务 project-map 符号提取。<b>现已扩展</b>：<code>lsp</code> 的 9 个导航 action 在 LSP 不可用/无结果时经 <code>astFallback</code>（workspaceTools.ts:2930）降级到 AST 项目图，并以 source/confidence 标注。<b>read/write/edit/patch 仍未接入</b>语言智能。</p>
+        <div class="no">F·01</div><h5>降级链已接入 lsp 点查询 + 文件操作（已改造）</h5>
+        <p><code>UnifiedSymbolDispatcher</code> 的 <code>lsp→ast→regex</code> 降级（Rust symbol_provider.rs 为引擎）原本只服务 project-map 符号提取。<b>现已扩展</b>：<code>lsp</code> 的 9 个导航 action 在 LSP 不可用/无结果时经 <code>astFallback</code>（workspaceTools.ts:2930）降级到 AST 项目图，并以 source/confidence 标注。<code>read</code> 的 <code>symbol</code> 参数用 AST 定位符号、<code>list</code> 逐文件 extractSymbols、<code>grep semantic:true</code> 走 LSP workspace symbol。<b>仅 write/edit/patch 仍为纯文本</b>。</p>
       </div>
       <div class="led">
-        <div class="no">F·02</div><h5>read 是哑的</h5>
-        <p><code>workspace_read_file</code> 直接 <code>invoke('read_text_file')</code> 返回纯文本（workspaceTools.ts:1913）。不辨文件类型、不给符号大纲、不告诉 LLM 这个文件在依赖图里的位置。</p>
+        <div class="no">F·02</div><h5>read 已接入 AST（已改造）</h5>
+        <p><code>workspace_read_file</code> 传 <code>symbol</code> 时先 <code>extract_file_symbols</code>（AST）定位符号行范围再切片返回；无 AST 支持时降级文本搜索。整文件读取超 300 行自动附带符号大纲（workspaceTools.ts:1913）。</p>
       </div>
       <div class="led">
         <div class="no">F·03</div><h5>改完没有反馈回路</h5>
@@ -644,7 +644,7 @@
       </div>
       <div class="led">
         <div class="no">F·06</div><h5>重叠的心智模型（已收敛）</h5>
-        <p>原 read / graph(overview) / list 都返回结构、graph(lookup) 与 lsp(definition) 都在"找符号"、graph(impact)=dependency(incoming) 的职责重叠，<b>现已收敛</b>：<code>graph</code> 对 LLM 隐藏，项目结构归 <code>list(action: overview)</code>，点查询（定义/引用/实现/调用层级）统一进 <code>lsp</code> 并按需内部降级 AST。LLM 面对单一 <code>lsp</code> 工具，无需在重叠工具间裁决。</p>
+        <p>原 read / graph(overview) / list 都返回结构、graph(lookup) 与 lsp(definition) 都在"找符号"、graph(impact)=dependency(incoming) 的职责重叠，<b>现已收敛</b>：<code>graph</code> 对 LLM 隐藏，项目结构归 <code>list</code>（目录树 + 逐文件轻量符号），点查询（定义/引用/实现/调用层级）统一进 <code>lsp</code> 并按需内部降级 AST。LLM 面对单一 <code>lsp</code> 工具，无需在重叠工具间裁决。</p>
       </div>
     </div>
   </section>

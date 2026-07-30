@@ -906,9 +906,9 @@ After the change, at least run verification for the affected scope; if no narrow
             <tr><td><code>write</code></td><td>Create or fully overwrite a file; use edit for partial modifications</td></tr>
             <tr><td><code>edit</code></td><td>Single-file precise SEARCH/REPLACE modification; search must exactly match source file</td></tr>
             <tr><td><code>patch</code></td><td>Multi-file atomic SEARCH/REPLACE; all blocks validated successfully before writing together; any failure rolls back all</td></tr>
-            <tr><td><code>grep</code></td><td>Regex search file contents; returns match locations with context</td></tr>
+            <tr><td><code>grep</code></td><td>Regex search file contents; returns match locations with context; <code>semantic:true</code> switches to LSP semantic search</td></tr>
             <tr><td><code>glob</code></td><td>Search project files by filename glob patterns; supports regex union</td></tr>
-            <tr><td><code>list</code></td><td>Browse project directory tree structure; supports recursive depth control</td></tr>
+            <tr><td><code>list</code></td><td>Browse project directory tree, embeds lightweight per-file symbols (AST); no-AST languages return path only</td></tr>
           </tbody>
         </table>
 

@@ -9,7 +9,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 1. read ────
   {
     name: 'read',
-    description: '读取项目文件。支持行范围（startLine/endLine）、行窗口（aroundLine）、上下文行数（contextLines）、字节限制（maxBytes）。',
+    description: '读取项目文件。支持行范围（startLine/endLine）、行窗口（aroundLine）、上下文行数（contextLines）、字节限制（maxBytes）。传 symbol 可按符号名（函数/类等）精确读取该符号代码（AST 定位，无 AST 时降级文本搜索）。整文件读取较大文件时会自动附带符号大纲。',
     parameters: {
       type: 'object',
       properties: {
@@ -19,6 +19,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
         endLine: { type: 'number', description: '结束行号（1-based）。' },
         aroundLine: { type: 'number', description: '以指定行号为中心读取窗口。' },
         contextLines: { type: 'number', description: 'aroundLine 前后各保留多少行，默认 20。' },
+        symbol: { type: 'string', description: '可选。按符号名（函数/类等）精确读取该符号代码片段（AST 定位）。传入后忽略 startLine/endLine/aroundLine。' },
       },
       required: ['relativePath'],
     },
@@ -81,11 +82,13 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 5. grep ────
   {
     name: 'grep',
-    description: '按正则表达式搜索项目文件内容，返回匹配位置与上下文。',
+    description: '按正则表达式搜索项目文件内容，返回匹配位置与上下文。semantic:true 切换语义模式（LSP workspace symbol 检索），无 LSP 时降级正则并告知。',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '正则表达式。' },
+        query: { type: 'string', description: '正则表达式（默认模式）或符号名（语义模式）。' },
+        semantic: { type: 'boolean', description: '设为 true 则使用 LSP workspace symbol 语义检索；无 LSP 时降级正则搜索。' },
+        relativePath: { type: 'string', description: '语义模式下的锚点文件路径，用于确定语言服务器。' },
         caseSensitive: { type: 'boolean', description: '区分大小写；默认 smart-case。' },
         contextLines: { type: 'number', description: '匹配前后额外返回多少行上下文，默认 0，最大 8。' },
         maxResults: { type: 'number', description: '最多返回多少条匹配，默认 80。' },
@@ -111,12 +114,11 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 7. list ────
   {
     name: 'list',
-    description: 'action: files(默认，浏览目录树)|overview(项目结构概览：目录树+代码符号骨架，AST 实现，无需 LSP)。',
+    description: '浏览目录树，返回文件/目录列表。对代码文件会自动附带轻量符号大纲（顶层符号，AST 实现），便于快速了解各文件内容。',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['files', 'overview'] },
-        relativePath: { type: 'string', description: '子目录路径；省略则列出项目根目录。overview 时用于限定概览范围。' },
+        relativePath: { type: 'string', description: '子目录路径；省略则列出项目根目录。' },
         maxDepth: { type: 'number', description: '递归深度，默认 2，最大 6。' },
       },
     },

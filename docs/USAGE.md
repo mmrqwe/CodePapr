@@ -303,13 +303,13 @@ Hover 任意用户消息 → 下方出现"重置到此点"和"复制"按钮：
 
 整理用快速模型对记忆做去重、合并、精简，写回文件；失败时降级为规则去重（按标题去重 + 按日期保留最近的）。整理是 fire-and-forget 的，不阻塞当前会话，收益在下次启动生效。
 
-## 代码智能（lsp / list overview）
+## 代码智能（lsp / list）
 
-LLM 侧的代码智能由 `lsp` 工具与 `list(action: overview)` 承担。
+LLM 侧的代码智能由 `lsp` 工具与 `list`（目录树 + 逐文件轻量符号）承担。
 
 **lsp 导航（9 个 action，LSP 优先、AST 项目图兜底，结果带 source/confidence）**：`goToDefinition`（跳转定义）、`findReferences`（查找引用）、`hover`（类型/文档信息）、`documentSymbol`（文件符号大纲）、`workspaceSymbol`（工作区符号检索）、`goToImplementation`（跳转实现）、`prepareCallHierarchy`（调用层级项）、`incomingCalls`（入调用）、`outgoingCalls`（出调用）。LSP 不可用或无结果时自动降级到 AST 项目图，结果以 `source`（lsp/ast）与 `confidence`（high/medium/low）标注精度。
 
-**项目结构概览**：`list(action: overview)` 返回 AST 项目结构概览（目录树 + 符号骨架）；`list()` 默认（`action: files`）浏览目录树。
+**项目结构**：`list` 浏览目录树并自动附带逐文件轻量符号（每个代码文件的顶层符号，AST 实现，无需 LSP）。
 
 > `graph` 工具（full / lookup / dependency / impact / implementations / entrypoints / smart_context / dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests 等 14 个 action）现已**对 LLM 隐藏**，仅供 UI 面板与作为 `lsp` 点查询的 AST 兜底后端。
 

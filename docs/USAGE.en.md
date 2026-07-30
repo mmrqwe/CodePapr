@@ -264,13 +264,13 @@ Each entry starts with `## YYYY-MM-DD Topic` and is manually editable.
 
 Consolidation uses the fast model to deduplicate, merge, and compress memory, writing back to file. On failure, it degrades to rule-based dedup (by title + keep latest by date). Consolidation is fire-and-forget; the current session uses old memory, benefits apply on next startup.
 
-## Code Intelligence (lsp / list overview)
+## Code Intelligence (lsp / list)
 
-LLM-facing code intelligence is provided by the `lsp` tool and `list(action: overview)`.
+LLM-facing code intelligence is provided by the `lsp` tool and `list` (directory tree + per-file lightweight symbols).
 
 **lsp navigation (9 actions, LSP-first with AST project-graph fallback, results tagged with source/confidence)**: `goToDefinition` (jump to definition), `findReferences` (find references), `hover` (type/documentation info), `documentSymbol` (file symbol outline), `workspaceSymbol` (workspace symbol search), `goToImplementation` (jump to implementation), `prepareCallHierarchy` (call hierarchy item), `incomingCalls` (incoming calls), `outgoingCalls` (outgoing calls). When LSP is unavailable or returns nothing, it automatically degrades to the AST project graph; results are tagged with `source` (lsp/ast) and `confidence` (high/medium/low).
 
-**Project structure overview**: `list(action: overview)` returns an AST project structure overview (directory tree + symbol skeleton); `list()` defaults to (`action: files`) directory-tree browsing.
+**Project structure**: `list` browses the directory tree and automatically attaches lightweight per-file symbols (top-level symbols per code file, AST-based, no LSP needed).
 
 > The `graph` tool (full / lookup / dependency / impact / implementations / entrypoints / smart_context / dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests — 14 actions) is now **hidden from the LLM**, serving only UI panels and acting as the AST fallback backend for `lsp` point queries.
 

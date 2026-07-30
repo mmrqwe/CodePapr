@@ -754,10 +754,10 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
   if (hasTool(toolNames, 'list') && !isApp) {
     highPriority.push(
       lang === 'en'
-        ? '- [list] `list(action: overview)` gives the project structure map (directory tree + symbol skeleton, AST-based, no LSP needed) — get the map before acting instead of reading files blindly.'
+        ? '- [list] `list` gives the directory tree with lightweight per-file symbols (top-level symbols per code file, AST-based, no LSP needed) — get the map before acting instead of reading files blindly.'
         : lang === 'zh-TW'
-        ? '- [list] `list(action: overview)` 取得專案結構地圖（目錄樹+符號骨架，AST 實現，無需 LSP）——先拿地圖再行動，不要盲讀檔案。'
-        : '- [list] `list(action: overview)` 取得项目结构地图（目录树+符号骨架，AST 实现，无需 LSP）——先拿地图再行动，不要盲读文件。'
+        ? '- [list] `list` 取得目錄樹並附帶逐文件輕量符號（每個代碼文件的頂層符號，AST 實現，無需 LSP）——先拿地圖再行動，不要盲讀檔案。'
+        : '- [list] `list` 取得目录树并附带逐文件轻量符号（每个代码文件的顶层符号，AST 实现，无需 LSP）——先拿地图再行动，不要盲读文件。'
     );
   }
   if (hasTool(toolNames, 'lsp') && !isApp) {
