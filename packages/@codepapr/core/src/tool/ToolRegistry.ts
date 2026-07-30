@@ -13,6 +13,7 @@ export type ToolHandler = (args: Record<string, unknown>) => Promise<unknown> | 
 export class ToolRegistry {
   private tools: Map<string, IToolDefinition> = new Map();
   private handlers: Map<string, ToolHandler> = new Map();
+  private llmHiddenTools: Set<string> = new Set();
   private frozen: boolean = false;
   private frozenHash: string | null = null;
 
@@ -56,6 +57,15 @@ export class ToolRegistry {
     return [...this.tools.values()];
   }
 
+  /**
+   * 仅返回对主代理 LLM 可见的工具：排除被 hideFromLlm（已删除）与 softHideFromLlm（软隐藏）的工具。
+   * 用于构建主代理的工具集；子代理白名单过滤仍用 getAll()，可选取软隐藏的工具（如 graph）。
+   */
+  getLlmTools(): IToolDefinition[] {
+    if (this.llmHiddenTools.size === 0) return [...this.tools.values()];
+    return [...this.tools.values()].filter((tool) => !this.llmHiddenTools.has(tool.name));
+  }
+
   get(name: string): IToolDefinition | undefined {
     return this.tools.get(name);
   }
@@ -69,6 +79,15 @@ export class ToolRegistry {
   hideFromLlm(name: string): void {
     if (this.frozen) throw new CacheConsistencyError(`Cannot hide tool "${name}" after registry is frozen`);
     this.tools.delete(name);
+  }
+
+  /**
+   * 软隐藏：工具定义与 handler 均保留（getAll()/execute() 仍可用，供子代理白名单选取与执行），
+   * 但从主代理的 getLlmTools() 中排除。用于 graph——主代理不可见，子代理（如 Explore）可选取。
+   */
+  softHideFromLlm(name: string): void {
+    if (this.frozen) throw new CacheConsistencyError(`Cannot hide tool "${name}" after registry is frozen`);
+    this.llmHiddenTools.add(name);
   }
 
   has(name: string): boolean {

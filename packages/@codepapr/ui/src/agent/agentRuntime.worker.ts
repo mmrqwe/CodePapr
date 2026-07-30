@@ -14,6 +14,7 @@ import {
   ToolRegistry,
   filterToolsForAgent,
   buildTaskToolDefinition,
+  MERGE_TOOL_DEFINITIONS,
   type AgentDefinition,
   type SubagentSessionResult,
   type ToolOutputTruncationOptions,
@@ -605,6 +606,17 @@ function createRegistry(
     });
   }
 
+  // graph 对主代理软隐藏（不在 payload.toolDefinitions 的主代理 LLM 工具集中），但子代理（如 Explore）
+  // 可能经白名单选取它。这里补注册一个代理 handler，使子代理过滤（getAll）与执行可用；主代理前缀用 getLlmTools() 排除。
+  if (!registry.has('graph')) {
+    const graphDef = MERGE_TOOL_DEFINITIONS.find((t) => t.name === 'graph');
+    if (graphDef) {
+      registry.register(graphDef, async (args) => {
+        return await requestToolExecution(requestId, 'graph', args, toolIpcTimeoutMs);
+      });
+    }
+  }
+
   if (includeTaskTool && (payload.runtime.agentDefinitions?.length ?? 0) > 0) {
     const definition = buildTaskToolDefinition(payload.runtime.agentDefinitions ?? [], payload.runtime.lang);
     if (!definition) {
@@ -986,7 +998,7 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
   const startIndex = payload.messages.length;
   const prefix = new ImmutablePrefix({
     systemPrompt: payload.systemPrompt,
-    tools: registry.getAll(),
+    tools: registry.getLlmTools(),
     model: payload.model,
     parameters: {
       temperature: payload.parameters.temperature,

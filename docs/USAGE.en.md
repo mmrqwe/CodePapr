@@ -164,7 +164,7 @@ Full parameter reference: `packages/@codepapr/core/docs/CONFIGURATION.md`.
 
 | Agent | Purpose | Model | Tools |
 |-------|------|------|------|
-| **explore** | Read-only code analysis | fast | read, read_image, list, lsp, diagnostics, grep |
+| **explore** | Read-only code analysis | fast | read, read_image, list, graph, glob, lsp, diagnostics, grep |
 | **scout** | Web search + download | fast | websearch, webfetch, browser, read_image |
 | **mentor** | Architecture/algorithm guidance | Configurable independent model | None |
 
@@ -272,7 +272,7 @@ LLM-facing code intelligence is provided by the `lsp` tool and `list` (directory
 
 **Project structure**: `list` browses the directory tree and automatically attaches lightweight per-file symbols (top-level symbols per code file, AST-based, no LSP needed).
 
-> The `graph` tool (full / lookup / dependency / impact / implementations / entrypoints / smart_context / dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests — 14 actions) is now **hidden from the LLM**, serving only UI panels and acting as the AST fallback backend for `lsp` point queries.
+> The `graph` tool (full / lookup / dependency / impact / implementations / entrypoints / smart_context / dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests — 14 actions) is **soft-hidden from the main Agent's LLM** — the main Agent uses `list` + `lsp` for structure and navigation, and delegates cross-module dependency/impact analysis to Explore. `graph` is still provided to the Explore sub-agent via allowlist, and serves UI panels and the AST fallback backend for `lsp` point queries.
 
 ## Project-Level Customization
 

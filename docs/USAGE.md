@@ -164,7 +164,7 @@ LLM 可通过 4 个工具管理 app：
 
 | Agent | 用途 | 模型 | 工具 |
 |-------|------|------|------|
-| **explore** | 只读代码分析 | fast | read, read_image, list, lsp, diagnostics, grep |
+| **explore** | 只读代码分析 | fast | read, read_image, list, graph, glob, lsp, diagnostics, grep |
 | **scout** | 网页搜索 + 下载 | fast | websearch, webfetch, browser, read_image |
 | **mentor** | 架构/算法指导 | 可配置独立模型 | 无 |
 
@@ -311,7 +311,7 @@ LLM 侧的代码智能由 `lsp` 工具与 `list`（目录树 + 逐文件轻量�
 
 **项目结构**：`list` 浏览目录树并自动附带逐文件轻量符号（每个代码文件的顶层符号，AST 实现，无需 LSP）。
 
-> `graph` 工具（full / lookup / dependency / impact / implementations / entrypoints / smart_context / dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests 等 14 个 action）现已**对 LLM 隐藏**，仅供 UI 面板与作为 `lsp` 点查询的 AST 兜底后端。
+> `graph` 工具（full / lookup / dependency / impact / implementations / entrypoints / smart_context / dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests 等 14 个 action）对**主代理 LLM 软隐藏**——主代理用 `list` + `lsp` 完成结构与导航，跨模块依赖/影响分析委派给 Explore。`graph` 仍经白名单提供给 Explore 子代理，并供 UI 面板与 `lsp` 点查询的 AST 兜底后端使用。
 
 ## 项目级定制
 

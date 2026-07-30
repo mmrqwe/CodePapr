@@ -330,7 +330,7 @@ function _createLocalAgent(
 
   const prefix = new ImmutablePrefix({
     systemPrompt: composedSystemPrompt,
-    tools: toolRegistry.getAll(),
+    tools: toolRegistry.getLlmTools(),
     model: baseModel,
     parameters: {
       temperature: overrides.temperature ?? settings.temperature,

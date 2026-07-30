@@ -128,10 +128,11 @@
   .tier::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
   .tier.t1::before{background:var(--green)} .tier.t2::before{background:var(--amber)} .tier.t3::before{background:var(--orange)}
   .tier.t4::before{background:var(--accent)} .tier.t5::before{background:var(--violet)} .tier.t6::before{background:var(--teal)}
+  .tier.t7::before{background:#ec4899}
   .tierhead{display:flex;align-items:flex-start;gap:16px;padding:20px 24px 16px;border-bottom:1px dashed var(--border)}
   .tierhead .idx{font-family:var(--font-mono);font-weight:700;font-size:1.9rem;line-height:1}
   .t1 .idx{color:var(--green)} .t2 .idx{color:var(--amber)} .t3 .idx{color:var(--orange)}
-  .t4 .idx{color:var(--accent)} .t5 .idx{color:var(--violet)} .t6 .idx{color:var(--teal)}
+  .t4 .idx{color:var(--accent)} .t5 .idx{color:var(--violet)} .t6 .idx{color:var(--teal)} .t7 .idx{color:#ec4899}
   .tierhead .tt h3{font-size:1.25rem;font-weight:700;letter-spacing:-0.01em}
   .tierhead .tt h3 span{font-weight:400;color:var(--foreground-muted);font-size:0.9rem;margin-left:8px}
   .tierhead .tt .tags{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
@@ -142,10 +143,11 @@
   .t4 .tag{color:var(--accent);background:var(--accent-soft);border-color:transparent}
   .t5 .tag{color:var(--violet);background:rgba(139,92,246,0.12);border-color:transparent}
   .t6 .tag{color:var(--teal);background:rgba(20,184,166,0.12);border-color:transparent}
+  .t7 .tag{color:#ec4899;background:rgba(236,72,153,0.12);border-color:transparent}
   .tierhead .hz{margin-left:auto;text-align:right;font-family:var(--font-mono);font-size:0.7rem;color:var(--foreground-dim);line-height:1.5;white-space:nowrap}
   .tierhead .hz b{display:block;font-size:0.82rem;font-weight:600}
   .t1 .hz b{color:var(--green)} .t2 .hz b{color:var(--amber)} .t3 .hz b{color:var(--orange)}
-  .t4 .hz b{color:var(--accent)} .t5 .hz b{color:var(--violet)} .t6 .hz b{color:var(--teal)}
+  .t4 .hz b{color:var(--accent)} .t5 .hz b{color:var(--violet)} .t6 .hz b{color:var(--teal)} .t7 .hz b{color:#ec4899}
 
   .sublabel{font-family:var(--font-mono);font-size:0.7rem;letter-spacing:.1em;color:var(--foreground-dim);text-transform:uppercase;padding:14px 24px 4px;display:flex;align-items:center;gap:10px}
   .sublabel::after{content:"";flex:1;height:1px;background:var(--border)}
@@ -157,7 +159,7 @@
   @media(max-width:760px){.item{grid-template-columns:52px 1fr}.item .src,.item .desc,.item .more{grid-column:2}}
   .addr{font-family:var(--font-mono);font-size:0.68rem;font-weight:600;letter-spacing:.06em;padding-top:4px}
   .t1 .addr{color:var(--green)} .t2 .addr{color:var(--amber)} .t3 .addr{color:var(--orange)}
-  .t4 .addr{color:var(--accent)} .t5 .addr{color:var(--violet)} .t6 .addr{color:var(--teal)}
+  .t4 .addr{color:var(--accent)} .t5 .addr{color:var(--violet)} .t6 .addr{color:var(--teal)} .t7 .addr{color:#ec4899}
   .name{font-weight:600;font-size:0.98rem}
   .name small{display:block;font-weight:400;color:var(--foreground-dim);font-size:0.74rem;margin-top:2px;font-family:var(--font-mono)}
   .src{font-family:var(--font-mono);font-size:0.72rem;color:var(--foreground-muted);line-height:1.8;padding-top:2px}
@@ -238,7 +240,7 @@
       <li><a href="#fileops">文件操作</a></li>
       <li><a href="#intel">代码智能</a></li>
       <li><a href="#cmd">命令·Git·Web</a></li>
-      <li><a href="#mechanisms">现状机制</a></li>
+      <li><a href="#agents">Agent 工具集</a></li>
       <li><a href="#pipeline">分发链路</a></li>
       <li><a href="tool-inventory.en.html">EN</a></li>
     </ul>
@@ -396,11 +398,11 @@
         <div class="item">
           <div class="row">
             <div class="addr">GRAPH</div>
-            <div class="name">graph<small>→ workspace_project_graph 等 · workspaceTools.ts:3204 · <b>对 LLM 隐藏</b></small></div>
-            <div class="src"><span class="chip">14 个 action（UI-only）</span><span class="chip">建图缓存 TTL 60s</span><span class="chip">hideFromLlm:4200</span></div>
-            <div class="cchip c-ast">UI + AST 兜底</div>
+            <div class="name">graph<small>→ workspace_project_graph 等 · workspaceTools.ts:3204 · <b>主代理软隐藏 · Explore 可用</b></small></div>
+            <div class="src"><span class="chip">14 个 action</span><span class="chip">建图缓存 TTL 60s</span><span class="chip">softHideFromLlm:4200</span></div>
+            <div class="cchip c-ast">Explore + UI + AST 兜底</div>
           </div>
-          <div class="desc"><b>已对 LLM 隐藏（UI-only）</b>。14 个 action 仍在：<b>full / overview / lookup / dependency / entrypoints / impact / implementations / smart_context</b> + 6 个分析（<b>dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests</b>）。细粒度 handler 保留注册，服务 UI 面板并作为 <code>lsp</code> 点查询的 <b>AST 兜底后端</b>；项目结构改由 <code>list</code>（目录树 + 逐文件轻量符号）对 LLM 暴露。</div>
+          <div class="desc"><b>对主代理 LLM 软隐藏</b>（主代理用 <code>list</code> + <code>lsp</code>），但经白名单提供给 <b>Explore 子代理</b>做影响/依赖分析。14 个 action 仍在：<b>full / overview / lookup / dependency / entrypoints / impact / implementations / smart_context</b> + 6 个分析（<b>dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests</b>）。定义与 handler 保留注册，服务 Explore、UI 面板并作为 <code>lsp</code> 点查询的 <b>AST 兜底后端</b>。</div>
           <div class="more"><div class="mbox">构建链：<code>list_workspace_files</code> → 逐文件 <code>read_text_file</code> → LSP documentSymbol 覆盖 → <code>buildWorkspaceProjectMap</code> → <code>buildWorkspaceProjectGraph</code> → LSP 边增强。<b>现已加建图缓存</b>：按“建图参数 + 工作区”做键，TTL 60s，任一工作区写入经 <code>notifyWorkspaceMutation</code> 清空，同键在途构建去重，上限 3 条 FIFO 淘汰——lookup→dependency→impact 三连只建一次图。符号经 <code>UnifiedSymbolDispatcher.extractSymbols</code>（lsp→ast→regex 降级）。</div></div>
         </div>
 
@@ -420,11 +422,11 @@
         <div class="item">
           <div class="row">
             <div class="addr">LEDIT</div>
-            <div class="name">lsp_edit<small>→ rename / code_action / format · :2933 / :2954 / :3035</small></div>
+            <div class="name">lsp_edit<small>→ rename / code_action / format · :3537 / :3558 / :3639</small></div>
             <div class="src"><span class="chip">action: rename | code_action | format</span></div>
             <div class="cchip c-lsp">LSP</div>
           </div>
-          <div class="desc">语言服务语义修改：重命名（应用 workspace edit）、按 title/kind 选代码动作、批量格式化。<b>这是"语义编辑"的现有种子</b>，但与 edit/patch 完全割裂。</div>
+          <div class="desc">语言服务<b>语义编辑入口，与字面 edit/patch 互补</b>：跨文件符号改名用 rename（应用 workspace edit，优先于 edit/patch）、按 title/kind 选代码动作（整理导入 source.organizeImports、快速修复 quickfix）、批量格式化。字面片段替换仍用 edit/patch。</div>
           <div class="more"><div class="mbox">分发：<code>lsp_edit</code> → <code>workspace_rename_symbol</code> / <code>workspace_apply_code_action</code> / <code>workspace_format_files</code>。rename 经 LSP <code>textDocument/rename</code> 拿 WorkspaceEdit 后落盘。</div></div>
         </div>
 
@@ -435,7 +437,7 @@
             <div class="src"><span class="chip">invoke lsp_get_diagnostics</span><span class="chip">Rust lsp.rs:1689</span></div>
             <div class="cchip c-lsp">LSP</div>
           </div>
-          <div class="desc">传 <code>relativePath</code> 查单文件 LSP 诊断；传 <code>project:true</code> 跑项目级 lint/typecheck。write/edit/patch 改后已会<b>自动返回单文件诊断</b>；本工具用于<b>按需单文件复查</b>与项目级 lint/typecheck。</div>
+          <div class="desc">传 <code>relativePath</code> 查单文件 LSP 诊断；传 <code>project:true</code> 跑项目级 lint/typecheck。write/edit/patch 改后已会<b>自动返回单文件诊断</b>，无需紧接着再调本工具复查同一文件；本工具用于<b>按需单文件复查</b>与项目级 lint/typecheck（自动反馈不含项目级）。</div>
           <div class="more"><div class="mbox">单文件：<code>invoke('lsp_get_diagnostics',{languageId, relativePath})</code>，Rust 侧按文件 uri 等待诊断刷新（命中即短路返回、硬上限 2s 防卡死），再按路径后缀匹配取本文件。全项目：遍历可用 provider 语言聚合 topIssues。</div></div>
         </div>
 
@@ -568,6 +570,66 @@
         </div>
       </section>
 
+      <!-- ═══ TIER 7 · Agent 工具集 ═══ -->
+      <section class="tier t7 reveal" id="agents">
+        <div class="tierhead">
+          <div class="idx">07</div>
+          <div class="tt">
+            <h3>Agent Tool Matrix <span>Agent 工具集</span></h3>
+            <div class="tags"><span class="tag">主代理 + Explore / Scout / Mentor</span><span class="tag">白名单过滤</span><span class="tag">agentConfig.ts</span></div>
+          </div>
+          <div class="hz"><b>谁拿到哪些工具</b>主代理全量（graph 软隐藏）· 子代理白名单</div>
+        </div>
+
+        <div class="sublabel"><b>主代理</b> 全量读写执行 · graph 软隐藏（委派 Explore）</div>
+
+        <div class="item">
+          <div class="row">
+            <div class="addr">MAIN</div>
+            <div class="name">主代理 Main Agent<small>agentFactory.ts · getLlmTools() · graph 软隐藏</small></div>
+            <div class="src"><span class="chip">读写执行全量</span><span class="chip">graph 不可见</span><span class="chip">task 委派</span></div>
+            <div class="cchip c-mix">读写执行</div>
+          </div>
+          <div class="desc">拥有全部读写/执行工具：<code>read / write / edit / patch / grep / glob / list / lsp / lsp_edit / diagnostics / git / bash / browser / webfetch / websearch / skill / question / todo / task</code>（App 模式另有 <code>app_*</code>）。<b>唯独 <code>graph</code> 对其软隐藏</b>——项目结构用 <code>list</code>、符号导航用 <code>lsp</code>、跨模块依赖/影响分析委派给 Explore。</div>
+          <div class="more"><div class="mbox">工具集经 <code>toolRegistry.getLlmTools()</code> 构建（排除软隐藏工具）。<code>graph</code> 经 <code>softHideFromLlm</code> 软隐藏：定义与 handler 仍注册（供子代理与 UI 面板），仅从主代理 LLM 工具集排除。ask/plan 只读模式另经 <code>MUTATING_TOOL_NAMES</code> 硬拦截 write/edit/patch/lsp_edit/bash/git/app_*。</div></div>
+        </div>
+
+        <div class="sublabel"><b>子代理</b> 独立 Session · 工具按定义白名单过滤（filterToolsForAgent）</div>
+
+        <div class="item">
+          <div class="row">
+            <div class="addr">EXPL</div>
+            <div class="name">Explore<small>只读代码分析 · model: fast · agentConfig.ts:257</small></div>
+            <div class="src"><span class="chip">8 工具</span><span class="chip">含 graph + glob</span><span class="chip">只读</span></div>
+            <div class="cchip c-lsp">只读分析</div>
+          </div>
+          <div class="desc"><code>read / read_image / list / graph / glob / lsp / diagnostics / grep</code>。<b>含 <code>graph</code></b>（影响/依赖/实现分析，主代理委派给它）与 <b><code>glob</code></b>（按文件名查找，与 grep 配对）。只读，不改文件。</div>
+          <div class="more"><div class="mbox">子代理注册时传 <code>exposeGraphToLlm:true</code>，graph 不软隐藏，白名单（<code>graph:true, glob:true</code>）即可选取。多模态关闭时 <code>read_image</code> 被动态剥离。</div></div>
+        </div>
+
+        <div class="item">
+          <div class="row">
+            <div class="addr">SCOUT</div>
+            <div class="name">Scout<small>网页搜索 + 下载 · model: fast · agentConfig.ts:331</small></div>
+            <div class="src"><span class="chip">4 工具</span><span class="chip">联网</span><span class="chip">不碰项目代码</span></div>
+            <div class="cchip c-text">联网</div>
+          </div>
+          <div class="desc"><code>websearch / webfetch / browser / read_image</code>。负责联网找资料、读文档、下载资源（<code>webfetch save:true</code> 落到 <code>.CodePapr/downloads/</code>），不读写项目代码。</div>
+          <div class="more"><div class="mbox">多模态关闭时 <code>read_image</code> 被动态剥离。</div></div>
+        </div>
+
+        <div class="item">
+          <div class="row">
+            <div class="addr">MENTOR</div>
+            <div class="name">Mentor<small>架构/算法/调试指导 · model: 可配置独立模型 · agentConfig.ts:392</small></div>
+            <div class="src"><span class="chip">无工具 {}</span><span class="chip">纯推理</span><span class="chip">听汇报做决策</span></div>
+            <div class="cchip c-mm">纯推理</div>
+          </div>
+          <div class="desc"><b>无任何工具（<code>{}</code>）</b>。刻意设计：只基于主代理汇报的上下文做架构/算法/调试决策，信息不足时回复「需补充 X」让工程师去补，不自己查代码（避免与 Explore 重叠、拖慢响应）。</div>
+          <div class="more"><div class="mbox"><code>filterToolsForAgent</code> 对空对象 <code>{}</code> 返回空工具列表（显式禁用）。Mentor 未启用时（<code>mentorEnabled:false</code>）从委派列表过滤掉。</div></div>
+        </div>
+      </section>
+
     </main>
 
     <!-- ═══ RAIL ═══ -->
@@ -616,38 +678,6 @@
       </div>
     </aside>
   </div>
-
-  <!-- ═══ MECHANISMS ═══ -->
-  <section class="mech reveal" id="mechanisms">
-    <h2>现状五个事实</h2>
-    <div class="sub">改造的出发点：原初缺口 F·03/F·04/F·05 现已修复或改善，F·01/F·02/F·06 已改造/收敛。</div>
-    <div class="ledger">
-      <div class="led">
-        <div class="no">F·01</div><h5>降级链已接入 lsp 点查询 + 文件操作（已改造）</h5>
-        <p><code>UnifiedSymbolDispatcher</code> 的 <code>lsp→ast→regex</code> 降级（Rust symbol_provider.rs 为引擎）原本只服务 project-map 符号提取。<b>现已扩展</b>：<code>lsp</code> 的 9 个导航 action 在 LSP 不可用/无结果时经 <code>astFallback</code>（workspaceTools.ts:2930）降级到 AST 项目图，并以 source/confidence 标注。<code>read</code> 的 <code>symbol</code> 参数用 AST 定位符号、<code>list</code> 逐文件 extractSymbols、<code>grep semantic:true</code> 走 LSP workspace symbol。<b>write/edit/patch 也已接入 AST 语法预检与写后 LSP 诊断反馈</b>（匹配仍为字面，歧义报错带符号定位，见 F·05）。</p>
-      </div>
-      <div class="led">
-        <div class="no">F·02</div><h5>read 已接入 AST（已改造）</h5>
-        <p><code>workspace_read_file</code> 传 <code>symbol</code> 时先 <code>extract_file_symbols</code>（AST）定位符号行范围再切片返回；无 AST 支持时降级文本搜索。整文件读取超 300 行自动附带符号大纲（workspaceTools.ts:1913）。</p>
-      </div>
-      <div class="led">
-        <div class="no">F·03</div><h5>改完没有反馈回路（已修复）</h5>
-        <p><b>现已修复</b>：write/edit/patch 写前跑 <code>astPreCheck</code>（tree-sitter，新增语法错误即拦截不落盘），写后重读校验并经 <code>lspDiagnosticsHook</code> 先 <code>lsp_open_document</code> 同步改后内容、再 <code>lsp_get_diagnostics</code> 按文件等待最新诊断，结果直接带 <code>diagnostics</code>/<code>notes</code> 返回。agent 改坏类型检查会在<b>同一次工具结果里立刻看到</b>。无 LSP 时降级并明确提示需手动复查。</p>
-      </div>
-      <div class="led">
-        <div class="no">F·04</div><h5>graph 每次全量重建（已修复）</h5>
-        <p><b>现已修复</b>：<code>buildIntelligenceProjectGraph</code>（workspaceTools.ts:2161）外加建图缓存——按“建图参数 + 工作区”做键，TTL 60s，任一工作区写入经 <code>notifyWorkspaceMutation</code> 清空，同键在途构建去重，上限 3 条。lookup→dependency→impact 三连<b>只建一次图</b>，后两次直接复用（含昂贵的 LSP 边增强）。<code>workspace_project_graph</code> 也改为走该缓存（stripGraphNoise 前深拷贝以免污染缓存）。</p>
-      </div>
-      <div class="led">
-        <div class="no">F·05</div><h5>edit 是纯字面匹配（已改善）</h5>
-        <p><code>applySearchReplacePatch</code> 仍以 <code>String.indexOf</code> 做字面匹配（searchReplaceDiff.ts），但<b>消歧已符号化</b>：新增 <code>locateSearchOccurrences</code> 返回每处行/列，多处匹配且未锁定（replaceAll/expectedOccurrences）时，edit/patch 经 <code>extractProjectMapSymbols</code>（AST）抛出带 <code>L行号（位于 kind name）</code> 的富错误，模型可精准定位而非硬猜。跨切面改名仍建议走 <code>lsp_edit rename</code>。</p>
-      </div>
-      <div class="led">
-        <div class="no">F·06</div><h5>重叠的心智模型（已收敛）</h5>
-        <p>原 read / graph(overview) / list 都返回结构、graph(lookup) 与 lsp(definition) 都在"找符号"、graph(impact)=dependency(incoming) 的职责重叠，<b>现已收敛</b>：<code>graph</code> 对 LLM 隐藏，项目结构归 <code>list</code>（目录树 + 逐文件轻量符号），点查询（定义/引用/实现/调用层级）统一进 <code>lsp</code> 并按需内部降级 AST。LLM 面对单一 <code>lsp</code> 工具，无需在重叠工具间裁决。</p>
-      </div>
-    </div>
-  </section>
 
   <!-- ═══ PIPELINE ═══ -->
   <section class="pipe reveal" id="pipeline">

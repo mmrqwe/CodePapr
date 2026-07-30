@@ -128,10 +128,11 @@
   .tier::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
   .tier.t1::before{background:var(--green)} .tier.t2::before{background:var(--amber)} .tier.t3::before{background:var(--orange)}
   .tier.t4::before{background:var(--accent)} .tier.t5::before{background:var(--violet)} .tier.t6::before{background:var(--teal)}
+  .tier.t7::before{background:#ec4899}
   .tierhead{display:flex;align-items:flex-start;gap:16px;padding:20px 24px 16px;border-bottom:1px dashed var(--border)}
   .tierhead .idx{font-family:var(--font-mono);font-weight:700;font-size:1.9rem;line-height:1}
   .t1 .idx{color:var(--green)} .t2 .idx{color:var(--amber)} .t3 .idx{color:var(--orange)}
-  .t4 .idx{color:var(--accent)} .t5 .idx{color:var(--violet)} .t6 .idx{color:var(--teal)}
+  .t4 .idx{color:var(--accent)} .t5 .idx{color:var(--violet)} .t6 .idx{color:var(--teal)} .t7 .idx{color:#ec4899}
   .tierhead .tt h3{font-size:1.25rem;font-weight:700;letter-spacing:-0.01em}
   .tierhead .tt h3 span{font-weight:400;color:var(--foreground-muted);font-size:0.9rem;margin-left:8px}
   .tierhead .tt .tags{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
@@ -142,10 +143,11 @@
   .t4 .tag{color:var(--accent);background:var(--accent-soft);border-color:transparent}
   .t5 .tag{color:var(--violet);background:rgba(139,92,246,0.12);border-color:transparent}
   .t6 .tag{color:var(--teal);background:rgba(20,184,166,0.12);border-color:transparent}
+  .t7 .tag{color:#ec4899;background:rgba(236,72,153,0.12);border-color:transparent}
   .tierhead .hz{margin-left:auto;text-align:right;font-family:var(--font-mono);font-size:0.7rem;color:var(--foreground-dim);line-height:1.5;white-space:nowrap}
   .tierhead .hz b{display:block;font-size:0.82rem;font-weight:600}
   .t1 .hz b{color:var(--green)} .t2 .hz b{color:var(--amber)} .t3 .hz b{color:var(--orange)}
-  .t4 .hz b{color:var(--accent)} .t5 .hz b{color:var(--violet)} .t6 .hz b{color:var(--teal)}
+  .t4 .hz b{color:var(--accent)} .t5 .hz b{color:var(--violet)} .t6 .hz b{color:var(--teal)} .t7 .hz b{color:#ec4899}
 
   .sublabel{font-family:var(--font-mono);font-size:0.7rem;letter-spacing:.1em;color:var(--foreground-dim);text-transform:uppercase;padding:14px 24px 4px;display:flex;align-items:center;gap:10px}
   .sublabel::after{content:"";flex:1;height:1px;background:var(--border)}
@@ -157,7 +159,7 @@
   @media(max-width:760px){.item{grid-template-columns:52px 1fr}.item .src,.item .desc,.item .more{grid-column:2}}
   .addr{font-family:var(--font-mono);font-size:0.68rem;font-weight:600;letter-spacing:.06em;padding-top:4px}
   .t1 .addr{color:var(--green)} .t2 .addr{color:var(--amber)} .t3 .addr{color:var(--orange)}
-  .t4 .addr{color:var(--accent)} .t5 .addr{color:var(--violet)} .t6 .addr{color:var(--teal)}
+  .t4 .addr{color:var(--accent)} .t5 .addr{color:var(--violet)} .t6 .addr{color:var(--teal)} .t7 .addr{color:#ec4899}
   .name{font-weight:600;font-size:0.98rem}
   .name small{display:block;font-weight:400;color:var(--foreground-dim);font-size:0.74rem;margin-top:2px;font-family:var(--font-mono)}
   .src{font-family:var(--font-mono);font-size:0.72rem;color:var(--foreground-muted);line-height:1.8;padding-top:2px}
@@ -238,7 +240,7 @@
       <li><a href="#fileops">File Ops</a></li>
       <li><a href="#intel">Code Intelligence</a></li>
       <li><a href="#cmd">Cmd·Git·Web</a></li>
-      <li><a href="#mechanisms">Mechanisms</a></li>
+      <li><a href="#agents">Agent Tools</a></li>
       <li><a href="#pipeline">Pipeline</a></li>
       <li><a href="tool-inventory.html">中文</a></li>
     </ul>
@@ -396,11 +398,11 @@
         <div class="item">
           <div class="row">
             <div class="addr">GRAPH</div>
-            <div class="name">graph<small>→ workspace_project_graph etc. · workspaceTools.ts:3204 · <b>hidden from the LLM</b></small></div>
-            <div class="src"><span class="chip">14 actions (UI-only)</span><span class="chip">graph cache TTL 60s</span><span class="chip">hideFromLlm:4200</span></div>
-            <div class="cchip c-ast">UI + AST fallback</div>
+            <div class="name">graph<small>→ workspace_project_graph etc. · workspaceTools.ts:3204 · <b>soft-hidden from main Agent · available to Explore</b></small></div>
+            <div class="src"><span class="chip">14 actions</span><span class="chip">graph cache TTL 60s</span><span class="chip">softHideFromLlm:4200</span></div>
+            <div class="cchip c-ast">Explore + UI + AST fallback</div>
           </div>
-          <div class="desc"><b>Now hidden from the LLM (UI-only)</b>. The 14 actions remain: <b>full / overview / lookup / dependency / entrypoints / impact / implementations / smart_context</b> + 6 analyses (<b>dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests</b>). The fine-grained handlers stay registered, serving UI panels and acting as the <b>AST fallback backend</b> for <code>lsp</code> point queries; the project structure is now exposed to the LLM via <code>list</code> (directory tree + per-file lightweight symbols).</div>
+          <div class="desc"><b>Soft-hidden from the main Agent's LLM</b> (the main Agent uses <code>list</code> + <code>lsp</code>), but provided to the <b>Explore sub-agent</b> via allowlist for impact/dependency analysis. The 14 actions remain: <b>full / overview / lookup / dependency / entrypoints / impact / implementations / smart_context</b> + 6 analyses (<b>dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests</b>). The definition and handlers stay registered, serving Explore, UI panels, and acting as the <b>AST fallback backend</b> for <code>lsp</code> point queries.</div>
           <div class="more"><div class="mbox">Build chain: <code>list_workspace_files</code> → per-file <code>read_text_file</code> → LSP documentSymbol coverage → <code>buildWorkspaceProjectMap</code> → <code>buildWorkspaceProjectGraph</code> → LSP edge enrichment. <b>Now backed by a graph build cache</b>: keyed by "build args + workspace", 60s TTL, cleared on any workspace write via <code>notifyWorkspaceMutation</code>, in-flight builds for the same key are deduped, capped at 3 entries with FIFO eviction—a lookup→dependency→impact triple builds the graph only once. Symbols go through <code>UnifiedSymbolDispatcher.extractSymbols</code> (lsp→ast→regex degradation).</div></div>
         </div>
 
@@ -420,11 +422,11 @@
         <div class="item">
           <div class="row">
             <div class="addr">LEDIT</div>
-            <div class="name">lsp_edit<small>→ rename / code_action / format · :2933 / :2954 / :3035</small></div>
+            <div class="name">lsp_edit<small>→ rename / code_action / format · :3537 / :3558 / :3639</small></div>
             <div class="src"><span class="chip">action: rename | code_action | format</span></div>
             <div class="cchip c-lsp">LSP</div>
           </div>
-          <div class="desc">Language-service semantic modifications: rename (applies a workspace edit), pick a code action by title/kind, batch formatting. <b>This is the existing seed of "semantic editing"</b>, but it is completely disconnected from edit/patch.</div>
+          <div class="desc">Language-service <b>semantic editing entry point, complementary to literal edit/patch</b>: cross-file symbol renames via rename (applies a workspace edit; prefer over edit/patch), code actions by title/kind (organize imports source.organizeImports, quickfix), batch formatting. Use edit/patch for literal snippet replacement.</div>
           <div class="more"><div class="mbox">Dispatch: <code>lsp_edit</code> → <code>workspace_rename_symbol</code> / <code>workspace_apply_code_action</code> / <code>workspace_format_files</code>. rename obtains a WorkspaceEdit via LSP <code>textDocument/rename</code>, then persists to disk.</div></div>
         </div>
 
@@ -435,7 +437,7 @@
             <div class="src"><span class="chip">invoke lsp_get_diagnostics</span><span class="chip">Rust lsp.rs:1689</span></div>
             <div class="cchip c-lsp">LSP</div>
           </div>
-          <div class="desc">Pass <code>relativePath</code> to query single-file LSP diagnostics; pass <code>project:true</code> to run project-level lint/typecheck. write/edit/patch now <b>auto-return single-file diagnostics</b> after a change; this tool is for <b>on-demand single-file re-checks</b> and project-level lint/typecheck.</div>
+          <div class="desc">Pass <code>relativePath</code> to query single-file LSP diagnostics; pass <code>project:true</code> to run project-level lint/typecheck. write/edit/patch now <b>auto-return single-file diagnostics</b> after a change, so there's no need to call this tool right after editing the same file; this tool is for <b>on-demand single-file re-checks</b> and project-level lint/typecheck (the auto-feedback doesn't cover project-level).</div>
           <div class="more"><div class="mbox">Single file: <code>invoke('lsp_get_diagnostics',{languageId, relativePath})</code>; the Rust side waits for the file's diagnostics to refresh by uri (short-circuits on arrival, hard-capped at 2s to avoid hanging), then matches this file by path suffix. Whole project: iterates available provider languages and aggregates topIssues.</div></div>
         </div>
 
@@ -568,6 +570,66 @@
         </div>
       </section>
 
+      <!-- ═══ TIER 7 · Agent Tool Matrix ═══ -->
+      <section class="tier t7 reveal" id="agents">
+        <div class="tierhead">
+          <div class="idx">07</div>
+          <div class="tt">
+            <h3>Agent Tool Matrix <span>Who gets which tools</span></h3>
+            <div class="tags"><span class="tag">Main + Explore / Scout / Mentor</span><span class="tag">allowlist filtering</span><span class="tag">agentConfig.ts</span></div>
+          </div>
+          <div class="hz"><b>Who gets which tools</b>Main = full set (graph soft-hidden) · sub-agents = allowlist</div>
+        </div>
+
+        <div class="sublabel"><b>Main Agent</b> full read/write/execute · graph soft-hidden (delegated to Explore)</div>
+
+        <div class="item">
+          <div class="row">
+            <div class="addr">MAIN</div>
+            <div class="name">Main Agent<small>agentFactory.ts · getLlmTools() · graph soft-hidden</small></div>
+            <div class="src"><span class="chip">full read/write/execute</span><span class="chip">graph not visible</span><span class="chip">task delegation</span></div>
+            <div class="cchip c-mix">Read/Write/Exec</div>
+          </div>
+          <div class="desc">Has all read/write/execute tools: <code>read / write / edit / patch / grep / glob / list / lsp / lsp_edit / diagnostics / git / bash / browser / webfetch / websearch / skill / question / todo / task</code> (plus <code>app_*</code> in App mode). <b>Only <code>graph</code> is soft-hidden</b> from it — project structure via <code>list</code>, symbol navigation via <code>lsp</code>, cross-module dependency/impact analysis delegated to Explore.</div>
+          <div class="more"><div class="mbox">The tool set is built via <code>toolRegistry.getLlmTools()</code> (excludes soft-hidden tools). <code>graph</code> is soft-hidden via <code>softHideFromLlm</code>: its definition and handler stay registered (for sub-agents and UI panels), only excluded from the main Agent's LLM tool set. In ask/plan read-only modes, <code>MUTATING_TOOL_NAMES</code> additionally hard-blocks write/edit/patch/lsp_edit/bash/git/app_*.</div></div>
+        </div>
+
+        <div class="sublabel"><b>Sub-agents</b> independent Session · tools filtered by definition allowlist (filterToolsForAgent)</div>
+
+        <div class="item">
+          <div class="row">
+            <div class="addr">EXPL</div>
+            <div class="name">Explore<small>read-only code analysis · model: fast · agentConfig.ts:257</small></div>
+            <div class="src"><span class="chip">8 tools</span><span class="chip">incl. graph + glob</span><span class="chip">read-only</span></div>
+            <div class="cchip c-lsp">Read-only analysis</div>
+          </div>
+          <div class="desc"><code>read / read_image / list / graph / glob / lsp / diagnostics / grep</code>. <b>Includes <code>graph</code></b> (impact/dependency/implementation analysis, delegated by the main Agent) and <b><code>glob</code></b> (find files by name, pairs with grep). Read-only — never modifies files.</div>
+          <div class="more"><div class="mbox">Sub-agent registration passes <code>exposeGraphToLlm:true</code>, so graph is not soft-hidden and the allowlist (<code>graph:true, glob:true</code>) can select it. <code>read_image</code> is stripped dynamically when multimodal is off.</div></div>
+        </div>
+
+        <div class="item">
+          <div class="row">
+            <div class="addr">SCOUT</div>
+            <div class="name">Scout<small>web search + download · model: fast · agentConfig.ts:331</small></div>
+            <div class="src"><span class="chip">4 tools</span><span class="chip">web access</span><span class="chip">no project code</span></div>
+            <div class="cchip c-text">Web</div>
+          </div>
+          <div class="desc"><code>websearch / webfetch / browser / read_image</code>. Responsible for finding resources online, reading docs, and downloading assets (<code>webfetch save:true</code> lands in <code>.CodePapr/downloads/</code>); does not read or write project code.</div>
+          <div class="more"><div class="mbox"><code>read_image</code> is stripped dynamically when multimodal is off.</div></div>
+        </div>
+
+        <div class="item">
+          <div class="row">
+            <div class="addr">MENTOR</div>
+            <div class="name">Mentor<small>architecture/algorithm/debugging guidance · model: configurable independent · agentConfig.ts:392</small></div>
+            <div class="src"><span class="chip">no tools {}</span><span class="chip">pure reasoning</span><span class="chip">decides from reports</span></div>
+            <div class="cchip c-mm">Pure reasoning</div>
+          </div>
+          <div class="desc"><b>No tools (<code>{}</code>)</b>. Deliberate design: makes architecture/algorithm/debugging decisions purely from the context the main Agent reports; when information is insufficient it replies "need to supplement: X" and has the engineer collect it, rather than querying code itself (avoids overlap with Explore and slows nothing down).</div>
+          <div class="more"><div class="mbox"><code>filterToolsForAgent</code> returns an empty tool list for the empty object <code>{}</code> (explicit disable). When Mentor is disabled (<code>mentorEnabled:false</code>) it is filtered out of the delegation list.</div></div>
+        </div>
+      </section>
+
     </main>
 
     <!-- ═══ RAIL ═══ -->
@@ -616,38 +678,6 @@
       </div>
     </aside>
   </div>
-
-  <!-- ═══ MECHANISMS ═══ -->
-  <section class="mech reveal" id="mechanisms">
-    <h2>Five facts about the current state</h2>
-    <div class="sub">Starting point for refactoring: the original gaps F·03/F·04/F·05 are now fixed or improved; F·01/F·02/F·06 are refactored/consolidated.</div>
-    <div class="ledger">
-      <div class="led">
-        <div class="no">F·01</div><h5>degradation chain wired into lsp point queries + file ops (refactored)</h5>
-        <p>The <code>lsp→ast→regex</code> degradation in <code>UnifiedSymbolDispatcher</code> (with Rust symbol_provider.rs as the engine) originally only served project-map symbol extraction. <b>Now extended</b>: the 9 navigation actions of <code>lsp</code> degrade to the AST project graph via <code>astFallback</code> (workspaceTools.ts:2930) when LSP is unavailable/returns nothing, tagged with source/confidence. <code>read</code>'s <code>symbol</code> param uses AST targeting, <code>list</code> runs per-file extractSymbols, <code>grep semantic:true</code> uses LSP workspace symbol. <b>write/edit/patch are now also wired to AST syntax pre-checks and post-write LSP diagnostic feedback</b> (matching stays literal; ambiguity errors carry symbol location, see F·05).</p>
-      </div>
-      <div class="led">
-        <div class="no">F·02</div><h5>read is now AST-aware (refactored)</h5>
-        <p><code>workspace_read_file</code> with <code>symbol</code> first runs <code>extract_file_symbols</code> (AST) to locate the symbol's line range, then slices; degrades to text search without AST support. Full-file reads over 300 lines auto-attach a symbol outline (workspaceTools.ts:1913).</p>
-      </div>
-      <div class="led">
-        <div class="no">F·03</div><h5>no feedback loop after a change (fixed)</h5>
-        <p><b>Now fixed</b>: write/edit/patch run <code>astPreCheck</code> before writing (tree-sitter; rejects without persisting when new syntax errors appear), then re-read to verify and use <code>lspDiagnosticsHook</code>—first <code>lsp_open_document</code> syncs the new content, then <code>lsp_get_diagnostics</code> waits for the file's fresh diagnostics—and return <code>diagnostics</code>/<code>notes</code> right in the result. If the agent breaks type checking, it <b>sees it immediately in the same tool result</b>. Without an LSP it degrades and explicitly notes a manual re-check is needed.</p>
-      </div>
-      <div class="led">
-        <div class="no">F·04</div><h5>graph does a full rebuild every time (fixed)</h5>
-        <p><b>Now fixed</b>: <code>buildIntelligenceProjectGraph</code> (workspaceTools.ts:2161) is wrapped in a graph build cache—keyed by "build args + workspace", 60s TTL, cleared on any workspace write via <code>notifyWorkspaceMutation</code>, in-flight builds for the same key deduped, capped at 3 entries. A lookup→dependency→impact triple <b>builds the graph only once</b>; the latter two reuse it (including the expensive LSP edge enrichment). <code>workspace_project_graph</code> now routes through the same cache (deep-copying before stripGraphNoise so the cache isn't polluted).</p>
-      </div>
-      <div class="led">
-        <div class="no">F·05</div><h5>edit is pure literal matching (improved)</h5>
-        <p><code>applySearchReplacePatch</code> still uses <code>String.indexOf</code> for literal matching (searchReplaceDiff.ts), but <b>disambiguation is now symbol-aware</b>: a new <code>locateSearchOccurrences</code> returns each match's line/column, and when there are multiple matches not pinned down (replaceAll/expectedOccurrences), edit/patch use <code>extractProjectMapSymbols</code> (AST) to throw a rich error with <code>L&lt;line&gt; (in &lt;kind&gt; &lt;name&gt;)</code>, so the model can pinpoint precisely instead of guessing. Cross-cutting renames should still go through <code>lsp_edit rename</code>.</p>
-      </div>
-      <div class="led">
-        <div class="no">F·06</div><h5>overlapping mental models (consolidated)</h5>
-        <p>The former read / graph(overview) / list all returned structure, graph(lookup) and lsp(definition) were both "finding symbols", and graph(impact)=dependency(incoming) had overlapping responsibilities—<b>now consolidated</b>: <code>graph</code> is hidden from the LLM, project structure goes to <code>list</code> (directory tree + per-file lightweight symbols), and point queries (definition/references/implementation/call hierarchy) are unified into <code>lsp</code>, which degrades to AST internally as needed. The LLM faces a single <code>lsp</code> tool, with no need to arbitrate between overlapping tools.</p>
-      </div>
-    </div>
-  </section>
 
   <!-- ═══ PIPELINE ═══ -->
   <section class="pipe reveal" id="pipeline">

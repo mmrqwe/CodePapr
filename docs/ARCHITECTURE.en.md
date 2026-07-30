@@ -319,9 +319,11 @@ On Apple Silicon Macs, users can manually click "GPU Warmup" in the Voice Tab of
 
 | Agent | Purpose | Model | Tools |
 |-------|------|------|------|
-| explore | Read-only code analysis | fast | read, read_image, list, lsp, diagnostics, grep |
+| explore | Read-only code analysis | fast | read, read_image, list, graph, glob, lsp, diagnostics, grep |
 | scout | Web search + download | fast | websearch, webfetch, browser, read_image |
 | mentor | Architecture/algorithm guidance | Configurable independent model | None |
+
+> **Main Agent tool set**: the main Agent has all read/write/execution tools (read/write/edit/patch/grep/glob/list/lsp/lsp_edit/diagnostics/git/bash/browser/webfetch/skill/question/todo/task, etc.), but `graph` is **soft-hidden** from it — project structure and symbol navigation are handled by `list` + `lsp`, while cross-module dependency/impact analysis is delegated to Explore. The `graph` definition and handler stay registered, so sub-agents (Explore) can select it via allowlist and execute it.
 
 > The Goal autonomous loop's verifier is a standalone no-tools model call configured in Advanced settings (`verifierModelTier`). It is not a built-in sub-agent and is never exposed via the `task` tool.
 
@@ -332,7 +334,7 @@ The `task` tool only exposes agents whose `mode` is `subagent` / `all`; agents w
 **Each sub-agent gets a fresh Session**, with no access to the main Agent's conversation history:
 
 - Creates a new `AppendOnlyLog` — blank log
-- Tool set is filtered by the allowlist in the definition (Explore has 6 tools)
+- Tool set is filtered by the allowlist in the definition (Explore has 8 tools)
 - Only receives the task description from `task.prompt` as its sole context
 - Nesting depth is configurable (`subagentMaxDepth`, default 2; explore/scout can override via `exploreMaxDepth` / `scoutMaxDepth`)
 
@@ -482,7 +484,7 @@ Consolidation reuses the `selectContextCompactionModelRoute` fast-model route, s
 
 ### 9.1 Tool Definition
 
-`graph` is a unified project semantic graph tool accessed via the `action` parameter. **Now hidden from the LLM (UI-only)**: LLM-facing code intelligence is provided by the `lsp` tool (9 navigation actions, LSP-first with AST project-graph fallback) and `list` (directory tree + per-file lightweight symbols); `graph`'s fine-grained handlers stay registered to serve UI panels and act as the AST fallback backend for `lsp` point queries.
+`graph` is a unified project semantic graph tool accessed via the `action` parameter. **Soft-hidden from the main Agent's LLM**: main-Agent-facing code intelligence is provided by the `lsp` tool (9 navigation actions, LSP-first with AST project-graph fallback) and `list` (directory tree + per-file lightweight symbols), while cross-module dependency/impact analysis is delegated to the Explore sub-agent. The `graph` definition and handlers stay registered — the Explore sub-agent selects it via allowlist for impact/dependency analysis, and it also serves UI panels and acts as the AST fallback backend for `lsp` point queries.
 
 **Graph build cache**: on the UI side, `buildIntelligenceProjectGraph` (workspaceTools.ts) caches the full build result—keyed by "build args + workspace", 60s TTL, cleared on any workspace write via `notifyWorkspaceMutation`, with in-flight builds for the same key deduped and capped at 3 entries (FIFO eviction). A `lookup→dependency→impact` sequence builds the graph only once.
 
@@ -511,7 +513,7 @@ Consolidation reuses the `selectContextCompactionModelRoute` fast-model route, s
 
 - Core function in `core/src/tool/workspace/graphQuery.ts` (~2,400 lines)
 - CLI and UI each implement handler branches
-- Explore sub-agent system prompt lists all actions
+- The Explore sub-agent selects this tool via allowlist (`graph: true`); its system prompt lists the commonly-used actions
 
 ## 10. Prompt Assembly and DeepSeek Cache Optimization
 

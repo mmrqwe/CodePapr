@@ -78,7 +78,7 @@ async function runSubagent(
     context.workspacePath,
     context.editHistory,
     context.onWorkspaceMutated,
-    { multimodalEnabled: context.multimodalEnabled }
+    { multimodalEnabled: context.multimodalEnabled, exposeGraphToLlm: true }
   );
   const tools = filterToolsForAgent(registry.getAll(), definition.tools);
 

@@ -318,9 +318,11 @@ ChatPanel → useTtsPlayer hook → Rust TTS Module → GPT-SoVITS Python Server
 
 | Agent | 用途 | 模型 | 工具 |
 |-------|------|------|------|
-| explore | 只读代码分析 | fast | read, read_image, list, lsp, diagnostics, grep |
+| explore | 只读代码分析 | fast | read, read_image, list, graph, glob, lsp, diagnostics, grep |
 | scout | 网页搜索 + 下载 | fast | websearch, webfetch, browser, read_image |
 | mentor | 架构/算法指导 | 可配置独立模型 | 无 |
+
+> **主代理工具集**：主代理拥有全部读写/执行工具（read/write/edit/patch/grep/glob/list/lsp/lsp_edit/diagnostics/git/bash/browser/webfetch/skill/question/todo/task 等），但 `graph` 对其**软隐藏**——项目结构与符号导航改由 `list` + `lsp` 承担，跨模块依赖/影响分析则委派给 Explore。`graph` 的定义与 handler 仍保留注册，子代理（Explore）可经白名单选取并执行。
 
 > Goal 自主循环的验收器（Verifier）是一个独立的无工具模型调用，在高级设置中配置（`verifierModelTier`），不属于内置子代理，也不经 `task` 工具暴露。
 
@@ -331,7 +333,7 @@ ChatPanel → useTtsPlayer hook → Rust TTS Module → GPT-SoVITS Python Server
 **每个子代理拥有全新的 Session**，不继承主 Agent 的历史对话：
 
 - 创建全新的 `AppendOnlyLog` — 空白日志
-- 工具集按定义中的白名单过滤（Explore 有 6 个工具）
+- 工具集按定义中的白名单过滤（Explore 有 8 个工具）
 - 只接收 `task.prompt` 传入的任务描述作为唯一下文
 - 嵌套深度上限可配置（`subagentMaxDepth`，默认 2；explore/scout 可分别用 `exploreMaxDepth` / `scoutMaxDepth` 覆盖）
 
@@ -481,7 +483,7 @@ agent 回复完成
 
 ### 9.1 工具定义
 
-`graph` 是统一的项目语义图工具，通过 `action` 参数选择操作。**现已对 LLM 隐藏（UI-only）**：LLM 侧的代码智能改由 `lsp` 工具（9 个导航 action，LSP 优先、AST 项目图兜底）与 `list`（目录树 + 逐文件轻量符号）承担；`graph` 的细粒度 handler 保留注册，服务于 UI 面板并作为 `lsp` 点查询的 AST 兜底后端。
+`graph` 是统一的项目语义图工具，通过 `action` 参数选择操作。**对主代理 LLM 软隐藏**：主代理侧的代码智能改由 `lsp` 工具（9 个导航 action，LSP 优先、AST 项目图兜底）与 `list`（目录树 + 逐文件轻量符号）承担，跨模块依赖/影响分析委派给 Explore 子代理。`graph` 的定义与 handler 保留注册——Explore 子代理经白名单选取它做影响/依赖分析，同时服务 UI 面板并作为 `lsp` 点查询的 AST 兜底后端。
 
 **建图缓存**：UI 侧 `buildIntelligenceProjectGraph`（workspaceTools.ts）缓存完整建图结果——以“建图参数 + 工作区”为键，TTL 60s，任一工作区写入经 `notifyWorkspaceMutation` 清空，同键在途构建去重、上限 3 条 FIFO 淘汰。`lookup→dependency→impact` 等连续 action 只建一次图。
 
@@ -510,7 +512,7 @@ agent 回复完成
 
 - 核心函数在 `core/src/tool/workspace/graphQuery.ts`（~2,400 行）
 - CLI 和 UI 分别实现 handler 分支
-- Explore 子代理的系统提示词中列出所有 action
+- Explore 子代理经白名单（`graph: true`）选取本工具，其系统提示词中列出常用 action
 
 ## 10. Prompt 组装与 DeepSeek 缓存优化
 

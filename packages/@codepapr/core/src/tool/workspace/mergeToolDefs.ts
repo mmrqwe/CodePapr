@@ -176,7 +176,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 10. lsp_edit ────
   {
     name: 'lsp_edit',
-    description: '语言服务语义修改。action: rename(重命名)|code_action(代码动作)|format(格式化)。',
+    description: '语言服务语义修改，与字面 edit/patch 互补：跨文件符号改名用 rename（优先于 edit/patch）、整理导入/快速修复用 code_action（kind 如 source.organizeImports / quickfix）、格式化用 format。action: rename|code_action|format。',
     parameters: {
       type: 'object',
       properties: {
@@ -198,7 +198,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 11. diagnostics ────
   {
     name: 'diagnostics',
-    description: '代码诊断。传 relativePath 获取单文件 LSP 诊断；传 project: true 运行项目级 lint/typecheck。',
+    description: '代码诊断。project:true 运行项目级 lint/typecheck（验证整体是否改坏；write/edit/patch 的自动反馈不含项目级）；传 relativePath 按需查单文件 LSP 诊断（不修改文件）。注意：write/edit/patch 改完已自动返回该单文件诊断，无需紧接着再调本工具复查同一文件。',
     parameters: {
       type: 'object',
       properties: {

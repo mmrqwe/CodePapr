@@ -1819,6 +1819,11 @@ name: 'web_download_file',
 export interface RegisterWorkspaceToolsOptions {
   disableWebSearchTools?: boolean;
   multimodalEnabled?: boolean;
+  /**
+   * 是否把 graph 工具暴露给 LLM。默认 false：graph 对主代理软隐藏（项目结构改用 list、符号导航改用 lsp），
+   * 但 handler 仍注册，供子代理（如 Explore）经白名单选取。子代理注册时应传 true。
+   */
+  exposeGraphToLlm?: boolean;
 }
 
 export function registerWorkspaceTools(
@@ -4195,7 +4200,9 @@ export function registerWorkspaceTools(
     registry.hideFromLlm(name);
   }
 
-  // graph 工具对 LLM 隐藏：项目结构改用 list（目录树+逐文件轻量符号），符号导航改用 lsp。
-  // 细粒度 handler 仍保留注册，供 UI 面板与后续 AST 兜底使用。
-  registry.hideFromLlm('graph');
+  // graph 工具默认对主代理 LLM 软隐藏：项目结构改用 list（目录树+逐文件轻量符号），符号导航改用 lsp。
+  // 软隐藏保留定义与 handler——子代理（如 Explore，exposeGraphToLlm:true）仍可经白名单选取并执行。
+  if (!options.exposeGraphToLlm) {
+    registry.softHideFromLlm('graph');
+  }
 }

@@ -167,6 +167,8 @@ describe('agentConfig - BUILTIN_AGENTS', () => {
       read: true,
       read_image: true,
       list: true,
+      graph: true,
+      glob: true,
       lsp: true,
       diagnostics: true,
       grep: true,

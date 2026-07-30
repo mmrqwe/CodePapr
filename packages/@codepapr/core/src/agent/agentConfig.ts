@@ -256,13 +256,15 @@ export function filterToolsForMode<T extends IToolDefinition>(
 export const BUILTIN_AGENTS: AgentDefinition[] = [
   {
       name: 'explore',
-      description: 'Code analysis (lsp symbol navigation + project structure overview, more accurate than grep)',
+      description: 'Code analysis (graph semantic map + lsp symbol navigation + project structure overview, more accurate than grep)',
       mode: 'subagent',
       model: 'fast',
       tools: {
         read: true,
         read_image: true,
         list: true,
+        graph: true,
+        glob: true,
         lsp: true,
         diagnostics: true,
         grep: true,
@@ -272,13 +274,15 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
 ## Core Workflow
 
 1. **Choose tools by task, don't blindly read files**:
-   - **Global understanding** ("Overall project structure", "What modules exist"): Use \`list\` to get the project structure (directory tree with lightweight per-file symbols).
-   - **Precise query** ("Where is Foo defined"): Use \`lsp(action: goToDefinition)\` or \`lsp(action: workspaceSymbol, query: "Foo")\` directly.
-   - **Fuzzy exploration** ("How is auth implemented", "What's the data flow"): Start with \`lsp(action: workspaceSymbol, query: "auth")\` to locate relevant symbols, then \`lsp(action: documentSymbol)\` for a file's outline.
+   - **Global understanding** ("Overall project structure", "What modules exist"): Use \`graph(action: overview)\` for the semantic map, or \`list\` for the directory tree with lightweight per-file symbols.
+   - **Impact / dependency analysis** ("What breaks if I change X", "trace the dependency chain"): Use \`graph(action: impact)\` for blast radius, \`graph(action: dependency)\` for the dependency subgraph, \`graph(action: implementations)\` for interface impls, \`graph(action: entrypoints)\` for startup chains.
+   - **Precise query** ("Where is Foo defined"): Use \`lsp(action: goToDefinition)\`, \`lsp(action: workspaceSymbol, query: "Foo")\`, or \`graph(action: lookup, query: "Foo")\` directly.
+   - **Fuzzy exploration** ("How is auth implemented", "What's the data flow"): Start with \`graph(action: smart_context, query: "auth")\` or \`lsp(action: workspaceSymbol, query: "auth")\` to locate relevant symbols, then \`lsp(action: documentSymbol)\` for a file's outline.
+   - **Find files by name** ("all test files", "config files"): Use \`glob(query: "**/*.test.ts")\`.
    - **Who uses / calls this** ("Who calls bar", "What implements interface I"): Use \`lsp(action: findReferences)\`, \`lsp(action: goToImplementation)\`, or \`lsp(action: incomingCalls)\`.
-   - After lsp/list gives you file+line, use \`read\` to precisely read the relevant lines. **Don't skip lsp/list and blindly read files.**
+   - After graph/lsp/list gives you file+line, use \`read\` to precisely read the relevant lines. **Don't skip graph/lsp/list and blindly read files.**
 
-2. **lsp for references, grep for text**: To find "who calls foo", use \`lsp(action: findReferences)\` — it catches renamed imports like \`import { foo as bar }\` that \`grep "foo"\` would miss. Use \`grep\` only for string literals, log templates, or comments.
+2. **lsp/graph for references, grep for text**: To find "who calls foo", use \`lsp(action: findReferences)\` or \`graph(action: impact)\` — they catch renamed imports like \`import { foo as bar }\` that \`grep "foo"\` would miss. Use \`grep\` only for string literals, log templates, or comments.
 
 3. **Exploration depth control**: Trace dependency chains up to 3 levels deep. Stop when you reach external dependencies (node_modules/system libraries), leaf nodes (functions with no further calls), or boundaries (entry points of different modules). Don't trace infinitely.
 
@@ -287,6 +291,10 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
 ## Available Tools
 
 - **list (relativePath?)** — Directory tree with lightweight per-file symbols (top-level symbols per code file, AST-based, works without LSP). Use for global understanding
+
+- **graph (action)** — Project semantic map. \`overview\` (lightweight map), \`lookup\` (symbol lookup), \`dependency\` (dependency subgraph), \`impact\` (blast radius of a change), \`implementations\` (interface/base-class impls), \`entrypoints\` (startup chains), \`smart_context\` (task-aware context, needs query), \`type_hierarchy\`, \`circular_deps\`, \`dead_code\`. Use for cross-module impact/dependency analysis
+
+- **glob (query)** — Find files by name/path glob pattern, e.g. \`**/*.test.ts\`. Use to locate files by name (pairs with grep, which searches content)
 
 - **lsp (action: goToDefinition, relativePath+line)** — Jump to definition. Prefer over grep for finding symbol sources
 - **lsp (action: findReferences, relativePath+line)** — Find references. Prefer over grep, catches renamed references
