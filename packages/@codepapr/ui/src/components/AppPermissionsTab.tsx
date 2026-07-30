@@ -1,65 +1,47 @@
-import { useState, useEffect, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
 import type { PaprAppSettings, PaprLevel } from '@codepapr/types';
 
-const LEVEL_LABELS: Record<number, string> = {
-  0: 'Level 0 · Pure',
-  1: 'Level 1 · Runtime',
-  2: 'Level 2 · Network',
-  3: 'Level 3 · System',
-};
-
-const LEVEL_DESC: Record<number, string> = {
-  0: 'No external access, HTML/CSS/JS only',
-  1: 'Storage + LLM + read-only workspace (default)',
-  2: '+ HTTP + search + MCP tools',
-  3: '+ file write + terminal + Git (requires global toggle)',
-};
-
 interface AppPermissionsTabProps {
   lang?: Lang;
+  value: PaprAppSettings | null;
+  onChange: (settings: PaprAppSettings) => void;
+  loadError?: string;
 }
 
-export function AppPermissionsTab({ lang }: AppPermissionsTabProps) {
+export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermissionsTabProps) {
   const t = getTranslation(lang);
   const apps = useAppRuntimeStore((state) => state.apps);
-  const [settings, setSettings] = useState<PaprAppSettings | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [loadError, setLoadError] = useState('');
-  const [saveError, setSaveError] = useState('');
-
-  useEffect(() => {
-    invoke<PaprAppSettings>('papr_get_app_settings')
-      .then(setSettings)
-      .catch((err) => setLoadError(String(err)));
-  }, []);
-
-  const save = useCallback((updated: PaprAppSettings) => {
-    setSaving(true);
-    setSaveError('');
-    invoke('papr_set_app_settings', { settings: updated })
-      .then(() => setSettings(updated))
-      .catch((err) => setSaveError(String(err)))
-      .finally(() => setSaving(false));
-  }, []);
+  const LEVEL_LABELS: Record<number, string> = {
+    0: t.appPermL0Label,
+    1: t.appPermL1Label,
+    2: t.appPermL2Label,
+    3: t.appPermL3Label,
+  };
+  const LEVEL_DESC: Record<number, string> = {
+    0: t.appPermL0Desc,
+    1: t.appPermL1Desc,
+    2: t.appPermL2Desc,
+    3: t.appPermL3Desc,
+  };
 
   if (loadError) {
     return <div className="p-4 text-xs text-red-400">{t.appPermLoadFailed}: {loadError}</div>;
   }
 
-  if (!settings) {
-    return <div className="p-4 text-xs text-slate-500">Loading...</div>;
+  if (!value) {
+    return <div className="p-4 text-xs text-slate-500">{t.appPermLoading}</div>;
   }
 
+  const settings = value;
+
   const updateDefaultLevel = (level: PaprLevel) => {
-    save({ ...settings, defaultLevel: level });
+    onChange({ ...settings, defaultLevel: level });
   };
 
   const toggleAllowLevel3 = () => {
-    save({ ...settings, allowLevel3: !settings.allowLevel3 });
+    onChange({ ...settings, allowLevel3: !settings.allowLevel3 });
   };
 
   const updateAppOverride = (appId: string, level: PaprLevel | 'auto') => {
@@ -69,7 +51,7 @@ export function AppPermissionsTab({ lang }: AppPermissionsTabProps) {
     } else {
       overrides[appId] = level;
     }
-    save({ ...settings, appOverrides: overrides });
+    onChange({ ...settings, appOverrides: overrides });
   };
 
   const getAppManifestLevel = (appId: string): PaprLevel => {
@@ -203,16 +185,6 @@ export function AppPermissionsTab({ lang }: AppPermissionsTabProps) {
       {apps.length === 0 && (
         <div className="rounded-xl border border-[#2a2d3a] bg-[#11141c] p-6 text-center text-xs text-slate-600">
           {t.appPermNoApps}
-        </div>
-      )}
-
-      {saving && (
-        <div className="text-[10px] text-slate-600">Saving...</div>
-      )}
-
-      {saveError && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[10px] text-red-300">
-          {t.appPermSaveFailed}: {saveError}
         </div>
       )}
 

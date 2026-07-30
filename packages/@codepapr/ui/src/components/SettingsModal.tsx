@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import type { PaprAppSettings } from '@codepapr/types';
 import {
   ApiFormat,
   ApiMode,
@@ -64,6 +66,14 @@ export function SettingsModal() {
   const t = getTranslation(currentLang);
   const settingsError = getSettingsError(local);
 
+  const [appDraft, setAppDraft] = useState<PaprAppSettings | null>(null);
+  const [appLoadError, setAppLoadError] = useState('');
+  useEffect(() => {
+    invoke<PaprAppSettings>('papr_get_app_settings')
+      .then(setAppDraft)
+      .catch((err) => setAppLoadError(String(err)));
+  }, []);
+
   const defaultPrompts: Record<string, string> = {};
   for (const agent of BUILTIN_AGENTS) {
     defaultPrompts[agent.name] = resolveAgentPrompt(agent, currentLang);
@@ -105,6 +115,10 @@ export function SettingsModal() {
   };
 
   const resetTab = (tab: SettingsTab) => {
+    if (tab === 'app') {
+      setAppDraft({ defaultLevel: 1, allowLevel3: false, appOverrides: {} });
+      return;
+    }
     const defaults = normalizeSettings({});
     const tabKeys: Record<SettingsTab, (keyof Settings)[]> = {
       general: ['lang', 'debugEnabled', 'chatBordersEnabled'],
@@ -199,6 +213,11 @@ export function SettingsModal() {
   };
 
   const save = () => {
+    if (appDraft && !appLoadError) {
+      invoke('papr_set_app_settings', { settings: appDraft }).catch(() => {
+        /* best-effort: app permission persistence mirrors the draft model */
+      });
+    }
     setSettings(local);
     setShowSettings(false);
   };
@@ -254,10 +273,10 @@ export function SettingsModal() {
     },
     {
       id: 'app',
-      label: 'App',
-      type: 'Application',
-      desc: 'App 权限管理',
-      tip: '管理 .papr 应用的权限级别',
+      label: t.settingsAppTab,
+      type: t.settingsAppType,
+      desc: t.settingsAppDesc,
+      tip: t.settingsAppTabTip,
     },
   ];
 
@@ -284,7 +303,7 @@ export function SettingsModal() {
         </div>
 
         <div className="border-b border-[#2a2d3a] bg-[#161922] px-5 py-3">
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-6 gap-2">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -1482,7 +1501,12 @@ export function SettingsModal() {
 
           {activeTab === 'app' && (
             <div className="flex flex-col gap-4">
-              <AppPermissionsTab lang={currentLang} />
+              <AppPermissionsTab
+                lang={currentLang}
+                value={appDraft}
+                onChange={setAppDraft}
+                loadError={appLoadError}
+              />
             </div>
           )}
 
