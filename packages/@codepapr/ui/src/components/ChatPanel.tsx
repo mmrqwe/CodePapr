@@ -1583,6 +1583,10 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
       ttsSetTextLanguage('zh');
       ttsSetVoiceModel('');
       ttsSetFineTunedModel('');
+      // Reset the preload tracker too, so switching back to a character that
+      // DOES have a fine-tuned model re-triggers the preload (otherwise the
+      // stale cached path would suppress it).
+      prevFtPathRef.current = '';
     }
   }, [activeCharacter?.voice?.referenceSamplePath, activeCharacter?.voice?.referenceText, activeCharacter?.voice?.referenceTextLanguage, activeCharacter?.voice?.textLanguage, activeCharacter?.voice?.engine, activeCharacter?.voice?.playbackMode, activeCharacter?.voice?.sampleSteps, activeCharacter?.voice?.speed, activeCharacter?.voice?.modelName, activeCharacter?.voice?.fineTunedModelPath, activeCharacter?.voice?.useFineTuned, activeCharacter?.voice?.sentencesPerChunk, ttsSetVoiceConfig, ttsSetTextLanguage, ttsSetVoiceModel, ttsSetFineTunedModel, ttsSetPlaybackMode, ttsSetSampleSteps, ttsSetSpeed, ttsSetSentencesPerChunk, ttsServerStatus]);
 

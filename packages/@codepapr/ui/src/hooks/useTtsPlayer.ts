@@ -26,6 +26,20 @@ function safeListen<T = unknown>(event: string, handler: (event: { payload: T })
   return listen(event, handler);
 }
 
+/**
+ * Max queued chunks drained into a single ws-batch WebSocket request.
+ *
+ * The consumer loop splices at most this many chunks per iteration so that
+ * `isLast` (queue empty AFTER the splice) is meaningful: while text is still
+ * streaming in and the queue has more than this many chunks pending, the
+ * non-final batches use the non-blocking WS path and synthesise in parallel
+ * with playback of the current batch. Draining the whole queue at once (the
+ * previous behaviour) made `isLast` always true and turned the non-blocking
+ * pipeline into dead code. Kept modest so playback order stays stable in the
+ * common case (a single batch → blocking → strictly ordered).
+ */
+const WS_BATCH_CHUNKS = 4;
+
 export type TtsServerStatus = 'unknown' | 'starting' | 'running' | 'stopped' | 'error';
 
 export interface TtsInstallStatus {
@@ -112,6 +126,17 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
   const queueRef = useRef<string[]>([]);
   const processingRef = useRef(false);
   const abortedRef = useRef(false);
+  // The messageId that was active when `stop()` was last invoked. While the
+  // same message keeps streaming in, `feedStream` ignores its frames so a
+  // mid-stream stop doesn't restart playback from the beginning (resetting
+  // `feedStateRef` alone would make the next frame look like brand-new
+  // content). Cleared as soon as a different messageId arrives.
+  const stoppedMessageIdRef = useRef<string | undefined>(undefined);
+  // Set by `skip()` so the consumer loop can tell a user-initiated skip
+  // (backend aborts because we called `tts_stop_playback`) apart from a
+  // genuine synthesis failure. Without this, each skip counts toward
+  // `errorCountRef` and three skips would wrongly drop the whole queue.
+  const skipRef = useRef(false);
   // Consolidated feed-state (cursor + dedup keys). See `planFeed`.
   // Holding these on a single object makes the pure-function reducer in
   // `useTtsPlayer.helpers` exhaustively testable.
@@ -131,6 +156,11 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
   const sentencesPerChunkRef = useRef<number>(3);
   const pcmFallbackWarnedRef = useRef(false);
   const startSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The startup status-poll interval. Kept on a ref (like the safety timer)
+  // so it can be cleared on unmount — otherwise a start begun mid-lifecycle
+  // would keep polling `tts_server_status` for up to 120s after the component
+  // is gone.
+  const startPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const modelPreloadedRef = useRef(false);
 
   const setPlaybackMode = useCallback((mode: TtsPlaybackMode) => {
@@ -212,16 +242,28 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
             if (running) {
               setServerStatus('running');
               clearInterval(poll);
-              clearTimeout(safetyTimer);
+              startPollRef.current = null;
+              // Reference the timer via its ref (not a local captured before
+              // its initialiser) so there is no temporal-dead-zone ordering
+              // hazard between the interval and the timeout.
+              if (startSafetyTimerRef.current !== null) {
+                clearTimeout(startSafetyTimerRef.current);
+                startSafetyTimerRef.current = null;
+              }
             }
           } catch {
             // Ignore transient invoke errors during startup.
           }
         }, 2000);
+        startPollRef.current = poll;
         // After 120s of waiting, give up the polling. Don't change status
         // here — by then the error event will have already fired (or the
         // user can read the streaming log).
-        const safetyTimer = setTimeout(() => clearInterval(poll), 120_000);
+        const safetyTimer = setTimeout(() => {
+          clearInterval(poll);
+          startPollRef.current = null;
+          startSafetyTimerRef.current = null;
+        }, 120_000);
         startSafetyTimerRef.current = safetyTimer;
       })
       .catch((e) => {
@@ -232,6 +274,10 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
         if (startSafetyTimerRef.current !== null) {
           clearTimeout(startSafetyTimerRef.current);
           startSafetyTimerRef.current = null;
+        }
+        if (startPollRef.current !== null) {
+          clearInterval(startPollRef.current);
+          startPollRef.current = null;
         }
       });
   }, []);
@@ -329,7 +375,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
           queueRef.current = [];
           break;
         }
-        const batch = queueRef.current.splice(0);
+        const batch = queueRef.current.splice(0, WS_BATCH_CHUNKS);
         if (batch.length === 0) break;
 
         const maxSteps = Math.max(...batch.map((s) => pickSteps(s, sampleStepsRef.current)));
@@ -358,7 +404,13 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
             await safeInvoke('tts_synthesize_batch_ws_nonblocking', baseArgs);
           }
           errorCountRef.current = 0;
+          skipRef.current = false;
         } catch (e) {
+          if (skipRef.current) {
+            skipRef.current = false;
+            errorCountRef.current = 0;
+            continue;
+          }
           errorCountRef.current++;
           if (errorCountRef.current <= 1) {
             setLastError(String(e));
@@ -389,7 +441,16 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
       try {
         await synthesize(sentence);
         errorCountRef.current = 0;
+        skipRef.current = false;
       } catch (e) {
+        // A skip aborts the in-flight synthesis via tts_stop_playback; treat
+        // it as "advance to the next sentence", not a failure, so repeated
+        // skips don't trip the consecutive-error circuit breaker.
+        if (skipRef.current) {
+          skipRef.current = false;
+          errorCountRef.current = 0;
+          continue;
+        }
         errorCountRef.current++;
         if (errorCountRef.current <= 1) {
           setLastError(String(e));
@@ -453,6 +514,14 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
       );
       feedStateRef.current = state;
 
+      // A mid-stream `stop()` arms `stoppedMessageIdRef`. Ignore any further
+      // frames of that same message so playback does NOT resume from the top;
+      // a different messageId means a new turn started, so disarm and proceed.
+      if (stoppedMessageIdRef.current !== undefined) {
+        if (messageId === stoppedMessageIdRef.current) return;
+        stoppedMessageIdRef.current = undefined;
+      }
+
       abortedRef.current = false;
       if (Date.now() > errorCooldownUntilRef.current) {
         errorCountRef.current = 0;
@@ -501,6 +570,13 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
 
   const stop = useCallback(() => {
     abortedRef.current = true;
+    // A full stop is not a skip — clear any pending skip flag so a later
+    // genuine error is still counted.
+    skipRef.current = false;
+    // Remember which message was stopped so late streaming frames for the
+    // SAME message are ignored (otherwise resetting feedState below makes
+    // the next frame look new and playback restarts from the top).
+    stoppedMessageIdRef.current = feedStateRef.current.lastMessageId;
     queueRef.current = [];
     feedStateRef.current = createFeedState();
     safeInvoke('tts_stop_playback').catch(() => {});
@@ -508,6 +584,11 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
   }, []);
 
   const skip = useCallback(() => {
+    // Arm the skip flag BEFORE stopping so the consumer loop attributes the
+    // resulting synthesis abort to the user (advance) rather than to an
+    // error. The backend auto-clears its cancel flag after one abort, so the
+    // next sentence synthesises normally.
+    skipRef.current = true;
     safeInvoke('tts_stop_playback').catch(() => {});
   }, []);
 
@@ -518,6 +599,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
     // otherwise a still-awaiting `synthesize()` from the previous run can
     // resume and overlap the replay.
     abortedRef.current = true;
+    stoppedMessageIdRef.current = undefined;
     queueRef.current = [];
     feedStateRef.current = createFeedState();
     safeInvoke('tts_stop_playback').catch(() => {});
@@ -541,6 +623,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
     // calls the backend directly, so a queued item from a prior session
     // would otherwise play right after the bypass.
     abortedRef.current = true;
+    stoppedMessageIdRef.current = undefined;
     queueRef.current = [];
     feedStateRef.current = createFeedState();
     safeInvoke('tts_stop_playback').catch(() => {});
@@ -676,6 +759,10 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
       if (startSafetyTimerRef.current !== null) {
         clearTimeout(startSafetyTimerRef.current);
         startSafetyTimerRef.current = null;
+      }
+      if (startPollRef.current !== null) {
+        clearInterval(startPollRef.current);
+        startPollRef.current = null;
       }
     };
   }, [refreshServerStatus, refreshInstalled]);

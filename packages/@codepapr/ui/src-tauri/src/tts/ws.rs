@@ -48,8 +48,14 @@ struct WsRequest {
 }
 
 /// Number of persistent WebSocket connections in the pool.
-/// Each connection processes requests independently, so 2 connections
-/// can handle 2 concurrent batch requests in true parallel.
+/// Each connection processes requests independently, so N connections
+/// can handle N concurrent batch requests in true parallel.
+///
+/// Currently 1 by design: the blocking path serialises batches on this
+/// single pooled connection, which keeps audio enqueue order deterministic
+/// (concurrent connections enqueueing into the shared rodio sink could play
+/// sentences out of order). True parallelism comes from the non-blocking
+/// path, which opens its own independent connections per chunk.
 const WS_POOL_SIZE: usize = 1;
 
 /// Round-robin counter for assigning requests to pool connections.
@@ -355,8 +361,15 @@ fn send_to_pool(
         temperature,
         done_tx,
     };
-    tx.send(req)
-        .map_err(|_| "WebSocket pool channel closed".to_string())
+    tx.send(req).map_err(|_| {
+        // The pool connection's receiver was dropped (initial connect failure
+        // or loop exit) yet its sender is still parked in WS_POOL. Invalidate
+        // the pool so the next call rebuilds a fresh connection instead of
+        // permanently feeding a dead channel (which would fail every
+        // ws-batch synthesis until the app restarts).
+        invalidate_pool();
+        "WebSocket pool channel closed".to_string()
+    })
 }
 
 /// Blocking variant: sends a batch through the persistent WebSocket

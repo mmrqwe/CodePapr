@@ -412,11 +412,12 @@ pub fn tts_server_start(app_handle: tauri::AppHandle, gpt_sovits_path: Option<St
                         );
                         let client = tts_client();
                         let base_url = GptSovitsServer::api_base_url();
-                        let body = serde_json::json!({ "sovits_model_path": ft }).to_string();
+                        // GET + query matches the synthesis hot-path
+                        // (`synthesize_blocking`) and api.py's `/set_model`
+                        // handler — keep all set_model calls on one method.
                         if let Ok(resp) = client
-                            .post(format!("{base_url}/set_model"))
-                            .header("Content-Type", "application/json")
-                            .body(body)
+                            .get(format!("{base_url}/set_model"))
+                            .query(&[("sovits_model_path", ft.as_str())])
                             .send()
                         {
                             if resp.status().is_success() {
@@ -739,11 +740,9 @@ pub async fn tts_set_model(model_name: String) -> Result<(), String> {
         }
         let base_url = GptSovitsServer::api_base_url();
         let client = tts_client();
-        let body = serde_json::json!({ "sovits_model_path": default_path }).to_string();
         let resp = client
-            .post(format!("{base_url}/set_model"))
-            .header("Content-Type", "application/json")
-            .body(body)
+            .get(format!("{base_url}/set_model"))
+            .query(&[("sovits_model_path", default_path.as_str())])
             .send()
             .map_err(|e| format!("set_model request failed: {e}"))?;
         if !resp.status().is_success() {
@@ -757,11 +756,9 @@ pub async fn tts_set_model(model_name: String) -> Result<(), String> {
     }
     let base_url = GptSovitsServer::api_base_url();
     let client = tts_client();
-    let body = serde_json::json!({ "sovits_model_path": model_name }).to_string();
     let resp = client
-        .post(format!("{base_url}/set_model"))
-        .header("Content-Type", "application/json")
-        .body(body)
+        .get(format!("{base_url}/set_model"))
+        .query(&[("sovits_model_path", model_name.as_str())])
         .send()
         .map_err(|e| format!("set_model request failed: {e}"))?;
     if !resp.status().is_success() {
@@ -1033,12 +1030,21 @@ fn synthesize_blocking(
                 .map(|g| g.as_ref() != Some(model))
                 .unwrap_or(true);
             if should_set {
-                let _ = client
+                // Only record the model as "loaded" when the server actually
+                // accepted it. Caching a failed/errored request would poison
+                // the cache: every subsequent call would skip /set_model
+                // (believing the model is already loaded) and synthesis would
+                // silently run on the wrong model until a server restart.
+                let set_ok = client
                     .get(format!("{base_url}/set_model"))
                     .query(&[("sovits_model_path", model.as_str())])
-                    .send();
-                if let Ok(mut g) = last_model_lock().lock() {
-                    *g = Some(model.clone());
+                    .send()
+                    .map(|r| r.status().is_success())
+                    .unwrap_or(false);
+                if set_ok {
+                    if let Ok(mut g) = last_model_lock().lock() {
+                        *g = Some(model.clone());
+                    }
                 }
             }
         }
@@ -1068,16 +1074,23 @@ fn synthesize_blocking(
                 .map(|g| g.as_ref() != Some(&key))
                 .unwrap_or(true);
             if should_refer {
-                let _ = client
+                // Only cache the refer key on success — caching a failed
+                // request would poison the cache the same way as /set_model
+                // above, leaving the wrong reference voice stuck.
+                let refer_ok = client
                     .get(format!("{base_url}/change_refer"))
                     .query(&[
                         ("refer_wav_path", audio_path.as_str()),
                         ("prompt_text", prompt_text.as_deref().unwrap_or("")),
                         ("prompt_language", lang),
                     ])
-                    .send();
-                if let Ok(mut g) = last_refer_lock().lock() {
-                    *g = Some(key);
+                    .send()
+                    .map(|r| r.status().is_success())
+                    .unwrap_or(false);
+                if refer_ok {
+                    if let Ok(mut g) = last_refer_lock().lock() {
+                        *g = Some(key);
+                    }
                 }
             }
         }
@@ -1563,6 +1576,7 @@ pub fn tts_finetune_start(
     character_id: String,
     train_audio_dir: String,
 ) -> Result<(), String> {
+    sanitize_character_id(&character_id)?;
     finetune::start_finetune(app_handle, character_id, PathBuf::from(train_audio_dir))
 }
 
@@ -1572,6 +1586,7 @@ pub fn tts_finetune_collect_and_start(
     app_handle: tauri::AppHandle,
     character_id: String,
 ) -> Result<(), String> {
+    sanitize_character_id(&character_id)?;
     finetune::collect_and_start_finetune(app_handle, character_id)
 }
 
@@ -1584,12 +1599,14 @@ pub fn tts_finetune_cancel() -> Result<(), String> {
 /// Returns the path to the fine-tuned model for a character, or None.
 #[tauri::command]
 pub fn tts_finetune_status(character_id: String) -> Result<Option<String>, String> {
+    sanitize_character_id(&character_id)?;
     Ok(finetune::check_finetune_status(&character_id))
 }
 
 /// Check whether training data (metadata.list + WAV files) exists for a character.
 #[tauri::command]
 pub fn tts_check_training_data_exists(character_id: String) -> Result<bool, String> {
+    sanitize_character_id(&character_id)?;
     let meta = voices_dir().join(&character_id).join("train").join("metadata.list");
     Ok(meta.exists())
 }
@@ -1650,7 +1667,9 @@ fn split_sentences(text: &str, lang: &str) -> Vec<String> {
         current.push(ch);
         if ENDINGS.contains(&ch) {
             let trimmed = current.trim().to_string();
-            if !trimmed.is_empty() && trimmed != "." {
+            // Drop fragments that are only a terminator (e.g. from "。。" or
+            // "..") — symmetric for the CJK full stop and the ASCII period.
+            if !trimmed.is_empty() && trimmed != "." && trimmed != "。" {
                 sentences.push(trimmed);
             }
             current.clear();
@@ -1684,6 +1703,7 @@ pub fn tts_generate_training_data(
     custom_script: Option<String>,
     force: Option<bool>,
 ) -> Result<(), String> {
+    sanitize_character_id(&character_id)?;
     {
         let lock = tts_server_lock();
         let guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;

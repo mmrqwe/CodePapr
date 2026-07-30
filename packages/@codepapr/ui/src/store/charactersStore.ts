@@ -5,6 +5,7 @@ import {
   buildCharacterSystemPrompt,
 } from '../utils/characterTypes';
 import { loadCharactersState, saveCharactersState } from '../utils/characterStorage';
+import { toast } from './toastStore';
 
 interface CharacterState {
   loaded: boolean;
@@ -28,6 +29,24 @@ function buildStateFile(state: CharacterState): CharactersStateFile {
   };
 }
 
+// Serialise persistence so concurrent mutations cannot write the JSON blob
+// out of order. Each mutation enqueues a snapshot of its post-mutation state;
+// the chain guarantees the latest (most complete) snapshot is the final thing
+// written to disk. A failed save is surfaced to the user rather than letting
+// in-memory state silently diverge from what is persisted.
+let saveChain: Promise<void> = Promise.resolve();
+
+function persistState(state: CharacterState): Promise<void> {
+  const file = buildStateFile(state);
+  saveChain = saveChain.then(() =>
+    saveCharactersState(file).catch((err) => {
+      console.warn('Failed to persist characters state:', err);
+      toast.error('角色数据保存失败，最近的更改可能未被持久化。');
+    }),
+  );
+  return saveChain;
+}
+
 export const useCharactersStore = create<CharacterState & CharacterActions>((set, get) => ({
   loaded: false,
   loading: false,
@@ -46,31 +65,36 @@ export const useCharactersStore = create<CharacterState & CharacterActions>((set
       });
     } catch (err) {
       console.warn('Failed to load characters:', err);
-      set({ loaded: true, loading: false });
+      // Leave `loaded` false so a later invocation (e.g. reopening the
+      // characters modal) retries instead of being permanently blocked by a
+      // transient failure.
+      set({ loaded: false, loading: false });
     }
   },
   upsertCharacter: async (character) => {
-    const { characters } = get();
-    const next = (() => {
-      const idx = characters.findIndex((c) => c.id === character.id);
-      if (idx === -1) return [...characters, character];
-      const copy = characters.slice();
-      copy[idx] = character;
-      return copy;
-    })();
-    set({ characters: next });
-    await saveCharactersState(buildStateFile({ ...get(), characters: next }));
+    // Functional update: compute `next` from the latest committed state so
+    // two rapid upserts cannot lose one another's writes (the previous
+    // read-then-set captured a stale snapshot).
+    set((state) => {
+      const idx = state.characters.findIndex((c) => c.id === character.id);
+      const characters =
+        idx === -1
+          ? [...state.characters, character]
+          : state.characters.map((c) => (c.id === character.id ? character : c));
+      return { characters };
+    });
+    await persistState(get());
   },
   deleteCharacter: async (characterId) => {
-    const { characters, activeCharacterId } = get();
-    const next = characters.filter((c) => c.id !== characterId);
-    const nextActive = activeCharacterId === characterId ? null : activeCharacterId;
-    set({ characters: next, activeCharacterId: nextActive });
-    await saveCharactersState(buildStateFile({ ...get(), characters: next, activeCharacterId: nextActive }));
+    set((state) => ({
+      characters: state.characters.filter((c) => c.id !== characterId),
+      activeCharacterId: state.activeCharacterId === characterId ? null : state.activeCharacterId,
+    }));
+    await persistState(get());
   },
   setActiveCharacter: async (characterId) => {
     set({ activeCharacterId: characterId });
-    await saveCharactersState(buildStateFile(get()));
+    await persistState(get());
   },
 }));
 

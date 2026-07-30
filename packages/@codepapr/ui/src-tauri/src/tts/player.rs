@@ -52,6 +52,17 @@ impl AudioPlayer {
         }
     }
 
+    /// Set the playback volume (clamped to 0.0-2.0). Applies to the active
+    /// sink immediately and to every sink created afterwards. This completes
+    /// the previously dead `volume` field, which was read on sink creation
+    /// but had no setter, so it could never change from 1.0.
+    pub(crate) fn set_volume(&mut self, volume: f32) {
+        self.volume = volume.clamp(0.0, 2.0);
+        if let Some(ref sink) = self.sink {
+            sink.set_volume(self.volume);
+        }
+    }
+
     /// Mode A entry-point. Replaces any in-flight playback with a single
     /// fully-decoded WAV.
     pub(crate) fn play_wav(&mut self, wav_bytes: &[u8]) -> Result<(), String> {

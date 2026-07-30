@@ -53,6 +53,22 @@ describe('sanitizeForSpeech', () => {
     expect(sanitizeForSpeech('Word __strong__ end.')).toContain('strong');
   });
 
+  it('preserves snake_case identifiers (underscores between word chars)', () => {
+    const out = sanitizeForSpeech('Call the get_user_name function now.');
+    expect(out).toContain('get_user_name');
+  });
+
+  it('preserves a single trailing underscore identifier', () => {
+    expect(sanitizeForSpeech('Use my_var and other_var_2 here.')).toContain('my_var');
+    expect(sanitizeForSpeech('Use my_var and other_var_2 here.')).toContain('other_var_2');
+  });
+
+  it('DELETES underscore italics at word boundaries', () => {
+    const out = sanitizeForSpeech('He said _quietly_ hello.');
+    expect(out).not.toContain('quietly');
+    expect(out).toContain('hello');
+  });
+
   it('DELETES italic action descriptors entirely (single line, English)', () => {
     const out = sanitizeForSpeech('She said *whispering* hello.');
     expect(out).not.toContain('whispering');

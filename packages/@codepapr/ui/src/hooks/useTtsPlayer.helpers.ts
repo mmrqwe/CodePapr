@@ -35,7 +35,10 @@ export function sanitizeForSpeech(text: string): string {
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/__([^_]+)__/g, '$1')
     .replace(/\*[^*]+?\*/g, ' ')
-    .replace(/_[^_]+?_/g, ' ')
+    // Underscore italics only when the underscores sit on word boundaries —
+    // otherwise identifiers like `snake_case` (underscores between word
+    // chars) get their middle stripped out.
+    .replace(/(^|[^\w])_[^_]+?_(?=[^\w]|$)/g, '$1 ')
     .replace(/（[^（）]*）/g, ' ')
     .replace(/\([^()]*\)/g, ' ')
     .replace(/…+/g, '。')
