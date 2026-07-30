@@ -370,8 +370,16 @@ fn main() {
                 workspace_fs::watcher::stop_workspace_watcher_impl();
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_handle, event| {
+            // CloseRequested covers normal window close; Exit also fires on
+            // programmatic exit / last-window-close paths, so reap backend
+            // processes here too (idempotent) to avoid orphaned servers.
+            if matches!(event, tauri::RunEvent::Exit) {
+                let _ = shell::background::stop_all_background_processes(None);
+            }
+        });
 }
 
 #[cfg(test)]

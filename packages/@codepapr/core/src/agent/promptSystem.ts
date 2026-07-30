@@ -165,7 +165,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       'await papr.agent.run({ agent: "agentName", task: "你的任务" }, onProgress?)',
       '// 返回: { content: "...", steps: [...], reasoningContent?: "..." }',
       '// onProgress 可选，接收流式事件: { type: "tool-call-start"|"tool-call-end"|"content-delta" }',
-      'Agent 可调用 manifest 中声明的工具（read、grep、list、web_search 等），支持多轮推理。',
+      'Agent 可调用 manifest 中声明的工具（read、grep、list、websearch 等），支持多轮推理。',
       '适用场景：让 AI 分析项目文件、搜索网络、生成报告。App 可以展示 loading 反馈 + steps 追踪。',
       '需要权限：agent:run:<agentName>',
       '',
@@ -199,10 +199,10 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '| storage:read, storage:write | papr.db | L1 |',
       '| fs:read, fs:write | papr.fs | L1 |',
       '| agent:run:<name> | papr.agent.run | L1 |',
-      '| workspace:read | Agent 只读工具（read/grep/list/graph/lsp/diagnostics/read_image/skill_load/todo） | L1 |',
-      '| http:get, http:post | papr.http + Agent web_search/web_fetch/web_download + MCP | L2 |',
+      '| workspace:read | Agent 只读工具（read/grep/list/lsp/diagnostics/read_image/skill_load/todo） | L1 |',
+      '| http:get, http:post | papr.http + Agent websearch/webfetch + MCP | L2 |',
       '| workspace:write | Agent 写入工具（write/edit/patch） | L3 |',
-      '| workspace:exec | Agent 执行工具（exec/shell） | L3 |',
+      '| workspace:exec | Agent 执行工具（bash） | L3 |',
 
       '## Agent 定义',
       '在 agents 参数中声明 app 可调用的 AI Agent。每个 Agent 是一个可运行多轮工具调用的子代理。',
@@ -210,14 +210,14 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '| name | Agent 名称 | "assistant", "analyst" |',
       '| model | main（用户主模型）/ fast / mentor | "main" |',
       '| systemPrompt | 自定义系统提示词 | "你是数据分析专家" |',
-      '| tools | 工具白名单（可选，不声明=使用当前级别允许的全部工具）| ["read", "web_search"] |',
+      '| tools | 工具白名单（可选，不声明=使用当前级别允许的全部工具）| ["read", "websearch"] |',
       '| maxToolRounds | 最大工具轮数（默认20，上限受全局设置约束）| 15 |',
       '| inheritContext | 继承主会话上下文（可选，默认全不继承）| { projectRules: true, skills: true } |',
       '',
       '不声明 tools → Agent 可使用当前 level 允许的全部内置工具。MCP 工具必须显式声明才可用（L2+）。',
       '声明 tools → 仅使用白名单中的工具，且必须在 level 允许范围内。',
       '始终排除的工具：task（委派子代理）、app_render（套娃生成）。',
-      '高危工具（write/edit/exec）仍需 manifest.permissions 中声明 workspace:write/exec 权限。',
+      '高危工具（write/edit/patch/bash）仍需 manifest.permissions 中声明 workspace:write/exec 权限。',
       'inheritContext 子字段：skills（继承技能）、projectRules（继承项目规则）、projectMemory（继承项目记忆）、customPrompt（继承自定义提示词）。',
 
       '## 后端服务 vs 纯前端',
@@ -313,7 +313,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       'await papr.agent.run({ agent: "agentName", task: "你的任務" }, onProgress?)',
       '// 返回: { content: "...", steps: [...], reasoningContent?: "..." }',
       '// onProgress 可選，接收流式事件: { type: "tool-call-start"|"tool-call-end"|"content-delta" }',
-      'Agent 可調用 manifest 中宣告的工具（read、grep、list、web_search 等），支援多輪推理。',
+      'Agent 可調用 manifest 中宣告的工具（read、grep、list、websearch 等），支援多輪推理。',
       '適用場景：讓 AI 分析專案檔案、搜尋網路、生成報告。App 可以展示 loading 回饋 + steps 追蹤。',
       '需要權限：agent:run:<agentName>',
       '',
@@ -347,10 +347,10 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '| storage:read, storage:write | papr.db | L1 |',
       '| fs:read, fs:write | papr.fs | L1 |',
       '| agent:run:<name> | papr.agent.run | L1 |',
-      '| workspace:read | Agent 唯讀工具（read/grep/list/graph/lsp/diagnostics/read_image/skill_load/todo） | L1 |',
-      '| http:get, http:post | papr.http + Agent web_search/web_fetch/web_download + MCP | L2 |',
+      '| workspace:read | Agent 唯讀工具（read/grep/list/lsp/diagnostics/read_image/skill_load/todo） | L1 |',
+      '| http:get, http:post | papr.http + Agent websearch/webfetch + MCP | L2 |',
       '| workspace:write | Agent 寫入工具（write/edit/patch） | L3 |',
-      '| workspace:exec | Agent 執行工具（exec/shell） | L3 |',
+      '| workspace:exec | Agent 執行工具（bash） | L3 |',
 
       '## Agent 定義',
       '在 agents 參數中宣告 app 可呼叫的 AI Agent。每個 Agent 是一個可執行多輪工具呼叫的子代理。',
@@ -358,14 +358,14 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '| name | Agent 名稱 | "assistant", "analyst" |',
       '| model | main（使用者主模型）/ fast / mentor | "main" |',
       '| systemPrompt | 自訂系統提示詞 | "你是資料分析專家" |',
-      '| tools | 工具白名單（可選，不宣告=使用目前級別允許的全部工具）| ["read", "web_search"] |',
+      '| tools | 工具白名單（可選，不宣告=使用目前級別允許的全部工具）| ["read", "websearch"] |',
       '| maxToolRounds | 最大工具輪數（預設20，上限受全域設定約束）| 15 |',
       '| inheritContext | 繼承主會話上下文（可選，預設全不繼承）| { projectRules: true, skills: true } |',
       '',
       '不宣告 tools → Agent 可使用目前 level 允許的全部內建工具。MCP 工具必須顯式宣告才可用（L2+）。',
       '宣告 tools → 僅使用白名單中的工具，且必須在 level 允許範圍內。',
       '始終排除的工具：task（委派子代理）、app_render（套娃生成）。',
-      '高危工具（write/edit/exec）仍需 manifest.permissions 中宣告 workspace:write/exec 權限。',
+      '高危工具（write/edit/patch/bash）仍需 manifest.permissions 中宣告 workspace:write/exec 權限。',
       'inheritContext 子欄位：skills（繼承技能）、projectRules（繼承專案規則）、projectMemory（繼承專案記憶）、customPrompt（繼承自訂提示詞）。',
 
       '## 後端服務 vs 純前端',
@@ -453,7 +453,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       'await papr.agent.run({ agent: "agentName", task: "your task" }, onProgress?)',
       '// Returns: { content: "...", steps: [...], reasoningContent?: "..." }',
       '// onProgress (optional) receives stream events: { type: "tool-call-start"|"tool-call-end"|"content-delta" }',
-      'Agents use manifest-declared tools (read, grep, list, web_search, etc.) with multi-turn reasoning.',
+      'Agents use manifest-declared tools (read, grep, list, websearch, etc.) with multi-turn reasoning.',
       'Use for: AI-powered file analysis, web research, report generation. Show loading + step tracking in UI.',
       'Permission: agent:run:<agentName>',
       '',
@@ -488,9 +488,9 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '| fs:read, fs:write | papr.fs | L1 |',
       '| agent:run:<name> | papr.agent.run | L1 |',
       '| workspace:read | Agent read tools (read/grep/list/lsp/diagnostics/read_image/skill_load/todo) | L1 |',
-      '| http:get, http:post | papr.http + Agent web_search/web_fetch/web_download + MCP | L2 |',
+      '| http:get, http:post | papr.http + Agent websearch/webfetch + MCP | L2 |',
       '| workspace:write | Agent write tools (write/edit/patch) | L3 |',
-      '| workspace:exec | Agent exec tool (bash) | L3 |',
+      '| workspace:exec | Agent bash tool (shell) | L3 |',
       'Only declare permissions the app actually needs.',
 
       '## Agent Definitions',
@@ -499,14 +499,14 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '| name | Agent name | "assistant", "analyst" |',
       '| model | main (user primary) / fast / mentor | "main" |',
       '| systemPrompt | Custom system prompt | "You are a data analyst" |',
-      '| tools | Tool whitelist (optional, omit = all tools allowed at this level) | ["read", "web_search"] |',
+      '| tools | Tool whitelist (optional, omit = all tools allowed at this level) | ["read", "websearch"] |',
       '| maxToolRounds | Max tool rounds (default 20, capped by global settings) | 15 |',
       '| inheritContext | Inherit main session context (optional, none by default) | { projectRules: true, skills: true } |',
       '',
       'Omit tools → agent can use ALL built-in tools permitted at its level. MCP tools must be explicitly declared (L2+).',
       'Specify tools → only those tools are available, and they must be within the level allowlist.',
       'Always excluded tools: task (sub-delegation), app_render (nesting).',
-      'Dangerous tools (write/edit/exec) still require workspace:write/exec permissions in manifest.',
+      'Dangerous tools (write/edit/patch/bash) still require workspace:write/exec permissions in manifest.',
       'inheritContext sub-fields: skills (inherit skills), projectRules (inherit project rules), projectMemory (inherit project memory), customPrompt (inherit custom prompt).',
 
       '## Backend vs Frontend-Only',
@@ -932,10 +932,10 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
     if (isApp) {
       appRender.push(
         lang === 'en'
-          ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps to the application panel. Call this after writing HTML with workspace_write_file to `.CodePapr/apps/<appId>/index.html`. appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. The HTML runs in a sandboxed iframe with its own origin — use CDN for libraries (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js) and fetch() for data APIs.\n\n📦 Papr SDK (available in your HTML via window.papr):\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — persistent key-value storage\n  • papr.agent.run({agent, task}) — invoke an AI agent (define agents in the agents parameter)\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP requests\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — file I/O in app data directory\n  • papr.app.info() — get app metadata\n⚠️ Declare permissions in the permissions parameter for each SDK feature used (storage:read, storage:write, http:get, http:post, fs:read, fs:write, agent:run:<name>).'
+          ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps to the application panel. Call this after writing HTML with workspace_write_file to `.CodePapr/apps/<appId>/index.html`. appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. The HTML runs in a sandboxed iframe isolated from the host — use CDN for libraries (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js) and fetch() for data APIs.\n\n📦 Papr SDK (available in your HTML via window.papr):\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — persistent key-value storage\n  • papr.agent.run({agent, task}) — invoke an AI agent (define agents in the agents parameter)\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP requests\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — file I/O in app data directory\n  • papr.app.info() — get app metadata\n⚠️ Declare permissions in the permissions parameter for each SDK feature used (storage:read, storage:write, http:get, http:post, fs:read, fs:write, agent:run:<name>).'
           : lang === 'zh-TW'
-          ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用渲染到應用面板。先用 workspace_write_file 將 HTML 寫入 `.CodePapr/apps/<appId>/index.html`，再調用此工具。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。HTML 在具有獨立 origin 的沙箱 iframe 中運行——通過 CDN 引用函式庫，支援 fetch() 存取資料 API。\n\n📦 Papr SDK（在 HTML 中可通過 window.papr 使用）：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 鍵值持久化存儲\n  • papr.agent.run({agent, task}) — 調用 AI Agent（在 agents 參數中定義）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 請求\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — app data 目錄內的檔案讀寫\n  • papr.app.info() — 獲取應用資訊\n⚠️ 使用前必須在 permissions 參數中聲明對應權限（storage:read, storage:write, http:get, http:post, fs:read, fs:write, agent:run:<name>）。'
-          : '- [app_render] 你的主要输出工具。将交互式 HTML 应用渲染到应用面板。先用 workspace_write_file 将 HTML 写入 `.CodePapr/apps/<appId>/index.html`，再调用此工具。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。HTML 在具有独立 origin 的沙箱 iframe 中运行——通过 CDN 引用库，支持 fetch() 访问数据 API。\n\n📦 Papr SDK（在 HTML 中可通过 window.papr 使用）：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 键值持久化存储\n  • papr.agent.run({agent, task}, onProgress?) — 调用 AI Agent（在 agents 参数中定义，可声明 tools 和 maxToolRounds）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 请求\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — app data 目录内的文件读写\n  • papr.app.info() — 获取应用信息\n⚠️ 使用前必须在 permissions 参数中声明对应权限（storage:read, storage:write, http:get, http:post, fs:read, fs:write, workspace:read, workspace:write, workspace:exec, agent:run:<name>）。\n🤖 Agent 工具（在 agents[].tools 声明）：read, grep, list, graph, web_search, web_fetch, write, edit, exec。工具运行在 Agent Loop 中，支持多轮调用（maxToolRounds 控制上限）。'
+          ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用渲染到應用面板。先用 workspace_write_file 將 HTML 寫入 `.CodePapr/apps/<appId>/index.html`，再調用此工具。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。HTML 在與宿主隔離的沙箱 iframe 中運行——通過 CDN 引用函式庫，支援 fetch() 存取資料 API。\n\n📦 Papr SDK（在 HTML 中可通過 window.papr 使用）：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 鍵值持久化存儲\n  • papr.agent.run({agent, task}) — 調用 AI Agent（在 agents 參數中定義）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 請求\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — app data 目錄內的檔案讀寫\n  • papr.app.info() — 獲取應用資訊\n⚠️ 使用前必須在 permissions 參數中聲明對應權限（storage:read, storage:write, http:get, http:post, fs:read, fs:write, agent:run:<name>）。'
+          : '- [app_render] 你的主要输出工具。将交互式 HTML 应用渲染到应用面板。先用 workspace_write_file 将 HTML 写入 `.CodePapr/apps/<appId>/index.html`，再调用此工具。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。HTML 在与宿主隔离的沙箱 iframe 中运行——通过 CDN 引用库，支持 fetch() 访问数据 API。\n\n📦 Papr SDK（在 HTML 中可通过 window.papr 使用）：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 键值持久化存储\n  • papr.agent.run({agent, task}, onProgress?) — 调用 AI Agent（在 agents 参数中定义，可声明 tools 和 maxToolRounds）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 请求\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — app data 目录内的文件读写\n  • papr.app.info() — 获取应用信息\n⚠️ 使用前必须在 permissions 参数中声明对应权限（storage:read, storage:write, http:get, http:post, fs:read, fs:write, workspace:read, workspace:write, workspace:exec, agent:run:<name>）。\n🤖 Agent 工具（在 agents[].tools 声明）：read, grep, list, lsp, diagnostics, read_image, skill_load, todo, websearch, webfetch, write, edit, patch, bash。工具运行在 Agent Loop 中，支持多轮调用（maxToolRounds 控制上限）。'
       );
     } else {
       appRender.push(

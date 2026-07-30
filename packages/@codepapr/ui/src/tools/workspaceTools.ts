@@ -61,6 +61,7 @@ import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { useAgentStore } from '../store/agentStore';
 import { usePermissionStore, isAbsolutePath } from '../store/permissionStore';
 import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
+import { disallowedPermissionsForLevel } from '../papr/levelGrants';
 import {
   applySearchReplaceDiff,
   applySearchReplacePatch,
@@ -1755,7 +1756,7 @@ name: 'web_download_file',
         },
         level: {
           type: 'number',
-          description: '权限级别 0-3。L0=纯计算, L1=Runtime（存储+LLM+只读工作区，默认）, L2=联网（+HTTP+搜索+MCP）, L3=系统（+文件写入+终端+Git，需用户全局开启）。',
+          description: '权限级别 0-3。L0=纯计算, L1=Runtime（存储+文件+AI Agent+只读工作区，默认）, L2=联网（+HTTP+搜索+MCP）, L3=系统（+文件写入+终端执行，需用户全局开启）。',
         },
         agents: {
           type: 'array',
@@ -1768,11 +1769,21 @@ name: 'web_download_file',
               tools: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Agent 可用的工具白名单（可选）。不声明 = 继承主 Agent 全部工具（含 MCP、skill_load）。始终排除 task 和 app_render。高危工具（write/edit/exec）需 manifest.permissions 中声明 workspace:write/exec。',
+                description: 'Agent 可用的工具白名单（可选）。可用工具名：read, grep, list, lsp, diagnostics, read_image, skill_load, todo, websearch, webfetch（L2+）, write, edit, patch, bash（L3）。不声明 = 使用当前级别允许的全部工具。始终排除 task 和 app_render。高危工具（write/edit/patch/bash）需 manifest.permissions 中声明 workspace:write/exec。',
               },
               maxToolRounds: {
                 type: 'number',
                 description: '最大工具调用轮数，默认 20，上限 50',
+              },
+              inheritContext: {
+                type: 'object',
+                properties: {
+                  skills: { type: 'boolean', description: '继承主会话的技能（skills）' },
+                  projectRules: { type: 'boolean', description: '继承项目规则（AGENTS.md 等）' },
+                  projectMemory: { type: 'boolean', description: '继承项目记忆' },
+                  customPrompt: { type: 'boolean', description: '继承用户自定义系统提示词' },
+                },
+                description: '可选。继承主会话上下文的哪些部分（默认全不继承）。',
               },
             },
             required: ['name'],
@@ -2431,7 +2442,7 @@ export function registerWorkspaceTools(
     const port = asOptionalNumber(args.port);
     const rawFiles = args.files as Array<{ relativePath: string; content: string }> | undefined;
     const permissions = (args.permissions as string[] | undefined) ?? [];
-    const agents = (args.agents as Array<{name: string; model?: string; systemPrompt?: string; tools?: string[]; maxToolRounds?: number}> | undefined) ?? [];
+    const agents = (args.agents as Array<{name: string; model?: string; systemPrompt?: string; tools?: string[]; maxToolRounds?: number; inheritContext?: {skills?: boolean; projectRules?: boolean; projectMemory?: boolean; customPrompt?: boolean}}> | undefined) ?? [];
 
     for (const a of agents) {
       if (!a.name || typeof a.name !== 'string' || a.name.trim().length === 0) {
@@ -2445,6 +2456,17 @@ export function registerWorkspaceTools(
       }
       if (a.maxToolRounds !== undefined && (typeof a.maxToolRounds !== 'number' || !Number.isInteger(a.maxToolRounds) || a.maxToolRounds < 1)) {
         throw new Error(`agent maxToolRounds 必须是正整数: ${a.maxToolRounds}`);
+      }
+      if (a.inheritContext !== undefined) {
+        if (typeof a.inheritContext !== 'object' || a.inheritContext === null || Array.isArray(a.inheritContext)) {
+          throw new Error(`agent inheritContext 必须是对象: ${JSON.stringify(a.inheritContext)}`);
+        }
+        for (const field of ['skills', 'projectRules', 'projectMemory', 'customPrompt'] as const) {
+          const val = a.inheritContext[field];
+          if (val !== undefined && typeof val !== 'boolean') {
+            throw new Error(`agent inheritContext.${field} 必须是布尔值: ${val}`);
+          }
+        }
       }
     }
 
@@ -2476,18 +2498,7 @@ export function registerWorkspaceTools(
       throw new Error(`level 必须是 0/1/2/3，收到: ${args.level}`);
     }
 
-    const LEVEL_GRANTS: Record<number, Set<string>> = {
-      0: new Set(),
-      1: new Set(['storage:read', 'storage:write', 'fs:read', 'fs:write', 'agent:run:*', 'workspace:read']),
-      2: new Set(['storage:read', 'storage:write', 'fs:read', 'fs:write', 'agent:run:*', 'workspace:read', 'http:get', 'http:post']),
-      3: new Set(['storage:read', 'storage:write', 'fs:read', 'fs:write', 'agent:run:*', 'workspace:read', 'http:get', 'http:post', 'workspace:write', 'workspace:exec']),
-    };
-    const grants = LEVEL_GRANTS[appLevel] ?? LEVEL_GRANTS[1];
-    const invalidPerms = permissions.filter((p) => {
-      if (grants.has(p)) return false;
-      if (p.startsWith('agent:run:') && grants.has('agent:run:*')) return false;
-      return true;
-    });
+    const invalidPerms = disallowedPermissionsForLevel(appLevel, permissions);
     if (invalidPerms.length > 0) {
       throw new Error(`permissions ${JSON.stringify(invalidPerms)} 超出 level ${appLevel} 允许范围，请提升 level 或移除这些权限。`);
     }
@@ -2505,6 +2516,7 @@ export function registerWorkspaceTools(
         systemPrompt: a.systemPrompt,
         ...(a.tools ? { tools: a.tools } : {}),
         ...(a.maxToolRounds ? { maxToolRounds: Math.min(a.maxToolRounds, 50) } : {}),
+        ...(a.inheritContext ? { inheritContext: a.inheritContext } : {}),
       })),
       ...(command ? { command } : {}),
       ...(cmdArgs && cmdArgs.length > 0 ? { args: cmdArgs } : {}),
@@ -2664,6 +2676,9 @@ export function registerWorkspaceTools(
     await new Promise((r) => setTimeout(r, 800));
     const stillAvailable: boolean = await invoke('check_port_available', { port: app.port });
     if (stillAvailable) {
+      // Kill the spawned child so a slow-starting server does not become an
+      // orphan that later grabs the port untracked by the store.
+      try { await invoke('stop_background_process', { pid: result.pid }); } catch { /* best-effort */ }
       useAppRuntimeStore.getState().setAppStopped(appId);
       throw new Error(`应用 '${appId}' 后端启动失败：进程已退出或端口 ${app.port} 未被监听，请检查 command/args 配置。`);
     }

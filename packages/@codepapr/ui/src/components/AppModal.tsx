@@ -155,7 +155,7 @@ export function AppModal({ lang }: AppModalProps) {
           key={`${openedApp.appId}-${openedApp.updatedAt}`}
           src={iframeSrc}
           title={openedApp.title}
-          sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-modals"
           className="h-full w-full border-0"
           onLoad={handleIframeLoad}
           onError={() => setError(t.appModalLoadFailed)}

@@ -25,6 +25,18 @@ pub(crate) fn build_web_client() -> Result<reqwest::blocking::Client, String> {
         .map_err(|err| format!("初始化网页客户端失败: {err}"))
 }
 
+/// HTTP client for papr app `papr.http` calls. Redirects are disabled so a
+/// public URL cannot 302-bounce into an internal/loopback address (SSRF), and
+/// no cookie store is used so apps do not share host cookies.
+pub(crate) fn build_papr_http_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .user_agent(SCRAPER_USER_AGENT)
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|err| format!("初始化 papr HTTP 客户端失败: {err}"))
+}
+
 pub(crate) fn apply_browser_headers(
     request: reqwest::blocking::RequestBuilder,
     referer: Option<&str>,

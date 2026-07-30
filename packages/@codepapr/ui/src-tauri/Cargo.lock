@@ -691,6 +691,7 @@ dependencies = [
  "tree-sitter-rust",
  "tree-sitter-swift",
  "tree-sitter-typescript",
+ "url",
  "xz2",
  "zeroize",
  "zip 2.4.2",

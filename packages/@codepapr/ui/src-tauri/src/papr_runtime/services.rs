@@ -5,40 +5,55 @@ use serde::Serialize;
 
 use crate::papr_runtime::permission;
 use crate::shared::{canonical_workspace, parse_browser_url};
-use crate::web::client::build_web_client;
+use crate::web::client::build_papr_http_client;
 use crate::web::text::{collapse_whitespace, html_to_text, truncate_text_to_bytes};
 
 const MAX_PAPR_HTTP_BYTES: usize = 500_000;
 
-fn is_private_or_internal_url(url: &str) -> bool {
-    let host = url
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .split(['/', ':', '?', '#'])
-        .next()
-        .unwrap_or("")
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .to_lowercase();
+fn is_internal_ipv4(ip: std::net::Ipv4Addr) -> bool {
+    let octets = ip.octets();
+    ip.is_loopback()           // 127.0.0.0/8
+        || ip.is_private()     // 10/8, 172.16/12, 192.168/16
+        || ip.is_link_local()  // 169.254/16 (incl. cloud metadata 169.254.169.254)
+        || ip.is_unspecified() // 0.0.0.0
+        || octets[0] == 0      // 0.0.0.0/8 "this" network
+        || (octets[0] == 100 && (64..=127).contains(&octets[1])) // CGNAT 100.64/10
+}
 
-    if host.is_empty() || host == "localhost" || host == "::1" || host == "0.0.0.0" {
-        return true;
+fn is_internal_ipv6(ip: std::net::Ipv6Addr) -> bool {
+    if let Some(mapped) = ip.to_ipv4_mapped() {
+        return is_internal_ipv4(mapped); // ::ffff:127.0.0.1 etc.
     }
-    if host == "169.254.169.254" || host == "metadata.google.internal" {
-        return true;
+    if ip.is_loopback() || ip.is_unspecified() {
+        return true; // ::1, ::
     }
-    let octets: Vec<&str> = host.split('.').collect();
-    if octets.len() == 4 {
-        if let (Ok(a), Ok(b)) = (octets[0].parse::<u8>(), octets[1].parse::<u8>()) {
-            if a == 127 || a == 10 || (a == 172 && (16..=31).contains(&b)) || (a == 192 && b == 168) || a == 169 {
-                return true;
-            }
-        }
+    let first = ip.segments()[0];
+    (first & 0xfe00) == 0xfc00 // fc00::/7 unique-local (fd00::/8 too)
+        || (first & 0xffc0) == 0xfe80 // fe80::/10 link-local
+}
+
+fn is_internal_domain(host: &str) -> bool {
+    let h = host.to_lowercase();
+    h == "localhost"
+        || h.ends_with(".localhost")
+        || h.ends_with(".local")
+        || h.ends_with(".internal")
+}
+
+/// Block loopback / private / link-local / unspecified targets. The URL is
+/// parsed with the WHATWG `url` crate so IPv4 special forms (decimal
+/// `2130706433`, short `127.1`, hex/octal octets) are normalised to a canonical
+/// address before the range checks, closing string-parsing bypasses.
+fn is_private_or_internal_url(url: &str) -> bool {
+    match url::Url::parse(url) {
+        Ok(parsed) => match parsed.host() {
+            Some(url::Host::Ipv4(ip)) => is_internal_ipv4(ip),
+            Some(url::Host::Ipv6(ip)) => is_internal_ipv6(ip),
+            Some(url::Host::Domain(domain)) => is_internal_domain(domain),
+            None => true,
+        },
+        Err(_) => true,
     }
-    if host.starts_with("fc") || host.starts_with("fd") || host.starts_with("fe80") {
-        return true;
-    }
-    false
 }
 
 #[derive(Serialize)]
@@ -108,7 +123,7 @@ pub async fn papr_http_get(
     }
 
     let max = max_bytes.unwrap_or(50_000).clamp(1_000, MAX_PAPR_HTTP_BYTES);
-    let client = build_web_client()?;
+    let client = build_papr_http_client()?;
     let response = client
         .get(parsed_url)
         .header(reqwest::header::ACCEPT, "application/json, text/plain, text/html;q=0.9, */*;q=0.5")
@@ -167,7 +182,7 @@ pub async fn papr_http_post(
     }
 
     let ct = content_type.unwrap_or_else(|| "application/json".to_string());
-    let client = build_web_client()?;
+    let client = build_papr_http_client()?;
     let response = client
         .post(parsed_url)
         .header(reqwest::header::CONTENT_TYPE, &ct)
@@ -578,5 +593,47 @@ mod tests {
         papr_delete_app("del-app".into()).unwrap();
 
         assert!(!app_dir.exists());
+    }
+
+    #[test]
+    fn ssrf_internal_targets_are_blocked() {
+        let blocked = [
+            "http://127.0.0.1/",
+            "http://127.1/",                 // short IPv4 form
+            "http://2130706433/",            // decimal IPv4 (== 127.0.0.1)
+            "http://0x7f.0.0.1/",            // hex octet
+            "http://0.0.0.0/",
+            "http://0/",
+            "http://10.0.0.5/",
+            "http://172.16.0.1/",
+            "http://192.168.1.1/",
+            "http://169.254.169.254/",       // cloud metadata
+            "http://100.64.0.1/",            // CGNAT
+            "http://localhost/",
+            "http://foo.localhost/",
+            "http://app.local/",
+            "http://metadata.google.internal/",
+            "http://[::1]/",
+            "http://[::ffff:127.0.0.1]/",    // IPv6-mapped IPv4
+            "http://[fe80::1]/",
+            "http://[fd00::1]/",
+        ];
+        for url in blocked {
+            assert!(is_private_or_internal_url(url), "should block {url}");
+        }
+    }
+
+    #[test]
+    fn ssrf_public_targets_are_allowed() {
+        let allowed = [
+            "https://example.com/",
+            "https://8.8.8.8/",
+            "https://1.1.1.1/",
+            "https://93.184.216.34/",
+            "http://[2606:4700:4700::1111]/",
+        ];
+        for url in allowed {
+            assert!(!is_private_or_internal_url(url), "should allow {url}");
+        }
     }
 }

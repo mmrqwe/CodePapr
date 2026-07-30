@@ -102,6 +102,7 @@ export interface AgentRuntimeHandle {
   runAppAgent(
     payload: AppAgentPayload,
     onStream?: (event: IChatStreamEvent) => void,
+    requestId?: string,
   ): Promise<AppAgentResult>;
   cancelAppAgent(requestId: string): void;
 }
@@ -337,6 +338,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       runtime: {
         rulesSection: this.config.runtime.rulesSection,
         customPrompt: this.config.runtime.customPrompt,
+        memorySection: this.config.runtime.memorySection,
         lang: this.config.runtime.lang,
         skillDefinitions: this.config.runtime.skillDefinitions,
         agentDefinitions: this.config.runtime.agentDefinitions,
@@ -362,11 +364,11 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   async runAppAgent(
     payload: AppAgentPayload,
     onStream?: (event: IChatStreamEvent) => void,
+    requestId: string = createId(),
   ): Promise<AppAgentResult> {
     if (this.crashed) {
       throw new WorkerCrashError('Agent worker has crashed. Create a new agent to retry.');
     }
-    const requestId = createId();
 
     const result = await new Promise<AppAgentResult>((resolve, reject) => {
       const timeoutTimer = setTimeout(() => {
