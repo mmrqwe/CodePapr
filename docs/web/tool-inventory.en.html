@@ -253,7 +253,7 @@
   <div class="container">
     <div class="section-label"><span class="dot"></span> TOOL SURFACE · LSP / AST Inventory</div>
     <h1>Tool Inventory · <span class="gradient">Two-Layer Architecture × Language Intelligence</span></h1>
-    <p>CodePapr exposes <strong>25 merged tools</strong> to the LLM (<code>graph</code> is now UI-only), routed by dispatchers to <strong>61 fine-grained workspace_* tools</strong> (hidden from the LLM), ultimately landing on the Tauri / Rust backend. Code intelligence (the <code>lsp</code> tool's 9 navigation actions) is wired to an <strong>LSP → AST project-graph</strong> fallback, tagged with <code>source</code>/<code>confidence</code> for precision; <code>list</code> browses the directory tree with per-file lightweight symbols (AST); <code>read</code> supports a <code>symbol</code> param for AST-based symbol reading and auto-attaches outlines for large files; <code>grep</code> supports <code>semantic:true</code> for LSP workspace symbol search. Only write / edit / patch remain plain-text operations. Click any entry to expand its dispatch chain and integration status.</p>
+    <p>CodePapr exposes <strong>25 merged tools</strong> to the LLM (<code>graph</code> is now UI-only), routed by dispatchers to <strong>61 fine-grained workspace_* tools</strong> (hidden from the LLM), ultimately landing on the Tauri / Rust backend. Code intelligence (the <code>lsp</code> tool's 9 navigation actions) is wired to an <strong>LSP → AST project-graph</strong> fallback, tagged with <code>source</code>/<code>confidence</code> for precision; <code>list</code> browses the directory tree with per-file lightweight symbols (AST); <code>read</code> supports a <code>symbol</code> param for AST-based symbol reading and auto-attaches outlines for large files; <code>grep</code> supports <code>semantic:true</code> for LSP workspace symbol search. write / edit / patch now also layer <strong>AST syntax pre-checks</strong> and <strong>post-write LSP diagnostic feedback</strong> on top of text matching (matching stays literal, but ambiguity errors list each match's line and enclosing symbol). Click any entry to expand its dispatch chain and integration status.</p>
     <div class="legend">
       <span class="lg"><i style="background:var(--green)"></i>LSP-backed</span>
       <span class="lg"><i style="background:var(--amber)"></i>AST-backed</span>
@@ -267,7 +267,7 @@
       <div class="stat-card"><div class="num n-amber">15</div><div class="cap">Real LSP languages<br>Rust symbol_provider.rs</div></div>
       <div class="stat-card"><div class="num n-violet">17</div><div class="cap">AST languages<br>tree-sitter</div></div>
       <div class="stat-card"><div class="num n-teal">11</div><div class="cap">regex fallback languages</div></div>
-      <div class="stat-card"><div class="num n-orange">3</div><div class="cap">read/grep/list<br>tools wired to LSP/AST</div></div>
+      <div class="stat-card"><div class="num n-orange">6</div><div class="cap">read/grep/list/write/edit/patch<br>tools wired to LSP/AST</div></div>
     </div>
   </div>
 </section>
@@ -282,12 +282,12 @@
           <div class="idx">01</div>
           <div class="tt">
             <h3>File Ops <span>File Operations</span></h3>
-            <div class="tags"><span class="tag">read / write / edit / patch</span><span class="tag">grep / glob / list</span><span class="tag">read·grep·list wired to AST/LSP</span></div>
+            <div class="tags"><span class="tag">read / write / edit / patch</span><span class="tag">grep / glob / list</span><span class="tag">read·grep·list·write·edit·patch wired to AST/LSP</span></div>
           </div>
-          <div class="hz"><b>Partially refactored</b>read·grep·list wired to LSP/AST</div>
+          <div class="hz"><b>Fully refactored</b>read·grep·list·write·edit·patch wired to LSP/AST</div>
         </div>
 
-        <div class="sublabel"><b>Read/Write/Edit</b> Direct file-content ops · write/edit/patch plain-text · read wired to AST</div>
+        <div class="sublabel"><b>Read/Write/Edit</b> Direct file-content ops · write/edit/patch text matching + AST pre-check + LSP diagnostics · read wired to AST</div>
 
         <div class="item">
           <div class="row">
@@ -303,34 +303,34 @@
         <div class="item">
           <div class="row">
             <div class="addr">WRITE</div>
-            <div class="name">write<small>→ workspace_write_file · workspaceTools.ts:1957</small></div>
-            <div class="src"><span class="chip">invoke write_text_file</span><span class="chip">editHistory.record</span><span class="chip">notifyWorkspaceMutation</span></div>
-            <div class="cchip c-text">Plain text</div>
+            <div class="name">write<small>→ workspace_write_file · workspaceTools.ts:2370</small></div>
+            <div class="src"><span class="chip">invoke write_text_file</span><span class="chip">astPreCheck</span><span class="chip">lspDiagnosticsHook</span><span class="chip">notifyWorkspaceMutation</span></div>
+            <div class="cchip c-mix">Text + AST/LSP</div>
           </div>
-          <div class="desc">Creates or fully overwrites a file. After writing, records edit history and broadcasts the mutation. <b>Runs no diagnostics after writing</b>—syntax errors only surface when the LLM remembers to call diagnostics itself.</div>
-          <div class="more"><div class="mbox">Dispatch: <code>write</code> → <code>workspace_write_file</code> → <code>invoke('write_text_file')</code>. Post-write <code>notifyWorkspaceMutation([path])</code> (a natural hook for cache invalidation). No AST parse validation, no LSP diagnostic feedback.</div></div>
+          <div class="desc">Creates or fully overwrites a file. Runs an <b>AST syntax pre-check</b> before writing (rejects without persisting if new syntax errors appear), re-reads to verify consistency after writing, and <b>syncs the LSP then returns the file's latest diagnostics</b> (result includes <code>diagnostics</code>/<code>notes</code>).</div>
+          <div class="more"><div class="mbox">Dispatch: <code>write</code> → <code>workspace_write_file</code>. Pre-write <code>astPreCheck</code> (tree-sitter compares before/after syntax error counts, rejects only when the count increases); post-write re-read verification + <code>lspDiagnosticsHook</code> (first <code>lsp_open_document</code> syncs the new content to trigger didChange, then <code>lsp_get_diagnostics</code> waits for the file's fresh diagnostics); finally <code>editHistory.record</code> + <code>notifyWorkspaceMutation([path])</code> (also clears the graph build cache).</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">EDIT</div>
-            <div class="name">edit<small>→ workspace_apply_patch · workspaceTools.ts:3271</small></div>
-            <div class="src"><span class="chip">applySearchReplacePatch</span><span class="chip">searchReplaceDiff.ts</span></div>
-            <div class="cchip c-text">Plain text</div>
+            <div class="name">edit<small>→ workspace_apply_patch · workspaceTools.ts:3875</small></div>
+            <div class="src"><span class="chip">applySearchReplacePatch</span><span class="chip">locateSearchOccurrences</span><span class="chip">astPreCheck · lspDiagnosticsHook</span></div>
+            <div class="cchip c-mix">Text + AST/LSP</div>
           </div>
-          <div class="desc">Precise single-file SEARCH/REPLACE. <b>Pure literal <code>String.indexOf</code> matching</b> (after CRLF→LF normalization), zero fuzzy. Re-reads the source independently of read (<code>maxBytes 20MB</code>), then re-reads after writing to verify consistency.</div>
-          <div class="more"><div class="mbox">Matching semantics: search must match byte-for-byte; <code>expectedOccurrences</code> validates the count; multiple matches require <code>replaceAll</code>. When the same text appears in several functions, you can only guess by lengthening search or via expectedOccurrences—<b>no symbol anchor</b> available. No diagnostic feedback after the change.</div></div>
+          <div class="desc">Precise single-file SEARCH/REPLACE. <b>Literal <code>String.indexOf</code> matching</b> (CRLF→LF normalized), zero fuzzy; <b>on multiple matches it errors out listing each match's line + enclosing symbol</b>. AST pre-check before writing, re-read verification and LSP diagnostics after (<code>maxBytes 20MB</code>).</div>
+          <div class="more"><div class="mbox">Matching semantics: search must match byte-for-byte; <code>expectedOccurrences</code> validates the count; multiple matches require <code>replaceAll</code>. On ambiguity it no longer just says "matched N occurrences"—<code>locateSearchOccurrences</code> pinpoints each line and <code>extractProjectMapSymbols</code> (AST) resolves the enclosing symbol, throwing a rich error with <code>L&lt;line&gt; (in &lt;kind&gt; &lt;name&gt;)</code> for precise disambiguation. Post-change <code>lspDiagnosticsHook</code> returns the file's latest diagnostics.</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">PATCH</div>
-            <div class="name">patch<small>→ workspace_apply_diff · workspaceTools.ts:3325</small></div>
-            <div class="src"><span class="chip">applySearchReplaceDiff</span><span class="chip">multi-file atomic</span></div>
-            <div class="cchip c-text">Plain text</div>
+            <div class="name">patch<small>→ workspace_apply_diff · workspaceTools.ts:3956</small></div>
+            <div class="src"><span class="chip">applySearchReplaceDiff</span><span class="chip">multi-file atomic</span><span class="chip">astPreCheck · lspDiagnosticsHook</span></div>
+            <div class="cchip c-mix">Text + AST/LSP</div>
           </div>
-          <div class="desc">Multi-file atomic SEARCH/REPLACE: all patches are written together only after every one matches exactly; any failure rolls back. Matching mechanism is identical to edit (pure literal), only adding cross-file atomicity.</div>
-          <div class="more"><div class="mbox">Dispatch: <code>patch</code> → <code>workspace_apply_diff</code>. Re-reads source per file → <code>applySearchReplaceDiff</code> applies sequentially → writes per file + re-read verification → batch <code>notifyWorkspaceMutation</code>.</div></div>
+          <div class="desc">Multi-file atomic SEARCH/REPLACE: all patches are written together only after every one matches exactly; any failure rolls back. Matching mechanism is identical to edit (literal + <b>ambiguity error with line/symbol</b>), with per-file AST pre-check and LSP diagnostics, only adding cross-file atomicity.</div>
+          <div class="more"><div class="mbox">Dispatch: <code>patch</code> → <code>workspace_apply_diff</code>. Re-reads source per file → per-patch ambiguity pre-check (locates line + symbol against running content) → <code>applySearchReplaceDiff</code> applies sequentially → per-file <code>astPreCheck</code> + write + re-read verification + <code>lspDiagnosticsHook</code> → batch <code>notifyWorkspaceMutation</code> (clears the graph cache).</div></div>
         </div>
 
         <div class="sublabel"><b>Search</b> Regex + semantic search · grep semantic uses LSP workspace symbol · list embeds per-file AST symbols</div>
@@ -396,12 +396,12 @@
         <div class="item">
           <div class="row">
             <div class="addr">GRAPH</div>
-            <div class="name">graph<small>→ workspace_project_graph etc. · workspaceTools.ts:2777 · <b>hidden from the LLM</b></small></div>
-            <div class="src"><span class="chip">14 actions (UI-only)</span><span class="chip">hideFromLlm:3793</span></div>
+            <div class="name">graph<small>→ workspace_project_graph etc. · workspaceTools.ts:3204 · <b>hidden from the LLM</b></small></div>
+            <div class="src"><span class="chip">14 actions (UI-only)</span><span class="chip">graph cache TTL 60s</span><span class="chip">hideFromLlm:4200</span></div>
             <div class="cchip c-ast">UI + AST fallback</div>
           </div>
           <div class="desc"><b>Now hidden from the LLM (UI-only)</b>. The 14 actions remain: <b>full / overview / lookup / dependency / entrypoints / impact / implementations / smart_context</b> + 6 analyses (<b>dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests</b>). The fine-grained handlers stay registered, serving UI panels and acting as the <b>AST fallback backend</b> for <code>lsp</code> point queries; the project structure is now exposed to the LLM via <code>list</code> (directory tree + per-file lightweight symbols).</div>
-          <div class="more"><div class="mbox">Build chain: <code>list_workspace_files</code> → per-file <code>read_text_file</code> → LSP documentSymbol coverage → <code>buildWorkspaceProjectMap</code> → <code>buildWorkspaceProjectGraph</code> → LSP edge enrichment. <b>Full rebuild on every call, zero caching</b> (hence only used as fallback/UI, not the main path). Symbols go through <code>UnifiedSymbolDispatcher.extractSymbols</code> (lsp→ast→regex degradation).</div></div>
+          <div class="more"><div class="mbox">Build chain: <code>list_workspace_files</code> → per-file <code>read_text_file</code> → LSP documentSymbol coverage → <code>buildWorkspaceProjectMap</code> → <code>buildWorkspaceProjectGraph</code> → LSP edge enrichment. <b>Now backed by a graph build cache</b>: keyed by "build args + workspace", 60s TTL, cleared on any workspace write via <code>notifyWorkspaceMutation</code>, in-flight builds for the same key are deduped, capped at 3 entries with FIFO eviction—a lookup→dependency→impact triple builds the graph only once. Symbols go through <code>UnifiedSymbolDispatcher.extractSymbols</code> (lsp→ast→regex degradation).</div></div>
         </div>
 
         <div class="sublabel"><b>LSP navigation & semantic editing</b> precise to file:line:column</div>
@@ -431,12 +431,12 @@
         <div class="item">
           <div class="row">
             <div class="addr">DIAG</div>
-            <div class="name">diagnostics<small>→ workspace_lsp_diagnostics / project_diagnostics · :2977 / :3396</small></div>
+            <div class="name">diagnostics<small>→ workspace_lsp_diagnostics / project_diagnostics · :3581 / :4066</small></div>
             <div class="src"><span class="chip">invoke lsp_get_diagnostics</span><span class="chip">Rust lsp.rs:1689</span></div>
             <div class="cchip c-lsp">LSP</div>
           </div>
-          <div class="desc">Pass <code>relativePath</code> to query single-file LSP diagnostics; pass <code>project:true</code> to run project-level lint/typecheck. <b>A standalone tool—the LLM must remember to call it itself</b>; it is not auto-triggered after write/edit.</div>
-          <div class="more"><div class="mbox">Single file: <code>invoke('lsp_get_diagnostics',{languageId})</code> returns diagnostics grouped by uri, matched to this file by path suffix. Whole project: iterates available provider languages and aggregates topIssues.</div></div>
+          <div class="desc">Pass <code>relativePath</code> to query single-file LSP diagnostics; pass <code>project:true</code> to run project-level lint/typecheck. write/edit/patch now <b>auto-return single-file diagnostics</b> after a change; this tool is for <b>on-demand single-file re-checks</b> and project-level lint/typecheck.</div>
+          <div class="more"><div class="mbox">Single file: <code>invoke('lsp_get_diagnostics',{languageId, relativePath})</code>; the Rust side waits for the file's diagnostics to refresh by uri (short-circuits on arrival, hard-capped at 2s to avoid hanging), then matches this file by path suffix. Whole project: iterates available provider languages and aggregates topIssues.</div></div>
         </div>
 
         <div class="sublabel"><b>Hidden fine-grained</b> shadowed by merged tools · reached via graph/lsp dispatch</div>
@@ -620,27 +620,27 @@
   <!-- ═══ MECHANISMS ═══ -->
   <section class="mech reveal" id="mechanisms">
     <h2>Five facts about the current state</h2>
-    <div class="sub">Why "tools are bloated and LSP/AST aren't wired well" — the starting point for refactoring.</div>
+    <div class="sub">Starting point for refactoring: the original gaps F·03/F·04/F·05 are now fixed or improved; F·01/F·02/F·06 are refactored/consolidated.</div>
     <div class="ledger">
       <div class="led">
         <div class="no">F·01</div><h5>degradation chain wired into lsp point queries + file ops (refactored)</h5>
-        <p>The <code>lsp→ast→regex</code> degradation in <code>UnifiedSymbolDispatcher</code> (with Rust symbol_provider.rs as the engine) originally only served project-map symbol extraction. <b>Now extended</b>: the 9 navigation actions of <code>lsp</code> degrade to the AST project graph via <code>astFallback</code> (workspaceTools.ts:2930) when LSP is unavailable/returns nothing, tagged with source/confidence. <code>read</code>'s <code>symbol</code> param uses AST targeting, <code>list</code> runs per-file extractSymbols, <code>grep semantic:true</code> uses LSP workspace symbol. <b>Only write/edit/patch remain plain-text</b>.</p>
+        <p>The <code>lsp→ast→regex</code> degradation in <code>UnifiedSymbolDispatcher</code> (with Rust symbol_provider.rs as the engine) originally only served project-map symbol extraction. <b>Now extended</b>: the 9 navigation actions of <code>lsp</code> degrade to the AST project graph via <code>astFallback</code> (workspaceTools.ts:2930) when LSP is unavailable/returns nothing, tagged with source/confidence. <code>read</code>'s <code>symbol</code> param uses AST targeting, <code>list</code> runs per-file extractSymbols, <code>grep semantic:true</code> uses LSP workspace symbol. <b>write/edit/patch are now also wired to AST syntax pre-checks and post-write LSP diagnostic feedback</b> (matching stays literal; ambiguity errors carry symbol location, see F·05).</p>
       </div>
       <div class="led">
         <div class="no">F·02</div><h5>read is now AST-aware (refactored)</h5>
         <p><code>workspace_read_file</code> with <code>symbol</code> first runs <code>extract_file_symbols</code> (AST) to locate the symbol's line range, then slices; degrades to text search without AST support. Full-file reads over 300 lines auto-attach a symbol outline (workspaceTools.ts:1913).</p>
       </div>
       <div class="led">
-        <div class="no">F·03</div><h5>no feedback loop after a change</h5>
-        <p>write/edit/patch end once they hit disk. <code>diagnostics</code> is a standalone tool; the LLM must remember to call it itself. If the agent breaks type checking, it has <b>no idea until the next call</b>—this is the biggest gap in a good harness.</p>
+        <div class="no">F·03</div><h5>no feedback loop after a change (fixed)</h5>
+        <p><b>Now fixed</b>: write/edit/patch run <code>astPreCheck</code> before writing (tree-sitter; rejects without persisting when new syntax errors appear), then re-read to verify and use <code>lspDiagnosticsHook</code>—first <code>lsp_open_document</code> syncs the new content, then <code>lsp_get_diagnostics</code> waits for the file's fresh diagnostics—and return <code>diagnostics</code>/<code>notes</code> right in the result. If the agent breaks type checking, it <b>sees it immediately in the same tool result</b>. Without an LSP it degrades and explicitly notes a manual re-check is needed.</p>
       </div>
       <div class="led">
-        <div class="no">F·04</div><h5>graph does a full rebuild every time</h5>
-        <p>Every graph action re-lists the whole workspace + reads each file from disk + queries LSP + builds the graph + enriches it (buildIntelligenceProjectGraph:1785). <b>Zero caching</b>. A lookup→dependency→impact triple is three full rebuilds.</p>
+        <div class="no">F·04</div><h5>graph does a full rebuild every time (fixed)</h5>
+        <p><b>Now fixed</b>: <code>buildIntelligenceProjectGraph</code> (workspaceTools.ts:2161) is wrapped in a graph build cache—keyed by "build args + workspace", 60s TTL, cleared on any workspace write via <code>notifyWorkspaceMutation</code>, in-flight builds for the same key deduped, capped at 3 entries. A lookup→dependency→impact triple <b>builds the graph only once</b>; the latter two reuse it (including the expensive LSP edge enrichment). <code>workspace_project_graph</code> now routes through the same cache (deep-copying before stripGraphNoise so the cache isn't polluted).</p>
       </div>
       <div class="led">
-        <div class="no">F·05</div><h5>edit is pure literal matching</h5>
-        <p><code>applySearchReplacePatch</code> uses <code>String.indexOf</code> for exact matching (searchReplaceDiff.ts:51-78). When the same text appears in multiple functions, you can only guess via <code>expectedOccurrences</code> or by lengthening search—<b>no symbol anchor</b> available.</p>
+        <div class="no">F·05</div><h5>edit is pure literal matching (improved)</h5>
+        <p><code>applySearchReplacePatch</code> still uses <code>String.indexOf</code> for literal matching (searchReplaceDiff.ts), but <b>disambiguation is now symbol-aware</b>: a new <code>locateSearchOccurrences</code> returns each match's line/column, and when there are multiple matches not pinned down (replaceAll/expectedOccurrences), edit/patch use <code>extractProjectMapSymbols</code> (AST) to throw a rich error with <code>L&lt;line&gt; (in &lt;kind&gt; &lt;name&gt;)</code>, so the model can pinpoint precisely instead of guessing. Cross-cutting renames should still go through <code>lsp_edit rename</code>.</p>
       </div>
       <div class="led">
         <div class="no">F·06</div><h5>overlapping mental models (consolidated)</h5>
@@ -657,17 +657,17 @@
       <div class="fstep"><span class="fi">L0</span><b>LLM calls edit</b></div><div class="farrow">→</div>
       <div class="fstep"><span class="fi">L1</span><b>Merged tool definition</b>mergeToolDefs</div><div class="farrow">→</div>
       <div class="fstep"><span class="fi">L2</span><b>Dispatcher mapping</b>edit→apply_patch</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L3</span><b>Fine-grained handler</b>re-read source 20MB</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L4</span><b>Literal SEARCH/REPLACE</b>indexOf exact match</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L3</span><b>Fine-grained handler</b>re-read source 20MB · ambiguity line+symbol</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L4</span><b>Literal replace + AST pre-check</b>indexOf match · reject new syntax errors</div><div class="farrow">→</div>
       <div class="fstep"><span class="fi">L5</span><b>invoke write_text_file</b>Tauri → Rust</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L6</span><b>Re-read verify + editHistory</b>notifyMutation</div>
+      <div class="fstep"><span class="fi">L6</span><b>Re-read verify + LSP diagnostics</b>editHistory · notifyMutation (clears graph cache)</div>
     </div>
   </section>
 </div>
 
 <footer>
   <div class="container">
-    CodePapr &mdash; Tool inventory audit · generated from source verification (<code>mergeToolDefs.ts</code> / <code>registerSharedWorkspaceTools.ts</code> / <code>workspaceTools.ts</code> / <code>toolDefinitions.ts</code> / <code>unifiedSymbols.ts</code> / <code>symbol_provider.rs</code> / <code>toolOutputTruncation.ts</code> / <code>workspace_fs/mod.rs</code> / <code>agentRuntime.worker.ts</code>). Two-layer architecture = 25 merged tools (visible to the LLM, graph now UI-only) → 61 fine-grained (hideFromLlm) → Tauri/Rust. Degradation chain = lsp→ast (point queries) / lsp→ast→regex (symbol extraction). Three limit layers in units of tokens / chars / bytes — don't confuse them.
+    CodePapr &mdash; Tool inventory audit · generated from source verification (<code>mergeToolDefs.ts</code> / <code>registerSharedWorkspaceTools.ts</code> / <code>workspaceTools.ts</code> / <code>searchReplaceDiff.ts</code> / <code>toolDefinitions.ts</code> / <code>unifiedSymbols.ts</code> / <code>symbol_provider.rs</code> / <code>lsp.rs</code> / <code>toolOutputTruncation.ts</code> / <code>workspace_fs/mod.rs</code> / <code>agentRuntime.worker.ts</code>). Two-layer architecture = 25 merged tools (visible to the LLM, graph now UI-only) → 61 fine-grained (hideFromLlm) → Tauri/Rust. Degradation chain = lsp→ast (point queries) / lsp→ast→regex (symbol extraction). Three limit layers in units of tokens / chars / bytes — don't confuse them.
   </div>
 </footer>
 

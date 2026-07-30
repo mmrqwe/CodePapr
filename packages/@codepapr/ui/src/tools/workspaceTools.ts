@@ -64,16 +64,19 @@ import { usePermissionStore as usePaprPermissionStore } from '../papr/permission
 import {
   applySearchReplaceDiff,
   applySearchReplacePatch,
+  locateSearchOccurrences,
   buildWorkspaceProjectGraph,
   enrichWorkspaceProjectGraph,
   buildGitUnavailableDiff,
   buildGitUnavailableStatus,
   buildWorkspaceProjectMap,
+  extractProjectMapSymbols,
   filterWorkspaceInsightEntries,
   selectProjectMapFiles,
   type GitDiffSummary,
   type GitStatusSummary,
   type WorkspaceListEntry,
+  type WorkspaceMapSymbolSummary,
   type WorkspaceProjectGraphResult,
 } from './workspaceToolUtils';
 import { resolveProjectMapSymbolOverrides } from './workspaceProjectMapLsp';
@@ -384,6 +387,11 @@ interface ApplyPatchArgs {
 
 interface ApplyPatchResult extends WriteTextFileResult {
   replacements: number;
+  diagnostics?: unknown[];
+  notes?: string[];
+}
+
+interface WriteFileResult extends WriteTextFileResult {
   diagnostics?: unknown[];
   notes?: string[];
 }
@@ -1825,6 +1833,7 @@ export function registerWorkspaceTools(
     if (paths.length === 0) {
       return;
     }
+    invalidateProjectGraphCache();
     onWorkspaceMutated?.(paths);
   };
 
@@ -1873,6 +1882,13 @@ export function registerWorkspaceTools(
     }
   };
 
+  let lspDocumentVersion = 1;
+  const nextLspDocumentVersion = (): number => {
+    const current = lspDocumentVersion;
+    lspDocumentVersion += 1;
+    return current;
+  };
+
   // AST 预检：比较编辑前后语法错误数，仅当错误数增加（改前合法→改后非法）时拦截、不落盘。
   // 语言无 tree-sitter 支持时降级跳过（返回 note），绝不报错。
   const astPreCheck = async (
@@ -1903,18 +1919,34 @@ export function registerWorkspaceTools(
     return {};
   };
 
-  // LSP 诊断后置钩子：写入后获取该文件诊断。无可用 LSP 时降级跳过（返回 note），绝不报错。
+  // LSP 诊断后置钩子：先把改后内容同步给 LSP，再等待并读取该文件的最新诊断。
+  // 无可用 LSP 时降级跳过（返回 note），绝不报错。
   const lspDiagnosticsHook = async (
-    relativePath: string
+    relativePath: string,
+    newContent: string
   ): Promise<{ diagnostics: unknown[]; note: string }> => {
     const languageId = lspLanguageFromPath(relativePath);
     if (!languageId) {
       return { diagnostics: [], note: `LSP 诊断跳过：无法识别 ${relativePath} 的语言类型。` };
     }
     try {
+      await invoke('lsp_open_document', {
+        workspacePath: workspace(),
+        languageId,
+        relativePath,
+        content: newContent,
+        version: nextLspDocumentVersion(),
+      });
+    } catch {
+      return {
+        diagnostics: [],
+        note: `LSP 诊断跳过：${languageId} 文档同步失败或无可用 LSP，诊断可能不是最新。如需确证请运行 diagnostics。`,
+      };
+    }
+    try {
       const result = await invoke<{ diagnostics: Record<string, { diagnostics?: unknown[] }> }>(
         'lsp_get_diagnostics',
-        { workspacePath: workspace(), languageId }
+        { workspacePath: workspace(), languageId, relativePath }
       );
       const allDiags = result.diagnostics ?? {};
       const fileUri = Object.keys(allDiags).find(
@@ -1931,6 +1963,60 @@ export function registerWorkspaceTools(
     } catch {
       return { diagnostics: [], note: `LSP 诊断跳过：${languageId} 无可用 LSP。` };
     }
+  };
+
+  const AMBIGUITY_MATCH_LIMIT = 8;
+
+  // 多处匹配消歧：当 search 命中多于一处且未用 replaceAll/expectedOccurrences 锁定时，
+  // 返回带行号与所在符号的富错误文本；无歧义时返回 null，交由 applySearchReplacePatch 正常处理。
+  const describeAmbiguousMatches = async (
+    relativePath: string,
+    content: string,
+    search: string,
+    replaceAll: boolean | undefined,
+    expectedOccurrences: number | undefined
+  ): Promise<string | null> => {
+    const locations = locateSearchOccurrences(content, search);
+    if (locations.length <= 1 || replaceAll) {
+      return null;
+    }
+    if (typeof expectedOccurrences === 'number' && expectedOccurrences === locations.length) {
+      return null;
+    }
+
+    let symbols: WorkspaceMapSymbolSummary[] = [];
+    try {
+      symbols = await extractProjectMapSymbols(relativePath, content);
+    } catch {
+      symbols = [];
+    }
+    const sortedSymbols = [...symbols].sort((left, right) => left.line - right.line);
+    const enclosingSymbol = (line: number): string | null => {
+      let found: WorkspaceMapSymbolSummary | null = null;
+      for (const symbol of sortedSymbols) {
+        if (symbol.line <= line) {
+          found = symbol;
+        } else {
+          break;
+        }
+      }
+      return found ? `${found.kind} ${found.name}` : null;
+    };
+
+    const limit = Math.min(locations.length, AMBIGUITY_MATCH_LIMIT);
+    const detailLines = locations.slice(0, limit).map((loc) => {
+      const symbol = enclosingSymbol(loc.line);
+      return symbol ? `  L${loc.line}（位于 ${symbol}）` : `  L${loc.line}`;
+    });
+    const omitted =
+      locations.length > limit ? `\n  …其余 ${locations.length - limit} 处省略` : '';
+
+    return (
+      `匹配到 ${locations.length} 处相同文本块，无法确定修改目标。` +
+      `请加长 search 纳入上下唯一内容，或设置 expectedOccurrences / replaceAll：\n` +
+      detailLines.join('\n') +
+      omitted
+    );
   };
 
   const ensureExternalPathAllowed = async (relativePath: string | undefined, operation: 'read' | 'list'): Promise<void> => {
@@ -1950,9 +2036,37 @@ export function registerWorkspaceTools(
     return absPath[ws.length] === '/';
   }
 
-  const buildIntelligenceProjectGraph = async (args: Record<string, unknown>): Promise<WorkspaceProjectGraphResult> => {
+  const PROJECT_GRAPH_CACHE_TTL_MS = 60_000;
+  const PROJECT_GRAPH_CACHE_MAX_ENTRIES = 3;
+
+  interface ProjectGraphCacheEntry {
+    graph: WorkspaceProjectGraphResult;
+    createdAt: number;
+  }
+
+  const projectGraphCache = new Map<string, ProjectGraphCacheEntry>();
+  const projectGraphInflight = new Map<string, Promise<WorkspaceProjectGraphResult>>();
+
+  const invalidateProjectGraphCache = (): void => {
+    projectGraphCache.clear();
+    projectGraphInflight.clear();
+  };
+
+  const projectGraphCacheKey = (parsed: ProjectGraphArgs): string =>
+    JSON.stringify([
+      workspace(),
+      parsed.relativePath ?? '',
+      parsed.maxDepth,
+      parsed.maxFiles,
+      parsed.maxTreeEntries,
+      parsed.maxSymbolsPerFile,
+      parsed.maxEdges,
+      parsed.maxBytes,
+    ]);
+
+  const parseIntelligenceProjectGraphArgs = (args: Record<string, unknown>): ProjectGraphArgs => {
     const view = asOptionalString(args.view) === 'overview' ? 'overview' : 'full';
-    const parsed: ProjectGraphArgs = {
+    return {
       view,
       relativePath: asOptionalString(args.relativePath),
       maxDepth: boundedNumber(asOptionalNumber(args.maxDepth), 16, 1, Number.MAX_SAFE_INTEGER),
@@ -1962,7 +2076,9 @@ export function registerWorkspaceTools(
       maxEdges: boundedNumber(asOptionalNumber(args.maxEdges), Number.MAX_SAFE_INTEGER, 1, Number.MAX_SAFE_INTEGER),
       maxBytes: boundedNumber(asOptionalNumber(args.maxBytes), Number.MAX_SAFE_INTEGER, 10_000, Number.MAX_SAFE_INTEGER),
     };
+  };
 
+  const computeIntelligenceProjectGraph = async (parsed: ProjectGraphArgs): Promise<WorkspaceProjectGraphResult> => {
     const listResult = await invoke<ListFilesResult>('list_workspace_files', {
       workspacePath: workspace(),
       relativePath: parsed.relativePath,
@@ -2037,6 +2153,42 @@ export function registerWorkspaceTools(
       return await enrichWorkspaceProjectGraph(graph, fileContents, 3);
     } catch {
       return graph;
+    }
+  };
+
+  // 建图缓存：同一组建图参数在 TTL 内复用结果（lookup→dependency→impact 三连只建一次图）；
+  // 任一工作区写入会经 notifyWorkspaceMutation 清空缓存，TTL 作为带外变更的兜底。
+  const buildIntelligenceProjectGraph = async (args: Record<string, unknown>): Promise<WorkspaceProjectGraphResult> => {
+    const parsed = parseIntelligenceProjectGraphArgs(args);
+    const key = projectGraphCacheKey(parsed);
+
+    const cached = projectGraphCache.get(key);
+    if (cached) {
+      if (Date.now() - cached.createdAt < PROJECT_GRAPH_CACHE_TTL_MS) {
+        return cached.graph;
+      }
+      projectGraphCache.delete(key);
+    }
+
+    const inflight = projectGraphInflight.get(key);
+    if (inflight) {
+      return inflight;
+    }
+
+    const pending = computeIntelligenceProjectGraph(parsed);
+    projectGraphInflight.set(key, pending);
+    try {
+      const graph = await pending;
+      if (projectGraphCache.size >= PROJECT_GRAPH_CACHE_MAX_ENTRIES) {
+        const oldestKey = projectGraphCache.keys().next().value;
+        if (oldestKey !== undefined) {
+          projectGraphCache.delete(oldestKey);
+        }
+      }
+      projectGraphCache.set(key, { graph, createdAt: Date.now() });
+      return graph;
+    } finally {
+      projectGraphInflight.delete(key);
     }
   };
 
@@ -2221,18 +2373,47 @@ export function registerWorkspaceTools(
       content: asString(args.content, 'content'),
     };
     const before = await readBeforeContent(parsed.relativePath);
+
+    const notes: string[] = [];
+    const preCheck = await astPreCheck(parsed.relativePath, before ?? '', parsed.content);
+    if (preCheck.rejected) {
+      throw new Error(preCheck.rejected);
+    }
+    if (preCheck.note) {
+      notes.push(preCheck.note);
+    }
+
     const result = await invoke<WriteTextFileResult>('write_text_file', {
       workspacePath: workspace(),
       relativePath: parsed.relativePath,
       content: parsed.content,
     });
+
+    const verified = await invoke<ReadFileResult>('read_text_file', {
+      workspacePath: workspace(),
+      relativePath: parsed.relativePath,
+      maxBytes: Math.max(new TextEncoder().encode(parsed.content).length + 1024, 16384),
+    });
+    if (verified.content !== parsed.content) {
+      throw new Error(
+        `文件写入验证失败：${parsed.relativePath} 写入后内容与预期不一致。可能由云同步锁或文件系统问题导致，请重试。`
+      );
+    }
+
+    const diag = await lspDiagnosticsHook(parsed.relativePath, parsed.content);
+    notes.push(diag.note);
+
     editHistory?.record({
       path: result.path,
       before,
       after: parsed.content,
     });
     notifyWorkspaceMutation([result.path]);
-    return result;
+    return {
+      ...result,
+      diagnostics: diag.diagnostics,
+      notes,
+    } satisfies WriteFileResult;
   });
 
   registry.register(toolByName('app_render'), async (args: Record<string, unknown>) => {
@@ -3021,92 +3202,9 @@ export function registerWorkspaceTools(
   });
 
   registry.register(toolByName('workspace_project_graph'), async (args: Record<string, unknown>) => {
-    const view = asOptionalString(args.view) === 'overview' ? 'overview' : 'full';
-    const parsed: ProjectGraphArgs = {
-      view,
-      relativePath: asOptionalString(args.relativePath),
-      maxDepth: boundedNumber(asOptionalNumber(args.maxDepth), 16, 1, Number.MAX_SAFE_INTEGER),
-      maxFiles: boundedNumber(asOptionalNumber(args.maxFiles), Number.MAX_SAFE_INTEGER, 1, Number.MAX_SAFE_INTEGER),
-      maxTreeEntries: boundedNumber(asOptionalNumber(args.maxTreeEntries), 320, 20, Number.MAX_SAFE_INTEGER),
-      maxSymbolsPerFile: boundedNumber(asOptionalNumber(args.maxSymbolsPerFile), Number.MAX_SAFE_INTEGER, 1, Number.MAX_SAFE_INTEGER),
-      maxEdges: boundedNumber(asOptionalNumber(args.maxEdges), Number.MAX_SAFE_INTEGER, 1, Number.MAX_SAFE_INTEGER),
-      maxBytes: boundedNumber(asOptionalNumber(args.maxBytes), Number.MAX_SAFE_INTEGER, 10_000, Number.MAX_SAFE_INTEGER),
-    };
-
-    const listResult = await invoke<ListFilesResult>('list_workspace_files', {
-      workspacePath: workspace(),
-      relativePath: parsed.relativePath,
-      maxDepth: parsed.maxDepth,
-    });
-
-    const insightEntries = filterWorkspaceInsightEntries(listResult.entries);
-    const selectedFiles = selectProjectMapFiles(insightEntries, parsed.maxFiles);
-    const fileReads = await Promise.all(
-      selectedFiles.map(async (entry) => {
-        try {
-          const file = await invoke<ReadFileResult>('read_text_file', {
-            workspacePath: workspace(),
-            relativePath: entry.path,
-            maxBytes: parsed.maxBytes,
-          });
-          return [entry.path, { content: file.content, bytes: file.bytes }] as const;
-        } catch {
-          return null;
-        }
-      })
-    );
-
-    const fileContents = Object.fromEntries(
-      fileReads.filter(
-        (
-          entry
-        ): entry is readonly [string, { content: string; bytes: number }] => entry !== null
-      )
-    );
-    const maxSymbolsPerFile = parsed.maxSymbolsPerFile ?? 24;
-    const symbolOverrides = await resolveProjectMapSymbolOverrides(
-      workspace(),
-      fileContents,
-      maxSymbolsPerFile
-    );
-
-    let projectMap: Awaited<ReturnType<typeof buildWorkspaceProjectMap>>;
-    try {
-      projectMap = await buildWorkspaceProjectMap({
-        rootRelativePath: listResult.root || parsed.relativePath,
-        entries: insightEntries,
-        fileContents,
-        symbolOverrides,
-        maxTreeEntries: parsed.maxTreeEntries,
-        maxStubsPerFile: maxSymbolsPerFile,
-        truncated: listResult.truncated,
-      });
-    } catch (mapError) {
-      console.warn('buildWorkspaceProjectMap failed, falling back to tree-only map:', mapError);
-      projectMap = await buildWorkspaceProjectMap({
-        rootRelativePath: listResult.root || parsed.relativePath,
-        entries: insightEntries,
-        fileContents: {},
-        symbolOverrides: {},
-        maxTreeEntries: parsed.maxTreeEntries,
-        maxStubsPerFile: maxSymbolsPerFile,
-        truncated: listResult.truncated,
-      });
-    }
-
-    const graph2 = buildWorkspaceProjectGraph({
-      projectMap,
-      entries: insightEntries,
-      fileContents,
-      symbolOverrides,
-      maxEdges: parsed.maxEdges,
-    });
-
-    try {
-      return stripGraphNoise(await enrichWorkspaceProjectGraph(graph2, fileContents, 3));
-    } catch {
-      return stripGraphNoise(graph2);
-    }
+    const graph = await buildIntelligenceProjectGraph(args);
+    // stripGraphNoise 会原地裁剪图，先深拷贝，避免污染共享建图缓存。
+    return stripGraphNoise(structuredClone(graph));
   });
 
   registry.register(toolByName('workspace_symbol_lookup'), async (args: Record<string, unknown>) => {
@@ -3791,6 +3889,16 @@ export function registerWorkspaceTools(
     if (current.bytes >= 20_000_000) {
       throw new Error(`文件 ${parsed.relativePath} 超过 20MB 上限，请改用 workspace_write_file 重写整个文件`);
     }
+    const ambiguity = await describeAmbiguousMatches(
+      parsed.relativePath,
+      current.content,
+      parsed.search,
+      parsed.replaceAll,
+      parsed.expectedOccurrences
+    );
+    if (ambiguity) {
+      throw new Error(ambiguity);
+    }
     const patched = applySearchReplacePatch(current.content, {
       search: parsed.search,
       replace: parsed.replace,
@@ -3827,7 +3935,7 @@ export function registerWorkspaceTools(
     }
 
     // 后置 LSP 诊断钩子：返回编译诊断供模型继续修复（无 LSP 则降级跳过）
-    const diag = await lspDiagnosticsHook(parsed.relativePath);
+    const diag = await lspDiagnosticsHook(parsed.relativePath, patched.content);
     notes.push(diag.note);
 
     editHistory?.record({
@@ -3872,6 +3980,26 @@ export function registerWorkspaceTools(
       fileBytes[relativePath] = current.bytes;
     }
 
+    const runningContents: Record<string, string> = { ...fileContents };
+    for (const patch of parsed.patches) {
+      const patchContent = runningContents[patch.relativePath] ?? '';
+      const ambiguity = await describeAmbiguousMatches(
+        patch.relativePath,
+        patchContent,
+        patch.search,
+        patch.replaceAll,
+        patch.expectedOccurrences
+      );
+      if (ambiguity) {
+        throw new Error(`${patch.relativePath}: ${ambiguity}`);
+      }
+      try {
+        runningContents[patch.relativePath] = applySearchReplacePatch(patchContent, patch).content;
+      } catch {
+        break;
+      }
+    }
+
     const diff = applySearchReplaceDiff(fileContents, parsed.patches);
 
     // 前置 AST 语法预检：任一文件引入新语法错误则整体拦截、全部不落盘（语言不支持则降级跳过）
@@ -3908,7 +4036,7 @@ export function registerWorkspaceTools(
       }
 
       // 后置 LSP 诊断钩子：返回编译诊断供模型继续修复（无 LSP 则降级跳过）
-      const diag = await lspDiagnosticsHook(file.path);
+      const diag = await lspDiagnosticsHook(file.path, file.content);
       notes.push(`${file.path}: ${diag.note}`);
 
       editHistory?.record({

@@ -18,7 +18,8 @@ export { ToolRegistry, FilteringToolRegistry } from './tool/ToolRegistry';
 export type { ToolHandler } from './tool/ToolRegistry';
 export { EditHistory } from './tool/editHistory';
 export type { EditRecord, RevertAction } from './tool/editHistory';
-export { applySearchReplaceDiff, applySearchReplacePatch } from './tool/searchReplaceDiff';
+export { applySearchReplaceDiff, applySearchReplacePatch, locateSearchOccurrences } from './tool/searchReplaceDiff';
+export type { SearchOccurrenceLocation } from './tool/searchReplaceDiff';
 export {
   truncateToolOutput,
   stringifyToolResult,

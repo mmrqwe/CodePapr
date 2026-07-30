@@ -87,12 +87,14 @@ export interface CommandResultLike {
 export {
   applySearchReplaceDiff,
   applySearchReplacePatch,
+  locateSearchOccurrences,
 } from '@codepapr/core';
 export type {
   ApplySearchReplaceDiffFile,
   ApplySearchReplaceDiffPatch,
   ApplySearchReplaceDiffResult,
   ApplySearchReplacePatchPlan,
+  SearchOccurrenceLocation,
 } from '@codepapr/core';
 
 interface BuildWorkspaceProjectMapParams {

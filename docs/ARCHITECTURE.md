@@ -483,6 +483,8 @@ agent 回复完成
 
 `graph` 是统一的项目语义图工具，通过 `action` 参数选择操作。**现已对 LLM 隐藏（UI-only）**：LLM 侧的代码智能改由 `lsp` 工具（9 个导航 action，LSP 优先、AST 项目图兜底）与 `list`（目录树 + 逐文件轻量符号）承担；`graph` 的细粒度 handler 保留注册，服务于 UI 面板并作为 `lsp` 点查询的 AST 兜底后端。
 
+**建图缓存**：UI 侧 `buildIntelligenceProjectGraph`（workspaceTools.ts）缓存完整建图结果——以“建图参数 + 工作区”为键，TTL 60s，任一工作区写入经 `notifyWorkspaceMutation` 清空，同键在途构建去重、上限 3 条 FIFO 淘汰。`lookup→dependency→impact` 等连续 action 只建一次图。
+
 **基础导航（7 个 action）：**
 | Action | 功能 |
 |---|---|

@@ -484,6 +484,8 @@ Consolidation reuses the `selectContextCompactionModelRoute` fast-model route, s
 
 `graph` is a unified project semantic graph tool accessed via the `action` parameter. **Now hidden from the LLM (UI-only)**: LLM-facing code intelligence is provided by the `lsp` tool (9 navigation actions, LSP-first with AST project-graph fallback) and `list` (directory tree + per-file lightweight symbols); `graph`'s fine-grained handlers stay registered to serve UI panels and act as the AST fallback backend for `lsp` point queries.
 
+**Graph build cache**: on the UI side, `buildIntelligenceProjectGraph` (workspaceTools.ts) caches the full build result—keyed by "build args + workspace", 60s TTL, cleared on any workspace write via `notifyWorkspaceMutation`, with in-flight builds for the same key deduped and capped at 3 entries (FIFO eviction). A `lookup→dependency→impact` sequence builds the graph only once.
+
 **Basic navigation (7 actions):**
 | Action | Function |
 |---|---|

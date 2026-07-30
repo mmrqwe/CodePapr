@@ -23,21 +23,51 @@ export interface ApplySearchReplaceDiffResult {
   totalReplacements: number;
 }
 
-function countOccurrences(content: string, search: string): number {
-  let count = 0;
+export interface SearchOccurrenceLocation {
+  line: number;
+  column: number;
+}
+
+function offsetToLineColumn(content: string, offset: number): SearchOccurrenceLocation {
+  let line = 1;
+  let lineStart = 0;
+
+  for (let i = 0; i < offset; i += 1) {
+    if (content[i] === '\n') {
+      line += 1;
+      lineStart = i + 1;
+    }
+  }
+
+  return { line, column: offset - lineStart + 1 };
+}
+
+export function locateSearchOccurrences(
+  content: string,
+  search: string
+): SearchOccurrenceLocation[] {
+  if (!search) {
+    return [];
+  }
+
+  const fileHasCrLf = content.includes('\r\n');
+  const searchLf = search.replace(/\r\n/g, '\n');
+  const contentLf = fileHasCrLf ? content.replace(/\r\n/g, '\n') : content;
+
+  const locations: SearchOccurrenceLocation[] = [];
   let start = 0;
 
-  while (start <= content.length) {
-    const index = content.indexOf(search, start);
+  while (start <= contentLf.length) {
+    const index = contentLf.indexOf(searchLf, start);
     if (index === -1) {
       break;
     }
 
-    count += 1;
-    start = index + search.length;
+    locations.push(offsetToLineColumn(contentLf, index));
+    start = index + searchLf.length;
   }
 
-  return count;
+  return locations;
 }
 
 export function applySearchReplacePatch(
@@ -53,7 +83,7 @@ export function applySearchReplacePatch(
   const replaceLf = plan.replace.replace(/\r\n/g, '\n');
   const contentLf = fileHasCrLf ? content.replace(/\r\n/g, '\n') : content;
 
-  const occurrences = countOccurrences(contentLf, searchLf);
+  const occurrences = locateSearchOccurrences(content, plan.search).length;
 
   if (occurrences === 0) {
     let hint = '';

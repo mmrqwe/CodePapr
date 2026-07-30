@@ -253,7 +253,7 @@
   <div class="container">
     <div class="section-label"><span class="dot"></span> TOOL SURFACE · LSP / AST 盘点</div>
     <h1>工具全景 · <span class="gradient">两层架构 × 语言智能</span></h1>
-    <p>CodePapr 对 LLM 暴露 <strong>25 个合并工具</strong>（<code>graph</code> 已转 UI-only），经分发器路由到 <strong>61 个细粒度 workspace_* 工具</strong>（对 LLM 隐藏），最终落到 Tauri / Rust 后端。代码智能（<code>lsp</code> 的 9 个导航 action）已接入 <strong>LSP → AST 项目图</strong> 降级，并以 <code>source</code>/<code>confidence</code> 标注精度；<code>list</code> 浏览目录树并逐文件嵌入轻量符号（AST）；<code>read</code> 支持 <code>symbol</code> 参数按 AST 定位符号读取，大文件自动附带符号大纲；<code>grep</code> 支持 <code>semantic:true</code> 切换 LSP workspace symbol 语义检索。仅 write / edit / patch 仍为纯文本操作。点击任意条目展开分发链路与接入现状。</p>
+    <p>CodePapr 对 LLM 暴露 <strong>25 个合并工具</strong>（<code>graph</code> 已转 UI-only），经分发器路由到 <strong>61 个细粒度 workspace_* 工具</strong>（对 LLM 隐藏），最终落到 Tauri / Rust 后端。代码智能（<code>lsp</code> 的 9 个导航 action）已接入 <strong>LSP → AST 项目图</strong> 降级，并以 <code>source</code>/<code>confidence</code> 标注精度；<code>list</code> 浏览目录树并逐文件嵌入轻量符号（AST）；<code>read</code> 支持 <code>symbol</code> 参数按 AST 定位符号读取，大文件自动附带符号大纲；<code>grep</code> 支持 <code>semantic:true</code> 切换 LSP workspace symbol 语义检索。write / edit / patch 也在文本匹配之上接入了 <strong>AST 语法预检</strong>与<strong>写后 LSP 诊断反馈</strong>（匹配仍为字面，但歧义报错会列出每处行号与所在符号）。点击任意条目展开分发链路与接入现状。</p>
     <div class="legend">
       <span class="lg"><i style="background:var(--green)"></i>LSP 接入</span>
       <span class="lg"><i style="background:var(--amber)"></i>AST 接入</span>
@@ -267,7 +267,7 @@
       <div class="stat-card"><div class="num n-amber">15</div><div class="cap">真实 LSP 语言<br>Rust symbol_provider.rs</div></div>
       <div class="stat-card"><div class="num n-violet">17</div><div class="cap">AST 语言<br>tree-sitter</div></div>
       <div class="stat-card"><div class="num n-teal">11</div><div class="cap">regex 兜底语言</div></div>
-      <div class="stat-card"><div class="num n-orange">3</div><div class="cap">read/grep/list<br>接入 LSP/AST 的数量</div></div>
+      <div class="stat-card"><div class="num n-orange">6</div><div class="cap">read/grep/list/write/edit/patch<br>接入 LSP/AST 的数量</div></div>
     </div>
   </div>
 </section>
@@ -282,12 +282,12 @@
           <div class="idx">01</div>
           <div class="tt">
             <h3>File Ops <span>文件操作</span></h3>
-            <div class="tags"><span class="tag">read / write / edit / patch</span><span class="tag">grep / glob / list</span><span class="tag">read·grep·list 已接入 AST/LSP</span></div>
+            <div class="tags"><span class="tag">read / write / edit / patch</span><span class="tag">grep / glob / list</span><span class="tag">read·grep·list·write·edit·patch 已接入 AST/LSP</span></div>
           </div>
-          <div class="hz"><b>已部分改造</b>read·grep·list 接入 LSP/AST</div>
+          <div class="hz"><b>已全面改造</b>read·grep·list·write·edit·patch 接入 LSP/AST</div>
         </div>
 
-        <div class="sublabel"><b>读写改</b> 直接操作文件内容 · write/edit/patch 纯文本语义 · read 已接入 AST</div>
+        <div class="sublabel"><b>读写改</b> 直接操作文件内容 · write/edit/patch 文本匹配 + AST 预检 + LSP 诊断 · read 已接入 AST</div>
 
         <div class="item">
           <div class="row">
@@ -303,34 +303,34 @@
         <div class="item">
           <div class="row">
             <div class="addr">WRITE</div>
-            <div class="name">write<small>→ workspace_write_file · workspaceTools.ts:1957</small></div>
-            <div class="src"><span class="chip">invoke write_text_file</span><span class="chip">editHistory.record</span><span class="chip">notifyWorkspaceMutation</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="name">write<small>→ workspace_write_file · workspaceTools.ts:2370</small></div>
+            <div class="src"><span class="chip">invoke write_text_file</span><span class="chip">astPreCheck</span><span class="chip">lspDiagnosticsHook</span><span class="chip">notifyWorkspaceMutation</span></div>
+            <div class="cchip c-mix">文本 + AST/LSP</div>
           </div>
-          <div class="desc">创建或完整覆盖文件。写入后记录编辑历史并广播 mutation。<b>写完不跑任何诊断</b>——语法错误要等 LLM 自己想起调 diagnostics 才发现。</div>
-          <div class="more"><div class="mbox">分发：<code>write</code> → <code>workspace_write_file</code> → <code>invoke('write_text_file')</code>。写后 <code>notifyWorkspaceMutation([path])</code>（缓存失效的天然挂点）。无 AST 解析校验、无 LSP 诊断反馈。</div></div>
+          <div class="desc">创建或完整覆盖文件。写前跑 <b>AST 语法预检</b>（新增语法错误则拦截不落盘），写后重读校验一致性，并<b>同步 LSP 后返回该文件最新诊断</b>（结果含 <code>diagnostics</code>/<code>notes</code>）。</div>
+          <div class="more"><div class="mbox">分发：<code>write</code> → <code>workspace_write_file</code>。写前 <code>astPreCheck</code>（tree-sitter 比较前后语法错误数，仅错误数增加时拦截）；写后重读校验 + <code>lspDiagnosticsHook</code>（先 <code>lsp_open_document</code> 同步改后内容触发 didChange，再 <code>lsp_get_diagnostics</code> 按文件等待最新诊断）；末了 <code>editHistory.record</code> + <code>notifyWorkspaceMutation([path])</code>（同时清空 graph 建图缓存）。</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">EDIT</div>
-            <div class="name">edit<small>→ workspace_apply_patch · workspaceTools.ts:3271</small></div>
-            <div class="src"><span class="chip">applySearchReplacePatch</span><span class="chip">searchReplaceDiff.ts</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="name">edit<small>→ workspace_apply_patch · workspaceTools.ts:3875</small></div>
+            <div class="src"><span class="chip">applySearchReplacePatch</span><span class="chip">locateSearchOccurrences</span><span class="chip">astPreCheck · lspDiagnosticsHook</span></div>
+            <div class="cchip c-mix">文本 + AST/LSP</div>
           </div>
-          <div class="desc">单文件精确 SEARCH/REPLACE。<b>纯字面 <code>String.indexOf</code> 匹配</b>（CRLF→LF 归一化后），零模糊。重读原文独立于 read（<code>maxBytes 20MB</code>），写后再重读校验一致性。</div>
-          <div class="more"><div class="mbox">匹配语义：search 必须逐字节命中；<code>expectedOccurrences</code> 校验次数；多匹配需 <code>replaceAll</code>。同一段文本出现在多个函数里时只能靠加长 search 或 expectedOccurrences 硬猜——<b>无符号锚点</b>可用。改完无诊断反馈。</div></div>
+          <div class="desc">单文件精确 SEARCH/REPLACE。<b>字面 <code>String.indexOf</code> 匹配</b>（CRLF→LF 归一化），零模糊；<b>多处匹配时报错并列出每处行号 + 所在符号</b>。写前 AST 预检、写后重读校验并返回 LSP 诊断（<code>maxBytes 20MB</code>）。</div>
+          <div class="more"><div class="mbox">匹配语义：search 须逐字节命中；<code>expectedOccurrences</code> 校验次数；多匹配需 <code>replaceAll</code>。歧义时不再只说“匹配到 N 处”——经 <code>locateSearchOccurrences</code> 定位各行、<code>extractProjectMapSymbols</code>（AST）解析所在符号，抛出带 <code>L行号（位于 kind name）</code> 的富错误供精准消歧。改后 <code>lspDiagnosticsHook</code> 返回本文件最新诊断。</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">PATCH</div>
-            <div class="name">patch<small>→ workspace_apply_diff · workspaceTools.ts:3325</small></div>
-            <div class="src"><span class="chip">applySearchReplaceDiff</span><span class="chip">多文件原子</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="name">patch<small>→ workspace_apply_diff · workspaceTools.ts:3956</small></div>
+            <div class="src"><span class="chip">applySearchReplaceDiff</span><span class="chip">多文件原子</span><span class="chip">astPreCheck · lspDiagnosticsHook</span></div>
+            <div class="cchip c-mix">文本 + AST/LSP</div>
           </div>
-          <div class="desc">多文件原子 SEARCH/REPLACE：所有补丁全部精确匹配后一起写入，任一失败回滚。匹配机制与 edit 相同（纯字面），仅多了跨文件原子性。</div>
-          <div class="more"><div class="mbox">分发：<code>patch</code> → <code>workspace_apply_diff</code>。逐文件重读原文 → <code>applySearchReplaceDiff</code> 顺序应用 → 逐文件写入 + 重读校验 → 批量 <code>notifyWorkspaceMutation</code>。</div></div>
+          <div class="desc">多文件原子 SEARCH/REPLACE：所有补丁全部精确匹配后一起写入，任一失败回滚。匹配机制与 edit 相同（字面 + <b>歧义行号/符号报错</b>），逐文件 AST 预检与 LSP 诊断，仅多了跨文件原子性。</div>
+          <div class="more"><div class="mbox">分发：<code>patch</code> → <code>workspace_apply_diff</code>。逐文件重读原文 → 逐补丁歧义预检（按运行态内容定位行号 + 符号）→ <code>applySearchReplaceDiff</code> 顺序应用 → 逐文件 <code>astPreCheck</code> + 写入 + 重读校验 + <code>lspDiagnosticsHook</code> → 批量 <code>notifyWorkspaceMutation</code>（清空 graph 缓存）。</div></div>
         </div>
 
         <div class="sublabel"><b>检索</b> 正则 + 语义搜索 · grep semantic 走 LSP workspace symbol · list 逐文件 AST 符号</div>
@@ -396,12 +396,12 @@
         <div class="item">
           <div class="row">
             <div class="addr">GRAPH</div>
-            <div class="name">graph<small>→ workspace_project_graph 等 · workspaceTools.ts:2777 · <b>对 LLM 隐藏</b></small></div>
-            <div class="src"><span class="chip">14 个 action（UI-only）</span><span class="chip">hideFromLlm:3793</span></div>
+            <div class="name">graph<small>→ workspace_project_graph 等 · workspaceTools.ts:3204 · <b>对 LLM 隐藏</b></small></div>
+            <div class="src"><span class="chip">14 个 action（UI-only）</span><span class="chip">建图缓存 TTL 60s</span><span class="chip">hideFromLlm:4200</span></div>
             <div class="cchip c-ast">UI + AST 兜底</div>
           </div>
           <div class="desc"><b>已对 LLM 隐藏（UI-only）</b>。14 个 action 仍在：<b>full / overview / lookup / dependency / entrypoints / impact / implementations / smart_context</b> + 6 个分析（<b>dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests</b>）。细粒度 handler 保留注册，服务 UI 面板并作为 <code>lsp</code> 点查询的 <b>AST 兜底后端</b>；项目结构改由 <code>list</code>（目录树 + 逐文件轻量符号）对 LLM 暴露。</div>
-          <div class="more"><div class="mbox">构建链：<code>list_workspace_files</code> → 逐文件 <code>read_text_file</code> → LSP documentSymbol 覆盖 → <code>buildWorkspaceProjectMap</code> → <code>buildWorkspaceProjectGraph</code> → LSP 边增强。<b>每次调用全量重建，零缓存</b>（故仅作兜底/UI，不作主路径）。符号经 <code>UnifiedSymbolDispatcher.extractSymbols</code>（lsp→ast→regex 降级）。</div></div>
+          <div class="more"><div class="mbox">构建链：<code>list_workspace_files</code> → 逐文件 <code>read_text_file</code> → LSP documentSymbol 覆盖 → <code>buildWorkspaceProjectMap</code> → <code>buildWorkspaceProjectGraph</code> → LSP 边增强。<b>现已加建图缓存</b>：按“建图参数 + 工作区”做键，TTL 60s，任一工作区写入经 <code>notifyWorkspaceMutation</code> 清空，同键在途构建去重，上限 3 条 FIFO 淘汰——lookup→dependency→impact 三连只建一次图。符号经 <code>UnifiedSymbolDispatcher.extractSymbols</code>（lsp→ast→regex 降级）。</div></div>
         </div>
 
         <div class="sublabel"><b>LSP 导航与语义编辑</b> 精确到 file:line:column</div>
@@ -431,12 +431,12 @@
         <div class="item">
           <div class="row">
             <div class="addr">DIAG</div>
-            <div class="name">diagnostics<small>→ workspace_lsp_diagnostics / project_diagnostics · :2977 / :3396</small></div>
+            <div class="name">diagnostics<small>→ workspace_lsp_diagnostics / project_diagnostics · :3581 / :4066</small></div>
             <div class="src"><span class="chip">invoke lsp_get_diagnostics</span><span class="chip">Rust lsp.rs:1689</span></div>
             <div class="cchip c-lsp">LSP</div>
           </div>
-          <div class="desc">传 <code>relativePath</code> 查单文件 LSP 诊断；传 <code>project:true</code> 跑项目级 lint/typecheck。<b>独立工具——要 LLM 自己记得调</b>，write/edit 后不会自动触发。</div>
-          <div class="more"><div class="mbox">单文件：<code>invoke('lsp_get_diagnostics',{languageId})</code> 返回按 uri 分组的诊断，按路径后缀匹配取本文件。全项目：遍历可用 provider 语言聚合 topIssues。</div></div>
+          <div class="desc">传 <code>relativePath</code> 查单文件 LSP 诊断；传 <code>project:true</code> 跑项目级 lint/typecheck。write/edit/patch 改后已会<b>自动返回单文件诊断</b>；本工具用于<b>按需单文件复查</b>与项目级 lint/typecheck。</div>
+          <div class="more"><div class="mbox">单文件：<code>invoke('lsp_get_diagnostics',{languageId, relativePath})</code>，Rust 侧按文件 uri 等待诊断刷新（命中即短路返回、硬上限 2s 防卡死），再按路径后缀匹配取本文件。全项目：遍历可用 provider 语言聚合 topIssues。</div></div>
         </div>
 
         <div class="sublabel"><b>隐藏细粒度</b> 被合并工具遮蔽 · 经 graph/lsp 分发触达</div>
@@ -620,27 +620,27 @@
   <!-- ═══ MECHANISMS ═══ -->
   <section class="mech reveal" id="mechanisms">
     <h2>现状五个事实</h2>
-    <div class="sub">为什么"工具臃肿、没接好 LSP/AST"——改造的出发点。</div>
+    <div class="sub">改造的出发点：原初缺口 F·03/F·04/F·05 现已修复或改善，F·01/F·02/F·06 已改造/收敛。</div>
     <div class="ledger">
       <div class="led">
         <div class="no">F·01</div><h5>降级链已接入 lsp 点查询 + 文件操作（已改造）</h5>
-        <p><code>UnifiedSymbolDispatcher</code> 的 <code>lsp→ast→regex</code> 降级（Rust symbol_provider.rs 为引擎）原本只服务 project-map 符号提取。<b>现已扩展</b>：<code>lsp</code> 的 9 个导航 action 在 LSP 不可用/无结果时经 <code>astFallback</code>（workspaceTools.ts:2930）降级到 AST 项目图，并以 source/confidence 标注。<code>read</code> 的 <code>symbol</code> 参数用 AST 定位符号、<code>list</code> 逐文件 extractSymbols、<code>grep semantic:true</code> 走 LSP workspace symbol。<b>仅 write/edit/patch 仍为纯文本</b>。</p>
+        <p><code>UnifiedSymbolDispatcher</code> 的 <code>lsp→ast→regex</code> 降级（Rust symbol_provider.rs 为引擎）原本只服务 project-map 符号提取。<b>现已扩展</b>：<code>lsp</code> 的 9 个导航 action 在 LSP 不可用/无结果时经 <code>astFallback</code>（workspaceTools.ts:2930）降级到 AST 项目图，并以 source/confidence 标注。<code>read</code> 的 <code>symbol</code> 参数用 AST 定位符号、<code>list</code> 逐文件 extractSymbols、<code>grep semantic:true</code> 走 LSP workspace symbol。<b>write/edit/patch 也已接入 AST 语法预检与写后 LSP 诊断反馈</b>（匹配仍为字面，歧义报错带符号定位，见 F·05）。</p>
       </div>
       <div class="led">
         <div class="no">F·02</div><h5>read 已接入 AST（已改造）</h5>
         <p><code>workspace_read_file</code> 传 <code>symbol</code> 时先 <code>extract_file_symbols</code>（AST）定位符号行范围再切片返回；无 AST 支持时降级文本搜索。整文件读取超 300 行自动附带符号大纲（workspaceTools.ts:1913）。</p>
       </div>
       <div class="led">
-        <div class="no">F·03</div><h5>改完没有反馈回路</h5>
-        <p>write/edit/patch 落盘即结束。<code>diagnostics</code> 是独立工具，要 LLM 自己记得调。agent 改坏了类型检查，<b>下一次调用前毫不知情</b>——这是好 harness 最大的缺口。</p>
+        <div class="no">F·03</div><h5>改完没有反馈回路（已修复）</h5>
+        <p><b>现已修复</b>：write/edit/patch 写前跑 <code>astPreCheck</code>（tree-sitter，新增语法错误即拦截不落盘），写后重读校验并经 <code>lspDiagnosticsHook</code> 先 <code>lsp_open_document</code> 同步改后内容、再 <code>lsp_get_diagnostics</code> 按文件等待最新诊断，结果直接带 <code>diagnostics</code>/<code>notes</code> 返回。agent 改坏类型检查会在<b>同一次工具结果里立刻看到</b>。无 LSP 时降级并明确提示需手动复查。</p>
       </div>
       <div class="led">
-        <div class="no">F·04</div><h5>graph 每次全量重建</h5>
-        <p>每个 graph action 都重新 list 全工作区 + 逐文件读盘 + 查 LSP + 建图 + 增强（buildIntelligenceProjectGraph:1785）。<b>零缓存</b>。lookup→dependency→impact 三连就是三次全量重建。</p>
+        <div class="no">F·04</div><h5>graph 每次全量重建（已修复）</h5>
+        <p><b>现已修复</b>：<code>buildIntelligenceProjectGraph</code>（workspaceTools.ts:2161）外加建图缓存——按“建图参数 + 工作区”做键，TTL 60s，任一工作区写入经 <code>notifyWorkspaceMutation</code> 清空，同键在途构建去重，上限 3 条。lookup→dependency→impact 三连<b>只建一次图</b>，后两次直接复用（含昂贵的 LSP 边增强）。<code>workspace_project_graph</code> 也改为走该缓存（stripGraphNoise 前深拷贝以免污染缓存）。</p>
       </div>
       <div class="led">
-        <div class="no">F·05</div><h5>edit 是纯字面匹配</h5>
-        <p><code>applySearchReplacePatch</code> 用 <code>String.indexOf</code> 精确匹配（searchReplaceDiff.ts:51-78）。同一段文本在多个函数里出现时只能靠 <code>expectedOccurrences</code> 或加长 search 硬猜——<b>没有符号锚点</b>可用。</p>
+        <div class="no">F·05</div><h5>edit 是纯字面匹配（已改善）</h5>
+        <p><code>applySearchReplacePatch</code> 仍以 <code>String.indexOf</code> 做字面匹配（searchReplaceDiff.ts），但<b>消歧已符号化</b>：新增 <code>locateSearchOccurrences</code> 返回每处行/列，多处匹配且未锁定（replaceAll/expectedOccurrences）时，edit/patch 经 <code>extractProjectMapSymbols</code>（AST）抛出带 <code>L行号（位于 kind name）</code> 的富错误，模型可精准定位而非硬猜。跨切面改名仍建议走 <code>lsp_edit rename</code>。</p>
       </div>
       <div class="led">
         <div class="no">F·06</div><h5>重叠的心智模型（已收敛）</h5>
@@ -657,17 +657,17 @@
       <div class="fstep"><span class="fi">L0</span><b>LLM 调用 edit</b></div><div class="farrow">→</div>
       <div class="fstep"><span class="fi">L1</span><b>合并工具定义</b>mergeToolDefs</div><div class="farrow">→</div>
       <div class="fstep"><span class="fi">L2</span><b>分发器映射</b>edit→apply_patch</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L3</span><b>细粒度 handler</b>重读原文 20MB</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L4</span><b>字面 SEARCH/REPLACE</b>indexOf 精确匹配</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L3</span><b>细粒度 handler</b>重读原文 20MB · 歧义定位行号+符号</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L4</span><b>字面替换 + AST 预检</b>indexOf 匹配 · 新语法错误拦截</div><div class="farrow">→</div>
       <div class="fstep"><span class="fi">L5</span><b>invoke write_text_file</b>Tauri → Rust</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L6</span><b>重读校验 + editHistory</b>notifyMutation</div>
+      <div class="fstep"><span class="fi">L6</span><b>重读校验 + LSP 诊断</b>editHistory · notifyMutation(清 graph 缓存)</div>
     </div>
   </section>
 </div>
 
 <footer>
   <div class="container">
-    CodePapr &mdash; 工具全景盘点 · 生成自源码核实（<code>mergeToolDefs.ts</code> / <code>registerSharedWorkspaceTools.ts</code> / <code>workspaceTools.ts</code> / <code>toolDefinitions.ts</code> / <code>unifiedSymbols.ts</code> / <code>symbol_provider.rs</code> / <code>toolOutputTruncation.ts</code> / <code>workspace_fs/mod.rs</code> / <code>agentRuntime.worker.ts</code>）。两层架构 = 25 合并工具（LLM 可见，graph 转 UI-only）→ 61 细粒度（hideFromLlm）→ Tauri/Rust。降级链 = lsp→ast（点查询）/ lsp→ast→regex（符号提取）。限制三层单位：tokens / 字符 / 字节，勿混淆。
+    CodePapr &mdash; 工具全景盘点 · 生成自源码核实（<code>mergeToolDefs.ts</code> / <code>registerSharedWorkspaceTools.ts</code> / <code>workspaceTools.ts</code> / <code>searchReplaceDiff.ts</code> / <code>toolDefinitions.ts</code> / <code>unifiedSymbols.ts</code> / <code>symbol_provider.rs</code> / <code>lsp.rs</code> / <code>toolOutputTruncation.ts</code> / <code>workspace_fs/mod.rs</code> / <code>agentRuntime.worker.ts</code>）。两层架构 = 25 合并工具（LLM 可见，graph 转 UI-only）→ 61 细粒度（hideFromLlm）→ Tauri/Rust。降级链 = lsp→ast（点查询）/ lsp→ast→regex（符号提取）。限制三层单位：tokens / 字符 / 字节，勿混淆。
   </div>
 </footer>
 

@@ -1689,11 +1689,21 @@ pub(crate) fn lsp_request_impl(
 pub fn lsp_get_diagnostics(
     workspace_path: String,
     language_id: String,
+    relative_path: Option<String>,
 ) -> Result<LspDiagnosticsResponse, String> {
     match ensure_running_server_handle(None, &workspace_path, &language_id).and_then(|server| {
         let mut server = lock_server(&server)?;
-        // 同上：给一个短暂的真实等待窗口，而不是一県就返回已有结果。
-        let _ = collect_publish_diagnostics(&mut server, "", Duration::from_millis(300));
+        // 指定目标文件时，等待该文件的诊断刷新到位（命中即短路返回，硬上限防止卡死）；
+        // 未指定时沿用短窗口拉取已有缓存。
+        let (wait_uri, wait) = match relative_path.as_deref() {
+            Some(path) if !path.trim().is_empty() => {
+                let workspace = canonical_workspace(&workspace_path)?;
+                let uri = file_uri_for(&workspace, path)?;
+                (uri, Duration::from_millis(2000))
+            }
+            _ => (String::new(), Duration::from_millis(300)),
+        };
+        let _ = collect_publish_diagnostics(&mut server, &wait_uri, wait);
         Ok(server.diagnostics_by_uri.clone())
     }) {
         Ok(diagnostics) => Ok(LspDiagnosticsResponse { diagnostics }),

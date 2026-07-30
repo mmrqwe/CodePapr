@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applySearchReplaceDiff, applySearchReplacePatch } from '../src';
+import { applySearchReplaceDiff, applySearchReplacePatch, locateSearchOccurrences } from '../src';
 
 describe('applySearchReplacePatch', () => {
   it('applies a single precise search replace block', () => {
@@ -89,5 +89,37 @@ describe('applySearchReplaceDiff', () => {
         ]
       )
     ).toThrow('补丁 2 (src/a.ts) 应用失败');
+  });
+});
+
+describe('locateSearchOccurrences', () => {
+  it('returns empty for an empty search', () => {
+    expect(locateSearchOccurrences('a\nb\n', '')).toEqual([]);
+  });
+
+  it('locates a single occurrence with 1-based line and column', () => {
+    expect(locateSearchOccurrences('const value = 1;\n', 'value')).toEqual([
+      { line: 1, column: 7 },
+    ]);
+  });
+
+  it('locates multiple occurrences across lines', () => {
+    expect(locateSearchOccurrences('foo\nbar\nfoo\n', 'foo')).toEqual([
+      { line: 1, column: 1 },
+      { line: 3, column: 1 },
+    ]);
+  });
+
+  it('reports the first line of a multiline match', () => {
+    expect(locateSearchOccurrences('a\nconst x = 1;\nconst y = 2;\n', 'const x = 1;\nconst y = 2;')).toEqual([
+      { line: 2, column: 1 },
+    ]);
+  });
+
+  it('handles CRLF content using normalized line numbers', () => {
+    expect(locateSearchOccurrences('foo\r\nbar\r\nfoo\r\n', 'foo')).toEqual([
+      { line: 1, column: 1 },
+      { line: 3, column: 1 },
+    ]);
   });
 });
