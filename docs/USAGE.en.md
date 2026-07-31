@@ -250,7 +250,7 @@ The toolbar search box supports **conversation search** and **file search**, swi
 
 Each entry starts with `## YYYY-MM-DD Topic` and is manually editable.
 
-**Loading**: Injected into the bootstrap context on each session start (does not enter system prompt cache).
+**Loading**: Injected once at session start into the Session Bootstrap (`log[0]`, `isPrefixSystem`). The bootstrap is frozen per (session × stable signature), stays byte-stable within the session, and is cached as part of the prefix (folded into Claude's ephemeral system block; the message prefix for DeepSeek/OpenAI). On-disk `memory.md` edits do not trigger an in-session rebuild; they take effect on the next session.
 
 **Cold-start auto-generation**: If `memory.md` is missing or empty at session start and a ProjectGraph cache is available, the fast model auto-generates an initial memory (project structure / tech stack / build commands / key conventions) in the background. It does not block the current session; benefits apply on the next session.
 

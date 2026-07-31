@@ -32,6 +32,7 @@ import { loadProjectState } from '../utils/projectStorage';
 import {
   loadSessions,
   loadSessionMessages,
+  loadAllSessionMessages,
   loadAllProjectMeta,
 } from '../utils/projectStorage';
 import { runProjectDiagnostics } from '../utils/projectDiagnostics';
@@ -172,6 +173,21 @@ void _isApiConfigured;
 // don't trigger duplicate generation. Module-level on purpose: the guard
 // spans the whole session, not a single store snapshot.
 let memoryBootstrapInFlight = false;
+
+// Serializes background memory.md read-modify-write operations (cold-start
+// bootstrap and post-reply consolidation). They share one file and each does a
+// full-overwrite write; without serialization a slow bootstrap write can land
+// between a consolidation's read and write (or vice versa) and clobber it. The
+// chain never rejects, so a failing task does not wedge subsequent ones.
+let memoryWriteChain: Promise<void> = Promise.resolve();
+function withMemoryLock<T>(task: () => Promise<T>): Promise<T> {
+  const result = memoryWriteChain.then(task);
+  memoryWriteChain = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
 
 // Snapshot the current todo digest so a context checkpoint can freeze it. The
 // frozen digest is reused on every rebuild (instead of re-rendering from live
@@ -461,12 +477,29 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             createdAt: meta.createdAt,
           })) as unknown as SessionMeta[];
 
+          // Batch-load every session's messages in a single IPC round-trip (one
+          // connection open) instead of one load per session. Fall back to
+          // per-session loads if the batch command is unavailable/errors.
+          let batchedMessages: Record<string, UIMessage[]> | null = null;
+          try {
+            const loaded = await loadAllSessionMessages(normalizedWorkspacePath);
+            batchedMessages = {};
+            for (const [id, msgs] of Object.entries(loaded)) {
+              batchedMessages[id] = msgs as unknown as UIMessage[];
+            }
+          } catch {
+            batchedMessages = null;
+          }
           for (const s of sessions) {
-            try {
-              const msgs = await loadSessionMessages(normalizedWorkspacePath, s.id);
-              sessionMessages[s.id] = msgs as unknown as UIMessage[];
-            } catch {
-              sessionMessages[s.id] = [];
+            if (batchedMessages) {
+              sessionMessages[s.id] = batchedMessages[s.id] ?? [];
+            } else {
+              try {
+                const msgs = await loadSessionMessages(normalizedWorkspacePath, s.id);
+                sessionMessages[s.id] = msgs as unknown as UIMessage[];
+              } catch {
+                sessionMessages[s.id] = [];
+              }
             }
           }
 
@@ -1195,14 +1228,16 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             };
             void (async () => {
               try {
-                const generated = await bootstrapMemoryContent(bootstrapInput, normalizedSettings);
-                if (generated) {
-                  await invoke('write_text_file', {
-                    workspacePath,
-                    relativePath: '.CodePapr/memory.md',
-                    content: generated,
-                  });
-                }
+                await withMemoryLock(async () => {
+                  const generated = await bootstrapMemoryContent(bootstrapInput, normalizedSettings);
+                  if (generated) {
+                    await invoke('write_text_file', {
+                      workspacePath,
+                      relativePath: '.CodePapr/memory.md',
+                      content: generated,
+                    });
+                  }
+                });
               } catch {
                 // Silent fail - don't disrupt the session
               } finally {
@@ -2069,24 +2104,26 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             const ws = get().workspacePath;
             void (async () => {
               try {
-                const memResult = await invoke<{ path: string; content: string; bytes: number }>(
-                  'read_text_file',
-                  {
-                    workspacePath: ws,
-                    relativePath: '.CodePapr/memory.md',
-                    maxBytes: 50_000,
+                await withMemoryLock(async () => {
+                  const memResult = await invoke<{ path: string; content: string; bytes: number }>(
+                    'read_text_file',
+                    {
+                      workspacePath: ws,
+                      relativePath: '.CodePapr/memory.md',
+                      maxBytes: 50_000,
+                    }
+                  );
+                  const content = memResult.content?.trim();
+                  if (!content || !planMemoryConsolidation(content, MEMORY_CONSOLIDATION_MAX_LINES)) return;
+                  const consolidated = await consolidateMemoryContent(content, normalizedSettings);
+                  if (consolidated && consolidated !== content) {
+                    await invoke('write_text_file', {
+                      workspacePath: ws,
+                      relativePath: '.CodePapr/memory.md',
+                      content: consolidated,
+                    });
                   }
-                );
-                const content = memResult.content?.trim();
-                if (!content || !planMemoryConsolidation(content, MEMORY_CONSOLIDATION_MAX_LINES)) return;
-                const consolidated = await consolidateMemoryContent(content, normalizedSettings);
-                if (consolidated && consolidated !== content) {
-                  await invoke('write_text_file', {
-                    workspacePath: ws,
-                    relativePath: '.CodePapr/memory.md',
-                    content: consolidated,
-                  });
-                }
+                });
               } catch {
                 // Silent fail - don't disrupt the session
               }

@@ -239,6 +239,7 @@ fn main() {
             db::delete_session,
             db::save_message_batch,
             db::load_session_messages,
+            db::load_all_session_messages,
             db::save_project_meta,
             db::load_project_meta,
             db::load_all_project_meta,

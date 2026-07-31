@@ -4,6 +4,7 @@ import {
   FilteringToolRegistry,
   MUTATING_TOOL_NAMES,
   isReadOnlyMode,
+  Serializer,
   type EditHistory,
   type PromptMode,
 } from '@codepapr/core';
@@ -227,6 +228,12 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
   private crashed = false;
   private snapshotTimerId: ReturnType<typeof setTimeout> | null = null;
+  // Tracks the log length the worker's per-session cache should currently hold.
+  // When it matches this.logStore.length() the next chat syncs incrementally
+  // (no full-log clone); a mismatch (first turn, resetToMessage, clear, pop,
+  // compaction) falls back to a full sync. Fresh per WorkerBackedAgent instance,
+  // so a recreated worker always starts with a full sync.
+  private readonly workerSyncedLength = new Map<string, number>();
 
   constructor(private readonly config: WorkerBackedAgentConfig) {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
@@ -236,8 +243,10 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       this.logStore.loadFromSnapshot({
         messages: config.initialMessages,
         lastMessageIndex: config.initialMessages.length - 1,
+        // Serializer.getByteLength (sorted-key JSON) matches the byte accounting
+        // loadFromSnapshot validates against (see createLog in the worker).
         totalBytes: config.initialMessages.reduce(
-          (sum, message) => sum + new TextEncoder().encode(JSON.stringify(message)).length,
+          (sum, message) => sum + Serializer.getByteLength(message),
           0
         ),
       });
@@ -322,11 +331,29 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     const requestId = createId();
     this.activeRequestId = requestId;
 
+    const sessionId = this.config.sessionId;
+    const mainLength = this.logStore.length();
+    const syncedLength = this.workerSyncedLength.get(sessionId);
+    let chatMessages: IMessage[];
+    let incrementalSync: AgentWorkerChatPayload['incrementalSync'];
+    if (syncedLength === mainLength) {
+      // Worker cache is in sync: send only messages appended since (normally
+      // none) and let the worker reuse its cached log — no full-log clone.
+      chatMessages = [];
+      incrementalSync = {
+        expectedBaseLength: syncedLength,
+        newMessages: this.logStore.getMessagesSince(syncedLength),
+      };
+    } else {
+      chatMessages = [...this.logStore.getAllMessages()];
+    }
+
     const payload: AgentWorkerChatPayload = {
       requestId,
-      sessionId: this.config.sessionId,
+      sessionId,
       workspacePath: this.config.workspacePath,
-      messages: [...this.logStore.getAllMessages()],
+      messages: chatMessages,
+      ...(incrementalSync ? { incrementalSync } : {}),
       userInput,
       images,
       settings: this.config.settings,
@@ -562,11 +589,17 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     }
 
     if (message.type === 'tool-request') {
-      const match = pending.pendingToolCalls.find(
-        (item) =>
-          item.toolName === message.toolName &&
-          item.argumentsKey === stableStringify(message.arguments)
-      );
+      // Prefer matching by tool-call id (robust even for concurrent identical
+      // calls); fall back to name+arguments for older paths without an id.
+      const match =
+        (message.toolCallId
+          ? pending.pendingToolCalls.find((item) => item.toolCallId === message.toolCallId)
+          : undefined) ??
+        pending.pendingToolCalls.find(
+          (item) =>
+            item.toolName === message.toolName &&
+            item.argumentsKey === stableStringify(message.arguments)
+        );
 
       void this.toolExecutor(message.toolName, message.arguments, {
         toolCallId: match?.toolCallId,
@@ -633,7 +666,20 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       this.flushDeltas(pending);
       this.pendingRequests.delete(message.requestId);
       this.activeRequestId = null;
-      void this.logStore.appendBatch(message.deltaMessages).then(() => {
+      let apply: Promise<unknown>;
+      if (message.compacted && message.fullMessages) {
+        // Mid-loop compaction replaced the worker log this turn: adopt the
+        // compacted epoch wholesale instead of appending deltas, whose indices no
+        // longer align after the worker reset its log.
+        this.logStore.reset();
+        apply = this.logStore.appendBatch(message.fullMessages);
+      } else {
+        apply = this.logStore.appendBatch(message.deltaMessages);
+      }
+      void apply.then(() => {
+        // Record the worker's authoritative log length so the next chat can sync
+        // incrementally (only when it matches this.logStore.length()).
+        this.workerSyncedLength.set(this.config.sessionId, message.logLength);
         pending.resolve(message.response);
       }, (error) => {
         pending.reject(error instanceof Error ? error : new Error(String(error)));

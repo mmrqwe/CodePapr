@@ -6,9 +6,22 @@ import type { Settings } from '../store/internals/types';
 
 export const MEMORY_CONSOLIDATION_MAX_LINES = 200;
 
+/** Sanity floor for an LLM consolidation result; anything shorter is treated as
+ *  empty/garbage and falls back to rule-based consolidation. */
+const MIN_CONSOLIDATED_CHARS = 50;
+
+/** Count lines ignoring trailing blank lines, so a trailing newline doesn't
+ *  inflate the count (which previously triggered consolidation one line early
+ *  and never fired on a file of exactly maxLines lines). */
+function countMemoryLines(content: string): number {
+  const trimmed = content.replace(/\n+$/, '');
+  if (!trimmed) return 0;
+  return trimmed.split('\n').length;
+}
+
 export function planMemoryConsolidation(content: string | undefined, maxLines: number = MEMORY_CONSOLIDATION_MAX_LINES): boolean {
   if (!content) return false;
-  return content.split('\n').length > maxLines;
+  return countMemoryLines(content) > maxLines;
 }
 
 function buildMemoryConsolidationPrompt(options: {
@@ -85,7 +98,7 @@ function fallbackConsolidateMemory(content: string, maxLines: number): string {
   });
 
   const joined = unique.join('');
-  if (joined.split('\n').length <= maxLines) {
+  if (countMemoryLines(joined) <= maxLines) {
     return joined.trim();
   }
 
@@ -98,7 +111,7 @@ function fallbackConsolidateMemory(content: string, maxLines: number): string {
   let result = '';
   for (const s of sorted) {
     const candidate = result + s;
-    if (candidate.split('\n').length > maxLines) break;
+    if (countMemoryLines(candidate) > maxLines) break;
     result = candidate;
   }
   return result.trim();
@@ -151,7 +164,13 @@ export async function consolidateMemoryContent(
     });
 
     const consolidated = result.response.choices[0]?.message.content?.trim();
-    if (consolidated && consolidated.length > 50) {
+    if (consolidated && consolidated.length > MIN_CONSOLIDATED_CHARS) {
+      // Enforce the target: if the LLM didn't compress below the limit, apply the
+      // rule-based trim so we never write back a still-over-limit file (which would
+      // just re-trigger consolidation on the next pass).
+      if (planMemoryConsolidation(consolidated)) {
+        return fallbackConsolidateMemory(consolidated, MEMORY_CONSOLIDATION_MAX_LINES);
+      }
       return consolidated;
     }
   } catch (e) {

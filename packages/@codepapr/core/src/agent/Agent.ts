@@ -490,7 +490,7 @@ export class Agent {
           try {
             const toolTimeoutMs = this.toolTimeouts[call.name] ?? DEFAULT_TOOL_TIMEOUT_MS;
             result = await withTimeout(
-              this.session.toolRegistry.execute(call.name, call.arguments),
+              this.session.toolRegistry.execute(call.name, call.arguments, { toolCallId: call.id }),
               toolTimeoutMs,
               effectiveSignal
             );

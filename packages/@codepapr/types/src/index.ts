@@ -146,9 +146,6 @@ export interface IAppendOnlyLog {
   toMessageArray(): IMessage[];
   toJSON(): IAppendLogEntry;
 
-  persistToDatabase(sessionId: string): Promise<void>;
-  loadFromDatabase(sessionId: string): Promise<void>;
-
   createSnapshot(): IAppendLogEntry;
   loadFromSnapshot(snapshot: IAppendLogEntry): void;
 }
@@ -178,19 +175,6 @@ export interface IVolatileScratch {
 // ============================================================================
 // Session & Agent Types
 // ============================================================================
-
-export interface ISessionConfig {
-  sessionId: string;
-  createdAt: number;
-  lastModified: number;
-  model: string;
-  provider: 'deepseek' | 'openai' | 'claude';
-  tools: IToolDefinition[];
-  systemPrompt: string;
-  parameters: Record<string, unknown>;
-  isPrefixFrozen: boolean;
-  prefixHash?: string;
-}
 
 export interface IAgentResponse {
   role: 'assistant';
@@ -372,39 +356,6 @@ export interface ICacheValidation {
   cacheHitRate: number;
   promptCacheHitTokens?: number;
   promptCacheMissTokens?: number;
-}
-
-// ============================================================================
-// Database Types
-// ============================================================================
-
-export interface IDatabase {
-  init(): Promise<void>;
-  close(): Promise<void>;
-
-  // Sessions
-  createSession(config: ISessionConfig): Promise<string>;
-  getSession(sessionId: string): Promise<ISessionConfig | null>;
-  updateSession(sessionId: string, updates: Partial<ISessionConfig>): Promise<void>;
-  deleteSession(sessionId: string): Promise<void>;
-  listSessions(): Promise<ISessionConfig[]>;
-
-  // Messages
-  appendMessage(sessionId: string, message: IMessage, index: number): Promise<void>;
-  getMessages(sessionId: string): Promise<IMessage[]>;
-  getMessageCount(sessionId: string): Promise<number>;
-
-  // Tools
-  saveTool(sessionId: string, tool: IToolDefinition): Promise<void>;
-  getTools(sessionId: string): Promise<IToolDefinition[]>;
-
-  // Cache stats
-  saveCacheStats(sessionId: string, stats: ICacheStatistics): Promise<void>;
-  getCacheStats(sessionId: string, limit?: number): Promise<ICacheStatistics[]>;
-
-  // API keys
-  saveApiKey(provider: string, encryptedKey: string): Promise<void>;
-  getApiKey(provider: string): Promise<string | null>;
 }
 
 // ============================================================================

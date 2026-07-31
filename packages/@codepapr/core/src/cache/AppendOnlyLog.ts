@@ -350,17 +350,6 @@ export class AppendOnlyLog implements IAppendOnlyLog {
   }
 
   /**
-   * Persistence hooks (to be implemented by DB layer)
-   */
-  async persistToDatabase(): Promise<void> {
-    // Implemented by repository layer
-  }
-
-  async loadFromDatabase(): Promise<void> {
-    // Implemented by repository layer
-  }
-
-  /**
    * Private: Deep freeze a message
    */
   private freezeMessage(msg: IMessage): IMessage {

@@ -479,7 +479,52 @@ export function buildEffectiveContextMessages(
   // identical input and coincides with the compaction prefix rewrite, so it does
   // not add per-round prefix-cache breaks (the old per-request sliding-window
   // pruning mutated mid-prefix bytes on essentially every round).
-  return pruneOldToolResults(result, options?.pruneOptions);
+  return pruneOldToolResults(repairOrphanedToolCalls(result), options?.pruneOptions);
+}
+
+/**
+ * Ensure every assistant `toolCalls` entry has a matching `tool` result message.
+ * A hard crash mid-tool-execution can persist an assistant tool-call whose result
+ * was never produced; some providers (OpenAI/DeepSeek) reject assistant tool_calls
+ * without a matching tool message. Insert a small placeholder result so rebuilt
+ * history is always well-formed. The UI→core path normally pairs these already, so
+ * this is a defensive no-op except after an interrupted run.
+ */
+export function repairOrphanedToolCalls(messages: IMessage[]): IMessage[] {
+  const resolvedIds = new Set<string>();
+  for (const msg of messages) {
+    if (msg.role === 'tool' && msg.toolResult) {
+      resolvedIds.add(msg.toolResult.toolCallId);
+    }
+  }
+
+  const repaired: IMessage[] = [];
+  for (const msg of messages) {
+    repaired.push(msg);
+    if (msg.role !== 'assistant' || !msg.toolCalls || msg.toolCalls.length === 0) {
+      continue;
+    }
+    for (const call of msg.toolCalls) {
+      if (resolvedIds.has(call.id)) {
+        continue;
+      }
+      const placeholder = '[tool result missing: interrupted before completion]';
+      repaired.push({
+        id: `${msg.id}-tool-${call.id}-repaired`,
+        role: 'tool',
+        content: placeholder,
+        timestamp: msg.timestamp,
+        toolResult: {
+          toolCallId: call.id,
+          success: false,
+          result: placeholder,
+          error: '工具执行中断，结果缺失',
+        },
+      });
+    }
+  }
+
+  return repaired;
 }
 
 export function planContextCompaction(

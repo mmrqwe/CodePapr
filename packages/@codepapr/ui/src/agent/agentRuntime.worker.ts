@@ -9,6 +9,7 @@ import {
   buildRuntimeUserPrompt,
   ImmutablePrefix,
   Session,
+  Serializer,
   resolveSubagentExecution,
   runSubagentSession,
   ToolRegistry,
@@ -55,6 +56,11 @@ const toolResponseWaiters = new Map<
 
 const sessionAbortControllers = new Map<string, AbortController>();
 const appAgentAbortControllers = new Map<string, AbortController>();
+
+// Per-session log cache so consecutive turns reuse the already-built history
+// instead of re-cloning + re-hashing the full log every turn (incremental sync).
+// Reset implicitly when the worker is recreated (new WorkerBackedAgent instance).
+const sessionLogs = new Map<string, AppendOnlyLog>();
 
 const chatResponseWaiters = new Map<
   string,
@@ -440,10 +446,10 @@ function createLog(sessionId: string, messages: IMessage[]): AppendOnlyLog {
   log.loadFromSnapshot({
     messages,
     lastMessageIndex: messages.length - 1,
-    totalBytes: messages.reduce(
-      (sum, message) => sum + new TextEncoder().encode(JSON.stringify(message)).length,
-      0
-    ),
+    // Use Serializer.getByteLength (sorted-key JSON) to match the byte accounting
+    // AppendOnlyLog.loadFromSnapshot validates against; plain JSON.stringify only
+    // happens to match by length and would spuriously throw if formatting changed.
+    totalBytes: messages.reduce((sum, message) => sum + Serializer.getByteLength(message), 0),
   });
   return log;
 }
@@ -452,7 +458,8 @@ async function requestToolExecution(
   requestId: string,
   toolName: string,
   args: Record<string, unknown>,
-  timeoutMs: number = TOOL_IPC_TIMEOUT_MS
+  timeoutMs: number = TOOL_IPC_TIMEOUT_MS,
+  toolCallId?: string
 ): Promise<unknown> {
   const toolRequestId = `${requestId}:${++nextToolRequestId}`;
 
@@ -480,6 +487,7 @@ async function requestToolExecution(
     toolRequestId,
     toolName,
     arguments: args,
+    ...(toolCallId ? { toolCallId } : {}),
   });
 
   return await result;
@@ -600,9 +608,9 @@ function createRegistry(
   const toolIpcTimeoutMs = payload.settings.toolIpcTimeoutMs ?? TOOL_IPC_TIMEOUT_MS;
 
   for (const tool of payload.toolDefinitions) {
-    registry.register(tool, async (args) => {
+    registry.register(tool, async (args, context) => {
       const timeout = tool.name === 'graph' ? toolIpcTimeoutMs : TOOL_IPC_TIMEOUT_MS;
-      return await requestToolExecution(requestId, tool.name, args, timeout);
+      return await requestToolExecution(requestId, tool.name, args, timeout, context?.toolCallId);
     });
   }
 
@@ -611,8 +619,8 @@ function createRegistry(
   if (!registry.has('graph')) {
     const graphDef = MERGE_TOOL_DEFINITIONS.find((t) => t.name === 'graph');
     if (graphDef) {
-      registry.register(graphDef, async (args) => {
-        return await requestToolExecution(requestId, 'graph', args, toolIpcTimeoutMs);
+      registry.register(graphDef, async (args, context) => {
+        return await requestToolExecution(requestId, 'graph', args, toolIpcTimeoutMs, context?.toolCallId);
       });
     }
   }
@@ -733,10 +741,10 @@ async function handleRunAppAgent(
       if (requestedTools.length > 0 && !requestedTools.includes(tool.name)) continue;
     }
 
-    registry.register(tool, async (args) => {
+    registry.register(tool, async (args, context) => {
       const sandboxedArgs = sandboxWriteArgs(tool.name, args);
       return await requestToolExecution(
-        requestId, tool.name, sandboxedArgs, TOOL_IPC_TIMEOUT_MS
+        requestId, tool.name, sandboxedArgs, TOOL_IPC_TIMEOUT_MS, context?.toolCallId
       );
     });
   }
@@ -995,7 +1003,31 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
 
   try {
     const registry = createRegistry(payload.requestId, payload, true);
-  const startIndex = payload.messages.length;
+
+  // Reuse a per-session log across turns to avoid re-cloning + re-hashing the
+  // full history each turn. Full sync rebuilds it from payload.messages;
+  // incremental sync appends only newMessages onto the cached log after
+  // verifying the cached length matches what the main thread expects (a
+  // mismatch means the cache is stale and is treated as an error — the main
+  // thread only sends incremental when its tracked length agrees).
+  let sessionLog = sessionLogs.get(payload.sessionId);
+  if (payload.incrementalSync && sessionLog) {
+    const { expectedBaseLength, newMessages } = payload.incrementalSync;
+    if (sessionLog.length() !== expectedBaseLength) {
+      throw new Error(
+        `Worker log cache mismatch for session ${payload.sessionId}: ` +
+          `cached ${sessionLog.length()}, expected base ${expectedBaseLength}`
+      );
+    }
+    if (newMessages.length > 0) {
+      await sessionLog.appendBatch(newMessages);
+    }
+  } else {
+    sessionLog = createLog(payload.sessionId, payload.messages);
+    sessionLogs.set(payload.sessionId, sessionLog);
+  }
+  const startIndex = sessionLog.length();
+
   const prefix = new ImmutablePrefix({
     systemPrompt: payload.systemPrompt,
     tools: registry.getLlmTools(),
@@ -1012,7 +1044,7 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     sessionId: payload.sessionId,
     prefix,
     toolRegistry: registry,
-    log: createLog(payload.sessionId, payload.messages),
+    log: sessionLog,
   });
   const agent = new Agent({
     session,
@@ -1030,9 +1062,13 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     ),
   });
 
+  let compacted = false;
   const response = await agent.chat(
     payload.userInput,
     (event) => {
+      if (event.type === 'context-compacted') {
+        compacted = true;
+      }
       postMessageToMain({
         type: 'stream',
         requestId: payload.requestId,
@@ -1056,6 +1092,13 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     requestId: payload.requestId,
     response,
     deltaMessages: session.logStore.getMessagesSince(startIndex),
+    logLength: session.logStore.length(),
+    // When compaction reset the log this turn, getMessagesSince(startIndex) no
+    // longer maps onto the original prefix; ship the whole compacted epoch so the
+    // main thread can replace its authoritative log and stay in sync.
+    ...(compacted
+      ? { compacted: true, fullMessages: session.logStore.getAllMessages().slice() }
+      : {}),
   });
   } finally {
     sessionAbortControllers.delete(payload.requestId);

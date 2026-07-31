@@ -8,7 +8,17 @@ import { Serializer } from '../cache/Serializer';
 
 const log = new Logger('ToolRegistry');
 
-export type ToolHandler = (args: Record<string, unknown>) => Promise<unknown> | unknown;
+export interface ToolExecutionContext {
+  /** The assistant tool-call id this execution fulfills. Lets the worker bridge
+   *  match a tool-request to its pending call by id (robust even for concurrent
+   *  identical calls) instead of by name+arguments. */
+  toolCallId?: string;
+}
+
+export type ToolHandler = (
+  args: Record<string, unknown>,
+  context?: ToolExecutionContext
+) => Promise<unknown> | unknown;
 
 export class ToolRegistry {
   private tools: Map<string, IToolDefinition> = new Map();
@@ -70,10 +80,14 @@ export class ToolRegistry {
     return this.tools.get(name);
   }
 
-  async execute(name: string, args: Record<string, unknown>): Promise<unknown> {
+  async execute(
+    name: string,
+    args: Record<string, unknown>,
+    context?: ToolExecutionContext
+  ): Promise<unknown> {
     const handler = this.handlers.get(name);
     if (!handler) throw new Error(`No handler for tool: ${name}`);
-    return await handler(args);
+    return await handler(args, context);
   }
 
   hideFromLlm(name: string): void {

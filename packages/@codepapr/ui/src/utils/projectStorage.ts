@@ -522,6 +522,23 @@ export async function loadSessionMessages(
   return parsed as ProjectMessage[];
 }
 
+interface AllMessagesResult {
+  messagesBySessionJson: string;
+}
+
+/** Load every session's messages in one IPC round-trip (vs. one per session).
+ *  Returns a map of sessionId → messages. */
+export async function loadAllSessionMessages(
+  workspacePath: string
+): Promise<Record<string, ProjectMessage[]>> {
+  const result = await invoke<AllMessagesResult>('load_all_session_messages', {
+    workspacePath: workspacePath.trim(),
+  });
+  const parsed: unknown = JSON.parse(result.messagesBySessionJson);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  return parsed as Record<string, ProjectMessage[]>;
+}
+
 export async function saveProjectMeta(workspacePath: string, key: string, value: unknown): Promise<void> {
   await invoke('save_project_meta', {
     workspacePath: workspacePath.trim(),

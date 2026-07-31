@@ -289,7 +289,7 @@ Hover 任意用户消息 → 下方出现"重置到此点"和"复制"按钮：
 
 每条以 `## YYYY-MM-DD 主题` 起始，可手动编辑。
 
-**加载**：每次会话启动时一次性全量注入到 bootstrap 上下文（不进入 system prompt 缓存）。
+**加载**：每次会话启动时一次性全量注入到 Session Bootstrap（`log[0]`，`isPrefixSystem`）。该 bootstrap 按「会话 × 稳定签名」冻结，会话内字节稳定并随前缀缓存（Claude 折入 ephemeral system 块；DeepSeek/OpenAI 作为消息前缀命中）；`memory.md` 的磁盘改动不触发会话内重建，下次会话生效。
 
 **冷启动自动生成**：若会话启动时 `memory.md` 不存在或为空，且 ProjectGraph 缓存可用，后台用快速模型自动生成一份初始记忆（项目结构/技术栈/构建命令/关键约定）。不阻塞当前会话，下次会话生效。
 

@@ -99,6 +99,14 @@ export interface AgentWorkerChatPayload {
   sessionId: string;
   workspacePath: string;
   messages: IMessage[];
+  /** When set, the worker reuses its cached log for `sessionId` (verified to be
+   *  at `expectedBaseLength`) and appends `newMessages` instead of rebuilding
+   *  from `messages` — avoiding a full-log structured clone each turn. `messages`
+   *  is then empty. Absent => full sync from `messages`. */
+  incrementalSync?: {
+    expectedBaseLength: number;
+    newMessages: IMessage[];
+  };
   userInput: string;
   images?: IImageContent[];
   settings: WorkerAgentSettings;
@@ -205,13 +213,16 @@ export type AgentWorkerToMainMessage =
       requestId: string;
       event: IChatStreamEvent;
     }
-  | {
-      type: 'tool-request';
-      requestId: string;
-      toolRequestId: string;
-      toolName: string;
-      arguments: Record<string, unknown>;
-    }
+    | {
+        type: 'tool-request';
+        requestId: string;
+        toolRequestId: string;
+        toolName: string;
+        arguments: Record<string, unknown>;
+        /** Assistant tool-call id this execution fulfills; preferred for matching
+         *  the pending call over name+arguments (robust for identical calls). */
+        toolCallId?: string;
+      }
   | {
       type: 'proxy-chat';
       requestId: string;
@@ -231,12 +242,21 @@ export type AgentWorkerToMainMessage =
       type: 'fetch-cancel';
       fetchId: string;
     }
-  | {
-      type: 'result';
-      requestId: string;
-      response: IAgentResponse;
-      deltaMessages: IMessage[];
-    }
+    | {
+        type: 'result';
+        requestId: string;
+        response: IAgentResponse;
+        deltaMessages: IMessage[];
+        /** Total length of the worker's authoritative log after this turn; the
+         *  main thread records it to decide incremental vs full sync next turn. */
+        logLength: number;
+        /** True when mid-loop compaction replaced the worker log this turn. The
+         *  main thread must then replace its authoritative log with `fullMessages`
+         *  (the compacted epoch) instead of appending `deltaMessages`, whose
+         *  indices no longer line up after the worker reset its log. */
+        compacted?: boolean;
+        fullMessages?: IMessage[];
+      }
   | {
       type: 'error';
       requestId: string;

@@ -849,6 +849,51 @@ pub(crate) struct MessageListResult {
     pub(crate) messages_json: String,
 }
 
+/// Map a `messages` row (columns: id, role, work_mode, content, reasoning_content,
+/// tool_invocations, extras, timestamp at indices 0..=7) into its JSON form,
+/// restoring the extras fields. Shared by single-session and batch loads so both
+/// stay byte-identical.
+fn row_to_message_json(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
+    let tool_raw: Option<String> = row.get(5)?;
+    let tool_invocations: serde_json::Value = match tool_raw {
+        Some(s) => serde_json::from_str(&s).unwrap_or(serde_json::Value::Null),
+        None => serde_json::Value::Null,
+    };
+
+    let extras_raw: Option<String> = row.get(6)?;
+    let work_mode: Option<String> = row.get(2)?;
+    let reasoning: Option<String> = row.get(4)?;
+
+    let mut obj = serde_json::json!({
+        "id": row.get::<_, String>(0)?,
+        "role": row.get::<_, String>(1)?,
+        "content": row.get::<_, String>(3)?,
+        "timestamp": row.get::<_, i64>(7)?,
+    });
+
+    if let Some(wm) = work_mode {
+        obj["workMode"] = serde_json::Value::String(wm);
+    }
+    if let Some(rc) = reasoning {
+        obj["reasoningContent"] = serde_json::Value::String(rc);
+    }
+    if !tool_invocations.is_null() {
+        obj["toolInvocations"] = tool_invocations;
+    }
+    // 还原 extras（promptContent / synthetic / hidden / carryForwardInContext /
+    // contextCheckpoint / question），供 buildEffectiveContextMessages 重建压缩
+    // 历史与上下文成员资格。
+    if let Some(s) = extras_raw {
+        if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&s) {
+            for (key, value) in map {
+                obj[key] = value;
+            }
+        }
+    }
+
+    Ok(obj)
+}
+
 #[tauri::command]
 pub(crate) fn load_session_messages(
     workspace_path: String,
@@ -863,52 +908,54 @@ pub(crate) fn load_session_messages(
         .map_err(|err| format!("查询消息失败: {err}"))?;
 
     let messages: Vec<serde_json::Value> = stmt
-        .query_map(params![session_id], |row| {
-            let tool_raw: Option<String> = row.get(5)?;
-            let tool_invocations: serde_json::Value = match tool_raw {
-                Some(s) => serde_json::from_str(&s).unwrap_or(serde_json::Value::Null),
-                None => serde_json::Value::Null,
-            };
-
-            let extras_raw: Option<String> = row.get(6)?;
-            let work_mode: Option<String> = row.get(2)?;
-            let reasoning: Option<String> = row.get(4)?;
-
-            let mut obj = serde_json::json!({
-                "id": row.get::<_, String>(0)?,
-                "role": row.get::<_, String>(1)?,
-                "content": row.get::<_, String>(3)?,
-                "timestamp": row.get::<_, i64>(7)?,
-            });
-
-            if let Some(wm) = work_mode {
-                obj["workMode"] = serde_json::Value::String(wm);
-            }
-            if let Some(rc) = reasoning {
-                obj["reasoningContent"] = serde_json::Value::String(rc);
-            }
-            if !tool_invocations.is_null() {
-                obj["toolInvocations"] = tool_invocations;
-            }
-            // 还原 extras（promptContent / synthetic / hidden / carryForwardInContext /
-            // contextCheckpoint / question），供 buildEffectiveContextMessages 重建压缩
-            // 历史与上下文成员资格。
-            if let Some(s) = extras_raw {
-                if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&s) {
-                    for (key, value) in map {
-                        obj[key] = value;
-                    }
-                }
-            }
-
-            Ok(obj)
-        })
+        .query_map(params![session_id], row_to_message_json)
         .map_err(|err| format!("读取消息列表失败: {err}"))?
         .filter_map(|r| r.ok())
         .collect();
 
     Ok(MessageListResult {
         messages_json: serde_json::to_string(&messages)
+            .map_err(|err| format!("序列化消息列表失败: {err}"))?,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AllMessagesResult {
+    pub(crate) messages_by_session_json: String,
+}
+
+/// Load every session's messages in a single query (one connection open), grouped
+/// by session id. Replaces the previous N+1 per-session loads at workspace open.
+#[tauri::command]
+pub(crate) fn load_all_session_messages(
+    workspace_path: String,
+) -> Result<AllMessagesResult, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, role, work_mode, content, reasoning_content, tool_invocations, extras, timestamp, message_index, session_id
+             FROM messages ORDER BY session_id ASC, message_index ASC",
+        )
+        .map_err(|err| format!("查询消息失败: {err}"))?;
+
+    let mut grouped: std::collections::BTreeMap<String, Vec<serde_json::Value>> =
+        std::collections::BTreeMap::new();
+    let rows = stmt
+        .query_map([], |row| {
+            let session_id: String = row.get(9)?;
+            let msg = row_to_message_json(row)?;
+            Ok((session_id, msg))
+        })
+        .map_err(|err| format!("读取消息列表失败: {err}"))?;
+    for row in rows {
+        if let Ok((session_id, msg)) = row {
+            grouped.entry(session_id).or_default().push(msg);
+        }
+    }
+
+    Ok(AllMessagesResult {
+        messages_by_session_json: serde_json::to_string(&grouped)
             .map_err(|err| format!("序列化消息列表失败: {err}"))?,
     })
 }

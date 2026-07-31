@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { IMessage } from '@codepapr/types';
 import type { PruneOptions } from '@codepapr/core';
 import {
   buildContextCompactionTranscript,
@@ -9,6 +10,7 @@ import {
   planContextCompaction,
   renderContextCheckpointContent,
   renderContextCheckpointSummary,
+  repairOrphanedToolCalls,
   type ContextCheckpointPayload,
   type ContextMessageLike,
 } from './contextCompaction';
@@ -497,6 +499,49 @@ describe('contextCompaction', () => {
       const effective = buildEffectiveContextMessages(messages);
       const toolMsg = effective.find((m) => m.role === 'tool');
       expect(toolMsg?.content).toBe('plain output');
+    });
+  });
+
+  describe('orphaned tool-call repair (problem 2.2 fix)', () => {
+    it('repairs an assistant tool call that has no matching tool result', () => {
+      const messages: IMessage[] = [
+        { id: 'u1', role: 'user', content: '运行命令', timestamp: 1 },
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          timestamp: 2,
+          toolCalls: [{ id: 'c1', name: 'run', arguments: {} }],
+        },
+      ];
+
+      const repaired = repairOrphanedToolCalls(messages);
+      const toolMsg = repaired.find((m) => m.role === 'tool');
+      expect(toolMsg?.toolResult?.toolCallId).toBe('c1');
+      expect(toolMsg?.toolResult?.success).toBe(false);
+    });
+
+    it('leaves well-formed tool-call pairing untouched', () => {
+      const messages: IMessage[] = [
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          timestamp: 1,
+          toolCalls: [{ id: 'c1', name: 'run', arguments: {} }],
+        },
+        {
+          id: 't1',
+          role: 'tool',
+          content: 'ok',
+          timestamp: 2,
+          toolResult: { toolCallId: 'c1', success: true, result: 'ok' },
+        },
+      ];
+
+      const repaired = repairOrphanedToolCalls(messages);
+      expect(repaired).toHaveLength(2);
+      expect(repaired.filter((m) => m.role === 'tool')).toHaveLength(1);
     });
   });
 
