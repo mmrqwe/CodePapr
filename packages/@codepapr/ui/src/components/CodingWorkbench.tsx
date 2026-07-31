@@ -234,7 +234,9 @@ export function CodingWorkbench({
   const workspaceSwitchingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isInitialGraphLoadRef = useRef(true);
   const graphLoadStartedRef = useRef(false);
+  const graphLoadSawLoadingRef = useRef(false);
   const projectGraphLoadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const defaultHealAttemptedRef = useRef<string | null>(null);
   const [isInitialGraphPreload, setIsInitialGraphPreload] = useState(false);
 
   useEffect(() => {
@@ -249,10 +251,16 @@ export function CodingWorkbench({
     if (isInitialGraphLoadRef.current) {
       if (isLoading) {
         graphLoadStartedRef.current = true;
+        graphLoadSawLoadingRef.current = true;
         useAgentStore.getState().setProjectGraphLoading(true, progress ?? undefined);
-      } else if (graphLoadStartedRef.current) {
+      } else if (graphLoadSawLoadingRef.current) {
+        // 仅当本回调确实观察到过 isLoading=true（即 effectiveLoading 真正点亮过，
+        // 含 prewarming/loadingInProgress）后才 finalize。否则挂载初期 effectiveLoading
+        // 会短暂为 false（prewarming/loadingInProgress 的状态更新尚未应用），若此时提前
+        // 关闭遮罩，LSP 预热会在遮罩关闭后继续运行造成卡顿。
         isInitialGraphLoadRef.current = false;
         graphLoadStartedRef.current = false;
+        graphLoadSawLoadingRef.current = false;
         useAgentStore.getState().setProjectGraphLoading(false);
         setIsInitialGraphPreload(false);
       }
@@ -353,9 +361,38 @@ export function CodingWorkbench({
     void loadProject(workspacePath);
   }, [loadProject, workspacePath]);
 
+  // 自愈：若当前打开的正是默认项目，且它在运行期间被删除（loadProject 报错），
+  // 调用 ensure_default_project 重建文件夹后重新加载。仅对默认项目生效，避免误
+  // 重建用户的真实项目；同一 workspace 仅在报错期间尝试一次，错误清除后复位。
+  useEffect(() => {
+    if (!folderError) {
+      defaultHealAttemptedRef.current = null;
+      return;
+    }
+    if (!workspacePath) return;
+    if (defaultHealAttemptedRef.current === workspacePath) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await invoke<{ path: string }>('ensure_default_project');
+        if (cancelled) return;
+        const defaultPath = result?.path?.trim() ?? '';
+        if (!defaultPath || defaultPath !== workspacePath) return;
+        defaultHealAttemptedRef.current = workspacePath;
+        await loadProject(workspacePath);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [folderError, workspacePath, loadProject]);
+
   useEffect(() => {
     isInitialGraphLoadRef.current = true;
     graphLoadStartedRef.current = false;
+    graphLoadSawLoadingRef.current = false;
     setIsInitialGraphPreload(false);
   }, [workspacePath]);
 
@@ -483,6 +520,7 @@ export function CodingWorkbench({
           console.warn('[CodePapr] projectGraphLoading 超时 15s，强制关闭');
           isInitialGraphLoadRef.current = false;
           graphLoadStartedRef.current = false;
+          graphLoadSawLoadingRef.current = false;
           setIsInitialGraphPreload(false);
           useAgentStore.getState().setProjectGraphLoading(false);
         }

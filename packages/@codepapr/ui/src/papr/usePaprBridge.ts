@@ -6,10 +6,18 @@ import { usePermissionStore } from './permissionStore';
 import { LEVEL_GRANTS, levelAllows, resolveEffectiveLevel } from './levelGrants';
 import { useAgentStore } from '../store/agentStore';
 
-const PAPR_APP_ORIGIN = 'codepapr-app://localhost';
+// Each app is served from its own origin (codepapr-app://<appId>) so apps are
+// isolated from one another (separate localStorage / cookies / IndexedDB).
+function appOriginFor(appId: string): string {
+  return `codepapr-app://${appId}`;
+}
 
-function postToIframe(iframeRef: React.RefObject<HTMLIFrameElement | null>, message: unknown) {
-  iframeRef.current?.contentWindow?.postMessage(message, PAPR_APP_ORIGIN);
+function postToIframe(
+  iframeRef: React.RefObject<HTMLIFrameElement | null>,
+  message: unknown,
+  targetOrigin: string,
+) {
+  iframeRef.current?.contentWindow?.postMessage(message, targetOrigin);
 }
 
 interface UsePaprBridgeOptions {
@@ -37,10 +45,10 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
 
   const handleMessage = useCallback(
     (event: MessageEvent) => {
-      if (event.origin !== PAPR_APP_ORIGIN) return;
-      // All apps share the codepapr-app:// origin, so origin alone cannot tell
-      // them apart. Only accept messages from this bridge's own iframe window
-      // (blocks other apps / popups on the same origin from spoofing requests).
+      const appOrigin = appOriginFor(appId);
+      if (event.origin !== appOrigin) return;
+      // Defense in depth: even though each app now has its own origin, only
+      // accept messages from this bridge's own iframe window.
       if (iframeRef.current && event.source !== iframeRef.current.contentWindow) return;
 
       const data = event.data;
@@ -52,7 +60,7 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
           code: 'NO_MANIFEST',
           message: `No manifest loaded for app '${appId}'`,
         });
-        postToIframe(iframeRef, resp);
+        postToIframe(iframeRef, resp, appOrigin);
         return;
       }
 
@@ -72,12 +80,12 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
           code: 'PERMISSION_DENIED',
           message: `Permission denied: '${capability}' (app level ${currentLevel})`,
         });
-        postToIframe(iframeRef, resp);
+        postToIframe(iframeRef, resp, appOrigin);
       }
 
       function respond(result?: unknown, error?: { code: string; message: string }) {
         const resp = createPaprResponse(data.reqId, result, error);
-        postToIframe(iframeRef, resp);
+        postToIframe(iframeRef, resp, appOrigin);
       }
 
       const type = data.type;
@@ -204,7 +212,7 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
               reqId: data.reqId,
               type: 'stream',
               event,
-            });
+            }, appOrigin);
           },
           runId,
         );

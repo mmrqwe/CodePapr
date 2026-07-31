@@ -449,7 +449,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
 
       let processed = 0;
       const total = lspFiles.length;
-      const batchSize = 3;
+      const batchSize = 6;
       for (let i = 0; i < lspFiles.length; i += batchSize) {
         if (cancelled || gen !== prewarmingGenRef.current) return;
         const batch = lspFiles.slice(i, i + batchSize);
@@ -461,7 +461,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
             if (result.content) {
               await invoke('lsp_open_document', {
                 workspacePath, languageId: file.langId, relativePath: file.path,
-                content: result.content, version: 1,
+                content: result.content, version: 1, diagWaitMs: 0,
               });
             }
           } catch { /* skip */ }
@@ -472,7 +472,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
       if (cancelled || gen !== prewarmingGenRef.current) return;
 
       setPrewarmingProgress('等待分析...');
-      await new Promise((r) => setTimeout(r, 5000));
+      await new Promise((r) => setTimeout(r, 1500));
       if (cancelled || gen !== prewarmingGenRef.current) return;
 
       setPrewarmingProgress('收集诊断...');

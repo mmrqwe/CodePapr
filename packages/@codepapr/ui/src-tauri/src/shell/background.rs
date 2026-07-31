@@ -470,15 +470,16 @@ fn spawn_and_register_background(
     mut cmd: Command,
 ) -> Result<BackgroundCommandResult, String> {
     if let Some(existing_result) = with_background_processes(|processes| {
-        for (pid, process) in processes.iter_mut() {
+        for (pid, process) in processes.iter() {
+            // Dedup key includes preview_url (which carries the per-app port) so
+            // two apps in the same workspace running an identical command (e.g.
+            // `node server.js`) on different ports are NOT collapsed into one
+            // shared process that one app's stop/delete would kill for both.
             if process.workspace_path == workspace_path
                 && process.command == command
                 && process.args == args
+                && process.preview_url == preview_url
             {
-                if preview_url.is_some() {
-                    process.preview_url = preview_url.clone();
-                }
-
                 return Ok(Some(BackgroundCommandResult {
                     command: command.clone(),
                     args: args.clone(),

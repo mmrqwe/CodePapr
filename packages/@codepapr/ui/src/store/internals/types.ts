@@ -250,6 +250,7 @@ export interface AgentActions {
   setWorkspacePath: (path: string) => void;
   closeWorkspace: () => void;
   openWorkspace: (path: string) => Promise<void>;
+  ensureDefaultWorkspace: () => Promise<string | null>;
   noteWorkspaceMutation: (paths?: string[]) => void;
   setShowSettings: (v: boolean) => void;
   setProjectGraphLoading: (

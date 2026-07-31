@@ -817,6 +817,7 @@ impl SymbolProvider for LspSymbolProvider {
             relative_path.clone(),
             content.to_string(),
             1,
+            Some(0),
         );
 
         let response = crate::lsp::lsp_request_impl(
@@ -827,7 +828,7 @@ impl SymbolProvider for LspSymbolProvider {
         )?;
 
         let _ =
-            crate::lsp::lsp_close_document(workspace_path, self.language_id.clone(), relative_path);
+            crate::lsp::lsp_close_document_impl(&workspace_path, &self.language_id, &relative_path);
 
         let symbols = flatten_lsp_symbols(&response.message, SymbolSource::Lsp);
         Ok(symbols)
@@ -851,6 +852,7 @@ impl SymbolProvider for LspSymbolProvider {
             relative_path.clone(),
             content.to_string(),
             1,
+            Some(0),
         );
 
         let response = crate::lsp::lsp_request_impl(
@@ -864,7 +866,7 @@ impl SymbolProvider for LspSymbolProvider {
         );
 
         let _ =
-            crate::lsp::lsp_close_document(workspace_path, self.language_id.clone(), relative_path);
+            crate::lsp::lsp_close_document_impl(&workspace_path, &self.language_id, &relative_path);
 
         let result = response?;
         let contents = result
@@ -904,6 +906,7 @@ impl SymbolProvider for LspSymbolProvider {
             relative_path.clone(),
             content.to_string(),
             1,
+            Some(0),
         );
 
         let response = crate::lsp::lsp_request_impl(
@@ -917,7 +920,7 @@ impl SymbolProvider for LspSymbolProvider {
         );
 
         let _ =
-            crate::lsp::lsp_close_document(workspace_path, self.language_id.clone(), relative_path);
+            crate::lsp::lsp_close_document_impl(&workspace_path, &self.language_id, &relative_path);
 
         let result = response?;
         let locations = parse_lsp_locations(&result.message);
@@ -942,6 +945,7 @@ impl SymbolProvider for LspSymbolProvider {
             relative_path.clone(),
             content.to_string(),
             1,
+            Some(0),
         );
 
         let response = crate::lsp::lsp_request_impl(
@@ -956,7 +960,7 @@ impl SymbolProvider for LspSymbolProvider {
         );
 
         let _ =
-            crate::lsp::lsp_close_document(workspace_path, self.language_id.clone(), relative_path);
+            crate::lsp::lsp_close_document_impl(&workspace_path, &self.language_id, &relative_path);
 
         let result = response?;
         let locations = parse_lsp_locations(&result.message);

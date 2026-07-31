@@ -1440,6 +1440,7 @@ pub(crate) fn lsp_open_document_with_app(
     relative_path: String,
     content: String,
     version: i32,
+    diag_wait_ms: Option<u64>,
 ) -> Result<LspResponse, String> {
     let workspace = canonical_workspace(&workspace_path)?;
     let uri = file_uri_for(&workspace, &relative_path)?;
@@ -1478,7 +1479,10 @@ pub(crate) fn lsp_open_document_with_app(
         if already_open.is_none() {
             // Duration::ZERO 等价于"看一眼当前已到的消息就返回"，诊断通常是异步、
             // 有延迟发布的，首次打开文档时几乎总是拿到空诊断。给一个短暂的真实等待窗口。
-            let _ = collect_publish_diagnostics(&mut server, &uri, Duration::from_millis(300));
+            // 批量预热等场景可传 diag_wait_ms=Some(0) 跳过逐文件等待，改在末尾统一收集诊断，
+            // 避免 N 个文件累计 N×300ms 的阻塞。None 时沿用默认 300ms。
+            let wait = Duration::from_millis(diag_wait_ms.unwrap_or(300));
+            let _ = collect_publish_diagnostics(&mut server, &uri, wait);
         }
         let current = server
             .diagnostics_by_uri
@@ -1527,33 +1531,37 @@ pub(crate) fn lsp_open_document_with_app(
 }
 
 #[tauri::command]
-pub fn lsp_open_document(
+pub async fn lsp_open_document(
     app: tauri::AppHandle,
     workspace_path: String,
     language_id: String,
     relative_path: String,
     content: String,
     version: i32,
+    diag_wait_ms: Option<u64>,
 ) -> Result<LspResponse, String> {
-    lsp_open_document_with_app(
-        Some(&app),
-        workspace_path,
-        language_id,
-        relative_path,
-        content,
-        version,
-    )
+    run_blocking_workspace_task(move || {
+        lsp_open_document_with_app(
+            Some(&app),
+            workspace_path,
+            language_id,
+            relative_path,
+            content,
+            version,
+            diag_wait_ms,
+        )
+    })
+    .await
 }
 
-#[tauri::command]
-pub fn lsp_close_document(
-    workspace_path: String,
-    language_id: String,
-    relative_path: String,
+pub(crate) fn lsp_close_document_impl(
+    workspace_path: &str,
+    language_id: &str,
+    relative_path: &str,
 ) -> Result<bool, String> {
-    let workspace = canonical_workspace(&workspace_path)?;
-    let uri = file_uri_for(&workspace, &relative_path)?;
-    match lookup_server_handle(&workspace_path, &language_id)
+    let workspace = canonical_workspace(workspace_path)?;
+    let uri = file_uri_for(&workspace, relative_path)?;
+    match lookup_server_handle(workspace_path, language_id)
         .ok_or_else(|| "LSP server 未启动".to_string())
         .and_then(|server| {
             let mut server = lock_server(&server)?;
@@ -1563,7 +1571,7 @@ pub fn lsp_close_document(
                 .map_err(|err| format!("检查 LSP 状态失败: {err}"))?
                 .is_some()
             {
-                let _ = remove_server_handle(&workspace_path, &language_id);
+                let _ = remove_server_handle(workspace_path, language_id);
                 return Ok(false);
             }
 
@@ -1583,11 +1591,23 @@ pub fn lsp_close_document(
             Ok(true)
         }) {
         Ok(result) => Ok(result),
-        Err(err) if lsp_fallback::supports_language(&language_id) => {
-            lsp_fallback::close_document(&workspace_path, &language_id, &uri).ok_or(err)
+        Err(err) if lsp_fallback::supports_language(language_id) => {
+            lsp_fallback::close_document(workspace_path, language_id, &uri).ok_or(err)
         }
         Err(err) => Err(err),
     }
+}
+
+#[tauri::command]
+pub async fn lsp_close_document(
+    workspace_path: String,
+    language_id: String,
+    relative_path: String,
+) -> Result<bool, String> {
+    run_blocking_workspace_task(move || {
+        lsp_close_document_impl(&workspace_path, &language_id, &relative_path)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1685,19 +1705,18 @@ pub(crate) fn lsp_request_impl(
     }
 }
 
-#[tauri::command]
-pub fn lsp_get_diagnostics(
-    workspace_path: String,
-    language_id: String,
-    relative_path: Option<String>,
+pub(crate) fn lsp_get_diagnostics_impl(
+    workspace_path: &str,
+    language_id: &str,
+    relative_path: Option<&str>,
 ) -> Result<LspDiagnosticsResponse, String> {
-    match ensure_running_server_handle(None, &workspace_path, &language_id).and_then(|server| {
+    match ensure_running_server_handle(None, workspace_path, language_id).and_then(|server| {
         let mut server = lock_server(&server)?;
         // 指定目标文件时，等待该文件的诊断刷新到位（命中即短路返回，硬上限防止卡死）；
         // 未指定时沿用短窗口拉取已有缓存。
-        let (wait_uri, wait) = match relative_path.as_deref() {
+        let (wait_uri, wait) = match relative_path {
             Some(path) if !path.trim().is_empty() => {
-                let workspace = canonical_workspace(&workspace_path)?;
+                let workspace = canonical_workspace(workspace_path)?;
                 let uri = file_uri_for(&workspace, path)?;
                 (uri, Duration::from_millis(2000))
             }
@@ -1707,7 +1726,7 @@ pub fn lsp_get_diagnostics(
         Ok(server.diagnostics_by_uri.clone())
     }) {
         Ok(diagnostics) => Ok(LspDiagnosticsResponse { diagnostics }),
-        Err(_err) if lsp_fallback::supports_language(&language_id) => Ok(LspDiagnosticsResponse {
+        Err(_err) if lsp_fallback::supports_language(language_id) => Ok(LspDiagnosticsResponse {
             diagnostics: HashMap::new(),
         }),
         Err(err) => Err(err),
@@ -1715,8 +1734,22 @@ pub fn lsp_get_diagnostics(
 }
 
 #[tauri::command]
-pub fn lsp_stop_server(workspace_path: String, language_id: String) -> Result<bool, String> {
-    match remove_server_handle(&workspace_path, &language_id)
+pub async fn lsp_get_diagnostics(
+    workspace_path: String,
+    language_id: String,
+    relative_path: Option<String>,
+) -> Result<LspDiagnosticsResponse, String> {
+    run_blocking_workspace_task(move || {
+        lsp_get_diagnostics_impl(&workspace_path, &language_id, relative_path.as_deref())
+    })
+    .await
+}
+
+pub(crate) fn lsp_stop_server_impl(
+    workspace_path: &str,
+    language_id: &str,
+) -> Result<bool, String> {
+    match remove_server_handle(workspace_path, language_id)
         .ok_or_else(|| "LSP server 未启动".to_string())
         .and_then(|server| {
             let mut server = lock_server(&server)?;
@@ -1744,18 +1777,23 @@ pub fn lsp_stop_server(workspace_path: String, language_id: String) -> Result<bo
             Ok(true)
         }) {
         Ok(result) => Ok(result),
-        Err(err) if lsp_fallback::supports_language(&language_id) => {
-            lsp_fallback::stop_server(&workspace_path, &language_id).ok_or(err)
+        Err(err) if lsp_fallback::supports_language(language_id) => {
+            lsp_fallback::stop_server(workspace_path, language_id).ok_or(err)
         }
         Err(err) => Err(err),
     }
 }
 
+#[tauri::command]
+pub async fn lsp_stop_server(workspace_path: String, language_id: String) -> Result<bool, String> {
+    run_blocking_workspace_task(move || lsp_stop_server_impl(&workspace_path, &language_id)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_running_server_handle, file_uri_for, lock_server, lsp_close_document,
-        lsp_open_document_with_app, lsp_request, lsp_server_config, lsp_stop_server,
+        ensure_running_server_handle, file_uri_for, lock_server, lsp_close_document_impl,
+        lsp_open_document_with_app, lsp_request, lsp_server_config, lsp_stop_server_impl,
         normalize_relative_path, resolve_lsp_command_candidates, resolved_command_display,
         send_request, server_key, LSP_REQUEST_TIMEOUT,
     };
@@ -1949,6 +1987,7 @@ mod tests {
             relative_path.to_string(),
             content.to_string(),
             1,
+            None,
         )
         .unwrap_or_else(|err| panic!("{language_id} open document failed: {err}"));
 
@@ -2013,12 +2052,8 @@ mod tests {
             );
         }
 
-        let _ = lsp_close_document(
-            workspace_path.clone(),
-            language_id.to_string(),
-            relative_path.to_string(),
-        );
-        let _ = lsp_stop_server(workspace_path, language_id.to_string());
+        let _ = lsp_close_document_impl(&workspace_path, language_id, relative_path);
+        let _ = lsp_stop_server_impl(&workspace_path, language_id);
     }
 
     #[test]
@@ -2235,6 +2270,7 @@ mod tests {
             "Program.cs".to_string(),
             source.to_string(),
             1,
+            None,
         )
         .unwrap_or_else(|err| panic!("csharp open document failed: {err}"));
 
@@ -2251,15 +2287,9 @@ mod tests {
             "expected Roslyn analyzer sidecar, got {server_command}"
         );
 
-        let _ = lsp_close_document(
-            workspace.to_string_lossy().into_owned(),
-            "csharp".to_string(),
-            "Program.cs".to_string(),
-        );
-        let _ = lsp_stop_server(
-            workspace.to_string_lossy().into_owned(),
-            "csharp".to_string(),
-        );
+        let workspace_path = workspace.to_string_lossy().into_owned();
+        let _ = lsp_close_document_impl(&workspace_path, "csharp", "Program.cs");
+        let _ = lsp_stop_server_impl(&workspace_path, "csharp");
 
         run_lsp_smoke_case(
             &workspace,
@@ -2296,6 +2326,7 @@ mod tests {
             "Program.cs".to_string(),
             program.to_string(),
             1,
+            None,
         )
         .unwrap_or_else(|err| panic!("csharp cross-file open failed: {err}"));
         assert_eq!(
@@ -2336,12 +2367,8 @@ mod tests {
             "expected cross-file definition to point at Calculator.cs, got {definition}"
         );
 
-        let _ = lsp_close_document(
-            workspace_path.clone(),
-            "csharp".to_string(),
-            "Program.cs".to_string(),
-        );
-        let _ = lsp_stop_server(workspace_path, "csharp".to_string());
+        let _ = lsp_close_document_impl(&workspace_path, "csharp", "Program.cs");
+        let _ = lsp_stop_server_impl(&workspace_path, "csharp");
         let _ = fs::remove_dir_all(workspace);
     }
 
@@ -2367,6 +2394,7 @@ mod tests {
             "App/Program.cs".to_string(),
             program.to_string(),
             1,
+            None,
         )
         .unwrap_or_else(|err| panic!("csharp project-ref open failed: {err}"));
         assert_eq!(
@@ -2407,12 +2435,8 @@ mod tests {
             "expected project reference definition to point at Library/MathHelpers.cs, got {definition}"
         );
 
-        let _ = lsp_close_document(
-            workspace_path.clone(),
-            "csharp".to_string(),
-            "App/Program.cs".to_string(),
-        );
-        let _ = lsp_stop_server(workspace_path, "csharp".to_string());
+        let _ = lsp_close_document_impl(&workspace_path, "csharp", "App/Program.cs");
+        let _ = lsp_stop_server_impl(&workspace_path, "csharp");
         let _ = fs::remove_dir_all(workspace);
     }
 

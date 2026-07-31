@@ -336,14 +336,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         }
 
         const recentWorkspaces = sortRecentWorkspaces(settings.recentWorkspaces);
-        if (recentWorkspaces.length === 0) {
-          return;
-        }
-
+        let openedWorkspace = false;
         for (const entry of recentWorkspaces) {
           try {
             await get().openWorkspace(entry.path);
-            return;
+            openedWorkspace = true;
+            break;
           } catch {
             const currentSettings = get().settings;
             const withoutFailed = currentSettings.recentWorkspaces.filter(
@@ -356,6 +354,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             set({ settings: nextSettings, _agent: null, _agentModel: null, _agentPromptKey: null });
             void saveAppSettings(nextSettings).catch(() => undefined);
           }
+        }
+
+        // 兜底：没有任何可用项目（首次启动或全部 recent 已失效）时，
+        // 自动创建并打开默认项目，保证对话产生的文件始终有落点。
+        if (!openedWorkspace) {
+          await get().ensureDefaultWorkspace();
         }
       },
 
@@ -575,6 +579,19 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           });
           set({ settings: nextSettings });
           void saveAppSettings(nextSettings).catch(() => undefined);
+        }
+      },
+
+      ensureDefaultWorkspace: async () => {
+        try {
+          const result = await invoke<{ path: string }>('ensure_default_project');
+          const path = result?.path?.trim();
+          if (!path) return null;
+          await get().openWorkspace(path);
+          return path;
+        } catch (err) {
+          console.warn('[CodePapr] 创建默认项目失败:', err);
+          return null;
         }
       },
 
@@ -1081,6 +1098,13 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           appendErrorMessage(set, settingsError);
           saveCurrentProjectState(get());
           return;
+        }
+
+        // 兜底：若当前没有打开任何项目（如用户中途关闭了工作区），自动创建并打开
+        // 默认项目，保证本次对话的文件工具有可用工作目录。失败时保持空工作区，
+        // 退化到原有的 requireWorkspace 报错行为。
+        if (!get().workspacePath.trim()) {
+          await get().ensureDefaultWorkspace();
         }
 
         try {

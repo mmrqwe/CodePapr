@@ -232,6 +232,32 @@ export default function App() {
               port: app.port ?? undefined,
             });
           }
+
+          // The Rust background-process registry survives webview reloads even
+          // though the in-memory JS store does not. Re-associate any surviving
+          // backend (matched by its preview URL / port) so start/stop/delete and
+          // running-state stay accurate after a reload.
+          try {
+            const procs = await invoke<Array<{ pid: number; preview_url?: string }>>(
+              'list_background_processes',
+              { workspacePath },
+            );
+            const runningByUrl = new Map<string, number>();
+            for (const proc of procs) {
+              if (proc.preview_url) runningByUrl.set(proc.preview_url, proc.pid);
+            }
+            for (const app of discovered) {
+              if (useAgentStore.getState().workspacePath !== workspacePath) return;
+              if (!app.port) continue;
+              const url = `http://localhost:${app.port}/`;
+              const pid = runningByUrl.get(url);
+              if (pid !== undefined) {
+                useAppRuntimeStore.getState().setAppRunning(app.app_id, pid, url);
+              }
+            }
+          } catch {
+            // 对账失败不影响应用列表恢复
+          }
         } catch {
           // 扫描失败不影响正常使用
         }

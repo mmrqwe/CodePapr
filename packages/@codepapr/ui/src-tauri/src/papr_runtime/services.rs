@@ -1,4 +1,5 @@
 use std::fs;
+use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 
 use serde::Serialize;
@@ -54,6 +55,39 @@ fn is_private_or_internal_url(url: &str) -> bool {
         },
         Err(_) => true,
     }
+}
+
+/// Resolve a domain host and verify every resolved address is public, returning
+/// a vetted `(domain, socket_addr)` to pin via `RequestBuilder::resolve`. Pinning
+/// closes the DNS-rebinding TOCTOU window where a public domain re-resolves to an
+/// internal IP between validation and connect. IP-literal hosts need no resolution
+/// (they are already range-checked by `is_private_or_internal_url`).
+fn resolve_safe_socket_addr(
+    parsed: &url::Url,
+) -> Result<Option<(String, std::net::SocketAddr)>, String> {
+    let host = match parsed.host() {
+        Some(url::Host::Domain(domain)) => domain.to_string(),
+        Some(_) => return Ok(None),
+        None => return Err("URL 缺少主机".to_string()),
+    };
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let addrs: Vec<std::net::SocketAddr> = (host.as_str(), port)
+        .to_socket_addrs()
+        .map_err(|err| format!("DNS 解析失败 {host}: {err}"))?
+        .collect();
+    if addrs.is_empty() {
+        return Err(format!("DNS 解析无结果: {host}"));
+    }
+    for addr in &addrs {
+        let internal = match addr.ip() {
+            std::net::IpAddr::V4(v4) => is_internal_ipv4(v4),
+            std::net::IpAddr::V6(v6) => is_internal_ipv6(v6),
+        };
+        if internal {
+            return Err(format!("安全限制：{host} 解析到内网/本地地址 {}", addr.ip()));
+        }
+    }
+    Ok(Some((host, addrs[0])))
 }
 
 #[derive(Serialize)]
@@ -121,9 +155,11 @@ pub async fn papr_http_get(
     if is_private_or_internal_url(&parsed_url) {
         return Err("安全限制：不允许访问内网/本地地址".to_string());
     }
+    let parsed = url::Url::parse(&parsed_url).map_err(|err| format!("URL 解析失败: {err}"))?;
+    let pin = resolve_safe_socket_addr(&parsed)?;
 
     let max = max_bytes.unwrap_or(50_000).clamp(1_000, MAX_PAPR_HTTP_BYTES);
-    let client = build_papr_http_client()?;
+    let client = build_papr_http_client(pin)?;
     let response = client
         .get(parsed_url)
         .header(reqwest::header::ACCEPT, "application/json, text/plain, text/html;q=0.9, */*;q=0.5")
@@ -180,9 +216,11 @@ pub async fn papr_http_post(
     if is_private_or_internal_url(&parsed_url) {
         return Err("安全限制：不允许访问内网/本地地址".to_string());
     }
+    let parsed = url::Url::parse(&parsed_url).map_err(|err| format!("URL 解析失败: {err}"))?;
+    let pin = resolve_safe_socket_addr(&parsed)?;
 
     let ct = content_type.unwrap_or_else(|| "application/json".to_string());
-    let client = build_papr_http_client()?;
+    let client = build_papr_http_client(pin)?;
     let response = client
         .post(parsed_url)
         .header(reqwest::header::CONTENT_TYPE, &ct)

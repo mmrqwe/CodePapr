@@ -27,12 +27,20 @@ pub(crate) fn build_web_client() -> Result<reqwest::blocking::Client, String> {
 
 /// HTTP client for papr app `papr.http` calls. Redirects are disabled so a
 /// public URL cannot 302-bounce into an internal/loopback address (SSRF), and
-/// no cookie store is used so apps do not share host cookies.
-pub(crate) fn build_papr_http_client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
+/// no cookie store is used so apps do not share host cookies. When `pin` is
+/// provided the domain is pinned to a pre-vetted socket address, closing the
+/// DNS-rebinding TOCTOU window between validation and connect.
+pub(crate) fn build_papr_http_client(
+    pin: Option<(String, std::net::SocketAddr)>,
+) -> Result<reqwest::blocking::Client, String> {
+    let mut builder = reqwest::blocking::Client::builder()
         .user_agent(SCRAPER_USER_AGENT)
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(20))
+        .timeout(Duration::from_secs(20));
+    if let Some((domain, addr)) = pin {
+        builder = builder.resolve(&domain, addr);
+    }
+    builder
         .build()
         .map_err(|err| format!("初始化 papr HTTP 客户端失败: {err}"))
 }

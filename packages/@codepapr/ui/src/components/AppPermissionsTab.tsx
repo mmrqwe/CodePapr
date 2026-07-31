@@ -122,14 +122,17 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
           </div>
           <button
             type="button"
+            role="switch"
+            aria-checked={settings.allowLevel3}
+            aria-label={t.appPermAllowL3}
             onClick={toggleAllowLevel3}
-            className={`relative h-6 w-11 rounded-full transition-colors ${
+            className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors ${
               settings.allowLevel3 ? 'bg-amber-500' : 'bg-[#2a2d3a]'
             }`}
           >
             <span
-              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                settings.allowLevel3 ? 'translate-x-5' : 'translate-x-0.5'
+              className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                settings.allowLevel3 ? 'translate-x-5' : 'translate-x-0'
               }`}
             />
           </button>

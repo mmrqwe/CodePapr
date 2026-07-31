@@ -2634,22 +2634,41 @@ export function registerWorkspaceTools(
       diskApps = discovered.filter((d) => !storeIds.has(d.app_id));
     } catch { /* best-effort */ }
 
-    const fromStore = storeApps.map((app) => ({
-      appId: app.appId,
-      title: app.title,
-      hasBackend: !!(app.command && app.port),
-      isRunning: !!(app.pid && app.url),
-      port: app.port ?? null,
-      url: app.url ?? null,
-    }));
-    const fromDisk = diskApps.map((d) => ({
-      appId: d.app_id,
-      title: d.title,
-      hasBackend: !!(d.command && d.port),
-      isRunning: false,
-      port: d.port ?? null,
-      url: null,
-    }));
+    // Ground truth for running backends: the Rust process registry (survives
+    // webview reloads). Keyed by preview URL so we can match an app by its port.
+    const runningByUrl = new Map<string, number>();
+    try {
+      const procs = await invoke<Array<{ pid: number; preview_url?: string }>>('list_background_processes', { workspacePath: workspace() });
+      for (const proc of procs) {
+        if (proc.preview_url) runningByUrl.set(proc.preview_url, proc.pid);
+      }
+    } catch { /* best-effort */ }
+    const urlForPort = (port?: number | null): string | null => (port ? `http://localhost:${port}/` : null);
+
+    const fromStore = storeApps.map((app) => {
+      const regUrl = urlForPort(app.port);
+      const regRunning = regUrl !== null && runningByUrl.has(regUrl);
+      return {
+        appId: app.appId,
+        title: app.title,
+        hasBackend: !!(app.command && app.port),
+        isRunning: !!(app.pid && app.url) || regRunning,
+        port: app.port ?? null,
+        url: app.url ?? (regRunning ? regUrl : null),
+      };
+    });
+    const fromDisk = diskApps.map((d) => {
+      const regUrl = urlForPort(d.port);
+      const regRunning = regUrl !== null && runningByUrl.has(regUrl);
+      return {
+        appId: d.app_id,
+        title: d.title,
+        hasBackend: !!(d.command && d.port),
+        isRunning: regRunning,
+        port: d.port ?? null,
+        url: regRunning ? regUrl : null,
+      };
+    });
     return [...fromStore, ...fromDisk];
   });
 

@@ -66,7 +66,7 @@ export function AppModal({ lang }: AppModalProps) {
     return null;
   }
 
-  const iframeSrc = `codepapr-app://localhost/${openedApp.appId}/index.html`;
+  const iframeSrc = `codepapr-app://${openedApp.appId}/index.html`;
 
   const hasMeta = (manifest?.permissions && manifest.permissions.length > 0)
     || (manifest?.agents && manifest.agents.length > 0);

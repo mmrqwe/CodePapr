@@ -336,6 +336,7 @@ async function loadProjectMapSymbolsFromLsp(
       relativePath,
       content,
       version: 1,
+      diagWaitMs: 0,
     });
     opened = true;
 

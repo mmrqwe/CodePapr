@@ -3,6 +3,7 @@
 //! All file I/O is workspace-scoped — paths are resolved relative to a
 //! canonicalised workspace root and path traversal is rejected.
 
+pub(crate) mod default_project;
 pub(crate) mod diff;
 pub(crate) mod list;
 pub(crate) mod read;
