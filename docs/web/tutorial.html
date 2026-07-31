@@ -1755,7 +1755,7 @@ X-API-Key: your-api-key</code></pre>
         <p>DeepSeek 按<strong>字节前缀逐字匹配</strong>自动缓存（无显式断点）。架构的第一性原则是：<strong>epoch 内前缀字节稳定（只追加），epoch 之间通过压缩有意重置。</strong></p>
         <ul>
           <li><strong>epoch</strong> = 一个 agent 生命周期内、前缀保持字节稳定的跨度。工具循环每一轮把 assistant 消息与 tool 结果<strong>追加到尾部</strong>，前缀逐字节复用 → 循环内多次调用天然高命中。</li>
-          <li><strong>epoch 边界 = 上下文压缩</strong>：达到上下文阈值时，把历史摘要成 checkpoint + 保留尾部，开启新 epoch（一次性 miss，之后重新稳定累积命中）。这对齐 OpenCode 的 Context Epoch 与 Claude Code 的 auto-compact。</li>
+          <li><strong>epoch 边界 = 上下文压缩</strong>：达到上下文阈值时，把历史摘要成 checkpoint + 保留尾部，开启新 epoch（一次性 miss，之后重新稳定累积命中）。这对齐 OpenCode 的 Context Epoch 与 Claude Code 的 auto-compact。checkpoint 按<strong>保留边界插入</strong>（非追加到末尾），其后保留近期尾部原文（含工具调用↔结果配对，边界在 UI 消息粒度选取、不切出孤儿 tool 消息）；checkpoint 在有效上下文中以 <strong>user 轮</strong>发出，避免压缩后首条 / 连续 assistant，提升跨 provider 正确性。</li>
         </ul>
 
         <h3>中途溢出 → 压缩（mid-loop compaction）</h3>

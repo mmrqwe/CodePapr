@@ -519,6 +519,7 @@ export class Agent {
           success,
           error: errorMessage,
           output: typeof contextResult === 'string' ? contextResult : JSON.stringify(contextResult),
+          contextContent: toolMsg.content,
           ...(subagentToolInvocations ? { subagentToolInvocations } : {}),
         });
 

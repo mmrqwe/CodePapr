@@ -125,6 +125,7 @@ import {
 import { buildProviderInstance } from './internals/providerFactory';
 import { WorkerCrashError } from '../agent/WorkerBackedAgent';
 import { maybeGenerateContextCheckpoint } from './internals/contextCheckpoint';
+import { insertCheckpointAtRetainedBoundary } from '../utils/contextCompaction';
 import { handleWorkspaceMutation } from './internals/backgroundDiagnostics';
 import { runVerifier } from '../utils/verifierRunner';
 import { useGoalStore } from './goalStore';
@@ -1017,7 +1018,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
                 }));
               }
               set((s) => {
-                const nextMessages = [...sessionMsgs, checkpointResult.message];
+                const nextMessages = insertCheckpointAtRetainedBoundary(
+                  sessionMsgs,
+                  checkpointResult.message,
+                  checkpointResult.insertIndex
+                );
                 return {
                   messages: nextMessages,
                   sessionMessages: { ...s.sessionMessages, [s.activeSessionId!]: nextMessages },
@@ -1281,6 +1286,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
                 memorySection
               )
           );
+          // Inject the frozen, memory-containing bootstrap so the main agent's
+          // log[0] actually carries memory.md / project-graph. The factory prefers
+          // runtime.sessionBootstrapPrompt over its skills+custom-only fallback
+          // (agentFactory.ts); without this the computed bootstrap above is used
+          // only as a cache key and memory never reaches the primary agent.
+          runtimeAgentConfig.sessionBootstrapPrompt = runtimeSessionBootstrapPrompt;
           const runtimePromptKey = [
             runtimeSystemPrompt,
             runtimeSessionBootstrapPrompt,
@@ -1758,10 +1769,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
                       }
                     }
                     set((s) => {
-                      const next = [
-                        ...(s.sessionMessages[activeSessionId!] ?? []),
+                      const next = insertCheckpointAtRetainedBoundary(
+                        s.sessionMessages[activeSessionId!] ?? [],
                         cp.message,
-                      ];
+                        cp.insertIndex
+                      );
                       return {
                         messages: next,
                         sessionMessages: {
@@ -1999,7 +2011,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           if (checkpointResult) {
             set((s) => {
               const currentSessionMessages = s.sessionMessages[activeSessionId!] ?? [];
-              const nextSessionMessages = [...currentSessionMessages, checkpointResult.message];
+              const nextSessionMessages = insertCheckpointAtRetainedBoundary(
+                currentSessionMessages,
+                checkpointResult.message,
+                checkpointResult.insertIndex
+              );
               const isCurrentSession = s.activeSessionId === activeSessionId;
 
               return {

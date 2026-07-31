@@ -23,7 +23,7 @@ export async function maybeGenerateContextCheckpoint(
   messages: UIMessage[],
   force?: boolean,
   todoDigest?: string
-): Promise<{ message: UIMessage; cacheStats?: ICacheStatistics; modelTier: 'primary' | 'fast' | 'local' } | null> {
+): Promise<{ message: UIMessage; cacheStats?: ICacheStatistics; modelTier: 'primary' | 'fast' | 'local'; insertIndex: number } | null> {
   const plan = planContextCompaction(messages, {
     maxRounds: settings.maxConversationRounds,
     maxTokens: effectiveMaxContextTokens(settings, resolveProviderName(settings)),
@@ -116,5 +116,6 @@ export async function maybeGenerateContextCheckpoint(
     },
     cacheStats,
     modelTier,
+    insertIndex: plan.insertIndex,
   };
 }

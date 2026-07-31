@@ -603,6 +603,8 @@ CodePapr 的核心架构决策是**围绕 DeepSeek 隐式前缀缓存做提示�
 
 **epoch 边界 = 上下文压缩**。压缩是**唯一**被许可的前缀重置：达到上下文阈值时，把历史摘要成 checkpoint + 保留尾部，开启新 epoch（一次性 miss，之后重新稳定累积命中）。这对齐 OpenCode 的 Context Epoch 与 Claude Code 的 auto-compact 设计。
 
+压缩后的有效上下文 = `[checkpoint 摘要, ...保留尾部]`。checkpoint **按保留边界插入**（`planContextCompaction.insertIndex`，经 `insertCheckpointAtRetainedBoundary` 落到 UI 消息边界），而非追加到列表末尾——`buildEffectiveContextMessages` 取 checkpoint **之后**的消息作为保留尾部，因此最近若干轮（含工具调用↔结果配对）原文保留在 checkpoint 之后，只有更早的消息被摘要。保留边界在 **UI 消息粒度**选取（每个 assistant+tools 组是原子单元），不会切出孤儿 tool 消息。checkpoint 在有效上下文中以 **user 轮**发出（非 assistant），避免压缩后出现"首条 / 连续 assistant"，提升跨 provider（OpenAI / Claude）正确性；checkpoint 识别基于 `contextCheckpoint` payload，与角色无关。
+
 ### 13.3 中途溢出 → 压缩（mid-loop compaction）
 
 工具循环内上下文会随 tool 结果增长。`Agent.chat` 在**每轮构建请求之前**做溢出检查（`estimateContextTokens`：前缀字节 + 日志字节 / 4 的粗估）：
@@ -610,7 +612,7 @@ CodePapr 的核心架构决策是**围绕 DeepSeek 隐式前缀缓存做提示�
 1. 超过有效阈值（`contextCompaction.maxContextTokens`）时，调用注入的压缩 handler：
    - 把当前日志（core `IMessage`）转成 ui `ContextMessageLike`（`coreMessagesToContextMessages`，tool 结果回填到 assistant 的 `toolInvocations`，往返保真）；
    - 走与轮间压缩相同的管线（`maybeGenerateContextCheckpoint` 生成 checkpoint 摘要，并冻结当前 TodoList digest）；
-   - `buildEffectiveContextMessages` 用 checkpoint 替换历史 + 剪枝尾部旧 tool 结果；
+   - `buildEffectiveContextMessages` 在保留边界插入 checkpoint（其后保留近期尾部原文，含工具调用）+ 剪枝尾部旧 tool 结果；
    - `Session.replaceLog` 重置日志（`AppendOnlyLog.reset` + 重载），`RequestBuilder.resetLogTracking` 重置 append-only 跟踪避免误报；
    - 合并压缩的 cacheStats，发出 `context-compacted` 流事件，循环继续。
 2. **检查时机：仅轮首**。tool 结果在一轮末尾追加，其导致的超限在**下一轮轮首**被拦截——任何 LLM 请求都不会用超限上下文发送；工具调用任务在压缩后基于"摘要 + 近期尾部"继续。

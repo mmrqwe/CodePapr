@@ -514,7 +514,7 @@
       </div>
       <div class="led">
         <div class="no">M·03</div><h5>压缩 Epoch</h5>
-        <p>轮数或 token 超限时，把较早消息折叠成 checkpoint 摘要 + 保留尾部，开启新 context epoch。这是<b>有意</b>的全量前缀重写——接受一次失效，换上下文受控。</p>
+        <p>轮数或 token 超限时，把较早消息折叠成 checkpoint 摘要 + 保留尾部，开启新 context epoch。这是<b>有意</b>的全量前缀重写——接受一次失效，换上下文受控。checkpoint 按<b>保留边界插入</b>（非追加到末尾），其后保留近期尾部原文（含工具调用↔结果配对）；边界在 UI 消息粒度选取，assistant+tools 组不被切开。checkpoint 在有效上下文中以 <b>user 轮</b>发出，避免压缩后首条 / 连续 assistant，提升跨 provider 正确性。</p>
       </div>
       <div class="led">
         <div class="no">M·04</div><h5>动态内容尾部隔离</h5>

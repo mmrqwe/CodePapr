@@ -143,6 +143,11 @@ export interface UIToolInvocation {
   error?: string;
   statusText?: string;
   output?: string;
+  /** Byte-exact tool message content appended to the log (truncated +
+   *  deterministically serialized). Used to rebuild tool messages byte-identically
+   *  on restore so the prefix cache is not broken. `output` is the full raw result
+   *  for display. Persisted inside the tool_invocations JSON column. */
+  contextContent?: string;
   subagentToolInvocations?: ISubagentToolInvocation[];
 }
 

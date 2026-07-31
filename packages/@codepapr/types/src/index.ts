@@ -289,6 +289,11 @@ export type IChatStreamEvent =
         success: boolean;
         error?: string;
         output?: string;
+        /** Byte-exact tool message content actually appended to the log (already
+         *  truncated + deterministically serialized). Persisted so a restored
+         *  history rebuilds tool messages byte-identically and does not break the
+         *  prefix cache. `output` stays the full raw result for UI display. */
+        contextContent?: string;
         subagentToolInvocations?: ISubagentToolInvocation[];
       }
   | { type: 'context-compacted'; round: number };

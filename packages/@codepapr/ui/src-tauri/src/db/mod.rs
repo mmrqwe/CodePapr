@@ -126,19 +126,20 @@ fn open_project_db(workspace_path: &str) -> Result<(Connection, PathBuf, PathBuf
            model TEXT NOT NULL,
            created_at INTEGER NOT NULL
          );
-         CREATE TABLE IF NOT EXISTS messages (
-           id TEXT PRIMARY KEY,
-           session_id TEXT NOT NULL,
-           message_index INTEGER NOT NULL,
-           role TEXT NOT NULL,
-           work_mode TEXT,
-           content TEXT NOT NULL,
-           reasoning_content TEXT,
-           tool_invocations TEXT,
-           timestamp INTEGER NOT NULL,
-           FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
-           UNIQUE(session_id, message_index)
-         );
+          CREATE TABLE IF NOT EXISTS messages (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            message_index INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            work_mode TEXT,
+            content TEXT NOT NULL,
+            reasoning_content TEXT,
+            tool_invocations TEXT,
+            extras TEXT,
+            timestamp INTEGER NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+            UNIQUE(session_id, message_index)
+          );
           CREATE TABLE IF NOT EXISTS project_meta (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL,
@@ -171,9 +172,36 @@ fn migrate_project_db(conn: &Connection, workspace: &Path) -> Result<(), String>
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|err| format!("读取数据库版本失败: {err}"))?;
 
-    if version >= 1 {
-        return Ok(());
+    if version < 1 {
+        migrate_project_db_v1(conn, workspace)?;
     }
+
+    if version < 2 {
+        // v2: 消息表新增 extras 列，承载恢复上下文所需的 promptContent / synthetic /
+        // hidden / carryForwardInContext / contextCheckpoint / question 等字段。
+        // 正常重启后 buildEffectiveContextMessages 依赖 contextCheckpoint / synthetic
+        // 等标志重建压缩历史与上下文成员资格，缺失会导致已压缩会话重新展开并击穿缓存。
+        let has_extras = conn
+            .prepare("PRAGMA table_info(messages)")
+            .and_then(|mut stmt| {
+                let mut names = stmt
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .filter_map(|r| r.ok());
+                Ok(names.any(|name| name == "extras"))
+            })
+            .unwrap_or(false);
+        if !has_extras {
+            conn.execute_batch("ALTER TABLE messages ADD COLUMN extras TEXT;")
+                .map_err(|err| format!("迁移 messages.extras 列失败: {err}"))?;
+        }
+        conn.pragma_update(None, "user_version", 2_i64)
+            .map_err(|err| format!("设置数据库版本失败: {err}"))?;
+    }
+
+    Ok(())
+}
+
+fn migrate_project_db_v1(conn: &Connection, workspace: &Path) -> Result<(), String> {
 
     // 获取要迁移的 JSON：先查 project_state 表，再查 legacy 文件
     let legacy_json = match read_project_state_value(conn)? {
@@ -769,18 +797,41 @@ pub(crate) fn save_message_batch(
         let tool_invocations = tool_invocations_raw
             .filter(|v| !v.is_null())
             .and_then(|v| serde_json::to_string(v).ok());
+        // extras：恢复上下文所需的非核心字段，整体存为 JSON。缺失这些会导致重启后
+        // 压缩状态（contextCheckpoint）与成员资格标志（synthetic/hidden/
+        // carryForwardInContext）丢失，使已压缩会话重新展开并击穿前缀缓存。
+        let mut extras_map = serde_json::Map::new();
+        for key in [
+            "promptContent",
+            "synthetic",
+            "hidden",
+            "carryForwardInContext",
+            "contextCheckpoint",
+            "question",
+        ] {
+            if let Some(val) = msg.get(key) {
+                if !val.is_null() {
+                    extras_map.insert(key.to_string(), val.clone());
+                }
+            }
+        }
+        let extras = if extras_map.is_empty() {
+            None
+        } else {
+            serde_json::to_string(&serde_json::Value::Object(extras_map)).ok()
+        };
         let timestamp = msg.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0);
         let message_index = idx as i64;
 
         // 使用 INSERT OR IGNORE：DELETE 已清空当前 session 的消息，
         // 如果 id 冲突（来自其他 session 的消息），跳过而非覆盖，避免跨 session 数据破坏
         tx.execute(
-            "INSERT OR IGNORE INTO messages (id, session_id, message_index, role, work_mode, content, reasoning_content, tool_invocations, timestamp)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT OR IGNORE INTO messages (id, session_id, message_index, role, work_mode, content, reasoning_content, tool_invocations, extras, timestamp)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 msg_id, session_id.as_str(), message_index,
                 role, work_mode, content,
-                reasoning_content, tool_invocations,
+                reasoning_content, tool_invocations, extras,
                 timestamp,
             ],
         )
@@ -806,7 +857,7 @@ pub(crate) fn load_session_messages(
     let (conn, ..) = open_project_db(&workspace_path)?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, role, work_mode, content, reasoning_content, tool_invocations, timestamp, message_index
+            "SELECT id, role, work_mode, content, reasoning_content, tool_invocations, extras, timestamp, message_index
              FROM messages WHERE session_id = ?1 ORDER BY message_index ASC",
         )
         .map_err(|err| format!("查询消息失败: {err}"))?;
@@ -819,6 +870,7 @@ pub(crate) fn load_session_messages(
                 None => serde_json::Value::Null,
             };
 
+            let extras_raw: Option<String> = row.get(6)?;
             let work_mode: Option<String> = row.get(2)?;
             let reasoning: Option<String> = row.get(4)?;
 
@@ -826,7 +878,7 @@ pub(crate) fn load_session_messages(
                 "id": row.get::<_, String>(0)?,
                 "role": row.get::<_, String>(1)?,
                 "content": row.get::<_, String>(3)?,
-                "timestamp": row.get::<_, i64>(6)?,
+                "timestamp": row.get::<_, i64>(7)?,
             });
 
             if let Some(wm) = work_mode {
@@ -837,6 +889,16 @@ pub(crate) fn load_session_messages(
             }
             if !tool_invocations.is_null() {
                 obj["toolInvocations"] = tool_invocations;
+            }
+            // 还原 extras（promptContent / synthetic / hidden / carryForwardInContext /
+            // contextCheckpoint / question），供 buildEffectiveContextMessages 重建压缩
+            // 历史与上下文成员资格。
+            if let Some(s) = extras_raw {
+                if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&s) {
+                    for (key, value) in map {
+                        obj[key] = value;
+                    }
+                }
             }
 
             Ok(obj)

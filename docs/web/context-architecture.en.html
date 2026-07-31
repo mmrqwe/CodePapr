@@ -506,7 +506,7 @@
       </div>
       <div class="led">
         <div class="no">M·03</div><h5>Compaction Epoch</h5>
-        <p>When rounds or tokens exceed limits, earlier messages are folded into a checkpoint summary + retained tail, opening a new context epoch. This is an <b>intentional</b> full prefix rewrite — accepting one invalidation in exchange for controlled context.</p>
+        <p>When rounds or tokens exceed limits, earlier messages are folded into a checkpoint summary + retained tail, opening a new context epoch. This is an <b>intentional</b> full prefix rewrite — accepting one invalidation in exchange for controlled context. The checkpoint is <b>inserted at the retention boundary</b> (not appended at the end); the recent tail after it stays verbatim (including tool-call↔result pairs). The boundary is chosen at UI-message granularity, so assistant+tools groups are never split. In the effective context the checkpoint is emitted as a <b>user turn</b>, avoiding a leading/consecutive assistant after compaction for better cross-provider correctness.</p>
       </div>
       <div class="led">
         <div class="no">M·04</div><h5>Dynamic Content Tail Isolation</h5>

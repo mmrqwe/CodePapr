@@ -25,7 +25,10 @@ export function sanitizeMessageForPersistence(message: UIMessage, _debugEnabled:
     ...message,
     isStreaming: undefined,
     statusText: undefined,
-    promptContent: undefined,
+    // promptContent is intentionally preserved: it is the full runtime user prompt
+    // actually sent to the model. Restoring it (via the messages.extras column)
+    // keeps rebuilt history byte-identical to the live log, protecting the prefix
+    // cache. Only the short display `content` would be recovered otherwise.
     images: undefined,
     toolInvocations: message.toolInvocations?.map((ti) => ({
       ...ti,

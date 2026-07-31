@@ -6,6 +6,7 @@ import {
 } from '@codepapr/core';
 import {
   buildEffectiveContextMessages,
+  insertCheckpointAtRetainedBoundary,
   type ContextMessageLike,
 } from '../utils/contextCompaction';
 import { maybeGenerateContextCheckpoint } from '../store/internals/contextCheckpoint';
@@ -122,8 +123,17 @@ export function createContextCompactionHandler(
       if (!checkpoint) {
         return null;
       }
+      // Insert the checkpoint at the planned retention boundary (not at the end)
+      // so the recent tool-call tail follows it and stays verbatim in the rebuilt
+      // context. Appending at the end would make buildEffectiveContextMessages
+      // treat the tail as empty and drop the recent tool calls.
+      const withCheckpoint = insertCheckpointAtRetainedBoundary(
+        contextMessages,
+        checkpoint.message as unknown as ContextMessageLike,
+        checkpoint.insertIndex
+      );
       const compacted = buildEffectiveContextMessages(
-        [...contextMessages, checkpoint.message as unknown as ContextMessageLike],
+        withCheckpoint,
         { pruneOptions: buildPruneOptions(settings) }
       );
       return { messages: compacted, cacheStats: checkpoint.cacheStats };

@@ -62,6 +62,14 @@ export interface ContextCompactionPlan {
   sourceTokens: number;
   retainedMessages: IMessage[];
   effectiveTokens: number;
+  /**
+   * Absolute index (into the UI message list passed to `planContextCompaction`)
+   * where the newly generated checkpoint must be inserted so the retained tail
+   * follows it. `buildEffectiveContextMessages` treats messages AFTER the
+   * checkpoint as the retained tail, so inserting here (instead of appending at
+   * the end) keeps the recent tool-call tail verbatim in the rebuilt context.
+   */
+  insertIndex: number;
 }
 
 interface CheckpointMatch {
@@ -190,10 +198,14 @@ function toCoreTailMessages(messages: readonly ContextMessageLike[]): IMessage[]
           return {
             id: `${message.id}-tool-${ti.id}`,
             role: 'tool' as const,
-            // Use sortedStringify to match the live path (Message.tool), so a
-            // rebuilt history is byte-identical to what was originally sent and
-            // does not break DeepSeek's prefix cache on agent rebuild.
-            content: typeof cleanedOutput === 'string' ? cleanedOutput : sortedStringify(cleanedOutput),
+            // Prefer contextContent: the byte-exact content appended to the live
+            // log (already truncated + sortedStringify'd). Falling back to
+            // sortedStringify(cleanedOutput) only matches the live path for
+            // non-truncated object results, so contextContent is what keeps a
+            // rebuilt history byte-identical (and the prefix cache intact).
+            content:
+              ti.contextContent ??
+              (typeof cleanedOutput === 'string' ? cleanedOutput : sortedStringify(cleanedOutput)),
             timestamp: message.timestamp,
             toolResult: {
               toolCallId: ti.id,
@@ -339,36 +351,57 @@ function collectPatternHighlights(
   );
 }
 
-function pickRetainedTailMessages(messages: readonly IMessage[]): {
-  retainedMessages: IMessage[];
-  retainedTokens: number;
-} {
-  const retained: IMessage[] = [];
+/**
+ * Choose the retained tail in UI-message space and return its start index
+ * (relative to `tailUI`), so the checkpoint can be inserted at a UI boundary.
+ * Each UI assistant message expands atomically to an assistant+tools group via
+ * `toCoreTailMessages`, so splitting at a UI index never orphans a tool message
+ * in either the source or the retained partition. Token accounting reuses the
+ * core conversion so it stays consistent with the live/rebuild path.
+ */
+function pickRetainedTailUIStart(tailUI: readonly ContextMessageLike[]): number {
   let retainedTokens = 0;
+  let retainedCount = 0;
+  let startIndex = tailUI.length;
 
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]!;
-    const messageTokens = getMessageTokenCount(message);
-    const keepByMinimum = retained.length < CONTEXT_COMPACTION_MIN_RETAIN_MESSAGES;
+  for (let index = tailUI.length - 1; index >= 0; index -= 1) {
+    const message = tailUI[index]!;
+    const coreMessages = toCoreTailMessages([message]);
+    const messageTokens = getMessagesTokenCount(coreMessages);
+    const keepByMinimum = retainedCount < CONTEXT_COMPACTION_MIN_RETAIN_MESSAGES;
     const keepByBudget =
-      retained.length < CONTEXT_COMPACTION_MAX_RETAIN_MESSAGES &&
+      retainedCount < CONTEXT_COMPACTION_MAX_RETAIN_MESSAGES &&
       retainedTokens + messageTokens <= CONTEXT_COMPACTION_TARGET_RETAIN_TOKENS;
 
     if (!keepByMinimum && !keepByBudget) {
       break;
     }
 
-    retained.unshift(message);
-    retainedTokens += messageTokens;
+    startIndex = index;
+    // Synthetic/hidden messages contribute no core messages; keep them in the
+    // tail span (they are filtered out downstream) but do not let them consume
+    // the retention budget.
+    if (coreMessages.length > 0) {
+      retainedCount += 1;
+      retainedTokens += messageTokens;
+    }
   }
 
-  if (retained.length === 0 && messages.length > 0) {
-    const tail = messages[messages.length - 1]!;
-    retained.push(tail);
-    retainedTokens = getMessageTokenCount(tail);
-  }
+  return startIndex;
+}
 
-  return { retainedMessages: retained, retainedTokens };
+/**
+ * Smallest boundary such that `toCoreTailMessages(tailUI.slice(0, boundary))`
+ * is non-empty. Used when there is no prior checkpoint and retention would keep
+ * everything, to guarantee at least one message is compacted into a checkpoint.
+ */
+function firstNonEmptyCoreBoundary(tailUI: readonly ContextMessageLike[]): number {
+  for (let boundary = 1; boundary <= tailUI.length; boundary += 1) {
+    if (toCoreTailMessages(tailUI.slice(0, boundary)).length > 0) {
+      return boundary;
+    }
+  }
+  return tailUI.length;
 }
 
 function renderSection(heading: string, items: readonly string[]): string[] {
@@ -423,7 +456,12 @@ export function buildEffectiveContextMessages(
     result = [
       {
         id: checkpoint.message.id,
-        role: 'assistant',
+        // Emitted as a user turn (not assistant) so the rebuilt context never
+        // starts with — or stacks consecutive — assistant messages, which some
+        // providers reject. Detection is payload-based (contextCheckpoint), and
+        // the checkpoint is not processed by toCoreTailMessages, so the retained
+        // tail logic is unaffected.
+        role: 'user',
         content: checkpoint.payload.renderedContent,
         timestamp: checkpoint.message.timestamp,
         metadata: {
@@ -453,50 +491,47 @@ export function planContextCompaction(
   const force = options?.force ?? false;
   const checkpoint = getLatestCheckpoint(messages);
   const tailStart = checkpoint ? checkpoint.index + 1 : 0;
-  const tailMessages = toCoreTailMessages(messages.slice(tailStart));
+  const tailUI = messages.slice(tailStart);
+  const tailMessages = toCoreTailMessages(tailUI);
   const priorCheckpoint = checkpoint?.payload ?? null;
   const effectiveTokens =
     getCheckpointTokenCount(priorCheckpoint) + getMessagesTokenCount(tailMessages);
   const effectiveRoundCount =
     tailMessages.filter((m) => m.role === 'user').length + (priorCheckpoint ? 1 : 0);
 
+  const noCompact: ContextCompactionPlan = {
+    shouldCompact: false,
+    priorCheckpoint,
+    sourceMessages: [],
+    sourceChars: 0,
+    sourceTokens: 0,
+    retainedMessages: tailMessages,
+    effectiveTokens,
+    insertIndex: messages.length,
+  };
+
   if (
     !force &&
     effectiveRoundCount <= maxRounds &&
     effectiveTokens <= maxTokens
   ) {
-    return {
-      shouldCompact: false,
-      priorCheckpoint,
-      sourceMessages: [],
-      sourceChars: 0,
-      sourceTokens: 0,
-      retainedMessages: tailMessages,
-      effectiveTokens,
-    };
+    return noCompact;
   }
 
-  const { retainedMessages } = pickRetainedTailMessages(tailMessages);
-  let retainedCount = retainedMessages.length;
+  // Split in UI-message space so the new checkpoint can be inserted at a UI
+  // boundary (assistant+tools groups stay atomic), and the retained tail keeps
+  // its tool calls verbatim after the checkpoint.
+  let retainedUIStart = pickRetainedTailUIStart(tailUI);
 
-  if (!priorCheckpoint && retainedCount >= tailMessages.length && tailMessages.length > 0) {
-    retainedCount = Math.max(0, tailMessages.length - 1);
+  if (!priorCheckpoint && retainedUIStart === 0 && tailUI.length > 0) {
+    retainedUIStart = firstNonEmptyCoreBoundary(tailUI);
   }
 
-  const splitIndex = Math.max(0, tailMessages.length - retainedCount);
-  const sourceMessages = tailMessages.slice(0, splitIndex);
-  const finalRetainedMessages = tailMessages.slice(splitIndex);
+  const sourceMessages = toCoreTailMessages(tailUI.slice(0, retainedUIStart));
+  const finalRetainedMessages = toCoreTailMessages(tailUI.slice(retainedUIStart));
 
   if (!priorCheckpoint && sourceMessages.length === 0 && finalRetainedMessages.length === 0) {
-    return {
-      shouldCompact: false,
-      priorCheckpoint,
-      sourceMessages: [],
-      sourceChars: 0,
-      sourceTokens: 0,
-      retainedMessages: tailMessages,
-      effectiveTokens,
-    };
+    return noCompact;
   }
 
   return {
@@ -507,7 +542,22 @@ export function planContextCompaction(
     sourceTokens: getMessagesTokenCount(sourceMessages),
     retainedMessages: finalRetainedMessages,
     effectiveTokens,
+    insertIndex: tailStart + retainedUIStart,
   };
+}
+
+/**
+ * Insert a checkpoint message at the planned retention boundary so the retained
+ * tail follows it. `buildEffectiveContextMessages` then keeps that tail verbatim
+ * (recent tool calls included) instead of dropping it.
+ */
+export function insertCheckpointAtRetainedBoundary<T>(
+  messages: readonly T[],
+  checkpoint: T,
+  insertIndex: number
+): T[] {
+  const clamped = Math.max(0, Math.min(insertIndex, messages.length));
+  return [...messages.slice(0, clamped), checkpoint, ...messages.slice(clamped)];
 }
 
 export function buildContextCompactionTranscript(messages: readonly IMessage[]): string {

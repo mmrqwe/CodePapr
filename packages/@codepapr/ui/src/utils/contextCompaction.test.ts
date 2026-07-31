@@ -4,6 +4,7 @@ import {
   buildContextCompactionTranscript,
   buildEffectiveContextMessages,
   buildLocalContextCheckpointSections,
+  insertCheckpointAtRetainedBoundary,
   parseContextCheckpointSections,
   planContextCompaction,
   renderContextCheckpointContent,
@@ -449,6 +450,183 @@ describe('contextCompaction', () => {
       const first = buildEffectiveContextMessages(makeMessages(), { pruneOptions });
       const second = buildEffectiveContextMessages(makeMessages(), { pruneOptions });
       expect(second).toEqual(first);
+    });
+  });
+
+  describe('tool message byte-faithfulness (contextContent, problem 1.2 fix)', () => {
+    it('prefers contextContent (byte-exact log content) when rebuilding tool messages', () => {
+      const truncated = 'x'.repeat(50) + '…[truncated]';
+      const messages: ContextMessageLike[] = [
+        createUser('u1', '运行命令'),
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          timestamp: 2,
+          toolInvocations: [
+            {
+              id: 'call-1',
+              name: 'run',
+              arguments: {},
+              status: 'success',
+              output: 'x'.repeat(5000),
+              contextContent: truncated,
+            },
+          ],
+        },
+      ];
+
+      const effective = buildEffectiveContextMessages(messages);
+      const toolMsg = effective.find((m) => m.role === 'tool');
+      expect(toolMsg?.content).toBe(truncated);
+    });
+
+    it('falls back to output when contextContent is absent (legacy data)', () => {
+      const messages: ContextMessageLike[] = [
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          timestamp: 1,
+          toolInvocations: [
+            { id: 'call-1', name: 'run', arguments: {}, status: 'success', output: 'plain output' },
+          ],
+        },
+      ];
+
+      const effective = buildEffectiveContextMessages(messages);
+      const toolMsg = effective.find((m) => m.role === 'tool');
+      expect(toolMsg?.content).toBe('plain output');
+    });
+  });
+
+  describe('retained-tail insertion boundary (problem 1 fix)', () => {
+    function createCheckpoint(id: string, content: string): ContextMessageLike {
+      return {
+        id,
+        role: 'assistant',
+        content: '',
+        synthetic: true,
+        hidden: true,
+        timestamp: 999,
+        contextCheckpoint: {
+          version: 2,
+          summary: content,
+          renderedContent: content,
+          sourceMessageCount: 0,
+          sourceChars: 0,
+          generatedAt: 999,
+          modelName: 'test-model',
+          modelTier: 'fast',
+        },
+      };
+    }
+
+    it('clamps insertIndex into bounds', () => {
+      const arr = [1, 2, 3];
+      expect(insertCheckpointAtRetainedBoundary(arr, 9, 0)).toEqual([9, 1, 2, 3]);
+      expect(insertCheckpointAtRetainedBoundary(arr, 9, 3)).toEqual([1, 2, 3, 9]);
+      expect(insertCheckpointAtRetainedBoundary(arr, 9, 99)).toEqual([1, 2, 3, 9]);
+      expect(insertCheckpointAtRetainedBoundary(arr, 9, -5)).toEqual([9, 1, 2, 3]);
+    });
+
+    it('sets insertIndex to the list end when no compaction is needed', () => {
+      const messages = [createUser('u1', 'hi'), createAssistant('a1', 'hello')];
+      const plan = planContextCompaction(messages, { maxRounds: 24 });
+      expect(plan.shouldCompact).toBe(false);
+      expect(plan.insertIndex).toBe(messages.length);
+    });
+
+    it('compacts at least one message when there is no prior checkpoint', () => {
+      const messages = [createUser('u1', '只有一个消息')];
+      const plan = planContextCompaction(messages, { force: true });
+      expect(plan.sourceMessages.length).toBeGreaterThan(0);
+      expect(plan.insertIndex).toBeGreaterThan(0);
+    });
+
+    it('emits the checkpoint as a user turn in effective context (problem 2 fix)', () => {
+      const messages: ContextMessageLike[] = [
+        createUser('u1', '旧需求'),
+        createCheckpoint('cp1', '检查点摘要'),
+        createUser('u2', '新需求'),
+      ];
+      const effective = buildEffectiveContextMessages(messages);
+      expect(effective[0]?.role).toBe('user');
+      expect(effective[0]?.content).toContain('检查点摘要');
+    });
+
+    it('inserting the checkpoint at plan.insertIndex keeps the recent tool-call tail verbatim and paired', () => {
+      const messages: ContextMessageLike[] = [];
+      for (let r = 0; r < 10; r += 1) {
+        messages.push(createUser(`u${r}`, `用户消息 ${r}`));
+        messages.push(
+          createAssistantWithTools(`a${r}`, `处理 ${r}`, [
+            { id: `call-${r}`, name: 'read', arguments: { r }, status: 'success', output: `输出 ${r}` },
+          ]),
+        );
+      }
+
+      const plan = planContextCompaction(messages, { maxRounds: 3 });
+      expect(plan.shouldCompact).toBe(true);
+      expect(plan.insertIndex).toBeGreaterThan(0);
+      expect(plan.insertIndex).toBeLessThanOrEqual(messages.length);
+
+      const withCheckpoint = insertCheckpointAtRetainedBoundary(
+        messages,
+        createCheckpoint('cp1', '检查点摘要内容'),
+        plan.insertIndex,
+      );
+      const effective = buildEffectiveContextMessages(withCheckpoint);
+
+      expect(effective[0]?.role).toBe('user');
+      expect(effective[0]?.content).toContain('检查点摘要内容');
+
+      const toolCallMsgs = effective.filter(
+        (m) => m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0,
+      );
+      const toolResultMsgs = effective.filter((m) => m.role === 'tool');
+      expect(toolCallMsgs.length).toBeGreaterThan(0);
+
+      const resultIds = new Set(toolResultMsgs.map((m) => m.toolResult?.toolCallId));
+      for (const tc of toolCallMsgs) {
+        for (const call of tc.toolCalls ?? []) {
+          expect(resultIds.has(call.id)).toBe(true);
+        }
+      }
+      const callIds = new Set(toolCallMsgs.flatMap((m) => (m.toolCalls ?? []).map((c) => c.id)));
+      for (const tr of toolResultMsgs) {
+        expect(callIds.has(tr.toolResult?.toolCallId ?? '')).toBe(true);
+      }
+    });
+
+    it('never orphans a tool message at the retained-tail boundary', () => {
+      // Force the boundary to land right before an assistant+tools group by using
+      // a tiny retention budget; the whole group must stay together in the tail.
+      const messages: ContextMessageLike[] = [];
+      for (let r = 0; r < 8; r += 1) {
+        messages.push(createUser(`u${r}`, `用户消息 ${r}`));
+        messages.push(
+          createAssistantWithTools(`a${r}`, '', [
+            { id: `call-${r}`, name: 'read', arguments: {}, status: 'success', output: 'x'.repeat(50) },
+          ]),
+        );
+      }
+
+      const plan = planContextCompaction(messages, { maxRounds: 2 });
+      expect(plan.shouldCompact).toBe(true);
+
+      // The retained partition (core) must start at a clean boundary: it cannot
+      // begin with a standalone tool message.
+      expect(plan.retainedMessages[0]?.role).not.toBe('tool');
+
+      const withCheckpoint = insertCheckpointAtRetainedBoundary(
+        messages,
+        createCheckpoint('cp1', '摘要'),
+        plan.insertIndex,
+      );
+      const effective = buildEffectiveContextMessages(withCheckpoint);
+      // After the leading checkpoint, the first tail message is never an orphan tool.
+      expect(effective[1]?.role).not.toBe('tool');
     });
   });
 });

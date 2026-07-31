@@ -151,7 +151,7 @@ Six tabs:
 - **LLM**: Primary model, fast model, temperature, topP, maxTokens, thinking mode, maxToolRounds
 - **Search**: Self-hosted SearXNG first, with automatic fallback to built-in multi-source aggregation (Bing / Mojeek / Qwant / Wikipedia); category/time/language/safe search parameters are in the collapsible Advanced section; the engine selector has been removed from the UI
 - **Mentor**: Mentor sub-agent independent API key, Base URL, model selection
-- **Advanced**: Context compaction (model/temperature/summary output tokens/context limit/conversation rounds), TodoList max retries, ProjectGraph limits. The context limit `maxContextTokens` defaults to 500K; when reached, context is auto-compacted (summarizing old messages and clearing old tool results). The effective value is clamped to the selected provider's context limit (DeepSeek ~500K, Claude ~200K, OpenAI ~128K, minus the output reserve)
+- **Advanced**: Context compaction (model/temperature/summary output tokens/context limit/conversation rounds), TodoList max retries, ProjectGraph limits. The context limit `maxContextTokens` defaults to 500K; when reached, context is auto-compacted: earlier messages are summarized into a checkpoint and old tool results cleared, while recent rounds (including tool-call↔result pairs) stay verbatim after the checkpoint. The effective value is clamped to the selected provider's context limit (DeepSeek ~500K, Claude ~200K, OpenAI ~128K, minus the output reserve)
 - **App**: .papr app permission management — global default level, Level 3 global toggle, per-app level overrides
 
 Voice configuration is not in the main settings panel — it is configured per character in the CharacterModal Voice Tab.

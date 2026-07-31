@@ -604,6 +604,8 @@ An **epoch** = a span within one agent lifetime during which the prefix stays by
 
 **The epoch boundary = context compaction.** Compaction is the **only** sanctioned prefix reset: when the context threshold is reached, history is summarized into a checkpoint + retained tail, starting a new epoch (a one-time miss, then stable hit accumulation resumes). This mirrors OpenCode's Context Epoch and Claude Code's auto-compact.
 
+The compacted effective context = `[checkpoint summary, ...retained tail]`. The checkpoint is **inserted at the retention boundary** (`planContextCompaction.insertIndex`, placed on a UI-message boundary via `insertCheckpointAtRetainedBoundary`), not appended at the end of the list — `buildEffectiveContextMessages` treats the messages **after** the checkpoint as the retained tail, so the most recent rounds (including tool-call↔result pairs) stay verbatim after the checkpoint and only earlier messages are summarized. The boundary is chosen at **UI-message granularity** (each assistant+tools group is atomic), so no tool message is ever orphaned. In the effective context the checkpoint is emitted as a **user turn** (not assistant), avoiding a leading/consecutive assistant message after compaction for better cross-provider (OpenAI / Claude) correctness; checkpoint detection is payload-based (`contextCheckpoint`), independent of role.
+
 ### 13.3 Mid-Loop Overflow → Compaction
 
 Context grows with tool results during the tool loop. `Agent.chat` performs an overflow check **before building each round's request** (`estimateContextTokens`: a rough estimate of prefix bytes + log bytes / 4):
@@ -611,7 +613,7 @@ Context grows with tool results during the tool loop. `Agent.chat` performs an o
 1. When the effective threshold (`contextCompaction.maxContextTokens`) is exceeded, the injected compaction handler runs:
    - Convert the current log (core `IMessage`) into ui `ContextMessageLike` (`coreMessagesToContextMessages`, re-attaching tool results to the assistant's `toolInvocations`, round-trip faithful);
    - Run the same pipeline as between-turn compaction (`maybeGenerateContextCheckpoint` produces the checkpoint summary and freezes the current TodoList digest);
-   - `buildEffectiveContextMessages` replaces history with the checkpoint + prunes old tool results in the tail;
+   - `buildEffectiveContextMessages` inserts the checkpoint at the retention boundary (the recent tail, tool calls included, stays verbatim after it) + prunes old tool results in the tail;
    - `Session.replaceLog` resets the log (`AppendOnlyLog.reset` + reload) and `RequestBuilder.resetLogTracking` resets append-only tracking to avoid false violations;
    - Merge the compaction's cacheStats, emit a `context-compacted` stream event, and continue the loop.
 2. **Check timing: round-start only.** Tool results are appended at the end of a round; the overflow they cause is caught at the **next round's start** — no LLM request is ever sent with an over-limit context; the tool-calling task continues after compaction from "summary + recent tail".

@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { QuestionData } from '@codepapr/types';
 import type { ProjectDiagnosticsReport } from './projectDiagnostics';
+import type { ContextCheckpointPayload } from './contextCompaction';
 
 const projectStateSaveTails = new Map<string, Promise<void>>();
 
@@ -28,6 +30,13 @@ export interface ProjectMessage {
   promptContent?: string;
   reasoningContent?: string;
   displayReasoningContent?: string;
+  /** Restored from the messages.extras column; needed to rebuild compacted
+   *  history and context membership byte-identically (see db/mod.rs). */
+  synthetic?: boolean;
+  hidden?: boolean;
+  carryForwardInContext?: boolean;
+  contextCheckpoint?: ContextCheckpointPayload;
+  question?: QuestionData;
   timestamp: number;
 }
 
