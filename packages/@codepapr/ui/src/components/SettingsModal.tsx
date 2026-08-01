@@ -1485,6 +1485,48 @@ export function SettingsModal() {
               </div>
 
               <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-5">
+                <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t.workspaceProjectGraph}</h3>
+                <div className="mt-4 grid gap-5 md:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      {t.projectGraphMaxFilesLabel}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="100"
+                      value={local.projectGraphMaxFiles}
+                      onChange={(e) => {
+                        const parsed = parseInt(e.target.value, 10);
+                        update({ projectGraphMaxFiles: Number.isFinite(parsed) ? parsed : local.projectGraphMaxFiles });
+                      }}
+                      title={t.projectGraphMaxFilesHint}
+                      className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+                    />
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.projectGraphMaxFilesHint}</p>
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      {t.projectGraphMaxTreeEntriesLabel}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="100"
+                      value={local.projectGraphMaxTreeEntries}
+                      onChange={(e) => {
+                        const parsed = parseInt(e.target.value, 10);
+                        update({ projectGraphMaxTreeEntries: Number.isFinite(parsed) ? parsed : local.projectGraphMaxTreeEntries });
+                      }}
+                      title={t.projectGraphMaxTreeEntriesHint}
+                      className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+                    />
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.projectGraphMaxTreeEntriesHint}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-5">
                 <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t.systemPrompt}</h3>
                 <p className="mb-4 text-[10px] leading-relaxed text-slate-600">{t.settingsPromptDesc}</p>
                 <textarea

@@ -133,7 +133,9 @@ describe('WorkspaceInsightPanel', () => {
     expect(invokeMock).toHaveBeenCalled();
     expect(container.textContent).not.toContain('ProjectGraph 与 Git');
     expect(container.textContent).not.toContain('项目图谱');
-    expect(container.textContent).toContain('ProjectGraph');
+    // 冗余的 "ProjectGraph" 标题已移除；改用「知识图谱」按钮（仅在 ProjectGraph
+    // 构建成功后显示）确认该区块已渲染。
+    expect(container.textContent).toContain('知识图谱');
     expect(container.textContent).toContain('刷新');
   });
 

@@ -31,6 +31,9 @@ import {
   IMessage,
   ISubagentToolInvocation,
   QuestionData,
+  IContextSnapshot,
+  IContextMessageView,
+  ContextStage,
 } from '@codepapr/types';
 import { Logger, estimateTokens } from '@codepapr/common';
 import { Session, mergeOptionalTokenCount } from './Session';
@@ -137,6 +140,81 @@ function buildRequestContextDebugText(request: IChatRequest, round: number): str
   };
 
   return JSON.stringify(debugPayload, null, 2);
+}
+
+function classifyContextStage(message: IMessage): ContextStage {
+  const metadata = message.metadata ?? {};
+  if (metadata.sessionBootstrap === true) {
+    return 'session-state';
+  }
+  if (message.role === 'system' || metadata.isPrefixSystem === true) {
+    return 'stable-prefix';
+  }
+  return 'conversation';
+}
+
+function buildContextSnapshot(request: IChatRequest, round: number): IContextSnapshot {
+  const toolCallNameById = new Map<string, string>();
+  for (const message of request.messages) {
+    for (const toolCall of message.toolCalls ?? []) {
+      toolCallNameById.set(toolCall.id, toolCall.name);
+    }
+  }
+
+  const tokensByStage: Record<ContextStage, number> = {
+    'stable-prefix': 0,
+    'session-state': 0,
+    conversation: 0,
+  };
+
+  const messages: IContextMessageView[] = request.messages.map((message) => {
+    const stage = classifyContextStage(message);
+    const estimatedTokens = estimateTokens(message.content ?? '');
+    tokensByStage[stage] += estimatedTokens;
+
+    const view: IContextMessageView = {
+      role: message.role,
+      content: message.content ?? '',
+      stage,
+      estimatedTokens,
+    };
+
+    if (message.role === 'tool' && message.toolResult) {
+      const toolName = toolCallNameById.get(message.toolResult.toolCallId);
+      if (toolName) {
+        view.toolName = toolName;
+      }
+    }
+
+    if (message.toolCalls && message.toolCalls.length > 0) {
+      view.toolCallNames = message.toolCalls.map((toolCall) => toolCall.name);
+    }
+
+    return view;
+  });
+
+  const toolsTokenEstimate = estimateTokens(
+    Serializer.stringify(request.tools ?? [])
+  );
+  tokensByStage['stable-prefix'] += toolsTokenEstimate;
+
+  const toolNames = (request.tools ?? []).map((tool) => tool.name);
+
+  const totalTokens =
+    tokensByStage['stable-prefix'] +
+    tokensByStage['session-state'] +
+    tokensByStage.conversation;
+
+  return {
+    round,
+    model: request.model,
+    messages,
+    toolNames,
+    toolsTokenEstimate,
+    totalTokens,
+    tokensByStage,
+    capturedAt: Date.now(),
+  };
 }
 
 function accumulateStats(
@@ -391,6 +469,7 @@ export class Agent {
         type: 'request-context',
         round: roundNumber,
         content: buildRequestContextDebugText(request, roundNumber),
+        snapshot: buildContextSnapshot(request, roundNumber),
       });
 
       let response: IChatResponse;

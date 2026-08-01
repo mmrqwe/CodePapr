@@ -12,7 +12,12 @@ import {
 } from '@codepapr/types';
 import { Logger, sortedStringify } from '@codepapr/common';
 import { BaseLLMProvider, ProviderConfig } from './ILLMProvider';
-import { readSseStream, safeParseToolArguments, sanitizeToolCallArguments } from './streaming';
+import {
+  readSseStream,
+  safeParseToolArguments,
+  sanitizeToolCallArguments,
+  withStreamIdleRetry,
+} from './streaming';
 import { buildClaudeImageContent } from './imageContent';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
 
@@ -153,104 +158,126 @@ export class ClaudeProvider extends BaseLLMProvider {
       messageCount: payload.messages.length,
     });
 
-    const response = await this.fetchWithRetry(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.config.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: sortedStringify(payload),
-    }, signal);
-
-    let responseId = '';
-    let content = '';
-    let finishReason = 'end_turn';
-    let usage: ClaudeResponse['usage'];
-    const toolCallStates: ClaudeStreamingToolState[] = [];
-
-    await readSseStream(response, (payloadLine) => {
-      const chunk = JSON.parse(payloadLine) as ClaudeStreamChunk;
-      usage = chunk.usage ?? chunk.message?.usage ?? usage;
-
-      if (chunk.type === 'message_start') {
-        responseId = chunk.message?.id ?? responseId;
-        return;
+    let emitted = false;
+    const trackEvent = (event: IChatStreamEvent): void => {
+      if (event.type === 'content-delta' || event.type === 'reasoning-delta') {
+        emitted = true;
       }
-
-      if (chunk.type === 'content_block_start' && chunk.content_block?.type === 'tool_use') {
-        const index = chunk.index ?? 0;
-        toolCallStates[index] = {
-          id: chunk.content_block.id ?? `tool-call-${index}`,
-          name: chunk.content_block.name ?? '',
-          argumentsText:
-            chunk.content_block.input &&
-            Object.keys(chunk.content_block.input).length > 0
-              ? sortedStringify(chunk.content_block.input)
-              : '',
-        };
-        return;
-      }
-
-      if (chunk.type === 'content_block_delta') {
-        if (chunk.delta?.type === 'text_delta' && chunk.delta.text) {
-          content += chunk.delta.text;
-          onEvent({ type: 'content-delta', delta: chunk.delta.text });
-          return;
-        }
-
-        if (chunk.delta?.type === 'input_json_delta') {
-          const index = chunk.index ?? 0;
-          const current = toolCallStates[index] ?? {
-            id: `tool-call-${index}`,
-            name: '',
-            argumentsText: '',
-          };
-          toolCallStates[index] = {
-            ...current,
-            argumentsText: `${current.argumentsText}${chunk.delta.partial_json ?? ''}`,
-          };
-        }
-        return;
-      }
-
-      if (chunk.type === 'message_delta') {
-        finishReason = chunk.delta?.stop_reason ?? finishReason;
-      }
-    });
-
-    return {
-      id: responseId,
-      choices: [
-        {
-          message: {
-            role: 'assistant',
-            content,
-            toolCalls:
-              toolCallStates.length > 0
-                ? toolCallStates
-                    .filter(
-                      (
-                        toolCall
-                      ): toolCall is ClaudeStreamingToolState => !!toolCall
-                    )
-                    .map((toolCall) => ({
-                      id: toolCall.id,
-                      name: toolCall.name,
-                      arguments: safeParseToolArguments(toolCall.argumentsText),
-                    }))
-                : undefined,
-          },
-          finishReason,
-        },
-      ],
-      usage: {
-        cache_creation_input_tokens: usage?.cache_creation_input_tokens ?? 0,
-        cache_read_input_tokens: usage?.cache_read_input_tokens ?? 0,
-        input_tokens: usage?.input_tokens ?? 0,
-        output_tokens: usage?.output_tokens ?? 0,
-      },
+      onEvent(event);
     };
+
+    return withStreamIdleRetry(
+      async () => {
+        const response = await this.fetchWithRetry(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': this.config.apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: sortedStringify(payload),
+        }, signal);
+
+        let responseId = '';
+        let content = '';
+        let finishReason = 'end_turn';
+        let usage: ClaudeResponse['usage'];
+        const toolCallStates: ClaudeStreamingToolState[] = [];
+
+        await readSseStream(response, (payloadLine) => {
+          const chunk = JSON.parse(payloadLine) as ClaudeStreamChunk;
+          usage = chunk.usage ?? chunk.message?.usage ?? usage;
+
+          if (chunk.type === 'message_start') {
+            responseId = chunk.message?.id ?? responseId;
+            return;
+          }
+
+          if (chunk.type === 'content_block_start' && chunk.content_block?.type === 'tool_use') {
+            const index = chunk.index ?? 0;
+            toolCallStates[index] = {
+              id: chunk.content_block.id ?? `tool-call-${index}`,
+              name: chunk.content_block.name ?? '',
+              argumentsText:
+                chunk.content_block.input &&
+                Object.keys(chunk.content_block.input).length > 0
+                  ? sortedStringify(chunk.content_block.input)
+                  : '',
+            };
+            return;
+          }
+
+          if (chunk.type === 'content_block_delta') {
+            if (chunk.delta?.type === 'text_delta' && chunk.delta.text) {
+              content += chunk.delta.text;
+              trackEvent({ type: 'content-delta', delta: chunk.delta.text });
+              return;
+            }
+
+            if (chunk.delta?.type === 'input_json_delta') {
+              const index = chunk.index ?? 0;
+              const current = toolCallStates[index] ?? {
+                id: `tool-call-${index}`,
+                name: '',
+                argumentsText: '',
+              };
+              toolCallStates[index] = {
+                ...current,
+                argumentsText: `${current.argumentsText}${chunk.delta.partial_json ?? ''}`,
+              };
+            }
+            return;
+          }
+
+          if (chunk.type === 'message_delta') {
+            finishReason = chunk.delta?.stop_reason ?? finishReason;
+          }
+        }, signal);
+
+        return {
+          id: responseId,
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content,
+                toolCalls:
+                  toolCallStates.length > 0
+                    ? toolCallStates
+                        .filter(
+                          (
+                            toolCall
+                          ): toolCall is ClaudeStreamingToolState => !!toolCall
+                        )
+                        .map((toolCall) => ({
+                          id: toolCall.id,
+                          name: toolCall.name,
+                          arguments: safeParseToolArguments(toolCall.argumentsText),
+                        }))
+                    : undefined,
+              },
+              finishReason,
+            },
+          ],
+          usage: {
+            cache_creation_input_tokens: usage?.cache_creation_input_tokens ?? 0,
+            cache_read_input_tokens: usage?.cache_read_input_tokens ?? 0,
+            input_tokens: usage?.input_tokens ?? 0,
+            output_tokens: usage?.output_tokens ?? 0,
+          },
+        };
+      },
+      {
+        signal,
+        hasEmitted: () => emitted,
+        onRetry: (attempt, err) =>
+          log.warn('LLM stream idle timeout, retrying', {
+            model: payload.model,
+            attempt,
+            error: err.message,
+          }),
+      }
+    );
   }
 
   async chat(request: IChatRequest, signal?: AbortSignal): Promise<IChatResponse> {

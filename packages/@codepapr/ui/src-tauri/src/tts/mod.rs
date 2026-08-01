@@ -911,6 +911,7 @@ pub async fn tts_synthesize_batch_ws(
     top_k: Option<u32>,
     top_p: Option<f64>,
     temperature: Option<f64>,
+    seq: u64,
 ) -> Result<(), String> {
     {
         let lock = tts_server_lock();
@@ -945,6 +946,7 @@ pub async fn tts_synthesize_batch_ws(
             tk,
             tp,
             temp,
+            seq,
         );
         let _ = tx.send(result);
     });
@@ -974,6 +976,7 @@ pub async fn tts_synthesize_batch_ws_nonblocking(
     top_k: Option<u32>,
     top_p: Option<f64>,
     temperature: Option<f64>,
+    seq: u64,
 ) -> Result<(), String> {
     {
         let lock = tts_server_lock();
@@ -1005,6 +1008,7 @@ pub async fn tts_synthesize_batch_ws_nonblocking(
         tk,
         tp,
         temp,
+        seq,
     );
     Ok(())
 }
@@ -1412,6 +1416,7 @@ fn server_log_excerpt() -> String {
 #[tauri::command]
 pub fn tts_stop_playback() -> Result<(), String> {
     SYNTHESIS_CANCELLED.store(true, Ordering::Relaxed);
+    ws::clear_reorder_buffer();
     let lock = tts_player_lock();
     let mut guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
     guard.stop();

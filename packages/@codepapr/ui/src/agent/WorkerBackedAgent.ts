@@ -164,7 +164,13 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
 
   registerMcpTools(registry, config.settings.mcp, config.runtime.mcpToolDefinitions ?? [], config.runtime.mcpToolMappings);
 
-  const definitions = [...registry.getAll()];
+  // Send only the LLM-visible tools to the worker. getAll() would also include
+  // hideFromLlm/softHideFromLlm tools (e.g. read_image when multimodal is off,
+  // graph, deprecated aliases); the worker re-registers everything it receives
+  // as normal tools, so any hidden tool sent over would leak back into the main
+  // agent's getLlmTools() prefix. Subagents still reach graph via the worker's
+  // re-registration + getAll()/whitelist selection.
+  const definitions = [...registry.getLlmTools()];
 
   return {
     toolDefinitions: definitions,

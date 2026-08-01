@@ -139,6 +139,9 @@ const MAX_INSIGHT_SYMBOLS = Number.MAX_SAFE_INTEGER;
 const MAX_PROJECT_GRAPH_SOURCE_FILES = 500;
 const MAX_GIT_CHANGED_FILES = 12;
 const MAX_GIT_DIFF_PATHS = 12;
+// 轮末自动刷新 ProjectGraph 的安定延迟：须大于 workspace 变更版本号防抖（150ms），
+// 确保定时器触发时读到的是本轮全部写入落定后的版本号。
+const PROJECT_GRAPH_AUTO_REFRESH_DELAY_MS = 500;
 
 function createEmptyGitDiffLoadState(): GitDiffLoadState {
   return {
@@ -174,16 +177,18 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   const { workspacePath, entries, lang, selectedPath, onSelectPath, showGitPanel = false, canStartLoading = true, onProgressChange } = props;
   const t = getTranslation(lang);
   const settings = useAgentStore((s) => s.settings);
-  const resolveLimit = (value: number | undefined, fallback: number): number => {
-    if (value === undefined || value === null || !Number.isFinite(value) || value <= 0) return fallback;
+  const agentIsLoading = useAgentStore((s) => s.isLoading);
+  const resolveLimit = (value: number | undefined, fallback: number, zeroMeansUnlimited = false): number => {
+    if (value === undefined || value === null || !Number.isFinite(value)) return fallback;
+    if (value <= 0) return zeroMeansUnlimited ? Number.MAX_SAFE_INTEGER : fallback;
     return value;
   };
   const insightMaxDepth = resolveLimit(settings?.projectGraphMaxDepth, INSIGHT_LIST_MAX_DEPTH);
   const insightMaxFileBytes = resolveLimit(settings?.projectGraphMaxFileBytes, MAX_INSIGHT_FILE_BYTES);
   const insightMaxSymbols = resolveLimit(settings?.projectGraphMaxSymbolsPerFile, MAX_INSIGHT_SYMBOLS);
   const insightMaxEdges = resolveLimit(settings?.projectGraphMaxEdges, Number.MAX_SAFE_INTEGER);
-  const insightMaxSourceFiles = resolveLimit(settings?.projectGraphMaxFiles, MAX_PROJECT_GRAPH_SOURCE_FILES);
-  const insightMaxTreeEntries = resolveLimit(settings?.projectGraphMaxTreeEntries, 320);
+  const insightMaxSourceFiles = resolveLimit(settings?.projectGraphMaxFiles, MAX_PROJECT_GRAPH_SOURCE_FILES, true);
+  const insightMaxTreeEntries = resolveLimit(settings?.projectGraphMaxTreeEntries, 320, true);
   const [projectGraph, setProjectGraph] = useState<WorkspaceProjectGraphResult | null>(null);
   const [gitStatus, setGitStatus] = useState<GitStatusSummary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -199,6 +204,30 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
     setDebugLog((prev) => [...prev, `${new Date().toLocaleTimeString()} ${msg}`]);
   };
   const [refreshVersion, setRefreshVersion] = useState(0);
+  // 自动刷新 ProjectGraph：记录上一轮 agent 加载态，及本轮起始的 workspace 变更版本号。
+  const prevAgentIsLoadingRef = useRef(agentIsLoading);
+  const graphMutationVersionAtTurnStartRef = useRef(useAgentStore.getState().workspaceMutationVersion);
+  // 本轮对话中 LLM 改过文件 → 轮末自动刷新。仅依赖 agentIsLoading；版本号经
+  // getState() 读取（不进依赖），避免轮末定时器被晚到的版本 bump 清掉。
+  useEffect(() => {
+    const wasLoading = prevAgentIsLoadingRef.current;
+    prevAgentIsLoadingRef.current = agentIsLoading;
+    if (agentIsLoading && !wasLoading) {
+      // 轮首：记录起始版本号，用于判断本轮是否有文件变更。
+      graphMutationVersionAtTurnStartRef.current = useAgentStore.getState().workspaceMutationVersion;
+      return;
+    }
+    if (!agentIsLoading && wasLoading) {
+      // 轮末：等变更防抖落定后，若版本号变化则刷新。
+      const timer = setTimeout(() => {
+        const latest = useAgentStore.getState().workspaceMutationVersion;
+        if (latest !== graphMutationVersionAtTurnStartRef.current) {
+          setRefreshVersion((v) => v + 1);
+        }
+      }, PROJECT_GRAPH_AUTO_REFRESH_DELAY_MS);
+      return () => clearTimeout(timer);
+    }
+  }, [agentIsLoading]);
   const [projectGraphProgress, setProjectGraphProgress] = useState<ProjectGraphProgressState | null>(null);
   const [gitMode, setGitMode] = useState<GitDiffMode>('unstaged');
   const [gitModeDiffs, setGitModeDiffs] = useState<Record<GitDiffMode, GitDiffLoadState>>({
@@ -1376,9 +1405,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
             <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-[#2a2d3a] bg-[#10131b] p-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    {t.workspaceProjectGraph}
-                  </div>
                   {projectGraph?.truncated && (
                     <span className="text-[10px] text-amber-300">{t.workspaceProjectGraphTruncated}</span>
                   )}

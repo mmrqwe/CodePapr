@@ -333,6 +333,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _checkpointError: null,
       _checkpointSeq: 0,
       _pendingMemoryConsolidation: false,
+      _latestContextSnapshot: null,
 
       loadSettings: async () => {
         let settings = get().settings;
@@ -796,6 +797,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agent: null,
           _agentModel: null,
           _agentPromptKey: null,
+          _latestContextSnapshot: null,
         }));
         saveCurrentProjectState(get());
       },
@@ -835,6 +837,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             _agent: isActive ? null : s._agent,
             _agentModel: isActive ? null : s._agentModel,
             _agentPromptKey: isActive ? null : s._agentPromptKey,
+            _latestContextSnapshot: isActive ? null : s._latestContextSnapshot,
           };
         });
         saveCurrentProjectState(get(), { purgeDeletedContent: true });
@@ -866,6 +869,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agentPromptKey: null,
           _checkpointSeq: 0,
           _checkpointError: null,
+          _latestContextSnapshot: null,
         }));
         saveCurrentProjectState(get(), { purgeDeletedContent: true });
         if (sessionId) {
@@ -934,6 +938,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agent: null,
           _agentModel: null,
           _agentPromptKey: null,
+          _latestContextSnapshot: null,
         });
 
         get()._editHistory.clear();
@@ -1145,6 +1150,57 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           await get().ensureDefaultWorkspace();
         }
 
+        // Idle safety net: guarantees isLoading/isStreaming can never stay stuck
+        // ON if the agent promise somehow never settles. Threshold sits above the
+        // worker-level idle backstop; the timer resets on every stream event, so
+        // an actively streaming/working turn never trips it. Under normal operation
+        // the stream/worker idle timeouts settle the promise first and the finally
+        // below clears this timer before it ever fires.
+        const STORE_IDLE_TIMEOUT_MS = 330_000;
+        let storeIdleTimer: ReturnType<typeof setTimeout> | undefined;
+        const clearStoreIdle = () => {
+          if (storeIdleTimer !== undefined) {
+            clearTimeout(storeIdleTimer);
+            storeIdleTimer = undefined;
+          }
+        };
+        const armStoreIdle = () => {
+          clearStoreIdle();
+          storeIdleTimer = setTimeout(() => {
+            storeIdleTimer = undefined;
+            if (!get().isLoading) return;
+            console.warn(
+              '[sendMessage] idle watchdog: no activity for',
+              STORE_IDLE_TIMEOUT_MS,
+              'ms; forcing recovery'
+            );
+            try {
+              get()._agent?.cancel();
+            } catch {
+              // ignore — we still force-clear UI state below
+            }
+            set((s) => {
+              const { activeSessionId } = s;
+              if (!activeSessionId) return { isLoading: false };
+              const currentMessages = s.sessionMessages[activeSessionId] ?? s.messages;
+              const nextMessages = currentMessages.map((message) =>
+                message.isStreaming
+                  ? { ...message, isStreaming: false, statusText: undefined }
+                  : message
+              );
+              return {
+                isLoading: false,
+                messages: nextMessages,
+                sessionMessages: {
+                  ...s.sessionMessages,
+                  [activeSessionId]: nextMessages,
+                },
+              };
+            });
+            saveCurrentProjectState(get());
+          }, STORE_IDLE_TIMEOUT_MS);
+        };
+
         try {
           const { workspacePath, sessionMessages } = get();
 
@@ -1178,6 +1234,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             };
           });
           saveCurrentProjectState(get());
+          armStoreIdle();
 
           const diagnosticsForPrompt = projectDiagnosticsReport ?? get().projectDiagnosticsReport;
           const rulesSection = get()._projectRulesSection;
@@ -1514,6 +1571,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
           const runAgentPass = async (passInput: string, passImages?: import('@codepapr/types').IImageContent[]) => {
             const response = await agent!.chat(passInput, (event) => {
+              armStoreIdle();
               if (event.type === 'assistant-round-start') {
                 if (!assistantMessageId) return;
 
@@ -1551,6 +1609,15 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
               }
 
               if (!assistantMessageId) return;
+
+              if (event.type === 'request-context') {
+                set({
+                  _latestContextSnapshot: {
+                    sessionId: activeSessionId!,
+                    snapshot: event.snapshot,
+                  },
+                });
+              }
 
               updateAssistantMessage(set, activeSessionId!, assistantMessageId, (message) => {
                 if (event.type === 'request-context') {
@@ -2167,6 +2234,8 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             : '';
           appendErrorMessage(set, crashPrefix + formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'));
           saveCurrentProjectState(get());
+        } finally {
+          clearStoreIdle();
         }
       },
     }));

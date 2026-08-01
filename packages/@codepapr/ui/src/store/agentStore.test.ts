@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { IChatStreamEvent, IMessage } from '@codepapr/types';
+import type { IChatStreamEvent, IContextSnapshot, IMessage } from '@codepapr/types';
 import type { ProjectStateSnapshot, ProjectSessionMeta, ProjectMessage } from '../utils/projectStorage';
 import type { Settings } from './agentStore';
 import { createMockAgent } from './__test-utils__/createMockAgent';
@@ -1093,8 +1093,20 @@ describe('useAgentStore.sendMessage', () => {
 
   it('stores request-context snapshots on assistant messages when debug mode is enabled', async () => {
     const requestContext = '{\n  "round": 1,\n  "model": "deepseek-v4-pro"\n}';
+    const contextSnapshot: IContextSnapshot = {
+      round: 1,
+      model: 'deepseek-v4-pro',
+      messages: [
+        { role: 'system', content: 'system prompt', stage: 'stable-prefix', estimatedTokens: 3 },
+      ],
+      toolNames: [],
+      toolsTokenEstimate: 0,
+      totalTokens: 3,
+      tokensByStage: { 'stable-prefix': 3, 'session-state': 0, conversation: 0 },
+      capturedAt: Date.now(),
+    };
     const chat = vi.fn(async (_input: string, onEvent?: (event: IChatStreamEvent) => void) => {
-      onEvent?.({ type: 'request-context', round: 1, content: requestContext });
+      onEvent?.({ type: 'request-context', round: 1, content: requestContext, snapshot: contextSnapshot });
       onEvent?.({ type: 'content-delta', delta: '开始分析' });
 
       return createAgentResponse('开始分析');
@@ -1117,6 +1129,10 @@ describe('useAgentStore.sendMessage', () => {
     );
 
     expect(visibleMessages[1]?.promptContent).toBe(requestContext);
+
+    const latest = useAgentStore.getState()._latestContextSnapshot;
+    expect(latest?.sessionId).toBe('session-1');
+    expect(latest?.snapshot).toBe(contextSnapshot);
   });
 
   it('does not append a synthetic summary for pure agent q-and-a replies', async () => {

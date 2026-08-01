@@ -126,18 +126,25 @@ function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss, sh
 export interface CacheStatsDashboardProps {
   lang?: Lang;
   collapsible?: boolean;
+  onOpenContextInspector?: () => void;
 }
 
-export function CacheStatsDashboard({ lang, collapsible = true }: CacheStatsDashboardProps) {
+export function CacheStatsDashboard({ lang, collapsible = true, onOpenContextInspector }: CacheStatsDashboardProps) {
   const settings = useAgentStore((state) => state.settings);
   const sessions = useAgentStore((state) => state.sessions);
   const activeSessionId = useAgentStore((state) => state.activeSessionId);
   const conversationStats = useAgentStore((state) => state.conversationStats);
   const sessionConversationStats = useAgentStore((state) => state.sessionConversationStats);
+  const latestContextSnapshot = useAgentStore((state) => state._latestContextSnapshot);
   const [collapsed, setCollapsed] = useState(collapsible);
   const [viewMode, setViewMode] = useState<'conversation' | 'project'>('conversation');
   const t = getTranslation(lang ?? settings.lang);
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
+
+  const contextSnapshot =
+    latestContextSnapshot && latestContextSnapshot.sessionId === activeSessionId
+      ? latestContextSnapshot.snapshot
+      : null;
 
   const normalizedProvider = settings.provider?.trim().toLowerCase() ?? '';
   const normalizedModel = settings.model?.trim().toLowerCase() ?? '';
@@ -180,6 +187,25 @@ export function CacheStatsDashboard({ lang, collapsible = true }: CacheStatsDash
 
       {showContent && (
         <div className={`min-h-0 flex-1 space-y-4 overflow-y-scroll scrollbar-thin ${collapsible ? 'border-t border-[#2a2d3a] px-4 py-4' : 'px-4 py-4'}`}>
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-[#2a2d3a] bg-[#1a1d27] px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-[11px] text-slate-500">{t.currentContextLength}</p>
+              <p className="font-mono text-sm font-semibold text-indigo-300">
+                {contextSnapshot
+                  ? `~${contextSnapshot.totalTokens.toLocaleString()} ${t.tokensUnit}`
+                  : '—'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenContextInspector}
+              disabled={!contextSnapshot || !onOpenContextInspector}
+              className="flex-shrink-0 rounded-lg border border-[#2a2d3a] px-2.5 py-1.5 text-xs font-medium text-slate-300 transition-colors enabled:hover:border-indigo-400 enabled:hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {t.viewContext}
+            </button>
+          </div>
+
           <div className="flex rounded-lg border border-[#2a2d3a] bg-[#1a1d27] p-0.5">
             <button
               type="button"

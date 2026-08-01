@@ -155,6 +155,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
   const speedRef = useRef<number>(1.0);
   const sentencesPerChunkRef = useRef<number>(3);
   const pcmFallbackWarnedRef = useRef(false);
+  const batchSeqRef = useRef(0);
   const startSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The startup status-poll interval. Kept on a ref (like the safety timer)
   // so it can be cleared on unmount — otherwise a start begun mid-lifecycle
@@ -383,6 +384,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
           sentences: batch,
           sampleSteps: maxSteps,
           speed: speedRef.current,
+          seq: batchSeqRef.current++,
         };
         if (fineTunedModelRef.current) {
           baseArgs.modelName = fineTunedModelRef.current;
@@ -579,6 +581,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
     stoppedMessageIdRef.current = feedStateRef.current.lastMessageId;
     queueRef.current = [];
     feedStateRef.current = createFeedState();
+    batchSeqRef.current = 0;
     safeInvoke('tts_stop_playback').catch(() => {});
     setIsPlaying(false);
   }, []);

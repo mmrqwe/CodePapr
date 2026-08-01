@@ -241,9 +241,36 @@ export interface ISubagentToolInvocation {
   output?: string;
 }
 
+/** 上下文分区阶段：稳定前缀（系统提示词/工具/few-shot）、会话状态（引导注入）、对话历史 */
+export type ContextStage = 'stable-prefix' | 'session-state' | 'conversation';
+
+export interface IContextMessageView {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  stage: ContextStage;
+  estimatedTokens: number;
+  /** tool 结果消息：对应工具名 */
+  toolName?: string;
+  /** assistant 消息：本轮发起的工具调用概要（名称列表） */
+  toolCallNames?: string[];
+}
+
+export interface IContextSnapshot {
+  round: number;
+  model: string;
+  messages: IContextMessageView[];
+  /** 工具定义名称列表（稳定前缀的一部分，schema 体积大故不内联） */
+  toolNames: string[];
+  /** 工具定义（schema）的估算 token，独立于消息 */
+  toolsTokenEstimate: number;
+  totalTokens: number;
+  tokensByStage: Record<ContextStage, number>;
+  capturedAt: number;
+}
+
 export type IChatStreamEvent =
   | { type: 'assistant-round-start'; round: number }
-  | { type: 'request-context'; round: number; content: string }
+  | { type: 'request-context'; round: number; content: string; snapshot: IContextSnapshot }
   | {
       type: 'assistant-round-complete';
       round: number;

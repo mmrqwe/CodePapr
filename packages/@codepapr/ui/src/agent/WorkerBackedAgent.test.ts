@@ -34,7 +34,10 @@ class MockWorker {
   }
 }
 
-function createAgent(initialMessages: IMessage[] = []): WorkerBackedAgent {
+function createAgent(
+  initialMessages: IMessage[] = [],
+  overrides?: { multimodalEnabled?: boolean }
+): WorkerBackedAgent {
   return new WorkerBackedAgent({
     sessionId: 'session-1',
     workspacePath: '/tmp/codepapr-worker-agent-test',
@@ -81,7 +84,7 @@ function createAgent(initialMessages: IMessage[] = []): WorkerBackedAgent {
       mcp: normalizeMcpSettings(),
       graphToolTimeoutMs: 600_000,
       toolIpcTimeoutMs: 120_000,
-      multimodalEnabled: false,
+      multimodalEnabled: overrides?.multimodalEnabled ?? false,
       multimodalModelTier: 'all',
       toolOutputInterceptChars: 30_000,
       toolOutputOffloadChars: 50_000,
@@ -277,5 +280,46 @@ describe('WorkerBackedAgent', () => {
       'u2',
       'a2',
     ]);
+  });
+
+  it('excludes read_image and graph from worker tool definitions when multimodal is off', async () => {
+    const agent = createAgent([], { multimodalEnabled: false });
+    const chatPromise = agent.chat('hello');
+    const worker = MockWorker.instances[0];
+    const chatMessage = worker?.messages[0];
+    if (chatMessage?.type !== 'chat') throw new Error('expected chat message');
+
+    const toolNames = chatMessage.payload.toolDefinitions.map((t) => t.name);
+    expect(toolNames).not.toContain('read_image');
+    expect(toolNames).not.toContain('graph');
+
+    worker?.emit({
+      type: 'result',
+      requestId: chatMessage.payload.requestId,
+      response: { role: 'assistant', content: 'ok' },
+      deltaMessages: [],
+      logLength: 0,
+    });
+    await chatPromise;
+  });
+
+  it('includes read_image in worker tool definitions when multimodal is on', async () => {
+    const agent = createAgent([], { multimodalEnabled: true });
+    const chatPromise = agent.chat('hello');
+    const worker = MockWorker.instances[0];
+    const chatMessage = worker?.messages[0];
+    if (chatMessage?.type !== 'chat') throw new Error('expected chat message');
+
+    const toolNames = chatMessage.payload.toolDefinitions.map((t) => t.name);
+    expect(toolNames).toContain('read_image');
+
+    worker?.emit({
+      type: 'result',
+      requestId: chatMessage.payload.requestId,
+      response: { role: 'assistant', content: 'ok' },
+      deltaMessages: [],
+      logLength: 0,
+    });
+    await chatPromise;
   });
 });

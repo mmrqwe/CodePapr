@@ -128,15 +128,36 @@ export function sanitizeToolCallArguments(
   return clean;
 }
 
+export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
+
+export class StreamIdleTimeoutError extends Error {
+  readonly retriable = true;
+  readonly idleTimeoutMs: number;
+
+  constructor(idleTimeoutMs: number) {
+    super(
+      `Stream idle timeout: no data received for ${Math.round(idleTimeoutMs / 1000)}s`
+    );
+    this.name = 'StreamIdleTimeoutError';
+    this.idleTimeoutMs = idleTimeoutMs;
+  }
+}
+
+export interface ReadSseStreamOptions {
+  idleTimeoutMs?: number;
+}
+
 export async function readSseStream(
   response: Response,
   onData: (payload: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options?: ReadSseStreamOptions
 ): Promise<void> {
   if (!response.body) {
     throw new Error('Streaming response body is not available');
   }
 
+  const idleTimeoutMs = options?.idleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -158,32 +179,88 @@ export async function readSseStream(
     }
   };
 
+  const readChunk = () => {
+    if (idleTimeoutMs <= 0) {
+      return reader.read();
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new StreamIdleTimeoutError(idleTimeoutMs));
+      }, idleTimeoutMs);
+    });
+    return Promise.race([reader.read(), timeout]).finally(() => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+    });
+  };
+
   let isDone = false;
 
-  while (!isDone) {
-    if (signal?.aborted) {
+  try {
+    while (!isDone) {
+      if (signal?.aborted) {
+        void reader.cancel();
+        throw new DOMException('Stream was cancelled', 'AbortError');
+      }
+
+      const { done: readDone, value } = await readChunk();
+      buffer += decoder.decode(value, { stream: !readDone });
+
+      const events = buffer.split(/\r?\n\r?\n/);
+      buffer = events.pop() ?? '';
+
+      for (const event of events) {
+        consumeEvent(event);
+      }
+
+      if (readDone) {
+        isDone = true;
+      }
+    }
+
+    const trailing = buffer.trim();
+    if (trailing) {
+      consumeEvent(trailing);
+    }
+  } catch (err) {
+    if (err instanceof StreamIdleTimeoutError) {
       void reader.cancel();
-      throw new DOMException('Stream was cancelled', 'AbortError');
     }
-
-    const { done: readDone, value } = await reader.read();
-    buffer += decoder.decode(value, { stream: !readDone });
-
-    const events = buffer.split(/\r?\n\r?\n/);
-    buffer = events.pop() ?? '';
-
-    for (const event of events) {
-      consumeEvent(event);
-    }
-
-    if (readDone) {
-      isDone = true;
-    }
+    throw err;
   }
+}
 
-  const trailing = buffer.trim();
-  if (trailing) {
-    consumeEvent(trailing);
+export interface StreamIdleRetryOptions {
+  maxRetries?: number;
+  signal?: AbortSignal;
+  hasEmitted: () => boolean;
+  onRetry?: (attempt: number, error: StreamIdleTimeoutError) => void;
+}
+
+export async function withStreamIdleRetry<T>(
+  runAttempt: () => Promise<T>,
+  options: StreamIdleRetryOptions
+): Promise<T> {
+  const maxRetries = options.maxRetries ?? 1;
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await runAttempt();
+    } catch (err) {
+      if (
+        err instanceof StreamIdleTimeoutError &&
+        !options.hasEmitted() &&
+        !options.signal?.aborted &&
+        attempt < maxRetries
+      ) {
+        attempt += 1;
+        options.onRetry?.(attempt, err);
+        continue;
+      }
+      throw err;
+    }
   }
 }
 

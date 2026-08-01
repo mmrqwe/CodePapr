@@ -64,4 +64,36 @@ describe('SettingsModal', () => {
     expect(generalTab?.textContent).toContain('通用');
     expect(llmTab?.textContent).toContain('LLM');
   });
+
+  it('exposes ProjectGraph limit settings in the advanced tab', async () => {
+    await act(async () => {
+      root.render(<SettingsModal />);
+    });
+
+    const advancedTab = container.querySelector(
+      'button[title="配置上下文压缩、子任务规划的 token 上限和模型选择。"]'
+    );
+    expect(advancedTab).not.toBeNull();
+
+    await act(async () => {
+      advancedTab!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const html = container.innerHTML;
+    expect(html).toContain('源文件上限');
+    expect(html).toContain('文件树条目上限');
+    expect(html).toContain('0 表示不限制');
+
+    const inputs = Array.from(container.querySelectorAll('input[type="number"]'));
+    const filesInput = inputs.find(
+      (input) => input.getAttribute('title') === '参与 ProjectGraph 构建的最大文件数，0 表示不限制。'
+    );
+    const treeInput = inputs.find(
+      (input) => input.getAttribute('title') === '项目文件树的最大条目数，0 表示不限制。'
+    );
+    expect(filesInput).toBeDefined();
+    expect(treeInput).toBeDefined();
+    expect(filesInput!.getAttribute('min')).toBe('0');
+    expect(treeInput!.getAttribute('min')).toBe('0');
+  });
 });

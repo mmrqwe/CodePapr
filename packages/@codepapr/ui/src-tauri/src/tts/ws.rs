@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use futures_util::{SinkExt, StreamExt};
@@ -32,6 +33,55 @@ pub(crate) fn ws_base_url() -> String {
     format!("ws://127.0.0.1:{GPT_SOVITS_API_PORT}{WS_PATH}")
 }
 
+struct ReorderBuffer {
+    expected_seq: u64,
+    generation: u64,
+    pending: HashMap<u64, Vec<Vec<u8>>>,
+}
+
+static REORDER_BUFFER: std::sync::OnceLock<Mutex<ReorderBuffer>> = std::sync::OnceLock::new();
+
+fn reorder_buffer() -> &'static Mutex<ReorderBuffer> {
+    REORDER_BUFFER.get_or_init(|| {
+        Mutex::new(ReorderBuffer {
+            expected_seq: 0,
+            generation: 0,
+            pending: HashMap::new(),
+        })
+    })
+}
+
+pub(crate) fn clear_reorder_buffer() {
+    let mut buf = reorder_buffer().lock().unwrap();
+    buf.pending.clear();
+    buf.expected_seq = 0;
+    buf.generation += 1;
+}
+
+fn insert_and_drain(seq: u64, wav_chunks: Vec<Vec<u8>>, generation: u64) {
+    let mut buf = reorder_buffer().lock().unwrap();
+    if generation != buf.generation {
+        return;
+    }
+    buf.pending.insert(seq, wav_chunks);
+    let mut to_enqueue: Vec<Vec<u8>> = Vec::new();
+    let mut next = buf.expected_seq;
+    while let Some(chunks) = buf.pending.remove(&next) {
+        to_enqueue.extend(chunks);
+        next += 1;
+    }
+    buf.expected_seq = next;
+    if to_enqueue.is_empty() {
+        return;
+    }
+    drop(buf);
+    let lock = tts_player_lock();
+    let mut player = lock.lock().unwrap();
+    for wav in &to_enqueue {
+        let _ = player.enqueue_wav(wav);
+    }
+}
+
 struct WsRequest {
     sentences: Vec<String>,
     ref_audio_path: Option<String>,
@@ -44,6 +94,7 @@ struct WsRequest {
     top_p: f32,
     temperature: f32,
     model_name: Option<String>,
+    seq: u64,
     done_tx: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
 }
 
@@ -119,9 +170,14 @@ async fn run_pool_loop(
     rx: &mut mpsc::UnboundedReceiver<WsRequest>,
 ) {
     while let Some(req) = rx.recv().await {
+        let gen = reorder_buffer().lock().unwrap().generation;
         let result = process_one_request(&mut ws, &req).await;
+        match &result {
+            Ok(wavs) => insert_and_drain(req.seq, wavs.clone(), gen),
+            Err(_) => insert_and_drain(req.seq, vec![], gen),
+        }
         if let Some(done_tx) = req.done_tx {
-            let _ = done_tx.send(result);
+            let _ = done_tx.send(result.map(|_| ()));
         }
     }
 }
@@ -131,7 +187,7 @@ async fn process_one_request(
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
     req: &WsRequest,
-) -> Result<(), String> {
+) -> Result<Vec<Vec<u8>>, String> {
     let mut ref_obj = serde_json::Map::new();
     if let Some(ref path) = req.ref_audio_path {
         if !path.is_empty() {
@@ -221,6 +277,7 @@ async fn process_one_request(
 
     let mut received_count: usize = 0;
     let mut seen_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    let mut collected_wavs: Vec<Vec<u8>> = Vec::new();
     let ws_result = loop {
         match ws.next().await {
             Some(Ok(Message::Binary(data))) => {
@@ -233,12 +290,8 @@ async fn process_one_request(
                     if !seen_indices.insert(idx) {
                         continue;
                     }
-                    // Skip empty frames (header-only = failed synthesis).
-                    // Counts towards received_count so we don't report
-                    // "Partial synthesis" for sentences that legitimately
-                    // failed on the Python side.
                     if data.len() > 4 {
-                        let _ = enqueue_wav(&data[4..]);
+                        collected_wavs.push(data[4..].to_vec());
                     }
                     received_count += 1;
                 }
@@ -304,7 +357,7 @@ async fn process_one_request(
         ));
     }
 
-    Ok(())
+    Ok(collected_wavs)
 }
 
 fn invalidate_pool() {
@@ -313,16 +366,6 @@ fn invalidate_pool() {
             guard.clear();
         }
     }
-}
-
-fn enqueue_wav(wav_bytes: &[u8]) -> Result<(), String> {
-    let lock = tts_player_lock();
-    let mut guard = lock
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
-    guard
-        .enqueue_wav(wav_bytes)
-        .map_err(|e| format!("Enqueue error: {e}"))
 }
 
 fn send_to_pool(
@@ -337,6 +380,7 @@ fn send_to_pool(
     top_k: u32,
     top_p: f32,
     temperature: f32,
+    seq: u64,
     done_tx: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
 ) -> Result<(), String> {
     get_or_init_pool()?;
@@ -359,14 +403,10 @@ fn send_to_pool(
         top_k,
         top_p,
         temperature,
+        seq,
         done_tx,
     };
     tx.send(req).map_err(|_| {
-        // The pool connection's receiver was dropped (initial connect failure
-        // or loop exit) yet its sender is still parked in WS_POOL. Invalidate
-        // the pool so the next call rebuilds a fresh connection instead of
-        // permanently feeding a dead channel (which would fail every
-        // ws-batch synthesis until the app restarts).
         invalidate_pool();
         "WebSocket pool channel closed".to_string()
     })
@@ -390,6 +430,7 @@ pub(crate) fn synthesize_batch_ws(
     top_k: u32,
     top_p: f32,
     temperature: f32,
+    seq: u64,
 ) -> Result<(), String> {
     fn do_send(
         sentences: &Vec<String>,
@@ -403,6 +444,7 @@ pub(crate) fn synthesize_batch_ws(
         top_k: u32,
         top_p: f32,
         temperature: f32,
+        seq: u64,
     ) -> Result<tokio::sync::oneshot::Receiver<Result<(), String>>, String> {
         let (done_tx, done_rx) = tokio::sync::oneshot::channel();
         send_to_pool(
@@ -417,6 +459,7 @@ pub(crate) fn synthesize_batch_ws(
             top_k,
             top_p,
             temperature,
+            seq,
             Some(done_tx),
         )?;
         Ok(done_rx)
@@ -425,7 +468,7 @@ pub(crate) fn synthesize_batch_ws(
     let rx = do_send(
         &sentences, &model_name, &ref_audio_path,
         &prompt_text, &prompt_language, &text_language, sample_steps, speed,
-        top_k, top_p, temperature,
+        top_k, top_p, temperature, seq,
     )?;
     match rx.blocking_recv() {
         Ok(result) => {
@@ -436,7 +479,7 @@ pub(crate) fn synthesize_batch_ws(
                     let rx2 = do_send(
                         &sentences, &model_name, &ref_audio_path,
                         &prompt_text, &prompt_language, &text_language, sample_steps, speed,
-                        top_k, top_p, temperature,
+                        top_k, top_p, temperature, seq,
                     )?;
                     return match rx2.blocking_recv() {
                         Ok(r) => r,
@@ -469,9 +512,11 @@ pub(crate) fn synthesize_batch_ws_nonblocking(
     top_k: u32,
     top_p: f32,
     temperature: f32,
+    seq: u64,
 ) {
+    let gen = reorder_buffer().lock().unwrap().generation;
     std::thread::spawn(move || {
-        let _ = ws_runtime().block_on(synthesize_batch_ws_async(
+        let result = ws_runtime().block_on(synthesize_batch_ws_async(
             sentences,
             model_name,
             ref_audio_path,
@@ -484,6 +529,10 @@ pub(crate) fn synthesize_batch_ws_nonblocking(
             top_p,
             temperature,
         ));
+        match result {
+            Ok(wavs) => insert_and_drain(seq, wavs, gen),
+            Err(_) => insert_and_drain(seq, vec![], gen),
+        }
     });
 }
 
@@ -501,7 +550,7 @@ async fn synthesize_batch_ws_async(
     top_k: u32,
     top_p: f32,
     temperature: f32,
-) -> Result<(), String> {
+) -> Result<Vec<Vec<u8>>, String> {
     let url = ws_base_url();
     let (mut ws, _resp) = connect_async(&url)
         .await
@@ -539,14 +588,17 @@ async fn synthesize_batch_ws_async(
     ws.send(Message::Text(json)).await.map_err(|e| format!("WS send failed: {e}"))?;
 
     let mut received: usize = 0;
+    let mut seen_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    let mut collected_wavs: Vec<Vec<u8>> = Vec::new();
     loop {
         match ws.next().await {
             Some(Ok(Message::Binary(data))) => {
                 if data.len() < 4 { continue; }
                 let idx = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
                 if idx < sentences.len() {
+                    if !seen_indices.insert(idx) { continue; }
                     if data.len() > 4 {
-                        let _ = enqueue_wav(&data[4..]);
+                        collected_wavs.push(data[4..].to_vec());
                     }
                     received += 1;
                 }
@@ -583,5 +635,5 @@ async fn synthesize_batch_ws_async(
     if received < sentences.len() {
         return Err(format!("Partial: got {}/{} sentences", received, sentences.len()));
     }
-    Ok(())
+    Ok(collected_wavs)
 }

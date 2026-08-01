@@ -53,6 +53,9 @@ const ProjectConfigModal = lazy(() =>
 const ContextDebugModal = lazy(() =>
   import('./components/ContextDebugModal').then((m) => ({ default: m.ContextDebugModal }))
 );
+const ContextInspectorModal = lazy(() =>
+  import('./components/ContextInspectorModal').then((m) => ({ default: m.ContextInspectorModal }))
+);
 const DebugLogModal = lazy(() =>
   import('./components/DebugLogModal').then((m) => ({ default: m.DebugLogModal }))
 );
@@ -125,6 +128,8 @@ export default function App() {
     projectGraphLoading,
     projectGraphPhase,
   } = useAgentStore();
+  const latestContextSnapshot = useAgentStore((state) => state._latestContextSnapshot);
+  const activeSessionId = useAgentStore((state) => state.activeSessionId);
   const activePreviewSession = usePreviewStore((state) => state.activePreviewSession);
   const openedAppId = useAppRuntimeStore((state) => state.openedAppId);
   const clearApps = useAppRuntimeStore((state) => state.clearApps);
@@ -141,6 +146,7 @@ export default function App() {
   const [showProjectStats, setShowProjectStats] = useState(false);
   const [showProjectConfig, setShowProjectConfig] = useState(false);
   const [showContextDebug, setShowContextDebug] = useState(false);
+  const [showContextInspector, setShowContextInspector] = useState(false);
   const [showDebugLog, setShowDebugLog] = useState(false);
   const [showCodeReview, setShowCodeReview] = useState<ReviewScope | null>(null);
   const [activeMainTab, setActiveMainTab] = useState<MainTab>('chat');
@@ -685,11 +691,25 @@ export default function App() {
                 </button>
               </div>
               <div className="min-h-0 flex-1 flex flex-col">
-                <CacheStatsDashboard lang={settings.lang} collapsible={false} />
+                <CacheStatsDashboard
+                  lang={settings.lang}
+                  collapsible={false}
+                  onOpenContextInspector={() => setShowContextInspector(true)}
+                />
               </div>
             </div>
           </div>
         )}
+
+        {showContextInspector &&
+          latestContextSnapshot &&
+          latestContextSnapshot.sessionId === activeSessionId && (
+            <ContextInspectorModal
+              snapshot={latestContextSnapshot.snapshot}
+              lang={settings.lang}
+              onClose={() => setShowContextInspector(false)}
+            />
+          )}
 
         {showCodeReview && workspacePath && (
           <CodeReviewPanel

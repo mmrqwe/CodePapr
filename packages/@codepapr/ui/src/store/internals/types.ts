@@ -1,4 +1,4 @@
-import type { IImageContent, ISubagentToolInvocation, QuestionData } from '@codepapr/types';
+import type { IContextSnapshot, IImageContent, ISubagentToolInvocation, QuestionData } from '@codepapr/types';
 import type { WorkMode } from '../../utils/agentPrompts';
 import type { TaskModelRoute } from '../../utils/modelRouting';
 import type { ContextCheckpointPayload } from '../../utils/contextCompaction';
@@ -247,6 +247,7 @@ export interface AgentState {
   _checkpointError: string | null;
   _checkpointSeq: number;
   _pendingMemoryConsolidation: boolean;
+  _latestContextSnapshot: { sessionId: string; snapshot: IContextSnapshot } | null;
 }
 
 export interface AgentActions {

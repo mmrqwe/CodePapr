@@ -156,7 +156,11 @@ export function mergeShortSentences(sentences: string[]): string[] {
  *  - The last character is sentence-end punctuation.
  *
  * Returns 0 when no safe split exists yet (caller should keep buffering).
- */export function findSafeSplitPoint(text: string): number {
+ * We only split at sentence boundaries where all markers are balanced —
+ * never at an unbalanced marker position — to avoid splitting a marker
+ * pair across streaming frames (which would permanently lose content).
+ */
+export function findSafeSplitPoint(text: string): number {
   let star = 0;
   let backtick = 0;
   let cnParen = 0;
@@ -166,7 +170,6 @@ export function mergeShortSentences(sentences: string[]): string[] {
   let cnQuote2 = 0;
   let cnBracket = 0;
   let lastSafe = 0;
-  let firstUnbalancedAt = 0;
   let i = 0;
 
   const allBalanced = () =>
@@ -176,10 +179,7 @@ export function mergeShortSentences(sentences: string[]): string[] {
   while (i < text.length) {
     if (text.startsWith('```', i)) {
       const end = text.indexOf('```', i + 3);
-      if (end < 0) {
-        if (firstUnbalancedAt === 0 && i > lastSafe) firstUnbalancedAt = i;
-        return Math.max(lastSafe, firstUnbalancedAt);
-      }
+      if (end < 0) return lastSafe;
       i = end + 3;
       continue;
     }
@@ -188,81 +188,50 @@ export function mergeShortSentences(sentences: string[]): string[] {
 
     if (ch === '*' && next === '*') {
       const close = text.indexOf('**', i + 2);
-      if (close < 0) {
-        if (firstUnbalancedAt === 0 && i > lastSafe) firstUnbalancedAt = i;
-        return Math.max(lastSafe, firstUnbalancedAt);
-      }
+      if (close < 0) return lastSafe;
       i = close + 2;
       continue;
     }
 
     switch (ch) {
-      case '*': {
-        const wasBalanced = allBalanced();
+      case '*':
         star ^= 1;
-        if (wasBalanced && !allBalanced() && firstUnbalancedAt === 0 && i > lastSafe) {
-          firstUnbalancedAt = i;
-        }
         break;
-      }
-      case '`': {
-        const wasBalanced = allBalanced();
+      case '`':
         backtick ^= 1;
-        if (wasBalanced && !allBalanced() && firstUnbalancedAt === 0 && i > lastSafe) {
-          firstUnbalancedAt = i;
-        }
         break;
-      }
       case '（':
         cnParen++;
-        if (cnParen === 1 && firstUnbalancedAt === 0 && i > lastSafe) {
-          firstUnbalancedAt = i;
-        }
         break;
       case '）':
         if (cnParen > 0) cnParen--;
         break;
       case '(':
         enParen++;
-        if (enParen === 1 && firstUnbalancedAt === 0 && i > lastSafe) {
-          firstUnbalancedAt = i;
-        }
         break;
       case ')':
         if (enParen > 0) enParen--;
         break;
       case '[':
         bracket++;
-        if (bracket === 1 && firstUnbalancedAt === 0 && i > lastSafe) {
-          firstUnbalancedAt = i;
-        }
         break;
       case ']':
         if (bracket > 0) bracket--;
         break;
       case '「':
         cnQuote++;
-        if (cnQuote === 1 && firstUnbalancedAt === 0 && i > lastSafe) {
-          firstUnbalancedAt = i;
-        }
         break;
       case '」':
         if (cnQuote > 0) cnQuote--;
         break;
       case '『':
         cnQuote2++;
-        if (cnQuote2 === 1 && firstUnbalancedAt === 0 && i > lastSafe) {
-          firstUnbalancedAt = i;
-        }
         break;
       case '』':
         if (cnQuote2 > 0) cnQuote2--;
         break;
       case '【':
         cnBracket++;
-        if (cnBracket === 1 && firstUnbalancedAt === 0 && i > lastSafe) {
-          firstUnbalancedAt = i;
-        }
         break;
       case '】':
         if (cnBracket > 0) cnBracket--;
@@ -282,13 +251,12 @@ export function mergeShortSentences(sentences: string[]): string[] {
       case '\r':
         if (allBalanced()) {
           lastSafe = i + 1;
-          firstUnbalancedAt = 0;
         }
         break;
     }
     i++;
   }
-  return Math.max(lastSafe, firstUnbalancedAt);
+  return lastSafe;
 }
 
 /**

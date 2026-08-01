@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { IChatRequest, IChatResponse, ILLMProvider } from '@codepapr/types';
+import type { IChatRequest, IChatResponse, IContextSnapshot, ILLMProvider } from '@codepapr/types';
 import { Agent, DEFAULT_AGENT_MAX_TOOL_ROUNDS, ImmutablePrefix, Session, ToolRegistry, type ContextCompactionConfig } from '../src';
 
 function createResponse(
@@ -216,6 +216,111 @@ describe('Agent', () => {
       'context:2:test-model:0',
       'complete:2:第二轮总结',
     ]);
+  });
+
+  it('attaches a staged context snapshot to the request-context event', async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(
+      {
+        name: 'read_file',
+        description: 'Read a file',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string' },
+          },
+          required: ['path'],
+        },
+      },
+      async () => ({ ok: true })
+    );
+
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi
+        .fn<(_: IChatRequest) => Promise<IChatResponse>>()
+        .mockResolvedValueOnce(createResponse('完成')),
+    };
+
+    const agent = new Agent({
+      session: new Session({
+        sessionId: 'session-snapshot',
+        prefix: new ImmutablePrefix({
+          systemPrompt: '你是测试助手',
+          tools: toolRegistry.getAll(),
+          model: 'test-model',
+          parameters: { temperature: 0.7, topP: 0.9, maxTokens: 1000 },
+        }),
+        toolRegistry,
+      }),
+      provider,
+      providerName: 'openai',
+      requestBuilder: {
+        build: ({ model }) => ({
+          model,
+          tools: toolRegistry.getAll(),
+          messages: [
+            {
+              id: 'prefix-system',
+              role: 'system',
+              content: '你是测试助手',
+              timestamp: 0,
+              metadata: { isPrefixSystem: true },
+            },
+            {
+              id: 'session-bootstrap',
+              role: 'assistant',
+              content: '会话引导内容',
+              timestamp: 1,
+              metadata: { sessionBootstrap: true, isPrefixSystem: true },
+            },
+            {
+              id: 'user-1',
+              role: 'user',
+              content: '你好',
+              timestamp: 2,
+            },
+          ],
+        }),
+      },
+      cacheValidator: {
+        validate: () => ({
+          prefixCached: false,
+          prefixCreated: false,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          newInputTokens: 1,
+          outputTokens: 1,
+          cacheHitRate: 0,
+        }),
+      },
+    });
+
+    let snapshot: IContextSnapshot | undefined;
+    await agent.chat('你好', (event) => {
+      if (event.type === 'request-context') {
+        snapshot = event.snapshot;
+      }
+    });
+
+    expect(snapshot).toBeDefined();
+    expect(snapshot!.round).toBe(1);
+    expect(snapshot!.messages).toHaveLength(3);
+    expect(snapshot!.messages[0]?.stage).toBe('stable-prefix');
+    expect(snapshot!.messages[1]?.stage).toBe('session-state');
+    expect(snapshot!.messages[2]?.stage).toBe('conversation');
+    expect(snapshot!.toolsTokenEstimate).toBeGreaterThan(0);
+    expect(snapshot!.toolNames).toEqual(['read_file']);
+    expect(snapshot!.tokensByStage['stable-prefix']).toBeGreaterThan(0);
+    expect(snapshot!.tokensByStage['session-state']).toBeGreaterThan(0);
+    expect(snapshot!.tokensByStage.conversation).toBeGreaterThan(0);
+    expect(snapshot!.totalTokens).toBe(
+      snapshot!.tokensByStage['stable-prefix'] +
+        snapshot!.tokensByStage['session-state'] +
+        snapshot!.tokensByStage.conversation
+    );
   });
 
   it('allows more than five internal tool rounds by default', async () => {

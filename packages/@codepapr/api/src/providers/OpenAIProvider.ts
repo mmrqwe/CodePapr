@@ -18,6 +18,7 @@ import {
   readSseStream,
   safeParseToolArguments,
   sanitizeToolCallArguments,
+  withStreamIdleRetry,
 } from './streaming';
 import { buildOpenAIImageContent } from './imageContent';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
@@ -135,89 +136,111 @@ export class OpenAIProvider extends BaseLLMProvider {
       messageCount: payload.messages.length,
     });
 
-    const response = await this.fetchWithRetry(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.config.apiKey}`,
-      },
-      body: sortedStringify(payload),
-    }, signal);
-
-    let responseId = '';
-    let content = '';
-    let reasoningContent = '';
-    let finishReason = 'stop';
-    let usage: OpenAIResponse['usage'];
-    let systemFingerprint: string | undefined;
-    const toolCallStates: Array<{ id: string; name: string; argumentsText: string }> = [];
-
-    await readSseStream(response, (payloadLine) => {
-      if (payloadLine === '[DONE]') {
-        return;
+    let emitted = false;
+    const trackEvent = (event: IChatStreamEvent): void => {
+      if (event.type === 'content-delta' || event.type === 'reasoning-delta') {
+        emitted = true;
       }
-
-      const chunk = JSON.parse(payloadLine) as OpenAIStreamChunk;
-      responseId = chunk.id ?? responseId;
-      usage = chunk.usage ?? usage;
-      systemFingerprint = chunk.system_fingerprint ?? systemFingerprint;
-
-      for (const choice of chunk.choices ?? []) {
-        const delta = choice.delta;
-        if (!delta) {
-          finishReason = choice.finish_reason ?? finishReason;
-          continue;
-        }
-
-        if (delta.content) {
-          content += delta.content;
-          onEvent({ type: 'content-delta', delta: delta.content });
-        }
-
-        if (delta.reasoning_content) {
-          reasoningContent += delta.reasoning_content;
-          onEvent({ type: 'reasoning-delta', delta: delta.reasoning_content });
-        }
-
-        if (delta.tool_calls?.length) {
-          applyStreamingToolCallDeltas(toolCallStates, delta.tool_calls);
-        }
-
-        finishReason = choice.finish_reason ?? finishReason;
-      }
-    });
-
-    const result: IChatResponse = {
-      id: responseId,
-      choices: [
-        {
-          message: {
-            role: 'assistant',
-            content,
-            reasoningContent: reasoningContent || undefined,
-            toolCalls: finalizeStreamingToolCalls(toolCallStates),
-          },
-          finishReason,
-        },
-      ],
-      usage: {
-        cache_read_input_tokens: getOpenAICachedTokens(usage),
-        cache_creation_input_tokens: getOpenAICreationTokens(usage),
-        input_tokens: getOpenAIInputTokens(usage),
-        output_tokens: getOpenAIOutputTokens(usage),
-      },
-      system_fingerprint: systemFingerprint,
+      onEvent(event);
     };
 
-    log.info('LLM request completed', {
-      model: payload.model,
-      stream: true,
-      finishReason,
-      inputTokens: result.usage?.input_tokens ?? 0,
-      outputTokens: result.usage?.output_tokens ?? 0,
-    });
+    return withStreamIdleRetry(
+      async () => {
+        const response = await this.fetchWithRetry(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.config.apiKey}`,
+          },
+          body: sortedStringify(payload),
+        }, signal);
 
-    return result;
+        let responseId = '';
+        let content = '';
+        let reasoningContent = '';
+        let finishReason = 'stop';
+        let usage: OpenAIResponse['usage'];
+        let systemFingerprint: string | undefined;
+        const toolCallStates: Array<{ id: string; name: string; argumentsText: string }> = [];
+
+        await readSseStream(response, (payloadLine) => {
+          if (payloadLine === '[DONE]') {
+            return;
+          }
+
+          const chunk = JSON.parse(payloadLine) as OpenAIStreamChunk;
+          responseId = chunk.id ?? responseId;
+          usage = chunk.usage ?? usage;
+          systemFingerprint = chunk.system_fingerprint ?? systemFingerprint;
+
+          for (const choice of chunk.choices ?? []) {
+            const delta = choice.delta;
+            if (!delta) {
+              finishReason = choice.finish_reason ?? finishReason;
+              continue;
+            }
+
+            if (delta.content) {
+              content += delta.content;
+              trackEvent({ type: 'content-delta', delta: delta.content });
+            }
+
+            if (delta.reasoning_content) {
+              reasoningContent += delta.reasoning_content;
+              trackEvent({ type: 'reasoning-delta', delta: delta.reasoning_content });
+            }
+
+            if (delta.tool_calls?.length) {
+              applyStreamingToolCallDeltas(toolCallStates, delta.tool_calls);
+            }
+
+            finishReason = choice.finish_reason ?? finishReason;
+          }
+        }, signal);
+
+        const result: IChatResponse = {
+          id: responseId,
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content,
+                reasoningContent: reasoningContent || undefined,
+                toolCalls: finalizeStreamingToolCalls(toolCallStates),
+              },
+              finishReason,
+            },
+          ],
+          usage: {
+            cache_read_input_tokens: getOpenAICachedTokens(usage),
+            cache_creation_input_tokens: getOpenAICreationTokens(usage),
+            input_tokens: getOpenAIInputTokens(usage),
+            output_tokens: getOpenAIOutputTokens(usage),
+          },
+          system_fingerprint: systemFingerprint,
+        };
+
+        log.info('LLM request completed', {
+          model: payload.model,
+          stream: true,
+          finishReason,
+          inputTokens: result.usage?.input_tokens ?? 0,
+          outputTokens: result.usage?.output_tokens ?? 0,
+        });
+
+        return result;
+      },
+      {
+        signal,
+        hasEmitted: () => emitted,
+        onRetry: (attempt, err) =>
+          log.warn('LLM stream idle timeout, retrying', {
+            model: payload.model,
+            attempt,
+            error: err.message,
+          }),
+      }
+    );
   }
 
   async chat(request: IChatRequest, signal?: AbortSignal): Promise<IChatResponse> {

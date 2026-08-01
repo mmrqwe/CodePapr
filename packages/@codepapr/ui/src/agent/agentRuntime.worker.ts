@@ -31,7 +31,7 @@ import {
   CacheValidator,
   setGlobalFetchFn,
 } from '@codepapr/api';
-import type { IChatRequest, IChatResponse, ICacheStatistics, IChatStreamEvent, IMessage, ILLMProvider, IToolDefinition } from '@codepapr/types';
+import type { IAgentResponse, IChatRequest, IChatResponse, ICacheStatistics, IChatStreamEvent, IMessage, ILLMProvider, IToolDefinition } from '@codepapr/types';
 import type {
   AgentWorkerChatPayload,
   AgentWorkerToMainMessage,
@@ -622,6 +622,11 @@ function createRegistry(
       registry.register(graphDef, async (args, context) => {
         return await requestToolExecution(requestId, 'graph', args, toolIpcTimeoutMs, context?.toolCallId);
       });
+      // Soft-hide so the main agent's getLlmTools() excludes graph (matching the
+      // main thread's exposeGraphToLlm:false default). Subagents still select it
+      // via getAll()+whitelist (filterToolsForAgent), which includes soft-hidden
+      // tools.
+      registry.softHideFromLlm('graph');
     }
   }
 
@@ -1063,9 +1068,36 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
   });
 
   let compacted = false;
-  const response = await agent.chat(
+  // Idle backstop: if the whole agent produces no stream/tool activity for this
+  // long, declare it hung and abort. Threshold sits above the max tool timeout
+  // (DEFAULT_TOOL_TIMEOUT_MS) so legitimate long tools never trip it; the timer
+  // resets on every event, so a continuously streaming/working agent never times
+  // out. The per-LLM-stream idle timeout (readSseStream) is the primary defense;
+  // this only catches hangs that escape it.
+  const CHAT_IDLE_TIMEOUT_MS = 300_000;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let rejectIdle: ((err: Error) => void) | undefined;
+  const clearIdle = () => {
+    if (idleTimer !== undefined) {
+      clearTimeout(idleTimer);
+      idleTimer = undefined;
+    }
+  };
+  const armIdle = () => {
+    clearIdle();
+    idleTimer = setTimeout(() => {
+      idleTimer = undefined;
+      abortController.abort();
+      rejectIdle?.(
+        new Error(`Agent idle timeout: no activity for ${CHAT_IDLE_TIMEOUT_MS / 1000}s`)
+      );
+    }, CHAT_IDLE_TIMEOUT_MS);
+  };
+
+  const chatPromise = agent.chat(
     payload.userInput,
     (event) => {
+      armIdle();
       if (event.type === 'context-compacted') {
         compacted = true;
       }
@@ -1078,6 +1110,19 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     payload.images,
     abortController.signal,
   );
+
+  armIdle();
+  let response: IAgentResponse;
+  try {
+    response = await Promise.race([
+      chatPromise,
+      new Promise<never>((_, reject) => {
+        rejectIdle = reject;
+      }),
+    ]);
+  } finally {
+    clearIdle();
+  }
 
   const subagentEntries = subagentCacheStatsMap.get(payload.requestId);
   if (subagentEntries && subagentEntries.length > 0) {

@@ -355,10 +355,8 @@ describe('findSafeSplitPoint', () => {
     expect(findSafeSplitPoint('*action')).toBe(0);
   });
 
-  it('returns position before unbalanced marker (streaming-safe)', () => {
-    // When there is no prior safe split, the function returns the index of
-    // the first unbalanced marker so we can still speak the safe prefix.
-    expect(findSafeSplitPoint('hi *open')).toBe(3);
+  it('returns 0 when unbalanced marker has no prior sentence boundary', () => {
+    expect(findSafeSplitPoint('hi *open')).toBe(0);
   });
 
   it('returns position after ! inside a closed *...*', () => {
@@ -368,11 +366,9 @@ describe('findSafeSplitPoint', () => {
     expect(text.slice(0, pos)).toContain('!');
   });
 
-  it('returns the unbalanced position when inside unclosed full-width parens', () => {
-    // No earlier terminator → returns index of `（` so caller speaks "开头".
+  it('returns 0 when inside unclosed full-width parens with no prior boundary', () => {
     const text = '开头（动作';
-    const pos = findSafeSplitPoint(text);
-    expect(pos).toBe(text.indexOf('（'));
+    expect(findSafeSplitPoint(text)).toBe(0);
   });
 
   it('treats balanced full-width parens + 。 as fully safe', () => {
@@ -389,10 +385,8 @@ describe('findSafeSplitPoint', () => {
     expect(text.slice(0, pos)).toContain('!');
   });
 
-  it('returns the unbalanced position when inside unclosed half-width parens', () => {
-    const text = 'start (open';
-    const pos = findSafeSplitPoint(text);
-    expect(pos).toBe(text.indexOf('('));
+  it('returns 0 when inside unclosed half-width parens with no prior boundary', () => {
+    expect(findSafeSplitPoint('start (open')).toBe(0);
   });
 
   it('handles **bold** pair (skips internal terminators)', () => {
@@ -418,10 +412,8 @@ describe('findSafeSplitPoint', () => {
     expect(pos).toBeGreaterThan(0);
   });
 
-  it('returns first-unbalanced position when inside 「」 with no prior safe split', () => {
-    const text = '他说「未结束';
-    const pos = findSafeSplitPoint(text);
-    expect(pos).toBe(text.indexOf('「'));
+  it('returns 0 when inside 「」 with no prior safe split', () => {
+    expect(findSafeSplitPoint('他说「未结束')).toBe(0);
   });
 
   it('splits after 。 when 「」 is closed', () => {
@@ -430,9 +422,8 @@ describe('findSafeSplitPoint', () => {
     expect(pos).toBe(text.length);
   });
 
-  it('flags 『 as unbalanced (no terminator yet)', () => {
-    const pos = findSafeSplitPoint('A『B');
-    expect(pos).toBe('A'.length);
+  it('returns 0 for 『 with no prior boundary', () => {
+    expect(findSafeSplitPoint('A『B')).toBe(0);
   });
 
   it('flags 【 as unbalanced (no terminator yet)', () => {
@@ -459,9 +450,9 @@ describe('findSafeSplitPoint', () => {
     // Streaming text where action descriptor hasn't closed yet.
     const text = 'Hello there! *Johnny looks';
     const pos = findSafeSplitPoint(text);
-    // pos is at the index of `*` — everything before is safe to speak.
-    expect(pos).toBe(text.indexOf('*'));
-    expect(text.slice(0, pos)).toBe('Hello there! ');
+    // Splits at the sentence boundary (!) before the unclosed marker.
+    expect(pos).toBe(text.indexOf('!') + 1);
+    expect(text.slice(0, pos)).toBe('Hello there!');
   });
 
   it('DOES split on full-width comma (fine-grained for GPT speed)', () => {
