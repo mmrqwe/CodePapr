@@ -3832,11 +3832,11 @@ export function registerWorkspaceTools(
 
       let backupRef: string | undefined;
       if (snapshot) {
-        const snap = await invoke<import('../utils/snapshot').SnapshotInfo>('snapshot_create', {
+        const snap = await invoke<import('../utils/snapshot').SnapshotInfo | null>('snapshot_create', {
           workspacePath: workspace(),
           label: `CodePapr safety snapshot | restore | ${source ?? 'HEAD'} | ${Date.now()}`,
         });
-        backupRef = snap.shortHash;
+        backupRef = snap?.shortHash;
       }
 
       const result = await invoke<import('../utils/snapshot').GitOperationResult>('git_restore_files', {

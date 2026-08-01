@@ -1457,19 +1457,25 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
                 userMessageText: previewSource,
               });
               const cp = await snapshotCreate(get().workspacePath, label);
-              set((s) => ({
-                _messageCheckpoints: { ...s._messageCheckpoints, [userMsg!.id]: cp.sha },
-                _checkpointSeq: sequence,
-                _checkpointError: null,
-              }));
-              void saveCheckpointRecord(
-                get().workspacePath,
-                activeSessionId!,
-                userMsg!.id,
-                cp.sha,
-                label,
-                cp.fileCount,
-              ).catch(() => undefined);
+              if (cp) {
+                set((s) => ({
+                  _messageCheckpoints: { ...s._messageCheckpoints, [userMsg!.id]: cp.sha },
+                  _checkpointSeq: sequence,
+                  _checkpointError: null,
+                }));
+                void saveCheckpointRecord(
+                  get().workspacePath,
+                  activeSessionId!,
+                  userMsg!.id,
+                  cp.sha,
+                  label,
+                  cp.fileCount,
+                ).catch(() => undefined);
+              } else {
+                // Empty/new workspace (or all files ignored): nothing to snapshot.
+                // Benign skip — do not surface a "snapshot failed" banner. (The
+                // Rust side still logs "0 files to snapshot" to stderr for debug.)
+              }
             } catch (err) {
               const msg = err instanceof Error ? err.message : String(err);
               console.warn('[CodePapr] checkpoint 创建失败:', msg);

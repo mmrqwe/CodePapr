@@ -113,8 +113,8 @@ export async function snapshotEnsure(workspacePath: string): Promise<EnsureResul
   return invoke<EnsureResult>('snapshot_ensure', { workspacePath });
 }
 
-export async function snapshotCreate(workspacePath: string, label: string): Promise<SnapshotInfo> {
-  return invoke<SnapshotInfo>('snapshot_create', { workspacePath, label });
+export async function snapshotCreate(workspacePath: string, label: string): Promise<SnapshotInfo | null> {
+  return invoke<SnapshotInfo | null>('snapshot_create', { workspacePath, label });
 }
 
 export async function snapshotList(workspacePath: string, limit?: number): Promise<SnapshotInfo[]> {

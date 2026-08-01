@@ -186,6 +186,13 @@ impl SnapshotEngine {
         }
     }
 
+    /// Whether the workspace currently has any snapshotable files. Lets callers
+    /// distinguish the benign "nothing to snapshot" case (empty/new workspace, or
+    /// all files ignored) from genuine failures, without treating it as an error.
+    pub fn has_snapshotable_files(&self) -> bool {
+        !IgnoreResolver::new(&self.workspace).collect_files().is_empty()
+    }
+
     pub fn create(&self, label: &str) -> Result<SnapshotInfo, String> {
         let git_path = code_papr_git_path(&self.workspace);
         let repo = Repository::open(&git_path)

@@ -22,10 +22,16 @@ pub async fn snapshot_ensure(workspace_path: String) -> EnsureResult {
 pub async fn snapshot_create(
     workspace_path: String,
     label: String,
-) -> Result<SnapshotInfo, String> {
+) -> Result<Option<SnapshotInfo>, String> {
     let workspace = PathBuf::from(workspace_path);
     let engine = SnapshotEngine::new(&workspace);
-    engine.create(&label)
+    // Benign skip: an empty/new workspace (or one whose files are all ignored)
+    // has nothing to snapshot. Return None — not an error — so the UI doesn't
+    // show a "snapshot failed" banner for a normal empty workspace.
+    if !engine.has_snapshotable_files() {
+        return Ok(None);
+    }
+    engine.create(&label).map(Some)
 }
 
 #[tauri::command]
