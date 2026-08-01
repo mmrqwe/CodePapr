@@ -533,7 +533,10 @@ export default function App() {
                         />
                       </Suspense>
                     ) : (
-                      <ChatPanel onOpenWorkspacePath={handleSelectPath} />
+                      <ChatPanel
+                        onOpenWorkspacePath={handleSelectPath}
+                        deferMessages={projectGraphLoading && !!workspacePath}
+                      />
                     )}
                   </div>
                 </div>

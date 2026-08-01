@@ -199,7 +199,7 @@ export function CacheStatsDashboard({ lang, collapsible = true, onOpenContextIns
             <button
               type="button"
               onClick={onOpenContextInspector}
-              disabled={!contextSnapshot || !onOpenContextInspector}
+              disabled={!onOpenContextInspector || !activeSessionId}
               className="flex-shrink-0 rounded-lg border border-[#2a2d3a] px-2.5 py-1.5 text-xs font-medium text-slate-300 transition-colors enabled:hover:border-indigo-400 enabled:hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t.viewContext}

@@ -1339,9 +1339,12 @@ function ModeSelector({ mode, setMode, isLoading, lang, sessionLock }: ModeSelec
 
 interface ChatPanelProps {
   onOpenWorkspacePath?: (path: string) => void;
+  /** 为 true 时暂缓渲染对话内容（如 ProjectGraph 初始化全屏遮罩期间），
+   *  待界面稳定后再渲染并定位，避免加载期布局未定导致滚动错位。 */
+  deferMessages?: boolean;
 }
 
-export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
+export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPanelProps) {
   const {
     messages,
     isLoading,
@@ -1752,6 +1755,27 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
     };
   }, []);
 
+  // 暂缓渲染结束（如 ProjectGraph 初始化遮罩关闭）后，对话内容首次进入已稳定的
+  // 布局：此时瞬时滚到底部，避免加载期布局未定导致的滚动错位。
+  useLayoutEffect(() => {
+    if (deferMessages) return;
+    shouldStickToBottomRef.current = true;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        const container = messageListRef.current;
+        if (container) {
+          isProgrammaticScrollRef.current = true;
+          scrollContainerToBottom(container, 'auto');
+        }
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [deferMessages]);
+
   const submitMessage = useCallback(async (
     taskText: string,
     displayText: string,
@@ -2093,7 +2117,7 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
         style={{ overflowAnchor: 'none' }}
       >
         <div ref={messageListContentRef}>
-          {visibleMessages.length === 0 && (
+          {!deferMessages && visibleMessages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-slate-600 select-none">
               <div className="text-4xl mb-3">⌘</div>
               <p className="text-sm">CodePapr</p>
@@ -2110,7 +2134,7 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
               )}
             </div>
           )}
-          {subagentRuns.map((run, idx) => (
+          {!deferMessages && subagentRuns.map((run, idx) => (
             <div key={idx} className="mx-3 mb-3 rounded-xl border border-cyan-500/20 bg-[#0b0d12]/60 overflow-hidden">
               <button
                 type="button"
@@ -2159,7 +2183,7 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
               )}
             </div>
           ))}
-          {renderedMessages.map((m) => {
+          {!deferMessages && renderedMessages.map((m) => {
             const isUserMsg = m.role === 'user';
             const canShowActions = isUserMsg && !isLoading;
 
