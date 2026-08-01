@@ -577,10 +577,10 @@
   });
 
   const arc=document.getElementById('dialArc'), num=document.getElementById('dialNum');
-  const C=2*Math.PI*22, target=91;
+  const C=2*Math.PI*22, target=99.6;
   arc.style.strokeDasharray=C;
   requestAnimationFrame(()=>requestAnimationFrame(()=>{arc.style.strokeDashoffset=C*(1-target/100)}));
-  let cur=0; const tick=setInterval(()=>{cur+=2;if(cur>=target){cur=target;clearInterval(tick)}num.textContent=cur},28);
+  let cur=0; const tick=setInterval(()=>{cur+=2;if(cur>=target){cur=target;clearInterval(tick)}num.textContent=Number.isInteger(cur)?cur:cur.toFixed(1)},28);
 })();
 </script>
 </body>
