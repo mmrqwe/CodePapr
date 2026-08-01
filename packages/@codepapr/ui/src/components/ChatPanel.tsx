@@ -1409,6 +1409,10 @@ export function ChatPanel({ onOpenWorkspacePath }: ChatPanelProps) {
     }
   }, [sessionLock]);
 
+  useEffect(() => {
+    useAgentStore.setState({ _currentMode: mode });
+  }, [mode]);
+
   const [subagentRuns, setSubagentRuns] = useState<SubAgentRun[]>([]);
   useEffect(() => subscribeSubagentProgress(() => {
     setSubagentRuns(getSubagentRuns());

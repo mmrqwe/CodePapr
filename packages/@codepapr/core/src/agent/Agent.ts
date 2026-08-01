@@ -153,7 +153,13 @@ function classifyContextStage(message: IMessage): ContextStage {
   return 'conversation';
 }
 
-function buildContextSnapshot(request: IChatRequest, round: number): IContextSnapshot {
+export interface ContextSnapshotSource {
+  model: string;
+  messages: IMessage[];
+  tools?: IToolDefinition[];
+}
+
+export function buildContextSnapshot(request: ContextSnapshotSource, round: number): IContextSnapshot {
   const toolCallNameById = new Map<string, string>();
   for (const message of request.messages) {
     for (const toolCall of message.toolCalls ?? []) {

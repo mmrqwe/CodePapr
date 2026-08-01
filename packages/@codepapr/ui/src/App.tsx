@@ -694,7 +694,14 @@ export default function App() {
                 <CacheStatsDashboard
                   lang={settings.lang}
                   collapsible={false}
-                  onOpenContextInspector={() => setShowContextInspector(true)}
+                  onOpenContextInspector={async () => {
+                    const state = useAgentStore.getState();
+                    const current = state._latestContextSnapshot;
+                    if (!current || current.sessionId !== state.activeSessionId) {
+                      await state.computeContextSnapshot();
+                    }
+                    setShowContextInspector(true);
+                  }}
                 />
               </div>
             </div>

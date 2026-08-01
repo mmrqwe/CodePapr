@@ -1135,6 +1135,31 @@ describe('useAgentStore.sendMessage', () => {
     expect(latest?.snapshot).toBe(contextSnapshot);
   });
 
+  it('computeContextSnapshot rebuilds the staged context from restored messages without sending', async () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      sessionMessages: {
+        'session-1': [
+          { id: 'u1', role: 'user', content: '你好，帮我看看项目', timestamp: 1 },
+          { id: 'a1', role: 'assistant', content: '好的，我来看一下。', timestamp: 2 },
+        ],
+      },
+      _latestContextSnapshot: null,
+    }));
+
+    await useAgentStore.getState().computeContextSnapshot();
+
+    const rebuilt = useAgentStore.getState()._latestContextSnapshot;
+    expect(rebuilt?.sessionId).toBe('session-1');
+    const snapshot = rebuilt?.snapshot;
+    expect(snapshot).toBeDefined();
+    expect(snapshot!.messages.some((m) => m.stage === 'stable-prefix' && m.role === 'system')).toBe(true);
+    expect(snapshot!.messages.some((m) => m.stage === 'conversation' && m.content === '你好，帮我看看项目')).toBe(true);
+    expect(snapshot!.messages.some((m) => m.stage === 'conversation' && m.content === '好的，我来看一下。')).toBe(true);
+    expect(snapshot!.totalTokens).toBeGreaterThan(0);
+    expect(snapshot!.tokensByStage['stable-prefix']).toBeGreaterThan(0);
+  });
+
   it('does not append a synthetic summary for pure agent q-and-a replies', async () => {
     const chat = vi.fn(async () => createAgentResponse('这个项目目前主要是 Vite + React + TypeScript。'));
 

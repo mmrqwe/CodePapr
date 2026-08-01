@@ -248,6 +248,7 @@ export interface AgentState {
   _checkpointSeq: number;
   _pendingMemoryConsolidation: boolean;
   _latestContextSnapshot: { sessionId: string; snapshot: IContextSnapshot } | null;
+  _currentMode: WorkMode;
 }
 
 export interface AgentActions {
@@ -279,6 +280,7 @@ export interface AgentActions {
   setProjectDiagnosticsReport: (report: ProjectDiagnosticsReport | null) => void;
   refreshProjectDiagnostics: () => Promise<ProjectDiagnosticsReport | null>;
   setSkillEnabledState: (skillId: string, enabled: boolean | null) => void;
+  computeContextSnapshot: () => Promise<void>;
   _loadProjectConfig: (path: string) => Promise<void>;
   _ensureWorkspaceGitReady: (path: string) => Promise<void>;
 }

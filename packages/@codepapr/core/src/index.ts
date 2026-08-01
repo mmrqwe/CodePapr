@@ -10,8 +10,8 @@ export { VolatileScratch } from './cache/VolatileScratch';
 export { CachePartition } from './cache/CachePartition';
 
 // Agent / Session / Tool / Message
-export { Agent, DEFAULT_AGENT_MAX_TOOL_ROUNDS } from './agent/Agent';
-export type { AgentOptions, IRequestBuilder, ICacheValidator, ContextCompactionConfig } from './agent/Agent';
+export { Agent, DEFAULT_AGENT_MAX_TOOL_ROUNDS, buildContextSnapshot } from './agent/Agent';
+export type { AgentOptions, IRequestBuilder, ICacheValidator, ContextCompactionConfig, ContextSnapshotSource } from './agent/Agent';
 export { Session } from './agent/Session';
 export type { SessionOptions } from './agent/Session';
 export { ToolRegistry, FilteringToolRegistry } from './tool/ToolRegistry';

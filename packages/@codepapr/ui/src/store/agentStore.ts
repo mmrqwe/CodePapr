@@ -19,6 +19,7 @@ import {
   serializeGoalState,
   GoalConditionParseError,
   renderTodoListDigest,
+  buildContextSnapshot,
 } from '@codepapr/core';
 import type {
   IAgentResponse,
@@ -119,6 +120,7 @@ import {
 } from './internals/promptBuilders';
 import {
   AgentRuntimeConfig,
+  buildAgentSessionParts,
   createAgent,
   getAgentMessagesSince,
   setDefaultOnWorkspaceMutatedResolver,
@@ -334,6 +336,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _checkpointSeq: 0,
       _pendingMemoryConsolidation: false,
       _latestContextSnapshot: null,
+      _currentMode: 'agent',
 
       loadSettings: async () => {
         let settings = get().settings;
@@ -764,6 +767,103 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         });
 
         saveCurrentProjectState(get());
+      },
+
+      computeContextSnapshot: async () => {
+        const { workspacePath, activeSessionId, sessionMessages, settings } = get();
+        if (!activeSessionId || !workspacePath) return;
+        const normalizedSettings = normalizeSettings(settings);
+        const messages = sessionMessages[activeSessionId] ?? [];
+        const rulesSection = get()._projectRulesSection;
+        const skillDefinitions = get()._skillDefinitions;
+        const agentDefinitions = get()._agentDefinitions;
+        const mode = get()._currentMode;
+
+        let projectGraphSummary: string | undefined;
+        try {
+          const cachedRaw = await invoke<string | null>('load_projectgraph_cache', { workspacePath });
+          if (cachedRaw) {
+            const cacheData = JSON.parse(cachedRaw);
+            if (cacheData?.projectGraph) {
+              projectGraphSummary = buildProjectGraphBootstrapSummary(cacheData.projectGraph);
+            }
+          }
+        } catch {
+          // 无 ProjectGraph 缓存：跳过
+        }
+
+        let memorySection: string | undefined;
+        try {
+          const memoryResult = await invoke<{ content: string }>('read_text_file', {
+            workspacePath,
+            relativePath: '.CodePapr/memory.md',
+            maxBytes: 50_000,
+          });
+          memorySection = memoryResult.content?.trim();
+        } catch {
+          // 无 memory.md：跳过
+        }
+
+        let mcpToolDefinitions: IToolDefinition[] = [];
+        let mcpToolMappings: Array<{ serverId: string; toolName: string; displayName: string }> = [];
+        if (normalizedSettings.mcp.enabled && normalizedSettings.mcp.exposeTools) {
+          try {
+            const loadedMcpTools = await loadMcpToolDefinitions(normalizedSettings.mcp);
+            mcpToolDefinitions = loadedMcpTools.definitions;
+            mcpToolMappings = loadedMcpTools.toolMappings;
+          } catch {
+            // MCP 工具发现失败：跳过
+          }
+        }
+
+        const runtimeSystemPrompt = buildAgentRuntimeSystemPrompt(
+          normalizedSettings,
+          mode,
+          workspacePath,
+          rulesSection,
+          { agentDefinitions }
+        );
+        const sessionBootstrapPrompt = buildAgentSessionBootstrapPrompt(
+          normalizedSettings,
+          workspacePath,
+          skillDefinitions,
+          projectGraphSummary,
+          memorySection
+        );
+
+        const parts = buildAgentSessionParts(
+          normalizedSettings,
+          activeSessionId,
+          workspacePath,
+          messages,
+          { systemPrompt: runtimeSystemPrompt },
+          {
+            editHistory: get()._editHistory,
+            mcpToolDefinitions,
+            mcpToolMappings,
+            rulesSection,
+            memorySection,
+            projectGraphSummary,
+            customPrompt: normalizedSettings.systemPrompt,
+            lang: normalizedSettings.lang,
+            mode,
+            skillDefinitions,
+            agentDefinitions,
+            sessionBootstrapPrompt,
+            onWorkspaceMutated: () => {},
+          }
+        );
+
+        const snapshot = buildContextSnapshot(
+          {
+            model: parts.model,
+            messages: [...parts.prefix.toMessageArray(), ...parts.log.toMessageArray()],
+            tools: [...parts.prefix.getToolDefinitions()],
+          },
+          0
+        );
+
+        set({ _latestContextSnapshot: { sessionId: activeSessionId, snapshot } });
       },
 
       setShowSettings: (v) => set({ showSettings: v }),

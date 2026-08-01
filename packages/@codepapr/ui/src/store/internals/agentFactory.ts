@@ -210,7 +210,22 @@ export function setDefaultOnWorkspaceMutatedResolver(
   defaultOnWorkspaceMutatedResolver = resolver;
 }
 
-function _createLocalAgent(
+export interface AgentSessionParts {
+  prefix: ImmutablePrefix;
+  log: AppendOnlyLog;
+  model: string;
+  toolRegistry: ToolRegistry;
+  provider: ReturnType<typeof buildProviderInstance>;
+  providerName: ReturnType<typeof resolveProviderName>;
+  uiTaskToolContext?: UiTaskToolContext;
+}
+
+/**
+ * 组装会话的「前缀 + 日志 + 工具」（系统提示词、工具定义、会话引导、历史消息），
+ * 与真实发送共用同一份逻辑。既用于创建主线程 Agent，也用于按需重建上下文快照
+ * （computeContextSnapshot），保证两者组装结果一致。
+ */
+export function buildAgentSessionParts(
   settings: Settings,
   sessionId: string,
   workspacePath: string,
@@ -219,7 +234,7 @@ function _createLocalAgent(
     Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   > = {},
   runtime: AgentRuntimeConfig = {}
-): AgentRuntimeHandle {
+): AgentSessionParts {
   const mode: PromptMode = runtime.mode ?? 'agent';
   const toolRegistry = isReadOnlyMode(mode)
     ? new FilteringToolRegistry((tool) => !MUTATING_TOOL_NAMES.has(tool.name))
@@ -340,23 +355,38 @@ function _createLocalAgent(
       reasoningEffort: overrides.thinkingEffort ?? settings.thinkingEffort,
     },
   });
+  const log = createLogFromMessages(sessionId, messages, sessionBootstrapPrompt);
+  return { prefix, log, model: baseModel, toolRegistry, provider, providerName, uiTaskToolContext };
+}
+
+function _createLocalAgent(
+  settings: Settings,
+  sessionId: string,
+  workspacePath: string,
+  messages: UIMessage[] = [],
+  overrides: Partial<
+    Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'temperature' | 'maxTokens' | 'systemPrompt'>
+  > = {},
+  runtime: AgentRuntimeConfig = {}
+): AgentRuntimeHandle {
+  const parts = buildAgentSessionParts(settings, sessionId, workspacePath, messages, overrides, runtime);
   const session = new Session({
     sessionId,
-    prefix,
-    toolRegistry,
-    log: createLogFromMessages(sessionId, messages, sessionBootstrapPrompt),
+    prefix: parts.prefix,
+    toolRegistry: parts.toolRegistry,
+    log: parts.log,
   });
   return new _MainThreadAgentHandle(new Agent({
     session,
-    provider,
-    providerName,
+    provider: parts.provider,
+    providerName: parts.providerName,
     requestBuilder: new RequestBuilder(),
     cacheValidator: new CacheValidator(),
     maxToolRounds: settings.maxToolRounds,
     toolTimeouts: { graph: settings.graphToolTimeoutMs },
     toolOutputTruncation: buildToolOutputTruncation(settings, workspacePath),
-    contextCompaction: createContextCompactionHandler(settings, providerName, sessionId),
-  }), () => uiTaskToolContext?.subagentCacheStats ?? []);
+    contextCompaction: createContextCompactionHandler(settings, parts.providerName, sessionId),
+  }), () => parts.uiTaskToolContext?.subagentCacheStats ?? []);
 }
 
 export function createAgent(
