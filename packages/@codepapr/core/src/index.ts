@@ -43,12 +43,14 @@ export type { PruneOptions } from './tool/pruneToolResults';
 export {
   summarizeToolOutput,
   resolveToolContextMode,
+  resolveToolContextOverrides,
   prepareHistorySummary,
   applyHistoryToolSummaries,
   headTailPreview,
   TOOL_SUMMARY_METADATA_KEY,
   DEFAULT_SUMMARY_MAX_CHARS,
   DEFAULT_AUTO_THRESHOLD_CHARS,
+  DEFAULT_TOOL_CONTEXT_OVERRIDES,
 } from './tool/toolOutputSummary';
 export type {
   ToolContextMode,

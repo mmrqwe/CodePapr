@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { IMessage } from '@codepapr/types';
 import {
   resolveToolContextMode,
+  resolveToolContextOverrides,
   summarizeToolOutput,
   prepareHistorySummary,
   applyHistoryToolSummaries,
@@ -9,6 +10,7 @@ import {
   TOOL_SUMMARY_METADATA_KEY,
   DEFAULT_SUMMARY_MAX_CHARS,
   DEFAULT_AUTO_THRESHOLD_CHARS,
+  DEFAULT_TOOL_CONTEXT_OVERRIDES,
   type ToolContextConfig,
 } from './toolOutputSummary';
 
@@ -28,7 +30,6 @@ describe('resolveToolContextMode', () => {
     expect(resolveToolContextMode('question', config)).toBe('full');
     expect(resolveToolContextMode('todo', config)).toBe('full');
     expect(resolveToolContextMode('skill', config)).toBe('full');
-    expect(resolveToolContextMode('task', config)).toBe('full');
   });
 
   it('uses overrides when present', () => {
@@ -41,6 +42,41 @@ describe('resolveToolContextMode', () => {
     expect(resolveToolContextMode('bash', config)).toBe('full');
     expect(resolveToolContextMode('read', config)).toBe('full');
     expect(resolveToolContextMode('unknown_tool', config)).toBe('full');
+  });
+
+  it('task is not protected: follows defaultMode and overrides', () => {
+    expect(resolveToolContextMode('task', makeConfig({ defaultMode: 'summary' }))).toBe('summary');
+    expect(resolveToolContextMode('task', makeConfig({ defaultMode: 'full' }))).toBe('full');
+    expect(
+      resolveToolContextMode('task', makeConfig({ defaultMode: 'full', overrides: { task: 'auto' } }))
+    ).toBe('auto');
+  });
+});
+
+describe('resolveToolContextOverrides', () => {
+  it('provides auto baseline for heavy tools', () => {
+    const merged = resolveToolContextOverrides({});
+    expect(merged.lsp).toBe('auto');
+    expect(merged.git).toBe('auto');
+    expect(merged.diagnostics).toBe('auto');
+    expect(merged.graph).toBe('auto');
+    expect(merged.bash).toBe('auto');
+    expect(merged.browser).toBe('auto');
+    expect(merged.webfetch).toBe('auto');
+    expect(merged.task).toBe('auto');
+  });
+
+  it('user overrides win over the built-in baseline', () => {
+    const merged = resolveToolContextOverrides({ git: 'full', task: 'summary' });
+    expect(merged.git).toBe('full');
+    expect(merged.task).toBe('summary');
+    expect(merged.lsp).toBe('auto');
+  });
+
+  it('baseline matches the settings UI category grouping', () => {
+    for (const tool of ['bash', 'browser', 'webfetch', 'graph', 'lsp', 'diagnostics', 'git']) {
+      expect(DEFAULT_TOOL_CONTEXT_OVERRIDES[tool]).toBe('auto');
+    }
   });
 });
 
@@ -181,6 +217,34 @@ describe('summarizeToolOutput', () => {
     expect(summary).toContain('https://example.com');
   });
 
+  it('summarizes task output previewing the subagent answer', () => {
+    const content = Array.from({ length: 20 }, (_, i) => `line${i + 1}`).join('\n');
+    const summary = summarizeToolOutput(
+      'task',
+      { agent: 'explore', prompt: 'find X' },
+      { agent: 'explore', content, steps: [{ name: 'grep' }, { name: 'read' }, { name: 'read' }] },
+      true,
+      500
+    );
+    expect(summary).toContain('[task] ✓ | explore | 3 步');
+    expect(summary).toContain('20 行');
+    expect(summary).toContain('line1');
+    expect(summary).toContain('line20');
+    expect(summary).not.toContain('line10');
+  });
+
+  it('summarizes failed task output without content field', () => {
+    const summary = summarizeToolOutput(
+      'task',
+      { agent: 'explore' },
+      { error: 'Sub-agent execution timed out (60s)' },
+      false,
+      500
+    );
+    expect(summary).toContain('[task] ✗ | explore');
+    expect(summary).toContain('timed out');
+  });
+
   it('summarizes unknown tools generically', () => {
     const summary = summarizeToolOutput('custom_tool', { foo: 'bar' }, 'some output', true, 500);
     expect(summary).toContain('[custom_tool]');
@@ -228,6 +292,43 @@ describe('prepareHistorySummary', () => {
     const config = makeConfig({ defaultMode: 'summary' });
     expect(
       prepareHistorySummary({ ...input, toolName: 'question', originalChars: 10_000 }, config)
+    ).toBeUndefined();
+  });
+
+  it('task is summarizable once it leaves the protected set', () => {
+    const config = makeConfig({
+      defaultMode: 'full',
+      overrides: resolveToolContextOverrides({}),
+    });
+    const summary = prepareHistorySummary(
+      {
+        toolName: 'task',
+        args: { agent: 'explore', prompt: 'survey' },
+        result: { agent: 'explore', content: 'x'.repeat(100), steps: [] },
+        success: true,
+        originalChars: 10_000,
+      },
+      config
+    );
+    expect(summary).toContain('[task] ✓ | explore');
+  });
+
+  it('task stays full when the user overrides the baseline back to full', () => {
+    const config = makeConfig({
+      defaultMode: 'full',
+      overrides: resolveToolContextOverrides({ task: 'full' }),
+    });
+    expect(
+      prepareHistorySummary(
+        {
+          toolName: 'task',
+          args: { agent: 'explore' },
+          result: { agent: 'explore', content: 'x', steps: [] },
+          success: true,
+          originalChars: 10_000,
+        },
+        config
+      )
     ).toBeUndefined();
   });
 

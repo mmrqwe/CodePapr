@@ -13,7 +13,11 @@
  *  - summary: 总是产生冻结摘要。
  *  - auto:    原始输出字符数 > autoThresholdChars 时产生冻结摘要。
  *
- * 交互类工具（question / todo / skill / task）永不摘要。
+ * 交互类工具（question / todo / skill）永不摘要。
+ *
+ * 重输出工具（分析类 graph/lsp/diagnostics/git、执行类 bash/browser/webfetch、子代理 task）
+ * 由 DEFAULT_TOOL_CONTEXT_OVERRIDES 给出 'auto' 底线，组合根经 resolveToolContextOverrides
+ * 与用户 override 合并（用户显式设置优先）：小输出保持全文，超阈值的大输出在历史中摘要。
  *
  * 冻结摘要不是内容切片，而是结构化卡片：
  *  `[工具] ✓/✗ | 关键参数` → `规模统计（基于原始输出）` → `头+尾预览`
@@ -38,7 +42,31 @@ export const TOOL_SUMMARY_METADATA_KEY = 'toolSummary';
 export const DEFAULT_SUMMARY_MAX_CHARS = 500;
 export const DEFAULT_AUTO_THRESHOLD_CHARS = 5_000;
 
-const PROTECTED_TOOLS = new Set(['question', 'todo', 'skill', 'task']);
+/**
+ * 重输出工具的 built-in 底线覆盖：分析类（graph/lsp/diagnostics/git）、执行类
+ * （bash/browser/webfetch）与子代理 task 默认 'auto'——小输出保持全文，超阈值的
+ * 大输出（findReferences、大 diff、项目级诊断、构建日志、子代理长结论）在历史中摘要。
+ * 与 UI 设置的分类覆盖对齐（设置面板按「分析」「执行」整类共享下拉）。
+ */
+export const DEFAULT_TOOL_CONTEXT_OVERRIDES: Readonly<Record<string, ToolContextMode>> = {
+  graph: 'auto',
+  lsp: 'auto',
+  diagnostics: 'auto',
+  git: 'auto',
+  bash: 'auto',
+  browser: 'auto',
+  webfetch: 'auto',
+  task: 'auto',
+};
+
+/** 组合根合并覆盖：built-in 底线在下，用户显式 override 在上（用户优先）。 */
+export function resolveToolContextOverrides(
+  userOverrides: Record<string, ToolContextMode>
+): Record<string, ToolContextMode> {
+  return { ...DEFAULT_TOOL_CONTEXT_OVERRIDES, ...userOverrides };
+}
+
+const PROTECTED_TOOLS = new Set(['question', 'todo', 'skill']);
 
 export function resolveToolContextMode(
   toolName: string,
@@ -217,6 +245,24 @@ function summarizeGit(args: Record<string, unknown>, result: unknown, success: b
   ].filter(Boolean).join('\n');
 }
 
+/**
+ * 子代理结果形状为 { agent, content, steps }（__subagentToolInvocations 已在 Agent 层剥离）。
+ * 预览针对子代理最终答复 content 做头+尾；无 content（如失败 { error }）时回退整体序列化。
+ */
+function summarizeTask(args: Record<string, unknown>, result: unknown, success: boolean): string {
+  const agentName = arg(args, 'agent');
+  const status = success ? '✓' : '✗';
+  const record = result && typeof result === 'object' ? (result as Record<string, unknown>) : null;
+  const content = record && typeof record.content === 'string' ? record.content : str(result);
+  const stepCount = record && Array.isArray(record.steps) ? (record.steps as unknown[]).length : undefined;
+  const lines = content.split('\n');
+  return [
+    `[task] ${status} | ${agentName}${stepCount !== undefined ? ` | ${stepCount} 步` : ''}`,
+    `${lines.length} 行 / ${content.length.toLocaleString()} 字符`,
+    headTailPreview(content),
+  ].filter(Boolean).join('\n');
+}
+
 function summarizeGeneric(toolName: string, args: Record<string, unknown>, result: unknown, success: boolean): string {
   const status = success ? '✓' : '✗';
   const output = str(result);
@@ -242,6 +288,7 @@ const SUMMARIZERS: Record<
   browser: summarizeBrowser,
   webfetch: summarizeWebfetch,
   git: summarizeGit,
+  task: summarizeTask,
 };
 
 export function summarizeToolOutput(

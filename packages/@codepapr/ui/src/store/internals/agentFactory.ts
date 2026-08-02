@@ -8,6 +8,7 @@ import {
   MUTATING_TOOL_NAMES,
   isReadOnlyMode,
   generateToolOutputFilename,
+  resolveToolContextOverrides,
   type AgentDefinition,
   type EditHistory,
   type SkillDefinition,
@@ -79,7 +80,7 @@ function buildToolOutputTruncation(
 function buildToolContextConfig(settings: Settings): ToolContextConfig {
   return {
     defaultMode: settings.toolContextDefaultMode,
-    overrides: settings.toolContextOverrides,
+    overrides: resolveToolContextOverrides(settings.toolContextOverrides),
     summaryMaxChars: settings.toolContextSummaryMaxChars,
     autoThresholdChars: settings.toolContextAutoThresholdChars,
   };

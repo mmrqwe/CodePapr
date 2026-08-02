@@ -11,6 +11,7 @@ import {
   Session,
   Serializer,
   resolveSubagentExecution,
+  resolveToolContextOverrides,
   runSubagentSession,
   ToolRegistry,
   filterToolsForAgent,
@@ -735,7 +736,7 @@ function buildToolOutputTruncation(s: WorkerAgentSettings): ToolOutputTruncation
 function buildToolContextConfig(s: WorkerAgentSettings): ToolContextConfig {
   return {
     defaultMode: s.toolContextDefaultMode,
-    overrides: s.toolContextOverrides,
+    overrides: resolveToolContextOverrides(s.toolContextOverrides),
     summaryMaxChars: s.toolContextSummaryMaxChars,
     autoThresholdChars: s.toolContextAutoThresholdChars,
   };

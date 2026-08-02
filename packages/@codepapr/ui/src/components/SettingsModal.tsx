@@ -12,7 +12,7 @@ import {
 import { DEEPSEEK_MAX_TOKENS } from '@codepapr/api/tokenLimits';
 import { AppPermissionsTab } from './AppPermissionsTab';
 import { OpenAIProvider, ClaudeProvider } from '@codepapr/api';
-import { BUILTIN_AGENTS, resolveAgentPrompt } from '@codepapr/core';
+import { BUILTIN_AGENTS, DEFAULT_TOOL_CONTEXT_OVERRIDES, resolveAgentPrompt } from '@codepapr/core';
 import { getTranslation, Lang } from '../utils/i18n';
 import { LicenseModal } from './LicenseModal';
 
@@ -1521,7 +1521,9 @@ export function SettingsModal() {
                     ['analysis', t.toolContextCategoryAnalysis, ['graph', 'lsp', 'diagnostics', 'git']],
                   ] as const).map(([, label, tools]) => {
                     const currentOverride = local.toolContextOverrides[tools[0]];
-                    const mode = currentOverride ?? local.toolContextDefaultMode;
+                    const effectiveDefault =
+                      DEFAULT_TOOL_CONTEXT_OVERRIDES[tools[0]] ?? local.toolContextDefaultMode;
+                    const mode = currentOverride ?? effectiveDefault;
                     return (
                       <div key={label} className="flex items-center justify-between rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3">
                         <span className="text-xs text-slate-400">{label}</span>
@@ -1531,7 +1533,7 @@ export function SettingsModal() {
                             const value = e.target.value as 'full' | 'summary' | 'auto';
                             const overrides = { ...local.toolContextOverrides };
                             for (const tool of tools) {
-                              if (value === local.toolContextDefaultMode) {
+                              if (value === effectiveDefault) {
                                 delete overrides[tool];
                               } else {
                                 overrides[tool] = value;
