@@ -19,6 +19,7 @@ import {
   type AgentDefinition,
   type SubagentSessionResult,
   type ToolOutputTruncationOptions,
+  type ToolContextConfig,
 } from '@codepapr/core';
 import {
   DEFAULT_MAX_TOKENS,
@@ -595,6 +596,7 @@ async function runSubagent(
     graphToolTimeoutMs: s.graphToolTimeoutMs,
     maxWallClockMs: SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
     toolOutputTruncation: buildToolOutputTruncation(payload.settings),
+    toolContextConfig: buildToolContextConfig(payload.settings),
   });
 }
 
@@ -678,6 +680,15 @@ function buildToolOutputTruncation(s: WorkerAgentSettings): ToolOutputTruncation
     offloadChars: s.toolOutputOffloadChars,
     offloadPreviewChars: s.toolOutputPreviewChars,
     ceilingChars: s.toolOutputCeilingChars,
+  };
+}
+
+function buildToolContextConfig(s: WorkerAgentSettings): ToolContextConfig {
+  return {
+    defaultMode: s.toolContextDefaultMode,
+    overrides: s.toolContextOverrides,
+    summaryMaxChars: s.toolContextSummaryMaxChars,
+    autoThresholdChars: s.toolContextAutoThresholdChars,
   };
 }
 
@@ -897,6 +908,7 @@ async function handleRunAppAgent(
     maxToolRounds,
     toolTimeouts: { graph: cachedSettings.graphToolTimeoutMs },
     toolOutputTruncation: buildToolOutputTruncation(cachedSettings),
+    toolContextConfig: buildToolContextConfig(cachedSettings),
   });
 
   const steps: Array<{ name: string; status: string; summary?: string }> = [];
@@ -1060,6 +1072,7 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     maxToolRounds: payload.settings.maxToolRounds,
     toolTimeouts: { graph: payload.settings.graphToolTimeoutMs },
     toolOutputTruncation: buildToolOutputTruncation(payload.settings),
+    toolContextConfig: buildToolContextConfig(payload.settings),
     contextCompaction: createContextCompactionHandler(
       payload.settings as unknown as Settings,
       payload.providerName,

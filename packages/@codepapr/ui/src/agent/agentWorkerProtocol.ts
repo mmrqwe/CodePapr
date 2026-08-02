@@ -66,6 +66,10 @@ export interface WorkerAgentSettings {
   pruneOldToolResults: boolean;
   pruneProtectRounds: number;
   pruneMinChars: number;
+  toolContextDefaultMode: 'full' | 'summary' | 'auto';
+  toolContextOverrides: Record<string, 'full' | 'summary' | 'auto'>;
+  toolContextSummaryMaxChars: number;
+  toolContextAutoThresholdChars: number;
   maxContextTokens: number;
   maxConversationRounds: number;
   compactionModel: 'fast' | 'primary';

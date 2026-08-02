@@ -40,6 +40,18 @@ export type {
 } from './tool/toolOutputTruncation';
 export { pruneOldToolResults } from './tool/pruneToolResults';
 export type { PruneOptions } from './tool/pruneToolResults';
+export {
+  applyToolContextMode,
+  summarizeToolOutput,
+  resolveToolContextMode,
+  DEFAULT_SUMMARY_MAX_CHARS,
+  DEFAULT_AUTO_THRESHOLD_CHARS,
+} from './tool/toolOutputSummary';
+export type {
+  ToolContextMode,
+  ToolContextConfig,
+  ToolContextResult,
+} from './tool/toolOutputSummary';
 export type {
   ApplySearchReplaceDiffFile,
   ApplySearchReplaceDiffPatch,

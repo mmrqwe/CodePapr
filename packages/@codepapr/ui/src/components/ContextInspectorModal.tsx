@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import type { ContextStage, IContextSnapshot } from '@codepapr/types';
 import { getTranslation, type Lang } from '../utils/i18n';
 
@@ -44,6 +44,7 @@ function formatTokens(value: number): string {
 
 export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspectorModalProps) {
   const t = getTranslation(lang);
+  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
 
   const stageLabels: Record<ContextStage, string> = {
     'stable-prefix': t.stageStablePrefix,
@@ -53,7 +54,12 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
 
   const fullText = useMemo(() => {
     const parts: string[] = [];
-    if (snapshot.toolNames.length > 0) {
+    if (snapshot.toolDefinitions && snapshot.toolDefinitions.length > 0) {
+      parts.push(
+        `[${stageLabels['stable-prefix']} · ${t.toolsEstimate}]\n` +
+        snapshot.toolDefinitions.map((td) => `${td.name}: ${td.description}\n${JSON.stringify(td.parameters, null, 2)}`).join('\n\n')
+      );
+    } else if (snapshot.toolNames.length > 0) {
       parts.push(
         `[${stageLabels['stable-prefix']} · ${t.toolsEstimate}]\n${snapshot.toolNames.join(', ')}`
       );
@@ -132,8 +138,34 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
                       {formatTokens(snapshot.toolsTokenEstimate)} {t.tokensUnit}
                     </span>
                   </div>
-                  <div className="whitespace-pre-wrap break-words px-3 py-2.5 text-xs leading-relaxed text-slate-300">
-                    {snapshot.toolNames.join(', ')}
+                  <div className="divide-y divide-white/5">
+                    {(snapshot.toolDefinitions ?? snapshot.toolNames.map((n) => ({ name: n, description: '', parameters: null }))).map((td) => {
+                      const expanded = expandedTools.has(td.name);
+                      return (
+                        <div key={td.name}>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedTools((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(td.name)) next.delete(td.name); else next.add(td.name);
+                              return next;
+                            })}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-white/5"
+                          >
+                            <span className={`text-[10px] text-slate-600 transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
+                            <span className="font-mono text-xs font-medium text-indigo-300">{td.name}</span>
+                            {td.description && (
+                              <span className="min-w-0 flex-1 truncate text-[11px] text-slate-500">{td.description}</span>
+                            )}
+                          </button>
+                          {expanded && td.parameters != null && (
+                            <pre className="whitespace-pre-wrap break-words bg-black/20 px-4 py-2 text-[10px] leading-relaxed text-slate-400">
+                              {JSON.stringify(td.parameters, null, 2)}
+                            </pre>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ) : null;

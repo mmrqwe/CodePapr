@@ -12,6 +12,7 @@ import {
   type EditHistory,
   type SkillDefinition,
   type ToolOutputTruncationOptions,
+  type ToolContextConfig,
 } from '@codepapr/core';
 import type { PromptMode } from '@codepapr/core';
 import { CacheValidator, RequestBuilder } from '@codepapr/api';
@@ -66,6 +67,33 @@ function buildToolOutputTruncation(
     offloadChars: settings.toolOutputOffloadChars,
     offloadPreviewChars: settings.toolOutputPreviewChars,
     ceilingChars: settings.toolOutputCeilingChars,
+    spillToDisk: async (content: string, toolName: string): Promise<string | null> => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const filename = generateToolOutputFilename(toolName);
+        const relativePath = `.CodePapr/tool-output/${filename}`;
+        await invoke('write_text_file', {
+          workspacePath,
+          relativePath,
+          content,
+        });
+        return relativePath;
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
+function buildToolContextConfig(
+  settings: Settings,
+  workspacePath: string
+): ToolContextConfig {
+  return {
+    defaultMode: settings.toolContextDefaultMode,
+    overrides: settings.toolContextOverrides,
+    summaryMaxChars: settings.toolContextSummaryMaxChars,
+    autoThresholdChars: settings.toolContextAutoThresholdChars,
     spillToDisk: async (content: string, toolName: string): Promise<string | null> => {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
@@ -385,6 +413,7 @@ function _createLocalAgent(
     maxToolRounds: settings.maxToolRounds,
     toolTimeouts: { graph: settings.graphToolTimeoutMs },
     toolOutputTruncation: buildToolOutputTruncation(settings, workspacePath),
+    toolContextConfig: buildToolContextConfig(settings, workspacePath),
     contextCompaction: createContextCompactionHandler(settings, parts.providerName, sessionId),
   }), () => parts.uiTaskToolContext?.subagentCacheStats ?? []);
 }

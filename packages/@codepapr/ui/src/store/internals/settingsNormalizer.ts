@@ -199,6 +199,26 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     typeof input.pruneMinChars === 'number' && Number.isFinite(input.pruneMinChars)
       ? Math.max(0, Math.floor(input.pruneMinChars))
       : DEFAULT_SETTINGS.pruneMinChars;
+  const toolContextDefaultMode: 'full' | 'summary' | 'auto' =
+    input.toolContextDefaultMode === 'full' || input.toolContextDefaultMode === 'summary'
+      ? input.toolContextDefaultMode
+      : 'auto';
+  const toolContextOverrides: Record<string, 'full' | 'summary' | 'auto'> =
+    input.toolContextOverrides && typeof input.toolContextOverrides === 'object'
+      ? Object.fromEntries(
+          Object.entries(input.toolContextOverrides).filter(
+            ([, v]) => v === 'full' || v === 'summary' || v === 'auto'
+          )
+        )
+      : {};
+  const toolContextSummaryMaxChars =
+    typeof input.toolContextSummaryMaxChars === 'number' && Number.isFinite(input.toolContextSummaryMaxChars)
+      ? Math.max(100, Math.floor(input.toolContextSummaryMaxChars))
+      : DEFAULT_SETTINGS.toolContextSummaryMaxChars;
+  const toolContextAutoThresholdChars =
+    typeof input.toolContextAutoThresholdChars === 'number' && Number.isFinite(input.toolContextAutoThresholdChars)
+      ? Math.max(500, Math.floor(input.toolContextAutoThresholdChars))
+      : DEFAULT_SETTINGS.toolContextAutoThresholdChars;
   const projectGraphMaxDepth =
     typeof input.projectGraphMaxDepth === 'number' && Number.isFinite(input.projectGraphMaxDepth)
       ? Math.max(0, Math.floor(input.projectGraphMaxDepth))
@@ -403,6 +423,10 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     pruneOldToolResults,
     pruneProtectRounds,
     pruneMinChars,
+    toolContextDefaultMode,
+    toolContextOverrides,
+    toolContextSummaryMaxChars,
+    toolContextAutoThresholdChars,
     projectGraphMaxDepth,
     projectGraphMaxFiles,
     projectGraphMaxEdges,

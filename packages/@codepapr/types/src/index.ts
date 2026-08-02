@@ -259,8 +259,10 @@ export interface IContextSnapshot {
   round: number;
   model: string;
   messages: IContextMessageView[];
-  /** 工具定义名称列表（稳定前缀的一部分，schema 体积大故不内联） */
+  /** 工具定义名称列表（稳定前缀的一部分） */
   toolNames: string[];
+  /** 完整工具定义（含 schema），用于上下文检查器展示 */
+  toolDefinitions?: Array<{ name: string; description: string; parameters: unknown }>;
   /** 工具定义（schema）的估算 token，独立于消息 */
   toolsTokenEstimate: number;
   totalTokens: number;

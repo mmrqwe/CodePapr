@@ -21,6 +21,7 @@ import { AppendOnlyLog } from '../cache/AppendOnlyLog';
 import { ImmutablePrefix } from '../cache/ImmutablePrefix';
 import type { ToolRegistry } from '../tool/ToolRegistry';
 import type { ToolOutputTruncationOptions } from '../tool/toolOutputTruncation';
+import type { ToolContextConfig } from '../tool/toolOutputSummary';
 import {
   buildRuntimeSystemPrompt,
   buildRuntimeUserPrompt,
@@ -207,6 +208,7 @@ export interface SubagentSessionDeps {
   graphToolTimeoutMs: number;
   maxWallClockMs?: number;
   toolOutputTruncation?: ToolOutputTruncationOptions;
+  toolContextConfig?: ToolContextConfig;
   onToolCallEnd?: (event: Extract<IChatStreamEvent, { type: 'tool-call-end' }>) => void;
 }
 
@@ -328,6 +330,7 @@ export async function runSubagentSession(
     maxToolRounds: exec.maxToolRounds,
     toolTimeouts: { graph: deps.graphToolTimeoutMs },
     toolOutputTruncation: deps.toolOutputTruncation,
+    toolContextConfig: deps.toolContextConfig,
   });
 
   let response;

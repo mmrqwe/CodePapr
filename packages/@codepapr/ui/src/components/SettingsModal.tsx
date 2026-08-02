@@ -129,7 +129,7 @@ export function SettingsModal() {
       llm: ['apiMode', 'apiFormat', 'fastModelEnabled', 'thinkingEnabled', 'thinkingEffort', 'temperature', 'topP', 'maxToolRounds', local.apiMode],
       search: ['searxngEnabled', 'searxngBaseUrl', 'searxngCategories', 'searxngTimeRange', 'searxngLanguage', 'searxngSafeSearch'],
       mentor: ['mentorEnabled', 'mentorApiFormat', 'mentorBaseURL', 'mentorApiKey', 'mentorModel', 'mentorMaxTokens', 'mentorThinkingEnabled', 'maxMentorConsultations', 'explorePrompt', 'scoutPrompt', 'mentorPrompt', 'exploreTemperature', 'exploreMaxToolRounds', 'exploreMaxTokens', 'exploreTopP', 'exploreMaxDepth', 'exploreThinkingEnabled', 'scoutTemperature', 'scoutMaxToolRounds', 'scoutMaxTokens', 'scoutTopP', 'scoutMaxDepth', 'scoutThinkingEnabled'],
-      advanced: ['compactionModel', 'compactionMaxTokens', 'compactionTemperature', 'maxContextTokens', 'maxConversationRounds', 'todoMaxRetries', 'goalMaxIterations', 'goalMaxWallClockMs', 'goalRequireGitClean', 'verifierModelTier', 'verifierMaxTokens', 'verifierTemperature', 'projectGraphMaxDepth', 'projectGraphMaxFiles', 'projectGraphMaxEdges', 'projectGraphMaxSymbolsPerFile', 'projectGraphMaxFileBytes', 'projectGraphMaxTreeEntries'],
+      advanced: ['compactionModel', 'compactionMaxTokens', 'compactionTemperature', 'maxContextTokens', 'maxConversationRounds', 'toolContextDefaultMode', 'toolContextOverrides', 'toolContextSummaryMaxChars', 'toolContextAutoThresholdChars', 'todoMaxRetries', 'goalMaxIterations', 'goalMaxWallClockMs', 'goalRequireGitClean', 'verifierModelTier', 'verifierMaxTokens', 'verifierTemperature', 'projectGraphMaxDepth', 'projectGraphMaxFiles', 'projectGraphMaxEdges', 'projectGraphMaxSymbolsPerFile', 'projectGraphMaxFileBytes', 'projectGraphMaxTreeEntries'],
       app: [],
     };
     const resetPart: Partial<Settings> = {};
@@ -1406,6 +1406,101 @@ export function SettingsModal() {
                     />
                     <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.maxConversationRoundsHint}</p>
                   </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-5">
+                <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  {t.toolContextSettings}
+                </label>
+                <p className="mb-3 text-[11px] leading-relaxed text-slate-500">{t.toolContextDesc}</p>
+                <div className="grid gap-5 md:grid-cols-3">
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      {t.toolContextDefaultModeLabel}
+                    </label>
+                    <select
+                      value={local.toolContextDefaultMode}
+                      onChange={(e) => update({ toolContextDefaultMode: e.target.value as 'full' | 'summary' | 'auto' })}
+                      className="w-full cursor-pointer rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+                    >
+                      <option value="full">{t.toolContextModeFull}</option>
+                      <option value="summary">{t.toolContextModeSummary}</option>
+                      <option value="auto">{t.toolContextModeAuto}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      {t.toolContextSummaryMaxCharsLabel}
+                    </label>
+                    <input
+                      type="number"
+                      min="100"
+                      max="5000"
+                      step="100"
+                      value={local.toolContextSummaryMaxChars}
+                      onChange={(e) => {
+                        const parsed = parseInt(e.target.value, 10);
+                        update({ toolContextSummaryMaxChars: Number.isFinite(parsed) ? parsed : local.toolContextSummaryMaxChars });
+                      }}
+                      className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+                    />
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.toolContextSummaryMaxCharsHint}</p>
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      {t.toolContextAutoThresholdLabel}
+                    </label>
+                    <input
+                      type="number"
+                      min="500"
+                      max="50000"
+                      step="500"
+                      value={local.toolContextAutoThresholdChars}
+                      onChange={(e) => {
+                        const parsed = parseInt(e.target.value, 10);
+                        update({ toolContextAutoThresholdChars: Number.isFinite(parsed) ? parsed : local.toolContextAutoThresholdChars });
+                      }}
+                      className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+                    />
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.toolContextAutoThresholdHint}</p>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  {([
+                    ['execution', t.toolContextCategoryExecution, ['bash', 'browser', 'webfetch']],
+                    ['reading', t.toolContextCategoryReading, ['read', 'grep', 'glob', 'list']],
+                    ['writing', t.toolContextCategoryWriting, ['write', 'edit', 'patch']],
+                    ['analysis', t.toolContextCategoryAnalysis, ['graph', 'lsp', 'diagnostics', 'git']],
+                  ] as const).map(([, label, tools]) => {
+                    const currentOverride = local.toolContextOverrides[tools[0]];
+                    const mode = currentOverride ?? local.toolContextDefaultMode;
+                    return (
+                      <div key={label} className="flex items-center justify-between rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3">
+                        <span className="text-xs text-slate-400">{label}</span>
+                        <select
+                          value={mode}
+                          onChange={(e) => {
+                            const value = e.target.value as 'full' | 'summary' | 'auto';
+                            const overrides = { ...local.toolContextOverrides };
+                            for (const tool of tools) {
+                              if (value === local.toolContextDefaultMode) {
+                                delete overrides[tool];
+                              } else {
+                                overrides[tool] = value;
+                              }
+                            }
+                            update({ toolContextOverrides: overrides });
+                          }}
+                          className="cursor-pointer rounded-lg border border-[#2a2d3a] bg-[#161922] px-3 py-1.5 text-xs text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+                        >
+                          <option value="full">{t.toolContextModeFull}</option>
+                          <option value="summary">{t.toolContextModeSummary}</option>
+                          <option value="auto">{t.toolContextModeAuto}</option>
+                        </select>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 

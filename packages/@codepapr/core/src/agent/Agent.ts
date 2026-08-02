@@ -40,6 +40,7 @@ import { Session, mergeOptionalTokenCount } from './Session';
 import { MessageFactory } from '../message/Message';
 import { Serializer } from '../cache/Serializer';
 import { truncateToolOutput, type ToolOutputTruncationOptions } from '../tool/toolOutputTruncation';
+import { applyToolContextMode, type ToolContextConfig } from '../tool/toolOutputSummary';
 
 const log = new Logger('Agent');
 
@@ -205,6 +206,11 @@ export function buildContextSnapshot(request: ContextSnapshotSource, round: numb
   tokensByStage['stable-prefix'] += toolsTokenEstimate;
 
   const toolNames = (request.tools ?? []).map((tool) => tool.name);
+  const toolDefinitions = (request.tools ?? []).map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters,
+  }));
 
   const totalTokens =
     tokensByStage['stable-prefix'] +
@@ -216,6 +222,7 @@ export function buildContextSnapshot(request: ContextSnapshotSource, round: numb
     model: request.model,
     messages,
     toolNames,
+    toolDefinitions,
     toolsTokenEstimate,
     totalTokens,
     tokensByStage,
@@ -327,6 +334,7 @@ export interface AgentOptions {
   maxToolRounds?: number;
   toolTimeouts?: Record<string, number>;
   toolOutputTruncation?: ToolOutputTruncationOptions;
+  toolContextConfig?: ToolContextConfig;
   contextCompaction?: ContextCompactionConfig;
 }
 
@@ -349,6 +357,7 @@ export class Agent {
   private maxToolRounds: number;
   private toolTimeouts: Record<string, number>;
   private toolOutputTruncation?: ToolOutputTruncationOptions;
+  private toolContextConfig?: ToolContextConfig;
   private contextCompaction?: ContextCompactionConfig;
   private abortController: AbortController | null = null;
   private cachedPrefixTokens?: number;
@@ -363,6 +372,7 @@ export class Agent {
     this.maxToolRounds = normalizeMaxToolRounds(opts.maxToolRounds);
     this.toolTimeouts = opts.toolTimeouts ?? {};
     this.toolOutputTruncation = opts.toolOutputTruncation;
+    this.toolContextConfig = opts.toolContextConfig;
     this.contextCompaction = opts.contextCompaction;
   }
 
@@ -649,6 +659,18 @@ export class Agent {
   }
 
   private async buildToolMessage(call: IToolCall, result: unknown, success: boolean) {
+    if (this.toolContextConfig) {
+      const ctx = await applyToolContextMode(
+        call.name,
+        call.arguments,
+        result,
+        success,
+        this.toolContextConfig
+      );
+      if (ctx.summarized) {
+        return MessageFactory.tool(call.id, ctx.content, success);
+      }
+    }
     if (this.toolOutputTruncation) {
       const truncated = await truncateToolOutput(result, call.name, this.toolOutputTruncation);
       return MessageFactory.tool(call.id, truncated.content, success);

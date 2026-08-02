@@ -62,6 +62,10 @@ export interface Settings {
   pruneOldToolResults: boolean;
   pruneProtectRounds: number;
   pruneMinChars: number;
+  toolContextDefaultMode: 'full' | 'summary' | 'auto';
+  toolContextOverrides: Record<string, 'full' | 'summary' | 'auto'>;
+  toolContextSummaryMaxChars: number;
+  toolContextAutoThresholdChars: number;
   projectGraphMaxDepth: number;
   projectGraphMaxFiles: number;
   projectGraphMaxEdges: number;
