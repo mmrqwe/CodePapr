@@ -222,8 +222,9 @@ export function mergeAgentDefinitions(builtin: AgentDefinition[], loaded: AgentD
 }
 
 /**
- * 会变更项目或外部状态的工具。ask/plan 模式（只读 / 只规划）会在注册层屏蔽这些工具，
+ * 会变更项目或外部状态的工具。ask 模式（只读）会在注册层屏蔽这些工具，
  * 既不下发给模型，也不注册 handler（硬拦截）。
+ * plan 模式虽有"先确认再实施"的工作流，但工具层面拥有完整变更能力。
  * 注：git 含读子命令但整体可变更仓库，归入变更类。
  */
 export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
@@ -239,18 +240,41 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
   'app_delete',
 ]);
 
-/** ask/plan 为受限（只读）模式；agent/app 拥有完整工具。 */
+/** 仅在 app 模式下可用的工具（应用管理/渲染相关）。 */
+export const APP_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'app_render',
+  'app_list',
+  'app_start',
+  'app_stop',
+  'app_delete',
+]);
+
+/** 仅在 plan 模式下可用的工具（向用户提问以消除歧义/确认决策）。 */
+export const PLAN_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'question',
+]);
+
+/** ask 为只读模式；plan/agent/app 拥有完整变更工具。 */
 export function isReadOnlyMode(mode: PromptMode): boolean {
-  return mode === 'ask' || mode === 'plan';
+  return mode === 'ask';
 }
 
-/** 按工作模式过滤工具：ask/plan 移除变更类工具；agent/app 原样返回。 */
+/**
+ * 按工作模式过滤工具：
+ * - ask：移除变更类工具（只读）
+ * - 非 app 模式：移除 app 专用工具
+ * - 非 plan 模式：移除 question 工具
+ */
 export function filterToolsForMode<T extends IToolDefinition>(
   tools: T[],
   mode: PromptMode
 ): T[] {
-  if (!isReadOnlyMode(mode)) return tools;
-  return tools.filter((tool) => !MUTATING_TOOL_NAMES.has(tool.name));
+  return tools.filter((tool) => {
+    if (isReadOnlyMode(mode) && MUTATING_TOOL_NAMES.has(tool.name)) return false;
+    if (mode !== 'app' && APP_ONLY_TOOL_NAMES.has(tool.name)) return false;
+    if (mode !== 'plan' && PLAN_ONLY_TOOL_NAMES.has(tool.name)) return false;
+    return true;
+  });
 }
 
 export const BUILTIN_AGENTS: AgentDefinition[] = [

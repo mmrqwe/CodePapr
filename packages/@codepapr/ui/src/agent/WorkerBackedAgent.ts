@@ -160,6 +160,7 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
     {
       disableWebSearchTools: hasEnabledMcpSearch(config.settings.mcp),
       multimodalEnabled: resolveWorkerMultimodalEnabled(config.settings, config.model),
+      mode,
     },
   );
 
@@ -476,6 +477,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         this.pendingRequests.delete(message.requestId);
         this.activeRequestId = null;
         this.flushDeltas(pending);
+        this.workerSyncedLength.delete(this.config.sessionId);
         pending.reject(new DOMException('Session was cancelled', 'AbortError'));
       }
       return;
@@ -707,6 +709,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.flushDeltas(pending);
     this.pendingRequests.delete(message.requestId);
     this.activeRequestId = null;
+    this.workerSyncedLength.delete(this.config.sessionId);
     pending.reject(reconstructWorkerError(message));
   };
 

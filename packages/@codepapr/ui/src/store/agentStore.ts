@@ -2335,6 +2335,13 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           saveCurrentProjectState(get());
         } finally {
           clearStoreIdle();
+          void (async () => {
+            try {
+              await invoke('close_browser_page', { workspacePath: get().workspacePath });
+            } catch {
+              // no-op: browser may not have been opened this turn
+            }
+          })();
         }
       },
     }));

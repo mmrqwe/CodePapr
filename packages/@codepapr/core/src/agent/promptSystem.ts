@@ -916,7 +916,7 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
 
   // === 特殊模式工具 ===
   const special: string[] = [];
-  if (hasTool(toolNames, 'question') && (mode === 'plan' || mode === 'app')) {
+  if (hasTool(toolNames, 'question') && mode === 'plan') {
     special.push(
       lang === 'en'
         ? '- [question] When requirements are ambiguous, call `question` with clear question and optional options. Wait for user response.'

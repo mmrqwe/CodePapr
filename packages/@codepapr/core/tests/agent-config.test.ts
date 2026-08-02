@@ -100,31 +100,51 @@ describe('agentConfig - filterToolsForMode', () => {
     tool('bash'),
     tool('git'),
     tool('app_render'),
+    tool('app_list'),
+    tool('app_start'),
+    tool('app_stop'),
+    tool('app_delete'),
     tool('question'),
+    tool('task'),
   ];
 
-  it('ask 模式移除变更类工具，保留只读工具', () => {
-    expect(filterToolsForMode(all, 'ask').map((t) => t.name)).toEqual(['read', 'question']);
+  it('ask 模式：移除变更类工具和 app 工具和 question，保留只读工具 + task', () => {
+    expect(filterToolsForMode(all, 'ask').map((t) => t.name)).toEqual(['read', 'task']);
   });
 
-  it('plan 模式移除变更类工具', () => {
-    expect(filterToolsForMode(all, 'plan').map((t) => t.name)).toEqual(['read', 'question']);
+  it('plan 模式：有变更工具 + question，无 app 工具', () => {
+    const names = filterToolsForMode(all, 'plan').map((t) => t.name);
+    expect(names).toContain('read');
+    expect(names).toContain('write');
+    expect(names).toContain('edit');
+    expect(names).toContain('bash');
+    expect(names).toContain('git');
+    expect(names).toContain('question');
+    expect(names).toContain('task');
+    expect(names).not.toContain('app_render');
+    expect(names).not.toContain('app_list');
   });
 
-  it('agent 模式保留全部工具', () => {
-    expect(filterToolsForMode(all, 'agent').map((t) => t.name)).toEqual([
-      'read',
-      'write',
-      'edit',
-      'bash',
-      'git',
-      'app_render',
-      'question',
-    ]);
+  it('agent 模式：有变更工具 + task，无 app 工具和 question', () => {
+    const names = filterToolsForMode(all, 'agent').map((t) => t.name);
+    expect(names).toContain('read');
+    expect(names).toContain('write');
+    expect(names).toContain('edit');
+    expect(names).toContain('bash');
+    expect(names).toContain('git');
+    expect(names).toContain('task');
+    expect(names).not.toContain('app_render');
+    expect(names).not.toContain('question');
   });
 
-  it('app 模式保留全部工具', () => {
-    expect(filterToolsForMode(all, 'app')).toHaveLength(all.length);
+  it('app 模式：有变更工具 + app 工具 + task，无 question', () => {
+    const names = filterToolsForMode(all, 'app').map((t) => t.name);
+    expect(names).toContain('read');
+    expect(names).toContain('write');
+    expect(names).toContain('app_render');
+    expect(names).toContain('app_list');
+    expect(names).toContain('task');
+    expect(names).not.toContain('question');
   });
 });
 

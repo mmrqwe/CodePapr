@@ -1075,7 +1075,9 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
   // incremental sync appends only newMessages onto the cached log after
   // verifying the cached length matches what the main thread expects (a
   // mismatch means the cache is stale and is treated as an error — the main
-  // thread only sends incremental when its tracked length agrees).
+  // thread only sends incremental when its tracked length agrees; it is
+  // responsible for invalidating its tracked length whenever a turn errors
+  // or is cancelled so the next chat falls back to a full sync).
   let sessionLog = sessionLogs.get(payload.sessionId);
   if (payload.incrementalSync && sessionLog) {
     const { expectedBaseLength, newMessages } = payload.incrementalSync;

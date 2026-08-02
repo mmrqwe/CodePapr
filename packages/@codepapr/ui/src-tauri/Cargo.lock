@@ -652,6 +652,7 @@ dependencies = [
  "headless_chrome",
  "ignore",
  "keyring",
+ "libc",
  "notify",
  "rand 0.8.6",
  "regex",

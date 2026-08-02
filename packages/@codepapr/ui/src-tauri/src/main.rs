@@ -385,6 +385,7 @@ fn main() {
             // processes here too (idempotent) to avoid orphaned servers.
             if matches!(event, tauri::RunEvent::Exit) {
                 let _ = shell::background::stop_all_background_processes(None);
+                browser::page::close_all_browser_pages();
             }
         });
 }

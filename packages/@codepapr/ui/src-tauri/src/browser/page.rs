@@ -689,7 +689,29 @@ pub(crate) async fn close_browser_page(workspace_path: String) -> Result<Browser
 
 pub(crate) fn close_all_browser_pages() {
     let Ok(mut sessions) = browser_page_sessions().lock() else { return };
+    let pids: Vec<u32> = sessions
+        .values()
+        .filter_map(|s| s._browser.get_process_id())
+        .collect();
     for (_, session) in sessions.drain() {
         let _ = session.tab.close(true);
+    }
+    // Drop handles Browser.close() via CDP, but if the transport is already
+    // dead (mid-shutdown, network issue) the Chrome process can be orphaned.
+    // Force-kill by PID as a last-resort safety net.
+    for pid in pids {
+        #[cfg(unix)]
+        {
+            let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/PID", &pid.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
     }
 }

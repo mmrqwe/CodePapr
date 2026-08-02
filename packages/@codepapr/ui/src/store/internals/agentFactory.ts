@@ -324,6 +324,7 @@ export function buildAgentSessionParts(
   }, {
     disableWebSearchTools: hasEnabledMcpSearch(settings.mcp),
     multimodalEnabled: resolveMultimodalEnabled(settings, overrides.model ?? settings.model),
+    mode,
   });
 
   // TodoList 工具：主 Agent 的"短期工作记忆"，与 task 工具正交协作

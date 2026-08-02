@@ -1835,6 +1835,8 @@ export interface RegisterWorkspaceToolsOptions {
    * 但 handler 仍注册，供子代理（如 Explore）经白名单选取。子代理注册时应传 true。
    */
   exposeGraphToLlm?: boolean;
+  /** 工作模式，用于按模式过滤工具可见性。默认 agent。 */
+  mode?: 'ask' | 'plan' | 'agent' | 'app';
 }
 
 export function registerWorkspaceTools(
@@ -4148,7 +4150,7 @@ export function registerWorkspaceTools(
     'workspace_fix_diagnostics', 'workspace_format_files',
     'workspace_git_status', 'workspace_git_diff', 'workspace_git_history',
     'workspace_git_branch_checkout', 'workspace_git_stage', 'workspace_git_commit',
-    'workspace_git_restore', 'workspace_git_reset',
+    'workspace_git_restore', 'workspace_git_reset', 'workspace_restore_undo',
     'workspace_run_command', 'workspace_project_diagnostics',
     'workspace_run_shell_command', 'workspace_start_shell_background_command',
     'workspace_start_background_command', 'workspace_start_preview_session',
@@ -4232,6 +4234,18 @@ export function registerWorkspaceTools(
 
   for (const name of oldToolNames) {
     registry.hideFromLlm(name);
+  }
+
+  // 按模式过滤工具可见性
+  const mode = options.mode ?? 'agent';
+  const APP_TOOLS = ['app_render', 'app_list', 'app_start', 'app_stop', 'app_delete'];
+  if (mode !== 'app') {
+    for (const name of APP_TOOLS) {
+      registry.hideFromLlm(name);
+    }
+  }
+  if (mode !== 'plan') {
+    registry.hideFromLlm('question');
   }
 
   // graph 工具默认对主代理 LLM 软隐藏：项目结构改用 list（目录树+逐文件轻量符号），符号导航改用 lsp。
