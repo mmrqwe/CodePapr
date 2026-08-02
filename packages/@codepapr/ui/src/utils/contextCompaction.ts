@@ -1,6 +1,12 @@
 import type { IImageContent, IMessage } from '@codepapr/types';
 import { estimateTokens, sortedStringify } from '@codepapr/common';
-import { stripInternalFields, pruneOldToolResults, type PruneOptions } from '@codepapr/core';
+import {
+  stripInternalFields,
+  pruneOldToolResults,
+  applyHistoryToolSummaries,
+  TOOL_SUMMARY_METADATA_KEY,
+  type PruneOptions,
+} from '@codepapr/core';
 import type { Lang } from './i18n';
 import type { UIToolInvocation } from '../store/internals/types';
 
@@ -213,6 +219,11 @@ function toCoreTailMessages(messages: readonly ContextMessageLike[]): IMessage[]
               result: cleanedOutput,
               error: ti.error,
             },
+            // Carry the frozen history summary so applyHistoryToolSummaries
+            // rewrites rebuilt requests byte-identically to the live path.
+            ...(ti.contextSummary
+              ? { metadata: { [TOOL_SUMMARY_METADATA_KEY]: ti.contextSummary } }
+              : {}),
           };
         });
         return [assistantMsg, ...toolMsgs];
@@ -479,7 +490,12 @@ export function buildEffectiveContextMessages(
   // identical input and coincides with the compaction prefix rewrite, so it does
   // not add per-round prefix-cache breaks (the old per-request sliding-window
   // pruning mutated mid-prefix bytes on essentially every round).
-  return pruneOldToolResults(repairOrphanedToolCalls(result), options?.pruneOptions);
+  const pruned = pruneOldToolResults(repairOrphanedToolCalls(result), options?.pruneOptions);
+  // Apply frozen history summaries (tool context mode) with the same pure rule the
+  // live RequestBuilder uses, so rebuilt history is byte-identical to live.
+  // Layering: prune (oldest → placeholder) runs first on full-content sizes,
+  // then summarization folds the middle-aged results; the latest batch stays full.
+  return applyHistoryToolSummaries(pruned);
 }
 
 /**

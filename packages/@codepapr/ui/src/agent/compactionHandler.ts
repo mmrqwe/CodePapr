@@ -1,6 +1,7 @@
 import type { ICacheStatistics, IMessage } from '@codepapr/types';
 import {
   renderTodoListDigest,
+  TOOL_SUMMARY_METADATA_KEY,
   type ContextCompactionConfig,
   type PruneOptions,
 } from '@codepapr/core';
@@ -50,6 +51,7 @@ export function coreMessagesToContextMessages(coreMessages: IMessage[]): Context
       const toolInvocations: UIToolInvocation[] = msg.toolCalls.map((tc) => {
         const toolMsg = toolByCallId.get(tc.id);
         const success = toolMsg?.toolResult?.success ?? false;
+        const frozenSummary = toolMsg?.metadata?.[TOOL_SUMMARY_METADATA_KEY];
         return {
           id: tc.id,
           name: tc.name,
@@ -57,6 +59,7 @@ export function coreMessagesToContextMessages(coreMessages: IMessage[]): Context
           status: success ? 'success' : 'error',
           output: typeof toolMsg?.content === 'string' ? toolMsg.content : '',
           error: toolMsg?.toolResult?.error,
+          ...(typeof frozenSummary === 'string' ? { contextSummary: frozenSummary } : {}),
         };
       });
       result.push({

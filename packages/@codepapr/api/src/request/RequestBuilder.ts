@@ -22,7 +22,7 @@ import {
   CacheConsistencyError,
 } from '@codepapr/types';
 import { Logger, sha256, estimateTokens } from '@codepapr/common';
-import { Serializer } from '@codepapr/core';
+import { Serializer, applyHistoryToolSummaries } from '@codepapr/core';
 import { DEFAULT_MAX_TOKENS, sanitizeMaxTokens, getProviderContextLimit } from '../tokenLimits';
 
 const log = new Logger('RequestBuilder');
@@ -87,13 +87,24 @@ export class RequestBuilder {
     // This prevents old base64 data from bloating every subsequent request.
     messages = stripConsumedImages(messages);
 
-    // NOTE: Old tool results are NOT pruned here. Pruning on every request build
-    // used a sliding protection window, so a tool message flipped from full
-    // content to a placeholder as rounds accumulated — mutating bytes in the
-    // middle of the already-cached prefix and invalidating DeepSeek's byte-exact
-    // prefix cache on essentially every round. Pruning now happens once, at
-    // context-rebuild time (buildEffectiveContextMessages), where it coincides
-    // with the compaction prefix rewrite and is idempotent for identical input.
+    // Tool context mode: replace tool messages carrying a frozen summary
+    // (metadata.toolSummary) with that summary, EXCEPT the latest tool batch
+    // (which the LLM just received and is reasoning about). The full content
+    // stays in the AppendOnlyLog; only this request copy is rewritten.
+    //
+    // The rule is a pure function of the message array (no build-history
+    // state), so the live path and the rebuild path produce byte-identical
+    // requests. Each tool message flips exactly once (the round after it
+    // leaves the latest batch), so this costs one prefix-cache invalidation
+    // per message — not the per-round break the old sliding-window prune
+    // caused (its flip point sat N rounds back, invalidating the whole
+    // protected window every round).
+    //
+    // NOTE: Old tool results are NOT placeholder-pruned here. That pruning
+    // happens once, at context-rebuild time (buildEffectiveContextMessages),
+    // where it coincides with the compaction prefix rewrite and is idempotent
+    // for identical input.
+    messages = applyHistoryToolSummaries(messages);
 
     // ✅ 检查 6: 确定性序列化
     const cacheRelevantMessages = this.toCacheRelevantMessages(messages);

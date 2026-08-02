@@ -154,6 +154,10 @@ export interface UIToolInvocation {
    *  on restore so the prefix cache is not broken. `output` is the full raw result
    *  for display. Persisted inside the tool_invocations JSON column. */
   contextContent?: string;
+  /** Frozen history summary (tool context mode). Rebuilt tool messages carry it
+   *  in metadata so applyHistoryToolSummaries behaves byte-identically to the
+   *  live path. Absent when the tool stays full in history. */
+  contextSummary?: string;
   subagentToolInvocations?: ISubagentToolInvocation[];
 }
 

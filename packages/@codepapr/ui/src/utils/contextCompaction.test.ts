@@ -502,6 +502,94 @@ describe('contextCompaction', () => {
     });
   });
 
+  describe('history summaries on rebuild (tool context mode)', () => {
+    function assistantWithSummary(
+      id: string,
+      callId: string,
+      full: string,
+      summary?: string
+    ): ContextMessageLike {
+      return {
+        id,
+        role: 'assistant',
+        content: '',
+        timestamp: Number(id.replace(/\D/g, '')) || 1,
+        toolInvocations: [
+          {
+            id: callId,
+            name: 'read',
+            arguments: {},
+            status: 'success',
+            output: full,
+            contextContent: full,
+            ...(summary ? { contextSummary: summary } : {}),
+          },
+        ],
+      };
+    }
+
+    it('carries the frozen summary into rebuilt tool message metadata', () => {
+      const messages: ContextMessageLike[] = [
+        assistantWithSummary('a1', 'c1', 'full-1', '[read] summary-1'),
+      ];
+      const effective = buildEffectiveContextMessages(messages);
+      const toolMsg = effective.find((m) => m.role === 'tool');
+      expect(toolMsg?.metadata?.toolSummary).toBe('[read] summary-1');
+      // The rebuilt log content itself stays the full (byte-exact) content;
+      // summarization is applied at request-build time, not in the log.
+      expect(toolMsg?.content).toBe('full-1');
+    });
+
+    it('summarizes older results but keeps the latest batch full (live-path parity)', () => {
+      const messages: ContextMessageLike[] = [
+        assistantWithSummary('a1', 'c1', 'full-1', '[read] summary-1'),
+        assistantWithSummary('a2', 'c2', 'full-2', '[read] summary-2'),
+      ];
+      const effective = buildEffectiveContextMessages(messages);
+      const toolMsgs = effective.filter((m) => m.role === 'tool');
+      expect(toolMsgs[0]?.content).toBe('[read] summary-1');
+      expect(toolMsgs[1]?.content).toBe('full-2');
+    });
+
+    it('keeps full-mode results (no contextSummary) untouched', () => {
+      const messages: ContextMessageLike[] = [
+        assistantWithSummary('a1', 'c1', 'full-1'),
+        assistantWithSummary('a2', 'c2', 'full-2'),
+      ];
+      const effective = buildEffectiveContextMessages(messages);
+      const toolMsgs = effective.filter((m) => m.role === 'tool');
+      expect(toolMsgs[0]?.content).toBe('full-1');
+      expect(toolMsgs[1]?.content).toBe('full-2');
+    });
+
+    it('layers prune (oldest→placeholder) before summarize (middle-aged→summary)', () => {
+      const big = 'y'.repeat(30_000);
+      const messages: ContextMessageLike[] = [
+        assistantWithSummary('a1', 'c1', big, '[read] summary-1'),
+        assistantWithSummary('a2', 'c2', big, '[read] summary-2'),
+        assistantWithSummary('a3', 'c3', 'full-3', '[read] summary-3'),
+      ];
+      // Reverse round counting: a tool message is checked before its calling
+      // assistant is counted, so protectRecentRounds=1 protects t2/t3 and
+      // leaves the oldest (t1) prunable — producing the placeholder tier.
+      const pruneOptions: PruneOptions = {
+        enabled: true,
+        protectRecentRounds: 1,
+        minPrunableChars: 10_000,
+        protectedTools: new Set<string>(),
+        placeholder: '[cleared]',
+      };
+      const effective = buildEffectiveContextMessages(messages, { pruneOptions });
+      const toolMsgs = effective.filter((m) => m.role === 'tool');
+      // Oldest (outside the protected window) is pruned to the placeholder…
+      expect(toolMsgs[0]?.content).toBe('[cleared]');
+      // …the middle-aged one is folded to its frozen summary…
+      expect(toolMsgs[1]?.content).toBe('[read] summary-2');
+      // …and the latest batch stays full.
+      expect(toolMsgs[2]?.content).toBe('full-3');
+    });
+  });
+
   describe('orphaned tool-call repair (problem 2.2 fix)', () => {
     it('repairs an assistant tool call that has no matching tool result', () => {
       const messages: IMessage[] = [

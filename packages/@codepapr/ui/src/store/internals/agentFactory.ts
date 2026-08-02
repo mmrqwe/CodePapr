@@ -76,30 +76,12 @@ function buildToolOutputTruncation(
   };
 }
 
-function buildToolContextConfig(
-  settings: Settings,
-  workspacePath: string
-): ToolContextConfig {
+function buildToolContextConfig(settings: Settings): ToolContextConfig {
   return {
     defaultMode: settings.toolContextDefaultMode,
     overrides: settings.toolContextOverrides,
     summaryMaxChars: settings.toolContextSummaryMaxChars,
     autoThresholdChars: settings.toolContextAutoThresholdChars,
-    spillToDisk: async (content: string, toolName: string): Promise<string | null> => {
-      try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        const filename = generateToolOutputFilename(toolName);
-        const relativePath = `.CodePapr/tool-output/${filename}`;
-        await invoke('write_text_file', {
-          workspacePath,
-          relativePath,
-          content,
-        });
-        return relativePath;
-      } catch {
-        return null;
-      }
-    },
   };
 }
 
@@ -438,7 +420,7 @@ function _createLocalAgent(
     maxToolRounds: settings.maxToolRounds,
     toolTimeouts: { graph: settings.graphToolTimeoutMs },
     toolOutputTruncation: buildToolOutputTruncation(settings, workspacePath),
-    toolContextConfig: buildToolContextConfig(settings, workspacePath),
+    toolContextConfig: buildToolContextConfig(settings),
     contextCompaction: createContextCompactionHandler(
       settings,
       parts.providerName,

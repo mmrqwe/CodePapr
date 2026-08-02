@@ -307,6 +307,11 @@ export type IChatStreamEvent =
          *  history rebuilds tool messages byte-identically and does not break the
          *  prefix cache. `output` stays the full raw result for UI display. */
         contextContent?: string;
+        /** Frozen history summary (tool context mode). The log keeps the full
+         *  content; this summary replaces older tool messages when requests are
+         *  built. Persisted so rebuilt history applies the same summaries
+         *  byte-identically. Absent when the tool stays full in history. */
+        contextSummary?: string;
         subagentToolInvocations?: ISubagentToolInvocation[];
       }
   | { type: 'context-compacted'; round: number };

@@ -41,16 +41,19 @@ export type {
 export { pruneOldToolResults } from './tool/pruneToolResults';
 export type { PruneOptions } from './tool/pruneToolResults';
 export {
-  applyToolContextMode,
   summarizeToolOutput,
   resolveToolContextMode,
+  prepareHistorySummary,
+  applyHistoryToolSummaries,
+  headTailPreview,
+  TOOL_SUMMARY_METADATA_KEY,
   DEFAULT_SUMMARY_MAX_CHARS,
   DEFAULT_AUTO_THRESHOLD_CHARS,
 } from './tool/toolOutputSummary';
 export type {
   ToolContextMode,
   ToolContextConfig,
-  ToolContextResult,
+  HistorySummaryInput,
 } from './tool/toolOutputSummary';
 export type {
   ApplySearchReplaceDiffFile,

@@ -31,7 +31,12 @@ export class MessageFactory {
     }) as IMessage;
   }
 
-  static tool(toolCallId: string, result: unknown, success: boolean = true): IMessage {
+  static tool(
+    toolCallId: string,
+    result: unknown,
+    success: boolean = true,
+    metadata?: Record<string, unknown>
+  ): IMessage {
     const cleanedResult =
       typeof result === 'string' ? result : stripInternalFields(result);
     const toolResult: IToolResult = { toolCallId, success, result: cleanedResult };
@@ -45,6 +50,7 @@ export class MessageFactory {
       content,
       timestamp: Date.now(),
       toolResult,
+      ...(metadata ? { metadata } : {}),
     }) as IMessage;
   }
 }

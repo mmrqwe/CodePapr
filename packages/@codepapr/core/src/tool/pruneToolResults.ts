@@ -10,6 +10,7 @@
  */
 
 import type { IMessage } from '@codepapr/types';
+import { TOOL_SUMMARY_METADATA_KEY } from './toolOutputSummary';
 
 export interface PruneOptions {
   enabled: boolean;
@@ -83,6 +84,19 @@ export function pruneOldToolResults(
   const prunedSet = new Set(prunable.map((e) => e.index));
   return messages.map((msg, i) => {
     if (!prunedSet.has(i)) return msg;
-    return { ...msg, content: options.placeholder, toolResult: { ...msg.toolResult!, result: options.placeholder } };
+    // Drop the frozen history summary (if any) so a later summarization pass
+    // cannot resurrect a pruned result: placeholder < summary < full.
+    let metadata: Record<string, unknown> | undefined;
+    if (msg.metadata) {
+      metadata = { ...msg.metadata };
+      delete metadata[TOOL_SUMMARY_METADATA_KEY];
+      if (Object.keys(metadata).length === 0) metadata = undefined;
+    }
+    return {
+      ...msg,
+      content: options.placeholder,
+      toolResult: { ...msg.toolResult!, result: options.placeholder },
+      metadata,
+    };
   });
 }

@@ -39,8 +39,16 @@ import { Logger, estimateTokens } from '@codepapr/common';
 import { Session, mergeOptionalTokenCount } from './Session';
 import { MessageFactory } from '../message/Message';
 import { Serializer } from '../cache/Serializer';
-import { truncateToolOutput, type ToolOutputTruncationOptions } from '../tool/toolOutputTruncation';
-import { applyToolContextMode, type ToolContextConfig } from '../tool/toolOutputSummary';
+import {
+  truncateToolOutput,
+  stringifyToolResult,
+  type ToolOutputTruncationOptions,
+} from '../tool/toolOutputTruncation';
+import {
+  prepareHistorySummary,
+  TOOL_SUMMARY_METADATA_KEY,
+  type ToolContextConfig,
+} from '../tool/toolOutputSummary';
 
 const log = new Logger('Agent');
 
@@ -615,6 +623,10 @@ export class Agent {
           error: errorMessage,
           output: typeof contextResult === 'string' ? contextResult : JSON.stringify(contextResult),
           contextContent: toolMsg.content,
+          contextSummary:
+            typeof toolMsg.metadata?.[TOOL_SUMMARY_METADATA_KEY] === 'string'
+              ? (toolMsg.metadata[TOOL_SUMMARY_METADATA_KEY] as string)
+              : undefined,
           ...(subagentToolInvocations ? { subagentToolInvocations } : {}),
         });
 
@@ -659,22 +671,37 @@ export class Agent {
   }
 
   private async buildToolMessage(call: IToolCall, result: unknown, success: boolean) {
-    if (this.toolContextConfig) {
-      const ctx = await applyToolContextMode(
-        call.name,
-        call.arguments,
-        result,
-        success,
-        this.toolContextConfig
-      );
-      if (ctx.summarized) {
-        return MessageFactory.tool(call.id, ctx.content, success);
-      }
-    }
+    let content: string;
+    let originalChars: number;
+    let spilledPath: string | undefined;
     if (this.toolOutputTruncation) {
       const truncated = await truncateToolOutput(result, call.name, this.toolOutputTruncation);
-      return MessageFactory.tool(call.id, truncated.content, success);
+      content = truncated.content;
+      originalChars = truncated.originalChars;
+      spilledPath = truncated.spilledPath;
+    } else {
+      content = stringifyToolResult(result);
+      originalChars = content.length;
     }
-    return MessageFactory.tool(call.id, result, success);
+
+    let metadata: Record<string, unknown> | undefined;
+    if (this.toolContextConfig) {
+      const summary = prepareHistorySummary(
+        {
+          toolName: call.name,
+          args: call.arguments,
+          result,
+          success,
+          originalChars,
+          spilledPath,
+        },
+        this.toolContextConfig
+      );
+      if (summary) {
+        metadata = { [TOOL_SUMMARY_METADATA_KEY]: summary };
+      }
+    }
+
+    return MessageFactory.tool(call.id, content, success, metadata);
   }
 }

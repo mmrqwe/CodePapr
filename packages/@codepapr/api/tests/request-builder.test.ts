@@ -208,6 +208,99 @@ describe('RequestBuilder - DeepSeek cache stability', () => {
   });
 });
 
+describe('RequestBuilder - tool context mode (history summaries)', () => {
+  const SUMMARY_KEY = 'toolSummary';
+
+  function assistantWithTools(id: string, callIds: string[]): IMessage {
+    return {
+      id,
+      role: 'assistant',
+      content: '',
+      toolCalls: callIds.map((cid) => ({ id: cid, name: 'read', arguments: {} })),
+      timestamp: 1,
+    } as IMessage;
+  }
+
+  function toolResult(id: string, callId: string, content: string, summary?: string): IMessage {
+    return {
+      id,
+      role: 'tool',
+      content,
+      toolResult: { toolCallId: callId, success: true, result: content },
+      ...(summary ? { metadata: { [SUMMARY_KEY]: summary } } : {}),
+      timestamp: 1,
+    } as IMessage;
+  }
+
+  async function buildLog(messages: IMessage[]): Promise<{ req: ReturnType<RequestBuilder['build']> }> {
+    const log = new AppendOnlyLog('history-summaries');
+    for (const msg of messages) {
+      await log.append(msg);
+    }
+    const req = new RequestBuilder().build({
+      prefix: createPrefix(),
+      appendLog: log,
+      model: 'deepseek-chat',
+      provider: 'deepseek',
+    });
+    return { req };
+  }
+
+  it('keeps the latest tool batch full and rewrites older results to frozen summaries', async () => {
+    const { req } = await buildLog([
+      assistantWithTools('a1', ['c1']),
+      toolResult('t1', 'c1', 'full-1', '[read] summary-1'),
+      assistantWithTools('a2', ['c2']),
+      toolResult('t2', 'c2', 'full-2', '[read] summary-2'),
+    ]);
+
+    // messages[0] is the system prefix; log messages start at index 1.
+    expect(req.messages[2]?.content).toBe('[read] summary-1');
+    expect(req.messages[4]?.content).toBe('full-2');
+  });
+
+  it('does not rewrite the log itself (copy-only mutation)', async () => {
+    const log = new AppendOnlyLog('copy-only');
+    await log.append(assistantWithTools('a1', ['c1']));
+    await log.append(toolResult('t1', 'c1', 'full-1', '[read] summary-1'));
+    await log.append(assistantWithTools('a2', ['c2']));
+    await log.append(toolResult('t2', 'c2', 'full-2', '[read] summary-2'));
+
+    new RequestBuilder().build({
+      prefix: createPrefix(),
+      appendLog: log,
+      model: 'deepseek-chat',
+      provider: 'deepseek',
+    });
+
+    expect(log.toMessageArray()[1]?.content).toBe('full-1');
+  });
+
+  it('leaves full-mode results (no frozen summary) untouched', async () => {
+    const { req } = await buildLog([
+      assistantWithTools('a1', ['c1']),
+      toolResult('t1', 'c1', 'full-1'),
+      assistantWithTools('a2', ['c2']),
+      toolResult('t2', 'c2', 'full-2'),
+    ]);
+    expect(req.messages[2]?.content).toBe('full-1');
+    expect(req.messages[4]?.content).toBe('full-2');
+  });
+
+  it('is byte-identical for identical logs (rebuild/live parity)', async () => {
+    const make = () => [
+      assistantWithTools('a1', ['c1']),
+      toolResult('t1', 'c1', 'full-1', '[read] summary-1'),
+      assistantWithTools('a2', ['c2']),
+      toolResult('t2', 'c2', 'full-2', '[read] summary-2'),
+    ];
+    const { req: req1 } = await buildLog(make());
+    const { req: req2 } = await buildLog(make());
+    expect(JSON.stringify(req1.messages)).toBe(JSON.stringify(req2.messages));
+    expect(req1.metadata?.requestShapeHash).toBe(req2.metadata?.requestShapeHash);
+  });
+});
+
 describe('stripConsumedImages', () => {
   function user(content: string, images?: IMessage['images']): IMessage {
     return { id: `u-${content}`, role: 'user', content, images, timestamp: 1 } as IMessage;

@@ -79,7 +79,7 @@ export const DEFAULT_SETTINGS: Settings = {
   pruneOldToolResults: true,
   pruneProtectRounds: 6,
   pruneMinChars: 20_000,
-  toolContextDefaultMode: 'auto',
+  toolContextDefaultMode: 'full',
   toolContextOverrides: {},
   toolContextSummaryMaxChars: 500,
   toolContextAutoThresholdChars: 5_000,
