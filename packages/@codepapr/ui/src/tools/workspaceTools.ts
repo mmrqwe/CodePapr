@@ -4232,6 +4232,12 @@ export function registerWorkspaceTools(
     registry.hideFromLlm('read_image');
   }
 
+  // MCP 搜索启用时底层 web_fetch_url / web_download_file 不注册，
+  // 合并层 webfetch 分发器虽已注册但调用必失败，需一并对 LLM 隐藏。
+  if (options.disableWebSearchTools) {
+    registry.hideFromLlm('webfetch');
+  }
+
   for (const name of oldToolNames) {
     registry.hideFromLlm(name);
   }

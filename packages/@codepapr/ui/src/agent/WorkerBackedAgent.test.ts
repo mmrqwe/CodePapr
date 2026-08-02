@@ -2,9 +2,21 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IAgentResponse, IMessage } from '@codepapr/types';
-import { normalizeMcpSettings } from '../utils/mcpTypes';
+import { createDefaultMcpSettings, normalizeMcpSettings, type McpSettings } from '../utils/mcpTypes';
 import type { AgentWorkerToMainMessage, MainToAgentWorkerMessage } from './agentWorkerProtocol';
 import { WorkerBackedAgent, type AgentRuntimeStreamEvent } from './WorkerBackedAgent';
+
+function makeMcpSearchSettings(): McpSettings {
+  const base = createDefaultMcpSettings();
+  return {
+    ...base,
+    enabled: true,
+    exposeTools: true,
+    servers: base.servers.map((server) =>
+      server.id === 'search' ? { ...server, enabled: true } : server
+    ),
+  };
+}
 
 class MockWorker {
   static instances: MockWorker[] = [];
@@ -36,7 +48,7 @@ class MockWorker {
 
 function createAgent(
   initialMessages: IMessage[] = [],
-  overrides?: { multimodalEnabled?: boolean }
+  overrides?: { multimodalEnabled?: boolean; mcpSearch?: boolean }
 ): WorkerBackedAgent {
   return new WorkerBackedAgent({
     sessionId: 'session-1',
@@ -81,7 +93,7 @@ function createAgent(
       appSubAgentModelTier: 'primary',
       appSubAgentThinkingEnabled: false,
       appSubAgentMaxToolRounds: 50,
-      mcp: normalizeMcpSettings(),
+      mcp: overrides?.mcpSearch ? makeMcpSearchSettings() : normalizeMcpSettings(),
       graphToolTimeoutMs: 600_000,
       toolIpcTimeoutMs: 120_000,
       streamIdleTimeoutMs: 300_000,
@@ -318,6 +330,48 @@ describe('WorkerBackedAgent', () => {
 
     const toolNames = chatMessage.payload.toolDefinitions.map((t) => t.name);
     expect(toolNames).toContain('read_image');
+
+    worker?.emit({
+      type: 'result',
+      requestId: chatMessage.payload.requestId,
+      response: { role: 'assistant', content: 'ok' },
+      deltaMessages: [],
+      logLength: 0,
+    });
+    await chatPromise;
+  });
+
+  it('excludes websearch/webfetch from worker tool definitions when MCP search is enabled', async () => {
+    const agent = createAgent([], { mcpSearch: true });
+    const chatPromise = agent.chat('hello');
+    const worker = MockWorker.instances[0];
+    const chatMessage = worker?.messages[0];
+    if (chatMessage?.type !== 'chat') throw new Error('expected chat message');
+
+    const toolNames = chatMessage.payload.toolDefinitions.map((t) => t.name);
+    expect(toolNames).not.toContain('websearch');
+    expect(toolNames).not.toContain('webfetch');
+
+    worker?.emit({
+      type: 'result',
+      requestId: chatMessage.payload.requestId,
+      response: { role: 'assistant', content: 'ok' },
+      deltaMessages: [],
+      logLength: 0,
+    });
+    await chatPromise;
+  });
+
+  it('includes websearch/webfetch in worker tool definitions when MCP search is disabled', async () => {
+    const agent = createAgent([], { mcpSearch: false });
+    const chatPromise = agent.chat('hello');
+    const worker = MockWorker.instances[0];
+    const chatMessage = worker?.messages[0];
+    if (chatMessage?.type !== 'chat') throw new Error('expected chat message');
+
+    const toolNames = chatMessage.payload.toolDefinitions.map((t) => t.name);
+    expect(toolNames).toContain('websearch');
+    expect(toolNames).toContain('webfetch');
 
     worker?.emit({
       type: 'result',
