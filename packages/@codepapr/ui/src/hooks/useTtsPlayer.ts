@@ -38,7 +38,7 @@ function safeListen<T = unknown>(event: string, handler: (event: { payload: T })
  * pipeline into dead code. Kept modest so playback order stays stable in the
  * common case (a single batch → blocking → strictly ordered).
  */
-const WS_BATCH_CHUNKS = 4;
+const WS_BATCH_CHUNKS = 1;
 
 export type TtsServerStatus = 'unknown' | 'starting' | 'running' | 'stopped' | 'error';
 
@@ -398,13 +398,8 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
           baseArgs.textLanguage = textLangRef.current;
         }
 
-        const isLast = queueRef.current.length === 0;
         try {
-          if (isLast) {
-            await safeInvoke('tts_synthesize_batch_ws', baseArgs);
-          } else {
-            await safeInvoke('tts_synthesize_batch_ws_nonblocking', baseArgs);
-          }
+          await safeInvoke('tts_synthesize_batch_ws', baseArgs);
           errorCountRef.current = 0;
           skipRef.current = false;
         } catch (e) {
