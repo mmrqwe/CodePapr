@@ -686,3 +686,10 @@ pub(crate) async fn close_browser_page(workspace_path: String) -> Result<Browser
         })
     }).await
 }
+
+pub(crate) fn close_all_browser_pages() {
+    let Ok(mut sessions) = browser_page_sessions().lock() else { return };
+    for (_, session) in sessions.drain() {
+        let _ = session.tab.close(true);
+    }
+}

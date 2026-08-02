@@ -368,7 +368,12 @@ fn main() {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 lsp::stop_all_servers();
                 tts::tts_server_stop_internal();
+                tts::finetune::cancel();
+                tts::installer::cancel();
                 let _ = shell::background::stop_all_background_processes(None);
+                shell::session::stop_all_shell_sessions();
+                browser::page::close_all_browser_pages();
+                mcp_host::disconnect_all_blocking();
                 workspace_fs::watcher::stop_workspace_watcher_impl();
             }
         })

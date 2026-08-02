@@ -278,3 +278,11 @@ pub(crate) fn close_shell_session(session_id: String) -> Result<ShellCloseSessio
         })
     })
 }
+
+pub(crate) fn stop_all_shell_sessions() {
+    let Ok(mut sessions) = shell_sessions().lock() else { return };
+    for (_, mut session) in sessions.drain() {
+        let _ = session.child.kill();
+        let _ = session.child.wait();
+    }
+}

@@ -868,6 +868,11 @@ pub async fn disconnect_all() -> Result<usize, String> {
     Ok(closed)
 }
 
+pub fn disconnect_all_blocking() {
+    let Ok(handle) = tokio::runtime::Handle::try_current() else { return };
+    let _ = handle.block_on(disconnect_all());
+}
+
 /** Test connection to a single server: connect, list tools, return summary.
  *  Used by the per-server "Test" button in the UI. */
 pub async fn test_server(
