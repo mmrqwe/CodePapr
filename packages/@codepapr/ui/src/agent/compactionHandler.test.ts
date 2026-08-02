@@ -149,3 +149,129 @@ describe('createContextCompactionHandler (mid-loop retained tail)', () => {
     expect(result).toBeNull();
   });
 });
+
+describe('createContextCompactionHandler (bootstrap refresh)', () => {
+  const settings = {
+    pruneOldToolResults: false,
+    pruneProtectRounds: 6,
+    pruneMinChars: 20000,
+    maxContextTokens: 500000,
+    maxTokens: 8000,
+  } as unknown as Settings;
+
+  const checkpointMessage = {
+    id: 'cp1',
+    role: 'assistant',
+    content: '',
+    synthetic: true,
+    hidden: true,
+    timestamp: 999,
+    contextCheckpoint: {
+      version: 2,
+      summary: '检查点',
+      renderedContent: '检查点摘要',
+      sourceMessageCount: 6,
+      sourceChars: 100,
+      generatedAt: 999,
+      modelName: 'test-model',
+      modelTier: 'fast',
+    },
+  } as unknown as UIMessage;
+
+  function fourRounds(): IMessage[] {
+    const coreMessages: IMessage[] = [];
+    for (let r = 0; r < 4; r += 1) {
+      coreMessages.push({ id: `u${r}`, role: 'user', content: `用户消息 ${r}`, timestamp: r * 2 + 1 });
+      coreMessages.push({ id: `a${r}`, role: 'assistant', content: `助手回复 ${r}`, timestamp: r * 2 + 2 });
+    }
+    return coreMessages;
+  }
+
+  it('prefixes a fresh session bootstrap when refreshBootstrap returns content', async () => {
+    vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
+      message: checkpointMessage,
+      modelTier: 'fast',
+      insertIndex: 6,
+    });
+
+    const refreshBootstrap = vi.fn().mockResolvedValue('# 会话上下文\n\n## 项目记忆\n新鲜记忆');
+    const config = createContextCompactionHandler(settings, 'deepseek', 'session-test', refreshBootstrap);
+    const result = await config.handler(fourRounds());
+
+    expect(refreshBootstrap).toHaveBeenCalledTimes(1);
+    expect(result).not.toBeNull();
+    // bootstrap + checkpoint + retained tail (u3, a3)
+    expect(result!.messages).toHaveLength(4);
+    const bootstrap = result!.messages[0]!;
+    expect(bootstrap.role).toBe('assistant');
+    expect(bootstrap.content).toContain('新鲜记忆');
+    expect(bootstrap.metadata?.sessionBootstrap).toBe(true);
+    expect(bootstrap.metadata?.isPrefixSystem).toBe(true);
+    // checkpoint follows the bootstrap
+    expect(result!.messages[1]?.role).toBe('user');
+    expect(result!.messages[1]?.content).toContain('检查点摘要');
+  });
+
+  it('does not prefix a bootstrap when refreshBootstrap returns null', async () => {
+    vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
+      message: checkpointMessage,
+      modelTier: 'fast',
+      insertIndex: 6,
+    });
+
+    const refreshBootstrap = vi.fn().mockResolvedValue(null);
+    const config = createContextCompactionHandler(settings, 'deepseek', 'session-test', refreshBootstrap);
+    const result = await config.handler(fourRounds());
+
+    expect(result).not.toBeNull();
+    // checkpoint + tail only, no bootstrap
+    expect(result!.messages).toHaveLength(3);
+    expect(result!.messages[0]?.role).toBe('user');
+    expect(result!.messages[0]?.content).toContain('检查点摘要');
+  });
+
+  it('does not prefix a bootstrap when refreshBootstrap returns an empty string', async () => {
+    vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
+      message: checkpointMessage,
+      modelTier: 'fast',
+      insertIndex: 6,
+    });
+
+    const refreshBootstrap = vi.fn().mockResolvedValue('   ');
+    const config = createContextCompactionHandler(settings, 'deepseek', 'session-test', refreshBootstrap);
+    const result = await config.handler(fourRounds());
+
+    expect(result!.messages).toHaveLength(3);
+    expect(result!.messages[0]?.content).toContain('检查点摘要');
+  });
+
+  it('falls back to a bootstrap-less epoch when refreshBootstrap throws', async () => {
+    vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
+      message: checkpointMessage,
+      modelTier: 'fast',
+      insertIndex: 6,
+    });
+
+    const refreshBootstrap = vi.fn().mockRejectedValue(new Error('disk read failed'));
+    const config = createContextCompactionHandler(settings, 'deepseek', 'session-test', refreshBootstrap);
+    const result = await config.handler(fourRounds());
+
+    expect(result).not.toBeNull();
+    expect(result!.messages).toHaveLength(3);
+    expect(result!.messages[0]?.content).toContain('检查点摘要');
+  });
+
+  it('keeps backward compatibility when no refreshBootstrap is provided', async () => {
+    vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
+      message: checkpointMessage,
+      modelTier: 'fast',
+      insertIndex: 6,
+    });
+
+    const config = createContextCompactionHandler(settings, 'deepseek', 'session-test');
+    const result = await config.handler(fourRounds());
+
+    expect(result!.messages).toHaveLength(3);
+    expect(result!.messages[0]?.content).toContain('检查点摘要');
+  });
+});

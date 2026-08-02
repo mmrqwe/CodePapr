@@ -112,6 +112,40 @@ function buildToolContextConfig(
   };
 }
 
+/**
+ * Build a callback that re-reads memory.md from disk and rebuilds the session
+ * bootstrap with fresh content. Used by mid-loop context compaction to refresh
+ * memory at epoch boundaries (the epoch resets anyway, so no extra cache break).
+ * Returns null when memory cannot be read and no bootstrap can be produced.
+ */
+function buildBootstrapRefresher(
+  settings: Settings,
+  workspacePath: string,
+  runtime: AgentRuntimeConfig
+): () => Promise<string | null> {
+  return async () => {
+    let memorySection: string | undefined;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const memoryResult = await invoke<{ path: string; content: string; bytes: number }>(
+        'read_text_file',
+        { workspacePath, relativePath: '.CodePapr/memory.md', maxBytes: 50_000 }
+      );
+      memorySection = memoryResult.content?.trim() || undefined;
+    } catch {
+      memorySection = undefined;
+    }
+    const bootstrap = buildAgentSessionBootstrapPrompt(
+      settings,
+      workspacePath,
+      runtime.skillDefinitions ?? [],
+      runtime.projectGraphSummary,
+      memorySection
+    );
+    return bootstrap.trim() || null;
+  };
+}
+
 export interface AgentRuntimeConfig {
   editHistory?: EditHistory;
   rulesSection?: string;
@@ -414,7 +448,12 @@ function _createLocalAgent(
     toolTimeouts: { graph: settings.graphToolTimeoutMs },
     toolOutputTruncation: buildToolOutputTruncation(settings, workspacePath),
     toolContextConfig: buildToolContextConfig(settings, workspacePath),
-    contextCompaction: createContextCompactionHandler(settings, parts.providerName, sessionId),
+    contextCompaction: createContextCompactionHandler(
+      settings,
+      parts.providerName,
+      sessionId,
+      buildBootstrapRefresher(settings, workspacePath, runtime)
+    ),
   }), () => parts.uiTaskToolContext?.subagentCacheStats ?? []);
 }
 
@@ -502,6 +541,7 @@ export function createAgent(
           onWorkspaceMutated,
         },
         onStreamSnapshot: runtime.onStreamSnapshot,
+        onRefreshBootstrap: buildBootstrapRefresher(settings, workspacePath, runtime),
       });
     }
   } catch (e) {

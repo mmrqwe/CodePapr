@@ -96,17 +96,44 @@ function currentTodoDigest(sessionId: string): string | undefined {
 }
 
 /**
+ * Build the session-bootstrap log message (log[0] shape) carrying a freshly
+ * rendered bootstrap. Mid-loop compaction drops the original bootstrap (it sits
+ * before the checkpoint and is summarized away); re-injecting a fresh one here
+ * restores memory.md / skills / project-graph into the new epoch. The epoch is
+ * already being reset, so this adds no extra prefix-cache break.
+ */
+export function buildSessionBootstrapMessage(bootstrap: string): IMessage {
+  return {
+    id: 'session-bootstrap',
+    role: 'assistant',
+    content: bootstrap,
+    timestamp: 1,
+    metadata: {
+      sessionBootstrap: true,
+      isPrefixSystem: true,
+    },
+  };
+}
+
+/**
  * Build the mid-loop context-compaction config injected into the Agent.
  *
  * When the Agent's round-start estimate exceeds the effective context budget, it
  * calls `handler` with the current log messages; we run the same compaction the
  * UI uses between turns (checkpoint summary + pruning) and return the compacted
  * core messages, which the Agent swaps in as a new context epoch.
+ *
+ * `refreshBootstrap` (optional) re-reads volatile disk state (memory.md) and
+ * rebuilds the session bootstrap; when it returns a non-empty string, the
+ * compacted epoch is prefixed with a fresh bootstrap message so memory stays
+ * current across long sessions without breaking the prefix cache (the epoch is
+ * reset anyway).
  */
 export function createContextCompactionHandler(
   settings: Settings,
   providerName: ContextProvider,
-  sessionId: string
+  sessionId: string,
+  refreshBootstrap?: () => Promise<string | null>
 ): ContextCompactionConfig {
   return {
     maxContextTokens: effectiveMaxContextTokens(settings, providerName),
@@ -136,6 +163,19 @@ export function createContextCompactionHandler(
         withCheckpoint,
         { pruneOptions: buildPruneOptions(settings) }
       );
+      if (refreshBootstrap) {
+        try {
+          const freshBootstrap = await refreshBootstrap();
+          if (freshBootstrap && freshBootstrap.trim()) {
+            return {
+              messages: [buildSessionBootstrapMessage(freshBootstrap.trim()), ...compacted],
+              cacheStats: checkpoint.cacheStats,
+            };
+          }
+        } catch {
+          // Refresh failure is non-fatal: fall through to the bootstrap-less epoch.
+        }
+      }
       return { messages: compacted, cacheStats: checkpoint.cacheStats };
     },
   };

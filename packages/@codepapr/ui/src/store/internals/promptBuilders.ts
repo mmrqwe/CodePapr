@@ -16,7 +16,6 @@ import type { WorkMode } from '../../utils/agentPrompts';
 import { buildProjectDiagnosticsPromptSection } from '../../utils/agentPrompts';
 import type { ProjectDiagnosticsReport } from '../../utils/projectDiagnostics';
 import { buildEffectiveContextMessages } from '../../utils/contextCompaction';
-import { getActiveCharacterPrompt } from '../charactersStore';
 import type { Settings, UIMessage } from './types';
 
 export function toCoreMessages(
@@ -145,17 +144,13 @@ export function buildAgentSessionBootstrapPrompt(
   projectGraphSummary?: string,
   memorySection?: string
 ): string {
-  const characterPrompt = getActiveCharacterPrompt();
-  const customPromptSection = [settings.systemPrompt, characterPrompt]
-    .map((part) => part?.trim() ?? '')
-    .filter((part) => part.length > 0)
-    .join('\n\n');
+  const customPromptSection = (settings.systemPrompt ?? '').trim();
   return buildSessionBootstrapPrompt({
     workspacePath,
     lang: settings.lang ?? 'zh-CN',
     skillsSection: buildSkillsSection(skillDefinitions, settings.lang ?? 'zh-CN'),
     memorySection,
-    customPromptSection,
+    customPromptSection: customPromptSection || undefined,
     projectGraphSummary,
   });
 }

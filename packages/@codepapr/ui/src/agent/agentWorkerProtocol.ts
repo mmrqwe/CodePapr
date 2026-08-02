@@ -147,6 +147,13 @@ export type MainToAgentWorkerMessage =
       error?: string;
     }
   | {
+      type: 'refresh-bootstrap-response';
+      bootstrapRequestId: string;
+      success: boolean;
+      bootstrap?: string | null;
+      error?: string;
+    }
+  | {
       type: 'fetch-response-start';
       fetchId: string;
       status: number;
@@ -233,6 +240,11 @@ export type AgentWorkerToMainMessage =
       proxyChatId: string;
       config: AgentWorkerProxyChatConfig;
       chatRequest: IChatRequest;
+    }
+  | {
+      type: 'refresh-bootstrap-request';
+      requestId: string;
+      bootstrapRequestId: string;
     }
   | {
       type: 'fetch-request';

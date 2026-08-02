@@ -77,6 +77,16 @@ let nextToolRequestId = 0;
 
 let nextFetchId = 0;
 
+const bootstrapResponseWaiters = new Map<
+  string,
+  {
+    resolve: (value: string | null) => void;
+    reject: (error: Error) => void;
+  }
+>();
+
+let nextBootstrapRequestId = 0;
+
 const TOOL_IPC_TIMEOUT_MS = 120_000;
 const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 300_000;
 
@@ -514,6 +524,42 @@ async function _proxyChatRequest(
   });
 
   return await result;
+}
+
+const BOOTSTRAP_REFRESH_TIMEOUT_MS = 30_000;
+
+/**
+ * Ask the main thread to rebuild the session bootstrap with fresh disk state
+ * (memory.md). Mirrors the proxy-chat request/response pattern. Resolves to the
+ * fresh bootstrap string, or null when main has no refresher / empty result.
+ * Times out (resolving null) so a stalled refresh never wedges compaction.
+ */
+async function _refreshBootstrapRequest(requestId: string): Promise<string | null> {
+  const bootstrapRequestId = `${requestId}:bootstrap-${++nextBootstrapRequestId}`;
+
+  const result = new Promise<string | null>((resolve, reject) => {
+    bootstrapResponseWaiters.set(bootstrapRequestId, { resolve, reject });
+  });
+
+  const timer = setTimeout(() => {
+    const waiter = bootstrapResponseWaiters.get(bootstrapRequestId);
+    if (waiter) {
+      bootstrapResponseWaiters.delete(bootstrapRequestId);
+      waiter.resolve(null);
+    }
+  }, BOOTSTRAP_REFRESH_TIMEOUT_MS);
+
+  postMessageToMain({
+    type: 'refresh-bootstrap-request',
+    requestId,
+    bootstrapRequestId,
+  });
+
+  try {
+    return await result;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function runSubagent(
@@ -1076,7 +1122,8 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     contextCompaction: createContextCompactionHandler(
       payload.settings as unknown as Settings,
       payload.providerName,
-      payload.sessionId
+      payload.sessionId,
+      () => _refreshBootstrapRequest(payload.requestId)
     ),
   });
 
@@ -1186,6 +1233,13 @@ self.onmessage = (event: MessageEvent<MainToAgentWorkerMessage>) => {
       }
     }
 
+    for (const [id, waiter] of bootstrapResponseWaiters) {
+      if (id.startsWith(`${message.requestId}:`)) {
+        bootstrapResponseWaiters.delete(id);
+        waiter.resolve(null);
+      }
+    }
+
     subagentCacheStatsMap.delete(message.requestId);
 
     postMessageToMain({
@@ -1228,6 +1282,20 @@ self.onmessage = (event: MessageEvent<MainToAgentWorkerMessage>) => {
       waiter.resolve(message.result);
     } else {
       waiter.reject(new Error(message.error || 'Chat proxy failed'));
+    }
+    return;
+  }
+
+  if (message.type === 'refresh-bootstrap-response') {
+    const waiter = bootstrapResponseWaiters.get(message.bootstrapRequestId);
+    if (!waiter) {
+      return;
+    }
+    bootstrapResponseWaiters.delete(message.bootstrapRequestId);
+    if (message.success) {
+      waiter.resolve(message.bootstrap ?? null);
+    } else {
+      waiter.reject(new Error(message.error || 'Bootstrap refresh failed'));
     }
     return;
   }

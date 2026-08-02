@@ -122,8 +122,12 @@ export interface WorkerBackedAgentConfig {
     onWorkspaceMutated?: WorkspaceMutationListener;
   };
   /** Called periodically during streaming so the store can persist a
-   *  debounced snapshot of in-flight content for crash recovery. */
+    *  debounced snapshot of in-flight content for crash recovery. */
   onStreamSnapshot?: () => void;
+  /** Re-reads volatile disk state (memory.md) and rebuilds the session
+    *  bootstrap. Invoked when the worker's mid-loop compaction resets the epoch
+    *  so memory stays fresh across long sessions. Returns null/empty to skip. */
+  onRefreshBootstrap?: () => Promise<string | null>;
 }
 
 function stableStringify(value: unknown): string {
@@ -494,6 +498,11 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       return;
     }
 
+    if (message.type === 'refresh-bootstrap-request') {
+      void this.handleRefreshBootstrapRequest(message.bootstrapRequestId);
+      return;
+    }
+
     if (message.type === 'app-agent-stream') {
       const entry = this.appAgentRequests.get(message.requestId);
       if (!entry?.onStream) return;
@@ -746,6 +755,34 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       }
     }
     this.pendingFetchControllers.clear();
+  }
+
+  private async handleRefreshBootstrapRequest(bootstrapRequestId: string): Promise<void> {
+    if (!this.config.onRefreshBootstrap) {
+      this.worker.postMessage({
+        type: 'refresh-bootstrap-response',
+        bootstrapRequestId,
+        success: true,
+        bootstrap: null,
+      } satisfies MainToAgentWorkerMessage);
+      return;
+    }
+    try {
+      const bootstrap = await this.config.onRefreshBootstrap();
+      this.worker.postMessage({
+        type: 'refresh-bootstrap-response',
+        bootstrapRequestId,
+        success: true,
+        bootstrap: bootstrap ?? null,
+      } satisfies MainToAgentWorkerMessage);
+    } catch (err) {
+      this.worker.postMessage({
+        type: 'refresh-bootstrap-response',
+        bootstrapRequestId,
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      } satisfies MainToAgentWorkerMessage);
+    }
   }
 
   private async handleFetchRequest(message: {
