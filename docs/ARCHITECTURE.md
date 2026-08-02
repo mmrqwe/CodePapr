@@ -621,7 +621,7 @@ CodePapr 的核心架构决策是**围绕 DeepSeek 隐式前缀缓存做提示�
 2. **检查时机：仅轮首**。tool 结果在一轮末尾追加，其导致的超限在**下一轮轮首**被拦截——任何 LLM 请求都不会用超限上下文发送；工具调用任务在压缩后基于"摘要 + 近期尾部"继续。
 3. **不在工具执行中途压缩**：一轮内多个工具调用原子执行完再到轮边界压缩，避免破坏"工具调用↔结果"配对。
 4. **防死循环**：`lastCompactionRound` 保证两次压缩至少间隔 2 轮；handler 返回 null 不重置。
-5. **防御纵深**：`toolOutputTruncation` 把单个 tool 结果限制在 ~100KB（或落盘留预览），单轮增长有界，不会单轮撑爆 provider 硬上限。中间截断保留字符数默认为 20k，可通过 `toolOutputMiddleKeepChars` 配置；工具上下文模式（完整/摘要/自动）进一步控制输出进入上下文的详细程度。
+5. **防御纵深**：`toolOutputTruncation` 把单个 tool 结果限制在 ~100KB（或落盘留预览），单轮增长有界，不会单轮撑爆 provider 硬上限。中间截断保留字符数默认为 20k，可通过 `toolOutputMiddleKeepChars` 配置。工具上下文模式（完整/摘要/自动，默认完整）不影响当轮——工具结果始终以全文（受本截断管线约束）发给 LLM；它只控制结果变成历史后是否替换为冻结摘要，见 §13.10。
 
 ### 13.4 剪枝是压缩的子步骤（非独立机制）
 
@@ -686,6 +686,16 @@ effectiveMaxContextTokens = min(maxContextTokens, providerContextLimit − maxTo
 
 共同原则：**用"溢出触发的压缩"约束上下文，压缩之间保持前缀字节稳定；绝不每轮改动已发送前缀。**
 
+### 13.10 工具上下文模式（当轮全文 / 历史摘要）
+
+工具上下文模式（`toolContextDefaultMode` / `toolContextOverrides`，默认 `full`）控制工具输出**变成历史上下文后**的形态，与「发给 LLM 的内容」解耦：
+
+- **当轮永远全文**：工具结果产生时始终以全文进入日志与当前请求（大小由截断管线约束：60k 中间截断 / 100k 落盘 / 150k 硬上限），LLM 完整见过每一条结果并据此推理。
+- **写入时冻结摘要**：模式判定需摘要时（`summary`；或 `auto` 且原始字符数 > `toolContextAutoThresholdChars`，默认 5k），写入时一次性计算摘要并冻结进 `message.metadata.toolSummary`。交互类工具（question / todo / skill / task）永不摘要。摘要不是内容切片，而是结构化卡片：`[工具] ✓/✗ | 关键参数` → `规模统计（基于原始输出）` → `头尾预览（前 3 行 + 后 3 行，各 ≤150 字符；≤6 行时单块展示）` → `完整输出: {落盘路径}（可用 read 回读）`（仅当截断管线已落盘，复用其路径不重复写盘），整卡钳制于 `toolContextSummaryMaxChars`（默认 500）。各工具卡片字段：read 带路径与行范围/符号后缀，bash 带命令，edit/patch 带 `-删/+增` 字符数，grep/glob 带 query 与匹配数。
+- **请求构建时翻转**：`RequestBuilder` 组装消息时调用纯函数 `applyHistoryToolSummaries`：带冻结摘要的工具消息中，**最新一批**（最后一个带 toolCalls 的 assistant 轮的工具结果）保持全文，其余替换为冻结摘要；只改请求副本，不改 AppendOnlyLog。
+- **缓存行为**：翻转点永远贴着尾部，每轮 miss 后缀是有界小常量（一条翻转消息 + 一轮新内容），之前的「摘要稳定区」随对话增长并照常命中；每条消息只翻转一次，仅产生一次性前缀缓存失效——不同于已移除的旧滑动窗口裁剪（窗口每轮移动，每轮整体重缓存保护窗口）。
+- **实时/重建字节一致**：冻结摘要随流事件 `contextSummary` 进入 `UIToolInvocation` 持久化；重建时（`buildEffectiveContextMessages`）回填 metadata 并应用同一纯函数规则。与剪枝分层：占位符（最老，剪枝时同时删除摘要，防止复活）< 摘要（中青年）< 全文（最新批）。
+- **可进可退**：`full` 不产生冻结摘要，等价纯追加 + 完美缓存（默认值，开箱与旧版零差异）；`summary` / `auto` 启用滚动摘要，按工具 override 启用（内置逐工具默认表已移除，一切随 defaultMode）。
 
 ## 14. Settings 结构
 
@@ -697,7 +707,7 @@ effectiveMaxContextTokens = min(maxContextTokens, providerContextLimit − maxTo
 | LLM | API 类型、模型名称、fast 模型、temperature、topP、maxTokens、thinking 模式、maxToolRounds |
 | Search | 自部署 SearXNG 优先，失败自动降级到内置多源聚合；搜索引擎选择器已移除；分类/时间/语言/安全搜索等高级参数收入折叠区 |
 | Mentor | Mentor 子代理独立 API key、Base URL、模型选择 |
-| 高级 | 上下文压缩（模型/温度/摘要输出 token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 深度/文件限制、流式与工具输出（流空闲超时、中间截断保留字符数）、工具上下文模式（完整/摘要/自动）。上下文上限 `maxContextTokens` 默认 500K，实际生效值按所选服务商上下文上限自动钳制（见 §13.5） |
+| 高级 | 上下文压缩（模型/温度/摘要输出 token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 深度/文件限制、流式与工具输出（流空闲超时、中间截断保留字符数）、工具上下文模式（完整/摘要/自动，默认完整；当轮始终全文，仅历史上下文按模式摘要，见 §13.10）。上下文上限 `maxContextTokens` 默认 500K，实际生效值按所选服务商上下文上限自动钳制（见 §13.5） |
 | App | .papr 应用权限管理——全局默认级别、Level 3 全局开关、逐应用级别覆盖 |
 
 语音配置不在主设置面板，而是在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。

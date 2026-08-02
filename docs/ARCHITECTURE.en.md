@@ -622,7 +622,7 @@ Context grows with tool results during the tool loop. `Agent.chat` performs an o
 2. **Check timing: round-start only.** Tool results are appended at the end of a round; the overflow they cause is caught at the **next round's start** — no LLM request is ever sent with an over-limit context; the tool-calling task continues after compaction from "summary + recent tail".
 3. **No mid-tool-execution compaction:** a round's multiple tool calls are executed atomically before compacting at the round boundary, preserving tool-call↔result pairing.
 4. **Anti-loop:** `lastCompactionRound` guarantees at least 2 rounds between compactions; a null handler result does not reset it.
-5. **Defense in depth:** `toolOutputTruncation` bounds each tool result to ~100KB (or spills to disk with a preview), so per-round growth is bounded and cannot blow the provider's hard limit in a single round. Middle-truncation keep size defaults to 20k chars and is configurable via `toolOutputMiddleKeepChars`; tool context mode (full/summary/auto) further controls how much output enters the context.
+5. **Defense in depth:** `toolOutputTruncation` bounds each tool result to ~100KB (or spills to disk with a preview), so per-round growth is bounded and cannot blow the provider's hard limit in a single round. Middle-truncation keep size defaults to 20k chars and is configurable via `toolOutputMiddleKeepChars`. Tool context mode (full/summary/auto, default full) does NOT affect the current round — a tool result is always sent to the LLM in full (bounded by this truncation pipeline); it only controls whether the result is replaced by a frozen summary once it becomes history (see §13.10).
 
 ### 13.4 Pruning Is a Compaction Sub-Step (Not a Separate Mechanism)
 
@@ -687,6 +687,16 @@ These measures keep the prefix byte-stable within an epoch (any break invalidate
 
 Shared principle: **bound context with overflow-triggered compaction, keep the prefix byte-stable between compactions, and never mutate the already-sent prefix per round.**
 
+### 13.10 Tool Context Mode (current round full / history summarized)
+
+Tool context mode (`toolContextDefaultMode` / `toolContextOverrides`, default `full`) controls how tool output appears **once it becomes history context**, decoupled from what is sent to the LLM:
+
+- **Current round is always full:** a fresh tool result always enters the log and the current request in full (size bounded by the truncation pipeline: 60k middle-truncation / 100k offload / 150k ceiling), so the LLM sees every result completely and reasons over it.
+- **Summary frozen at write time:** when the mode calls for summarization (`summary`; or `auto` with original chars > `toolContextAutoThresholdChars`, default 5k), a summary is computed once at write time and frozen into `message.metadata.toolSummary`. Interactive tools (question / todo / skill / task) are never summarized. The summary is not a content slice but a structured card: `[tool] ✓/✗ | key args` → `size stats (of the original output)` → `head+tail preview (first 3 + last 3 lines, ≤150 chars each; a single block when ≤6 lines)` → `Full output: {spill path} (read it back with read)` (only when the truncation pipeline already spilled, reusing its path), clamped to `toolContextSummaryMaxChars` (default 500). Per-tool card fields: read carries the path and line-range/symbol suffix, bash the command, edit/patch the `-removed/+added` char counts, grep/glob the query and match counts.
+- **Flip at request-build time:** when assembling messages, `RequestBuilder` calls the pure function `applyHistoryToolSummaries`: among tool messages carrying a frozen summary, all EXCEPT the latest batch (the tool results of the last assistant round with toolCalls) are replaced by their frozen summary; the latest batch stays full. Only the request copy is rewritten, never the AppendOnlyLog.
+- **Cache behavior:** the flip point always sits adjacent to the tail, so each round's missed suffix is a small bounded constant (one flipped message + one new round), while the "stable summary zone" before it grows with the conversation and keeps hitting. Each message flips exactly once — a one-time prefix-cache invalidation — unlike the removed legacy sliding-window pruning (its window moved every round, re-caching the whole protected window each time).
+- **Live/rebuild byte parity:** the frozen summary flows into `UIToolInvocation` via the stream event's `contextSummary` and is persisted; at rebuild time (`buildEffectiveContextMessages`) it is re-attached to metadata and the same pure rule is applied. Layering with pruning: placeholder (oldest; pruning also drops the summary so it cannot resurrect) < summary (middle-aged) < full (latest batch).
+- **Opt-in spectrum:** `full` produces no frozen summary — pure append-only with perfect caching (the default; out-of-box behavior is identical to the legacy version); `summary` / `auto` enable rolling summaries, opted into per tool via overrides (the built-in per-tool default table was removed; everything follows defaultMode).
 
 ## 14. Settings Structure
 
@@ -698,7 +708,7 @@ The settings panel has six tabs. Full parameter reference: `packages/@codepapr/c
 | LLM | API type, model name, fast model, temperature, topP, maxTokens, thinking mode, maxToolRounds |
 | Search | Self-hosted SearXNG first, with automatic fallback to built-in multi-source aggregation when unavailable; engine selector removed from UI; category/time/language/safe search parameters moved to collapsible Advanced Options section |
 | Mentor | Mentor sub-agent independent API key, Base URL, model selection |
-| Advanced | Context compaction (model/temperature/summary output tokens/context limit/conversation rounds), TodoList max retries, ProjectGraph depth/file limits, streaming & tool output (stream idle timeout, middle-truncation keep chars), tool context mode (full/summary/auto). The context limit `maxContextTokens` defaults to 500K; its effective value is clamped to the selected provider's context limit (see §13.5) |
+| Advanced | Context compaction (model/temperature/summary output tokens/context limit/conversation rounds), TodoList max retries, ProjectGraph depth/file limits, streaming & tool output (stream idle timeout, middle-truncation keep chars), tool context mode (full/summary/auto, default full; the current round always gets full output, only history is summarized per mode, see §13.10). The context limit `maxContextTokens` defaults to 500K; its effective value is clamped to the selected provider's context limit (see §13.5) |
 | App | .papr app permission management — global default level, Level 3 global toggle, per-app level overrides |
 
 Voice configuration is not in the main settings panel — it is configured per character in the CharacterModal Voice Tab.

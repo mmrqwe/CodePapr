@@ -204,9 +204,11 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
       ? Math.max(0, Math.floor(input.pruneMinChars))
       : DEFAULT_SETTINGS.pruneMinChars;
   const toolContextDefaultMode: 'full' | 'summary' | 'auto' =
-    input.toolContextDefaultMode === 'full' || input.toolContextDefaultMode === 'summary'
+    input.toolContextDefaultMode === 'full' ||
+    input.toolContextDefaultMode === 'summary' ||
+    input.toolContextDefaultMode === 'auto'
       ? input.toolContextDefaultMode
-      : 'auto';
+      : DEFAULT_SETTINGS.toolContextDefaultMode;
   const toolContextOverrides: Record<string, 'full' | 'summary' | 'auto'> =
     input.toolContextOverrides && typeof input.toolContextOverrides === 'object'
       ? Object.fromEntries(

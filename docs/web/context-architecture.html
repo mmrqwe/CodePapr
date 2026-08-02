@@ -510,7 +510,7 @@
       </div>
       <div class="led">
          <div class="no">M·02</div><h5>写时三阶梯截断</h5>
-         <p>工具输出在写入 AppendOnlyLog 前一次性归一化（<code>truncateToolOutput</code>）：60k 中间截断 / 100k 落盘 / 150k 硬上限。出生即有界，废除事后滑动裁剪，重建逐字节一致。可配置中间截断保留字符数（默认 20k）与工具上下文模式（完整/摘要/自动）。</p>
+         <p>工具输出在写入 AppendOnlyLog 前一次性归一化（<code>truncateToolOutput</code>）：60k 中间截断 / 100k 落盘 / 150k 硬上限。出生即有界，废除事后滑动裁剪，重建逐字节一致。可配置中间截断保留字符数（默认 20k）。工具上下文模式（完整/摘要/自动，默认完整）与截断解耦：当轮始终把全文发给模型，结果变成历史后按模式替换为写入时冻结的结构化摘要卡片（<code>applyHistoryToolSummaries</code>，最新一批保持全文）；每条消息只翻转一次，仅产生一次性缓存失效，摘要稳定区随对话增长照常命中。</p>
       </div>
       <div class="led">
         <div class="no">M·03</div><h5>压缩 Epoch</h5>

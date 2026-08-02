@@ -218,6 +218,94 @@ describe('Agent', () => {
     ]);
   });
 
+  it('keeps full tool output in the log and freezes a history summary in metadata (tool context mode)', async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(
+      {
+        name: 'read_file',
+        description: 'Read a file',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string' },
+          },
+          required: ['path'],
+        },
+      },
+      async () => 'line1\nline2\nline3'
+    );
+
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi
+        .fn<(_: IChatRequest) => Promise<IChatResponse>>()
+        .mockResolvedValueOnce(
+          createResponse('读取', {
+            toolCalls: [{ id: 'tool-1', name: 'read_file', arguments: { path: 'a.ts' } }],
+          })
+        )
+        .mockResolvedValueOnce(createResponse('完成')),
+    };
+
+    const agent = new Agent({
+      session: new Session({
+        sessionId: 'session-tool-ctx',
+        prefix: new ImmutablePrefix({
+          systemPrompt: '你是测试助手',
+          tools: toolRegistry.getAll(),
+          model: 'test-model',
+          parameters: { temperature: 0.7, topP: 0.9, maxTokens: 1000 },
+        }),
+        toolRegistry,
+      }),
+      provider,
+      providerName: 'openai',
+      requestBuilder: {
+        build: ({ model }) => ({ model, messages: [] }),
+      },
+      cacheValidator: {
+        validate: () => ({
+          prefixCached: false,
+          prefixCreated: false,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          newInputTokens: 1,
+          outputTokens: 1,
+          cacheHitRate: 0,
+        }),
+      },
+      toolContextConfig: {
+        defaultMode: 'summary',
+        overrides: {},
+        summaryMaxChars: 500,
+        autoThresholdChars: 5000,
+      },
+    });
+
+    let endEvent: { contextContent?: string; contextSummary?: string } | undefined;
+    await agent.chat('读取并继续', (event) => {
+      if (event.type === 'tool-call-end') {
+        endEvent = event;
+      }
+    });
+
+    // The log keeps the FULL tool output (what the LLM saw this round)…
+    const toolMsg = agent
+      .getSession()
+      .logStore.getAllMessages()
+      .find((m) => m.role === 'tool');
+    expect(toolMsg?.content).toBe('line1\nline2\nline3');
+    // …with a frozen history summary attached for later request builds.
+    expect(toolMsg?.metadata?.toolSummary).toContain('[read_file]');
+
+    // The stream event carries both: full content for byte-exact rebuilds and
+    // the frozen summary for history.
+    expect(endEvent?.contextContent).toBe('line1\nline2\nline3');
+    expect(endEvent?.contextSummary).toContain('[read_file]');
+  });
+
   it('attaches a staged context snapshot to the request-context event', async () => {
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(

@@ -462,7 +462,7 @@
             <div class="src"><span class="chip">truncateToolOutput</span><span class="chip">write-time 3-tier</span></div>
             <div class="cchip c-miss">append · bounded at birth</div>
           </div>
-          <div class="desc"><b>&gt;100k chars</b> → spill to disk + 2k preview + path (read can re-read); <b>60k–100k</b> → middle truncation (head + tail, 20k total kept); <b>150k</b> hard ceiling. Mode is controlled by <b>tool context settings</b> (full / summary / auto) — auto mode keeps full output under 5k chars and summarizes above. Normalized and frozen once at write time, <b>post-hoc sliding trim abolished</b> → no more mid-prefix flips. Code retrieval (read / grep / graph / lsp) is the most common tool result source.</div>
+          <div class="desc"><b>&gt;100k chars</b> → spill to disk + 2k preview + path (read can re-read); <b>60k–100k</b> → middle truncation (head + tail, 20k total kept); <b>150k</b> hard ceiling. Normalized and frozen once at write time, <b>post-hoc sliding trim abolished</b> → no more mid-prefix flips. Separately, <b>tool context mode</b> (full / summary / auto, default full) governs history only: the current round always receives the full output; once a result becomes history it is replaced by a structured summary card frozen at write time (<code>applyHistoryToolSummaries</code>; the latest batch stays full) — each message flips once (a one-time cache invalidation), and auto mode summarizes only above 5k chars. Code retrieval (read / grep / graph / lsp) is the most common tool result source.</div>
           <div class="more"><div class="mbox">This is the core of hit-rate optimization: every tool result is bounded at birth, the tail is naturally controlled, and miss converges to the theoretical minimum. Thresholds are in <b>characters</b> (content.length), so CJK text isn't misjudged by byte count. Rebuilds read frozen tool output directly (<code>sortedStringify</code> guarantees byte-identical with the live path).</div></div>
         </div>
       </section>
@@ -502,7 +502,7 @@
       </div>
       <div class="led">
         <div class="no">M·02</div><h5>Write-Time 3-Tier Truncation</h5>
-        <p>Tool output is normalized once before writing to AppendOnlyLog (<code>truncateToolOutput</code>): 30k middle truncation / 50k disk spill / 150k hard ceiling. Bounded at birth, post-hoc sliding trim abolished, rebuilds byte-identical.</p>
+        <p>Tool output is normalized once before writing to AppendOnlyLog (<code>truncateToolOutput</code>): 60k middle truncation / 100k disk spill / 150k hard ceiling. Bounded at birth, post-hoc sliding trim abolished, rebuilds byte-identical. Tool context mode (full/summary/auto, default full) is decoupled from truncation: the current round always receives full output, and history is folded into write-time frozen summaries.</p>
       </div>
       <div class="led">
         <div class="no">M·03</div><h5>Compaction Epoch</h5>
