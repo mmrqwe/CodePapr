@@ -33,7 +33,7 @@ import {
   shouldUseWorkerAgentRuntime,
   toWorkerAgentSettings,
 } from './providerFactory';
-import { resolveProviderName } from './settingsNormalizer';
+import { resolveMultimodalEnabled, resolveProviderName } from './settingsNormalizer';
 import { getActiveCharacterPrompt } from '../charactersStore';
 import {
   buildAgentSessionBootstrapPrompt,
@@ -41,16 +41,6 @@ import {
   toCoreMessages,
 } from './promptBuilders';
 import type { ApiFormat, Lang, Settings, UIMessage } from './types';
-
-function resolveMultimodalEnabled(settings: Settings, currentModel: string): boolean {
-  if (!settings.multimodalEnabled) return false;
-  if (settings.multimodalModelTier === 'all') return true;
-  const fastModel = settings.fastModel.trim();
-  const isFastModel = settings.fastModelEnabled && fastModel.length > 0 && currentModel === fastModel;
-  if (settings.multimodalModelTier === 'primary' && !isFastModel) return true;
-  if (settings.multimodalModelTier === 'fast' && isFastModel) return true;
-  return false;
-}
 
 function subagentMultimodalAllowed(settings: Settings, agentTier: 'primary' | 'fast'): boolean {
   if (!settings.multimodalEnabled) return false;

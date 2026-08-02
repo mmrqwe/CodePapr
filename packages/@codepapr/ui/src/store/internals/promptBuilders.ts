@@ -1,10 +1,14 @@
 import {
   AppendOnlyLog,
+  APP_ONLY_TOOL_NAMES,
   buildSessionBootstrapPrompt,
   buildSkillsSection,
   DEFAULT_PROMPT_TOOL_NAMES,
   buildRuntimeSystemPrompt,
   buildRuntimeUserPrompt,
+  isReadOnlyMode,
+  MUTATING_TOOL_NAMES,
+  PLAN_ONLY_TOOL_NAMES,
   Serializer,
   type AgentDefinition,
   type PruneOptions,
@@ -14,8 +18,10 @@ import {
 import type { IMessage } from '@codepapr/types';
 import type { WorkMode } from '../../utils/agentPrompts';
 import { buildProjectDiagnosticsPromptSection } from '../../utils/agentPrompts';
+import { hasEnabledMcpSearch } from '../../utils/mcpTypes';
 import type { ProjectDiagnosticsReport } from '../../utils/projectDiagnostics';
 import { buildEffectiveContextMessages } from '../../utils/contextCompaction';
+import { resolveMultimodalEnabled } from './settingsNormalizer';
 import type { Settings, UIMessage } from './types';
 
 export function toCoreMessages(
@@ -70,12 +76,21 @@ export function buildAgentRuntimeSystemPrompt(
   mode: WorkMode,
   workspacePath: string,
   rulesSection?: string,
-  runtime?: { agentDefinitions?: AgentDefinition[] }
+  runtime?: { agentDefinitions?: AgentDefinition[]; model?: string }
 ): string {
-  const toolNames = [
-    ...DEFAULT_PROMPT_TOOL_NAMES,
-    ...((runtime?.agentDefinitions?.length ?? 0) > 0 ? ['task'] : []),
-  ];
+  const effectiveModel = (runtime?.model ?? settings.model).trim();
+  const multimodalEnabled = resolveMultimodalEnabled(settings, effectiveModel);
+  const mcpSearchEnabled = hasEnabledMcpSearch(settings.mcp);
+  // 与工具注册层（registerWorkspaceTools / FilteringToolRegistry）的可见性条件保持对齐，
+  // 避免系统提示词提及模型实际不可用的工具。
+  const toolNames = DEFAULT_PROMPT_TOOL_NAMES.filter((name) => {
+    if (name === 'read_image') return multimodalEnabled;
+    if (APP_ONLY_TOOL_NAMES.has(name)) return mode === 'app';
+    if (PLAN_ONLY_TOOL_NAMES.has(name)) return mode === 'plan';
+    if (MUTATING_TOOL_NAMES.has(name)) return !isReadOnlyMode(mode);
+    if (name === 'websearch' || name === 'webfetch') return !mcpSearchEnabled;
+    return true;
+  });
 
   return buildRuntimeSystemPrompt({
     mode,

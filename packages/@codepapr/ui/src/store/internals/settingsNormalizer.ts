@@ -502,6 +502,16 @@ export function resolveProviderName(settings: Settings): ProviderName {
   return settings.apiFormat;
 }
 
+export function resolveMultimodalEnabled(settings: Settings, currentModel: string): boolean {
+  if (!settings.multimodalEnabled) return false;
+  if (settings.multimodalModelTier === 'all') return true;
+  const fastModel = settings.fastModel.trim();
+  const isFastModel = settings.fastModelEnabled && fastModel.length > 0 && currentModel === fastModel;
+  if (settings.multimodalModelTier === 'primary' && !isFastModel) return true;
+  if (settings.multimodalModelTier === 'fast' && isFastModel) return true;
+  return false;
+}
+
 export function getActiveModeConfig(settings: Settings): ModeConfig & { apiFormat: ApiFormat } {
   const cfg = settings.apiMode === 'deepseek' ? settings.deepseek
     : settings.apiMode === 'custom' ? settings.custom

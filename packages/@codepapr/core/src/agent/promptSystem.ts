@@ -817,7 +817,7 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
 
   // === 常用工具 ===
   const common: string[] = [];
-  if (hasTool(toolNames, 'edit') || hasTool(toolNames, 'write') || hasTool(toolNames, 'patch')) {
+  if ((hasTool(toolNames, 'edit') || hasTool(toolNames, 'write') || hasTool(toolNames, 'patch')) && !isAsk) {
     common.push(
       lang === 'en'
         ? '- [edit/patch/write] Single-file: `edit` (SEARCH/REPLACE). Multi-file atomic: `patch`. Full rewrite or new file: `write` (requires relativePath + content). Search block must match file exactly.'
@@ -835,7 +835,7 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
         : '- [bash] 执行 shell 命令（支持管道、&&、变量），如 `bash(command: "npm test")`。dev server / 长命令用 `background: true`（返回 pid，用 `bash(action: list/stop)` 管理）。用 `workdir` 指定工作目录（不要在命令里 cd，不跨调用保留）。'
     );
   }
-  if (hasTool(toolNames, 'git') && !isApp) {
+  if (hasTool(toolNames, 'git') && !isAsk && !isApp) {
     common.push(
       lang === 'en'
         ? '- [git] Inspect: `git(action: status/diff/log)`. Stage & commit: `git(action: stage)` then `git(action: commit)`. Branch: `git(action: branch)`. restore/reset auto-creates backups — do NOT manually `git stash`.'
@@ -880,7 +880,7 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
 
   // === 辅助工具 ===
   const auxiliary: string[] = [];
-  if (hasTool(toolNames, 'lsp_edit') && !isApp) {
+  if (hasTool(toolNames, 'lsp_edit') && !isAsk && !isApp) {
     auxiliary.push(
       lang === 'en'
         ? '- [lsp_edit] Semantics-aware edits: `rename`, `code_action` (kind: "source.organizeImports"), `format`.'
@@ -932,63 +932,51 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
     lines.push(...special);
   }
 
-  if (hasTool(toolNames, 'app_render')) {
+  if (hasTool(toolNames, 'app_render') && isApp) {
     const appRender: string[] = [];
-    if (isApp) {
-      appRender.push(
+    appRender.push(
         lang === 'en'
           ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps to the application panel. Call this after writing HTML with workspace_write_file to `.CodePapr/apps/<appId>/index.html`. appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. The HTML runs in a sandboxed iframe isolated from the host — use CDN for libraries (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js) and fetch() for data APIs.\n\n📦 Papr SDK (available in your HTML via window.papr):\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — persistent key-value storage\n  • papr.agent.run({agent, task}) — invoke an AI agent (define agents in the agents parameter)\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP requests\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — file I/O in app data directory\n  • papr.app.info() — get app metadata\n⚠️ Declare permissions in the permissions parameter for each SDK feature used (storage:read, storage:write, http:get, http:post, fs:read, fs:write, agent:run:<name>).'
           : lang === 'zh-TW'
           ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用渲染到應用面板。先用 workspace_write_file 將 HTML 寫入 `.CodePapr/apps/<appId>/index.html`，再調用此工具。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。HTML 在與宿主隔離的沙箱 iframe 中運行——通過 CDN 引用函式庫，支援 fetch() 存取資料 API。\n\n📦 Papr SDK（在 HTML 中可通過 window.papr 使用）：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 鍵值持久化存儲\n  • papr.agent.run({agent, task}) — 調用 AI Agent（在 agents 參數中定義）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 請求\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — app data 目錄內的檔案讀寫\n  • papr.app.info() — 獲取應用資訊\n⚠️ 使用前必須在 permissions 參數中聲明對應權限（storage:read, storage:write, http:get, http:post, fs:read, fs:write, agent:run:<name>）。'
           : '- [app_render] 你的主要输出工具。将交互式 HTML 应用渲染到应用面板。先用 workspace_write_file 将 HTML 写入 `.CodePapr/apps/<appId>/index.html`，再调用此工具。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。HTML 在与宿主隔离的沙箱 iframe 中运行——通过 CDN 引用库，支持 fetch() 访问数据 API。\n\n📦 Papr SDK（在 HTML 中可通过 window.papr 使用）：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 键值持久化存储\n  • papr.agent.run({agent, task}, onProgress?) — 调用 AI Agent（在 agents 参数中定义，可声明 tools 和 maxToolRounds）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 请求\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — app data 目录内的文件读写\n  • papr.app.info() — 获取应用信息\n⚠️ 使用前必须在 permissions 参数中声明对应权限（storage:read, storage:write, http:get, http:post, fs:read, fs:write, workspace:read, workspace:write, workspace:exec, agent:run:<name>）。\n🤖 Agent 工具（在 agents[].tools 声明）：read, grep, list, lsp, diagnostics, read_image, skill_load, todo, websearch, webfetch, write, edit, patch, bash。工具运行在 Agent Loop 中，支持多轮调用（maxToolRounds 控制上限）。'
-      );
-    } else {
-      appRender.push(
-        lang === 'en'
-          ? '- [app_render] Render data visualizations, dashboards, and interactive HTML apps in the application panel. Use with workspace_write_file for analysis results that are better shown as interactive apps than Markdown.'
-          : lang === 'zh-TW'
-          ? '- [app_render] 將資料視覺化、儀表板和互動式 HTML 應用渲染到應用面板。當分析結果更適合以互動應用而非 Markdown 呈現時使用。'
-          : '- [app_render] 将数据可视化、仪表板和交互式 HTML 应用渲染到应用面板。当分析结果更适合以交互应用而非 Markdown 呈现时使用。'
-      );
-    }
+    );
     lines.push(
       lang === 'en' ? '### App Render' : lang === 'zh-TW' ? '### 應用渲染' : '### 应用渲染'
     );
     lines.push(...appRender);
 
-    if (isApp) {
-      lines.push(
-        lang === 'en' ? '### App Management' : lang === 'zh-TW' ? '### 應用管理' : '### 应用管理'
-      );
-      lines.push(
-        lang === 'en'
-          ? '- [app_list] List all registered apps (appId, title, hasBackend, isRunning, port). Call before creating to check for duplicates.'
-          : lang === 'zh-TW'
-          ? '- [app_list] 列出所有已註冊應用（appId、標題、是否有後端、是否運行中、端口）。創建前調用檢查重複。'
-          : '- [app_list] 列出所有已注册应用（appId、标题、是否有后端、是否运行中、端口）。创建前调用检查重复。'
-      );
-      lines.push(
-        lang === 'en'
-          ? '- [app_start] Start a backend app\'s server by appId. Check port, start backend, set state to running. Use this instead of manually running node/commands.'
-          : lang === 'zh-TW'
-          ? '- [app_start] 按 appId 啟動後端服務。檢查端口、啟動後端、設為運行中。用此工具而非手動執行 node/命令。'
-          : '- [app_start] 按 appId 启动后端服务。检查端口、启动后端、设为运行中。用此工具而非手动执行 node/命令。'
-      );
-      lines.push(
-        lang === 'en'
-          ? '- [app_stop] Stop a running backend app by appId. Stops the process, sets state to stopped.'
-          : lang === 'zh-TW'
-          ? '- [app_stop] 按 appId 停止正在運行的後端服務。停止進程、設為已停止。'
-          : '- [app_stop] 按 appId 停止正在运行的后端服务。停止进程、设为已停止。'
-      );
-      lines.push(
-        lang === 'en'
-          ? '- [app_delete] Delete an app by appId. Stops backend, removes files, clears storage. Irreversible.'
-          : lang === 'zh-TW'
-          ? '- [app_delete] 按 appId 刪除應用。停止後端、刪除檔案、清除存儲。不可恢復。'
-          : '- [app_delete] 按 appId 删除应用。停止后端、删除文件、清除存储。不可恢复。'
-      );
-    }
+    lines.push(
+      lang === 'en' ? '### App Management' : lang === 'zh-TW' ? '### 應用管理' : '### 应用管理'
+    );
+    lines.push(
+      lang === 'en'
+        ? '- [app_list] List all registered apps (appId, title, hasBackend, isRunning, port). Call before creating to check for duplicates.'
+        : lang === 'zh-TW'
+        ? '- [app_list] 列出所有已註冊應用（appId、標題、是否有後端、是否運行中、端口）。創建前調用檢查重複。'
+        : '- [app_list] 列出所有已注册应用（appId、标题、是否有后端、是否运行中、端口）。创建前调用检查重复。'
+    );
+    lines.push(
+      lang === 'en'
+        ? '- [app_start] Start a backend app\'s server by appId. Check port, start backend, set state to running. Use this instead of manually running node/commands.'
+        : lang === 'zh-TW'
+        ? '- [app_start] 按 appId 啟動後端服務。檢查端口、啟動後端、設為運行中。用此工具而非手動執行 node/命令。'
+        : '- [app_start] 按 appId 启动后端服务。检查端口、启动后端、设为运行中。用此工具而非手动执行 node/命令。'
+    );
+    lines.push(
+      lang === 'en'
+        ? '- [app_stop] Stop a running backend app by appId. Stops the process, sets state to stopped.'
+        : lang === 'zh-TW'
+        ? '- [app_stop] 按 appId 停止正在運行的後端服務。停止進程、設為已停止。'
+        : '- [app_stop] 按 appId 停止正在运行的后端服务。停止进程、设为已停止。'
+    );
+    lines.push(
+      lang === 'en'
+        ? '- [app_delete] Delete an app by appId. Stops backend, removes files, clears storage. Irreversible.'
+        : lang === 'zh-TW'
+        ? '- [app_delete] 按 appId 刪除應用。停止後端、刪除檔案、清除存儲。不可恢復。'
+        : '- [app_delete] 按 appId 删除应用。停止后端、删除文件、清除存储。不可恢复。'
+    );
   }
 
   return lines;

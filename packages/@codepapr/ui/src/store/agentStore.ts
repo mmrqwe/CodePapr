@@ -1447,6 +1447,20 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
               saveCurrentProjectState(get());
             },
           };
+          const taskText = effectiveDisplay ?? effectiveInput;
+          let route = selectTaskModelRoute(
+            {
+              model: normalizedSettings.model,
+              fastModelEnabled: normalizedSettings.fastModelEnabled,
+              fastModel: normalizedSettings.fastModel,
+              temperature: normalizedSettings.temperature,
+              maxTokens: normalizedSettings.maxTokens,
+              thinkingEnabled: normalizedSettings.thinkingEnabled,
+            },
+            mode,
+            taskText,
+            slashCommandModelHint
+          );
           const runtimeSystemPrompt = buildAgentRuntimeSystemPrompt(
             normalizedSettings,
             mode,
@@ -1454,6 +1468,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             rulesSection,
             {
               agentDefinitions: get()._agentDefinitions,
+              model: route.model,
             }
           );
           // Signature of the STABLE bootstrap inputs. Volatile disk state
@@ -1499,24 +1514,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           });
           let { _agent: agent, activeSessionId } = get();
           const { _agentModel: agentModel, _agentPromptKey: agentPromptKey } = get();
-          const taskText = effectiveDisplay ?? effectiveInput;
           let accumulatedStats: ICacheStatistics | undefined;
           let accumulatedSubagentFast: ICacheStatistics | undefined;
           let accumulatedSubagentPrimary: ICacheStatistics | undefined;
           let accumulatedSubagentMentor: ICacheStatistics | undefined;
-          let route = selectTaskModelRoute(
-            {
-              model: normalizedSettings.model,
-              fastModelEnabled: normalizedSettings.fastModelEnabled,
-              fastModel: normalizedSettings.fastModel,
-              temperature: normalizedSettings.temperature,
-              maxTokens: normalizedSettings.maxTokens,
-              thinkingEnabled: normalizedSettings.thinkingEnabled,
-            },
-            mode,
-            taskText,
-            slashCommandModelHint
-          );
           const primaryRoute = buildPrimaryModelRoute(
             {
               model: normalizedSettings.model,

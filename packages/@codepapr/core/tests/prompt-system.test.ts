@@ -264,4 +264,57 @@ describe('promptSystem', () => {
     });
     expect(prompt).not.toContain('架构师');
   });
+
+  it('includes read_image hint only when read_image is in toolNames', () => {
+    const withTool = buildRuntimeSystemPrompt({
+      mode: 'agent',
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+      toolNames: ['read', 'read_image'],
+    });
+    expect(withTool).toContain('[read_image]');
+
+    const withoutTool = buildRuntimeSystemPrompt({
+      mode: 'agent',
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+      toolNames: ['read'],
+    });
+    expect(withoutTool).not.toContain('read_image');
+  });
+
+  it('omits app_render section outside app mode even when app_render is in toolNames', () => {
+    const prompt = buildRuntimeSystemPrompt({
+      mode: 'agent',
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+      toolNames: ['read', 'app_render'],
+    });
+    expect(prompt).not.toContain('app_render');
+    expect(prompt).not.toContain('应用渲染');
+  });
+
+  it('includes app_render section in app mode', () => {
+    const prompt = buildRuntimeSystemPrompt({
+      mode: 'app',
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+      toolNames: ['app_render'],
+    });
+    expect(prompt).toContain('app_render');
+    expect(prompt).toContain('应用渲染');
+    expect(prompt).toContain('应用管理');
+  });
+
+  it('suppresses mutating tool hints in ask mode', () => {
+    const prompt = buildRuntimeSystemPrompt({
+      mode: 'ask',
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+      toolNames: ['read', 'write', 'edit', 'patch', 'git', 'lsp_edit'],
+    });
+    expect(prompt).not.toContain('SEARCH/REPLACE');
+    expect(prompt).not.toContain('git(action');
+    expect(prompt).not.toContain('lsp_edit');
+  });
 });

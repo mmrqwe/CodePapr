@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildAgentSessionBootstrapPrompt } from './promptBuilders';
+import { buildAgentRuntimeSystemPrompt, buildAgentSessionBootstrapPrompt } from './promptBuilders';
 import { useCharactersStore } from '../charactersStore';
 import type { CharacterProfile } from '../../utils/characterTypes';
+import { createDefaultMcpSettings } from '../../utils/mcpTypes';
+import type { McpSettings } from '../../utils/mcpTypes';
 import type { Settings } from './types';
 
 function makeCharacter(overrides: Partial<CharacterProfile> = {}): CharacterProfile {
@@ -67,5 +69,91 @@ describe('buildAgentSessionBootstrapPrompt', () => {
     const bootstrap = buildAgentSessionBootstrapPrompt(settings, '/tmp/ws', [], 'some memory');
     expect(bootstrap).toContain('some memory');
     expect(bootstrap).not.toContain('长期附加指导');
+  });
+});
+
+function makeRuntimeSettings(overrides: Partial<Settings> = {}): Settings {
+  return {
+    systemPrompt: '',
+    lang: 'zh-CN',
+    model: 'main-model',
+    mentorEnabled: false,
+    multimodalEnabled: false,
+    multimodalModelTier: 'all',
+    fastModelEnabled: false,
+    fastModel: '',
+    mcp: createDefaultMcpSettings(),
+    ...overrides,
+  } as unknown as Settings;
+}
+
+describe('buildAgentRuntimeSystemPrompt', () => {
+  it('omits the read_image hint when multimodal is disabled', () => {
+    const settings = makeRuntimeSettings({ multimodalEnabled: false });
+    const prompt = buildAgentRuntimeSystemPrompt(settings, 'agent', '/tmp/ws');
+    expect(prompt).not.toContain('read_image');
+  });
+
+  it('includes the read_image hint when multimodal is enabled', () => {
+    const settings = makeRuntimeSettings({ multimodalEnabled: true });
+    const prompt = buildAgentRuntimeSystemPrompt(settings, 'agent', '/tmp/ws');
+    expect(prompt).toContain('read_image');
+  });
+
+  it('respects multimodalModelTier against the effective model', () => {
+    const settings = makeRuntimeSettings({
+      multimodalEnabled: true,
+      multimodalModelTier: 'primary',
+      fastModelEnabled: true,
+      fastModel: 'fast-model',
+    });
+    const onPrimary = buildAgentRuntimeSystemPrompt(settings, 'agent', '/tmp/ws', undefined, {
+      model: 'main-model',
+    });
+    const onFast = buildAgentRuntimeSystemPrompt(settings, 'agent', '/tmp/ws', undefined, {
+      model: 'fast-model',
+    });
+    expect(onPrimary).toContain('read_image');
+    expect(onFast).not.toContain('read_image');
+  });
+
+  it('omits the app_render hint outside app mode', () => {
+    const settings = makeRuntimeSettings();
+    const prompt = buildAgentRuntimeSystemPrompt(settings, 'agent', '/tmp/ws');
+    expect(prompt).not.toContain('app_render');
+    expect(prompt).not.toContain('应用渲染');
+  });
+
+  it('includes the app_render hint in app mode', () => {
+    const settings = makeRuntimeSettings();
+    const prompt = buildAgentRuntimeSystemPrompt(settings, 'app', '/tmp/ws');
+    expect(prompt).toContain('app_render');
+  });
+
+  it('omits mutating tool hints in read-only ask mode', () => {
+    const settings = makeRuntimeSettings();
+    const prompt = buildAgentRuntimeSystemPrompt(settings, 'ask', '/tmp/ws');
+    expect(prompt).not.toContain('SEARCH/REPLACE');
+    expect(prompt).not.toContain('git(action');
+    expect(prompt).not.toContain('lsp_edit');
+  });
+
+  it('omits websearch/webfetch hints when MCP search is enabled', () => {
+    const mcp = {
+      enabled: true,
+      exposeTools: true,
+      servers: [{ enabled: true, category: 'search' }],
+    } as unknown as McpSettings;
+    const settings = makeRuntimeSettings({ mcp });
+    const prompt = buildAgentRuntimeSystemPrompt(settings, 'agent', '/tmp/ws');
+    expect(prompt).not.toContain('websearch');
+    expect(prompt).not.toContain('webfetch');
+  });
+
+  it('keeps websearch/webfetch hints when MCP search is disabled', () => {
+    const settings = makeRuntimeSettings();
+    const prompt = buildAgentRuntimeSystemPrompt(settings, 'agent', '/tmp/ws');
+    expect(prompt).toContain('websearch');
+    expect(prompt).toContain('webfetch');
   });
 });
