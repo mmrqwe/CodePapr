@@ -299,7 +299,7 @@
             <div class="cchip c-mix">Text + AST</div>
           </div>
           <div class="desc">Reads a project file. Supports <code>startLine/endLine</code> line ranges, an <code>aroundLine</code> window, and <code>maxBytes</code> (defaults to 500KB). Pass <code>symbol</code> to read a specific symbol via AST targeting (degrades to text search without AST). Large full-file reads auto-attach a symbol outline.</div>
-          <div class="more"><div class="mbox">Dispatch: <code>read</code> → <code>workspace_read_file</code> → <code>invoke('read_text_file')</code>. With <code>symbol</code>, first runs <code>extract_file_symbols</code> (AST) to locate the symbol's line range, then slices. Output passes through <code>truncateToolOutput</code>: &gt;30k chars middle-truncated / &gt;50k offloaded to disk + 2k preview / 150k hard cap.</div></div>
+          <div class="more"><div class="mbox">Dispatch: <code>read</code> → <code>workspace_read_file</code> → <code>invoke('read_text_file')</code>. With <code>symbol</code>, first runs <code>extract_file_symbols</code> (AST) to locate the symbol's line range, then slices. Output passes through <code>truncateToolOutput</code>: &gt;60k chars middle-truncated / &gt;100k offloaded to disk + 2k preview / 150k hard cap.</div></div>
         </div>
 
         <div class="item">
@@ -344,7 +344,7 @@
             <div class="src"><span class="chip">isRegexp:true</span><span class="chip">smart-case</span><span class="chip">semantic optional</span></div>
             <div class="cchip c-mix">Text + LSP</div>
           </div>
-          <div class="desc">Searches file contents by regex, returning match positions and context. <code>contextLines</code> defaults to 0, max 8; <code>maxResults</code> defaults to 80. <code>semantic:true</code> switches to semantic mode (LSP workspace symbol search); degrades to regex with a note when no LSP is available.</div>
+          <div class="desc">Searches file contents by regex — the <b>default tool for searching file content</b> (strings, identifiers, log templates, config keys, you name it). <code>contextLines</code> defaults to 0, max 8; <code>maxResults</code> defaults to 80. <code>semantic:true</code> switches to semantic mode (LSP workspace symbol search); degrades to regex with a note when no LSP is available. <b>Never shell out to <code>bash grep/rg</code> for content search — always use this tool.</b></div>
           <div class="more"><div class="mbox">Dispatch: default <code>grep</code> → <code>workspace_search_text</code> (forces <code>isRegexp:true</code>); with <code>semantic:true</code> → <code>workspace_workspace_symbol</code> (LSP), degrades to regex with <code>degraded:true</code> if no LSP.</div></div>
         </div>
 
@@ -473,7 +473,7 @@
             <div class="src"><span class="chip">action: run|list|stop|stop_all</span><span class="chip">background:true → background</span></div>
             <div class="cchip c-text">Plain text</div>
           </div>
-          <div class="desc">Runs shell commands in the project environment (through a shell; pipes/&&/variables supported). <code>action: run</code> blocks by default; <code>background:true</code> runs in the background (dev servers / long-running commands) and returns a pid; <code>workdir</code> sets the working directory (relative to project root or absolute). <code>list/stop/stop_all</code> manage background processes.</div>
+          <div class="desc">Runs shell commands in the project environment (through a shell; pipes/&&/variables supported). <code>action: run</code> blocks by default; <code>background:true</code> runs in the background (dev servers / long-running commands) and returns a pid; <code>workdir</code> sets the working directory (relative to project root or absolute). <code>list/stop/stop_all</code> manage background processes. <b>To search file content, use the <code>grep</code> tool — never <code>bash grep/rg</code>.</b></div>
           <div class="more"><div class="mbox">Dispatch: <code>bash</code> → run + background? → <code>workspace_start_shell_background_command</code>, otherwise <code>workspace_run_shell_command</code>; list/stop/stop_all → <code>workspace_list_background_processes</code> / <code>workspace_stop_background_process</code> / <code>workspace_stop_all_background_processes</code>.</div></div>
         </div>
       </section>

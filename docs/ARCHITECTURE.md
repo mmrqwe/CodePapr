@@ -529,26 +529,29 @@ agent 回复完成
 **第二层：Session Bootstrap（AppendOnlyLog 首条 assistant 消息）**
 跨轮次稳定：
 1. Skills Section
-2. ProjectGraph Summary
-3. Custom Guidance（用户长期偏好提示词）
-4. 角色人设（当前启用的 CharacterProfile）
+2. Custom Guidance（用户长期偏好提示词）
+3. 角色人设（当前启用的 CharacterProfile）
 
 **第三层：Runtime User Prompt（当前轮 user 消息）**
 每次用户输入时构建：
 1. Mode Header
 2. User Input
-3. Diagnostics Section（放在最后，避免前缀抖动）
+3. Runtime Context（日期/时区）
+4. Project Structure Overview（项目结构图，每轮重读）
+5. Diagnostics Section（放在最后，避免前缀抖动）
 
 ### 10.2 关键不变量
 
 - 用户自定义提示词进入 session bootstrap 而非每轮 user prompt
 - Skills 进入 bootstrap 而非 system prefix
 - 角色人设进入 bootstrap 而非 system prefix（切换角色不破坏缓存）
+- ProjectGraph Summary 进入每轮 user prompt 尾部而非 bootstrap（每轮刷新，不影响前缀缓存）
 - Workspace 路径只在 system prompt 出现一次
 - Custom guidance 只在 bootstrap 出现一次
 - `topP`、`temperature`、`maxTokens`、`thinkingEnabled` 一起冻结在 ImmutablePrefix 中，任意变化都会破坏缓存 hash
-- session bootstrap 按"会话 × 稳定签名"缓存，memory.md / 项目图等易变磁盘状态变化不触发重建（见 §13.6）
-- 每轮 user prompt 的动态内容（日期 / 诊断）置于尾部，不改既有前缀
+- session bootstrap 按"会话 × 稳定签名"缓存，memory.md 等易变磁盘状态变化不触发重建（见 §13.6）；mid-loop 压缩时 memory 会随 bootstrap 一起刷新（反正 epoch 重写，无额外缓存代价）
+- 每轮 user prompt 的动态内容（日期 / 诊断 / 项目结构图）置于尾部，不改既有前缀
+- 项目诊断全绿（passed）时整段省略，不注入 prompt，减少无意义的尾部字节抖动
 
 ## 11. 模型路由
 
@@ -618,7 +621,7 @@ CodePapr 的核心架构决策是**围绕 DeepSeek 隐式前缀缓存做提示�
 2. **检查时机：仅轮首**。tool 结果在一轮末尾追加，其导致的超限在**下一轮轮首**被拦截——任何 LLM 请求都不会用超限上下文发送；工具调用任务在压缩后基于"摘要 + 近期尾部"继续。
 3. **不在工具执行中途压缩**：一轮内多个工具调用原子执行完再到轮边界压缩，避免破坏"工具调用↔结果"配对。
 4. **防死循环**：`lastCompactionRound` 保证两次压缩至少间隔 2 轮；handler 返回 null 不重置。
-5. **防御纵深**：`toolOutputTruncation` 把单个 tool 结果限制在 ~50KB（或落盘留预览），单轮增长有界，不会单轮撑爆 provider 硬上限。
+5. **防御纵深**：`toolOutputTruncation` 把单个 tool 结果限制在 ~100KB（或落盘留预览），单轮增长有界，不会单轮撑爆 provider 硬上限。中间截断保留字符数默认为 20k，可通过 `toolOutputMiddleKeepChars` 配置；工具上下文模式（完整/摘要/自动）进一步控制输出进入上下文的详细程度。
 
 ### 13.4 剪枝是压缩的子步骤（非独立机制）
 
@@ -654,11 +657,12 @@ effectiveMaxContextTokens = min(maxContextTokens, providerContextLimit − maxTo
 | --- | --- |
 | 无每请求前缀改动 | 剪枝只在压缩 / 重建时执行，不在每次请求构建时滑动剪枝 |
 | 重建序列化字节一致 | `toCoreTailMessages` 对象 tool 结果用 `sortedStringify`（与实时路径 `Message.tool` 一致）；空助手内容为 `''`（非 `' '`） |
-| 降低重建频率 | session bootstrap 按"会话 × 稳定签名"缓存（`resolveSessionBootstrap`）；memory.md / 项目图等易变磁盘状态变化不再触发重建 |
+| 降低重建频率 | session bootstrap 按"会话 × 稳定签名"缓存（`resolveSessionBootstrap`）；memory.md 等易变磁盘状态变化不触发重建；mid-loop 压缩时 memory 随 bootstrap 一起刷新（利用 epoch 重写窗口，零额外代价） |
 | reasoning 回传稳定 | `reasoning_content` 按"是否存在 + 模型能力（`supportsThinkingPayload`）"回传，与每请求 thinking 开关解耦，避免重建时给历史消息增删 reasoning |
 | TodoList digest 冻结 | checkpoint 生成时冻结当前 digest 进 payload，重建时复用而非实时重渲染 |
 | 参数冻结 | topP / temperature / maxTokens / thinkingEnabled 冻结在 ImmutablePrefix，变化即换 hash |
-| 动态内容置于尾部 | 每轮 user prompt 的日期 / 诊断等动态内容放在新 user 消息（尾部），不改既有前缀 |
+| 动态内容置于尾部 | 每轮 user prompt 的日期 / 诊断 / 项目结构图 / 实时计划等动态内容放在新 user 消息（尾部），不改既有前缀 |
+| 项目诊断省略 | 项目级诊断全绿（passed）时整段不注入，无信息增量却省尾部字节 |
 
 ### 13.7 哈希与校验
 
@@ -693,7 +697,7 @@ effectiveMaxContextTokens = min(maxContextTokens, providerContextLimit − maxTo
 | LLM | API 类型、模型名称、fast 模型、temperature、topP、maxTokens、thinking 模式、maxToolRounds |
 | Search | 自部署 SearXNG 优先，失败自动降级到内置多源聚合；搜索引擎选择器已移除；分类/时间/语言/安全搜索等高级参数收入折叠区 |
 | Mentor | Mentor 子代理独立 API key、Base URL、模型选择 |
-| 高级 | 上下文压缩（模型/温度/摘要输出 token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 深度/文件限制。上下文上限 `maxContextTokens` 默认 500K，实际生效值按所选服务商上下文上限自动钳制（见 §13.5） |
+| 高级 | 上下文压缩（模型/温度/摘要输出 token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 深度/文件限制、流式与工具输出（流空闲超时、中间截断保留字符数）、工具上下文模式（完整/摘要/自动）。上下文上限 `maxContextTokens` 默认 500K，实际生效值按所选服务商上下文上限自动钳制（见 §13.5） |
 | App | .papr 应用权限管理——全局默认级别、Level 3 全局开关、逐应用级别覆盖 |
 
 语音配置不在主设置面板，而是在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。

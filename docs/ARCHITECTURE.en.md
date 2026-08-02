@@ -530,26 +530,29 @@ Fully fixed, cross-session reusable prefix:
 **Layer 2: Session Bootstrap (AppendOnlyLog first assistant message)**
 Stable across turns:
 1. Skills Section
-2. ProjectGraph Summary
-3. Custom Guidance (user long-term preference prompt)
-4. Character profile (currently active CharacterProfile)
+2. Custom Guidance (user long-term preference prompt)
+3. Character profile (currently active CharacterProfile)
 
 **Layer 3: Runtime User Prompt (current turn user message)**
 Built on each user input:
 1. Mode Header
 2. User Input
-3. Diagnostics Section (placed last to avoid prefix jitter)
+3. Runtime Context (date/timezone)
+4. Project Structure Overview (project graph, re-read each turn)
+5. Diagnostics Section (placed last to avoid prefix jitter)
 
 ### 10.2 Key Invariants
 
 - User custom prompts go into session bootstrap, not per-turn user prompt
 - Skills go into bootstrap, not system prefix
 - Character profile goes into bootstrap, not system prefix (switching characters does not break cache)
+- ProjectGraph Summary goes into the per-turn user prompt tail, not bootstrap (re-read each round, no prefix cache impact)
 - Workspace path appears only once in system prompt
 - Custom guidance appears only once in bootstrap
 - `topP`, `temperature`, `maxTokens`, `thinkingEnabled` are frozen together in ImmutablePrefix; any change breaks the cache hash
-- Session bootstrap is cached per "session × stable signature"; volatile disk state (memory.md / project graph) does not trigger rebuilds (see §13.6)
-- Per-turn dynamic content (date / diagnostics) is placed at the tail, not in the existing prefix
+- Session bootstrap is cached per "session × stable signature"; volatile disk state (memory.md) does not trigger rebuilds (see §13.6); memory is refreshed together with bootstrap at mid-loop compaction (free because the epoch is rewritten anyway)
+- Per-turn dynamic content (date / diagnostics / project graph / live plan) is placed at the tail, not in the existing prefix
+- Project diagnostics section is entirely omitted when overall status is "passed" (no actionable info, saves tail bytes)
 
 ## 11. Model Routing
 
@@ -619,7 +622,7 @@ Context grows with tool results during the tool loop. `Agent.chat` performs an o
 2. **Check timing: round-start only.** Tool results are appended at the end of a round; the overflow they cause is caught at the **next round's start** — no LLM request is ever sent with an over-limit context; the tool-calling task continues after compaction from "summary + recent tail".
 3. **No mid-tool-execution compaction:** a round's multiple tool calls are executed atomically before compacting at the round boundary, preserving tool-call↔result pairing.
 4. **Anti-loop:** `lastCompactionRound` guarantees at least 2 rounds between compactions; a null handler result does not reset it.
-5. **Defense in depth:** `toolOutputTruncation` bounds each tool result to ~50KB (or spills to disk with a preview), so per-round growth is bounded and cannot blow the provider's hard limit in a single round.
+5. **Defense in depth:** `toolOutputTruncation` bounds each tool result to ~100KB (or spills to disk with a preview), so per-round growth is bounded and cannot blow the provider's hard limit in a single round. Middle-truncation keep size defaults to 20k chars and is configurable via `toolOutputMiddleKeepChars`; tool context mode (full/summary/auto) further controls how much output enters the context.
 
 ### 13.4 Pruning Is a Compaction Sub-Step (Not a Separate Mechanism)
 
@@ -655,11 +658,12 @@ These measures keep the prefix byte-stable within an epoch (any break invalidate
 | --- | --- |
 | No per-request prefix mutation | Pruning runs only at compaction/rebuild, not as a sliding window on every request build |
 | Byte-identical rebuild serialization | `toCoreTailMessages` uses `sortedStringify` for object tool results (matching the live path `Message.tool`); empty assistant content is `''` (not `' '`) |
-| Fewer rebuilds | Session bootstrap is cached per "session × stable signature" (`resolveSessionBootstrap`); volatile disk state (memory.md / project graph) no longer triggers rebuilds |
+| Fewer rebuilds | Session bootstrap is cached per "session × stable signature" (`resolveSessionBootstrap`); volatile disk state (memory.md) does not trigger rebuilds; memory is refreshed together with bootstrap at mid-loop compaction (free since the epoch is rewritten anyway) |
 | Stable reasoning round-trip | `reasoning_content` is round-tripped based on "presence + model capability (`supportsThinkingPayload`)", decoupled from the per-request thinking toggle, so rebuilds don't add/remove reasoning on history |
 | Frozen TodoList digest | The current digest is frozen into the checkpoint payload at generation and reused on rebuild instead of re-rendered live |
 | Frozen parameters | topP / temperature / maxTokens / thinkingEnabled are frozen in ImmutablePrefix; any change flips the hash |
-| Dynamic content placed at the tail | Per-turn dynamic content (date / diagnostics) goes into the new user message (tail), not the existing prefix |
+| Dynamic content placed at the tail | Per-turn dynamic content (date / diagnostics / project graph / live plan) goes into the new user message (tail), not the existing prefix |
+| Clean diagnostics omittance | When overall project diagnostics status is "passed", the entire section is omitted — no info gain, fewer tail bytes |
 
 ### 13.7 Hashing and Validation
 
@@ -694,7 +698,7 @@ The settings panel has six tabs. Full parameter reference: `packages/@codepapr/c
 | LLM | API type, model name, fast model, temperature, topP, maxTokens, thinking mode, maxToolRounds |
 | Search | Self-hosted SearXNG first, with automatic fallback to built-in multi-source aggregation when unavailable; engine selector removed from UI; category/time/language/safe search parameters moved to collapsible Advanced Options section |
 | Mentor | Mentor sub-agent independent API key, Base URL, model selection |
-| Advanced | Context compaction (model/temperature/summary output tokens/context limit/conversation rounds), TodoList max retries, ProjectGraph depth/file limits. The context limit `maxContextTokens` defaults to 500K; its effective value is clamped to the selected provider's context limit (see §13.5) |
+| Advanced | Context compaction (model/temperature/summary output tokens/context limit/conversation rounds), TodoList max retries, ProjectGraph depth/file limits, streaming & tool output (stream idle timeout, middle-truncation keep chars), tool context mode (full/summary/auto). The context limit `maxContextTokens` defaults to 500K; its effective value is clamped to the selected provider's context limit (see §13.5) |
 | App | .papr app permission management — global default level, Level 3 global toggle, per-app level overrides |
 
 Voice configuration is not in the main settings panel — it is configured per character in the CharacterModal Voice Tab.

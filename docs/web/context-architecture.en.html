@@ -339,17 +339,6 @@
           <div class="more"><div class="mbox">Design intent: "Only inject names and descriptions in stable context; let the model decide whether it needs them, then call skill_load on demand to read full instructions."</div></div>
         </div>
 
-        <div class="item" data-wire="map">
-          <div class="row">
-            <div class="addr">MAP</div>
-            <div class="name">Repository Map<small>project structure overview</small></div>
-            <div class="src"><span class="chip">project graph cache</span><span class="chip">buildProjectGraphBootstrapSummary</span></div>
-            <div class="cchip c-hit">frozen outside signature</div>
-          </div>
-          <div class="desc">Directory / file / symbol bird's-eye view, rendered as "## Project Structure Overview". Volatile on disk, but <b>excluded from bootstrap signature</b> → frozen within session, changes don't trigger rebuild. <b>Only injected when graph cache exists</b>. Sub-agents inherit via <code>SubagentSessionDeps.projectGraphSummary</code>.</div>
-          <div class="more"><div class="mbox">Also used for cold start: when memory.md is empty and graph exists, background task generates initial memory from graph summary (<code>agentStore.ts</code>).</div></div>
-        </div>
-
         <div class="item" data-wire="mem">
           <div class="row">
             <div class="addr">MEM</div>
@@ -357,7 +346,7 @@
             <div class="src"><span class="chip">.CodePapr/memory.md</span><span class="chip">memorySection</span></div>
             <div class="cchip c-hit">frozen outside signature</div>
           </div>
-          <div class="desc">Cross-session project knowledge, rendered as "## Project Memory". <b>Auto-created</b> (cold-start bootstrap). Mid-session agent writes to memory.md <b>don't trigger rebuild</b> (outside signature) → prefix cache intact, updates take effect <b>next session</b>. This is an explicit "cache stability vs. freshness" tradeoff. Sub-agents inherit via <code>SubagentSessionDeps.memorySection</code>.</div>
+          <div class="desc">Cross-session project knowledge, rendered as "## Project Memory". <b>Auto-created</b> (cold-start bootstrap). Frozen between runs via <code>resolveSessionBootstrap</code> (outside signature → prefix cache intact). <b>Refreshed at mid-loop compaction</b>: when context exceeds budget and the epoch resets, <code>refreshBootstrap</code> re-reads <code>memory.md</code> from disk and injects a fresh bootstrap — the epoch is rewritten anyway, so no extra cache cost. Updates otherwise take effect <b>next session</b>. Sub-agents inherit via <code>SubagentSessionDeps.memorySection</code>.</div>
           <div class="more"><div class="mbox">Contrast: memory.md usually exists (auto-generated) while AGENTS.md may not (requires user to save rules) — different creation mechanisms.</div></div>
         </div>
 
@@ -433,6 +422,17 @@
           <div class="more"><div class="mbox">Lossy snapshot: only contains status / title / retry / errorLog (first 200 chars), excludes description / dependsOn / artifacts. Full details are passed back every turn via the <code>todo</code> tool during live operation. <code>checkpoint.payload.todoDigest</code> is still stored (data compatibility) but no longer injected as a separate user message.</div></div>
         </div>
 
+        <div class="item" data-wire="map">
+          <div class="row">
+            <div class="addr">MAP</div>
+            <div class="name">Repository Map<small>project structure overview</small></div>
+            <div class="src"><span class="chip">project graph cache</span><span class="chip">buildProjectGraphBootstrapSummary</span><span class="chip">injected per run</span></div>
+            <div class="cchip c-miss">fresh per turn · tail user prompt</div>
+          </div>
+          <div class="desc">Directory / file / symbol bird's-eye view, rendered as "## Project Structure Overview" and injected into each turn's <b>user prompt</b> (after runtime context, before diagnostics). <b>Fresh every run</b> — re-read from disk at send time, never frozen into the prefix. Zero cache impact: it sits after the cached prefix boundary, so changes don't invalidate any history. Sub-agents still inherit it via <code>SubagentSessionDeps.projectGraphSummary</code> (in their bootstrap, since they're short-lived).</div>
+          <div class="more"><div class="mbox">Used for cold start: when memory.md is empty and a graph exists, a background task generates initial memory from the graph summary (<code>agentStore.ts</code>). The graph is also available as a tool (<code>graph(action: full/overview/...)</code>) for deeper exploration.</div></div>
+        </div>
+
         <div class="item" data-wire="task">
           <div class="row">
             <div class="addr">TASK</div>
@@ -462,7 +462,7 @@
             <div class="src"><span class="chip">truncateToolOutput</span><span class="chip">write-time 3-tier</span></div>
             <div class="cchip c-miss">append · bounded at birth</div>
           </div>
-          <div class="desc"><b>&gt;50k chars</b> → spill to disk + 2k preview + path (read can re-read); <b>30k–50k</b> → middle truncation (half head, half tail); <b>150k</b> hard ceiling. Normalized and frozen once at write time, <b>post-hoc sliding trim abolished</b> → no more mid-prefix flips. Code retrieval (read / grep / graph / lsp) is the most common tool result source.</div>
+          <div class="desc"><b>&gt;100k chars</b> → spill to disk + 2k preview + path (read can re-read); <b>60k–100k</b> → middle truncation (head + tail, 20k total kept); <b>150k</b> hard ceiling. Mode is controlled by <b>tool context settings</b> (full / summary / auto) — auto mode keeps full output under 5k chars and summarizes above. Normalized and frozen once at write time, <b>post-hoc sliding trim abolished</b> → no more mid-prefix flips. Code retrieval (read / grep / graph / lsp) is the most common tool result source.</div>
           <div class="more"><div class="mbox">This is the core of hit-rate optimization: every tool result is bounded at birth, the tail is naturally controlled, and miss converges to the theoretical minimum. Thresholds are in <b>characters</b> (content.length), so CJK text isn't misjudged by byte count. Rebuilds read frozen tool output directly (<code>sortedStringify</code> guarantees byte-identical with the live path).</div></div>
         </div>
       </section>

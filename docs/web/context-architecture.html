@@ -347,17 +347,6 @@
           <div class="more"><div class="mbox">设计意图：「稳定上下文里只注入名称和描述，由模型自行判断是否需要，再按需调用 skill_load 读取完整说明」。</div></div>
         </div>
 
-        <div class="item" data-wire="map">
-          <div class="row">
-            <div class="addr">MAP</div>
-            <div class="name">Repository Map<small>项目结构概览</small></div>
-            <div class="src"><span class="chip">project graph 缓存</span><span class="chip">buildProjectGraphBootstrapSummary</span></div>
-            <div class="cchip c-hit">签名外冻结</div>
-          </div>
-          <div class="desc">目录 / 文件 / 符号鸟瞰，渲染为「## 项目结构概览」。磁盘上易变，但<b>被排除出 bootstrap 签名</b> → 会话内冻结，改了也不重建。<b>有 graph 缓存才注入</b>。子代理通过 <code>SubagentSessionDeps.projectGraphSummary</code> 继承。</div>
-          <div class="more"><div class="mbox">也用于冷启动：memory.md 为空且有 graph 时，后台用 graph 摘要生成初始 memory（<code>agentStore.ts</code>）。</div></div>
-        </div>
-
         <div class="item" data-wire="mem">
           <div class="row">
             <div class="addr">MEM</div>
@@ -365,7 +354,7 @@
             <div class="src"><span class="chip">.CodePapr/memory.md</span><span class="chip">memorySection</span></div>
             <div class="cchip c-hit">签名外冻结</div>
           </div>
-          <div class="desc">跨会话项目知识，渲染为「## 项目记忆」。<b>自动创建</b>（冷启动 bootstrap）。会话中途 agent 写 memory.md <b>不触发重建</b>（签名外）→ 前缀缓存不破，更新<b>次会话生效</b>。这是"缓存稳定 vs 实时性"的明确取舍。子代理通过 <code>SubagentSessionDeps.memorySection</code> 继承。</div>
+          <div class="desc">跨会话项目知识，渲染为「## 项目记忆」。<b>自动创建</b>（冷启动 bootstrap）。通过 <code>resolveSessionBootstrap</code> 在轮次间冻结（签名外 → 前缀缓存不破）。<b>mid-loop 压缩时刷新</b>：上下文超预算触发压缩、epoch 重置时，<code>refreshBootstrap</code> 从磁盘重读 <code>memory.md</code> 并注入一份新的 bootstrap——反正 epoch 要重写，没有额外缓存开销。其余情况更新<b>次会话生效</b>。子代理通过 <code>SubagentSessionDeps.memorySection</code> 继承。</div>
           <div class="more"><div class="mbox">对比：项目里 memory.md 往往存在（自动生成）而 AGENTS.md 可能不存在（需用户保存规则）——两者创建机制不同。</div></div>
         </div>
 
@@ -441,6 +430,17 @@
           <div class="more"><div class="mbox">有损快照：仅含 status / title / retry / errorLog 前 200 字符，不含 description / dependsOn / artifacts。完整细节在 live 期间靠 <code>todo</code> 工具每轮回传。<code>checkpoint.payload.todoDigest</code> 仍存储（数据兼容），但不再单独注入为 user 消息。</div></div>
         </div>
 
+        <div class="item" data-wire="map">
+          <div class="row">
+            <div class="addr">MAP</div>
+            <div class="name">Repository Map<small>项目结构概览</small></div>
+            <div class="src"><span class="chip">project graph 缓存</span><span class="chip">buildProjectGraphBootstrapSummary</span><span class="chip">每轮注入</span></div>
+            <div class="cchip c-miss">每轮刷新 · user prompt 尾部</div>
+          </div>
+          <div class="desc">目录 / 文件 / 符号鸟瞰，渲染为「## 项目结构概览」，注入每轮的<b>user prompt</b>（运行时上下文之后、诊断之前）。<b>每轮从磁盘重读</b>，永不冻结进前缀。零缓存影响：它坐落在已缓存前缀边界之后，变化不会让历史失效。子代理仍通过 <code>SubagentSessionDeps.projectGraphSummary</code> 继承（注入它们的 bootstrap，因为子代理生命周期短）。</div>
+          <div class="more"><div class="mbox">用于冷启动：memory.md 为空且有 graph 时，后台用 graph 摘要生成初始 memory（<code>agentStore.ts</code>）。graph 同时作为工具（<code>graph(action: full/overview/...)</code>）供深度探索使用。</div></div>
+        </div>
+
         <div class="item" data-wire="task">
           <div class="row">
             <div class="addr">TASK</div>
@@ -470,7 +470,7 @@
             <div class="src"><span class="chip">truncateToolOutput</span><span class="chip">写时三阶梯</span></div>
             <div class="cchip c-miss">追加 · 出生即有界</div>
           </div>
-          <div class="desc"><b>&gt;50k 字符</b> → 落盘 + 2k 预览 + 路径（read 可回读）；<b>30k–50k</b> → 中间截断（头尾各半）；<b>150k</b> 硬上限。写时一次性归一化并冻结，<b>废除事后滑动裁剪</b> → 前缀不再中部翻转。代码检索（read / grep / graph / lsp）是最常见的 tool result 来源。</div>
+          <div class="desc"><b>&gt;100k 字符</b> → 落盘 + 2k 预览 + 路径（read 可回读）；<b>60k–100k</b> → 中间截断（头尾共 20k）；<b>150k</b> 硬上限。模式由<b>工具上下文设置</b>控制（完整 / 摘要 / 自动）——自动模式在 5k 字符以下保留完整输出，超出则摘要。写时一次性归一化并冻结，<b>废除事后滑动裁剪</b> → 前缀不再中部翻转。代码检索（read / grep / graph / lsp）是最常见的 tool result 来源。</div>
           <div class="more"><div class="mbox">这是命中率优化的核心：每条工具结果出生即有界，尾部天然受控，miss 收敛到理论下限。阈值按<b>字符</b>（content.length），中文不被字节数误判。重建时直接读取已冻结的工具输出（<code>sortedStringify</code> 保证与实时路径逐字节一致）。</div></div>
         </div>
       </section>
@@ -482,10 +482,10 @@
         <h4>线上字节顺序 · Wire Order</h4>
         <ul class="wire">
           <li class="wnode" data-c="hit" data-wire="sys param tool rules"><b>prefix</b> system + tools + params<span class="wtag">ImmutablePrefix · 命中</span></li>
-          <li class="wnode" data-c="hit" data-wire="skill map mem custom"><b>bootstrap</b> log[0] · isPrefixSystem<span class="wtag">记忆化 · 命中 · Claude 提取为 system</span></li>
+          <li class="wnode" data-c="hit" data-wire="skill mem custom"><b>bootstrap</b> log[0] · isPrefixSystem<span class="wtag">记忆化 · 命中 · Claude 提取为 system</span></li>
           <li class="wnode" data-c="epoch" data-wire="ckpt"><b>checkpoint</b> 检查点摘要<span class="wtag">epoch 重写</span></li>
           <li class="wnode" data-c="hit" data-wire="recent tuse tres"><b>tail</b> 最近对话<span class="wtag">append-only · 历史命中</span></li>
-          <li class="wnode" data-c="miss" data-wire="todo task tres"><span class="misspulse"></span><b>本轮新增</b> user prompt + Live Plan<span class="wtag">唯一 miss</span></li>
+          <li class="wnode" data-c="miss" data-wire="map todo task tres"><span class="misspulse"></span><b>本轮新增</b> user prompt + 结构图 + Live Plan<span class="wtag">唯一 miss</span></li>
         </ul>
       </div>
       <div class="railcard reveal">
@@ -509,8 +509,8 @@
         <p>memory.md 与 project-graph 在磁盘上易变，但被排除出 <code>bootstrapSignature</code>。<code>resolveSessionBootstrap</code> 按 (session × 稳定签名) 记忆化 bootstrap——磁盘变化不重建，更新次会话生效。保住整段前缀缓存。</p>
       </div>
       <div class="led">
-        <div class="no">M·02</div><h5>写时三阶梯截断</h5>
-        <p>工具输出在写入 AppendOnlyLog 前一次性归一化（<code>truncateToolOutput</code>）：30k 中间截断 / 50k 落盘 / 150k 硬上限。出生即有界，废除事后滑动裁剪，重建逐字节一致。</p>
+         <div class="no">M·02</div><h5>写时三阶梯截断</h5>
+         <p>工具输出在写入 AppendOnlyLog 前一次性归一化（<code>truncateToolOutput</code>）：60k 中间截断 / 100k 落盘 / 150k 硬上限。出生即有界，废除事后滑动裁剪，重建逐字节一致。可配置中间截断保留字符数（默认 20k）与工具上下文模式（完整/摘要/自动）。</p>
       </div>
       <div class="led">
         <div class="no">M·03</div><h5>压缩 Epoch</h5>

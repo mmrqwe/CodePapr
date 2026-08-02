@@ -299,7 +299,7 @@
             <div class="cchip c-mix">文本 + AST</div>
           </div>
           <div class="desc">读取项目文件。支持 <code>startLine/endLine</code> 行范围、<code>aroundLine</code> 窗口、<code>maxBytes</code>（默认 500KB）。传 <code>symbol</code> 参数可按 AST 定位符号精确读取（无 AST 时降级文本搜索）。整文件读取较大文件时自动附带符号大纲。</div>
-          <div class="more"><div class="mbox">分发：<code>read</code> → <code>workspace_read_file</code> → <code>invoke('read_text_file')</code>。传 <code>symbol</code> 时先 <code>extract_file_symbols</code>（AST）定位符号行范围再切片返回。输出经 <code>truncateToolOutput</code>：&gt;30k 字符中间截断 / &gt;50k 落盘 + 2k 预览 / 150k 硬顶。</div></div>
+          <div class="more"><div class="mbox">分发：<code>read</code> → <code>workspace_read_file</code> → <code>invoke('read_text_file')</code>。传 <code>symbol</code> 时先 <code>extract_file_symbols</code>（AST）定位符号行范围再切片返回。输出经 <code>truncateToolOutput</code>：&gt;60k 字符中间截断 / &gt;100k 落盘 + 2k 预览 / 150k 硬顶。</div></div>
         </div>
 
         <div class="item">
@@ -344,7 +344,7 @@
             <div class="src"><span class="chip">isRegexp:true</span><span class="chip">smart-case</span><span class="chip">semantic 可选</span></div>
             <div class="cchip c-mix">文本 + LSP</div>
           </div>
-          <div class="desc">按正则搜索文件内容，返回匹配位置与上下文。<code>contextLines</code> 默认 0 最大 8，<code>maxResults</code> 默认 80。<code>semantic:true</code> 切换语义模式（LSP workspace symbol 检索），无 LSP 时降级正则并告知。</div>
+          <div class="desc">按正则搜索文件内容，是<b>搜索文件内容的默认工具</b>（字符串、标识符、日志模板、配置键都用它）。<code>contextLines</code> 默认 0 最大 8，<code>maxResults</code> 默认 80。<code>semantic:true</code> 切换语义模式（LSP workspace symbol 检索），无 LSP 时降级正则并告知。<b>不要用 <code>bash grep/rg</code> 搜索文件内容</b>——始终用本工具。</div>
           <div class="more"><div class="mbox">分发：默认 <code>grep</code> → <code>workspace_search_text</code>（强制 <code>isRegexp:true</code>）；<code>semantic:true</code> 时 → <code>workspace_workspace_symbol</code>（LSP），无 LSP 则降级正则并返回 <code>degraded:true</code>。</div></div>
         </div>
 
@@ -473,7 +473,7 @@
             <div class="src"><span class="chip">action: run|list|stop|stop_all</span><span class="chip">background:true → 后台</span></div>
             <div class="cchip c-text">纯文本</div>
           </div>
-          <div class="desc">在项目环境执行 shell 命令（穿过 shell，支持管道/&&/变量）。<code>action: run</code> 默认阻塞等待；<code>background:true</code> 后台运行（dev server / 长驻命令）返回 pid；<code>workdir</code> 指定工作目录（相对项目根或绝对）。<code>list/stop/stop_all</code> 管理后台进程。</div>
+          <div class="desc">在项目环境执行 shell 命令（穿过 shell，支持管道/&&/变量）。<code>action: run</code> 默认阻塞等待；<code>background:true</code> 后台运行（dev server / 长驻命令）返回 pid；<code>workdir</code> 指定工作目录（相对项目根或绝对）。<code>list/stop/stop_all</code> 管理后台进程。<b>搜索文件内容请用 <code>grep</code> 工具，不要用 bash grep/rg</b>。</div>
           <div class="more"><div class="mbox">分发：<code>bash</code> → run + background? → <code>workspace_start_shell_background_command</code>，否则 <code>workspace_run_shell_command</code>；list/stop/stop_all → <code>workspace_list_background_processes</code> / <code>workspace_stop_background_process</code> / <code>workspace_stop_all_background_processes</code>。</div></div>
         </div>
       </section>
