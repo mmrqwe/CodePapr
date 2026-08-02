@@ -42,7 +42,7 @@ describe('buildAgentSessionBootstrapPrompt', () => {
 
   it('includes the custom system prompt in the bootstrap', () => {
     const settings = makeSettings({ systemPrompt: 'CUSTOM_SYS_PROMPT_MARKER' });
-    const bootstrap = buildAgentSessionBootstrapPrompt(settings, '/tmp/ws', [], undefined, 'some memory');
+    const bootstrap = buildAgentSessionBootstrapPrompt(settings, '/tmp/ws', [], 'some memory');
     expect(bootstrap).toContain('CUSTOM_SYS_PROMPT_MARKER');
     expect(bootstrap).toContain('some memory');
   });
@@ -55,7 +55,7 @@ describe('buildAgentSessionBootstrapPrompt', () => {
     });
 
     const settings = makeSettings({ systemPrompt: 'CUSTOM_SYS_PROMPT_MARKER' });
-    const bootstrap = buildAgentSessionBootstrapPrompt(settings, '/tmp/ws', [], undefined, 'some memory');
+    const bootstrap = buildAgentSessionBootstrapPrompt(settings, '/tmp/ws', [], 'some memory');
 
     expect(bootstrap).toContain('CUSTOM_SYS_PROMPT_MARKER');
     expect(bootstrap).not.toContain('UNIQUE_CHAR_DESCRIPTION_MARKER');
@@ -64,7 +64,7 @@ describe('buildAgentSessionBootstrapPrompt', () => {
 
   it('omits the custom guidance section entirely when system prompt is empty', () => {
     const settings = makeSettings({ systemPrompt: '   ' });
-    const bootstrap = buildAgentSessionBootstrapPrompt(settings, '/tmp/ws', [], undefined, 'some memory');
+    const bootstrap = buildAgentSessionBootstrapPrompt(settings, '/tmp/ws', [], 'some memory');
     expect(bootstrap).toContain('some memory');
     expect(bootstrap).not.toContain('长期附加指导');
   });

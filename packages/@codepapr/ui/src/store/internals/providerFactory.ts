@@ -14,10 +14,14 @@ export function buildProviderInstance(s: Settings) {
     return new LocalProvider({
       apiKey: s.apiKey.trim() || 'local',
       baseURL: s.baseURL.trim().replace(/\/+$/, '') || DEFAULT_LOCAL_BASE_URL,
+      idleTimeoutMs: s.streamIdleTimeoutMs,
     });
   }
 
-  const cfg: { apiKey: string; baseURL?: string } = { apiKey: s.apiKey.trim() };
+  const cfg: { apiKey: string; baseURL?: string; idleTimeoutMs?: number } = {
+    apiKey: s.apiKey.trim(),
+    idleTimeoutMs: s.streamIdleTimeoutMs,
+  };
   if (s.apiMode === 'custom') {
     cfg.baseURL = s.baseURL.trim().replace(/\/+$/, '');
   }
@@ -72,12 +76,14 @@ export function toWorkerAgentSettings(settings: Settings): WorkerAgentSettings {
   mcp: settings.mcp,
   graphToolTimeoutMs: settings.graphToolTimeoutMs,
   toolIpcTimeoutMs: settings.toolIpcTimeoutMs,
+  streamIdleTimeoutMs: settings.streamIdleTimeoutMs,
   multimodalEnabled: settings.multimodalEnabled,
   multimodalModelTier: settings.multimodalModelTier,
   toolOutputInterceptChars: settings.toolOutputInterceptChars,
   toolOutputOffloadChars: settings.toolOutputOffloadChars,
   toolOutputCeilingChars: settings.toolOutputCeilingChars,
   toolOutputPreviewChars: settings.toolOutputPreviewChars,
+  toolOutputMiddleKeepChars: settings.toolOutputMiddleKeepChars,
   pruneOldToolResults: settings.pruneOldToolResults,
   pruneProtectRounds: settings.pruneProtectRounds,
   pruneMinChars: settings.pruneMinChars,

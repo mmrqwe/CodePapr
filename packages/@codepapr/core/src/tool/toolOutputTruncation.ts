@@ -6,9 +6,9 @@
  * 也正因为每条工具结果出生即有界，事后基于滑动窗口的旧结果裁剪不再必要。
  *
  * 三阶梯（阈值单位均为「字符」content.length）：
- *  - Tier 1 拦截（interceptChars，默认 30,000）：超过则「中间截断」，保留头尾各半
- *    （middleKeepChars，默认 8,000，头 50% + 尾 50%），删除中间。
- *  - Tier 2 落盘（offloadChars，默认 50,000）：超过则离线落盘，上下文只留
+ *  - Tier 1 拦截（interceptChars，默认 60,000）：超过则「中间截断」，保留头尾各半
+ *    （middleKeepChars，默认 20,000，头 50% + 尾 50%），删除中间。
+ *  - Tier 2 落盘（offloadChars，默认 100,000）：超过则离线落盘，上下文只留
  *    offloadPreviewChars（默认 2,000）头部预览 + 磁盘文件路径，LLM 可用 read 回读全文。
  *  - Tier 3 硬上限（ceilingChars，默认 150,000）：钳制 intercept/offload 的最高值，
  *    即使配置更高也强行按上限截断。
@@ -17,11 +17,11 @@
 import { sortedStringify, generateUUID } from '@codepapr/common';
 
 export interface ToolOutputTruncationOptions {
-  /** Tier 1 拦截阈值（字符）。超过则中间截断。默认 30,000。 */
+  /** Tier 1 拦截阈值（字符）。超过则中间截断。默认 60,000。 */
   interceptChars?: number;
-  /** 中间截断保留的总字符数，头尾各半。默认 8,000。 */
+  /** 中间截断保留的总字符数，头尾各半。默认 20,000。 */
   middleKeepChars?: number;
-  /** Tier 2 落盘阈值（字符）。超过则落盘 + 预览。默认 50,000。 */
+  /** Tier 2 落盘阈值（字符）。超过则落盘 + 预览。默认 100,000。 */
   offloadChars?: number;
   /** 落盘时保留的头部预览字符数。默认 2,000。 */
   offloadPreviewChars?: number;
@@ -38,9 +38,9 @@ export interface TruncationResult {
   truncated: boolean;
 }
 
-export const DEFAULT_INTERCEPT_CHARS = 30_000;
-export const DEFAULT_MIDDLE_KEEP_CHARS = 8_000;
-export const DEFAULT_OFFLOAD_CHARS = 50_000;
+export const DEFAULT_INTERCEPT_CHARS = 60_000;
+export const DEFAULT_MIDDLE_KEEP_CHARS = 20_000;
+export const DEFAULT_OFFLOAD_CHARS = 100_000;
 export const DEFAULT_OFFLOAD_PREVIEW_CHARS = 2_000;
 export const DEFAULT_CEILING_CHARS = 150_000;
 

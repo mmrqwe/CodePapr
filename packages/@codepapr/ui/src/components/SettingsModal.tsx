@@ -129,7 +129,7 @@ export function SettingsModal() {
       llm: ['apiMode', 'apiFormat', 'fastModelEnabled', 'thinkingEnabled', 'thinkingEffort', 'temperature', 'topP', 'maxToolRounds', local.apiMode],
       search: ['searxngEnabled', 'searxngBaseUrl', 'searxngCategories', 'searxngTimeRange', 'searxngLanguage', 'searxngSafeSearch'],
       mentor: ['mentorEnabled', 'mentorApiFormat', 'mentorBaseURL', 'mentorApiKey', 'mentorModel', 'mentorMaxTokens', 'mentorThinkingEnabled', 'maxMentorConsultations', 'explorePrompt', 'scoutPrompt', 'mentorPrompt', 'exploreTemperature', 'exploreMaxToolRounds', 'exploreMaxTokens', 'exploreTopP', 'exploreMaxDepth', 'exploreThinkingEnabled', 'scoutTemperature', 'scoutMaxToolRounds', 'scoutMaxTokens', 'scoutTopP', 'scoutMaxDepth', 'scoutThinkingEnabled'],
-      advanced: ['compactionModel', 'compactionMaxTokens', 'compactionTemperature', 'maxContextTokens', 'maxConversationRounds', 'toolContextDefaultMode', 'toolContextOverrides', 'toolContextSummaryMaxChars', 'toolContextAutoThresholdChars', 'todoMaxRetries', 'goalMaxIterations', 'goalMaxWallClockMs', 'goalRequireGitClean', 'verifierModelTier', 'verifierMaxTokens', 'verifierTemperature', 'projectGraphMaxDepth', 'projectGraphMaxFiles', 'projectGraphMaxEdges', 'projectGraphMaxSymbolsPerFile', 'projectGraphMaxFileBytes', 'projectGraphMaxTreeEntries'],
+      advanced: ['compactionModel', 'compactionMaxTokens', 'compactionTemperature', 'maxContextTokens', 'maxConversationRounds', 'toolContextDefaultMode', 'toolContextOverrides', 'toolContextSummaryMaxChars', 'toolContextAutoThresholdChars', 'todoMaxRetries', 'goalMaxIterations', 'goalMaxWallClockMs', 'goalRequireGitClean', 'verifierModelTier', 'verifierMaxTokens', 'verifierTemperature', 'projectGraphMaxDepth', 'projectGraphMaxFiles', 'projectGraphMaxEdges', 'projectGraphMaxSymbolsPerFile', 'projectGraphMaxFileBytes', 'projectGraphMaxTreeEntries', 'streamIdleTimeoutMs', 'toolOutputMiddleKeepChars'],
       app: [],
     };
     const resetPart: Partial<Settings> = {};
@@ -1405,6 +1405,53 @@ export function SettingsModal() {
                       className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
                     />
                     <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.maxConversationRoundsHint}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-5">
+                <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  {t.streamOutputSettings}
+                </label>
+                <p className="mb-3 text-[11px] leading-relaxed text-slate-500">{t.streamOutputDesc}</p>
+                <div className="grid gap-5 md:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      {t.streamIdleTimeoutLabel}
+                    </label>
+                    <input
+                      type="number"
+                      min="10"
+                      max="1800"
+                      step="10"
+                      value={Math.round(local.streamIdleTimeoutMs / 1000)}
+                      onChange={(e) => {
+                        const parsed = parseInt(e.target.value, 10);
+                        update({ streamIdleTimeoutMs: Number.isFinite(parsed) ? parsed * 1000 : local.streamIdleTimeoutMs });
+                      }}
+                      title={t.streamIdleTimeoutLabel}
+                      className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+                    />
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.streamIdleTimeoutHint}</p>
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      {t.toolOutputMiddleKeepLabel}
+                    </label>
+                    <input
+                      type="number"
+                      min="1000"
+                      max="150000"
+                      step="1000"
+                      value={local.toolOutputMiddleKeepChars}
+                      onChange={(e) => {
+                        const parsed = parseInt(e.target.value, 10);
+                        update({ toolOutputMiddleKeepChars: Number.isFinite(parsed) ? parsed : local.toolOutputMiddleKeepChars });
+                      }}
+                      title={t.toolOutputMiddleKeepLabel}
+                      className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+                    />
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.toolOutputMiddleKeepHint}</p>
                   </div>
                 </div>
               </div>

@@ -57,12 +57,14 @@ export interface WorkerAgentSettings {
   mcp: McpSettings;
   graphToolTimeoutMs: number;
   toolIpcTimeoutMs: number;
+  streamIdleTimeoutMs: number;
   multimodalEnabled: boolean;
   multimodalModelTier: 'primary' | 'fast' | 'all';
   toolOutputInterceptChars: number;
   toolOutputOffloadChars: number;
   toolOutputCeilingChars: number;
   toolOutputPreviewChars: number;
+  toolOutputMiddleKeepChars: number;
   pruneOldToolResults: boolean;
   pruneProtectRounds: number;
   pruneMinChars: number;

@@ -71,10 +71,11 @@ export const DEFAULT_SETTINGS: Settings = {
   compactionModel: 'fast',
   compactionMaxTokens: 8_000,
   compactionTemperature: 0.1,
-  toolOutputInterceptChars: 30_000,
-  toolOutputOffloadChars: 50_000,
+  toolOutputInterceptChars: 60_000,
+  toolOutputOffloadChars: 100_000,
   toolOutputCeilingChars: 150_000,
   toolOutputPreviewChars: 2_000,
+  toolOutputMiddleKeepChars: 20_000,
   pruneOldToolResults: true,
   pruneProtectRounds: 6,
   pruneMinChars: 20_000,
@@ -138,6 +139,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mcp: normalizeMcpSettings(),
   graphToolTimeoutMs: 600_000,
   toolIpcTimeoutMs: 120_000,
+  streamIdleTimeoutMs: 300_000,
 };
 
 export function createEmptyStats(): CumulativeStats {

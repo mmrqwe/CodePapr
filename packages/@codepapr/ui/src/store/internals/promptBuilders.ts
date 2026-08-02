@@ -141,7 +141,6 @@ export function buildAgentSessionBootstrapPrompt(
   settings: Settings,
   workspacePath: string,
   skillDefinitions: readonly SkillDefinition[] = [],
-  projectGraphSummary?: string,
   memorySection?: string
 ): string {
   const customPromptSection = (settings.systemPrompt ?? '').trim();
@@ -151,7 +150,6 @@ export function buildAgentSessionBootstrapPrompt(
     skillsSection: buildSkillsSection(skillDefinitions, settings.lang ?? 'zh-CN'),
     memorySection,
     customPromptSection: customPromptSection || undefined,
-    projectGraphSummary,
   });
 }
 
@@ -161,6 +159,7 @@ export function buildAgentRuntimeUserPrompt(params: {
   workspacePath: string;
   input: string;
   projectDiagnosticsReport?: ProjectDiagnosticsReport | null;
+  projectGraphSummary?: string;
   todoDigest?: string;
 }): string {
   const diagnosticsSection =
@@ -180,6 +179,7 @@ export function buildAgentRuntimeUserPrompt(params: {
     workspacePath: params.workspacePath,
     lang: params.settings.lang ?? 'zh-CN',
     diagnosticsSection,
+    projectGraphSection: params.projectGraphSummary,
     todoDigest: params.todoDigest,
   });
 }

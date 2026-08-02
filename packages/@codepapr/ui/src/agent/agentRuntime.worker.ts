@@ -428,11 +428,13 @@ function buildProvider(settings: WorkerAgentSettings) {
     return new LocalProvider({
       apiKey: settings.apiKey.trim() || 'local',
       baseURL: settings.baseURL.trim().replace(/\/+$/, '') || DEFAULT_LOCAL_BASE_URL,
+      idleTimeoutMs: settings.streamIdleTimeoutMs,
     });
   }
 
-  const config: { apiKey: string; baseURL?: string } = {
+  const config: { apiKey: string; baseURL?: string; idleTimeoutMs?: number } = {
     apiKey: settings.apiKey.trim(),
+    idleTimeoutMs: settings.streamIdleTimeoutMs,
   };
   if (settings.apiMode === 'custom') {
     config.baseURL = settings.baseURL.trim().replace(/\/+$/, '');
@@ -725,6 +727,7 @@ function buildToolOutputTruncation(s: WorkerAgentSettings): ToolOutputTruncation
     interceptChars: s.toolOutputInterceptChars,
     offloadChars: s.toolOutputOffloadChars,
     offloadPreviewChars: s.toolOutputPreviewChars,
+    middleKeepChars: s.toolOutputMiddleKeepChars,
     ceilingChars: s.toolOutputCeilingChars,
   };
 }

@@ -59,6 +59,7 @@ export interface Settings {
   toolOutputOffloadChars: number;
   toolOutputCeilingChars: number;
   toolOutputPreviewChars: number;
+  toolOutputMiddleKeepChars: number;
   pruneOldToolResults: boolean;
   pruneProtectRounds: number;
   pruneMinChars: number;
@@ -122,6 +123,7 @@ export interface Settings {
   mcp: McpSettings;
   graphToolTimeoutMs: number;
   toolIpcTimeoutMs: number;
+  streamIdleTimeoutMs: number;
 }
 
 export interface WorkspaceEntry {

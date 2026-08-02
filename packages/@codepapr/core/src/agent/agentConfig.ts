@@ -282,7 +282,7 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
    - **Who uses / calls this** ("Who calls bar", "What implements interface I"): Use \`lsp(action: findReferences)\`, \`lsp(action: goToImplementation)\`, or \`lsp(action: incomingCalls)\`.
    - After graph/lsp/list gives you file+line, use \`read\` to precisely read the relevant lines. **Don't skip graph/lsp/list and blindly read files.**
 
-2. **lsp/graph for references, grep for text**: To find "who calls foo", use \`lsp(action: findReferences)\` or \`graph(action: impact)\` — they catch renamed imports like \`import { foo as bar }\` that \`grep "foo"\` would miss. Use \`grep\` only for string literals, log templates, or comments.
+2. **grep for content, lsp/graph for references**: Use \`grep\` as the default tool to search file content (strings, identifiers, log templates, config keys). For "who calls / references foo", prefer \`lsp(action: findReferences)\` or \`graph(action: impact)\` — they catch renamed imports like \`import { foo as bar }\` that \`grep "foo"\` would miss. Never shell out to \`bash grep/rg\`; use the \`grep\` tool.
 
 3. **Exploration depth control**: Trace dependency chains up to 3 levels deep. Stop when you reach external dependencies (node_modules/system libraries), leaf nodes (functions with no further calls), or boundaries (entry points of different modules). Don't trace infinitely.
 
@@ -305,7 +305,7 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
 - **lsp (action: incomingCalls | outgoingCalls, relativePath+line)** — Call hierarchy (callers / callees)
 - **diagnostics** — Query file or project LSP diagnostics (to check if code currently has errors)
 - **read** — Read file content (after lsp/list gives you file+line, precisely read relevant lines)
-- **grep** — Regex search for text literals (not for structural analysis)
+- **grep** — Regex search file content. Default tool for finding text/identifiers/usages; use lsp/graph for cross-module references & impact
 
 ## Output Format
 

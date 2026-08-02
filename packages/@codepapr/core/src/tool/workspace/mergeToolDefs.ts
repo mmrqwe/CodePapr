@@ -242,7 +242,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
       type: 'object',
       properties: {
         action: { type: 'string', enum: ['run', 'list', 'stop', 'stop_all'], description: '操作，默认 run。' },
-        command: { type: 'string', description: 'run 时必填。要执行的 shell 命令，如 npm install、git status、ls -la | grep foo。' },
+        command: { type: 'string', description: 'run 时必填。要执行的 shell 命令，如 npm install、git status、ls -la。搜索文件内容请用 grep 工具，不要用 bash grep/rg。' },
         workdir: { type: 'string', description: 'run 时可选。命令的工作目录（相对项目根或绝对路径），默认项目根。' },
         timeout: { type: 'number', description: 'run 阻塞执行的超时秒数，默认 30，最大 600。' },
         background: { type: 'boolean', description: 'run 时设为 true 则后台运行并返回 pid。' },

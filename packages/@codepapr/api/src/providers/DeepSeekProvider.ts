@@ -204,7 +204,7 @@ export class DeepSeekProvider extends BaseLLMProvider {
 
               finishReason = choice.finish_reason ?? finishReason;
             }
-          }, signal);
+          }, signal, { idleTimeoutMs: this.config.idleTimeoutMs });
         } catch (err) {
           if (err instanceof DOMException && err.name === 'AbortError') {
             throw err;

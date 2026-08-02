@@ -128,7 +128,7 @@ export function sanitizeToolCallArguments(
   return clean;
 }
 
-export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
+export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000;
 
 export class StreamIdleTimeoutError extends Error {
   readonly retriable = true;

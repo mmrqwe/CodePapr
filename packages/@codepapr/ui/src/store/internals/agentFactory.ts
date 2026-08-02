@@ -66,6 +66,7 @@ function buildToolOutputTruncation(
     interceptChars: settings.toolOutputInterceptChars,
     offloadChars: settings.toolOutputOffloadChars,
     offloadPreviewChars: settings.toolOutputPreviewChars,
+    middleKeepChars: settings.toolOutputMiddleKeepChars,
     ceilingChars: settings.toolOutputCeilingChars,
     spillToDisk: async (content: string, toolName: string): Promise<string | null> => {
       try {
@@ -139,7 +140,6 @@ function buildBootstrapRefresher(
       settings,
       workspacePath,
       runtime.skillDefinitions ?? [],
-      runtime.projectGraphSummary,
       memorySection
     );
     return bootstrap.trim() || null;

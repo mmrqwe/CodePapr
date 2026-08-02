@@ -232,7 +232,7 @@ export class ClaudeProvider extends BaseLLMProvider {
           if (chunk.type === 'message_delta') {
             finishReason = chunk.delta?.stop_reason ?? finishReason;
           }
-        }, signal);
+        }, signal, { idleTimeoutMs: this.config.idleTimeoutMs });
 
         return {
           id: responseId,

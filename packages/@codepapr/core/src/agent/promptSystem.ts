@@ -26,6 +26,7 @@ export interface BuildRuntimeUserPromptOptions {
   workspacePath: string;
   lang?: PromptLang;
   diagnosticsSection?: string;
+  projectGraphSection?: string;
   runtimeContextSection?: string;
   todoDigest?: string;
 }
@@ -574,6 +575,7 @@ const SECTION_LABELS: Record<
     skills: string;
     memory: string;
     diagnostics: string;
+    projectGraph: string;
     customGuidance: string;
   }
 > = {
@@ -587,6 +589,7 @@ const SECTION_LABELS: Record<
     skills: '## 项目 Skills',
     memory: '## 项目记忆',
     diagnostics: '## 项目诊断',
+    projectGraph: '## 项目结构概览',
     customGuidance: '## 长期附加指导',
   },
   'zh-TW': {
@@ -599,6 +602,7 @@ const SECTION_LABELS: Record<
     skills: '## 項目 Skills',
     memory: '## 項目記憶',
     diagnostics: '## 項目診斷',
+    projectGraph: '## 項目結構概覽',
     customGuidance: '## 長期附加指導',
   },
   en: {
@@ -611,6 +615,7 @@ const SECTION_LABELS: Record<
     skills: '## Relevant Skills',
     memory: '## Project Memory',
     diagnostics: '## Project Diagnostics',
+    projectGraph: '## Project Structure Overview',
     customGuidance: '## Persistent Custom Guidance',
   },
 };
@@ -842,10 +847,10 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
   if (hasTool(toolNames, 'read') || hasTool(toolNames, 'glob') || hasTool(toolNames, 'grep') || hasTool(toolNames, 'list')) {
     common.push(
       lang === 'en'
-        ? '- [read] Read file content (startLine/endLine/aroundLine). `list` browse directories, `glob` find files by name, `grep` regex search content.'
+        ? '- [read] Read file content (startLine/endLine/aroundLine). `list` browse directories, `glob` find files by name. To search file CONTENT, always use the `grep` tool (regex) — never `bash grep/rg`.'
         : lang === 'zh-TW'
-        ? '- [read] 讀取檔案內容（startLine/endLine/aroundLine）。`list` 瀏覽目錄，`glob` 按檔名查找，`grep` 正則搜索內容。'
-        : '- [read] 读取文件内容（startLine/endLine/aroundLine）。`list` 浏览目录，`glob` 按文件名查找，`grep` 正则搜索内容。'
+        ? '- [read] 讀取檔案內容（startLine/endLine/aroundLine）。`list` 瀏覽目錄，`glob` 按檔名查找。搜索檔案內容一律用 `grep` 工具（正則），不要用 `bash grep/rg`。'
+        : '- [read] 读取文件内容（startLine/endLine/aroundLine）。`list` 浏览目录，`glob` 按文件名查找。搜索文件内容一律用 `grep` 工具（正则），不要用 `bash grep/rg`。'
     );
   }
   if (hasTool(toolNames, 'read_image')) {
@@ -1232,6 +1237,7 @@ export function buildRuntimeUserPrompt(options: BuildRuntimeUserPromptOptions): 
     options.mode === 'ask' ? labels.question : options.mode === 'app' ? labels.app : labels.task,
     options.input.trim(),
     ...(runtimeContext ? ['', runtimeContextTitle, runtimeContext] : []),
+    ...(options.projectGraphSection?.trim() ? ['', labels.projectGraph, options.projectGraphSection.trim()] : []),
     ...(options.diagnosticsSection?.trim() ? ['', labels.diagnostics, options.diagnosticsSection.trim()] : []),
     ...(options.todoDigest?.trim() ? ['', options.todoDigest.trim()] : []),
   ].join('\n');

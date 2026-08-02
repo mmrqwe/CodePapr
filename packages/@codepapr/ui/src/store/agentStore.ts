@@ -827,7 +827,6 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           normalizedSettings,
           workspacePath,
           skillDefinitions,
-          projectGraphSummary,
           memorySection
         );
 
@@ -1474,7 +1473,6 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
                 normalizedSettings,
                 workspacePath,
                 skillDefinitions,
-                projectGraphBootstrapSummary,
                 memorySection
               )
           );
@@ -1496,6 +1494,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             workspacePath,
             input: effectiveInput,
             projectDiagnosticsReport: diagnosticsForPrompt,
+            projectGraphSummary: projectGraphBootstrapSummary,
             todoDigest: currentTodoDigest(optimisticSid),
           });
           let { _agent: agent, activeSessionId } = get();

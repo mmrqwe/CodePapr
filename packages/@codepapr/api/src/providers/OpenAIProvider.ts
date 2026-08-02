@@ -196,7 +196,7 @@ export class OpenAIProvider extends BaseLLMProvider {
 
             finishReason = choice.finish_reason ?? finishReason;
           }
-        }, signal);
+        }, signal, { idleTimeoutMs: this.config.idleTimeoutMs });
 
         const result: IChatResponse = {
           id: responseId,

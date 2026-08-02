@@ -187,6 +187,10 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     typeof input.toolOutputPreviewChars === 'number' && Number.isFinite(input.toolOutputPreviewChars)
       ? Math.max(100, Math.floor(input.toolOutputPreviewChars))
       : DEFAULT_SETTINGS.toolOutputPreviewChars;
+  const toolOutputMiddleKeepChars =
+    typeof input.toolOutputMiddleKeepChars === 'number' && Number.isFinite(input.toolOutputMiddleKeepChars)
+      ? Math.max(1000, Math.min(toolOutputInterceptChars, Math.floor(input.toolOutputMiddleKeepChars)))
+      : Math.min(toolOutputInterceptChars, DEFAULT_SETTINGS.toolOutputMiddleKeepChars);
   const pruneOldToolResults =
     typeof input.pruneOldToolResults === 'boolean'
       ? input.pruneOldToolResults
@@ -381,6 +385,10 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     typeof input.toolIpcTimeoutMs === 'number' && Number.isFinite(input.toolIpcTimeoutMs)
       ? Math.max(30_000, Math.floor(input.toolIpcTimeoutMs))
       : DEFAULT_SETTINGS.toolIpcTimeoutMs;
+  const streamIdleTimeoutMs =
+    typeof input.streamIdleTimeoutMs === 'number' && Number.isFinite(input.streamIdleTimeoutMs)
+      ? Math.max(10_000, Math.floor(input.streamIdleTimeoutMs))
+      : DEFAULT_SETTINGS.streamIdleTimeoutMs;
   const mcp = normalizeMcpSettings(input.mcp);
 
   return {
@@ -420,6 +428,7 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     toolOutputOffloadChars,
     toolOutputCeilingChars,
     toolOutputPreviewChars,
+    toolOutputMiddleKeepChars,
     pruneOldToolResults,
     pruneProtectRounds,
     pruneMinChars,
@@ -482,6 +491,7 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     searxngEngines,
     graphToolTimeoutMs,
     toolIpcTimeoutMs,
+    streamIdleTimeoutMs,
     mcp,
   };
 }

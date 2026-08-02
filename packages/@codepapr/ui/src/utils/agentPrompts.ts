@@ -123,6 +123,13 @@ export function buildProjectDiagnosticsPromptSection(params: {
     return [];
   }
 
+  // A clean bill of health carries no actionable information for the model and
+  // only adds volatile bytes to the prompt; omit the section entirely when the
+  // project diagnostics pass. Failures/unavailable states are still surfaced.
+  if (report.available && report.overallStatus === 'passed') {
+    return [];
+  }
+
   const copy = PROJECT_DIAGNOSTICS_COPY[promptLang];
   const lines = [SECTION_LABELS[promptLang].diagnostics];
 
