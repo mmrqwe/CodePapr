@@ -11,6 +11,7 @@ mod lsp_fallback;
 mod lsp_managed_tools;
 mod mcp_host;
 mod papr_runtime;
+mod power;
 mod secrets;
 mod shared;
 mod shell;
@@ -362,7 +363,9 @@ fn main() {
             papr_runtime::services::papr_fs_write,
             papr_runtime::services::papr_fs_list,
             papr_runtime::services::papr_fs_delete,
-            papr_runtime::services::papr_delete_app
+            papr_runtime::services::papr_delete_app,
+            power::prevent_idle_sleep,
+            power::allow_idle_sleep
         ])
         .on_window_event(|_, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
@@ -375,6 +378,7 @@ fn main() {
                 browser::page::close_all_browser_pages();
                 mcp_host::disconnect_all_blocking();
                 workspace_fs::watcher::stop_workspace_watcher_impl();
+                power::release_all();
             }
         })
         .build(tauri::generate_context!())
@@ -386,6 +390,7 @@ fn main() {
             if matches!(event, tauri::RunEvent::Exit) {
                 let _ = shell::background::stop_all_background_processes(None);
                 browser::page::close_all_browser_pages();
+                power::release_all();
             }
         });
 }

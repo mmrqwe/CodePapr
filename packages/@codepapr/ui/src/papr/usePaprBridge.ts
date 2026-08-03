@@ -6,6 +6,7 @@ import { usePermissionStore } from './permissionStore';
 import { LEVEL_GRANTS, levelAllows, resolveEffectiveLevel } from './levelGrants';
 import { useAgentStore } from '../store/agentStore';
 import { WorkerCrashError } from '../agent/WorkerBackedAgent';
+import { acquireSleepPrevention, releaseSleepPrevention } from '../utils/sleepPrevention';
 
 // Each app is served from its own origin (codepapr-app://<appId>) so apps are
 // isolated from one another (separate localStorage / cookies / IndexedDB).
@@ -194,6 +195,10 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
         const workspacePath = useAgentStore.getState().workspacePath;
         const runId = data.reqId;
 
+        // App Agent 运行期间同样防休眠：它复用聊天 Agent 的 Worker，
+        // 休眠会连 Worker 一起杀掉。
+        void acquireSleepPrevention();
+
         const runPromise = agent.runAppAgent(
           {
             appId,
@@ -249,6 +254,7 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
           })
           .finally(() => {
             activeAgentRuns.current.delete(runId);
+            void releaseSleepPrevention();
           });
         return;
       }

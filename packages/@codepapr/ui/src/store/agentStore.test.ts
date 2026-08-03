@@ -2213,6 +2213,69 @@ describe('useAgentStore.sendMessage', () => {
       expect(useAgentStore.getState().isLoading).toBe(false);
     });
   });
+
+  describe('idle-sleep prevention', () => {
+    it('blocks idle sleep while a turn is in flight and releases it afterwards', async () => {
+      const powerCalls: string[] = [];
+      invokeMock.mockImplementation(async (command: string): Promise<Record<string, unknown>> => {
+        if (command === 'prevent_idle_sleep' || command === 'allow_idle_sleep') {
+          powerCalls.push(command);
+          return {};
+        }
+        if (command === 'list_workspace_files') {
+          return { root: '', entries: [], truncated: false };
+        }
+        throw new Error(`Unexpected invoke call: ${command}`);
+      });
+      const chat = vi.fn(async () => createAgentResponse('已完成'));
+      useAgentStore.setState((state) => ({
+        ...state,
+        isLoading: false,
+        _agent: createMockAgent({ chat }),
+        _agentModel: 'deepseek-v4-pro',
+        _agentPromptKey: null,
+        _gitReady: false,
+      }));
+
+      await useAgentStore.getState().sendMessage('任务', '任务', 'agent');
+
+      expect(chat).toHaveBeenCalledTimes(1);
+      expect(powerCalls).toEqual(['prevent_idle_sleep', 'allow_idle_sleep']);
+      expect(useAgentStore.getState().isLoading).toBe(false);
+    });
+
+    it('releases the sleep block even when the turn errors out', async () => {
+      const powerCalls: string[] = [];
+      invokeMock.mockImplementation(async (command: string): Promise<Record<string, unknown>> => {
+        if (command === 'prevent_idle_sleep' || command === 'allow_idle_sleep') {
+          powerCalls.push(command);
+          return {};
+        }
+        if (command === 'list_workspace_files') {
+          return { root: '', entries: [], truncated: false };
+        }
+        throw new Error(`Unexpected invoke call: ${command}`);
+      });
+      const chat = vi.fn(
+        async (): Promise<never> => {
+          throw new Error('provider exploded');
+        },
+      );
+      useAgentStore.setState((state) => ({
+        ...state,
+        isLoading: false,
+        _agent: createMockAgent({ chat }),
+        _agentModel: 'deepseek-v4-pro',
+        _agentPromptKey: null,
+        _gitReady: false,
+      }));
+
+      await useAgentStore.getState().sendMessage('任务', '任务', 'agent');
+
+      expect(powerCalls).toEqual(['prevent_idle_sleep', 'allow_idle_sleep']);
+      expect(useAgentStore.getState().isLoading).toBe(false);
+    });
+  });
 });
 
 describe('_messageCheckpoints', () => {

@@ -56,6 +56,7 @@ import type { WorkMode } from '../utils/agentPrompts';
 import { buildModePrompt } from '../utils/agentPrompts';
 import { getTranslation } from '../utils/i18n';
 import { yieldToMainThread } from '../utils/taskScheduling';
+import { acquireSleepPrevention, releaseSleepPrevention } from '../utils/sleepPrevention';
 import {
   buildPrimaryModelRoute,
   selectTaskModelRoute,
@@ -2400,6 +2401,21 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 // This breaks the static import cycle while preserving the original behavior:
 // callers that omit `onWorkspaceMutated` fall back to the store's noteWorkspaceMutation.
 setDefaultOnWorkspaceMutatedResolver(() => useAgentStore.getState().noteWorkspaceMutation);
+
+// 回合进行中阻止系统空闲休眠：macOS 休眠/唤醒循环会让 WKWebView 静默杀掉
+// Agent Worker，导致回合丢失（见 power.rs）。isLoading 覆盖普通回合、Goal
+// 循环与后台修复流；App Agent 运行在 usePaprBridge 中单独持有。
+let sleepBlockHeld = false;
+useAgentStore.subscribe((state, prevState) => {
+  if (state.isLoading === prevState.isLoading) return;
+  if (state.isLoading && !sleepBlockHeld) {
+    sleepBlockHeld = true;
+    void acquireSleepPrevention();
+  } else if (!state.isLoading && sleepBlockHeld) {
+    sleepBlockHeld = false;
+    void releaseSleepPrevention();
+  }
+});
 
 export function buildChatInputPrompt(
   mode: WorkMode,
