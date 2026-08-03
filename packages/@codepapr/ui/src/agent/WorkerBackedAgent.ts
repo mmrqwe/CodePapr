@@ -78,12 +78,18 @@ const STREAM_DELTA_FLUSH_INTERVAL_MS = 240;
 const MAX_BUFFERED_STREAM_DELTA_CHARS = 4096;
 const STREAM_SNAPSHOT_INTERVAL_MS = 2000;
 // Heartbeat: while requests are in flight, ping the worker periodically. A
-// silently dead worker (e.g. killed by the OS under memory pressure) never
-// fires an 'error' event and would otherwise leave the chat promise hanging
-// until the much slower store-level idle watchdog. Missing pongs for longer
-// than the timeout declares the worker crashed, triggering recovery.
+// silently dead worker (e.g. killed by WebKit on display sleep) never fires
+// an 'error' event and would otherwise leave the chat promise hanging until
+// the much slower store-level idle watchdog. Missing pongs for longer than
+// the timeout declares the worker crashed, triggering recovery.
 const WORKER_HEARTBEAT_INTERVAL_MS = 5000;
 const WORKER_HEARTBEAT_TIMEOUT_MS = 15000;
+// A worker that has never answered a pong gets a longer grace window: its
+// first turn pays the full-sync cost (cloning + hashing the whole log),
+// which blocks pong replies — especially right after a page thaw, when
+// WebKit still throttles the process. Declaring it dead after only 15s
+// produces false crashes that cascade through the recovery retries.
+const WORKER_HEARTBEAT_INITIAL_GRACE_MS = 60000;
 const MAX_WORKER_DIAGNOSTICS = 20;
 
 /** Error thrown when the agent worker crashes (OOM, uncaught exception, etc.).
@@ -251,6 +257,9 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   private crashInfo: { message: string; detail?: string } | null = null;
   private heartbeatTimerId: ReturnType<typeof setInterval> | null = null;
   private lastPongAt = 0;
+  /** False until the first pong arrives; switches the heartbeat from the
+   *  initial grace window to the normal timeout. */
+  private hasReceivedPong = false;
   /** Recent worker-side diagnostics (global errors, unhandled rejections,
    *  handler failures) included in the crash log for post-mortem analysis. */
   private readonly workerDiagnostics: string[] = [];
@@ -288,6 +297,9 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.worker.addEventListener('message', this.handleWorkerMessage);
     this.worker.addEventListener('error', this.handleWorkerError);
     this.worker.addEventListener('messageerror', this.handleWorkerMessageError);
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    }
     this.startHeartbeat();
   }
 
@@ -304,11 +316,12 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         this.lastPongAt = Date.now();
         return;
       }
-      if (Date.now() - this.lastPongAt > WORKER_HEARTBEAT_TIMEOUT_MS) {
+      const timeout = this.hasReceivedPong
+        ? WORKER_HEARTBEAT_TIMEOUT_MS
+        : WORKER_HEARTBEAT_INITIAL_GRACE_MS;
+      if (Date.now() - this.lastPongAt > timeout) {
         this.handleCrash(
-          `Agent worker unresponsive (no heartbeat for ${Math.round(
-            WORKER_HEARTBEAT_TIMEOUT_MS / 1000
-          )}s)`,
+          `Agent worker unresponsive (no heartbeat for ${Math.round(timeout / 1000)}s)`,
         );
         return;
       }
@@ -327,6 +340,16 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       this.heartbeatTimerId = null;
     }
   }
+
+  /** Page thaw (display back on / window visible again): timers were skewed
+   *  while the page was frozen, so refresh the heartbeat baseline instead of
+   *  declaring a healthy worker dead on stale arithmetic. A genuinely dead
+   *  worker is still caught one timeout window later. */
+  private readonly handleVisibilityChange = () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      this.lastPongAt = Date.now();
+    }
+  };
 
   isCrashed(): boolean {
     return this.crashed;
@@ -392,6 +415,9 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.abortAllPendingFetches();
     this.rejectAllAppAgentRequests(new Error('Agent was destroyed'));
     this.crashed = true;
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    }
     if (activeInstance === this) {
       activeInstance = null;
     }
@@ -547,6 +573,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     const message = event.data;
 
     if (message.type === 'pong') {
+      this.hasReceivedPong = true;
       this.lastPongAt = Date.now();
       return;
     }
@@ -826,8 +853,19 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.crashInfo = { message, detail };
     this.clearHeartbeat();
     this.clearSnapshotTimer();
+    // Capture live state synchronously: writeCrashLog awaits a dynamic import,
+    // by which time the rejection loops below have already drained the maps.
+    const crashReport = {
+      message,
+      detail,
+      pendingChatRequests: this.pendingRequests.size,
+      pendingAppAgentRequests: this.appAgentRequests.size,
+      msSinceLastPong: this.lastPongAt > 0 ? Date.now() - this.lastPongAt : -1,
+      visibilityState:
+        typeof document !== 'undefined' ? document.visibilityState : 'unavailable',
+    };
     console.error('[AgentWorker] crashed:', message, detail ?? '');
-    void this.writeCrashLog(message, detail);
+    void this.writeCrashLog(crashReport);
     this.rejectAllAppAgentRequests(new WorkerCrashError(message, detail));
 
     const error = new WorkerCrashError(message, detail);
@@ -860,18 +898,27 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
   /** Best-effort crash report on disk so release builds (no devtools) can be
    *  post-mortemed: .CodePapr/logs/agent-worker-crash-<timestamp>.log */
-  private async writeCrashLog(message: string, detail?: string): Promise<void> {
+  private async writeCrashLog(report: {
+    message: string;
+    detail?: string;
+    pendingChatRequests: number;
+    pendingAppAgentRequests: number;
+    msSinceLastPong: number;
+    visibilityState: string;
+  }): Promise<void> {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const now = new Date();
       const stamp = now.toISOString().replace(/[:.]/g, '-');
       const lines = [
         `time: ${now.toISOString()}`,
-        `message: ${message}`,
-        `detail: ${detail ?? 'n/a'}`,
+        `message: ${report.message}`,
+        `detail: ${report.detail ?? 'n/a'}`,
         `sessionId: ${this.config.sessionId}`,
-        `pendingChatRequests: ${this.pendingRequests.size}`,
-        `pendingAppAgentRequests: ${this.appAgentRequests.size}`,
+        `pendingChatRequests: ${report.pendingChatRequests}`,
+        `pendingAppAgentRequests: ${report.pendingAppAgentRequests}`,
+        `msSinceLastPong: ${report.msSinceLastPong}`,
+        `visibilityState: ${report.visibilityState}`,
         `userAgent: ${typeof navigator !== 'undefined' ? navigator.userAgent : 'n/a'}`,
       ];
       if (this.workerDiagnostics.length > 0) {

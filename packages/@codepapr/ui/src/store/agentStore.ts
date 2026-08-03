@@ -123,11 +123,13 @@ import {
   AgentRuntimeConfig,
   buildAgentSessionParts,
   createAgent,
+  createMainThreadAgent,
   getAgentMessagesSince,
   setDefaultOnWorkspaceMutatedResolver,
 } from './internals/agentFactory';
 import { buildProviderInstance } from './internals/providerFactory';
 import { WorkerCrashError } from '../agent/WorkerBackedAgent';
+import { delay, waitForPageVisible } from '../utils/crashRecovery';
 import { maybeGenerateContextCheckpoint } from './internals/contextCheckpoint';
 import { insertCheckpointAtRetainedBoundary } from '../utils/contextCompaction';
 import { handleWorkspaceMutation } from './internals/backgroundDiagnostics';
@@ -171,6 +173,13 @@ export {
 // Marker to silence unused-import lint for re-exported helpers
 void _getProviderLabel;
 void _isApiConfigured;
+
+// Worker 崩溃恢复链参数：先重建 Worker 重试（每次先等页面恢复可见，避开解冻
+// 节流期），达到上限后降级主线程 Agent 把回合跑完——崩溃对用户永不表现为
+// 「报错停止」。延迟递增，避免热循环。
+const CRASH_RECOVERY_MAX_WORKER_RETRIES = 3;
+const CRASH_RECOVERY_RETRY_DELAYS_MS = [200, 500, 1000];
+const CRASH_RECOVERY_VISIBLE_WAIT_MS = 30_000;
 
 // Guards cold-start memory.md bootstrap so concurrent sendMessage calls
 // don't trigger duplicate generation. Module-level on purpose: the guard
@@ -1801,6 +1810,95 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             return response;
           };
 
+          // 本回合是否已降级到主线程 Agent（回合结束后清空 _agent，下条消息重建 Worker）。
+          let mainThreadFallbackUsed = false;
+
+          const resetStreamingForRetry = () => {
+            if (!assistantMessageId) return;
+            updateAssistantMessage(set, activeSessionId, assistantMessageId, (message) => ({
+              ...message,
+              content: '',
+              reasoningContent: '',
+              displayReasoningContent: undefined,
+              toolInvocations: undefined,
+              isStreaming: true,
+              statusText: getTranslation(normalizedSettings.lang).streamingStatus,
+            }));
+          };
+
+          const rebuildAgentForRetry = (useMainThread: boolean) => {
+            agent = useMainThread
+              ? createMainThreadAgent(
+                  normalizedSettings,
+                  activeSessionId,
+                  workspacePath,
+                  retryBaseMessages,
+                  {
+                    model: route.model,
+                    thinkingEnabled: route.thinkingEnabled,
+                    temperature: route.temperature,
+                    maxTokens: route.maxTokens,
+                    systemPrompt: runtimeSystemPrompt,
+                  },
+                  runtimeAgentConfig,
+                )
+              : createAgent(
+                  normalizedSettings,
+                  activeSessionId,
+                  workspacePath,
+                  retryBaseMessages,
+                  {
+                    model: route.model,
+                    thinkingEnabled: route.thinkingEnabled,
+                    temperature: route.temperature,
+                    maxTokens: route.maxTokens,
+                    systemPrompt: runtimeSystemPrompt,
+                  },
+                  runtimeAgentConfig,
+                );
+            set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey });
+          };
+
+          /**
+           * 崩溃恢复执行器：Worker 崩溃绝不向用户表现为「报错停止」。
+           * 链：重建 Worker 重试（≤3 次，每次先等页面可见 + 递增延迟）→
+           * 仍崩则降级主线程 Agent 跑完本回合 → 仅当主线程也失败才向上抛
+           * （此时已是常规错误，非 Worker 崩溃）。AbortError（用户取消）立即终止。
+           * 崩溃发生前主日志未收到本轮 delta（result 才落日志），重试无损。
+           */
+          const runWithCrashRecovery = async (
+            passInput: string,
+            passImages?: import('@codepapr/types').IImageContent[],
+          ): Promise<IAgentResponse> => {
+            try {
+              return await runAgentPass(passInput, passImages);
+            } catch (error) {
+              if (!(error instanceof WorkerCrashError)) throw error;
+            }
+
+            for (let attempt = 1; attempt <= CRASH_RECOVERY_MAX_WORKER_RETRIES; attempt++) {
+              await waitForPageVisible(CRASH_RECOVERY_VISIBLE_WAIT_MS);
+              await delay(CRASH_RECOVERY_RETRY_DELAYS_MS[attempt - 1] ?? 1000);
+              rebuildAgentForRetry(false);
+              resetStreamingForRetry();
+              await yieldToMainThread();
+              try {
+                return await runAgentPass(passInput, passImages);
+              } catch (retryError) {
+                if (!(retryError instanceof WorkerCrashError)) throw retryError;
+              }
+            }
+
+            // Worker 重建反复崩溃：降级主线程 Agent 兜底（无 Worker 即无
+            // 「Worker 被杀」失败模式），保证本回合有结果。
+            await waitForPageVisible(CRASH_RECOVERY_VISIBLE_WAIT_MS);
+            rebuildAgentForRetry(true);
+            mainThreadFallbackUsed = true;
+            resetStreamingForRetry();
+            await yieldToMainThread();
+            return await runAgentPass(passInput, passImages);
+          };
+
           const getCurrentAssistantMessage = () =>
             assistantMessageId
               ? get().sessionMessages[activeSessionId!]?.find(
@@ -1871,7 +1969,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
                   }
 
                   const turnStartIndex = sessionLogStartIndex;
-                  const response = await runAgentPass(turnPrompt);
+                  // Goal 回合同样接入崩溃恢复链：Worker 崩溃透明重建/降级，
+                  // 不再让 Goal 循环因崩溃中断。
+                  const response = await runWithCrashRecovery(turnPrompt);
                   lastWorkerContent = response.content;
 
                   sessionLogStartIndex =
@@ -2067,49 +2167,17 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             };
           } else {
           try {
-            resp = await runAgentPass(runtimeUserPrompt, images);
+            resp = await runWithCrashRecovery(runtimeUserPrompt, images);
           } catch (error) {
             if (error instanceof DOMException && error.name === 'AbortError') {
               throw error;
             }
-
-            // Worker 崩溃：主日志未收到本轮 delta（result 才落日志），UI 侧把
-            // 流式消息重置后，用同一份上下文重建 agent 并自动重试一次；重试仍
-            // 崩溃则抛给外层 catch 报错（此时 _agent 会被清空，下条消息重建）。
-            if (error instanceof WorkerCrashError) {
-              agent = createAgent(
-                normalizedSettings,
-                activeSessionId,
-                workspacePath,
-                retryBaseMessages,
-                {
-                  model: route.model,
-                  thinkingEnabled: route.thinkingEnabled,
-                  temperature: route.temperature,
-                  maxTokens: route.maxTokens,
-                  systemPrompt: runtimeSystemPrompt,
-                },
-                runtimeAgentConfig,
-              );
-              set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey });
-
-              if (assistantMessageId) {
-                updateAssistantMessage(set, activeSessionId, assistantMessageId, (message) => ({
-                  ...message,
-                  content: '',
-                  reasoningContent: '',
-                  displayReasoningContent: undefined,
-                  toolInvocations: undefined,
-                  isStreaming: true,
-                  statusText: getTranslation(normalizedSettings.lang).streamingStatus,
-                }));
-              }
-
-              await yieldToMainThread();
-              resp = await runAgentPass(runtimeUserPrompt, images);
-            } else if (!shouldFallbackToPrimaryModel(error, route, normalizedSettings)) {
+            if (!shouldFallbackToPrimaryModel(error, route, normalizedSettings)) {
               throw error;
-            } else {
+            }
+
+            // fast 模型提供方错误降级主模型（与崩溃恢复正交：崩溃已在
+            // runWithCrashRecovery 内重建/降级处理，不会走到这里）。
             route = primaryRoute;
             agent = createAgent(
               normalizedSettings,
@@ -2141,8 +2209,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             }
 
             await yieldToMainThread();
-            resp = await runAgentPass(runtimeUserPrompt, images);
-            }
+            resp = await runWithCrashRecovery(runtimeUserPrompt, images);
           }
           }
 
@@ -2254,6 +2321,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
               },
             };
           });
+          if (mainThreadFallbackUsed) {
+            // 主线程 Agent 只是崩溃兜底的应急替代：清空它，让下一条消息重建
+            // Worker 运行时回到常态（若随后产生检查点，下面会以 Worker 重建）。
+            set({ _agent: null, _agentModel: null, _agentPromptKey: null });
+          }
           const checkpointResult = await maybeGenerateContextCheckpoint(
             normalizedSettings,
             get().sessionMessages[activeSessionId] ?? [],

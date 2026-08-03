@@ -395,6 +395,24 @@ export function buildAgentSessionParts(
   return { prefix, log, model: baseModel, toolRegistry, provider, providerName, uiTaskToolContext };
 }
 
+/**
+ * 显式创建主线程 Agent（无 Worker）。用作 Worker 反复崩溃后的降级兜底：
+ * 主线程运行时不存在「Worker 被 WebKit 杀掉」的失败模式，保证回合能跑完。
+ * 代价是重活会阻塞 UI 线程，因此仅作为应急路径，不改变默认 Worker 运行时。
+ */
+export function createMainThreadAgent(
+  settings: Settings,
+  sessionId: string,
+  workspacePath: string,
+  messages: UIMessage[] = [],
+  overrides: Partial<
+    Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'temperature' | 'maxTokens' | 'systemPrompt'>
+  > = {},
+  runtime: AgentRuntimeConfig = {}
+): AgentRuntimeHandle {
+  return _createLocalAgent(settings, sessionId, workspacePath, messages, overrides, runtime);
+}
+
 function _createLocalAgent(
   settings: Settings,
   sessionId: string,

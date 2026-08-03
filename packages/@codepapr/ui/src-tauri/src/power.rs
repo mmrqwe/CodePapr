@@ -1,15 +1,18 @@
-//! Idle-sleep prevention while the agent is working.
+//! Sleep/display-sleep prevention while the agent is working.
 //!
-//! macOS idle-sleep suspends the WKWebView Web Content process; across
-//! sleep/wake cycles WebKit silently terminates Web Workers, killing the
-//! agent runtime mid-turn (no JS error event is fired, so the turn just
-//! hangs). While a turn is in flight we therefore hold a
-//! `NoIdleSleepAssertion` so the machine stays awake. Lid-close sleep is NOT
-//! blocked by this assertion type — only idle sleep is.
+//! WKWebView silently terminates Web Workers when the display sleeps (the
+//! page is frozen and the worker is killed mid-request — no JS error event
+//! fires, the turn just dies) and likewise across system sleep/wake cycles.
+//! While a turn is in flight we therefore hold TWO assertions:
+//!  - `PreventUserIdleDisplaySleep`: keeps the screen on (display sleep was
+//!    the observed kill trigger, not system sleep);
+//!  - `NoIdleSleepAssertion`: keeps the system from idle-sleeping.
+//! Lid-close sleep is NOT blocked by either — crash recovery (heartbeat +
+//! auto-rebuild) covers that case.
 //!
 //! Reference-counted: multiple UI holders (chat turn, app-agent runs) may
-//! overlap; the system assertion is created on the first acquire and
-//! released when the last holder lets go. Non-macOS platforms are no-ops.
+//! overlap; the assertions are created on the first acquire and released
+//! when the last holder lets go. Non-macOS platforms are no-ops.
 
 #[cfg(target_os = "macos")]
 mod macos {
@@ -62,38 +65,56 @@ mod macos {
 
     struct SleepBlockState {
         holders: u32,
-        assertion_id: Option<IOPMAssertionId>,
+        assertion_ids: Vec<IOPMAssertionId>,
     }
 
     static STATE: Mutex<SleepBlockState> = Mutex::new(SleepBlockState {
         holders: 0,
-        assertion_id: None,
+        assertion_ids: Vec::new(),
     });
+
+    fn create_assertion(assertion_type: &str) -> Result<IOPMAssertionId, String> {
+        let type_ref = cf_string(assertion_type)?;
+        let name_ref = match cf_string("CodePapr agent turn in progress") {
+            Ok(name_ref) => name_ref,
+            Err(err) => {
+                unsafe { CFRelease(type_ref) };
+                return Err(err);
+            }
+        };
+        let mut assertion_id: IOPMAssertionId = 0;
+        let result = unsafe {
+            IOPMAssertionCreateWithName(
+                type_ref,
+                K_IOPM_ASSERTION_LEVEL_ON,
+                name_ref,
+                &mut assertion_id,
+            )
+        };
+        unsafe {
+            CFRelease(type_ref);
+            CFRelease(name_ref);
+        }
+        if result != K_IORETURN_SUCCESS {
+            return Err(format!(
+                "IOPMAssertionCreateWithName({assertion_type}) 失败: 0x{result:08x}"
+            ));
+        }
+        Ok(assertion_id)
+    }
 
     pub fn acquire() -> Result<(), String> {
         let mut state = STATE.lock().map_err(|err| err.to_string())?;
-        if state.assertion_id.is_none() {
-            // "NoIdleSleepAssertion" blocks idle sleep only; the user can
-            // still force sleep (lid close / Apple menu).
-            let assertion_type = cf_string("NoIdleSleepAssertion")?;
-            let assertion_name = cf_string("CodePapr agent turn in progress")?;
-            let mut assertion_id: IOPMAssertionId = 0;
-            let result = unsafe {
-                IOPMAssertionCreateWithName(
-                    assertion_type,
-                    K_IOPM_ASSERTION_LEVEL_ON,
-                    assertion_name,
-                    &mut assertion_id,
-                )
+        if state.assertion_ids.is_empty() {
+            let display_id = create_assertion("PreventUserIdleDisplaySleep")?;
+            let idle_id = match create_assertion("NoIdleSleepAssertion") {
+                Ok(id) => id,
+                Err(err) => {
+                    unsafe { IOPMAssertionRelease(display_id) };
+                    return Err(err);
+                }
             };
-            unsafe {
-                CFRelease(assertion_type);
-                CFRelease(assertion_name);
-            }
-            if result != K_IORETURN_SUCCESS {
-                return Err(format!("IOPMAssertionCreateWithName 失败: 0x{result:08x}"));
-            }
-            state.assertion_id = Some(assertion_id);
+            state.assertion_ids = vec![display_id, idle_id];
         }
         state.holders = state.holders.saturating_add(1);
         Ok(())
@@ -107,20 +128,24 @@ mod macos {
         }
         state.holders -= 1;
         if state.holders == 0 {
-            if let Some(assertion_id) = state.assertion_id.take() {
+            let mut first_error: Option<String> = None;
+            for assertion_id in state.assertion_ids.drain(..) {
                 let result = unsafe { IOPMAssertionRelease(assertion_id) };
-                if result != K_IORETURN_SUCCESS {
-                    return Err(format!("IOPMAssertionRelease 失败: 0x{result:08x}"));
+                if result != K_IORETURN_SUCCESS && first_error.is_none() {
+                    first_error = Some(format!("IOPMAssertionRelease 失败: 0x{result:08x}"));
                 }
+            }
+            if let Some(err) = first_error {
+                return Err(err);
             }
         }
         Ok(())
     }
 
-    /// Drop any held assertion (process exit path).
+    /// Drop any held assertions (process exit path).
     pub fn release_all() {
         if let Ok(mut state) = STATE.lock() {
-            if let Some(assertion_id) = state.assertion_id.take() {
+            for assertion_id in state.assertion_ids.drain(..) {
                 unsafe {
                     IOPMAssertionRelease(assertion_id);
                 }

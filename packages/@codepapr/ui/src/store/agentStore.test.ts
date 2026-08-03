@@ -51,9 +51,15 @@ const { loadAppSettingsMock, saveAppSettingsMock } = vi.hoisted(() => ({
   saveAppSettingsMock: vi.fn(async () => undefined),
 }));
 
-const { createAgentMock, actualCreateAgentRef } = vi.hoisted(() => ({
+const { createAgentMock, createMainThreadAgentMock, actualCreateAgentRef } = vi.hoisted(() => ({
   createAgentMock: vi.fn(),
-  actualCreateAgentRef: { current: null as null | ((...args: never[]) => unknown) },
+  createMainThreadAgentMock: vi.fn(),
+  actualCreateAgentRef: {
+    current: null as null | {
+      createAgent: (...args: never[]) => unknown;
+      createMainThreadAgent: (...args: never[]) => unknown;
+    },
+  },
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -94,15 +100,25 @@ vi.mock('../utils/appSettingsStorage', () => ({
   saveAppSettings: saveAppSettingsMock,
 }));
 
-// createAgent is spied so crash-recovery tests can inject mock agents for the
-// rebuilt instance; the default implementation delegates to the real factory.
+// createAgent/createMainThreadAgent are spied so crash-recovery tests can
+// inject mock agents for rebuilt instances; defaults delegate to the real
+// factory.
 vi.mock('./internals/agentFactory', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./internals/agentFactory')>();
-  actualCreateAgentRef.current = actual.createAgent as (...args: never[]) => unknown;
-  createAgentMock.mockImplementation((...args: never[]) => actualCreateAgentRef.current!(...args));
+  actualCreateAgentRef.current = {
+    createAgent: actual.createAgent as (...args: never[]) => unknown,
+    createMainThreadAgent: actual.createMainThreadAgent as (...args: never[]) => unknown,
+  };
+  createAgentMock.mockImplementation((...args: never[]) =>
+    actualCreateAgentRef.current!.createAgent(...args)
+  );
+  createMainThreadAgentMock.mockImplementation((...args: never[]) =>
+    actualCreateAgentRef.current!.createMainThreadAgent(...args)
+  );
   return {
     ...actual,
     createAgent: createAgentMock,
+    createMainThreadAgent: createMainThreadAgentMock,
   };
 });
 
@@ -234,8 +250,14 @@ describe('useAgentStore.sendMessage', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
-    createAgentMock.mockImplementation((...args: never[]) => actualCreateAgentRef.current!(...args));
+    createAgentMock.mockImplementation((...args: never[]) =>
+      actualCreateAgentRef.current!.createAgent(...args)
+    );
+    createMainThreadAgentMock.mockImplementation((...args: never[]) =>
+      actualCreateAgentRef.current!.createMainThreadAgent(...args)
+    );
     createAgentMock.mockClear();
+    createMainThreadAgentMock.mockClear();
     invokeMock.mockClear();
     loadProjectStateMock.mockClear();
     saveProjectStateMock.mockClear();
@@ -2154,26 +2176,87 @@ describe('useAgentStore.sendMessage', () => {
       expect(useAgentStore.getState()._agent).toBe(fresh);
     });
 
-    it('surfaces the crash and drops the agent when the retry also crashes', async () => {
-      const crashOnce = () =>
-        vi.fn(async (): Promise<never> => {
-          throw new WorkerCrashError('Agent worker crashed: Simulated OOM');
-        });
-      const crashing = createMockAgent({ chat: crashOnce() });
-      const retryCrashing = createMockAgent({ chat: crashOnce() });
-      createAgentMock.mockReturnValue(retryCrashing);
+    it('falls back to the main-thread agent when worker rebuilds keep crashing', async () => {
+      const crashingChat = vi.fn(
+        async (): Promise<never> => {
+          throw new WorkerCrashError('Agent worker crashed: Simulated kill');
+        },
+      );
+      const crashing = createMockAgent({ chat: crashingChat });
+      // 每次重建的 Worker 都立即崩溃（3 次重试全败）→ 降级主线程兜底成功。
+      createAgentMock.mockImplementation(() => createMockAgent({ chat: crashingChat }));
+      const fallbackChat = vi.fn(async () => createAgentResponse('主线程兜底回复'));
+      const fallbackAgent = createMockAgent({ chat: fallbackChat });
+      createMainThreadAgentMock.mockReturnValue(fallbackAgent);
       setCrashRecoveryState(crashing);
 
       await useAgentStore.getState().sendMessage('任务', '任务', 'agent');
 
-      expect(createAgentMock).toHaveBeenCalledTimes(1);
+      expect(crashingChat).toHaveBeenCalledTimes(4); // 首次 + 3 次 Worker 重建重试
+      expect(createAgentMock).toHaveBeenCalledTimes(3);
+      expect(createMainThreadAgentMock).toHaveBeenCalledTimes(1);
+      expect(fallbackChat).toHaveBeenCalledTimes(1);
+      const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+      expect(sessionMessages.some((m) => m.role === 'assistant' && m.content === '主线程兜底回复')).toBe(true);
+      expect(sessionMessages.filter((m) => m.role === 'error')).toHaveLength(0);
+      // 兜底回合结束后清空 _agent：下一条消息重建 Worker 运行时回到常态。
       expect(useAgentStore.getState()._agent).toBeNull();
+      expect(useAgentStore.getState().isLoading).toBe(false);
+    });
+
+    it('only surfaces an error when even the main-thread fallback fails', async () => {
+      const crashingChat = vi.fn(
+        async (): Promise<never> => {
+          throw new WorkerCrashError('Agent worker crashed: Simulated kill');
+        },
+      );
+      const crashing = createMockAgent({ chat: crashingChat });
+      createAgentMock.mockImplementation(() => createMockAgent({ chat: crashingChat }));
+      const fallbackChat = vi.fn(
+        async (): Promise<never> => {
+          throw new Error('provider exploded');
+        },
+      );
+      createMainThreadAgentMock.mockReturnValue(createMockAgent({ chat: fallbackChat }));
+      setCrashRecoveryState(crashing);
+
+      await useAgentStore.getState().sendMessage('任务', '任务', 'agent');
+
+      expect(createAgentMock).toHaveBeenCalledTimes(3);
+      expect(createMainThreadAgentMock).toHaveBeenCalledTimes(1);
       expect(useAgentStore.getState().isLoading).toBe(false);
       const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
       const errorMessages = sessionMessages.filter((m) => m.role === 'error');
       expect(errorMessages).toHaveLength(1);
-      expect(errorMessages[0]?.content).toContain('Agent Worker 崩溃');
-      expect(errorMessages[0]?.content).toContain('Simulated OOM');
+      // 此时错误已是常规错误（非 Worker 崩溃），不带崩溃前缀。
+      expect(errorMessages[0]?.content).toContain('provider exploded');
+      expect(errorMessages[0]?.content).not.toContain('Agent Worker 崩溃');
+    });
+
+    it('stops the recovery chain immediately on user cancel', async () => {
+      const crashingChat = vi.fn(
+        async (): Promise<never> => {
+          throw new WorkerCrashError('Agent worker crashed: Simulated kill');
+        },
+      );
+      const crashing = createMockAgent({ chat: crashingChat });
+      const cancelledChat = vi.fn(
+        async (): Promise<never> => {
+          throw new DOMException('Session was cancelled', 'AbortError');
+        },
+      );
+      const retryAgent = createMockAgent({ chat: cancelledChat, isCrashed: false });
+      createAgentMock.mockReturnValue(retryAgent);
+      setCrashRecoveryState(crashing);
+
+      await useAgentStore.getState().sendMessage('任务', '任务', 'agent');
+
+      // 首次崩溃重建一次后，重试中的取消立即终止恢复链：不再继续重建。
+      expect(createAgentMock).toHaveBeenCalledTimes(1);
+      expect(createMainThreadAgentMock).not.toHaveBeenCalled();
+      // 取消时 agent 未崩溃：保留（非崩溃语义）。
+      expect(useAgentStore.getState()._agent).toBe(retryAgent);
+      expect(useAgentStore.getState().isLoading).toBe(false);
     });
 
     it('drops the agent when a cancel aborts a worker that died mid-turn', async () => {

@@ -406,8 +406,10 @@ describe('WorkerBackedAgent', () => {
     // rejection fired inside the timer callback is never "unhandled".
     const rejection = expect(chatPromise).rejects.toBeInstanceOf(WorkerCrashError);
 
-    // Heartbeat pings go out every 5s; after 15s without a pong the worker is
-    // declared crashed. Advance well past the timeout without answering.
+    // Answer one ping so the heartbeat leaves the initial grace window, then
+    // go silent: after 15s without a pong the worker is declared crashed.
+    await vi.advanceTimersByTimeAsync(5_000);
+    worker?.emit({ type: 'pong' });
     await vi.advanceTimersByTimeAsync(21_000);
 
     expect(agent.isCrashed()).toBe(true);
@@ -415,6 +417,53 @@ describe('WorkerBackedAgent', () => {
     expect(worker?.messages.some((m) => m.type === 'ping')).toBe(true);
     await rejection;
     await expect(chatPromise).rejects.toThrow(/unresponsive/i);
+  });
+
+  it('gives a never-answered worker the longer initial grace window', async () => {
+    const agent = createAgent();
+    const chatPromise = agent.chat('hello');
+    const worker = MockWorker.instances[0];
+    const rejection = expect(chatPromise).rejects.toBeInstanceOf(WorkerCrashError);
+
+    // No pong ever arrives, but the first turn gets the 60s initial grace
+    // (full-sync + hashing can legitimately block pong replies that long,
+    // especially right after a page thaw). Ticks at 5s intervals: the 60s
+    // tick is exactly at the limit (not over), the 65s tick declares crash.
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(agent.isCrashed()).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(7_000);
+    expect(agent.isCrashed()).toBe(true);
+    expect(worker?.terminated).toBe(true);
+    await rejection;
+    await expect(chatPromise).rejects.toThrow(/no heartbeat for 60s/i);
+  });
+
+  it('refreshes the heartbeat baseline when the page becomes visible again', async () => {
+    const agent = createAgent();
+    const chatPromise = agent.chat('hello');
+    const worker = MockWorker.instances[0];
+    const rejection = expect(chatPromise).rejects.toBeInstanceOf(WorkerCrashError);
+
+    // Answer one ping to leave the initial grace window.
+    await vi.advanceTimersByTimeAsync(5_000);
+    worker?.emit({ type: 'pong' });
+
+    // 12s of silence: within the 15s window.
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(agent.isCrashed()).toBe(false);
+
+    // Page thaws (visibilitychange→visible): baseline refreshes. Without the
+    // refresh the next tick (total 25s since the pong) would declare a crash.
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    await vi.advanceTimersByTimeAsync(17_000);
+    expect(agent.isCrashed()).toBe(false);
+
+    // A genuine silence window after the thaw still crashes as expected.
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(agent.isCrashed()).toBe(true);
+    await rejection;
   });
 
   it('keeps the worker alive while heartbeats are answered', async () => {
