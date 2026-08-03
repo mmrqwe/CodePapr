@@ -391,6 +391,8 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     typeof input.streamIdleTimeoutMs === 'number' && Number.isFinite(input.streamIdleTimeoutMs)
       ? Math.max(10_000, Math.floor(input.streamIdleTimeoutMs))
       : DEFAULT_SETTINGS.streamIdleTimeoutMs;
+  const browserEngine: 'embedded' | 'headless' =
+    input.browserEngine === 'headless' ? 'headless' : 'embedded';
   const mcp = normalizeMcpSettings(input.mcp);
 
   return {
@@ -494,6 +496,7 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     graphToolTimeoutMs,
     toolIpcTimeoutMs,
     streamIdleTimeoutMs,
+    browserEngine,
     mcp,
   };
 }

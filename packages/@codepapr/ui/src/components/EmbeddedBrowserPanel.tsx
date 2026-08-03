@@ -1,0 +1,278 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { useBrowserViewStore } from '../store/browserViewStore';
+import { getTranslation } from '../utils/i18n';
+import type { Lang } from '../utils/i18n';
+
+interface EmbeddedBrowserStateEvent {
+  workspacePath: string;
+  url: string;
+  title: string;
+}
+
+interface EmbeddedBrowserPanelProps {
+  workspacePath: string;
+  lang?: Lang;
+}
+
+export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPanelProps) {
+  const t = getTranslation(lang);
+  const pageSession = useBrowserViewStore((state) => state.pageSession);
+  const closePanel = useBrowserViewStore((state) => state.closePanel);
+  const setPageSession = useBrowserViewStore((state) => state.setPageSession);
+
+  const placeholderRef = useRef<HTMLDivElement | null>(null);
+  const [addressInput, setAddressInput] = useState('');
+  const [isNavigating, setIsNavigating] = useState(false);
+  const [actionError, setActionError] = useState('');
+
+  const activeSession =
+    pageSession && pageSession.workspacePath === workspacePath ? pageSession : null;
+
+  // 把原生 WebView 定位到占位区域上方。
+  const syncBounds = useCallback(async () => {
+    const el = placeholderRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    try {
+      await invoke('embedded_browser_set_bounds', {
+        workspacePath,
+        x: rect.left,
+        y: rect.top,
+        width: rect.width,
+        height: rect.height,
+      });
+    } catch {
+      // 会话可能尚未创建；忽略定位失败。
+    }
+  }, [workspacePath]);
+
+  // 打开面板：显示原生 WebView 并持续跟随布局变化。
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: UnlistenFn | null = null;
+
+    const show = async () => {
+      try {
+        await invoke('embedded_browser_show', { workspacePath });
+      } catch {
+        // 无会话时 show 会失败，属正常情况。
+      }
+      await syncBounds();
+    };
+    void show();
+
+    const onStateChange = (event: { payload: EmbeddedBrowserStateEvent }) => {
+      const payload = event.payload;
+      if (payload.workspacePath !== workspacePath) return;
+      setPageSession({
+        url: payload.url,
+        title: payload.title,
+        workspacePath,
+        startedAt: Date.now(),
+      });
+    };
+    listen<EmbeddedBrowserStateEvent>('embedded-browser://state-changed', onStateChange).then(
+      (fn) => {
+        if (disposed) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      }
+    );
+
+    const onResize = () => void syncBounds();
+    window.addEventListener('resize', onResize);
+    const observer = new ResizeObserver(() => void syncBounds());
+    if (placeholderRef.current) observer.observe(placeholderRef.current);
+
+    return () => {
+      disposed = true;
+      window.removeEventListener('resize', onResize);
+      observer.disconnect();
+      if (unlisten) unlisten();
+      void invoke('embedded_browser_hide', { workspacePath }).catch(() => undefined);
+    };
+  }, [workspacePath, syncBounds, setPageSession]);
+
+  // 地址栏跟随当前页面 URL。
+  useEffect(() => {
+    setAddressInput(activeSession?.url ?? '');
+  }, [activeSession?.url]);
+
+  const navigateTo = useCallback(
+    async (rawUrl: string) => {
+      const trimmed = rawUrl.trim();
+      if (!trimmed) return;
+      const url = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+      setIsNavigating(true);
+      setActionError('');
+      try {
+        const result = await invoke<{ url: string; title: string }>(
+          'embedded_browser_navigate',
+          { workspacePath, url }
+        );
+        setPageSession({
+          url: result.url,
+          title: result.title,
+          workspacePath,
+          startedAt: Date.now(),
+        });
+      } catch (err) {
+        setActionError((err as Error).message);
+      } finally {
+        setIsNavigating(false);
+      }
+    },
+    [workspacePath, setPageSession]
+  );
+
+  const runAction = useCallback(
+    async (action: () => Promise<{ url: string; title: string }>) => {
+      setActionError('');
+      try {
+        const result = await action();
+        setPageSession({
+          url: result.url,
+          title: result.title,
+          workspacePath,
+          startedAt: Date.now(),
+        });
+      } catch (err) {
+        setActionError((err as Error).message);
+      }
+    },
+    [workspacePath, setPageSession]
+  );
+
+  const goBack = useCallback(
+    () =>
+      void runAction(() =>
+        invoke<{ url: string; title: string }>('embedded_browser_history', {
+          workspacePath,
+          direction: 'back',
+        })
+      ),
+    [workspacePath, runAction]
+  );
+
+  const goForward = useCallback(
+    () =>
+      void runAction(() =>
+        invoke<{ url: string; title: string }>('embedded_browser_history', {
+          workspacePath,
+          direction: 'forward',
+        })
+      ),
+    [workspacePath, runAction]
+  );
+
+  const reload = useCallback(
+    () =>
+      void runAction(() =>
+        invoke<{ url: string; title: string }>('embedded_browser_reload', { workspacePath })
+      ),
+    [workspacePath, runAction]
+  );
+
+  const openInSystemBrowser = useCallback(() => {
+    if (!activeSession?.url) return;
+    void invoke('open_browser_target', {
+      workspacePath,
+      url: activeSession.url,
+    }).catch(() => undefined);
+  }, [workspacePath, activeSession?.url]);
+
+  return (
+    <div className="flex h-full flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#2a2d3a] bg-[#11141c] px-3 py-2">
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={goBack}
+            title={t.embeddedBrowserBack}
+            className="rounded-md border border-[#2a2d3a] px-2 py-1 text-xs text-slate-300 transition-colors hover:border-indigo-500/50 hover:text-white"
+          >
+            ←
+          </button>
+          <button
+            type="button"
+            onClick={goForward}
+            title={t.embeddedBrowserForward}
+            className="rounded-md border border-[#2a2d3a] px-2 py-1 text-xs text-slate-300 transition-colors hover:border-indigo-500/50 hover:text-white"
+          >
+            →
+          </button>
+          <button
+            type="button"
+            onClick={reload}
+            title={t.embeddedBrowserReload}
+            className="rounded-md border border-[#2a2d3a] px-2 py-1 text-xs text-slate-300 transition-colors hover:border-indigo-500/50 hover:text-white"
+          >
+            ⟳
+          </button>
+        </div>
+
+        <form
+          className="min-w-0 flex-1"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void navigateTo(addressInput);
+          }}
+        >
+          <input
+            type="text"
+            value={addressInput}
+            onChange={(event) => setAddressInput(event.target.value)}
+            placeholder={t.embeddedBrowserAddressPlaceholder}
+            className="w-full rounded-md border border-[#2a2d3a] bg-[#0b0d12] px-2 py-1 text-xs text-slate-200 outline-none transition-colors focus:border-indigo-500/60"
+            spellCheck={false}
+          />
+        </form>
+
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={openInSystemBrowser}
+            title={t.embeddedBrowserOpenExternal}
+            className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] font-medium text-slate-300 transition-colors hover:border-indigo-500/50 hover:text-white"
+          >
+            {t.embeddedBrowserOpenExternal}
+          </button>
+          <button
+            type="button"
+            onClick={closePanel}
+            className="rounded-md border border-red-500/30 px-2 py-1 text-[10px] font-medium text-red-200 transition-colors hover:border-red-400/60 hover:text-red-100"
+          >
+            {t.embeddedBrowserClose}
+          </button>
+        </div>
+      </div>
+
+      {activeSession?.title && (
+        <div className="truncate px-1 text-[11px] text-slate-400">{activeSession.title}</div>
+      )}
+
+      {actionError && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-200">
+          {actionError}
+        </div>
+      )}
+
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-[#2a2d3a] bg-[#0b0d12]">
+        {isNavigating && (
+          <div className="absolute left-0 top-0 z-10 h-0.5 w-full animate-pulse bg-indigo-500/70" />
+        )}
+        <div ref={placeholderRef} className="h-full w-full" />
+        {!activeSession && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-xs text-slate-600">
+            {t.embeddedBrowserEmpty}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

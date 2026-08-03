@@ -20,8 +20,8 @@ use std::{
 };
 use std::sync::mpsc;
 
-const MAX_BROWSER_DOM_BYTES: usize = 500_000;
-const MAX_BROWSER_SCREENSHOT_BYTES: usize = 25_000_000;
+pub(crate) const MAX_BROWSER_DOM_BYTES: usize = 500_000;
+pub(crate) const MAX_BROWSER_SCREENSHOT_BYTES: usize = 25_000_000;
 const DEFAULT_BROWSER_TIMEOUT_SECONDS: u64 = 10;
 const MAX_BROWSER_TIMEOUT_SECONDS: u64 = 120;
 
@@ -42,7 +42,7 @@ fn with_browser_page_sessions<T>(
     handler(&mut sessions)
 }
 
-fn parse_browser_selector_kind(raw: Option<&str>) -> Result<BrowserSelectorKind, String> {
+pub(crate) fn parse_browser_selector_kind(raw: Option<&str>) -> Result<BrowserSelectorKind, String> {
     match raw.unwrap_or("css").trim().to_lowercase().as_str() {
         "css" => Ok(BrowserSelectorKind::Css),
         "xpath" => Ok(BrowserSelectorKind::XPath),
@@ -50,7 +50,7 @@ fn parse_browser_selector_kind(raw: Option<&str>) -> Result<BrowserSelectorKind,
     }
 }
 
-fn parse_browser_dom_content_type(raw: Option<&str>) -> Result<BrowserDomContentType, String> {
+pub(crate) fn parse_browser_dom_content_type(raw: Option<&str>) -> Result<BrowserDomContentType, String> {
     match raw.unwrap_or("html").trim().to_lowercase().as_str() {
         "html" => Ok(BrowserDomContentType::Html),
         "text" => Ok(BrowserDomContentType::Text),
@@ -58,7 +58,7 @@ fn parse_browser_dom_content_type(raw: Option<&str>) -> Result<BrowserDomContent
     }
 }
 
-fn parse_browser_screenshot_format(raw: Option<&str>) -> Result<BrowserScreenshotFormat, String> {
+pub(crate) fn parse_browser_screenshot_format(raw: Option<&str>) -> Result<BrowserScreenshotFormat, String> {
     match raw.unwrap_or("png").trim().to_lowercase().as_str() {
         "png" => Ok(BrowserScreenshotFormat::Png),
         "jpeg" | "jpg" => Ok(BrowserScreenshotFormat::Jpeg),
@@ -66,7 +66,7 @@ fn parse_browser_screenshot_format(raw: Option<&str>) -> Result<BrowserScreensho
     }
 }
 
-fn browser_action_timeout(timeout_seconds: Option<u64>) -> Duration {
+pub(crate) fn browser_action_timeout(timeout_seconds: Option<u64>) -> Duration {
     Duration::from_secs(
         timeout_seconds
             .unwrap_or(DEFAULT_BROWSER_TIMEOUT_SECONDS)
@@ -215,7 +215,7 @@ fn truncate_browser_dom(content: String) -> (String, bool) {
     (content[..end].to_string(), true)
 }
 
-fn default_browser_screenshot_path(format: BrowserScreenshotFormat) -> Result<PathBuf, String> {
+pub(crate) fn default_browser_screenshot_path(format: BrowserScreenshotFormat) -> Result<PathBuf, String> {
     Ok(PathBuf::from(format!(
         ".CodePapr/browser/browser-{}.{}",
         unix_millis()?,
@@ -223,7 +223,7 @@ fn default_browser_screenshot_path(format: BrowserScreenshotFormat) -> Result<Pa
     )))
 }
 
-fn write_browser_binary_file(
+pub(crate) fn write_browser_binary_file(
     workspace: &Path,
     relative_path: Option<String>,
     default_path: PathBuf,
@@ -387,9 +387,13 @@ pub(crate) fn open_browser_target(
 
 #[tauri::command]
 pub(crate) async fn open_browser_page(
+    app: tauri::AppHandle,
     workspace_path: String,
     url: String,
 ) -> Result<BrowserPageSessionResult, String> {
+    if crate::embedded_browser::is_embedded_engine() {
+        return crate::embedded_browser::page::embedded_browser_open(app, workspace_path, url).await;
+    }
     run_blocking_workspace_task(move || {
         open_or_navigate_browser_page_session(&workspace_path, &url)
     }).await
@@ -397,9 +401,13 @@ pub(crate) async fn open_browser_page(
 
 #[tauri::command]
 pub(crate) async fn navigate_browser_page(
+    app: tauri::AppHandle,
     workspace_path: String,
     url: String,
 ) -> Result<BrowserPageSessionResult, String> {
+    if crate::embedded_browser::is_embedded_engine() {
+        return crate::embedded_browser::page::embedded_browser_navigate(app, workspace_path, url).await;
+    }
     run_blocking_workspace_task(move || {
         open_or_navigate_browser_page_session(&workspace_path, &url)
     }).await
@@ -407,8 +415,12 @@ pub(crate) async fn navigate_browser_page(
 
 #[tauri::command]
 pub(crate) async fn reload_browser_page(
+    app: tauri::AppHandle,
     workspace_path: String,
 ) -> Result<BrowserPageSessionResult, String> {
+    if crate::embedded_browser::is_embedded_engine() {
+        return crate::embedded_browser::page::embedded_browser_reload(app, workspace_path).await;
+    }
     run_blocking_workspace_task(move || {
         let workspace_key = browser_workspace_key(&workspace_path)?;
 
@@ -425,12 +437,18 @@ pub(crate) async fn reload_browser_page(
 
 #[tauri::command]
 pub(crate) async fn click_browser_page_element(
+    app: tauri::AppHandle,
     workspace_path: String,
     selector: String,
     selector_type: Option<String>,
     wait_for_navigation: Option<bool>,
     timeout_seconds: Option<u64>,
 ) -> Result<BrowserPageActionResult, String> {
+    if crate::embedded_browser::is_embedded_engine() {
+        return crate::embedded_browser::page::embedded_browser_click(
+            app, workspace_path, selector, selector_type, wait_for_navigation, timeout_seconds,
+        ).await;
+    }
     run_blocking_workspace_task(move || {
         let workspace_key = browser_workspace_key(&workspace_path)?;
         let selector_kind = parse_browser_selector_kind(selector_type.as_deref())?;
@@ -465,6 +483,7 @@ pub(crate) async fn click_browser_page_element(
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn input_browser_page_text(
+    app: tauri::AppHandle,
     workspace_path: String,
     selector: String,
     text: String,
@@ -474,6 +493,12 @@ pub(crate) async fn input_browser_page_text(
     wait_for_navigation: Option<bool>,
     timeout_seconds: Option<u64>,
 ) -> Result<BrowserPageActionResult, String> {
+    if crate::embedded_browser::is_embedded_engine() {
+        return crate::embedded_browser::page::embedded_browser_input(
+            app, workspace_path, selector, text, selector_type, clear, submit,
+            wait_for_navigation, timeout_seconds,
+        ).await;
+    }
     run_blocking_workspace_task(move || {
         let workspace_key = browser_workspace_key(&workspace_path)?;
         let selector_kind = parse_browser_selector_kind(selector_type.as_deref())?;
@@ -532,12 +557,18 @@ pub(crate) async fn input_browser_page_text(
 
 #[tauri::command]
 pub(crate) async fn read_browser_page_dom(
+    app: tauri::AppHandle,
     workspace_path: String,
     selector: Option<String>,
     selector_type: Option<String>,
     content_type: Option<String>,
     timeout_seconds: Option<u64>,
 ) -> Result<BrowserPageDomResult, String> {
+    if crate::embedded_browser::is_embedded_engine() {
+        return crate::embedded_browser::page::embedded_browser_read_dom(
+            app, workspace_path, selector, selector_type, content_type, timeout_seconds,
+        ).await;
+    }
     run_blocking_workspace_task(move || {
         let workspace_key = browser_workspace_key(&workspace_path)?;
         let timeout = browser_action_timeout(timeout_seconds);
@@ -608,6 +639,7 @@ pub(crate) async fn read_browser_page_dom(
 
 #[tauri::command]
 pub(crate) async fn screenshot_browser_page(
+    app: tauri::AppHandle,
     workspace_path: String,
     relative_path: Option<String>,
     selector: Option<String>,
@@ -615,6 +647,11 @@ pub(crate) async fn screenshot_browser_page(
     format: Option<String>,
     timeout_seconds: Option<u64>,
 ) -> Result<BrowserPageScreenshotResult, String> {
+    if crate::embedded_browser::is_embedded_engine() {
+        return crate::embedded_browser::page::embedded_browser_screenshot(
+            app, workspace_path, relative_path, selector, selector_type, format, timeout_seconds,
+        ).await;
+    }
     run_blocking_workspace_task(move || {
         let workspace = canonical_workspace(&workspace_path)?;
         let workspace_key = workspace.to_string_lossy().to_string();
@@ -665,7 +702,10 @@ pub(crate) async fn screenshot_browser_page(
 }
 
 #[tauri::command]
-pub(crate) async fn close_browser_page(workspace_path: String) -> Result<BrowserPageCloseResult, String> {
+pub(crate) async fn close_browser_page(app: tauri::AppHandle, workspace_path: String) -> Result<BrowserPageCloseResult, String> {
+    if crate::embedded_browser::is_embedded_engine() {
+        return crate::embedded_browser::page::embedded_browser_close(app, workspace_path).await;
+    }
     run_blocking_workspace_task(move || {
         let workspace_key = browser_workspace_key(&workspace_path)?;
 

@@ -124,6 +124,7 @@ export interface Settings {
   graphToolTimeoutMs: number;
   toolIpcTimeoutMs: number;
   streamIdleTimeoutMs: number;
+  browserEngine: 'embedded' | 'headless';
 }
 
 export interface WorkspaceEntry {

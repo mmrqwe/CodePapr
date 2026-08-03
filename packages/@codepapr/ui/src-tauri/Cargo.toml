@@ -21,7 +21,9 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+# unstable 启用多 WebView API（Window::add_child）——内置浏览器面板依赖。
+# pin 版本：unstable API 可能随 minor 版本漂移（tauri 官方建议）。
+tauri = { version = "=2.11.2", features = ["protocol-asset", "unstable"] }
 tauri-plugin-prevent-default = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -77,6 +79,16 @@ tree-sitter-ruby = { path = "../../../../.cargo-vendor/ruby" }
 tree-sitter-kotlin = { path = "../../../../.cargo-vendor/kotlin" }
 
 tree-sitter-swift = { path = "../../../../.cargo-vendor/swift" }
+
+# 内置浏览器截图：WKWebView.takeSnapshot + NSBitmapImageRep 编码。
+# 版本与依赖树中现有 objc2 系列保持一致（wry/tauri 传递依赖）。
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSData", "NSString", "NSError", "NSThread"] }
+objc2-app-kit = { version = "0.3", features = ["NSBitmapImageRep", "NSImage", "NSColor", "NSGraphicsContext", "NSImageRep", "objc2-core-graphics"] }
+objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKSnapshotConfiguration", "block2"] }
+objc2-core-graphics = { version = "0.3", features = ["CGImage", "CGColorSpace"] }
+block2 = "0.6"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

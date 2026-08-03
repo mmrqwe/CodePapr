@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAgentStore, isApiConfigured } from './store/agentStore';
 import { usePreviewStore } from './store/previewStore';
+import { useBrowserViewStore } from './store/browserViewStore';
 import { useAppRuntimeStore } from './store/appRuntimeStore';
 import { useCharactersStore } from './store/charactersStore';
 import { useDebugLogStore } from './store/debugLogStore';
@@ -64,6 +65,9 @@ const CodePreviewPanel = lazy(() =>
 );
 const PreviewSessionPanel = lazy(() =>
   import('./components/PreviewSessionPanel').then((m) => ({ default: m.PreviewSessionPanel }))
+);
+const EmbeddedBrowserPanel = lazy(() =>
+  import('./components/EmbeddedBrowserPanel').then((m) => ({ default: m.EmbeddedBrowserPanel }))
 );
 const CacheStatsDashboard = lazy(() =>
   import('./components/CacheStatsDashboard').then((m) => ({ default: m.CacheStatsDashboard }))
@@ -131,6 +135,10 @@ export default function App() {
   const latestContextSnapshot = useAgentStore((state) => state._latestContextSnapshot);
   const activeSessionId = useAgentStore((state) => state.activeSessionId);
   const activePreviewSession = usePreviewStore((state) => state.activePreviewSession);
+  const browserPageSession = useBrowserViewStore((state) => state.pageSession);
+  const browserPanelOpen = useBrowserViewStore((state) => state.panelOpen);
+  const browserEngine = useBrowserViewStore((state) => state.engine);
+  const openBrowserPanel = useBrowserViewStore((state) => state.openPanel);
   const openedAppId = useAppRuntimeStore((state) => state.openedAppId);
   const clearApps = useAppRuntimeStore((state) => state.clearApps);
   const mountApp = useAppRuntimeStore((state) => state.mountApp);
@@ -596,6 +604,16 @@ export default function App() {
                           )}
                         </button>
                       )}
+                      {browserPageSession && browserEngine === 'embedded' && workspacePath && (
+                        <button
+                          type="button"
+                          onClick={() => openBrowserPanel()}
+                          title={t.embeddedBrowserToolbarTip}
+                          className="flex-shrink-0 rounded-lg border border-emerald-500/40 px-2.5 py-2 text-xs font-medium text-emerald-200 transition-colors hover:border-emerald-400 hover:text-white"
+                        >
+                          {t.embeddedBrowserTab}
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setShowProjectSwitcher(true)}
@@ -627,6 +645,16 @@ export default function App() {
                 <div className="h-full max-h-[88vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#0f1117] shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
                   <Suspense fallback={null}>
                     <PreviewSessionPanel workspacePath={activePreviewSession.workspacePath} lang={settings.lang} />
+                  </Suspense>
+                </div>
+              </div>
+            )}
+
+            {browserPanelOpen && browserEngine === 'embedded' && workspacePath && (
+              <div className="absolute inset-0 z-40 flex items-center justify-center bg-[#07090d]/70 p-6 backdrop-blur-sm">
+                <div className="h-full max-h-[88vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#0f1117] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
+                  <Suspense fallback={null}>
+                    <EmbeddedBrowserPanel workspacePath={workspacePath} lang={settings.lang} />
                   </Suspense>
                 </div>
               </div>

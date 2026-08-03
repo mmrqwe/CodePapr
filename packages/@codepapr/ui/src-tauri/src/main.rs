@@ -5,6 +5,7 @@ mod app_runtime;
 mod browser;
 mod character_card;
 mod db;
+mod embedded_browser;
 mod git_operations;
 mod lsp;
 mod lsp_fallback;
@@ -305,6 +306,21 @@ fn main() {
             browser::page::read_browser_page_dom,
             browser::page::screenshot_browser_page,
             browser::page::close_browser_page,
+            embedded_browser::page::embedded_browser_open,
+            embedded_browser::page::embedded_browser_navigate,
+            embedded_browser::page::embedded_browser_reload,
+            embedded_browser::page::embedded_browser_history,
+            embedded_browser::page::embedded_browser_click,
+            embedded_browser::page::embedded_browser_input,
+            embedded_browser::page::embedded_browser_read_dom,
+            embedded_browser::page::embedded_browser_screenshot,
+            embedded_browser::page::embedded_browser_close,
+            embedded_browser::page::embedded_browser_get_state,
+            embedded_browser::page::embedded_browser_set_bounds,
+            embedded_browser::page::embedded_browser_show,
+            embedded_browser::page::embedded_browser_hide,
+            embedded_browser::page::set_browser_engine,
+            embedded_browser::page::get_browser_engine,
             shell::session::open_shell_session,
             shell::session::list_shell_sessions,
             shell::session::read_shell_output,
@@ -376,6 +392,7 @@ fn main() {
                 let _ = shell::background::stop_all_background_processes(None);
                 shell::session::stop_all_shell_sessions();
                 browser::page::close_all_browser_pages();
+                embedded_browser::close_all_sessions();
                 mcp_host::disconnect_all_blocking();
                 workspace_fs::watcher::stop_workspace_watcher_impl();
                 power::release_all();
@@ -390,6 +407,7 @@ fn main() {
             if matches!(event, tauri::RunEvent::Exit) {
                 let _ = shell::background::stop_all_background_processes(None);
                 browser::page::close_all_browser_pages();
+                embedded_browser::close_all_sessions();
                 power::release_all();
             }
         });

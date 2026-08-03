@@ -129,7 +129,7 @@ export function SettingsModal() {
       llm: ['apiMode', 'apiFormat', 'fastModelEnabled', 'thinkingEnabled', 'thinkingEffort', 'temperature', 'topP', 'maxToolRounds', local.apiMode],
       search: ['searxngEnabled', 'searxngBaseUrl', 'searxngCategories', 'searxngTimeRange', 'searxngLanguage', 'searxngSafeSearch'],
       mentor: ['mentorEnabled', 'mentorApiFormat', 'mentorBaseURL', 'mentorApiKey', 'mentorModel', 'mentorMaxTokens', 'mentorThinkingEnabled', 'maxMentorConsultations', 'explorePrompt', 'scoutPrompt', 'mentorPrompt', 'exploreTemperature', 'exploreMaxToolRounds', 'exploreMaxTokens', 'exploreTopP', 'exploreMaxDepth', 'exploreThinkingEnabled', 'scoutTemperature', 'scoutMaxToolRounds', 'scoutMaxTokens', 'scoutTopP', 'scoutMaxDepth', 'scoutThinkingEnabled'],
-      advanced: ['compactionModel', 'compactionMaxTokens', 'compactionTemperature', 'maxContextTokens', 'maxConversationRounds', 'toolContextDefaultMode', 'toolContextOverrides', 'toolContextSummaryMaxChars', 'toolContextAutoThresholdChars', 'todoMaxRetries', 'goalMaxIterations', 'goalMaxWallClockMs', 'goalRequireGitClean', 'verifierModelTier', 'verifierMaxTokens', 'verifierTemperature', 'projectGraphMaxDepth', 'projectGraphMaxFiles', 'projectGraphMaxEdges', 'projectGraphMaxSymbolsPerFile', 'projectGraphMaxFileBytes', 'projectGraphMaxTreeEntries', 'streamIdleTimeoutMs', 'toolOutputMiddleKeepChars'],
+      advanced: ['compactionModel', 'compactionMaxTokens', 'compactionTemperature', 'maxContextTokens', 'maxConversationRounds', 'toolContextDefaultMode', 'toolContextOverrides', 'toolContextSummaryMaxChars', 'toolContextAutoThresholdChars', 'todoMaxRetries', 'goalMaxIterations', 'goalMaxWallClockMs', 'goalRequireGitClean', 'verifierModelTier', 'verifierMaxTokens', 'verifierTemperature', 'projectGraphMaxDepth', 'projectGraphMaxFiles', 'projectGraphMaxEdges', 'projectGraphMaxSymbolsPerFile', 'projectGraphMaxFileBytes', 'projectGraphMaxTreeEntries', 'streamIdleTimeoutMs', 'toolOutputMiddleKeepChars', 'browserEngine'],
       app: [],
     };
     const resetPart: Partial<Settings> = {};
@@ -1454,6 +1454,21 @@ export function SettingsModal() {
                     <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.toolOutputMiddleKeepHint}</p>
                   </div>
                 </div>
+              </div>
+
+              <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-5">
+                <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  {t.embeddedBrowserEngine}
+                </label>
+                <p className="mb-3 text-[11px] leading-relaxed text-slate-500">{t.embeddedBrowserEngineTip}</p>
+                <select
+                  value={local.browserEngine}
+                  onChange={(e) => update({ browserEngine: e.target.value as 'embedded' | 'headless' })}
+                  className="w-full cursor-pointer rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+                >
+                  <option value="embedded">{t.embeddedBrowserEngineEmbedded}</option>
+                  <option value="headless">{t.embeddedBrowserEngineHeadless}</option>
+                </select>
               </div>
 
               <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-5">

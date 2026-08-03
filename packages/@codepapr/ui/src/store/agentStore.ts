@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from './toastStore';
+import { applyBrowserEngine } from './browserViewStore';
 import {
   applySkillEnablement,
   BUILTIN_AGENTS,
@@ -354,6 +355,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           const storedSettings = await loadAppSettings();
           settings = normalizeSettings(storedSettings ?? get().settings);
           set({ settings, settingsLoaded: true, _agent: null, _agentModel: null, _agentPromptKey: null });
+          void applyBrowserEngine(settings.browserEngine);
 
           // No proactive write-back on load: legacy plaintext-key migration is
           // already handled (and re-persisted) by the backend's
@@ -395,9 +397,13 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       setSettings: (partial) => {
+        const previousEngine = get().settings.browserEngine;
         const settings = normalizeSettings({ ...get().settings, ...partial });
         set({ settings, _agent: null, _agentModel: null, _agentPromptKey: null });
         void saveAppSettings(settings).catch(() => undefined);
+        if (settings.browserEngine !== previousEngine) {
+          void applyBrowserEngine(settings.browserEngine);
+        }
       },
 
       setWorkspacePath: (path) => {

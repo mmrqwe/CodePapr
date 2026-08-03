@@ -57,6 +57,7 @@ import type {
 import type { IToolDefinition } from '@codepapr/types';
 import type { IImageContent } from '@codepapr/types';
 import { usePreviewStore, type PreviewSession } from '../store/previewStore';
+import { useBrowserViewStore } from '../store/browserViewStore';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { useAgentStore } from '../store/agentStore';
 import { usePermissionStore, isAbsolutePath } from '../store/permissionStore';
@@ -626,6 +627,20 @@ function syncPreviewWithPage(
     workspacePath,
     openedAt: Date.now(),
   };
+}
+
+/** 把浏览器页面会话同步到内置浏览器视图 store（驱动工具栏指示与面板）。 */
+function syncBrowserViewPage(
+  workspacePath: string,
+  page: Pick<BrowserPageSessionResult | BrowserPageActionResult | BrowserPageDomResult | BrowserPageScreenshotResult, 'url' | 'title'>,
+  titleOverride?: string
+): void {
+  useBrowserViewStore.getState().setPageSession({
+    url: page.url,
+    title: titleOverride ?? page.title,
+    workspacePath,
+    startedAt: Date.now(),
+  });
 }
 
 function asHttpOrHttpsUrl(value: unknown, name: string): string {
@@ -3104,6 +3119,7 @@ export function registerWorkspaceTools(
       url: parsed.url,
     });
     const session = syncPreviewWithPage(workspace(), result, parsed.title ?? result.title);
+    syncBrowserViewPage(workspace(), result, parsed.title ?? result.title);
     return { ...result, previewSession: session };
   });
 
@@ -3118,6 +3134,7 @@ export function registerWorkspaceTools(
       url: parsed.url,
     });
     const session = syncPreviewWithPage(workspace(), result, parsed.title ?? result.title);
+    syncBrowserViewPage(workspace(), result, parsed.title ?? result.title);
     return { ...result, previewSession: session };
   });
 
@@ -3126,6 +3143,7 @@ export function registerWorkspaceTools(
       workspacePath: workspace(),
     });
     const session = syncPreviewWithPage(workspace(), result);
+    syncBrowserViewPage(workspace(), result);
     return { ...result, previewSession: session };
   });
 
@@ -3145,6 +3163,7 @@ export function registerWorkspaceTools(
       timeoutSeconds: parsed.timeoutSeconds,
     });
     const session = syncPreviewWithPage(workspace(), result);
+    syncBrowserViewPage(workspace(), result);
     return { ...result, previewSession: session };
   });
 
@@ -3170,6 +3189,7 @@ export function registerWorkspaceTools(
       timeoutSeconds: parsed.timeoutSeconds,
     });
     const session = syncPreviewWithPage(workspace(), result);
+    syncBrowserViewPage(workspace(), result);
     return { ...result, previewSession: session };
   });
 
@@ -3181,13 +3201,15 @@ export function registerWorkspaceTools(
       timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
     };
 
-    return await invoke<BrowserPageDomResult>('read_browser_page_dom', {
+    const result = await invoke<BrowserPageDomResult>('read_browser_page_dom', {
       workspacePath: workspace(),
       selector: parsed.selector,
       selectorType: parsed.selectorType,
       contentType: parsed.contentType,
       timeoutSeconds: parsed.timeoutSeconds,
     });
+    syncBrowserViewPage(workspace(), result);
+    return result;
   });
 
   registry.register(toolByName('browser_take_screenshot'), async (args: Record<string, unknown>) => {
@@ -3207,6 +3229,7 @@ export function registerWorkspaceTools(
       format: parsed.format,
       timeoutSeconds: parsed.timeoutSeconds,
     });
+    syncBrowserViewPage(workspace(), result);
 
     return result;
   });
@@ -3234,6 +3257,10 @@ export function registerWorkspaceTools(
     });
     if (current?.workspacePath === workspace()) {
       usePreviewStore.getState().closePreviewSession();
+    }
+    const browserView = useBrowserViewStore.getState();
+    if (browserView.pageSession?.workspacePath === workspace()) {
+      browserView.setPageSession(null);
     }
 
     return {

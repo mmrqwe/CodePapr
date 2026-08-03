@@ -140,6 +140,7 @@ export const DEFAULT_SETTINGS: Settings = {
   graphToolTimeoutMs: 600_000,
   toolIpcTimeoutMs: 120_000,
   streamIdleTimeoutMs: 300_000,
+  browserEngine: 'embedded',
 };
 
 export function createEmptyStats(): CumulativeStats {
