@@ -10,4 +10,3 @@ export { ChatPanel } from './components/ChatPanel';
 export { SessionManager } from './components/SessionManager';
 export { CacheStatsDashboard } from './components/CacheStatsDashboard';
 export { CodingWorkbench } from './components/CodingWorkbench';
-export { useAgent } from './hooks/useAgent';
