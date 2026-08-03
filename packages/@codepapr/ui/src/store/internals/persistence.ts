@@ -20,6 +20,28 @@ export function maybeApplySessionTitle(
   );
 }
 
+export function touchSession(
+  sessions: SessionMeta[],
+  sessionId: string,
+  timestamp: number
+): SessionMeta[] {
+  const target = sessions.find((session) => session.id === sessionId);
+  if (!target) {
+    return sessions;
+  }
+  const touched: SessionMeta = { ...target, updatedAt: timestamp };
+  return [touched, ...sessions.filter((session) => session.id !== sessionId)];
+}
+
+export function normalizeSessionMetaList(sessions: SessionMeta[]): SessionMeta[] {
+  return [...sessions]
+    .map((session) => ({
+      ...session,
+      updatedAt: session.updatedAt ?? session.createdAt,
+    }))
+    .sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt);
+}
+
 export function sanitizeMessageForPersistence(message: UIMessage, _debugEnabled: boolean): UIMessage {
   return {
     ...message,
@@ -107,6 +129,7 @@ export function normalizeProjectSnapshot(
   return {
     ...createEmptyProjectState(),
     ...snapshot,
+    sessions: normalizeSessionMetaList(snapshot.sessions as SessionMeta[]),
     activeSessionId,
     sessionMessages: sanitizeSessionMessagesForPersistence(
       (snapshot.sessionMessages ?? {}) as Record<string, UIMessage[]>,

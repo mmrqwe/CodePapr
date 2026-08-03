@@ -140,6 +140,7 @@ export interface SessionMeta {
   provider: ProviderName;
   model: string;
   createdAt: number;
+  updatedAt: number;
 }
 
 export interface UIToolInvocation {

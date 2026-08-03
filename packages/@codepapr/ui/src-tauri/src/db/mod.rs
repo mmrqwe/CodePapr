@@ -119,13 +119,14 @@ fn open_project_db(workspace_path: &str) -> Result<(Connection, PathBuf, PathBuf
          );
          CREATE INDEX IF NOT EXISTS idx_app_storage_app
            ON app_storage(app_id);
-         CREATE TABLE IF NOT EXISTS sessions (
-           id TEXT PRIMARY KEY,
-           name TEXT NOT NULL,
-           provider TEXT NOT NULL,
-           model TEXT NOT NULL,
-           created_at INTEGER NOT NULL
-         );
+          CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER
+          );
           CREATE TABLE IF NOT EXISTS messages (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
@@ -195,6 +196,29 @@ fn migrate_project_db(conn: &Connection, workspace: &Path) -> Result<(), String>
                 .map_err(|err| format!("迁移 messages.extras 列失败: {err}"))?;
         }
         conn.pragma_update(None, "user_version", 2_i64)
+            .map_err(|err| format!("设置数据库版本失败: {err}"))?;
+    }
+
+    if version < 3 {
+        // v3: sessions 表新增 updated_at 列，会话列表按最近活跃时间排序；
+        // 旧数据回填 created_at 保持原有顺序。
+        let has_updated_at = conn
+            .prepare("PRAGMA table_info(sessions)")
+            .and_then(|mut stmt| {
+                let mut names = stmt
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .filter_map(|r| r.ok());
+                Ok(names.any(|name| name == "updated_at"))
+            })
+            .unwrap_or(false);
+        if !has_updated_at {
+            conn.execute_batch(
+                "ALTER TABLE sessions ADD COLUMN updated_at INTEGER;
+                 UPDATE sessions SET updated_at = created_at WHERE updated_at IS NULL;",
+            )
+            .map_err(|err| format!("迁移 sessions.updated_at 列失败: {err}"))?;
+        }
+        conn.pragma_update(None, "user_version", 3_i64)
             .map_err(|err| format!("设置数据库版本失败: {err}"))?;
     }
 
@@ -732,17 +756,22 @@ pub(crate) fn save_session(workspace_path: String, session_json: String) -> Resu
         .get("createdAt")
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
+    let updated_at = parsed
+        .get("updatedAt")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(created_at);
 
     let (conn, ..) = open_project_db(&workspace_path)?;
     conn.execute(
-        "INSERT INTO sessions (id, name, provider, model, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO sessions (id, name, provider, model, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
            provider = excluded.provider,
            model = excluded.model,
-           created_at = excluded.created_at",
-        params![id, name, provider, model, created_at],
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at",
+        params![id, name, provider, model, created_at, updated_at],
     )
     .map_err(|err| format!("保存会话失败: {err}"))?;
 
@@ -759,17 +788,23 @@ pub(crate) struct SessionListResult {
 pub(crate) fn load_sessions(workspace_path: String) -> Result<SessionListResult, String> {
     let (conn, ..) = open_project_db(&workspace_path)?;
     let mut stmt = conn
-        .prepare("SELECT id, name, provider, model, created_at FROM sessions ORDER BY created_at DESC, id ASC")
+        .prepare(
+            "SELECT id, name, provider, model, created_at, updated_at FROM sessions
+             ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC, id ASC",
+        )
         .map_err(|err| format!("查询会话失败: {err}"))?;
 
     let sessions: Vec<serde_json::Value> = stmt
         .query_map([], |row| {
+            let created_at = row.get::<_, i64>(4)?;
+            let updated_at: Option<i64> = row.get(5)?;
             Ok(serde_json::json!({
                 "id": row.get::<_, String>(0)?,
                 "name": row.get::<_, String>(1)?,
                 "provider": row.get::<_, String>(2)?,
                 "model": row.get::<_, String>(3)?,
-                "createdAt": row.get::<_, i64>(4)?,
+                "createdAt": created_at,
+                "updatedAt": updated_at.unwrap_or(created_at),
             }))
         })
         .map_err(|err| format!("读取会话列表失败: {err}"))?

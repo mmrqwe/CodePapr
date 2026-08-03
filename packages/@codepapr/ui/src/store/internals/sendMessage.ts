@@ -58,7 +58,7 @@ import type { CommandResult } from '../../tools/streamingWorkspaceCommand';
 
 import { normalizeSettings, getSettingsError, resolveProviderName } from './settingsNormalizer';
 import { addConversationStats, getSessionConversationStats } from './stats';
-import { maybeApplySessionTitle } from './persistence';
+import { maybeApplySessionTitle, touchSession } from './persistence';
 import { saveCurrentProjectState } from './projectSnapshot';
 import {
   appendErrorMessage,
@@ -428,9 +428,13 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           set((s) => {
             const currentMsgs = s.sessionMessages[optimisticSid!] ?? s.messages;
             const next = [...currentMsgs, userMsg!];
-            const updatedSessions = maybeApplySessionTitle(
-              s.sessions, optimisticSid!, effectiveDisplay ?? effectiveInput,
-              currentMsgs
+            const updatedSessions = touchSession(
+              maybeApplySessionTitle(
+                s.sessions, optimisticSid!, effectiveDisplay ?? effectiveInput,
+                currentMsgs
+              ),
+              optimisticSid!,
+              userMsg!.timestamp
             );
             return {
               sessions: updatedSessions,

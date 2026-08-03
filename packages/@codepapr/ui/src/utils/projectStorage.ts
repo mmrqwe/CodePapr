@@ -20,6 +20,7 @@ export interface ProjectSessionMeta {
   provider: string;
   model: string;
   createdAt: number;
+  updatedAt?: number;
 }
 
 export interface ProjectMessage {

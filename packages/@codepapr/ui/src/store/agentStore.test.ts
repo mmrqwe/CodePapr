@@ -229,6 +229,7 @@ describe('useAgentStore.sendMessage', () => {
           provider: 'deepseek',
           model: 'deepseek-v4-pro',
           createdAt: Date.now(),
+          updatedAt: Date.now(),
         },
       ],
       activeSessionId: 'session-1',
@@ -356,6 +357,7 @@ describe('useAgentStore.sendMessage', () => {
           provider: 'deepseek',
           model: 'deepseek-v4-pro',
           createdAt: Date.now() + 1,
+          updatedAt: Date.now() + 1,
         },
       ],
       sessionMessages: {
@@ -557,6 +559,7 @@ describe('useAgentStore.sendMessage', () => {
           provider: 'deepseek',
           model: 'deepseek-v4-pro',
           createdAt: Date.now() + 1,
+          updatedAt: Date.now() + 1,
         },
       ],
       sessionMessages: {
@@ -2397,7 +2400,7 @@ describe('useAgentStore.closeWorkspace', () => {
       projectGraphLoading: true,
       projectGraphPhase: { phase: 'reading-files', current: 3, total: 10 },
       sessions: [
-        { id: 's1', name: '任务 1', provider: 'deepseek', model: 'deepseek-chat', createdAt: 1 },
+        { id: 's1', name: '任务 1', provider: 'deepseek', model: 'deepseek-chat', createdAt: 1, updatedAt: 1 },
       ],
       activeSessionId: 's1',
       messages: [{ id: 'm1', role: 'user', content: 'hi', timestamp: 1 }],
@@ -2427,7 +2430,7 @@ describe('useAgentStore.closeWorkspace', () => {
       projectGraphLoading: true,
       projectGraphPhase: { phase: 'reading-files', current: 3, total: 10 },
       sessions: [
-        { id: 's-old', name: '旧任务', provider: 'deepseek', model: 'deepseek-chat', createdAt: 1 },
+        { id: 's-old', name: '旧任务', provider: 'deepseek', model: 'deepseek-chat', createdAt: 1, updatedAt: 1 },
       ],
       activeSessionId: 's-old',
       messages: [{ id: 'm-old', role: 'user', content: 'hi', timestamp: 1 }],
@@ -2605,6 +2608,7 @@ describe('session lazy loading and LRU cache', () => {
       provider: 'deepseek' as const,
       model: 'deepseek-v4-pro',
       createdAt,
+      updatedAt: createdAt,
     };
   }
 

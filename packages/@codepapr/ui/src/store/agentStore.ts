@@ -334,6 +334,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           sessions = (await loadSessions(normalizedWorkspacePath)).map((meta) => ({
             ...meta,
             createdAt: meta.createdAt,
+            updatedAt: meta.updatedAt ?? meta.createdAt,
           })) as unknown as SessionMeta[];
 
           const meta = await loadAllProjectMeta(normalizedWorkspacePath);
@@ -443,7 +444,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _gitReadyError: null,
           _checkpointError: null,
           _checkpointSeq: 0,
-          // Active session first; the rest follow the persisted (createdAt DESC)
+          // Active session first; the rest follow the persisted (updatedAt DESC)
           // order as the initial LRU approximation.
           _sessionLru: [
             ...(activeSessionId ? [activeSessionId] : []),
@@ -728,12 +729,14 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         const { settings } = get();
         const normalizedSettings = normalizeSettings(settings);
         const id = createId();
+        const now = Date.now();
         const meta: SessionMeta = {
           id,
           name: '新任务',
           provider: resolveProviderName(normalizedSettings),
           model: normalizedSettings.model,
-          createdAt: Date.now(),
+          createdAt: now,
+          updatedAt: now,
         };
         set((s) => ({
           sessions: [meta, ...s.sessions],

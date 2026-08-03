@@ -107,6 +107,7 @@ describe('ChatPanel', () => {
           provider: 'deepseek',
           model: 'deepseek-v4-pro',
           createdAt: 1,
+          updatedAt: 1,
         },
       ],
       activeSessionId: 'session-1',
