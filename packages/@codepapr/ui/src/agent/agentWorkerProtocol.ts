@@ -188,6 +188,9 @@ export type MainToAgentWorkerMessage =
   | {
       type: 'cancel-app-agent';
       requestId: string;
+    }
+  | {
+      type: 'ping';
     };
 
 export interface AgentWorkerProxyChatConfig {
@@ -309,4 +312,14 @@ export type AgentWorkerToMainMessage =
       type: 'app-agent-stream';
       requestId: string;
       event: IChatStreamEvent;
+    }
+  | {
+      type: 'pong';
+    }
+  | {
+      /** Best-effort diagnostic emitted by the worker before it dies (global
+       *  error / unhandled rejection) or when a message handler fails. */
+      type: 'worker-diagnostic';
+      message: string;
+      detail?: string;
     };

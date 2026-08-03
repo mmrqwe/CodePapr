@@ -51,6 +51,11 @@ const { loadAppSettingsMock, saveAppSettingsMock } = vi.hoisted(() => ({
   saveAppSettingsMock: vi.fn(async () => undefined),
 }));
 
+const { createAgentMock, actualCreateAgentRef } = vi.hoisted(() => ({
+  createAgentMock: vi.fn(),
+  actualCreateAgentRef: { current: null as null | ((...args: never[]) => unknown) },
+}));
+
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
 }));
@@ -89,8 +94,21 @@ vi.mock('../utils/appSettingsStorage', () => ({
   saveAppSettings: saveAppSettingsMock,
 }));
 
+// createAgent is spied so crash-recovery tests can inject mock agents for the
+// rebuilt instance; the default implementation delegates to the real factory.
+vi.mock('./internals/agentFactory', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./internals/agentFactory')>();
+  actualCreateAgentRef.current = actual.createAgent as (...args: never[]) => unknown;
+  createAgentMock.mockImplementation((...args: never[]) => actualCreateAgentRef.current!(...args));
+  return {
+    ...actual,
+    createAgent: createAgentMock,
+  };
+});
+
 import { normalizeSettings, useAgentStore } from './agentStore';
 import { buildEffectiveContextMessages } from '../utils/contextCompaction';
+import { WorkerCrashError } from '../agent/WorkerBackedAgent';
 
 async function waitForMacrotask(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -216,6 +234,8 @@ describe('useAgentStore.sendMessage', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    createAgentMock.mockImplementation((...args: never[]) => actualCreateAgentRef.current!(...args));
+    createAgentMock.mockClear();
     invokeMock.mockClear();
     loadProjectStateMock.mockClear();
     saveProjectStateMock.mockClear();
@@ -2078,6 +2098,120 @@ describe('useAgentStore.sendMessage', () => {
         (message) => message.content.includes('执行证据摘要')
       )
     ).toBe(true);
+  });
+
+  describe('worker crash recovery', () => {
+    function setCrashRecoveryState(agent: ReturnType<typeof createMockAgent>): void {
+      useAgentStore.setState((state) => ({
+        ...state,
+        isLoading: false,
+        _agent: agent,
+        _agentModel: 'deepseek-v4-pro',
+        _agentPromptKey: null,
+        _gitReady: false,
+      }));
+    }
+
+    it('rebuilds the agent instead of reusing a crashed one', async () => {
+      const crashedChat = vi.fn(async () => createAgentResponse('不应被调用'));
+      const crashed = createMockAgent({ chat: crashedChat, isCrashed: true });
+      const freshChat = vi.fn(async () => createAgentResponse('重建后的回复'));
+      const fresh = createMockAgent({ chat: freshChat });
+      createAgentMock.mockReturnValue(fresh);
+      setCrashRecoveryState(crashed);
+
+      await useAgentStore.getState().sendMessage('继续', '继续', 'agent');
+
+      expect(crashedChat).not.toHaveBeenCalled();
+      expect(createAgentMock).toHaveBeenCalledTimes(1);
+      expect(freshChat).toHaveBeenCalledTimes(1);
+      const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+      expect(sessionMessages.some((m) => m.role === 'assistant' && m.content === '重建后的回复')).toBe(true);
+      expect(sessionMessages.filter((m) => m.role === 'error')).toHaveLength(0);
+      expect(useAgentStore.getState()._agent).toBe(fresh);
+    });
+
+    it('auto-retries once with a rebuilt agent when the worker crashes mid-turn', async () => {
+      const crashingChat = vi.fn(
+        async (): Promise<never> => {
+          throw new WorkerCrashError('Agent worker crashed: Simulated OOM');
+        },
+      );
+      const crashing = createMockAgent({ chat: crashingChat });
+      const retryChat = vi.fn(async () => createAgentResponse('崩溃重试后的回复'));
+      const fresh = createMockAgent({ chat: retryChat });
+      createAgentMock.mockReturnValue(fresh);
+      setCrashRecoveryState(crashing);
+
+      await useAgentStore.getState().sendMessage('任务', '任务', 'agent');
+
+      expect(crashingChat).toHaveBeenCalledTimes(1);
+      expect(createAgentMock).toHaveBeenCalledTimes(1);
+      expect(retryChat).toHaveBeenCalledTimes(1);
+      const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+      expect(sessionMessages.some((m) => m.role === 'assistant' && m.content === '崩溃重试后的回复')).toBe(true);
+      expect(sessionMessages.filter((m) => m.role === 'error')).toHaveLength(0);
+      expect(useAgentStore.getState()._agent).toBe(fresh);
+    });
+
+    it('surfaces the crash and drops the agent when the retry also crashes', async () => {
+      const crashOnce = () =>
+        vi.fn(async (): Promise<never> => {
+          throw new WorkerCrashError('Agent worker crashed: Simulated OOM');
+        });
+      const crashing = createMockAgent({ chat: crashOnce() });
+      const retryCrashing = createMockAgent({ chat: crashOnce() });
+      createAgentMock.mockReturnValue(retryCrashing);
+      setCrashRecoveryState(crashing);
+
+      await useAgentStore.getState().sendMessage('任务', '任务', 'agent');
+
+      expect(createAgentMock).toHaveBeenCalledTimes(1);
+      expect(useAgentStore.getState()._agent).toBeNull();
+      expect(useAgentStore.getState().isLoading).toBe(false);
+      const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+      const errorMessages = sessionMessages.filter((m) => m.role === 'error');
+      expect(errorMessages).toHaveLength(1);
+      expect(errorMessages[0]?.content).toContain('Agent Worker 崩溃');
+      expect(errorMessages[0]?.content).toContain('Simulated OOM');
+    });
+
+    it('drops the agent when a cancel aborts a worker that died mid-turn', async () => {
+      // Simulates: worker dies silently mid-turn, cancel times out and marks the
+      // agent crashed, the pending chat rejects with AbortError. The store must
+      // null _agent so the next message rebuilds instead of reusing the corpse.
+      let crashedFlag = false;
+      const chat = vi.fn(
+        async (): Promise<never> => {
+          crashedFlag = true;
+          throw new DOMException('Agent was terminated', 'AbortError');
+        },
+      );
+      const crashed = createMockAgent({ chat, isCrashed: () => crashedFlag });
+      setCrashRecoveryState(crashed);
+
+      await useAgentStore.getState().sendMessage('任务', '任务', 'agent');
+
+      expect(useAgentStore.getState()._agent).toBeNull();
+      expect(useAgentStore.getState().isLoading).toBe(false);
+      const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+      expect(sessionMessages.filter((m) => m.role === 'error')).toHaveLength(0);
+    });
+
+    it('keeps the agent on a normal user cancel (not crashed)', async () => {
+      const chat = vi.fn(
+        async (): Promise<never> => {
+          throw new DOMException('Session was cancelled', 'AbortError');
+        },
+      );
+      const healthy = createMockAgent({ chat, isCrashed: false });
+      setCrashRecoveryState(healthy);
+
+      await useAgentStore.getState().sendMessage('任务', '任务', 'agent');
+
+      expect(useAgentStore.getState()._agent).toBe(healthy);
+      expect(useAgentStore.getState().isLoading).toBe(false);
+    });
   });
 });
 

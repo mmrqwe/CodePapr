@@ -1216,8 +1216,34 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
   }
 }
 
-self.onmessage = (event: MessageEvent<MainToAgentWorkerMessage>) => {
-  const message = event.data;
+function reportDiagnostic(message: string, detail?: string): void {
+  try {
+    postMessageToMain({ type: 'worker-diagnostic', message, detail });
+  } catch {
+    // worker already shutting down — nothing to do
+  }
+}
+
+self.addEventListener('error', (event) => {
+  reportDiagnostic(
+    event.message || 'Worker global error',
+    event.filename ? `${event.filename}:${event.lineno}:${event.colno}` : undefined,
+  );
+});
+
+self.addEventListener('unhandledrejection', (event) => {
+  const reason = event.reason as unknown;
+  reportDiagnostic(
+    `Unhandled rejection: ${reason instanceof Error ? reason.message : String(reason)}`,
+    reason instanceof Error ? reason.stack : undefined,
+  );
+});
+
+function dispatchWorkerMessage(message: MainToAgentWorkerMessage): void {
+  if (message.type === 'ping') {
+    postMessageToMain({ type: 'pong' });
+    return;
+  }
 
   if (message.type === 'cancel-session') {
     const controller = sessionAbortControllers.get(message.requestId);
@@ -1311,18 +1337,28 @@ self.onmessage = (event: MessageEvent<MainToAgentWorkerMessage>) => {
     if (!pending || pending.settled) {
       return;
     }
-    const noBodyStatus = [101, 103, 204, 205, 304].includes(message.status);
-    const responseInit: ResponseInit = {
-      status: message.status,
-      statusText: message.statusText,
-      headers: new Headers(message.headers),
-    };
-    const response = new Response(
-      noBodyStatus ? null : pending.bodyStream,
-      responseInit
-    );
-    pending.settled = true;
-    pending.resolve(response);
+    // Constructing Headers/Response can throw on unusual values; fail just this
+    // fetch instead of letting the exception escape and kill the worker.
+    try {
+      const noBodyStatus = [101, 103, 204, 205, 304].includes(message.status);
+      const responseInit: ResponseInit = {
+        status: message.status,
+        statusText: message.statusText,
+        headers: new Headers(message.headers),
+      };
+      const response = new Response(
+        noBodyStatus ? null : pending.bodyStream,
+        responseInit
+      );
+      pending.settled = true;
+      pending.resolve(response);
+    } catch (err) {
+      finalizePendingFetch(
+        message.fetchId,
+        'error',
+        err instanceof Error ? err : new Error(String(err)),
+      );
+    }
     return;
   }
 
@@ -1383,6 +1419,39 @@ self.onmessage = (event: MessageEvent<MainToAgentWorkerMessage>) => {
       errorDetails,
     });
   });
+}
+
+self.onmessage = (event: MessageEvent<MainToAgentWorkerMessage>) => {
+  const message = event.data;
+  try {
+    dispatchWorkerMessage(message);
+  } catch (error) {
+    // Unexpected synchronous failure in a message handler: report it and fail
+    // only the affected request instead of letting the exception escape and kill
+    // the whole worker (which would surface as an opaque "worker crashed").
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    reportDiagnostic(`onmessage handler failed: ${errorMessage}`, errorStack);
+    try {
+      if (message.type === 'chat') {
+        postMessageToMain({
+          type: 'error',
+          requestId: message.payload.requestId,
+          error: `Worker message handler failed: ${errorMessage}`,
+          errorName: error instanceof Error ? error.name : undefined,
+        });
+      } else if (message.type === 'run-app-agent') {
+        postMessageToMain({
+          type: 'app-agent-error',
+          requestId: message.requestId,
+          error: `Worker message handler failed: ${errorMessage}`,
+          errorName: error instanceof Error ? error.name : undefined,
+        });
+      }
+    } catch {
+      // posting failed too — the diagnostic above is the last record
+    }
+  }
 };
 
 export {};

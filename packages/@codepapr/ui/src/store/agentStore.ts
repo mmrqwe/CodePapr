@@ -1531,7 +1531,15 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           );
 
           // 首次发消息时自动创建会话；恢复后的旧会话则原地重建 agent。
-          if (!agent || agentModel !== route.model || (agentPromptKey !== null && agentPromptKey !== runtimePromptKey)) {
+          // 已崩溃的 agent（worker 死亡）绝不复用：直接重建，避免向死 worker 发消息。
+          if (!agent || agent.isCrashed() || agentModel !== route.model || (agentPromptKey !== null && agentPromptKey !== runtimePromptKey)) {
+            if (agent?.isCrashed()) {
+              try {
+                agent.destroy();
+              } catch {
+                // already torn down
+              }
+            }
             if (activeSessionId) {
               let contextMessages = sessionMessages[activeSessionId] ?? [];
               if (mode !== 'ask' && contextMessages.some((m) => m.role === 'assistant' && m.workMode === 'ask')) {
@@ -2063,10 +2071,44 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             if (error instanceof DOMException && error.name === 'AbortError') {
               throw error;
             }
-            if (!shouldFallbackToPrimaryModel(error, route, normalizedSettings)) {
-              throw error;
-            }
 
+            // Worker 崩溃：主日志未收到本轮 delta（result 才落日志），UI 侧把
+            // 流式消息重置后，用同一份上下文重建 agent 并自动重试一次；重试仍
+            // 崩溃则抛给外层 catch 报错（此时 _agent 会被清空，下条消息重建）。
+            if (error instanceof WorkerCrashError) {
+              agent = createAgent(
+                normalizedSettings,
+                activeSessionId,
+                workspacePath,
+                retryBaseMessages,
+                {
+                  model: route.model,
+                  thinkingEnabled: route.thinkingEnabled,
+                  temperature: route.temperature,
+                  maxTokens: route.maxTokens,
+                  systemPrompt: runtimeSystemPrompt,
+                },
+                runtimeAgentConfig,
+              );
+              set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey });
+
+              if (assistantMessageId) {
+                updateAssistantMessage(set, activeSessionId, assistantMessageId, (message) => ({
+                  ...message,
+                  content: '',
+                  reasoningContent: '',
+                  displayReasoningContent: undefined,
+                  toolInvocations: undefined,
+                  isStreaming: true,
+                  statusText: getTranslation(normalizedSettings.lang).streamingStatus,
+                }));
+              }
+
+              await yieldToMainThread();
+              resp = await runAgentPass(runtimeUserPrompt, images);
+            } else if (!shouldFallbackToPrimaryModel(error, route, normalizedSettings)) {
+              throw error;
+            } else {
             route = primaryRoute;
             agent = createAgent(
               normalizedSettings,
@@ -2099,6 +2141,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
             await yieldToMainThread();
             resp = await runAgentPass(runtimeUserPrompt, images);
+            }
           }
           }
 
@@ -2306,7 +2349,13 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         } catch (err) {
           console.error('[sendMessage] outer catch:', err);
           if (err instanceof DOMException && err.name === 'AbortError') {
-            set({ isLoading: false });
+            // 取消若源于 worker 已死（cancel 超时判崩），必须同时清空 agent，
+            // 否则下一条消息会复用死 agent，抛出笼统的「worker has crashed」。
+            if (get()._agent?.isCrashed()) {
+              set({ _agent: null, isLoading: false });
+            } else {
+              set({ isLoading: false });
+            }
             if (assistantMessageId && get().activeSessionId) {
               cleanupStreamingAssistantMessage(set, get().activeSessionId!, assistantMessageId);
             }

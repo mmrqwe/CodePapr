@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IAgentResponse, IMessage } from '@codepapr/types';
 import { createDefaultMcpSettings, normalizeMcpSettings, type McpSettings } from '../utils/mcpTypes';
 import type { AgentWorkerToMainMessage, MainToAgentWorkerMessage } from './agentWorkerProtocol';
-import { WorkerBackedAgent, type AgentRuntimeStreamEvent } from './WorkerBackedAgent';
+import { WorkerBackedAgent, WorkerCrashError, type AgentRuntimeStreamEvent } from './WorkerBackedAgent';
 
 function makeMcpSearchSettings(): McpSettings {
   const base = createDefaultMcpSettings();
@@ -22,15 +22,19 @@ class MockWorker {
   static instances: MockWorker[] = [];
 
   readonly messages: MainToAgentWorkerMessage[] = [];
+  terminated = false;
   private messageListeners: Array<(event: MessageEvent<AgentWorkerToMainMessage>) => void> = [];
+  private errorListeners: Array<(event: ErrorEvent) => void> = [];
 
   constructor() {
     MockWorker.instances.push(this);
   }
 
-  addEventListener(type: string, listener: (event: MessageEvent<AgentWorkerToMainMessage>) => void): void {
+  addEventListener(type: string, listener: (event: never) => void): void {
     if (type === 'message') {
-      this.messageListeners.push(listener);
+      this.messageListeners.push(listener as (event: MessageEvent<AgentWorkerToMainMessage>) => void);
+    } else if (type === 'error') {
+      this.errorListeners.push(listener as (event: ErrorEvent) => void);
     }
   }
 
@@ -38,9 +42,20 @@ class MockWorker {
     this.messages.push(message);
   }
 
+  terminate(): void {
+    this.terminated = true;
+  }
+
   emit(message: AgentWorkerToMainMessage): void {
     const event = { data: message } as MessageEvent<AgentWorkerToMainMessage>;
     for (const listener of this.messageListeners) {
+      listener(event);
+    }
+  }
+
+  emitError(message: string): void {
+    const event = { message, filename: '', lineno: 0, colno: 0 } as ErrorEvent;
+    for (const listener of this.errorListeners) {
       listener(event);
     }
   }
@@ -381,5 +396,93 @@ describe('WorkerBackedAgent', () => {
       logLength: 0,
     });
     await chatPromise;
+  });
+
+  it('declares the worker crashed when heartbeats go unanswered during a request', async () => {
+    const agent = createAgent();
+    const chatPromise = agent.chat('hello');
+    const worker = MockWorker.instances[0];
+    // Attach the rejection handler before advancing timers so the crash
+    // rejection fired inside the timer callback is never "unhandled".
+    const rejection = expect(chatPromise).rejects.toBeInstanceOf(WorkerCrashError);
+
+    // Heartbeat pings go out every 5s; after 15s without a pong the worker is
+    // declared crashed. Advance well past the timeout without answering.
+    await vi.advanceTimersByTimeAsync(21_000);
+
+    expect(agent.isCrashed()).toBe(true);
+    expect(worker?.terminated).toBe(true);
+    expect(worker?.messages.some((m) => m.type === 'ping')).toBe(true);
+    await rejection;
+    await expect(chatPromise).rejects.toThrow(/unresponsive/i);
+  });
+
+  it('keeps the worker alive while heartbeats are answered', async () => {
+    const agent = createAgent();
+    const chatPromise = agent.chat('hello');
+    const worker = MockWorker.instances[0];
+    const chatMessage = worker?.messages[0];
+    if (chatMessage?.type !== 'chat') throw new Error('expected chat message');
+
+    // Answer every ping for longer than the crash timeout.
+    for (let i = 0; i < 5; i++) {
+      await vi.advanceTimersByTimeAsync(5_000);
+      worker?.emit({ type: 'pong' });
+    }
+
+    expect(agent.isCrashed()).toBe(false);
+
+    worker?.emit({
+      type: 'result',
+      requestId: chatMessage.payload.requestId,
+      response: { role: 'assistant', content: 'ok' },
+      deltaMessages: [],
+      logLength: 0,
+    });
+    await expect(chatPromise).resolves.toEqual({ role: 'assistant', content: 'ok' });
+  });
+
+  it('reports the original crash cause when chat() is called after a crash', async () => {
+    const agent = createAgent();
+    const chatPromise = agent.chat('hello');
+    const worker = MockWorker.instances[0];
+    const rejection = expect(chatPromise).rejects.toBeInstanceOf(WorkerCrashError);
+
+    worker?.emitError('Simulated OOM');
+
+    await rejection;
+    await expect(chatPromise).rejects.toThrow(/Simulated OOM/);
+
+    // A subsequent chat on the same dead agent must carry the original cause,
+    // not just a generic "has crashed" message.
+    await expect(agent.chat('again')).rejects.toThrow(/Simulated OOM/);
+    expect(agent.isCrashed()).toBe(true);
+  });
+
+  it('includes worker diagnostics emitted before a crash', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const agent = createAgent();
+      const chatPromise = agent.chat('hello');
+      const worker = MockWorker.instances[0];
+      const rejection = expect(chatPromise).rejects.toBeInstanceOf(WorkerCrashError);
+
+      worker?.emit({
+        type: 'worker-diagnostic',
+        message: 'Unhandled rejection: boom',
+        detail: 'worker.ts:10:5',
+      });
+      worker?.emitError('fatal');
+
+      await rejection;
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[AgentWorker] diagnostic:',
+        'Unhandled rejection: boom (worker.ts:10:5)',
+      );
+    } finally {
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
   });
 });

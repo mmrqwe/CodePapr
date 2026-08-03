@@ -13,6 +13,10 @@ export interface MockAgentOverrides {
   cancel?: () => void;
   /** Custom destroy implementation. Defaults to no-op. */
   destroy?: () => void;
+  /** Pre-built isCrashed() return value (or dynamic getter). Defaults to false. */
+  isCrashed?: boolean | (() => boolean);
+  /** Custom runAppAgent implementation. Defaults to rejecting (unused in most tests). */
+  runAppAgent?: AgentRuntimeHandle['runAppAgent'];
 }
 
 const DEFAULT_RESPONSE: IAgentResponse = {
@@ -47,8 +51,13 @@ export function createMockAgent(overrides: MockAgentOverrides = {}): AgentRuntim
     ? overrides.logMessages
     : () => overrides.logMessages ?? [];
 
+  const isCrashed = typeof overrides.isCrashed === 'function'
+    ? overrides.isCrashed
+    : () => overrides.isCrashed ?? false;
+
   return {
     chat,
+    isCrashed,
     getSession: () => ({
       logStore: {
         length: () => overrides.logStoreLength ?? 0,
@@ -57,6 +66,8 @@ export function createMockAgent(overrides: MockAgentOverrides = {}): AgentRuntim
     }),
     cancel: overrides.cancel ?? (() => undefined),
     destroy: overrides.destroy ?? (() => undefined),
+    runAppAgent: overrides.runAppAgent ?? (() => Promise.reject(new Error('not available in mock'))),
+    cancelAppAgent: () => undefined,
     // logStore is typed as the full `AppendOnlyLog` class. The store only
     // calls `length()` and `getMessagesSince()` on it, so we provide a
     // minimal shape and isolate the cast inside this factory.

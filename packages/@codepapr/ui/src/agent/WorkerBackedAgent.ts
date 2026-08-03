@@ -77,6 +77,14 @@ interface PendingWorkerRequest {
 const STREAM_DELTA_FLUSH_INTERVAL_MS = 240;
 const MAX_BUFFERED_STREAM_DELTA_CHARS = 4096;
 const STREAM_SNAPSHOT_INTERVAL_MS = 2000;
+// Heartbeat: while requests are in flight, ping the worker periodically. A
+// silently dead worker (e.g. killed by the OS under memory pressure) never
+// fires an 'error' event and would otherwise leave the chat promise hanging
+// until the much slower store-level idle watchdog. Missing pongs for longer
+// than the timeout declares the worker crashed, triggering recovery.
+const WORKER_HEARTBEAT_INTERVAL_MS = 5000;
+const WORKER_HEARTBEAT_TIMEOUT_MS = 15000;
+const MAX_WORKER_DIAGNOSTICS = 20;
 
 /** Error thrown when the agent worker crashes (OOM, uncaught exception, etc.).
  *  The `chat()` promise rejects with this so the store's catch block can
@@ -238,6 +246,14 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   private activeRequestId: string | null = null;
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
   private crashed = false;
+  /** Original crash cause, kept so errors thrown after the crash (chat() on a
+   *  dead agent) can report why the worker died instead of a generic message. */
+  private crashInfo: { message: string; detail?: string } | null = null;
+  private heartbeatTimerId: ReturnType<typeof setInterval> | null = null;
+  private lastPongAt = 0;
+  /** Recent worker-side diagnostics (global errors, unhandled rejections,
+   *  handler failures) included in the crash log for post-mortem analysis. */
+  private readonly workerDiagnostics: string[] = [];
   private snapshotTimerId: ReturnType<typeof setTimeout> | null = null;
   // Tracks the log length the worker's per-session cache should currently hold.
   // When it matches this.logStore.length() the next chat syncs incrementally
@@ -272,10 +288,55 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.worker.addEventListener('message', this.handleWorkerMessage);
     this.worker.addEventListener('error', this.handleWorkerError);
     this.worker.addEventListener('messageerror', this.handleWorkerMessageError);
+    this.startHeartbeat();
+  }
+
+  /** Detects a silently dead worker (no 'error' event, e.g. OS memory kill):
+   *  while requests are pending, a ping must be answered within the timeout. */
+  private startHeartbeat(): void {
+    if (this.heartbeatTimerId !== null) return;
+    this.lastPongAt = Date.now();
+    this.heartbeatTimerId = setInterval(() => {
+      if (this.crashed) return;
+      if (this.pendingRequests.size === 0 && this.appAgentRequests.size === 0) {
+        // Idle: nothing to protect; keep the baseline fresh so a request that
+        // starts right after doesn't trip on a stale timestamp.
+        this.lastPongAt = Date.now();
+        return;
+      }
+      if (Date.now() - this.lastPongAt > WORKER_HEARTBEAT_TIMEOUT_MS) {
+        this.handleCrash(
+          `Agent worker unresponsive (no heartbeat for ${Math.round(
+            WORKER_HEARTBEAT_TIMEOUT_MS / 1000
+          )}s)`,
+        );
+        return;
+      }
+      try {
+        this.worker.postMessage({ type: 'ping' } satisfies MainToAgentWorkerMessage);
+      } catch {
+        // posting to a dead worker can throw in some engines — treat as crash
+        this.handleCrash('Agent worker unresponsive (heartbeat post failed)');
+      }
+    }, WORKER_HEARTBEAT_INTERVAL_MS);
+  }
+
+  private clearHeartbeat(): void {
+    if (this.heartbeatTimerId !== null) {
+      clearInterval(this.heartbeatTimerId);
+      this.heartbeatTimerId = null;
+    }
   }
 
   isCrashed(): boolean {
     return this.crashed;
+  }
+
+  private crashCause(): string {
+    if (!this.crashInfo) return 'unknown cause';
+    return this.crashInfo.detail
+      ? `${this.crashInfo.message} (${this.crashInfo.detail})`
+      : this.crashInfo.message;
   }
 
   getSession(): { logStore: AppendOnlyLog } {
@@ -305,7 +366,16 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.cancelAllAppAgents();
 
     this.cancelTimer = setTimeout(() => {
-      this.crashed = true;
+      // Worker did not acknowledge the cancel in time — it is stuck or dead.
+      // Record the cause so the store can drop this agent and the next crash
+      // report explains why.
+      if (!this.crashed) {
+        this.crashed = true;
+        this.crashInfo = {
+          message: 'Agent worker did not acknowledge cancel within 2s (terminated)',
+        };
+        this.clearHeartbeat();
+      }
       this.worker.terminate();
       pending.reject(new DOMException('Agent was terminated', 'AbortError'));
       this.pendingRequests.delete(requestId);
@@ -317,6 +387,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   destroy(): void {
     this.cancel();
     this.clearCancelTimer();
+    this.clearHeartbeat();
     this.clearSnapshotTimer();
     this.abortAllPendingFetches();
     this.rejectAllAppAgentRequests(new Error('Agent was destroyed'));
@@ -337,7 +408,10 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     images?: IImageContent[]
   ): Promise<IAgentResponse> {
     if (this.crashed) {
-      throw new WorkerCrashError('Agent worker has crashed and cannot process messages. Create a new agent to retry.');
+      throw new WorkerCrashError(
+        `Agent worker has crashed and cannot process messages (${this.crashCause()}). Create a new agent to retry.`,
+        this.crashInfo?.detail,
+      );
     }
     const requestId = createId();
     this.activeRequestId = requestId;
@@ -405,7 +479,10 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     requestId: string = createId(),
   ): Promise<AppAgentResult> {
     if (this.crashed) {
-      throw new WorkerCrashError('Agent worker has crashed. Create a new agent to retry.');
+      throw new WorkerCrashError(
+        `Agent worker has crashed (${this.crashCause()}). Create a new agent to retry.`,
+        this.crashInfo?.detail,
+      );
     }
 
     const result = await new Promise<AppAgentResult>((resolve, reject) => {
@@ -468,6 +545,23 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
   private readonly handleWorkerMessage = (event: MessageEvent<AgentWorkerToMainMessage>) => {
     const message = event.data;
+
+    if (message.type === 'pong') {
+      this.lastPongAt = Date.now();
+      return;
+    }
+
+    if (message.type === 'worker-diagnostic') {
+      const entry = message.detail
+        ? `${message.message} (${message.detail})`
+        : message.message;
+      this.workerDiagnostics.push(entry);
+      if (this.workerDiagnostics.length > MAX_WORKER_DIAGNOSTICS) {
+        this.workerDiagnostics.shift();
+      }
+      console.warn('[AgentWorker] diagnostic:', entry);
+      return;
+    }
 
     if (message.type === 'cancelled') {
       const pending = this.pendingRequests.get(message.requestId);
@@ -729,7 +823,11 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   private handleCrash(message: string, detail?: string): void {
     if (this.crashed) return;
     this.crashed = true;
+    this.crashInfo = { message, detail };
+    this.clearHeartbeat();
     this.clearSnapshotTimer();
+    console.error('[AgentWorker] crashed:', message, detail ?? '');
+    void this.writeCrashLog(message, detail);
     this.rejectAllAppAgentRequests(new WorkerCrashError(message, detail));
 
     const error = new WorkerCrashError(message, detail);
@@ -758,6 +856,38 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       }
     }
     this.pendingFetchControllers.clear();
+  }
+
+  /** Best-effort crash report on disk so release builds (no devtools) can be
+   *  post-mortemed: .CodePapr/logs/agent-worker-crash-<timestamp>.log */
+  private async writeCrashLog(message: string, detail?: string): Promise<void> {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const now = new Date();
+      const stamp = now.toISOString().replace(/[:.]/g, '-');
+      const lines = [
+        `time: ${now.toISOString()}`,
+        `message: ${message}`,
+        `detail: ${detail ?? 'n/a'}`,
+        `sessionId: ${this.config.sessionId}`,
+        `pendingChatRequests: ${this.pendingRequests.size}`,
+        `pendingAppAgentRequests: ${this.appAgentRequests.size}`,
+        `userAgent: ${typeof navigator !== 'undefined' ? navigator.userAgent : 'n/a'}`,
+      ];
+      if (this.workerDiagnostics.length > 0) {
+        lines.push('workerDiagnostics:');
+        for (const entry of this.workerDiagnostics) {
+          lines.push(`  - ${entry}`);
+        }
+      }
+      await invoke('write_text_file', {
+        workspacePath: this.config.workspacePath,
+        relativePath: `.CodePapr/logs/agent-worker-crash-${stamp}.log`,
+        content: `${lines.join('\n')}\n`,
+      });
+    } catch {
+      // best-effort only — never disrupt crash recovery
+    }
   }
 
   private async handleRefreshBootstrapRequest(bootstrapRequestId: string): Promise<void> {

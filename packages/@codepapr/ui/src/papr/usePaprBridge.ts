@@ -5,6 +5,7 @@ import { isPaprMessage, createPaprResponse } from './paprProtocol';
 import { usePermissionStore } from './permissionStore';
 import { LEVEL_GRANTS, levelAllows, resolveEffectiveLevel } from './levelGrants';
 import { useAgentStore } from '../store/agentStore';
+import { WorkerCrashError } from '../agent/WorkerBackedAgent';
 
 // Each app is served from its own origin (codepapr-app://<appId>) so apps are
 // isolated from one another (separate localStorage / cookies / IndexedDB).
@@ -225,6 +226,10 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
         runPromise
           .then((result) => respond(result))
           .catch((err) => {
+            // Worker 崩溃时清空 store 中的 agent，避免后续聊天复用死 worker。
+            if (err instanceof WorkerCrashError || (err instanceof Error && err.name === 'WorkerCrashError')) {
+              useAgentStore.setState({ _agent: null });
+            }
             const errMsg = String(err);
             let code = 'AGENT_ERROR';
             if (err instanceof DOMException && err.name === 'AbortError') {
