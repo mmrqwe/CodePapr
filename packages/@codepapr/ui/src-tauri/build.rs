@@ -2,7 +2,6 @@ use flate2::read::GzDecoder;
 #[cfg(not(windows))]
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256, Sha512};
 use std::{
     env, fs,
     io::Read,
@@ -10,11 +9,11 @@ use std::{
     process::Command,
     time::Duration,
 };
+
+#[path = "src/download_verification.rs"]
+mod download_verification;
 #[cfg(not(windows))]
-use std::{
-    io::Write,
-    time::Instant,
-};
+use std::{io::Write, time::Instant};
 use tar::Archive;
 use xz2::read::XzDecoder;
 use zip::ZipArchive;
@@ -27,10 +26,15 @@ enum ArchiveKind {
 }
 
 const CLANGD_VERSION: &str = "22.1.6";
+// 钉死到 milestone 版本：快照 URL 浮动且无法锁定哈希。
+// 该 URL 同时存在于 src/download_verification.rs 的锁定清单中，升级时两处同步。
 const JDTLS_DOWNLOAD_URL: &str =
-    "https://download.eclipse.org/jdtls/snapshots/jdt-language-server-latest.tar.gz";
+    "https://download.eclipse.org/jdtls/milestones/1.54.0/jdt-language-server-1.54.0-202511261751.tar.gz";
 const JAVA_RUNTIME_VERSION: &str = "21";
 const NODE_RUNTIME_VERSION: &str = "v20.12.2";
+// 钉死版本 + 锁定哈希（见 src/download_verification.rs），禁止使用 latest 浮动 URL。
+const SQLS_VERSION: &str = "0.2.48";
+const MARKSMAN_VERSION: &str = "2026-02-08";
 #[cfg(not(windows))]
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_DOWNLOAD_BYTES: usize = 600_000_000;
@@ -766,27 +770,27 @@ fn managed_sqls_download() -> Result<(String, ArchiveKind), String> {
     } else {
         return Err("unsupported target OS for bundled sqls".to_string());
     };
-    Ok((format!("https://github.com/sqls-server/sqls/releases/download/v0.2.45/sqls-{platform}-0.2.45.zip"), ArchiveKind::Zip))
+    Ok((format!("https://github.com/sqls-server/sqls/releases/download/v{SQLS_VERSION}/sqls-{platform}-{SQLS_VERSION}.zip"), ArchiveKind::Zip))
 }
 
 fn managed_marksman_url() -> Result<String, String> {
-    let ext = if target_os() == "windows" { ".exe" } else { "" };
+    // linux 使用 musl 静态构建，兼容任意发行版；URL 与锁定清单一一对应。
     let name = if target_os() == "macos" {
-        format!("marksman-macos{ext}")
+        "marksman-macos".to_string()
     } else if target_os() == "linux" {
         let arch = if target_arch() == "aarch64" {
             "arm64"
         } else {
             "x64"
         };
-        format!("marksman-linux-{arch}{ext}")
+        format!("marksman-linux-musl-{arch}")
     } else if target_os() == "windows" {
         "marksman.exe".to_string()
     } else {
         return Err("unsupported target OS for bundled marksman".to_string());
     };
     Ok(format!(
-        "https://github.com/artempyanykh/marksman/releases/latest/download/{name}"
+        "https://github.com/artempyanykh/marksman/releases/download/{MARKSMAN_VERSION}/{name}"
     ))
 }
 
@@ -1166,177 +1170,34 @@ fn walk_paths_into(root: &Path, paths: &mut Vec<PathBuf>) -> Result<(), String> 
 }
 
 // ── Download checksum verification ────────────────────────────────────
+// 校验实现与运行时共享 src/download_verification.rs（锁定清单 + 官方校验源）。
 
-/// Computes the hex-encoded SHA-256 or SHA-512 digest of a file.
-fn compute_file_hash(path: &Path, use_sha512: bool) -> Result<String, String> {
-    let mut file = fs::File::open(path)
-        .map_err(|err| format!("open {} for hashing: {err}", path.display()))?;
-    let mut buffer = [0u8; 64 * 1024];
-
-    if use_sha512 {
-        let mut hasher = Sha512::new();
-        loop {
-            let read = file
-                .read(&mut buffer)
-                .map_err(|err| format!("read {} for hashing: {err}", path.display()))?;
-            if read == 0 {
-                break;
-            }
-            hasher.update(&buffer[..read]);
-        }
-        Ok(bytes_to_hex(hasher.finalize()))
-    } else {
-        let mut hasher = Sha256::new();
-        loop {
-            let read = file
-                .read(&mut buffer)
-                .map_err(|err| format!("read {} for hashing: {err}", path.display()))?;
-            if read == 0 {
-                break;
-            }
-            hasher.update(&buffer[..read]);
-        }
-        Ok(bytes_to_hex(hasher.finalize()))
-    }
-}
-
-fn bytes_to_hex(bytes: impl AsRef<[u8]>) -> String {
-    bytes
-        .as_ref()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
-
-/// Fetches a small text resource from a URL (used for checksum files).
-fn fetch_text(url: &str) -> Result<String, String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .user_agent("CodePapr-build/0.1")
-        .build()
-        .map_err(|err| format!("build HTTP client for checksum: {err}"))?;
-    let response = client
-        .get(url)
-        .send()
-        .map_err(|err| format!("fetch checksum {url}: {err}"))?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "fetch checksum {url} returned {}",
-            response.status()
-        ));
-    }
-    response
-        .text()
-        .map_err(|err| format!("read checksum response from {url}: {err}"))
-}
-
-/// Attempts to fetch the official checksum for a download URL.
-/// Returns `Ok(None)` when no checksum source is available (the caller
-/// should log the computed hash and continue).
-fn fetch_expected_checksum(url: &str) -> Result<Option<(String, bool, &'static str)>, String> {
-    // Node.js: https://nodejs.org/dist/{version}/node-{version}-{platform}-{arch}.{ext}
-    if url.starts_with("https://nodejs.org/dist/") {
-        return fetch_nodejs_checksum(url)
-            .map(|hash| hash.map(|h| (h, false, "nodejs.org SHASUMS256")));
-    }
-
-    // Temurin JRE: https://api.adoptium.net/v3/binary/latest/{ver}/ga/...
-    if url.starts_with("https://api.adoptium.net/v3/binary/") {
-        let checksum_url = url.replace("/v3/binary/", "/v3/checksum/");
-        let hash = fetch_text(&checksum_url)?;
-        return Ok(Some((hash.trim().to_string(), false, "Adoptium API")));
-    }
-
-    // .NET SDK: https://dotnetcli.azureedge.net/dotnet/Sdk/{version}/{filename}
-    if url.starts_with("https://dotnetcli.azureedge.net/dotnet/Sdk/") {
-        return fetch_dotnet_checksum(url)
-            .map(|hash| hash.map(|h| (h, true, ".NET SHA512")));
-    }
-
-    Ok(None)
-}
-
-fn fetch_nodejs_checksum(url: &str) -> Result<Option<String>, String> {
-    let version = url
-        .split('/')
-        .nth(4)
-        .ok_or_else(|| format!("cannot parse Node.js version from {url}"))?;
-    let filename = url
-        .rsplit('/')
-        .next()
-        .ok_or_else(|| format!("cannot parse filename from {url}"))?;
-
-    let shasums_url = format!("https://nodejs.org/dist/{version}/SHASUMS256.txt");
-    let shasums = fetch_text(&shasums_url)?;
-
-    for line in shasums.lines() {
-        let parts: Vec<&str> = line.splitn(2, "  ").collect();
-        if parts.len() == 2 && parts[1].trim() == filename {
-            return Ok(Some(parts[0].trim().to_string()));
-        }
-    }
-
-    Ok(None)
-}
-
-fn fetch_dotnet_checksum(url: &str) -> Result<Option<String>, String> {
-    let parts: Vec<&str> = url.split('/').collect();
-    if parts.len() < 7 {
-        return Ok(None);
-    }
-    let version = parts[5];
-    let filename = parts[6];
-
-    let checksum_url = format!(
-        "https://dotnetcli.azureedge.net/dotnet/Sdk/{version}/SHA512/{filename}.sha512"
-    );
-    let checksum = fetch_text(&checksum_url)?;
-    Ok(Some(checksum.trim().to_string()))
-}
-
-/// Verifies a downloaded file against its official checksum, or logs the
-/// computed hash when no official checksum source is available.
+/// Verifies a downloaded file via the shared verification module.
 ///
 /// - **Checksum mismatch** → hard error (build fails).
 /// - **Checksum fetch failure** → warning (build continues, hash logged).
-/// - **No official checksum source** → warning with computed SHA-256.
+/// - **No checksum source** → warning with computed SHA-256.
 ///
-/// Set `CODEPAPR_SKIP_DOWNLOAD_CHECKSUM=1` to bypass verification entirely.
+/// Set `CODEPAPR_SKIP_DOWNLOAD_CHECKSUM=1` to bypass verification at build
+/// time (development only). The runtime path has no such bypass.
 fn verify_download(url: &str, file_path: &Path) -> Result<(), String> {
     if env_flag_enabled("CODEPAPR_SKIP_DOWNLOAD_CHECKSUM") {
-        println!("cargo:warning=skipping checksum verification (CODEPAPR_SKIP_DOWNLOAD_CHECKSUM=1)");
+        println!(
+            "cargo:warning=skipping checksum verification (CODEPAPR_SKIP_DOWNLOAD_CHECKSUM=1)"
+        );
         return Ok(());
     }
 
-    let computed_sha256 = compute_file_hash(file_path, false)?;
-
-    match fetch_expected_checksum(url) {
-        Ok(Some((expected_hash, use_sha512, source))) => {
-            let algorithm = if use_sha512 { "SHA512" } else { "SHA256" };
-            let computed = if use_sha512 {
-                compute_file_hash(file_path, true)?
-            } else {
-                computed_sha256.clone()
-            };
-
-            if computed != expected_hash.to_lowercase().trim() {
-                return Err(format!(
-                    "checksum mismatch for {url} ({source})\n  expected ({algorithm}): {expected_hash}\n  computed:          {computed}"
-                ));
-            }
-            println!("cargo:warning=checksum verified ({algorithm}): {url}");
-        }
-        Ok(None) => {
-            println!("cargo:warning=no official checksum for {url} (sha256={computed_sha256})");
-        }
-        Err(err) => {
+    match download_verification::verify_download(url, file_path) {
+        Ok(outcome) => {
             println!(
-                "cargo:warning=checksum fetch failed for {url}: {err} (sha256={computed_sha256})"
+                "cargo:warning=download verification: {url}: {}",
+                outcome.description()
             );
+            Ok(())
         }
+        Err(err) => Err(format!("checksum verification failed for {url}: {err}")),
     }
-
-    Ok(())
 }
 
 fn install_archive(

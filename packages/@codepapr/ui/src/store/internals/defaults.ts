@@ -9,6 +9,12 @@ export const LEGACY_SYSTEM_PROMPT_MARKERS = [
   'Agent 是完全自主执行模式',
 ];
 
+/** Max number of sessions whose messages stay resident in memory. Sessions are
+ *  loaded on demand (see selectSession); exceeding this limit evicts the least
+ *  recently used non-active session. The SQLite store remains the source of
+ *  truth, so eviction never loses data. */
+export const SESSION_MESSAGE_CACHE_LIMIT = 5;
+
 export function normalizeCustomSystemPrompt(prompt: string | undefined): string {
   const trimmed = prompt?.trim() ?? '';
   if (!trimmed) {

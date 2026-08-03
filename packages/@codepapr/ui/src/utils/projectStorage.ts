@@ -539,6 +539,37 @@ export async function loadAllSessionMessages(
   return parsed as Record<string, ProjectMessage[]>;
 }
 
+export interface ToolUsageEntry {
+  name: string;
+  count: number;
+  success: number;
+  error: number;
+}
+
+interface ToolUsageResult {
+  usageJson: string;
+}
+
+/** Aggregate tool invocation stats across all sessions in the backend (SQL
+ *  scan of the tool_invocations column), so the UI does not need every
+ *  session's messages resident in memory. */
+export async function aggregateToolUsageInDb(
+  workspacePath: string
+): Promise<ToolUsageEntry[]> {
+  const result = await invoke<ToolUsageResult>('aggregate_tool_usage', {
+    workspacePath: workspacePath.trim(),
+  });
+  const parsed: unknown = JSON.parse(result.usageJson);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(
+    (entry): entry is ToolUsageEntry =>
+      !!entry &&
+      typeof entry === 'object' &&
+      typeof (entry as ToolUsageEntry).name === 'string' &&
+      typeof (entry as ToolUsageEntry).count === 'number'
+  );
+}
+
 export async function saveProjectMeta(workspacePath: string, key: string, value: unknown): Promise<void> {
   await invoke('save_project_meta', {
     workspacePath: workspacePath.trim(),

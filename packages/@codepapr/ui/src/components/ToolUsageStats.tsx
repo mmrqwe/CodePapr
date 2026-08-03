@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getTranslation, type Lang } from '../utils/i18n';
 import { useAgentStore } from '../store/agentStore';
+import { aggregateToolUsageInDb } from '../utils/projectStorage';
 import type { UIMessage } from '../store/internals/types';
 
 interface ToolUsage {
@@ -28,8 +29,33 @@ export function aggregateToolUsage(sessionMessages: Record<string, UIMessage[]>)
 
 export function ToolUsageStats({ lang }: { lang?: Lang }) {
   const t = getTranslation(lang);
+  const workspacePath = useAgentStore((s) => s.workspacePath);
   const sessionMessages = useAgentStore((s) => s.sessionMessages);
-  const usage = useMemo(() => aggregateToolUsage(sessionMessages), [sessionMessages]);
+  // Sessions are lazy-loaded (only a few stay resident in memory), so stats are
+  // aggregated in the backend across all sessions; the in-memory aggregation
+  // remains as a fallback when the command is unavailable.
+  const [dbUsage, setDbUsage] = useState<ToolUsage[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDbUsage(null);
+    if (!workspacePath) return;
+    void aggregateToolUsageInDb(workspacePath)
+      .then((result) => {
+        if (!cancelled) setDbUsage(result.sort((a, b) => b.count - a.count));
+      })
+      .catch(() => {
+        if (!cancelled) setDbUsage(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspacePath]);
+
+  const usage = useMemo(
+    () => dbUsage ?? aggregateToolUsage(sessionMessages),
+    [dbUsage, sessionMessages]
+  );
   const maxCount = Math.max(...usage.map((u) => u.count), 1);
   const totalCalls = usage.reduce((s, u) => s + u.count, 0);
 

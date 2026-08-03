@@ -1,13 +1,13 @@
-pub mod status;
+pub mod branch;
+pub mod commit;
 pub mod diff;
 pub mod log;
-pub mod stage;
-pub mod commit;
-pub mod branch;
 pub mod restore_files;
+pub mod stage;
+pub mod status;
 
-use std::path::{Path, PathBuf};
 use git2::Repository;
+use std::path::{Path, PathBuf};
 
 pub(crate) fn open_repo(workspace: &Path) -> Result<Repository, String> {
     let git_path = workspace.join(".CodePapr/git");
@@ -22,8 +22,7 @@ pub(crate) fn open_repo(workspace: &Path) -> Result<Repository, String> {
             let _ = std::fs::remove_file(&lock_file);
         }
     }
-    let repo = Repository::open(&git_path)
-        .map_err(|e| format!("open repo: {}", e.message()))?;
+    let repo = Repository::open(&git_path).map_err(|e| format!("open repo: {}", e.message()))?;
     let _ = repo.set_workdir(workspace, false);
     Ok(repo)
 }
@@ -39,9 +38,10 @@ pub(crate) fn validate_git_ref(value: &str, field_name: &str) -> Result<(), Stri
     if trimmed.starts_with('-') {
         return Err(format!("非法 {}: {} (不能以 - 开头)", field_name, value));
     }
-    if trimmed.chars().any(|c| {
-        c.is_whitespace() || (c as u32) < 0x20 || (c as u32) == 0x7f
-    }) {
+    if trimmed
+        .chars()
+        .any(|c| c.is_whitespace() || (c as u32) < 0x20 || (c as u32) == 0x7f)
+    {
         return Err(format!("非法 {}: {}", field_name, value));
     }
     Ok(())
@@ -51,12 +51,15 @@ pub(crate) fn ensure_signature(repo: &Repository) -> Result<git2::Signature<'sta
     if let Ok(sig) = repo.signature() {
         return Ok(sig);
     }
-    let mut config = repo.config().map_err(|e| format!("config: {}", e.message()))?;
+    let mut config = repo
+        .config()
+        .map_err(|e| format!("config: {}", e.message()))?;
     if config.get_string("user.email").is_err() {
         let _ = config.set_str("user.email", "codepapr@local");
     }
     if config.get_string("user.name").is_err() {
         let _ = config.set_str("user.name", "CodePapr");
     }
-    repo.signature().map_err(|e| format!("signature: {}", e.message()))
+    repo.signature()
+        .map_err(|e| format!("signature: {}", e.message()))
 }

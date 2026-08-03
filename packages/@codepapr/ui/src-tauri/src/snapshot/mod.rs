@@ -1,15 +1,15 @@
-pub mod types;
-pub mod ignore_resolver;
-mod snapshot_engine;
-mod restore_engine;
 mod diff_engine;
+pub mod ignore_resolver;
+mod restore_engine;
+mod snapshot_engine;
+pub mod types;
 
 use std::path::PathBuf;
 
-pub use types::*;
-pub use snapshot_engine::SnapshotEngine;
-pub use restore_engine::RestoreEngine;
 pub use diff_engine::DiffEngine;
+pub use restore_engine::RestoreEngine;
+pub use snapshot_engine::SnapshotEngine;
+pub use types::*;
 
 #[tauri::command]
 pub async fn snapshot_ensure(workspace_path: String) -> EnsureResult {

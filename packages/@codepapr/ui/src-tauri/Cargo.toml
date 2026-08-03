@@ -43,6 +43,7 @@ flate2 = "1"
 tar = "0.4"
 xz2 = "0.1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
 bitflags = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "sync", "time"] }
 rmcp = { version = "1.7.0", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest", "macros"] }

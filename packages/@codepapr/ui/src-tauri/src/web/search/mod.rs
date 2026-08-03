@@ -272,9 +272,7 @@ pub(crate) async fn search_web(
                             return Ok(response);
                         }
                         Err(err) => {
-                            eprintln!(
-                                "SearXNG 搜索失败，降级到内置多源聚合: {err}"
-                            );
+                            eprintln!("SearXNG 搜索失败，降级到内置多源聚合: {err}");
                         }
                     }
                 }

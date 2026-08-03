@@ -18,7 +18,6 @@ import { loadProjectState } from '../utils/projectStorage';
 import {
   loadSessions,
   loadSessionMessages,
-  loadAllSessionMessages,
   loadAllProjectMeta,
 } from '../utils/projectStorage';
 import { runProjectDiagnostics } from '../utils/projectDiagnostics';
@@ -43,7 +42,11 @@ import {
   loadProjectRulesSection,
 } from '../utils/projectConfigLoader';
 
-import { createEmptyConversationStats, DEFAULT_SETTINGS } from './internals/defaults';
+import {
+  createEmptyConversationStats,
+  DEFAULT_SETTINGS,
+  SESSION_MESSAGE_CACHE_LIMIT,
+} from './internals/defaults';
 import {
   getProviderLabel as _getProviderLabel,
   isApiConfigured as _isApiConfigured,
@@ -74,6 +77,8 @@ import type {
   Lang,
   ResetToMessageResult,
   SessionMeta,
+  StoreGet,
+  StoreSet,
   UIMessage,
 } from './internals/types';
 
@@ -104,6 +109,43 @@ export {
 void _getProviderLabel;
 void _isApiConfigured;
 
+/** Evict least-recently-used session messages so at most
+ *  SESSION_MESSAGE_CACHE_LIMIT sessions stay resident in memory. Eviction only
+ *  drops the in-memory copy — SQLite keeps the full history, and every mutation
+ *  is persisted before eviction can run (saveCurrentProjectState captures the
+ *  state snapshot at call time), so no data is lost. */
+function evictSessionMessageCache(get: StoreGet, set: StoreSet, protectIds: string[]): void {
+  const { sessionMessages, _sessionLru } = get();
+  const loadedIds = Object.keys(sessionMessages);
+  if (loadedIds.length <= SESSION_MESSAGE_CACHE_LIMIT) return;
+
+  const protectedSet = new Set(protectIds);
+  const loadedSet = new Set(loadedIds);
+  const evictIds: string[] = [];
+  const remaining = () => loadedSet.size - evictIds.length;
+
+  for (let i = _sessionLru.length - 1; i >= 0 && remaining() > SESSION_MESSAGE_CACHE_LIMIT; i--) {
+    const id = _sessionLru[i];
+    if (protectedSet.has(id) || !loadedSet.has(id)) continue;
+    evictIds.push(id);
+  }
+  // Sessions loaded but missing from the LRU (defensive): evict them too.
+  for (const id of loadedIds) {
+    if (remaining() <= SESSION_MESSAGE_CACHE_LIMIT) break;
+    if (protectedSet.has(id) || evictIds.includes(id)) continue;
+    evictIds.push(id);
+  }
+  if (evictIds.length === 0) return;
+
+  set((s) => {
+    const next = { ...s.sessionMessages };
+    for (const id of evictIds) {
+      delete next[id];
+    }
+    return { sessionMessages: next };
+  });
+}
+
 export const useAgentStore = create<AgentState & AgentActions>()((set, get) => ({
       settings: DEFAULT_SETTINGS,
       workspacePath: '',
@@ -115,6 +157,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       skillEnabledById: {},
       conversationStats: createEmptyConversationStats(),
       sessionConversationStats: {},
+      sessionMessagesLoading: false,
       projectDiagnosticsReport: null,
       isLoading: false,
       projectGraphLoading: false,
@@ -139,6 +182,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _pendingMemoryConsolidation: false,
       _latestContextSnapshot: null,
       _currentMode: 'agent',
+      _sessionLru: [],
 
       loadSettings: async () => {
         let settings = get().settings;
@@ -212,6 +256,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             skillEnabledById: {},
             conversationStats: createEmptyConversationStats(),
             sessionConversationStats: {},
+            sessionMessagesLoading: false,
       projectDiagnosticsReport: null,
       projectGraphLoading: false,
       projectGraphPhase: null,
@@ -228,6 +273,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _gitReadyError: null,
       _checkpointError: null,
       _checkpointSeq: 0,
+      _sessionLru: [],
           };
         });
         if (path) {
@@ -249,6 +295,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           skillEnabledById: {},
           conversationStats: createEmptyConversationStats(),
           sessionConversationStats: {},
+          sessionMessagesLoading: false,
           projectDiagnosticsReport: null,
           _agent: null,
           _agentModel: null,
@@ -263,6 +310,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _gitReadyError: null,
           _checkpointError: null,
           _checkpointSeq: 0,
+          _sessionLru: [],
         });
       },
 
@@ -288,37 +336,25 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             createdAt: meta.createdAt,
           })) as unknown as SessionMeta[];
 
-          // Batch-load every session's messages in a single IPC round-trip (one
-          // connection open) instead of one load per session. Fall back to
-          // per-session loads if the batch command is unavailable/errors.
-          let batchedMessages: Record<string, UIMessage[]> | null = null;
-          try {
-            const loaded = await loadAllSessionMessages(normalizedWorkspacePath);
-            batchedMessages = {};
-            for (const [id, msgs] of Object.entries(loaded)) {
-              batchedMessages[id] = msgs as unknown as UIMessage[];
-            }
-          } catch {
-            batchedMessages = null;
-          }
-          for (const s of sessions) {
-            if (batchedMessages) {
-              sessionMessages[s.id] = batchedMessages[s.id] ?? [];
-            } else {
-              try {
-                const msgs = await loadSessionMessages(normalizedWorkspacePath, s.id);
-                sessionMessages[s.id] = msgs as unknown as UIMessage[];
-              } catch {
-                sessionMessages[s.id] = [];
-              }
-            }
-          }
-
           const meta = await loadAllProjectMeta(normalizedWorkspacePath);
           const rawActiveSessionId = (meta.active_session_id as string) ?? null;
           activeSessionId = rawActiveSessionId && sessions.some(s => s.id === rawActiveSessionId)
             ? rawActiveSessionId
             : null;
+
+          // Lazy loading: only the active session's messages are loaded upfront.
+          // Other sessions are loaded on demand in selectSession and cached with
+          // an LRU limit, keeping workspace open fast and memory bounded even
+          // with many sessions.
+          if (activeSessionId) {
+            try {
+              const msgs = await loadSessionMessages(normalizedWorkspacePath, activeSessionId);
+              sessionMessages[activeSessionId] = msgs as unknown as UIMessage[];
+            } catch {
+              sessionMessages[activeSessionId] = [];
+            }
+          }
+
           skillEnabledById = (meta.skill_enabled_by_id as Record<string, boolean>) ?? {};
           const rawStats = meta.conversation_stats as { primary?: unknown; fast?: unknown } | null;
           // cloneConversationStats fills in any tier missing from older persisted
@@ -347,8 +383,13 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             debugEnabled: get().settings.debugEnabled,
           });
           sessions = snapshot.sessions as SessionMeta[];
-          sessionMessages = snapshot.sessionMessages as Record<string, UIMessage[]>;
           activeSessionId = snapshot.activeSessionId;
+          // Keep only the active session's messages resident; the rest are
+          // loaded on demand (see selectSession).
+          const snapshotMessages = snapshot.sessionMessages as Record<string, UIMessage[]>;
+          sessionMessages = activeSessionId
+            ? { [activeSessionId]: snapshotMessages[activeSessionId] ?? [] }
+            : {};
           skillEnabledById = normalizeSkillEnabledState(snapshot.skillEnabledById);
           conversationStats = snapshot.activeSessionId
             ? getSessionConversationStats(snapshot.sessionConversationStats ?? {}, snapshot.activeSessionId)
@@ -384,6 +425,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           activeSessionId,
           messages,
           sessionMessages,
+          sessionMessagesLoading: false,
           skillEnabledById,
           conversationStats: finalConversationStats,
           sessionConversationStats: sessionConversationStats as Record<string, import('./internals/types').ConversationStats>,
@@ -401,6 +443,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _gitReadyError: null,
           _checkpointError: null,
           _checkpointSeq: 0,
+          // Active session first; the rest follow the persisted (createdAt DESC)
+          // order as the initial LRU approximation.
+          _sessionLru: [
+            ...(activeSessionId ? [activeSessionId] : []),
+            ...sessions.filter((s) => s.id !== activeSessionId).map((s) => s.id),
+          ],
         });
 
         if (sessionTodoLists && Object.keys(sessionTodoLists).length > 0) {
@@ -691,6 +739,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           sessions: [meta, ...s.sessions],
           activeSessionId: id,
           messages: [],
+          sessionMessagesLoading: false,
           sessionMessages: {
             ...s.sessionMessages,
             [id]: [],
@@ -704,24 +753,58 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agentModel: null,
           _agentPromptKey: null,
           _latestContextSnapshot: null,
+          _sessionLru: [id, ...s._sessionLru.filter((x) => x !== id)],
         }));
+        evictSessionMessageCache(get, set, [id]);
         saveCurrentProjectState(get());
       },
 
       selectSession: (id) => {
-        const { sessions, activeSessionId, sessionMessages, sessionConversationStats } = get();
+        const { sessions, activeSessionId, sessionConversationStats, workspacePath } = get();
         if (id === activeSessionId) return;
         const meta = sessions.find((s) => s.id === id);
         if (!meta) return;
-        const messages = sessionMessages[id] ?? [];
-        set({
+
+        set((s) => ({
           activeSessionId: id,
-          messages,
           conversationStats: getSessionConversationStats(sessionConversationStats, id),
           _agent: null,
           _agentModel: null,
           _agentPromptKey: null,
-        });
+          _sessionLru: [id, ...s._sessionLru.filter((x) => x !== id)],
+        }));
+
+        const cached = get().sessionMessages[id];
+        if (cached) {
+          set({ messages: cached, sessionMessagesLoading: false });
+          saveCurrentProjectState(get());
+          return;
+        }
+
+        // On-demand load: messages were evicted (or never loaded). SQLite is
+        // the source of truth, so load from there instead of keeping every
+        // session resident in memory.
+        set({ messages: [], sessionMessagesLoading: true });
+        void (async () => {
+          let loaded: UIMessage[] = [];
+          try {
+            loaded = (await loadSessionMessages(workspacePath, id)) as unknown as UIMessage[];
+          } catch {
+            loaded = [];
+          }
+          // Race guard: the user may have switched to another session (or
+          // workspace) while the load was in flight.
+          const current = get();
+          if (current.activeSessionId !== id || current.workspacePath !== workspacePath) return;
+          set((s) => ({
+            messages: loaded,
+            sessionMessages: { ...s.sessionMessages, [id]: loaded },
+            sessionMessagesLoading: false,
+          }));
+          evictSessionMessageCache(get, set, [id]);
+        })();
+        // Persist the active-session switch immediately; the loaded messages
+        // already live in SQLite and need no write-back.
         saveCurrentProjectState(get());
       },
 
@@ -737,6 +820,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             sessions,
             activeSessionId: isActive ? null : s.activeSessionId,
             messages: isActive ? [] : s.messages,
+            sessionMessagesLoading: isActive ? false : s.sessionMessagesLoading,
             sessionMessages,
             sessionConversationStats,
             conversationStats: isActive ? createEmptyConversationStats() : s.conversationStats,
@@ -744,6 +828,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             _agentModel: isActive ? null : s._agentModel,
             _agentPromptKey: isActive ? null : s._agentPromptKey,
             _latestContextSnapshot: isActive ? null : s._latestContextSnapshot,
+            _sessionLru: s._sessionLru.filter((x) => x !== id),
           };
         });
         saveCurrentProjectState(get(), { purgeDeletedContent: true });

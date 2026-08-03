@@ -47,14 +47,12 @@ pub(crate) fn should_ignore_dir(name: &str) -> bool {
 /// watcher to suppress noise from build outputs and dependency folders
 /// without having to walk the tree.
 pub(crate) fn path_touches_ignored_dir(path: &std::path::Path) -> bool {
-    path.components().any(|component| {
-        match component {
-            std::path::Component::Normal(name) => {
-                let s = name.to_string_lossy();
-                should_ignore_dir(&s)
-            }
-            _ => false,
+    path.components().any(|component| match component {
+        std::path::Component::Normal(name) => {
+            let s = name.to_string_lossy();
+            should_ignore_dir(&s)
         }
+        _ => false,
     })
 }
 
@@ -65,20 +63,9 @@ pub(crate) fn should_ignore_file(name: &str) -> bool {
     IGNORED_FILES.contains(&lower.as_str())
 }
 
-const IGNORED_FILES: &[&str] = &[
-    ".ds_store",
-    "thumbs.db",
-    "ehthumbs.db",
-    "desktop.ini",
-];
+const IGNORED_FILES: &[&str] = &[".ds_store", "thumbs.db", "ehthumbs.db", "desktop.ini"];
 
-pub(crate) const IGNORED_DIRS: &[&str] = &[
-    "node_modules",
-    "target",
-    "dist",
-    "build",
-    "coverage",
-];
+pub(crate) const IGNORED_DIRS: &[&str] = &["node_modules", "target", "dist", "build", "coverage"];
 
 #[cfg(test)]
 mod tests;

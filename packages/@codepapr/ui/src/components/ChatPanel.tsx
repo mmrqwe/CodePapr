@@ -1364,6 +1364,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
     _agentDefinitions,
     _skillDefinitions,
     mentorEnabled,
+    sessionMessagesLoading,
   } = useAgentStore(
     useShallow((state) => ({
       messages: state.messages,
@@ -1384,6 +1385,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
       _agentDefinitions: state._agentDefinitions,
       _skillDefinitions: state._skillDefinitions,
       mentorEnabled: state.settings.mentorEnabled ?? true,
+      sessionMessagesLoading: state.sessionMessagesLoading,
     }))
   );
   const [input, setInput] = useState('');
@@ -1452,7 +1454,11 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const settingsError = getSettingsError(settings);
   const isConfigured = !settingsError;
-  const canSubmit = (!!input.trim() || pendingImages.length > 0 || pendingFiles.length > 0) && !isLoading;
+  // Block sending while the session's history is still loading on demand —
+  // submitting early would build context from an incomplete message list.
+  const canSubmit = (!!input.trim() || pendingImages.length > 0 || pendingFiles.length > 0)
+    && !isLoading
+    && !sessionMessagesLoading;
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden && !(message.synthetic && message.carryForwardInContext)),
     [messages]
@@ -2117,7 +2123,13 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
         style={{ overflowAnchor: 'none' }}
       >
         <div ref={messageListContentRef}>
-          {!deferMessages && visibleMessages.length === 0 && (
+          {!deferMessages && sessionMessagesLoading && visibleMessages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full text-slate-600 select-none">
+              <div className="h-5 w-5 mb-3 animate-spin rounded-full border-2 border-slate-700 border-t-indigo-400" />
+              <p className="text-xs">{t.loadingSessionMessages}</p>
+            </div>
+          )}
+          {!deferMessages && !sessionMessagesLoading && visibleMessages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-slate-600 select-none">
               <div className="text-4xl mb-3">⌘</div>
               <p className="text-sm">CodePapr</p>

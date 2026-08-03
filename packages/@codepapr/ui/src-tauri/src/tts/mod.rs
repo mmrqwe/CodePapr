@@ -18,10 +18,8 @@ use tauri::Emitter;
 use crate::shared::run_blocking_workspace_task;
 use server::GptSovitsServer;
 
-static TTS_SERVER: std::sync::OnceLock<Mutex<Option<GptSovitsServer>>> =
-    std::sync::OnceLock::new();
-static AUDIO_PLAYER: std::sync::OnceLock<Mutex<player::AudioPlayer>> =
-    std::sync::OnceLock::new();
+static TTS_SERVER: std::sync::OnceLock<Mutex<Option<GptSovitsServer>>> = std::sync::OnceLock::new();
+static AUDIO_PLAYER: std::sync::OnceLock<Mutex<player::AudioPlayer>> = std::sync::OnceLock::new();
 static STARTING: AtomicBool = AtomicBool::new(false);
 static FIRST_SYNTH_COMPLETED: AtomicBool = AtomicBool::new(false);
 /// Set by `tts_stop_playback` so long-running HTTP response readers can
@@ -32,11 +30,9 @@ static SYNTHESIS_CANCELLED: AtomicBool = AtomicBool::new(false);
 static HTTP_CLIENT: std::sync::OnceLock<Client> = std::sync::OnceLock::new();
 /// Tracks the (ref_path, prompt_text, lang) key of the last `/change_refer`
 /// call so we skip it when the speaker hasn't changed.
-static LAST_REFER_KEY: std::sync::OnceLock<Mutex<Option<String>>> =
-    std::sync::OnceLock::new();
+static LAST_REFER_KEY: std::sync::OnceLock<Mutex<Option<String>>> = std::sync::OnceLock::new();
 /// Tracks the last model name sent via `/set_model`.
-static LAST_MODEL_NAME: std::sync::OnceLock<Mutex<Option<String>>> =
-    std::sync::OnceLock::new();
+static LAST_MODEL_NAME: std::sync::OnceLock<Mutex<Option<String>>> = std::sync::OnceLock::new();
 /// Default v4 SoVITS model path, set during server start. Used to reset
 /// the model when switching from a fine-tuned character to one without.
 static DEFAULT_SOVITS_V4_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -170,7 +166,10 @@ fn kill_port_process(port: u16) -> bool {
 #[cfg(windows)]
 fn pids_on_port(port: u16) -> Vec<String> {
     let output = std::process::Command::new("cmd")
-        .args(["/c", &format!("for /f \"tokens=5\" %a in ('netstat -ano ^| findstr :{port}') do @echo %a")])
+        .args([
+            "/c",
+            &format!("for /f \"tokens=5\" %a in ('netstat -ano ^| findstr :{port}') do @echo %a"),
+        ])
         .output();
     if let Ok(out) = output {
         if out.status.success() {
@@ -202,9 +201,7 @@ fn pids_on_port(port: u16) -> Vec<String> {
     // Fallback: some container/CI environments lack lsof.
     // Try ss first, then netstat.
     for cmd in &["ss", "netstat"] {
-        let output = std::process::Command::new(cmd)
-            .args(["-tlnp"])
-            .output();
+        let output = std::process::Command::new(cmd).args(["-tlnp"]).output();
         if let Ok(out) = output {
             if out.status.success() {
                 let stdout = String::from_utf8_lossy(&out.stdout);
@@ -234,9 +231,12 @@ fn convert_to_wav(input: &std::path::Path, output: &std::path::Path) -> Result<(
             "-y",
             "-i",
             &input.to_string_lossy(),
-            "-ar", "16000",
-            "-ac", "1",
-            "-sample_fmt", "s16",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            "-sample_fmt",
+            "s16",
             &output.to_string_lossy(),
         ])
         .stdout(std::process::Stdio::null())
@@ -260,7 +260,11 @@ fn candidate_works(candidate: &str) -> bool {
 }
 
 fn find_ffmpeg() -> Option<String> {
-    let candidates: &[&str] = &["ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"];
+    let candidates: &[&str] = &[
+        "ffmpeg",
+        "/opt/homebrew/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+    ];
     for candidate in candidates {
         if candidate_works(candidate) {
             return Some(candidate.to_string());
@@ -284,7 +288,12 @@ fn find_ffmpeg() -> Option<String> {
 // ---- Server lifecycle ----
 
 #[tauri::command]
-pub fn tts_server_start(app_handle: tauri::AppHandle, gpt_sovits_path: Option<String>, model_version: Option<String>, fine_tuned_model_path: Option<String>) -> Result<(), String> {
+pub fn tts_server_start(
+    app_handle: tauri::AppHandle,
+    gpt_sovits_path: Option<String>,
+    model_version: Option<String>,
+    fine_tuned_model_path: Option<String>,
+) -> Result<(), String> {
     ws::set_ws_app_handle(app_handle.clone());
     // Each new server lifecycle starts with a fresh "first synthesis" flag
     // so the perf-warning heuristic correctly treats the first request after
@@ -329,15 +338,15 @@ pub fn tts_server_start(app_handle: tauri::AppHandle, gpt_sovits_path: Option<St
     // The command returns immediately so the frontend doesn't freeze.
     std::thread::spawn(move || {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        // ── Pre-flight: make sure port 9880 is actually free ──
-        // A previous CodePapr session may have crashed and left its Python TTS
-        // server orphaned to launchd, holding port 9880 indefinitely. If we
-        // skip this check, every start attempt below will hit "address already
-        // in use" until the user manually kills the zombie. We proactively
-        // clean any squatter — including respecting the SIGTERM→SIGKILL
-        // escalation in `kill_port_process`.
-        if !pids_on_port(server::GPT_SOVITS_API_PORT).is_empty() {
-            let _ = app_handle_for_thread.emit(
+            // ── Pre-flight: make sure port 9880 is actually free ──
+            // A previous CodePapr session may have crashed and left its Python TTS
+            // server orphaned to launchd, holding port 9880 indefinitely. If we
+            // skip this check, every start attempt below will hit "address already
+            // in use" until the user manually kills the zombie. We proactively
+            // clean any squatter — including respecting the SIGTERM→SIGKILL
+            // escalation in `kill_port_process`.
+            if !pids_on_port(server::GPT_SOVITS_API_PORT).is_empty() {
+                let _ = app_handle_for_thread.emit(
                 "tts-server-log",
                 ServerLogEvent {
                     stream: "system",
@@ -347,23 +356,23 @@ pub fn tts_server_start(app_handle: tauri::AppHandle, gpt_sovits_path: Option<St
                     ),
                 },
             );
-            let cleared = kill_port_process(server::GPT_SOVITS_API_PORT);
-            if !cleared {
-                let msg = format!(
+                let cleared = kill_port_process(server::GPT_SOVITS_API_PORT);
+                if !cleared {
+                    let msg = format!(
                     "Could not free port {}: another process is holding it and refused to terminate. Please kill it manually:\n  lsof -ti :{} | xargs kill -9",
                     server::GPT_SOVITS_API_PORT,
                     server::GPT_SOVITS_API_PORT
                 );
-                let _ = app_handle_for_thread.emit("tts-server-error", msg.clone());
-                STARTING.store(false, Ordering::SeqCst);
-                return;
+                    let _ = app_handle_for_thread.emit("tts-server-error", msg.clone());
+                    STARTING.store(false, Ordering::SeqCst);
+                    return;
+                }
             }
-        }
 
-        // Tell the user upfront which compute backend we're trying. Saves a
-        // lot of confusion when MPS gives the user a 3-5x speedup vs CPU.
-        let device = server::recommended_device();
-        let _ = app_handle_for_thread.emit(
+            // Tell the user upfront which compute backend we're trying. Saves a
+            // lot of confusion when MPS gives the user a 3-5x speedup vs CPU.
+            let device = server::recommended_device();
+            let _ = app_handle_for_thread.emit(
             "tts-server-log",
             ServerLogEvent {
                 stream: "system",
@@ -379,70 +388,74 @@ pub fn tts_server_start(app_handle: tauri::AppHandle, gpt_sovits_path: Option<St
             },
         );
 
-        // Store the default v4 SoVITS path BEFORE path is consumed by start_with_retry.
-        // Used later by tts_set_model to reset from fine-tuned back to default.
-        let default_v4 = path.join("GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth");
-        if default_v4.exists() {
-            let _ = DEFAULT_SOVITS_V4_PATH.set(default_v4.to_string_lossy().to_string());
-        }
+            // Store the default v4 SoVITS path BEFORE path is consumed by start_with_retry.
+            // Used later by tts_set_model to reset from fine-tuned back to default.
+            let default_v4 = path.join("GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth");
+            if default_v4.exists() {
+                let _ = DEFAULT_SOVITS_V4_PATH.set(default_v4.to_string_lossy().to_string());
+            }
 
-        let result = start_with_retry(path, app_handle_for_thread.clone(), &mv);
-        match result {
-            Ok((srv, used_device)) => {
-                let reported_version = srv.model_version().to_string();
-                let half_prec = srv.half_precision();
-                // New Python process has no refer/model state — reset caches
-                if let Ok(mut g) = last_refer_lock().lock() { *g = None; }
-                if let Ok(mut g) = last_model_lock().lock() { *g = None; }
-                if let Ok(mut g) = lock.lock() {
-                    *g = Some(srv);
-                }
+            let result = start_with_retry(path, app_handle_for_thread.clone(), &mv);
+            match result {
+                Ok((srv, used_device)) => {
+                    let reported_version = srv.model_version().to_string();
+                    let half_prec = srv.half_precision();
+                    // New Python process has no refer/model state — reset caches
+                    if let Ok(mut g) = last_refer_lock().lock() {
+                        *g = None;
+                    }
+                    if let Ok(mut g) = last_model_lock().lock() {
+                        *g = None;
+                    }
+                    if let Ok(mut g) = lock.lock() {
+                        *g = Some(srv);
+                    }
 
-                // Load the fine-tuned model BEFORE emitting tts-server-started.
-                // This eliminates the race condition between /set_model and the
-                // first synthesis that caused "Broken pipe" WS errors.
-                if let Some(ref ft) = ft_path {
-                    if !ft.is_empty() {
-                        let _ = app_handle_for_thread.emit(
-                            "tts-server-log",
-                            ServerLogEvent {
-                                stream: "system",
-                                line: format!("Loading fine-tuned model: {}", ft),
-                            },
-                        );
-                        let client = tts_client();
-                        let base_url = GptSovitsServer::api_base_url();
-                        // GET + query matches the synthesis hot-path
-                        // (`synthesize_blocking`) and api.py's `/set_model`
-                        // handler — keep all set_model calls on one method.
-                        if let Ok(resp) = client
-                            .get(format!("{base_url}/set_model"))
-                            .query(&[("sovits_model_path", ft.as_str())])
-                            .send()
-                        {
-                            if resp.status().is_success() {
-                                if let Ok(mut g) = last_model_lock().lock() {
-                                    *g = Some(ft.clone());
+                    // Load the fine-tuned model BEFORE emitting tts-server-started.
+                    // This eliminates the race condition between /set_model and the
+                    // first synthesis that caused "Broken pipe" WS errors.
+                    if let Some(ref ft) = ft_path {
+                        if !ft.is_empty() {
+                            let _ = app_handle_for_thread.emit(
+                                "tts-server-log",
+                                ServerLogEvent {
+                                    stream: "system",
+                                    line: format!("Loading fine-tuned model: {}", ft),
+                                },
+                            );
+                            let client = tts_client();
+                            let base_url = GptSovitsServer::api_base_url();
+                            // GET + query matches the synthesis hot-path
+                            // (`synthesize_blocking`) and api.py's `/set_model`
+                            // handler — keep all set_model calls on one method.
+                            if let Ok(resp) = client
+                                .get(format!("{base_url}/set_model"))
+                                .query(&[("sovits_model_path", ft.as_str())])
+                                .send()
+                            {
+                                if resp.status().is_success() {
+                                    if let Ok(mut g) = last_model_lock().lock() {
+                                        *g = Some(ft.clone());
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                let _ = app_handle_for_thread.emit(
-                    "tts-server-started",
-                    ServerStartedPayload {
-                        device: used_device,
-                        model_version: reported_version,
-                        half_precision: half_prec,
-                    },
-                );
+                    let _ = app_handle_for_thread.emit(
+                        "tts-server-started",
+                        ServerStartedPayload {
+                            device: used_device,
+                            model_version: reported_version,
+                            half_precision: half_prec,
+                        },
+                    );
+                }
+                Err(e) => {
+                    let _ = app_handle_for_thread.emit("tts-server-error", e.clone());
+                    eprintln!("Failed to start TTS server: {e}");
+                }
             }
-            Err(e) => {
-                let _ = app_handle_for_thread.emit("tts-server-error", e.clone());
-                eprintln!("Failed to start TTS server: {e}");
-            }
-        }
         })); // catch_unwind
         STARTING.store(false, Ordering::SeqCst);
         if let Err(panic_err) = result {
@@ -453,7 +466,10 @@ pub fn tts_server_start(app_handle: tauri::AppHandle, gpt_sovits_path: Option<St
             } else {
                 "Unknown panic".to_string()
             };
-            let _ = app_handle_for_thread.emit("tts-server-error", format!("TTS server start panicked: {}", msg));
+            let _ = app_handle_for_thread.emit(
+                "tts-server-error",
+                format!("TTS server start panicked: {}", msg),
+            );
         }
     });
     Ok(())
@@ -641,7 +657,8 @@ pub async fn tts_warmup_gpu(
         "tts-server-log",
         ServerLogEvent {
             stream: "system",
-            line: "GPU warmup: triggering Metal kernel compilation with a dummy phrase...".to_string(),
+            line: "GPU warmup: triggering Metal kernel compilation with a dummy phrase..."
+                .to_string(),
         },
     );
 
@@ -663,8 +680,8 @@ pub async fn tts_warmup_gpu(
                 prompt_language.clone(),
                 prompt_language,
                 MODE_STREAMED_PIPELINE,
-                4,    // minimum steps — just want the kernel compiled
-                1.0,  // default speed
+                4,   // minimum steps — just want the kernel compiled
+                1.0, // default speed
             )
         }));
         let _ = tx.send(match result {
@@ -712,7 +729,12 @@ pub fn tts_check_installed() -> Result<TtsInstallStatus, String> {
     let models_ok = installer::has_complete_model_set(&pretrained);
     let installed = api_py && venv_ok && models_ok;
 
-    Ok(TtsInstallStatus { installed, api_py, venv_ok, models_ok })
+    Ok(TtsInstallStatus {
+        installed,
+        api_py,
+        venv_ok,
+        models_ok,
+    })
 }
 
 // ---- Model management ----
@@ -723,55 +745,54 @@ pub fn tts_check_installed() -> Result<TtsInstallStatus, String> {
 #[tauri::command]
 pub async fn tts_set_model(model_name: String) -> Result<(), String> {
     run_blocking_workspace_task(move || {
-    {
-        let lock = tts_server_lock();
-        let guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
-        if !guard.as_ref().map_or(false, |s| s.is_running()) {
-            return Err("TTS server is not running.".to_string());
+        {
+            let lock = tts_server_lock();
+            let guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
+            if !guard.as_ref().map_or(false, |s| s.is_running()) {
+                return Err("TTS server is not running.".to_string());
+            }
         }
-    }
-    if model_name.is_empty() {
-        // Reset to default v4 pretrained model.
-        let default_path = DEFAULT_SOVITS_V4_PATH.get()
-            .cloned()
-            .unwrap_or_default();
-        if default_path.is_empty() {
-            return Err("Default model path not set. Start the server first.".to_string());
+        if model_name.is_empty() {
+            // Reset to default v4 pretrained model.
+            let default_path = DEFAULT_SOVITS_V4_PATH.get().cloned().unwrap_or_default();
+            if default_path.is_empty() {
+                return Err("Default model path not set. Start the server first.".to_string());
+            }
+            let base_url = GptSovitsServer::api_base_url();
+            let client = tts_client();
+            let resp = client
+                .get(format!("{base_url}/set_model"))
+                .query(&[("sovits_model_path", default_path.as_str())])
+                .send()
+                .map_err(|e| format!("set_model request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let body = resp.text().unwrap_or_default();
+                return Err(format!("set_model failed: {body}"));
+            }
+            if let Ok(mut g) = last_model_lock().lock() {
+                *g = None;
+            }
+            return Ok(());
         }
         let base_url = GptSovitsServer::api_base_url();
         let client = tts_client();
         let resp = client
             .get(format!("{base_url}/set_model"))
-            .query(&[("sovits_model_path", default_path.as_str())])
+            .query(&[("sovits_model_path", model_name.as_str())])
             .send()
             .map_err(|e| format!("set_model request failed: {e}"))?;
         if !resp.status().is_success() {
             let body = resp.text().unwrap_or_default();
             return Err(format!("set_model failed: {body}"));
         }
+        // Update the model cache so the first synthesis doesn't redundantly
+        // call /set_model again.
         if let Ok(mut g) = last_model_lock().lock() {
-            *g = None;
+            *g = Some(model_name);
         }
-        return Ok(());
-    }
-    let base_url = GptSovitsServer::api_base_url();
-    let client = tts_client();
-    let resp = client
-        .get(format!("{base_url}/set_model"))
-        .query(&[("sovits_model_path", model_name.as_str())])
-        .send()
-        .map_err(|e| format!("set_model request failed: {e}"))?;
-    if !resp.status().is_success() {
-        let body = resp.text().unwrap_or_default();
-        return Err(format!("set_model failed: {body}"));
-    }
-    // Update the model cache so the first synthesis doesn't redundantly
-    // call /set_model again.
-    if let Ok(mut g) = last_model_lock().lock() {
-        *g = Some(model_name);
-    }
-    Ok(())
-    }).await
+        Ok(())
+    })
+    .await
 }
 
 // ---- Synthesis ----
@@ -816,7 +837,9 @@ pub async fn tts_synthesize_and_play(
         let guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
         let running = guard.as_ref().map_or(false, |s| s.is_running());
         if !running {
-            return Err("TTS server is not running. Click the speaker icon to start it.".to_string());
+            return Err(
+                "TTS server is not running. Click the speaker icon to start it.".to_string(),
+            );
         }
     }
 
@@ -831,51 +854,54 @@ pub async fn tts_synthesize_and_play(
     let (tx, rx) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let started = std::time::Instant::now();
-        let result = synthesize_blocking(
-            text,
-            model_name,
-            ref_audio_path,
-            prompt_text,
-            prompt_language,
-            text_language,
-            &mode,
-            steps,
-            spd,
-        );
-        // Telemetry: a successful synthesis that takes longer than this is
-        // probably running on CPU even though we asked for MPS. Surface it
-        // to the live log panel so the user can spot configuration issues
-        // without having to install profiling tools.
-        if result.is_ok() {
-            let elapsed = started.elapsed();
-            let elapsed_secs = elapsed.as_secs_f32();
-            let line = format!(
-                "Synthesis completed in {:.1}s (mode={}, sample_steps={})",
-                elapsed_secs, mode, steps
+            let started = std::time::Instant::now();
+            let result = synthesize_blocking(
+                text,
+                model_name,
+                ref_audio_path,
+                prompt_text,
+                prompt_language,
+                text_language,
+                &mode,
+                steps,
+                spd,
             );
-            let _ = app_handle_for_thread.emit(
-                "tts-server-log",
-                ServerLogEvent { stream: "system", line: line.clone() },
-            );
-            // 12s+ for a single sentence on MPS strongly suggests the
-            // backend silently fell back to CPU. The first synthesis after
-            // server start is exempt because Metal kernel compilation is
-            // a known one-time cost.
-            if elapsed_secs > 12.0 && !FIRST_SYNTH_COMPLETED.load(Ordering::SeqCst) {
-                // First synth — Metal warmup, expected to be slow.
-            } else if elapsed_secs > 12.0 {
+            // Telemetry: a successful synthesis that takes longer than this is
+            // probably running on CPU even though we asked for MPS. Surface it
+            // to the live log panel so the user can spot configuration issues
+            // without having to install profiling tools.
+            if result.is_ok() {
+                let elapsed = started.elapsed();
+                let elapsed_secs = elapsed.as_secs_f32();
+                let line = format!(
+                    "Synthesis completed in {:.1}s (mode={}, sample_steps={})",
+                    elapsed_secs, mode, steps
+                );
                 let _ = app_handle_for_thread.emit(
+                    "tts-server-log",
+                    ServerLogEvent {
+                        stream: "system",
+                        line: line.clone(),
+                    },
+                );
+                // 12s+ for a single sentence on MPS strongly suggests the
+                // backend silently fell back to CPU. The first synthesis after
+                // server start is exempt because Metal kernel compilation is
+                // a known one-time cost.
+                if elapsed_secs > 12.0 && !FIRST_SYNTH_COMPLETED.load(Ordering::SeqCst) {
+                    // First synth — Metal warmup, expected to be slow.
+                } else if elapsed_secs > 12.0 {
+                    let _ = app_handle_for_thread.emit(
                     "tts-server-log",
                     ServerLogEvent {
                         stream: "system",
                         line: "⚠ Synthesis is taking longer than expected. If you have an Apple Silicon Mac, MPS may have fallen back to CPU. Check the log above for PyTorch fallback warnings.".to_string(),
                     },
                 );
+                }
+                FIRST_SYNTH_COMPLETED.store(true, Ordering::SeqCst);
             }
-            FIRST_SYNTH_COMPLETED.store(true, Ordering::SeqCst);
-        }
-        result
+            result
         }));
         let _ = tx.send(match result {
             Ok(r) => r,
@@ -1030,7 +1056,8 @@ fn synthesize_blocking(
     // /set_model — only when the model name actually changed.
     if let Some(ref model) = model_name {
         if !model.is_empty() {
-            let should_set = last_model_lock().lock()
+            let should_set = last_model_lock()
+                .lock()
                 .map(|g| g.as_ref() != Some(model))
                 .unwrap_or(true);
             if should_set {
@@ -1074,7 +1101,8 @@ fn synthesize_blocking(
             params.push(("prompt_language", lang.to_string()));
 
             let key = refer_key(audio_path, prompt_text.as_deref().unwrap_or(""), lang);
-            let should_refer = last_refer_lock().lock()
+            let should_refer = last_refer_lock()
+                .lock()
                 .map(|g| g.as_ref() != Some(&key))
                 .unwrap_or(true);
             if should_refer {
@@ -1138,9 +1166,7 @@ fn synthesize_blocking(
 
     {
         let lock = tts_player_lock();
-        let mut guard = lock
-            .lock()
-            .map_err(|e| format!("Lock error: {e}"))?;
+        let mut guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
         guard.stop();
         guard
             .play_wav(&all_bytes)
@@ -1181,9 +1207,7 @@ fn read_response_to_end(resp: &mut reqwest::blocking::Response) -> Result<Vec<u8
 /// PCM `data` sub-chunk, parse the format from the `fmt ` chunk, then
 /// initialise the player's PCM stream. Subsequent bytes are interpreted
 /// as raw 16-bit PCM samples and pushed straight into the sink.
-fn synthesize_streaming_pcm(
-    resp: &mut reqwest::blocking::Response,
-) -> Result<(), String> {
+fn synthesize_streaming_pcm(resp: &mut reqwest::blocking::Response) -> Result<(), String> {
     const MAX_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
     let mut buf = [0u8; 16384];
     let mut header_buf: Vec<u8> = Vec::with_capacity(4096);
@@ -1220,9 +1244,7 @@ fn synthesize_streaming_pcm(
                 Some(parsed) => {
                     {
                         let lock = tts_player_lock();
-                        let mut guard = lock
-                            .lock()
-                            .map_err(|e| format!("Lock error: {e}"))?;
+                        let mut guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
                         guard
                             .start_pcm_stream(parsed.sample_rate, parsed.channels)
                             .map_err(|e| format!("PCM init error: {e}{}", server_log_excerpt()))?;
@@ -1309,9 +1331,7 @@ fn push_pcm_chunk(chunk: &[u8], leftover_byte: &mut Option<u8>) -> Result<(), St
     }
 
     let lock = tts_player_lock();
-    let mut guard = lock
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let mut guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
     guard
         .push_pcm_samples(samples)
         .map_err(|e| format!("PCM push error: {e}{}", server_log_excerpt()))?;
@@ -1354,7 +1374,8 @@ fn parse_wav_header(buf: &[u8]) -> Option<ParsedWavHeader> {
     let mut channels: Option<u16> = None;
     while pos + 8 <= buf.len() {
         let id = &buf[pos..pos + 4];
-        let size = u32::from_le_bytes([buf[pos + 4], buf[pos + 5], buf[pos + 6], buf[pos + 7]]) as usize;
+        let size =
+            u32::from_le_bytes([buf[pos + 4], buf[pos + 5], buf[pos + 6], buf[pos + 7]]) as usize;
         let body_start = pos + 8;
         let body_end = body_start.checked_add(size)?;
         if id == b"fmt " {
@@ -1367,7 +1388,10 @@ fn parse_wav_header(buf: &[u8]) -> Option<ParsedWavHeader> {
             //   +0: audio_format (u16) → should be 1 for PCM
             //   +2: num_channels (u16)
             //   +4: sample_rate  (u32)
-            channels = Some(u16::from_le_bytes([buf[body_start + 2], buf[body_start + 3]]));
+            channels = Some(u16::from_le_bytes([
+                buf[body_start + 2],
+                buf[body_start + 3],
+            ]));
             sample_rate = Some(u32::from_le_bytes([
                 buf[body_start + 4],
                 buf[body_start + 5],
@@ -1403,13 +1427,20 @@ fn parse_wav_header(buf: &[u8]) -> Option<ParsedWavHeader> {
 /// when the server isn't running or has no logs yet.
 fn server_log_excerpt() -> String {
     let lock = tts_server_lock();
-    let Ok(guard) = lock.lock() else { return String::new() };
-    let Some(srv) = guard.as_ref() else { return String::new() };
+    let Ok(guard) = lock.lock() else {
+        return String::new();
+    };
+    let Some(srv) = guard.as_ref() else {
+        return String::new();
+    };
     let logs = srv.recent_log_excerpt(40);
     if logs.trim().is_empty() {
         String::new()
     } else {
-        format!("\n────── recent server log ──────\n{}\n──────────────────────────────", logs.trim())
+        format!(
+            "\n────── recent server log ──────\n{}\n──────────────────────────────",
+            logs.trim()
+        )
     }
 }
 
@@ -1430,7 +1461,11 @@ pub fn tts_stop_playback() -> Result<(), String> {
 /// before the bounds check. When `must_exist` is true the file must already
 /// be present on disk (read path); when false it may not exist yet (write
 /// path — the parent directory is checked instead).
-fn validate_voice_path_in(file_path: &str, voices_root: &Path, must_exist: bool) -> Result<PathBuf, String> {
+fn validate_voice_path_in(
+    file_path: &str,
+    voices_root: &Path,
+    must_exist: bool,
+) -> Result<PathBuf, String> {
     let path = Path::new(file_path);
 
     if file_path.is_empty() {
@@ -1438,30 +1473,30 @@ fn validate_voice_path_in(file_path: &str, voices_root: &Path, must_exist: bool)
     }
 
     if must_exist {
-        let meta = path.metadata().map_err(|e| format!("Cannot access voice file: {e}"))?;
+        let meta = path
+            .metadata()
+            .map_err(|e| format!("Cannot access voice file: {e}"))?;
         if !meta.is_file() {
             return Err("Voice path is not a regular file".to_string());
         }
     }
 
-    let canonical = path.canonicalize()
+    let canonical = path
+        .canonicalize()
         .map_err(|e| format!("Invalid voice file path: {e}"))?;
 
-    let voices = voices_root.canonicalize()
+    let voices = voices_root
+        .canonicalize()
         .map_err(|_| "Voices directory is not accessible".to_string())?;
 
     if !canonical.starts_with(&voices) {
-        return Err(
-            "Voice file path is outside the allowed voices directory".to_string()
-        );
+        return Err("Voice file path is outside the allowed voices directory".to_string());
     }
 
     if !must_exist {
         if let Some(parent) = canonical.parent() {
             if !parent.starts_with(&voices) {
-                return Err(
-                    "Voice file parent is outside the allowed voices directory".to_string()
-                );
+                return Err("Voice file parent is outside the allowed voices directory".to_string());
             }
         }
     }
@@ -1479,7 +1514,10 @@ fn sanitize_character_id(id: &str) -> Result<&str, String> {
     if id.is_empty() || id.len() > 64 {
         return Err("Character ID must be 1-64 characters".to_string());
     }
-    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         return Err(
             "Character ID contains invalid characters (only A-Z, a-z, 0-9, _, - allowed)"
                 .to_string(),
@@ -1489,14 +1527,19 @@ fn sanitize_character_id(id: &str) -> Result<&str, String> {
 }
 
 #[tauri::command]
-pub fn tts_save_voice_file(character_id: String, base64_data: String, extension: String) -> Result<String, String> {
+pub fn tts_save_voice_file(
+    character_id: String,
+    base64_data: String,
+    extension: String,
+) -> Result<String, String> {
     sanitize_character_id(&character_id)?;
 
     let dir = voices_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create voices dir: {e}"))?;
 
     let ext_lower = extension.to_lowercase();
-    if ext_lower.is_empty() || ext_lower.len() > 16
+    if ext_lower.is_empty()
+        || ext_lower.len() > 16
         || !ext_lower.chars().all(|c| c.is_ascii_alphanumeric())
     {
         return Err("Invalid file extension".to_string());
@@ -1506,7 +1549,11 @@ pub fn tts_save_voice_file(character_id: String, base64_data: String, extension:
     let path = dir.join(&filename);
 
     // Decode base64 (strip data URL prefix if present).
-    let b64 = if let Some(idx) = base64_data.find(";base64,") { &base64_data[idx + 8..] } else { &base64_data };
+    let b64 = if let Some(idx) = base64_data.find(";base64,") {
+        &base64_data[idx + 8..]
+    } else {
+        &base64_data
+    };
     use base64::Engine;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(b64)
@@ -1535,15 +1582,20 @@ pub fn tts_save_voice_file(character_id: String, base64_data: String, extension:
 pub fn tts_read_voice_file(file_path: String) -> Result<String, String> {
     let safe_path = validate_voice_path(&file_path, true)?;
 
-    let bytes = std::fs::read(&safe_path)
-        .map_err(|e| format!("Cannot read voice file: {e}"))?;
+    let bytes = std::fs::read(&safe_path).map_err(|e| format!("Cannot read voice file: {e}"))?;
     use base64::Engine;
     let lower = safe_path.to_string_lossy().to_ascii_lowercase();
-    let mime = if lower.ends_with(".wav") { "audio/wav" }
-        else if lower.ends_with(".mp3") { "audio/mpeg" }
-        else if lower.ends_with(".m4a") { "audio/mp4" }
-        else if lower.ends_with(".aac") { "audio/aac" }
-        else { "audio/wav" };
+    let mime = if lower.ends_with(".wav") {
+        "audio/wav"
+    } else if lower.ends_with(".mp3") {
+        "audio/mpeg"
+    } else if lower.ends_with(".m4a") {
+        "audio/mp4"
+    } else if lower.ends_with(".aac") {
+        "audio/aac"
+    } else {
+        "audio/wav"
+    };
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(format!("data:{mime};base64,{b64}"))
 }
@@ -1551,10 +1603,7 @@ pub fn tts_read_voice_file(file_path: String) -> Result<String, String> {
 // ---- Install ----
 
 #[tauri::command]
-pub fn tts_install(
-    app_handle: tauri::AppHandle,
-    source: Option<String>,
-) -> Result<(), String> {
+pub fn tts_install(app_handle: tauri::AppHandle, source: Option<String>) -> Result<(), String> {
     std::thread::spawn(move || {
         installer::install(app_handle, source);
     });
@@ -1612,7 +1661,10 @@ pub fn tts_finetune_status(character_id: String) -> Result<Option<String>, Strin
 #[tauri::command]
 pub fn tts_check_training_data_exists(character_id: String) -> Result<bool, String> {
     sanitize_character_id(&character_id)?;
-    let meta = voices_dir().join(&character_id).join("train").join("metadata.list");
+    let meta = voices_dir()
+        .join(&character_id)
+        .join("train")
+        .join("metadata.list");
     Ok(meta.exists())
 }
 
@@ -1665,7 +1717,11 @@ struct GenerateProgress {
 /// ending: "." for en/ko, "。" for CJK languages.
 fn split_sentences(text: &str, lang: &str) -> Vec<String> {
     const ENDINGS: &[char] = &['。', '！', '？', '!', '?', '.', '\n'];
-    let fallback_punct = if matches!(lang, "en" | "all_ko" | "ko") { "." } else { "。" };
+    let fallback_punct = if matches!(lang, "en" | "all_ko" | "ko") {
+        "."
+    } else {
+        "。"
+    };
     let mut sentences = Vec::new();
     let mut current = String::new();
     for ch in text.chars() {
@@ -1730,12 +1786,15 @@ pub fn tts_generate_training_data(
         let cid = character_id.clone();
         let train_dir_str = train_dir.to_string_lossy().to_string();
         std::thread::spawn(move || {
-            let _ = app.emit("tts-generate-done", serde_json::json!({
-                "character_id": cid,
-                "train_dir": train_dir_str,
-                "count": count,
-                "reused": true,
-            }));
+            let _ = app.emit(
+                "tts-generate-done",
+                serde_json::json!({
+                    "character_id": cid,
+                    "train_dir": train_dir_str,
+                    "count": count,
+                    "reused": true,
+                }),
+            );
         });
         return Ok(());
     }
@@ -1778,12 +1837,15 @@ pub fn tts_generate_training_data(
         let clean_lang = normalize_lang_code(&text_lang);
 
         for (i, sentence) in sentences.iter().enumerate() {
-            let _ = app.emit("tts-generate-progress", GenerateProgress {
-                character_id: cid.clone(),
-                current: i + 1,
-                total,
-                sentence: sentence.clone(),
-            });
+            let _ = app.emit(
+                "tts-generate-progress",
+                GenerateProgress {
+                    character_id: cid.clone(),
+                    current: i + 1,
+                    total,
+                    sentence: sentence.clone(),
+                },
+            );
 
             let resp = client
                 .get(&base_url)
@@ -1808,7 +1870,9 @@ pub fn tts_generate_training_data(
                         metadata_lines.push(format!("{filename}|default|{clean_lang}|{sentence}"));
                     }
                 }
-                _ => { failed_count += 1; }
+                _ => {
+                    failed_count += 1;
+                }
             }
         }
 
@@ -1818,15 +1882,18 @@ pub fn tts_generate_training_data(
         }
 
         let actual_count = metadata_lines.len();
-        let _ = app.emit("tts-generate-done", serde_json::json!({
-            "character_id": cid,
-            "train_dir": train_dir.to_string_lossy(),
-            "count": actual_count,
-            "failed_count": failed_count,
-            "error": if actual_count == 0 && failed_count > 0 {
-                "所有句子合成失败，请检查参考音频和文本是否正确配置"
-            } else { "" },
-        }));
+        let _ = app.emit(
+            "tts-generate-done",
+            serde_json::json!({
+                "character_id": cid,
+                "train_dir": train_dir.to_string_lossy(),
+                "count": actual_count,
+                "failed_count": failed_count,
+                "error": if actual_count == 0 && failed_count > 0 {
+                    "所有句子合成失败，请检查参考音频和文本是否正确配置"
+                } else { "" },
+            }),
+        );
     });
 
     Ok(())

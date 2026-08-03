@@ -202,7 +202,6 @@ fn migrate_project_db(conn: &Connection, workspace: &Path) -> Result<(), String>
 }
 
 fn migrate_project_db_v1(conn: &Connection, workspace: &Path) -> Result<(), String> {
-
     // 获取要迁移的 JSON：先查 project_state 表，再查 legacy 文件
     let legacy_json = match read_project_state_value(conn)? {
         Some(json) => json,
@@ -233,7 +232,8 @@ fn migrate_project_db_v1(conn: &Connection, workspace: &Path) -> Result<(), Stri
         .collect();
 
     // 整个迁移在单个事务中执行，保证原子性
-    let tx = conn.unchecked_transaction()
+    let tx = conn
+        .unchecked_transaction()
         .map_err(|err| format!("开启迁移事务失败: {err}"))?;
 
     for session in &sessions {
@@ -242,9 +242,15 @@ fn migrate_project_db_v1(conn: &Connection, workspace: &Path) -> Result<(), Stri
             continue;
         }
         let name = session.get("name").and_then(|v| v.as_str()).unwrap_or("");
-        let provider = session.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+        let provider = session
+            .get("provider")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let model = session.get("model").and_then(|v| v.as_str()).unwrap_or("");
-        let created_at = session.get("createdAt").and_then(|v| v.as_i64()).unwrap_or(0);
+        let created_at = session
+            .get("createdAt")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
 
         tx.execute(
             "INSERT OR IGNORE INTO sessions (id, name, provider, model, created_at)
@@ -254,9 +260,7 @@ fn migrate_project_db_v1(conn: &Connection, workspace: &Path) -> Result<(), Stri
         .map_err(|err| format!("迁移会话 {id} 失败: {err}"))?;
     }
 
-    let session_messages = parsed
-        .get("sessionMessages")
-        .and_then(|v| v.as_object());
+    let session_messages = parsed.get("sessionMessages").and_then(|v| v.as_object());
 
     if let Some(sm) = session_messages {
         for (session_id, messages) in sm {
@@ -325,7 +329,8 @@ fn migrate_project_db_v1(conn: &Connection, workspace: &Path) -> Result<(), Stri
         }
     }
 
-    tx.commit().map_err(|err| format!("提交迁移事务失败: {err}"))?;
+    tx.commit()
+        .map_err(|err| format!("提交迁移事务失败: {err}"))?;
 
     conn.pragma_update(None, "user_version", 1_i64)
         .map_err(|err| format!("设置数据库版本失败: {err}"))?;
@@ -467,7 +472,10 @@ fn extract_and_store_secrets(app_secrets: &AppSecrets, value: &mut serde_json::V
             continue;
         }
         if secrets::set_secret(app_secrets, account, trimmed).is_ok() {
-            obj.insert((*field).to_string(), serde_json::Value::String(String::new()));
+            obj.insert(
+                (*field).to_string(),
+                serde_json::Value::String(String::new()),
+            );
         }
     }
 }
@@ -479,7 +487,10 @@ fn extract_and_store_secrets(app_secrets: &AppSecrets, value: &mut serde_json::V
 /// Returns `Some(stripped_json)` when migration occurred and the stripped JSON
 /// should be re-persisted to SQLite to remove the plaintext. Returns `None`
 /// otherwise.
-fn migrate_and_inject_secrets(app_secrets: &AppSecrets, value: &mut serde_json::Value) -> Option<String> {
+fn migrate_and_inject_secrets(
+    app_secrets: &AppSecrets,
+    value: &mut serde_json::Value,
+) -> Option<String> {
     // Migration phase: move any non-empty plaintext keys to vault.
     let mut migrated = false;
     {
@@ -489,7 +500,10 @@ fn migrate_and_inject_secrets(app_secrets: &AppSecrets, value: &mut serde_json::
             let trimmed = raw.trim();
             if !trimmed.is_empty() {
                 if secrets::set_secret(app_secrets, account, trimmed).is_ok() {
-                    obj.insert((*field).to_string(), serde_json::Value::String(String::new()));
+                    obj.insert(
+                        (*field).to_string(),
+                        serde_json::Value::String(String::new()),
+                    );
                     migrated = true;
                 }
             }
@@ -552,10 +566,7 @@ pub(crate) fn load_app_settings(app: tauri::AppHandle) -> Result<AppSettingsResu
                 let _ = app_secrets.save();
             }
 
-            Some(
-                serde_json::to_string(&value)
-                    .map_err(|err| format!("序列化配置失败: {err}"))?,
-            )
+            Some(serde_json::to_string(&value).map_err(|err| format!("序列化配置失败: {err}"))?)
         }
         None => None,
     };
@@ -567,7 +578,10 @@ pub(crate) fn load_app_settings(app: tauri::AppHandle) -> Result<AppSettingsResu
 }
 
 #[tauri::command]
-pub(crate) fn save_app_settings(app: tauri::AppHandle, settings_json: String) -> Result<AppSettingsResult, String> {
+pub(crate) fn save_app_settings(
+    app: tauri::AppHandle,
+    settings_json: String,
+) -> Result<AppSettingsResult, String> {
     if settings_json.len() > MAX_SETTINGS_JSON_BYTES {
         return Err(format!("配置内容超过上限 {MAX_SETTINGS_JSON_BYTES} bytes"));
     }
@@ -581,8 +595,8 @@ pub(crate) fn save_app_settings(app: tauri::AppHandle, settings_json: String) ->
     // Divert API keys to the Stronghold vault before anything hits SQLite.
     let app_secrets = app.state::<AppSecrets>();
     extract_and_store_secrets(&app_secrets, &mut value);
-    let persisted_json = serde_json::to_string(&value)
-        .map_err(|err| format!("序列化配置失败: {err}"))?;
+    let persisted_json =
+        serde_json::to_string(&value).map_err(|err| format!("序列化配置失败: {err}"))?;
 
     let (conn, db_path) = open_app_db()?;
     conn.execute(
@@ -597,7 +611,9 @@ pub(crate) fn save_app_settings(app: tauri::AppHandle, settings_json: String) ->
     .map_err(|err| format!("保存应用配置失败: {err}"))?;
 
     // Persist the vault after writing secrets.
-    app_secrets.save().map_err(|e| format!("保存密钥库失败: {e}"))?;
+    app_secrets
+        .save()
+        .map_err(|e| format!("保存密钥库失败: {e}"))?;
 
     Ok(AppSettingsResult {
         settings_json: Some(persisted_json),
@@ -626,11 +642,13 @@ pub(crate) fn load_app_characters() -> Result<AppCharactersResult, String> {
 #[tauri::command]
 pub(crate) fn save_app_characters(characters_json: String) -> Result<AppCharactersResult, String> {
     if characters_json.len() > MAX_CHARACTERS_JSON_BYTES {
-        return Err(format!("角色卡内容超过上限 {MAX_CHARACTERS_JSON_BYTES} bytes"));
+        return Err(format!(
+            "角色卡内容超过上限 {MAX_CHARACTERS_JSON_BYTES} bytes"
+        ));
     }
 
-    let value: serde_json::Value =
-        serde_json::from_str(&characters_json).map_err(|err| format!("角色卡不是合法 JSON: {err}"))?;
+    let value: serde_json::Value = serde_json::from_str(&characters_json)
+        .map_err(|err| format!("角色卡不是合法 JSON: {err}"))?;
     if !value.is_object() {
         return Err("角色卡 JSON 必须是对象".to_string());
     }
@@ -697,17 +715,23 @@ pub(crate) fn save_project_state(
 
 #[tauri::command]
 pub(crate) fn save_session(workspace_path: String, session_json: String) -> Result<(), String> {
-    let parsed: serde_json::Value = serde_json::from_str(&session_json)
-        .map_err(|err| format!("会话 JSON 不合法: {err}"))?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&session_json).map_err(|err| format!("会话 JSON 不合法: {err}"))?;
 
     let id = parsed.get("id").and_then(|v| v.as_str()).unwrap_or("");
     if id.is_empty() {
         return Err("会话 ID 不能为空".to_string());
     }
     let name = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("");
-    let provider = parsed.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+    let provider = parsed
+        .get("provider")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let model = parsed.get("model").and_then(|v| v.as_str()).unwrap_or("");
-    let created_at = parsed.get("createdAt").and_then(|v| v.as_i64()).unwrap_or(0);
+    let created_at = parsed
+        .get("createdAt")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
 
     let (conn, ..) = open_project_db(&workspace_path)?;
     conn.execute(
@@ -776,13 +800,17 @@ pub(crate) fn save_message_batch(
         .map_err(|err| format!("消息列表 JSON 不合法: {err}"))?;
 
     let (conn, ..) = open_project_db(&workspace_path)?;
-    let tx = conn.unchecked_transaction()
+    let tx = conn
+        .unchecked_transaction()
         .map_err(|err| format!("开启事务失败: {err}"))?;
 
     // 全量替换语义：先删除该 session 的所有旧消息，再插入新消息。
     // 这样 clearMessages(空数组) 和 resetToMessage(截断数组) 才能正确清理旧数据。
-    tx.execute("DELETE FROM messages WHERE session_id = ?1", params![session_id])
-        .map_err(|err| format!("清理旧消息失败: {err}"))?;
+    tx.execute(
+        "DELETE FROM messages WHERE session_id = ?1",
+        params![session_id],
+    )
+    .map_err(|err| format!("清理旧消息失败: {err}"))?;
 
     for (idx, msg) in messages.iter().enumerate() {
         let msg_id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
@@ -838,7 +866,8 @@ pub(crate) fn save_message_batch(
         .map_err(|err| format!("保存消息 {msg_id} 失败: {err}"))?;
     }
 
-    tx.commit().map_err(|err| format!("提交消息事务失败: {err}"))?;
+    tx.commit()
+        .map_err(|err| format!("提交消息事务失败: {err}"))?;
 
     Ok(())
 }
@@ -925,6 +954,21 @@ pub(crate) struct AllMessagesResult {
     pub(crate) messages_by_session_json: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ToolUsageEntry {
+    pub(crate) name: String,
+    pub(crate) count: i64,
+    pub(crate) success: i64,
+    pub(crate) error: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ToolUsageResult {
+    pub(crate) usage_json: String,
+}
+
 /// Load every session's messages in a single query (one connection open), grouped
 /// by session id. Replaces the previous N+1 per-session loads at workspace open.
 #[tauri::command]
@@ -957,6 +1001,65 @@ pub(crate) fn load_all_session_messages(
     Ok(AllMessagesResult {
         messages_by_session_json: serde_json::to_string(&grouped)
             .map_err(|err| format!("序列化消息列表失败: {err}"))?,
+    })
+}
+
+/// Aggregate tool invocation statistics across every session directly in the
+/// backend, so the frontend does not need to keep all sessions' messages
+/// resident in memory just to compute usage stats. Only the
+/// `tool_invocations` column is read; message bodies never cross the IPC
+/// boundary.
+#[tauri::command]
+pub(crate) fn aggregate_tool_usage(workspace_path: String) -> Result<ToolUsageResult, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let mut stmt = conn
+        .prepare("SELECT tool_invocations FROM messages WHERE tool_invocations IS NOT NULL")
+        .map_err(|err| format!("查询工具调用失败: {err}"))?;
+
+    // name → (count, success, error)
+    let mut aggregated: std::collections::BTreeMap<String, (i64, i64, i64)> =
+        std::collections::BTreeMap::new();
+
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|err| format!("读取工具调用失败: {err}"))?;
+    for raw in rows.filter_map(|r| r.ok()) {
+        let Ok(serde_json::Value::Array(invocations)) =
+            serde_json::from_str::<serde_json::Value>(&raw)
+        else {
+            continue;
+        };
+        for invocation in invocations {
+            let Some(name) = invocation.get("name").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let status = invocation
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let entry = aggregated.entry(name.to_string()).or_insert((0, 0, 0));
+            entry.0 += 1;
+            if status == "success" {
+                entry.1 += 1;
+            } else if status == "error" {
+                entry.2 += 1;
+            }
+        }
+    }
+
+    let usage: Vec<ToolUsageEntry> = aggregated
+        .into_iter()
+        .map(|(name, (count, success, error))| ToolUsageEntry {
+            name,
+            count,
+            success,
+            error,
+        })
+        .collect();
+
+    Ok(ToolUsageResult {
+        usage_json: serde_json::to_string(&usage)
+            .map_err(|err| format!("序列化工具统计失败: {err}"))?,
     })
 }
 
@@ -1064,23 +1167,25 @@ pub(crate) fn load_checkpoint_records(
     let (sql, params): (String, Vec<rusqlite::types::Value>) = if let Some(ref sid) = session_id {
         (
             "SELECT id, session_id, message_id, sha, label, file_count, created_at
-             FROM checkpoint_timeline WHERE session_id = ?1 ORDER BY id".into(),
+             FROM checkpoint_timeline WHERE session_id = ?1 ORDER BY id"
+                .into(),
             vec![sid.clone().into()],
         )
     } else {
         (
             "SELECT id, session_id, message_id, sha, label, file_count, created_at
-             FROM checkpoint_timeline ORDER BY id".into(),
+             FROM checkpoint_timeline ORDER BY id"
+                .into(),
             vec![],
         )
     };
 
-    let mut stmt = conn.prepare(&sql)
+    let mut stmt = conn
+        .prepare(&sql)
         .map_err(|err| format!("查询 checkpoint 记录失败: {err}"))?;
 
-    let records = stmt.query_map(
-        rusqlite::params_from_iter(params.iter()),
-        |row| {
+    let records = stmt
+        .query_map(rusqlite::params_from_iter(params.iter()), |row| {
             Ok(CheckpointRecord {
                 id: row.get(0)?,
                 session_id: row.get(1)?,
@@ -1090,11 +1195,10 @@ pub(crate) fn load_checkpoint_records(
                 file_count: row.get(5)?,
                 created_at: row.get(6)?,
             })
-        },
-    )
-    .map_err(|err| format!("读取 checkpoint 记录失败: {err}"))?
-    .filter_map(|r| r.ok())
-    .collect();
+        })
+        .map_err(|err| format!("读取 checkpoint 记录失败: {err}"))?
+        .filter_map(|r| r.ok())
+        .collect();
 
     Ok(records)
 }
@@ -1258,10 +1362,7 @@ pub(crate) fn papr_storage_delete(
     Ok(())
 }
 
-pub(crate) fn papr_storage_keys(
-    workspace_path: &str,
-    app_id: &str,
-) -> Result<Vec<String>, String> {
+pub(crate) fn papr_storage_keys(workspace_path: &str, app_id: &str) -> Result<Vec<String>, String> {
     let (conn, ..) = open_project_db(workspace_path)?;
     let mut stmt = conn
         .prepare("SELECT key FROM app_storage WHERE app_id = ?1 ORDER BY key")
@@ -1296,7 +1397,11 @@ pub(crate) fn papr_save_permission_settings(settings_json: &str) -> Result<(), S
            value = excluded.value,
            data_type = excluded.data_type,
            updated_at = excluded.updated_at",
-        params![PAPR_APP_PERMISSION_SETTINGS_KEY, settings_json, unix_millis()?],
+        params![
+            PAPR_APP_PERMISSION_SETTINGS_KEY,
+            settings_json,
+            unix_millis()?
+        ],
     )
     .map_err(|err| format!("保存 Papr 权限设置失败: {err}"))?;
     Ok(())
@@ -1472,6 +1577,65 @@ mod tests {
         assert!(!wal_after
             .windows(marker_bytes.len())
             .any(|window| window == marker_bytes));
+    }
+
+    #[test]
+    fn aggregate_tool_usage_counts_invocations_across_sessions() {
+        let workspace = TestWorkspace::new("aggregate-tool-usage");
+        let ws = workspace.workspace_arg();
+
+        save_session(
+            ws.clone(),
+            r#"{"id":"s-1","name":"会话一","provider":"deepseek","model":"m","createdAt":1}"#
+                .to_string(),
+        )
+        .expect("should save session s-1");
+        save_session(
+            ws.clone(),
+            r#"{"id":"s-2","name":"会话二","provider":"deepseek","model":"m","createdAt":2}"#
+                .to_string(),
+        )
+        .expect("should save session s-2");
+
+        let s1_messages = r#"[
+            {"id":"m-1","role":"assistant","content":"","timestamp":1,
+             "toolInvocations":[{"id":"t-1","name":"read","status":"success"},{"id":"t-2","name":"read","status":"error"}]},
+            {"id":"m-2","role":"assistant","content":"","timestamp":2,
+             "toolInvocations":[{"id":"t-3","name":"write","status":"success"}]},
+            {"id":"m-3","role":"user","content":"no tools here","timestamp":3}
+        ]"#;
+        let s2_messages = r#"[
+            {"id":"m-4","role":"assistant","content":"","timestamp":1,
+             "toolInvocations":[{"id":"t-4","name":"read","status":"success"},{"id":"t-5","name":"search","status":"running"}]}
+        ]"#;
+        save_message_batch(ws.clone(), "s-1".to_string(), s1_messages.to_string())
+            .expect("should save s-1 messages");
+        save_message_batch(ws.clone(), "s-2".to_string(), s2_messages.to_string())
+            .expect("should save s-2 messages");
+
+        let result = aggregate_tool_usage(ws).expect("should aggregate tool usage");
+        let usage: Vec<serde_json::Value> =
+            serde_json::from_str(&result.usage_json).expect("usage json should parse");
+
+        let find = |name: &str| {
+            usage
+                .iter()
+                .find(|entry| entry["name"] == name)
+                .unwrap_or_else(|| panic!("missing entry for {name}"))
+                .clone()
+        };
+        let read = find("read");
+        assert_eq!(read["count"], 3);
+        assert_eq!(read["success"], 2);
+        assert_eq!(read["error"], 1);
+        let write = find("write");
+        assert_eq!(write["count"], 1);
+        assert_eq!(write["success"], 1);
+        let search = find("search");
+        assert_eq!(search["count"], 1);
+        assert_eq!(search["success"], 0);
+        assert_eq!(search["error"], 0);
+        assert_eq!(usage.len(), 3);
     }
 
     #[test]

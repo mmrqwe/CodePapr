@@ -235,6 +235,8 @@ export interface AgentState {
   skillEnabledById: Record<string, boolean>;
   conversationStats: ConversationStats;
   sessionConversationStats: Record<string, ConversationStats>;
+  /** True while the active session's messages are being loaded on demand. */
+  sessionMessagesLoading: boolean;
   projectDiagnosticsReport: ProjectDiagnosticsReport | null;
   isLoading: boolean;
   projectGraphLoading: boolean;
@@ -260,6 +262,9 @@ export interface AgentState {
   _pendingMemoryConsolidation: boolean;
   _latestContextSnapshot: { sessionId: string; snapshot: IContextSnapshot } | null;
   _currentMode: WorkMode;
+  /** LRU order (most recently used first) of sessions whose messages may live
+   *  in the in-memory cache. Runtime-only; rebuilt on workspace open. */
+  _sessionLru: string[];
 }
 
 export interface AgentActions {

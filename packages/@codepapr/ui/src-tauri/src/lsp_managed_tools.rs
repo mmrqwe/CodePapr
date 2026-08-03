@@ -47,13 +47,21 @@ enum ArchiveKind {
 const CSHARP_ANALYZER_PROJECT: &str =
     "tools/CodePapr.CSharp.Analyzer/CodePapr.CSharp.Analyzer.csproj";
 const CLANGD_VERSION: &str = "22.1.6";
+// 钉死到 milestone 版本：快照 URL 浮动且无法锁定哈希。
+// 该 URL 同时存在于 src/download_verification.rs 的锁定清单中，升级时两处同步。
 const JDTLS_DOWNLOAD_URL: &str =
-    "https://download.eclipse.org/jdtls/snapshots/jdt-language-server-latest.tar.gz";
+    "https://download.eclipse.org/jdtls/milestones/1.54.0/jdt-language-server-1.54.0-202511261751.tar.gz";
 const JAVA_RUNTIME_VERSION: &str = "21";
 const NODE_RUNTIME_VERSION: &str = "v20.12.2";
+// 钉死版本 + 锁定哈希（见 src/download_verification.rs），禁止使用 latest 浮动 URL。
+const SQLS_VERSION: &str = "0.2.48";
+const MARKSMAN_VERSION: &str = "2026-02-08";
 const MANAGED_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 const MANAGED_COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_MANAGED_DOWNLOAD_BYTES: usize = 300_000_000;
+// 解压防护上限：远超现有工具实际体积（clangd 解压后约 600MB 为最大者）。
+const MAX_EXTRACTED_TOTAL_BYTES: u64 = 2_000_000_000;
+const MAX_EXTRACTED_ENTRIES: usize = 100_000;
 
 struct ManagedNodeRuntime {
     command: PathBuf,
@@ -1099,23 +1107,8 @@ fn ensure_markdown_support(reporter: Option<&dyn Fn(ManagedLspProgress)>) -> Res
 
         let install_root = managed_install_root()?;
         let marksman_root = install_root.join("marksman");
-        let (url, archive_kind) = managed_marksman_download()?;
-        install_archive(
-            &url,
-            archive_kind,
-            &marksman_root,
-            "marksman",
-            "marksman",
-            reporter,
-        )?;
-
-        let bin_dir = marksman_root.join("bin");
-        fs::create_dir_all(&bin_dir).map_err(|e| format!("创建 marksman bin 目录失败: {e}"))?;
-        if let Some(binary) = find_extracted_binary(&marksman_root, "marksman") {
-            let dest = bin_dir.join(executable_name("marksman"));
-            fs::rename(&binary, &dest).map_err(|e| format!("移动 marksman 失败: {e}"))?;
-            ensure_executable(&dest)?;
-        }
+        let url = managed_marksman_url()?;
+        install_single_binary(&url, &marksman_root, "marksman", "marksman", reporter)?;
 
         if marksman_command_works() || !managed_markdown_commands().is_empty() {
             return Ok(());
@@ -1183,56 +1176,46 @@ fn marksman_command_works() -> bool {
 }
 
 fn managed_sqls_download() -> Result<(String, ArchiveKind), String> {
+    // sqls 官方仅提供 x86_64 构建：macOS ARM 经 Rosetta 运行；Linux ARM 无可用构建。
     let os = if cfg!(target_os = "macos") {
         "darwin"
     } else if cfg!(target_os = "linux") {
+        if cfg!(target_arch = "aarch64") {
+            return Err("sqls 官方未提供 Linux ARM64 构建，请手动安装 sqls".to_string());
+        }
         "linux"
     } else if cfg!(target_os = "windows") {
         "windows"
     } else {
         return Err("当前平台不支持 sqls 下载".to_string());
     };
-    let arch = if cfg!(target_arch = "aarch64") {
-        "arm64"
-    } else {
-        "amd64"
-    };
     Ok((
         format!(
-            "https://github.com/sqls-server/sqls/releases/latest/download/sqls_{os}_{arch}.tar.gz"
+            "https://github.com/sqls-server/sqls/releases/download/v{SQLS_VERSION}/sqls-{os}-{SQLS_VERSION}.zip"
         ),
-        ArchiveKind::TarGz,
+        ArchiveKind::Zip,
     ))
 }
 
-fn managed_marksman_download() -> Result<(String, ArchiveKind), String> {
-    let os = if cfg!(target_os = "macos") {
-        "macos"
+fn managed_marksman_url() -> Result<String, String> {
+    // marksman 自 2024-12 起以裸二进制发布（无压缩包）；linux 用 musl 静态构建，
+    // 兼容任意发行版。macOS 为 universal binary。URL 与锁定清单一一对应。
+    let name = if cfg!(target_os = "macos") {
+        "marksman-macos".to_string()
     } else if cfg!(target_os = "linux") {
-        "linux"
+        let arch = if cfg!(target_arch = "aarch64") {
+            "arm64"
+        } else {
+            "x64"
+        };
+        format!("marksman-linux-musl-{arch}")
     } else if cfg!(target_os = "windows") {
-        "windows"
+        "marksman.exe".to_string()
     } else {
         return Err("当前平台不支持 marksman 下载".to_string());
     };
-    let arch = if cfg!(target_arch = "aarch64") {
-        "arm64"
-    } else {
-        "x64"
-    };
-    let ext = if cfg!(target_os = "windows") {
-        "zip"
-    } else {
-        "tar.gz"
-    };
-    let archive_kind = if cfg!(target_os = "windows") {
-        ArchiveKind::Zip
-    } else {
-        ArchiveKind::TarGz
-    };
-    Ok((
-        format!("https://github.com/artempyanykh/marksman/releases/latest/download/marksman-{os}-{arch}.{ext}"),
-        archive_kind,
+    Ok(format!(
+        "https://github.com/artempyanykh/marksman/releases/download/{MARKSMAN_VERSION}/{name}"
     ))
 }
 
@@ -1627,6 +1610,10 @@ fn install_archive(
             Some(destination),
         );
         download_to_file(url, &archive_path)?;
+        // 解压前强校验：哈希不匹配直接中止（临时文件由下方统一清理）。
+        let verification = crate::download_verification::verify_download(url, &archive_path)
+            .map_err(|err| format!("{label} 下载校验失败，已中止安装: {err}"))?;
+        log_verification(tool_label, url, &verification);
         fs::create_dir_all(&stage_root)
             .map_err(|err| format!("创建 {label} 暂存目录失败: {err}"))?;
         emit_progress(
@@ -1650,6 +1637,7 @@ fn install_archive(
                 .map_err(|err| format!("写入 {label} 目录失败: {err}"))?;
             let _ = fs::remove_dir_all(&stage_root);
         }
+        write_install_manifest(destination, tool_label, url, &verification);
         emit_progress(
             reporter,
             "ready",
@@ -1663,6 +1651,114 @@ fn install_archive(
     let _ = fs::remove_file(&archive_path);
     let _ = fs::remove_dir_all(&stage_root);
     install_result
+}
+
+/// 下载单个二进制文件（marksman 等无压缩包发布的工具），同样执行强校验。
+fn install_single_binary(
+    url: &str,
+    destination_root: &Path,
+    binary_name: &str,
+    tool_label: &str,
+    reporter: Option<&dyn Fn(ManagedLspProgress)>,
+) -> Result<(), String> {
+    fs::create_dir_all(destination_root)
+        .map_err(|err| format!("创建 {tool_label} 安装目录失败: {err}"))?;
+
+    let unique = format!("{}-{}", std::process::id(), monotonic_nanos());
+    let download_path = destination_root.join(format!(".{binary_name}-{unique}.download"));
+
+    let install_result = (|| {
+        emit_progress(
+            reporter,
+            "downloading",
+            tool_label,
+            String::new(),
+            Some(destination_root),
+        );
+        download_to_file(url, &download_path)?;
+        let verification = crate::download_verification::verify_download(url, &download_path)
+            .map_err(|err| format!("{tool_label} 下载校验失败，已中止安装: {err}"))?;
+        log_verification(tool_label, url, &verification);
+
+        let bin_dir = destination_root.join("bin");
+        fs::create_dir_all(&bin_dir)
+            .map_err(|err| format!("创建 {tool_label} bin 目录失败: {err}"))?;
+        let dest = bin_dir.join(executable_name(binary_name));
+        if dest.exists() {
+            fs::remove_file(&dest)
+                .map_err(|err| format!("清理旧的 {tool_label} 二进制失败: {err}"))?;
+        }
+        fs::rename(&download_path, &dest)
+            .map_err(|err| format!("写入 {tool_label} 二进制失败: {err}"))?;
+        ensure_executable(&dest)?;
+        write_install_manifest(destination_root, tool_label, url, &verification);
+        emit_progress(
+            reporter,
+            "ready",
+            tool_label,
+            String::new(),
+            Some(destination_root),
+        );
+        Ok(())
+    })();
+
+    let _ = fs::remove_file(&download_path);
+    install_result
+}
+
+fn log_verification(
+    tool_label: &str,
+    url: &str,
+    outcome: &crate::download_verification::VerificationOutcome,
+) {
+    match outcome {
+        crate::download_verification::VerificationOutcome::Verified { .. } => {
+            eprintln!("[managed-lsp] {tool_label} {}", outcome.description());
+        }
+        _ => {
+            eprintln!(
+                "[managed-lsp] 警告: {tool_label} {url} {}",
+                outcome.description()
+            );
+        }
+    }
+}
+
+/// 记录安装来源与校验信息，便于事后审计（版本、来源、哈希、安装时间）。
+fn write_install_manifest(
+    install_root: &Path,
+    tool_label: &str,
+    url: &str,
+    outcome: &crate::download_verification::VerificationOutcome,
+) {
+    let (verified, source, sha256) = match outcome {
+        crate::download_verification::VerificationOutcome::Verified { source, .. } => {
+            (true, source.to_string(), String::new())
+        }
+        crate::download_verification::VerificationOutcome::NoChecksumSource { computed_sha256 } => {
+            (false, String::new(), computed_sha256.clone())
+        }
+        crate::download_verification::VerificationOutcome::ChecksumUnavailable {
+            computed_sha256,
+            ..
+        } => (false, String::new(), computed_sha256.clone()),
+    };
+    let manifest = serde_json::json!({
+        "tool": tool_label,
+        "url": url,
+        "verified": verified,
+        "verificationSource": source,
+        "sha256": sha256,
+        "installedAt": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    });
+    let path = install_root.join(".codepapr-install-manifest.json");
+    let _ = fs::write(
+        path,
+        serde_json::to_vec_pretty(&manifest).unwrap_or_default(),
+    );
 }
 
 fn emit_progress(
@@ -1751,18 +1847,62 @@ fn extract_tar_gz(archive_path: &Path, destination: &Path) -> Result<(), String>
     let archive_file =
         fs::File::open(archive_path).map_err(|err| format!("打开 tar.gz 归档失败: {err}"))?;
     let decoder = GzDecoder::new(archive_file);
-    Archive::new(decoder)
-        .unpack(destination)
-        .map_err(|err| format!("解压 tar.gz 归档失败: {err}"))
+    extract_tar_entries(Archive::new(decoder), archive_path, destination)
 }
 
 fn extract_tar_xz(archive_path: &Path, destination: &Path) -> Result<(), String> {
     let archive_file =
         fs::File::open(archive_path).map_err(|err| format!("打开 tar.xz 归档失败: {err}"))?;
     let decoder = XzDecoder::new(archive_file);
-    Archive::new(decoder)
-        .unpack(destination)
-        .map_err(|err| format!("解压 tar.xz 归档失败: {err}"))
+    extract_tar_entries(Archive::new(decoder), archive_path, destination)
+}
+
+/// 逐条目解压 tar 归档，施加安全限制：
+/// - `unpack_in` 保证路径与符号链接/硬链接目标不逃逸出目标目录；
+/// - 条目总数与解压后总体积受限，防止解压炸弹。
+fn extract_tar_entries<R: Read>(
+    mut archive: Archive<R>,
+    archive_path: &Path,
+    destination: &Path,
+) -> Result<(), String> {
+    let mut entry_count = 0_usize;
+    let mut total_bytes = 0_u64;
+
+    let entries = archive
+        .entries()
+        .map_err(|err| format!("读取 tar 归档条目失败 ({}): {err}", archive_path.display()))?;
+    for entry in entries {
+        let mut entry = entry
+            .map_err(|err| format!("读取 tar 归档条目失败 ({}): {err}", archive_path.display()))?;
+
+        entry_count += 1;
+        if entry_count > MAX_EXTRACTED_ENTRIES {
+            return Err(format!(
+                "tar 归档条目数超过上限 {MAX_EXTRACTED_ENTRIES} ({})",
+                archive_path.display()
+            ));
+        }
+        let size = entry.header().size().unwrap_or(0);
+        total_bytes = total_bytes.saturating_add(size);
+        if total_bytes > MAX_EXTRACTED_TOTAL_BYTES {
+            return Err(format!(
+                "tar 归档解压体积超过上限 {MAX_EXTRACTED_TOTAL_BYTES} bytes ({})",
+                archive_path.display()
+            ));
+        }
+
+        let unpacked = entry
+            .unpack_in(destination)
+            .map_err(|err| format!("解压 tar 归档条目失败 ({}): {err}", archive_path.display()))?;
+        if !unpacked {
+            return Err(format!(
+                "tar 归档包含非法路径条目，已拒绝解压 ({})",
+                archive_path.display()
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 fn extract_zip(archive_path: &Path, destination: &Path) -> Result<(), String> {
@@ -1771,12 +1911,35 @@ fn extract_zip(archive_path: &Path, destination: &Path) -> Result<(), String> {
     let mut archive =
         ZipArchive::new(archive_file).map_err(|err| format!("解析 zip 归档失败: {err}"))?;
 
+    let mut entry_count = 0_usize;
+    let mut total_bytes = 0_u64;
+
     for index in 0..archive.len() {
         let mut entry = archive
             .by_index(index)
             .map_err(|err| format!("读取 zip 条目失败: {err}"))?;
+
+        entry_count += 1;
+        if entry_count > MAX_EXTRACTED_ENTRIES {
+            return Err(format!(
+                "zip 归档条目数超过上限 {MAX_EXTRACTED_ENTRIES} ({})",
+                archive_path.display()
+            ));
+        }
+        total_bytes = total_bytes.saturating_add(entry.size());
+        if total_bytes > MAX_EXTRACTED_TOTAL_BYTES {
+            return Err(format!(
+                "zip 归档解压体积超过上限 {MAX_EXTRACTED_TOTAL_BYTES} bytes ({})",
+                archive_path.display()
+            ));
+        }
+
+        // enclosed_name 拒绝绝对路径与 `..` 组件；非法条目直接报错而非跳过。
         let Some(entry_path) = entry.enclosed_name().map(|path| path.to_path_buf()) else {
-            continue;
+            return Err(format!(
+                "zip 归档包含非法路径条目，已拒绝解压 ({})",
+                archive_path.display()
+            ));
         };
         let target = destination.join(entry_path);
         if entry.is_dir() {
@@ -2591,5 +2754,164 @@ mod tests {
         let (url, _) = managed_clangd_download().expect("clangd mapping");
         assert!(url.contains("github.com/clangd/clangd/releases/download"));
         assert!(url.contains("clangd-"));
+    }
+
+    /// 篡改检测：文件内容与锁定哈希不匹配时必须硬失败。
+    #[test]
+    fn pinned_checksum_rejects_tampered_file() {
+        let url = super::JDTLS_DOWNLOAD_URL;
+        assert!(
+            crate::download_verification::pinned_checksum(url).is_some(),
+            "jdtls URL 必须命中锁定清单"
+        );
+        let temp = std::env::temp_dir().join(format!(
+            "codepapr-tamper-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("unix epoch")
+                .as_nanos()
+        ));
+        fs::write(&temp, b"tampered content").expect("write temp");
+        let result = crate::download_verification::verify_download(url, &temp);
+        let _ = fs::remove_file(&temp);
+        assert!(
+            result.is_err(),
+            "篡改文件必须校验失败，实际: {:?}",
+            result.map(|outcome| outcome.description())
+        );
+    }
+
+    /// 每个托管下载 URL 必须有校验覆盖：锁定清单哈希，或已知官方校验源。
+    /// 升级工具版本时若忘记同步锁定清单，此测试在当前平台立即失败。
+    #[test]
+    fn every_managed_download_has_checksum_coverage() {
+        let mut urls = vec![super::JDTLS_DOWNLOAD_URL.to_string()];
+        if let Ok((url, _)) = managed_clangd_download() {
+            urls.push(url);
+        }
+        if let Ok((url, _)) = super::managed_sqls_download() {
+            urls.push(url);
+        }
+        if let Ok(url) = super::managed_marksman_url() {
+            urls.push(url);
+        }
+        if let Ok((url, _)) = managed_node_download() {
+            urls.push(url);
+        }
+        if let Ok((url, _)) = managed_java_download() {
+            urls.push(url);
+        }
+
+        for url in urls {
+            let has_pinned = crate::download_verification::pinned_checksum(&url).is_some();
+            let has_official_source = url.starts_with("https://nodejs.org/dist/")
+                || url.starts_with("https://api.adoptium.net/v3/binary/")
+                || url.starts_with("https://download.eclipse.org/jdtls/");
+            assert!(
+                has_pinned || has_official_source,
+                "托管下载缺少校验覆盖: {url}"
+            );
+        }
+    }
+
+    /// 真实压缩包解压冒烟测试（含符号链接处理）。需要网络下载夹具，默认跳过；
+    /// 设置 CODEPAPR_EXTRACT_SMOKE_DIR 指向包含以下文件的目录启用：
+    /// node.tar.gz / jdtls.tar.gz / sqls.zip / clangd.zip
+    #[test]
+    fn extract_archive_smoke_with_real_fixtures() {
+        let Some(dir) = std::env::var_os("CODEPAPR_EXTRACT_SMOKE_DIR") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+
+        let cases: &[(&str, super::ArchiveKind, &[&str])] = &[
+            ("node.tar.gz", super::ArchiveKind::TarGz, &["node", "npm"]),
+            ("jdtls.tar.gz", super::ArchiveKind::TarGz, &["plugins"]),
+            ("sqls.zip", super::ArchiveKind::Zip, &["sqls"]),
+            ("clangd.zip", super::ArchiveKind::Zip, &["clangd"]),
+        ];
+
+        fn contains_entry(root: &std::path::Path, name: &str) -> bool {
+            let mut stack = vec![root.to_path_buf()];
+            while let Some(dir) = stack.pop() {
+                let Ok(entries) = fs::read_dir(&dir) else {
+                    continue;
+                };
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let path = entry.path();
+                    if path
+                        .file_name()
+                        .is_some_and(|n| n.to_string_lossy() == name)
+                    {
+                        return true;
+                    }
+                    if path.is_dir()
+                        && !path
+                            .symlink_metadata()
+                            .is_ok_and(|m| m.file_type().is_symlink())
+                    {
+                        stack.push(path);
+                    }
+                }
+            }
+            false
+        }
+
+        for (name, kind, expected) in cases {
+            let archive = dir.join(name);
+            if !archive.is_file() {
+                continue;
+            }
+            let dest = std::env::temp_dir().join(format!(
+                "codepapr-extract-smoke-{}-{}",
+                name,
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("unix epoch")
+                    .as_nanos()
+            ));
+            fs::create_dir_all(&dest).expect("create dest");
+            super::extract_archive(&archive, *kind, &dest)
+                .unwrap_or_else(|err| panic!("extract {name}: {err}"));
+            for entry_name in *expected {
+                assert!(
+                    contains_entry(&dest, entry_name),
+                    "{name}: missing {entry_name} after extraction"
+                );
+            }
+            let _ = fs::remove_dir_all(&dest);
+        }
+
+        // 锁定清单哈希端到端验证（离线）：夹具文件必须通过其锁定 URL 的校验。
+        // 夹具需与当前平台的下载 URL 对应。
+        let mut pinned_cases: Vec<(String, String)> = vec![(
+            "jdtls.tar.gz".to_string(),
+            super::JDTLS_DOWNLOAD_URL.to_string(),
+        )];
+        if let Ok((url, _)) = super::managed_sqls_download() {
+            pinned_cases.push(("sqls.zip".to_string(), url));
+        }
+        if let Ok((url, _)) = managed_clangd_download() {
+            pinned_cases.push(("clangd.zip".to_string(), url));
+        }
+        if let Ok((url, _)) = managed_node_download() {
+            pinned_cases.push(("node.tar.gz".to_string(), url));
+        }
+        for (name, url) in &pinned_cases {
+            let file = dir.join(name);
+            if !file.is_file() {
+                continue;
+            }
+            let outcome = crate::download_verification::verify_download(url, &file)
+                .unwrap_or_else(|err| panic!("verify {name}: {err}"));
+            assert!(
+                matches!(
+                    outcome,
+                    crate::download_verification::VerificationOutcome::Verified { .. }
+                ),
+                "{name}: {}",
+                outcome.description()
+            );
+        }
     }
 }

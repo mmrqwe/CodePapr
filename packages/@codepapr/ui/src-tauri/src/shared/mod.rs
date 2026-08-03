@@ -10,8 +10,8 @@ pub(crate) mod time;
 
 pub(crate) use paths::{
     canonical_workspace, expanded_path, home_dir, normalize_relative_path,
-    normalize_workspace_filter, parse_workspace_path_input, relative_string,
-    resolve_existing_path, sanitize_workspace_path_input, PathLocationInput,
+    normalize_workspace_filter, parse_workspace_path_input, relative_string, resolve_existing_path,
+    sanitize_workspace_path_input, PathLocationInput,
 };
 pub(crate) use runtime::run_blocking_workspace_task;
 pub(crate) use strings::{parse_browser_url, truncate_utf8};

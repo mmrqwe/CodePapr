@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IChatStreamEvent, IContextSnapshot, IMessage } from '@codepapr/types';
 import type { ProjectStateSnapshot, ProjectSessionMeta, ProjectMessage } from '../utils/projectStorage';
-import type { Settings } from './agentStore';
+import type { Settings, UIMessage } from './agentStore';
 import { createMockAgent } from './__test-utils__/createMockAgent';
 
 const { invokeMock } = vi.hoisted(() => ({
@@ -37,7 +37,9 @@ const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMoc
   saveProjectStateWithPurgeMock: vi.fn(async () => undefined),
   saveProjectStateDirectMock: vi.fn(async () => undefined),
   loadSessionsMock: vi.fn(async (): Promise<ProjectSessionMeta[]> => []),
-  loadSessionMessagesMock: vi.fn(async (): Promise<ProjectMessage[]> => []),
+  loadSessionMessagesMock: vi.fn(
+    async (_workspacePath: string, _sessionId: string): Promise<ProjectMessage[]> => []
+  ),
   loadAllProjectMetaMock: vi.fn(async () => ({})),
   saveSessionMock: vi.fn(async () => undefined),
   saveMessageBatchMock: vi.fn(async () => undefined),
@@ -125,6 +127,7 @@ vi.mock('./internals/agentFactory', async (importOriginal) => {
 import { normalizeSettings, useAgentStore } from './agentStore';
 import { buildEffectiveContextMessages } from '../utils/contextCompaction';
 import { WorkerCrashError } from '../agent/WorkerBackedAgent';
+import { SESSION_MESSAGE_CACHE_LIMIT } from './internals/defaults';
 
 async function waitForMacrotask(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -2591,5 +2594,229 @@ describe('sendMessage /goal', () => {
     expect(errorMessages).toHaveLength(0);
     // Agent should have been called (goal loop started)
     expect(chat).toHaveBeenCalled();
+  });
+});
+
+describe('session lazy loading and LRU cache', () => {
+  function createSessionMeta(id: string, createdAt: number) {
+    return {
+      id,
+      name: `任务 ${id}`,
+      provider: 'deepseek' as const,
+      model: 'deepseek-v4-pro',
+      createdAt,
+    };
+  }
+
+  function createMessage(id: string, content: string): ProjectMessage {
+    return { id, role: 'user', content, timestamp: 1 };
+  }
+
+  beforeEach(() => {
+    loadSessionsMock.mockClear();
+    loadSessionMessagesMock.mockClear();
+    loadAllProjectMetaMock.mockClear();
+    loadProjectStateMock.mockClear();
+    saveProjectStateDirectMock.mockClear();
+    saveMessageBatchMock.mockClear();
+    saveSessionMock.mockClear();
+    saveProjectMetaMock.mockClear();
+    loadSessionsMock.mockResolvedValue([]);
+    loadSessionMessagesMock.mockResolvedValue([]);
+    loadAllProjectMetaMock.mockResolvedValue({});
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ apiKey: 'sk-test', fastModelEnabled: false }),
+      workspacePath: '/tmp/codepapr-lazy-test',
+      sessions: [],
+      activeSessionId: null,
+      messages: [],
+      sessionMessages: {},
+      sessionMessagesLoading: false,
+      conversationStats: createEmptyConversation(),
+      sessionConversationStats: {},
+      isLoading: false,
+      settingsLoaded: true,
+      _agent: null,
+      _agentModel: null,
+      _agentPromptKey: null,
+      _sessionLru: [],
+    }));
+  });
+
+  it('openWorkspace loads only the active session messages', async () => {
+    loadSessionsMock.mockResolvedValue([
+      createSessionMeta('s-active', 3),
+      createSessionMeta('s-other-1', 2),
+      createSessionMeta('s-other-2', 1),
+    ]);
+    loadAllProjectMetaMock.mockResolvedValue({
+      active_session_id: 's-active',
+      conversation_stats: createEmptyConversation(),
+      session_conversation_stats: {},
+    });
+    loadSessionMessagesMock.mockResolvedValue([createMessage('m-1', '活跃会话的消息')]);
+
+    await useAgentStore.getState().openWorkspace('/tmp/codepapr-lazy-test');
+
+    const state = useAgentStore.getState();
+    expect(loadSessionMessagesMock).toHaveBeenCalledTimes(1);
+    expect(loadSessionMessagesMock).toHaveBeenCalledWith('/tmp/codepapr-lazy-test', 's-active');
+    expect(state.activeSessionId).toBe('s-active');
+    expect(state.messages.map((m) => m.content)).toEqual(['活跃会话的消息']);
+    expect(Object.keys(state.sessionMessages)).toEqual(['s-active']);
+    expect(state.sessionMessagesLoading).toBe(false);
+    expect(state._sessionLru).toEqual(['s-active', 's-other-1', 's-other-2']);
+  });
+
+  it('selectSession loads messages on demand and shows a loading state', async () => {
+    const deferred: { resolve: ((messages: ProjectMessage[]) => void) | null } = { resolve: null };
+    loadSessionMessagesMock.mockImplementation(
+      () => new Promise<ProjectMessage[]>((resolve) => { deferred.resolve = resolve; })
+    );
+    useAgentStore.setState((state) => ({
+      ...state,
+      sessions: [createSessionMeta('s-1', 2), createSessionMeta('s-2', 1)],
+      activeSessionId: 's-1',
+      sessionMessages: { 's-1': [createMessage('m-1', '会话一') as unknown as UIMessage] },
+      sessionConversationStats: {
+        's-1': createEmptyConversation(),
+        's-2': createEmptyConversation(),
+      },
+      _sessionLru: ['s-1', 's-2'],
+    }));
+
+    useAgentStore.getState().selectSession('s-2');
+
+    expect(useAgentStore.getState().activeSessionId).toBe('s-2');
+    expect(useAgentStore.getState().sessionMessagesLoading).toBe(true);
+    expect(useAgentStore.getState().messages).toEqual([]);
+
+    deferred.resolve?.([createMessage('m-2', '会话二')]);
+    await waitForCondition(() => !useAgentStore.getState().sessionMessagesLoading);
+
+    const state = useAgentStore.getState();
+    expect(loadSessionMessagesMock).toHaveBeenCalledWith('/tmp/codepapr-lazy-test', 's-2');
+    expect(state.messages.map((m) => m.content)).toEqual(['会话二']);
+    expect(state.sessionMessages['s-2']?.map((m) => m.content)).toEqual(['会话二']);
+    expect(state._sessionLru).toEqual(['s-2', 's-1']);
+  });
+
+  it('selectSession uses the in-memory cache without hitting storage', () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      sessions: [createSessionMeta('s-1', 2), createSessionMeta('s-2', 1)],
+      activeSessionId: 's-1',
+      sessionMessages: {
+        's-1': [],
+        's-2': [createMessage('m-2', '缓存的消息') as unknown as UIMessage],
+      },
+      sessionConversationStats: {
+        's-1': createEmptyConversation(),
+        's-2': createEmptyConversation(),
+      },
+      _sessionLru: ['s-1', 's-2'],
+    }));
+
+    useAgentStore.getState().selectSession('s-2');
+
+    expect(loadSessionMessagesMock).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().messages.map((m) => m.content)).toEqual(['缓存的消息']);
+    expect(useAgentStore.getState().sessionMessagesLoading).toBe(false);
+  });
+
+  it('evicts the least recently used session when the cache limit is exceeded', async () => {
+    const cacheLimit = SESSION_MESSAGE_CACHE_LIMIT;
+    const sessionIds = Array.from({ length: cacheLimit }, (_, i) => `s-${i + 1}`);
+    const sessionMessages: Record<string, UIMessage[]> = {};
+    for (const id of sessionIds) {
+      sessionMessages[id] = [createMessage(`m-${id}`, `消息 ${id}`) as unknown as UIMessage];
+    }
+    useAgentStore.setState((state) => ({
+      ...state,
+      sessions: [
+        ...sessionIds.map((id, i) => createSessionMeta(id, cacheLimit - i)),
+        createSessionMeta('s-new', 0),
+      ],
+      activeSessionId: 's-1',
+      messages: sessionMessages['s-1']!,
+      sessionMessages,
+      sessionConversationStats: Object.fromEntries(
+        [...sessionIds, 's-new'].map((id) => [id, createEmptyConversation()])
+      ),
+      // s-1 most recently used … s-5 least recently used
+      _sessionLru: [...sessionIds],
+    }));
+    loadSessionMessagesMock.mockResolvedValue([createMessage('m-new', '新会话的消息')]);
+
+    useAgentStore.getState().selectSession('s-new');
+    await waitForCondition(() => !useAgentStore.getState().sessionMessagesLoading);
+
+    const state = useAgentStore.getState();
+    const resident = Object.keys(state.sessionMessages);
+    expect(resident).toHaveLength(cacheLimit);
+    expect(resident).toContain('s-new');
+    // LRU tail (s-5) got evicted; the more recently used sessions stay resident
+    expect(resident).not.toContain(`s-${cacheLimit}`);
+    expect(resident).toContain('s-1');
+    // Evicted data is still reloadable from storage
+    expect(state._sessionLru[0]).toBe('s-new');
+  });
+
+  it('does not apply on-demand load results after the user switched away', async () => {
+    const deferred: { resolve: ((messages: ProjectMessage[]) => void) | null } = { resolve: null };
+    loadSessionMessagesMock.mockImplementation(
+      (_workspace: string, sessionId: string) => {
+        if (sessionId === 's-slow') {
+          return new Promise<ProjectMessage[]>((resolve) => { deferred.resolve = resolve; });
+        }
+        return Promise.resolve([createMessage('m-fast', '快速会话')]);
+      }
+    );
+    useAgentStore.setState((state) => ({
+      ...state,
+      sessions: [createSessionMeta('s-slow', 2), createSessionMeta('s-fast', 1)],
+      activeSessionId: null,
+      sessionMessages: {},
+      sessionConversationStats: {
+        's-slow': createEmptyConversation(),
+        's-fast': createEmptyConversation(),
+      },
+      _sessionLru: ['s-slow', 's-fast'],
+    }));
+
+    useAgentStore.getState().selectSession('s-slow');
+    expect(useAgentStore.getState().sessionMessagesLoading).toBe(true);
+    // Switch away before the slow load resolves
+    useAgentStore.getState().selectSession('s-fast');
+    await waitForCondition(() => useAgentStore.getState().messages.length === 1);
+    expect(useAgentStore.getState().messages.map((m) => m.content)).toEqual(['快速会话']);
+
+    deferred.resolve?.([createMessage('m-slow', '迟到的消息')]);
+    await waitForMacrotask();
+
+    const state = useAgentStore.getState();
+    expect(state.activeSessionId).toBe('s-fast');
+    expect(state.messages.map((m) => m.content)).toEqual(['快速会话']);
+    expect(state.sessionMessages['s-slow']).toBeUndefined();
+  });
+
+  it('deleteSession removes the session from the LRU order', () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      sessions: [createSessionMeta('s-1', 2), createSessionMeta('s-2', 1)],
+      activeSessionId: 's-1',
+      sessionMessages: { 's-1': [], 's-2': [] },
+      sessionConversationStats: {
+        's-1': createEmptyConversation(),
+        's-2': createEmptyConversation(),
+      },
+      _sessionLru: ['s-1', 's-2'],
+    }));
+
+    useAgentStore.getState().deleteSession('s-2');
+
+    expect(useAgentStore.getState()._sessionLru).toEqual(['s-1']);
+    expect(useAgentStore.getState().sessionMessages['s-2']).toBeUndefined();
   });
 });
