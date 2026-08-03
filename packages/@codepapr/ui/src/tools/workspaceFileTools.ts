@@ -1,0 +1,444 @@
+import { invoke } from '@tauri-apps/api/core';
+import {
+  asString,
+  asOptionalString,
+  asOptionalNumber,
+  asOptionalBoolean,
+  asOptionalPositiveInteger,
+  asPatchArray,
+} from '@codepapr/core';
+import type { IImageContent } from '@codepapr/types';
+import { toolByName } from './workspaceToolDefinitions';
+import {
+  OUTLINE_LINE_THRESHOLD,
+  LIST_SYMBOL_FILE_LIMIT,
+  LIST_SYMBOL_FILE_MAX_BYTES,
+  LIST_SYMBOLS_PER_FILE,
+  extractFileSymbols,
+  findSymbolByName,
+  sliceLines,
+  formatOutline,
+  type ListFilesArgs,
+  type ListFilesResult,
+  type ReadFileArgs,
+  type ReadFileResult,
+  type ReadImageFileArgs,
+  type ReadImageFileResult,
+  type WriteFileArgs,
+  type WriteTextFileResult,
+  type WriteFileResult,
+  type ApplyPatchArgs,
+  type ApplyPatchResult,
+  type ApplyDiffArgs,
+  type ApplyDiffFileResult,
+  type ApplyDiffResult,
+} from './workspaceToolHelpers';
+import { applySearchReplaceDiff, applySearchReplacePatch } from './workspaceToolUtils';
+import { lspLanguageFromPath } from '../utils/editorLanguage';
+import { type WorkspaceToolContext } from './workspaceToolContext';
+
+export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
+  const {
+    registry,
+    workspace,
+    readBeforeContent,
+    astPreCheck,
+    lspDiagnosticsHook,
+    describeAmbiguousMatches,
+    ensureExternalPathAllowed,
+    notifyWorkspaceMutation,
+    editHistory,
+  } = ctx;
+
+  registry.register(toolByName('workspace_list_files'), async (args: Record<string, unknown>) => {
+    const parsed: ListFilesArgs = {
+      relativePath: asOptionalString(args.relativePath),
+      maxDepth: asOptionalNumber(args.maxDepth),
+    };
+    await ensureExternalPathAllowed(parsed.relativePath, 'list');
+    const result = await invoke<ListFilesResult>('list_workspace_files', {
+      workspacePath: workspace(),
+      relativePath: parsed.relativePath,
+      maxDepth: parsed.maxDepth,
+    });
+
+    // 轻量逐文件符号：对代码文件附带顶层符号大纲（AST，无 AST 支持或失败则跳过该文件）
+    const symbolsByFile: Record<string, string> = {};
+    const codeFiles = result.entries
+      .filter((e) => !e.isDir && e.bytes <= LIST_SYMBOL_FILE_MAX_BYTES && lspLanguageFromPath(e.path))
+      .slice(0, LIST_SYMBOL_FILE_LIMIT);
+    await Promise.all(
+      codeFiles.map(async (e) => {
+        try {
+          const languageId = lspLanguageFromPath(e.path);
+          const file = await invoke<ReadFileResult>('read_text_file', {
+            workspacePath: workspace(),
+            relativePath: e.path,
+            maxBytes: LIST_SYMBOL_FILE_MAX_BYTES,
+          });
+          const symbols = await extractFileSymbols(languageId, file.content);
+          const topLevel = symbols.filter((s) => !s.containerName).slice(0, LIST_SYMBOLS_PER_FILE);
+          if (topLevel.length > 0) {
+            symbolsByFile[e.path] = topLevel.map((s) => `${s.name} (${s.kind})`).join(', ');
+          }
+        } catch {
+          // 单文件符号提取失败则跳过（降级）
+        }
+      })
+    );
+
+    return { ...result, symbolsByFile };
+  });
+
+  registry.register(toolByName('workspace_read_file'), async (args: Record<string, unknown>) => {
+    const parsed: ReadFileArgs = {
+      relativePath: asString(args.relativePath, 'relativePath'),
+      maxBytes: asOptionalNumber(args.maxBytes),
+      startLine: asOptionalNumber(args.startLine),
+      endLine: asOptionalNumber(args.endLine),
+      aroundLine: asOptionalNumber(args.aroundLine),
+      contextLines: asOptionalNumber(args.contextLines),
+      symbol: asOptionalString(args.symbol),
+    };
+    await ensureExternalPathAllowed(parsed.relativePath, 'read');
+    const languageId = lspLanguageFromPath(parsed.relativePath);
+    const hasLineAnchor =
+      parsed.startLine != null || parsed.endLine != null || parsed.aroundLine != null;
+
+    // 符号切片：传了 symbol 时，用 AST 定位符号行范围后只读该符号（无 AST 则降级文本搜索）
+    if (parsed.symbol) {
+      const full = await invoke<ReadFileResult>('read_text_file', {
+        workspacePath: workspace(),
+        relativePath: parsed.relativePath,
+        maxBytes: 20_000_000,
+      });
+      const symbols = await extractFileSymbols(languageId, full.content);
+      const target = findSymbolByName(symbols, parsed.symbol);
+      if (target) {
+        return {
+          ...full,
+          content: sliceLines(full.content, target.line, target.endLine),
+          startLine: target.line,
+          endLine: target.endLine,
+          truncatedByRange: false,
+          symbol: target.name,
+          symbolKind: target.kind,
+          note: `已用 AST 定位符号 ${target.name} (${target.kind}) L${target.line}-L${target.endLine}，仅返回该符号代码。`,
+        };
+      }
+      const lines = full.content.split('\n');
+      const lower = parsed.symbol.toLowerCase();
+      const idx = lines.findIndex((l) => l.toLowerCase().includes(lower));
+      if (idx >= 0) {
+        const start = Math.max(1, idx + 1 - 5);
+        const end = Math.min(lines.length, idx + 1 + 20);
+        return {
+          ...full,
+          content: sliceLines(full.content, start, end),
+          startLine: start,
+          endLine: end,
+          truncatedByRange: false,
+          note: `该语言无 AST 支持或未找到符号 "${parsed.symbol}"，已降级文本搜索，返回首个匹配行附近 L${start}-L${end}。`,
+        };
+      }
+      return {
+        ...full,
+        note: `未能定位符号 "${parsed.symbol}"（无 AST 支持且文本未匹配），已返回全文。`,
+      };
+    }
+
+    const result = await invoke<ReadFileResult>('read_text_file', {
+      workspacePath: workspace(),
+      relativePath: parsed.relativePath,
+      maxBytes: parsed.maxBytes,
+      startLine: parsed.startLine,
+      endLine: parsed.endLine,
+      aroundLine: parsed.aroundLine,
+      contextLines: parsed.contextLines,
+    });
+
+    // 自动大纲：整文件读取且文件较大、未截断时附带符号大纲（AST 不支持则降级跳过）
+    if (
+      !hasLineAnchor &&
+      languageId &&
+      result.totalLines > OUTLINE_LINE_THRESHOLD &&
+      !result.truncatedByBytes
+    ) {
+      const symbols = await extractFileSymbols(languageId, result.content);
+      if (symbols.length > 0) {
+        return {
+          ...result,
+          outline: formatOutline(symbols),
+          outlineNote: `文件较大（${result.totalLines} 行），已附带 ${symbols.length} 个符号大纲；可用 read(relativePath, symbol: "符号名") 精确读取某个符号。`,
+        };
+      }
+    }
+
+    return result;
+  });
+
+  registry.register(toolByName('workspace_read_image'), async (args: Record<string, unknown>) => {
+    const parsed: ReadImageFileArgs = {
+      relativePath: asString(args.relativePath, 'relativePath'),
+      maxBytes: asOptionalNumber(args.maxBytes),
+    };
+    await ensureExternalPathAllowed(parsed.relativePath, 'read');
+    const result = await invoke<ReadImageFileResult>('read_image_file', {
+      workspacePath: workspace(),
+      relativePath: parsed.relativePath,
+      maxBytes: parsed.maxBytes,
+    });
+    const images: IImageContent[] = [{
+      mediaType: result.mediaType,
+      data: result.data,
+    }];
+    return {
+      path: result.path,
+      mediaType: result.mediaType,
+      bytes: result.bytes,
+      __images: images,
+    };
+  });
+
+  registry.register(toolByName('workspace_write_file'), async (args: Record<string, unknown>) => {
+    const parsed: WriteFileArgs = {
+      relativePath: asString(args.relativePath, 'relativePath'),
+      content: asString(args.content, 'content'),
+    };
+    const before = await readBeforeContent(parsed.relativePath);
+
+    const notes: string[] = [];
+    const preCheck = await astPreCheck(parsed.relativePath, before ?? '', parsed.content);
+    if (preCheck.rejected) {
+      throw new Error(preCheck.rejected);
+    }
+    if (preCheck.note) {
+      notes.push(preCheck.note);
+    }
+
+    const result = await invoke<WriteTextFileResult>('write_text_file', {
+      workspacePath: workspace(),
+      relativePath: parsed.relativePath,
+      content: parsed.content,
+    });
+
+    const verified = await invoke<ReadFileResult>('read_text_file', {
+      workspacePath: workspace(),
+      relativePath: parsed.relativePath,
+      maxBytes: Math.max(new TextEncoder().encode(parsed.content).length + 1024, 16384),
+    });
+    if (verified.content !== parsed.content) {
+      throw new Error(
+        `文件写入验证失败：${parsed.relativePath} 写入后内容与预期不一致。可能由云同步锁或文件系统问题导致，请重试。`
+      );
+    }
+
+    const diag = await lspDiagnosticsHook(parsed.relativePath, parsed.content);
+    notes.push(diag.note);
+
+    editHistory?.record({
+      path: result.path,
+      before,
+      after: parsed.content,
+    });
+    notifyWorkspaceMutation([result.path]);
+    return {
+      ...result,
+      diagnostics: diag.diagnostics,
+      notes,
+    } satisfies WriteFileResult;
+  });
+
+
+  registry.register(toolByName('workspace_apply_patch'), async (args: Record<string, unknown>) => {
+    const parsed: ApplyPatchArgs = {
+      relativePath: asString(args.relativePath, 'relativePath'),
+      search: asString(args.search, 'search'),
+      replace: asString(args.replace, 'replace'),
+      replaceAll: asOptionalBoolean(args.replaceAll, 'replaceAll'),
+      expectedOccurrences: asOptionalPositiveInteger(args.expectedOccurrences, 'expectedOccurrences'),
+    };
+
+    const current = await invoke<ReadFileResult>('read_text_file', {
+      workspacePath: workspace(),
+      relativePath: parsed.relativePath,
+      maxBytes: 20_000_000,
+    });
+    if (current.bytes >= 20_000_000) {
+      throw new Error(`文件 ${parsed.relativePath} 超过 20MB 上限，请改用 workspace_write_file 重写整个文件`);
+    }
+    const ambiguity = await describeAmbiguousMatches(
+      parsed.relativePath,
+      current.content,
+      parsed.search,
+      parsed.replaceAll,
+      parsed.expectedOccurrences
+    );
+    if (ambiguity) {
+      throw new Error(ambiguity);
+    }
+    const patched = applySearchReplacePatch(current.content, {
+      search: parsed.search,
+      replace: parsed.replace,
+      replaceAll: parsed.replaceAll,
+      expectedOccurrences: parsed.expectedOccurrences,
+    });
+
+    // 前置 AST 语法预检：仅当修改引入新语法错误时拦截、不落盘（语言不支持则降级跳过）
+    const notes: string[] = [];
+    const preCheck = await astPreCheck(parsed.relativePath, current.content, patched.content);
+    if (preCheck.rejected) {
+      throw new Error(preCheck.rejected);
+    }
+    if (preCheck.note) {
+      notes.push(preCheck.note);
+    }
+
+    const result = await invoke<WriteTextFileResult>('write_text_file', {
+      workspacePath: workspace(),
+      relativePath: parsed.relativePath,
+      content: patched.content,
+    });
+
+    // 写后验证：重读确认文件内容与写入一致
+    const verified = await invoke<ReadFileResult>('read_text_file', {
+      workspacePath: workspace(),
+      relativePath: parsed.relativePath,
+      maxBytes: Math.max(new TextEncoder().encode(patched.content).length + 1024, 16384),
+    });
+    if (verified.content !== patched.content) {
+      throw new Error(
+        `文件写入验证失败：${parsed.relativePath} 写入后内容与预期不一致。可能由云同步锁或文件系统问题导致，请重试。`
+      );
+    }
+
+    // 后置 LSP 诊断钩子：返回编译诊断供模型继续修复（无 LSP 则降级跳过）
+    const diag = await lspDiagnosticsHook(parsed.relativePath, patched.content);
+    notes.push(diag.note);
+
+    editHistory?.record({
+      path: result.path,
+      before: current.content,
+      after: patched.content,
+    });
+    notifyWorkspaceMutation([result.path]);
+
+    return {
+      ...result,
+      replacements: patched.replacements,
+      diagnostics: diag.diagnostics,
+      notes,
+    } satisfies ApplyPatchResult;
+  });
+
+  registry.register(toolByName('workspace_apply_diff'), async (args: Record<string, unknown>) => {
+    const parsed: ApplyDiffArgs = {
+      patches: asPatchArray(args.patches).map((patch) => ({
+        relativePath: asString(patch.relativePath, 'relativePath'),
+        search: asString(patch.search, 'search'),
+        replace: asString(patch.replace, 'replace'),
+        replaceAll: asOptionalBoolean(patch.replaceAll, 'replaceAll'),
+        expectedOccurrences: asOptionalPositiveInteger(patch.expectedOccurrences, 'expectedOccurrences'),
+      })),
+    };
+    const uniquePaths = [...new Set(parsed.patches.map((patch) => patch.relativePath))];
+    const fileContents: Record<string, string> = {};
+    const fileBytes: Record<string, number> = {};
+
+    for (const relativePath of uniquePaths) {
+      const current = await invoke<ReadFileResult>('read_text_file', {
+        workspacePath: workspace(),
+        relativePath,
+        maxBytes: 20_000_000,
+      });
+      if (current.bytes >= 20_000_000) {
+        throw new Error(`文件 ${relativePath} 超过 20MB 上限，请改用 workspace_write_file 重写整个文件`);
+      }
+      fileContents[relativePath] = current.content;
+      fileBytes[relativePath] = current.bytes;
+    }
+
+    const runningContents: Record<string, string> = { ...fileContents };
+    for (const patch of parsed.patches) {
+      const patchContent = runningContents[patch.relativePath] ?? '';
+      const ambiguity = await describeAmbiguousMatches(
+        patch.relativePath,
+        patchContent,
+        patch.search,
+        patch.replaceAll,
+        patch.expectedOccurrences
+      );
+      if (ambiguity) {
+        throw new Error(`${patch.relativePath}: ${ambiguity}`);
+      }
+      try {
+        runningContents[patch.relativePath] = applySearchReplacePatch(patchContent, patch).content;
+      } catch {
+        break;
+      }
+    }
+
+    const diff = applySearchReplaceDiff(fileContents, parsed.patches);
+
+    // 前置 AST 语法预检：任一文件引入新语法错误则整体拦截、全部不落盘（语言不支持则降级跳过）
+    const notes: string[] = [];
+    for (const file of diff.files) {
+      const preCheck = await astPreCheck(file.path, fileContents[file.path] ?? '', file.content);
+      if (preCheck.rejected) {
+        throw new Error(`${file.path}: ${preCheck.rejected}`);
+      }
+      if (preCheck.note) {
+        notes.push(`${file.path}: ${preCheck.note}`);
+      }
+    }
+
+    const files: ApplyDiffFileResult[] = [];
+
+    for (const file of diff.files) {
+      const result = await invoke<WriteTextFileResult>('write_text_file', {
+        workspacePath: workspace(),
+        relativePath: file.path,
+        content: file.content,
+      });
+
+      // 写后验证
+      const verified = await invoke<ReadFileResult>('read_text_file', {
+        workspacePath: workspace(),
+        relativePath: file.path,
+        maxBytes: Math.max(new TextEncoder().encode(file.content).length + 1024, 16384),
+      });
+      if (verified.content !== file.content) {
+        throw new Error(
+          `文件写入验证失败：${file.path} 写入后内容与预期不一致。可能由云同步锁或文件系统问题导致，请重试。`
+        );
+      }
+
+      // 后置 LSP 诊断钩子：返回编译诊断供模型继续修复（无 LSP 则降级跳过）
+      const diag = await lspDiagnosticsHook(file.path, file.content);
+      notes.push(`${file.path}: ${diag.note}`);
+
+      editHistory?.record({
+        path: result.path,
+        before: fileContents[file.path] ?? null,
+        after: file.content,
+      });
+      files.push({
+        ...result,
+        patches: file.patches,
+        replacements: file.replacements,
+        diagnostics: diag.diagnostics,
+      });
+    }
+
+    notifyWorkspaceMutation(files.map((file) => file.path));
+
+    return {
+      files,
+      totalFiles: diff.totalFiles,
+      totalPatches: diff.totalPatches,
+      totalReplacements: diff.totalReplacements,
+      notes,
+    } satisfies ApplyDiffResult;
+  });
+
+}
