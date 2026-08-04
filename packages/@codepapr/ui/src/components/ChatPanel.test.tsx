@@ -740,6 +740,55 @@ describe('ChatPanel', () => {
     expect(container.textContent).toContain('Ask');
   });
 
+  it('allows typing and sending in a project without any session', async () => {
+    const sendSpy = vi.fn(async () => {});
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ fastModelEnabled: false, apiKey: 'test-key' }),
+      sessions: [],
+      activeSessionId: null,
+      messages: [],
+      sessionMessages: {},
+      _sessionInputState: {},
+      isLoading: false,
+      loadingSessionId: null,
+      sessionMessagesLoading: false,
+      sendMessage: sendSpy,
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    expect(textarea).not.toBeNull();
+
+    const setNativeValue = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      'value'
+    )!.set!;
+    await act(async () => {
+      setNativeValue.call(textarea, '空项目的第一条消息');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(
+      '空项目的第一条消息'
+    );
+
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+
+    expect(sendSpy).toHaveBeenCalledWith(
+      '空项目的第一条消息',
+      '空项目的第一条消息',
+      'agent',
+      null,
+      undefined
+    );
+  });
+
   it('shows the cancel button only on the session that is actually running', async () => {
     setTwoSessions({
       isLoading: true,

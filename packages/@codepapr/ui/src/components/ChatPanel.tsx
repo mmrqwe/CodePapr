@@ -1391,12 +1391,21 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
   );
   // 输入框状态（模式/草稿/附件）按会话存取：切换会话自动换到对应会话的状态，
   // 互不串扰；组件卸载（如切到代码预览 tab）也不丢失。
+  // 无活动会话时（空项目/会话全部删除）回退到组件本地状态，保证不必先点
+  // 「新对话」也能输入发送——sendMessage 会在发送时自动创建会话。
   const sessionInputMap = useAgentStore((state) => state._sessionInputState);
-  const sessionInputState = activeSessionId ? sessionInputMap[activeSessionId] : undefined;
+  const [fallbackInput, setFallbackInput] = useState<SessionInputState>(DEFAULT_SESSION_INPUT);
+  const sessionInputState = activeSessionId ? sessionInputMap[activeSessionId] : fallbackInput;
   const input = sessionInputState?.draft ?? '';
   const pendingImages = sessionInputState?.images ?? NO_PENDING_IMAGES;
   const pendingFiles = sessionInputState?.files ?? NO_PENDING_FILES;
   const mode = sessionInputState?.mode ?? 'agent';
+
+  useEffect(() => {
+    if (activeSessionId) {
+      setFallbackInput(DEFAULT_SESSION_INPUT);
+    }
+  }, [activeSessionId]);
 
   const updateSessionInput = useCallback(
     (updater: (state: SessionInputState) => SessionInputState) => {
@@ -1405,7 +1414,10 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
         _sessionInputState: map,
         setSessionInputState: apply,
       } = useAgentStore.getState();
-      if (!sid) return;
+      if (!sid) {
+        setFallbackInput(updater);
+        return;
+      }
       apply(sid, updater(map[sid] ?? DEFAULT_SESSION_INPUT));
     },
     []
