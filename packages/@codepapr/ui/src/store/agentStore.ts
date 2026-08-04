@@ -116,13 +116,20 @@ void _isApiConfigured;
  *  SESSION_MESSAGE_CACHE_LIMIT sessions stay resident in memory. Eviction only
  *  drops the in-memory copy — SQLite keeps the full history, and every mutation
  *  is persisted before eviction can run (saveCurrentProjectState captures the
- *  state snapshot at call time), so no data is lost. */
+ *  state snapshot at call time), so no data is lost.
+ *
+ *  The session that is currently mid-turn (loadingSessionId) is always
+ *  protected: evicting it while a turn is in flight would make the turn-end
+ *  write fall back to the wrong session's messages and corrupt its history. */
 function evictSessionMessageCache(get: StoreGet, set: StoreSet, protectIds: string[]): void {
-  const { sessionMessages, _sessionLru } = get();
+  const { sessionMessages, _sessionLru, loadingSessionId } = get();
   const loadedIds = Object.keys(sessionMessages);
   if (loadedIds.length <= SESSION_MESSAGE_CACHE_LIMIT) return;
 
   const protectedSet = new Set(protectIds);
+  if (loadingSessionId) {
+    protectedSet.add(loadingSessionId);
+  }
   const loadedSet = new Set(loadedIds);
   const evictIds: string[] = [];
   const remaining = () => loadedSet.size - evictIds.length;

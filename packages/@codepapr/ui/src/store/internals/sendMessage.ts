@@ -237,43 +237,47 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             return;
           }
           if (lower === 'compact') {
-            const sessionMsgs = get().sessionMessages[get().activeSessionId ?? ''] ?? [];
+            // 以 await 前捕获的会话为准：压缩模型调用期间用户可能切换会话，
+            // 压缩结果不得写入其它会话，也不得污染当前查看会话的视图。
+            const compactSessionId = get().activeSessionId;
+            const sessionMsgs = get().sessionMessages[compactSessionId ?? ''] ?? [];
             const checkpointResult = await maybeGenerateContextCheckpoint(
               normalizedSettings,
               sessionMsgs,
               true,
-              currentTodoDigest(get().activeSessionId)
+              currentTodoDigest(compactSessionId)
             );
             if (checkpointResult) {
-              if (checkpointResult.cacheStats) {
+              if (checkpointResult.cacheStats && compactSessionId) {
                 const cpTier: 'primary' | 'fast' = checkpointResult.modelTier === 'primary' ? 'primary' : 'fast';
                 set((s) => ({
-                  conversationStats: addConversationStats(
-                    s.conversationStats,
-                    cpTier,
-                    checkpointResult.cacheStats!
-                  ),
+                  conversationStats:
+                    s.activeSessionId === compactSessionId
+                      ? addConversationStats(s.conversationStats, cpTier, checkpointResult.cacheStats!)
+                      : s.conversationStats,
                   sessionConversationStats: {
                     ...s.sessionConversationStats,
-                    [s.activeSessionId!]: addConversationStats(
-                      getSessionConversationStats(s.sessionConversationStats, s.activeSessionId!),
+                    [compactSessionId]: addConversationStats(
+                      getSessionConversationStats(s.sessionConversationStats, compactSessionId),
                       cpTier,
                       checkpointResult.cacheStats!
                     ),
                   },
                 }));
               }
-              set((s) => {
-                const nextMessages = insertCheckpointAtRetainedBoundary(
-                  sessionMsgs,
-                  checkpointResult.message,
-                  checkpointResult.insertIndex
-                );
-                return {
-                  messages: nextMessages,
-                  sessionMessages: { ...s.sessionMessages, [s.activeSessionId!]: nextMessages },
-                };
-              });
+              if (compactSessionId) {
+                set((s) => {
+                  const nextMessages = insertCheckpointAtRetainedBoundary(
+                    sessionMsgs,
+                    checkpointResult.message,
+                    checkpointResult.insertIndex
+                  );
+                  return {
+                    messages: s.activeSessionId === compactSessionId ? nextMessages : s.messages,
+                    sessionMessages: { ...s.sessionMessages, [compactSessionId]: nextMessages },
+                  };
+                });
+              }
               appendInfoMessage(
                 set,
                 `对话已压缩。${checkpointResult.message.contextCheckpoint?.sourceMessageCount ?? 0} 条消息合并为检查点，节省 ${
@@ -598,7 +602,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             getActiveCharacterPrompt() ?? '',
           ].join('\u0000');
           const runtimeSessionBootstrapPrompt = resolveSessionBootstrap(
-            get().activeSessionId,
+            turnSessionId,
             bootstrapSignature,
             () =>
               buildAgentSessionBootstrapPrompt(
@@ -629,7 +633,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             projectGraphSummary: projectGraphBootstrapSummary,
             todoDigest: currentTodoDigest(optimisticSid),
           });
-          let { _agent: agent, activeSessionId } = get();
+          let { _agent: agent } = get();
+          // 本回合归属会话以 optimistic 阶段捕获的 turnSessionId 为准。上方多个
+          // await（project-graph / memory / MCP 发现）期间用户可能已切换会话，
+          // 此处若重读 get().activeSessionId 会把回合执行到新会话：用户消息留在
+          // 旧会话、助手回复却写进新会话，且 agent 上下文不含本条输入。
+          let activeSessionId: string | null = turnSessionId;
           const { _agentModel: agentModel, _agentPromptKey: agentPromptKey } = get();
           let accumulatedStats: ICacheStatistics | undefined;
           let accumulatedSubagentFast: ICacheStatistics | undefined;
@@ -1062,7 +1071,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                       const cur = s.sessionMessages[activeSessionId!] ?? [];
                       const next = [...cur, feedbackMsg];
                       return {
-                        messages: next,
+                        messages: s.activeSessionId === activeSessionId ? next : s.messages,
                         sessionMessages: { ...s.sessionMessages, [activeSessionId!]: next },
                       };
                     });
@@ -1203,7 +1212,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                         cp.insertIndex
                       );
                       return {
-                        messages: next,
+                        messages: s.activeSessionId === activeSessionId ? next : s.messages,
                         sessionMessages: {
                           ...s.sessionMessages,
                           [activeSessionId!]: next,

@@ -2,6 +2,7 @@ use crate::shared::{
     canonical_workspace, expanded_path, normalize_workspace_filter, parse_browser_url,
     run_blocking_workspace_task, truncate_utf8, unix_millis,
 };
+use crate::shell::dangerous::{detect_dangerous_command, detect_dangerous_invocation};
 use crate::shell::types::{
     BackgroundCommandResult, BackgroundProcessEntry, CommandResult, ManagedBackgroundProcess,
     StopAllBackgroundProcessesResult, StopBackgroundProcessResult,
@@ -199,6 +200,11 @@ pub(crate) fn run_workspace_command_impl(
         return Err(format!(
             "命令 `{command}` 被安全策略阻止。已阻止的入口: {}",
             BLOCKED_COMMANDS.join(", ")
+        ));
+    }
+    if let Some(reason) = detect_dangerous_invocation(&command, args.as_deref().unwrap_or(&[])) {
+        return Err(format!(
+            "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
         ));
     }
 
@@ -400,6 +406,11 @@ pub(crate) fn run_workspace_shell_command_impl(
     if command.trim().is_empty() {
         return Err("命令不能为空".to_string());
     }
+    if let Some(reason) = detect_dangerous_command(&command) {
+        return Err(format!(
+            "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
+        ));
+    }
     let workspace = canonical_workspace(&workspace_path)?;
     let cwd = resolve_shell_workdir(&workspace, workdir)?;
     let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30).clamp(1, MAX_COMMAND_SECONDS));
@@ -427,6 +438,11 @@ pub(crate) fn start_workspace_background_command(
         return Err(format!(
             "命令 `{command}` 被安全策略阻止。已阻止的入口: {}",
             BLOCKED_COMMANDS.join(", ")
+        ));
+    }
+    if let Some(reason) = detect_dangerous_invocation(&command, args.as_deref().unwrap_or(&[])) {
+        return Err(format!(
+            "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
         ));
     }
 
@@ -545,6 +561,11 @@ pub(crate) fn start_workspace_shell_background_command(
 ) -> Result<BackgroundCommandResult, String> {
     if command.trim().is_empty() {
         return Err("命令不能为空".to_string());
+    }
+    if let Some(reason) = detect_dangerous_command(&command) {
+        return Err(format!(
+            "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
+        ));
     }
     let workspace = canonical_workspace(&workspace_path)?;
     let cwd = resolve_shell_workdir(&workspace, workdir)?;

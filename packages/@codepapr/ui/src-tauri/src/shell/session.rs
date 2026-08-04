@@ -1,4 +1,5 @@
 use crate::shared::{canonical_workspace, normalize_workspace_filter, unix_millis};
+use crate::shell::dangerous::{detect_dangerous_command, detect_dangerous_invocation};
 use crate::shell::guard::{
     build_shell_command_line, create_shell_session_id, detect_default_shell,
     find_unquoted_shell_version_constraint, write_shell_payload,
@@ -225,6 +226,12 @@ pub(crate) fn send_shell_input(
             .get(&session_id)
             .ok_or_else(|| format!("Shell 会话不存在: {session_id}"))?;
 
+        if let Some(reason) = detect_dangerous_command(&input) {
+            return Err(format!(
+                "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
+            ));
+        }
+
         if let Some(token) = find_unquoted_shell_version_constraint(&input) {
             return Err(format!(
                 "检测到未加引号的版本约束 {token:?}。这会在 shell 中被解析成重定向并生成空文件。请把该参数包在引号里后重试，例如 '{token}'。"
@@ -245,6 +252,12 @@ pub(crate) fn send_shell_command(
         let session = sessions
             .get(&session_id)
             .ok_or_else(|| format!("Shell 会话不存在: {session_id}"))?;
+        if let Some(reason) = detect_dangerous_invocation(&command, args.as_deref().unwrap_or(&[]))
+        {
+            return Err(format!(
+                "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
+            ));
+        }
         let payload =
             build_shell_command_line(&session.shell, &command, &args.unwrap_or_default())?;
         write_shell_payload(&session_id, session, payload)

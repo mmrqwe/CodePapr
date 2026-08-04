@@ -27,7 +27,6 @@ const packagePaths = [
   'packages/@codepapr/common/package.json',
   'packages/@codepapr/core/package.json',
   'packages/@codepapr/api/package.json',
-  'packages/@codepapr/db/package.json',
   'packages/@codepapr/editor/package.json',
   'packages/@codepapr/ui/package.json',
 ];
@@ -56,8 +55,6 @@ for (const scriptName of requiredScripts) {
 }
 
 const requiredFiles = [
-  '.github/workflows/ci.yml',
-  '.github/workflows/release-desktop.yml',
   'README.md',
   'docs/ARCHITECTURE.md',
   'docs/SETUP.md',

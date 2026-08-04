@@ -109,7 +109,7 @@ const tools: IToolDefinition[] = [
   {
     name: 'workspace_run_command',
     description:
-      '在当前项目文件夹内运行短时开发命令或一次性脚本，例如测试、构建、lint、格式检查。默认允许绝大多数项目内开发命令；仅阻止明显的 shell 包装器、提权入口和远程登录命令。不要传 shell 字符串；必须把命令和参数分开，例如 command=npm, args=["test"]。如果目标是启动 dev server、watcher、调试器或其他长驻进程，请改用 workspace_start_background_command。',
+      '在当前项目文件夹内运行短时开发命令或一次性脚本，例如测试、构建、lint、格式检查。默认允许绝大多数项目内开发命令；会阻止 shell 包装器、提权入口、远程登录命令，以及高危破坏性命令（如 rm -rf / 或 ~、磁盘格式化/裸写、git push --force、git reset --hard、关机重启等——这些会被直接拦截，如确需执行请提示用户手动操作）。不要传 shell 字符串；必须把命令和参数分开，例如 command=npm, args=["test"]。如果目标是启动 dev server、watcher、调试器或其他长驻进程，请改用 workspace_start_background_command。',
     parameters: {
       type: 'object',
       properties: {
@@ -133,7 +133,7 @@ const tools: IToolDefinition[] = [
   {
     name: 'workspace_run_shell_command',
     description:
-      '在项目环境中穿过 shell 执行一条命令（支持管道、&&、变量展开），阻塞等待并返回完整 stdout/stderr 与退出码。由 bash 工具调用。',
+      '在项目环境中穿过 shell 执行一条命令（支持管道、&&、变量展开），阻塞等待并返回完整 stdout/stderr 与退出码。高危破坏性命令（rm -rf / 或 ~、磁盘格式化/裸写、git push --force、git reset --hard、关机重启等）会被直接拦截。由 bash 工具调用。',
     parameters: {
       type: 'object',
       properties: {
@@ -156,7 +156,7 @@ const tools: IToolDefinition[] = [
   {
     name: 'workspace_start_shell_background_command',
     description:
-      '在项目环境中穿过 shell 后台执行一条命令，返回 pid；输出写入日志尾部，可用 workspace_list_background_processes 查看。由 bash 工具调用。',
+      '在项目环境中穿过 shell 后台执行一条命令，返回 pid；输出写入日志尾部，可用 workspace_list_background_processes 查看。高危破坏性命令会被直接拦截。由 bash 工具调用。',
     parameters: {
       type: 'object',
       properties: {

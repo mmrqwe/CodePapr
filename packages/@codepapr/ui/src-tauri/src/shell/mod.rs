@@ -1,4 +1,5 @@
 pub(crate) mod background;
+pub(crate) mod dangerous;
 pub(crate) mod guard;
 pub(crate) mod session;
 pub(crate) mod types;

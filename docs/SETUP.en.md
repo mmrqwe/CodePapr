@@ -62,7 +62,6 @@ Passing verifies that your machine meets at least:
 - Node dependencies are correctly installed
 - Workspace build succeeds
 - Workspace tests pass
-- CLI E2E tests pass
 - Tauri cargo check succeeds
 
 ## 4. Configuration & Local Prerequisites
@@ -96,7 +95,7 @@ The following scenarios depend on valid model configuration:
 - CLI real ask, plan, agent calls
 - smoke:agent-tools
 
-Running test, test:e2e, verify:ci typically does not require live model credentials.
+Running test and verify:ci typically does not require live model credentials.
 
 ## 5. Verification Strategy
 
@@ -108,14 +107,13 @@ CodePapr's current verification pipeline can be understood in terms of "scope" a
 | --- | --- | --- |
 | npm run build | Full workspace build | Confirming artifacts after source changes (UI package runs `tsc --noEmit` before build) |
 | npm run test | Full workspace tests | Daily main regression |
-| npm run test:e2e | CLI E2E | Changing CLI, session assembly, or scripted provider |
 | npm run test:e2e:ui | Playwright UI E2E | Changing desktop UI components, Toast, permissions dialog, code review panel |
 | npm run test:e2e:ui:install | Install Playwright Chromium | First-time UI E2E or CI environment prep |
 | npm run lint | Static analysis | Pre-commit quality gate |
 | npm run audit | Dependency security audit | Before release or after dependency changes |
 | CODEPAPR_EXTERNAL_WORKSPACE=/absolute/path/to/workspace npm run smoke:desktop-diagnostics | External workspace desktop smoke | Changing workbench project diagnostics, file tree, code preview, local marker fallback |
 | npm run smoke:lsp-preview | Real multi-language LSP smoke | Changing code preview hover, definition, background warmup, or external LSP / built-in fallback wiring |
-| npm run verify:ci | lint + audit + build + test + test:e2e | CI-equivalent local check |
+| npm run verify:ci | lint + audit + build + test | One-shot pre-commit local check |
 | npm run verify | verify:ci + cargo check | Most complete local verification |
 | npm run smoke:agent-tools | Live model tool smoke | Changing tool selection, preview, shell, browser interaction, project diagnostics, or absolute path file reading |
 
@@ -125,9 +123,8 @@ Pre-commit recommended order:
 
 1. npm run build
 2. npm run test
-3. npm run test:e2e
-4. npm run test:e2e:ui
-5. npm run verify
+3. npm run test:e2e:ui
+4. npm run verify
 
 Install browser dependencies before first UI E2E run:
 
@@ -163,15 +160,7 @@ This smoke generates small TypeScript, C#, Rust, Java, Python, and C++ projects 
 npm run test
 ```
 
-Covers core, api, db and other primary path vitest tests. Most commonly used local regression entry point.
-
-#### CLI E2E
-
-```bash
-npm run test:e2e
-```
-
-Uses scripted provider; better for CI and stable regression, no live model cost.
+Covers core, api, ui and other primary path vitest tests. Most commonly used local regression entry point.
 
 #### Full Verification
 
@@ -330,16 +319,12 @@ Before releasing, confirm:
 
 ## 8. CI / CD
 
-Three GitHub Actions workflows are configured:
+This repository does not currently configure automated CI workflows; all verification is run locally by hand:
 
-| Workflow | File | Description |
-| --- | --- | --- |
-| CI | `.github/workflows/ci.yml` | lint, audit, cross-platform build+test (Ubuntu/Windows/macOS), CLI E2E, smoke (agent-tools + desktop-diagnostics), UI E2E (Playwright, Ubuntu) |
-| Desktop Build | `.github/workflows/desktop-build.yml` | Build MSI/DMG installers on Windows/macOS; auto-create GitHub Release on v* tag push |
-| Rust Typecheck | `.github/workflows/typecheck.yml` | cargo check / fmt / clippy / test, across three platforms |
+- `npm run verify` (= `verify:ci` + `cargo check`) is the most complete local verification, covering lint, audit, build, test and Rust type checking.
+- `scripts/release-readiness.mjs` is the final static gate for doc and key resource integrity before release, invoked by `npm run release:prep`.
 
-- Release Desktop workflow supports manual trigger and builds macOS desktop bundles from v* tags.
-- scripts/release-readiness.mjs is the final static gate for doc and key resource integrity before release.
+If CI is added later, it should at least cover: a PR gate (lint + build + test), periodic dependency security scans (audit / cargo audit), and pre-release validation on tag push.
 
 ## 9. Operational Notes
 

@@ -65,7 +65,6 @@ npm run verify
 - Node 依赖安装正确
 - workspace build 正常
 - workspace tests 正常
-- CLI E2E 正常
 - Tauri cargo check 正常
 
 ## 4. 配置与本地运行前提
@@ -99,7 +98,7 @@ CodePapr 当前将应用级配置保存在：
 - CLI 真实 ask、plan、agent 调用
 - smoke:agent-tools
 
-如果只跑 test、test:e2e、verify:ci，通常不需要真实模型凭据。
+如果只跑 test、verify:ci，通常不需要真实模型凭据。
 
 ## 5. 验证策略
 
@@ -111,14 +110,13 @@ CodePapr 当前的验证链路可以按“范围”和“成本”来理解。
 | --- | --- | --- |
 | npm run build | 全 workspace 构建 | 改完源码后确认产物可生成（UI 包构建前会先跑 `tsc --noEmit`） |
 | npm run test | 全 workspace 测试 | 日常主回归 |
-| npm run test:e2e | CLI E2E | 改到 CLI、会话装配或 scripted provider |
 | npm run test:e2e:ui | Playwright UI E2E | 改到桌面端 UI 组件、Toast、权限对话框、代码审查面板 |
 | npm run test:e2e:ui:install | 安装 Playwright Chromium | 首次运行 UI E2E 或 CI 环境准备 |
 | npm run lint | 静态检查 | 提交前质量门禁 |
 | npm run audit | 依赖安全检查 | 发布前或依赖变更后 |
 | CODEPAPR_EXTERNAL_WORKSPACE=/absolute/path/to/workspace npm run smoke:desktop-diagnostics | 外部 workspace 桌面烟测 | 改到工作台项目诊断、文件树、代码预览、本地标记降级 |
 | npm run smoke:lsp-preview | 真实多语言 LSP 烟测 | 改到代码预览的 hover、definition、后台预热，或外部 LSP / 内建 fallback 接线 |
-| npm run verify:ci | lint + audit + build + test + test:e2e | CI 等价本地检查 |
+| npm run verify:ci | lint + audit + build + test | 提交前一键本地检查 |
 | npm run verify | verify:ci + cargo check | 本地最完整验证 |
 | npm run smoke:agent-tools | 真实模型工具烟测 | 改到工具选择、预览、shell、浏览器交互、project diagnostics 或绝对路径文件读取 |
 
@@ -128,9 +126,8 @@ CodePapr 当前的验证链路可以按“范围”和“成本”来理解。
 
 1. npm run build
 2. npm run test
-3. npm run test:e2e
-4. npm run test:e2e:ui
-5. npm run verify
+3. npm run test:e2e:ui
+4. npm run verify
 
 首次运行 UI E2E 前需要安装浏览器依赖：
 
@@ -166,15 +163,7 @@ npm run smoke:lsp-preview
 npm run test
 ```
 
-这条链路覆盖 core、api、db 等主路径的 vitest 测试，是最常用的本地回归入口。
-
-#### CLI E2E
-
-```bash
-npm run test:e2e
-```
-
-这条链路走 scripted provider，更适合 CI 和稳定回归，不依赖真实模型成本。
+这条链路覆盖 core、api、ui 等主路径的 vitest 测试，是最常用的本地回归入口。
 
 #### 完整验证
 
@@ -336,16 +325,12 @@ npm run publish
 
 ## 8. CI / CD
 
-仓库已配置三套 GitHub Actions 工作流：
+当前仓库没有配置自动化 CI 工作流，所有验证都在本地手动执行：
 
-| 工作流 | 文件 | 说明 |
-| --- | --- | --- |
-| CI | `.github/workflows/ci.yml` | lint、audit、跨平台 build+test（Ubuntu/Windows/macOS）、CLI E2E、smoke（agent-tools + desktop-diagnostics）、UI E2E（Playwright，Ubuntu） |
-| Desktop Build | `.github/workflows/desktop-build.yml` | 在 Windows/macOS 上构建 MSI/DMG 安装包，v* tag 推送时自动创建 GitHub Release |
-| Rust Typecheck | `.github/workflows/typecheck.yml` | cargo check / fmt / clippy / test，跨三平台 |
+- `npm run verify`（= `verify:ci` + `cargo check`）是本地最完整的验证，覆盖 lint、audit、build、test 与 Rust 类型检查。
+- `scripts/release-readiness.mjs` 是发布前文档与关键资源完整性的最后一道静态门禁，由 `npm run release:prep` 调用。
 
-- Release Desktop 工作流支持手动触发，也支持通过 v* tag 构建 macOS 桌面 bundle。
-- scripts/release-readiness.mjs 是当前发布前文档与关键资源完整性的最后一道静态门禁。
+如果后续需要接入 CI，建议至少覆盖：PR 门禁（lint + build + test）、定期依赖安全扫描（audit / cargo audit）、以及打 tag 时的发布前校验。
 
 ## 9. 运维注意事项
 
