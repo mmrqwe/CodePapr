@@ -1,4 +1,5 @@
 import type { IToolCall } from '@codepapr/types';
+import { ProviderRequestError } from './ILLMProvider';
 
 interface StreamingToolCallDelta {
   index?: number;
@@ -236,7 +237,18 @@ export interface StreamIdleRetryOptions {
   maxRetries?: number;
   signal?: AbortSignal;
   hasEmitted: () => boolean;
-  onRetry?: (attempt: number, error: StreamIdleTimeoutError) => void;
+  onRetry?: (attempt: number, error: Error) => void;
+}
+
+/** Errors safe to retry a whole stream attempt for: nothing has been emitted
+ *  to the caller yet, so re-running the attempt is lossless. */
+function isRetriableStreamError(err: unknown): boolean {
+  if (err instanceof StreamIdleTimeoutError) {
+    return true;
+  }
+  // Provider-wrapped mid-stream breaks (connection reset / truncated body,
+  // e.g. reqwest "error decoding response body"). Only the retriable ones.
+  return err instanceof ProviderRequestError && err.retriable;
 }
 
 export async function withStreamIdleRetry<T>(
@@ -250,13 +262,13 @@ export async function withStreamIdleRetry<T>(
       return await runAttempt();
     } catch (err) {
       if (
-        err instanceof StreamIdleTimeoutError &&
+        isRetriableStreamError(err) &&
         !options.hasEmitted() &&
         !options.signal?.aborted &&
         attempt < maxRetries
       ) {
         attempt += 1;
-        options.onRetry?.(attempt, err);
+        options.onRetry?.(attempt, err as Error);
         continue;
       }
       throw err;

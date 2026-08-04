@@ -762,4 +762,24 @@ describe('contextCompaction', () => {
       expect(effective[1]?.role).not.toBe('tool');
     });
   });
+
+  describe('checkpoint preamble', () => {
+    it('defers to the latest user message and never orders the model to restore old task lists', () => {
+      const zh = renderContextCheckpointContent('用户目标：\n- 旧任务', 'zh-CN');
+      expect(zh).toContain('当前回合的任务以用户最新消息为准');
+      expect(zh).toContain('除非用户明确要求继续先前的工作');
+      expect(zh).not.toContain('立即调用');
+      expect(zh).not.toContain('todo(action: list)');
+
+      const tw = renderContextCheckpointContent('用戶目標：\n- 舊任務', 'zh-TW');
+      expect(tw).toContain('當前回合的任務以用戶最新訊息為準');
+      expect(tw).not.toContain('立即調用');
+      expect(tw).not.toContain('todo(action: list)');
+
+      const en = renderContextCheckpointContent('User Goal:\n- old task', 'en');
+      expect(en).toContain("governed by the user's latest message");
+      expect(en).toContain('unless the user explicitly asks to continue');
+      expect(en).not.toContain('todo(action: list)');
+    });
+  });
 });

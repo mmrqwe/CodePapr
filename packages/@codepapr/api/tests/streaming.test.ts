@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ProviderRequestError } from '../src/providers/ILLMProvider';
 import {
   readSseStream,
   StreamIdleTimeoutError,
@@ -182,5 +183,61 @@ describe('withStreamIdleRetry', () => {
     );
     expect(retries).toEqual([1, 2]);
     expect(calls).toBe(3);
+  });
+
+  it('retries retriable provider stream breaks when nothing was emitted', async () => {
+    let calls = 0;
+    const result = await withStreamIdleRetry(
+      async () => {
+        calls += 1;
+        if (calls === 1) {
+          throw new ProviderRequestError({
+            provider: 'openai',
+            message: 'Stream interrupted: error decoding response body',
+            retriable: true,
+          });
+        }
+        return 'recovered';
+      },
+      { hasEmitted: () => false, maxRetries: 1 }
+    );
+    expect(result).toBe('recovered');
+    expect(calls).toBe(2);
+  });
+
+  it('does not retry non-retriable provider errors', async () => {
+    let calls = 0;
+    await expect(
+      withStreamIdleRetry(
+        async () => {
+          calls += 1;
+          throw new ProviderRequestError({
+            provider: 'openai',
+            message: 'HTTP 400: bad request',
+            retriable: false,
+          });
+        },
+        { hasEmitted: () => false, maxRetries: 3 }
+      )
+    ).rejects.toBeInstanceOf(ProviderRequestError);
+    expect(calls).toBe(1);
+  });
+
+  it('does not retry retriable stream breaks once content was emitted', async () => {
+    let calls = 0;
+    await expect(
+      withStreamIdleRetry(
+        async () => {
+          calls += 1;
+          throw new ProviderRequestError({
+            provider: 'openai',
+            message: 'Stream interrupted: error decoding response body',
+            retriable: true,
+          });
+        },
+        { hasEmitted: () => true, maxRetries: 3 }
+      )
+    ).rejects.toBeInstanceOf(ProviderRequestError);
+    expect(calls).toBe(1);
   });
 });

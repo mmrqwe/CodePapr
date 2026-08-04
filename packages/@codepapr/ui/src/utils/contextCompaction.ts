@@ -103,7 +103,7 @@ function getContextCopy(lang: Lang | undefined): ContextCopy {
     case 'zh-TW':
       return {
         checkpointPreamble:
-          '以下是先前長會話的上下文檢查點。把它視為已驗證的歷史摘要；若與後續原始訊息衝突，以後續原始訊息為準。如果你看不到當前任務清單，立即調用 `todo(action: list)` 恢復。',
+          '以下是先前長會話的上下文檢查點，僅作為已驗證的歷史背景摘要；若與後續原始訊息衝突，以後續原始訊息為準。當前回合的任務以用戶最新訊息為準：除非用戶明確要求繼續先前的工作，否則不要主動恢復或繼續檢查點中的舊任務、舊任務清單。',
         summaryHeading: '檢查點摘要',
         userGoalHeading: '用戶目標',
         constraintsHeading: '約束與偏好',
@@ -118,7 +118,7 @@ function getContextCopy(lang: Lang | undefined): ContextCopy {
     case 'en':
       return {
         checkpointPreamble:
-          'The block below is a checkpoint summary for earlier conversation context. Treat it as verified history; if it conflicts with later raw messages, trust the later raw messages. If you do not see your current task list, call `todo(action: list)` immediately to restore it.',
+          'The block below is a checkpoint summary of earlier conversation context, provided only as verified historical background; if it conflicts with later raw messages, trust the later raw messages. The current turn is governed by the user\'s latest message: do not resume or restore old tasks or task lists from the checkpoint unless the user explicitly asks to continue the previous work.',
         summaryHeading: 'Checkpoint Summary',
         userGoalHeading: 'User Goal',
         constraintsHeading: 'Constraints & Preferences',
@@ -133,7 +133,7 @@ function getContextCopy(lang: Lang | undefined): ContextCopy {
     default:
       return {
         checkpointPreamble:
-          '以下是先前长会话的上下文检查点。把它视为已验证的历史摘要；如果与后续原始消息冲突，以后续原始消息为准。如果你看不到当前任务清单，立即调用 `todo(action: list)` 恢复。',
+          '以下是先前长会话的上下文检查点，仅作为已验证的历史背景摘要；如果与后续原始消息冲突，以后续原始消息为准。当前回合的任务以用户最新消息为准：除非用户明确要求继续先前的工作，否则不要主动恢复或继续检查点中的旧任务、旧任务清单。',
         summaryHeading: '检查点摘要',
         userGoalHeading: '用户目标',
         constraintsHeading: '约束与偏好',

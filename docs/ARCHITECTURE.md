@@ -634,19 +634,15 @@ CodePapr 的核心架构决策是**围绕 DeepSeek 隐式前缀缓存做提示�
 
 压缩摘要掉头部旧消息（含旧 tool 结果），剪枝给保留尾部瘦身。剪枝设置（`pruneOldToolResults` / `pruneProtectRounds` / `pruneMinChars`）为内部调参，不在 UI 暴露。注意它与 `compactionMaxTokens`（压缩摘要的输出上限）是两个不同概念：后者是压缩那次 LLM 调用能写多长的摘要，不是触发阈值。
 
-### 13.5 有效上下文阈值（provider-aware）
+### 13.5 有效上下文阈值（用户配置优先）
 
-`maxContextTokens`（默认 **500K**，针对 DeepSeek 1M 上下文）是压缩触发阈值。为避免在小上下文 provider 上压缩赶不上上限而 400，实际生效值按 provider 钳制（`effectiveMaxContextTokens`）：
+`maxContextTokens`（默认 **500K**）是压缩触发阈值，对 DeepSeek / OpenAI 兼容 / Claude 三种服务商**统一生效**，不再按 provider 硬上限钳制（`effectiveMaxContextTokens`）：
 
 ```
-effectiveMaxContextTokens = min(maxContextTokens, providerContextLimit − maxTokens)
+effectiveMaxContextTokens = maxContextTokens
 ```
 
-| provider | 上下文硬上限 | 默认有效阈值 |
-| --- | --- | --- |
-| DeepSeek | ~1M | 500K |
-| Claude | 200K | ≈ 200K − maxTokens |
-| OpenAI | 128K | ≈ 128K − maxTokens |
+OpenAI/Claude 兼容端点常是转发网关（如 OpenAI 网关转发 DeepSeek 大上下文模型），按名义服务商钳制会导致长任务频繁触发压缩；上限由用户对该配置项的取值负责（设置 → 高级 → 最大上下文(输入)）。
 
 阈值越高 → 压缩越少 → epoch 重置越少 → 命中率越高（缓存读取廉价）。该有效值同时用于轮间压缩（`planContextCompaction`）与中途溢出检查。
 

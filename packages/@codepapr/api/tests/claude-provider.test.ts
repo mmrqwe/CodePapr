@@ -1,11 +1,32 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IChatRequest } from '@codepapr/types';
 import { ClaudeProvider } from '../src/providers/ClaudeProvider';
+import { ProviderRequestError } from '../src/providers/ILLMProvider';
 
 function jsonResponse(payload: unknown): Response {
   return new Response(JSON.stringify(payload), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+/** SSE response whose body breaks mid-stream (reqwest surfaces connection
+ *  resets as "error decoding response body"). The optional chunk is delivered
+ *  first; the break happens on the following read. */
+function brokenSseResponse(emitBeforeBreak?: string): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (emitBeforeBreak) {
+        controller.enqueue(new TextEncoder().encode(emitBeforeBreak));
+      }
+    },
+    pull(controller) {
+      controller.error(new Error('error decoding response body'));
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
   });
 }
 
@@ -185,5 +206,69 @@ describe('ClaudeProvider', () => {
     });
     expect(response?.usage?.cache_read_input_tokens).toBe(7);
     expect(response?.usage?.output_tokens).toBe(5);
+  });
+
+  it('wraps mid-stream body breaks into a retriable ProviderRequestError once content was emitted', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      brokenSseResponse(
+        'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"半"}}\n\n'
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new ClaudeProvider({ apiKey: 'test-key' });
+    const events: string[] = [];
+    let caught: unknown;
+    try {
+      await provider.streamChat(
+        {
+          model: 'claude-sonnet-4-6',
+          messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+          maxTokens: 1024,
+        },
+        (event) => {
+          if (event.type === 'content-delta') {
+            events.push(event.delta);
+          }
+        }
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ProviderRequestError);
+    expect((caught as ProviderRequestError).retriable).toBe(true);
+    expect((caught as Error).message).toContain('Stream interrupted');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(events).toEqual(['半']);
+  });
+
+  it('retries a stream break when nothing was emitted yet', async () => {
+    const okChunks = [
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"完整"}}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}\n\n',
+    ].join('');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(brokenSseResponse())
+      .mockResolvedValueOnce(
+        new Response(okChunks, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new ClaudeProvider({ apiKey: 'test-key' });
+    const response = await provider.streamChat(
+      {
+        model: 'claude-sonnet-4-6',
+        messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+        maxTokens: 1024,
+      },
+      () => {}
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(response?.choices[0]?.message.content).toBe('完整');
   });
 });

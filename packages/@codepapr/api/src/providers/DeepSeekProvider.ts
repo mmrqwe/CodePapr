@@ -259,7 +259,7 @@ export class DeepSeekProvider extends BaseLLMProvider {
         signal,
         hasEmitted: () => emitted,
         onRetry: (attempt, err) =>
-          log.warn('LLM stream idle timeout, retrying', {
+          log.warn('LLM stream interrupted, retrying', {
             model: payload.model,
             attempt,
             error: err.message,

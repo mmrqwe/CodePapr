@@ -635,19 +635,15 @@ context reaches threshold → compaction (shouldCompact) → rebuild agent → p
 
 Compaction summarizes away the head (incl. old tool results); pruning slims the retained tail. The pruning settings (`pruneOldToolResults` / `pruneProtectRounds` / `pruneMinChars`) are internal tuning knobs, not exposed in the UI. Note this differs from `compactionMaxTokens` (the compaction summary's output limit): the latter is how long the summary LLM call may write, not a trigger threshold.
 
-### 13.5 Effective Context Threshold (provider-aware)
+### 13.5 Effective Context Threshold (user-configured)
 
-`maxContextTokens` (default **500K**, tuned for DeepSeek's 1M context) is the compaction trigger threshold. To avoid compaction lagging behind the limit (causing 400s) on smaller-context providers, the effective value is clamped per provider (`effectiveMaxContextTokens`):
+`maxContextTokens` (default **500K**) is the compaction trigger threshold. It applies **uniformly** to DeepSeek / OpenAI-compatible / Claude providers — no per-provider clamping (`effectiveMaxContextTokens`):
 
 ```
-effectiveMaxContextTokens = min(maxContextTokens, providerContextLimit − maxTokens)
+effectiveMaxContextTokens = maxContextTokens
 ```
 
-| Provider | Hard context limit | Default effective threshold |
-| --- | --- | --- |
-| DeepSeek | ~1M | 500K |
-| Claude | 200K | ≈ 200K − maxTokens |
-| OpenAI | 128K | ≈ 128K − maxTokens |
+OpenAI/Claude-compatible endpoints are often forwarding gateways (e.g. an OpenAI gateway serving a large-context DeepSeek model); clamping to the nominal provider limit would trigger excessive compaction on long tasks. The user owns the configured value (Settings → Advanced → Max Context Tokens).
 
 Higher threshold → fewer compactions → fewer epoch resets → higher hit rate (cache reads are cheap). This effective value is used for both between-turn compaction (`planContextCompaction`) and the mid-loop overflow check.
 

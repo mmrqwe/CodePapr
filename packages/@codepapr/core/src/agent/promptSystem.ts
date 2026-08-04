@@ -577,6 +577,7 @@ const SECTION_LABELS: Record<
     diagnostics: string;
     projectGraph: string;
     customGuidance: string;
+    todoDigest: string;
   }
 > = {
   'zh-CN': {
@@ -591,6 +592,7 @@ const SECTION_LABELS: Record<
     diagnostics: '## 项目诊断',
     projectGraph: '## 项目结构概览',
     customGuidance: '## 长期附加指导',
+    todoDigest: '## 当前任务清单（背景进度，仅供了解；当前回合的行动以用户最新消息为准）',
   },
   'zh-TW': {
     workspace: '## 項目文件夾',
@@ -604,6 +606,7 @@ const SECTION_LABELS: Record<
     diagnostics: '## 項目診斷',
     projectGraph: '## 項目結構概覽',
     customGuidance: '## 長期附加指導',
+    todoDigest: '## 當前任務清單（背景進度，僅供了解；當前回合的行動以用戶最新訊息為準）',
   },
   en: {
     workspace: '## Workspace',
@@ -617,6 +620,7 @@ const SECTION_LABELS: Record<
     diagnostics: '## Project Diagnostics',
     projectGraph: '## Project Structure Overview',
     customGuidance: '## Persistent Custom Guidance',
+    todoDigest: '## Current Task List (background progress, for awareness only; the current turn follows the user\'s latest message)',
   },
 };
 
@@ -1227,6 +1231,6 @@ export function buildRuntimeUserPrompt(options: BuildRuntimeUserPromptOptions): 
     ...(runtimeContext ? ['', runtimeContextTitle, runtimeContext] : []),
     ...(options.projectGraphSection?.trim() ? ['', labels.projectGraph, options.projectGraphSection.trim()] : []),
     ...(options.diagnosticsSection?.trim() ? ['', labels.diagnostics, options.diagnosticsSection.trim()] : []),
-    ...(options.todoDigest?.trim() ? ['', options.todoDigest.trim()] : []),
+    ...(options.todoDigest?.trim() ? ['', labels.todoDigest, options.todoDigest.trim()] : []),
   ].join('\n');
 }

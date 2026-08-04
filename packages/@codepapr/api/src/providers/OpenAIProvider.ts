@@ -11,13 +11,14 @@ import {
   IToolCall,
 } from '@codepapr/types';
 import { Logger, sortedStringify } from '@codepapr/common';
-import { BaseLLMProvider, ProviderConfig } from './ILLMProvider';
+import { BaseLLMProvider, ProviderConfig, ProviderRequestError } from './ILLMProvider';
 import {
   applyStreamingToolCallDeltas,
   finalizeStreamingToolCalls,
   readSseStream,
   safeParseToolArguments,
   sanitizeToolCallArguments,
+  StreamIdleTimeoutError,
   withStreamIdleRetry,
 } from './streaming';
 import { buildOpenAIImageContent } from './imageContent';
@@ -163,40 +164,63 @@ export class OpenAIProvider extends BaseLLMProvider {
         let systemFingerprint: string | undefined;
         const toolCallStates: Array<{ id: string; name: string; argumentsText: string }> = [];
 
-        await readSseStream(response, (payloadLine) => {
-          if (payloadLine === '[DONE]') {
-            return;
-          }
+        try {
+          await readSseStream(response, (payloadLine) => {
+            if (payloadLine === '[DONE]') {
+              return;
+            }
 
-          const chunk = JSON.parse(payloadLine) as OpenAIStreamChunk;
-          responseId = chunk.id ?? responseId;
-          usage = chunk.usage ?? usage;
-          systemFingerprint = chunk.system_fingerprint ?? systemFingerprint;
+            let chunk: OpenAIStreamChunk;
+            try {
+              chunk = JSON.parse(payloadLine) as OpenAIStreamChunk;
+            } catch {
+              log.warn('SSE chunk parse failed, skipping', { payloadLine: payloadLine.slice(0, 200) });
+              return;
+            }
+            responseId = chunk.id ?? responseId;
+            usage = chunk.usage ?? usage;
+            systemFingerprint = chunk.system_fingerprint ?? systemFingerprint;
 
-          for (const choice of chunk.choices ?? []) {
-            const delta = choice.delta;
-            if (!delta) {
+            for (const choice of chunk.choices ?? []) {
+              const delta = choice.delta;
+              if (!delta) {
+                finishReason = choice.finish_reason ?? finishReason;
+                continue;
+              }
+
+              if (delta.content) {
+                content += delta.content;
+                trackEvent({ type: 'content-delta', delta: delta.content });
+              }
+
+              if (delta.reasoning_content) {
+                reasoningContent += delta.reasoning_content;
+                trackEvent({ type: 'reasoning-delta', delta: delta.reasoning_content });
+              }
+
+              if (delta.tool_calls?.length) {
+                applyStreamingToolCallDeltas(toolCallStates, delta.tool_calls);
+              }
+
               finishReason = choice.finish_reason ?? finishReason;
-              continue;
             }
-
-            if (delta.content) {
-              content += delta.content;
-              trackEvent({ type: 'content-delta', delta: delta.content });
-            }
-
-            if (delta.reasoning_content) {
-              reasoningContent += delta.reasoning_content;
-              trackEvent({ type: 'reasoning-delta', delta: delta.reasoning_content });
-            }
-
-            if (delta.tool_calls?.length) {
-              applyStreamingToolCallDeltas(toolCallStates, delta.tool_calls);
-            }
-
-            finishReason = choice.finish_reason ?? finishReason;
+          }, signal, { idleTimeoutMs: this.config.idleTimeoutMs });
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            throw err;
           }
-        }, signal, { idleTimeoutMs: this.config.idleTimeoutMs });
+          if (err instanceof StreamIdleTimeoutError) {
+            throw err;
+          }
+          // Mid-stream body breaks (connection reset / truncated body — surfaced
+          // by reqwest as "error decoding response body") are retriable at the
+          // stream level as long as nothing has been emitted yet.
+          throw new ProviderRequestError({
+            provider: this.name,
+            message: `Stream interrupted: ${err instanceof Error ? err.message : String(err)}`,
+            retriable: true,
+          });
+        }
 
         const result: IChatResponse = {
           id: responseId,
@@ -234,7 +258,7 @@ export class OpenAIProvider extends BaseLLMProvider {
         signal,
         hasEmitted: () => emitted,
         onRetry: (attempt, err) =>
-          log.warn('LLM stream idle timeout, retrying', {
+          log.warn('LLM stream interrupted, retrying', {
             model: payload.model,
             attempt,
             error: err.message,

@@ -211,6 +211,36 @@ describe('promptSystem', () => {
     expect(prompt).not.toContain('优先查官方文档。');
   });
 
+  it('marks the injected todo digest as background-only state', () => {
+    const digest = '[TodoList] 目标: 旧任务\n  ○ t1: 旧步骤 ← current';
+    const zhPrompt = buildRuntimeUserPrompt({
+      mode: 'agent',
+      input: '讲个笑话',
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+      todoDigest: digest,
+    });
+    expect(zhPrompt).toContain('## 当前任务清单（背景进度，仅供了解；当前回合的行动以用户最新消息为准）');
+    expect(zhPrompt).toContain(digest);
+
+    const enPrompt = buildRuntimeUserPrompt({
+      mode: 'agent',
+      input: 'tell me a joke',
+      workspacePath: '/tmp/project',
+      lang: 'en',
+      todoDigest: digest,
+    });
+    expect(enPrompt).toContain('## Current Task List (background progress, for awareness only');
+
+    const noDigest = buildRuntimeUserPrompt({
+      mode: 'agent',
+      input: '讲个笑话',
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+    });
+    expect(noDigest).not.toContain('当前任务清单');
+  });
+
   it('flags obviously dynamic user prompt content', () => {
     const result = validateUserPrompt('请在回答中加入 [TIMESTAMP] 和 ${env}');
     expect(result.valid).toBe(false);

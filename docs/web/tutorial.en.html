@@ -581,7 +581,7 @@ https://api.deepseek.com/v1</code></pre>
                 <li>fast model switch — Whether to enable the fast model</li>
                 <li>fast model name — Fast model name (default <code>deepseek-v4-flash</code>)</li>
                 <li>max tool rounds — Maximum tool rounds (default 500)</li>
-                <li>max context tokens — Maximum context tokens (default 500k; the effective value is clamped to the selected provider's context limit, minus the output reserve)</li>
+                <li>max context tokens — Maximum context tokens (default 500k; applies uniformly to DeepSeek, OpenAI-compatible, and Claude providers — no per-provider clamping)</li>
                 <li>max conversation rounds — Maximum conversation rounds (default 24)</li>
               </ul>
             </div>
@@ -1772,7 +1772,7 @@ Cross-session (different projects):
         <p>Old tool-result pruning (<code>pruneOldToolResults</code>, replacing large old results beyond the protection window with a placeholder) has <strong>no independent trigger</strong>; it runs only at compaction/rebuild as an internal slimming sub-step of compaction (mirroring OpenCode's <code>SessionCompaction.prune</code>). The only trigger is the context threshold. Note this differs from <code>compactionMaxTokens</code> (the compaction summary's output limit).</p>
 
         <h3>Effective Context Threshold (provider-aware)</h3>
-        <p><code>maxContextTokens</code> defaults to <strong>500K</strong> (tuned for DeepSeek's 1M context). To avoid compaction lagging behind the limit (causing 400s) on smaller-context providers, the effective value is clamped per provider: <code>min(maxContextTokens, providerContextLimit − maxTokens)</code>. Higher threshold → fewer compactions → higher hit rate (cache reads are cheap).</p>
+        <p><code>maxContextTokens</code> defaults to <strong>500K</strong> and applies uniformly to DeepSeek, OpenAI-compatible, and Claude providers (no per-provider clamping; compatible endpoints are often gateways forwarding large-context models). Higher threshold → fewer compactions → higher hit rate (cache reads are cheap).</p>
         <table>
           <thead><tr><th>Provider</th><th>Hard context limit</th><th>Default effective threshold</th></tr></thead>
           <tbody>
