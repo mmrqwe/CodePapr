@@ -784,7 +784,6 @@ describe('ChatPanel', () => {
       '空项目的第一条消息',
       '空项目的第一条消息',
       'agent',
-      null,
       undefined
     );
   });

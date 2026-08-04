@@ -211,6 +211,26 @@ describe('promptSystem', () => {
     expect(prompt).not.toContain('优先查官方文档。');
   });
 
+  it('keeps project overview and diagnostics out of per-turn prompts (agent fetches via tools)', () => {
+    // Per-turn user messages sit at the request tail and never hit the prefix
+    // cache; large project overviews/diagnostics there burn fresh tokens every
+    // round. The agent uses graph / diagnostics tools on demand instead.
+    for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
+      const prompt = buildRuntimeUserPrompt({
+        mode: 'agent',
+        input: '修复构建错误',
+        workspacePath: '/tmp/project',
+        lang,
+      });
+      expect(prompt).not.toContain('项目结构概览');
+      expect(prompt).not.toContain('項目結構概覽');
+      expect(prompt).not.toContain('Project Structure Overview');
+      expect(prompt).not.toContain('项目诊断');
+      expect(prompt).not.toContain('項目診斷');
+      expect(prompt).not.toContain('Project Diagnostics');
+    }
+  });
+
   it('marks the injected todo digest as background-only state', () => {
     const digest = '[TodoList] 目标: 旧任务\n  ○ t1: 旧步骤 ← current';
     const zhPrompt = buildRuntimeUserPrompt({

@@ -314,7 +314,6 @@ export interface AgentActions {
     input: string,
     displayContent?: string,
     mode?: WorkMode,
-    projectDiagnosticsReport?: ProjectDiagnosticsReport | null,
     images?: IImageContent[]
   ) => Promise<void>;
   cancelMessage: () => void;

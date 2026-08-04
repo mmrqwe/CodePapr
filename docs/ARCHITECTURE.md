@@ -538,21 +538,21 @@ agent 回复完成
 1. Mode Header
 2. User Input
 3. Runtime Context（日期/时区）
-4. Project Structure Overview（项目结构图，每轮重读）
-5. Diagnostics Section（放在最后，避免前缀抖动）
+4. TodoList Digest（背景进度，标注"以用户最新消息为准"）
+
+项目结构概览与项目诊断**不再注入每轮 user prompt**：user 消息位于请求尾部、永远无法命中前缀缓存，大项目下概览可达数万 token/轮。改由 agent 按系统提示词约束自行调用 `graph`（"先拿地图再行动"）/ `diagnostics`（改后终检）工具按需获取；write/edit/patch 改完仍自动返回单文件诊断。
 
 ### 10.2 关键不变量
 
 - 用户自定义提示词进入 session bootstrap 而非每轮 user prompt
 - Skills 进入 bootstrap 而非 system prefix
 - 角色人设进入 bootstrap 而非 system prefix（切换角色不破坏缓存）
-- ProjectGraph Summary 进入每轮 user prompt 尾部而非 bootstrap（每轮刷新，不影响前缀缓存）
+- ProjectGraph Summary 不进入主 Agent 每轮 user prompt（token 浪费），由 `graph` 工具按需获取；仅子代理 bootstrap 与 memory.md 冷启动生成仍使用
 - Workspace 路径只在 system prompt 出现一次
 - Custom guidance 只在 bootstrap 出现一次
 - `topP`、`temperature`、`maxTokens`、`thinkingEnabled` 一起冻结在 ImmutablePrefix 中，任意变化都会破坏缓存 hash
 - session bootstrap 按"会话 × 稳定签名"缓存，memory.md 等易变磁盘状态变化不触发重建（见 §13.6）；mid-loop 压缩时 memory 会随 bootstrap 一起刷新（反正 epoch 重写，无额外缓存代价）
-- 每轮 user prompt 的动态内容（日期 / 诊断 / 项目结构图）置于尾部，不改既有前缀
-- 项目诊断全绿（passed）时整段省略，不注入 prompt，减少无意义的尾部字节抖动
+- 每轮 user prompt 的动态内容（日期 / TodoList digest）置于尾部，不改既有前缀
 
 ## 11. 模型路由
 
@@ -658,8 +658,8 @@ OpenAI/Claude 兼容端点常是转发网关（如 OpenAI 网关转发 DeepSeek 
 | reasoning 回传稳定 | `reasoning_content` 按"是否存在 + 模型能力（`supportsThinkingPayload`）"回传，与每请求 thinking 开关解耦，避免重建时给历史消息增删 reasoning |
 | TodoList digest 冻结 | checkpoint 生成时冻结当前 digest 进 payload，重建时复用而非实时重渲染 |
 | 参数冻结 | topP / temperature / maxTokens / thinkingEnabled 冻结在 ImmutablePrefix，变化即换 hash |
-| 动态内容置于尾部 | 每轮 user prompt 的日期 / 诊断 / 项目结构图 / 实时计划等动态内容放在新 user 消息（尾部），不改既有前缀 |
-| 项目诊断省略 | 项目级诊断全绿（passed）时整段不注入，无信息增量却省尾部字节 |
+| 动态内容置于尾部 | 每轮 user prompt 的日期 / TodoList digest 等动态内容放在新 user 消息（尾部），不改既有前缀 |
+| 大体量上下文按需获取 | 项目结构概览与项目诊断不注入每轮 user prompt（尾部内容永不命中前缀缓存，大项目下每轮数万 token）；由 agent 通过 `graph` / `diagnostics` 工具按需获取 |
 
 ### 13.7 哈希与校验
 

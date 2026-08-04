@@ -31,8 +31,6 @@ import {
   deleteCheckpointsForSession,
 } from '../utils/snapshot';
 import { nextCheckpointSequence } from '../utils/workspaceGitPanel';
-import type { WorkMode } from '../utils/agentPrompts';
-import { buildModePrompt } from '../utils/agentPrompts';
 import { acquireSleepPrevention, releaseSleepPrevention } from '../utils/sleepPrevention';
 import { restoreTodoListContexts } from '../tools/todoListTool';
 import { loadMcpToolDefinitions } from '../tools/mcpTools';
@@ -78,7 +76,6 @@ import { upsertRecentWorkspace, sortRecentWorkspaces } from './internals/recentW
 import type {
   AgentActions,
   AgentState,
-  Lang,
   ResetToMessageResult,
   SessionMeta,
   StoreGet,
@@ -1187,18 +1184,4 @@ useAgentStore.subscribe((state, prevState) => {
   }
 });
 
-export function buildChatInputPrompt(
-  mode: WorkMode,
-  workspacePath: string,
-  input: string,
-  lang: Lang | undefined,
-  projectDiagnosticsReport?: import('../utils/projectDiagnostics').ProjectDiagnosticsReport | null
-): string {
-  return buildModePrompt(
-    mode,
-    workspacePath,
-    input,
-    lang ?? 'zh-CN',
-    projectDiagnosticsReport
-  );
-}
+

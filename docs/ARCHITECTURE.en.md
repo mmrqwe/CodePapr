@@ -539,21 +539,21 @@ Built on each user input:
 1. Mode Header
 2. User Input
 3. Runtime Context (date/timezone)
-4. Project Structure Overview (project graph, re-read each turn)
-5. Diagnostics Section (placed last to avoid prefix jitter)
+4. TodoList Digest (background progress, marked "the current turn follows the user's latest message")
+
+The project structure overview and project diagnostics are **no longer injected into the per-turn user prompt**: user messages sit at the request tail and never hit the prefix cache, and on large projects the overview can reach tens of thousands of tokens per turn. Instead the agent fetches them on demand via the `graph` ("get the map before acting") / `diagnostics` (final check after edits) tools, per the system-prompt constraints; write/edit/patch still auto-return per-file diagnostics after each modification.
 
 ### 10.2 Key Invariants
 
 - User custom prompts go into session bootstrap, not per-turn user prompt
 - Skills go into bootstrap, not system prefix
 - Character profile goes into bootstrap, not system prefix (switching characters does not break cache)
-- ProjectGraph Summary goes into the per-turn user prompt tail, not bootstrap (re-read each round, no prefix cache impact)
+- ProjectGraph Summary does NOT go into the main agent's per-turn user prompt (token waste); the agent fetches it on demand via the `graph` tool. Only sub-agent bootstraps and the memory.md cold-start generation still use it
 - Workspace path appears only once in system prompt
 - Custom guidance appears only once in bootstrap
 - `topP`, `temperature`, `maxTokens`, `thinkingEnabled` are frozen together in ImmutablePrefix; any change breaks the cache hash
 - Session bootstrap is cached per "session × stable signature"; volatile disk state (memory.md) does not trigger rebuilds (see §13.6); memory is refreshed together with bootstrap at mid-loop compaction (free because the epoch is rewritten anyway)
-- Per-turn dynamic content (date / diagnostics / project graph / live plan) is placed at the tail, not in the existing prefix
-- Project diagnostics section is entirely omitted when overall status is "passed" (no actionable info, saves tail bytes)
+- Per-turn dynamic content (date / TodoList digest) is placed at the tail, not in the existing prefix
 
 ## 11. Model Routing
 
@@ -659,8 +659,8 @@ These measures keep the prefix byte-stable within an epoch (any break invalidate
 | Stable reasoning round-trip | `reasoning_content` is round-tripped based on "presence + model capability (`supportsThinkingPayload`)", decoupled from the per-request thinking toggle, so rebuilds don't add/remove reasoning on history |
 | Frozen TodoList digest | The current digest is frozen into the checkpoint payload at generation and reused on rebuild instead of re-rendered live |
 | Frozen parameters | topP / temperature / maxTokens / thinkingEnabled are frozen in ImmutablePrefix; any change flips the hash |
-| Dynamic content placed at the tail | Per-turn dynamic content (date / diagnostics / project graph / live plan) goes into the new user message (tail), not the existing prefix |
-| Clean diagnostics omittance | When overall project diagnostics status is "passed", the entire section is omitted — no info gain, fewer tail bytes |
+| Dynamic content placed at the tail | Per-turn dynamic content (date / TodoList digest) goes into the new user message (tail), not the existing prefix |
+| Heavy context fetched on demand | Project structure overview and diagnostics are NOT injected into the per-turn user prompt (tail content never hits the prefix cache; tens of thousands of tokens per turn on large projects); the agent fetches them via `graph` / `diagnostics` tools on demand |
 
 ### 13.7 Hashing and Validation
 

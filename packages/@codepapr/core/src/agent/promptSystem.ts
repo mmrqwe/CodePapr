@@ -25,8 +25,6 @@ export interface BuildRuntimeUserPromptOptions {
   input: string;
   workspacePath: string;
   lang?: PromptLang;
-  diagnosticsSection?: string;
-  projectGraphSection?: string;
   runtimeContextSection?: string;
   todoDigest?: string;
 }
@@ -574,8 +572,6 @@ const SECTION_LABELS: Record<
     app: string;
     skills: string;
     memory: string;
-    diagnostics: string;
-    projectGraph: string;
     customGuidance: string;
     todoDigest: string;
   }
@@ -589,8 +585,6 @@ const SECTION_LABELS: Record<
     app: '## 生成应用',
     skills: '## 项目 Skills',
     memory: '## 项目记忆',
-    diagnostics: '## 项目诊断',
-    projectGraph: '## 项目结构概览',
     customGuidance: '## 长期附加指导',
     todoDigest: '## 当前任务清单（背景进度，仅供了解；当前回合的行动以用户最新消息为准）',
   },
@@ -603,8 +597,6 @@ const SECTION_LABELS: Record<
     app: '## 生成應用',
     skills: '## 項目 Skills',
     memory: '## 項目記憶',
-    diagnostics: '## 項目診斷',
-    projectGraph: '## 項目結構概覽',
     customGuidance: '## 長期附加指導',
     todoDigest: '## 當前任務清單（背景進度，僅供了解；當前回合的行動以用戶最新訊息為準）',
   },
@@ -617,8 +609,6 @@ const SECTION_LABELS: Record<
     app: '## Generate App',
     skills: '## Relevant Skills',
     memory: '## Project Memory',
-    diagnostics: '## Project Diagnostics',
-    projectGraph: '## Project Structure Overview',
     customGuidance: '## Persistent Custom Guidance',
     todoDigest: '## Current Task List (background progress, for awareness only; the current turn follows the user\'s latest message)',
   },
@@ -1229,8 +1219,6 @@ export function buildRuntimeUserPrompt(options: BuildRuntimeUserPromptOptions): 
     options.mode === 'ask' ? labels.question : options.mode === 'app' ? labels.app : labels.task,
     options.input.trim(),
     ...(runtimeContext ? ['', runtimeContextTitle, runtimeContext] : []),
-    ...(options.projectGraphSection?.trim() ? ['', labels.projectGraph, options.projectGraphSection.trim()] : []),
-    ...(options.diagnosticsSection?.trim() ? ['', labels.diagnostics, options.diagnosticsSection.trim()] : []),
     ...(options.todoDigest?.trim() ? ['', labels.todoDigest, options.todoDigest.trim()] : []),
   ].join('\n');
 }

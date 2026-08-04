@@ -693,7 +693,7 @@ describe('useAgentStore.sendMessage', () => {
     const originalSendMessage = useAgentStore.getState().sendMessage;
 
     try {
-      const sendMessageMock = vi.fn(async () => undefined);
+      const sendMessageMock = vi.fn(async (..._args: unknown[]) => undefined);
       invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
         if (command === 'list_workspace_files') {
           return {
@@ -804,12 +804,13 @@ describe('useAgentStore.sendMessage', () => {
       ).toBe(true);
 
       await vi.advanceTimersByTimeAsync(1_000);
+      // 诊断明细内嵌在修复提示词里；报告对象不再作为参数注入每轮 prompt。
       expect(sendMessageMock).toHaveBeenCalledWith(
         expect.stringContaining('src/App.tsx'),
         '后台诊断发现问题，自动进入修复流',
-        'agent',
-        expect.objectContaining({ overallStatus: 'failed' })
+        'agent'
       );
+      expect(String(sendMessageMock.mock.calls[0]?.[0])).toContain('诊断失败项');
     } finally {
       useAgentStore.setState({ sendMessage: originalSendMessage });
       vi.useRealTimers();
@@ -896,7 +897,7 @@ describe('useAgentStore.sendMessage', () => {
     expect(useAgentStore.getState()._agentPromptKey).toBeNull();
   });
 
-  it('wraps user input with runtime diagnostics context before sending', async () => {
+  it('does not inject diagnostics or project overview into the per-turn prompt (agent fetches via tools)', async () => {
     const chat = vi.fn(async (prompt: string) => {
       void prompt;
       return createAgentResponse('已完成 App.tsx 静态错误修复。');
@@ -929,19 +930,24 @@ describe('useAgentStore.sendMessage', () => {
       _agent: createMockAgent({ chat }),
       _agentModel: 'deepseek-v4-pro',
       _agentPromptKey: null,
+      // Even with a failing report in the store, the per-turn prompt must
+      // stay lean: the agent decides when to run diagnostics / graph itself.
+      projectDiagnosticsReport: diagnosticsReport,
     });
 
     await useAgentStore
       .getState()
-      .sendMessage('修复 App.tsx 里的静态错误', '修复 App.tsx 里的静态错误', 'agent', diagnosticsReport);
+      .sendMessage('修复 App.tsx 里的静态错误', '修复 App.tsx 里的静态错误', 'agent');
 
     expect(chat).toHaveBeenCalledTimes(1);
-    expect(String(chat.mock.calls[0]?.[0])).toContain('# CodePapr AGENT 模式');
-    expect(String(chat.mock.calls[0]?.[0])).toContain('## 项目诊断');
-    expect(String(chat.mock.calls[0]?.[0])).toContain('src/App.tsx:3:14');
-    expect(String(chat.mock.calls[0]?.[0])).toContain('修复 App.tsx 里的静态错误');
+    const prompt = String(chat.mock.calls[0]?.[0]);
+    expect(prompt).toContain('# CodePapr AGENT 模式');
+    expect(prompt).toContain('修复 App.tsx 里的静态错误');
+    expect(prompt).not.toContain('## 项目诊断');
+    expect(prompt).not.toContain('src/App.tsx:3:14');
+    expect(prompt).not.toContain('## 项目结构概览');
     const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
-    expect(sessionMessages[0]?.promptContent).toContain('## 项目诊断');
+    expect(sessionMessages[0]?.promptContent).not.toContain('## 项目诊断');
     expect(sessionMessages[0]?.content).toBe('修复 App.tsx 里的静态错误');
   });
 

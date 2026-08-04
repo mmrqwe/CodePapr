@@ -115,12 +115,12 @@ function maybeStartBackgroundRepair(params: {
 
     backgroundRepairFingerprints.add(fingerprint);
     backgroundRepairAttemptsByWorkspace.set(params.workspacePath, attempts + 1);
+    // 诊断明细已内嵌在修复提示词中（buildDiagnosticsRepairPrompt），无需再注入报告。
     void state
       .sendMessage(
         buildDiagnosticsRepairPrompt(params.report, changedPaths),
         '后台诊断发现问题，自动进入修复流',
-        'agent',
-        params.report
+        'agent'
       )
       .catch((error) => {
         appendErrorMessage(params.set, formatAgentError(error, state.settings.lang ?? 'zh-CN'));

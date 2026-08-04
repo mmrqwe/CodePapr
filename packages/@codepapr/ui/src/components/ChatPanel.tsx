@@ -1859,7 +1859,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
     }
 
     shouldStickToBottomRef.current = true;
-    await sendMessage(taskText, displayText, nextMode, null, images);
+    await sendMessage(taskText, displayText, nextMode, images);
   }, [
     refreshProjectDiagnostics,
     sendMessage,

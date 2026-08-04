@@ -207,7 +207,7 @@ function buildModeSwitchMessage(mode: WorkMode): UIMessage {
 }
 
 export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['sendMessage'] {
-  return async (input, displayContent, mode = 'agent', projectDiagnosticsReport = null, images) => {
+  return async (input, displayContent, mode = 'agent', images) => {
         const { settings } = get();
         const normalizedSettings = normalizeSettings(settings);
         let assistantMessageId: string | null = null;
@@ -456,7 +456,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           saveCurrentProjectState(get());
           armStoreIdle();
 
-          const diagnosticsForPrompt = projectDiagnosticsReport ?? get().projectDiagnosticsReport;
           const rulesSection = get()._projectRulesSection;
           const skillDefinitions = get()._skillDefinitions;
           let projectGraphBootstrapSummary: string | undefined;
@@ -629,8 +628,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             mode,
             workspacePath,
             input: effectiveInput,
-            projectDiagnosticsReport: diagnosticsForPrompt,
-            projectGraphSummary: projectGraphBootstrapSummary,
             todoDigest: currentTodoDigest(optimisticSid),
           });
           let { _agent: agent } = get();

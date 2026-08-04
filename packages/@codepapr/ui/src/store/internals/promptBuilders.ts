@@ -17,9 +17,7 @@ import {
 } from '@codepapr/core';
 import type { IMessage } from '@codepapr/types';
 import type { WorkMode } from '../../utils/agentPrompts';
-import { buildProjectDiagnosticsPromptSection } from '../../utils/agentPrompts';
 import { hasEnabledMcpSearch } from '../../utils/mcpTypes';
-import type { ProjectDiagnosticsReport } from '../../utils/projectDiagnostics';
 import { buildEffectiveContextMessages } from '../../utils/contextCompaction';
 import { resolveMultimodalEnabled } from './settingsNormalizer';
 import type { Settings, UIMessage } from './types';
@@ -173,28 +171,15 @@ export function buildAgentRuntimeUserPrompt(params: {
   mode: WorkMode;
   workspacePath: string;
   input: string;
-  projectDiagnosticsReport?: ProjectDiagnosticsReport | null;
-  projectGraphSummary?: string;
   todoDigest?: string;
 }): string {
-  const diagnosticsSection =
-    params.mode === 'ask' || params.mode === 'app'
-      ? ''
-      : buildProjectDiagnosticsPromptSection({
-          lang: params.settings.lang ?? 'zh-CN',
-          workspacePath: params.workspacePath,
-          projectDiagnosticsReport: params.projectDiagnosticsReport,
-        })
-          .slice(1)
-          .join('\n');
-
+  // 项目结构概览与项目诊断不再注入每轮 user prompt（大项目下每轮数万 token
+  // 且位于请求尾部无法命中前缀缓存）；由 agent 通过 graph / diagnostics 工具按需获取。
   return buildRuntimeUserPrompt({
     mode: params.mode,
     input: params.input,
     workspacePath: params.workspacePath,
     lang: params.settings.lang ?? 'zh-CN',
-    diagnosticsSection,
-    projectGraphSection: params.projectGraphSummary,
     todoDigest: params.todoDigest,
   });
 }
