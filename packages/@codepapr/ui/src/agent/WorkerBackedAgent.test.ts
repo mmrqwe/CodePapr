@@ -146,6 +146,14 @@ function createAgent(
   });
 }
 
+type ChatWorkerMessage = Extract<MainToAgentWorkerMessage, { type: 'chat' }>;
+
+/** The constructor posts an 'init' message before any chat, so tests must
+ *  filter for chat messages instead of indexing raw worker messages. */
+function chatMessages(worker: MockWorker | undefined): ChatWorkerMessage[] {
+  return (worker?.messages ?? []).filter((m): m is ChatWorkerMessage => m.type === 'chat');
+}
+
 describe('WorkerBackedAgent', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -156,6 +164,17 @@ describe('WorkerBackedAgent', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
+  });
+
+  it('posts an init message with settings/tools/workspace before any chat', () => {
+    createAgent();
+    const worker = MockWorker.instances[0];
+    const initMessage = worker?.messages[0];
+    expect(initMessage?.type).toBe('init');
+    if (initMessage?.type !== 'init') throw new Error('expected init message');
+    expect(initMessage.payload.workspacePath).toBe('/tmp/codepapr-worker-agent-test');
+    expect(initMessage.payload.settings.model).toBe('deepseek-test');
+    expect(initMessage.payload.toolDefinitions.length).toBeGreaterThan(0);
   });
 
   it('buffers content and reasoning deltas before flushing them to the UI', async () => {
@@ -169,7 +188,7 @@ describe('WorkerBackedAgent', () => {
 
     const chatPromise = agent.chat('hello', (event) => events.push(event));
     const worker = MockWorker.instances[0];
-    const chatMessage = worker?.messages[0];
+    const chatMessage = chatMessages(worker)[0];
 
     expect(chatMessage?.type).toBe('chat');
     if (chatMessage?.type !== 'chat') {
@@ -207,7 +226,7 @@ describe('WorkerBackedAgent', () => {
 
     const chatPromise = agent.chat('hello', (event) => events.push(event));
     const worker = MockWorker.instances[0];
-    const chatMessage = worker?.messages[0];
+    const chatMessage = chatMessages(worker)[0];
     if (chatMessage?.type !== 'chat') {
       throw new Error('expected chat message');
     }
@@ -236,7 +255,7 @@ describe('WorkerBackedAgent', () => {
 
     const chatPromise = agent.chat('hello');
     const worker = MockWorker.instances[0];
-    const chatMessage = worker?.messages[0];
+    const chatMessage = chatMessages(worker)[0];
     if (chatMessage?.type !== 'chat') {
       throw new Error('expected chat message');
     }
@@ -267,7 +286,7 @@ describe('WorkerBackedAgent', () => {
 
     // Turn 1: empty history => full sync (no incrementalSync).
     const chat1 = agent.chat('hello');
-    const msg1 = worker?.messages[0];
+    const msg1 = chatMessages(worker)[0];
     if (msg1?.type !== 'chat') throw new Error('expected chat message');
     expect(msg1.payload.incrementalSync).toBeUndefined();
     const requestId1 = msg1.payload.requestId;
@@ -287,7 +306,7 @@ describe('WorkerBackedAgent', () => {
 
     // Turn 2: main log length (2) matches the tracked worker length => incremental.
     const chat2 = agent.chat('again');
-    const msg2 = worker?.messages[1];
+    const msg2 = chatMessages(worker)[1];
     if (msg2?.type !== 'chat') throw new Error('expected chat message');
     expect(msg2.payload.incrementalSync?.expectedBaseLength).toBe(2);
     expect(msg2.payload.incrementalSync?.newMessages).toEqual([]);
@@ -319,7 +338,7 @@ describe('WorkerBackedAgent', () => {
     const agent = createAgent([], { multimodalEnabled: false });
     const chatPromise = agent.chat('hello');
     const worker = MockWorker.instances[0];
-    const chatMessage = worker?.messages[0];
+    const chatMessage = chatMessages(worker)[0];
     if (chatMessage?.type !== 'chat') throw new Error('expected chat message');
 
     const toolNames = chatMessage.payload.toolDefinitions.map((t) => t.name);
@@ -340,7 +359,7 @@ describe('WorkerBackedAgent', () => {
     const agent = createAgent([], { multimodalEnabled: true });
     const chatPromise = agent.chat('hello');
     const worker = MockWorker.instances[0];
-    const chatMessage = worker?.messages[0];
+    const chatMessage = chatMessages(worker)[0];
     if (chatMessage?.type !== 'chat') throw new Error('expected chat message');
 
     const toolNames = chatMessage.payload.toolDefinitions.map((t) => t.name);
@@ -360,7 +379,7 @@ describe('WorkerBackedAgent', () => {
     const agent = createAgent([], { mcpSearch: true });
     const chatPromise = agent.chat('hello');
     const worker = MockWorker.instances[0];
-    const chatMessage = worker?.messages[0];
+    const chatMessage = chatMessages(worker)[0];
     if (chatMessage?.type !== 'chat') throw new Error('expected chat message');
 
     const toolNames = chatMessage.payload.toolDefinitions.map((t) => t.name);
@@ -381,7 +400,7 @@ describe('WorkerBackedAgent', () => {
     const agent = createAgent([], { mcpSearch: false });
     const chatPromise = agent.chat('hello');
     const worker = MockWorker.instances[0];
-    const chatMessage = worker?.messages[0];
+    const chatMessage = chatMessages(worker)[0];
     if (chatMessage?.type !== 'chat') throw new Error('expected chat message');
 
     const toolNames = chatMessage.payload.toolDefinitions.map((t) => t.name);
@@ -470,7 +489,7 @@ describe('WorkerBackedAgent', () => {
     const agent = createAgent();
     const chatPromise = agent.chat('hello');
     const worker = MockWorker.instances[0];
-    const chatMessage = worker?.messages[0];
+    const chatMessage = chatMessages(worker)[0];
     if (chatMessage?.type !== 'chat') throw new Error('expected chat message');
 
     // Answer every ping for longer than the crash timeout.

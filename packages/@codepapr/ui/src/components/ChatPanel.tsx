@@ -1803,26 +1803,38 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
     };
   }, []);
 
-  // 暂缓渲染结束（如 ProjectGraph 初始化遮罩关闭）后，对话内容首次进入已稳定的
-  // 布局：此时瞬时滚到底部，避免加载期布局未定导致的滚动错位。
+  // 对话内容首次进入已稳定布局的时刻（ProjectGraph 遮罩关闭、打开工作区、切换
+  // 会话、按需历史加载完成）统一瞬时滚到底部。WKWebView 对「新插入的大列表 +
+  // 同帧程序化滚动」可能不重绘（表现为空白、动一下滚动条才显示），因此用双 rAF
+  // 让内容先完成合成，再瞬时滚动，最后补一次 1px 滚动微扰强制重绘。
   useLayoutEffect(() => {
-    if (deferMessages) return;
+    if (deferMessages || sessionMessagesLoading) return;
     shouldStickToBottomRef.current = true;
     let raf2 = 0;
+    let raf3 = 0;
+    let raf4 = 0;
     const raf1 = requestAnimationFrame(() => {
       raf2 = requestAnimationFrame(() => {
         const container = messageListRef.current;
-        if (container) {
-          isProgrammaticScrollRef.current = true;
-          scrollContainerToBottom(container, 'auto');
-        }
+        if (!container) return;
+        isProgrammaticScrollRef.current = true;
+        scrollContainerToBottom(container, 'auto');
+        raf3 = requestAnimationFrame(() => {
+          container.scrollTop = Math.max(0, container.scrollTop - 1);
+          raf4 = requestAnimationFrame(() => {
+            isProgrammaticScrollRef.current = true;
+            scrollContainerToBottom(container, 'auto');
+          });
+        });
       });
     });
     return () => {
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
+      cancelAnimationFrame(raf3);
+      cancelAnimationFrame(raf4);
     };
-  }, [deferMessages]);
+  }, [deferMessages, sessionMessagesLoading, activeSessionId]);
 
   const submitMessage = useCallback(async (
     taskText: string,

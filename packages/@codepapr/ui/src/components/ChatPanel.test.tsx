@@ -551,6 +551,68 @@ describe('ChatPanel', () => {
     expect(chatScroll.scrollTop).toBe(1200);
   });
 
+  it('scrolls to the bottom when on-demand session history finishes loading', async () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      messages: [],
+      sessionMessages: {},
+      sessionMessagesLoading: true,
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const chatScroll = container.querySelector('[data-chat-scroll="true"]') as HTMLDivElement;
+    expect(chatScroll).not.toBeNull();
+    Object.defineProperty(chatScroll, 'scrollHeight', {
+      value: 900,
+      writable: true,
+      configurable: true,
+    });
+
+    await act(async () => {
+      useAgentStore.setState((state) => ({
+        ...state,
+        messages: [
+          {
+            id: 'user-loaded',
+            role: 'user',
+            content: '按需加载完成的历史消息',
+            timestamp: 10,
+          },
+        ],
+        sessionMessagesLoading: false,
+      }));
+      root.render(<ChatPanel />);
+    });
+    flushRAF();
+
+    expect(chatScroll.scrollTop).toBe(900);
+  });
+
+  it('scrolls to the bottom when message rendering is un-deferred', async () => {
+    await act(async () => {
+      root.render(<ChatPanel deferMessages />);
+    });
+
+    const chatScroll = container.querySelector('[data-chat-scroll="true"]') as HTMLDivElement;
+    expect(chatScroll).not.toBeNull();
+    expect(container.querySelector('[data-message-role="user"]')).toBeNull();
+    Object.defineProperty(chatScroll, 'scrollHeight', {
+      value: 1100,
+      writable: true,
+      configurable: true,
+    });
+
+    await act(async () => {
+      root.render(<ChatPanel deferMessages={false} />);
+    });
+    flushRAF();
+
+    expect(chatScroll.scrollTop).toBe(1100);
+  });
+
   it('does not collapse textual summary-style conversations', async () => {
     useAgentStore.setState((state) => ({
       ...state,

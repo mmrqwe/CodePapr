@@ -325,6 +325,9 @@ export interface AgentActions {
   setSkillEnabledState: (skillId: string, enabled: boolean | null) => void;
   setSessionInputState: (sessionId: string, state: SessionInputState) => void;
   computeContextSnapshot: () => Promise<void>;
+  /** 确保存在可用 Agent（App Agent 依赖聊天 Agent 的 Worker）。用户从未发过
+   *  消息时按需创建，供 papr://agent.run 使用；并发调用共享同一次创建。 */
+  ensureAgentForApp: () => Promise<AgentRuntimeHandle>;
   _loadProjectConfig: (path: string) => Promise<void>;
   _ensureWorkspaceGitReady: (path: string) => Promise<void>;
 }

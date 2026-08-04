@@ -124,6 +124,16 @@ export interface AgentWorkerChatPayload {
   runtime: WorkerAgentRuntimeConfig;
 }
 
+/** Warms the worker's cached settings/tools/workspace/runtime before any chat
+ *  turn runs. App agents (`run-app-agent`) rely on these caches and must work
+ *  even when the user has not sent a chat message yet. */
+export interface AgentWorkerInitPayload {
+  settings: WorkerAgentSettings;
+  toolDefinitions: IToolDefinition[];
+  workspacePath: string;
+  runtime: WorkerAgentRuntimeConfig;
+}
+
 export interface AgentWorkerToolResponse {
   requestId: string;
   toolRequestId: string;
@@ -133,6 +143,10 @@ export interface AgentWorkerToolResponse {
 }
 
 export type MainToAgentWorkerMessage =
+  | {
+      type: 'init';
+      payload: AgentWorkerInitPayload;
+    }
   | {
       type: 'chat';
       payload: AgentWorkerChatPayload;

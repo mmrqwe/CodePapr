@@ -81,6 +81,10 @@ tree-sitter-kotlin = { path = "../../../../.cargo-vendor/kotlin" }
 
 tree-sitter-swift = { path = "../../../../.cargo-vendor/swift" }
 
+# vendor 自 crates.io tree-sitter-sequel 0.3.11（DerekStride/tree-sitter-sql），
+# sha256: 9d198ad3c319c02e43c21efa1ec796b837afcb96ffaef1a40c1978fbdcec7d17
+tree-sitter-sql = { path = "../../../../.cargo-vendor/sql", package = "tree-sitter-sequel" }
+
 # 内置浏览器截图：WKWebView.takeSnapshot + NSBitmapImageRep 编码。
 # 版本与依赖树中现有 objc2 系列保持一致（wry/tauri 传递依赖）。
 [target.'cfg(target_os = "macos")'.dependencies]

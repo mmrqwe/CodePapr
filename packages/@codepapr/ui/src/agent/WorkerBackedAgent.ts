@@ -302,6 +302,24 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       document.addEventListener('visibilitychange', this.handleVisibilityChange);
     }
     this.startHeartbeat();
+    // Warm the worker's caches up front so app agents can run before any chat
+    // turn (messages are processed in order, so this lands before any request).
+    this.worker.postMessage({
+      type: 'init',
+      payload: {
+        settings: config.settings,
+        toolDefinitions: this.toolDefinitions,
+        workspacePath: config.workspacePath,
+        runtime: {
+          rulesSection: config.runtime.rulesSection,
+          customPrompt: config.runtime.customPrompt,
+          memorySection: config.runtime.memorySection,
+          lang: config.runtime.lang,
+          skillDefinitions: config.runtime.skillDefinitions,
+          agentDefinitions: config.runtime.agentDefinitions,
+        },
+      },
+    } satisfies MainToAgentWorkerMessage);
   }
 
   /** Detects a silently dead worker (no 'error' event, e.g. OS memory kill):

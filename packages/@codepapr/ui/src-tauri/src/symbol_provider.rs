@@ -1170,6 +1170,43 @@ struct AstLanguageConfig {
     import_kinds: &'static [&'static str],
     kind_map: &'static [(&'static str, u64)],
     name_field: &'static str,
+    /// 在匹配节点上追加尝试的 field 名（name_field 未命中时按序尝试）。
+    fallback_name_fields: &'static [&'static str],
+    /// 仍找不到名字时，按序取第一个该 kind 的命名子节点：先在其上尝试
+    /// name_field 与 fallback fields，仍未命中则直接使用该子节点文本。
+    name_child_kinds: &'static [&'static str],
+}
+
+impl AstLanguageConfig {
+    fn all_name_fields(&self) -> impl Iterator<Item = &'static str> + '_ {
+        std::iter::once(self.name_field)
+            .chain(self.fallback_name_fields.iter().copied())
+    }
+
+    /// 按 config 规则解析符号名节点：节点自身 field → fallback fields →
+    /// 指定 kind 的子节点（先 field 后文本）。
+    fn resolve_name_node<'tree>(&self, node: Node<'tree>) -> Option<Node<'tree>> {
+        for field in self.all_name_fields() {
+            if let Some(name_node) = node.child_by_field_name(field) {
+                return Some(name_node);
+            }
+        }
+        for kind in self.name_child_kinds {
+            let Some(child) = (0..node.child_count())
+                .filter_map(|i| node.child(i))
+                .find(|c| c.is_named() && c.kind() == *kind)
+            else {
+                continue;
+            };
+            for field in self.all_name_fields() {
+                if let Some(name_node) = child.child_by_field_name(field) {
+                    return Some(name_node);
+                }
+            }
+            return Some(child);
+        }
+        None
+    }
 }
 
 struct AstSymbolProvider {
@@ -1207,7 +1244,7 @@ impl AstSymbolProvider {
         let kind = node.kind();
 
         if let Some(sym_kind) = self.match_kind(kind) {
-            if let Some(name_node) = node.child_by_field_name(self.config.name_field) {
+            if let Some(name_node) = self.config.resolve_name_node(node) {
                 let name = name_node.utf8_text(source).unwrap_or("");
                 if !name.is_empty() && !is_control_keyword(name) {
                     let start = node.start_position();
@@ -1282,7 +1319,7 @@ impl AstSymbolProvider {
         let kind = node.kind();
         let mut child_container = container.clone();
         if self.match_kind(kind).is_some() {
-            if let Some(name_node) = node.child_by_field_name(self.config.name_field) {
+            if let Some(name_node) = self.config.resolve_name_node(node) {
                 let name = name_node.utf8_text(source).unwrap_or("");
                 if !name.is_empty() && !is_control_keyword(name) {
                     let start = node.start_position();
@@ -1598,6 +1635,8 @@ fn register_ast_providers() {
             ("lexical_declaration", 13),
         ],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1625,6 +1664,8 @@ fn register_ast_providers() {
             ("lexical_declaration", 13),
         ],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1649,6 +1690,8 @@ fn register_ast_providers() {
             ("lexical_declaration", 13),
         ],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1664,6 +1707,8 @@ fn register_ast_providers() {
             ("assignment", 13),
         ],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1684,6 +1729,8 @@ fn register_ast_providers() {
             ("static_item", 14),
         ],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1706,6 +1753,8 @@ fn register_ast_providers() {
             ("field_declaration", 8),
         ],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1728,6 +1777,8 @@ fn register_ast_providers() {
             ("short_var_declaration", 13),
         ],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1745,6 +1796,8 @@ fn register_ast_providers() {
             ("declaration", 13),
         ],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1756,6 +1809,8 @@ fn register_ast_providers() {
         import_kinds: &[],
         kind_map: &[("function_definition", 12), ("variable_assignment", 13)],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1782,6 +1837,8 @@ fn register_ast_providers() {
             ("property_declaration", 8),
         ],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1812,6 +1869,8 @@ fn register_ast_providers() {
             ("variable_declaration", 13),
         ],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1823,6 +1882,8 @@ fn register_ast_providers() {
         import_kinds: &["import_statement"],
         kind_map: &[],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1834,6 +1895,8 @@ fn register_ast_providers() {
         import_kinds: &[],
         kind_map: &[("element", 5), ("script_element", 5), ("style_element", 5)],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1845,6 +1908,8 @@ fn register_ast_providers() {
         import_kinds: &[],
         kind_map: &[("object", 19), ("pair", 7)],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1862,6 +1927,8 @@ fn register_ast_providers() {
             ("assignment", 13),
         ],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1883,6 +1950,8 @@ fn register_ast_providers() {
             ("property_declaration", 7),
         ],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
     });
 
     register_ast_with_config(AstLanguageConfig {
@@ -1907,6 +1976,38 @@ fn register_ast_providers() {
             ("property_declaration", 7),
         ],
         name_field: "name",
+        fallback_name_fields: &[],
+        name_child_kinds: &[],
+    });
+
+    // SQL（tree-sitter-sequel / DerekStride/tree-sitter-sql）：
+    // - table/view/function/trigger 等对象名在 object_reference 子节点的 name field 中
+    // - create_index 的对象名是语句自身的 field("column")
+    // - create_database/create_schema 的对象名是裸 identifier 子节点
+    // kind 数值与 regex-sql provider 保持一致（TABLE/VIEW/INDEX=5，FUNCTION/PROCEDURE/TRIGGER=12）。
+    register_ast_with_config(AstLanguageConfig {
+        language_id: "sql",
+        language_fn: || unsafe { std::mem::transmute(tree_sitter_sql::LANGUAGE.into_raw()()) },
+        type_kinds: &[
+            "create_table",
+            "create_view",
+            "create_materialized_view",
+            "create_index",
+        ],
+        callable_kinds: &["create_function", "create_trigger"],
+        variable_kinds: &[],
+        import_kinds: &[],
+        kind_map: &[
+            ("create_table", 5),
+            ("create_view", 5),
+            ("create_materialized_view", 5),
+            ("create_index", 5),
+            ("create_function", 12),
+            ("create_trigger", 12),
+        ],
+        name_field: "name",
+        fallback_name_fields: &["column"],
+        name_child_kinds: &["object_reference", "identifier"],
     });
 }
 
@@ -2120,5 +2221,74 @@ mod syntax_check_tests {
         register_ast_providers();
         let symbols = extract_file_symbols_for_language("nonexistent_language_xyz", "some code");
         assert!(symbols.is_empty());
+    }
+
+    #[test]
+    fn check_syntax_valid_sql_has_no_errors() {
+        register_ast_providers();
+        let result = check_syntax_for_language(
+            "sql",
+            "CREATE TABLE users (\n  id INT PRIMARY KEY,\n  email VARCHAR(255)\n);\n",
+        );
+        assert!(result.supported);
+        assert_eq!(result.error_count, 0);
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn check_syntax_broken_sql_reports_errors() {
+        register_ast_providers();
+        let result = check_syntax_for_language("sql", "CREATE TABLE users (id INT;\n");
+        assert!(result.supported);
+        assert!(result.error_count > 0);
+    }
+
+    #[test]
+    fn extract_file_symbols_sql_returns_create_statements() {
+        register_ast_providers();
+        let content = "CREATE TABLE users (\n  id INT\n);\nCREATE INDEX idx_users_email ON users(email);\n";
+        let symbols = extract_file_symbols_for_language("sql", content);
+        let table = symbols.iter().find(|s| s.name == "users");
+        assert!(table.is_some(), "expected users table symbol, got: {symbols:?}");
+        let table = table.unwrap();
+        assert_eq!(table.kind, "create_table");
+        assert_eq!(table.line, 1);
+        assert!(table.end_line >= 3);
+        let index = symbols.iter().find(|s| s.name == "idx_users_email");
+        assert!(
+            index.is_some(),
+            "expected idx_users_email index symbol, got: {symbols:?}"
+        );
+    }
+
+    #[test]
+    fn extract_file_symbols_sql_resolves_qualified_object_reference() {
+        register_ast_providers();
+        let content = "CREATE TABLE public.orders (\n  id INT\n);\n";
+        let symbols = extract_file_symbols_for_language("sql", content);
+        assert!(
+            symbols.iter().any(|s| s.name == "orders"),
+            "expected orders table symbol, got: {symbols:?}"
+        );
+        assert!(
+            !symbols.iter().any(|s| s.name == "public.orders"),
+            "name should be resolved from object_reference name field, got: {symbols:?}"
+        );
+    }
+
+    #[test]
+    fn extract_file_symbols_sql_resolves_function_and_view() {
+        register_ast_providers();
+        let content =
+            "CREATE VIEW active_users AS SELECT * FROM users;\nCREATE FUNCTION inc(x INT) RETURNS INT AS $$ BEGIN RETURN x + 1; END; $$ LANGUAGE plpgsql;\n";
+        let symbols = extract_file_symbols_for_language("sql", content);
+        assert!(
+            symbols.iter().any(|s| s.name == "active_users"),
+            "expected active_users view symbol, got: {symbols:?}"
+        );
+        assert!(
+            symbols.iter().any(|s| s.name == "inc"),
+            "expected inc function symbol, got: {symbols:?}"
+        );
     }
 }

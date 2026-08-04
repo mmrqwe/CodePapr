@@ -1401,6 +1401,14 @@ function dispatchWorkerMessage(message: MainToAgentWorkerMessage): void {
     return;
   }
 
+  if (message.type === 'init') {
+    cachedSettings = message.payload.settings;
+    cachedToolDefinitions = message.payload.toolDefinitions;
+    cachedWorkspacePath = message.payload.workspacePath;
+    cachedRuntimeConfig = message.payload.runtime;
+    return;
+  }
+
   if (message.type === 'run-app-agent') {
     void handleRunAppAgent(message.payload, message.requestId).catch((error) => {
       postMessageToMain({

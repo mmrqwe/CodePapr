@@ -2951,3 +2951,134 @@ describe('per-session execution and input state', () => {
     expect(state._sessionInputState['s-b']).toEqual({ mode: 'ask', draft: '问题', images: [], files: [] });
   });
 });
+
+describe('useAgentStore.ensureAgentForApp', () => {
+  beforeEach(() => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({
+        apiKey: 'sk-test',
+        fastModelEnabled: false,
+      }),
+      workspacePath: '/tmp/codepapr-test',
+      sessions: [
+        {
+          id: 'session-1',
+          name: '任务 1',
+          provider: 'deepseek',
+          model: 'deepseek-v4-pro',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      ],
+      activeSessionId: 'session-1',
+      messages: [],
+      sessionMessages: {
+        'session-1': [],
+      },
+      settingsLoaded: true,
+      _agent: null,
+      _agentModel: null,
+      _agentPromptKey: null,
+      _agentSessionId: null,
+    }));
+  });
+
+  afterEach(() => {
+    createAgentMock.mockImplementation((...args: never[]) =>
+      actualCreateAgentRef.current!.createAgent(...args)
+    );
+    createAgentMock.mockClear();
+    invokeMock.mockClear();
+  });
+
+  it('creates an agent on demand when no chat agent exists', async () => {
+    const mockAgent = createMockAgent();
+    createAgentMock.mockReturnValue(mockAgent);
+
+    const agent = await useAgentStore.getState().ensureAgentForApp();
+
+    expect(agent).toBe(mockAgent);
+    expect(createAgentMock).toHaveBeenCalledTimes(1);
+    const state = useAgentStore.getState();
+    expect(state._agent).toBe(mockAgent);
+    // 空上下文宿主 Agent：不绑定模型/提示词/会话，下一条聊天消息总是重建。
+    expect(state._agentModel).toBeNull();
+    expect(state._agentPromptKey).toBeNull();
+    expect(state._agentSessionId).toBeNull();
+  });
+
+  it('reuses the existing chat agent when it is healthy', async () => {
+    const existing = createMockAgent();
+    useAgentStore.setState({ _agent: existing });
+    createAgentMock.mockReturnValue(createMockAgent());
+
+    const agent = await useAgentStore.getState().ensureAgentForApp();
+
+    expect(agent).toBe(existing);
+    expect(createAgentMock).not.toHaveBeenCalled();
+  });
+
+  it('destroys and rebuilds a crashed agent', async () => {
+    const destroySpy = vi.fn();
+    const crashed = createMockAgent({ isCrashed: true, destroy: destroySpy });
+    const fresh = createMockAgent();
+    useAgentStore.setState({ _agent: crashed });
+    createAgentMock.mockReturnValue(fresh);
+
+    const agent = await useAgentStore.getState().ensureAgentForApp();
+
+    expect(destroySpy).toHaveBeenCalledTimes(1);
+    expect(agent).toBe(fresh);
+    expect(useAgentStore.getState()._agent).toBe(fresh);
+  });
+
+  it('rejects with a settings error when the API key is missing', async () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ apiKey: '' }),
+    }));
+    createAgentMock.mockReturnValue(createMockAgent());
+
+    await expect(useAgentStore.getState().ensureAgentForApp()).rejects.toThrow(/API Key/);
+    expect(createAgentMock).not.toHaveBeenCalled();
+    expect(useAgentStore.getState()._agent).toBeNull();
+  });
+
+  it('dedupes concurrent calls into a single agent creation', async () => {
+    const mockAgent = createMockAgent();
+    createAgentMock.mockReturnValue(mockAgent);
+
+    const [first, second] = await Promise.all([
+      useAgentStore.getState().ensureAgentForApp(),
+      useAgentStore.getState().ensureAgentForApp(),
+    ]);
+
+    expect(first).toBe(mockAgent);
+    expect(second).toBe(mockAgent);
+    expect(createAgentMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates a session when none is active', async () => {
+    useAgentStore.setState({
+      sessions: [],
+      activeSessionId: null,
+      sessionMessages: {},
+    });
+    const mockAgent = createMockAgent();
+    createAgentMock.mockReturnValue(mockAgent);
+
+    await useAgentStore.getState().ensureAgentForApp();
+
+    const state = useAgentStore.getState();
+    expect(state.sessions.length).toBe(1);
+    expect(createAgentMock).toHaveBeenCalledWith(
+      expect.anything(),
+      state.activeSessionId,
+      '/tmp/codepapr-test',
+      [],
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+});

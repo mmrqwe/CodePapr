@@ -49,6 +49,7 @@ import {
 } from './internals/defaults';
 import {
   getProviderLabel as _getProviderLabel,
+  getSettingsError,
   isApiConfigured as _isApiConfigured,
   normalizeSettings,
   resolveProviderName,
@@ -66,8 +67,11 @@ import {
 } from './internals/promptBuilders';
 import {
   buildAgentSessionParts,
+  createAgent,
   setDefaultOnWorkspaceMutatedResolver,
+  type AgentRuntimeConfig,
 } from './internals/agentFactory';
+import type { AgentRuntimeHandle } from '../agent/WorkerBackedAgent';
 import { handleWorkspaceMutation } from './internals/backgroundDiagnostics';
 import { createSendMessage } from './internals/sendMessage';
 import { upsertRecentWorkspace, sortRecentWorkspaces } from './internals/recentWorkspaces';
@@ -154,6 +158,99 @@ function evictSessionMessageCache(get: StoreGet, set: StoreSet, protectIds: stri
     }
     return { sessionMessages: next };
   });
+}
+
+// App Agent 初始化去重：并发的 papr://agent.run 请求共享同一次创建，
+// 避免重复拉起 Worker。
+let appAgentEnsureInFlight: Promise<AgentRuntimeHandle> | null = null;
+
+/** 为 App Agent 确保存在可用 Agent（复用聊天 Agent 的 Worker）。
+ *  与 sendMessage 的创建路径对齐，但只产出「宿主」：空上下文、不绑定会话，
+ *  下一条聊天消息总会重建，绝不会被误用于聊天回合。 */
+async function ensureAgentForAppInternal(
+  get: StoreGet,
+  set: StoreSet,
+): Promise<AgentRuntimeHandle> {
+  const existing = get()._agent;
+  if (existing && !existing.isCrashed()) return existing;
+  if (existing) {
+    try {
+      existing.destroy();
+    } catch {
+      // already torn down
+    }
+    set({ _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
+  }
+
+  const normalizedSettings = normalizeSettings(get().settings);
+  const settingsError = getSettingsError(normalizedSettings);
+  if (settingsError) throw new Error(settingsError);
+
+  // 兜底：没有打开任何项目时自动创建默认项目，保证文件工具有落点。
+  if (!get().workspacePath.trim()) {
+    await get().ensureDefaultWorkspace();
+  }
+  const workspacePath = get().workspacePath;
+  if (!workspacePath.trim()) {
+    throw new Error('没有可用的工作区，无法初始化 Agent');
+  }
+
+  let sessionId = get().activeSessionId;
+  if (!sessionId) {
+    get().newSession();
+    sessionId = get().activeSessionId;
+  }
+  if (!sessionId) {
+    throw new Error('无法初始化会话');
+  }
+
+  let memorySection: string | undefined;
+  try {
+    const memoryResult = await invoke<{ content: string }>('read_text_file', {
+      workspacePath,
+      relativePath: '.CodePapr/memory.md',
+      maxBytes: 50_000,
+    });
+    memorySection = memoryResult.content?.trim();
+  } catch {
+    // 无 memory.md：跳过
+  }
+
+  let mcpToolDefinitions: IToolDefinition[] = [];
+  let mcpToolMappings: Array<{ serverId: string; toolName: string; displayName: string }> = [];
+  if (normalizedSettings.mcp.enabled && normalizedSettings.mcp.exposeTools) {
+    try {
+      const loadedMcpTools = await loadMcpToolDefinitions(normalizedSettings.mcp);
+      mcpToolDefinitions = loadedMcpTools.definitions;
+      mcpToolMappings = loadedMcpTools.toolMappings;
+    } catch {
+      // MCP 工具发现失败：跳过
+    }
+  }
+
+  // 竞态保护：异步加载期间工作区已切换，放弃本次创建由调用方重试。
+  if (get().workspacePath !== workspacePath) {
+    throw new Error('工作区已变更，请重试');
+  }
+
+  const runtimeConfig: AgentRuntimeConfig = {
+    editHistory: get()._editHistory,
+    rulesSection: get()._projectRulesSection,
+    customPrompt: normalizedSettings.systemPrompt,
+    memorySection,
+    lang: normalizedSettings.lang,
+    mode: 'agent',
+    skillDefinitions: get()._skillDefinitions,
+    agentDefinitions: get()._agentDefinitions,
+    mcpToolDefinitions,
+    mcpToolMappings,
+  };
+
+  const agent = createAgent(normalizedSettings, sessionId, workspacePath, [], {}, runtimeConfig);
+  // _agentModel/_agentPromptKey/_agentSessionId 保持 null：下一条聊天消息
+  // 总会按会话上下文重建，这个空上下文 Agent 不会被复用到聊天回合。
+  set({ _agent: agent, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
+  return agent;
 }
 
 export const useAgentStore = create<AgentState & AgentActions>()((set, get) => ({
@@ -757,6 +854,15 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         );
 
         set({ _latestContextSnapshot: { sessionId: activeSessionId, snapshot } });
+      },
+
+      ensureAgentForApp: () => {
+        if (appAgentEnsureInFlight) return appAgentEnsureInFlight;
+        const promise = ensureAgentForAppInternal(get, set).finally(() => {
+          appAgentEnsureInFlight = null;
+        });
+        appAgentEnsureInFlight = promise;
+        return promise;
       },
 
       setShowSettings: (v) => set({ showSettings: v }),

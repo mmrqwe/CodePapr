@@ -186,76 +186,89 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
           return;
         }
 
-        const agent = useAgentStore.getState()._agent;
-        if (!agent) {
-          respond(undefined, { code: 'NO_AGENT', message: '请先在对话中发送一条消息以初始化 Agent' });
-          return;
-        }
-
-        const workspacePath = useAgentStore.getState().workspacePath;
         const runId = data.reqId;
 
-        // App Agent 运行期间同样防休眠：它复用聊天 Agent 的 Worker，
-        // 休眠会连 Worker 一起杀掉。
-        void acquireSleepPrevention();
+        void (async () => {
+          // 用户可能从未发过聊天消息（_agent 为空）：按需初始化 Agent，
+          // 而不是要求用户先去对话里发一条消息。
+          let agent;
+          try {
+            agent = await useAgentStore.getState().ensureAgentForApp();
+          } catch (err) {
+            respond(undefined, {
+              code: 'NO_AGENT',
+              message: err instanceof Error ? err.message : String(err),
+            });
+            return;
+          }
 
-        const runPromise = agent.runAppAgent(
-          {
-            appId,
+          // 初始化期间 App 可能已被关闭：避免启动无人消费的后台运行。
+          if (!iframeRef.current) return;
+
+          const workspacePath = useAgentStore.getState().workspacePath;
+
+          // App Agent 运行期间同样防休眠：它复用聊天 Agent 的 Worker，
+          // 休眠会连 Worker 一起杀掉。
+          void acquireSleepPrevention();
+
+          const runPromise = agent.runAppAgent(
+            {
+              appId,
+              agentName,
+              systemPrompt: agentDef.systemPrompt,
+              model: runtimeModel || agentDef.model,
+              task,
+              tools: agentDef.tools,
+              maxToolRounds: agentDef.maxToolRounds,
+              workspacePath,
+              level: currentLevel,
+              inheritContext: agentDef.inheritContext,
+            },
+            (event) => {
+              postToIframe(iframeRef, {
+                __papr: true,
+                reqId: data.reqId,
+                type: 'stream',
+                event,
+              }, appOrigin);
+            },
+            runId,
+          );
+
+          activeAgentRuns.current.set(runId, {
+            cancel: () => agent.cancelAppAgent?.(runId),
             agentName,
-            systemPrompt: agentDef.systemPrompt,
-            model: runtimeModel || agentDef.model,
-            task,
-            tools: agentDef.tools,
-            maxToolRounds: agentDef.maxToolRounds,
-            workspacePath,
-            level: currentLevel,
-            inheritContext: agentDef.inheritContext,
-          },
-          (event) => {
-            postToIframe(iframeRef, {
-              __papr: true,
-              reqId: data.reqId,
-              type: 'stream',
-              event,
-            }, appOrigin);
-          },
-          runId,
-        );
-
-        activeAgentRuns.current.set(runId, {
-          cancel: () => agent.cancelAppAgent?.(runId),
-          agentName,
-        });
-
-        runPromise
-          .then((result) => respond(result))
-          .catch((err) => {
-            // Worker 崩溃时清空 store 中的 agent，避免后续聊天复用死 worker。
-            if (err instanceof WorkerCrashError || (err instanceof Error && err.name === 'WorkerCrashError')) {
-              useAgentStore.setState({ _agent: null });
-            }
-            const errMsg = String(err);
-            let code = 'AGENT_ERROR';
-            if (err instanceof DOMException && err.name === 'AbortError') {
-              code = 'CANCELLED';
-            } else if (errMsg.includes('timeout') || errMsg.includes('timed out') || errMsg.includes('TIMEOUT')) {
-              code = 'TIMEOUT';
-            } else if (errMsg.includes('model') && (errMsg.includes('not found') || errMsg.includes('invalid') || errMsg.includes('配置'))) {
-              code = 'MODEL_ERROR';
-            } else if (errMsg.includes('API key') || errMsg.includes('api key') || errMsg.includes('authentication') || errMsg.includes('401') || errMsg.includes('403')) {
-              code = 'AUTH_ERROR';
-            } else if (errMsg.includes('network') || errMsg.includes('fetch') || errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND')) {
-              code = 'NETWORK_ERROR';
-            } else if (errMsg.includes('permission denied') || errMsg.includes('权限') || errMsg.includes('PERMISSION')) {
-              code = 'PERMISSION_DENIED';
-            }
-            respond(undefined, { code, message: errMsg });
-          })
-          .finally(() => {
-            activeAgentRuns.current.delete(runId);
-            void releaseSleepPrevention();
           });
+
+          runPromise
+            .then((result) => respond(result))
+            .catch((err) => {
+              // Worker 崩溃时清空 store 中的 agent，避免后续聊天复用死 worker。
+              if (err instanceof WorkerCrashError || (err instanceof Error && err.name === 'WorkerCrashError')) {
+                useAgentStore.setState({ _agent: null });
+              }
+              const errMsg = String(err);
+              let code = 'AGENT_ERROR';
+              if (err instanceof DOMException && err.name === 'AbortError') {
+                code = 'CANCELLED';
+              } else if (errMsg.includes('timeout') || errMsg.includes('timed out') || errMsg.includes('TIMEOUT')) {
+                code = 'TIMEOUT';
+              } else if (errMsg.includes('model') && (errMsg.includes('not found') || errMsg.includes('invalid') || errMsg.includes('配置'))) {
+                code = 'MODEL_ERROR';
+              } else if (errMsg.includes('API key') || errMsg.includes('api key') || errMsg.includes('authentication') || errMsg.includes('401') || errMsg.includes('403')) {
+                code = 'AUTH_ERROR';
+              } else if (errMsg.includes('network') || errMsg.includes('fetch') || errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND')) {
+                code = 'NETWORK_ERROR';
+              } else if (errMsg.includes('permission denied') || errMsg.includes('权限') || errMsg.includes('PERMISSION')) {
+                code = 'PERMISSION_DENIED';
+              }
+              respond(undefined, { code, message: errMsg });
+            })
+            .finally(() => {
+              activeAgentRuns.current.delete(runId);
+              void releaseSleepPrevention();
+            });
+        })();
         return;
       }
 
