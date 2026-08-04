@@ -621,4 +621,82 @@ describe('ChatPanel', () => {
     expect(input?.getAttribute('placeholder')).toBe('Shift+Enter 换行 Enter 发送 /help 帮助');
     expect(container.textContent).not.toContain('Shift+Enter 换行 · Enter 发送');
   });
+
+  function setTwoSessions(extra: Record<string, unknown> = {}) {
+    useAgentStore.setState((state) => ({
+      ...state,
+      sessions: [
+        { id: 'session-1', name: '会话 1', provider: 'deepseek', model: 'deepseek-v4-pro', createdAt: 2, updatedAt: 2 },
+        { id: 'session-2', name: '会话 2', provider: 'deepseek', model: 'deepseek-v4-pro', createdAt: 1, updatedAt: 1 },
+      ],
+      activeSessionId: 'session-1',
+      messages: [],
+      sessionMessages: { 'session-1': [], 'session-2': [] },
+      sessionConversationStats: {},
+      conversationStats: {
+        primary: { totalCacheRead: 0, totalCacheCreation: 0, totalInput: 0, totalOutput: 0, promptCacheHitTokens: 0, promptCacheMissTokens: 0, calls: 0, rounds: 0 },
+        fast: { totalCacheRead: 0, totalCacheCreation: 0, totalInput: 0, totalOutput: 0, promptCacheHitTokens: 0, promptCacheMissTokens: 0, calls: 0, rounds: 0 },
+        mentor: { totalCacheRead: 0, totalCacheCreation: 0, totalInput: 0, totalOutput: 0, promptCacheHitTokens: 0, promptCacheMissTokens: 0, calls: 0, rounds: 0 },
+      },
+      isLoading: false,
+      loadingSessionId: null,
+      _sessionInputState: {},
+      ...extra,
+    }));
+  }
+
+  it('restores per-session draft and mode when switching sessions', async () => {
+    setTwoSessions({
+      _sessionInputState: {
+        'session-1': { mode: 'ask', draft: '会话 1 的草稿', images: [], files: [] },
+        'session-2': { mode: 'plan', draft: '会话 2 的草稿', images: [], files: [] },
+      },
+    });
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    let textarea = container.querySelector('textarea');
+    expect(textarea?.value).toBe('会话 1 的草稿');
+    expect(container.textContent).toContain('Ask');
+
+    await act(async () => {
+      useAgentStore.getState().selectSession('session-2');
+    });
+
+    textarea = container.querySelector('textarea');
+    expect(textarea?.value).toBe('会话 2 的草稿');
+    expect(container.textContent).toContain('Plan');
+
+    await act(async () => {
+      useAgentStore.getState().selectSession('session-1');
+    });
+
+    textarea = container.querySelector('textarea');
+    expect(textarea?.value).toBe('会话 1 的草稿');
+    expect(container.textContent).toContain('Ask');
+  });
+
+  it('shows the cancel button only on the session that is actually running', async () => {
+    setTwoSessions({
+      isLoading: true,
+      loadingSessionId: 'session-1',
+      activeSessionId: 'session-2',
+    });
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    // 查看未执行的会话 2：不显示取消按钮
+    expect(container.textContent).not.toContain('取消');
+
+    await act(async () => {
+      useAgentStore.getState().selectSession('session-1');
+    });
+
+    // 切回执行中的会话 1：显示取消按钮
+    expect(container.textContent).toContain('取消');
+  });
 });

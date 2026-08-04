@@ -143,6 +143,27 @@ export interface SessionMeta {
   updatedAt: number;
 }
 
+export interface ImagePreview extends IImageContent {
+  id: string;
+  /** 完整 data URI，仅用于本地预览 */
+  dataUri: string;
+}
+
+export interface TextFileAttachment {
+  id: string;
+  name: string;
+  content: string;
+  size: number;
+}
+
+/** 每会话输入框状态（运行时记忆，不持久化）：模式、草稿、待发送附件。 */
+export interface SessionInputState {
+  mode: WorkMode;
+  draft: string;
+  images: ImagePreview[];
+  files: TextFileAttachment[];
+}
+
 export interface UIToolInvocation {
   id: string;
   name: string;
@@ -240,6 +261,8 @@ export interface AgentState {
   sessionMessagesLoading: boolean;
   projectDiagnosticsReport: ProjectDiagnosticsReport | null;
   isLoading: boolean;
+  /** 当前正在执行回合的会话 ID（单执行模型下至多一个）。与 isLoading 同步置位/清除。 */
+  loadingSessionId: string | null;
   projectGraphLoading: boolean;
   projectGraphPhase: null | { phase: string; current: number; total: number };
   showSettings: boolean;
@@ -248,6 +271,9 @@ export interface AgentState {
   _agent: AgentRuntimeHandle | null;
   _agentModel: string | null;
   _agentPromptKey: string | null;
+  /** _agent 绑定的会话 ID；复用 agent 前必须校验与当前会话一致。 */
+  _agentSessionId: string | null;
+  _sessionInputState: Record<string, SessionInputState>;
   _requestBuilder: RequestBuilder;
   _cacheValidator: CacheValidator;
   _editHistory: EditHistory;
@@ -297,6 +323,7 @@ export interface AgentActions {
   setProjectDiagnosticsReport: (report: ProjectDiagnosticsReport | null) => void;
   refreshProjectDiagnostics: () => Promise<ProjectDiagnosticsReport | null>;
   setSkillEnabledState: (skillId: string, enabled: boolean | null) => void;
+  setSessionInputState: (sessionId: string, state: SessionInputState) => void;
   computeContextSnapshot: () => Promise<void>;
   _loadProjectConfig: (path: string) => Promise<void>;
   _ensureWorkspaceGitReady: (path: string) => Promise<void>;

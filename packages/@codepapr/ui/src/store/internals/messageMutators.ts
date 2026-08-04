@@ -3,7 +3,7 @@ import { createId } from '../../utils/createId';
 import type { AgentRuntimeStreamEvent } from '../../agent/WorkerBackedAgent';
 import type { StoreSet, UIMessage, UIToolInvocation } from './types';
 
-export function appendErrorMessage(set: StoreSet, content: string): void {
+export function appendErrorMessage(set: StoreSet, content: string, sessionId?: string | null): void {
   const errorMsg: UIMessage = {
     id: createId(),
     role: 'error',
@@ -12,21 +12,24 @@ export function appendErrorMessage(set: StoreSet, content: string): void {
   };
 
   set((s) => {
-    const sessionId = s.activeSessionId;
-    const currentSessionMessages = sessionId
-      ? s.sessionMessages[sessionId] ?? s.messages
+    const targetId = sessionId ?? s.activeSessionId;
+    const currentSessionMessages = targetId
+      ? s.sessionMessages[targetId] ?? s.messages
       : s.messages;
     const nextMessages = [...currentSessionMessages, errorMsg];
 
     return {
-      messages: nextMessages,
-      sessionMessages: sessionId
+      // 仅当目标会话仍是当前查看的会话时才同步扁平镜像，
+      // 避免后台会话的消息覆盖用户正在查看的列表。
+      messages: targetId && targetId === s.activeSessionId ? nextMessages : s.messages,
+      sessionMessages: targetId
         ? {
             ...s.sessionMessages,
-            [sessionId]: nextMessages,
+            [targetId]: nextMessages,
           }
         : s.sessionMessages,
       isLoading: false,
+      loadingSessionId: null,
     };
   });
 }
@@ -50,7 +53,7 @@ export function appendInfoMessage(set: StoreSet, content: string): void {
     const nextMessages = [...currentSessionMessages, infoMsg];
 
     return {
-      messages: nextMessages,
+      messages: sessionId === s.activeSessionId ? nextMessages : s.messages,
       sessionMessages: sessionId
         ? {
             ...s.sessionMessages,
@@ -58,6 +61,7 @@ export function appendInfoMessage(set: StoreSet, content: string): void {
           }
         : s.sessionMessages,
       isLoading: false,
+      loadingSessionId: null,
     };
   });
 }
@@ -85,7 +89,7 @@ export function updateAssistantMessage(
     }
 
     return {
-      messages: nextMessages,
+      messages: sessionId === s.activeSessionId ? nextMessages : s.messages,
       sessionMessages: {
         ...s.sessionMessages,
         [sessionId]: nextMessages,
@@ -230,7 +234,7 @@ export function appendSessionMessages(
     const nextMessages = [...currentSessionMessages, ...newMessages];
 
     return {
-      messages: nextMessages,
+      messages: sessionId === s.activeSessionId ? nextMessages : s.messages,
       sessionMessages: {
         ...s.sessionMessages,
         [sessionId]: nextMessages,
@@ -262,7 +266,7 @@ export function cleanupStreamingAssistantMessage(
         );
 
     return {
-      messages: nextMessages,
+      messages: sessionId === s.activeSessionId ? nextMessages : s.messages,
       sessionMessages: {
         ...s.sessionMessages,
         [sessionId]: nextMessages,

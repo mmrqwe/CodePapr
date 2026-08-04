@@ -88,11 +88,14 @@ export type {
   ApiFormat,
   ApiMode,
   CumulativeStats,
+  ImagePreview,
   Lang,
   ProviderName,
   ResetToMessageResult,
+  SessionInputState,
   SessionMeta,
   Settings,
+  TextFileAttachment,
   UIMessage,
   UIToolInvocation,
   WorkspaceEntry,
@@ -160,6 +163,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       sessionMessagesLoading: false,
       projectDiagnosticsReport: null,
       isLoading: false,
+      loadingSessionId: null,
       projectGraphLoading: false,
       projectGraphPhase: null as null | { phase: string; current: number; total: number },
       showSettings: false,
@@ -167,6 +171,8 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _agent: null,
       _agentModel: null,
       _agentPromptKey: null,
+      _agentSessionId: null,
+      _sessionInputState: {},
       _requestBuilder: new RequestBuilder(),
       _cacheValidator: new CacheValidator(),
       _editHistory: new EditHistory(),
@@ -189,7 +195,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         try {
           const storedSettings = await loadAppSettings();
           settings = normalizeSettings(storedSettings ?? get().settings);
-          set({ settings, settingsLoaded: true, _agent: null, _agentModel: null, _agentPromptKey: null });
+          set({ settings, settingsLoaded: true, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
           void applyBrowserEngine(settings.browserEngine);
 
           // No proactive write-back on load: legacy plaintext-key migration is
@@ -200,7 +206,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           // returns nothing, destroying a stored key.
         } catch {
           settings = get().settings;
-          set({ settingsLoaded: true, _agent: null, _agentModel: null, _agentPromptKey: null });
+          set({ settingsLoaded: true, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
         }
 
         const recentWorkspaces = sortRecentWorkspaces(settings.recentWorkspaces);
@@ -219,7 +225,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
               ...currentSettings,
               recentWorkspaces: withoutFailed,
             });
-            set({ settings: nextSettings, _agent: null, _agentModel: null, _agentPromptKey: null });
+            set({ settings: nextSettings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
             void saveAppSettings(nextSettings).catch(() => undefined);
           }
         }
@@ -234,7 +240,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       setSettings: (partial) => {
         const previousEngine = get().settings.browserEngine;
         const settings = normalizeSettings({ ...get().settings, ...partial });
-        set({ settings, _agent: null, _agentModel: null, _agentPromptKey: null });
+        set({ settings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
         void saveAppSettings(settings).catch(() => undefined);
         if (settings.browserEngine !== previousEngine) {
           void applyBrowserEngine(settings.browserEngine);
@@ -263,6 +269,8 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _agent: null,
       _agentModel: null,
       _agentPromptKey: null,
+      _agentSessionId: null,
+      _sessionInputState: {},
       _editHistory: new EditHistory(),
       _projectRulesSection: '',
       _skillDefinitions: [],
@@ -283,6 +291,16 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       closeWorkspace: () => {
+        // 关闭工作区即放弃进行中的回合：主动取消，避免被遗弃的 worker
+        // 继续消耗资源/阻止系统休眠状态正确释放。
+        const { _agent, isLoading } = get();
+        if (isLoading && _agent) {
+          try {
+            _agent.cancel();
+          } catch {
+            // ignore — 状态清理照常进行
+          }
+        }
         set({
           workspacePath: '',
           workspaceMutationVersion: 0,
@@ -297,9 +315,13 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           sessionConversationStats: {},
           sessionMessagesLoading: false,
           projectDiagnosticsReport: null,
+          isLoading: false,
+          loadingSessionId: null,
           _agent: null,
           _agentModel: null,
           _agentPromptKey: null,
+          _agentSessionId: null,
+          _sessionInputState: {},
           _editHistory: new EditHistory(),
           _projectRulesSection: '',
           _skillDefinitions: [],
@@ -434,6 +456,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agent: null,
           _agentModel: null,
           _agentPromptKey: null,
+          _agentSessionId: null,
           _editHistory: new EditHistory(),
           _projectRulesSection: '',
           _skillDefinitions: [],
@@ -535,6 +558,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agentDefinitions: mergedAgents,
           _agent: null,
           _agentPromptKey: null,
+          _agentSessionId: null,
         });
       },
 
@@ -619,10 +643,17 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             ),
             _agent: null,
             _agentPromptKey: null,
+            _agentSessionId: null,
           };
         });
 
         saveCurrentProjectState(get());
+      },
+
+      setSessionInputState: (sessionId, state) => {
+        set((s) => ({
+          _sessionInputState: { ...s._sessionInputState, [sessionId]: state },
+        }));
       },
 
       computeContextSnapshot: async () => {
@@ -755,6 +786,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agent: null,
           _agentModel: null,
           _agentPromptKey: null,
+          _agentSessionId: null,
           _latestContextSnapshot: null,
           _sessionLru: [id, ...s._sessionLru.filter((x) => x !== id)],
         }));
@@ -763,17 +795,22 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       selectSession: (id) => {
-        const { sessions, activeSessionId, sessionConversationStats, workspacePath } = get();
+        const { sessions, activeSessionId, sessionConversationStats, workspacePath, loadingSessionId } = get();
         if (id === activeSessionId) return;
         const meta = sessions.find((s) => s.id === id);
         if (!meta) return;
 
+        // 离开的会话若正在执行，保留 agent 句柄（回合继续、可取消）；
+        // 否则清空，由下次发送为新会话重建。
+        const keepAgent = loadingSessionId !== null && loadingSessionId === activeSessionId;
+
         set((s) => ({
           activeSessionId: id,
           conversationStats: getSessionConversationStats(sessionConversationStats, id),
-          _agent: null,
-          _agentModel: null,
-          _agentPromptKey: null,
+          _agent: keepAgent ? s._agent : null,
+          _agentModel: keepAgent ? s._agentModel : null,
+          _agentPromptKey: keepAgent ? s._agentPromptKey : null,
+          _agentSessionId: keepAgent ? s._agentSessionId : null,
           _sessionLru: [id, ...s._sessionLru.filter((x) => x !== id)],
         }));
 
@@ -812,13 +849,25 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       deleteSession: (id) => {
+        const running = get();
+        if (running.loadingSessionId === id && running._agent) {
+          try {
+            running._agent.cancel();
+          } catch {
+            // ignore — 状态清理照常进行
+          }
+        }
         set((s) => {
           const sessions = s.sessions.filter((x) => x.id !== id);
           const isActive = s.activeSessionId === id;
+          const isAgentOwner = s._agentSessionId === id;
+          const wasLoading = s.loadingSessionId === id;
           const sessionMessages = { ...s.sessionMessages };
           const sessionConversationStats = { ...s.sessionConversationStats };
+          const sessionInputState = { ...s._sessionInputState };
           delete sessionMessages[id];
           delete sessionConversationStats[id];
+          delete sessionInputState[id];
           return {
             sessions,
             activeSessionId: isActive ? null : s.activeSessionId,
@@ -827,10 +876,14 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             sessionMessages,
             sessionConversationStats,
             conversationStats: isActive ? createEmptyConversationStats() : s.conversationStats,
-            _agent: isActive ? null : s._agent,
-            _agentModel: isActive ? null : s._agentModel,
-            _agentPromptKey: isActive ? null : s._agentPromptKey,
+            isLoading: wasLoading ? false : s.isLoading,
+            loadingSessionId: wasLoading ? null : s.loadingSessionId,
+            _agent: isAgentOwner ? null : s._agent,
+            _agentModel: isAgentOwner ? null : s._agentModel,
+            _agentPromptKey: isAgentOwner ? null : s._agentPromptKey,
+            _agentSessionId: isAgentOwner ? null : s._agentSessionId,
             _latestContextSnapshot: isActive ? null : s._latestContextSnapshot,
+            _sessionInputState: sessionInputState,
             _sessionLru: s._sessionLru.filter((x) => x !== id),
           };
         });
@@ -861,6 +914,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agent: null,
           _agentModel: null,
           _agentPromptKey: null,
+          _agentSessionId: null,
           _checkpointSeq: 0,
           _checkpointError: null,
           _latestContextSnapshot: null,
@@ -932,6 +986,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agent: null,
           _agentModel: null,
           _agentPromptKey: null,
+          _agentSessionId: null,
           _latestContextSnapshot: null,
         });
 
@@ -967,16 +1022,16 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       cancelMessage: () => {
-        const { _agent, isLoading } = get();
+        const { _agent, isLoading, loadingSessionId } = get();
         if (!isLoading || !_agent) return;
 
         _agent.cancel();
 
         set((s) => {
-          const { activeSessionId } = s;
-          if (!activeSessionId) return {};
+          const sessionId = loadingSessionId ?? s.activeSessionId;
+          if (!sessionId) return { isLoading: false, loadingSessionId: null };
 
-          const currentMessages = s.sessionMessages[activeSessionId] ?? s.messages;
+          const currentMessages = s.sessionMessages[sessionId] ?? s.messages;
           const nextMessages = currentMessages.map((message) =>
             message.isStreaming
               ? { ...message, isStreaming: false, statusText: undefined }
@@ -985,10 +1040,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
           return {
             isLoading: false,
-            messages: nextMessages,
+            loadingSessionId: null,
+            messages: sessionId === s.activeSessionId ? nextMessages : s.messages,
             sessionMessages: {
               ...s.sessionMessages,
-              [activeSessionId]: nextMessages,
+              [sessionId]: nextMessages,
             },
           };
         });

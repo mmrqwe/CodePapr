@@ -214,6 +214,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         let assistantStep = 1;
         let sessionLogStartIndex: number | null = null;
         let userMsg: UIMessage | null = null;
+        // 本回合归属的会话（catch 中用于收尾，try 内的同名局部变量不在 catch 作用域）。
+        let turnSessionId: string | null = null;
 
         let effectiveInput = input;
         let effectiveDisplay = displayContent;
@@ -386,9 +388,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               // ignore — we still force-clear UI state below
             }
             set((s) => {
-              const { activeSessionId } = s;
-              if (!activeSessionId) return { isLoading: false };
-              const currentMessages = s.sessionMessages[activeSessionId] ?? s.messages;
+              // 以实际执行回合的会话为准（用户可能已切换到别的会话查看）。
+              const sessionId = s.loadingSessionId ?? s.activeSessionId;
+              if (!sessionId) return { isLoading: false, loadingSessionId: null };
+              const currentMessages = s.sessionMessages[sessionId] ?? s.messages;
               const nextMessages = currentMessages.map((message) =>
                 message.isStreaming
                   ? { ...message, isStreaming: false, statusText: undefined }
@@ -396,10 +399,11 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               );
               return {
                 isLoading: false,
-                messages: nextMessages,
+                loadingSessionId: null,
+                messages: sessionId === s.activeSessionId ? nextMessages : s.messages,
                 sessionMessages: {
                   ...s.sessionMessages,
-                  [activeSessionId]: nextMessages,
+                  [sessionId]: nextMessages,
                 },
               };
             });
@@ -416,6 +420,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             get().newSession();
             optimisticSid = get().activeSessionId!;
           }
+          turnSessionId = optimisticSid;
           const _userMsgId = createId();
           userMsg = {
             id: _userMsgId,
@@ -441,6 +446,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               messages: next,
               sessionMessages: { ...s.sessionMessages, [optimisticSid!]: next },
               isLoading: true,
+              loadingSessionId: optimisticSid,
             };
           });
           saveCurrentProjectState(get());
@@ -643,9 +649,13 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
 
           // 首次发消息时自动创建会话；恢复后的旧会话则原地重建 agent。
           // 已崩溃的 agent（worker 死亡）绝不复用：直接重建，避免向死 worker 发消息。
-          if (!agent || agent.isCrashed() || agentModel !== route.model || (agentPromptKey !== null && agentPromptKey !== runtimePromptKey)) {
-            if (agent?.isCrashed()) {
+          // agent 与创建它的会话绑定（logStore/上下文），切换会话后绝不复用，
+          // 否则会把新会话的消息写进旧会话的上下文。
+          const agentSessionId = get()._agentSessionId;
+          if (!agent || agent.isCrashed() || (agentSessionId !== null && agentSessionId !== activeSessionId) || agentModel !== route.model || (agentPromptKey !== null && agentPromptKey !== runtimePromptKey)) {
+            if (agent) {
               try {
+                // 单执行模型下此刻 agent 必然空闲（执行中禁止发送），销毁安全且避免 worker 泄漏。
                 agent.destroy();
               } catch {
                 // already torn down
@@ -670,7 +680,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 },
                 runtimeAgentConfig,
               );
-              set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey });
+              set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey, _agentSessionId: activeSessionId });
             } else {
               get().newSession();
               ({ activeSessionId } = get());
@@ -689,7 +699,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   },
                   runtimeAgentConfig,
                 );
-                set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey });
+                set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey, _agentSessionId: activeSessionId });
               }
             }
           }
@@ -715,7 +725,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 m.id === userMsg!.id ? { ...m, promptContent: userMsg!.promptContent } : m
               );
               return {
-                messages: updated,
+                messages: s.activeSessionId === activeSessionId ? updated : s.messages,
                 sessionMessages: { ...s.sessionMessages, [activeSessionId!]: updated },
               };
             });
@@ -816,7 +826,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     );
 
                   return {
-                    messages: nextMessages,
+                    messages: s.activeSessionId === activeSessionId ? nextMessages : s.messages,
                     sessionMessages: {
                       ...s.sessionMessages,
                       [activeSessionId!]: nextMessages,
@@ -957,7 +967,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   },
                   runtimeAgentConfig,
                 );
-            set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey });
+            set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey, _agentSessionId: activeSessionId });
           };
 
           /**
@@ -1294,7 +1304,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               },
               runtimeAgentConfig,
             );
-            set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey });
+            set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey, _agentSessionId: activeSessionId });
 
             if (assistantMessageId) {
               updateAssistantMessage(set, activeSessionId, assistantMessageId, (message) => ({
@@ -1407,13 +1417,19 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               );
 
             return {
-              messages: persistedMessages,
+              messages: s.activeSessionId === activeSessionId ? persistedMessages : s.messages,
               sessionMessages: {
                 ...s.sessionMessages,
                 [activeSessionId!]: persistedMessages,
               },
               isLoading: false,
-              conversationStats: applyTierDeltas(s.conversationStats),
+              loadingSessionId: null,
+              // conversationStats 是「当前查看会话」的视图：回合归属会话已不是
+              // 当前会话时只更新 per-session 账本，不污染当前视图。
+              conversationStats:
+                s.activeSessionId === activeSessionId
+                  ? applyTierDeltas(s.conversationStats)
+                  : s.conversationStats,
               sessionConversationStats: {
                 ...s.sessionConversationStats,
                 [activeSessionId!]: applyTierDeltas(
@@ -1425,7 +1441,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           if (mainThreadFallbackUsed) {
             // 主线程 Agent 只是崩溃兜底的应急替代：清空它，让下一条消息重建
             // Worker 运行时回到常态（若随后产生检查点，下面会以 Worker 重建）。
-            set({ _agent: null, _agentModel: null, _agentPromptKey: null });
+            set({ _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
           }
           const checkpointResult = await maybeGenerateContextCheckpoint(
             normalizedSettings,
@@ -1434,6 +1450,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             currentTodoDigest(activeSessionId)
           );
           if (checkpointResult) {
+            const prevAgent = get()._agent;
+            const prevAgentOwner = get()._agentSessionId;
             set((s) => {
               const currentSessionMessages = s.sessionMessages[activeSessionId!] ?? [];
               const nextSessionMessages = insertCheckpointAtRetainedBoundary(
@@ -1449,6 +1467,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   ...s.sessionMessages,
                   [activeSessionId!]: nextSessionMessages,
                 },
+                // 检查点压缩了上下文：旧 agent 的 logStore 已失效。用户仍在查看
+                // 则就地重建；否则置空（下次发送按 sessionMessages 重建），
+                // 绝不保留带旧上下文的 agent。
                 _agent:
                   isCurrentSession
                     ? createAgent(
@@ -1465,16 +1486,18 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                         },
                         runtimeAgentConfig,
                       )
-                    : s._agent,
-                _agentModel: isCurrentSession ? route.model : s._agentModel,
-                _agentPromptKey: isCurrentSession ? runtimePromptKey : s._agentPromptKey,
-                conversationStats: checkpointResult.cacheStats
-                  ? addConversationStats(
-                      s.conversationStats,
-                      checkpointResult.modelTier === 'primary' ? 'primary' : 'fast',
-                      checkpointResult.cacheStats
-                    )
-                  : s.conversationStats,
+                    : null,
+                _agentModel: isCurrentSession ? route.model : null,
+                _agentPromptKey: isCurrentSession ? runtimePromptKey : null,
+                _agentSessionId: isCurrentSession ? activeSessionId : null,
+                conversationStats:
+                  checkpointResult.cacheStats && isCurrentSession
+                    ? addConversationStats(
+                        s.conversationStats,
+                        checkpointResult.modelTier === 'primary' ? 'primary' : 'fast',
+                        checkpointResult.cacheStats
+                      )
+                    : s.conversationStats,
                 sessionConversationStats: checkpointResult.cacheStats
                   ? {
                       ...s.sessionConversationStats,
@@ -1488,6 +1511,15 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 _pendingMemoryConsolidation: true,
               };
           });
+            // 被替换/失效的旧 agent 已空闲（回合结束），销毁以回收 worker；
+            // 仅当它仍属于本回合会话时才销毁，避免误伤竞态下新建的 agent。
+            if (prevAgent && prevAgentOwner === activeSessionId && get()._agent !== prevAgent) {
+              try {
+                prevAgent.destroy();
+              } catch {
+                // already torn down
+              }
+            }
           }
           if (get()._pendingMemoryConsolidation) {
             set({ _pendingMemoryConsolidation: false });
@@ -1522,16 +1554,18 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           saveCurrentProjectState(get());
         } catch (err) {
           console.error('[sendMessage] outer catch:', err);
+          // 以本回合捕获的会话为准收尾（用户可能已切换到别的会话）。
+          const sid = turnSessionId ?? get().activeSessionId;
           if (err instanceof DOMException && err.name === 'AbortError') {
             // 取消若源于 worker 已死（cancel 超时判崩），必须同时清空 agent，
             // 否则下一条消息会复用死 agent，抛出笼统的「worker has crashed」。
             if (get()._agent?.isCrashed()) {
-              set({ _agent: null, isLoading: false });
+              set({ _agent: null, _agentSessionId: null, isLoading: false, loadingSessionId: null });
             } else {
-              set({ isLoading: false });
+              set({ isLoading: false, loadingSessionId: null });
             }
-            if (assistantMessageId && get().activeSessionId) {
-              cleanupStreamingAssistantMessage(set, get().activeSessionId!, assistantMessageId);
+            if (assistantMessageId && sid) {
+              cleanupStreamingAssistantMessage(set, sid, assistantMessageId);
             }
             saveCurrentProjectState(get());
             return;
@@ -1540,13 +1574,13 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // Worker crash: null out the agent so a fresh one is created on retry.
           const isWorkerCrash = err instanceof WorkerCrashError;
           if (isWorkerCrash) {
-            set({ _agent: null, isLoading: false });
+            set({ _agent: null, _agentSessionId: null, isLoading: false, loadingSessionId: null });
           } else {
-            set({ isLoading: false });
+            set({ isLoading: false, loadingSessionId: null });
           }
 
-          if (assistantMessageId && get().activeSessionId) {
-            cleanupStreamingAssistantMessage(set, get().activeSessionId!, assistantMessageId);
+          if (assistantMessageId && sid) {
+            cleanupStreamingAssistantMessage(set, sid, assistantMessageId);
           }
           const crashPrefix = isWorkerCrash
             ? (normalizedSettings.lang === 'en'
@@ -1555,7 +1589,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 ? 'Agent Worker 崩潰。'
                 : 'Agent Worker 崩溃。')
             : '';
-          appendErrorMessage(set, crashPrefix + formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'));
+          appendErrorMessage(set, crashPrefix + formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'), sid);
           saveCurrentProjectState(get());
         } finally {
           clearStoreIdle();

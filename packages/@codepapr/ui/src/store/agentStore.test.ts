@@ -243,11 +243,14 @@ describe('useAgentStore.sendMessage', () => {
       },
       projectDiagnosticsReport: null,
         isLoading: false,
+      loadingSessionId: null,
       showSettings: false,
       settingsLoaded: true,
       _agent: null,
       _agentModel: null,
       _agentPromptKey: null,
+      _agentSessionId: null,
+      _sessionInputState: {},
     }));
   });
 
@@ -2822,5 +2825,129 @@ describe('session lazy loading and LRU cache', () => {
 
     expect(useAgentStore.getState()._sessionLru).toEqual(['s-1']);
     expect(useAgentStore.getState().sessionMessages['s-2']).toBeUndefined();
+  });
+});
+
+describe('per-session execution and input state', () => {
+  function setTwoSessionState(extra: Partial<ReturnType<typeof useAgentStore.getState>> = {}) {
+    useAgentStore.setState((state) => ({
+      ...state,
+      workspacePath: '/tmp/codepapr-align',
+      sessions: [
+        { id: 's-a', name: 'A', provider: 'deepseek' as const, model: 'deepseek-v4-pro', createdAt: 2, updatedAt: 2 },
+        { id: 's-b', name: 'B', provider: 'deepseek' as const, model: 'deepseek-v4-pro', createdAt: 1, updatedAt: 1 },
+      ],
+      activeSessionId: 's-a',
+      messages: [],
+      sessionMessages: { 's-a': [], 's-b': [] },
+      sessionConversationStats: {
+        's-a': createEmptyConversation(),
+        's-b': createEmptyConversation(),
+      },
+      conversationStats: createEmptyConversation(),
+      isLoading: false,
+      loadingSessionId: null,
+      _agent: null,
+      _agentModel: null,
+      _agentPromptKey: null,
+      _agentSessionId: null,
+      _sessionInputState: {},
+      _sessionLru: ['s-a', 's-b'],
+      ...extra,
+    }));
+  }
+
+  it('selectSession keeps the agent handle while the leaving session is still loading', () => {
+    const agent = createMockAgent();
+    setTwoSessionState({
+      isLoading: true,
+      loadingSessionId: 's-a',
+      _agent: agent,
+      _agentSessionId: 's-a',
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    useAgentStore.getState().selectSession('s-b');
+
+    const state = useAgentStore.getState();
+    expect(state.activeSessionId).toBe('s-b');
+    expect(state._agent).toBe(agent);
+    expect(state._agentSessionId).toBe('s-a');
+    expect(state.isLoading).toBe(true);
+    expect(state.loadingSessionId).toBe('s-a');
+  });
+
+  it('selectSession drops the agent when idle', () => {
+    const agent = createMockAgent();
+    setTwoSessionState({ _agent: agent, _agentSessionId: 's-a', _agentModel: 'deepseek-v4-pro' });
+
+    useAgentStore.getState().selectSession('s-b');
+
+    expect(useAgentStore.getState()._agent).toBeNull();
+    expect(useAgentStore.getState()._agentSessionId).toBeNull();
+  });
+
+  it('cancelMessage finalizes the loading session even if it is not the active one', () => {
+    const cancel = vi.fn();
+    const agent = createMockAgent({ cancel });
+    setTwoSessionState({
+      activeSessionId: 's-b',
+      messages: [{ id: 'b-msg', role: 'user', content: 'B 的消息', timestamp: 1 }],
+      sessionMessages: {
+        's-a': [{ id: 'a-stream', role: 'assistant', content: '流式中', timestamp: 1, isStreaming: true }],
+        's-b': [{ id: 'b-msg', role: 'user', content: 'B 的消息', timestamp: 1 }],
+      },
+      isLoading: true,
+      loadingSessionId: 's-a',
+      _agent: agent,
+      _agentSessionId: 's-a',
+    });
+
+    useAgentStore.getState().cancelMessage();
+
+    const state = useAgentStore.getState();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(state.isLoading).toBe(false);
+    expect(state.loadingSessionId).toBeNull();
+    expect(state.sessionMessages['s-a']?.[0]?.isStreaming).toBe(false);
+    // 当前查看会话（s-b）的消息镜像不受影响
+    expect(state.messages.map((m) => m.id)).toEqual(['b-msg']);
+  });
+
+  it('deleteSession cancels a running session and clears its loading/input state', () => {
+    const cancel = vi.fn();
+    const agent = createMockAgent({ cancel });
+    setTwoSessionState({
+      isLoading: true,
+      loadingSessionId: 's-a',
+      _agent: agent,
+      _agentSessionId: 's-a',
+      _sessionInputState: {
+        's-a': { mode: 'ask', draft: '草稿 A', images: [], files: [] },
+        's-b': { mode: 'agent', draft: '草稿 B', images: [], files: [] },
+      },
+    });
+
+    useAgentStore.getState().deleteSession('s-a');
+
+    const state = useAgentStore.getState();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(state.isLoading).toBe(false);
+    expect(state.loadingSessionId).toBeNull();
+    expect(state._agent).toBeNull();
+    expect(state._agentSessionId).toBeNull();
+    expect(state._sessionInputState['s-a']).toBeUndefined();
+    expect(state._sessionInputState['s-b']?.draft).toBe('草稿 B');
+  });
+
+  it('setSessionInputState stores input state per session', () => {
+    setTwoSessionState();
+
+    useAgentStore.getState().setSessionInputState('s-a', { mode: 'plan', draft: '计划', images: [], files: [] });
+    useAgentStore.getState().setSessionInputState('s-b', { mode: 'ask', draft: '问题', images: [], files: [] });
+
+    const state = useAgentStore.getState();
+    expect(state._sessionInputState['s-a']).toEqual({ mode: 'plan', draft: '计划', images: [], files: [] });
+    expect(state._sessionInputState['s-b']).toEqual({ mode: 'ask', draft: '问题', images: [], files: [] });
   });
 });

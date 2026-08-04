@@ -12,7 +12,15 @@ import {
   type ChangeEvent,
   type ReactNode,
 } from 'react';
-import { getSettingsError, UIMessage, UIToolInvocation, useAgentStore } from '../store/agentStore';
+import {
+  getSettingsError,
+  UIMessage,
+  UIToolInvocation,
+  useAgentStore,
+  type ImagePreview,
+  type SessionInputState,
+  type TextFileAttachment,
+} from '../store/agentStore';
 import { TaskChecklist } from './TaskChecklist';
 import { GoalBanner } from './GoalBanner';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -53,22 +61,13 @@ function truncateText(value: string, maxLength: number = 120): string {
   return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
 }
 
-interface ImagePreview extends IImageContent {
-  id: string;
-  /** 完整 data URI，仅用于本地预览 */
-  dataUri: string;
-}
-
-interface TextFileAttachment {
-  id: string;
-  name: string;
-  content: string;
-  size: number;
-}
-
 const SUPPORTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 const MAX_TEXT_FILE_BYTES = 1_000_000;
 const MAX_PENDING_FILES = 20;
+
+const DEFAULT_SESSION_INPUT: SessionInputState = { mode: 'agent', draft: '', images: [], files: [] };
+const NO_PENDING_IMAGES: ImagePreview[] = [];
+const NO_PENDING_FILES: TextFileAttachment[] = [];
 
 /** 把 File 读取为 base64 图片内容（剥离 data URI 前缀）。 */
 function readFileAsImagePreview(file: File): Promise<ImagePreview | null> {
@@ -1348,6 +1347,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
   const {
     messages,
     isLoading,
+    loadingSessionId,
     sendMessage,
     cancelMessage,
     activeSessionId,
@@ -1369,6 +1369,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
     useShallow((state) => ({
       messages: state.messages,
       isLoading: state.isLoading,
+      loadingSessionId: state.loadingSessionId,
       sendMessage: state.sendMessage,
       cancelMessage: state.cancelMessage,
       activeSessionId: state.activeSessionId,
@@ -1388,15 +1389,50 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
       sessionMessagesLoading: state.sessionMessagesLoading,
     }))
   );
-  const [input, setInput] = useState('');
-  const [pendingImages, setPendingImages] = useState<ImagePreview[]>([]);
-  const [pendingFiles, setPendingFiles] = useState<TextFileAttachment[]>([]);
-  useEffect(() => {
-    setPendingFiles([]);
-  }, [activeSessionId]);
+  // 输入框状态（模式/草稿/附件）按会话存取：切换会话自动换到对应会话的状态，
+  // 互不串扰；组件卸载（如切到代码预览 tab）也不丢失。
+  const sessionInputMap = useAgentStore((state) => state._sessionInputState);
+  const sessionInputState = activeSessionId ? sessionInputMap[activeSessionId] : undefined;
+  const input = sessionInputState?.draft ?? '';
+  const pendingImages = sessionInputState?.images ?? NO_PENDING_IMAGES;
+  const pendingFiles = sessionInputState?.files ?? NO_PENDING_FILES;
+  const mode = sessionInputState?.mode ?? 'agent';
+
+  const updateSessionInput = useCallback(
+    (updater: (state: SessionInputState) => SessionInputState) => {
+      const {
+        activeSessionId: sid,
+        _sessionInputState: map,
+        setSessionInputState: apply,
+      } = useAgentStore.getState();
+      if (!sid) return;
+      apply(sid, updater(map[sid] ?? DEFAULT_SESSION_INPUT));
+    },
+    []
+  );
+  const setInput = useCallback(
+    (v: string | ((prev: string) => string)) =>
+      updateSessionInput((st) => ({ ...st, draft: typeof v === 'function' ? v(st.draft) : v })),
+    [updateSessionInput]
+  );
+  const setPendingImages = useCallback(
+    (v: ImagePreview[] | ((prev: ImagePreview[]) => ImagePreview[])) =>
+      updateSessionInput((st) => ({ ...st, images: typeof v === 'function' ? v(st.images) : v })),
+    [updateSessionInput]
+  );
+  const setPendingFiles = useCallback(
+    (v: TextFileAttachment[] | ((prev: TextFileAttachment[]) => TextFileAttachment[])) =>
+      updateSessionInput((st) => ({ ...st, files: typeof v === 'function' ? v(st.files) : v })),
+    [updateSessionInput]
+  );
+  const setMode = useCallback(
+    (v: WorkMode | ((prev: WorkMode) => WorkMode)) =>
+      updateSessionInput((st) => ({ ...st, mode: typeof v === 'function' ? v(st.mode) : v })),
+    [updateSessionInput]
+  );
+
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const onPreviewImage = useCallback((src: string) => setPreviewImage(src), []);
-  const [mode, setMode] = useState<WorkMode>('agent');
 
   const sessionLock = useMemo<'app' | 'coding' | null>(() => {
     const userMessages = messages.filter((m) => m.role === 'user' && !m.synthetic && !m.hidden);
@@ -1405,14 +1441,14 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
   }, [messages]);
 
   useEffect(() => {
+    // 仅强制会话级模式约束；空会话的默认模式由 _sessionInputState 兜底，
+    // 不在此重置，否则会覆盖用户为该会话记住的模式。
     if (sessionLock === 'app') {
       setMode('app');
     } else if (sessionLock === 'coding') {
       setMode((current) => (current === 'app' ? 'agent' : current));
-    } else {
-      setMode('agent');
     }
-  }, [sessionLock]);
+  }, [sessionLock, setMode]);
 
   useEffect(() => {
     useAgentStore.setState({ _currentMode: mode });
@@ -1446,16 +1482,22 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
   const isProgrammaticScrollRef = useRef(false);
   const isComposingRef = useRef(false);
 
+  // isLoading 是全局「任一会话在执行」（单执行模型）；isActiveLoading 才是
+  // 当前查看会话自身的执行状态，输入框/按钮等 UI 一律按它对齐。
+  const isActiveLoading = isLoading && loadingSessionId !== null && loadingSessionId === activeSessionId;
+  const otherSessionRunning = isLoading && !isActiveLoading;
+
   useLayoutEffect(() => {
-    if (isLoading) {
+    if (isActiveLoading) {
       shouldStickToBottomRef.current = true;
     }
-  }, [isLoading]);
+  }, [isActiveLoading]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const settingsError = getSettingsError(settings);
   const isConfigured = !settingsError;
   // Block sending while the session's history is still loading on demand —
   // submitting early would build context from an incomplete message list.
+  // 全局 isLoading 阻断发送：单执行模型下任一会话执行中都不允许开启新回合。
   const canSubmit = (!!input.trim() || pendingImages.length > 0 || pendingFiles.length > 0)
     && !isLoading
     && !sessionMessagesLoading;
@@ -2303,11 +2345,11 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
               <TaskChecklist
                 checklist={_taskChecklists[activeSessionId]!}
                 lang={settings.lang ?? 'zh-CN'}
-                isLoading={isLoading}
+                isLoading={isActiveLoading}
               />
             </div>
           ) : null}
-          {isLoading && !hasStreamingMessage && (
+          {isActiveLoading && !hasStreamingMessage && (
             <div className="mb-4 flex justify-start fade-in">
               <div className="flex items-center gap-1.5 px-1 py-2">
                 <div className="flex gap-1.5 items-center">
@@ -2516,7 +2558,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
                 ))}
               </div>
             )}
-            <div className={`chat-input-box relative flex flex-col rounded-2xl border bg-[#1a1d27] px-3 pt-3 pb-2 transition-all duration-200 ${isLoading ? 'border-[#2a2d3a]' : 'border-[#2a2d3a] focus-within:border-indigo-500/60'}`}>
+            <div className={`chat-input-box relative flex flex-col rounded-2xl border bg-[#1a1d27] px-3 pt-3 pb-2 transition-all duration-200 ${isActiveLoading ? 'border-[#2a2d3a]' : 'border-[#2a2d3a] focus-within:border-indigo-500/60'}`}>
               <textarea
                 ref={textareaRef}
                 className="w-full bg-[#1a1d27] text-slate-200 placeholder-slate-600 outline-none resize-none text-[15px] leading-relaxed overflow-y-auto min-h-[44px] max-h-[80px]"
@@ -2596,7 +2638,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={isLoading}
+                    disabled={isActiveLoading}
                     title="上传文件或图片"
                     className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
@@ -2736,12 +2778,12 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
                   <ModeSelector
                     mode={mode}
                     setMode={setMode}
-                    isLoading={isLoading}
+                    isLoading={isActiveLoading}
                     lang={settings.lang ?? 'zh-CN'}
                     sessionLock={sessionLock}
                   />
                 </div>
-                {isLoading ? (
+                {isActiveLoading ? (
                   <button
                     onClick={() => cancelMessage()}
                     className="flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-500"
@@ -2755,6 +2797,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
                   <button
                     onClick={() => { void handlePrimaryAction(); }}
                     disabled={!canSubmit}
+                    title={otherSessionRunning ? t.anotherSessionRunning : undefined}
                     className={`p-1.5 rounded-lg transition-all shadow-sm flex items-center justify-center
                       ${canSubmit
                         ? 'bg-slate-200 text-slate-900 hover:bg-white'
