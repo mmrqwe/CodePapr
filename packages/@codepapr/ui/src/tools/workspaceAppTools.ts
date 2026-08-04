@@ -11,8 +11,64 @@ import {
 } from './workspaceToolHelpers';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
-import { disallowedPermissionsForLevel } from '../papr/levelGrants';
+import {
+  APP_AGENT_LEVEL_TOOLS,
+  disallowedPermissionsForLevel,
+  minLevelForAgentTool,
+} from '../papr/levelGrants';
 import { type WorkspaceToolContext } from './workspaceToolContext';
+
+/**
+ * 校验 agents[].tools 白名单：声明即契约，runtime 不再静默裁剪。
+ * 在渲染时报错让模型立即修正，而不是让 app 运行时工具神秘失效。
+ */
+function validateAgentTools(params: {
+  agents: Array<{ name: string; tools?: string[] }>;
+  permissions: string[];
+  level: number;
+  disableWebSearchTools: boolean;
+}): void {
+  const { agents, permissions, level, disableWebSearchTools } = params;
+  const levelTools = APP_AGENT_LEVEL_TOOLS[level] ?? APP_AGENT_LEVEL_TOOLS[1];
+
+  for (const agent of agents) {
+    if (!agent.tools) continue;
+
+    for (const toolName of agent.tools) {
+      if (typeof toolName !== 'string' || toolName.trim().length === 0) {
+        throw new Error(`agents[${agent.name}].tools 含非法工具名: ${JSON.stringify(toolName)}`);
+      }
+      if (toolName === 'task' || toolName === 'app_render') {
+        throw new Error(`agents[${agent.name}].tools 不能声明 ${toolName}（App Agent 始终排除该工具）`);
+      }
+      if (toolName.startsWith('mcp__')) {
+        if (level < 2) {
+          throw new Error(`agents[${agent.name}].tools 声明了 MCP 工具 ${toolName}，MCP 工具需要 level ≥ 2（当前 level ${level}），请提升 level`);
+        }
+        continue;
+      }
+      const minLevel = minLevelForAgentTool(toolName);
+      if (minLevel === null) {
+        throw new Error(`agents[${agent.name}].tools 含未知工具: ${toolName}。可用工具: read, grep, list, lsp, diagnostics, read_image, skill_load, todo, local_time_now, websearch, webfetch（L2+）, write, edit, patch, bash（L3），或 mcp__ 前缀的 MCP 工具（L2+）`);
+      }
+      if (!levelTools.has(toolName)) {
+        throw new Error(`agents[${agent.name}].tools 中的 ${toolName} 需要 level ≥ ${minLevel}（当前 level ${level}），请提升 app_render 的 level 参数或从 tools 中移除`);
+      }
+      if ((toolName === 'websearch' || toolName === 'webfetch') && disableWebSearchTools) {
+        throw new Error(`设置已启用 MCP 搜索，websearch/webfetch 不可用。请改为在 agents[${agent.name}].tools 中显式声明对应的 MCP 搜索工具（mcp__ 前缀名称），或在设置中关闭 MCP 搜索`);
+      }
+    }
+
+    const needsWorkspaceWrite = agent.tools.some((t) => t === 'write' || t === 'edit' || t === 'patch');
+    const needsWorkspaceExec = agent.tools.includes('bash');
+    if (needsWorkspaceWrite && !permissions.includes('workspace:write')) {
+      throw new Error(`agents[${agent.name}].tools 含写入工具（write/edit/patch），必须在 permissions 中声明 workspace:write`);
+    }
+    if (needsWorkspaceExec && !permissions.includes('workspace:exec')) {
+      throw new Error(`agents[${agent.name}].tools 含 bash，必须在 permissions 中声明 workspace:exec`);
+    }
+  }
+}
 
 export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
   const {
@@ -93,6 +149,13 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     if (invalidPerms.length > 0) {
       throw new Error(`permissions ${JSON.stringify(invalidPerms)} 超出 level ${appLevel} 允许范围，请提升 level 或移除这些权限。`);
     }
+
+    validateAgentTools({
+      agents,
+      permissions,
+      level: appLevel,
+      disableWebSearchTools: ctx.options.disableWebSearchTools ?? false,
+    });
 
     const manifest = {
       spec: 'papr/0.1',

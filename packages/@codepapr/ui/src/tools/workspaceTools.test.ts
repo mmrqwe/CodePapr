@@ -198,3 +198,103 @@ describe('individual domain registrars register their exact tool sets', () => {
     ]);
   });
 });
+
+describe('app_render agent tools validation', () => {
+  const BASE_ARGS = {
+    appId: 'demo-app',
+    title: 'Demo App',
+    html: '<!DOCTYPE html><html><body></body></html>',
+  };
+
+  function appRegistry(options: RegisterWorkspaceToolsOptions = {}): ToolRegistry {
+    return build({ mode: 'app', ...options });
+  }
+
+  it('rejects websearch in agent tools at default level 1', async () => {
+    await expect(
+      appRegistry().execute('app_render', {
+        ...BASE_ARGS,
+        agents: [{ name: 'searcher', tools: ['websearch'] }],
+      }),
+    ).rejects.toThrow(/level ≥ 2/);
+  });
+
+  it('accepts websearch in agent tools at level 2', async () => {
+    await expect(
+      appRegistry().execute('app_render', {
+        ...BASE_ARGS,
+        level: 2,
+        agents: [{ name: 'searcher', tools: ['websearch'] }],
+      }),
+    ).resolves.toMatchObject({ appId: 'demo-app', mounted: true });
+  });
+
+  it('rejects websearch when MCP search is enabled', async () => {
+    await expect(
+      appRegistry({ disableWebSearchTools: true }).execute('app_render', {
+        ...BASE_ARGS,
+        level: 2,
+        agents: [{ name: 'searcher', tools: ['websearch'] }],
+      }),
+    ).rejects.toThrow(/MCP 搜索/);
+  });
+
+  it('rejects unknown tool names with the available-tool list', async () => {
+    await expect(
+      appRegistry().execute('app_render', {
+        ...BASE_ARGS,
+        agents: [{ name: 'searcher', tools: ['web_search'] }],
+      }),
+    ).rejects.toThrow(/未知工具: web_search/);
+  });
+
+  it('rejects task and app_render in agent tools', async () => {
+    await expect(
+      appRegistry().execute('app_render', {
+        ...BASE_ARGS,
+        agents: [{ name: 'helper', tools: ['read', 'task'] }],
+      }),
+    ).rejects.toThrow(/始终排除/);
+  });
+
+  it('rejects MCP tools below level 2', async () => {
+    await expect(
+      appRegistry().execute('app_render', {
+        ...BASE_ARGS,
+        agents: [{ name: 'searcher', tools: ['mcp__search__web_search'] }],
+      }),
+    ).rejects.toThrow(/MCP 工具需要 level ≥ 2/);
+  });
+
+  it('rejects write tools without workspace:write permission', async () => {
+    await expect(
+      appRegistry().execute('app_render', {
+        ...BASE_ARGS,
+        level: 3,
+        agents: [{ name: 'editor', tools: ['read', 'write'] }],
+      }),
+    ).rejects.toThrow(/workspace:write/);
+  });
+
+  it('rejects bash without workspace:exec permission', async () => {
+    await expect(
+      appRegistry().execute('app_render', {
+        ...BASE_ARGS,
+        level: 3,
+        permissions: ['workspace:write'],
+        agents: [{ name: 'runner', tools: ['bash'] }],
+      }),
+    ).rejects.toThrow(/workspace:exec/);
+  });
+
+  it('accepts high-risk tools when permissions are declared', async () => {
+    await expect(
+      appRegistry().execute('app_render', {
+        ...BASE_ARGS,
+        level: 3,
+        permissions: ['workspace:write', 'workspace:exec'],
+        agents: [{ name: 'runner', tools: ['write', 'bash'] }],
+      }),
+    ).resolves.toMatchObject({ appId: 'demo-app', mounted: true });
+  });
+});

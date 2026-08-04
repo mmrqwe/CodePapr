@@ -575,6 +575,61 @@ describe('WorkerBackedAgent', () => {
     await rejection;
   });
 
+  it('executes tool requests from app-agent runs and replies with tool-response', async () => {
+    const agent = createAgent();
+    const runPromise = agent.runAppAgent(
+      { appId: 'app-1', agentName: 'assistant', task: 'search the web' },
+      undefined,
+      'run-tools',
+    );
+    const worker = MockWorker.instances[0];
+
+    // App-agent runs are tracked in appAgentRequests (not pendingRequests);
+    // their tool calls must still be executed instead of silently dropped.
+    worker?.emit({
+      type: 'tool-request',
+      requestId: 'run-tools',
+      toolRequestId: 'run-tools:1',
+      toolName: 'local_time_now',
+      arguments: {},
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const response = worker?.messages.find(
+      (m): m is Extract<MainToAgentWorkerMessage, { type: 'tool-response' }> =>
+        m.type === 'tool-response' && m.payload.toolRequestId === 'run-tools:1',
+    );
+    expect(response?.payload.success).toBe(true);
+
+    worker?.emit({ type: 'app-agent-result', requestId: 'run-tools', content: 'done' });
+    await expect(runPromise).resolves.toMatchObject({ content: 'done' });
+  });
+
+  it('drops tool requests after an app-agent run was cancelled', async () => {
+    const agent = createAgent();
+    const runPromise = agent.runAppAgent(
+      { appId: 'app-1', agentName: 'assistant', task: 'search the web' },
+      undefined,
+      'run-cancel',
+    );
+    // Avoid unhandled rejection noise; cancelAppAgent rejects with AbortError.
+    runPromise.catch(() => undefined);
+    agent.cancelAppAgent('run-cancel');
+    const worker = MockWorker.instances[0];
+
+    worker?.emit({
+      type: 'tool-request',
+      requestId: 'run-cancel',
+      toolRequestId: 'run-cancel:1',
+      toolName: 'local_time_now',
+      arguments: {},
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(worker?.messages.some((m) => m.type === 'tool-response')).toBe(false);
+    await expect(runPromise).rejects.toBeInstanceOf(DOMException);
+  });
+
   it('includes worker diagnostics emitted before a crash', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);

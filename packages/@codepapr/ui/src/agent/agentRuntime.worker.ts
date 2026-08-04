@@ -34,17 +34,21 @@ import {
   setGlobalFetchFn,
 } from '@codepapr/api';
 import type { IAgentResponse, IChatRequest, IChatResponse, ICacheStatistics, IChatStreamEvent, IMessage, ILLMProvider, IToolDefinition } from '@codepapr/types';
-import type {
-  AgentWorkerChatPayload,
-  AgentWorkerToMainMessage,
-  MainToAgentWorkerMessage,
-  WorkerAgentSettings,
-  WorkerAgentRuntimeConfig,
-  WorkerApiFormat,
-  AppAgentPayload,
+import {
+  resolveAppAgentIdleTimeoutMs,
+  type AgentWorkerChatPayload,
+  type AgentWorkerToMainMessage,
+  type MainToAgentWorkerMessage,
+  type WorkerAgentSettings,
+  type WorkerAgentRuntimeConfig,
+  type WorkerApiFormat,
+  type AppAgentPayload,
 } from './agentWorkerProtocol';
 import { createContextCompactionHandler } from './compactionHandler';
 import type { Settings } from '../store/internals/types';
+// Shared with app_render validation (fail fast at render time instead of
+// silently stripping tools the app's level does not grant).
+import { APP_AGENT_LEVEL_TOOLS } from '../papr/levelGrants';
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -90,14 +94,6 @@ let nextBootstrapRequestId = 0;
 
 const TOOL_IPC_TIMEOUT_MS = 120_000;
 const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 300_000;
-const APP_AGENT_IDLE_TIMEOUT_MS = 300_000;
-
-const APP_AGENT_LEVEL_TOOLS: Record<number, ReadonlySet<string>> = {
-  0: new Set(),
-  1: new Set(['read', 'grep', 'list', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'todo', 'local_time_now']),
-  2: new Set(['read', 'grep', 'list', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'todo', 'local_time_now', 'websearch', 'webfetch']),
-  3: new Set(['read', 'grep', 'list', 'lsp', 'diagnostics', 'read_image', 'skill_load', 'todo', 'local_time_now', 'websearch', 'webfetch', 'write', 'edit', 'patch', 'bash']),
-};
 
 let cachedSettings: WorkerAgentSettings | null = null;
 let cachedToolDefinitions: IToolDefinition[] = [];
@@ -811,6 +807,12 @@ async function handleRunAppAgent(
     return args;
   }
 
+  const toolIpcTimeoutMs = cachedSettings.toolIpcTimeoutMs ?? TOOL_IPC_TIMEOUT_MS;
+
+  // A running tool counts as activity for the idle watchdog. notifyActivity
+  // only exists once agent.chat starts, so bridge it through a mutable ref.
+  let toolActivity: (() => void) | null = null;
+
   const registry = new ToolRegistry();
   for (const tool of cachedToolDefinitions) {
     if (BLOCKED.has(tool.name)) continue;
@@ -824,9 +826,14 @@ async function handleRunAppAgent(
 
     registry.register(tool, async (args, context) => {
       const sandboxedArgs = sandboxWriteArgs(tool.name, args);
-      return await requestToolExecution(
-        requestId, tool.name, sandboxedArgs, TOOL_IPC_TIMEOUT_MS, context?.toolCallId
-      );
+      toolActivity?.();
+      try {
+        return await requestToolExecution(
+          requestId, tool.name, sandboxedArgs, toolIpcTimeoutMs, context?.toolCallId
+        );
+      } finally {
+        toolActivity?.();
+      }
     });
   }
 
@@ -1013,41 +1020,44 @@ async function handleRunAppAgent(
   try {
     const response = await withIdleTimeout(
       agent,
-      (notifyActivity) => agent.chat(userPrompt, (event) => {
-        notifyActivity();
-        if (event.type === 'content-delta') {
-          bufferedContent += event.delta;
-          if (bufferedContent.length >= STREAM_BUFFER_CHARS) {
-            flushStreamBuffer();
-          } else {
-            scheduleStreamFlush();
+      (notifyActivity) => {
+        toolActivity = notifyActivity;
+        return agent.chat(userPrompt, (event) => {
+          notifyActivity();
+          if (event.type === 'content-delta') {
+            bufferedContent += event.delta;
+            if (bufferedContent.length >= STREAM_BUFFER_CHARS) {
+              flushStreamBuffer();
+            } else {
+              scheduleStreamFlush();
+            }
+            return;
           }
-          return;
-        }
-        if (event.type === 'reasoning-delta') {
-          bufferedReasoning += event.delta;
-          if (bufferedReasoning.length >= STREAM_BUFFER_CHARS) {
-            flushStreamBuffer();
-          } else {
-            scheduleStreamFlush();
+          if (event.type === 'reasoning-delta') {
+            bufferedReasoning += event.delta;
+            if (bufferedReasoning.length >= STREAM_BUFFER_CHARS) {
+              flushStreamBuffer();
+            } else {
+              scheduleStreamFlush();
+            }
+            return;
           }
-          return;
-        }
-        flushStreamBuffer();
-        postMessageToMain({
-          type: 'app-agent-stream',
-          requestId,
-          event,
-        });
-        if (event.type === 'tool-call-end') {
-          steps.push({
-            name: event.toolName,
-            status: event.success ? 'success' : 'error',
-            summary: event.error || event.toolName,
+          flushStreamBuffer();
+          postMessageToMain({
+            type: 'app-agent-stream',
+            requestId,
+            event,
           });
-        }
-      }, undefined, abortController.signal),
-      APP_AGENT_IDLE_TIMEOUT_MS,
+          if (event.type === 'tool-call-end') {
+            steps.push({
+              name: event.toolName,
+              status: event.success ? 'success' : 'error',
+              summary: event.error || event.toolName,
+            });
+          }
+        }, undefined, abortController.signal);
+      },
+      resolveAppAgentIdleTimeoutMs(cachedSettings.toolIpcTimeoutMs),
       cachedSettings.lang
     );
     flushStreamBuffer();

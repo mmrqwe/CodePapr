@@ -15,15 +15,16 @@ import { registerWorkspaceTools, type WorkspaceMutationListener } from '../tools
 import { registerTodoListTools } from '../tools/todoListTool';
 import { registerMcpTools } from '../tools/mcpTools';
 import { hasEnabledMcpSearch } from '../utils/mcpTypes';
-import type {
-  AgentWorkerChatPayload,
-  AgentWorkerToMainMessage,
-  MainToAgentWorkerMessage,
-  WorkerAgentParameters,
-  WorkerAgentRuntimeConfig,
-  WorkerAgentSettings,
-  AppAgentPayload,
-  AppAgentResult,
+import {
+  resolveAppAgentIdleTimeoutMs,
+  type AgentWorkerChatPayload,
+  type AgentWorkerToMainMessage,
+  type MainToAgentWorkerMessage,
+  type WorkerAgentParameters,
+  type WorkerAgentRuntimeConfig,
+  type WorkerAgentSettings,
+  type AppAgentPayload,
+  type AppAgentResult,
 } from './agentWorkerProtocol';
 
 function resolveWorkerMultimodalEnabled(settings: WorkerAgentSettings, currentModel: string): boolean {
@@ -91,7 +92,6 @@ const WORKER_HEARTBEAT_TIMEOUT_MS = 15000;
 // produces false crashes that cascade through the recovery retries.
 const WORKER_HEARTBEAT_INITIAL_GRACE_MS = 60000;
 const MAX_WORKER_DIAGNOSTICS = 20;
-const APP_AGENT_IDLE_TIMEOUT_MS = 300_000;
 
 /** Error thrown when the agent worker crashes (OOM, uncaught exception, etc.).
  *  The `chat()` promise rejects with this so the store's catch block can
@@ -271,10 +271,15 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   // compaction) falls back to a full sync. Fresh per WorkerBackedAgent instance,
   // so a recreated worker always starts with a full sync.
   private readonly workerSyncedLength = new Map<string, number>();
+  /** Must match the worker's withIdleTimeout window for the same run, so a
+    *  run is never killed on one side while the other still considers it
+    *  active. Derived from the tool IPC timeout (resolveAppAgentIdleTimeoutMs). */
+  private readonly appAgentIdleTimeoutMs: number;
 
   constructor(private readonly config: WorkerBackedAgentConfig) {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     activeInstance = this;
+    this.appAgentIdleTimeoutMs = resolveAppAgentIdleTimeoutMs(config.settings.toolIpcTimeoutMs);
     this.logStore = new AppendOnlyLog(config.sessionId);
     if (config.initialMessages.length > 0) {
       this.logStore.loadFromSnapshot({
@@ -556,13 +561,14 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     const entry = this.appAgentRequests.get(requestId);
     if (!entry) return;
     if (entry.timeoutTimer !== null) clearTimeout(entry.timeoutTimer);
+    const idleTimeoutMs = this.appAgentIdleTimeoutMs;
     entry.timeoutTimer = setTimeout(() => {
       entry.timeoutTimer = null;
       this.appAgentRequests.delete(requestId);
       entry.reject(new Error(
-        `App agent request timed out (no activity for ${APP_AGENT_IDLE_TIMEOUT_MS / 1000}s)`,
+        `App agent request timed out (no activity for ${idleTimeoutMs / 1000}s)`,
       ));
-    }, APP_AGENT_IDLE_TIMEOUT_MS);
+    }, idleTimeoutMs);
   }
 
   cancelAppAgent(requestId: string): void {
@@ -711,6 +717,73 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       return;
     }
 
+    if (message.type === 'tool-request') {
+      // App-agent runs (papr.agent.run) are tracked in appAgentRequests, not
+      // pendingRequests, but their tool calls cross the same bridge. Requests
+      // belonging to cancelled/unknown runs (in neither map) are still dropped.
+      const pending = this.pendingRequests.get(message.requestId);
+      const appAgentEntry = this.appAgentRequests.get(message.requestId);
+      if (!pending && !appAgentEntry) {
+        return;
+      }
+      // A tool executing on the main thread is activity: keep the app-agent
+      // idle timer from firing mid-run (e.g. slow bash/websearch calls).
+      if (appAgentEntry) {
+        this.armAppAgentIdleTimer(message.requestId);
+      }
+
+      // Prefer matching by tool-call id (robust even for concurrent identical
+      // calls); fall back to name+arguments for older paths without an id.
+      const match = pending
+        ? ((message.toolCallId
+            ? pending.pendingToolCalls.find((item) => item.toolCallId === message.toolCallId)
+            : undefined) ??
+          pending.pendingToolCalls.find(
+            (item) =>
+              item.toolName === message.toolName &&
+              item.argumentsKey === stableStringify(message.arguments)
+          ))
+        : undefined;
+
+      void this.toolExecutor(message.toolName, message.arguments, {
+        toolCallId: match?.toolCallId,
+        onProgress: pending?.streamListener
+          ? (progressEvent) => {
+              pending.streamListener?.(progressEvent);
+            }
+          : undefined,
+      })
+        .then((result) => {
+          if (appAgentEntry) {
+            this.armAppAgentIdleTimer(message.requestId);
+          }
+          this.worker.postMessage({
+            type: 'tool-response',
+            payload: {
+              requestId: message.requestId,
+              toolRequestId: message.toolRequestId,
+              success: true,
+              result,
+            },
+          } satisfies MainToAgentWorkerMessage);
+        })
+        .catch((error) => {
+          if (appAgentEntry) {
+            this.armAppAgentIdleTimer(message.requestId);
+          }
+          this.worker.postMessage({
+            type: 'tool-response',
+            payload: {
+              requestId: message.requestId,
+              toolRequestId: message.toolRequestId,
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          } satisfies MainToAgentWorkerMessage);
+        });
+      return;
+    }
+
     const pending = this.pendingRequests.get(message.requestId);
     if (!pending) {
       return;
@@ -753,52 +826,6 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
       this.flushDeltas(pending);
       pending.streamListener?.(message.event);
-      return;
-    }
-
-    if (message.type === 'tool-request') {
-      // Prefer matching by tool-call id (robust even for concurrent identical
-      // calls); fall back to name+arguments for older paths without an id.
-      const match =
-        (message.toolCallId
-          ? pending.pendingToolCalls.find((item) => item.toolCallId === message.toolCallId)
-          : undefined) ??
-        pending.pendingToolCalls.find(
-          (item) =>
-            item.toolName === message.toolName &&
-            item.argumentsKey === stableStringify(message.arguments)
-        );
-
-      void this.toolExecutor(message.toolName, message.arguments, {
-        toolCallId: match?.toolCallId,
-        onProgress: pending.streamListener
-          ? (progressEvent) => {
-              pending.streamListener?.(progressEvent);
-            }
-          : undefined,
-      })
-        .then((result) => {
-          this.worker.postMessage({
-            type: 'tool-response',
-            payload: {
-              requestId: message.requestId,
-              toolRequestId: message.toolRequestId,
-              success: true,
-              result,
-            },
-          } satisfies MainToAgentWorkerMessage);
-        })
-        .catch((error) => {
-          this.worker.postMessage({
-            type: 'tool-response',
-            payload: {
-              requestId: message.requestId,
-              toolRequestId: message.toolRequestId,
-              success: false,
-              error: error instanceof Error ? error.message : String(error),
-            },
-          } satisfies MainToAgentWorkerMessage);
-        });
       return;
     }
 

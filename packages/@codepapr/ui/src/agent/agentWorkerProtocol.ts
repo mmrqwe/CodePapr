@@ -213,6 +213,18 @@ export interface AgentWorkerProxyChatConfig {
   format: WorkerApiFormat;
 }
 
+/** Base idle window for app-agent runs. Both the worker (withIdleTimeout) and
+ *  the main thread (armAppAgentIdleTimer) must use the same effective value,
+ *  otherwise one side kills a run the other still considers healthy. */
+export const APP_AGENT_BASE_IDLE_TIMEOUT_MS = 300_000;
+
+/** A single tool call is legitimate activity: when the configured tool IPC
+ *  timeout exceeds the base idle window, extend the window so one slow tool
+ *  (e.g. a long bash run) is not killed mid-flight by the idle watchdog. */
+export function resolveAppAgentIdleTimeoutMs(toolIpcTimeoutMs: number | undefined): number {
+  return Math.max(APP_AGENT_BASE_IDLE_TIMEOUT_MS, (toolIpcTimeoutMs ?? 120_000) + 30_000);
+}
+
 export interface AppAgentPayload {
   appId: string;
   agentName: string;
