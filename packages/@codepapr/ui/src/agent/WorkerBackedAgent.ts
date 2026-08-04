@@ -91,6 +91,7 @@ const WORKER_HEARTBEAT_TIMEOUT_MS = 15000;
 // produces false crashes that cascade through the recovery retries.
 const WORKER_HEARTBEAT_INITIAL_GRACE_MS = 60000;
 const MAX_WORKER_DIAGNOSTICS = 20;
+const APP_AGENT_IDLE_TIMEOUT_MS = 300_000;
 
 /** Error thrown when the agent worker crashes (OOM, uncaught exception, etc.).
  *  The `chat()` promise rejects with this so the store's catch block can
@@ -512,20 +513,16 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     }
 
     const result = await new Promise<AppAgentResult>((resolve, reject) => {
-      const timeoutTimer = setTimeout(() => {
-        this.appAgentRequests.delete(requestId);
-        reject(new Error('App agent request timed out (300s)'));
-      }, 300_000);
-
       this.appAgentRequests.set(requestId, {
         resolve,
         reject,
-        timeoutTimer,
+        timeoutTimer: null,
         onStream,
         bufferedContentDelta: '',
         bufferedReasoningDelta: '',
         flushTimerId: null,
       });
+      this.armAppAgentIdleTimer(requestId);
 
       this.worker.postMessage({
         type: 'run-app-agent',
@@ -535,6 +532,19 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     });
 
     return result;
+  }
+
+  private armAppAgentIdleTimer(requestId: string): void {
+    const entry = this.appAgentRequests.get(requestId);
+    if (!entry) return;
+    if (entry.timeoutTimer !== null) clearTimeout(entry.timeoutTimer);
+    entry.timeoutTimer = setTimeout(() => {
+      entry.timeoutTimer = null;
+      this.appAgentRequests.delete(requestId);
+      entry.reject(new Error(
+        `App agent request timed out (no activity for ${APP_AGENT_IDLE_TIMEOUT_MS / 1000}s)`,
+      ));
+    }, APP_AGENT_IDLE_TIMEOUT_MS);
   }
 
   cancelAppAgent(requestId: string): void {
@@ -628,7 +638,9 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
     if (message.type === 'app-agent-stream') {
       const entry = this.appAgentRequests.get(message.requestId);
-      if (!entry?.onStream) return;
+      if (!entry) return;
+      this.armAppAgentIdleTimer(message.requestId);
+      if (!entry.onStream) return;
 
       if (message.event.type === 'content-delta') {
         entry.bufferedContentDelta += message.event.delta;

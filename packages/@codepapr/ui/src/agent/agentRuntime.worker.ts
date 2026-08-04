@@ -90,6 +90,7 @@ let nextBootstrapRequestId = 0;
 
 const TOOL_IPC_TIMEOUT_MS = 120_000;
 const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 300_000;
+const APP_AGENT_IDLE_TIMEOUT_MS = 300_000;
 
 const APP_AGENT_LEVEL_TOOLS: Record<number, ReadonlySet<string>> = {
   0: new Set(),
@@ -327,28 +328,41 @@ const subagentCacheStatsMap = new Map<
   Array<{ tier: 'primary' | 'fast' | 'mentor'; stats: ICacheStatistics }>
 >();
 
-async function withWallClockTimeout<T>(
+async function withIdleTimeout<T>(
   agent: Agent,
-  promiseFactory: () => Promise<T>,
+  promiseFactory: (notifyActivity: () => void) => Promise<T>,
   timeoutMs: number,
   lang?: string
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let rejectFn: ((err: Error) => void) | undefined;
+  let settled = false;
+
+  const armTimer = () => {
+    if (settled) return;
+    if (timer !== undefined) clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      agent.cancel();
+      rejectFn?.(new Error(
+        lang === 'zh-TW'
+          ? `子代理執行超時（${timeoutMs / 1000} 秒無活動）`
+          : lang === 'zh-CN'
+          ? `子代理执行超时（${timeoutMs / 1000} 秒无活动）`
+          : `Sub-agent execution timed out (no activity for ${timeoutMs / 1000}s)`
+      ));
+    }, timeoutMs);
+  };
+
   try {
     return await new Promise<T>((resolve, reject) => {
-      timer = setTimeout(() => {
-        agent.cancel();
-        reject(new Error(
-          lang === 'zh-TW'
-            ? `子代理執行超時 (${timeoutMs / 1000}秒)`
-            : lang === 'zh-CN'
-            ? `子代理执行超时 (${timeoutMs / 1000}秒)`
-            : `Sub-agent execution timed out (${timeoutMs / 1000}s)`
-        ));
-      }, timeoutMs);
+      rejectFn = reject;
+      armTimer();
 
-      promiseFactory().then(
+      promiseFactory(armTimer).then(
         (result) => {
+          settled = true;
           if (timer !== undefined) {
             clearTimeout(timer);
             timer = undefined;
@@ -356,6 +370,7 @@ async function withWallClockTimeout<T>(
           resolve(result);
         },
         (err) => {
+          settled = true;
           if (timer !== undefined) {
             clearTimeout(timer);
             timer = undefined;
@@ -996,9 +1011,10 @@ async function handleRunAppAgent(
   }
 
   try {
-    const response = await withWallClockTimeout(
+    const response = await withIdleTimeout(
       agent,
-      () => agent.chat(userPrompt, (event) => {
+      (notifyActivity) => agent.chat(userPrompt, (event) => {
+        notifyActivity();
         if (event.type === 'content-delta') {
           bufferedContent += event.delta;
           if (bufferedContent.length >= STREAM_BUFFER_CHARS) {
@@ -1031,7 +1047,7 @@ async function handleRunAppAgent(
           });
         }
       }, undefined, abortController.signal),
-      300_000,
+      APP_AGENT_IDLE_TIMEOUT_MS,
       cachedSettings.lang
     );
     flushStreamBuffer();

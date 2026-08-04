@@ -209,7 +209,7 @@ Papr 是 CodePapr 的应用运行时——AI 生成的 `.papr` App 可以直接�
 - manifest `agents[].tools` 声明白名单（仅 15 个允许工具）
 - Worker 端 `handleRunAppAgent` 构建完整 `Session`（`ImmutablePrefix` + `AppendOnlyLog` + `ToolRegistry`）
 - 走 `Agent.chat()` 多轮工具循环（`maxToolRounds` 默认 20，上限 50）
-- 300s wall-clock 超时 + 工具 IPC proxy 到主线程
+- 三层 300s **空闲**超时（iframe SDK / 主线程 `WorkerBackedAgent` / Worker `withIdleTimeout`）：任一流式事件到达即重置定时器，持续有产出的长任务不会被掐断，仅当连续 300 秒无任何事件才判定挂起。工具 IPC proxy 到主线程
 - 流式事件通过 `app-agent-stream` 消息转发到 iframe
 
 **协议层 SDK 注入：** `app_runtime.rs::handle_app_protocol` 在返回 HTML 时自动在 `<head>` 后注入 `<script src="__papr_sdk.js">`，SDK 内容编译时嵌入 Rust binary（`include_str!`）。
@@ -357,6 +357,7 @@ ChatPanel → useTtsPlayer hook → Rust TTS Module → GPT-SoVITS Python Server
 - **单次工具调用 90 秒超时**：`Agent.ts` 中每次 `toolRegistry.execute()` 由 `withTimeout` 包裹，超时返回 `{ error: '工具执行超时' }` 给 LLM 自主决策
 - **子代理整体 wall-clock 超时**：`subagentConfig.ts` 的 `runSubagentSession` 内置超时（Worker 路径 5 分钟），超时调用 `agent.cancel()` 终止循环
 - **Worker IPC 120 秒超时**：`requestToolExecution` 的 Promise 内置超时清理 waiter，防止主线程不回信时永久挂起
+- **App Agent 300 秒空闲超时**：`papr.agent.run` 链路三层（iframe SDK、主线程 `WorkerBackedAgent`、Worker `withIdleTimeout`）均为空闲语义——每收到一个流式事件就重置定时器，任务持续产出即可运行任意时长；仅当连续 300 秒无任何事件才超时终止
 
 超时不是静默失败——错误信息会返回给 LLM，LLM 可看到超时原因并自行决定重试、换策略、或向用户汇报。
 

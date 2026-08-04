@@ -84,6 +84,11 @@ await papr.fs.writeFile('config.json', JSON.stringify(config));
 const files = await papr.fs.list();
 ```
 
+**`papr.agent.run` 的轮数与超时限制：**
+
+- **工具轮数**：受 manifest `agents[].maxToolRounds` 限制（未声明时默认 50，声明值也封顶 50），websearch/webfetch 等搜索调用计入总轮数，没有单独的搜索轮数限制
+- **超时**：采用 **300 秒空闲超时**（iframe SDK、主线程、Worker 三层一致）——只要 Agent 持续产出进度事件（流式输出、工具调用）就会一直运行下去，不会被掐断；仅当连续 300 秒没有任何事件才判定超时。因此多轮搜索/长分析任务无需担心固定 5 分钟上限
+
 ### 创建 App
 
 切换 **App 模式**，用自然语言描述想要的 App。Agent 会自动调用 `app_render` 工具生成完整的 manifest.json 和 index.html，注册到应用面板。相同 appId 再次调用会覆盖更新。

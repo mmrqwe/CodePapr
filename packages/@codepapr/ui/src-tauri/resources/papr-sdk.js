@@ -3,9 +3,23 @@
 
   if (window.papr) return;
 
+  var IPC_IDLE_TIMEOUT_MS = 300000;
   var pending = {};
   var appInfo = null;
   var parentOrigin = window.__PAPR_PARENT_ORIGIN || '*';
+
+  function armIdleTimer(reqId) {
+    var entry = pending[reqId];
+    if (!entry) return;
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = setTimeout(function () {
+      var p = pending[reqId];
+      if (p) {
+        delete pending[reqId];
+        p.reject(new Error('Papr IPC timeout: ' + p.type + ' (reqId=' + reqId + ')'));
+      }
+    }, IPC_IDLE_TIMEOUT_MS);
+  }
 
   function send(type, payload, onProgress) {
     var reqId = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -14,7 +28,9 @@
       pending[reqId] = {
         resolve: resolve,
         reject: reject,
-        onProgress: onProgress
+        onProgress: onProgress,
+        type: type,
+        timer: null
       };
 
       window.parent.postMessage({
@@ -24,12 +40,7 @@
         payload: payload
       }, parentOrigin);
 
-      setTimeout(function () {
-        if (pending[reqId]) {
-          delete pending[reqId];
-          reject(new Error('Papr IPC timeout: ' + type + ' (reqId=' + reqId + ')'));
-        }
-      }, 300000);
+      armIdleTimer(reqId);
     });
 
     promise.reqId = reqId;
@@ -44,10 +55,12 @@
     if (!p) return;
 
     if (data.type === 'stream') {
+      armIdleTimer(reqId);
       if (p.onProgress) p.onProgress(data.event);
       return;
     }
 
+    if (p.timer) clearTimeout(p.timer);
     delete pending[reqId];
     if (data.error) {
       var err = new Error(data.error.message || 'Papr IPC error');

@@ -508,6 +508,54 @@ describe('WorkerBackedAgent', () => {
     expect(agent.isCrashed()).toBe(true);
   });
 
+  it('keeps an app agent run alive while stream events keep arriving', async () => {
+    const agent = createAgent();
+    const runPromise = agent.runAppAgent(
+      { appId: 'app-1', agentName: 'assistant', task: 'long analysis' },
+      undefined,
+      'run-1',
+    );
+    const worker = MockWorker.instances[0];
+
+    // 360s total — beyond the 300s idle window — but a stream event every 10s
+    // keeps re-arming the idle timer, so the run must survive.
+    for (let i = 0; i < 36; i++) {
+      await vi.advanceTimersByTimeAsync(10_000);
+      worker?.emit({ type: 'pong' });
+      worker?.emit({
+        type: 'app-agent-stream',
+        requestId: 'run-1',
+        event: { type: 'content-delta', delta: '.' },
+      });
+    }
+
+    worker?.emit({ type: 'app-agent-result', requestId: 'run-1', content: 'done' });
+    await expect(runPromise).resolves.toEqual({
+      content: 'done',
+      reasoningContent: undefined,
+      steps: undefined,
+    });
+  });
+
+  it('times out an app agent run after 300s without activity', async () => {
+    const agent = createAgent();
+    const runPromise = agent.runAppAgent(
+      { appId: 'app-1', agentName: 'assistant', task: 'long analysis' },
+      undefined,
+      'run-2',
+    );
+    const rejection = expect(runPromise).rejects.toThrow(/no activity for 300s/);
+    const worker = MockWorker.instances[0];
+
+    // Keep the heartbeat alive so only the app-agent idle timer fires.
+    for (let i = 0; i < 31; i++) {
+      await vi.advanceTimersByTimeAsync(10_000);
+      worker?.emit({ type: 'pong' });
+    }
+
+    await rejection;
+  });
+
   it('includes worker diagnostics emitted before a crash', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);

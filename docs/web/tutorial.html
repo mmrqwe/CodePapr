@@ -706,6 +706,7 @@ https://api.deepseek.com/v1</code></pre>
           <li>通过 CDN 引用图表库（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js 等）</li>
           <li>在沙箱 iframe 中运行（<code>sandbox="allow-scripts allow-same-origin"</code>）</li>
           <li>可使用 <strong>Papr SDK</strong>（<code>window.papr</code>）调用 Agent、存储、HTTP、文件系统</li>
+          <li><code>papr.agent.run</code> 采用 <strong>300 秒空闲超时</strong>：只要 Agent 持续产出进度事件（流式输出/工具调用）就可运行任意时长，仅连续 300 秒无事件才超时；工具轮数受 <code>maxToolRounds</code> 限制（默认/上限 50，搜索调用计入总轮数）</li>
           <li>appId 必须是 kebab-case，相同 appId 再次调用覆盖更新——支持迭代改进</li>
         </ul>
         <p><strong>会话隔离：</strong></p>

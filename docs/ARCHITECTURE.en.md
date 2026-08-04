@@ -209,7 +209,7 @@ Independent from built-in sub-agents (explore/scout/mentor). Uses a dedicated Ag
 - manifest `agents[].tools` specifies a whitelist (15 allowed tools)
 - Worker-side `handleRunAppAgent` builds a full `Session` (`ImmutablePrefix` + `AppendOnlyLog` + `ToolRegistry`)
 - Runs `Agent.chat()` multi-turn tool loop (`maxToolRounds` default 20, max 50)
-- 300s wall-clock timeout + tool IPC proxy to main thread
+- Three-layer 300s **idle** timeout (iframe SDK / main-thread `WorkerBackedAgent` / Worker `withIdleTimeout`): any streaming event resets the timer, so long-running tasks that keep producing are never cut off; only 300s of total silence is treated as hung. Tool IPC proxied to main thread
 - Streaming events forwarded to iframe via `app-agent-stream` messages
 
 **Protocol-level SDK injection:** `app_runtime.rs::handle_app_protocol` injects `<script src="__papr_sdk.js">` after `<head>` when serving HTML. SDK content is embedded in the Rust binary at compile time (`include_str!`).
@@ -358,6 +358,7 @@ Sub-agents never wait indefinitely — multiple layers of timeout ensure timely 
 - **90-second per-tool timeout**: each `toolRegistry.execute()` call in `Agent.ts` is wrapped with `withTimeout`; on timeout, returns `{ error: 'tool execution timeout' }` to the LLM for autonomous decision
 - **Overall wall-clock timeout**: `runSubagentSession` in `subagentConfig.ts` has a built-in timeout (5 minutes on the Worker path); timeout calls `agent.cancel()` to terminate the loop
 - **120-second Worker IPC timeout**: `requestToolExecution` promise includes a built-in timeout that cleans up the waiter, preventing permanent hangs when the main thread fails to respond
+- **App Agent 300-second idle timeout**: the `papr.agent.run` path uses idle semantics at all three layers (iframe SDK, main-thread `WorkerBackedAgent`, Worker `withIdleTimeout`) — every streaming event resets the timer, so a task may run indefinitely as long as it keeps producing events; only 300s of total silence triggers the timeout
 
 Timeouts are not silent failures — error information is returned to the LLM, which can decide to retry, switch strategies, or report to the user.
 

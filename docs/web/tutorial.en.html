@@ -706,6 +706,7 @@ https://api.deepseek.com/v1</code></pre>
           <li>Reference chart libraries via CDN (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js, etc.)</li>
           <li>Runs in a sandboxed iframe (<code>sandbox="allow-scripts allow-same-origin"</code>)</li>
           <li>Use <strong>Papr SDK</strong> (<code>window.papr</code>) to call Agent, storage, HTTP, and filesystem capabilities</li>
+          <li><code>papr.agent.run</code> uses a <strong>300-second idle timeout</strong>: as long as the Agent keeps emitting progress events (streaming output / tool calls) it can run indefinitely; only 300s of total silence triggers a timeout. Tool rounds are bounded by <code>maxToolRounds</code> (default/cap 50; search calls count toward the total)</li>
           <li>appId must be kebab-case; calling with the same appId updates in place — supports iterative refinement</li>
         </ul>
         <p><strong>Session Isolation:</strong></p>

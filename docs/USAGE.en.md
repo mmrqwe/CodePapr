@@ -84,6 +84,11 @@ await papr.fs.writeFile('config.json', JSON.stringify(config));
 const files = await papr.fs.list();
 ```
 
+**`papr.agent.run` round & timeout limits:**
+
+- **Tool rounds**: bounded by the manifest `agents[].maxToolRounds` (defaults to 50 when omitted, and any declared value is capped at 50). Search calls such as websearch/webfetch count toward the total — there is no separate search-round limit.
+- **Timeout**: a **300-second idle timeout** (consistent across all three layers: iframe SDK, main thread, Worker). As long as the Agent keeps emitting progress events (streaming output, tool calls) the run continues uninterrupted; only 300s of total silence is treated as a timeout. Multi-round search / long analysis tasks no longer hit a fixed 5-minute ceiling.
+
 ### Creating Apps
 
 Switch to **App mode** and describe the app you want in natural language. The Agent calls `app_render` to generate a complete manifest.json and index.html. Same appId updates in place.
