@@ -1567,8 +1567,12 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
 
     // Installed and not currently starting → kick off a start.
     setTtsStarting(true);
-    const ftPath = activeCharacter?.voice?.useFineTuned !== false && activeCharacter?.voice?.fineTunedModelPath
-      ? activeCharacter.voice.fineTunedModelPath
+    // 从 store 现取角色：此回调被 useCallback 记忆化，闭包里的 activeCharacter
+    // 会停留在创建时的渲染（切换角色后用旧的 fineTunedModelPath 启动服务器）。
+    const store = useCharactersStore.getState();
+    const character = store.characters.find((c) => c.id === store.activeCharacterId) ?? null;
+    const ftPath = character?.voice?.useFineTuned !== false && character?.voice?.fineTunedModelPath
+      ? character.voice.fineTunedModelPath
       : '';
     ttsStartServer('v4', ftPath);
     // Safety: clear the "starting" UI flag eventually so the button isn't

@@ -404,6 +404,22 @@ describe('Regression: audited graphQuery bugs', () => {
     expect(new Set(edgeIds).size).toBe(edgeIds.length);
   });
 
+  it('P2-23: circular_deps survives dangling imports edges (no file node for target)', () => {
+    // LSP enrich 可能产生指向不存在文件节点的 imports 边。旧实现 DFS 里
+    // adjacency.get(neighbor)! 取到 undefined 的迭代器直接抛 TypeError。
+    const g = makeGraph();
+    const dangling: WorkspaceProjectGraphResult = {
+      ...g,
+      edges: [
+        ...g.edges,
+        { id: 'dangling-1', kind: 'imports', from: 'file:src/main.ts', to: 'file:src/does-not-exist.ts' },
+      ],
+    };
+    expect(() => detectCircularDependencies(dangling)).not.toThrow();
+    const result = detectCircularDependencies(dangling);
+    expect(result.total).toBeGreaterThanOrEqual(0);
+  });
+
   it('P1-8: change-impact returns dependent files (not empty) and selects their tests', () => {
     // makeGraph: main.ts -> lib.ts -> models.ts，lib.test.ts 导入 lib.ts。
     // 旧实现反向 BFS 到达的全是 file 节点，却被 kind !== 'file' 过滤掉 → 恒为空。

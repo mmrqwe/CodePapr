@@ -488,7 +488,12 @@ fn extract_and_store_secrets(app_secrets: &AppSecrets, value: &mut serde_json::V
     };
 
     for (field, account) in SECRET_FIELDS {
-        let raw = obj.get(field).and_then(|v| v.as_str()).unwrap_or("");
+        // 区分「字段缺失」与「字段被显式清空」：缺失（部分设置更新、回写
+        // stripped JSON 等）绝不能删 vault 密钥，否则存储的 key 会被静默销毁；
+        // 只有字段存在且为空才视为用户主动清除。
+        let Some(raw) = obj.get(field).and_then(|v| v.as_str()) else {
+            continue;
+        };
         let trimmed = raw.trim();
         if trimmed.is_empty() {
             // User cleared the key — remove from vault.

@@ -153,8 +153,13 @@ pub fn git_branch_checkout_impl(
 
 #[tauri::command]
 pub async fn git_branch_list(workspace_path: String) -> Vec<GitBranch> {
-    let workspace = std::path::PathBuf::from(workspace_path);
-    git_branch_list_impl(&workspace)
+    // git2 分支遍历是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
+    crate::shared::run_blocking_workspace_task(move || -> Result<Vec<GitBranch>, String> {
+        let workspace = std::path::PathBuf::from(workspace_path);
+        Ok(git_branch_list_impl(&workspace))
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -165,13 +170,23 @@ pub async fn git_branch_checkout(
     create_if_missing: Option<bool>,
     start_point: Option<String>,
 ) -> GitOperationResult {
-    let workspace = std::path::PathBuf::from(workspace_path);
-    git_branch_checkout_impl(
-        &workspace, &branch_name,
-        create.unwrap_or(false),
-        create_if_missing.unwrap_or(true),
-        start_point.as_deref(),
-    )
+    // git2 切换分支是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
+    crate::shared::run_blocking_workspace_task(move || -> Result<GitOperationResult, String> {
+        let workspace = std::path::PathBuf::from(workspace_path);
+        Ok(git_branch_checkout_impl(
+            &workspace, &branch_name,
+            create.unwrap_or(false),
+            create_if_missing.unwrap_or(true),
+            start_point.as_deref(),
+        ))
+    })
+    .await
+    .unwrap_or_else(|err| GitOperationResult {
+        ok: false,
+        action: "branch-checkout".to_string(),
+        message: err,
+        backup_ref: None,
+    })
 }
 
 #[cfg(test)]

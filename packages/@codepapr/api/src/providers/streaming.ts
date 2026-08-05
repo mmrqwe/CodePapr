@@ -55,24 +55,98 @@ function attemptJsonRepair(text: string): string | null {
 
   repaired = repaired.replace(/,\s*$/, '');
 
-  const openBraces = (repaired.match(/{/g) || []).length;
-  const closeBraces = (repaired.match(/}/g) || []).length;
-  const openBrackets = (repaired.match(/\[/g) || []).length;
-  const closeBrackets = (repaired.match(/\]/g) || []).length;
+  // 括号计数与尾逗号清理必须避开字符串字面量：代码内容里天然包含 `{`/`}`/`,`
+  // （如 "enum E { A, }"），旧实现全局计数+全局替换会把字符串值静默改成
+  // 另一段「合法但语义不同」的 JSON 传给工具。
+  const balance = countBracketsOutsideStrings(repaired);
 
-  if (openBraces > closeBraces) {
-    repaired += '}'.repeat(openBraces - closeBraces);
+  if (balance.openBraces > balance.closeBraces) {
+    repaired += '}'.repeat(balance.openBraces - balance.closeBraces);
   }
-  if (openBrackets > closeBrackets) {
-    repaired += ']'.repeat(openBrackets - closeBrackets);
+  if (balance.openBrackets > balance.closeBrackets) {
+    repaired += ']'.repeat(balance.openBrackets - balance.closeBrackets);
   }
 
-  repaired = repaired.replace(/,\s*([}\]])/g, '$1');
+  repaired = stripTrailingCommasOutsideStrings(repaired);
 
   if (repaired !== text.trim()) {
     return repaired;
   }
   return null;
+}
+
+function countBracketsOutsideStrings(text: string): {
+  openBraces: number;
+  closeBraces: number;
+  openBrackets: number;
+  closeBrackets: number;
+} {
+  let openBraces = 0;
+  let closeBraces = 0;
+  let openBrackets = 0;
+  let closeBrackets = 0;
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === '\\') {
+        i++;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') openBraces++;
+    else if (ch === '}') closeBraces++;
+    else if (ch === '[') openBrackets++;
+    else if (ch === ']') closeBrackets++;
+  }
+  return { openBraces, closeBraces, openBrackets, closeBrackets };
+}
+
+function stripTrailingCommasOutsideStrings(text: string): string {
+  let out = '';
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      out += ch;
+      if (ch === '\\') {
+        if (i + 1 < text.length) {
+          out += text[i + 1];
+          i++;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === ',') {
+      // 仅当逗号之后（跳过空白）紧跟 } 或 ] 时才视为尾逗号丢弃
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j])) {
+        j++;
+      }
+      if (j < text.length && (text[j] === '}' || text[j] === ']')) {
+        continue;
+      }
+    }
+    out += ch;
+  }
+  return out;
 }
 
 // 模型常把多行 SQL/脚本直接塞进 JSON 字符串值，留下未转义的换行/制表符，

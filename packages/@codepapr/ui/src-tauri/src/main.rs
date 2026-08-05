@@ -408,8 +408,10 @@ fn main() {
             // processes here too (idempotent) to avoid orphaned servers.
             if matches!(event, tauri::RunEvent::Exit) {
                 let _ = shell::background::stop_all_background_processes(None);
+                shell::session::stop_all_shell_sessions();
                 browser::page::close_all_browser_pages();
                 embedded_browser::close_all_sessions();
+                mcp_host::disconnect_all_blocking();
                 power::release_all();
             }
         });

@@ -47,11 +47,22 @@ pub fn git_stage_impl(
         let mut added = 0;
         for path in pathspecs {
             let p = crate::snapshot::ignore_resolver::git_relative_path(std::path::Path::new(path));
-            if let Err(e) = index.add_path(&p) {
-                return GitOperationResult {
-                    ok: false, action: "stage".to_string(),
-                    message: format!("add {:?}: {}", path, e.message()), backup_ref: None,
-                };
+            if workspace.join(&p).exists() {
+                if let Err(e) = index.add_path(&p) {
+                    return GitOperationResult {
+                        ok: false, action: "stage".to_string(),
+                        message: format!("add {:?}: {}", path, e.message()), backup_ref: None,
+                    };
+                }
+            } else {
+                // 文件已从工作区删除：add_path 只处理新增/修改，暂存删除必须
+                // 用 remove_path（对齐 git add <path> 的语义），否则报错。
+                if let Err(e) = index.remove_path(&p) {
+                    return GitOperationResult {
+                        ok: false, action: "stage".to_string(),
+                        message: format!("remove {:?}: {}", path, e.message()), backup_ref: None,
+                    };
+                }
             }
             added += 1;
         }
@@ -79,8 +90,18 @@ pub async fn git_stage(
     all: Option<bool>,
     pathspecs: Option<Vec<String>>,
 ) -> GitOperationResult {
-    let workspace = std::path::PathBuf::from(workspace_path);
-    git_stage_impl(&workspace, all.unwrap_or(false), &pathspecs.unwrap_or_default())
+    // git2 暂存是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
+    crate::shared::run_blocking_workspace_task(move || -> Result<GitOperationResult, String> {
+        let workspace = std::path::PathBuf::from(workspace_path);
+        Ok(git_stage_impl(&workspace, all.unwrap_or(false), &pathspecs.unwrap_or_default()))
+    })
+    .await
+    .unwrap_or_else(|err| GitOperationResult {
+        ok: false,
+        action: "stage".to_string(),
+        message: err,
+        backup_ref: None,
+    })
 }
 
 #[cfg(test)]
@@ -154,6 +175,33 @@ mod tests {
         let paths: Vec<&str> = diff_result.files.iter().map(|f| f.path.as_str()).collect();
         assert!(paths.iter().any(|p| *p == "x.txt"), "x.txt 应已 staged");
         assert!(paths.iter().any(|p| *p == "y.txt"), "y.txt 应已 staged");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    // P2-29：选择性 stage 必须能暂存「已删除」的文件（对齐 git add <path>）。
+    // 旧实现对 pathspec 一律 add_path，文件已删除时报错而非暂存删除。
+    #[test]
+    fn test_stage_deleted_file_stages_the_deletion() {
+        let workspace = temp_workspace("deleted");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        fs::write(workspace.join("gone.txt"), "to be removed\n").unwrap();
+        fs::write(workspace.join("keep.txt"), "stays\n").unwrap();
+        engine.create("baseline").expect("baseline");
+
+        // 从工作区删除 gone.txt
+        fs::remove_file(workspace.join("gone.txt")).unwrap();
+
+        let result = git_stage_impl(&workspace, false, &["gone.txt".to_string()]);
+        assert!(result.ok, "暂存已删除文件应成功: {}", result.message);
+
+        // staged diff 应把 gone.txt 标记为删除（D）
+        let diff_result = super::super::diff::git_diff_impl(&workspace, true, &[]);
+        let gone = diff_result.files.iter().find(|f| f.path == "gone.txt");
+        assert!(gone.is_some(), "gone.txt 应出现在 staged diff: {:?}", diff_result.files);
+        assert_eq!(gone.unwrap().status, "D", "gone.txt 应为删除状态");
 
         fs::remove_dir_all(&workspace).ok();
     }

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as barrel from '../src/tool/workspace/graphQuery';
 import * as pkg from '../src';
 
-// 拆分前 graphQuery.ts 对外暴露的 26 个查询函数。拆分后 barrel 必须原样保留，
+// graphQuery.ts 对外暴露的公共查询函数。barrel 必须原样保留，
 // 既不能丢（消费方 import 会断），也不能多（避免把内部 helper 泄漏成公共 API）。
 const PUBLIC_FUNCTIONS = [
   'analyzeWorkspaceChangeImpact',
@@ -18,16 +18,19 @@ const PUBLIC_FUNCTIONS = [
   'detectDeadCode',
   'discoverAndMapTests',
   'findSymbolAtPosition',
+  'findSymbolByNameInFile',
   'findWorkspaceEntrypoints',
   'findWorkspaceSymbolImplementations',
   'generateSmartTestSkeletons',
   'generateTestSkeletons',
   'getWorkspaceSmartContext',
+  'identifierAtPosition',
   'lookupWorkspaceSymbols',
   'planExtractMethod',
   'planInlineVariable',
   'planMoveSymbol',
   'planProjectGraphRename',
+  'replanProjectGraphRenameForSymbol',
   'selectTestsByChangeImpact',
   'suggestInlineVariables',
   'suggestRefactorings',
@@ -41,7 +44,7 @@ function exportedFunctions(module: unknown): string[] {
 }
 
 describe('graphQuery barrel export surface', () => {
-  it('exposes exactly the 26 public query functions (no loss, no leakage)', () => {
+  it('exposes exactly the public query functions (no loss, no leakage)', () => {
     expect(exportedFunctions(barrel)).toEqual([...PUBLIC_FUNCTIONS]);
   });
 

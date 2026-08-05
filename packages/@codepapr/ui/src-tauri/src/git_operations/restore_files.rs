@@ -93,8 +93,18 @@ pub async fn git_restore_files(
     pathspecs: Option<Vec<String>>,
     source: Option<String>,
 ) -> GitOperationResult {
-    let workspace = std::path::PathBuf::from(workspace_path);
-    git_restore_files_impl(&workspace, &pathspecs.unwrap_or_default(), source.as_deref())
+    // git2 恢复是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
+    crate::shared::run_blocking_workspace_task(move || -> Result<GitOperationResult, String> {
+        let workspace = std::path::PathBuf::from(workspace_path);
+        Ok(git_restore_files_impl(&workspace, &pathspecs.unwrap_or_default(), source.as_deref()))
+    })
+    .await
+    .unwrap_or_else(|err| GitOperationResult {
+        ok: false,
+        action: "restore".to_string(),
+        message: err,
+        backup_ref: None,
+    })
 }
 
 #[cfg(test)]

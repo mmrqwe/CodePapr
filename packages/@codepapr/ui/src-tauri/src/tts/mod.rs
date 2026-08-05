@@ -104,6 +104,42 @@ fn voices_dir() -> PathBuf {
         .join("voices")
 }
 
+/// 判断端口上的进程是否是我们自己启动的 GPT-SoVITS 服务（python api.py）。
+/// 只有它才允许被 `kill_port_process` 清理；无法确认时一律视为「不是我们的」
+/// （安全方向）——绝不因端口冲突杀掉用户无关的进程。
+fn is_gpt_sovits_process(pid: &str) -> bool {
+    #[cfg(unix)]
+    {
+        let Ok(out) = std::process::Command::new("ps")
+            .args(["-p", pid, "-o", "command="])
+            .output()
+        else {
+            return false;
+        };
+        if !out.status.success() {
+            return false;
+        }
+        let cmd = String::from_utf8_lossy(&out.stdout).to_ascii_lowercase();
+        cmd.contains("python") && cmd.contains("api.py")
+    }
+    #[cfg(windows)]
+    {
+        let Ok(out) = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .output()
+        else {
+            return false;
+        };
+        if !out.status.success() {
+            return false;
+        }
+        // tasklist 只能给出映像名（如 python.exe）：要求是 python 进程。
+        String::from_utf8_lossy(&out.stdout)
+            .to_ascii_lowercase()
+            .contains("python")
+    }
+}
+
 /// Forcefully free a TCP port by killing whatever process is bound to it.
 ///
 /// Strategy: SIGTERM (polite) → wait up to 1.5s for graceful shutdown
@@ -118,13 +154,19 @@ fn voices_dir() -> PathBuf {
 ///
 /// Returns `true` if the port is confirmed free after the cleanup attempt.
 fn kill_port_process(port: u16) -> bool {
+    let pids = pids_on_port(port);
+    if pids.is_empty() {
+        return true;
+    }
+    // 只清理我们自己的 GPT-SoVITS 进程。端口被未知进程占用（用户自己的
+    // 9880 服务）时拒绝动手，返回 false 让调用方提示用户手动处理。
+    if !pids.iter().all(|pid| is_gpt_sovits_process(pid)) {
+        return false;
+    }
+
     #[cfg(unix)]
     {
         // Round 1: polite shutdown.
-        let pids = pids_on_port(port);
-        if pids.is_empty() {
-            return true;
-        }
         for pid in &pids {
             let _ = std::process::Command::new("kill").arg(pid).output();
         }
@@ -136,8 +178,9 @@ fn kill_port_process(port: u16) -> bool {
             }
         }
         // Round 2: SIGKILL anything still squatting on the port.
+        // 重新确认归属：等待期间端口可能被别的进程接管。
         let stubborn = pids_on_port(port);
-        for pid in &stubborn {
+        for pid in stubborn.iter().filter(|pid| is_gpt_sovits_process(pid)) {
             let _ = std::process::Command::new("kill")
                 .args(["-9", pid])
                 .output();
@@ -151,15 +194,20 @@ fn kill_port_process(port: u16) -> bool {
         // On Windows, /F (forceful) is the default. Run twice with a short
         // pause to handle the (rare) case where a child process is spawned
         // between our enumeration and the kill.
-        let _ = std::process::Command::new("cmd")
-            .args(["/c", &format!("for /f \"tokens=5\" %a in ('netstat -ano ^| findstr :{port}') do @taskkill /F /PID %a 2>nul")])
-            .output();
+        for pid in &pids {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/PID", pid])
+                .output();
+        }
         std::thread::sleep(std::time::Duration::from_millis(500));
-        let _ = std::process::Command::new("cmd")
-            .args(["/c", &format!("for /f \"tokens=5\" %a in ('netstat -ano ^| findstr :{port}') do @taskkill /F /PID %a 2>nul")])
-            .output();
+        let stubborn = pids_on_port(port);
+        for pid in stubborn.iter().filter(|pid| is_gpt_sovits_process(pid)) {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/PID", pid])
+                .output();
+        }
         std::thread::sleep(std::time::Duration::from_millis(500));
-        true
+        pids_on_port(port).is_empty()
     }
 }
 

@@ -869,8 +869,17 @@ pub async fn disconnect_all() -> Result<usize, String> {
 }
 
 pub fn disconnect_all_blocking() {
-    let Ok(handle) = tokio::runtime::Handle::try_current() else { return };
-    let _ = handle.block_on(disconnect_all());
+    // 由主线程的窗口关闭回调调用，该线程不在 tokio runtime 上下文里：
+    // 旧实现 Handle::try_current() 在此必然失败而静默 return，MCP stdio
+    // 子进程退出时从不被关闭。改用一次性 current-thread runtime 阻塞执行——
+    // 无论本线程是否已有 runtime 都安全（独立实例，不构成嵌套 block_on）。
+    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
+        return;
+    };
+    let _ = runtime.block_on(disconnect_all());
 }
 
 /** Test connection to a single server: connect, list tools, return summary.

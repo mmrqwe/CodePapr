@@ -362,6 +362,16 @@ pub(crate) fn file_uri_for(workspace: &Path, relative_path: &str) -> Result<Stri
 }
 
 fn detect_python_path() -> Option<String> {
+    // 探测要 spawn python 子进程：整个进程生命周期只做一次并缓存结果。
+    // 旧实现在每次 registry 查/插/删（server_key → lsp_server_family →
+    // lsp_server_config）都为 Python 重新 spawn 一遍。
+    static PYTHON_PATH: OnceLock<Option<String>> = OnceLock::new();
+    PYTHON_PATH
+        .get_or_init(detect_python_path_uncached)
+        .clone()
+}
+
+fn detect_python_path_uncached() -> Option<String> {
     #[cfg(target_os = "windows")]
     let primary_candidates: &[&str] = &["python", "py", "python3"];
     #[cfg(not(target_os = "windows"))]
@@ -496,7 +506,8 @@ fn workspace_initialization_options(
             Some(opts)
         }
         "python" => {
-            let mut opts = config.initialization_options.clone().unwrap_or_default();
+            // 惰性计算：只在真正启动 server（start_server）时探测解释器路径。
+            let mut opts = python_initialization_options().unwrap_or_default();
             if let Some(project_config) = load_pyright_project_config(workspace) {
                 if let Some(analysis) = opts.pointer_mut("/settings/python/analysis") {
                     if let Value::Object(ref mut base_analysis) = *analysis {
@@ -543,10 +554,13 @@ fn lsp_server_config(language_id: &str) -> Option<ResolvedLspConfig> {
             candidates: YAML_LANGUAGE_SERVER,
             initialization_options: None,
         }),
+        // initialization_options 保持 None（静态）：python 的选项需要 spawn
+        // 子进程探测解释器路径，推迟到 start_server 的
+        // workspace_initialization_options 里才算，避免每次 registry 操作都探测。
         "python" => Some(ResolvedLspConfig {
             family_key: "python",
             candidates: PYTHON_LANGUAGE_SERVER,
-            initialization_options: python_initialization_options(),
+            initialization_options: None,
         }),
         "csharp" => Some(ResolvedLspConfig {
             family_key: "csharp",
@@ -674,10 +688,23 @@ fn spawn_lsp_reader(
     mut stdout: impl Read + Send + 'static,
     queue: Arc<Mutex<VecDeque<Value>>>,
     pending: Arc<Mutex<HashMap<u64, mpsc::Sender<Value>>>>,
+    stdin: Arc<Mutex<ChildStdin>>,
 ) {
     thread::spawn(move || {
         while let Ok(message) = read_lsp_message(&mut stdout) {
+            let has_method = message.get("method").is_some();
             if let Some(id) = message.get("id").and_then(Value::as_u64) {
+                if has_method {
+                    // 这是 server→client 请求（workspace/configuration、
+                    // window/workDoneProgress/create、client/registerCapability 等）。
+                    // 旧实现直接丢弃永不回复：违反协议，且会阻塞等待结果的
+                    // 服务器（如 rust-analyzer 等 workspace/configuration）。
+                    let response = build_server_request_response(&message);
+                    if let Ok(mut writer) = stdin.lock() {
+                        let _ = write_lsp_message(&mut writer, &response);
+                    }
+                    continue;
+                }
                 if let Ok(mut map) = pending.lock() {
                     if let Some(tx) = map.remove(&id) {
                         let _ = tx.send(message);
@@ -688,6 +715,32 @@ fn spawn_lsp_reader(
             }
         }
     });
+}
+
+/// 为 server→client 请求构造回复。未知方法统一回 result: null，
+/// 保证服务器不会永久等待。
+fn build_server_request_response(message: &Value) -> Value {
+    let id = message.get("id").cloned().unwrap_or(Value::Null);
+    let method = message.get("method").and_then(Value::as_str).unwrap_or("");
+    let result = match method {
+        // 规范要求对 params.items 每项回一个配置值：全 null 即可，
+        // 服务器会退回默认配置而不是卡死。
+        "workspace/configuration" => {
+            let count = message
+                .get("params")
+                .and_then(|params| params.get("items"))
+                .and_then(Value::as_array)
+                .map(|items| items.len())
+                .unwrap_or(0);
+            Value::Array(vec![Value::Null; count])
+        }
+        "workspace/applyEdit" => json!({
+            "applied": false,
+            "failureReason": "client does not apply workspace edits"
+        }),
+        _ => Value::Null,
+    };
+    json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
 
 fn spawn_lsp_stderr_reader(
@@ -1260,7 +1313,13 @@ fn spawn_server_candidate(
     let messages = Arc::new(Mutex::new(VecDeque::new()));
     let stderr_tail = Arc::new(Mutex::new(VecDeque::new()));
     let pending_responses = Arc::new(Mutex::new(HashMap::new()));
-    spawn_lsp_reader(stdout, Arc::clone(&messages), Arc::clone(&pending_responses));
+    let stdin = Arc::new(Mutex::new(stdin));
+    spawn_lsp_reader(
+        stdout,
+        Arc::clone(&messages),
+        Arc::clone(&pending_responses),
+        Arc::clone(&stdin),
+    );
     spawn_lsp_stderr_reader(stderr, Arc::clone(&stderr_tail));
 
     let mut server = ManagedLspServer {
@@ -1272,7 +1331,7 @@ fn spawn_server_candidate(
         tool_label: candidate.tool_label.clone(),
         managed_cache_path: candidate.managed_cache_path.clone(),
         child,
-        stdin: Arc::new(Mutex::new(stdin)),
+        stdin,
         messages,
         stderr_tail,
         open_documents: HashMap::new(),

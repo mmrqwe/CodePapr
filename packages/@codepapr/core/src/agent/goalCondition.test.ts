@@ -42,6 +42,31 @@ describe('parseGoalCondition', () => {
     expect(result.clauses[1].args).toEqual(['test']);
   });
 
+  // P2-20：引号内的 && 属于命令/匹配模式本身，不能拆。旧实现裸 split 会把
+  // exec:grep "a&&b" 切成 `exec:grep "a` 和 `b"` 两个废子句。
+  it('引号内的 && 不作为子句分隔符（双引号）', () => {
+    const result = parseGoalCondition('exec:grep "a&&b" file.txt');
+    expect(result.clauses).toHaveLength(1);
+    expect(result.clauses[0].command).toBe('grep');
+    expect(result.clauses[0].args).toEqual(['a&&b', 'file.txt']);
+  });
+
+  it('引号内的 && 不作为子句分隔符（单引号 + match 模式）', () => {
+    const result = parseGoalCondition("exec:npm test match:'x && y'");
+    expect(result.clauses).toHaveLength(1);
+    expect(result.clauses[0].command).toBe('npm');
+    expect(result.clauses[0].matchPattern).toBe('x && y');
+  });
+
+  it('引号内 && 与顶层 && 混合时只拆顶层', () => {
+    const result = parseGoalCondition('exec:grep "a&&b" f && exec:npm test');
+    expect(result.clauses).toHaveLength(2);
+    expect(result.clauses[0].command).toBe('grep');
+    expect(result.clauses[0].args).toEqual(['a&&b', 'f']);
+    expect(result.clauses[1].command).toBe('npm');
+    expect(result.clauses[1].args).toEqual(['test']);
+  });
+
   it('解析带自然语言目标和 | 分隔符', () => {
     const result = parseGoalCondition('修复 auth 测试 | exec:npm test');
     expect(result.clauses).toHaveLength(1);

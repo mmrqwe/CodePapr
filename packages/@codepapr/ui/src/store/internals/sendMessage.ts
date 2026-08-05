@@ -666,8 +666,15 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           if (!agent || agent.isCrashed() || (agentSessionId !== null && agentSessionId !== activeSessionId) || agentModel !== route.model || (agentPromptKey !== null && agentPromptKey !== runtimePromptKey)) {
             if (agent) {
               try {
-                // 单执行模型下此刻 agent 必然空闲（执行中禁止发送），销毁安全且避免 worker 泄漏。
-                agent.destroy();
+                // 单执行模型下此刻 agent 对聊天必然空闲（执行中禁止发送），
+                // 但它可能还在跑 app-agent（papr.agent.run，不占 isLoading）：
+                // 那种情况立即 destroy 会杀掉在飞的 app 执行，改为 detach 后
+                // 等 app-agent 结算完自我销毁。
+                if (agent.hasActiveAppAgentRequests?.()) {
+                  agent.detachAndCleanupWhenIdle?.();
+                } else {
+                  agent.destroy();
+                }
               } catch {
                 // already torn down
               }

@@ -161,6 +161,24 @@ describe('slashCommand - expandCommandTemplate', () => {
     });
     expect(result).toBe('!`cmd2` 然后 real-output');
   });
+
+  // P2-19：用户参数里的 $ 序列必须按字面量处理。旧实现把参数当 replace 的
+  // 替换串（$& / $' / $` / $$ 被展开），且 $ARGUMENTS 插入后又被 $N 二次扫描。
+  it('用户参数中的 $& / $\' / $` / $$ 按字面量替换', async () => {
+    const result = await expandCommandTemplate('价格：$ARGUMENTS', ["$100 and $'quoted' and $& and $$"]);
+    expect(result).toBe("价格：$100 and $'quoted' and $& and $$");
+  });
+
+  it('$ARGUMENTS 插入的文本不会被 $N 规则二次替换', async () => {
+    // 参数里含 $1：若被二次扫描，$1 会被替换成第一个位置参数。
+    const result = await expandCommandTemplate('内容：$ARGUMENTS', ['cost is $1', 'x']);
+    expect(result).toBe('内容：cost is $1 x');
+  });
+
+  it('位置参数中的 $ 序列同样按字面量处理', async () => {
+    const result = await expandCommandTemplate('第一个：$1', ['$&']);
+    expect(result).toBe('第一个：$&');
+  });
 });
 
 describe('slashCommand - parseInlineCommandLine', () => {

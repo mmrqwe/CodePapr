@@ -131,6 +131,9 @@ export {
   computeIncrementalUpdate,
   applyIncrementalUpdate,
   findSymbolAtPosition,
+  findSymbolByNameInFile,
+  identifierAtPosition,
+  replanProjectGraphRenameForSymbol,
 } from './tool/workspace/graphQuery';
 export type {
   WorkspaceChangeImpactOptions,

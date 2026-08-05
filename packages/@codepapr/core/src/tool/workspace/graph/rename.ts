@@ -82,6 +82,61 @@ export function findSymbolAtPosition(
   return nearest;
 }
 
+/** 在指定文件中按名称查找符号节点（用于按位置实际标识符重新解析）。 */
+export function findSymbolByNameInFile(
+  graph: WorkspaceProjectGraphResult,
+  relativePath: string,
+  name: string,
+): ProjectGraphNode | null {
+  for (const node of graph.nodes) {
+    if (node.kind === 'symbol' && node.path === relativePath && node.symbol?.name === name) {
+      return node;
+    }
+  }
+  return null;
+}
+
+/** 为已知符号节点重新生成重命名计划。 */
+export function replanProjectGraphRenameForSymbol(
+  graph: WorkspaceProjectGraphResult,
+  symbol: ProjectGraphNode,
+): ProjectGraphRenamePlan {
+  return {
+    symbol,
+    oldName: symbol.symbol?.name ?? '',
+    targetFiles: collectRenameTargetFiles(graph, symbol),
+  };
+}
+
+/** 提取文件内容中覆盖 (line, character) 的标识符；character 为 1 基列号。
+ *  位置不在任何标识符上时返回 null。 */
+export function identifierAtPosition(
+  content: string,
+  line: number,
+  character: number,
+): string | null {
+  const lines = content.split(/\r?\n/);
+  const lineText = lines[line - 1];
+  if (!lineText) return null;
+  const isIdent = (ch: string | undefined): boolean =>
+    typeof ch === 'string' && /[\w$]/.test(ch);
+
+  let index = Math.floor(character) - 1;
+  if (index < 0) index = 0;
+  if (index >= lineText.length) index = lineText.length - 1;
+  // 光标可能落在标识符末尾之后一个字符：回退到标识符上
+  if (!isIdent(lineText[index]) && index > 0 && isIdent(lineText[index - 1])) {
+    index -= 1;
+  }
+  if (!isIdent(lineText[index])) return null;
+
+  let start = index;
+  while (start > 0 && isIdent(lineText[start - 1])) start -= 1;
+  let end = index;
+  while (end + 1 < lineText.length && isIdent(lineText[end + 1])) end += 1;
+  return lineText.slice(start, end + 1);
+}
+
 function isCommentLine(line: string): boolean {
   const trimmed = line.trimStart();
   return (

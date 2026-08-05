@@ -114,6 +114,50 @@ function tokenizeCommand(line: string): { command: string; args: string[] } {
 /**
  * 解析单个子句字符串，如 `exec:npm test match:"\\d+ passed"`
  */
+/** 按顶层 && 拆分子句：引号（单/双）内的 && 视为字面量不拆分。
+ *  与裸 split 不同，保留各子句原文（由 parseClause 负责 trim），
+ *  空子句同样保留以维持原有的「条件子句不能为空」报错行为。 */
+function splitTopLevelClauses(text: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (quote) {
+      current += ch;
+      if (ch === '\\' && i + 1 < text.length) {
+        current += text[i + 1];
+        i++;
+        continue;
+      }
+      if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+
+    if (ch === '&' && text[i + 1] === '&') {
+      parts.push(current.trim());
+      current = '';
+      i++;
+      continue;
+    }
+
+    current += ch;
+  }
+
+  parts.push(current.trim());
+  return parts;
+}
+
 function parseClause(clauseStr: string): GoalConditionClause {
   const trimmed = clauseStr.trim();
   if (!trimmed) {
@@ -271,8 +315,9 @@ export function parseGoalCondition(input: string): GoalCondition {
     };
   }
 
-  // 客观验证模式：按 && 拆分多个子句
-  const clauseStrings = conditionText.split(/\s*&&\s*/);
+  // 客观验证模式：按 && 拆分多个子句（引号内的 && 属于命令/匹配模式本身，
+  // 不能拆。旧实现裸 split 会把 exec:grep "a&&b" 切成两个废子句）。
+  const clauseStrings = splitTopLevelClauses(conditionText);
   const clauses: GoalConditionClause[] = clauseStrings.map(parseClause);
 
   const humanReadable = buildHumanReadable(clauses);

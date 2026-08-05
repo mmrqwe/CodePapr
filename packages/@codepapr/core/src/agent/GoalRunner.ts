@@ -241,7 +241,12 @@ export class GoalRunner {
 
   private notifyAndPersist(): void {
     this.callbacks.onStateChange(this.getState());
-    void this.callbacks.writeGoalState?.(this.getState());
+    // fire-and-forget 持久化必须接住失败：`void` 不会捕获 reject，旧实现下
+    // 每次写失败（磁盘满/权限）都成为 unhandled rejection（每迭代约 7 次）。
+    const pending = this.callbacks.writeGoalState?.(this.getState());
+    pending?.catch((error: unknown) => {
+      console.warn('[GoalRunner] 状态持久化失败:', error);
+    });
   }
 
   private buildInitialPrompt(): string {

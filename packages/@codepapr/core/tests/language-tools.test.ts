@@ -162,6 +162,77 @@ describe('performProjectGraphRename', () => {
     expect(host.written['src/lib.ts']).toBeUndefined();
     expect(result.message).toContain('截断');
   });
+
+  // P2-24：图兜底按「声明行 ≤ 目标行」解析、忽略列号，在函数体内的用法位置
+  // 会解析到外层函数。必须用该位置的真实标识符核对，否则会把错误的标识符
+  // 跨文件全文替换。
+  function makeSameFileGraph() {
+    return buildWorkspaceProjectGraph({
+      root: '.',
+      tree: '.\n- src/',
+      allFiles: [{ path: 'src/mod.ts' }],
+      fileContents: {
+        'src/mod.ts': {
+          content: 'function alpha() { return beta(); }\nfunction beta() { return 1; }\n',
+        },
+      },
+      files: [
+        {
+          path: 'src/mod.ts', language: 'TypeScript', bytes: 70, symbolSource: 'ast',
+          symbols: [
+            { name: 'alpha', kind: 'function', signature: 'function alpha()', line: 1, exported: false },
+            { name: 'beta', kind: 'function', signature: 'function beta()', line: 2, exported: false },
+          ],
+        },
+      ],
+      maxEdges: 200,
+    });
+  }
+
+  it('re-resolves to the identifier actually at the position (not the enclosing symbol)', async () => {
+    const host = createMockHost({
+      files: {
+        'src/mod.ts': 'function alpha() { return beta(); }\nfunction beta() { return 1; }\n',
+      },
+    });
+    // 位置指向 alpha 体内的 beta() 用法（第 1 行第 27 列）。按行解析会得到
+    // 外层 alpha，但真实标识符是 beta → 应重命名 beta 而非 alpha。
+    const result = await performProjectGraphRename(host, {
+      relativePath: 'src/mod.ts',
+      line: 1,
+      character: 27,
+      newName: 'gamma',
+      graph: makeSameFileGraph(),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(host.written['src/mod.ts']).toBe(
+      'function alpha() { return gamma(); }\nfunction gamma() { return 1; }\n'
+    );
+  });
+
+  it('refuses to rename when the position identifier matches no symbol in the file', async () => {
+    const host = createMockHost({
+      files: {
+        'src/main.ts': 'import { helper } from "./lib";\nexport function main() { return helper(); }\n',
+        'src/lib.ts': 'export function helper() { return 1; }\n',
+      },
+    });
+    // 位置指向 main 体内的 helper() 用法（第 2 行第 33 列）。按行解析得到 main，
+    // 真实标识符是 helper，而 helper 未声明在 src/main.ts → 拒绝，绝不误改 main。
+    const result = await performProjectGraphRename(host, {
+      relativePath: 'src/main.ts',
+      line: 2,
+      character: 33,
+      newName: 'util',
+      graph: makeRenameGraph(),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(host.written['src/main.ts']).toBeUndefined();
+    expect(host.written['src/lib.ts']).toBeUndefined();
+    expect(result.message).toContain('拒绝重命名');
+  });
 });
 
 describe('performWorkspaceRename (LSP path)', () => {

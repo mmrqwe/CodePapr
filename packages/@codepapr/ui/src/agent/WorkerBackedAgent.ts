@@ -121,6 +121,10 @@ export interface AgentRuntimeHandle {
     requestId?: string,
   ): Promise<AppAgentResult>;
   cancelAppAgent(requestId: string): void;
+  /** 是否仍有在飞的 app-agent（papr.agent.run）请求。 */
+  hasActiveAppAgentRequests?(): boolean;
+  /** 标记已被替换：在飞的 app-agent 请求全部结算后再销毁，避免杀掉运行中的执行。 */
+  detachAndCleanupWhenIdle?(): void;
 }
 
 export interface WorkerBackedAgentConfig {
@@ -275,6 +279,9 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     *  run is never killed on one side while the other still considers it
     *  active. Derived from the tool IPC timeout (resolveAppAgentIdleTimeoutMs). */
   private readonly appAgentIdleTimeoutMs: number;
+  /** 已被 store 替换（detach）：在飞的 app-agent 请求全部结束后自我销毁。 */
+  private detached = false;
+  private destroyed = false;
 
   constructor(private readonly config: WorkerBackedAgentConfig) {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
@@ -431,7 +438,26 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     }, 2000);
   }
 
+  hasActiveAppAgentRequests(): boolean {
+    return this.appAgentRequests.size > 0;
+  }
+
+  /** 标记该 agent 已被 store 替换：仍有 app-agent（papr.agent.run）在飞时
+   *  立即 destroy 会杀掉运行中的 app 执行，改为等全部结算后自我销毁。 */
+  detachAndCleanupWhenIdle(): void {
+    this.detached = true;
+    this.maybeCleanupDetached();
+  }
+
+  private maybeCleanupDetached(): void {
+    if (this.detached && !this.destroyed && this.appAgentRequests.size === 0) {
+      this.destroy();
+    }
+  }
+
   destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
     this.cancel();
     this.clearCancelTimer();
     this.clearHeartbeat();
@@ -574,10 +600,22 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     const idleTimeoutMs = this.appAgentIdleTimeoutMs;
     entry.timeoutTimer = setTimeout(() => {
       entry.timeoutTimer = null;
+      // 必须同时取消 worker 侧的执行：旧实现只 reject 主线程 promise，worker
+      // 会继续烧 token 跑完无人监听的 app agent（其 abort 控制器也滞留）。
+      try {
+        this.worker.postMessage({
+          type: 'cancel-app-agent',
+          requestId,
+        } satisfies MainToAgentWorkerMessage);
+      } catch {
+        // worker 可能已终止
+      }
+      this.flushAppAgentDeltas(entry);
       this.appAgentRequests.delete(requestId);
       entry.reject(new Error(
         `App agent request timed out (no activity for ${idleTimeoutMs / 1000}s)`,
       ));
+      this.maybeCleanupDetached();
     }, idleTimeoutMs);
   }
 
@@ -592,6 +630,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       if (entry.timeoutTimer !== null) clearTimeout(entry.timeoutTimer);
       this.appAgentRequests.delete(requestId);
       entry.reject(new DOMException('App agent was cancelled', 'AbortError'));
+      this.maybeCleanupDetached();
     }
   }
 
@@ -611,6 +650,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       entry.reject(error);
     }
     this.appAgentRequests.clear();
+    this.maybeCleanupDetached();
   }
 
   private readonly handleWorkerMessage = (event: MessageEvent<AgentWorkerToMainMessage>) => {
@@ -712,6 +752,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
           reasoningContent: message.reasoningContent,
           steps: message.steps,
         });
+        this.maybeCleanupDetached();
       }
       return;
     }
@@ -723,6 +764,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         if (entry.timeoutTimer !== null) clearTimeout(entry.timeoutTimer);
         this.appAgentRequests.delete(message.requestId);
         entry.reject(new Error(message.error));
+        this.maybeCleanupDetached();
       }
       return;
     }

@@ -74,10 +74,16 @@ export function detectCircularDependencies(
       }
 
       if (!color.has(neighbor) || color.get(neighbor) === NodeColor.WHITE) {
+        // 悬空边（LSP enrich 可能产生指向不存在文件节点的 imports 边）：
+        // 目标不在 adjacency 中，跳过而不是取 undefined 的迭代器抛 TypeError。
+        const neighborEdges = adjacency.get(neighbor);
+        if (!neighborEdges) {
+          continue;
+        }
         color.set(neighbor, NodeColor.GRAY);
         onStack.add(neighbor);
         parent.set(neighbor, top.node);
-        stack.push({ node: neighbor, iter: adjacency.get(neighbor)![Symbol.iterator]() });
+        stack.push({ node: neighbor, iter: neighborEdges[Symbol.iterator]() });
       }
     }
   }

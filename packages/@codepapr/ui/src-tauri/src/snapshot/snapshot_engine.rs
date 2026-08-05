@@ -102,17 +102,10 @@ impl SnapshotEngine {
         let git_path = code_papr_git_path(&self.workspace);
         let dot_git = git_path.join(".git");
 
-        // 清理可能因崩溃遗留的锁文件：
-        // - config.lock:       libgit2 写入 config 时创建
-        // - index.lock:        libgit2 写入 index 时创建（stage/commit/snapshot 期间崩溃会残留）
-        // - HEAD.lock:         libgit2 更新 HEAD 引用时创建
-        // - packed-refs.lock:  libgit2 写入 packed-refs 时创建
-        for lock_name in &["config.lock", "index.lock", "HEAD.lock", "packed-refs.lock"] {
-            let lock_file = dot_git.join(lock_name);
-            if lock_file.exists() {
-                let _ = std::fs::remove_file(&lock_file);
-            }
-        }
+        // 清理可能因崩溃遗留的锁文件（config/index/HEAD/packed-refs .lock）。
+        // 只删可证明陈旧的（存活超阈值）：无条件删除会把并发操作正在使用的
+        // 活锁删掉，破坏写到一半的 index/ref。
+        crate::shared::remove_stale_git_locks(&dot_git);
 
         if dot_git.is_dir() {
             match Repository::open(&git_path) {

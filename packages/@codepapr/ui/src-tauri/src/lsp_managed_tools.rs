@@ -2218,8 +2218,29 @@ fn run_command_with_timeout(
         .spawn()
         .map_err(|err| format!("启动命令 `{}` 失败: {err}", command_display(command, args)))?;
 
+    // 必须用独立线程实时抽干 stdout/stderr：输出一旦超过 OS 管道缓冲（~64KB），
+    // 子进程会阻塞在 write 上永不退出，旧实现（退出后才 wait_with_output）
+    // 会空转到满超时（npm install 等可达 300s）才杀进程。
+    let mut stdout_pipe = child.stdout.take();
+    let mut stderr_pipe = child.stderr.take();
+    let stdout_handle = thread::spawn(move || {
+        let mut buffer = Vec::new();
+        if let Some(pipe) = stdout_pipe.as_mut() {
+            let _ = pipe.read_to_end(&mut buffer);
+        }
+        buffer
+    });
+    let stderr_handle = thread::spawn(move || {
+        let mut buffer = Vec::new();
+        if let Some(pipe) = stderr_pipe.as_mut() {
+            let _ = pipe.read_to_end(&mut buffer);
+        }
+        buffer
+    });
+
     let started = Instant::now();
-    loop {
+    let mut timed_out = false;
+    let status_code = loop {
         if child
             .try_wait()
             .map_err(|err| {
@@ -2230,38 +2251,37 @@ fn run_command_with_timeout(
             })?
             .is_some()
         {
-            let output = child.wait_with_output().map_err(|err| {
+            break child.wait().map_err(|err| {
                 format!(
                     "读取命令 `{}` 输出失败: {err}",
                     command_display(command, args)
                 )
-            })?;
-            return Ok(ManagedCommandOutput {
-                status_code: output.status.code(),
-                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-                timed_out: false,
-            });
+            })?.code();
         }
 
         if started.elapsed() >= timeout {
+            timed_out = true;
             let _ = child.kill();
-            let output = child.wait_with_output().map_err(|err| {
+            break child.wait().map_err(|err| {
                 format!(
                     "停止超时命令 `{}` 失败: {err}",
                     command_display(command, args)
                 )
-            })?;
-            return Ok(ManagedCommandOutput {
-                status_code: output.status.code(),
-                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-                timed_out: true,
-            });
+            })?.code();
         }
 
         thread::sleep(Duration::from_millis(100));
-    }
+    };
+
+    let stdout = stdout_handle.join().unwrap_or_default();
+    let stderr = stderr_handle.join().unwrap_or_default();
+
+    Ok(ManagedCommandOutput {
+        status_code,
+        stdout: String::from_utf8_lossy(&stdout).to_string(),
+        stderr: String::from_utf8_lossy(&stderr).to_string(),
+        timed_out,
+    })
 }
 
 fn rustup_which_rust_analyzer() -> Option<PathBuf> {

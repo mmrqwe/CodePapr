@@ -89,12 +89,24 @@ pub fn git_commit_impl(
 
             for spec in pathspecs {
                 let p = crate::snapshot::ignore_resolver::git_relative_path(std::path::Path::new(spec));
-                if let Err(e) = idx.add_path(&p) {
-                    return GitOperationResult {
-                        ok: false, action: "commit".to_string(),
-                        message: format!("add {:?}: {}", spec, e.message()),
-                        backup_ref: None,
-                    };
+                if workspace.join(&p).exists() {
+                    if let Err(e) = idx.add_path(&p) {
+                        return GitOperationResult {
+                            ok: false, action: "commit".to_string(),
+                            message: format!("add {:?}: {}", spec, e.message()),
+                            backup_ref: None,
+                        };
+                    }
+                } else {
+                    // 文件已从工作区删除：index 此刻是 HEAD 树，remove_path
+                    // 即把该删除纳入本次提交（对齐 git commit -- <paths> 语义）。
+                    if let Err(e) = idx.remove_path(&p) {
+                        return GitOperationResult {
+                            ok: false, action: "commit".to_string(),
+                            message: format!("remove {:?}: {}", spec, e.message()),
+                            backup_ref: None,
+                        };
+                    }
                 }
             }
 
@@ -185,13 +197,23 @@ pub async fn git_commit(
     pathspecs: Option<Vec<String>>,
     allow_empty: Option<bool>,
 ) -> GitOperationResult {
-    let workspace = std::path::PathBuf::from(workspace_path);
-    git_commit_impl(
-        &workspace, &message,
-        stage_all.unwrap_or(false),
-        &pathspecs.unwrap_or_default(),
-        allow_empty.unwrap_or(false),
-    )
+    // git2 提交是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
+    crate::shared::run_blocking_workspace_task(move || -> Result<GitOperationResult, String> {
+        let workspace = std::path::PathBuf::from(workspace_path);
+        Ok(git_commit_impl(
+            &workspace, &message,
+            stage_all.unwrap_or(false),
+            &pathspecs.unwrap_or_default(),
+            allow_empty.unwrap_or(false),
+        ))
+    })
+    .await
+    .unwrap_or_else(|err| GitOperationResult {
+        ok: false,
+        action: "commit".to_string(),
+        message: err,
+        backup_ref: None,
+    })
 }
 
 #[cfg(test)]

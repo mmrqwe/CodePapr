@@ -6,16 +6,30 @@ pub mod types;
 
 use std::path::PathBuf;
 
+use crate::shared::run_blocking_workspace_task;
+
 pub use diff_engine::DiffEngine;
 pub use restore_engine::RestoreEngine;
 pub use snapshot_engine::SnapshotEngine;
 pub use types::*;
 
+// 所有命令都在阻塞线程池执行：git2 的仓库遍历/哈希/提交是重阻塞操作，
+// 直接跑在 tokio 工作线程上会卡住共享 runtime（连累 MCP I/O 与超时）。
+
 #[tauri::command]
 pub async fn snapshot_ensure(workspace_path: String) -> EnsureResult {
-    let workspace = PathBuf::from(workspace_path);
-    let engine = SnapshotEngine::new(&workspace);
-    engine.ensure()
+    run_blocking_workspace_task(move || -> Result<EnsureResult, String> {
+        let workspace = PathBuf::from(workspace_path);
+        let engine = SnapshotEngine::new(&workspace);
+        Ok(engine.ensure())
+    })
+    .await
+    .unwrap_or_else(|err| EnsureResult {
+        ready: false,
+        created_repo: false,
+        head_sha: None,
+        error: Some(err),
+    })
 }
 
 #[tauri::command]
@@ -23,15 +37,18 @@ pub async fn snapshot_create(
     workspace_path: String,
     label: String,
 ) -> Result<Option<SnapshotInfo>, String> {
-    let workspace = PathBuf::from(workspace_path);
-    let engine = SnapshotEngine::new(&workspace);
-    // Benign skip: an empty/new workspace (or one whose files are all ignored)
-    // has nothing to snapshot. Return None — not an error — so the UI doesn't
-    // show a "snapshot failed" banner for a normal empty workspace.
-    if !engine.has_snapshotable_files() {
-        return Ok(None);
-    }
-    engine.create(&label).map(Some)
+    run_blocking_workspace_task(move || {
+        let workspace = PathBuf::from(workspace_path);
+        let engine = SnapshotEngine::new(&workspace);
+        // Benign skip: an empty/new workspace (or one whose files are all ignored)
+        // has nothing to snapshot. Return None — not an error — so the UI doesn't
+        // show a "snapshot failed" banner for a normal empty workspace.
+        if !engine.has_snapshotable_files() {
+            return Ok(None);
+        }
+        engine.create(&label).map(Some)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -39,16 +56,23 @@ pub async fn snapshot_list(
     workspace_path: String,
     limit: Option<usize>,
 ) -> Result<Vec<SnapshotInfo>, String> {
-    let workspace = PathBuf::from(workspace_path);
-    let engine = SnapshotEngine::new(&workspace);
-    Ok(engine.list(limit.unwrap_or(100)))
+    run_blocking_workspace_task(move || {
+        let workspace = PathBuf::from(workspace_path);
+        let engine = SnapshotEngine::new(&workspace);
+        Ok(engine.list(limit.unwrap_or(100)))
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn snapshot_head_sha(workspace_path: String) -> Option<String> {
-    let workspace = PathBuf::from(workspace_path);
-    let engine = SnapshotEngine::new(&workspace);
-    engine.head_sha()
+    run_blocking_workspace_task(move || -> Result<Option<String>, String> {
+        let workspace = PathBuf::from(workspace_path);
+        let engine = SnapshotEngine::new(&workspace);
+        Ok(engine.head_sha())
+    })
+    .await
+    .unwrap_or(None)
 }
 
 #[tauri::command]
@@ -56,9 +80,12 @@ pub async fn restore_plan(
     workspace_path: String,
     target_sha: String,
 ) -> Result<RestorePlan, String> {
-    let workspace = PathBuf::from(workspace_path);
-    let engine = RestoreEngine::new(&workspace);
-    engine.plan(&target_sha)
+    run_blocking_workspace_task(move || {
+        let workspace = PathBuf::from(workspace_path);
+        let engine = RestoreEngine::new(&workspace);
+        engine.plan(&target_sha)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -66,16 +93,22 @@ pub async fn restore_execute(
     workspace_path: String,
     target_sha: String,
 ) -> Result<RestoreResult, String> {
-    let workspace = PathBuf::from(workspace_path);
-    let engine = RestoreEngine::new(&workspace);
-    engine.execute(&target_sha)
+    run_blocking_workspace_task(move || {
+        let workspace = PathBuf::from(workspace_path);
+        let engine = RestoreEngine::new(&workspace);
+        engine.execute(&target_sha)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn restore_undo(workspace_path: String) -> Result<(), String> {
-    let workspace = PathBuf::from(workspace_path);
-    let engine = RestoreEngine::new(&workspace);
-    engine.undo()
+    run_blocking_workspace_task(move || {
+        let workspace = PathBuf::from(workspace_path);
+        let engine = RestoreEngine::new(&workspace);
+        engine.undo()
+    })
+    .await
 }
 
 #[tauri::command]
@@ -83,9 +116,12 @@ pub async fn snapshot_changed_files(
     workspace_path: String,
     sha: String,
 ) -> Result<CommitChangedFiles, String> {
-    let workspace = PathBuf::from(workspace_path);
-    let engine = DiffEngine::new(&workspace);
-    engine.changed_files(&sha)
+    run_blocking_workspace_task(move || {
+        let workspace = PathBuf::from(workspace_path);
+        let engine = DiffEngine::new(&workspace);
+        engine.changed_files(&sha)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -94,9 +130,12 @@ pub async fn diff_snapshots(
     from_sha: String,
     to_sha: String,
 ) -> Result<Vec<FileDiff>, String> {
-    let workspace = PathBuf::from(workspace_path);
-    let engine = DiffEngine::new(&workspace);
-    engine.diff_snapshots(&from_sha, &to_sha)
+    run_blocking_workspace_task(move || {
+        let workspace = PathBuf::from(workspace_path);
+        let engine = DiffEngine::new(&workspace);
+        engine.diff_snapshots(&from_sha, &to_sha)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -105,7 +144,10 @@ pub async fn snapshot_file_content(
     sha: String,
     path: String,
 ) -> Result<String, String> {
-    let workspace = PathBuf::from(workspace_path);
-    let engine = DiffEngine::new(&workspace);
-    engine.file_content(&sha, &path)
+    run_blocking_workspace_task(move || {
+        let workspace = PathBuf::from(workspace_path);
+        let engine = DiffEngine::new(&workspace);
+        engine.file_content(&sha, &path)
+    })
+    .await
 }

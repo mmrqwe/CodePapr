@@ -128,8 +128,10 @@ impl Serialize for ProviderCapability {
 // ── Provider trait ────────────────────────────────────────────────────
 
 pub trait SymbolProvider: Send + Sync {
-    fn language_id(&self) -> &'static str;
-    fn provider_name(&self) -> &'static str;
+    // 返回借用 self 的 &str 而非 &'static str：旧签名逼着 String 字段的实现
+    // 用 Box::leak 每次调用都永久泄漏一份字符串（随使用无界增长）。
+    fn language_id(&self) -> &str;
+    fn provider_name(&self) -> &str;
     fn source(&self) -> SymbolSource;
     fn capability(&self) -> ProviderCapability;
 
@@ -510,13 +512,12 @@ impl RegexSymbolProvider {
 }
 
 impl SymbolProvider for RegexSymbolProvider {
-    fn language_id(&self) -> &'static str {
+    fn language_id(&self) -> &str {
         self.language_id
     }
 
-    fn provider_name(&self) -> &'static str {
-        // Leak is safe for static provider names
-        Box::leak(self.provider_name.clone().into_boxed_str())
+    fn provider_name(&self) -> &str {
+        &self.provider_name
     }
 
     fn source(&self) -> SymbolSource {
@@ -780,12 +781,12 @@ impl LspSymbolProvider {
 }
 
 impl SymbolProvider for LspSymbolProvider {
-    fn language_id(&self) -> &'static str {
-        Box::leak(self.language_id.clone().into_boxed_str())
+    fn language_id(&self) -> &str {
+        &self.language_id
     }
 
-    fn provider_name(&self) -> &'static str {
-        Box::leak(self.provider_name.clone().into_boxed_str())
+    fn provider_name(&self) -> &str {
+        &self.provider_name
     }
 
     fn source(&self) -> SymbolSource {
@@ -1355,12 +1356,12 @@ impl AstSymbolProvider {
 }
 
 impl SymbolProvider for AstSymbolProvider {
-    fn language_id(&self) -> &'static str {
+    fn language_id(&self) -> &str {
         self.config.language_id
     }
 
-    fn provider_name(&self) -> &'static str {
-        Box::leak(self.provider_name.clone().into_boxed_str())
+    fn provider_name(&self) -> &str {
+        &self.provider_name
     }
 
     fn source(&self) -> SymbolSource {

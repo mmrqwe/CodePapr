@@ -361,9 +361,13 @@ export async function expandCommandTemplate(
 ): Promise<string> {
   let result = template;
 
-  // 参数占位符
-  result = result.replace(/\$ARGUMENTS\b/g, args.join(' '));
-  result = result.replace(/\$(\d+)/g, (_match, index: string) => {
+  // 参数占位符：$ARGUMENTS 与 $N 单遍展开。函数形式的替换保证用户输入里的
+  // $& / $' / $` / $$ 按字面量处理（旧实现把输入当替换串，$ 序列被展开）；
+  // 单遍保证插入的参数文本不会被 $N 规则二次扫描（$1 被再次替换）。
+  result = result.replace(/\$ARGUMENTS\b|\$(\d+)/g, (_match, index?: string) => {
+    if (index === undefined) {
+      return args.join(' ');
+    }
     const value = args[Number(index) - 1];
     return value ?? '';
   });

@@ -43,6 +43,11 @@ pub fn git_log_impl(workspace: &std::path::Path, limit: usize) -> Vec<GitLogEntr
 
 #[tauri::command]
 pub async fn git_log(workspace_path: String, limit: Option<usize>) -> Vec<GitLogEntry> {
-    let workspace = std::path::PathBuf::from(workspace_path);
-    git_log_impl(&workspace, limit.unwrap_or(20).min(100))
+    // git2 历史遍历是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
+    crate::shared::run_blocking_workspace_task(move || -> Result<Vec<GitLogEntry>, String> {
+        let workspace = std::path::PathBuf::from(workspace_path);
+        Ok(git_log_impl(&workspace, limit.unwrap_or(20).min(100)))
+    })
+    .await
+    .unwrap_or_default()
 }

@@ -2,9 +2,44 @@ import { describe, expect, it } from 'vitest';
 import { ProviderRequestError } from '../src/providers/ILLMProvider';
 import {
   readSseStream,
+  safeParseToolArguments,
   StreamIdleTimeoutError,
   withStreamIdleRetry,
 } from '../src/providers/streaming';
+
+describe('safeParseToolArguments JSON 修复（P2-18：字符串感知）', () => {
+  it('does not corrupt string values containing ", }" while repairing trailing commas', () => {
+    // 旧实现全局替换 /,\s*([}\]])/ 且括号计数不避字符串字面量，会把
+    // "enum E { A, }" 里的 ", }" 改成 "}"，产出「合法但语义不同」的 JSON。
+    const raw = '{"code": "enum E { A, }",}';
+    const parsed = safeParseToolArguments(raw);
+    expect(parsed._parseError).toBeUndefined();
+    expect(parsed.code).toBe('enum E { A, }');
+  });
+
+  it('does not count braces inside strings when balancing', () => {
+    // 字符串值里花括号不平衡（{ 多于 }）不应触发补 }，否则会污染字符串。
+    const raw = '{"content": "if (x) { return 1;"}';
+    const parsed = safeParseToolArguments(raw);
+    expect(parsed._parseError).toBeUndefined();
+    expect(parsed.content).toBe('if (x) { return 1;');
+  });
+
+  it('still repairs a genuinely truncated object (missing closing brace)', () => {
+    const raw = '{"a": 1, "b": 2';
+    const parsed = safeParseToolArguments(raw);
+    expect(parsed._parseError).toBeUndefined();
+    expect(parsed.a).toBe(1);
+    expect(parsed.b).toBe(2);
+  });
+
+  it('still repairs a real trailing comma outside strings', () => {
+    const raw = '{"a": 1,}';
+    const parsed = safeParseToolArguments(raw);
+    expect(parsed._parseError).toBeUndefined();
+    expect(parsed.a).toBe(1);
+  });
+});
 
 const encoder = new TextEncoder();
 

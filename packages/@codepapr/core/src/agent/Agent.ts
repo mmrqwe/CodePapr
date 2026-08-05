@@ -426,6 +426,9 @@ export class Agent {
 
     this.session.scratch.reset();
     this.session.scratch.markRoundStart();
+    // round 每次 chat() 从 0 重新计数，压缩冷却也必须随之重置：否则上一次
+    // chat 在 round N 压缩过，本次 chat 前 N+2 轮即使超预算也无法压缩。
+    this.lastCompactionRound = -Infinity;
 
     this.session.partition.validate();
 

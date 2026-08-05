@@ -3,11 +3,13 @@
 //! These helpers are used by 3+ unrelated domains (db, fs, shell, browser, web)
 //! and have no dependencies on any domain-specific crate.
 
+pub(crate) mod git_locks;
 pub(crate) mod paths;
 pub(crate) mod runtime;
 pub(crate) mod strings;
 pub(crate) mod time;
 
+pub(crate) use git_locks::remove_stale_git_locks;
 pub(crate) use paths::{
     canonical_workspace, expanded_path, home_dir, normalize_relative_path,
     normalize_workspace_filter, parse_workspace_path_input, relative_string, resolve_existing_path,

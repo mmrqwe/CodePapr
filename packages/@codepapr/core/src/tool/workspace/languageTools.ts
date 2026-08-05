@@ -4,7 +4,11 @@ import {
   planProjectGraphRename,
   computeRenameEditsForContent,
   applyRenameEditsToContent,
+  identifierAtPosition,
+  findSymbolByNameInFile,
+  replanProjectGraphRenameForSymbol,
   type ProjectGraphRenameParams,
+  type ProjectGraphRenamePlan,
 } from './graphQuery';
 
 export interface WorkspaceSymbolLocation {
@@ -1021,11 +1025,45 @@ export async function performProjectGraphRename(
   host: WorkspaceHost,
   args: ProjectGraphRenameParams,
 ): Promise<WorkspaceCodeOperationResult> {
-  const plan = planProjectGraphRename(args);
+  let plan: ProjectGraphRenamePlan = planProjectGraphRename(args);
 
   if (!plan.symbol) {
     return { available: true, ok: false, changedFiles: [], appliedEdits: 0, message: '未找到要重命名的符号。' };
   }
+
+  // 图兜底只能按「声明行 ≤ 目标行」解析且忽略列号：在函数体内的用法位置
+  // 重命名会解析到外层函数。必须用该位置上的真实标识符核对：不匹配时重新
+  // 解析到图中同名符号，解析不到就拒绝——绝不做错标识符的全局文本替换。
+  if (host.readTextFile) {
+    const sourceRead = await host.readTextFile({
+      relativePath: args.relativePath,
+      maxBytes: 1_000_000,
+    });
+    if (sourceRead.truncatedByBytes) {
+      return {
+        available: true, ok: false, changedFiles: [], appliedEdits: 0,
+        message: '源文件过大被截断，无法确认重命名位置，已跳过。',
+      };
+    }
+    const identifier = identifierAtPosition(sourceRead.content ?? '', args.line, args.character);
+    if (!identifier) {
+      return {
+        available: true, ok: false, changedFiles: [], appliedEdits: 0,
+        message: `位置 (${args.line}, ${args.character}) 不在任何标识符上，无法重命名。请提供符号所在的精确行列号。`,
+      };
+    }
+    if (identifier !== plan.oldName) {
+      const corrected = findSymbolByNameInFile(args.graph, args.relativePath, identifier);
+      if (!corrected) {
+        return {
+          available: true, ok: false, changedFiles: [], appliedEdits: 0,
+          message: `拒绝重命名：按行解析到符号 "${plan.oldName}"，但该位置的实际标识符是 "${identifier}"。请提供精确的行列号。`,
+        };
+      }
+      plan = replanProjectGraphRenameForSymbol(args.graph, corrected);
+    }
+  }
+
   if (plan.targetFiles.length === 0) {
     return { available: true, ok: false, changedFiles: [], appliedEdits: 0, message: '未找到该符号的引用位置。' };
   }

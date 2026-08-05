@@ -84,8 +84,20 @@ pub fn git_status_impl(workspace: &std::path::Path) -> GitStatusResult {
 
 #[tauri::command]
 pub async fn git_status(workspace_path: String) -> GitStatusResult {
-    let workspace = std::path::PathBuf::from(workspace_path);
-    git_status_impl(&workspace)
+    // git2 状态遍历是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
+    crate::shared::run_blocking_workspace_task(move || -> Result<GitStatusResult, String> {
+        let workspace = std::path::PathBuf::from(workspace_path);
+        Ok(git_status_impl(&workspace))
+    })
+    .await
+    .unwrap_or_else(|err| GitStatusResult {
+        available: false,
+        is_repo: false,
+        branch: None,
+        head_short: None,
+        entries: Vec::new(),
+        message: Some(err),
+    })
 }
 
 #[cfg(test)]
