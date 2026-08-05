@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use git2::{IndexAddOption, Repository, RepositoryInitOptions, Signature};
 use super::types::{EnsureResult, SnapshotInfo};
-use super::ignore_resolver::IgnoreResolver;
+use super::ignore_resolver::{git_relative_path, IgnoreResolver};
 
 const CODEPAPR_GIT_SUBDIR: &str = ".CodePapr/git";
 const EXCLUDE_RULES: &[&str] = &[
@@ -219,7 +219,9 @@ impl SnapshotEngine {
 
         let mut added = 0usize;
         for file in &files {
-            match index.add_path(file) {
+            // collect_files 返回 OS 原生分隔符（Windows 为 '\'），libgit2
+            // 只认 '/'：必须转换，否则 Windows 上快照会漏掉所有嵌套文件。
+            match index.add_path(&git_relative_path(file)) {
                 Ok(()) => added += 1,
                 Err(e) => {
                     eprintln!("[CodePapr] snapshot_create: add_path failed for {:?}: {}", file, e.message());

@@ -19,6 +19,30 @@ describe('applySearchReplacePatch', () => {
       })
     ).toThrow('匹配到 2 处文本块');
   });
+
+  // 回归：String.replace(search, replace) 会把替换串里的 $& / $' / $` / $$
+  // 当特殊模式展开，导致文件被静默损坏。单处替换必须按字面量处理。
+  it('treats $ replacement patterns literally in single replace', () => {
+    const patterns = ["$&", "$'", '$`', '$$', "$'ansi'"];
+    for (const literal of patterns) {
+      const result = applySearchReplacePatch('OLD\n', {
+        search: 'OLD',
+        replace: literal,
+      });
+      expect(result.content).toBe(`${literal}\n`);
+      expect(result.replacements).toBe(1);
+    }
+  });
+
+  it('treats $ replacement patterns literally with replaceAll', () => {
+    const result = applySearchReplacePatch('a\na\n', {
+      search: 'a',
+      replace: "$'",
+      replaceAll: true,
+    });
+    expect(result.content).toBe("$'\n$'\n");
+    expect(result.replacements).toBe(2);
+  });
 });
 
 describe('applySearchReplaceDiff', () => {

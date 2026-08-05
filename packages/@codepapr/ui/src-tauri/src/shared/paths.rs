@@ -297,6 +297,11 @@ pub(crate) fn resolve_existing_path(
     };
     let target =
         std::fs::canonicalize(candidate).map_err(|err| format!("路径不存在或无法访问: {err}"))?;
+    // canonicalize 会解析符号链接：绝对路径输入或 workspace 内指向外部的软链
+    // 都可能逃出项目文件夹，必须在解析后复查包含关系（与写入侧检查保持一致）。
+    if !target.starts_with(&workspace) {
+        return Err("路径必须位于项目文件夹内".to_string());
+    }
     Ok((workspace, target))
 }
 

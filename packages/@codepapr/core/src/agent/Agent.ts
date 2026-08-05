@@ -504,11 +504,26 @@ export class Agent {
             : await this.provider.chat(request, effectiveSignal);
       } catch (err) {
         if (isImageError(err)) {
-          const lastMsg = this.session.logStore.getLastMessage();
-          if (lastMsg?.role === 'user' && lastMsg.images && lastMsg.images.length > 0) {
-            this.session.logStore.popLastMessage();
-            this.requestBuilder.syncAfterPop?.(this.session.logStore);
+          // 被拒绝的图片可能位于任意一条 user 消息（工具 __images 会在日志中段
+          // 插入图片消息），而不只是最后一条；且必须保留消息文本（旧实现整条
+          // pop 会丢掉用户输入）。找不到任何可剥离的图片时必须抛出——否则
+          // 会反复重发完全相同的请求，循环到 maxToolRounds。
+          const messages = this.session.logStore.getAllMessages();
+          let strippedImages = false;
+          const stripped = messages.map((message) => {
+            if (!(message.role === 'user' && message.images && message.images.length > 0)) {
+              return message;
+            }
+            strippedImages = true;
+            const next: IMessage = { ...message };
+            delete next.images;
+            return next;
+          });
+          if (!strippedImages) {
+            throw err;
           }
+          this.session.replaceLog(stripped);
+          this.requestBuilder.resetLogTracking?.();
           onStreamEvent?.({
             type: 'tool-call-end',
             toolCallId: '',

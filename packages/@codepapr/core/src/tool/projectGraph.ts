@@ -1,4 +1,8 @@
 import { estimateTokens } from '@codepapr/common';
+import {
+  countFunctionLinesIndentBased,
+  isIndentationBasedLanguage,
+} from './workspace/graph/codeMetrics';
 
 export type ProjectGraphNodeKind = 'file' | 'symbol';
 export type ProjectGraphFileType = 'source' | 'test' | 'config' | 'doc' | 'docker' | 'cicd' | 'sql';
@@ -2961,7 +2965,7 @@ function buildCallEdges(
     for (const func of funcSymbols) {
       if (semanticEdgeCount.value >= maxEdges) break;
       const funcLine = func.symbol!.line;
-      const funcEndLine = findFunctionEndLine(content, funcLine, file.language);
+      const funcEndLine = findFunctionEndLine(content, funcLine, file.path, file.language);
       const sourceId = symbolNodeId(
         file.path,
         func.symbol!,
@@ -3181,7 +3185,20 @@ function extractCallTargets(
   return results;
 }
 
-function findFunctionEndLine(content: string, startLine: number, _language?: string): number {
+function findFunctionEndLine(
+  content: string,
+  startLine: number,
+  filePath: string,
+  language?: string,
+): number {
+  // Python 等缩进语言没有花括号：旧实现一律按括号配对找函数结尾，对它们
+  // 返回 -1，导致 buildCallEdges 跳过结束行边界，把声明行之后的所有调用
+  // 都记到每个函数头上。缩进语言改用缩进判定（与 codeMetrics 一致）。
+  if (isIndentationBasedLanguage(filePath, language)) {
+    const lineCount = countFunctionLinesIndentBased(content, startLine);
+    return lineCount > 0 ? startLine + lineCount - 1 : -1;
+  }
+
   const lines = content.split(/\r?\n/);
   let depth = 0;
   let started = false;

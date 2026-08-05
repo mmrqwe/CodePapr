@@ -403,6 +403,79 @@ describe('Regression: audited graphQuery bugs', () => {
     expect(new Set(nodeIds).size).toBe(nodeIds.length);
     expect(new Set(edgeIds).size).toBe(edgeIds.length);
   });
+
+  it('P1-8: change-impact returns dependent files (not empty) and selects their tests', () => {
+    // makeGraph: main.ts -> lib.ts -> models.ts，lib.test.ts 导入 lib.ts。
+    // 旧实现反向 BFS 到达的全是 file 节点，却被 kind !== 'file' 过滤掉 → 恒为空。
+    const graph = makeGraph();
+    const result = selectTestsByChangeImpact(graph, ['src/models.ts']);
+    // models.ts 的下游依赖（lib.ts / main.ts）应被纳入影响范围，
+    // 进而选中导入 lib.ts 的测试文件。
+    expect(result.affectedTests).toContain('src/lib.test.ts');
+    expect(
+      result.reasoning.some((line) => line.includes('src/models.ts') && !line.includes('影响 0 个'))
+    ).toBe(true);
+  });
+
+  it('P1-9: Python call edges respect indentation-based function bodies', () => {
+    // 旧实现 findFunctionEndLine 对无花括号语言返回 -1，buildCallEdges 跳过
+    // 结束行边界，把函数声明之后的所有调用都记到该函数头上。
+    const content = [
+      'def bar():',
+      '    pass',
+      '',
+      'def foo():',
+      '    bar()',
+      '',
+      'def baz():',
+      '    pass',
+      '',
+      'foo()',
+      'baz()',
+      '',
+    ].join('\n');
+    const graph = buildWorkspaceProjectGraph({
+      root: '.',
+      tree: '.\n- src/',
+      allFiles: [{ path: 'src/module.py' }],
+      fileContents: { 'src/module.py': { content } },
+      files: [
+        {
+          path: 'src/module.py',
+          language: 'Python',
+          bytes: content.length,
+          symbolSource: 'ast',
+          symbols: [
+            { name: 'bar', kind: 'function', signature: 'def bar()', line: 1, exported: true },
+            { name: 'foo', kind: 'function', signature: 'def foo()', line: 4, exported: true },
+            { name: 'baz', kind: 'function', signature: 'def baz()', line: 7, exported: true },
+          ],
+        },
+      ],
+      maxEdges: 200,
+    });
+
+    const idByName = new Map<string, string>();
+    for (const node of graph.nodes) {
+      if (node.kind === 'symbol' && node.symbol) {
+        idByName.set(node.symbol.name, node.id);
+      }
+    }
+    const fooId = idByName.get('foo');
+    const barId = idByName.get('bar');
+    const bazId = idByName.get('baz');
+    expect(fooId).toBeDefined();
+    expect(barId).toBeDefined();
+    expect(bazId).toBeDefined();
+
+    const fooCallTargets = graph.edges
+      .filter((e) => e.kind === 'calls' && e.from === fooId)
+      .map((e) => e.to);
+    // foo 函数体内的 bar() 调用必须归属 foo
+    expect(fooCallTargets).toContain(barId);
+    // baz 定义在 foo 之后、顶层 foo()/baz() 也在 foo 体之外：均不得归属 foo
+    expect(fooCallTargets).not.toContain(bazId);
+  });
 });
 
 describe('findSymbolAtPosition (AST 兜底的位置→符号解析)', () => {

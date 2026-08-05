@@ -2922,7 +2922,10 @@ describe('per-session execution and input state', () => {
 
   it('deleteSession cancels a running session and clears its loading/input state', () => {
     const cancel = vi.fn();
-    const agent = createMockAgent({ cancel });
+    // 真实 WorkerBackedAgent.destroy() 内部先调 cancel() 再回收 worker；
+    // deleteSession 现在走 destroy()（只 cancel 会泄漏 worker）。
+    const destroy = vi.fn(() => cancel());
+    const agent = createMockAgent({ cancel, destroy });
     setTwoSessionState({
       isLoading: true,
       loadingSessionId: 's-a',
@@ -2937,6 +2940,7 @@ describe('per-session execution and input state', () => {
     useAgentStore.getState().deleteSession('s-a');
 
     const state = useAgentStore.getState();
+    expect(destroy).toHaveBeenCalledTimes(1);
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(state.isLoading).toBe(false);
     expect(state.loadingSessionId).toBeNull();

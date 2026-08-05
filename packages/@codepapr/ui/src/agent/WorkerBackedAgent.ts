@@ -438,6 +438,16 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.clearSnapshotTimer();
     this.abortAllPendingFetches();
     this.rejectAllAppAgentRequests(new Error('Agent was destroyed'));
+    // worker 被直接 terminate 后 cancel ACK 永远不会到达（cancel() 的兜底
+    // 定时器也已被清除）：必须主动 reject 所有 pending chat 请求，否则调用
+    // 方 await 永久挂起。用 WorkerCrashError 让上层崩溃恢复重建并重试回合。
+    const destroyError = new WorkerCrashError('Agent was destroyed');
+    for (const [requestId, pending] of this.pendingRequests) {
+      this.flushDeltas(pending);
+      pending.reject(destroyError);
+      this.pendingRequests.delete(requestId);
+    }
+    this.activeRequestId = null;
     this.crashed = true;
     if (typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', this.handleVisibilityChange);

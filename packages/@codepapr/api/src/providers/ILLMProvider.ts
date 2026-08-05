@@ -154,7 +154,10 @@ export abstract class BaseLLMProvider implements ILLMProvider {
           body: errorText,
         });
 
-        if (response.status >= 400 && response.status < 500) {
+        if (!retriable) {
+          // 4xx（429 除外）重试无意义，立即失败。注意：在 catch 里必须把
+          // 不可重试的 ProviderRequestError 原样重抛，否则会被当成普通异常
+          // 进入重试循环（旧实现的 bug）。
           throw providerError;
         }
 
@@ -163,14 +166,33 @@ export abstract class BaseLLMProvider implements ILLMProvider {
         clearTimeout(timeoutId);
         signal?.removeEventListener('abort', abortHandler);
         lastError = err as Error;
-        if (err instanceof DOMException && err.name === 'AbortError') {
-          throw err;
+        if (signal?.aborted) {
+          // 用户主动取消：立即终止，不重试。
+          throw new DOMException('Request was cancelled', 'AbortError');
         }
-        log.warn(`${this.name} request attempt failed`, {
-          attempt: attempt + 1,
-          maxRetries,
-          error: lastError.message,
-        });
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          // 本函数超时调用 controller.abort() 同样产生 AbortError，但超时
+          // ≠ 用户取消：超时可重试。旧实现把它当取消直接重抛，导致慢端点
+          // 显示「已取消」且永不重试。
+          lastError = new ProviderRequestError({
+            provider: this.name,
+            message: `Request timed out after ${this.config.timeout}ms`,
+            retriable: true,
+          });
+          log.warn(`${this.name} request timed out`, {
+            attempt: attempt + 1,
+            maxRetries,
+            timeout: this.config.timeout,
+          });
+        } else if (err instanceof ProviderRequestError && !err.retriable) {
+          throw err;
+        } else {
+          log.warn(`${this.name} request attempt failed`, {
+            attempt: attempt + 1,
+            maxRetries,
+            error: lastError.message,
+          });
+        }
       }
 
       // 指数退避

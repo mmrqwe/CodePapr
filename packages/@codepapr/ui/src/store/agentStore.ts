@@ -161,6 +161,22 @@ function evictSessionMessageCache(get: StoreGet, set: StoreSet, protectIds: stri
 // 避免重复拉起 Worker。
 let appAgentEnsureInFlight: Promise<AgentRuntimeHandle> | null = null;
 
+/** 销毁当前 agent 句柄（回收 Worker 进程 / 心跳定时器 / 事件监听器）。
+ *  所有把 _agent 置 null 或替换掉的路径都必须先调用它，否则每个被丢弃的
+ *  WorkerBackedAgent 会带着活 Worker + 5s 心跳 interval + visibilitychange
+ *  监听器泄漏到应用退出。destroy() 内部会 reject 全部 pending 请求
+ *  （以 WorkerCrashError 走崩溃恢复），不会让 await 中的回合挂死。
+ *  注意：不要在 set() 的 updater 函数内调用（updater 必须无副作用）。 */
+function disposeAgentHandle(get: StoreGet): void {
+  const agent = get()._agent;
+  if (!agent) return;
+  try {
+    agent.destroy();
+  } catch {
+    // already torn down
+  }
+}
+
 /** 为 App Agent 确保存在可用 Agent（复用聊天 Agent 的 Worker）。
  *  与 sendMessage 的创建路径对齐，但只产出「宿主」：空上下文、不绑定会话，
  *  下一条聊天消息总会重建，绝不会被误用于聊天回合。 */
@@ -296,6 +312,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         try {
           const storedSettings = await loadAppSettings();
           settings = normalizeSettings(storedSettings ?? get().settings);
+          disposeAgentHandle(get);
           set({ settings, settingsLoaded: true, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
           void applyBrowserEngine(settings.browserEngine);
 
@@ -307,6 +324,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           // returns nothing, destroying a stored key.
         } catch {
           settings = get().settings;
+          disposeAgentHandle(get);
           set({ settingsLoaded: true, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
         }
 
@@ -326,6 +344,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
               ...currentSettings,
               recentWorkspaces: withoutFailed,
             });
+            disposeAgentHandle(get);
             set({ settings: nextSettings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
             void saveAppSettings(nextSettings).catch(() => undefined);
           }
@@ -341,6 +360,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       setSettings: (partial) => {
         const previousEngine = get().settings.browserEngine;
         const settings = normalizeSettings({ ...get().settings, ...partial });
+        disposeAgentHandle(get);
         set({ settings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
         void saveAppSettings(settings).catch(() => undefined);
         if (settings.browserEngine !== previousEngine) {
@@ -349,6 +369,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       setWorkspacePath: (path) => {
+        disposeAgentHandle(get);
         set((s) => {
           if (s.workspacePath === path) {
             return { workspacePath: path, _agent: null, workspaceMutationVersion: 0 };
@@ -392,16 +413,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       closeWorkspace: () => {
-        // 关闭工作区即放弃进行中的回合：主动取消，避免被遗弃的 worker
-        // 继续消耗资源/阻止系统休眠状态正确释放。
-        const { _agent, isLoading } = get();
-        if (isLoading && _agent) {
-          try {
-            _agent.cancel();
-          } catch {
-            // ignore — 状态清理照常进行
-          }
-        }
+        // 关闭工作区即放弃进行中的回合：destroy() 内部先 cancel 再 reject
+        // 全部 pending 请求并终止 Worker，避免被遗弃的 worker 继续消耗资源/
+        // 阻止系统休眠状态正确释放。
+        disposeAgentHandle(get);
         set({
           workspacePath: '',
           workspaceMutationVersion: 0,
@@ -653,6 +668,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           skillDefinitions,
           get().skillEnabledById
         );
+        disposeAgentHandle(get);
         set({
           _projectRulesSection: rulesSection,
           _skillDefinitions: enabledSkillDefinitions,
@@ -729,6 +745,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           return;
         }
 
+        disposeAgentHandle(get);
         set((state) => {
           const skillEnabledById = { ...state.skillEnabledById };
           if (enabled === null || enabled) {
@@ -879,6 +896,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           createdAt: now,
           updatedAt: now,
         };
+        disposeAgentHandle(get);
         set((s) => ({
           sessions: [meta, ...s.sessions],
           activeSessionId: id,
@@ -910,9 +928,15 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         const meta = sessions.find((s) => s.id === id);
         if (!meta) return;
 
-        // 离开的会话若正在执行，保留 agent 句柄（回合继续、可取消）；
-        // 否则清空，由下次发送为新会话重建。
-        const keepAgent = loadingSessionId !== null && loadingSessionId === activeSessionId;
+        // 离开的会话若正在执行，保留 agent 句柄（回合继续、可取消）；切回的
+        // 目标会话若正在执行同样必须保留（旧实现会把运行中回合的 agent 丢弃，
+        // 回合结束后句柄无人销毁而泄漏）。其余情况清空并销毁，由下次发送重建。
+        const keepAgent =
+          loadingSessionId !== null &&
+          (loadingSessionId === activeSessionId || loadingSessionId === id);
+        if (!keepAgent) {
+          disposeAgentHandle(get);
+        }
 
         set((s) => ({
           activeSessionId: id,
@@ -960,12 +984,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
       deleteSession: (id) => {
         const running = get();
-        if (running.loadingSessionId === id && running._agent) {
-          try {
-            running._agent.cancel();
-          } catch {
-            // ignore — 状态清理照常进行
-          }
+        // agent 归属被删会话时直接销毁（destroy() 内部先 cancel 再 reject
+        // pending 请求）：只 cancel 不 destroy 会泄漏 worker。
+        if (running._agentSessionId === id && running._agent) {
+          disposeAgentHandle(get);
         }
         set((s) => {
           const sessions = s.sessions.filter((x) => x.id !== id);
@@ -1002,6 +1024,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
       clearMessages: () => {
         const sessionId = get().activeSessionId;
+        disposeAgentHandle(get);
         set((s) => ({
           messages: [],
           sessionMessages: s.activeSessionId
@@ -1084,6 +1107,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           void deleteCheckpointByMessage(get().workspacePath, id).catch(() => undefined);
         }
 
+        disposeAgentHandle(get);
         set({
           messages: truncatedMessages,
           sessionMessages: activeSessionId

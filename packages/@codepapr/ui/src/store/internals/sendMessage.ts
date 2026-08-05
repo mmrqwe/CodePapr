@@ -267,8 +267,13 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               }
               if (compactSessionId) {
                 set((s) => {
+                  // 必须在 updater 内读最新消息：/compact 不置 isLoading，压缩
+                  // 模型调用期间用户可继续发消息，用 await 前捕获的 sessionMsgs
+                  // 写回会把 await 期间产生的消息整个覆盖丢失。insertIndex 由
+                  // insertCheckpointAtRetainedBoundary 内部做 clamp。
+                  const liveMessages = s.sessionMessages[compactSessionId] ?? [];
                   const nextMessages = insertCheckpointAtRetainedBoundary(
-                    sessionMsgs,
+                    liveMessages,
                     checkpointResult.message,
                     checkpointResult.insertIndex
                   );
@@ -986,9 +991,20 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           const runWithCrashRecovery = async (
             passInput: string,
             passImages?: import('@codepapr/types').IImageContent[],
+            onPassStart?: (logLength: number) => void,
           ): Promise<IAgentResponse> => {
+            // 崩溃恢复可能已重建 agent（新 log 长度与旧 agent 不同）：每次
+            // 真正执行前上报「即将执行」agent 的 log 坐标，调用方（Goal 循环
+            // 的转录切片）必须用它，而不是重建前的旧坐标。
+            const runPass = async (): Promise<IAgentResponse> => {
+              if (onPassStart && typeof agent?.getSession === 'function') {
+                onPassStart(agent.getSession().logStore.length());
+              }
+              return runAgentPass(passInput, passImages);
+            };
+
             try {
-              return await runAgentPass(passInput, passImages);
+              return await runPass();
             } catch (error) {
               if (!(error instanceof WorkerCrashError)) throw error;
             }
@@ -1000,7 +1016,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               resetStreamingForRetry();
               await yieldToMainThread();
               try {
-                return await runAgentPass(passInput, passImages);
+                return await runPass();
               } catch (retryError) {
                 if (!(retryError instanceof WorkerCrashError)) throw retryError;
               }
@@ -1013,7 +1029,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             mainThreadFallbackUsed = true;
             resetStreamingForRetry();
             await yieldToMainThread();
-            return await runAgentPass(passInput, passImages);
+            return await runPass();
           };
 
           const getCurrentAssistantMessage = () =>
@@ -1085,10 +1101,13 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     await yieldToMainThread();
                   }
 
-                  const turnStartIndex = sessionLogStartIndex;
+                  let turnStartIndex = sessionLogStartIndex;
                   // Goal 回合同样接入崩溃恢复链：Worker 崩溃透明重建/降级，
-                  // 不再让 Goal 循环因崩溃中断。
-                  const response = await runWithCrashRecovery(turnPrompt);
+                  // 不再让 Goal 循环因崩溃中断。onPassStart 回调保证崩溃重建后
+                  // 用新 agent 的 log 坐标切片转录（旧坐标会切出错误内容）。
+                  const response = await runWithCrashRecovery(turnPrompt, undefined, (logLength) => {
+                    turnStartIndex = logLength;
+                  });
                   lastWorkerContent = response.content;
 
                   sessionLogStartIndex =
@@ -1455,7 +1474,13 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             undefined,
             currentTodoDigest(activeSessionId)
           );
-          if (checkpointResult) {
+          if (checkpointResult && (get().isLoading || get().loadingSessionId !== null)) {
+            // 检查点模型调用 await 期间 isLoading 已置 false，用户可能已发出新
+            // 回合（T2），T2 正运行在同一个 agent 上。此时应用检查点会换掉并
+            // destroy T2 正在使用的 agent（destroy 会让 T2 的 chat() 被拒）。
+            // 整个检查点直接丢弃（T2 回合结束时会重新评估），绝不触碰运行中
+            // 的 agent。
+          } else if (checkpointResult) {
             const prevAgent = get()._agent;
             const prevAgentOwner = get()._agentSessionId;
             set((s) => {

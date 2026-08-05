@@ -19,7 +19,7 @@ import {
   StreamIdleTimeoutError,
   withStreamIdleRetry,
 } from './streaming';
-import { buildClaudeImageContent } from './imageContent';
+import { buildClaudeImageContent, ClaudeContentPart } from './imageContent';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
 
 const log = new Logger('ClaudeProvider');
@@ -103,31 +103,91 @@ function shouldApplyPromptCache(request: IChatRequest): boolean {
   return request.cacheControl?.type === 'session' || request.cacheControl?.type === 'ephemeral';
 }
 
-function normalizeClaudeConversationMessages(request: IChatRequest) {
-  return request.messages
-    .filter((message) => !isSystemMessage(message))
-    .map((message) => ({
-      role: message.role === 'tool' ? 'user' : message.role,
-      content: message.toolResult
-        ? [
-            {
-              type: 'tool_result' as const,
-              tool_use_id: message.toolResult.toolCallId,
-              content: sortedStringify(message.toolResult.result),
-            },
-          ]
-        : message.toolCalls
-        ? [
-            { type: 'text' as const, text: message.content },
-            ...message.toolCalls.map((toolCall) => ({
-              type: 'tool_use' as const,
-              id: toolCall.id,
-              name: toolCall.name,
-              input: sanitizeToolCallArguments(toolCall.arguments),
-            })),
-          ]
-        : buildClaudeImageContent(message.content, message.images) ?? message.content,
-    }));
+type ClaudeToolResultPart = {
+  type: 'tool_result';
+  tool_use_id: string;
+  content: string;
+};
+
+type ClaudeToolUsePart = {
+  type: 'tool_use';
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+};
+
+type ClaudeMessageBlock = ClaudeContentPart | ClaudeToolResultPart | ClaudeToolUsePart;
+
+interface NormalizedClaudeMessage {
+  role: 'user' | 'assistant';
+  content: ClaudeMessageBlock[];
+}
+
+function buildClaudeMessageBlocks(
+  message: IChatRequest['messages'][number]
+): ClaudeMessageBlock[] {
+  if (message.toolResult) {
+    return [
+      {
+        type: 'tool_result',
+        tool_use_id: message.toolResult.toolCallId,
+        content: sortedStringify(message.toolResult.result),
+      },
+    ];
+  }
+
+  if (message.toolCalls) {
+    const blocks: ClaudeMessageBlock[] = [];
+    // Anthropic 拒绝空 text 块：工具调用回合 assistant 文本常为空，不能插入
+    if (message.content) {
+      blocks.push({ type: 'text', text: message.content });
+    }
+    for (const toolCall of message.toolCalls) {
+      blocks.push({
+        type: 'tool_use',
+        id: toolCall.id,
+        name: toolCall.name,
+        input: sanitizeToolCallArguments(toolCall.arguments),
+      });
+    }
+    return blocks;
+  }
+
+  const imageContent = buildClaudeImageContent(message.content, message.images);
+  if (imageContent) {
+    return imageContent;
+  }
+
+  return message.content ? [{ type: 'text', text: message.content }] : [];
+}
+
+function normalizeClaudeConversationMessages(request: IChatRequest): NormalizedClaudeMessage[] {
+  const normalized: NormalizedClaudeMessage[] = [];
+
+  for (const message of request.messages) {
+    if (isSystemMessage(message)) {
+      continue;
+    }
+
+    const role: 'user' | 'assistant' = message.role === 'assistant' ? 'assistant' : 'user';
+    const blocks = buildClaudeMessageBlocks(message);
+    // Anthropic 拒绝空 content：空消息直接跳过
+    if (blocks.length === 0) {
+      continue;
+    }
+
+    // Anthropic 要求 user/assistant 角色严格交替。并行工具调用会产生多条
+    // 连续的 tool(→user) 消息，必须合并进同一个 content 数组，否则
+    // 400 "roles must alternate"。
+    const last = normalized[normalized.length - 1];
+    if (last && last.role === role) {
+      last.content.push(...blocks);
+    } else {
+      normalized.push({ role, content: [...blocks] });
+    }
+  }
+
+  return normalized;
 }
 
 export class ClaudeProvider extends BaseLLMProvider {
@@ -194,7 +254,12 @@ export class ClaudeProvider extends BaseLLMProvider {
               log.warn('SSE chunk parse failed, skipping', { payloadLine: payloadLine.slice(0, 200) });
               return;
             }
-            usage = chunk.usage ?? chunk.message?.usage ?? usage;
+            // message_start 携带 input/cache token，message_delta 只携带
+            // output_tokens：整体替换会丢掉 input/cache 统计，必须按字段合并。
+            const chunkUsage = chunk.usage ?? chunk.message?.usage;
+            if (chunkUsage) {
+              usage = { ...usage, ...chunkUsage };
+            }
 
             if (chunk.type === 'message_start') {
               responseId = chunk.message?.id ?? responseId;

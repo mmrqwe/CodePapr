@@ -267,7 +267,15 @@ mod tests {
     use std::path::PathBuf;
 
     fn temp_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("codepapr-vault-test-{}", std::process::id()));
+        // 每个测试独立目录：仅用 PID 作后缀时并行运行的 vault 测试共享同一目录，
+        // 一个测试的 remove_dir_all 会摧毁另一个测试正在使用的 vault，导致随机失败。
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!(
+            "codepapr-vault-test-{}-{n}",
+            std::process::id()
+        ));
         fs::create_dir_all(&dir).unwrap();
         dir
     }

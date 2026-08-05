@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use git2::{Repository, ResetType, Oid, Tree};
 use super::types::{RestorePlan, RestoreResult, FileChange};
 use super::snapshot_engine::SnapshotEngine;
-use super::ignore_resolver::IgnoreResolver;
+use super::ignore_resolver::{git_relative_path, IgnoreResolver};
 use crate::git_operations::validate_git_ref;
 
 /// 在 hard reset 之后清理"目标树中不存在但当前工作区存在"的未跟踪文件。
@@ -23,7 +23,9 @@ fn remove_untracked_not_in_tree(
         }) {
             continue;
         }
-        if target_tree.get_path(relative).is_ok() {
+        // Windows 上 relative 含 '\'，get_path 只按 '/' 解析：不转换会把
+        // 树中实际存在的文件误判为"不在目标树"，hard reset 后将其删除。
+        if target_tree.get_path(&git_relative_path(relative)).is_ok() {
             continue;
         }
         let abs = workspace.join(relative);

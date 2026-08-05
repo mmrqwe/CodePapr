@@ -3,6 +3,7 @@ use crate::shared::{
     run_blocking_workspace_task, truncate_utf8, unix_millis,
 };
 use crate::shell::dangerous::{detect_dangerous_command, detect_dangerous_invocation};
+use crate::shell::process_tree::{kill_process_tree, prepare_new_process_group};
 use crate::shell::types::{
     BackgroundCommandResult, BackgroundProcessEntry, CommandResult, ManagedBackgroundProcess,
     StopAllBackgroundProcessesResult, StopBackgroundProcessResult,
@@ -233,6 +234,7 @@ pub(crate) fn run_workspace_command_impl(
 
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
+    prepare_new_process_group(&mut cmd);
     let mut child = match cmd.spawn() {
         Ok(child) => child,
         Err(err) => {
@@ -299,8 +301,7 @@ fn collect_command_output(
         }
         if started.elapsed() >= timeout {
             timed_out = true;
-            child
-                .kill()
+            kill_process_tree(&mut child)
                 .map_err(|err| format!("终止超时命令失败: {err}"))?;
             status = child
                 .wait()
@@ -368,6 +369,7 @@ fn build_shell_spawn_command(command: &str, cwd: &Path) -> Command {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        prepare_new_process_group(&mut cmd);
         cmd
     }
     #[cfg(not(windows))]
@@ -380,6 +382,7 @@ fn build_shell_spawn_command(command: &str, cwd: &Path) -> Command {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        prepare_new_process_group(&mut cmd);
         cmd
     }
 }
@@ -473,6 +476,7 @@ pub(crate) fn start_workspace_background_command(
         .stderr(Stdio::piped());
     #[cfg(windows)]
     bg_cmd.creation_flags(CREATE_NO_WINDOW_BG);
+    prepare_new_process_group(&mut bg_cmd);
 
     spawn_and_register_background(workspace_path, command, args, preview_url, bg_cmd)
 }
@@ -631,7 +635,7 @@ pub(crate) fn stop_background_process(pid: u32) -> Result<StopBackgroundProcessR
         };
 
         if still_running {
-            let _ = process.child.kill();
+            let _ = kill_process_tree(&mut process.child);
             let _ = process.child.wait();
         }
 
@@ -671,7 +675,7 @@ pub(crate) fn stop_all_background_processes(
                 };
 
                 if still_running {
-                    let _ = process.child.kill();
+                    let _ = kill_process_tree(&mut process.child);
                     let _ = process.child.wait();
                     stopped += 1;
                 }

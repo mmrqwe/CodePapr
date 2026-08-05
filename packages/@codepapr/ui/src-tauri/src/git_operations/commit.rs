@@ -88,8 +88,8 @@ pub fn git_commit_impl(
             }
 
             for spec in pathspecs {
-                let p = std::path::Path::new(spec);
-                if let Err(e) = idx.add_path(p) {
+                let p = crate::snapshot::ignore_resolver::git_relative_path(std::path::Path::new(spec));
+                if let Err(e) = idx.add_path(&p) {
                     return GitOperationResult {
                         ok: false, action: "commit".to_string(),
                         message: format!("add {:?}: {}", spec, e.message()),

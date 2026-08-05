@@ -4,6 +4,7 @@ use crate::shell::guard::{
     build_shell_command_line, create_shell_session_id, detect_default_shell,
     find_unquoted_shell_version_constraint, write_shell_payload,
 };
+use crate::shell::process_tree::{kill_process_tree, prepare_new_process_group};
 use crate::shell::types::{
     ManagedShellSession, ShellCloseSessionResult, ShellReadOutputResult, ShellSendInputResult,
     ShellSessionEntry, ShellSessionResult,
@@ -120,6 +121,7 @@ pub(crate) fn open_shell_session(
         .stderr(Stdio::piped());
     #[cfg(windows)]
     shell_cmd.creation_flags(CREATE_NO_WINDOW_SHELL);
+    prepare_new_process_group(&mut shell_cmd);
     let mut child = shell_cmd
         .spawn()
         .map_err(|err| format!("启动 Shell 会话失败: {err}"))?;
@@ -281,7 +283,7 @@ pub(crate) fn close_shell_session(session_id: String) -> Result<ShellCloseSessio
         };
 
         if still_running {
-            let _ = session.child.kill();
+            let _ = kill_process_tree(&mut session.child);
             let _ = session.child.wait();
         }
 
@@ -295,7 +297,7 @@ pub(crate) fn close_shell_session(session_id: String) -> Result<ShellCloseSessio
 pub(crate) fn stop_all_shell_sessions() {
     let Ok(mut sessions) = shell_sessions().lock() else { return };
     for (_, mut session) in sessions.drain() {
-        let _ = session.child.kill();
+        let _ = kill_process_tree(&mut session.child);
         let _ = session.child.wait();
     }
 }

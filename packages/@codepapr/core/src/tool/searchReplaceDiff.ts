@@ -108,9 +108,16 @@ export function applySearchReplacePatch(
   }
 
   const replacements = plan.replaceAll ? occurrences : 1;
-  const resultLf = plan.replaceAll
-    ? contentLf.split(searchLf).join(replaceLf)
-    : contentLf.replace(searchLf, replaceLf);
+  let resultLf: string;
+  if (plan.replaceAll) {
+    resultLf = contentLf.split(searchLf).join(replaceLf);
+  } else {
+    // 不能用 String.replace(search, replace)：替换串中的 $& / $' / $` / $$
+    // 会被当作特殊模式展开，导致文件内容被静默损坏。按索引拼接保证字面量替换。
+    const index = contentLf.indexOf(searchLf);
+    resultLf =
+      contentLf.slice(0, index) + replaceLf + contentLf.slice(index + searchLf.length);
+  }
 
   if (resultLf === contentLf) {
     throw new Error('替换前后内容完全一致，search 和 replace 不能相同');

@@ -200,6 +200,17 @@ struct ManagedLspServer {
     pending_responses: Arc<Mutex<HashMap<u64, mpsc::Sender<Value>>>>,
 }
 
+impl Drop for ManagedLspServer {
+    /// 兜底回收：无论走哪条路径（显式 stop、被注册表顶掉、崩溃清理），只要
+    /// 结构体被丢弃就必须杀掉并回收子进程。正常 stop 流程已 kill+wait 过时，
+    /// 这里重复调用只会得到被忽略的错误，不会有害；但缺了它，被并发顶掉的
+    /// LSP 进程会成为永久孤儿进程。
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 #[allow(dead_code)]
 struct CollectedDiagnostics {
     current: Vec<Value>,
@@ -212,6 +223,24 @@ static LSP_SERVERS: OnceLock<RwLock<HashMap<String, SharedLspServer>>> = OnceLoc
 
 fn lsp_servers() -> &'static RwLock<HashMap<String, SharedLspServer>> {
     LSP_SERVERS.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// 每个 server key 的创建锁：并发请求同一 workspace::family 时，查找→启动→
+/// 插入序列必须串行化，否则两个线程各自 spawn 一个真实 LSP 进程，后插入者
+/// 顶掉先插入者，被顶掉的进程脱离注册表成为永久孤儿。
+static LSP_CREATION_LOCKS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+
+fn lsp_creation_lock(key: &str) -> Arc<Mutex<()>> {
+    let locks = LSP_CREATION_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+    match locks.lock() {
+        Ok(mut map) => map
+            .entry(key.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone(),
+        Err(poisoned) => poisoned.into_inner().entry(key.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone(),
+    }
 }
 
 fn lock_server<'a>(
@@ -1373,6 +1402,26 @@ fn ensure_running_server_handle(
     workspace_path: &str,
     language_id: &str,
 ) -> Result<SharedLspServer, String> {
+    // 快路径：已存在且运行中，无需创建锁。
+    if let Some(server) = lookup_server_handle(workspace_path, language_id) {
+        let mut guard = lock_server(&server)?;
+        if server_is_running(&mut guard)? {
+            drop(guard);
+            return Ok(server);
+        }
+        drop(guard);
+        let _ = remove_server_handle(workspace_path, language_id);
+    }
+
+    // 慢路径：同一 key 的创建串行化。持锁期间完成 查找→启动→插入，第二个
+    // 并发请求在锁上等待，拿到锁后会在注册表里找到第一个已启动的 server。
+    // （所有调用方都在 run_blocking_workspace_task 的阻塞线程上，持锁安全。）
+    let key = server_key(workspace_path, language_id);
+    let creation_lock = lsp_creation_lock(&key);
+    let _creating = creation_lock
+        .lock()
+        .map_err(|_| "LSP server 创建锁已不可用".to_string())?;
+
     if let Some(server) = lookup_server_handle(workspace_path, language_id) {
         let mut guard = lock_server(&server)?;
         if server_is_running(&mut guard)? {

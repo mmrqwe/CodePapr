@@ -23,12 +23,12 @@ pub fn git_stage_impl(
 
     if all || !pathspecs.is_empty() {
         if all || pathspecs.is_empty() {
-            use crate::snapshot::ignore_resolver::IgnoreResolver;
+            use crate::snapshot::ignore_resolver::{git_relative_path, IgnoreResolver};
             let resolver = IgnoreResolver::new(workspace);
             let files = resolver.collect_files();
             let mut added = 0;
             for file in &files {
-                if index.add_path(file).is_ok() {
+                if index.add_path(&git_relative_path(file)).is_ok() {
                     added += 1;
                 }
             }
@@ -46,8 +46,8 @@ pub fn git_stage_impl(
 
         let mut added = 0;
         for path in pathspecs {
-            let p = std::path::Path::new(path);
-            if let Err(e) = index.add_path(p) {
+            let p = crate::snapshot::ignore_resolver::git_relative_path(std::path::Path::new(path));
+            if let Err(e) = index.add_path(&p) {
                 return GitOperationResult {
                     ok: false, action: "stage".to_string(),
                     message: format!("add {:?}: {}", path, e.message()), backup_ref: None,

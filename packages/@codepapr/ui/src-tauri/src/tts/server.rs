@@ -76,7 +76,9 @@ impl GptSovitsServer {
             .arg("-p")
             .arg(GPT_SOVITS_API_PORT.to_string())
             .arg("-a")
-            .arg("0.0.0.0")
+            // 只绑回环地址：所有客户端调用都走 127.0.0.1，绑 0.0.0.0 会把
+            // GPT-SoVITS API（含 /set_model 等接受文件路径的端点）暴露给局域网。
+            .arg("127.0.0.1")
             .arg("-d")
             .arg(device)
             .current_dir(&self.api_path)

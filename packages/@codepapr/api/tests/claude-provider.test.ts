@@ -208,6 +208,108 @@ describe('ClaudeProvider', () => {
     expect(response?.usage?.output_tokens).toBe(5);
   });
 
+  it('P1-15: message_delta usage merges instead of clobbering message_start input/cache tokens', async () => {
+    // message_start 携带 input_tokens + cache_creation；message_delta 只带
+    // output_tokens。旧实现整体替换 → input/cache 统计归零。必须按字段合并。
+    const chunks = [
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"claude-usage","usage":{"input_tokens":120,"output_tokens":0,"cache_creation_input_tokens":30,"cache_read_input_tokens":40}}}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":9}}\n\n',
+      'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+    ].join('');
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(chunks, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new ClaudeProvider({ apiKey: 'test-key' });
+    const response = await provider.streamChat?.(
+      {
+        model: 'claude-sonnet-4-6',
+        messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+        maxTokens: 1024,
+      },
+      () => undefined
+    );
+
+    expect(response?.usage?.input_tokens).toBe(120);
+    expect(response?.usage?.cache_creation_input_tokens).toBe(30);
+    expect(response?.usage?.cache_read_input_tokens).toBe(40);
+    expect(response?.usage?.output_tokens).toBe(9);
+  });
+
+  it('P0-3: parallel tool calls merge into one user message and omit empty text blocks', async () => {
+    // 并行工具调用：assistant 一条消息带两个 tool_use，随后两条 tool 结果消息。
+    // Anthropic 要求角色严格交替且拒绝空 text 块——两条 tool_result 必须合并进
+    // 同一个 user 消息，空 assistant 文本不得产生空 text 块。
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 'claude-1',
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'done' }],
+        model: 'claude-sonnet',
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new ClaudeProvider({ apiKey: 'test-key' });
+    await provider.chat({
+      model: 'claude-sonnet-4-6',
+      messages: [
+        { id: 'u1', role: 'user', content: 'do two things', timestamp: 1 },
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          timestamp: 2,
+          toolCalls: [
+            { id: 'tc-1', name: 'read', arguments: { path: 'a' } },
+            { id: 'tc-2', name: 'read', arguments: { path: 'b' } },
+          ],
+        },
+        {
+          id: 't1',
+          role: 'tool',
+          content: 'result-a',
+          timestamp: 3,
+          toolResult: { toolCallId: 'tc-1', result: 'A', success: true },
+        },
+        {
+          id: 't2',
+          role: 'tool',
+          content: 'result-b',
+          timestamp: 4,
+          toolResult: { toolCallId: 'tc-2', result: 'B', success: true },
+        },
+      ],
+      maxTokens: 1024,
+    });
+
+    const [, options] = fetchMock.mock.calls[0] ?? [];
+    const body = JSON.parse((options as RequestInit).body as string) as {
+      messages: Array<{ role: string; content: Array<{ type: string }> }>;
+    };
+
+    // 角色必须严格交替：user, assistant, user（两条 tool_result 合并）
+    expect(body.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user']);
+
+    // assistant 消息：空文本不产生 text 块，只保留两个 tool_use
+    const assistantBlocks = body.messages[1].content;
+    expect(assistantBlocks.filter((b) => b.type === 'text')).toHaveLength(0);
+    expect(assistantBlocks.filter((b) => b.type === 'tool_use')).toHaveLength(2);
+
+    // 合并后的 user 消息包含两个 tool_result
+    const mergedUserBlocks = body.messages[2].content;
+    expect(mergedUserBlocks.filter((b) => b.type === 'tool_result')).toHaveLength(2);
+  });
+
   it('wraps mid-stream body breaks into a retriable ProviderRequestError once content was emitted', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       brokenSseResponse(

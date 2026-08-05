@@ -155,7 +155,7 @@ impl DiffEngine {
         let tree = commit.tree()
             .map_err(|e| format!("commit tree: {}", e.message()))?;
 
-        let entry = tree.get_path(std::path::Path::new(path))
+        let entry = tree.get_path(&super::ignore_resolver::git_relative_path(std::path::Path::new(path)))
             .map_err(|e| format!("get_path {}: {}", path, e.message()))?;
         let blob = repo.find_blob(entry.id())
             .map_err(|e| format!("find_blob: {}", e.message()))?;

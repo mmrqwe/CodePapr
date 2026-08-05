@@ -90,7 +90,10 @@ function analyzeChangeImpactInternal(
     }
   }
 
+  // 从 file 节点出发经 imports/reexports 反向 BFS 能到达的只有 file 节点
+  // （file→file 边）：旧实现用 kind !== 'file' 恰好把可达节点全部排除，
+  // 导致影响分析恒为空。
   return graph.nodes.filter(
-    (n) => impacted.has(n.id) && n.kind !== 'file',
+    (n) => impacted.has(n.id) && n.kind === 'file',
   );
 }
