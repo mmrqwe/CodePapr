@@ -56,6 +56,8 @@ pub(crate) struct ReadWindow {
 pub(crate) struct WriteFileResult {
     pub(crate) path: String,
     pub(crate) bytes: usize,
+    /// 非 UTF-8（或带 BOM）文件按原编码回写时的编码标识
+    pub(crate) encoding: Option<String>,
     pub(crate) change: WriteFileChangeSummary,
 }
 

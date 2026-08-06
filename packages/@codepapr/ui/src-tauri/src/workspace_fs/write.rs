@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::shared::{
     canonical_workspace, normalize_relative_path, relative_string, run_blocking_workspace_task,
@@ -7,8 +8,11 @@ use crate::shared::{
 };
 
 use super::diff::compute_line_change_summary;
+use super::read::{decode_text_bytes, detect_text_encoding, encode_text_with_encoding};
 use super::types::WriteFileResult;
 use super::MAX_WRITE_BYTES;
+
+static TMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[tauri::command]
 pub(crate) async fn write_text_file(
@@ -22,7 +26,7 @@ pub(crate) async fn write_text_file(
     .await
 }
 
-fn write_text_file_impl(
+pub(crate) fn write_text_file_impl(
     workspace_path: String,
     relative_path: String,
     content: String,
@@ -46,10 +50,14 @@ fn write_text_file_impl(
         }
     };
     let existed_before = target.exists();
-    let previous_content = if existed_before {
-        fs::read_to_string(&target).ok()
-    } else {
-        None
+    // 原文件内容与编码：变更摘要需要解码后的文本；编码用于按原编码回写，
+    // 避免编辑 GBK/UTF-16/BOM 文件时静默转码
+    let (previous_content, original_encoding) = match fs::read(&target) {
+        Ok(bytes) => {
+            let encoding = detect_text_encoding(&bytes);
+            (decode_text_bytes(bytes).ok(), encoding)
+        }
+        Err(_) => (None, None),
     };
     let parent = target
         .parent()
@@ -61,15 +69,25 @@ fn write_text_file_impl(
         return Err("拒绝写入项目文件夹之外的路径".to_string());
     }
 
+    let (bytes_to_write, encoding_label) = match original_encoding {
+        Some(encoding) => (
+            encode_text_with_encoding(&content, encoding),
+            Some(encoding.label().to_string()),
+        ),
+        None => (content.as_bytes().to_vec(), None),
+    };
+
+    let sequence = TMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
     let tmp = target.with_extension(format!(
-        "{}.{}.tmp",
+        "{}.{}.{}.tmp",
         target
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or(""),
-        std::process::id()
+        std::process::id(),
+        sequence
     ));
-    if let Err(err) = fs::write(&tmp, content.as_bytes()) {
+    if let Err(err) = fs::write(&tmp, &bytes_to_write) {
         let _ = fs::remove_file(&tmp);
         return Err(format!("写入文件 {} 失败: {err}", target.display()));
     }
@@ -80,7 +98,8 @@ fn write_text_file_impl(
 
     Ok(WriteFileResult {
         path: relative_string(&workspace, &target),
-        bytes: content.len(),
+        bytes: bytes_to_write.len(),
+        encoding: encoding_label,
         change: compute_line_change_summary(existed_before, previous_content.as_deref(), &content),
     })
 }

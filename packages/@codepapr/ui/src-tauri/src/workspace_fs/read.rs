@@ -399,50 +399,103 @@ pub(crate) fn read_image_file_impl(
     })
 }
 
-pub(crate) fn decode_text_bytes(bytes: Vec<u8>) -> Result<String, String> {
-    // UTF-8 BOM：剥离后按正常流程解码
-    if let Some(rest) = bytes.strip_prefix(b"\xef\xbb\xbf") {
-        return decode_text_bytes(rest.to_vec());
-    }
+/// 文本编码探测结果。写入时按原编码回写，避免编辑导致静默转码/BOM 丢失。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TextEncoding {
+    Utf8,
+    Utf8Bom,
+    Utf16LeBom,
+    Utf16BeBom,
+    /// 无 BOM，启发式识别
+    Utf16Le,
+    Utf16Be,
+    /// GBK/GB2312 超集
+    Gb18030,
+}
 
-    // UTF-16 BOM（必须在二进制检测之前，UTF-16 内容含 NUL 字节）
-    if let Some(rest) = bytes.strip_prefix(b"\xff\xfe") {
-        return decode_utf16(rest, encoding_rs::UTF_16LE);
+impl TextEncoding {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            TextEncoding::Utf8 => "utf-8",
+            TextEncoding::Utf8Bom => "utf-8-bom",
+            TextEncoding::Utf16LeBom | TextEncoding::Utf16Le => "utf-16le",
+            TextEncoding::Utf16BeBom | TextEncoding::Utf16Be => "utf-16be",
+            TextEncoding::Gb18030 => "gb18030",
+        }
     }
-    if let Some(rest) = bytes.strip_prefix(b"\xfe\xff") {
-        return decode_utf16(rest, encoding_rs::UTF_16BE);
-    }
+}
 
-    // 无 BOM 的 UTF-16 启发式（NUL 字节集中在奇/偶数位）
-    if let Some(content) = decode_utf16_without_bom(&bytes) {
-        return Ok(content);
+/// 探测字节序列的文本编码；二进制内容返回 None。
+pub(crate) fn detect_text_encoding(bytes: &[u8]) -> Option<TextEncoding> {
+    if bytes.starts_with(b"\xef\xbb\xbf") {
+        return Some(TextEncoding::Utf8Bom);
     }
-
-    if is_probably_binary_content(&bytes) {
-        return Err("文件包含二进制内容，拒绝作为文本读取".to_string());
+    // UTF-16 BOM 必须在二进制检测之前（UTF-16 内容含 NUL 字节）
+    if bytes.starts_with(b"\xff\xfe") {
+        return Some(TextEncoding::Utf16LeBom);
     }
-
-    match String::from_utf8(bytes) {
-        Ok(content) => Ok(content),
-        Err(error) => {
-            let bytes = error.into_bytes();
-            if is_probably_binary_content(&bytes) {
-                return Err("文件包含二进制内容，拒绝作为文本读取".to_string());
+    if bytes.starts_with(b"\xfe\xff") {
+        return Some(TextEncoding::Utf16BeBom);
+    }
+    if let Some(encoding) = detect_utf16_without_bom(bytes) {
+        return Some(encoding);
+    }
+    if is_probably_binary_content(bytes) {
+        return None;
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(_) => Some(TextEncoding::Utf8),
+        Err(err) => {
+            // 仅尾部不完整序列（按字节上限截断导致）仍视为 UTF-8，
+            // 避免落入 GB18030 兜底在截断点产生乱码
+            if err.error_len().is_none() && err.valid_up_to() >= bytes.len().saturating_sub(3) {
+                return Some(TextEncoding::Utf8);
             }
+            Some(TextEncoding::Gb18030)
+        }
+    }
+}
 
-            // 非 UTF-8 文本按 GB18030 兜底（GBK/GB2312 超集，中文老项目常见编码）
+pub(crate) fn decode_text_bytes(bytes: Vec<u8>) -> Result<String, String> {
+    let Some(encoding) = detect_text_encoding(&bytes) else {
+        return Err("文件包含二进制内容，拒绝作为文本读取".to_string());
+    };
+
+    match encoding {
+        TextEncoding::Utf8Bom => decode_utf8_body(&bytes[3..]),
+        TextEncoding::Utf16LeBom => decode_utf16(&bytes[2..], encoding_rs::UTF_16LE),
+        TextEncoding::Utf16BeBom => decode_utf16(&bytes[2..], encoding_rs::UTF_16BE),
+        TextEncoding::Utf16Le => decode_utf16(&bytes, encoding_rs::UTF_16LE),
+        TextEncoding::Utf16Be => decode_utf16(&bytes, encoding_rs::UTF_16BE),
+        TextEncoding::Utf8 => decode_utf8_body(&bytes),
+        TextEncoding::Gb18030 => {
             let (decoded, _, had_errors) = encoding_rs::GB18030.decode(&bytes);
             if !had_errors {
                 return Ok(decoded.into_owned());
             }
-
             Ok(String::from_utf8_lossy(&bytes).into_owned())
         }
     }
 }
 
+fn decode_utf8_body(bytes: &[u8]) -> Result<String, String> {
+    match std::str::from_utf8(bytes) {
+        Ok(content) => Ok(content.to_string()),
+        Err(err) if err.error_len().is_none() => {
+            // 尾部不完整多字节序列（截断导致）：修剪后解码
+            let trimmed = &bytes[..err.valid_up_to()];
+            std::str::from_utf8(trimmed)
+                .map(|content| content.to_string())
+                .map_err(|err| format!("UTF-8 解码失败: {err}"))
+        }
+        Err(err) => Err(format!("UTF-8 解码失败: {err}")),
+    }
+}
+
 fn decode_utf16(bytes: &[u8], encoding: &'static encoding_rs::Encoding) -> Result<String, String> {
-    let (decoded, _, had_errors) = encoding.decode(bytes);
+    // 按字节上限截断可能落在奇数字节：丢弃尾部半个码元而不是报错
+    let usable = bytes.len() / 2 * 2;
+    let (decoded, _, had_errors) = encoding.decode(&bytes[..usable]);
     if had_errors {
         return Err("文件包含二进制内容，拒绝作为文本读取".to_string());
     }
@@ -451,8 +504,8 @@ fn decode_utf16(bytes: &[u8], encoding: &'static encoding_rs::Encoding) -> Resul
 
 /// 无 BOM UTF-16 启发式：NUL 字节集中出现在奇数位（LE）或偶数位（BE），
 /// 且另一侧几乎没有 NUL。典型场景：Windows 工具生成的 ASCII 为主的 UTF-16 文件。
-fn decode_utf16_without_bom(bytes: &[u8]) -> Option<String> {
-    if bytes.len() < 4 || bytes.len() % 2 != 0 {
+fn detect_utf16_without_bom(bytes: &[u8]) -> Option<TextEncoding> {
+    if bytes.len() < 4 {
         return None;
     }
 
@@ -469,9 +522,9 @@ fn decode_utf16_without_bom(bytes: &[u8]) -> Option<String> {
     }
 
     let (dominant, other, encoding) = if odd_nuls >= even_nuls {
-        (odd_nuls, even_nuls, encoding_rs::UTF_16LE)
+        (odd_nuls, even_nuls, TextEncoding::Utf16Le)
     } else {
-        (even_nuls, odd_nuls, encoding_rs::UTF_16BE)
+        (even_nuls, odd_nuls, TextEncoding::Utf16Be)
     };
 
     // 主导侧 NUL 占比需 >= 25%，且另一侧 NUL 极少，避免误判真正的二进制
@@ -479,9 +532,66 @@ fn decode_utf16_without_bom(bytes: &[u8]) -> Option<String> {
         return None;
     }
 
-    let (decoded, _, had_errors) = encoding.decode(bytes);
+    // 校验可解码性（截断的尾部奇数字节在解码阶段丢弃）
+    let usable = bytes.len() / 2 * 2;
+    let rs_encoding = match encoding {
+        TextEncoding::Utf16Le => encoding_rs::UTF_16LE,
+        _ => encoding_rs::UTF_16BE,
+    };
+    let (_, _, had_errors) = rs_encoding.decode(&bytes[..usable]);
     if had_errors {
         return None;
     }
-    Some(decoded.into_owned())
+    Some(encoding)
+}
+
+/// 按指定编码回写文本内容（BOM 随编码变体保留/省略）。
+pub(crate) fn encode_text_with_encoding(content: &str, encoding: TextEncoding) -> Vec<u8> {
+    match encoding {
+        TextEncoding::Utf8 => content.as_bytes().to_vec(),
+        TextEncoding::Utf8Bom => {
+            let mut out = Vec::with_capacity(3 + content.len());
+            out.extend_from_slice(b"\xef\xbb\xbf");
+            out.extend_from_slice(content.as_bytes());
+            out
+        }
+        TextEncoding::Utf16LeBom | TextEncoding::Utf16Le => {
+            let mut out = Vec::with_capacity(content.len() * 2 + 2);
+            if encoding == TextEncoding::Utf16LeBom {
+                out.extend_from_slice(b"\xff\xfe");
+            }
+            for unit in content.encode_utf16() {
+                out.extend_from_slice(&unit.to_le_bytes());
+            }
+            out
+        }
+        TextEncoding::Utf16BeBom | TextEncoding::Utf16Be => {
+            let mut out = Vec::with_capacity(content.len() * 2 + 2);
+            if encoding == TextEncoding::Utf16BeBom {
+                out.extend_from_slice(b"\xfe\xff");
+            }
+            for unit in content.encode_utf16() {
+                out.extend_from_slice(&unit.to_be_bytes());
+            }
+            out
+        }
+        // encoding_rs 的 UTF-16 编码器被规范禁用（会输出 UTF-8），故手工编码；
+        // GB18030 编码器可用且覆盖全部 Unicode
+        TextEncoding::Gb18030 => encode_with(encoding_rs::GB18030, content),
+    }
+}
+
+fn encode_with(encoding: &'static encoding_rs::Encoding, content: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(content.len() * 4);
+    let mut encoder = encoding.new_encoder();
+    let mut input = content;
+    loop {
+        let (result, read, _) = encoder.encode_from_utf8_to_vec(input, &mut out, true);
+        input = &input[read..];
+        match result {
+            encoding_rs::CoderResult::InputEmpty => break,
+            encoding_rs::CoderResult::OutputFull => continue,
+        }
+    }
+    out
 }

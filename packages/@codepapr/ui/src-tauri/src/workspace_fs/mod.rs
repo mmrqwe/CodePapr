@@ -39,7 +39,8 @@ pub(crate) const DEFAULT_SEARCH_MAX_MATCHES_PER_FILE: usize = 5;
 pub(crate) const MAX_SEARCH_MAX_MATCHES_PER_FILE: usize = 20;
 
 pub(crate) fn should_ignore_dir(name: &str) -> bool {
-    name.starts_with('.') || IGNORED_DIRS.contains(&name)
+    // 仅排除 .git 与重型目录：.github/.vscode 等点目录允许被搜索与列出
+    name == ".git" || IGNORED_DIRS.contains(&name)
 }
 
 /// Returns true when any path component is an ignored directory (e.g.
@@ -65,7 +66,30 @@ pub(crate) fn should_ignore_file(name: &str) -> bool {
 
 const IGNORED_FILES: &[&str] = &[".ds_store", "thumbs.db", "ehthumbs.db", "desktop.ini"];
 
-pub(crate) const IGNORED_DIRS: &[&str] = &["node_modules", "target", "dist", "build", "coverage"];
+const IGNORED_DIRS: &[&str] = &[
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "coverage",
+    "__pycache__",
+    ".venv",
+    ".idea",
+    ".next",
+    ".nuxt",
+    ".cache",
+    ".turbo",
+    ".gradle",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+    ".parcel-cache",
+    // 应用自身的项目级状态目录（非 git 项目中无 gitignore 保护）
+    ".CodePapr",
+    ".ProjectGraph",
+    ".scratch",
+];
 
 #[cfg(test)]
 mod tests;

@@ -285,9 +285,8 @@ pub(crate) fn collect_search_matches(
                 .unwrap_or(true)
         });
 
-    if max_filesize > 0 {
-        builder.max_filesize(Some(max_filesize as u64));
-    }
+    // 不使用 builder.max_filesize 预过滤：超限文件需要计入 skipped_files，
+    // 让调用方知道 0 结果不等于全库无匹配（改在访问条目时检查大小）
 
     let walker = builder.build_parallel();
     let workspace_ref = &workspace_owned;
@@ -320,6 +319,15 @@ pub(crate) fn collect_search_matches(
             };
             if !file_type.is_file() {
                 return ignore::WalkState::Continue;
+            }
+            if max_filesize > 0 {
+                if let Ok(metadata) = entry.metadata() {
+                    if metadata.len() > max_filesize as u64 {
+                        // 超过单文件大小上限：计入 skipped，不读取内容
+                        skipped.fetch_add(1, Ordering::Relaxed);
+                        return ignore::WalkState::Continue;
+                    }
+                }
             }
 
             let path = entry.into_path();

@@ -74,9 +74,12 @@ fn collect_entries(
         }
 
         let path = child.path();
-        let metadata = child
-            .metadata()
-            .map_err(|err| format!("无法读取文件信息 {}: {err}", path.display()))?;
+        // symlink_metadata 不跟随符号链接：坏软链不会让整个列表失败；
+        // 个别条目元数据读取失败时跳过而不是报错
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
         let is_dir = metadata.is_dir();
         let name = child.file_name().to_string_lossy().to_string();
 
@@ -95,7 +98,7 @@ fn collect_entries(
             bytes: if is_dir { 0 } else { metadata.len() },
         });
 
-        if is_dir && depth < max_depth && !should_ignore_dir(&name) {
+        if is_dir && depth < max_depth {
             collect_entries(workspace, &path, depth + 1, max_depth, entries, truncated)?;
         }
     }

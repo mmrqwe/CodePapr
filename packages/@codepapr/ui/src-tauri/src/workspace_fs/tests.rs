@@ -518,6 +518,237 @@ fn search_workspace_text_counts_skipped_binary_files() {
 }
 
 #[test]
+fn write_text_file_preserves_utf16le_bom_encoding() {
+    let workspace = TestWorkspace::new("write-utf16");
+    let mut original = vec![0xFF, 0xFE];
+    for unit in "hello\n".encode_utf16() {
+        original.extend_from_slice(&unit.to_le_bytes());
+    }
+    fs::write(workspace.file_path("utf16.txt"), &original).expect("should write fixture");
+
+    let result = write::write_text_file_impl(
+        workspace.workspace_arg(),
+        "utf16.txt".to_string(),
+        "world\n".to_string(),
+    )
+    .expect("write should succeed");
+
+    assert_eq!(result.encoding.as_deref(), Some("utf-16le"));
+    let bytes = fs::read(workspace.file_path("utf16.txt")).expect("should read back");
+    assert_eq!(bytes, [0xFF, 0xFE, b'w', 0, b'o', 0, b'r', 0, b'l', 0, b'd', 0, 0x0A, 0]);
+}
+
+#[test]
+fn write_text_file_preserves_gbk_encoding() {
+    let workspace = TestWorkspace::new("write-gbk");
+    // 「你好」的 GBK 编码
+    fs::write(workspace.file_path("gbk.txt"), b"\xC4\xE3\xBA\xC3")
+        .expect("should write fixture");
+
+    let result = write::write_text_file_impl(
+        workspace.workspace_arg(),
+        "gbk.txt".to_string(),
+        "世界abc".to_string(),
+    )
+    .expect("write should succeed");
+
+    assert_eq!(result.encoding.as_deref(), Some("gb18030"));
+    let bytes = fs::read(workspace.file_path("gbk.txt")).expect("should read back");
+    assert_eq!(bytes, b"\xCA\xC0\xBD\xE7abc");
+}
+
+#[test]
+fn write_text_file_preserves_utf8_bom() {
+    let workspace = TestWorkspace::new("write-bom");
+    fs::write(workspace.file_path("bom.txt"), b"\xef\xbb\xbfhello\n")
+        .expect("should write fixture");
+
+    let result = write::write_text_file_impl(
+        workspace.workspace_arg(),
+        "bom.txt".to_string(),
+        "world\n".to_string(),
+    )
+    .expect("write should succeed");
+
+    assert_eq!(result.encoding.as_deref(), Some("utf-8-bom"));
+    let bytes = fs::read(workspace.file_path("bom.txt")).expect("should read back");
+    assert_eq!(bytes, b"\xef\xbb\xbfworld\n");
+}
+
+#[test]
+fn write_text_file_new_file_is_plain_utf8() {
+    let workspace = TestWorkspace::new("write-new");
+
+    let result = write::write_text_file_impl(
+        workspace.workspace_arg(),
+        "new.txt".to_string(),
+        "plain\n".to_string(),
+    )
+    .expect("write should succeed");
+
+    assert_eq!(result.encoding, None);
+    let bytes = fs::read(workspace.file_path("new.txt")).expect("should read back");
+    assert_eq!(bytes, b"plain\n");
+}
+
+#[test]
+fn write_text_file_change_summary_works_for_gbk_files() {
+    let workspace = TestWorkspace::new("write-gbk-summary");
+    // 「第一行\n第二行\n」的 GBK 编码
+    fs::write(
+        workspace.file_path("gbk.txt"),
+        b"\xB5\xDA\xD2\xBB\xD0\xD0\n\xB5\xDA\xB6\xFE\xD0\xD0\n",
+    )
+    .expect("should write fixture");
+
+    let result = write::write_text_file_impl(
+        workspace.workspace_arg(),
+        "gbk.txt".to_string(),
+        "第一行\n第三行\n".to_string(),
+    )
+    .expect("write should succeed");
+
+    // 旧内容能正确解码时，摘要应是增量 diff 而不是整文件当新增
+    assert_eq!(result.change.kind, "updated");
+    assert_eq!(result.change.added, 1);
+    assert_eq!(result.change.deleted, 1);
+}
+
+#[test]
+fn read_text_file_handles_utf16_truncated_at_odd_byte() {
+    let workspace = TestWorkspace::new("read-utf16-trunc");
+    let mut bytes = vec![0xFF, 0xFE];
+    let text = "x".repeat(600);
+    for unit in text.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    fs::write(workspace.file_path("utf16.txt"), &bytes).expect("should write fixture");
+
+    // 1202 字节 = BOM(2) + 600 码元(1200)；上限 1000 会落在奇数字节
+    let result = read::read_text_file_impl(
+        workspace.workspace_arg(),
+        "utf16.txt".to_string(),
+        Some(1000),
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("truncated utf-16 read should not fail");
+
+    assert!(result.truncated_by_bytes);
+    assert!(result.content.starts_with('x'));
+}
+
+#[test]
+fn read_text_file_trims_incomplete_utf8_tail_at_truncation() {
+    let workspace = TestWorkspace::new("read-utf8-trunc");
+    // 999 个 a + 「汉」(3 字节) = 1002 字节；上限 1000 落在多字节序列中间
+    let mut text = "a".repeat(999);
+    text.push('汉');
+    fs::write(workspace.file_path("note.txt"), text.as_bytes()).expect("should write fixture");
+
+    let result = read::read_text_file_impl(
+        workspace.workspace_arg(),
+        "note.txt".to_string(),
+        Some(1000),
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("truncated utf-8 read should not fail");
+
+    assert!(result.truncated_by_bytes);
+    // 不完整尾部序列被修剪：不应出现替换字符或 GB18030 乱码
+    assert_eq!(result.content, "a".repeat(999));
+}
+
+#[cfg(unix)]
+#[test]
+fn list_workspace_files_survives_broken_symlink() {
+    let workspace = TestWorkspace::new("list-broken-symlink");
+    fs::write(workspace.file_path("real.txt"), b"content\n").expect("should write fixture");
+    std::os::unix::fs::symlink(
+        workspace.file_path("missing-target.txt"),
+        workspace.file_path("broken-link"),
+    )
+    .expect("should create symlink");
+
+    let result = list::list_workspace_files_impl(workspace.workspace_arg(), None, Some(2))
+        .expect("broken symlink should not break listing");
+
+    let paths: Vec<String> = result.entries.iter().map(|e| e.path.clone()).collect();
+    assert!(paths.contains(&"real.txt".to_string()));
+}
+
+#[test]
+fn search_workspace_text_includes_dot_dirs_but_excludes_git() {
+    let workspace = TestWorkspace::new("search-dot-dirs");
+    fs::create_dir_all(workspace.file_path(".github/workflows"))
+        .expect("should create .github dir");
+    fs::create_dir_all(workspace.file_path(".git")).expect("should create .git dir");
+    fs::write(
+        workspace.file_path(".github/workflows/ci.yml"),
+        b"needle-dotdir\n",
+    )
+    .expect("should write fixture");
+    fs::write(workspace.file_path(".git/config"), b"needle-git\n")
+        .expect("should write fixture");
+
+    let result = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "needle-dotdir".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("search should succeed");
+    assert_eq!(result.matches.len(), 1);
+    assert_eq!(result.matches[0].path, ".github/workflows/ci.yml");
+
+    let git_result = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "needle-git".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("search should succeed");
+    assert!(git_result.matches.is_empty());
+}
+
+#[test]
+fn search_workspace_text_counts_oversized_files_as_skipped() {
+    let workspace = TestWorkspace::new("search-oversized");
+    fs::write(workspace.file_path("small.txt"), b"needle small\n")
+        .expect("should write fixture");
+    fs::write(workspace.file_path("big.txt"), vec![b'x'; 4096])
+        .expect("should write fixture");
+
+    let result = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "needle".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(2000),
+    )
+    .expect("search should succeed");
+
+    assert_eq!(result.matches.len(), 1);
+    assert_eq!(result.skipped_files, 1);
+}
+
+#[test]
 fn list_workspace_files_excludes_ds_store_and_ignored_dirs() {
     let workspace = TestWorkspace::new("list-ignore-noise");
     fs::create_dir_all(workspace.file_path("src")).expect("should create src dir");

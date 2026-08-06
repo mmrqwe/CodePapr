@@ -120,6 +120,8 @@ export interface WriteFileArgs {
 export interface WriteTextFileResult {
   path: string;
   bytes: number;
+  /** 非 UTF-8（或带 BOM）文件按原编码回写时的编码标识 */
+  encoding?: string;
   change: WriteFileChangeSummary;
 }
 
