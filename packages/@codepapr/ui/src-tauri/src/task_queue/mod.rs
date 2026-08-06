@@ -132,7 +132,7 @@ pub(crate) fn task_worker(rx: std::sync::mpsc::Receiver<WorkspaceTask>) {
                 timeout_seconds,
             } => {
                 let res =
-                    run_workspace_command_impl(workspace_path, command, args, timeout_seconds);
+                    run_workspace_command_impl(workspace_path, command, args, timeout_seconds, None);
                 WorkspaceTaskResult::RunCommand { id, result: res }
             }
         };
@@ -210,12 +210,19 @@ pub(crate) fn poll_workspace_task(task_id: u64) -> PollResult {
             }
         }
     };
-    let guard = state.lock().unwrap();
-    match guard.pending_results.get(&task_id) {
-        Some(result) => PollResult {
-            done: true,
-            result: Some(result.clone()),
-        },
+    let mut guard = state.lock().unwrap();
+    match guard.pending_results.remove(&task_id) {
+        Some(result) => {
+            // 已消费的结果立即移除：旧实现一直挂到 200 条驱逐上限，既占内存，
+            // 又挤占尚未轮询到的结果的缓冲位。
+            if let Some(pos) = guard.completed_order.iter().position(|id| *id == task_id) {
+                guard.completed_order.remove(pos);
+            }
+            PollResult {
+                done: true,
+                result: Some(result),
+            }
+        }
         None => PollResult {
             done: false,
             result: None,

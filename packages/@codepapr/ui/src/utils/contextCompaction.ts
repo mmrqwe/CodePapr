@@ -591,7 +591,9 @@ export function planContextCompaction(
   const sourceMessages = toCoreTailMessages(tailUI.slice(0, retainedUIStart));
   const finalRetainedMessages = toCoreTailMessages(tailUI.slice(retainedUIStart));
 
-  if (!priorCheckpoint && sourceMessages.length === 0 && finalRetainedMessages.length === 0) {
+  // 源为空就没有可压缩内容：旧实现仅在「无既有 checkpoint」时拦截，有 checkpoint
+  // 且保留尾覆盖全部时会拿空转录跑模型，把既有 checkpoint 换成退化版本。
+  if (sourceMessages.length === 0) {
     return noCompact;
   }
 

@@ -62,7 +62,9 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
         } catch { /* LSP 不可用，降级正则 */ }
       }
       const regexResult = await registry.execute('workspace_search_text', { ...args, isRegexp: true }) as Record<string, unknown>;
-      return { ...regexResult, degraded: true, note: '语义搜索不可用（无 LSP 或未指定锚点文件 relativePath），已降级正则搜索。' };
+      const semanticNote = '语义搜索不可用（无 LSP 或未指定锚点文件 relativePath），已降级正则搜索。';
+      const innerNote = typeof regexResult.note === 'string' ? regexResult.note : '';
+      return { ...regexResult, degraded: true, note: innerNote ? `${semanticNote} ${innerNote}` : semanticNote };
     }
     return await registry.execute('workspace_search_text', { ...args, isRegexp: true });
   });

@@ -20,6 +20,26 @@ export interface ArchitectureCheckResult {
   summary: string;
 }
 
+const MAX_LAYER_PATTERN_LENGTH = 200;
+// (a+)+ / (a*)* 这类嵌套量词是灾难性回溯（ReDoS）的主要来源。分层 pattern
+// 来自用户配置并会对每条边路径执行 test()，直接拒绝常见嵌套量词形态。
+const NESTED_QUANTIFIER_PATTERN =
+  /\([^()]*(?:[+*]|\{\d+,?\d*\})[^()]*\)(?:[+*?]|\{\d+,?\d*\})/;
+
+function compileLayerPattern(pattern: string): RegExp | null {
+  if (!pattern || pattern.length > MAX_LAYER_PATTERN_LENGTH) {
+    return null;
+  }
+  if (NESTED_QUANTIFIER_PATTERN.test(pattern)) {
+    return null;
+  }
+  try {
+    return new RegExp(pattern);
+  } catch {
+    return null;
+  }
+}
+
 export function checkArchitectureLayers(
   graph: WorkspaceProjectGraphResult,
   layers: ArchitectureLayer[],
@@ -30,13 +50,7 @@ export function checkArchitectureLayers(
   const compiledLayers = layers.map((layer) => ({
     ...layer,
     compiledPatterns: layer.patterns
-      .map((p) => {
-        try {
-          return new RegExp(p);
-        } catch {
-          return null;
-        }
-      })
+      .map(compileLayerPattern)
       .filter((re): re is RegExp => re !== null),
   }));
 

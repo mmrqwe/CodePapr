@@ -500,6 +500,13 @@ export function CodingWorkbench({
     } else {
       setIsWorkspaceSwitching(false);
     }
+    return () => {
+      // 卸载时清理：否则陈旧定时器会对已卸载组件 setState。
+      if (workspaceSwitchingTimerRef.current) {
+        clearTimeout(workspaceSwitchingTimerRef.current);
+        workspaceSwitchingTimerRef.current = null;
+      }
+    };
   }, [workspacePath]);
 
   const canStartProjectGraph = !isLoadingTree && hasAnyProjectMapCandidate(entries) && !!workspacePath;
@@ -535,6 +542,13 @@ export function CodingWorkbench({
         projectGraphLoadTimeoutRef.current = null;
       }
     }
+    return () => {
+      // 卸载时清理：否则陈旧回调会强制清掉新实例的 loading 标志。
+      if (projectGraphLoadTimeoutRef.current) {
+        clearTimeout(projectGraphLoadTimeoutRef.current);
+        projectGraphLoadTimeoutRef.current = null;
+      }
+    };
   }, [canStartProjectGraph]);
 
   useEffect(() => {

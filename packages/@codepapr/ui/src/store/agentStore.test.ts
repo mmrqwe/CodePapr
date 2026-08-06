@@ -2518,6 +2518,11 @@ describe('sendMessage /goal', () => {
         fastModel: 'deepseek-v4-flash',
       }),
       workspacePath: '/tmp/goal-test-workspace',
+      // 生产不变式：activeSessionId 必须存在于 sessions（sendMessage 的收尾
+      // 写入会跳过已不存在的会话）。
+      sessions: [
+        { id: 'session-1', name: 'goal', provider: 'deepseek', model: 'deepseek-v4-flash', createdAt: 1, updatedAt: 1 },
+      ],
       activeSessionId: 'session-1',
       messages: [],
       sessionMessages: { 'session-1': [] },

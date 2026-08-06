@@ -1,11 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import { ProviderRequestError } from '../src/providers/ILLMProvider';
 import {
+  applyStreamingToolCallDeltas,
+  finalizeStreamingToolCalls,
   readSseStream,
   safeParseToolArguments,
   StreamIdleTimeoutError,
   withStreamIdleRetry,
 } from '../src/providers/streaming';
+
+describe('finalizeStreamingToolCalls（P3：稀疏 delta 空洞）', () => {
+  it('skips holes explicitly and keeps call ids stable', () => {
+    // provider 的首个 delta 直接用 index=1（跳过 0）→ states 出现空洞。
+    const states = applyStreamingToolCallDeltas([], [
+      { index: 1, id: 'call-b', function: { name: 'beta', arguments: '{"x":1}' } },
+    ]);
+    const calls = finalizeStreamingToolCalls(states);
+    expect(calls).toHaveLength(1);
+    expect(calls?.[0].id).toBe('call-b');
+    expect(calls?.[0].name).toBe('beta');
+  });
+
+  it('returns undefined when every slot is a hole', () => {
+    const states: Parameters<typeof finalizeStreamingToolCalls>[0] = [];
+    states[2] = undefined as never; // 制造空洞
+    states.length = 3;
+    expect(finalizeStreamingToolCalls(states)).toBeUndefined();
+  });
+});
 
 describe('safeParseToolArguments JSON 修复（P2-18：字符串感知）', () => {
   it('does not corrupt string values containing ", }" while repairing trailing commas', () => {

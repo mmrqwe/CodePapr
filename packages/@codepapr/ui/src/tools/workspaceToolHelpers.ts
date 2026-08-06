@@ -401,12 +401,20 @@ export interface SearchResult {
   query: string;
   matches: SearchMatch[];
   truncated: boolean;
+  /** 正则编译失败后已降级为字面量搜索 */
+  regexDegraded?: boolean;
+  /** 因读取失败/解码失败（二进制）/超出大小限制而被跳过的文件数 */
+  skippedFiles?: number;
+  note?: string;
 }
 
 export interface PathSearchResult {
   query: string;
   matches: PathSearchMatch[];
   truncated: boolean;
+  /** 正则编译失败后已降级为字面量搜索 */
+  regexDegraded?: boolean;
+  note?: string;
 }
 
 export interface DownloadFileResult {

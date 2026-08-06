@@ -206,6 +206,16 @@ describe('updateTodoList', () => {
     expect(task.retries).toBe(3);
   });
 
+  it('P3: bumpRetry 与 failed 转换同时出现只计一次重试', () => {
+    const ctx = makeContext([{ id: 'a', status: 'running' }]);
+    const updated = updateTodoList(ctx, [{ id: 'a', status: 'failed', bumpRetry: true }]);
+
+    const task = updated.tasks.find((t) => t.id === 'a')!;
+    // 旧实现两条路径各 +1 → 2，提前耗尽 maxRetries；修复后只 +1。
+    expect(task.retries).toBe(1);
+    expect(task.status).toBe('pending');
+  });
+
   it('同时更新多条任务', () => {
     const ctx = makeContext([{ id: 'a', status: 'pending' }, { id: 'b', status: 'pending' }]);
     const updated = updateTodoList(ctx, [

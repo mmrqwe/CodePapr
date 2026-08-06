@@ -647,6 +647,7 @@ dependencies = [
  "base64 0.22.1",
  "bitflags 2.11.1",
  "block2",
+ "encoding_rs",
  "flate2",
  "futures-util",
  "git2",

@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
     use crate::shell::background::{
-        run_workspace_command_impl, scan_script_for_version_constraint,
+        drain_capped_output, run_workspace_command_impl, scan_script_for_version_constraint,
+        MAX_OUTPUT_BYTES,
     };
     use crate::shell::guard::find_unquoted_shell_version_constraint;
     use crate::shell::session::{
@@ -199,6 +200,7 @@ mod tests {
             "./install.sh".to_string(),
             None,
             Some(5),
+            None,
         );
 
         assert!(result.is_err());
@@ -215,5 +217,37 @@ mod tests {
             !workspace.file_path("=0.27.0").exists(),
             "empty redirect file should not have been created"
         );
+    }
+
+    // P3：输出缓冲必须有上限（旧实现 read_to_end 无上限会撑爆内存），
+    // 但超限后仍要持续读完（否则子进程阻塞在满管道上直到超时）。
+    #[test]
+    fn drain_capped_output_caps_buffer_but_keeps_draining() {
+        use std::cell::Cell;
+        use std::io::Read;
+        use std::rc::Rc;
+
+        struct CountingReader {
+            remaining: usize,
+            consumed: Rc<Cell<usize>>,
+        }
+        impl Read for CountingReader {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n = buf.len().min(self.remaining);
+                self.remaining -= n;
+                self.consumed.set(self.consumed.get() + n);
+                Ok(n)
+            }
+        }
+
+        let total = MAX_OUTPUT_BYTES * 3;
+        let consumed = Rc::new(Cell::new(0));
+        let reader = CountingReader {
+            remaining: total,
+            consumed: Rc::clone(&consumed),
+        };
+        let buffer = drain_capped_output(reader);
+        assert_eq!(buffer.len(), MAX_OUTPUT_BYTES, "保留内容不得超过上限");
+        assert_eq!(consumed.get(), total, "超限后仍必须读到 EOF");
     }
 }

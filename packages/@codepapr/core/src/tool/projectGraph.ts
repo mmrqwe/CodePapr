@@ -235,6 +235,10 @@ interface FileModuleContext {
   references: ModuleReference[];
   importedSymbols: Map<string, ModuleBinding[]>;
   importedNamespaces: Map<string, ModuleBinding>;
+  /** 看起来是项目内导入（相对路径 / crate:: / mod 声明）但未能解析的数量。
+   *  references 只记录解析成功的导入，质量指标需要它当分母的一部分，
+   *  否则 importResolutionRate 结构性恒等于 1。外部包导入不计入。 */
+  unresolvedLocalImports?: number;
 }
 
 interface RelationTargetDescriptor {
@@ -1008,6 +1012,11 @@ function buildJsTsModuleContext(sourcePath: string, content: string, allFiles: R
   const references: ModuleReference[] = [];
   const importedSymbols = new Map<string, ModuleBinding[]>();
   const importedNamespaces = new Map<string, ModuleBinding>();
+  let unresolvedLocalImports = 0;
+  // 相对/绝对路径导入必须解析到项目文件；解析失败说明图有缺口。
+  // 裸包名（react、lodash 等）属于外部依赖，不计入。
+  const isLocalSpecifier = (specifier: string): boolean =>
+    specifier.startsWith('./') || specifier.startsWith('../') || specifier.startsWith('/');
   const staticModulePattern = /(?:^|\n)\s*(import|export)\s+([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g;
   const dynamicModulePatterns: Array<{ pattern: RegExp; kind: ModuleReference['kind'] }> = [
     { pattern: /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g, kind: 'imports' },
@@ -1020,6 +1029,10 @@ function buildJsTsModuleContext(sourcePath: string, content: string, allFiles: R
     const clause = collapseWhitespace(staticMatch[2] ?? '');
     const specifier = staticMatch[3]?.trim() ?? '';
     const targetPath = resolveImportTarget(sourcePath, specifier, allFiles, 'typescript');
+
+    if (!targetPath && isLocalSpecifier(specifier)) {
+      unresolvedLocalImports += 1;
+    }
 
     if (targetPath) {
       const kind: ModuleReference['kind'] = keyword === 'export' ? 'reexports' : 'imports';
@@ -1070,6 +1083,8 @@ function buildJsTsModuleContext(sourcePath: string, content: string, allFiles: R
       const specifier = match[1]?.trim() ?? '';
       if (resolveImportTarget(sourcePath, specifier, allFiles, 'typescript')) {
         references.push({ kind, specifier });
+      } else if (isLocalSpecifier(specifier)) {
+        unresolvedLocalImports += 1;
       }
       match = pattern.exec(content);
     }
@@ -1079,6 +1094,7 @@ function buildJsTsModuleContext(sourcePath: string, content: string, allFiles: R
     references,
     importedSymbols,
     importedNamespaces,
+    unresolvedLocalImports,
   };
 }
 
@@ -1136,6 +1152,11 @@ function buildRustModuleContext(sourcePath: string, content: string, allFiles: R
   const references: ModuleReference[] = [];
   const importedSymbols = new Map<string, ModuleBinding[]>();
   const importedNamespaces = new Map<string, ModuleBinding>();
+  let unresolvedLocalImports = 0;
+  // crate::/self::/super:: 与 mod 声明必须解析到项目内文件；外部 crate 不计入。
+  const isLocalUsePath = (path: string): boolean =>
+    path === 'crate' || path === 'self' || path === 'super' ||
+    path.startsWith('crate::') || path.startsWith('self::') || path.startsWith('super::');
 
   const usePattern = /^[\t ]*(?:pub(?:\s*\([^)]*\))?\s+)?use\s+([^;]+);/gm;
   const externCratePattern = /^[\t ]*extern\s+crate\s+(\w+)/gm;
@@ -1156,6 +1177,9 @@ function buildRustModuleContext(sourcePath: string, content: string, allFiles: R
         addImportedBinding(importedSymbols, name, { targetPath, importedName: name });
       }
     } else {
+      if (isLocalUsePath(basePath)) {
+        unresolvedLocalImports += 1;
+      }
       const crateName = basePath.split('::')[0];
       if (crateName && crateName !== 'crate' && crateName !== 'self' && crateName !== 'super') {
         importedNamespaces.set(crateName, { targetPath: crateName, namespace: true });
@@ -1179,11 +1203,13 @@ function buildRustModuleContext(sourcePath: string, content: string, allFiles: R
     const targetPath = resolveImportTarget(sourcePath, modPath, allFiles, 'rust');
     if (targetPath) {
       references.push({ kind: 'imports', specifier: modName });
+    } else {
+      unresolvedLocalImports += 1;
     }
     match = modDeclPattern.exec(content);
   }
 
-  return { references, importedSymbols, importedNamespaces };
+  return { references, importedSymbols, importedNamespaces, unresolvedLocalImports };
 }
 
 function extractRustUseNames(usePath: string): string[] {
@@ -2072,7 +2098,9 @@ function extractSymbolRelations(symbol: ProjectGraphSymbolInput, language: strin
     }
   }
 
-  if (language === 'Java' && symbol.kind === 'interface') {
+  // 旧实现用 language === 'Java' 精确匹配原始标签：扫描器若给出 'java'/'JAVA'
+  // 等其它大小写，该分支永不执行（死代码）。统一走 normalizeLanguage。
+  if (normalizeLanguage(language) === 'java' && symbol.kind === 'interface') {
     return relations.map((relation) => (relation.kind === 'implements' ? { ...relation, kind: 'extends' } : relation));
   }
 
@@ -2900,7 +2928,9 @@ function computeQualityMetrics(
   let resolvedImports = 0;
   let totalImports = 0;
   for (const ctx of moduleContexts.values()) {
-    totalImports += ctx.references.length;
+    // references 只含解析成功的导入；加上未解析的项目内导入才是真实分母，
+    // 否则该指标结构性恒等于 1，无法反映图质量。
+    totalImports += ctx.references.length + (ctx.unresolvedLocalImports ?? 0);
   }
   for (const edge of edges) {
     if (edge.kind !== 'imports') continue;

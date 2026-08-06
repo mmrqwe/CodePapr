@@ -18,6 +18,9 @@ pub struct SnapshotInfo {
     pub timestamp: i64,
     pub file_count: usize,
     pub is_head: bool,
+    /// 创建时未能加入索引的文件数（如超过大小上限）。>0 表示该快照不完整。
+    #[serde(default)]
+    pub skipped_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

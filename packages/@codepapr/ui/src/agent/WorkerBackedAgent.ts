@@ -851,9 +851,22 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         });
       } else if (message.event.type === 'tool-call-end') {
         const finishedToolCallId = message.event.toolCallId;
-        pending.pendingToolCalls = pending.pendingToolCalls.filter(
-          (item) => item.toolCallId !== finishedToolCallId
-        );
+        if (finishedToolCallId) {
+          pending.pendingToolCalls = pending.pendingToolCalls.filter(
+            (item) => item.toolCallId !== finishedToolCallId
+          );
+        } else {
+          // end 事件缺 toolCallId（旧/兜底路径）时按工具名移除最早一条：
+          // 否则列表整回合膨胀，name+arguments 兜底匹配可能把新请求配对到
+          // 早已结束的调用条目。
+          const finishedToolName = message.event.toolName;
+          const oldestIndex = pending.pendingToolCalls.findIndex(
+            (item) => item.toolName === finishedToolName
+          );
+          if (oldestIndex >= 0) {
+            pending.pendingToolCalls.splice(oldestIndex, 1);
+          }
+        }
       }
 
       if (message.event.type === 'content-delta') {

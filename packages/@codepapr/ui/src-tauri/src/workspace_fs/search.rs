@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ignore::WalkBuilder;
@@ -87,12 +87,19 @@ pub(crate) fn search_workspace_text_impl(
         max_matches_per_file,
         max_bytes_per_file,
     )?;
-    let (matches, truncated) = collect_search_matches(&workspace, &prepared)?;
+    let (matches, truncated, skipped_files) = collect_search_matches(&workspace, &prepared)?;
 
     Ok(SearchResult {
-        query: prepared.raw_query,
+        query: prepared.raw_query.clone(),
         matches,
         truncated,
+        regex_degraded: prepared.regex_degraded,
+        skipped_files,
+        note: if prepared.regex_degraded {
+            degraded_note(&prepared.raw_query)
+        } else {
+            None
+        },
     })
 }
 
@@ -108,9 +115,15 @@ pub(crate) fn search_workspace_paths_impl(
     let (matches, truncated) = collect_path_matches(&workspace, &prepared)?;
 
     Ok(PathSearchResult {
-        query: prepared.raw_query,
+        query: prepared.raw_query.clone(),
         matches,
         truncated,
+        regex_degraded: prepared.regex_degraded,
+        note: if prepared.regex_degraded {
+            degraded_note(&prepared.raw_query)
+        } else {
+            None
+        },
     })
 }
 
@@ -118,21 +131,42 @@ fn resolve_case_sensitivity(query: &str, requested: Option<bool>) -> bool {
     requested.unwrap_or_else(|| query.chars().any(|ch| ch.is_ascii_uppercase()))
 }
 
+/// 返回 (正则, 是否降级)。is_regexp 模式下编译失败时自动降级为字面量搜索，
+/// 避免 LLM 写出 Rust regex 不支持的语法（lookaround、反向引用等）时直接报错。
 fn build_search_regex(
     query: &str,
     is_regexp: Option<bool>,
     case_sensitive: bool,
-) -> Result<Regex, String> {
-    let pattern = if is_regexp.unwrap_or(false) {
+) -> Result<(Regex, bool), String> {
+    let is_regexp = is_regexp.unwrap_or(false);
+    let pattern = if is_regexp {
         query.to_string()
     } else {
         regex::escape(query)
     };
 
-    RegexBuilder::new(&pattern)
+    match RegexBuilder::new(&pattern)
         .case_insensitive(!case_sensitive)
         .build()
-        .map_err(|err| format!("搜索正则无效: {err}"))
+    {
+        Ok(regex) => Ok((regex, false)),
+        Err(err) => {
+            if !is_regexp {
+                return Err(format!("搜索正则无效: {err}"));
+            }
+            let regex = RegexBuilder::new(&regex::escape(query))
+                .case_insensitive(!case_sensitive)
+                .build()
+                .map_err(|err| format!("搜索正则无效: {err}"))?;
+            Ok((regex, true))
+        }
+    }
+}
+
+fn degraded_note(raw_query: &str) -> Option<String> {
+    Some(format!(
+        "正则表达式无效，已降级为字面量搜索: {raw_query}"
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -154,9 +188,11 @@ fn prepare_text_search(
     }
 
     let case_sensitive = resolve_case_sensitivity(&raw_query, case_sensitive);
+    let (matcher, regex_degraded) = build_search_regex(&raw_query, is_regexp, case_sensitive)?;
     Ok(PreparedTextSearch {
         raw_query: raw_query.clone(),
-        matcher: build_search_regex(&raw_query, is_regexp, case_sensitive)?,
+        matcher,
+        regex_degraded,
         context_lines: context_lines
             .unwrap_or(DEFAULT_SEARCH_CONTEXT_LINES)
             .min(MAX_SEARCH_CONTEXT_LINES),
@@ -184,9 +220,11 @@ fn prepare_path_search(
     }
 
     let case_sensitive = resolve_case_sensitivity(&raw_query, case_sensitive);
+    let (matcher, regex_degraded) = build_search_regex(&raw_query, is_regexp, case_sensitive)?;
     Ok(PreparedPathSearch {
         raw_query: raw_query.clone(),
-        matcher: build_search_regex(&raw_query, is_regexp, case_sensitive)?,
+        matcher,
+        regex_degraded,
         max_results: max_results
             .unwrap_or(MAX_PATH_SEARCH_RESULTS)
             .clamp(1, MAX_PATH_SEARCH_RESULTS),
@@ -224,7 +262,7 @@ fn build_search_walker(workspace: &Path, max_filesize: Option<usize>) -> ignore:
 pub(crate) fn collect_search_matches(
     workspace: &Path,
     options: &PreparedTextSearch,
-) -> Result<(Vec<SearchMatch>, bool), String> {
+) -> Result<(Vec<SearchMatch>, bool, usize), String> {
     let workspace_owned = workspace.to_path_buf();
     let max_filesize = options.max_bytes_per_file;
 
@@ -255,6 +293,7 @@ pub(crate) fn collect_search_matches(
     let workspace_ref = &workspace_owned;
     let results = Arc::new(Mutex::new(Vec::<SearchMatch>::new()));
     let truncated = Arc::new(AtomicBool::new(false));
+    let skipped = Arc::new(AtomicUsize::new(0));
     let max_results = options.max_results;
     let max_per_file = options.max_matches_per_file;
     let context_lines = options.context_lines;
@@ -263,6 +302,7 @@ pub(crate) fn collect_search_matches(
         let workspace = workspace_ref.clone();
         let results = Arc::clone(&results);
         let truncated = Arc::clone(&truncated);
+        let skipped = Arc::clone(&skipped);
         Box::new(move |entry_result| {
             if truncated.load(Ordering::Relaxed) {
                 return ignore::WalkState::Quit;
@@ -284,9 +324,12 @@ pub(crate) fn collect_search_matches(
 
             let path = entry.into_path();
             let Ok(buffer) = fs::read(&path) else {
+                skipped.fetch_add(1, Ordering::Relaxed);
                 return ignore::WalkState::Continue;
             };
             let Ok(content) = decode_text_bytes(buffer) else {
+                // 二进制或无法解码的文件：计入 skipped，让调用方知道 0 结果不等于全库无匹配
+                skipped.fetch_add(1, Ordering::Relaxed);
                 return ignore::WalkState::Continue;
             };
             let (lines, _) = split_text_lines_for_read(&content);
@@ -304,7 +347,9 @@ pub(crate) fn collect_search_matches(
                         path: relative_string(workspace.as_path(), &path),
                         line: index + 1,
                         preview: line.trim().chars().take(240).collect(),
-                        column: Some(found.start() + 1),
+                        // found.start() 是字节偏移：非 ASCII 行上直接当列号会
+                        // 让光标定位错位，换算成字符偏移。
+                        column: Some(line[..found.start()].chars().count() + 1),
                         context_before: if context_lines > 0 {
                             Some(lines[index.saturating_sub(context_lines)..index].to_vec())
                         } else {
@@ -341,7 +386,11 @@ pub(crate) fn collect_search_matches(
         .unwrap_or_else(|_| unreachable!())
         .into_inner()
         .unwrap();
-    Ok((matches, truncated.load(Ordering::Relaxed)))
+    Ok((
+        matches,
+        truncated.load(Ordering::Relaxed),
+        skipped.load(Ordering::Relaxed),
+    ))
 }
 
 pub(crate) fn collect_path_matches(

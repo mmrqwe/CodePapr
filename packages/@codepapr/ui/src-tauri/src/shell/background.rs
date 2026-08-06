@@ -184,9 +184,10 @@ pub(crate) async fn run_workspace_command(
     command: String,
     args: Option<Vec<String>>,
     timeout_seconds: Option<u64>,
+    workdir: Option<String>,
 ) -> Result<CommandResult, String> {
     run_blocking_workspace_task(move || {
-        run_workspace_command_impl(workspace_path, command, args, timeout_seconds)
+        run_workspace_command_impl(workspace_path, command, args, timeout_seconds, workdir)
     })
     .await
 }
@@ -196,6 +197,7 @@ pub(crate) fn run_workspace_command_impl(
     command: String,
     args: Option<Vec<String>>,
     timeout_seconds: Option<u64>,
+    workdir: Option<String>,
 ) -> Result<CommandResult, String> {
     if !command_allowed(&command) {
         return Err(format!(
@@ -221,13 +223,15 @@ pub(crate) fn run_workspace_command_impl(
 
     let args = args.unwrap_or_default();
     let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30).clamp(1, MAX_COMMAND_SECONDS));
+    // 嵌套项目（如子目录里的 go.mod）需要在模块目录内执行，否则命令会跑错模块。
+    let cwd = resolve_shell_workdir(&workspace, workdir)?;
 
     #[cfg(windows)]
     const CREATE_NO_WINDOW: u32 = 0x08000000;
     let mut cmd = Command::new(&command);
     cmd.args(&args)
         .env("PATH", expanded_path())
-        .current_dir(workspace)
+        .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -262,6 +266,26 @@ pub(crate) fn run_workspace_command_impl(
 }
 
 /// 等待子进程退出并收集 stdout/stderr；超时则终止进程并标记 timed_out。
+/// 只保留上限内的输出，但持续读到底：旧实现 read_to_end 无上限，超时窗口内
+/// 输出几百 MB 会先撑爆内存；只读到上限就停又会让子进程阻塞在满管道上。
+pub(crate) fn drain_capped_output(mut reader: impl Read) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                if buffer.len() < MAX_OUTPUT_BYTES {
+                    let take = (MAX_OUTPUT_BYTES - buffer.len()).min(n);
+                    buffer.extend_from_slice(&chunk[..take]);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    buffer
+}
+
 fn collect_command_output(
     mut child: Child,
     timeout: Duration,
@@ -275,18 +299,8 @@ fn collect_command_output(
         .take()
         .ok_or_else(|| "无法捕获命令标准错误".to_string())?;
 
-    let stdout_handle = thread::spawn(move || {
-        let mut reader = stdout;
-        let mut buffer = Vec::new();
-        let _ = reader.read_to_end(&mut buffer);
-        buffer
-    });
-    let stderr_handle = thread::spawn(move || {
-        let mut reader = stderr;
-        let mut buffer = Vec::new();
-        let _ = reader.read_to_end(&mut buffer);
-        buffer
-    });
+    let stdout_handle = thread::spawn(move || drain_capped_output(stdout));
+    let stderr_handle = thread::spawn(move || drain_capped_output(stderr));
 
     let started = Instant::now();
     let mut timed_out = false;

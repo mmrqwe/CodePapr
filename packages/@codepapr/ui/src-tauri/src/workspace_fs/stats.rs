@@ -412,6 +412,13 @@ pub(crate) fn compute_project_stats_impl(workspace_path: &str) -> Result<Project
                 return ignore::WalkState::Continue;
             }
 
+            // 超大文件（数据集等）只计数不读内容：旧实现对每个文件整体
+            // fs::read 进内存，workspace 里放一个多 GB 文件就能 OOM。
+            const MAX_STATS_READ_BYTES: u64 = 100 * 1024 * 1024;
+            let too_large = entry
+                .metadata()
+                .map(|m| m.len() > MAX_STATS_READ_BYTES)
+                .unwrap_or(false);
             let path = entry.into_path();
             let relative = relative_string(workspace.as_path(), &path);
 
@@ -426,6 +433,11 @@ pub(crate) fn compute_project_stats_impl(workspace_path: &str) -> Result<Project
             }
 
             let language = language_from_path(&relative);
+
+            if too_large {
+                agg.skipped_files += 1;
+                return ignore::WalkState::Continue;
+            }
 
             let buffer = match fs::read(&path) {
                 Ok(b) => b,

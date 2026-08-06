@@ -1404,6 +1404,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             : null;
 
           set((s) => {
+            // 回合进行中会话可能已不存在（关闭工作区/删除会话）：此时不再写
+            // 消息，避免在 sessionMessages 里复活一个 sessions 中已没有的孤儿
+            // 条目；只复位 loading 状态。
+            if (!s.sessions.some((x) => x.id === activeSessionId)) {
+              return { isLoading: false, loadingSessionId: null };
+            }
             const currentSessionMessages = s.sessionMessages[activeSessionId!] ?? s.messages;
             const hasPlaceholder = currentSessionMessages.some((message) => message.id === assistantMessageId);
             const nextMessages = hasPlaceholder

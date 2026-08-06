@@ -347,6 +347,177 @@ fn should_ignore_file_filters_os_noise_case_insensitively() {
 }
 
 #[test]
+fn read_text_file_strips_utf8_bom() {
+    let workspace = TestWorkspace::new("utf8-bom");
+    fs::write(workspace.file_path("bom.txt"), b"\xef\xbb\xbfhello\n")
+        .expect("should write fixture");
+
+    let result = read::read_text_file_impl(
+        workspace.workspace_arg(),
+        "bom.txt".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("utf-8 BOM file should be readable");
+
+    assert_eq!(result.content, "hello\n");
+}
+
+#[test]
+fn read_text_file_decodes_utf16le_with_bom() {
+    let workspace = TestWorkspace::new("utf16-read");
+    let mut bytes = vec![0xFF, 0xFE];
+    for unit in "hello\n".encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    fs::write(workspace.file_path("utf16.txt"), &bytes).expect("should write fixture");
+
+    let result = read::read_text_file_impl(
+        workspace.workspace_arg(),
+        "utf16.txt".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("utf-16 LE file should be readable");
+
+    assert_eq!(result.content, "hello\n");
+}
+
+#[test]
+fn read_text_file_splits_lone_cr_line_endings() {
+    let workspace = TestWorkspace::new("cr-lines");
+    fs::write(workspace.file_path("cr.txt"), b"alpha\rbeta\rgamma\n")
+        .expect("should write fixture");
+
+    let result = read::read_text_file_impl(
+        workspace.workspace_arg(),
+        "cr.txt".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("lone-cr file should be readable");
+
+    // 孤立 \r 也按换行计；全文读取保留原始字节（与 CRLF 行为一致）
+    assert_eq!(result.total_lines, 3);
+}
+
+#[test]
+fn search_workspace_text_decodes_utf16le_with_bom() {
+    let workspace = TestWorkspace::new("search-utf16");
+    let mut bytes = vec![0xFF, 0xFE];
+    for unit in "export const value = 1;\n".encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    fs::write(workspace.file_path("utf16.txt"), &bytes).expect("should write fixture");
+
+    let result = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "value".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("utf-16 file should be searchable");
+
+    assert_eq!(result.matches.len(), 1);
+    assert_eq!(result.matches[0].path, "utf16.txt");
+    assert_eq!(result.skipped_files, 0);
+}
+
+#[test]
+fn search_workspace_text_decodes_gbk_chinese_content() {
+    let workspace = TestWorkspace::new("search-gbk");
+    // 「你好世界」的 GBK 编码
+    fs::write(
+        workspace.file_path("gbk.txt"),
+        b"\xC4\xE3\xBA\xC3\xCA\xC0\xBD\xE7\n",
+    )
+    .expect("should write fixture");
+
+    let result = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "世界".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("gbk file should be searchable");
+
+    assert_eq!(result.matches.len(), 1);
+    assert_eq!(result.matches[0].path, "gbk.txt");
+    assert!(result.matches[0].preview.contains("世界"));
+}
+
+#[test]
+fn search_workspace_text_degrades_invalid_regex_to_literal() {
+    let workspace = TestWorkspace::new("search-regex-degrade");
+    fs::create_dir_all(workspace.file_path("src")).expect("should create src dir");
+    fs::write(workspace.file_path("src/main.ts"), b"call foo(bar) here\n")
+        .expect("should write fixture");
+
+    // 「foo(bar」是非法正则（未闭合括号），应降级为字面量搜索并命中
+    let result = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "foo(bar".to_string(),
+        None,
+        Some(true),
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("invalid regex should degrade instead of failing");
+
+    assert!(result.regex_degraded);
+    assert!(result.note.unwrap_or_default().contains("降级"));
+    assert_eq!(result.matches.len(), 1);
+    assert_eq!(result.matches[0].line, 1);
+}
+
+#[test]
+fn search_workspace_text_counts_skipped_binary_files() {
+    let workspace = TestWorkspace::new("search-skipped");
+    fs::create_dir_all(workspace.file_path("src")).expect("should create src dir");
+    fs::write(workspace.file_path("src/main.ts"), b"needle token\n")
+        .expect("should write text fixture");
+    fs::write(
+        workspace.file_path("blob.bin"),
+        [0x00u8, 0x01, 0x02, 0x03, 0x04, 0x05],
+    )
+    .expect("should write binary fixture");
+
+    let result = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "needle".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("search should succeed");
+
+    assert_eq!(result.matches.len(), 1);
+    assert_eq!(result.skipped_files, 1);
+}
+
+#[test]
 fn list_workspace_files_excludes_ds_store_and_ignored_dirs() {
     let workspace = TestWorkspace::new("list-ignore-noise");
     fs::create_dir_all(workspace.file_path("src")).expect("should create src dir");

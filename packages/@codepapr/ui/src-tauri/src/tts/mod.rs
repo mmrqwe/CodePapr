@@ -1915,7 +1915,14 @@ pub fn tts_generate_training_data(
                         let filename = format!("{:03}.wav", i);
                         let path = train_dir.join(&filename);
                         let _ = std::fs::write(&path, &bytes);
-                        metadata_lines.push(format!("{filename}|default|{clean_lang}|{sentence}"));
+                        // metadata.list 以 | 分列：句子里的 | 会破坏训练数据
+                        // 格式，换成全角；控制字符一并剔除。
+                        let safe_sentence: String = sentence
+                            .chars()
+                            .map(|ch| if ch == '|' { '｜' } else { ch })
+                            .filter(|ch| !ch.is_control())
+                            .collect();
+                        metadata_lines.push(format!("{filename}|default|{clean_lang}|{safe_sentence}"));
                     }
                 }
                 _ => {

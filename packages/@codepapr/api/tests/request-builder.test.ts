@@ -357,4 +357,17 @@ describe('stripConsumedImages', () => {
     expect(result[2].images).toBeUndefined(); // no images
     expect(result[4].images).toEqual(img);
   });
+
+  it('P3: consecutive unconsumed image messages keep only the last', () => {
+    // 旧实现对「其后无 assistant」的图片消息全部保留，连续多条 user 图片消息
+    // 会把多份 base64 都塞进请求；契约是只保留最后一条。
+    const msgs = [
+      user('img1', img),
+      user('img2', img),
+      tool('t1'),
+    ];
+    const result = stripConsumedImages(msgs);
+    expect(result[0].images).toBeUndefined();
+    expect(result[1].images).toEqual(img);
+  });
 });

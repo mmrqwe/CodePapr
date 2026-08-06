@@ -237,9 +237,12 @@ export async function readSseStream(
   const decoder = new TextDecoder();
   let buffer = '';
 
-  void signal?.addEventListener('abort', () => {
+  // 命名引用 + finally 移除：signal 常由 UI 长期持有，正常结束时不清理会让
+  // 每次流式请求都泄漏一个监听器（并滞留 reader/response 引用）。
+  const abortHandler = (): void => {
     void reader.cancel();
-  }, { once: true });
+  };
+  signal?.addEventListener('abort', abortHandler, { once: true });
 
   const consumeEvent = (rawEvent: string): void => {
     const lines = rawEvent.split(/\r?\n/);
@@ -304,6 +307,8 @@ export async function readSseStream(
       void reader.cancel();
     }
     throw err;
+  } finally {
+    signal?.removeEventListener('abort', abortHandler);
   }
 }
 
@@ -381,13 +386,20 @@ export function finalizeStreamingToolCalls(
     return undefined;
   }
 
-  return states.map((state) => {
-    const rawArguments = state.argumentsText.trim();
-
-    return {
+  // 显式按索引遍历：provider 的 delta 序号不连续时 states 是稀疏数组，
+  // map() 会静默跳过空洞并在结果里重新编号；这里显式跳过空洞，全空洞时
+  // 返回 undefined 而不是空数组。
+  const toolCalls: IToolCall[] = [];
+  for (let index = 0; index < states.length; index += 1) {
+    const state = states[index];
+    if (!state) {
+      continue;
+    }
+    toolCalls.push({
       id: state.id,
       name: state.name,
-      arguments: safeParseToolArguments(rawArguments),
-    };
-  });
+      arguments: safeParseToolArguments(state.argumentsText.trim()),
+    });
+  }
+  return toolCalls.length > 0 ? toolCalls : undefined;
 }

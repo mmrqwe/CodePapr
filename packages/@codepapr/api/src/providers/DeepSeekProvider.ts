@@ -289,7 +289,18 @@ export class DeepSeekProvider extends BaseLLMProvider {
       body: sortedStringify(payload),
     }, signal);
 
-    const data = (await response.json()) as DeepSeekResponse;
+    let data: DeepSeekResponse;
+    try {
+      data = (await response.json()) as DeepSeekResponse;
+    } catch (err) {
+      // 200 但非 JSON 正文（代理 HTML 错误页等）：转成带 provider 上下文的
+      // 错误，而不是裸 SyntaxError。
+      throw new ProviderRequestError({
+        provider: this.name,
+        message: `响应不是合法 JSON: ${(err as Error).message}`,
+        retriable: false,
+      });
+    }
 
     log.info('LLM request completed', {
       model: payload.model,

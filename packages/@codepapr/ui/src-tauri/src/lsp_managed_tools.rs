@@ -4,9 +4,7 @@ use serde::Serialize;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::{
-    collections::hash_map::DefaultHasher,
     env, fs,
-    hash::{Hash, Hasher},
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -2153,9 +2151,16 @@ fn jdtls_configuration_dir(jdtls_root: &Path) -> Option<PathBuf> {
 }
 
 fn workspace_hash(workspace: &Path) -> String {
-    let mut hasher = DefaultHasher::new();
-    workspace.to_string_lossy().hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+    // FNV-1a：算法固定，跨 Rust 版本稳定。DefaultHasher 的输出无稳定性保证，
+    // 工具链升级后 JDTLS -data 目录名会漂移，强制整个工作区重新索引。
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+    let mut hash = FNV_OFFSET;
+    for byte in workspace.to_string_lossy().as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    format!("{:016x}", hash)
 }
 
 fn monotonic_nanos() -> u128 {
@@ -2636,13 +2641,30 @@ fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 mod tests {
     use super::{
         managed_clangd_download, managed_java_download, managed_lsp_commands,
-        managed_node_download, managed_node_package_command_for_root, NODE_RUNTIME_VERSION,
+        managed_node_download, managed_node_package_command_for_root, workspace_hash,
+        NODE_RUNTIME_VERSION,
     };
     use std::{
         fs,
         path::Path,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    // P3：workspace_hash 用作 JDTLS -data 目录名，必须跨 Rust 版本稳定。
+    // DefaultHasher 无稳定性保证，已换成 FNV-1a；此值固定，算法漂移会立刻暴露。
+    #[test]
+    fn workspace_hash_is_stable_fnv1a() {
+        assert_eq!(workspace_hash(Path::new("/tmp/ws")), "40884622fba0c3c6");
+        // 确定性 + 不同输入不同输出
+        assert_eq!(
+            workspace_hash(Path::new("/a/b")),
+            workspace_hash(Path::new("/a/b"))
+        );
+        assert_ne!(
+            workspace_hash(Path::new("/a/b")),
+            workspace_hash(Path::new("/a/c"))
+        );
+    }
 
     #[test]
     fn csharp_managed_commands_include_analyzer_strategy() {

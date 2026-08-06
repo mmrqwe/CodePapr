@@ -82,7 +82,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 5. grep ────
   {
     name: 'grep',
-    description: '按正则表达式搜索项目文件内容，返回匹配位置与上下文。semantic:true 切换语义模式（LSP workspace symbol 检索），无 LSP 时降级正则并告知。',
+    description: '按正则表达式搜索项目文件内容，返回匹配位置与上下文。正则无效时自动降级为字面量搜索并在 note 中说明。支持 UTF-8/UTF-16/GB18030 等编码。semantic:true 切换语义模式（LSP workspace symbol 检索），无 LSP 时降级正则并告知。',
     parameters: {
       type: 'object',
       properties: {

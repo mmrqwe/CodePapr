@@ -59,6 +59,7 @@ function createInvokeWorkspaceHost(workspacePath: string, invoke: InvokeLike): P
         command: options.command,
         args: options.args,
         timeoutSeconds: options.timeoutSeconds,
+        workdir: options.workdir,
       });
     },
   };

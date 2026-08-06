@@ -95,6 +95,11 @@ pub(crate) struct SearchResult {
     pub(crate) query: String,
     pub(crate) matches: Vec<SearchMatch>,
     pub(crate) truncated: bool,
+    /// 正则编译失败后已降级为字面量搜索
+    pub(crate) regex_degraded: bool,
+    /// 因读取失败/解码失败（二进制）/超出大小限制而被跳过的文件数
+    pub(crate) skipped_files: usize,
+    pub(crate) note: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -103,11 +108,15 @@ pub(crate) struct PathSearchResult {
     pub(crate) query: String,
     pub(crate) matches: Vec<PathSearchMatch>,
     pub(crate) truncated: bool,
+    /// 正则编译失败后已降级为字面量搜索
+    pub(crate) regex_degraded: bool,
+    pub(crate) note: Option<String>,
 }
 
 pub(crate) struct PreparedTextSearch {
     pub(crate) raw_query: String,
     pub(crate) matcher: Regex,
+    pub(crate) regex_degraded: bool,
     pub(crate) context_lines: usize,
     pub(crate) max_results: usize,
     pub(crate) max_matches_per_file: usize,
@@ -117,5 +126,6 @@ pub(crate) struct PreparedTextSearch {
 pub(crate) struct PreparedPathSearch {
     pub(crate) raw_query: String,
     pub(crate) matcher: Regex,
+    pub(crate) regex_degraded: bool,
     pub(crate) max_results: usize,
 }

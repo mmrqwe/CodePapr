@@ -156,7 +156,8 @@ pub(super) fn split_text_lines_for_read(content: &str) -> (Vec<String>, bool) {
         return (Vec::new(), false);
     }
 
-    let normalized = content.replace("\r\n", "\n");
+    // \r\n → \n；残留的孤立 \r（老 Mac 换行）也按换行处理
+    let normalized = content.replace("\r\n", "\n").replace('\r', "\n");
     let has_trailing_newline = normalized.ends_with('\n');
     let mut lines = normalized
         .split('\n')
@@ -399,6 +400,24 @@ pub(crate) fn read_image_file_impl(
 }
 
 pub(crate) fn decode_text_bytes(bytes: Vec<u8>) -> Result<String, String> {
+    // UTF-8 BOM：剥离后按正常流程解码
+    if let Some(rest) = bytes.strip_prefix(b"\xef\xbb\xbf") {
+        return decode_text_bytes(rest.to_vec());
+    }
+
+    // UTF-16 BOM（必须在二进制检测之前，UTF-16 内容含 NUL 字节）
+    if let Some(rest) = bytes.strip_prefix(b"\xff\xfe") {
+        return decode_utf16(rest, encoding_rs::UTF_16LE);
+    }
+    if let Some(rest) = bytes.strip_prefix(b"\xfe\xff") {
+        return decode_utf16(rest, encoding_rs::UTF_16BE);
+    }
+
+    // 无 BOM 的 UTF-16 启发式（NUL 字节集中在奇/偶数位）
+    if let Some(content) = decode_utf16_without_bom(&bytes) {
+        return Ok(content);
+    }
+
     if is_probably_binary_content(&bytes) {
         return Err("文件包含二进制内容，拒绝作为文本读取".to_string());
     }
@@ -411,7 +430,58 @@ pub(crate) fn decode_text_bytes(bytes: Vec<u8>) -> Result<String, String> {
                 return Err("文件包含二进制内容，拒绝作为文本读取".to_string());
             }
 
+            // 非 UTF-8 文本按 GB18030 兜底（GBK/GB2312 超集，中文老项目常见编码）
+            let (decoded, _, had_errors) = encoding_rs::GB18030.decode(&bytes);
+            if !had_errors {
+                return Ok(decoded.into_owned());
+            }
+
             Ok(String::from_utf8_lossy(&bytes).into_owned())
         }
     }
+}
+
+fn decode_utf16(bytes: &[u8], encoding: &'static encoding_rs::Encoding) -> Result<String, String> {
+    let (decoded, _, had_errors) = encoding.decode(bytes);
+    if had_errors {
+        return Err("文件包含二进制内容，拒绝作为文本读取".to_string());
+    }
+    Ok(decoded.into_owned())
+}
+
+/// 无 BOM UTF-16 启发式：NUL 字节集中出现在奇数位（LE）或偶数位（BE），
+/// 且另一侧几乎没有 NUL。典型场景：Windows 工具生成的 ASCII 为主的 UTF-16 文件。
+fn decode_utf16_without_bom(bytes: &[u8]) -> Option<String> {
+    if bytes.len() < 4 || bytes.len() % 2 != 0 {
+        return None;
+    }
+
+    let mut even_nuls = 0usize;
+    let mut odd_nuls = 0usize;
+    for (index, &byte) in bytes.iter().enumerate() {
+        if byte == 0 {
+            if index % 2 == 0 {
+                even_nuls += 1;
+            } else {
+                odd_nuls += 1;
+            }
+        }
+    }
+
+    let (dominant, other, encoding) = if odd_nuls >= even_nuls {
+        (odd_nuls, even_nuls, encoding_rs::UTF_16LE)
+    } else {
+        (even_nuls, odd_nuls, encoding_rs::UTF_16BE)
+    };
+
+    // 主导侧 NUL 占比需 >= 25%，且另一侧 NUL 极少，避免误判真正的二进制
+    if dominant * 4 < bytes.len() || other * 3 > dominant {
+        return None;
+    }
+
+    let (decoded, _, had_errors) = encoding.decode(bytes);
+    if had_errors {
+        return None;
+    }
+    Some(decoded.into_owned())
 }

@@ -98,6 +98,7 @@ export function createUiWorkspaceHost(params: {
         command: options.command,
         args: options.args,
         timeoutSeconds: options.timeoutSeconds,
+        workdir: options.workdir,
       });
     },
     languageService: {

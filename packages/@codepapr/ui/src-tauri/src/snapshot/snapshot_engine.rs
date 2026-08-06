@@ -211,18 +211,24 @@ impl SnapshotEngine {
             .map_err(|e| format!("clear index: {}", e.message()))?;
 
         let mut added = 0usize;
+        let mut skipped = 0usize;
         for file in &files {
             // collect_files 返回 OS 原生分隔符（Windows 为 '\'），libgit2
             // 只认 '/'：必须转换，否则 Windows 上快照会漏掉所有嵌套文件。
             match index.add_path(&git_relative_path(file)) {
                 Ok(()) => added += 1,
                 Err(e) => {
+                    skipped += 1;
                     eprintln!("[CodePapr] snapshot_create: add_path failed for {:?}: {}", file, e.message());
                 }
             }
         }
 
         eprintln!("[CodePapr] snapshot_create: {} files added to index", added);
+        if skipped > 0 {
+            // 不能静默：漏掉的文件在恢复时不会出现，必须让调用方可见。
+            eprintln!("[CodePapr] snapshot_create: WARNING: {skipped} files were SKIPPED (snapshot is incomplete)");
+        }
 
         if added == 0 {
             return Err("failed to add any files to index".to_string());
@@ -259,6 +265,7 @@ impl SnapshotEngine {
             timestamp,
             file_count: added,
             is_head: true,
+            skipped_count: skipped,
         })
     }
 
@@ -294,7 +301,7 @@ impl SnapshotEngine {
                 .map(|t| t.len())
                 .unwrap_or(0);
 
-            result.push(SnapshotInfo { sha, short_hash, label, timestamp, file_count, is_head });
+            result.push(SnapshotInfo { sha, short_hash, label, timestamp, file_count, is_head, skipped_count: 0 });
         }
         result
     }

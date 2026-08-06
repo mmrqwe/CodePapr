@@ -361,6 +361,11 @@ fn matches_pattern(pattern: &str, value: &str) -> bool {
     if pattern == "*" {
         return true;
     }
+    // *foo*：包含匹配。必须先于前缀/后缀分支判断（否则会被 strip_suffix
+    // 当成前缀 "*foo" 处理，永远匹配不上）。
+    if let Some(inner) = pattern.strip_prefix('*').and_then(|p| p.strip_suffix('*')) {
+        return value.contains(inner);
+    }
     if let Some(prefix) = pattern.strip_suffix('*') {
         return value.starts_with(prefix);
     }
@@ -721,40 +726,46 @@ pub async fn call_tool(
     validate_tool_policy(&server, &tool_name)?;
 
     if server.require_confirmation && server.permission_mode != "read-only" {
-        if let Some(app_handle) = &app {
-            let request_id = format!("mcp_{}_{}", sanitize_name_part(&server_id), uuid_v4());
-            let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
-            pending_confirmations().lock().await.insert(request_id.clone(), tx);
+        // Fail-closed：没有 UI 通道就无法向用户要确认。旧实现在 app 为 None
+        // 时直接跳过确认执行，会把需要确认的工具放行。
+        let Some(app_handle) = &app else {
+            return Err(format!(
+                "MCP tool '{tool_name}' on server '{}' requires user confirmation, but no UI channel is available",
+                server.name
+            ));
+        };
+        let request_id = format!("mcp_{}_{}", sanitize_name_part(&server_id), uuid_v4());
+        let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+        pending_confirmations().lock().await.insert(request_id.clone(), tx);
 
-            let _ = app_handle.emit(
-                "mcp-confirm-request",
-                McpConfirmRequest {
-                    request_id: request_id.clone(),
-                    server_id: sanitize_name_part(&server_id),
-                    server_name: server.name.clone(),
-                    tool_name: tool_name.clone(),
-                    arguments: arguments.clone(),
-                },
-            );
+        let _ = app_handle.emit(
+            "mcp-confirm-request",
+            McpConfirmRequest {
+                request_id: request_id.clone(),
+                server_id: sanitize_name_part(&server_id),
+                server_name: server.name.clone(),
+                tool_name: tool_name.clone(),
+                arguments: arguments.clone(),
+            },
+        );
 
-            let approved = match tokio::time::timeout(Duration::from_secs(120), rx).await {
-                Ok(Ok(approved)) => approved,
-                Ok(Err(_)) => {
-                    pending_confirmations().lock().await.remove(&request_id);
-                    return Err("Confirmation channel closed".to_string());
-                }
-                Err(_) => {
-                    pending_confirmations().lock().await.remove(&request_id);
-                    return Err("Confirmation timed out".to_string());
-                }
-            };
-
-            if !approved {
-                return Err(format!(
-                    "MCP tool '{tool_name}' on server '{}' was denied by user",
-                    server.name
-                ));
+        let approved = match tokio::time::timeout(Duration::from_secs(120), rx).await {
+            Ok(Ok(approved)) => approved,
+            Ok(Err(_)) => {
+                pending_confirmations().lock().await.remove(&request_id);
+                return Err("Confirmation channel closed".to_string());
             }
+            Err(_) => {
+                pending_confirmations().lock().await.remove(&request_id);
+                return Err("Confirmation timed out".to_string());
+            }
+        };
+
+        if !approved {
+            return Err(format!(
+                "MCP tool '{tool_name}' on server '{}' was denied by user",
+                server.name
+            ));
         }
     }
 
@@ -1107,5 +1118,25 @@ mod tests {
         let a = make_server("sse", "https://example.com/sse", &[("X-Key", "val")]);
         let b = make_server("sse", "https://example.com/sse", &[("X-Key", "val")]);
         assert_eq!(server_cache_key(&a), server_cache_key(&b));
+    }
+
+    #[test]
+    fn matches_pattern_supports_prefix_suffix_exact_and_wildcard() {
+        assert!(super::matches_pattern("get_*", "get_user"));
+        assert!(super::matches_pattern("*_list", "user_list"));
+        assert!(super::matches_pattern("get_user", "get_user"));
+        assert!(super::matches_pattern("*", "anything"));
+        assert!(!super::matches_pattern("get_*", "set_user"));
+        assert!(!super::matches_pattern("", "anything"));
+    }
+
+    // P3：旧实现只支持前缀/后缀通配，*foo*（包含）永远匹配不上。
+    #[test]
+    fn matches_pattern_supports_contains_glob() {
+        assert!(super::matches_pattern("*user*", "get_user_info"));
+        assert!(super::matches_pattern("*user*", "user"));
+        assert!(!super::matches_pattern("*user*", "get_account"));
+        // ** 等价于全匹配
+        assert!(super::matches_pattern("**", "anything"));
     }
 }

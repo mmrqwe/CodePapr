@@ -183,11 +183,14 @@ export function updateTodoList(
     let retries = task.retries ?? 0;
     let errorLog = task.errorLog;
 
-    if (patch.bumpRetry === true) {
+    // 同一次更新里 bumpRetry 与 failed 转换只计一次重试：旧实现两者同时出现
+    // 会 +2，提前耗尽 maxRetries。
+    const failedTransition =
+      nextStatus === 'failed' && (task.status === 'running' || task.status === 'pending');
+    if (patch.bumpRetry === true || failedTransition) {
       retries += 1;
     }
-    if (nextStatus === 'failed' && (task.status === 'running' || task.status === 'pending')) {
-      retries += 1;
+    if (failedTransition) {
       const limit = task.maxRetries ?? DEFAULT_TODO_MAX_RETRIES;
       if (retries < limit) {
         nextStatus = 'pending';

@@ -1074,6 +1074,8 @@ async function handleRunAppAgent(
       clearTimeout(flushTimerId);
       flushTimerId = null;
     }
+    // 把已缓冲的流式 delta 先冲刷出去，错误路径不再静默丢弃最后一段内容。
+    flushStreamBuffer();
     postMessageToMain({
       type: 'app-agent-error',
       requestId,

@@ -19,8 +19,24 @@ fn app_workspaces() -> &'static Mutex<HashMap<String, String>> {
     APP_WORKSPACES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// app_id 会被拼进文件服务路径（.CodePapr/apps/<app_id>/...）：拒绝一切
+/// 路径形态的 id（"..", 分隔符等），防止注册出能服务 .CodePapr 内部文件
+/// （如 project.sqlite）的「应用」。
+fn is_valid_app_id(app_id: &str) -> bool {
+    !app_id.is_empty()
+        && app_id.len() <= 128
+        && app_id != "."
+        && app_id != ".."
+        && !app_id.contains("..")
+        && !app_id.contains('/')
+        && !app_id.contains('\\')
+}
+
 #[tauri::command]
 pub fn register_app_workspace(app_id: String, workspace_path: String) {
+    if !is_valid_app_id(&app_id) {
+        return;
+    }
     let mut map = app_workspaces().lock().unwrap_or_else(|e| e.into_inner());
     map.insert(app_id.clone(), workspace_path.clone());
     papr_runtime::app_context::register(&app_id, &workspace_path);
@@ -80,6 +96,13 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
                 .unwrap();
         }
     };
+
+    if !is_valid_app_id(app_id) {
+        return Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body("invalid app id".into())
+            .unwrap();
+    }
 
     let file_path = if file_path.is_empty() { "index.html" } else { file_path };
 

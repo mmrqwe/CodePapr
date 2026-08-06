@@ -695,8 +695,20 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
   // Server lifecycle event listeners for instant status updates.
   const unlistenFnsRef = useRef<UnlistenFn[]>([]);
   useEffect(() => {
+    // listen() 是异步注册：组件在 promise 解析前卸载时，cleanup 跑完时 fns
+    // 还是空的，晚到的监听器会永久泄漏。用 disposed 标志兜底。
+    let disposed = false;
     const fns: UnlistenFn[] = [];
-    safeListen<{ device: string; model_version: string; half_precision: boolean } | null>('tts-server-started', (event) => {
+    const track = (pending: Promise<UnlistenFn>): void => {
+      void pending.then((fn) => {
+        if (disposed) {
+          fn();
+          return;
+        }
+        fns.push(fn);
+      });
+    };
+    track(safeListen<{ device: string; model_version: string; half_precision: boolean } | null>('tts-server-started', (event) => {
       const payload = event.payload;
       const device = (payload && typeof payload === 'object' && typeof payload.device === 'string')
         ? payload.device
@@ -716,16 +728,16 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
       firstSynthHintShownRef.current = false;
       modelPreloadedRef.current = false;
       setServerStatus('running');
-    }).then((fn) => fns.push(fn));
-    safeListen('tts-server-error', (event: { payload: string }) => {
+    }));
+    track(safeListen('tts-server-error', (event: { payload: string }) => {
       const msg = typeof event.payload === 'string' ? event.payload : 'Unknown error';
       setLastError(`Server: ${msg}`);
       setServerStatus('error');
-    }).then((fn) => fns.push(fn));
-    safeListen('tts-server-stopped', () => {
+    }));
+    track(safeListen('tts-server-stopped', () => {
       setServerStatus('stopped');
-    }).then((fn) => fns.push(fn));
-    safeListen<{ stream: 'stdout' | 'stderr' | 'system'; line: string }>(
+    }));
+    track(safeListen<{ stream: 'stdout' | 'stderr' | 'system'; line: string }>(
       'tts-server-log',
       (event) => {
         const payload = event.payload;
@@ -741,9 +753,10 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
           return next.length > 1000 ? next.slice(next.length - 1000) : next;
         });
       },
-    ).then((fn) => fns.push(fn));
+    ));
     unlistenFnsRef.current = fns;
     return () => {
+      disposed = true;
       unlistenFnsRef.current.forEach((fn) => fn());
     };
   }, []);

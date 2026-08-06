@@ -178,12 +178,30 @@ impl AppSecrets {
         // Generate a fresh random key.
         let mut key = vec![0u8; VAULT_KEY_LEN];
         rand::rngs::OsRng.fill_bytes(&mut key);
-        fs::File::create(key_path)
-            .map_err(|e| format!("创建 vault 密钥文件失败: {e}"))?
-            .write_all(&key)
-            .map_err(|e| format!("写入 vault 密钥文件失败: {e}"))?;
+        // Unix 上以 0600 原子创建：旧实现先按默认权限创建再 chmod，存在主密钥
+        // 短暂全局可读的窗口。
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(key_path)
+                .map_err(|e| format!("创建 vault 密钥文件失败: {e}"))?
+                .write_all(&key)
+                .map_err(|e| format!("写入 vault 密钥文件失败: {e}"))?;
+        }
+        #[cfg(not(unix))]
+        {
+            fs::File::create(key_path)
+                .map_err(|e| format!("创建 vault 密钥文件失败: {e}"))?
+                .write_all(&key)
+                .map_err(|e| format!("写入 vault 密钥文件失败: {e}"))?;
+        }
 
-        // Restrict permissions on Unix so only the owner can read.
+        // Restrict permissions on Unix so only the owner can read (兜底覆盖
+        // 旧版本遗留文件的权限)。
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

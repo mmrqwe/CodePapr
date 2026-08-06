@@ -23,6 +23,9 @@ export interface ProjectDiagnosticStagePlan {
   command: string;
   args: string[];
   fallback: boolean;
+  /** 相对 workspace 的执行目录：嵌套项目（如子目录里的 go.mod）必须在自己
+   *  的模块目录内执行，否则会跑错模块或直接失败。 */
+  workdir?: string;
   kind?:
     | 'package-script'
     | 'python-static'
@@ -396,13 +399,17 @@ export function createProjectDiagnosticsPlan(params: {
   const goModFiles = findProjectFiles(params.entries, (_entry, path) => path.endsWith('go.mod'));
   const preferredGoMod = chooseProjectFileForChangedPaths(goModFiles, changedPaths) ?? goModFiles[0] ?? null;
   if (preferredGoMod && shouldIncludeNestedProject(preferredGoMod, changedPaths)) {
+    const goModDir = entryDir(preferredGoMod);
     stages.push({
       id: 'go-test',
       scriptName: 'go-test',
-      label: 'go test ./...',
+      label: goModDir ? `go test ./...（${goModDir}）` : 'go test ./...',
       command: 'go',
       args: ['test', './...'],
       fallback: false,
+      // go 没有 --manifest-path 之类的标志：嵌套 go.mod 必须在其模块目录内
+      // 执行，旧实现从 workspace 根运行会测错模块或直接失败。
+      ...(goModDir ? { workdir: goModDir } : {}),
       kind: 'go-test',
     });
   }
@@ -518,6 +525,7 @@ export async function runProjectDiagnostics(
           command: stage.command,
           args: stage.args,
           timeoutSeconds: 270,
+          workdir: stage.workdir,
         })
       );
       stages.push({

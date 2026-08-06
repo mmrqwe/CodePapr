@@ -63,6 +63,8 @@ export interface WorkspaceHostRunCommandOptions {
   command: string;
   args?: string[];
   timeoutSeconds?: number;
+  /** 相对 workspace 的工作目录（嵌套项目需要，如子目录里的 go.mod）。 */
+  workdir?: string;
 }
 
 export interface WorkspaceLanguageServiceRequestOptions<TParams> {

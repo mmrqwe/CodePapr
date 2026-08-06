@@ -438,6 +438,7 @@ export class Agent {
     let aggregatedStats: ICacheStatistics | undefined;
     let question: QuestionData | undefined;
 
+    try {
     for (let round = 0; round < this.maxToolRounds; round++) {
       if (effectiveSignal?.aborted) {
         break;
@@ -674,9 +675,12 @@ export class Agent {
         break;
       }
     }
-
-    this.session.scratch.markRoundEnd();
-    this.abortController = null;
+    } finally {
+      // 错误路径同样要复位：旧实现抛错时跳过这两步，后续 cancel() 会 abort
+      // 一个陈旧的 controller，scratch 也会一直停在「回合进行中」。
+      this.session.scratch.markRoundEnd();
+      this.abortController = null;
+    }
 
     return {
       role: 'assistant',
