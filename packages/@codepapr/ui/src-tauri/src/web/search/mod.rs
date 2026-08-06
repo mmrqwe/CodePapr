@@ -1,10 +1,14 @@
 use serde::Serialize;
 
-use crate::web::client::{build_web_client, cache_search_response, get_cached_search};
+use crate::web::client::{
+    build_web_client, cache_search_response, get_cached_search, is_source_cooling_down,
+    mark_source_failed, mark_source_ok,
+};
 use crate::web::text::normalize_search_text;
 
 pub(crate) mod academic;
 pub(crate) mod bing;
+pub(crate) mod brave;
 pub(crate) mod duckduckgo;
 pub(crate) mod market;
 pub(crate) mod mojeek;
@@ -16,7 +20,7 @@ pub(crate) const WIKIPEDIA_API_ENDPOINT: &str = "https://en.wikipedia.org/w/api.
 pub(crate) const ARXIV_API_ENDPOINT: &str = "http://export.arxiv.org/api/query";
 pub(crate) const OPENALEX_API_ENDPOINT: &str = "https://api.openalex.org/works";
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WebSearchEntry {
     pub(crate) title: String,
@@ -32,6 +36,12 @@ pub(crate) struct WebSearchResponse {
     pub(crate) abstract_text: String,
     pub(crate) abstract_url: String,
     pub(crate) results: Vec<WebSearchEntry>,
+    /// SearXNG 不可用/返回空，已降级到内置多源聚合
+    pub(crate) degraded: bool,
+    /// 降级或源失败说明（供 LLM 判断结果可信度）
+    pub(crate) note: Option<String>,
+    /// 实际贡献了结果的搜索源
+    pub(crate) sources: Vec<String>,
 }
 
 pub(crate) fn push_unique_search_result(
@@ -54,6 +64,28 @@ pub(crate) fn push_unique_search_result(
     }
 
     results.push(candidate);
+}
+
+/// 将某源的命中合并进总结果（去重、受 max_results 约束），并记录贡献源。
+fn merge_source(
+    results: &mut Vec<WebSearchEntry>,
+    sources: &mut Vec<String>,
+    name: &str,
+    entries: Vec<WebSearchEntry>,
+    max_results: usize,
+) {
+    let mut contributed = false;
+    for entry in entries {
+        if results.len() >= max_results {
+            break;
+        }
+        let before = results.len();
+        push_unique_search_result(results, entry);
+        contributed |= results.len() > before;
+    }
+    if contributed {
+        sources.push(name.to_string());
+    }
 }
 
 fn contains_explicit_market_symbol(query: &str) -> bool {
@@ -240,46 +272,74 @@ pub(crate) async fn search_web(
             return Err("搜索关键词不能为空".to_string());
         }
 
-        if let Some(cached) = get_cached_search(query) {
+        let searxng_active = searxng_enabled.unwrap_or(false)
+            && searxng_base_url
+                .as_deref()
+                .map(|url| !url.trim().is_empty())
+                .unwrap_or(false);
+        let cache_scope = if searxng_active {
+            format!(
+                "searxng:{}",
+                searxng_base_url.as_deref().unwrap_or("").trim()
+            )
+        } else {
+            "builtin".to_string()
+        };
+
+        if let Some(cached) = get_cached_search(query, &cache_scope) {
             return Ok(cached);
         }
 
         let max_results = max_results.unwrap_or(5).clamp(1, 10);
         let client = build_web_client()?;
 
-        if searxng_enabled.unwrap_or(false) {
-            if let Some(ref base_url) = searxng_base_url {
-                if !base_url.trim().is_empty() {
-                    match searxng::collect_searxng_results(
-                        &client,
-                        base_url.trim(),
-                        query,
-                        max_results,
-                        searxng_categories.as_deref().unwrap_or(""),
-                        searxng_time_range.as_deref().unwrap_or(""),
-                        searxng_language.as_deref().unwrap_or(""),
-                        searxng_safe_search.unwrap_or(1),
-                        searxng_engines.as_deref().unwrap_or(""),
-                    ) {
-                        Ok((results, abstract_text, abstract_url)) => {
-                            let response = WebSearchResponse {
-                                query: query.to_string(),
-                                abstract_text,
-                                abstract_url,
-                                results,
-                            };
-                            cache_search_response(query, &response);
-                            return Ok(response);
-                        }
-                        Err(err) => {
-                            eprintln!("SearXNG 搜索失败，降级到内置多源聚合: {err}");
-                        }
-                    }
+        let mut degraded = false;
+        let mut note: Option<String> = None;
+
+        if searxng_active {
+            let base_url = searxng_base_url.as_deref().unwrap_or("").trim().to_string();
+            match searxng::collect_searxng_results(
+                &client,
+                &base_url,
+                query,
+                max_results,
+                searxng_categories.as_deref().unwrap_or(""),
+                searxng_time_range.as_deref().unwrap_or(""),
+                searxng_language.as_deref().unwrap_or(""),
+                searxng_safe_search.unwrap_or(1),
+                searxng_engines.as_deref().unwrap_or(""),
+            ) {
+                Ok((results, abstract_text, abstract_url)) if !results.is_empty() => {
+                    let response = WebSearchResponse {
+                        query: query.to_string(),
+                        abstract_text,
+                        abstract_url,
+                        results,
+                        degraded: false,
+                        note: None,
+                        sources: vec!["searxng".to_string()],
+                    };
+                    cache_search_response(query, &cache_scope, &response);
+                    return Ok(response);
+                }
+                Ok(_) => {
+                    degraded = true;
+                    let msg = "SearXNG 返回空结果，已降级到内置多源聚合".to_string();
+                    eprintln!("{msg}");
+                    note = Some(msg);
+                }
+                Err(err) => {
+                    degraded = true;
+                    let msg = format!("SearXNG 搜索失败，已降级到内置多源聚合: {err}");
+                    eprintln!("{msg}");
+                    note = Some(msg);
                 }
             }
         }
 
         let mut results = Vec::new();
+        let mut sources: Vec<String> = Vec::new();
+
         let finance_like_query = is_finance_like_query(query);
         let prioritize_market_quote = is_direct_market_quote_query(query);
         let yahoo_results = if finance_like_query {
@@ -290,6 +350,7 @@ pub(crate) async fn search_web(
 
         if prioritize_market_quote {
             if let Some(entry) = yahoo_results.first() {
+                let before = results.len();
                 push_unique_search_result(
                     &mut results,
                     WebSearchEntry {
@@ -298,90 +359,99 @@ pub(crate) async fn search_web(
                         snippet: entry.snippet.clone(),
                     },
                 );
-            }
-        }
-
-        if let Ok(bing_results) = bing::collect_bing_results(&client, query, max_results) {
-            for entry in bing_results {
-                if results.len() >= max_results {
-                    break;
-                }
-                push_unique_search_result(&mut results, entry);
-            }
-        }
-
-        let duck_html_outcome =
-            duckduckgo::collect_duckduckgo_html_results(&client, query, max_results);
-        let duck_html_failed = match &duck_html_outcome {
-            Ok(list) => list.is_empty(),
-            Err(_) => true,
-        };
-        if let Ok(duck_results) = duck_html_outcome {
-            for entry in duck_results {
-                if results.len() >= max_results {
-                    break;
-                }
-                push_unique_search_result(&mut results, entry);
-            }
-        }
-
-        if duck_html_failed && results.len() < max_results {
-            if let Ok(lite_results) =
-                duckduckgo::collect_duckduckgo_lite_results(&client, query, max_results)
-            {
-                for entry in lite_results {
-                    if results.len() >= max_results {
-                        break;
-                    }
-                    push_unique_search_result(&mut results, entry);
+                if results.len() > before {
+                    sources.push("yahoo".to_string());
                 }
             }
         }
 
-        if results.len() < max_results {
-            if let Ok(mojeek_results) = mojeek::collect_mojeek_results(&client, query, max_results)
-            {
-                for entry in mojeek_results {
-                    if results.len() >= max_results {
-                        break;
-                    }
-                    push_unique_search_result(&mut results, entry);
-                }
-            }
-        }
+        // 主抓取源并行执行：Bing(免key RSS/API) / DuckDuckGo(html→lite) / Brave / Mojeek / Qwant。
+        // 冷却中的源（近期失败）直接跳过，避免反复撞限流。
+        type SourceOutcome = (&'static str, Result<Vec<WebSearchEntry>, String>);
+        let outcomes: Vec<SourceOutcome> = std::thread::scope(|scope| {
+            let mut handles: Vec<(
+                &'static str,
+                std::thread::ScopedJoinHandle<'_, Result<Vec<WebSearchEntry>, String>>,
+            )> = Vec::new();
 
-        if results.len() < max_results {
-            if let Ok(qwant_results) =
-                qwant::collect_qwant_lite_results(&client, query, max_results)
-            {
-                for entry in qwant_results {
-                    if results.len() >= max_results {
-                        break;
-                    }
-                    push_unique_search_result(&mut results, entry);
+            if !is_source_cooling_down("bing") {
+                handles.push((
+                    "bing",
+                    scope.spawn(|| bing::collect_bing_results(&client, query, max_results)),
+                ));
+            }
+            if !is_source_cooling_down("duckduckgo") {
+                handles.push((
+                    "duckduckgo",
+                    scope.spawn(|| {
+                        duckduckgo::collect_duckduckgo_html_results(&client, query, max_results)
+                            .or_else(|_| {
+                                duckduckgo::collect_duckduckgo_lite_results(
+                                    &client,
+                                    query,
+                                    max_results,
+                                )
+                            })
+                    }),
+                ));
+            }
+            if !is_source_cooling_down("brave") {
+                handles.push((
+                    "brave",
+                    scope.spawn(|| brave::collect_brave_results(&client, query, max_results)),
+                ));
+            }
+            if !is_source_cooling_down("mojeek") {
+                handles.push((
+                    "mojeek",
+                    scope.spawn(|| mojeek::collect_mojeek_results(&client, query, max_results)),
+                ));
+            }
+            if !is_source_cooling_down("qwant") {
+                handles.push((
+                    "qwant",
+                    scope.spawn(|| qwant::collect_qwant_lite_results(&client, query, max_results)),
+                ));
+            }
+
+            handles
+                .into_iter()
+                .map(|(name, handle)| {
+                    let joined = handle
+                        .join()
+                        .unwrap_or_else(|_| Err(format!("{name} 搜索线程异常退出")));
+                    (name, joined)
+                })
+                .collect()
+        });
+
+        // 按优先级合并：Bing → DuckDuckGo → Brave → Mojeek → Qwant
+        for (name, outcome) in outcomes {
+            match outcome {
+                Ok(entries) if !entries.is_empty() => {
+                    mark_source_ok(name);
+                    merge_source(&mut results, &mut sources, name, entries, max_results);
+                }
+                Ok(_) => {
+                    mark_source_failed(name);
+                    eprintln!("内置搜索源 {name} 返回空结果");
+                }
+                Err(err) => {
+                    mark_source_failed(name);
+                    eprintln!("内置搜索源 {name} 失败: {err}");
                 }
             }
         }
 
         if let Ok(wiki_results) = academic::collect_wikipedia_results(&client, query, max_results) {
-            for entry in wiki_results {
-                if results.len() >= max_results {
-                    break;
-                }
-                push_unique_search_result(&mut results, entry);
-            }
+            merge_source(&mut results, &mut sources, "wikipedia", wiki_results, max_results);
         }
 
         let academic_query = is_academic_query(query);
         if academic_query && results.len() < max_results {
             if let Ok(arxiv_results) = academic::collect_arxiv_results(&client, query, max_results)
             {
-                for entry in arxiv_results {
-                    if results.len() >= max_results {
-                        break;
-                    }
-                    push_unique_search_result(&mut results, entry);
-                }
+                merge_source(&mut results, &mut sources, "arxiv", arxiv_results, max_results);
             }
         }
 
@@ -389,12 +459,13 @@ pub(crate) async fn search_web(
             if let Ok(openalex_results) =
                 academic::collect_openalex_results(&client, query, max_results)
             {
-                for entry in openalex_results {
-                    if results.len() >= max_results {
-                        break;
-                    }
-                    push_unique_search_result(&mut results, entry);
-                }
+                merge_source(
+                    &mut results,
+                    &mut sources,
+                    "openalex",
+                    openalex_results,
+                    max_results,
+                );
             }
         }
 
@@ -410,37 +481,92 @@ pub(crate) async fn search_web(
 
             if results.len() < max_results {
                 if let Some(topics) = instant.related_topics.as_ref() {
+                    let before = results.len();
                     duckduckgo::collect_duckduckgo_related_results(
                         topics,
                         &mut results,
                         max_results,
                     );
+                    if results.len() > before {
+                        sources.push("duckduckgo-instant".to_string());
+                    }
                 }
             }
         }
 
         if finance_like_query {
-            for entry in yahoo_results
+            let tail: Vec<WebSearchEntry> = yahoo_results
                 .into_iter()
                 .skip(usize::from(prioritize_market_quote))
-            {
-                if results.len() >= max_results {
-                    break;
-                }
-                push_unique_search_result(&mut results, entry);
-            }
+                .collect();
+            merge_source(&mut results, &mut sources, "yahoo", tail, max_results);
         }
 
         results.truncate(max_results);
+        if results.is_empty() && note.is_none() {
+            note = Some("所有搜索源均未返回结果（可能被限流或查询无匹配）".to_string());
+        }
         let response = WebSearchResponse {
             query: query.to_string(),
             abstract_text,
             abstract_url,
             results,
+            degraded,
+            note,
+            sources,
         };
-        cache_search_response(query, &response);
+        cache_search_response(query, &cache_scope, &response);
         Ok(response)
     })
     .await
     .map_err(|e| format!("搜索失败: {e}"))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(title: &str, url: &str) -> WebSearchEntry {
+        WebSearchEntry {
+            title: title.to_string(),
+            url: url.to_string(),
+            snippet: String::new(),
+        }
+    }
+
+    #[test]
+    fn push_unique_dedupes_by_normalized_url_and_title() {
+        let mut results = Vec::new();
+        push_unique_search_result(&mut results, entry("A", "https://example.com/page"));
+        push_unique_search_result(&mut results, entry("Different title", "https://example.com/page/"));
+        push_unique_search_result(&mut results, entry("a", "https://other.com/x"));
+        push_unique_search_result(&mut results, entry("", "https://empty-title.com"));
+        push_unique_search_result(&mut results, entry("No url", ""));
+        // URL 归一化去重 + 标题大小写不敏感去重；空标题/空 URL 丢弃
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].url, "https://example.com/page");
+    }
+
+    #[test]
+    fn merge_source_tracks_contributors_and_cap() {
+        let mut results = Vec::new();
+        let mut sources = Vec::new();
+        merge_source(
+            &mut results,
+            &mut sources,
+            "bing",
+            vec![entry("A", "https://a.com"), entry("B", "https://b.com")],
+            10,
+        );
+        merge_source(&mut results, &mut sources, "brave", vec![entry("A", "https://a.com")], 10);
+        merge_source(
+            &mut results,
+            &mut sources,
+            "mojeek",
+            vec![entry("C", "https://c.com")],
+            2,
+        );
+        assert_eq!(results.len(), 2);
+        assert_eq!(sources, vec!["bing".to_string()]);
+    }
 }

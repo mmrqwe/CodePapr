@@ -9,11 +9,14 @@ pub(crate) const SCRAPER_USER_AGENT: &str =
 pub(crate) const SEARCH_CACHE_TTL_SECS: u64 = 300;
 pub(crate) const SEARCH_RETRY_MAX: u32 = 2;
 pub(crate) const DDG_MIN_REQUEST_INTERVAL_MS: u64 = 1500;
+/// 源失败后的冷却时间：期间跳过该源，避免反复撞限流/风控
+pub(crate) const SOURCE_COOLDOWN_SECS: u64 = 300;
 
 pub(crate) static SEARCH_CACHE: OnceLock<Mutex<HashMap<String, (Instant, WebSearchResponse)>>> =
     OnceLock::new();
 pub(crate) static RATE_LIMIT_LAST_REQUEST: OnceLock<Mutex<HashMap<String, Instant>>> =
     OnceLock::new();
+pub(crate) static SOURCE_FAILURES: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
 
 pub(crate) fn build_web_client() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
@@ -111,26 +114,114 @@ where
     Err(last_error)
 }
 
-fn search_cache_key(query: &str) -> String {
-    query.trim().to_lowercase()
+fn search_cache_key(query: &str, scope: &str) -> String {
+    format!("{scope}\u{1f}{}", query.trim().to_lowercase())
 }
 
-pub(crate) fn get_cached_search(query: &str) -> Option<WebSearchResponse> {
+pub(crate) fn get_cached_search(query: &str, scope: &str) -> Option<WebSearchResponse> {
     let cache = SEARCH_CACHE
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .ok()?;
     cache
-        .get(&search_cache_key(query))
+        .get(&search_cache_key(query, scope))
         .filter(|entry| entry.0.elapsed() < Duration::from_secs(SEARCH_CACHE_TTL_SECS))
         .map(|entry| entry.1.clone())
 }
 
-pub(crate) fn cache_search_response(query: &str, response: &WebSearchResponse) {
+pub(crate) fn cache_search_response(query: &str, scope: &str, response: &WebSearchResponse) {
+    // 空结果不缓存：一次失败不应污染后续 TTL 内的相同查询
+    if response.results.is_empty() && response.abstract_text.trim().is_empty() {
+        return;
+    }
     if let Ok(mut cache) = SEARCH_CACHE
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
     {
-        cache.insert(search_cache_key(query), (Instant::now(), response.clone()));
+        cache.insert(
+            search_cache_key(query, scope),
+            (Instant::now(), response.clone()),
+        );
+    }
+}
+
+pub(crate) fn mark_source_failed(source: &str) {
+    if let Ok(mut map) = SOURCE_FAILURES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        map.insert(source.to_string(), Instant::now());
+    }
+}
+
+pub(crate) fn mark_source_ok(source: &str) {
+    if let Ok(mut map) = SOURCE_FAILURES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        map.remove(source);
+    }
+}
+
+pub(crate) fn is_source_cooling_down(source: &str) -> bool {
+    SOURCE_FAILURES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .ok()
+        .and_then(|map| map.get(source).copied())
+        .map(|failed_at| failed_at.elapsed() < Duration::from_secs(SOURCE_COOLDOWN_SECS))
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::web::search::WebSearchEntry;
+
+    fn response(results: Vec<WebSearchEntry>, abstract_text: &str) -> WebSearchResponse {
+        WebSearchResponse {
+            query: "q".to_string(),
+            abstract_text: abstract_text.to_string(),
+            abstract_url: String::new(),
+            results,
+            degraded: false,
+            note: None,
+            sources: Vec::new(),
+        }
+    }
+
+    fn entry(url: &str) -> WebSearchEntry {
+        WebSearchEntry {
+            title: "t".to_string(),
+            url: url.to_string(),
+            snippet: String::new(),
+        }
+    }
+
+    #[test]
+    fn empty_response_is_not_cached() {
+        let empty = response(Vec::new(), "");
+        cache_search_response("empty-cache-probe", "builtin", &empty);
+        assert!(get_cached_search("empty-cache-probe", "builtin").is_none());
+
+        let abstract_only = response(Vec::new(), "instant answer");
+        cache_search_response("abstract-cache-probe", "builtin", &abstract_only);
+        assert!(get_cached_search("abstract-cache-probe", "builtin").is_some());
+    }
+
+    #[test]
+    fn cache_key_is_scoped_by_source_config() {
+        let with_results = response(vec![entry("https://a.com")], "");
+        cache_search_response("scoped-probe", "searxng:https://s.example", &with_results);
+        assert!(get_cached_search("scoped-probe", "searxng:https://s.example").is_some());
+        assert!(get_cached_search("scoped-probe", "builtin").is_none());
+    }
+
+    #[test]
+    fn source_cooldown_tracks_failures() {
+        mark_source_failed("unit-test-source");
+        assert!(is_source_cooling_down("unit-test-source"));
+        mark_source_ok("unit-test-source");
+        assert!(!is_source_cooling_down("unit-test-source"));
     }
 }

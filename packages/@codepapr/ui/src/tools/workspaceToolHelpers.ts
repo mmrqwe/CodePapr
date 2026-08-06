@@ -360,6 +360,12 @@ export interface WebSearchResponse {
   abstract: string;
   abstractUrl: string;
   results: WebSearchResult[];
+  /** SearXNG 不可用/返回空，已降级到内置多源聚合 */
+  degraded?: boolean;
+  /** 降级或源失败说明 */
+  note?: string;
+  /** 实际贡献了结果的搜索源 */
+  sources?: string[];
 }
 
 export interface WebFetchUrlResult {

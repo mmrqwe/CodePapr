@@ -125,7 +125,25 @@ fn parse_duckduckgo_lite(
     let html = response
         .text()
         .map_err(|err| format!("读取 DuckDuckGo Lite 搜索结果失败: {err}"))?;
-    let document = Html::parse_document(&html);
+    parse_duckduckgo_lite_str(&html, max_results)
+}
+
+/// DDG 风控页特征：anomaly 弹窗或 challenge 表单。命中时视为失败，
+/// 让调用方走兜底源，而不是拿到 0 条结果。
+fn is_duckduckgo_challenge(html: &str) -> bool {
+    html.contains("anomaly-modal")
+        || html.contains("challenge-form")
+        || html.contains("challenge-platform")
+}
+
+pub(crate) fn parse_duckduckgo_lite_str(
+    html: &str,
+    max_results: usize,
+) -> Result<Vec<WebSearchEntry>, String> {
+    if is_duckduckgo_challenge(html) {
+        return Err("DuckDuckGo Lite 被风控拦截".to_string());
+    }
+    let document = Html::parse_document(html);
     let row_sel = Selector::parse("tr").map_err(|_| "DuckDuckGo Lite 页面解析失败".to_string())?;
     let link_sel =
         Selector::parse("a.result-link").map_err(|_| "DuckDuckGo Lite 页面解析失败".to_string())?;
@@ -187,7 +205,17 @@ fn parse_duckduckgo_html(
     let html = response
         .text()
         .map_err(|err| format!("读取 DuckDuckGo 搜索结果失败: {err}"))?;
-    let document = Html::parse_document(&html);
+    parse_duckduckgo_html_str(&html, max_results)
+}
+
+pub(crate) fn parse_duckduckgo_html_str(
+    html: &str,
+    max_results: usize,
+) -> Result<Vec<WebSearchEntry>, String> {
+    if is_duckduckgo_challenge(html) {
+        return Err("DuckDuckGo 被风控拦截".to_string());
+    }
+    let document = Html::parse_document(html);
     let result_body_sel =
         Selector::parse(".result__body").map_err(|_| "DuckDuckGo 页面解析失败".to_string())?;
     let link_sel =
@@ -348,5 +376,58 @@ pub(crate) fn collect_duckduckgo_related_results(
         if let Some(nested) = item.get("Topics") {
             collect_duckduckgo_related_results(nested, results, max_results);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_duckduckgo_html_str_extracts_results_and_resolves_redirect() {
+        let html = r#"<html><body>
+<div class="result__body">
+  <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpage&amp;rut=abc">Example title</a>
+  <div class="result__snippet">Example snippet</div>
+</div>
+<div class="result__body">
+  <a class="result__a" href="https://direct.example.org/x">Direct title</a>
+  <div class="result__snippet">Direct snippet</div>
+</div>
+</body></html>"#;
+
+        let results = parse_duckduckgo_html_str(html, 10).expect("parse should succeed");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].title, "Example title");
+        assert_eq!(results[0].url, "https://example.com/page");
+        assert_eq!(results[0].snippet, "Example snippet");
+        assert_eq!(results[1].url, "https://direct.example.org/x");
+    }
+
+    #[test]
+    fn parse_duckduckgo_html_str_rejects_anomaly_page() {
+        let html = r#"<html><body><div id="anomaly-modal">Please verify</div></body></html>"#;
+        let error = parse_duckduckgo_html_str(html, 10).expect_err("anomaly page should fail");
+        assert!(error.contains("风控"));
+    }
+
+    #[test]
+    fn parse_duckduckgo_lite_str_extracts_results() {
+        let html = r#"<html><body><table>
+<tr><td><a class="result-link" href="https://lite.example.com/a">Lite title</a></td></tr>
+<tr><td class="result-snippet">Lite snippet</td></tr>
+</table></body></html>"#;
+
+        let results = parse_duckduckgo_lite_str(html, 10).expect("parse should succeed");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Lite title");
+        assert_eq!(results[0].url, "https://lite.example.com/a");
+        assert_eq!(results[0].snippet, "Lite snippet");
+    }
+
+    #[test]
+    fn parse_duckduckgo_lite_str_rejects_challenge_page() {
+        let html = "<html><body><form class=\"challenge-form\"></form></body></html>";
+        assert!(parse_duckduckgo_lite_str(html, 10).is_err());
     }
 }
