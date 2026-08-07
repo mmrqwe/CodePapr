@@ -84,6 +84,7 @@ describe('ChatPanel', () => {
       'ResizeObserver',
       class MockResizeObserver {
         observe = vi.fn();
+        unobserve = vi.fn();
         disconnect = vi.fn();
 
         constructor(callback: ResizeObserverCallback) {
@@ -788,7 +789,7 @@ describe('ChatPanel', () => {
     );
   });
 
-  describe('batched history rendering', () => {
+  describe('batched history rendering (sliding window)', () => {
     function setLongConversation(rounds: number, batchRounds: number) {
       const messages: UIMessage[] = [];
       for (let i = 1; i <= rounds; i++) {
@@ -811,7 +812,13 @@ describe('ChatPanel', () => {
       }));
     }
 
-    it('renders only the latest N rounds at first and loads earlier rounds via the sentinel', async () => {
+    function findButton(text: string): HTMLButtonElement | undefined {
+      return Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent?.includes(text)
+      );
+    }
+
+    it('renders only the latest N rounds at first with a top spacer for unloaded history', async () => {
       setLongConversation(10, 3);
 
       await act(async () => {
@@ -823,23 +830,87 @@ describe('ChatPanel', () => {
       expect(container.querySelector('[data-message-id="user-10"]')).not.toBeNull();
       expect(container.querySelector('[data-message-id="user-7"]')).toBeNull();
 
-      const sentinelButton = Array.from(container.querySelectorAll('button')).find(
-        (b) => b.textContent?.includes('加载更早')
-      );
-      expect(sentinelButton).toBeTruthy();
-      expect(sentinelButton?.textContent).toContain('7');
+      // 上方未渲染历史由占位块撑起
+      const topSpacer = container.querySelector('[data-chat-scroll] [aria-hidden]') as HTMLElement | null;
+      expect(topSpacer).not.toBeNull();
+      expect(parseInt(topSpacer!.style.height, 10)).toBeGreaterThan(0);
 
-      await act(async () => {
-        sentinelButton?.click();
-      });
-
-      // 又加载了 3 轮（5-7），第 4 轮仍未渲染
-      expect(container.querySelector('[data-message-id="user-5"]')).not.toBeNull();
-      expect(container.querySelector('[data-message-id="user-7"]')).not.toBeNull();
-      expect(container.querySelector('[data-message-id="user-4"]')).toBeNull();
+      expect(findButton('加载更早')?.textContent).toContain('7');
+      expect(container.textContent).not.toContain('加载更新');
     });
 
-    it('renders everything without a sentinel when the conversation fits the batch', async () => {
+    it('slides the window up on the top sentinel: loads earlier rounds and unloads later ones', async () => {
+      setLongConversation(10, 3);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+
+      await act(async () => {
+        findButton('加载更早')?.click();
+      });
+
+      // 窗口上移 2 轮（步长 = ceil(3/2)）：第 6-8 轮可见
+      expect(container.querySelector('[data-message-id="user-6"]')).not.toBeNull();
+      expect(container.querySelector('[data-message-id="user-8"]')).not.toBeNull();
+      expect(container.querySelector('[data-message-id="user-5"]')).toBeNull();
+      // 第 9-10 轮被卸载，DOM 保持有界
+      expect(container.querySelector('[data-message-id="user-9"]')).toBeNull();
+      expect(container.querySelector('[data-message-id="user-10"]')).toBeNull();
+      // 下方出现「加载更新」哨兵
+      expect(findButton('加载更新')?.textContent).toContain('2');
+    });
+
+    it('slides back down and re-attaches to the tail', async () => {
+      setLongConversation(10, 3);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+
+      await act(async () => {
+        findButton('加载更早')?.click();
+      });
+      await act(async () => {
+        findButton('加载更新')?.click();
+      });
+
+      // 回到尾部：第 8-10 轮可见，且不再有「加载更新」哨兵
+      expect(container.querySelector('[data-message-id="user-10"]')).not.toBeNull();
+      expect(container.querySelector('[data-message-id="user-7"]')).toBeNull();
+      expect(container.textContent).not.toContain('加载更新');
+    });
+
+    it('keeps the tail rendered and trims the head while new rounds arrive at the bottom', async () => {
+      setLongConversation(10, 3);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+      expect(container.querySelector('[data-message-id="user-8"]')).not.toBeNull();
+
+      // 追加 2 轮（模拟流式新回合到达）
+      await act(async () => {
+        const current = useAgentStore.getState().messages;
+        const extra: UIMessage[] = [
+          { id: 'user-11', role: 'user', content: '问题 11', timestamp: 21 },
+          { id: 'assistant-11', role: 'assistant', content: '回答 11', timestamp: 22 },
+          { id: 'user-12', role: 'user', content: '问题 12', timestamp: 23 },
+          { id: 'assistant-12', role: 'assistant', content: '回答 12', timestamp: 24 },
+        ];
+        useAgentStore.setState({
+          messages: [...current, ...extra],
+          sessionMessages: { 'session-1': [...current, ...extra] },
+        });
+      });
+
+      // 窗口重新贴尾：最新轮可见，头部旧轮被卸载，DOM 保持有界
+      expect(container.querySelector('[data-message-id="user-12"]')).not.toBeNull();
+      expect(container.querySelector('[data-message-id="user-10"]')).not.toBeNull();
+      expect(container.querySelector('[data-message-id="user-9"]')).toBeNull();
+    });
+
+    it('renders everything without sentinels when the conversation fits the batch', async () => {
       setLongConversation(3, 6);
 
       await act(async () => {
@@ -849,9 +920,10 @@ describe('ChatPanel', () => {
       expect(container.querySelector('[data-message-id="user-1"]')).not.toBeNull();
       expect(container.querySelector('[data-message-id="user-3"]')).not.toBeNull();
       expect(container.textContent).not.toContain('加载更早');
+      expect(container.textContent).not.toContain('加载更新');
     });
 
-    it('widens the window when a jump request targets an unloaded message', async () => {
+    it('moves the window when a jump request targets an unloaded message', async () => {
       setLongConversation(10, 3);
 
       await act(async () => {
@@ -863,11 +935,13 @@ describe('ChatPanel', () => {
         useAgentStore.getState().requestChatScrollToMessage('user-2');
       });
 
+      // 目标进入窗口，同时尾部轮被卸载
       expect(container.querySelector('[data-message-id="user-2"]')).not.toBeNull();
+      expect(container.querySelector('[data-message-id="user-8"]')).toBeNull();
       expect(useAgentStore.getState()._pendingChatJump).toBeNull();
     });
 
-    it('scrolls directly without widening the window when the target is already rendered', async () => {
+    it('scrolls directly without moving the window when the target is already rendered', async () => {
       setLongConversation(10, 3);
 
       await act(async () => {
@@ -879,7 +953,7 @@ describe('ChatPanel', () => {
         useAgentStore.getState().requestChatScrollToMessage('user-9');
       });
 
-      // 窗口未扩大：第 7 轮仍未渲染；但发生了滚动
+      // 窗口未移动：第 7 轮仍未渲染；但发生了滚动
       expect(container.querySelector('[data-message-id="user-7"]')).toBeNull();
       expect(scrollToMock).toHaveBeenCalled();
     });

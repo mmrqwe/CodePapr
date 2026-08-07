@@ -475,7 +475,10 @@ export declare const I18N_DICTS: {
         chatPlaceholderConfigured: string;
         chatPlaceholderUnconfigured: string;
     chatLoadEarlierRounds: string;
+    chatLoadLaterRounds: string;
         chatLoadEarlierRounds: string;
+    chatLoadLaterRounds: string;
+        chatLoadLaterRounds: string;
         currentMode: string;
         agentMode: string;
         agentStepLabel: string;
@@ -965,7 +968,10 @@ export declare const I18N_DICTS: {
         chatPlaceholderConfigured: string;
         chatPlaceholderUnconfigured: string;
     chatLoadEarlierRounds: string;
+    chatLoadLaterRounds: string;
         chatLoadEarlierRounds: string;
+    chatLoadLaterRounds: string;
+        chatLoadLaterRounds: string;
         currentMode: string;
         agentMode: string;
         agentStepLabel: string;
@@ -1455,7 +1461,10 @@ export declare const I18N_DICTS: {
         chatPlaceholderConfigured: string;
         chatPlaceholderUnconfigured: string;
     chatLoadEarlierRounds: string;
+    chatLoadLaterRounds: string;
         chatLoadEarlierRounds: string;
+    chatLoadLaterRounds: string;
+        chatLoadLaterRounds: string;
         currentMode: string;
         agentMode: string;
         agentStepLabel: string;
@@ -1817,6 +1826,7 @@ export declare function getTranslation(lang?: Lang): {
     chatPlaceholderConfigured: string;
     chatPlaceholderUnconfigured: string;
     chatLoadEarlierRounds: string;
+    chatLoadLaterRounds: string;
     currentMode: string;
     agentMode: string;
     agentStepLabel: string;
@@ -2175,6 +2185,7 @@ export declare function getTranslation(lang?: Lang): {
     chatPlaceholderConfigured: string;
     chatPlaceholderUnconfigured: string;
     chatLoadEarlierRounds: string;
+    chatLoadLaterRounds: string;
     currentMode: string;
     agentMode: string;
     agentStepLabel: string;
@@ -2533,6 +2544,7 @@ export declare function getTranslation(lang?: Lang): {
     chatPlaceholderConfigured: string;
     chatPlaceholderUnconfigured: string;
     chatLoadEarlierRounds: string;
+    chatLoadLaterRounds: string;
     currentMode: string;
     agentMode: string;
     agentStepLabel: string;

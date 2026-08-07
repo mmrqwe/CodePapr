@@ -45,10 +45,15 @@ import {
   scrollContainerToBottom,
 } from '../utils/chatScroll';
 import {
-  computeInitialWindowStart,
-  computePreviousWindowStart,
-  computeWindowStartForIndex,
-  countRoundsBefore,
+  clampWindow,
+  computeInitialWindow,
+  computeRoundStartIndices,
+  computeWindowForJump,
+  estimateMessageHeight,
+  slideWindowDown,
+  slideWindowUp,
+  windowMessageBounds,
+  type RoundWindow,
 } from '../utils/messageWindow';
 import SlashCommandDropdown, {
   type SlashCommandDropdownHandle,
@@ -1765,20 +1770,111 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
         )?.id ?? null,
     [visibleMessages]
   );
-  // —— 历史分批渲染：首屏只渲染最近 N 轮，滚动接近顶部时再向前加载 N 轮 ——
-  // 完整 visibleMessages 仍供 LLM 上下文/TTS/搜索使用，这里只裁剪渲染范围。
+  // —— 历史滑动窗口渲染 ——
+  // DOM 里恒定只保留约 N 轮：上滑时窗口整体上移（加载更早的轮、卸载下面的轮），
+  // 下滑反之；滚回底部时窗口重新贴合尾部。完整 visibleMessages 仍供 LLM 上下文/
+  // TTS/搜索使用，这里只裁剪渲染范围。未渲染区域用占位块撑起滚动高度，占位高度
+  // 取自高度缓存（渲染时实测）或对未渲染过消息的估算。
   const chatRenderBatchRounds = Math.max(1, settings.chatRenderBatchRounds || 6);
+  const slideStepRounds = Math.max(1, Math.ceil(chatRenderBatchRounds / 2));
   const chatRenderBatchRoundsRef = useRef(chatRenderBatchRounds);
   chatRenderBatchRoundsRef.current = chatRenderBatchRounds;
-  const [windowStart, setWindowStart] = useState(() =>
-    computeInitialWindowStart(visibleMessages, chatRenderBatchRounds)
+  const slideStepRoundsRef = useRef(slideStepRounds);
+  slideStepRoundsRef.current = slideStepRounds;
+
+  const roundStarts = useMemo(() => computeRoundStartIndices(visibleMessages), [visibleMessages]);
+  const totalRounds = roundStarts.length;
+  const roundStartsRef = useRef(roundStarts);
+  roundStartsRef.current = roundStarts;
+
+  // 窗口 [lo, hi) 是「轮」的下标区间；hi === totalRounds 表示贴合尾部。
+  const [roundWindow, setRoundWindow] = useState<RoundWindow>(() =>
+    computeInitialWindow(totalRounds, chatRenderBatchRounds)
   );
-  const windowStartRef = useRef(windowStart);
-  windowStartRef.current = windowStart;
-  const pendingScrollAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+  const roundWindowRef = useRef(roundWindow);
+  roundWindowRef.current = roundWindow;
   const pendingScrollToIdRef = useRef<string | null>(null);
-  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+  const topSentinelRef = useRef<HTMLDivElement | null>(null);
+  const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
   const windowSessionKeyRef = useRef<string | null>(null);
+
+  // 防御：会话切换/截断的同一帧里窗口可能越界，先收敛再使用。
+  const effectiveRoundWindow = useMemo(
+    () => clampWindow(roundWindow, totalRounds, chatRenderBatchRounds),
+    [roundWindow, totalRounds, chatRenderBatchRounds]
+  );
+
+  const windowBounds = useMemo(
+    () => windowMessageBounds(visibleMessages, effectiveRoundWindow),
+    [visibleMessages, effectiveRoundWindow]
+  );
+  const windowedMessages = useMemo(
+    () => visibleMessages.slice(windowBounds.start, windowBounds.end),
+    [visibleMessages, windowBounds]
+  );
+
+  // 高度缓存：消息 ID → 实测像素高度。跨会话保留（ID 唯一），回访时占位精确。
+  const heightCacheRef = useRef(new Map<string, number>());
+  const messageHeights = useMemo(
+    () => visibleMessages.map((m) => heightCacheRef.current.get(m.id) ?? estimateMessageHeight(m)),
+    // effectiveRoundWindow 入依赖：窗口滑动后必须用最新缓存重算占位高度。
+    [visibleMessages, effectiveRoundWindow]
+  );
+  const prefixHeights = useMemo(() => {
+    const prefix = new Array<number>(messageHeights.length + 1);
+    prefix[0] = 0;
+    for (let i = 0; i < messageHeights.length; i++) {
+      prefix[i + 1] = prefix[i] + messageHeights[i];
+    }
+    return prefix;
+  }, [messageHeights]);
+  const topSpacerHeight = prefixHeights[windowBounds.start];
+  const bottomSpacerHeight = prefixHeights[visibleMessages.length] - prefixHeights[windowBounds.end];
+  const topSpacerHeightRef = useRef(topSpacerHeight);
+  topSpacerHeightRef.current = topSpacerHeight;
+
+  // 渲染后同步测量：共享一个 ResizeObserver 观察窗口内的消息包装元素。
+  const itemObserverRef = useRef<ResizeObserver | null>(null);
+  const observedItemsRef = useRef(new Set<Element>());
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const el = entry.target as HTMLElement;
+        const id = el.getAttribute('data-message-id');
+        if (!id) continue;
+        const height = el.getBoundingClientRect().height;
+        if (height > 0) {
+          heightCacheRef.current.set(id, height);
+        }
+      }
+    });
+    itemObserverRef.current = observer;
+    return () => {
+      observer.disconnect();
+      itemObserverRef.current = null;
+      observedItemsRef.current.clear();
+    };
+  }, []);
+  useLayoutEffect(() => {
+    const observer = itemObserverRef.current;
+    const content = messageListContentRef.current;
+    if (!observer || !content) return;
+    const seen = new Set<Element>();
+    content.querySelectorAll('[data-window-item]').forEach((el) => {
+      seen.add(el);
+      if (!observedItemsRef.current.has(el)) {
+        observedItemsRef.current.add(el);
+        observer.observe(el);
+      }
+    });
+    for (const el of observedItemsRef.current) {
+      if (!seen.has(el)) {
+        observedItemsRef.current.delete(el);
+        observer.unobserve(el);
+      }
+    }
+  });
 
   // 切换会话（含按需加载完成）时把窗口重置为「最近 N 轮」。
   useEffect(() => {
@@ -1787,90 +1883,94 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
     if (windowSessionKeyRef.current === key) return;
     windowSessionKeyRef.current = key;
     pendingScrollToIdRef.current = null;
-    setWindowStart(computeInitialWindowStart(visibleMessagesRef.current, chatRenderBatchRoundsRef.current));
+    setRoundWindow(computeInitialWindow(roundStartsRef.current.length, chatRenderBatchRoundsRef.current));
   }, [deferMessages, sessionMessagesLoading, activeSessionId]);
 
-  // 消息被截断（重置到某条）后窗口起点可能越界，收敛回有效值。
+  // 消息变化（流式追加/重置截断）后收敛窗口：
+  // - 越界（截断）→ clamp；贴尾窗口截断后仍贴尾
+  // - 吸底时新轮到达 → 窗口重新贴尾，保证用户始终看到最新消息
+  // - 贴尾且轮数超出窗口 → 卸载头部旧轮；但视口仍停留在窗口顶部附近时暂缓，
+  //   避免把用户正在看的内容移出窗口（此时继续增长是暂时的，用户上滑会触发哨兵滑动）
   useEffect(() => {
-    setWindowStart((prev) => {
-      const msgs = visibleMessagesRef.current;
-      if (prev <= msgs.length) return prev;
-      return computeInitialWindowStart(msgs, chatRenderBatchRoundsRef.current);
-    });
+    const total = roundStartsRef.current.length;
+    const batch = chatRenderBatchRoundsRef.current;
+    const prev = roundWindowRef.current;
+    if (prev.hi > total || prev.lo > prev.hi || prev.lo < 0) {
+      setRoundWindow(clampWindow(prev, total, batch));
+      return;
+    }
+    if (shouldStickToBottomRef.current && prev.hi < total && total - prev.hi <= batch) {
+      setRoundWindow(computeInitialWindow(total, batch));
+      return;
+    }
+    if (prev.hi === total && total > batch) {
+      const lo = total - batch;
+      if (lo !== prev.lo) {
+        const container = messageListRef.current;
+        const viewportClearOfWindowTop =
+          !container || container.scrollTop > topSpacerHeightRef.current + 200;
+        if (shouldStickToBottomRef.current || viewportClearOfWindowTop) {
+          setRoundWindow({ lo, hi: total });
+        }
+      }
+    }
   }, [visibleMessages]);
 
-  // 防御：会话切换的同一帧里 windowStart 可能还是旧会话的值。
-  const effectiveWindowStart = useMemo(() => {
-    if (windowStart <= 0) return 0;
-    if (windowStart > visibleMessages.length) {
-      return computeInitialWindowStart(visibleMessages, chatRenderBatchRounds);
-    }
-    return windowStart;
-  }, [visibleMessages, windowStart, chatRenderBatchRounds]);
-
-  const windowedMessages = useMemo(
-    () => (effectiveWindowStart > 0 ? visibleMessages.slice(effectiveWindowStart) : visibleMessages),
-    [visibleMessages, effectiveWindowStart]
-  );
-
-  const roundsBeforeWindow = useMemo(
-    () => countRoundsBefore(visibleMessages, effectiveWindowStart),
-    [visibleMessages, effectiveWindowStart]
-  );
-
-  // 向前加载一批：先记录滚动位置，前插后补偿，保持视口稳定。
-  const loadOlderRounds = useCallback(() => {
-    const msgs = visibleMessagesRef.current;
-    const next = computePreviousWindowStart(msgs, windowStartRef.current, chatRenderBatchRoundsRef.current);
-    if (next === windowStartRef.current) return;
-    const container = messageListRef.current;
-    if (container) {
-      pendingScrollAnchorRef.current = {
-        scrollHeight: container.scrollHeight,
-        scrollTop: container.scrollTop,
-      };
-    }
-    isProgrammaticScrollRef.current = true;
-    setWindowStart(next);
+  // 滑动窗口。占位块高度与窗口内消息共用同一份高度数据（缓存/估算），
+  // 消息在「占位 ↔ 渲染」之间切换时绝对位置不变，因此无需补偿 scrollTop，
+  // 视口自然停在原内容上，新批次在其上/下方出现。
+  const slideWindow = useCallback((dir: 'up' | 'down') => {
+    const total = roundStartsRef.current.length;
+    const current = roundWindowRef.current;
+    const next = dir === 'up'
+      ? slideWindowUp(current, total, chatRenderBatchRoundsRef.current, slideStepRoundsRef.current)
+      : slideWindowDown(current, total, chatRenderBatchRoundsRef.current, slideStepRoundsRef.current);
+    if (next.lo === current.lo && next.hi === current.hi) return;
+    setRoundWindow(next);
   }, []);
 
-  // 前插后的滚动锚定补偿。
-  useLayoutEffect(() => {
-    const anchor = pendingScrollAnchorRef.current;
-    if (!anchor) return;
-    pendingScrollAnchorRef.current = null;
-    const container = messageListRef.current;
-    if (!container) return;
-    isProgrammaticScrollRef.current = true;
-    container.scrollTop = anchor.scrollTop + (container.scrollHeight - anchor.scrollHeight);
-  }, [windowStart]);
-
-  // 哨兵接近视口顶部（向上预探 600px，约提前几轮）时自动加载上一批。
+  // 顶/底哨兵：接近视口（预探 600px）时自动滑动窗口；也保留手动按钮。
   useEffect(() => {
-    const sentinel = loadMoreSentinelRef.current;
+    const sentinel = topSentinelRef.current;
     const container = messageListRef.current;
     if (!sentinel || !container || typeof IntersectionObserver === 'undefined') return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
-          loadOlderRounds();
+          slideWindow('up');
         }
       },
       { root: container, rootMargin: '600px 0px 0px 0px', threshold: 0 }
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [effectiveWindowStart, loadOlderRounds]);
+  }, [effectiveRoundWindow.lo, slideWindow]);
+  useEffect(() => {
+    const sentinel = bottomSentinelRef.current;
+    const container = messageListRef.current;
+    if (!sentinel || !container || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          slideWindow('down');
+        }
+      },
+      { root: container, rootMargin: '0px 0px 600px 0px', threshold: 0 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [effectiveRoundWindow.hi, totalRounds, slideWindow]);
 
-  // 跳转到指定消息：窗口外先扩窗，渲染后再滚动；已在窗口内则直接滚动。
+  // 跳转到指定消息：窗口外先移动窗口，渲染后再滚动；已在窗口内则直接滚动。
   const scrollToMessageInView = useCallback((messageId: string) => {
     const msgs = visibleMessagesRef.current;
     const index = msgs.findIndex((m) => m.id === messageId);
     if (index < 0) return;
-    if (index < windowStartRef.current) {
+    const bounds = windowMessageBounds(msgs, roundWindowRef.current);
+    if (index < bounds.start || index >= bounds.end) {
       pendingScrollToIdRef.current = messageId;
       isProgrammaticScrollRef.current = true;
-      setWindowStart(computeWindowStartForIndex(msgs, index));
+      setRoundWindow(computeWindowForJump(msgs, index, chatRenderBatchRoundsRef.current));
       return;
     }
     const container = messageListRef.current;
@@ -1893,7 +1993,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
     pendingScrollToIdRef.current = null;
     isProgrammaticScrollRef.current = true;
     container.scrollTop = Math.max(0, el.offsetTop - 80);
-  }, [windowStart, visibleMessages]);
+  }, [roundWindow, visibleMessages]);
 
   // 跨面板跳转请求（如 AgentOpsPanel 里的会话搜索）。
   const pendingChatJump = useAgentStore((s) => s._pendingChatJump);
@@ -2347,14 +2447,17 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
         style={{ overflowAnchor: 'none' }}
       >
         <div ref={messageListContentRef}>
-          {!deferMessages && effectiveWindowStart > 0 && (
-            <div ref={loadMoreSentinelRef} className="mb-3 flex justify-center">
+          {topSpacerHeight > 0 && (
+            <div aria-hidden style={{ height: topSpacerHeight }} />
+          )}
+          {!deferMessages && effectiveRoundWindow.lo > 0 && (
+            <div ref={topSentinelRef} className="mb-3 flex justify-center">
               <button
                 type="button"
-                onClick={loadOlderRounds}
+                onClick={() => slideWindow('up')}
                 className="rounded-full border border-[#2a2d3a] bg-[#10131b] px-4 py-1.5 text-xs text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-200"
               >
-                {t.chatLoadEarlierRounds.replace('{n}', String(roundsBeforeWindow))}
+                {t.chatLoadEarlierRounds.replace('{n}', String(effectiveRoundWindow.lo))}
               </button>
             </div>
           )}
@@ -2468,7 +2571,13 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
               />
             );
 
-            if (!canShowActions) return bubble;
+            if (!canShowActions) {
+              return (
+                <div key={m.id} data-window-item data-message-id={m.id}>
+                  {bubble}
+                </div>
+              );
+            }
 
             const hasCheckpoint = Boolean(messageCheckpoints[m.id]);
             const canReset = hasCheckpoint && gitReady;
@@ -2488,7 +2597,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
                   : '此消息没有代码快照，无法重置代码。');
 
             return (
-              <div key={m.id} data-message-id={m.id}>
+              <div key={m.id} data-window-item data-message-id={m.id}>
                 {bubble}
                 <div
                   className="mb-4 flex justify-end"
@@ -2533,6 +2642,20 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
               </div>
             );
           })}
+          {!deferMessages && effectiveRoundWindow.hi < totalRounds && (
+            <div ref={bottomSentinelRef} className="mb-3 flex justify-center">
+              <button
+                type="button"
+                onClick={() => slideWindow('down')}
+                className="rounded-full border border-[#2a2d3a] bg-[#10131b] px-4 py-1.5 text-xs text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-200"
+              >
+                {t.chatLoadLaterRounds.replace('{n}', String(totalRounds - effectiveRoundWindow.hi))}
+              </button>
+            </div>
+          )}
+          {bottomSpacerHeight > 0 && (
+            <div aria-hidden style={{ height: bottomSpacerHeight }} />
+          )}
           {activeSessionId && _taskChecklists[activeSessionId] ? (
             <div className="mx-3 mb-4 rounded-2xl border-2 border-indigo-500/50 bg-[#10131b]">{/* debug-visible wrapper */}
               <TaskChecklist
