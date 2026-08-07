@@ -303,6 +303,8 @@ export function createWorkspaceToolContext(params: WorkspaceToolContextParams) {
       workspacePath: workspace(),
       relativePath: parsed.relativePath,
       maxDepth: parsed.maxDepth,
+      // app 模式下让 ProjectGraph 也能看到 .CodePapr/apps 下的应用源码
+      includeCodePaprApps: options.mode === 'app',
     });
 
     const insightEntries = filterWorkspaceInsightEntries(listResult.entries);

@@ -374,6 +374,7 @@ export function buildAgentSessionParts(
       scoutMaxToolRounds: settings.scoutMaxToolRounds,
       scoutMaxDepth: settings.scoutMaxDepth,
         graphToolTimeoutMs: settings.graphToolTimeoutMs,
+        mode,
       };
       registerUiTaskTool(toolRegistry, uiTaskToolContext);
     }

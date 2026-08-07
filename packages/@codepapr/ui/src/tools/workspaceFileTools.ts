@@ -48,7 +48,10 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
     ensureExternalPathAllowed,
     notifyWorkspaceMutation,
     editHistory,
+    options,
   } = ctx;
+  // app 模式下放行 .CodePapr/apps（Papr 应用源码存放处），其余模式保持屏蔽
+  const includeCodePaprApps = options.mode === 'app';
 
   registry.register(toolByName('workspace_list_files'), async (args: Record<string, unknown>) => {
     const parsed: ListFilesArgs = {
@@ -60,6 +63,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       workspacePath: workspace(),
       relativePath: parsed.relativePath,
       maxDepth: parsed.maxDepth,
+      includeCodePaprApps,
     });
 
     // 轻量逐文件符号：对代码文件附带顶层符号大纲（AST，无 AST 支持或失败则跳过该文件）

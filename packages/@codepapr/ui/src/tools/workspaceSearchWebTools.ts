@@ -34,6 +34,8 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
     notifyWorkspaceMutation,
     options,
   } = ctx;
+  // app 模式下放行 .CodePapr/apps（Papr 应用源码存放处），其余模式保持屏蔽
+  const includeCodePaprApps = options.mode === 'app';
 
   registry.register(toolByName('workspace_search_text'), async (args: Record<string, unknown>) => {
     const parsed: SearchTextArgs = {
@@ -54,6 +56,7 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
       maxResults: parsed.maxResults,
       maxMatchesPerFile: parsed.maxMatchesPerFile,
       maxBytesPerFile: parsed.maxBytesPerFile,
+      includeCodePaprApps,
     });
   });
 
@@ -70,6 +73,7 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
       caseSensitive: parsed.caseSensitive,
       isRegexp: parsed.isRegexp,
       maxResults: parsed.maxResults,
+      includeCodePaprApps,
     });
   });
 

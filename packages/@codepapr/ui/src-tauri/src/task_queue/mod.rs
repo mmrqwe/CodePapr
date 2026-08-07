@@ -104,6 +104,7 @@ pub(crate) fn task_worker(rx: std::sync::mpsc::Receiver<WorkspaceTask>) {
                     workspace_path,
                     relative_path,
                     max_depth,
+                    None,
                 );
                 WorkspaceTaskResult::ListFiles { id, result: res }
             }

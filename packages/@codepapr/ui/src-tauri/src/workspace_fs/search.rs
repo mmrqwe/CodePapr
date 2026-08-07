@@ -30,6 +30,7 @@ pub(crate) async fn search_workspace_text(
     max_results: Option<usize>,
     max_matches_per_file: Option<usize>,
     max_bytes_per_file: Option<usize>,
+    include_codepapr_apps: Option<bool>,
 ) -> Result<SearchResult, String> {
     run_blocking_workspace_task(move || {
         search_workspace_text_impl(
@@ -41,6 +42,7 @@ pub(crate) async fn search_workspace_text(
             max_results,
             max_matches_per_file,
             max_bytes_per_file,
+            include_codepapr_apps,
         )
     })
     .await
@@ -53,6 +55,7 @@ pub(crate) async fn search_workspace_paths(
     case_sensitive: Option<bool>,
     is_regexp: Option<bool>,
     max_results: Option<usize>,
+    include_codepapr_apps: Option<bool>,
 ) -> Result<PathSearchResult, String> {
     run_blocking_workspace_task(move || {
         search_workspace_paths_impl(
@@ -61,6 +64,7 @@ pub(crate) async fn search_workspace_paths(
             case_sensitive,
             is_regexp,
             max_results,
+            include_codepapr_apps,
         )
     })
     .await
@@ -76,6 +80,7 @@ pub(crate) fn search_workspace_text_impl(
     max_results: Option<usize>,
     max_matches_per_file: Option<usize>,
     max_bytes_per_file: Option<usize>,
+    include_codepapr_apps: Option<bool>,
 ) -> Result<SearchResult, String> {
     let workspace = canonical_workspace(&workspace_path)?;
     let prepared = prepare_text_search(
@@ -87,7 +92,9 @@ pub(crate) fn search_workspace_text_impl(
         max_matches_per_file,
         max_bytes_per_file,
     )?;
-    let (matches, truncated, skipped_files) = collect_search_matches(&workspace, &prepared)?;
+    let include_apps = include_codepapr_apps.unwrap_or(false);
+    let (matches, truncated, skipped_files) =
+        collect_search_matches(&workspace, &prepared, include_apps)?;
 
     Ok(SearchResult {
         query: prepared.raw_query.clone(),
@@ -109,10 +116,12 @@ pub(crate) fn search_workspace_paths_impl(
     case_sensitive: Option<bool>,
     is_regexp: Option<bool>,
     max_results: Option<usize>,
+    include_codepapr_apps: Option<bool>,
 ) -> Result<PathSearchResult, String> {
     let workspace = canonical_workspace(&workspace_path)?;
     let prepared = prepare_path_search(query, case_sensitive, is_regexp, max_results)?;
-    let (matches, truncated) = collect_path_matches(&workspace, &prepared)?;
+    let include_apps = include_codepapr_apps.unwrap_or(false);
+    let (matches, truncated) = collect_path_matches(&workspace, &prepared, include_apps)?;
 
     Ok(PathSearchResult {
         query: prepared.raw_query.clone(),
@@ -231,7 +240,11 @@ fn prepare_path_search(
     })
 }
 
-fn build_search_walker(workspace: &Path, max_filesize: Option<usize>) -> ignore::Walk {
+/// 构建主搜索遍历器。`.CodePapr` 子树在这里始终被排除（名称过滤 + 项目
+/// .gitignore 双重屏蔽）；app 模式对 `.CodePapr/apps` 的放行由
+/// build_apps_walker 的二次遍历实现（override 语义是"只搜匹配项"，
+/// 会误杀全库其余文件，不能用于此场景）。
+fn build_search_walker_builder(workspace: &Path) -> WalkBuilder {
     let mut builder = WalkBuilder::new(workspace);
     builder
         .hidden(false)
@@ -252,6 +265,37 @@ fn build_search_walker(workspace: &Path, max_filesize: Option<usize>) -> ignore:
                 .unwrap_or(true)
         });
 
+    builder
+}
+
+/// app 模式专用遍历器：直接以 `.CodePapr/apps` 为根，关闭 gitignore
+/// （项目 .gitignore 通常忽略 .CodePapr/），仅保留重型目录名称过滤。
+fn build_apps_walker(workspace: &Path) -> Option<ignore::Walk> {
+    let apps_root = workspace.join(".CodePapr/apps");
+    if !apps_root.is_dir() {
+        return None;
+    }
+    let mut builder = WalkBuilder::new(&apps_root);
+    builder
+        .hidden(false)
+        .require_git(false)
+        .parents(false)
+        .git_ignore(false)
+        .git_exclude(false)
+        .ignore(false)
+        .filter_entry(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .map(|name| !should_ignore_dir(name))
+                .unwrap_or(true)
+        });
+    Some(builder.build())
+}
+
+fn build_search_walker(workspace: &Path, max_filesize: Option<usize>) -> ignore::Walk {
+    let mut builder = build_search_walker_builder(workspace);
+
     if let Some(limit) = max_filesize {
         builder.max_filesize(Some(limit as u64));
     }
@@ -259,31 +303,111 @@ fn build_search_walker(workspace: &Path, max_filesize: Option<usize>) -> ignore:
     builder.build()
 }
 
+/// 处理单个遍历条目：读取、解码、按行匹配并写入共享结果。
+/// 主遍历与 .CodePapr/apps 二次遍历共用。
+#[allow(clippy::too_many_arguments)]
+fn handle_search_entry(
+    entry_result: Result<ignore::DirEntry, ignore::Error>,
+    workspace: &Path,
+    options: &PreparedTextSearch,
+    max_filesize: usize,
+    max_results: usize,
+    max_per_file: usize,
+    context_lines: usize,
+    results: &Mutex<Vec<SearchMatch>>,
+    truncated: &AtomicBool,
+    skipped: &AtomicUsize,
+) -> ignore::WalkState {
+    let entry = match entry_result {
+        Ok(e) => e,
+        Err(_) => return ignore::WalkState::Continue,
+    };
+    if entry.depth() == 0 {
+        return ignore::WalkState::Continue;
+    }
+    let Some(file_type) = entry.file_type() else {
+        return ignore::WalkState::Continue;
+    };
+    if !file_type.is_file() {
+        return ignore::WalkState::Continue;
+    }
+    if max_filesize > 0 {
+        if let Ok(metadata) = entry.metadata() {
+            if metadata.len() > max_filesize as u64 {
+                // 超过单文件大小上限：计入 skipped，不读取内容
+                skipped.fetch_add(1, Ordering::Relaxed);
+                return ignore::WalkState::Continue;
+            }
+        }
+    }
+
+    let path = entry.into_path();
+    let Ok(buffer) = fs::read(&path) else {
+        skipped.fetch_add(1, Ordering::Relaxed);
+        return ignore::WalkState::Continue;
+    };
+    let Ok(content) = decode_text_bytes(buffer) else {
+        // 二进制或无法解码的文件：计入 skipped，让调用方知道 0 结果不等于全库无匹配
+        skipped.fetch_add(1, Ordering::Relaxed);
+        return ignore::WalkState::Continue;
+    };
+    let (lines, _) = split_text_lines_for_read(&content);
+
+    let mut local_matches: Vec<SearchMatch> = Vec::new();
+    let mut matched_in_file = 0usize;
+
+    for (index, line) in lines.iter().enumerate() {
+        if matched_in_file >= max_per_file {
+            break;
+        }
+        if let Some(found) = options.matcher.find(line) {
+            matched_in_file += 1;
+            local_matches.push(SearchMatch {
+                path: relative_string(workspace, &path),
+                line: index + 1,
+                preview: line.trim().chars().take(240).collect(),
+                // found.start() 是字节偏移：非 ASCII 行上直接当列号会
+                // 让光标定位错位，换算成字符偏移。
+                column: Some(line[..found.start()].chars().count() + 1),
+                context_before: if context_lines > 0 {
+                    Some(lines[index.saturating_sub(context_lines)..index].to_vec())
+                } else {
+                    None
+                },
+                context_after: if context_lines > 0 {
+                    Some(
+                        lines[index + 1..(index + 1 + context_lines).min(lines.len())].to_vec(),
+                    )
+                } else {
+                    None
+                },
+            });
+        }
+    }
+
+    if !local_matches.is_empty() {
+        let mut global = results.lock().unwrap();
+        for m in local_matches {
+            if global.len() >= max_results {
+                truncated.store(true, Ordering::Relaxed);
+                break;
+            }
+            global.push(m);
+        }
+    }
+
+    ignore::WalkState::Continue
+}
+
 pub(crate) fn collect_search_matches(
     workspace: &Path,
     options: &PreparedTextSearch,
+    include_codepapr_apps: bool,
 ) -> Result<(Vec<SearchMatch>, bool, usize), String> {
     let workspace_owned = workspace.to_path_buf();
     let max_filesize = options.max_bytes_per_file;
 
-    let mut builder = WalkBuilder::new(&workspace_owned);
-    builder
-        .hidden(false)
-        .require_git(false)
-        .parents(true)
-        .git_ignore(true)
-        .git_exclude(true)
-        .ignore(true)
-        .filter_entry(|entry| {
-            if entry.depth() == 0 {
-                return true;
-            }
-            entry
-                .file_name()
-                .to_str()
-                .map(|name| !should_ignore_dir(name))
-                .unwrap_or(true)
-        });
+    let builder = build_search_walker_builder(&workspace_owned);
 
     // 不使用 builder.max_filesize 预过滤：超限文件需要计入 skipped_files，
     // 让调用方知道 0 结果不等于全库无匹配（改在访问条目时检查大小）
@@ -306,89 +430,44 @@ pub(crate) fn collect_search_matches(
             if truncated.load(Ordering::Relaxed) {
                 return ignore::WalkState::Quit;
             }
-
-            let entry = match entry_result {
-                Ok(e) => e,
-                Err(_) => return ignore::WalkState::Continue,
-            };
-            if entry.depth() == 0 {
-                return ignore::WalkState::Continue;
-            }
-            let Some(file_type) = entry.file_type() else {
-                return ignore::WalkState::Continue;
-            };
-            if !file_type.is_file() {
-                return ignore::WalkState::Continue;
-            }
-            if max_filesize > 0 {
-                if let Ok(metadata) = entry.metadata() {
-                    if metadata.len() > max_filesize as u64 {
-                        // 超过单文件大小上限：计入 skipped，不读取内容
-                        skipped.fetch_add(1, Ordering::Relaxed);
-                        return ignore::WalkState::Continue;
-                    }
-                }
-            }
-
-            let path = entry.into_path();
-            let Ok(buffer) = fs::read(&path) else {
-                skipped.fetch_add(1, Ordering::Relaxed);
-                return ignore::WalkState::Continue;
-            };
-            let Ok(content) = decode_text_bytes(buffer) else {
-                // 二进制或无法解码的文件：计入 skipped，让调用方知道 0 结果不等于全库无匹配
-                skipped.fetch_add(1, Ordering::Relaxed);
-                return ignore::WalkState::Continue;
-            };
-            let (lines, _) = split_text_lines_for_read(&content);
-
-            let mut local_matches: Vec<SearchMatch> = Vec::new();
-            let mut matched_in_file = 0usize;
-
-            for (index, line) in lines.iter().enumerate() {
-                if matched_in_file >= max_per_file {
-                    break;
-                }
-                if let Some(found) = options.matcher.find(line) {
-                    matched_in_file += 1;
-                    local_matches.push(SearchMatch {
-                        path: relative_string(workspace.as_path(), &path),
-                        line: index + 1,
-                        preview: line.trim().chars().take(240).collect(),
-                        // found.start() 是字节偏移：非 ASCII 行上直接当列号会
-                        // 让光标定位错位，换算成字符偏移。
-                        column: Some(line[..found.start()].chars().count() + 1),
-                        context_before: if context_lines > 0 {
-                            Some(lines[index.saturating_sub(context_lines)..index].to_vec())
-                        } else {
-                            None
-                        },
-                        context_after: if context_lines > 0 {
-                            Some(
-                                lines[index + 1..(index + 1 + context_lines).min(lines.len())]
-                                    .to_vec(),
-                            )
-                        } else {
-                            None
-                        },
-                    });
-                }
-            }
-
-            if !local_matches.is_empty() {
-                let mut global = results.lock().unwrap();
-                for m in local_matches {
-                    if global.len() >= max_results {
-                        truncated.store(true, Ordering::Relaxed);
-                        break;
-                    }
-                    global.push(m);
-                }
-            }
-
-            ignore::WalkState::Continue
+            handle_search_entry(
+                entry_result,
+                workspace.as_path(),
+                options,
+                max_filesize,
+                max_results,
+                max_per_file,
+                context_lines,
+                &results,
+                &truncated,
+                &skipped,
+            )
         })
     });
+
+    // app 模式：二次遍历 .CodePapr/apps（主遍历受项目 .gitignore 与名称
+    // 过滤屏蔽无法到达）。结果并入同一共享状态，max_results 上限仍然生效。
+    if include_codepapr_apps {
+        if let Some(apps_walker) = build_apps_walker(&workspace_owned) {
+            for entry_result in apps_walker {
+                if truncated.load(Ordering::Relaxed) {
+                    break;
+                }
+                handle_search_entry(
+                    entry_result,
+                    workspace_ref,
+                    options,
+                    max_filesize,
+                    max_results,
+                    max_per_file,
+                    context_lines,
+                    &results,
+                    &truncated,
+                    &skipped,
+                );
+            }
+        }
+    }
 
     let matches = Arc::try_unwrap(results)
         .unwrap_or_else(|_| unreachable!())
@@ -404,42 +483,66 @@ pub(crate) fn collect_search_matches(
 pub(crate) fn collect_path_matches(
     workspace: &Path,
     options: &PreparedPathSearch,
+    include_codepapr_apps: bool,
 ) -> Result<(Vec<PathSearchMatch>, bool), String> {
     let mut matches = Vec::new();
     let mut truncated = false;
 
     for entry in build_search_walker(workspace, None) {
-        let Ok(entry) = entry else {
-            continue;
-        };
-        if entry.depth() == 0 {
-            continue;
+        if match_path_entry(entry, workspace, options, &mut matches) {
+            truncated = true;
+            return Ok((matches, truncated));
         }
+    }
 
-        let path = entry.into_path();
-        let Ok(metadata) = fs::metadata(&path) else {
-            continue;
-        };
-        let name = path
-            .file_name()
-            .and_then(|value| value.to_str())
-            .map(|value| value.to_string())
-            .unwrap_or_default();
-        let relative = relative_string(workspace, &path);
-
-        if options.matcher.is_match(&relative) || options.matcher.is_match(&name) {
-            matches.push(PathSearchMatch {
-                path: relative,
-                name,
-                is_dir: metadata.is_dir(),
-                bytes: if metadata.is_dir() { 0 } else { metadata.len() },
-            });
-            if matches.len() >= options.max_results {
-                truncated = true;
-                break;
+    // app 模式：二次遍历 .CodePapr/apps（主遍历受 .gitignore 与名称过滤屏蔽）
+    if include_codepapr_apps {
+        if let Some(apps_walker) = build_apps_walker(workspace) {
+            for entry in apps_walker {
+                if match_path_entry(entry, workspace, options, &mut matches) {
+                    truncated = true;
+                    return Ok((matches, truncated));
+                }
             }
         }
     }
 
     Ok((matches, truncated))
+}
+
+/// 处理单个路径条目；返回 true 表示已达 max_results 上限（截断）。
+fn match_path_entry(
+    entry_result: Result<ignore::DirEntry, ignore::Error>,
+    workspace: &Path,
+    options: &PreparedPathSearch,
+    matches: &mut Vec<PathSearchMatch>,
+) -> bool {
+    let Ok(entry) = entry_result else {
+        return false;
+    };
+    if entry.depth() == 0 {
+        return false;
+    }
+
+    let path = entry.into_path();
+    let Ok(metadata) = fs::metadata(&path) else {
+        return false;
+    };
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    let relative = relative_string(workspace, &path);
+
+    if options.matcher.is_match(&relative) || options.matcher.is_match(&name) {
+        matches.push(PathSearchMatch {
+            path: relative,
+            name,
+            is_dir: metadata.is_dir(),
+            bytes: if metadata.is_dir() { 0 } else { metadata.len() },
+        });
+        return matches.len() >= options.max_results;
+    }
+    false
 }

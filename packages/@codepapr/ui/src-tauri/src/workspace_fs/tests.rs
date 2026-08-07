@@ -179,6 +179,7 @@ fn search_workspace_text_returns_context_and_respects_gitignore() {
         Some(10),
         Some(2),
         Some(200_000),
+        None,
     )
     .expect("text search should succeed");
 
@@ -195,6 +196,7 @@ fn search_workspace_text_returns_context_and_respects_gitignore() {
     let ignored = search::search_workspace_text_impl(
         workspace.workspace_arg(),
         "ignored-hit".to_string(),
+        None,
         None,
         None,
         None,
@@ -236,6 +238,7 @@ fn search_workspace_paths_supports_regex_and_respects_gitignore() {
         Some(false),
         Some(true),
         Some(10),
+        None,
     )
     .expect("path search should succeed");
 
@@ -428,6 +431,7 @@ fn search_workspace_text_decodes_utf16le_with_bom() {
         None,
         None,
         None,
+        None,
     )
     .expect("utf-16 file should be searchable");
 
@@ -449,6 +453,7 @@ fn search_workspace_text_decodes_gbk_chinese_content() {
     let result = search::search_workspace_text_impl(
         workspace.workspace_arg(),
         "世界".to_string(),
+        None,
         None,
         None,
         None,
@@ -480,6 +485,7 @@ fn search_workspace_text_degrades_invalid_regex_to_literal() {
         None,
         None,
         None,
+        None,
     )
     .expect("invalid regex should degrade instead of failing");
 
@@ -504,6 +510,7 @@ fn search_workspace_text_counts_skipped_binary_files() {
     let result = search::search_workspace_text_impl(
         workspace.workspace_arg(),
         "needle".to_string(),
+        None,
         None,
         None,
         None,
@@ -675,7 +682,7 @@ fn list_workspace_files_survives_broken_symlink() {
     )
     .expect("should create symlink");
 
-    let result = list::list_workspace_files_impl(workspace.workspace_arg(), None, Some(2))
+    let result = list::list_workspace_files_impl(workspace.workspace_arg(), None, Some(2), None)
         .expect("broken symlink should not break listing");
 
     let paths: Vec<String> = result.entries.iter().map(|e| e.path.clone()).collect();
@@ -705,6 +712,7 @@ fn search_workspace_text_includes_dot_dirs_but_excludes_git() {
         None,
         None,
         None,
+        None,
     )
     .expect("search should succeed");
     assert_eq!(result.matches.len(), 1);
@@ -713,6 +721,7 @@ fn search_workspace_text_includes_dot_dirs_but_excludes_git() {
     let git_result = search::search_workspace_text_impl(
         workspace.workspace_arg(),
         "needle-git".to_string(),
+        None,
         None,
         None,
         None,
@@ -741,6 +750,7 @@ fn search_workspace_text_counts_oversized_files_as_skipped() {
         None,
         None,
         Some(2000),
+        None,
     )
     .expect("search should succeed");
 
@@ -788,6 +798,7 @@ fn list_workspace_files_excludes_ds_store_and_ignored_dirs() {
         workspace.workspace_arg(),
         None,
         Some(2),
+        None,
     )
     .expect("list should succeed");
 
@@ -800,5 +811,204 @@ fn list_workspace_files_excludes_ds_store_and_ignored_dirs() {
     assert!(
         !paths.iter().any(|p| p.eq_ignore_ascii_case("Thumbs.db")),
         "Thumbs.db should be filtered: {paths:?}"
+    );
+}
+
+#[test]
+fn search_workspace_text_codepapr_apps_gated_by_app_mode() {
+    let workspace = TestWorkspace::new("search-codepapr-apps");
+    fs::create_dir_all(workspace.file_path(".CodePapr/apps/my-app"))
+        .expect("should create app dir");
+    fs::create_dir_all(workspace.file_path(".CodePapr/git"))
+        .expect("should create shadow git dir");
+    fs::write(
+        workspace.file_path(".CodePapr/apps/my-app/index.html"),
+        b"<html>needle-app</html>\n",
+    )
+    .expect("should write app fixture");
+    fs::write(workspace.file_path(".CodePapr/memory.md"), b"needle-memory\n")
+        .expect("should write memory fixture");
+    fs::write(workspace.file_path(".CodePapr/git/config"), b"needle-shadow-git\n")
+        .expect("should write shadow git fixture");
+    // 项目 .gitignore 通常忽略 .CodePapr/：app 模式白名单需要穿透它
+    fs::write(workspace.file_path(".gitignore"), b".CodePapr/\n")
+        .expect("should write gitignore");
+    fs::write(workspace.file_path("src-note.txt"), b"needle-app outside\n")
+        .expect("should write outside fixture");
+
+    // app 模式：能搜到 .CodePapr/apps 下的应用源码（穿透 gitignore），
+    // 但 memory.md / git/ 等内部状态仍被屏蔽
+    let app_mode = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "needle-app".to_string(),
+        None,
+        None,
+        None,
+        Some(20),
+        None,
+        None,
+        Some(true),
+    )
+    .expect("app-mode search should succeed");
+    let app_paths: Vec<String> = app_mode.matches.iter().map(|m| m.path.clone()).collect();
+    assert!(
+        app_paths.contains(&".CodePapr/apps/my-app/index.html".to_string()),
+        "app mode should search .CodePapr/apps: {app_paths:?}"
+    );
+    assert!(app_paths.contains(&"src-note.txt".to_string()));
+
+    let memory_hit = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "needle-memory".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(true),
+    )
+    .expect("app-mode memory search should succeed");
+    assert!(memory_hit.matches.is_empty(), "memory.md must stay hidden");
+
+    let git_hit = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "needle-shadow-git".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(true),
+    )
+    .expect("app-mode git search should succeed");
+    assert!(git_hit.matches.is_empty(), ".CodePapr/git must stay hidden");
+
+    // 非 app 模式：.CodePapr 全量屏蔽（含 apps）
+    let non_app = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "needle-app".to_string(),
+        None,
+        None,
+        None,
+        Some(20),
+        None,
+        None,
+        None,
+    )
+    .expect("non-app search should succeed");
+    let non_app_paths: Vec<String> = non_app.matches.iter().map(|m| m.path.clone()).collect();
+    assert_eq!(non_app_paths, vec!["src-note.txt".to_string()]);
+}
+
+#[test]
+fn search_workspace_paths_codepapr_apps_gated_by_app_mode() {
+    let workspace = TestWorkspace::new("search-paths-codepapr-apps");
+    fs::create_dir_all(workspace.file_path(".CodePapr/apps/my-app"))
+        .expect("should create app dir");
+    fs::write(
+        workspace.file_path(".CodePapr/apps/my-app/index.html"),
+        b"<html></html>\n",
+    )
+    .expect("should write app fixture");
+    fs::write(workspace.file_path(".gitignore"), b".CodePapr/\n")
+        .expect("should write gitignore");
+
+    let app_mode = search::search_workspace_paths_impl(
+        workspace.workspace_arg(),
+        "index\\.html".to_string(),
+        Some(true),
+        Some(true),
+        Some(20),
+        Some(true),
+    )
+    .expect("app-mode path search should succeed");
+    let paths: Vec<String> = app_mode.matches.iter().map(|m| m.path.clone()).collect();
+    assert!(
+        paths.contains(&".CodePapr/apps/my-app/index.html".to_string()),
+        "app mode should find app files by path: {paths:?}"
+    );
+
+    let non_app = search::search_workspace_paths_impl(
+        workspace.workspace_arg(),
+        "index\\.html".to_string(),
+        Some(true),
+        Some(true),
+        Some(20),
+        None,
+    )
+    .expect("non-app path search should succeed");
+    assert!(non_app.matches.is_empty());
+}
+
+#[test]
+fn list_workspace_files_codepapr_apps_gated_by_app_mode() {
+    let workspace = TestWorkspace::new("list-codepapr-apps");
+    fs::create_dir_all(workspace.file_path(".CodePapr/apps/my-app"))
+        .expect("should create app dir");
+    fs::create_dir_all(workspace.file_path(".CodePapr/skills"))
+        .expect("should create skills dir");
+    fs::write(
+        workspace.file_path(".CodePapr/apps/my-app/index.html"),
+        b"<html></html>\n",
+    )
+    .expect("should write app fixture");
+    fs::write(workspace.file_path(".CodePapr/skills/search.md"), b"skill\n")
+        .expect("should write skill fixture");
+    fs::write(workspace.file_path(".CodePapr/project.sqlite"), b"db\n")
+        .expect("should write db fixture");
+    fs::write(workspace.file_path("src-note.txt"), b"note\n")
+        .expect("should write outside fixture");
+
+    // 非 app 模式：根目录遍历不出现 .CodePapr 任何内容
+    let non_app = list::list_workspace_files_impl(
+        workspace.workspace_arg(),
+        None,
+        Some(6),
+        None,
+    )
+    .expect("non-app list should succeed");
+    let paths: Vec<String> = non_app.entries.iter().map(|e| e.path.clone()).collect();
+    assert!(paths.contains(&"src-note.txt".to_string()));
+    assert!(
+        !paths.iter().any(|p| p.starts_with(".CodePapr")),
+        "non-app mode must hide .CodePapr: {paths:?}"
+    );
+
+    // app 模式：仅放行 apps 子树，skills/project.sqlite 仍隐藏
+    let app_mode = list::list_workspace_files_impl(
+        workspace.workspace_arg(),
+        None,
+        Some(6),
+        Some(true),
+    )
+    .expect("app-mode list should succeed");
+    let paths: Vec<String> = app_mode.entries.iter().map(|e| e.path.clone()).collect();
+    assert!(
+        paths.contains(&".CodePapr/apps/my-app/index.html".to_string()),
+        "app mode should list app files: {paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|p| p.starts_with(".CodePapr/skills")),
+        "skills must stay hidden in broad listing: {paths:?}"
+    );
+    assert!(
+        !paths.contains(&".CodePapr/project.sqlite".to_string()),
+        "project.sqlite must stay hidden: {paths:?}"
+    );
+
+    // 定向访问不受模式管控：skills 加载链路（显式 relativePath）保持可用
+    let targeted = list::list_workspace_files_impl(
+        workspace.workspace_arg(),
+        Some(".CodePapr/skills".to_string()),
+        Some(2),
+        None,
+    )
+    .expect("targeted skills list should succeed");
+    let paths: Vec<String> = targeted.entries.iter().map(|e| e.path.clone()).collect();
+    assert!(
+        paths.contains(&".CodePapr/skills/search.md".to_string()),
+        "explicit skills listing must keep working: {paths:?}"
     );
 }

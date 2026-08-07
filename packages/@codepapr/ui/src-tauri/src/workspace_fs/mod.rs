@@ -43,6 +43,18 @@ pub(crate) fn should_ignore_dir(name: &str) -> bool {
     name == ".git" || IGNORED_DIRS.contains(&name)
 }
 
+/// app 模式白名单：仅放行 `.CodePapr/apps` 子树（Papr 应用源码存放处）。
+/// `.CodePapr` 其余内容（project.sqlite、git/、memory.md 等内部状态）始终屏蔽。
+/// 非 app 模式（include_codepapr_apps=false）时一律不放行。
+pub(crate) fn codepapr_apps_allowed(relative_path: &str, include_codepapr_apps: bool) -> bool {
+    if !include_codepapr_apps {
+        return false;
+    }
+    relative_path == ".CodePapr"
+        || relative_path == ".CodePapr/apps"
+        || relative_path.starts_with(".CodePapr/apps/")
+}
+
 /// Returns true when any path component is an ignored directory (e.g.
 /// `node_modules`, `target`) or a dot-directory. Used by the native file
 /// watcher to suppress noise from build outputs and dependency folders

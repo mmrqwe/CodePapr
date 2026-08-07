@@ -15,6 +15,7 @@ import {
   buildTaskToolDefinition,
   type AgentDefinition,
   type EditHistory,
+  type PromptMode,
   type SkillDefinition,
   type SubagentSessionResult,
   type ToolOutputTruncationOptions,
@@ -63,6 +64,8 @@ export interface UiTaskToolContext {
   graphToolTimeoutMs: number;
   multimodalEnabled: boolean;
   toolOutputTruncation?: ToolOutputTruncationOptions;
+  /** 主会话工作模式：app 模式下子代理同样需要能搜索 .CodePapr/apps 应用源码。 */
+  mode?: PromptMode;
 }
 
 async function runSubagent(
@@ -78,7 +81,7 @@ async function runSubagent(
     context.workspacePath,
     context.editHistory,
     context.onWorkspaceMutated,
-    { multimodalEnabled: context.multimodalEnabled, exposeGraphToLlm: true }
+    { multimodalEnabled: context.multimodalEnabled, exposeGraphToLlm: true, mode: context.mode }
   );
   const tools = filterToolsForAgent(registry.getAll(), definition.tools);
 
