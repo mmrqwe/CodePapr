@@ -162,6 +162,18 @@ function findProjectFiles(
     .sort((left, right) => pathDepth(left) - pathDepth(right) || left.localeCompare(right));
 }
 
+/** monorepo：根 package.json 没有 lint/typecheck 脚本时，找最匹配的子包 package.json。 */
+function findNestedPackageJson(
+  entries: readonly ProjectDiagnosticsListEntry[],
+  changedPaths: readonly string[]
+): string | null {
+  const candidates = findProjectFiles(
+    entries,
+    (_entry, path) => path.endsWith('package.json') && path !== 'package.json'
+  );
+  return chooseProjectFileForChangedPaths(candidates, changedPaths) ?? candidates[0] ?? null;
+}
+
 function chooseProjectFileForChangedPaths(
   candidates: readonly string[],
   changedPaths: readonly string[]
@@ -221,6 +233,50 @@ function buildRunArgs(
     default:
       return { command: 'npm', args: ['run', scriptName] };
   }
+}
+
+/** 从 package.json scripts 构建 lint/typecheck 阶段（monorepo 根与子包共用）。 */
+function buildPackageScriptStages(
+  scripts: Record<string, string>,
+  packageManager: ProjectDiagnosticsReport['packageManager'],
+  workdir?: string
+): ProjectDiagnosticStagePlan[] {
+  const stages: ProjectDiagnosticStagePlan[] = [];
+  const withWorkdir = <T extends ProjectDiagnosticStagePlan>(stage: T): T =>
+    workdir ? { ...stage, workdir } : stage;
+
+  if (scripts.lint) {
+    const runner = buildRunArgs(packageManager, 'lint');
+    stages.push(
+      withWorkdir({
+        id: 'lint',
+        scriptName: 'lint',
+        label: 'lint',
+        command: runner.command,
+        args: runner.args,
+        fallback: false,
+        kind: 'package-script',
+      })
+    );
+  }
+
+  const typecheck = resolveTypecheckScript(scripts);
+  if (typecheck) {
+    const runner = buildRunArgs(packageManager, typecheck.scriptName);
+    stages.push(
+      withWorkdir({
+        id: 'typecheck',
+        scriptName: typecheck.scriptName,
+        label: typecheck.fallback ? 'typecheck(build fallback)' : 'typecheck',
+        command: runner.command,
+        args: runner.args,
+        fallback: typecheck.fallback,
+        kind: 'package-script',
+      })
+    );
+  }
+
+  return stages;
 }
 
 function looksLikePythonWorkspace(entries: readonly ProjectDiagnosticsListEntry[]): boolean {
@@ -322,33 +378,15 @@ export function createProjectDiagnosticsPlan(params: {
     : {};
 
   const stages: ProjectDiagnosticStagePlan[] = [];
-  if (scripts.lint) {
-    const runner = buildRunArgs(packageManager, 'lint');
-    stages.push({
-      id: 'lint',
-      scriptName: 'lint',
-      label: 'lint',
-      command: runner.command,
-      args: runner.args,
-      fallback: false,
-      kind: 'package-script',
-    });
-  }
-
   const isPythonWorkspace = looksLikePythonWorkspace(params.entries);
-  const typecheck = resolveTypecheckScript(scripts);
-  if (typecheck && !(typecheck.fallback && isPythonWorkspace)) {
-    const runner = buildRunArgs(packageManager, typecheck.scriptName);
-    stages.push({
-      id: 'typecheck',
-      scriptName: typecheck.scriptName,
-      label: typecheck.fallback ? 'typecheck(build fallback)' : 'typecheck',
-      command: runner.command,
-      args: runner.args,
-      fallback: typecheck.fallback,
-      kind: 'package-script',
-    });
-  } else if (isPythonWorkspace) {
+  for (const stage of buildPackageScriptStages(scripts, packageManager)) {
+    // Python 项目里拿 build 当 typecheck 兜底没有意义，跳过
+    if (stage.id === 'typecheck' && stage.fallback && isPythonWorkspace) {
+      continue;
+    }
+    stages.push(stage);
+  }
+  if (isPythonWorkspace && !stages.some((stage) => stage.id === 'typecheck')) {
     stages.push({
       id: 'typecheck',
       scriptName: 'python-static',
@@ -499,11 +537,50 @@ export async function runProjectDiagnostics(
     packageJsonContent = '';
   }
 
-  const plan = createProjectDiagnosticsPlan({
-    entries: asProjectDiagnosticsEntries(listResult.entries),
+  const entries = asProjectDiagnosticsEntries(listResult.entries);
+  let plan = createProjectDiagnosticsPlan({
+    entries,
     packageJsonContent,
     changedPaths: options.changedPaths,
   });
+
+  // monorepo：根 package.json 没有 lint/typecheck 脚本时，选最匹配的子包
+  // package.json（优先覆盖本次改动路径），在其目录内执行脚本阶段。
+  if (!plan.stages.some((stage) => stage.kind === 'package-script')) {
+    const nestedPath = findNestedPackageJson(entries, options.changedPaths ?? []);
+    if (nestedPath) {
+      try {
+        const nestedResult = await host.readTextFile({
+          relativePath: nestedPath,
+          maxBytes: 300_000,
+        });
+        const nestedPkg = normalizePackageJson(nestedResult.content);
+        const nestedScripts = isRecord(nestedPkg.scripts)
+          ? Object.fromEntries(
+              Object.entries(nestedPkg.scripts).filter(
+                (entry): entry is [string, string] => typeof entry[1] === 'string'
+              )
+            )
+          : {};
+        const nestedStages = buildPackageScriptStages(
+          nestedScripts,
+          plan.packageManager,
+          entryDir(nestedPath)
+        );
+        if (nestedStages.length > 0) {
+          plan = {
+            ...plan,
+            available: true,
+            packageJsonPath: nestedPath,
+            stages: [...nestedStages, ...plan.stages],
+            message: undefined,
+          };
+        }
+      } catch {
+        // 子包 package.json 读取失败时保持原计划
+      }
+    }
+  }
 
   if (!plan.available) {
     return {

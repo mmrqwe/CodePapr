@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -8,6 +9,7 @@ use crate::shared::{
 };
 use crate::web::client::{build_web_client, retry_with_backoff, SEARCH_RETRY_MAX};
 use crate::web::text::{collapse_whitespace, html_to_text, truncate_text_to_bytes};
+use crate::workspace_fs::read::decode_text_bytes;
 
 pub(crate) const MAX_DOWNLOAD_BYTES: usize = 25_000_000;
 pub(crate) const MAX_WEB_FETCH_BYTES: usize = 2_000_000;
@@ -20,6 +22,8 @@ pub(crate) struct DownloadFileResult {
     pub(crate) bytes: usize,
     pub(crate) file_name: String,
     pub(crate) content_type: Option<String>,
+    /// 目标路径原本已有文件（被本次下载覆盖）
+    pub(crate) overwritten: bool,
 }
 
 #[derive(Serialize)]
@@ -38,6 +42,66 @@ fn download_target_file_name(url: &reqwest::Url) -> String {
         .filter(|segment| !segment.trim().is_empty())
         .map(|segment| segment.to_string())
         .unwrap_or_else(|| "download.bin".to_string())
+}
+
+/// 从 Content-Type 头提取 charset 标签（如 `text/html; charset=GBK`）。
+pub(crate) fn charset_from_content_type(content_type: &str) -> Option<String> {
+    let lower = content_type.to_lowercase();
+    let index = lower.find("charset=")?;
+    let rest = &content_type[index + "charset=".len()..];
+    let value: String = rest
+        .chars()
+        .skip_while(|ch| ch.is_whitespace() || *ch == '"' || *ch == '\'')
+        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
+        .collect();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+/// 从 HTML 头部（前 2KB）的 `<meta charset>` / `<meta http-equiv>` 提取 charset。
+pub(crate) fn charset_from_meta(head: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(head).to_lowercase();
+    let index = text.find("charset=")?;
+    let rest = &text[index + "charset=".len()..];
+    let value: String = rest
+        .chars()
+        .skip_while(|ch| ch.is_whitespace() || *ch == '"' || *ch == '\'')
+        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
+        .collect();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn decode_with_label(body: &[u8], label: &str) -> Option<String> {
+    let encoding = encoding_rs::Encoding::for_label(label.as_bytes())?;
+    if encoding == encoding_rs::UTF_8 {
+        return None; // 交由统一的 UTF-8/兜底路径处理
+    }
+    let (decoded, _, _) = encoding.decode(body);
+    Some(decoded.into_owned())
+}
+
+/// 网页正文解码：Content-Type charset → meta charset → BOM/UTF-16 启发式 →
+/// 严格 UTF-8 → GB18030 兜底（与文件读取同一套探测逻辑）。
+pub(crate) fn decode_web_body(body: &[u8], content_type: Option<&str>) -> String {
+    if let Some(label) = content_type.and_then(charset_from_content_type) {
+        if let Some(decoded) = decode_with_label(body, &label) {
+            return decoded;
+        }
+    }
+    let head_len = body.len().min(2048);
+    if let Some(label) = charset_from_meta(&body[..head_len]) {
+        if let Some(decoded) = decode_with_label(body, &label) {
+            return decoded;
+        }
+    }
+    decode_text_bytes(body.to_vec()).unwrap_or_else(|_| String::from_utf8_lossy(body).into_owned())
 }
 
 #[tauri::command]
@@ -91,7 +155,7 @@ pub(crate) async fn fetch_web_url(
             return Err(format!("网页内容超过上限 {MAX_WEB_FETCH_BYTES} bytes"));
         }
 
-        let raw_text = String::from_utf8_lossy(&body).into_owned();
+        let raw_text = decode_web_body(&body, content_type.as_deref());
         let normalized = if content_type
             .as_deref()
             .map(|value| {
@@ -130,6 +194,7 @@ pub(crate) async fn download_web_file(
         let client = reqwest::blocking::Client::builder()
             .user_agent("CodePapr/0.1")
             .redirect(reqwest::redirect::Policy::limited(10))
+            .timeout(Duration::from_secs(60))
             .build()
             .map_err(|err| format!("初始化下载客户端失败: {err}"))?;
 
@@ -182,6 +247,7 @@ pub(crate) async fn download_web_file(
             return Err("拒绝写入项目文件夹之外的路径".to_string());
         }
 
+        let overwritten = target.exists();
         fs::write(&target, &bytes).map_err(|err| format!("写入下载文件失败: {err}"))?;
 
         Ok(DownloadFileResult {
@@ -194,8 +260,75 @@ pub(crate) async fn download_web_file(
                 .unwrap_or("download.bin")
                 .to_string(),
             content_type,
+            overwritten,
         })
     })
     .await
     .map_err(|e| format!("下载失败: {e}"))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn charset_from_content_type_parses_common_forms() {
+        assert_eq!(
+            charset_from_content_type("text/html; charset=GBK").as_deref(),
+            Some("GBK")
+        );
+        assert_eq!(
+            charset_from_content_type("text/html; charset=\"shift_jis\"").as_deref(),
+            Some("shift_jis")
+        );
+        assert_eq!(
+            charset_from_content_type("text/html; charset=utf-8").as_deref(),
+            Some("utf-8")
+        );
+        assert_eq!(charset_from_content_type("application/json"), None);
+        assert_eq!(charset_from_content_type("text/html; charset="), None);
+    }
+
+    #[test]
+    fn charset_from_meta_detects_meta_tags() {
+        let html = br#"<html><head><meta charset="GB2312"></head>"#;
+        assert_eq!(charset_from_meta(html).as_deref(), Some("gb2312"));
+
+        let http_equiv = br#"<head><meta http-equiv="Content-Type" content="text/html; charset=Big5"></head>"#;
+        assert_eq!(charset_from_meta(http_equiv).as_deref(), Some("big5"));
+
+        assert_eq!(charset_from_meta(b"<html><head></head>"), None);
+    }
+
+    #[test]
+    fn decode_web_body_uses_header_charset() {
+        // 「你好」的 GBK 编码
+        let body = b"\xC4\xE3\xBA\xC3";
+        let decoded = decode_web_body(body, Some("text/html; charset=GBK"));
+        assert_eq!(decoded, "你好");
+    }
+
+    #[test]
+    fn decode_web_body_uses_meta_charset_without_header() {
+        let mut body = Vec::new();
+        body.extend_from_slice(b"<html><head><meta charset=\"GBK\"></head><body>");
+        body.extend_from_slice(b"\xC4\xE3\xBA\xC3"); // 「你好」GBK
+        body.extend_from_slice(b"</body></html>");
+        let decoded = decode_web_body(&body, None);
+        assert!(decoded.contains("你好"), "meta charset 应生效: {decoded}");
+    }
+
+    #[test]
+    fn decode_web_body_falls_back_to_gb18030_for_bare_gbk() {
+        let body = b"\xC4\xE3\xBA\xC3"; // 「你好」GBK，无任何声明
+        let decoded = decode_web_body(body, Some("text/html"));
+        assert_eq!(decoded, "你好");
+    }
+
+    #[test]
+    fn decode_web_body_keeps_utf8_and_strips_bom() {
+        let body = b"\xef\xbb\xbfhello utf8";
+        let decoded = decode_web_body(body, Some("text/html; charset=utf-8"));
+        assert_eq!(decoded, "hello utf8");
+    }
 }

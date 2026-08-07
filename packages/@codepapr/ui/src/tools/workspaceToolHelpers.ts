@@ -431,6 +431,8 @@ export interface DownloadFileResult {
   bytes: number;
   fileName: string;
   contentType?: string | null;
+  /** 目标路径原本已有文件（被本次下载覆盖） */
+  overwritten?: boolean;
 }
 
 export interface BackgroundCommandResult {

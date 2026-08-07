@@ -237,10 +237,12 @@ fn slice_content_by_window(content: &str, window: &ReadWindow) -> (String, usize
         return (String::new(), 0);
     }
 
+    // 与整文件读取保持一致的换行风格：CRLF 文件窗口读取不降级为 LF
+    let line_ending = if content.contains("\r\n") { "\r\n" } else { "\n" };
     let (lines, has_trailing_newline) = split_text_lines_for_read(content);
-    let mut selected = lines[window.start_line - 1..window.end_line].join("\n");
+    let mut selected = lines[window.start_line - 1..window.end_line].join(line_ending);
     if !selected.is_empty() && (window.end_line < window.total_lines || has_trailing_newline) {
-        selected.push('\n');
+        selected.push_str(line_ending);
     }
     let bytes = selected.len();
     (selected, bytes)

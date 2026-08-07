@@ -1,6 +1,6 @@
 use crate::shared::{
     canonical_workspace, expanded_path, normalize_workspace_filter, parse_browser_url,
-    run_blocking_workspace_task, truncate_utf8, unix_millis,
+    run_blocking_workspace_task, unix_millis,
 };
 use crate::shell::dangerous::{detect_dangerous_command, detect_dangerous_invocation};
 use crate::shell::process_tree::{kill_process_tree, prepare_new_process_group};
@@ -286,6 +286,13 @@ pub(crate) fn drain_capped_output(mut reader: impl Read) -> Vec<u8> {
     buffer
 }
 
+/// 命令输出解码：UTF-8 直通，非 UTF-8（GBK 等）走编码探测兜底；
+/// 二进制/无法解码时退回 lossy，保证始终有输出可见。
+fn decode_command_output(bytes: &[u8]) -> String {
+    crate::workspace_fs::read::decode_text_bytes(bytes.to_vec())
+        .unwrap_or_else(|_| String::from_utf8_lossy(bytes).into_owned())
+}
+
 fn collect_command_output(
     mut child: Child,
     timeout: Duration,
@@ -346,8 +353,8 @@ fn collect_command_output(
 
     Ok((
         status,
-        truncate_utf8(stdout_bytes),
-        truncate_utf8(stderr_bytes),
+        decode_command_output(stdout_bytes),
+        decode_command_output(stderr_bytes),
         timed_out,
     ))
 }

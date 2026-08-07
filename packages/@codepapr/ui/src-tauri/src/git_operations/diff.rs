@@ -89,7 +89,10 @@ pub fn git_diff_impl(
                     buf.extend_from_slice(line.content());
                     true
                 });
-                diff_text.push_str(&String::from_utf8_lossy(&buf));
+                // 非 UTF-8 文件（GBK 等）的 diff 走编码探测兜底，避免整段替换字符
+                let patch_text = crate::workspace_fs::read::decode_text_bytes(buf.clone())
+                    .unwrap_or_else(|_| String::from_utf8_lossy(&buf).into_owned());
+                diff_text.push_str(&patch_text);
             }
         } else if diff_text.len() >= MAX_DIFF_BYTES && i < deltas.len() {
             truncated = true;

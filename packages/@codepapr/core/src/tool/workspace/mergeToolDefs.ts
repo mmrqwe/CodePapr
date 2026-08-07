@@ -100,7 +100,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 6. glob ────
   {
     name: 'glob',
-    description: '按 glob 文件名模式搜索项目文件，如 **/*.test.ts。支持正则合并。',
+    description: '按 glob 文件名模式搜索项目文件，如 **/*.test.ts、src/**/*.ts、*.md。仅支持 glob 通配符（** 跨目录、* 单层、? 单字符），不支持正则/字符类/花括号展开；需要正则请按文件名特征拆分多次查询。',
     parameters: {
       type: 'object',
       properties: {

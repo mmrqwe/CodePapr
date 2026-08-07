@@ -749,6 +749,31 @@ fn search_workspace_text_counts_oversized_files_as_skipped() {
 }
 
 #[test]
+fn read_text_file_window_preserves_crlf_line_endings() {
+    let workspace = TestWorkspace::new("window-crlf");
+    fs::write(
+        workspace.file_path("crlf.txt"),
+        b"alpha\r\nbeta\r\ngamma\r\n",
+    )
+    .expect("should write fixture");
+
+    let result = read::read_text_file_impl(
+        workspace.workspace_arg(),
+        "crlf.txt".to_string(),
+        None,
+        Some(2),
+        Some(2),
+        None,
+        None,
+    )
+    .expect("window read should succeed");
+
+    // 窗口读取与整读一致：CRLF 文件不降级为 LF
+    assert_eq!(result.content, "beta\r\n");
+    assert_eq!(result.total_lines, 3);
+}
+
+#[test]
 fn list_workspace_files_excludes_ds_store_and_ignored_dirs() {
     let workspace = TestWorkspace::new("list-ignore-noise");
     fs::create_dir_all(workspace.file_path("src")).expect("should create src dir");

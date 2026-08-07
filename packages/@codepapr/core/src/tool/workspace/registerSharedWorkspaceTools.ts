@@ -136,7 +136,9 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
     if (args.background === true) {
       return await registry.execute('workspace_start_shell_background_command', args);
     }
-    return await registry.execute('workspace_run_shell_command', args);
+    // LLM 侧参数名是 timeout，细粒度工具期望 timeoutSeconds；不做映射超时会被静默忽略
+    const timeoutSeconds = args.timeoutSeconds ?? args.timeout;
+    return await registry.execute('workspace_run_shell_command', { ...args, timeoutSeconds });
   });
 
   // ──── 浏览器 ────
