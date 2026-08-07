@@ -372,11 +372,10 @@ export default function App() {
           </div>
         </div>
       )}
-      {openedAppId ? (
-        <div className="h-screen w-screen overflow-hidden bg-[#0f1117]">
-        <AppModal lang={settings.lang} />
-        </div>
-      ) : (
+      {/* 打开 app 时主界面保持挂载（invisible 仅视觉隐藏），避免退出 app 后
+          CodingWorkbench/WorkspaceInsightPanel 重挂载导致 ProjectGraph、LSP 预热、
+          文件树等初始化流程全部重跑。AppModal 以全屏覆盖层形式渲染在其上。 */}
+      <div className={`h-screen w-screen overflow-hidden bg-[#0f1117] ${openedAppId ? 'invisible' : ''}`}>
       <SplitPane
         direction="horizontal"
         defaultRatio={0.18}
@@ -669,6 +668,12 @@ export default function App() {
           </div>
         }
       />
+      </div>
+
+      {openedAppId && (
+        <div className="fixed inset-0 z-[60] overflow-hidden bg-[#0f1117]">
+          <AppModal lang={settings.lang} />
+        </div>
       )}
 
       <Suspense fallback={null}>
