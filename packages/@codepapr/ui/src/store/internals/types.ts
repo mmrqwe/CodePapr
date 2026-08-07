@@ -105,8 +105,8 @@ export interface Settings {
   goalMaxIterations: number;
   goalMaxWallClockMs: number;
   goalRequireGitClean: boolean;
-  // Verifier 子代理配置（默认快速模型，高级设置可切换）
-  verifierModelTier: 'fast' | 'primary';
+  // Verifier 子代理配置（默认快速模型，高级设置可切换；主观目标默认升级导师模型）
+  verifierModelTier: 'fast' | 'primary' | 'mentor';
   verifierMaxTokens: number;
   verifierTemperature: number;
   // App 子代理配置（papr.agent.run 调用的 Agent）

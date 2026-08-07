@@ -9,9 +9,32 @@
  * 复用 runCachedModelRequest 做单次 LLM 调用（无工具循环）。
  */
 
-import type { GoalVerdict, GoalStrictness, ConditionResult, ICacheStatistics, ILLMProvider } from '@codepapr/types';
+import type { GoalVerdict, GoalStrictness, ConditionResult, ICacheStatistics, IChatThinking, ILLMProvider } from '@codepapr/types';
+import { ClaudeProvider, OpenAIProvider } from '@codepapr/api';
 import { runCachedModelRequest } from './cachedModelRequest';
 import type { Settings } from '../store/agentStore';
+
+export type VerifierModelTier = 'fast' | 'primary' | 'mentor';
+
+/**
+ * 解析 Verifier 实际使用的模型档位（纯函数，可单测）：
+ * - 主观目标（无 exec: 条件）在 fast 档自动升级为 mentor（抽象目标需要更强判断力）；
+ * - mentor 档未配置 mentor 模型时静默降级为 primary。
+ */
+export function resolveVerifierTier(
+  settingsTier: VerifierModelTier,
+  isSubjective: boolean,
+  mentorConfigured: boolean,
+): VerifierModelTier {
+  let tier: VerifierModelTier = settingsTier;
+  if (isSubjective && tier === 'fast') {
+    tier = 'mentor';
+  }
+  if (tier === 'mentor' && !mentorConfigured) {
+    tier = 'primary';
+  }
+  return tier;
+}
 
 export interface VerifierRunnerParams {
   provider: ILLMProvider;
@@ -43,8 +66,10 @@ function buildVerifierSystemPromptEn(isSubjective: boolean, strictness: GoalStri
   const strictnessDesc = strictness === 'strict'
     ? '**Strict mode**: The bar is very high. Only call SATISFIED if you are completely confident every aspect of the goal is fully met. Any doubt → NOT_MET.'
     : strictness === 'loose'
-    ? '**Loose mode**: The bar is low. Call SATISFIED if the Worker made genuine, visible progress toward the goal — it doesn\'t need to be perfect or complete.'
+    ? '**Loose mode**: The bar is lower. Call SATISFIED if the Worker made substantial, visible progress and the goal is mostly complete.'
     : '**Normal mode**: Use reasonable judgment. Call SATISFIED if the goal is substantially met. Minor gaps → NOT_MET.';
+
+  const progressThreshold = strictness === 'strict' ? '1.0' : strictness === 'loose' ? '0.7' : '0.9';
 
   if (isSubjective) {
     return `You are a Goal Verifier for a subjective task. You have NO tools. You only read the execution transcript.
@@ -69,6 +94,12 @@ Add up the scores (0-4 range):
 - **SATISFIED**: total ≥ ${strictness === 'strict' ? '4' : strictness === 'loose' ? '2' : '3'}
 - **NOT_MET**: total < ${strictness === 'strict' ? '4' : strictness === 'loose' ? '2' : '3'}
 - **AMBIGUOUS**: only if you genuinely cannot tell (use very sparingly)
+
+## Completion Threshold
+SATISFIED means the goal is substantially COMPLETE — not merely "good progress":
+- SATISFIED requires progress ≥ ${progressThreshold}${strictness === 'strict' ? ' with no remaining gaps' : ''}.
+- Correct direction, partial edits, or "almost done" → NOT_MET with a concrete missing list.
+- Judge against the FULL goal, not just this round's activity.
 
 ## Anti-Forgery Checks
 Watch for these red flags — they strongly push toward NOT_MET:
@@ -151,12 +182,13 @@ function buildVerifierSystemPromptZh(
     ? t('**严格模式**：标准极高。只有当你完全确信目标的每个方面都达成时才判 SATISFIED。有任何疑虑 → NOT_MET。',
         '**嚴格模式**：標準極高。只有當你完全確信目標的每個方面都達成時才判 SATISFIED。有任何疑慮 → NOT_MET。')
     : strictness === 'loose'
-    ? t('**宽松模式**：标准较低。只要 Worker 做出了真实可见的进展就可以判 SATISFIED —— 不需要完美或全部完成。',
-        '**寬鬆模式**：標準較低。只要 Worker 做出了真實可見的進展就可以判 SATISFIED —— 不需要完美或全部完成。')
+    ? t('**宽松模式**：标准较低。Worker 做出大量可见进展、目标接近完成时判 SATISFIED。',
+        '**寬鬆模式**：標準較低。Worker 做出大量可見進展、目標接近完成時判 SATISFIED。')
     : t('**一般模式**：合理判断。目标基本达成就判 SATISFIED。有明显缺口 → NOT_MET。',
         '**一般模式**：合理判斷。目標基本達成就判 SATISFIED。有明顯缺口 → NOT_MET。');
 
   const threshold = strictness === 'strict' ? '4' : strictness === 'loose' ? '2' : '3';
+  const progressThreshold = strictness === 'strict' ? '1.0' : strictness === 'loose' ? '0.7' : '0.9';
 
   if (isSubjective) {
     return `${t('你是主观任务的目标验证者。你没有任何工具，只能阅读执行记录。', '你是主觀任務的目標驗證者。你沒有任何工具，只能閱讀執行記錄。')}
@@ -181,6 +213,12 @@ ${t('总分', '總分')}（0-4 ${t('分', '分')}）：
 - **SATISFIED**：${t('总分', '總分')} ≥ ${threshold}
 - **NOT_MET**：${t('总分', '總分')} < ${threshold}
 - **AMBIGUOUS**：${t('只有当你真的无法判断时才用（尽量少用）', '只有當你真的無法判斷時才用（盡量少用）')}
+
+## ${t('完成度门槛', '完成度門檻')}
+SATISFIED ${t('意味着目标实质完成', '意味著目標實質完成')} —— ${t('而不是"有进展"', '而不是「有進展」')}：
+- ${t('判', '判')} SATISFIED ${t('必须', '必須')} progress ≥ ${progressThreshold}${strictness === 'strict' ? t(' 且无任何遗漏', ' 且無任何遺漏') : ''}。
+- ${t('方向正确、部分修改、"接近完成" → NOT_MET，并给出具体 missing 清单。', '方向正確、部分修改、「接近完成」→ NOT_MET，並給出具體 missing 清單。')}
+- ${t('按整体目标判断，不只看本轮动作。', '按整體目標判斷，不只看本輪動作。')}
 
 ## ${t('反伪造检查', '反偽造檢查')}
 ${t('以下是红旗信号，出现则强烈倾向 NOT_MET：', '以下是紅旗信號，出現則強烈傾向 NOT_MET：')}
@@ -422,7 +460,7 @@ function parseVerifierResponse(content: string): GoalVerdict {
 export interface VerifierResult {
   verdict: GoalVerdict;
   cacheStats?: ICacheStatistics;
-  tier: 'primary' | 'fast';
+  tier: VerifierModelTier;
 }
 
 export async function runVerifier(
@@ -436,27 +474,52 @@ export async function runVerifier(
   maxIterations: number,
   params: VerifierRunnerParams
 ): Promise<VerifierResult> {
-  const useFast =
-    params.settings.verifierModelTier === 'fast' &&
-    params.fastModelEnabled &&
-    params.fastModel;
+  const mentorConfigured =
+    params.settings.mentorEnabled && params.settings.mentorModel.trim().length > 0;
+  let tier = resolveVerifierTier(params.settings.verifierModelTier, isSubjective, mentorConfigured);
 
-  const model = useFast ? params.fastModel : params.primaryModel;
-  const tier: 'primary' | 'fast' = useFast ? 'fast' : 'primary';
+  let provider: ILLMProvider = params.provider;
+  let providerName: 'deepseek' | 'openai' | 'claude' = params.providerName;
+  let model: string;
+  let maxTokens = params.settings.verifierMaxTokens;
+  let thinking: IChatThinking = { type: 'disabled' };
+
+  if (tier === 'mentor') {
+    model = params.settings.mentorModel.trim();
+    const apiKey = params.settings.mentorApiKey.trim() || params.settings.apiKey.trim();
+    const mentorBaseURL = params.settings.mentorBaseURL.trim().replace(/\/+$/, '');
+    const baseURL = mentorBaseURL || params.settings.baseURL.trim().replace(/\/+$/, '') || undefined;
+    const config = { apiKey, ...(baseURL ? { baseURL } : {}) };
+    if (params.settings.mentorApiFormat === 'claude') {
+      provider = new ClaudeProvider(config);
+      providerName = 'claude';
+    } else {
+      provider = new OpenAIProvider(config);
+      providerName = 'openai';
+    }
+    maxTokens = params.settings.mentorMaxTokens;
+    thinking = params.settings.mentorThinkingEnabled ? { type: 'enabled' } : { type: 'disabled' };
+  } else if (tier === 'fast' && params.fastModelEnabled && params.fastModel) {
+    model = params.fastModel;
+  } else {
+    tier = 'primary';
+    model = params.primaryModel;
+  }
+
   const systemPrompt = buildVerifierSystemPrompt(isSubjective, strictness, lang);
   const userPrompt = buildVerifierUserPrompt(transcript, conditionResult, goalText, isSubjective, lang, iteration, maxIterations);
 
   try {
     const result = await runCachedModelRequest({
-      provider: params.provider,
-      providerName: params.providerName,
+      provider,
+      providerName,
       model,
       systemPrompt,
       userPrompt,
       temperature: params.settings.verifierTemperature,
-      maxTokens: params.settings.verifierMaxTokens,
-      thinking: { type: 'disabled' },
-      sessionId: `verifier:${model}`,
+      maxTokens,
+      thinking,
+      sessionId: `verifier:${tier}:${model}`,
     });
     const content = result.response.choices[0]?.message.content?.trim() ?? '';
     return { verdict: parseVerifierResponse(content), cacheStats: result.cacheStats, tier };

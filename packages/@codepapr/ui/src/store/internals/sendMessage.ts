@@ -1178,6 +1178,11 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                         accumulatedSubagentFast,
                         verifierResult.cacheStats
                       );
+                    } else if (verifierResult.tier === 'mentor') {
+                      accumulatedSubagentMentor = accumulateCacheStats(
+                        accumulatedSubagentMentor,
+                        verifierResult.cacheStats
+                      );
                     } else {
                       accumulatedSubagentPrimary = accumulateCacheStats(
                         accumulatedSubagentPrimary,

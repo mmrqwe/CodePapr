@@ -1616,11 +1616,12 @@ export function SettingsModal() {
                 <div className="mt-4 grid gap-5 md:grid-cols-3">
                   <div>
                     <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t.verifierModelTierLabel}</label>
-                    <select value={local.verifierModelTier} onChange={(e) => update({ verifierModelTier: e.target.value as 'fast' | 'primary' })}
+                    <select value={local.verifierModelTier} onChange={(e) => update({ verifierModelTier: e.target.value as 'fast' | 'primary' | 'mentor' })}
                       title={t.verifierModelTierLabel}
                       className="w-full cursor-pointer rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none">
                       <option value="fast">{t.verifierModelTierFast}</option>
                       <option value="primary">{t.verifierModelTierPrimary}</option>
+                      <option value="mentor">{t.verifierModelTierMentor}</option>
                     </select>
                     <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.verifierModelTierHint}</p>
                   </div>

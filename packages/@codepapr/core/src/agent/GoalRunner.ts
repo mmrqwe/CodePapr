@@ -206,11 +206,14 @@ export class GoalRunner {
 
       // ── 判定是否达成 ──────────────────────────────────────────
       // 客观模式（有 exec: 条件）：条件满足 + Verifier 确认 = 双保险
-      // 主观模式（无 exec: 条件）：仅 Verifier 判定 SATISFIED
+      // 主观模式（无 exec: 条件）：Verifier 判 SATISFIED 且 progress 达到门槛
+      // （抽象目标容易让 Verifier 把"有进展"误判为"已完成"，progress 门槛兜底；
+      //  Verifier 未返回 progress 时按 1 处理，兼容旧输出）
       const hasObjectiveCondition = this.condition.clauses.length > 0;
+      const progressThreshold = this.condition.strictness === 'loose' ? 0.7 : 0.9;
       const isSatisfied = hasObjectiveCondition
         ? (conditionResult.met && verdict.verdict === 'SATISFIED')
-        : (verdict.verdict === 'SATISFIED');
+        : (verdict.verdict === 'SATISFIED' && (verdict.progress ?? 1) >= progressThreshold);
       if (isSatisfied) {
         this.state.status = 'satisfied';
         this.state.elapsedMs = Date.now() - this.state.startedAt;

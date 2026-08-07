@@ -373,6 +373,7 @@ export declare const I18N_DICTS: {
         verifierModelTierHint: string;
         verifierModelTierFast: string;
         verifierModelTierPrimary: string;
+        verifierModelTierMentor: string;
         verifierMaxTokensLabel: string;
         verifierMaxTokensHint: string;
         verifierTemperatureLabel: string;
@@ -908,6 +909,7 @@ export declare const I18N_DICTS: {
         verifierModelTierHint: string;
         verifierModelTierFast: string;
         verifierModelTierPrimary: string;
+        verifierModelTierMentor: string;
         verifierMaxTokensLabel: string;
         verifierMaxTokensHint: string;
         verifierTemperatureLabel: string;
@@ -1389,6 +1391,7 @@ export declare const I18N_DICTS: {
         verifierModelTierHint: string;
         verifierModelTierFast: string;
         verifierModelTierPrimary: string;
+        verifierModelTierMentor: string;
         verifierMaxTokensLabel: string;
         verifierMaxTokensHint: string;
         verifierTemperatureLabel: string;

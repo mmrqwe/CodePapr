@@ -37,6 +37,23 @@ function makeVerdict(verdict: 'SATISFIED' | 'NOT_MET' | 'AMBIGUOUS'): GoalVerdic
   };
 }
 
+function makeVerdictWithProgress(verdict: 'SATISFIED' | 'NOT_MET' | 'AMBIGUOUS', progress?: number): GoalVerdict {
+  return {
+    verdict,
+    evidence: `verdict: ${verdict}`,
+    missing: verdict === 'SATISFIED' ? undefined : 'missing evidence',
+    progress,
+  };
+}
+
+function makeSubjectiveConditionResult(): ConditionResult {
+  return {
+    met: false,
+    evidence: '主观验证模式：无客观验证条件',
+    details: [],
+  };
+}
+
 function makeWorkerResult(content: string, outputTokens = 100): WorkerTurnResult {
   return {
     content,
@@ -297,6 +314,87 @@ describe('GoalRunner', () => {
     expect(result.iteration).toBe(3);
     // feedbackHistory 只有 2 条（第 1 轮被跳过）
     expect(result.feedbackHistory).toHaveLength(2);
+  });
+
+  it('主观模式：SATISFIED 但 progress 低于门槛时不结束（继续循环）', async () => {
+    const condition = parseGoalCondition('美化登录页');
+    const runner = new GoalRunner({
+      condition,
+      userGoalText: '美化登录页',
+      limits: { maxIterations: 2, maxWallClockMs: 60_000 },
+      callbacks: {
+        runWorkerTurn: vi.fn().mockResolvedValue(makeWorkerResult('working')),
+        runVerifier: vi.fn().mockResolvedValue(makeVerdictWithProgress('SATISFIED', 0.5)),
+        evaluateCondition: vi.fn().mockResolvedValue(makeSubjectiveConditionResult()),
+        onStateChange: vi.fn(),
+        isAborted: () => false,
+      },
+    });
+
+    const result = await runner.run();
+    expect(result.status).toBe('limit_exceeded');
+    expect(result.iteration).toBe(2);
+    expect(result.feedbackHistory).toHaveLength(2);
+  });
+
+  it('主观模式：SATISFIED 且 progress 达到门槛时结束', async () => {
+    const condition = parseGoalCondition('美化登录页');
+    const runner = new GoalRunner({
+      condition,
+      userGoalText: '美化登录页',
+      limits: { maxIterations: 5, maxWallClockMs: 60_000 },
+      callbacks: {
+        runWorkerTurn: vi.fn().mockResolvedValue(makeWorkerResult('done')),
+        runVerifier: vi.fn().mockResolvedValue(makeVerdictWithProgress('SATISFIED', 0.95)),
+        evaluateCondition: vi.fn().mockResolvedValue(makeSubjectiveConditionResult()),
+        onStateChange: vi.fn(),
+        isAborted: () => false,
+      },
+    });
+
+    const result = await runner.run();
+    expect(result.status).toBe('satisfied');
+    expect(result.iteration).toBe(1);
+  });
+
+  it('主观模式：SATISFIED 无 progress 字段按达成处理（兼容旧输出）', async () => {
+    const condition = parseGoalCondition('美化登录页');
+    const runner = new GoalRunner({
+      condition,
+      userGoalText: '美化登录页',
+      limits: { maxIterations: 5, maxWallClockMs: 60_000 },
+      callbacks: {
+        runWorkerTurn: vi.fn().mockResolvedValue(makeWorkerResult('done')),
+        runVerifier: vi.fn().mockResolvedValue(makeVerdict('SATISFIED')),
+        evaluateCondition: vi.fn().mockResolvedValue(makeSubjectiveConditionResult()),
+        onStateChange: vi.fn(),
+        isAborted: () => false,
+      },
+    });
+
+    const result = await runner.run();
+    expect(result.status).toBe('satisfied');
+    expect(result.iteration).toBe(1);
+  });
+
+  it('主观模式 loose：progress ≥ 0.7 即达成', async () => {
+    const condition = parseGoalCondition('--loose 美化登录页');
+    const runner = new GoalRunner({
+      condition,
+      userGoalText: '美化登录页',
+      limits: { maxIterations: 5, maxWallClockMs: 60_000 },
+      callbacks: {
+        runWorkerTurn: vi.fn().mockResolvedValue(makeWorkerResult('done')),
+        runVerifier: vi.fn().mockResolvedValue(makeVerdictWithProgress('SATISFIED', 0.75)),
+        evaluateCondition: vi.fn().mockResolvedValue(makeSubjectiveConditionResult()),
+        onStateChange: vi.fn(),
+        isAborted: () => false,
+      },
+    });
+
+    const result = await runner.run();
+    expect(result.status).toBe('satisfied');
+    expect(result.iteration).toBe(1);
   });
 });
 

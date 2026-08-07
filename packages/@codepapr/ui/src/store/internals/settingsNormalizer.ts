@@ -329,8 +329,12 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     typeof input.goalRequireGitClean === 'boolean'
       ? input.goalRequireGitClean
       : DEFAULT_SETTINGS.goalRequireGitClean;
-  const verifierModelTier: 'fast' | 'primary' =
-    input.verifierModelTier === 'primary' ? 'primary' : 'fast';
+  const verifierModelTier: 'fast' | 'primary' | 'mentor' =
+    input.verifierModelTier === 'primary'
+      ? 'primary'
+      : input.verifierModelTier === 'mentor'
+      ? 'mentor'
+      : 'fast';
   const verifierMaxTokens =
     typeof input.verifierMaxTokens === 'number' && Number.isFinite(input.verifierMaxTokens)
       ? Math.max(100, Math.floor(input.verifierMaxTokens))
