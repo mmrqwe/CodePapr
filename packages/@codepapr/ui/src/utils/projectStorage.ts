@@ -66,6 +66,8 @@ export interface ProjectConversationStats {
   primary: ProjectModelTierStats;
   fast: ProjectModelTierStats;
   mentor: ProjectModelTierStats;
+  /** Agent 实际执行时长（墙钟，毫秒）。旧数据缺失该字段 → 触发回填。 */
+  runtimeMs?: number;
 }
 
 export interface ProjectStateSnapshot {
@@ -257,6 +259,7 @@ function parseConversationStats(value: unknown): ProjectConversationStats {
     primary: parseModelTierStats(value.primary),
     fast: parseModelTierStats(value.fast),
     mentor: parseModelTierStats(value.mentor),
+    runtimeMs: typeof value.runtimeMs === 'number' ? value.runtimeMs : undefined,
   };
 }
 
@@ -568,6 +571,33 @@ export async function aggregateToolUsageInDb(
       typeof entry === 'object' &&
       typeof (entry as ToolUsageEntry).name === 'string' &&
       typeof (entry as ToolUsageEntry).count === 'number'
+  );
+}
+
+interface SessionRuntimeResult {
+  runtimeJson: string;
+}
+
+/** Aggregate per-session agent runtime (wall-clock ms) in the backend (SQL scan
+ *  of message timestamps), so the UI does not need every session's messages
+ *  resident in memory. Used to backfill `runtimeMs` for sessions persisted
+ *  before runtime tracking existed. */
+export async function aggregateSessionRuntimeInDb(
+  workspacePath: string
+): Promise<Record<string, number>> {
+  const result = await invoke<SessionRuntimeResult>('aggregate_session_runtime', {
+    workspacePath: workspacePath.trim(),
+  });
+  const parsed: unknown = JSON.parse(result.runtimeJson);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  return Object.fromEntries(
+    Object.entries(parsed as Record<string, unknown>).filter(
+      (entry): entry is [string, number] =>
+        typeof entry[0] === 'string' &&
+        typeof entry[1] === 'number' &&
+        Number.isFinite(entry[1]) &&
+        entry[1] > 0
+    )
   );
 }
 

@@ -18,7 +18,7 @@ const { invokeMock } = vi.hoisted(() => ({
   }),
 }));
 
-const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMock, saveProjectStateDirectMock, loadSessionsMock, loadSessionMessagesMock, loadAllProjectMetaMock, saveSessionMock, saveMessageBatchMock, deleteSessionByIdMock, saveProjectMetaMock, enqueueProjectStateSaveMock } = vi.hoisted(() => ({
+const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMock, saveProjectStateDirectMock, loadSessionsMock, loadSessionMessagesMock, loadAllProjectMetaMock, saveSessionMock, saveMessageBatchMock, deleteSessionByIdMock, saveProjectMetaMock, enqueueProjectStateSaveMock, aggregateSessionRuntimeInDbMock } = vi.hoisted(() => ({
   loadProjectStateMock: vi.fn(async (): Promise<ProjectStateSnapshot> => ({
     version: 1,
     sessions: [],
@@ -46,6 +46,7 @@ const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMoc
   deleteSessionByIdMock: vi.fn(async () => undefined),
   saveProjectMetaMock: vi.fn(async () => undefined),
   enqueueProjectStateSaveMock: vi.fn(async (_path: string, writer: () => Promise<void>) => { await writer(); }),
+  aggregateSessionRuntimeInDbMock: vi.fn(async (): Promise<Record<string, number>> => ({})),
 }));
 
 const { loadAppSettingsMock, saveAppSettingsMock } = vi.hoisted(() => ({
@@ -95,6 +96,7 @@ vi.mock('../utils/projectStorage', () => ({
   deleteSessionById: deleteSessionByIdMock,
   saveProjectMeta: saveProjectMetaMock,
   enqueueProjectStateSave: enqueueProjectStateSaveMock,
+  aggregateSessionRuntimeInDb: aggregateSessionRuntimeInDbMock,
 }));
 
 vi.mock('../utils/appSettingsStorage', () => ({
@@ -1332,6 +1334,45 @@ describe('useAgentStore.sendMessage', () => {
     expect(stats.primary.totalOutput).not.toBe(38);
   });
 
+  it('accumulates agent wall-clock runtime into conversation stats per turn', async () => {
+    const baseNow = Date.now();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(baseNow);
+    const chat = vi.fn(async () => {
+      // 回合在 3 秒后完成（墙钟口径：用户发送 → 回合结束）
+      nowSpy.mockReturnValue(baseNow + 3000);
+      return createAgentResponse('已完成。');
+    });
+
+    useAgentStore.setState((state) => ({
+      ...state,
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    }));
+
+    await useAgentStore.getState().sendMessage('帮我改个函数', '帮我改个函数', 'agent');
+
+    const state = useAgentStore.getState();
+    expect(state.conversationStats.runtimeMs).toBe(3000);
+    expect(state.sessionConversationStats['session-1']?.runtimeMs).toBe(3000);
+
+    // 第二回合继续累加
+    const secondChat = vi.fn(async () => {
+      nowSpy.mockReturnValue(baseNow + 5000);
+      return createAgentResponse('又完成了。');
+    });
+    useAgentStore.setState((state2) => ({
+      ...state2,
+      _agent: createMockAgent({ chat: secondChat }),
+      _agentModel: 'deepseek-v4-pro',
+    }));
+    await useAgentStore.getState().sendMessage('再来一次', '再来一次', 'agent');
+
+    const afterSecond = useAgentStore.getState();
+    expect(afterSecond.conversationStats.runtimeMs).toBe(5000);
+    expect(afterSecond.sessionConversationStats['session-1']?.runtimeMs).toBe(5000);
+    nowSpy.mockRestore();
+  });
+
   it('does not issue an extra fast-model summary request at the end', async () => {
     const chat = vi.fn(async () => createAgentResponse('已完成修改。'));
     const fetchMock = vi.fn(() =>
@@ -1385,37 +1426,38 @@ describe('useAgentStore.sendMessage', () => {
     expect(assistantMessage?.content).toContain('已完成修改');
     expect(assistantMessage?.modelName).toBe('deepseek-v4-pro');
     expect(assistantMessage?.modelTier).toBe('primary');
-    expect(useAgentStore.getState().conversationStats).toEqual({
-      primary: {
-        totalCacheRead: 0,
-        totalCacheCreation: 0,
-        totalInput: 1,
-        totalOutput: 1,
-        promptCacheHitTokens: 0,
-        promptCacheMissTokens: 0,
-        calls: 1,
-        rounds: 1,
-      },
-      fast: {
-        totalCacheRead: 0,
-        totalCacheCreation: 0,
-        totalInput: 0,
-        totalOutput: 0,
-        promptCacheHitTokens: 0,
-        promptCacheMissTokens: 0,
-        calls: 0,
-        rounds: 0,
-      },
-      mentor: {
-        totalCacheRead: 0,
-        totalCacheCreation: 0,
-        totalInput: 0,
-        totalOutput: 0,
-        promptCacheHitTokens: 0,
-        promptCacheMissTokens: 0,
-        calls: 0,
-        rounds: 0,
-      },
+    // 按 tier 断言（conversationStats 还包含运行时长 runtimeMs，随墙钟变化，
+    // 不属于本用例的校验范围）。
+    const finalStats = useAgentStore.getState().conversationStats;
+    expect(finalStats.primary).toEqual({
+      totalCacheRead: 0,
+      totalCacheCreation: 0,
+      totalInput: 1,
+      totalOutput: 1,
+      promptCacheHitTokens: 0,
+      promptCacheMissTokens: 0,
+      calls: 1,
+      rounds: 1,
+    });
+    expect(finalStats.fast).toEqual({
+      totalCacheRead: 0,
+      totalCacheCreation: 0,
+      totalInput: 0,
+      totalOutput: 0,
+      promptCacheHitTokens: 0,
+      promptCacheMissTokens: 0,
+      calls: 0,
+      rounds: 0,
+    });
+    expect(finalStats.mentor).toEqual({
+      totalCacheRead: 0,
+      totalCacheCreation: 0,
+      totalInput: 0,
+      totalOutput: 0,
+      promptCacheHitTokens: 0,
+      promptCacheMissTokens: 0,
+      calls: 0,
+      rounds: 0,
     });
   });
 
@@ -2714,6 +2756,44 @@ describe('session lazy loading and LRU cache', () => {
     expect(Object.keys(state.sessionMessages)).toEqual(['s-active']);
     expect(state.sessionMessagesLoading).toBe(false);
     expect(state._sessionLru).toEqual(['s-active', 's-other-1', 's-other-2']);
+  });
+
+  it('openWorkspace backfills runtimeMs for legacy session stats', async () => {
+    loadSessionsMock.mockResolvedValue([createSessionMeta('s-legacy', 1)]);
+    loadAllProjectMetaMock.mockResolvedValue({
+      active_session_id: 's-legacy',
+      conversation_stats: createEmptyConversation(),
+      session_conversation_stats: {
+        // 旧数据没有 runtimeMs 字段 → 触发回填
+        's-legacy': createEmptyConversation(),
+      },
+    });
+    loadSessionMessagesMock.mockResolvedValue([]);
+    aggregateSessionRuntimeInDbMock.mockResolvedValueOnce({ 's-legacy': 4200 });
+
+    await useAgentStore.getState().openWorkspace('/tmp/codepapr-lazy-test');
+
+    const state = useAgentStore.getState();
+    expect(aggregateSessionRuntimeInDbMock).toHaveBeenCalledWith('/tmp/codepapr-lazy-test');
+    expect(state.sessionConversationStats['s-legacy']?.runtimeMs).toBe(4200);
+    expect(state.conversationStats.runtimeMs).toBe(4200);
+  });
+
+  it('openWorkspace keeps live-tracked runtimeMs instead of overwriting it', async () => {
+    loadSessionsMock.mockResolvedValue([createSessionMeta('s-live', 1)]);
+    loadAllProjectMetaMock.mockResolvedValue({
+      active_session_id: 's-live',
+      conversation_stats: { ...createEmptyConversation(), runtimeMs: 100 },
+      session_conversation_stats: {
+        's-live': { ...createEmptyConversation(), runtimeMs: 100 },
+      },
+    });
+    loadSessionMessagesMock.mockResolvedValue([]);
+    aggregateSessionRuntimeInDbMock.mockResolvedValueOnce({ 's-live': 999999 });
+
+    await useAgentStore.getState().openWorkspace('/tmp/codepapr-lazy-test');
+
+    expect(useAgentStore.getState().sessionConversationStats['s-live']?.runtimeMs).toBe(100);
   });
 
   it('selectSession loads messages on demand and shows a loading state', async () => {

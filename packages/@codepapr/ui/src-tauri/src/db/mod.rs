@@ -1103,6 +1103,98 @@ pub(crate) fn aggregate_tool_usage(workspace_path: String) -> Result<ToolUsageRe
     })
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionRuntimeResult {
+    pub(crate) runtime_json: String,
+}
+
+/// 收尾一个回合：end > start 时把 (end - start) 累加进该会话的运行时长。
+fn close_runtime_turn(
+    acc: &mut std::collections::BTreeMap<String, i64>,
+    session_id: &str,
+    turn: &mut Option<(i64, Option<i64>)>,
+) {
+    if let Some((start, Some(end))) = turn.take() {
+        if end > start {
+            *acc.entry(session_id.to_string()).or_insert(0) += end - start;
+        }
+    }
+}
+
+/// 在后台聚合每个会话的 Agent 实际执行时长（墙钟，毫秒）：
+/// Σ(回合内最后一条非 synthetic 的 assistant/error 消息时间戳 − 发起回合的
+/// 非 synthetic user 消息时间戳)。用于回填旧会话缺失的 runtimeMs
+/// （session_conversation_stats 旧数据没有该字段），消息体不跨 IPC 边界。
+#[tauri::command]
+pub(crate) fn aggregate_session_runtime(
+    workspace_path: String,
+) -> Result<SessionRuntimeResult, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT session_id, role, extras, timestamp
+             FROM messages ORDER BY session_id ASC, message_index ASC",
+        )
+        .map_err(|err| format!("查询消息失败: {err}"))?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })
+        .map_err(|err| format!("读取消息列表失败: {err}"))?;
+
+    let mut runtime_by_session: std::collections::BTreeMap<String, i64> =
+        std::collections::BTreeMap::new();
+    // 当前打开的回合：(user 消息时间戳, 最后一条候选结束消息时间戳)
+    let mut open_turn: Option<(i64, Option<i64>)> = None;
+    let mut current_session: Option<String> = None;
+
+    for row in rows {
+        let Ok((session_id, role, extras_raw, timestamp)) = row else {
+            continue;
+        };
+        if current_session.as_deref() != Some(session_id.as_str()) {
+            if let Some(prev) = current_session.take() {
+                close_runtime_turn(&mut runtime_by_session, &prev, &mut open_turn);
+            }
+            current_session = Some(session_id.clone());
+        }
+        let synthetic = extras_raw
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+            .and_then(|value| value.get("synthetic").and_then(|flag| flag.as_bool()))
+            .unwrap_or(false);
+        if synthetic {
+            continue;
+        }
+        match role.as_str() {
+            "user" => {
+                close_runtime_turn(&mut runtime_by_session, &session_id, &mut open_turn);
+                open_turn = Some((timestamp, None));
+            }
+            "assistant" | "error" => {
+                if let Some((_, end)) = open_turn.as_mut() {
+                    *end = Some(timestamp);
+                }
+            }
+            _ => {}
+        }
+    }
+    if let Some(prev) = current_session {
+        close_runtime_turn(&mut runtime_by_session, &prev, &mut open_turn);
+    }
+
+    Ok(SessionRuntimeResult {
+        runtime_json: serde_json::to_string(&runtime_by_session)
+            .map_err(|err| format!("序列化运行时长统计失败: {err}"))?,
+    })
+}
+
 #[tauri::command]
 pub(crate) fn save_project_meta(
     workspace_path: String,
@@ -1676,6 +1768,52 @@ mod tests {
         assert_eq!(search["success"], 0);
         assert_eq!(search["error"], 0);
         assert_eq!(usage.len(), 3);
+    }
+
+    #[test]
+    fn aggregate_session_runtime_pairs_user_messages_with_turn_ends() {
+        let workspace = TestWorkspace::new("aggregate-session-runtime");
+        let ws = workspace.workspace_arg();
+
+        save_session(
+            ws.clone(),
+            r#"{"id":"s-1","name":"会话一","provider":"deepseek","model":"m","createdAt":1}"#
+                .to_string(),
+        )
+        .expect("should save session s-1");
+        save_session(
+            ws.clone(),
+            r#"{"id":"s-2","name":"会话二","provider":"deepseek","model":"m","createdAt":2}"#
+                .to_string(),
+        )
+        .expect("should save session s-2");
+
+        // s-1：两个完整回合（1500ms + 200ms）+ 一条应被忽略的 synthetic 消息。
+        let s1_messages = r#"[
+            {"id":"m-1","role":"user","content":"q1","timestamp":1000},
+            {"id":"m-2","role":"assistant","content":"round1","timestamp":1500},
+            {"id":"m-3","role":"assistant","content":"final","timestamp":2500},
+            {"id":"m-4","role":"assistant","content":"","timestamp":2600,"synthetic":true},
+            {"id":"m-5","role":"user","content":"q2","timestamp":3000},
+            {"id":"m-6","role":"error","content":"boom","timestamp":3200}
+        ]"#;
+        // s-2：synthetic user 不开回合；孤立 assistant 无归属；未闭合回合不计。
+        let s2_messages = r#"[
+            {"id":"m-7","role":"user","content":"","timestamp":100,"synthetic":true},
+            {"id":"m-8","role":"assistant","content":"orphan","timestamp":200},
+            {"id":"m-9","role":"user","content":"open turn","timestamp":500}
+        ]"#;
+        save_message_batch(ws.clone(), "s-1".to_string(), s1_messages.to_string())
+            .expect("should save s-1 messages");
+        save_message_batch(ws.clone(), "s-2".to_string(), s2_messages.to_string())
+            .expect("should save s-2 messages");
+
+        let result = aggregate_session_runtime(ws).expect("should aggregate session runtime");
+        let runtime: std::collections::BTreeMap<String, i64> =
+            serde_json::from_str(&result.runtime_json).expect("runtime json should parse");
+
+        assert_eq!(runtime.get("s-1"), Some(&1700));
+        assert!(!runtime.contains_key("s-2"));
     }
 
     #[test]

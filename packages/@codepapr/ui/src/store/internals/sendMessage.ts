@@ -57,7 +57,7 @@ import { useGoalStore } from '../goalStore';
 import type { CommandResult } from '../../tools/streamingWorkspaceCommand';
 
 import { normalizeSettings, getSettingsError, resolveProviderName } from './settingsNormalizer';
-import { addConversationStats, getSessionConversationStats } from './stats';
+import { addConversationRuntime, addConversationStats, getSessionConversationStats } from './stats';
 import { maybeApplySessionTitle, touchSession } from './persistence';
 import { saveCurrentProjectState } from './projectSnapshot';
 import {
@@ -418,6 +418,30 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             });
             saveCurrentProjectState(get());
           }, STORE_IDLE_TIMEOUT_MS);
+        };
+
+        // 累计本回合 Agent 实际执行时长（墙钟）：用户发送时刻 → 回合收尾时刻。
+        // 正常结束在 finalize 的 set() 中与 tier 统计一并累加；取消/出错/Goal
+        // 循环异常等提前收尾路径走这里。
+        const accumulateTurnRuntime = (sessionId: string | null): void => {
+          if (!sessionId || !userMsg) return;
+          const runtimeMs = Date.now() - userMsg.timestamp;
+          if (!Number.isFinite(runtimeMs) || runtimeMs <= 0) return;
+          set((s) => {
+            if (!s.sessions.some((x) => x.id === sessionId)) return {};
+            const next = addConversationRuntime(
+              getSessionConversationStats(s.sessionConversationStats, sessionId),
+              runtimeMs
+            );
+            return {
+              conversationStats:
+                s.activeSessionId === sessionId ? next : s.conversationStats,
+              sessionConversationStats: {
+                ...s.sessionConversationStats,
+                [sessionId]: next,
+              },
+            };
+          });
         };
 
         try {
@@ -1291,6 +1315,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 ? `Goal loop error: ${(goalErr as Error).message}`
                 : `Goal 循环出错: ${(goalErr as Error).message}`;
               appendErrorMessage(set, goalErrMsg);
+              accumulateTurnRuntime(activeSessionId);
               saveCurrentProjectState(get());
               return;
             }
@@ -1421,6 +1446,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               }
             : null;
 
+          // 本回合 Agent 实际执行时长（墙钟）：与 finalize 时间戳同一时刻取值，
+          // 保证与消息时间戳推算口径一致。
+          const turnRuntimeMs = userMsg ? Date.now() - userMsg.timestamp : 0;
+
           set((s) => {
             // 回合进行中会话可能已不存在（关闭工作区/删除会话）：此时不再写
             // 消息，避免在 sessionMessages 里复活一个 sessions 中已没有的孤儿
@@ -1466,10 +1495,13 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             const applyTierDeltas = (
               base: ConversationStats,
             ): ConversationStats =>
-              tierDeltas.reduce(
-                (acc, delta) =>
-                  addConversationStats(acc, delta.tier, delta.stats, delta.incrementRounds ? { incrementRounds: true } : undefined),
-                base,
+              addConversationRuntime(
+                tierDeltas.reduce(
+                  (acc, delta) =>
+                    addConversationStats(acc, delta.tier, delta.stats, delta.incrementRounds ? { incrementRounds: true } : undefined),
+                  base,
+                ),
+                turnRuntimeMs,
               );
 
             return {
@@ -1629,6 +1661,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             if (assistantMessageId && sid) {
               cleanupStreamingAssistantMessage(set, sid, assistantMessageId);
             }
+            // 取消也算已消耗的执行时长（墙钟口径：发送 → 取消）。
+            accumulateTurnRuntime(sid);
             saveCurrentProjectState(get());
             return;
           }
@@ -1652,6 +1686,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 : 'Agent Worker 崩溃。')
             : '';
           appendErrorMessage(set, crashPrefix + formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'), sid);
+          accumulateTurnRuntime(sid);
           saveCurrentProjectState(get());
         } finally {
           clearStoreIdle();

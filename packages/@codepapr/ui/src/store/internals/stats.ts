@@ -32,6 +32,8 @@ export function cloneConversationStats(
     primary: { ...createEmptyModelTierStats(), ...(stats.primary ?? {}) },
     fast: { ...createEmptyModelTierStats(), ...(stats.fast ?? {}) },
     mentor: { ...createEmptyModelTierStats(), ...(stats.mentor ?? {}) },
+    // 保持 undefined 语义：旧持久化数据没有该字段，回填逻辑依赖它做幂等判断。
+    runtimeMs: typeof stats.runtimeMs === 'number' ? stats.runtimeMs : undefined,
   };
 }
 
@@ -135,12 +137,31 @@ export function aggregateProjectStats(
   sessionConversationStats: Record<string, ConversationStats>
 ): ConversationStats {
   const result = createEmptyConversationStats();
+  let runtimeMs = 0;
+  let hasRuntime = false;
   for (const stats of Object.values(sessionConversationStats)) {
     result.primary = addModelTierStatsToStats(result.primary, stats.primary);
     result.fast = addModelTierStatsToStats(result.fast, stats.fast);
     result.mentor = addModelTierStatsToStats(result.mentor, stats.mentor ?? createEmptyModelTierStats());
+    if (typeof stats.runtimeMs === 'number') {
+      runtimeMs += stats.runtimeMs;
+      hasRuntime = true;
+    }
   }
+  result.runtimeMs = hasRuntime ? runtimeMs : undefined;
   return result;
+}
+
+/** 累加一次回合的 Agent 实际执行时长（墙钟，毫秒）。 */
+export function addConversationRuntime(
+  current: ConversationStats,
+  runtimeMs: number
+): ConversationStats {
+  if (!Number.isFinite(runtimeMs) || runtimeMs <= 0) return current;
+  return {
+    ...current,
+    runtimeMs: (current.runtimeMs ?? 0) + Math.round(runtimeMs),
+  };
 }
 
 export function migrateCumulativeToConversationStats(

@@ -244,6 +244,7 @@ fn main() {
             db::load_session_messages,
             db::load_all_session_messages,
             db::aggregate_tool_usage,
+            db::aggregate_session_runtime,
             db::save_project_meta,
             db::load_project_meta,
             db::load_all_project_meta,

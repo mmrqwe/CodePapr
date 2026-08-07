@@ -31,6 +31,8 @@ export declare const I18N_DICTS: {
         savings: string;
         roundsLabel: string;
         callCount: string;
+        runtimeDuration: string;
+        runtimeDurationTip: string;
         thisConversation: string;
         entireProject: string;
         priceNotice: string;
@@ -526,6 +528,8 @@ export declare const I18N_DICTS: {
         savings: string;
         roundsLabel: string;
         callCount: string;
+        runtimeDuration: string;
+        runtimeDurationTip: string;
         thisConversation: string;
         entireProject: string;
         priceNotice: string;
@@ -1019,6 +1023,8 @@ export declare const I18N_DICTS: {
         savings: string;
         roundsLabel: string;
         callCount: string;
+        runtimeDuration: string;
+        runtimeDurationTip: string;
         thisConversation: string;
         entireProject: string;
         priceNotice: string;
@@ -1512,6 +1518,8 @@ export declare function getTranslation(lang?: Lang): {
     withoutCache: string;
     savings: string;
     roundsLabel: string;
+    runtimeDuration: string;
+    runtimeDurationTip: string;
     priceNotice: string;
     workbench: string;
     workbenchDesc: string;
@@ -1871,6 +1879,8 @@ export declare function getTranslation(lang?: Lang): {
     withoutCache: string;
     savings: string;
     roundsLabel: string;
+    runtimeDuration: string;
+    runtimeDurationTip: string;
     priceNotice: string;
     workbench: string;
     workbenchDesc: string;
@@ -2230,6 +2240,8 @@ export declare function getTranslation(lang?: Lang): {
     withoutCache: string;
     savings: string;
     roundsLabel: string;
+    runtimeDuration: string;
+    runtimeDurationTip: string;
     priceNotice: string;
     workbench: string;
     workbenchDesc: string;

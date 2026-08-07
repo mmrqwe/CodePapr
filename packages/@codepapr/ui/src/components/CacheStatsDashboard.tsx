@@ -29,6 +29,17 @@ function formatRmb(value: number): string {
   return `¥${value.toFixed(5)}`;
 }
 
+function formatDuration(ms: number | undefined): string {
+  if (!ms || ms <= 0) return '—';
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
 function StatRow({ label, value, color = 'text-slate-300' }: { label: string; value: string | number; color?: string }) {
   return (
     <div className="flex justify-between items-center py-1.5">
@@ -194,6 +205,12 @@ export function CacheStatsDashboard({ lang, collapsible = true, onOpenContextIns
                 {contextSnapshot
                   ? `~${contextSnapshot.totalTokens.toLocaleString()} ${t.tokensUnit}`
                   : '—'}
+              </p>
+            </div>
+            <div className="min-w-0" title={t.runtimeDurationTip}>
+              <p className="text-[11px] text-slate-500">{t.runtimeDuration}</p>
+              <p className="font-mono text-sm font-semibold text-slate-300">
+                {formatDuration(displayedStats.runtimeMs)}
               </p>
             </div>
             <button

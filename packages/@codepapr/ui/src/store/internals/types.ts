@@ -234,6 +234,9 @@ export interface ConversationStats {
   primary: ModelTierStats;
   fast: ModelTierStats;
   mentor: ModelTierStats;
+  /** Agent 实际执行时长（墙钟，毫秒）：Σ(回合结束时刻 − 用户发送时刻)。
+   *  undefined 表示旧数据尚未回填（backfill 以此为幂等判据）。 */
+  runtimeMs?: number;
 }
 
 export type ResetToMessageResult =

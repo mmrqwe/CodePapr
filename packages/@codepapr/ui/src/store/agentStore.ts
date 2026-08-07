@@ -19,6 +19,7 @@ import {
   loadSessions,
   loadSessionMessages,
   loadAllProjectMeta,
+  aggregateSessionRuntimeInDb,
 } from '../utils/projectStorage';
 import { runProjectDiagnostics } from '../utils/projectDiagnostics';
 import { loadAppSettings, saveAppSettings } from '../utils/appSettingsStorage';
@@ -52,7 +53,11 @@ import {
   normalizeSettings,
   resolveProviderName,
 } from './internals/settingsNormalizer';
-import { cloneConversationStats, getSessionConversationStats } from './internals/stats';
+import {
+  addConversationRuntime,
+  cloneConversationStats,
+  getSessionConversationStats,
+} from './internals/stats';
 import {
   normalizeProjectSnapshot,
   normalizeSkillEnabledState,
@@ -543,6 +548,28 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           projectDiagnosticsReport = snapshot.projectDiagnosticsReport;
           messageCheckpoints = snapshot.messageCheckpoints ?? {};
           sessionTodoLists = snapshot.sessionTodoLists ?? {};
+        }
+
+        // 回填旧会话运行时长：session_conversation_stats 旧数据没有 runtimeMs
+        // 字段，从 DB 消息时间戳聚合补齐（幂等：只处理 runtimeMs 为 undefined
+        // 的条目，新回合实时累计后不会再触发）。
+        try {
+          const runtimeBySession = await aggregateSessionRuntimeInDb(normalizedWorkspacePath);
+          for (const [sessionId, runtimeMs] of Object.entries(runtimeBySession)) {
+            const existing = sessionConversationStats[sessionId] as
+              | import('./internals/types').ConversationStats
+              | undefined;
+            if (existing && typeof existing.runtimeMs === 'number') continue;
+            sessionConversationStats[sessionId] = addConversationRuntime(
+              cloneConversationStats(existing),
+              runtimeMs
+            );
+          }
+        } catch (err) {
+          console.warn(
+            '[CodePapr] 回填会话运行时长失败:',
+            err instanceof Error ? err.message : err
+          );
         }
 
         const messages = activeSessionId
@@ -1167,9 +1194,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           if (!sessionId) return { isLoading: false, loadingSessionId: null };
 
           const currentMessages = s.sessionMessages[sessionId] ?? s.messages;
+          // 补上取消时刻的时间戳：与 sendMessage 的取消路径（accumulateTurnRuntime）
+          // 保持同口径，保证按消息时间戳回溯运行时长时不丢这一段。
           const nextMessages = currentMessages.map((message) =>
             message.isStreaming
-              ? { ...message, isStreaming: false, statusText: undefined }
+              ? { ...message, isStreaming: false, statusText: undefined, timestamp: Date.now() }
               : message
           );
 
