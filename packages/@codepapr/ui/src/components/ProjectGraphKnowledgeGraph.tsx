@@ -53,6 +53,23 @@ function parentFolder(filePath: string): string {
   return segments.slice(0, -1).join('/');
 }
 
+function topFolder(filePath: string): string {
+  const segments = filePath.replace(/\\/g, '/').split('/');
+  return segments.length > 1 ? segments[0] : '.';
+}
+
+export interface GraphFocusRequest {
+  centerId: string;
+  depth: number;
+}
+
+export interface GraphHighlightRequest {
+  nodeIds: string[];
+  edgeIds?: string[];
+  // 单调递增序号：同一组目标重复点击时也触发高亮副作用。
+  seq: number;
+}
+
 function folderColor(folder: string): string {
   let hash = 0;
   for (let i = 0; i < folder.length; i++) {
@@ -125,7 +142,10 @@ function computeDegrees(
 interface G6NodeData {
   label: string;
   fullLabel: string;
+  // 大图标签降密度时被清空的 label 仍保留在此，供悬停 highlight 状态恢复显示。
+  hoverLabel: string;
   nodeKind: 'file' | 'symbol';
+  nodeSourceId: string;
   fullPath: string;
   language?: string;
   isEntry: boolean;
@@ -138,6 +158,8 @@ interface G6NodeData {
   inDegree: number;
   outDegree: number;
   parentFolder?: string;
+  // 力导聚类依据：同目录节点聚拢，节点颜色（目录哈希色）才与布局对应。
+  cluster: string;
   [key: string]: unknown;
 }
 
@@ -154,6 +176,8 @@ interface G6Data {
     };
   }>;
   edges: Array<{
+    // 沿用 ProjectGraph 边 id，供外部高亮请求按 edgeIds 精确匹配。
+    id: string;
     source: string;
     target: string;
     data: {
@@ -168,21 +192,64 @@ interface G6Data {
   }>;
 }
 
+// 聚焦模式：从 centerId 出发在无向邻接（排除 contains 结构边）上 BFS，
+// 收集 depth 跳内的全部节点 id。
+function computeFocusNodeIds(
+  nodes: ProjectGraphNode[],
+  edges: ProjectGraphEdge[],
+  focus: GraphFocusRequest,
+): Set<string> {
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const adjacency = new Map<string, Set<string>>();
+  const link = (from: string, to: string) => {
+    let set = adjacency.get(from);
+    if (!set) {
+      set = new Set();
+      adjacency.set(from, set);
+    }
+    set.add(to);
+  };
+  for (const edge of edges) {
+    if (edge.kind === 'contains') continue;
+    if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) continue;
+    link(edge.from, edge.to);
+    link(edge.to, edge.from);
+  }
+  const visited = new Set<string>([focus.centerId]);
+  let frontier: string[] = [focus.centerId];
+  for (let d = 0; d < focus.depth && frontier.length > 0; d++) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      for (const neighbor of adjacency.get(id) ?? []) {
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor);
+          next.push(neighbor);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return visited;
+}
+
 function buildG6Data(
   nodes: ProjectGraphNode[],
   edges: ProjectGraphEdge[],
   viewModes?: Set<string>,
+  focus?: GraphFocusRequest | null,
 ): G6Data {
   const modes = viewModes ?? new Set(['deps']);
   const showDeps = modes.has('deps');
   const showHierarchy = modes.has('hierarchy');
   const showCalls = modes.has('calls');
 
+  const focusIds = focus ? computeFocusNodeIds(nodes, edges, focus) : null;
+
   const nodeById = new Map<string, ProjectGraphNode>();
   const fileNodes: ProjectGraphNode[] = [];
   for (const node of nodes) {
     nodeById.set(node.id, node);
-    if (node.kind === 'file') fileNodes.push(node);
+    if (node.kind === 'file' && (!focusIds || focusIds.has(node.id))) fileNodes.push(node);
   }
 
   const degrees = computeDegrees(nodes, edges);
@@ -203,7 +270,7 @@ function buildG6Data(
   const g6Edges: G6Data['edges'] = [];
   const seenEdgeKeys = new Set<string>();
 
-  const pushEdge = (edge: { source: string; target: string; data: { label: string; kind: string }; style: { stroke: string; lineWidth: number; endArrow: boolean } }) => {
+  const pushEdge = (edge: { id: string; source: string; target: string; data: { label: string; kind: string }; style: { stroke: string; lineWidth: number; endArrow: boolean } }) => {
     const key = `${edge.source}->${edge.target}::${edge.data.kind}`;
     if (seenEdgeKeys.has(key)) return;
     seenEdgeKeys.add(key);
@@ -216,13 +283,16 @@ function buildG6Data(
     const isEntry = Boolean(fileNode.entryPoint);
     const folder = parentFolder(fileNode.path);
     const ft = fileNode.fileType;
+    const label = fileNameFromPath(fileNode.path);
 
     g6Nodes.push({
       id: fileNode.id,
       data: {
-        label: fileNameFromPath(fileNode.path),
+        label,
+        hoverLabel: label,
         fullLabel: fileNode.path.replace(/\\/g, '/').split('/').pop() ?? fileNode.path,
         nodeKind: 'file',
+        nodeSourceId: fileNode.id,
         fullPath: fileNode.path,
         language: fileNode.language,
         isEntry,
@@ -230,6 +300,7 @@ function buildG6Data(
         inDegree: degrees.get(fileNode.id)?.in ?? 0,
         outDegree: degrees.get(fileNode.id)?.out ?? 0,
         parentFolder: folder,
+        cluster: topFolder(fileNode.path),
       },
       style: {
         fill: ft && ft !== 'source' ? (FILE_TYPE_COLORS[ft] ?? folderColor(folder)) : folderColor(folder),
@@ -251,7 +322,8 @@ function buildG6Data(
     }
 
     const hierarchySymbols = nodes.filter(
-      (n) => n.kind === 'symbol' && n.symbol && HIERARCHY_SYMBOL_KINDS.has(n.symbol.kind) && hierarchyEdgeEndpoints.has(n.id),
+      (n) => n.kind === 'symbol' && n.symbol && HIERARCHY_SYMBOL_KINDS.has(n.symbol.kind) && hierarchyEdgeEndpoints.has(n.id)
+        && (!focusIds || focusIds.has(n.id)),
     );
 
     const maxHSymDeg = Math.max(1, ...hierarchySymbols.map((n) => degrees.get(n.id)?.total ?? 0));
@@ -264,12 +336,15 @@ function buildG6Data(
     for (const symNode of rankedHierarchySymbols) {
       includedNodeIds.add(symNode.id);
       const deg = degrees.get(symNode.id)?.total ?? 0;
+      const symLabel = symbolDisplayLabel(symNode);
       g6Nodes.push({
         id: symNode.id,
         data: {
-          label: symbolDisplayLabel(symNode),
+          label: symLabel,
+          hoverLabel: symLabel,
           fullLabel: symNode.label,
           nodeKind: 'symbol',
+          nodeSourceId: symNode.id,
           fullPath: symNode.path,
           symbolKind: symNode.symbol?.kind,
           line: symNode.symbol?.line,
@@ -279,6 +354,7 @@ function buildG6Data(
           isEntry: false,
           inDegree: degrees.get(symNode.id)?.in ?? 0,
           outDegree: degrees.get(symNode.id)?.out ?? 0,
+          cluster: topFolder(symNode.path),
         },
         style: {
           fill: symbolNodeColor(symNode.symbol?.kind ?? ''),
@@ -292,6 +368,7 @@ function buildG6Data(
   if (showCalls) {
     const crossFileCalls = edges.filter((e) => {
       if (e.kind !== 'calls') return false;
+      if (focusIds && (!focusIds.has(e.from) || !focusIds.has(e.to))) return false;
       const fromNode = nodeById.get(e.from);
       const toNode = nodeById.get(e.to);
       return fromNode && toNode && fromNode.path !== toNode.path;
@@ -325,12 +402,15 @@ function buildG6Data(
       if (includedNodeIds.has(symNode.id)) continue;
       includedNodeIds.add(symNode.id);
       const deg = degrees.get(symNode.id)?.total ?? 0;
+      const symLabel = symbolDisplayLabel(symNode);
       g6Nodes.push({
         id: symNode.id,
         data: {
-          label: symbolDisplayLabel(symNode),
+          label: symLabel,
+          hoverLabel: symLabel,
           fullLabel: symNode.label,
           nodeKind: 'symbol',
+          nodeSourceId: symNode.id,
           fullPath: symNode.path,
           symbolKind: symNode.symbol?.kind,
           line: symNode.symbol?.line,
@@ -340,6 +420,7 @@ function buildG6Data(
           isEntry: false,
           inDegree: degrees.get(symNode.id)?.in ?? 0,
           outDegree: degrees.get(symNode.id)?.out ?? 0,
+          cluster: topFolder(symNode.path),
         },
         style: {
           fill: symbolNodeColor(symNode.symbol?.kind ?? ''),
@@ -353,6 +434,7 @@ function buildG6Data(
       if (!includedNodeIds.has(edge.from) || !includedNodeIds.has(edge.to)) continue;
       const edgeColor = EDGE_COLORS[edge.kind] ?? '#6e7681';
       pushEdge({
+        id: edge.id,
         source: edge.from,
         target: edge.to,
         data: { label: edge.kind, kind: edge.kind },
@@ -374,6 +456,7 @@ function buildG6Data(
     const edgeColor = EDGE_COLORS[edge.kind] ?? '#6e7681';
     const isHierarchy = edge.kind === 'extends' || edge.kind === 'implements';
     pushEdge({
+      id: edge.id,
       source: edge.from,
       target: edge.to,
       data: { label: edge.kind, kind: edge.kind },
@@ -383,6 +466,22 @@ function buildG6Data(
         endArrow: edge.kind !== 'calls',
       },
     });
+  }
+
+  // 大图标签降密度：节点过多时只保留入口点与度数最高的节点的标签，
+  // 其余节点悬停时经 highlight 状态的 labelText 恢复显示。
+  const LABEL_NODE_THRESHOLD = 120;
+  const LABEL_KEEP_COUNT = 40;
+  if (g6Nodes.length > LABEL_NODE_THRESHOLD) {
+    const rankedForLabel = [...g6Nodes].sort((a, b) => {
+      const priorityDiff = (b.data.isEntry ? 1 : 0) - (a.data.isEntry ? 1 : 0);
+      if (priorityDiff !== 0) return priorityDiff;
+      return (b.data.inDegree + b.data.outDegree) - (a.data.inDegree + a.data.outDegree);
+    });
+    const keepLabels = new Set(rankedForLabel.slice(0, LABEL_KEEP_COUNT).map((n) => n.id));
+    for (const n of g6Nodes) {
+      if (!keepLabels.has(n.id)) n.data.label = '';
+    }
   }
 
   return { nodes: g6Nodes, edges: g6Edges };
@@ -404,6 +503,7 @@ interface TooltipInfo {
 }
 
 interface SelectedNodeInfo {
+  nodeId: string;
   label: string;
   fullPath: string;
   nodeKind: 'file' | 'symbol';
@@ -427,6 +527,12 @@ interface ProjectGraphKnowledgeGraphProps {
   viewModes?: Set<string>;
   searchQuery?: string;
   lang?: 'zh-CN' | 'zh-TW' | 'en';
+  // 聚焦模式：只渲染 centerId 的 depth 跳邻域子图。
+  focus?: GraphFocusRequest | null;
+  // 外部（洞察面板）驱动的高亮请求；null 表示清除高亮。
+  highlight?: GraphHighlightRequest | null;
+  // 节点详情弹窗中点击「聚焦邻域」时回调。
+  onRequestFocus?: (nodeId: string) => void;
 }
 
 export interface ProjectGraphKnowledgeGraphHandle {
@@ -486,6 +592,48 @@ function applySearchDimming(graph: Graph, query: string): void {
     }
     void graph.setElementState(stateMap);
   } catch { /* ignore */ }
+}
+
+// 外部洞察面板驱动的高亮：目标节点 highlight、其余 dim；边默认按"两端都在目标集"
+// 判定，提供 edgeIds 时精确匹配。完成后把视口移到目标区域。
+function applyGraphHighlight(graph: Graph, highlight: GraphHighlightRequest): void {
+  try {
+    const targets = new Set(highlight.nodeIds);
+    const edgeTargets = new Set(highlight.edgeIds ?? []);
+    const stateMap: Record<string, string | string[]> = {};
+    for (const n of graph.getNodeData()) {
+      if (!n.id) continue;
+      stateMap[n.id] = targets.has(n.id) ? 'highlight' : 'dim';
+    }
+    for (const e of graph.getEdgeData()) {
+      if (!e.id) continue;
+      const active = edgeTargets.size > 0
+        ? edgeTargets.has(e.id)
+        : Boolean(e.source && e.target && targets.has(e.source) && targets.has(e.target));
+      stateMap[e.id] = active ? 'active' : 'dim';
+    }
+    void graph.setElementState(stateMap);
+    if (highlight.nodeIds.length > 0) {
+      void graph.focusElement(
+        highlight.nodeIds.length === 1 ? highlight.nodeIds[0] : highlight.nodeIds,
+        { duration: 300 },
+      );
+    }
+  } catch { /* ignore */ }
+}
+
+function clearGraphStates(graph: Graph, searchQuery: string): void {
+  try {
+    const stateMap: Record<string, string | string[]> = {};
+    for (const n of graph.getNodeData()) {
+      if (n.id) stateMap[n.id] = [];
+    }
+    for (const e of graph.getEdgeData()) {
+      if (e.id) stateMap[e.id] = [];
+    }
+    void graph.setElementState(stateMap);
+  } catch { /* ignore */ }
+  applySearchDimming(graph, searchQuery);
 }
 
 interface EdgeRelation {
@@ -552,7 +700,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
   ProjectGraphKnowledgeGraphHandle,
   ProjectGraphKnowledgeGraphProps
 >(function ProjectGraphKnowledgeGraph(
-  { projectGraph, onNodeClick, dark = true, viewModes, searchQuery = '', lang },
+  { projectGraph, onNodeClick, dark = true, viewModes, searchQuery = '', lang, focus, highlight, onRequestFocus },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -561,6 +709,8 @@ const ProjectGraphKnowledgeGraph = forwardRef<
   onNodeClickRef.current = onNodeClick;
   const searchQueryRef = useRef(searchQuery);
   searchQueryRef.current = searchQuery;
+  const highlightRef = useRef(highlight);
+  highlightRef.current = highlight;
   // 复用的节点索引与度数表：避免每次点击/导航都重新遍历整张图（O(n+e)）。
   const graphNodeMap = useMemo(
     () => new Map(projectGraph.nodes.map((n) => [n.id, n])),
@@ -575,6 +725,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
   const positionsCacheRef = useRef<Map<string, [number, number]> | null>(null);
   const lastGraphRef = useRef<WorkspaceProjectGraphResult | null>(null);
   const lastViewModeKeyRef = useRef<string>('');
+  const lastFocusKeyRef = useRef<string>('');
   const [tooltipInfo, setTooltipInfo] = useState<TooltipInfo | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<SelectedNodeInfo | null>(null);
@@ -612,6 +763,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
 
     const fileTypeVal = targetNode.fileType;
     setSelectedNode({
+      nodeId: targetNodeId,
       label: targetNode.qualifiedName ?? targetNode.label,
       fullPath: targetNode.path,
       nodeKind: targetNode.kind,
@@ -648,6 +800,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
   }), []);
 
   const viewModeKey = viewModes ? [...viewModes].sort().join(',') : '_all';
+  const focusKey = focus ? `${focus.centerId}@${focus.depth}` : '';
 
   useEffect(() => {
     const container = containerRef.current;
@@ -661,6 +814,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
       projectGraph.nodes,
       projectGraph.edges,
       viewModes,
+      focus,
     );
 
     if (graphRef.current) {
@@ -680,6 +834,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
       positionsCacheRef.current !== null &&
       lastGraphRef.current === projectGraph &&
       lastViewModeKeyRef.current === viewModeKey &&
+      lastFocusKeyRef.current === focusKey &&
       nodes.every((n) => {
         const p = positionsCacheRef.current!.get(n.id);
         return !!p && Number.isFinite(p[0]) && Number.isFinite(p[1]);
@@ -720,6 +875,8 @@ const ProjectGraphKnowledgeGraph = forwardRef<
           highlight: {
             stroke: dark ? '#f0883e' : '#d9673e',
             lineWidth: 3,
+            // 大图标签降密度后 label 可能为空，悬停/高亮时恢复显示完整标签。
+            labelText: (d: NodeData) => ((d.data?.hoverLabel as string) ?? ''),
           },
           neighbour: {},
           dim: {
@@ -771,7 +928,9 @@ const ProjectGraphKnowledgeGraph = forwardRef<
               linkDistance: 260,
               nodeStrength: 3000,
               edgeStrength: 0.2,
-              clustering: false,
+              // 按顶级目录聚类：同目录节点聚拢，节点颜色（目录哈希色）与布局对应。
+              clustering: true,
+              nodeClusterBy: 'cluster',
               animation: false,
               maxIteration: 1200,
             },
@@ -789,6 +948,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
             const g6Data = nd?.data as G6NodeData | undefined;
             if (!g6Data?.fullPath) return;
             setSelectedNode({
+              nodeId,
               label: g6Data.fullLabel ?? g6Data.label,
               fullPath: g6Data.fullPath,
               nodeKind: g6Data.nodeKind,
@@ -944,10 +1104,17 @@ const ProjectGraphKnowledgeGraph = forwardRef<
       setConnectedEdges({ inbound: [], outbound: [] });
     });
 
-    graph.render().catch((err) => {
-      console.error('G6 render error:', err);
-      setGraphError(err instanceof Error ? err.message : String(err));
-    });
+    graph.render()
+      .then(() => {
+        // 图重建（切换视图/聚焦/主题）后恢复外部高亮请求。
+        if (highlightRef.current) {
+          applyGraphHighlight(graph, highlightRef.current);
+        }
+      })
+      .catch((err) => {
+        console.error('G6 render error:', err);
+        setGraphError(err instanceof Error ? err.message : String(err));
+      });
 
     graphRef.current = graph;
 
@@ -966,6 +1133,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
     });
     lastGraphRef.current = projectGraph;
     lastViewModeKeyRef.current = viewModeKey;
+    lastFocusKeyRef.current = focusKey;
 
     graph.setSize(initWidth, initHeight);
 
@@ -1001,7 +1169,18 @@ const ProjectGraphKnowledgeGraph = forwardRef<
       console.error('G6 init error:', err);
       setGraphError(err instanceof Error ? err.message : String(err));
     }
-  }, [projectGraph, handleNodeClick, dark, viewModeKey, graphNodeMap]);
+  }, [projectGraph, handleNodeClick, dark, viewModeKey, focusKey, focus, graphNodeMap]);
+
+  // 外部高亮请求变化：应用高亮；置 null 时清除全部状态并恢复搜索 dimming。
+  useEffect(() => {
+    const graph = graphRef.current;
+    if (!graph) return;
+    if (highlight) {
+      applyGraphHighlight(graph, highlight);
+    } else {
+      clearGraphStates(graph, searchQueryRef.current);
+    }
+  }, [highlight, projectGraph, viewModeKey, focusKey]);
 
   useEffect(() => {
     const graph = graphRef.current;
@@ -1206,13 +1385,26 @@ const ProjectGraphKnowledgeGraph = forwardRef<
                     </div>
                   </div>
                 )}
-                <button
-                  type="button"
-                  onClick={handleOpenFile}
-                  className={`mt-4 w-full rounded-lg border px-3 py-2 text-[11px] font-medium transition-colors ${dark ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20' : 'border-indigo-300 bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}
-                >
-                  {lang === 'en' ? 'Open File' : '打开文件'}
-                </button>
+                <div className="mt-4 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedNode) {
+                        onRequestFocus?.(selectedNode.nodeId);
+                      }
+                    }}
+                    className={`w-full rounded-lg border px-3 py-2 text-[11px] font-medium transition-colors ${dark ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20' : 'border-emerald-300 bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}
+                  >
+                    {t.graphNodeFocus}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOpenFile}
+                    className={`w-full rounded-lg border px-3 py-2 text-[11px] font-medium transition-colors ${dark ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20' : 'border-indigo-300 bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}
+                  >
+                    {lang === 'en' ? 'Open File' : '打开文件'}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -1250,7 +1442,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
         </div>
       )}
       <div className={`pointer-events-none absolute bottom-2 right-2 rounded-lg border px-2.5 py-2 text-[9px] leading-relaxed ${dark ? 'border-[#2a2d3a] bg-[#1a1d27]/90 text-slate-400' : 'border-slate-200 bg-white/90 text-slate-500'}`}>
-        <div className="mb-1.5 font-semibold opacity-70">图例</div>
+        <div className="mb-1.5 font-semibold opacity-70">{t.graphLegendTitle}</div>
         <div className="grid grid-cols-2 gap-x-3 gap-y-1">
           {(['imports', 'reexports', 'extends', 'implements', 'calls', 'tested_by', 'configures'] as const).map((kind) => (
             <div key={kind} className="flex items-center gap-1.5">
@@ -1261,6 +1453,9 @@ const ProjectGraphKnowledgeGraph = forwardRef<
           <div className="flex items-center gap-1.5">
             <span className="inline-block h-3 w-3 rounded-full border-2" style={{ borderColor: '#f0883e' }} />
             <span>{lang === 'en' ? 'Entry / Exported' : '入口 / 导出'}</span>
+          </div>
+          <div className="col-span-2 flex items-center gap-1.5 opacity-70">
+            <span>{t.graphLegendNodeColor}</span>
           </div>
         </div>
       </div>

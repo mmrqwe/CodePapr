@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAgentStore } from '../store/agentStore';
 import { yieldToMainThread } from '../utils/taskScheduling';
@@ -22,7 +22,12 @@ import {
 } from '../tools/workspaceToolUtils';
 import { resolveProjectMapSymbolOverrides, globalLspPool } from '../tools/workspaceProjectMapLsp';
 import { getTranslation, type Lang } from '../utils/i18n';
-import ProjectGraphKnowledgeGraph, { type ProjectGraphKnowledgeGraphHandle } from './ProjectGraphKnowledgeGraph';
+import ProjectGraphKnowledgeGraph, {
+  type ProjectGraphKnowledgeGraphHandle,
+  type GraphHighlightRequest,
+} from './ProjectGraphKnowledgeGraph';
+import { computeProjectGraphInsights } from '../utils/projectGraphInsights';
+import type { CircularDependency, DeadCodeSymbol } from '@codepapr/core';
 import {
   buildGitDiffClipboardText,
   buildGitDiffCommandArgs,
@@ -173,6 +178,70 @@ function projectGraphFolderPath(path: string): string {
   return segments.length > 1 ? segments.slice(0, -1).join('/') : '.';
 }
 
+const INSIGHT_ITEM_CLASS =
+  'flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[10px] text-slate-300 transition-colors hover:bg-[#1a1d28]';
+
+function InsightSection({
+  title,
+  tip,
+  count,
+  badgeClass,
+  children,
+}: {
+  title: string;
+  tip: string;
+  count: number;
+  badgeClass: string;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-1" title={tip}>
+        <span className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+          {title}
+        </span>
+        <span
+          className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] tabular-nums ${
+            count > 0 ? badgeClass : 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+          }`}
+        >
+          {count > 0 ? count : '✓'}
+        </span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function InsightFileList({
+  items,
+  emptyText,
+  onPick,
+}: {
+  items: Array<{ id: string; path: string }>;
+  emptyText: string;
+  onPick: (id: string, path: string) => void;
+}) {
+  if (items.length === 0) {
+    return <div className="px-1.5 text-[10px] text-slate-600">{emptyText}</div>;
+  }
+  return (
+    <div className="flex flex-col gap-0.5">
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          onClick={() => onPick(item.id, item.path)}
+          title={item.path}
+          className={INSIGHT_ITEM_CLASS}
+        >
+          <span className="truncate">{item.path}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   const { workspacePath, entries, lang, selectedPath, onSelectPath, showGitPanel = false, canStartLoading = true, onProgressChange } = props;
   const t = getTranslation(lang);
@@ -267,9 +336,72 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   const [graphViewModes, setGraphViewModes] = useState<Set<string>>(
     () => new Set(['deps', 'hierarchy', 'calls']),
   );
+  // 聚焦模式：只渲染 centerId 的 depth 跳邻域；label 用于工具条展示。
+  const [graphFocus, setGraphFocus] = useState<{ centerId: string; depth: number; label: string } | null>(null);
+  // 洞察面板驱动的图高亮请求；seq 保证重复点击同一项也会重新触发。
+  const [graphHighlight, setGraphHighlight] = useState<GraphHighlightRequest | null>(null);
+  const graphHighlightSeqRef = useRef(0);
+
+  // 洞察全部由已构建的图同步纯计算得出（core 既有分析函数），无额外 IO。
+  const projectGraphInsights = useMemo(
+    () => (projectGraph ? computeProjectGraphInsights(projectGraph) : null),
+    [projectGraph],
+  );
+
+  // 图重建（刷新/工作区切换）后聚焦与高亮失效，复位避免指向不存在的节点。
+  useEffect(() => {
+    setGraphFocus(null);
+    setGraphHighlight(null);
+  }, [projectGraph]);
 
   function isGraphDarkTheme(): boolean {
     return document.documentElement.classList.contains('dark');
+  }
+
+  function closeKnowledgeGraph() {
+    setShowKnowledgeGraph(false);
+    setGraphFocus(null);
+    setGraphHighlight(null);
+  }
+
+  function focusGraphFile(nodeId: string, label: string) {
+    setGraphHighlight(null);
+    setGraphFocus({ centerId: nodeId, depth: 1, label });
+  }
+
+  function highlightGraphNodes(nodeIds: string[], edgeIds?: string[]) {
+    graphHighlightSeqRef.current += 1;
+    setGraphHighlight({
+      nodeIds,
+      ...(edgeIds && edgeIds.length > 0 ? { edgeIds } : {}),
+      seq: graphHighlightSeqRef.current,
+    });
+  }
+
+  function handleInsightDeadCodeClick(symbol: DeadCodeSymbol) {
+    highlightGraphNodes([symbol.id, `file:${symbol.path}`]);
+    onSelectPath(symbol.path);
+  }
+
+  function handleInsightCycleClick(cycle: CircularDependency) {
+    const nodeIds = [...new Set(cycle.cycle)];
+    const edgeIds: string[] = [];
+    for (let i = 0; i < cycle.cycle.length - 1; i++) {
+      const from = cycle.cycle[i];
+      const to = cycle.cycle[i + 1];
+      for (const e of projectGraph?.edges ?? []) {
+        if ((e.kind === 'imports' || e.kind === 'reexports') && e.from === from && e.to === to) {
+          edgeIds.push(e.id);
+        }
+      }
+    }
+    highlightGraphNodes(nodeIds, edgeIds);
+  }
+
+  function handleGraphRequestFocus(nodeId: string) {
+    const node = projectGraph?.nodes.find((n) => n.id === nodeId);
+    setGraphHighlight(null);
+    setGraphFocus({ centerId: nodeId, depth: 1, label: node?.path ?? nodeId });
   }
 
   function toggleGraphViewMode(mode: string) {
@@ -1833,7 +1965,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
       )}
 
       {showKnowledgeGraph && projectGraph && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm" onClick={() => setShowKnowledgeGraph(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm" onClick={closeKnowledgeGraph}>
           <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#0f1117] shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#2a2d3a] px-5 py-3">
               <h2 className="text-sm font-semibold text-slate-200">{t.workspaceProjectGraphKnowledgeGraph}</h2>
@@ -1871,7 +2003,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowKnowledgeGraph(false)}
+                  onClick={closeKnowledgeGraph}
                   className="text-lg leading-none text-slate-500 transition-colors hover:text-slate-200"
                 >
                   &times;
@@ -1896,18 +2028,190 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                 </label>
               ))}
             </div>
-            <div className="min-h-0 flex-1 p-2 flex flex-col" style={{ minHeight: '400px' }}>
-              <ProjectGraphKnowledgeGraph
-                ref={knowledgeGraphRef}
-                projectGraph={projectGraph}
-                dark={isGraphDarkTheme()}
-                viewModes={graphViewModes}
-                searchQuery={graphSearchQuery}
-                lang={lang}
-                onNodeClick={(filePath, line) => {
-                  handleKnowledgeGraphNodeClick(filePath, line);
-                }}
-              />
+            <div className="flex min-h-0 flex-1">
+              {/* 洞察侧栏：由已构建的图同步计算，点击条目在图中高亮或进入聚焦模式 */}
+              <div className="w-60 shrink-0 space-y-3 overflow-y-auto overscroll-contain border-r border-[#2a2d3a] p-3 scrollbar-thin scrollbar-stable">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+                  {t.graphInsightsTitle}
+                </div>
+                {projectGraphInsights && (
+                  <>
+                    <InsightSection
+                      title={t.graphInsightsCircular}
+                      tip={t.graphInsightsCircularTip}
+                      count={projectGraphInsights.circularDeps.total}
+                      badgeClass="border border-red-500/40 bg-red-500/10 text-red-300"
+                    >
+                      {projectGraphInsights.circularDeps.total === 0 ? (
+                        <div className="px-1.5 text-[10px] text-slate-600">{t.graphInsightsNone}</div>
+                      ) : (
+                        <div className="flex flex-col gap-0.5">
+                          {projectGraphInsights.circularDeps.cycles.slice(0, 10).map((cycle, idx) => (
+                            <button
+                              key={`${cycle.files.join('|')}|${idx}`}
+                              type="button"
+                              onClick={() => handleInsightCycleClick(cycle)}
+                              title={cycle.files.join(' → ')}
+                              className={INSIGHT_ITEM_CLASS}
+                            >
+                              <span className="truncate">{cycle.files.map((f) => f.split('/').pop()).join(' → ')}</span>
+                            </button>
+                          ))}
+                          {projectGraphInsights.circularDeps.total > 10 && (
+                            <div className="px-1.5 text-[9px] text-slate-600">+{projectGraphInsights.circularDeps.total - 10}</div>
+                          )}
+                        </div>
+                      )}
+                    </InsightSection>
+
+                    <InsightSection
+                      title={t.graphInsightsDeadCode}
+                      tip={t.graphInsightsDeadCodeTip}
+                      count={projectGraphInsights.deadCode.total}
+                      badgeClass="border border-amber-500/40 bg-amber-500/10 text-amber-300"
+                    >
+                      {projectGraphInsights.deadCode.total === 0 ? (
+                        <div className="px-1.5 text-[10px] text-slate-600">{t.graphInsightsNone}</div>
+                      ) : (
+                        <div className="flex flex-col gap-0.5">
+                          {projectGraphInsights.deadCode.unusedSymbols.slice(0, 30).map((s) => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => handleInsightDeadCodeClick(s)}
+                              title={`${s.path}:${s.line}`}
+                              className={INSIGHT_ITEM_CLASS}
+                            >
+                              {s.exported && <span className="shrink-0 text-amber-400">★</span>}
+                              <span className="shrink-0 rounded bg-[#2a2d3a] px-1 text-[8px] uppercase text-slate-500">{s.kind}</span>
+                              <span className="truncate">{s.name}</span>
+                              <span className="ml-auto shrink-0 text-[9px] text-slate-600">{s.path.split('/').pop()}:L{s.line}</span>
+                            </button>
+                          ))}
+                          {projectGraphInsights.deadCode.total > 30 && (
+                            <div className="px-1.5 text-[9px] text-slate-600">+{projectGraphInsights.deadCode.total - 30}</div>
+                          )}
+                        </div>
+                      )}
+                    </InsightSection>
+
+                    <InsightSection
+                      title={t.graphInsightsHubs}
+                      tip={t.graphInsightsHubsTip}
+                      count={projectGraphInsights.hubs.length}
+                      badgeClass="border border-indigo-500/40 bg-indigo-500/10 text-indigo-300"
+                    >
+                      {projectGraphInsights.hubs.length === 0 ? (
+                        <div className="px-1.5 text-[10px] text-slate-600">{t.graphInsightsNone}</div>
+                      ) : (
+                        <div className="flex flex-col gap-0.5">
+                          {projectGraphInsights.hubs.map((hub) => (
+                            <button
+                              key={hub.nodeId}
+                              type="button"
+                              onClick={() => focusGraphFile(hub.nodeId, hub.path)}
+                              title={hub.path}
+                              className={INSIGHT_ITEM_CLASS}
+                            >
+                              <span className="truncate">{hub.path}</span>
+                              <span className="ml-auto shrink-0 text-[9px] text-slate-600">{t.graphInsightsInDegree} {hub.inDegree}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </InsightSection>
+
+                    <InsightSection
+                      title={t.graphInsightsTestGaps}
+                      tip={t.graphInsightsTestGapsTip}
+                      count={projectGraphInsights.testGaps.length}
+                      badgeClass="border border-orange-500/40 bg-orange-500/10 text-orange-300"
+                    >
+                      <InsightFileList
+                        items={projectGraphInsights.testGaps.map((n) => ({ id: n.id, path: n.path }))}
+                        emptyText={t.graphInsightsNone}
+                        onPick={focusGraphFile}
+                      />
+                    </InsightSection>
+
+                    <InsightSection
+                      title={t.graphInsightsOrphans}
+                      tip={t.graphInsightsOrphansTip}
+                      count={projectGraphInsights.orphans.length}
+                      badgeClass="border border-[#2a2d3a] bg-[#1a1d27] text-slate-300"
+                    >
+                      <InsightFileList
+                        items={projectGraphInsights.orphans.map((n) => ({ id: n.id, path: n.path }))}
+                        emptyText={t.graphInsightsNone}
+                        onPick={focusGraphFile}
+                      />
+                    </InsightSection>
+
+                    <InsightSection
+                      title={t.graphInsightsEntryPoints}
+                      tip={t.graphInsightsEntryPointsTip}
+                      count={projectGraphInsights.entryPoints.total}
+                      badgeClass="border border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                    >
+                      <InsightFileList
+                        items={projectGraphInsights.entryPoints.entries.map((e) => ({ id: e.nodeId, path: e.path }))}
+                        emptyText={t.graphInsightsNone}
+                        onPick={focusGraphFile}
+                      />
+                    </InsightSection>
+                  </>
+                )}
+              </div>
+
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                {graphFocus && (
+                  <div className="flex items-center gap-2 border-b border-[#2a2d3a] px-4 py-1.5 text-[10px]">
+                    <span className="shrink-0 text-slate-500">{t.graphFocusLabel}:</span>
+                    <span className="min-w-0 truncate font-medium text-emerald-300" title={graphFocus.label}>
+                      {graphFocus.label}
+                    </span>
+                    <div className="ml-auto flex shrink-0 items-center gap-1">
+                      {[1, 2].map((depth) => (
+                        <button
+                          key={depth}
+                          type="button"
+                          onClick={() => setGraphFocus({ ...graphFocus, depth })}
+                          className={`rounded border px-1.5 py-0.5 transition-colors ${
+                            graphFocus.depth === depth
+                              ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'
+                              : 'border-[#2a2d3a] text-slate-500 hover:text-slate-300'
+                          }`}
+                        >
+                          {depth} {t.graphFocusHop}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setGraphFocus(null)}
+                        className="rounded border border-[#2a2d3a] px-1.5 py-0.5 text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100"
+                      >
+                        {t.graphFocusBack}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className="min-h-0 flex-1 p-2 flex flex-col" style={{ minHeight: '400px' }}>
+                  <ProjectGraphKnowledgeGraph
+                    ref={knowledgeGraphRef}
+                    projectGraph={projectGraph}
+                    dark={isGraphDarkTheme()}
+                    viewModes={graphViewModes}
+                    searchQuery={graphSearchQuery}
+                    lang={lang}
+                    focus={graphFocus}
+                    highlight={graphHighlight}
+                    onRequestFocus={handleGraphRequestFocus}
+                    onNodeClick={(filePath, line) => {
+                      handleKnowledgeGraphNodeClick(filePath, line);
+                    }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
