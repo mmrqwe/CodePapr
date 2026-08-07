@@ -13,6 +13,12 @@ export {
   buildOpenAIImageContent,
   buildClaudeImageContent,
 } from './providers/imageContent';
+export {
+  DEFAULT_STREAM_MAX_RETRIES,
+  DEFAULT_STREAM_RETRY_DELAYS_MS,
+  defaultStreamRetryDelayMs,
+  StreamIdleTimeoutError,
+} from './providers/streaming';
 
 // Request / Response
 export { RequestBuilder, stripConsumedImages } from './request/RequestBuilder';

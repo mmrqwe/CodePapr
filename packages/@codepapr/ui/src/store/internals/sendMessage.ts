@@ -907,6 +907,19 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   };
                 }
 
+                if (event.type === 'stream-restart') {
+                  // 流中断后整段重试：上一轮已推送的增量作废，必须先清空，
+                  // 否则新一轮增量会与之重复拼接（LLM 流无法断点续传）。
+                  return {
+                    ...message,
+                    content: '',
+                    reasoningContent: undefined,
+                    displayReasoningContent: undefined,
+                    isStreaming: true,
+                    statusText: `${getTranslation(normalizedSettings.lang).reconnectingStatus} (${event.attempt}/${event.maxRetries})…`,
+                  };
+                }
+
                 if (event.type === 'context-compacted') {
                   // Context epoch reset happened inside the agent loop; no message
                   // mutation is needed here (the log was replaced internally).

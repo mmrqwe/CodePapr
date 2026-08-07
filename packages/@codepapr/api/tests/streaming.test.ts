@@ -2,12 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { ProviderRequestError } from '../src/providers/ILLMProvider';
 import {
   applyStreamingToolCallDeltas,
+  DEFAULT_STREAM_RETRY_DELAYS_MS,
+  defaultStreamRetryDelayMs,
   finalizeStreamingToolCalls,
   readSseStream,
   safeParseToolArguments,
   StreamIdleTimeoutError,
   withStreamIdleRetry,
 } from '../src/providers/streaming';
+
+const noDelay = { retryDelayMs: () => 0 };
 
 describe('finalizeStreamingToolCalls（P3：稀疏 delta 空洞）', () => {
   it('skips holes explicitly and keeps call ids stable', () => {
@@ -173,13 +177,27 @@ describe('withStreamIdleRetry', () => {
         if (calls === 1) throw new StreamIdleTimeoutError(50);
         return 'ok';
       },
-      { hasEmitted: () => false, maxRetries: 1 }
+      { hasEmitted: () => false, maxRetries: 1, ...noDelay }
     );
     expect(result).toBe('ok');
     expect(calls).toBe(2);
   });
 
-  it('fails fast once output has been emitted (no duplicate content)', async () => {
+  it('still retries after output has been emitted (consumer resets via stream-restart)', async () => {
+    let calls = 0;
+    const result = await withStreamIdleRetry(
+      async () => {
+        calls += 1;
+        if (calls === 1) throw new StreamIdleTimeoutError(50);
+        return 'recovered';
+      },
+      { hasEmitted: () => true, maxRetries: 3, ...noDelay }
+    );
+    expect(result).toBe('recovered');
+    expect(calls).toBe(2);
+  });
+
+  it('defaults to 3 retries once the stream keeps failing', async () => {
     let calls = 0;
     await expect(
       withStreamIdleRetry(
@@ -187,9 +205,39 @@ describe('withStreamIdleRetry', () => {
           calls += 1;
           throw new StreamIdleTimeoutError(50);
         },
-        { hasEmitted: () => true, maxRetries: 3 }
+        { hasEmitted: () => true, ...noDelay }
       )
     ).rejects.toBeInstanceOf(StreamIdleTimeoutError);
+    expect(calls).toBe(4);
+  });
+
+  it('uses the 5s/10s/15s backoff schedule by default', () => {
+    expect(DEFAULT_STREAM_RETRY_DELAYS_MS).toEqual([5000, 10000, 15000]);
+    expect(defaultStreamRetryDelayMs(1)).toBe(5000);
+    expect(defaultStreamRetryDelayMs(2)).toBe(10000);
+    expect(defaultStreamRetryDelayMs(3)).toBe(15000);
+    expect(defaultStreamRetryDelayMs(99)).toBe(15000);
+  });
+
+  it('waits the configured delay before retrying and honors abort during the wait', async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const promise = withStreamIdleRetry(
+      async () => {
+        calls += 1;
+        throw new StreamIdleTimeoutError(50);
+      },
+      {
+        hasEmitted: () => false,
+        maxRetries: 3,
+        signal: controller.signal,
+        retryDelayMs: () => 60_000,
+      }
+    );
+    const assertion = expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort();
+    await assertion;
     expect(calls).toBe(1);
   });
 
@@ -236,6 +284,7 @@ describe('withStreamIdleRetry', () => {
         hasEmitted: () => false,
         maxRetries: 2,
         onRetry: (attempt) => retries.push(attempt),
+        ...noDelay,
       }
     );
     expect(retries).toEqual([1, 2]);
@@ -256,7 +305,7 @@ describe('withStreamIdleRetry', () => {
         }
         return 'recovered';
       },
-      { hasEmitted: () => false, maxRetries: 1 }
+      { hasEmitted: () => false, maxRetries: 1, ...noDelay }
     );
     expect(result).toBe('recovered');
     expect(calls).toBe(2);
@@ -280,8 +329,9 @@ describe('withStreamIdleRetry', () => {
     expect(calls).toBe(1);
   });
 
-  it('does not retry retriable stream breaks once content was emitted', async () => {
+  it('retries retriable stream breaks even after content was emitted', async () => {
     let calls = 0;
+    const retries: number[] = [];
     await expect(
       withStreamIdleRetry(
         async () => {
@@ -292,9 +342,15 @@ describe('withStreamIdleRetry', () => {
             retriable: true,
           });
         },
-        { hasEmitted: () => true, maxRetries: 3 }
+        {
+          hasEmitted: () => true,
+          maxRetries: 3,
+          onRetry: (attempt) => retries.push(attempt),
+          ...noDelay,
+        }
       )
     ).rejects.toBeInstanceOf(ProviderRequestError);
-    expect(calls).toBe(1);
+    expect(calls).toBe(4);
+    expect(retries).toEqual([1, 2, 3]);
   });
 });

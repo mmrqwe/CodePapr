@@ -52,6 +52,7 @@ export interface Settings {
   maxToolRounds: number;
   maxContextTokens: number;
   maxConversationRounds: number;
+  chatRenderBatchRounds: number;
   compactionModel: 'fast' | 'primary';
   compactionMaxTokens: number;
   compactionTemperature: number;
@@ -292,6 +293,11 @@ export interface AgentState {
   /** LRU order (most recently used first) of sessions whose messages may live
    *  in the in-memory cache. Runtime-only; rebuilt on workspace open. */
   _sessionLru: string[];
+  /** Pending request to bring a message into view in the chat pane. The chat
+   *  panel renders history in batches, so jumping to an unloaded message first
+   *  widens the render window. `seq` re-triggers repeated requests for the same
+   *  message. Runtime-only. */
+  _pendingChatJump: { messageId: string; seq: number } | null;
 }
 
 export interface AgentActions {
@@ -324,6 +330,9 @@ export interface AgentActions {
   setSkillEnabledState: (skillId: string, enabled: boolean | null) => void;
   setSessionInputState: (sessionId: string, state: SessionInputState) => void;
   computeContextSnapshot: () => Promise<void>;
+  /** Ask the chat pane to scroll a message into view (expanding the render
+   *  window when the message is not loaded yet). */
+  requestChatScrollToMessage: (messageId: string) => void;
   /** 确保存在可用 Agent（App Agent 依赖聊天 Agent 的 Worker）。用户从未发过
    *  消息时按需创建，供 papr://agent.run 使用；并发调用共享同一次创建。 */
   ensureAgentForApp: () => Promise<AgentRuntimeHandle>;

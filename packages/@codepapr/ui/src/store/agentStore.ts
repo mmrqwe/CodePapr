@@ -306,6 +306,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _latestContextSnapshot: null,
       _currentMode: 'agent',
       _sessionLru: [],
+      _pendingChatJump: null,
 
       loadSettings: async () => {
         let settings = get().settings;
@@ -1183,6 +1184,13 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           };
         });
         saveCurrentProjectState(get());
+      },
+
+      requestChatScrollToMessage: (messageId: string) => {
+        if (!messageId) return;
+        set((s) => ({
+          _pendingChatJump: { messageId, seq: (s._pendingChatJump?.seq ?? 0) + 1 },
+        }));
       },
 
       sendMessage: createSendMessage(set, get),

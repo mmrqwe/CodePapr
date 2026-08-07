@@ -44,6 +44,12 @@ import {
   isScrollContainerNearBottom,
   scrollContainerToBottom,
 } from '../utils/chatScroll';
+import {
+  computeInitialWindowStart,
+  computePreviousWindowStart,
+  computeWindowStartForIndex,
+  countRoundsBefore,
+} from '../utils/messageWindow';
 import SlashCommandDropdown, {
   type SlashCommandDropdownHandle,
 } from './SlashCommandDropdown';
@@ -1140,7 +1146,7 @@ const MessageBubble = memo(function MessageBubble({
   const frameClassName = isUser
     ? 'max-w-[80%] rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm leading-relaxed text-white'
     : isError
-      ? 'max-w-[80%] rounded-2xl rounded-bl-sm border border-red-700/50 bg-red-900/60 px-4 py-2.5 text-sm leading-relaxed text-red-300'
+      ? 'max-w-[80%] rounded-2xl rounded-bl-sm border border-white/10 bg-white/[0.04] px-4 py-3 text-sm leading-relaxed text-slate-400'
       : isSyntheticSummary
         ? 'w-full rounded-2xl rounded-bl-sm border border-[#2a2d3a] bg-[#101722] px-4 py-3 text-sm leading-relaxed text-slate-200 shadow-[0_10px_30px_rgba(15,23,42,0.22)]'
         : 'w-full max-w-4xl px-0 py-0 text-sm leading-relaxed text-slate-200';
@@ -1215,6 +1221,16 @@ const MessageBubble = memo(function MessageBubble({
         )}
         {!showRunningStatusIndicator && msg.statusText && !msg.content && !(msg.displayReasoningContent ?? msg.reasoningContent) && (!msg.toolInvocations || msg.toolInvocations.length === 0) && (
           <p className="mb-2 text-xs font-medium text-slate-400/90 select-none">{msg.statusText}</p>
+        )}
+        {isError && (
+          <div className="mb-1.5 flex items-center gap-1.5 select-none">
+            <svg className="h-3.5 w-3.5 flex-shrink-0 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span className="text-xs font-medium text-slate-500">{t.errorOccurred}</span>
+          </div>
         )}
         <div className="select-text">
           <MessageContent
@@ -1749,11 +1765,149 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
         )?.id ?? null,
     [visibleMessages]
   );
+  // —— 历史分批渲染：首屏只渲染最近 N 轮，滚动接近顶部时再向前加载 N 轮 ——
+  // 完整 visibleMessages 仍供 LLM 上下文/TTS/搜索使用，这里只裁剪渲染范围。
+  const chatRenderBatchRounds = Math.max(1, settings.chatRenderBatchRounds || 6);
+  const chatRenderBatchRoundsRef = useRef(chatRenderBatchRounds);
+  chatRenderBatchRoundsRef.current = chatRenderBatchRounds;
+  const [windowStart, setWindowStart] = useState(() =>
+    computeInitialWindowStart(visibleMessages, chatRenderBatchRounds)
+  );
+  const windowStartRef = useRef(windowStart);
+  windowStartRef.current = windowStart;
+  const pendingScrollAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+  const pendingScrollToIdRef = useRef<string | null>(null);
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+  const windowSessionKeyRef = useRef<string | null>(null);
+
+  // 切换会话（含按需加载完成）时把窗口重置为「最近 N 轮」。
+  useEffect(() => {
+    if (deferMessages || sessionMessagesLoading) return;
+    const key = activeSessionId ?? '__none__';
+    if (windowSessionKeyRef.current === key) return;
+    windowSessionKeyRef.current = key;
+    pendingScrollToIdRef.current = null;
+    setWindowStart(computeInitialWindowStart(visibleMessagesRef.current, chatRenderBatchRoundsRef.current));
+  }, [deferMessages, sessionMessagesLoading, activeSessionId]);
+
+  // 消息被截断（重置到某条）后窗口起点可能越界，收敛回有效值。
+  useEffect(() => {
+    setWindowStart((prev) => {
+      const msgs = visibleMessagesRef.current;
+      if (prev <= msgs.length) return prev;
+      return computeInitialWindowStart(msgs, chatRenderBatchRoundsRef.current);
+    });
+  }, [visibleMessages]);
+
+  // 防御：会话切换的同一帧里 windowStart 可能还是旧会话的值。
+  const effectiveWindowStart = useMemo(() => {
+    if (windowStart <= 0) return 0;
+    if (windowStart > visibleMessages.length) {
+      return computeInitialWindowStart(visibleMessages, chatRenderBatchRounds);
+    }
+    return windowStart;
+  }, [visibleMessages, windowStart, chatRenderBatchRounds]);
+
+  const windowedMessages = useMemo(
+    () => (effectiveWindowStart > 0 ? visibleMessages.slice(effectiveWindowStart) : visibleMessages),
+    [visibleMessages, effectiveWindowStart]
+  );
+
+  const roundsBeforeWindow = useMemo(
+    () => countRoundsBefore(visibleMessages, effectiveWindowStart),
+    [visibleMessages, effectiveWindowStart]
+  );
+
+  // 向前加载一批：先记录滚动位置，前插后补偿，保持视口稳定。
+  const loadOlderRounds = useCallback(() => {
+    const msgs = visibleMessagesRef.current;
+    const next = computePreviousWindowStart(msgs, windowStartRef.current, chatRenderBatchRoundsRef.current);
+    if (next === windowStartRef.current) return;
+    const container = messageListRef.current;
+    if (container) {
+      pendingScrollAnchorRef.current = {
+        scrollHeight: container.scrollHeight,
+        scrollTop: container.scrollTop,
+      };
+    }
+    isProgrammaticScrollRef.current = true;
+    setWindowStart(next);
+  }, []);
+
+  // 前插后的滚动锚定补偿。
+  useLayoutEffect(() => {
+    const anchor = pendingScrollAnchorRef.current;
+    if (!anchor) return;
+    pendingScrollAnchorRef.current = null;
+    const container = messageListRef.current;
+    if (!container) return;
+    isProgrammaticScrollRef.current = true;
+    container.scrollTop = anchor.scrollTop + (container.scrollHeight - anchor.scrollHeight);
+  }, [windowStart]);
+
+  // 哨兵接近视口顶部（向上预探 600px，约提前几轮）时自动加载上一批。
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    const container = messageListRef.current;
+    if (!sentinel || !container || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          loadOlderRounds();
+        }
+      },
+      { root: container, rootMargin: '600px 0px 0px 0px', threshold: 0 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [effectiveWindowStart, loadOlderRounds]);
+
+  // 跳转到指定消息：窗口外先扩窗，渲染后再滚动；已在窗口内则直接滚动。
+  const scrollToMessageInView = useCallback((messageId: string) => {
+    const msgs = visibleMessagesRef.current;
+    const index = msgs.findIndex((m) => m.id === messageId);
+    if (index < 0) return;
+    if (index < windowStartRef.current) {
+      pendingScrollToIdRef.current = messageId;
+      isProgrammaticScrollRef.current = true;
+      setWindowStart(computeWindowStartForIndex(msgs, index));
+      return;
+    }
+    const container = messageListRef.current;
+    const el = container?.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
+    if (container && el) {
+      isProgrammaticScrollRef.current = true;
+      container.scrollTo?.({ top: Math.max(0, el.offsetTop - 80), behavior: 'smooth' });
+    } else {
+      pendingScrollToIdRef.current = messageId;
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    const targetId = pendingScrollToIdRef.current;
+    if (!targetId) return;
+    const container = messageListRef.current;
+    if (!container) return;
+    const el = container.querySelector(`[data-message-id="${targetId}"]`) as HTMLElement | null;
+    if (!el) return;
+    pendingScrollToIdRef.current = null;
+    isProgrammaticScrollRef.current = true;
+    container.scrollTop = Math.max(0, el.offsetTop - 80);
+  }, [windowStart, visibleMessages]);
+
+  // 跨面板跳转请求（如 AgentOpsPanel 里的会话搜索）。
+  const pendingChatJump = useAgentStore((s) => s._pendingChatJump);
+  useEffect(() => {
+    if (!pendingChatJump) return;
+    scrollToMessageInView(pendingChatJump.messageId);
+    useAgentStore.setState({ _pendingChatJump: null });
+  }, [pendingChatJump, scrollToMessageInView]);
+
   const renderedMessages = useMemo(() => {
     if (!tailExecutionProcessGroup) {
-      return visibleMessages;
+      return windowedMessages;
     }
-    return visibleMessages.filter((message) => {
+    return windowedMessages.filter((message) => {
       if (message.id === tailExecutionProcessGroup.summaryMessageId) {
         return true;
       }
@@ -1764,7 +1918,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
         (processMessage) => processMessage.id === message.id
       );
     });
-  }, [visibleMessages, tailExecutionProcessGroup]);
+  }, [windowedMessages, tailExecutionProcessGroup]);
 
   useLayoutEffect(() => {
     lastVisibleMessageIdRef.current = tailMessageId;
@@ -2193,6 +2347,17 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
         style={{ overflowAnchor: 'none' }}
       >
         <div ref={messageListContentRef}>
+          {!deferMessages && effectiveWindowStart > 0 && (
+            <div ref={loadMoreSentinelRef} className="mb-3 flex justify-center">
+              <button
+                type="button"
+                onClick={loadOlderRounds}
+                className="rounded-full border border-[#2a2d3a] bg-[#10131b] px-4 py-1.5 text-xs text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-200"
+              >
+                {t.chatLoadEarlierRounds.replace('{n}', String(roundsBeforeWindow))}
+              </button>
+            </div>
+          )}
           {!deferMessages && sessionMessagesLoading && visibleMessages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-slate-600 select-none">
               <div className="h-5 w-5 mb-3 animate-spin rounded-full border-2 border-slate-700 border-t-indigo-400" />
@@ -2498,6 +2663,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
         <ConversationRoundsIndicator
           messages={visibleMessages}
           scrollContainerRef={messageListRef}
+          onScrollToMessage={scrollToMessageInView}
         />
       </div>
 

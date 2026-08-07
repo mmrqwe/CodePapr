@@ -13,6 +13,7 @@ import {
 import { Logger, sortedStringify } from '@codepapr/common';
 import { BaseLLMProvider, ProviderConfig, ProviderRequestError } from './ILLMProvider';
 import {
+  DEFAULT_STREAM_MAX_RETRIES,
   readSseStream,
   safeParseToolArguments,
   sanitizeToolCallArguments,
@@ -315,7 +316,8 @@ export class ClaudeProvider extends BaseLLMProvider {
           }
           // Mid-stream body breaks (connection reset / truncated body — surfaced
           // by reqwest as "error decoding response body") are retriable at the
-          // stream level as long as nothing has been emitted yet.
+          // stream level; a `stream-restart` event lets consumers drop partial
+          // output of the dead attempt.
           throw new ProviderRequestError({
             provider: this.name,
             message: `Stream interrupted: ${err instanceof Error ? err.message : String(err)}`,
@@ -359,12 +361,21 @@ export class ClaudeProvider extends BaseLLMProvider {
       {
         signal,
         hasEmitted: () => emitted,
-        onRetry: (attempt, err) =>
+        retryDelayMs: this.config.streamRetryDelayMs,
+        onRetry: (attempt, err) => {
+          if (emitted) {
+            onEvent({
+              type: 'stream-restart',
+              attempt,
+              maxRetries: DEFAULT_STREAM_MAX_RETRIES,
+            });
+          }
           log.warn('LLM stream interrupted, retrying', {
             model: payload.model,
             attempt,
             error: err.message,
-          }),
+          });
+        },
       }
     );
   }

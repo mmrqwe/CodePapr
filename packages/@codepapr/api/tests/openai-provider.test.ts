@@ -133,16 +133,60 @@ describe('OpenAIProvider', () => {
     expect(response?.usage?.input_tokens).toBe(10);
   });
 
-  it('wraps mid-stream body breaks into a retriable ProviderRequestError once content was emitted', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      brokenSseResponse(
-        'data: {"id":"resp-stream","choices":[{"index":0,"delta":{"content":"半"},"finish_reason":null}]}\n\n'
+  it('retries a mid-stream break after content was emitted, emitting stream-restart so the caller can reset', async () => {
+    const okChunks = [
+      'data: {"id":"resp-stream","choices":[{"index":0,"delta":{"content":"完整"},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ].join('');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        brokenSseResponse(
+          'data: {"id":"resp-stream","choices":[{"index":0,"delta":{"content":"半"},"finish_reason":null}]}\n\n'
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(okChunks, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAIProvider({ apiKey: 'test-key', streamRetryDelayMs: () => 0 });
+    const events: string[] = [];
+    const response = await provider.streamChat(
+      {
+        model: 'gpt-4o',
+        messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+        maxTokens: 1024,
+      },
+      (event) => {
+        if (event.type === 'content-delta') {
+          events.push(`content:${event.delta}`);
+        } else if (event.type === 'stream-restart') {
+          events.push(`restart:${event.attempt}/${event.maxRetries}`);
+        }
+      }
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(events).toEqual(['content:半', 'restart:1/3', 'content:完整']);
+    expect(response?.choices[0]?.message.content).toBe('完整');
+  });
+
+  it('surfaces a retriable error after exhausting mid-stream retries', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        brokenSseResponse(
+          'data: {"id":"resp-stream","choices":[{"index":0,"delta":{"content":"半"},"finish_reason":null}]}\n\n'
+        )
       )
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const provider = new OpenAIProvider({ apiKey: 'test-key' });
-    const events: string[] = [];
+    const provider = new OpenAIProvider({ apiKey: 'test-key', streamRetryDelayMs: () => 0 });
+    const restarts: number[] = [];
     let caught: unknown;
     try {
       await provider.streamChat(
@@ -152,8 +196,8 @@ describe('OpenAIProvider', () => {
           maxTokens: 1024,
         },
         (event) => {
-          if (event.type === 'content-delta') {
-            events.push(event.delta);
+          if (event.type === 'stream-restart') {
+            restarts.push(event.attempt);
           }
         }
       );
@@ -163,9 +207,8 @@ describe('OpenAIProvider', () => {
     expect(caught).toBeInstanceOf(ProviderRequestError);
     expect((caught as ProviderRequestError).retriable).toBe(true);
     expect((caught as Error).message).toContain('Stream interrupted');
-    // Content was already emitted: no silent retry, the caller sees the error.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(events).toEqual(['半']);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(restarts).toEqual([1, 2, 3]);
   });
 
   it('retries a stream break when nothing was emitted yet', async () => {
@@ -184,7 +227,7 @@ describe('OpenAIProvider', () => {
       );
     vi.stubGlobal('fetch', fetchMock);
 
-    const provider = new OpenAIProvider({ apiKey: 'test-key' });
+    const provider = new OpenAIProvider({ apiKey: 'test-key', streamRetryDelayMs: () => 0 });
     const response = await provider.streamChat?.(
       {
         model: 'gpt-4o',

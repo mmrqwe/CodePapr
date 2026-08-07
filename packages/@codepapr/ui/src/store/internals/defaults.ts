@@ -74,6 +74,7 @@ export const DEFAULT_SETTINGS: Settings = {
   maxToolRounds: DEFAULT_AGENT_MAX_TOOL_ROUNDS,
   maxContextTokens: 500_000,
   maxConversationRounds: 24,
+  chatRenderBatchRounds: 6,
   compactionModel: 'fast',
   compactionMaxTokens: 8_000,
   compactionTemperature: 0.1,

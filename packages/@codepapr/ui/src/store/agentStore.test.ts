@@ -1148,6 +1148,35 @@ describe('useAgentStore.sendMessage', () => {
     expect(visibleMessages[1]?.reasoningContent).toBe('第一段思考\n第二段思考');
   });
 
+  it('clears partial streamed content and reasoning on stream-restart so a retried attempt does not duplicate', async () => {
+    const chat = vi.fn(async (_input: string, onEvent?: (event: IChatStreamEvent) => void) => {
+      onEvent?.({ type: 'reasoning-delta', delta: '中断前的思考' });
+      onEvent?.({ type: 'content-delta', delta: '中断前的回复' });
+      onEvent?.({ type: 'stream-restart', attempt: 1, maxRetries: 3 });
+      onEvent?.({ type: 'reasoning-delta', delta: '完整思考' });
+      onEvent?.({ type: 'content-delta', delta: '完整回复' });
+
+      return createAgentResponse('完整回复', {
+        reasoningContent: '完整思考',
+      });
+    });
+
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    await useAgentStore.getState().sendMessage('解释一下当前实现', '解释一下当前实现', 'ask');
+
+    const visibleMessages = (useAgentStore.getState().sessionMessages['session-1'] ?? []).filter(
+      (message) => !message.hidden
+    );
+
+    expect(visibleMessages).toHaveLength(2);
+    expect(visibleMessages[1]?.content).toBe('完整回复');
+    expect(visibleMessages[1]?.reasoningContent).toBe('完整思考');
+  });
+
   it('stores request-context snapshots on assistant messages when debug mode is enabled', async () => {
     const requestContext = '{\n  "round": 1,\n  "model": "deepseek-v4-pro"\n}';
     const contextSnapshot: IContextSnapshot = {

@@ -27,7 +27,7 @@ vi.mock('./MonacoTextEditor', () => ({
   configureMonacoLanguageServices: vi.fn(),
 }));
 
-import { normalizeSettings, useAgentStore } from '../store/agentStore';
+import { normalizeSettings, useAgentStore, type UIMessage } from '../store/agentStore';
 import { ChatPanel } from './ChatPanel';
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
@@ -786,6 +786,103 @@ describe('ChatPanel', () => {
       'agent',
       undefined
     );
+  });
+
+  describe('batched history rendering', () => {
+    function setLongConversation(rounds: number, batchRounds: number) {
+      const messages: UIMessage[] = [];
+      for (let i = 1; i <= rounds; i++) {
+        messages.push({ id: `user-${i}`, role: 'user', content: `问题 ${i}`, timestamp: i * 2 - 1 });
+        messages.push({ id: `assistant-${i}`, role: 'assistant', content: `回答 ${i}`, timestamp: i * 2 });
+      }
+      useAgentStore.setState((state) => ({
+        ...state,
+        settings: normalizeSettings({ fastModelEnabled: false, chatRenderBatchRounds: batchRounds }),
+        sessions: [
+          { id: 'session-1', name: '会话 1', provider: 'deepseek', model: 'deepseek-v4-pro', createdAt: 1, updatedAt: 1 },
+        ],
+        activeSessionId: 'session-1',
+        messages,
+        sessionMessages: { 'session-1': messages },
+        sessionMessagesLoading: false,
+        isLoading: false,
+        loadingSessionId: null,
+        _pendingChatJump: null,
+      }));
+    }
+
+    it('renders only the latest N rounds at first and loads earlier rounds via the sentinel', async () => {
+      setLongConversation(10, 3);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+
+      // 最近 3 轮（8-10）在 DOM 中，第 7 轮尚未渲染
+      expect(container.querySelector('[data-message-id="user-8"]')).not.toBeNull();
+      expect(container.querySelector('[data-message-id="user-10"]')).not.toBeNull();
+      expect(container.querySelector('[data-message-id="user-7"]')).toBeNull();
+
+      const sentinelButton = Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent?.includes('加载更早')
+      );
+      expect(sentinelButton).toBeTruthy();
+      expect(sentinelButton?.textContent).toContain('7');
+
+      await act(async () => {
+        sentinelButton?.click();
+      });
+
+      // 又加载了 3 轮（5-7），第 4 轮仍未渲染
+      expect(container.querySelector('[data-message-id="user-5"]')).not.toBeNull();
+      expect(container.querySelector('[data-message-id="user-7"]')).not.toBeNull();
+      expect(container.querySelector('[data-message-id="user-4"]')).toBeNull();
+    });
+
+    it('renders everything without a sentinel when the conversation fits the batch', async () => {
+      setLongConversation(3, 6);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+
+      expect(container.querySelector('[data-message-id="user-1"]')).not.toBeNull();
+      expect(container.querySelector('[data-message-id="user-3"]')).not.toBeNull();
+      expect(container.textContent).not.toContain('加载更早');
+    });
+
+    it('widens the window when a jump request targets an unloaded message', async () => {
+      setLongConversation(10, 3);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+      expect(container.querySelector('[data-message-id="user-2"]')).toBeNull();
+
+      await act(async () => {
+        useAgentStore.getState().requestChatScrollToMessage('user-2');
+      });
+
+      expect(container.querySelector('[data-message-id="user-2"]')).not.toBeNull();
+      expect(useAgentStore.getState()._pendingChatJump).toBeNull();
+    });
+
+    it('scrolls directly without widening the window when the target is already rendered', async () => {
+      setLongConversation(10, 3);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+      scrollToMock.mockClear();
+
+      await act(async () => {
+        useAgentStore.getState().requestChatScrollToMessage('user-9');
+      });
+
+      // 窗口未扩大：第 7 轮仍未渲染；但发生了滚动
+      expect(container.querySelector('[data-message-id="user-7"]')).toBeNull();
+      expect(scrollToMock).toHaveBeenCalled();
+    });
   });
 
   it('shows the cancel button only on the session that is actually running', async () => {

@@ -312,21 +312,57 @@ export async function readSseStream(
   }
 }
 
+export const DEFAULT_STREAM_MAX_RETRIES = 3;
+
+/** 每次重试前的等待时长（毫秒），按重试次序取值：5s → 10s → 15s。
+ *  给网络恢复留出时间，避免立即重连打在同一波故障上。 */
+export const DEFAULT_STREAM_RETRY_DELAYS_MS: readonly number[] = [
+  5_000, 10_000, 15_000,
+];
+
+export function defaultStreamRetryDelayMs(attempt: number): number {
+  const delays = DEFAULT_STREAM_RETRY_DELAYS_MS;
+  return delays[Math.min(Math.max(attempt, 1), delays.length) - 1] ?? 0;
+}
+
+async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) {
+    return;
+  }
+  if (signal?.aborted) {
+    throw new DOMException('Stream was cancelled', 'AbortError');
+  }
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new DOMException('Stream was cancelled', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 export interface StreamIdleRetryOptions {
   maxRetries?: number;
   signal?: AbortSignal;
   hasEmitted: () => boolean;
   onRetry?: (attempt: number, error: Error) => void;
+  /** 每次重试前的等待时长（毫秒），attempt 从 1 开始。默认 5s → 10s → 15s。 */
+  retryDelayMs?: (attempt: number) => number;
 }
 
-/** Errors safe to retry a whole stream attempt for: nothing has been emitted
- *  to the caller yet, so re-running the attempt is lossless. */
+/** Network-level stream failures worth retrying: idle timeouts and
+ *  provider-wrapped mid-stream breaks (connection reset / truncated body,
+ *  e.g. reqwest "error decoding response body"). Retry is allowed even after
+ *  output has been emitted — the provider emits a `stream-restart` event via
+ *  onRetry so consumers can discard the partial output of the dead attempt. */
 function isRetriableStreamError(err: unknown): boolean {
   if (err instanceof StreamIdleTimeoutError) {
     return true;
   }
-  // Provider-wrapped mid-stream breaks (connection reset / truncated body,
-  // e.g. reqwest "error decoding response body"). Only the retriable ones.
   return err instanceof ProviderRequestError && err.retriable;
 }
 
@@ -334,7 +370,8 @@ export async function withStreamIdleRetry<T>(
   runAttempt: () => Promise<T>,
   options: StreamIdleRetryOptions
 ): Promise<T> {
-  const maxRetries = options.maxRetries ?? 1;
+  const maxRetries = options.maxRetries ?? DEFAULT_STREAM_MAX_RETRIES;
+  const retryDelayMs = options.retryDelayMs ?? defaultStreamRetryDelayMs;
   let attempt = 0;
   for (;;) {
     try {
@@ -342,12 +379,12 @@ export async function withStreamIdleRetry<T>(
     } catch (err) {
       if (
         isRetriableStreamError(err) &&
-        !options.hasEmitted() &&
         !options.signal?.aborted &&
         attempt < maxRetries
       ) {
         attempt += 1;
         options.onRetry?.(attempt, err as Error);
+        await abortableDelay(retryDelayMs(attempt), options.signal);
         continue;
       }
       throw err;

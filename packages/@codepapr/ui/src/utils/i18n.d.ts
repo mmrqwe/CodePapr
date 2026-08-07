@@ -345,6 +345,10 @@ export declare const I18N_DICTS: {
         maxContextTokensHint: string;
         maxConversationRounds: string;
         maxConversationRoundsHint: string;
+    chatRenderBatchRounds: string;
+    chatRenderBatchRoundsHint: string;
+        chatRenderBatchRounds: string;
+        chatRenderBatchRoundsHint: string;
         contextCompactionSettings: string;
         contextCompactionDesc: string;
         settingsAdvancedTab: string;
@@ -446,6 +450,8 @@ export declare const I18N_DICTS: {
         expand: string;
         collapse: string;
         streamingStatus: string;
+        reconnectingStatus: string;
+        errorOccurred: string;
         agentContinuing: string;
         agentPlanning: string;
         agentSubtaskRunning: string;
@@ -468,6 +474,8 @@ export declare const I18N_DICTS: {
         copy: string;
         chatPlaceholderConfigured: string;
         chatPlaceholderUnconfigured: string;
+    chatLoadEarlierRounds: string;
+        chatLoadEarlierRounds: string;
         currentMode: string;
         agentMode: string;
         agentStepLabel: string;
@@ -829,6 +837,10 @@ export declare const I18N_DICTS: {
         maxContextTokensHint: string;
         maxConversationRounds: string;
         maxConversationRoundsHint: string;
+    chatRenderBatchRounds: string;
+    chatRenderBatchRoundsHint: string;
+        chatRenderBatchRounds: string;
+        chatRenderBatchRoundsHint: string;
         contextCompactionSettings: string;
         contextCompactionDesc: string;
         settingsProjectGraphTitle: string;
@@ -928,6 +940,8 @@ export declare const I18N_DICTS: {
         expand: string;
         collapse: string;
         streamingStatus: string;
+        reconnectingStatus: string;
+        errorOccurred: string;
         agentContinuing: string;
         agentPlanning: string;
         agentSubtaskRunning: string;
@@ -950,6 +964,8 @@ export declare const I18N_DICTS: {
         copy: string;
         chatPlaceholderConfigured: string;
         chatPlaceholderUnconfigured: string;
+    chatLoadEarlierRounds: string;
+        chatLoadEarlierRounds: string;
         currentMode: string;
         agentMode: string;
         agentStepLabel: string;
@@ -1363,6 +1379,10 @@ export declare const I18N_DICTS: {
         maxContextTokensHint: string;
         maxConversationRounds: string;
         maxConversationRoundsHint: string;
+    chatRenderBatchRounds: string;
+    chatRenderBatchRoundsHint: string;
+        chatRenderBatchRounds: string;
+        chatRenderBatchRoundsHint: string;
         contextCompactionSettings: string;
         contextCompactionDesc: string;
         settingsAdvancedTab: string;
@@ -1410,6 +1430,8 @@ export declare const I18N_DICTS: {
         expand: string;
         collapse: string;
         streamingStatus: string;
+        reconnectingStatus: string;
+        errorOccurred: string;
         agentContinuing: string;
         agentPlanning: string;
         agentSubtaskRunning: string;
@@ -1432,6 +1454,8 @@ export declare const I18N_DICTS: {
         copy: string;
         chatPlaceholderConfigured: string;
         chatPlaceholderUnconfigured: string;
+    chatLoadEarlierRounds: string;
+        chatLoadEarlierRounds: string;
         currentMode: string;
         agentMode: string;
         agentStepLabel: string;
@@ -1747,6 +1771,8 @@ export declare function getTranslation(lang?: Lang): {
     maxContextTokensHint: string;
     maxConversationRounds: string;
     maxConversationRoundsHint: string;
+    chatRenderBatchRounds: string;
+    chatRenderBatchRoundsHint: string;
     contextCompactionSettings: string;
     contextCompactionDesc: string;
     settingsAdvancedTab: string;
@@ -1766,6 +1792,8 @@ export declare function getTranslation(lang?: Lang): {
     expand: string;
     collapse: string;
     streamingStatus: string;
+    reconnectingStatus: string;
+    errorOccurred: string;
     agentContinuing: string;
     agentPlanning: string;
     agentSubtaskRunning: string;
@@ -1788,6 +1816,7 @@ export declare function getTranslation(lang?: Lang): {
     copy: string;
     chatPlaceholderConfigured: string;
     chatPlaceholderUnconfigured: string;
+    chatLoadEarlierRounds: string;
     currentMode: string;
     agentMode: string;
     agentStepLabel: string;
@@ -2100,6 +2129,8 @@ export declare function getTranslation(lang?: Lang): {
     maxContextTokensHint: string;
     maxConversationRounds: string;
     maxConversationRoundsHint: string;
+    chatRenderBatchRounds: string;
+    chatRenderBatchRoundsHint: string;
     contextCompactionSettings: string;
     contextCompactionDesc: string;
     settingsAdvancedTab: string;
@@ -2119,6 +2150,8 @@ export declare function getTranslation(lang?: Lang): {
     expand: string;
     collapse: string;
     streamingStatus: string;
+    reconnectingStatus: string;
+    errorOccurred: string;
     agentContinuing: string;
     agentPlanning: string;
     agentSubtaskRunning: string;
@@ -2141,6 +2174,7 @@ export declare function getTranslation(lang?: Lang): {
     copy: string;
     chatPlaceholderConfigured: string;
     chatPlaceholderUnconfigured: string;
+    chatLoadEarlierRounds: string;
     currentMode: string;
     agentMode: string;
     agentStepLabel: string;
@@ -2453,6 +2487,8 @@ export declare function getTranslation(lang?: Lang): {
     maxContextTokensHint: string;
     maxConversationRounds: string;
     maxConversationRoundsHint: string;
+    chatRenderBatchRounds: string;
+    chatRenderBatchRoundsHint: string;
     contextCompactionSettings: string;
     contextCompactionDesc: string;
     settingsAdvancedTab: string;
@@ -2472,6 +2508,8 @@ export declare function getTranslation(lang?: Lang): {
     expand: string;
     collapse: string;
     streamingStatus: string;
+    reconnectingStatus: string;
+    errorOccurred: string;
     agentContinuing: string;
     agentPlanning: string;
     agentSubtaskRunning: string;
@@ -2494,6 +2532,7 @@ export declare function getTranslation(lang?: Lang): {
     copy: string;
     chatPlaceholderConfigured: string;
     chatPlaceholderUnconfigured: string;
+    chatLoadEarlierRounds: string;
     currentMode: string;
     agentMode: string;
     agentStepLabel: string;

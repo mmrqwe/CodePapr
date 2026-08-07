@@ -200,9 +200,15 @@ export const ConversationSearch = memo(function ConversationSearch({ onNavigateT
   }, [showPanel]);
 
   const scrollToMessage = useCallback((id: string) => {
-    const c = document.querySelector('[data-chat-scroll="true"]'); if (!c) return;
-    const el = c.querySelector(`[data-message-id="${id}"]`); if (!el) return;
-    c.scrollTo?.({ top: Math.max(0, (el as HTMLElement).offsetTop - 80), behavior: 'smooth' });
+    const c = document.querySelector('[data-chat-scroll="true"]');
+    const el = c?.querySelector(`[data-message-id="${id}"]`);
+    if (c && el) {
+      c.scrollTo?.({ top: Math.max(0, (el as HTMLElement).offsetTop - 80), behavior: 'smooth' });
+    } else {
+      // Not rendered yet (chat history loads in batches) — ask the chat pane
+      // to widen its window and scroll.
+      useAgentStore.getState().requestChatScrollToMessage(id);
+    }
     setOpen(false);
   }, []);
   const navigateToFile = useCallback((f: FileResult) => { onNavigateToFile({ path: f.path, line: f.line, column: f.column ?? 1 }); setOpen(false); }, [onNavigateToFile]);

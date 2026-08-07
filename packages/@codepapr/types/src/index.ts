@@ -281,6 +281,9 @@ export type IChatStreamEvent =
     }
   | { type: 'reasoning-delta'; delta: string }
   | { type: 'content-delta'; delta: string }
+  /** 流中断后整段重试即将开始：此前已推送的 reasoning/content 增量作废，
+   *  消费方必须先清空已累积内容再接收新一轮增量（LLM 流无法断点续传）。 */
+  | { type: 'stream-restart'; attempt: number; maxRetries: number }
   | {
       type: 'tool-call-start';
       toolCallId: string;

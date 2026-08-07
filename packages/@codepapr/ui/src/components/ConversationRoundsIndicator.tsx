@@ -5,6 +5,9 @@ import type { UIMessage } from '../store/agentStore';
 interface ConversationRoundsIndicatorProps {
   messages: UIMessage[];
   scrollContainerRef: RefObject<HTMLDivElement | null>;
+  /** Preferred jump handler (e.g. chat pane that may need to widen its render
+   *  window first). Falls back to a direct DOM scroll when omitted. */
+  onScrollToMessage?: (messageId: string) => void;
 }
 
 interface RoundData {
@@ -31,6 +34,7 @@ export const ConversationRoundsIndicator = memo(
   function ConversationRoundsIndicator({
     messages,
     scrollContainerRef,
+    onScrollToMessage,
   }: ConversationRoundsIndicatorProps) {
     const rounds = useMemo<RoundData[]>(() => {
       let idx = 0;
@@ -93,6 +97,11 @@ export const ConversationRoundsIndicator = memo(
 
     const scrollToRound = useCallback(
       (roundId: string) => {
+        if (onScrollToMessage) {
+          onScrollToMessage(roundId);
+          hidePanel();
+          return;
+        }
         const container = scrollContainerRef.current;
         if (!container) return;
         const el = container.querySelector(`[data-message-id="${roundId}"]`);
@@ -100,7 +109,7 @@ export const ConversationRoundsIndicator = memo(
         container.scrollTo?.({ top: Math.max(0, (el as HTMLElement).offsetTop - 80), behavior: 'smooth' });
         hidePanel();
       },
-      [scrollContainerRef, hidePanel],
+      [onScrollToMessage, scrollContainerRef, hidePanel],
     );
 
     // cleanup

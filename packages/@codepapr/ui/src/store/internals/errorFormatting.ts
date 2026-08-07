@@ -1,7 +1,26 @@
-import { ProviderRequestError } from '@codepapr/api';
+import { DEFAULT_STREAM_MAX_RETRIES, ProviderRequestError } from '@codepapr/api';
 import type { Lang } from './types';
 
+function formatNetworkInterruption(lang: Lang): string {
+  const retries = DEFAULT_STREAM_MAX_RETRIES;
+  return lang === 'en'
+    ? `Connection lost — still failing after ${retries} retries. Please check your network and try again.`
+    : lang === 'zh-TW'
+    ? `連線中斷，重試 ${retries} 次後仍失敗。請檢查網路後重試。`
+    : `连接中断，重试 ${retries} 次后仍失败。请检查网络后重试。`;
+}
+
+/** 无 HTTP 状态码的可重试错误 = 流中断 / 请求超时等网络层故障。
+ *  429/5xx 带 status，走各自的文案。 */
+function isNetworkInterruption(error: ProviderRequestError): boolean {
+  return error.retriable && error.status === undefined;
+}
+
 export function formatProviderError(error: ProviderRequestError, lang: Lang): string {
+  if (isNetworkInterruption(error)) {
+    return formatNetworkInterruption(lang);
+  }
+
   const providerLabel = error.provider || 'LLM';
   const requestIdText = error.requestId
     ? lang === 'en'
@@ -37,6 +56,13 @@ export function formatAgentError(error: unknown, lang: Lang): string {
     (error as Error & { name?: string }).name === 'ProviderRequestError'
   ) {
     return formatProviderError(error as ProviderRequestError, lang);
+  }
+
+  if (
+    error instanceof Error &&
+    (error as Error & { name?: string }).name === 'StreamIdleTimeoutError'
+  ) {
+    return formatNetworkInterruption(lang);
   }
 
   const message = error instanceof Error ? error.message : String(error);

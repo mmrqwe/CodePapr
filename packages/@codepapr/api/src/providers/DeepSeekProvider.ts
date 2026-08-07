@@ -18,6 +18,7 @@ import { sanitizeToolCallArguments } from './streaming';
 import { BaseLLMProvider, ProviderConfig, ProviderRequestError } from './ILLMProvider';
 import {
   applyStreamingToolCallDeltas,
+  DEFAULT_STREAM_MAX_RETRIES,
   finalizeStreamingToolCalls,
   readSseStream,
   safeParseToolArguments,
@@ -258,12 +259,21 @@ export class DeepSeekProvider extends BaseLLMProvider {
       {
         signal,
         hasEmitted: () => emitted,
-        onRetry: (attempt, err) =>
+        retryDelayMs: this.config.streamRetryDelayMs,
+        onRetry: (attempt, err) => {
+          if (emitted) {
+            onEvent({
+              type: 'stream-restart',
+              attempt,
+              maxRetries: DEFAULT_STREAM_MAX_RETRIES,
+            });
+          }
           log.warn('LLM stream interrupted, retrying', {
             model: payload.model,
             attempt,
             error: err.message,
-          }),
+          });
+        },
       }
     );
   }

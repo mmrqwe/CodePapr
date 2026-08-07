@@ -161,6 +161,10 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     typeof input.maxConversationRounds === 'number' && Number.isFinite(input.maxConversationRounds)
       ? Math.max(2, Math.floor(input.maxConversationRounds))
       : DEFAULT_SETTINGS.maxConversationRounds;
+  const chatRenderBatchRounds =
+    typeof input.chatRenderBatchRounds === 'number' && Number.isFinite(input.chatRenderBatchRounds)
+      ? Math.max(1, Math.min(50, Math.floor(input.chatRenderBatchRounds)))
+      : DEFAULT_SETTINGS.chatRenderBatchRounds;
   const compactionModel: 'fast' | 'primary' =
     input.compactionModel === 'primary' ? 'primary' : 'fast';
   const compactionMaxTokens =
@@ -429,6 +433,7 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     maxToolRounds,
     maxContextTokens,
     maxConversationRounds,
+    chatRenderBatchRounds,
     compactionModel,
     compactionMaxTokens,
     compactionTemperature,

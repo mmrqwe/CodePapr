@@ -158,6 +158,12 @@ export default function App() {
   const [showDebugLog, setShowDebugLog] = useState(false);
   const [showCodeReview, setShowCodeReview] = useState<ReviewScope | null>(null);
   const [activeMainTab, setActiveMainTab] = useState<MainTab>('chat');
+  // 跨面板的消息跳转请求（会话搜索等）：先切回聊天 tab，ChatPanel 挂载后
+  // 负责扩窗并滚动到目标消息。
+  const pendingChatJump = useAgentStore((state) => state._pendingChatJump);
+  useEffect(() => {
+    if (pendingChatJump) setActiveMainTab('chat');
+  }, [pendingChatJump]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [selectedGitFile, setSelectedGitFile] = useState<GitFileSelection | null>(null);
   const [isGitPanelExpanded, setIsGitPanelExpanded] = useState(false);
