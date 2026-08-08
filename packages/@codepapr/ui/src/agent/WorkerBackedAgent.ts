@@ -11,6 +11,11 @@ import {
 import type { IAgentResponse, IChatRequest, IChatStreamEvent, IImageContent, IMessage, IToolDefinition } from '@codepapr/types';
 import { OpenAIProvider, ClaudeProvider, ProviderRequestError, getGlobalFetchFn } from '@codepapr/api';
 import { createId } from '../utils/createId';
+import {
+  cancelExternalAccessRequests,
+  isPermissionWaitActive,
+  subscribePermissionWait,
+} from '../store/permissionStore';
 import { registerWorkspaceTools, type WorkspaceMutationListener } from '../tools/workspaceTools';
 import { registerTodoListTools } from '../tools/todoListTool';
 import { registerMcpTools } from '../tools/mcpTools';
@@ -254,6 +259,8 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     flushTimerId: ReturnType<typeof setTimeout> | null;
   }>();
   private readonly pendingFetchControllers = new Map<string, AbortController>();
+  private unsubscribePermissionWait: (() => void) | null = null;
+  private permissionWaitActive = false;
   private activeRequestId: string | null = null;
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
   private crashed = false;
@@ -307,6 +314,21 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.worker = new Worker(new URL('./agentRuntime.worker.ts', import.meta.url), {
       type: 'module',
     });
+    this.unsubscribePermissionWait = subscribePermissionWait((waiting) => {
+      this.permissionWaitActive = waiting;
+      for (const requestId of this.appAgentRequests.keys()) {
+        if (waiting) {
+          const entry = this.appAgentRequests.get(requestId);
+          if (entry?.timeoutTimer !== null && entry?.timeoutTimer !== undefined) {
+            clearTimeout(entry.timeoutTimer);
+            entry.timeoutTimer = null;
+          }
+        } else {
+          this.armAppAgentIdleTimer(requestId);
+        }
+      }
+      this.worker.postMessage({ type: 'permission-wait', waiting } satisfies MainToAgentWorkerMessage);
+    });
     this.worker.addEventListener('message', this.handleWorkerMessage);
     this.worker.addEventListener('error', this.handleWorkerError);
     this.worker.addEventListener('messageerror', this.handleWorkerMessageError);
@@ -332,6 +354,10 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         },
       },
     } satisfies MainToAgentWorkerMessage);
+    if (isPermissionWaitActive()) {
+      this.permissionWaitActive = true;
+      this.worker.postMessage({ type: 'permission-wait', waiting: true } satisfies MainToAgentWorkerMessage);
+    }
   }
 
   /** Detects a silently dead worker (no 'error' event, e.g. OS memory kill):
@@ -400,6 +426,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   }
 
   cancel(): void {
+    cancelExternalAccessRequests();
     const requestId = this.activeRequestId;
     if (!requestId) return;
 
@@ -463,6 +490,8 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.clearHeartbeat();
     this.clearSnapshotTimer();
     this.abortAllPendingFetches();
+    this.unsubscribePermissionWait?.();
+    this.unsubscribePermissionWait = null;
     this.rejectAllAppAgentRequests(new Error('Agent was destroyed'));
     // worker 被直接 terminate 后 cancel ACK 永远不会到达（cancel() 的兜底
     // 定时器也已被清除）：必须主动 reject 所有 pending chat 请求，否则调用
@@ -597,6 +626,10 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     const entry = this.appAgentRequests.get(requestId);
     if (!entry) return;
     if (entry.timeoutTimer !== null) clearTimeout(entry.timeoutTimer);
+    if (this.permissionWaitActive) {
+      entry.timeoutTimer = null;
+      return;
+    }
     const idleTimeoutMs = this.appAgentIdleTimeoutMs;
     entry.timeoutTimer = setTimeout(() => {
       entry.timeoutTimer = null;
@@ -620,6 +653,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   }
 
   cancelAppAgent(requestId: string): void {
+    cancelExternalAccessRequests();
     this.worker.postMessage({
       type: 'cancel-app-agent',
       requestId,

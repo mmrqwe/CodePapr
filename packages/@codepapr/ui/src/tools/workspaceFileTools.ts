@@ -209,6 +209,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       relativePath: asString(args.relativePath, 'relativePath'),
       content: asString(args.content, 'content'),
     };
+    await ensureExternalPathAllowed(parsed.relativePath, 'write');
     const before = await readBeforeContent(parsed.relativePath);
 
     const notes: string[] = [];
@@ -262,6 +263,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       replaceAll: asOptionalBoolean(args.replaceAll, 'replaceAll'),
       expectedOccurrences: asOptionalPositiveInteger(args.expectedOccurrences, 'expectedOccurrences'),
     };
+    await ensureExternalPathAllowed(parsed.relativePath, 'write');
 
     const current = await invoke<ReadFileResult>('read_text_file', {
       workspacePath: workspace(),
@@ -350,6 +352,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
     const fileBytes: Record<string, number> = {};
 
     for (const relativePath of uniquePaths) {
+      await ensureExternalPathAllowed(relativePath, 'write');
       const current = await invoke<ReadFileResult>('read_text_file', {
         workspacePath: workspace(),
         relativePath,

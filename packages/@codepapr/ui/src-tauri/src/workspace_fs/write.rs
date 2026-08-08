@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::shared::{
-    canonical_workspace, normalize_relative_path, relative_string, run_blocking_workspace_task,
+    canonical_workspace, ensure_path_accessible, ensure_write_path_accessible,
+    normalize_relative_path, relative_string, run_blocking_workspace_task,
     sanitize_workspace_path_input,
 };
 
@@ -49,6 +50,7 @@ pub(crate) fn write_text_file_impl(
             workspace.join(normalize_relative_path(Some(&raw))?)
         }
     };
+    ensure_write_path_accessible(&workspace, &target)?;
     let existed_before = target.exists();
     // 原文件内容与编码：变更摘要需要解码后的文本；编码用于按原编码回写，
     // 避免编辑 GBK/UTF-16/BOM 文件时静默转码
@@ -65,8 +67,12 @@ pub(crate) fn write_text_file_impl(
     fs::create_dir_all(parent).map_err(|err| format!("创建目录失败: {err}"))?;
     let canonical_parent =
         fs::canonicalize(parent).map_err(|err| format!("无法访问目标目录: {err}"))?;
-    if !canonical_parent.starts_with(&workspace) {
-        return Err("拒绝写入项目文件夹之外的路径".to_string());
+    if target.exists() {
+        let canonical_target =
+            fs::canonicalize(&target).map_err(|err| format!("无法访问目标文件: {err}"))?;
+        ensure_path_accessible(&workspace, &canonical_target)?;
+    } else {
+        ensure_path_accessible(&workspace, &canonical_parent)?;
     }
 
     let (bytes_to_write, encoding_label) = match original_encoding {
@@ -128,14 +134,7 @@ pub(crate) async fn delete_workspace_file(
             return Ok(false);
         }
 
-        let parent = target
-            .parent()
-            .ok_or_else(|| "无法确定目标文件目录".to_string())?;
-        let canonical_parent =
-            fs::canonicalize(parent).map_err(|err| format!("无法访问目标目录: {err}"))?;
-        if !canonical_parent.starts_with(&workspace) {
-            return Err("拒绝删除项目文件夹之外的路径".to_string());
-        }
+        ensure_path_accessible(&workspace, &fs::canonicalize(&target).map_err(|err| format!("无法访问目标文件: {err}"))?)?;
         if !target.is_file() {
             return Err("仅支持删除文件".to_string());
         }
@@ -174,9 +173,7 @@ pub(crate) async fn delete_workspace_dir(
 
         let canonical_target =
             fs::canonicalize(&target).map_err(|err| format!("无法访问目标目录: {err}"))?;
-        if !canonical_target.starts_with(&workspace) {
-            return Err("拒绝删除项目文件夹之外的路径".to_string());
-        }
+        ensure_path_accessible(&workspace, &canonical_target)?;
 
         fs::remove_dir_all(&target)
             .map_err(|err| format!("删除目录 {} 失败: {err}", target.display()))?;

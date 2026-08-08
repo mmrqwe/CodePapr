@@ -126,6 +126,7 @@ export interface Settings {
   toolIpcTimeoutMs: number;
   streamIdleTimeoutMs: number;
   browserEngine: 'embedded' | 'headless';
+  folderAccessYolo: boolean;
 }
 
 export interface WorkspaceEntry {

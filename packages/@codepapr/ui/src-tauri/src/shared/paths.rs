@@ -277,8 +277,8 @@ pub(crate) fn sanitize_workspace_path_input(relative_path: Option<&str>) -> Stri
     parse_workspace_path_input(relative_path).path
 }
 
-/// Resolve a relative path against a workspace, canonicalising and
-/// enforcing that the result stays inside the workspace.
+/// Resolve a path against a workspace, canonicalising it and applying the
+/// shared workspace/external access policy after traversal checks.
 pub(crate) fn resolve_existing_path(
     workspace_path: &str,
     relative_path: Option<&str>,
@@ -297,12 +297,143 @@ pub(crate) fn resolve_existing_path(
     };
     let target =
         std::fs::canonicalize(candidate).map_err(|err| format!("路径不存在或无法访问: {err}"))?;
-    // canonicalize 会解析符号链接：绝对路径输入或 workspace 内指向外部的软链
-    // 都可能逃出项目文件夹，必须在解析后复查包含关系（与写入侧检查保持一致）。
-    if !target.starts_with(&workspace) {
-        return Err("路径必须位于项目文件夹内".to_string());
-    }
+    ensure_path_accessible(&workspace, &target)?;
     Ok((workspace, target))
+}
+
+/// Hidden/system directories that must never be auto-authorized by YOLO.
+/// Ordinary project dot-directories such as `.github` and `.vscode` remain
+/// accessible when they are inside the trusted workspace.
+const PROTECTED_EXTERNAL_DIRS: &[&str] = &[
+    ".ssh",
+    ".gnupg",
+    ".config",
+    ".aws",
+    ".azure",
+    ".kube",
+    ".git",
+    ".CodePapr",
+];
+
+pub(crate) fn is_protected_external_path(path: &Path) -> bool {
+    let hidden_protected = path.components().any(|component| match component {
+        Component::Normal(name) => PROTECTED_EXTERNAL_DIRS
+            .iter()
+            .any(|protected| name.to_string_lossy().eq_ignore_ascii_case(protected)),
+        _ => false,
+    });
+
+    #[cfg(target_os = "windows")]
+    {
+        return hidden_protected || is_protected_windows_system_path(path);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        hidden_protected
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn is_protected_windows_system_path(path: &Path) -> bool {
+    let mut protected = Vec::new();
+    for variable in [
+        "WINDIR",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "ProgramData",
+        "APPDATA",
+        "LOCALAPPDATA",
+    ] {
+        if let Some(value) = std::env::var_os(variable) {
+            protected.push(PathBuf::from(value));
+        }
+    }
+    protected
+        .iter()
+        .any(|base| path_is_same_or_child(path, base))
+}
+
+pub(crate) fn path_is_same_or_child(path: &Path, base: &Path) -> bool {
+    let path_value = path_key(path);
+    let base_key = path_key(base);
+    if base_key == "/" {
+        return path_value.starts_with('/');
+    }
+    path_value == base_key || path_value.starts_with(&(base_key + "/"))
+}
+
+pub(crate) fn path_is_same(path: &Path, base: &Path) -> bool {
+    path_key(path) == path_key(base)
+}
+
+fn path_key(path: &Path) -> String {
+    let value = path.to_string_lossy().replace('\\', "/");
+    #[cfg(target_os = "windows")]
+    let value = value.to_lowercase();
+    let value = value.strip_prefix("//?/").unwrap_or(&value);
+    value.trim_end_matches('/').to_string()
+}
+
+pub(crate) fn ensure_path_accessible(workspace: &Path, target: &Path) -> Result<(), String> {
+    if path_is_same_or_child(target, workspace) {
+        return Ok(());
+    }
+
+    if is_protected_external_path(target) {
+        return Err(format!(
+            "安全限制：禁止访问受保护的隐藏目录 {}",
+            target.display()
+        ));
+    }
+
+    let policy = crate::db::load_external_access_policy()?;
+    if policy.yolo {
+        return Ok(());
+    }
+
+    let is_allowed_dir = policy.allowed_dirs.iter().any(|dir| {
+        let allowed = Path::new(dir);
+        path_is_same_or_child(target, allowed)
+    });
+    let is_allowed_file = policy
+        .allowed_files
+        .iter()
+        .any(|file| path_is_same(target, Path::new(file)));
+    if is_allowed_dir || is_allowed_file {
+        return Ok(());
+    }
+
+    Err(format!(
+        "外部路径未获授权：{}。请先授权该文件夹或文件",
+        target.display()
+    ))
+}
+
+pub(crate) fn ensure_write_path_accessible(workspace: &Path, target: &Path) -> Result<(), String> {
+    if path_is_same_or_child(target, workspace) {
+        return Ok(());
+    }
+
+    if target.exists() {
+        let canonical_target = std::fs::canonicalize(target)
+            .map_err(|err| format!("路径不存在或无法访问: {err}"))?;
+        return ensure_path_accessible(workspace, &canonical_target);
+    }
+
+    let mut existing = target
+        .parent()
+        .ok_or_else(|| "无法确定目标文件目录".to_string())?
+        .to_path_buf();
+    while !existing.exists() {
+        existing = existing
+            .parent()
+            .ok_or_else(|| "无法确定目标文件目录".to_string())?
+            .to_path_buf();
+    }
+    let canonical_existing = std::fs::canonicalize(&existing)
+        .map_err(|err| format!("无法访问目标目录: {err}"))?;
+    ensure_path_accessible(workspace, &canonical_existing)
 }
 
 /// Convert an absolute path to a workspace-relative forward-slash string.

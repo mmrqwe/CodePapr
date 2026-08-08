@@ -156,6 +156,10 @@ export type MainToAgentWorkerMessage =
       payload: AgentWorkerToolResponse;
     }
   | {
+      type: 'permission-wait';
+      waiting: boolean;
+    }
+  | {
       type: 'proxy-chat-response';
       proxyChatId: string;
       success: boolean;

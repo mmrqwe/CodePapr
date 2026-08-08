@@ -54,6 +54,20 @@ const log = new Logger('Agent');
 
 const DEFAULT_TOOL_TIMEOUT_MS = 270_000;
 
+/** Tools that can pause while waiting for a user folder-access decision. */
+export const PERMISSION_WAITING_TOOL_TIMEOUTS: Readonly<Record<string, number>> = {
+  read: Number.POSITIVE_INFINITY,
+  list: Number.POSITIVE_INFINITY,
+  read_image: Number.POSITIVE_INFINITY,
+  write: Number.POSITIVE_INFINITY,
+  edit: Number.POSITIVE_INFINITY,
+  patch: Number.POSITIVE_INFINITY,
+  bash: Number.POSITIVE_INFINITY,
+  graph: Number.POSITIVE_INFINITY,
+  lsp: Number.POSITIVE_INFINITY,
+  diagnostics: Number.POSITIVE_INFINITY,
+};
+
 function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -76,13 +90,15 @@ function withTimeout<T>(
 
     signal?.addEventListener('abort', onAbort, { once: true });
 
-    state.timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      if (!state.settled) {
-        state.settled = true;
-        reject(new Error(`工具执行超时 (${timeoutMs / 1000}s)`));
-      }
-    }, timeoutMs);
+    if (Number.isFinite(timeoutMs)) {
+      state.timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        if (!state.settled) {
+          state.settled = true;
+          reject(new Error(`工具执行超时 (${timeoutMs / 1000}s)`));
+        }
+      }, timeoutMs);
+    }
 
     promise.then(
       (result) => {

@@ -1,8 +1,14 @@
+import { useEffect } from 'react';
 import { usePermissionStore } from '../store/permissionStore';
 
 export function PermissionDialog() {
   const pendingRequest = usePermissionStore((s) => s.pendingRequest);
   const respondToExternalAccess = usePermissionStore((s) => s.respondToExternalAccess);
+  const hydratePolicy = usePermissionStore((s) => s.hydratePolicy);
+
+  useEffect(() => {
+    void hydratePolicy();
+  }, [hydratePolicy]);
 
   if (!pendingRequest) return null;
 
@@ -10,7 +16,14 @@ export function PermissionDialog() {
   const handleAllowFile = () => respondToExternalAccess(true, 'file');
   const handleDeny = () => respondToExternalAccess(false, 'file');
 
-  const operationLabel = pendingRequest.operation === 'read' ? '读取' : '列出目录';
+  const operationLabel =
+    pendingRequest.operation === 'read'
+      ? '读取'
+      : pendingRequest.operation === 'list'
+        ? '列出目录'
+        : pendingRequest.operation === 'write'
+          ? '写入'
+          : '执行命令';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
@@ -34,13 +47,15 @@ export function PermissionDialog() {
           >
             拒绝
           </button>
-          <button
-            type="button"
-            onClick={handleAllowFile}
-            className="rounded-lg border border-[#2a2d3a] bg-transparent px-3.5 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:border-cyan-500/40 hover:text-cyan-300"
-          >
-            允许此文件
-          </button>
+          {pendingRequest.operation !== 'list' && pendingRequest.allowFile !== false && (
+            <button
+              type="button"
+              onClick={handleAllowFile}
+              className="rounded-lg border border-[#2a2d3a] bg-transparent px-3.5 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:border-cyan-500/40 hover:text-cyan-300"
+            >
+              允许此文件
+            </button>
+          )}
           <button
             type="button"
             onClick={handleAllowDirectory}

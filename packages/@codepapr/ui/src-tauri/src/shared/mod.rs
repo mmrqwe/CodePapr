@@ -12,8 +12,9 @@ pub(crate) mod time;
 pub(crate) use git_locks::remove_stale_git_locks;
 pub(crate) use paths::{
     canonical_workspace, expanded_path, home_dir, normalize_relative_path,
+    ensure_path_accessible, ensure_write_path_accessible, is_protected_external_path,
     normalize_workspace_filter, parse_workspace_path_input, relative_string, resolve_existing_path,
-    sanitize_workspace_path_input, PathLocationInput,
+    sanitize_workspace_path_input, path_is_same, path_is_same_or_child, PathLocationInput,
 };
 pub(crate) use runtime::run_blocking_workspace_task;
 pub(crate) use strings::{parse_browser_url, truncate_utf8};

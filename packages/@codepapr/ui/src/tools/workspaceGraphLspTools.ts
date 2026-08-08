@@ -51,6 +51,7 @@ export function registerWorkspaceGraphLspTools(ctx: WorkspaceToolContext): void 
     getWorkspaceHost,
     resolveLanguageId,
     buildIntelligenceProjectGraph,
+    ensureExternalPathAllowed,
   } = ctx;
 
   registry.register(toolByName('workspace_project_graph'), async (args: Record<string, unknown>) => {
@@ -188,6 +189,7 @@ export function registerWorkspaceGraphLspTools(ctx: WorkspaceToolContext): void 
       };
     },
     async documentSymbol(relativePath: string): Promise<WorkspaceDocumentSymbolResult> {
+      await ensureExternalPathAllowed(relativePath, 'read');
       const file = await invoke<ReadFileResult>('read_text_file', {
         workspacePath: workspace(),
         relativePath,

@@ -1,10 +1,13 @@
+import { invoke } from '@tauri-apps/api/core';
 import { create } from 'zustand';
 import { createId } from '../utils/createId';
 
 export interface ExternalAccessRequest {
   id: string;
   path: string;
-  operation: 'read' | 'list';
+  operation: 'read' | 'list' | 'write' | 'execute';
+  workspacePath?: string;
+  allowFile?: boolean;
 }
 
 export interface ExternalAccessResponse {
@@ -12,9 +15,39 @@ export interface ExternalAccessResponse {
   scope: 'directory' | 'file';
 }
 
+interface ExternalAccessPolicyPayload {
+  yolo: boolean;
+  allowedDirs: string[];
+  allowedFiles: string[];
+}
+
+interface PendingExternalRequest {
+  request: ExternalAccessRequest;
+  resolve: (value: ExternalAccessResponse) => void;
+  reject: (reason: unknown) => void;
+  responding: boolean;
+}
+
 function normalizePathDots(p: string): string {
-  const isAbsolute = p.startsWith('/');
-  const parts = p.split('/').filter(Boolean);
+  const rawPath = p.replace(/\\/g, '/');
+  const isDrivePath = /^[A-Za-z]:\//.test(rawPath);
+  const isUncPath = rawPath.startsWith('//');
+  const isAbsolute = rawPath.startsWith('/') || isDrivePath;
+  const prefix = isDrivePath
+    ? rawPath.slice(0, 2)
+    : isUncPath
+      ? '//'
+      : isAbsolute
+        ? '/'
+        : '';
+  const pathWithoutPrefix = isDrivePath
+    ? rawPath.slice(2)
+    : isUncPath
+      ? rawPath.slice(2)
+      : isAbsolute
+        ? rawPath.slice(1)
+        : rawPath;
+  const parts = pathWithoutPrefix.split('/').filter(Boolean);
   const result: string[] = [];
   for (const part of parts) {
     if (part === '.') continue;
@@ -28,7 +61,7 @@ function normalizePathDots(p: string): string {
       result.push(part);
     }
   }
-  return (isAbsolute ? '/' : '') + result.join('/');
+  return prefix + (prefix && !prefix.endsWith('/') ? '/' : '') + result.join('/');
 }
 
 export function getDirname(p: string): string {
@@ -39,61 +72,189 @@ export function getDirname(p: string): string {
 }
 
 export function isAbsolutePath(p: string): boolean {
-  return p.startsWith('/') || /^[A-Za-z]:[/\\]/.test(p);
+  const normalized = p.replace(/\\/g, '/');
+  return normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized);
 }
 
 interface PermissionStoreState {
   pendingRequest: ExternalAccessRequest | null;
   allowedExternalDirs: string[];
   allowedExternalFiles: string[];
+  yolo: boolean;
 
-  requestExternalAccess: (path: string, operation: 'read' | 'list') => Promise<ExternalAccessResponse>;
-  respondToExternalAccess: (approved: boolean, scope: 'directory' | 'file') => void;
+  hydratePolicy: () => Promise<void>;
+  setYolo: (enabled: boolean) => Promise<void>;
+  requestExternalAccess: (
+    path: string,
+    operation: ExternalAccessRequest['operation'],
+    workspacePath?: string,
+    allowFile?: boolean,
+  ) => Promise<ExternalAccessResponse>;
+  respondToExternalAccess: (
+    approved: boolean,
+    scope: 'directory' | 'file',
+  ) => Promise<void>;
   isExternalPathAllowed: (path: string) => boolean;
   addAllowedDir: (dir: string) => void;
   addAllowedFile: (file: string) => void;
-  clearAllowlist: () => void;
+  clearAllowlist: () => Promise<void>;
 }
 
-let pendingResolve: ((value: ExternalAccessResponse) => void) | null = null;
+const pendingQueue: PendingExternalRequest[] = [];
+let policyHydration: Promise<void> | null = null;
+const permissionWaitListeners = new Set<(waiting: boolean) => void>();
+
+export function subscribePermissionWait(listener: (waiting: boolean) => void): () => void {
+  permissionWaitListeners.add(listener);
+  return () => permissionWaitListeners.delete(listener);
+}
+
+export function isPermissionWaitActive(): boolean {
+  return pendingQueue.length > 0;
+}
+
+export function cancelExternalAccessRequests(reason: unknown = new DOMException('权限请求已取消', 'AbortError')): void {
+  const requests = pendingQueue.splice(0);
+  usePermissionStore.setState({ pendingRequest: null });
+  if (requests.length > 0) publishPermissionWait(false);
+  for (const entry of requests) {
+    entry.reject(reason);
+  }
+}
+
+function publishPermissionWait(waiting: boolean): void {
+  for (const listener of permissionWaitListeners) {
+    listener(waiting);
+  }
+}
+
+function currentPendingRequest(): ExternalAccessRequest | null {
+  return pendingQueue[0]?.request ?? null;
+}
+
+function syncPending(set: (state: Partial<PermissionStoreState>) => void): void {
+  set({ pendingRequest: currentPendingRequest() });
+}
+
+function applyPolicy(
+  set: (state: Partial<PermissionStoreState>) => void,
+  policy: ExternalAccessPolicyPayload,
+): void {
+  set({
+    yolo: policy.yolo === true,
+    allowedExternalDirs: (policy.allowedDirs ?? []).map(normalizePathDots),
+    allowedExternalFiles: (policy.allowedFiles ?? []).map(normalizePathDots),
+  });
+}
 
 export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
   pendingRequest: null,
   allowedExternalDirs: [],
   allowedExternalFiles: [],
+  yolo: false,
 
-  requestExternalAccess: (rawPath: string, operation: 'read' | 'list') => {
+  hydratePolicy: async () => {
+    if (!policyHydration) {
+      policyHydration = invoke<ExternalAccessPolicyPayload>('get_external_access_policy')
+        .then((policy) => applyPolicy(set, policy))
+        .catch((error) => {
+          console.warn('无法加载外部文件访问策略:', error);
+        })
+        .finally(() => {
+          policyHydration = null;
+        });
+    }
+    await policyHydration;
+  },
+
+  setYolo: async (enabled: boolean) => {
+    const policy = await invoke<ExternalAccessPolicyPayload>('set_external_access_yolo', {
+      enabled,
+    });
+    applyPolicy(set, policy);
+  },
+
+  requestExternalAccess: (
+    rawPath: string,
+    operation: ExternalAccessRequest['operation'],
+    workspacePath?: string,
+    allowFile = true,
+  ) => {
     const normalized = normalizePathDots(rawPath);
-    return new Promise<ExternalAccessResponse>((resolve) => {
-      pendingResolve = resolve;
-      set({
-        pendingRequest: {
+    const existing = pendingQueue.find(
+      (entry) => entry.request.path === normalized && entry.request.operation === operation,
+    );
+    if (existing) {
+      return new Promise<ExternalAccessResponse>((resolve, reject) => {
+        const originalResolve = existing.resolve;
+        const originalReject = existing.reject;
+        existing.resolve = (value) => {
+          originalResolve(value);
+          resolve(value);
+        };
+        existing.reject = (reason) => {
+          originalReject(reason);
+          reject(reason);
+        };
+      });
+    }
+
+    return new Promise<ExternalAccessResponse>((resolve, reject) => {
+      const wasEmpty = pendingQueue.length === 0;
+      pendingQueue.push({
+        request: {
           id: createId(),
           path: normalized,
           operation,
+          ...(workspacePath ? { workspacePath } : {}),
+          allowFile,
         },
+        resolve,
+        reject,
+        responding: false,
       });
+      syncPending(set);
+      if (wasEmpty) publishPermissionWait(true);
     });
   },
 
-  respondToExternalAccess: (approved: boolean, scope: 'directory' | 'file') => {
-    const { pendingRequest } = get();
-    if (pendingRequest && approved) {
-      if (scope === 'directory') {
-        get().addAllowedDir(getDirname(pendingRequest.path));
-      } else {
-        get().addAllowedFile(pendingRequest.path);
+  respondToExternalAccess: async (approved, scope) => {
+    const entry = pendingQueue[0];
+    if (!entry || entry.responding) return;
+    entry.responding = true;
+
+    try {
+      if (approved) {
+        const grantPath =
+          scope === 'directory' &&
+          (entry.request.operation === 'list' || entry.request.operation === 'execute')
+            ? entry.request.path
+            : scope === 'directory'
+              ? getDirname(entry.request.path)
+              : entry.request.path;
+        const policy = await invoke<ExternalAccessPolicyPayload>('grant_external_access', {
+          workspacePath: entry.request.workspacePath,
+          rawPath: grantPath,
+          scope,
+        });
+        applyPolicy(set, policy);
       }
+
+      pendingQueue.shift();
+      syncPending(set);
+      if (pendingQueue.length === 0) publishPermissionWait(false);
+      entry.resolve({ approved, scope });
+    } catch (error) {
+      pendingQueue.shift();
+      syncPending(set);
+      if (pendingQueue.length === 0) publishPermissionWait(false);
+      entry.reject(error);
     }
-    if (pendingResolve) {
-      pendingResolve({ approved, scope });
-      pendingResolve = null;
-    }
-    set({ pendingRequest: null });
   },
 
   isExternalPathAllowed: (rawPath: string) => {
     const normalized = normalizePathDots(rawPath);
+    if (get().yolo) return true;
     const { allowedExternalDirs, allowedExternalFiles } = get();
     for (const dir of allowedExternalDirs) {
       if (normalized === dir || normalized.startsWith(dir + '/')) return true;
@@ -120,7 +281,8 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
     }
   },
 
-  clearAllowlist: () => {
-    set({ allowedExternalDirs: [], allowedExternalFiles: [] });
+  clearAllowlist: async () => {
+    const policy = await invoke<ExternalAccessPolicyPayload>('clear_external_access_grants');
+    applyPolicy(set, policy);
   },
 }));

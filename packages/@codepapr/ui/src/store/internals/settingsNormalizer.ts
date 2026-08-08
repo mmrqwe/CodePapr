@@ -401,6 +401,10 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
       : DEFAULT_SETTINGS.streamIdleTimeoutMs;
   const browserEngine: 'embedded' | 'headless' =
     input.browserEngine === 'headless' ? 'headless' : 'embedded';
+  const folderAccessYolo =
+    typeof input.folderAccessYolo === 'boolean'
+      ? input.folderAccessYolo
+      : DEFAULT_SETTINGS.folderAccessYolo;
   const mcp = normalizeMcpSettings(input.mcp);
 
   return {
@@ -506,6 +510,7 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     toolIpcTimeoutMs,
     streamIdleTimeoutMs,
     browserEngine,
+    folderAccessYolo,
     mcp,
   };
 }

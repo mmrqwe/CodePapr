@@ -15,7 +15,12 @@ import type {
   ISubagentToolInvocation,
   IToolDefinition,
 } from '@codepapr/types';
-import { Agent, type IRequestBuilder, type ICacheValidator } from './Agent';
+import {
+  Agent,
+  PERMISSION_WAITING_TOOL_TIMEOUTS,
+  type IRequestBuilder,
+  type ICacheValidator,
+} from './Agent';
 import { Session } from './Session';
 import { AppendOnlyLog } from '../cache/AppendOnlyLog';
 import { ImmutablePrefix } from '../cache/ImmutablePrefix';
@@ -328,7 +333,10 @@ export async function runSubagentSession(
     requestBuilder: deps.requestBuilder,
     cacheValidator: deps.cacheValidator,
     maxToolRounds: exec.maxToolRounds,
-    toolTimeouts: { graph: deps.graphToolTimeoutMs },
+    toolTimeouts: {
+      ...PERMISSION_WAITING_TOOL_TIMEOUTS,
+      graph: deps.graphToolTimeoutMs,
+    },
     toolOutputTruncation: deps.toolOutputTruncation,
     toolContextConfig: deps.toolContextConfig,
   });

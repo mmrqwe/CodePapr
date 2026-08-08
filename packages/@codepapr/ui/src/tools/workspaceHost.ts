@@ -52,10 +52,15 @@ export function createUiWorkspaceHost(params: {
   workspacePath: string;
   editHistory?: EditHistory;
   notifyWorkspaceMutation?: (paths: string[]) => void;
+  ensureExternalPathAllowed?: (
+    path: string | undefined,
+    operation: 'read' | 'list' | 'write' | 'execute',
+  ) => Promise<void>;
 }): WorkspaceHost {
   return {
     workspacePath: params.workspacePath,
     async listFiles(options) {
+      await params.ensureExternalPathAllowed?.(options.relativePath, 'list');
       return await invoke<ListFilesResult>('list_workspace_files', {
         workspacePath: params.workspacePath,
         relativePath: options.relativePath,
@@ -63,6 +68,7 @@ export function createUiWorkspaceHost(params: {
       });
     },
     async readTextFile(options) {
+      await params.ensureExternalPathAllowed?.(options.relativePath, 'read');
       return await invoke<ReadFileResult>('read_text_file', {
         workspacePath: params.workspacePath,
         relativePath: options.relativePath,
@@ -74,6 +80,7 @@ export function createUiWorkspaceHost(params: {
       });
     },
     async writeTextFile(options) {
+      await params.ensureExternalPathAllowed?.(options.relativePath, 'write');
       const before = await invoke<ReadFileResult>('read_text_file', {
         workspacePath: params.workspacePath,
         relativePath: options.relativePath,
@@ -93,6 +100,7 @@ export function createUiWorkspaceHost(params: {
       return result;
     },
     async runCommand(options) {
+      await params.ensureExternalPathAllowed?.(options.workdir, 'execute');
       return await invoke<CommandResult>('run_workspace_command', {
         workspacePath: params.workspacePath,
         command: options.command,
@@ -103,6 +111,7 @@ export function createUiWorkspaceHost(params: {
     },
     languageService: {
       async request<TResult, TParams>(options: WorkspaceLanguageServiceRequestOptions<TParams>) {
+        await params.ensureExternalPathAllowed?.(options.relativePath, 'read');
         const content =
           options.content ??
           (

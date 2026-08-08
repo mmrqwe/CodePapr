@@ -6,9 +6,10 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::secrets;
 use crate::shared::{canonical_workspace, home_dir, unix_millis};
@@ -22,6 +23,7 @@ const APP_DB_FILE: &str = "codepapr.sqlite";
 const APP_SETTINGS_KEY: &str = "ui.settings";
 const APP_CHARACTERS_KEY: &str = "ui.characters";
 const PAPR_APP_PERMISSION_SETTINGS_KEY: &str = "papr.appPermissionSettings";
+const EXTERNAL_ACCESS_POLICY_KEY: &str = "fs.externalAccessPolicy";
 const PROJECT_STORAGE_DIR: &str = ".CodePapr";
 const PROJECT_DB_FILE: &str = "project.sqlite";
 const PROJECT_STATE_KEY: &str = "project.state";
@@ -30,6 +32,8 @@ const LEGACY_STATE_FILE: &str = ".CodePapr/state.json";
 const MAX_SETTINGS_JSON_BYTES: usize = 200_000;
 const MAX_CHARACTERS_JSON_BYTES: usize = 50_000_000;
 const MAX_PROJECT_STATE_JSON_BYTES: usize = 20_000_000;
+
+static EXTERNAL_ACCESS_POLICY_CACHE: OnceLock<Mutex<Option<ExternalAccessPolicy>>> = OnceLock::new();
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -52,6 +56,67 @@ pub(crate) struct AppCharactersResult {
 pub(crate) struct ProjectStateResult {
     pub(crate) state_json: Option<String>,
     pub(crate) db_path: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExternalAccessPolicy {
+    pub(crate) yolo: bool,
+    pub(crate) allowed_dirs: Vec<String>,
+    pub(crate) allowed_files: Vec<String>,
+}
+
+fn external_access_policy_cache() -> &'static Mutex<Option<ExternalAccessPolicy>> {
+    EXTERNAL_ACCESS_POLICY_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+pub(crate) fn load_external_access_policy() -> Result<ExternalAccessPolicy, String> {
+    let cache = external_access_policy_cache();
+    if let Some(policy) = cache
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+    {
+        return Ok(policy);
+    }
+
+    let (conn, _) = open_app_db()?;
+    let policy = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![EXTERNAL_ACCESS_POLICY_KEY],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|err| format!("读取外部文件访问策略失败: {err}"))?
+        .and_then(|json| serde_json::from_str::<ExternalAccessPolicy>(&json).ok())
+        .unwrap_or_default();
+
+    *cache.lock().unwrap_or_else(|error| error.into_inner()) = Some(policy.clone());
+    Ok(policy)
+}
+
+pub(crate) fn save_external_access_policy(
+    policy: &ExternalAccessPolicy,
+) -> Result<ExternalAccessPolicy, String> {
+    let json = serde_json::to_string(policy)
+        .map_err(|err| format!("序列化外部文件访问策略失败: {err}"))?;
+    let (conn, _) = open_app_db()?;
+    conn.execute(
+        "INSERT INTO settings (key, value, data_type, updated_at)
+         VALUES (?1, ?2, 'json', ?3)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           data_type = excluded.data_type,
+           updated_at = excluded.updated_at",
+        params![EXTERNAL_ACCESS_POLICY_KEY, json, unix_millis()?],
+    )
+    .map_err(|err| format!("保存外部文件访问策略失败: {err}"))?;
+
+    *external_access_policy_cache()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Some(policy.clone());
+    Ok(policy.clone())
 }
 
 // ── App DB helpers ───────────────────────────────────────────────────

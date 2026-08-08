@@ -28,11 +28,46 @@ import {
 } from './workspaceToolHelpers';
 import { type WorkspaceToolContext } from './workspaceToolContext';
 
+const SYSTEM_COMMAND_PATHS = [
+  '/bin/',
+  '/sbin/',
+  '/usr/bin/',
+  '/usr/sbin/',
+  '/usr/local/bin/',
+  '/opt/homebrew/bin/',
+];
+
+function extractAbsoluteCommandPaths(command: string, skipFirstToken = true): string[] {
+  const candidates = command
+    .split(/[\s"'`=<>|;&()]+/)
+    .map((part) => part.replace(/^[,.;]+|[,.;]+$/g, ''))
+    .map((part) => part.replace(/\\/g, '/'))
+    .filter(
+      (part, index) =>
+        (!skipFirstToken || index > 0) &&
+        (part.startsWith('/') || /^[A-Za-z]:\//.test(part)),
+    );
+  return [...new Set(candidates)].filter(
+    (candidate) => !SYSTEM_COMMAND_PATHS.some((prefix) => candidate.startsWith(prefix)),
+  );
+}
+
 export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
   const {
     registry,
     workspace,
+    ensureExternalPathAllowed,
   } = ctx;
+
+  const ensureCommandPathsAllowed = async (command: string, args: string[] = []): Promise<void> => {
+    const candidates = [
+      ...extractAbsoluteCommandPaths(command),
+      ...args.flatMap((arg) => extractAbsoluteCommandPaths(arg, false)),
+    ];
+    for (const candidate of [...new Set(candidates)]) {
+      await ensureExternalPathAllowed(candidate, 'execute');
+    }
+  };
 
   registry.register(toolByName('workspace_run_command'), async (args: Record<string, unknown>) => {
     const parsed: RunCommandArgs = {
@@ -40,6 +75,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
       args: asOptionalStringArray(args.args),
       timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
     };
+    await ensureCommandPathsAllowed(parsed.command, parsed.args ?? []);
     return await invoke('run_workspace_command', {
       workspacePath: workspace(),
       command: parsed.command,
@@ -49,19 +85,27 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
   });
 
   registry.register(toolByName('workspace_run_shell_command'), async (args: Record<string, unknown>) => {
+    const workdir = asOptionalString(args.workdir);
+    const command = asString(args.command, 'command');
+    await ensureExternalPathAllowed(workdir, 'execute');
+    await ensureCommandPathsAllowed(command);
     return await invoke('run_workspace_shell_command', {
       workspacePath: workspace(),
-      command: asString(args.command, 'command'),
-      workdir: asOptionalString(args.workdir),
+      command,
+      workdir,
       timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
     });
   });
 
   registry.register(toolByName('workspace_start_shell_background_command'), async (args: Record<string, unknown>) => {
+    const workdir = asOptionalString(args.workdir);
+    const command = asString(args.command, 'command');
+    await ensureExternalPathAllowed(workdir, 'execute');
+    await ensureCommandPathsAllowed(command);
     return await invoke<BackgroundCommandResult>('start_workspace_shell_background_command', {
       workspacePath: workspace(),
-      command: asString(args.command, 'command'),
-      workdir: asOptionalString(args.workdir),
+      command,
+      workdir,
       previewUrl: asOptionalString(args.previewUrl),
     });
   });
@@ -73,6 +117,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
       args: asOptionalStringArray(args.args),
       previewUrl: asOptionalString(args.previewUrl),
     };
+    await ensureCommandPathsAllowed(parsed.command, parsed.args ?? []);
 
     return await invoke<BackgroundCommandResult>('start_workspace_background_command', {
       workspacePath: workspace(),
@@ -89,6 +134,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
       previewUrl: asHttpOrHttpsUrl(args.previewUrl, 'previewUrl'),
       title: asOptionalString(args.title),
     };
+    await ensureCommandPathsAllowed(parsed.command, parsed.args ?? []);
 
     const result = await invoke<BackgroundCommandResult>('start_workspace_background_command', {
       workspacePath: workspace(),
@@ -167,6 +213,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
       throw new Error('shell_send_input 不能同时传 input 和 command');
     }
     if (parsed.command) {
+      await ensureCommandPathsAllowed(parsed.command, parsed.args ?? []);
       return await invoke<ShellSendInputResult>('send_shell_command', {
         sessionId: parsed.sessionId,
         command: parsed.command,
@@ -176,6 +223,8 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     if (!parsed.input) {
       throw new Error('shell_send_input 必须提供 input 或 command');
     }
+
+    await ensureCommandPathsAllowed(parsed.input);
 
     return await invoke<ShellSendInputResult>('send_shell_input', {
       sessionId: parsed.sessionId,

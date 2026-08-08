@@ -21,6 +21,7 @@ import {
   type SubagentSessionResult,
   type ToolOutputTruncationOptions,
   type ToolContextConfig,
+  PERMISSION_WAITING_TOOL_TIMEOUTS,
 } from '@codepapr/core';
 import {
   DEFAULT_MAX_TOKENS,
@@ -52,13 +53,14 @@ import { APP_AGENT_LEVEL_TOOLS } from '../papr/levelGrants';
 
 declare const self: DedicatedWorkerGlobalScope;
 
-const toolResponseWaiters = new Map<
-  string,
-  {
-    resolve: (value: unknown) => void;
-    reject: (error: Error) => void;
-  }
->();
+interface ToolResponseWaiter {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timer?: ReturnType<typeof setTimeout>;
+  timeoutMs: number;
+}
+
+const toolResponseWaiters = new Map<string, ToolResponseWaiter>();
 
 const sessionAbortControllers = new Map<string, AbortController>();
 const appAgentAbortControllers = new Map<string, AbortController>();
@@ -94,6 +96,7 @@ let nextBootstrapRequestId = 0;
 
 const TOOL_IPC_TIMEOUT_MS = 120_000;
 const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 300_000;
+let permissionWaitActive = false;
 
 let cachedSettings: WorkerAgentSettings | null = null;
 let cachedToolDefinitions: IToolDefinition[] = [];
@@ -337,8 +340,16 @@ async function withIdleTimeout<T>(
   const armTimer = () => {
     if (settled) return;
     if (timer !== undefined) clearTimeout(timer);
+    if (permissionWaitActive) {
+      timer = undefined;
+      return;
+    }
     timer = setTimeout(() => {
       if (settled) return;
+      if (permissionWaitActive) {
+        timer = undefined;
+        return;
+      }
       settled = true;
       agent.cancel();
       rejectFn?.(new Error(
@@ -489,21 +500,27 @@ async function requestToolExecution(
   const toolRequestId = `${requestId}:${++nextToolRequestId}`;
 
   const result = new Promise<unknown>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      toolResponseWaiters.delete(toolRequestId);
-      reject(new Error(`工具 IPC 超时: ${toolName} (${timeoutMs / 1000}s)`));
-    }, timeoutMs);
-
-    toolResponseWaiters.set(toolRequestId, {
+    const waiter: ToolResponseWaiter = {
       resolve: (value: unknown) => {
-        clearTimeout(timer);
+        if (waiter.timer !== undefined) clearTimeout(waiter.timer);
         resolve(value);
       },
       reject: (error: Error) => {
-        clearTimeout(timer);
+        if (waiter.timer !== undefined) clearTimeout(waiter.timer);
         reject(error);
       },
-    });
+      timeoutMs,
+    };
+    const armTimer = () => {
+      if (permissionWaitActive) return;
+      waiter.timer = setTimeout(() => {
+        toolResponseWaiters.delete(toolRequestId);
+        reject(new Error(`工具 IPC 超时: ${toolName} (${timeoutMs / 1000}s)`));
+      }, timeoutMs);
+    };
+
+    toolResponseWaiters.set(toolRequestId, waiter);
+    armTimer();
   });
 
   postMessageToMain({
@@ -516,6 +533,26 @@ async function requestToolExecution(
   });
 
   return await result;
+}
+
+function setPermissionWaitActive(waiting: boolean): void {
+  permissionWaitActive = waiting;
+  if (waiting) {
+    for (const waiter of toolResponseWaiters.values()) {
+      if (waiter.timer !== undefined) {
+        clearTimeout(waiter.timer);
+        waiter.timer = undefined;
+      }
+    }
+  } else {
+    for (const [toolRequestId, waiter] of toolResponseWaiters) {
+      if (waiter.timer !== undefined) continue;
+      waiter.timer = setTimeout(() => {
+        toolResponseWaiters.delete(toolRequestId);
+        waiter.reject(new Error(`工具 IPC 超时 (${waiter.timeoutMs / 1000}s)`));
+      }, waiter.timeoutMs);
+    }
+  }
 }
 
 async function _proxyChatRequest(
@@ -978,7 +1015,7 @@ async function handleRunAppAgent(
     requestBuilder: new RequestBuilder(),
     cacheValidator: new CacheValidator(),
     maxToolRounds,
-    toolTimeouts: { graph: cachedSettings.graphToolTimeoutMs },
+    toolTimeouts: { ...PERMISSION_WAITING_TOOL_TIMEOUTS },
     toolOutputTruncation: buildToolOutputTruncation(cachedSettings),
     toolContextConfig: buildToolContextConfig(cachedSettings),
   });
@@ -1150,7 +1187,7 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     requestBuilder: new RequestBuilder(),
     cacheValidator: new CacheValidator(),
     maxToolRounds: payload.settings.maxToolRounds,
-    toolTimeouts: { graph: payload.settings.graphToolTimeoutMs },
+    toolTimeouts: { ...PERMISSION_WAITING_TOOL_TIMEOUTS },
     toolOutputTruncation: buildToolOutputTruncation(payload.settings),
     toolContextConfig: buildToolContextConfig(payload.settings),
     contextCompaction: createContextCompactionHandler(
@@ -1163,11 +1200,8 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
 
   let compacted = false;
   // Idle backstop: if the whole agent produces no stream/tool activity for this
-  // long, declare it hung and abort. Threshold sits above the max tool timeout
-  // (DEFAULT_TOOL_TIMEOUT_MS) so legitimate long tools never trip it; the timer
-  // resets on every event, so a continuously streaming/working agent never times
-  // out. The per-LLM-stream idle timeout (readSseStream) is the primary defense;
-  // this only catches hangs that escape it.
+  // long, declare it hung and abort. Permission waits explicitly suspend this
+  // backstop; the timer still catches unrelated worker/tool hangs.
   const CHAT_IDLE_TIMEOUT_MS = 300_000;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let rejectIdle: ((err: Error) => void) | undefined;
@@ -1179,7 +1213,12 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
   };
   const armIdle = () => {
     clearIdle();
+    if (permissionWaitActive) return;
     idleTimer = setTimeout(() => {
+      if (permissionWaitActive) {
+        idleTimer = undefined;
+        return;
+      }
       idleTimer = undefined;
       abortController.abort();
       rejectIdle?.(
@@ -1273,6 +1312,11 @@ function dispatchWorkerMessage(message: MainToAgentWorkerMessage): void {
     return;
   }
 
+  if (message.type === 'permission-wait') {
+    setPermissionWaitActive(message.waiting);
+    return;
+  }
+
   if (message.type === 'cancel-session') {
     const controller = sessionAbortControllers.get(message.requestId);
     if (controller) {
@@ -1282,6 +1326,7 @@ function dispatchWorkerMessage(message: MainToAgentWorkerMessage): void {
     for (const [id, waiter] of toolResponseWaiters) {
       if (id.startsWith(`${message.requestId}:`)) {
         toolResponseWaiters.delete(id);
+        if (waiter.timer !== undefined) clearTimeout(waiter.timer);
         waiter.reject(new DOMException('Session was cancelled', 'AbortError'));
       }
     }
@@ -1324,6 +1369,7 @@ function dispatchWorkerMessage(message: MainToAgentWorkerMessage): void {
     }
 
     toolResponseWaiters.delete(message.payload.toolRequestId);
+    if (waiter.timer !== undefined) clearTimeout(waiter.timer);
     if (message.payload.success) {
       waiter.resolve(message.payload.result);
     } else {

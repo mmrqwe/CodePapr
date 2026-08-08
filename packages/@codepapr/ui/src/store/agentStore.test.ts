@@ -3124,6 +3124,7 @@ describe('useAgentStore.ensureAgentForApp', () => {
 
     expect(agent).toBe(mockAgent);
     expect(createAgentMock).toHaveBeenCalledTimes(1);
+    expect(createAgentMock.mock.calls[0]?.[5]).toMatchObject({ mode: 'app' });
     const state = useAgentStore.getState();
     expect(state._agent).toBe(mockAgent);
     // 空上下文宿主 Agent：不绑定模型/提示词/会话，下一条聊天消息总是重建。

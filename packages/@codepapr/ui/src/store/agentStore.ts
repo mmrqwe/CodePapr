@@ -257,7 +257,7 @@ async function ensureAgentForAppInternal(
     customPrompt: normalizedSettings.systemPrompt,
     memorySection,
     lang: normalizedSettings.lang,
-    mode: 'agent',
+    mode: 'app',
     skillDefinitions: get()._skillDefinitions,
     agentDefinitions: get()._agentDefinitions,
     mcpToolDefinitions,
@@ -319,8 +319,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           const storedSettings = await loadAppSettings();
           settings = normalizeSettings(storedSettings ?? get().settings);
           disposeAgentHandle(get);
-          set({ settings, settingsLoaded: true, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
-          void applyBrowserEngine(settings.browserEngine);
+           set({ settings, settingsLoaded: true, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
+           void applyBrowserEngine(settings.browserEngine);
+           void invoke('set_external_access_yolo', { enabled: settings.folderAccessYolo }).catch(() => undefined);
 
           // No proactive write-back on load: legacy plaintext-key migration is
           // already handled (and re-persisted) by the backend's
@@ -369,6 +370,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         disposeAgentHandle(get);
         set({ settings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
         void saveAppSettings(settings).catch(() => undefined);
+        void invoke('set_external_access_yolo', { enabled: settings.folderAccessYolo }).catch(() => undefined);
         if (settings.browserEngine !== previousEngine) {
           void applyBrowserEngine(settings.browserEngine);
         }
@@ -1244,5 +1246,3 @@ useAgentStore.subscribe((state, prevState) => {
     void releaseSleepPrevention();
   }
 });
-
-

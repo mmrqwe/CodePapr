@@ -78,6 +78,7 @@ export function createWorkspaceToolContext(params: WorkspaceToolContextParams) {
       workspacePath: workspace(),
       editHistory,
       notifyWorkspaceMutation,
+      ensureExternalPathAllowed,
     });
 
   const resolveLanguageId = (relativePath: string): string => {
@@ -239,22 +240,40 @@ export function createWorkspaceToolContext(params: WorkspaceToolContextParams) {
     );
   };
 
-  const ensureExternalPathAllowed = async (relativePath: string | undefined, operation: 'read' | 'list'): Promise<void> => {
+  const ensureExternalPathAllowed = async (
+    relativePath: string | undefined,
+    operation: 'read' | 'list' | 'write' | 'execute',
+  ): Promise<void> => {
     if (!relativePath || !isAbsolutePath(relativePath)) return;
-    if (isWithinWorkspace(relativePath, workspace())) return;
-    const { isExternalPathAllowed, requestExternalAccess } = usePermissionStore.getState();
-    if (isExternalPathAllowed(relativePath)) return;
-    const result = await requestExternalAccess(relativePath, operation);
+    const currentWorkspace = workspace();
+    const check = await invoke<{
+      path: string;
+      canonicalPath: string;
+      exists: boolean;
+      inWorkspace: boolean;
+      allowed: boolean;
+      protected: boolean;
+    }>('check_external_path', {
+      workspacePath: currentWorkspace,
+      rawPath: relativePath,
+    });
+    if (check.inWorkspace || check.allowed) return;
+    if (check.protected) {
+      throw new Error(`安全限制：禁止访问受保护的隐藏目录 ${check.canonicalPath}`);
+    }
+
+    const { requestExternalAccess } = usePermissionStore.getState();
+    const requestPath = check.exists ? check.canonicalPath : relativePath;
+    const result = await requestExternalAccess(
+      requestPath,
+      operation,
+      currentWorkspace,
+      check.exists,
+    );
     if (!result.approved) {
-      throw new Error('用户拒绝访问外部路径');
+      throw new Error(`用户拒绝访问外部路径：${check.canonicalPath}`);
     }
   };
-
-  function isWithinWorkspace(absPath: string, ws: string): boolean {
-    if (!absPath.startsWith(ws)) return false;
-    if (absPath.length === ws.length) return true;
-    return absPath[ws.length] === '/';
-  }
 
   const PROJECT_GRAPH_CACHE_TTL_MS = 60_000;
   const PROJECT_GRAPH_CACHE_MAX_ENTRIES = 3;
@@ -299,6 +318,7 @@ export function createWorkspaceToolContext(params: WorkspaceToolContextParams) {
   };
 
   const computeIntelligenceProjectGraph = async (parsed: ProjectGraphArgs): Promise<WorkspaceProjectGraphResult> => {
+    await ensureExternalPathAllowed(parsed.relativePath, 'list');
     const listResult = await invoke<ListFilesResult>('list_workspace_files', {
       workspacePath: workspace(),
       relativePath: parsed.relativePath,

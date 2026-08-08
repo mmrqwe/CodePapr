@@ -1,9 +1,13 @@
 use crate::shared::{
-    canonical_workspace, expanded_path, normalize_workspace_filter, parse_browser_url,
-    run_blocking_workspace_task, unix_millis,
+    canonical_workspace, ensure_path_accessible, expanded_path, normalize_workspace_filter,
+    parse_browser_url, run_blocking_workspace_task, unix_millis,
 };
 use crate::shell::dangerous::{detect_dangerous_command, detect_dangerous_invocation};
 use crate::shell::process_tree::{kill_process_tree, prepare_new_process_group};
+use crate::shell::sandbox::{
+    sandboxed_command, sandboxed_shell_command, validate_restricted_command,
+    validate_restricted_shell_command,
+};
 use crate::shell::types::{
     BackgroundCommandResult, BackgroundProcessEntry, CommandResult, ManagedBackgroundProcess,
     StopAllBackgroundProcessesResult, StopBackgroundProcessResult,
@@ -222,14 +226,15 @@ pub(crate) fn run_workspace_command_impl(
     }
 
     let args = args.unwrap_or_default();
+    validate_restricted_command(&command, &args, &workspace)?;
     let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30).clamp(1, MAX_COMMAND_SECONDS));
     // 嵌套项目（如子目录里的 go.mod）需要在模块目录内执行，否则命令会跑错模块。
     let cwd = resolve_shell_workdir(&workspace, workdir)?;
 
     #[cfg(windows)]
     const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let mut cmd = Command::new(&command);
-    cmd.args(&args)
+    let mut cmd = sandboxed_command(&command, &args, &workspace)?;
+    cmd
         .env("PATH", expanded_path())
         .current_dir(cwd)
         .stdin(Stdio::null())
@@ -369,17 +374,24 @@ fn resolve_shell_workdir(workspace: &Path, workdir: Option<String>) -> Result<Pa
             } else {
                 workspace.join(p)
             };
-            if !resolved.is_dir() {
-                return Err(format!("工作目录不存在: {}", resolved.display()));
+            let canonical = fs::canonicalize(&resolved)
+                .map_err(|_| format!("工作目录不存在: {}", resolved.display()))?;
+            if !canonical.is_dir() {
+                return Err(format!("工作目录不是目录: {}", resolved.display()));
             }
-            Ok(resolved)
+            ensure_path_accessible(workspace, &canonical)?;
+            Ok(canonical)
         }
         None => Ok(workspace.to_path_buf()),
     }
 }
 
 /// 构建「穿过 shell 执行」的 Command：unix 用 $SHELL -c（缺省 /bin/bash），windows 用 cmd /C。
-fn build_shell_spawn_command(command: &str, cwd: &Path) -> Command {
+fn build_shell_spawn_command(
+    command: &str,
+    cwd: &Path,
+    workspace: &Path,
+) -> Result<Command, String> {
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW_SHELL: u32 = 0x08000000;
@@ -391,20 +403,18 @@ fn build_shell_spawn_command(command: &str, cwd: &Path) -> Command {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         prepare_new_process_group(&mut cmd);
-        cmd
+        Ok(cmd)
     }
     #[cfg(not(windows))]
     {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-        let mut cmd = Command::new(shell);
-        cmd.arg("-c").arg(command);
-        cmd.env("PATH", expanded_path())
-            .current_dir(cwd)
+        let mut cmd = sandboxed_shell_command(&shell, command, workspace)?;
+        cmd.current_dir(cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         prepare_new_process_group(&mut cmd);
-        cmd
+        Ok(cmd)
     }
 }
 
@@ -436,9 +446,10 @@ pub(crate) fn run_workspace_shell_command_impl(
         ));
     }
     let workspace = canonical_workspace(&workspace_path)?;
+    validate_restricted_shell_command(&command, &workspace)?;
     let cwd = resolve_shell_workdir(&workspace, workdir)?;
     let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30).clamp(1, MAX_COMMAND_SECONDS));
-    let mut cmd = build_shell_spawn_command(&command, &cwd);
+    let mut cmd = build_shell_spawn_command(&command, &cwd, &workspace)?;
     let child = cmd.spawn().map_err(|err| format!("启动命令失败: {err}"))?;
     let (status, stdout, stderr, timed_out) = collect_command_output(child, timeout)?;
     Ok(CommandResult {
@@ -481,6 +492,7 @@ pub(crate) fn start_workspace_background_command(
     }
 
     let args = args.unwrap_or_default();
+    validate_restricted_command(&command, &args, &workspace)?;
     let preview_url = preview_url
         .map(|raw_url| parse_browser_url(&raw_url))
         .transpose()?;
@@ -488,7 +500,7 @@ pub(crate) fn start_workspace_background_command(
 
     #[cfg(windows)]
     const CREATE_NO_WINDOW_BG: u32 = 0x08000000;
-    let mut bg_cmd = Command::new(&command);
+    let mut bg_cmd = sandboxed_command(&command, &args, &workspace)?;
     bg_cmd
         .args(&args)
         .current_dir(&workspace)
@@ -593,12 +605,13 @@ pub(crate) fn start_workspace_shell_background_command(
         ));
     }
     let workspace = canonical_workspace(&workspace_path)?;
+    validate_restricted_shell_command(&command, &workspace)?;
     let cwd = resolve_shell_workdir(&workspace, workdir)?;
     let preview_url = preview_url
         .map(|raw_url| parse_browser_url(&raw_url))
         .transpose()?;
     let workspace_path = workspace.to_string_lossy().to_string();
-    let cmd = build_shell_spawn_command(&command, &cwd);
+    let cmd = build_shell_spawn_command(&command, &cwd, &workspace)?;
     spawn_and_register_background(workspace_path, command, Vec::new(), preview_url, cmd)
 }
 

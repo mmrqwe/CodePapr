@@ -1,10 +1,12 @@
 //! Filesystem operations: list, read, write, delete, search.
 //!
-//! All file I/O is workspace-scoped — paths are resolved relative to a
-//! canonicalised workspace root and path traversal is rejected.
+//! File I/O is workspace-scoped by default. Explicitly authorized external
+//! paths and YOLO-approved paths are handled by the shared access policy;
+//! canonicalisation and path traversal checks still apply.
 
 pub(crate) mod default_project;
 pub(crate) mod diff;
+pub(crate) mod access;
 pub(crate) mod list;
 pub(crate) mod read;
 pub(crate) mod search;

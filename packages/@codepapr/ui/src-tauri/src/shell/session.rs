@@ -5,6 +5,8 @@ use crate::shell::guard::{
     find_unquoted_shell_version_constraint, write_shell_payload,
 };
 use crate::shell::process_tree::{kill_process_tree, prepare_new_process_group};
+use crate::shell::sandbox::sandboxed_command;
+use crate::shell::sandbox::{validate_restricted_command, validate_restricted_shell_command};
 use crate::shell::types::{
     ManagedShellSession, ShellCloseSessionResult, ShellReadOutputResult, ShellSendInputResult,
     ShellSessionEntry, ShellSessionResult,
@@ -12,7 +14,8 @@ use crate::shell::types::{
 use std::{
     collections::{HashMap, VecDeque},
     io::{BufRead, BufReader, Read},
-    process::{Command, Stdio},
+    path::Path,
+    process::Stdio,
     sync::{atomic::AtomicU64, Arc, Mutex, OnceLock},
     thread,
 };
@@ -113,7 +116,7 @@ pub(crate) fn open_shell_session(
     let shell = detect_default_shell(shell);
     #[cfg(windows)]
     const CREATE_NO_WINDOW_SHELL: u32 = 0x08000000;
-    let mut shell_cmd = Command::new(&shell);
+    let mut shell_cmd = sandboxed_command(&shell, &[], &workspace)?;
     shell_cmd
         .current_dir(&workspace)
         .stdin(Stdio::piped())
@@ -228,6 +231,8 @@ pub(crate) fn send_shell_input(
             .get(&session_id)
             .ok_or_else(|| format!("Shell 会话不存在: {session_id}"))?;
 
+        validate_restricted_shell_command(&input, Path::new(&session.workspace_path))?;
+
         if let Some(reason) = detect_dangerous_command(&input) {
             return Err(format!(
                 "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
@@ -254,6 +259,12 @@ pub(crate) fn send_shell_command(
         let session = sessions
             .get(&session_id)
             .ok_or_else(|| format!("Shell 会话不存在: {session_id}"))?;
+        let command_args = args.as_deref().unwrap_or(&[]);
+        validate_restricted_command(
+            &command,
+            command_args,
+            Path::new(&session.workspace_path),
+        )?;
         if let Some(reason) = detect_dangerous_invocation(&command, args.as_deref().unwrap_or(&[]))
         {
             return Err(format!(

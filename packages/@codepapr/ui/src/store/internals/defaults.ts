@@ -148,6 +148,7 @@ export const DEFAULT_SETTINGS: Settings = {
   toolIpcTimeoutMs: 120_000,
   streamIdleTimeoutMs: 300_000,
   browserEngine: 'embedded',
+  folderAccessYolo: false,
 };
 
 export function createEmptyStats(): CumulativeStats {
