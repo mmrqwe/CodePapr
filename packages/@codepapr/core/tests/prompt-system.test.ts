@@ -435,8 +435,9 @@ describe('promptSystem', () => {
       const prompt = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang });
       expect(prompt).toContain('data-theme');
       expect(prompt).toContain('prefers-color-scheme');
-      expect(prompt).toContain('#0f1117');
-      expect(prompt).toContain('#2a2d3a');
+      expect(prompt).toContain('#0a0c12');
+      expect(prompt).toContain('#f7f4ef');
+      expect(prompt).toContain('#d9673e');
       expect(prompt).toContain('#6366f1');
     }
   });

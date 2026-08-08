@@ -243,7 +243,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '- 使用 system-ui 字体族、flexbox/grid 布局、移动端友好的响应式设计',
       '- 必须有 loading 状态和 error 处理的 UI 反馈',
       '- 界面优先做成主题化：用 CSS 变量提供深/浅两套配色，通过 `@media (prefers-color-scheme: dark)` 和 `html[data-theme="dark"]` 切换（SDK 会自动把 CodePapr 当前深浅主题同步到 html 的 data-theme 属性，无需 app 自己感知，只写双主题 CSS 即可）',
-      '- 配色参照 CodePapr：深色模式背景 #0f1117、面板 #161922/#1a1d27、边框 #2a2d3a、强调色 indigo #6366f1、文字 slate 系；浅色模式用白/浅灰底 + 同款 indigo 强调，让 app 与 CodePapr 风格一致',
+      '- 配色参照 CodePapr 官网主题：深色模式底 #0a0c12、面板 #0f121a、主文字 #edeff5、边框 rgba(255,255,255,0.07)、强调 indigo #6366f1（高亮 #818cf8）；浅色模式米色底 #f7f4ef、面板 #f5f0e9、主文字 #1e1b18、边框 rgba(27,18,10,0.08)、强调橙 #d9673e（代码/深橙 #bf4f28），让 app 与 CodePapr 风格一致',
       '- appId 必须是 kebab-case（小写字母 + 数字 + 连字符），如 "todo-app"、"stock-dashboard"',
 
       '## 构建高质量 App',
@@ -429,7 +429,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '- 圖表庫通過 CDN 引用（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js）',
       '- 必須有 loading 狀態和 error 處理的 UI 回饋',
       '- 介面優先做成主題化：用 CSS 變數提供深/淺兩套配色，透過 `@media (prefers-color-scheme: dark)` 和 `html[data-theme="dark"]` 切換（SDK 會自動把 CodePapr 目前的深淺主題同步到 html 的 data-theme 屬性，無需 app 自己感知，只寫雙主題 CSS 即可）',
-      '- 配色參照 CodePapr：深色模式背景 #0f1117、面板 #161922/#1a1d27、邊框 #2a2d3a、強調色 indigo #6366f1、文字 slate 系；淺色模式用白/淺灰底 + 同款 indigo 強調，讓 app 與 CodePapr 風格一致',
+      '- 配色參照 CodePapr 官網主題：深色模式底 #0a0c12、面板 #0f121a、主文字 #edeff5、邊框 rgba(255,255,255,0.07)、強調 indigo #6366f1（高亮 #818cf8）；淺色模式米色底 #f7f4ef、面板 #f5f0e9、主文字 #1e1b18、邊框 rgba(27,18,10,0.08)、強調橙 #d9673e（程式碼/深橙 #bf4f28），讓 app 與 CodePapr 風格一致',
       '- appId 必須是 kebab-case',
 
       '## 構建高品質 App',
@@ -608,7 +608,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '- Use system-ui font, flexbox/grid layout, mobile-friendly responsive design',
       '- Must include loading states and error handling UI feedback',
       '- Build themed interfaces by default: provide both dark and light palettes via CSS variables, switched with `@media (prefers-color-scheme: dark)` and `html[data-theme="dark"]` (the SDK automatically syncs CodePapr\'s current theme to the html data-theme attribute — the app does not need to detect it, just write dual-theme CSS)',
-      '- Match the CodePapr palette: dark mode background #0f1117, panels #161922/#1a1d27, borders #2a2d3a, accent indigo #6366f1, slate text; light mode uses white/light-gray backgrounds with the same indigo accent — keep the app visually consistent with CodePapr',
+      '- Match the CodePapr website theme: dark mode background #0a0c12, panels #0f121a, primary text #edeff5, borders rgba(255,255,255,0.07), accent indigo #6366f1 (highlight #818cf8); light mode beige background #f7f4ef, panels #f5f0e9, primary text #1e1b18, borders rgba(27,18,10,0.08), accent orange #d9673e (code/deep orange #bf4f28) — keep the app visually consistent with CodePapr',
       '- appId must be kebab-case (lowercase + numbers + hyphens)',
 
       '## Building a High-Quality App',
