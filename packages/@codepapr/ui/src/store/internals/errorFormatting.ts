@@ -1,8 +1,7 @@
 import { DEFAULT_STREAM_MAX_RETRIES, ProviderRequestError } from '@codepapr/api';
 import type { Lang } from './types';
 
-function formatNetworkInterruption(lang: Lang): string {
-  const retries = DEFAULT_STREAM_MAX_RETRIES;
+function formatNetworkInterruption(lang: Lang, retries = DEFAULT_STREAM_MAX_RETRIES): string {
   return lang === 'en'
     ? `Connection lost — still failing after ${retries} retries. Please check your network and try again.`
     : lang === 'zh-TW'
@@ -11,14 +10,19 @@ function formatNetworkInterruption(lang: Lang): string {
 }
 
 /** 无 HTTP 状态码的可重试错误 = 流中断 / 请求超时等网络层故障。
- *  429/5xx 带 status，走各自的文案。 */
+ *  429/5xx 带 status，走各自的文案。
+ *  请求级重试耗尽（attempts 已设且无 status）同样归入网络层故障文案，
+ *  用真实重试次数而不是硬编码常量。 */
 function isNetworkInterruption(error: ProviderRequestError): boolean {
-  return error.retriable && error.status === undefined;
+  return (
+    (error.retriable && error.status === undefined) ||
+    (error.attempts !== undefined && error.status === undefined)
+  );
 }
 
 export function formatProviderError(error: ProviderRequestError, lang: Lang): string {
   if (isNetworkInterruption(error)) {
-    return formatNetworkInterruption(lang);
+    return formatNetworkInterruption(lang, error.attempts ?? DEFAULT_STREAM_MAX_RETRIES);
   }
 
   const providerLabel = error.provider || 'LLM';

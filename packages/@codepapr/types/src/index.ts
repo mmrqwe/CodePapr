@@ -286,6 +286,9 @@ export type IChatStreamEvent =
   /** 流中断后整段重试即将开始：此前已推送的 reasoning/content 增量作废，
    *  消费方必须先清空已累积内容再接收新一轮增量（LLM 流无法断点续传）。 */
   | { type: 'stream-restart'; attempt: number; maxRetries: number }
+  /** 请求尚未建立流（连接层失败）时的自动重试：尚无任何输出可作废，
+   *  消费方仅需更新状态提示。 */
+  | { type: 'request-retry'; attempt: number; maxRetries: number }
   | {
       type: 'tool-call-start';
       toolCallId: string;

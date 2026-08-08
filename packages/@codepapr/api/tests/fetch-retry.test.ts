@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BaseLLMProvider, ProviderRequestError } from '../src/providers/ILLMProvider';
+import {
+  BaseLLMProvider,
+  DEFAULT_REQUEST_MAX_RETRIES,
+  defaultRequestRetryDelayMs,
+  DEFAULT_REQUEST_RETRY_DELAYS_MS,
+  ProviderRequestError,
+} from '../src/providers/ILLMProvider';
 import type { IChatRequest, IChatResponse } from '@codepapr/types';
 
 /** 暴露受保护的 fetchWithRetry 以便直接测试重试/超时语义。 */
@@ -9,8 +15,13 @@ class TestProvider extends BaseLLMProvider {
   async chat(_request: IChatRequest, _signal?: AbortSignal): Promise<IChatResponse> {
     throw new Error('not used');
   }
-  public callFetch(url: string, options: RequestInit, signal?: AbortSignal) {
-    return this.fetchWithRetry(url, options, signal);
+  public callFetch(
+    url: string,
+    options: RequestInit,
+    signal?: AbortSignal,
+    onRequestRetry?: (attempt: number, maxRetries: number, error: Error) => void
+  ) {
+    return this.fetchWithRetry(url, options, signal, onRequestRetry);
   }
 }
 
@@ -18,12 +29,15 @@ function makeProvider(overrides: {
   fetchFn: typeof fetch;
   timeout?: number;
   maxRetries?: number;
+  onRequestRetry?: (attempt: number, maxRetries: number, error: Error) => void;
 }) {
   return new TestProvider({
     apiKey: 'test-key',
     fetchFn: overrides.fetchFn,
     timeout: overrides.timeout ?? 60000,
-    maxRetries: overrides.maxRetries ?? 3,
+    maxRetries: overrides.maxRetries ?? DEFAULT_REQUEST_MAX_RETRIES,
+    onRequestRetry: overrides.onRequestRetry,
+    requestRetryDelayMs: () => 0,
   });
 }
 
@@ -117,5 +131,52 @@ describe('fetchWithRetry 重试语义', () => {
     expect((err as DOMException).name).toBe('AbortError');
     // 用户取消不应触发重试
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('默认 6 次重试，连接层失败耗尽后带 attempts 字段并以 6 次文案结束', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => {
+      throw new Error('error sending request for url (https://opencode.ai/zen/go/v1/chat/completions)');
+    });
+    const provider = makeProvider({ fetchFn: fetchMock as unknown as typeof fetch });
+
+    const err = (await provider.callFetch('http://x', { method: 'POST' }).catch((e) => e)) as
+      ProviderRequestError;
+    expect(fetchMock).toHaveBeenCalledTimes(DEFAULT_REQUEST_MAX_RETRIES);
+    expect(err).toBeInstanceOf(ProviderRequestError);
+    expect(err.retriable).toBe(false);
+    expect(err.attempts).toBe(DEFAULT_REQUEST_MAX_RETRIES);
+    expect(err.maxRetries).toBe(DEFAULT_REQUEST_MAX_RETRIES);
+    expect(err.message).toContain(
+      `Network error after ${DEFAULT_REQUEST_MAX_RETRIES} attempts`
+    );
+  });
+
+  it('每次重试前调用 onRequestRetry，携带 attempt/maxRetries/错误', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => {
+      throw new Error('boom');
+    });
+    const seen: Array<{ attempt: number; maxRetries: number; error: string }> = [];
+    const provider = makeProvider({
+      fetchFn: fetchMock as unknown as typeof fetch,
+      maxRetries: 3,
+      onRequestRetry: (attempt, maxRetries, error) => {
+        seen.push({ attempt, maxRetries, error: error.message });
+      },
+    });
+
+    await provider.callFetch('http://x', { method: 'POST' }).catch(() => undefined);
+    expect(seen).toEqual([
+      { attempt: 1, maxRetries: 3, error: 'boom' },
+      { attempt: 2, maxRetries: 3, error: 'boom' },
+    ]);
+  });
+
+  it('请求级退避封顶 30s', () => {
+    expect(DEFAULT_REQUEST_RETRY_DELAYS_MS).toEqual([
+      1000, 2000, 4000, 8000, 16000, 30000,
+    ]);
+    expect(defaultRequestRetryDelayMs(1)).toBe(1000);
+    expect(defaultRequestRetryDelayMs(6)).toBe(30000);
+    expect(defaultRequestRetryDelayMs(99)).toBe(30000);
   });
 });

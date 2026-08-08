@@ -197,7 +197,7 @@ describe('withStreamIdleRetry', () => {
     expect(calls).toBe(2);
   });
 
-  it('defaults to 3 retries once the stream keeps failing', async () => {
+  it('defaults to 6 retries once the stream keeps failing', async () => {
     let calls = 0;
     await expect(
       withStreamIdleRetry(
@@ -208,15 +208,18 @@ describe('withStreamIdleRetry', () => {
         { hasEmitted: () => true, ...noDelay }
       )
     ).rejects.toBeInstanceOf(StreamIdleTimeoutError);
-    expect(calls).toBe(4);
+    expect(calls).toBe(7);
   });
 
-  it('uses the 5s/10s/15s backoff schedule by default', () => {
-    expect(DEFAULT_STREAM_RETRY_DELAYS_MS).toEqual([5000, 10000, 15000]);
+  it('uses the 5s/10s/15s/20s/25s/30s backoff schedule by default', () => {
+    expect(DEFAULT_STREAM_RETRY_DELAYS_MS).toEqual([
+      5000, 10000, 15000, 20000, 25000, 30000,
+    ]);
     expect(defaultStreamRetryDelayMs(1)).toBe(5000);
     expect(defaultStreamRetryDelayMs(2)).toBe(10000);
     expect(defaultStreamRetryDelayMs(3)).toBe(15000);
-    expect(defaultStreamRetryDelayMs(99)).toBe(15000);
+    expect(defaultStreamRetryDelayMs(6)).toBe(30000);
+    expect(defaultStreamRetryDelayMs(99)).toBe(30000);
   });
 
   it('waits the configured delay before retrying and honors abort during the wait', async () => {

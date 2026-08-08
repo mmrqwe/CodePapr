@@ -312,17 +312,17 @@ export async function readSseStream(
   }
 }
 
-export const DEFAULT_STREAM_MAX_RETRIES = 3;
+export const DEFAULT_STREAM_MAX_RETRIES = 6;
 
-/** 每次重试前的等待时长（毫秒），按重试次序取值：5s → 10s → 15s。
+/** 每次重试前的等待时长（毫秒），按重试次序取值：5s → 10s → 15s → 20s → 25s → 30s。
  *  给网络恢复留出时间，避免立即重连打在同一波故障上。 */
 export const DEFAULT_STREAM_RETRY_DELAYS_MS: readonly number[] = [
-  5_000, 10_000, 15_000,
+  5_000, 10_000, 15_000, 20_000, 25_000, 30_000,
 ];
 
 export function defaultStreamRetryDelayMs(attempt: number): number {
   const delays = DEFAULT_STREAM_RETRY_DELAYS_MS;
-  return delays[Math.min(Math.max(attempt, 1), delays.length) - 1] ?? 0;
+  return delays[Math.min(Math.max(attempt, 1), delays.length) - 1] ?? 30_000;
 }
 
 async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
@@ -350,7 +350,7 @@ export interface StreamIdleRetryOptions {
   signal?: AbortSignal;
   hasEmitted: () => boolean;
   onRetry?: (attempt: number, error: Error) => void;
-  /** 每次重试前的等待时长（毫秒），attempt 从 1 开始。默认 5s → 10s → 15s。 */
+  /** 每次重试前的等待时长（毫秒），attempt 从 1 开始。默认 5s → 10s → 15s → 20s → 25s → 30s。 */
   retryDelayMs?: (attempt: number) => number;
 }
 

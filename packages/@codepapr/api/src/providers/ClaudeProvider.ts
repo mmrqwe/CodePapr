@@ -238,7 +238,19 @@ export class ClaudeProvider extends BaseLLMProvider {
             'anthropic-version': '2023-06-01',
           },
           body: sortedStringify(payload),
-        }, signal);
+        }, signal, (attempt, maxRetries, err) => {
+          onEvent({
+            type: 'request-retry',
+            attempt,
+            maxRetries,
+          });
+          log.warn('LLM request failed, retrying', {
+            model: payload.model,
+            attempt,
+            maxRetries,
+            error: err.message,
+          });
+        });
 
         let responseId = '';
         let content = '';

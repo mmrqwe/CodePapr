@@ -944,6 +944,16 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   };
                 }
 
+                if (event.type === 'request-retry') {
+                  // 连接层失败重试：请求尚未建立流，无任何输出可作废，
+                  // 仅更新状态提示让重试过程可见。
+                  return {
+                    ...message,
+                    isStreaming: true,
+                    statusText: `${getTranslation(normalizedSettings.lang).reconnectingStatus} (${event.attempt}/${event.maxRetries})…`,
+                  };
+                }
+
                 if (event.type === 'context-compacted') {
                   // Context epoch reset happened inside the agent loop; no message
                   // mutation is needed here (the log was replaced internally).

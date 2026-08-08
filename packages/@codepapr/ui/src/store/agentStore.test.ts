@@ -1179,6 +1179,34 @@ describe('useAgentStore.sendMessage', () => {
     expect(visibleMessages[1]?.reasoningContent).toBe('完整思考');
   });
 
+  it('shows a reconnect status on request-retry and keeps the partial state intact', async () => {
+    let statusTextDuringRetry: string | undefined;
+    const chat = vi.fn(async (_input: string, onEvent?: (event: IChatStreamEvent) => void) => {
+      onEvent?.({ type: 'request-retry', attempt: 2, maxRetries: 6 });
+      // 事件处理是同步的：此刻状态栏应已显示重试进度
+      statusTextDuringRetry = (useAgentStore.getState().sessionMessages['session-1'] ?? [])
+        .find((message) => message.role === 'assistant')?.statusText;
+      onEvent?.({ type: 'content-delta', delta: '恢复后的回复' });
+
+      return createAgentResponse('恢复后的回复');
+    });
+
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    await useAgentStore.getState().sendMessage('解释一下当前实现', '解释一下当前实现', 'ask');
+
+    const visibleMessages = (useAgentStore.getState().sessionMessages['session-1'] ?? []).filter(
+      (message) => !message.hidden
+    );
+
+    expect(visibleMessages).toHaveLength(2);
+    expect(visibleMessages[1]?.content).toBe('恢复后的回复');
+    expect(statusTextDuringRetry).toContain('2/6');
+  });
+
   it('stores request-context snapshots on assistant messages when debug mode is enabled', async () => {
     const requestContext = '{\n  "round": 1,\n  "model": "deepseek-v4-pro"\n}';
     const contextSnapshot: IContextSnapshot = {

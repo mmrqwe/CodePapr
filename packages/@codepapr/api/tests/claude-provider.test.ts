@@ -348,7 +348,7 @@ describe('ClaudeProvider', () => {
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(events).toEqual(['content:半', 'restart:1/3', 'content:完整']);
+    expect(events).toEqual(['content:半', 'restart:1/6', 'content:完整']);
     expect(response?.choices[0]?.message.content).toBe('完整');
   });
 
@@ -384,8 +384,8 @@ describe('ClaudeProvider', () => {
     expect(caught).toBeInstanceOf(ProviderRequestError);
     expect((caught as ProviderRequestError).retriable).toBe(true);
     expect((caught as Error).message).toContain('Stream interrupted');
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(restarts).toEqual([1, 2, 3]);
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(restarts).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it('retries a stream break when nothing was emitted yet', async () => {
