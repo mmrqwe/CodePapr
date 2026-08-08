@@ -81,7 +81,7 @@ const result = await papr.agent.run(
 // HTTP requests
 const data = await papr.http.get('https://api.example.com/data');
 
-// File I/O (restricted to app data directory)
+// File I/O (restricted to the app data directory; writeFile auto-creates parent dirs, e.g. 'posts/x.md')
 await papr.fs.writeFile('config.json', JSON.stringify(config));
 const files = await papr.fs.list();
 ```
@@ -103,7 +103,7 @@ App access is declared by two orthogonal axes in `app_render` (or the manifest):
 |---|---|---|
 | `local` | `none` | Pure compute; only `papr.db` / `papr.fs` (app-owned sandbox, always available) |
 | `local` | `read` | + read project files (Agent read tools: read/grep/list/lsp/diagnostics, etc.) |
-| `local` | `write` | + modify project files and execute commands (Agent write/edit/patch/bash) |
+| `local` | `write` | + modify project files and execute commands (Agent write/edit/patch/bash, writing project files directly) |
 | `network` | `true` | + access the public internet (papr.http + Agent websearch/webfetch + MCP) |
 | `network` | `false` | fully offline (enforced by iframe CSP + backend sandbox; JS cannot bypass) |
 

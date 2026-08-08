@@ -814,43 +814,10 @@ async function handleRunAppAgent(
     network: payload.network ?? (payload.level !== undefined ? legacyLevelToAccess(payload.level).network : false),
   };
   const allowedTools = agentToolsFor(access.local, access.network);
-  /** app 沙箱访问档：主线程执行 bash 等工具时按此构建沙箱（网络/写按轴收窄） */
+  /** app 沙箱访问档：主线程执行 bash 等工具时按此构建沙箱（网络/写按轴收窄）。
+   *  write/edit/patch 在 local=write 时直接写项目文件（与主 agent 同权，主线程自带路径校验），
+   *  不再重定向到 app sandbox 目录。 */
   const appAccess = { network: access.network, workspaceWrite: access.local === 'write' };
-
-  const sandboxPrefix = `.CodePapr/apps/${payload.appId}/sandbox/`;
-  const SANDBOX_WRITABLE_TOOLS = new Set(['write', 'edit', 'patch']);
-
-  function isSafeSandboxPath(p: string): boolean {
-    if (!p) return false;
-    if (p.startsWith('/') || p.startsWith('\\')) return false;
-    if (p.includes('..')) return false;
-    if (p.includes('\\')) return false;
-    if (/^[a-zA-Z]:[\\/]/.test(p)) return false;
-    return true;
-  }
-
-  function sandboxWriteArgs(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
-    if (!SANDBOX_WRITABLE_TOOLS.has(toolName)) return args;
-    if (toolName === 'patch') {
-      if (Array.isArray(args.patches)) {
-        const safePatches = (args.patches as Array<Record<string, unknown>>).map((p) => {
-          if (typeof p.relativePath !== 'string' || !isSafeSandboxPath(p.relativePath)) {
-            throw new Error(`sandbox: invalid path in patch: ${String(p.relativePath)}`);
-          }
-          return { ...p, relativePath: sandboxPrefix + p.relativePath };
-        });
-        return { ...args, patches: safePatches };
-      }
-      return args;
-    }
-    if (typeof args.relativePath === 'string') {
-      if (!isSafeSandboxPath(args.relativePath)) {
-        throw new Error(`sandbox: invalid path: ${args.relativePath}`);
-      }
-      return { ...args, relativePath: sandboxPrefix + args.relativePath };
-    }
-    return args;
-  }
 
   const toolIpcTimeoutMs = cachedSettings.toolIpcTimeoutMs ?? TOOL_IPC_TIMEOUT_MS;
 
@@ -870,11 +837,10 @@ async function handleRunAppAgent(
     }
 
     registry.register(tool, async (args, context) => {
-      const sandboxedArgs = sandboxWriteArgs(tool.name, args);
       toolActivity?.();
       try {
         return await requestToolExecution(
-          requestId, tool.name, sandboxedArgs, toolIpcTimeoutMs, context?.toolCallId, appAccess
+          requestId, tool.name, args, toolIpcTimeoutMs, context?.toolCallId, appAccess
         );
       } finally {
         toolActivity?.();

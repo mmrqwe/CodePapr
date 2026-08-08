@@ -173,7 +173,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '适用场景：调用外部 API 获取数据（JSON API、RSS feed 等）。',
       '需要权限：http:get, http:post',
       '',
-      '### papr.fs — 文件读写（限定 app data 目录 .CodePapr/apps/<appId>/data/）',
+      '### papr.fs — 文件读写（限定 app data 目录 .CodePapr/apps/<appId>/data/；writeFile 自动创建子目录，如 posts/x.md）',
       'await papr.fs.writeFile(path, content)  // 写文件',
       'await papr.fs.readFile(path, maxBytes?) // 读文件',
       'await papr.fs.list(path?)               // 列出目录文件',
@@ -193,7 +193,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '| write | 可修改项目 | + Agent 写入/执行（write/edit/patch/bash） |',
       '| network=true | 可联网 | + papr.http + Agent websearch/webfetch + MCP |',
       '',
-      '推荐组合：计算器 → {local:"none", network:false}；Todo/笔记 → {local:"none", network:false}；数据分析看板 → {local:"read", network:true}；重构工具 → {local:"write", network:false}。',
+      '推荐组合：计算器 → {local:"none", network:false}；Todo/笔记 → {local:"none", network:false}；数据分析看板 → {local:"read", network:true}；重构工具 → {local:"write", network:false}。\n💡 需要把生成的文件写入项目时（如导出静态网站/文档/报告到项目文件夹），用 local:"write" + agent：agent 会用 write/edit/patch/bash 直接写项目文件（如 task: "生成博客站点到 docs/blog/"）。',
       '⚠️ 后端服务（command）要求 local 至少为 "read"。',
       'papr.db / papr.fs 是 app 自有沙箱，永远可用，无需任何权限。',
       '旧 level 参数（0-3）仍兼容：0→{none,off}、1→{read,off}、2→{read,on}、3→{write,on}。',
@@ -331,7 +331,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '適用場景：呼叫外部 API 獲取資料（JSON API、RSS feed 等）。',
       '需要權限：http:get, http:post',
       '',
-      '### papr.fs — 檔案讀寫（限定 app data 目錄 .CodePapr/apps/<appId>/data/）',
+      '### papr.fs — 檔案讀寫（限定 app data 目錄 .CodePapr/apps/<appId>/data/；writeFile 自動建立子目錄，如 posts/x.md）',
       'await papr.fs.writeFile(path, content)  // 寫檔案',
       'await papr.fs.readFile(path, maxBytes?) // 讀檔案',
       'await papr.fs.list(path?)               // 列出目錄檔案',
@@ -353,7 +353,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '| write | 可修改專案 | + Agent 寫入/執行（write/edit/patch/bash） |',
       '| network=true | 可聯網 | + papr.http + Agent websearch/webfetch + MCP |',
       '',
-      '推薦組合：計算器 → {local:"none", network:false}；Todo/筆記 → {local:"none", network:false}；資料分析看板 → {local:"read", network:true}；重構工具 → {local:"write", network:false}。',
+      '推薦組合：計算器 → {local:"none", network:false}；Todo/筆記 → {local:"none", network:false}；資料分析看板 → {local:"read", network:true}；重構工具 → {local:"write", network:false}。\n💡 需要把產生的檔案寫入專案時（如匯出靜態網站/文件/報告到專案資料夾），用 local:"write" + agent：agent 會用 write/edit/patch/bash 直接寫專案檔案（如 task: "生成部落格站點到 docs/blog/"）。',
       '⚠️ 後端服務（command）要求 local 至少為 "read"。',
       'papr.db / papr.fs 是 app 自有沙箱，永遠可用，無需任何權限。',
       '舊 level 參數（0-3）仍相容：0→{none,off}、1→{read,off}、2→{read,on}、3→{write,on}。',
@@ -482,7 +482,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       'Use for: calling external APIs (JSON APIs, RSS feeds, etc.).',
       'Permissions: http:get, http:post',
       '',
-      '### papr.fs — File I/O (restricted to .CodePapr/apps/<appId>/data/)',
+      '### papr.fs — File I/O (restricted to .CodePapr/apps/<appId>/data/; writeFile auto-creates subdirectories, e.g. posts/x.md)',
       'await papr.fs.writeFile(path, content)  // Write file',
       'await papr.fs.readFile(path, maxBytes?) // Read file',
       'await papr.fs.list(path?)               // List directory',
@@ -502,7 +502,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '| write | Modify the project | + Agent write/execute (write/edit/patch/bash) |',
       '| network=true | Network access | + papr.http + Agent websearch/webfetch + MCP |',
       '',
-      'Recommended combos: calculator → {local:"none", network:false}; Todo/notes → {local:"none", network:false}; data dashboard → {local:"read", network:true}; refactoring tool → {local:"write", network:false}.',
+      'Recommended combos: calculator → {local:"none", network:false}; Todo/notes → {local:"none", network:false}; data dashboard → {local:"read", network:true}; refactoring tool → {local:"write", network:false}.\n💡 To write generated files into the project (e.g. export a static site/docs/report into the project folder), use local:"write" + an agent — the agent writes project files directly with write/edit/patch/bash (e.g. task: "Generate a blog site into docs/blog/").',
       '⚠️ Backend services (command) require local to be at least "read".',
       'papr.db / papr.fs are app-owned sandbox and always available — no permission needed.',
       'The legacy level parameter (0-3) still works: 0→{none,off}, 1→{read,off}, 2→{read,on}, 3→{write,on}.',
@@ -958,10 +958,10 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
     const appRender: string[] = [];
     appRender.push(
         lang === 'en'
-          ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps to the application panel. app_render writes manifest.json and index.html to `.CodePapr/apps/<appId>/` itself — do NOT write the files manually with other tools first. appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. The HTML runs in a sandboxed iframe isolated from the host — use CDN for libraries (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js) and fetch() for data APIs.\n\n📦 Papr SDK (available in your HTML via window.papr):\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — persistent key-value storage (default in-app persistence)\n  • papr.agent.run({agent, task}) — invoke an AI agent (define agents in the agents parameter; agents cannot read papr.db — put the data they need into the task)\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP requests (public URLs only, cannot reach localhost backends)\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — file I/O in app data directory\n  • papr.app.info() — get app metadata\n⚠️ The access profile is declared via app_render local/network parameters (see the permission model above); papr.db/papr.fs are always available, papr.http requires network:true.'
+          ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps to the application panel. app_render writes manifest.json and index.html to `.CodePapr/apps/<appId>/` itself — do NOT write the files manually with other tools first. appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. The HTML runs in a sandboxed iframe isolated from the host — use CDN for libraries (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js) and fetch() for data APIs.\n\n📦 Papr SDK (available in your HTML via window.papr):\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — persistent key-value storage (default in-app persistence)\n  • papr.agent.run({agent, task}) — invoke an AI agent (define agents in the agents parameter; agents cannot read papr.db — put the data they need into the task)\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP requests (public URLs only, cannot reach localhost backends)\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — file I/O in app data directory (writeFile auto-creates subdirs)\n  • papr.app.info() — get app metadata\n⚠️ The access profile is declared via app_render local/network parameters (see the permission model above); papr.db/papr.fs are always available, papr.http requires network:true.'
           : lang === 'zh-TW'
-          ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用渲染到應用面板。app_render 會自動寫入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手動寫檔案。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。HTML 在與宿主隔離的沙箱 iframe 中運行——通過 CDN 引用函式庫，支援 fetch() 存取資料 API。\n\n📦 Papr SDK（在 HTML 中可通過 window.papr 使用）：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 鍵值持久化存儲（應用內持久化預設用它）\n  • papr.agent.run({agent, task}) — 調用 AI Agent（在 agents 參數中定義；Agent 讀不到 papr.db，需要的資料要放進 task）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 請求（僅限公網位址，不能存取 localhost 後端）\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — app data 目錄內的檔案讀寫\n  • papr.app.info() — 獲取應用資訊\n⚠️ 存取檔用 app_render 的 local/network 參數宣告（見上權限模型）；papr.db/papr.fs 永遠可用無需宣告，papr.http 需要 network:true。'
-          : '- [app_render] 你的主要输出工具。将交互式 HTML 应用渲染到应用面板。app_render 会自动写入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手动写文件。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。HTML 在与宿主隔离的沙箱 iframe 中运行——通过 CDN 引用库，支持 fetch() 访问数据 API。\n\n📦 Papr SDK（在 HTML 中可通过 window.papr 使用）：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 键值持久化存储（应用内持久化默认用它）\n  • papr.agent.run({agent, task}, onProgress?) — 调用 AI Agent（在 agents 参数中定义，可声明 tools 和 maxToolRounds；Agent 读不到 papr.db，需要的数据要放进 task）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 请求（仅限公网地址，不能访问 localhost 后端）\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — app data 目录内的文件读写\n  • papr.app.info() — 获取应用信息\n⚠️ 访问档用 app_render 的 local/network 参数声明（见上权限模型）；papr.db/papr.fs 永远可用无需声明，papr.http 需要 network:true。\n🤖 Agent 工具（在 agents[].tools 声明，需在访问档允许范围内）：read, grep, list, lsp, diagnostics, read_image, skill_load, todo, local_time_now, websearch, webfetch（network）, write, edit, patch, bash（write）。工具运行在 Agent Loop 中，支持多轮调用（maxToolRounds 控制上限）。'
+          ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用渲染到應用面板。app_render 會自動寫入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手動寫檔案。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。HTML 在與宿主隔離的沙箱 iframe 中運行——通過 CDN 引用函式庫，支援 fetch() 存取資料 API。\n\n📦 Papr SDK（在 HTML 中可通過 window.papr 使用）：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 鍵值持久化存儲（應用內持久化預設用它）\n  • papr.agent.run({agent, task}) — 調用 AI Agent（在 agents 參數中定義；Agent 讀不到 papr.db，需要的資料要放進 task）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 請求（僅限公網位址，不能存取 localhost 後端）\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — app data 目錄內的檔案讀寫（writeFile 自動建立子目錄）\n  • papr.app.info() — 獲取應用資訊\n⚠️ 存取檔用 app_render 的 local/network 參數宣告（見上權限模型）；papr.db/papr.fs 永遠可用無需宣告，papr.http 需要 network:true。'
+          : '- [app_render] 你的主要输出工具。将交互式 HTML 应用渲染到应用面板。app_render 会自动写入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手动写文件。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。HTML 在与宿主隔离的沙箱 iframe 中运行——通过 CDN 引用库，支持 fetch() 访问数据 API。\n\n📦 Papr SDK（在 HTML 中可通过 window.papr 使用）：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 键值持久化存储（应用内持久化默认用它）\n  • papr.agent.run({agent, task}, onProgress?) — 调用 AI Agent（在 agents 参数中定义，可声明 tools 和 maxToolRounds；Agent 读不到 papr.db，需要的数据要放进 task）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 请求（仅限公网地址，不能访问 localhost 后端）\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — app data 目录内的文件读写（writeFile 自动创建子目录）\n  • papr.app.info() — 获取应用信息\n⚠️ 访问档用 app_render 的 local/network 参数声明（见上权限模型）；papr.db/papr.fs 永远可用无需声明，papr.http 需要 network:true。\n🤖 Agent 工具（在 agents[].tools 声明，需在访问档允许范围内）：read, grep, list, lsp, diagnostics, read_image, skill_load, todo, local_time_now, websearch, webfetch（network）, write, edit, patch, bash（write）。工具运行在 Agent Loop 中，支持多轮调用（maxToolRounds 控制上限）。'
     );
     lines.push(
       lang === 'en' ? '### App Render' : lang === 'zh-TW' ? '### 應用渲染' : '### 应用渲染'

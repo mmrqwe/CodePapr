@@ -81,7 +81,7 @@ const result = await papr.agent.run(
 // HTTP 请求
 const data = await papr.http.get('https://api.example.com/data');
 
-// 文件读写（限定 app data 目录）
+// 文件读写（限定 app data 目录；writeFile 自动创建父目录，如 'posts/x.md'）
 await papr.fs.writeFile('config.json', JSON.stringify(config));
 const files = await papr.fs.list();
 ```
@@ -103,7 +103,7 @@ App 的访问权限由**两个正交轴**组成，在 `app_render`（或 manifes
 |---|---|---|
 | `local` | `none` | 纯计算，仅 `papr.db` / `papr.fs`（app 自有沙箱，永远可用） |
 | `local` | `read` | + 读取项目文件（Agent 只读工具 read/grep/list/lsp/diagnostics 等） |
-| `local` | `write` | + 修改项目文件并执行命令（Agent write/edit/patch/bash） |
+| `local` | `write` | + 修改项目文件并执行命令（Agent write/edit/patch/bash，直接写项目文件） |
 | `network` | `true` | + 访问公网（papr.http + Agent websearch/webfetch + MCP） |
 | `network` | `false` | 完全断网（iframe CSP + 后端沙箱强制，JS 无法绕过） |
 

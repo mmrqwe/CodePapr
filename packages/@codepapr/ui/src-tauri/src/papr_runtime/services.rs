@@ -300,7 +300,7 @@ pub fn papr_fs_write(
     permission::check_permission(&manifest, &app_id, "fs:write")?;
 
     let ctx = crate::papr_runtime::app_context::get(&app_id)?;
-    if path.contains("..") || path.contains('\\') || path.is_empty() {
+    if path.contains("..") || path.contains('\\') || path.starts_with('/') || path.is_empty() {
         return Err("invalid path".to_string());
     }
 
@@ -309,24 +309,32 @@ pub fn papr_fs_write(
     }
 
     let _ = ensure_app_data_dir(&ctx.workspace_path, &app_id)?;
-    let resolved = resolve_app_path(&ctx.workspace_path, &app_id, &path)
-        .or_else(|_| {
-            let base = app_data_dir(&ctx.workspace_path, &app_id)?;
-            let candidate = base.join(&path);
-            if let Some(parent) = candidate.parent() {
-                let canonical_parent = parent.canonicalize().map_err(|_| {
-                    "parent directory does not exist".to_string()
-                })?;
-                let canonical_base = base.canonicalize().map_err(|_| {
-                    "app data directory does not exist".to_string()
-                })?;
-                if !canonical_parent.starts_with(&canonical_base) {
-                    return Err("path traversal blocked".to_string());
-                }
-            }
-            Ok(candidate)
-        })?;
+    let base = app_data_dir(&ctx.workspace_path, &app_id)?;
+    let canonical_base = base.canonicalize().map_err(|_| {
+        format!("app data directory does not exist: {}", base.display())
+    })?;
 
+    // 沿路径找到最深的已存在祖先并确认其位于 data/ 内（防符号链接/遍历逃逸），
+    // 随后 create_dir_all 自动创建缺失的父目录——writeFile("posts/x.md") 无需先建 posts/。
+    let mut probe = base.join(&path);
+    let mut existing_parent: Option<PathBuf> = None;
+    while let Some(parent) = probe.parent() {
+        if parent.exists() {
+            existing_parent = Some(parent.to_path_buf());
+            break;
+        }
+        probe = parent.to_path_buf();
+    }
+    if let Some(parent) = &existing_parent {
+        let canonical_parent = parent.canonicalize().map_err(|err| {
+            format!("无法访问目录 {}: {err}", parent.display())
+        })?;
+        if !canonical_parent.starts_with(&canonical_base) {
+            return Err("path traversal blocked".to_string());
+        }
+    }
+
+    let resolved = base.join(&path);
     if let Some(parent) = resolved.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("创建目录失败: {err}"))?;
@@ -530,6 +538,48 @@ mod tests {
         assert_eq!(content, "Hello World");
 
         unregister_test_app("test-app");
+    }
+
+    #[test]
+    fn fs_write_auto_creates_subdirectories() {
+        let ws = TestWorkspace::new("papr-fs-nested");
+        register_test_app(&ws.workspace_arg(), "nested-app", &[]);
+
+        // 写嵌套路径：父目录不存在时应自动创建（博客 posts/ 分目录场景）
+        papr_fs_write("nested-app".into(), "posts/first.md".into(), "# Hello".into()).unwrap();
+        papr_fs_write("nested-app".into(), "posts/archive/old.md".into(), "# Old".into()).unwrap();
+
+        assert!(ws
+            .file_path(".CodePapr/apps/nested-app/data/posts/first.md")
+            .exists());
+        assert!(ws
+            .file_path(".CodePapr/apps/nested-app/data/posts/archive/old.md")
+            .exists());
+        let content = papr_fs_read("nested-app".into(), "posts/archive/old.md".into(), None).unwrap();
+        assert_eq!(content, "# Old");
+
+        // list 能列出新建的嵌套目录
+        let entries = papr_fs_list("nested-app".into(), Some("posts".into())).unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"first.md"));
+        assert!(names.contains(&"archive"));
+
+        unregister_test_app("nested-app");
+    }
+
+    #[test]
+    fn fs_write_rejects_escape_paths() {
+        let ws = TestWorkspace::new("papr-fs-escape");
+        register_test_app(&ws.workspace_arg(), "escape-app", &[]);
+
+        // 绝对路径与 .. 逃逸必须被拦截（不能写出 data/）
+        assert!(papr_fs_write("escape-app".into(), "/tmp/evil.txt".into(), "x".into()).is_err());
+        assert!(papr_fs_write("escape-app".into(), "../evil.txt".into(), "x".into()).is_err());
+        assert!(papr_fs_write("escape-app".into(), "a\\..\\evil.txt".into(), "x".into()).is_err());
+        assert!(!ws.file_path(".CodePapr/apps/escape-app/data/../evil.txt").exists());
+        assert!(!ws.file_path("/tmp/evil.txt").exists());
+
+        unregister_test_app("escape-app");
     }
 
     #[test]

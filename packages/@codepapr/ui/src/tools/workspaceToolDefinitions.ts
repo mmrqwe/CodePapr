@@ -1138,7 +1138,7 @@ name: 'web_download_file',
               tools: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Agent 可用的工具白名单（可选）。可用工具名：read, grep, list, lsp, diagnostics, read_image, skill_load, todo, local_time_now, websearch, webfetch（需 network:true）, write, edit, patch, bash（需 local:write）。不声明 = 使用当前访问档（local/network）允许的全部工具。始终排除 task 和 app_render。',
+                description: 'Agent 可用的工具白名单（可选）。可用工具名：read, grep, list, lsp, diagnostics, read_image, skill_load, todo, local_time_now, websearch, webfetch（需 network:true）, write, edit, patch, bash（需 local:write，直接写项目文件）。不声明 = 使用当前访问档（local/network）允许的全部工具。始终排除 task 和 app_render。',
               },
               maxToolRounds: {
                 type: 'number',
