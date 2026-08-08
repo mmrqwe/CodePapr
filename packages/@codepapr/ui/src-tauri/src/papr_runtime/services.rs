@@ -45,7 +45,7 @@ fn is_internal_domain(host: &str) -> bool {
 /// parsed with the WHATWG `url` crate so IPv4 special forms (decimal
 /// `2130706433`, short `127.1`, hex/octal octets) are normalised to a canonical
 /// address before the range checks, closing string-parsing bypasses.
-fn is_private_or_internal_url(url: &str) -> bool {
+pub(crate) fn is_private_or_internal_url(url: &str) -> bool {
     match url::Url::parse(url) {
         Ok(parsed) => match parsed.host() {
             Some(url::Host::Ipv4(ip)) => is_internal_ipv4(ip),
@@ -509,6 +509,8 @@ mod tests {
             args: None,
             port: None,
             level: None,
+            local: None,
+            network: None,
         };
         manifest::store_manifest(app_id, m);
     }
@@ -599,12 +601,14 @@ mod tests {
             args: None,
             port: None,
             level: None,
+            local: None,
+            network: None,
         };
         manifest::store_manifest("noperm-app", m);
 
+        // 两轴模型：papr.fs 是 app 自有沙箱，永远可用，无需声明任何权限
         let result = papr_fs_write("noperm-app".into(), "f.txt".into(), "data".into());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("permission denied"));
+        assert!(result.is_ok());
 
         crate::papr_runtime::app_context::unregister("noperm-app");
         manifest::clear_manifest("noperm-app");

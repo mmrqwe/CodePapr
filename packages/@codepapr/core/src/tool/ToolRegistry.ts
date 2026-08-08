@@ -2,7 +2,7 @@
  * ToolRegistry: 工具注册中心 (冻结后不可修改，保证缓存一致性)
  */
 
-import { IToolDefinition, CacheConsistencyError } from '@codepapr/types';
+import { IToolDefinition, CacheConsistencyError, AppSandboxAccess } from '@codepapr/types';
 import { sha256, deepFreeze, Logger } from '@codepapr/common';
 import { Serializer } from '../cache/Serializer';
 
@@ -13,6 +13,8 @@ export interface ToolExecutionContext {
    *  match a tool-request to its pending call by id (robust even for concurrent
    *  identical calls) instead of by name+arguments. */
   toolCallId?: string;
+  /** app agent（papr.agent.run）专属：该 app 的两轴访问档，bash 等工具按此构建沙箱。 */
+  appAccess?: AppSandboxAccess;
 }
 
 export type ToolHandler = (

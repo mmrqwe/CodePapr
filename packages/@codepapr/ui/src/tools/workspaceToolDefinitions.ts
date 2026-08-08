@@ -1093,7 +1093,7 @@ name: 'web_download_file',
   {
     name: 'app_render',
     description:
-      '生成一个交互式 HTML 应用到应用面板。用于数据分析可视化、仪表盘、关系图等。自动写入 manifest.json 和 index.html 到 .CodePapr/apps/<appId>/ 目录，并注册到应用管理面板。相同 appId 会覆盖已有应用。\n\n📦 Papr SDK 可用：生成的 HTML 可通过 window.papr 调用 CodePapr 能力：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 键值持久化存储（应用内数据持久化默认用它）\n  • papr.agent.run({agent, task}) — 调用 AI Agent（Agent 读不到 papr.db，需要的数据要放进 task）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 请求（仅限公网地址）\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) / papr.fs.delete(path) — 文件读写（限定 app data 目录）\n  • papr.app.info() — 获取应用信息\n⚠️ 使用前必须在 permissions 参数中声明对应权限（storage:read, storage:write, http:get, http:post, fs:read, fs:write, workspace:read, workspace:write, workspace:exec, agent:run:<name>）。',
+      '生成一个交互式 HTML 应用到应用面板。用于数据分析可视化、仪表盘、关系图等。自动写入 manifest.json 和 index.html 到 .CodePapr/apps/<appId>/ 目录，并注册到应用管理面板。相同 appId 会覆盖已有应用。\n\n📦 Papr SDK 可用：生成的 HTML 可通过 window.papr 调用 CodePapr 能力：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 键值持久化存储（应用内数据持久化默认用它，永远可用）\n  • papr.agent.run({agent, task}) — 调用 AI Agent（Agent 读不到 papr.db，需要的数据要放进 task；工具集由 local/network 决定）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 请求（仅限公网地址，需 network: true）\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) / papr.fs.delete(path) — 文件读写（限定 app data 目录，永远可用）\n  • papr.app.info() — 获取应用信息\n⚠️ 访问档用 local（none/read/write）+ network（true/false）两个参数声明；papr.db/papr.fs 无需权限，papr.http 需 network:true。',
     parameters: {
       type: 'object',
       properties: {
@@ -1107,16 +1107,25 @@ name: 'web_download_file',
         },
         html: {
           type: 'string',
-          description: '前端 HTML 文档内容（index.html）。可以内联 CSS/JS，可以引用 CDN（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js）。可使用 window.papr SDK 调用 CodePapr 能力（需声明 permissions）。',
+          description: '前端 HTML 文档内容（index.html）。可以内联 CSS/JS，可以引用 CDN（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js）。可使用 window.papr SDK 调用 CodePapr 能力（papr.db/papr.fs 永远可用；papr.http 需要 network: true）。',
+        },
+        local: {
+          type: 'string',
+          enum: ['none', 'read', 'write'],
+          description: '可选。本地（工作区）访问轴：none=纯计算（仅 papr.db/papr.fs，默认）, read=可读取项目文件（Agent 只读工具）, write=可修改项目并执行命令（Agent write/edit/patch/bash）。后端服务（command）要求至少 read。',
+        },
+        network: {
+          type: 'boolean',
+          description: '可选。网络开关：true=可访问公网（papr.http + Agent websearch/webfetch + MCP），false=完全断网（默认，CSP+沙箱强制）。',
         },
         permissions: {
           type: 'array',
           items: { type: 'string' },
-          description: '可选。应用需要的权限列表（必须是 level 允许范围内的子集）。可选值：storage:read, storage:write, http:get, http:post, fs:read, fs:write, agent:run:<agentName>, workspace:read, workspace:write, workspace:exec。',
+          description: '可选（旧参数，已废弃）。应用需要的权限列表。新 manifest 使用 local/network 两轴参数。',
         },
         level: {
           type: 'number',
-          description: '权限级别 0-3。L0=纯计算, L1=Runtime（存储+文件+AI Agent+只读工作区，默认）, L2=联网（+HTTP+搜索+MCP）, L3=系统（+文件写入+终端执行，需用户全局开启）。',
+          description: '可选（旧参数，已废弃，仍兼容）。权限级别 0-3：0→{local:none,network:off}, 1→{local:read,network:off}, 2→{local:read,network:on}, 3→{local:write,network:on}。推荐改用 local/network。',
         },
         agents: {
           type: 'array',
@@ -1129,7 +1138,7 @@ name: 'web_download_file',
               tools: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Agent 可用的工具白名单（可选）。可用工具名：read, grep, list, lsp, diagnostics, read_image, skill_load, todo, local_time_now, websearch, webfetch（L2+）, write, edit, patch, bash（L3）。不声明 = 使用当前级别允许的全部工具。始终排除 task 和 app_render。高危工具（write/edit/patch/bash）需 manifest.permissions 中声明 workspace:write/exec。',
+                description: 'Agent 可用的工具白名单（可选）。可用工具名：read, grep, list, lsp, diagnostics, read_image, skill_load, todo, local_time_now, websearch, webfetch（需 network:true）, write, edit, patch, bash（需 local:write）。不声明 = 使用当前访问档（local/network）允许的全部工具。始终排除 task 和 app_render。',
               },
               maxToolRounds: {
                 type: 'number',

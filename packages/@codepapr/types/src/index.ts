@@ -602,12 +602,28 @@ export type PaprPermission =
   | 'workspace:exec'
   | `agent:run:${string}`;
 
+/** 两轴权限模型：本地（工作区）访问轴。 */
+export type PaprLocalAccess = 'none' | 'read' | 'write';
+
+/** 两轴权限：local（无/只读/读写执行）× network（关/开）。 */
+export interface PaprAccess {
+  local: PaprLocalAccess;
+  network: boolean;
+}
+
+/** 工具桥接携带的 app 沙箱访问档：主线程执行 bash 等工具时按此构建沙箱。 */
+export interface AppSandboxAccess {
+  network: boolean;
+  workspaceWrite: boolean;
+}
+
+/** 旧四档等级（仅用于老 manifest 迁移，新代码使用 PaprLocalAccess）。 */
 export type PaprLevel = 0 | 1 | 2 | 3;
 
 export interface PaprAppSettings {
-  defaultLevel: PaprLevel;
-  allowLevel3: boolean;
-  appOverrides: Record<string, PaprLevel>;
+  defaultLocal: PaprLocalAccess;
+  defaultNetwork: boolean;
+  appOverrides: Record<string, PaprAccess>;
 }
 
 export interface PaprManifest {
@@ -621,6 +637,8 @@ export interface PaprManifest {
   args?: string[];
   port?: number;
   level?: PaprLevel;
+  local?: PaprLocalAccess;
+  network?: boolean;
 }
 
 export interface PaprIPCRequest {

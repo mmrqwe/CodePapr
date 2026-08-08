@@ -84,16 +84,19 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     });
   });
 
-  registry.register(toolByName('workspace_run_shell_command'), async (args: Record<string, unknown>) => {
+  registry.register(toolByName('workspace_run_shell_command'), async (args: Record<string, unknown>, context) => {
     const workdir = asOptionalString(args.workdir);
     const command = asString(args.command, 'command');
     await ensureExternalPathAllowed(workdir, 'execute');
     await ensureCommandPathsAllowed(command);
+    // app agent 调用时按两轴构建沙箱：网络关 → 无网络；local 非 write → 工作区只读
+    const appAccess = context?.appAccess;
     return await invoke('run_workspace_shell_command', {
       workspacePath: workspace(),
       command,
       workdir,
       timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
+      ...(appAccess ? { sandbox: appAccess } : {}),
     });
   });
 

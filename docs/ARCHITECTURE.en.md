@@ -252,18 +252,25 @@ LLM can manage app lifecycle via 4 tools (registered as merge tools in `workspac
 
 App list + fixed bottom action bar. List items: green/red status dot + emoji icon + app name. Bottom bar: ▶ Start / Open / ■ Stop / 🗑 Delete. Buttons auto-enable/disable based on selected app state. "Open" for pure frontend apps is always enabled; for backend apps, only when running.
 
-**Permission Level System (4 Tiers):**
+**Permission Model (Two Axes: local × network):**
 
-Apps declare a permission level via manifest `level` field:
+Apps declare an access profile via manifest `local` (`none`/`read`/`write`) × `network` (`true`/`false`); legacy `level` (0-3) migrates automatically (0→{none,off}, 1→{read,off}, 2→{read,on}, 3→{write,on}):
 
-| Level | Name | Capabilities |
-|---|---|---|
-| L0 | Pure Compute | No external access, HTML/CSS/JS only |
-| L1 | Runtime (default) | `papr.db` + `papr.fs` + AI Agent (read-only tools: read/grep/list/lsp) |
-| L2 | Network | + `papr.http` + Agent web search + MCP tools |
-| L3 | System | + file write/terminal/git. Requires global user enable in Settings |
+| local | Capabilities |
+|---|---|
+| `none` | Pure compute; only `papr.db`/`papr.fs` (app-owned sandbox, always available) |
+| `read` | + Agent read-only tools (read/grep/list/lsp/diagnostics/read_image/skill_load) |
+| `write` | + Agent write/execute (write/edit/patch/bash) |
+| network=true | + papr.http + Agent websearch/webfetch + MCP |
 
-Resolution: `effective_level = min(manifest.level, user_override, global_allowLevel3_switch)`. Settings has a new **App Tab** (`AppPermissionsTab.tsx`): global default level selector, Level 3 global toggle, per-app override dropdowns.
+Resolution: `effective = manifest_access ∩ user_override` (overrides can only narrow). Settings **App Tab** (`AppPermissionsTab.tsx`): global defaults (local × network) + per-app two-control overrides.
+
+**Network enforcement chain (core of the two-axis model):**
+
+1. **Direct iframe networking**: `handle_app_protocol` injects a CSP response header (`build_app_csp`) per the manifest access profile. Network off: `connect-src 'self' [own backend port]`, `img-src 'self' data:`, `form-action 'none'` — enforced by the browser engine, JS cannot bypass; CDN scripts (`script-src https:`) stay but cannot exfiltrate. Network on: `https:/wss:/ws:` opened.
+2. **Backend processes**: `app_start` resolves the access profile from the manifest and passes it via the `sandbox` argument to `start_workspace_background_command`; the sandbox-exec profile is built per axis (network off = `network-bind` for localhost listen only, no outbound; local=read = workspace read-only).
+3. **App-agent bash**: the worker carries `appAccess` in the tool-request bridge; the main-thread `run_workspace_shell_command` builds the sandbox per the access profile.
+4. **Agent webfetch**: `fetch_web_url` now has SSRF protection (aligned with papr.http), blocking internal/private addresses.
 
 **Backend URL Injection:**
 
@@ -709,7 +716,7 @@ The settings panel has six tabs. Full parameter reference: `packages/@codepapr/c
 | Search | Self-hosted SearXNG first, with automatic fallback to built-in multi-source aggregation when unavailable; engine selector removed from UI; category/time/language/safe search parameters moved to collapsible Advanced Options section |
 | Mentor | Mentor sub-agent independent API key, Base URL, model selection |
 | Advanced | Context compaction (model/temperature/summary output tokens/context limit/conversation rounds), TodoList max retries, ProjectGraph depth/file limits, streaming & tool output (stream idle timeout, middle-truncation keep chars), tool context mode (full/summary/auto, default full; the current round always gets full output, only history is summarized per mode, see §13.10). The context limit `maxContextTokens` defaults to 500K; its effective value is clamped to the selected provider's context limit (see §13.5) |
-| App | .papr app permission management — global default level, Level 3 global toggle, per-app level overrides |
+| App | .papr app permission management — global defaults (local access × network) and per-app two-axis overrides |
 
 Voice configuration is not in the main settings panel — it is configured per character in the CharacterModal Voice Tab.
 

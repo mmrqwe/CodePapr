@@ -12,9 +12,12 @@ import {
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
 import {
-  APP_AGENT_LEVEL_TOOLS,
-  disallowedPermissionsForLevel,
-  minLevelForAgentTool,
+  LOCAL_ORDER,
+  accessMeetsTool,
+  legacyAccessToLevel,
+  legacyLevelToAccess,
+  type PaprAccess,
+  type PaprLocalAccess,
 } from '../papr/levelGrants';
 import { type WorkspaceToolContext } from './workspaceToolContext';
 
@@ -28,18 +31,48 @@ const RESERVED_APP_FILES = new Set([
   'db.sqlite-shm',
 ]);
 
+const LOCAL_LABEL: Record<PaprLocalAccess, string> = {
+  none: '无',
+  read: '只读',
+  write: '读写执行',
+};
+
 /**
- * 校验 agents[].tools 白名单：声明即契约，runtime 不再静默裁剪。
+ * 解析 app_render 的访问参数：优先 local/network（两轴），缺省回落旧 level。
+ */
+function parseAccess(args: Record<string, unknown>): PaprAccess {
+  const rawLocal = args.local;
+  const rawNetwork = args.network;
+  if (rawLocal !== undefined || rawNetwork !== undefined) {
+    if (rawLocal !== undefined && !LOCAL_ORDER.includes(rawLocal as PaprLocalAccess)) {
+      throw new Error(`local 必须是 none/read/write，收到: ${JSON.stringify(rawLocal)}`);
+    }
+    if (rawNetwork !== undefined && typeof rawNetwork !== 'boolean') {
+      throw new Error(`network 必须是布尔值，收到: ${JSON.stringify(rawNetwork)}`);
+    }
+    return {
+      local: (rawLocal as PaprLocalAccess) ?? 'none',
+      network: rawNetwork === true,
+    };
+  }
+  // 旧 level 参数迁移
+  const level = typeof args.level === 'number' ? args.level : 1;
+  if (![0, 1, 2, 3].includes(level)) {
+    throw new Error(`level 必须是 0/1/2/3，收到: ${args.level}`);
+  }
+  return legacyLevelToAccess(level);
+}
+
+/**
+ * 校验 agents[].tools 白名单（两轴模型）：声明即契约，runtime 不再静默裁剪。
  * 在渲染时报错让模型立即修正，而不是让 app 运行时工具神秘失效。
  */
 function validateAgentTools(params: {
   agents: Array<{ name: string; tools?: string[] }>;
-  permissions: string[];
-  level: number;
+  access: PaprAccess;
   disableWebSearchTools: boolean;
 }): void {
-  const { agents, permissions, level, disableWebSearchTools } = params;
-  const levelTools = APP_AGENT_LEVEL_TOOLS[level] ?? APP_AGENT_LEVEL_TOOLS[1];
+  const { agents, access, disableWebSearchTools } = params;
 
   for (const agent of agents) {
     if (!agent.tools) continue;
@@ -52,30 +85,19 @@ function validateAgentTools(params: {
         throw new Error(`agents[${agent.name}].tools 不能声明 ${toolName}（App Agent 始终排除该工具）`);
       }
       if (toolName.startsWith('mcp__')) {
-        if (level < 2) {
-          throw new Error(`agents[${agent.name}].tools 声明了 MCP 工具 ${toolName}，MCP 工具需要 level ≥ 2（当前 level ${level}），请提升 level`);
+        if (!access.network) {
+          throw new Error(`agents[${agent.name}].tools 声明了 MCP 工具 ${toolName}，MCP 工具需要 network: true（当前 network: ${access.network}）`);
         }
         continue;
       }
-      const minLevel = minLevelForAgentTool(toolName);
-      if (minLevel === null) {
-        throw new Error(`agents[${agent.name}].tools 含未知工具: ${toolName}。可用工具: read, grep, list, lsp, diagnostics, read_image, skill_load, todo, local_time_now, websearch, webfetch（L2+）, write, edit, patch, bash（L3），或 mcp__ 前缀的 MCP 工具（L2+）`);
-      }
-      if (!levelTools.has(toolName)) {
-        throw new Error(`agents[${agent.name}].tools 中的 ${toolName} 需要 level ≥ ${minLevel}（当前 level ${level}），请提升 app_render 的 level 参数或从 tools 中移除`);
+      if (!accessMeetsTool(access, toolName)) {
+        throw new Error(
+          `agents[${agent.name}].tools 中的 ${toolName} 不在当前访问档（local=${LOCAL_LABEL[access.local]}, network=${access.network}）允许范围内，请调整 app_render 的 local/network 参数或从 tools 中移除。`
+        );
       }
       if ((toolName === 'websearch' || toolName === 'webfetch') && disableWebSearchTools) {
         throw new Error(`设置已启用 MCP 搜索，websearch/webfetch 不可用。请改为在 agents[${agent.name}].tools 中显式声明对应的 MCP 搜索工具（mcp__ 前缀名称），或在设置中关闭 MCP 搜索`);
       }
-    }
-
-    const needsWorkspaceWrite = agent.tools.some((t) => t === 'write' || t === 'edit' || t === 'patch');
-    const needsWorkspaceExec = agent.tools.includes('bash');
-    if (needsWorkspaceWrite && !permissions.includes('workspace:write')) {
-      throw new Error(`agents[${agent.name}].tools 含写入工具（write/edit/patch），必须在 permissions 中声明 workspace:write`);
-    }
-    if (needsWorkspaceExec && !permissions.includes('workspace:exec')) {
-      throw new Error(`agents[${agent.name}].tools 含 bash，必须在 permissions 中声明 workspace:exec`);
     }
   }
 }
@@ -150,20 +172,22 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       throw new Error(`title 不能为空`);
     }
 
-    const appLevel = typeof args.level === 'number' ? args.level : 1;
-    if (![0, 1, 2, 3].includes(appLevel)) {
+    const appLevel = typeof args.level === 'number' ? args.level : undefined;
+    if (appLevel !== undefined && ![0, 1, 2, 3].includes(appLevel)) {
       throw new Error(`level 必须是 0/1/2/3，收到: ${args.level}`);
     }
 
-    const invalidPerms = disallowedPermissionsForLevel(appLevel, permissions);
-    if (invalidPerms.length > 0) {
-      throw new Error(`permissions ${JSON.stringify(invalidPerms)} 超出 level ${appLevel} 允许范围，请提升 level 或移除这些权限。`);
+    // 两轴访问：local（无/只读/读写执行）× network（关/开）
+    const access = parseAccess(args);
+    if (command && access.local !== 'read' && access.local !== 'write') {
+      throw new Error(
+        `后端服务（command）需要 local 至少为 read（当前 local: ${LOCAL_LABEL[access.local]}）。请设置 local: "read" 或 local: "write"。`
+      );
     }
 
     validateAgentTools({
       agents,
-      permissions,
-      level: appLevel,
+      access,
       disableWebSearchTools: ctx.options.disableWebSearchTools ?? false,
     });
 
@@ -173,7 +197,9 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       version: '0.1.0',
       entry: 'index.html',
       permissions,
-      level: appLevel,
+      local: access.local,
+      network: access.network,
+      level: appLevel ?? legacyAccessToLevel(access),
       agents: agents.map((a) => ({
         name: a.name,
         model: a.model ?? 'main',
@@ -345,6 +371,12 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     if (!app.command || !app.port) throw new Error(`应用 '${appId}' 没有后端服务`);
     if (app.pid) throw new Error(`应用 '${appId}' 后端已在运行 (pid: ${app.pid})`);
 
+    // 后端进程沙箱按 manifest 的两轴访问构建（防绕过：直接改文件启动也过不了 sandbox）
+    const appAccess = accessFromManifestJson(app.manifestJson);
+    if (appAccess.local !== 'read' && appAccess.local !== 'write') {
+      throw new Error(`应用 '${appId}' 的 local 访问为 ${appAccess.local}，不允许启动后端服务`);
+    }
+
     const available: boolean = await invoke('check_port_available', { port: app.port });
     if (!available) throw new Error(`端口 ${app.port} 已被占用`);
 
@@ -354,6 +386,11 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       command: app.command,
       args: app.args ?? [],
       previewUrl: url,
+      sandbox: {
+        network: appAccess.network,
+        workspaceWrite: appAccess.local === 'write',
+        allowBind: true,
+      },
     });
     useAppRuntimeStore.getState().setAppRunning(appId, result.pid, url);
 
@@ -396,4 +433,20 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     return { appId, deleted: true };
   });
 
+}
+
+/** 从 manifest JSON 解析两轴访问（供 app_start 等校验沙箱档）。 */
+function accessFromManifestJson(manifestJson: string | null | undefined): PaprAccess {
+  if (manifestJson) {
+    try {
+      const manifest = JSON.parse(manifestJson) as { local?: PaprLocalAccess; network?: boolean; level?: number };
+      if (manifest.local) {
+        return { local: manifest.local, network: manifest.network === true };
+      }
+      if (typeof manifest.level === 'number') {
+        return legacyLevelToAccess(manifest.level);
+      }
+    } catch { /* 解析失败回落默认 */ }
+  }
+  return { local: 'none', network: false };
 }

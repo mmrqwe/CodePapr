@@ -6,7 +6,7 @@ use crate::shell::dangerous::{detect_dangerous_command, detect_dangerous_invocat
 use crate::shell::process_tree::{kill_process_tree, prepare_new_process_group};
 use crate::shell::sandbox::{
     sandboxed_command, sandboxed_shell_command, validate_restricted_command,
-    validate_restricted_shell_command,
+    validate_restricted_shell_command, SandboxAccess, SandboxAccessArgs,
 };
 use crate::shell::types::{
     BackgroundCommandResult, BackgroundProcessEntry, CommandResult, ManagedBackgroundProcess,
@@ -233,7 +233,7 @@ pub(crate) fn run_workspace_command_impl(
 
     #[cfg(windows)]
     const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let mut cmd = sandboxed_command(&command, &args, &workspace)?;
+    let mut cmd = sandboxed_command(&command, &args, &workspace, None)?;
     cmd
         .env("PATH", expanded_path())
         .current_dir(cwd)
@@ -391,6 +391,7 @@ fn build_shell_spawn_command(
     command: &str,
     cwd: &Path,
     workspace: &Path,
+    access: Option<SandboxAccess>,
 ) -> Result<Command, String> {
     #[cfg(windows)]
     {
@@ -408,7 +409,7 @@ fn build_shell_spawn_command(
     #[cfg(not(windows))]
     {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-        let mut cmd = sandboxed_shell_command(&shell, command, workspace)?;
+        let mut cmd = sandboxed_shell_command(&shell, command, workspace, access)?;
         cmd.current_dir(cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -424,9 +425,10 @@ pub(crate) async fn run_workspace_shell_command(
     command: String,
     workdir: Option<String>,
     timeout_seconds: Option<u64>,
+    sandbox: Option<SandboxAccessArgs>,
 ) -> Result<CommandResult, String> {
     run_blocking_workspace_task(move || {
-        run_workspace_shell_command_impl(workspace_path, command, workdir, timeout_seconds)
+        run_workspace_shell_command_impl(workspace_path, command, workdir, timeout_seconds, sandbox)
     })
     .await
 }
@@ -436,6 +438,7 @@ pub(crate) fn run_workspace_shell_command_impl(
     command: String,
     workdir: Option<String>,
     timeout_seconds: Option<u64>,
+    sandbox: Option<SandboxAccessArgs>,
 ) -> Result<CommandResult, String> {
     if command.trim().is_empty() {
         return Err("命令不能为空".to_string());
@@ -449,7 +452,7 @@ pub(crate) fn run_workspace_shell_command_impl(
     validate_restricted_shell_command(&command, &workspace)?;
     let cwd = resolve_shell_workdir(&workspace, workdir)?;
     let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30).clamp(1, MAX_COMMAND_SECONDS));
-    let mut cmd = build_shell_spawn_command(&command, &cwd, &workspace)?;
+    let mut cmd = build_shell_spawn_command(&command, &cwd, &workspace, sandbox.map(Into::into))?;
     let child = cmd.spawn().map_err(|err| format!("启动命令失败: {err}"))?;
     let (status, stdout, stderr, timed_out) = collect_command_output(child, timeout)?;
     Ok(CommandResult {
@@ -468,6 +471,7 @@ pub(crate) fn start_workspace_background_command(
     command: String,
     args: Option<Vec<String>>,
     preview_url: Option<String>,
+    sandbox: Option<SandboxAccessArgs>,
 ) -> Result<BackgroundCommandResult, String> {
     if !command_allowed(&command) {
         return Err(format!(
@@ -500,7 +504,7 @@ pub(crate) fn start_workspace_background_command(
 
     #[cfg(windows)]
     const CREATE_NO_WINDOW_BG: u32 = 0x08000000;
-    let mut bg_cmd = sandboxed_command(&command, &args, &workspace)?;
+    let mut bg_cmd = sandboxed_command(&command, &args, &workspace, sandbox.map(Into::into))?;
     bg_cmd
         .args(&args)
         .current_dir(&workspace)
@@ -611,7 +615,7 @@ pub(crate) fn start_workspace_shell_background_command(
         .map(|raw_url| parse_browser_url(&raw_url))
         .transpose()?;
     let workspace_path = workspace.to_string_lossy().to_string();
-    let cmd = build_shell_spawn_command(&command, &cwd, &workspace)?;
+    let cmd = build_shell_spawn_command(&command, &cwd, &workspace, None)?;
     spawn_and_register_background(workspace_path, command, Vec::new(), preview_url, cmd)
 }
 

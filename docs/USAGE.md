@@ -95,32 +95,26 @@ const files = await papr.fs.list();
 
 切换 **App 模式**，用自然语言描述想要的 App。Agent 会自动调用 `app_render` 工具生成完整的 manifest.json 和 index.html，注册到应用面板。相同 appId 再次调用会覆盖更新。
 
-### 权限
+### 权限（两轴模型）
 
-App 需要声明所需权限：
+App 的访问权限由**两个正交轴**组成，在 `app_render`（或 manifest）中声明：
 
-| 权限 | 能力 |
-|---|---|
-| `storage:read/write` | `papr.db` 键值存储 |
-| `http:get/post` | `papr.http` HTTP 请求 |
-| `fs:read/write` | `papr.fs` 文件读写 |
-| `workspace:read/write/exec` | Agent 工具：读写工作区文件、执行命令 |
-| `agent:run:<name>` | 调用指定 Agent |
+| 轴 | 取值 | 能力 |
+|---|---|---|
+| `local` | `none` | 纯计算，仅 `papr.db` / `papr.fs`（app 自有沙箱，永远可用） |
+| `local` | `read` | + 读取项目文件（Agent 只读工具 read/grep/list/lsp/diagnostics 等） |
+| `local` | `write` | + 修改项目文件并执行命令（Agent write/edit/patch/bash） |
+| `network` | `true` | + 访问公网（papr.http + Agent websearch/webfetch + MCP） |
+| `network` | `false` | 完全断网（iframe CSP + 后端沙箱强制，JS 无法绕过） |
 
-Agent 工具白名单（在 `agents[].tools` 声明）：`read`、`grep`、`list`、`lsp`、`diagnostics`、`read_image`、`skill_load`、`todo`、`local_time_now`、`websearch`（L2+）、`webfetch`（L2+）、`write`（L3）、`edit`（L3）、`patch`（L3）、`bash`（L3）。
+- `papr.db` / `papr.fs` 是 app 自有沙箱，**永远可用，无需任何权限**
+- 后端服务（`command`）要求 `local` 至少为 `read`
+- 推荐组合：计算器 `{none, 关}`、Todo/笔记 `{none, 关}`、数据分析看板 `{read, 开}`、重构工具 `{write, 关}`
+- 旧 `level` 字段（0-3）仍兼容：0→`{none,关}`、1→`{read,关}`、2→`{read,开}`、3→`{write,开}`
 
-### 权限分级
+Agent 工具白名单（在 `agents[].tools` 声明，必须落在访问档内）：`read`、`grep`、`list`、`lsp`、`diagnostics`、`read_image`、`skill_load`、`todo`、`local_time_now`（local≥read 或内置）、`websearch`、`webfetch`（需 network）、`write`、`edit`、`patch`、`bash`（需 local=write）。
 
-App 通过 manifest 的 `level` 字段声明权限级别（默认 L1）：
-
-| Level | 可用能力 |
-|---|---|
-| L0 纯计算 | 无外部访问，仅 HTML/CSS/JS 渲染 |
-| L1 Runtime | `papr.db` + `papr.fs` + AI Agent（只读工具） |
-| L2 联网 | + `papr.http` + Agent 联网搜索 + MCP |
-| L3 系统 | + Agent 文件写入（限 app sandbox 目录）/终端执行（需全局开关） |
-
-设置 → **App Tab** 可调整全局默认级别、开启 L3 开关、逐 app 覆盖。
+设置 → **App Tab** 可调整全局默认（本地访问 × 网络）并逐 app 覆盖（覆盖只能收窄）。
 
 ### 应用管理面板
 

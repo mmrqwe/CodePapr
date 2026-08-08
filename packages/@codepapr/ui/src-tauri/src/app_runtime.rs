@@ -213,6 +213,21 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
         "application/octet-stream"
     };
 
+    // 两轴模型的核心强制点：iframe 直接联网由 CSP 拦截，网络只能走 papr.http
+    // （受权限管控）或后端 app 自身的 localhost 服务。CSP 由浏览器引擎执行，
+    // JS 无法绕过。CDN 图表库（script-src https:）始终放行——脚本 URL 静态、
+    // 且 connect-src/img-src 关闭时外部脚本无法回传数据。
+    let csp: Option<String> = if file_path.ends_with(".html") || file_path.ends_with(".htm") {
+        papr_runtime::manifest::get_manifest(app_id)
+            .ok()
+            .map(|m| {
+                let access = papr_runtime::permission::resolve_effective_access(&m, app_id);
+                build_app_csp(access, m.port)
+            })
+    } else {
+        None
+    };
+
     let body = if file_path.ends_with(".html") || file_path.ends_with(".htm") {
         let html = String::from_utf8_lossy(&content);
         let mut injected = papr_runtime::sdk_inject::inject_sdk_into_html(&html);
@@ -240,13 +255,48 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
         content
     };
 
-    Response::builder()
+    let mut response = Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", mime)
         .header("Access-Control-Allow-Origin", "*")
-        .header("Cache-Control", "no-cache")
-        .body(body)
-        .unwrap()
+        .header("Cache-Control", "no-cache");
+    if let Some(csp) = &csp {
+        response = response.header("Content-Security-Policy", csp.as_str());
+    }
+    response.body(body).unwrap()
+}
+
+/// 按两轴权限构建 app 文档的 CSP：
+/// - 网络关：只允许同源 + 自身后端端口（无后端则纯同源），img/form 全禁外发；
+/// - 网络开：额外放行 https/wss/ws 与 https 图片/表单；
+/// - script-src 始终放行 https:（CDN 图表库），connect-src 关闭时无法回传数据。
+pub(crate) fn build_app_csp(
+    access: crate::papr_runtime::permission::PaprAccess,
+    port: Option<u16>,
+) -> String {
+    let mut connect: Vec<String> = vec!["'self'".to_string()];
+    let mut img: Vec<String> = vec!["'self'".to_string(), "data:".to_string()];
+    let mut form: Vec<String> = vec!["'none'".to_string()];
+    if let Some(p) = port {
+        connect.push(format!("http://localhost:{p}"));
+        connect.push(format!("http://127.0.0.1:{p}"));
+    }
+    if access.network {
+        connect.push("https:".to_string());
+        connect.push("wss:".to_string());
+        connect.push("ws:".to_string());
+        img.push("https:".to_string());
+        form.push("https:".to_string());
+    }
+    format!(
+        "default-src 'none'; script-src 'self' https: 'unsafe-inline' 'wasm-unsafe-eval'; \
+         style-src 'self' 'unsafe-inline' https:; img-src {}; \
+         font-src 'self' data: https:; media-src 'self' data: blob:; worker-src 'self' blob:; \
+         connect-src {}; form-action {}",
+        img.join(" "),
+        connect.join(" "),
+        form.join(" ")
+    )
 }
 
 // ── App discovery ──────────────────────────────────────────────────────
@@ -482,5 +532,41 @@ mod tests {
         assert!(!is_unservable_app_file("index.html"));
         assert!(!is_unservable_app_file("server.js"));
         assert!(!is_unservable_app_file("sqlite.txt"));
+    }
+
+    #[test]
+    fn csp_blocks_direct_network_when_network_off() {
+        use crate::papr_runtime::permission::{PaprAccess, PaprLocalAccess};
+        let access = PaprAccess { local: PaprLocalAccess::Read, network: false };
+        let csp = build_app_csp(access, None);
+        // 无后端：connect-src 只有同源，任何外发通道关闭
+        assert!(csp.contains("connect-src 'self';"), "got: {csp}");
+        assert!(csp.contains("form-action 'none'"), "got: {csp}");
+        assert!(!csp.contains("wss:"), "got: {csp}");
+        // connect/img/form 不允许 https（font-src/script-src 的 https: 是给 CDN 的，不算外发通道）
+        assert!(!csp.contains("connect-src 'self' https:"), "got: {csp}");
+        assert!(!csp.contains("img-src 'self' data: https:"), "got: {csp}");
+        // CDN 脚本仍然放行（图表库）
+        assert!(csp.contains("script-src 'self' https:"), "got: {csp}");
+    }
+
+    #[test]
+    fn csp_allows_own_backend_port_when_network_off() {
+        use crate::papr_runtime::permission::{PaprAccess, PaprLocalAccess};
+        let access = PaprAccess { local: PaprLocalAccess::Read, network: false };
+        let csp = build_app_csp(access, Some(3456));
+        assert!(csp.contains("http://localhost:3456"), "got: {csp}");
+        assert!(csp.contains("http://127.0.0.1:3456"), "got: {csp}");
+        assert!(!csp.contains("wss:"), "got: {csp}");
+    }
+
+    #[test]
+    fn csp_opens_public_network_when_network_on() {
+        use crate::papr_runtime::permission::{PaprAccess, PaprLocalAccess};
+        let access = PaprAccess { local: PaprLocalAccess::Read, network: true };
+        let csp = build_app_csp(access, None);
+        assert!(csp.contains("connect-src 'self' https: wss: ws:"), "got: {csp}");
+        assert!(csp.contains("form-action 'none' https:"), "got: {csp}");
+        assert!(csp.contains("img-src 'self' data: https:"), "got: {csp}");
     }
 }

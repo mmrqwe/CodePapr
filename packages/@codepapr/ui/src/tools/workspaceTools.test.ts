@@ -210,20 +210,23 @@ describe('app_render agent tools validation', () => {
     return build({ mode: 'app', ...options });
   }
 
-  it('rejects websearch in agent tools at default level 1', async () => {
+  it('rejects websearch in agent tools when network is off', async () => {
     await expect(
       appRegistry().execute('app_render', {
         ...BASE_ARGS,
+        local: 'read',
+        network: false,
         agents: [{ name: 'searcher', tools: ['websearch'] }],
       }),
-    ).rejects.toThrow(/level ≥ 2/);
+    ).rejects.toThrow(/网络.*关闭|不在当前访问档/);
   });
 
-  it('accepts websearch in agent tools at level 2', async () => {
+  it('accepts websearch in agent tools when network is on', async () => {
     await expect(
       appRegistry().execute('app_render', {
         ...BASE_ARGS,
-        level: 2,
+        local: 'read',
+        network: true,
         agents: [{ name: 'searcher', tools: ['websearch'] }],
       }),
     ).resolves.toMatchObject({ appId: 'demo-app', mounted: true });
@@ -233,67 +236,106 @@ describe('app_render agent tools validation', () => {
     await expect(
       appRegistry({ disableWebSearchTools: true }).execute('app_render', {
         ...BASE_ARGS,
-        level: 2,
+        local: 'read',
+        network: true,
         agents: [{ name: 'searcher', tools: ['websearch'] }],
       }),
     ).rejects.toThrow(/MCP 搜索/);
   });
 
-  it('rejects unknown tool names with the available-tool list', async () => {
+  it('rejects unknown tool names', async () => {
     await expect(
       appRegistry().execute('app_render', {
         ...BASE_ARGS,
         agents: [{ name: 'searcher', tools: ['web_search'] }],
       }),
-    ).rejects.toThrow(/未知工具: web_search/);
+    ).rejects.toThrow(/未知工具|不在当前访问档/);
   });
 
   it('rejects task and app_render in agent tools', async () => {
     await expect(
       appRegistry().execute('app_render', {
         ...BASE_ARGS,
+        local: 'read',
         agents: [{ name: 'helper', tools: ['read', 'task'] }],
       }),
     ).rejects.toThrow(/始终排除/);
   });
 
-  it('rejects MCP tools below level 2', async () => {
+  it('rejects MCP tools when network is off', async () => {
     await expect(
       appRegistry().execute('app_render', {
         ...BASE_ARGS,
+        local: 'read',
+        network: false,
         agents: [{ name: 'searcher', tools: ['mcp__search__web_search'] }],
       }),
-    ).rejects.toThrow(/MCP 工具需要 level ≥ 2/);
+    ).rejects.toThrow(/MCP 工具需要 network/);
   });
 
-  it('rejects write tools without workspace:write permission', async () => {
+  it('rejects write tools below local write', async () => {
     await expect(
       appRegistry().execute('app_render', {
         ...BASE_ARGS,
-        level: 3,
+        local: 'read',
         agents: [{ name: 'editor', tools: ['read', 'write'] }],
       }),
-    ).rejects.toThrow(/workspace:write/);
+    ).rejects.toThrow(/不在当前访问档/);
   });
 
-  it('rejects bash without workspace:exec permission', async () => {
+  it('rejects bash below local write', async () => {
     await expect(
       appRegistry().execute('app_render', {
         ...BASE_ARGS,
-        level: 3,
-        permissions: ['workspace:write'],
+        local: 'read',
         agents: [{ name: 'runner', tools: ['bash'] }],
       }),
-    ).rejects.toThrow(/workspace:exec/);
+    ).rejects.toThrow(/不在当前访问档/);
   });
 
-  it('accepts high-risk tools when permissions are declared', async () => {
+  it('accepts high-risk tools at local write', async () => {
     await expect(
       appRegistry().execute('app_render', {
         ...BASE_ARGS,
-        level: 3,
-        permissions: ['workspace:write', 'workspace:exec'],
+        local: 'write',
         agents: [{ name: 'runner', tools: ['write', 'bash'] }],
+      }),
+    ).resolves.toMatchObject({ appId: 'demo-app', mounted: true });
+  });
+
+  it('rejects backend command below local read', async () => {
+    await expect(
+      appRegistry().execute('app_render', {
+        ...BASE_ARGS,
+        local: 'none',
+        command: 'node',
+        args: ['server.js'],
+        port: 3456,
+        files: [{ relativePath: 'server.js', content: 'console.log(1)' }],
+      }),
+    ).rejects.toThrow(/后端服务.*local/);
+  });
+
+  it('accepts backend command at local read', async () => {
+    await expect(
+      appRegistry().execute('app_render', {
+        ...BASE_ARGS,
+        local: 'read',
+        network: false,
+        command: 'node',
+        args: ['server.js'],
+        port: 3456,
+        files: [{ relativePath: 'server.js', content: 'console.log(1)' }],
+      }),
+    ).resolves.toMatchObject({ appId: 'demo-app', mounted: true, hasBackend: true });
+  });
+
+  it('maps legacy level to two-axis access in manifest', async () => {
+    await expect(
+      appRegistry().execute('app_render', {
+        ...BASE_ARGS,
+        level: 2,
+        agents: [{ name: 'searcher', tools: ['websearch', 'read'] }],
       }),
     ).resolves.toMatchObject({ appId: 'demo-app', mounted: true });
   });

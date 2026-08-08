@@ -62,6 +62,8 @@ export type AgentRuntimeStreamEvent = IChatStreamEvent | ToolProgressStreamEvent
 interface ToolExecutionContext {
   toolCallId?: string;
   onProgress?: (event: ToolProgressStreamEvent) => void;
+  /** app agent 专属：该 app 的两轴访问档（bash 沙箱构建用） */
+  appAccess?: { network: boolean; workspaceWrite: boolean };
 }
 
 type WorkerToolExecutor = (
@@ -203,8 +205,8 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
 
   return {
     toolDefinitions: definitions,
-    execute: async (toolName, args) => {
-      return await registry.execute(toolName, args);
+    execute: async (toolName, args, context) => {
+      return await registry.execute(toolName, args, context ? { ...context } : undefined);
     },
   };
 }
@@ -833,6 +835,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
       void this.toolExecutor(message.toolName, message.arguments, {
         toolCallId: match?.toolCallId,
+        appAccess: message.appAccess,
         onProgress: pending?.streamListener
           ? (progressEvent) => {
               pending.streamListener?.(progressEvent);

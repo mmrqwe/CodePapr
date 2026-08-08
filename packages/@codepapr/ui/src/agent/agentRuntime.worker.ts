@@ -49,7 +49,7 @@ import { createContextCompactionHandler } from './compactionHandler';
 import type { Settings } from '../store/internals/types';
 // Shared with app_render validation (fail fast at render time instead of
 // silently stripping tools the app's level does not grant).
-import { APP_AGENT_LEVEL_TOOLS } from '../papr/levelGrants';
+import { agentToolsFor, legacyLevelToAccess } from '../papr/levelGrants';
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -495,7 +495,8 @@ async function requestToolExecution(
   toolName: string,
   args: Record<string, unknown>,
   timeoutMs: number = TOOL_IPC_TIMEOUT_MS,
-  toolCallId?: string
+  toolCallId?: string,
+  appAccess?: { network: boolean; workspaceWrite: boolean }
 ): Promise<unknown> {
   const toolRequestId = `${requestId}:${++nextToolRequestId}`;
 
@@ -530,6 +531,7 @@ async function requestToolExecution(
     toolName,
     arguments: args,
     ...(toolCallId ? { toolCallId } : {}),
+    ...(appAccess ? { appAccess } : {}),
   });
 
   return await result;
@@ -805,9 +807,15 @@ async function handleRunAppAgent(
 
   const BLOCKED = new Set(['task', 'app_render']);
   const requestedTools = payload.tools ?? [];
-  const level = payload.level ?? 1;
 
-  const levelAllowed = APP_AGENT_LEVEL_TOOLS[level] ?? APP_AGENT_LEVEL_TOOLS[1];
+  // 两轴访问：local（无/只读/读写执行）× network（关/开）；旧 level 迁移
+  const access = {
+    local: (payload.local ?? (payload.level !== undefined ? legacyLevelToAccess(payload.level).local : 'none')) as 'none' | 'read' | 'write',
+    network: payload.network ?? (payload.level !== undefined ? legacyLevelToAccess(payload.level).network : false),
+  };
+  const allowedTools = agentToolsFor(access.local, access.network);
+  /** app 沙箱访问档：主线程执行 bash 等工具时按此构建沙箱（网络/写按轴收窄） */
+  const appAccess = { network: access.network, workspaceWrite: access.local === 'write' };
 
   const sandboxPrefix = `.CodePapr/apps/${payload.appId}/sandbox/`;
   const SANDBOX_WRITABLE_TOOLS = new Set(['write', 'edit', 'patch']);
@@ -854,10 +862,10 @@ async function handleRunAppAgent(
   for (const tool of cachedToolDefinitions) {
     if (BLOCKED.has(tool.name)) continue;
     if (tool.name.startsWith('mcp__')) {
-      if (level < 2) continue;
+      if (!access.network) continue;
       if (requestedTools.length === 0 || !requestedTools.includes(tool.name)) continue;
     } else {
-      if (!levelAllowed.has(tool.name)) continue;
+      if (!allowedTools.has(tool.name)) continue;
       if (requestedTools.length > 0 && !requestedTools.includes(tool.name)) continue;
     }
 
@@ -866,7 +874,7 @@ async function handleRunAppAgent(
       toolActivity?.();
       try {
         return await requestToolExecution(
-          requestId, tool.name, sandboxedArgs, toolIpcTimeoutMs, context?.toolCallId
+          requestId, tool.name, sandboxedArgs, toolIpcTimeoutMs, context?.toolCallId, appAccess
         );
       } finally {
         toolActivity?.();

@@ -1,3 +1,4 @@
+use crate::papr_runtime::permission::PaprLocalAccess;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -63,6 +64,10 @@ pub struct PaprManifest {
     pub port: Option<u16>,
     #[serde(default)]
     pub level: Option<u8>,
+    #[serde(default)]
+    pub local: Option<PaprLocalAccess>,
+    #[serde(default)]
+    pub network: Option<bool>,
 }
 
 pub fn load_manifest(apps_dir: &Path, app_id: &str) -> Result<PaprManifest, String> {
@@ -115,6 +120,22 @@ mod tests {
         assert_eq!(manifest.version.as_deref(), Some("1.0"));
         assert_eq!(manifest.permissions.unwrap().len(), 1);
         assert_eq!(manifest.agents.unwrap().len(), 1);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_manifest_with_two_axis_access() {
+        let dir = std::env::temp_dir().join(format!("papr-test-axis-{}", std::process::id()));
+        let app_dir = dir.join("axis-app");
+        fs::create_dir_all(&app_dir).unwrap();
+
+        let json = r#"{"spec":"papr/0.1","name":"Axis","local":"read","network":true}"#;
+        fs::write(app_dir.join("manifest.json"), json).unwrap();
+
+        let manifest = load_manifest(&dir, "axis-app").unwrap();
+        assert_eq!(manifest.local, Some(PaprLocalAccess::Read));
+        assert_eq!(manifest.network, Some(true));
 
         fs::remove_dir_all(&dir).ok();
     }
@@ -173,6 +194,8 @@ mod tests {
             args: None,
             port: None,
             level: None,
+            local: Some(PaprLocalAccess::Read),
+            network: Some(false),
         };
 
         store_manifest("test-cache", manifest);

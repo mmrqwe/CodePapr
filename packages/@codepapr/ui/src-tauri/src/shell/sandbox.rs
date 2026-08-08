@@ -65,7 +65,12 @@ fn protected_home_paths() -> Vec<PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
-fn build_profile(program: &str, workspace: &Path) -> Result<String, String> {
+fn build_profile(
+    program: &str,
+    workspace: &Path,
+    access: Option<SandboxAccess>,
+) -> Result<String, String> {
+    let access = access.unwrap_or_default();
     let policy = db::load_external_access_policy()?;
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let mut lines = vec![
@@ -73,8 +78,13 @@ fn build_profile(program: &str, workspace: &Path) -> Result<String, String> {
         "(import \"system.sb\")".to_string(),
         "(deny default)".to_string(),
         "(allow process*)".to_string(),
-        "(allow network*)".to_string(),
     ];
+    // 网络轴：出站网络按开关；监听 localhost 由 allow_bind 单独控制（后端进程需要）。
+    if access.network {
+        lines.push("(allow network*)".to_string());
+    } else if access.allow_bind {
+        lines.push("(allow network-bind)".to_string());
+    }
     // 所有读放行的根路径：用于推导祖先目录的 metadata 规则
     let mut read_roots: Vec<PathBuf> = Vec::new();
 
@@ -148,14 +158,17 @@ fn build_profile(program: &str, workspace: &Path) -> Result<String, String> {
         }
     }
 
-    if policy.yolo {
+    if policy.yolo && access.workspace_write {
+        // YOLO 只对全权调用（主代理，access 默认全开）生效：允许读写全盘（受保护 HOME 目录除外）。
         add_subpath_rule(&mut lines, "allow", "file-read*", Path::new("/"));
         add_subpath_rule(&mut lines, "allow", "file-write*", Path::new("/"));
     } else {
         if let Some(canonical) = add_subpath_rule(&mut lines, "allow", "file-read*", workspace) {
             read_roots.push(canonical);
         }
-        add_subpath_rule(&mut lines, "allow", "file-write*", workspace);
+        if access.workspace_write {
+            add_subpath_rule(&mut lines, "allow", "file-write*", workspace);
+        }
         for path in policy
             .allowed_dirs
             .iter()
@@ -165,7 +178,9 @@ fn build_profile(program: &str, workspace: &Path) -> Result<String, String> {
             if let Some(canonical) = add_subpath_rule(&mut lines, "allow", "file-read*", &path) {
                 read_roots.push(canonical);
             }
-            add_subpath_rule(&mut lines, "allow", "file-write*", &path);
+            if access.workspace_write {
+                add_subpath_rule(&mut lines, "allow", "file-write*", &path);
+            }
         }
     }
 
@@ -198,14 +213,58 @@ fn build_profile(program: &str, workspace: &Path) -> Result<String, String> {
     Ok(lines.join("\n"))
 }
 
+/// 沙箱访问档：按两轴权限构建 sandbox-exec profile。
+/// - `network`：出站网络（`network*`）。关 = 完全不能联网。
+/// - `workspace_write`：工作区（及已授权外部路径）可写。关 = 只读。
+/// - `allow_bind`：允许监听端口（后端进程需要；网络关时仍可监听 localhost 供 iframe 访问）。
+#[derive(Debug, Clone, Copy)]
+pub struct SandboxAccess {
+    pub network: bool,
+    pub workspace_write: bool,
+    pub allow_bind: bool,
+}
+
+impl Default for SandboxAccess {
+    fn default() -> Self {
+        Self { network: true, workspace_write: true, allow_bind: false }
+    }
+}
+
+/// tauri 命令参数形态（camelCase），缺省字段回落到全权。
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxAccessArgs {
+    #[serde(default = "sandbox_network_default")]
+    pub network: bool,
+    #[serde(default = "sandbox_workspace_write_default")]
+    pub workspace_write: bool,
+    #[serde(default)]
+    pub allow_bind: bool,
+}
+
+fn sandbox_network_default() -> bool {
+    true
+}
+
+fn sandbox_workspace_write_default() -> bool {
+    true
+}
+
+impl From<SandboxAccessArgs> for SandboxAccess {
+    fn from(args: SandboxAccessArgs) -> Self {
+        Self { network: args.network, workspace_write: args.workspace_write, allow_bind: args.allow_bind }
+    }
+}
+
 pub(crate) fn sandboxed_command(
     program: &str,
     args: &[String],
     workspace: &Path,
+    access: Option<SandboxAccess>,
 ) -> Result<Command, String> {
     #[cfg(target_os = "macos")]
     {
-        let profile = build_profile(program, workspace)?;
+        let profile = build_profile(program, workspace, access)?;
         let mut command = Command::new("/usr/bin/sandbox-exec");
         command.arg("-p").arg(profile).arg(program).args(args);
         return Ok(command);
@@ -213,7 +272,7 @@ pub(crate) fn sandboxed_command(
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = workspace;
+        let _ = (workspace, access);
         let mut command = Command::new(program);
         command.args(args);
         Ok(command)
@@ -224,12 +283,13 @@ pub(crate) fn sandboxed_shell_command(
     shell: &str,
     command_line: &str,
     workspace: &Path,
+    access: Option<SandboxAccess>,
 ) -> Result<Command, String> {
     #[cfg(windows)]
     let shell_args = ["/C".to_string(), command_line.to_string()];
     #[cfg(not(windows))]
     let shell_args = ["-c".to_string(), command_line.to_string()];
-    let mut command = sandboxed_command(shell, &shell_args, workspace)?;
+    let mut command = sandboxed_command(shell, &shell_args, workspace, access)?;
     #[cfg(not(target_os = "windows"))]
     command.env("PATH", crate::shared::expanded_path());
     Ok(command)
@@ -350,7 +410,7 @@ pub(crate) fn validate_restricted_shell_command(
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::{build_profile, sandboxed_command};
+    use super::{build_profile, sandboxed_command, SandboxAccess};
     use std::fs;
 
     #[test]
@@ -359,7 +419,7 @@ mod tests {
             std::env::temp_dir().join(format!("codepapr-sandbox-test-{}", std::process::id()));
         fs::create_dir_all(&workspace).expect("sandbox test workspace should exist");
 
-        let mut command = sandboxed_command("/bin/echo", &["sandbox-ok".to_string()], &workspace)
+        let mut command = sandboxed_command("/bin/echo", &["sandbox-ok".to_string()], &workspace, None)
             .expect("sandbox command should build");
         let output = command.output().expect("sandbox command should start");
 
@@ -377,7 +437,7 @@ mod tests {
         let workspace =
             std::env::temp_dir().join(format!("codepapr-sandbox-profile-{}", std::process::id()));
         fs::create_dir_all(&workspace).expect("sandbox test workspace should exist");
-        let profile = build_profile("/bin/zsh", &workspace).expect("profile should build");
+        let profile = build_profile("/bin/zsh", &workspace, None).expect("profile should build");
         let _ = fs::remove_dir_all(&workspace);
 
         // 临时目录规则必须是规范化后的 /private/var/folders 形式，
@@ -396,13 +456,54 @@ mod tests {
     }
 
     #[test]
-    fn profile_grants_ancestor_metadata_for_read_roots() {
-        let workspace = std::env::temp_dir().join(format!(
+    fn profile_respects_two_axis_access() {
+        let workspace =
+            std::env::temp_dir().join(format!("codepapr-sandbox-axis-{}", std::process::id()));
+        fs::create_dir_all(&workspace).expect("sandbox test workspace should exist");
+
+        // 网络关 + 工作区只读：无 network*、无工作区写规则
+        let restricted = build_profile(
+            "/bin/zsh",
+            &workspace,
+            Some(SandboxAccess { network: false, workspace_write: false, allow_bind: false }),
+        )
+        .expect("profile should build");
+        assert!(!restricted.contains("(allow network*)"), "got:\n{restricted}");
+        assert!(
+            !restricted.contains(&format!("(allow file-write* (subpath \"{}\")", workspace.display())),
+            "workspace write must be absent:\n{restricted}"
+        );
+        assert!(!restricted.contains("(allow network-bind)"), "got:\n{restricted}");
+
+        // 后端进程（网络关）：只允许 network-bind（监听 localhost），无出站
+        let backend = build_profile(
+            "/bin/zsh",
+            &workspace,
+            Some(SandboxAccess { network: false, workspace_write: true, allow_bind: true }),
+        )
+        .expect("profile should build");
+        assert!(backend.contains("(allow network-bind)"), "got:\n{backend}");
+        assert!(!backend.contains("(allow network*)"), "got:\n{backend}");
+
+        // 网络开：完整 network*
+        let full = build_profile(
+            "/bin/zsh",
+            &workspace,
+            Some(SandboxAccess { network: true, workspace_write: true, allow_bind: false }),
+        )
+        .expect("profile should build");
+        assert!(full.contains("(allow network*)"), "got:\n{full}");
+
+        let _ = fs::remove_dir_all(&workspace);
+    }
+
+    #[test]
+    fn profile_grants_ancestor_metadata_for_read_roots() {        let workspace = std::env::temp_dir().join(format!(
             "codepapr-sandbox-ancestors-{}",
             std::process::id()
         ));
         fs::create_dir_all(&workspace).expect("sandbox test workspace should exist");
-        let profile = build_profile("/bin/zsh", &workspace).expect("profile should build");
+        let profile = build_profile("/bin/zsh", &workspace, None).expect("profile should build");
         let _ = fs::remove_dir_all(&workspace);
 
         // node/npm 的 realpathSync 需要 lstat 允许路径链上的每个祖先目录
@@ -431,7 +532,7 @@ mod tests {
         let probe = std::env::temp_dir().join(format!("codepapr-probe-{}", std::process::id()));
         let script = format!("touch {} && echo TMP_WRITE_OK", probe.display());
         let mut command =
-            sandboxed_command("/bin/zsh", &["-c".to_string(), script], &workspace)
+            sandboxed_command("/bin/zsh", &["-c".to_string(), script], &workspace, None)
                 .expect("sandbox command should build");
         command.env("PATH", crate::shared::expanded_path());
         let output = command.output().expect("sandbox command should start");
@@ -460,6 +561,7 @@ mod tests {
             "/opt/homebrew/bin/node",
             &["-e".to_string(), "console.log('node-ok')".to_string()],
             &workspace,
+            None,
         )
         .expect("sandbox command should build");
         let output = command.output().expect("sandbox command should start");
@@ -485,7 +587,7 @@ mod tests {
         fs::create_dir_all(&workspace).expect("sandbox test workspace should exist");
 
         let mut command =
-            sandboxed_command("/opt/homebrew/bin/npm", &["--version".to_string()], &workspace)
+            sandboxed_command("/opt/homebrew/bin/npm", &["--version".to_string()], &workspace, None)
                 .expect("sandbox command should build");
         // 与真实调用路径一致：cwd 必须在工作区内，否则 process.cwd() 会被拒
         command

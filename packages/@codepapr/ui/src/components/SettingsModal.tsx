@@ -116,7 +116,7 @@ export function SettingsModal() {
 
   const resetTab = (tab: SettingsTab) => {
     if (tab === 'app') {
-      setAppDraft({ defaultLevel: 1, allowLevel3: false, appOverrides: {} });
+      setAppDraft({ defaultLocal: 'none', defaultNetwork: false, appOverrides: {} });
       return;
     }
     const defaults = normalizeSettings({});

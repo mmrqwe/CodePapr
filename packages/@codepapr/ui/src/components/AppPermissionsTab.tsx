@@ -1,7 +1,8 @@
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
-import type { PaprAppSettings, PaprLevel } from '@codepapr/types';
+import type { PaprAccess, PaprAppSettings, PaprLocalAccess } from '@codepapr/types';
+import { LOCAL_ORDER, legacyLevelToAccess } from '../papr/levelGrants';
 
 interface AppPermissionsTabProps {
   lang?: Lang;
@@ -10,21 +11,21 @@ interface AppPermissionsTabProps {
   loadError?: string;
 }
 
+const LOCAL_LABEL: Record<PaprLocalAccess, string> = {
+  none: '无',
+  read: '只读',
+  write: '读写执行',
+};
+
+const LOCAL_DESC: Record<PaprLocalAccess, string> = {
+  none: '不能访问项目文件，仅使用 app 自己的存储（papr.db / papr.fs）',
+  read: '可读取项目文件（agent 工具：read/grep/list/lsp 等）',
+  write: '可读写项目文件并执行命令（agent 工具：write/edit/patch/bash）',
+};
+
 export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermissionsTabProps) {
   const t = getTranslation(lang);
   const apps = useAppRuntimeStore((state) => state.apps);
-  const LEVEL_LABELS: Record<number, string> = {
-    0: t.appPermL0Label,
-    1: t.appPermL1Label,
-    2: t.appPermL2Label,
-    3: t.appPermL3Label,
-  };
-  const LEVEL_DESC: Record<number, string> = {
-    0: t.appPermL0Desc,
-    1: t.appPermL1Desc,
-    2: t.appPermL2Desc,
-    3: t.appPermL3Desc,
-  };
 
   if (loadError) {
     return <div className="p-4 text-xs text-red-400">{t.appPermLoadFailed}: {loadError}</div>;
@@ -36,107 +37,136 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
 
   const settings = value;
 
-  const updateDefaultLevel = (level: PaprLevel) => {
-    onChange({ ...settings, defaultLevel: level });
+  const updateDefaultLocal = (local: PaprLocalAccess) => {
+    onChange({ ...settings, defaultLocal: local });
   };
 
-  const toggleAllowLevel3 = () => {
-    onChange({ ...settings, allowLevel3: !settings.allowLevel3 });
+  const updateDefaultNetwork = (network: boolean) => {
+    onChange({ ...settings, defaultNetwork: network });
   };
 
-  const updateAppOverride = (appId: string, level: PaprLevel | 'auto') => {
+  const updateAppOverride = (appId: string, patch: Partial<PaprAccess> | 'auto') => {
     const overrides = { ...settings.appOverrides };
-    if (level === 'auto') {
+    if (patch === 'auto') {
       delete overrides[appId];
     } else {
-      overrides[appId] = level;
+      const current = overrides[appId] ?? { local: 'none', network: false };
+      overrides[appId] = { ...current, ...patch };
     }
     onChange({ ...settings, appOverrides: overrides });
   };
 
-  const getAppManifestLevel = (appId: string): PaprLevel => {
+  const getAppDeclared = (appId: string): PaprAccess => {
     const app = apps.find((a) => a.appId === appId);
-    if (!app?.manifestJson) return settings.defaultLevel;
+    if (!app?.manifestJson) return { local: settings.defaultLocal, network: settings.defaultNetwork };
     try {
-      const manifest = JSON.parse(app.manifestJson);
-      return (manifest.level ?? settings.defaultLevel) as PaprLevel;
+      const manifest = JSON.parse(app.manifestJson) as {
+        local?: PaprLocalAccess;
+        network?: boolean;
+        level?: 0 | 1 | 2 | 3;
+      };
+      if (manifest.local) {
+        return { local: manifest.local, network: manifest.network === true };
+      }
+      if (typeof manifest.level === 'number') {
+        return legacyLevelToAccess(manifest.level);
+      }
     } catch {
-      return settings.defaultLevel;
+      // manifest 解析失败回落默认
     }
+    return { local: settings.defaultLocal, network: settings.defaultNetwork };
   };
 
-  const getAppEffectiveLevel = (appId: string): PaprLevel => {
-    const manifestLevel = getAppManifestLevel(appId);
+  const getAppEffective = (appId: string): PaprAccess => {
+    const declared = getAppDeclared(appId);
     const override = settings.appOverrides[appId];
-    let effective = override !== undefined
-      ? Math.min(override, manifestLevel) as PaprLevel
-      : manifestLevel;
-    if (effective >= 3 && !settings.allowLevel3) {
-      effective = 2 as PaprLevel;
-    }
-    return effective;
+    if (!override) return declared;
+    const rank = (l: PaprLocalAccess) => LOCAL_ORDER.indexOf(l);
+    return {
+      local: rank(override.local) < rank(declared.local) ? override.local : declared.local,
+      network: override.network && declared.network,
+    };
   };
+
+  const localButton = (local: PaprLocalAccess, active: boolean) =>
+    `rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+      active
+        ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-200'
+        : 'border-[#2a2d3a] text-slate-400 hover:border-indigo-500/30 hover:text-slate-200'
+    }`;
+
+  const networkToggle = (enabled: boolean, onChangeNetwork: (v: boolean) => void, trackColor: string) => (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      onClick={() => onChangeNetwork(!enabled)}
+      className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors ${
+        enabled ? trackColor : 'bg-[#2a2d3a]'
+      }`}
+    >
+      <span
+        className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+          enabled ? 'translate-x-5' : 'translate-x-0'
+        }`}
+      />
+    </button>
+  );
+
+  const networkRow = (
+    enabled: boolean,
+    onChangeNetwork: (v: boolean) => void,
+    label: string,
+    hint: string,
+  ) => (
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <div className="text-xs font-semibold text-slate-200">{label}</div>
+        <div className="mt-0.5 text-[10px] leading-relaxed text-slate-500">{hint}</div>
+      </div>
+      {networkToggle(enabled, onChangeNetwork, 'bg-emerald-500')}
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <p className="text-xs leading-relaxed text-slate-400">
-          {t.appPermTitle}
-        </p>
+        <p className="text-xs leading-relaxed text-slate-400">{t.appPermTitle}</p>
       </div>
 
+      {/* 本地访问轴 */}
       <div className="rounded-xl border border-[#2a2d3a] bg-[#11141c] p-4">
         <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
-          {t.appPermGlobalLevel}
+          {t.appPermGlobalLevel} · 本地访问
         </label>
         <div className="flex gap-2">
-          {([0, 1, 2, 3] as PaprLevel[]).map((lvl) => (
+          {LOCAL_ORDER.map((lvl) => (
             <button
               key={lvl}
               type="button"
-              onClick={() => updateDefaultLevel(lvl)}
-              className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
-                settings.defaultLevel === lvl
-                  ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-200'
-                  : 'border-[#2a2d3a] text-slate-400 hover:border-indigo-500/30 hover:text-slate-200'
-              }`}
+              onClick={() => updateDefaultLocal(lvl)}
+              className={localButton(lvl, settings.defaultLocal === lvl)}
             >
-              {LEVEL_LABELS[lvl]}
+              {LOCAL_LABEL[lvl]}
             </button>
           ))}
         </div>
         <p className="mt-2 text-[10px] leading-relaxed text-slate-600">
-          {LEVEL_DESC[settings.defaultLevel]}
+          {LOCAL_DESC[settings.defaultLocal]}
         </p>
       </div>
 
-      <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <label className="text-xs font-semibold text-amber-200">
-              ⚠️ {t.appPermAllowL3}
-            </label>
-            <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-              {t.appPermAllowL3Desc}
-            </p>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={settings.allowLevel3}
-            aria-label={t.appPermAllowL3}
-            onClick={toggleAllowLevel3}
-            className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors ${
-              settings.allowLevel3 ? 'bg-amber-500' : 'bg-[#2a2d3a]'
-            }`}
-          >
-            <span
-              className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                settings.allowLevel3 ? 'translate-x-5' : 'translate-x-0'
-              }`}
-            />
-          </button>
-        </div>
+      {/* 网络轴 */}
+      <div className="rounded-xl border border-[#2a2d3a] bg-[#11141c] p-4">
+        <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
+          网络
+        </label>
+        {networkRow(
+          settings.defaultNetwork,
+          updateDefaultNetwork,
+          '允许访问网络',
+          '开启后 app 可访问公网（papr.http / agent 联网工具），关闭则完全断网（CSP + 沙箱强制）',
+        )}
       </div>
 
       {apps.length > 0 && (
@@ -146,9 +176,9 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
           </label>
           <div className="flex flex-col gap-2">
             {apps.map((app) => {
-              const manifestLevel = getAppManifestLevel(app.appId);
-              const effectiveLevel = getAppEffectiveLevel(app.appId);
-              const override = settings.appOverrides[app.appId];
+              const declared = getAppDeclared(app.appId);
+              const effective = getAppEffective(app.appId);
+              const hasOverride = settings.appOverrides[app.appId] !== undefined;
               return (
                 <div
                   key={app.appId}
@@ -160,24 +190,53 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-xs font-semibold text-slate-200">{app.title}</div>
                     <div className="text-[10px] text-slate-600">
-                      manifest: L{manifestLevel} → effective: <span className={effectiveLevel >= 3 ? 'text-amber-400' : effectiveLevel >= 2 ? 'text-sky-400' : 'text-slate-400'}>L{effectiveLevel}</span>
+                      声明: L{LOCAL_LABEL[declared.local]}{declared.network ? '·联网' : '·离线'} → 生效:{' '}
+                      <span className={effective.local === 'write' ? 'text-amber-400' : effective.local === 'read' ? 'text-sky-400' : 'text-slate-400'}>
+                        {LOCAL_LABEL[effective.local]}{effective.network ? '·联网' : '·离线'}
+                      </span>
+                      {hasOverride ? ' ·已覆盖' : ''}
                     </div>
                   </div>
-                  <select
-                    value={override !== undefined ? String(override) : 'auto'}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      updateAppOverride(app.appId, val === 'auto' ? 'auto' : Number(val) as PaprLevel);
-                    }}
-                    className="rounded-md border border-[#2a2d3a] bg-[#0f1117] px-2 py-1 text-[10px] text-slate-300 outline-none focus:border-indigo-500/50"
-                  >
-                    <option value="auto">Auto (L{manifestLevel})</option>
-                    {[0, 1, 2, 3].filter((l) => l <= manifestLevel).map((l) => (
-                      <option key={l} value={l} disabled={l === 3 && !settings.allowLevel3}>
-                        L{l}{l === 3 && !settings.allowLevel3 ? ` (${t.appPermNeedGlobal})` : ''}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <select
+                      value={hasOverride ? settings.appOverrides[app.appId]!.local : 'auto'}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'auto') {
+                          updateAppOverride(app.appId, 'auto');
+                        } else {
+                          updateAppOverride(app.appId, { local: val as PaprLocalAccess });
+                        }
+                      }}
+                      title="本地访问覆盖"
+                      className="rounded-md border border-[#2a2d3a] bg-[#0f1117] px-1.5 py-1 text-[10px] text-slate-300 outline-none focus:border-indigo-500/50"
+                    >
+                      <option value="auto">本地: 自动</option>
+                      <option value="none">本地: 无</option>
+                      <option value="read">本地: 只读</option>
+                      <option value="write">本地: 读写执行</option>
+                    </select>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={effective.network}
+                      onClick={() =>
+                        hasOverride
+                          ? updateAppOverride(app.appId, { network: !settings.appOverrides[app.appId]!.network })
+                          : updateAppOverride(app.appId, { network: !declared.network })
+                      }
+                      title="网络覆盖（联网/离线）"
+                      className={`relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors ${
+                        effective.network ? 'bg-emerald-500' : 'bg-[#2a2d3a]'
+                      }`}
+                    >
+                      <span
+                        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                          effective.network ? 'translate-x-4' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -194,10 +253,10 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
       <div className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] p-4">
         <h4 className="mb-2 text-xs font-semibold text-slate-300">{t.appPermLevelInfo}</h4>
         <div className="flex flex-col gap-1.5 text-[10px] leading-relaxed text-slate-500">
-          <div><span className="text-slate-400 font-mono">L0</span> · {LEVEL_DESC[0]}</div>
-          <div><span className="text-slate-400 font-mono">L1</span> · {LEVEL_DESC[1]}</div>
-          <div><span className="text-slate-400 font-mono">L2</span> · {LEVEL_DESC[2]}</div>
-          <div><span className="text-amber-400 font-mono">L3</span> · {LEVEL_DESC[3]}</div>
+          <div><span className="text-slate-400 font-mono">无</span> · 纯计算，仅 papr.db / papr.fs（app 自有沙箱）</div>
+          <div><span className="text-slate-400 font-mono">只读</span> · + 读取项目文件（agent 只读工具）</div>
+          <div><span className="text-slate-400 font-mono">读写执行</span> · + 修改项目/执行命令（agent write/edit/patch/bash）</div>
+          <div><span className="text-slate-400 font-mono">网络</span> · 与本地轴正交：联网访问公网（https/wss），离线完全断网</div>
         </div>
       </div>
     </div>

@@ -95,32 +95,26 @@ const files = await papr.fs.list();
 
 Switch to **App mode** and describe the app you want in natural language. The Agent calls `app_render` to generate a complete manifest.json and index.html. Same appId updates in place.
 
-### Permissions
+### Permissions (two-axis model)
 
-Apps must declare required permissions:
+App access is declared by two orthogonal axes in `app_render` (or the manifest):
 
-| Permission | Capability |
-|---|---|
-| `storage:read/write` | `papr.db` key-value storage |
-| `http:get/post` | `papr.http` HTTP requests |
-| `fs:read/write` | `papr.fs` file I/O |
-| `workspace:read/write/exec` | Agent tools: read/write workspace files, execute commands |
-| `agent:run:<name>` | Invoke a specific agent |
+| Axis | Value | Capability |
+|---|---|---|
+| `local` | `none` | Pure compute; only `papr.db` / `papr.fs` (app-owned sandbox, always available) |
+| `local` | `read` | + read project files (Agent read tools: read/grep/list/lsp/diagnostics, etc.) |
+| `local` | `write` | + modify project files and execute commands (Agent write/edit/patch/bash) |
+| `network` | `true` | + access the public internet (papr.http + Agent websearch/webfetch + MCP) |
+| `network` | `false` | fully offline (enforced by iframe CSP + backend sandbox; JS cannot bypass) |
 
-Agent tool whitelist (declare in `agents[].tools`): `read`, `grep`, `list`, `lsp`, `diagnostics`, `read_image`, `skill_load`, `todo`, `local_time_now`, `websearch` (L2+), `webfetch` (L2+), `write` (L3), `edit` (L3), `patch` (L3), `bash` (L3).
+- `papr.db` / `papr.fs` are app-owned sandbox and always available — no permission needed
+- Backend services (`command`) require `local` to be at least `read`
+- Recommended combos: calculator `{none, off}`, Todo/notes `{none, off}`, data dashboard `{read, on}`, refactoring tool `{write, off}`
+- The legacy `level` field (0-3) still works: 0→`{none,off}`, 1→`{read,off}`, 2→`{read,on}`, 3→`{write,on}`
 
-### Permission Levels
+Agent tool whitelist (declare in `agents[].tools`, must fall within the access profile): `read`, `grep`, `list`, `lsp`, `diagnostics`, `read_image`, `skill_load`, `todo`, `local_time_now` (built-in), `websearch`, `webfetch` (require network), `write`, `edit`, `patch`, `bash` (require local=write).
 
-Apps declare a permission level via manifest `level` field (default L1):
-
-| Level | Capabilities |
-|---|---|
-| L0 Pure Compute | No external access, HTML/CSS/JS only |
-| L1 Runtime | `papr.db` + `papr.fs` + AI Agent (read-only tools) |
-| L2 Network | + `papr.http` + Agent web search + MCP |
-| L3 System | + Agent file writes (write/edit/patch confined to the app sandbox dir) / shell execution (requires global toggle) |
-
-Settings → **App Tab** adjusts global default level, L3 toggle, and per-app overrides.
+Settings → **App Tab** adjusts the global default (local access × network) and per-app overrides (overrides can only narrow).
 
 ### Application Management Panel
 

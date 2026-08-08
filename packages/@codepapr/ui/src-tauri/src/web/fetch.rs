@@ -114,6 +114,10 @@ pub(crate) async fn fetch_web_url(
         if !parsed_url.starts_with("https://") && !parsed_url.starts_with("http://") {
             return Err("url 必须是 http 或 https URL".to_string());
         }
+        // SSRF 防护：与 papr.http 对齐，禁止访问内网/本地地址（app agent 的 webfetch 也走这里）
+        if crate::papr_runtime::services::is_private_or_internal_url(&parsed_url) {
+            return Err("安全限制：不允许访问内网/本地地址".to_string());
+        }
 
         let max_bytes = max_bytes.unwrap_or(20_000).clamp(1_000, 100_000);
         let client = build_web_client()?;

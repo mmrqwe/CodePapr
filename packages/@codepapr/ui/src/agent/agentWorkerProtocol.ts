@@ -238,6 +238,11 @@ export interface AppAgentPayload {
   tools?: string[];
   maxToolRounds?: number;
   workspacePath?: string;
+  /** 两轴访问：本地（工作区）访问轴 */
+  local?: 'none' | 'read' | 'write';
+  /** 两轴访问：网络开关 */
+  network?: boolean;
+  /** 旧等级（兼容）；有 local/network 时忽略 */
   level?: number;
   inheritContext?: {
     skills?: boolean;
@@ -268,6 +273,8 @@ export type AgentWorkerToMainMessage =
         /** Assistant tool-call id this execution fulfills; preferred for matching
          *  the pending call over name+arguments (robust for identical calls). */
         toolCallId?: string;
+        /** app agent 专属：该 app 的两轴访问档，主线程据此构建 bash 等工具的沙箱 */
+        appAccess?: { network: boolean; workspaceWrite: boolean };
       }
   | {
       type: 'proxy-chat';

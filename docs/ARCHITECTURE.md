@@ -251,18 +251,25 @@ LLM 可通过 4 个工具管理 app 生命周期（在 `workspaceTools.ts` 注�
 
 应用列表 + 底部固定按钮栏。列表项：绿/红状态圆点 + emoji 图标 + app 名称。底部栏：▶ 启动 / 打开 / ■ 停止 / 🗑 删除。按钮根据选中 app 的状态自动启用/禁用。纯前端 app 的"打开"始终可用；后端 app 的"打开"仅在已启动时可用。
 
-**权限分级（4 级）：**
+**权限模型（两轴：本地 × 网络）：**
 
-app 可通过 manifest 的 `level` 字段声明权限级别：
+app 通过 manifest 的 `local`（`none`/`read`/`write`）× `network`（`true`/`false`）声明访问档；旧 `level`（0-3）自动迁移（0→{none,off}、1→{read,off}、2→{read,on}、3→{write,on}）：
 
-| Level | 名称 | 可用能力 |
-|---|---|---|
-| L0 | 纯计算 | 无外部访问，仅 HTML/CSS/JS 渲染 |
-| L1 | Runtime（默认） | `papr.db` + `papr.fs` + AI Agent（只读工具：read/grep/list/lsp） |
-| L2 | 联网 | + `papr.http` + Agent 联网搜索 + MCP 工具 |
-| L3 | 系统 | + 文件写入/终端/Git。需用户在设置中全局开启 |
+| local | 能力 |
+|---|---|
+| `none` | 纯计算，仅 `papr.db`/`papr.fs`（app 自有沙箱，永远可用） |
+| `read` | + Agent 只读工具（read/grep/list/lsp/diagnostics/read_image/skill_load） |
+| `write` | + Agent 写入/执行（write/edit/patch/bash） |
+| network=true | + papr.http + Agent websearch/webfetch + MCP |
 
-权限解析：`effective_level = min(manifest.level, user_override, global_allowLevel3_switch)`。设置面板新增 **App Tab**（`AppPermissionsTab.tsx`）：全局默认级别选择器、Level 3 全局开关、逐 app 覆盖下拉框。
+权限解析：`effective = manifest_access ∩ user_override`（覆盖只能收窄）。设置面板 **App Tab**（`AppPermissionsTab.tsx`）：全局默认（本地 × 网络）+ 逐 app 两控件覆盖。
+
+**网络强制链（两轴模型的核心）：**
+
+1. **iframe 直接联网**：`handle_app_protocol` 按 manifest 访问档注入 CSP 响应头（`build_app_csp`）。网络关：`connect-src 'self' [自身后端端口]`、`img-src 'self' data:`、`form-action 'none'`——浏览器引擎执行，JS 无法绕过；CDN 脚本（`script-src https:`）保留但无法回传数据。网络开：放行 `https:/wss:/ws:`。
+2. **后端进程**：`app_start` 从 manifest 解析访问档，经 `sandbox` 参数传入 `start_workspace_background_command`；sandbox-exec profile 按轴构建（网络关仅 `network-bind` 监听 localhost，无出站；local=read 时工作区只读）。
+3. **app agent 的 bash**：worker 在 tool-request 桥接中携带 `appAccess`，主线程 `run_workspace_shell_command` 按访问档构建沙箱。
+4. **agent webfetch**：`fetch_web_url` 增加 SSRF 防护（与 papr.http 对齐），禁止访问内网地址。
 
 **后端 URL 注入：**
 
@@ -707,7 +714,7 @@ OpenAI/Claude 兼容端点常是转发网关（如 OpenAI 网关转发 DeepSeek 
 | Search | 自部署 SearXNG 优先，失败自动降级到内置多源聚合；搜索引擎选择器已移除；分类/时间/语言/安全搜索等高级参数收入折叠区 |
 | Mentor | Mentor 子代理独立 API key、Base URL、模型选择 |
 | 高级 | 上下文压缩（模型/温度/摘要输出 token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 深度/文件限制、流式与工具输出（流空闲超时、中间截断保留字符数）、工具上下文模式（完整/摘要/自动，默认完整；当轮始终全文，仅历史上下文按模式摘要，见 §13.10）。上下文上限 `maxContextTokens` 默认 500K，实际生效值按所选服务商上下文上限自动钳制（见 §13.5） |
-| App | .papr 应用权限管理——全局默认级别、Level 3 全局开关、逐应用级别覆盖 |
+| App | .papr 应用权限管理——全局默认（本地访问 × 网络）与逐应用两轴覆盖 |
 
 语音配置不在主设置面板，而是在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。
 

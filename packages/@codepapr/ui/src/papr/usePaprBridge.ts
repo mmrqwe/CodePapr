@@ -1,9 +1,9 @@
 import { useEffect, useCallback, useState, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import type { PaprManifest, PaprAgentDef, PaprAppSettings, PaprLevel } from '@codepapr/types';
+import type { PaprManifest, PaprAgentDef, PaprAppSettings } from '@codepapr/types';
 import { isPaprMessage, createPaprResponse } from './paprProtocol';
 import { usePermissionStore } from './permissionStore';
-import { LEVEL_GRANTS, levelAllows, resolveEffectiveLevel } from './levelGrants';
+import { accessAllows, resolveEffectiveAccess } from './levelGrants';
 import { useAgentStore } from '../store/agentStore';
 import { WorkerCrashError } from '../agent/WorkerBackedAgent';
 import { acquireSleepPrevention, releaseSleepPrevention } from '../utils/sleepPrevention';
@@ -41,9 +41,9 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
     invoke<PaprAppSettings>('papr_get_app_settings').then(setAppSettings).catch(() => {});
   }, [appId, manifest, cacheManifest]);
 
-  const effectiveLevel: PaprLevel = resolveEffectiveLevel(manifest?.level, appSettings, appId);
-  const effectiveLevelRef = useRef(effectiveLevel);
-  effectiveLevelRef.current = effectiveLevel;
+  const effectiveAccess = resolveEffectiveAccess(manifest, appSettings, appId);
+  const effectiveAccessRef = useRef(effectiveAccess);
+  effectiveAccessRef.current = effectiveAccess;
 
   const handleMessage = useCallback(
     (event: MessageEvent) => {
@@ -67,20 +67,16 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
       }
 
       const permissions = resolvedManifest.permissions ?? [];
-      const currentLevel = effectiveLevelRef.current;
+      const currentAccess = effectiveAccessRef.current;
 
       function hasPermission(capability: string): boolean {
-        if (!levelAllows(currentLevel, capability)) return false;
-        if (permissions.length === 0) return true;
-        if (permissions.includes(capability as never)) return true;
-        const prefix = capability.split(':')[0];
-        return permissions.includes(prefix as never);
+        return accessAllows(currentAccess, capability, resolvedManifest);
       }
 
       function deny(capability: string) {
         const resp = createPaprResponse(data.reqId, undefined, {
           code: 'PERMISSION_DENIED',
-          message: `Permission denied: '${capability}' (app level ${currentLevel})`,
+          message: `Permission denied: '${capability}' (app local=${currentAccess.local}, network=${currentAccess.network})`,
         });
         postToIframe(iframeRef, resp, appOrigin);
       }
@@ -146,16 +142,13 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
       }
 
       if (type === 'papr://app.info') {
-        const rawPerms = resolvedManifest.permissions ?? [];
-        const effectivePermissions = rawPerms.length === 0
-          ? Array.from(LEVEL_GRANTS[currentLevel] ?? [])
-          : rawPerms.filter((p) => levelAllows(currentLevel, p as never));
         respond({
           appId,
           name: resolvedManifest.name,
           version: resolvedManifest.version ?? '0.0.0',
-          permissions: effectivePermissions,
-          level: currentLevel,
+          permissions,
+          local: currentAccess.local,
+          network: currentAccess.network,
         });
         return;
       }
@@ -221,7 +214,8 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
               tools: agentDef.tools,
               maxToolRounds: agentDef.maxToolRounds,
               workspacePath,
-              level: currentLevel,
+              local: currentAccess.local,
+              network: currentAccess.network,
               inheritContext: agentDef.inheritContext,
             },
             (event) => {
