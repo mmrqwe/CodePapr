@@ -607,6 +607,11 @@ export class Agent {
         if (effectiveSignal?.aborted) {
           break;
         }
+        // 检测到 question 后立即终止本轮剩余的 tool call：plan 模式模型可能
+        // 在提问前先发了变更类工具，必须保证提问一旦发生就不再执行后续调用。
+        if (question) {
+          break;
+        }
 
         let result: unknown;
         let success = true;

@@ -1,3 +1,4 @@
+import type { QuestionData, QuestionOption } from '@codepapr/types';
 import type { WorkMode } from './agentPrompts';
 import type { Lang } from './i18n';
 
@@ -6,28 +7,16 @@ export interface PlanFollowUpAction {
   label: string;
   prompt: string;
   mode: WorkMode;
-}
-
-export interface DecisionOptionItem {
-  id: string;
-  label: string;
-  description?: string;
-}
-
-export interface DecisionOptionCard {
-  id: string;
-  heading: string;
-  question: string;
-  options: DecisionOptionItem[];
-  note?: string;
+  /** 触发回答的源消息 id（用于标记已答状态）。 */
+  sourceMessageId?: string;
 }
 
 export interface ParsedDecisionCards {
-  cards: DecisionOptionCard[];
+  questions: QuestionData[];
   remainderContent: string;
 }
 
-interface JsonDecisionOptionItem {
+interface JsonQuestionOption {
   id?: string;
   label?: string;
   description?: string;
@@ -37,8 +26,9 @@ interface JsonDecisionCard {
   id?: string;
   heading?: string;
   question?: string;
-  options?: Array<JsonDecisionOptionItem | string>;
+  options?: Array<JsonQuestionOption | string>;
   note?: string;
+  multiple?: boolean;
 }
 
 const DECISION_HEADING_PATTERNS = [
@@ -69,10 +59,6 @@ function parseDecisionHeading(heading: string): string | null {
     .trim();
 }
 
-function buildOptionId(cardIndex: number, optionIndex: number): string {
-  return `decision-${cardIndex + 1}-option-${optionIndex + 1}`;
-}
-
 function extractJsonObject(content: string): string | null {
   const trimmed = content.trim();
   const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -97,54 +83,41 @@ function parseDecisionCardsFromJson(content: string): ParsedDecisionCards | null
       remainderContent?: string;
     };
     const rawCards = Array.isArray(parsed.decisionCards) ? parsed.decisionCards : [];
-    const cards: DecisionOptionCard[] = [];
-    rawCards.forEach((card, cardIndex) => {
-        const question = typeof card.question === 'string' ? card.question.trim() : '';
-        const options = (Array.isArray(card.options) ? card.options : [])
-          .map((option, optionIndex) => {
-            if (typeof option === 'string') {
-              return {
-                id: buildOptionId(cardIndex, optionIndex),
-                label: option.trim(),
-              };
-            }
-            return {
-              id:
-                typeof option.id === 'string' && option.id.trim()
-                  ? option.id.trim()
-                  : buildOptionId(cardIndex, optionIndex),
-              label: typeof option.label === 'string' ? option.label.trim() : '',
-              description:
-                typeof option.description === 'string' ? option.description.trim() : undefined,
-            };
-          })
-          .filter((option) => option.label);
+    const questions: QuestionData[] = [];
+    rawCards.forEach((card) => {
+      const questionText = typeof card.question === 'string' ? card.question.trim() : '';
+      const options = (Array.isArray(card.options) ? card.options : [])
+        .map((option) => {
+          if (typeof option === 'string') {
+            return { label: option.trim() };
+          }
+          return {
+            label: typeof option.label === 'string' ? option.label.trim() : '',
+            description:
+              typeof option.description === 'string' ? option.description.trim() : undefined,
+          };
+        })
+        .filter((option) => option.label);
 
-        if (!question || options.length === 0) {
-          return;
-        }
+      if (!questionText || options.length === 0) {
+        return;
+      }
 
-        cards.push({
-          id:
-            typeof card.id === 'string' && card.id.trim()
-              ? card.id.trim()
-              : `decision-card-${cardIndex + 1}`,
-          heading:
-            typeof card.heading === 'string' && card.heading.trim()
-              ? card.heading.trim()
-              : question,
-          question,
-          options,
-          note: typeof card.note === 'string' && card.note.trim() ? card.note.trim() : undefined,
-        });
+      questions.push({
+        question: questionText,
+        header: typeof card.heading === 'string' && card.heading.trim() ? card.heading.trim() : questionText,
+        options,
+        multiple: card.multiple === true,
+        note: typeof card.note === 'string' && card.note.trim() ? card.note.trim() : undefined,
       });
+    });
 
-    if (cards.length === 0) {
+    if (questions.length === 0) {
       return null;
     }
 
     return {
-      cards,
+      questions,
       remainderContent:
         typeof parsed.remainderContent === 'string' ? parsed.remainderContent.trim() : '',
     };
@@ -153,12 +126,9 @@ function parseDecisionCardsFromJson(content: string): ParsedDecisionCards | null
   }
 }
 
-function parseDecisionOptions(body: string, cardIndex: number): {
-  options: DecisionOptionItem[];
-  note?: string;
-} {
+function parseDecisionOptions(body: string): { options: QuestionOption[]; note?: string } {
   const lines = body.split('\n');
-  const options: DecisionOptionItem[] = [];
+  const options: QuestionOption[] = [];
   const noteLines: string[] = [];
 
   for (const rawLine of lines) {
@@ -170,7 +140,6 @@ function parseDecisionOptions(body: string, cardIndex: number): {
     const optionMatch = line.match(/^(\d+)[.、]\s*(.+)$/);
     if (optionMatch) {
       options.push({
-        id: buildOptionId(cardIndex, options.length),
         label: optionMatch[2]?.trim() ?? '',
       });
       continue;
@@ -207,12 +176,12 @@ export function parseDecisionOptionCards(content: string): ParsedDecisionCards {
 
   if (matches.length === 0) {
     return {
-      cards: [],
+      questions: [],
       remainderContent: content.trim(),
     };
   }
 
-  const cards: DecisionOptionCard[] = [];
+  const questions: QuestionData[] = [];
   const remainderParts: string[] = [];
 
   const appendRemainder = (value: string) => {
@@ -227,66 +196,77 @@ export function parseDecisionOptionCards(content: string): ParsedDecisionCards {
   for (let index = 0; index < matches.length; index += 1) {
     const current = matches[index];
     const heading = current?.[1]?.trim() ?? '';
-    const question = parseDecisionHeading(heading);
+    const questionText = parseDecisionHeading(heading);
     const sectionStart = (current?.index ?? 0) + (current?.[0]?.length ?? 0);
     const sectionEnd = matches[index + 1]?.index ?? content.length;
     const body = content.slice(sectionStart, sectionEnd).trim();
 
-    if (!question) {
+    if (!questionText) {
       appendRemainder(`## ${heading}\n${body}`.trim());
       continue;
     }
 
-    const { options, note } = parseDecisionOptions(body, index);
+    const { options, note } = parseDecisionOptions(body);
     if (options.length === 0) {
       appendRemainder(`## ${heading}\n${body}`.trim());
       continue;
     }
 
-    cards.push({
-      id: `decision-card-${index + 1}`,
-      heading,
-      question,
+    questions.push({
+      question: questionText,
+      header: heading,
       options,
+      multiple: false,
       note,
     });
   }
 
   return {
-    cards,
+    questions,
     remainderContent: remainderParts.join('\n\n').trim(),
   };
 }
 
-export function buildDecisionOptionAction(params: {
-  card: DecisionOptionCard;
-  option: DecisionOptionItem;
+/**
+ * 统一的「回答后续动作」构建器：question 工具与旧版决策卡片共用。
+ * 使用完整问题文本（而非截断的 header），支持单选与多选。
+ */
+export function buildQuestionAnswerAction(params: {
+  question: QuestionData;
+  selected: QuestionOption[];
   lang: Lang | undefined;
+  sourceMessageId?: string;
 }): PlanFollowUpAction {
-  const { card, option, lang } = params;
+  const { question, selected, lang, sourceMessageId } = params;
+  const labels = selected.map((option) => option.label).filter(Boolean);
+  const joined = labels.join('、');
+  const joinedEn = labels.join('", "');
 
   switch (lang ?? 'zh-CN') {
     case 'zh-TW':
       return {
-        id: `${card.id}-${option.id}`,
-        label: `選擇了「${option.label}」`,
-        prompt: `在剛才待確認選項「${card.question}」中，用戶選擇了「${option.label}」。請基於這個選擇繼續收斂最終 Plan；如果仍存在會影響實施方向的關鍵分歧，再提出新的待確認選項。不要開始執行。`,
+        id: `question-${question.question}-${joined}`,
+        label: `選擇了「${joined}」`,
+        prompt: `用戶對問題「${question.question}」的回答：選擇了「${joined}」。請基於這個選擇繼續收斂最終 Plan；如果仍存在會影響實施方向的關鍵分歧，再提出新的問題。不要開始執行。`,
         mode: 'plan',
+        sourceMessageId,
       };
     case 'en':
       return {
-        id: `${card.id}-${option.id}`,
-        label: `Chose "${option.label}"`,
-        prompt: `For the earlier decision point "${card.question}", the user selected "${option.label}". Continue refining the final plan based on that choice. If another decision still materially changes implementation direction, ask the next decision options. Do not start execution.`,
+        id: `question-${question.question}-${joinedEn}`,
+        label: labels.length > 1 ? `Chose "${joinedEn}"` : `Chose "${joinedEn}"`,
+        prompt: `Answer to question "${question.question}": chose "${joinedEn}". Continue refining the final plan based on that choice; if another decision still materially changes implementation direction, ask again. Do not start execution.`,
         mode: 'plan',
+        sourceMessageId,
       };
     case 'zh-CN':
     default:
       return {
-        id: `${card.id}-${option.id}`,
-        label: `选择了「${option.label}」`,
-        prompt: `在刚才待确认选项「${card.question}」中，用户选择了「${option.label}」。请基于这个选择继续收敛最终 Plan；如果仍存在会影响实施方向的关键分歧，再提出新的待确认选项。不要开始执行。`,
+        id: `question-${question.question}-${joined}`,
+        label: `选择了「${joined}」`,
+        prompt: `用户对问题「${question.question}」的回答：选择了「${joined}」。请基于这个选择继续收敛最终 Plan；如果仍存在会影响实施方向的关键分歧，再提出新的问题。不要开始执行。`,
         mode: 'plan',
+        sourceMessageId,
       };
   }
 }

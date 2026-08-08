@@ -28,6 +28,8 @@ vi.mock('./MonacoTextEditor', () => ({
 }));
 
 import { normalizeSettings, useAgentStore, type UIMessage } from '../store/agentStore';
+import type { WorkMode } from '../utils/agentPrompts';
+import type { IImageContent } from '@codepapr/types';
 import { ChatPanel } from './ChatPanel';
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
@@ -1038,5 +1040,210 @@ describe('ChatPanel', () => {
 
     // 切回执行中的会话 1：显示取消按钮
     expect(container.textContent).toContain('取消');
+  });
+
+  describe('QuestionCard (plan mode question tool)', () => {
+    type SendMessageSpy = (
+      input: string,
+      displayContent?: string,
+      mode?: WorkMode,
+      images?: IImageContent[]
+    ) => Promise<void>;
+
+    function makeSendSpy(): ReturnType<typeof vi.fn<SendMessageSpy>> {
+      return vi.fn<SendMessageSpy>(async () => {});
+    }
+
+    function setPlanQuestion(
+      sendMessageSpy: (input: string, displayContent?: string, mode?: WorkMode, images?: IImageContent[]) => Promise<void>,      extraMessages: UIMessage[] = []
+    ) {
+      const baseMessages: UIMessage[] = [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: '帮我规划一下',
+          timestamp: 1,
+        },
+        {
+          id: 'plan-1',
+          role: 'assistant',
+          workMode: 'plan',
+          content: '开始规划',
+          timestamp: 2,
+        },
+        ...extraMessages,
+      ];
+      useAgentStore.setState((state) => ({
+        ...state,
+        settings: normalizeSettings({ fastModelEnabled: false, apiKey: 'test-key' }),
+        workspacePath: '/tmp/codepapr-chat',
+        sessions: [
+          {
+            id: 'session-1',
+            name: '会话 1',
+            provider: 'deepseek',
+            model: 'deepseek-v4-pro',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+        activeSessionId: 'session-1',
+        messages: baseMessages,
+        sessionMessages: { 'session-1': baseMessages },
+        _sessionInputState: { 'session-1': { mode: 'plan', draft: '', images: [], files: [] } },
+        isLoading: false,
+        showSettings: false,
+        sendMessage: sendMessageSpy,
+      }));
+    }
+
+    function clickText(text: string) {
+      const button = Array.from(container.querySelectorAll('button')).find((el) =>
+        el.textContent?.includes(text)
+      );
+      if (!button) throw new Error(`未找到包含 "${text}" 的按钮`);
+      return act(async () => {
+        button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+    }
+
+    it('renders a single-select question card and answers with the full question text', async () => {
+      const sendSpy = makeSendSpy();
+      setPlanQuestion(sendSpy, [
+        {
+          id: 'plan-q',
+          role: 'assistant',
+          workMode: 'plan',
+          content: '',
+          timestamp: 3,
+          question: {
+            question: '你希望系统采用什么技术栈？React 还是 Vue，还是 Rust + Tauri？',
+            header: '技术栈',
+            options: [{ label: 'rust+tauri' }, { label: 'react+vite' }],
+            multiple: false,
+          },
+        },
+      ]);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+
+      expect(container.textContent).toContain('你希望系统采用什么技术栈？React 还是 Vue，还是 Rust + Tauri？');
+
+      await clickText('rust+tauri');
+
+      // 回答必须携带完整问题文本（而非截断的 header）
+      const callArgs = sendSpy.mock.calls[0];
+      expect(callArgs?.[0]).toContain('你希望系统采用什么技术栈？React 还是 Vue，还是 Rust + Tauri？');
+      expect(callArgs?.[0]).toContain('rust+tauri');
+      expect(callArgs?.[0]).toContain('不要开始执行');
+      expect(callArgs?.[2]).toBe('plan');
+
+      // 源消息被标记为已回答
+      const planMsg = useAgentStore.getState().messages.find((m) => m.id === 'plan-q');
+      expect(planMsg?.questionAnswered).toBe(true);
+    });
+
+    it('supports multi-select with a confirm button', async () => {
+      const sendSpy = makeSendSpy();
+      setPlanQuestion(sendSpy, [
+        {
+          id: 'plan-q',
+          role: 'assistant',
+          workMode: 'plan',
+          content: '',
+          timestamp: 3,
+          question: {
+            question: '需要哪些模块？',
+            header: '模块',
+            options: [{ label: '模块A' }, { label: '模块B' }, { label: '模块C' }],
+            multiple: true,
+          },
+        },
+      ]);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+
+      await clickText('模块A');
+      await clickText('模块C');
+
+      // 确认按钮出现且可点击
+      await clickText('确认选择');
+
+      const callArgs = sendSpy.mock.calls[0];
+      expect(callArgs?.[0]).toContain('模块A、模块C');
+      expect(callArgs?.[0]).toContain('需要哪些模块？');
+      expect(callArgs?.[2]).toBe('plan');
+    });
+
+    it('marks the question card answered and disables further interaction', async () => {
+      const sendSpy = makeSendSpy();
+      setPlanQuestion(sendSpy, [
+        {
+          id: 'plan-q',
+          role: 'assistant',
+          workMode: 'plan',
+          content: '',
+          timestamp: 3,
+          question: {
+            question: '继续吗？',
+            header: '确认',
+            options: [{ label: '继续' }, { label: '停止' }],
+            multiple: false,
+          },
+        },
+      ]);
+
+      // 模拟已答状态持久化恢复
+      useAgentStore.setState((state) => ({
+        messages: state.messages.map((m) =>
+          m.id === 'plan-q' ? { ...m, questionAnswered: true } : m
+        ),
+        sessionMessages: {
+          'session-1': (state.sessionMessages['session-1'] ?? []).map((m) =>
+            m.id === 'plan-q' ? { ...m, questionAnswered: true } : m
+          ),
+        },
+      }));
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+
+      expect(container.textContent).toContain('已回答');
+
+      await clickText('继续');
+      expect(sendSpy).not.toHaveBeenCalled();
+    });
+
+    it('renders legacy decision-card markdown through the unified QuestionCard', async () => {
+      const sendSpy = makeSendSpy();
+      setPlanQuestion(sendSpy, [
+        {
+          id: 'plan-q',
+          role: 'assistant',
+          workMode: 'plan',
+          content: `## 待确认选项 | 你希望系统采用什么技术栈？\n1. rust+tauri\n2. react+vite`,
+          timestamp: 3,
+        },
+      ]);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+
+      // 旧格式决策卡片渲染为统一 QuestionCard
+      expect(container.textContent).toContain('你希望系统采用什么技术栈？');
+      expect(container.textContent).toContain('rust+tauri');
+
+      await clickText('rust+tauri');
+      const callArgs = sendSpy.mock.calls[0];
+      expect(callArgs?.[0]).toContain('你希望系统采用什么技术栈？');
+      expect(callArgs?.[0]).toContain('rust+tauri');
+      expect(callArgs?.[2]).toBe('plan');
+    });
   });
 });

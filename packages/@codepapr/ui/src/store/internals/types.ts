@@ -207,6 +207,8 @@ export interface UIMessage {
   carryForwardInContext?: boolean;
   contextCheckpoint?: ContextCheckpointPayload;
   question?: QuestionData;
+  /** 该消息上的 plan 问题/决策卡片是否已被用户回答（防重复作答，持久化）。 */
+  questionAnswered?: boolean;
   timestamp: number;
 }
 

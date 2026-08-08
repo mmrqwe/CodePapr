@@ -103,13 +103,74 @@ describe('registerWorkspaceTools (domain split)', () => {
       question: 'Proceed?',
       header: 'Confirm',
       options: [{ label: 'Yes', description: 'continue' }],
-    })) as { __question: boolean; question: string; header: string; status: string };
+    })) as { __question: boolean; question: string; header: string };
     expect(result).toMatchObject({
       __question: true,
       question: 'Proceed?',
       header: 'Confirm',
-      status: 'asked',
     });
+    expect(result).not.toHaveProperty('status');
+  });
+
+  it('tolerates string options and drops invalid option items', async () => {
+    const registry = build({ mode: 'plan' });
+    const result = (await registry.execute('question', {
+      question: 'Pick one?',
+      header: 'Pick',
+      options: ['plain', 42, null, {}, { label: '' }, { label: 123 }, { label: 'valid', description: 99 }],
+    })) as { options: Array<{ label: string; description?: string }> };
+    expect(result.options).toEqual([
+      { label: 'plain' },
+      { label: 'valid' },
+    ]);
+  });
+
+  it('caps option count and truncates long labels/descriptions safely', async () => {
+    const registry = build({ mode: 'plan' });
+    const filler = Array.from({ length: 20 }, (_, i) => ({ label: `opt-${i}` }));
+    const longDescription = 'a'.repeat(500);
+    const result = (await registry.execute('question', {
+      question: 'Pick?',
+      header: 'Pick',
+      options: [
+        ...filler.slice(0, 7),
+        { label: '😀'.repeat(60), description: longDescription },
+        ...filler.slice(7),
+      ],
+    })) as {
+      options: Array<{ label: string; description?: string }>;
+    };
+    expect(result.options).toHaveLength(8);
+    const emojiOption = result.options[7];
+    // 截断按码点进行，不切开代理对：不含 U+FFFD 替换符，总码点数 ≤ 50
+    expect(emojiOption?.label).not.toContain('\uFFFD');
+    expect(Array.from(emojiOption?.label ?? '').length).toBeLessThanOrEqual(50);
+    // 截断后以省略号结尾
+    expect(emojiOption?.label?.endsWith('…')).toBe(true);
+    // description 也被限制在 200 码点内
+    expect(Array.from(emojiOption?.description ?? '').length).toBeLessThanOrEqual(200);
+    expect(emojiOption?.description?.endsWith('…')).toBe(true);
+  });
+
+  it('omits options entirely when the model sends an empty array', async () => {
+    const registry = build({ mode: 'plan' });
+    const result = (await registry.execute('question', {
+      question: 'Free text?',
+      header: 'Free',
+      options: [],
+    })) as { options?: unknown; multiple?: boolean };
+    expect(result.options).toBeUndefined();
+    expect(result.multiple).toBeUndefined();
+  });
+
+  it('only includes multiple when options exist', async () => {
+    const registry = build({ mode: 'plan' });
+    const result = (await registry.execute('question', {
+      question: 'Multi?',
+      header: 'Multi',
+      multiple: true,
+    })) as { multiple?: boolean };
+    expect(result.multiple).toBeUndefined();
   });
 });
 

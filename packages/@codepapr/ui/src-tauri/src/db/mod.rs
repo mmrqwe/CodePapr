@@ -1034,6 +1034,7 @@ pub(crate) fn save_message_batch(
             "carryForwardInContext",
             "contextCheckpoint",
             "question",
+            "questionAnswered",
         ] {
             if let Some(val) = msg.get(key) {
                 if !val.is_null() {
@@ -1108,8 +1109,8 @@ fn row_to_message_json(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Valu
         obj["toolInvocations"] = tool_invocations;
     }
     // 还原 extras（promptContent / synthetic / hidden / carryForwardInContext /
-    // contextCheckpoint / question），供 buildEffectiveContextMessages 重建压缩
-    // 历史与上下文成员资格。
+    // contextCheckpoint / question / questionAnswered），供 buildEffectiveContextMessages
+    // 重建压缩历史与上下文成员资格。
     if let Some(s) = extras_raw {
         if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&s) {
             for (key, value) in map {

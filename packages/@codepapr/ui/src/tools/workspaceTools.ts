@@ -31,6 +31,16 @@ import {
 
 export type { WorkspaceMutationListener, RegisterWorkspaceToolsOptions };
 
+/** question 工具最多返回的预定义选项数，防止模型撑爆 UI 与上下文。 */
+const MAX_QUESTION_OPTIONS = 8;
+
+/** 按 Unicode 码点截断（避免切开代理对/组合字符产生乱码），超长补省略号。 */
+function truncateSafe(value: string, maxLength: number): string {
+  const chars = Array.from(value);
+  if (chars.length <= maxLength) return value;
+  return `${chars.slice(0, maxLength - 1).join('')}…`;
+}
+
 
 export function registerWorkspaceTools(
   registry: ToolRegistry,
@@ -127,15 +137,29 @@ export function registerWorkspaceTools(
     },
     questionHandler: async (args: Record<string, unknown>) => {
       const question = asString(args.question, 'question');
-      const header = asString(args.header, 'header').slice(0, 30);
-      const rawOptions = args.options as Array<Record<string, unknown>> | undefined;
+      const header = truncateSafe(asString(args.header, 'header'), 30);
+      const rawOptions = Array.isArray(args.options) ? args.options : undefined;
       const multiple = args.multiple === true;
       const options = rawOptions
-        ?.map((opt) => ({
-          label: asString(opt.label, 'option.label').slice(0, 50),
-          description: opt.description != null ? asString(opt.description, 'option.description') : undefined,
-        }))
-        .filter((opt) => opt.label.length > 0);
+        ?.flatMap((item) => {
+          if (typeof item === 'string') {
+            return item.trim() ? [{ label: truncateSafe(item.trim(), 50) }] : [];
+          }
+          if (!item || typeof item !== 'object' || Array.isArray(item)) {
+            return [];
+          }
+          const record = item as Record<string, unknown>;
+          if (typeof record.label !== 'string' || !record.label.trim()) {
+            return [];
+          }
+          return [{
+            label: truncateSafe(record.label.trim(), 50),
+            description: typeof record.description === 'string'
+              ? truncateSafe(record.description, 200)
+              : undefined,
+          }];
+        })
+        .slice(0, MAX_QUESTION_OPTIONS);
 
       return {
         __question: true,
@@ -143,7 +167,6 @@ export function registerWorkspaceTools(
         header,
         ...(options && options.length > 0 ? { options } : {}),
         ...(options && options.length > 0 ? { multiple } : {}),
-        status: 'asked',
       };
     },
   });

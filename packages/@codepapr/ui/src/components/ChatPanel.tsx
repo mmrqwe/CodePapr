@@ -25,7 +25,7 @@ import { TaskChecklist } from './TaskChecklist';
 import { GoalBanner } from './GoalBanner';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import type { IImageContent } from '@codepapr/types';
-import type { QuestionData } from '@codepapr/types';
+import type { QuestionData, QuestionOption } from '@codepapr/types';
 import { type WorkMode } from '../utils/agentPrompts';
 import { getTranslation } from '../utils/i18n';
 import { useTtsPlayer } from '../hooks/useTtsPlayer';
@@ -34,11 +34,9 @@ import { TtsInstaller } from './TtsInstaller';
 import { useCharactersStore } from '../store/charactersStore';
 import { isExecutionHeavyTask } from '../utils/modelRouting';
 import {
-  buildDecisionOptionAction,
+  buildQuestionAnswerAction,
   type PlanFollowUpAction,
   parseDecisionOptionCards,
-  type DecisionOptionCard,
-  type DecisionOptionItem,
 } from '../utils/planMode';
 import {
   isScrollContainerNearBottom,
@@ -891,139 +889,132 @@ function QuestionCard({
   lang,
   disabled,
   onAnswer,
+  onOpenWorkspacePath,
+  sourceMessageId,
+  answered = false,
 }: {
   question: QuestionData;
   lang: 'zh-CN' | 'zh-TW' | 'en';
   disabled: boolean;
   onAnswer: (action: PlanFollowUpAction) => void;
+  onOpenWorkspacePath?: (path: string) => void;
+  sourceMessageId?: string;
+  answered?: boolean;
 }) {
   const t = getTranslation(lang);
   const hasOptions = question.options && question.options.length > 0;
+  const multiple = hasOptions && question.multiple === true;
+  const [selected, setSelected] = useState<string[]>([]);
 
-  const handleOptionClick = (option: { label: string; description?: string }) => {
-    const isEn = lang === 'en';
-    const answerText = isEn
-      ? `Answer to "${question.header}": chose "${option.label}". Continue refining the final Plan; if another decision still materially changes implementation direction, ask again. Do not start execution.`
-      : `用户对问题「${question.header}」的回答：选择了「${option.label}」。请基于这个选择继续收敛最终 Plan；如果仍存在会影响实施方向的关键分歧，再提出新的问题。不要开始执行。`;
-    onAnswer({
-      id: `question-${question.header}-${option.label}`,
-      label: isEn ? `Chose "${option.label}"` : `选择了「${option.label}」`,
-      prompt: answerText,
-      mode: 'plan',
-    });
+  useEffect(() => {
+    if (!multiple) {
+      setSelected([]);
+    }
+  }, [multiple]);
+
+  const submitSelection = (options: QuestionOption[]) => {
+    if (answered || disabled) {
+      return;
+    }
+    onAnswer(
+      buildQuestionAnswerAction({
+        question,
+        selected: options,
+        lang,
+        sourceMessageId,
+      })
+    );
   };
+
+  const handleOptionClick = (option: QuestionOption) => {
+    if (answered || disabled) {
+      return;
+    }
+    if (multiple) {
+      setSelected((current) =>
+        current.includes(option.label)
+          ? current.filter((label) => label !== option.label)
+          : [...current, option.label]
+      );
+      return;
+    }
+    submitSelection([option]);
+  };
+
+  const selectedOptions = (question.options ?? []).filter((option) =>
+    selected.includes(option.label)
+  );
 
   return (
     <div className="mb-3">
       <div className="rounded-xl border border-cyan-500/20 bg-[#0b0d12]/55 px-3.5 py-3">
         <div className="mb-2 flex items-center gap-2">
           <span className="inline-flex items-center rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-100">
-            {t.planDecisionTag}
+            {answered ? t.planQuestionAnswered : t.planDecisionTag}
           </span>
           <h4 className="text-sm font-semibold text-slate-100">{question.question}</h4>
+          {multiple && !answered && (
+            <span className="rounded-full border border-slate-600/60 px-2 py-0.5 text-[10px] text-slate-400">
+              {t.planMultiSelectHint}
+            </span>
+          )}
         </div>
+        {question.note && (
+          <div className="mb-3 rounded-lg border border-[#243040] bg-[#101722] px-3 py-2">
+            <MessageContent
+              content={question.note}
+              lang={lang}
+              onOpenWorkspacePath={onOpenWorkspacePath}
+            />
+          </div>
+        )}
         {hasOptions ? (
           <div className="space-y-2">
-            {question.options!.map((option, index) => (
+            {question.options!.map((option, index) => {
+              const isSelected = multiple && selected.includes(option.label);
+              return (
+                <button
+                  key={`${question.question}-${index}`}
+                  type="button"
+                  disabled={disabled || answered}
+                  onClick={() => handleOptionClick(option)}
+                  className={`flex w-full items-start justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                    isSelected
+                      ? 'border-cyan-400/60 bg-cyan-500/18'
+                      : 'border-cyan-500/25 bg-cyan-500/8 hover:border-cyan-400/45 hover:bg-cyan-500/12'
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-cyan-50">{option.label}</div>
+                    {option.description && (
+                      <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-slate-300">
+                        {option.description}
+                      </p>
+                    )}
+                  </div>
+                  <span className="flex-shrink-0 text-[11px] font-medium text-cyan-200">
+                    {multiple ? (isSelected ? '✓' : '') : t.planDecisionTag}
+                  </span>
+                </button>
+              );
+            })}
+            {multiple && (
               <button
-                key={`${question.header}-${index}`}
                 type="button"
-                disabled={disabled}
-                onClick={() => handleOptionClick(option)}
-                className="flex w-full items-start justify-between gap-3 rounded-xl border border-cyan-500/25 bg-cyan-500/8 px-3 py-2.5 text-left transition-colors hover:border-cyan-400/45 hover:bg-cyan-500/12 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={disabled || answered || selected.length === 0}
+                onClick={() => submitSelection(selectedOptions)}
+                className="w-full rounded-xl border border-cyan-500/40 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition-colors hover:border-cyan-400/60 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-cyan-50">{option.label}</div>
-                  {option.description && (
-                    <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-slate-300">
-                      {option.description}
-                    </p>
-                  )}
-                </div>
-                <span className="flex-shrink-0 text-[11px] font-medium text-cyan-200">
-                  {t.planDecisionTag}
-                </span>
+                {t.planConfirmSelection}
               </button>
-            ))}
+            )}
           </div>
         ) : (
-          <p className="text-xs text-slate-400">请在聊天框中输入你的回答，以继续规划。</p>
+          <p className="text-xs text-slate-400">
+            {answered ? t.planQuestionAnswered : t.planQuestionFreeTextHint}
+          </p>
         )}
       </div>
-    </div>
-  );
-}
-
-function DecisionOptionCardsPanel({
-  lang,
-  cards,
-  disabled,
-  onAction,
-  onOpenWorkspacePath,
-}: {
-  lang: 'zh-CN' | 'zh-TW' | 'en';
-  cards: DecisionOptionCard[];
-  disabled: boolean;
-  onAction: (action: PlanFollowUpAction) => void;
-  onOpenWorkspacePath?: (path: string) => void;
-}) {
-  const t = getTranslation(lang);
-
-  return (
-    <div className="mb-3 space-y-3">
-      <p className="text-[11px] font-semibold text-cyan-200">{t.planOptionsLabel}</p>
-      {cards.map((card) => {
-        return (
-          <div
-            key={card.id}
-            className="rounded-xl border border-cyan-500/20 bg-[#0b0d12]/55 px-3.5 py-3"
-          >
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-100">
-                {t.planDecisionTag}
-              </span>
-              <h4 className="text-sm font-semibold text-slate-100">{card.question}</h4>
-            </div>
-            {card.note && (
-              <div className="mb-3 rounded-lg border border-[#243040] bg-[#101722] px-3 py-2">
-                <MessageContent
-                  content={card.note}
-                  lang={lang}
-                  onOpenWorkspacePath={onOpenWorkspacePath}
-                />
-              </div>
-            )}
-            <div className="space-y-2">
-              {card.options.map((option: DecisionOptionItem) => {
-                const action = buildDecisionOptionAction({ card, option, lang });
-
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => onAction(action)}
-                    className="flex w-full items-start justify-between gap-3 rounded-xl border border-cyan-500/25 bg-cyan-500/8 px-3 py-2.5 text-left transition-colors hover:border-cyan-400/45 hover:bg-cyan-500/12 disabled:cursor-not-allowed disabled:opacity-50"
-                    title={action.prompt}
-                  >
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-cyan-50">{option.label}</div>
-                      {option.description && (
-                        <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-slate-300">
-                          {option.description}
-                        </p>
-                      )}
-                    </div>
-                    <span className="flex-shrink-0 text-[11px] font-medium text-cyan-200">
-                      {action.label}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
     </div>
   );
 }
@@ -1243,7 +1234,7 @@ const MessageBubble = memo(function MessageBubble({
         <div className="select-text">
           <MessageContent
             content={
-              !msg.isStreaming && showPlanActions && parsedDecisionCards && parsedDecisionCards.cards.length > 0
+              !msg.isStreaming && showPlanActions && parsedDecisionCards && parsedDecisionCards.questions.length > 0
                 ? parsedDecisionCards.remainderContent
                 : msg.content
             }
@@ -1255,21 +1246,31 @@ const MessageBubble = memo(function MessageBubble({
         {showPlanActions &&
           onPlanAction &&
           parsedDecisionCards &&
-          parsedDecisionCards.cards.length > 0 && (
-          <DecisionOptionCardsPanel
-            lang={lang}
-            cards={parsedDecisionCards.cards}
-            disabled={Boolean(planActionsDisabled)}
-            onAction={onPlanAction}
-            onOpenWorkspacePath={onOpenWorkspacePath}
-          />
+          parsedDecisionCards.questions.length > 0 && (
+          <div className="space-y-3">
+            {parsedDecisionCards.questions.map((question, index) => (
+              <QuestionCard
+                key={`decision-card-${index}`}
+                question={question}
+                lang={lang}
+                disabled={Boolean(planActionsDisabled)}
+                answered={msg.questionAnswered === true}
+                onAnswer={onPlanAction}
+                onOpenWorkspacePath={onOpenWorkspacePath}
+                sourceMessageId={msg.id}
+              />
+            ))}
+          </div>
         )}
         {showPlanActions && onPlanAction && msg.question && (
           <QuestionCard
             question={msg.question}
             lang={lang}
             disabled={Boolean(planActionsDisabled)}
+            answered={msg.questionAnswered === true}
             onAnswer={onPlanAction}
+            onOpenWorkspacePath={onOpenWorkspacePath}
+            sourceMessageId={msg.id}
           />
         )}
         {typeof msg.agentStep !== 'number' && (
@@ -2356,9 +2357,34 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
       return;
     }
 
+    // 标记源消息的 plan 问题为已答（持久化，防重复作答）。
+    if (action.sourceMessageId && activeSessionId) {
+      useAgentStore.setState((s) => {
+        const currentSessionMessages = s.sessionMessages[activeSessionId] ?? s.messages;
+        let changed = false;
+        const nextMessages = currentSessionMessages.map((message) => {
+          if (message.id !== action.sourceMessageId) {
+            return message;
+          }
+          changed = true;
+          return { ...message, questionAnswered: true };
+        });
+        if (!changed) {
+          return {};
+        }
+        return {
+          messages: activeSessionId === s.activeSessionId ? nextMessages : s.messages,
+          sessionMessages: {
+            ...s.sessionMessages,
+            [activeSessionId]: nextMessages,
+          },
+        };
+      });
+    }
+
     setMode(action.mode);
     await submitMessage(action.prompt, action.label, action.mode);
-  }, [isConfigured, isLoading, submitMessage]);
+  }, [activeSessionId, isConfigured, isLoading, submitMessage]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     const nativeEvent = e.nativeEvent;

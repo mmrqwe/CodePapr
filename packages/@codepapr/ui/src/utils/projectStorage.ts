@@ -38,6 +38,7 @@ export interface ProjectMessage {
   carryForwardInContext?: boolean;
   contextCheckpoint?: ContextCheckpointPayload;
   question?: QuestionData;
+  questionAnswered?: boolean;
   timestamp: number;
 }
 

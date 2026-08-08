@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildDecisionOptionAction,
+  buildQuestionAnswerAction,
   parseDecisionOptionCards,
 } from './planMode';
 
@@ -21,8 +21,8 @@ describe('parseDecisionOptionCards', () => {
 确认技术栈后再输出最终计划。
 `);
 
-    expect(parsed.cards).toHaveLength(1);
-    expect(parsed.cards[0]).toMatchObject({
+    expect(parsed.questions).toHaveLength(1);
+    expect(parsed.questions[0]).toMatchObject({
       question: '你希望系统采用什么技术栈？',
       options: [
         { label: 'c#+ts+electron' },
@@ -31,7 +31,7 @@ describe('parseDecisionOptionCards', () => {
         { label: '其它（请说明）' },
       ],
     });
-    expect(parsed.cards[0]?.note).toContain('补充说明');
+    expect(parsed.questions[0]?.note).toContain('补充说明');
     expect(parsed.remainderContent).toContain('临时结论');
     expect(parsed.remainderContent).toContain('先确认关键前提');
   });
@@ -39,7 +39,7 @@ describe('parseDecisionOptionCards', () => {
   it('falls back to plain content when no decision card is present', () => {
     const parsed = parseDecisionOptionCards('直接输出普通计划。');
 
-    expect(parsed.cards).toEqual([]);
+    expect(parsed.questions).toEqual([]);
     expect(parsed.remainderContent).toBe('直接输出普通计划。');
   });
 
@@ -60,9 +60,9 @@ describe('parseDecisionOptionCards', () => {
 }
 \`\`\``);
 
-    expect(parsed.cards).toHaveLength(1);
-    expect(parsed.cards[0]?.question).toBe('你希望系统采用什么技术栈？');
-    expect(parsed.cards[0]?.options[0]).toMatchObject({
+    expect(parsed.questions).toHaveLength(1);
+    expect(parsed.questions[0]?.question).toBe('你希望系统采用什么技术栈？');
+    expect(parsed.questions[0]?.options?.[0]).toMatchObject({
       label: 'c#+ts+electron',
       description: '现有团队栈一致',
     });
@@ -70,19 +70,15 @@ describe('parseDecisionOptionCards', () => {
   });
 });
 
-describe('buildDecisionOptionAction', () => {
+describe('buildQuestionAnswerAction', () => {
   it('keeps the flow inside plan mode after the user chooses an option', () => {
-    const action = buildDecisionOptionAction({
-      card: {
-        id: 'decision-card-1',
-        heading: '待确认选项 | 你希望系统采用什么技术栈？',
+    const action = buildQuestionAnswerAction({
+      question: {
         question: '你希望系统采用什么技术栈？',
-        options: [{ id: 'decision-1-option-1', label: 'rust+tauri' }],
+        header: '技术栈',
+        options: [{ label: 'rust+tauri' }],
       },
-      option: {
-        id: 'decision-1-option-1',
-        label: 'rust+tauri',
-      },
+      selected: [{ label: 'rust+tauri' }],
       lang: 'zh-CN',
     });
 
@@ -90,7 +86,85 @@ describe('buildDecisionOptionAction', () => {
       mode: 'plan',
       label: '选择了「rust+tauri」',
     });
+    expect(action.prompt).toContain('你希望系统采用什么技术栈？');
     expect(action.prompt).toContain('rust+tauri');
     expect(action.prompt).toContain('不要开始执行');
+  });
+
+  it('uses the full question text (not the truncated header) in the answer prompt', () => {
+    const action = buildQuestionAnswerAction({
+      question: {
+        question: '你希望系统采用什么技术栈？React 还是 Vue，还是 Rust + Tauri？',
+        header: '技术栈',
+        options: [{ label: 'rust+tauri' }, { label: 'react+vite' }],
+      },
+      selected: [{ label: 'rust+tauri' }],
+      lang: 'zh-CN',
+    });
+
+    expect(action.prompt).toContain('你希望系统采用什么技术栈？React 还是 Vue，还是 Rust + Tauri？');
+    // 使用完整问题文本，而非旧的「header 截断」格式
+    expect(action.prompt).not.toContain('对问题「技术栈」');
+  });
+
+  it('joins multiple selected options into a multi-select answer', () => {
+    const action = buildQuestionAnswerAction({
+      question: {
+        question: '需要哪些模块？',
+        header: '模块',
+        multiple: true,
+        options: [{ label: 'A' }, { label: 'B' }, { label: 'C' }],
+      },
+      selected: [{ label: 'A' }, { label: 'C' }],
+      lang: 'zh-CN',
+    });
+
+    expect(action.prompt).toContain('选择了「A、C」');
+    expect(action.label).toBe('选择了「A、C」');
+  });
+
+  it('supports en prompts', () => {
+    const action = buildQuestionAnswerAction({
+      question: {
+        question: 'Which stack?',
+        header: 'Stack',
+        options: [{ label: 'Rust' }],
+      },
+      selected: [{ label: 'Rust' }],
+      lang: 'en',
+    });
+
+    expect(action.prompt).toContain('Which stack?');
+    expect(action.prompt).toContain('Do not start execution');
+  });
+
+  it('supports zh-TW prompts', () => {
+    const action = buildQuestionAnswerAction({
+      question: {
+        question: '你希望系統採用什麼技術棧？',
+        header: '技術棧',
+        options: [{ label: 'rust+tauri' }],
+      },
+      selected: [{ label: 'rust+tauri' }],
+      lang: 'zh-TW',
+    });
+
+    expect(action.prompt).toContain('你希望系統採用什麼技術棧？');
+    expect(action.prompt).toContain('不要開始執行');
+  });
+
+  it('carries the source message id for answered-state marking', () => {
+    const action = buildQuestionAnswerAction({
+      question: {
+        question: 'Proceed?',
+        header: 'Confirm',
+        options: [{ label: 'Yes' }],
+      },
+      selected: [{ label: 'Yes' }],
+      lang: 'en',
+      sourceMessageId: 'msg-42',
+    });
+
+    expect(action.sourceMessageId).toBe('msg-42');
   });
 });

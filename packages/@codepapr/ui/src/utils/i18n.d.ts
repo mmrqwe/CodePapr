@@ -491,6 +491,10 @@ export declare const I18N_DICTS: {
         runAgent: string;
         planOptionsLabel: string;
         planDecisionTag: string;
+        planQuestionFreeTextHint: string;
+        planQuestionAnswered: string;
+        planConfirmSelection: string;
+        planMultiSelectHint: string;
         welcomeTitle: string;
         welcomeDescConfigured: string;
         apiFormat: string;
@@ -986,6 +990,10 @@ export declare const I18N_DICTS: {
         runAgent: string;
         planOptionsLabel: string;
         planDecisionTag: string;
+        planQuestionFreeTextHint: string;
+        planQuestionAnswered: string;
+        planConfirmSelection: string;
+        planMultiSelectHint: string;
         welcomeTitle: string;
         welcomeDescConfigured: string;
         apiFormat: string;
@@ -1481,6 +1489,10 @@ export declare const I18N_DICTS: {
         runAgent: string;
         planOptionsLabel: string;
         planDecisionTag: string;
+        planQuestionFreeTextHint: string;
+        planQuestionAnswered: string;
+        planConfirmSelection: string;
+        planMultiSelectHint: string;
         welcomeTitle: string;
         welcomeDescConfigured: string;
         apiFormat: string;
@@ -1844,6 +1856,10 @@ export declare function getTranslation(lang?: Lang): {
     runAgent: string;
     planOptionsLabel: string;
     planDecisionTag: string;
+    planQuestionFreeTextHint: string;
+    planQuestionAnswered: string;
+    planConfirmSelection: string;
+    planMultiSelectHint: string;
     welcomeTitle: string;
     welcomeDescConfigured: string;
     apiFormat: string;
@@ -2205,6 +2221,10 @@ export declare function getTranslation(lang?: Lang): {
     runAgent: string;
     planOptionsLabel: string;
     planDecisionTag: string;
+    planQuestionFreeTextHint: string;
+    planQuestionAnswered: string;
+    planConfirmSelection: string;
+    planMultiSelectHint: string;
     welcomeTitle: string;
     welcomeDescConfigured: string;
     apiFormat: string;
@@ -2566,6 +2586,10 @@ export declare function getTranslation(lang?: Lang): {
     runAgent: string;
     planOptionsLabel: string;
     planDecisionTag: string;
+    planQuestionFreeTextHint: string;
+    planQuestionAnswered: string;
+    planConfirmSelection: string;
+    planMultiSelectHint: string;
     welcomeTitle: string;
     welcomeDescConfigured: string;
     apiFormat: string;

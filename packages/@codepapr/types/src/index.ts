@@ -199,6 +199,8 @@ export interface QuestionData {
   header: string;
   options?: QuestionOption[];
   multiple?: boolean;
+  /** 附加说明（决策卡片格式携带的补充信息，question 工具不产生）。 */
+  note?: string;
 }
 
 export interface QuestionOption {

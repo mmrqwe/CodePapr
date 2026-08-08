@@ -357,24 +357,25 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 22. question ────
   {
     name: 'question',
-    description: '向用户提问（Plan 模式），可提供预定义选项和多选支持。',
+    description: '向用户提出明确的问题以收集需求、确认决策或消除歧义。仅在 Plan 模式下使用，当需求不明确或需要用户做关键选择时调用。如果不需要用户选择，不传 options 则用户可自由输入文本回答。',
     parameters: {
       type: 'object',
       properties: {
-        question: { type: 'string', description: '问题内容。' },
-        header: { type: 'string', description: '简短标题（最长 30 字符）。' },
+        question: { type: 'string', description: '要问用户的问题，清晰描述需要确认的内容。' },
+        header: { type: 'string', description: '简短标题（最多30字符），用于在UI中标识此问题。' },
         options: {
           type: 'array',
+          description: '可选的预定义选项。如果提供，用户只能从这些选项中选择（单选或多选）；如果不提供，用户可自由输入文本回答。',
           items: {
             type: 'object',
             properties: {
-              label: { type: 'string', description: '选项标签。' },
-              description: { type: 'string', description: '选项说明。' },
+              label: { type: 'string', description: '选项的显示文字（1-5个词，简洁）。' },
+              description: { type: 'string', description: '选项的详细说明。' },
             },
             required: ['label'],
           },
         },
-        multiple: { type: 'boolean', description: '是否允许多选。' },
+        multiple: { type: 'boolean', description: '是否允许多选（仅在提供 options 时有效）。默认 false 为单选。' },
       },
       required: ['question', 'header'],
     },
