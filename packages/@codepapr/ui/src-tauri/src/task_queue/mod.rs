@@ -5,6 +5,8 @@
 //! strictly one-at-a-time.  Tauri commands enqueue tasks and return a task_id
 //! immediately; the frontend polls `poll_workspace_task` for the result.
 
+#![forbid(unsafe_code)]
+
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};

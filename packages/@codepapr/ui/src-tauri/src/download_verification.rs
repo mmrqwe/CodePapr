@@ -12,6 +12,8 @@
 //!
 //! 注意：运行时不提供任何环境变量绕过入口。
 
+#![forbid(unsafe_code)]
+
 use sha2::{Digest, Sha256, Sha512};
 use std::{fs, io::Read, path::Path, time::Duration};
 

@@ -4,6 +4,8 @@
 //! paths and YOLO-approved paths are handled by the shared access policy;
 //! canonicalisation and path traversal checks still apply.
 
+#![forbid(unsafe_code)]
+
 pub(crate) mod default_project;
 pub(crate) mod diff;
 pub(crate) mod access;

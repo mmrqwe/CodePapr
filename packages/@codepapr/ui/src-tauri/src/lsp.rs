@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 #[cfg(windows)]
@@ -2121,12 +2123,15 @@ static LSP_EXTENDS_PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceL
 static LSP_IMPLEMENTS_PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
 
 fn lsp_extends_pattern() -> &'static regex::Regex {
-    LSP_EXTENDS_PATTERN.get_or_init(|| regex::Regex::new(r"(?i-u)\bextends\s+(\w+)").unwrap())
+    LSP_EXTENDS_PATTERN.get_or_init(|| {
+        regex::Regex::new(r"(?i-u)\bextends\s+(\w+)").expect("valid static extends regex")
+    })
 }
 
 fn lsp_implements_pattern() -> &'static regex::Regex {
-    LSP_IMPLEMENTS_PATTERN
-        .get_or_init(|| regex::Regex::new(r"(?i-u)\bimplements\s+([\w,\s]+)").unwrap())
+    LSP_IMPLEMENTS_PATTERN.get_or_init(|| {
+        regex::Regex::new(r"(?i-u)\bimplements\s+([\w,\s]+)").expect("valid static implements regex")
+    })
 }
 
 #[tauri::command]

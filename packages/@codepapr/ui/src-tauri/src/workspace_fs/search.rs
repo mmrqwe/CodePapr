@@ -472,7 +472,7 @@ pub(crate) fn collect_search_matches(
     let matches = Arc::try_unwrap(results)
         .unwrap_or_else(|_| unreachable!())
         .into_inner()
-        .unwrap();
+        .unwrap_or_else(|e| e.into_inner());
     Ok((
         matches,
         truncated.load(Ordering::Relaxed),

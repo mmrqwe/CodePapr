@@ -495,7 +495,7 @@ pub(crate) fn compute_project_stats_impl(workspace_path: &str) -> Result<Project
     let agg = Arc::try_unwrap(aggregator)
         .unwrap_or_else(|_| unreachable!())
         .into_inner()
-        .unwrap();
+        .unwrap_or_else(|e| e.into_inner());
 
     Ok(finalize(agg))
 }

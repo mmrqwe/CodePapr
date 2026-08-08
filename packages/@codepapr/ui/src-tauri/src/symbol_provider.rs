@@ -1613,9 +1613,7 @@ fn register_lsp_providers() {
 fn register_ast_providers() {
     register_ast_with_config(AstLanguageConfig {
         language_id: "typescript",
-        language_fn: || unsafe {
-            std::mem::transmute(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into_raw()())
-        },
+        language_fn: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         type_kinds: &[
             "class_declaration",
             "interface_declaration",
@@ -1642,9 +1640,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "typescriptreact",
-        language_fn: || unsafe {
-            std::mem::transmute(tree_sitter_typescript::LANGUAGE_TSX.into_raw()())
-        },
+        language_fn: || tree_sitter_typescript::LANGUAGE_TSX.into(),
         type_kinds: &[
             "class_declaration",
             "interface_declaration",
@@ -1671,9 +1667,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "javascript",
-        language_fn: || unsafe {
-            std::mem::transmute(tree_sitter_javascript::LANGUAGE.into_raw()())
-        },
+        language_fn: || tree_sitter_javascript::LANGUAGE.into(),
         type_kinds: &["class_declaration"],
         callable_kinds: &[
             "function_declaration",
@@ -1697,7 +1691,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "python",
-        language_fn: || unsafe { std::mem::transmute(tree_sitter_python::LANGUAGE.into_raw()()) },
+        language_fn: || tree_sitter_python::LANGUAGE.into(),
         type_kinds: &["class_definition"],
         callable_kinds: &["function_definition"],
         variable_kinds: &["assignment"],
@@ -1714,7 +1708,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "rust",
-        language_fn: || unsafe { std::mem::transmute(tree_sitter_rust::LANGUAGE.into_raw()()) },
+        language_fn: || tree_sitter_rust::LANGUAGE.into(),
         type_kinds: &["struct_item", "enum_item", "trait_item", "impl_item"],
         callable_kinds: &["function_item"],
         variable_kinds: &["let_declaration", "const_item", "static_item"],
@@ -1736,7 +1730,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "java",
-        language_fn: || unsafe { std::mem::transmute(tree_sitter_java::LANGUAGE.into_raw()()) },
+        language_fn: || tree_sitter_java::LANGUAGE.into(),
         type_kinds: &[
             "class_declaration",
             "interface_declaration",
@@ -1760,7 +1754,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "go",
-        language_fn: || unsafe { std::mem::transmute(tree_sitter_go::LANGUAGE.into_raw()()) },
+        language_fn: || tree_sitter_go::LANGUAGE.into(),
         type_kinds: &["type_declaration"],
         callable_kinds: &["function_declaration", "method_declaration"],
         variable_kinds: &[
@@ -1784,7 +1778,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "cpp",
-        language_fn: || unsafe { std::mem::transmute(tree_sitter_cpp::LANGUAGE.into_raw()()) },
+        language_fn: || tree_sitter_cpp::LANGUAGE.into(),
         type_kinds: &["class_specifier", "struct_specifier", "enum_specifier"],
         callable_kinds: &["function_definition"],
         variable_kinds: &["declaration"],
@@ -1803,7 +1797,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "shellscript",
-        language_fn: || unsafe { std::mem::transmute(tree_sitter_bash::LANGUAGE.into_raw()()) },
+        language_fn: || tree_sitter_bash::LANGUAGE.into(),
         type_kinds: &[],
         callable_kinds: &["function_definition"],
         variable_kinds: &["variable_assignment"],
@@ -1816,9 +1810,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "php",
-        language_fn: || unsafe {
-            std::mem::transmute(tree_sitter_php::LANGUAGE_PHP_ONLY.into_raw()())
-        },
+        language_fn: || tree_sitter_php::LANGUAGE_PHP_ONLY.into(),
         type_kinds: &[
             "class_declaration",
             "interface_declaration",
@@ -1844,7 +1836,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "csharp",
-        language_fn: || unsafe { std::mem::transmute(tree_sitter_c_sharp::LANGUAGE.into_raw()()) },
+        language_fn: || tree_sitter_c_sharp::LANGUAGE.into(),
         type_kinds: &[
             "class_declaration",
             "interface_declaration",
@@ -1876,7 +1868,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "css",
-        language_fn: || unsafe { std::mem::transmute(tree_sitter_css::LANGUAGE.into_raw()()) },
+        language_fn: || tree_sitter_css::LANGUAGE.into(),
         type_kinds: &[],
         callable_kinds: &[],
         variable_kinds: &[],
@@ -1889,7 +1881,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "html",
-        language_fn: || unsafe { std::mem::transmute(tree_sitter_html::LANGUAGE.into_raw()()) },
+        language_fn: || tree_sitter_html::LANGUAGE.into(),
         type_kinds: &["element", "script_element", "style_element"],
         callable_kinds: &[],
         variable_kinds: &[],
@@ -1902,7 +1894,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "json",
-        language_fn: || unsafe { std::mem::transmute(tree_sitter_json::LANGUAGE.into_raw()()) },
+        language_fn: || tree_sitter_json::LANGUAGE.into(),
         type_kinds: &["object", "pair"],
         callable_kinds: &[],
         variable_kinds: &[],
@@ -1915,7 +1907,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "ruby",
-        language_fn: || unsafe { std::mem::transmute(tree_sitter_ruby::LANGUAGE.into_raw()()) },
+        language_fn: || tree_sitter_ruby::LANGUAGE.into(),
         type_kinds: &["class", "module"],
         callable_kinds: &["method", "singleton_method"],
         variable_kinds: &["assignment"],
@@ -1934,7 +1926,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "kotlin",
-        language_fn: || unsafe { std::mem::transmute(tree_sitter_kotlin::LANGUAGE.into_raw()()) },
+        language_fn: || tree_sitter_kotlin::LANGUAGE.into(),
         type_kinds: &[
             "class_declaration",
             "object_declaration",
@@ -1957,7 +1949,7 @@ fn register_ast_providers() {
 
     register_ast_with_config(AstLanguageConfig {
         language_id: "swift",
-        language_fn: || unsafe { std::mem::transmute(tree_sitter_swift::LANGUAGE.into_raw()()) },
+        language_fn: || tree_sitter_swift::LANGUAGE.into(),
         type_kinds: &[
             "class_declaration",
             "struct_declaration",
@@ -1988,7 +1980,7 @@ fn register_ast_providers() {
     // kind 数值与 regex-sql provider 保持一致（TABLE/VIEW/INDEX=5，FUNCTION/PROCEDURE/TRIGGER=12）。
     register_ast_with_config(AstLanguageConfig {
         language_id: "sql",
-        language_fn: || unsafe { std::mem::transmute(tree_sitter_sql::LANGUAGE.into_raw()()) },
+        language_fn: || tree_sitter_sql::LANGUAGE.into(),
         type_kinds: &[
             "create_table",
             "create_view",

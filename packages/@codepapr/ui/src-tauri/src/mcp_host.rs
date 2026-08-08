@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use rmcp::{
     model::CallToolRequestParams,
     object,

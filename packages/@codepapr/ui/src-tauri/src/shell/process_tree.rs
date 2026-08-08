@@ -45,8 +45,14 @@ pub(crate) fn kill_process_tree(child: &mut Child) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         let pid = child.id() as libc::pid_t;
+        // SAFETY: `pid` is the child's own process id (a valid pgid/pgid
+        // argument per POSIX; `getpgid` accepts any pid, including 0, and
+        // negative values are handled via the `kill(-pid)` form below).
         let group_leader = unsafe { libc::getpgid(pid) };
         if group_leader == pid {
+            // SAFETY: `-pid` is a valid negative pid signalling the whole
+            // process group; verified above that `pid` is its own group
+            // leader, so we can never kill our own group.
             if unsafe { libc::kill(-pid, libc::SIGKILL) } == 0 {
                 return Ok(());
             }

@@ -16,6 +16,8 @@
 //! API keys from the OS keychain (the old `keyring`‑based storage) and then
 //! delete them from the keychain so the user never sees a prompt again.
 
+#![forbid(unsafe_code)]
+
 use std::{
     fs,
     io::{Read, Write},

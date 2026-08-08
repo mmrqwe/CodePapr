@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use flate2::read::GzDecoder;
 use reqwest::blocking::Client;
 use serde::Serialize;

@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 pub(crate) mod finetune;
 pub(crate) mod installer;
 pub(crate) mod player;

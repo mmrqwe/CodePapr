@@ -7,7 +7,7 @@ use std::{
 
 use serde::Serialize;
 use tauri::{
-    http::{Request, Response, StatusCode},
+    http::{header::HeaderValue, Request, Response, StatusCode},
     UriSchemeContext,
 };
 
@@ -17,6 +17,17 @@ static APP_WORKSPACES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new(
 
 fn app_workspaces() -> &'static Mutex<HashMap<String, String>> {
     APP_WORKSPACES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Build a plain HTTP response with the given status and body. Status codes
+/// and the CORS header are static constants, so response construction
+/// cannot fail.
+fn resp(status: StatusCode, body: impl Into<Vec<u8>>) -> Response<Vec<u8>> {
+    Response::builder()
+        .status(status)
+        .header("Access-Control-Allow-Origin", "*")
+        .body(body.into())
+        .expect("static status code and header values cannot fail")
 }
 
 /// app_id 会被拼进文件服务路径（.CodePapr/apps/<app_id>/...）：拒绝一切
@@ -78,14 +89,16 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
     let path = path.trim_start_matches('/');
 
     let serve_sdk = || {
-        let sdk = papr_runtime::sdk_inject::get_sdk_js();
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/javascript; charset=utf-8")
-            .header("Access-Control-Allow-Origin", "*")
-            .header("Cache-Control", "no-cache")
-            .body(sdk.as_bytes().to_vec())
-            .unwrap()
+        let mut response = resp(
+            StatusCode::OK,
+            papr_runtime::sdk_inject::get_sdk_js().as_bytes().to_vec(),
+        );
+        response.headers_mut().insert(
+            "Content-Type",
+            HeaderValue::from_static("application/javascript; charset=utf-8"),
+        );
+        response.headers_mut().insert("Cache-Control", HeaderValue::from_static("no-cache"));
+        response
     };
 
     // Legacy SDK URL with no app id prefix.
@@ -96,18 +109,12 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
     let (app_id, file_path) = match path.split_once('/') {
         Some((id, rest)) if !id.is_empty() => (id, rest),
         _ => {
-            return Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body("missing app id".into())
-                .unwrap();
+            return resp(StatusCode::NOT_FOUND, "missing app id".to_string());
         }
     };
 
     if !is_valid_app_id(app_id) {
-        return Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .body("invalid app id".into())
-            .unwrap();
+        return resp(StatusCode::FORBIDDEN, "invalid app id".to_string());
     }
 
     let file_path = if file_path.is_empty() { "index.html" } else { file_path };
@@ -120,29 +127,20 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
     }
 
     if file_path.contains("..") || file_path.contains('\\') {
-        return Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .body("path traversal blocked".into())
-            .unwrap();
+        return resp(StatusCode::FORBIDDEN, "path traversal blocked".to_string());
     }
 
     // papr.db 的数据库文件（含 WAL/SHM 边车）是 app 私有状态且可能正在被写入，
     // 不允许通过协议裸 serve。
     if is_unservable_app_file(file_path) {
-        return Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body("file not found".into())
-            .unwrap();
+        return resp(StatusCode::NOT_FOUND, "file not found".to_string());
     }
 
     let map = app_workspaces().lock().unwrap_or_else(|e| e.into_inner());
     let workspace = match map.get(app_id) {
         Some(ws) => ws.clone(),
         None => {
-            return Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body("app not registered".into())
-                .unwrap();
+            return resp(StatusCode::NOT_FOUND, "app not registered".to_string());
         }
     };
     drop(map);
@@ -153,37 +151,25 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
     let canonical_base = match std::path::Path::new(&app_base).canonicalize() {
         Ok(p) => p,
         Err(_) => {
-            return Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body("app not found".into())
-                .unwrap();
+            return resp(StatusCode::NOT_FOUND, "app not found".to_string());
         }
     };
 
     let canonical_path = match std::path::Path::new(&raw_path).canonicalize() {
         Ok(p) => p,
         Err(_) => {
-            return Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body("file not found".into())
-                .unwrap();
+            return resp(StatusCode::NOT_FOUND, "file not found".to_string());
         }
     };
 
     if !canonical_path.starts_with(&canonical_base) {
-        return Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .body("path traversal blocked".into())
-            .unwrap();
+        return resp(StatusCode::FORBIDDEN, "path traversal blocked".to_string());
     }
 
     let content = match fs::read(&canonical_path) {
         Ok(c) => c,
         Err(_) => {
-            return Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body("file not found".into())
-                .unwrap();
+            return resp(StatusCode::NOT_FOUND, "file not found".to_string());
         }
     };
 
@@ -263,7 +249,9 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
     if let Some(csp) = &csp {
         response = response.header("Content-Security-Policy", csp.as_str());
     }
-    response.body(body).unwrap()
+    response
+        .body(body)
+        .expect("static status code and validated header values cannot fail")
 }
 
 /// 按两轴权限构建 app 文档的 CSP：

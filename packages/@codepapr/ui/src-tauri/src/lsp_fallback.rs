@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{

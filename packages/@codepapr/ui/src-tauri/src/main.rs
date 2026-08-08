@@ -1,5 +1,8 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Unsafe blocks must not be wrapped in unsafe fns without explicit
+// documentation; all unsafe is reviewed.
+#![deny(unsafe_op_in_unsafe_fn)]
 
 mod app_runtime;
 mod browser;

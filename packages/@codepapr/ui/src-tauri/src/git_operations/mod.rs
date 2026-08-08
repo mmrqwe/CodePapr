@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 pub mod branch;
 pub mod commit;
 pub mod diff;

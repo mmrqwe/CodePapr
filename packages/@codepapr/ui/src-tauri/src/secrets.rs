@@ -6,6 +6,8 @@
 //!
 //! All actual I/O is performed by [`crate::vault::AppSecrets`].
 
+#![forbid(unsafe_code)]
+
 use crate::vault::AppSecrets;
 
 pub(crate) const PRIMARY_KEY_ACCOUNT: &str = "api_key";

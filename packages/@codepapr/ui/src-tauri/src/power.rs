@@ -51,6 +51,10 @@ mod macos {
         let c_string = std::ffi::CString::new(trimmed)
             .map_err(|err| format!("无效的断言名称: {err}"))?;
         let cf = unsafe {
+            // SAFETY: `c_string` is a live NUL-terminated C string whose
+            // pointer remains valid for the call; `null()` selects the
+            // default allocator, and the returned CFString is non-owning
+            // (we hold `c_string` until the CF string's first use).
             CFStringCreateWithCString(
                 std::ptr::null(),
                 c_string.as_ptr(),
@@ -78,12 +82,16 @@ mod macos {
         let name_ref = match cf_string("CodePapr agent turn in progress") {
             Ok(name_ref) => name_ref,
             Err(err) => {
+                // SAFETY: `type_ref` is a valid CFStringRef returned by
+                // `cf_string` above and not yet released.
                 unsafe { CFRelease(type_ref) };
                 return Err(err);
             }
         };
         let mut assertion_id: IOPMAssertionId = 0;
         let result = unsafe {
+            // SAFETY: `type_ref`/`name_ref` are live CFStringRefs; 
+            // `assertion_id` is a valid writable pointer to a u32.
             IOPMAssertionCreateWithName(
                 type_ref,
                 K_IOPM_ASSERTION_LEVEL_ON,
@@ -92,6 +100,8 @@ mod macos {
             )
         };
         unsafe {
+            // SAFETY: both references are still live here; CFRelease is
+            // balanced with the +1 retains from `cf_string`.
             CFRelease(type_ref);
             CFRelease(name_ref);
         }
@@ -110,6 +120,8 @@ mod macos {
             let idle_id = match create_assertion("NoIdleSleepAssertion") {
                 Ok(id) => id,
                 Err(err) => {
+                    // SAFETY: `display_id` is a live assertion created by
+                    // `create_assertion` on the line above.
                     unsafe { IOPMAssertionRelease(display_id) };
                     return Err(err);
                 }
@@ -130,6 +142,9 @@ mod macos {
         if state.holders == 0 {
             let mut first_error: Option<String> = None;
             for assertion_id in state.assertion_ids.drain(..) {
+                // SAFETY: every id in `assertion_ids` was produced by a
+                // successful `create_assertion` and released exactly once
+                // here (ids are drained, never released twice).
                 let result = unsafe { IOPMAssertionRelease(assertion_id) };
                 if result != K_IORETURN_SUCCESS && first_error.is_none() {
                     first_error = Some(format!("IOPMAssertionRelease 失败: 0x{result:08x}"));
@@ -146,6 +161,9 @@ mod macos {
     pub fn release_all() {
         if let Ok(mut state) = STATE.lock() {
             for assertion_id in state.assertion_ids.drain(..) {
+                // SAFETY: same invariant as `release()` — ids are live
+                // assertions created by `create_assertion`, drained exactly
+                // once (process exit path).
                 unsafe {
                     IOPMAssertionRelease(assertion_id);
                 }

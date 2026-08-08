@@ -740,6 +740,8 @@ pub(crate) fn close_all_browser_pages() {
     for pid in &pids {
         #[cfg(unix)]
         {
+            // SAFETY: `*pid` is a positive process id (from `child.id()`),
+            // and SIGTERM is a valid signal for `kill`.
             let _ = unsafe { libc::kill(*pid as i32, libc::SIGTERM) };
         }
         #[cfg(windows)]

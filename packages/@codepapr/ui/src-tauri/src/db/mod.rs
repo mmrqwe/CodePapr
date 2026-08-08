@@ -6,6 +6,10 @@
 //! - **Papr App DB** (`<workspace>/.CodePapr/apps/<appId>/db.sqlite`): per-app key-value
 //!   storage backing `papr.db`. Kept inside the app folder so each app stays
 //!   self-contained and isolated from CodePapr internal state.
+//!
+//! This module is pure Rust (rusqlite); no FFI, so unsafe is forbidden.
+
+#![forbid(unsafe_code)]
 
 use std::fs;
 use std::path::{Path, PathBuf};

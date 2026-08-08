@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use regex::Regex;
 use serde::Deserialize;
 
@@ -105,6 +107,21 @@ pub(crate) fn collect_wikipedia_results(
     Ok(results)
 }
 
+/// Field-extraction regexes for arXiv Atom entries. Compiled once, reused
+/// across every search; the patterns are static strings so construction
+/// cannot fail.
+static ARXIV_FIELD_REGEXES: OnceLock<[Regex; 3]> = OnceLock::new();
+
+fn arxiv_field_regexes() -> &'static [Regex; 3] {
+    ARXIV_FIELD_REGEXES.get_or_init(|| {
+        [
+            Regex::new(r"<title[^>]*>([\s\S]*?)</title>").expect("valid arxiv title regex"),
+            Regex::new(r"<summary[^>]*>([\s\S]*?)</summary>").expect("valid arxiv summary regex"),
+            Regex::new(r"<id[^>]*>([\s\S]*?)</id>").expect("valid arxiv id regex"),
+        ]
+    })
+}
+
 pub(crate) fn collect_arxiv_results(
     client: &reqwest::blocking::Client,
     query: &str,
@@ -140,9 +157,7 @@ pub(crate) fn collect_arxiv_results(
 
     let entry_re =
         Regex::new(r"<entry>[\s\S]*?</entry>").map_err(|_| "arXiv 解析正则构造失败".to_string())?;
-    let title_re = Regex::new(r"<title[^>]*>([\s\S]*?)</title>").unwrap();
-    let summary_re = Regex::new(r"<summary[^>]*>([\s\S]*?)</summary>").unwrap();
-    let id_re = Regex::new(r"<id[^>]*>([\s\S]*?)</id>").unwrap();
+    let [title_re, summary_re, id_re] = arxiv_field_regexes();
 
     let mut results = Vec::new();
     for entry in entry_re.find_iter(&body) {

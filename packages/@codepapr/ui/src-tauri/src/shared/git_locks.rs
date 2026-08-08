@@ -77,6 +77,10 @@ mod tests {
             std::ffi::CString::new(lock.to_string_lossy().as_ref()).unwrap();
         let backdate = (GIT_LOCK_STALE_AFTER.as_secs() + 60) as i64;
         unsafe {
+            // SAFETY: `path_cstr` is a live NUL-terminated path string whose
+            // pointer stays valid for the call; `times` is a two-element
+            // array (atime/utime) of libc::timeval, and null pointers are
+            // not passed here.
             let now = libc::time(std::ptr::null_mut());
             let old = libc::timeval { tv_sec: now - backdate, tv_usec: 0 };
             let times = [old, old];

@@ -246,14 +246,14 @@ async fn process_one_request(
         "top_p".to_string(),
         serde_json::Value::Number(
             serde_json::Number::from_f64(req.top_p as f64)
-                .unwrap_or(serde_json::Number::from_f64(1.0).unwrap()),
+                .unwrap_or(serde_json::Number::from(1)),
         ),
     );
     payload.insert(
         "temperature".to_string(),
         serde_json::Value::Number(
             serde_json::Number::from_f64(req.temperature as f64)
-                .unwrap_or(serde_json::Number::from_f64(1.0).unwrap()),
+                .unwrap_or(serde_json::Number::from(1)),
         ),
     );
     if let Some(ref model) = req.model_name {
@@ -574,8 +574,8 @@ async fn synthesize_batch_ws_async(
     payload.insert("sample_steps".to_string(), serde_json::Value::Number(serde_json::Number::from(sample_steps)));
     payload.insert("speed_factor".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(speed as f64).unwrap_or(serde_json::Number::from(1))));
     payload.insert("top_k".to_string(), serde_json::Value::Number(serde_json::Number::from(top_k)));
-    payload.insert("top_p".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(top_p as f64).unwrap_or(serde_json::Number::from_f64(1.0).unwrap())));
-    payload.insert("temperature".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(temperature as f64).unwrap_or(serde_json::Number::from_f64(1.0).unwrap())));
+    payload.insert("top_p".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(top_p as f64).unwrap_or(serde_json::Number::from(1))));
+    payload.insert("temperature".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(temperature as f64).unwrap_or(serde_json::Number::from(1))));
     if let Some(ref model) = model_name {
         if !model.is_empty() {
             payload.insert("model_name".to_string(), serde_json::Value::String(model.clone()));

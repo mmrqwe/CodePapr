@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 mod diff_engine;
 pub mod ignore_resolver;
 mod restore_engine;
