@@ -403,6 +403,42 @@ describe('promptSystem', () => {
     expect(en).toContain('default in-app persistence');
   });
 
+  it('app mode warns about the network:false CSP hard block', () => {
+    for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
+      const prompt = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang });
+      expect(prompt).toContain('network:false');
+      expect(prompt).toMatch(/CSP|Content-Security/i);
+    }
+  });
+
+  it('app mode includes the high-quality-app methodology and self-check', () => {
+    const zhCN = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'zh-CN' });
+    expect(zhCN).toContain('构建高质量 App');
+    expect(zhCN).toContain('生成后自检');
+    const zhTW = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'zh-TW' });
+    expect(zhTW).toContain('構建高品質 App');
+    const en = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'en' });
+    expect(en).toContain('Building a High-Quality App');
+    expect(en).toContain('Self-check');
+  });
+
+  it('app mode includes a project-data-exploration example', () => {
+    for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
+      const prompt = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang });
+      expect(prompt).toContain('readme-dashboard');
+      expect(prompt).toContain('local: "read"');
+    }
+  });
+
+  it('app mode documents papr.fs subdirectory auto-creation and agent-cannot-read-db', () => {
+    const zhCN = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'zh-CN' });
+    expect(zhCN).toContain('自动创建子目录');
+    expect(zhCN).toContain('Agent 读不到 papr.db');
+    const en = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'en' });
+    expect(en).toContain('auto-creates subdirectories');
+    expect(en).toContain('Agents cannot read papr.db');
+  });
+
   it('all mode prompts pass the ImmutablePrefix static-content guard', () => {
     // 回归：app 模式后端示例曾含 `${API}` 模板字面量，命中缓存层的动态内容拦截，
     // 导致 app 模式直接报 "System prompt contains dynamic content" 无法使用。

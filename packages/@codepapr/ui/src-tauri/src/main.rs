@@ -392,7 +392,7 @@ fn main() {
             power::prevent_idle_sleep,
             power::allow_idle_sleep
         ])
-        .on_window_event(|_, event| {
+        .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 lsp::stop_all_servers();
                 tts::tts_server_stop_internal();
@@ -405,6 +405,15 @@ fn main() {
                 mcp_host::disconnect_all_blocking();
                 workspace_fs::watcher::stop_workspace_watcher_impl();
                 power::release_all();
+
+                // macOS：AppKit 默认最后一个窗口关闭后不终止应用
+                // （applicationShouldTerminateAfterLastWindowClosed=NO），tao/wry 均未覆盖，
+                // 进程会残留在 Dock。必须显式退出——exit(0) 会走 ExitRequested→Exit，
+                // 下方 RunEvent::Exit 的清理（幂等）会再跑一遍。
+                // CloseRequested 触发时被关窗口仍在注册表中，len() <= 1 即"最后一个窗口"。
+                if window.app_handle().windows().len() <= 1 {
+                    window.app_handle().exit(0);
+                }
             }
         })
         .build(tauri::generate_context!())

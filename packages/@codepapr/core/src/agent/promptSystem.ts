@@ -165,12 +165,14 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '// onProgress 可选，接收流式事件: { type: "tool-call-start"|"tool-call-end"|"content-delta" }',
       'Agent 可调用 manifest 中声明的工具（read、grep、list、websearch 等），支持多轮推理。',
       '适用场景：让 AI 分析项目文件、搜索网络、生成报告。App 可以展示 loading 反馈 + steps 追踪。',
+      '⚠️ Agent 读不到 papr.db——需要的数据要放进 task（如 task: "总结: " + JSON.stringify(todos)）。',
       '需要权限：agent:run:<agentName>',
       '',
       '### papr.http — HTTP 请求',
       'await papr.http.get(url, maxBytes?)     // GET 请求，返回 { status, body, contentType }',
       'await papr.http.post(url, body, contentType?)  // POST 请求',
       '适用场景：调用外部 API 获取数据（JSON API、RSS feed 等）。',
+      '⚠️ 仅限公网地址（https），不能访问 localhost 或内网（SSRF 防护）。',
       '需要权限：http:get, http:post',
       '',
       '### papr.fs — 文件读写（限定 app data 目录 .CodePapr/apps/<appId>/data/；writeFile 自动创建子目录，如 posts/x.md）',
@@ -196,6 +198,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '推荐组合：计算器 → {local:"none", network:false}；Todo/笔记 → {local:"none", network:false}；数据分析看板 → {local:"read", network:true}；重构工具 → {local:"write", network:false}。\n💡 需要把生成的文件写入项目时（如导出静态网站/文档/报告到项目文件夹），用 local:"write" + agent：agent 会用 write/edit/patch/bash 直接写项目文件（如 task: "生成博客站点到 docs/blog/"）。',
       '⚠️ 后端服务（command）要求 local 至少为 "read"。',
       'papr.db / papr.fs 是 app 自有沙箱，永远可用，无需任何权限。',
+      '⚠️ network:false 时 app 无法访问任何外部资源（CSP 强制拦截 fetch/WebSocket/图片/表单）——HTML 里需要外部 API 时必须设 network:true，papr.http 同理。',
       '旧 level 参数（0-3）仍兼容：0→{none,off}、1→{read,off}、2→{read,on}、3→{write,on}。',
 
       '## Agent 定义',
@@ -241,6 +244,14 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '- 必须有 loading 状态和 error 处理的 UI 反馈',
       '- appId 必须是 kebab-case（小写字母 + 数字 + 连字符），如 "todo-app"、"stock-dashboard"',
 
+      '## 构建高质量 App',
+      '- 复杂 app 先规划再编码：先列出视图、数据流、关键状态，再写完整 HTML；避免边写边想导致结构混乱',
+      '- 状态管理：关键状态用 papr.db 持久化（刷新不丢），纯 UI 临时状态用局部变量即可，不要都塞进 papr.db',
+      '- 所有异步操作（papr.agent.run / papr.http / papr.fs）必须有 loading 反馈和 error 处理，失败时给用户可理解的提示',
+      '- 列表/搜索类界面要有空状态提示（如 "暂无数据"），不要白屏；表单要有输入校验和提交反馈；破坏性操作（删除等）要有确认',
+      '- 生成后自检：① local/network 与代码实际能力匹配（fetch 外部/papr.http → network:true；agent 写项目 → local:write）② CDN 库 URL 正确可达 ③ 刷新后状态不丢失（用 papr.db）④ 移动端布局不破',
+
+
       '## 完整示例：AI Todo App',
       '```',
       '用户: "创建一个 Todo App，可以添加任务，用 AI 总结未完成的任务"',
@@ -257,6 +268,22 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '      // AI 总结用 papr.agent.run（数据要放进 task，Agent 读不到 papr.db）',
       '      const result = await papr.agent.run({agent:\'assistant\', task:\'总结这些任务: \' + JSON.stringify(todos)}, (e)=>{updateProgress(e);});',
       '      showResult(result.content);"',
+      '  })',
+      '```',
+
+      '## 完整示例：项目数据探索',
+      '```',
+      '用户: "分析项目里的 README，生成一个阅读看板"',
+      '→ 你调用 app_render({',
+      '    appId: "readme-dashboard",',
+      '    title: "README 阅读看板",',
+      '    local: "read",    // 需要 agent 读取项目文件',
+      '    network: false,   // 无需联网',
+      '    agents: [{name:"analyst", model:"main", systemPrompt:"你是项目文档分析师", tools:["read"]}],',
+      '    html: "<!DOCTYPE html>...<script>\\n',
+      '      // 点击\"分析\"时让 agent 读 README 并总结（数据放 task 里）',
+      '      const r = await papr.agent.run({agent:\'analyst\', task:\'读取 README.md 并总结项目要点，输出 JSON\'});',
+      '      renderSummary(JSON.parse(r.content));"',
       '  })',
       '```',
 
@@ -323,6 +350,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '// onProgress 可選，接收流式事件: { type: "tool-call-start"|"tool-call-end"|"content-delta" }',
       'Agent 可調用 manifest 中宣告的工具（read、grep、list、websearch 等），支援多輪推理。',
       '適用場景：讓 AI 分析專案檔案、搜尋網路、生成報告。App 可以展示 loading 回饋 + steps 追蹤。',
+      '⚠️ Agent 讀不到 papr.db——需要的資料要放進 task（如 task: "總結: " + JSON.stringify(todos)）。',
       '需要權限：agent:run:<agentName>',
       '',
       '### papr.http — HTTP 請求',
@@ -356,6 +384,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '推薦組合：計算器 → {local:"none", network:false}；Todo/筆記 → {local:"none", network:false}；資料分析看板 → {local:"read", network:true}；重構工具 → {local:"write", network:false}。\n💡 需要把產生的檔案寫入專案時（如匯出靜態網站/文件/報告到專案資料夾），用 local:"write" + agent：agent 會用 write/edit/patch/bash 直接寫專案檔案（如 task: "生成部落格站點到 docs/blog/"）。',
       '⚠️ 後端服務（command）要求 local 至少為 "read"。',
       'papr.db / papr.fs 是 app 自有沙箱，永遠可用，無需任何權限。',
+      '⚠️ network:false 時 app 無法存取任何外部資源（CSP 強制攔截 fetch/WebSocket/圖片/表單）——HTML 裡需要外部 API 時必須設 network:true，papr.http 同理。',
       '舊 level 參數（0-3）仍相容：0→{none,off}、1→{read,off}、2→{read,on}、3→{write,on}。',
 
       '## Agent 定義',
@@ -399,6 +428,14 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '- 必須有 loading 狀態和 error 處理的 UI 回饋',
       '- appId 必須是 kebab-case',
 
+      '## 構建高品質 App',
+      '- 複雜 app 先規劃再編碼：先列出視圖、資料流、關鍵狀態，再寫完整 HTML；避免邊寫邊想導致結構混亂',
+      '- 狀態管理：關鍵狀態用 papr.db 持久化（重新整理不丟），純 UI 臨時狀態用區域變數即可，不要都塞進 papr.db',
+      '- 所有非同步操作（papr.agent.run / papr.http / papr.fs）必須有 loading 回饋和 error 處理，失敗時給使用者可理解的提示',
+      '- 列表/搜尋類介面要有空狀態提示（如「暫無資料」），不要白屏；表單要有輸入驗證和提交回饋；破壞性操作（刪除等）要有確認',
+      '- 生成後自檢：① local/network 與程式碼實際能力匹配（fetch 外部/papr.http → network:true；agent 寫專案 → local:write）② CDN 庫 URL 正確可達 ③ 重新整理後狀態不丟失（用 papr.db）④ 行動版版面不破',
+
+
       '## 完整示例：AI Todo App',
       '```',
       '用戶: "創建一個 Todo App，可以添加任務，用 AI 總結未完成的任務"',
@@ -409,6 +446,22 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '    network: false,  // 無需聯網',
       '    agents: [{name:"assistant", model:"main", systemPrompt:"你是任務總結助手"}],',
       '    html: "...papr.db 存儲 todos；papr.agent.run({agent:\'assistant\', task:\'總結這些任務: \' + JSON.stringify(todos)}) 調用 AI 總結..."',
+      '  })',
+      '```',
+
+      '## 完整示例：專案資料探索',
+      '```',
+      '用戶: "分析專案裡的 README，生成一個閱讀看板"',
+      '→ 你調用 app_render({',
+      '    appId: "readme-dashboard",',
+      '    title: "README 閱讀看板",',
+      '    local: "read",    // 需要 agent 讀取專案檔案',
+      '    network: false,   // 無需聯網',
+      '    agents: [{name:"analyst", model:"main", systemPrompt:"你是專案文件分析師", tools:["read"]}],',
+      '    html: "<!DOCTYPE html>...<script>\\n',
+      '      // 點擊\"分析\"時讓 agent 讀 README 並總結（資料放 task 裡）',
+      '      const r = await papr.agent.run({agent:\'analyst\', task:\'讀取 README.md 並總結專案要點，輸出 JSON\'});',
+      '      renderSummary(JSON.parse(r.content));"',
       '  })',
       '```',
 
@@ -474,12 +527,14 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '// onProgress (optional) receives stream events: { type: "tool-call-start"|"tool-call-end"|"content-delta" }',
       'Agents use manifest-declared tools (read, grep, list, websearch, etc.) with multi-turn reasoning.',
       'Use for: AI-powered file analysis, web research, report generation. Show loading + step tracking in UI.',
+      '⚠️ Agents cannot read papr.db — put the data they need into the task (e.g. task: "Summarize: " + JSON.stringify(todos)).',
       'Permission: agent:run:<agentName>',
       '',
       '### papr.http — HTTP Requests',
       'await papr.http.get(url, maxBytes?)     // GET, returns { status, body, contentType }',
       'await papr.http.post(url, body, contentType?)  // POST',
       'Use for: calling external APIs (JSON APIs, RSS feeds, etc.).',
+      '⚠️ Public https URLs only — localhost and internal addresses are blocked (SSRF protection).',
       'Permissions: http:get, http:post',
       '',
       '### papr.fs — File I/O (restricted to .CodePapr/apps/<appId>/data/; writeFile auto-creates subdirectories, e.g. posts/x.md)',
@@ -505,6 +560,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       'Recommended combos: calculator → {local:"none", network:false}; Todo/notes → {local:"none", network:false}; data dashboard → {local:"read", network:true}; refactoring tool → {local:"write", network:false}.\n💡 To write generated files into the project (e.g. export a static site/docs/report into the project folder), use local:"write" + an agent — the agent writes project files directly with write/edit/patch/bash (e.g. task: "Generate a blog site into docs/blog/").',
       '⚠️ Backend services (command) require local to be at least "read".',
       'papr.db / papr.fs are app-owned sandbox and always available — no permission needed.',
+      '⚠️ With network:false the app CANNOT reach any external resource (CSP blocks fetch/WebSocket/images/forms) — if the HTML needs external APIs, set network:true; papr.http needs it too.',
       'The legacy level parameter (0-3) still works: 0→{none,off}, 1→{read,off}, 2→{read,on}, 3→{write,on}.',
 
       '## Agent Definitions',
@@ -549,6 +605,14 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '- Must include loading states and error handling UI feedback',
       '- appId must be kebab-case (lowercase + numbers + hyphens)',
 
+      '## Building a High-Quality App',
+      '- Plan before coding for complex apps: sketch the views, data flow, and key state first, then write the complete HTML — do not discover the structure while writing',
+      '- State: persist key state with papr.db (survives refresh); keep transient UI state in local variables — do not stuff everything into papr.db',
+      '- Every async operation (papr.agent.run / papr.http / papr.fs) needs a loading state and error handling with a human-readable failure message',
+      '- Lists/search need an empty state (e.g. "No data") — never a blank screen; forms need input validation and submit feedback; destructive actions (delete) need confirmation',
+      '- Self-check before finishing: ① local/network must match the capabilities the code actually uses (external fetch/papr.http → network:true; agent writing to the project → local:write) ② CDN URLs are reachable ③ state survives refresh (papr.db) ④ mobile layout does not break',
+
+
       '## Complete Example: AI Todo App',
       '```',
       'User: "Create a Todo App that can summarize incomplete tasks with AI"',
@@ -559,6 +623,22 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '    network: false,  // no network needed',
       '    agents: [{name:"assistant", model:"main", systemPrompt:"You summarize tasks"}],',
       '    html: "...store todos with papr.db; summarize via papr.agent.run({agent:\'assistant\', task:\'Summarize these tasks: \' + JSON.stringify(todos)})..."',
+      '  })',
+      '```',
+
+      '## Complete Example: Project Data Explorer',
+      '```',
+      'User: "Analyze the project README and build a reading dashboard"',
+      '→ You call app_render({',
+      '    appId: "readme-dashboard",',
+      '    title: "README Dashboard",',
+      '    local: "read",    // agent needs to read project files',
+      '    network: false,   // no network needed',
+      '    agents: [{name:"analyst", model:"main", systemPrompt:"You analyze project docs", tools:["read"]}],',
+      '    html: "<!DOCTYPE html>...<script>\\n',
+      '      // when the user clicks \"Analyze\", have the agent read the README and summarize',
+      '      const r = await papr.agent.run({agent:\'analyst\', task:\'Read README.md and summarize the project into JSON\'});',
+      '      renderSummary(JSON.parse(r.content));"',
       '  })',
       '```',
 
@@ -958,10 +1038,10 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
     const appRender: string[] = [];
     appRender.push(
         lang === 'en'
-          ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps to the application panel. app_render writes manifest.json and index.html to `.CodePapr/apps/<appId>/` itself — do NOT write the files manually with other tools first. appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. The HTML runs in a sandboxed iframe isolated from the host — use CDN for libraries (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js) and fetch() for data APIs.\n\n📦 Papr SDK (available in your HTML via window.papr):\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — persistent key-value storage (default in-app persistence)\n  • papr.agent.run({agent, task}) — invoke an AI agent (define agents in the agents parameter; agents cannot read papr.db — put the data they need into the task)\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP requests (public URLs only, cannot reach localhost backends)\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — file I/O in app data directory (writeFile auto-creates subdirs)\n  • papr.app.info() — get app metadata\n⚠️ The access profile is declared via app_render local/network parameters (see the permission model above); papr.db/papr.fs are always available, papr.http requires network:true.'
+          ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps to the application panel. app_render writes manifest.json and index.html to `.CodePapr/apps/<appId>/` itself — do NOT write the files manually with other tools first. appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. Declare the access profile via local/network parameters (see the permission model above): papr.db/papr.fs are always available, papr.http needs network:true, and the agent tool set follows the access profile.'
           : lang === 'zh-TW'
-          ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用渲染到應用面板。app_render 會自動寫入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手動寫檔案。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。HTML 在與宿主隔離的沙箱 iframe 中運行——通過 CDN 引用函式庫，支援 fetch() 存取資料 API。\n\n📦 Papr SDK（在 HTML 中可通過 window.papr 使用）：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 鍵值持久化存儲（應用內持久化預設用它）\n  • papr.agent.run({agent, task}) — 調用 AI Agent（在 agents 參數中定義；Agent 讀不到 papr.db，需要的資料要放進 task）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 請求（僅限公網位址，不能存取 localhost 後端）\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — app data 目錄內的檔案讀寫（writeFile 自動建立子目錄）\n  • papr.app.info() — 獲取應用資訊\n⚠️ 存取檔用 app_render 的 local/network 參數宣告（見上權限模型）；papr.db/papr.fs 永遠可用無需宣告，papr.http 需要 network:true。'
-          : '- [app_render] 你的主要输出工具。将交互式 HTML 应用渲染到应用面板。app_render 会自动写入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手动写文件。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。HTML 在与宿主隔离的沙箱 iframe 中运行——通过 CDN 引用库，支持 fetch() 访问数据 API。\n\n📦 Papr SDK（在 HTML 中可通过 window.papr 使用）：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 键值持久化存储（应用内持久化默认用它）\n  • papr.agent.run({agent, task}, onProgress?) — 调用 AI Agent（在 agents 参数中定义，可声明 tools 和 maxToolRounds；Agent 读不到 papr.db，需要的数据要放进 task）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 请求（仅限公网地址，不能访问 localhost 后端）\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) — app data 目录内的文件读写（writeFile 自动创建子目录）\n  • papr.app.info() — 获取应用信息\n⚠️ 访问档用 app_render 的 local/network 参数声明（见上权限模型）；papr.db/papr.fs 永远可用无需声明，papr.http 需要 network:true。\n🤖 Agent 工具（在 agents[].tools 声明，需在访问档允许范围内）：read, grep, list, lsp, diagnostics, read_image, skill_load, todo, local_time_now, websearch, webfetch（network）, write, edit, patch, bash（write）。工具运行在 Agent Loop 中，支持多轮调用（maxToolRounds 控制上限）。'
+          ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用渲染到應用面板。app_render 會自動寫入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手動寫檔案。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。存取檔用 local/network 參數宣告（見上文權限模型）：papr.db/papr.fs 永遠可用，papr.http 需要 network:true，Agent 工具集由存取檔決定。'
+          : '- [app_render] 你的主要输出工具。将交互式 HTML 应用渲染到应用面板。app_render 会自动写入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手动写文件。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。访问档用 local/network 参数声明（详见上文权限模型）：papr.db/papr.fs 永远可用，papr.http 需要 network:true，Agent 工具集由访问档决定。'
     );
     lines.push(
       lang === 'en' ? '### App Render' : lang === 'zh-TW' ? '### 應用渲染' : '### 应用渲染'
