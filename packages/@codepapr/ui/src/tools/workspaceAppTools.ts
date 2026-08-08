@@ -18,6 +18,16 @@ import {
 } from '../papr/levelGrants';
 import { type WorkspaceToolContext } from './workspaceToolContext';
 
+/** app_render.files 不允许覆盖的保留文件：manifest/index 由 app_render 自身生成，
+ * db.sqlite（含 WAL/SHM 边车）是 papr.db 的持久化数据。 */
+const RESERVED_APP_FILES = new Set([
+  'manifest.json',
+  'index.html',
+  'db.sqlite',
+  'db.sqlite-wal',
+  'db.sqlite-shm',
+]);
+
 /**
  * 校验 agents[].tools 白名单：声明即契约，runtime 不再静默裁剪。
  * 在渲染时报错让模型立即修正，而不是让 app 运行时工具神秘失效。
@@ -221,7 +231,8 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
         if (filePath.includes('..') || file.relativePath.includes('\\') || file.relativePath.startsWith('/') || file.relativePath.includes('\0')) {
           throw new Error(`文件路径不合法（不能包含 ..、\\、绝对路径或 null 字节）: ${file.relativePath}`);
         }
-        if (file.relativePath === 'manifest.json' || file.relativePath === 'index.html') {
+        const normalizedRelative = file.relativePath.replace(/^\.\//, '').toLowerCase();
+        if (RESERVED_APP_FILES.has(normalizedRelative)) {
           throw new Error(`不能通过 files 覆盖保留文件: ${file.relativePath}`);
         }
         const fileBefore = await readBeforeContent(filePath);

@@ -1,8 +1,11 @@
 //! SQLite persistence for app settings and project state.
 //!
-//! Two databases:
+//! Three database locations:
 //! - **App DB** (`~/.codepapr/codepapr.sqlite`): global UI settings
 //! - **Project DB** (`<workspace>/.CodePapr/project.sqlite`): per-workspace state + ProjectGraph cache
+//! - **Papr App DB** (`<workspace>/.CodePapr/apps/<appId>/db.sqlite`): per-app key-value
+//!   storage backing `papr.db`. Kept inside the app folder so each app stays
+//!   self-contained and isolated from CodePapr internal state.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,6 +29,7 @@ const PAPR_APP_PERMISSION_SETTINGS_KEY: &str = "papr.appPermissionSettings";
 const EXTERNAL_ACCESS_POLICY_KEY: &str = "fs.externalAccessPolicy";
 const PROJECT_STORAGE_DIR: &str = ".CodePapr";
 const PROJECT_DB_FILE: &str = "project.sqlite";
+const PAPR_APP_DB_FILE: &str = "db.sqlite";
 const PROJECT_STATE_KEY: &str = "project.state";
 const LEGACY_PROJECT_FILE: &str = ".CodePapr/project.json";
 const LEGACY_STATE_FILE: &str = ".CodePapr/state.json";
@@ -170,21 +174,12 @@ fn open_project_db(workspace_path: &str) -> Result<(Connection, PathBuf, PathBuf
         "PRAGMA journal_mode = WAL;
          PRAGMA secure_delete = ON;
          PRAGMA foreign_keys = ON;
-         CREATE TABLE IF NOT EXISTS project_state (
-           key TEXT PRIMARY KEY,
-           value TEXT NOT NULL,
-           updated_at INTEGER NOT NULL
-         );
-         CREATE TABLE IF NOT EXISTS app_storage (
-           app_id TEXT NOT NULL,
-           key TEXT NOT NULL,
-           value TEXT NOT NULL,
-           updated_at INTEGER NOT NULL,
-           PRIMARY KEY (app_id, key)
-         );
-         CREATE INDEX IF NOT EXISTS idx_app_storage_app
-           ON app_storage(app_id);
-          CREATE TABLE IF NOT EXISTS sessions (
+          CREATE TABLE IF NOT EXISTS project_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+          );
+           CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             provider TEXT NOT NULL,
@@ -287,7 +282,105 @@ fn migrate_project_db(conn: &Connection, workspace: &Path) -> Result<(), String>
             .map_err(|err| format!("设置数据库版本失败: {err}"))?;
     }
 
+    if version < 4 {
+        // v4: papr.db 数据从 project.sqlite 的 app_storage 表迁出，改为每个 app
+        // 独立的 .CodePapr/apps/<appId>/db.sqlite，使 app 目录自包含、与内部状态隔离。
+        migrate_project_db_v4_papr_storage(conn, workspace)?;
+        conn.pragma_update(None, "user_version", 4_i64)
+            .map_err(|err| format!("设置数据库版本失败: {err}"))?;
+    }
+
     Ok(())
+}
+
+fn migrate_project_db_v4_papr_storage(conn: &Connection, workspace: &Path) -> Result<(), String> {
+    let has_table: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_storage')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|err| format!("检查 app_storage 表失败: {err}"))?;
+    if !has_table {
+        return Ok(());
+    }
+
+    let mut stmt = conn
+        .prepare("SELECT app_id, key, value, updated_at FROM app_storage")
+        .map_err(|err| format!("读取 app_storage 失败: {err}"))?;
+    let rows: Vec<(String, String, String, i64)> = stmt
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .map_err(|err| format!("查询 app_storage 失败: {err}"))?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(stmt);
+
+    let apps_dir = workspace.join(PROJECT_STORAGE_DIR).join("apps");
+    let mut by_app: std::collections::HashMap<String, Vec<(String, String, i64)>> =
+        std::collections::HashMap::new();
+    for (app_id, key, value, updated_at) in rows {
+        by_app.entry(app_id).or_default().push((key, value, updated_at));
+    }
+
+    for (app_id, kvs) in by_app {
+        let app_dir = apps_dir.join(&app_id);
+        // app 目录已不存在 = app 已被删除，孤儿数据直接丢弃（与 papr_delete_app 语义一致）
+        if !app_dir.is_dir() {
+            continue;
+        }
+        let (app_conn, _) = open_papr_app_db_at(&app_dir)?;
+        for (key, value, updated_at) in kvs {
+            app_conn
+                .execute(
+                    "INSERT INTO app_storage (key, value, updated_at)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT(key) DO UPDATE SET
+                       value = excluded.value,
+                       updated_at = excluded.updated_at",
+                    params![key, value, updated_at],
+                )
+                .map_err(|err| format!("迁移 app '{app_id}' 存储失败: {err}"))?;
+        }
+    }
+
+    conn.execute_batch("DROP TABLE app_storage;")
+        .map_err(|err| format!("删除 app_storage 表失败: {err}"))?;
+    Ok(())
+}
+
+// ── Papr per-app DB helpers ─────────────────────────────────────────
+
+/// Opens (and initializes) the per-app papr database at
+/// `<workspace>/.CodePapr/apps/<app_id>/db.sqlite`.
+fn open_papr_app_db(workspace_path: &str, app_id: &str) -> Result<(Connection, PathBuf), String> {
+    if app_id.is_empty() || app_id.contains("..") || app_id.contains('/') || app_id.contains('\\') {
+        return Err(format!("非法的 appId: {app_id}"));
+    }
+    let workspace = canonical_workspace(workspace_path)?;
+    let app_dir = workspace.join(PROJECT_STORAGE_DIR).join("apps").join(app_id);
+    open_papr_app_db_at(&app_dir)
+}
+
+fn open_papr_app_db_at(app_dir: &Path) -> Result<(Connection, PathBuf), String> {
+    fs::create_dir_all(app_dir)
+        .map_err(|err| format!("创建 app 目录 {} 失败: {err}", app_dir.display()))?;
+    let db_path = app_dir.join(PAPR_APP_DB_FILE);
+    let conn = Connection::open(&db_path)
+        .map_err(|err| format!("打开 app 数据库 {} 失败: {err}", db_path.display()))?;
+    // busy_timeout：后端 app 进程（server.js）可能与主进程并发访问同一个库。
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA busy_timeout = 5000;
+         CREATE TABLE IF NOT EXISTS app_storage (
+           key TEXT PRIMARY KEY,
+           value TEXT NOT NULL,
+           updated_at INTEGER NOT NULL
+         );",
+    )
+    .map_err(|err| format!("初始化 app 存储表失败: {err}"))?;
+    Ok((conn, db_path))
 }
 
 fn migrate_project_db_v1(conn: &Connection, workspace: &Path) -> Result<(), String> {
@@ -1516,10 +1609,10 @@ pub(crate) fn papr_storage_get(
     app_id: &str,
     key: &str,
 ) -> Result<Option<String>, String> {
-    let (conn, ..) = open_project_db(workspace_path)?;
+    let (conn, ..) = open_papr_app_db(workspace_path, app_id)?;
     conn.query_row(
-        "SELECT value FROM app_storage WHERE app_id = ?1 AND key = ?2",
-        params![app_id, key],
+        "SELECT value FROM app_storage WHERE key = ?1",
+        params![key],
         |row| row.get::<_, String>(0),
     )
     .optional()
@@ -1532,14 +1625,14 @@ pub(crate) fn papr_storage_set(
     key: &str,
     value: &str,
 ) -> Result<(), String> {
-    let (conn, ..) = open_project_db(workspace_path)?;
+    let (conn, ..) = open_papr_app_db(workspace_path, app_id)?;
     conn.execute(
-        "INSERT INTO app_storage (app_id, key, value, updated_at)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(app_id, key) DO UPDATE SET
+        "INSERT INTO app_storage (key, value, updated_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(key) DO UPDATE SET
            value = excluded.value,
            updated_at = excluded.updated_at",
-        params![app_id, key, value, unix_millis()?],
+        params![key, value, unix_millis()?],
     )
     .map_err(|err| format!("保存 app_storage 失败: {err}"))?;
     Ok(())
@@ -1550,22 +1643,19 @@ pub(crate) fn papr_storage_delete(
     app_id: &str,
     key: &str,
 ) -> Result<(), String> {
-    let (conn, ..) = open_project_db(workspace_path)?;
-    conn.execute(
-        "DELETE FROM app_storage WHERE app_id = ?1 AND key = ?2",
-        params![app_id, key],
-    )
-    .map_err(|err| format!("删除 app_storage 失败: {err}"))?;
+    let (conn, ..) = open_papr_app_db(workspace_path, app_id)?;
+    conn.execute("DELETE FROM app_storage WHERE key = ?1", params![key])
+        .map_err(|err| format!("删除 app_storage 失败: {err}"))?;
     Ok(())
 }
 
 pub(crate) fn papr_storage_keys(workspace_path: &str, app_id: &str) -> Result<Vec<String>, String> {
-    let (conn, ..) = open_project_db(workspace_path)?;
+    let (conn, ..) = open_papr_app_db(workspace_path, app_id)?;
     let mut stmt = conn
-        .prepare("SELECT key FROM app_storage WHERE app_id = ?1 ORDER BY key")
+        .prepare("SELECT key FROM app_storage ORDER BY key")
         .map_err(|err| format!("查询 app_storage keys 失败: {err}"))?;
     let keys: Vec<String> = stmt
-        .query_map(params![app_id], |row| row.get::<_, String>(0))
+        .query_map([], |row| row.get::<_, String>(0))
         .map_err(|err| format!("读取 app_storage keys 失败: {err}"))?
         .filter_map(|r| r.ok())
         .collect();
@@ -1895,6 +1985,11 @@ mod tests {
             Some("value1")
         );
 
+        // 数据落在 app 自己的 db.sqlite，而不是 project.sqlite
+        assert!(workspace
+            .file_path(".CodePapr/apps/test-app-storage/db.sqlite")
+            .exists());
+
         papr_storage_set(&ws, app_id, "key1", "updated").unwrap();
         assert_eq!(
             papr_storage_get(&ws, app_id, "key1").unwrap().as_deref(),
@@ -1930,5 +2025,74 @@ mod tests {
             papr_storage_get(&ws, "app-b", "shared").unwrap().as_deref(),
             Some("data-b")
         );
+
+        // 每个 app 一个独立 db 文件
+        assert!(workspace.file_path(".CodePapr/apps/app-a/db.sqlite").exists());
+        assert!(workspace.file_path(".CodePapr/apps/app-b/db.sqlite").exists());
+    }
+
+    #[test]
+    fn papr_storage_rejects_path_shaped_app_ids() {
+        let workspace = TestWorkspace::new("papr-storage-badid");
+        let ws = workspace.workspace_arg();
+        assert!(papr_storage_set(&ws, "../evil", "k", "v").is_err());
+        assert!(papr_storage_set(&ws, "a/b", "k", "v").is_err());
+        assert!(papr_storage_get(&ws, "..", "k").is_err());
+    }
+
+    #[test]
+    fn papr_storage_v4_migration_moves_rows_into_per_app_files() {
+        let workspace = TestWorkspace::new("papr-storage-migrate");
+        let ws = workspace.workspace_arg();
+
+        // 模拟旧库：project.sqlite 里有 app_storage 表（v3 schema），两个 app 有数据，
+        // 其中一个 app 目录已不存在（孤儿数据应被丢弃）。
+        {
+            let (conn, ..) = open_project_db(&ws).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS app_storage (
+                   app_id TEXT NOT NULL,
+                   key TEXT NOT NULL,
+                   value TEXT NOT NULL,
+                   updated_at INTEGER NOT NULL,
+                   PRIMARY KEY (app_id, key)
+                 );
+                 INSERT INTO app_storage (app_id, key, value, updated_at) VALUES
+                   ('live-app', 'k1', 'v1', 100),
+                   ('live-app', 'k2', 'v2', 200),
+                   ('gone-app', 'k', 'orphan', 300);",
+            )
+            .unwrap();
+            conn.pragma_update(None, "user_version", 3_i64).unwrap();
+        }
+        std::fs::create_dir_all(workspace.file_path(".CodePapr/apps/live-app")).unwrap();
+
+        // 重新打开触发 v4 迁移
+        {
+            let (conn, ..) = open_project_db(&ws).unwrap();
+            let version: i64 = conn
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .unwrap();
+            assert_eq!(version, 4);
+            let table_gone: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_storage')",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(!table_gone, "app_storage 表应在迁移后被删除");
+        }
+
+        assert_eq!(
+            papr_storage_get(&ws, "live-app", "k1").unwrap().as_deref(),
+            Some("v1")
+        );
+        assert_eq!(
+            papr_storage_get(&ws, "live-app", "k2").unwrap().as_deref(),
+            Some("v2")
+        );
+        // 孤儿 app 的数据被丢弃，且不会为它创建目录
+        assert!(!workspace.file_path(".CodePapr/apps/gone-app").exists());
     }
 }

@@ -229,10 +229,13 @@ Independent from built-in sub-agents (explore/scout/mentor). Uses a dedicated Ag
 **Storage isolation:**
 
 ```
-papr.db.set('key', value) → project.sqlite.app_storage(app_id, key, value)
+papr.db.set('key', value) → app_storage(key, value) in .CodePapr/apps/<appId>/db.sqlite
 ```
 
-Same key in different apps is fully isolated via `app_id` primary key prefix.
+Each app gets its own SQLite file (WAL + busy_timeout), isolated from project.sqlite
+internal state; the app folder stays self-contained (manifest + html + db) and is removed
+as a whole when the app is deleted. db.sqlite is never served over the codepapr-app://
+protocol and cannot be overwritten via app_render.files.
 
 **App Management Tools:**
 

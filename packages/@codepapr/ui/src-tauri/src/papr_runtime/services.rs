@@ -439,12 +439,7 @@ pub fn papr_delete_app(app_id: String) -> Result<(), String> {
             .map_err(|err| format!("删除 app 目录失败: {err}"))?;
     }
 
-    let _ = crate::db::papr_storage_keys(&ctx.workspace_path, &app_id)
-        .map(|keys| {
-            for key in keys {
-                let _ = crate::db::papr_storage_delete(&ctx.workspace_path, &app_id, &key);
-            }
-        });
+    // papr.db 数据（db.sqlite）位于 app 目录内，随目录一并删除，无需单独清理。
 
     crate::papr_runtime::app_context::unregister(&app_id);
     crate::papr_runtime::manifest::clear_manifest(&app_id);
@@ -618,18 +613,19 @@ mod tests {
     #[test]
     fn papr_delete_app_removes_directory_and_storage() {
         let ws = TestWorkspace::new("papr-delete-app");
-        register_test_app(&ws.workspace_arg(), "del-app", &[]);
+        register_test_app(&ws.workspace_arg(), "del-app", &["storage:read", "storage:write"]);
 
         let app_dir = ws.file_path(".CodePapr/apps/del-app");
         fs::create_dir_all(&app_dir).unwrap();
         fs::write(app_dir.join("index.html"), b"<html></html>").unwrap();
 
         papr_fs_write("del-app".into(), "settings.json".into(), r#"{"theme":"dark"}"#.into()).unwrap();
-
-        assert!(app_dir.exists());
+        crate::db::papr_storage_set(&ws.workspace_arg(), "del-app", "k", "v").unwrap();
+        assert!(app_dir.join("db.sqlite").exists());
 
         papr_delete_app("del-app".into()).unwrap();
 
+        // app 目录连同其中的 db.sqlite 一起被删除
         assert!(!app_dir.exists());
     }
 

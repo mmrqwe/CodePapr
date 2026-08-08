@@ -34,12 +34,13 @@ Papr 是 CodePapr 的应用运行时。AI 生成的 App 可以直接在桌面端
 
 ### .papr 格式
 
-App 是 `.CodePapr/apps/<appId>/` 目录下的两个文件：
+App 是 `.CodePapr/apps/<appId>/` 目录下的两个文件（使用 papr.db 后还会生成 `db.sqlite` 存放应用数据）：
 
 ```
 .CodePapr/apps/my-app/
 ├── manifest.json     ← 元数据 + 权限 + Agent
-└── index.html        ← 入口 HTML
+├── index.html        ← 入口 HTML
+└── db.sqlite         ← papr.db 数据（运行时生成）
 ```
 
 manifest.json 示例：
@@ -49,10 +50,11 @@ manifest.json 示例：
   "spec": "papr/0.1",
   "name": "Todo App",
   "version": "0.1.0",
+  "level": 2,
   "permissions": ["storage:read", "storage:write", "agent:run:assistant"],
   "agents": [{
     "name": "assistant",
-    "model": "deepseek",
+    "model": "main",
     "systemPrompt": "你是一个任务管理助手",
     "tools": ["read", "websearch"],
     "maxToolRounds": 20
@@ -65,7 +67,7 @@ manifest.json 示例：
 HTML 中自动注入 `window.papr`，无需手动引入：
 
 ```javascript
-// 键值存储（按 app 隔离，持久化到 SQLite）
+// 键值存储（按 app 隔离，数据存于 .CodePapr/apps/<appId>/db.sqlite）
 await papr.db.set('theme', 'dark');
 const theme = await papr.db.get('theme');
 
@@ -102,11 +104,10 @@ App 需要声明所需权限：
 | `storage:read/write` | `papr.db` 键值存储 |
 | `http:get/post` | `papr.http` HTTP 请求 |
 | `fs:read/write` | `papr.fs` 文件读写 |
-| `llm:chat` | 直接 LLM 调用 |
 | `workspace:read/write/exec` | Agent 工具：读写工作区文件、执行命令 |
 | `agent:run:<name>` | 调用指定 Agent |
 
-Agent 工具白名单（在 `agents[].tools` 声明）：`read`、`grep`、`list`、`lsp`、`websearch`、`webfetch`、`write`、`edit`、`bash`。
+Agent 工具白名单（在 `agents[].tools` 声明）：`read`、`grep`、`list`、`lsp`、`diagnostics`、`read_image`、`skill_load`、`todo`、`local_time_now`、`websearch`（L2+）、`webfetch`（L2+）、`write`（L3）、`edit`（L3）、`patch`（L3）、`bash`（L3）。
 
 ### 权限分级
 
@@ -117,7 +118,7 @@ App 通过 manifest 的 `level` 字段声明权限级别（默认 L1）：
 | L0 纯计算 | 无外部访问，仅 HTML/CSS/JS 渲染 |
 | L1 Runtime | `papr.db` + `papr.fs` + AI Agent（只读工具） |
 | L2 联网 | + `papr.http` + Agent 联网搜索 + MCP |
-| L3 系统 | + 文件写入/终端/Git（需全局开关） |
+| L3 系统 | + Agent 文件写入（限 app sandbox 目录）/终端执行（需全局开关） |
 
 设置 → **App Tab** 可调整全局默认级别、开启 L3 开关、逐 app 覆盖。
 
@@ -479,7 +480,7 @@ CLI 的读取路径边界相对宽松（可读取任意绝对路径），写入�
 | `<workspace>/.CodePapr/skills` | 项目级技能文件 |
 | `<workspace>/.CodePapr/agents` | 项目级自定义子代理 |
 | `<workspace>/.CodePapr/commands` | 项目级自定义命令 |
-| `<workspace>/.CodePapr/apps` | Papr App 目录（每个子目录 = 一个 app） |
+| `<workspace>/.CodePapr/apps` | Papr App 目录（每个子目录 = 一个 app；`db.sqlite` 为该 app 的 papr.db 数据） |
 | `~/.codepapr/voices` | 角色参考音频文件 |
 | `~/.codepapr/gpt-sovits` | GPT-SoVITS 安装与模型 |
 

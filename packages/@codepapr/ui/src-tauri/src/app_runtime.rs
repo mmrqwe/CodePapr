@@ -32,6 +32,12 @@ fn is_valid_app_id(app_id: &str) -> bool {
         && !app_id.contains('\\')
 }
 
+/// papr.db 的 SQLite 文件（db.sqlite 及其 -wal/-shm 边车）不对外提供静态服务。
+fn is_unservable_app_file(file_path: &str) -> bool {
+    let lower = file_path.to_ascii_lowercase();
+    lower.ends_with(".sqlite") || lower.ends_with(".sqlite-wal") || lower.ends_with(".sqlite-shm")
+}
+
 #[tauri::command]
 pub fn register_app_workspace(app_id: String, workspace_path: String) {
     if !is_valid_app_id(&app_id) {
@@ -117,6 +123,15 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
         return Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body("path traversal blocked".into())
+            .unwrap();
+    }
+
+    // papr.db 的数据库文件（含 WAL/SHM 边车）是 app 私有状态且可能正在被写入，
+    // 不允许通过协议裸 serve。
+    if is_unservable_app_file(file_path) {
+        return Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body("file not found".into())
             .unwrap();
     }
 
@@ -455,5 +470,17 @@ mod tests {
         assert!(manifest_json.contains("server.js"));
 
         fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn sqlite_files_are_not_servable() {
+        assert!(is_unservable_app_file("db.sqlite"));
+        assert!(is_unservable_app_file("db.sqlite-wal"));
+        assert!(is_unservable_app_file("db.sqlite-shm"));
+        assert!(is_unservable_app_file("DB.SQLITE"));
+        assert!(is_unservable_app_file("data/nested.sqlite"));
+        assert!(!is_unservable_app_file("index.html"));
+        assert!(!is_unservable_app_file("server.js"));
+        assert!(!is_unservable_app_file("sqlite.txt"));
     }
 }

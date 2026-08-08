@@ -1093,7 +1093,7 @@ name: 'web_download_file',
   {
     name: 'app_render',
     description:
-      '生成一个交互式 HTML 应用到应用面板。用于数据分析可视化、仪表盘、关系图等。生成的文件写入 .CodePapr/apps/<appId>/ 目录，并自动注册到应用管理面板。相同 appId 会覆盖已有应用。\n\n📦 Papr SDK 可用：生成的 HTML 可通过 window.papr 调用 CodePapr 能力：\n  • papr.db.get(key) / papr.db.set(key, value) — 键值持久化存储\n  • papr.agent.run({agent, task}) — 调用 AI Agent\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 请求\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) — 文件读写（限定 app data 目录）\n  • papr.app.info() — 获取应用信息\n⚠️ 使用前必须在 permissions 参数中声明对应权限（storage:read, storage:write, http:get, http:post, fs:read, fs:write, agent:run:<name>）。',
+      '生成一个交互式 HTML 应用到应用面板。用于数据分析可视化、仪表盘、关系图等。自动写入 manifest.json 和 index.html 到 .CodePapr/apps/<appId>/ 目录，并注册到应用管理面板。相同 appId 会覆盖已有应用。\n\n📦 Papr SDK 可用：生成的 HTML 可通过 window.papr 调用 CodePapr 能力：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 键值持久化存储（应用内数据持久化默认用它）\n  • papr.agent.run({agent, task}) — 调用 AI Agent（Agent 读不到 papr.db，需要的数据要放进 task）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 请求（仅限公网地址）\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) / papr.fs.delete(path) — 文件读写（限定 app data 目录）\n  • papr.app.info() — 获取应用信息\n⚠️ 使用前必须在 permissions 参数中声明对应权限（storage:read, storage:write, http:get, http:post, fs:read, fs:write, workspace:read, workspace:write, workspace:exec, agent:run:<name>）。',
     parameters: {
       type: 'object',
       properties: {
@@ -1129,11 +1129,11 @@ name: 'web_download_file',
               tools: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Agent 可用的工具白名单（可选）。可用工具名：read, grep, list, lsp, diagnostics, read_image, skill_load, todo, websearch, webfetch（L2+）, write, edit, patch, bash（L3）。不声明 = 使用当前级别允许的全部工具。始终排除 task 和 app_render。高危工具（write/edit/patch/bash）需 manifest.permissions 中声明 workspace:write/exec。',
+                description: 'Agent 可用的工具白名单（可选）。可用工具名：read, grep, list, lsp, diagnostics, read_image, skill_load, todo, local_time_now, websearch, webfetch（L2+）, write, edit, patch, bash（L3）。不声明 = 使用当前级别允许的全部工具。始终排除 task 和 app_render。高危工具（write/edit/patch/bash）需 manifest.permissions 中声明 workspace:write/exec。',
               },
               maxToolRounds: {
                 type: 'number',
-                description: '最大工具调用轮数，默认 20，上限 50',
+                description: '最大工具调用轮数，默认 50，上限 50',
               },
               inheritContext: {
                 type: 'object',

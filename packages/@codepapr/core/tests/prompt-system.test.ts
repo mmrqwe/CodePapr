@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildModeSystemPrompt,
   buildSkillsSection,
   buildSessionBootstrapPrompt,
   buildRuntimeSystemPrompt,
@@ -354,6 +355,52 @@ describe('promptSystem', () => {
     expect(prompt).toContain('app_render');
     expect(prompt).toContain('应用渲染');
     expect(prompt).toContain('应用管理');
+  });
+
+  it('app mode workflow references real tool names, not hidden workspace_* internals', () => {
+    for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
+      const prompt = buildRuntimeSystemPrompt({
+        mode: 'app',
+        workspacePath: '/tmp/project',
+        lang,
+        toolNames: ['read', 'list', 'grep', 'glob', 'app_render', 'app_list', 'app_start', 'app_stop', 'app_delete'],
+      });
+      expect(prompt).not.toContain('workspace_read_file');
+      expect(prompt).not.toContain('workspace_write_file');
+      expect(prompt).not.toContain('workspace_list_files');
+      expect(prompt).not.toContain('workspace_search_text');
+    }
+  });
+
+  it('app mode workflow teaches exploration with list/read/grep', () => {
+    const zhCN = buildRuntimeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'zh-CN' });
+    expect(zhCN).toContain('探索数据：用 list');
+    const zhTW = buildRuntimeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'zh-TW' });
+    expect(zhTW).toContain('探索資料：用 list');
+    const en = buildRuntimeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'en' });
+    expect(en).toContain('Explore data: use list');
+  });
+
+  it('app mode examples include the required title parameter in all languages', () => {
+    for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
+      const prompt = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang });
+      expect(prompt).toContain('title: "AI Todo App"');
+    }
+  });
+
+  it('app mode documents __PAPR_BACKEND_URL and CORS for backend apps in all languages', () => {
+    for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
+      const prompt = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang });
+      expect(prompt).toContain('__PAPR_BACKEND_URL');
+      expect(prompt).toContain('Access-Control-Allow-Origin');
+    }
+  });
+
+  it('app mode mandates papr.db as default in-app persistence', () => {
+    const zhCN = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'zh-CN' });
+    expect(zhCN).toContain('持久化默认用 papr.db');
+    const en = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'en' });
+    expect(en).toContain('default in-app persistence');
   });
 
   it('suppresses mutating tool hints in ask mode', () => {

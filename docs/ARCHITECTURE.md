@@ -229,10 +229,12 @@ Papr 是 CodePapr 的应用运行时——AI 生成的 `.papr` App 可以直接�
 **存储隔离：**
 
 ```
-papr.db.set('key', value) → project.sqlite.app_storage(app_id, key, value)
+papr.db.set('key', value) → .CodePapr/apps/<appId>/db.sqlite 的 app_storage(key, value)
 ```
 
-不同 app 同名 key 完全隔离，通过 `app_id` 主键前缀保证。
+每个 app 一个独立 SQLite 文件（WAL + busy_timeout），与 project.sqlite 内部状态隔离；
+app 目录自包含（manifest + html + db），删除 app 时随目录一并清除。
+db.sqlite 不通过 codepapr-app:// 协议对外提供静态服务，也不能被 app_render.files 覆盖。
 
 **App 管理工具：**
 

@@ -297,4 +297,25 @@ describe('app_render agent tools validation', () => {
       }),
     ).resolves.toMatchObject({ appId: 'demo-app', mounted: true });
   });
+
+  it.each(['manifest.json', 'index.html', 'db.sqlite', 'db.sqlite-wal', 'db.sqlite-shm', './db.sqlite'])(
+    'rejects reserved file %s in files parameter',
+    async (relativePath) => {
+      await expect(
+        appRegistry().execute('app_render', {
+          ...BASE_ARGS,
+          files: [{ relativePath, content: 'x' }],
+        }),
+      ).rejects.toThrow(/保留文件/);
+    },
+  );
+
+  it('accepts non-reserved files', async () => {
+    await expect(
+      appRegistry().execute('app_render', {
+        ...BASE_ARGS,
+        files: [{ relativePath: 'server.js', content: 'console.log(1)' }],
+      }),
+    ).resolves.toMatchObject({ appId: 'demo-app', mounted: true });
+  });
 });

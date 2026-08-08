@@ -34,12 +34,13 @@ Papr is CodePapr's application runtime. AI-generated apps run directly in the de
 
 ### .papr Format
 
-An app is two files under `.CodePapr/apps/<appId>/`:
+An app is two files under `.CodePapr/apps/<appId>/` (once papr.db is used, a `db.sqlite` appears holding app data):
 
 ```
 .CodePapr/apps/my-app/
 ├── manifest.json     ← Metadata + permissions + agents
-└── index.html        ← Entry HTML
+├── index.html        ← Entry HTML
+└── db.sqlite         ← papr.db data (created at runtime)
 ```
 
 manifest.json example:
@@ -49,10 +50,11 @@ manifest.json example:
   "spec": "papr/0.1",
   "name": "Todo App",
   "version": "0.1.0",
+  "level": 2,
   "permissions": ["storage:read", "storage:write", "agent:run:assistant"],
   "agents": [{
     "name": "assistant",
-    "model": "deepseek",
+    "model": "main",
     "systemPrompt": "You are a task assistant",
     "tools": ["read", "websearch"],
     "maxToolRounds": 20
@@ -65,7 +67,7 @@ manifest.json example:
 `window.papr` is auto-injected into the HTML — no manual import needed:
 
 ```javascript
-// Key-value storage (per-app isolation, persisted to SQLite)
+// Key-value storage (per-app isolation, stored in .CodePapr/apps/<appId>/db.sqlite)
 await papr.db.set('theme', 'dark');
 const theme = await papr.db.get('theme');
 
@@ -102,11 +104,10 @@ Apps must declare required permissions:
 | `storage:read/write` | `papr.db` key-value storage |
 | `http:get/post` | `papr.http` HTTP requests |
 | `fs:read/write` | `papr.fs` file I/O |
-| `llm:chat` | Direct LLM calls |
 | `workspace:read/write/exec` | Agent tools: read/write workspace files, execute commands |
 | `agent:run:<name>` | Invoke a specific agent |
 
-Agent tool whitelist (declare in `agents[].tools`): `read`, `grep`, `list`, `lsp`, `websearch`, `webfetch`, `write`, `edit`, `bash`.
+Agent tool whitelist (declare in `agents[].tools`): `read`, `grep`, `list`, `lsp`, `diagnostics`, `read_image`, `skill_load`, `todo`, `local_time_now`, `websearch` (L2+), `webfetch` (L2+), `write` (L3), `edit` (L3), `patch` (L3), `bash` (L3).
 
 ### Permission Levels
 
@@ -117,7 +118,7 @@ Apps declare a permission level via manifest `level` field (default L1):
 | L0 Pure Compute | No external access, HTML/CSS/JS only |
 | L1 Runtime | `papr.db` + `papr.fs` + AI Agent (read-only tools) |
 | L2 Network | + `papr.http` + Agent web search + MCP |
-| L3 System | + file write/terminal/git (requires global toggle) |
+| L3 System | + Agent file writes (write/edit/patch confined to the app sandbox dir) / shell execution (requires global toggle) |
 
 Settings → **App Tab** adjusts global default level, L3 toggle, and per-app overrides.
 
