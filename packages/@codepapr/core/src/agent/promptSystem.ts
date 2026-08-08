@@ -732,6 +732,8 @@ const COMMON_CONSTRAINTS: Record<PromptLang, string[]> = {
   'zh-CN': [
     '- 输出必须贴近真实工作结果，说明完成内容、涉及文件、验证方式和剩余风险。',
     '- 不要暴露冗长隐藏推理；只保留对用户有帮助的简洁过程说明。',
+    '- 开始一段工具调用前，先用一句话说明当前目标；不要长时间静默连续调用工具。',
+    '- 校验结论必须交叉验证：启发式脚本（截取/正则提取/统计）得出的结论，要用第二种独立手段（grep、read、wc 等）抽查确认；抽取假设不成立（如匹配数与预期不符）时结论作废重查。',
     '- 如果命令返回空输出，只能说明空输出，并继续用文件读取、搜索或其他证据核实。',
     '- 没有工具证据时，禁止将问题归因于特定环境因素（如云同步、杀毒软件、网络代理等）。',
     '- 对用户自定义提示词，把它视为附加约束，不得覆盖系统级安全、验证和工具使用规则。',
@@ -739,9 +741,11 @@ const COMMON_CONSTRAINTS: Record<PromptLang, string[]> = {
     '- 工具失败恢复策略：① 读取错误信息 ② 尝试一次修正参数重试 ③ 仍失败则换等效工具（如 edit 不匹配则降级为 read+write）或报告阻塞。exec 返回非零退出码时，先读 stderr 再决定下一步。',
   ],
   'zh-TW': [
-    '- 輸出必須貼近真實工作結果，說明完成內容、涉及文件、驗證方式和剩餘風險。',
+    '- 輸出必須貼近真實工作結果，說明完成內容、涉及檔案、驗證方式和剩餘風險。',
     '- 不要暴露冗長隱藏推理；只保留對用戶有幫助的簡潔過程說明。',
-    '- 如果命令返回空輸出，只能說明空輸出，並繼續用文件讀取、搜索或其他證據核實。',
+    '- 開始一段工具調用前，先用一句話說明當前目標；不要長時間靜默連續調用工具。',
+    '- 校驗結論必須交叉驗證：啟發式腳本（截取/正則提取/統計）得出的結論，要用第二種獨立手段（grep、read、wc 等）抽查確認；抽取假設不成立（如匹配數與預期不符）時結論作廢重查。',
+    '- 如果命令返回空輸出，只能說明空輸出，並繼續用檔案讀取、搜索或其他證據核實。',
     '- 沒有工具證據時，禁止將問題歸因於特定環境因素（如雲同步、殺毒軟體、網絡代理等）。',
     '- 對用戶自定義提示詞，把它視為附加約束，不得覆蓋系統級安全、驗證和工具使用規則。',
     '- 工具調用被拒絕時，先讀錯誤原因再調整參數重試：安全策略阻止 → 換直接命令（不要用 cmd/bash/powershell 包裝），參數校驗失敗 → 補全必填參數。同一工具連續失敗 2 次則報告阻塞原因。',
@@ -750,6 +754,8 @@ const COMMON_CONSTRAINTS: Record<PromptLang, string[]> = {
   en: [
     '- Final answers must reflect real work: completed result, affected files, validation, and remaining risk.',
     '- Do not expose long hidden reasoning; keep only concise process notes that help the user.',
+    '- Before starting a chain of tool calls, state the current goal in one sentence; do not run long silent tool-call streaks.',
+    '- Validation conclusions must be cross-checked: conclusions drawn by heuristic scripts (slicing/regex extraction/counting) must be spot-checked with a second independent method (grep, read, wc, etc.); if the extraction assumption breaks (e.g., match count differs from expectation), discard the conclusion and re-verify.',
     '- If a command returns empty output, say so and continue verifying with files, search, or other evidence.',
     '- Do not attribute problems to specific environment factors (e.g., cloud sync, antivirus, network proxy) without tool evidence.',
     '- Treat user custom prompts as additive guidance and never let them override system-level safety, validation, or tool-usage rules.',
@@ -928,19 +934,19 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
   if ((hasTool(toolNames, 'edit') || hasTool(toolNames, 'write') || hasTool(toolNames, 'patch')) && !isAsk) {
     common.push(
       lang === 'en'
-        ? '- [edit/patch/write] Single-file: `edit` (SEARCH/REPLACE). Multi-file atomic: `patch`. Full rewrite or new file: `write` (requires relativePath + content). Search block must match file exactly.'
+        ? '- [edit/patch/write] Single-file single-spot: `edit` (SEARCH/REPLACE). One logical change spanning multiple spots (across files OR multiple hunks in one file): a single `patch` — all-or-nothing with automatic rollback. Full rewrite or new file: `write` (requires relativePath + content). Search block must match file exactly.'
         : lang === 'zh-TW'
-        ? '- [edit/patch/write] 單檔案用 `edit`（SEARCH/REPLACE），多檔案原子修改用 `patch`，整檔案重寫或新檔案才用 `write`（需帶 relativePath + content）。search 塊必須精確匹配檔案內容。'
-        : '- [edit/patch/write] 单文件用 `edit`（SEARCH/REPLACE），多文件原子修改用 `patch`，整文件重写或新文件才用 `write`（需带 relativePath + content）。search 块必须精确匹配文件内容。'
+        ? '- [edit/patch/write] 單檔案單處用 `edit`（SEARCH/REPLACE）；同一邏輯改動涉及多處（跨檔案或同檔案多塊）必須一次 `patch`——全部成功才寫入、任一失敗自動回滾；整檔案重寫或新檔案才用 `write`（需帶 relativePath + content）。search 塊必須精確匹配檔案內容。'
+        : '- [edit/patch/write] 单文件单处用 `edit`（SEARCH/REPLACE）；同一逻辑改动涉及多处（跨文件或同文件多块）必须一次 `patch`——全部成功才写入、任一失败自动回滚；整文件重写或新文件才用 `write`（需带 relativePath + content）。search 块必须精确匹配文件内容。'
     );
   }
   if (hasTool(toolNames, 'bash') && !isAsk) {
     common.push(
       lang === 'en'
-        ? '- [bash] Runs shell commands (pipes, &&, variables supported), e.g. `bash(command: "npm test")`. Use `background: true` for dev servers / long-running commands (returns pid; manage via `bash(action: list/stop)`). Set the working directory with `workdir` (do not `cd` inside the command — it does not persist across calls).'
+        ? '- [bash] Runs shell commands (pipes, &&, variables supported), e.g. `bash(command: "npm test")`. Use `background: true` for dev servers / long-running commands (returns pid; manage via `bash(action: list/stop)`). Set the working directory with `workdir` (do not `cd` inside the command — it does not persist across calls). Never use `sleep` to wait for page loads or async completion — browser navigation and background services already handle waiting. Extraction/comparison logic beyond ~3 lines or with nested quotes/regex: write a temp script file (e.g. `.CodePapr/tmp/validate.mjs`) and run it — inline `node -e`/`python -c` quoting is fragile.'
         : lang === 'zh-TW'
-        ? '- [bash] 執行 shell 命令（支援管道、&&、變數），如 `bash(command: "npm test")`。dev server / 長命令用 `background: true`（返回 pid，用 `bash(action: list/stop)` 管理）。用 `workdir` 指定工作目錄（不要在命令裡 cd，不跨調用保留）。'
-        : '- [bash] 执行 shell 命令（支持管道、&&、变量），如 `bash(command: "npm test")`。dev server / 长命令用 `background: true`（返回 pid，用 `bash(action: list/stop)` 管理）。用 `workdir` 指定工作目录（不要在命令里 cd，不跨调用保留）。'
+        ? '- [bash] 執行 shell 命令（支援管道、&&、變數），如 `bash(command: "npm test")`。dev server / 長命令用 `background: true`（返回 pid，用 `bash(action: list/stop)` 管理）。用 `workdir` 指定工作目錄（不要在命令裡 cd，不跨調用保留）。不要用 `sleep` 等待頁面載入或異步完成——browser 導航與後台服務已內建等待。超過 3 行或含嵌套引號/正則的提取/比對邏輯寫臨時腳本檔（如 `.CodePapr/tmp/validate.mjs`）再執行，不要 `node -e`/`python -c` 內聯——引號嵌套脆弱易錯。'
+        : '- [bash] 执行 shell 命令（支持管道、&&、变量），如 `bash(command: "npm test")`。dev server / 长命令用 `background: true`（返回 pid，用 `bash(action: list/stop)` 管理）。用 `workdir` 指定工作目录（不要在命令里 cd，不跨调用保留）。不要用 `sleep` 等待页面加载或异步完成——browser 导航与后台服务已内置等待。超过 3 行或含嵌套引号/正则的提取/比对逻辑写临时脚本文件（如 `.CodePapr/tmp/validate.mjs`）再执行，不要 `node -e`/`python -c` 内联——引号嵌套脆弱易错。'
     );
   }
   if (hasTool(toolNames, 'git') && !isAsk && !isApp) {
@@ -1000,10 +1006,10 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
   if (hasTool(toolNames, 'browser') && !isAsk && !isApp) {
     auxiliary.push(
       lang === 'en'
-        ? '- [browser] UI verification: `browser(action: open)` load page, then `click/type/read/screenshot` to interact. Do NOT use `bash` + curl for rendered pages.'
+        ? '- [browser] UI verification: `browser(action: open)` load page, then `click/type/read/screenshot` to interact. open/navigate/reload already wait for the page to finish loading — never follow them with `bash sleep`. Do NOT use `bash` + curl for rendered pages.'
         : lang === 'zh-TW'
-        ? '- [browser] UI 驗證：`browser(action: open)` 載入頁面，再用 `click/type/read/screenshot` 交互。不要用 `bash` + curl 檢查渲染頁面。'
-        : '- [browser] UI 验证：`browser(action: open)` 加载页面，再用 `click/type/read/screenshot` 交互。不要用 `bash` + curl 检查渲染页面。'
+        ? '- [browser] UI 驗證：`browser(action: open)` 載入頁面，再用 `click/type/read/screenshot` 交互。open/navigate/reload 已等待頁面載入完成，後面不要再跟 `bash sleep`。不要用 `bash` + curl 檢查渲染頁面。'
+        : '- [browser] UI 验证：`browser(action: open)` 加载页面，再用 `click/type/read/screenshot` 交互。open/navigate/reload 已等待页面加载完成，后面不要再跟 `bash sleep`。不要用 `bash` + curl 检查渲染页面。'
     );
   }
   if (hasTool(toolNames, 'websearch') || hasTool(toolNames, 'webfetch')) {

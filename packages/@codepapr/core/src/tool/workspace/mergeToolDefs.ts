@@ -254,7 +254,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 16. browser ────
   {
     name: 'browser',
-    description: '内置浏览器交互。action: open(打开URL)|navigate(导航)|reload(刷新)|close(关闭)|click(点击元素)|type(输入文本)|read(读取DOM)|screenshot(截图)|get(读状态)。open/navigate 需 url；click/type 需 selector；type 需 text。',
+    description: '内置浏览器交互。action: open(打开URL)|navigate(导航)|reload(刷新)|close(关闭)|click(点击元素)|type(输入文本)|read(读取DOM)|screenshot(截图)|get(读状态)。open/navigate 需 url；click/type 需 selector；type 需 text。open/navigate/reload 会等待页面加载完成后才返回，之后无需再用 bash sleep 等待。',
     parameters: {
       type: 'object',
       properties: {

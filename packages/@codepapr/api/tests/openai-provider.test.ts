@@ -92,6 +92,39 @@ describe('OpenAIProvider', () => {
     });
   });
 
+  it('filters the legacy reasoning placeholder echo out of responses', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'resp-echo',
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: 'done',
+                reasoning_content: '[reasoning not captured]',
+              },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 5, completion_tokens: 2 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAIProvider({ apiKey: 'test-key' });
+    const response = await provider.chat({
+      model: 'gpt-4o',
+      messages: [{ id: 'u1', role: 'user', content: 'go', timestamp: 1 }],
+      maxTokens: 1024,
+    });
+
+    expect(response.choices[0]?.message.reasoningContent).toBeUndefined();
+    expect(response.choices[0]?.message.content).toBe('done');
+  });
+
   it('streamChat emits reasoning/content deltas and normalizes cached tokens', async () => {
     const chunks = [
       'data: {"id":"resp-stream","choices":[{"index":0,"delta":{"reasoning_content":"先想"},"finish_reason":null}]}\n\n',
@@ -376,7 +409,7 @@ describe('safeParseToolArguments', () => {
     };
 
     expect(body.messages[0]?.reasoning_content).toBe('上一轮推理');
-    expect(body.messages[1]?.reasoning_content).toBe('[reasoning not captured]');
+    expect(body.messages[1]?.reasoning_content).toBe('Called lookup to proceed.');
     expect(body.messages[1]?.tool_calls?.[0]?.function.arguments).toBe('{"a":1,"b":2}');
   });
 

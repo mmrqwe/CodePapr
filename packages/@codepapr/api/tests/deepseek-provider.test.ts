@@ -509,8 +509,8 @@ describe('DeepSeekProvider', () => {
 
     // thinking 保持开启，不降级
     expect(body.thinking).toEqual({ type: 'enabled' });
-    // 缺 reasoning 的工具轮注入稳定占位符，tool_calls 原样保留
-    expect(body.messages[0]?.reasoning_content).toBe('[reasoning not captured]');
+    // 缺 reasoning 的工具轮注入动态占位符（取自首个工具名），tool_calls 原样保留
+    expect(body.messages[0]?.reasoning_content).toBe('Called read to proceed.');
     expect(body.messages[0]?.tool_calls?.[0]?.id).toBe('call_no_reasoning_1');
   });
 
@@ -558,7 +558,65 @@ describe('DeepSeekProvider', () => {
     };
 
     expect(body.thinking).toEqual({ type: 'disabled' });
-    expect(body.messages[0]?.reasoning_content).toBe('[reasoning not captured]');
+    expect(body.messages[0]?.reasoning_content).toBe('Called read to proceed.');
+  });
+
+  it('响应带回旧占位符回声时置空（chat）：阻断渲染/持久化/再回声循环', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 'resp-echo',
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: '继续执行',
+              reasoning_content: '[reasoning not captured]',
+            },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 4 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new DeepSeekProvider({ apiKey: 'test-key' });
+    const response = await provider.chat({
+      model: 'deepseek-v4-flash',
+      messages: [{ id: 'u1', role: 'user', content: '继续', timestamp: 1 }],
+      maxTokens: 1024,
+    });
+
+    expect(response.choices[0]?.message.reasoningContent).toBeUndefined();
+    expect(response.choices[0]?.message.content).toBe('继续执行');
+  });
+
+  it('流式增量全程是旧占位符回声时最终 reasoning 置空（streamChat）', async () => {
+    const chunks = [
+      'data: {"choices":[{"index":0,"delta":{"reasoning_content":"[reasoning not "}}]}\n\n',
+      'data: {"choices":[{"index":0,"delta":{"reasoning_content":"captured]","content":"结果"}}]}\n\n',
+      'data: [DONE]\n\n',
+    ].join('');
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(chunks, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new DeepSeekProvider({ apiKey: 'test-key' });
+    const response = await provider.streamChat?.(
+      {
+        model: 'deepseek-v4-flash',
+        messages: [{ id: 'u1', role: 'user', content: '继续', timestamp: 1 }],
+        maxTokens: 1024,
+      },
+      () => undefined
+    );
+
+    expect(response?.choices[0]?.message.reasoningContent).toBeUndefined();
+    expect(response?.choices[0]?.message.content).toBe('结果');
   });
 
   it('reasoning 回传校验 400 时自动以 thinking 关闭重试一次', async () => {

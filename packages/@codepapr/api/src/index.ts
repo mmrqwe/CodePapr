@@ -19,6 +19,11 @@ export {
   defaultStreamRetryDelayMs,
   StreamIdleTimeoutError,
 } from './providers/streaming';
+export {
+  LEGACY_REASONING_PLACEHOLDER,
+  isLegacyReasoningPlaceholder,
+  stripLegacyReasoningPlaceholder,
+} from './providers/reasoningRoundTrip';
 
 // Request / Response
 export { RequestBuilder, stripConsumedImages } from './request/RequestBuilder';

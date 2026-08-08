@@ -43,6 +43,7 @@ import {
 import { getTodoListContext } from '../../tools/todoListTool';
 import { getActiveCharacterPrompt } from '../charactersStore';
 import { loadMcpToolDefinitions } from '../../tools/mcpTools';
+import { isLegacyReasoningPlaceholder } from '@codepapr/api';
 import {
   listCommandDefinitions,
   loadCommandDefinition,
@@ -901,13 +902,19 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 }
 
                 if (event.type === 'assistant-round-complete') {
+                  // provider 已把旧占位符回声从 event.reasoningContent 过滤为
+                  // undefined，但流式 reasoning-delta 可能已把同一段文本累积进
+                  // 消息；合并结果若恰为旧占位符则整体丢弃，避免渲染/持久化。
+                  const mergedReasoning = mergeMessageText(
+                    message.reasoningContent,
+                    event.reasoningContent
+                  );
                   return {
                     ...message,
                     content: mergeMessageText(message.content, event.content) ?? '',
-                    reasoningContent: mergeMessageText(
-                      message.reasoningContent,
-                      event.reasoningContent
-                    ),
+                    reasoningContent: isLegacyReasoningPlaceholder(mergedReasoning)
+                      ? undefined
+                      : mergedReasoning,
                     isStreaming: false,
                     statusText: undefined,
                   };
