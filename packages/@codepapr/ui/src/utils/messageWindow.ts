@@ -115,6 +115,62 @@ export function windowMessageBounds(
   return { start, end };
 }
 
+/** Message index at a content offset (px from the top of the conversation).
+ *  `prefixHeights[i]` is the top position of message `i`, so this binary-searches
+ *  for the message containing the offset. */
+export function findMessageIndexAtOffset(
+  prefixHeights: readonly number[],
+  offset: number
+): number {
+  const count = prefixHeights.length - 1;
+  if (count <= 0) return 0;
+  let lo = 0;
+  let hi = count - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (prefixHeights[mid] <= offset) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+/** Index of the round containing `messageIndex` (0 for messages before the
+ *  first round). Assumes `roundStarts` is non-empty and sorted ascending. */
+export function findRoundIndexAtMessageIndex(
+  roundStarts: readonly number[],
+  messageIndex: number
+): number {
+  let round = 0;
+  for (let i = 0; i < roundStarts.length; i++) {
+    if (roundStarts[i] <= messageIndex) round = i;
+    else break;
+  }
+  return round;
+}
+
+/** Window for a given viewport: centers the batch on the round at
+ *  `centerOffset` (usually scrollTop + clientHeight/2), clamping at the ends
+ *  and attaching to the tail when the viewport is within the last batch. This
+ *  is what makes the rendered window follow the scrollbar. */
+export function computeWindowForViewport(
+  messages: readonly UIMessage[],
+  prefixHeights: readonly number[],
+  centerOffset: number,
+  batchRounds: number
+): RoundWindow {
+  const starts = computeRoundStartIndices(messages);
+  const total = starts.length;
+  if (total === 0) return { lo: 0, hi: 0 };
+  const messageIndex = findMessageIndexAtOffset(prefixHeights, centerOffset);
+  const centerRound = findRoundIndexAtMessageIndex(starts, messageIndex);
+  if (centerRound + batchRounds >= total) {
+    return computeInitialWindow(total, batchRounds);
+  }
+  const lo = Math.max(0, centerRound - Math.floor(batchRounds / 2));
+  const hi = Math.min(total, lo + batchRounds);
+  return { lo, hi };
+}
+
 /** Rough pixel height for a message that is not currently rendered (and may
  *  never have been measured). Used for the spacer blocks that stand in for
  *  unloaded history; measured heights replace estimates once a message renders. */

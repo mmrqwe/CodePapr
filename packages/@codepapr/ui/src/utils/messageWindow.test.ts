@@ -4,7 +4,10 @@ import {
   computeInitialWindow,
   computeRoundStartIndices,
   computeWindowForJump,
+  computeWindowForViewport,
   estimateMessageHeight,
+  findMessageIndexAtOffset,
+  findRoundIndexAtMessageIndex,
   slideWindowDown,
   slideWindowUp,
   windowMessageBounds,
@@ -167,6 +170,75 @@ describe('windowMessageBounds', () => {
     const messages = buildConversation(4);
     const bounds = windowMessageBounds(messages, { lo: 2, hi: 4 });
     expect(bounds).toEqual({ start: 4, end: messages.length });
+  });
+});
+
+describe('findMessageIndexAtOffset', () => {
+  // messages of height 100: prefix = [0, 100, 200, 300]
+  const prefix = [0, 100, 200, 300];
+
+  it('finds the message containing the offset', () => {
+    expect(findMessageIndexAtOffset(prefix, 0)).toBe(0);
+    expect(findMessageIndexAtOffset(prefix, 50)).toBe(0);
+    expect(findMessageIndexAtOffset(prefix, 100)).toBe(1);
+    expect(findMessageIndexAtOffset(prefix, 250)).toBe(2);
+  });
+
+  it('clamps beyond the ends', () => {
+    expect(findMessageIndexAtOffset(prefix, -50)).toBe(0);
+    expect(findMessageIndexAtOffset(prefix, 10_000)).toBe(2);
+  });
+
+  it('handles empty prefix', () => {
+    expect(findMessageIndexAtOffset([0], 100)).toBe(0);
+  });
+});
+
+describe('findRoundIndexAtMessageIndex', () => {
+  const starts = [0, 4, 8];
+
+  it('maps a message to its containing round', () => {
+    expect(findRoundIndexAtMessageIndex(starts, 0)).toBe(0);
+    expect(findRoundIndexAtMessageIndex(starts, 3)).toBe(0);
+    expect(findRoundIndexAtMessageIndex(starts, 4)).toBe(1);
+    expect(findRoundIndexAtMessageIndex(starts, 10)).toBe(2);
+  });
+});
+
+describe('computeWindowForViewport', () => {
+  // 10 rounds, each = user + assistant; heights from estimateMessageHeight are
+  // deterministic per content, so build a matching prefix from the same helper.
+  const messages = buildConversation(10);
+  const heights = messages.map((m) => estimateMessageHeight(m));
+  const prefix = [0];
+  for (const h of heights) prefix.push(prefix[prefix.length - 1] + h);
+  const batch = 3;
+
+  it('centers the window on the round at the viewport center', () => {
+    // center of round 5 (message index 8) → lo = 4 - 1 = 3
+    const offset = prefix[8] + 10;
+    const w = computeWindowForViewport(messages, prefix, offset, batch);
+    expect(w.lo).toBe(3);
+    expect(w.hi - w.lo).toBeLessThanOrEqual(batch);
+    expect(w.lo).toBeLessThanOrEqual(4);
+    expect(w.hi).toBeGreaterThan(4);
+  });
+
+  it('clamps at the first round', () => {
+    const w = computeWindowForViewport(messages, prefix, 0, batch);
+    expect(w.lo).toBe(0);
+    expect(w.hi).toBeLessThanOrEqual(batch);
+  });
+
+  it('attaches to the tail near the bottom', () => {
+    const w = computeWindowForViewport(messages, prefix, prefix[messages.length] - 10, batch);
+    expect(w).toEqual({ lo: 7, hi: 10 });
+  });
+
+  it('returns an empty window when there are no rounds', () => {
+    const msgs = [msg('assistant', 'a')];
+    const p = [0, estimateMessageHeight(msgs[0])];
+    expect(computeWindowForViewport(msgs, p, 0, batch)).toEqual({ lo: 0, hi: 0 });
   });
 });
 

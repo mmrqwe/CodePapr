@@ -881,6 +881,65 @@ describe('ChatPanel', () => {
       expect(container.textContent).not.toContain('加载更新');
     });
 
+    it('moves the window to the viewport when scrolling into unloaded regions', async () => {
+      setLongConversation(10, 3);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+
+      // 初始贴尾：第 8-10 轮可见
+      expect(container.querySelector('[data-message-id="user-8"]')).not.toBeNull();
+      expect(container.querySelector('[data-message-id="user-1"]')).toBeNull();
+
+      // 模拟把滚动条直接拖到最顶部（未加载的占位区）
+      const scrollContainer = container.querySelector('[data-chat-scroll="true"]') as HTMLElement;
+      await act(async () => {
+        Object.defineProperty(scrollContainer, 'scrollTop', { value: 0, writable: true, configurable: true });
+        scrollContainer.dispatchEvent(new Event('scroll'));
+      });
+      await act(async () => {
+        flushRAF();
+      });
+
+      // 窗口跟随视口：第 1 轮出现，尾部卸载
+      expect(container.querySelector('[data-message-id="user-1"]')).not.toBeNull();
+      expect(container.querySelector('[data-message-id="user-10"]')).toBeNull();
+    });
+
+    it('tracks the viewport round for the rounds indicator', async () => {
+      setLongConversation(10, 3);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+
+      const ticks = () => Array.from(container.querySelectorAll('.rounds-indicator-tick'));
+      expect(ticks().length).toBe(10);
+
+      const scrollContainer = container.querySelector('[data-chat-scroll="true"]') as HTMLElement;
+
+      // 滚到底部 → 最后一轮高亮
+      await act(async () => {
+        Object.defineProperty(scrollContainer, 'scrollTop', { value: 1_000_000, writable: true, configurable: true });
+        scrollContainer.dispatchEvent(new Event('scroll'));
+      });
+      await act(async () => {
+        flushRAF();
+      });
+      expect(ticks()[9]?.className).toContain('current');
+
+      // 滚到顶部 → 第一轮高亮
+      await act(async () => {
+        Object.defineProperty(scrollContainer, 'scrollTop', { value: 0, writable: true, configurable: true });
+        scrollContainer.dispatchEvent(new Event('scroll'));
+      });
+      await act(async () => {
+        flushRAF();
+      });
+      expect(ticks()[0]?.className).toContain('current');
+    });
+
     it('keeps the tail rendered and trims the head while new rounds arrive at the bottom', async () => {
       setLongConversation(10, 3);
 

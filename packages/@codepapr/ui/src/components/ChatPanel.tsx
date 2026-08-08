@@ -49,7 +49,10 @@ import {
   computeInitialWindow,
   computeRoundStartIndices,
   computeWindowForJump,
+  computeWindowForViewport,
   estimateMessageHeight,
+  findMessageIndexAtOffset,
+  findRoundIndexAtMessageIndex,
   slideWindowDown,
   slideWindowUp,
   windowMessageBounds,
@@ -1794,8 +1797,6 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
   const roundWindowRef = useRef(roundWindow);
   roundWindowRef.current = roundWindow;
   const pendingScrollToIdRef = useRef<string | null>(null);
-  const topSentinelRef = useRef<HTMLDivElement | null>(null);
-  const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
   const windowSessionKeyRef = useRef<string | null>(null);
 
   // 防御：会话切换/截断的同一帧里窗口可能越界，先收敛再使用。
@@ -1832,6 +1833,12 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
   const bottomSpacerHeight = prefixHeights[visibleMessages.length] - prefixHeights[windowBounds.end];
   const topSpacerHeightRef = useRef(topSpacerHeight);
   topSpacerHeightRef.current = topSpacerHeight;
+  const prefixHeightsRef = useRef(prefixHeights);
+  prefixHeightsRef.current = prefixHeights;
+
+  // 视口所在的轮（1-based），供右侧轮次指示器使用。滚动比例在引入占位块后
+  // 不再准确，改为用与占位同一份高度数据从 scrollTop 反查。
+  const [viewportRoundIndex, setViewportRoundIndex] = useState(1);
 
   // 渲染后同步测量：共享一个 ResizeObserver 观察窗口内的消息包装元素。
   const itemObserverRef = useRef<ResizeObserver | null>(null);
@@ -1877,24 +1884,35 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
   });
 
   // 切换会话（含按需加载完成）时把窗口重置为「最近 N 轮」。
+  // 用「会话 ID + 首条可见消息 ID」双重指纹防竞态：selectSession 分两步更新
+  // activeSessionId 和 messages，只按会话 ID 判断会用旧会话的消息算出错误窗口。
+  const windowInitFingerprintRef = useRef<string | null>(null);
   useEffect(() => {
     if (deferMessages || sessionMessagesLoading) return;
     const key = activeSessionId ?? '__none__';
-    if (windowSessionKeyRef.current === key) return;
+    const fingerprint = visibleMessagesRef.current[0]?.id ?? '';
+    if (windowSessionKeyRef.current === key && windowInitFingerprintRef.current === fingerprint) return;
     windowSessionKeyRef.current = key;
+    windowInitFingerprintRef.current = fingerprint;
     pendingScrollToIdRef.current = null;
+    jumpScrollSuppressRef.current = false;
     setRoundWindow(computeInitialWindow(roundStartsRef.current.length, chatRenderBatchRoundsRef.current));
-  }, [deferMessages, sessionMessagesLoading, activeSessionId]);
+  }, [deferMessages, sessionMessagesLoading, activeSessionId, messages]);
 
   // 消息变化（流式追加/重置截断）后收敛窗口：
   // - 越界（截断）→ clamp；贴尾窗口截断后仍贴尾
   // - 吸底时新轮到达 → 窗口重新贴尾，保证用户始终看到最新消息
   // - 贴尾且轮数超出窗口 → 卸载头部旧轮；但视口仍停留在窗口顶部附近时暂缓，
-  //   避免把用户正在看的内容移出窗口（此时继续增长是暂时的，用户上滑会触发哨兵滑动）
+  //   避免把用户正在看的内容移出窗口（此时继续增长是暂时的，用户上滑会触发窗口跟随）
   useEffect(() => {
     const total = roundStartsRef.current.length;
     const batch = chatRenderBatchRoundsRef.current;
     const prev = roundWindowRef.current;
+    // 退化窗口自愈：有轮次但窗口为空（初始化竞态残留）→ 直接贴尾。
+    if (total > 0 && prev.lo === 0 && prev.hi === 0) {
+      setRoundWindow(computeInitialWindow(total, batch));
+      return;
+    }
     if (prev.hi > total || prev.lo > prev.hi || prev.lo < 0) {
       setRoundWindow(clampWindow(prev, total, batch));
       return;
@@ -1929,43 +1947,57 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
     setRoundWindow(next);
   }, []);
 
-  // 顶/底哨兵：接近视口（预探 600px）时自动滑动窗口；也保留手动按钮。
-  useEffect(() => {
-    const sentinel = topSentinelRef.current;
+  // 窗口跟随视口：滚动（含拖滚动条、打开会话的滚到底部、跳转后的滚动）时，
+  // 按视口中心所在轮重定位窗口。占位块总高恒定，移动窗口不会改变 scrollTop，
+  // 因此没有反馈环。仅当视口中心移出当前窗口才重定位，避免频繁重渲染。
+  const placeRafRef = useRef(0);
+  // 跳转滚动后暂缓窗口重定位，直到用户下一次主动滚动：小窗口（batch 较小）时，
+  // 视口中心可能落在跳转窗口之外，立即重定位会把跳转目标移出窗口。
+  const jumpScrollSuppressRef = useRef(false);
+  const placeWindowFromScroll = useCallback(() => {
     const container = messageListRef.current;
-    if (!sentinel || !container || typeof IntersectionObserver === 'undefined') return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          slideWindow('up');
-        }
-      },
-      { root: container, rootMargin: '600px 0px 0px 0px', threshold: 0 }
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [effectiveRoundWindow.lo, slideWindow]);
-  useEffect(() => {
-    const sentinel = bottomSentinelRef.current;
+    const msgs = visibleMessagesRef.current;
+    const starts = roundStartsRef.current;
+    if (!container || msgs.length === 0 || starts.length === 0) return;
+    const prefix = prefixHeightsRef.current;
+    const centerOffset = container.scrollTop + container.clientHeight / 2;
+    const messageIndex = findMessageIndexAtOffset(prefix, centerOffset);
+    const centerRound = findRoundIndexAtMessageIndex(starts, messageIndex);
+    setViewportRoundIndex((prev) => (prev === centerRound + 1 ? prev : centerRound + 1));
+    if (jumpScrollSuppressRef.current) return;
+    const current = roundWindowRef.current;
+    if (centerRound >= current.lo && centerRound < current.hi) return;
+    setRoundWindow(computeWindowForViewport(msgs, prefix, centerOffset, chatRenderBatchRoundsRef.current));
+  }, []);
+  const handleScrollPlace = useCallback(() => {
+    if (placeRafRef.current) return;
+    placeRafRef.current = requestAnimationFrame(() => {
+      placeRafRef.current = 0;
+      placeWindowFromScroll();
+    });
+  }, [placeWindowFromScroll]);
+  useEffect(() => () => { cancelAnimationFrame(placeRafRef.current); }, []);
+
+  // 窗口/消息变化后同步一次指示器轮次（如流式追加、切换会话后未发生滚动）。
+  useLayoutEffect(() => {
     const container = messageListRef.current;
-    if (!sentinel || !container || typeof IntersectionObserver === 'undefined') return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          slideWindow('down');
-        }
-      },
-      { root: container, rootMargin: '0px 0px 600px 0px', threshold: 0 }
+    const starts = roundStartsRef.current;
+    if (!container || starts.length === 0) return;
+    const prefix = prefixHeightsRef.current;
+    const centerOffset = container.scrollTop + container.clientHeight / 2;
+    const round = findRoundIndexAtMessageIndex(
+      starts,
+      findMessageIndexAtOffset(prefix, centerOffset)
     );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [effectiveRoundWindow.hi, totalRounds, slideWindow]);
+    setViewportRoundIndex((prev) => (prev === round + 1 ? prev : round + 1));
+  }, [roundWindow, visibleMessages]);
 
   // 跳转到指定消息：窗口外先移动窗口，渲染后再滚动；已在窗口内则直接滚动。
   const scrollToMessageInView = useCallback((messageId: string) => {
     const msgs = visibleMessagesRef.current;
     const index = msgs.findIndex((m) => m.id === messageId);
     if (index < 0) return;
+    jumpScrollSuppressRef.current = true;
     const bounds = windowMessageBounds(msgs, roundWindowRef.current);
     if (index < bounds.start || index >= bounds.end) {
       pendingScrollToIdRef.current = messageId;
@@ -2438,10 +2470,12 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
         onScroll={(event) => {
           if (!isProgrammaticScrollRef.current) {
             shouldStickToBottomRef.current = isScrollContainerNearBottom(event.currentTarget);
+            jumpScrollSuppressRef.current = false;
           }
           if (isScrollContainerNearBottom(event.currentTarget)) {
             isProgrammaticScrollRef.current = false;
           }
+          handleScrollPlace();
         }}
         className="h-full overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable px-4 py-4"
         style={{ overflowAnchor: 'none' }}
@@ -2451,7 +2485,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
             <div aria-hidden style={{ height: topSpacerHeight }} />
           )}
           {!deferMessages && effectiveRoundWindow.lo > 0 && (
-            <div ref={topSentinelRef} className="mb-3 flex justify-center">
+            <div className="mb-3 flex justify-center">
               <button
                 type="button"
                 onClick={() => slideWindow('up')}
@@ -2643,7 +2677,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
             );
           })}
           {!deferMessages && effectiveRoundWindow.hi < totalRounds && (
-            <div ref={bottomSentinelRef} className="mb-3 flex justify-center">
+            <div className="mb-3 flex justify-center">
               <button
                 type="button"
                 onClick={() => slideWindow('down')}
@@ -2787,6 +2821,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
           messages={visibleMessages}
           scrollContainerRef={messageListRef}
           onScrollToMessage={scrollToMessageInView}
+          currentRoundIndex={viewportRoundIndex}
         />
       </div>
 

@@ -8,6 +8,10 @@ interface ConversationRoundsIndicatorProps {
   /** Preferred jump handler (e.g. chat pane that may need to widen its render
    *  window first). Falls back to a direct DOM scroll when omitted. */
   onScrollToMessage?: (messageId: string) => void;
+  /** Externally computed current round (1-based). Takes precedence over the
+   *  internal scroll-ratio estimate, which becomes inaccurate when the chat
+   *  pane virtualizes history with placeholder spacers. */
+  currentRoundIndex?: number;
 }
 
 interface RoundData {
@@ -35,6 +39,7 @@ export const ConversationRoundsIndicator = memo(
     messages,
     scrollContainerRef,
     onScrollToMessage,
+    currentRoundIndex,
   }: ConversationRoundsIndicatorProps) {
     const rounds = useMemo<RoundData[]>(() => {
       let idx = 0;
@@ -51,15 +56,18 @@ export const ConversationRoundsIndicator = memo(
       return result;
     }, [messages]);
 
-    const [currentRoundIndex, setCurrentRoundIndex] = useState(1);
+    const [internalRoundIndex, setInternalRoundIndex] = useState(1);
     const [panelOpen, setPanelOpen] = useState(false);
     const indicatorRef = useRef<HTMLDivElement | null>(null);
     const panelRef = useRef<HTMLDivElement | null>(null);
     const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const rafRef = useRef(0);
 
-    // lightweight current-round tracking via scroll ratio (no DOM queries)
+    // lightweight current-round tracking via scroll ratio (no DOM queries).
+    // Skipped when the parent supplies currentRoundIndex (accurate even when
+    // the chat pane virtualizes history with placeholder spacers).
     useEffect(() => {
+      if (currentRoundIndex !== undefined) return;
       const container = scrollContainerRef.current;
       if (!container || rounds.length < 2) return;
 
@@ -70,7 +78,7 @@ export const ConversationRoundsIndicator = memo(
           const sh = container.scrollHeight - container.clientHeight;
           const ratio = sh > 0 ? container.scrollTop / sh : 0;
           const idx = Math.round(1 + ratio * (rounds.length - 1));
-          setCurrentRoundIndex(Math.max(1, Math.min(rounds.length, idx)));
+          setInternalRoundIndex(Math.max(1, Math.min(rounds.length, idx)));
         });
       };
 
@@ -80,7 +88,12 @@ export const ConversationRoundsIndicator = memo(
         container.removeEventListener('scroll', update);
         if (rafRef.current) cancelAnimationFrame(rafRef.current);
       };
-    }, [rounds.length, scrollContainerRef]);
+    }, [rounds.length, scrollContainerRef, currentRoundIndex]);
+
+    const activeRoundIndex = Math.max(
+      1,
+      Math.min(rounds.length || 1, currentRoundIndex ?? internalRoundIndex)
+    );
 
     // hover handlers
     const showPanel = useCallback(() => {
@@ -130,7 +143,7 @@ export const ConversationRoundsIndicator = memo(
           onMouseLeave={scheduleHide}
         >
           {rounds.map((round, i) => {
-            const isCurrent = round.index === currentRoundIndex;
+            const isCurrent = round.index === activeRoundIndex;
             return (
               <div
                 key={round.id}
@@ -154,7 +167,7 @@ export const ConversationRoundsIndicator = memo(
             </div>
             <div className="rounds-panel-list">
               {rounds.map((round) => {
-                const isCurrent = round.index === currentRoundIndex;
+                const isCurrent = round.index === activeRoundIndex;
                 return (
                   <button
                     key={round.id}
@@ -173,5 +186,9 @@ export const ConversationRoundsIndicator = memo(
       </>
     );
   },
-  (prev, next) => prev.messages === next.messages && prev.scrollContainerRef === next.scrollContainerRef,
+  (prev, next) =>
+    prev.messages === next.messages &&
+    prev.scrollContainerRef === next.scrollContainerRef &&
+    prev.onScrollToMessage === next.onScrollToMessage &&
+    prev.currentRoundIndex === next.currentRoundIndex,
 );
