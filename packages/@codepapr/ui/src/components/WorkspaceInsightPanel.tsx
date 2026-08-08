@@ -978,7 +978,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
 
         setProjectGraphProgress({ phase: 'enriching', current: 5, total: 5 });
 
-        const nextProjectGraph = await enrichWorkspaceProjectGraph(rawProjectGraph, fileContents, 3).catch(() => rawProjectGraph);
+        const nextProjectGraph = await enrichWorkspaceProjectGraph(rawProjectGraph, fileContents, 4, Number.MAX_SAFE_INTEGER, workspacePath).catch(() => rawProjectGraph);
 
         const s = nextProjectGraph.summary;
         appendDebug(`图完成: files=${s.files} symbols=${s.symbols} imports=${s.imports} extends=${s.extends} calls=${s.calls}`);

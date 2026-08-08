@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { buildWorkspaceProjectGraph } from '../src';
+import { describe, expect, it, vi } from 'vitest';
+import { buildWorkspaceProjectGraph, enrichProjectGraphEdges, type LspProjectGraphEnhancer } from '../src';
 
 describe('buildWorkspaceProjectGraph', () => {
   it('builds file, symbol, contains, and import edges', () => {
@@ -274,5 +274,111 @@ describe('buildWorkspaceProjectGraph', () => {
         symbolSource: 'lsp',
       })
     );
+  });
+
+  it('groups LSP enhancement by file and enhances all symbols by default', async () => {
+    const graph = buildWorkspaceProjectGraph({
+      root: '.',
+      tree: '.\n- src/',
+      allFiles: [{ path: 'src/a.ts' }, { path: 'src/b.ts' }],
+      fileContents: {
+        'src/a.ts': { content: 'export function alpha() {}\nexport function beta() {}\n' },
+        'src/b.ts': { content: 'export function gamma() {}\n' },
+      },
+      files: [
+        {
+          path: 'src/a.ts',
+          language: 'TypeScript',
+          bytes: 60,
+          symbolSource: 'lsp',
+          symbols: [
+            { name: 'alpha', kind: 'function', signature: 'alpha()', line: 1, exported: true },
+            { name: 'beta', kind: 'function', signature: 'beta()', line: 2, exported: true },
+          ],
+        },
+        {
+          path: 'src/b.ts',
+          language: 'TypeScript',
+          bytes: 30,
+          symbolSource: 'lsp',
+          symbols: [
+            { name: 'gamma', kind: 'function', signature: 'gamma()', line: 1, exported: true },
+          ],
+        },
+      ],
+    });
+
+    const enhanceReferences = vi.fn(async () => []);
+    const enhanceInheritance = vi.fn(async () => []);
+    const enhancer: LspProjectGraphEnhancer = { enhanceReferences, enhanceInheritance };
+
+    await enrichProjectGraphEdges(graph, enhancer, {
+      'src/a.ts': { content: 'x', bytes: 1 },
+      'src/b.ts': { content: 'y', bytes: 1 },
+    });
+
+    // 按文件分组：enhanceReferences 每个文件只调一次，且一次带上该文件全部符号。
+    expect(enhanceReferences).toHaveBeenCalledTimes(2);
+    expect(enhanceReferences).toHaveBeenCalledWith(
+      'src/a.ts',
+      expect.any(String),
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'alpha', line: 1 }),
+        expect.objectContaining({ name: 'beta', line: 2 }),
+      ])
+    );
+    expect(enhanceReferences).toHaveBeenCalledWith(
+      'src/b.ts',
+      expect.any(String),
+      expect.arrayContaining([expect.objectContaining({ name: 'gamma', line: 1 })])
+    );
+    // 无 maxSymbols 上限时全部符号都被增强，无一遗漏。
+    const symbolsSentToA = enhanceReferences.mock.calls.find(([path]) => path === 'src/a.ts')?.[2];
+    expect(symbolsSentToA).toHaveLength(2);
+
+    // references 结果照常转化为文件级 imports 边（跨文件才成边）。
+    enhanceReferences.mockResolvedValue([
+      { filePath: 'src/b.ts', line: 1, character: 0, fromSymbol: 'alpha', toSymbol: 'alpha' },
+    ]);
+    const enriched = await enrichProjectGraphEdges(graph, enhancer, {
+      'src/a.ts': { content: 'x', bytes: 1 },
+      'src/b.ts': { content: 'y', bytes: 1 },
+    });
+    expect(enriched.edges).toContainEqual(
+      expect.objectContaining({ kind: 'imports', from: 'file:src/a.ts', to: 'file:src/b.ts' })
+    );
+  });
+
+  it('honors an explicit maxSymbols cap in enhancement order (entry point score first)', async () => {
+    const graph = buildWorkspaceProjectGraph({
+      root: '.',
+      tree: '.',
+      fileContents: {
+        'src/a.ts': { content: 'export function alpha() {}\nexport function beta() {}\n' },
+      },
+      files: [
+        {
+          path: 'src/a.ts',
+          language: 'TypeScript',
+          bytes: 60,
+          symbolSource: 'lsp',
+          symbols: [
+            { name: 'alpha', kind: 'function', signature: 'alpha()', line: 1, exported: true },
+            { name: 'beta', kind: 'function', signature: 'beta()', line: 2, exported: true },
+          ],
+        },
+      ],
+    });
+
+    const enhanceReferences = vi.fn(async () => []);
+    const enhancer: LspProjectGraphEnhancer = {
+      enhanceReferences,
+      enhanceInheritance: vi.fn(async () => []),
+    };
+
+    await enrichProjectGraphEdges(graph, enhancer, { 'src/a.ts': { content: 'x', bytes: 1 } }, 1, 1);
+
+    expect(enhanceReferences).toHaveBeenCalledTimes(1);
+    expect(enhanceReferences.mock.calls[0]?.[2]).toHaveLength(1);
   });
 });

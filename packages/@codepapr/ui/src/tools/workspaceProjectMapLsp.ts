@@ -34,20 +34,6 @@ interface LspDocumentSymbolLike {
   children?: LspDocumentSymbolLike[];
 }
 
-interface LspOpenDocumentResponse {
-  message?: {
-    server?: {
-      toolSource?: string;
-    };
-  };
-}
-
-interface LspRequestEnvelope<T> {
-  message?: {
-    result?: T;
-  };
-}
-
 // LSP 连接池接口
 export interface LspConnectionHandle {
   languageId: string;
@@ -210,7 +196,7 @@ function collapseWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
-function workspaceFileUri(workspacePath: string, relativePath: string): string {
+export function workspaceFileUri(workspacePath: string, relativePath: string): string {
   const normalizedWorkspacePath = workspacePath.replace(/\\/g, '/').replace(/\/+$/, '');
   const normalizedRelativePath = relativePath.replace(/^\.\//, '').replace(/\\/g, '/');
   const raw = `file://${normalizedWorkspacePath}/${normalizedRelativePath}`;
@@ -313,68 +299,6 @@ export function normalizeProjectMapDocumentSymbols(
   return symbols;
 }
 
-async function loadProjectMapSymbolsFromLsp(
-  workspacePath: string,
-  relativePath: string,
-  languageId: string,
-  content: string,
-  maxSymbols: number,
-  connectionPool?: LspConnectionPool
-): Promise<WorkspaceMapSymbolSummary[]> {
-  let opened = false;
-  let handle: LspConnectionHandle | null = null;
-
-  try {
-    // 从连接池获取连接（如果有）
-    if (connectionPool) {
-      handle = await connectionPool.acquire(languageId, workspacePath);
-    }
-
-    await invoke<LspOpenDocumentResponse>('lsp_open_document', {
-      workspacePath,
-      languageId,
-      relativePath,
-      content,
-      version: 1,
-      diagWaitMs: 0,
-    });
-    opened = true;
-
-    // 记录文档为活跃
-    handle?.activeDocuments.add(relativePath);
-
-    const requestResult = await invoke<LspRequestEnvelope<unknown>>('lsp_request', {
-      workspacePath,
-      languageId,
-      method: 'textDocument/documentSymbol',
-      params: {
-        textDocument: {
-          uri: workspaceFileUri(workspacePath, relativePath),
-        },
-      },
-    });
-
-    return normalizeProjectMapDocumentSymbols(requestResult.message?.result, maxSymbols);
-  } catch {
-    return [];
-  } finally {
-    if (opened) {
-      // 连接池复用的是「语言服务器」而非「已打开的文档」：documentSymbol 是一次性请求，
-      // 读取完符号后立即关闭文档，避免数百个文件长期挂在语言服务器上占用内存。
-      handle?.activeDocuments.delete(relativePath);
-      await invoke<boolean>('lsp_close_document', {
-        workspacePath,
-        languageId,
-        relativePath,
-      }).catch(() => undefined);
-      // 释放连接
-      if (handle) {
-        connectionPool?.release(handle);
-      }
-    }
-  }
-}
-
 export async function resolveProjectMapSymbolOverrides(
   workspacePath: string,
   fileContents: Record<string, ProjectMapFileContent>,
@@ -393,27 +317,58 @@ export async function resolveProjectMapSymbolOverrides(
     }
   }
 
-  // 分批并发处理，避免同时请求太多 LSP 连接
-  for (let i = 0; i < lspSupportedFiles.length; i += concurrencyLimit) {
-    if (isCancelled?.()) break;
-    const batch = lspSupportedFiles.slice(i, i + concurrencyLimit);
-    const batchPromises = batch.map(async ({ path, languageId, content }) => {
-      if (isCancelled?.()) return { path, symbols: [] as WorkspaceMapSymbolSummary[] };
-      const symbols = await loadProjectMapSymbolsFromLsp(
-        workspacePath,
-        path,
-        languageId,
-        content,
-        maxSymbols,
-        globalLspPool
-      );
-      return { path, symbols };
-    });
+  if (lspSupportedFiles.length === 0) {
+    return overrides;
+  }
 
-    const batchResults = await Promise.allSettled(batchPromises);
+  // 批量路径：一次 IPC 往返内完成整批文件的 open→documentSymbol→close，
+  // 避免旧实现每文件 3 次往返（500 文件 = 1500 次）的传输与解析开销。
+  // 分批限制单次 IPC payload 大小（每块约 40 个文件），块间并发。
+  const BATCH_CHUNK_SIZE = 40;
+  const chunks: Array<Array<(typeof lspSupportedFiles)[number]>> = [];
+  for (let i = 0; i < lspSupportedFiles.length; i += BATCH_CHUNK_SIZE) {
+    chunks.push(lspSupportedFiles.slice(i, i + BATCH_CHUNK_SIZE));
+  }
+
+  for (let i = 0; i < chunks.length; i += Math.max(1, concurrencyLimit)) {
+    if (isCancelled?.()) break;
+    const chunkBatch = chunks.slice(i, i + Math.max(1, concurrencyLimit));
+    const batchResults = await Promise.allSettled(
+      chunkBatch.map(async (chunk) => {
+        if (isCancelled?.()) return [];
+        try {
+          const outputs = await invoke<Array<{ path: string; result: unknown; error?: string | null }>>(
+            'lsp_batch_symbols',
+            {
+              workspacePath,
+              files: chunk.map((file) => ({
+                path: file.path,
+                languageId: file.languageId,
+                content: file.content,
+              })),
+            }
+          );
+          const collected: Array<{ path: string; symbols: WorkspaceMapSymbolSummary[] }> = [];
+          for (const output of outputs ?? []) {
+            if (output.error || !output.result) continue;
+            collected.push({
+              path: output.path,
+              symbols: normalizeProjectMapDocumentSymbols(output.result, maxSymbols),
+            });
+          }
+          return collected;
+        } catch {
+          return [];
+        }
+      })
+    );
+
     for (const result of batchResults) {
-      if (result.status === 'fulfilled' && result.value && result.value.symbols.length > 0) {
-        overrides[result.value.path] = result.value.symbols;
+      if (result.status !== 'fulfilled') continue;
+      for (const item of result.value) {
+        if (item.symbols.length > 0) {
+          overrides[item.path] = item.symbols;
+        }
       }
     }
   }

@@ -22,108 +22,81 @@ describe('resolveProjectMapSymbolOverrides', () => {
 
   it('uses real LSP document symbols for C#/Java/C++ with fallback support', async () => {
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
-      if (command === 'lsp_open_document') {
-        const relativePath = String(args?.relativePath ?? '');
-        if (relativePath === 'src/Program.cs') {
-          return { message: { server: { toolSource: 'managed-cache' } } };
-        }
-        if (relativePath === 'src/Main.java') {
-          return { message: { server: { toolSource: 'builtin-fallback' } } };
-        }
-        if (relativePath === 'src/native/main.cpp') {
-          return { message: { server: { toolSource: 'path' } } };
-        }
-      }
-
-      if (command === 'lsp_request') {
-        const languageId = String(args?.languageId ?? '');
-        if (languageId === 'csharp') {
-          return {
-            message: {
-              result: [
-                {
-                  name: 'Program',
-                  kind: 5,
-                  selectionRange: {
-                    start: { line: 0, character: 0 },
-                    end: { line: 0, character: 7 },
-                  },
-                  children: [
-                    {
-                      name: 'Main',
-                      kind: 6,
-                      detail: '(string[] args)',
-                      selectionRange: {
-                        start: { line: 3, character: 4 },
-                        end: { line: 3, character: 8 },
-                      },
-                    },
-                  ],
+      if (command === 'lsp_batch_symbols') {
+        const files = Array.isArray(args?.files) ? (args.files as Array<{ path: string; languageId: string }>) : [];
+        return files.map((file) => {
+          const languageId = String(file.languageId ?? '');
+          let result: unknown = null;
+          if (languageId === 'csharp') {
+            result = [
+              {
+                name: 'Program',
+                kind: 5,
+                selectionRange: {
+                  start: { line: 0, character: 0 },
+                  end: { line: 0, character: 7 },
                 },
-              ],
-            },
-          };
-        }
-
-        if (languageId === 'cpp') {
-          return {
-            message: {
-              result: [
-                {
-                  name: 'Runner',
-                  kind: 5,
-                  selectionRange: {
-                    start: { line: 0, character: 0 },
-                    end: { line: 0, character: 6 },
-                  },
-                  children: [
-                    {
-                      name: 'run',
-                      kind: 6,
-                      detail: '() -> int',
-                      selectionRange: {
-                        start: { line: 4, character: 2 },
-                        end: { line: 4, character: 5 },
-                      },
+                children: [
+                  {
+                    name: 'Main',
+                    kind: 6,
+                    detail: '(string[] args)',
+                    selectionRange: {
+                      start: { line: 3, character: 4 },
+                      end: { line: 3, character: 8 },
                     },
-                  ],
-                },
-              ],
-            },
-          };
-        }
-
-        if (languageId === 'java') {
-          return {
-            message: {
-              result: [
-                {
-                  name: 'Main',
-                  kind: 5,
-                  selectionRange: {
-                    start: { line: 0, character: 0 },
-                    end: { line: 0, character: 4 },
                   },
-                  children: [
-                    {
-                      name: 'main',
-                      kind: 6,
-                      detail: '(String[] args)',
-                      selectionRange: {
-                        start: { line: 1, character: 4 },
-                        end: { line: 1, character: 8 },
-                      },
-                    },
-                  ],
+                ],
+              },
+            ];
+          } else if (languageId === 'cpp') {
+            result = [
+              {
+                name: 'Runner',
+                kind: 5,
+                selectionRange: {
+                  start: { line: 0, character: 0 },
+                  end: { line: 0, character: 6 },
                 },
-              ],
-            },
-          };
-        }
-      }
+                children: [
+                  {
+                    name: 'run',
+                    kind: 6,
+                    detail: '() -> int',
+                    selectionRange: {
+                      start: { line: 4, character: 2 },
+                      end: { line: 4, character: 5 },
+                    },
+                  },
+                ],
+              },
+            ];
+          } else if (languageId === 'java') {
+            result = [
+              {
+                name: 'Main',
+                kind: 5,
+                selectionRange: {
+                  start: { line: 0, character: 0 },
+                  end: { line: 0, character: 4 },
+                },
+                children: [
+                  {
+                    name: 'main',
+                    kind: 6,
+                    detail: '(String[] args)',
+                    selectionRange: {
+                      start: { line: 1, character: 4 },
+                      end: { line: 1, character: 8 },
+                    },
+                  },
+                ],
+              },
+            ];
+          }
 
-      if (command === 'lsp_close_document') {
-        return true;
+          return { path: file.path, result, error: null };
+        });
       }
 
       throw new Error(`Unexpected command: ${command}`);

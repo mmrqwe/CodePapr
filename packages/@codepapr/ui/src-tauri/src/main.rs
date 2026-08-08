@@ -342,6 +342,8 @@ fn main() {
             lsp::lsp_request,
             lsp::lsp_get_diagnostics,
             lsp::lsp_stop_server,
+            lsp::lsp_batch_symbols,
+            lsp::lsp_batch_enrich,
             symbol_provider::resolve_symbol_provider,
             symbol_provider::list_available_symbol_providers,
             symbol_provider::resolve_symbols,

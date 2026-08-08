@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -1205,6 +1205,10 @@ fn expanded_path() -> String {
 
 pub fn refresh_expanded_path() {
     EXPANDED_PATH_CACHE.write().unwrap().take();
+    // PATH 变化可能让此前「命令不存在」的服务器重新可用，清空启动失败负缓存。
+    if let Ok(mut failures) = lsp_start_failures().lock() {
+        failures.clear();
+    }
 }
 
 fn spawn_server_candidate(
@@ -1456,6 +1460,57 @@ fn server_is_running(server: &mut ManagedLspServer) -> Result<bool, String> {
         .is_none())
 }
 
+// ── LSP 启动失败负缓存 ────────────────────────────────────────────────
+// 服务器二进制缺失时（未安装、不在 PATH），旧实现会为每一个文件重新走一遍
+// spawn + managed 安装检查，500 文件的项目就是 500 次无意义的尝试。
+// 这里按 (workspace::family) 记住「启动失败」一小段时间，期间直接返回同一个
+// 错误，让上游快速落到 fallback；TTL 到期或 PATH/托管工具变化后自然重试，
+// 保证用户手动安装后能及时被识别。
+const LSP_START_FAILURE_TTL: Duration = Duration::from_secs(15);
+
+static LSP_START_FAILURES: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+
+fn lsp_start_failures() -> &'static Mutex<HashMap<String, Instant>> {
+    LSP_START_FAILURES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn lsp_start_failure_hit(workspace_path: &str, language_id: &str) -> bool {
+    let key = server_key(workspace_path, language_id);
+    let mut failures = match lsp_start_failures().lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(recorded) = failures.get(&key) {
+        if recorded.elapsed() < LSP_START_FAILURE_TTL {
+            return true;
+        }
+        failures.remove(&key);
+    }
+    false
+}
+
+fn lsp_start_failure_record(workspace_path: &str, language_id: &str) {
+    let key = server_key(workspace_path, language_id);
+    if let Ok(mut failures) = lsp_start_failures().lock() {
+        failures.insert(key, Instant::now());
+    }
+}
+
+fn lsp_start_failure_clear(workspace_path: &str, language_id: &str) {
+    let key = server_key(workspace_path, language_id);
+    if let Ok(mut failures) = lsp_start_failures().lock() {
+        failures.remove(&key);
+    }
+}
+
+/// 只有「托管安装完全不可用/无需安装」的失败才值得缓存：语言不在托管列表
+/// （managed_lsp_commands 为空）意味着本次调用内没有安装动作可做，短时间内
+/// 重试必然得到同样的失败。托管语言（如 clangd/JDTLS/csharp 大体积下载中）
+/// 不缓存，否则会打断安装流程。
+fn lsp_start_failure_cacheable(workspace: &Path, language_id: &str) -> bool {
+    managed_lsp_commands(workspace, language_id).is_empty()
+}
+
 fn ensure_running_server_handle(
     app: Option<&tauri::AppHandle>,
     workspace_path: &str,
@@ -1470,6 +1525,12 @@ fn ensure_running_server_handle(
         }
         drop(guard);
         let _ = remove_server_handle(workspace_path, language_id);
+    }
+
+    if lsp_start_failure_hit(workspace_path, language_id) {
+        return Err(format!(
+            "LSP server `{language_id}` 最近一次启动失败（负缓存），跳过重试"
+        ));
     }
 
     // 慢路径：同一 key 的创建串行化。持锁期间完成 查找→启动→插入，第二个
@@ -1491,7 +1552,17 @@ fn ensure_running_server_handle(
         let _ = remove_server_handle(workspace_path, language_id);
     }
 
-    let server = Arc::new(Mutex::new(start_server(app, workspace_path, language_id)?));
+    let started = (|| {
+        let workspace = canonical_workspace(workspace_path)?;
+        start_server(app, workspace_path, language_id).map_err(|err| {
+            if lsp_start_failure_cacheable(&workspace, language_id) {
+                lsp_start_failure_record(workspace_path, language_id);
+            }
+            err
+        })
+    })();
+    let server = Arc::new(Mutex::new(started?));
+    lsp_start_failure_clear(workspace_path, language_id);
     insert_server_handle(workspace_path, language_id, Arc::clone(&server))?;
     Ok(server)
 }
@@ -1525,6 +1596,8 @@ pub async fn lsp_start_server(
         if sanitized_workspace.is_empty() {
             return Err("workspace_path 不能为空".to_string());
         }
+        // 显式启动 = 用户意图（可能刚安装好服务器），绕过负缓存。
+        lsp_start_failure_clear(&sanitized_workspace, &sanitized_language_id);
 
         match ensure_running_server_handle(None, &sanitized_workspace, &sanitized_language_id).and_then(
             |server| {
@@ -1897,13 +1970,281 @@ pub async fn lsp_stop_server(workspace_path: String, language_id: String) -> Res
     run_blocking_workspace_task(move || lsp_stop_server_impl(&workspace_path, &language_id)).await
 }
 
+// ── 批量命令（ProjectGraph 加载加速） ─────────────────────────────────
+// 旧流程每个文件都走「didOpen → 请求 → didClose」三次 IPC 往返，500 文件就是
+// 1500 次，且服务器每次 didOpen 都要重新解析文件。批量命令把整批文件的文档
+// 生命周期合并成一次调用：批量 open → 批量请求（请求期间不持锁，天然流水线）
+// → 批量 close。LSP 请求内容与单文件路径完全一致，返回结果不缩水。
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspBatchSymbolInput {
+    pub path: String,
+    pub language_id: String,
+    pub content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspBatchSymbolOutput {
+    pub path: String,
+    pub result: Value,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn lsp_batch_symbols(
+    workspace_path: String,
+    files: Vec<LspBatchSymbolInput>,
+) -> Result<Vec<LspBatchSymbolOutput>, String> {
+    run_blocking_workspace_task(move || lsp_batch_symbols_impl(&workspace_path, &files)).await
+}
+
+pub(crate) fn lsp_batch_symbols_impl(
+    workspace_path: &str,
+    files: &[LspBatchSymbolInput],
+) -> Result<Vec<LspBatchSymbolOutput>, String> {
+    let workspace = canonical_workspace(workspace_path)?;
+
+    let mut by_language: HashMap<String, Vec<&LspBatchSymbolInput>> = HashMap::new();
+    for file in files {
+        by_language
+            .entry(file.language_id.clone())
+            .or_default()
+            .push(file);
+    }
+
+    let mut outputs = Vec::with_capacity(files.len());
+    for (_, group) in by_language {
+        for file in group.iter().copied() {
+            let _ = lsp_open_document_with_app(
+                None,
+                workspace_path.to_string(),
+                file.language_id.clone(),
+                file.path.clone(),
+                file.content.clone(),
+                1,
+                Some(0),
+            );
+        }
+        for file in group.iter().copied() {
+            let uri = match file_uri_for(&workspace, &file.path) {
+                Ok(uri) => uri,
+                Err(err) => {
+                    outputs.push(LspBatchSymbolOutput {
+                        path: file.path.clone(),
+                        result: Value::Null,
+                        error: Some(err),
+                    });
+                    continue;
+                }
+            };
+            match lsp_request_impl(
+                workspace_path,
+                &file.language_id,
+                "textDocument/documentSymbol",
+                &json!({ "textDocument": { "uri": uri } }),
+            ) {
+                Ok(response) => outputs.push(LspBatchSymbolOutput {
+                    path: file.path.clone(),
+                    result: response
+                        .message
+                        .get("result")
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                    error: None,
+                }),
+                Err(err) => outputs.push(LspBatchSymbolOutput {
+                    path: file.path.clone(),
+                    result: Value::Null,
+                    error: Some(err),
+                }),
+            }
+        }
+        for file in group.iter().copied() {
+            let _ = lsp_close_document_impl(workspace_path, &file.language_id, &file.path);
+        }
+    }
+
+    Ok(outputs)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspBatchEnrichSymbol {
+    pub name: String,
+    pub line: usize,
+    pub character: usize,
+    pub kind: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspBatchEnrichFile {
+    pub path: String,
+    pub language_id: String,
+    pub content: String,
+    pub symbols: Vec<LspBatchEnrichSymbol>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspBatchEnrichReference {
+    pub uri: String,
+    pub line: usize,
+    pub character: usize,
+    pub from_symbol: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspBatchEnrichInheritance {
+    pub from_symbol: String,
+    pub to_symbol: String,
+    pub kind: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspBatchEnrichFileOutput {
+    pub path: String,
+    pub references: Vec<LspBatchEnrichReference>,
+    pub inheritance: Vec<LspBatchEnrichInheritance>,
+}
+
+// 与前端 createLspProjectGraphEnhancer 的解析逻辑逐字对齐（JS 的 \w 是
+// ASCII 集，故关闭 unicode 模式保证行为一致）：
+//   hover.contents.match(/\bextends\s+(\w+)/i)
+//   hover.contents.match(/\bimplements\s+([\w,\s]+)/i)
+// 若改动此处，必须同步改 workspaceToolUtils.ts。
+static LSP_EXTENDS_PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+static LSP_IMPLEMENTS_PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+
+fn lsp_extends_pattern() -> &'static regex::Regex {
+    LSP_EXTENDS_PATTERN.get_or_init(|| regex::Regex::new(r"(?i-u)\bextends\s+(\w+)").unwrap())
+}
+
+fn lsp_implements_pattern() -> &'static regex::Regex {
+    LSP_IMPLEMENTS_PATTERN
+        .get_or_init(|| regex::Regex::new(r"(?i-u)\bimplements\s+([\w,\s]+)").unwrap())
+}
+
+#[tauri::command]
+pub async fn lsp_batch_enrich(
+    workspace_path: String,
+    files: Vec<LspBatchEnrichFile>,
+) -> Result<Vec<LspBatchEnrichFileOutput>, String> {
+    run_blocking_workspace_task(move || lsp_batch_enrich_impl(&workspace_path, &files)).await
+}
+
+pub(crate) fn lsp_batch_enrich_impl(
+    workspace_path: &str,
+    files: &[LspBatchEnrichFile],
+) -> Result<Vec<LspBatchEnrichFileOutput>, String> {
+    let workspace = canonical_workspace(workspace_path)?;
+    let mut outputs = Vec::with_capacity(files.len());
+
+    for file in files {
+        let uri = match file_uri_for(&workspace, &file.path) {
+            Ok(uri) => uri,
+            Err(_) => continue,
+        };
+        let _ = lsp_open_document_with_app(
+            None,
+            workspace_path.to_string(),
+            file.language_id.clone(),
+            file.path.clone(),
+            file.content.clone(),
+            1,
+            Some(0),
+        );
+
+        let mut references: Vec<LspBatchEnrichReference> = Vec::new();
+        let mut inheritance: Vec<LspBatchEnrichInheritance> = Vec::new();
+        for sym in &file.symbols {
+            // 与旧实现一致：单个请求失败静默跳过（符号提取不到引用/继承不
+            // 影响其余符号与整体图构建）。
+            if let Ok(response) = lsp_request_impl(
+                workspace_path,
+                &file.language_id,
+                "textDocument/references",
+                &json!({
+                    "textDocument": { "uri": uri },
+                    "position": { "line": sym.line, "character": sym.character },
+                    "context": { "includeDeclaration": false },
+                }),
+            ) {
+                let locations = crate::symbol_provider::parse_lsp_locations(&response.message);
+                for loc in locations {
+                    references.push(LspBatchEnrichReference {
+                        uri: loc.uri,
+                        line: loc.line,
+                        character: loc.character,
+                        from_symbol: sym.name.clone(),
+                    });
+                }
+            }
+
+            if sym.kind == "class" || sym.kind == "interface" {
+                if let Ok(response) = lsp_request_impl(
+                    workspace_path,
+                    &file.language_id,
+                    "textDocument/hover",
+                    &json!({
+                        "textDocument": { "uri": uri },
+                        "position": { "line": sym.line, "character": sym.character },
+                    }),
+                ) {
+                    let contents = response
+                        .message
+                        .get("result")
+                        .and_then(|r| r.get("contents"))
+                        .map(crate::symbol_provider::lsp_markdown_to_plain)
+                        .unwrap_or_default();
+                    if let Some(captures) = lsp_extends_pattern().captures(&contents) {
+                        inheritance.push(LspBatchEnrichInheritance {
+                            from_symbol: sym.name.clone(),
+                            to_symbol: captures[1].to_string(),
+                            kind: "extends".to_string(),
+                        });
+                    }
+                    if let Some(captures) = lsp_implements_pattern().captures(&contents) {
+                        for iface in captures[1]
+                            .split(',')
+                            .map(|s| s.trim())
+                            .filter(|s| !s.is_empty())
+                        {
+                            inheritance.push(LspBatchEnrichInheritance {
+                                from_symbol: sym.name.clone(),
+                                to_symbol: iface.to_string(),
+                                kind: "implements".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let _ = lsp_close_document_impl(workspace_path, &file.language_id, &file.path);
+
+        outputs.push(LspBatchEnrichFileOutput {
+            path: file.path.clone(),
+            references,
+            inheritance,
+        });
+    }
+
+    Ok(outputs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_running_server_handle, file_uri_for, lock_server, lsp_close_document_impl,
-        lsp_open_document_with_app, lsp_request, lsp_server_config, lsp_stop_server_impl,
-        normalize_relative_path, resolve_lsp_command_candidates, resolved_command_display,
-        send_request, server_key, LSP_REQUEST_TIMEOUT,
+        ensure_running_server_handle, file_uri_for, lock_server, lsp_batch_enrich_impl,
+        lsp_batch_symbols_impl, lsp_close_document_impl, lsp_open_document_with_app, lsp_request,
+        lsp_server_config, lsp_stop_server_impl, normalize_relative_path,
+        resolve_lsp_command_candidates, resolved_command_display, send_request, server_key,
+        LspBatchEnrichFile, LspBatchEnrichSymbol, LspBatchSymbolInput, LSP_REQUEST_TIMEOUT,
     };
     use serde_json::{json, Value};
     use std::{
@@ -2178,6 +2519,124 @@ mod tests {
             "/tmp/ws::typescript"
         );
         assert_eq!(server_key("/tmp/ws", "scss"), "/tmp/ws::css");
+    }
+
+    #[test]
+    fn lsp_start_failure_cache_records_and_expires() {
+        use super::{lsp_start_failure_clear, lsp_start_failure_hit, lsp_start_failure_record};
+
+        lsp_start_failure_clear("/tmp/ws", "typescript");
+        assert!(!lsp_start_failure_hit("/tmp/ws", "typescript"));
+        lsp_start_failure_record("/tmp/ws", "typescript");
+        assert!(lsp_start_failure_hit("/tmp/ws", "typescript"));
+        lsp_start_failure_clear("/tmp/ws", "typescript");
+        assert!(!lsp_start_failure_hit("/tmp/ws", "typescript"));
+    }
+
+    #[test]
+    fn lsp_batch_symbols_returns_per_file_document_symbols() {
+        let _guard = lsp_smoke_lock();
+
+        let workspace = make_temp_workspace("batch-symbols");
+        write_workspace_file(
+            &workspace,
+            "src/alpha.ts",
+            "export class Alpha { greet(): string { return 'hi'; } }\n",
+        );
+        write_workspace_file(
+            &workspace,
+            "src/beta.ts",
+            "import { Alpha } from './alpha';\nconst a = new Alpha();\n",
+        );
+
+        let workspace_str = workspace.to_string_lossy().to_string();
+        let files = vec![
+            LspBatchSymbolInput {
+                path: "src/alpha.ts".to_string(),
+                language_id: "typescript".to_string(),
+                content: "export class Alpha { greet(): string { return 'hi'; } }\n".to_string(),
+            },
+            LspBatchSymbolInput {
+                path: "src/beta.ts".to_string(),
+                language_id: "typescript".to_string(),
+                content: "import { Alpha } from './alpha';\nconst a = new Alpha();\n".to_string(),
+            },
+        ];
+
+        let outputs = lsp_batch_symbols_impl(&workspace_str, &files).expect("batch symbols failed");
+        assert_eq!(outputs.len(), 2);
+        for output in &outputs {
+            assert!(output.error.is_none(), "unexpected error: {:?}", output.error);
+        }
+        // alpha.ts 的类声明必然出现在 documentSymbol 里（真实 tsserver 与
+        // 内建实现一致）；beta.ts 只有 const 声明，tsserver 不把 import 列为
+        // 符号，因此只断言其结果为合法数组。
+        let alpha = outputs
+            .iter()
+            .find(|output| output.path == "src/alpha.ts")
+            .expect("missing alpha output");
+        assert!(
+            value_contains_text(&alpha.result, "Alpha"),
+            "expected documentSymbol to contain Alpha, got: {}",
+            alpha.result
+        );
+        let beta = outputs
+            .iter()
+            .find(|output| output.path == "src/beta.ts")
+            .expect("missing beta output");
+        assert!(
+            beta.result.is_array(),
+            "expected array documentSymbol for beta.ts, got: {}",
+            beta.result
+        );
+
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn lsp_batch_enrich_returns_structured_results() {
+        let _guard = lsp_smoke_lock();
+
+        let workspace = make_temp_workspace("batch-enrich");
+        let source = "class Base {}\nclass Child extends Base {}\nconst c = new Child();\n";
+        write_workspace_file(&workspace, "src/model.ts", source);
+
+        let workspace_str = workspace.to_string_lossy().to_string();
+        let files = vec![LspBatchEnrichFile {
+            path: "src/model.ts".to_string(),
+            language_id: "typescript".to_string(),
+            content: source.to_string(),
+            symbols: vec![
+                LspBatchEnrichSymbol {
+                    name: "Child".to_string(),
+                    line: 1,
+                    character: 6,
+                    kind: "class".to_string(),
+                },
+                LspBatchEnrichSymbol {
+                    name: "greet".to_string(),
+                    line: 2,
+                    character: 0,
+                    kind: "method".to_string(),
+                },
+            ],
+        }];
+
+        let outputs = lsp_batch_enrich_impl(&workspace_str, &files).expect("batch enrich failed");
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(outputs[0].path, "src/model.ts");
+        // 结构完整性断言：无论真实服务器是否可用，返回结构都必须一致。
+        for reference in &outputs[0].references {
+            assert!(!reference.uri.is_empty());
+            assert!(!reference.from_symbol.is_empty());
+        }
+        // 类符号（Child）的 hover 里应能解析出 extends Base（真实服务器）；fallback
+        // 环境可能为空，但不允许出现非法 kind。
+        for inh in &outputs[0].inheritance {
+            assert!(inh.kind == "extends" || inh.kind == "implements");
+        }
+
+        let _ = fs::remove_dir_all(workspace);
     }
 
     #[test]

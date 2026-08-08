@@ -1082,7 +1082,7 @@ fn flatten_lsp_symbols_rec(
     }
 }
 
-fn lsp_markdown_to_plain(value: &serde_json::Value) -> String {
+pub(crate) fn lsp_markdown_to_plain(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => s.clone(),
         serde_json::Value::Object(map) => {
@@ -1104,7 +1104,7 @@ fn lsp_markdown_to_plain(value: &serde_json::Value) -> String {
     }
 }
 
-fn parse_lsp_locations(value: &serde_json::Value) -> Vec<SymbolLocation> {
+pub(crate) fn parse_lsp_locations(value: &serde_json::Value) -> Vec<SymbolLocation> {
     let result = match value.get("result") {
         Some(r) => r,
         None => return Vec::new(),

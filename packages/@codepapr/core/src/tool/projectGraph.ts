@@ -3337,7 +3337,7 @@ export async function enrichProjectGraphEdges(
   enhancer: LspProjectGraphEnhancer,
   fileContents: Record<string, ProjectGraphFileContent>,
   concurrency: number = 3,
-  maxSymbols: number = 30,
+  maxSymbols: number = Number.MAX_SAFE_INTEGER,
 ): Promise<WorkspaceProjectGraphResult> {
   const edges = [...result.edges];
   const seenEdges = new Set(edges.map((e) => e.id));
@@ -3366,23 +3366,34 @@ export async function enrichProjectGraphEdges(
   );
   const toEnhance = prioritized.slice(0, Math.max(0, maxSymbols));
 
-  for (let i = 0; i < toEnhance.length; i += concurrency) {
-    const batch = toEnhance.slice(i, i + concurrency);
+  // 按文件分组后一次性交给 enhancer：同一文件的所有符号共享一次文档
+  // open/close 窗口（批量 LSP 命令的调用方），避免逐符号重复开闭文档。
+  const groups = new Map<string, Array<{ node: ProjectGraphNode; symbol: NonNullable<ProjectGraphNode['symbol']> }>>();
+  for (const node of toEnhance) {
+    if (!node.symbol || !node.path) continue;
+    const list = groups.get(node.path) ?? [];
+    list.push({ node, symbol: node.symbol });
+    groups.set(node.path, list);
+  }
+  const paths = [...groups.keys()];
+
+  for (let i = 0; i < paths.length; i += concurrency) {
+    const batch = paths.slice(i, i + concurrency);
     await Promise.all(
-      batch.map(async (node) => {
-        if (!node.symbol || !node.path) return;
-        const content = fileContents[node.path]?.content;
+      batch.map(async (path) => {
+        const content = fileContents[path]?.content;
         if (!content) return;
+        const entries = groups.get(path) ?? [];
 
         try {
           const refs = await enhancer.enhanceReferences(
-            node.path,
+            path,
             content,
-            [{ name: node.symbol.name, line: node.symbol.line, kind: node.symbol.kind }],
+            entries.map((e) => ({ name: e.symbol.name, line: e.symbol.line, kind: e.symbol.kind })),
           );
 
           for (const ref of refs) {
-            const sourceFileId = `file:${node.path}`;
+            const sourceFileId = `file:${path}`;
             const targetFileId = `file:${ref.filePath}`;
             if (sourceFileId === targetFileId) continue;
 
@@ -3395,17 +3406,18 @@ export async function enrichProjectGraphEdges(
           }
 
           const inheritances = await enhancer.enhanceInheritance(
-            node.path,
+            path,
             content,
-            [{ name: node.symbol.name, line: node.symbol.line, kind: node.symbol.kind }],
+            entries.map((e) => ({ name: e.symbol.name, line: e.symbol.line, kind: e.symbol.kind })),
           );
 
           for (const inh of inheritances) {
-            const fromNode = node;
+            const fromNode = entries.find((e) => e.symbol.name === inh.fromSymbol)?.node;
+            if (!fromNode) continue;
             const candidates = symbolsByName.get(inh.toSymbol);
             if (!candidates || candidates.length === 0) continue;
             const toNode =
-              candidates.find((n) => n.path === node.path) ??
+              candidates.find((n) => n.path === fromNode.path) ??
               candidates.find((n) => n.symbol?.exported) ??
               candidates[0];
             if (!toNode || fromNode.id === toNode.id) continue;
@@ -3418,7 +3430,7 @@ export async function enrichProjectGraphEdges(
             });
           }
         } catch (e) {
-          console.warn('ProjectGraph enhancement failed for', node.symbol?.name, ':', e);
+          console.warn('ProjectGraph enhancement failed for', path, ':', e);
         }
       })
     );

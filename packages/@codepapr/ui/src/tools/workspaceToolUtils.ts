@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core';
 import {
   buildWorkspaceProjectGraph as buildCoreWorkspaceProjectGraph,
   enrichProjectGraphEdges,
@@ -604,9 +605,21 @@ function isProjectGraphContextCandidate(path: string, content: string): boolean 
 
 export function createLspProjectGraphEnhancer(
   fileContents: Record<string, { content: string; bytes: number }>,
+  workspacePath?: string,
 ): LspProjectGraphEnhancer {
+  // 行拆分缓存：旧实现每个符号对全文 split 一遍（O(符号数×文件大小)）。
+  // 一次构建内同一文件内容不变，按文件只拆一次。
+  const lineCache = new Map<string, string[]>();
+  const linesFor = (content: string): string[] => {
+    let lines = lineCache.get(content);
+    if (!lines) {
+      lines = content.split(/\r?\n/);
+      lineCache.set(content, lines);
+    }
+    return lines;
+  };
   const findSymbolColumn = (content: string, zeroBasedLine: number, name: string): number => {
-    const lineText = content.split(/\r?\n/)[zeroBasedLine] ?? '';
+    const lineText = linesFor(content)[zeroBasedLine] ?? '';
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // 不用后行断言 (?<!...)（需 Safari 16.4+ / macOS 13.3+，旧 WebView 会抛 SyntaxError）；
     // 改用 lookahead + 手动检查前导字符，返回第一个构成完整标识符的匹配位置。
@@ -633,6 +646,54 @@ export function createLspProjectGraphEnhancer(
     }
     return normalized;
   };
+
+  interface BatchEnrichFileResult {
+    path: string;
+    references: Array<{ uri: string; line: number; character: number; fromSymbol: string }>;
+    inheritance: Array<{ fromSymbol: string; toSymbol: string; kind: 'extends' | 'implements' }>;
+  }
+
+  // 批量命令响应缓存：core 会先调 enhanceReferences 再调 enhanceInheritance
+  // （同一文件的同一符号列表），两个阶段共享一次 lsp_batch_enrich 调用。
+  const batchCache = new Map<string, Promise<BatchEnrichFileResult | null>>();
+  const loadBatchForFile = (
+    filePath: string,
+    content: string,
+    symbols: Array<{ name: string; line: number; kind: string }>,
+  ): Promise<BatchEnrichFileResult | null> => {
+    let pending = batchCache.get(filePath);
+    if (!pending) {
+      pending = (async () => {
+        if (!workspacePath) return null;
+        const lang = lspLanguageFromPath(filePath);
+        if (!lang) return null;
+        const entries: Array<{ name: string; line: number; character: number; kind: string }> = [];
+        for (const sym of symbols) {
+          try {
+            const column = findSymbolColumn(content, sym.line - 1, sym.name);
+            entries.push({ name: sym.name, line: sym.line - 1, character: column, kind: sym.kind });
+          } catch {
+            continue;
+          }
+        }
+        if (entries.length === 0) return null;
+        try {
+          const outputs = await invoke<
+            Array<{ path: string; references: BatchEnrichFileResult['references']; inheritance: BatchEnrichFileResult['inheritance'] }>
+          >('lsp_batch_enrich', {
+            workspacePath,
+            files: [{ path: filePath, languageId: lang, content, symbols: entries }],
+          });
+          return outputs?.[0] ?? null;
+        } catch {
+          return null;
+        }
+      })();
+      batchCache.set(filePath, pending);
+    }
+    return pending;
+  };
+
   return {
     enhanceReferences: async (
       filePath: string,
@@ -640,11 +701,28 @@ export function createLspProjectGraphEnhancer(
       symbols: Array<{ name: string; line: number; kind: string }>,
     ) => {
       const results: Array<{ filePath: string; line: number; character: number; fromSymbol?: string; toSymbol?: string }> = [];
+      const fileContent = fileContents[filePath]?.content;
+      if (!fileContent) return results;
+
+      if (workspacePath) {
+        const batch = await loadBatchForFile(filePath, fileContent, symbols);
+        if (batch) {
+          for (const ref of batch.references) {
+            results.push({
+              filePath: resolveRelativePath(ref.uri),
+              line: ref.line,
+              character: ref.character,
+              fromSymbol: ref.fromSymbol,
+              toSymbol: ref.fromSymbol,
+            });
+          }
+        }
+        return results;
+      }
+
       for (const sym of symbols) {
         const lang = lspLanguageFromPath(filePath);
         if (!lang) continue;
-        const fileContent = fileContents[filePath]?.content;
-        if (!fileContent) continue;
         try {
           const column = findSymbolColumn(fileContent, sym.line - 1, sym.name);
           const refs = await WorkspaceSymbolProvider.references(lang, filePath, fileContent, sym.line - 1, column);
@@ -669,12 +747,21 @@ export function createLspProjectGraphEnhancer(
       symbols: Array<{ name: string; line: number; kind: string }>,
     ) => {
       const results: Array<{ fromSymbol: string; toSymbol: string; kind: 'extends' | 'implements'; toFilePath?: string }> = [];
+      const fileContent = fileContents[filePath]?.content;
+      if (!fileContent) return results;
+
+      if (workspacePath) {
+        const batch = await loadBatchForFile(filePath, fileContent, symbols);
+        if (batch) {
+          return [...batch.inheritance];
+        }
+        return results;
+      }
+
       for (const sym of symbols) {
         if (sym.kind !== 'class' && sym.kind !== 'interface') continue;
         const lang = lspLanguageFromPath(filePath);
         if (!lang) continue;
-        const fileContent = fileContents[filePath]?.content;
-        if (!fileContent) continue;
         try {
           const column = findSymbolColumn(fileContent, sym.line - 1, sym.name);
           const defs = await WorkspaceSymbolProvider.definition(lang, filePath, fileContent, sym.line - 1, column);
@@ -963,11 +1050,12 @@ export function buildWorkspaceProjectGraph(params: BuildWorkspaceProjectGraphPar
 export async function enrichWorkspaceProjectGraph(
   graph: WorkspaceProjectGraphResult,
   fileContents: Record<string, { content: string; bytes: number }>,
-  concurrency: number = 3,
-  maxSymbols: number = 30,
+  concurrency: number = 4,
+  maxSymbols: number = Number.MAX_SAFE_INTEGER,
+  workspacePath?: string,
 ): Promise<WorkspaceProjectGraphResult> {
   try {
-    const enhancer = createLspProjectGraphEnhancer(fileContents);
+    const enhancer = createLspProjectGraphEnhancer(fileContents, workspacePath);
     return await enrichProjectGraphEdges(graph, enhancer, fileContents, concurrency, maxSymbols);
   } catch {
     return graph;

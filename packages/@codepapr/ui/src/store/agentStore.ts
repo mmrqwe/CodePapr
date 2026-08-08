@@ -33,6 +33,7 @@ import {
 } from '../utils/snapshot';
 import { nextCheckpointSequence } from '../utils/workspaceGitPanel';
 import { acquireSleepPrevention, releaseSleepPrevention } from '../utils/sleepPrevention';
+import { warmupLspForWorkspace } from '../utils/lspWarmup';
 import { restoreTodoListContexts } from '../tools/todoListTool';
 import { loadMcpToolDefinitions } from '../tools/mcpTools';
 import {
@@ -417,6 +418,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         if (path) {
           void get()._loadProjectConfig(path);
           void get()._ensureWorkspaceGitReady(path);
+          void warmupLspForWorkspace(path);
         }
       },
 
@@ -632,6 +634,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         }
         await get()._loadProjectConfig(path);
         void get()._ensureWorkspaceGitReady(path);
+        void warmupLspForWorkspace(path);
 
         const currentSettings = get().settings;
         if (get().settingsLoaded && normalizedWorkspacePath) {
