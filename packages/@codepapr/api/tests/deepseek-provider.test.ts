@@ -447,4 +447,226 @@ describe('DeepSeekProvider', () => {
     expect(body.stream).toBe(true);
     expect(body.stream_options?.include_usage).toBe(true);
   });
+
+  it('thinking 开启但历史 tool_calls assistant 缺 reasoning 时注入占位符且不降级 thinking', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 'resp-placeholder',
+        choices: [
+          {
+            message: { role: 'assistant', content: '完成', reasoning_content: '本轮思考' },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 4 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new DeepSeekProvider({ apiKey: 'test-key' });
+    await provider.chat({
+      model: 'deepseek-v4-flash',
+      thinking: { type: 'enabled' },
+      messages: [
+        {
+          id: 'assistant-toolcall-empty-reasoning',
+          role: 'assistant',
+          content: '调用工具中',
+          toolCalls: [
+            {
+              id: 'call_no_reasoning_1',
+              name: 'read',
+              arguments: { relativePath: 'src/index.ts' },
+            },
+          ],
+          timestamp: 1,
+        },
+        {
+          id: 'tool-1',
+          role: 'tool',
+          content: 'file content',
+          toolResult: { toolCallId: 'call_no_reasoning_1', result: 'file content' },
+          timestamp: 2,
+        },
+        {
+          id: 'user-2',
+          role: 'user',
+          content: '继续',
+          timestamp: 3,
+        },
+      ],
+      maxTokens: 1024,
+    });
+
+    const [, options] = fetchMock.mock.calls[0] ?? [];
+    const body = JSON.parse((options as RequestInit).body as string) as {
+      thinking?: { type: string };
+      messages: Array<{
+        reasoning_content?: string;
+        tool_calls?: Array<{ id: string }>;
+      }>;
+    };
+
+    // thinking 保持开启，不降级
+    expect(body.thinking).toEqual({ type: 'enabled' });
+    // 缺 reasoning 的工具轮注入稳定占位符，tool_calls 原样保留
+    expect(body.messages[0]?.reasoning_content).toBe('[reasoning not captured]');
+    expect(body.messages[0]?.tool_calls?.[0]?.id).toBe('call_no_reasoning_1');
+  });
+
+  it('thinking 关闭且工具轮缺 reasoning 时同样注入占位符（与 thinking 开关解耦，字节稳定）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 'resp-placeholder-off',
+        choices: [
+          {
+            message: { role: 'assistant', content: '完成', reasoning_content: '' },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 4 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new DeepSeekProvider({ apiKey: 'test-key' });
+    await provider.chat({
+      model: 'deepseek-v4-flash',
+      thinking: { type: 'disabled' },
+      messages: [
+        {
+          id: 'assistant-toolcall-off',
+          role: 'assistant',
+          content: '调用工具中',
+          toolCalls: [
+            {
+              id: 'call_off_1',
+              name: 'read',
+              arguments: { relativePath: 'src/index.ts' },
+            },
+          ],
+          timestamp: 1,
+        },
+      ],
+      maxTokens: 1024,
+    });
+
+    const [, options] = fetchMock.mock.calls[0] ?? [];
+    const body = JSON.parse((options as RequestInit).body as string) as {
+      thinking?: { type: string };
+      messages: Array<{ reasoning_content?: string }>;
+    };
+
+    expect(body.thinking).toEqual({ type: 'disabled' });
+    expect(body.messages[0]?.reasoning_content).toBe('[reasoning not captured]');
+  });
+
+  it('reasoning 回传校验 400 时自动以 thinking 关闭重试一次', async () => {
+    const reasoning400 = new Response(
+      JSON.stringify({
+        error: {
+          type: 'invalid_request_error',
+          message:
+            'Error from provider (Console Go): Upstream request failed: [invalid_request_error] ' +
+            'The reasoning_content in the thinking mode must be passed back to the API.',
+        },
+      }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } }
+    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(reasoning400)
+      .mockResolvedValue(
+        jsonResponse({
+          id: 'resp-fallback',
+          choices: [
+            {
+              message: { role: 'assistant', content: '兜底成功', reasoning_content: '' },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 4 },
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new DeepSeekProvider({ apiKey: 'test-key' });
+    const response = await provider.chat({
+      model: 'deepseek-v4-flash',
+      thinking: { type: 'enabled', reasoningEffort: 'max' },
+      messages: [
+        {
+          id: 'assistant-toolcall-no-reasoning',
+          role: 'assistant',
+          content: '调用工具中',
+          toolCalls: [
+            {
+              id: 'call_fb_1',
+              name: 'read',
+              arguments: { relativePath: 'src/index.ts' },
+            },
+          ],
+          timestamp: 1,
+        },
+        {
+          id: 'user-2',
+          role: 'user',
+          content: '继续',
+          timestamp: 2,
+        },
+      ],
+      maxTokens: 1024,
+    });
+
+    expect(response.choices[0]?.message.content).toBe('兜底成功');
+    // 两次请求：原请求（thinking enabled）+ 兜底重试（thinking disabled）
+    expect(fetchMock.mock.calls.length).toBe(2);
+
+    const firstBody = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string
+    ) as { thinking?: { type: string }; reasoning_effort?: string };
+    expect(firstBody.thinking).toEqual({ type: 'enabled' });
+
+    const secondBody = JSON.parse(
+      (fetchMock.mock.calls[1]?.[1] as RequestInit).body as string
+    ) as { thinking?: { type: string }; reasoning_effort?: string };
+    expect(secondBody.thinking).toEqual({ type: 'disabled' });
+    expect(secondBody.reasoning_effort).toBeUndefined();
+  });
+
+  it('streamChat 兼容 reasoning 别名字段下发思考内容', async () => {
+    const chunks = [
+      'data: {"id":"resp-alias","choices":[{"index":0,"delta":{"reasoning":"别名思考"},"finish_reason":null}]}\n\n',
+      'data: {"id":"resp-alias","choices":[{"index":0,"delta":{"content":"最终"},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ].join('');
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(chunks, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new DeepSeekProvider({ apiKey: 'test-key' });
+    const events: string[] = [];
+
+    const response = await provider.streamChat?.(
+      {
+        model: 'deepseek-v4-pro',
+        thinking: { type: 'enabled' },
+        messages: [
+          { id: 'user-1', role: 'user', content: '请回答', timestamp: 1 },
+        ],
+        maxTokens: 1024,
+      },
+      (event) => {
+        events.push(`${event.type}:${event.delta}`);
+      }
+    );
+
+    expect(events).toEqual(['reasoning-delta:别名思考', 'content-delta:最终']);
+    expect(response?.choices[0]?.message.reasoningContent).toBe('别名思考');
+  });
 });

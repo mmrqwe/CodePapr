@@ -316,4 +316,139 @@ describe('safeParseToolArguments', () => {
     expect((result as Record<string, unknown>).error).toMatch(/JSON 解析失败/);
     expect(typeof (result as Record<string, unknown>)._raw).toBe('string');
   });
+
+  it('回传已存 reasoning_content 并为缺失 reasoning 的工具轮注入占位符', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 'resp-openai-reasoning',
+        choices: [
+          {
+            message: { role: 'assistant', content: '最终答案', reasoning_content: '本轮思考' },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 4 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAIProvider({ apiKey: 'test-key' });
+    await provider.chat({
+      model: 'gpt-4o',
+      thinking: { type: 'enabled' },
+      messages: [
+        {
+          id: 'assistant-with-reasoning',
+          role: 'assistant',
+          content: '上一轮答案',
+          reasoningContent: '上一轮推理',
+          timestamp: 1,
+        },
+        {
+          id: 'assistant-toolcall-no-reasoning',
+          role: 'assistant',
+          content: '调用工具中',
+          toolCalls: [
+            {
+              id: 'call_openai_1',
+              name: 'lookup',
+              arguments: { b: 2, a: 1 },
+            },
+          ],
+          timestamp: 2,
+        },
+        {
+          id: 'user-2',
+          role: 'user',
+          content: '继续',
+          timestamp: 3,
+        },
+      ],
+      maxTokens: 1024,
+    });
+
+    const [, options] = fetchMock.mock.calls[0] ?? [];
+    const body = JSON.parse((options as RequestInit).body as string) as {
+      messages: Array<{
+        reasoning_content?: string;
+        tool_calls?: Array<{ function: { arguments: string } }>;
+      }>;
+    };
+
+    expect(body.messages[0]?.reasoning_content).toBe('上一轮推理');
+    expect(body.messages[1]?.reasoning_content).toBe('[reasoning not captured]');
+    expect(body.messages[1]?.tool_calls?.[0]?.function.arguments).toBe('{"a":1,"b":2}');
+  });
+
+  it('reasoning 回传校验 400 时自动以 thinking 关闭重试一次', async () => {
+    const reasoning400 = new Response(
+      JSON.stringify({
+        error: {
+          type: 'invalid_request_error',
+          message:
+            'Error from provider (Console Go): Upstream request failed: [invalid_request_error] ' +
+            'The reasoning_content in the thinking mode must be passed back to the API.',
+        },
+      }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } }
+    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(reasoning400)
+      .mockResolvedValue(
+        jsonResponse({
+          id: 'resp-openai-fallback',
+          choices: [
+            {
+              message: { role: 'assistant', content: '兜底成功', reasoning_content: '' },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 4 },
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAIProvider({ apiKey: 'test-key' });
+    const response = await provider.chat({
+      model: 'gpt-4o',
+      thinking: { type: 'enabled', reasoningEffort: 'max' },
+      messages: [
+        {
+          id: 'assistant-toolcall-no-reasoning',
+          role: 'assistant',
+          content: '调用工具中',
+          toolCalls: [
+            {
+              id: 'call_fb_openai_1',
+              name: 'lookup',
+              arguments: { a: 1 },
+            },
+          ],
+          timestamp: 1,
+        },
+        {
+          id: 'user-2',
+          role: 'user',
+          content: '继续',
+          timestamp: 2,
+        },
+      ],
+      maxTokens: 1024,
+    });
+
+    expect(response.choices[0]?.message.content).toBe('兜底成功');
+    expect(fetchMock.mock.calls.length).toBe(2);
+
+    const firstBody = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string
+    ) as { thinking?: { type: string }; reasoning_effort?: string };
+    expect(firstBody.thinking).toEqual({ type: 'enabled' });
+
+    const secondBody = JSON.parse(
+      (fetchMock.mock.calls[1]?.[1] as RequestInit).body as string
+    ) as { thinking?: { type: string }; reasoning_effort?: string };
+    expect(secondBody.thinking).toEqual({ type: 'disabled' });
+    expect(secondBody.reasoning_effort).toBeUndefined();
+  });
 });

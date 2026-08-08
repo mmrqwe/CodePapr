@@ -14,8 +14,12 @@ import {
   IToolCall,
 } from '@codepapr/types';
 import { Logger, sortedStringify } from '@codepapr/common';
-import { sanitizeToolCallArguments } from './streaming';
 import { BaseLLMProvider, ProviderConfig, ProviderRequestError } from './ILLMProvider';
+import {
+  buildOpenAICompatibleMessages,
+  isReasoningRoundTripError,
+  withReasoningRoundTripFallback,
+} from './reasoningRoundTrip';
 import {
   applyStreamingToolCallDeltas,
   DEFAULT_STREAM_MAX_RETRIES,
@@ -25,7 +29,6 @@ import {
   StreamIdleTimeoutError,
   withStreamIdleRetry,
 } from './streaming';
-import { buildOpenAIImageContent } from './imageContent';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
 
 const log = new Logger('DeepSeekProvider');
@@ -97,6 +100,8 @@ interface DeepSeekStreamChunk {
     delta?: {
       content?: string;
       reasoning_content?: string;
+      /** 兼容个别中继以下发思考内容的别名字段。 */
+      reasoning?: string;
       tool_calls?: Array<{
         index?: number;
         id?: string;
@@ -125,6 +130,24 @@ export class DeepSeekProvider extends BaseLLMProvider {
   }
 
   async streamChat(
+    request: IChatRequest,
+    onEvent: (event: IChatStreamEvent) => void,
+    signal?: AbortSignal
+  ): Promise<IChatResponse> {
+    return withReasoningRoundTripFallback(
+      request,
+      (effective) => this.streamChatCore(effective, onEvent, signal),
+      (err) => {
+        log.warn(
+          'DeepSeek 400: reasoning_content round-trip rejected; retrying this request with thinking disabled',
+          { error: err.message.slice(0, 300) }
+        );
+      },
+      (err) => isReasoningRoundTripError(err) && request.thinking?.type === 'enabled' && !isLegacyReasonerModel(request.model)
+    );
+  }
+
+  private async streamChatCore(
     request: IChatRequest,
     onEvent: (event: IChatStreamEvent) => void,
     signal?: AbortSignal
@@ -189,9 +212,10 @@ export class DeepSeekProvider extends BaseLLMProvider {
                 continue;
               }
 
-              if (delta.reasoning_content) {
-                reasoningContent += delta.reasoning_content;
-                trackEvent({ type: 'reasoning-delta', delta: delta.reasoning_content });
+              const reasoningDelta = delta.reasoning_content ?? delta.reasoning;
+              if (reasoningDelta) {
+                reasoningContent += reasoningDelta;
+                trackEvent({ type: 'reasoning-delta', delta: reasoningDelta });
               }
 
               if (delta.content) {
@@ -279,6 +303,20 @@ export class DeepSeekProvider extends BaseLLMProvider {
   }
 
   async chat(request: IChatRequest, signal?: AbortSignal): Promise<IChatResponse> {
+    return withReasoningRoundTripFallback(
+      request,
+      (effective) => this.chatCore(effective, signal),
+      (err) => {
+        log.warn(
+          'DeepSeek 400: reasoning_content round-trip rejected; retrying this request with thinking disabled',
+          { error: err.message.slice(0, 300) }
+        );
+      },
+      (err) => isReasoningRoundTripError(err) && request.thinking?.type === 'enabled' && !isLegacyReasonerModel(request.model)
+    );
+  }
+
+  private async chatCore(request: IChatRequest, signal?: AbortSignal): Promise<IChatResponse> {
     const url = `${this.config.baseURL}/chat/completions`;
     const payload = this.buildPayload(request);
 
@@ -326,60 +364,13 @@ export class DeepSeekProvider extends BaseLLMProvider {
   private buildPayload(request: IChatRequest, stream: boolean = false) {
     const supportsThinkingPayload = !isLegacyReasonerModel(request.model);
 
+    // 统一处理 reasoning_content 回传 / 占位注入（见 reasoningRoundTrip.ts）：
+    // - 带 tool_calls 且存有 reasoning 的 assistant 必须回传（与 thinking 开关、
+    //   模型能力解耦），否则 API 400；
+    // - 带 tool_calls 但缺失 reasoning 的 assistant 注入稳定占位符，thinking 不降级。
     return {
       model: request.model,
-      messages: request.messages.map((m) => {
-        const isAssistantWithToolCalls =
-          m.role === 'assistant' && !!m.toolCalls && m.toolCalls.length > 0;
-        const hasReasoningContent =
-          typeof m.reasoningContent === 'string' &&
-          m.reasoningContent.length > 0;
-
-        // DeepSeek 官方要求：若 assistant 中间轮发起了工具调用，
-        // 其 reasoning_content 必须在后续每次请求中持续回传，
-        // 否则 API 会返回 400 "Load fail"。这一约束与当前 thinking
-        // 开关无关——即使本轮关闭了 thinking，历史中那些带 tool_calls
-        // 的 assistant 仍需保留 reasoning_content。
-        const mustRoundTripReasoningContent =
-          isAssistantWithToolCalls && hasReasoningContent;
-
-        // 对非工具调用的 assistant 消息，只要模型支持 thinking 载荷且带有
-        // reasoning_content 就回传，与当前 thinking 开关解耦。若按每次请求的
-        // thinking 开关来决定是否回传，重建 agent 时 thinking 取值不同会给所有
-        // 历史消息增删 reasoning_content，改变历史字节、破坏前缀缓存。按"是否
-        // 存在"回传是稳定的（DeepSeek 在 thinking 关闭时也接受 reasoning_content，
-        // 上面 mustRoundTrip 分支正是依赖这一点）。仍保留 supportsThinkingPayload
-        // 门控：legacy reasoner 等不支持 thinking 载荷的模型不回传 reasoning_content。
-        const optionallyRoundTripReasoningContent =
-          supportsThinkingPayload &&
-          !isAssistantWithToolCalls &&
-          m.role === 'assistant' &&
-          hasReasoningContent;
-
-        const includeReasoningContent =
-          mustRoundTripReasoningContent || optionallyRoundTripReasoningContent;
-
-        return {
-          role: m.role,
-          content: buildOpenAIImageContent(m.content, m.images) ?? m.content,
-          ...(includeReasoningContent && {
-            reasoning_content: m.reasoningContent,
-          }),
-          ...(m.toolCalls && {
-            tool_calls: m.toolCalls.map((tc) => ({
-              id: tc.id,
-              type: 'function' as const,
-              function: {
-                name: tc.name,
-                arguments: sortedStringify(sanitizeToolCallArguments(tc.arguments)),
-              },
-            })),
-          }),
-          ...(m.toolResult && {
-            tool_call_id: m.toolResult.toolCallId,
-          }),
-        };
-      }),
+      messages: buildOpenAICompatibleMessages(request, { supportsThinkingPayload }),
       ...(supportsThinkingPayload &&
         request.thinking && {
           thinking: {

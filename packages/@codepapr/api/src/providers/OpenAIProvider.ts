@@ -13,16 +13,18 @@ import {
 import { Logger, sortedStringify } from '@codepapr/common';
 import { BaseLLMProvider, ProviderConfig, ProviderRequestError } from './ILLMProvider';
 import {
+  buildOpenAICompatibleMessages,
+  withReasoningRoundTripFallback,
+} from './reasoningRoundTrip';
+import {
   applyStreamingToolCallDeltas,
   DEFAULT_STREAM_MAX_RETRIES,
   finalizeStreamingToolCalls,
   readSseStream,
   safeParseToolArguments,
-  sanitizeToolCallArguments,
   StreamIdleTimeoutError,
   withStreamIdleRetry,
 } from './streaming';
-import { buildOpenAIImageContent } from './imageContent';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
 
 const log = new Logger('OpenAIProvider');
@@ -64,6 +66,8 @@ interface OpenAIStreamChunk {
     delta?: {
       content?: string;
       reasoning_content?: string;
+      /** 兼容个别中继以下发思考内容的别名字段。 */
+      reasoning?: string;
       tool_calls?: Array<{
         index?: number;
         id?: string;
@@ -125,6 +129,23 @@ export class OpenAIProvider extends BaseLLMProvider {
   }
 
   async streamChat(
+    request: IChatRequest,
+    onEvent: (event: IChatStreamEvent) => void,
+    signal?: AbortSignal
+  ): Promise<IChatResponse> {
+    return withReasoningRoundTripFallback(
+      request,
+      (effective) => this.streamChatCore(effective, onEvent, signal),
+      (err) => {
+        log.warn(
+          'OpenAI-compatible endpoint rejected reasoning_content round-trip (400); retrying this request with thinking disabled',
+          { error: err.message.slice(0, 300) }
+        );
+      }
+    );
+  }
+
+  private async streamChatCore(
     request: IChatRequest,
     onEvent: (event: IChatStreamEvent) => void,
     signal?: AbortSignal
@@ -194,9 +215,10 @@ export class OpenAIProvider extends BaseLLMProvider {
                 trackEvent({ type: 'content-delta', delta: delta.content });
               }
 
-              if (delta.reasoning_content) {
-                reasoningContent += delta.reasoning_content;
-                trackEvent({ type: 'reasoning-delta', delta: delta.reasoning_content });
+              const reasoningDelta = delta.reasoning_content ?? delta.reasoning;
+              if (reasoningDelta) {
+                reasoningContent += reasoningDelta;
+                trackEvent({ type: 'reasoning-delta', delta: reasoningDelta });
               }
 
               if (delta.tool_calls?.length) {
@@ -279,6 +301,19 @@ export class OpenAIProvider extends BaseLLMProvider {
   }
 
   async chat(request: IChatRequest, signal?: AbortSignal): Promise<IChatResponse> {
+    return withReasoningRoundTripFallback(
+      request,
+      (effective) => this.chatCore(effective, signal),
+      (err) => {
+        log.warn(
+          'OpenAI-compatible endpoint rejected reasoning_content round-trip (400); retrying this request with thinking disabled',
+          { error: err.message.slice(0, 300) }
+        );
+      }
+    );
+  }
+
+  private async chatCore(request: IChatRequest, signal?: AbortSignal): Promise<IChatResponse> {
     const url = `${this.config.baseURL}/chat/completions`;
     const payload = this.buildPayload(request);
 
@@ -320,25 +355,11 @@ export class OpenAIProvider extends BaseLLMProvider {
   }
 
   private buildPayload(request: IChatRequest, stream: boolean = false) {
+    // OpenAI 兼容端点（含 Console Go 等转发 DeepSeek 的中继）同样需要
+    // reasoning_content 回传/占位注入（见 reasoningRoundTrip.ts）。
     return {
       model: request.model,
-      messages: request.messages.map((m) => ({
-        role: m.role,
-        content: buildOpenAIImageContent(m.content, m.images) ?? m.content,
-        ...(m.toolCalls && {
-          tool_calls: m.toolCalls.map((tc) => ({
-            id: tc.id,
-            type: 'function' as const,
-            function: {
-              name: tc.name,
-              arguments: sortedStringify(sanitizeToolCallArguments(tc.arguments)),
-            },
-          })),
-        }),
-        ...(m.toolResult && {
-          tool_call_id: m.toolResult.toolCallId,
-        }),
-      })),
+      messages: buildOpenAICompatibleMessages(request, { supportsThinkingPayload: true }),
       temperature: request.temperature ?? 0.7,
       top_p: request.topP ?? 0.9,
       max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
