@@ -1,0 +1,33 @@
+import type { ApiFormat, ApiMode, Settings } from '../../store/agentStore';
+import type { SettingsTab } from './types';
+
+export const MODEL_PRESETS: Record<ApiMode | ApiFormat, string[]> = {
+  deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner'],
+  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'o3-mini'],
+  claude: ['claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest'],
+  custom: [],
+  local: ['local-model', 'qwen2.5-coder', 'llama3.1'],
+};
+
+export const LOCAL_URL_PLACEHOLDER = 'http://127.0.0.1:8080/v1（llama.cpp / Ollama / LM Studio）';
+
+export const CUSTOM_URL_PLACEHOLDERS: Record<ApiFormat, string> = {
+  openai: 'https://api.openai.com/v1 或兼容服务 /v1',
+  claude: 'https://api.anthropic.com/v1 或兼容 Claude Messages API',
+};
+
+/// Keys reset by the "reset current tab" button. The llm tab resets only the
+/// active mode's config (apiMode); the other modes' configs — and therefore
+/// their API keys — are preserved. The flat fields (model/apiKey/baseURL/
+/// fastModel/maxTokens) are re-derived from the active mode config by
+/// `update()`, so they need not be listed here.
+export function tabResetKeys(apiMode: ApiMode): Record<SettingsTab, (keyof Settings)[]> {
+  return {
+    general: ['lang', 'debugEnabled', 'chatBordersEnabled'],
+    llm: ['apiMode', 'apiFormat', 'fastModelEnabled', 'thinkingEnabled', 'thinkingEffort', 'temperature', 'topP', 'maxToolRounds', apiMode],
+    search: ['searxngEnabled', 'searxngBaseUrl', 'searxngCategories', 'searxngTimeRange', 'searxngLanguage', 'searxngSafeSearch'],
+    mentor: ['mentorEnabled', 'mentorApiFormat', 'mentorBaseURL', 'mentorApiKey', 'mentorModel', 'mentorMaxTokens', 'mentorThinkingEnabled', 'maxMentorConsultations', 'explorePrompt', 'scoutPrompt', 'mentorPrompt', 'exploreTemperature', 'exploreMaxToolRounds', 'exploreMaxTokens', 'exploreTopP', 'exploreMaxDepth', 'exploreThinkingEnabled', 'scoutTemperature', 'scoutMaxToolRounds', 'scoutMaxTokens', 'scoutTopP', 'scoutMaxDepth', 'scoutThinkingEnabled'],
+    advanced: ['compactionModel', 'compactionMaxTokens', 'compactionTemperature', 'maxContextTokens', 'maxConversationRounds', 'chatRenderBatchRounds', 'toolContextDefaultMode', 'toolContextOverrides', 'toolContextSummaryMaxChars', 'toolContextAutoThresholdChars', 'todoMaxRetries', 'goalMaxIterations', 'goalMaxWallClockMs', 'goalRequireGitClean', 'verifierModelTier', 'verifierMaxTokens', 'verifierTemperature', 'projectGraphMaxDepth', 'projectGraphMaxFiles', 'projectGraphMaxEdges', 'projectGraphMaxSymbolsPerFile', 'projectGraphMaxFileBytes', 'projectGraphMaxTreeEntries', 'streamIdleTimeoutMs', 'toolOutputMiddleKeepChars', 'browserEngine', 'folderAccessYolo'],
+    app: [],
+  };
+}
