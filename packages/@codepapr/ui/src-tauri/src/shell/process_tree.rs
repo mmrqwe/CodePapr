@@ -1,4 +1,7 @@
-use std::process::{Child, Command};
+use std::{
+    process::{Child, Command},
+    time::{Duration, Instant},
+};
 
 /// 让命令在独立进程组中启动（Unix）。停止/超时时据此杀整个进程树：
 /// 只杀直接子进程（shell 包装器）会让真正的工作进程（`npm run dev`、
@@ -12,7 +15,27 @@ pub(crate) fn prepare_new_process_group(cmd: &mut Command) {
 #[cfg(not(unix))]
 pub(crate) fn prepare_new_process_group(_cmd: &mut Command) {}
 
-/// 杀掉子进程及其全部后代。
+/// 有界等待子进程退出：`child.wait()` 在进程处于 D 状态（不可中断）时可能无限
+/// 阻塞。应用关闭/退出路径绝不能被清理调用卡住，否则进程残留在后台并触发
+/// macOS「正在后台运行」通知。到截止时间仍未退出则放弃等待（进程已 SIGKILL，
+/// 僵尸会被 init 收养回收）。
+pub(crate) fn wait_for_child_exit(child: &mut Child, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(_) => return,
+        }
+    }
+}
+
+/// 杀掉子进程及其全部后代，并等待其退出（默认最多 3 秒）。
 ///
 /// Unix：子进程由 `prepare_new_process_group` 以独立进程组启动，pid == pgid，
 /// 用 `kill(-pid, SIGKILL)` 杀整组。防御性地先用 getpgid 确认组确实归子进程

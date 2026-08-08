@@ -733,16 +733,14 @@ pub(crate) fn close_all_browser_pages() {
         .values()
         .filter_map(|s| s._browser.get_process_id())
         .collect();
-    for (_, session) in sessions.drain() {
-        let _ = session.tab.close(true);
-    }
-    // Drop handles Browser.close() via CDP, but if the transport is already
-    // dead (mid-shutdown, network issue) the Chrome process can be orphaned.
-    // Force-kill by PID as a last-resort safety net.
-    for pid in pids {
+    // 只按 PID 强杀 Chrome，不做任何 CDP 往返：`tab.close()` 是 CDP 调用，
+    // idle_browser_timeout 高达 120s——Chrome 挂死时会在主线程（或退出线程）
+    // 阻塞两分钟，拖死应用退出链路。会话注册表直接清空（drop 触发
+    // BrowserInner::drop 的 close_on_drop，但它内部同样是 try/ok 尽力而为）。
+    for pid in &pids {
         #[cfg(unix)]
         {
-            let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+            let _ = unsafe { libc::kill(*pid as i32, libc::SIGTERM) };
         }
         #[cfg(windows)]
         {
@@ -754,4 +752,5 @@ pub(crate) fn close_all_browser_pages() {
                 .status();
         }
     }
+    sessions.clear();
 }

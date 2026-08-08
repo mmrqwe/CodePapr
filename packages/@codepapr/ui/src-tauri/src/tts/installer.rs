@@ -522,7 +522,9 @@ fn check_python(app: &AppHandle) -> Result<String, String> {
 
 fn clone_code(app: &AppHandle, target_path: &Path) -> Result<(), String> {
     let parent = target_path.parent().unwrap_or(target_path);
-    let target_name = target_path.file_name().unwrap();
+    let target_name = target_path
+        .file_name()
+        .ok_or_else(|| format!("Invalid install path (no file name): {}", target_path.display()))?;
 
     let mut last_err = String::new();
     for (idx, repo) in CODE_GIT_REPOS.iter().enumerate() {

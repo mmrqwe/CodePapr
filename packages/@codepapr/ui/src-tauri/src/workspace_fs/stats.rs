@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use ignore::WalkBuilder;
 use serde::Serialize;
 
-use crate::shared::{canonical_workspace, relative_string, run_blocking_workspace_task};
+use crate::shared::{canonical_workspace, lock, relative_string, run_blocking_workspace_task};
 
 use super::read::decode_text_bytes;
 use super::should_ignore_dir;
@@ -404,7 +404,7 @@ pub(crate) fn compute_project_stats_impl(workspace_path: &str) -> Result<Project
             };
 
             if file_type.is_dir() {
-                let mut agg = aggregator.lock().unwrap();
+                let mut agg = lock(&aggregator);
                 agg.total_directories += 1;
                 return ignore::WalkState::Continue;
             }
@@ -422,7 +422,7 @@ pub(crate) fn compute_project_stats_impl(workspace_path: &str) -> Result<Project
             let path = entry.into_path();
             let relative = relative_string(workspace.as_path(), &path);
 
-            let mut agg = aggregator.lock().unwrap();
+            let mut agg = lock(&aggregator);
             if agg.truncated {
                 return ignore::WalkState::Quit;
             }

@@ -148,7 +148,7 @@ impl GptSovitsServer {
         }
 
         let child_arc = Arc::new(Mutex::new(child));
-        self.child = Some(child_arc);
+        self.child = Some(Arc::clone(&child_arc));
         self.wait_healthy(HEALTH_CHECK_TIMEOUT_SECS)?;
         self.running = true;
 
@@ -159,7 +159,7 @@ impl GptSovitsServer {
         // Watchdog: poll the child process directly via try_wait so PID
         // reuse cannot cause false-alive detection.
         if let Some(app) = app_handle {
-            let watchdog_child = Arc::clone(self.child.as_ref().unwrap());
+            let watchdog_child = Arc::clone(&child_arc);
             std::thread::spawn(move || {
                 loop {
                     std::thread::sleep(Duration::from_secs(2));

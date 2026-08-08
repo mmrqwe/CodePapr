@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use ignore::WalkBuilder;
 use regex::{Regex, RegexBuilder};
 
-use crate::shared::{canonical_workspace, relative_string, run_blocking_workspace_task};
+use crate::shared::{canonical_workspace, lock, relative_string, run_blocking_workspace_task};
 
 use super::read::{decode_text_bytes, split_text_lines_for_read};
 use super::types::{
@@ -386,7 +386,7 @@ fn handle_search_entry(
     }
 
     if !local_matches.is_empty() {
-        let mut global = results.lock().unwrap();
+        let mut global = lock(&results);
         for m in local_matches {
             if global.len() >= max_results {
                 truncated.store(true, Ordering::Relaxed);

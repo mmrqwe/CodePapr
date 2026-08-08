@@ -22,7 +22,7 @@ use crate::lsp_managed_tools::{
     dotnet_binary, ensure_managed_language_server, managed_lsp_commands, ManagedLspCommand,
     ManagedLspProgress,
 };
-use crate::shared::run_blocking_workspace_task;
+use crate::shared::{read, run_blocking_workspace_task, write};
 
 const LSP_STARTUP_TIMEOUT: Duration = Duration::from_secs(8);
 // 常规语义请求（hover/definition/references/rename/...）单独用更长的超时：大型项目里
@@ -883,7 +883,7 @@ fn fallback_server_status(
 
 fn force_stop_server_process(server: &mut ManagedLspServer) {
     let _ = server.child.kill();
-    let _ = server.child.wait();
+    crate::shell::process_tree::wait_for_child_exit(&mut server.child, std::time::Duration::from_secs(3));
 }
 
 fn resolve_lsp_command_candidates(
@@ -1195,16 +1195,16 @@ fn expanded_path() -> String {
             .unwrap_or_else(|_| current)
     }
 
-    if let Some(cached) = EXPANDED_PATH_CACHE.read().unwrap().as_ref() {
+    if let Some(cached) = read(&EXPANDED_PATH_CACHE).as_ref() {
         return cached.clone();
     }
     let path = compute();
-    *EXPANDED_PATH_CACHE.write().unwrap() = Some(path.clone());
+    *write(&EXPANDED_PATH_CACHE) = Some(path.clone());
     path
 }
 
 pub fn refresh_expanded_path() {
-    EXPANDED_PATH_CACHE.write().unwrap().take();
+    write(&EXPANDED_PATH_CACHE).take();
     // PATH 变化可能让此前「命令不存在」的服务器重新可用，清空启动失败负缓存。
     if let Ok(mut failures) = lsp_start_failures().lock() {
         failures.clear();

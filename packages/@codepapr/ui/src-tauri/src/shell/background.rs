@@ -3,7 +3,7 @@ use crate::shared::{
     parse_browser_url, run_blocking_workspace_task, unix_millis,
 };
 use crate::shell::dangerous::{detect_dangerous_command, detect_dangerous_invocation};
-use crate::shell::process_tree::{kill_process_tree, prepare_new_process_group};
+use crate::shell::process_tree::{kill_process_tree, prepare_new_process_group, wait_for_child_exit};
 use crate::shell::sandbox::{
     sandboxed_command, sandboxed_shell_command, validate_restricted_command,
     validate_restricted_shell_command, SandboxAccess, SandboxAccessArgs,
@@ -674,7 +674,7 @@ pub(crate) fn stop_background_process(pid: u32) -> Result<StopBackgroundProcessR
 
         if still_running {
             let _ = kill_process_tree(&mut process.child);
-            let _ = process.child.wait();
+            wait_for_child_exit(&mut process.child, Duration::from_secs(3));
         }
 
         Ok(StopBackgroundProcessResult {
@@ -714,7 +714,7 @@ pub(crate) fn stop_all_background_processes(
 
                 if still_running {
                     let _ = kill_process_tree(&mut process.child);
-                    let _ = process.child.wait();
+                    wait_for_child_exit(&mut process.child, Duration::from_secs(3));
                     stopped += 1;
                 }
             }

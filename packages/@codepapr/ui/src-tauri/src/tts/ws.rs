@@ -8,6 +8,7 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::tts_player_lock;
+use crate::shared::lock;
 use crate::tts::server::GPT_SOVITS_API_PORT;
 
 static WS_APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
@@ -52,14 +53,14 @@ fn reorder_buffer() -> &'static Mutex<ReorderBuffer> {
 }
 
 pub(crate) fn clear_reorder_buffer() {
-    let mut buf = reorder_buffer().lock().unwrap();
+    let mut buf = lock(reorder_buffer());
     buf.pending.clear();
     buf.expected_seq = 0;
     buf.generation += 1;
 }
 
 fn insert_and_drain(seq: u64, wav_chunks: Vec<Vec<u8>>, generation: u64) {
-    let mut buf = reorder_buffer().lock().unwrap();
+    let mut buf = lock(reorder_buffer());
     if generation != buf.generation {
         return;
     }
@@ -76,7 +77,7 @@ fn insert_and_drain(seq: u64, wav_chunks: Vec<Vec<u8>>, generation: u64) {
     }
     drop(buf);
     let lock = tts_player_lock();
-    let mut player = lock.lock().unwrap();
+    let mut player = crate::shared::lock(lock);
     for wav in &to_enqueue {
         let _ = player.enqueue_wav(wav);
     }
@@ -170,7 +171,7 @@ async fn run_pool_loop(
     rx: &mut mpsc::UnboundedReceiver<WsRequest>,
 ) {
     while let Some(req) = rx.recv().await {
-        let gen = reorder_buffer().lock().unwrap().generation;
+        let gen = lock(reorder_buffer()).generation;
         let result = process_one_request(&mut ws, &req).await;
         match &result {
             Ok(wavs) => insert_and_drain(req.seq, wavs.clone(), gen),
@@ -514,7 +515,7 @@ pub(crate) fn synthesize_batch_ws_nonblocking(
     temperature: f32,
     seq: u64,
 ) {
-    let gen = reorder_buffer().lock().unwrap().generation;
+    let gen = lock(reorder_buffer()).generation;
     std::thread::spawn(move || {
         let result = ws_runtime().block_on(synthesize_batch_ws_async(
             sentences,

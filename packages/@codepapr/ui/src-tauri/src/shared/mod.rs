@@ -7,6 +7,7 @@ pub(crate) mod git_locks;
 pub(crate) mod paths;
 pub(crate) mod runtime;
 pub(crate) mod strings;
+pub(crate) mod sync;
 pub(crate) mod time;
 
 pub(crate) use git_locks::remove_stale_git_locks;
@@ -18,4 +19,5 @@ pub(crate) use paths::{
 };
 pub(crate) use runtime::run_blocking_workspace_task;
 pub(crate) use strings::{parse_browser_url, truncate_utf8};
+pub(crate) use sync::{lock, read, write};
 pub(crate) use time::unix_millis;

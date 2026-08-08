@@ -96,7 +96,10 @@ impl AudioPlayer {
             self.sink = Some(sink);
         }
 
-        self.sink.as_ref().unwrap().append(source);
+        self.sink
+            .as_ref()
+            .ok_or_else(|| "Audio sink unavailable".to_string())?
+            .append(source);
         self.pcm_format = None;
         Ok(())
     }

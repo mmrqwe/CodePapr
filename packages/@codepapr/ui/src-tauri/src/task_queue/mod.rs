@@ -11,6 +11,7 @@ use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
 
+use crate::shared::lock;
 use crate::shell::background::run_workspace_command_impl;
 use crate::shell::CommandResult;
 use crate::workspace_fs::{ListFilesResult, ReadFileResult};
@@ -139,7 +140,7 @@ pub(crate) fn task_worker(rx: std::sync::mpsc::Receiver<WorkspaceTask>) {
         };
 
         if let Some(state) = TASK_RESULTS.get() {
-            let mut guard = state.lock().unwrap();
+            let mut guard = lock(state);
             let id = result_id(&result);
             guard.completed_order.push_back(id);
             guard.pending_results.insert(id, result);
@@ -211,7 +212,7 @@ pub(crate) fn poll_workspace_task(task_id: u64) -> PollResult {
             }
         }
     };
-    let mut guard = state.lock().unwrap();
+    let mut guard = lock(state);
     match guard.pending_results.remove(&task_id) {
         Some(result) => {
             // 已消费的结果立即移除：旧实现一直挂到 200 条驱逐上限，既占内存，

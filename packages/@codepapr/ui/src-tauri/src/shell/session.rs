@@ -4,7 +4,7 @@ use crate::shell::guard::{
     build_shell_command_line, create_shell_session_id, detect_default_shell,
     find_unquoted_shell_version_constraint, write_shell_payload,
 };
-use crate::shell::process_tree::{kill_process_tree, prepare_new_process_group};
+use crate::shell::process_tree::{kill_process_tree, prepare_new_process_group, wait_for_child_exit};
 use crate::shell::sandbox::sandboxed_command;
 use crate::shell::sandbox::{validate_restricted_command, validate_restricted_shell_command};
 use crate::shell::types::{
@@ -18,6 +18,7 @@ use std::{
     process::Stdio,
     sync::{atomic::AtomicU64, Arc, Mutex, OnceLock},
     thread,
+    time::Duration,
 };
 
 #[cfg(windows)]
@@ -295,7 +296,7 @@ pub(crate) fn close_shell_session(session_id: String) -> Result<ShellCloseSessio
 
         if still_running {
             let _ = kill_process_tree(&mut session.child);
-            let _ = session.child.wait();
+            wait_for_child_exit(&mut session.child, Duration::from_secs(3));
         }
 
         Ok(ShellCloseSessionResult {
@@ -309,6 +310,6 @@ pub(crate) fn stop_all_shell_sessions() {
     let Ok(mut sessions) = shell_sessions().lock() else { return };
     for (_, mut session) in sessions.drain() {
         let _ = kill_process_tree(&mut session.child);
-        let _ = session.child.wait();
+        wait_for_child_exit(&mut session.child, Duration::from_secs(3));
     }
 }

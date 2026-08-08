@@ -396,26 +396,13 @@ fn main() {
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-                lsp::stop_all_servers();
-                tts::tts_server_stop_internal();
-                tts::finetune::cancel();
-                tts::installer::cancel();
-                let _ = shell::background::stop_all_background_processes(None);
-                shell::session::stop_all_shell_sessions();
-                browser::page::close_all_browser_pages();
-                embedded_browser::close_all_sessions();
-                mcp_host::disconnect_all_blocking();
-                workspace_fs::watcher::stop_workspace_watcher_impl();
-                power::release_all();
-
-                // macOS：AppKit 默认最后一个窗口关闭后不终止应用
-                // （applicationShouldTerminateAfterLastWindowClosed=NO），tao/wry 均未覆盖，
-                // 进程会残留在 Dock。必须显式退出——exit(0) 会走 ExitRequested→Exit，
-                // 下方 RunEvent::Exit 的清理（幂等）会再跑一遍。
-                // CloseRequested 触发时被关窗口仍在注册表中，len() <= 1 即"最后一个窗口"。
+                // 先发出退出请求，再做清理：exit(0) 走 ExitRequested→Exit，
+                // 窗口销毁路径（Destroyed→ExitRequested→ControlFlow::Exit）本身也能退出。
+                // 若先跑清理，任何阻塞调用（child.wait、CDP close）都会卡死退出链路。
                 if window.app_handle().windows().len() <= 1 {
                     window.app_handle().exit(0);
                 }
+                run_shutdown_cleanup();
             }
         })
         .build(tauri::generate_context!())
@@ -424,15 +411,30 @@ fn main() {
             // CloseRequested covers normal window close; Exit also fires on
             // programmatic exit / last-window-close paths, so reap backend
             // processes here too (idempotent) to avoid orphaned servers.
+            // 清理必须在独立线程执行：tao 的 run() 在 run_return 返回后才
+            // process::exit，RunEvent::Exit 回调若阻塞（CDP close 可达 120s/页、
+            // child.wait 无限等待），进程会永远残留在后台并触发 macOS
+            // "正在后台运行"通知。
             if matches!(event, tauri::RunEvent::Exit) {
-                let _ = shell::background::stop_all_background_processes(None);
-                shell::session::stop_all_shell_sessions();
-                browser::page::close_all_browser_pages();
-                embedded_browser::close_all_sessions();
-                mcp_host::disconnect_all_blocking();
-                power::release_all();
+                std::thread::spawn(run_shutdown_cleanup);
             }
         });
+}
+
+/// 关闭/退出时的尽力而为清理。每个子调用都应是有界等待（见各模块超时封装）；
+/// 该函数由调用方放在独立线程执行，绝不阻塞主线程的退出链路。
+fn run_shutdown_cleanup() {
+    lsp::stop_all_servers();
+    tts::tts_server_stop_internal();
+    tts::finetune::cancel();
+    tts::installer::cancel();
+    let _ = shell::background::stop_all_background_processes(None);
+    shell::session::stop_all_shell_sessions();
+    browser::page::close_all_browser_pages();
+    embedded_browser::close_all_sessions();
+    mcp_host::disconnect_all_blocking();
+    workspace_fs::watcher::stop_workspace_watcher_impl();
+    power::release_all();
 }
 
 #[cfg(test)]
