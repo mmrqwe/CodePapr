@@ -349,6 +349,15 @@ The desktop app requires explicit authorization for reading/listing absolute pat
 
 The CLI has looser read path boundaries (can read any absolute path), but writes remain workspace-scoped.
 
+## macOS Command Sandbox
+
+On macOS the `bash` tool, shell sessions, and app backend processes run inside a `sandbox-exec` sandbox:
+
+- **Readable**: system dirs (/bin, /usr, /System, /Library, etc.), /opt/homebrew (Homebrew tools), PATH directories, the workspace, and authorized external paths
+- **Writable**: the workspace, the temp directory, tool cache dirs (~/.npm, ~/.cache, ~/.cargo, ~/.local, ~/.nvm, ~/.volta), and authorized external paths
+- **Always denied** (even in YOLO mode): ~/.ssh, ~/.gnupg, ~/.config, ~/.aws, ~/.azure, ~/.kube, ~/.git, ~/.CodePapr
+- Common HOME tool configs (.gitconfig, .npmrc, etc.) are allowed read-only by default; other HOME files require external authorization when needed
+
 ## Toast Notifications
 
 The desktop uses non-blocking Toast notifications instead of traditional alerts:

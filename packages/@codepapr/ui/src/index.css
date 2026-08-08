@@ -168,8 +168,19 @@ body {
 :root:not(.dark) [class*="bg-[#090c12]"],
 :root:not(.dark) [class*="bg-[#06070a]"],
 :root:not(.dark) [class*="bg-[#06080c]"],
-:root:not(.dark) [class*="bg-[#07090d]"] {
+:root:not(.dark) [class*="bg-[#07090d]"],
+:root:not(.dark) [class*="bg-[#0d0f15]"] {
   background-color: var(--bg-deep) !important;
+}
+
+/* 深灰底（开关关闭态/hover 底）→ 浅色描边强度 */
+:root:not(.dark) [class*="bg-[#2a2d3a]"] {
+  background-color: var(--border-strong) !important;
+}
+
+/* 弹窗遮罩：浅色主题用暖色薄纱替代 70% 纯黑，避免整体发黑 */
+:root:not(.dark) .bg-black\/70 {
+  background-color: rgba(27, 18, 10, 0.38) !important;
 }
 
 /* Active/selected bg → warm accent, matching session tab */
@@ -318,20 +329,31 @@ body {
 :root:not(.dark) .text-amber-100,
 :root:not(.dark) .text-amber-200,
 :root:not(.dark) .text-amber-300 { color: var(--amber) !important; }
+:root:not(.dark) .text-amber-400,
+:root:not(.dark) [class*="text-amber-400/"] { color: var(--amber) !important; }
+/* 带透明度的 amber-100（如 text-amber-100/70）在浅底上接近白色，加深为可读色 */
+:root:not(.dark) [class*="text-amber-100/"] { color: var(--foreground-soft) !important; }
 :root:not(.dark) [class*="border-amber-"] { border-color: var(--amber-bg) !important; }
-:root:not(.dark) [class*="bg-amber-500/"] { background-color: var(--amber-bg) !important; }
+:root:not(.dark) [class*="bg-amber-500/"],
+:root:not(.dark) [class*="bg-amber-950/"] { background-color: var(--amber-bg) !important; }
 
 /* Cyan */
 :root:not(.dark) .text-cyan-50,
 :root:not(.dark) .text-cyan-100,
 :root:not(.dark) .text-cyan-200,
-:root:not(.dark) .text-cyan-300 { color: var(--cyan) !important; }
+:root:not(.dark) .text-cyan-300,
+:root:not(.dark) .text-cyan-400 { color: var(--cyan) !important; }
 :root:not(.dark) [class*="border-cyan-"] { border-color: var(--cyan-bg) !important; }
-:root:not(.dark) [class*="bg-cyan-500/"] { background-color: var(--cyan-bg) !important; }
+:root:not(.dark) [class*="bg-cyan-500/"],
+:root:not(.dark) [class*="bg-cyan-600/"] { background-color: var(--cyan-bg) !important; }
+
+/* Sky */
+:root:not(.dark) .text-sky-400 { color: #0369a1 !important; }
 
 /* Red */
 :root:not(.dark) .text-red-200,
-:root:not(.dark) .text-red-300 { color: var(--red) !important; }
+:root:not(.dark) .text-red-300,
+:root:not(.dark) .text-red-400 { color: var(--red) !important; }
 /* ── 对话轮次指示器 ────────────────────────── */
 .rounds-indicator-bar {
   position: absolute;

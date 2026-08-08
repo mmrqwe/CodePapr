@@ -388,6 +388,15 @@ model: fast
 
 CLI 的读取路径边界相对宽松（可读取任意绝对路径），写入仍限制在工作区内。
 
+## macOS 命令沙箱
+
+macOS 上 `bash` 工具、Shell 会话与 app 后端进程都通过 `sandbox-exec` 沙箱运行：
+
+- **可读**：系统目录（/bin、/usr、/System、/Library 等）、/opt/homebrew（Homebrew 工具）、PATH 中的目录、工作区、已授权的外部路径
+- **可写**：工作区、临时目录、工具缓存目录（~/.npm、~/.cache、~/.cargo、~/.local、~/.nvm、~/.volta）、已授权的外部路径
+- **始终禁止**（YOLO 模式也不例外）：~/.ssh、~/.gnupg、~/.config、~/.aws、~/.azure、~/.kube、~/.git、~/.CodePapr
+- HOME 下的常见工具配置（.gitconfig、.npmrc 等）默认只读放行；其他 HOME 文件需要时通过外部授权放行
+
 ## Toast 通知
 
 桌面端使用非阻塞 Toast 通知替代传统 alert：

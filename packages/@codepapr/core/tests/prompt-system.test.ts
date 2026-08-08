@@ -403,6 +403,26 @@ describe('promptSystem', () => {
     expect(en).toContain('default in-app persistence');
   });
 
+  it('all mode prompts pass the ImmutablePrefix static-content guard', () => {
+    // 回归：app 模式后端示例曾含 `${API}` 模板字面量，命中缓存层的动态内容拦截，
+    // 导致 app 模式直接报 "System prompt contains dynamic content" 无法使用。
+    for (const mode of ['ask', 'plan', 'agent', 'app'] as const) {
+      for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
+        const prompt = buildRuntimeSystemPrompt({ mode, workspacePath: '/tmp/project', lang });
+        expect(
+          () =>
+            new ImmutablePrefix({
+              systemPrompt: prompt,
+              tools: [],
+              model: 'test-model',
+              parameters: { temperature: 0.7, topP: 0.9, maxTokens: 2000 },
+            }),
+          `mode=${mode} lang=${lang} 的系统提示词含动态内容`,
+        ).not.toThrow();
+      }
+    }
+  });
+
   it('suppresses mutating tool hints in ask mode', () => {
     const prompt = buildRuntimeSystemPrompt({
       mode: 'ask',
