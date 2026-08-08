@@ -7,9 +7,10 @@ import { usePaprBridge } from '../papr/usePaprBridge';
 
 interface AppModalProps {
   lang?: Lang;
+  isDark: boolean;
 }
 
-export function AppModal({ lang }: AppModalProps) {
+export function AppModal({ lang, isDark }: AppModalProps) {
   const t = getTranslation(lang);
   const openedAppId = useAppRuntimeStore((state) => state.openedAppId);
   const openedApp = useAppRuntimeStore((state) =>
@@ -56,10 +57,11 @@ export function AppModal({ lang }: AppModalProps) {
     }
   }, [openedApp?.manifestJson]);
 
-  usePaprBridge({
+  const { postTheme } = usePaprBridge({
     iframeRef,
     appId: openedApp?.appId ?? '',
     manifest,
+    dark: isDark,
   });
 
   if (!openedApp) {
@@ -157,7 +159,10 @@ export function AppModal({ lang }: AppModalProps) {
           title={openedApp.title}
           sandbox="allow-scripts allow-same-origin allow-forms allow-modals"
           className="h-full w-full border-0"
-          onLoad={handleIframeLoad}
+          onLoad={() => {
+            handleIframeLoad();
+            postTheme(isDark);
+          }}
           onError={() => setError(t.appModalLoadFailed)}
         />
       </div>

@@ -430,6 +430,17 @@ describe('promptSystem', () => {
     }
   });
 
+  it('app mode mandates themed dual dark/light UI matching the CodePapr palette in all languages', () => {
+    for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
+      const prompt = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang });
+      expect(prompt).toContain('data-theme');
+      expect(prompt).toContain('prefers-color-scheme');
+      expect(prompt).toContain('#0f1117');
+      expect(prompt).toContain('#2a2d3a');
+      expect(prompt).toContain('#6366f1');
+    }
+  });
+
   it('app mode documents papr.fs subdirectory auto-creation and agent-cannot-read-db', () => {
     const zhCN = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'zh-CN' });
     expect(zhCN).toContain('自动创建子目录');

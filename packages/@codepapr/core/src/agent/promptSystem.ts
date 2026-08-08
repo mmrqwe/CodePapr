@@ -242,6 +242,8 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '- 图表库通过 CDN <script src="..."> 引用（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js）',
       '- 使用 system-ui 字体族、flexbox/grid 布局、移动端友好的响应式设计',
       '- 必须有 loading 状态和 error 处理的 UI 反馈',
+      '- 界面优先做成主题化：用 CSS 变量提供深/浅两套配色，通过 `@media (prefers-color-scheme: dark)` 和 `html[data-theme="dark"]` 切换（SDK 会自动把 CodePapr 当前深浅主题同步到 html 的 data-theme 属性，无需 app 自己感知，只写双主题 CSS 即可）',
+      '- 配色参照 CodePapr：深色模式背景 #0f1117、面板 #161922/#1a1d27、边框 #2a2d3a、强调色 indigo #6366f1、文字 slate 系；浅色模式用白/浅灰底 + 同款 indigo 强调，让 app 与 CodePapr 风格一致',
       '- appId 必须是 kebab-case（小写字母 + 数字 + 连字符），如 "todo-app"、"stock-dashboard"',
 
       '## 构建高质量 App',
@@ -426,6 +428,8 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '- 完整 HTML 文件、樣式內聯、腳本放 <script> 中',
       '- 圖表庫通過 CDN 引用（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js）',
       '- 必須有 loading 狀態和 error 處理的 UI 回饋',
+      '- 介面優先做成主題化：用 CSS 變數提供深/淺兩套配色，透過 `@media (prefers-color-scheme: dark)` 和 `html[data-theme="dark"]` 切換（SDK 會自動把 CodePapr 目前的深淺主題同步到 html 的 data-theme 屬性，無需 app 自己感知，只寫雙主題 CSS 即可）',
+      '- 配色參照 CodePapr：深色模式背景 #0f1117、面板 #161922/#1a1d27、邊框 #2a2d3a、強調色 indigo #6366f1、文字 slate 系；淺色模式用白/淺灰底 + 同款 indigo 強調，讓 app 與 CodePapr 風格一致',
       '- appId 必須是 kebab-case',
 
       '## 構建高品質 App',
@@ -603,6 +607,8 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '- Chart libraries via CDN (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js)',
       '- Use system-ui font, flexbox/grid layout, mobile-friendly responsive design',
       '- Must include loading states and error handling UI feedback',
+      '- Build themed interfaces by default: provide both dark and light palettes via CSS variables, switched with `@media (prefers-color-scheme: dark)` and `html[data-theme="dark"]` (the SDK automatically syncs CodePapr\'s current theme to the html data-theme attribute — the app does not need to detect it, just write dual-theme CSS)',
+      '- Match the CodePapr palette: dark mode background #0f1117, panels #161922/#1a1d27, borders #2a2d3a, accent indigo #6366f1, slate text; light mode uses white/light-gray backgrounds with the same indigo accent — keep the app visually consistent with CodePapr',
       '- appId must be kebab-case (lowercase + numbers + hyphens)',
 
       '## Building a High-Quality App',
@@ -1038,10 +1044,10 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
     const appRender: string[] = [];
     appRender.push(
         lang === 'en'
-          ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps to the application panel. app_render writes manifest.json and index.html to `.CodePapr/apps/<appId>/` itself — do NOT write the files manually with other tools first. appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. Declare the access profile via local/network parameters (see the permission model above): papr.db/papr.fs are always available, papr.http needs network:true, and the agent tool set follows the access profile.'
+          ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps to the application panel. app_render writes manifest.json and index.html to `.CodePapr/apps/<appId>/` itself — do NOT write the files manually with other tools first. appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. Declare the access profile via local/network parameters (see the permission model above): papr.db/papr.fs are always available, papr.http needs network:true, and the agent tool set follows the access profile. Build themed dual dark/light UI matching the CodePapr palette (see Frontend Conventions).'
           : lang === 'zh-TW'
-          ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用渲染到應用面板。app_render 會自動寫入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手動寫檔案。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。存取檔用 local/network 參數宣告（見上文權限模型）：papr.db/papr.fs 永遠可用，papr.http 需要 network:true，Agent 工具集由存取檔決定。'
-          : '- [app_render] 你的主要输出工具。将交互式 HTML 应用渲染到应用面板。app_render 会自动写入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手动写文件。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。访问档用 local/network 参数声明（详见上文权限模型）：papr.db/papr.fs 永远可用，papr.http 需要 network:true，Agent 工具集由访问档决定。'
+          ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用渲染到應用面板。app_render 會自動寫入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手動寫檔案。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。存取檔用 local/network 參數宣告（見上文權限模型）：papr.db/papr.fs 永遠可用，papr.http 需要 network:true，Agent 工具集由存取檔決定。介面做成深/淺雙主題，配色參照 CodePapr（見前端規範）。'
+          : '- [app_render] 你的主要输出工具。将交互式 HTML 应用渲染到应用面板。app_render 会自动写入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手动写文件。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。访问档用 local/network 参数声明（详见上文权限模型）：papr.db/papr.fs 永远可用，papr.http 需要 network:true，Agent 工具集由访问档决定。界面做成深/浅双主题，配色参照 CodePapr（见前端规范）。'
     );
     lines.push(
       lang === 'en' ? '### App Render' : lang === 'zh-TW' ? '### 應用渲染' : '### 应用渲染'

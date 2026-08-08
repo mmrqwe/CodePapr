@@ -26,9 +26,10 @@ interface UsePaprBridgeOptions {
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   appId: string;
   manifest: PaprManifest | null;
+  dark: boolean;
 }
 
-export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptions) {
+export function usePaprBridge({ iframeRef, appId, manifest, dark }: UsePaprBridgeOptions) {
   const cacheManifest = usePermissionStore((s) => s.cacheManifest);
   const [appSettings, setAppSettings] = useState<PaprAppSettings | null>(null);
 
@@ -40,6 +41,22 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
     }
     invoke<PaprAppSettings>('papr_get_app_settings').then(setAppSettings).catch(() => {});
   }, [appId, manifest, cacheManifest]);
+
+  const postTheme = useCallback(
+    (isDark: boolean) => {
+      const win = iframeRef.current?.contentWindow;
+      if (!win) return;
+      win.postMessage(
+        { __papr: true, type: 'papr://theme', payload: { dark: isDark } },
+        appOriginFor(appId),
+      );
+    },
+    [appId, iframeRef],
+  );
+
+  useEffect(() => {
+    postTheme(dark);
+  }, [dark, postTheme]);
 
   const effectiveAccess = resolveEffectiveAccess(manifest, appSettings, appId);
   const effectiveAccessRef = useRef(effectiveAccess);
@@ -405,4 +422,6 @@ export function usePaprBridge({ iframeRef, appId, manifest }: UsePaprBridgeOptio
       activeAgentRuns.current.clear();
     };
   }, [handleMessage]);
+
+  return { postTheme };
 }

@@ -672,7 +672,7 @@ export default function App() {
 
       {openedAppId && (
         <div className="fixed inset-0 z-[60] overflow-hidden bg-[#0f1117]">
-          <AppModal lang={settings.lang} />
+          <AppModal lang={settings.lang} isDark={isDark} />
         </div>
       )}
 
