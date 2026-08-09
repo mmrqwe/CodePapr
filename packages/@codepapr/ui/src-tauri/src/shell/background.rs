@@ -507,6 +507,9 @@ pub(crate) fn start_workspace_background_command(
     let mut bg_cmd = sandboxed_command(&command, &args, &workspace, sandbox.map(Into::into))?;
     bg_cmd
         .args(&args)
+        // GUI 壳进程的 PATH 只有系统目录（无 /opt/homebrew/bin 等），不注入则
+        // sandbox-exec 里 exec "node"/"python" 直接失败，后端进程秒退且无任何日志。
+        .env("PATH", expanded_path())
         .current_dir(&workspace)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

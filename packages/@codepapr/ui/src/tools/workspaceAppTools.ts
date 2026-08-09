@@ -7,6 +7,7 @@ import {
 } from '@codepapr/core';
 import { toolByName } from './workspaceToolDefinitions';
 import {
+  type BackgroundProcessEntry,
   type WriteTextFileResult,
 } from './workspaceToolHelpers';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
@@ -407,11 +408,19 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       if (Date.now() >= deadline) break;
     }
     if (!portTaken) {
+      // 先取进程捕获的输出再停掉它：spawn 秒退的真实原因（如 sandbox-exec
+      // 找不到 node、脚本语法错误）只存在于 log_tail，不捞出来就死无对证。
+      let spawnLog = '';
+      try {
+        const procs = await invoke<BackgroundProcessEntry[]>('list_background_processes', { workspacePath: workspace() });
+        spawnLog = procs.find((p) => p.pid === result.pid)?.logTail?.trim() ?? '';
+      } catch { /* best-effort */ }
       // Kill the spawned child so a slow-starting server does not become an
       // orphan that later grabs the port untracked by the store.
       try { await invoke('stop_background_process', { pid: result.pid }); } catch { /* best-effort */ }
       useAppRuntimeStore.getState().setAppStopped(appId);
-      throw new Error(`应用 '${appId}' 后端启动失败：进程已退出或端口 ${app.port} 未被监听，请检查 command/args 配置。`);
+      const detail = spawnLog ? `\n进程输出：\n${spawnLog}` : '';
+      throw new Error(`应用 '${appId}' 后端启动失败：进程已退出或端口 ${app.port} 未被监听，请检查 command/args 配置。${detail}`);
     }
 
     return { appId, pid: result.pid, url, started: true };
