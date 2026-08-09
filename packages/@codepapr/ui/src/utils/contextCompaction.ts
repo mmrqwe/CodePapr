@@ -10,6 +10,9 @@ import {
 import type { Lang } from './i18n';
 import type { UIToolInvocation } from '../store/internals/types';
 
+export const TOOL_RESULT_MISSING_PLACEHOLDER = '[tool result missing: interrupted before completion]';
+export const TOOL_RESULT_MISSING_ERROR = '工具执行中断，结果缺失';
+
 export const CONTEXT_COMPACTION_VERSION = 2;
 export const CONTEXT_COMPACTION_DEFAULT_MAX_ROUNDS = 24;
 export const CONTEXT_COMPACTION_DEFAULT_MAX_TOKENS = 200_000;
@@ -201,23 +204,31 @@ function toCoreTailMessages(messages: readonly ContextMessageLike[]): IMessage[]
         const toolMsgs: IMessage[] = message.toolInvocations.map((ti) => {
           const cleanedOutput =
             typeof ti.output === 'string' ? ti.output : stripInternalFields(ti.output);
+          // Prefer contextContent: the byte-exact content appended to the live
+          // log (already truncated + sortedStringify'd). Falling back to
+          // sortedStringify(cleanedOutput) only matches the live path for
+          // non-truncated object results, so contextContent is what keeps a
+          // rebuilt history byte-identical (and the prefix cache intact).
+          const fallbackContent =
+            typeof cleanedOutput === 'string' ? cleanedOutput : sortedStringify(cleanedOutput);
+          // Interrupted invocations (abort/crash before tool-call-end) carry no
+          // contextContent/output, and sortedStringify(undefined) is undefined;
+          // a non-string content would fail AppendOnlyLog.loadFromSnapshot
+          // validation on restore. Fall back to the same placeholder
+          // repairOrphanedToolCalls inserts so rebuilt history stays valid.
+          const content =
+            ti.contextContent ??
+            (typeof fallbackContent === 'string' ? fallbackContent : TOOL_RESULT_MISSING_PLACEHOLDER);
           return {
             id: `${message.id}-tool-${ti.id}`,
             role: 'tool' as const,
-            // Prefer contextContent: the byte-exact content appended to the live
-            // log (already truncated + sortedStringify'd). Falling back to
-            // sortedStringify(cleanedOutput) only matches the live path for
-            // non-truncated object results, so contextContent is what keeps a
-            // rebuilt history byte-identical (and the prefix cache intact).
-            content:
-              ti.contextContent ??
-              (typeof cleanedOutput === 'string' ? cleanedOutput : sortedStringify(cleanedOutput)),
+            content,
             timestamp: message.timestamp,
             toolResult: {
               toolCallId: ti.id,
               success: ti.status === 'success',
-              result: cleanedOutput,
-              error: ti.error,
+              result: cleanedOutput === undefined ? content : cleanedOutput,
+              error: ti.error ?? (content === TOOL_RESULT_MISSING_PLACEHOLDER ? TOOL_RESULT_MISSING_ERROR : undefined),
             },
             // Carry the frozen history summary so applyHistoryToolSummaries
             // rewrites rebuilt requests byte-identically to the live path.
@@ -524,17 +535,16 @@ export function repairOrphanedToolCalls(messages: IMessage[]): IMessage[] {
       if (resolvedIds.has(call.id)) {
         continue;
       }
-      const placeholder = '[tool result missing: interrupted before completion]';
       repaired.push({
         id: `${msg.id}-tool-${call.id}-repaired`,
         role: 'tool',
-        content: placeholder,
+        content: TOOL_RESULT_MISSING_PLACEHOLDER,
         timestamp: msg.timestamp,
         toolResult: {
           toolCallId: call.id,
           success: false,
-          result: placeholder,
-          error: '工具执行中断，结果缺失',
+          result: TOOL_RESULT_MISSING_PLACEHOLDER,
+          error: TOOL_RESULT_MISSING_ERROR,
         },
       });
     }

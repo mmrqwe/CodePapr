@@ -57,6 +57,9 @@ export function sanitizeMessageForPersistence(message: UIMessage, _debugEnabled:
       statusText: undefined,
       status: ti.status === 'running' ? 'error' : ti.status,
       error: ti.status === 'running' ? '未完成的工具调用' : ti.error,
+      // output 缺失（中断的调用）会让 toCoreTailMessages 重建出 content 为
+      // undefined 的 tool 消息，导致 AppendOnlyLog.loadFromSnapshot 校验失败。
+      output: ti.output ?? '',
     })),
   };
 }

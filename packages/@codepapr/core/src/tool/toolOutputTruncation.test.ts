@@ -32,6 +32,14 @@ describe('stringifyToolResult', () => {
     const result = stringifyToolResult({ data: 'ok', __question: true, __images: [] });
     expect(result).toBe(JSON.stringify({ data: 'ok' }));
   });
+
+  it('returns a string for undefined (never leaks undefined content)', () => {
+    expect(stringifyToolResult(undefined)).toBe('{}');
+  });
+
+  it('stringifies null explicitly', () => {
+    expect(stringifyToolResult(null)).toBe('null');
+  });
 });
 
 describe('getByteSize / getCharLength', () => {

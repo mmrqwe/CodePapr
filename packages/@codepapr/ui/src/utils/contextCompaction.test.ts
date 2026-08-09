@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { IMessage } from '@codepapr/types';
-import type { PruneOptions } from '@codepapr/core';
+import { AppendOnlyLog, Serializer, type PruneOptions } from '@codepapr/core';
 import {
   buildContextCompactionTranscript,
   buildEffectiveContextMessages,
@@ -11,6 +11,8 @@ import {
   renderContextCheckpointContent,
   renderContextCheckpointSummary,
   repairOrphanedToolCalls,
+  TOOL_RESULT_MISSING_ERROR,
+  TOOL_RESULT_MISSING_PLACEHOLDER,
   type ContextCheckpointPayload,
   type ContextMessageLike,
 } from './contextCompaction';
@@ -499,6 +501,79 @@ describe('contextCompaction', () => {
       const effective = buildEffectiveContextMessages(messages);
       const toolMsg = effective.find((m) => m.role === 'tool');
       expect(toolMsg?.content).toBe('plain output');
+    });
+
+    it('emits a placeholder for interrupted invocations without output/contextContent', () => {
+      const messages: ContextMessageLike[] = [
+        createUser('u1', '运行命令'),
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          timestamp: 2,
+          toolInvocations: [
+            {
+              id: 'tool-call_00_interrupted',
+              name: 'run',
+              arguments: {},
+              status: 'error',
+              error: '未完成的工具调用',
+            },
+          ],
+        },
+      ];
+
+      const effective = buildEffectiveContextMessages(messages);
+      const toolMsg = effective.find((m) => m.role === 'tool');
+      expect(toolMsg?.content).toBe(TOOL_RESULT_MISSING_PLACEHOLDER);
+      expect(toolMsg?.toolResult?.success).toBe(false);
+      expect(toolMsg?.toolResult?.result).toBe(TOOL_RESULT_MISSING_PLACEHOLDER);
+      expect(toolMsg?.toolResult?.error).toBe('未完成的工具调用');
+    });
+
+    it('fills a default error when the interrupted invocation has none', () => {
+      const messages: ContextMessageLike[] = [
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          timestamp: 1,
+          toolInvocations: [
+            { id: 'c1', name: 'run', arguments: {}, status: 'running' },
+          ],
+        },
+      ];
+
+      const effective = buildEffectiveContextMessages(messages);
+      const toolMsg = effective.find((m) => m.role === 'tool');
+      expect(toolMsg?.content).toBe(TOOL_RESULT_MISSING_PLACEHOLDER);
+      expect(toolMsg?.toolResult?.error).toBe(TOOL_RESULT_MISSING_ERROR);
+    });
+
+    it('rebuilt history with an interrupted invocation loads into AppendOnlyLog', () => {
+      const messages: ContextMessageLike[] = [
+        createUser('u1', '运行命令'),
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          timestamp: 2,
+          toolInvocations: [
+            { id: 'tool-call_00_interrupted', name: 'run', arguments: {}, status: 'error' },
+          ],
+        },
+      ];
+
+      const effective = buildEffectiveContextMessages(messages);
+      const log = new AppendOnlyLog('session-under-test');
+      expect(() =>
+        log.loadFromSnapshot({
+          messages: effective,
+          lastMessageIndex: effective.length - 1,
+          totalBytes: effective.reduce((sum, message) => sum + Serializer.getByteLength(message), 0),
+        })
+      ).not.toThrow();
+      expect(log.length()).toBe(effective.length);
     });
   });
 

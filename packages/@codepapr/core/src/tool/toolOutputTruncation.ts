@@ -64,7 +64,10 @@ function stripInternalFields(value: unknown): unknown {
 export function stringifyToolResult(result: unknown): string {
   if (typeof result === 'string') return result;
   const cleaned = stripInternalFields(result);
-  return typeof cleaned === 'string' ? cleaned : sortedStringify(cleaned);
+  if (typeof cleaned === 'string') return cleaned;
+  // sortedStringify(undefined) returns undefined (JSON.stringify semantics);
+  // the log requires string content, so normalize to an empty result object.
+  return cleaned === undefined ? '{}' : sortedStringify(cleaned);
 }
 
 export function getByteSize(content: string): number {

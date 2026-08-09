@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeSessionMetaList, touchSession } from './persistence';
-import type { SessionMeta } from './types';
+import { normalizeSessionMetaList, sanitizeMessageForPersistence, touchSession } from './persistence';
+import type { SessionMeta, UIMessage } from './types';
 
 function session(id: string, createdAt: number, updatedAt?: number): SessionMeta {
   return {
@@ -43,5 +43,42 @@ describe('normalizeSessionMetaList', () => {
     const result = normalizeSessionMetaList(legacy);
     expect(result.map((s) => s.id)).toEqual(['b', 'c', 'a']);
     expect(result.every((s) => s.updatedAt === s.createdAt)).toBe(true);
+  });
+});
+
+describe('sanitizeMessageForPersistence', () => {
+  it('marks a running tool invocation as errored and backfills empty output', () => {
+    const message: UIMessage = {
+      id: 'a1',
+      role: 'assistant',
+      content: '',
+      timestamp: 1,
+      toolInvocations: [
+        { id: 'tool-call_00_x', name: 'run', arguments: {}, status: 'running' },
+      ],
+    };
+
+    const sanitized = sanitizeMessageForPersistence(message, false);
+    const invocation = sanitized.toolInvocations?.[0];
+    expect(invocation?.status).toBe('error');
+    expect(invocation?.error).toBe('未完成的工具调用');
+    expect(invocation?.output).toBe('');
+  });
+
+  it('keeps completed invocation output intact', () => {
+    const message: UIMessage = {
+      id: 'a1',
+      role: 'assistant',
+      content: '',
+      timestamp: 1,
+      toolInvocations: [
+        { id: 'c1', name: 'run', arguments: {}, status: 'success', output: 'done' },
+      ],
+    };
+
+    const sanitized = sanitizeMessageForPersistence(message, false);
+    const invocation = sanitized.toolInvocations?.[0];
+    expect(invocation?.status).toBe('success');
+    expect(invocation?.output).toBe('done');
   });
 });
