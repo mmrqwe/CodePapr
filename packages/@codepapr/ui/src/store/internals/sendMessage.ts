@@ -104,6 +104,11 @@ const CRASH_RECOVERY_MAX_WORKER_RETRIES = 3;
 const CRASH_RECOVERY_RETRY_DELAYS_MS = [200, 500, 1000];
 const CRASH_RECOVERY_VISIBLE_WAIT_MS = 30_000;
 
+/** 重试状态里的次数展示：流层默认无限重试时 maxRetries 缺省，只显示已试次数。 */
+function formatRetryCounter(attempt: number, maxRetries?: number): string {
+  return maxRetries === undefined ? `${attempt}` : `${attempt}/${maxRetries}`;
+}
+
 // Guards cold-start memory.md bootstrap so concurrent sendMessage calls
 // don't trigger duplicate generation. Module-level on purpose: the guard
 // spans the whole session, not a single store snapshot.
@@ -941,13 +946,14 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 if (event.type === 'stream-restart') {
                   // 流中断后整段重试：上一轮已推送的增量作废，必须先清空，
                   // 否则新一轮增量会与之重复拼接（LLM 流无法断点续传）。
+                  // maxRetries 缺省 = 无限重试，状态只显示已重试次数。
                   return {
                     ...message,
                     content: '',
                     reasoningContent: undefined,
                     displayReasoningContent: undefined,
                     isStreaming: true,
-                    statusText: `${getTranslation(normalizedSettings.lang).reconnectingStatus} (${event.attempt}/${event.maxRetries})…`,
+                    statusText: `${getTranslation(normalizedSettings.lang).reconnectingStatus} (${formatRetryCounter(event.attempt, event.maxRetries)})…`,
                   };
                 }
 
@@ -957,7 +963,22 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   return {
                     ...message,
                     isStreaming: true,
-                    statusText: `${getTranslation(normalizedSettings.lang).reconnectingStatus} (${event.attempt}/${event.maxRetries})…`,
+                    statusText: `${getTranslation(normalizedSettings.lang).reconnectingStatus} (${formatRetryCounter(event.attempt, event.maxRetries)})…`,
+                  };
+                }
+
+                if (event.type === 'round-retry') {
+                  // 回合级重试（输出截断续写 / 空完成重试）：已输出内容保留，
+                  // 仅更新状态提示让自动恢复过程可见。
+                  const translation = getTranslation(normalizedSettings.lang);
+                  const base =
+                    event.reason === 'length-continue'
+                      ? translation.continuingOutputStatus
+                      : translation.emptyResponseRetryStatus;
+                  return {
+                    ...message,
+                    isStreaming: true,
+                    statusText: `${base} (${event.attempt})…`,
                   };
                 }
 

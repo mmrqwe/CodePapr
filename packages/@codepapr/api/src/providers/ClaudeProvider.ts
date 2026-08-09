@@ -13,7 +13,6 @@ import {
 import { Logger, sortedStringify } from '@codepapr/common';
 import { BaseLLMProvider, ProviderConfig, ProviderRequestError } from './ILLMProvider';
 import {
-  DEFAULT_STREAM_MAX_RETRIES,
   readSseStream,
   safeParseToolArguments,
   sanitizeToolCallArguments,
@@ -256,6 +255,7 @@ export class ClaudeProvider extends BaseLLMProvider {
         let content = '';
         let finishReason = 'end_turn';
         let usage: ClaudeResponse['usage'];
+        let sawTermination = false;
         const toolCallStates: ClaudeStreamingToolState[] = [];
 
         try {
@@ -276,6 +276,12 @@ export class ClaudeProvider extends BaseLLMProvider {
 
             if (chunk.type === 'message_start') {
               responseId = chunk.message?.id ?? responseId;
+              return;
+            }
+
+            // message_stop 是正常结束信号。
+            if (chunk.type === 'message_stop') {
+              sawTermination = true;
               return;
             }
 
@@ -316,7 +322,10 @@ export class ClaudeProvider extends BaseLLMProvider {
             }
 
             if (chunk.type === 'message_delta') {
-              finishReason = chunk.delta?.stop_reason ?? finishReason;
+              if (chunk.delta?.stop_reason) {
+                finishReason = chunk.delta.stop_reason;
+                sawTermination = true;
+              }
             }
           }, signal, { idleTimeoutMs: this.config.idleTimeoutMs });
         } catch (err) {
@@ -333,6 +342,17 @@ export class ClaudeProvider extends BaseLLMProvider {
           throw new ProviderRequestError({
             provider: this.name,
             message: `Stream interrupted: ${err instanceof Error ? err.message : String(err)}`,
+            retriable: true,
+          });
+        }
+
+        // 流干净地结束但没有任何终止信号（message_stop / stop_reason）：
+        // 典型是中转/网关把响应截断后直接关闭连接。此时内容不完整，绝不能当
+        // 正常完成处理——抛可重试错误走流层无限重连。
+        if (!sawTermination) {
+          throw new ProviderRequestError({
+            provider: this.name,
+            message: 'Stream ended prematurely: no message_stop/stop_reason received',
             retriable: true,
           });
         }
@@ -372,16 +392,15 @@ export class ClaudeProvider extends BaseLLMProvider {
       },
       {
         signal,
+        // undefined = 无限重试：可重试故障不终止回合。
+        maxRetries: this.config.streamMaxRetries,
         hasEmitted: () => emitted,
         retryDelayMs: this.config.streamRetryDelayMs,
         onRetry: (attempt, err) => {
-          if (emitted) {
-            onEvent({
-              type: 'stream-restart',
-              attempt,
-              maxRetries: DEFAULT_STREAM_MAX_RETRIES,
-            });
-          }
+          // 无论是否已有输出都发 stream-restart：让 UI 状态可见，也让上层
+          // idle 看门狗看到活动。无输出时清空操作是幂等的。maxRetries 缺省
+          // （无限重试）——可重试故障不终止回合。
+          onEvent({ type: 'stream-restart', attempt, maxRetries: this.config.streamMaxRetries });
           log.warn('LLM stream interrupted, retrying', {
             model: payload.model,
             attempt,

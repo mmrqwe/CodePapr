@@ -16,7 +16,7 @@ export const DEFAULT_MENTOR_SETTINGS: MentorSettings = {
   baseURL: '',
   apiKey: '',
   apiFormat: 'openai',
-  maxTokens: 10000,
+  maxTokens: 100_000,
   maxConsultations: 2,
 };
 

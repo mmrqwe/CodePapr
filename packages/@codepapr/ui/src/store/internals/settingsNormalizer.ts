@@ -256,10 +256,19 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
 
   const mentorApiFormat: ApiFormat =
     input.mentorApiFormat === 'claude' ? 'claude' : 'openai';
-  const mentorMaxTokens =
+  // 迁移：旧默认值为 10000，过小会导致 mentor 思考/长回复被 max_tokens 截断。
+  // 持久化值恰为旧默认时升级到新默认（100k）；用户显式设置的其他值保持不变。
+  const LEGACY_MENTOR_MAX_TOKENS = 10000;
+  const rawMentorMaxTokens =
     typeof input.mentorMaxTokens === 'number' && Number.isFinite(input.mentorMaxTokens)
-      ? Math.max(100, Math.floor(input.mentorMaxTokens))
-      : DEFAULT_SETTINGS.mentorMaxTokens;
+      ? Math.floor(input.mentorMaxTokens)
+      : undefined;
+  const mentorMaxTokens =
+    rawMentorMaxTokens === undefined
+      ? DEFAULT_SETTINGS.mentorMaxTokens
+      : rawMentorMaxTokens === LEGACY_MENTOR_MAX_TOKENS
+        ? DEFAULT_SETTINGS.mentorMaxTokens
+        : Math.max(100, rawMentorMaxTokens);
   const maxMentorConsultations =
     typeof input.maxMentorConsultations === 'number' && Number.isFinite(input.maxMentorConsultations)
       ? Math.max(0, Math.floor(input.maxMentorConsultations))

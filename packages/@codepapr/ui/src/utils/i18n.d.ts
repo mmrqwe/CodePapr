@@ -453,6 +453,8 @@ export declare const I18N_DICTS: {
         collapse: string;
         streamingStatus: string;
         reconnectingStatus: string;
+        continuingOutputStatus: string;
+        emptyResponseRetryStatus: string;
         errorOccurred: string;
         agentContinuing: string;
         agentPlanning: string;
@@ -952,6 +954,8 @@ export declare const I18N_DICTS: {
         collapse: string;
         streamingStatus: string;
         reconnectingStatus: string;
+        continuingOutputStatus: string;
+        emptyResponseRetryStatus: string;
         errorOccurred: string;
         agentContinuing: string;
         agentPlanning: string;
@@ -1451,6 +1455,8 @@ export declare const I18N_DICTS: {
         collapse: string;
         streamingStatus: string;
         reconnectingStatus: string;
+        continuingOutputStatus: string;
+        emptyResponseRetryStatus: string;
         errorOccurred: string;
         agentContinuing: string;
         agentPlanning: string;
@@ -1822,6 +1828,8 @@ export declare function getTranslation(lang?: Lang): {
     collapse: string;
     streamingStatus: string;
     reconnectingStatus: string;
+    continuingOutputStatus: string;
+    emptyResponseRetryStatus: string;
     errorOccurred: string;
     agentContinuing: string;
     agentPlanning: string;
@@ -2187,6 +2195,8 @@ export declare function getTranslation(lang?: Lang): {
     collapse: string;
     streamingStatus: string;
     reconnectingStatus: string;
+    continuingOutputStatus: string;
+    emptyResponseRetryStatus: string;
     errorOccurred: string;
     agentContinuing: string;
     agentPlanning: string;
@@ -2552,6 +2562,8 @@ export declare function getTranslation(lang?: Lang): {
     collapse: string;
     streamingStatus: string;
     reconnectingStatus: string;
+    continuingOutputStatus: string;
+    emptyResponseRetryStatus: string;
     errorOccurred: string;
     agentContinuing: string;
     agentPlanning: string;

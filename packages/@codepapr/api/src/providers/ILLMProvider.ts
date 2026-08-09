@@ -30,6 +30,9 @@ export interface ProviderConfig {
   /** 流中断重试前的等待时长（毫秒），attempt 从 1 开始。
    *  未设置时回退到默认 5s → 10s → 15s → 20s → 25s → 30s。测试可注入 0 跳过等待。 */
   streamRetryDelayMs?: (attempt: number) => number;
+  /** 流层重试次数上限。缺省（undefined）= 无限重试：只要故障可重试且用户未取消，
+   *  就一直重连直到成功——网络波动/限流不终止回合。测试可注入小值模拟耗尽。 */
+  streamMaxRetries?: number;
   /** 请求级（连接层失败）每次重试前的回调：attempt 从 1 开始，maxRetries 为总次数。
    *  provider 可据此向 UI 发出 request-retry 事件，让重试过程可见。 */
   onRequestRetry?: (attempt: number, maxRetries: number, error: Error) => void;
@@ -245,6 +248,9 @@ export abstract class BaseLLMProvider implements ILLMProvider {
     log.error(`${this.name} request exhausted retries`, lastError);
 
     if (lastError instanceof ProviderRequestError) {
+      // 循环只会因可重试错误（429/5xx/网络层）耗尽次数而退出，该错误本质上
+      // 仍是瞬态故障：标记 retriable 让流层（withStreamIdleRetry）继续无限重连，
+      // 而不是把网络波动升级成终止回合的致命错误。
       throw lastError;
     }
     if (lastError instanceof DOMException && lastError.name === 'AbortError') {
@@ -253,7 +259,7 @@ export abstract class BaseLLMProvider implements ILLMProvider {
     throw new ProviderRequestError({
       provider: this.name,
       message: `Network error after ${maxRetries} attempts: ${lastError?.message ?? 'unknown'}`,
-      retriable: false,
+      retriable: true,
       attempts: maxRetries,
       maxRetries,
     });

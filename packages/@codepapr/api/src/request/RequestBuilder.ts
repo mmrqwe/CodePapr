@@ -37,6 +37,10 @@ interface BuildOptions {
   topP?: number;
   maxTokens?: number;
   tools?: IToolDefinition[];
+  /** 仅影响本次请求的临时尾部消息（不写入 appendLog、不参与 logHash）。
+   *  用于输出被 max_tokens 截断后的自动续写：把已输出的部分 assistant 内容 +
+   *  「继续」指令追加到请求尾部，让模型从截断处续写。 */
+  suffixMessages?: IMessage[];
 }
 
 function buildProviderCacheControl(
@@ -77,10 +81,10 @@ export class RequestBuilder {
     // ✅ 检查 4: 前缀未变化
     this.validatePrefixUnchanged(opts.prefix);
 
-    // ✅ 检查 5: 构造消息数组（前缀 + 日志）
+    // ✅ 检查 5: 构造消息数组（前缀 + 日志 [+ 临时续写尾部]）
     const prefixMessages = opts.prefix.toMessageArray();
     const logMessages = opts.appendLog.toMessageArray();
-    let messages = [...prefixMessages, ...logMessages];
+    let messages = [...prefixMessages, ...logMessages, ...(opts.suffixMessages ?? [])];
 
     // Strip images from consumed user messages
     // Only the LAST user message with images keeps them; all earlier ones are stripped.

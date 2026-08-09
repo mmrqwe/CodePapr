@@ -54,6 +54,24 @@ const log = new Logger('Agent');
 
 const DEFAULT_TOOL_TIMEOUT_MS = 270_000;
 
+/** 输出被 max_tokens 截断（finish_reason='length'）后，单回合自动续写的上限。
+ *  防止遇到中转的极小输出上限时无限续写；达到上限后以已合并内容正常收尾
+ *  （绝不报错——任务在后续回合仍可继续）。 */
+export const MAX_CONTINUATIONS_PER_ROUND = 12;
+
+/** 截断续写时追加在请求尾部的指令（临时消息，不落日志）。 */
+export const CONTINUATION_NUDGE =
+  '你上一次的输出因达到最大输出长度而被截断。请从截断处继续输出，不要重复已经输出的内容。';
+
+/** 模型返回空完成（无内容/无思考/无工具调用）时的退避重试延迟（毫秒）。
+ *  空完成是瞬态故障，退避重发即可；绝不因空完成而静默结束回合。 */
+export const EMPTY_COMPLETION_RETRY_DELAYS_MS: readonly number[] = [
+  5_000, 10_000, 15_000, 20_000, 25_000, 30_000,
+];
+
+/** 连续空完成达到该次数后关闭 thinking 再试（思考输出异常是常见诱因）。 */
+export const EMPTY_COMPLETION_DISABLE_THINKING_AFTER = 5;
+
 /** Tools that can pause while waiting for a user folder-access decision. */
 export const PERMISSION_WAITING_TOOL_TIMEOUTS: Readonly<Record<string, number>> = {
   read: Number.POSITIVE_INFINITY,
@@ -319,6 +337,8 @@ export interface IRequestBuilder {
     topP?: number;
     maxTokens?: number;
     tools?: IToolDefinition[];
+    /** 仅影响本次请求的临时尾部消息（不落日志）：用于 max_tokens 截断后的自动续写。 */
+    suffixMessages?: IMessage[];
   }): IChatRequest;
   syncAfterPop?(appendLog: IAppendOnlyLog): void;
   resetLogTracking?(): void;
@@ -360,6 +380,9 @@ export interface AgentOptions {
   toolOutputTruncation?: ToolOutputTruncationOptions;
   toolContextConfig?: ToolContextConfig;
   contextCompaction?: ContextCompactionConfig;
+  /** 空完成退避重试的延迟表（毫秒）。缺省使用 EMPTY_COMPLETION_RETRY_DELAYS_MS；
+   *  测试可注入 0 跳过等待。 */
+  emptyCompletionRetryDelaysMs?: readonly number[];
 }
 
 export const DEFAULT_AGENT_MAX_TOOL_ROUNDS = 500;
@@ -383,6 +406,7 @@ export class Agent {
   private toolOutputTruncation?: ToolOutputTruncationOptions;
   private toolContextConfig?: ToolContextConfig;
   private contextCompaction?: ContextCompactionConfig;
+  private emptyCompletionRetryDelaysMs: readonly number[];
   private abortController: AbortController | null = null;
   private cachedPrefixTokens?: number;
   private lastCompactionRound = -Infinity;
@@ -398,6 +422,8 @@ export class Agent {
     this.toolOutputTruncation = opts.toolOutputTruncation;
     this.toolContextConfig = opts.toolContextConfig;
     this.contextCompaction = opts.contextCompaction;
+    this.emptyCompletionRetryDelaysMs =
+      opts.emptyCompletionRetryDelaysMs ?? EMPTY_COMPLETION_RETRY_DELAYS_MS;
   }
 
   getSession(): Session {
@@ -424,6 +450,24 @@ export class Agent {
       );
     }
     return this.cachedPrefixTokens + Math.ceil(this.session.logStore.getContentBytes() / 4);
+  }
+
+  /** 可被取消的等待：空完成退避重试使用。取消立即抛 AbortError。 */
+  private async sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) {
+      throw new DOMException('已取消', 'AbortError');
+    }
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = (): void => {
+        clearTimeout(timer);
+        reject(new DOMException('已取消', 'AbortError'));
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
   }
 
   async chat(
@@ -455,7 +499,7 @@ export class Agent {
     let question: QuestionData | undefined;
 
     try {
-    for (let round = 0; round < this.maxToolRounds; round++) {
+    roundLoop: for (let round = 0; round < this.maxToolRounds; round++) {
       if (effectiveSignal?.aborted) {
         break;
       }
@@ -494,109 +538,217 @@ export class Agent {
       }
 
       const params = this.session.prefix.getParameters();
-      const request = this.requestBuilder.build({
-        prefix: this.session.prefix,
-        appendLog: this.session.logStore,
-        model: this.session.prefix.getModelName(),
-        provider: this.providerName,
-        thinking:
-          this.providerName === 'deepseek'
-            ? buildDeepSeekThinking(params as Record<string, unknown>)
-            : undefined,
-        temperature: params.temperature,
-        topP: params.topP,
-        maxTokens: params.maxTokens,
-        tools: [...this.session.prefix.getToolDefinitions()],
-      });
+      const baseThinking =
+        this.providerName === 'deepseek'
+          ? buildDeepSeekThinking(params as Record<string, unknown>)
+          : undefined;
 
-      onStreamEvent?.({
-        type: 'request-context',
-        round: roundNumber,
-        content: buildRequestContextDebugText(request, roundNumber),
-        snapshot: buildContextSnapshot(request, roundNumber),
-      });
+      // ── 回合完成质量守卫 ──────────────────────────────────────────────
+      // 目标：只要 LLM 还能连上，回合就必须产出有效结果，绝不静默结束。
+      //  - finish_reason='length'（max_tokens 耗尽，常见于思考过长）：片段不
+      //    落日志，内存合并后关闭 thinking，用临时 suffix（部分输出 + 续写
+      //    指令）从截断处续写，直到某段正常结束再整体落日志。
+      //  - 空完成（无内容/无思考/无工具调用）：退避重试，连续多次后关闭
+      //    thinking 再试。
+      let continuationAttempt = 0;
+      let emptyAttempt = 0;
+      let mergedContent = '';
+      let mergedReasoning = '';
+      let roundThinking = baseThinking;
+      // DeepSeek 省略 thinking 字段时默认开启思考，必须显式 disabled 才算关闭。
+      const thinkingDisabled: IChatThinking | undefined =
+        this.providerName === 'deepseek' ? { type: 'disabled' } : undefined;
+      let request!: IChatRequest;
+      let assistant!: IChatResponse['choices'][number]['message'];
 
-      let response: IChatResponse;
-      try {
-        response =
-          onStreamEvent && this.provider.streamChat
-            ? await this.provider.streamChat(request, onStreamEvent, effectiveSignal)
-            : await this.provider.chat(request, effectiveSignal);
-      } catch (err) {
-        if (isImageError(err)) {
-          // 被拒绝的图片可能位于任意一条 user 消息（工具 __images 会在日志中段
-          // 插入图片消息），而不只是最后一条；且必须保留消息文本（旧实现整条
-          // pop 会丢掉用户输入）。找不到任何可剥离的图片时必须抛出——否则
-          // 会反复重发完全相同的请求，循环到 maxToolRounds。
-          const messages = this.session.logStore.getAllMessages();
-          let strippedImages = false;
-          const stripped = messages.map((message) => {
-            if (!(message.role === 'user' && message.images && message.images.length > 0)) {
-              return message;
+      for (;;) {
+        if (effectiveSignal?.aborted) {
+          break roundLoop;
+        }
+
+        // 续写尾部：已合并的部分输出（assistant）+ 续写指令（user）。仅存在于
+        // 本次请求，不写入日志；reasoning 不回填（续写已关 thinking，且截断的
+        // 思考对续写无价值，回填还可能触发 round-trip 校验问题）。
+        const suffixMessages: IMessage[] | undefined =
+          continuationAttempt > 0
+            ? [
+                {
+                  id: `continuation-partial-r${roundNumber}-${continuationAttempt}`,
+                  role: 'assistant',
+                  content: mergedContent,
+                  timestamp: Date.now(),
+                },
+                {
+                  id: `continuation-nudge-r${roundNumber}-${continuationAttempt}`,
+                  role: 'user',
+                  content: CONTINUATION_NUDGE,
+                  timestamp: Date.now(),
+                },
+              ]
+            : undefined;
+
+        request = this.requestBuilder.build({
+          prefix: this.session.prefix,
+          appendLog: this.session.logStore,
+          model: this.session.prefix.getModelName(),
+          provider: this.providerName,
+          thinking: roundThinking,
+          temperature: params.temperature,
+          topP: params.topP,
+          maxTokens: params.maxTokens,
+          tools: [...this.session.prefix.getToolDefinitions()],
+          suffixMessages,
+        });
+
+        onStreamEvent?.({
+          type: 'request-context',
+          round: roundNumber,
+          content: buildRequestContextDebugText(request, roundNumber),
+          snapshot: buildContextSnapshot(request, roundNumber),
+        });
+
+        let response: IChatResponse;
+        try {
+          response =
+            onStreamEvent && this.provider.streamChat
+              ? await this.provider.streamChat(request, onStreamEvent, effectiveSignal)
+              : await this.provider.chat(request, effectiveSignal);
+        } catch (err) {
+          if (isImageError(err)) {
+            // 被拒绝的图片可能位于任意一条 user 消息（工具 __images 会在日志中段
+            // 插入图片消息），而不只是最后一条；且必须保留消息文本（旧实现整条
+            // pop 会丢掉用户输入）。找不到任何可剥离的图片时必须抛出——否则
+            // 会反复重发完全相同的请求，循环到 maxToolRounds。
+            const messages = this.session.logStore.getAllMessages();
+            let strippedImages = false;
+            const stripped = messages.map((message) => {
+              if (!(message.role === 'user' && message.images && message.images.length > 0)) {
+                return message;
+              }
+              strippedImages = true;
+              const next: IMessage = { ...message };
+              delete next.images;
+              return next;
+            });
+            if (!strippedImages) {
+              throw err;
             }
-            strippedImages = true;
-            const next: IMessage = { ...message };
-            delete next.images;
-            return next;
-          });
-          if (!strippedImages) {
-            throw err;
+            this.session.replaceLog(stripped);
+            this.requestBuilder.resetLogTracking?.();
+            onStreamEvent?.({
+              type: 'tool-call-end',
+              toolCallId: '',
+              toolName: 'multimodal',
+              success: false,
+              error: `Image rejected: ${(err as Error).message}`,
+              output: '',
+            });
+            continue roundLoop;
           }
-          this.session.replaceLog(stripped);
-          this.requestBuilder.resetLogTracking?.();
+          throw err;
+        }
+
+        const validation = this.cacheValidator.validate(
+          request,
+          response,
+          this.session.prefix.computeHash(),
+          this.session.logStore.computeHash()
+        );
+
+        const stats: ICacheStatistics = {
+          cacheCreationTokens: validation.cacheCreationTokens,
+          cacheReadTokens: validation.cacheReadTokens,
+          newInputTokens: validation.newInputTokens,
+          outputTokens: validation.outputTokens,
+          cacheHitRate: validation.cacheHitRate,
+          promptCacheHitTokens: validation.promptCacheHitTokens,
+          promptCacheMissTokens: validation.promptCacheMissTokens,
+          calls: 1,
+        };
+        this.session.recordStats(stats);
+        aggregatedStats = accumulateStats(aggregatedStats, stats);
+
+        const choice = response.choices[0];
+        if (!choice) throw new Error('No choices in response');
+        const segment = choice.message;
+
+        if (choice.finishReason === 'length') {
+          // 输出预算耗尽（思考 token 通常计入 max_tokens）：此段的 toolCalls
+          // JSON 大概率被截断，绝不能执行；合并已输出内容，关 thinking 续写。
+          mergedContent += segment.content ?? '';
+          if (segment.reasoningContent) {
+            mergedReasoning += segment.reasoningContent;
+          }
+          continuationAttempt += 1;
+          if (continuationAttempt > MAX_CONTINUATIONS_PER_ROUND) {
+            // 安全阀（如中转输出上限极小）：以已合并内容正常收尾，不报错。
+            log.warn('Max continuations reached; ending round with merged partial content', {
+              round: roundNumber,
+              continuations: continuationAttempt - 1,
+            });
+            assistant = { ...segment, content: '', toolCalls: undefined, reasoningContent: undefined };
+            break;
+          }
           onStreamEvent?.({
-            type: 'tool-call-end',
-            toolCallId: '',
-            toolName: 'multimodal',
-            success: false,
-            error: `Image rejected: ${(err as Error).message}`,
-            output: '',
+            type: 'round-retry',
+            reason: 'length-continue',
+            attempt: continuationAttempt,
           });
+          log.warn('Output truncated by max_tokens; continuing without thinking', {
+            round: roundNumber,
+            attempt: continuationAttempt,
+          });
+          roundThinking = thinkingDisabled;
           continue;
         }
-        throw err;
+
+        const isEmptyCompletion =
+          !(segment.content ?? '') &&
+          !segment.reasoningContent &&
+          (!segment.toolCalls || segment.toolCalls.length === 0);
+        if (isEmptyCompletion) {
+          emptyAttempt += 1;
+          onStreamEvent?.({ type: 'round-retry', reason: 'empty', attempt: emptyAttempt });
+          if (emptyAttempt >= EMPTY_COMPLETION_DISABLE_THINKING_AFTER) {
+            roundThinking = thinkingDisabled;
+          }
+          const delays = this.emptyCompletionRetryDelaysMs;
+          const delayMs = delays[Math.min(emptyAttempt, delays.length) - 1] ?? 30_000;
+          log.warn('Empty completion; retrying round after backoff', {
+            round: roundNumber,
+            attempt: emptyAttempt,
+            delayMs,
+          });
+          await this.sleepAbortable(delayMs, effectiveSignal);
+          continue;
+        }
+
+        assistant = segment;
+        break;
       }
 
-      const validation = this.cacheValidator.validate(
-        request,
-        response,
-        this.session.prefix.computeHash(),
-        this.session.logStore.computeHash()
-      );
-
-      const stats: ICacheStatistics = {
-        cacheCreationTokens: validation.cacheCreationTokens,
-        cacheReadTokens: validation.cacheReadTokens,
-        newInputTokens: validation.newInputTokens,
-        outputTokens: validation.outputTokens,
-        cacheHitRate: validation.cacheHitRate,
-        promptCacheHitTokens: validation.promptCacheHitTokens,
-        promptCacheMissTokens: validation.promptCacheMissTokens,
-        calls: 1,
-      };
-      this.session.recordStats(stats);
-      aggregatedStats = accumulateStats(aggregatedStats, stats);
-
-      const choice = response.choices[0];
-      if (!choice) throw new Error('No choices in response');
-      const assistant = choice.message;
+      // 合并续写片段后整体落日志（日志中每回合仍只有一条 assistant 消息）。
+      const roundContent = mergedContent + (assistant.content ?? '');
+      const roundReasoning = mergedReasoning
+        ? mergedReasoning + (assistant.reasoningContent ?? '')
+        : assistant.reasoningContent;
 
       const assistantMsg = MessageFactory.assistant(
-        assistant.content ?? '',
+        roundContent,
         assistant.toolCalls,
-        assistant.reasoningContent
+        roundReasoning
       );
       await this.session.logStore.append(assistantMsg);
 
       onStreamEvent?.({
         type: 'assistant-round-complete',
         round: roundNumber,
-        content: assistant.content ?? '',
-        reasoningContent: assistant.reasoningContent,
+        content: roundContent,
+        reasoningContent: roundReasoning,
       });
 
-      finalContent = assistant.content ?? '';
-      finalReasoningContent = assistant.reasoningContent;
+      finalContent = roundContent;
+      finalReasoningContent = roundReasoning;
       finalToolCalls = assistant.toolCalls;
 
       if (!assistant.toolCalls || assistant.toolCalls.length === 0) {

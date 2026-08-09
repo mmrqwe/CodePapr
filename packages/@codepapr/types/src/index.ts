@@ -284,11 +284,16 @@ export type IChatStreamEvent =
   | { type: 'reasoning-delta'; delta: string }
   | { type: 'content-delta'; delta: string }
   /** 流中断后整段重试即将开始：此前已推送的 reasoning/content 增量作废，
-   *  消费方必须先清空已累积内容再接收新一轮增量（LLM 流无法断点续传）。 */
-  | { type: 'stream-restart'; attempt: number; maxRetries: number }
+   *  消费方必须先清空已累积内容再接收新一轮增量（LLM 流无法断点续传）。
+   *  maxRetries 缺省 = 无限重试（可重试故障不再终止回合）。 */
+  | { type: 'stream-restart'; attempt: number; maxRetries?: number }
   /** 请求尚未建立流（连接层失败）时的自动重试：尚无任何输出可作废，
-   *  消费方仅需更新状态提示。 */
-  | { type: 'request-retry'; attempt: number; maxRetries: number }
+   *  消费方仅需更新状态提示。maxRetries 缺省 = 无限重试。 */
+  | { type: 'request-retry'; attempt: number; maxRetries?: number }
+  /** Agent 层回合级重试：模型返回空完成（empty）或输出被 max_tokens 截断后
+   *  自动续写（length-continue）。消费方仅需更新状态提示，不清空已有内容
+   *  （length-continue 的已输出片段保留并继续拼接）。 */
+  | { type: 'round-retry'; reason: 'empty' | 'length-continue'; attempt: number }
   | {
       type: 'tool-call-start';
       toolCallId: string;

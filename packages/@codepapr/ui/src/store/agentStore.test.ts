@@ -1207,6 +1207,61 @@ describe('useAgentStore.sendMessage', () => {
     expect(statusTextDuringRetry).toContain('2/6');
   });
 
+  it('shows reconnect status without a cap when maxRetries is omitted (unlimited retries)', async () => {
+    let statusTextDuringRetry: string | undefined;
+    const chat = vi.fn(async (_input: string, onEvent?: (event: IChatStreamEvent) => void) => {
+      onEvent?.({ type: 'stream-restart', attempt: 3 });
+      statusTextDuringRetry = (useAgentStore.getState().sessionMessages['session-1'] ?? [])
+        .find((message) => message.role === 'assistant')?.statusText;
+      onEvent?.({ type: 'content-delta', delta: '恢复后的回复' });
+
+      return createAgentResponse('恢复后的回复');
+    });
+
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    await useAgentStore.getState().sendMessage('解释一下当前实现', '解释一下当前实现', 'ask');
+
+    expect(statusTextDuringRetry).toContain('(3)');
+    expect(statusTextDuringRetry).not.toContain('undefined');
+  });
+
+  it('keeps partial content and shows status on round-retry (length-continue / empty)', async () => {
+    let statusDuringContinue: string | undefined;
+    let statusDuringEmpty: string | undefined;
+    const chat = vi.fn(async (_input: string, onEvent?: (event: IChatStreamEvent) => void) => {
+      onEvent?.({ type: 'content-delta', delta: '已输出的片段' });
+      onEvent?.({ type: 'round-retry', reason: 'length-continue', attempt: 1 });
+      statusDuringContinue = (useAgentStore.getState().sessionMessages['session-1'] ?? [])
+        .find((message) => message.role === 'assistant')?.statusText;
+      onEvent?.({ type: 'round-retry', reason: 'empty', attempt: 2 });
+      statusDuringEmpty = (useAgentStore.getState().sessionMessages['session-1'] ?? [])
+        .find((message) => message.role === 'assistant')?.statusText;
+      onEvent?.({ type: 'content-delta', delta: '续写部分' });
+
+      return createAgentResponse('已输出的片段续写部分');
+    });
+
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    await useAgentStore.getState().sendMessage('解释一下当前实现', '解释一下当前实现', 'ask');
+
+    const visibleMessages = (useAgentStore.getState().sessionMessages['session-1'] ?? []).filter(
+      (message) => !message.hidden
+    );
+
+    // round-retry 不清空已输出内容（与 stream-restart 不同）
+    expect(visibleMessages[1]?.content).toBe('已输出的片段续写部分');
+    expect(statusDuringContinue).toContain('(1)');
+    expect(statusDuringEmpty).toContain('(2)');
+  });
+
   it('stores request-context snapshots on assistant messages when debug mode is enabled', async () => {
     const requestContext = '{\n  "round": 1,\n  "model": "deepseek-v4-pro"\n}';
     const contextSnapshot: IContextSnapshot = {
@@ -2498,6 +2553,19 @@ describe('normalizeSettings', () => {
     });
 
     expect(settings.maxTokens).toBe(200000);
+  });
+
+  it('defaults mentorMaxTokens to 100k for fresh settings', () => {
+    expect(normalizeSettings({}).mentorMaxTokens).toBe(100_000);
+  });
+
+  it('migrates the legacy mentorMaxTokens default (10000) to 100k', () => {
+    expect(normalizeSettings({ mentorMaxTokens: 10000 }).mentorMaxTokens).toBe(100_000);
+  });
+
+  it('keeps explicitly chosen mentorMaxTokens values intact', () => {
+    expect(normalizeSettings({ mentorMaxTokens: 20000 }).mentorMaxTokens).toBe(20000);
+    expect(normalizeSettings({ mentorMaxTokens: 200_000 }).mentorMaxTokens).toBe(200_000);
   });
 });
 

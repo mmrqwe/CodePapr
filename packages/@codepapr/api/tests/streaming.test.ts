@@ -197,7 +197,22 @@ describe('withStreamIdleRetry', () => {
     expect(calls).toBe(2);
   });
 
-  it('defaults to 6 retries once the stream keeps failing', async () => {
+  it('defaults to unlimited retries: keeps reconnecting past the old 6x cap until success', async () => {
+    let calls = 0;
+    const result = await withStreamIdleRetry(
+      async () => {
+        calls += 1;
+        // 旧默认 6 次上限之内始终失败，第 8 次才恢复：验证缺省不再提前放弃。
+        if (calls <= 7) throw new StreamIdleTimeoutError(50);
+        return 'recovered-late';
+      },
+      { hasEmitted: () => true, ...noDelay }
+    );
+    expect(result).toBe('recovered-late');
+    expect(calls).toBe(8);
+  });
+
+  it('honors an explicit maxRetries cap (test/escape-hatch)', async () => {
     let calls = 0;
     await expect(
       withStreamIdleRetry(
@@ -205,7 +220,7 @@ describe('withStreamIdleRetry', () => {
           calls += 1;
           throw new StreamIdleTimeoutError(50);
         },
-        { hasEmitted: () => true, ...noDelay }
+        { hasEmitted: () => true, maxRetries: 6, ...noDelay }
       )
     ).rejects.toBeInstanceOf(StreamIdleTimeoutError);
     expect(calls).toBe(7);

@@ -42,7 +42,9 @@ import {
 } from './agentConfig';
 import { selectSubagentExecutionRoute, type SubagentExecutionRoute } from './subagentRoute';
 
-export const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 600_000;
+// 流层改为无限重连后，长时间网络波动也会消耗子代理预算；放宽到 20 分钟，
+// 避免「重连中」的子代理被墙钟误杀（主线程 task 工具路径使用此常量）。
+export const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 1_200_000;
 
 const EXPLORE_DEFAULT_TEMPERATURE = 0.5;
 const SCOUT_DEFAULT_TEMPERATURE = 0.3;

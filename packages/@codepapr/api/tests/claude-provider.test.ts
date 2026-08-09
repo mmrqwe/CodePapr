@@ -330,7 +330,11 @@ describe('ClaudeProvider', () => {
       );
     vi.stubGlobal('fetch', fetchMock);
 
-    const provider = new ClaudeProvider({ apiKey: 'test-key', streamRetryDelayMs: () => 0 });
+    const provider = new ClaudeProvider({
+      apiKey: 'test-key',
+      streamRetryDelayMs: () => 0,
+      streamMaxRetries: 6,
+    });
     const events: string[] = [];
     const response = await provider.streamChat(
       {
@@ -362,7 +366,11 @@ describe('ClaudeProvider', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const provider = new ClaudeProvider({ apiKey: 'test-key', streamRetryDelayMs: () => 0 });
+    const provider = new ClaudeProvider({
+      apiKey: 'test-key',
+      streamRetryDelayMs: () => 0,
+      streamMaxRetries: 6,
+    });
     const restarts: number[] = [];
     let caught: unknown;
     try {

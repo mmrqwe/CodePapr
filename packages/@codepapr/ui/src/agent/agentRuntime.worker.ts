@@ -95,7 +95,9 @@ const bootstrapResponseWaiters = new Map<
 let nextBootstrapRequestId = 0;
 
 const TOOL_IPC_TIMEOUT_MS = 120_000;
-const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 300_000;
+// 子代理（含 mentor）墙钟上限。流层改为无限重连后，长时间网络波动也会消耗
+// 子代理预算；放宽到 20 分钟，避免「重连中」的子代理被墙钟误杀。
+const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 1_200_000;
 let permissionWaitActive = false;
 
 let cachedSettings: WorkerAgentSettings | null = null;

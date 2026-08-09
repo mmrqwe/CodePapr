@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { IChatRequest, IChatResponse, IContextSnapshot, ILLMProvider } from '@codepapr/types';
-import { Agent, DEFAULT_AGENT_MAX_TOOL_ROUNDS, ImmutablePrefix, Session, ToolRegistry, type ContextCompactionConfig } from '../src';
+import type { IChatRequest, IChatResponse, IContextSnapshot, ILLMProvider, IMessage } from '@codepapr/types';
+import {
+  Agent,
+  CONTINUATION_NUDGE,
+  DEFAULT_AGENT_MAX_TOOL_ROUNDS,
+  ImmutablePrefix,
+  MAX_CONTINUATIONS_PER_ROUND,
+  Session,
+  ToolRegistry,
+  type ContextCompactionConfig,
+} from '../src';
 
 function createResponse(
   content: string,
@@ -678,5 +687,203 @@ describe('Agent mid-loop context compaction', () => {
     await agent.chat('读取并继续');
     const messages = agent.getSession().logStore.getAllMessages();
     expect(messages[0]?.content).toBe('compacted summary');
+  });
+});
+
+describe('Agent completion-quality guards (no silent stops)', () => {
+  function lengthResponse(content: string, reasoningContent?: string): IChatResponse {
+    return {
+      id: 'resp-length',
+      choices: [
+        {
+          message: { role: 'assistant', content, reasoningContent },
+          finishReason: 'length',
+        },
+      ],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    };
+  }
+
+  function stopResponse(content: string): IChatResponse {
+    return {
+      id: 'resp-stop',
+      choices: [
+        {
+          message: { role: 'assistant', content },
+          finishReason: 'stop',
+        },
+      ],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    };
+  }
+
+  function emptyResponse(): IChatResponse {
+    return {
+      id: 'resp-empty',
+      choices: [
+        {
+          message: { role: 'assistant', content: '' },
+          finishReason: 'stop',
+        },
+      ],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    };
+  }
+
+  const noopValidator = {
+    validate: () => ({
+      prefixCached: false,
+      prefixCreated: false,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      newInputTokens: 1,
+      outputTokens: 1,
+      cacheHitRate: 0,
+    }),
+  };
+
+  function createGuardedAgent(
+    provider: ILLMProvider,
+    providerName: 'deepseek' | 'openai' | 'claude',
+    buildSpy: (opts: { suffixMessages?: IMessage[]; thinking?: unknown }) => void,
+    parameters: Record<string, unknown> = { temperature: 0.7, topP: 0.9, maxTokens: 1000 },
+  ): Agent {
+    const toolRegistry = new ToolRegistry();
+    return new Agent({
+      session: new Session({
+        sessionId: 'session-guard',
+        prefix: new ImmutablePrefix({
+          systemPrompt: '你是测试助手',
+          tools: toolRegistry.getAll(),
+          model: 'test-model',
+          parameters,
+        }),
+        toolRegistry,
+      }),
+      provider,
+      providerName,
+      requestBuilder: {
+        build: (opts) => {
+          buildSpy(opts);
+          return { model: 'test-model', messages: [] };
+        },
+      },
+      cacheValidator: noopValidator,
+      emptyCompletionRetryDelaysMs: [0],
+    });
+  }
+
+  it('continues automatically when output is truncated by max_tokens (finish_reason=length)', async () => {
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi
+        .fn<(_: IChatRequest) => Promise<IChatResponse>>()
+        .mockResolvedValueOnce(lengthResponse('你好，世'))
+        .mockResolvedValueOnce(stopResponse('界！')),
+    };
+    const builds: Array<{ suffixMessages?: IMessage[] }> = [];
+    const agent = createGuardedAgent(provider, 'openai', (opts) => builds.push({ suffixMessages: opts.suffixMessages }));
+    const events: Array<{ type: string; reason?: string }> = [];
+
+    const response = await agent.chat('请回答', (e) => {
+      if (e.type === 'round-retry') events.push({ type: e.type, reason: e.reason });
+    });
+
+    // 两个片段合并为一条完整回复
+    expect(response.content).toBe('你好，世界！');
+    expect(provider.chat).toHaveBeenCalledTimes(2);
+
+    // 日志中该回合只有一条 assistant 消息（片段不单独落日志）
+    const messages = agent.getSession().logStore.getAllMessages();
+    expect(messages).toHaveLength(2);
+    expect(messages[1]?.role).toBe('assistant');
+    expect(messages[1]?.content).toBe('你好，世界！');
+
+    // 第一次请求无 suffix；续写请求携带 部分输出 + 续写指令
+    expect(builds[0]?.suffixMessages).toBeUndefined();
+    const suffix = builds[1]?.suffixMessages;
+    expect(suffix).toHaveLength(2);
+    expect(suffix?.[0]?.role).toBe('assistant');
+    expect(suffix?.[0]?.content).toBe('你好，世');
+    expect(suffix?.[1]?.role).toBe('user');
+    expect(suffix?.[1]?.content).toBe(CONTINUATION_NUDGE);
+
+    expect(events).toEqual([{ type: 'round-retry', reason: 'length-continue' }]);
+  });
+
+  it('disables thinking on continuation attempts (deepseek)', async () => {
+    const provider: ILLMProvider = {
+      name: 'deepseek',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi
+        .fn<(_: IChatRequest) => Promise<IChatResponse>>()
+        .mockResolvedValueOnce(lengthResponse('部分'))
+        .mockResolvedValueOnce(stopResponse('完整')),
+    };
+    const builds: Array<{ thinking?: unknown }> = [];
+    const agent = createGuardedAgent(
+      provider,
+      'deepseek',
+      (opts) => builds.push({ thinking: opts.thinking }),
+      { temperature: 0.7, topP: 0.9, maxTokens: 1000, thinkingEnabled: true },
+    );
+
+    await agent.chat('请回答');
+
+    expect(builds[0]?.thinking).toEqual({ type: 'enabled' });
+    // DeepSeek 省略 thinking 会默认开启思考，续写必须显式 disabled
+    expect(builds[1]?.thinking).toEqual({ type: 'disabled' });
+  });
+
+  it('stops continuing after MAX_CONTINUATIONS_PER_ROUND and ends gracefully (no throw)', async () => {
+    const chatMock = vi.fn<(_: IChatRequest) => Promise<IChatResponse>>();
+    for (let i = 0; i < MAX_CONTINUATIONS_PER_ROUND + 1; i += 1) {
+      chatMock.mockResolvedValueOnce(lengthResponse(`片段${i}`));
+    }
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: chatMock,
+    };
+    const agent = createGuardedAgent(provider, 'openai', () => undefined);
+
+    const response = await agent.chat('请回答');
+
+    // 达到续写上限后以已合并内容正常收尾（绝不抛错）
+    expect(chatMock).toHaveBeenCalledTimes(MAX_CONTINUATIONS_PER_ROUND + 1);
+    const expected = Array.from({ length: MAX_CONTINUATIONS_PER_ROUND + 1 }, (_, i) => `片段${i}`).join('');
+    expect(response.content).toBe(expected);
+    expect(response.toolCalls).toBeUndefined();
+  });
+
+  it('retries an empty completion instead of silently ending the turn', async () => {
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi
+        .fn<(_: IChatRequest) => Promise<IChatResponse>>()
+        .mockResolvedValueOnce(emptyResponse())
+        .mockResolvedValueOnce(emptyResponse())
+        .mockResolvedValueOnce(stopResponse('最终答案')),
+    };
+    const agent = createGuardedAgent(provider, 'openai', () => undefined);
+    const attempts: number[] = [];
+
+    const response = await agent.chat('请回答', (e) => {
+      if (e.type === 'round-retry' && e.reason === 'empty') attempts.push(e.attempt);
+    });
+
+    expect(response.content).toBe('最终答案');
+    expect(provider.chat).toHaveBeenCalledTimes(3);
+    expect(attempts).toEqual([1, 2]);
+    // 空完成不落日志：仅 user + 最终 assistant
+    const messages = agent.getSession().logStore.getAllMessages();
+    expect(messages).toHaveLength(2);
+    expect(messages[1]?.content).toBe('最终答案');
   });
 });

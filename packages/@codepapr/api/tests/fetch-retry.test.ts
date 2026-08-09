@@ -133,7 +133,7 @@ describe('fetchWithRetry 重试语义', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('默认 6 次重试，连接层失败耗尽后带 attempts 字段并以 6 次文案结束', async () => {
+  it('默认 6 次重试，连接层失败耗尽后带 attempts 字段；错误仍标记 retriable 供流层无限重连', async () => {
     const fetchMock = vi.fn().mockImplementation(() => {
       throw new Error('error sending request for url (https://opencode.ai/zen/go/v1/chat/completions)');
     });
@@ -143,7 +143,9 @@ describe('fetchWithRetry 重试语义', () => {
       ProviderRequestError;
     expect(fetchMock).toHaveBeenCalledTimes(DEFAULT_REQUEST_MAX_RETRIES);
     expect(err).toBeInstanceOf(ProviderRequestError);
-    expect(err.retriable).toBe(false);
+    // 耗尽连接层重试只说明这波故障持续，不代表永久失败：标记 retriable 让
+    // 流层（withStreamIdleRetry）继续无限重连，网络波动不终止回合。
+    expect(err.retriable).toBe(true);
     expect(err.attempts).toBe(DEFAULT_REQUEST_MAX_RETRIES);
     expect(err.maxRetries).toBe(DEFAULT_REQUEST_MAX_RETRIES);
     expect(err.message).toContain(

@@ -186,7 +186,11 @@ describe('OpenAIProvider', () => {
       );
     vi.stubGlobal('fetch', fetchMock);
 
-    const provider = new OpenAIProvider({ apiKey: 'test-key', streamRetryDelayMs: () => 0 });
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      streamRetryDelayMs: () => 0,
+      streamMaxRetries: 6,
+    });
     const events: string[] = [];
     const response = await provider.streamChat(
       {
@@ -218,7 +222,11 @@ describe('OpenAIProvider', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const provider = new OpenAIProvider({ apiKey: 'test-key', streamRetryDelayMs: () => 0 });
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      streamRetryDelayMs: () => 0,
+      streamMaxRetries: 6,
+    });
     const restarts: number[] = [];
     let caught: unknown;
     try {
@@ -272,6 +280,86 @@ describe('OpenAIProvider', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(response?.choices[0]?.message.content).toBe('完整');
+  });
+
+  it('treats a clean EOF with no [DONE]/finish_reason/usage as premature and retries', async () => {
+    // 第一次：中转把流截断后干净关闭（无 [DONE]、无 finish_reason、无 usage）。
+    const truncated =
+      'data: {"id":"resp-stream","choices":[{"index":0,"delta":{"reasoning_content":"思考到一半"},"finish_reason":null}]}\n\n';
+    const okChunks = [
+      'data: {"id":"resp-stream","choices":[{"index":0,"delta":{"content":"完整"},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ].join('');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(truncated, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(okChunks, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAIProvider({ apiKey: 'test-key', streamRetryDelayMs: () => 0 });
+    const restarts: number[] = [];
+    const response = await provider.streamChat(
+      {
+        model: 'gpt-4o',
+        messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+        maxTokens: 1024,
+      },
+      (event) => {
+        if (event.type === 'stream-restart') restarts.push(event.attempt);
+      }
+    );
+
+    // 截断的流不被当作正常完成：触发重连并在第二次拿到完整响应
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(restarts).toEqual([1]);
+    expect(response?.choices[0]?.message.content).toBe('完整');
+  });
+
+  it('surfaces a retriable premature-EOF error when truncation persists', async () => {
+    const truncated =
+      'data: {"id":"resp-stream","choices":[{"index":0,"delta":{"content":"半"},"finish_reason":null}]}\n\n';
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(truncated, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      streamRetryDelayMs: () => 0,
+      streamMaxRetries: 2,
+    });
+    let caught: unknown;
+    try {
+      await provider.streamChat(
+        {
+          model: 'gpt-4o',
+          messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+          maxTokens: 1024,
+        },
+        () => {}
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ProviderRequestError);
+    expect((caught as ProviderRequestError).retriable).toBe(true);
+    expect((caught as Error).message).toContain('Stream ended prematurely');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('skips malformed SSE chunks instead of aborting the stream', async () => {

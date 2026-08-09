@@ -312,6 +312,8 @@ export async function readSseStream(
   }
 }
 
+/** 历史默认值（6 次）。流层重试现已默认无限（见 withStreamIdleRetry），
+ *  该常量仅保留给错误文案等展示用途。 */
 export const DEFAULT_STREAM_MAX_RETRIES = 6;
 
 /** 每次重试前的等待时长（毫秒），按重试次序取值：5s → 10s → 15s → 20s → 25s → 30s。
@@ -346,6 +348,8 @@ async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 export interface StreamIdleRetryOptions {
+  /** 重试次数上限。缺省（undefined）= 无限重试：只要故障可重试且用户未取消，
+   *  就一直重连直到成功——网络波动/限流不应终止回合。测试可注入小值。 */
   maxRetries?: number;
   signal?: AbortSignal;
   hasEmitted: () => boolean;
@@ -370,7 +374,9 @@ export async function withStreamIdleRetry<T>(
   runAttempt: () => Promise<T>,
   options: StreamIdleRetryOptions
 ): Promise<T> {
-  const maxRetries = options.maxRetries ?? DEFAULT_STREAM_MAX_RETRIES;
+  // undefined = 无限重试：可重试故障（网络波动/限流/流中断）绝不终止回合，
+  // 一直重连直到成功或用户取消。
+  const maxRetries = options.maxRetries;
   const retryDelayMs = options.retryDelayMs ?? defaultStreamRetryDelayMs;
   let attempt = 0;
   for (;;) {
@@ -380,7 +386,7 @@ export async function withStreamIdleRetry<T>(
       if (
         isRetriableStreamError(err) &&
         !options.signal?.aborted &&
-        attempt < maxRetries
+        (maxRetries === undefined || attempt < maxRetries)
       ) {
         attempt += 1;
         options.onRetry?.(attempt, err as Error);

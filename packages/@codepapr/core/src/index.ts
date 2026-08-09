@@ -12,7 +12,10 @@ export { CachePartition } from './cache/CachePartition';
 // Agent / Session / Tool / Message
 export {
   Agent,
+  CONTINUATION_NUDGE,
   DEFAULT_AGENT_MAX_TOOL_ROUNDS,
+  EMPTY_COMPLETION_RETRY_DELAYS_MS,
+  MAX_CONTINUATIONS_PER_ROUND,
   PERMISSION_WAITING_TOOL_TIMEOUTS,
   buildContextSnapshot,
 } from './agent/Agent';

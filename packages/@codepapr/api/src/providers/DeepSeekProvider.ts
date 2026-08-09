@@ -23,7 +23,6 @@ import {
 } from './reasoningRoundTrip';
 import {
   applyStreamingToolCallDeltas,
-  DEFAULT_STREAM_MAX_RETRIES,
   finalizeStreamingToolCalls,
   readSseStream,
   safeParseToolArguments,
@@ -199,11 +198,15 @@ export class DeepSeekProvider extends BaseLLMProvider {
         let finishReason = 'stop';
         let usage: DeepSeekResponse['usage'];
         let systemFingerprint: string | undefined;
+        let sawDone = false;
+        let sawFinishReason = false;
+        let sawUsage = false;
         const toolCallStates: Array<{ id: string; name: string; argumentsText: string }> = [];
 
         try {
           await readSseStream(response, (payloadLine) => {
             if (payloadLine === '[DONE]') {
+              sawDone = true;
               return;
             }
 
@@ -215,13 +218,19 @@ export class DeepSeekProvider extends BaseLLMProvider {
               return;
             }
             responseId = chunk.id ?? responseId;
-            usage = chunk.usage ?? usage;
+            if (chunk.usage) {
+              usage = chunk.usage;
+              sawUsage = true;
+            }
             systemFingerprint = chunk.system_fingerprint ?? systemFingerprint;
 
             for (const choice of chunk.choices ?? []) {
               const delta = choice.delta;
               if (!delta) {
-                finishReason = choice.finish_reason ?? finishReason;
+                if (choice.finish_reason) {
+                  finishReason = choice.finish_reason;
+                  sawFinishReason = true;
+                }
                 continue;
               }
 
@@ -240,7 +249,10 @@ export class DeepSeekProvider extends BaseLLMProvider {
                 applyStreamingToolCallDeltas(toolCallStates, delta.tool_calls);
               }
 
-              finishReason = choice.finish_reason ?? finishReason;
+              if (choice.finish_reason) {
+                finishReason = choice.finish_reason;
+                sawFinishReason = true;
+              }
             }
           }, signal, { idleTimeoutMs: this.config.idleTimeoutMs });
         } catch (err) {
@@ -253,6 +265,17 @@ export class DeepSeekProvider extends BaseLLMProvider {
           throw new ProviderRequestError({
             provider: this.name,
             message: `Stream interrupted: ${err instanceof Error ? err.message : String(err)}`,
+            retriable: true,
+          });
+        }
+
+        // 流干净地结束但没有任何终止信号（[DONE]/finish_reason/usage）：
+        // 典型是中转/网关把响应截断后直接关闭连接。此时内容不完整，绝不能当
+        // 正常完成处理——抛可重试错误走流层无限重连。
+        if (!sawDone && !sawFinishReason && !sawUsage) {
+          throw new ProviderRequestError({
+            provider: this.name,
+            message: 'Stream ended prematurely: no [DONE]/finish_reason/usage received',
             retriable: true,
           });
         }
@@ -295,16 +318,15 @@ export class DeepSeekProvider extends BaseLLMProvider {
       },
       {
         signal,
+        // undefined = 无限重试：可重试故障不终止回合。
+        maxRetries: this.config.streamMaxRetries,
         hasEmitted: () => emitted,
         retryDelayMs: this.config.streamRetryDelayMs,
         onRetry: (attempt, err) => {
-          if (emitted) {
-            onEvent({
-              type: 'stream-restart',
-              attempt,
-              maxRetries: DEFAULT_STREAM_MAX_RETRIES,
-            });
-          }
+          // 无论是否已有输出都发 stream-restart：让 UI 状态可见，也让上层
+          // idle 看门狗看到活动。无输出时清空操作是幂等的。maxRetries 缺省
+          // （无限重试）——可重试故障不终止回合。
+          onEvent({ type: 'stream-restart', attempt, maxRetries: this.config.streamMaxRetries });
           log.warn('LLM stream interrupted, retrying', {
             model: payload.model,
             attempt,

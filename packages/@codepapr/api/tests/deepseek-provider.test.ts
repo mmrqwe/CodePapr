@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IChatRequest } from '@codepapr/types';
 import { DeepSeekProvider } from '../src/providers/DeepSeekProvider';
+import { ProviderRequestError } from '../src/providers/ILLMProvider';
 
 function jsonResponse(payload: unknown): Response {
   return new Response(JSON.stringify(payload), {
@@ -726,5 +727,84 @@ describe('DeepSeekProvider', () => {
 
     expect(events).toEqual(['reasoning-delta:别名思考', 'content-delta:最终']);
     expect(response?.choices[0]?.message.reasoningContent).toBe('别名思考');
+  });
+
+  it('把无 [DONE]/finish_reason/usage 的干净截断判定为提前结束并重连', async () => {
+    // 第一次：思考途中被中转截断后干净关闭（无终止信号）。
+    const truncated =
+      'data: {"id":"resp-trunc","choices":[{"index":0,"delta":{"reasoning_content":"思考到一半"},"finish_reason":null}]}\n\n';
+    const okChunks = [
+      'data: {"id":"resp-ok","choices":[{"index":0,"delta":{"content":"完整"},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ].join('');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(truncated, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(okChunks, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new DeepSeekProvider({ apiKey: 'test-key', streamRetryDelayMs: () => 0 });
+    const restarts: number[] = [];
+    const response = await provider.streamChat?.(
+      {
+        model: 'deepseek-v4-pro',
+        messages: [{ id: 'user-1', role: 'user', content: '请回答', timestamp: 1 }],
+        maxTokens: 1024,
+      },
+      (event) => {
+        if (event.type === 'stream-restart') restarts.push(event.attempt);
+      }
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(restarts).toEqual([1]);
+    expect(response?.choices[0]?.message.content).toBe('完整');
+  });
+
+  it('持续截断时抛出可重试的 premature-EOF 错误', async () => {
+    const truncated =
+      'data: {"id":"resp-trunc","choices":[{"index":0,"delta":{"content":"半"},"finish_reason":null}]}\n\n';
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(truncated, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new DeepSeekProvider({
+      apiKey: 'test-key',
+      streamRetryDelayMs: () => 0,
+      streamMaxRetries: 2,
+    });
+    let caught: unknown;
+    try {
+      await provider.streamChat?.(
+        {
+          model: 'deepseek-v4-pro',
+          messages: [{ id: 'user-1', role: 'user', content: '请回答', timestamp: 1 }],
+          maxTokens: 1024,
+        },
+        () => {}
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ProviderRequestError);
+    expect((caught as ProviderRequestError).retriable).toBe(true);
+    expect((caught as Error).message).toContain('Stream ended prematurely');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
