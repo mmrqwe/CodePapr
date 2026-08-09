@@ -381,6 +381,7 @@ fn main() {
             app_runtime::register_app_workspace,
             app_runtime::unregister_app_workspace,
             app_runtime::check_port_available,
+            app_runtime::check_port_available_detail,
             app_runtime::scan_workspace_apps,
             papr_runtime::app_storage::papr_storage_get,
             papr_runtime::app_storage::papr_storage_set,

@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     fs,
-    net::TcpListener,
     sync::{Mutex, OnceLock},
 };
 
@@ -69,19 +68,46 @@ pub fn unregister_app_workspace(app_id: String) {
 
 #[tauri::command]
 pub fn check_port_available(port: u16) -> Result<bool, String> {
-    // IPv4/IPv6 都要检查：node 可能监听 :: 双栈，也可能只监听 IPv6；
-    // 只绑 127.0.0.1 会对 IPv6-only 监听误判「端口空闲」（曾导致 15s
-    // 轮询误停后端、连带关闭 app 弹窗）。
-    fn listening(addr: (&str, u16)) -> Option<bool> {
-        match TcpListener::bind(addr) {
-            Ok(_) => Some(false), // 绑得上 = 该地址族无监听
-            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => Some(true),
-            Err(_) => None, // 其它错误（如该地址族不可用）不参与判定
+    // IPv4/IPv6 都探测：node 可能监听 :: 双栈，也可能只监听其一。
+    let occupied = port_has_listener(("127.0.0.1", port)) || port_has_listener(("::1", port));
+    Ok(!occupied)
+}
+
+/// 探测端口是否有服务：用 connect 而非 bind。
+/// Rust std 的 TcpListener::bind 默认设 SO_REUSEADDR，macOS/BSD 下对同样
+/// 带 REUSEADDR 的监听 socket（node/libuv 默认开启）绑定会成功 → 永远误判
+/// 「端口空闲」，曾导致启动验证把活着的后端当死的杀掉。connect 无此语义
+/// 陷阱：连得上 = 有监听，拒绝 = 无服务。
+fn port_has_listener(addr: (&str, u16)) -> bool {
+    use std::net::ToSocketAddrs;
+    let Ok(mut addrs) = addr.to_socket_addrs() else {
+        return false;
+    };
+    let Some(sock_addr) = addrs.next() else {
+        return false;
+    };
+    std::net::TcpStream::connect_timeout(&sock_addr, std::time::Duration::from_millis(300)).is_ok()
+}
+
+/// 带诊断细节的端口探测：返回每个地址族的 connect 结果（conn=有监听 /
+/// refused=无服务 / err:<kind>=其它错误）。供 app 启动轮询落盘勘验。
+#[tauri::command]
+pub fn check_port_available_detail(port: u16) -> Result<String, String> {
+    fn probe(addr: (&str, u16)) -> String {
+        use std::net::ToSocketAddrs;
+        let Ok(mut addrs) = addr.to_socket_addrs() else {
+            return "err:resolve".to_string();
+        };
+        let Some(sock_addr) = addrs.next() else {
+            return "err:resolve".to_string();
+        };
+        match std::net::TcpStream::connect_timeout(&sock_addr, std::time::Duration::from_millis(300)) {
+            Ok(_) => "conn".to_string(),
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => "refused".to_string(),
+            Err(e) => format!("err:{:?}", e.kind()),
         }
     }
-    let occupied = listening(("127.0.0.1", port)).unwrap_or(false)
-        || listening(("::1", port)).unwrap_or(false);
-    Ok(!occupied)
+    Ok(format!("v4={} v6={}", probe(("127.0.0.1", port)), probe(("::1", port))))
 }
 
 pub fn handle_app_protocol<R: tauri::Runtime>(

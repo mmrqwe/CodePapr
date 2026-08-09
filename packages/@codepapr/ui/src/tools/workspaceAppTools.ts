@@ -450,11 +450,17 @@ export async function launchAppBackend(
   const PORT_POLL_INTERVAL_MS = 250;
   const PORT_POLL_TIMEOUT_MS = 8000;
   const deadline = Date.now() + PORT_POLL_TIMEOUT_MS;
+  const startedAt = Date.now();
+  const pollTrace: string[] = [];
   let portTaken = false;
   for (;;) {
     await new Promise((r) => setTimeout(r, PORT_POLL_INTERVAL_MS));
-    const stillAvailable: boolean = await invoke('check_port_available', { port: app.port });
-    if (!stillAvailable) { portTaken = true; break; }
+    // 带探测细节的诊断：v4/v6 各自 conn(有监听)/refused(无服务)/err，
+    // 「监听中却判空闲」的怪象靠它勘验
+    const detail = await invoke<string>('check_port_available_detail', { port: app.port });
+    const available = !detail.includes('conn');
+    pollTrace.push(`+${Date.now() - startedAt}ms:${detail}`);
+    if (!available) { portTaken = true; break; }
     if (Date.now() >= deadline) break;
   }
   if (!portTaken) {
@@ -468,6 +474,7 @@ export async function launchAppBackend(
     // Kill the spawned child so a slow-starting server does not become an
     // orphan that later grabs the port untracked by the store.
     try { await invoke('stop_background_process', { pid: result.pid, source: 'app_start-failure' }); } catch { /* best-effort */ }
+    try { await invoke('log_ui_event', { workspacePath, message: `app_start-failure ${app.appId} port=${app.port} pid=${result.pid} polls=[${pollTrace.join(' ')}]` }); } catch { /* best-effort */ }
     const detail = spawnLog ? `\n进程输出：\n${spawnLog}` : '';
     throw new Error(`应用 '${app.appId}' 后端启动失败：进程已退出或端口 ${app.port} 未被监听，请检查 command/args 配置。${detail}`);
   }
