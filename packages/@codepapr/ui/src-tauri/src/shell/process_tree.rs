@@ -35,11 +35,13 @@ pub(crate) fn wait_for_child_exit(child: &mut Child, timeout: Duration) {
     }
 }
 
-/// 杀掉子进程及其全部后代，并等待其退出（默认最多 3 秒）。
+/// 杀掉子进程及其全部后代，并等待其退出。
 ///
-/// Unix：子进程由 `prepare_new_process_group` 以独立进程组启动，pid == pgid，
-/// 用 `kill(-pid, SIGKILL)` 杀整组。防御性地先用 getpgid 确认组确实归子进程
-/// 所有（绝不误杀自身所在进程组），否则退回只杀子进程。
+/// Unix：先对进程组发 SIGTERM，给进程优雅退出的机会（后端服务可借此落日志、
+/// 刷 WAL，也便于事后勘验「是谁停的」）；3 秒内未退出再 SIGKILL。子进程由
+/// `prepare_new_process_group` 以独立进程组启动，pid == pgid，用
+/// `kill(-pid, SIG)` 作用于整组。防御性地先用 getpgid 确认组确实归子进程
+/// 所有（绝不误杀自身所在进程组），否则退回只对子进程本身发信号。
 /// Windows：`taskkill /T /F` 递归杀进程树，失败时退回只杀子进程。
 pub(crate) fn kill_process_tree(child: &mut Child) -> std::io::Result<()> {
     #[cfg(unix)]
@@ -49,21 +51,39 @@ pub(crate) fn kill_process_tree(child: &mut Child) -> std::io::Result<()> {
         // argument per POSIX; `getpgid` accepts any pid, including 0, and
         // negative values are handled via the `kill(-pid)` form below).
         let group_leader = unsafe { libc::getpgid(pid) };
-        if group_leader == pid {
+        let target: libc::pid_t = if group_leader == pid {
             // SAFETY: `-pid` is a valid negative pid signalling the whole
             // process group; verified above that `pid` is its own group
             // leader, so we can never kill our own group.
-            if unsafe { libc::kill(-pid, libc::SIGKILL) } == 0 {
-                return Ok(());
+            -pid
+        } else {
+            pid
+        };
+
+        let _ = unsafe { libc::kill(target, libc::SIGTERM) };
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => return Ok(()),
+                Ok(None) => {
+                    if Instant::now() >= deadline {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(_) => break,
             }
-            let err = std::io::Error::last_os_error();
-            // ESRCH：进程组已不存在（子进程及后代均已退出）
-            if err.raw_os_error() == Some(libc::ESRCH) {
-                return Ok(());
-            }
-            return Err(err);
         }
-        return child.kill();
+
+        if unsafe { libc::kill(target, libc::SIGKILL) } == 0 {
+            return Ok(());
+        }
+        let err = std::io::Error::last_os_error();
+        // ESRCH：进程组已不存在（子进程及后代均已退出）
+        if err.raw_os_error() == Some(libc::ESRCH) {
+            return Ok(());
+        }
+        return Err(err);
     }
     #[cfg(windows)]
     {

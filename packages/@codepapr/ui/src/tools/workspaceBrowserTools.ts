@@ -108,6 +108,7 @@ export function registerWorkspaceBrowserTools(ctx: WorkspaceToolContext): void {
     if ((parsed.stopLinkedProcess ?? true) && typeof session.pid === 'number') {
       const result = await invoke<StopBackgroundProcessResult>('stop_background_process', {
         pid: session.pid,
+        source: 'browser_close_preview-tool',
       });
       stoppedLinkedProcess = result.stopped;
     }
@@ -264,6 +265,7 @@ export function registerWorkspaceBrowserTools(ctx: WorkspaceToolContext): void {
     ) {
       const result = await invoke<StopBackgroundProcessResult>('stop_background_process', {
         pid: current.pid,
+        source: 'browser-tool-linked-process',
       });
       stoppedLinkedProcess = result.stopped;
     }

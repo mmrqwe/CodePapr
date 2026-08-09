@@ -15,7 +15,7 @@ use crate::shell::types::{
 use std::{
     collections::{HashMap, VecDeque},
     fs,
-    io::{BufRead, BufReader, Read},
+    io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex, OnceLock},
@@ -60,18 +60,88 @@ pub(crate) fn background_processes() -> &'static Mutex<HashMap<u32, ManagedBackg
 pub(crate) fn cleanup_finished_background_processes(
     processes: &mut HashMap<u32, ManagedBackgroundProcess>,
 ) {
-    let finished_pids: Vec<u32> = processes
+    let finished: Vec<(u32, Option<std::process::ExitStatus>, String, String)> = processes
         .iter_mut()
         .filter_map(|(pid, process)| match process.child.try_wait() {
-            Ok(Some(_)) => Some(*pid),
+            // 注意：Ok(None) = 进程仍存活，绝不能当作已退出（会把活进程踢出注册表）
+            Ok(Some(status)) => Some((
+                *pid,
+                Some(status),
+                process.command.clone(),
+                process.workspace_path.clone(),
+            )),
             Ok(None) => None,
-            Err(_) => Some(*pid),
+            Err(_) => Some((*pid, None, process.command.clone(), process.workspace_path.clone())),
         })
         .collect();
 
-    for pid in finished_pids {
+    for (pid, status, command, workspace_path) in finished {
         processes.remove(&pid);
+        // 能走到这里的都是「未经 stop 请求的意外退出」（stop_* 会先移除条目再杀）。
+        // 退出信号是辨认凶手的第一证据：signal=9 即被外部 SIGKILL。
+        let (code, signal) = match status {
+            Some(status) => (status.code(), exit_signal(status)),
+            None => (None, None),
+        };
+        log_background_event(
+            &workspace_path,
+            format!(
+                "unexpected-exit pid={pid} command={command} code={code:?} signal={signal:?} (no stop request; signal=9 => SIGKILL by OS/other process)"
+            ),
+        );
     }
+}
+
+#[cfg(unix)]
+fn exit_signal(status: std::process::ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal()
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_status: std::process::ExitStatus) -> Option<i32> {
+    None
+}
+
+/// 后台进程生命周期日志：<workspace>/.CodePapr/logs/background-lifecycle.log。
+/// spawn / stop 请求 / 意外退出全部落盘；进程被「无声杀死」时这里是唯一勘验现场。
+fn log_background_event(workspace_path: &str, message: String) {
+    let path = Path::new(workspace_path)
+        .join(".CodePapr")
+        .join("logs")
+        .join("background-lifecycle.log");
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let line = format!("{} {message}\n", utc_timestamp());
+    let _ = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut file| file.write_all(line.as_bytes()));
+}
+
+fn utc_timestamp() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs() as i64;
+    let (h, m, s) = (secs % 86400 / 3600, secs % 3600 / 60, secs % 60);
+    let days = secs / 86400;
+    // days-since-epoch → 公历（Howard Hinnant 的 civil_from_days 算法）
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + if month <= 2 { 1 } else { 0 };
+    format!(
+        "{year:04}-{month:02}-{day:02}T{h:02}:{m:02}:{s:02}.{:03}Z",
+        now.subsec_millis()
+    )
 }
 
 pub(crate) fn with_background_processes<T>(
@@ -597,6 +667,13 @@ fn spawn_and_register_background(
         Ok(())
     })?;
 
+    log_background_event(
+        &workspace_path,
+        format!(
+            "spawn pid={pid} command={command} args={args:?} preview_url={preview_url:?}"
+        ),
+    );
+
     Ok(BackgroundCommandResult {
         command,
         args,
@@ -670,7 +747,11 @@ pub(crate) fn list_background_processes(
 }
 
 #[tauri::command]
-pub(crate) fn stop_background_process(pid: u32) -> Result<StopBackgroundProcessResult, String> {
+pub(crate) fn stop_background_process(
+    pid: u32,
+    source: Option<String>,
+) -> Result<StopBackgroundProcessResult, String> {
+    let source = source.unwrap_or_else(|| "unknown".to_string());
     with_background_processes(|processes| {
         let Some(mut process) = processes.remove(&pid) else {
             return Ok(StopBackgroundProcessResult {
@@ -678,6 +759,14 @@ pub(crate) fn stop_background_process(pid: u32) -> Result<StopBackgroundProcessR
                 stopped: false,
             });
         };
+
+        log_background_event(
+            &process.workspace_path,
+            format!(
+                "stop-requested pid={pid} command={} source={source}",
+                process.command
+            ),
+        );
 
         let still_running = match process.child.try_wait() {
             Ok(Some(_)) => false,
@@ -700,7 +789,9 @@ pub(crate) fn stop_background_process(pid: u32) -> Result<StopBackgroundProcessR
 #[tauri::command]
 pub(crate) fn stop_all_background_processes(
     workspace_path: Option<String>,
+    source: Option<String>,
 ) -> Result<StopAllBackgroundProcessesResult, String> {
+    let source = source.unwrap_or_else(|| "unknown".to_string());
     let workspace_filter = normalize_workspace_filter(workspace_path)?;
 
     with_background_processes(|processes| {
@@ -719,6 +810,13 @@ pub(crate) fn stop_all_background_processes(
 
         for pid in target_pids {
             if let Some(mut process) = processes.remove(&pid) {
+                log_background_event(
+                    &process.workspace_path,
+                    format!(
+                        "stop-all-requested pid={pid} command={} source={source}",
+                        process.command
+                    ),
+                );
                 let still_running = match process.child.try_wait() {
                     Ok(Some(_)) => false,
                     Ok(None) => true,
@@ -735,4 +833,87 @@ pub(crate) fn stop_all_background_processes(
 
         Ok(StopAllBackgroundProcessesResult { stopped })
     })
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    fn make_entry(child: Child) -> ManagedBackgroundProcess {
+        ManagedBackgroundProcess {
+            child,
+            command: "sleep".to_string(),
+            args: vec!["30".to_string()],
+            workspace_path: std::env::temp_dir().to_string_lossy().to_string(),
+            started_at: 0,
+            preview_url: None,
+            log_tail: Arc::new(Mutex::new(VecDeque::new())),
+        }
+    }
+
+    /// 回归：cleanup 绝不能把仍存活的进程踢出注册表。
+    /// 此前 `match try_wait() { Ok(status) => ... }` 误匹配 Ok(None)（存活），
+    /// 导致运行中的后端被登记为 unexpected-exit，UI 误报「app 已退出」。
+    #[test]
+    fn cleanup_keeps_live_processes() {
+        let mut processes = HashMap::new();
+        let child = Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("sleep should spawn");
+        let pid = child.id();
+        processes.insert(pid, make_entry(child));
+
+        cleanup_finished_background_processes(&mut processes);
+
+        assert!(
+            processes.contains_key(&pid),
+            "live process must survive cleanup"
+        );
+
+        // 清理：杀掉测试进程
+        if let Some(mut entry) = processes.remove(&pid) {
+            let _ = entry.child.kill();
+            let _ = entry.child.wait();
+        }
+    }
+
+    /// 已退出的进程必须被清理，且其退出信息可被记录。
+    #[test]
+    fn cleanup_reaps_finished_processes() {
+        let mut processes = HashMap::new();
+        let child = Command::new("true")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("true should spawn");
+        let pid = child.id();
+        processes.insert(pid, make_entry(child));
+
+        // 等待子进程退出
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(entry) = processes.get_mut(&pid) {
+                if matches!(entry.child.try_wait(), Ok(Some(_))) {
+                    break;
+                }
+            }
+            if Instant::now() >= deadline {
+                panic!("true should exit quickly");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        cleanup_finished_background_processes(&mut processes);
+
+        assert!(
+            !processes.contains_key(&pid),
+            "finished process must be reaped"
+        );
+    }
 }

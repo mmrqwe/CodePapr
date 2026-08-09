@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { usePreviewStore } from '../store/previewStore';
+import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
 
@@ -71,6 +72,13 @@ export function BackgroundProcessPanel({ workspacePath, lang }: BackgroundProces
       ? activePreviewSession.pid
       : null;
 
+  const apps = useAppRuntimeStore((state) => state.apps);
+  // previewUrl 与 app 的端口一一对应（http://localhost:<port>/）；命中即该进程是 app 后端
+  const findOwnerApp = useCallback((previewUrl?: string | null) => {
+    if (!previewUrl) return undefined;
+    return apps.find((app) => app.port && previewUrl === `http://localhost:${app.port}/`);
+  }, [apps]);
+
   const refreshProcesses = useCallback(async (silent: boolean = false) => {
     if (!workspacePath) {
       setProcesses([]);
@@ -117,9 +125,17 @@ export function BackgroundProcessPanel({ workspacePath, lang }: BackgroundProces
   }, [refreshProcesses, workspacePath]);
 
   const stopProcess = useCallback(async (pid: number) => {
+    // 应用后端受 app_start/app_stop 生命周期管理：此处的通用停止按钮可能误触，
+    // 停掉后应用立即不可用，必须先确认（也拦截无人操作的幽灵点击）。
+    const process = processes.find((entry) => entry.pid === pid);
+    const ownerApp = process ? findOwnerApp(process.previewUrl) : undefined;
+    if (ownerApp && typeof window !== 'undefined'
+      && !window.confirm(t.backgroundProcessStopAppConfirm.replace('{title}', ownerApp.title))) {
+      return;
+    }
     setStoppingPid(pid);
     try {
-      await invoke<StopBackgroundProcessResult>('stop_background_process', { pid });
+      await invoke<StopBackgroundProcessResult>('stop_background_process', { pid, source: 'background-process-panel' });
       clearPreviewSessionByPid(pid);
       await refreshProcesses(true);
     } catch (err) {
@@ -127,13 +143,23 @@ export function BackgroundProcessPanel({ workspacePath, lang }: BackgroundProces
     } finally {
       setStoppingPid(null);
     }
-  }, [clearPreviewSessionByPid, refreshProcesses]);
+  }, [clearPreviewSessionByPid, findOwnerApp, processes, refreshProcesses, t]);
 
   const stopAllProcesses = useCallback(async () => {
+    const ownedApps = processes
+      .map((entry) => findOwnerApp(entry.previewUrl))
+      .filter((app): app is NonNullable<typeof app> => app !== undefined);
+    if (ownedApps.length > 0 && typeof window !== 'undefined') {
+      const titles = Array.from(new Set(ownedApps.map((app) => app.title))).join('、');
+      if (!window.confirm(t.backgroundProcessStopAppConfirm.replace('{title}', titles))) {
+        return;
+      }
+    }
     setIsStoppingAll(true);
     try {
       await invoke<StopAllBackgroundProcessesResult>('stop_all_background_processes', {
         workspacePath,
+        source: 'background-process-panel-stop-all',
       });
       if (activePreviewPid !== null) {
         clearPreviewSessionByPid(activePreviewPid);
@@ -144,7 +170,7 @@ export function BackgroundProcessPanel({ workspacePath, lang }: BackgroundProces
     } finally {
       setIsStoppingAll(false);
     }
-  }, [activePreviewPid, clearPreviewSessionByPid, refreshProcesses, workspacePath]);
+  }, [activePreviewPid, clearPreviewSessionByPid, findOwnerApp, processes, refreshProcesses, t, workspacePath]);
 
   const openPreview = useCallback((process: BackgroundProcessEntry) => {
     if (!process.previewUrl) {

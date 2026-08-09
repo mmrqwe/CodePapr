@@ -167,12 +167,14 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
 
     return await invoke<StopBackgroundProcessResult>('stop_background_process', {
       pid: parsed.pid,
+      source: 'workspace_stop_background_process-tool',
     });
   });
 
   registry.register(toolByName('workspace_stop_all_background_processes'), async () => {
     return await invoke<StopAllBackgroundProcessesResult>('stop_all_background_processes', {
       workspacePath: workspace(),
+      source: 'workspace_stop_all_background_processes-tool',
     });
   });
 

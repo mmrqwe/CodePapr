@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { usePreviewStore } from '../store/previewStore';
+import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
 
@@ -62,9 +63,17 @@ export function PreviewSessionPanel({ workspacePath, lang }: PreviewSessionPanel
         workspacePath,
       });
 
-      if (typeof activePreview.pid === 'number') {
+      // 应用后端的生命周期归应用面板管（app_start/app_stop）：关闭预览只解除
+      // 关联，不顺手杀进程——否则用户关个预览窗口就把 app 后端停了。
+      const isAppBackend = typeof activePreview.pid === 'number'
+        && useAppRuntimeStore.getState().apps.some(
+          (app) => app.pid === activePreview.pid
+            || (app.port && activePreview.url === `http://localhost:${app.port}/`),
+        );
+      if (typeof activePreview.pid === 'number' && !isAppBackend) {
         await invoke<StopBackgroundProcessResult>('stop_background_process', {
           pid: activePreview.pid,
+          source: 'preview-session-panel-close',
         });
       }
       closePreviewSession();

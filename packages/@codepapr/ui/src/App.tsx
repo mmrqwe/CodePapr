@@ -220,7 +220,7 @@ export default function App() {
     for (const app of currentApps) {
       invoke('unregister_app_workspace', { appId: app.appId }).catch(() => {});
       if (app.pid) {
-        invoke('stop_background_process', { pid: app.pid }).catch(() => {});
+        invoke('stop_background_process', { pid: app.pid, source: 'workspace-change-effect' }).catch(() => {});
       }
     }
     clearApps();

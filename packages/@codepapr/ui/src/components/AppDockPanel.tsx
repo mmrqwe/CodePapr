@@ -68,7 +68,7 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
     if (!selected || !selected.pid) return;
     setBusy(true);
     try {
-      await invoke('stop_background_process', { pid: selected.pid });
+      await invoke('stop_background_process', { pid: selected.pid, source: 'app-dock-stop' });
     } catch {
       // ignore
     }
@@ -80,7 +80,7 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
     if (!selected) return;
     setBusy(true);
     if (selected.pid) {
-      try { await invoke('stop_background_process', { pid: selected.pid }); } catch { /* ignore */ }
+      try { await invoke('stop_background_process', { pid: selected.pid, source: 'app-dock-delete' }); } catch { /* ignore */ }
     }
     try { await invoke('papr_delete_app', { appId: selected.appId }); } catch { /* ignore */ }
     try { await invoke('unregister_app_workspace', { appId: selected.appId }); } catch { /* ignore */ }

@@ -285,7 +285,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
 
     const existingApp = useAppRuntimeStore.getState().apps.find((a) => a.appId === rawAppId);
     if (existingApp?.pid) {
-      try { await invoke('stop_background_process', { pid: existingApp.pid }); } catch { /* best-effort */ }
+      try { await invoke('stop_background_process', { pid: existingApp.pid, source: 'app_render' }); } catch { /* best-effort */ }
       useAppRuntimeStore.getState().setAppStopped(rawAppId);
     }
 
@@ -417,7 +417,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       } catch { /* best-effort */ }
       // Kill the spawned child so a slow-starting server does not become an
       // orphan that later grabs the port untracked by the store.
-      try { await invoke('stop_background_process', { pid: result.pid }); } catch { /* best-effort */ }
+      try { await invoke('stop_background_process', { pid: result.pid, source: 'app_start-failure' }); } catch { /* best-effort */ }
       useAppRuntimeStore.getState().setAppStopped(appId);
       const detail = spawnLog ? `\n进程输出：\n${spawnLog}` : '';
       throw new Error(`应用 '${appId}' 后端启动失败：进程已退出或端口 ${app.port} 未被监听，请检查 command/args 配置。${detail}`);
@@ -434,7 +434,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     if (!app.pid) throw new Error(`应用 '${appId}' 后端未在运行`);
 
     let killFailed = false;
-    try { await invoke('stop_background_process', { pid: app.pid }); } catch { killFailed = true; }
+    try { await invoke('stop_background_process', { pid: app.pid, source: 'app_stop-tool' }); } catch { killFailed = true; }
     useAppRuntimeStore.getState().setAppStopped(appId);
     return { appId, stopped: true, ...(killFailed ? { warning: '进程停止命令失败，后端进程可能仍在运行并占用端口。' } : {}) };
   });

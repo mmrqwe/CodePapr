@@ -431,7 +431,7 @@ fn run_shutdown_cleanup() {
     tts::tts_server_stop_internal();
     tts::finetune::cancel();
     tts::installer::cancel();
-    let _ = shell::background::stop_all_background_processes(None);
+    let _ = shell::background::stop_all_background_processes(None, Some("host-exit".to_string()));
     shell::session::stop_all_shell_sessions();
     browser::page::close_all_browser_pages();
     embedded_browser::close_all_sessions();

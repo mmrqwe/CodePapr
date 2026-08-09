@@ -283,6 +283,7 @@ export declare const I18N_DICTS: {
         backgroundProcessLogTail: string;
         backgroundProcessNoLogs: string;
         backgroundProcessStop: string;
+        backgroundProcessStopAppConfirm: string;
         backgroundProcessStopping: string;
         backgroundProcessStartedAt: string;
         codePreview: string;
@@ -786,6 +787,7 @@ export declare const I18N_DICTS: {
         backgroundProcessLogTail: string;
         backgroundProcessNoLogs: string;
         backgroundProcessStop: string;
+        backgroundProcessStopAppConfirm: string;
         backgroundProcessStopping: string;
         backgroundProcessStartedAt: string;
         codePreview: string;
@@ -1287,6 +1289,7 @@ export declare const I18N_DICTS: {
         backgroundProcessLogTail: string;
         backgroundProcessNoLogs: string;
         backgroundProcessStop: string;
+        backgroundProcessStopAppConfirm: string;
         backgroundProcessStopping: string;
         backgroundProcessStartedAt: string;
         codePreview: string;
@@ -1709,6 +1712,7 @@ export declare function getTranslation(lang?: Lang): {
     backgroundProcessLogTail: string;
     backgroundProcessNoLogs: string;
     backgroundProcessStop: string;
+    backgroundProcessStopAppConfirm: string;
     backgroundProcessStopping: string;
     backgroundProcessStartedAt: string;
     codePreview: string;
@@ -2076,6 +2080,7 @@ export declare function getTranslation(lang?: Lang): {
     backgroundProcessLogTail: string;
     backgroundProcessNoLogs: string;
     backgroundProcessStop: string;
+    backgroundProcessStopAppConfirm: string;
     backgroundProcessStopping: string;
     backgroundProcessStartedAt: string;
     codePreview: string;
@@ -2443,6 +2448,7 @@ export declare function getTranslation(lang?: Lang): {
     backgroundProcessLogTail: string;
     backgroundProcessNoLogs: string;
     backgroundProcessStop: string;
+    backgroundProcessStopAppConfirm: string;
     backgroundProcessStopping: string;
     backgroundProcessStartedAt: string;
         lspDiagnosticDetails: string;
