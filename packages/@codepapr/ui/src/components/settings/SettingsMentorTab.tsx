@@ -424,39 +424,21 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
                     <label className={LABEL_CLASS}>
                       {t.mentorMaxTokensLabel}
                     </label>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="range"
-                        min={100}
-                        max={8000}
-                        step={100}
-                        value={local.mentorMaxTokens}
-                        onChange={(e) =>
-                          update({
-                            mentorMaxTokens: Number.isFinite(Number(e.target.value))
-                              ? Number(e.target.value)
-                              : local.mentorMaxTokens,
-                          })
-                        }
-                        title={t.mentorMaxTokensLabel}
-                        className="flex-1 cursor-pointer accent-indigo-500"
-                      />
-                      <input
-                        type="number"
-                        min={100}
-                        max={8000}
-                        step={100}
-                        value={local.mentorMaxTokens}
-                        onChange={(e) => {
-                          const parsed = Number(e.target.value);
-                          update({
-                            mentorMaxTokens: Number.isFinite(parsed) ? parsed : local.mentorMaxTokens,
-                          });
-                        }}
-                        title={t.mentorMaxTokensLabel}
-                        className="w-20 rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-center text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
-                      />
-                    </div>
+                    <input
+                      type="number"
+                      min={100}
+                      max={200000}
+                      step={1000}
+                      value={local.mentorMaxTokens}
+                      onChange={(e) => {
+                        const parsed = Number(e.target.value);
+                        update({
+                          mentorMaxTokens: Number.isFinite(parsed) ? parsed : local.mentorMaxTokens,
+                        });
+                      }}
+                      title={t.mentorMaxTokensLabel}
+                      className={FIELD_CLASS}
+                    />
                     <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.mentorMaxTokensHint}</p>
                   </div>
                   <div>
