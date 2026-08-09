@@ -372,58 +372,12 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     if (!app.command || !app.port) throw new Error(`应用 '${appId}' 没有后端服务`);
     if (app.pid) throw new Error(`应用 '${appId}' 后端已在运行 (pid: ${app.pid})`);
 
-    // 后端进程沙箱按 manifest 的两轴访问构建（防绕过：直接改文件启动也过不了 sandbox）
-    const appAccess = accessFromManifestJson(app.manifestJson);
-    if (appAccess.local !== 'read' && appAccess.local !== 'write') {
-      throw new Error(`应用 '${appId}' 的 local 访问为 ${appAccess.local}，不允许启动后端服务`);
-    }
-
-    const available: boolean = await invoke('check_port_available', { port: app.port });
-    if (!available) throw new Error(`端口 ${app.port} 已被占用`);
-
-    const url = `http://localhost:${app.port}/`;
-    const result = await invoke<{ pid: number }>('start_workspace_background_command', {
-      workspacePath: workspace(),
-      command: app.command,
-      args: app.args ?? [],
-      previewUrl: url,
-      sandbox: {
-        network: appAccess.network,
-        workspaceWrite: appAccess.local === 'write',
-        allowBind: true,
-      },
-    });
-    useAppRuntimeStore.getState().setAppRunning(appId, result.pid, url);
-
-    // 轮询等待端口被监听：冷启动在负载下可能超过固定短等待，过早判失败会误杀
-    // 正在启动的进程（随后它又绑上端口，变成 store 追踪不到的孤儿）。
-    const PORT_POLL_INTERVAL_MS = 250;
-    const PORT_POLL_TIMEOUT_MS = 8000;
-    const deadline = Date.now() + PORT_POLL_TIMEOUT_MS;
-    let portTaken = false;
-    for (;;) {
-      await new Promise((r) => setTimeout(r, PORT_POLL_INTERVAL_MS));
-      const stillAvailable: boolean = await invoke('check_port_available', { port: app.port });
-      if (!stillAvailable) { portTaken = true; break; }
-      if (Date.now() >= deadline) break;
-    }
-    if (!portTaken) {
-      // 先取进程捕获的输出再停掉它：spawn 秒退的真实原因（如 sandbox-exec
-      // 找不到 node、脚本语法错误）只存在于 log_tail，不捞出来就死无对证。
-      let spawnLog = '';
-      try {
-        const procs = await invoke<BackgroundProcessEntry[]>('list_background_processes', { workspacePath: workspace() });
-        spawnLog = procs.find((p) => p.pid === result.pid)?.logTail?.trim() ?? '';
-      } catch { /* best-effort */ }
-      // Kill the spawned child so a slow-starting server does not become an
-      // orphan that later grabs the port untracked by the store.
-      try { await invoke('stop_background_process', { pid: result.pid, source: 'app_start-failure' }); } catch { /* best-effort */ }
-      useAppRuntimeStore.getState().setAppStopped(appId);
-      const detail = spawnLog ? `\n进程输出：\n${spawnLog}` : '';
-      throw new Error(`应用 '${appId}' 后端启动失败：进程已退出或端口 ${app.port} 未被监听，请检查 command/args 配置。${detail}`);
-    }
-
-    return { appId, pid: result.pid, url, started: true };
+    const { pid, url } = await launchAppBackend(
+      { appId, command: app.command, args: app.args ?? [], port: app.port, manifestJson: app.manifestJson },
+      workspace(),
+    );
+    useAppRuntimeStore.getState().setAppRunning(appId, pid, url);
+    return { appId, pid, url, started: true };
   });
 
   registry.register(toolByName('app_stop'), async (args: Record<string, unknown>) => {
@@ -452,6 +406,73 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     return { appId, deleted: true };
   });
 
+}
+
+export interface AppLaunchTarget {
+  appId: string;
+  command: string;
+  args: string[];
+  port: number;
+  manifestJson?: string;
+}
+
+/** 后端 app 启动核心路径：manifest 两轴沙箱 + 端口预检 + spawn + 轮询等待监听 +
+ * 失败时捕获进程输出。app_start 工具与应用面板 ▶ 按钮都走这里——
+ * 保证无论从哪启动，沙箱权限、校验与诊断行为完全一致。 */
+export async function launchAppBackend(
+  app: AppLaunchTarget,
+  workspacePath: string,
+): Promise<{ pid: number; url: string }> {
+  // 后端进程沙箱按 manifest 的两轴访问构建（防绕过：直接改文件启动也过不了 sandbox）
+  const appAccess = accessFromManifestJson(app.manifestJson);
+  if (appAccess.local !== 'read' && appAccess.local !== 'write') {
+    throw new Error(`应用 '${app.appId}' 的 local 访问为 ${appAccess.local}，不允许启动后端服务`);
+  }
+
+  const available: boolean = await invoke('check_port_available', { port: app.port });
+  if (!available) throw new Error(`端口 ${app.port} 已被占用`);
+
+  const url = `http://localhost:${app.port}/`;
+  const result = await invoke<{ pid: number }>('start_workspace_background_command', {
+    workspacePath,
+    command: app.command,
+    args: app.args,
+    previewUrl: url,
+    sandbox: {
+      network: appAccess.network,
+      workspaceWrite: appAccess.local === 'write',
+      allowBind: true,
+    },
+  });
+
+  // 轮询等待端口被监听：冷启动在负载下可能超过固定短等待，过早判失败会误杀
+  // 正在启动的进程（随后它又绑上端口，变成 store 追踪不到的孤儿）。
+  const PORT_POLL_INTERVAL_MS = 250;
+  const PORT_POLL_TIMEOUT_MS = 8000;
+  const deadline = Date.now() + PORT_POLL_TIMEOUT_MS;
+  let portTaken = false;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, PORT_POLL_INTERVAL_MS));
+    const stillAvailable: boolean = await invoke('check_port_available', { port: app.port });
+    if (!stillAvailable) { portTaken = true; break; }
+    if (Date.now() >= deadline) break;
+  }
+  if (!portTaken) {
+    // 先取进程捕获的输出再停掉它：spawn 秒退的真实原因（如 sandbox-exec
+    // 找不到 node、脚本语法错误）只存在于 log_tail，不捞出来就死无对证。
+    let spawnLog = '';
+    try {
+      const procs = await invoke<BackgroundProcessEntry[]>('list_background_processes', { workspacePath });
+      spawnLog = procs.find((p) => p.pid === result.pid)?.logTail?.trim() ?? '';
+    } catch { /* best-effort */ }
+    // Kill the spawned child so a slow-starting server does not become an
+    // orphan that later grabs the port untracked by the store.
+    try { await invoke('stop_background_process', { pid: result.pid, source: 'app_start-failure' }); } catch { /* best-effort */ }
+    const detail = spawnLog ? `\n进程输出：\n${spawnLog}` : '';
+    throw new Error(`应用 '${app.appId}' 后端启动失败：进程已退出或端口 ${app.port} 未被监听，请检查 command/args 配置。${detail}`);
+  }
+
+  return { pid: result.pid, url };
 }
 
 /** 从 manifest JSON 解析两轴访问（供 app_start 等校验沙箱档）。 */

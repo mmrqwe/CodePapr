@@ -3,6 +3,7 @@ import { useAppRuntimeStore, type AppInstance } from '../store/appRuntimeStore';
 import { useAgentStore } from '../store/agentStore';
 import { usePermissionStore } from '../papr/permissionStore';
 import { invoke } from '@tauri-apps/api/core';
+import { launchAppBackend } from '../tools/workspaceAppTools';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
 
@@ -40,24 +41,24 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
     setBusy(true);
     setError('');
     try {
-      const available: boolean = await invoke('check_port_available', { port: selected.port });
-      if (!available) {
-        setError(t.appDockPortBusy.replace('{port}', String(selected.port)));
-        return;
-      }
-      const result = await invoke<{ pid: number }>('start_workspace_background_command', {
+      // 与 app_start 工具同一条启动路径：manifest 沙箱 + 端口预检 + 监听等待
+      const { pid, url } = await launchAppBackend(
+        {
+          appId: selected.appId,
+          command: selected.command,
+          args: selected.args ?? [],
+          port: selected.port,
+          manifestJson: selected.manifestJson,
+        },
         workspacePath,
-        command: selected.command,
-        args: selected.args ?? [],
-        previewUrl: `http://localhost:${selected.port}/`,
-      });
-      setAppRunning(selected.appId, result.pid, `http://localhost:${selected.port}/`);
+      );
+      setAppRunning(selected.appId, pid, url);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
-  }, [selected, isRunning, workspacePath, t, setAppRunning, openAppModal]);
+  }, [selected, isRunning, workspacePath, setAppRunning]);
 
   const handleOpen = useCallback(() => {
     if (!selected) return;
@@ -101,6 +102,14 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
     const timer = setInterval(async () => {
       for (const app of runningApps) {
         try {
+          // 进程存活是后端生死的直接证据；端口探测只是间接证据——
+          // check_port_available 只绑 IPv4 127.0.0.1，当后端监听在 IPv6（::）
+          // 时 IPv4 绑定会成功，误判「端口空闲」→ 错误 setAppStopped →
+          // 连带关掉打开的 app 弹窗（用户看到的「15 秒自动退出」）。
+          // 因此：只要进程还活着就绝不判停。
+          const alive: boolean = await invoke('background_process_alive', { pid: app.pid });
+          if (alive) continue;
+          // 进程确实已死，再用端口二次确认（进程条目可能刚被清理）
           const available: boolean = await invoke('check_port_available', { port: app.port });
           if (available) {
             useAppRuntimeStore.getState().setAppStopped(app.appId);

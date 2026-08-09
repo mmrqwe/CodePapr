@@ -69,10 +69,19 @@ pub fn unregister_app_workspace(app_id: String) {
 
 #[tauri::command]
 pub fn check_port_available(port: u16) -> Result<bool, String> {
-    match TcpListener::bind(("127.0.0.1", port)) {
-        Ok(_) => Ok(true),
-        Err(_) => Ok(false),
+    // IPv4/IPv6 都要检查：node 可能监听 :: 双栈，也可能只监听 IPv6；
+    // 只绑 127.0.0.1 会对 IPv6-only 监听误判「端口空闲」（曾导致 15s
+    // 轮询误停后端、连带关闭 app 弹窗）。
+    fn listening(addr: (&str, u16)) -> Option<bool> {
+        match TcpListener::bind(addr) {
+            Ok(_) => Some(false), // 绑得上 = 该地址族无监听
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => Some(true),
+            Err(_) => None, // 其它错误（如该地址族不可用）不参与判定
+        }
     }
+    let occupied = listening(("127.0.0.1", port)).unwrap_or(false)
+        || listening(("::1", port)).unwrap_or(false);
+    Ok(!occupied)
 }
 
 pub fn handle_app_protocol<R: tauri::Runtime>(

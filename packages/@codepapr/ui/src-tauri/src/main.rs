@@ -300,6 +300,8 @@ fn main() {
             shell::background::start_workspace_background_command,
             shell::background::start_workspace_shell_background_command,
             shell::background::list_background_processes,
+            shell::background::log_ui_event,
+            shell::background::background_process_alive,
             shell::background::stop_background_process,
             shell::background::stop_all_background_processes,
             workspace_fs::search::search_workspace_text,

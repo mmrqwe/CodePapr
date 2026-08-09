@@ -83,10 +83,17 @@ pub(crate) fn cleanup_finished_background_processes(
             Some(status) => (status.code(), exit_signal(status)),
             None => (None, None),
         };
+        let hint = match (code, signal) {
+            (_, Some(9)) => "SIGKILL：系统内存压力或外部进程所杀",
+            (_, Some(_)) => "被信号终止（非宿主 stop 路径）",
+            (Some(0), _) => "自行退出 code=0（查应用日志，常见于 EADDRINUSE 端口被占）",
+            (Some(_), _) => "自行退出（非零码=应用自身错误）",
+            (None, None) => "未知退出状态",
+        };
         log_background_event(
             &workspace_path,
             format!(
-                "unexpected-exit pid={pid} command={command} code={code:?} signal={signal:?} (no stop request; signal=9 => SIGKILL by OS/other process)"
+                "unexpected-exit pid={pid} command={command} code={code:?} signal={signal:?} (no stop request; {hint})"
             ),
         );
     }
@@ -103,8 +110,29 @@ fn exit_signal(_status: std::process::ExitStatus) -> Option<i32> {
     None
 }
 
+/// UI 侧事件埋点：谁清空了 openedAppId / 停了 app，全部带调用栈落盘，
+/// 与 spawn/stop 同文件，时间线对齐勘验。
+#[tauri::command]
+pub(crate) fn log_ui_event(workspace_path: String, message: String) {
+    log_background_event(&workspace_path, format!("ui-event {message}"));
+}
+
+/// 进程是否仍存活（注册表视角：条目存在且未退出）。
+/// 端口探测只是间接证据（IPv4/IPv6 语义、瞬时窗口都可能误判），
+/// 进程存活才是判定后端生死的直接证据。
+#[tauri::command]
+pub(crate) fn background_process_alive(pid: u32) -> bool {
+    with_background_processes(|processes| {
+        Ok(match processes.get_mut(&pid) {
+            Some(process) => matches!(process.child.try_wait(), Ok(None)),
+            None => false,
+        })
+    })
+    .unwrap_or(false)
+}
+
 /// 后台进程生命周期日志：<workspace>/.CodePapr/logs/background-lifecycle.log。
-/// spawn / stop 请求 / 意外退出全部落盘；进程被「无声杀死」时这里是唯一勘验现场。
+/// spawn / stop请求 / 意外退出全部落盘；进程被「无声杀死」时这里是唯一勘验现场。
 fn log_background_event(workspace_path: &str, message: String) {
     let path = Path::new(workspace_path)
         .join(".CodePapr")
