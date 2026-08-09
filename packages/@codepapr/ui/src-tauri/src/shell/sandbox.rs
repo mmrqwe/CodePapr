@@ -69,6 +69,7 @@ fn build_profile(
     program: &str,
     workspace: &Path,
     access: Option<SandboxAccess>,
+    app_write_dir: Option<&Path>,
 ) -> Result<String, String> {
     let access = access.unwrap_or_default();
     let policy = db::load_external_access_policy()?;
@@ -184,6 +185,16 @@ fn build_profile(
         }
     }
 
+    // 后端 app 自身的运行目录始终可写（DB/-wal/-shm、日志等运行时数据）：
+    // local=read 只应限制工作区的其余部分，app 目录是它自己的数据域。
+    // 缺了这条，只读工作区里的后端进程会在打开 SQLite（WAL 需写 -wal/-shm）时
+    // 立刻 EPERM 崩溃，表现为 app_start 反复"进程已退出或端口未被监听"。
+    if let Some(app_dir) = app_write_dir {
+        if let Some(canonical) = add_subpath_rule(&mut lines, "allow", "file-write*", app_dir) {
+            read_roots.push(canonical);
+        }
+    }
+
     if let Some(parent) = Path::new(program).parent() {
         if let Some(canonical) = add_subpath_rule(&mut lines, "allow", "file-read*", parent) {
             read_roots.push(canonical);
@@ -256,6 +267,24 @@ impl From<SandboxAccessArgs> for SandboxAccess {
     }
 }
 
+/// 后端进程（allow_bind）的脚本所在目录：即使工作区只读，app 也要能写自己的
+/// 运行时数据（DB/WAL/日志）。相对路径按工作区解析；无法推导时不放行。
+#[cfg(target_os = "macos")]
+fn backend_app_dir(args: &[String], workspace: &Path) -> Option<PathBuf> {
+    let script = args.first().map(String::as_str)?;
+    let script_path = Path::new(script);
+    let resolved = if script_path.is_absolute() {
+        script_path.to_path_buf()
+    } else {
+        workspace.join(script_path)
+    };
+    let parent = resolved.parent()?;
+    if parent.as_os_str().is_empty() {
+        return None;
+    }
+    Some(parent.to_path_buf())
+}
+
 pub(crate) fn sandboxed_command(
     program: &str,
     args: &[String],
@@ -264,7 +293,13 @@ pub(crate) fn sandboxed_command(
 ) -> Result<Command, String> {
     #[cfg(target_os = "macos")]
     {
-        let profile = build_profile(program, workspace, access)?;
+        let access = access.unwrap_or_default();
+        let app_write_dir = if access.allow_bind {
+            backend_app_dir(args, workspace)
+        } else {
+            None
+        };
+        let profile = build_profile(program, workspace, Some(access), app_write_dir.as_deref())?;
         let mut command = Command::new("/usr/bin/sandbox-exec");
         command.arg("-p").arg(profile).arg(program).args(args);
         return Ok(command);
@@ -412,6 +447,7 @@ pub(crate) fn validate_restricted_shell_command(
 mod tests {
     use super::{build_profile, sandboxed_command, SandboxAccess};
     use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn sandboxed_runtime_command_can_start() {
@@ -437,7 +473,8 @@ mod tests {
         let workspace =
             std::env::temp_dir().join(format!("codepapr-sandbox-profile-{}", std::process::id()));
         fs::create_dir_all(&workspace).expect("sandbox test workspace should exist");
-        let profile = build_profile("/bin/zsh", &workspace, None).expect("profile should build");
+        let profile =
+            build_profile("/bin/zsh", &workspace, None, None).expect("profile should build");
         let _ = fs::remove_dir_all(&workspace);
 
         // 临时目录规则必须是规范化后的 /private/var/folders 形式，
@@ -466,6 +503,7 @@ mod tests {
             "/bin/zsh",
             &workspace,
             Some(SandboxAccess { network: false, workspace_write: false, allow_bind: false }),
+            None,
         )
         .expect("profile should build");
         assert!(!restricted.contains("(allow network*)"), "got:\n{restricted}");
@@ -480,6 +518,7 @@ mod tests {
             "/bin/zsh",
             &workspace,
             Some(SandboxAccess { network: false, workspace_write: true, allow_bind: true }),
+            None,
         )
         .expect("profile should build");
         assert!(backend.contains("(allow network-bind)"), "got:\n{backend}");
@@ -490,11 +529,132 @@ mod tests {
             "/bin/zsh",
             &workspace,
             Some(SandboxAccess { network: true, workspace_write: true, allow_bind: false }),
+            None,
         )
         .expect("profile should build");
         assert!(full.contains("(allow network*)"), "got:\n{full}");
 
         let _ = fs::remove_dir_all(&workspace);
+    }
+
+    /// 功能测试的工作区不能放在系统临时目录里：临时目录在沙箱中始终可写，
+    /// 会掩盖"工作区只读"的断言。
+    fn home_test_workspace(suffix: &str) -> PathBuf {
+        let home = std::env::var_os("HOME").expect("HOME must be set");
+        PathBuf::from(home).join(format!("codepapr-sandbox-{suffix}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn backend_profile_grants_app_dir_write_under_read_only_workspace() {
+        let workspace = home_test_workspace("appdir-p");
+        let app_dir = workspace.join("apps").join("demo");
+        fs::create_dir_all(&app_dir).expect("app dir should exist");
+
+        let profile = build_profile(
+            "/bin/zsh",
+            &workspace,
+            Some(SandboxAccess { network: true, workspace_write: false, allow_bind: true }),
+            Some(app_dir.as_path()),
+        )
+        .expect("profile should build");
+        let canonical_app_dir = app_dir.canonicalize().expect("app dir should canonicalize");
+        let canonical_workspace = workspace.canonicalize().expect("workspace should canonicalize");
+        let _ = fs::remove_dir_all(&workspace);
+
+        assert!(
+            profile.contains(&format!(
+                "(allow file-write* (subpath \"{}\"))",
+                canonical_app_dir.display()
+            )),
+            "app dir must be writable for backend spawns; got:\n{profile}"
+        );
+        assert!(
+            !profile.contains(&format!(
+                "(allow file-write* (subpath \"{}\"))",
+                canonical_workspace.display()
+            )),
+            "workspace itself must stay read-only; got:\n{profile}"
+        );
+    }
+
+    #[test]
+    fn backend_spawn_can_write_app_dir_but_not_rest_of_workspace() {
+        let workspace = home_test_workspace("appdir-f");
+        let app_dir = workspace.join("apps").join("demo");
+        fs::create_dir_all(&app_dir).expect("app dir should exist");
+
+        let app_probe = app_dir.join("runtime.txt");
+        let ws_probe = workspace.join("outside.txt");
+        let script = app_dir.join("run.sh");
+        fs::write(
+            &script,
+            format!(
+                "touch {} && echo APP_WRITE_OK\ntouch {} && echo WS_WRITE_OK\nexit 0\n",
+                app_probe.display(),
+                ws_probe.display()
+            ),
+        )
+        .expect("script should be written");
+
+        let access = SandboxAccess { network: false, workspace_write: false, allow_bind: true };
+        let mut command = sandboxed_command(
+            "/bin/zsh",
+            &[script.display().to_string()],
+            &workspace,
+            Some(access),
+        )
+        .expect("sandbox command should build");
+        let output = command.output().expect("sandbox command should start");
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let app_written = app_probe.exists();
+        let ws_written = ws_probe.exists();
+        let _ = fs::remove_dir_all(&workspace);
+
+        assert!(
+            stdout.contains("APP_WRITE_OK") && app_written,
+            "backend must write into its own app dir; stdout={stdout} stderr={:?}",
+            output.stderr
+        );
+        assert!(
+            !stdout.contains("WS_WRITE_OK") && !ws_written,
+            "backend must not write the rest of a read-only workspace"
+        );
+    }
+
+    #[test]
+    fn non_backend_spawn_gets_no_app_dir_write() {
+        let workspace = home_test_workspace("appdir-n");
+        let app_dir = workspace.join("apps").join("demo");
+        fs::create_dir_all(&app_dir).expect("app dir should exist");
+
+        let app_probe = app_dir.join("runtime.txt");
+        let script = app_dir.join("run.sh");
+        fs::write(
+            &script,
+            format!("touch {} && echo APP_WRITE_OK\nexit 0\n", app_probe.display()),
+        )
+        .expect("script should be written");
+
+        // allow_bind=false（非后端 spawn）：即使 args[0] 指向脚本也不放行 app 目录写
+        let access = SandboxAccess { network: false, workspace_write: false, allow_bind: false };
+        let mut command = sandboxed_command(
+            "/bin/zsh",
+            &[script.display().to_string()],
+            &workspace,
+            Some(access),
+        )
+        .expect("sandbox command should build");
+        let output = command.output().expect("sandbox command should start");
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let written = app_probe.exists();
+        let _ = fs::remove_dir_all(&workspace);
+
+        assert!(
+            !stdout.contains("APP_WRITE_OK") && !written,
+            "non-backend spawn must not gain app dir write; stdout={stdout}"
+        );
     }
 
     #[test]
@@ -503,7 +663,8 @@ mod tests {
             std::process::id()
         ));
         fs::create_dir_all(&workspace).expect("sandbox test workspace should exist");
-        let profile = build_profile("/bin/zsh", &workspace, None).expect("profile should build");
+        let profile =
+            build_profile("/bin/zsh", &workspace, None, None).expect("profile should build");
         let _ = fs::remove_dir_all(&workspace);
 
         // node/npm 的 realpathSync 需要 lstat 允许路径链上的每个祖先目录

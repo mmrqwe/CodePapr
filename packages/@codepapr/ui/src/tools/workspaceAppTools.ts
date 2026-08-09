@@ -394,9 +394,19 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     });
     useAppRuntimeStore.getState().setAppRunning(appId, result.pid, url);
 
-    await new Promise((r) => setTimeout(r, 800));
-    const stillAvailable: boolean = await invoke('check_port_available', { port: app.port });
-    if (stillAvailable) {
+    // 轮询等待端口被监听：冷启动在负载下可能超过固定短等待，过早判失败会误杀
+    // 正在启动的进程（随后它又绑上端口，变成 store 追踪不到的孤儿）。
+    const PORT_POLL_INTERVAL_MS = 250;
+    const PORT_POLL_TIMEOUT_MS = 8000;
+    const deadline = Date.now() + PORT_POLL_TIMEOUT_MS;
+    let portTaken = false;
+    for (;;) {
+      await new Promise((r) => setTimeout(r, PORT_POLL_INTERVAL_MS));
+      const stillAvailable: boolean = await invoke('check_port_available', { port: app.port });
+      if (!stillAvailable) { portTaken = true; break; }
+      if (Date.now() >= deadline) break;
+    }
+    if (!portTaken) {
       // Kill the spawned child so a slow-starting server does not become an
       // orphan that later grabs the port untracked by the store.
       try { await invoke('stop_background_process', { pid: result.pid }); } catch { /* best-effort */ }

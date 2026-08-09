@@ -527,7 +527,9 @@ fn spawn_and_register_background(
     mut cmd: Command,
 ) -> Result<BackgroundCommandResult, String> {
     if let Some(existing_result) = with_background_processes(|processes| {
-        for (pid, process) in processes.iter() {
+        let mut stale_pids: Vec<u32> = Vec::new();
+        let mut existing: Option<BackgroundCommandResult> = None;
+        for (pid, process) in processes.iter_mut() {
             // Dedup key includes preview_url (which carries the per-app port) so
             // two apps in the same workspace running an identical command (e.g.
             // `node server.js`) on different ports are NOT collapsed into one
@@ -537,17 +539,25 @@ fn spawn_and_register_background(
                 && process.args == args
                 && process.preview_url == preview_url
             {
-                return Ok(Some(BackgroundCommandResult {
-                    command: command.clone(),
-                    args: args.clone(),
-                    pid: Some(*pid),
-                    started: false,
-                    preview_url: process.preview_url.clone(),
-                }));
+                // 只有进程确实存活才算命中；死条目剔除后走重新 spawn，
+                // 否则命中 stale pid 会导致 app_start 永远不再真正拉起进程。
+                if matches!(process.child.try_wait(), Ok(None)) {
+                    existing = Some(BackgroundCommandResult {
+                        command: command.clone(),
+                        args: args.clone(),
+                        pid: Some(*pid),
+                        started: false,
+                        preview_url: process.preview_url.clone(),
+                    });
+                    break;
+                }
+                stale_pids.push(*pid);
             }
         }
-
-        Ok(None)
+        for pid in stale_pids {
+            processes.remove(&pid);
+        }
+        Ok(existing)
     })? {
         return Ok(existing_result);
     }
