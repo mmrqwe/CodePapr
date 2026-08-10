@@ -16,7 +16,7 @@ pub(crate) use paths::{
     ensure_path_accessible, ensure_path_accessible_with_policy, ensure_write_path_accessible,
     is_protected_external_path, normalize_workspace_filter, parse_workspace_path_input,
     relative_string, resolve_existing_path, sanitize_workspace_path_input, path_is_same,
-    path_is_same_or_child, PathLocationInput,
+    path_is_same_or_child, write_file_rejecting_symlink, PathLocationInput,
 };
 pub(crate) use runtime::run_blocking_workspace_task;
 pub(crate) use strings::{parse_browser_url, truncate_utf8};

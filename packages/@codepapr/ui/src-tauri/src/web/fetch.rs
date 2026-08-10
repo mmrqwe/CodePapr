@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Read;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -224,8 +225,14 @@ pub(crate) async fn download_web_file(
             }
         }
 
-        let bytes = response
-            .bytes()
+        // 流式读取并硬截断：Content-Length 可能缺失（chunked）或不可信，
+        // 不能先 bytes() 全量读入内存再判断大小——恶意站点可用超大 chunked
+        // 响应直接打爆进程内存（与 papr_runtime::services::read_body_capped 同一思路）。
+        // take(cap+1) 保证从网络读入的字节数不超过上限+1，读满即判超限。
+        let mut bytes: Vec<u8> = Vec::new();
+        response
+            .take(MAX_DOWNLOAD_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
             .map_err(|err| format!("读取下载内容失败: {err}"))?;
         if bytes.len() > MAX_DOWNLOAD_BYTES {
             return Err(format!("下载文件超过上限 {MAX_DOWNLOAD_BYTES} bytes"));
@@ -252,7 +259,8 @@ pub(crate) async fn download_web_file(
         }
 
         let overwritten = target.exists();
-        fs::write(&target, &bytes).map_err(|err| format!("写入下载文件失败: {err}"))?;
+        // 父目录校验不能覆盖"目标本身是 symlink"的逃逸：写入走拒绝符号链接的闸门
+        crate::shared::write_file_rejecting_symlink(&target, &workspace, &bytes)?;
 
         Ok(DownloadFileResult {
             url: final_url.to_string(),

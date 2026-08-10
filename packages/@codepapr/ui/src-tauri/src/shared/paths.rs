@@ -447,6 +447,59 @@ pub(crate) fn ensure_write_path_accessible(workspace: &Path, target: &Path) -> R
     ensure_path_accessible(workspace, &canonical_existing)
 }
 
+/// 写入目标文件的最终闸门：拒绝符号链接。
+///
+/// 只校验父目录的边界检查不够：`fs::write` 会跟随最终组件的符号链接，
+/// 若目标本身是预置的 symlink（指向工作区/app data 之外），就会覆盖外部文件。
+/// 本函数：
+/// 1. 目标已存在且是 symlink → 拒绝；
+/// 2. 目标已存在且是普通文件 → canonicalize 后仍必须位于 `base` 内；
+/// 3. Unix 上以 O_NOFOLLOW 打开，堵住"检查后、打开前被换入 symlink"的竞态窗口
+///    （Windows 上创建 symlink 需要特权，回退到普通写入）。
+pub(crate) fn write_file_rejecting_symlink(
+    target: &Path,
+    base: &Path,
+    bytes: &[u8],
+) -> Result<(), String> {
+    if let Ok(meta) = std::fs::symlink_metadata(target) {
+        if meta.file_type().is_symlink() {
+            return Err(format!(
+                "安全限制：写入目标 {} 是符号链接，已拒绝写入",
+                target.display()
+            ));
+        }
+        let canonical = std::fs::canonicalize(target)
+            .map_err(|err| format!("无法访问写入目标 {}: {err}", target.display()))?;
+        if !path_is_same_or_child(&canonical, base) {
+            return Err(format!(
+                "安全限制：写入目标 {} 位于允许范围之外",
+                target.display()
+            ));
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(target)
+            .map_err(|err| format!("写入文件 {} 失败: {err}", target.display()))?;
+        file.write_all(bytes)
+            .map_err(|err| format!("写入文件 {} 失败: {err}", target.display()))
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::fs::write(target, bytes)
+            .map_err(|err| format!("写入文件 {} 失败: {err}", target.display()))
+    }
+}
+
 /// Convert an absolute path to a workspace-relative forward-slash string.
 pub(crate) fn relative_string(workspace: &Path, path: &Path) -> String {
     path.strip_prefix(workspace)
@@ -464,4 +517,72 @@ pub(crate) fn normalize_workspace_filter(
             canonical_workspace(&path).map(|workspace| workspace.to_string_lossy().to_string())
         })
         .transpose()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_base(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("codepapr-write-guard-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("test base dir should be created");
+        // 与实际调用点一致：base 均为 canonicalize 后的路径（macOS /var → /private/var）
+        std::fs::canonicalize(&dir).expect("test base dir should canonicalize")
+    }
+
+    #[test]
+    fn write_new_and_existing_regular_files() {
+        let base = test_base("regular");
+
+        let fresh = base.join("new.txt");
+        write_file_rejecting_symlink(&fresh, &base, b"hello").expect("new file should write");
+        assert_eq!(std::fs::read(&fresh).unwrap(), b"hello");
+
+        write_file_rejecting_symlink(&fresh, &base, b"world").expect("overwrite should write");
+        assert_eq!(std::fs::read(&fresh).unwrap(), b"world");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_target_escaping_base_is_rejected() {
+        let base = test_base("symlink");
+        let outside_dir = std::env::temp_dir()
+            .join(format!("codepapr-write-guard-outside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outside_dir);
+        std::fs::create_dir_all(&outside_dir).expect("outside dir should exist");
+        let outside_file = outside_dir.join("victim.txt");
+        std::fs::write(&outside_file, b"original").expect("victim should exist");
+
+        // 工作区内预置 symlink 指向外部文件：写入必须被拒绝，外部文件不得被覆盖
+        let link = base.join("innocent.txt");
+        std::os::unix::fs::symlink(&outside_file, &link).expect("symlink should be created");
+
+        let err = write_file_rejecting_symlink(&link, &base, b"pwned")
+            .expect_err("symlink target must be rejected");
+        assert!(err.contains("符号链接"), "unexpected error: {err}");
+        assert_eq!(std::fs::read(&outside_file).unwrap(), b"original");
+
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&outside_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_even_inside_base_is_rejected() {
+        let base = test_base("symlink-inside");
+        let real = base.join("real.txt");
+        std::fs::write(&real, b"original").expect("real file should exist");
+        let link = base.join("link.txt");
+        std::os::unix::fs::symlink(&real, &link).expect("symlink should be created");
+
+        // 即使链接目标在 base 内也拒绝：写入方拿到的路径语义与链接不符，
+        // 统一拒绝最简单且无歧义
+        assert!(write_file_rejecting_symlink(&link, &base, b"x").is_err());
+        assert_eq!(std::fs::read(&real).unwrap(), b"original");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }

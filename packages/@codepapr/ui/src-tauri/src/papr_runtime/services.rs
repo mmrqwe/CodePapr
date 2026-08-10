@@ -396,8 +396,8 @@ pub fn papr_fs_write(
             .map_err(|err| format!("创建目录失败: {err}"))?;
     }
 
-    fs::write(&resolved, content)
-        .map_err(|err| format!("写入文件失败: {err}"))?;
+    // 父目录校验不能覆盖"目标本身是 symlink"的逃逸：写入走拒绝符号链接的闸门
+    crate::shared::write_file_rejecting_symlink(&resolved, &canonical_base, content.as_bytes())?;
 
     Ok(())
 }

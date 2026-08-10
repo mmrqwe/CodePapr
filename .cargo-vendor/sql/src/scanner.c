@@ -169,17 +169,21 @@ unsigned tree_sitter_sql_external_scanner_serialize(void *payload, char *buffer)
     return 0;
   }
 
+  // serialize must be a pure snapshot: do NOT free the live state here.
+  // The parser continues scanning with the live state after serializing
+  // (e.g. start tag scanned, end tag expected later); freeing it would lose
+  // the dollar-quote tag for subsequent/incremental parse steps.
   memcpy(buffer, state->start_tag, tag_length);
-  if (state->start_tag != NULL) {
-    free(state->start_tag);
-    state->start_tag = NULL;
-  }
   return tag_length;
 }
 
 void tree_sitter_sql_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {
   LexerState *state = (LexerState *)payload;
-  state->start_tag = NULL;
+  // Release any previous state before overwriting it to avoid leaks.
+  if (state->start_tag != NULL) {
+    free(state->start_tag);
+    state->start_tag = NULL;
+  }
   // A length of 1 can't exists.
   if (length > 1) {
     state->start_tag = malloc(length);

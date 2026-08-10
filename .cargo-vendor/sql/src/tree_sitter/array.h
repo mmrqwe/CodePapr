@@ -182,11 +182,22 @@ static inline void _array__erase(Array *self, size_t element_size,
 /// This is not what you're looking for, see `array_reserve`.
 static inline void _array__reserve(Array *self, size_t element_size, uint32_t new_capacity) {
   if (new_capacity > self->capacity) {
-    if (self->contents) {
-      self->contents = ts_realloc(self->contents, new_capacity * element_size);
-    } else {
-      self->contents = ts_malloc(new_capacity * element_size);
+    // Checked multiply: wrapping here would allocate a tiny buffer that the
+    // caller immediately overflows with memcpy/memmove.
+    if (element_size > 0 && (size_t)new_capacity > SIZE_MAX / element_size) {
+      return;
     }
+    size_t new_bytes = (size_t)new_capacity * element_size;
+    // Keep the old buffer/capacity on allocation failure: updating capacity
+    // while contents is NULL would turn the next write into a NULL deref or
+    // heap corruption.
+    void *contents = self->contents
+      ? ts_realloc(self->contents, new_bytes)
+      : ts_malloc(new_bytes);
+    if (contents == NULL) {
+      return;
+    }
+    self->contents = contents;
     self->capacity = new_capacity;
   }
 }
@@ -207,9 +218,16 @@ static inline void _array__swap(Array *self, Array *other) {
 
 /// This is not what you're looking for, see `array_push` or `array_grow_by`.
 static inline void _array__grow(Array *self, uint32_t count, size_t element_size) {
+  // Guarded additions: wrapping uint32 arithmetic here would make new_size
+  // smaller than size and bypass the reserve below.
+  if (count > UINT32_MAX - self->size) {
+    return;
+  }
   uint32_t new_size = self->size + count;
   if (new_size > self->capacity) {
-    uint32_t new_capacity = self->capacity * 2;
+    uint32_t new_capacity = self->capacity > UINT32_MAX / 2
+      ? UINT32_MAX
+      : self->capacity * 2;
     if (new_capacity < 8) new_capacity = 8;
     if (new_capacity < new_size) new_capacity = new_size;
     _array__reserve(self, element_size, new_capacity);

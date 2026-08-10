@@ -457,6 +457,38 @@ fn reject_dynamic_windows_shell_syntax(command: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 无内核沙箱的 Unix 平台（Linux 等）：macOS 有 sandbox-exec 在运行时按真实
+/// 路径裁决，这些平台没有运行时强制层。~、$VAR、反引号、进程替换等动态语法
+/// 由 shell 在运行时展开，静态无法裁决其访问范围，必须预先拒绝
+/// （与 Windows 的 reject_dynamic_windows_shell_syntax 同一思路）。
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn reject_dynamic_unix_shell_syntax(command: &str) -> Result<(), String> {
+    let has_variable = command.char_indices().any(|(index, character)| {
+        character == '$'
+            && command[index + character.len_utf8()..]
+                .chars()
+                .next()
+                .map(|next| next.is_ascii_alphanumeric() || matches!(next, '{' | '('))
+                .unwrap_or(false)
+    });
+    let has_tilde_token = shell_command_tokens(command)
+        .iter()
+        .any(|token| token.starts_with('~'));
+    if has_variable
+        || has_tilde_token
+        || command.contains('`')
+        || command.contains("..")
+        || command.contains("<(")
+        || command.contains(">(")
+    {
+        return Err(
+            "安全限制：当前平台没有内核级沙箱，无法裁决 ~、$变量、反引号、进程替换等动态路径，请改用项目内相对路径或已授权的明确绝对路径"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_restricted_command(
     command: &str,
     args: &[String],
@@ -502,10 +534,22 @@ pub(crate) fn validate_restricted_shell_command(
         }
     }
 
-    // 非 Windows 不拒绝 $VAR/反引号/~/.. 等动态语法：内核沙箱在运行时按真实
-    // 路径裁决，预拒会误杀合法命令；只检查字面绝对路径 token。
-    #[cfg(not(target_os = "windows"))]
+    // macOS 有 sandbox-exec：内核沙箱在运行时按真实路径裁决（含动态语法的
+    // 展开结果），预拒会误杀合法命令；只检查字面绝对路径 token。
+    #[cfg(target_os = "macos")]
     {
+        for (index, token) in shell_command_tokens(command).into_iter().enumerate() {
+            if index > 0 && unix_absolute_token(&token) {
+                ensure_unix_command_path(workspace, &token)?;
+            }
+        }
+    }
+
+    // 其余非 Windows 平台（Linux 等）没有运行时裁决层：先拒绝无法静态裁决的
+    // 动态语法，再检查字面绝对路径 token。
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        reject_dynamic_unix_shell_syntax(command)?;
         for (index, token) in shell_command_tokens(command).into_iter().enumerate() {
             if index > 0 && unix_absolute_token(&token) {
                 ensure_unix_command_path(workspace, &token)?;
@@ -936,5 +980,48 @@ mod tests {
         let _ = fs::remove_dir_all(&protected_dir);
         let _ = fs::remove_dir_all(&outside_dir);
         let _ = fs::remove_dir_all(&workspace);
+    }
+}
+
+#[cfg(all(test, not(any(target_os = "macos", target_os = "windows"))))]
+mod linux_tests {
+    use super::reject_dynamic_unix_shell_syntax;
+
+    #[test]
+    fn dynamic_syntax_is_rejected_without_kernel_sandbox() {
+        for command in [
+            "cat ~/.ssh/id_rsa",
+            "tar czf x.tgz ~/.aws",
+            "cat $HOME/.aws/credentials",
+            "cat ${HOME}/.ssh/id_rsa",
+            "echo $(whoami)",
+            "cat `echo /etc/passwd`",
+            "ls ..",
+            "cat ../secret.txt",
+            "diff <(cat /etc/passwd) x",
+            "cd ~",
+        ] {
+            assert!(
+                reject_dynamic_unix_shell_syntax(command).is_err(),
+                "should reject: {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn plain_commands_still_pass() {
+        for command in [
+            "ls -la",
+            "cat notes.txt",
+            "npm run build",
+            "grep -r TODO src",
+            "echo 100%",
+            "python train.py --epochs 10",
+        ] {
+            assert!(
+                reject_dynamic_unix_shell_syntax(command).is_ok(),
+                "should allow: {command}"
+            );
+        }
     }
 }

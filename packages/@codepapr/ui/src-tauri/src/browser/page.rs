@@ -255,7 +255,8 @@ pub(crate) fn write_browser_binary_file(
         return Err("拒绝写入项目文件夹之外的路径".to_string());
     }
 
-    fs::write(&target, bytes).map_err(|err| format!("写入浏览器输出文件失败: {err}"))?;
+    // 父目录校验不能覆盖"目标本身是 symlink"的逃逸：写入走拒绝符号链接的闸门
+    crate::shared::write_file_rejecting_symlink(&target, workspace, bytes)?;
     Ok(relative_string(workspace, &target))
 }
 
