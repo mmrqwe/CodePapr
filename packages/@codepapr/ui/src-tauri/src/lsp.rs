@@ -2291,6 +2291,12 @@ mod tests {
         fs::write(target, content).expect("write workspace file");
     }
 
+    fn write_lsp_frame(stdin: &mut impl std::io::Write, body: &str) {
+        let frame = format!("Content-Length: {}\r\n\r\n{}", body.len(), body);
+        stdin.write_all(frame.as_bytes()).expect("write frame");
+        stdin.flush().expect("flush frame");
+    }
+
     fn value_contains_text(value: &Value, needle: &str) -> bool {
         match value {
             Value::String(text) => text.contains(needle),
@@ -3010,6 +3016,172 @@ mod tests {
         let _ = lsp_close_document_impl(&workspace_path, "csharp", "App/Program.cs");
         let _ = lsp_stop_server_impl(&workspace_path, "csharp");
         let _ = fs::remove_dir_all(workspace);
+    }
+
+    /// 回归：畸形协议输入绝不能杀死 C# 分析器进程（稳定性 DoS）。
+    /// 缺 params、空 contentChanges、非法 JSON、类型错误的字段都必须降级为
+    /// JSON-RPC error / 日志并继续服务；超大 Content-Length 必须被协议层拒绝
+    /// （受控退出），而不是按声明长度分配内存。
+    #[test]
+    fn csharp_analyzer_survives_malformed_protocol_input() {
+        use std::io::{Read, Write};
+        use std::process::{Command, Stdio};
+        use std::sync::mpsc;
+
+        let tool_dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/CodePapr.CSharp.Analyzer");
+        let built_binary = tool_dir
+            .join("bin")
+            .join("Debug")
+            .join("net8.0")
+            .join("CodePapr.CSharp.Analyzer");
+        let built_dll = tool_dir
+            .join("bin")
+            .join("Debug")
+            .join("net8.0")
+            .join("CodePapr.CSharp.Analyzer.dll");
+
+        let launch = if built_binary.is_file() {
+            Some((built_binary.to_string_lossy().into_owned(), Vec::new()))
+        } else if built_dll.is_file() {
+            Some((
+                crate::lsp_managed_tools::dotnet_binary().to_string(),
+                vec![built_dll.to_string_lossy().into_owned()],
+            ))
+        } else {
+            None
+        };
+        let Some((program, args)) = launch else {
+            eprintln!("跳过：C# 分析器未构建（dotnet build tools/CodePapr.CSharp.Analyzer）");
+            return;
+        };
+
+        let mut child = Command::new(&program)
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn csharp analyzer");
+
+        let mut stdin = child.stdin.take().expect("analyzer stdin");
+        let stdout = child.stdout.take().expect("analyzer stdout");
+
+        // 读线程：把 stdout 上的 LSP 帧解析成 JSON 逐个送出
+        let (frames_tx, frames_rx) = mpsc::channel();
+        thread::spawn(move || {
+            let mut reader = std::io::BufReader::new(stdout);
+            loop {
+                let mut header = Vec::new();
+                let mut byte = [0u8; 1];
+                loop {
+                    match reader.read(&mut byte) {
+                        Ok(0) => return,
+                        Ok(_) => {
+                            header.push(byte[0]);
+                            if header.ends_with(b"\r\n\r\n") {
+                                break;
+                            }
+                        }
+                        Err(_) => return,
+                    }
+                }
+                let header_text = String::from_utf8_lossy(&header);
+                let Some(length) = header_text.lines().find_map(|line| {
+                    line.trim()
+                        .to_lowercase()
+                        .strip_prefix("content-length:")
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                }) else {
+                    return;
+                };
+                let mut body = vec![0u8; length];
+                if reader.read_exact(&mut body).is_err() {
+                    return;
+                }
+                let Ok(value) = serde_json::from_slice::<Value>(&body) else {
+                    return;
+                };
+                if frames_tx.send(value).is_err() {
+                    return;
+                }
+            }
+        });
+
+        write_lsp_frame(&mut stdin, r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
+        // 已知方法但缺 params：必须回错误而不是崩溃
+        write_lsp_frame(&mut stdin, r#"{"jsonrpc":"2.0","id":2,"method":"textDocument/hover"}"#);
+        // contentChanges 为空数组
+        write_lsp_frame(&mut stdin, r#"{"jsonrpc":"2.0","id":3,"method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///t/a.cs"},"contentChanges":[]}}"#);
+        // 非法 JSON 消息体（body 已完整读出、流仍同步，不得影响后续消息）
+        stdin
+            .write_all(b"Content-Length: 17\r\n\r\n{not valid json!!")
+            .expect("write malformed frame");
+        stdin.flush().expect("flush malformed frame");
+        // 畸形输入之后的合法 didOpen 仍必须被正常处理
+        write_lsp_frame(&mut stdin, r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///t/a.cs","text":"class C {}"}}}"#);
+        // position 字段类型错误
+        write_lsp_frame(&mut stdin, r#"{"jsonrpc":"2.0","id":4,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///t/a.cs"},"position":{"line":"x","character":0}}}"#);
+
+        let mut responses: Vec<Value> = Vec::new();
+        // 期望：id=1 result、id=2 error、id=3 error、publishDiagnostics、id=4 error
+        for _ in 0..5 {
+            let value = frames_rx
+                .recv_timeout(Duration::from_secs(20))
+                .expect("分析器停止响应（进程可能已被畸形输入杀死）");
+            responses.push(value);
+        }
+
+        let by_id = |id: i64| {
+            responses
+                .iter()
+                .find(|response| response.get("id").and_then(Value::as_i64) == Some(id))
+        };
+        assert!(
+            by_id(1).and_then(|response| response.get("result")).is_some(),
+            "initialize 应成功: {responses:?}"
+        );
+        for id in [2, 3, 4] {
+            let error = by_id(id)
+                .and_then(|response| response.get("error"))
+                .unwrap_or_else(|| panic!("请求 {id} 应返回 JSON-RPC error: {responses:?}"));
+            assert_eq!(
+                error.get("code").and_then(Value::as_i64),
+                Some(-32602),
+                "请求 {id} 应为 Invalid params: {responses:?}"
+            );
+        }
+        assert!(
+            responses.iter().any(|response| response
+                .get("method")
+                .and_then(Value::as_str)
+                == Some("textDocument/publishDiagnostics")),
+            "畸形输入之后的合法 didOpen 仍应产生诊断: {responses:?}"
+        );
+
+        // 超大 Content-Length（9MB > 8MB 上限）：拒绝并受控退出，绝不按声明分配
+        stdin
+            .write_all(b"Content-Length: 9437184\r\n\r\n")
+            .expect("write oversized header");
+        stdin.flush().expect("flush oversized header");
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let exit_status = loop {
+            match child.try_wait().expect("wait analyzer") {
+                Some(status) => break status,
+                None => {
+                    if Instant::now() >= deadline {
+                        let _ = child.kill();
+                        panic!("分析器在超大 Content-Length 后未受控退出");
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
+            }
+        };
+        assert!(
+            exit_status.success(),
+            "拒绝超大帧后应干净退出: {exit_status:?}"
+        );
     }
 
     #[test]
