@@ -43,6 +43,84 @@ fn collect_ancestors(path: &Path, out: &mut std::collections::BTreeSet<PathBuf>)
     }
 }
 
+/// 命令运行必须放行读取的系统目录（工具链、二进制与 dylib）。
+#[cfg(not(target_os = "windows"))]
+fn unix_system_read_dirs() -> Vec<PathBuf> {
+    [
+        "/bin",
+        "/usr",
+        "/System",
+        "/Library",
+        "/private/etc",
+        "/private/var/db",
+        "/private/tmp",
+        "/dev",
+    ]
+    .iter()
+    .map(PathBuf::from)
+    .collect()
+}
+
+/// 工具缓存/临时目录：沙箱中读写均放行。
+#[cfg(not(target_os = "windows"))]
+fn unix_tool_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![std::env::temp_dir()];
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        for name in [".npm", ".cache", ".cargo", ".local", ".nvm", ".volta"] {
+            dirs.push(home.join(name));
+        }
+    }
+    dirs
+}
+
+/// HOME 下常见工具配置文件（只读）：git/npm 读不到会直接报错。
+#[cfg(not(target_os = "windows"))]
+fn unix_home_read_files() -> Vec<PathBuf> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
+    let home = PathBuf::from(home);
+    [
+        ".gitconfig",
+        ".gitignore",
+        ".gitignore_global",
+        ".gitattributes",
+        ".npmrc",
+    ]
+    .iter()
+    .map(|name| home.join(name))
+    .collect()
+}
+
+/// workspace/授权策略之外的读放行根集，与 build_profile 的规则保持同构：
+/// 沙箱 profile 用它生成 file-read* 规则，命令预检（ensure_unix_command_path）
+/// 用它放行系统路径。全部 canonicalize 后去重；不存在的路径跳过（与
+/// add_subpath_rule 行为一致）。
+///
+/// Homebrew（Apple Silicon）：bin 目录只是符号链接，真实二进制与 dylib 在
+/// Cellar/opt 下，必须放行整个前缀的读取，否则 node/python 等无法加载。
+/// Intel 前缀 /usr/local 已被 /usr 规则覆盖。
+#[cfg(not(target_os = "windows"))]
+fn unix_allowed_read_roots() -> Vec<PathBuf> {
+    let mut candidates = unix_system_read_dirs();
+    candidates.extend(unix_tool_dirs());
+    candidates.extend(std::env::split_paths(&crate::shared::expanded_path()));
+    candidates.push(PathBuf::from("/opt/homebrew"));
+    candidates.extend(unix_home_read_files());
+
+    let mut roots: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
+    for path in candidates {
+        if path.as_os_str().is_empty() {
+            continue;
+        }
+        if let Ok(canonical) = path.canonicalize() {
+            roots.insert(canonical);
+        }
+    }
+    roots.into_iter().collect()
+}
+
 #[cfg(target_os = "macos")]
 fn protected_home_paths() -> Vec<PathBuf> {
     let Some(home) = std::env::var_os("HOME") else {
@@ -73,7 +151,6 @@ fn build_profile(
 ) -> Result<String, String> {
     let access = access.unwrap_or_default();
     let policy = db::load_external_access_policy()?;
-    let home = std::env::var_os("HOME").map(PathBuf::from);
     let mut lines = vec![
         "(version 1)".to_string(),
         "(import \"system.sb\")".to_string(),
@@ -86,77 +163,24 @@ fn build_profile(
     } else if access.allow_bind {
         lines.push("(allow network-bind)".to_string());
     }
-    // 所有读放行的根路径：用于推导祖先目录的 metadata 规则
+    // 所有读放行的根路径：用于推导祖先目录的 metadata 规则。
+    // 与命令预检共用 unix_allowed_read_roots，保证两侧放行集不漂移。
     let mut read_roots: Vec<PathBuf> = Vec::new();
 
-    let system_read_dirs = [
-        "/bin",
-        "/usr",
-        "/System",
-        "/Library",
-        "/private/etc",
-        "/private/var/db",
-        "/private/tmp",
-        "/dev",
-    ];
-    for path in system_read_dirs.iter().map(Path::new) {
-        if let Some(canonical) = add_subpath_rule(&mut lines, "allow", "file-read*", path) {
-            read_roots.push(canonical);
-        }
+    for canonical in unix_allowed_read_roots() {
+        lines.push(format!(
+            "(allow file-read* (subpath \"{}\"))",
+            profile_quote(&canonical)
+        ));
+        read_roots.push(canonical);
     }
 
-    let tool_dirs: Vec<PathBuf> = {
-        let mut dirs = vec![std::env::temp_dir()];
-        if let Some(home) = &home {
-            for name in [".npm", ".cache", ".cargo", ".local", ".nvm", ".volta"] {
-                dirs.push(home.join(name));
-            }
-        }
-        dirs
-    };
-    for path in &tool_dirs {
+    // 工具/临时目录额外放行写入（缓存性质）
+    for path in unix_tool_dirs() {
         if path.as_os_str().is_empty() {
             continue;
         }
-        if let Some(canonical) = add_subpath_rule(&mut lines, "allow", "file-read*", path) {
-            read_roots.push(canonical);
-        }
-        add_subpath_rule(&mut lines, "allow", "file-write*", path);
-    }
-
-    for path in std::env::split_paths(&crate::shared::expanded_path()) {
-        if let Some(canonical) = add_subpath_rule(&mut lines, "allow", "file-read*", &path) {
-            read_roots.push(canonical);
-        }
-    }
-
-    // Homebrew（Apple Silicon）：bin 目录只是符号链接，真实二进制与 dylib 在
-    // Cellar/opt 下，必须放行整个前缀的读取，否则 node/python 等无法加载。
-    // Intel 前缀 /usr/local 已被上面的 /usr 规则覆盖。
-    let homebrew_prefix = Path::new("/opt/homebrew");
-    if homebrew_prefix.is_dir() {
-        if let Some(canonical) =
-            add_subpath_rule(&mut lines, "allow", "file-read*", homebrew_prefix)
-        {
-            read_roots.push(canonical);
-        }
-    }
-
-    // HOME 下常见工具配置（只读）：git/npm 读不到会直接报错
-    if let Some(home) = &home {
-        for name in [
-            ".gitconfig",
-            ".gitignore",
-            ".gitignore_global",
-            ".gitattributes",
-            ".npmrc",
-        ] {
-            if let Some(canonical) =
-                add_subpath_rule(&mut lines, "allow", "file-read*", &home.join(name))
-            {
-                read_roots.push(canonical);
-            }
-        }
+        add_subpath_rule(&mut lines, "allow", "file-write*", &path);
     }
 
     if policy.yolo && access.workspace_write {
@@ -330,14 +354,32 @@ pub(crate) fn sandboxed_shell_command(
     Ok(command)
 }
 
-#[cfg(target_os = "windows")]
-fn windows_command_tokens(command: &str) -> Vec<String> {
+fn shell_command_tokens(command: &str) -> Vec<String> {
     command
         .split(|character: char| character.is_whitespace() || "\"'`=<>|;&()".contains(character))
-        .map(|token| token.trim_matches(|character: char| ",.;".contains(character)))
+        .map(|token| token.trim_matches(|character| ",.;".contains(character)))
         .filter(|token| !token.is_empty())
         .map(ToString::to_string)
         .collect()
+}
+
+/// 规范化路径；路径尚不存在（如将要创建的文件）时回退到最近的已存在祖先目录。
+fn canonicalize_with_existing_ancestor(path: &Path) -> Result<PathBuf, String> {
+    match std::fs::canonicalize(path) {
+        Ok(target) => Ok(target),
+        Err(_) => {
+            let mut parent = path
+                .parent()
+                .ok_or_else(|| "无法确定命令路径的父目录".to_string())?;
+            while !parent.exists() {
+                parent = parent
+                    .parent()
+                    .ok_or_else(|| "命令路径不存在或无法访问".to_string())?;
+            }
+            std::fs::canonicalize(parent)
+                .map_err(|err| format!("命令路径不存在或无法访问: {err}"))
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -350,22 +392,39 @@ fn windows_absolute_token(token: &str) -> bool {
 
 #[cfg(target_os = "windows")]
 fn ensure_windows_command_path(workspace: &Path, raw_path: &str) -> Result<(), String> {
-    let path = Path::new(raw_path);
-    let target = match std::fs::canonicalize(path) {
-        Ok(target) => target,
-        Err(_) => {
-            let mut parent = path
-                .parent()
-                .ok_or_else(|| "无法确定命令路径的父目录".to_string())?;
-            while !parent.exists() {
-                parent = parent
-                    .parent()
-                    .ok_or_else(|| "命令路径不存在或无法访问".to_string())?;
-            }
-            std::fs::canonicalize(parent)
-                .map_err(|err| format!("命令路径不存在或无法访问: {err}"))?
-        }
-    };
+    let target = canonicalize_with_existing_ancestor(Path::new(raw_path))?;
+    crate::shared::ensure_path_accessible(workspace, &target)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn unix_absolute_token(token: &str) -> bool {
+    token.starts_with('/')
+}
+
+/// Unix 平台的命令路径预检，与 sandbox-exec profile 的放行集对齐：
+/// 1. workspace 子路径直接放行（工作区内的 .git/.config 等是合法项目数据）；
+/// 2. 受保护目录先于放行集拒绝——profile 的 deny 规则追加在 allow 之后、
+///    优先级更高，PATH 里的 ~/.config/yarn 等子路径不得放行；
+/// 3. 命中 unix_allowed_read_roots（系统/工具/PATH/Homebrew）放行；
+/// 4. 其余交给 ensure_path_accessible 按 yolo/已授权目录与文件裁决。
+#[cfg(not(target_os = "windows"))]
+fn ensure_unix_command_path(workspace: &Path, raw_path: &str) -> Result<(), String> {
+    let target = canonicalize_with_existing_ancestor(Path::new(raw_path))?;
+    if crate::shared::path_is_same_or_child(&target, workspace) {
+        return Ok(());
+    }
+    if crate::shared::is_protected_external_path(&target) {
+        return Err(format!(
+            "安全限制：禁止访问受保护的隐藏目录 {}",
+            target.display()
+        ));
+    }
+    if unix_allowed_read_roots()
+        .iter()
+        .any(|root| crate::shared::path_is_same_or_child(&target, root))
+    {
+        return Ok(());
+    }
     crate::shared::ensure_path_accessible(workspace, &target)
 }
 
@@ -406,7 +465,7 @@ pub(crate) fn validate_restricted_command(
     #[cfg(target_os = "windows")]
     {
         for argument in args {
-            for token in windows_command_tokens(argument) {
+            for token in shell_command_tokens(argument) {
                 if windows_absolute_token(&token) {
                     ensure_windows_command_path(workspace, &token)?;
                 }
@@ -417,7 +476,14 @@ pub(crate) fn validate_restricted_command(
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (command, args, workspace);
+        for argument in args {
+            for token in shell_command_tokens(argument) {
+                if unix_absolute_token(&token) {
+                    ensure_unix_command_path(workspace, &token)?;
+                }
+            }
+        }
+        let _ = command;
     }
     Ok(())
 }
@@ -429,23 +495,32 @@ pub(crate) fn validate_restricted_shell_command(
     #[cfg(target_os = "windows")]
     {
         reject_dynamic_windows_shell_syntax(command)?;
-        for (index, token) in windows_command_tokens(command).into_iter().enumerate() {
+        for (index, token) in shell_command_tokens(command).into_iter().enumerate() {
             if index > 0 && windows_absolute_token(&token) {
                 ensure_windows_command_path(workspace, &token)?;
             }
         }
     }
 
+    // 非 Windows 不拒绝 $VAR/反引号/~/.. 等动态语法：内核沙箱在运行时按真实
+    // 路径裁决，预拒会误杀合法命令；只检查字面绝对路径 token。
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (command, workspace);
+        for (index, token) in shell_command_tokens(command).into_iter().enumerate() {
+            if index > 0 && unix_absolute_token(&token) {
+                ensure_unix_command_path(workspace, &token)?;
+            }
+        }
     }
     Ok(())
 }
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::{build_profile, sandboxed_command, SandboxAccess};
+    use super::{
+        build_profile, sandboxed_command, validate_restricted_command,
+        validate_restricted_shell_command, SandboxAccess,
+    };
     use std::fs;
     use std::path::PathBuf;
 
@@ -769,5 +844,97 @@ mod tests {
             "homebrew npm must run in sandbox; stderr: {:?}",
             output.stderr
         );
+    }
+
+    #[test]
+    fn unix_validation_allows_workspace_and_system_paths() {
+        // 工作区不能放在临时目录：临时目录本身是放行根，会掩盖工作区断言
+        let workspace = home_test_workspace("unixval-ok");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+        let probe = workspace.join("a.txt");
+        fs::write(&probe, "x").expect("probe should be written");
+
+        validate_restricted_command("cat", &[probe.display().to_string()], &workspace)
+            .expect("workspace path must pass");
+        validate_restricted_command("ls", &["/usr/bin".to_string()], &workspace)
+            .expect("system path must pass");
+        validate_restricted_shell_command(&format!("cat {}", probe.display()), &workspace)
+            .expect("shell command with workspace path must pass");
+        validate_restricted_shell_command("echo hello && ls -la", &workspace)
+            .expect("relative shell command must pass");
+
+        // 工作区内的 .git 是合法项目数据：workspace 判定先于受保护目录规则
+        let ws_git_file = workspace.join(".git").join("config");
+        fs::create_dir_all(ws_git_file.parent().unwrap()).expect(".git dir should exist");
+        fs::write(&ws_git_file, "x").expect("git config should be written");
+        validate_restricted_command("cat", &[ws_git_file.display().to_string()], &workspace)
+            .expect("workspace .git must pass");
+
+        // 尚不存在的工作区路径（将要创建的文件）：回退祖先目录判定
+        let future = workspace.join("not-created-yet.txt");
+        validate_restricted_command("touch", &[future.display().to_string()], &workspace)
+            .expect("nonexistent workspace path must pass via ancestor fallback");
+
+        let _ = fs::remove_dir_all(&workspace);
+    }
+
+    #[test]
+    fn unix_validation_rejects_protected_and_unauthorized_paths() {
+        let workspace = home_test_workspace("unixval-deny");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+        let home = PathBuf::from(std::env::var_os("HOME").expect("HOME must be set"));
+        let pid = std::process::id();
+
+        // 受保护目录：即使 YOLO 模式也必须拒绝（与 profile 尾部 deny 规则一致）
+        let protected_dir = home.join(format!("codepapr-unixval-protected-{pid}"));
+        let protected_file = protected_dir.join(".aws").join("credentials");
+        fs::create_dir_all(protected_file.parent().unwrap())
+            .expect("protected dir should exist");
+        fs::write(&protected_file, "x").expect("protected file should be written");
+
+        let err = validate_restricted_command(
+            "cat",
+            &[protected_file.display().to_string()],
+            &workspace,
+        )
+        .expect_err("protected path must be rejected");
+        assert!(err.contains("受保护"), "unexpected error: {err}");
+
+        let err = validate_restricted_shell_command(
+            &format!("cat {}", protected_file.display()),
+            &workspace,
+        )
+        .expect_err("protected path in shell command must be rejected");
+        assert!(err.contains("受保护"), "unexpected error: {err}");
+
+        // 未授权外部路径：非 YOLO 策略下拒绝
+        let outside_dir = home.join(format!("codepapr-unixval-outside-{pid}"));
+        let outside_file = outside_dir.join("secret.txt");
+        fs::create_dir_all(&outside_dir).expect("outside dir should exist");
+        fs::write(&outside_file, "x").expect("outside file should be written");
+
+        if !crate::db::load_external_access_policy()
+            .expect("policy should load")
+            .yolo
+        {
+            let err = validate_restricted_command(
+                "cat",
+                &[outside_file.display().to_string()],
+                &workspace,
+            )
+            .expect_err("unauthorized outside path must be rejected");
+            assert!(err.contains("未获授权"), "unexpected error: {err}");
+
+            let err = validate_restricted_shell_command(
+                &format!("cat {}", outside_file.display()),
+                &workspace,
+            )
+            .expect_err("unauthorized outside path in shell command must be rejected");
+            assert!(err.contains("未获授权"), "unexpected error: {err}");
+        }
+
+        let _ = fs::remove_dir_all(&protected_dir);
+        let _ = fs::remove_dir_all(&outside_dir);
+        let _ = fs::remove_dir_all(&workspace);
     }
 }
