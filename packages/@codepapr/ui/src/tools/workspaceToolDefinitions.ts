@@ -14,7 +14,7 @@ const tools: IToolDefinition[] = [
   {
     name: 'workspace_list_files',
     description:
-      '列出当前项目文件夹内的文件树。用于理解项目结构。路径必须是相对于项目文件夹的路径，不能使用绝对路径或 ..。',
+      '列出当前项目文件夹内的文件树。用于理解项目结构。路径必须是相对于项目文件夹的路径，不能使用绝对路径或 ..。node_modules/build/dist/.venv/__pycache__ 等目录会作为目录条目列出但不会自动展开其内部，如需查看其内容请用 relativePath 指定该目录。',
     parameters: {
       type: 'object',
       properties: {
@@ -24,7 +24,7 @@ const tools: IToolDefinition[] = [
         },
         maxDepth: {
           type: 'number',
-          description: '递归深度，默认 2，最大 6。',
+          description: '递归深度，默认 2，最大 20。',
         },
       },
     },
@@ -179,7 +179,7 @@ const tools: IToolDefinition[] = [
   {
     name: 'workspace_search_text',
     description:
-      '在当前项目文件夹内搜索文本内容，返回文件路径、行号、列号、上下文和匹配预览。支持 smart-case、正则，并默认遵守常见忽略目录与根级 .gitignore/.ignore。',
+      '在当前项目文件夹内搜索文本内容，返回文件路径、行号、列号、上下文和匹配预览。支持 smart-case、正则。默认跳过 node_modules/build/dist/.venv/__pycache__ 等忽略目录与 .gitignore 排除的文件；设置 includeIgnoredDirs=true 可搜索这些目录（耗时显著增加，结果仍受 maxResults 限制）。',
     parameters: {
       type: 'object',
       properties: {
@@ -211,6 +211,11 @@ const tools: IToolDefinition[] = [
           type: 'number',
           description: '搜索时单个文件最大读取字节数，默认 500000，最大 1000000。',
         },
+        includeIgnoredDirs: {
+          type: 'boolean',
+          description:
+            '是否搜索被忽略目录（node_modules/build/dist/.venv/__pycache__ 等）内部，默认 false；设为 true 会穿透 .gitignore 且显著增加耗时，仅在需要时开启。',
+        },
       },
       required: ['query'],
     },
@@ -218,7 +223,7 @@ const tools: IToolDefinition[] = [
   {
     name: 'workspace_search_files',
     description:
-      '按文件名或路径片段搜索当前项目内的文件和目录，返回匹配路径、名称、类型和字节数。支持 smart-case、正则，并默认遵守常见忽略目录与根级 .gitignore/.ignore。',
+      '按文件名或路径片段搜索当前项目内的文件和目录，返回匹配路径、名称、类型和字节数。支持 smart-case、正则。默认跳过 node_modules/build/dist/.venv/__pycache__ 等忽略目录与 .gitignore 排除的文件；设置 includeIgnoredDirs=true 可搜索这些目录（耗时显著增加）。',
     parameters: {
       type: 'object',
       properties: {
@@ -237,6 +242,11 @@ const tools: IToolDefinition[] = [
         maxResults: {
           type: 'number',
           description: '最多返回多少条匹配，默认 120。',
+        },
+        includeIgnoredDirs: {
+          type: 'boolean',
+          description:
+            '是否搜索被忽略目录（node_modules/build/dist/.venv/__pycache__ 等）内部，默认 false；设为 true 会穿透 .gitignore 且显著增加耗时，仅在需要时开启。',
         },
       },
       required: ['query'],

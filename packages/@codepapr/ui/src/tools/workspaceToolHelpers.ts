@@ -173,6 +173,7 @@ export interface SearchTextArgs {
   maxResults?: number;
   maxMatchesPerFile?: number;
   maxBytesPerFile?: number;
+  includeIgnoredDirs?: boolean;
 }
 
 export interface SearchFilesArgs {
@@ -180,6 +181,7 @@ export interface SearchFilesArgs {
   caseSensitive?: boolean;
   isRegexp?: boolean;
   maxResults?: number;
+  includeIgnoredDirs?: boolean;
 }
 
 

@@ -324,6 +324,89 @@ describe('CodingWorkbench', () => {
     expect(visibleInsightPanel?.parentElement?.classList.contains('hidden')).toBe(false);
   });
 
+  it('lazily loads a directory subtree when the user expands an unloaded directory', async () => {
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'list_workspace_files') {
+        if (args?.relativePath === 'src') {
+          return {
+            root: '/tmp/codepapr-workspace',
+            entries: [
+              {
+                path: 'src/App.tsx',
+                name: 'App.tsx',
+                isDir: false,
+                bytes: 24,
+                hasChildren: false,
+              },
+              {
+                path: 'src/components',
+                name: 'components',
+                isDir: true,
+                bytes: 0,
+                hasChildren: true,
+              },
+            ],
+            truncated: false,
+          };
+        }
+        return {
+          root: '/tmp/codepapr-workspace',
+          entries: [
+            {
+              path: 'README.md',
+              name: 'README.md',
+              isDir: false,
+              bytes: 12,
+              hasChildren: false,
+            },
+            {
+              path: 'src',
+              name: 'src',
+              isDir: true,
+              bytes: 0,
+              hasChildren: true,
+            },
+          ],
+          truncated: false,
+        };
+      }
+      return undefined;
+    });
+
+    await act(async () => {
+      root.render(
+        <CodingWorkbench
+          selectedPath={null}
+          selectedGitFile={null}
+          selectedLocation={null}
+          previewPlacement="hidden"
+          onSelectPath={() => undefined}
+        />
+      );
+    });
+
+    await flushEffects();
+    expect(container.textContent).toContain('README.md');
+    expect(container.textContent).toContain('src');
+    expect(container.textContent).not.toContain('App.tsx');
+
+    const srcButton = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'src'
+    );
+    expect(srcButton).toBeTruthy();
+
+    await act(async () => {
+      srcButton?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(container.textContent).toContain('App.tsx');
+    const lazyCall = invokeMock.mock.calls.find(
+      ([command, args]) => command === 'list_workspace_files' && args?.relativePath === 'src'
+    );
+    expect(lazyCall).toBeTruthy();
+  });
+
   it('closeWorkspace 后 projectGraphLoading 重置为 false，不再卡在初始化浮层', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'list_workspace_files') {

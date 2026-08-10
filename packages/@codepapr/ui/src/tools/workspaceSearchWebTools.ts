@@ -46,6 +46,7 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
       maxResults: asOptionalNumber(args.maxResults),
       maxMatchesPerFile: asOptionalNumber(args.maxMatchesPerFile),
       maxBytesPerFile: asOptionalNumber(args.maxBytesPerFile),
+      includeIgnoredDirs: asOptionalBoolean(args.includeIgnoredDirs, 'includeIgnoredDirs'),
     };
     return await invoke<SearchResult>('search_workspace_text', {
       workspacePath: workspace(),
@@ -57,6 +58,7 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
       maxMatchesPerFile: parsed.maxMatchesPerFile,
       maxBytesPerFile: parsed.maxBytesPerFile,
       includeCodePaprApps,
+      includeIgnoredDirs: parsed.includeIgnoredDirs,
     });
   });
 
@@ -66,6 +68,7 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
       caseSensitive: asOptionalBoolean(args.caseSensitive, 'caseSensitive'),
       isRegexp: asOptionalBoolean(args.isRegexp, 'isRegexp'),
       maxResults: asOptionalNumber(args.maxResults),
+      includeIgnoredDirs: asOptionalBoolean(args.includeIgnoredDirs, 'includeIgnoredDirs'),
     };
     return await invoke<PathSearchResult>('search_workspace_paths', {
       workspacePath: workspace(),
@@ -74,6 +77,7 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
       isRegexp: parsed.isRegexp,
       maxResults: parsed.maxResults,
       includeCodePaprApps,
+      includeIgnoredDirs: parsed.includeIgnoredDirs,
     });
   });
 

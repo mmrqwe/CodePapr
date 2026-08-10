@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolRegistry } from '@codepapr/core';
 
 const { invokeMock } = vi.hoisted(() => ({
-  invokeMock: vi.fn(async () => ({})),
+  invokeMock: vi.fn(
+    async (_command: string, _args?: Record<string, unknown>) => ({})
+  ),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -257,6 +259,62 @@ describe('individual domain registrars register their exact tool sets', () => {
     expect(register(registerWorkspaceMiscTools)).toEqual([
       'local_time_now', 'workspace_project_diagnostics',
     ]);
+  });
+});
+
+describe('workspace search tools includeIgnoredDirs passthrough', () => {
+  const emptySearchResult = {
+    query: 'x',
+    matches: [],
+    truncated: false,
+    regexDegraded: false,
+    note: null,
+    skippedFiles: 0,
+  };
+
+  beforeEach(() => {
+    invokeMock.mockClear();
+  });
+
+  function makeRegistry(): ToolRegistry {
+    const registry = new ToolRegistry();
+    const ctx = {
+      registry,
+      workspace: () => '/tmp/ws',
+      options: { disableWebSearchTools: true },
+    } as unknown as WorkspaceToolContext;
+    registerWorkspaceSearchWebTools(ctx);
+    return registry;
+  }
+
+  it('forwards includeIgnoredDirs to the text search command', async () => {
+    invokeMock.mockResolvedValueOnce(emptySearchResult);
+    const registry = makeRegistry();
+    await registry.execute('workspace_search_text', { query: 'foo', includeIgnoredDirs: true });
+    const call = invokeMock.mock.calls.find(([command]) => command === 'search_workspace_text');
+    expect(call?.[1]).toMatchObject({ includeIgnoredDirs: true });
+  });
+
+  it('leaves includeIgnoredDirs undefined when the agent does not pass it', async () => {
+    invokeMock.mockResolvedValueOnce(emptySearchResult);
+    const registry = makeRegistry();
+    await registry.execute('workspace_search_text', { query: 'foo' });
+    const call = invokeMock.mock.calls.find(([command]) => command === 'search_workspace_text');
+    expect(call?.[1]?.includeIgnoredDirs).toBeUndefined();
+  });
+
+  it('forwards includeIgnoredDirs to the path search command', async () => {
+    invokeMock.mockResolvedValueOnce({
+      query: 'x',
+      matches: [],
+      truncated: false,
+      regexDegraded: false,
+      note: null,
+    });
+    const registry = makeRegistry();
+    await registry.execute('workspace_search_files', { query: 'foo', includeIgnoredDirs: true });
+    const call = invokeMock.mock.calls.find(([command]) => command === 'search_workspace_paths');
+    expect(call?.[1]).toMatchObject({ includeIgnoredDirs: true });
   });
 });
 

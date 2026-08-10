@@ -8,6 +8,7 @@ pub(crate) struct FileEntry {
     pub(crate) name: String,
     pub(crate) is_dir: bool,
     pub(crate) bytes: u64,
+    pub(crate) has_children: bool,
 }
 
 #[derive(Serialize, Clone)]

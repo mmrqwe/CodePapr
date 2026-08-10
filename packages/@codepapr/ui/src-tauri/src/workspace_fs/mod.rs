@@ -25,8 +25,8 @@ pub(crate) use types::{ListFilesResult, ReadFileResult};
 // ── Shared constants ─────────────────────────────────────────────────
 
 pub(crate) const DEFAULT_MAX_DEPTH: usize = 2;
-pub(crate) const MAX_DEPTH: usize = 6;
-pub(crate) const MAX_ENTRIES: usize = 800;
+pub(crate) const MAX_DEPTH: usize = 20;
+pub(crate) const MAX_ENTRIES: usize = 10_000;
 pub(crate) const DEFAULT_MAX_READ_BYTES: usize = 500_000;
 pub(crate) const MAX_READ_BYTES: usize = 1_000_000;
 pub(crate) const MAX_RANGE_SOURCE_BYTES: usize = 20_000_000;
@@ -44,7 +44,17 @@ pub(crate) const MAX_SEARCH_MAX_MATCHES_PER_FILE: usize = 20;
 
 pub(crate) fn should_ignore_dir(name: &str) -> bool {
     // 仅排除 .git 与重型目录：.github/.vscode 等点目录允许被搜索与列出
-    name == ".git" || IGNORED_DIRS.contains(&name)
+    name == ".git" || APP_STATE_DIRS.contains(&name) || IGNORED_DIRS.contains(&name)
+}
+
+/// 应用自身的项目级状态目录：任何模式（含"显示被忽略目录"的文件树/搜索）都始终隐藏。
+pub(crate) fn is_app_state_dir(name: &str) -> bool {
+    APP_STATE_DIRS.contains(&name)
+}
+
+/// 通用重型/产物目录：文件树与 list 工具默认列出但不下钻，搜索工具需显式 includeIgnoredDirs。
+pub(crate) fn is_generic_ignored_dir(name: &str) -> bool {
+    IGNORED_DIRS.contains(&name)
 }
 
 /// app 模式白名单：仅放行 `.CodePapr/apps` 子树（Papr 应用源码存放处）。
@@ -101,11 +111,10 @@ const IGNORED_DIRS: &[&str] = &[
     ".ruff_cache",
     ".tox",
     ".parcel-cache",
-    // 应用自身的项目级状态目录（非 git 项目中无 gitignore 保护）
-    ".CodePapr",
-    ".ProjectGraph",
-    ".scratch",
 ];
+
+// 应用自身的项目级状态目录（非 git 项目中无 gitignore 保护），任何模式始终隐藏
+const APP_STATE_DIRS: &[&str] = &[".CodePapr", ".ProjectGraph", ".scratch"];
 
 #[cfg(test)]
 mod tests;

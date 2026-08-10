@@ -14,9 +14,10 @@ use super::types::{
     SearchResult,
 };
 use super::{
-    should_ignore_dir, DEFAULT_SEARCH_CONTEXT_LINES, DEFAULT_SEARCH_MAX_FILE_BYTES,
-    DEFAULT_SEARCH_MAX_MATCHES_PER_FILE, MAX_PATH_SEARCH_RESULTS, MAX_SEARCH_CONTEXT_LINES,
-    MAX_SEARCH_MAX_FILE_BYTES, MAX_SEARCH_MAX_MATCHES_PER_FILE, MAX_SEARCH_RESULTS,
+    is_app_state_dir, should_ignore_dir, DEFAULT_SEARCH_CONTEXT_LINES,
+    DEFAULT_SEARCH_MAX_FILE_BYTES, DEFAULT_SEARCH_MAX_MATCHES_PER_FILE, MAX_PATH_SEARCH_RESULTS,
+    MAX_SEARCH_CONTEXT_LINES, MAX_SEARCH_MAX_FILE_BYTES, MAX_SEARCH_MAX_MATCHES_PER_FILE,
+    MAX_SEARCH_RESULTS,
 };
 
 #[tauri::command]
@@ -31,9 +32,10 @@ pub(crate) async fn search_workspace_text(
     max_matches_per_file: Option<usize>,
     max_bytes_per_file: Option<usize>,
     include_codepapr_apps: Option<bool>,
+    include_ignored_dirs: Option<bool>,
 ) -> Result<SearchResult, String> {
     run_blocking_workspace_task(move || {
-        search_workspace_text_impl(
+        search_workspace_text_impl_full(
             workspace_path,
             query,
             case_sensitive,
@@ -43,6 +45,7 @@ pub(crate) async fn search_workspace_text(
             max_matches_per_file,
             max_bytes_per_file,
             include_codepapr_apps,
+            include_ignored_dirs,
         )
     })
     .await
@@ -56,15 +59,17 @@ pub(crate) async fn search_workspace_paths(
     is_regexp: Option<bool>,
     max_results: Option<usize>,
     include_codepapr_apps: Option<bool>,
+    include_ignored_dirs: Option<bool>,
 ) -> Result<PathSearchResult, String> {
     run_blocking_workspace_task(move || {
-        search_workspace_paths_impl(
+        search_workspace_paths_impl_full(
             workspace_path,
             query,
             case_sensitive,
             is_regexp,
             max_results,
             include_codepapr_apps,
+            include_ignored_dirs,
         )
     })
     .await
@@ -82,6 +87,33 @@ pub(crate) fn search_workspace_text_impl(
     max_bytes_per_file: Option<usize>,
     include_codepapr_apps: Option<bool>,
 ) -> Result<SearchResult, String> {
+    search_workspace_text_impl_full(
+        workspace_path,
+        query,
+        case_sensitive,
+        is_regexp,
+        context_lines,
+        max_results,
+        max_matches_per_file,
+        max_bytes_per_file,
+        include_codepapr_apps,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn search_workspace_text_impl_full(
+    workspace_path: String,
+    query: String,
+    case_sensitive: Option<bool>,
+    is_regexp: Option<bool>,
+    context_lines: Option<usize>,
+    max_results: Option<usize>,
+    max_matches_per_file: Option<usize>,
+    max_bytes_per_file: Option<usize>,
+    include_codepapr_apps: Option<bool>,
+    include_ignored_dirs: Option<bool>,
+) -> Result<SearchResult, String> {
     let workspace = canonical_workspace(&workspace_path)?;
     let prepared = prepare_text_search(
         query,
@@ -93,8 +125,9 @@ pub(crate) fn search_workspace_text_impl(
         max_bytes_per_file,
     )?;
     let include_apps = include_codepapr_apps.unwrap_or(false);
+    let include_ignored = include_ignored_dirs.unwrap_or(false);
     let (matches, truncated, skipped_files) =
-        collect_search_matches(&workspace, &prepared, include_apps)?;
+        collect_search_matches(&workspace, &prepared, include_apps, include_ignored)?;
 
     Ok(SearchResult {
         query: prepared.raw_query.clone(),
@@ -110,6 +143,7 @@ pub(crate) fn search_workspace_text_impl(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn search_workspace_paths_impl(
     workspace_path: String,
     query: String,
@@ -118,10 +152,33 @@ pub(crate) fn search_workspace_paths_impl(
     max_results: Option<usize>,
     include_codepapr_apps: Option<bool>,
 ) -> Result<PathSearchResult, String> {
+    search_workspace_paths_impl_full(
+        workspace_path,
+        query,
+        case_sensitive,
+        is_regexp,
+        max_results,
+        include_codepapr_apps,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn search_workspace_paths_impl_full(
+    workspace_path: String,
+    query: String,
+    case_sensitive: Option<bool>,
+    is_regexp: Option<bool>,
+    max_results: Option<usize>,
+    include_codepapr_apps: Option<bool>,
+    include_ignored_dirs: Option<bool>,
+) -> Result<PathSearchResult, String> {
     let workspace = canonical_workspace(&workspace_path)?;
     let prepared = prepare_path_search(query, case_sensitive, is_regexp, max_results)?;
     let include_apps = include_codepapr_apps.unwrap_or(false);
-    let (matches, truncated) = collect_path_matches(&workspace, &prepared, include_apps)?;
+    let include_ignored = include_ignored_dirs.unwrap_or(false);
+    let (matches, truncated) =
+        collect_path_matches(&workspace, &prepared, include_apps, include_ignored)?;
 
     Ok(PathSearchResult {
         query: prepared.raw_query.clone(),
@@ -244,26 +301,48 @@ fn prepare_path_search(
 /// .gitignore 双重屏蔽）；app 模式对 `.CodePapr/apps` 的放行由
 /// build_apps_walker 的二次遍历实现（override 语义是"只搜匹配项"，
 /// 会误杀全库其余文件，不能用于此场景）。
-fn build_search_walker_builder(workspace: &Path) -> WalkBuilder {
+fn build_search_walker_builder(workspace: &Path, include_ignored_dirs: bool) -> WalkBuilder {
     let mut builder = WalkBuilder::new(workspace);
-    builder
-        .hidden(false)
-        .require_git(false)
-        .parents(true)
-        .git_ignore(true)
-        .git_exclude(true)
-        .ignore(true)
-        .filter_entry(|entry| {
-            if entry.depth() == 0 {
-                return true;
-            }
+    if include_ignored_dirs {
+        // 全量模式：穿透 .gitignore 与通用忽略目录（node_modules/build/dist/.venv 等），
+        // 仅排除 `.git` 与应用自身状态目录（.CodePapr/.ProjectGraph/.scratch）。
+        builder
+            .hidden(false)
+            .require_git(false)
+            .parents(false)
+            .git_ignore(false)
+            .git_exclude(false)
+            .ignore(false)
+            .filter_entry(|entry| {
+                if entry.depth() == 0 {
+                    return true;
+                }
+                entry
+                    .file_name()
+                    .to_str()
+                    .map(|name| !(name == ".git" || is_app_state_dir(name)))
+                    .unwrap_or(true)
+            });
+    } else {
+        builder
+            .hidden(false)
+            .require_git(false)
+            .parents(true)
+            .git_ignore(true)
+            .git_exclude(true)
+            .ignore(true)
+            .filter_entry(|entry| {
+                if entry.depth() == 0 {
+                    return true;
+                }
 
-            entry
-                .file_name()
-                .to_str()
-                .map(|name| !should_ignore_dir(name))
-                .unwrap_or(true)
-        });
+                entry
+                    .file_name()
+                    .to_str()
+                    .map(|name| !should_ignore_dir(name))
+                    .unwrap_or(true)
+            });
+    }
 
     builder
 }
@@ -293,8 +372,12 @@ fn build_apps_walker(workspace: &Path) -> Option<ignore::Walk> {
     Some(builder.build())
 }
 
-fn build_search_walker(workspace: &Path, max_filesize: Option<usize>) -> ignore::Walk {
-    let mut builder = build_search_walker_builder(workspace);
+fn build_search_walker(
+    workspace: &Path,
+    max_filesize: Option<usize>,
+    include_ignored_dirs: bool,
+) -> ignore::Walk {
+    let mut builder = build_search_walker_builder(workspace, include_ignored_dirs);
 
     if let Some(limit) = max_filesize {
         builder.max_filesize(Some(limit as u64));
@@ -403,11 +486,12 @@ pub(crate) fn collect_search_matches(
     workspace: &Path,
     options: &PreparedTextSearch,
     include_codepapr_apps: bool,
+    include_ignored_dirs: bool,
 ) -> Result<(Vec<SearchMatch>, bool, usize), String> {
     let workspace_owned = workspace.to_path_buf();
     let max_filesize = options.max_bytes_per_file;
 
-    let builder = build_search_walker_builder(&workspace_owned);
+    let builder = build_search_walker_builder(&workspace_owned, include_ignored_dirs);
 
     // 不使用 builder.max_filesize 预过滤：超限文件需要计入 skipped_files，
     // 让调用方知道 0 结果不等于全库无匹配（改在访问条目时检查大小）
@@ -484,11 +568,12 @@ pub(crate) fn collect_path_matches(
     workspace: &Path,
     options: &PreparedPathSearch,
     include_codepapr_apps: bool,
+    include_ignored_dirs: bool,
 ) -> Result<(Vec<PathSearchMatch>, bool), String> {
     let mut matches = Vec::new();
     let mut truncated = false;
 
-    for entry in build_search_walker(workspace, None) {
+    for entry in build_search_walker(workspace, None, include_ignored_dirs) {
         if match_path_entry(entry, workspace, options, &mut matches) {
             truncated = true;
             return Ok((matches, truncated));

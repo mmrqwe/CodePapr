@@ -42,12 +42,35 @@ interface FileEntry {
   name: string;
   isDir: boolean;
   bytes: number;
+  hasChildren?: boolean;
 }
 
 interface ListFilesResult {
   root: string;
   entries: FileEntry[];
   truncated: boolean;
+}
+
+// 初始加载深度：根 + 5 层（兼顾 ProjectGraph 候选检测）；更深目录按需懒加载。
+const INITIAL_TREE_MAX_DEPTH = 6;
+// 懒加载单个目录时的遍历深度（目录本身 + 两层子项）。
+const LAZY_DIR_MAX_DEPTH = 2;
+
+// 合并浅层扫描与各懒加载目录子树为一张扁平条目表（按 path 去重）。
+function mergeFlatFileEntries(
+  shallow: readonly FileEntry[],
+  dirBuckets: Readonly<Record<string, readonly FileEntry[]>>
+): FileEntry[] {
+  const byPath = new Map<string, FileEntry>();
+  for (const entry of shallow) {
+    byPath.set(entry.path, entry);
+  }
+  for (const bucket of Object.values(dirBuckets)) {
+    for (const entry of bucket) {
+      byPath.set(entry.path, entry);
+    }
+  }
+  return [...byPath.values()];
 }
 
 function basename(path: string): string {
@@ -159,7 +182,11 @@ function FileTreeRow({
         style={{ paddingLeft: 8 + depth * 14 }}
       >
         <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center">
-          {node.isDir ? <TreeChevronIcon isExpanded={isExpanded} /> : <span className="h-3.5 w-3.5" />}
+          {node.isDir && (node.children.length > 0 || node.hasChildren) ? (
+            <TreeChevronIcon isExpanded={isExpanded} />
+          ) : (
+            <span className="h-3.5 w-3.5" />
+          )}
         </span>
         {node.isDir ? <FolderIcon isExpanded={isExpanded} /> : <FileIcon />}
         <span className={`min-w-0 truncate ${node.isDir ? 'font-medium text-slate-100' : ''}`}>
@@ -220,7 +247,9 @@ export function CodingWorkbench({
   const t = getTranslation(settings.lang);
   const appCount = useAppRuntimeStore((state) => state.apps.length);
   const appMountSignal = useAppRuntimeStore((state) => state.mountSignal);
-  const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [shallowEntries, setShallowEntries] = useState<FileEntry[]>([]);
+  const [dirEntries, setDirEntries] = useState<Record<string, FileEntry[]>>({});
+  const [loadedDirectories, setLoadedDirectories] = useState<string[]>([]);
   const [activePath, setActivePath] = useState<string | null>(selectedPath);
   const [expandedDirectories, setExpandedDirectories] = useState<string[]>([]);
   const [isLoadingTree, setIsLoadingTree] = useState(false);
@@ -238,6 +267,18 @@ export function CodingWorkbench({
   const projectGraphLoadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const defaultHealAttemptedRef = useRef<string | null>(null);
   const [isInitialGraphPreload, setIsInitialGraphPreload] = useState(false);
+  const loadedDirectoriesRef = useRef<string[]>([]);
+  const expandedDirectoriesRef = useRef<string[]>([]);
+  const shallowEntriesRef = useRef<FileEntry[]>([]);
+  const dirEntriesRef = useRef<Record<string, FileEntry[]>>({});
+
+  useEffect(() => {
+    expandedDirectoriesRef.current = expandedDirectories;
+  }, [expandedDirectories]);
+
+  useEffect(() => {
+    loadedDirectoriesRef.current = loadedDirectories;
+  }, [loadedDirectories]);
 
   useEffect(() => {
     if (appMountSignal > 0) {
@@ -268,6 +309,10 @@ export function CodingWorkbench({
   }, []);
 
   const projectName = workspacePath ? basename(workspacePath) : t.unselected;
+  const entries = useMemo(
+    () => mergeFlatFileEntries(shallowEntries, dirEntries),
+    [shallowEntries, dirEntries]
+  );
   const fileCount = useMemo(() => entries.filter((entry) => !entry.isDir).length, [entries]);
   const directoryCount = useMemo(() => entries.filter((entry) => entry.isDir).length, [entries]);
   const treeNodes = useMemo(() => buildFileTree(entries), [entries]);
@@ -333,24 +378,32 @@ export function CodingWorkbench({
   const loadProject = useCallback(async (path: string) => {
     setFolderError('');
     setTreeTruncated(false);
+    loadedDirectoriesRef.current = [];
+    dirEntriesRef.current = {};
+    setLoadedDirectories([]);
+    setDirEntries({});
 
     if (!path) {
-      setEntries([]);
+      shallowEntriesRef.current = [];
+      setShallowEntries([]);
       return;
     }
 
-    setEntries([]);
+    shallowEntriesRef.current = [];
+    setShallowEntries([]);
     setIsLoadingTree(true);
     try {
       const result = await invoke<ListFilesResult>('list_workspace_files', {
         workspacePath: path,
-        maxDepth: 6,
+        maxDepth: INITIAL_TREE_MAX_DEPTH,
       });
       lastTreeSignatureRef.current = computeTreeSignature({ root: result.root, entries: result.entries, truncated: result.truncated });
-      setEntries(result.entries);
+      shallowEntriesRef.current = result.entries;
+      setShallowEntries(result.entries);
       setTreeTruncated(result.truncated);
     } catch (err) {
-      setEntries([]);
+      shallowEntriesRef.current = [];
+      setShallowEntries([]);
       setFolderError((err as Error).message);
     } finally {
       setIsLoadingTree(false);
@@ -412,28 +465,64 @@ export function CodingWorkbench({
 
       inFlight = true;
       try {
-        const result = await invoke<ListFilesResult>('list_workspace_files', {
-          workspacePath,
-          maxDepth: 6,
-        });
+        // 浅层全量刷新 + 并行重取所有“已展开且已加载”目录，保证可见子树内容新鲜；
+        // 已加载但折叠的目录保留缓存，重新展开时再取（toggleDirectory 每次展开都会拉取）。
+        const expandedLoadedDirs = loadedDirectoriesRef.current.filter((dir) =>
+          expandedDirectoriesRef.current.includes(dir)
+        );
+
+        const [shallowResult, ...subtreeResults] = await Promise.all([
+          invoke<ListFilesResult>('list_workspace_files', {
+            workspacePath,
+            maxDepth: INITIAL_TREE_MAX_DEPTH,
+          }),
+          ...expandedLoadedDirs.map((dir) =>
+            invoke<ListFilesResult>('list_workspace_files', {
+              workspacePath,
+              relativePath: dir,
+              maxDepth: LAZY_DIR_MAX_DEPTH,
+            })
+          ),
+        ]);
 
         if (disposed) {
           return;
         }
 
-        if (!result || !Array.isArray(result.entries)) {
+        if (!shallowResult || !Array.isArray(shallowResult.entries)) {
           return;
         }
 
-        const nextSignature = computeTreeSignature(result);
+        const nextShallow = shallowResult.entries;
+        const nextDirEntries: Record<string, FileEntry[]> = {};
+        expandedLoadedDirs.forEach((dir, index) => {
+          const subResult = subtreeResults[index];
+          if (subResult && Array.isArray(subResult.entries)) {
+            nextDirEntries[dir] = subResult.entries;
+          }
+        });
+        const mergedDirEntries = { ...dirEntriesRef.current, ...nextDirEntries };
+        const mergedEntries = mergeFlatFileEntries(nextShallow, mergedDirEntries);
+        const nextTruncated =
+          Boolean(shallowResult.truncated) ||
+          subtreeResults.some((subResult) => Boolean(subResult?.truncated));
+
+        const nextSignature = computeTreeSignature({
+          root: '',
+          entries: mergedEntries,
+          truncated: nextTruncated,
+        });
         if (nextSignature === lastTreeSignatureRef.current) {
           return;
         }
 
         lastTreeSignatureRef.current = nextSignature;
+        shallowEntriesRef.current = nextShallow;
+        dirEntriesRef.current = mergedDirEntries;
         setFolderError('');
-        setEntries(result.entries);
-        setTreeTruncated(result.truncated);
+        setShallowEntries(nextShallow);
+        setDirEntries(mergedDirEntries);
+        setTreeTruncated(nextTruncated);
       } catch (e) {
         console.warn('File watcher refresh failed:', e);
       } finally {
@@ -493,7 +582,12 @@ export function CodingWorkbench({
     }
     if (workspacePath) {
       setIsWorkspaceSwitching(true);
-      setEntries([]);
+      shallowEntriesRef.current = [];
+      dirEntriesRef.current = {};
+      loadedDirectoriesRef.current = [];
+      setShallowEntries([]);
+      setDirEntries({});
+      setLoadedDirectories([]);
       workspaceSwitchingTimerRef.current = setTimeout(() => {
         setIsWorkspaceSwitching(false);
       }, 30_000);
@@ -664,13 +758,64 @@ export function CodingWorkbench({
     setActivePath(path);
   }, []);
 
-  const toggleDirectory = useCallback((path: string) => {
-    setExpandedDirectories((current) =>
-      current.includes(path)
-        ? current.filter((currentPath) => currentPath !== path)
-        : [...current, path]
+  const loadDirectoryChildren = useCallback(async (dir: string) => {
+    if (!workspacePath) {
+      return;
+    }
+    try {
+      const result = await invoke<ListFilesResult>('list_workspace_files', {
+        workspacePath,
+        relativePath: dir,
+        maxDepth: LAZY_DIR_MAX_DEPTH,
+      });
+      const nextDirEntries: Record<string, FileEntry[]> = {
+        ...dirEntriesRef.current,
+        [dir]: result?.entries ?? [],
+      };
+      dirEntriesRef.current = nextDirEntries;
+      if (!loadedDirectoriesRef.current.includes(dir)) {
+        loadedDirectoriesRef.current = [...loadedDirectoriesRef.current, dir];
+      }
+      setDirEntries(nextDirEntries);
+      setLoadedDirectories([...loadedDirectoriesRef.current]);
+      if (result?.truncated) {
+        setTreeTruncated(true);
+      }
+      const mergedEntries = mergeFlatFileEntries(shallowEntriesRef.current, nextDirEntries);
+      lastTreeSignatureRef.current = computeTreeSignature({
+        root: '',
+        entries: mergedEntries,
+        truncated: Boolean(result?.truncated),
+      });
+    } catch (err) {
+      setFolderError((err as Error).message);
+    }
+  }, [computeTreeSignature, workspacePath]);
+
+  const toggleDirectory = useCallback(async (path: string) => {
+    const isExpanded = expandedDirectories.includes(path);
+    const hasVisibleChildren = entries.some(
+      (entry) => entry.path !== path && entry.path.startsWith(`${path}/`)
     );
-  }, []);
+    const isLoaded = loadedDirectories.includes(path);
+    const entry = entryByPath.get(path);
+    const isKnownEmpty = entry?.hasChildren === false && !hasVisibleChildren;
+
+    if (isExpanded && (isLoaded || hasVisibleChildren || isKnownEmpty)) {
+      setExpandedDirectories((current) => current.filter((currentPath) => currentPath !== path));
+      return;
+    }
+
+    if (isExpanded || isLoaded) {
+      await loadDirectoryChildren(path);
+    } else if (hasVisibleChildren || isKnownEmpty) {
+      setExpandedDirectories((current) => (current.includes(path) ? current : [...current, path]));
+      return;
+    } else {
+      await loadDirectoryChildren(path);
+    }
+    setExpandedDirectories((current) => (current.includes(path) ? current : [...current, path]));
+  }, [entries, entryByPath, expandedDirectories, loadedDirectories, loadDirectoryChildren]);
 
   const handleTreeRowKeyDown = useCallback((
     event: ReactKeyboardEvent<HTMLButtonElement>,

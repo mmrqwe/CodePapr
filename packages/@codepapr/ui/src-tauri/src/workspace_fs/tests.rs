@@ -1012,3 +1012,282 @@ fn list_workspace_files_codepapr_apps_gated_by_app_mode() {
         "explicit skills listing must keep working: {paths:?}"
     );
 }
+
+#[test]
+fn list_workspace_files_lists_ignored_dirs_without_recursing() {
+    let workspace = TestWorkspace::new("list-ignored-shown");
+    fs::create_dir_all(workspace.file_path("node_modules/pkg")).expect("should create nm dir");
+    fs::write(
+        workspace.file_path("node_modules/pkg/index.js"),
+        b"x\n",
+    )
+    .expect("should write fixture");
+    fs::create_dir_all(workspace.file_path("build")).expect("should create build dir");
+    fs::write(workspace.file_path("build/out.txt"), b"x\n").expect("should write fixture");
+    fs::create_dir_all(workspace.file_path("src")).expect("should create src dir");
+    fs::write(workspace.file_path("src/main.ts"), b"x\n").expect("should write fixture");
+
+    let result = list::list_workspace_files_impl(workspace.workspace_arg(), None, Some(6), None)
+        .expect("list should succeed");
+
+    let paths: Vec<String> = result.entries.iter().map(|e| e.path.clone()).collect();
+    assert!(
+        paths.contains(&"node_modules".to_string()),
+        "node_modules should be listed: {paths:?}"
+    );
+    assert!(
+        paths.contains(&"build".to_string()),
+        "build should be listed: {paths:?}"
+    );
+    assert!(
+        !paths
+            .iter()
+            .any(|p| p.starts_with("node_modules/") || p.starts_with("build/")),
+        "ignored dir contents must not be recursed: {paths:?}"
+    );
+
+    let nm = result
+        .entries
+        .iter()
+        .find(|e| e.path == "node_modules")
+        .expect("node_modules entry should exist");
+    assert!(nm.is_dir);
+    assert!(nm.has_children, "ignored dir with content should report children");
+}
+
+#[test]
+fn list_workspace_files_never_shows_git_or_app_state_dirs() {
+    let workspace = TestWorkspace::new("list-always-hidden");
+    fs::create_dir_all(workspace.file_path(".git")).expect("should create .git dir");
+    fs::create_dir_all(workspace.file_path(".CodePapr/apps")).expect("should create app dir");
+    fs::create_dir_all(workspace.file_path(".ProjectGraph")).expect("should create graph dir");
+    fs::create_dir_all(workspace.file_path(".scratch")).expect("should create scratch dir");
+    fs::write(workspace.file_path("note.txt"), b"x\n").expect("should write fixture");
+
+    let result = list::list_workspace_files_impl(workspace.workspace_arg(), None, Some(6), None)
+        .expect("list should succeed");
+    let paths: Vec<String> = result.entries.iter().map(|e| e.path.clone()).collect();
+    assert!(paths.contains(&"note.txt".to_string()));
+    assert!(!paths.contains(&".git".to_string()));
+    assert!(!paths.contains(&".CodePapr".to_string()));
+    assert!(!paths.contains(&".ProjectGraph".to_string()));
+    assert!(!paths.contains(&".scratch".to_string()));
+}
+
+#[test]
+fn search_workspace_text_include_ignored_dirs_reaches_ignored_folders() {
+    let workspace = TestWorkspace::new("search-include-ignored");
+    fs::create_dir_all(workspace.file_path("node_modules/pkg")).expect("should create nm dir");
+    fs::write(
+        workspace.file_path("node_modules/pkg/index.js"),
+        b"needle-in-node_modules\n",
+    )
+    .expect("should write fixture");
+    fs::create_dir_all(workspace.file_path("build")).expect("should create build dir");
+    fs::write(workspace.file_path("build/out.txt"), b"needle-in-build\n")
+        .expect("should write fixture");
+    fs::write(workspace.file_path("src-note.txt"), b"needle-in-src\n")
+        .expect("should write fixture");
+
+    let default = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "needle".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("default search should succeed");
+    let default_paths: Vec<String> = default.matches.iter().map(|m| m.path.clone()).collect();
+    assert!(default_paths.contains(&"src-note.txt".to_string()));
+    assert!(
+        !default_paths
+            .iter()
+            .any(|p| p.starts_with("node_modules/") || p.starts_with("build/")),
+        "default search must skip ignored dirs: {default_paths:?}"
+    );
+
+    let full = search::search_workspace_text_impl_full(
+        workspace.workspace_arg(),
+        "needle".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(true),
+    )
+    .expect("include-ignored search should succeed");
+    let full_paths: Vec<String> = full.matches.iter().map(|m| m.path.clone()).collect();
+    assert!(
+        full_paths.contains(&"node_modules/pkg/index.js".to_string()),
+        "full search must reach node_modules: {full_paths:?}"
+    );
+    assert!(
+        full_paths.contains(&"build/out.txt".to_string()),
+        "full search must reach build: {full_paths:?}"
+    );
+}
+
+#[test]
+fn search_workspace_paths_include_ignored_dirs_reaches_ignored_folders() {
+    let workspace = TestWorkspace::new("search-paths-include-ignored");
+    fs::create_dir_all(workspace.file_path("node_modules/pkg")).expect("should create nm dir");
+    fs::write(
+        workspace.file_path("node_modules/pkg/index.js"),
+        b"x\n",
+    )
+    .expect("should write fixture");
+    fs::create_dir_all(workspace.file_path(".venv/lib")).expect("should create venv dir");
+    fs::write(workspace.file_path(".venv/lib/activate.sh"), b"x\n")
+        .expect("should write fixture");
+
+    let default = search::search_workspace_paths_impl(
+        workspace.workspace_arg(),
+        "index\\.js|activate".to_string(),
+        Some(true),
+        Some(true),
+        Some(50),
+        None,
+    )
+    .expect("default path search should succeed");
+    let default_paths: Vec<String> = default.matches.iter().map(|m| m.path.clone()).collect();
+    assert!(
+        !default_paths
+            .iter()
+            .any(|p| p.starts_with("node_modules/") || p.starts_with(".venv/")),
+        "default path search must skip ignored dirs: {default_paths:?}"
+    );
+
+    let full = search::search_workspace_paths_impl_full(
+        workspace.workspace_arg(),
+        "index\\.js|activate".to_string(),
+        Some(true),
+        Some(true),
+        Some(50),
+        None,
+        Some(true),
+    )
+    .expect("include-ignored path search should succeed");
+    let full_paths: Vec<String> = full.matches.iter().map(|m| m.path.clone()).collect();
+    assert!(
+        full_paths.contains(&"node_modules/pkg/index.js".to_string()),
+        "full path search must reach node_modules: {full_paths:?}"
+    );
+    assert!(
+        full_paths.contains(&".venv/lib/activate.sh".to_string()),
+        "full path search must reach .venv: {full_paths:?}"
+    );
+}
+
+#[test]
+fn list_workspace_files_clamps_excessive_depth_and_reports_truncated() {
+    let workspace = TestWorkspace::new("list-depth-clamp");
+    fs::create_dir_all(workspace.file_path("a/b/c/d/e/f/g")).expect("should create deep dir");
+    fs::write(
+        workspace.file_path("a/b/c/d/e/f/g/deep.txt"),
+        b"x\n",
+    )
+    .expect("should write fixture");
+
+    let clamped = list::list_workspace_files_impl(
+        workspace.workspace_arg(),
+        None,
+        Some(MAX_DEPTH + 1),
+        None,
+    )
+    .expect("over-limit depth should be clamped, not fail");
+    assert!(
+        clamped.truncated,
+        "depth clamp must surface truncation instead of silently dropping deep entries"
+    );
+
+    let at_limit = list::list_workspace_files_impl(
+        workspace.workspace_arg(),
+        None,
+        Some(MAX_DEPTH),
+        None,
+    )
+    .expect("at-limit depth list should succeed");
+    assert!(!at_limit.truncated, "at-limit depth must not report truncation");
+}
+
+#[test]
+fn list_workspace_files_reports_has_children_for_dirs() {
+    let workspace = TestWorkspace::new("list-has-children");
+    fs::create_dir_all(workspace.file_path("src/deep")).expect("should create src dir");
+    fs::write(workspace.file_path("src/main.ts"), b"x\n").expect("should write fixture");
+    fs::create_dir_all(workspace.file_path("empty")).expect("should create empty dir");
+    fs::create_dir_all(workspace.file_path("only-noise/node_modules"))
+        .expect("should create noise-only dir");
+
+    let result = list::list_workspace_files_impl(workspace.workspace_arg(), None, Some(1), None)
+        .expect("list should succeed");
+
+    let src = result
+        .entries
+        .iter()
+        .find(|e| e.path == "src")
+        .expect("src dir should be listed");
+    assert!(src.is_dir);
+    assert!(src.has_children, "src has visible children");
+
+    let empty = result
+        .entries
+        .iter()
+        .find(|e| e.path == "empty")
+        .expect("empty dir should be listed");
+    assert!(empty.is_dir);
+    assert!(!empty.has_children, "empty dir must report no children");
+
+    let noise = result
+        .entries
+        .iter()
+        .find(|e| e.path == "only-noise")
+        .expect("noise-only dir should be listed");
+    assert!(noise.is_dir);
+    assert!(
+        noise.has_children,
+        "ignored dirs are visible now, so node_modules counts as a child"
+    );
+
+    let file = result
+        .entries
+        .iter()
+        .find(|e| e.path == "src/main.ts")
+        .expect("src/main.ts should be listed");
+    assert!(!file.has_children, "files must never report children");
+}
+
+#[test]
+fn list_workspace_files_relative_path_scopes_to_subtree() {
+    let workspace = TestWorkspace::new("list-lazy-scope");
+    fs::create_dir_all(workspace.file_path("src/components"))
+        .expect("should create src/components dir");
+    fs::write(workspace.file_path("src/main.ts"), b"x\n").expect("should write fixture");
+    fs::write(workspace.file_path("src/components/Box.tsx"), b"x\n")
+        .expect("should write fixture");
+    fs::write(workspace.file_path("README.md"), b"x\n").expect("should write fixture");
+
+    let result = list::list_workspace_files_impl(
+        workspace.workspace_arg(),
+        Some("src".to_string()),
+        Some(2),
+        None,
+    )
+    .expect("lazy subtree list should succeed");
+
+    let paths: Vec<String> = result.entries.iter().map(|e| e.path.clone()).collect();
+    assert!(paths.contains(&"src/main.ts".to_string()));
+    assert!(paths.contains(&"src/components".to_string()));
+    assert!(paths.contains(&"src/components/Box.tsx".to_string()));
+    assert!(
+        !paths.iter().any(|p| p == "README.md"),
+        "lazy listing must not include sibling files: {paths:?}"
+    );
+}

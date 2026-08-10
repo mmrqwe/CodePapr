@@ -113,4 +113,39 @@ describe('fileTree', () => {
       },
     ]);
   });
+
+  it('propagates backend hasChildren so unloaded directories show an expand affordance', () => {
+    const tree = buildFileTree([
+      { path: 'src', name: 'src', isDir: true, bytes: 0, hasChildren: true },
+      { path: 'empty', name: 'empty', isDir: true, bytes: 0, hasChildren: false },
+      { path: 'README.md', name: 'README.md', isDir: false, bytes: 1, hasChildren: false },
+    ]);
+
+    expect(flattenVisibleFileTree(tree, new Set())).toEqual([
+      {
+        path: 'empty',
+        name: 'empty',
+        isDir: true,
+        depth: 0,
+        parentPath: null,
+        hasChildren: false,
+      },
+      {
+        path: 'src',
+        name: 'src',
+        isDir: true,
+        depth: 0,
+        parentPath: null,
+        hasChildren: true,
+      },
+      {
+        path: 'README.md',
+        name: 'README.md',
+        isDir: false,
+        depth: 0,
+        parentPath: null,
+        hasChildren: false,
+      },
+    ]);
+  });
 });

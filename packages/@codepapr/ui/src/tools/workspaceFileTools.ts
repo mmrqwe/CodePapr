@@ -91,7 +91,11 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       })
     );
 
-    return { ...result, symbolsByFile };
+    const note = result.truncated
+      ? '（列表已截断，仅返回部分条目；请改用 relativePath 指定目录或降低 maxDepth 分批浏览）'
+      : undefined;
+
+    return { ...result, symbolsByFile, note };
   });
 
   registry.register(toolByName('workspace_read_file'), async (args: Record<string, unknown>) => {

@@ -3,6 +3,7 @@ export interface FileTreeEntryLike {
   name: string;
   isDir: boolean;
   bytes: number;
+  hasChildren?: boolean;
 }
 
 export interface FileTreeNode {
@@ -10,6 +11,7 @@ export interface FileTreeNode {
   name: string;
   isDir: boolean;
   bytes: number;
+  hasChildren: boolean;
   children: FileTreeNode[];
 }
 
@@ -72,6 +74,7 @@ export function buildFileTree(entries: readonly FileTreeEntryLike[]): FileTreeNo
       name: entry.name,
       isDir: entry.isDir,
       bytes: entry.bytes,
+      hasChildren: entry.hasChildren ?? false,
       children: [],
     };
     nodesByPath.set(entry.path, node);
@@ -105,7 +108,7 @@ function appendVisibleRows(
       isDir: node.isDir,
       depth,
       parentPath,
-      hasChildren: node.children.length > 0,
+      hasChildren: node.children.length > 0 || (node.isDir && node.hasChildren),
     });
 
     if (node.isDir && node.children.length > 0 && expandedPaths.has(node.path)) {
