@@ -33,10 +33,13 @@ pub(crate) fn build_web_client() -> Result<reqwest::blocking::Client, String> {
 /// no cookie store is used so apps do not share host cookies. When `pin` is
 /// provided the domain is pinned to a pre-vetted socket address, closing the
 /// DNS-rebinding TOCTOU window between validation and connect.
+///
+/// 异步客户端：papr_http_get/post 是 async tauri command，绝不能用 blocking
+/// 客户端（会阻塞 tokio worker 线程）。
 pub(crate) fn build_papr_http_client(
     pin: Option<(String, std::net::SocketAddr)>,
-) -> Result<reqwest::blocking::Client, String> {
-    let mut builder = reqwest::blocking::Client::builder()
+) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder()
         .user_agent(SCRAPER_USER_AGENT)
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(20));

@@ -37,16 +37,14 @@ const SYSTEM_COMMAND_PATHS = [
   '/opt/homebrew/bin/',
 ];
 
-function extractAbsoluteCommandPaths(command: string, skipFirstToken = true): string[] {
+// 首 token 通常是可执行文件本体，绝不能跳过：跳过它意味着
+// `/tmp/evil/bin ...` 这类绝对路径可执行文件不会触发外部路径授权。
+function extractAbsoluteCommandPaths(command: string): string[] {
   const candidates = command
     .split(/[\s"'`=<>|;&()]+/)
     .map((part) => part.replace(/^[,.;]+|[,.;]+$/g, ''))
     .map((part) => part.replace(/\\/g, '/'))
-    .filter(
-      (part, index) =>
-        (!skipFirstToken || index > 0) &&
-        (part.startsWith('/') || /^[A-Za-z]:\//.test(part)),
-    );
+    .filter((part) => part.startsWith('/') || /^[A-Za-z]:\//.test(part));
   return [...new Set(candidates)].filter(
     (candidate) => !SYSTEM_COMMAND_PATHS.some((prefix) => candidate.startsWith(prefix)),
   );
@@ -62,7 +60,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
   const ensureCommandPathsAllowed = async (command: string, args: string[] = []): Promise<void> => {
     const candidates = [
       ...extractAbsoluteCommandPaths(command),
-      ...args.flatMap((arg) => extractAbsoluteCommandPaths(arg, false)),
+      ...args.flatMap((arg) => extractAbsoluteCommandPaths(arg)),
     ];
     for (const candidate of [...new Set(candidates)]) {
       await ensureExternalPathAllowed(candidate, 'execute');

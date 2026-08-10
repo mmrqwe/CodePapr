@@ -262,6 +262,96 @@ describe('individual domain registrars register their exact tool sets', () => {
   });
 });
 
+describe('exec tools check command paths including the executable token', () => {
+  function execRegistry() {
+    const registry = new ToolRegistry();
+    const ensureExternalPathAllowed = vi.fn(async () => {});
+    const ctx = {
+      registry,
+      workspace: () => '/tmp/ws',
+      ensureExternalPathAllowed,
+      options: {},
+    } as unknown as WorkspaceToolContext;
+    registerWorkspaceExecTools(ctx);
+    return { registry, ensureExternalPathAllowed };
+  }
+
+  const checkedPaths = (mock: ReturnType<typeof vi.fn>): string[] =>
+    mock.mock.calls.map((call) => call[0]).filter((p): p is string => typeof p === 'string');
+
+  beforeEach(() => {
+    invokeMock.mockClear();
+    invokeMock.mockResolvedValue({});
+  });
+
+  it('checks the first token (executable body) of workspace_run_command', async () => {
+    // 回归：首 token 是可执行文件本体，绝不能跳过授权检查
+    const { registry, ensureExternalPathAllowed } = execRegistry();
+    await registry.execute('workspace_run_command', {
+      command: '/opt/tools/mytool --flag /tmp/data.txt',
+    });
+    expect(checkedPaths(ensureExternalPathAllowed)).toEqual(
+      expect.arrayContaining(['/opt/tools/mytool', '/tmp/data.txt']),
+    );
+  });
+
+  it('skips system paths and relative commands', async () => {
+    const { registry, ensureExternalPathAllowed } = execRegistry();
+    await registry.execute('workspace_run_command', {
+      command: '/usr/bin/python3 script.py',
+    });
+    expect(checkedPaths(ensureExternalPathAllowed)).toEqual([]);
+  });
+
+  it('checks absolute paths in args', async () => {
+    const { registry, ensureExternalPathAllowed } = execRegistry();
+    await registry.execute('workspace_run_command', {
+      command: 'node',
+      args: ['server.js', '--config', '/etc/myapp/conf.json'],
+    });
+    expect(checkedPaths(ensureExternalPathAllowed)).toEqual(['/etc/myapp/conf.json']);
+  });
+
+  it('checks the executable token in shell commands', async () => {
+    const { registry, ensureExternalPathAllowed } = execRegistry();
+    await registry.execute('workspace_run_shell_command', {
+      command: '/tmp/evil/run.sh && /usr/local/bin/node ok.js',
+    });
+    expect(checkedPaths(ensureExternalPathAllowed)).toEqual(
+      expect.arrayContaining(['/tmp/evil/run.sh']),
+    );
+  });
+
+  it('checks shell_send_input payload paths', async () => {
+    const { registry, ensureExternalPathAllowed } = execRegistry();
+    await registry.execute('shell_send_input', {
+      sessionId: 's1',
+      input: '/tmp/evil/run.sh',
+    });
+    expect(checkedPaths(ensureExternalPathAllowed)).toEqual(['/tmp/evil/run.sh']);
+  });
+
+  it('blocks execution when path authorization is denied', async () => {
+    const registry = new ToolRegistry();
+    const ensureExternalPathAllowed = vi.fn(async () => {
+      throw new Error('用户拒绝访问外部路径：/tmp/evil/run.sh');
+    });
+    const ctx = {
+      registry,
+      workspace: () => '/tmp/ws',
+      ensureExternalPathAllowed,
+      options: {},
+    } as unknown as WorkspaceToolContext;
+    registerWorkspaceExecTools(ctx);
+
+    await expect(
+      registry.execute('workspace_run_command', { command: '/tmp/evil/run.sh' }),
+    ).rejects.toThrow(/拒绝访问/);
+    const invoked = invokeMock.mock.calls.some(([command]) => command === 'run_workspace_command');
+    expect(invoked).toBe(false);
+  });
+});
+
 describe('workspace search tools includeIgnoredDirs passthrough', () => {
   const emptySearchResult = {
     query: 'x',

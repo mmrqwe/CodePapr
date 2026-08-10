@@ -232,7 +232,9 @@ pub(crate) fn send_shell_input(
             .get(&session_id)
             .ok_or_else(|| format!("Shell 会话不存在: {session_id}"))?;
 
-        validate_restricted_shell_command(&input, Path::new(&session.workspace_path))?;
+        let workspace = Path::new(&session.workspace_path);
+        validate_restricted_shell_command(&input, workspace)?;
+        crate::shell::path_guard::ensure_command_paths_accessible(workspace, &input, &[])?;
 
         if let Some(reason) = detect_dangerous_command(&input) {
             return Err(format!(
@@ -261,10 +263,12 @@ pub(crate) fn send_shell_command(
             .get(&session_id)
             .ok_or_else(|| format!("Shell 会话不存在: {session_id}"))?;
         let command_args = args.as_deref().unwrap_or(&[]);
-        validate_restricted_command(
+        let workspace = Path::new(&session.workspace_path);
+        validate_restricted_command(&command, command_args, workspace)?;
+        crate::shell::path_guard::ensure_command_paths_accessible(
+            workspace,
             &command,
-            command_args,
-            Path::new(&session.workspace_path),
+            args.as_deref().unwrap_or(&[]),
         )?;
         if let Some(reason) = detect_dangerous_invocation(&command, args.as_deref().unwrap_or(&[]))
         {

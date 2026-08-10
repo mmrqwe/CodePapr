@@ -46,7 +46,7 @@ xz2 = "0.1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 bitflags = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "sync", "time", "net"] }
 rmcp = { version = "1.7.0", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest", "macros"] }
 git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 rodio = { version = "0.20", default-features = false, features = ["wav"] }

@@ -325,6 +325,7 @@ pub(crate) fn run_workspace_command_impl(
 
     let args = args.unwrap_or_default();
     validate_restricted_command(&command, &args, &workspace)?;
+    super::path_guard::ensure_command_paths_accessible(&workspace, &command, &args)?;
     let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30).clamp(1, MAX_COMMAND_SECONDS));
     // 嵌套项目（如子目录里的 go.mod）需要在模块目录内执行，否则命令会跑错模块。
     let cwd = resolve_shell_workdir(&workspace, workdir)?;
@@ -548,6 +549,7 @@ pub(crate) fn run_workspace_shell_command_impl(
     }
     let workspace = canonical_workspace(&workspace_path)?;
     validate_restricted_shell_command(&command, &workspace)?;
+    super::path_guard::ensure_command_paths_accessible(&workspace, &command, &[])?;
     let cwd = resolve_shell_workdir(&workspace, workdir)?;
     let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30).clamp(1, MAX_COMMAND_SECONDS));
     let mut cmd = build_shell_spawn_command(&command, &cwd, &workspace, sandbox.map(Into::into))?;
@@ -595,6 +597,7 @@ pub(crate) fn start_workspace_background_command(
 
     let args = args.unwrap_or_default();
     validate_restricted_command(&command, &args, &workspace)?;
+    super::path_guard::ensure_command_paths_accessible(&workspace, &command, &args)?;
     let preview_url = preview_url
         .map(|raw_url| parse_browser_url(&raw_url))
         .transpose()?;
@@ -728,6 +731,7 @@ pub(crate) fn start_workspace_shell_background_command(
     }
     let workspace = canonical_workspace(&workspace_path)?;
     validate_restricted_shell_command(&command, &workspace)?;
+    super::path_guard::ensure_command_paths_accessible(&workspace, &command, &[])?;
     let cwd = resolve_shell_workdir(&workspace, workdir)?;
     let preview_url = preview_url
         .map(|raw_url| parse_browser_url(&raw_url))

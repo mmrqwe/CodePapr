@@ -1,5 +1,4 @@
 use std::fs;
-use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 
 use serde::Serialize;
@@ -10,6 +9,7 @@ use crate::web::client::build_papr_http_client;
 use crate::web::text::{collapse_whitespace, html_to_text, truncate_text_to_bytes};
 
 const MAX_PAPR_HTTP_BYTES: usize = 500_000;
+const PAPR_HTTP_POST_MAX_BYTES: usize = 100_000;
 
 fn is_internal_ipv4(ip: std::net::Ipv4Addr) -> bool {
     let octets = ip.octets();
@@ -62,7 +62,10 @@ pub(crate) fn is_private_or_internal_url(url: &str) -> bool {
 /// closes the DNS-rebinding TOCTOU window where a public domain re-resolves to an
 /// internal IP between validation and connect. IP-literal hosts need no resolution
 /// (they are already range-checked by `is_private_or_internal_url`).
-fn resolve_safe_socket_addr(
+///
+/// 异步解析（tokio::net::lookup_host）：本函数在 async tauri command 内调用，
+/// 用阻塞的 ToSocketAddrs 会卡住 tokio worker 线程。
+async fn resolve_safe_socket_addr(
     parsed: &url::Url,
 ) -> Result<Option<(String, std::net::SocketAddr)>, String> {
     let host = match parsed.host() {
@@ -71,8 +74,8 @@ fn resolve_safe_socket_addr(
         None => return Err("URL 缺少主机".to_string()),
     };
     let port = parsed.port_or_known_default().unwrap_or(443);
-    let addrs: Vec<std::net::SocketAddr> = (host.as_str(), port)
-        .to_socket_addrs()
+    let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
+        .await
         .map_err(|err| format!("DNS 解析失败 {host}: {err}"))?
         .collect();
     if addrs.is_empty() {
@@ -88,6 +91,42 @@ fn resolve_safe_socket_addr(
         }
     }
     Ok(Some((host, addrs[0])))
+}
+
+/// 把一个响应块追加到缓冲区，最多累计到 `cap` 字节。
+/// 返回 true 表示已达上限且仍有剩余数据（应停止读取并标记 truncated）。
+/// 纯函数以便单测；网络循环见 read_body_capped。
+fn append_capped(buffer: &mut Vec<u8>, chunk: &[u8], cap: usize) -> bool {
+    let remaining = cap.saturating_sub(buffer.len());
+    if remaining == 0 {
+        return !chunk.is_empty();
+    }
+    if chunk.len() > remaining {
+        buffer.extend_from_slice(&chunk[..remaining]);
+        return true;
+    }
+    buffer.extend_from_slice(chunk);
+    false
+}
+
+/// 流式读取响应体，累计达到 `cap` 字节立即停止——恶意/超大响应无法把内存
+/// 撑过上限（旧实现 bytes() 全量读取，max_bytes 只在读完后截断文本）。
+/// 返回 `(body, truncated)`；truncated 表示响应在上限处被截断。
+async fn read_body_capped(
+    mut response: reqwest::Response,
+    cap: usize,
+) -> Result<(Vec<u8>, bool), String> {
+    let mut buffer: Vec<u8> = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|err| format!("读取响应失败: {err}"))?
+    {
+        if append_capped(&mut buffer, &chunk, cap) {
+            return Ok((buffer, true));
+        }
+    }
+    Ok((buffer, false))
 }
 
 #[derive(Serialize)]
@@ -156,7 +195,7 @@ pub async fn papr_http_get(
         return Err("安全限制：不允许访问内网/本地地址".to_string());
     }
     let parsed = url::Url::parse(&parsed_url).map_err(|err| format!("URL 解析失败: {err}"))?;
-    let pin = resolve_safe_socket_addr(&parsed)?;
+    let pin = resolve_safe_socket_addr(&parsed).await?;
 
     let max = max_bytes.unwrap_or(50_000).clamp(1_000, MAX_PAPR_HTTP_BYTES);
     let client = build_papr_http_client(pin)?;
@@ -164,6 +203,7 @@ pub async fn papr_http_get(
         .get(parsed_url)
         .header(reqwest::header::ACCEPT, "application/json, text/plain, text/html;q=0.9, */*;q=0.5")
         .send()
+        .await
         .map_err(|err| format!("HTTP GET 失败: {err}"))?;
 
     let status = response.status();
@@ -173,29 +213,30 @@ pub async fn papr_http_get(
         .and_then(|v| v.to_str().ok())
         .map(|v| v.to_string());
 
-    let body_bytes = response
-        .bytes()
-        .map_err(|err| format!("读取响应失败: {err}"))?;
+    // HTML 响应的标记/文本比高，原始读取上限放宽到硬顶，max 只约束转换后的
+    // 文本；非 HTML 直接按 max 封顶。两种情况下内存都封顶，达到上限即提前停止。
+    let html_by_header = content_type
+        .as_deref()
+        .map(|v| v.contains("html"))
+        .unwrap_or(false);
+    let read_cap = if html_by_header { MAX_PAPR_HTTP_BYTES } else { max };
+    let (body_bytes, body_truncated) = read_body_capped(response, read_cap).await?;
     let body_str = String::from_utf8_lossy(&body_bytes).into_owned();
 
-    let is_html = content_type
-        .as_deref()
-        .map(|v| v.contains("html") || body_str.contains("<html"))
-        .unwrap_or(false);
-
+    let is_html = html_by_header || body_str.contains("<html");
     let text = if is_html {
         html_to_text(&body_str)
     } else {
         collapse_whitespace(&body_str)
     };
 
-    let (content, truncated) = truncate_text_to_bytes(text, max);
+    let (content, text_truncated) = truncate_text_to_bytes(text, max);
 
     Ok(PaprHttpResult {
         status: status.as_u16(),
         body: content,
         content_type,
-        truncated,
+        truncated: body_truncated || text_truncated,
     })
 }
 
@@ -217,7 +258,7 @@ pub async fn papr_http_post(
         return Err("安全限制：不允许访问内网/本地地址".to_string());
     }
     let parsed = url::Url::parse(&parsed_url).map_err(|err| format!("URL 解析失败: {err}"))?;
-    let pin = resolve_safe_socket_addr(&parsed)?;
+    let pin = resolve_safe_socket_addr(&parsed).await?;
 
     let ct = content_type.unwrap_or_else(|| "application/json".to_string());
     let client = build_papr_http_client(pin)?;
@@ -226,6 +267,7 @@ pub async fn papr_http_post(
         .header(reqwest::header::CONTENT_TYPE, &ct)
         .body(body)
         .send()
+        .await
         .map_err(|err| format!("HTTP POST 失败: {err}"))?;
 
     let status = response.status();
@@ -235,18 +277,17 @@ pub async fn papr_http_post(
         .and_then(|v| v.to_str().ok())
         .map(|v| v.to_string());
 
-    let body_bytes = response
-        .bytes()
-        .map_err(|err| format!("读取响应失败: {err}"))?;
+    let (body_bytes, body_truncated) =
+        read_body_capped(response, PAPR_HTTP_POST_MAX_BYTES).await?;
     let body_str = String::from_utf8_lossy(&body_bytes).into_owned();
     let text = collapse_whitespace(&body_str);
-    let (content, truncated) = truncate_text_to_bytes(text, 100_000);
+    let (content, text_truncated) = truncate_text_to_bytes(text, PAPR_HTTP_POST_MAX_BYTES);
 
     Ok(PaprHttpResult {
         status: status.as_u16(),
         body: content,
         content_type: resp_content_type,
-        truncated,
+        truncated: body_truncated || text_truncated,
     })
 }
 
@@ -723,5 +764,56 @@ mod tests {
         for url in allowed {
             assert!(!is_private_or_internal_url(url), "should allow {url}");
         }
+    }
+
+    fn drain_chunks(chunks: &[&[u8]], cap: usize) -> (Vec<u8>, bool) {
+        let mut buffer: Vec<u8> = Vec::new();
+        let mut truncated = false;
+        for chunk in chunks {
+            if append_capped(&mut buffer, chunk, cap) {
+                truncated = true;
+                break;
+            }
+        }
+        (buffer, truncated)
+    }
+
+    #[test]
+    fn capped_read_keeps_small_bodies_intact() {
+        let (body, truncated) = drain_chunks(&[b"hello ", b"world"], 1_000);
+        assert_eq!(body, b"hello world");
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn capped_read_stops_mid_chunk_at_limit() {
+        // 回归：旧实现 bytes() 全量读取后才截断；现在达到上限立即停止
+        let (body, truncated) = drain_chunks(&[b"abcdef", b"ghijkl", b"mnop"], 8);
+        assert_eq!(body, b"abcdefgh");
+        assert!(truncated);
+    }
+
+    #[test]
+    fn capped_read_exact_fit_is_not_truncated() {
+        let (body, truncated) = drain_chunks(&[b"abcd", b"efgh"], 8);
+        assert_eq!(body, b"abcdefgh");
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn capped_read_marks_truncated_when_more_data_follows_exact_fit() {
+        let (body, truncated) = drain_chunks(&[b"abcd", b"efgh", b"extra"], 8);
+        assert_eq!(body, b"abcdefgh");
+        assert!(truncated);
+    }
+
+    #[test]
+    fn capped_read_memory_bounded_against_huge_response() {
+        // 模拟 1000 个 64KB 块（约 64MB 响应）：缓冲区不得超过上限
+        let chunk = vec![b'x'; 65_536];
+        let chunks: Vec<&[u8]> = vec![chunk.as_slice(); 1000];
+        let (body, truncated) = drain_chunks(&chunks, MAX_PAPR_HTTP_BYTES);
+        assert!(body.len() <= MAX_PAPR_HTTP_BYTES);
+        assert!(truncated);
     }
 }

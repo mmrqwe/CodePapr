@@ -376,6 +376,18 @@ fn path_key(path: &Path) -> String {
 }
 
 pub(crate) fn ensure_path_accessible(workspace: &Path, target: &Path) -> Result<(), String> {
+    let policy = crate::db::load_external_access_policy()?;
+    ensure_path_accessible_with_policy(workspace, target, &policy)
+}
+
+/// 策略参数化的授权判定核心：工作区内直通；受保护目录一律拒绝；
+/// 其余按 yolo / 已授权目录与文件裁决。供需要批量检查（一次载入策略）
+/// 或单元测试（构造策略）的调用方复用。
+pub(crate) fn ensure_path_accessible_with_policy(
+    workspace: &Path,
+    target: &Path,
+    policy: &crate::db::ExternalAccessPolicy,
+) -> Result<(), String> {
     if path_is_same_or_child(target, workspace) {
         return Ok(());
     }
@@ -387,7 +399,6 @@ pub(crate) fn ensure_path_accessible(workspace: &Path, target: &Path) -> Result<
         ));
     }
 
-    let policy = crate::db::load_external_access_policy()?;
     if policy.yolo {
         return Ok(());
     }

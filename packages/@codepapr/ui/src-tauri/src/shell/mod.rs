@@ -1,6 +1,7 @@
 pub(crate) mod background;
 pub(crate) mod dangerous;
 pub(crate) mod guard;
+pub(crate) mod path_guard;
 pub(crate) mod process_tree;
 pub(crate) mod sandbox;
 pub(crate) mod session;
