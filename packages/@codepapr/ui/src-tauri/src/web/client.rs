@@ -28,6 +28,56 @@ pub(crate) fn build_web_client() -> Result<reqwest::blocking::Client, String> {
         .map_err(|err| format!("初始化网页客户端失败: {err}"))
 }
 
+/// SSRF 安全 GET（阻塞版，供 spawn_blocking 内使用）：
+/// 1. 每一跳都校验目标 URL 不是内网/本地地址（is_private_or_internal_url）；
+/// 2. 域名主机先 DNS 解析并逐地址校验为公网后 pin 到客户端（防 rebinding）；
+/// 3. 客户端禁用自动重定向（Policy::none），手动跟随重定向并对每一跳重复 1/2——
+///    防止公网 URL 302 跳板到 127.0.0.1 / 169.254.169.254 等内部地址。
+/// 与 papr.http（build_papr_http_client + resolve_safe_socket_addr）同一防御等级。
+pub(crate) fn ssrf_safe_blocking_get(
+    start_url: &str,
+    timeout: Duration,
+    apply_headers: impl Fn(reqwest::blocking::RequestBuilder) -> reqwest::blocking::RequestBuilder,
+) -> Result<reqwest::blocking::Response, String> {
+    const MAX_SAFE_REDIRECTS: usize = 10;
+    let mut current = start_url.to_string();
+    for _ in 0..=MAX_SAFE_REDIRECTS {
+        if crate::papr_runtime::services::is_private_or_internal_url(&current) {
+            return Err("安全限制：不允许访问内网/本地地址".to_string());
+        }
+        let parsed =
+            reqwest::Url::parse(&current).map_err(|err| format!("URL 解析失败: {err}"))?;
+        let pin = crate::papr_runtime::services::resolve_safe_socket_addr_blocking(&parsed)?;
+        let mut builder = reqwest::blocking::Client::builder()
+            .user_agent(SCRAPER_USER_AGENT)
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(timeout);
+        if let Some((domain, addr)) = pin {
+            builder = builder.resolve(&domain, addr);
+        }
+        let client = builder
+            .build()
+            .map_err(|err| format!("初始化网页客户端失败: {err}"))?;
+        let response = apply_headers(client.get(parsed.clone()))
+            .send()
+            .map_err(|err| format!("请求失败: {err}"))?;
+        if response.status().is_redirection() {
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| "重定向响应缺少 Location 头".to_string())?;
+            current = parsed
+                .join(location)
+                .map_err(|err| format!("重定向目标 URL 不合法: {err}"))?
+                .to_string();
+            continue;
+        }
+        return Ok(response);
+    }
+    Err(format!("重定向次数超过上限 {MAX_SAFE_REDIRECTS}"))
+}
+
 /// HTTP client for papr app `papr.http` calls. Redirects are disabled so a
 /// public URL cannot 302-bounce into an internal/loopback address (SSRF), and
 /// no cookie store is used so apps do not share host cookies. When `pin` is

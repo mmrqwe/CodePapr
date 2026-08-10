@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::shared::{
     canonical_workspace, normalize_relative_path, parse_browser_url, relative_string,
 };
-use crate::web::client::{build_web_client, retry_with_backoff, SEARCH_RETRY_MAX};
+use crate::web::client::{retry_with_backoff, ssrf_safe_blocking_get, SEARCH_RETRY_MAX};
 use crate::web::text::{collapse_whitespace, html_to_text, truncate_text_to_bytes};
 use crate::workspace_fs::read::decode_text_bytes;
 
@@ -115,23 +115,20 @@ pub(crate) async fn fetch_web_url(
         if !parsed_url.starts_with("https://") && !parsed_url.starts_with("http://") {
             return Err("url 必须是 http 或 https URL".to_string());
         }
-        // SSRF 防护：与 papr.http 对齐，禁止访问内网/本地地址（app agent 的 webfetch 也走这里）
-        if crate::papr_runtime::services::is_private_or_internal_url(&parsed_url) {
-            return Err("安全限制：不允许访问内网/本地地址".to_string());
-        }
 
         let max_bytes = max_bytes.unwrap_or(20_000).clamp(1_000, 100_000);
-        let client = build_web_client()?;
+        // SSRF 防护：与 papr.http 对齐（app agent 的 webfetch 也走这里）。
+        // ssrf_safe_blocking_get 对每一跳做内网校验 + DNS pin + 手动重定向跟随，
+        // 防止初始 URL 合法但经 302 跳板或 DNS rebinding 访问内网/本地地址。
         let response = retry_with_backoff(
             || {
-                client
-                    .get(parsed_url.clone())
-                    .header(
+                ssrf_safe_blocking_get(&parsed_url, Duration::from_secs(20), |req| {
+                    req.header(
                         reqwest::header::ACCEPT,
                         "text/plain, text/html;q=0.9, application/json;q=0.8, */*;q=0.5",
                     )
-                    .send()
-                    .map_err(|err| format!("读取网页失败: {err}"))
+                })
+                .map_err(|err| format!("读取网页失败: {err}"))
             },
             SEARCH_RETRY_MAX,
         )?;
@@ -194,18 +191,14 @@ pub(crate) async fn download_web_file(
 ) -> Result<DownloadFileResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let workspace = canonical_workspace(&workspace_path)?;
-        let parsed_url = reqwest::Url::parse(&parse_browser_url(&url)?)
-            .map_err(|err| format!("URL 解析失败: {err}"))?;
-        let client = reqwest::blocking::Client::builder()
-            .user_agent("CodePapr/0.1")
-            .redirect(reqwest::redirect::Policy::limited(10))
-            .timeout(Duration::from_secs(60))
-            .build()
-            .map_err(|err| format!("初始化下载客户端失败: {err}"))?;
-
-        let response = client
-            .get(parsed_url)
-            .send()
+        let parsed_url = parse_browser_url(&url)?;
+        if !parsed_url.starts_with("https://") && !parsed_url.starts_with("http://") {
+            return Err("url 必须是 http 或 https URL".to_string());
+        }
+        // SSRF 防护：与 fetch_web_url / papr.http 同一防御等级——每一跳内网校验 +
+        // DNS pin + 手动重定向跟随。旧实现既不校验目标也不校验重定向落点，
+        // 可被用于读取云元数据（169.254.169.254）或本机服务响应。
+        let response = ssrf_safe_blocking_get(&parsed_url, Duration::from_secs(60), |req| req)
             .map_err(|err| format!("下载失败: {err}"))?;
         let status = response.status();
         if !status.is_success() {

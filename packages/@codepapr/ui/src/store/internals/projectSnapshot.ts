@@ -64,6 +64,9 @@ async function saveProjectStateNormalized(
 
   for (const [sessionId, messages] of Object.entries(sanitizedMessages)) {
     if (!knownSessionIds.has(sessionId)) continue;
+    // 读取失败的会话内存中是空/残缺视图：全量替换语义下回写会抹掉 DB 里
+    // 该会话的全部消息。跳过回写，等重载成功后才允许持久化。
+    if (state._messageLoadFailedSessions?.[sessionId]) continue;
     try {
       await saveMessageBatch(path, sessionId, messages as ProjectMessage[]);
     } catch (err) {

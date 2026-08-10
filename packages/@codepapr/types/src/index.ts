@@ -315,6 +315,11 @@ export type IChatStreamEvent =
         success: boolean;
         error?: string;
         output?: string;
+        /** Original tool call arguments. Carried by placeholder end events
+         *  (skipped calls, e.g. question/cancel interruption) that have no
+         *  preceding start event, so the invocation persisted from this event
+         *  rebuilds byte-identically with the live log. */
+        arguments?: Record<string, unknown>;
         /** Byte-exact tool message content actually appended to the log (already
          *  truncated + deterministically serialized). Persisted so a restored
          *  history rebuilds tool messages byte-identically and does not break the

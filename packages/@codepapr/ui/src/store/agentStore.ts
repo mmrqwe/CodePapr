@@ -291,6 +291,8 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       projectGraphPhase: null as null | { phase: string; current: number; total: number },
       showSettings: false,
       settingsLoaded: false,
+      _settingsPersistable: false,
+      _messageLoadFailedSessions: {},
       _agent: null,
       _agentModel: null,
       _agentPromptKey: null,
@@ -308,6 +310,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _gitReadyError: null,
       _checkpointError: null,
       _checkpointSeq: 0,
+      _turnSeq: 0,
       _pendingMemoryConsolidation: false,
       _latestContextSnapshot: null,
       _currentMode: 'agent',
@@ -320,7 +323,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           const storedSettings = await loadAppSettings();
           settings = normalizeSettings(storedSettings ?? get().settings);
           disposeAgentHandle(get);
-           set({ settings, settingsLoaded: true, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
+           set({ settings, settingsLoaded: true, _settingsPersistable: true, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
            void applyBrowserEngine(settings.browserEngine);
            void invoke('set_external_access_yolo', { enabled: settings.folderAccessYolo }).catch(() => undefined);
 
@@ -331,9 +334,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           // vault (interpreted as "user cleared the key") when vault injection
           // returns nothing, destroying a stored key.
         } catch {
+          // 加载失败：内存中是默认设置。保持 _settingsPersistable=false，
+          // 禁止后续自动回写，避免用默认值（含空 apiKey）摧毁磁盘上的真实配置。
           settings = get().settings;
           disposeAgentHandle(get);
-          set({ settingsLoaded: true, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
+          set({ settingsLoaded: true, _settingsPersistable: false, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
         }
 
         const recentWorkspaces = sortRecentWorkspaces(settings.recentWorkspaces);
@@ -354,7 +359,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             });
             disposeAgentHandle(get);
             set({ settings: nextSettings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
-            void saveAppSettings(nextSettings).catch(() => undefined);
+            if (get()._settingsPersistable) {
+              void saveAppSettings(nextSettings).catch(() => undefined);
+            }
           }
         }
 
@@ -412,6 +419,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _gitReadyError: null,
       _checkpointError: null,
       _checkpointSeq: 0,
+      _turnSeq: 0,
       _sessionLru: [],
           };
         });
@@ -458,6 +466,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _gitReadyError: null,
           _checkpointError: null,
           _checkpointSeq: 0,
+          _turnSeq: 0,
           _sessionLru: [],
         });
       },
@@ -477,6 +486,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         let projectDiagnosticsReport: unknown = null;
         let messageCheckpoints: Record<string, string> = {};
         let sessionTodoLists: Record<string, unknown> = {};
+        const messageLoadFailed: Record<string, boolean> = {};
 
         try {
           sessions = (await loadSessions(normalizedWorkspacePath)).map((meta) => ({
@@ -500,7 +510,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
               const msgs = await loadSessionMessages(normalizedWorkspacePath, activeSessionId);
               sessionMessages[activeSessionId] = msgs as unknown as UIMessage[];
             } catch {
+              // 读取失败 ≠ 会话为空：置 [] 但标记失败，禁止后续把空数组
+              // 全量替换回 DB（会抹掉该会话的全部消息）。
               sessionMessages[activeSessionId] = [];
+              messageLoadFailed[activeSessionId] = true;
             }
           }
 
@@ -615,12 +628,14 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _gitReadyError: null,
           _checkpointError: null,
           _checkpointSeq: 0,
+          _turnSeq: 0,
           // Active session first; the rest follow the persisted (updatedAt DESC)
           // order as the initial LRU approximation.
           _sessionLru: [
             ...(activeSessionId ? [activeSessionId] : []),
             ...sessions.filter((s) => s.id !== activeSessionId).map((s) => s.id),
           ],
+          _messageLoadFailedSessions: messageLoadFailed,
         });
 
         if (sessionTodoLists && Object.keys(sessionTodoLists).length > 0) {
@@ -637,7 +652,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         void warmupLspForWorkspace(path);
 
         const currentSettings = get().settings;
-        if (get().settingsLoaded && normalizedWorkspacePath) {
+        // _settingsPersistable 为 false 表示启动时设置加载失败、内存中是默认值，
+        // 此时回写会用默认设置（含空 apiKey）覆盖磁盘上的真实配置，必须跳过。
+        if (get().settingsLoaded && get()._settingsPersistable && normalizedWorkspacePath) {
           const nextRecent = upsertRecentWorkspace(currentSettings.recentWorkspaces, normalizedWorkspacePath);
           const nextSettings = normalizeSettings({
             ...currentSettings,
@@ -994,10 +1011,13 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         set({ messages: [], sessionMessagesLoading: true });
         void (async () => {
           let loaded: UIMessage[] = [];
+          let loadFailed = false;
           try {
             loaded = (await loadSessionMessages(workspacePath, id)) as unknown as UIMessage[];
           } catch {
+            // 读取失败 ≠ 会话为空：标记失败，禁止把空数组全量替换回 DB。
             loaded = [];
+            loadFailed = true;
           }
           // Race guard: the user may have switched to another session (or
           // workspace) while the load was in flight.
@@ -1007,6 +1027,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             messages: loaded,
             sessionMessages: { ...s.sessionMessages, [id]: loaded },
             sessionMessagesLoading: false,
+            _messageLoadFailedSessions: {
+              ...s._messageLoadFailedSessions,
+              [id]: loadFailed,
+            },
           }));
           evictSessionMessageCache(get, set, [id]);
         })();
@@ -1082,6 +1106,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agentPromptKey: null,
           _agentSessionId: null,
           _checkpointSeq: 0,
+          _turnSeq: 0,
           _checkpointError: null,
           _latestContextSnapshot: null,
         }));

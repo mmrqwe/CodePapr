@@ -274,6 +274,18 @@ export interface AgentState {
   projectGraphPhase: null | { phase: string; current: number; total: number };
   showSettings: boolean;
   settingsLoaded: boolean;
+  /**
+   * 设置是否成功从磁盘加载过。加载失败时内存中是默认设置，
+   * 此时禁止任何自动回写（否则会用默认值覆盖磁盘上的真实配置，
+   * 空 apiKey 还会被 vault 解释为"清除密钥"）。仅用户显式修改设置时才允许写入。
+   */
+  _settingsPersistable: boolean;
+  /**
+   * 消息加载失败的会话（sessionId → true）。"读取失败"与"会话为空"必须区分：
+   * 读失败被当作空会话后，全量替换语义的 save_message_batch 会把 DB 中该会话
+   * 的全部消息抹掉。对此集合中的会话：禁止回写消息、发送前必须先重载成功。
+   */
+  _messageLoadFailedSessions: Record<string, boolean>;
   // 运行时（不持久化）
   _agent: AgentRuntimeHandle | null;
   _agentModel: string | null;
@@ -293,6 +305,10 @@ export interface AgentState {
   _gitReadyError: string | null;
   _checkpointError: string | null;
   _checkpointSeq: number;
+  /** 单调递增的回合序号。sendMessage 启动时自增并捕获；异步收尾（取消/崩溃
+   *  的 catch）只有在序号未变时才允许复位 isLoading——否则取消 ACK 晚于新回合
+   *  启动到达时，旧回合的收尾会踩掉新回合的 loading 态，破坏单执行模型。 */
+  _turnSeq: number;
   _pendingMemoryConsolidation: boolean;
   _latestContextSnapshot: { sessionId: string; snapshot: IContextSnapshot } | null;
   _currentMode: WorkMode;

@@ -37,6 +37,28 @@ import { applySearchReplaceDiff, applySearchReplacePatch } from './workspaceTool
 import { lspLanguageFromPath } from '../utils/editorLanguage';
 import { type WorkspaceToolContext } from './workspaceToolContext';
 
+/**
+ * 读取结果若被字节上限截断则拒绝用于"读全文 → 局部替换 → 写回"链路：
+ * 在截断内容上打补丁并整体写回会静默丢失文件尾部（不可逆数据丢失）。
+ */
+function assertReadNotTruncated(result: ReadFileResult, relativePath: string): void {
+  if (result.truncatedByBytes || result.bytes >= 20_000_000) {
+    throw new Error(`文件 ${relativePath} 超过 20MB 上限，请改用 workspace_write_file 重写整个文件`);
+  }
+}
+
+/** 写后验证：正常全量比对；回读被截断时（读写上限一致，理论上不发生）降级为前缀比对，避免误报失败 */
+function assertWriteVerified(verified: ReadFileResult, expected: string, relativePath: string): void {
+  const matches = verified.truncatedByBytes
+    ? expected.startsWith(verified.content)
+    : verified.content === expected;
+  if (!matches) {
+    throw new Error(
+      `文件写入验证失败：${relativePath} 写入后内容与预期不一致。可能由云同步锁或文件系统问题导致，请重试。`
+    );
+  }
+}
+
 export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
   const {
     registry,
@@ -236,11 +258,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       relativePath: parsed.relativePath,
       maxBytes: Math.max(new TextEncoder().encode(parsed.content).length + 1024, 16384),
     });
-    if (verified.content !== parsed.content) {
-      throw new Error(
-        `文件写入验证失败：${parsed.relativePath} 写入后内容与预期不一致。可能由云同步锁或文件系统问题导致，请重试。`
-      );
-    }
+    assertWriteVerified(verified, parsed.content, parsed.relativePath);
 
     const diag = await lspDiagnosticsHook(parsed.relativePath, parsed.content);
     notes.push(diag.note);
@@ -274,9 +292,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       relativePath: parsed.relativePath,
       maxBytes: 20_000_000,
     });
-    if (current.bytes >= 20_000_000) {
-      throw new Error(`文件 ${parsed.relativePath} 超过 20MB 上限，请改用 workspace_write_file 重写整个文件`);
-    }
+    assertReadNotTruncated(current, parsed.relativePath);
     const ambiguity = await describeAmbiguousMatches(
       parsed.relativePath,
       current.content,
@@ -316,11 +332,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       relativePath: parsed.relativePath,
       maxBytes: Math.max(new TextEncoder().encode(patched.content).length + 1024, 16384),
     });
-    if (verified.content !== patched.content) {
-      throw new Error(
-        `文件写入验证失败：${parsed.relativePath} 写入后内容与预期不一致。可能由云同步锁或文件系统问题导致，请重试。`
-      );
-    }
+    assertWriteVerified(verified, patched.content, parsed.relativePath);
 
     // 后置 LSP 诊断钩子：返回编译诊断供模型继续修复（无 LSP 则降级跳过）
     const diag = await lspDiagnosticsHook(parsed.relativePath, patched.content);
@@ -362,9 +374,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
         relativePath,
         maxBytes: 20_000_000,
       });
-      if (current.bytes >= 20_000_000) {
-        throw new Error(`文件 ${relativePath} 超过 20MB 上限，请改用 workspace_write_file 重写整个文件`);
-      }
+      assertReadNotTruncated(current, relativePath);
       fileContents[relativePath] = current.content;
       fileBytes[relativePath] = current.bytes;
     }
@@ -418,11 +428,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
         relativePath: file.path,
         maxBytes: Math.max(new TextEncoder().encode(file.content).length + 1024, 16384),
       });
-      if (verified.content !== file.content) {
-        throw new Error(
-          `文件写入验证失败：${file.path} 写入后内容与预期不一致。可能由云同步锁或文件系统问题导致，请重试。`
-        );
-      }
+      assertWriteVerified(verified, file.content, file.path);
 
       // 后置 LSP 诊断钩子：返回编译诊断供模型继续修复（无 LSP 则降级跳过）
       const diag = await lspDiagnosticsHook(file.path, file.content);

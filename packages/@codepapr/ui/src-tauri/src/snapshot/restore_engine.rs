@@ -60,9 +60,87 @@ fn remove_untracked_not_in_tree(
 }
 
 const BACKUP_REF: &str = "refs/codepapr-backup-before-reset";
+const BACKUP_COMMIT_MESSAGE: &str = "codepapr:backup-before-reset";
 
 fn code_papr_git_path(workspace: &Path) -> PathBuf {
     workspace.join(".CodePapr/git")
+}
+
+/// 为"当前工作区实际状态"创建备份快照提交，返回其 Oid。
+///
+/// 与 `SnapshotEngine::create` 的关键区别：不移动 HEAD（commit 传 None），
+/// 该提交只作为 restore/undo 的安全网存在，不进入快照时间线。
+///
+/// 旧实现的备份只是 `BACKUP_REF -> 当前 shadow HEAD`（最后一次快照），
+/// 最后一次快照之后的工作区改动会被 reset 摧毁且 undo 无法恢复；
+/// 现在备份内容 = 执行破坏性操作前的真实磁盘状态。
+///
+/// 工作区无可快照文件（空/全被忽略）时降级为备份当前 HEAD；
+/// HEAD 也不存在则返回错误（调用方应拒绝无安全网的破坏性操作）。
+fn create_backup_snapshot(repo: &Repository, workspace: &Path) -> Result<Oid, String> {
+    let head_commit = repo
+        .head()
+        .ok()
+        .and_then(|h| h.target())
+        .and_then(|oid| repo.find_commit(oid).ok());
+
+    let files = IgnoreResolver::new(workspace).collect_files();
+    if files.is_empty() {
+        return head_commit
+            .map(|c| c.id())
+            .ok_or_else(|| "没有可备份的内容（工作区为空且无 HEAD）".to_string());
+    }
+
+    let mut index = repo
+        .index()
+        .map_err(|e| format!("index: {}", e.message()))?;
+    index.clear().map_err(|e| format!("clear index: {}", e.message()))?;
+
+    let mut added = 0usize;
+    let mut skipped = 0usize;
+    for file in &files {
+        // collect_files 返回 OS 原生分隔符（Windows 为 '\'），libgit2 只认 '/'
+        match index.add_path(&git_relative_path(file)) {
+            Ok(()) => added += 1,
+            Err(e) => {
+                skipped += 1;
+                eprintln!(
+                    "[CodePapr] backup_snapshot: add_path failed for {:?}: {}",
+                    file,
+                    e.message()
+                );
+            }
+        }
+    }
+    if skipped > 0 {
+        eprintln!("[CodePapr] backup_snapshot: WARNING: {skipped} files were SKIPPED (backup is incomplete)");
+    }
+    if added == 0 {
+        return head_commit
+            .map(|c| c.id())
+            .ok_or_else(|| "备份快照未能添加任何文件".to_string());
+    }
+
+    index.write().map_err(|e| format!("write index: {}", e.message()))?;
+    let tree_oid = index
+        .write_tree()
+        .map_err(|e| format!("write_tree: {}", e.message()))?;
+    let tree = repo
+        .find_tree(tree_oid)
+        .map_err(|e| format!("find_tree: {}", e.message()))?;
+    let signature = crate::git_operations::ensure_signature(repo)?;
+    let parents: Vec<&git2::Commit> = head_commit.iter().collect();
+    let oid = repo
+        .commit(
+            None,
+            &signature,
+            &signature,
+            BACKUP_COMMIT_MESSAGE,
+            &tree,
+            &parents,
+        )
+        .map_err(|e| format!("backup commit: {}", e.message()))?;
+    Ok(oid)
 }
 
 fn delta_status_code(delta: &git2::DiffDelta) -> &'static str {
@@ -205,16 +283,23 @@ impl RestoreEngine {
             None => (target_tree.len(), 0),
         };
 
+        // 备份 = reset 前工作区的真实状态（而非最后一次快照），
+        // 确保最后一次快照之后新增/修改的文件也能通过 undo 找回。
         let mut backup_ref = None;
-        if let Some(head_ref) = repo.head().ok() {
-            if let Some(head_oid) = head_ref.target() {
-                eprintln!("[CodePapr] restore_execute: backup ref -> {}", head_oid);
-                match repo.reference(BACKUP_REF, head_oid, true, "codepapr backup before reset") {
+        match create_backup_snapshot(&repo, &self.workspace) {
+            Ok(backup_oid) => {
+                eprintln!("[CodePapr] restore_execute: backup ref -> {}", backup_oid);
+                match repo.reference(BACKUP_REF, backup_oid, true, "codepapr backup before reset") {
                     Ok(_) => backup_ref = Some(BACKUP_REF.to_string()),
                     Err(e) => return Err(format!(
                         "failed to create backup ref: {} (refusing reset without safety net)", e.message()
                     )),
                 }
+            }
+            Err(e) => {
+                return Err(format!(
+                    "failed to create backup snapshot: {e} (refusing reset without safety net)"
+                ))
             }
         }
 
@@ -239,6 +324,21 @@ impl RestoreEngine {
         })
     }
 
+    /// 在其它破坏性操作（如 shadow repo 的 force checkout——其 workdir 就是
+    /// 用户工作区）之前创建当前工作区状态的备份并更新 BACKUP_REF，
+    /// 使数据始终可以通过 restore_undo 找回。
+    pub fn backup_current_state(&self) -> Result<String, String> {
+        let git_path = code_papr_git_path(&self.workspace);
+        let repo = Repository::open(&git_path)
+            .map_err(|e| format!("open repo: {}", e.message()))?;
+        repo.set_workdir(&self.workspace, false)
+            .map_err(|e| format!("set workdir: {}", e.message()))?;
+        let oid = create_backup_snapshot(&repo, &self.workspace)?;
+        repo.reference(BACKUP_REF, oid, true, "codepapr backup before destructive op")
+            .map_err(|e| format!("failed to update backup ref: {}", e.message()))?;
+        Ok(oid.to_string())
+    }
+
     pub fn undo(&self) -> Result<(), String> {
         let git_path = code_papr_git_path(&self.workspace);
         let repo = Repository::open(&git_path)
@@ -255,6 +355,22 @@ impl RestoreEngine {
         let target_tree = target_commit.tree()
             .map_err(|e| format!("backup tree: {}", e.message()))?;
 
+        // 与 execute 对齐的空 tree 防护：备份目标若是空 baseline 提交，
+        // reset + 未跟踪清理会删除工作区所有文件。
+        if target_tree.is_empty() {
+            return Err(
+                "backup checkpoint has an empty tree; refusing undo to prevent data loss"
+                    .to_string(),
+            );
+        }
+
+        // undo 前先备份当前工作区状态：restore 之后用户新写的文件不丢失，
+        // 且 undo 本身可再次 undo（在两个状态间可逆切换）。
+        let current_oid = create_backup_snapshot(&repo, &self.workspace)
+            .map_err(|e| format!("failed to backup current state before undo: {e}"))?;
+        repo.reference(BACKUP_REF, current_oid, true, "codepapr backup before undo")
+            .map_err(|e| format!("failed to update backup ref: {}", e.message()))?;
+
         let mut checkout = git2::build::CheckoutBuilder::new();
         checkout.force();
         repo.reset(target_commit.as_object(), ResetType::Hard, Some(&mut checkout))
@@ -265,5 +381,95 @@ impl RestoreEngine {
         eprintln!("[CodePapr] restore_undo: restored to {} ({} untracked removed)", target_oid, removed);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::snapshot::SnapshotEngine;
+    use std::fs;
+
+    fn temp_workspace(label: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        let unique = format!(
+            "codepapr-restore-{label}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        path.push(unique);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn test_undo_recovers_changes_made_after_last_snapshot() {
+        let workspace = temp_workspace("post-snapshot-changes");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        fs::write(workspace.join("tracked.txt"), "v1\n").unwrap();
+        let cp = engine.create("baseline").expect("baseline snapshot");
+
+        // 最后一次快照之后：修改已跟踪文件 + 新增文件（都未快照）
+        fs::write(workspace.join("tracked.txt"), "v2-unsnapshotted\n").unwrap();
+        fs::write(workspace.join("brand-new.txt"), "new-unsnapshotted\n").unwrap();
+
+        let restore = RestoreEngine::new(&workspace);
+        let exec = restore.execute(&cp.sha).expect("restore should succeed");
+        assert!(exec.ok);
+        assert_eq!(fs::read_to_string(workspace.join("tracked.txt")).unwrap(), "v1\n");
+        assert!(!workspace.join("brand-new.txt").exists());
+
+        // undo 必须找回"最后一次快照之后"的改动（旧实现备份仅指向 HEAD 快照，会永久丢失）
+        restore.undo().expect("undo should succeed");
+        assert_eq!(
+            fs::read_to_string(workspace.join("tracked.txt")).unwrap(),
+            "v2-unsnapshotted\n",
+            "post-snapshot modification must survive undo"
+        );
+        assert!(
+            workspace.join("brand-new.txt").exists(),
+            "post-snapshot new file must survive undo"
+        );
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
+    fn test_undo_refuses_empty_tree_backup() {
+        let workspace = temp_workspace("empty-tree-undo");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure(); // 创建空 tree 的 baseline 提交
+
+        fs::write(workspace.join("file.txt"), "content\n").unwrap();
+        let cp = engine.create("with-file").expect("snapshot with file");
+
+        let restore = RestoreEngine::new(&workspace);
+        // 人为把 BACKUP_REF 指向空 baseline（模拟 force checkout 到空分支后的旧备份语义）
+        let repo = Repository::open(code_papr_git_path(&workspace)).unwrap();
+        let mut revwalk = repo.revwalk().unwrap();
+        revwalk.push_head().unwrap();
+        let baseline = revwalk
+            .map(|o| o.unwrap())
+            .last()
+            .expect("should have baseline commit");
+        repo.reference(BACKUP_REF, baseline, true, "test").unwrap();
+
+        // 先正常 restore 一次（会重建备份），再强制把备份指回空 baseline 验证 undo 拒绝
+        restore.execute(&cp.sha).expect("restore should succeed");
+        repo.reference(BACKUP_REF, baseline, true, "test").unwrap();
+        drop(repo);
+
+        let err = restore.undo().expect_err("undo must refuse empty-tree backup");
+        assert!(err.contains("empty tree"), "unexpected error: {err}");
+        assert!(
+            workspace.join("file.txt").exists(),
+            "workspace must be untouched after refused undo"
+        );
+
+        fs::remove_dir_all(&workspace).ok();
     }
 }

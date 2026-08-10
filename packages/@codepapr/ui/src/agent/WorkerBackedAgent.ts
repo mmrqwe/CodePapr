@@ -716,7 +716,12 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         this.clearCancelTimer();
         this.clearSnapshotTimer();
         this.pendingRequests.delete(message.requestId);
-        this.activeRequestId = null;
+        // 仅当被取消的仍是当前活跃请求时才清空 activeRequestId：取消 ACK 到达
+        // 前用户可能已开启新回合（新 requestId），无差别置空会让新回合的
+        // cancel() 找不到 requestId 而失效。
+        if (this.activeRequestId === message.requestId) {
+          this.activeRequestId = null;
+        }
         this.flushDeltas(pending);
         this.workerSyncedLength.delete(this.config.sessionId);
         pending.reject(new DOMException('Session was cancelled', 'AbortError'));

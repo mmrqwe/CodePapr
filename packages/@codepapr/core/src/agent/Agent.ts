@@ -755,6 +755,7 @@ export class Agent {
         break;
       }
 
+      let executedToolCalls = 0;
       for (const call of assistant.toolCalls) {
         if (effectiveSignal?.aborted) {
           break;
@@ -807,6 +808,7 @@ export class Agent {
         }
         const toolMsg = await this.buildToolMessage(call, contextResult, success);
         await this.session.logStore.append(toolMsg);
+        executedToolCalls += 1;
         onStreamEvent?.({
           type: 'tool-call-end',
           toolCallId: call.id,
@@ -841,6 +843,40 @@ export class Agent {
             );
             await this.session.logStore.append(imageMsg);
           }
+        }
+      }
+
+      // 为被跳过的 tool call 补占位结果：OpenAI/DeepSeek 要求每个 tool_call 都有
+      // 配对的 tool 消息、Claude 要求每个 tool_use 后必须跟 tool_result，否则下一
+      // 轮请求被 400 拒绝。question 中断与取消中断都会留下同批未执行的调用——
+      // 不补占位会污染日志，用户回答 question 后的第一个请求即失败。
+      if (executedToolCalls < assistant.toolCalls.length) {
+        const skipReason = question
+          ? '该工具调用被跳过：会话已进入提问流程'
+          : '该工具调用未执行：会话已取消';
+        for (const skipped of assistant.toolCalls.slice(executedToolCalls)) {
+          const placeholder = await this.buildToolMessage(
+            skipped,
+            { error: skipReason },
+            false
+          );
+          await this.session.logStore.append(placeholder);
+          onStreamEvent?.({
+            type: 'tool-call-end',
+            toolCallId: skipped.id,
+            toolName: skipped.name,
+            success: false,
+            error: skipReason,
+            output: JSON.stringify({ error: skipReason }),
+            // 携带原始参数：该事件没有对应的 start 事件，UI 侧从 end 事件新建
+            // invocation 时需要真实参数，否则重建上下文与活日志字节不一致。
+            arguments: skipped.arguments,
+            contextContent: placeholder.content,
+            contextSummary:
+              typeof placeholder.metadata?.[TOOL_SUMMARY_METADATA_KEY] === 'string'
+                ? (placeholder.metadata[TOOL_SUMMARY_METADATA_KEY] as string)
+                : undefined,
+          });
         }
       }
 

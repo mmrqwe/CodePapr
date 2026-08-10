@@ -83,7 +83,7 @@ function buildAgent(opts: {
     maxToolRounds: 10,
   });
 
-  return agent;
+  return { agent, log };
 }
 
 function responseWithToolCalls(toolCalls: IToolCall[]): IChatResponse {
@@ -121,7 +121,7 @@ describe('Agent question tool flow', () => {
       chat: vi.fn(async () => responseWithToolCalls([questionCall])),
     };
 
-    const agent = buildAgent({
+    const { agent } = buildAgent({
       provider,
       tools: [
         {
@@ -175,7 +175,7 @@ describe('Agent question tool flow', () => {
     };
 
     let writeExecuted = false;
-    const agent = buildAgent({
+    const { agent, log } = buildAgent({
       provider,
       tools: [
         {
@@ -200,6 +200,16 @@ describe('Agent question tool flow', () => {
     expect(result.question).toBeDefined();
     // question 一旦出现，同一轮里排在后面的 write 不得执行
     expect(writeExecuted).toBe(false);
+    // 但被跳过的 write 必须有占位 tool 结果入日志：OpenAI/Claude 要求
+    // tool_call 与 tool_result 严格配对，否则用户回答后的下一个请求被 400 拒绝
+    const toolMessages = log.getAllMessages().filter((m) => m.role === 'tool');
+    expect(toolMessages.map((m) => m.toolResult?.toolCallId)).toEqual([
+      'call-q',
+      'call-w',
+    ]);
+    const skippedResult = toolMessages[1];
+    expect(skippedResult.toolResult?.success).toBe(false);
+    expect(skippedResult.content).toContain('被跳过');
   });
 
   it('still executes tools that appear before the question call in the same round', async () => {
@@ -230,7 +240,7 @@ describe('Agent question tool flow', () => {
     };
 
     let readExecuted = false;
-    const agent = buildAgent({
+    const { agent } = buildAgent({
       provider,
       tools: [
         {

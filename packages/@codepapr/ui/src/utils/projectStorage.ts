@@ -502,7 +502,8 @@ export async function saveMessageBatch(
   sessionId: string,
   messages: ProjectMessage[]
 ): Promise<void> {
-  if (messages.length === 0) return;
+  // 空数组必须落库：后端为全量替换语义（先 DELETE 后 INSERT），
+  // 跳过会导致 clearMessages/resetToMessage 截断到空后重启时旧消息复活。
   await invoke('save_message_batch', {
     workspacePath: workspacePath.trim(),
     sessionId,

@@ -141,6 +141,7 @@ fn open_app_db() -> Result<(Connection, PathBuf), String> {
         .map_err(|err| format!("打开配置数据库 {} 失败: {err}", db_path.display()))?;
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
+         PRAGMA busy_timeout = 5000;
          PRAGMA foreign_keys = ON;
          CREATE TABLE IF NOT EXISTS settings (
            key TEXT PRIMARY KEY,
@@ -176,6 +177,7 @@ fn open_project_db(workspace_path: &str) -> Result<(Connection, PathBuf, PathBuf
         .map_err(|err| format!("打开项目状态数据库 {} 失败: {err}", db_path.display()))?;
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
+         PRAGMA busy_timeout = 5000;
          PRAGMA secure_delete = ON;
          PRAGMA foreign_keys = ON;
           CREATE TABLE IF NOT EXISTS project_state (
@@ -743,18 +745,20 @@ pub(crate) fn load_app_settings(app: tauri::AppHandle) -> Result<AppSettingsResu
 
             // If migration happened, persist the stripped JSON so plaintext keys
             // are removed from SQLite going forward, and flush the vault so the
-            // migrated secrets survive a restart.
+            // migrated secrets survive a restart. vault 必须先落盘成功再剥离 DB：
+            // 若先写空 key 入库而 vault 保存失败，密钥将两头皆空且无报错。
             if let Some(stripped) = stripped_for_persistence {
-                let _ = conn.execute(
-                    "INSERT INTO settings (key, value, data_type, updated_at)
-                     VALUES (?1, ?2, 'json', ?3)
-                     ON CONFLICT(key) DO UPDATE SET
-                       value = excluded.value,
-                       data_type = excluded.data_type,
-                       updated_at = excluded.updated_at",
-                    params![APP_SETTINGS_KEY, stripped, unix_millis()?],
-                );
-                let _ = app_secrets.save();
+                if app_secrets.save().is_ok() {
+                    let _ = conn.execute(
+                        "INSERT INTO settings (key, value, data_type, updated_at)
+                         VALUES (?1, ?2, 'json', ?3)
+                         ON CONFLICT(key) DO UPDATE SET
+                           value = excluded.value,
+                           data_type = excluded.data_type,
+                           updated_at = excluded.updated_at",
+                        params![APP_SETTINGS_KEY, stripped, unix_millis()?],
+                    );
+                }
             }
 
             Some(serde_json::to_string(&value).map_err(|err| format!("序列化配置失败: {err}"))?)
@@ -789,6 +793,13 @@ pub(crate) fn save_app_settings(
     let persisted_json =
         serde_json::to_string(&value).map_err(|err| format!("序列化配置失败: {err}"))?;
 
+    // 必须先持久化 vault 成功，再写"已剥离 key 的 JSON"入库。顺序反了的话：
+    // DB 已存空 key 而 vault 落盘失败（磁盘满/权限/文件被占）→ 重启后两头皆空，
+    // 用户的 API key 静默永久丢失。vault 失败时 DB 保持原状，用户可重试。
+    app_secrets
+        .save()
+        .map_err(|e| format!("保存密钥库失败: {e}"))?;
+
     let (conn, db_path) = open_app_db()?;
     conn.execute(
         "INSERT INTO settings (key, value, data_type, updated_at)
@@ -800,11 +811,6 @@ pub(crate) fn save_app_settings(
         params![APP_SETTINGS_KEY, persisted_json, unix_millis()?],
     )
     .map_err(|err| format!("保存应用配置失败: {err}"))?;
-
-    // Persist the vault after writing secrets.
-    app_secrets
-        .save()
-        .map_err(|e| format!("保存密钥库失败: {e}"))?;
 
     Ok(AppSettingsResult {
         settings_json: Some(persisted_json),

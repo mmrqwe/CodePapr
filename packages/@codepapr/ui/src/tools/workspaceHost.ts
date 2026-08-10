@@ -81,10 +81,12 @@ export function createUiWorkspaceHost(params: {
     },
     async writeTextFile(options) {
       await params.ensureExternalPathAllowed?.(options.relativePath, 'write');
+      // 与 MAX_WRITE_BYTES(20MB) 对齐：before 快照必须覆盖可写入的全部范围，
+      // 否则 undo 会把文件"恢复"成截断内容
       const before = await invoke<ReadFileResult>('read_text_file', {
         workspacePath: params.workspacePath,
         relativePath: options.relativePath,
-        maxBytes: 1_000_000,
+        maxBytes: 20_000_000,
       }).catch(() => null);
       const result = await invoke<WriteTextFileResult>('write_text_file', {
         workspacePath: params.workspacePath,
@@ -118,7 +120,7 @@ export function createUiWorkspaceHost(params: {
             await invoke<ReadFileResult>('read_text_file', {
               workspacePath: params.workspacePath,
               relativePath: options.relativePath,
-              maxBytes: 1_000_000,
+              maxBytes: 20_000_000,
             })
           ).content;
 

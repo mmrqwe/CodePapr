@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::Read;
+use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 
 use serde::Serialize;
@@ -12,7 +13,7 @@ use crate::web::text::{collapse_whitespace, html_to_text, truncate_text_to_bytes
 const MAX_PAPR_HTTP_BYTES: usize = 500_000;
 const PAPR_HTTP_POST_MAX_BYTES: usize = 100_000;
 
-fn is_internal_ipv4(ip: std::net::Ipv4Addr) -> bool {
+pub(crate) fn is_internal_ipv4(ip: std::net::Ipv4Addr) -> bool {
     let octets = ip.octets();
     ip.is_loopback()           // 127.0.0.0/8
         || ip.is_private()     // 10/8, 172.16/12, 192.168/16
@@ -22,7 +23,7 @@ fn is_internal_ipv4(ip: std::net::Ipv4Addr) -> bool {
         || (octets[0] == 100 && (64..=127).contains(&octets[1])) // CGNAT 100.64/10
 }
 
-fn is_internal_ipv6(ip: std::net::Ipv6Addr) -> bool {
+pub(crate) fn is_internal_ipv6(ip: std::net::Ipv6Addr) -> bool {
     if let Some(mapped) = ip.to_ipv4_mapped() {
         return is_internal_ipv4(mapped); // ::ffff:127.0.0.1 etc.
     }
@@ -77,6 +78,37 @@ async fn resolve_safe_socket_addr(
     let port = parsed.port_or_known_default().unwrap_or(443);
     let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
         .await
+        .map_err(|err| format!("DNS 解析失败 {host}: {err}"))?
+        .collect();
+    if addrs.is_empty() {
+        return Err(format!("DNS 解析无结果: {host}"));
+    }
+    for addr in &addrs {
+        let internal = match addr.ip() {
+            std::net::IpAddr::V4(v4) => is_internal_ipv4(v4),
+            std::net::IpAddr::V6(v6) => is_internal_ipv6(v6),
+        };
+        if internal {
+            return Err(format!("安全限制：{host} 解析到内网/本地地址 {}", addr.ip()));
+        }
+    }
+    Ok(Some((host, addrs[0])))
+}
+
+/// `resolve_safe_socket_addr` 的阻塞版本：供 spawn_blocking 内的阻塞客户端
+/// （fetch_web_url / download_web_file）复用同一套 DNS 解析 + 逐地址内网校验，
+/// 防止 DNS rebinding 在"校验后、连接前"把公网域名重新解析到内网地址。
+pub(crate) fn resolve_safe_socket_addr_blocking(
+    parsed: &url::Url,
+) -> Result<Option<(String, std::net::SocketAddr)>, String> {
+    let host = match parsed.host() {
+        Some(url::Host::Domain(domain)) => domain.to_string(),
+        Some(_) => return Ok(None),
+        None => return Err("URL 缺少主机".to_string()),
+    };
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let addrs: Vec<std::net::SocketAddr> = (host.as_str(), port)
+        .to_socket_addrs()
         .map_err(|err| format!("DNS 解析失败 {host}: {err}"))?
         .collect();
     if addrs.is_empty() {

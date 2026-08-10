@@ -53,6 +53,7 @@ import {
 import { WorkerCrashError } from '../../agent/WorkerBackedAgent';
 import { delay, waitForPageVisible } from '../../utils/crashRecovery';
 import { insertCheckpointAtRetainedBoundary } from '../../utils/contextCompaction';
+import { loadSessionMessages } from '../../utils/projectStorage';
 import { runVerifier } from '../../utils/verifierRunner';
 import { useGoalStore } from '../goalStore';
 import type { CommandResult } from '../../tools/streamingWorkspaceCommand';
@@ -222,6 +223,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         let userMsg: UIMessage | null = null;
         // 本回合归属的会话（catch 中用于收尾，try 内的同名局部变量不在 catch 作用域）。
         let turnSessionId: string | null = null;
+        // 本回合的序号（catch 中判断是否仍是当前回合，同 turnSessionId 需在 try 外声明）。
+        let turnSeq = 0;
 
         let effectiveInput = input;
         let effectiveDisplay = displayContent;
@@ -452,6 +455,40 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
 
         try {
           const { workspacePath, sessionMessages } = get();
+
+          // 回合序号：异步收尾（取消/崩溃 catch）用它判断自己是否仍是当前回合，
+          // 避免旧回合的收尾踩掉新回合的 isLoading（单执行模型）。
+          turnSeq = get()._turnSeq + 1;
+          set({ _turnSeq: turnSeq });
+
+          // ── 消息加载失败守卫 ──
+          // 该会话的消息此前从 DB 读取失败（内存中是空视图）。若直接在空视图上
+          // 追加并保存，全量替换语义会把 DB 里该会话的历史消息全部抹掉。
+          // 先尝试重载：成功则恢复视图，仍失败则拒绝发送并提示用户。
+          const guardSid = get().activeSessionId;
+          if (guardSid && workspacePath && get()._messageLoadFailedSessions?.[guardSid]) {
+            try {
+              const reloaded = (await loadSessionMessages(
+                workspacePath,
+                guardSid
+              )) as unknown as UIMessage[];
+              set((s) => ({
+                messages: s.activeSessionId === guardSid ? reloaded : s.messages,
+                sessionMessages: { ...s.sessionMessages, [guardSid]: reloaded },
+                _messageLoadFailedSessions: {
+                  ...s._messageLoadFailedSessions,
+                  [guardSid]: false,
+                },
+              }));
+            } catch (reloadErr) {
+              console.error('[CodePapr] 会话消息重载失败，拒绝发送以防覆盖历史:', reloadErr);
+              appendInfoMessage(
+                set,
+                '会话历史加载失败，为避免覆盖已有消息已暂停发送。请重新打开项目或切换会话后重试。'
+              );
+              return;
+            }
+          }
 
           // ── optimistic UI: show user message immediately, before any awaits ──
           let optimisticSid = get().activeSessionId;
@@ -1689,11 +1726,18 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // 以本回合捕获的会话为准收尾（用户可能已切换到别的会话）。
           const sid = turnSessionId ?? get().activeSessionId;
           if (err instanceof DOMException && err.name === 'AbortError') {
+            // 取消 ACK 可能晚于新回合启动到达：仅当本回合仍是当前回合时才复位
+            // isLoading，否则会踩掉新回合的 loading 态、破坏单执行模型。
+            const stillCurrentTurn = get()._turnSeq === turnSeq;
             // 取消若源于 worker 已死（cancel 超时判崩），必须同时清空 agent，
             // 否则下一条消息会复用死 agent，抛出笼统的「worker has crashed」。
             if (get()._agent?.isCrashed()) {
-              set({ _agent: null, _agentSessionId: null, isLoading: false, loadingSessionId: null });
-            } else {
+              set({
+                _agent: null,
+                _agentSessionId: null,
+                ...(stillCurrentTurn ? { isLoading: false, loadingSessionId: null } : {}),
+              });
+            } else if (stillCurrentTurn) {
               set({ isLoading: false, loadingSessionId: null });
             }
             if (assistantMessageId && sid) {
@@ -1707,9 +1751,14 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
 
           // Worker crash: null out the agent so a fresh one is created on retry.
           const isWorkerCrash = err instanceof WorkerCrashError;
+          const stillCurrentTurn = get()._turnSeq === turnSeq;
           if (isWorkerCrash) {
-            set({ _agent: null, _agentSessionId: null, isLoading: false, loadingSessionId: null });
-          } else {
+            set({
+              _agent: null,
+              _agentSessionId: null,
+              ...(stillCurrentTurn ? { isLoading: false, loadingSessionId: null } : {}),
+            });
+          } else if (stillCurrentTurn) {
             set({ isLoading: false, loadingSessionId: null });
           }
 

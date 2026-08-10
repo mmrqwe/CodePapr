@@ -136,6 +136,23 @@ pub fn git_branch_checkout_impl(
         };
     }
 
+    // shadow repo 的 workdir 就是用户工作区：force checkout 会直接覆盖工作区文件。
+    // 切换前先备份当前状态到 BACKUP_REF，使数据可通过 restore_undo 找回。
+    // 备份失败且工作区确有可快照文件时中止切换（fail-closed，防无安全网覆盖）。
+    let backup_ref = match crate::snapshot::RestoreEngine::new(workspace).backup_current_state() {
+        Ok(oid) => Some(oid),
+        Err(e) => {
+            if crate::snapshot::SnapshotEngine::new(workspace).has_snapshotable_files() {
+                return GitOperationResult {
+                    ok: false, action: "branch_checkout".to_string(),
+                    message: format!("切换前备份工作区失败，已中止以防数据丢失: {e}"),
+                    backup_ref: None,
+                };
+            }
+            None
+        }
+    };
+
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
     if let Err(e) = repo.checkout_head(Some(&mut checkout)) {
@@ -147,7 +164,7 @@ pub fn git_branch_checkout_impl(
 
     GitOperationResult {
         ok: true, action: "branch_checkout".to_string(),
-        message: format!("已切换到分支 {}", branch_name), backup_ref: None,
+        message: format!("已切换到分支 {}", branch_name), backup_ref,
     }
 }
 

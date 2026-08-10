@@ -110,6 +110,13 @@ export function applyToolStreamEvent(
       if (exactIndex >= 0) {
         return exactIndex;
       }
+      // toolCallId 是权威标识：带了 id 却没命中任何 invocation 时，绝不能退回
+      // "仅按工具名"匹配——那会把事件错配到同名的其它调用上（例如 question
+      // 中断补发的占位 end 事件会污染同批已执行的同名工具结果）。此时应返回
+      // -1 走"新建 invocation"分支。名字兜底只留给缺 toolCallId 的旧/兜底路径。
+      if (event.toolCallId !== '') {
+        return -1;
+      }
     }
 
     const eventArguments = 'arguments' in event ? Serializer.stringify(event.arguments ?? {}) : null;
@@ -189,7 +196,8 @@ export function applyToolStreamEvent(
       ? {
           id: event.toolCallId,
           name: event.toolName,
-          arguments: {},
+          // 占位 end 事件（question/取消中断）携带原始参数；缺失时保持旧行为
+          arguments: event.arguments ?? {},
           status: event.success ? 'success' : 'error',
         }
       : currentInvocations[existingIndex]!;

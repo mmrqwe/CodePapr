@@ -28,7 +28,10 @@ pub(crate) const DEFAULT_MAX_DEPTH: usize = 2;
 pub(crate) const MAX_DEPTH: usize = 20;
 pub(crate) const MAX_ENTRIES: usize = 10_000;
 pub(crate) const DEFAULT_MAX_READ_BYTES: usize = 500_000;
-pub(crate) const MAX_READ_BYTES: usize = 1_000_000;
+// 与 MAX_WRITE_BYTES / MAX_RANGE_SOURCE_BYTES 对齐：整文件读取上限必须覆盖
+// edit/patch 的"读全文 → 局部替换 → 写回"链路，否则 >1MB 文件会被静默截断后
+// 整体写回，丢失尾部内容（工具契约与 ARCHITECTURE 文档均为 20MB）。
+pub(crate) const MAX_READ_BYTES: usize = 20_000_000;
 pub(crate) const MAX_RANGE_SOURCE_BYTES: usize = 20_000_000;
 pub(crate) const DEFAULT_ANCHORED_CONTEXT_LINES: usize = 20;
 pub(crate) const MAX_READ_CONTEXT_LINES: usize = 200;

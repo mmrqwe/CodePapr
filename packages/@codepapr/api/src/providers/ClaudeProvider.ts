@@ -127,11 +127,14 @@ function buildClaudeMessageBlocks(
   message: IChatRequest['messages'][number]
 ): ClaudeMessageBlock[] {
   if (message.toolResult) {
+    // 使用 message.content（MessageFactory.tool 已生成的纯文本/序列化结果）。
+    // 不能对 toolResult.result 再做 sortedStringify：Agent 路径下 result 已是字符串，
+    // 二次 JSON 编码会给全部内容套上引号与转义，损坏发给模型的工具结果。
     return [
       {
         type: 'tool_result',
         tool_use_id: message.toolResult.toolCallId,
-        content: sortedStringify(message.toolResult.result),
+        content: message.content,
       },
     ];
   }
