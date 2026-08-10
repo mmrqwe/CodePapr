@@ -544,7 +544,10 @@ async fn connect_http(
 async fn get_or_connect_client(server: &McpServerConfig) -> Result<SharedMcpClient, String> {
     let key = server_cache_key(server);
     let server_id = sanitize_name_part(&server.id);
-    {
+    // 全局 map 锁只用于查找/清理，clone 出 Arc 后立即释放，绝不跨 await 持有：
+    // client 子锁可能被长时间的 call_tool/list_tools 占用，若在持有 map 锁时
+    // await 它，会把所有其他服务器的访问一并阻塞。
+    let existing = {
         let mut guard = clients().lock().await;
         let stale_keys: Vec<String> = guard
             .iter()
@@ -564,12 +567,20 @@ async fn get_or_connect_client(server: &McpServerConfig) -> Result<SharedMcpClie
         for stale_key in stale_keys {
             guard.remove(&stale_key);
         }
-        if let Some(client) = guard.get(&key).cloned() {
-            let closed = client.lock().await.is_closed();
-            if !closed {
-                return Ok(client);
+        guard.get(&key).cloned()
+    };
+
+    if let Some(client) = existing {
+        let closed = client.lock().await.is_closed();
+        if !closed {
+            return Ok(client);
+        }
+        // 释放窗口期内可能已有并发重连插入了新 client，仅当仍是同一个 Arc 时才移除
+        let mut guard = clients().lock().await;
+        if let Some(current) = guard.get(&key) {
+            if Arc::ptr_eq(current, &client) {
+                guard.remove(&key);
             }
-            guard.remove(&key);
         }
     }
 

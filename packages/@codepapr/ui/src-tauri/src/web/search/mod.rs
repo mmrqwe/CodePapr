@@ -277,20 +277,37 @@ pub(crate) async fn search_web(
                 .as_deref()
                 .map(|url| !url.trim().is_empty())
                 .unwrap_or(false);
-        let cache_scope = if searxng_active {
-            format!(
-                "searxng:{}",
-                searxng_base_url.as_deref().unwrap_or("").trim()
-            )
-        } else {
-            "builtin".to_string()
-        };
+        let max_results = max_results.unwrap_or(5).clamp(1, 10);
 
-        if let Some(cached) = get_cached_search(query, &cache_scope) {
+        // 缓存 key 必须纳入所有影响结果的参数，且全部先归一化（clamp/trim/lowercase），
+        // 否则用户改参数后 TTL 内仍会命中旧结果
+        let mut cache_key = format!(
+            "{}\u{1f}{max_results}\u{1f}{}",
+            if searxng_active {
+                format!(
+                    "searxng:{}",
+                    searxng_base_url.as_deref().unwrap_or("").trim()
+                )
+            } else {
+                "builtin".to_string()
+            },
+            query.to_lowercase()
+        );
+        if searxng_active {
+            cache_key.push_str(&format!(
+                "\u{1f}{categories}\u{1f}{time_range}\u{1f}{language}\u{1f}{safe_search}\u{1f}{engines}",
+                categories = searxng_categories.as_deref().unwrap_or("").trim().to_lowercase(),
+                time_range = searxng_time_range.as_deref().unwrap_or("").trim().to_lowercase(),
+                language = searxng_language.as_deref().unwrap_or("").trim().to_lowercase(),
+                safe_search = searxng_safe_search.unwrap_or(1),
+                engines = searxng_engines.as_deref().unwrap_or("").trim().to_lowercase(),
+            ));
+        }
+
+        if let Some(cached) = get_cached_search(&cache_key) {
             return Ok(cached);
         }
 
-        let max_results = max_results.unwrap_or(5).clamp(1, 10);
         let client = build_web_client()?;
 
         let mut degraded = false;
@@ -319,7 +336,7 @@ pub(crate) async fn search_web(
                         note: None,
                         sources: vec!["searxng".to_string()],
                     };
-                    cache_search_response(query, &cache_scope, &response);
+                    cache_search_response(&cache_key, &response);
                     return Ok(response);
                 }
                 Ok(_) => {
@@ -515,7 +532,10 @@ pub(crate) async fn search_web(
             note,
             sources,
         };
-        cache_search_response(query, &cache_scope, &response);
+        // 降级结果不缓存：否则 TTL 内即使 SearXNG 恢复也会一直命中降级旧结果
+        if !degraded {
+            cache_search_response(&cache_key, &response);
+        }
         Ok(response)
     })
     .await

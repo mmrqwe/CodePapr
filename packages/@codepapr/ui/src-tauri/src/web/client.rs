@@ -83,17 +83,24 @@ pub(crate) fn apply_browser_headers(
     req
 }
 
+/// 限流同一域名的连续请求。map 中存放的是该域名"下一次允许发起请求的时刻"：
+/// 先在锁内为自己预留一个时间槽并立即释放锁，再在锁外 sleep 到槽位时刻。
+/// 这样不同域名互不阻塞，同时同域名的并发请求各自占据递增的槽位，
+/// 仍严格保持 min_interval 间隔（若放锁后直接 sleep 再回写时间戳，
+/// 并发请求会同时醒来、同时发起请求，破坏间隔约束）。
 pub(crate) fn rate_limit_domain(domain: &str, min_interval: Duration) {
     let map = RATE_LIMIT_LAST_REQUEST.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(mut lock) = map.lock() {
         let now = Instant::now();
-        if let Some(last) = lock.get(domain) {
-            let elapsed = now.duration_since(*last);
-            if elapsed < min_interval {
-                std::thread::sleep(min_interval - elapsed);
-            }
+        let next_slot = lock
+            .get(domain)
+            .map(|next_allowed| (*next_allowed + min_interval).max(now))
+            .unwrap_or(now);
+        lock.insert(domain.to_string(), next_slot);
+        drop(lock);
+        if next_slot > now {
+            std::thread::sleep(next_slot - now);
         }
-        lock.insert(domain.to_string(), Instant::now());
     }
 }
 
@@ -117,22 +124,21 @@ where
     Err(last_error)
 }
 
-fn search_cache_key(query: &str, scope: &str) -> String {
-    format!("{scope}\u{1f}{}", query.trim().to_lowercase())
-}
-
-pub(crate) fn get_cached_search(query: &str, scope: &str) -> Option<WebSearchResponse> {
+/// 缓存 key 由调用方预构建，必须包含所有影响结果的参数
+/// （scope/query/max_results/categories/time_range/language/safe_search/engines），
+/// 否则用户改参数后仍会命中旧缓存。
+pub(crate) fn get_cached_search(cache_key: &str) -> Option<WebSearchResponse> {
     let cache = SEARCH_CACHE
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .ok()?;
     cache
-        .get(&search_cache_key(query, scope))
+        .get(cache_key)
         .filter(|entry| entry.0.elapsed() < Duration::from_secs(SEARCH_CACHE_TTL_SECS))
         .map(|entry| entry.1.clone())
 }
 
-pub(crate) fn cache_search_response(query: &str, scope: &str, response: &WebSearchResponse) {
+pub(crate) fn cache_search_response(cache_key: &str, response: &WebSearchResponse) {
     // 空结果不缓存：一次失败不应污染后续 TTL 内的相同查询
     if response.results.is_empty() && response.abstract_text.trim().is_empty() {
         return;
@@ -141,10 +147,7 @@ pub(crate) fn cache_search_response(query: &str, scope: &str, response: &WebSear
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
     {
-        cache.insert(
-            search_cache_key(query, scope),
-            (Instant::now(), response.clone()),
-        );
+        cache.insert(cache_key.to_string(), (Instant::now(), response.clone()));
     }
 }
 
@@ -204,20 +207,20 @@ mod tests {
     #[test]
     fn empty_response_is_not_cached() {
         let empty = response(Vec::new(), "");
-        cache_search_response("empty-cache-probe", "builtin", &empty);
-        assert!(get_cached_search("empty-cache-probe", "builtin").is_none());
+        cache_search_response("builtin\u{1f}empty-cache-probe", &empty);
+        assert!(get_cached_search("builtin\u{1f}empty-cache-probe").is_none());
 
         let abstract_only = response(Vec::new(), "instant answer");
-        cache_search_response("abstract-cache-probe", "builtin", &abstract_only);
-        assert!(get_cached_search("abstract-cache-probe", "builtin").is_some());
+        cache_search_response("builtin\u{1f}abstract-cache-probe", &abstract_only);
+        assert!(get_cached_search("builtin\u{1f}abstract-cache-probe").is_some());
     }
 
     #[test]
     fn cache_key_is_scoped_by_source_config() {
         let with_results = response(vec![entry("https://a.com")], "");
-        cache_search_response("scoped-probe", "searxng:https://s.example", &with_results);
-        assert!(get_cached_search("scoped-probe", "searxng:https://s.example").is_some());
-        assert!(get_cached_search("scoped-probe", "builtin").is_none());
+        cache_search_response("searxng:https://s.example\u{1f}scoped-probe", &with_results);
+        assert!(get_cached_search("searxng:https://s.example\u{1f}scoped-probe").is_some());
+        assert!(get_cached_search("builtin\u{1f}scoped-probe").is_none());
     }
 
     #[test]
