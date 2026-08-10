@@ -1,4 +1,4 @@
-# [codepapr-api-version] 3
+# [codepapr-api-version] 4
 # [codepapr-ws] endpoint
 
 import os, warnings
@@ -159,6 +159,7 @@ sys.path.append(now_dir)
 sys.path.append("%s/GPT_SoVITS" % (now_dir))
 
 import signal
+import hmac
 from text.LangSegmenter import LangSegmenter
 from time import time as ttime
 import torch
@@ -1355,12 +1356,24 @@ def get_tts_wav(
         yield audio_bytes.getvalue()
 
 
-def handle_control(command):
+# 控制令牌：由 CodePapr 主进程启动时通过环境变量注入（每次启动随机生成、不落盘）。
+# 未注入令牌时 /control 彻底禁用——否则任何本机进程都能重启/杀掉 TTS 服务（本地 DoS）。
+# 手动运行 api.py 不会有该环境变量，因此该场景下端点同样不可用。
+CONTROL_TOKEN = os.environ.get("CODEPAPR_CONTROL_TOKEN", "")
+
+
+def handle_control(command, token):
+    if not CONTROL_TOKEN or not token or not hmac.compare_digest(str(token), CONTROL_TOKEN):
+        return JSONResponse(
+            {"code": 403, "message": "control endpoint is disabled (missing or invalid token)"},
+            status_code=403,
+        )
     if command == "restart":
         os.execl(g_config.python_exec, g_config.python_exec, *sys.argv)
     elif command == "exit":
         os.kill(os.getpid(), signal.SIGTERM)
         exit(0)
+    return JSONResponse({"code": 400, "message": f"unknown command: {command}"}, status_code=400)
 
 
 def handle_change(path, text, language):
@@ -1669,12 +1682,13 @@ async def set_model(
 @app.post("/control")
 async def control(request: Request):
     json_post_raw = await request.json()
-    return handle_control(json_post_raw.get("command"))
+    token = request.headers.get("x-control-token") or json_post_raw.get("token") or ""
+    return handle_control(json_post_raw.get("command"), token)
 
 
 @app.get("/control")
-async def control(command: str = None):
-    return handle_control(command)
+async def control(command: str = None, token: str = None):
+    return handle_control(command, token or "")
 
 
 @app.post("/change_refer")

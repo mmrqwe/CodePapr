@@ -110,6 +110,14 @@ impl GptSovitsServer {
         // Force half precision for ~2x faster synthesis on all devices.
         cmd.arg("-hp");
 
+        // 每次启动随机生成控制令牌并注入 api.py：/control 端点（restart/exit）
+        // 无令牌即禁用，防止其他本机进程随意重启/杀掉 TTS 服务（本地 DoS）。
+        // Rust 侧自身不调用 /control（重启/退出由父进程管理），令牌无需留存。
+        let mut token_bytes = [0u8; 32];
+        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut token_bytes);
+        let control_token: String = token_bytes.iter().map(|b| format!("{b:02x}")).collect();
+        cmd.env("CODEPAPR_CONTROL_TOKEN", control_token);
+
         // Force unbuffered Python stdout/stderr so we get logs in real time.
         cmd.env("PYTHONUNBUFFERED", "1");
         // Enable MPS fallback for ops not supported on MPS.

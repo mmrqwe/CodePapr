@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Read;
 use std::path::PathBuf;
 
 use serde::Serialize;
@@ -320,15 +321,29 @@ pub fn papr_fs_read(
     }
 
     let max = max_bytes.unwrap_or(200_000).clamp(1_000, 1_000_000);
-    let content = fs::read_to_string(&resolved)
+    read_capped_utf8(&resolved, max)
+}
+
+/// 最多读取 max 字节，并在 UTF-8 字符边界处安全截断。
+/// 旧实现先全量读入内存，再用 chars().take(max) 取 max 个"字符"——
+/// 多字节文本下实际返回可达 3~4 倍 max 字节，超出 byte cap。
+fn read_capped_utf8(path: &std::path::Path, max: usize) -> Result<String, String> {
+    let file = fs::File::open(path).map_err(|err| format!("读取文件失败: {err}"))?;
+    let mut buf = Vec::new();
+    file.take(max as u64)
+        .read_to_end(&mut buf)
         .map_err(|err| format!("读取文件失败: {err}"))?;
 
-    if content.len() > max {
-        let truncated: String = content.chars().take(max).collect();
-        return Ok(truncated);
+    match std::str::from_utf8(&buf) {
+        Ok(text) => Ok(text.to_string()),
+        // error_len() == None 表示意外 EOF：恰好截断在多字节字符中间，
+        // 回退到最后一个完整字符；文件本身含非法 UTF-8 则报错（与 read_to_string 一致）
+        Err(err) if err.error_len().is_none() => {
+            buf.truncate(err.valid_up_to());
+            String::from_utf8(buf).map_err(|err| format!("读取文件失败: {err}"))
+        }
+        Err(_) => Err("文件不是有效的 UTF-8 文本".to_string()),
     }
-
-    Ok(content)
 }
 
 #[tauri::command]
@@ -633,6 +648,39 @@ mod tests {
         assert!(result.unwrap_err().contains("traversal"));
 
         unregister_test_app("traversal-app");
+    }
+
+    #[test]
+    fn fs_read_truncates_by_bytes_not_chars() {
+        let ws = TestWorkspace::new("papr-fs-mb-trunc");
+        register_test_app(&ws.workspace_arg(), "mb-app", &[]);
+
+        // 500 个 CJK 字符 = 1500 字节；旧实现 take(1000 个字符) 会返回 3000 字节
+        let cjk: String = "中".repeat(500);
+        papr_fs_write("mb-app".into(), "cjk.txt".into(), cjk).unwrap();
+
+        let content = papr_fs_read("mb-app".into(), "cjk.txt".into(), Some(1_000)).unwrap();
+        assert!(content.len() <= 1_000, "按字节上限截断，实际 {} 字节", content.len());
+        assert_eq!(content.len(), 999); // 3 字节/字符，边界回退到完整字符
+        assert_eq!(content.chars().count(), 333);
+
+        unregister_test_app("mb-app");
+    }
+
+    #[test]
+    fn read_capped_utf8_handles_split_char_and_invalid_bytes() {
+        let ws = TestWorkspace::new("papr-fs-capped");
+
+        // "ab中" = [61 62 E4 B8 AD]，cap=4 恰好切在"中"中间 → 保留 "ab"
+        let path = ws.file_path("split.txt");
+        std::fs::write(&path, "ab中").unwrap();
+        assert_eq!(read_capped_utf8(&path, 4).unwrap(), "ab");
+        assert_eq!(read_capped_utf8(&path, 100).unwrap(), "ab中");
+
+        // 文件本身含非法 UTF-8 → 报错（与 read_to_string 行为一致）
+        let bad = ws.file_path("bad.txt");
+        std::fs::write(&bad, [0x61, 0xFF, 0x62]).unwrap();
+        assert!(read_capped_utf8(&bad, 100).is_err());
     }
 
     #[test]
