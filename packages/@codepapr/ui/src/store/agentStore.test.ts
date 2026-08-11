@@ -54,9 +54,12 @@ const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMoc
   waitForPendingProjectStateSaveMock: vi.fn(async () => undefined),
 }));
 
-const { loadAppSettingsMock, saveAppSettingsMock } = vi.hoisted(() => ({
+const { loadAppSettingsMock, saveAppSettingsMock, queueAppSettingsSaveMock } = vi.hoisted(() => ({
   loadAppSettingsMock: vi.fn(async (): Promise<Partial<Settings> | null> => null),
-  saveAppSettingsMock: vi.fn(async () => undefined),
+  saveAppSettingsMock: vi.fn(async (_settings?: unknown) => undefined),
+  queueAppSettingsSaveMock: vi.fn(async (settings: unknown) => {
+    await saveAppSettingsMock(settings);
+  }),
 }));
 
 const { maybeGenerateContextCheckpointMock } = vi.hoisted(() => ({
@@ -118,6 +121,7 @@ vi.mock('../utils/projectStorage', () => ({
 vi.mock('../utils/appSettingsStorage', () => ({
   loadAppSettings: loadAppSettingsMock,
   saveAppSettings: saveAppSettingsMock,
+  queueAppSettingsSave: queueAppSettingsSaveMock,
 }));
 
 vi.mock('./internals/contextCheckpoint', () => ({
@@ -382,6 +386,50 @@ describe('useAgentStore.sendMessage', () => {
     expect(state.sessions[0]?.id).toBe('session-restored');
     expect(state.messages[0]?.content).toBe('之前的聊天');
     expect(state.settings.recentWorkspaces[0]?.path).toBe('/tmp/restored-workspace');
+  });
+
+  it('does not persist settings when the initial settings load failed', async () => {
+    loadAppSettingsMock.mockRejectedValueOnce(new Error('db locked'));
+    await useAgentStore.getState().loadSettings();
+
+    expect(useAgentStore.getState()._settingsPersistable).toBe(false);
+
+    saveAppSettingsMock.mockClear();
+    useAgentStore.getState().setSettings({ lang: 'en' });
+
+    // 设置加载失败时内存中是默认值：绝不能回写磁盘（否则会清空最近项目、
+    // 并把空 apiKey 当作"用户清除密钥"删掉 vault 里的 key）。
+    expect(saveAppSettingsMock).not.toHaveBeenCalled();
+    expect(useAgentStore.getState()._persistenceError).toBeTruthy();
+  });
+
+  it('persists settings when the initial settings load succeeded', async () => {
+    await useAgentStore.getState().loadSettings();
+    useAgentStore.setState({ _persistenceError: null });
+
+    expect(useAgentStore.getState()._settingsPersistable).toBe(true);
+    saveAppSettingsMock.mockClear();
+    useAgentStore.getState().setSettings({ lang: 'en' });
+    expect(saveAppSettingsMock).toHaveBeenCalledTimes(1);
+    expect(useAgentStore.getState()._persistenceError).toBeFalsy();
+  });
+
+  it('preserves the running agent only when setSettings is called with preserveAgent', async () => {
+    const destroy = vi.fn();
+    const fakeAgent = { destroy } as unknown as import('../agent/WorkerBackedAgent').AgentRuntimeHandle;
+
+    // 默认行为：设置变更销毁进行中的 agent（配置已变，需按新配置重建）
+    useAgentStore.setState({ _agent: fakeAgent });
+    useAgentStore.getState().setSettings({ lang: 'en' });
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(useAgentStore.getState()._agent).toBeNull();
+
+    // preserveAgent：纯 UI 变更（置顶/移除项目）不打断运行中的回合
+    useAgentStore.setState({ _agent: fakeAgent });
+    useAgentStore.getState().setSettings({ lang: 'zh-TW' }, { preserveAgent: true });
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(useAgentStore.getState()._agent).not.toBeNull();
+    expect(useAgentStore.getState().settings.lang).toBe('zh-TW');
   });
 
   it('switches cache stats with the active session and persists them per conversation', () => {

@@ -661,11 +661,15 @@ const SECRET_FIELDS: [(&str, &str); 2] = [
 /// replacing them with empty strings in the JSON so nothing sensitive lands
 /// in SQLite.  If vault storage fails for a field, the plaintext is left
 /// untouched (graceful degradation).
-fn extract_and_store_secrets(app_secrets: &AppSecrets, value: &mut serde_json::Value) {
+///
+/// Returns `true` if any secret was actually stored or removed — 只有发生
+/// 真实变更时才值得执行一次 Stronghold 快照落盘（保存代价高且阻塞）。
+fn extract_and_store_secrets(app_secrets: &AppSecrets, value: &mut serde_json::Value) -> bool {
     let Some(obj) = value.as_object_mut() else {
-        return;
+        return false;
     };
 
+    let mut changed = false;
     for (field, account) in SECRET_FIELDS {
         // 区分「字段缺失」与「字段被显式清空」：缺失（部分设置更新、回写
         // stripped JSON 等）绝不能删 vault 密钥，否则存储的 key 会被静默销毁；
@@ -675,8 +679,21 @@ fn extract_and_store_secrets(app_secrets: &AppSecrets, value: &mut serde_json::V
         };
         let trimmed = raw.trim();
         if trimmed.is_empty() {
-            // User cleared the key — remove from vault.
-            let _ = secrets::delete_secret(app_secrets, account);
+            // User cleared the key — remove from vault, 但仅当确实存在时
+            // 才算变更（避免每次保存都触发全量快照写盘）。
+            if app_secrets.get_secret(account).is_some() {
+                let _ = secrets::delete_secret(app_secrets, account);
+                changed = true;
+            }
+            continue;
+        }
+        // 前端每次保存都会带回已注入的 key：值与 vault 一致时只做明文剥离，
+        // 不重复写库（Stronghold 快照全量落盘代价高），避免每次保存都写 vault。
+        if app_secrets.get_secret(account).as_deref() == Some(trimmed) {
+            obj.insert(
+                (*field).to_string(),
+                serde_json::Value::String(String::new()),
+            );
             continue;
         }
         if secrets::set_secret(app_secrets, account, trimmed).is_ok() {
@@ -684,8 +701,10 @@ fn extract_and_store_secrets(app_secrets: &AppSecrets, value: &mut serde_json::V
                 (*field).to_string(),
                 serde_json::Value::String(String::new()),
             );
+            changed = true;
         }
     }
+    changed
 }
 
 /// Performs one-time migration of legacy plaintext keys (from older versions
@@ -791,7 +810,7 @@ pub(crate) fn load_app_settings(app: tauri::AppHandle) -> Result<AppSettingsResu
 }
 
 #[tauri::command]
-pub(crate) fn save_app_settings(
+pub(crate) async fn save_app_settings(
     app: tauri::AppHandle,
     settings_json: String,
 ) -> Result<AppSettingsResult, String> {
@@ -799,44 +818,54 @@ pub(crate) fn save_app_settings(
         return Err(format!("配置内容超过上限 {MAX_SETTINGS_JSON_BYTES} bytes"));
     }
 
-    let mut value: serde_json::Value =
-        serde_json::from_str(&settings_json).map_err(|err| format!("配置不是合法 JSON: {err}"))?;
-    if !value.is_object() {
-        return Err("配置 JSON 必须是对象".to_string());
-    }
+    let app_secrets = app.state::<AppSecrets>().inner().clone();
+    // 同步命令会在主线程执行（vault 快照写盘 + SQLite 会阻塞 UI），
+    // 改为在 blocking 线程池上完成；前端已按调用顺序串行化保存，
+    // 配合 APP_SETTINGS_DB_LOCK 保证读改写原子性。
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut value: serde_json::Value =
+            serde_json::from_str(&settings_json).map_err(|err| format!("配置不是合法 JSON: {err}"))?;
+        if !value.is_object() {
+            return Err("配置 JSON 必须是对象".to_string());
+        }
 
-    // Divert API keys to the Stronghold vault before anything hits SQLite.
-    let app_secrets = app.state::<AppSecrets>();
-    extract_and_store_secrets(&app_secrets, &mut value);
-    let persisted_json =
-        serde_json::to_string(&value).map_err(|err| format!("序列化配置失败: {err}"))?;
+        // Divert API keys to the Stronghold vault before anything hits SQLite.
+        let secrets_changed = extract_and_store_secrets(&app_secrets, &mut value);
+        let persisted_json =
+            serde_json::to_string(&value).map_err(|err| format!("序列化配置失败: {err}"))?;
 
-    // 必须先持久化 vault 成功，再写"已剥离 key 的 JSON"入库。顺序反了的话：
-    // DB 已存空 key 而 vault 落盘失败（磁盘满/权限/文件被占）→ 重启后两头皆空，
-    // 用户的 API key 静默永久丢失。vault 失败时 DB 保持原状，用户可重试。
-    app_secrets
-        .save()
-        .map_err(|e| format!("保存密钥库失败: {e}"))?;
+        // 必须先持久化 vault 成功，再写"已剥离 key 的 JSON"入库。顺序反了的话：
+        // DB 已存空 key 而 vault 落盘失败（磁盘满/权限/文件被占）→ 重启后两头皆空，
+        // 用户的 API key 静默永久丢失。vault 失败时 DB 保持原状，用户可重试。
+        // 仅当密钥确实变更时才写快照——每次保存都全量重写代价高且没必要。
+        if secrets_changed {
+            app_secrets
+                .save()
+                .map_err(|e| format!("保存密钥库失败: {e}"))?;
+        }
 
-    let _guard = app_settings_db_lock()
-        .lock()
-        .unwrap_or_else(|err| err.into_inner());
-    let (conn, db_path) = open_app_db()?;
-    conn.execute(
-        "INSERT INTO settings (key, value, data_type, updated_at)
-         VALUES (?1, ?2, 'json', ?3)
-         ON CONFLICT(key) DO UPDATE SET
-           value = excluded.value,
-           data_type = excluded.data_type,
-           updated_at = excluded.updated_at",
-        params![APP_SETTINGS_KEY, persisted_json, unix_millis()?],
-    )
-    .map_err(|err| format!("保存应用配置失败: {err}"))?;
+        let _guard = app_settings_db_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let (conn, db_path) = open_app_db()?;
+        conn.execute(
+            "INSERT INTO settings (key, value, data_type, updated_at)
+             VALUES (?1, ?2, 'json', ?3)
+             ON CONFLICT(key) DO UPDATE SET
+               value = excluded.value,
+               data_type = excluded.data_type,
+               updated_at = excluded.updated_at",
+            params![APP_SETTINGS_KEY, persisted_json, unix_millis()?],
+        )
+        .map_err(|err| format!("保存应用配置失败: {err}"))?;
 
-    Ok(AppSettingsResult {
-        settings_json: Some(persisted_json),
-        db_path: db_path.to_string_lossy().to_string(),
+        Ok(AppSettingsResult {
+            settings_json: Some(persisted_json),
+            db_path: db_path.to_string_lossy().to_string(),
+        })
     })
+    .await
+    .map_err(|err| format!("保存设置任务失败: {err}"))?
 }
 
 // ui.settings 的读-改-写互斥：note_recent_workspace 与 load/save_app_settings
@@ -973,6 +1002,101 @@ fn note_recent_workspace_impl(
 pub(crate) fn note_recent_workspace(path: String) -> Result<AppSettingsResult, String> {
     let db_path = app_db_path()?;
     note_recent_workspace_impl(&db_path, &path)
+}
+
+/// 用前端计算好的列表整体替换 settings JSON 里的 recentWorkspaces
+/// （钉住/移除最近项目后由前端 await 调用）：同步、原子读改写，立即落库，
+/// 即使随后立刻退出也不会丢。
+fn set_recent_workspaces_impl(
+    db_path: &Path,
+    workspaces_json: &str,
+) -> Result<AppSettingsResult, String> {
+    let parsed: serde_json::Value = serde_json::from_str(workspaces_json)
+        .map_err(|err| format!("recentWorkspaces 不是合法 JSON: {err}"))?;
+    let arr = parsed
+        .as_array()
+        .ok_or_else(|| "recentWorkspaces 必须是数组".to_string())?;
+
+    let now = unix_millis()?;
+    let mut normalized: Vec<serde_json::Value> = Vec::new();
+    for raw in arr.iter().take(10) {
+        let Some(obj) = raw.as_object() else {
+            continue;
+        };
+        let Some(raw_path) = obj.get("path").and_then(|p| p.as_str()) else {
+            continue;
+        };
+        let path = raw_path.trim();
+        if path.is_empty() {
+            continue;
+        }
+        let name = obj
+            .get("name")
+            .and_then(|n| n.as_str())
+            .filter(|n| !n.trim().is_empty())
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| workspace_display_name(path));
+        let last_opened_at = obj
+            .get("lastOpenedAt")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(now);
+        let pinned = obj.get("pinned").and_then(|v| v.as_bool()).unwrap_or(false);
+        normalized.push(serde_json::json!({
+            "path": path,
+            "name": name,
+            "lastOpenedAt": last_opened_at,
+            "pinned": pinned,
+        }));
+    }
+
+    let _guard = app_settings_db_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let conn = open_app_db_at(db_path)?;
+    let settings_json = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![APP_SETTINGS_KEY],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|err| format!("读取应用配置失败: {err}"))?;
+
+    let mut value: serde_json::Value = match settings_json.as_deref() {
+        Some(json) => serde_json::from_str(json)
+            .map_err(|err| format!("配置不是合法 JSON: {err}"))?,
+        None => serde_json::json!({}),
+    };
+    if !value.is_object() {
+        return Err("配置 JSON 必须是对象".to_string());
+    }
+    value
+        .as_object_mut()
+        .expect("set_recent_workspaces: 已确认是对象")
+        .insert("recentWorkspaces".into(), serde_json::Value::Array(normalized));
+    let merged = serde_json::to_string(&value).map_err(|err| format!("序列化配置失败: {err}"))?;
+
+    conn.execute(
+        "INSERT INTO settings (key, value, data_type, updated_at)
+         VALUES (?1, ?2, 'json', ?3)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           data_type = excluded.data_type,
+           updated_at = excluded.updated_at",
+        params![APP_SETTINGS_KEY, merged, unix_millis()?],
+    )
+    .map_err(|err| format!("保存应用配置失败: {err}"))?;
+
+    Ok(AppSettingsResult {
+        settings_json: Some(merged),
+        db_path: db_path.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+pub(crate) fn set_recent_workspaces(workspaces_json: String) -> Result<AppSettingsResult, String> {
+    let db_path = app_db_path()?;
+    set_recent_workspaces_impl(&db_path, &workspaces_json)
 }
 
 #[tauri::command]
@@ -2387,5 +2511,126 @@ mod tests {
         let workspace = TestWorkspace::new("recent-workspace-empty");
         let db_path = workspace.file_path("codepapr-test.sqlite");
         assert!(note_recent_workspace_impl(&db_path, "   ").is_err());
+    }
+
+    #[test]
+    fn set_recent_workspaces_replaces_list_and_preserves_other_fields() {
+        let workspace = TestWorkspace::new("set-recent-workspaces");
+        let db_path = workspace.file_path("codepapr-test.sqlite");
+
+        // 先写入一条 settings 行（含其他字段），再整体替换 recentWorkspaces
+        let base = r#"{"lang":"zh-CN","recentWorkspaces":[
+            {"path":"/old","name":"old","lastOpenedAt":1,"pinned":false}
+        ]}"#;
+        note_recent_workspace_impl(&db_path, "/seed").expect("seed note should succeed");
+        // 重新构造已知基线
+        let conn0 = Connection::open(&db_path).expect("open temp db");
+        conn0.execute(
+            "INSERT INTO settings (key, value, data_type, updated_at)
+             VALUES (?1, ?2, 'json', ?3)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+               data_type = excluded.data_type, updated_at = excluded.updated_at",
+            params![APP_SETTINGS_KEY, base, unix_millis().unwrap()],
+        )
+        .expect("seed settings");
+
+        let list = r#"[
+            {"path":"/b","name":"b","lastOpenedAt":200,"pinned":true},
+            {"path":"/a","name":"a","lastOpenedAt":100,"pinned":false}
+        ]"#;
+        set_recent_workspaces_impl(&db_path, list).expect("set should succeed");
+
+        let conn = Connection::open(&db_path).expect("open temp db");
+        let stored: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![APP_SETTINGS_KEY],
+                |row| row.get(0),
+            )
+            .expect("read settings");
+        let value: serde_json::Value = serde_json::from_str(&stored).expect("valid json");
+        let recent = value["recentWorkspaces"].as_array().expect("array");
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0]["path"], "/b");
+        assert_eq!(recent[0]["pinned"], true);
+        assert_eq!(recent[0]["lastOpenedAt"], 200);
+        assert_eq!(recent[1]["path"], "/a");
+        // 其他字段原样保留
+        assert_eq!(value["lang"], "zh-CN");
+    }
+
+    #[test]
+    fn set_recent_workspaces_normalizes_and_caps_list() {
+        let workspace = TestWorkspace::new("set-recent-workspaces-cap");
+        let db_path = workspace.file_path("codepapr-test.sqlite");
+        note_recent_workspace_impl(&db_path, "/seed").expect("seed");
+
+        // 12 条 + 1 条畸形（无 path）+ 1 条空 path
+        let mut entries = Vec::new();
+        for i in 0..12 {
+            entries.push(format!(
+                r#"{{"path":"/p{i}","name":"","lastOpenedAt":{i},"pinned":false}}"#
+            ));
+        }
+        entries.push(r#"{"lastOpenedAt":1,"pinned":false}"#.to_string());
+        entries.push(r#"{"path":"   ","lastOpenedAt":1,"pinned":false}"#.to_string());
+        let list = format!("[{}]", entries.join(","));
+
+        set_recent_workspaces_impl(&db_path, &list).expect("set should succeed");
+
+        let conn = Connection::open(&db_path).expect("open temp db");
+        let stored: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![APP_SETTINGS_KEY],
+                |row| row.get(0),
+            )
+            .expect("read settings");
+        let value: serde_json::Value = serde_json::from_str(&stored).expect("valid json");
+        let recent = value["recentWorkspaces"].as_array().expect("array");
+        assert_eq!(recent.len(), 10, "上限 10 条");
+        assert_eq!(recent[0]["path"], "/p0");
+        // 空 name 回退为路径末段
+        assert_eq!(recent[0]["name"], "p0");
+    }
+
+    #[test]
+    fn set_recent_workspaces_rejects_invalid_input() {
+        let workspace = TestWorkspace::new("set-recent-workspaces-invalid");
+        let db_path = workspace.file_path("codepapr-test.sqlite");
+
+        assert!(set_recent_workspaces_impl(&db_path, "{}").is_err(), "非数组应报错");
+        assert!(set_recent_workspaces_impl(&db_path, "{{{").is_err(), "非法 JSON 应报错");
+    }
+
+    #[test]
+    fn extract_and_store_secrets_reports_change_only_when_keys_actually_move() {
+        let workspace = TestWorkspace::new("extract-secrets-changed");
+        let secrets = AppSecrets::init(&workspace.path).expect("init vault should succeed");
+
+        // 新 key：应报告变更并剥离明文
+        let mut value: serde_json::Value =
+            serde_json::from_str(r#"{"apiKey":"sk-new","mentorApiKey":""}"#).unwrap();
+        assert!(extract_and_store_secrets(&secrets, &mut value));
+        assert_eq!(value["apiKey"], "");
+        assert_eq!(secrets.get_secret(crate::secrets::PRIMARY_KEY_ACCOUNT).as_deref(), Some("sk-new"));
+
+        // 前端每次保存都会带回已注入的同一 key：值与 vault 一致，不应报告变更
+        let mut value2: serde_json::Value =
+            serde_json::from_str(r#"{"apiKey":"sk-new","mentorApiKey":""}"#).unwrap();
+        assert!(!extract_and_store_secrets(&secrets, &mut value2));
+        assert_eq!(value2["apiKey"], "", "明文仍应被剥离");
+        assert_eq!(secrets.get_secret(crate::secrets::PRIMARY_KEY_ACCOUNT).as_deref(), Some("sk-new"));
+
+        // 显式清空已存在的 key：应报告变更并删除 vault 密钥
+        let mut value3: serde_json::Value =
+            serde_json::from_str(r#"{"apiKey":"","mentorApiKey":""}"#).unwrap();
+        assert!(extract_and_store_secrets(&secrets, &mut value3));
+        assert!(secrets.get_secret(crate::secrets::PRIMARY_KEY_ACCOUNT).is_none());
+
+        // 空 key 且 vault 已无密钥：不是变更，无需写快照
+        let mut value4: serde_json::Value =
+            serde_json::from_str(r#"{"apiKey":"","mentorApiKey":""}"#).unwrap();
+        assert!(!extract_and_store_secrets(&secrets, &mut value4));
     }
 }

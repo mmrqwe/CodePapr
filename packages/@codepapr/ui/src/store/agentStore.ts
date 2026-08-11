@@ -23,7 +23,7 @@ import {
   waitForPendingProjectStateSave,
 } from '../utils/projectStorage';
 import { runProjectDiagnostics } from '../utils/projectDiagnostics';
-import { loadAppSettings, saveAppSettings } from '../utils/appSettingsStorage';
+import { loadAppSettings, queueAppSettingsSave } from '../utils/appSettingsStorage';
 import {
   snapshotEnsure,
   snapshotList,
@@ -367,7 +367,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             disposeAgentHandle(get);
             set({ settings: nextSettings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
             if (get()._settingsPersistable) {
-              void saveAppSettings(nextSettings).catch((err) => {
+              void queueAppSettingsSave(nextSettings).catch((err) => {
                 // 持久化失败不可静默：内存已推进，磁盘仍是旧设置，下次启动即分叉。
                 const message = `设置保存失败：${err instanceof Error ? err.message : String(err)}`;
                 set({ _persistenceError: message });
@@ -384,16 +384,30 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         }
       },
 
-      setSettings: (partial) => {
+      setSettings: (partial, options) => {
         const previousEngine = get().settings.browserEngine;
         const settings = normalizeSettings({ ...get().settings, ...partial });
-        disposeAgentHandle(get);
-        set({ settings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
-        void saveAppSettings(settings).catch((err) => {
-          const message = `设置保存失败：${err instanceof Error ? err.message : String(err)}`;
-          set({ _persistenceError: message });
-          toast.error(message);
-        });
+        // 设置变更会影响 agent 配置（模型/key/prompt），默认销毁进行中的
+        // agent；但纯 UI 类变更（如最近项目置顶/移除）不应打断正在运行的回合。
+        if (!options?.preserveAgent) {
+          disposeAgentHandle(get);
+        }
+        set(options?.preserveAgent
+          ? { settings }
+          : { settings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
+        // _settingsPersistable 为 false 表示启动时设置加载失败、内存中是默认值，
+        // 此时回写会用默认值（含空 apiKey）覆盖磁盘真实配置：extract_and_store_secrets
+        // 会把"存在但为空"的 apiKey 视为用户主动清除，导致 vault 密钥被永久删除。
+        // 与 openWorkspace/loadSettings 的守卫一致：跳过持久化，并明确提示用户。
+        if (get()._settingsPersistable) {
+          void queueAppSettingsSave(settings).catch((err) => {
+            const message = `设置保存失败：${err instanceof Error ? err.message : String(err)}`;
+            set({ _persistenceError: message });
+            toast.error(message);
+          });
+        } else {
+          set({ _persistenceError: '设置加载失败，更改将不会被保存到磁盘' });
+        }
         void invoke('set_external_access_yolo', { enabled: settings.folderAccessYolo }).catch(() => undefined);
         if (settings.browserEngine !== previousEngine) {
           void applyBrowserEngine(settings.browserEngine);
@@ -713,7 +727,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             recentWorkspaces: nextRecent,
           });
           set({ settings: nextSettings });
-          void saveAppSettings(nextSettings).catch((err) => {
+          void queueAppSettingsSave(nextSettings).catch((err) => {
             const message = `设置保存失败：${err instanceof Error ? err.message : String(err)}`;
             set({ _persistenceError: message });
             toast.error(message);

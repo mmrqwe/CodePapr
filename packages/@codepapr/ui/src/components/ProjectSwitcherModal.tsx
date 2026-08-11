@@ -1,7 +1,7 @@
 import { open } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
 import { useAgentStore, WorkspaceEntry } from '../store/agentStore';
 import { normalizeSettings } from '../store/internals/settingsNormalizer';
-import { saveAppSettings } from '../utils/appSettingsStorage';
 import { getTranslation } from '../utils/i18n';
 
 function timeLabel(ms: number, t: ReturnType<typeof getTranslation>): string {
@@ -39,20 +39,21 @@ export function ProjectSwitcherModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const handleRemove = (path: string) => {
+  const handleRemove = async (path: string) => {
     const next = settings.recentWorkspaces.filter((e) => e.path !== path);
-    const nextSettings = normalizeSettings({ ...settings, recentWorkspaces: next });
-    setSettings(nextSettings);
-    void saveAppSettings(nextSettings).catch(() => undefined);
+    // 先 await 在 Rust 侧原子落库（与 setSettings 的异步保存解耦）：
+    // 移除后立刻退出也不会在下次启动时"复活"。
+    await invoke('set_recent_workspaces', { workspacesJson: JSON.stringify(next) }).catch(() => undefined);
+    // preserveAgent：置顶/移除属于纯 UI 变更，不打断进行中的 agent 回合。
+    setSettings(normalizeSettings({ ...settings, recentWorkspaces: next }), { preserveAgent: true });
   };
 
-  const handleTogglePin = (path: string) => {
+  const handleTogglePin = async (path: string) => {
     const next = settings.recentWorkspaces.map((e) =>
       e.path === path ? { ...e, pinned: !e.pinned } : e,
     );
-    const nextSettings = normalizeSettings({ ...settings, recentWorkspaces: next });
-    setSettings(nextSettings);
-    void saveAppSettings(nextSettings).catch(() => undefined);
+    await invoke('set_recent_workspaces', { workspacesJson: JSON.stringify(next) }).catch(() => undefined);
+    setSettings(normalizeSettings({ ...settings, recentWorkspaces: next }), { preserveAgent: true });
   };
 
   const handleChooseFolder = async () => {

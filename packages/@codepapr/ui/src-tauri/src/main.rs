@@ -228,6 +228,7 @@ fn main() {
             db::load_app_settings,
             db::save_app_settings,
             db::note_recent_workspace,
+            db::set_recent_workspaces,
             db::load_app_characters,
             db::save_app_characters,
             mcp_list_tools,

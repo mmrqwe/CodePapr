@@ -329,7 +329,10 @@ export interface AgentState {
 
 export interface AgentActions {
   loadSettings: () => Promise<void>;
-  setSettings: (s: Partial<Settings>) => void;
+  setSettings: (
+    s: Partial<Settings>,
+    options?: { preserveAgent?: boolean },
+  ) => void;
   setWorkspacePath: (path: string) => void;
   closeWorkspace: () => void;
   openWorkspace: (path: string) => Promise<void>;
