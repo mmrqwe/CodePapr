@@ -15,6 +15,7 @@ import {
   type ToolOutputTruncationOptions,
   type ToolContextConfig,
   SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
+  PERMISSION_WAITING_TOOL_TIMEOUTS,
 } from '@codepapr/core';
 import type { PromptMode } from '@codepapr/core';
 import { CacheValidator, RequestBuilder } from '@codepapr/api';
@@ -446,8 +447,14 @@ function _createLocalAgent(
     maxToolRounds: settings.maxToolRounds,
     // task 工具（子代理）内部有自己的 20 分钟墙钟预算（SUBAGENT_WALL_CLOCK_TIMEOUT_MS）：
     // 父级默认 270s 超时会在子代理预算到期前掐断 promise（且不取消子代理），
-    // 必须把 task 的超时对齐到子代理预算。
-    toolTimeouts: { graph: settings.graphToolTimeoutMs, task: SUBAGENT_WALL_CLOCK_TIMEOUT_MS },
+    // 必须把 task 的超时对齐到子代理预算。其余读写/命令类工具同样用
+    // PERMISSION_WAITING_TOOL_TIMEOUTS（bash 等为无限等待 + 由 IPC/命令侧
+    // 各自超时控制），否则主线程兜底路径上 bash 命令 >270s 会被父级超时掐断。
+    toolTimeouts: {
+      ...PERMISSION_WAITING_TOOL_TIMEOUTS,
+      graph: settings.graphToolTimeoutMs,
+      task: SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
+    },
     toolOutputTruncation: buildToolOutputTruncation(settings, workspacePath),
     toolContextConfig: buildToolContextConfig(settings),
     contextCompaction: createContextCompactionHandler(

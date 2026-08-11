@@ -168,70 +168,66 @@ export function applySearchReplacePatch(
     return { content: resultLf.replace(/\n/g, '\r\n'), replacements };
   }
 
-  // #24：混合换行文件必须逐行保留原行尾——旧实现只要存在一处 CRLF 就
-  // 全文规范化，未触碰的行也会被改写，git diff 整文件爆炸。
-  return { content: rebuildWithOriginalEols(content, resultLf, replacedSpans), replacements };
+  // #24：混合换行文件必须在原文上按字节拼接——未匹配区域严格保留原始字节
+  // （含各自行尾），只有替换区间内的行采用被替换首行的行尾风格。旧实现只要
+  // 存在一处 CRLF 就全文规范化；第一版逐行重建在替换改变行数时行尾映射错位
+  // （区间后的行拿到错误行的行尾），均造成 git diff 整文件爆炸。
+  return {
+    content: spliceMixedEol(content, contentLf, searchLf, replaceLf, replacedSpans),
+    replacements,
+  };
 }
 
-/** 混合换行文件的逐行行尾重建：#24。
- *  原文件每个 LF 行起始偏移 → 该行的原始行尾（CRLF/LF）。替换区间内的行
- *  继承「被替换的第一行」的行尾（新内容采用它取代的文本的风格）；区间外的
- *  行严格取原行尾，diff 只显示真正的改动。偏移以 LF 规范化空间计，与
- *  resultLf 对齐。 */
-function rebuildWithOriginalEols(
+/** 混合换行文件的原文拼接：#24。
+ *  在 LF 规范化空间定位替换区间，映射回原文偏移后做字节级拼接：
+ *  - 区间外：原文切片原样保留（行尾逐字节不变）；
+ *  - 区间内：replace 文本的换行统一采用「被替换首行」的原始行尾；
+ *  - search 不以换行结尾且紧随其后是换行时，把该换行并入区间（被触碰的
+ *    最后一行的行尾也跟随区域风格，与替换前行数无关，行数变化不错位）。 */
+function spliceMixedEol(
   original: string,
-  resultLf: string,
+  contentLf: string,
+  searchLf: string,
+  replaceLf: string,
   replacedSpans: ReadonlyArray<readonly [number, number]>
 ): string {
-  const dominantEol = dominantLineEnding(original);
-  // 原文件：LF 行起始偏移 → 行尾
-  const eolByLineStart = new Map<number, string>();
-  let lineStart = 0;
-  let lfPos = 0;
+  // LF 规范化偏移 → 原文偏移（\r\n 中的 \r 与其 \n 同归属，映射跳过 \r）
+  const lfToOrig: number[] = [];
   for (let i = 0; i < original.length; i += 1) {
-    if (original[i] === '\n') {
-      const eol = i > 0 && original[i - 1] === '\r' ? '\r\n' : '\n';
-      eolByLineStart.set(lineStart, eol);
-      lineStart = lfPos + 1;
+    if (original[i] === '\r' && original[i + 1] === '\n') {
+      continue;
     }
-    if (original[i] !== '\r') {
-      lfPos += 1;
-    }
+    lfToOrig.push(i);
   }
-  // 末行：原文件以换行结尾时其行尾已在循环中记录；否则无行尾
-  if (!original.endsWith('\n')) {
-    eolByLineStart.set(lineStart, '');
-  }
+  lfToOrig.push(original.length);
 
-  // 替换区行尾：继承被替换第一行的原始行尾（找不到则用主导行尾）
-  const firstSpanStart = replacedSpans.length > 0 ? replacedSpans[0][0] : -1;
+  // 区域行尾：首个替换区间所在行的原始行尾；该行无换行（文件末尾）时用主导行尾
+  const eolOfOriginalLineAt = (origOffset: number): string | null => {
+    const nl = original.indexOf('\n', origOffset);
+    if (nl === -1) {
+      return null;
+    }
+    return nl > 0 && original[nl - 1] === '\r' ? '\r\n' : '\n';
+  };
+  const firstSpan = replacedSpans[0];
   const regionEol =
-    firstSpanStart >= 0 ? (eolByLineStart.get(firstSpanStart) ?? dominantEol) : dominantEol;
+    (firstSpan ? eolOfOriginalLineAt(lfToOrig[firstSpan[0]]!) : null) ??
+    dominantLineEnding(original);
+  const replaceWithEol = regionEol === '\n' ? replaceLf : replaceLf.replace(/\n/g, regionEol);
 
-  const coveredBySpan = (offset: number): boolean =>
-    replacedSpans.some(([start, end]) => offset >= start && offset < end);
-
-  const out: string[] = [];
-  let resultLineStart = 0;
-  for (let i = 0; i < resultLf.length; i += 1) {
-    if (resultLf[i] === '\n') {
-      const text = resultLf.slice(resultLineStart, i);
-      const eol = coveredBySpan(resultLineStart)
-        ? regionEol
-        : (eolByLineStart.get(resultLineStart) ?? dominantEol);
-      out.push(text + eol);
-      resultLineStart = i + 1;
-    }
+  let out = '';
+  let prevOrigEnd = 0;
+  for (const [spanStart, spanEnd] of replacedSpans) {
+    // search 不以换行结尾且匹配后紧跟换行：区间扩展至包含该换行
+    const extendsTrailingEol = !searchLf.endsWith('\n') && contentLf[spanEnd] === '\n';
+    const origStart = lfToOrig[spanStart]!;
+    const origEnd = lfToOrig[extendsTrailingEol ? spanEnd + 1 : spanEnd]!;
+    const piece = extendsTrailingEol ? replaceWithEol + regionEol : replaceWithEol;
+    out += original.slice(prevOrigEnd, origStart) + piece;
+    prevOrigEnd = origEnd;
   }
-  // 末行：结果以换行结尾时最后一段为空，无需处理；否则补上末行
-  if (resultLineStart < resultLf.length) {
-    const text = resultLf.slice(resultLineStart);
-    const eol = coveredBySpan(resultLineStart)
-      ? regionEol
-      : (eolByLineStart.get(resultLineStart) ?? dominantEol);
-    out.push(text + eol);
-  }
-  return out.join('');
+  out += original.slice(prevOrigEnd);
+  return out;
 }
 
 /** 文件主导行尾：CRLF 行数多于 LF 行数 → CRLF，否则 LF（混合文件按多数派）。 */

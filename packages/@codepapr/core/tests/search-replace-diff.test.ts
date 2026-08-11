@@ -97,6 +97,49 @@ describe('applySearchReplacePatch', () => {
     });
     expect(result.content).toBe('a\r\nB\nc');
   });
+
+  // 替换改变行数时，未触碰行的行尾仍必须逐字节保留（旧逐行重建实现
+  // 在此场景映射错位：区间后的行会拿到错误行的行尾）。
+  it('preserves EOLs when the replacement changes the line count', () => {
+    const content = 'a\r\nb\nc\r\n';
+    const result = applySearchReplacePatch(content, {
+      search: 'b',
+      replace: 'x\ny',
+    });
+    // 新行继承被替换行（b）的 LF；a/c 未触碰，行尾逐字节不变
+    expect(result.content).toBe('a\r\nx\ny\nc\r\n');
+  });
+
+  it('preserves EOLs of later lines when an early replacement adds lines', () => {
+    const content = 'a\r\nb\nc\nd\r\n';
+    const result = applySearchReplacePatch(content, {
+      search: 'b',
+      replace: 'x\ny',
+    });
+    // c 是 LF 行：即便前面插入了新行，它的行尾也不能被改写
+    expect(result.content).toBe('a\r\nx\ny\nc\nd\r\n');
+  });
+
+  it('preserves EOLs when the replacement removes lines', () => {
+    const content = 'keep-1\nold-a\r\nold-b\r\nold-c\nkeep-2\r\n';
+    const result = applySearchReplacePatch(content, {
+      search: 'old-a\r\nold-b\r\nold-c',
+      replace: 'new-single',
+    });
+    // 区域行尾取被替换首行（old-a）的 \r\n；keep-1/keep-2 行尾不变
+    expect(result.content).toBe('keep-1\nnew-single\r\nkeep-2\r\n');
+  });
+
+  it('keeps untouched bytes when replaceAll changes line counts in a mixed file', () => {
+    const content = 'a\nm\nb\nm\r\nc\n';
+    const result = applySearchReplacePatch(content, {
+      search: 'm',
+      replace: 'x\ny',
+      replaceAll: true,
+    });
+    // 区域风格取首个被替换行（m\n）的 LF；第二个 m 行的 CRLF 被区域替换；a/b/c 行尾不变
+    expect(result.content).toBe('a\nx\ny\nb\nx\ny\nc\n');
+  });
 });
 
 describe('applySearchReplaceDiff', () => {

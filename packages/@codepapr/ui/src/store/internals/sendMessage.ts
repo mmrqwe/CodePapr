@@ -54,7 +54,7 @@ import {
 import { AgentDestroyedError, WorkerCrashError } from '../../agent/WorkerBackedAgent';
 import { delay, waitForPageVisible } from '../../utils/crashRecovery';
 import { insertCheckpointAtRetainedBoundary } from '../../utils/contextCompaction';
-import { loadSessionMessages } from '../../utils/projectStorage';
+import { loadSessionMessages, waitForPendingProjectStateSave } from '../../utils/projectStorage';
 import { runVerifier } from '../../utils/verifierRunner';
 import { useGoalStore } from '../goalStore';
 import type { CommandResult } from '../../tools/streamingWorkspaceCommand';
@@ -151,7 +151,7 @@ async function readMemoryFile(workspacePath: string): Promise<string | undefined
  *  用户可能 reset/清空/追加消息）。应用前校验当前数组是否仍是安全的插入基座：
  *  允许追加（长度增长且 insertIndex 之前的内容一致）；禁止删除/重排——旧
  *  insertIndex 落到末尾会让已删除内容以摘要形式复活（#15）。 */
-function isSafeCheckpointInsert(
+export function isSafeCheckpointInsert(
   base: readonly UIMessage[] | undefined,
   current: readonly UIMessage[] | undefined,
   insertIndex: number
@@ -556,6 +556,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           const guardSid = get().activeSessionId;
           if (guardSid && workspacePath && get()._messageLoadFailedSessions?.[guardSid]) {
             try {
+              // 读前排空挂起保存队列，避免重载读到旧数据（与 openWorkspace 对齐）。
+              await waitForPendingProjectStateSave(workspacePath);
               const reloaded = (await loadSessionMessages(
                 workspacePath,
                 guardSid

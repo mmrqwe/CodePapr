@@ -422,6 +422,9 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
           relativePath: file.path,
           content: file.content,
         });
+        // 写成功即登记（必须在验证之前）：验证失败时该文件已落新内容，
+        // 若未登记会被回滚漏掉，仍留下部分应用状态。
+        applied.push({ path: file.path, before: fileContents[file.path] ?? null, result });
 
         // 写后验证
         const verified = await invoke<ReadFileResult>('read_text_file', {
@@ -430,7 +433,6 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
           maxBytes: Math.max(new TextEncoder().encode(file.content).length + 1024, 16384),
         });
         assertWriteVerified(verified, file.content, file.path);
-        applied.push({ path: file.path, before: fileContents[file.path] ?? null, result });
       }
     } catch (err) {
       // 回滚已写入的文件：尽量恢复到写前状态

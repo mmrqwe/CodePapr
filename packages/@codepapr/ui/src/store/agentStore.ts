@@ -1063,6 +1063,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         // session resident in memory.
         set({ messages: [], sessionMessagesLoading: true });
         void (async () => {
+          // 读前排空该工作区挂起的保存队列（与 openWorkspace 对齐）：
+          // 该会话的消息缓存可能刚被 LRU 逐出，其最新内容只存在于挂起的
+          // 保存任务中尚未落库；不等队列直接读会读到旧数据。
+          // （内部不会抛错。）
+          await waitForPendingProjectStateSave(workspacePath);
           let loaded: UIMessage[] = [];
           let loadFailed = false;
           try {

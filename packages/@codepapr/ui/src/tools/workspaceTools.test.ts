@@ -679,6 +679,56 @@ describe('workspace_apply_diff 写入原子性', () => {
     expect(lastWrite?.[1]?.content).toBe('AAA\n');
   });
 
+  it('#25 写成功但验证失败的文件也必须回滚（不能只回滚写失败前的文件）', async () => {
+    const originalContents = new Map<string, string>([
+      ['a.txt', 'AAA\n'],
+      ['b.txt', 'BBB\n'],
+    ]);
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_text_file') {
+        const rel = String(args?.relativePath);
+        return {
+          path: rel,
+          content: originalContents.get(rel) ?? '',
+          bytes: (originalContents.get(rel) ?? '').length,
+        };
+      }
+      if (command === 'write_text_file') {
+        const rel = String(args?.relativePath);
+        // a.txt：写"成功"但不生效（回读仍是旧内容）→ 验证失败；
+        // 旧实现此时 a.txt 未登记进 applied，回滚会漏掉它。
+        if (rel !== 'a.txt') {
+          originalContents.set(rel, String(args?.content ?? ''));
+        }
+        return { path: rel, bytes: String(args?.content ?? '').length, encoding: null };
+      }
+      if (command === 'check_syntax') {
+        return { supported: false, errorCount: 0, errors: [] };
+      }
+      if (command === 'extract_project_map_symbols') {
+        return [];
+      }
+      throw new Error(`Unexpected invoke: ${command}`);
+    });
+
+    const registry = build();
+    await expect(
+      registry.execute('patch', {
+        patches: [
+          { relativePath: 'a.txt', search: 'AAA', replace: 'AAA-new' },
+          { relativePath: 'b.txt', search: 'BBB', replace: 'BBB-new' },
+        ],
+      }),
+    ).rejects.toThrow('文件写入验证失败');
+
+    // a.txt 写成功但验证失败：必须登记并回滚（最后一次写为原内容）
+    const aWrites = invokeMock.mock.calls.filter(
+      ([command, args]) => command === 'write_text_file' && args?.relativePath === 'a.txt',
+    );
+    expect(aWrites.length).toBeGreaterThanOrEqual(2);
+    expect(aWrites[aWrites.length - 1]?.[1]?.content).toBe('AAA\n');
+  });
+
   it('#25 全部写入成功时不回滚，正常返回所有文件结果', async () => {
     const originalContents = new Map<string, string>([
       ['a.txt', 'AAA\n'],

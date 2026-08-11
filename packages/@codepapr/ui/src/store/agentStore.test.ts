@@ -3225,6 +3225,10 @@ describe('session lazy loading and LRU cache', () => {
     expect(useAgentStore.getState().sessionMessagesLoading).toBe(true);
     expect(useAgentStore.getState().messages).toEqual([]);
 
+    // 懒加载路径先排空挂起的保存队列（一个微任务后才真正发起 loadSessionMessages），
+    // 需等待 mock 被调用后 deferred.resolve 才就位，否则提前调用会被 ?. 跳过。
+    await waitForCondition(() => deferred.resolve !== null);
+    expect(waitForPendingProjectStateSaveMock).toHaveBeenCalledWith('/tmp/codepapr-lazy-test');
     deferred.resolve?.([createMessage('m-2', '会话二')]);
     await waitForCondition(() => !useAgentStore.getState().sessionMessagesLoading);
 

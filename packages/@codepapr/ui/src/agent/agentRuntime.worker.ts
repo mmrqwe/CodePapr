@@ -107,6 +107,29 @@ const bootstrapResponseWaiters = new Map<
 let nextBootstrapRequestId = 0;
 
 const TOOL_IPC_TIMEOUT_MS = 120_000;
+// bash 命令最长 600s（Rust MAX_COMMAND_SECONDS）。IPC 超时必须覆盖命令本身的
+// 最长运行时间，否则命令还在合法运行、IPC 先超时；配合超时即发 cancel-tool-request，
+// 确保超时 = 中止主线程执行，而不是抛弃后让它继续跑完（副作用滞后落地）。
+const BASH_COMMAND_MAX_SECONDS = 600;
+const BASH_IPC_MARGIN_MS = 15_000;
+
+/** 按工具解析 IPC 超时：bash 按其请求的 timeoutSeconds（默认 30s，Rust 钳制
+ *  1-600s）放宽并留余量；其余工具用基础值。 */
+function resolveToolIpcTimeoutMs(
+  toolName: string,
+  args: Record<string, unknown>,
+  baseMs: number
+): number {
+  if (toolName !== 'bash') {
+    return baseMs;
+  }
+  const raw =
+    typeof args.timeoutSeconds === 'number' && Number.isFinite(args.timeoutSeconds)
+      ? args.timeoutSeconds
+      : 30;
+  const commandMs = Math.min(Math.max(raw, 1), BASH_COMMAND_MAX_SECONDS) * 1000;
+  return Math.max(baseMs, commandMs + BASH_IPC_MARGIN_MS);
+}
 // 子代理（含 mentor）墙钟上限。流层改为无限重连后，长时间网络波动也会消耗
 // 子代理预算；放宽到 20 分钟，避免「重连中」的子代理被墙钟误杀。
 const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 1_200_000;
@@ -550,6 +573,13 @@ async function requestToolExecution(
       if (permissionWaitActive) return;
       waiter.timer = setTimeout(() => {
         toolResponseWaiters.delete(toolRequestId);
+        // IPC 超时同样通知主线程中止工具执行（杀 bash 进程等）——旧实现
+        // 只 reject 本地 waiter，主线程的工具会继续跑完、副作用滞后落地。
+        postMessageToMain({
+          type: 'cancel-tool-request',
+          requestId,
+          toolRequestId,
+        } satisfies AgentWorkerToMainMessage);
         reject(new Error(`工具 IPC 超时: ${toolName} (${timeoutMs / 1000}s)`));
       }, timeoutMs);
     };
@@ -762,7 +792,10 @@ function createRegistry(
 
   for (const tool of payload.toolDefinitions) {
     registry.register(tool, async (args, context) => {
-      const timeout = tool.name === 'graph' ? toolIpcTimeoutMs : TOOL_IPC_TIMEOUT_MS;
+      const timeout =
+        tool.name === 'graph'
+          ? toolIpcTimeoutMs
+          : resolveToolIpcTimeoutMs(tool.name, args, TOOL_IPC_TIMEOUT_MS);
       return await requestToolExecution(
         requestId,
         tool.name,
@@ -908,7 +941,13 @@ async function handleRunAppAgent(
       toolActivity?.();
       try {
         return await requestToolExecution(
-          requestId, tool.name, args, toolIpcTimeoutMs, context?.toolCallId, appAccess, context?.signal
+          requestId,
+          tool.name,
+          args,
+          resolveToolIpcTimeoutMs(tool.name, args, toolIpcTimeoutMs),
+          context?.toolCallId,
+          appAccess,
+          context?.signal
         );
       } finally {
         toolActivity?.();
