@@ -50,7 +50,7 @@ import {
   readWorkspaceTextFile,
   runWorkspaceInlineCommand,
 } from '../../utils/projectConfigLoader';
-import { WorkerCrashError } from '../../agent/WorkerBackedAgent';
+import { AgentDestroyedError, WorkerCrashError } from '../../agent/WorkerBackedAgent';
 import { delay, waitForPageVisible } from '../../utils/crashRecovery';
 import { insertCheckpointAtRetainedBoundary } from '../../utils/contextCompaction';
 import { loadSessionMessages } from '../../utils/projectStorage';
@@ -1249,9 +1249,20 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   // Goal 回合同样接入崩溃恢复链：Worker 崩溃透明重建/降级，
                   // 不再让 Goal 循环因崩溃中断。onPassStart 回调保证崩溃重建后
                   // 用新 agent 的 log 坐标切片转录（旧坐标会切出错误内容）。
-                  const response = await runWithCrashRecovery(turnPrompt, undefined, (logLength) => {
-                    turnStartIndex = logLength;
-                  });
+                  let response: IAgentResponse;
+                  try {
+                    response = await runWithCrashRecovery(turnPrompt, undefined, (logLength) => {
+                      turnStartIndex = logLength;
+                    });
+                  } catch (err) {
+                    // agent 被销毁（切会话/新建/改设置）：GoalRunner 把它当
+                    // 用户中断静默停止（AbortError → interrupted），绝不在
+                    // 循环里重建重跑整个回合。
+                    if (err instanceof AgentDestroyedError) {
+                      throw new DOMException('已取消', 'AbortError');
+                    }
+                    throw err;
+                  }
                   lastWorkerContent = response.content;
 
                   sessionLogStartIndex =
@@ -1750,7 +1761,14 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           console.error('[sendMessage] outer catch:', err);
           // 以本回合捕获的会话为准收尾（用户可能已切换到别的会话）。
           const sid = turnSessionId ?? get().activeSessionId;
-          if (err instanceof DOMException && err.name === 'AbortError') {
+          // 销毁（AgentDestroyedError）与取消等价：用户切会话/新建/改设置导致
+          // agent 被销毁时，回合必须安静停止——既不重跑（旧实现把销毁误当
+          // WorkerCrashError 重建重跑，bash/git commit 等副作用重复执行），
+          // 也不弹出错误提示。
+          if (
+            (err instanceof DOMException && err.name === 'AbortError') ||
+            err instanceof AgentDestroyedError
+          ) {
             // 取消 ACK 可能晚于新回合启动到达：仅当本回合仍是当前回合时才复位
             // isLoading，否则会踩掉新回合的 loading 态、破坏单执行模型。
             const stillCurrentTurn = get()._turnSeq === turnSeq;

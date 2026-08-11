@@ -156,7 +156,10 @@ export function enqueueProjectStateSave(
   return next;
 }
 
-async function waitForPendingProjectStateSave(workspacePath: string): Promise<void> {
+/** 等待指定工作区挂起的项目状态保存队列排空（读前刷新，避免读到旧数据）。
+ *  openWorkspace 等读路径必须先调用它：A→B→A 快速切换时，A 的挂起保存
+ *  尚未落库就读 A，会读到旧数据并回写覆盖新数据。 */
+export async function waitForPendingProjectStateSave(workspacePath: string): Promise<void> {
   const pending = projectStateSaveTails.get(workspacePath);
   if (!pending) {
     return;

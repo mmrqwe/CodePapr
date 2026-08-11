@@ -20,6 +20,7 @@ import {
   loadSessionMessages,
   loadAllProjectMeta,
   aggregateSessionRuntimeInDb,
+  waitForPendingProjectStateSave,
 } from '../utils/projectStorage';
 import { runProjectDiagnostics } from '../utils/projectDiagnostics';
 import { loadAppSettings, saveAppSettings } from '../utils/appSettingsStorage';
@@ -166,6 +167,10 @@ function evictSessionMessageCache(get: StoreGet, set: StoreSet, protectIds: stri
 // App Agent 初始化去重：并发的 papr://agent.run 请求共享同一次创建，
 // 避免重复拉起 Worker。
 let appAgentEnsureInFlight: Promise<AgentRuntimeHandle> | null = null;
+
+// openWorkspace 的工作区身份令牌：每次打开递增；异步加载完成后凭令牌判断
+// 是否仍是当前工作区，防止旧加载结果覆盖新工作区（读旧覆新）。
+let openWorkspaceSeq = 0;
 
 /** 销毁当前 agent 句柄（回收 Worker 进程 / 心跳定时器 / 事件监听器）。
  *  所有把 _agent 置 null 或替换掉的路径都必须先调用它，否则每个被丢弃的
@@ -477,6 +482,18 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
         const normalizedWorkspacePath = path.trim();
 
+        // 工作区身份令牌：openWorkspace 是异步加载（loadSessions → set），
+        // 期间用户可能再次切换工作区。旧实现没有守卫——前一次加载完成后
+        // 无条件 set()，用旧工作区的数据覆盖新工作区的状态（读旧覆新）。
+        // 每次打开递增令牌，set 前校验，不一致即丢弃本次结果。
+        const workspaceSeq = ++openWorkspaceSeq;
+
+        // 读前先排空该工作区挂起的保存队列（与 legacy loadProjectState 的
+        // waitForPendingProjectStateSave 对齐）：A→B→A 快速切换时，A 的
+        // 挂起保存未落库就读 A 会读到旧数据，再被下方 saveCurrentProjectState
+        // 回写，把新数据永久覆盖掉。
+        await waitForPendingProjectStateSave(normalizedWorkspacePath);
+
         let sessions: SessionMeta[] = [];
         let sessionMessages: Record<string, UIMessage[]> = {};
         let activeSessionId: string | null = null;
@@ -599,6 +616,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
               activeSessionId
             )
           : conversationStats;
+
+        // 工作区身份守卫：加载期间用户又切换了工作区（openWorkspace 令牌已
+        // 递增）则丢弃本次结果，绝不把旧工作区数据 set() 到新工作区上。
+        if (workspaceSeq !== openWorkspaceSeq) {
+          return;
+        }
 
         set({
           workspacePath: path,

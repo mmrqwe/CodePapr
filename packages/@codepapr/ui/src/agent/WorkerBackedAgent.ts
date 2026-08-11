@@ -114,6 +114,19 @@ export class WorkerCrashError extends Error {
   }
 }
 
+/** Error thrown when the agent was deliberately destroyed mid-turn (session
+ *  switch / new session / settings change). 与 WorkerCrashError 严格区分：
+ *  崩溃恢复链（runWithCrashRecovery）只对真实崩溃重建并重跑回合——销毁意味着
+ *  用户主动中断，绝不能再执行一遍回合（bash/git commit 等非幂等副作用会
+ *  重复执行且用户不可见）。上层应把它当作取消处理。 */
+export class AgentDestroyedError extends Error {
+  readonly isAgentDestroyed = true;
+  constructor(message: string, readonly detail?: string) {
+    super(message);
+    this.name = 'AgentDestroyedError';
+  }
+}
+
 export interface AgentRuntimeHandle {
   chat(
     userInput: string,
@@ -509,8 +522,11 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.rejectAllAppAgentRequests(new Error('Agent was destroyed'));
     // worker 被直接 terminate 后 cancel ACK 永远不会到达（cancel() 的兜底
     // 定时器也已被清除）：必须主动 reject 所有 pending chat 请求，否则调用
-    // 方 await 永久挂起。用 WorkerCrashError 让上层崩溃恢复重建并重试回合。
-    const destroyError = new WorkerCrashError('Agent was destroyed');
+    // 方 await 永久挂起。旧实现复用 WorkerCrashError 让崩溃恢复链「重建并
+    // 重跑整个回合」——销毁是用户主动中断（切会话/新建/改设置），重跑会
+    // 重复执行 bash/git commit 等非幂等副作用且用户不可见，必须用独立的
+    // AgentDestroyedError 区分开。
+    const destroyError = new AgentDestroyedError('Agent was destroyed');
     for (const [requestId, pending] of this.pendingRequests) {
       this.flushDeltas(pending);
       pending.reject(destroyError);
@@ -536,6 +552,11 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     onStreamEvent?: (event: AgentRuntimeStreamEvent) => void,
     images?: IImageContent[]
   ): Promise<IAgentResponse> {
+    if (this.destroyed) {
+      // 已被销毁的 agent 拒绝新回合：用 AgentDestroyedError（而非
+      // WorkerCrashError），避免崩溃恢复链对已销毁的 agent 重建重跑。
+      throw new AgentDestroyedError('Agent was destroyed');
+    }
     if (this.crashed) {
       throw new WorkerCrashError(
         `Agent worker has crashed and cannot process messages (${this.crashCause()}). Create a new agent to retry.`,

@@ -145,8 +145,14 @@ export class GoalRunner {
         console.log('[GoalRunner] runWorkerTurn completed', { iteration: iteration + 1, contentLength: workerResult.content.length, outputTokens: workerResult.outputTokens });
       } catch (err) {
         console.error('[GoalRunner] runWorkerTurn failed', err);
-        this.state.status = 'error';
-        this.state.error = (err as Error).message;
+        // 取消/销毁（用户切会话/新建/改设置导致 agent 被销毁）：不是执行
+        // 错误，按用户中断处理，静默停止循环，不显示「Goal 出错」。
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          this.state.status = 'interrupted';
+        } else {
+          this.state.status = 'error';
+          this.state.error = (err as Error).message;
+        }
         this.state.elapsedMs = Date.now() - this.state.startedAt;
         this.notifyAndPersist();
         return this.getState();

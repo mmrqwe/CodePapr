@@ -49,6 +49,7 @@ vi.mock('../utils/projectStorage', () => ({
   }),
   loadProjectState: loadProjectStateMock,
   saveProjectState: saveProjectStateMock,
+  waitForPendingProjectStateSave: async () => undefined,
 }));
 
 vi.mock('./SplitPane', async () => {

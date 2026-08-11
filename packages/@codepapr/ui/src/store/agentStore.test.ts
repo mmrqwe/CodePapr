@@ -18,7 +18,7 @@ const { invokeMock } = vi.hoisted(() => ({
   }),
 }));
 
-const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMock, saveProjectStateDirectMock, loadSessionsMock, loadSessionMessagesMock, loadAllProjectMetaMock, saveSessionMock, saveMessageBatchMock, deleteSessionByIdMock, saveProjectMetaMock, enqueueProjectStateSaveMock, aggregateSessionRuntimeInDbMock } = vi.hoisted(() => ({
+const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMock, saveProjectStateDirectMock, loadSessionsMock, loadSessionMessagesMock, loadAllProjectMetaMock, saveSessionMock, saveMessageBatchMock, deleteSessionByIdMock, saveProjectMetaMock, enqueueProjectStateSaveMock, aggregateSessionRuntimeInDbMock, waitForPendingProjectStateSaveMock } = vi.hoisted(() => ({
   loadProjectStateMock: vi.fn(async (): Promise<ProjectStateSnapshot> => ({
     version: 1,
     sessions: [],
@@ -47,6 +47,7 @@ const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMoc
   saveProjectMetaMock: vi.fn(async () => undefined),
   enqueueProjectStateSaveMock: vi.fn(async (_path: string, writer: () => Promise<void>) => { await writer(); }),
   aggregateSessionRuntimeInDbMock: vi.fn(async (): Promise<Record<string, number>> => ({})),
+  waitForPendingProjectStateSaveMock: vi.fn(async () => undefined),
 }));
 
 const { loadAppSettingsMock, saveAppSettingsMock } = vi.hoisted(() => ({
@@ -103,6 +104,7 @@ vi.mock('../utils/projectStorage', () => ({
   saveProjectMeta: saveProjectMetaMock,
   enqueueProjectStateSave: enqueueProjectStateSaveMock,
   aggregateSessionRuntimeInDb: aggregateSessionRuntimeInDbMock,
+  waitForPendingProjectStateSave: waitForPendingProjectStateSaveMock,
 }));
 
 vi.mock('../utils/appSettingsStorage', () => ({
@@ -138,7 +140,7 @@ vi.mock('./internals/agentFactory', async (importOriginal) => {
 
 import { normalizeSettings, useAgentStore } from './agentStore';
 import { buildEffectiveContextMessages } from '../utils/contextCompaction';
-import { WorkerCrashError } from '../agent/WorkerBackedAgent';
+import { AgentDestroyedError, WorkerCrashError } from '../agent/WorkerBackedAgent';
 import { SESSION_MESSAGE_CACHE_LIMIT } from './internals/defaults';
 
 async function waitForMacrotask(): Promise<void> {
@@ -2593,6 +2595,32 @@ describe('useAgentStore.sendMessage', () => {
       expect(useAgentStore.getState()._agent).toBe(healthy);
       expect(useAgentStore.getState().isLoading).toBe(false);
     });
+
+    it('agent destroyed mid-turn stops silently: no rebuild, no re-run, no error message', async () => {
+      // 用户切会话/新建/改设置导致 agent 被销毁：chat() 以 AgentDestroyedError
+      // 拒绝（旧实现是 WorkerCrashError——崩溃恢复链会重建并重跑整个回合，
+      // bash/git commit 等非幂等副作用重复执行且用户不可见）。
+      const destroyedChat = vi.fn(
+        async (): Promise<never> => {
+          throw new AgentDestroyedError('Agent was destroyed');
+        },
+      );
+      const destroyed = createMockAgent({ chat: destroyedChat, isCrashed: false });
+      createAgentMock.mockClear();
+      createMainThreadAgentMock.mockClear();
+      setCrashRecoveryState(destroyed);
+
+      await useAgentStore.getState().sendMessage('任务', '任务', 'agent');
+
+      expect(destroyedChat).toHaveBeenCalledTimes(1);
+      // 绝不重建/重跑
+      expect(createAgentMock).not.toHaveBeenCalled();
+      expect(createMainThreadAgentMock).not.toHaveBeenCalled();
+      // 静默停止：无错误消息
+      const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+      expect(sessionMessages.filter((m) => m.role === 'error')).toHaveLength(0);
+      expect(useAgentStore.getState().isLoading).toBe(false);
+    });
   });
 
   describe('idle-sleep prevention', () => {
@@ -2749,6 +2777,34 @@ describe('useAgentStore.closeWorkspace', () => {
     expect(state.projectGraphPhase).toBeNull();
     expect(state.activeSessionId).toBeNull();
     expect(state.sessions).toEqual([]);
+  });
+
+  it('openWorkspace 读前等待该工作区挂起的保存队列（读旧覆新防护）', async () => {
+    waitForPendingProjectStateSaveMock.mockClear();
+    await useAgentStore.getState().openWorkspace('/tmp/codepapr-flush');
+
+    // 旧实现：新表加载路径不等待挂起的保存队列（legacy loadProjectState
+    // 有 wait，迁移时漏掉）——A→B→A 快速切换会读到旧数据并被回写覆盖。
+    expect(waitForPendingProjectStateSaveMock).toHaveBeenCalledWith('/tmp/codepapr-flush');
+  });
+
+  it('快速切换工作区时旧加载结果不得覆盖新工作区（身份令牌守卫）', async () => {
+    let resolveFirst!: (value: ProjectSessionMeta[]) => void;
+    loadSessionsMock.mockImplementationOnce(
+      () => new Promise<ProjectSessionMeta[]>((resolve) => { resolveFirst = resolve; })
+    );
+
+    // A 的加载挂起中切换到 B，B 立即完成
+    const openA = useAgentStore.getState().openWorkspace('/tmp/codepapr-race-A');
+    await vi.waitFor(() => expect(loadSessionsMock).toHaveBeenCalled());
+    await useAgentStore.getState().openWorkspace('/tmp/codepapr-race-B');
+    expect(useAgentStore.getState().workspacePath).toBe('/tmp/codepapr-race-B');
+
+    // A 的加载姗姗来迟：旧实现无条件 set()，会用 A 的空状态覆盖 B 的工作区
+    resolveFirst([]);
+    await openA;
+
+    expect(useAgentStore.getState().workspacePath).toBe('/tmp/codepapr-race-B');
   });
 });
 

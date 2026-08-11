@@ -62,6 +62,12 @@ export function usePaprBridge({ iframeRef, appId, manifest, dark }: UsePaprBridg
   const effectiveAccessRef = useRef(effectiveAccess);
   effectiveAccessRef.current = effectiveAccess;
 
+  // manifest 走 ref：父组件每次渲染传入新对象（即使内容相同）时，
+  // handleMessage 的 identity 不能变——否则订阅 effect 的 cleanup 会把
+  // 所有在飞的 app agent 取消（旧实现 appSettings 异步加载就必然触发一次）。
+  const manifestRef = useRef(manifest);
+  manifestRef.current = manifest;
+
   const handleMessage = useCallback(
     (event: MessageEvent) => {
       const appOrigin = appOriginFor(appId);
@@ -73,7 +79,7 @@ export function usePaprBridge({ iframeRef, appId, manifest, dark }: UsePaprBridg
       const data = event.data;
       if (!isPaprMessage(data)) return;
 
-      const resolvedManifest = manifest ?? usePermissionStore.getState().manifests[appId];
+      const resolvedManifest = manifestRef.current ?? usePermissionStore.getState().manifests[appId];
       if (!resolvedManifest) {
         const resp = createPaprResponse(data.reqId, undefined, {
           code: 'NO_MANIFEST',
@@ -409,7 +415,10 @@ export function usePaprBridge({ iframeRef, appId, manifest, dark }: UsePaprBridg
         message: `Unknown request type: ${type}`,
       });
     },
-    [appId, manifest, iframeRef, appSettings],
+    // 稳定依赖：只随 appId/iframe 变化。manifest/appSettings 都经 ref 读取，
+    // 它们的异步加载/父组件重渲染不再改变 handleMessage identity——否则订阅
+    // effect 的 cleanup 会取消全部在飞的 app agent 执行。
+    [appId, iframeRef],
   );
 
   useEffect(() => {

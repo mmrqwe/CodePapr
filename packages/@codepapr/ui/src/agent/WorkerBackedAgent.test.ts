@@ -4,7 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IAgentResponse, IMessage } from '@codepapr/types';
 import { createDefaultMcpSettings, normalizeMcpSettings, type McpSettings } from '../utils/mcpTypes';
 import type { AgentWorkerToMainMessage, MainToAgentWorkerMessage } from './agentWorkerProtocol';
-import { WorkerBackedAgent, WorkerCrashError, type AgentRuntimeStreamEvent } from './WorkerBackedAgent';
+import {
+  AgentDestroyedError,
+  WorkerBackedAgent,
+  WorkerCrashError,
+  type AgentRuntimeStreamEvent,
+} from './WorkerBackedAgent';
 
 function makeMcpSearchSettings(): McpSettings {
   const base = createDefaultMcpSettings();
@@ -497,7 +502,6 @@ describe('WorkerBackedAgent', () => {
       await vi.advanceTimersByTimeAsync(5_000);
       worker?.emit({ type: 'pong' });
     }
-
     expect(agent.isCrashed()).toBe(false);
 
     worker?.emit({
@@ -525,6 +529,33 @@ describe('WorkerBackedAgent', () => {
     // not just a generic "has crashed" message.
     await expect(agent.chat('again')).rejects.toThrow(/Simulated OOM/);
     expect(agent.isCrashed()).toBe(true);
+  });
+
+  it('destroy() rejects in-flight chat with AgentDestroyedError, not WorkerCrashError', async () => {
+    const agent = createAgent();
+    const chatPromise = agent.chat('hello');
+    const worker = MockWorker.instances[0];
+    const chatMessage = chatMessages(worker)[0];
+    if (chatMessage?.type !== 'chat') throw new Error('expected chat message');
+
+    // 旧实现：destroy 用 WorkerCrashError 拒绝 → 崩溃恢复链重建并重跑整个
+    // 回合（非幂等工具副作用重复执行）。销毁是用户主动中断，必须用独立的
+    // AgentDestroyedError 区分。
+    const rejection = expect(chatPromise).rejects.toBeInstanceOf(AgentDestroyedError);
+    agent.destroy();
+
+    await rejection;
+    await expect(chatPromise).rejects.toMatchObject({ name: 'AgentDestroyedError' });
+    expect(agent.isCrashed()).toBe(true);
+    expect(worker?.terminated).toBe(true);
+  });
+
+  it('chat() on a destroyed agent throws AgentDestroyedError (no crash-recovery reuse)', async () => {
+    const agent = createAgent();
+    agent.destroy();
+    await expect(agent.chat('after destroy')).rejects.toMatchObject({
+      name: 'AgentDestroyedError',
+    });
   });
 
   it('keeps an app agent run alive while stream events keep arriving', async () => {
