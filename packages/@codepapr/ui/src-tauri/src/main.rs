@@ -383,6 +383,7 @@ fn main() {
             app_runtime::unregister_app_workspace,
             app_runtime::check_port_available,
             app_runtime::check_port_available_detail,
+            app_runtime::check_port_available_structured,
             app_runtime::check_port_owner,
             app_runtime::check_port_owned_by,
             app_runtime::check_port_bind_address,

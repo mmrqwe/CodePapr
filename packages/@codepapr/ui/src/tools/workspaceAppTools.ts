@@ -439,7 +439,18 @@ export async function launchAppBackend(
   }
 
   const available: boolean = await invoke('check_port_available', { port: app.port });
-  if (!available) throw new Error(`端口 ${app.port} 已被占用`);
+  if (!available) {
+    let ownerInfo = '';
+    try {
+      const owners = await invoke<number[]>('check_port_owner', { port: app.port });
+      if (owners.length > 0) {
+        ownerInfo = `（占用进程 pid=${owners.join(',')}）`;
+      }
+    } catch { /* best-effort */ }
+    throw new Error(
+      `端口 ${app.port} 已被占用${ownerInfo}。若为上次启动残留的后端进程，请先在「后台进程」面板停止，或重启 CodePapr。`,
+    );
+  }
 
   const url = `http://localhost:${app.port}/`;
   const result = await invoke<{ pid: number }>('start_workspace_background_command', {
@@ -463,36 +474,47 @@ export async function launchAppBackend(
   const pollTrace: string[] = [];
   let portTaken = false;
   let portOwnedByUs = false;
-  for (;;) {
-    await new Promise((r) => setTimeout(r, PORT_POLL_INTERVAL_MS));
-    // 结构化探测：v4/v6 各自 connect 是否成功（有监听即视为被占用）。
-    // 旧实现靠 !detail.includes('conn') 子串解析诊断文本判状态——文本里出现
-    // "conn"（如 err:ConnectionRefused 之外的措辞）就会翻转判定，改用
-    // 结构化布尔字段彻底消除对文案的依赖。
-    const probe = await invoke<{ v4: boolean; v6: boolean }>('check_port_available_structured', {
-      port: app.port,
-    });
-    const available = !probe.v4 && !probe.v6;
-    const detail = await invoke<string>('check_port_available_detail', { port: app.port });
-    pollTrace.push(`+${Date.now() - startedAt}ms:${detail}`);
-    if (!available) {
-      portTaken = true;
-      // TOCTOU 修复：端口被监听 ≠ 我们 spawn 的进程在监听。外部进程在
-      // 预检之后抢占端口时，旧实现照样判「启动成功」并返回死进程 pid。
-      // 归属按进程组判定（后端经 sandbox-exec 包装时，注册 pid 是包装进程，
-      // 真正监听的是组内 node，二者 pid 不等但 pgid 相同）。拿不到 lsof
-      // （容器/CI）时退化为仅存活检查。
+  let pollError = '';
+  try {
+    for (;;) {
+      await new Promise((r) => setTimeout(r, PORT_POLL_INTERVAL_MS));
+      // 结构化探测：v4/v6 各自 connect 是否成功（有监听即视为被占用）。
+      // 旧实现靠 !detail.includes('conn') 子串解析诊断文本判状态——文本里出现
+      // "conn"（如 err:ConnectionRefused 之外的措辞）就会翻转判定，改用
+      // 结构化布尔字段彻底消除对文案的依赖。
+      const probe = await invoke<{ v4: boolean; v6: boolean }>('check_port_available_structured', {
+        port: app.port,
+      });
+      const available = !probe.v4 && !probe.v6;
+      let detail = 'n/a';
       try {
-        portOwnedByUs = await invoke<boolean>('check_port_owned_by', {
-          port: app.port,
-          pid: result.pid,
-        });
-      } catch {
-        portOwnedByUs = true;
+        detail = await invoke<string>('check_port_available_detail', { port: app.port });
+      } catch { /* detail 缺失不致命 */ }
+      pollTrace.push(`+${Date.now() - startedAt}ms:${detail}`);
+      if (!available) {
+        portTaken = true;
+        // TOCTOU 修复：端口被监听 ≠ 我们 spawn 的进程在监听。外部进程在
+        // 预检之后抢占端口时，旧实现照样判「启动成功」并返回死进程 pid。
+        // 归属按进程组判定（后端经 sandbox-exec 包装时，注册 pid 是包装进程，
+        // 真正监听的是组内 node，二者 pid 不等但 pgid 相同）。拿不到 lsof
+        // （容器/CI）时退化为仅存活检查。
+        try {
+          portOwnedByUs = await invoke<boolean>('check_port_owned_by', {
+            port: app.port,
+            pid: result.pid,
+          });
+        } catch {
+          portOwnedByUs = true;
+        }
+        break;
       }
-      break;
+      if (Date.now() >= deadline) break;
     }
-    if (Date.now() >= deadline) break;
+  } catch (err) {
+    // 探测命令异常（如命令未注册）绝不能把进程留在"活着但无人认领"的中间态：
+    // 记录错误并走统一失败分支清理，保证"要么成功接管、要么清理干净"。
+    pollError = err instanceof Error ? err.message : String(err);
+    pollTrace.push(`+${Date.now() - startedAt}ms:ERROR(${pollError})`);
   }
   if (!portTaken || !portOwnedByUs) {
     // 先取进程捕获的输出再停掉它：spawn 秒退的真实原因（如 sandbox-exec
@@ -508,7 +530,7 @@ export async function launchAppBackend(
     try { await invoke('log_ui_event', { workspacePath, message: `app_start-failure ${app.appId} port=${app.port} pid=${result.pid} ownedByUs=${portOwnedByUs} polls=[${pollTrace.join(' ')}]` }); } catch { /* best-effort */ }
     const detail = spawnLog ? `\n进程输出：\n${spawnLog}` : '';
     const reason = !portTaken
-      ? '进程已退出或端口未被监听'
+      ? (pollError ? `端口探测失败（${pollError}）` : '进程已退出或端口未被监听')
       : '端口监听者不是本次启动的进程（可能被外部进程抢占）';
     throw new Error(`应用 '${app.appId}' 后端启动失败：${reason}，请检查 command/args 配置。${detail}`);
   }
