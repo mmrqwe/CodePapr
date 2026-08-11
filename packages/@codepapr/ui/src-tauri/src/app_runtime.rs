@@ -148,6 +148,25 @@ pub fn check_port_owner(port: u16) -> Vec<u32> {
     Vec::new()
 }
 
+/// 端口监听者是否属于给定 pid 的进程组。
+/// 注意：不能直接比 pid——后端经 sandbox-exec 包装时，注册表里的 pid 是
+/// sandbox-exec（进程组组长），真正监听的 node 是组内孙进程。spawn 用
+/// process_group(0) 使整棵进程树共享 pgid（== 组长 pid），因此正确判据是
+/// 「任一监听进程的 pgid == 给定 pid」。lsof 拿不到（容器/CI）时返回 true
+/// 退化为仅存活检查。
+#[tauri::command]
+pub fn check_port_owned_by(port: u16, pid: u32) -> bool {
+    let listeners = check_port_owner(port);
+    if listeners.is_empty() {
+        return true;
+    }
+    listeners.iter().any(|listener| {
+        // SAFETY: listener 是 lsof 返回的真实进程 pid；getpgid 接受任意 pid
+        let pgid = unsafe { libc::getpgid(*listener as libc::pid_t) };
+        pgid == pid as libc::pid_t
+    })
+}
+
 /// 端口监听地址（lsof NAME 列解析出的 host 部分，如 "127.0.0.1"、"*"、
 /// "::1"）。沙箱 SBPL 无法限制 bind 地址（`(local ip ...)` 过滤器在本平台
 /// 对 bind 无效），回环约束必须在 app_start 启动期强制：`*` 或非回环地址

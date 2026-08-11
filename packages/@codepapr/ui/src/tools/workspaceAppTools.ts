@@ -479,10 +479,14 @@ export async function launchAppBackend(
       portTaken = true;
       // TOCTOU 修复：端口被监听 ≠ 我们 spawn 的进程在监听。外部进程在
       // 预检之后抢占端口时，旧实现照样判「启动成功」并返回死进程 pid。
-      // 用 lsof 核对监听者归属；拿不到 lsof（容器/CI）时退化为仅存活检查。
+      // 归属按进程组判定（后端经 sandbox-exec 包装时，注册 pid 是包装进程，
+      // 真正监听的是组内 node，二者 pid 不等但 pgid 相同）。拿不到 lsof
+      // （容器/CI）时退化为仅存活检查。
       try {
-        const owners = await invoke<number[]>('check_port_owner', { port: app.port });
-        portOwnedByUs = owners.length === 0 || owners.includes(result.pid);
+        portOwnedByUs = await invoke<boolean>('check_port_owned_by', {
+          port: app.port,
+          pid: result.pid,
+        });
       } catch {
         portOwnedByUs = true;
       }
@@ -511,15 +515,26 @@ export async function launchAppBackend(
 
   // #60 回环约束：沙箱 SBPL 的 network-bind 地址过滤对本平台无效（实测
   // (local ip ...) 过滤器不限制 bind 地址，bind 0.0.0.0 照样成功），回环
-  // 强制放这里做——后端若监听在通配/非回环地址，会把服务暴露到局域网，
-  // 启动直接判失败并给出修复指引。拿不到 lsof（容器/CI）时跳过。
+  // 强制放这里做。注意：`*`（IPv6 双栈通配）是 node listen(PORT) 的平台
+  // 默认，绝大多数后端无法修改，且它回环可达（connect 探测能通）——因此
+  // `*` 仅落 warning 不判失败；只有监听在具体的非回环 IP（如 192.168.x.x）
+  // 才判定暴露到局域网并拒绝启动。拿不到 lsof（容器/CI）时跳过。
   let bindHosts: string[] = [];
   try {
     bindHosts = await invoke<string[]>('check_port_bind_address', { port: app.port });
   } catch {
     bindHosts = [];
   }
-  const nonLoopbackHosts = bindHosts.filter((host) => !isLoopbackBindHost(host));
+  const wildcardHosts = bindHosts.filter((host) => isWildcardBindHost(host));
+  if (wildcardHosts.length > 0) {
+    try {
+      await invoke('log_ui_event', {
+        workspacePath,
+        message: `app_start-warn ${app.appId} port=${app.port} pid=${result.pid} binds-wildcard（双栈通配，回环可达；如需局域网不可达请显式绑定 127.0.0.1/::1）`,
+      });
+    } catch { /* best-effort */ }
+  }
+  const nonLoopbackHosts = bindHosts.filter((host) => !isLoopbackBindHost(host) && !isWildcardBindHost(host));
   if (nonLoopbackHosts.length > 0) {
     let spawnLog = '';
     try {
@@ -527,6 +542,12 @@ export async function launchAppBackend(
       spawnLog = procs.find((p) => p.pid === result.pid)?.logTail?.trim() ?? '';
     } catch { /* best-effort */ }
     try { await invoke('stop_background_process', { pid: result.pid, source: 'app_start-loopback-failure' }); } catch { /* best-effort */ }
+    try {
+      await invoke('log_ui_event', {
+        workspacePath,
+        message: `app_start-failure ${app.appId} port=${app.port} pid=${result.pid} reason=non-loopback-bind hosts=[${nonLoopbackHosts.join(',')}]`,
+      });
+    } catch { /* best-effort */ }
     const detail = spawnLog ? `\n进程输出：\n${spawnLog}` : '';
     throw new Error(
       `应用 '${app.appId}' 后端监听在非回环地址（${nonLoopbackHosts.join(', ')}），` +
@@ -535,6 +556,11 @@ export async function launchAppBackend(
   }
 
   return { pid: result.pid, url };
+}
+
+/** #60：通配监听（IPv6 双栈 `*`，node listen(PORT) 平台默认）。 */
+function isWildcardBindHost(host: string): boolean {
+  return host === '*';
 }
 
 /** #60：监听地址回环判定（与 Rust app_runtime::is_loopback_bind 对齐）。 */
