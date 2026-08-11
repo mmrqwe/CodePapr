@@ -11,7 +11,15 @@ import {
 } from '../../utils/projectStorage';
 import { getAllTodoListContexts } from '../../tools/todoListTool';
 import { sanitizeSessionMessagesForPersistence } from './persistence';
+import { toast } from '../toastStore';
 import type { AgentState } from './types';
+
+/** 项目状态落盘失败的可见提示。内部模块（无 store 依赖）直接 toast。 */
+function reportProjectStateSaveError(label: string, err: unknown): void {
+  const message = `${label}：${err instanceof Error ? err.message : String(err)}`;
+  console.warn('[CodePapr]', message);
+  toast.error(message, { title: '项目状态保存失败' });
+}
 
 export function toProjectSnapshot(state: AgentState): ProjectStateSnapshot {
   const todoContexts = getAllTodoListContexts();
@@ -108,7 +116,7 @@ async function saveProjectStateNormalized(
     try {
       await saveProjectMeta(path, key, value);
     } catch (err) {
-      console.warn('[CodePapr] 保存元数据失败:', err instanceof Error ? err.message : err);
+      reportProjectStateSaveError(`保存元数据 ${key} 失败`, err);
     }
   }
 }
@@ -130,11 +138,11 @@ export function saveCurrentProjectState(
         purgeDeletedContent: options?.purgeDeletedContent ?? false,
       });
     } catch (err) {
-      console.warn('[CodePapr] 保存项目状态(兼容)失败:', err instanceof Error ? err.message : err);
+      reportProjectStateSaveError('保存项目状态(兼容)失败', err);
     }
 
     await saveProjectStateNormalized(state, options);
   }).catch((err) => {
-    console.warn('[CodePapr] 保存项目状态失败:', err instanceof Error ? err.message : err);
+    reportProjectStateSaveError('保存项目状态失败', err);
   });
 }

@@ -189,7 +189,8 @@ fn manifest_declares_agent(manifest: &PaprManifest, agent_name: &str) -> bool {
 }
 
 /// papr SDK 能力检查（两轴模型）：
-/// - storage/fs（app 自有沙箱）永远允许；
+/// - storage/fs 按 local 轴门槛放行（读需 ≥read，写需 =write），local=none
+///   一律拒绝——与 JS 层 levelGrants.accessAllows 保持同一语义；
 /// - http 需要网络轴开启；
 /// - agent:run:<name> 需要 manifest 声明了该 agent（工具集由 worker 按轴过滤）。
 pub fn check_permission(manifest: &PaprManifest, app_id: &str, capability: &str) -> Result<(), String> {
@@ -215,8 +216,22 @@ pub fn check_permission(manifest: &PaprManifest, app_id: &str, capability: &str)
         ));
     }
     if capability.starts_with("storage:") || capability.starts_with("fs:") {
-        // app 自有沙箱：papr.db / papr.fs 永远可用
-        return Ok(());
+        let is_write = capability.ends_with(":write");
+        let allowed = if is_write {
+            access.local == PaprLocalAccess::Write
+        } else {
+            access.local == PaprLocalAccess::Read || access.local == PaprLocalAccess::Write
+        };
+        if allowed {
+            return Ok(());
+        }
+        return Err(format!(
+            "permission denied: '{}' requires local access >= {} (app '{}' local is {:?})",
+            capability,
+            if is_write { "write" } else { "read" },
+            app_id,
+            access.local
+        ));
     }
 
     Err(format!(
@@ -299,13 +314,24 @@ mod tests {
     }
 
     #[test]
-    fn check_storage_always_allowed() {
+    fn check_storage_gated_by_local_axis() {
         reset_test_settings();
-        let m = make_manifest(Some(PaprLocalAccess::None), Some(false), None);
-        assert!(check_permission(&m, "test-app", "storage:read").is_ok());
-        assert!(check_permission(&m, "test-app", "storage:write").is_ok());
-        assert!(check_permission(&m, "test-app", "fs:read").is_ok());
-        assert!(check_permission(&m, "test-app", "fs:write").is_ok());
+        // local=none：storage/fs 一律拒绝（旧实现无条件放行）
+        let none = make_manifest(Some(PaprLocalAccess::None), Some(false), None);
+        assert!(check_permission(&none, "test-app", "storage:read").is_err());
+        assert!(check_permission(&none, "test-app", "storage:write").is_err());
+        assert!(check_permission(&none, "test-app", "fs:read").is_err());
+        assert!(check_permission(&none, "test-app", "fs:write").is_err());
+        // local=read：读放行、写拒绝
+        let read = make_manifest(Some(PaprLocalAccess::Read), Some(false), None);
+        assert!(check_permission(&read, "test-app", "storage:read").is_ok());
+        assert!(check_permission(&read, "test-app", "fs:read").is_ok());
+        assert!(check_permission(&read, "test-app", "storage:write").is_err());
+        assert!(check_permission(&read, "test-app", "fs:write").is_err());
+        // local=write：读写都放行
+        let write = make_manifest(Some(PaprLocalAccess::Write), Some(false), None);
+        assert!(check_permission(&write, "test-app", "storage:write").is_ok());
+        assert!(check_permission(&write, "test-app", "fs:write").is_ok());
     }
 
     #[test]

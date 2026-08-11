@@ -462,6 +462,7 @@ export async function launchAppBackend(
   const startedAt = Date.now();
   const pollTrace: string[] = [];
   let portTaken = false;
+  let portOwnedByUs = false;
   for (;;) {
     await new Promise((r) => setTimeout(r, PORT_POLL_INTERVAL_MS));
     // 带探测细节的诊断：v4/v6 各自 conn(有监听)/refused(无服务)/err，
@@ -469,10 +470,22 @@ export async function launchAppBackend(
     const detail = await invoke<string>('check_port_available_detail', { port: app.port });
     const available = !detail.includes('conn');
     pollTrace.push(`+${Date.now() - startedAt}ms:${detail}`);
-    if (!available) { portTaken = true; break; }
+    if (!available) {
+      portTaken = true;
+      // TOCTOU 修复：端口被监听 ≠ 我们 spawn 的进程在监听。外部进程在
+      // 预检之后抢占端口时，旧实现照样判「启动成功」并返回死进程 pid。
+      // 用 lsof 核对监听者归属；拿不到 lsof（容器/CI）时退化为仅存活检查。
+      try {
+        const owners = await invoke<number[]>('check_port_owner', { port: app.port });
+        portOwnedByUs = owners.length === 0 || owners.includes(result.pid);
+      } catch {
+        portOwnedByUs = true;
+      }
+      break;
+    }
     if (Date.now() >= deadline) break;
   }
-  if (!portTaken) {
+  if (!portTaken || !portOwnedByUs) {
     // 先取进程捕获的输出再停掉它：spawn 秒退的真实原因（如 sandbox-exec
     // 找不到 node、脚本语法错误）只存在于 log_tail，不捞出来就死无对证。
     let spawnLog = '';
@@ -483,9 +496,12 @@ export async function launchAppBackend(
     // Kill the spawned child so a slow-starting server does not become an
     // orphan that later grabs the port untracked by the store.
     try { await invoke('stop_background_process', { pid: result.pid, source: 'app_start-failure' }); } catch { /* best-effort */ }
-    try { await invoke('log_ui_event', { workspacePath, message: `app_start-failure ${app.appId} port=${app.port} pid=${result.pid} polls=[${pollTrace.join(' ')}]` }); } catch { /* best-effort */ }
+    try { await invoke('log_ui_event', { workspacePath, message: `app_start-failure ${app.appId} port=${app.port} pid=${result.pid} ownedByUs=${portOwnedByUs} polls=[${pollTrace.join(' ')}]` }); } catch { /* best-effort */ }
     const detail = spawnLog ? `\n进程输出：\n${spawnLog}` : '';
-    throw new Error(`应用 '${app.appId}' 后端启动失败：进程已退出或端口 ${app.port} 未被监听，请检查 command/args 配置。${detail}`);
+    const reason = !portTaken
+      ? '进程已退出或端口未被监听'
+      : '端口监听者不是本次启动的进程（可能被外部进程抢占）';
+    throw new Error(`应用 '${app.appId}' 后端启动失败：${reason}，请检查 command/args 配置。${detail}`);
   }
 
   return { pid: result.pid, url };

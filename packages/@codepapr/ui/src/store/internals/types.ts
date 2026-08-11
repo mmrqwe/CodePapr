@@ -300,10 +300,15 @@ export interface AgentState {
   _skillDefinitions: SkillDefinition[];
   _agentDefinitions: AgentDefinition[];
   _taskChecklists: Record<string, TaskChecklist | null>;
-  _messageCheckpoints: Record<string, string>;
+  /** 消息 checkpoint 锚点：messageId → { sha, 所属会话 }。记录归属会话后
+   *  clearMessages 只清当前会话的锚点，不再误删其他会话的历史锚点。 */
+  _messageCheckpoints: Record<string, { sha: string; sessionId: string }>;
   _gitReady: boolean;
   _gitReadyError: string | null;
   _checkpointError: string | null;
+  /** 持久化失败提示（设置保存/checkpoint 记录/项目状态落盘失败时置位，
+   *  供 UI 提示"内存状态与磁盘分叉"；成功落盘或下次保存成功后清空）。 */
+  _persistenceError: string | null;
   _checkpointSeq: number;
   /** 单调递增的回合序号。sendMessage 启动时自增并捕获；异步收尾（取消/崩溃
    *  的 catch）只有在序号未变时才允许复位 isLoading——否则取消 ACK 晚于新回合
@@ -348,6 +353,7 @@ export interface AgentActions {
   clearMessages: () => void;
   resetToMessage: (messageId: string) => Promise<ResetToMessageResult>;
   setProjectDiagnosticsReport: (report: ProjectDiagnosticsReport | null) => void;
+  setPersistenceError: (message: string | null) => void;
   refreshProjectDiagnostics: () => Promise<ProjectDiagnosticsReport | null>;
   setSkillEnabledState: (skillId: string, enabled: boolean | null) => void;
   setSessionInputState: (sessionId: string, state: SessionInputState) => void;

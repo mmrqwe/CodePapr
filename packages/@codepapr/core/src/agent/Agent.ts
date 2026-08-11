@@ -490,16 +490,6 @@ export class Agent {
       return controller.signal;
     })();
     const userMsg = MessageFactory.user(userInput, images);
-    await this.session.logStore.append(userMsg);
-
-    this.session.scratch.reset();
-    this.session.scratch.markRoundStart();
-    // round 每次 chat() 从 0 重新计数，压缩冷却也必须随之重置：否则上一次
-    // chat 在 round N 压缩过，本次 chat 前 N+2 轮即使超预算也无法压缩。
-    this.lastCompactionRound = -Infinity;
-    this.lastCompactionFailed = false;
-
-    this.session.partition.validate();
 
     let finalContent = '';
     let finalReasoningContent: string | undefined;
@@ -508,6 +498,20 @@ export class Agent {
     let question: QuestionData | undefined;
 
     try {
+      // 注意：append/validate 等状态变更必须在 try 内——它们抛错时
+      // finally 才能复位 scratch 与 abortController（旧实现把它们放在
+      // try 之前，抛错会跳过复位，与 finally 的注释自相矛盾）。
+      await this.session.logStore.append(userMsg);
+
+      this.session.scratch.reset();
+      this.session.scratch.markRoundStart();
+      // round 每次 chat() 从 0 重新计数，压缩冷却也必须随之重置：否则上一次
+      // chat 在 round N 压缩过，本次 chat 前 N+2 轮即使超预算也无法压缩。
+      this.lastCompactionRound = -Infinity;
+      this.lastCompactionFailed = false;
+
+      this.session.partition.validate();
+
     roundLoop: for (let round = 0; round < this.maxToolRounds; round++) {
       if (effectiveSignal?.aborted) {
         break;

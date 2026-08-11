@@ -131,6 +131,45 @@ describe('ProjectGraph Analysis Functions', () => {
       const result = buildTypeHierarchy(graph);
       expect(result.roots.length).toBeGreaterThan(0);
     });
+
+    it('稠密菱形继承图：等深重访剪枝（线性而非指数），深度语义正确', () => {
+      // 每层 2 个节点、层间完全二部继承边：根→叶路径数为 2^(levels-1)，
+      // 旧实现按路径数遍历（30 层 ≈ 5 亿次访问，测试直接挂起）；
+      // 修复后每节点只按"深度严格增大"重访，访问量 O(层数 × 每层节点数)。
+      const levels = 30;
+      const id = (level: number, idx: number) => `type-l${level}-${idx}`;
+      const nodes: Array<{ id: string; kind: string; path: string; symbol: { name: string; kind: string; line: number; exported: boolean } }> = [];
+      const edges: ProjectGraphEdge[] = [];
+      for (let level = 0; level < levels; level += 1) {
+        for (let idx = 0; idx < 2; idx += 1) {
+          nodes.push({
+            id: id(level, idx),
+            kind: 'symbol',
+            path: 'src/a.ts',
+            symbol: { name: `T${level}_${idx}`, kind: 'class', line: level * 2 + idx + 1, exported: true },
+          });
+        }
+        if (level > 0) {
+          for (let idx = 0; idx < 2; idx += 1) {
+            for (let prev = 0; prev < 2; prev += 1) {
+              edges.push({ from: id(level, idx), to: id(level - 1, prev), kind: 'extends' });
+            }
+          }
+        }
+      }
+      const graph = { nodes, edges } as unknown as WorkspaceProjectGraphResult;
+
+      const result = buildTypeHierarchy(graph);
+      // 深度 = 到根的最大距离（每层节点深度即层号）
+      for (let level = 0; level < levels; level += 1) {
+        for (let idx = 0; idx < 2; idx += 1) {
+          expect(result.nodes.get(id(level, idx))?.depth).toBe(level);
+        }
+      }
+      // 多父节点按每条父路径出链，数量封顶（每叶 ≤8，两片叶子 ≤16）
+      expect(result.chains.length).toBeGreaterThan(0);
+      expect(result.chains.length).toBeLessThanOrEqual(16);
+    });
   });
 
   describe('discoverAndMapTests', () => {
@@ -491,6 +530,77 @@ describe('Regression: audited graphQuery bugs', () => {
     expect(fooCallTargets).toContain(barId);
     // baz 定义在 foo 之后、顶层 foo()/baz() 也在 foo 体之外：均不得归属 foo
     expect(fooCallTargets).not.toContain(bazId);
+  });
+
+  it('Allman 大括号风格（C# 默认）：函数体边界正确，调用边不污染', () => {
+    // 旧实现 findFunctionEndLine 要求声明行就有 `{`，Allman 风格 `{` 在下一行
+    // → 返回 -1 → buildCallEdges 跳过结束边界 → 前面的函数吞下其声明行之后的
+    // 全部调用（包括后定义函数体内的调用）。方法名用小写规避 C# 分支对
+    // "大写裸调用"（疑似类型名）的过滤，聚焦测花括号边界本身。
+    const content = [
+      'public class worker',
+      '{',
+      '    public void first()',
+      '    {',
+      '        helper();',
+      '    }',
+      '',
+      '    public void helper()',
+      '    {',
+      '        third();',
+      '    }',
+      '',
+      '    public void third()',
+      '    {',
+      '    }',
+      '}',
+      '',
+    ].join('\n');
+    const graph = buildWorkspaceProjectGraph({
+      root: '.',
+      tree: '.\n- src/',
+      allFiles: [{ path: 'src/Worker.cs' }],
+      fileContents: { 'src/Worker.cs': { content } },
+      files: [
+        {
+          path: 'src/Worker.cs',
+          language: 'C#',
+          bytes: content.length,
+          symbolSource: 'ast',
+          symbols: [
+            { name: 'first', kind: 'method', signature: 'public void first()', line: 3, exported: false },
+            { name: 'helper', kind: 'method', signature: 'public void helper()', line: 8, exported: false },
+            { name: 'third', kind: 'method', signature: 'public void third()', line: 13, exported: false },
+          ],
+        },
+      ],
+      maxEdges: 200,
+    });
+
+    const idByName = new Map<string, string>();
+    for (const node of graph.nodes) {
+      if (node.kind === 'symbol' && node.symbol) {
+        idByName.set(node.symbol.name, node.id);
+      }
+    }
+    const firstId = idByName.get('first');
+    const helperId = idByName.get('helper');
+    const thirdId = idByName.get('third');
+    expect(firstId).toBeDefined();
+    expect(helperId).toBeDefined();
+    expect(thirdId).toBeDefined();
+
+    const targetsOf = (fromId: string | undefined) =>
+      graph.edges
+        .filter((e) => e.kind === 'calls' && e.from === fromId)
+        .map((e) => e.to);
+
+    // first 体内调用 helper；修复前 first 会吞下 helper 体内的 third() 调用
+    expect(targetsOf(firstId)).toEqual([helperId]);
+    // helper 体内调用 third
+    expect(targetsOf(helperId)).toEqual([thirdId]);
+    // third 无调用
+    expect(targetsOf(thirdId)).toEqual([]);
   });
 });
 

@@ -661,6 +661,77 @@ describe('WorkerBackedAgent', () => {
     await expect(runPromise).rejects.toBeInstanceOf(DOMException);
   });
 
+  it('cancelSession 只取消会话，不连带取消在飞的 app-agent（停止按钮语义）', async () => {
+    const agent = createAgent();
+    const chatPromise = agent.chat('hello');
+    chatPromise.catch(() => undefined);
+    const runPromise = agent.runAppAgent(
+      { appId: 'app-1', agentName: 'assistant', task: 'keep running' },
+      undefined,
+      'run-keep',
+    );
+    runPromise.catch(() => undefined);
+    const worker = MockWorker.instances[0];
+    if (worker) worker.messages.length = 0; // 清掉 init/chat 消息，只看后续
+
+    agent.cancelSession();
+
+    const posted = worker?.messages ?? [];
+    expect(posted.some((m) => m.type === 'cancel-session')).toBe(true);
+    // 不得发送 cancel-app-agent：停止按钮只停当前回合
+    expect(posted.some((m) => m.type === 'cancel-app-agent')).toBe(false);
+
+    // worker 回 cancel ACK 后 app-agent 仍在飞（未被 reject）
+    const requestId = posted.find((m) => m.type === 'cancel-session')?.requestId;
+    worker?.emit({ type: 'cancelled', requestId: requestId! });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(agent.hasActiveAppAgentRequests()).toBe(true);
+  });
+
+  it('cancel（销毁路径）仍会连带取消所有在飞的 app-agent', async () => {
+    const agent = createAgent();
+    agent.chat('hello').catch(() => undefined);
+    agent
+      .runAppAgent(
+        { appId: 'app-1', agentName: 'assistant', task: 'kill me' },
+        undefined,
+        'run-kill',
+      )
+      .catch(() => undefined);
+    const worker = MockWorker.instances[0];
+    if (worker) worker.messages.length = 0;
+
+    agent.cancel();
+
+    const posted = worker?.messages ?? [];
+    expect(posted.some((m) => m.type === 'cancel-session')).toBe(true);
+    expect(posted.some((m) => m.type === 'cancel-app-agent')).toBe(true);
+  });
+
+  it('取消 ACK 宽限：worker 未应答时 10s 才硬终止（旧实现 2s 误杀慢同步 worker）', async () => {
+    const agent = createAgent();
+    const chatPromise = agent.chat('hello');
+    const rejection = expect(chatPromise).rejects.toBeInstanceOf(DOMException);
+    const worker = MockWorker.instances[0];
+    agent.cancel();
+
+    // 2s 时（旧实现终止点）worker 仍存活——大上下文同步 >2s 是正常情况
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(worker?.terminated).toBe(false);
+    expect(agent.isCrashed()).toBe(false);
+
+    // 宽限期内 worker 任何响应（如 pong）都会重新武装窗口
+    worker?.emit({ type: 'pong' });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(worker?.terminated).toBe(false);
+
+    // 彻底无响应后 10s 窗口到期 → terminate + crashed
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(worker?.terminated).toBe(true);
+    expect(agent.isCrashed()).toBe(true);
+    await rejection;
+  });
+
   it('includes worker diagnostics emitted before a crash', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);

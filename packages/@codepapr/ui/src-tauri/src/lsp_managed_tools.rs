@@ -3,6 +3,7 @@
 use flate2::read::GzDecoder;
 use reqwest::blocking::Client;
 use serde::Serialize;
+use crate::shell::process_tree::{kill_process_tree, prepare_new_process_group};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::{
@@ -2221,6 +2222,10 @@ fn run_command_with_timeout(
         .stderr(Stdio::piped());
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
+    // 独立进程组：超时 kill 必须连孙进程一起杀（go install / npm / sh -c
+    // 包装都会再派生子进程）。旧实现只杀直接子进程，孙进程继续持有管道
+    // 写端 → stdout 读线程永远等不到 EOF → join 永久阻塞。
+    prepare_new_process_group(&mut cmd);
     let mut child = cmd
         .spawn()
         .map_err(|err| format!("启动命令 `{}` 失败: {err}", command_display(command, args)))?;
@@ -2228,21 +2233,25 @@ fn run_command_with_timeout(
     // 必须用独立线程实时抽干 stdout/stderr：输出一旦超过 OS 管道缓冲（~64KB），
     // 子进程会阻塞在 write 上永不退出，旧实现（退出后才 wait_with_output）
     // 会空转到满超时（npm install 等可达 300s）才杀进程。
+    // 读线程经 channel 回传结果：超时收割后孙进程逃逸持管道的极端情况下，
+    // 读线程不会结束——join 必须有界（recv_timeout），绝不能无限等。
     let mut stdout_pipe = child.stdout.take();
     let mut stderr_pipe = child.stderr.take();
+    let (stdout_tx, stdout_rx) = std::sync::mpsc::channel();
+    let (stderr_tx, stderr_rx) = std::sync::mpsc::channel();
     let stdout_handle = thread::spawn(move || {
         let mut buffer = Vec::new();
         if let Some(pipe) = stdout_pipe.as_mut() {
             let _ = pipe.read_to_end(&mut buffer);
         }
-        buffer
+        let _ = stdout_tx.send(buffer);
     });
     let stderr_handle = thread::spawn(move || {
         let mut buffer = Vec::new();
         if let Some(pipe) = stderr_pipe.as_mut() {
             let _ = pipe.read_to_end(&mut buffer);
         }
-        buffer
+        let _ = stderr_tx.send(buffer);
     });
 
     let started = Instant::now();
@@ -2268,7 +2277,9 @@ fn run_command_with_timeout(
 
         if started.elapsed() >= timeout {
             timed_out = true;
-            let _ = child.kill();
+            // 杀整个进程组（含孙进程）：kill_process_tree 先 SIGTERM、3s 后
+            // SIGKILL，并防御性确认进程组归属（不误杀自身所在组）。
+            let _ = kill_process_tree(&mut child);
             break child.wait().map_err(|err| {
                 format!(
                     "停止超时命令 `{}` 失败: {err}",
@@ -2280,8 +2291,8 @@ fn run_command_with_timeout(
         thread::sleep(Duration::from_millis(100));
     };
 
-    let stdout = stdout_handle.join().unwrap_or_default();
-    let stderr = stderr_handle.join().unwrap_or_default();
+    let stdout = recv_reader_result(stdout_rx, stdout_handle);
+    let stderr = recv_reader_result(stderr_rx, stderr_handle);
 
     Ok(ManagedCommandOutput {
         status_code,
@@ -2289,6 +2300,24 @@ fn run_command_with_timeout(
         stderr: String::from_utf8_lossy(&stderr).to_string(),
         timed_out,
     })
+}
+
+/// 有界等待读线程结果。孙进程逃逸并持有管道写端时，read_to_end 永远等不到
+/// EOF——给一个宽限窗口，超时则 detach 读线程并返回空，绝不永久阻塞调用方。
+fn recv_reader_result(
+    rx: std::sync::mpsc::Receiver<Vec<u8>>,
+    handle: thread::JoinHandle<()>,
+) -> Vec<u8> {
+    match rx.recv_timeout(Duration::from_secs(3)) {
+        Ok(buffer) => {
+            let _ = handle.join();
+            buffer
+        }
+        Err(_) => {
+            drop(handle);
+            Vec::new()
+        }
+    }
 }
 
 fn rustup_which_rust_analyzer() -> Option<PathBuf> {

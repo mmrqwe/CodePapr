@@ -1,3 +1,4 @@
+import { errorMessage } from '@codepapr/common';
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { usePreviewStore } from '../store/previewStore';
@@ -34,6 +35,20 @@ export function PreviewSessionPanel({ workspacePath, lang }: PreviewSessionPanel
       ? activePreviewSession
       : null;
 
+  // 应用后端判定：pid 匹配是主守卫；URL 匹配必须用前缀——旧实现精确等于
+  // `http://localhost:${port}/`，URL 带路径（/health、/api 等）即不匹配，
+  // 关闭预览时会把 app 后端当普通后台进程误杀。
+  const isAppBackend = Boolean(
+    activePreview &&
+      typeof activePreview.pid === 'number' &&
+      useAppRuntimeStore.getState().apps.some(
+        (app) =>
+          app.pid === activePreview.pid ||
+          (app.port &&
+            activePreview.url.startsWith(`http://localhost:${app.port}`)),
+      ),
+  );
+
   useEffect(() => {
     if (activePreviewSession && activePreviewSession.workspacePath !== workspacePath) {
       closePreviewSession();
@@ -65,12 +80,12 @@ export function PreviewSessionPanel({ workspacePath, lang }: PreviewSessionPanel
 
       // 应用后端的生命周期归应用面板管（app_start/app_stop）：关闭预览只解除
       // 关联，不顺手杀进程——否则用户关个预览窗口就把 app 后端停了。
-      const isAppBackend = typeof activePreview.pid === 'number'
+      const isAppBackendForClose = typeof activePreview.pid === 'number'
         && useAppRuntimeStore.getState().apps.some(
           (app) => app.pid === activePreview.pid
-            || (app.port && activePreview.url === `http://localhost:${app.port}/`),
+            || (app.port && activePreview.url.startsWith(`http://localhost:${app.port}`)),
         );
-      if (typeof activePreview.pid === 'number' && !isAppBackend) {
+      if (typeof activePreview.pid === 'number' && !isAppBackendForClose) {
         await invoke<StopBackgroundProcessResult>('stop_background_process', {
           pid: activePreview.pid,
           source: 'preview-session-panel-close',
@@ -78,7 +93,7 @@ export function PreviewSessionPanel({ workspacePath, lang }: PreviewSessionPanel
       }
       closePreviewSession();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setIsStopping(false);
     }
@@ -136,6 +151,9 @@ export function PreviewSessionPanel({ workspacePath, lang }: PreviewSessionPanel
           key={frameKey}
           src={activePreview.url}
           title={activePreview.title}
+          // 非 app 后端的任意 URL（agent 指定）必须沙箱化；app 后端需要
+          // 同源脚本 + 表单/弹窗能力，保持宽松。
+          sandbox={isAppBackend ? 'allow-scripts allow-same-origin allow-forms allow-modals' : 'allow-scripts allow-forms allow-modals'}
           className="h-full w-full bg-white"
           onError={() => setError(t.previewSessionLoadFailed)}
         />

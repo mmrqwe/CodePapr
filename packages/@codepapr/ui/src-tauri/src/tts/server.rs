@@ -16,7 +16,7 @@ const HEALTH_CHECK_INTERVAL_MS: u64 = 500;
 const LOG_BUFFER_MAX_LINES: usize = 1000;
 
 pub(crate) struct GptSovitsServer {
-    child: Option<Arc<Mutex<Child>>>,
+    child: Option<Arc<Mutex<Option<Child>>>>,
     python_path: Option<String>,
     api_path: PathBuf,
     running: bool,
@@ -155,7 +155,7 @@ impl GptSovitsServer {
             spawn_log_reader(stderr, "stderr", self.log_buffer.clone(), app_handle.clone());
         }
 
-        let child_arc = Arc::new(Mutex::new(child));
+        let child_arc = Arc::new(Mutex::new(Some(child)));
         self.child = Some(Arc::clone(&child_arc));
         self.wait_healthy(HEALTH_CHECK_TIMEOUT_SECS)?;
         self.running = true;
@@ -172,7 +172,8 @@ impl GptSovitsServer {
                 loop {
                     std::thread::sleep(Duration::from_secs(2));
                     let exited = match watchdog_child.lock() {
-                        Ok(mut c) => c.try_wait().is_ok_and(|s| s.is_some()),
+                        // None = 已被 stop() 交给收割线程
+                        Ok(mut c) => c.as_mut().map_or(true, |c| c.try_wait().is_ok_and(|s| s.is_some())),
                         Err(_) => true,
                     };
                     if exited {
@@ -193,29 +194,44 @@ impl GptSovitsServer {
             None => return Ok(()),
         };
 
+        // 从互斥体中取出 Child（Option），kill/收割完成后锁立即释放；
+        // 旧实现整个等待过程持锁，watchdog 线程（每 2s 锁一次）一并卡死。
         let mut child = match child_arc.lock() {
-            Ok(c) => c,
+            Ok(mut c) => c.take(),
             Err(_) => {
                 self.python_path = None;
                 return Ok(());
             }
         };
 
-        let _ = child.kill();
+        let Some(child_ref) = child.as_mut() else {
+            self.python_path = None;
+            return Ok(());
+        };
+
+        let _ = child_ref.kill();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            match child.try_wait() {
+            match child_ref.try_wait() {
                 Ok(Some(_)) => break,
                 Ok(None) => {
                     if Instant::now() > deadline {
-                        let _ = child.kill();
-                        let _ = child.wait();
                         break;
                     }
                     std::thread::sleep(Duration::from_millis(50));
                 }
                 Err(_) => break,
             }
+        }
+
+        if let Some(mut orphan) = child.take() {
+            // 3s 内未退出（如 D 状态，SIGKILL 也杀不掉）：二次 kill 后交给
+            // 独立收割线程异步 wait()，本函数立即返回、锁已释放——绝不无限
+            // wait()（旧实现永久阻塞且持锁，stop() 与 watchdog 双双卡死）。
+            let _ = orphan.kill();
+            std::thread::spawn(move || {
+                let _ = orphan.wait();
+            });
         }
 
         self.python_path = None;
@@ -232,13 +248,17 @@ impl GptSovitsServer {
         }
         if let Some(ref child_arc) = self.child {
             match child_arc.lock() {
-                Ok(mut child) => match child.try_wait() {
-                    Ok(Some(_)) => {
+                Ok(mut child) => match child.as_mut().map(|c| c.try_wait()) {
+                    Some(Ok(Some(_))) => {
                         self.running = false;
                         false
                     }
-                    Ok(None) => true,
-                    Err(_) => false,
+                    Some(Ok(None)) => true,
+                    // None：已被 stop() 交给收割线程 → 视为已停止
+                    _ => {
+                        self.running = false;
+                        false
+                    }
                 },
                 Err(_) => {
                     self.running = false;

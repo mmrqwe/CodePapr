@@ -447,6 +447,40 @@ pub(crate) fn ensure_write_path_accessible(workspace: &Path, target: &Path) -> R
     ensure_path_accessible(workspace, &canonical_existing)
 }
 
+/// 校验写入路径在 base 之下的祖先链不含符号链接目录。
+/// O_NOFOLLOW 只防末组件：中间目录若是指向 base 外的 symlink，open 会跟随，
+/// 写入逃出沙箱（旧实现只做"先检查、后写入"的父目录校验，窗口期内可被换入）。
+/// 注意：这是写前校验 + O_NOFOLLOW 打开的组合——检查与打开之间仍有极小
+/// 竞态窗口，但预置 symlink（持 fs:write 的 app 或并发外部写者预埋）会被拒绝。
+fn reject_symlinked_ancestors(target: &Path, base: &Path) -> Result<(), String> {
+    let mut current = target;
+    loop {
+        let Some(parent) = current.parent() else {
+            break;
+        };
+        // 到 base 为止（base 是 canonicalize 后的可信根；base 之上可能是
+        // 系统符号链接挂载，不属于本闸门范围）。
+        if parent == base || !path_is_same_or_child(parent, base) {
+            break;
+        }
+        match std::fs::symlink_metadata(parent) {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() {
+                    return Err(format!(
+                        "安全限制：写入路径 {} 含符号链接目录 {}，已拒绝写入",
+                        target.display(),
+                        parent.display()
+                    ));
+                }
+            }
+            // 尚不存在的中间目录：继续向上查（更深的已存在祖先可能是 symlink）
+            Err(_) => {}
+        }
+        current = parent;
+    }
+    Ok(())
+}
+
 /// 写入目标文件的最终闸门：拒绝符号链接。
 ///
 /// 只校验父目录的边界检查不够：`fs::write` 会跟随最终组件的符号链接，
@@ -454,13 +488,15 @@ pub(crate) fn ensure_write_path_accessible(workspace: &Path, target: &Path) -> R
 /// 本函数：
 /// 1. 目标已存在且是 symlink → 拒绝；
 /// 2. 目标已存在且是普通文件 → canonicalize 后仍必须位于 `base` 内；
-/// 3. Unix 上以 O_NOFOLLOW 打开，堵住"检查后、打开前被换入 symlink"的竞态窗口
+/// 3. 祖先链（base 之下的中间目录）不得含 symlink（防中间目录换入逃逸）；
+/// 4. Unix 上以 O_NOFOLLOW 打开，堵住"检查后、打开前被换入 symlink"的竞态窗口
 ///    （Windows 上创建 symlink 需要特权，回退到普通写入）。
 pub(crate) fn write_file_rejecting_symlink(
     target: &Path,
     base: &Path,
     bytes: &[u8],
 ) -> Result<(), String> {
+    reject_symlinked_ancestors(target, base)?;
     if let Ok(meta) = std::fs::symlink_metadata(target) {
         if meta.file_type().is_symlink() {
             return Err(format!(
@@ -584,5 +620,44 @@ mod tests {
         assert_eq!(std::fs::read(&real).unwrap(), b"original");
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_intermediate_directory_is_rejected() {
+        let base = test_base("symlink-dir");
+        let outside_dir = std::env::temp_dir()
+            .join(format!("codepapr-write-guard-outside-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outside_dir);
+        std::fs::create_dir_all(&outside_dir).expect("outside dir should exist");
+        let outside_victim = outside_dir.join("victim.txt");
+
+        // base/escape 是预置 symlink 目录（指向 base 外）：写入 base/escape/evil.txt
+        // 必须被祖先链检查拒绝，外部目录不得出现文件。
+        let escape = base.join("escape");
+        std::os::unix::fs::symlink(&outside_dir, &escape).expect("symlink dir should be created");
+
+        let err = write_file_rejecting_symlink(&escape.join("evil.txt"), &base, b"pwned")
+            .expect_err("symlinked intermediate directory must be rejected");
+        assert!(err.contains("符号链接目录"), "unexpected error: {err}");
+        assert!(!outside_victim.exists());
+
+        // 深层中间目录同样是符号链接：base/a/link/b.txt（link → 外部）
+        let nested = base.join("a").join("link").join("b.txt");
+        let _ = std::fs::create_dir_all(base.join("a"));
+        let link_dir = base.join("a").join("link");
+        std::os::unix::fs::symlink(&outside_dir, &link_dir).expect("nested symlink dir");
+        assert!(
+            write_file_rejecting_symlink(&nested, &base, b"pwned").is_err(),
+            "nested symlinked ancestor must be rejected"
+        );
+
+        // 正常深层目录不受影响
+        std::fs::create_dir_all(base.join("ok").join("deep")).unwrap();
+        write_file_rejecting_symlink(&base.join("ok").join("deep").join("f.txt"), &base, b"fine")
+            .expect("regular deep path should write");
+
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&outside_dir);
     }
 }

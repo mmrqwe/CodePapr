@@ -2808,11 +2808,21 @@ describe('_messageCheckpoints', () => {
     expect(useAgentStore.getState()._messageCheckpoints).toEqual({});
   });
 
-  it('clearMessages 清空所有 checkpoints', () => {
+  it('clearMessages 只清当前会话的 checkpoints，保留其他会话的锚点', () => {
     useAgentStore.getState().openWorkspace('/tmp/codepapr-reset-test-2');
-    useAgentStore.setState({ _messageCheckpoints: { 'msg-1': 'abc123', 'msg-2': 'def456' } });
+    const activeSessionId = useAgentStore.getState().activeSessionId ?? 's-current';
+    useAgentStore.setState({
+      activeSessionId,
+      _messageCheckpoints: {
+        'msg-1': { sha: 'abc123', sessionId: activeSessionId },
+        'msg-2': { sha: 'def456', sessionId: 's-other' },
+      },
+    });
     useAgentStore.getState().clearMessages();
-    expect(useAgentStore.getState()._messageCheckpoints).toEqual({});
+    // 其他会话的锚点必须保留（resetToMessage 依赖）；当前会话的被清掉。
+    expect(useAgentStore.getState()._messageCheckpoints).toEqual({
+      'msg-2': { sha: 'def456', sessionId: 's-other' },
+    });
   });
 });
 
@@ -3404,8 +3414,8 @@ describe('per-session execution and input state', () => {
   });
 
   it('cancelMessage finalizes the loading session even if it is not the active one', () => {
-    const cancel = vi.fn();
-    const agent = createMockAgent({ cancel });
+    const cancelSession = vi.fn();
+    const agent = createMockAgent({ cancel: cancelSession, cancelSession });
     setTwoSessionState({
       activeSessionId: 's-b',
       messages: [{ id: 'b-msg', role: 'user', content: 'B 的消息', timestamp: 1 }],
@@ -3422,7 +3432,8 @@ describe('per-session execution and input state', () => {
     useAgentStore.getState().cancelMessage();
 
     const state = useAgentStore.getState();
-    expect(cancel).toHaveBeenCalledTimes(1);
+    // 停止按钮走 cancelSession（不连带取消 app-agent）
+    expect(cancelSession).toHaveBeenCalledTimes(1);
     expect(state.isLoading).toBe(false);
     expect(state.loadingSessionId).toBeNull();
     expect(state.sessionMessages['s-a']?.[0]?.isStreaming).toBe(false);

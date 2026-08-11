@@ -1,3 +1,4 @@
+import { errorMessage } from '@codepapr/common';
 import { useState } from 'react';
 import { OpenAIProvider, ClaudeProvider } from '@codepapr/api';
 import { BUILTIN_AGENTS, resolveAgentPrompt } from '@codepapr/core';
@@ -79,7 +80,7 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
       setTestMessage(t.mentorTestSuccess);
     } catch (err) {
       setTestStatus('error');
-      const message = (typeof err === 'string' ? err : (err as Error).message).slice(0, 500);
+      const message = errorMessage(err).slice(0, 500);
       setTestMessage(`${t.mentorTestFailed}: ${message}`);
     }
   };

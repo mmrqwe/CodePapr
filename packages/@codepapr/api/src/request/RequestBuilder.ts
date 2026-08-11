@@ -68,7 +68,9 @@ export class RequestBuilder {
    */
   build(opts: BuildOptions): IChatRequest {
     // ✅ 检查 1: 系统提示词无动态内容
-    this.validateStaticSystemPrompt(opts.prefix);
+    // 由 ImmutablePrefix 构造器统一把关（含 allowTemplateLiterals 豁免），
+    // 此处不再重复正则校验：重复校验会复现字面示例文本（如 "${name}"）的
+    // 误报，且对已通过构造校验的前缀毫无增益。
 
     // ✅ 检查 2: 工具定义未变化
     const prefixTools = opts.prefix.getToolDefinitions();
@@ -173,28 +175,6 @@ export class RequestBuilder {
   resetLogTracking(): void {
     this.lastLogMessagesHash = '';
     this.lastLogMessageCount = 0;
-  }
-
-  /**
-   * 验证系统提示词无动态内容
-   */
-  private validateStaticSystemPrompt(prefix: IImmutablePrefix): void {
-    const prompt = prefix.getSystemPrompt();
-    const dynamicPatterns = [
-      { pattern: /\$\{[^}]+\}/g, name: 'template-interpolation' },
-      { pattern: /\{\{[^}]+\}\}/g, name: 'double-braces' },
-      { pattern: /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/g, name: 'iso-timestamp' },
-      { pattern: /\[TIMESTAMP\]|\[NOW\]|\[DATE\]/gi, name: 'date-placeholder' },
-    ];
-
-    for (const { pattern, name } of dynamicPatterns) {
-      if (pattern.test(prompt)) {
-        throw new CacheConsistencyError(
-          `System prompt contains dynamic content (${name}). ` +
-            `This destroys cache consistency.`
-        );
-      }
-    }
   }
 
   /**
@@ -318,14 +298,27 @@ export class RequestBuilder {
   }
 
   private hashToolDefinitions(tools: ReadonlyArray<IToolDefinition>): string {
+    // 必须与 ImmutablePrefix.canonicalToolDefinition 保持同一归一化规则：
+    // required 数组排序后参与哈希。否则「运行时传入的 required 顺序与冻结
+    // 前缀不同」会误报 CacheConsistencyError（工具定义并未变化）。
     return sha256(
       Serializer.stringify(
         [...tools]
-          .map((tool) => ({
-            name: tool.name,
-            description: tool.description,
-            parameters: Serializer.canonical(tool.parameters),
-          }))
+          .map((tool) => {
+            const parameters = Serializer.canonical(
+              tool.parameters
+            ) as IToolDefinition['parameters'];
+            return {
+              name: tool.name,
+              description: tool.description,
+              parameters: {
+                ...parameters,
+                required: parameters.required
+                  ? [...parameters.required].sort()
+                  : undefined,
+              },
+            };
+          })
           .sort((a, b) => a.name.localeCompare(b.name))
       )
     );

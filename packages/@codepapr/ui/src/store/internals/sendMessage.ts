@@ -1,3 +1,4 @@
+import { errorMessage } from '@codepapr/common';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../toastStore';
 import {
@@ -390,7 +391,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             } catch (err) {
               const msg = err instanceof GoalConditionParseError
                 ? err.message
-                : `Goal 条件解析失败: ${(err as Error).message}`;
+                : `Goal 条件解析失败: ${errorMessage(err)}`;
               appendInfoMessage(set, msg);
               return;
             }
@@ -909,7 +910,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               const cp = await snapshotCreate(get().workspacePath, label);
               if (cp) {
                 set((s) => ({
-                  _messageCheckpoints: { ...s._messageCheckpoints, [userMsg!.id]: cp.sha },
+                  _messageCheckpoints: {
+                    ...s._messageCheckpoints,
+                    [userMsg!.id]: { sha: cp.sha, sessionId: activeSessionId! },
+                  },
                   _checkpointSeq: sequence,
                   _checkpointError: null,
                 }));
@@ -920,7 +924,14 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   cp.sha,
                   label,
                   cp.fileCount,
-                ).catch(() => undefined);
+                ).catch((err) => {
+                  // 快照已落库但 checkpoint 锚点记录失败：内存 map 仍持有锚点，
+                  // 但重启后 timeline 会丢失该回滚点——不可静默。
+                  const msg = `checkpoint 记录保存失败：${err instanceof Error ? err.message : String(err)}`;
+                  console.warn('[CodePapr]', msg);
+                  set({ _persistenceError: msg });
+                  toast.warning(msg);
+                });
               } else {
                 // Empty/new workspace (or all files ignored): nothing to snapshot.
                 // Benign skip — do not surface a "snapshot failed" banner. (The
@@ -1787,9 +1798,22 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             });
             // 被替换/失效的旧 agent 已空闲（回合结束），销毁以回收 worker；
             // 仅当它仍属于本回合会话时才销毁，避免误伤竞态下新建的 agent。
-            if (checkpointApplied && prevAgent && prevAgentOwner === activeSessionId && get()._agent !== prevAgent) {
+            // 但回合结束 ≠ 无在飞执行：papr.agent.run（app-agent）不占 isLoading，
+            // 立即 destroy 会经由 cancel() → cancelAllAppAgents() 杀掉正在运行的
+            // app 执行（/compact 与回合前重建分支均用 hasActiveAppAgentRequests
+            // → detachAndCleanupWhenIdle 规避，此分支必须同样处理）。
+            if (
+              checkpointApplied &&
+              prevAgent &&
+              prevAgentOwner === activeSessionId &&
+              get()._agent !== prevAgent
+            ) {
               try {
-                prevAgent.destroy();
+                if (prevAgent.hasActiveAppAgentRequests?.()) {
+                  prevAgent.detachAndCleanupWhenIdle?.();
+                } else {
+                  prevAgent.destroy();
+                }
               } catch {
                 // already torn down
               }

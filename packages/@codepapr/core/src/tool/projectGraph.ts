@@ -3233,6 +3233,9 @@ function findFunctionEndLine(
   let depth = 0;
   let started = false;
 
+  // 支持 Allman 风格（C# 默认）：声明行 `public void Foo()` 后 `{` 在下一行。
+  // 旧实现只在首行找 `{`，首行无括号即返回 -1，导致 buildCallEdges 跳过
+  // 结束行边界，把声明行之后到 EOF 的全部调用都挂到该函数名下。
   for (let i = startLine - 1; i < lines.length; i++) {
     const line = lines[i];
     for (const ch of line) {
@@ -3242,10 +3245,9 @@ function findFunctionEndLine(
         if (started && depth <= 0) return i + 1;
       }
     }
-    if (i === startLine - 1 && !started && depth === 0) {
-      return -1;
-    }
   }
+  // 扫到 EOF 仍未配对闭合：函数体残缺（无括号函数/解析边界），返回 -1，
+  // 由调用方按"无结束边界"处理。
   return -1;
 }
 

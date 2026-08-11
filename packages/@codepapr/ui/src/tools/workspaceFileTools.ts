@@ -297,8 +297,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       parsed.relativePath,
       current.content,
       parsed.search,
-      parsed.replaceAll,
-      parsed.expectedOccurrences
+      parsed.replaceAll
     );
     if (ambiguity) {
       throw new Error(ambiguity);
@@ -386,8 +385,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
         patch.relativePath,
         patchContent,
         patch.search,
-        patch.replaceAll,
-        patch.expectedOccurrences
+        patch.replaceAll
       );
       if (ambiguity) {
         throw new Error(`${patch.relativePath}: ${ambiguity}`);

@@ -66,6 +66,49 @@ describe('RequestBuilder - DeepSeek cache stability', () => {
     ).toThrow(CacheConsistencyError);
   });
 
+  it('required 数组顺序不同的运行时工具不误报 CacheConsistencyError', () => {
+    const tool: IToolDefinition = {
+      name: 'edit',
+      description: 'Edit file',
+      parameters: {
+        type: 'object',
+        properties: { a: { type: 'string' }, b: { type: 'number' } },
+        required: ['a', 'b'],
+      },
+    };
+    // 同一工具，仅 required 声明顺序相反：ImmutablePrefix 侧会排序，
+    // 哈希必须与运行时传入的顺序无关，否则误报「工具定义不一致」。
+    const runtimeTool: IToolDefinition = {
+      ...tool,
+      parameters: { ...tool.parameters, required: ['b', 'a'] },
+    };
+
+    expect(() =>
+      new RequestBuilder().build({
+        prefix: createPrefix([tool]),
+        appendLog: new AppendOnlyLog('req-order'),
+        model: 'deepseek-chat',
+        provider: 'deepseek',
+        tools: [runtimeTool],
+      })
+    ).not.toThrow();
+
+    // 真·不同的 required 集合仍必须报错
+    const differentTool: IToolDefinition = {
+      ...tool,
+      parameters: { ...tool.parameters, required: ['a'] },
+    };
+    expect(() =>
+      new RequestBuilder().build({
+        prefix: createPrefix([tool]),
+        appendLog: new AppendOnlyLog('req-order-diff'),
+        model: 'deepseek-chat',
+        provider: 'deepseek',
+        tools: [differentTool],
+      })
+    ).toThrow(CacheConsistencyError);
+  });
+
   it('拒绝历史消息被改写的 append-only 日志', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
 

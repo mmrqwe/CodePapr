@@ -67,7 +67,9 @@ fn unix_tool_dirs() -> Vec<PathBuf> {
     let mut dirs = vec![std::env::temp_dir()];
     if let Some(home) = std::env::var_os("HOME") {
         let home = PathBuf::from(home);
-        for name in [".npm", ".cache", ".cargo", ".local", ".nvm", ".volta"] {
+        // 注意：不可整体放行 ~/.local（其 bin/ 在 PATH 内，可写即能植入
+        // 持久化二进制）；只放行数据目录 ~/.local/share。
+        for name in [".npm", ".cache", ".cargo", ".local/share", ".nvm", ".volta"] {
             dirs.push(home.join(name));
         }
     }
@@ -158,10 +160,15 @@ fn build_profile(
         "(allow process*)".to_string(),
     ];
     // 网络轴：出站网络按开关；监听 localhost 由 allow_bind 单独控制（后端进程需要）。
+    // allow_bind 必须限定监听地址为回环：裸 (allow network-bind) 允许 bind
+    // 0.0.0.0/::，后端进程可直接把服务暴露到局域网——与「监听 localhost」
+    // 的文档/注释语义不符。
     if access.network {
         lines.push("(allow network*)".to_string());
     } else if access.allow_bind {
-        lines.push("(allow network-bind)".to_string());
+        lines.push(
+            "(allow network-bind (local ip \"127.0.0.1\") (local ip \"::1\"))".to_string(),
+        );
     }
     // 所有读放行的根路径：用于推导祖先目录的 metadata 规则。
     // 与命令预检共用 unix_allowed_read_roots，保证两侧放行集不漂移。
@@ -187,6 +194,15 @@ fn build_profile(
         // YOLO 只对全权调用（主代理，access 默认全开）生效：允许读写全盘（受保护 HOME 目录除外）。
         add_subpath_rule(&mut lines, "allow", "file-read*", Path::new("/"));
         add_subpath_rule(&mut lines, "allow", "file-write*", Path::new("/"));
+        // 全盘写会覆盖 PATH 内的用户二进制目录（~/.local/bin 不在旧保护清单里）：
+        // 沙箱内命令可在其中植入持久化二进制，退出沙箱后仍能执行。这类目录
+        // 只 deny 写、保留读（PATH 上的工具仍需可执行）。
+        if let Some(home) = std::env::var_os("HOME") {
+            let home = PathBuf::from(home);
+            for name in ["local/bin", "bin", ".local/bin", "Library/Python", "Library/Ruby"] {
+                add_subpath_rule(&mut lines, "deny", "file-write*", &home.join(name));
+            }
+        }
     } else {
         if let Some(canonical) = add_subpath_rule(&mut lines, "allow", "file-read*", workspace) {
             read_roots.push(canonical);
@@ -664,7 +680,8 @@ mod tests {
         );
         assert!(!restricted.contains("(allow network-bind)"), "got:\n{restricted}");
 
-        // 后端进程（网络关）：只允许 network-bind（监听 localhost），无出站
+        // 后端进程（网络关）：network-bind 必须限定回环地址（禁止 bind
+        // 0.0.0.0 暴露局域网），且无出站
         let backend = build_profile(
             "/bin/zsh",
             &workspace,
@@ -672,7 +689,10 @@ mod tests {
             None,
         )
         .expect("profile should build");
-        assert!(backend.contains("(allow network-bind)"), "got:\n{backend}");
+        assert!(
+            backend.contains("(allow network-bind (local ip \"127.0.0.1\") (local ip \"::1\"))"),
+            "network-bind must be loopback-restricted, got:\n{backend}"
+        );
         assert!(!backend.contains("(allow network*)"), "got:\n{backend}");
 
         // 网络开：完整 network*

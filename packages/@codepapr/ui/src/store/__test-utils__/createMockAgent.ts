@@ -11,6 +11,9 @@ export interface MockAgentOverrides {
   logMessages?: IMessage[] | (() => IMessage[]);
   /** Custom cancel implementation. Defaults to no-op. */
   cancel?: () => void;
+  /** Custom cancelSession implementation. Defaults to the cancel override when
+   *  provided, else no-op. */
+  cancelSession?: () => void;
   /** Custom destroy implementation. Defaults to no-op. */
   destroy?: () => void;
   /** Pre-built isCrashed() return value (or dynamic getter). Defaults to false. */
@@ -65,6 +68,7 @@ export function createMockAgent(overrides: MockAgentOverrides = {}): AgentRuntim
       },
     }),
     cancel: overrides.cancel ?? (() => undefined),
+    cancelSession: overrides.cancelSession ?? overrides.cancel ?? (() => undefined),
     destroy: overrides.destroy ?? (() => undefined),
     runAppAgent: overrides.runAppAgent ?? (() => Promise.reject(new Error('not available in mock'))),
     cancelAppAgent: () => undefined,

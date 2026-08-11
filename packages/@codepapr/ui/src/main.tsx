@@ -6,9 +6,29 @@ import { fetch } from '@tauri-apps/plugin-http';
 import { setGlobalFetchFn } from '@codepapr/api';
 import App from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { isBlockedFetchTarget } from './utils/fetchGuard';
 import './index.css';
 
-setGlobalFetchFn(fetch);
+// 插件 fetch 在浏览器外执行、不受 CORS 约束，而 capabilities 放行 http://**：
+// 包一层守卫拦截链路本地/云元数据地址（169.254.169.254 等 SSRF 类目标）。
+// 回环与私网（LAN LLM 端点等合法用途）不受影响。worker 的 LLM fetch 经
+// proxyFetch → 主线程 getGlobalFetchFn() 同样走此守卫。
+const guardedFetch: typeof fetch = (input, init) => {
+  const target =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.href
+        : input.url;
+  if (isBlockedFetchTarget(target)) {
+    return Promise.reject(
+      new Error(`Blocked fetch to link-local/metadata address: ${target}`)
+    );
+  }
+  return fetch(input, init);
+};
+
+setGlobalFetchFn(guardedFetch);
 
 let editMenu: Menu | null = null;
 

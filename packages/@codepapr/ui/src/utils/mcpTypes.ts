@@ -72,9 +72,26 @@ export interface McpTestServerResult {
 
 export const MCP_TOOL_PREFIX = 'mcp__';
 
+/** 稳定短哈希（FNV-1a，base36）：用于给"有损消毒"的 MCP 工具名追加唯一后缀。
+ *  旧实现直接替换非法字符——foo.bar 与 foo_bar 都变成 foo_bar，工具注册时
+ *  碰撞抛错、整批中断；加上源自原始名的确定性后缀后，不同原始名必得不同
+ *  注册名（调用仍通过 toolNameMap 映射回原始名）。 */
+function shortStableHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 export function sanitizeMcpToolPart(value: string): string {
-  const sanitized = value.trim().replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
-  return sanitized || 'tool';
+  const trimmed = value.trim();
+  const sanitized = trimmed.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+  if (!sanitized) return 'tool';
+  // 消毒前后一致 = 无损，名字保持稳定（常见名 duckduckgo_search 不变）。
+  // 有损（含 . / : 空格等）则追加原始名哈希后缀，杜绝 foo.bar 与 foo_bar 碰撞。
+  return sanitized === trimmed ? sanitized : `${sanitized}_${shortStableHash(trimmed)}`;
 }
 
 export function buildMcpToolName(serverId: string, toolName: string): string {

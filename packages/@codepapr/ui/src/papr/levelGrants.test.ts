@@ -69,15 +69,29 @@ describe('two-axis levelGrants', () => {
     });
   });
 
-  it('accessAllows: storage/fs always, http needs network, agent needs declared agent', () => {
-    const off = { local: 'read' as const, network: false };
-    expect(accessAllows(off, 'storage:read', null)).toBe(true);
-    expect(accessAllows(off, 'fs:write', null)).toBe(true);
-    expect(accessAllows(off, 'http:get', null)).toBe(false);
-    expect(accessAllows({ ...off, network: true }, 'http:get', null)).toBe(true);
+  it('accessAllows: storage/fs 按 local 轴门槛，http 需网络，agent 需 manifest 声明', () => {
+    const none = { local: 'none' as const, network: false };
+    const read = { local: 'read' as const, network: false };
+    const write = { local: 'write' as const, network: false };
+    // local=none：storage/fs 一律拒绝（旧实现无条件放行，local 轴无纵深）
+    expect(accessAllows(none, 'storage:read', null)).toBe(false);
+    expect(accessAllows(none, 'storage:write', null)).toBe(false);
+    expect(accessAllows(none, 'fs:read', null)).toBe(false);
+    expect(accessAllows(none, 'fs:write', null)).toBe(false);
+    // local=read：读放行、写拒绝
+    expect(accessAllows(read, 'storage:read', null)).toBe(true);
+    expect(accessAllows(read, 'fs:read', null)).toBe(true);
+    expect(accessAllows(read, 'storage:write', null)).toBe(false);
+    expect(accessAllows(read, 'fs:write', null)).toBe(false);
+    // local=write：读写都放行
+    expect(accessAllows(write, 'storage:write', null)).toBe(true);
+    expect(accessAllows(write, 'fs:write', null)).toBe(true);
+    // http 需网络轴
+    expect(accessAllows(read, 'http:get', null)).toBe(false);
+    expect(accessAllows({ ...read, network: true }, 'http:get', null)).toBe(true);
     const manifest = makeManifest({ agents: [{ name: 'assistant' }] });
-    expect(accessAllows(off, 'agent:run:assistant', manifest)).toBe(true);
-    expect(accessAllows(off, 'agent:run:nobody', manifest)).toBe(false);
+    expect(accessAllows(read, 'agent:run:assistant', manifest)).toBe(true);
+    expect(accessAllows(read, 'agent:run:nobody', manifest)).toBe(false);
   });
 
   it('agentToolsFor derives tools from axes', () => {

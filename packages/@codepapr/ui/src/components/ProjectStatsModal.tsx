@@ -1,3 +1,4 @@
+import { errorMessage } from '@codepapr/common';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getTranslation, type Lang } from '../utils/i18n';
@@ -527,7 +528,7 @@ export function ProjectStatsModal({
     } catch (err) {
       if (!statsCache.get(workspacePath)) {
         setStats(null);
-        setError((err as Error).message);
+        setError(errorMessage(err));
       }
     } finally {
       setIsLoading(false);

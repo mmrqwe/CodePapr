@@ -1,3 +1,4 @@
+import { errorMessage } from '@codepapr/common';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
@@ -125,7 +126,7 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
       await upsertCharacter(character);
       setEditing(character);
     } catch (err) {
-      setImportError(`${t.characterImportFailed}: ${(err as Error).message}`);
+      setImportError(`${t.characterImportFailed}: ${errorMessage(err)}`);
     }
   };
 

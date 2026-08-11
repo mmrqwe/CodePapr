@@ -610,7 +610,7 @@ mod tests {
             "shadow repo should be intact"
         );
 
-        let restore_file = git_restore_files_impl(&workspace, &["main.rs".to_string()], None);
+        let restore_file = git_restore_files_impl(&workspace, &["main.rs".to_string()], None, None);
         assert!(restore_file.ok, "git_restore_files should succeed: {}", restore_file.message);
 
         restore.undo().expect("undo should work");

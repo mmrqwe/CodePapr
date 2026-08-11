@@ -1219,7 +1219,14 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     maxToolRounds: payload.settings.maxToolRounds,
     // task 工具（子代理）对齐其内部 20 分钟墙钟预算，避免父级 270s 默认
     // 超时掐断 promise 后子代理仍在后台执行。
-    toolTimeouts: { ...PERMISSION_WAITING_TOOL_TIMEOUTS, task: SUBAGENT_WALL_CLOCK_TIMEOUT_MS },
+    // graph 工具必须显式配置 graphToolTimeoutMs：主代理路径与 subagent 路径
+    // 一样走这里注册的 toolTimeouts，否则 graph 实际落到工具 IPC 120s 上限，
+    // 大仓库图构建（>2min）会被误杀。默认 600s（settings.graphToolTimeoutMs）。
+    toolTimeouts: {
+      ...PERMISSION_WAITING_TOOL_TIMEOUTS,
+      graph: payload.settings.graphToolTimeoutMs ?? TOOL_IPC_TIMEOUT_MS,
+      task: SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
+    },
     toolOutputTruncation: buildToolOutputTruncation(payload.settings),
     toolContextConfig: buildToolContextConfig(payload.settings),
     contextCompaction: createContextCompactionHandler(

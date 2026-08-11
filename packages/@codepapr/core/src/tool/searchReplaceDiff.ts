@@ -28,18 +28,35 @@ export interface SearchOccurrenceLocation {
   column: number;
 }
 
-function offsetToLineColumn(content: string, offset: number): SearchOccurrenceLocation {
-  let line = 1;
-  let lineStart = 0;
-
-  for (let i = 0; i < offset; i += 1) {
+/** 行起始偏移索引：一次性构建，供任意偏移 O(log n) 定位行号。
+ *  旧实现每处匹配都从文件头重扫（O(k·n)），短高频 search 命中 1MB 文件时
+ *  字符迭代量达 10^9~10^10，冻结调用线程（工具 handler 跑在 UI 线程）。 */
+function buildLineStarts(content: string): number[] {
+  const starts = [0];
+  for (let i = 0; i < content.length; i += 1) {
     if (content[i] === '\n') {
-      line += 1;
-      lineStart = i + 1;
+      starts.push(i + 1);
     }
   }
+  return starts;
+}
 
-  return { line, column: offset - lineStart + 1 };
+function offsetToLineColumn(
+  lineStarts: readonly number[],
+  offset: number
+): SearchOccurrenceLocation {
+  let lo = 0;
+  let hi = lineStarts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (lineStarts[mid] <= offset) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  const lineStart = lineStarts[lo]!;
+  return { line: lo + 1, column: offset - lineStart + 1 };
 }
 
 export function locateSearchOccurrences(
@@ -54,6 +71,7 @@ export function locateSearchOccurrences(
   const searchLf = search.replace(/\r\n/g, '\n');
   const contentLf = fileHasCrLf ? content.replace(/\r\n/g, '\n') : content;
 
+  const lineStarts = buildLineStarts(contentLf);
   const locations: SearchOccurrenceLocation[] = [];
   let start = 0;
 
@@ -63,7 +81,7 @@ export function locateSearchOccurrences(
       break;
     }
 
-    locations.push(offsetToLineColumn(contentLf, index));
+    locations.push(offsetToLineColumn(lineStarts, index));
     start = index + searchLf.length;
   }
 
@@ -104,7 +122,15 @@ export function applySearchReplacePatch(
   }
 
   if (occurrences > 1 && !plan.replaceAll) {
-    throw new Error(`匹配到 ${occurrences} 处文本块，请改用更精确的 search 或设置 replaceAll=true`);
+    // expectedOccurrences 只是数量校验器（前面已核对数量），不能消歧——
+    // 明确告知，避免 LLM 按提示设置后仍失败、陷入死循环。
+    const expectedClarification =
+      typeof plan.expectedOccurrences === 'number'
+        ? '（expectedOccurrences 只能校验数量，不能消歧；请加长 search 或设置 replaceAll=true）'
+        : '';
+    throw new Error(
+      `匹配到 ${occurrences} 处文本块，请改用更精确的 search 或设置 replaceAll=true${expectedClarification}`
+    );
   }
 
   const replacements = plan.replaceAll ? occurrences : 1;

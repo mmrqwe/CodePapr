@@ -9,6 +9,7 @@
  * 复用 runCachedModelRequest 做单次 LLM 调用（无工具循环）。
  */
 
+import { errorMessage } from '@codepapr/common';
 import type { GoalVerdict, GoalStrictness, ConditionResult, ICacheStatistics, IChatThinking, ILLMProvider } from '@codepapr/types';
 import { ClaudeProvider, OpenAIProvider } from '@codepapr/api';
 import { runCachedModelRequest } from './cachedModelRequest';
@@ -530,7 +531,7 @@ export async function runVerifier(
       return {
         verdict: {
           verdict: 'NOT_MET',
-          evidence: `Verifier 调用失败（${(err as Error).message}），主观模式无法降级`,
+          evidence: `Verifier 调用失败（${errorMessage(err)}），主观模式无法降级`,
           missing: 'Verifier 不可用',
           progress: 0,
           failureMode: 'unknown',
@@ -541,7 +542,7 @@ export async function runVerifier(
     return {
       verdict: {
         verdict: conditionResult.met ? 'SATISFIED' : 'NOT_MET',
-        evidence: `Verifier 调用失败（${(err as Error).message}），降级为仅条件评估`,
+        evidence: `Verifier 调用失败（${errorMessage(err)}），降级为仅条件评估`,
         progress: conditionResult.met ? 1 : 0,
         failureMode: conditionResult.met ? undefined : 'unknown',
       },

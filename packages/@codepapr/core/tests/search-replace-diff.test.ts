@@ -200,4 +200,23 @@ describe('locateSearchOccurrences', () => {
       { line: 3, column: 1 },
     ]);
   });
+
+  it('深匹配不再按匹配数 × 文件长度重扫（行索引 + 二分），1MB 文件高频词毫秒级完成', () => {
+    // 旧实现每处匹配都从文件头线性重扫到该偏移（O(k·n)）：
+    // 1MB 文件里 10 万次短匹配 ≈ 5×10^10 字符迭代，直接冻结 UI 线程。
+    // 行索引一次构建 + 二分定位后，总开销 O(n + k log n)。
+    const line = 'console.log("token");\n';
+    const content = line.repeat(40_000); // ≈ 1.2MB，5 万处匹配
+    const started = Date.now();
+    const locations = locateSearchOccurrences(content, 'token');
+    const elapsed = Date.now() - started;
+
+    expect(locations).toHaveLength(40_000);
+    // 行号必须精确（二分定位正确性）：'console.log("token");' 中 token 从
+    // 第 14 列开始（1 基）。
+    expect(locations[0]).toEqual({ line: 1, column: 14 });
+    expect(locations[39999]).toEqual({ line: 40000, column: 14 });
+    // 旧实现在此规模下需数秒到数十秒；修复后应在百毫秒内完成。
+    expect(elapsed).toBeLessThan(1000);
+  });
 });

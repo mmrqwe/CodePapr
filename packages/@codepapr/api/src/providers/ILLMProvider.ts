@@ -131,6 +131,25 @@ export abstract class BaseLLMProvider implements ILLMProvider {
     return !!this.config.apiKey;
   }
 
+  /** 可被取消的退避等待：用户取消立即抛 AbortError，不再等待剩余退避时长。
+   *  请求级重试（连接层失败，最长 30s 封顶）与流层重连共用此语义。 */
+  private async sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) {
+      throw new DOMException('Request was cancelled', 'AbortError');
+    }
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = (): void => {
+        clearTimeout(timer);
+        reject(new DOMException('Request was cancelled', 'AbortError'));
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
   protected async fetchWithRetry(
     url: string,
     options: RequestInit,
@@ -157,16 +176,22 @@ export abstract class BaseLLMProvider implements ILLMProvider {
       const abortHandler = () => controller.abort();
       signal?.addEventListener('abort', abortHandler, { once: true });
 
+      // 释放超时/取消监听的时机：响应成功返回（body 由流层负责），
+      // 或错误体读取完毕。绝不能提前释放——坏中继可能只发响应头就挂起，
+      // 非 2xx 的 response.text() 必须仍在超时与取消保护之下。
+      const cleanup = () => {
+        clearTimeout(timeoutId);
+        signal?.removeEventListener('abort', abortHandler);
+      };
+
       try {
         const response = await fetchFn(url, {
           ...options,
           signal: controller.signal,
         });
 
-        clearTimeout(timeoutId);
-        signal?.removeEventListener('abort', abortHandler);
-
         if (response.ok) {
+          cleanup();
           return response;
         }
 
@@ -193,6 +218,8 @@ export abstract class BaseLLMProvider implements ILLMProvider {
           body: errorText,
         });
 
+        cleanup();
+
         if (!retriable) {
           // 4xx（429 除外）重试无意义，立即失败。注意：在 catch 里必须把
           // 不可重试的 ProviderRequestError 原样重抛，否则会被当成普通异常
@@ -202,17 +229,17 @@ export abstract class BaseLLMProvider implements ILLMProvider {
 
         lastError = providerError;
       } catch (err) {
-        clearTimeout(timeoutId);
-        signal?.removeEventListener('abort', abortHandler);
+        cleanup();
         lastError = err as Error;
         if (signal?.aborted) {
           // 用户主动取消：立即终止，不重试。
           throw new DOMException('Request was cancelled', 'AbortError');
         }
         if (err instanceof DOMException && err.name === 'AbortError') {
-          // 本函数超时调用 controller.abort() 同样产生 AbortError，但超时
-          // ≠ 用户取消：超时可重试。旧实现把它当取消直接重抛，导致慢端点
-          // 显示「已取消」且永不重试。
+          // 本函数超时调用 controller.abort() 同样产生 AbortError（含
+          // 响应头已到达但 body 读取被超时中止的情况），但超时 ≠ 用户取消：
+          // 超时可重试。旧实现把它当取消直接重抛，导致慢端点显示「已取消」
+          // 且永不重试。
           lastError = new ProviderRequestError({
             provider: this.name,
             message: `Request timed out after ${this.config.timeout}ms`,
@@ -237,11 +264,12 @@ export abstract class BaseLLMProvider implements ILLMProvider {
       }
 
       // 指数退避，封顶 30s：给网络恢复留出时间（unstable 端点常持续
-      // 数十秒到数分钟的波动，短退避根本扛不过去）。
+      // 数十秒到数分钟的波动，短退避根本扛不过去）。退避必须可取消：
+      // 用户按下停止后，最长 30s 的等待会被立即打断。
       if (attempt < maxRetries - 1) {
         const delayMs = retryDelayMs(attempt + 1);
         notifyRetry?.(attempt + 1, maxRetries, lastError);
-        await new Promise((r) => setTimeout(r, delayMs));
+        await this.sleepAbortable(delayMs, signal);
       }
     }
 

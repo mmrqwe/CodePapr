@@ -205,7 +205,6 @@ export class OpenAIProvider extends BaseLLMProvider {
         let systemFingerprint: string | undefined;
         let sawDone = false;
         let sawFinishReason = false;
-        let sawUsage = false;
         const toolCallStates: Array<{ id: string; name: string; argumentsText: string }> = [];
 
         try {
@@ -240,7 +239,6 @@ export class OpenAIProvider extends BaseLLMProvider {
             responseId = chunk.id ?? responseId;
             if (chunk.usage) {
               usage = chunk.usage;
-              sawUsage = true;
             }
             systemFingerprint = chunk.system_fingerprint ?? systemFingerprint;
 
@@ -298,13 +296,16 @@ export class OpenAIProvider extends BaseLLMProvider {
           });
         }
 
-        // 流干净地结束但没有任何终止信号（[DONE]/finish_reason/usage）：
+        // 流干净地结束但没有任何终止信号（[DONE]/finish_reason）：
         // 典型是中转/网关把响应截断后直接关闭连接。此时内容不完整，绝不能当
         // 正常完成处理——抛可重试错误走流层无限重连。
-        if (!sawDone && !sawFinishReason && !sawUsage) {
+        // 注意：usage 不算终止信号——截断流常常先发 usage 再掐断连接，
+        // 若放行，部分内容会被当成正常完成返回，且 finish_reason 缺失导致
+        // 输出截断绕过 Agent 侧的 length 守卫。
+        if (!sawDone && !sawFinishReason) {
           throw new ProviderRequestError({
             provider: this.name,
-            message: 'Stream ended prematurely: no [DONE]/finish_reason/usage received',
+            message: 'Stream ended prematurely: no [DONE]/finish_reason received',
             retriable: true,
           });
         }

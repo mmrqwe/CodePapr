@@ -1,3 +1,4 @@
+import { errorMessage } from '@codepapr/common';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAgentStore } from '../store/agentStore';
 import {
@@ -271,7 +272,7 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
     try {
       setServerStatus(await listMcpServerStatus(local));
     } catch (err) {
-      setErrors((current) => [...current, (err as Error).message]);
+      setErrors((current) => [...current, errorMessage(err)]);
     }
   };
 
@@ -281,7 +282,7 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
       setMessage(`Disconnected ${closed} MCP servers`);
       await refreshStatus();
     } catch (err) {
-      setErrors((current) => [...current, (err as Error).message]);
+      setErrors((current) => [...current, errorMessage(err)]);
     }
   };
 
@@ -301,7 +302,7 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
       await refreshStatus();
     } catch (err) {
       setStatus('error');
-      setMessage((err as Error).message);
+      setMessage(errorMessage(err));
     } finally {
       setBusyServerId(null);
     }
@@ -314,7 +315,7 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
       setMessage(closed > 0 ? `Disconnected '${serverId}'` : `'${serverId}' was not connected`);
       await refreshStatus();
     } catch (err) {
-      setErrors((current) => [...current, (err as Error).message]);
+      setErrors((current) => [...current, errorMessage(err)]);
     } finally {
       setBusyServerId(null);
     }
@@ -342,7 +343,7 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
       await refreshStatus();
     } catch (err) {
       setStatus('error');
-      setMessage((err as Error).message);
+      setMessage(errorMessage(err));
     }
   };
 

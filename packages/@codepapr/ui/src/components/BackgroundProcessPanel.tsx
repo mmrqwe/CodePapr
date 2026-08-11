@@ -1,3 +1,4 @@
+import { errorMessage } from '@codepapr/common';
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { usePreviewStore } from '../store/previewStore';
@@ -100,7 +101,7 @@ export function BackgroundProcessPanel({ workspacePath, lang }: BackgroundProces
       }
       setError('');
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       if (!silent) {
         setIsLoading(false);
@@ -139,7 +140,7 @@ export function BackgroundProcessPanel({ workspacePath, lang }: BackgroundProces
       clearPreviewSessionByPid(pid);
       await refreshProcesses(true);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setStoppingPid(null);
     }
@@ -166,7 +167,7 @@ export function BackgroundProcessPanel({ workspacePath, lang }: BackgroundProces
       }
       await refreshProcesses(true);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setIsStoppingAll(false);
     }

@@ -1,3 +1,4 @@
+import { errorMessage } from '@codepapr/common';
 import {
   lazy,
   Suspense,
@@ -261,6 +262,10 @@ export function CodingWorkbench({
   const [isWorkspaceSwitching, setIsWorkspaceSwitching] = useState(false);
   const workspaceSwitchingPathRef = useRef<string | null>(null);
   const workspaceSwitchingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 始终指向最新 workspacePath（懒加载在飞响应用它做取消守卫；闭包捕获的
+  // workspacePath 在切换后仍是旧值，无法比较）。
+  const workspacePathRef = useRef(workspacePath);
+  workspacePathRef.current = workspacePath;
   const isInitialGraphLoadRef = useRef(true);
   const graphLoadStartedRef = useRef(false);
   const graphLoadSawLoadingRef = useRef(false);
@@ -404,7 +409,7 @@ export function CodingWorkbench({
     } catch (err) {
       shallowEntriesRef.current = [];
       setShallowEntries([]);
-      setFolderError((err as Error).message);
+      setFolderError(errorMessage(err));
     } finally {
       setIsLoadingTree(false);
     }
@@ -762,12 +767,19 @@ export function CodingWorkbench({
     if (!workspacePath) {
       return;
     }
+    const capturedPath = workspacePath;
     try {
       const result = await invoke<ListFilesResult>('list_workspace_files', {
-        workspacePath,
+        workspacePath: capturedPath,
         relativePath: dir,
         maxDepth: LAZY_DIR_MAX_DEPTH,
       });
+      // 取消守卫：await 期间用户切换了工作区 → 旧目录的迟到响应必须丢弃。
+      // 旧实现无守卫，旧工作区的在飞加载结果会无条件 merge 进新树，
+      // 跨工作区数据互相污染（目录、truncated 标志、tree 签名全部错乱）。
+      if (capturedPath !== workspacePathRef.current) {
+        return;
+      }
       const nextDirEntries: Record<string, FileEntry[]> = {
         ...dirEntriesRef.current,
         [dir]: result?.entries ?? [],
@@ -788,7 +800,7 @@ export function CodingWorkbench({
         truncated: Boolean(result?.truncated),
       });
     } catch (err) {
-      setFolderError((err as Error).message);
+      setFolderError(errorMessage(err));
     }
   }, [computeTreeSignature, workspacePath]);
 
@@ -907,7 +919,7 @@ export function CodingWorkbench({
         await openWorkspace(selected);
       }
     } catch (err) {
-      setFolderError(`${t.openFolderFailed}: ${(err as Error).message}`);
+      setFolderError(`${t.openFolderFailed}: ${errorMessage(err)}`);
     }
   };
 

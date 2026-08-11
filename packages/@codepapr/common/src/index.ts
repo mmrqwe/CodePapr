@@ -2,6 +2,18 @@ import { sha256 as hashSha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 
 /**
+ * 提取任意 throw 值的可读错误文本：Error 取 message、字符串原样返回、
+ * 其它值 String() 兜底。
+ * 注意：Tauri 2 的 invoke 拒绝值就是字符串（Rust Result 的 Err），
+ * `(err as Error).message` 对它恒为 undefined——统一用本函数转换。
+ */
+export function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  return String(err);
+}
+
+/**
  * SHA256 hash utility
  */
 export function sha256(data: string): string {

@@ -287,8 +287,11 @@ export function parseGoalCondition(input: string): GoalCondition {
   let goalText = '';
   let conditionText = rest;
 
+  // pipeIndex >= 0 覆盖 rest 以 | 开头的边界情况（如 "/goal | exec:npm test"）：
+  // 旧实现用 > 0，index 0 时跳过拆分，前导 | 残留在 conditionText 中，
+  // 报出费解的「条件必须以 exec: 开头」。
   const pipeIndex = rest.indexOf('|');
-  if (pipeIndex > 0) {
+  if (pipeIndex >= 0) {
     goalText = rest.slice(0, pipeIndex).trim();
     conditionText = rest.slice(pipeIndex + 1).trim();
   }

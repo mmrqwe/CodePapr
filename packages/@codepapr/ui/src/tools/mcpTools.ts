@@ -428,8 +428,14 @@ export function registerMcpTools(
   toolNameMapLoaded = true;
 
   for (const definition of definitions) {
-    registry.register(definition, async (args) => {
-      return await callMcpTool(settings, definition.name, args);
-    });
+    try {
+      registry.register(definition, async (args) => {
+        return await callMcpTool(settings, definition.name, args);
+      });
+    } catch {
+      // 单个工具注册失败（如重名）不能中断整批注册——旧实现直接抛出，
+      // 一个碰撞工具导致其余全部 MCP 工具不可用。跳过并继续。
+      console.warn(`[CodePapr] MCP 工具注册失败，跳过: ${definition.name}`);
+    }
   }
 }

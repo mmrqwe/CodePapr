@@ -32,6 +32,49 @@ function canonicalToolDefinition(tool: IToolDefinition): IToolDefinition {
   };
 }
 
+/** 静态内容校验选项 */
+export interface StaticContentValidationOptions {
+  /** 允许系统提示词中出现字面模板/占位符示例文本（如 "填充 ${name}"、
+   *  "使用 {{var}}"、硬编码的 ISO 时间戳示例 "2024-01-01T12:00"）而不抛错。
+   *  这类文本是静态的（每次构建完全相同），不会破坏缓存一致性——
+   *  校验的本意是拦截"每次构建会变化"的动态内容，正则只能猜测。 */
+  allowTemplateLiterals?: boolean;
+}
+
+/**
+ * 校验系统提示词不含动态内容（时间戳、会话 ID、随机值等）。
+ * 由 ImmutablePrefix 构造器调用，是全局唯一关卡（RequestBuilder 不再重复校验）。
+ */
+export function validateStaticContent(
+  prompt: string,
+  options?: StaticContentValidationOptions
+): void {
+  if (options?.allowTemplateLiterals) {
+    return;
+  }
+  const forbidden = [
+    /\$\{[^}]+\}/, // Template interpolation
+    /{{[^}]+}}/, // Double braces
+    /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/, // ISO timestamps
+    /\[TIMESTAMP\]/i,
+    /\[SESSION/i,
+    /\[TIME/i,
+    /\[DATE/i,
+    /\[RANDOM/i,
+  ];
+
+  for (const pattern of forbidden) {
+    if (pattern.test(prompt)) {
+      throw new PrefixModificationError(
+        `System prompt contains dynamic content matching: ${pattern}. ` +
+          `This would destroy cache consistency. Use static content only. ` +
+          `If the text is a literal example (static, never changes), construct the ` +
+          `prefix with { allowTemplateLiterals: true } to allow it.`
+      );
+    }
+  }
+}
+
 export class ImmutablePrefix implements IImmutablePrefix {
   private readonly systemPrompt: string;
   private readonly tools: ReadonlyArray<IToolDefinition>;
@@ -50,9 +93,13 @@ export class ImmutablePrefix implements IImmutablePrefix {
     fewShots?: IMessage[];
     model: string;
     parameters: IModelParameters;
+    /** 允许系统提示词包含字面模板示例文本（见 validateStaticContent 说明）。 */
+    allowTemplateLiterals?: boolean;
   }) {
     // 1. Validate static content (no timestamps, dynamic content)
-    this.validateStaticContent(config.systemPrompt);
+    validateStaticContent(config.systemPrompt, {
+      allowTemplateLiterals: config.allowTemplateLiterals,
+    });
 
     // 2. Deep freeze and store immutable copies
     this.systemPrompt = config.systemPrompt;
@@ -86,32 +133,6 @@ export class ImmutablePrefix implements IImmutablePrefix {
 
     // 6. Final freeze to prevent any future modifications
     Object.freeze(this);
-  }
-
-  /**
-   * Validate that system prompt contains no dynamic content
-   * Destroys cache: timestamps, session IDs, random values, etc.
-   */
-  private validateStaticContent(prompt: string): void {
-    const forbidden = [
-      /\$\{[^}]+\}/, // Template interpolation
-      /{{[^}]+}}/, // Double braces
-      /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/, // ISO timestamps
-      /\[TIMESTAMP\]/i,
-      /\[SESSION/i,
-      /\[TIME/i,
-      /\[DATE/i,
-      /\[RANDOM/i,
-    ];
-
-    for (const pattern of forbidden) {
-      if (pattern.test(prompt)) {
-        throw new PrefixModificationError(
-          `System prompt contains dynamic content matching: ${pattern}. ` +
-            `This would destroy cache consistency. Use static content only.`
-        );
-      }
-    }
   }
 
   /**
@@ -239,17 +260,22 @@ export class ImmutablePrefixFactory {
     fewShots?: IMessage[];
     model: string;
     parameters: IModelParameters;
+    allowTemplateLiterals?: boolean;
   }): IImmutablePrefix {
     return new ImmutablePrefix(config);
   }
 
-  static fromJSON(data: IPrefixContent): IImmutablePrefix {
+  static fromJSON(
+    data: IPrefixContent,
+    options?: { allowTemplateLiterals?: boolean }
+  ): IImmutablePrefix {
     return new ImmutablePrefix({
       systemPrompt: data.systemPrompt,
       tools: data.tools,
       fewShots: data.fewShots,
       model: data.model,
       parameters: data.parameters,
+      allowTemplateLiterals: options?.allowTemplateLiterals,
     });
   }
 }

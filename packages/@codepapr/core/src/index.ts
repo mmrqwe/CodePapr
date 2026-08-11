@@ -4,7 +4,12 @@
 
 // Cache exports
 export { Serializer } from './cache/Serializer';
-export { ImmutablePrefix, ImmutablePrefixFactory } from './cache/ImmutablePrefix';
+export {
+  ImmutablePrefix,
+  ImmutablePrefixFactory,
+  validateStaticContent,
+} from './cache/ImmutablePrefix';
+export type { StaticContentValidationOptions } from './cache/ImmutablePrefix';
 export { AppendOnlyLog } from './cache/AppendOnlyLog';
 export { VolatileScratch } from './cache/VolatileScratch';
 export { CachePartition } from './cache/CachePartition';

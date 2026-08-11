@@ -807,4 +807,44 @@ describe('DeepSeekProvider', () => {
     expect((caught as Error).message).toContain('Stream ended prematurely');
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
+
+  it('只收到 usage 而无 [DONE]/finish_reason 同样判定截断，不当作正常完成', async () => {
+    // 坏中继：先发 usage 再直接关闭连接——旧实现把 usage 当终止信号放行，
+    // 部分内容被当成正常完成返回，且 finish_reason 缺失绕过 length 守卫。
+    const truncatedWithUsage =
+      'data: {"id":"resp-trunc-usage","choices":[{"index":0,"delta":{"content":"半"},"finish_reason":null}]}\n\n' +
+      'data: {"id":"resp-trunc-usage","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":5}}\n\n';
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(truncatedWithUsage, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new DeepSeekProvider({
+      apiKey: 'test-key',
+      streamRetryDelayMs: () => 0,
+      streamMaxRetries: 2,
+    });
+    let caught: unknown;
+    try {
+      await provider.streamChat?.(
+        {
+          model: 'deepseek-v4-pro',
+          messages: [{ id: 'user-1', role: 'user', content: '请回答', timestamp: 1 }],
+          maxTokens: 1024,
+        },
+        () => {}
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ProviderRequestError);
+    expect((caught as ProviderRequestError).retriable).toBe(true);
+    expect((caught as Error).message).toContain('Stream ended prematurely');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
 });

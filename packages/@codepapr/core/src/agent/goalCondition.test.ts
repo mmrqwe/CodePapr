@@ -74,6 +74,16 @@ describe('parseGoalCondition', () => {
     expect(result.humanReadable).toContain('修复 auth 测试');
   });
 
+  it('以 | 开头的输入不残留前导分隔符（边界修复）', () => {
+    const objective = parseGoalCondition('| exec:npm test');
+    expect(objective.clauses).toHaveLength(1);
+    expect(objective.clauses[0].command).toBe('npm');
+
+    const subjective = parseGoalCondition('| 美化登录页');
+    expect(subjective.clauses).toHaveLength(0);
+    expect(subjective.humanReadable).toBe('美化登录页');
+  });
+
   it('解析带引号的命令参数', () => {
     const result = parseGoalCondition('exec:echo "hello world"');
     expect(result.clauses[0].command).toBe('echo');

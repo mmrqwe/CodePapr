@@ -1,3 +1,4 @@
+import { errorMessage } from '@codepapr/common';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { join } from '@tauri-apps/api/path';
@@ -833,7 +834,7 @@ export function CodePreviewPanel({
         if (!cancelled) {
           setPreviewContent('');
           setPreviewContentPath(null);
-          setPreviewError((err as Error).message);
+          setPreviewError(errorMessage(err));
         }
       } finally {
         if (!cancelled) {

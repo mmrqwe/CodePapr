@@ -80,6 +80,7 @@ import type { AgentRuntimeHandle } from '../agent/WorkerBackedAgent';
 import { handleWorkspaceMutation } from './internals/backgroundDiagnostics';
 import { createSendMessage } from './internals/sendMessage';
 import { upsertRecentWorkspace, sortRecentWorkspaces } from './internals/recentWorkspaces';
+import { toast } from './toastStore';
 import type {
   AgentActions,
   AgentState,
@@ -314,6 +315,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _gitReady: false,
       _gitReadyError: null,
       _checkpointError: null,
+      _persistenceError: null,
       _checkpointSeq: 0,
       _turnSeq: 0,
       _pendingMemoryConsolidation: false,
@@ -365,7 +367,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             disposeAgentHandle(get);
             set({ settings: nextSettings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
             if (get()._settingsPersistable) {
-              void saveAppSettings(nextSettings).catch(() => undefined);
+              void saveAppSettings(nextSettings).catch((err) => {
+                // 持久化失败不可静默：内存已推进，磁盘仍是旧设置，下次启动即分叉。
+                const message = `设置保存失败：${err instanceof Error ? err.message : String(err)}`;
+                set({ _persistenceError: message });
+                toast.error(message);
+              });
             }
           }
         }
@@ -382,7 +389,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         const settings = normalizeSettings({ ...get().settings, ...partial });
         disposeAgentHandle(get);
         set({ settings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
-        void saveAppSettings(settings).catch(() => undefined);
+        void saveAppSettings(settings).catch((err) => {
+          const message = `设置保存失败：${err instanceof Error ? err.message : String(err)}`;
+          set({ _persistenceError: message });
+          toast.error(message);
+        });
         void invoke('set_external_access_yolo', { enabled: settings.folderAccessYolo }).catch(() => undefined);
         if (settings.browserEngine !== previousEngine) {
           void applyBrowserEngine(settings.browserEngine);
@@ -423,6 +434,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _gitReady: false,
       _gitReadyError: null,
       _checkpointError: null,
+      _persistenceError: null,
       _checkpointSeq: 0,
       _turnSeq: 0,
       _sessionLru: [],
@@ -470,6 +482,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _gitReady: false,
           _gitReadyError: null,
           _checkpointError: null,
+      _persistenceError: null,
           _checkpointSeq: 0,
           _turnSeq: 0,
           _sessionLru: [],
@@ -501,7 +514,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         let conversationStats = createEmptyConversationStats();
         let sessionConversationStats: Record<string, unknown> = {};
         let projectDiagnosticsReport: unknown = null;
-        let messageCheckpoints: Record<string, string> = {};
+        let messageCheckpoints: Record<string, { sha: string; sessionId: string }> = {};
         let sessionTodoLists: Record<string, unknown> = {};
         const messageLoadFailed: Record<string, boolean> = {};
 
@@ -580,7 +593,16 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             );
           }
           projectDiagnosticsReport = snapshot.projectDiagnosticsReport;
-          messageCheckpoints = snapshot.messageCheckpoints ?? {};
+          // 旧格式锚点是纯字符串（无会话归属）：升级为 { sha, sessionId: '' }，
+          // sessionId 为空永不匹配任何会话，clearMessages 不会误删。
+          messageCheckpoints = Object.fromEntries(
+            Object.entries(snapshot.messageCheckpoints ?? {}).map(([id, value]) => [
+              id,
+              typeof value === 'string'
+                ? { sha: value, sessionId: '' }
+                : value,
+            ])
+          ) as Record<string, { sha: string; sessionId: string }>;
           sessionTodoLists = snapshot.sessionTodoLists ?? {};
         }
 
@@ -650,6 +672,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _gitReady: false,
           _gitReadyError: null,
           _checkpointError: null,
+      _persistenceError: null,
           _checkpointSeq: 0,
           _turnSeq: 0,
           // Active session first; the rest follow the persisted (updatedAt DESC)
@@ -684,7 +707,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             recentWorkspaces: nextRecent,
           });
           set({ settings: nextSettings });
-          void saveAppSettings(nextSettings).catch(() => undefined);
+          void saveAppSettings(nextSettings).catch((err) => {
+            const message = `设置保存失败：${err instanceof Error ? err.message : String(err)}`;
+            set({ _persistenceError: message });
+            toast.error(message);
+          });
         }
       },
 
@@ -773,10 +800,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
                 ]);
                 if (get().workspacePath !== path) return;
                 if (records.length > 0) {
-                  const cps: Record<string, string> = {};
+                  const cps: Record<string, { sha: string; sessionId: string }> = {};
                   let maxSeq = 0;
                   for (const r of records) {
-                    cps[r.messageId] = r.sha;
+                    cps[r.messageId] = { sha: r.sha, sessionId: r.sessionId };
                     const seqMatch = r.label.match(/checkpoint #(\d+)/);
                     if (seqMatch) {
                       maxSeq = Math.max(maxSeq, parseInt(seqMatch[1], 10));
@@ -809,6 +836,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _gitReady: false,
           _gitReadyError: lastError,
           _checkpointError: null,
+      _persistenceError: null,
         });
       },
 
@@ -1123,7 +1151,15 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _taskChecklists: s.activeSessionId
             ? { ...s._taskChecklists, [s.activeSessionId]: null }
             : s._taskChecklists,
-          _messageCheckpoints: {},
+          // 只清当前会话的 checkpoint 锚点：其他会话的历史锚点（resetToMessage
+          // 依赖）必须保留——旧实现整体置 {} 会丢光所有会话的回滚点。
+          _messageCheckpoints: s.activeSessionId
+            ? Object.fromEntries(
+                Object.entries(s._messageCheckpoints).filter(
+                  ([, entry]) => entry.sessionId !== s.activeSessionId
+                )
+              )
+            : s._messageCheckpoints,
           _agent: null,
           _agentModel: null,
           _agentPromptKey: null,
@@ -1131,6 +1167,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _checkpointSeq: 0,
           _turnSeq: 0,
           _checkpointError: null,
+      _persistenceError: null,
           _latestContextSnapshot: null,
         }));
         saveCurrentProjectState(get(), { purgeDeletedContent: true });
@@ -1141,7 +1178,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
       resetToMessage: async (messageId): Promise<ResetToMessageResult> => {
         const { messages, activeSessionId, _messageCheckpoints, workspacePath } = get();
-        const targetSha = _messageCheckpoints[messageId];
+        const targetSha = _messageCheckpoints[messageId]?.sha;
         if (!targetSha) return { ok: false, reason: 'no-checkpoint' };
 
         const msgIndex = messages.findIndex((m) => m.id === messageId);
@@ -1174,11 +1211,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
         const truncatedMessages = messages.slice(0, cutIndex);
         const keptIds = new Set(truncatedMessages.map((m) => m.id));
-        const nextCheckpoints: Record<string, string> = {};
+        const nextCheckpoints: Record<string, { sha: string; sessionId: string }> = {};
         const removedIds: string[] = [];
-        for (const [id, sha] of Object.entries(_messageCheckpoints)) {
+        for (const [id, entry] of Object.entries(_messageCheckpoints)) {
           if (keptIds.has(id)) {
-            nextCheckpoints[id] = sha;
+            nextCheckpoints[id] = entry;
           } else {
             removedIds.push(id);
           }
@@ -1224,6 +1261,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         saveCurrentProjectState(get());
       },
 
+      setPersistenceError: (message) => {
+        set({ _persistenceError: message });
+      },
+
       refreshProjectDiagnostics: async () => {
         const workspacePath = get().workspacePath.trim();
         if (!workspacePath) {
@@ -1240,7 +1281,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         const { _agent, isLoading, loadingSessionId } = get();
         if (!isLoading || !_agent) return;
 
-        _agent.cancel();
+        // 停止按钮只取消当前聊天回合：旧实现调用 cancel() 会连带
+        // cancelAllAppAgents()，把独立的 papr app-agent 运行一并杀掉。
+        _agent.cancelSession();
 
         set((s) => {
           const sessionId = loadingSessionId ?? s.activeSessionId;

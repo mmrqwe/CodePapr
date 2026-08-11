@@ -5,6 +5,7 @@ pub fn git_restore_files_impl(
     workspace: &std::path::Path,
     pathspecs: &[String],
     source: Option<&str>,
+    include_untracked: Option<bool>,
 ) -> GitOperationResult {
     let repo = match open_repo(workspace) {
         Ok(r) => r,
@@ -60,6 +61,11 @@ pub fn git_restore_files_impl(
 
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
+    // 恢复时是否一并处理未跟踪文件（默认 false）：true 时删除 checkout 路径
+    // 范围内挡路的未跟踪文件，与 git2 CheckoutBuilder::remove_untracked 语义一致。
+    if include_untracked.unwrap_or(false) {
+        checkout.remove_untracked(true);
+    }
     if !pathspecs.is_empty() {
         // 仅恢复指定路径，避免误伤工作区其它未提交改动。
         // git2 0.21 的 CheckoutBuilder::path() 每次添加一个 pathspec（无 paths() 批量方法）。
@@ -92,11 +98,17 @@ pub async fn git_restore_files(
     workspace_path: String,
     pathspecs: Option<Vec<String>>,
     source: Option<String>,
+    include_untracked: Option<bool>,
 ) -> GitOperationResult {
     // git2 恢复是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
     crate::shared::run_blocking_workspace_task(move || -> Result<GitOperationResult, String> {
         let workspace = std::path::PathBuf::from(workspace_path);
-        Ok(git_restore_files_impl(&workspace, &pathspecs.unwrap_or_default(), source.as_deref()))
+        Ok(git_restore_files_impl(
+            &workspace,
+            &pathspecs.unwrap_or_default(),
+            source.as_deref(),
+            include_untracked,
+        ))
     })
     .await
     .unwrap_or_else(|err| GitOperationResult {
@@ -149,6 +161,7 @@ mod tests {
             &workspace,
             &["revert.txt".to_string()],
             None,
+            None,
         );
         assert!(result.ok, "restore should succeed: {}", result.message);
 
@@ -180,11 +193,52 @@ mod tests {
         fs::write(workspace.join("a.txt"), "a-modified\n").unwrap();
         fs::write(workspace.join("b.txt"), "b-modified\n").unwrap();
 
-        let result = git_restore_files_impl(&workspace, &[], None);
+        let result = git_restore_files_impl(&workspace, &[], None, None);
         assert!(result.ok, "restore should succeed: {}", result.message);
 
         assert_eq!(fs::read_to_string(workspace.join("a.txt")).unwrap(), "a-original\n");
         assert_eq!(fs::read_to_string(workspace.join("b.txt")).unwrap(), "b-original\n");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    /// include_untracked=true 时恢复会一并移除挡路的未跟踪文件；
+    /// 默认（false）保留未跟踪文件（三层契约：TS 传 ?? false，Rust 参数生效）。
+    #[test]
+    fn test_restore_include_untracked_removes_untracked_files() {
+        let workspace = temp_workspace("untracked");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        fs::write(workspace.join("tracked.txt"), "original\n").unwrap();
+        engine.create("baseline").expect("baseline");
+
+        // 修改已跟踪文件 + 新增一个未跟踪文件
+        fs::write(workspace.join("tracked.txt"), "modified\n").unwrap();
+        fs::write(workspace.join("new-untracked.txt"), "scratch\n").unwrap();
+
+        // 默认（include_untracked=false）：未跟踪文件保留
+        let result = git_restore_files_impl(&workspace, &[], None, None);
+        assert!(result.ok);
+        assert!(workspace.join("new-untracked.txt").exists());
+        assert_eq!(
+            fs::read_to_string(workspace.join("tracked.txt")).unwrap(),
+            "original\n"
+        );
+
+        // include_untracked=true：恢复时移除未跟踪文件
+        fs::write(workspace.join("tracked.txt"), "modified-again\n").unwrap();
+        fs::write(workspace.join("new-untracked.txt"), "scratch\n").unwrap();
+        let result = git_restore_files_impl(&workspace, &[], None, Some(true));
+        assert!(result.ok);
+        assert!(
+            !workspace.join("new-untracked.txt").exists(),
+            "include_untracked=true 应移除未跟踪文件"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join("tracked.txt")).unwrap(),
+            "original\n"
+        );
 
         fs::remove_dir_all(&workspace).ok();
     }

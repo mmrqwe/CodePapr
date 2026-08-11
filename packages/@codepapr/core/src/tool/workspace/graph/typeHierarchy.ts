@@ -68,8 +68,11 @@ export function buildTypeHierarchy(
       roots.push(node);
     }
     if (node.children.length === 0 && node.parents.length > 0) {
-      const chain = buildAncestorChain(node, nodes);
-      if (chain.length >= 2) chains.push(chain);
+      // 多父节点按每条父路径各生成一条链（旧实现只跟 parents[0]，
+      // 多继承链不完整），数量封顶防指数爆炸。
+      for (const chain of buildAncestorChains(node, nodes)) {
+        if (chain.length >= 2) chains.push(chain);
+      }
     }
   }
 
@@ -88,7 +91,10 @@ function assignDepth(
   visiting: Set<string>,
 ) {
   if (visiting.has(node.symbolId)) return;
-  if (depth < node.depth) return;
+  // 记忆化剪枝：深度只增不减。等深重访（菱形/多继承 DAG 的常见情况）不会
+  // 给后代带来任何新信息，直接返回——旧实现用 `depth < node.depth`，等深
+  // 重访照样整棵子树重探，稠密图的遍历次数 = 根到节点的路径数（指数级）。
+  if (depth <= node.depth) return;
   node.depth = depth;
   visiting.add(node.symbolId);
   for (const childId of node.children) {
@@ -98,23 +104,36 @@ function assignDepth(
   visiting.delete(node.symbolId);
 }
 
-function buildAncestorChain(
+/** 每条根→叶路径最多产出的继承链数（多父节点的链数按路径指数增长，必须封顶）。 */
+const MAX_CHAINS_PER_LEAF = 8;
+
+function buildAncestorChains(
   leaf: TypeNode,
   nodes: Map<string, TypeNode>,
-): TypeNode[] {
-  const chain: TypeNode[] = [leaf];
-  let current = leaf;
-  const seen = new Set<string>([current.symbolId]);
+): TypeNode[][] {
+  const results: TypeNode[][] = [];
+  const current: TypeNode[] = [leaf];
+  const seen = new Set<string>([leaf.symbolId]);
 
-  while (current.parents.length > 0) {
-    const parentId = current.parents[0];
-    if (seen.has(parentId)) break;
-    seen.add(parentId);
-    const parent = nodes.get(parentId);
-    if (!parent) break;
-    chain.unshift(parent);
-    current = parent;
-  }
+  const dfs = (node: TypeNode): void => {
+    if (results.length >= MAX_CHAINS_PER_LEAF) return;
+    if (node.parents.length === 0) {
+      results.push([...current]);
+      return;
+    }
+    for (const parentId of node.parents) {
+      if (results.length >= MAX_CHAINS_PER_LEAF) return;
+      if (seen.has(parentId)) continue;
+      const parent = nodes.get(parentId);
+      if (!parent) continue;
+      seen.add(parentId);
+      current.unshift(parent);
+      dfs(parent);
+      current.shift();
+      seen.delete(parentId);
+    }
+  };
 
-  return chain;
+  dfs(leaf);
+  return results;
 }

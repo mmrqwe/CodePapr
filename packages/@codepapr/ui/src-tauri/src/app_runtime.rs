@@ -110,6 +110,25 @@ pub fn check_port_available_detail(port: u16) -> Result<String, String> {
     Ok(format!("v4={} v6={}", probe(("127.0.0.1", port)), probe(("::1", port))))
 }
 
+/// 端口当前监听进程的 PID 列表（无监听返回空）。用于 app 启动时验证端口
+/// 归属：轮询到「端口被监听」≠「我们 spawn 的进程在监听」——外部进程抢占
+/// 端口时旧实现照样判「启动成功」，返回死进程 pid；调用方必须核对归属。
+#[tauri::command]
+pub fn check_port_owner(port: u16) -> Vec<u32> {
+    let output = std::process::Command::new("lsof")
+        .args(["-ti", &format!(":{port}")])
+        .output();
+    if let Ok(out) = output {
+        if out.status.success() {
+            return String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter_map(|line| line.trim().parse::<u32>().ok())
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
 pub fn handle_app_protocol<R: tauri::Runtime>(
     _ctx: UriSchemeContext<'_, R>,
     request: Request<Vec<u8>>,

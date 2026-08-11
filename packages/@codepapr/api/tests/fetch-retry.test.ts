@@ -30,6 +30,7 @@ function makeProvider(overrides: {
   timeout?: number;
   maxRetries?: number;
   onRequestRetry?: (attempt: number, maxRetries: number, error: Error) => void;
+  requestRetryDelayMs?: (attempt: number) => number;
 }) {
   return new TestProvider({
     apiKey: 'test-key',
@@ -37,12 +38,35 @@ function makeProvider(overrides: {
     timeout: overrides.timeout ?? 60000,
     maxRetries: overrides.maxRetries ?? DEFAULT_REQUEST_MAX_RETRIES,
     onRequestRetry: overrides.onRequestRetry,
-    requestRetryDelayMs: () => 0,
+    requestRetryDelayMs: overrides.requestRetryDelayMs ?? (() => 0),
   });
 }
 
 function statusResponse(status: number): Response {
   return new Response(`error body ${status}`, { status });
+}
+
+/**
+ * 模拟坏中继：立即返回响应头（非 2xx），但 body 永不完成，
+ * 直到关联的 abort signal 触发（内部超时或用户取消）。
+ */
+function hangingBodyResponse(signal?: AbortSignal): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      return new Promise<void>((resolve) => {
+        const onAbort = (): void => {
+          controller.error(new DOMException('The operation was aborted', 'AbortError'));
+          resolve();
+        };
+        if (signal?.aborted) {
+          onAbort();
+          return;
+        }
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
+    },
+  });
+  return new Response(stream, { status: 502, statusText: 'Bad Gateway' });
 }
 
 describe('fetchWithRetry 重试语义', () => {
@@ -130,6 +154,65 @@ describe('fetchWithRetry 重试语义', () => {
     expect(err).toBeInstanceOf(DOMException);
     expect((err as DOMException).name).toBe('AbortError');
     // 用户取消不应触发重试
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('非 2xx 响应 body 读取仍在超时保护内：坏中继只发响应头即挂起 → 可重试超时错误', async () => {
+    // 坏中继：返回 502 但 body 永不结束，直到内部超时控制器 abort。
+    const fetchMock = vi.fn(
+      (_url: string, init?: RequestInit) => hangingBodyResponse(init?.signal)
+    );
+    const provider = makeProvider({
+      fetchFn: fetchMock as unknown as typeof fetch,
+      timeout: 20,
+      maxRetries: 1,
+    });
+
+    const err = await provider.callFetch('http://x', { method: 'POST' }).catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderRequestError);
+    expect((err as ProviderRequestError).retriable).toBe(true);
+    expect((err as Error).message).toContain('timed out');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('非 2xx 响应 body 读取期间用户取消 → 立即 AbortError，不重试', async () => {
+    const fetchMock = vi.fn(
+      (_url: string, init?: RequestInit) => hangingBodyResponse(init?.signal)
+    );
+    const provider = makeProvider({
+      fetchFn: fetchMock as unknown as typeof fetch,
+      timeout: 60000,
+      maxRetries: 3,
+    });
+
+    const controller = new AbortController();
+    const pending = provider.callFetch('http://x', { method: 'POST' }, controller.signal);
+    setTimeout(() => controller.abort(), 5);
+
+    const err = await pending.catch((e) => e);
+    expect(err).toBeInstanceOf(DOMException);
+    expect((err as DOMException).name).toBe('AbortError');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('退避等待可取消：用户取消立即抛 AbortError，不等最长 30s 退避', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => statusResponse(429));
+    const provider = makeProvider({
+      fetchFn: fetchMock as unknown as typeof fetch,
+      maxRetries: 3,
+      requestRetryDelayMs: () => 5000,
+    });
+
+    const controller = new AbortController();
+    const started = Date.now();
+    const pending = provider.callFetch('http://x', { method: 'POST' }, controller.signal);
+    setTimeout(() => controller.abort(), 10);
+
+    const err = await pending.catch((e) => e);
+    expect(err).toBeInstanceOf(DOMException);
+    expect((err as DOMException).name).toBe('AbortError');
+    expect(Date.now() - started).toBeLessThan(3000);
+    // 只在首次请求后进入退避，取消打断后不应再发起第 2 次尝试
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

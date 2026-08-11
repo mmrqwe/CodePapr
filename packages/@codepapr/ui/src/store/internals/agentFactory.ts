@@ -180,6 +180,11 @@ class _MainThreadAgentHandle implements AgentRuntimeHandle {
     this.abortController?.abort();
   }
 
+  /** 主线程 agent 无 app-agent 概念：与 cancel() 等价。 */
+  cancelSession(): void {
+    this.cancel();
+  }
+
   destroy(): void {
     this.cancel();
   }

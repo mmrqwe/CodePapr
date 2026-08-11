@@ -20,12 +20,15 @@ export function AppModal({ lang, isDark }: AppModalProps) {
   const reloadApp = useAppRuntimeStore((state) => state.reloadApp);
   const [error, setError] = useState('');
   const [showDetails, setShowDetails] = useState(false);
-  const [loaded, setLoaded] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const loadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 超时回调读 ref 而非 state：旧实现闭包捕获了 effect 运行时（切换前的）
+  // loaded 值，从已加载 app 切到失败 app 时 10s 后 `if (!loaded)` 恒 false，
+  // 白屏且无任何错误提示。
+  const loadedRef = useRef(false);
 
   const handleIframeLoad = useCallback(() => {
-    setLoaded(true);
+    loadedRef.current = true;
     if (loadTimerRef.current) {
       clearTimeout(loadTimerRef.current);
       loadTimerRef.current = null;
@@ -33,10 +36,10 @@ export function AppModal({ lang, isDark }: AppModalProps) {
   }, []);
 
   useEffect(() => {
-    setLoaded(false);
+    loadedRef.current = false;
     setError('');
     loadTimerRef.current = setTimeout(() => {
-      if (!loaded) {
+      if (!loadedRef.current) {
         setError(t.appModalLoadFailed);
       }
     }, 10_000);

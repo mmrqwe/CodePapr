@@ -70,14 +70,20 @@ export function resolveEffectiveAccess(
   return override ? intersectAccess(override, declared) : declared;
 }
 
-/** papr SDK 能力检查（两轴）：storage/fs 永远允许，http 需网络轴，agent 需 manifest 声明。 */
+/** papr SDK 能力检查（两轴）：storage/fs 按 local 轴门槛放行（读操作需 ≥read，
+ *  写操作需 =write），http 需网络轴，agent 需 manifest 声明。local=none 的
+ *  app 不再无条件获得存储/文件能力（旧实现两轴中 local 轴完全不参与，
+ *  无纵深防御）。 */
 export function accessAllows(access: PaprAccess, capability: string, manifest: PaprManifest | null): boolean {
   if (capability.startsWith('http:')) return access.network;
   if (capability.startsWith('agent:run:')) {
     const name = capability.slice('agent:run:'.length);
     return manifest?.agents?.some((a) => a.name === name) ?? false;
   }
-  if (capability.startsWith('storage:') || capability.startsWith('fs:')) return true;
+  if (capability.startsWith('storage:') || capability.startsWith('fs:')) {
+    const isWrite = capability.endsWith(':write');
+    return isWrite ? access.local === 'write' : localRank(access.local) >= 1;
+  }
   return false;
 }
 

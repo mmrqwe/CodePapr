@@ -94,6 +94,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
     gitReady,
     gitReadyError,
     checkpointError,
+    persistenceError,
     _agentDefinitions,
     _skillDefinitions,
     mentorEnabled,
@@ -116,6 +117,7 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
       gitReady: state._gitReady,
       gitReadyError: state._gitReadyError,
       checkpointError: state._checkpointError,
+      persistenceError: state._persistenceError,
       _agentDefinitions: state._agentDefinitions,
       _skillDefinitions: state._skillDefinitions,
       mentorEnabled: state.settings.mentorEnabled ?? true,
@@ -1193,6 +1195,18 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
             : settings.lang === 'zh-TW'
             ? `程式碼快照失敗：${checkpointError}（詳見控制台）`
             : `代码快照创建失败：${checkpointError}（详见控制台）`}
+        </div>
+      )}
+      {persistenceError && (
+        <div
+          role="status"
+          className="pointer-events-none absolute inset-x-0 top-2 z-30 mx-auto w-fit max-w-[90%] rounded-full border border-red-500/30 bg-red-500/15 px-4 py-1.5 text-xs text-red-200 shadow-lg backdrop-blur-sm"
+        >
+          {settings.lang === 'en'
+            ? `Failed to persist data: ${persistenceError} — your changes may not survive restart`
+            : settings.lang === 'zh-TW'
+            ? `資料持久化失敗：${persistenceError} — 重啟後變更可能遺失`
+            : `数据持久化失败：${persistenceError} — 重启后更改可能丢失`}
         </div>
       )}
       <GoalBanner />

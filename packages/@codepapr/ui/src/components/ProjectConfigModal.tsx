@@ -1,3 +1,4 @@
+import { errorMessage } from '@codepapr/common';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
@@ -350,7 +351,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
       setAgentContent(result.content);
     } catch (err) {
       setAgentContent('');
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   }, [selectedAgentPath, workspacePath]);
 
@@ -369,7 +370,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
       setSkillContent(result.content);
     } catch (err) {
       setSkillContent('');
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   }, [selectedSkillPath, workspacePath]);
 
@@ -434,7 +435,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
       await afterProjectConfigChanged([PROJECT_AGENTS_FILE]);
       setStatus(t.projectConfigSaved);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setIsSaving(false);
     }
@@ -462,7 +463,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
       setNewAgentName('helper');
       setStatus(t.projectConfigAgentCreated);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setIsSaving(false);
     }
@@ -482,7 +483,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
       await afterProjectConfigChanged([selectedAgentPath]);
       setStatus(t.projectConfigSaved);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setIsSaving(false);
     }
@@ -502,7 +503,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
       setStatus(t.projectConfigAgentDeleted);
       await loadAgentNames();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setIsSaving(false);
     }
@@ -531,7 +532,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
       setNewSkillName('docs');
       setStatus(t.projectConfigSkillCreated);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setIsSaving(false);
     }
@@ -552,7 +553,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
       await loadSkillNames();
       setStatus(t.projectConfigSaved);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setIsSaving(false);
     }
@@ -574,7 +575,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
       );
       setStatus(t.projectConfigSaved);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setIsSaving(false);
     }
@@ -601,7 +602,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
       setStatus(t.projectConfigSkillDeleted);
       await loadSkillNames();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setIsSaving(false);
     }

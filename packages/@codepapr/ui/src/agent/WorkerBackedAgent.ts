@@ -102,6 +102,13 @@ const WORKER_HEARTBEAT_TIMEOUT_MS = 15000;
 // produces false crashes that cascade through the recovery retries.
 const WORKER_HEARTBEAT_INITIAL_GRACE_MS = 60000;
 const MAX_WORKER_DIAGNOSTICS = 20;
+// 取消 ACK 宽限：用户点停止后，worker 必须在该窗口内回 canceller ACK，
+// 否则被硬 terminate。固定 2s 会误杀"慢但健康"的 worker——大上下文同步
+// （全量日志 clone + getByteLength 逐条哈希）会阻塞 worker 事件循环数秒，
+// cancel-session 处理与 ACK 都排在其后。10s 覆盖同步开销；
+// 期间 worker 每响应一条消息（含心跳 pong）就重新武装整个窗口，
+// 只有彻底无响应的 worker 才会被终止。
+const CANCEL_ACK_GRACE_MS = 10_000;
 
 /** Error thrown when the agent worker crashes (OOM, uncaught exception, etc.).
  *  The `chat()` promise rejects with this so the store's catch block can
@@ -135,6 +142,9 @@ export interface AgentRuntimeHandle {
   ): Promise<IAgentResponse>;
   getSession(): { logStore: AppendOnlyLog };
   cancel(): void;
+  /** 仅取消当前聊天回合（会话），不影响在飞的 papr app-agent 执行。
+   *  停止按钮走此路径；destroy() 仍走 cancel()（连带 app-agent）。 */
+  cancelSession(): void;
   destroy(): void;
   /** Returns true if the worker has crashed and can no longer process messages. */
   isCrashed(): boolean;
@@ -448,6 +458,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     };
   }
 
+  /** 完整取消：会话 + 全部在飞的 app-agent。destroy() 使用；停止按钮请用 cancelSession()。 */
   cancel(): void {
     cancelExternalAccessRequests();
     const requestId = this.activeRequestId;
@@ -459,6 +470,30 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       return;
     }
 
+    this.cancelSessionCore(requestId, pending);
+
+    this.cancelAllAppAgents();
+  }
+
+  /** 仅取消当前会话回合：停止按钮不能连带杀掉 papr app-agent 的独立运行。 */
+  cancelSession(): void {
+    cancelExternalAccessRequests();
+    const requestId = this.activeRequestId;
+    if (!requestId) return;
+
+    const pending = this.pendingRequests.get(requestId);
+    if (!pending) {
+      this.activeRequestId = null;
+      return;
+    }
+
+    this.cancelSessionCore(requestId, pending);
+  }
+
+  private cancelSessionCore(
+    requestId: string,
+    pending: { reject: (reason?: unknown) => void }
+  ): void {
     this.clearCancelTimer();
     this.clearSnapshotTimer();
 
@@ -471,8 +506,15 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       requestId,
     } satisfies MainToAgentWorkerMessage);
 
-    this.cancelAllAppAgents();
+    this.scheduleCancelTermination(requestId, pending, CANCEL_ACK_GRACE_MS);
+  }
 
+  /** 硬终止兜底：worker 未在宽限窗口内回 ACK（卡死/已死）时 terminate。 */
+  private scheduleCancelTermination(
+    requestId: string,
+    pending: { reject: (reason?: unknown) => void },
+    graceMs: number
+  ): void {
     this.cancelTimer = setTimeout(() => {
       // Worker did not acknowledge the cancel in time — it is stuck or dead.
       // Record the cause so the store can drop this agent and the next crash
@@ -480,7 +522,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       if (!this.crashed) {
         this.crashed = true;
         this.crashInfo = {
-          message: 'Agent worker did not acknowledge cancel within 2s (terminated)',
+          message: `Agent worker did not acknowledge cancel within ${Math.round(graceMs / 1000)}s (terminated)`,
         };
         this.clearHeartbeat();
       }
@@ -489,7 +531,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       this.pendingRequests.delete(requestId);
       this.activeRequestId = null;
       this.cancelTimer = null;
-    }, 2000);
+    }, graceMs);
   }
 
   hasActiveAppAgentRequests(): boolean {
@@ -742,6 +784,17 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
   private readonly handleWorkerMessage = (event: MessageEvent<AgentWorkerToMainMessage>) => {
     const message = event.data;
+
+    // 取消 ACK 等待期间 worker 仍在响应（任何消息都算活着）：重新武装
+    // 终止宽限窗口。大上下文同步会阻塞事件循环，worker 只是"慢"而非死。
+    if (message.type !== 'cancelled' && this.cancelTimer !== null && this.activeRequestId) {
+      const pending = this.pendingRequests.get(this.activeRequestId);
+      if (pending) {
+        clearTimeout(this.cancelTimer);
+        this.cancelTimer = null;
+        this.scheduleCancelTermination(this.activeRequestId, pending, CANCEL_ACK_GRACE_MS);
+      }
+    }
 
     if (message.type === 'pong') {
       this.hasReceivedPong = true;

@@ -39,6 +39,74 @@ function createResponse(
 }
 
 describe('Agent', () => {
+  it('logStore.append 抛错时 finally 仍复位 scratch 与 abortController（旧实现抛错跳过复位）', async () => {
+    const toolRegistry = new ToolRegistry();
+    const session = new Session({
+      sessionId: 'session-reset',
+      prefix: new ImmutablePrefix({
+        systemPrompt: '你是测试助手',
+        tools: [],
+        model: 'test-model',
+        parameters: { temperature: 0.7, topP: 0.9, maxTokens: 1000 },
+      }),
+      toolRegistry,
+    });
+
+    // 第一次 append 抛错，之后恢复正常
+    const originalAppend = session.logStore.append.bind(session.logStore);
+    vi.spyOn(session.logStore, 'append')
+      .mockRejectedValueOnce(new Error('append failed'))
+      .mockImplementation((msg) => originalAppend(msg));
+
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi
+        .fn<(_: IChatRequest) => Promise<IChatResponse>>()
+        .mockResolvedValue(createResponse('ok')),
+    };
+
+    const agent = new Agent({
+      session,
+      provider,
+      providerName: 'openai',
+      requestBuilder: {
+        build: ({ model }) => ({ model, messages: [] }),
+      },
+      cacheValidator: {
+        validate: () => ({
+          prefixCached: false,
+          prefixCreated: false,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          newInputTokens: 1,
+          outputTokens: 1,
+          cacheHitRate: 0,
+        }),
+      },
+    });
+
+    await expect(agent.chat('hi')).rejects.toThrow('append failed');
+
+    // finally 已执行：markRoundEnd 写入结束数据（旧实现 append 在 try 之前
+    // 抛错，scratch 停在「回合进行中」，lastRoundData 永远不会写入）
+    const scratchInternals = session.scratch as unknown as {
+      lastRoundData: { duration?: number };
+      roundStartTime: number;
+    };
+    expect(typeof scratchInternals.lastRoundData.duration).toBe('number');
+    expect(scratchInternals.roundStartTime).toBe(0);
+
+    // abortController 已清空：新回合不受陈旧 controller 影响
+    const agentInternals = agent as unknown as { abortController: AbortController | null };
+    expect(agentInternals.abortController).toBeNull();
+
+    // 失败后同一 agent 仍可正常开启新回合
+    const response = await agent.chat('hi again');
+    expect(response.content).toBe('ok');
+  });
+
   it('returns the final assistant round while keeping earlier rounds in the session log', async () => {
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(

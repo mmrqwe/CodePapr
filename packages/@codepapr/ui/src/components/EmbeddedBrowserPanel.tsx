@@ -1,3 +1,4 @@
+import { errorMessage } from '@codepapr/common';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -122,7 +123,7 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
           startedAt: Date.now(),
         });
       } catch (err) {
-        setActionError((err as Error).message);
+        setActionError(errorMessage(err));
       } finally {
         setIsNavigating(false);
       }
@@ -142,7 +143,7 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
           startedAt: Date.now(),
         });
       } catch (err) {
-        setActionError((err as Error).message);
+        setActionError(errorMessage(err));
       }
     },
     [workspacePath, setPageSession]

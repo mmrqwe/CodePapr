@@ -35,11 +35,11 @@ describe('sanitizeMcpToolPart', () => {
   });
 
   it('replaces spaces and special chars with underscores', () => {
-    expect(sanitizeMcpToolPart('my tool')).toBe('my_tool');
+    expect(sanitizeMcpToolPart('my tool')).toBe('my_tool_e68mvv');
   });
 
   it('strips leading/trailing underscores', () => {
-    expect(sanitizeMcpToolPart('%$^unsafe^%$')).toBe('unsafe');
+    expect(sanitizeMcpToolPart('%$^unsafe^%$')).toBe('unsafe_sycb5f');
   });
 
   it("falls back to 'tool' for empty or all-special input", () => {
@@ -49,6 +49,16 @@ describe('sanitizeMcpToolPart', () => {
 
   it('preserves hyphens', () => {
     expect(sanitizeMcpToolPart('postgres-db')).toBe('postgres-db');
+  });
+
+  it('有损消毒追加唯一后缀：foo.bar 与 foo_bar 不再碰撞', () => {
+    const dotted = sanitizeMcpToolPart('foo.bar');
+    const plain = sanitizeMcpToolPart('foo_bar');
+    expect(dotted).not.toBe(plain);
+    // 后缀来自原始名，确定性：同一原始名两次消毒结果一致
+    expect(dotted).toBe(sanitizeMcpToolPart('foo.bar'));
+    // 无损名保持原样
+    expect(plain).toBe('foo_bar');
   });
 });
 
@@ -64,6 +74,18 @@ describe('buildMcpToolName / parseMcpToolName', () => {
   it('handles server ids with underscores and hyphens', () => {
     const name = buildMcpToolName('my-server', 'some_tool');
     expect(name).toMatch(/^mcp__my-server__some_tool$/);
+  });
+
+  it('有损工具名（含点）生成无碰撞注册名，且映射解析可回原名', () => {
+    const nameA = buildMcpToolName('github', 'create.issue');
+    const nameB = buildMcpToolName('github', 'create_issue');
+    expect(nameA).not.toBe(nameB);
+    // 无损名保持原样
+    expect(nameB).toBe('mcp__github__create_issue');
+    // 有损名可解析回（serverId + 消毒后带哈希后缀的部分）
+    const parsed = parseMcpToolName(nameA);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.serverId).toBe('github');
   });
 
   it('returns null for names without the prefix', () => {

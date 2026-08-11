@@ -1,3 +1,4 @@
+import { errorMessage } from '@codepapr/common';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAgentStore } from '../store/agentStore';
 import { getTranslation } from '../utils/i18n';
@@ -65,7 +66,7 @@ export function ProjectDiagnosticsPanel({
         await refreshProjectDiagnostics();
         setError('');
       } catch (err) {
-        setError((err as Error).message);
+        setError(errorMessage(err));
       } finally {
         if (!silent) {
           setIsLoading(false);

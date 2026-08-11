@@ -188,20 +188,19 @@ export function createWorkspaceToolContext(params: WorkspaceToolContextParams) {
 
   const AMBIGUITY_MATCH_LIMIT = 8;
 
-  // 多处匹配消歧：当 search 命中多于一处且未用 replaceAll/expectedOccurrences 锁定时，
-  // 返回带行号与所在符号的富错误文本；无歧义时返回 null，交由 applySearchReplacePatch 正常处理。
+  // 多处匹配消歧：当 search 命中多于一处且未用 replaceAll 锁定时，返回带行号
+  // 与所在符号的富错误文本；无歧义时返回 null，交由 applySearchReplacePatch 正常处理。
+  // 注意：expectedOccurrences 只是数量校验器（必须等于实际匹配数），不能消歧——
+  // 命中多处时即使它恰好等于实际数，applySearchReplacePatch 仍会因未设 replaceAll
+  // 而失败。因此这里不把它当作"已锁定"信号，一律走富错误提示。
   const describeAmbiguousMatches = async (
     relativePath: string,
     content: string,
     search: string,
-    replaceAll: boolean | undefined,
-    expectedOccurrences: number | undefined
+    replaceAll: boolean | undefined
   ): Promise<string | null> => {
     const locations = locateSearchOccurrences(content, search);
     if (locations.length <= 1 || replaceAll) {
-      return null;
-    }
-    if (typeof expectedOccurrences === 'number' && expectedOccurrences === locations.length) {
       return null;
     }
 
@@ -234,7 +233,8 @@ export function createWorkspaceToolContext(params: WorkspaceToolContextParams) {
 
     return (
       `匹配到 ${locations.length} 处相同文本块，无法确定修改目标。` +
-      `请加长 search 纳入上下唯一内容，或设置 expectedOccurrences / replaceAll：\n` +
+      `请加长 search 纳入上下唯一内容，或设置 replaceAll=true（expectedOccurrences ` +
+      `只能校验数量，不能消歧）：\n` +
       detailLines.join('\n') +
       omitted
     );

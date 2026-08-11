@@ -30,7 +30,27 @@ pub(crate) fn is_internal_ipv6(ip: std::net::Ipv6Addr) -> bool {
     if ip.is_loopback() || ip.is_unspecified() {
         return true; // ::1, ::
     }
-    let first = ip.segments()[0];
+    // RFC 4291 §2.5.5.1 IPv4-compatible 形式 ::a.b.c.d（如 [::127.0.0.1]）：
+    // 前 5 段全零、后两段构成 IPv4。to_ipv4_mapped() 只认 ::ffff: 前缀，
+    // 漏判该兼容形式会让 SSRF 检查直接放过回环/内网目标。
+    let segments = ip.segments();
+    if segments[0] == 0
+        && segments[1] == 0
+        && segments[2] == 0
+        && segments[3] == 0
+        && segments[4] == 0
+    {
+        let v4 = std::net::Ipv4Addr::new(
+            (segments[5] >> 8) as u8,
+            (segments[5] & 0xff) as u8,
+            (segments[6] >> 8) as u8,
+            (segments[6] & 0xff) as u8,
+        );
+        if is_internal_ipv4(v4) {
+            return true;
+        }
+    }
+    let first = segments[0];
     (first & 0xfe00) == 0xfc00 // fc00::/7 unique-local (fd00::/8 too)
         || (first & 0xffc0) == 0xfe80 // fe80::/10 link-local
 }
@@ -593,6 +613,7 @@ fn stop_app_backend_processes(workspace_path: &str, port: u16) -> Result<usize, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::papr_runtime::permission::PaprLocalAccess;
     use crate::papr_runtime::manifest;
     use crate::test_helpers::TestWorkspace;
 
@@ -717,7 +738,9 @@ mod tests {
             args: None,
             port: None,
             level: None,
-            local: None,
+            // 两轴模型（#48）：fs/storage 按 local 轴门槛放行，
+            // 测试 app 声明 local=write 以覆盖读写场景。
+            local: Some(PaprLocalAccess::Write),
             network: None,
         };
         manifest::store_manifest(app_id, m);
@@ -869,7 +892,7 @@ mod tests {
     }
 
     #[test]
-    fn fs_permission_denied_without_grant() {
+    fn fs_write_requires_local_write_axis() {
         let ws = TestWorkspace::new("papr-fs-perm");
         crate::papr_runtime::app_context::register("noperm-app", &ws.workspace_arg());
 
@@ -887,11 +910,24 @@ mod tests {
             local: None,
             network: None,
         };
-        manifest::store_manifest("noperm-app", m);
 
-        // 两轴模型：papr.fs 是 app 自有沙箱，永远可用，无需声明任何权限
+        // 两轴模型（#48）：local 轴未声明 → 默认 none，papr.fs 写被拒绝
+        // （旧实现 storage/fs 无条件放行，local 轴完全不参与）。
         let result = papr_fs_write("noperm-app".into(), "f.txt".into(), "data".into());
-        assert!(result.is_ok());
+        assert!(
+            result.is_err(),
+            "local=none 的 app 不得写入 papr.fs: {result:?}"
+        );
+
+        // 声明 local=write 后写入放行
+        let m2 = manifest::PaprManifest {
+            local: Some(PaprLocalAccess::Write),
+            ..m.clone()
+        };
+        manifest::store_manifest("noperm-app", m);
+        manifest::store_manifest("noperm-app", m2);
+        let result = papr_fs_write("noperm-app".into(), "f.txt".into(), "data".into());
+        assert!(result.is_ok(), "local=write 应允许 papr.fs 写入: {result:?}");
 
         crate::papr_runtime::app_context::unregister("noperm-app");
         manifest::clear_manifest("noperm-app");
@@ -936,6 +972,8 @@ mod tests {
             "http://metadata.google.internal/",
             "http://[::1]/",
             "http://[::ffff:127.0.0.1]/",    // IPv6-mapped IPv4
+            "http://[::127.0.0.1]/",         // IPv4-compatible IPv6（RFC 4291 §2.5.5.1）
+            "http://[::192.168.1.1]/",       // IPv4-compatible 内网
             "http://[fe80::1]/",
             "http://[fd00::1]/",
         ];

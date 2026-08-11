@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Serializer } from '../src/cache/Serializer';
-import { ImmutablePrefix } from '../src/cache/ImmutablePrefix';
+import { ImmutablePrefix, ImmutablePrefixFactory } from '../src/cache/ImmutablePrefix';
 import { AppendOnlyLog } from '../src/cache/AppendOnlyLog';
 import { VolatileScratch } from '../src/cache/VolatileScratch';
 import { CachePartition } from '../src/cache/CachePartition';
@@ -104,6 +104,45 @@ describe('ImmutablePrefix - 冻结前缀', () => {
     });
 
     expect(p.getParameters().thinkingEnabled).toBe(true);
+  });
+
+  it('字面模板示例文本默认触发 PrefixModificationError（动态内容保护）', () => {
+    expect(
+      () => new ImmutablePrefix({ ...config, systemPrompt: '填充 ${name} 变量' })
+    ).toThrow(/dynamic content/);
+    expect(
+      () => new ImmutablePrefix({ ...config, systemPrompt: '使用 {{var}} 占位' })
+    ).toThrow(/dynamic content/);
+    expect(
+      () =>
+        new ImmutablePrefix({
+          ...config,
+          systemPrompt: '时间格式示例：2024-01-01T12:00',
+        })
+    ).toThrow(/dynamic content/);
+  });
+
+  it('allowTemplateLiterals 豁免字面示例文本，且 hash 保持稳定', () => {
+    const literalPrompt = '示例：请把 ${name} 替换为 {{value}}，格式见 2024-01-01T12:00';
+    const p1 = new ImmutablePrefix({ ...config, systemPrompt: literalPrompt, allowTemplateLiterals: true });
+    const p2 = new ImmutablePrefix({ ...config, systemPrompt: literalPrompt, allowTemplateLiterals: true });
+    expect(p1.computeHash()).toBe(p2.computeHash());
+    expect(p1.getSystemPrompt()).toBe(literalPrompt);
+  });
+
+  it('fromJSON 透传 allowTemplateLiterals 豁免', () => {
+    const literalPrompt = '字面 ${name}';
+    const p = ImmutablePrefixFactory.fromJSON(
+      {
+        systemPrompt: literalPrompt,
+        tools: [],
+        fewShots: undefined,
+        model: 'deepseek-chat',
+        parameters: { temperature: 0.7, topP: 0.9, maxTokens: 2000 },
+      },
+      { allowTemplateLiterals: true }
+    );
+    expect(p.getSystemPrompt()).toBe(literalPrompt);
   });
 });
 

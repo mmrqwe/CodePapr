@@ -938,7 +938,9 @@ name: 'web_download_file',
         },
         includeUntracked: {
           type: 'boolean',
-          description: '创建快照时是否包含未跟踪文件，默认 true。',
+          description:
+            '恢复时是否一并处理未跟踪文件（移除挡路的未跟踪文件），默认 false。' +
+            '注意：快照创建始终包含未跟踪文件（snapshot_create 的默认行为），此参数只影响恢复本身。',
         },
         source: {
           type: 'string',

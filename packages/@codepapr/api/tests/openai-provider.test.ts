@@ -362,6 +362,44 @@ describe('OpenAIProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it('只收到 usage 而无 [DONE]/finish_reason 同样判定截断，不当作正常完成', async () => {
+    const truncatedWithUsage =
+      'data: {"id":"resp-trunc-usage","choices":[{"index":0,"delta":{"content":"半"},"finish_reason":null}]}\n\n' +
+      'data: {"id":"resp-trunc-usage","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":5}}\n\n';
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(truncatedWithUsage, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      streamRetryDelayMs: () => 0,
+      streamMaxRetries: 2,
+    });
+    let caught: unknown;
+    try {
+      await provider.streamChat(
+        {
+          model: 'gpt-4o',
+          messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+          maxTokens: 1024,
+        },
+        () => {}
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ProviderRequestError);
+    expect((caught as ProviderRequestError).retriable).toBe(true);
+    expect((caught as Error).message).toContain('Stream ended prematurely');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it('skips malformed SSE chunks instead of aborting the stream', async () => {
     const chunks = [
       'data: {not json}\n\n',
