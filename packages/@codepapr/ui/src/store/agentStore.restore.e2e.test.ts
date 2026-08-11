@@ -127,6 +127,28 @@ describe('desktop restore e2e', () => {
         };
       }
 
+      if (command === 'note_recent_workspace') {
+        const workspacePath = String(payload?.path ?? '');
+        const current = storedSettingsJson ? JSON.parse(storedSettingsJson) : {};
+        const recent = Array.isArray(current.recentWorkspaces)
+          ? current.recentWorkspaces.filter(
+              (entry: { path: string }) => entry.path !== workspacePath
+            )
+          : [];
+        recent.unshift({
+          path: workspacePath,
+          name: workspacePath.split(/[\\/]/).filter(Boolean).pop() ?? workspacePath,
+          lastOpenedAt: Date.now(),
+          pinned: false,
+        });
+        current.recentWorkspaces = recent.slice(0, 10);
+        storedSettingsJson = JSON.stringify(current);
+        return {
+          settingsJson: storedSettingsJson,
+          dbPath: '/tmp/codepapr.sqlite',
+        };
+      }
+
       if (command === 'load_project_state') {
         const workspacePath = String(payload?.workspacePath ?? '');
         return {

@@ -145,9 +145,8 @@ fn app_db_path() -> Result<PathBuf, String> {
     Ok(data_dir.join(APP_DB_FILE))
 }
 
-fn open_app_db() -> Result<(Connection, PathBuf), String> {
-    let db_path = app_db_path()?;
-    let conn = Connection::open(&db_path)
+fn open_app_db_at(db_path: &Path) -> Result<Connection, String> {
+    let conn = Connection::open(db_path)
         .map_err(|err| format!("打开配置数据库 {} 失败: {err}", db_path.display()))?;
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
@@ -168,6 +167,12 @@ fn open_app_db() -> Result<(Connection, PathBuf), String> {
     )
     .map_err(|err| format!("初始化配置表失败: {err}"))?;
 
+    Ok(conn)
+}
+
+fn open_app_db() -> Result<(Connection, PathBuf), String> {
+    let db_path = app_db_path()?;
+    let conn = open_app_db_at(&db_path)?;
     Ok((conn, db_path))
 }
 
@@ -735,6 +740,9 @@ fn migrate_and_inject_secrets(
 
 #[tauri::command]
 pub(crate) fn load_app_settings(app: tauri::AppHandle) -> Result<AppSettingsResult, String> {
+    let _guard = app_settings_db_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
     let app_secrets = app.state::<AppSecrets>();
     let (conn, db_path) = open_app_db()?;
     let settings_json = conn
@@ -810,6 +818,9 @@ pub(crate) fn save_app_settings(
         .save()
         .map_err(|e| format!("保存密钥库失败: {e}"))?;
 
+    let _guard = app_settings_db_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
     let (conn, db_path) = open_app_db()?;
     conn.execute(
         "INSERT INTO settings (key, value, data_type, updated_at)
@@ -826,6 +837,142 @@ pub(crate) fn save_app_settings(
         settings_json: Some(persisted_json),
         db_path: db_path.to_string_lossy().to_string(),
     })
+}
+
+// ui.settings 的读-改-写互斥：note_recent_workspace 与 load/save_app_settings
+// 并发时可能交错覆盖（一方读到旧 JSON 后回写，丢掉另一方刚写的内容）。
+static APP_SETTINGS_DB_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn app_settings_db_lock() -> &'static Mutex<()> {
+    APP_SETTINGS_DB_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+/// 平台感知大小写去重（与前端 recentWorkspaces.ts 的 pathsEquivalent 对齐）：
+/// macOS/Windows 上同目录的不同大小写写法是同一目录，不应产生两条记录。
+fn recent_paths_equivalent(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        left.to_lowercase() == right.to_lowercase()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        false
+    }
+}
+
+fn workspace_display_name(path: &str) -> String {
+    path.rsplit(['/', '\\'])
+        .find(|segment| !segment.is_empty())
+        .unwrap_or(path)
+        .to_string()
+}
+
+/// 把工作区路径 upsert 进 settings JSON 的 recentWorkspaces（移到首位、
+/// 去重、保留 pinned、截断到 10 条），返回更新后的完整 JSON。
+fn merge_recent_workspace(settings_json: Option<&str>, path: &str) -> Result<String, String> {
+    let mut value: serde_json::Value = match settings_json {
+        Some(json) => serde_json::from_str(json)
+            .map_err(|err| format!("配置不是合法 JSON: {err}"))?,
+        None => serde_json::json!({}),
+    };
+    if !value.is_object() {
+        return Err("配置 JSON 必须是对象".to_string());
+    }
+    let obj = value
+        .as_object_mut()
+        .expect("recent_workspace: 已确认是对象");
+
+    let mut recent: Vec<serde_json::Value> = obj
+        .get("recentWorkspaces")
+        .and_then(|list| list.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let now = unix_millis()?;
+    let name = workspace_display_name(path);
+    if let Some(pos) = recent.iter().position(|entry| {
+        entry
+            .get("path")
+            .and_then(|p| p.as_str())
+            .map(|existing| recent_paths_equivalent(existing, path))
+            .unwrap_or(false)
+    }) {
+        let mut existing = recent.remove(pos);
+        if let Some(entry_obj) = existing.as_object_mut() {
+            entry_obj.insert("path".into(), serde_json::Value::String(path.to_string()));
+            entry_obj.insert("name".into(), serde_json::Value::String(name));
+            entry_obj.insert(
+                "lastOpenedAt".into(),
+                serde_json::Value::Number(serde_json::Number::from(now)),
+            );
+        }
+        recent.insert(0, existing);
+    } else {
+        recent.insert(
+            0,
+            serde_json::json!({
+                "path": path,
+                "name": name,
+                "lastOpenedAt": now,
+                "pinned": false,
+            }),
+        );
+    }
+    recent.truncate(10);
+    obj.insert("recentWorkspaces".into(), serde_json::Value::Array(recent));
+
+    serde_json::to_string(&value).map_err(|err| format!("序列化配置失败: {err}"))
+}
+
+/// 立即把工作区记入 recentWorkspaces 并落库（同步、原子读改写）。
+/// 载入文件夹时由前端 await 调用，确保退出前最近项目已持久化。
+fn note_recent_workspace_impl(
+    db_path: &Path,
+    workspace_path: &str,
+) -> Result<AppSettingsResult, String> {
+    let path = workspace_path.trim();
+    if path.is_empty() {
+        return Err("工作区路径不能为空".to_string());
+    }
+
+    let _guard = app_settings_db_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let conn = open_app_db_at(db_path)?;
+    let settings_json = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![APP_SETTINGS_KEY],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|err| format!("读取应用配置失败: {err}"))?;
+
+    let merged = merge_recent_workspace(settings_json.as_deref(), path)?;
+    conn.execute(
+        "INSERT INTO settings (key, value, data_type, updated_at)
+         VALUES (?1, ?2, 'json', ?3)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           data_type = excluded.data_type,
+           updated_at = excluded.updated_at",
+        params![APP_SETTINGS_KEY, merged, unix_millis()?],
+    )
+    .map_err(|err| format!("保存应用配置失败: {err}"))?;
+
+    Ok(AppSettingsResult {
+        settings_json: Some(merged),
+        db_path: db_path.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+pub(crate) fn note_recent_workspace(path: String) -> Result<AppSettingsResult, String> {
+    let db_path = app_db_path()?;
+    note_recent_workspace_impl(&db_path, &path)
 }
 
 #[tauri::command]
@@ -2115,5 +2262,130 @@ mod tests {
         );
         // 孤儿 app 的数据被丢弃，且不会为它创建目录
         assert!(!workspace.file_path(".CodePapr/apps/gone-app").exists());
+    }
+
+    // ── recent workspaces（note_recent_workspace）──
+
+    #[test]
+    fn merge_recent_workspace_adds_new_entry_at_front() {
+        let input = Some(
+            r#"{"lang":"zh-CN","recentWorkspaces":[
+                {"path":"/old/a","name":"a","lastOpenedAt":1,"pinned":false}
+            ]}"#,
+        );
+        let merged = merge_recent_workspace(input, "/new/b").expect("merge should succeed");
+        let value: serde_json::Value = serde_json::from_str(&merged).expect("valid json");
+        let recent = value["recentWorkspaces"].as_array().expect("array");
+
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0]["path"], "/new/b");
+        assert_eq!(recent[0]["name"], "b");
+        assert_eq!(recent[0]["pinned"], false);
+        assert_eq!(recent[1]["path"], "/old/a");
+        // 其他字段原样保留
+        assert_eq!(value["lang"], "zh-CN");
+    }
+
+    #[test]
+    fn merge_recent_workspace_moves_existing_entry_to_front_and_keeps_pinned() {
+        let input = Some(
+            r#"{"recentWorkspaces":[
+                {"path":"/first","name":"first","lastOpenedAt":100,"pinned":false},
+                {"path":"/target","name":"target","lastOpenedAt":50,"pinned":true}
+            ]}"#,
+        );
+        let merged = merge_recent_workspace(input, "/target").expect("merge should succeed");
+        let value: serde_json::Value = serde_json::from_str(&merged).expect("valid json");
+        let recent = value["recentWorkspaces"].as_array().expect("array");
+
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0]["path"], "/target");
+        assert_eq!(recent[0]["pinned"], true, "pinned 必须保留");
+        assert!(recent[0]["lastOpenedAt"].as_i64().unwrap() > 100);
+        assert_eq!(recent[1]["path"], "/first");
+    }
+
+    #[test]
+    fn merge_recent_workspace_dedupes_case_insensitively_on_macos_windows() {
+        if !recent_paths_equivalent("/Users/example/x", "/Users/example/x") {
+            // Linux：大小写敏感，跳过大小写去重断言
+            return;
+        }
+        let input = Some(
+            r#"{"recentWorkspaces":[
+                {"path":"/Users/example/x","name":"x","lastOpenedAt":10,"pinned":false}
+            ]}"#,
+        );
+        let merged = merge_recent_workspace(input, "/Users/example/x").expect("merge should succeed");
+        let value: serde_json::Value = serde_json::from_str(&merged).expect("valid json");
+        let recent = value["recentWorkspaces"].as_array().expect("array");
+
+        assert_eq!(recent.len(), 1, "大小写不同的同一目录应去重");
+        assert_eq!(recent[0]["path"], "/Users/example/x");
+    }
+
+    #[test]
+    fn merge_recent_workspace_truncates_to_ten_entries() {
+        let mut entries = Vec::new();
+        for i in 0..12 {
+            entries.push(format!(
+                r#"{{"path":"/p{i}","name":"p{i}","lastOpenedAt":{i},"pinned":false}}"#
+            ));
+        }
+        let input = Some(format!(r#"{{"recentWorkspaces":[{}]}}"#, entries.join(",")));
+        let merged = merge_recent_workspace(input.as_deref(), "/new").expect("merge should succeed");
+        let value: serde_json::Value = serde_json::from_str(&merged).expect("valid json");
+        let recent = value["recentWorkspaces"].as_array().expect("array");
+
+        assert_eq!(recent.len(), 10);
+        assert_eq!(recent[0]["path"], "/new");
+        assert_eq!(recent[9]["path"], "/p8");
+    }
+
+    #[test]
+    fn merge_recent_workspace_handles_missing_or_corrupt_settings() {
+        // 完全无 settings 行：从空对象起步
+        let merged = merge_recent_workspace(None, "/fresh").expect("merge should succeed");
+        let value: serde_json::Value = serde_json::from_str(&merged).expect("valid json");
+        assert_eq!(value["recentWorkspaces"][0]["path"], "/fresh");
+
+        // 非对象 JSON：报错而不是静默覆盖
+        assert!(merge_recent_workspace(Some("42"), "/fresh").is_err());
+        // 非 JSON：报错
+        assert!(merge_recent_workspace(Some("{{{"), "/fresh").is_err());
+    }
+
+    #[test]
+    fn note_recent_workspace_impl_persists_entry_immediately() {
+        let workspace = TestWorkspace::new("recent-workspace-note");
+        let db_path = workspace.file_path("codepapr-test.sqlite");
+
+        note_recent_workspace_impl(&db_path, "/project/alpha")
+            .expect("first note should succeed");
+        note_recent_workspace_impl(&db_path, "/project/beta")
+            .expect("second note should succeed");
+
+        let conn = Connection::open(&db_path).expect("should open temp app db");
+        let stored: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![APP_SETTINGS_KEY],
+                |row| row.get(0),
+            )
+            .expect("should persist settings row");
+        let value: serde_json::Value = serde_json::from_str(&stored).expect("valid json");
+        let recent = value["recentWorkspaces"].as_array().expect("array");
+
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0]["path"], "/project/beta", "最新打开的应排在最前");
+        assert_eq!(recent[0]["name"], "beta");
+        assert_eq!(recent[1]["path"], "/project/alpha");
+    }
+
+    #[test]
+    fn note_recent_workspace_impl_rejects_empty_path() {
+        let workspace = TestWorkspace::new("recent-workspace-empty");
+        let db_path = workspace.file_path("codepapr-test.sqlite");
+        assert!(note_recent_workspace_impl(&db_path, "   ").is_err());
     }
 }

@@ -497,6 +497,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
         const normalizedWorkspacePath = path.trim();
 
+        // 载入文件夹的同时在 Rust 侧同步落库最近项目（原子读改写）：
+        // 即使随后立刻退出，最近列表也已持久化，重启不会恢复成旧项目。
+        await invoke('note_recent_workspace', { path: normalizedWorkspacePath }).catch(() => undefined);
+
         // 工作区身份令牌：openWorkspace 是异步加载（loadSessions → set），
         // 期间用户可能再次切换工作区。旧实现没有守卫——前一次加载完成后
         // 无条件 set()，用旧工作区的数据覆盖新工作区的状态（读旧覆新）。

@@ -14,6 +14,10 @@ const { invokeMock } = vi.hoisted(() => ({
       };
     }
 
+    if (command === 'note_recent_workspace') {
+      return { settingsJson: null, dbPath: '' };
+    }
+
     throw new Error(`Unexpected invoke call: ${command}`);
   }),
 }));
@@ -306,6 +310,10 @@ describe('useAgentStore.sendMessage', () => {
           entries: [],
           truncated: false,
         };
+      }
+
+      if (command === 'note_recent_workspace') {
+        return { settingsJson: null, dbPath: '' };
       }
 
       throw new Error(`Unexpected invoke call: ${command}`);
@@ -861,6 +869,9 @@ describe('useAgentStore.sendMessage', () => {
   it('persists the recent workspace path after opening a workspace', async () => {
     await useAgentStore.getState().openWorkspace('/tmp/restored-workspace');
 
+    expect(invokeMock).toHaveBeenCalledWith('note_recent_workspace', {
+      path: '/tmp/restored-workspace',
+    });
     expect(useAgentStore.getState().settings.recentWorkspaces[0]?.path).toBe('/tmp/restored-workspace');
     expect(saveAppSettingsMock).toHaveBeenCalledWith(
       expect.objectContaining({

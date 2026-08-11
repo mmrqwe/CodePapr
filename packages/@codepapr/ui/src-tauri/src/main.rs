@@ -227,6 +227,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             db::load_app_settings,
             db::save_app_settings,
+            db::note_recent_workspace,
             db::load_app_characters,
             db::save_app_characters,
             mcp_list_tools,
