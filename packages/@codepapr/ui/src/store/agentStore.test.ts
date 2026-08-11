@@ -61,6 +61,10 @@ const { maybeGenerateContextCheckpointMock } = vi.hoisted(() => ({
   maybeGenerateContextCheckpointMock: vi.fn(async (): Promise<unknown> => null),
 }));
 
+const { consolidateMemoryContentMock } = vi.hoisted(() => ({
+  consolidateMemoryContentMock: vi.fn(async (_content: string): Promise<string | null> => null),
+}));
+
 const { createAgentMock, createMainThreadAgentMock, actualCreateAgentRef } = vi.hoisted(() => ({
   createAgentMock: vi.fn(),
   createMainThreadAgentMock: vi.fn(),
@@ -114,6 +118,15 @@ vi.mock('../utils/appSettingsStorage', () => ({
 
 vi.mock('./internals/contextCheckpoint', () => ({
   maybeGenerateContextCheckpoint: maybeGenerateContextCheckpointMock,
+}));
+
+vi.mock('../utils/memoryConsolidation', () => ({
+  consolidateMemoryContent: consolidateMemoryContentMock,
+  MEMORY_CONSOLIDATION_MAX_LINES: 200,
+  planMemoryConsolidation: (content: string | undefined, maxLines = 200): boolean => {
+    const count = content ? content.split('\n').length : 0;
+    return count > maxLines;
+  },
 }));
 
 // createAgent/createMainThreadAgent are spied so crash-recovery tests can
@@ -741,6 +754,108 @@ describe('useAgentStore.sendMessage', () => {
     const state = useAgentStore.getState();
     expect(destroy).not.toHaveBeenCalled();
     expect(state._agent).toBe(mockAgent);
+  });
+
+  it('#15 /compact 压缩模型调用期间用户清空消息：checkpoint 丢弃，已删内容不以摘要复活', async () => {
+    maybeGenerateContextCheckpointMock.mockImplementationOnce(async () => {
+      // 模拟：压缩模型调用期间用户清空了会话
+      useAgentStore.setState({
+        sessionMessages: { 'session-1': [] },
+        messages: [],
+      });
+      return {
+        message: {
+          id: 'checkpoint-stale',
+          role: 'assistant',
+          content: '被删除内容的摘要',
+          timestamp: Date.now(),
+          contextCheckpoint: {
+            version: 1,
+            summary: '已删内容',
+            sourceMessageCount: 2,
+            sourceChars: 500,
+            model: 'local',
+            createdAt: Date.now(),
+            language: 'zh-CN',
+          },
+          isStreaming: false,
+        },
+        modelTier: 'local',
+        insertIndex: 1,
+      };
+    });
+
+    const destroy = vi.fn();
+    useAgentStore.setState((state) => ({
+      ...state,
+      activeSessionId: 'session-1',
+      sessionMessages: {
+        'session-1': [
+          { id: 'u1', role: 'user', content: '第一条', timestamp: 1 },
+          { id: 'u2', role: 'user', content: '第二条', timestamp: 2 },
+        ],
+      },
+      messages: [
+        { id: 'u1', role: 'user', content: '第一条', timestamp: 1 },
+        { id: 'u2', role: 'user', content: '第二条', timestamp: 2 },
+      ],
+      _agent: createMockAgent({ destroy }),
+      _agentModel: 'deepseek-v4-pro',
+      _agentPromptKey: 'key-1',
+      _agentSessionId: 'session-1',
+    }));
+
+    await useAgentStore.getState().sendMessage('/compact', '/compact', 'agent');
+
+    // 旧实现：insertIndex 被 clamp 到末尾 → 已删除内容以摘要形式复活
+    const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+    expect(sessionMessages.some((m) => m.id === 'checkpoint-stale')).toBe(false);
+    // 基座失效时也不销毁 agent（checkpoint 未应用）
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it('#14 consolidation 模型调用期间 agent 写入 memory.md：写前重读比对，放弃覆盖', async () => {
+    const longMemory = Array.from({ length: 210 }, (_, i) => `line-${i}`).join('\n');
+    const agentWritten = 'agent 在 consolidation 期间写入的新记忆';
+    let memoryReads = 0;
+    const memoryWrites: Array<Record<string, unknown>> = [];
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'list_workspace_files') {
+        return { root: '', entries: [], truncated: false };
+      }
+      if (command === 'read_text_file' && args?.relativePath === '.CodePapr/memory.md') {
+        memoryReads += 1;
+        // 第 3 次读取 = 写前重读：agent 已写入新内容
+        return {
+          path: '.CodePapr/memory.md',
+          content: memoryReads >= 3 ? agentWritten : longMemory,
+          bytes: 100,
+        };
+      }
+      if (command === 'write_text_file') {
+        memoryWrites.push((args ?? {}) as Record<string, unknown>);
+        return { path: String(args?.relativePath), bytes: 1, encoding: null };
+      }
+      throw new Error(`Unexpected invoke: ${command}`);
+    });
+    consolidateMemoryContentMock.mockResolvedValue('consolidated-result');
+
+    useAgentStore.setState((state) => ({
+      ...state,
+      _agent: createMockAgent({ chat: vi.fn(async () => createAgentResponse('回复')) }),
+      _agentModel: 'deepseek-v4-pro',
+      _agentSessionId: 'session-1',
+    }));
+
+    await useAgentStore.getState().sendMessage('任务', '任务', 'agent');
+
+    // consolidation 是 fire-and-forget 的异步闭包：等待其完成（写前重读）
+    await vi.waitFor(() => expect(memoryReads).toBeGreaterThanOrEqual(3));
+
+    // 旧实现：consolidation 整文件覆盖，agent 在窗口内的写入全部丢失
+    expect(
+      memoryWrites.filter((w) => w.relativePath === '.CodePapr/memory.md')
+    ).toHaveLength(0);
   });
 
   it('persists the recent workspace path after opening a workspace', async () => {

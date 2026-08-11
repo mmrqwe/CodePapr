@@ -130,6 +130,41 @@ function withMemoryLock<T>(task: () => Promise<T>): Promise<T> {
   return result;
 }
 
+/** 读取 .CodePapr/memory.md 内容（trim 后）；不存在/读取失败返回 undefined。
+ *  供 bootstrap/consolidation 写前重读：它们的读-改-写窗口横跨整个模型调用，
+ *  期间 agent 的写入必须通过「写前比对」保护，不能被整文件覆盖（#14）。 */
+async function readMemoryFile(workspacePath: string): Promise<string | undefined> {
+  try {
+    const memResult = await invoke<{ content: string }>('read_text_file', {
+      workspacePath,
+      relativePath: '.CodePapr/memory.md',
+      maxBytes: 50_000,
+    });
+    return memResult.content?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** checkpoint 计划基于 base 消息数组计算（压缩模型调用期间 isLoading=false，
+ *  用户可能 reset/清空/追加消息）。应用前校验当前数组是否仍是安全的插入基座：
+ *  允许追加（长度增长且 insertIndex 之前的内容一致）；禁止删除/重排——旧
+ *  insertIndex 落到末尾会让已删除内容以摘要形式复活（#15）。 */
+function isSafeCheckpointInsert(
+  base: readonly UIMessage[] | undefined,
+  current: readonly UIMessage[] | undefined,
+  insertIndex: number
+): boolean {
+  if (base === current) return true;
+  if (!base || !current) return false;
+  if (current.length < base.length) return false;
+  const checkLen = Math.min(Math.max(insertIndex, 0), base.length);
+  for (let i = 0; i < checkLen; i += 1) {
+    if (current[i] !== base[i]) return false;
+  }
+  return true;
+}
+
 // Snapshot the current todo digest so a context checkpoint can freeze it. The
 // frozen digest is reused on every rebuild (instead of re-rendering from live
 // todo state), keeping the rebuilt context byte-stable for the prefix cache.
@@ -275,12 +310,20 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 }));
               }
               if (compactSessionId) {
+                let compactApplied = false;
                 set((s) => {
                   // 必须在 updater 内读最新消息：/compact 不置 isLoading，压缩
                   // 模型调用期间用户可继续发消息，用 await 前捕获的 sessionMsgs
                   // 写回会把 await 期间产生的消息整个覆盖丢失。insertIndex 由
                   // insertCheckpointAtRetainedBoundary 内部做 clamp。
                   const liveMessages = s.sessionMessages[compactSessionId] ?? [];
+                  // #15：压缩模型调用期间用户可能 reset/清空——校验插入基座，
+                  // 已删除内容不得以摘要形式复活（此时整个 checkpoint 丢弃，
+                  // 也不失效 agent）。
+                  if (!isSafeCheckpointInsert(sessionMsgs, liveMessages, checkpointResult.insertIndex)) {
+                    return {};
+                  }
+                  compactApplied = true;
                   const nextMessages = insertCheckpointAtRetainedBoundary(
                     liveMessages,
                     checkpointResult.message,
@@ -298,23 +341,25 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 // 下一条消息按压缩后的 sessionMessages 重建（与回合后 checkpoint
                 // 路径一致）；回合在飞时留给回合后的自动压缩处理，绝不触碰运行中
                 // 的 agent（destroy 会让在飞回合的 chat() 被拒）。
-                const compactAgent = get()._agent;
-                const compactAgentOwner = get()._agentSessionId;
-                const compactTurnInFlight =
-                  get().isLoading && get().loadingSessionId === compactSessionId;
-                if (compactAgent && compactAgentOwner === compactSessionId && !compactTurnInFlight) {
-                  try {
-                    // 可能在跑 app-agent（papr.agent.run，不占 isLoading）：
-                    // 有在飞 app 执行时 detach 等其结算完自我销毁。
-                    if (compactAgent.hasActiveAppAgentRequests?.()) {
-                      compactAgent.detachAndCleanupWhenIdle?.();
-                    } else {
-                      compactAgent.destroy();
+                if (compactApplied) {
+                  const compactAgent = get()._agent;
+                  const compactAgentOwner = get()._agentSessionId;
+                  const compactTurnInFlight =
+                    get().isLoading && get().loadingSessionId === compactSessionId;
+                  if (compactAgent && compactAgentOwner === compactSessionId && !compactTurnInFlight) {
+                    try {
+                      // 可能在跑 app-agent（papr.agent.run，不占 isLoading）：
+                      // 有在飞 app 执行时 detach 等其结算完自我销毁。
+                      if (compactAgent.hasActiveAppAgentRequests?.()) {
+                        compactAgent.detachAndCleanupWhenIdle?.();
+                      } else {
+                        compactAgent.destroy();
+                      }
+                    } catch {
+                      // already torn down
                     }
-                  } catch {
-                    // already torn down
+                    set({ _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
                   }
-                  set({ _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
                 }
               }
               appendInfoMessage(
@@ -604,6 +649,15 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 await withMemoryLock(async () => {
                   const generated = await bootstrapMemoryContent(bootstrapInput, normalizedSettings);
                   if (generated) {
+                    // #14：生成（读-改-写）窗口横跨整个模型调用，期间 agent
+                    // 可能已通过 write 工具写入 memory.md（原为空/缺失才触发
+                    // bootstrap）。写前重读：已有内容则放弃本次覆盖，绝不
+                    // 整文件覆盖丢失 agent 写入。
+                    const current = await readMemoryFile(workspacePath);
+                    if (current) {
+                      console.warn('[memory] bootstrap skipped: memory.md was written during generation');
+                      return;
+                    }
                     await invoke('write_text_file', {
                       workspacePath,
                       relativePath: '.CodePapr/memory.md',
@@ -1364,11 +1418,11 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 onStateChange: (state) =>
                   useGoalStore.getState().setGoalState(state),
                 onCompaction: async () => {
-                  const sessionMsgs =
+                  const compactionBaseMessages =
                     get().sessionMessages[activeSessionId!] ?? [];
                   const cp = await maybeGenerateContextCheckpoint(
                     normalizedSettings,
-                    sessionMsgs,
+                    compactionBaseMessages,
                     true,
                     currentTodoDigest(activeSessionId)
                   );
@@ -1382,6 +1436,11 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                       }
                     }
                     set((s) => {
+                      // #15：压缩模型调用期间消息可能已被 reset/清空——校验
+                      // 插入基座，已删除内容不得以摘要形式复活。
+                      if (!isSafeCheckpointInsert(compactionBaseMessages, s.sessionMessages[activeSessionId!] ?? [], cp.insertIndex)) {
+                        return {};
+                      }
                       const next = insertCheckpointAtRetainedBoundary(
                         s.sessionMessages[activeSessionId!] ?? [],
                         cp.message,
@@ -1642,9 +1701,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // Worker 运行时回到常态（若随后产生检查点，下面会以 Worker 重建）。
             set({ _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
           }
+          // #15：checkpoint 计划基于该数组计算；压缩模型调用期间用户可能
+          // reset/清空/追加消息，应用前必须校验（见 isSafeCheckpointInsert）。
+          const checkpointBaseMessages = get().sessionMessages[activeSessionId] ?? [];
           const checkpointResult = await maybeGenerateContextCheckpoint(
             normalizedSettings,
-            get().sessionMessages[activeSessionId] ?? [],
+            checkpointBaseMessages,
             undefined,
             currentTodoDigest(activeSessionId)
           );
@@ -1657,8 +1719,15 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           } else if (checkpointResult) {
             const prevAgent = get()._agent;
             const prevAgentOwner = get()._agentSessionId;
+            let checkpointApplied = false;
             set((s) => {
               const currentSessionMessages = s.sessionMessages[activeSessionId!] ?? [];
+              // 校验插入基座：reset/清空后旧 insertIndex 会把已删除内容以
+              // 摘要形式插回末尾（复活）——整个 checkpoint 丢弃。
+              if (!isSafeCheckpointInsert(checkpointBaseMessages, currentSessionMessages, checkpointResult.insertIndex)) {
+                return {};
+              }
+              checkpointApplied = true;
               const nextSessionMessages = insertCheckpointAtRetainedBoundary(
                 currentSessionMessages,
                 checkpointResult.message,
@@ -1715,10 +1784,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   : s.sessionConversationStats,
                 _pendingMemoryConsolidation: true,
               };
-          });
+            });
             // 被替换/失效的旧 agent 已空闲（回合结束），销毁以回收 worker；
             // 仅当它仍属于本回合会话时才销毁，避免误伤竞态下新建的 agent。
-            if (prevAgent && prevAgentOwner === activeSessionId && get()._agent !== prevAgent) {
+            if (checkpointApplied && prevAgent && prevAgentOwner === activeSessionId && get()._agent !== prevAgent) {
               try {
                 prevAgent.destroy();
               } catch {
@@ -1732,18 +1801,19 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             void (async () => {
               try {
                 await withMemoryLock(async () => {
-                  const memResult = await invoke<{ path: string; content: string; bytes: number }>(
-                    'read_text_file',
-                    {
-                      workspacePath: ws,
-                      relativePath: '.CodePapr/memory.md',
-                      maxBytes: 50_000,
-                    }
-                  );
-                  const content = memResult.content?.trim();
+                  const content = await readMemoryFile(ws);
                   if (!content || !planMemoryConsolidation(content, MEMORY_CONSOLIDATION_MAX_LINES)) return;
                   const consolidated = await consolidateMemoryContent(content, normalizedSettings);
                   if (consolidated && consolidated !== content) {
+                    // #14：consolidation 的读-改-写窗口横跨整个模型调用，期间
+                    // agent 可能已通过 write 工具写入 memory.md。写前重读：
+                    // 内容变了就放弃本次覆盖（下一回合会重新评估 consolidation），
+                    // 绝不整文件覆盖丢失 agent 写入。
+                    const current = await readMemoryFile(ws);
+                    if (current !== content) {
+                      console.warn('[memory] consolidation skipped: memory.md changed during generation');
+                      return;
+                    }
                     await invoke('write_text_file', {
                       workspacePath: ws,
                       relativePath: '.CodePapr/memory.md',

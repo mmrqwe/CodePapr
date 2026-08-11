@@ -570,8 +570,16 @@ fn stop_app_backend_processes(workspace_path: &str, port: u16) -> Result<usize, 
                     Err(_) => true,
                 };
                 if still_running {
-                    let _ = process.child.kill();
-                    let _ = process.child.wait();
+                    // 旧实现：process.child.kill() 只杀直接子进程（shell 包装器），
+                    // 真正的工作进程（server.js 派生的子进程等）变成孤儿继续占端口；
+                    // 且 child.wait() 无界阻塞——子进程处于 D 状态（不可中断）时
+                    // with_background_processes 的全局锁被无限持有，所有后台进程
+                    // 操作全部死锁。改用进程树击杀 + 有界等待（与 shell 路径一致）。
+                    let _ = crate::shell::process_tree::kill_process_tree(&mut process.child);
+                    crate::shell::process_tree::wait_for_child_exit(
+                        &mut process.child,
+                        std::time::Duration::from_secs(3),
+                    );
                     stopped += 1;
                 }
             }
@@ -587,6 +595,110 @@ mod tests {
     use super::*;
     use crate::papr_runtime::manifest;
     use crate::test_helpers::TestWorkspace;
+
+    #[cfg(unix)]
+    fn is_process_alive(pid: u32) -> bool {
+        std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "pid="])
+            .output()
+            .map(|out| out.status.success() && !out.stdout.is_empty())
+            .unwrap_or(false)
+    }
+
+    #[cfg(unix)]
+    fn wait_until_dead(pid: u32, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        while std::time::Instant::now() < deadline {
+            if !is_process_alive(pid) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        false
+    }
+
+    /// 回归（#17）：stop_app_backend_processes 必须杀整个进程树（旧实现只
+    /// kill 直接子进程——sh 包装器死了，server.js 等真实工作进程变成孤儿继续
+    /// 占端口），且不能无界等待（D 状态进程会让全局锁死锁）。
+    #[cfg(unix)]
+    #[test]
+    fn stop_app_backend_processes_kills_whole_tree() {
+        use crate::shell::background::background_processes;
+        use crate::shell::process_tree::prepare_new_process_group;
+        use crate::shell::types::ManagedBackgroundProcess;
+        use std::collections::VecDeque;
+        use std::process::{Command, Stdio};
+        use std::sync::{Arc, Mutex};
+
+        let ws = TestWorkspace::new("papr-stop-tree");
+        let port: u16 = 48_123;
+
+        // sh 派生两个 sleep 子进程：验证进程组击杀能连后代一起杀掉
+        let mut cmd = Command::new("/bin/sh");
+        cmd.arg("-c")
+            .arg("sleep 100 & sleep 100")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        prepare_new_process_group(&mut cmd);
+        let child = cmd.spawn().expect("sh should spawn");
+        let pid = child.id();
+
+        // sh 派生子进程是异步的：轮询等待后代出现（pgrep -P 跨 macOS/Linux）
+        let mut grandchildren: Vec<u32> = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            let pgrep_output = std::process::Command::new("pgrep")
+                .arg("-P")
+                .arg(pid.to_string())
+                .output()
+                .expect("pgrep should run");
+            grandchildren = String::from_utf8_lossy(&pgrep_output.stdout)
+                .split_whitespace()
+                .filter_map(|token| token.parse::<u32>().ok())
+                .collect();
+            if !grandchildren.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(
+            !grandchildren.is_empty(),
+            "sh -c 'sleep 100 & sleep 100' should have spawned children"
+        );
+
+        background_processes()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .insert(
+                pid,
+                ManagedBackgroundProcess {
+                    child,
+                    command: "sh".to_string(),
+                    args: vec![],
+                    workspace_path: ws.workspace_arg(),
+                    started_at: 0,
+                    preview_url: Some(format!("http://localhost:{port}/")),
+                    log_tail: Arc::new(Mutex::new(VecDeque::new())),
+                },
+            );
+
+        let stopped = stop_app_backend_processes(&ws.workspace_arg(), port)
+            .expect("stop should succeed");
+        assert_eq!(stopped, 1);
+
+        // 直接子进程与全部后代都必须在有界时间内死亡（无孤儿、无死锁）
+        assert!(
+            wait_until_dead(pid, std::time::Duration::from_secs(5)),
+            "direct child should be dead"
+        );
+        for grandchild in grandchildren {
+            assert!(
+                wait_until_dead(grandchild, std::time::Duration::from_secs(5)),
+                "grandchild {grandchild} should be dead (no orphaned processes)"
+            );
+        }
+    }
 
     fn register_test_app(workspace: &str, app_id: &str, extra_perms: &[&str]) {
         crate::papr_runtime::app_context::register(app_id, workspace);
