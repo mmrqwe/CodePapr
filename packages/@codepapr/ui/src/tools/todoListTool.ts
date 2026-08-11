@@ -63,6 +63,14 @@ export function resetTodoListContext(sessionId: string): void {
   pushChecklistToStore(sessionId, null);
 }
 
+/** 清空全部 TodoList 上下文（切换/关闭工作区时调用，防止跨项目累积）。 */
+export function clearAllTodoListContexts(): void {
+  for (const sessionId of todoContexts.keys()) {
+    pushChecklistToStore(sessionId, null);
+  }
+  todoContexts.clear();
+}
+
 /** 获取所有 TodoList 上下文，供持久化使用。 */
 export function getAllTodoListContexts(): ReadonlyMap<string, TodoListContext> {
   return todoContexts;

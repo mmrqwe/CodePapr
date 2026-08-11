@@ -1,4 +1,5 @@
 import type { WorkspaceEntry } from './types';
+import { pathsEquivalent } from '../../utils/pathComparison';
 
 export function upsertRecentWorkspace(
   recent: WorkspaceEntry[],
@@ -9,7 +10,9 @@ export function upsertRecentWorkspace(
     return recent;
   }
   const name = normalizedPath.split(/[\\/]/).filter(Boolean).pop() ?? normalizedPath;
-  const existingIndex = recent.findIndex((entry) => entry.path === normalizedPath);
+  // 平台感知大小写去重：macOS/Windows 上同目录的不同大小写写法是同一目录，
+  // 不应产生两条 recent 记录。
+  const existingIndex = recent.findIndex((entry) => pathsEquivalent(entry.path, normalizedPath));
   const now = Date.now();
   if (existingIndex >= 0) {
     const entry = recent[existingIndex];

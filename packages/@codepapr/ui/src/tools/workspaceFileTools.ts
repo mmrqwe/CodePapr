@@ -378,9 +378,12 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       fileBytes[relativePath] = current.bytes;
     }
 
-    const runningContents: Record<string, string> = { ...fileContents };
+    // 歧义预检：给出比 applySearchReplaceDiff 泛化报错更明确的提示。
+    // 旧实现曾在同一循环里"干跑"逐条应用并维护 runningContents，但结果
+    // 从未被使用（applySearchReplaceDiff 会从头重算），且 `catch { break }`
+    // 会静默吞掉错误——已删除这段死代码。
     for (const patch of parsed.patches) {
-      const patchContent = runningContents[patch.relativePath] ?? '';
+      const patchContent = fileContents[patch.relativePath] ?? '';
       const ambiguity = await describeAmbiguousMatches(
         patch.relativePath,
         patchContent,
@@ -389,11 +392,6 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       );
       if (ambiguity) {
         throw new Error(`${patch.relativePath}: ${ambiguity}`);
-      }
-      try {
-        runningContents[patch.relativePath] = applySearchReplacePatch(patchContent, patch).content;
-      } catch {
-        break;
       }
     }
 

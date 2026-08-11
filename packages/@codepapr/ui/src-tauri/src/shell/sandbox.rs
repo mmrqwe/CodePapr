@@ -9,6 +9,18 @@ fn profile_quote(path: &Path) -> String {
     path.to_string_lossy()
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
+        // SBPL 字符串字面量内裸换行/制表符等控制字符会提前终止表达式或改变
+        // 解析：工作区/外部路径理论上可含换行，必须一并转义。统一把 C0 控制
+        // 字符（含 \n \r \t）替换为空格，保持规则语义同时杜绝注入。
+        .chars()
+        .map(|ch| {
+            if ch.is_control() {
+                ' '
+            } else {
+                ch
+            }
+        })
+        .collect()
 }
 
 #[cfg(target_os = "macos")]
@@ -610,11 +622,11 @@ pub(crate) fn validate_restricted_shell_command(
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::{
-        build_profile, sandboxed_command, validate_restricted_command,
+        build_profile, profile_quote, sandboxed_command, validate_restricted_command,
         validate_restricted_shell_command, SandboxAccess,
     };
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn sandboxed_runtime_command_can_start() {
@@ -635,9 +647,26 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "sandbox-ok");
     }
 
+    /// 回归 #17：profile_quote 必须转义控制字符——含换行的路径若原样嵌入
+    /// SBPL 字面量会提前终止表达式（注入）。转义为空格后规则仍合法。
     #[test]
-    fn profile_canonicalizes_symlinked_paths() {
-        let workspace =
+    #[cfg(target_os = "macos")]
+    fn profile_quote_escapes_control_characters() {
+        let quoted = profile_quote(Path::new("/tmp/evil\nline\"quote\\back"));
+        assert!(!quoted.contains('\n'), "换行必须被转义: {quoted:?}");
+        assert!(!quoted.contains('\r'), "回车必须被转义: {quoted:?}");
+        assert!(!quoted.contains('\t'), "制表符必须被转义: {quoted:?}");
+        // 反斜杠与双引号保持原有转义语义
+        assert!(quoted.contains("\\\\"), "反斜杠必须保留转义: {quoted:?}");
+        assert!(quoted.contains("\\\""), "双引号必须保留转义: {quoted:?}");
+
+        // 常规路径不受影响
+        let normal = profile_quote(Path::new("/Users/example/Work/My App"));
+        assert_eq!(normal, "/Users/example/Work/My App");
+    }
+
+    #[test]
+    fn profile_canonicalizes_symlinked_paths() {        let workspace =
             std::env::temp_dir().join(format!("codepapr-sandbox-profile-{}", std::process::id()));
         fs::create_dir_all(&workspace).expect("sandbox test workspace should exist");
         let profile =

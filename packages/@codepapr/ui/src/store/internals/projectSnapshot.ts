@@ -30,12 +30,21 @@ export function toProjectSnapshot(state: AgentState): ProjectStateSnapshot {
     }
   }
 
+  // 只序列化仍存在的会话消息：已删会话的残留条目（如删除与回合报错竞态
+  // 产生的孤儿）不得被快照持久化。
+  const knownSessionIds = new Set(state.sessions.map((session) => session.id));
+  const liveSessionMessages = Object.fromEntries(
+    Object.entries(state.sessionMessages).filter(([sessionId]) =>
+      knownSessionIds.has(sessionId)
+    )
+  );
+
   return {
     version: 1,
     sessions: state.sessions,
     activeSessionId: state.activeSessionId,
     sessionMessages: sanitizeSessionMessagesForPersistence(
-      state.sessionMessages,
+      liveSessionMessages,
       state.settings.debugEnabled
     ),
     skillEnabledById: { ...state.skillEnabledById },

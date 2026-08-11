@@ -360,7 +360,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
           this.armAppAgentIdleTimer(requestId);
         }
       }
-      this.worker.postMessage({ type: 'permission-wait', waiting } satisfies MainToAgentWorkerMessage);
+      this.postToWorker({ type: 'permission-wait', waiting } satisfies MainToAgentWorkerMessage);
     });
     this.worker.addEventListener('message', this.handleWorkerMessage);
     this.worker.addEventListener('error', this.handleWorkerError);
@@ -389,7 +389,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     } satisfies MainToAgentWorkerMessage);
     if (isPermissionWaitActive()) {
       this.permissionWaitActive = true;
-      this.worker.postMessage({ type: 'permission-wait', waiting: true } satisfies MainToAgentWorkerMessage);
+      this.postToWorker({ type: 'permission-wait', waiting: true } satisfies MainToAgentWorkerMessage);
     }
   }
 
@@ -443,6 +443,25 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
   isCrashed(): boolean {
     return this.crashed;
+  }
+
+  /** postMessage 统一出口：crashed/destroyed 后 worker 已被 terminate，直接
+   *  跳过投递（部分引擎向已终止 worker postMessage 会抛异常，异步回调里
+   *  抛出还会变成 unhandledrejection）。所有无守卫的裸调用都必须走这里。 */
+  private postToWorker(
+    message: MainToAgentWorkerMessage,
+    transfer?: Transferable[]
+  ): void {
+    if (this.crashed || this.destroyed) return;
+    try {
+      if (transfer) {
+        this.worker.postMessage(message, transfer);
+      } else {
+        this.worker.postMessage(message);
+      }
+    } catch {
+      // worker may already be terminated
+    }
   }
 
   private crashCause(): string {
@@ -501,7 +520,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     // worker 侧的 chat promise，工具继续在后台跑完。
     this.abortInflightTools();
 
-    this.worker.postMessage({
+    this.postToWorker({
       type: 'cancel-session',
       requestId,
     } satisfies MainToAgentWorkerMessage);
@@ -659,7 +678,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         bufferedReasoningDelta: '',
         flushTimerId: null,
       });
-      this.worker.postMessage({ type: 'chat', payload } satisfies MainToAgentWorkerMessage);
+      this.postToWorker({ type: 'chat', payload } satisfies MainToAgentWorkerMessage);
     });
 
     return response;
@@ -689,7 +708,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       });
       this.armAppAgentIdleTimer(requestId);
 
-      this.worker.postMessage({
+      this.postToWorker({
         type: 'run-app-agent',
         requestId,
         payload,
@@ -732,7 +751,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   cancelAppAgent(requestId: string): void {
     cancelExternalAccessRequests();
     this.abortInflightTools(requestId);
-    this.worker.postMessage({
+    this.postToWorker({
       type: 'cancel-app-agent',
       requestId,
     } satisfies MainToAgentWorkerMessage);
@@ -765,7 +784,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   private cancelAllAppAgents(): void {
     this.abortInflightTools();
     for (const [reqId] of this.appAgentRequests) {
-      this.worker.postMessage({
+      this.postToWorker({
         type: 'cancel-app-agent',
         requestId: reqId,
       } satisfies MainToAgentWorkerMessage);
@@ -972,7 +991,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
           if (appAgentEntry) {
             this.armAppAgentIdleTimer(message.requestId);
           }
-          this.worker.postMessage({
+          this.postToWorker({
             type: 'tool-response',
             payload: {
               requestId: message.requestId,
@@ -986,7 +1005,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
           if (appAgentEntry) {
             this.armAppAgentIdleTimer(message.requestId);
           }
-          this.worker.postMessage({
+          this.postToWorker({
             type: 'tool-response',
             payload: {
               requestId: message.requestId,
@@ -1068,7 +1087,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       });
       provider.chat(message.chatRequest as IChatRequest)
         .then((resp) => {
-          this.worker.postMessage({
+          this.postToWorker({
             type: 'proxy-chat-response',
             proxyChatId: message.proxyChatId,
             success: true,
@@ -1076,7 +1095,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
           } satisfies MainToAgentWorkerMessage);
         })
         .catch((error) => {
-          this.worker.postMessage({
+          this.postToWorker({
             type: 'proxy-chat-response',
             proxyChatId: message.proxyChatId,
             success: false,
@@ -1166,6 +1185,11 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
     this.abortAllPendingFetches();
 
+    // 崩溃后 worker 已 terminate：解除订阅，避免后续 permission-wait 回调
+    // 再向已终止的 worker 投递（postToWorker 也会拦截，但解除更干净）。
+    this.unsubscribePermissionWait?.();
+    this.unsubscribePermissionWait = null;
+
     try {
       this.worker.terminate();
     } catch {
@@ -1227,7 +1251,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
   private async handleRefreshBootstrapRequest(bootstrapRequestId: string): Promise<void> {
     if (!this.config.onRefreshBootstrap) {
-      this.worker.postMessage({
+      this.postToWorker({
         type: 'refresh-bootstrap-response',
         bootstrapRequestId,
         success: true,
@@ -1237,14 +1261,14 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     }
     try {
       const bootstrap = await this.config.onRefreshBootstrap();
-      this.worker.postMessage({
+      this.postToWorker({
         type: 'refresh-bootstrap-response',
         bootstrapRequestId,
         success: true,
         bootstrap: bootstrap ?? null,
       } satisfies MainToAgentWorkerMessage);
     } catch (err) {
-      this.worker.postMessage({
+      this.postToWorker({
         type: 'refresh-bootstrap-response',
         bootstrapRequestId,
         success: false,
@@ -1282,7 +1306,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         signal: controller.signal,
       });
 
-      this.worker.postMessage({
+      this.postToWorker({
         type: 'fetch-response-start',
         fetchId,
         status: response.status,
@@ -1310,7 +1334,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
             // detaching a shared backing buffer (some fetch implementations
             // return sub-views).
             const chunk = (value instanceof Uint8Array ? value : new Uint8Array(value)).slice();
-            this.worker.postMessage(
+            this.postToWorker(
               {
                 type: 'fetch-response-chunk',
                 fetchId,
@@ -1329,7 +1353,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       }
 
       if (this.pendingFetchControllers.has(fetchId)) {
-        this.worker.postMessage({
+        this.postToWorker({
           type: 'fetch-response-end',
           fetchId,
         } satisfies MainToAgentWorkerMessage);
@@ -1337,7 +1361,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       if (this.pendingFetchControllers.has(fetchId)) {
-        this.worker.postMessage({
+        this.postToWorker({
           type: 'fetch-response-error',
           fetchId,
           error: errorMessage,

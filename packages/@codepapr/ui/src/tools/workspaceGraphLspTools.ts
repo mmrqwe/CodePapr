@@ -43,6 +43,7 @@ import {
   type ReadFileResult,
 } from './workspaceToolHelpers';
 import { type WorkspaceToolContext } from './workspaceToolContext';
+import { pathsEquivalent } from '../utils/pathComparison';
 
 export function registerWorkspaceGraphLspTools(ctx: WorkspaceToolContext): void {
   const {
@@ -441,8 +442,12 @@ export function registerWorkspaceGraphLspTools(ctx: WorkspaceToolContext): void 
         { workspacePath: workspace(), languageId }
       );
       const allDiags = result.diagnostics ?? {};
+      // 平台感知大小写：LSP 服务器报告的文件 URI 可能与 relativePath 大小写
+      // 不一致（macOS/Windows 常见），后缀匹配必须按平台大小写不敏感。
       const fileUri = Object.keys(allDiags).find(
-        (uri) => uri.endsWith(relativePath) || uri.endsWith(relativePath.replace(/\\/g, '/'))
+        (uri) =>
+          pathsEquivalent(uri, relativePath) ||
+          pathsEquivalent(uri.replace(/\\/g, '/'), relativePath)
       );
       const fileDiags = fileUri ? (allDiags[fileUri]?.diagnostics ?? []) : [];
       return JSON.stringify({

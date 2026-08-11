@@ -739,21 +739,9 @@ pub(crate) fn close_all_browser_pages() {
     // 阻塞两分钟，拖死应用退出链路。会话注册表直接清空（drop 触发
     // BrowserInner::drop 的 close_on_drop，但它内部同样是 try/ok 尽力而为）。
     for pid in &pids {
-        #[cfg(unix)]
-        {
-            // SAFETY: `*pid` is a positive process id (from `child.id()`),
-            // and SIGTERM is a valid signal for `kill`.
-            let _ = unsafe { libc::kill(*pid as i32, libc::SIGTERM) };
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            let _ = std::process::Command::new("taskkill")
-                .args(["/F", "/PID", &pid.to_string()])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        }
+        // 整组/整树杀：只 SIGTERM 主进程会让 renderer/gpu/网络等子进程
+        // 变成孤儿继续存活，长期占用资源与端口。
+        crate::shell::process_tree::kill_process_group_by_pid(*pid);
     }
     sessions.clear();
 }

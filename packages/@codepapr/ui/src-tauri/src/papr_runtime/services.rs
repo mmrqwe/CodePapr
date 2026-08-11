@@ -363,8 +363,8 @@ pub fn papr_fs_read(
     permission::check_permission(&manifest, &app_id, "fs:read")?;
 
     let ctx = crate::papr_runtime::app_context::get(&app_id)?;
-    if path.contains("..") || path.contains('\\') {
-        return Err("path traversal blocked".to_string());
+    if path.contains("..") || path.contains('\\') || path.starts_with('/') || path.is_empty() {
+        return Err("invalid path".to_string());
     }
 
     let resolved = resolve_app_path(&ctx.workspace_path, &app_id, &path)?;
@@ -472,8 +472,8 @@ pub fn papr_fs_list(
 
     let ctx = crate::papr_runtime::app_context::get(&app_id)?;
     let subpath = path.unwrap_or_else(|| ".".to_string());
-    if subpath.contains("..") || subpath.contains('\\') {
-        return Err("path traversal blocked".to_string());
+    if subpath.contains("..") || subpath.contains('\\') || subpath.starts_with('/') || subpath.is_empty() {
+        return Err("invalid path".to_string());
     }
 
     let _ = ensure_app_data_dir(&ctx.workspace_path, &app_id)?;
@@ -512,7 +512,7 @@ pub fn papr_fs_delete(
     permission::check_permission(&manifest, &app_id, "fs:write")?;
 
     let ctx = crate::papr_runtime::app_context::get(&app_id)?;
-    if path.contains("..") || path.contains('\\') || path.is_empty() {
+    if path.contains("..") || path.contains('\\') || path.starts_with('/') || path.is_empty() {
         return Err("invalid path".to_string());
     }
 
@@ -810,9 +810,18 @@ mod tests {
         let ws = TestWorkspace::new("papr-fs-traversal");
         register_test_app(&ws.workspace_arg(), "traversal-app", &[]);
 
-        let result = papr_fs_read("traversal-app".into(), "../secret.txt".into(), None);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("traversal"));
+        // read/list/delete 与 write 统一校验：.. / 反斜杠 / 绝对路径 / 空路径
+        // 一律拒绝（write 的既有契约，回归 #19 的一致性修复）。
+        for path in ["../secret.txt", "a\\..\\evil.txt", "/tmp/evil.txt", ""] {
+            let result = papr_fs_read("traversal-app".into(), path.to_string(), None);
+            assert!(result.is_err(), "read 应拒绝路径: {:?}", path);
+            let result = papr_fs_delete("traversal-app".into(), path.to_string());
+            assert!(result.is_err(), "delete 应拒绝路径: {:?}", path);
+        }
+        for path in ["../secret", "a\\..\\evil", "/tmp/evil", ""] {
+            let result = papr_fs_list("traversal-app".into(), Some(path.to_string()));
+            assert!(result.is_err(), "list 应拒绝路径: {:?}", path);
+        }
 
         unregister_test_app("traversal-app");
     }

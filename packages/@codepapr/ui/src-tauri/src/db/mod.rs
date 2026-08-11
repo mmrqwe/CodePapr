@@ -41,7 +41,14 @@ const MAX_SETTINGS_JSON_BYTES: usize = 200_000;
 const MAX_CHARACTERS_JSON_BYTES: usize = 50_000_000;
 const MAX_PROJECT_STATE_JSON_BYTES: usize = 20_000_000;
 
-static EXTERNAL_ACCESS_POLICY_CACHE: OnceLock<Mutex<Option<ExternalAccessPolicy>>> = OnceLock::new();
+// 缓存带 TTL：本进程内所有写入都走 save_external_access_policy 同步刷新，
+// 但跨进程/外部 DB 写入（第二个实例、直接改库）无法触发本进程失效。加
+// 1s TTL 让陈旧策略最多存活 1 秒，避免"grant 后命令仍被拒/revoke 后仍放行"
+// 的跨实例不一致。
+const EXTERNAL_ACCESS_POLICY_CACHE_TTL_MS: i64 = 1000;
+
+static EXTERNAL_ACCESS_POLICY_CACHE: OnceLock<Mutex<Option<(i64, ExternalAccessPolicy)>>> =
+    OnceLock::new();
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -74,18 +81,20 @@ pub(crate) struct ExternalAccessPolicy {
     pub(crate) allowed_files: Vec<String>,
 }
 
-fn external_access_policy_cache() -> &'static Mutex<Option<ExternalAccessPolicy>> {
+fn external_access_policy_cache() -> &'static Mutex<Option<(i64, ExternalAccessPolicy)>> {
     EXTERNAL_ACCESS_POLICY_CACHE.get_or_init(|| Mutex::new(None))
 }
 
 pub(crate) fn load_external_access_policy() -> Result<ExternalAccessPolicy, String> {
     let cache = external_access_policy_cache();
-    if let Some(policy) = cache
+    if let Some((cached_at, policy)) = cache
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .clone()
     {
-        return Ok(policy);
+        if unix_millis()?.saturating_sub(cached_at) < EXTERNAL_ACCESS_POLICY_CACHE_TTL_MS {
+            return Ok(policy);
+        }
     }
 
     let (conn, _) = open_app_db()?;
@@ -100,7 +109,8 @@ pub(crate) fn load_external_access_policy() -> Result<ExternalAccessPolicy, Stri
         .and_then(|json| serde_json::from_str::<ExternalAccessPolicy>(&json).ok())
         .unwrap_or_default();
 
-    *cache.lock().unwrap_or_else(|error| error.into_inner()) = Some(policy.clone());
+    *cache.lock().unwrap_or_else(|error| error.into_inner()) =
+        Some((unix_millis()?, policy.clone()));
     Ok(policy)
 }
 
@@ -123,7 +133,7 @@ pub(crate) fn save_external_access_policy(
 
     *external_access_policy_cache()
         .lock()
-        .unwrap_or_else(|error| error.into_inner()) = Some(policy.clone());
+        .unwrap_or_else(|error| error.into_inner()) = Some((unix_millis()?, policy.clone()));
     Ok(policy.clone())
 }
 

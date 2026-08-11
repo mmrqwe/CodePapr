@@ -157,6 +157,18 @@ fn create_backup_snapshot(repo: &Repository, workspace: &Path) -> Result<Oid, St
             &parents,
         )
         .map_err(|e| format!("backup commit: {}", e.message()))?;
+    // 备份提交只作为 undo 安全网，不得污染工作区 index：备份过程把当前
+    // 磁盘状态（含未跟踪文件）全部 add 进 index，若放任不管，随后的 force
+    // checkout 会把"备份暂存过、但目标树没有"的文件当作应删除条目处理
+    // （restore 时误删 include_untracked=false 本应保留的未跟踪文件）。
+    // Mixed 重置 index 回 HEAD 只动 index 不动工作区；HEAD 不存在时放弃。
+    if let Ok(head) = repo.head() {
+        if let Some(head_target) = head.target() {
+            if let Ok(object) = repo.find_object(head_target, None) {
+                let _ = repo.reset(&object, git2::ResetType::Mixed, None);
+            }
+        }
+    }
     Ok(oid)
 }
 

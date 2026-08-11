@@ -13,6 +13,15 @@ export function appendErrorMessage(set: StoreSet, content: string, sessionId?: s
 
   set((s) => {
     const targetId = sessionId ?? s.activeSessionId;
+    // 会话已被删除时禁止写入：否则会把已删会话的 sessionMessages 条目重新
+    // 写活（孤儿复活），并被项目快照持久化为幽灵数据。回合已结束（无目标
+    // 会话）时同样只复位 loading 状态。
+    if (targetId && !s.sessions.some((x) => x.id === targetId)) {
+      return {
+        isLoading: false,
+        loadingSessionId: null,
+      };
+    }
     const currentSessionMessages = targetId
       ? s.sessionMessages[targetId] ?? s.messages
       : s.messages;
@@ -238,6 +247,10 @@ export function appendSessionMessages(
   newMessages: UIMessage[]
 ): void {
   set((s) => {
+    // 会话已删除时禁止写入（与 appendErrorMessage 一致，防孤儿条目复活）。
+    if (!s.sessions.some((x) => x.id === sessionId)) {
+      return {};
+    }
     const currentSessionMessages = s.sessionMessages[sessionId] ?? s.messages;
     const nextMessages = [...currentSessionMessages, ...newMessages];
 

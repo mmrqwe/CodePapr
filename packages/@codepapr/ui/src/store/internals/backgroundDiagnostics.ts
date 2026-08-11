@@ -24,6 +24,23 @@ let mutationVersionTimer: ReturnType<typeof setTimeout> | null = null;
 let backgroundDiagnosticsRunId = 0;
 const backgroundRepairAttemptsByWorkspace = new Map<string, number>();
 const backgroundRepairFingerprints = new Set<string>();
+// 有界：指纹集只增不减会随"工作区 × 失败签名"组合无限膨胀；超限按插入序逐出
+// 最旧条目（被逐出后最多重复一次修复尝试，无正确性影响）。
+const BACKGROUND_REPAIR_FINGERPRINTS_MAX = 256;
+const BACKGROUND_REPAIR_WORKSPACES_MAX = 32;
+
+function evictBackgroundRepairCaches(): void {
+  while (backgroundRepairFingerprints.size > BACKGROUND_REPAIR_FINGERPRINTS_MAX) {
+    const oldest = backgroundRepairFingerprints.values().next().value;
+    if (oldest === undefined) break;
+    backgroundRepairFingerprints.delete(oldest);
+  }
+  while (backgroundRepairAttemptsByWorkspace.size > BACKGROUND_REPAIR_WORKSPACES_MAX) {
+    const oldest = backgroundRepairAttemptsByWorkspace.keys().next().value;
+    if (oldest === undefined) break;
+    backgroundRepairAttemptsByWorkspace.delete(oldest);
+  }
+}
 
 function failedDiagnosticStages(report: ProjectDiagnosticsReport): ProjectDiagnosticsReport['stages'] {
   return report.available ? report.stages.filter((stage) => !stage.success) : [];
@@ -115,6 +132,7 @@ function maybeStartBackgroundRepair(params: {
 
     backgroundRepairFingerprints.add(fingerprint);
     backgroundRepairAttemptsByWorkspace.set(params.workspacePath, attempts + 1);
+    evictBackgroundRepairCaches();
     // 诊断明细已内嵌在修复提示词中（buildDiagnosticsRepairPrompt），无需再注入报告。
     void state
       .sendMessage(

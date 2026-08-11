@@ -153,6 +153,26 @@ pub fn git_branch_checkout_impl(
         }
     };
 
+    // force checkout 会静默覆盖工作区未提交改动：统计将被覆盖的改动文件数，
+    // 在结果消息中显式告知用户（改动已备份到 BACKUP_REF，可 restore_undo 找回）。
+    let dirty_count = repo
+        .statuses(None)
+        .map(|statuses| {
+            statuses
+                .iter()
+                .filter(|entry| {
+                    let st = entry.status();
+                    st.is_wt_new()
+                        || st.is_wt_modified()
+                        || st.is_wt_deleted()
+                        || st.is_wt_renamed()
+                        || st.is_wt_typechange()
+                        || st.is_conflicted()
+                })
+                .count()
+        })
+        .unwrap_or(0);
+
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
     if let Err(e) = repo.checkout_head(Some(&mut checkout)) {
@@ -164,7 +184,15 @@ pub fn git_branch_checkout_impl(
 
     GitOperationResult {
         ok: true, action: "branch_checkout".to_string(),
-        message: format!("已切换到分支 {}", branch_name), backup_ref,
+        message: if dirty_count > 0 {
+            format!(
+                "已切换到分支 {}（覆盖 {} 个未提交改动文件，已备份，可撤销恢复）",
+                branch_name, dirty_count
+            )
+        } else {
+            format!("已切换到分支 {}", branch_name)
+        },
+        backup_ref,
     }
 }
 
@@ -294,6 +322,41 @@ mod tests {
         assert!(
             branches.iter().any(|b| b.name == "feature/test"),
             "新分支应在列表中: {:?}", branches.iter().map(|b| &b.name).collect::<Vec<_>>()
+        );
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    /// 回归 #12：带未提交改动切换分支时，force checkout 会覆盖工作区文件——
+    /// 结果消息必须显式告知覆盖了多少改动文件（不得无声丢弃），且必须有
+    /// 备份引用（restore_undo 可找回）。
+    #[test]
+    fn test_branch_checkout_with_dirty_worktree_reports_overwritten_files() {
+        let workspace = temp_workspace("dirty");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+        fs::write(workspace.join("a.txt"), "a\n").unwrap();
+        engine.create("baseline").expect("baseline");
+
+        // 制造未提交改动（a.txt 修改 + 新文件 b.txt）
+        fs::write(workspace.join("a.txt"), "a-modified\n").unwrap();
+        fs::write(workspace.join("b.txt"), "b\n").unwrap();
+
+        let result = git_branch_checkout_impl(
+            &workspace,
+            "feature/dirty",
+            false,
+            true,
+            None,
+        );
+        assert!(result.ok, "切换应成功: {}", result.message);
+        assert!(
+            result.message.contains("覆盖"),
+            "消息必须说明覆盖了未提交改动: {}", result.message
+        );
+        assert!(
+            result.backup_ref.is_some(),
+            "覆盖未提交改动前必须创建备份引用（可撤销恢复）"
         );
 
         fs::remove_dir_all(&workspace).ok();

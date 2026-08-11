@@ -465,10 +465,15 @@ export async function launchAppBackend(
   let portOwnedByUs = false;
   for (;;) {
     await new Promise((r) => setTimeout(r, PORT_POLL_INTERVAL_MS));
-    // 带探测细节的诊断：v4/v6 各自 conn(有监听)/refused(无服务)/err，
-    // 「监听中却判空闲」的怪象靠它勘验
+    // 结构化探测：v4/v6 各自 connect 是否成功（有监听即视为被占用）。
+    // 旧实现靠 !detail.includes('conn') 子串解析诊断文本判状态——文本里出现
+    // "conn"（如 err:ConnectionRefused 之外的措辞）就会翻转判定，改用
+    // 结构化布尔字段彻底消除对文案的依赖。
+    const probe = await invoke<{ v4: boolean; v6: boolean }>('check_port_available_structured', {
+      port: app.port,
+    });
+    const available = !probe.v4 && !probe.v6;
     const detail = await invoke<string>('check_port_available_detail', { port: app.port });
-    const available = !detail.includes('conn');
     pollTrace.push(`+${Date.now() - startedAt}ms:${detail}`);
     if (!available) {
       portTaken = true;

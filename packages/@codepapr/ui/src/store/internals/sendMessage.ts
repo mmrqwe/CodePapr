@@ -184,6 +184,18 @@ function currentTodoDigest(sessionId: string | null): string | undefined {
 // take effect on the next session or when a stable input (mode/rules/lang/
 // skills/system prompt/character) changes.
 const sessionBootstrapCache = new Map<string, { signature: string; bootstrap: string }>();
+// 有界缓存：每个条目是一整份 bootstrap 字符串（memory.md + skills + prompts），
+// 随会话数无限增长会长期占用内存。超过上限时按最旧（Map 插入序）逐出；
+// 被逐出的会话下次需要时只是重算一次，无正确性影响。
+const SESSION_BOOTSTRAP_CACHE_MAX = 64;
+
+function evictSessionBootstrapCache(): void {
+  while (sessionBootstrapCache.size > SESSION_BOOTSTRAP_CACHE_MAX) {
+    const oldest = sessionBootstrapCache.keys().next().value;
+    if (oldest === undefined) break;
+    sessionBootstrapCache.delete(oldest);
+  }
+}
 
 function resolveSessionBootstrap(
   sessionId: string | null,
@@ -197,6 +209,7 @@ function resolveSessionBootstrap(
   }
   const bootstrap = computeFresh();
   sessionBootstrapCache.set(sessionId, { signature, bootstrap });
+  evictSessionBootstrapCache();
   return bootstrap;
 }
 
@@ -261,6 +274,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         let turnSessionId: string | null = null;
         // 本回合的序号（catch 中判断是否仍是当前回合，同 turnSessionId 需在 try 外声明）。
         let turnSeq = 0;
+        // 回合启动时的工作区路径（finally 中关闭浏览器页面用：切工作区后
+        // 页面仍属于回合启动时的工作区）。
+        let turnWorkspacePath = '';
 
         let effectiveInput = input;
         let effectiveDisplay = displayContent;
@@ -526,6 +542,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
 
         try {
           const { workspacePath, sessionMessages } = get();
+          turnWorkspacePath = workspacePath;
 
           // 回合序号：异步收尾（取消/崩溃 catch）用它判断自己是否仍是当前回合，
           // 避免旧回合的收尾踩掉新回合的 isLoading（单执行模型）。
@@ -1916,7 +1933,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           clearStoreIdle();
           void (async () => {
             try {
-              await invoke('close_browser_page', { workspacePath: get().workspacePath });
+              // 用回合开始时的捕获路径而非实时路径：回合中途切换工作区时，
+              // 浏览器页面属于回合启动时的工作区，按实时路径关闭会 miss，
+              // 导致旧工作区的浏览器会话泄漏（close_browser_page 按键查找）。
+              await invoke('close_browser_page', { workspacePath: turnWorkspacePath });
             } catch {
               // no-op: browser may not have been opened this turn
             }

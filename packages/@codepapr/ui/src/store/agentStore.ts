@@ -35,7 +35,7 @@ import {
 import { nextCheckpointSequence } from '../utils/workspaceGitPanel';
 import { acquireSleepPrevention, releaseSleepPrevention } from '../utils/sleepPrevention';
 import { warmupLspForWorkspace } from '../utils/lspWarmup';
-import { restoreTodoListContexts } from '../tools/todoListTool';
+import { restoreTodoListContexts, clearAllTodoListContexts, resetTodoListContext } from '../tools/todoListTool';
 import { loadMcpToolDefinitions } from '../tools/mcpTools';
 import {
   loadSkillDefinitions,
@@ -402,6 +402,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
       setWorkspacePath: (path) => {
         disposeAgentHandle(get);
+        clearAllTodoListContexts();
         set((s) => {
           if (s.workspacePath === path) {
             return { workspacePath: path, _agent: null, workspaceMutationVersion: 0 };
@@ -452,6 +453,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         // 全部 pending 请求并终止 Worker，避免被遗弃的 worker 继续消耗资源/
         // 阻止系统休眠状态正确释放。
         disposeAgentHandle(get);
+        clearAllTodoListContexts();
         set({
           workspacePath: '',
           workspaceMutationVersion: 0,
@@ -1092,6 +1094,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
       deleteSession: (id) => {
         const running = get();
+        // 释放该会话的进程级 TodoList 上下文，避免已删会话的条目被
+        // getAllTodoListContexts 持续持久化（孤儿复活）。
+        resetTodoListContext(id);
         // agent 归属被删会话时直接销毁（destroy() 内部先 cancel 再 reject
         // pending 请求）：只 cancel 不 destroy 会泄漏 worker。
         if (running._agentSessionId === id && running._agent) {

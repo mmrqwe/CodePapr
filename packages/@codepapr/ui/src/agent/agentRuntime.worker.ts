@@ -68,7 +68,19 @@ const appAgentAbortControllers = new Map<string, AbortController>();
 // Per-session log cache so consecutive turns reuse the already-built history
 // instead of re-cloning + re-hashing the full log every turn (incremental sync).
 // Reset implicitly when the worker is recreated (new WorkerBackedAgent instance).
+// Capped: each entry holds the full message history of a session, so an unbounded
+// map would grow with every session ever opened in this worker.
 const sessionLogs = new Map<string, AppendOnlyLog>();
+const MAX_SESSION_LOGS = 8;
+
+function setSessionLog(sessionId: string, log: AppendOnlyLog): void {
+  sessionLogs.set(sessionId, log);
+  while (sessionLogs.size > MAX_SESSION_LOGS) {
+    const oldest = sessionLogs.keys().next().value;
+    if (oldest === undefined) break;
+    sessionLogs.delete(oldest);
+  }
+}
 
 const chatResponseWaiters = new Map<
   string,
@@ -939,7 +951,10 @@ async function handleRunAppAgent(
   } else if (model === 'fast') {
     model = cachedSettings.fastModel || cachedSettings.model;
   } else if (model === 'mentor') {
-    model = cachedSettings.mentorModel || cachedSettings.model;
+    // mentorEnabled 关闭时不允许借用 mentor 模型名，回落到主模型。
+    model = cachedSettings.mentorEnabled
+      ? (cachedSettings.mentorModel || cachedSettings.model)
+      : cachedSettings.model;
   }
 
   let agentProvider: ILLMProvider = buildProvider(cachedSettings);
@@ -1188,7 +1203,7 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     }
   } else {
     sessionLog = createLog(payload.sessionId, payload.messages);
-    sessionLogs.set(payload.sessionId, sessionLog);
+    setSessionLog(payload.sessionId, sessionLog);
   }
   const startIndex = sessionLog.length();
 
@@ -1319,6 +1334,9 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
   });
   } finally {
     sessionAbortControllers.delete(payload.requestId);
+    // 成功路径在读取后已 delete（幂等）；错误/取消路径在此兜底，避免
+    // subagentCacheStatsMap 按 requestId 无限累积。
+    subagentCacheStatsMap.delete(payload.requestId);
   }
 }
 

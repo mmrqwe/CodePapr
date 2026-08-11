@@ -15,6 +15,44 @@ pub(crate) fn prepare_new_process_group(cmd: &mut Command) {
 #[cfg(not(unix))]
 pub(crate) fn prepare_new_process_group(_cmd: &mut Command) {}
 
+/// 杀进程组（无 Child 句柄版）：按 pid 对整组先 SIGTERM 再 SIGKILL。
+/// 适用于只有 pid 的场景（如 CDP 浏览器主进程）。同样先 getpgid 确认
+/// 该 pid 是自身进程组组长，绝不用 `kill(-pid)` 误杀调用方所在组；
+/// 非组长则退回只杀该进程自身。
+#[cfg(unix)]
+pub(crate) fn kill_process_group_by_pid(pid: u32) {
+    let pid = pid as libc::pid_t;
+    let group_leader = unsafe { libc::getpgid(pid) };
+    let target: libc::pid_t = if group_leader == pid { -pid } else { pid };
+
+    let _ = unsafe { libc::kill(target, libc::SIGTERM) };
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if unsafe { libc::kill(pid, 0) } != 0 {
+            break;
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let _ = unsafe { libc::kill(target, libc::SIGKILL) };
+}
+
+/// 杀进程树（仅 pid 版，Windows）：`taskkill /T /F` 递归杀整棵树，
+/// 而不是只杀主进程。
+#[cfg(windows)]
+pub(crate) fn kill_process_group_by_pid(pid: u32) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let _ = std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
 /// 有界等待子进程退出：`child.wait()` 在进程处于 D 状态（不可中断）时可能无限
 /// 阻塞。应用关闭/退出路径绝不能被清理调用卡住，否则进程残留在后台并触发
 /// macOS「正在后台运行」通知。到截止时间仍未退出则放弃等待（进程已 SIGKILL，

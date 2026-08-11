@@ -531,8 +531,7 @@ describe('WorkerBackedAgent', () => {
     expect(agent.isCrashed()).toBe(true);
   });
 
-  it('destroy() rejects in-flight chat with AgentDestroyedError, not WorkerCrashError', async () => {
-    const agent = createAgent();
+  it('destroy() rejects in-flight chat with AgentDestroyedError, not WorkerCrashError', async () => {    const agent = createAgent();
     const chatPromise = agent.chat('hello');
     const worker = MockWorker.instances[0];
     const chatMessage = chatMessages(worker)[0];
@@ -556,6 +555,29 @@ describe('WorkerBackedAgent', () => {
     await expect(agent.chat('after destroy')).rejects.toMatchObject({
       name: 'AgentDestroyedError',
     });
+  });
+
+  // 回归 #2：崩溃/销毁后 worker 已 terminate，任何后续 postMessage（取消、
+  // 心跳、工具回包等异步回调）都必须被拦截——向已终止 worker 投递在部分
+  // 引擎会抛异常。
+  it('does not postMessage to a worker after it crashed', async () => {
+    const agent = createAgent();
+    void agent.chat('hello');
+    const worker = MockWorker.instances[0];
+    if (!worker) throw new Error('expected worker instance');
+    const beforeCrash = worker.messages.length;
+    expect(beforeCrash).toBeGreaterThan(0);
+
+    worker.emitError('Simulated OOM');
+    expect(agent.isCrashed()).toBe(true);
+    expect(worker.terminated).toBe(true);
+
+    // 崩溃后仍可能被调用的路径：取消会话 / 取消 app-agent / 销毁
+    agent.cancelSession();
+    agent.cancelAppAgent('req-1');
+    agent.destroy();
+
+    expect(worker.messages.length).toBe(beforeCrash);
   });
 
   it('keeps an app agent run alive while stream events keep arriving', async () => {

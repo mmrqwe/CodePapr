@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { create } from 'zustand';
 import { createId } from '../utils/createId';
+import { pathsEquivalent, pathUnderDir } from '../utils/pathComparison';
 
 export interface ExternalAccessRequest {
   id: string;
@@ -257,10 +258,12 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
     if (get().yolo) return true;
     const { allowedExternalDirs, allowedExternalFiles } = get();
     for (const dir of allowedExternalDirs) {
-      if (normalized === dir || normalized.startsWith(dir + '/')) return true;
+      // 平台感知大小写：macOS/Windows 上同一目录的不同大小写写法必须放行
+      // （否则用户授权 /Users/example/x 后 /Users/example/x 仍被误拒）。
+      if (pathUnderDir(normalized, dir)) return true;
     }
     for (const file of allowedExternalFiles) {
-      if (normalized === file) return true;
+      if (pathsEquivalent(normalized, file)) return true;
     }
     return false;
   },

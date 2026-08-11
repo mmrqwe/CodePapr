@@ -474,16 +474,28 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
       typeof input.mentorEnabled === 'boolean'
         ? input.mentorEnabled
         : DEFAULT_SETTINGS.mentorEnabled,
-    mentorModel: (input.mentorModel ?? DEFAULT_SETTINGS.mentorModel).trim(),
-    mentorBaseURL: (input.mentorBaseURL ?? DEFAULT_SETTINGS.mentorBaseURL).trim(),
-    mentorApiKey: (input.mentorApiKey ?? DEFAULT_SETTINGS.mentorApiKey).trim(),
+    mentorModel:
+      typeof input.mentorModel === 'string'
+        ? input.mentorModel.trim()
+        : DEFAULT_SETTINGS.mentorModel,
+    mentorBaseURL:
+      typeof input.mentorBaseURL === 'string'
+        ? input.mentorBaseURL.trim()
+        : DEFAULT_SETTINGS.mentorBaseURL,
+    mentorApiKey:
+      typeof input.mentorApiKey === 'string'
+        ? input.mentorApiKey.trim()
+        : DEFAULT_SETTINGS.mentorApiKey,
     mentorApiFormat,
     mentorMaxTokens,
     maxMentorConsultations,
     mentorThinkingEnabled,
-    explorePrompt: (input.explorePrompt ?? '').trim(),
-    scoutPrompt: (input.scoutPrompt ?? '').trim(),
-    mentorPrompt: (input.mentorPrompt ?? '').trim(),
+    explorePrompt:
+      typeof input.explorePrompt === 'string' ? input.explorePrompt.trim() : '',
+    scoutPrompt:
+      typeof input.scoutPrompt === 'string' ? input.scoutPrompt.trim() : '',
+    mentorPrompt:
+      typeof input.mentorPrompt === 'string' ? input.mentorPrompt.trim() : '',
     exploreModelTier: input.exploreModelTier === 'primary' ? 'primary' : 'fast',
     scoutModelTier: input.scoutModelTier === 'primary' ? 'primary' : 'fast',
     exploreTopP,

@@ -1,5 +1,5 @@
 import { errorMessage } from '@codepapr/common';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { usePreviewStore } from '../store/previewStore';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
@@ -55,7 +55,15 @@ export function PreviewSessionPanel({ workspacePath, lang }: PreviewSessionPanel
     }
   }, [activePreviewSession, closePreviewSession, workspacePath]);
 
+  // 会话切换（openedAt/pid/url 变化）时用 key 重挂 iframe 以强制重新加载。
+  // 首次挂载必须跳过：iframe 的 src 已在 JSX 中设置，mount 即开始加载，
+  // 若再 bump key 会先卸载刚挂载的 iframe 再重挂同 URL，导致双重加载。
+  const isFirstPreviewRender = useRef(true);
   useEffect(() => {
+    if (isFirstPreviewRender.current) {
+      isFirstPreviewRender.current = false;
+      return;
+    }
     setFrameKey((value) => value + 1);
     setError('');
   }, [activePreview?.openedAt, activePreview?.pid, activePreview?.url]);

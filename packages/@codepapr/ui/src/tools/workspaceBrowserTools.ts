@@ -271,7 +271,9 @@ export function registerWorkspaceBrowserTools(ctx: WorkspaceToolContext): void {
     }
 
     const result = await invoke<BrowserPageCloseResult>('close_browser_page', {
-      workspacePath: workspace(),
+      // 用会话捕获的工作区路径（而非实时路径）：预览会话可能属于上个工作区
+      // （切换工作区后关闭），按实时路径查找会 miss 并泄漏旧工作区的页面。
+      workspacePath: current?.workspacePath ?? workspace(),
     });
     if (current?.workspacePath === workspace()) {
       usePreviewStore.getState().closePreviewSession();

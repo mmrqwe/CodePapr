@@ -23,6 +23,7 @@ use std::{
         Arc, Mutex, OnceLock,
     },
     thread,
+    sync::mpsc,
     time::{Duration, Instant},
 };
 
@@ -32,6 +33,8 @@ use std::os::windows::process::CommandExt;
 pub(crate) const MAX_COMMAND_SECONDS: u64 = 600;
 pub(crate) const MAX_OUTPUT_BYTES: usize = 200_000;
 const MAX_BACKGROUND_LOG_LINES: usize = 48;
+/// 命令结束后读线程收尾的等待上限（见 collect_command_output_with_cancel）。
+const READER_DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// 前台命令（run_workspace_command / run_workspace_shell_command）的取消令牌表：
 /// token → 取消标志。前端在信号 abort（会话取消 / 工具超时）时调用
@@ -474,8 +477,17 @@ fn collect_command_output_with_cancel(
         .take()
         .ok_or_else(|| "无法捕获命令标准错误".to_string())?;
 
-    let stdout_handle = thread::spawn(move || drain_capped_output(stdout));
-    let stderr_handle = thread::spawn(move || drain_capped_output(stderr));
+    // 读线程把结果发回通道而非 join 直接取：孙进程逃逸进程组后仍持有管道
+    // 写端时，读线程永远等不到 EOF（join 永久阻塞）。通道版可用 recv_timeout
+    // 有界等待（与 lsp_managed_tools.rs 的同类修复一致）。
+    let (stdout_tx, stdout_rx) = mpsc::channel();
+    let (stderr_tx, stderr_rx) = mpsc::channel();
+    let stdout_handle = thread::spawn(move || {
+        let _ = stdout_tx.send(drain_capped_output(stdout));
+    });
+    let stderr_handle = thread::spawn(move || {
+        let _ = stderr_tx.send(drain_capped_output(stderr));
+    });
 
     let started = Instant::now();
     let mut timed_out = false;
@@ -505,12 +517,12 @@ fn collect_command_output_with_cancel(
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    let stdout = stdout_handle
-        .join()
-        .map_err(|_| "读取标准输出线程异常".to_string())?;
-    let stderr = stderr_handle
-        .join()
-        .map_err(|_| "读取标准错误线程异常".to_string())?;
+    // 有界等待读线程收尾：超时则放弃本轮输出（线程在管道最终关闭时自行
+    // 退出），绝不因 join 无超时挂起命令调用方。
+    let stdout = stdout_rx.recv_timeout(READER_DRAIN_TIMEOUT).unwrap_or_default();
+    let stderr = stderr_rx.recv_timeout(READER_DRAIN_TIMEOUT).unwrap_or_default();
+    drop(stdout_handle);
+    drop(stderr_handle);
 
     let stdout_bytes = if stdout.len() > MAX_OUTPUT_BYTES {
         &stdout[..MAX_OUTPUT_BYTES]
@@ -859,7 +871,7 @@ pub(crate) fn stop_background_process(
 ) -> Result<StopBackgroundProcessResult, String> {
     let source = source.unwrap_or_else(|| "unknown".to_string());
     with_background_processes(|processes| {
-        let Some(mut process) = processes.remove(&pid) else {
+        let Some(process) = processes.get_mut(&pid) else {
             return Ok(StopBackgroundProcessResult {
                 pid,
                 stopped: false,
@@ -880,10 +892,15 @@ pub(crate) fn stop_background_process(
             Err(_) => true,
         };
 
+        // 先杀后移除：kill + 等待最多 3s 期间进程仍在注册表中（状态查询可见
+        // "stopping"），避免先 remove 造成的失联窗口——那时 list/status 查
+        // 不到进程，用户会看到进程"凭空消失"又"回来"。
         if still_running {
             let _ = kill_process_tree(&mut process.child);
             wait_for_child_exit(&mut process.child, Duration::from_secs(3));
         }
+
+        processes.remove(&pid);
 
         Ok(StopBackgroundProcessResult {
             pid,
@@ -915,7 +932,8 @@ pub(crate) fn stop_all_background_processes(
         let mut stopped = 0usize;
 
         for pid in target_pids {
-            if let Some(mut process) = processes.remove(&pid) {
+            let mut still_running = false;
+            if let Some(process) = processes.get_mut(&pid) {
                 log_background_event(
                     &process.workspace_path,
                     format!(
@@ -923,7 +941,7 @@ pub(crate) fn stop_all_background_processes(
                         process.command
                     ),
                 );
-                let still_running = match process.child.try_wait() {
+                still_running = match process.child.try_wait() {
                     Ok(Some(_)) => false,
                     Ok(None) => true,
                     Err(_) => true,
@@ -932,8 +950,11 @@ pub(crate) fn stop_all_background_processes(
                 if still_running {
                     let _ = kill_process_tree(&mut process.child);
                     wait_for_child_exit(&mut process.child, Duration::from_secs(3));
-                    stopped += 1;
                 }
+            }
+            processes.remove(&pid);
+            if still_running {
+                stopped += 1;
             }
         }
 

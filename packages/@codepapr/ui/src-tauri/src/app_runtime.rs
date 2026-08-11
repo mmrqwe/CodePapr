@@ -110,6 +110,25 @@ pub fn check_port_available_detail(port: u16) -> Result<String, String> {
     Ok(format!("v4={} v6={}", probe(("127.0.0.1", port)), probe(("::1", port))))
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortProbeResult {
+    /// v4/v6 各自是否已有监听（connect 成功即视为被占用）。
+    pub(crate) v4: bool,
+    pub(crate) v6: bool,
+}
+
+/// 结构化端口探测：返回 v4/v6 各自是否有监听，供前端轮询做布尔判定。
+/// 与 check_port_available_detail 的唯一区别是结构化返回值——调用方
+/// 不应依赖子串解析诊断文本（如 "conn"）推断端口状态。
+#[tauri::command]
+pub fn check_port_available_structured(port: u16) -> Result<PortProbeResult, String> {
+    Ok(PortProbeResult {
+        v4: port_has_listener(("127.0.0.1", port)),
+        v6: port_has_listener(("::1", port)),
+    })
+}
+
 /// 端口当前监听进程的 PID 列表（无监听返回空）。用于 app 启动时验证端口
 /// 归属：轮询到「端口被监听」≠「我们 spawn 的进程在监听」——外部进程抢占
 /// 端口时旧实现照样判「启动成功」，返回死进程 pid；调用方必须核对归属。

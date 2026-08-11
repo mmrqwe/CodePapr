@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  appendErrorMessage,
   appendSessionMessages,
   applyToolStreamEvent,
   cleanupStreamingAssistantMessage,
@@ -69,7 +70,7 @@ function message(id: string, overrides: Partial<UIMessage> = {}): UIMessage {
   return { id, role: 'assistant', content: '', timestamp: 1, ...overrides };
 }
 
-function createHarness(initial: Pick<AgentState, 'activeSessionId' | 'messages' | 'sessionMessages'>) {
+function createHarness(initial: Pick<AgentState, 'activeSessionId' | 'messages' | 'sessionMessages' | 'sessions'>) {
   let state = { ...initial };
   const set: StoreSet = (partial) => {
     const patch = typeof partial === 'function' ? partial(state as AgentState) : partial;
@@ -81,10 +82,13 @@ function createHarness(initial: Pick<AgentState, 'activeSessionId' | 'messages' 
   };
 }
 
+const liveSessions = (ids: string[]) => ids.map((id) => ({ id })) as AgentState['sessions'];
+
 describe('session-scoped message mutators', () => {
   it('updateAssistantMessage updates the flat mirror only for the active session', () => {
     const harness = createHarness({
       activeSessionId: 'visible',
+      sessions: liveSessions(['visible', 'background']),
       messages: [message('v1', { content: 'visible' })],
       sessionMessages: {
         visible: [message('v1', { content: 'visible' })],
@@ -102,6 +106,7 @@ describe('session-scoped message mutators', () => {
   it('updateAssistantMessage keeps the mirror in sync for the active session', () => {
     const harness = createHarness({
       activeSessionId: 'visible',
+      sessions: liveSessions(['visible']),
       messages: [message('v1', { content: 'visible' })],
       sessionMessages: { visible: [message('v1', { content: 'visible' })] },
     });
@@ -116,6 +121,7 @@ describe('session-scoped message mutators', () => {
   it('appendSessionMessages does not leak background session messages into the mirror', () => {
     const harness = createHarness({
       activeSessionId: 'visible',
+      sessions: liveSessions(['visible', 'background']),
       messages: [message('v1')],
       sessionMessages: { visible: [message('v1')], background: [message('b1')] },
     });
@@ -130,6 +136,7 @@ describe('session-scoped message mutators', () => {
   it('cleanupStreamingAssistantMessage finalizes background session without touching the mirror', () => {
     const harness = createHarness({
       activeSessionId: 'visible',
+      sessions: liveSessions(['visible', 'background']),
       messages: [message('v1')],
       sessionMessages: {
         visible: [message('v1')],
@@ -142,5 +149,52 @@ describe('session-scoped message mutators', () => {
     const state = harness.get();
     expect(state.sessionMessages['background']?.[0]?.isStreaming).toBe(false);
     expect(state.messages.map((m) => m.id)).toEqual(['v1']);
+  });
+
+  // 回归 #4：会话删除后不得再被 appendErrorMessage/appendSessionMessages
+  // 复活——否则孤儿条目会被项目快照持久化。
+  it('appendErrorMessage does not resurrect a deleted session', () => {
+    const harness = createHarness({
+      activeSessionId: 'alive',
+      sessions: liveSessions(['alive']),
+      messages: [message('v1')],
+      sessionMessages: { alive: [message('v1')] },
+    });
+
+    appendErrorMessage(harness.set, 'boom', 'deleted-session');
+
+    const state = harness.get();
+    expect(state.sessionMessages['deleted-session']).toBeUndefined();
+    // 也不得污染活跃会话的消息
+    expect(state.sessionMessages['alive']?.map((m) => m.id)).toEqual(['v1']);
+  });
+
+  it('appendErrorMessage still works for a live session', () => {
+    const harness = createHarness({
+      activeSessionId: 'alive',
+      sessions: liveSessions(['alive']),
+      messages: [message('v1')],
+      sessionMessages: { alive: [message('v1')] },
+    });
+
+    appendErrorMessage(harness.set, 'boom', 'alive');
+
+    const state = harness.get();
+    expect(state.sessionMessages['alive']).toHaveLength(2);
+    expect(state.sessionMessages['alive']?.[1]).toMatchObject({ role: 'error', content: 'boom' });
+  });
+
+  it('appendSessionMessages does not resurrect a deleted session', () => {
+    const harness = createHarness({
+      activeSessionId: 'alive',
+      sessions: liveSessions(['alive']),
+      messages: [message('v1')],
+      sessionMessages: { alive: [message('v1')] },
+    });
+
+    appendSessionMessages(harness.set, 'deleted-session', [message('zombie')]);
+
+    const state = harness.get();
+    expect(state.sessionMessages['deleted-session']).toBeUndefined();
   });
 });

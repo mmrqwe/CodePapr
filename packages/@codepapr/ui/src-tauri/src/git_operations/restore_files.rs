@@ -59,6 +59,23 @@ pub fn git_restore_files_impl(
         },
     };
 
+    // force checkout 会直接覆盖工作区文件：恢复前先备份当前状态到
+    // BACKUP_REF，使被覆盖的本地改动可通过 restore_undo 找回。备份失败且
+    // 工作区确有可快照文件时中止（fail-closed，防无安全网覆盖）。
+    let backup_ref = match crate::snapshot::RestoreEngine::new(workspace).backup_current_state() {
+        Ok(oid) => Some(oid),
+        Err(e) => {
+            if crate::snapshot::SnapshotEngine::new(workspace).has_snapshotable_files() {
+                return GitOperationResult {
+                    ok: false, action: "restore".to_string(),
+                    message: format!("恢复前备份工作区失败，已中止以防数据丢失: {e}"),
+                    backup_ref: None,
+                };
+            }
+            None
+        }
+    };
+
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
     // 恢复时是否一并处理未跟踪文件（默认 false）：true 时删除 checkout 路径
@@ -78,18 +95,18 @@ pub fn git_restore_files_impl(
     if let Err(e) = repo.checkout_tree(target_object, Some(&mut checkout)) {
         return GitOperationResult {
             ok: false, action: "restore".to_string(),
-            message: format!("checkout: {}", e.message()), backup_ref: None,
+            message: format!("checkout: {}", e.message()), backup_ref,
         };
     }
 
     GitOperationResult {
         ok: true, action: "restore".to_string(),
         message: if pathspecs.is_empty() {
-            format!("已从 {} 恢复工作区文件", source_ref)
+            format!("已从 {} 恢复工作区文件（改动已备份，可撤销恢复）", source_ref)
         } else {
-            format!("已从 {} 恢复 {} 个路径", source_ref, pathspecs.len())
+            format!("已从 {} 恢复 {} 个路径（改动已备份，可撤销恢复）", source_ref, pathspecs.len())
         },
-        backup_ref: None,
+        backup_ref,
     }
 }
 
