@@ -13,6 +13,7 @@ import {
 import { Logger, sortedStringify } from '@codepapr/common';
 import { BaseLLMProvider, ProviderConfig, ProviderRequestError } from './ILLMProvider';
 import {
+  isRetriableStreamErrorType,
   readSseStream,
   safeParseToolArguments,
   sanitizeToolCallArguments,
@@ -23,6 +24,12 @@ import { buildClaudeImageContent, ClaudeContentPart } from './imageContent';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
 
 const log = new Logger('ClaudeProvider');
+
+/** Claude thinking 的思考预算（token）。Anthropic API 硬性要求
+ *  thinking.enabled 时必须携带 budget_tokens（≥1024 且 ≤ max_tokens），
+ *  缺失立即 400 invalid_request_error——旧实现只发 {type:"enabled"}，任何
+ *  调用方启用 thinking 都会当场 400。 */
+export const CLAUDE_THINKING_BUDGET_TOKENS = 4096;
 
 function isPrefixSystemMessage(metadata: Record<string, unknown> | undefined): boolean {
   return metadata?.isPrefixSystem === true;
@@ -84,6 +91,13 @@ interface ClaudeStreamChunk {
   };
   index?: number;
   usage?: ClaudeResponse['usage'];
+  /** error 事件：Anthropic 流式错误（invalid_request_error / authentication_error
+   *  / overloaded_error 等）。旧实现完全没处理——确定性错误被当成「流干净结束但
+   *  无终止信号」抛可重试错误，叠加流层无限重连永久卡死。 */
+  error?: {
+    type: string;
+    message: string;
+  };
 }
 
 interface ClaudeStreamingToolState {
@@ -277,6 +291,20 @@ export class ClaudeProvider extends BaseLLMProvider {
               usage = { ...usage, ...chunkUsage };
             }
 
+            // error 事件 = 确定性 API 错误（鉴权/配置/上下文超限），不是网络
+            // 断流：立即抛出并正确分类 retriable。overloaded/rate_limit 之外
+            // 的类型一律不重试，避免「欠费/配置错误 → 无限重连」。
+            if (chunk.type === 'error') {
+              const errorType = chunk.error?.type ?? '';
+              const errorMessage = chunk.error?.message ?? '未知错误';
+              log.error(`${this.name} stream error event`, { errorType, errorMessage });
+              throw new ProviderRequestError({
+                provider: this.name,
+                message: `Claude API error (${errorType}): ${errorMessage}`,
+                retriable: isRetriableStreamErrorType(errorType),
+              });
+            }
+
             if (chunk.type === 'message_start') {
               responseId = chunk.message?.id ?? responseId;
               return;
@@ -336,6 +364,12 @@ export class ClaudeProvider extends BaseLLMProvider {
             throw err;
           }
           if (err instanceof StreamIdleTimeoutError) {
+            throw err;
+          }
+          // 流内 error 事件（#6）已分类的 ProviderRequestError 必须原样穿透：
+          // 旧实现会把任何非超时错误包成 retriable=true 的「流中断」，确定性
+          // 错误被流层无限重连。
+          if (err instanceof ProviderRequestError) {
             throw err;
           }
           // Mid-stream body breaks (connection reset / truncated body — surfaced
@@ -463,7 +497,11 @@ export class ClaudeProvider extends BaseLLMProvider {
     return {
       model: request.model,
       max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
-      temperature: request.temperature ?? 0.7,
+      // Anthropic 要求 thinking 启用时 temperature 必须为 1，否则 400。
+      temperature:
+        request.thinking?.type === 'enabled'
+          ? 1
+          : (request.temperature ?? 0.7),
       top_p: request.topP ?? 0.9,
       system: systemPrompt
         ? [
@@ -491,6 +529,12 @@ export class ClaudeProvider extends BaseLLMProvider {
       ...(request.thinking?.type === 'enabled' && {
         thinking: {
           type: 'enabled' as const,
+          // 必须携带 budget_tokens（≥1024 且 ≤ max_tokens），且不超过本次
+          // 输出预算；缺 budget_tokens 或 budget > max_tokens 都会 400。
+          budget_tokens: Math.min(
+            CLAUDE_THINKING_BUDGET_TOKENS,
+            request.maxTokens ?? DEFAULT_MAX_TOKENS
+          ),
         },
       }),
       ...(stream ? { stream: true } : {}),

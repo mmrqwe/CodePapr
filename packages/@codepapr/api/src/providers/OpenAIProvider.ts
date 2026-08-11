@@ -20,6 +20,7 @@ import {
 import {
   applyStreamingToolCallDeltas,
   finalizeStreamingToolCalls,
+  isRetriableStreamErrorType,
   readSseStream,
   safeParseToolArguments,
   StreamIdleTimeoutError,
@@ -82,6 +83,12 @@ interface OpenAIStreamChunk {
   }>;
   usage?: OpenAIResponse['usage'];
   system_fingerprint?: string;
+  /** OpenAI 兼容中转可能以 SSE data 下发 error 对象（鉴权/限流/上下文超限）。
+   *  旧实现忽略它——流干净结束后被误判为瞬态断流，叠加无限重连永久卡死。 */
+  error?: {
+    message?: string;
+    type?: string;
+  };
 }
 
 function getOpenAICachedTokens(usage: OpenAIResponse['usage'] | undefined): number {
@@ -215,6 +222,21 @@ export class OpenAIProvider extends BaseLLMProvider {
               log.warn('SSE chunk parse failed, skipping', { payloadLine: payloadLine.slice(0, 200) });
               return;
             }
+
+            // 流内 error 对象 = 确定性 API 错误（鉴权/配置/上下文超限等），
+            // 不是网络断流：分类后立即抛出。overloaded/rate_limit 之外一律
+            // 不重试，避免无限重连。
+            if (chunk.error) {
+              const errorType = chunk.error.type ?? '';
+              const errorMessage = chunk.error.message ?? '未知错误';
+              log.error(`${this.name} stream error event`, { errorType, errorMessage });
+              throw new ProviderRequestError({
+                provider: this.name,
+                message: `OpenAI-compatible API error (${errorType || 'unknown'}): ${errorMessage}`,
+                retriable: isRetriableStreamErrorType(errorType),
+              });
+            }
+
             responseId = chunk.id ?? responseId;
             if (chunk.usage) {
               usage = chunk.usage;
@@ -258,6 +280,11 @@ export class OpenAIProvider extends BaseLLMProvider {
             throw err;
           }
           if (err instanceof StreamIdleTimeoutError) {
+            throw err;
+          }
+          // 流内 error 事件（#6）已分类的 ProviderRequestError 必须原样穿透：
+          // 旧实现把任何非超时错误包成 retriable=true 的「流中断」。
+          if (err instanceof ProviderRequestError) {
             throw err;
           }
           // Mid-stream body breaks (connection reset / truncated body — surfaced

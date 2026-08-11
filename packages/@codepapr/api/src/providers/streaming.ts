@@ -358,6 +358,36 @@ export interface StreamIdleRetryOptions {
   retryDelayMs?: (attempt: number) => number;
 }
 
+/** 流内 error 事件的确定性错误类型（Claude error 事件 / OpenAI 兼容流内
+ *  error 对象）：这些错误重试无意义（配置错误、鉴权失败、上下文超限、模型
+ *  不存在等），必须抛 retriable=false 让回合终止，而不是被流层当作瞬态断流
+ *  无限重连。 */
+export function isPersistentStreamErrorType(type: string | undefined): boolean {
+  if (!type) return false;
+  const normalized = type.trim().toLowerCase();
+  return [
+    'invalid_request_error',
+    'invalid_request',
+    'authentication_error',
+    'invalid_api_key',
+    'permission_error',
+    'not_found_error',
+    'model_not_found',
+    'request_too_large',
+    'context_length_exceeded',
+    'content_filter',
+    'insufficient_quota',
+  ].includes(normalized);
+}
+
+/** 流内 error 事件里值得重试的类型（过载/限流），其余（含未知类型）一律不重试：
+ *  确定性错误被误判为瞬态是「无限重连」的主要来源。 */
+export function isRetriableStreamErrorType(type: string | undefined): boolean {
+  if (!type) return false;
+  const normalized = type.trim().toLowerCase();
+  return normalized === 'overloaded_error' || normalized === 'rate_limit_error';
+}
+
 /** Network-level stream failures worth retrying: idle timeouts and
  *  provider-wrapped mid-stream breaks (connection reset / truncated body,
  *  e.g. reqwest "error decoding response body"). Retry is allowed even after

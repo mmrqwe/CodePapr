@@ -291,6 +291,31 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     sessionMessages: { ...s.sessionMessages, [compactSessionId]: nextMessages },
                   };
                 });
+
+                // ⚠️ 修复：压缩后必须让下一回合真正使用压缩后的上下文。
+                // 旧实现只往视图插入 checkpoint 消息，_agent 原样复用（全量历史
+                // 照发），"已节省 X KB" 是假提示。无回合在飞时销毁/失效旧 agent，
+                // 下一条消息按压缩后的 sessionMessages 重建（与回合后 checkpoint
+                // 路径一致）；回合在飞时留给回合后的自动压缩处理，绝不触碰运行中
+                // 的 agent（destroy 会让在飞回合的 chat() 被拒）。
+                const compactAgent = get()._agent;
+                const compactAgentOwner = get()._agentSessionId;
+                const compactTurnInFlight =
+                  get().isLoading && get().loadingSessionId === compactSessionId;
+                if (compactAgent && compactAgentOwner === compactSessionId && !compactTurnInFlight) {
+                  try {
+                    // 可能在跑 app-agent（papr.agent.run，不占 isLoading）：
+                    // 有在飞 app 执行时 detach 等其结算完自我销毁。
+                    if (compactAgent.hasActiveAppAgentRequests?.()) {
+                      compactAgent.detachAndCleanupWhenIdle?.();
+                    } else {
+                      compactAgent.destroy();
+                    }
+                  } catch {
+                    // already torn down
+                  }
+                  set({ _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
+                }
               }
               appendInfoMessage(
                 set,

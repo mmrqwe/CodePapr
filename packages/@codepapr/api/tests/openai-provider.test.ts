@@ -573,3 +573,92 @@ describe('safeParseToolArguments', () => {
     expect(secondBody.reasoning_effort).toBeUndefined();
   });
 });
+
+describe('OpenAIProvider stream error events', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('surfaces a deterministic in-stream error object as non-retriable instead of retrying forever', async () => {
+    const errorEvent =
+      'data: {"error":{"type":"insufficient_quota","message":"You exceeded your current quota"}}\n\n';
+    const okChunks = [
+      'data: {"id":"ok","choices":[{"index":0,"delta":{"content":"好"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}\n\n',
+      'data: [DONE]\n\n',
+    ].join('');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(errorEvent, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(okChunks, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAIProvider({ apiKey: 'test-key', streamRetryDelayMs: () => 0 });
+    let caught: unknown;
+    try {
+      await provider.streamChat(
+        {
+          model: 'gpt-4o',
+          messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+          maxTokens: 1024,
+        },
+        () => {}
+      );
+    } catch (err) {
+      caught = err;
+    }
+
+    // 确定性错误（欠费）必须立即终止且不重试——旧实现把它当瞬态断流无限重连。
+    expect(caught).toBeInstanceOf(ProviderRequestError);
+    expect((caught as ProviderRequestError).retriable).toBe(false);
+    expect((caught as Error).message).toContain('insufficient_quota');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks rate_limit_error stream objects as retriable', async () => {
+    const errorEvent =
+      'data: {"error":{"type":"rate_limit_error","message":"rate limited"}}\n\n';
+    const okChunks = [
+      'data: {"id":"ok","choices":[{"index":0,"delta":{"content":"好"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}\n\n',
+      'data: [DONE]\n\n',
+    ].join('');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(errorEvent, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(okChunks, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAIProvider({ apiKey: 'test-key', streamRetryDelayMs: () => 0, streamMaxRetries: 6 });
+    const response = await provider.streamChat(
+      {
+        model: 'gpt-4o',
+        messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+        maxTokens: 1024,
+      },
+      () => {}
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(response?.choices[0]?.message.content).toBe('好');
+  });
+});

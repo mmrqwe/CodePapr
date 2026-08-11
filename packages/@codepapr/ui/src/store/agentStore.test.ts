@@ -54,6 +54,12 @@ const { loadAppSettingsMock, saveAppSettingsMock } = vi.hoisted(() => ({
   saveAppSettingsMock: vi.fn(async () => undefined),
 }));
 
+const { maybeGenerateContextCheckpointMock } = vi.hoisted(() => ({
+  // 默认返回 null（与真实实现在小消息集下的行为一致）；/compact 等测试
+  // 单独 mockResolvedValueOnce 注入 checkpoint。
+  maybeGenerateContextCheckpointMock: vi.fn(async (): Promise<unknown> => null),
+}));
+
 const { createAgentMock, createMainThreadAgentMock, actualCreateAgentRef } = vi.hoisted(() => ({
   createAgentMock: vi.fn(),
   createMainThreadAgentMock: vi.fn(),
@@ -102,6 +108,10 @@ vi.mock('../utils/projectStorage', () => ({
 vi.mock('../utils/appSettingsStorage', () => ({
   loadAppSettings: loadAppSettingsMock,
   saveAppSettings: saveAppSettingsMock,
+}));
+
+vi.mock('./internals/contextCheckpoint', () => ({
+  maybeGenerateContextCheckpoint: maybeGenerateContextCheckpointMock,
 }));
 
 // createAgent/createMainThreadAgent are spied so crash-recovery tests can
@@ -610,6 +620,125 @@ describe('useAgentStore.sendMessage', () => {
       }),
       expect.anything()
     );
+  });
+
+  it('/compact 后销毁旧 agent 并清空句柄，下一回合用压缩后的历史重建（不再全量照发）', async () => {
+    maybeGenerateContextCheckpointMock.mockResolvedValueOnce({
+      message: {
+        id: 'checkpoint-1',
+        role: 'assistant',
+        content: '已压缩',
+        timestamp: Date.now(),
+        contextCheckpoint: {
+          version: 1,
+          summary: '压缩摘要',
+          sourceMessageCount: 2,
+          sourceChars: 500,
+          model: 'local',
+          createdAt: Date.now(),
+          language: 'zh-CN',
+        },
+        isStreaming: false,
+      },
+      modelTier: 'local',
+      insertIndex: 1,
+    });
+
+    const destroy = vi.fn();
+    const mockAgent = createMockAgent({ destroy });
+    useAgentStore.setState((state) => ({
+      ...state,
+      sessions: [
+        {
+          id: 'session-1',
+          name: '任务 1',
+          provider: 'deepseek',
+          model: 'deepseek-v4-pro',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      ],
+      activeSessionId: 'session-1',
+      sessionMessages: {
+        'session-1': [
+          { id: 'u1', role: 'user', content: '第一条', timestamp: 1 },
+          { id: 'u2', role: 'user', content: '第二条', timestamp: 2 },
+        ],
+      },
+      messages: [
+        { id: 'u1', role: 'user', content: '第一条', timestamp: 1 },
+        { id: 'u2', role: 'user', content: '第二条', timestamp: 2 },
+      ],
+      _agent: mockAgent,
+      _agentModel: 'deepseek-v4-pro',
+      _agentPromptKey: 'key-1',
+      _agentSessionId: 'session-1',
+    }));
+
+    await useAgentStore.getState().sendMessage('/compact', '/compact', 'agent');
+
+    // 旧实现：只插入 checkpoint 消息，_agent 原样复用（下一回合全量历史照发）。
+    const state = useAgentStore.getState();
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(state._agent).toBeNull();
+    expect(state._agentSessionId).toBeNull();
+    expect(state._agentModel).toBeNull();
+    expect(state._agentPromptKey).toBeNull();
+    expect(state.sessionMessages['session-1']).toContainEqual(
+      expect.objectContaining({ id: 'checkpoint-1', content: '已压缩' })
+    );
+  });
+
+  it('/compact 回合在飞时不销毁 agent（留给回合后自动压缩处理）', async () => {
+    maybeGenerateContextCheckpointMock.mockResolvedValueOnce({
+      message: {
+        id: 'checkpoint-1',
+        role: 'assistant',
+        content: '已压缩',
+        timestamp: Date.now(),
+        contextCheckpoint: {
+          version: 1,
+          summary: '压缩摘要',
+          sourceMessageCount: 2,
+          sourceChars: 500,
+          model: 'local',
+          createdAt: Date.now(),
+          language: 'zh-CN',
+        },
+        isStreaming: false,
+      },
+      modelTier: 'local',
+      insertIndex: 1,
+    });
+
+    const destroy = vi.fn();
+    const mockAgent = createMockAgent({ destroy });
+    useAgentStore.setState((state) => ({
+      ...state,
+      activeSessionId: 'session-1',
+      sessionMessages: {
+        'session-1': [
+          { id: 'u1', role: 'user', content: '第一条', timestamp: 1 },
+          { id: 'u2', role: 'user', content: '第二条', timestamp: 2 },
+        ],
+      },
+      messages: [
+        { id: 'u1', role: 'user', content: '第一条', timestamp: 1 },
+        { id: 'u2', role: 'user', content: '第二条', timestamp: 2 },
+      ],
+      isLoading: true,
+      loadingSessionId: 'session-1',
+      _agent: mockAgent,
+      _agentModel: 'deepseek-v4-pro',
+      _agentPromptKey: 'key-1',
+      _agentSessionId: 'session-1',
+    }));
+
+    await useAgentStore.getState().sendMessage('/compact', '/compact', 'agent');
+
+    const state = useAgentStore.getState();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(state._agent).toBe(mockAgent);
   });
 
   it('persists the recent workspace path after opening a workspace', async () => {

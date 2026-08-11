@@ -425,4 +425,153 @@ describe('ClaudeProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(response?.choices[0]?.message.content).toBe('完整');
   });
+
+  it('surfaces a deterministic SSE error event as non-retriable instead of retrying forever', async () => {
+    const errorEvent =
+      'event: error\ndata: {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}\n\n';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(errorEvent, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+          {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          }
+        )
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new ClaudeProvider({ apiKey: 'test-key', streamRetryDelayMs: () => 0 });
+    let caught: unknown;
+    try {
+      await provider.streamChat(
+        {
+          model: 'claude-sonnet-4-6',
+          messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+          maxTokens: 1024,
+        },
+        () => {}
+      );
+    } catch (err) {
+      caught = err;
+    }
+
+    // 确定性错误（鉴权失败）必须立即终止且不重试——旧实现把它当瞬态断流
+    // 无限重连（欠费/配置错误永久卡死）。
+    expect(caught).toBeInstanceOf(ProviderRequestError);
+    expect((caught as ProviderRequestError).retriable).toBe(false);
+    expect((caught as Error).message).toContain('authentication_error');
+    expect((caught as Error).message).toContain('invalid x-api-key');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks overloaded_error SSE events as retriable', async () => {
+    const errorEvent =
+      'event: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}\n\n';
+    const okChunks = [
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"好"}}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}\n\n',
+    ].join('');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(errorEvent, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(okChunks, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new ClaudeProvider({ apiKey: 'test-key', streamRetryDelayMs: () => 0, streamMaxRetries: 6 });
+    const response = await provider.streamChat(
+      {
+        model: 'claude-sonnet-4-6',
+        messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+        maxTokens: 1024,
+      },
+      () => {}
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(response?.choices[0]?.message.content).toBe('好');
+  });
+
+  it('sends budget_tokens and temperature=1 when thinking is enabled', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 'claude-thinking',
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'ok' }],
+        model: 'claude-sonnet',
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 5, output_tokens: 3 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new ClaudeProvider({ apiKey: 'test-key' });
+    await provider.chat({
+      model: 'claude-sonnet-4-6',
+      messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+      maxTokens: 8192,
+      temperature: 0.5,
+      thinking: { type: 'enabled' },
+    });
+
+    const [, options] = fetchMock.mock.calls[0] ?? [];
+    const body = JSON.parse((options as RequestInit).body as string) as {
+      temperature?: number;
+      thinking?: { type?: string; budget_tokens?: number };
+    };
+
+    // 旧实现：thinking 只有 {type:"enabled"}——Anthropic 要求 budget_tokens
+    // 且 temperature=1，任何启用 thinking 的调用都会 400。
+    expect(body.temperature).toBe(1);
+    expect(body.thinking).toEqual({ type: 'enabled', budget_tokens: 4096 });
+  });
+
+  it('keeps the configured temperature when thinking is disabled', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 'claude-no-thinking',
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'ok' }],
+        model: 'claude-sonnet',
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 5, output_tokens: 3 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new ClaudeProvider({ apiKey: 'test-key' });
+    await provider.chat({
+      model: 'claude-sonnet-4-6',
+      messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+      maxTokens: 8192,
+      temperature: 0.5,
+    });
+
+    const [, options] = fetchMock.mock.calls[0] ?? [];
+    const body = JSON.parse((options as RequestInit).body as string) as {
+      temperature?: number;
+      thinking?: unknown;
+    };
+    expect(body.temperature).toBe(0.5);
+    expect(body.thinking).toBeUndefined();
+  });
 });

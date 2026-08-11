@@ -414,6 +414,10 @@ export class Agent {
   private abortController: AbortController | null = null;
   private cachedPrefixTokens?: number;
   private lastCompactionRound = -Infinity;
+  /** 上一次压缩尝试是否失败（handler 返回 null）：失败后冷却一轮再重试，
+   *  避免每轮都空试昂贵的压缩 handler。成功压缩会清除该标志——压缩成功后
+   *  日志已低于预算，再次超限属于正常需求，绝不因冷却把超预算请求放行。 */
+  private lastCompactionFailed = false;
 
   constructor(opts: AgentOptions) {
     this.session = opts.session;
@@ -493,6 +497,7 @@ export class Agent {
     // round 每次 chat() 从 0 重新计数，压缩冷却也必须随之重置：否则上一次
     // chat 在 round N 压缩过，本次 chat 前 N+2 轮即使超预算也无法压缩。
     this.lastCompactionRound = -Infinity;
+    this.lastCompactionFailed = false;
 
     this.session.partition.validate();
 
@@ -519,25 +524,33 @@ export class Agent {
       // Mid-loop context compaction (round-start check): if the context exceeds
       // the budget, compact into a new epoch BEFORE building this round's
       // request, so no request is ever sent with an over-limit context. This
-      // catches overflow produced by the previous round's tool results. Guarded
-      // by lastCompactionRound to avoid compacting on consecutive rounds.
+      // catches overflow produced by the previous round's tool results.
+      // 冷却语义（旧实现 round - lastCompactionRound >= 2）会在「刚压缩过」的
+      // 下一轮把超预算请求照发出去，与上面注释「任何请求都不超限」矛盾——
+      // 压缩成功后日志已低于预算，重试压缩不会抖动；只有压缩失败（handler 返回
+      // null）时下一轮才可能再次超限，此时空试无意义，冷却一轮再重试。
       if (
         this.contextCompaction &&
-        round - this.lastCompactionRound >= 2 &&
-        this.estimateContextTokens() > this.contextCompaction.maxContextTokens
+        this.estimateContextTokens() > this.contextCompaction.maxContextTokens &&
+        !(this.lastCompactionFailed && round === this.lastCompactionRound + 1)
       ) {
         const compacted = await this.contextCompaction.handler(
           this.session.logStore.getAllMessages().slice()
         );
+        this.lastCompactionRound = round;
         if (compacted && compacted.messages.length > 0) {
+          this.lastCompactionFailed = false;
           this.session.replaceLog(compacted.messages);
           this.requestBuilder.resetLogTracking?.();
-          this.lastCompactionRound = round;
           if (compacted.cacheStats) {
             this.session.recordStats(compacted.cacheStats);
             aggregatedStats = accumulateStats(aggregatedStats, compacted.cacheStats);
           }
           onStreamEvent?.({ type: 'context-compacted', round: roundNumber });
+        } else {
+          // 无法压缩：本次请求只能超预算发出（别无选择），记录失败状态，
+          // 下一轮冷却（不重复空试），再之后重试。
+          this.lastCompactionFailed = true;
         }
       }
 

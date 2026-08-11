@@ -688,6 +688,155 @@ describe('Agent mid-loop context compaction', () => {
     const messages = agent.getSession().logStore.getAllMessages();
     expect(messages[0]?.content).toBe('compacted summary');
   });
+
+  it('compacts on consecutive over-budget rounds (no stale cooldown skipping)', async () => {
+    // 旧实现 round - lastCompactionRound >= 2：round 0 压缩后，round 1 即使
+    // 仍超预算也跳过——超预算请求照发，与「任何请求都不超限」矛盾。
+    // 修复后：压缩成功 → 无冷却，连续超限的每一轮都压缩。
+    const handler = vi.fn().mockResolvedValue({ messages: [summaryMessage] });
+    const { agent } = createAgentWithCompaction(handler, 1);
+    const events: string[] = [];
+    await agent.chat('读取并继续', (e) => {
+      if (e.type === 'context-compacted') events.push(e.type);
+    });
+    // round 0（请求前）与 round 1（工具结果落日志后）各压缩一次
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(events).toEqual(['context-compacted', 'context-compacted']);
+  });
+
+  it('cooldowns one round after a failed compaction instead of hot-looping, then retries', async () => {
+    // 三轮（工具→工具→收尾）覆盖 round 0/1/2 的压缩检查：
+    // handler 持续返回 null（无可压缩内容）→ round 0 尝试失败 → round 1
+    // 冷却（不空试）→ round 2 重试（再次失败）。旧实现在失败场景同样被
+    // >= 2 冷却，但成功的场景被错误地一起冷却了；这里锁定失败场景不回退。
+    const handler = vi.fn().mockResolvedValue(null);
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(
+      {
+        name: 'read_file',
+        description: 'Read a file',
+        parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+      },
+      async () => ({ ok: true })
+    );
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi
+        .fn<(_: IChatRequest) => Promise<IChatResponse>>()
+        .mockResolvedValueOnce(
+          createResponse('第一轮', {
+            toolCalls: [{ id: 't1', name: 'read_file', arguments: { path: 'a' } }],
+          })
+        )
+        .mockResolvedValueOnce(
+          createResponse('第二轮', {
+            toolCalls: [{ id: 't2', name: 'read_file', arguments: { path: 'b' } }],
+          })
+        )
+        .mockResolvedValueOnce(createResponse('最终答案')),
+    };
+    const agent = new Agent({
+      session: new Session({
+        sessionId: 'session-compact-fail',
+        prefix: new ImmutablePrefix({
+          systemPrompt: '你是测试助手',
+          tools: toolRegistry.getAll(),
+          model: 'test-model',
+          parameters: { temperature: 0.7, topP: 0.9, maxTokens: 1000 },
+        }),
+        toolRegistry,
+      }),
+      provider,
+      providerName: 'openai',
+      requestBuilder: { build: ({ model }) => ({ model, messages: [] }) },
+      cacheValidator: {
+        validate: () => ({
+          prefixCached: false,
+          prefixCreated: false,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          newInputTokens: 1,
+          outputTokens: 1,
+          cacheHitRate: 0,
+        }),
+      },
+      contextCompaction: { maxContextTokens: 1, handler },
+    });
+    await agent.chat('读取并继续');
+
+    // round 0 失败、round 1 冷却、round 2 重试（再次失败）→ 2 次调用
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it('a failed compaction does not suppress the next successful one', async () => {
+    const handler = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ messages: [summaryMessage] });
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(
+      {
+        name: 'read_file',
+        description: 'Read a file',
+        parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+      },
+      async () => ({ ok: true })
+    );
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi
+        .fn<(_: IChatRequest) => Promise<IChatResponse>>()
+        .mockResolvedValueOnce(
+          createResponse('第一轮', {
+            toolCalls: [{ id: 't1', name: 'read_file', arguments: { path: 'a' } }],
+          })
+        )
+        .mockResolvedValueOnce(
+          createResponse('第二轮', {
+            toolCalls: [{ id: 't2', name: 'read_file', arguments: { path: 'b' } }],
+          })
+        )
+        .mockResolvedValueOnce(createResponse('最终答案')),
+    };
+    const agent = new Agent({
+      session: new Session({
+        sessionId: 'session-compact-recover',
+        prefix: new ImmutablePrefix({
+          systemPrompt: '你是测试助手',
+          tools: toolRegistry.getAll(),
+          model: 'test-model',
+          parameters: { temperature: 0.7, topP: 0.9, maxTokens: 1000 },
+        }),
+        toolRegistry,
+      }),
+      provider,
+      providerName: 'openai',
+      requestBuilder: { build: ({ model }) => ({ model, messages: [] }) },
+      cacheValidator: {
+        validate: () => ({
+          prefixCached: false,
+          prefixCreated: false,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          newInputTokens: 1,
+          outputTokens: 1,
+          cacheHitRate: 0,
+        }),
+      },
+      contextCompaction: { maxContextTokens: 1, handler },
+    });
+    const events: string[] = [];
+    await agent.chat('读取并继续', (e) => {
+      if (e.type === 'context-compacted') events.push(e.type);
+    });
+    // round 0 失败 → round 1 冷却 → round 2 重试成功
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(events).toHaveLength(1);
+  });
 });
 
 describe('Agent completion-quality guards (no silent stops)', () => {
