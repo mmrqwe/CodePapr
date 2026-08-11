@@ -196,7 +196,7 @@ fn definition_result(
         return Ok(Value::Array(Vec::new()));
     };
 
-    let Some(symbol) = symbols.iter().find(|symbol| symbol.name == identifier) else {
+    let Some(symbol) = nearest_symbol(symbols, &identifier, position.0) else {
         return Ok(Value::Array(Vec::new()));
     };
 
@@ -216,7 +216,7 @@ fn hover_result(params: &Value, text: &str, symbols: &[ParsedSymbol]) -> Result<
         return Ok(Value::Null);
     };
 
-    let Some(symbol) = symbols.iter().find(|symbol| symbol.name == identifier) else {
+    let Some(symbol) = nearest_symbol(symbols, &identifier, position.0) else {
         return Ok(Value::Null);
     };
 
@@ -233,6 +233,20 @@ fn request_position(params: &Value) -> Option<(usize, usize)> {
     let line = params.get("position")?.get("line")?.as_u64()? as usize;
     let character = params.get("position")?.get("character")?.as_u64()? as usize;
     Some((line, character))
+}
+
+/// 从同名符号中挑"最可能的目标"：声明行距引用位置最近者优先（同作用域/
+/// 就近定义），平局取更靠前者。旧实现 `.find()` 取解析顺序首个，重载/
+/// 多作用域同名时定位到错误定义（#14）。
+fn nearest_symbol<'a>(
+    symbols: &'a [ParsedSymbol],
+    name: &str,
+    near_line: usize,
+) -> Option<&'a ParsedSymbol> {
+    symbols
+        .iter()
+        .filter(|symbol| symbol.name == name)
+        .min_by_key(|symbol| (symbol.line.abs_diff(near_line), symbol.line))
 }
 
 fn range_value(line: usize, start_column: usize, end_column: usize) -> Value {
@@ -622,7 +636,7 @@ fn go_callable_regex() -> &'static Regex {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_symbols;
+    use super::{nearest_symbol, parse_symbols};
 
     #[test]
     fn parses_csharp_symbols() {
@@ -673,5 +687,20 @@ mod tests {
         assert!(symbols.iter().any(|symbol| symbol.name == "Point"));
         assert!(symbols.iter().any(|symbol| symbol.name == "Add"));
         assert!(symbols.iter().any(|symbol| symbol.name == "NewPoint"));
+    }
+
+    // 回归 #14：同名符号（重载/多作用域）就近解析，而非解析顺序首个。
+    #[test]
+    fn nearest_symbol_resolves_closest_same_named_declaration() {
+        let text = "func Add() int {\n\treturn 1\n}\n\nfunc Add(x int) int {\n\treturn x\n}\n";
+        let symbols = parse_symbols("go", text);
+        let first = nearest_symbol(&symbols, "Add", 0).expect("Add should resolve");
+        assert_eq!(first.line, 0, "引用靠近第一个声明时应解析到它");
+
+        // 第二个 Add 在 0 基第 4 行；引用在第 3 行 → 就近解析到第 4 行
+        let second = nearest_symbol(&symbols, "Add", 3).expect("Add should resolve");
+        assert_eq!(second.line, 4, "引用靠近第二个声明时应解析到它（旧实现返回 0）");
+
+        assert!(nearest_symbol(&symbols, "Missing", 0).is_none());
     }
 }

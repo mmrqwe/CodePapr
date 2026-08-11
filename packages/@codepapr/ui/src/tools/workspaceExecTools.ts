@@ -37,18 +37,46 @@ const SYSTEM_COMMAND_PATHS = [
   '/opt/homebrew/bin/',
 ];
 
+// 与 Rust 侧 sandbox unix_allowed_read_roots 对齐（#18）：沙箱 profile 放行
+// 读取/执行的路径（PATH 项、Homebrew、工具缓存目录），预检不应要求授权，
+// 否则 ~/.cargo/bin、~/.local/bin（在 PATH 内）等合法工具会被误拒/误弹窗。
+// 每次调用时基于运行时 PATH 构建，避免模块加载时的静态快照过时。
+function buildSandboxAlignedSkipPrefixes(): string[] {
+  const home = process.env.HOME ?? '';
+  const prefixes = [
+    ...SYSTEM_COMMAND_PATHS,
+    ...(process.env.PATH ?? '').split(':').filter(Boolean).map((entry) => `${entry}/`),
+  ];
+  if (home) {
+    // 注意：不放行 ~/.local 整体（bin/ 可写即能植入持久化二进制），只放行
+    // 数据目录 ~/.local/share（与 Rust unix_tool_dirs 一致）。
+    for (const name of ['.npm', '.cache', '.cargo', '.local/share', '.nvm', '.volta']) {
+      prefixes.push(`${home}/${name}/`);
+    }
+    prefixes.push('/opt/homebrew/');
+  }
+  return prefixes;
+}
+
 // 首 token 通常是可执行文件本体，绝不能跳过：跳过它意味着
 // `/tmp/evil/bin ...` 这类绝对路径可执行文件不会触发外部路径授权。
 function extractAbsoluteCommandPaths(command: string): string[] {
+  const skipPrefixes = buildSandboxAlignedSkipPrefixes();
   const candidates = command
     .split(/[\s"'`=<>|;&()]+/)
     .map((part) => part.replace(/^[,.;]+|[,.;]+$/g, ''))
     .map((part) => part.replace(/\\/g, '/'))
     .filter((part) => part.startsWith('/') || /^[A-Za-z]:\//.test(part));
   return [...new Set(candidates)].filter(
-    (candidate) => !SYSTEM_COMMAND_PATHS.some((prefix) => candidate.startsWith(prefix)),
+    (candidate) => !skipPrefixes.some((prefix) => candidate.startsWith(prefix)),
   );
 }
+
+/** 测试专用出口：验证 #18 的沙箱对齐跳过集。 */
+export const __workspaceExecToolsTestUtils = {
+  extractAbsoluteCommandPaths,
+  buildSandboxAlignedSkipPrefixes,
+};
 
 // 可取消前台命令的令牌：Rust 侧 ACTIVE_COMMAND_CANCELS 以它注册取消标志，
 // abort 时 cancel_running_command 置位，阻塞等待的命令轮询到后杀进程树。

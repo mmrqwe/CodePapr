@@ -557,7 +557,7 @@ impl SymbolProvider for RegexSymbolProvider {
         else {
             return Ok(None);
         };
-        let Some(symbol) = symbols.iter().find(|s| s.name == identifier) else {
+        let Some(symbol) = nearest_symbol(&symbols, &identifier, line) else {
             return Ok(None);
         };
         Ok(Some(HoverResult {
@@ -582,7 +582,7 @@ impl SymbolProvider for RegexSymbolProvider {
         else {
             return Ok(Vec::new());
         };
-        let Some(symbol) = symbols.iter().find(|s| s.name == identifier) else {
+        let Some(symbol) = nearest_symbol(&symbols, &identifier, line) else {
             return Ok(Vec::new());
         };
         Ok(vec![SymbolLocation {
@@ -594,6 +594,20 @@ impl SymbolProvider for RegexSymbolProvider {
 }
 
 // ── Regex utilities (shared with lsp_fallback) ─────────────────────────
+
+/// 从同名符号中挑"最可能的目标"：优先声明行距引用位置最近者（同作用域/
+/// 就近定义优先），平局取更靠前（更早声明）者。旧实现 `.find()` 只取解析
+/// 顺序首个——重载/多作用域同名时会把引用定位到错误定义（#14）。
+fn nearest_symbol<'a>(
+    symbols: &'a [UnifiedSymbolDefinition],
+    name: &str,
+    near_line: usize,
+) -> Option<&'a UnifiedSymbolDefinition> {
+    symbols
+        .iter()
+        .filter(|s| s.name == name)
+        .min_by_key(|s| (s.line.abs_diff(near_line), s.line))
+}
 
 fn compile_regex(pattern: &str) -> Option<Regex> {
     Regex::new(pattern).ok()
@@ -1434,7 +1448,7 @@ impl SymbolProvider for AstSymbolProvider {
         else {
             return Ok(None);
         };
-        let Some(symbol) = symbols.iter().find(|s| s.name == identifier) else {
+        let Some(symbol) = nearest_symbol(&symbols, &identifier, line) else {
             return Ok(None);
         };
         Ok(Some(HoverResult {
@@ -1469,7 +1483,7 @@ impl SymbolProvider for AstSymbolProvider {
         else {
             return Ok(Vec::new());
         };
-        let Some(symbol) = symbols.iter().find(|s| s.name == identifier) else {
+        let Some(symbol) = nearest_symbol(&symbols, &identifier, line) else {
             return Ok(Vec::new());
         };
         Ok(vec![SymbolLocation {
@@ -2164,6 +2178,82 @@ fn register_regex_providers() {
         import_regex: Some(r"import\s+.+\s+from\s+\S+"),
         kind_map: HashMap::from([("class", 5), ("interface", 11), ("enum", 10), ("type", 5)]),
     })));
+}
+
+#[cfg(test)]
+mod symbol_resolution_tests {
+    use super::*;
+
+    fn symbol(name: &str, line: usize) -> UnifiedSymbolDefinition {
+        UnifiedSymbolDefinition {
+            name: name.to_string(),
+            kind: 1,
+            signature: format!("fn {name}()"),
+            detail: String::new(),
+            line,
+            column: 1,
+            end_column: 4,
+            container_name: None,
+            exported: false,
+            symbol_source: SymbolSource::Regex,
+        }
+    }
+
+    // 回归 #14：同名符号（重载/多作用域）必须就近解析，而不是取解析顺序首个。
+    #[test]
+    fn nearest_symbol_prefers_declaration_closest_to_reference_line() {
+        let symbols = vec![symbol("foo", 10), symbol("foo", 40), symbol("bar", 30)];
+
+        let near_first = nearest_symbol(&symbols, "foo", 12).expect("foo should resolve");
+        assert_eq!(near_first.line, 10, "引用靠近第一个声明时应解析到它");
+
+        let near_second = nearest_symbol(&symbols, "foo", 38).expect("foo should resolve");
+        assert_eq!(near_second.line, 40, "引用靠近第二个声明时应解析到它（旧实现取 10）");
+
+        let tie = nearest_symbol(&symbols, "foo", 25).expect("foo should resolve");
+        assert_eq!(tie.line, 10, "距离平局时取更靠前（更早声明）者");
+
+        assert!(nearest_symbol(&symbols, "missing", 20).is_none());
+    }
+
+    // 回归 #14 集成：regex provider 的 definition 对同一文件内两个同名函数，
+    // 按引用位置就近返回目标声明（行号 0 基，LSP 语义）。
+    #[test]
+    fn regex_provider_definition_resolves_nearest_same_named_symbol() {
+        let provider = RegexSymbolProvider::new(LanguagePatterns {
+            language_id: "python",
+            type_regex: None,
+            callable_regex: Some(r"^\s*def\s+(\w+)\s*\("),
+            variable_regex: None,
+            import_regex: None,
+            kind_map: HashMap::new(),
+        });
+        let content = "def foo(): # first\n    pass\n\n\ndef foo(): # second\n    return 2\n";
+
+        // 引用第二个 foo（第 4 行，0 基）→ 应定位到第 4 行声明
+        let defs = provider
+            .definition("test.py", content, 4, 5)
+            .expect("definition should succeed");
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].line, 4, "应定位到第 4 行的 foo（旧实现返回第 0 行）");
+
+        // 引用第一个 foo（第 0 行）→ 定位到第 0 行
+        let defs = provider
+            .definition("test.py", content, 0, 5)
+            .expect("definition should succeed");
+        assert_eq!(defs[0].line, 0);
+
+        // hover 同样就近
+        let hover = provider
+            .hover("test.py", content, 4, 5)
+            .expect("hover should succeed")
+            .expect("hover should find symbol");
+        assert!(
+            hover.contents.contains("second"),
+            "hover 应命中就近声明: {}",
+            hover.contents
+        );
+    }
 }
 
 #[cfg(test)]

@@ -116,7 +116,7 @@ fn unix_home_read_files() -> Vec<PathBuf> {
 /// Cellar/opt 下，必须放行整个前缀的读取，否则 node/python 等无法加载。
 /// Intel 前缀 /usr/local 已被 /usr 规则覆盖。
 #[cfg(not(target_os = "windows"))]
-fn unix_allowed_read_roots() -> Vec<PathBuf> {
+pub(crate) fn unix_allowed_read_roots() -> Vec<PathBuf> {
     let mut candidates = unix_system_read_dirs();
     candidates.extend(unix_tool_dirs());
     candidates.extend(std::env::split_paths(&crate::shared::expanded_path()));
@@ -133,6 +133,15 @@ fn unix_allowed_read_roots() -> Vec<PathBuf> {
         }
     }
     roots.into_iter().collect()
+}
+
+/// 路径是否落在沙箱读放行根集内（系统目录/工具缓存/PATH 项/Homebrew）。
+/// path_guard 用它做同一放行集判定，避免「沙箱放行、预检误拒」的漂移（#18）。
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn path_is_allowed_read_root(path: &Path) -> bool {
+    unix_allowed_read_roots()
+        .iter()
+        .any(|root| crate::shared::path_is_same_or_child(path, root))
 }
 
 #[cfg(target_os = "macos")]

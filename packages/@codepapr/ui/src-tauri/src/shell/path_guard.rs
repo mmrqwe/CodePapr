@@ -112,6 +112,19 @@ pub(crate) fn ensure_command_paths_accessible(
     let policy = crate::db::load_external_access_policy()?;
     for candidate in candidates {
         let canonical = canonical_probe(&candidate)?;
+        // 与沙箱 profile 的读放行集对齐（#18）：~/.cargo/bin、PATH 内工具链、
+        // /opt/homebrew 等沙箱内已放行读取/执行的路径，无需重复授权——
+        // 旧实现只认 SYSTEM_COMMAND_PATHS，沙箱放行而预检误拒的路径会漂移。
+        // 受保护目录优先级更高：先于放行集拒绝（与 ensure_unix_command_path
+        // 的判定顺序一致，PATH 里的 ~/.config/yarn 等子路径不得放行）。
+        #[cfg(not(target_os = "windows"))]
+        {
+            if !crate::shared::is_protected_external_path(&canonical)
+                && crate::shell::sandbox::path_is_allowed_read_root(&canonical)
+            {
+                continue;
+            }
+        }
         ensure_path_accessible_with_policy(workspace, &canonical, &policy)
             .map_err(|err| format!("命令路径未获授权 `{candidate}`：{err}"))?;
     }
@@ -191,23 +204,55 @@ mod tests {
         assert!(ensure_path_accessible_with_policy(&ws.path, &target, &policy).is_ok());
     }
 
+    /// 回归 #18：沙箱读放行根集内的路径（工具缓存/临时目录/PATH 项）无需
+    /// 授权——旧实现只认 SYSTEM_COMMAND_PATHS，沙箱放行而预检误拒。
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn sandbox_read_root_paths_are_allowed_without_grant() {
+        let ws = TestWorkspace::new("path-guard-read-root");
+        let policy = policy_with(&[], &[]);
+
+        // 工具缓存目录（unix_tool_dirs）与系统临时目录都是沙箱读放行根
+        let tool_bin = std::env::temp_dir().join("codepapr-tool-cache/bin/tool");
+        assert!(
+            ensure_command_paths_accessible(&ws.path, &tool_bin.to_string_lossy(), &[])
+                .is_ok(),
+            "沙箱读放行根内的命令路径不应被预检误拒"
+        );
+
+        // 受保护目录即使位于放行集附近也必须拒绝（优先级高于放行）
+        let home = std::env::var_os("HOME").unwrap_or_default();
+        let protected = std::path::PathBuf::from(home)
+            .join(".config/yarn/global/bin/yarn");
+        let result = ensure_command_paths_accessible(
+            &ws.path,
+            &protected.to_string_lossy(),
+            &[],
+        );
+        assert!(result.is_err(), "受保护目录必须拒绝: {:?}", result);
+    }
+
     #[test]
     fn external_paths_require_grant() {
         let ws = TestWorkspace::new("path-guard-external");
-        let external = std::env::temp_dir().join("path-guard-elsewhere/tool");
+        // 用 HOME 下的自定义目录而非临时目录：临时目录是沙箱读放行根，
+        // 会被 #18 的对齐逻辑直接放行，无法测试"需授权"路径。
+        let home = std::env::var_os("HOME").unwrap_or_default();
+        let external_dir = std::path::PathBuf::from(home).join("codepapr-path-guard-elsewhere");
+        let _ = std::fs::create_dir_all(&external_dir);
+        let external = external_dir.join("tool");
         let policy = policy_with(&[], &[]);
         assert!(ensure_path_accessible_with_policy(&ws.path, &external, &policy).is_err());
 
-        let granted_dir = std::env::temp_dir()
-            .join("path-guard-elsewhere")
-            .to_string_lossy()
-            .into_owned();
+        let granted_dir = external_dir.to_string_lossy().into_owned();
         let dir_granted = policy_with(&[granted_dir.as_str()], &[]);
         assert!(ensure_path_accessible_with_policy(&ws.path, &external, &dir_granted).is_ok());
 
         let external_str = external.to_string_lossy().into_owned();
         let file_granted = policy_with(&[], &[external_str.as_str()]);
         assert!(ensure_path_accessible_with_policy(&ws.path, &external, &file_granted).is_ok());
+
+        let _ = std::fs::remove_dir_all(&external_dir);
     }
 
     #[test]
@@ -230,7 +275,9 @@ mod tests {
             allowed_dirs: Vec::new(),
             allowed_files: Vec::new(),
         };
-        let external = std::env::temp_dir().join("path-guard-yolo-target/tool");
+        // HOME 下自定义目录（非沙箱读放行根），确保 yolo 分支被真实触发
+        let home = std::env::var_os("HOME").unwrap_or_default();
+        let external = std::path::PathBuf::from(home).join("codepapr-path-guard-yolo-target/tool");
         assert!(ensure_path_accessible_with_policy(&ws.path, &external, &policy).is_ok());
     }
 
@@ -239,7 +286,9 @@ mod tests {
     #[test]
     fn symlink_escape_out_of_workspace_is_rejected() {
         let ws = TestWorkspace::new("path-guard-symlink");
-        let external_dir = std::env::temp_dir().join("path-guard-symlink-outside");
+        // 用 HOME 下自定义目录（非沙箱读放行根），否则 #18 对齐会直接放行
+        let home = std::env::var_os("HOME").unwrap_or_default();
+        let external_dir = std::path::PathBuf::from(home).join("codepapr-path-guard-symlink-outside");
         let _ = std::fs::create_dir_all(&external_dir);
         let external_file = external_dir.join("secret.sh");
         std::fs::write(&external_file, "#!/bin/sh\necho hi\n").unwrap();
