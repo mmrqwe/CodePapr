@@ -15,6 +15,56 @@ use super::MAX_WRITE_BYTES;
 
 static TMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// 不可预测的临时文件名后缀：pid + 自增计数可被工作区内的其它进程预判并
+/// 预置符号链接（fs::write 跟随符号链接 → 写穿到任意文件）。混入熵来源：
+/// 系统时间纳秒 + /dev/urandom 随机数（失败时降级时间戳）。
+fn random_tmp_suffix() -> String {
+    let mut entropy: u128 = 0;
+    if let Ok(mut f) = fs::File::open("/dev/urandom") {
+        use std::io::Read;
+        let mut buf = [0u8; 16];
+        if f.read_exact(&mut buf).is_ok() {
+            entropy = u128::from_le_bytes(buf);
+        }
+    }
+    if entropy == 0 {
+        entropy = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+    }
+    format!("{entropy:x}")
+}
+
+/// 写入临时文件且绝不同时打开符号链接（O_EXCL）：tmp 路径若已被预置为
+/// symlink 或任意文件（预测性攻击），创建直接失败，不会写穿到其它路径。
+pub(crate) fn write_tmp_file_exclusive(tmp: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(tmp)
+            .map_err(|err| format!("写入临时文件 {} 失败: {err}", tmp.display()))?;
+        file.write_all(bytes)
+            .map_err(|err| format!("写入临时文件 {} 失败: {err}", tmp.display()))
+    }
+    #[cfg(not(unix))]
+    {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(tmp)
+            .map_err(|err| format!("写入临时文件 {} 失败: {err}", tmp.display()))?;
+        file.write_all(bytes)
+            .map_err(|err| format!("写入临时文件 {} 失败: {err}", tmp.display()))
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn write_text_file(
     workspace_path: String,
@@ -85,17 +135,22 @@ pub(crate) fn write_text_file_impl(
 
     let sequence = TMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
     let tmp = target.with_extension(format!(
-        "{}.{}.{}.tmp",
+        "{}.{}.{}.{}.tmp",
         target
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or(""),
         std::process::id(),
-        sequence
+        sequence,
+        random_tmp_suffix()
     ));
-    if let Err(err) = fs::write(&tmp, &bytes_to_write) {
+    // 旧实现：fs::write(&tmp, ...) 跟随符号链接 + 临时文件名可预测（仅
+    // pid+自增计数）——工作区内的其它进程可预置 symlink 让写入写穿到任意
+    // 文件。改 O_EXCL + O_NOFOLLOW + 随机后缀（与 download/截图/papr_fs_write
+    // 的 write_file_rejecting_symlink 同思路）。
+    if let Err(err) = write_tmp_file_exclusive(&tmp, &bytes_to_write) {
         let _ = fs::remove_file(&tmp);
-        return Err(format!("写入文件 {} 失败: {err}", target.display()));
+        return Err(err);
     }
     fs::rename(&tmp, &target).map_err(|err| {
         let _ = fs::remove_file(&tmp);

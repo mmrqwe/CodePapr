@@ -22,6 +22,7 @@ import { registerWorkspaceGraphLspTools } from './workspaceGraphLspTools';
 import { registerWorkspaceGitTools } from './workspaceGitTools';
 import { registerWorkspaceMiscTools } from './workspaceMiscTools';
 import type { WorkspaceToolContext } from './workspaceToolContext';
+import { useAppRuntimeStore } from '../store/appRuntimeStore';
 
 const names = (registry: ToolRegistry): string[] =>
   registry.getAll().map((tool) => tool.name).sort();
@@ -549,7 +550,12 @@ describe('app_render agent tools validation', () => {
     ).resolves.toMatchObject({ appId: 'demo-app', mounted: true });
   });
 
-  it.each(['manifest.json', 'index.html', 'db.sqlite', 'db.sqlite-wal', 'db.sqlite-shm', './db.sqlite'])(
+  it.each([
+    'manifest.json', 'index.html', 'db.sqlite', 'db.sqlite-wal', 'db.sqlite-shm', './db.sqlite',
+    // #27 回归：旧实现 replace(/^\.\//, '') 只剥一个前缀，多重 ./ 可绕过校验，
+    // Rust 侧 normalize 折叠 CurDir 后仍写入 manifest.json（绕过两轴权限审计）
+    '././manifest.json', './././index.html',
+  ])(
     'rejects reserved file %s in files parameter',
     async (relativePath) => {
       await expect(
@@ -568,5 +574,154 @@ describe('app_render agent tools validation', () => {
         files: [{ relativePath: 'server.js', content: 'console.log(1)' }],
       }),
     ).resolves.toMatchObject({ appId: 'demo-app', mounted: true });
+  });
+
+  it('app_delete 先停止运行中的后端进程再删文件（工具定义承诺会停）', async () => {
+    invokeMock.mockClear();
+    // 预置运行中的后端（store 有 pid）
+    useAppRuntimeStore.setState((state) => ({
+      ...state,
+      apps: [
+        {
+          appId: 'demo-app',
+          title: 'Demo App',
+          html: '<html></html>',
+          filePath: '.CodePapr/apps/demo-app/index.html',
+          command: 'node',
+          args: ['server.js'],
+          port: 3456,
+          pid: 12345,
+          url: 'http://localhost:3456/',
+          manifestJson: '{}',
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+    }));
+
+    await expect(
+      build({ mode: 'app' }).execute('app_delete', { appId: 'demo-app' }),
+    ).resolves.toMatchObject({ appId: 'demo-app', deleted: true });
+
+    // 旧实现：直接 papr_delete_app 删文件，运行中的后端变孤儿进程占端口
+    expect(
+      invokeMock.mock.calls.some(
+        ([command, args]) => command === 'stop_background_process' && args?.pid === 12345,
+      ),
+    ).toBe(true);
+    const paprDeleteIndex = invokeMock.mock.calls.findIndex(
+      ([command]) => command === 'papr_delete_app',
+    );
+    const stopIndex = invokeMock.mock.calls.findIndex(
+      ([command]) => command === 'stop_background_process',
+    );
+    expect(stopIndex).toBeGreaterThanOrEqual(0);
+    expect(paprDeleteIndex).toBeGreaterThan(stopIndex);
+  });
+});
+
+describe('workspace_apply_diff 写入原子性', () => {
+  beforeEach(() => {
+    useAppRuntimeStore.setState((state) => ({ ...state, apps: [] }));
+  });
+
+  it('#25 多文件写入中途失败时回滚已写入的文件，不留部分应用状态', async () => {
+    const originalContents = new Map<string, string>([
+      ['a.txt', 'AAA\n'],
+      ['b.txt', 'BBB\n'],
+    ]);
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_text_file') {
+        const rel = String(args?.relativePath);
+        return {
+          path: rel,
+          content: originalContents.get(rel) ?? '',
+          bytes: (originalContents.get(rel) ?? '').length,
+        };
+      }
+      if (command === 'write_text_file') {
+        const rel = String(args?.relativePath);
+        if (rel === 'b.txt') {
+          throw new Error('磁盘写入失败: b.txt');
+        }
+        // 模拟写生效：后续验证重读能读到新内容
+        originalContents.set(rel, String(args?.content ?? ''));
+        return { path: rel, bytes: String(args?.content ?? '').length, encoding: null };
+      }
+      if (command === 'check_syntax') {
+        return { supported: false, errorCount: 0, errors: [] };
+      }
+      if (command === 'extract_project_map_symbols') {
+        return [];
+      }
+      throw new Error(`Unexpected invoke: ${command}`);
+    });
+
+    const registry = build();
+    await expect(
+      registry.execute('patch', {
+        patches: [
+          { relativePath: 'a.txt', search: 'AAA', replace: 'AAA-new' },
+          { relativePath: 'b.txt', search: 'BBB', replace: 'BBB-new' },
+        ],
+      }),
+    ).rejects.toThrow('磁盘写入失败: b.txt');
+
+    // 旧实现：逐文件写盘，b.txt 失败后 a.txt 的新内容已落地（部分应用）。
+    // 修复后：回滚 a.txt 到写前内容。
+    const memoryWrites = invokeMock.mock.calls.filter(
+      ([command, args]) => command === 'write_text_file' && args?.relativePath === 'a.txt',
+    );
+    const rollbackWrite = memoryWrites.find(([, args]) => args?.content === 'AAA\n');
+    expect(rollbackWrite).toBeDefined();
+    // 最新一次写 a.txt 必须恢复原内容（最后落盘的是回滚而非补丁结果）
+    const lastWrite = memoryWrites[memoryWrites.length - 1];
+    expect(lastWrite?.[1]?.content).toBe('AAA\n');
+  });
+
+  it('#25 全部写入成功时不回滚，正常返回所有文件结果', async () => {
+    const originalContents = new Map<string, string>([
+      ['a.txt', 'AAA\n'],
+      ['b.txt', 'BBB\n'],
+    ]);
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_text_file') {
+        const rel = String(args?.relativePath);
+        return {
+          path: rel,
+          content: originalContents.get(rel) ?? '',
+          bytes: (originalContents.get(rel) ?? '').length,
+        };
+      }
+      if (command === 'write_text_file') {
+        const rel = String(args?.relativePath);
+        // 模拟写生效：后续验证重读能读到新内容
+        originalContents.set(rel, String(args?.content ?? ''));
+        return { path: rel, bytes: String(args?.content ?? '').length, encoding: null };
+      }
+      if (command === 'check_syntax') {
+        return { supported: false, errorCount: 0, errors: [] };
+      }
+      if (command === 'extract_project_map_symbols') {
+        return [];
+      }
+      throw new Error(`Unexpected invoke: ${command}`);
+    });
+
+    const result = await build().execute('patch', {
+      patches: [
+        { relativePath: 'a.txt', search: 'AAA', replace: 'AAA-new' },
+        { relativePath: 'b.txt', search: 'BBB', replace: 'BBB-new' },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      totalFiles: 2,
+      totalReplacements: 2,
+      files: [
+        expect.objectContaining({ path: 'a.txt' }),
+        expect.objectContaining({ path: 'b.txt' }),
+      ],
+    });
   });
 });

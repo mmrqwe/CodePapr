@@ -4,7 +4,10 @@
   if (window.papr) return;
 
   var IPC_IDLE_TIMEOUT_MS = 300000;
-  var pending = {};
+  // 原型安全：普通对象字面量的 pending['__proto__'] 会命中 Object.prototype
+  //（truthy 通过存在性检查，armIdleTimer 还会把 timer 写进原型，污染页面内
+  // 所有对象）。null 原型对象上 '__proto__'/'constructor' 只是普通键。
+  var pending = Object.create(null);
   var appInfo = null;
   var parentOrigin = window.__PAPR_PARENT_ORIGIN || '*';
   var currentTheme = null;
@@ -64,7 +67,15 @@
     return promise;
   }
 
+  // #26：与父侧 usePaprBridge 的 origin+source 双校验对等——只接受嵌入页
+  // （window.parent）发来的消息。旧实现不校验来源：任何持有本窗口引用的
+  // 页面（如恶意弹窗）都能伪造 papr 响应/主题消息。
+  function isFromParent(event) {
+    return event.source === window.parent;
+  }
+
   window.addEventListener('message', function (event) {
+    if (!isFromParent(event)) return;
     var data = event.data;
     if (!data || !data.__papr) return;
 
@@ -74,6 +85,11 @@
     }
 
     var reqId = data.reqId;
+    // 防御性校验（null 原型下本不必要）：拒绝原型相关键名，杜绝任何
+    // 原型链访问路径。
+    if (reqId === '__proto__' || reqId === 'constructor' || reqId === 'prototype') {
+      return;
+    }
     var p = pending[reqId];
     if (!p) return;
 

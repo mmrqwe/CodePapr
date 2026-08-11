@@ -373,8 +373,44 @@ mod tests {
     }
 
     #[test]
-    fn test_restore_removes_untracked_files_created_after_snapshot() {
-        let workspace = temp_workspace("untracked-cleanup");
+    /// #23：工具定义宣称接受「回退目标引用」——短 SHA、分支名、HEAD 都必须
+    /// 可解析。旧实现 Oid::from_str 只认完整 40 位 SHA，LLM 拿 shortHash 必失败。
+    #[test]
+    fn restore_plan_accepts_short_sha_and_head_ref() {
+        let workspace = temp_workspace("restore-short-sha");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+        fs::write(workspace.join("a.txt"), b"v1\n").expect("should write fixture");
+        let cp = engine.create("checkpoint #1").expect("create cp1");
+
+        let restore = crate::snapshot::RestoreEngine::new(&workspace);
+
+        // 短 SHA（8 位）
+        let short = &cp.sha[..8];
+        let plan = restore
+            .plan(short)
+            .expect("short sha should resolve via revparse");
+        assert_eq!(plan.target_label, "checkpoint #1");
+
+        // HEAD 引用
+        let plan_head = restore.plan("HEAD").expect("HEAD should resolve");
+        assert!(!plan_head.target_sha.is_empty());
+        assert_eq!(plan_head.target_label, "checkpoint #1");
+
+        // execute 同样接受短 SHA（含备份 + 恢复全链路）
+        let exec = restore
+            .execute(short)
+            .expect("execute with short sha should work");
+        assert!(exec.ok);
+        assert_eq!(
+            fs::read_to_string(workspace.join("a.txt")).expect("should read back"),
+            "v1\n"
+        );
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    fn test_restore_removes_untracked_files_created_after_snapshot() {        let workspace = temp_workspace("untracked-cleanup");
         let engine = SnapshotEngine::new(&workspace);
         engine.ensure();
 

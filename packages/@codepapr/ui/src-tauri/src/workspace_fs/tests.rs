@@ -1291,3 +1291,50 @@ fn list_workspace_files_relative_path_scopes_to_subtree() {
         "lazy listing must not include sibling files: {paths:?}"
     );
 }
+
+/// #21：临时文件写入必须拒绝预置符号链接（旧实现 fs::write 跟随 symlink，
+/// 可预测的 tmp 名 + 写穿 = 覆盖任意文件）。
+#[cfg(unix)]
+#[test]
+fn write_tmp_file_exclusive_rejects_preseeded_symlink() {
+    let workspace = TestWorkspace::new("write-tmp-symlink");
+    let victim = workspace.file_path("victim.txt");
+    fs::write(&victim, b"precious").expect("should write victim");
+    let tmp = workspace.file_path("target.ext.tmp");
+    std::os::unix::fs::symlink(&victim, &tmp).expect("should preseed symlink");
+
+    let err = write::write_tmp_file_exclusive(&tmp, b"evil").expect_err("symlink must be rejected");
+    assert!(err.contains("写入临时文件"), "unexpected error: {err}");
+    assert_eq!(
+        fs::read_to_string(&victim).expect("victim should be intact"),
+        "precious",
+        "symlink target must not be overwritten"
+    );
+}
+
+/// #21：临时文件写入使用 O_EXCL——已存在的普通文件同样拒绝（不覆盖）。
+#[test]
+fn write_tmp_file_exclusive_rejects_existing_file() {
+    let workspace = TestWorkspace::new("write-tmp-excl");
+    let tmp = workspace.file_path("target.ext.tmp");
+    fs::write(&tmp, b"existing").expect("should preseed file");
+
+    let err = write::write_tmp_file_exclusive(&tmp, b"new").expect_err("existing file must be rejected");
+    assert!(err.contains("写入临时文件"), "unexpected error: {err}");
+    assert_eq!(
+        fs::read_to_string(&tmp).expect("file should be intact"),
+        "existing"
+    );
+}
+
+/// #21：全新路径正常写入（O_EXCL 不破坏正常写流程）。
+#[test]
+fn write_tmp_file_exclusive_writes_fresh_path() {
+    let workspace = TestWorkspace::new("write-tmp-fresh");
+    let tmp = workspace.file_path("target.ext.tmp");
+    write::write_tmp_file_exclusive(&tmp, b"hello").expect("fresh path should write");
+    assert_eq!(
+        fs::read_to_string(&tmp).expect("should read back"),
+        "hello"
+    );
+}

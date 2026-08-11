@@ -662,15 +662,27 @@ pub async fn list_tools(
         let server = server.clone();
         async move {
             let server_id = sanitize_name_part(&server.id);
-            let result = async {
+            // #18：list_all_tools 必须有时限。旧实现无超时——挂起的服务器会无限
+            // 持有 client 的 AsyncMutex，该服务器后续所有 call_tool 永久排队。
+            // 超时后 future 被取消，锁随 guard drop 释放。
+            let timeout = Duration::from_secs(server.timeout_seconds.unwrap_or(60).clamp(5, 600));
+            let result = match tokio::time::timeout(timeout, async {
                 let client = get_or_connect_client(&server).await?;
                 let client = client.lock().await;
                 client
                     .list_all_tools()
                     .await
                     .map_err(|err| format!("Failed to list tools: {err}"))
-            }
-            .await;
+            })
+            .await
+            {
+                Ok(inner) => inner,
+                Err(_) => Err(format!(
+                    "Timed out listing tools for server '{}' after {}s",
+                    server.name,
+                    timeout.as_secs()
+                )),
+            };
             (server, server_id, result)
         }
     });
@@ -738,7 +750,13 @@ pub async fn call_tool(
         .ok_or_else(|| format!("MCP server not found: {server_id}"))?;
     validate_tool_policy(&server, &tool_name)?;
 
-    if server.require_confirmation && server.permission_mode != "read-only" {
+    // #20：read-only 模式不再整体跳过确认。read-only 下变更工具默认被策略
+    // 拦截（无需确认），但 allowed_tools 显式放行的变更工具仍会执行——此时
+    // require_confirmation 必须生效，否则配合 allowed_tools 可无确认执行变更。
+    if server.require_confirmation
+        && (server.permission_mode != "read-only"
+            || is_mutating_with_overrides(&server, &tool_name))
+    {
         // Fail-closed：没有 UI 通道就无法向用户要确认。旧实现在 app 为 None
         // 时直接跳过确认执行，会把需要确认的工具放行。
         let Some(app_handle) = &app else {
@@ -1151,5 +1169,63 @@ mod tests {
         assert!(!super::matches_pattern("*user*", "get_account"));
         // ** 等价于全匹配
         assert!(super::matches_pattern("**", "anything"));
+    }
+
+    fn make_server_with(mut server: McpServerConfig, mode: &str, confirm: bool, allowed: &[&str]) -> McpServerConfig {
+        server.permission_mode = mode.to_string();
+        server.require_confirmation = confirm;
+        server.allowed_tools = allowed.iter().map(|s| s.to_string()).collect();
+        server
+    }
+
+    /// #20：read-only 模式不再整体跳过 require_confirmation——allowed_tools
+    /// 显式放行的变更工具仍会执行，确认不能被跳过。
+    #[tokio::test]
+    async fn read_only_with_allowed_mutating_tool_still_requires_confirmation() {
+        let server = make_server_with(make_server("sse", "", &[]), "read-only", true, &["write"]);
+        // 变更工具（write 命中 allowed_tools 放行）+ require_confirmation +
+        // 无 UI 通道 → 必须走到确认路径并报「无 UI 通道」，而不是静默放行。
+        let err = call_tool(None, Some(settings_from(vec![server.clone()])), "test".into(), "write".into(), serde_json::json!({}))
+            .await
+            .expect_err("should require confirmation");
+        assert!(
+            err.contains("requires user confirmation"),
+            "expected confirmation error, got: {err}"
+        );
+    }
+
+    /// 对照：#20 修复后，read-only + 未放行变更工具（策略拦截）仍不需要确认。
+    #[tokio::test]
+    async fn read_only_with_blocked_mutating_tool_skips_confirmation() {
+        let server = make_server_with(make_server("sse", "", &[]), "read-only", true, &[]);
+        let err = call_tool(None, Some(settings_from(vec![server.clone()])), "test".into(), "write".into(), serde_json::json!({}))
+            .await
+            .expect_err("policy should block the tool");
+        assert!(
+            !err.contains("requires user confirmation"),
+            "blocked tool must not reach confirmation: {err}"
+        );
+    }
+
+    /// 对照：read-only + 只读工具不需要确认（策略本就不会拦截）。
+    #[tokio::test]
+    async fn read_only_with_readonly_tool_skips_confirmation() {
+        let server = make_server_with(make_server("sse", "", &[]), "read-only", true, &[]);
+        let err = call_tool(None, Some(settings_from(vec![server.clone()])), "test".into(), "read".into(), serde_json::json!({}))
+            .await
+            .expect_err("connection should fail, but not on confirmation");
+        assert!(
+            !err.contains("requires user confirmation"),
+            "read-only tool must not require confirmation: {err}"
+        );
+    }
+
+    fn settings_from(servers: Vec<McpServerConfig>) -> McpSettings {
+        McpSettings {
+            enabled: true,
+            expose_tools: true,
+            result_max_bytes: None,
+            servers,
+        }
     }
 }

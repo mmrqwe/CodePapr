@@ -62,6 +62,19 @@ fn remove_untracked_not_in_tree(
 const BACKUP_REF: &str = "refs/codepapr-backup-before-reset";
 const BACKUP_COMMIT_MESSAGE: &str = "codepapr:backup-before-reset";
 
+/// 把任意 git 引用解析为提交（短 SHA / 完整 SHA / 分支名 / HEAD 等）。
+/// 旧实现只认完整 40 位十六进制（Oid::from_str），工具定义却宣称接受
+/// 「回退目标引用」——LLM 拿 shortHash/分支名必然失败（#23）。
+fn resolve_target_commit<'repo>(repo: &'repo Repository, target_sha: &str) -> Result<git2::Commit<'repo>, String> {
+    let object = repo
+        .revparse_single(target_sha)
+        .map_err(|e| format!("无法解析引用 '{target_sha}': {}", e.message()))?;
+    let commit = object
+        .peel_to_commit()
+        .map_err(|e| format!("'{target_sha}' 不是提交对象: {}", e.message()))?;
+    Ok(commit)
+}
+
 fn code_papr_git_path(workspace: &Path) -> PathBuf {
     workspace.join(".CodePapr/git")
 }
@@ -113,7 +126,11 @@ fn create_backup_snapshot(repo: &Repository, workspace: &Path) -> Result<Oid, St
         }
     }
     if skipped > 0 {
-        eprintln!("[CodePapr] backup_snapshot: WARNING: {skipped} files were SKIPPED (backup is incomplete)");
+        // #23：备份不完整（add_path 失败的未跟踪文件会被 reset 删除且无法
+        // undo 恢复）绝不能继续——宁可拒绝整个 reset。
+        return Err(format!(
+            "备份快照不完整：{skipped} 个文件未能加入备份，已拒绝执行 reset（避免无法恢复的数据丢失）"
+        ));
     }
     if added == 0 {
         return head_commit
@@ -173,8 +190,10 @@ impl RestoreEngine {
         repo.set_workdir(&self.workspace, false)
             .map_err(|e| format!("set workdir: {}", e.message()))?;
 
-        let oid = Oid::from_str(target_sha)
-            .map_err(|e| format!("parse sha: {}", e.message()))?;
+        // 旧实现用 Oid::from_str 只认完整 40 位 SHA——工具定义说接受引用
+        // （分支名/短哈希），LLM 拿 shortHash 必失败。revparse 同时支持
+        // 短 SHA、分支名、HEAD 等任意引用。
+        let oid = resolve_target_commit(&repo, target_sha)?.id();
         let target_commit = repo.find_commit(oid)
             .map_err(|e| format!("find commit: {}", e.message()))?;
         let target_tree = target_commit.tree()
@@ -250,8 +269,7 @@ impl RestoreEngine {
         repo.set_workdir(&self.workspace, false)
             .map_err(|e| format!("set workdir: {}", e.message()))?;
 
-        let oid = Oid::from_str(target_sha)
-            .map_err(|e| format!("parse sha: {}", e.message()))?;
+        let oid = resolve_target_commit(&repo, target_sha)?.id();
         let target_commit = repo.find_commit(oid)
             .map_err(|e| format!("find commit: {}", e.message()))?;
         let target_tree = target_commit.tree()

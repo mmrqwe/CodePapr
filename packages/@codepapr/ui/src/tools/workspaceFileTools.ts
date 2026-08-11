@@ -415,21 +415,53 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
 
     const files: ApplyDiffFileResult[] = [];
 
+    // #25：写盘阶段原子化——旧实现逐文件写+验证，中途失败会留下「前半已应用、
+    // 后半未应用」的部分状态。改为：全部写盘并验证通过后才算成功；任一文件
+    // 失败则回滚已写入的文件（新文件删除、旧文件恢复原内容），整体报错。
+    const applied: Array<{ path: string; before: string | null; result: WriteTextFileResult }> = [];
+    try {
+      for (const file of diff.files) {
+        const result = await invoke<WriteTextFileResult>('write_text_file', {
+          workspacePath: workspace(),
+          relativePath: file.path,
+          content: file.content,
+        });
+
+        // 写后验证
+        const verified = await invoke<ReadFileResult>('read_text_file', {
+          workspacePath: workspace(),
+          relativePath: file.path,
+          maxBytes: Math.max(new TextEncoder().encode(file.content).length + 1024, 16384),
+        });
+        assertWriteVerified(verified, file.content, file.path);
+        applied.push({ path: file.path, before: fileContents[file.path] ?? null, result });
+      }
+    } catch (err) {
+      // 回滚已写入的文件：尽量恢复到写前状态
+      for (const entry of applied.reverse()) {
+        try {
+          if (entry.before === null) {
+            await invoke('delete_workspace_file', {
+              workspacePath: workspace(),
+              relativePath: entry.path,
+            });
+          } else {
+            await invoke('write_text_file', {
+              workspacePath: workspace(),
+              relativePath: entry.path,
+              content: entry.before,
+            });
+          }
+        } catch {
+          // best-effort 回滚：单个文件失败不阻断整体报错
+        }
+      }
+      throw err;
+    }
+
+    // 全部写入成功后才做后置处理：LSP 诊断钩子 + editHistory + 结果
     for (const file of diff.files) {
-      const result = await invoke<WriteTextFileResult>('write_text_file', {
-        workspacePath: workspace(),
-        relativePath: file.path,
-        content: file.content,
-      });
-
-      // 写后验证
-      const verified = await invoke<ReadFileResult>('read_text_file', {
-        workspacePath: workspace(),
-        relativePath: file.path,
-        maxBytes: Math.max(new TextEncoder().encode(file.content).length + 1024, 16384),
-      });
-      assertWriteVerified(verified, file.content, file.path);
-
+      const result = applied.find((entry) => entry.path === file.path)!.result;
       // 后置 LSP 诊断钩子：返回编译诊断供模型继续修复（无 LSP 则降级跳过）
       const diag = await lspDiagnosticsHook(file.path, file.content);
       notes.push(`${file.path}: ${diag.note}`);

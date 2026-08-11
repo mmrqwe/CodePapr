@@ -258,7 +258,10 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
         if (filePath.includes('..') || file.relativePath.includes('\\') || file.relativePath.startsWith('/') || file.relativePath.includes('\0')) {
           throw new Error(`文件路径不合法（不能包含 ..、\\、绝对路径或 null 字节）: ${file.relativePath}`);
         }
-        const normalizedRelative = file.relativePath.replace(/^\.\//, '').toLowerCase();
+        // #27：剥掉全部前导 ./（旧实现 replace(/^\.\//, '') 只剥一个前缀，
+        // `././manifest.json` 能绕过保留文件校验；Rust 侧 normalize_relative_path
+        // 会把 CurDir 组件折叠，最终仍写入 manifest.json，绕过两轴权限审计）。
+        const normalizedRelative = file.relativePath.replace(/^(\.\/)+/, '').toLowerCase();
         if (RESERVED_APP_FILES.has(normalizedRelative)) {
           throw new Error(`不能通过 files 覆盖保留文件: ${file.relativePath}`);
         }
@@ -399,6 +402,12 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     const app = store.apps.find((a) => a.appId === appId);
     if (!app) throw new Error(`应用 '${appId}' 不存在`);
 
+    // 工具定义承诺「会同时停止后端进程」：必须显式先停，不能只删文件——
+    // 旧实现依赖 papr_delete_app 按 manifest.port 快照停进程，manifest 无
+    // port/加载失败时后端进程变孤儿继续占端口，store 清空后再也看不到。
+    if (app.pid) {
+      try { await invoke('stop_background_process', { pid: app.pid, source: 'app_delete-tool' }); } catch { /* best-effort */ }
+    }
     try { await invoke('papr_delete_app', { appId }); } catch { /* best-effort */ }
     try { await invoke('unregister_app_workspace', { appId }); } catch { /* best-effort */ }
     usePaprPermissionStore.getState().clearManifest(appId);

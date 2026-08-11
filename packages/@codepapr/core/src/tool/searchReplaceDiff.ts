@@ -109,12 +109,20 @@ export function applySearchReplacePatch(
 
   const replacements = plan.replaceAll ? occurrences : 1;
   let resultLf: string;
+  const replacedSpans: Array<[number, number]> = [];
   if (plan.replaceAll) {
     resultLf = contentLf.split(searchLf).join(replaceLf);
+    let from = 0;
+    for (let i = 0; i < occurrences; i += 1) {
+      const index = contentLf.indexOf(searchLf, from);
+      replacedSpans.push([index, index + searchLf.length]);
+      from = index + searchLf.length;
+    }
   } else {
     // 不能用 String.replace(search, replace)：替换串中的 $& / $' / $` / $$
     // 会被当作特殊模式展开，导致文件内容被静默损坏。按索引拼接保证字面量替换。
     const index = contentLf.indexOf(searchLf);
+    replacedSpans.push([index, index + searchLf.length]);
     resultLf =
       contentLf.slice(0, index) + replaceLf + contentLf.slice(index + searchLf.length);
   }
@@ -123,10 +131,97 @@ export function applySearchReplacePatch(
     throw new Error('替换前后内容完全一致，search 和 replace 不能相同');
   }
 
-  return {
-    content: fileHasCrLf ? resultLf.replace(/\n/g, '\r\n') : resultLf,
-    replacements,
-  };
+  if (!fileHasCrLf) {
+    // 纯 LF 文件：结果直接使用
+    return { content: resultLf, replacements };
+  }
+
+  // 纯 CRLF 文件：整体回写 CRLF（旧行为）
+  const isPureCrLf = !/(^|[^\r])\n/.test(content);
+  if (isPureCrLf) {
+    return { content: resultLf.replace(/\n/g, '\r\n'), replacements };
+  }
+
+  // #24：混合换行文件必须逐行保留原行尾——旧实现只要存在一处 CRLF 就
+  // 全文规范化，未触碰的行也会被改写，git diff 整文件爆炸。
+  return { content: rebuildWithOriginalEols(content, resultLf, replacedSpans), replacements };
+}
+
+/** 混合换行文件的逐行行尾重建：#24。
+ *  原文件每个 LF 行起始偏移 → 该行的原始行尾（CRLF/LF）。替换区间内的行
+ *  继承「被替换的第一行」的行尾（新内容采用它取代的文本的风格）；区间外的
+ *  行严格取原行尾，diff 只显示真正的改动。偏移以 LF 规范化空间计，与
+ *  resultLf 对齐。 */
+function rebuildWithOriginalEols(
+  original: string,
+  resultLf: string,
+  replacedSpans: ReadonlyArray<readonly [number, number]>
+): string {
+  const dominantEol = dominantLineEnding(original);
+  // 原文件：LF 行起始偏移 → 行尾
+  const eolByLineStart = new Map<number, string>();
+  let lineStart = 0;
+  let lfPos = 0;
+  for (let i = 0; i < original.length; i += 1) {
+    if (original[i] === '\n') {
+      const eol = i > 0 && original[i - 1] === '\r' ? '\r\n' : '\n';
+      eolByLineStart.set(lineStart, eol);
+      lineStart = lfPos + 1;
+    }
+    if (original[i] !== '\r') {
+      lfPos += 1;
+    }
+  }
+  // 末行：原文件以换行结尾时其行尾已在循环中记录；否则无行尾
+  if (!original.endsWith('\n')) {
+    eolByLineStart.set(lineStart, '');
+  }
+
+  // 替换区行尾：继承被替换第一行的原始行尾（找不到则用主导行尾）
+  const firstSpanStart = replacedSpans.length > 0 ? replacedSpans[0][0] : -1;
+  const regionEol =
+    firstSpanStart >= 0 ? (eolByLineStart.get(firstSpanStart) ?? dominantEol) : dominantEol;
+
+  const coveredBySpan = (offset: number): boolean =>
+    replacedSpans.some(([start, end]) => offset >= start && offset < end);
+
+  const out: string[] = [];
+  let resultLineStart = 0;
+  for (let i = 0; i < resultLf.length; i += 1) {
+    if (resultLf[i] === '\n') {
+      const text = resultLf.slice(resultLineStart, i);
+      const eol = coveredBySpan(resultLineStart)
+        ? regionEol
+        : (eolByLineStart.get(resultLineStart) ?? dominantEol);
+      out.push(text + eol);
+      resultLineStart = i + 1;
+    }
+  }
+  // 末行：结果以换行结尾时最后一段为空，无需处理；否则补上末行
+  if (resultLineStart < resultLf.length) {
+    const text = resultLf.slice(resultLineStart);
+    const eol = coveredBySpan(resultLineStart)
+      ? regionEol
+      : (eolByLineStart.get(resultLineStart) ?? dominantEol);
+    out.push(text + eol);
+  }
+  return out.join('');
+}
+
+/** 文件主导行尾：CRLF 行数多于 LF 行数 → CRLF，否则 LF（混合文件按多数派）。 */
+function dominantLineEnding(content: string): string {
+  let crlf = 0;
+  let lf = 0;
+  for (let i = 0; i < content.length; i += 1) {
+    if (content[i] === '\n') {
+      if (i > 0 && content[i - 1] === '\r') {
+        crlf += 1;
+      } else {
+        lf += 1;
+      }
+    }
+  }
+  return crlf > lf ? '\r\n' : '\n';
 }
 
 export function applySearchReplaceDiff(

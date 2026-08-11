@@ -506,7 +506,7 @@ pub(crate) fn validate_restricted_command(
         let _ = command;
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
         for argument in args {
             for token in shell_command_tokens(argument) {
@@ -516,6 +516,38 @@ pub(crate) fn validate_restricted_command(
             }
         }
         let _ = command;
+    }
+
+    // 其余非 Windows 平台（Linux 等）没有内核沙箱兜底（macOS 的 sandbox-exec
+    // 在运行时按真实路径裁决）：直接命令（program + argv，无 shell 展开）的
+    // 相对路径参数若含 `..` 路径段，会在工作区 cwd 下越狱读/写工作区外文件。
+    // 旧实现只检查绝对路径 token（ensure_unix_command_path），`cat ../../etc/
+    // passwd` 这类相对路径完全放行。shell 路径有 reject_dynamic_unix_shell_
+    // syntax 兜底，直接命令路径之前没有。按路径段匹配（`..` 作为完整段）避免
+    // 误伤 `HEAD..HEAD~1`（git 区间语法）等合法 token。
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let has_parent_dir_segment = |token: &str| token.split('/').any(|seg| seg == "..");
+        // 直接命令的 command 与 args 都是单 argv 条目：按原始字符串检查 `..`
+        // 路径段——不能过 shell_command_tokens（其 trim_matches(",.;") 会把
+        // 裸 ".." 裁成空 token 漏检，`cat ..` 就能越狱到父目录）。
+        if has_parent_dir_segment(command) {
+            return Err(format!(
+                "安全限制：当前平台没有内核级沙箱，命令本体不能包含 .. 路径段（{command}），请使用工作区内的相对路径或已授权的绝对路径"
+            ));
+        }
+        for argument in args {
+            if has_parent_dir_segment(argument) {
+                return Err(format!(
+                    "安全限制：当前平台没有内核级沙箱，命令参数中的相对路径不能包含 .. 路径段（{argument}），请改用工作区内的相对路径或已授权的绝对路径"
+                ));
+            }
+            for token in shell_command_tokens(argument) {
+                if unix_absolute_token(&token) {
+                    ensure_unix_command_path(workspace, &token)?;
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -985,7 +1017,7 @@ mod tests {
 
 #[cfg(all(test, not(any(target_os = "macos", target_os = "windows"))))]
 mod linux_tests {
-    use super::reject_dynamic_unix_shell_syntax;
+    use super::{reject_dynamic_unix_shell_syntax, validate_restricted_command};
 
     #[test]
     fn dynamic_syntax_is_rejected_without_kernel_sandbox() {
@@ -1022,6 +1054,43 @@ mod linux_tests {
                 reject_dynamic_unix_shell_syntax(command).is_ok(),
                 "should allow: {command}"
             );
+        }
+    }
+
+    /// #19：直接命令（program + argv）的相对路径参数含 `..` 路径段必须拒绝。
+    /// 旧实现只检查绝对路径 token——`cat ../../etc/passwd` 直接越狱读工作区外
+    /// 文件，Linux 无 sandbox-exec 兜底。
+    #[test]
+    fn direct_command_parent_dir_segments_are_rejected() {
+        let workspace = std::path::PathBuf::from("/tmp/codepapr-linux-guard");
+        for (command, args) in [
+            ("cat", vec!["../../etc/passwd".to_string()]),
+            ("cat", vec!["a/../b.txt".to_string()]),
+            ("cat", vec!["..".to_string()]),
+            ("ls", vec!["-la".to_string(), "sub/../../..".to_string()]),
+            ("../../bin/evil", vec![]),
+            ("./../escape.sh", vec![]),
+        ] {
+            match validate_restricted_command(command, &args, &workspace) {
+                Ok(()) => panic!("CASE {command:?} {args:?} was NOT rejected"),
+                Err(e) if e.contains("安全限制") => {}
+                Err(e) => panic!("CASE {command:?} {args:?} rejected with unexpected error: {e}"),
+            }
+        }
+    }
+
+    /// 合法 token 不受影响：git 区间语法（HEAD..HEAD~1）、版本号、相对路径。
+    #[test]
+    fn direct_command_legit_tokens_still_pass() {
+        let workspace = std::path::PathBuf::from("/tmp/codepapr-linux-guard");
+        for (command, args) in [
+            ("git", vec!["log".to_string(), "HEAD..HEAD~1".to_string()]),
+            ("cat", vec!["notes.txt".to_string()]),
+            ("ls", vec!["-la".to_string(), "src".to_string()]),
+            ("python", vec!["train.py".to_string(), "--lr=0.1.0".to_string()]),
+        ] {
+            validate_restricted_command(command, &args, &workspace)
+                .unwrap_or_else(|e| panic!("should pass: {command} {args:?} -> {e}"));
         }
     }
 }
