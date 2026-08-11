@@ -50,6 +50,12 @@ function extractAbsoluteCommandPaths(command: string): string[] {
   );
 }
 
+// 可取消前台命令的令牌：Rust 侧 ACTIVE_COMMAND_CANCELS 以它注册取消标志，
+// abort 时 cancel_running_command 置位，阻塞等待的命令轮询到后杀进程树。
+function createCancelToken(): string {
+  return `cmd_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
   const {
     registry,
@@ -67,18 +73,28 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     }
   };
 
-  registry.register(toolByName('workspace_run_command'), async (args: Record<string, unknown>) => {
+  registry.register(toolByName('workspace_run_command'), async (args: Record<string, unknown>, context) => {
     const parsed: RunCommandArgs = {
       command: asString(args.command, 'command'),
       args: asOptionalStringArray(args.args),
       timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
     };
     await ensureCommandPathsAllowed(parsed.command, parsed.args ?? []);
+    // 取消通道：会话取消 / 工具超时（Agent 的 withTimeout）会 abort signal，
+    // 此时通过 cancel_running_command 杀掉 Rust 侧正在执行的进程树，而不是
+    // 让命令在后台继续跑完、副作用滞后落地。
+    const cancelToken = context?.signal ? createCancelToken() : undefined;
+    if (cancelToken && context?.signal) {
+      context.signal.addEventListener('abort', () => {
+        void invoke('cancel_running_command', { token: cancelToken }).catch(() => undefined);
+      }, { once: true });
+    }
     return await invoke('run_workspace_command', {
       workspacePath: workspace(),
       command: parsed.command,
       args: parsed.args,
       timeoutSeconds: parsed.timeoutSeconds,
+      cancelToken,
     });
   });
 
@@ -89,12 +105,19 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     await ensureCommandPathsAllowed(command);
     // app agent 调用时按两轴构建沙箱：网络关 → 无网络；local 非 write → 工作区只读
     const appAccess = context?.appAccess;
+    const cancelToken = context?.signal ? createCancelToken() : undefined;
+    if (cancelToken && context?.signal) {
+      context.signal.addEventListener('abort', () => {
+        void invoke('cancel_running_command', { token: cancelToken }).catch(() => undefined);
+      }, { once: true });
+    }
     return await invoke('run_workspace_shell_command', {
       workspacePath: workspace(),
       command,
       workdir,
       timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
       ...(appAccess ? { sandbox: appAccess } : {}),
+      cancelToken,
     });
   });
 

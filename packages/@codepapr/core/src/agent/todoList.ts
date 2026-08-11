@@ -117,7 +117,18 @@ function inferCurrentTaskId(tasks: AgentTask[], previous: string | null): string
   if (previous && tasks.some((task) => task.id === previous && task.status !== 'completed' && task.status !== 'failed')) {
     return previous;
   }
-  return null;
+  // 兜底：没有任何 running 任务时，把指针放到第一个「pending 且依赖已满足」的
+  // 任务上。旧实现只认 running，all-pending 初始化后 currentTaskId 永远是 null，
+  // 导致「标记 completed 自动推进」的链路永远走不到（死代码）。
+  const completedIds = new Set(
+    tasks.filter((task) => task.status === 'completed').map((task) => task.id)
+  );
+  const firstRunnable = tasks.find((task) => {
+    if (task.status !== 'pending') return false;
+    if (!task.dependsOn || task.dependsOn.length === 0) return true;
+    return task.dependsOn.every((depId) => completedIds.has(depId));
+  });
+  return firstRunnable ? firstRunnable.id : null;
 }
 
 export function createEmptyTodoListContext(goal: string): TodoListContext {
@@ -214,15 +225,16 @@ export function updateTodoList(
     };
   });
 
-  // 自动推进：如果当前任务被标记为 completed，选择下一个 pending 且依赖已满足的任务
+  // 自动推进：仅当「当前任务被标记为 completed」时才选择下一个 pending
+  // （依赖已满足）的任务。旧实现加了 `|| patches.some(p => p.id ===
+  // previous.currentTaskId)`：任何触及当前任务的 patch（哪怕只是汇报进度、
+  // 状态仍为 running）都会触发推进——产生两个 running 任务，且指针跳到
+  // 尚未开始的工作上。
   const completedIds = new Set(
     tasks.filter((task) => task.status === 'completed').map((task) => task.id)
   );
-  const newCurrentId = previous.currentTaskId
-    && (
-      tasks.some((task) => task.id === previous.currentTaskId && task.status === 'completed')
-      || patches.some((p) => p.id === previous.currentTaskId)
-    )
+  const newCurrentId = previous.currentTaskId &&
+    tasks.some((task) => task.id === previous.currentTaskId && task.status === 'completed')
     ? inferNextTaskId(tasks, completedIds)
     : previous.currentTaskId;
 

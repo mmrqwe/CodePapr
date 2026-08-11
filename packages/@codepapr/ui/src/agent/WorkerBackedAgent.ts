@@ -62,6 +62,9 @@ export type AgentRuntimeStreamEvent = IChatStreamEvent | ToolProgressStreamEvent
 interface ToolExecutionContext {
   toolCallId?: string;
   onProgress?: (event: ToolProgressStreamEvent) => void;
+  /** 取消通道：cancel-tool-request / 会话取消 / agent 销毁时 abort。bash 等
+   *  长耗时工具必须监听并停止执行，否则取消后仍在后台跑完。 */
+  signal?: AbortSignal;
   /** app agent 专属：该 app 的两轴访问档（bash 沙箱构建用） */
   appAccess?: { network: boolean; workspaceWrite: boolean };
 }
@@ -261,6 +264,11 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     flushTimerId: ReturnType<typeof setTimeout> | null;
   }>();
   private readonly pendingFetchControllers = new Map<string, AbortController>();
+  /** Worker 发起、正在主线程执行的工具：key = toolRequestId（`${requestId}:${n}`）。
+   *  cancel-tool-request / 会话取消 / agent 销毁时 abort 其 controller，
+   *  使工具实现（bash 等）收到 signal 后停止执行——否则工具会在取消后
+   *  继续在后台跑完并滞后落地副作用。 */
+  private readonly inflightToolExecutions = new Map<string, AbortController>();
   private unsubscribePermissionWait: (() => void) | null = null;
   private permissionWaitActive = false;
   private activeRequestId: string | null = null;
@@ -440,6 +448,10 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
     this.clearCancelTimer();
     this.clearSnapshotTimer();
+
+    // 会话取消同样中止主线程在飞的工具执行（bash 等），旧实现只 cancel
+    // worker 侧的 chat promise，工具继续在后台跑完。
+    this.abortInflightTools();
 
     this.worker.postMessage({
       type: 'cancel-session',
@@ -656,6 +668,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
   cancelAppAgent(requestId: string): void {
     cancelExternalAccessRequests();
+    this.abortInflightTools(requestId);
     this.worker.postMessage({
       type: 'cancel-app-agent',
       requestId,
@@ -670,7 +683,24 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     }
   }
 
+  /** 中止主线程在飞的工具执行。appAgentRequestId 提供时只中止该 app-agent
+   *  run 发起的工具（toolRequestId 以 `${requestId}:` 开头）。 */
+  private abortInflightTools(appAgentRequestId?: string): void {
+    for (const [toolRequestId, controller] of this.inflightToolExecutions) {
+      if (appAgentRequestId && !toolRequestId.startsWith(`${appAgentRequestId}:`)) {
+        continue;
+      }
+      try {
+        controller.abort();
+      } catch {
+        // already aborted
+      }
+      this.inflightToolExecutions.delete(toolRequestId);
+    }
+  }
+
   private cancelAllAppAgents(): void {
+    this.abortInflightTools();
     for (const [reqId] of this.appAgentRequests) {
       this.worker.postMessage({
         type: 'cancel-app-agent',
@@ -742,6 +772,19 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         } catch {
           // already aborted
         }
+      }
+      return;
+    }
+
+    if (message.type === 'cancel-tool-request') {
+      const controller = this.inflightToolExecutions.get(message.toolRequestId);
+      if (controller) {
+        try {
+          controller.abort();
+        } catch {
+          // already aborted
+        }
+        this.inflightToolExecutions.delete(message.toolRequestId);
       }
       return;
     }
@@ -825,6 +868,9 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         this.armAppAgentIdleTimer(message.requestId);
       }
 
+      const toolController = new AbortController();
+      this.inflightToolExecutions.set(message.toolRequestId, toolController);
+
       // Prefer matching by tool-call id (robust even for concurrent identical
       // calls); fall back to name+arguments for older paths without an id.
       const match = pending
@@ -841,6 +887,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       void this.toolExecutor(message.toolName, message.arguments, {
         toolCallId: match?.toolCallId,
         appAccess: message.appAccess,
+        signal: toolController.signal,
         onProgress: pending?.streamListener
           ? (progressEvent) => {
               pending.streamListener?.(progressEvent);
@@ -874,6 +921,9 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
               error: error instanceof Error ? error.message : String(error),
             },
           } satisfies MainToAgentWorkerMessage);
+        })
+        .finally(() => {
+          this.inflightToolExecutions.delete(message.toolRequestId);
         });
       return;
     }

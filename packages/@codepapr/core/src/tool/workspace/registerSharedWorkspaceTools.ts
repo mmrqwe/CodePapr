@@ -121,24 +121,24 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
   });
 
   // ──── bash：shell 命令执行 + 后台进程管理 ────
-  registry.register(findTool('bash'), async (args) => {
+  registry.register(findTool('bash'), async (args, context) => {
     const a = typeof args.action === 'string' ? args.action : 'run';
     if (a === 'list') {
-      return await registry.execute('workspace_list_background_processes', args);
+      return await registry.execute('workspace_list_background_processes', args, context);
     }
     if (a === 'stop') {
-      return await registry.execute('workspace_stop_background_process', args);
+      return await registry.execute('workspace_stop_background_process', args, context);
     }
     if (a === 'stop_all') {
-      return await registry.execute('workspace_stop_all_background_processes', args);
+      return await registry.execute('workspace_stop_all_background_processes', args, context);
     }
     if (a !== 'run') throw new Error(`未知的 bash action: ${a}`);
     if (args.background === true) {
-      return await registry.execute('workspace_start_shell_background_command', args);
+      return await registry.execute('workspace_start_shell_background_command', args, context);
     }
     // LLM 侧参数名是 timeout，细粒度工具期望 timeoutSeconds；不做映射超时会被静默忽略
     const timeoutSeconds = args.timeoutSeconds ?? args.timeout;
-    return await registry.execute('workspace_run_shell_command', { ...args, timeoutSeconds });
+    return await registry.execute('workspace_run_shell_command', { ...args, timeoutSeconds }, context);
   });
 
   // ──── 浏览器 ────

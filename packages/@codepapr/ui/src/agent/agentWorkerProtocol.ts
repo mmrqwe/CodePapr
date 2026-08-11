@@ -277,6 +277,14 @@ export type AgentWorkerToMainMessage =
         appAccess?: { network: boolean; workspaceWrite: boolean };
       }
   | {
+      /** 父级（Agent 回合取消 / 工具超时）已放弃等待该工具：主线程必须中止
+       *  正在执行的工具（如杀 bash 进程），否则工具在后台继续跑完、副作用
+       *  滞后落地。 */
+      type: 'cancel-tool-request';
+      requestId: string;
+      toolRequestId: string;
+    }
+  | {
       type: 'proxy-chat';
       requestId: string;
       proxyChatId: string;

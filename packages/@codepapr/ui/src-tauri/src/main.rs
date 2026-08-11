@@ -277,6 +277,7 @@ fn main() {
             workspace_fs::write::delete_workspace_dir,
             shell::background::run_workspace_command,
             shell::background::run_workspace_shell_command,
+            shell::background::cancel_running_command,
             snapshot::snapshot_ensure,
             snapshot::snapshot_create,
             snapshot::snapshot_list,

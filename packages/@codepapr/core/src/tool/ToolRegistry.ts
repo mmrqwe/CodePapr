@@ -13,6 +13,10 @@ export interface ToolExecutionContext {
    *  match a tool-request to its pending call by id (robust even for concurrent
    *  identical calls) instead of by name+arguments. */
   toolCallId?: string;
+  /** 取消通道：主会话取消或工具超时（Agent 的 withTimeout）都会 abort 此
+   *  signal。长耗时工具（bash/task 等）必须监听它并停止正在进行的副作用，
+   *  否则超时/取消后工具仍在后台继续执行。 */
+  signal?: AbortSignal;
   /** app agent（papr.agent.run）专属：该 app 的两轴访问档，bash 等工具按此构建沙箱。 */
   appAccess?: AppSandboxAccess;
 }

@@ -89,7 +89,8 @@ export const PERMISSION_WAITING_TOOL_TIMEOUTS: Readonly<Record<string, number>> 
 function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onTimeout?: () => void
 ): Promise<T> {
   if (signal?.aborted) {
     return Promise.reject(new DOMException('已取消', 'AbortError'));
@@ -113,6 +114,9 @@ function withTimeout<T>(
         signal?.removeEventListener('abort', onAbort);
         if (!state.settled) {
           state.settled = true;
+          // 超时 ≠ 取消底层执行：让调用方有机会把取消信号下发给正在执行
+          // 的工具（如杀掉 bash 子进程），否则工具会在后台继续跑完。
+          onTimeout?.();
           reject(new Error(`工具执行超时 (${timeoutMs / 1000}s)`));
         }
       }, timeoutMs);
@@ -783,18 +787,35 @@ export class Agent {
           success = false;
           log.error(`Tool argument parse failed: ${call.name}`, { error: errorMessage });
         } else {
+          // 每个工具调用独立 AbortController：主会话取消或工具超时都会
+          // abort 它，并通过 ToolExecutionContext.signal 下发给工具实现
+          // （bash 杀进程、task 取消子代理等）。旧实现 withTimeout 只抛弃
+          // promise，工具继续在后台跑完并滞后落地副作用。
+          const callController = new AbortController();
+          const propagateAbort = (): void => callController.abort();
+          if (effectiveSignal?.aborted) {
+            callController.abort();
+          } else {
+            effectiveSignal?.addEventListener('abort', propagateAbort, { once: true });
+          }
           try {
             const toolTimeoutMs = this.toolTimeouts[call.name] ?? DEFAULT_TOOL_TIMEOUT_MS;
             result = await withTimeout(
-              this.session.toolRegistry.execute(call.name, call.arguments, { toolCallId: call.id }),
+              this.session.toolRegistry.execute(call.name, call.arguments, {
+                toolCallId: call.id,
+                signal: callController.signal,
+              }),
               toolTimeoutMs,
-              effectiveSignal
+              effectiveSignal,
+              () => callController.abort()
             );
           } catch (err) {
             errorMessage = (err as Error).message;
             result = { error: errorMessage };
             success = false;
             log.error(`Tool execution failed: ${call.name}`, { error: err });
+          } finally {
+            effectiveSignal?.removeEventListener('abort', propagateAbort);
           }
         }
         let contextResult: unknown = result;

@@ -498,11 +498,31 @@ async function requestToolExecution(
   args: Record<string, unknown>,
   timeoutMs: number = TOOL_IPC_TIMEOUT_MS,
   toolCallId?: string,
-  appAccess?: { network: boolean; workspaceWrite: boolean }
+  appAccess?: { network: boolean; workspaceWrite: boolean },
+  signal?: AbortSignal
 ): Promise<unknown> {
   const toolRequestId = `${requestId}:${++nextToolRequestId}`;
 
+  if (signal?.aborted) {
+    throw new DOMException('已取消', 'AbortError');
+  }
+
+  let rejectTool!: (error: Error) => void;
+  // 父级取消/工具超时：通知主线程中止正在执行的工具（杀 bash 进程等），
+  // 并立即拒绝，避免主线程的工具在后台继续跑完、副作用滞后落地。
+  const onAbort = (): void => {
+    toolResponseWaiters.delete(toolRequestId);
+    postMessageToMain({
+      type: 'cancel-tool-request',
+      requestId,
+      toolRequestId,
+    } satisfies AgentWorkerToMainMessage);
+    rejectTool(new DOMException('已取消', 'AbortError'));
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+
   const result = new Promise<unknown>((resolve, reject) => {
+    rejectTool = reject;
     const waiter: ToolResponseWaiter = {
       resolve: (value: unknown) => {
         if (waiter.timer !== undefined) clearTimeout(waiter.timer);
@@ -526,17 +546,33 @@ async function requestToolExecution(
     armTimer();
   });
 
-  postMessageToMain({
-    type: 'tool-request',
-    requestId,
-    toolRequestId,
-    toolName,
-    arguments: args,
-    ...(toolCallId ? { toolCallId } : {}),
-    ...(appAccess ? { appAccess } : {}),
-  });
+  try {
+    postMessageToMain({
+      type: 'tool-request',
+      requestId,
+      toolRequestId,
+      toolName,
+      arguments: args,
+      ...(toolCallId ? { toolCallId } : {}),
+      ...(appAccess ? { appAccess } : {}),
+    });
 
-  return await result;
+    // 竞态防护：signal 可能在检查与 postMessage 之间被 abort（cancel-tool-request
+    // 会先于 tool-request 到达主线程而被忽略）。发出后再查一次，必要时补发取消。
+    if (signal?.aborted) {
+      toolResponseWaiters.delete(toolRequestId);
+      postMessageToMain({
+        type: 'cancel-tool-request',
+        requestId,
+        toolRequestId,
+      } satisfies AgentWorkerToMainMessage);
+      rejectTool(new DOMException('已取消', 'AbortError'));
+    }
+
+    return await result;
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+  }
 }
 
 function setPermissionWaitActive(waiting: boolean): void {
@@ -622,7 +658,8 @@ async function runSubagent(
   payload: AgentWorkerChatPayload,
   definition: AgentDefinition,
   prompt: string,
-  currentDepth: number
+  currentDepth: number,
+  abortSignal?: AbortSignal
 ): Promise<SubagentSessionResult> {
   const registry = createRegistry(requestId, payload, false, currentDepth);
   const tools = filterToolsForAgent(registry.getAll(), definition.tools);
@@ -696,6 +733,7 @@ async function runSubagent(
     customPromptSection: payload.runtime.customPrompt,
     graphToolTimeoutMs: s.graphToolTimeoutMs,
     maxWallClockMs: SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
+    abortSignal,
     toolOutputTruncation: buildToolOutputTruncation(payload.settings),
     toolContextConfig: buildToolContextConfig(payload.settings),
   });
@@ -713,7 +751,15 @@ function createRegistry(
   for (const tool of payload.toolDefinitions) {
     registry.register(tool, async (args, context) => {
       const timeout = tool.name === 'graph' ? toolIpcTimeoutMs : TOOL_IPC_TIMEOUT_MS;
-      return await requestToolExecution(requestId, tool.name, args, timeout, context?.toolCallId);
+      return await requestToolExecution(
+        requestId,
+        tool.name,
+        args,
+        timeout,
+        context?.toolCallId,
+        context?.appAccess,
+        context?.signal
+      );
     });
   }
 
@@ -723,7 +769,15 @@ function createRegistry(
     const graphDef = MERGE_TOOL_DEFINITIONS.find((t) => t.name === 'graph');
     if (graphDef) {
       registry.register(graphDef, async (args, context) => {
-        return await requestToolExecution(requestId, 'graph', args, toolIpcTimeoutMs, context?.toolCallId);
+        return await requestToolExecution(
+          requestId,
+          'graph',
+          args,
+          toolIpcTimeoutMs,
+          context?.toolCallId,
+          context?.appAccess,
+          context?.signal
+        );
       });
       // Soft-hide so the main agent's getLlmTools() excludes graph (matching the
       // main thread's exposeGraphToLlm:false default). Subagents still select it
@@ -739,7 +793,7 @@ function createRegistry(
       return registry;
     }
 
-    registry.register(definition, async (args) => {
+    registry.register(definition, async (args, context) => {
       const name = typeof args.agent === 'string' ? args.agent.trim() : '';
       const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
       if (!name) {
@@ -753,7 +807,7 @@ function createRegistry(
         throw new Error(`未找到子代理: ${name}`);
       }
 
-      const result = await runSubagent(requestId, payload, target, prompt, currentDepth + 1);
+      const result = await runSubagent(requestId, payload, target, prompt, currentDepth + 1, context?.signal);
       if (result.cacheStats) {
         const existing = subagentCacheStatsMap.get(requestId);
         const entry = { tier: result.tier, stats: result.cacheStats };
@@ -842,7 +896,7 @@ async function handleRunAppAgent(
       toolActivity?.();
       try {
         return await requestToolExecution(
-          requestId, tool.name, args, toolIpcTimeoutMs, context?.toolCallId, appAccess
+          requestId, tool.name, args, toolIpcTimeoutMs, context?.toolCallId, appAccess, context?.signal
         );
       } finally {
         toolActivity?.();
@@ -1163,7 +1217,9 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     requestBuilder: new RequestBuilder(),
     cacheValidator: new CacheValidator(),
     maxToolRounds: payload.settings.maxToolRounds,
-    toolTimeouts: { ...PERMISSION_WAITING_TOOL_TIMEOUTS },
+    // task 工具（子代理）对齐其内部 20 分钟墙钟预算，避免父级 270s 默认
+    // 超时掐断 promise 后子代理仍在后台执行。
+    toolTimeouts: { ...PERMISSION_WAITING_TOOL_TIMEOUTS, task: SUBAGENT_WALL_CLOCK_TIMEOUT_MS },
     toolOutputTruncation: buildToolOutputTruncation(payload.settings),
     toolContextConfig: buildToolContextConfig(payload.settings),
     contextCompaction: createContextCompactionHandler(

@@ -214,6 +214,9 @@ export interface SubagentSessionDeps {
   projectGraphSummary?: string;
   graphToolTimeoutMs: number;
   maxWallClockMs?: number;
+  /** 父级取消信号（主会话取消 / 父工具超时）：abort 时立即取消子代理执行，
+   *  避免父级 withTimeout 只抛弃 promise、子代理继续烧 token 跑写文件/bash。 */
+  abortSignal?: AbortSignal;
   toolOutputTruncation?: ToolOutputTruncationOptions;
   toolContextConfig?: ToolContextConfig;
   onToolCallEnd?: (event: Extract<IChatStreamEvent, { type: 'tool-call-end' }>) => void;
@@ -238,11 +241,28 @@ async function withSubagentWallClockTimeout<T>(
   agent: Agent,
   promiseFactory: () => Promise<T>,
   timeoutMs: number,
-  lang?: string
+  lang?: string,
+  abortSignal?: AbortSignal
 ): Promise<T> {
+  if (abortSignal?.aborted) {
+    throw new DOMException('已取消', 'AbortError');
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const onAbort = (): void => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+    // 父级（主代理工具调用）已取消/超时：立即取消子代理执行，否则子代理
+    // 会继续在后台烧 token、跑写文件/bash。
+    agent.cancel();
+    rejectFn(new DOMException('已取消', 'AbortError'));
+  };
+  let rejectFn!: (err: Error) => void;
+  abortSignal?.addEventListener('abort', onAbort, { once: true });
   try {
     return await new Promise<T>((resolve, reject) => {
+      rejectFn = reject;
       timer = setTimeout(() => {
         agent.cancel();
         reject(new Error(timeoutMessage(lang, timeoutMs / 1000)));
@@ -267,6 +287,7 @@ async function withSubagentWallClockTimeout<T>(
     });
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    abortSignal?.removeEventListener('abort', onAbort);
   }
 }
 
@@ -372,7 +393,8 @@ export async function runSubagentSession(
           }
         }),
       deps.maxWallClockMs ?? SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
-      deps.lang
+      deps.lang,
+      deps.abortSignal
     );
   } catch (err) {
     const errName = err instanceof Error ? err.name : undefined;

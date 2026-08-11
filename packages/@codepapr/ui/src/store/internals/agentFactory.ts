@@ -14,6 +14,7 @@ import {
   type SkillDefinition,
   type ToolOutputTruncationOptions,
   type ToolContextConfig,
+  SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
 } from '@codepapr/core';
 import type { PromptMode } from '@codepapr/core';
 import { CacheValidator, RequestBuilder } from '@codepapr/api';
@@ -438,7 +439,10 @@ function _createLocalAgent(
     requestBuilder: new RequestBuilder(),
     cacheValidator: new CacheValidator(),
     maxToolRounds: settings.maxToolRounds,
-    toolTimeouts: { graph: settings.graphToolTimeoutMs },
+    // task 工具（子代理）内部有自己的 20 分钟墙钟预算（SUBAGENT_WALL_CLOCK_TIMEOUT_MS）：
+    // 父级默认 270s 超时会在子代理预算到期前掐断 promise（且不取消子代理），
+    // 必须把 task 的超时对齐到子代理预算。
+    toolTimeouts: { graph: settings.graphToolTimeoutMs, task: SUBAGENT_WALL_CLOCK_TIMEOUT_MS },
     toolOutputTruncation: buildToolOutputTruncation(settings, workspacePath),
     toolContextConfig: buildToolContextConfig(settings),
     contextCompaction: createContextCompactionHandler(

@@ -71,7 +71,8 @@ export interface UiTaskToolContext {
 async function runSubagent(
   context: UiTaskToolContext,
   definition: AgentDefinition,
-  prompt: string
+  prompt: string,
+  abortSignal?: AbortSignal
 ): Promise<SubagentSessionResult> {
   startSubagentProgress(definition.name, prompt);
 
@@ -146,6 +147,7 @@ async function runSubagent(
     memorySection: context.memorySection,
     projectGraphSummary: context.projectGraphSummary,
     graphToolTimeoutMs: context.graphToolTimeoutMs,
+    abortSignal,
     toolOutputTruncation: context.toolOutputTruncation,
     onToolCallEnd: (event) => {
       pushSubagentStep({
@@ -172,7 +174,7 @@ export function registerUiTaskTool(
     return null;
   }
 
-  registry.register(definition, async (args) => {
+  registry.register(definition, async (args, execContext) => {
     const name = typeof args.agent === 'string' ? args.agent.trim() : '';
     const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
     if (!name) {
@@ -188,7 +190,7 @@ export function registerUiTaskTool(
     if (target.internal) {
       throw new Error(`子代理 "${name}" 是内部代理，不能直接委派`);
     }
-    const result = await runSubagent(context, target, prompt);
+    const result = await runSubagent(context, target, prompt, execContext?.signal);
     if (result.cacheStats) {
       if (!context.subagentCacheStats) {
         context.subagentCacheStats = [];

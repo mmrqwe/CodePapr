@@ -18,7 +18,10 @@ use std::{
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -29,6 +32,56 @@ use std::os::windows::process::CommandExt;
 pub(crate) const MAX_COMMAND_SECONDS: u64 = 600;
 pub(crate) const MAX_OUTPUT_BYTES: usize = 200_000;
 const MAX_BACKGROUND_LOG_LINES: usize = 48;
+
+/// 前台命令（run_workspace_command / run_workspace_shell_command）的取消令牌表：
+/// token → 取消标志。前端在信号 abort（会话取消 / 工具超时）时调用
+/// cancel_running_command 置位，阻塞等待的命令轮询到标志后立即杀进程树。
+/// 旧实现没有取消通道：Tauri invoke 无法中途取消，bash 等长命令会在
+/// 超时/取消后继续在后台跑完，副作用滞后落地。
+static ACTIVE_COMMAND_CANCELS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+
+fn command_cancels() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+    ACTIVE_COMMAND_CANCELS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 注册一个可取消前台命令的取消标志；返回的 Arc 用于轮询，token 用于
+/// cancel_running_command 远程置位。命令结束后必须调用
+/// `unregister_command_cancel(token)` 清理。
+fn register_command_cancel(token: &str) -> Option<Arc<AtomicBool>> {
+    let token = token.trim();
+    if token.is_empty() {
+        return None;
+    }
+    let flag = Arc::new(AtomicBool::new(false));
+    command_cancels()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .insert(token.to_string(), flag.clone());
+    Some(flag)
+}
+
+fn unregister_command_cancel(token: &str) {
+    command_cancels()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .remove(token);
+}
+
+#[tauri::command]
+pub(crate) fn cancel_running_command(token: String) -> Result<bool, String> {
+    let flag = command_cancels()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .remove(token.trim());
+    match flag {
+        Some(flag) => {
+            flag.store(true, Ordering::Relaxed);
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
 pub(crate) const BLOCKED_COMMANDS: &[&str] = &[
     "bash",
     "sh",
@@ -287,9 +340,10 @@ pub(crate) async fn run_workspace_command(
     args: Option<Vec<String>>,
     timeout_seconds: Option<u64>,
     workdir: Option<String>,
+    cancel_token: Option<String>,
 ) -> Result<CommandResult, String> {
     run_blocking_workspace_task(move || {
-        run_workspace_command_impl(workspace_path, command, args, timeout_seconds, workdir)
+        run_workspace_command_impl(workspace_path, command, args, timeout_seconds, workdir, cancel_token)
     })
     .await
 }
@@ -300,6 +354,7 @@ pub(crate) fn run_workspace_command_impl(
     args: Option<Vec<String>>,
     timeout_seconds: Option<u64>,
     workdir: Option<String>,
+    cancel_token: Option<String>,
 ) -> Result<CommandResult, String> {
     if !command_allowed(&command) {
         return Err(format!(
@@ -357,7 +412,11 @@ pub(crate) fn run_workspace_command_impl(
         }
     };
 
-    let (status, stdout, stderr, timed_out) = collect_command_output(child, timeout)?;
+    let cancel_flag = register_command_cancel(cancel_token.as_deref().unwrap_or(""));
+    let (status, stdout, stderr, timed_out) = collect_command_output_with_cancel(child, timeout, cancel_flag.clone())?;
+    if let Some(token) = cancel_token.as_deref() {
+        unregister_command_cancel(token);
+    }
 
     Ok(CommandResult {
         command,
@@ -397,9 +456,14 @@ fn decode_command_output(bytes: &[u8]) -> String {
         .unwrap_or_else(|_| String::from_utf8_lossy(bytes).into_owned())
 }
 
-fn collect_command_output(
+/// 等待子进程退出并收集 stdout/stderr；超时或 cancel_flag 置位（前端取消）
+/// 则杀进程树终止。只保留上限内的输出，但持续读到底：旧实现 read_to_end
+/// 无上限，超时窗口内输出几百 MB 会先撑爆内存；只读到上限就停又会让子进程
+/// 阻塞在满管道上。取消与超时统一标记为 timed_out（命令未正常完成）。
+fn collect_command_output_with_cancel(
     mut child: Child,
     timeout: Duration,
+    cancel_flag: Option<Arc<AtomicBool>>,
 ) -> Result<(Option<i32>, String, String, bool), String> {
     let stdout = child
         .stdout
@@ -424,13 +488,17 @@ fn collect_command_output(
             status = exit_status.code();
             break;
         }
-        if started.elapsed() >= timeout {
+        let cancelled = cancel_flag
+            .as_ref()
+            .map(|flag| flag.load(Ordering::Relaxed))
+            .unwrap_or(false);
+        if cancelled || started.elapsed() >= timeout {
             timed_out = true;
             kill_process_tree(&mut child)
-                .map_err(|err| format!("终止超时命令失败: {err}"))?;
+                .map_err(|err| format!("终止超时/取消命令失败: {err}"))?;
             status = child
                 .wait()
-                .map_err(|err| format!("等待超时命令退出失败: {err}"))?
+                .map_err(|err| format!("等待命令退出失败: {err}"))?
                 .code();
             break;
         }
@@ -525,9 +593,10 @@ pub(crate) async fn run_workspace_shell_command(
     workdir: Option<String>,
     timeout_seconds: Option<u64>,
     sandbox: Option<SandboxAccessArgs>,
+    cancel_token: Option<String>,
 ) -> Result<CommandResult, String> {
     run_blocking_workspace_task(move || {
-        run_workspace_shell_command_impl(workspace_path, command, workdir, timeout_seconds, sandbox)
+        run_workspace_shell_command_impl(workspace_path, command, workdir, timeout_seconds, sandbox, cancel_token)
     })
     .await
 }
@@ -538,6 +607,7 @@ pub(crate) fn run_workspace_shell_command_impl(
     workdir: Option<String>,
     timeout_seconds: Option<u64>,
     sandbox: Option<SandboxAccessArgs>,
+    cancel_token: Option<String>,
 ) -> Result<CommandResult, String> {
     if command.trim().is_empty() {
         return Err("命令不能为空".to_string());
@@ -554,7 +624,11 @@ pub(crate) fn run_workspace_shell_command_impl(
     let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30).clamp(1, MAX_COMMAND_SECONDS));
     let mut cmd = build_shell_spawn_command(&command, &cwd, &workspace, sandbox.map(Into::into))?;
     let child = cmd.spawn().map_err(|err| format!("启动命令失败: {err}"))?;
-    let (status, stdout, stderr, timed_out) = collect_command_output(child, timeout)?;
+    let cancel_flag = register_command_cancel(cancel_token.as_deref().unwrap_or(""));
+    let (status, stdout, stderr, timed_out) = collect_command_output_with_cancel(child, timeout, cancel_flag)?;
+    if let Some(token) = cancel_token.as_deref() {
+        unregister_command_cancel(token);
+    }
     Ok(CommandResult {
         command,
         args: Vec::new(),

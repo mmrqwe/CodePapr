@@ -136,7 +136,7 @@ pub(crate) fn task_worker(rx: std::sync::mpsc::Receiver<WorkspaceTask>) {
                 timeout_seconds,
             } => {
                 let res =
-                    run_workspace_command_impl(workspace_path, command, args, timeout_seconds, None);
+                    run_workspace_command_impl(workspace_path, command, args, timeout_seconds, None, None);
                 WorkspaceTaskResult::RunCommand { id, result: res }
             }
         };

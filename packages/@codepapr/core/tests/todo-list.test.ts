@@ -226,6 +226,51 @@ describe('updateTodoList', () => {
     expect(updated.tasks.find((t) => t.id === 'a')!.status).toBe('running');
     expect(updated.tasks.find((t) => t.id === 'b')!.status).toBe('completed');
   });
+
+  it('纯进度 patch（状态不变）不应触发自动推进，也不产生第二个 running', () => {
+    const ctx = makeContext([
+      { id: 'a', status: 'running' },
+      { id: 'b', status: 'pending' },
+    ]);
+    const updated = updateTodoList(ctx, [
+      { id: 'a', status: 'running', summary: '进行中：完成了 30%' },
+    ]);
+
+    // 旧实现：patch 触及当前任务即推进 → b 被置为 running、指针跳到 b。
+    expect(updated.currentTaskId).toBe('a');
+    const running = updated.tasks.filter((t) => t.status === 'running');
+    expect(running.map((t) => t.id)).toEqual(['a']);
+    expect(updated.tasks.find((t) => t.id === 'b')!.status).toBe('pending');
+  });
+
+  it('标记 completed 自动推进后不应残留双 running', () => {
+    const ctx = makeContext([
+      { id: 'a', status: 'running' },
+      { id: 'b', status: 'pending' },
+    ]);
+    const updated = updateTodoList(ctx, [{ id: 'a', status: 'completed' }]);
+
+    expect(updated.tasks.find((t) => t.id === 'a')!.status).toBe('completed');
+    expect(updated.tasks.find((t) => t.id === 'b')!.status).toBe('running');
+    const running = updated.tasks.filter((t) => t.status === 'running');
+    expect(running).toHaveLength(1);
+  });
+
+  it('all-pending 初始化后 currentTaskId 应指向第一个可执行任务（依赖满足）', () => {
+    const ctx = writeTodoList(null, 'test', [
+      { id: 'a', title: 'A', description: '', status: 'pending' as const },
+      { id: 'b', title: 'B', description: '', status: 'pending' as const, dependsOn: ['a'] },
+    ]);
+
+    // 旧实现：只认 running → null 永远不变，completed 自动推进是死代码。
+    expect(ctx.currentTaskId).toBe('a');
+
+    // 从 all-pending 出发，标记当前任务完成应能真正推进到下一个任务
+    const first = updateTodoList(ctx, [{ id: 'a', status: 'running' }]);
+    const updated = updateTodoList(first, [{ id: 'a', status: 'completed' }]);
+    expect(updated.tasks.find((t) => t.id === 'b')!.status).toBe('running');
+    expect(updated.currentTaskId).toBe('b');
+  });
 });
 
 describe('completeCurrentTodo', () => {
