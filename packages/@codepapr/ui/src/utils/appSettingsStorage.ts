@@ -44,3 +44,8 @@ export function queueAppSettingsSave(settings: Settings): Promise<void> {
   );
   return next;
 }
+
+/** 等待队列中所有在途设置保存完成（退出前 flush 用）。 */
+export function flushAppSettingsSaves(): Promise<void> {
+  return saveQueue;
+}

@@ -47,6 +47,11 @@ function persistState(state: CharacterState): Promise<void> {
   return saveChain;
 }
 
+/** 等待角色卡保存链全部落库（退出前 flush 用）。 */
+export function flushCharactersState(): Promise<void> {
+  return saveChain;
+}
+
 export const useCharactersStore = create<CharacterState & CharacterActions>((set, get) => ({
   loaded: false,
   loading: false,

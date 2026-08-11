@@ -41,6 +41,7 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuild
 use tauri::Manager;
 #[allow(unused_imports)]
 use tauri_plugin_dialog::DialogExt;
+use tauri::Emitter;
 
 use crate::secrets::{PRIMARY_KEY_ACCOUNT, MENTOR_KEY_ACCOUNT};
 use crate::vault::{migrate_from_keyring, AppSecrets};
@@ -413,6 +414,13 @@ fn main() {
                 // 窗口销毁路径（Destroyed→ExitRequested→ControlFlow::Exit）本身也能退出。
                 // 若先跑清理，任何阻塞调用（child.wait、CDP close）都会卡死退出链路。
                 if window.app_handle().windows().len() <= 1 {
+                    // 退出前给前端最后一次持久化机会：emit 事件后前端会把
+                    // 在途/最新的设置与角色卡状态重新落库，这里等待保存完成
+                    // （save_app_settings 已是异步命令，主线程等待期间它照常执行），
+                    // 避免"切项目/改设置/改角色后立刻退出"丢最后写入。
+                    let _ = window.emit("codepapr:flush-settings", ());
+                    let epoch_before = db::settings_save_epoch();
+                    db::wait_for_settings_save_epoch(epoch_before, std::time::Duration::from_millis(2000));
                     window.app_handle().exit(0);
                 }
                 run_shutdown_cleanup();

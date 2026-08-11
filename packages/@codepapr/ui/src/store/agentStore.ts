@@ -86,6 +86,7 @@ import type {
   AgentState,
   ResetToMessageResult,
   SessionMeta,
+  Settings,
   StoreGet,
   StoreSet,
   UIMessage,
@@ -187,6 +188,23 @@ function disposeAgentHandle(get: StoreGet): void {
   } catch {
     // already torn down
   }
+}
+
+/** 持久化设置：成功时清除历史持久化错误标记（横幅不再常驻）；
+ *  失败时记录 _persistenceError 并 toast 提示。保存走串行队列。 */
+function persistAppSettings(get: StoreGet, set: StoreSet, settings: Settings): void {
+  void queueAppSettingsSave(settings).then(
+    () => {
+      if (get()._persistenceError) {
+        set({ _persistenceError: null });
+      }
+    },
+    (err) => {
+      const message = `设置保存失败：${err instanceof Error ? err.message : String(err)}`;
+      set({ _persistenceError: message });
+      toast.error(message);
+    },
+  );
 }
 
 /** 为 App Agent 确保存在可用 Agent（复用聊天 Agent 的 Worker）。
@@ -367,12 +385,8 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             disposeAgentHandle(get);
             set({ settings: nextSettings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
             if (get()._settingsPersistable) {
-              void queueAppSettingsSave(nextSettings).catch((err) => {
-                // 持久化失败不可静默：内存已推进，磁盘仍是旧设置，下次启动即分叉。
-                const message = `设置保存失败：${err instanceof Error ? err.message : String(err)}`;
-                set({ _persistenceError: message });
-                toast.error(message);
-              });
+              // 持久化失败不可静默：内存已推进，磁盘仍是旧设置，下次启动即分叉。
+              persistAppSettings(get, set, nextSettings);
             }
           }
         }
@@ -400,11 +414,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         // 会把"存在但为空"的 apiKey 视为用户主动清除，导致 vault 密钥被永久删除。
         // 与 openWorkspace/loadSettings 的守卫一致：跳过持久化，并明确提示用户。
         if (get()._settingsPersistable) {
-          void queueAppSettingsSave(settings).catch((err) => {
-            const message = `设置保存失败：${err instanceof Error ? err.message : String(err)}`;
-            set({ _persistenceError: message });
-            toast.error(message);
-          });
+          persistAppSettings(get, set, settings);
         } else {
           set({ _persistenceError: '设置加载失败，更改将不会被保存到磁盘' });
         }
@@ -727,11 +737,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             recentWorkspaces: nextRecent,
           });
           set({ settings: nextSettings });
-          void queueAppSettingsSave(nextSettings).catch((err) => {
-            const message = `设置保存失败：${err instanceof Error ? err.message : String(err)}`;
-            set({ _persistenceError: message });
-            toast.error(message);
-          });
+          persistAppSettings(get, set, nextSettings);
         }
       },
 

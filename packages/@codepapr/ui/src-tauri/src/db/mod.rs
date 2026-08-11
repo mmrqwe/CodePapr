@@ -13,7 +13,9 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -822,7 +824,7 @@ pub(crate) async fn save_app_settings(
     // 同步命令会在主线程执行（vault 快照写盘 + SQLite 会阻塞 UI），
     // 改为在 blocking 线程池上完成；前端已按调用顺序串行化保存，
     // 配合 APP_SETTINGS_DB_LOCK 保证读改写原子性。
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let mut value: serde_json::Value =
             serde_json::from_str(&settings_json).map_err(|err| format!("配置不是合法 JSON: {err}"))?;
         if !value.is_object() {
@@ -864,8 +866,10 @@ pub(crate) async fn save_app_settings(
             db_path: db_path.to_string_lossy().to_string(),
         })
     })
-    .await
-    .map_err(|err| format!("保存设置任务失败: {err}"))?
+    .await;
+    // 无论成败都推进纪元：退出流程据此判断"已处理完毕"，无需继续等待。
+    SETTINGS_SAVE_EPOCH.fetch_add(1, Ordering::SeqCst);
+    result.map_err(|err| format!("保存设置任务失败: {err}"))?
 }
 
 // ui.settings 的读-改-写互斥：note_recent_workspace 与 load/save_app_settings
@@ -874,6 +878,32 @@ static APP_SETTINGS_DB_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn app_settings_db_lock() -> &'static Mutex<()> {
     APP_SETTINGS_DB_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+// 设置保存完成纪元：每次 save_app_settings 处理完毕 +1。退出流程在
+// CloseRequested 中等待该值推进，确保最后时刻的 fire-and-forget 保存
+// （含前端收到退出信号后重发的保存）在进程终止前真正落库。
+static SETTINGS_SAVE_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn settings_save_epoch() -> u64 {
+    SETTINGS_SAVE_EPOCH.load(Ordering::SeqCst)
+}
+
+/// 有界等待设置保存纪元推进（退出前 flush 用）。返回 true 表示 epoch 已推进
+/// （一次保存已处理完毕），false 表示超时（前端不可用/无保存发生）。
+pub(crate) fn wait_for_settings_save_epoch(epoch_before: u64, timeout: Duration) -> bool {
+    wait_for_epoch(&SETTINGS_SAVE_EPOCH, epoch_before, timeout)
+}
+
+fn wait_for_epoch(epoch: &AtomicU64, epoch_before: u64, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while epoch.load(Ordering::SeqCst) == epoch_before {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    true
 }
 
 /// 平台感知大小写去重（与前端 recentWorkspaces.ts 的 pathsEquivalent 对齐）：
@@ -2632,5 +2662,22 @@ mod tests {
         let mut value4: serde_json::Value =
             serde_json::from_str(r#"{"apiKey":"","mentorApiKey":""}"#).unwrap();
         assert!(!extract_and_store_secrets(&secrets, &mut value4));
+    }
+
+    #[test]
+    fn wait_for_epoch_returns_when_epoch_advances() {
+        let epoch = std::sync::Arc::new(AtomicU64::new(7));
+        let epoch_for_thread = epoch.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            epoch_for_thread.fetch_add(1, Ordering::SeqCst);
+        });
+        assert!(wait_for_epoch(&epoch, 7, std::time::Duration::from_secs(2)));
+    }
+
+    #[test]
+    fn wait_for_epoch_times_out_when_epoch_stays_put() {
+        let epoch = AtomicU64::new(7);
+        assert!(!wait_for_epoch(&epoch, 7, std::time::Duration::from_millis(40)));
     }
 }

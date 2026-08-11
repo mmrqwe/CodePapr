@@ -432,6 +432,30 @@ describe('useAgentStore.sendMessage', () => {
     expect(useAgentStore.getState().settings.lang).toBe('zh-TW');
   });
 
+  it('clears a stale persistence error once a settings save succeeds', async () => {
+    await useAgentStore.getState().loadSettings();
+    useAgentStore.setState({ _persistenceError: '旧错误' });
+    saveAppSettingsMock.mockClear();
+
+    useAgentStore.getState().setSettings({ lang: 'en' });
+    // 等待串行队列 + 成功回调（两个微任务轮）
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(useAgentStore.getState()._persistenceError).toBeNull();
+  });
+
+  it('records a persistence error when a settings save fails', async () => {
+    await useAgentStore.getState().loadSettings();
+    useAgentStore.setState({ _persistenceError: null });
+    saveAppSettingsMock.mockClear();
+    saveAppSettingsMock.mockRejectedValueOnce(new Error('disk full'));
+
+    useAgentStore.getState().setSettings({ lang: 'en' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(useAgentStore.getState()._persistenceError).toContain('disk full');
+  });
+
   it('switches cache stats with the active session and persists them per conversation', () => {
     useAgentStore.setState((state) => ({
       ...state,

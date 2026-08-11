@@ -18,6 +18,7 @@ import { ToastContainer } from './components/ToastContainer';
 import { PermissionDialog } from './components/PermissionDialog';
 import { ProjectSwitcherModal } from './components/ProjectSwitcherModal';
 import type { GitFileSelection } from './utils/workspaceGitPanel';
+import { registerSettingsFlushListener } from './utils/settingsFlush';
 import type { ReviewScope } from './utils/codeReview';
 import { getTranslation } from './utils/i18n';
 import type { PreviewLocation } from './utils/projectDiagnosticLocations';
@@ -182,6 +183,7 @@ export default function App() {
   useEffect(() => {
     void loadSettings();
     void useCharactersStore.getState().loadCharacters();
+    registerSettingsFlushListener();
   }, [loadSettings]);
 
   useEffect(() => {
