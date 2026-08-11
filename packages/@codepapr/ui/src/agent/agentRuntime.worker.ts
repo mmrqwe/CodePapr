@@ -46,6 +46,11 @@ import {
   type AppAgentPayload,
 } from './agentWorkerProtocol';
 import { createContextCompactionHandler } from './compactionHandler';
+import {
+  TOOL_IPC_TIMEOUT_MS,
+  resolveToolIpcTimeoutMs,
+  resolveGraphIpcTimeoutMs,
+} from './toolIpcTimeouts';
 import type { Settings } from '../store/internals/types';
 // Shared with app_render validation (fail fast at render time instead of
 // silently stripping tools the app's level does not grant).
@@ -106,30 +111,6 @@ const bootstrapResponseWaiters = new Map<
 
 let nextBootstrapRequestId = 0;
 
-const TOOL_IPC_TIMEOUT_MS = 120_000;
-// bash 命令最长 600s（Rust MAX_COMMAND_SECONDS）。IPC 超时必须覆盖命令本身的
-// 最长运行时间，否则命令还在合法运行、IPC 先超时；配合超时即发 cancel-tool-request，
-// 确保超时 = 中止主线程执行，而不是抛弃后让它继续跑完（副作用滞后落地）。
-const BASH_COMMAND_MAX_SECONDS = 600;
-const BASH_IPC_MARGIN_MS = 15_000;
-
-/** 按工具解析 IPC 超时：bash 按其请求的 timeoutSeconds（默认 30s，Rust 钳制
- *  1-600s）放宽并留余量；其余工具用基础值。 */
-function resolveToolIpcTimeoutMs(
-  toolName: string,
-  args: Record<string, unknown>,
-  baseMs: number
-): number {
-  if (toolName !== 'bash') {
-    return baseMs;
-  }
-  const raw =
-    typeof args.timeoutSeconds === 'number' && Number.isFinite(args.timeoutSeconds)
-      ? args.timeoutSeconds
-      : 30;
-  const commandMs = Math.min(Math.max(raw, 1), BASH_COMMAND_MAX_SECONDS) * 1000;
-  return Math.max(baseMs, commandMs + BASH_IPC_MARGIN_MS);
-}
 // 子代理（含 mentor）墙钟上限。流层改为无限重连后，长时间网络波动也会消耗
 // 子代理预算；放宽到 20 分钟，避免「重连中」的子代理被墙钟误杀。
 const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 1_200_000;
@@ -785,25 +766,41 @@ function createRegistry(
   requestId: string,
   payload: AgentWorkerChatPayload,
   includeTaskTool: boolean,
-  currentDepth: number = 0
+  currentDepth: number = 0,
+  onToolActivity?: (phase: 'start' | 'end') => void
 ): ToolRegistry {
   const registry = new ToolRegistry();
   const toolIpcTimeoutMs = payload.settings.toolIpcTimeoutMs ?? TOOL_IPC_TIMEOUT_MS;
+  // graph 构建可远超默认 IPC 120s：其 Agent 级超时已配置 graphToolTimeoutMs，
+  // IPC 层必须同步放宽（否则 120s 定时器先于 Agent 级 600s 开火误杀大仓库构建）。
+  const graphIpcTimeoutMs = resolveGraphIpcTimeoutMs(
+    toolIpcTimeoutMs,
+    payload.settings.graphToolTimeoutMs
+  );
+
+  // 工具执行期间通知外层（聊天回合的空闲兜底以此暂停/恢复，避免长 bash/子代理
+  // 在合法运行中被 "Agent idle timeout" 误杀；工具自身超时由 IPC 定时器保证）。
+  const runWithActivity = <T>(run: () => Promise<T>): Promise<T> => {
+    onToolActivity?.('start');
+    return run().finally(() => onToolActivity?.('end'));
+  };
 
   for (const tool of payload.toolDefinitions) {
     registry.register(tool, async (args, context) => {
       const timeout =
         tool.name === 'graph'
-          ? toolIpcTimeoutMs
-          : resolveToolIpcTimeoutMs(tool.name, args, TOOL_IPC_TIMEOUT_MS);
-      return await requestToolExecution(
-        requestId,
-        tool.name,
-        args,
-        timeout,
-        context?.toolCallId,
-        context?.appAccess,
-        context?.signal
+          ? graphIpcTimeoutMs
+          : resolveToolIpcTimeoutMs(tool.name, args, toolIpcTimeoutMs);
+      return await runWithActivity(() =>
+        requestToolExecution(
+          requestId,
+          tool.name,
+          args,
+          timeout,
+          context?.toolCallId,
+          context?.appAccess,
+          context?.signal
+        )
       );
     });
   }
@@ -814,14 +811,16 @@ function createRegistry(
     const graphDef = MERGE_TOOL_DEFINITIONS.find((t) => t.name === 'graph');
     if (graphDef) {
       registry.register(graphDef, async (args, context) => {
-        return await requestToolExecution(
-          requestId,
-          'graph',
-          args,
-          toolIpcTimeoutMs,
-          context?.toolCallId,
-          context?.appAccess,
-          context?.signal
+        return await runWithActivity(() =>
+          requestToolExecution(
+            requestId,
+            'graph',
+            args,
+            graphIpcTimeoutMs,
+            context?.toolCallId,
+            context?.appAccess,
+            context?.signal
+          )
         );
       });
       // Soft-hide so the main agent's getLlmTools() excludes graph (matching the
@@ -852,7 +851,9 @@ function createRegistry(
         throw new Error(`未找到子代理: ${name}`);
       }
 
-      const result = await runSubagent(requestId, payload, target, prompt, currentDepth + 1, context?.signal);
+      const result = await runWithActivity(() =>
+        runSubagent(requestId, payload, target, prompt, currentDepth + 1, context?.signal)
+      );
       if (result.cacheStats) {
         const existing = subagentCacheStatsMap.get(requestId);
         const entry = { tier: result.tier, stats: result.cacheStats };
@@ -1218,7 +1219,12 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
   sessionAbortControllers.set(payload.requestId, abortController);
 
   try {
-    const registry = createRegistry(payload.requestId, payload, true);
+    // 工具执行（含子代理/长 bash）期间暂停聊天空闲兜底：工具自身的 IPC 超时
+    // 负责兜底，空闲计时器只针对 LLM 流/工具请求静默挂死。
+    let toolActivityNotifier: ((phase: 'start' | 'end') => void) | null = null;
+    const registry = createRegistry(payload.requestId, payload, true, undefined, (phase) => {
+      toolActivityNotifier?.(phase);
+    });
 
   // Reuse a per-session log across turns to avoid re-cloning + re-hashing the
   // full history each turn. Full sync rebuilds it from payload.messages;
@@ -1318,6 +1324,15 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
         new Error(`Agent idle timeout: no activity for ${CHAT_IDLE_TIMEOUT_MS / 1000}s`)
       );
     }, CHAT_IDLE_TIMEOUT_MS);
+  };
+
+  // 工具执行（含子代理）期间暂停空闲兜底；结束时按正常节奏恢复。
+  toolActivityNotifier = (phase) => {
+    if (phase === 'start') {
+      clearIdle();
+    } else {
+      armIdle();
+    }
   };
 
   const chatPromise = agent.chat(
