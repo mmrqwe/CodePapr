@@ -361,20 +361,23 @@ mod tests {
     #[test]
     fn user_override_narrows_manifest_access() {
         reset_test_settings();
+        // 用独立 app id：persist 的 override 是全局共享状态，若与其它测试
+        // 共用 "test-app" 且不清理，并行运行时会把其它用例的断言收窄失败。
+        let app_id = "override-app";
         set_app_settings(AppPermissionSettings {
             default_local: PaprLocalAccess::None,
             default_network: false,
             app_overrides: {
                 let mut map = HashMap::new();
                 map.insert(
-                    "test-app".into(),
+                    app_id.into(),
                     PaprAccess { local: PaprLocalAccess::None, network: false },
                 );
                 map
             },
         });
         let m = make_manifest(Some(PaprLocalAccess::Write), Some(true), None);
-        let access = resolve_effective_access(&m, "test-app");
+        let access = resolve_effective_access(&m, app_id);
         assert_eq!(access.local, PaprLocalAccess::None);
         assert!(!access.network);
         // 未覆盖的 app 使用 manifest 声明
@@ -382,6 +385,9 @@ mod tests {
         let access2 = resolve_effective_access(&other, "other-app");
         assert_eq!(access2.local, PaprLocalAccess::Read);
         assert!(access2.network);
+
+        // 清理全局 settings，避免污染并行运行的其它用例
+        reset_test_settings();
     }
 
     #[test]

@@ -181,19 +181,15 @@ fn build_profile(
         "(allow process*)".to_string(),
     ];
     // 网络轴：出站网络按开关；监听 localhost 由 allow_bind 单独控制（后端进程需要）。
-    // allow_bind 必须限定监听地址为回环：裸 (allow network-bind) 允许 bind
-    // 0.0.0.0/::，后端进程可直接把服务暴露到局域网——与「监听 localhost」
-    // 的文档/注释语义不符。
+    // 注意：SBPL 的 network-bind 地址过滤在本平台无法限制 bind 地址——
+    // `(local ip "127.0.0.1")` 是语法错误（"port missing in network address"），
+    // `(local ip "localhost:*")` 虽可解析但实测 bind 0.0.0.0 依旧成功（过滤器
+    // 不约束 bind 行为）。因此这里只放行 network-bind，回环约束由 app_start 的
+    // 监听地址校验（check_port_bind_address）在启动期强制。
     if access.network {
         lines.push("(allow network*)".to_string());
     } else if access.allow_bind {
-        // 注意：SBPL 的 (local ip "127.0.0.1") 在 network-bind 里缺端口是语法
-        // 错误（"port missing in network address"），且 host 必须为 * 或
-        // localhost。用 "localhost:*"（回环 + 任意端口）既满足语法又保持
-        // 「只监听回环、不暴露局域网」的安全语义。
-        lines.push(
-            "(allow network-bind (local ip \"localhost:*\"))".to_string(),
-        );
+        lines.push("(allow network-bind)".to_string());
     }
     // 所有读放行的根路径：用于推导祖先目录的 metadata 规则。
     // 与命令预检共用 unix_allowed_read_roots，保证两侧放行集不漂移。
@@ -722,8 +718,9 @@ mod tests {
         );
         assert!(!restricted.contains("(allow network-bind)"), "got:\n{restricted}");
 
-        // 后端进程（网络关）：network-bind 必须限定回环地址（禁止 bind
-        // 0.0.0.0 暴露局域网），且无出站
+        // 后端进程（网络关）：允许 network-bind、无出站。回环约束不在
+        // SBPL 层（本平台过滤器无法限制 bind 地址，见 build_profile 注释），
+        // 由 app_start 的监听地址校验（check_port_bind_address）强制。
         let backend = build_profile(
             "/bin/zsh",
             &workspace,
@@ -731,10 +728,7 @@ mod tests {
             None,
         )
         .expect("profile should build");
-        assert!(
-            backend.contains("(allow network-bind (local ip \"localhost:*\"))"),
-            "network-bind must be loopback-restricted, got:\n{backend}"
-        );
+        assert!(backend.contains("(allow network-bind)"), "got:\n{backend}");
         assert!(!backend.contains("(allow network*)"), "got:\n{backend}");
 
         // 网络开：完整 network*

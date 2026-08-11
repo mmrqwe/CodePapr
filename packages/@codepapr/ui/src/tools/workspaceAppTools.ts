@@ -509,7 +509,37 @@ export async function launchAppBackend(
     throw new Error(`应用 '${app.appId}' 后端启动失败：${reason}，请检查 command/args 配置。${detail}`);
   }
 
+  // #60 回环约束：沙箱 SBPL 的 network-bind 地址过滤对本平台无效（实测
+  // (local ip ...) 过滤器不限制 bind 地址，bind 0.0.0.0 照样成功），回环
+  // 强制放这里做——后端若监听在通配/非回环地址，会把服务暴露到局域网，
+  // 启动直接判失败并给出修复指引。拿不到 lsof（容器/CI）时跳过。
+  let bindHosts: string[] = [];
+  try {
+    bindHosts = await invoke<string[]>('check_port_bind_address', { port: app.port });
+  } catch {
+    bindHosts = [];
+  }
+  const nonLoopbackHosts = bindHosts.filter((host) => !isLoopbackBindHost(host));
+  if (nonLoopbackHosts.length > 0) {
+    let spawnLog = '';
+    try {
+      const procs = await invoke<BackgroundProcessEntry[]>('list_background_processes', { workspacePath });
+      spawnLog = procs.find((p) => p.pid === result.pid)?.logTail?.trim() ?? '';
+    } catch { /* best-effort */ }
+    try { await invoke('stop_background_process', { pid: result.pid, source: 'app_start-loopback-failure' }); } catch { /* best-effort */ }
+    const detail = spawnLog ? `\n进程输出：\n${spawnLog}` : '';
+    throw new Error(
+      `应用 '${app.appId}' 后端监听在非回环地址（${nonLoopbackHosts.join(', ')}），` +
+      `服务会暴露到局域网。请在 command/args 中配置服务只监听 localhost/127.0.0.1。${detail}`
+    );
+  }
+
   return { pid: result.pid, url };
+}
+
+/** #60：监听地址回环判定（与 Rust app_runtime::is_loopback_bind 对齐）。 */
+function isLoopbackBindHost(host: string): boolean {
+  return host === 'localhost' || host === '::1' || host === '127.0.0.1' || host.startsWith('127.');
 }
 
 /** 从 manifest JSON 解析两轴访问（供 app_start 等校验沙箱档）。 */

@@ -148,6 +148,57 @@ pub fn check_port_owner(port: u16) -> Vec<u32> {
     Vec::new()
 }
 
+/// 端口监听地址（lsof NAME 列解析出的 host 部分，如 "127.0.0.1"、"*"、
+/// "::1"）。沙箱 SBPL 无法限制 bind 地址（`(local ip ...)` 过滤器在本平台
+/// 对 bind 无效），回环约束必须在 app_start 启动期强制：`*` 或非回环地址
+/// 说明后端把服务暴露到了局域网，启动必须失败并给出明确提示。
+#[tauri::command]
+pub fn check_port_bind_address(port: u16) -> Vec<String> {
+    let output = std::process::Command::new("lsof")
+        .args(["-nP", "-i", &format!(":{port}"), "-sTCP:LISTEN"])
+        .output();
+    if let Ok(out) = output {
+        if out.status.success() {
+            return parse_lsof_bind_hosts(&String::from_utf8_lossy(&out.stdout));
+        }
+    }
+    Vec::new()
+}
+
+fn parse_lsof_bind_hosts(stdout: &str) -> Vec<String> {
+    let mut hosts = Vec::new();
+    for line in stdout.lines() {
+        // NAME 列形如：TCP *:55331 (LISTEN) / TCP 127.0.0.1:8080 (LISTEN)
+        // TCP [::1]:8080 (LISTEN) / TCP localhost:8080 (LISTEN)
+        // 按 "TCP " 定位（不依赖列数，避免不同 lsof 版本列格式漂移）。
+        let Some(tcp_pos) = line.find("TCP ") else {
+            continue;
+        };
+        let rest = &line[tcp_pos + 4..];
+        let Some(address) = rest.split_whitespace().next() else {
+            continue;
+        };
+        // 括号 IPv6（[::1]:3456）取括号内；普通形式取首个 ':' 之前
+        let host = if let Some(host_start) = address.strip_prefix('[') {
+            host_start
+                .find(']')
+                .map(|end| host_start[..end].to_string())
+                .unwrap_or_default()
+        } else {
+            address.split(':').next().unwrap_or("").to_string()
+        };
+        if !host.is_empty() {
+            hosts.push(host);
+        }
+    }
+    hosts
+}
+
+/// 监听地址是否为回环（127.0.0.0/8、::1、localhost）。供 app_start 校验。
+pub(crate) fn is_loopback_bind(host: &str) -> bool {
+    host == "localhost" || host == "::1" || host == "127.0.0.1" || host.starts_with("127.")
+}
+
 pub fn handle_app_protocol<R: tauri::Runtime>(
     _ctx: UriSchemeContext<'_, R>,
     request: Request<Vec<u8>>,
@@ -593,6 +644,37 @@ mod tests {
         assert!(!is_unservable_app_file("index.html"));
         assert!(!is_unservable_app_file("server.js"));
         assert!(!is_unservable_app_file("sqlite.txt"));
+    }
+
+    #[test]
+    fn lsof_bind_hosts_parsing() {
+        // 通配监听（0.0.0.0）与回环监听、IPv6 括号形式都要正确解析出 host
+        let sample = "COMMAND  PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME\n\
+            node    123  mmr    3u   IPv4 0x92669b5f4405df      0t0  TCP *:3456 (LISTEN)\n\
+            python  456  mmr    4u   IPv6 0x92669b5f4405e0      0t0  TCP 127.0.0.1:3456 (LISTEN)\n\
+            python  456  mmr    5u   IPv6 0x92669b5f4405e1      0t0  TCP [::1]:3456 (LISTEN)\n";
+        let hosts = parse_lsof_bind_hosts(sample);
+        assert_eq!(hosts, vec!["*".to_string(), "127.0.0.1".to_string(), "::1".to_string()]);
+    }
+
+    #[test]
+    fn lsof_bind_hosts_parsing_ignores_header_and_empty() {
+        assert!(parse_lsof_bind_hosts("").is_empty());
+        assert!(parse_lsof_bind_hosts("COMMAND PID USER NAME\n").is_empty());
+        // 无 "TCP " 标记的行必须忽略（注意测试文本里不能出现该子串）
+        assert!(parse_lsof_bind_hosts("random line without the marker\n").is_empty());
+    }
+
+    #[test]
+    fn loopback_bind_detection() {
+        assert!(is_loopback_bind("127.0.0.1"));
+        assert!(is_loopback_bind("127.0.0.2"));
+        assert!(is_loopback_bind("::1"));
+        assert!(is_loopback_bind("localhost"));
+        assert!(!is_loopback_bind("*"));
+        assert!(!is_loopback_bind("192.168.1.5"));
+        assert!(!is_loopback_bind("0.0.0.0"));
+        assert!(!is_loopback_bind("fe80::1"));
     }
 
     #[test]

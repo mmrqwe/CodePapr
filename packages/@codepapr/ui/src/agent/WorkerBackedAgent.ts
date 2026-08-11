@@ -511,7 +511,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
   private cancelSessionCore(
     requestId: string,
-    pending: { reject: (reason?: unknown) => void }
+    pending: PendingWorkerRequest,
   ): void {
     this.clearCancelTimer();
     this.clearSnapshotTimer();
@@ -531,7 +531,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   /** 硬终止兜底：worker 未在宽限窗口内回 ACK（卡死/已死）时 terminate。 */
   private scheduleCancelTermination(
     requestId: string,
-    pending: { reject: (reason?: unknown) => void },
+    pending: PendingWorkerRequest,
     graceMs: number
   ): void {
     this.cancelTimer = setTimeout(() => {

@@ -562,7 +562,9 @@ describe('WorkerBackedAgent', () => {
   // 引擎会抛异常。
   it('does not postMessage to a worker after it crashed', async () => {
     const agent = createAgent();
-    void agent.chat('hello');
+    // chat 在崩溃时以 WorkerCrashError 拒绝：这里只验证崩溃后的消息行为，
+    // 必须显式 catch，否则未处理拒绝会让测试偶发报错（时序敏感）。
+    void agent.chat('hello').catch(() => undefined);
     const worker = MockWorker.instances[0];
     if (!worker) throw new Error('expected worker instance');
     const beforeCrash = worker.messages.length;
