@@ -754,13 +754,15 @@ mod tests {
     #[test]
     fn fs_write_and_read_roundtrip() {
         let ws = TestWorkspace::new("papr-fs-rw");
-        register_test_app(&ws.workspace_arg(), "test-app", &[]);
+        // 用进程内唯一的 app id：permission 模块的测试会为 "test-app" 写
+        // app_overrides（内存态），共用同一 id 会被并行测试竞态误伤。
+        register_test_app(&ws.workspace_arg(), "rw-app", &[]);
 
-        papr_fs_write("test-app".into(), "hello.txt".into(), "Hello World".into()).unwrap();
-        let content = papr_fs_read("test-app".into(), "hello.txt".into(), None).unwrap();
+        papr_fs_write("rw-app".into(), "hello.txt".into(), "Hello World".into()).unwrap();
+        let content = papr_fs_read("rw-app".into(), "hello.txt".into(), None).unwrap();
         assert_eq!(content, "Hello World");
 
-        unregister_test_app("test-app");
+        unregister_test_app("rw-app");
     }
 
     #[test]

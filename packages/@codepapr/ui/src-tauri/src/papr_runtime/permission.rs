@@ -16,9 +16,16 @@ fn app_settings() -> &'static Mutex<AppPermissionSettings> {
 }
 
 fn persist_settings(settings: &AppPermissionSettings) {
+    // 测试构建绝不写真实用户 DB：permission 测试会设置各种 app_overrides
+    //（含 "test-app"），持久化后 APP_SETTINGS 的 OnceLock 在下次运行时从
+    // DB 重新读到这些测试残留，导致真实 app 的权限被测试数据污染（曾使
+    // services 的 "test-app" 用例在后续运行中永久失败）。
+    #[cfg(not(test))]
     if let Ok(json) = serde_json::to_string(settings) {
         let _ = crate::db::papr_save_permission_settings(&json);
     }
+    #[cfg(test)]
+    let _ = settings;
 }
 
 #[cfg(test)]

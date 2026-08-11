@@ -178,8 +178,12 @@ fn build_profile(
     if access.network {
         lines.push("(allow network*)".to_string());
     } else if access.allow_bind {
+        // 注意：SBPL 的 (local ip "127.0.0.1") 在 network-bind 里缺端口是语法
+        // 错误（"port missing in network address"），且 host 必须为 * 或
+        // localhost。用 "localhost:*"（回环 + 任意端口）既满足语法又保持
+        // 「只监听回环、不暴露局域网」的安全语义。
         lines.push(
-            "(allow network-bind (local ip \"127.0.0.1\") (local ip \"::1\"))".to_string(),
+            "(allow network-bind (local ip \"localhost:*\"))".to_string(),
         );
     }
     // 所有读放行的根路径：用于推导祖先目录的 metadata 规则。
@@ -719,7 +723,7 @@ mod tests {
         )
         .expect("profile should build");
         assert!(
-            backend.contains("(allow network-bind (local ip \"127.0.0.1\") (local ip \"::1\"))"),
+            backend.contains("(allow network-bind (local ip \"localhost:*\"))"),
             "network-bind must be loopback-restricted, got:\n{backend}"
         );
         assert!(!backend.contains("(allow network*)"), "got:\n{backend}");
