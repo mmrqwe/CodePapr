@@ -22,6 +22,10 @@ export function OnboardingPanel({ onDismiss, onOpenFullSettings }: OnboardingPan
 
   const handleSave = () => {
     if (!canSave) return;
+    // setSettings 合并当前 settings 后经 normalizeSettings 规范化，扁平字段
+    // 只在无 per-mode 配置时才迁移；首次启动时 deepseek 配置对象恒已存在
+    // （默认值或磁盘加载），扁平字段会被丢弃。必须直接写入 per-mode 配置，
+    // 与 SettingsLlmTab 的写法保持一致。
     setSettings({
       apiMode: 'deepseek',
       apiFormat: 'openai',
@@ -30,6 +34,12 @@ export function OnboardingPanel({ onDismiss, onOpenFullSettings }: OnboardingPan
       apiKey: trimmedKey,
       model,
       fastModel: 'deepseek-v4-flash',
+      deepseek: {
+        ...settings.deepseek,
+        apiKey: trimmedKey,
+        model,
+        fastModel: 'deepseek-v4-flash',
+      },
     });
     onDismiss();
   };

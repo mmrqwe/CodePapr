@@ -159,7 +159,7 @@ vi.mock('./internals/agentFactory', async (importOriginal) => {
   };
 });
 
-import { normalizeSettings, useAgentStore } from './agentStore';
+import { getSettingsError, normalizeSettings, useAgentStore } from './agentStore';
 import { buildEffectiveContextMessages } from '../utils/contextCompaction';
 import { AgentDestroyedError, WorkerCrashError } from '../agent/WorkerBackedAgent';
 import { SESSION_MESSAGE_CACHE_LIMIT } from './internals/defaults';
@@ -2931,6 +2931,39 @@ describe('normalizeSettings', () => {
   it('keeps explicitly chosen mentorMaxTokens values intact', () => {
     expect(normalizeSettings({ mentorMaxTokens: 20000 }).mentorMaxTokens).toBe(20000);
     expect(normalizeSettings({ mentorMaxTokens: 200_000 }).mentorMaxTokens).toBe(200_000);
+  });
+});
+
+describe('useAgentStore.setSettings onboarding 回归（N1）', () => {
+  it('首次引导保存的 API Key 不被静默丢弃', () => {
+    // 模拟 OnboardingPanel.handleSave 的完整调用：setSettings 合并现有
+    // settings（恒含 per-mode 配置）后走 normalizeSettings，扁平字段会被
+    // activeConfig 派生值覆盖，因此必须把 key/model 同步写进 deepseek 配置
+    // （与 SettingsLlmTab 的写法一致）。
+    useAgentStore.getState().setSettings({
+      apiMode: 'deepseek',
+      apiFormat: 'openai',
+      provider: 'deepseek',
+      baseURL: '',
+      apiKey: 'sk-onboarding',
+      model: 'deepseek-chat',
+      fastModel: 'deepseek-v4-flash',
+      deepseek: {
+        ...useAgentStore.getState().settings.deepseek,
+        apiKey: 'sk-onboarding',
+        model: 'deepseek-chat',
+        fastModel: 'deepseek-v4-flash',
+      },
+    });
+
+    const settings = useAgentStore.getState().settings;
+    expect(settings.deepseek.apiKey).toBe('sk-onboarding');
+    expect(settings.deepseek.model).toBe('deepseek-chat');
+    expect(settings.deepseek.fastModel).toBe('deepseek-v4-flash');
+    expect(settings.apiKey).toBe('sk-onboarding');
+    expect(settings.model).toBe('deepseek-chat');
+    expect(settings.fastModel).toBe('deepseek-v4-flash');
+    expect(getSettingsError(settings)).toBeNull();
   });
 });
 
