@@ -1,3 +1,5 @@
+import { getTranslation } from './i18n';
+
 const LEADING_FILLER_PATTERNS = [
   /^(请你|请帮我|请|帮我|给我|我想知道|我需要|我想让你|我希望你|现在需要)\s*/u,
   /^(please|can you|could you|help me|i need you to|i want you to|i want to)\s*/iu,
@@ -44,15 +46,15 @@ function truncateTitle(input: string): string {
   return `${input.slice(0, limit).trim()}...`;
 }
 
-export function buildTaskTitle(input: string): string {
+export function buildTaskTitle(input: string, lang?: import('./i18n').Lang): string {
   const normalized = normalizeTitleText(input);
   if (!normalized) {
-    return '新任务';
+    return getTranslation(lang).taskTitleFallback;
   }
 
   const line = firstUsefulLine(normalized) || normalized;
   const sentence = trimSentence(line);
   const concise = stripLeadingFillers(sentence).replace(/[：:;；，,]+$/u, '').trim();
 
-  return truncateTitle(concise || sentence || normalized) || '新任务';
+  return truncateTitle(concise || sentence || normalized) || getTranslation(lang).taskTitleFallback;
 }

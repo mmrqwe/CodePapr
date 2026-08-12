@@ -126,7 +126,7 @@ export function SettingsModal() {
 
           {settingsError && (
             <div className="mt-5 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-              {settingsError === 'Please configure model settings' ? t.errorConfigModel : settingsError}
+              {settingsError}
             </div>
           )}
         </div>

@@ -1508,7 +1508,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       <div className="px-4 py-3 border-t border-[#2a2d3a] bg-[#10131b]">
         {!isConfigured && (
           <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-            <span>{settingsError === 'Please configure model settings' ? t.errorConfigModel : settingsError}</span>
+            <span>{settingsError}</span>
             <button
               onClick={() => setShowSettings(true)}
               className="flex-shrink-0 rounded-lg border border-amber-400/40 px-3 py-1.5 text-xs font-medium text-amber-100 transition-colors hover:border-amber-300 hover:text-white"

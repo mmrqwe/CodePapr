@@ -1,31 +1,36 @@
 import { BUILTIN_PROMPT_COMMANDS, type CommandDefinition } from '@codepapr/core';
+import { getTranslation, type Lang } from '../../utils/i18n';
 
 export function formatCommandSummary(command: Pick<CommandDefinition, 'name' | 'description'>): string {
   return `/${command.name}${command.description ? `: ${command.description}` : ''}`;
 }
 
-export function buildCommandHelpMessage(customCommands: readonly CommandDefinition[]): string {
+export function buildCommandHelpMessage(
+  customCommands: readonly CommandDefinition[],
+  lang: Lang = 'zh-CN'
+): string {
+  const t = getTranslation(lang);
   const lines = [
-    '本地命令:',
-    '/help (或 /commands): 查看命令说明',
-    '/compact: 强制压缩对话上下文',
-    '/goal exec:<验证命令>: 启动 Goal 自主循环（Worker+Verifier 双模型，直到验证条件通过）\n            标志: --strict 严格模式 / --loose 宽松模式 / --plan-first 首轮规划',
+    `${t.commandHelpLocalLabel}`,
+    t.commandHelpHelp,
+    t.commandHelpCompact,
+    t.commandHelpGoal,
   ];
 
   if (BUILTIN_PROMPT_COMMANDS.length > 0) {
-    lines.push('', '内置任务命令:');
+    lines.push('', t.commandHelpBuiltinLabel);
     for (const command of BUILTIN_PROMPT_COMMANDS) {
       lines.push(formatCommandSummary(command));
     }
   }
 
   if (customCommands.length > 0) {
-    lines.push('', '项目命令:');
+    lines.push('', t.commandHelpProjectLabel);
     for (const command of customCommands) {
       lines.push(formatCommandSummary(command));
     }
   } else {
-    lines.push('', '项目命令: 当前没有自定义命令（在 .CodePapr/commands/ 添加 *.md）');
+    lines.push('', t.commandHelpProjectEmpty);
   }
 
   return lines.join('\n');

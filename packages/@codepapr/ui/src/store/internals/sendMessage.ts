@@ -337,7 +337,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             const customCommands = workspaceForSlash
               ? await listCommandDefinitions(invoke, workspaceForSlash).catch(() => [] as CommandDefinition[])
               : [];
-            appendInfoMessage(set, buildCommandHelpMessage(customCommands));
+            appendInfoMessage(set, buildCommandHelpMessage(customCommands, normalizedSettings.lang));
             return;
           }
           if (lower === 'compact') {
@@ -350,7 +350,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             if (compactCheckpointInFlight) {
               appendInfoMessage(
                 set,
-                '上下文压缩已在进行中，请稍候。',
+                getTranslation(normalizedSettings.lang).compactInProgress,
                 compactSessionId,
                 { resetLoading: false }
               );
@@ -358,7 +358,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             }
             compactCheckpointInFlight = true;
             // N22：进度反馈——压缩是 LLM 调用（可达数十秒），先给出可见提示。
-            appendInfoMessage(set, '正在压缩上下文…', compactSessionId, {
+            appendInfoMessage(set, getTranslation(normalizedSettings.lang).compactingContext, compactSessionId, {
               resetLoading: false,
             });
             let checkpointResult: Awaited<ReturnType<typeof maybeGenerateContextCheckpoint>>;
@@ -450,18 +450,23 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   }
                 }
               }
+              const compactT = getTranslation(normalizedSettings.lang);
+              const savedText = checkpointResult.message.contextCheckpoint?.sourceChars
+                ? compactT.compactSavedKb.replace(
+                    '{{kb}}',
+                    String(Math.round(checkpointResult.message.contextCheckpoint.sourceChars / 1024))
+                  )
+                : compactT.compactSavedSeveral;
               appendInfoMessage(
                 set,
-                `对话已压缩。${checkpointResult.message.contextCheckpoint?.sourceMessageCount ?? 0} 条消息合并为检查点，节省 ${
-                  checkpointResult.message.contextCheckpoint?.sourceChars
-                    ? `${Math.round(checkpointResult.message.contextCheckpoint.sourceChars / 1024)} KB`
-                    : '若干'
-                } 上下文。`,
+                compactT.compactDoneMessage
+                  .replace('{{count}}', String(checkpointResult.message.contextCheckpoint?.sourceMessageCount ?? 0))
+                  .replace('{{saved}}', savedText),
                 compactSessionId,
                 { resetLoading: false }
               );
             } else {
-              appendInfoMessage(set, '当前上下文无需压缩。', compactSessionId, {
+              appendInfoMessage(set, getTranslation(normalizedSettings.lang).compactNotNeeded, compactSessionId, {
                 resetLoading: false,
               });
             }
@@ -483,7 +488,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             } catch (err) {
               const msg = err instanceof GoalConditionParseError
                 ? err.message
-                : `Goal 条件解析失败: ${errorMessage(err)}`;
+                : getTranslation(normalizedSettings.lang).goalParseErrorPrefix.replace('{{error}}', errorMessage(err));
               appendInfoMessage(set, msg);
               return;
             }
@@ -684,7 +689,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               console.error('[CodePapr] 会话消息重载失败，拒绝发送以防覆盖历史:', reloadErr);
               appendInfoMessage(
                 set,
-                '会话历史加载失败，为避免覆盖已有消息已暂停发送。请重新打开项目或切换会话后重试。'
+                getTranslation(normalizedSettings.lang).sessionHistoryLoadFailed
               );
               return;
             }
@@ -712,7 +717,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             const updatedSessions = touchSession(
               maybeApplySessionTitle(
                 s.sessions, optimisticSid!, effectiveDisplay ?? effectiveInput,
-                currentMsgs
+                currentMsgs,
+                normalizedSettings.lang
               ),
               optimisticSid!,
               userMsg!.timestamp

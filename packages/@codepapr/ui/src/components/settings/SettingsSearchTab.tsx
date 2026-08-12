@@ -153,7 +153,7 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
           </div>
 
           <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-5 py-4 text-xs leading-relaxed text-amber-400/80">
-            启用后将使用自部署 SearXNG 聚合搜索，替代所有内置搜索源。分类、时间等参数默认知别 SearXNG 实例配置，无需额外设置。
+            {t.searxngNotice}
           </div>
         </>
       )}

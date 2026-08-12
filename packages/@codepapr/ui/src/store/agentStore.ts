@@ -14,6 +14,7 @@ import {
 import type { IToolDefinition } from '@codepapr/types';
 import { CacheValidator, RequestBuilder } from '@codepapr/api';
 import { createId } from '../utils/createId';
+import { getTranslation } from '../utils/i18n';
 import { loadProjectState } from '../utils/projectStorage';
 import {
   loadSessions,
@@ -1041,7 +1042,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         const now = Date.now();
         const meta: SessionMeta = {
           id,
-          name: '新任务',
+          name: getTranslation(normalizedSettings.lang).newTask,
           provider: resolveProviderName(normalizedSettings),
           model: normalizedSettings.model,
           createdAt: now,

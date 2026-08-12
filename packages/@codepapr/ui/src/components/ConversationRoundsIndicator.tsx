@@ -1,6 +1,8 @@
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
 import type { RefObject } from 'react';
 import type { UIMessage } from '../store/agentStore';
+import { useAgentStore } from '../store/agentStore';
+import { getTranslation } from '../utils/i18n';
 
 interface ConversationRoundsIndicatorProps {
   messages: UIMessage[];
@@ -41,6 +43,7 @@ export const ConversationRoundsIndicator = memo(
     onScrollToMessage,
     currentRoundIndex,
   }: ConversationRoundsIndicatorProps) {
+    const lang = useAgentStore((s) => s.settings.lang);
     const rounds = useMemo<RoundData[]>(() => {
       let idx = 0;
       const result: RoundData[] = [];
@@ -158,7 +161,7 @@ export const ConversationRoundsIndicator = memo(
         {panelOpen && (
           <div ref={panelRef} className="rounds-panel" onMouseEnter={cancelHide} onMouseLeave={hidePanel}>
             <div className="rounds-panel-header">
-              <span className="rounds-panel-title">{`对话轮次 · ${rounds.length}`}</span>
+              <span className="rounds-panel-title">{getTranslation(lang).roundsPanelTitle.replace('{{count}}', String(rounds.length))}</span>
               <button type="button" className="rounds-panel-close" onClick={(e) => { e.stopPropagation(); hidePanel(); }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-3.5 w-3.5">
                   <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />

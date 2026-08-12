@@ -8,13 +8,14 @@ export function maybeApplySessionTitle(
   sessions: SessionMeta[],
   sessionId: string,
   titleSource: string,
-  currentMessages: readonly UIMessage[]
+  currentMessages: readonly UIMessage[],
+  lang?: import('../../utils/i18n').Lang
 ): SessionMeta[] {
   if (currentMessages.length > 0) {
     return sessions;
   }
 
-  const title = buildTaskTitle(titleSource);
+  const title = buildTaskTitle(titleSource, lang);
   return sessions.map((session) =>
     session.id === sessionId ? { ...session, name: title } : session
   );
