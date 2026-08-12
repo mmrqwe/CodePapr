@@ -1409,6 +1409,11 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   };
                 },
                 runVerifier: async (transcript, conditionResult) => {
+                  // N5：验证命令结束后用户可能已点停止——跳过 verifier LLM
+                  // 调用（不可中止），GoalRunner 收到 AbortError 立即中断。
+                  if (useGoalStore.getState().isAborted()) {
+                    throw new DOMException('Goal aborted', 'AbortError');
+                  }
                   const isSubjective = goalCondition!.clauses.length === 0;
                   const currentState = goalRunner.getState();
                   const verifierResult = await runVerifier(
@@ -1452,6 +1457,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 evaluateCondition: async () => {
                   return evaluateGoalCondition(goalCondition!, workspacePath, {
                     runCommand: async (ws, cmd, args) => {
+                      // N5：验证命令（最长 120s）不可中止，但命令之间必须
+                      // 检查 aborted 标志——用户在验证阶段点停止后，剩余的
+                      // 验证子句不再执行，GoalRunner 收到 AbortError 立即中断。
+                      if (useGoalStore.getState().isAborted()) {
+                        throw new DOMException('Goal aborted', 'AbortError');
+                      }
                       const result = await invoke<CommandResult>(
                         'run_workspace_command',
                         {

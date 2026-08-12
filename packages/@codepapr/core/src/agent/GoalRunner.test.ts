@@ -157,6 +157,110 @@ describe('GoalRunner', () => {
     expect(result.iteration).toBe(1);
   });
 
+  it('N5：验证命令期间点停止 → 评估完成后立即中断，跳过 verifier', async () => {
+    const condition = parseGoalCondition('exec:npm test');
+    let aborted = false;
+    const runVerifier = vi.fn().mockResolvedValue(makeVerdict('NOT_MET'));
+    const runner = new GoalRunner({
+      condition,
+      userGoalText: '',
+      limits: { maxIterations: 10, maxWallClockMs: 60_000 },
+      callbacks: {
+        runWorkerTurn: vi.fn().mockResolvedValue(makeWorkerResult('working')),
+        runVerifier,
+        evaluateCondition: vi.fn().mockImplementation(async () => {
+          // 模拟 120s 验证命令期间用户点停止
+          aborted = true;
+          return makeConditionResult(false);
+        }),
+        onStateChange: vi.fn(),
+        isAborted: () => aborted,
+      },
+    });
+
+    const result = await runner.run();
+    expect(result.status).toBe('interrupted');
+    expect(result.iteration).toBe(1);
+    // verifier 绝不执行：验证阶段的中断不能被拖到下一轮才发现
+    expect(runVerifier).not.toHaveBeenCalled();
+  });
+
+  it('N5：verifier 调用期间点停止 → 完成后立即中断，不进入压缩/下一轮', async () => {
+    const condition = parseGoalCondition('exec:npm test');
+    let aborted = false;
+    const runVerifier = vi.fn().mockImplementation(async () => {
+      aborted = true;
+      return makeVerdict('NOT_MET');
+    });
+    const onCompaction = vi.fn();
+    const runWorkerTurn = vi.fn().mockResolvedValue(makeWorkerResult('working'));
+    const runner = new GoalRunner({
+      condition,
+      userGoalText: '',
+      limits: { maxIterations: 10, maxWallClockMs: 60_000 },
+      callbacks: {
+        runWorkerTurn,
+        runVerifier,
+        evaluateCondition: vi.fn().mockResolvedValue(makeConditionResult(false)),
+        onStateChange: vi.fn(),
+        onCompaction,
+        isAborted: () => aborted,
+      },
+    });
+
+    const result = await runner.run();
+    expect(result.status).toBe('interrupted');
+    expect(result.iteration).toBe(1);
+    expect(runWorkerTurn).toHaveBeenCalledTimes(1);
+    expect(onCompaction).not.toHaveBeenCalled();
+  });
+
+  it('N5：验证回调抛 AbortError 时按用户中断处理', async () => {
+    const condition = parseGoalCondition('exec:npm test');
+    const runner = new GoalRunner({
+      condition,
+      userGoalText: '',
+      limits: { maxIterations: 10, maxWallClockMs: 60_000 },
+      callbacks: {
+        runWorkerTurn: vi.fn().mockResolvedValue(makeWorkerResult('working')),
+        runVerifier: vi.fn().mockRejectedValue(
+          new DOMException('Goal aborted', 'AbortError')
+        ),
+        evaluateCondition: vi.fn().mockResolvedValue(makeConditionResult(false)),
+        onStateChange: vi.fn(),
+        isAborted: () => true,
+      },
+    });
+
+    const result = await runner.run();
+    expect(result.status).toBe('interrupted');
+  });
+
+  it('N5：条件评估回调抛 AbortError 时按用户中断处理（不降级为评估错误）', async () => {
+    const condition = parseGoalCondition('exec:npm test');
+    let aborted = false;
+    const runVerifier = vi.fn().mockResolvedValue(makeVerdict('NOT_MET'));
+    const runner = new GoalRunner({
+      condition,
+      userGoalText: '',
+      limits: { maxIterations: 10, maxWallClockMs: 60_000 },
+      callbacks: {
+        runWorkerTurn: vi.fn().mockResolvedValue(makeWorkerResult('working')),
+        runVerifier,
+        evaluateCondition: vi.fn().mockImplementation(async () => {
+          aborted = true;
+          throw new DOMException('Goal aborted', 'AbortError');
+        }),
+        onStateChange: vi.fn(),
+        isAborted: () => aborted,
+      },
+    });
+
+    const result = await runner.run();
+    expect(result.status).toBe('interrupted');
+    expect(runVerifier).not.toHaveBeenCalled();
+  });
+
   it('Worker turn 抛出错误时返回 error', async () => {
     const condition = parseGoalCondition('exec:npm test');
     const runner = new GoalRunner({

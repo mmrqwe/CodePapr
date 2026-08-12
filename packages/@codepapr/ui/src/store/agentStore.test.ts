@@ -160,6 +160,8 @@ vi.mock('./internals/agentFactory', async (importOriginal) => {
 });
 
 import { getSettingsError, normalizeSettings, useAgentStore } from './agentStore';
+import { useGoalStore } from './goalStore';
+import { parseGoalCondition } from '@codepapr/core';
 import { buildEffectiveContextMessages } from '../utils/contextCompaction';
 import { AgentDestroyedError, WorkerCrashError } from '../agent/WorkerBackedAgent';
 import { SESSION_MESSAGE_CACHE_LIMIT } from './internals/defaults';
@@ -3612,6 +3614,26 @@ describe('per-session execution and input state', () => {
     expect(state._agent).toBeNull();
     expect(state._agentSessionId).toBeNull();
     expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancelMessage aborts an active goal loop (N5)', () => {
+    const cancelSession = vi.fn();
+    const agent = createMockAgent({ cancelSession });
+    setTwoSessionState({
+      isLoading: true,
+      loadingSessionId: 's-a',
+      _agent: agent,
+      _agentSessionId: 's-a',
+    });
+    useGoalStore.getState().setGoalActive(parseGoalCondition('exec:npm test'), '跑通测试');
+
+    useAgentStore.getState().cancelMessage();
+
+    // N5：goal 验证阶段没有在飞 agent 请求（120s 命令 + verifier），
+    // 停止按钮必须设置 aborted 标志让 GoalRunner 在验证步骤之间感知中断。
+    expect(useGoalStore.getState().isAborted()).toBe(true);
+
+    useGoalStore.getState().clearGoal();
   });
 
   it('deleteSession cancels a running session and clears its loading/input state', () => {

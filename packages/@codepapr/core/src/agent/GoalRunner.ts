@@ -98,10 +98,7 @@ export class GoalRunner {
     console.log('[GoalRunner] run() started', { maxIterations: this.limits.maxIterations, maxWallClockMs: this.limits.maxWallClockMs });
     for (let iteration = 0; iteration < this.limits.maxIterations; iteration++) {
       if (this.callbacks.isAborted()) {
-        this.state.status = 'interrupted';
-        this.state.elapsedMs = Date.now() - this.state.startedAt;
-        this.notifyAndPersist();
-        return this.getState();
+        return this.markInterrupted();
       }
 
       const elapsed = Date.now() - this.state.startedAt;
@@ -148,11 +145,10 @@ export class GoalRunner {
         // 取消/销毁（用户切会话/新建/改设置导致 agent 被销毁）：不是执行
         // 错误，按用户中断处理，静默停止循环，不显示「Goal 出错」。
         if (err instanceof DOMException && err.name === 'AbortError') {
-          this.state.status = 'interrupted';
-        } else {
-          this.state.status = 'error';
-          this.state.error = (err as Error).message;
+          return this.markInterrupted();
         }
+        this.state.status = 'error';
+        this.state.error = (err as Error).message;
         this.state.elapsedMs = Date.now() - this.state.startedAt;
         this.notifyAndPersist();
         return this.getState();
@@ -171,16 +167,25 @@ export class GoalRunner {
       }
 
       // ── 客观条件评估 ──────────────────────────────────────────
+      // N5：验证命令（最长 120s）期间用户可能点停止——命令本身不可中止，
+      // 但评估完成后必须立即检查 aborted 标志，跳过 verifier 直接中断。
       let conditionResult: ConditionResult;
       try {
         conditionResult = await this.callbacks.evaluateCondition();
       } catch (err) {
+        // 用户中断（验证命令之间检测到 aborted，回调抛 AbortError）
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return this.markInterrupted();
+        }
         // 条件评估本身出错（如命令不存在），记录但继续让 Verifier 判断
         conditionResult = {
           met: false,
           evidence: `条件评估出错: ${(err as Error).message}`,
           details: [],
         };
+      }
+      if (this.callbacks.isAborted()) {
+        return this.markInterrupted();
       }
       this.state.lastConditionResult = conditionResult;
 
@@ -191,7 +196,11 @@ export class GoalRunner {
           workerResult.transcript,
           conditionResult
         );
-      } catch {
+      } catch (err) {
+        // 用户中断（verifier 调用前检测到 aborted，回调抛 AbortError）
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return this.markInterrupted();
+        }
         // Verifier 出错时降级：仅依赖条件评估结果
         verdict = {
           verdict: conditionResult.met ? 'SATISFIED' : 'NOT_MET',
@@ -199,6 +208,11 @@ export class GoalRunner {
           progress: conditionResult.met ? 1 : 0,
           failureMode: conditionResult.met ? undefined : 'unknown',
         };
+      }
+      // N5：verifier LLM 调用期间用户可能点停止——调用不可中止，但完成
+      // 后必须立即检查，不进入压缩/下一轮。
+      if (this.callbacks.isAborted()) {
+        return this.markInterrupted();
       }
       this.state.lastVerdict = verdict;
 
@@ -243,6 +257,13 @@ export class GoalRunner {
 
     // 迭代次数耗尽
     this.state.status = 'limit_exceeded';
+    this.state.elapsedMs = Date.now() - this.state.startedAt;
+    this.notifyAndPersist();
+    return this.getState();
+  }
+
+  private markInterrupted(): GoalRunnerState {
+    this.state.status = 'interrupted';
     this.state.elapsedMs = Date.now() - this.state.startedAt;
     this.notifyAndPersist();
     return this.getState();

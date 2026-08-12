@@ -79,6 +79,7 @@ import {
 import type { AgentRuntimeHandle } from '../agent/WorkerBackedAgent';
 import { handleWorkspaceMutation } from './internals/backgroundDiagnostics';
 import { createSendMessage, invalidateAgentHandle } from './internals/sendMessage';
+import { useGoalStore } from './goalStore';
 import { upsertRecentWorkspace, sortRecentWorkspaces } from './internals/recentWorkspaces';
 import { toast } from './toastStore';
 import type {
@@ -1313,6 +1314,13 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
       cancelMessage: () => {
         const { _agent, isLoading, loadingSessionId } = get();
+
+        // N5：goal 外循环的验证阶段没有在飞的 agent 请求（120s 验证命令 +
+        // verifier 直连 LLM），cancelSession 是空操作——停止按钮必须通过
+        // goalStore 的 aborted 标志让 GoalRunner 在验证步骤之间感知中断
+        // （在飞的那条命令/LLM 调用本身不可中止，完成后立即停下）。
+        useGoalStore.getState().abortGoal();
+
         if (!isLoading || !_agent) return;
 
         // 停止按钮只取消当前聊天回合：旧实现调用 cancel() 会连带
