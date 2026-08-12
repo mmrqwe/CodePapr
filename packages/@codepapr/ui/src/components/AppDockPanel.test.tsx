@@ -130,4 +130,63 @@ describe('AppDockPanel', () => {
     expect(useAppRuntimeStore.getState().apps).toHaveLength(1);
     expect(container.textContent).toContain('删除应用失败');
   });
+
+  it('N18：后端未启动时双击不打开 app 并提示先启动', async () => {
+    useAppRuntimeStore.setState({
+      apps: [makeApp({ command: 'npm', args: ['run', 'dev'], port: 3000 })],
+      activeAppId: 'app-1',
+      openedAppId: null,
+    });
+    renderPanel();
+
+    const row = Array.from(container.querySelectorAll('div')).find(
+      (el) => el.className.includes('cursor-pointer') && el.textContent?.includes('我的应用'),
+    );
+    act(() => {
+      row?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // 门禁生效：openedAppId 保持 null，并给出可见提示
+    expect(useAppRuntimeStore.getState().openedAppId).toBeNull();
+    expect(container.textContent).toContain('请先启动');
+  });
+
+  it('N18：后端已运行时双击正常打开 app', async () => {
+    useAppRuntimeStore.setState({
+      apps: [makeApp({ command: 'npm', args: ['run', 'dev'], port: 3000, pid: 42, url: 'http://127.0.0.1:3000' })],
+      activeAppId: 'app-1',
+      openedAppId: null,
+    });
+    renderPanel();
+
+    const row = Array.from(container.querySelectorAll('div')).find(
+      (el) => el.className.includes('cursor-pointer') && el.textContent?.includes('我的应用'),
+    );
+    act(() => {
+      row?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+
+    expect(useAppRuntimeStore.getState().openedAppId).toBe('app-1');
+  });
+
+  it('N18：无后端 app（纯静态）双击直接打开', async () => {
+    useAppRuntimeStore.setState({
+      apps: [makeApp()],
+      activeAppId: 'app-1',
+      openedAppId: null,
+    });
+    renderPanel();
+
+    const row = Array.from(container.querySelectorAll('div')).find(
+      (el) => el.className.includes('cursor-pointer') && el.textContent?.includes('我的应用'),
+    );
+    act(() => {
+      row?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+
+    expect(useAppRuntimeStore.getState().openedAppId).toBe('app-1');
+  });
 });

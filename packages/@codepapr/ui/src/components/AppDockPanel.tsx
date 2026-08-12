@@ -33,8 +33,22 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
   }, []);
 
   const handleDoubleClick = useCallback((app: AppInstance) => {
+    const hasBackend = !!(app.command && app.port);
+    const running = hasBackend && !!app.pid && !!app.url;
+    // N18：双击必须与「打开」按钮共用同一门禁——后端未启动时打开只会得到
+    // 半残 app（界面加载、后端接口全部失败）。
+    if (hasBackend && !running) {
+      setError(
+        lang === 'en'
+          ? `Start "${app.title}" first (Run), then open it.`
+          : lang === 'zh-TW'
+            ? `請先啟動「${app.title}」（執行），再開啟。`
+            : `请先启动「${app.title}」（运行），再打开。`
+      );
+      return;
+    }
     openAppModal(app.appId);
-  }, [openAppModal]);
+  }, [openAppModal, lang]);
 
   const handleStart = useCallback(async () => {
     if (!selected || !selected.command || !selected.port || isRunning) return;
