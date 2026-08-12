@@ -87,7 +87,6 @@ import { toast } from './toastStore';
 import type {
   AgentActions,
   AgentState,
-  PendingRestoreUndo,
   ResetToMessageResult,
   SessionMeta,
   Settings,
