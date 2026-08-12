@@ -2698,6 +2698,16 @@ describe('useAgentStore.sendMessage', () => {
       expect(sessionMessages.some((m) => m.role === 'assistant' && m.content === '崩溃重试后的回复')).toBe(true);
       expect(sessionMessages.filter((m) => m.role === 'error')).toHaveLength(0);
       expect(useAgentStore.getState()._agent).toBe(fresh);
+
+      // N24 回归：重建 agent 的 initialMessages 不得包含当前回合的用户消息
+      // （回合输入经 chat() 注入）——旧实现塞入后上下文中出现两条重复用户消息。
+      const rebuiltInitialMessages = createAgentMock.mock.calls[0]?.[3] as
+        | Array<{ role: string; content: string }>
+        | undefined;
+      expect(rebuiltInitialMessages).toBeDefined();
+      expect(
+        rebuiltInitialMessages!.filter((m) => m.role === 'user' && m.content === '任务')
+      ).toHaveLength(0);
     });
 
     it('falls back to the main-thread agent when worker rebuilds keep crashing', async () => {

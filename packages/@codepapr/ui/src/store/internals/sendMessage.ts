@@ -1084,7 +1084,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             }
           }
 
-          let retryBaseMessages = [...(sessionMessages[activeSessionId!] ?? []), userMsg!];
+          // N24：retryBaseMessages 只含回合前历史。当前回合的用户消息经
+          // chat(passInput) 作为回合输入注入 worker 日志——若同时塞进
+          // initialMessages，崩溃重建/降级重建后的上下文中会出现两条重复
+          // 用户消息（重建前的首轮也是如此：初始 agent 用回合同前的
+          // sessionMessages 快照创建）。
+          let retryBaseMessages = [...(sessionMessages[activeSessionId!] ?? [])];
           if (mode !== 'ask' && retryBaseMessages.some((m) => m.role === 'assistant' && m.workMode === 'ask')) {
             retryBaseMessages = [...retryBaseMessages, buildModeSwitchMessage(mode)];
           }
