@@ -79,17 +79,44 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
 
   const handleDelete = useCallback(async () => {
     if (!selected) return;
+    // N13：删除不可逆（整个 app 目录含 db.sqlite），必须先确认——与角色卡/
+    // 会话删除一致。取消则什么都不做。
+    const confirmText =
+      lang === 'en'
+        ? `Delete app "${selected.title}"? Its directory and local data (database) will be permanently removed.`
+        : lang === 'zh-TW'
+          ? `刪除應用「${selected.title}」？其目錄與本地資料（資料庫）將被永久移除。`
+          : `删除应用「${selected.title}」？其目录与本地数据（数据库）将被永久移除。`;
+    if (typeof window !== 'undefined' && !window.confirm(confirmText)) return;
+
     setBusy(true);
+    setError('');
     if (selected.pid) {
       try { await invoke('stop_background_process', { pid: selected.pid, source: 'app-dock-delete' }); } catch { /* ignore */ }
     }
-    try { await invoke('papr_delete_app', { appId: selected.appId }); } catch { /* ignore */ }
+    try {
+      await invoke('papr_delete_app', { appId: selected.appId });
+    } catch (e) {
+      // N13：删除失败必须可见，且绝不能从 UI 移除该 app——目录仍在磁盘上，
+      // 移除只会在下次启动时被扫描回来（"假删除"）。
+      const detail = e instanceof Error ? e.message : String(e);
+      setError(
+        lang === 'en'
+          ? `Failed to delete app: ${detail}`
+          : lang === 'zh-TW'
+            ? `刪除應用失敗：${detail}`
+            : `删除应用失败：${detail}`
+      );
+      setBusy(false);
+      return;
+    }
+    // 目录已删除：unregister 失败只影响映射，app 本身已不可恢复，尽力而为。
     try { await invoke('unregister_app_workspace', { appId: selected.appId }); } catch { /* ignore */ }
     usePermissionStore.getState().clearManifest(selected.appId);
     if (selectedId === selected.appId) setSelectedId(null);
     closeApp(selected.appId);
     setBusy(false);
-  }, [selected, selectedId, closeApp]);
+  }, [selected, selectedId, closeApp, lang]);
 
   const canStart = !!(selected && hasBackend && !isRunning && !busy);
   const canOpen = !!(selected && !busy && (!hasBackend || isRunning));
