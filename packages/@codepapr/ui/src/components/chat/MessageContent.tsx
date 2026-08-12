@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { getTranslation } from '../../utils/i18n';
 import {
@@ -6,7 +7,7 @@ import {
   type Lang,
 } from './utils';
 
-export function MessageContent({
+export const MessageContent = memo(function MessageContent({
   content,
   lang,
   onOpenWorkspacePath,
@@ -36,4 +37,4 @@ export function MessageContent({
       onOpenWorkspacePath={onOpenWorkspacePath}
     />
   );
-}
+});

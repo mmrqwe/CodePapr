@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { memo, useEffect, useState, type ReactNode } from 'react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -133,7 +133,7 @@ interface MarkdownRendererProps {
   className?: string;
 }
 
-export function MarkdownRenderer({
+export const MarkdownRenderer = memo(function MarkdownRenderer({
   content,
   copyLabel,
   onOpenWorkspacePath,
@@ -241,4 +241,4 @@ export function MarkdownRenderer({
       </ReactMarkdown>
     </div>
   );
-}
+});

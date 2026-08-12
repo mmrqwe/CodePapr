@@ -1,4 +1,5 @@
 import {
+  memo,
   useRef,
   useEffect,
   useLayoutEffect,
@@ -17,7 +18,6 @@ import {
   type SessionInputState,
   type TextFileAttachment,
 } from '../store/agentStore';
-import { TaskChecklist } from './TaskChecklist';
 import { GoalBanner } from './GoalBanner';
 import type { IImageContent } from '@codepapr/types';
 import { type WorkMode } from '../utils/agentPrompts';
@@ -57,8 +57,8 @@ import { subscribeSubagentProgress, getSubagentRuns, toggleSubagentCollapse, typ
 import { ConversationRoundsIndicator } from './ConversationRoundsIndicator';
 import { toast } from '../store/toastStore';
 import type { PlanFollowUpAction } from '../utils/planMode';
-import { MessageBubble } from './chat/MessageBubble';
-import { ExecutionProcessPanel, buildTailExecutionProcessGroup } from './chat/ExecutionProcessPanel';
+import { buildTailExecutionProcessGroup } from './chat/ExecutionProcessPanel';
+import { MessageList } from './chat/MessageList';
 import { ModeSelector } from './chat/ModeSelector';
 import {
   buildUserPromptWithFiles,
@@ -76,7 +76,7 @@ interface ChatPanelProps {
    *  待界面稳定后再渲染并定位，避免加载期布局未定导致滚动错位。 */
   deferMessages?: boolean;
 }
-export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPanelProps) {
+export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPanelProps) {
   const {
     messages,
     isLoading,
@@ -208,7 +208,6 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
   const [resetConfirmMsgId, setResetConfirmMsgId] = useState<string | null>(null);
   const [resetInFlight, setResetInFlight] = useState(false);
   const [resetBanner, setResetBanner] = useState<{ kind: 'success' | 'warn' | 'error'; text: string } | null>(null);
-  const [hoveredActionMsgId, setHoveredActionMsgId] = useState<string | null>(null);
   useEffect(() => {
     if (!resetBanner) return;
     const timer = window.setTimeout(() => setResetBanner(null), 3000);
@@ -1229,235 +1228,40 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
         style={{ overflowAnchor: 'none' }}
       >
         <div ref={messageListContentRef}>
-          {topSpacerHeight > 0 && (
-            <div aria-hidden style={{ height: topSpacerHeight }} />
-          )}
-          {!deferMessages && effectiveRoundWindow.lo > 0 && (
-            <div className="mb-3 flex justify-center">
-              <button
-                type="button"
-                onClick={() => slideWindow('up')}
-                className="rounded-full border border-[#2a2d3a] bg-[#10131b] px-4 py-1.5 text-xs text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-200"
-              >
-                {t.chatLoadEarlierRounds.replace('{n}', String(effectiveRoundWindow.lo))}
-              </button>
-            </div>
-          )}
-          {!deferMessages && sessionMessagesLoading && visibleMessages.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-full text-slate-600 select-none">
-              <div className="h-5 w-5 mb-3 animate-spin rounded-full border-2 border-slate-700 border-t-indigo-400" />
-              <p className="text-xs">{t.loadingSessionMessages}</p>
-            </div>
-          )}
-          {!deferMessages && !sessionMessagesLoading && visibleMessages.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-full text-slate-600 select-none">
-              <div className="text-4xl mb-3">⌘</div>
-              <p className="text-sm">CodePapr</p>
-              <p className="text-xs mt-1">
-                {isConfigured ? t.welcomeDescConfigured : t.confirmSettings}
-              </p>
-              {!isConfigured && (
-                <button
-                  onClick={() => setShowSettings(true)}
-                  className="mt-4 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500"
-                >
-                  {t.toSettings}
-                </button>
-              )}
-            </div>
-          )}
-          {!deferMessages && subagentRuns.map((run, idx) => (
-            <div key={idx} className="mx-3 mb-3 rounded-xl border border-cyan-500/20 bg-[#0b0d12]/60 overflow-hidden">
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition-colors hover:bg-[#0f141d]/50"
-                onClick={() => toggleSubagentCollapse(idx)}
-              >
-                <span className={`inline-block h-2 w-2 rounded-full flex-shrink-0 ${run.state === 'running' ? 'animate-pulse bg-cyan-400' : 'bg-emerald-400'}`} />
-                <span className="flex-1 min-w-0">
-                  <span className="text-xs font-semibold text-cyan-300">
-                    {run.agent === 'explore' ? (run.state === 'running' ? 'Explore 正在分析代码...' : 'Explore 分析完成') :
-                     run.agent === 'scout' ? (run.state === 'running' ? 'Scout 正在搜索网络...' : 'Scout 搜索完成') :
-                     run.agent === 'mentor' ? (run.state === 'running' ? 'Mentor 正在思考...' : 'Mentor 思考完成') :
-                     (run.state === 'running' ? `${run.agent} 正在执行...` : `${run.agent} 执行完成`)}
-                  </span>
-                  {run.prompt && (
-                    <span className="block mt-0.5 text-[11px] text-slate-500 truncate">{run.prompt}</span>
-                  )}
-                </span>
-                <span className="text-[9px] text-slate-600 transition-transform flex-shrink-0" style={{ transform: run.collapsed ? 'rotate(-90deg)' : 'none' }}>
-                  ▼
-                </span>
-              </button>
-              {!run.collapsed && (
-                <div className="border-t border-cyan-500/10 px-3.5 py-2.5">
-                  {run.content && run.state === 'completed' && (
-                    <div className="mb-2 max-h-32 overflow-y-auto rounded-lg bg-[#0d1118] px-3 py-2 text-[11px] leading-relaxed text-slate-400 whitespace-pre-wrap">
-                      {run.content.length > 600 ? `${run.content.slice(0, 600)}...` : run.content}
-                    </div>
-                  )}
-                  {run.steps.length > 0 && (
-                    <div className="space-y-0.5">
-                      {run.steps.map((step, i) => (
-                        <div key={i} className="flex items-center gap-2 text-[10px]">
-                          <span className={step.status === 'error' ? 'text-red-400' : 'text-emerald-400'}>
-                            {step.status === 'error' ? '✗' : '✓'}
-                          </span>
-                          <span className="font-mono text-slate-400">{step.name}</span>
-                          {step.summary && step.summary !== step.name && (
-                            <span className="truncate text-slate-500">· {step.summary}</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-          {!deferMessages && renderedMessages.map((m) => {
-            const isUserMsg = m.role === 'user';
-            const canShowActions = isUserMsg && !isLoading;
-
-            const bubble = m.id === tailExecutionProcessGroup?.summaryMessageId ? (
-              <div key={`process-group:${tailExecutionProcessGroup.summaryMessageId}`}>
-                <ExecutionProcessPanel
-                  group={tailExecutionProcessGroup}
-                  lang={settings.lang ?? 'zh-CN'}
-                  onOpenWorkspacePath={onOpenWorkspacePath}
-                />
-                <MessageBubble
-                  msg={m}
-                  lang={settings.lang ?? 'zh-CN'}
-                  showPlanActions={m.id === latestPlanAssistantMessageId && m.id === tailMessageId}
-                  planActionsDisabled={isLoading}
-                  onPlanAction={handlePlanAction}
-                  onOpenWorkspacePath={onOpenWorkspacePath}
-                  onPreviewImage={onPreviewImage}
-                  characterAvatar={characterAvatar}
-                  characterName={characterName}
-                />
-              </div>
-            ) : (
-              <MessageBubble
-                key={m.id}
-                msg={m}
-                lang={settings.lang ?? 'zh-CN'}
-                showPlanActions={m.id === latestPlanAssistantMessageId && m.id === tailMessageId}
-                planActionsDisabled={isLoading}
-                onPlanAction={handlePlanAction}
-                onOpenWorkspacePath={onOpenWorkspacePath}
-                onPreviewImage={onPreviewImage}
-                characterAvatar={characterAvatar}
-                characterName={characterName}
-              />
-            );
-
-            if (!canShowActions) {
-              return (
-                <div key={m.id} data-window-item data-message-id={m.id}>
-                  {bubble}
-                </div>
-              );
-            }
-
-            const hasCheckpoint = Boolean(messageCheckpoints[m.id]);
-            const canReset = hasCheckpoint && gitReady;
-            const isHover = hoveredActionMsgId === m.id;
-            const resetLabel = settings.lang === 'en' ? 'Reset to here' : settings.lang === 'zh-TW' ? '重設到此' : '重置到此点';
-            const copyLabel = settings.lang === 'en' ? 'Copy' : '复制';
-            const noCheckpointTip = !gitReady
-              ? (settings.lang === 'en'
-                  ? 'Code reset is initializing or unavailable for this workspace.'
-                  : settings.lang === 'zh-TW'
-                  ? '程式碼重設正在初始化，或目前工作區不可用。'
-                  : '代码重置正在初始化，或当前工作区不可用。')
-              : (settings.lang === 'en'
-                  ? 'No code snapshot for this message; cannot reset code.'
-                  : settings.lang === 'zh-TW'
-                  ? '此訊息沒有程式碼快照，無法重置程式碼。'
-                  : '此消息没有代码快照，无法重置代码。');
-
-            return (
-              <div key={m.id} data-window-item data-message-id={m.id}>
-                {bubble}
-                <div
-                  className="mb-4 flex justify-end"
-                  onMouseEnter={() => setHoveredActionMsgId(m.id)}
-                  onMouseLeave={() => setHoveredActionMsgId((prev) => (prev === m.id ? null : prev))}
-                >
-                  <div
-                    className="flex items-center gap-1 mr-1 transition-opacity duration-150"
-                    style={{ opacity: isHover ? 1 : 0, pointerEvents: isHover ? 'auto' : 'none' }}
-                  >
-                    {m.role === 'assistant' && !m.synthetic && m.content && (
-                      <button
-                        className="rounded-md border border-[#2a2d3a] bg-[#10131b] px-2.5 py-1 text-[10px] text-slate-400 transition-colors hover:border-indigo-500/40 hover:bg-indigo-500/10 hover:text-indigo-300"
-                        onClick={() => ttsReplayText(m.content)}
-                        title={settings.lang === 'en' ? 'Replay' : settings.lang === 'zh-TW' ? '重播' : '重播'}
-                      >
-                        {settings.lang === 'en' ? 'Replay' : settings.lang === 'zh-TW' ? '重播' : '重播'}
-                      </button>
-                    )}
-                    <button
-                      className="rounded-md border border-[#2a2d3a] bg-[#10131b] px-2.5 py-1 text-[10px] text-slate-400 transition-colors enabled:hover:border-indigo-500/40 enabled:hover:bg-indigo-500/10 enabled:hover:text-indigo-300 disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={!canReset}
-                      title={canReset ? undefined : noCheckpointTip}
-                      onClick={() => setResetConfirmMsgId(m.id)}
-                    >
-                      {resetLabel}
-                    </button>
-                    <button
-                      className="rounded-md border border-[#2a2d3a] bg-[#10131b] px-2.5 py-1 text-[10px] text-slate-400 transition-colors hover:border-slate-500/40 hover:bg-slate-500/10 hover:text-slate-300"
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(m.content);
-                        } catch {
-                          // 复制失败静默忽略
-                        }
-                      }}
-                    >
-                      {copyLabel}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          {!deferMessages && effectiveRoundWindow.hi < totalRounds && (
-            <div className="mb-3 flex justify-center">
-              <button
-                type="button"
-                onClick={() => slideWindow('down')}
-                className="rounded-full border border-[#2a2d3a] bg-[#10131b] px-4 py-1.5 text-xs text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-200"
-              >
-                {t.chatLoadLaterRounds.replace('{n}', String(totalRounds - effectiveRoundWindow.hi))}
-              </button>
-            </div>
-          )}
-          {bottomSpacerHeight > 0 && (
-            <div aria-hidden style={{ height: bottomSpacerHeight }} />
-          )}
-          {activeSessionId && _taskChecklists[activeSessionId] ? (
-            <div className="mx-3 mb-4 rounded-2xl border-2 border-indigo-500/50 bg-[#10131b]">{/* debug-visible wrapper */}
-              <TaskChecklist
-                checklist={_taskChecklists[activeSessionId]!}
-                lang={settings.lang ?? 'zh-CN'}
-                isLoading={isActiveLoading}
-              />
-            </div>
-          ) : null}
-          {isActiveLoading && !hasStreamingMessage && (
-            <div className="mb-4 flex justify-start fade-in">
-              <div className="flex items-center gap-1.5 px-1 py-2">
-                <div className="flex gap-1.5 items-center">
-                  <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:0ms]" />
-                  <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:150ms]" />
-                  <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:300ms]" />
-                </div>
-              </div>
-            </div>
-          )}
+          <MessageList
+            deferMessages={deferMessages}
+            effectiveRoundWindow={effectiveRoundWindow}
+            totalRounds={totalRounds}
+            sessionMessagesLoading={sessionMessagesLoading}
+            visibleMessagesCount={visibleMessages.length}
+            isConfigured={isConfigured}
+            t={t}
+            topSpacerHeight={topSpacerHeight}
+            bottomSpacerHeight={bottomSpacerHeight}
+            subagentRuns={subagentRuns}
+            renderedMessages={renderedMessages}
+            tailExecutionProcessGroup={tailExecutionProcessGroup}
+            latestPlanAssistantMessageId={latestPlanAssistantMessageId}
+            tailMessageId={tailMessageId}
+            lang={settings.lang ?? 'zh-CN'}
+            isLoading={isLoading}
+            onPlanAction={handlePlanAction}
+            onOpenWorkspacePath={onOpenWorkspacePath}
+            onPreviewImage={onPreviewImage}
+            characterAvatar={characterAvatar}
+            characterName={characterName}
+            messageCheckpoints={messageCheckpoints}
+            gitReady={gitReady}
+            onTtsReplay={ttsReplayText}
+            onRequestReset={setResetConfirmMsgId}
+            activeSessionId={activeSessionId}
+            taskChecklists={_taskChecklists}
+            isActiveLoading={isActiveLoading}
+            hasStreamingMessage={hasStreamingMessage}
+            onShowSettings={setShowSettings}
+            onSlideWindow={slideWindow}
+            onToggleSubagentCollapse={toggleSubagentCollapse}
+          />
 
         {/* 重置到此点确认对话框 */}
         {resetConfirmMsgId !== null && (
@@ -1938,4 +1742,4 @@ export function ChatPanel({ onOpenWorkspacePath, deferMessages = false }: ChatPa
       )}
     </div>
   );
-}
+});

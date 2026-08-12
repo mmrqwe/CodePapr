@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState, useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { invoke } from '@tauri-apps/api/core';
 import { useAgentStore, isApiConfigured } from './store/agentStore';
 import { usePreviewStore } from './store/previewStore';
@@ -132,7 +133,19 @@ export default function App() {
     settingsLoaded,
     projectGraphLoading,
     projectGraphPhase,
-  } = useAgentStore();
+  } = useAgentStore(
+    useShallow((state) => ({
+      loadSettings: state.loadSettings,
+      showSettings: state.showSettings,
+      settings: state.settings,
+      setShowSettings: state.setShowSettings,
+      workspacePath: state.workspacePath,
+      messages: state.messages,
+      settingsLoaded: state.settingsLoaded,
+      projectGraphLoading: state.projectGraphLoading,
+      projectGraphPhase: state.projectGraphPhase,
+    }))
+  );
   const latestContextSnapshot = useAgentStore((state) => state._latestContextSnapshot);
   const activeSessionId = useAgentStore((state) => state.activeSessionId);
   const activePreviewSession = usePreviewStore((state) => state.activePreviewSession);
@@ -300,15 +313,18 @@ export default function App() {
       message.promptContent.trim().length > 0
   );
 
-  const handleSelectPath = (path: string | null) => {
-    const normalizedPath = normalizeSelectedPath(path, workspacePath);
-    setSelectedPath(normalizedPath);
-    setSelectedDiagnosticLocation(null);
-    if (!normalizedPath || selectedGitFile?.path !== normalizedPath) {
-      setSelectedGitFile(null);
-    }
-    setActiveMainTab(normalizedPath ? 'code' : 'chat');
-  };
+  const handleSelectPath = useCallback(
+    (path: string | null) => {
+      const normalizedPath = normalizeSelectedPath(path, workspacePath);
+      setSelectedPath(normalizedPath);
+      setSelectedDiagnosticLocation(null);
+      if (!normalizedPath || selectedGitFile?.path !== normalizedPath) {
+        setSelectedGitFile(null);
+      }
+      setActiveMainTab(normalizedPath ? 'code' : 'chat');
+    },
+    [workspacePath, selectedGitFile]
+  );
 
   const handleNavigateToLocation = (location: PreviewLocation) => {
     const normalizedPath = normalizeSelectedPath(location.path, workspacePath);
