@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAgentStore, WorkspaceEntry } from '../store/agentStore';
 import { normalizeSettings } from '../store/internals/settingsNormalizer';
 import { getTranslation } from '../utils/i18n';
+import { toast } from '../store/toastStore';
 
 function timeLabel(ms: number, t: ReturnType<typeof getTranslation>): string {
   if (!ms) {
@@ -35,7 +36,16 @@ export function ProjectSwitcherModal({ onClose }: { onClose: () => void }) {
     try {
       await openWorkspace(path);
     } catch (e) {
-      console.warn('Open workspace failed:', e);
+      // N12：打开失败（路径失效/被移动等）不再静默——当前工作区保持原样
+      // （openWorkspace 先加载后切换），明确提示用户该条目可能已失效。
+      const detail = e instanceof Error ? e.message : String(e);
+      const message =
+        settings.lang === 'en'
+          ? `Failed to open project: ${detail}. The current workspace was kept.`
+          : settings.lang === 'zh-TW'
+            ? `開啟專案失敗：${detail}。目前的工作區已保留。`
+            : `打开项目失败：${detail}。当前工作区已保留。`;
+      toast.error(message);
     }
   };
 
@@ -68,7 +78,15 @@ export function ProjectSwitcherModal({ onClose }: { onClose: () => void }) {
         try {
           await openWorkspace(selected);
         } catch (e) {
-          console.warn('Open workspace failed:', e);
+          // N12：与最近项目入口同口径——明确提示，当前工作区保持原样。
+          const detail = e instanceof Error ? e.message : String(e);
+          toast.error(
+            settings.lang === 'en'
+              ? `Failed to open project: ${detail}.`
+              : settings.lang === 'zh-TW'
+                ? `開啟專案失敗：${detail}。`
+                : `打开项目失败：${detail}。`
+          );
         }
       }
     } catch {

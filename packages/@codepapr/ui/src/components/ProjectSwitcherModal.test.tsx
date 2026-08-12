@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { invokeMock, openMock } = vi.hoisted(() => ({
-  invokeMock: vi.fn(async () => undefined),
+  invokeMock: vi.fn(async (_command?: string) => undefined),
   openMock: vi.fn(),
 }));
 
@@ -18,6 +18,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 }));
 
 import { normalizeSettings, useAgentStore } from '../store/agentStore';
+import { useToastStore } from '../store/toastStore';
 import { ProjectSwitcherModal } from './ProjectSwitcherModal';
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
@@ -103,5 +104,36 @@ describe('ProjectSwitcherModal', () => {
     expect(
       useAgentStore.getState().settings.recentWorkspaces.map((e) => e.path),
     ).toEqual(['/proj/b']);
+  });
+
+  it('N12：失效路径打开失败时提示错误且当前工作区保持原样', async () => {
+    renderModal();
+    useToastStore.getState().clearToasts();
+    invokeMock.mockImplementation(async (command?: string) => {
+      if (command === 'load_sessions' || command === 'load_project_state') {
+        throw new Error('workspace path not found');
+      }
+      return undefined;
+    });
+
+    const entryButton = Array.from(container.querySelectorAll('button')).find(
+      (el) => el.textContent?.includes('/proj/b'),
+    );
+    act(() => {
+      entryButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // 当前工作区必须保持原样（不被一起关掉落到空状态）
+    expect(useAgentStore.getState().workspacePath).toBe('/proj/a');
+    // 明确提示用户打开失败
+    expect(
+      useToastStore.getState().toasts.some((t) => t.message.includes('打开项目失败')),
+    ).toBe(true);
   });
 });

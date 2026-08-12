@@ -3339,6 +3339,32 @@ describe('useAgentStore.closeWorkspace', () => {
 
     expect(useAgentStore.getState().workspacePath).toBe('/tmp/codepapr-race-B');
   });
+
+  it('N12：失效路径打开失败时当前工作区保持原样并向上抛错', async () => {
+    loadSessionsMock.mockRejectedValueOnce(new Error('workspace path not found'));
+    loadProjectStateMock.mockRejectedValueOnce(new Error('workspace path not found'));
+
+    useAgentStore.setState({
+      workspacePath: '/tmp/codepapr-current',
+      sessions: [
+        { id: 's-a', name: 'A', provider: 'deepseek', model: 'deepseek-v4-pro', createdAt: 1, updatedAt: 1 },
+      ],
+      activeSessionId: 's-a',
+      messages: [{ id: 'm-a', role: 'user', content: 'hi', timestamp: 1 }],
+      sessionMessages: { 's-a': [{ id: 'm-a', role: 'user', content: 'hi', timestamp: 1 }] },
+    });
+
+    // 旧实现先 closeWorkspace 再加载：失败后当前工作区被一起关掉、静默落空。
+    await expect(
+      useAgentStore.getState().openWorkspace('/tmp/codepapr-gone')
+    ).rejects.toThrow();
+
+    const state = useAgentStore.getState();
+    expect(state.workspacePath).toBe('/tmp/codepapr-current');
+    expect(state.activeSessionId).toBe('s-a');
+    expect(state.sessions.map((s) => s.id)).toEqual(['s-a']);
+    expect(state.messages.map((m) => m.id)).toEqual(['m-a']);
+  });
 });
 
 describe('sendMessage /goal', () => {

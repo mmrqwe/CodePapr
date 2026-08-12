@@ -494,6 +494,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         // 关闭工作区即放弃进行中的回合：destroy() 内部先 cancel 再 reject
         // 全部 pending 请求并终止 Worker，避免被遗弃的 worker 继续消耗资源/
         // 阻止系统休眠状态正确释放。
+        // 同时递增工作区身份令牌：在飞的 openWorkspace 加载（先加载后切换，
+        // N12）完成后必须丢弃结果，否则关闭后旧工作区会被重新打开。
+        openWorkspaceSeq += 1;
         disposeAgentHandle(get);
         clearAllTodoListContexts();
         set({
@@ -534,19 +537,18 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       openWorkspace: async (path) => {
-        // 切换 = 先关闭（同步清空 UI，避免 async 加载期间显示旧浮层）+ 再打开
-        get().closeWorkspace();
-
         const normalizedWorkspacePath = path.trim();
 
-        // 载入文件夹的同时在 Rust 侧同步落库最近项目（原子读改写）：
-        // 即使随后立刻退出，最近列表也已持久化，重启不会恢复成旧项目。
-        await invoke('note_recent_workspace', { path: normalizedWorkspacePath }).catch(() => undefined);
+        // N12：先加载后切换——失效路径（目录被删除/移动）加载失败时，当前
+        // 工作区必须保持原样，错误由调用方提示。旧实现先 closeWorkspace 再
+        // 加载，失败不可恢复：静默落到空状态且把用户当前工作区一起关掉。
+        // 加载成功后才关闭旧工作区并 set 新状态。
 
         // 工作区身份令牌：openWorkspace 是异步加载（loadSessions → set），
         // 期间用户可能再次切换工作区。旧实现没有守卫——前一次加载完成后
         // 无条件 set()，用旧工作区的数据覆盖新工作区的状态（读旧覆新）。
         // 每次打开递增令牌，set 前校验，不一致即丢弃本次结果。
+        // closeWorkspace 同样递增令牌（见上），关闭后旧加载结果不得复活。
         const workspaceSeq = ++openWorkspaceSeq;
 
         // 读前先排空该工作区挂起的保存队列（与 legacy loadProjectState 的
@@ -692,6 +694,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         if (workspaceSeq !== openWorkspaceSeq) {
           return;
         }
+
+        // 加载成功：先持久化最近项目（原子读改写，重启不恢复成旧列表），
+        // 再关闭旧工作区（销毁 agent/清空状态），随后 set 新工作区状态。
+        await invoke('note_recent_workspace', { path: normalizedWorkspacePath }).catch(() => undefined);
+        get().closeWorkspace();
 
         set({
           workspacePath: path,
