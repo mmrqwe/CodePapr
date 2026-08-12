@@ -51,7 +51,8 @@ import {
   readWorkspaceTextFile,
   runWorkspaceInlineCommand,
 } from '../../utils/projectConfigLoader';
-import { AgentDestroyedError, WorkerCrashError } from '../../agent/WorkerBackedAgent';
+import { AgentDestroyedError, WorkerCrashError, type AgentRuntimeHandle } from '../../agent/WorkerBackedAgent';
+import { isPermissionWaitActive } from '../permissionStore';
 import { delay, waitForPageVisible } from '../../utils/crashRecovery';
 import { insertCheckpointAtRetainedBoundary } from '../../utils/contextCompaction';
 import { loadSessionMessages, waitForPendingProjectStateSave } from '../../utils/projectStorage';
@@ -260,6 +261,20 @@ function buildModeSwitchMessage(mode: WorkMode): UIMessage {
     carryForwardInContext: true,
     timestamp: Date.now(),
   };
+}
+
+/** N6：空闲看门狗不得误杀两类合法等待：
+ *  1. 权限确认弹窗——permissionStore 设计为无限期等待用户决策（与 worker 层
+ *     的「权限等待不限时」一致），弹窗停留超过看门狗阈值时必须推迟触发；
+ *  2. 静默长工具执行——无流事件输出的工具由工具自身的 IPC 超时兜底
+ *     （toolIpcTimeoutMs / graph / task），看门狗在工具在飞时必须推迟触发。
+ *  两者在飞时返回 true，调用方应重新武装看门狗而不是强制恢复。 */
+export function shouldDeferIdleWatchdog(
+  agent: Pick<AgentRuntimeHandle, 'hasInflightToolExecutions'> | null | undefined,
+): boolean {
+  if (isPermissionWaitActive()) return true;
+  if (agent?.hasInflightToolExecutions?.()) return true;
+  return false;
 }
 
 /** 失效并回收当前 agent（app-agent 在飞时改为结算后自毁，不连带杀掉）。
@@ -502,6 +517,16 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           storeIdleTimer = setTimeout(() => {
             storeIdleTimer = undefined;
             if (!get().isLoading) return;
+            // N6：权限确认弹窗等待不限时 + 静默长工具由工具自身 IPC 超时
+            // 兜底——两者在飞时看门狗必须推迟触发（重新武装），不能强制
+            // 恢复误杀回合（与 worker 层 idle backstop 的暂停语义对齐）。
+            if (shouldDeferIdleWatchdog(get()._agent)) {
+              console.warn(
+                '[sendMessage] idle watchdog: legitimate wait in flight (permission dialog or tool execution); deferring'
+              );
+              armStoreIdle();
+              return;
+            }
             console.warn(
               '[sendMessage] idle watchdog: no activity for',
               STORE_IDLE_TIMEOUT_MS,

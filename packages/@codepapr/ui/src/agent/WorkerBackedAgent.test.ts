@@ -660,6 +660,36 @@ describe('WorkerBackedAgent', () => {
     await expect(runPromise).resolves.toMatchObject({ content: 'done' });
   });
 
+  it('tracks in-flight tool executions for the idle watchdog (N6)', async () => {
+    const agent = createAgent();
+    const runPromise = agent.runAppAgent(
+      { appId: 'app-1', agentName: 'assistant', task: 'go' },
+      undefined,
+      'run-tools-n6',
+    );
+    const worker = MockWorker.instances[0];
+
+    expect(agent.hasInflightToolExecutions()).toBe(false);
+
+    worker?.emit({
+      type: 'tool-request',
+      requestId: 'run-tools-n6',
+      toolRequestId: 'run-tools-n6:1',
+      toolName: 'local_time_now',
+      arguments: {},
+    });
+
+    // tool-request 处理器同步登记执行中工具：响应回来前访问器必须为 true，
+    // 供 store 层空闲看门狗据此推迟触发（静默长工具不能被误杀）。
+    expect(agent.hasInflightToolExecutions()).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(agent.hasInflightToolExecutions()).toBe(false);
+
+    worker?.emit({ type: 'app-agent-result', requestId: 'run-tools-n6', content: 'done' });
+    await expect(runPromise).resolves.toMatchObject({ content: 'done' });
+  });
+
   it('drops tool requests after an app-agent run was cancelled', async () => {
     const agent = createAgent();
     const runPromise = agent.runAppAgent(

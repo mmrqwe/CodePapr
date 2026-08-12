@@ -158,6 +158,9 @@ export interface AgentRuntimeHandle {
   hasActiveAppAgentRequests?(): boolean;
   /** 标记已被替换：在飞的 app-agent 请求全部结算后再销毁，避免杀掉运行中的执行。 */
   detachAndCleanupWhenIdle?(): void;
+  /** 是否仍有主线程在飞的工具执行（含静默长工具）。空闲看门狗据此
+   *  暂停：工具自身的 IPC 超时负责兜底，不能被 5.5 分钟的看门狗误杀（N6）。 */
+  hasInflightToolExecutions?(): boolean;
 }
 
 export interface WorkerBackedAgentConfig {
@@ -555,6 +558,10 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
   hasActiveAppAgentRequests(): boolean {
     return this.appAgentRequests.size > 0;
+  }
+
+  hasInflightToolExecutions(): boolean {
+    return this.inflightToolExecutions.size > 0;
   }
 
   /** 标记该 agent 已被 store 替换：仍有 app-agent（papr.agent.run）在飞时

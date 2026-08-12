@@ -162,6 +162,8 @@ vi.mock('./internals/agentFactory', async (importOriginal) => {
 import { getSettingsError, normalizeSettings, useAgentStore } from './agentStore';
 import { useGoalStore } from './goalStore';
 import { parseGoalCondition } from '@codepapr/core';
+import { shouldDeferIdleWatchdog } from './internals/sendMessage';
+import { cancelExternalAccessRequests, usePermissionStore } from './permissionStore';
 import { buildEffectiveContextMessages } from '../utils/contextCompaction';
 import { AgentDestroyedError, WorkerCrashError } from '../agent/WorkerBackedAgent';
 import { SESSION_MESSAGE_CACHE_LIMIT } from './internals/defaults';
@@ -3013,6 +3015,30 @@ describe('useAgentStore.setSettings onboarding 回归（N1）', () => {
     expect(settings.model).toBe('deepseek-chat');
     expect(settings.fastModel).toBe('deepseek-v4-flash');
     expect(getSettingsError(settings)).toBeNull();
+  });
+});
+
+describe('shouldDeferIdleWatchdog（N6）', () => {
+  afterEach(() => {
+    cancelExternalAccessRequests();
+  });
+
+  it('无权限等待且无在飞工具时返回 false（正常触发恢复）', () => {
+    expect(shouldDeferIdleWatchdog(null)).toBe(false);
+    expect(shouldDeferIdleWatchdog({ hasInflightToolExecutions: () => false })).toBe(false);
+  });
+
+  it('权限确认弹窗等待期间返回 true（无限期等待设计，看门狗不得误杀）', () => {
+    const pending = usePermissionStore.getState().requestExternalAccess('/tmp/outside', 'read');
+    // afterEach 的 cancelExternalAccessRequests 会以 AbortError 拒绝该请求
+    pending.catch(() => undefined);
+    expect(shouldDeferIdleWatchdog(null)).toBe(true);
+  });
+
+  it('静默长工具在飞时返回 true（工具 IPC 超时兜底，看门狗不得误杀）', () => {
+    expect(
+      shouldDeferIdleWatchdog({ hasInflightToolExecutions: () => true })
+    ).toBe(true);
   });
 });
 
