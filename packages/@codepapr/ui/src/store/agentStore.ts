@@ -402,13 +402,22 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       setSettings: (partial, options) => {
         const previousEngine = get().settings.browserEngine;
         const settings = normalizeSettings({ ...get().settings, ...partial });
-        // 设置变更会影响 agent 配置（模型/key/prompt），默认销毁进行中的
-        // agent；但纯 UI 类变更（如最近项目置顶/移除）不应打断正在运行的回合。
-        if (!options?.preserveAgent) {
+        // N7：运行中的回合必须保留（继续用回合启动时的配置跑完），保存设置
+        // 不得静默杀掉它；仅在回合空闲时销毁 agent（旧配置不得复用）。
+        // 回合运行中变更设置时置空 _agentModel/_agentPromptKey：下一条消息
+        // 的复用检查（model/promptKey 不匹配即重建）据此按新设置重建 agent，
+        // 避免旧配置（temperature/maxTokens 等不进 promptKey 的字段）被复用。
+        const turnRunning = get().isLoading;
+        if (!options?.preserveAgent && !turnRunning) {
           disposeAgentHandle(get);
         }
-        set(options?.preserveAgent
-          ? { settings }
+        set(options?.preserveAgent || turnRunning
+          ? {
+              settings,
+              ...(turnRunning && !options?.preserveAgent
+                ? { _agentModel: null, _agentPromptKey: null }
+                : {}),
+            }
           : { settings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
         // _settingsPersistable 为 false 表示启动时设置加载失败、内存中是默认值，
         // 此时回写会用默认值（含空 apiKey）覆盖磁盘真实配置：extract_and_store_secrets
@@ -1024,7 +1033,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           createdAt: now,
           updatedAt: now,
         };
-        disposeAgentHandle(get);
+        // N7：新建任务不得静默杀掉运行中的回合（agent 绑定运行会话 A，
+        // 新建后 activeSessionId 变更，下一条消息由复用检查自动重建）。
+        const turnRunning = get().isLoading;
+        if (!turnRunning) {
+          disposeAgentHandle(get);
+        }
         set((s) => ({
           sessions: [meta, ...s.sessions],
           activeSessionId: id,
@@ -1039,10 +1053,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             ...s.sessionConversationStats,
             [id]: createEmptyConversationStats(),
           },
-          _agent: null,
-          _agentModel: null,
-          _agentPromptKey: null,
-          _agentSessionId: null,
+          _agent: turnRunning ? s._agent : null,
+          _agentModel: turnRunning ? s._agentModel : null,
+          _agentPromptKey: turnRunning ? s._agentPromptKey : null,
+          _agentSessionId: turnRunning ? s._agentSessionId : null,
           _latestContextSnapshot: null,
           _sessionLru: [id, ...s._sessionLru.filter((x) => x !== id)],
         }));
@@ -1056,12 +1070,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         const meta = sessions.find((s) => s.id === id);
         if (!meta) return;
 
-        // 离开的会话若正在执行，保留 agent 句柄（回合继续、可取消）；切回的
-        // 目标会话若正在执行同样必须保留（旧实现会把运行中回合的 agent 丢弃，
-        // 回合结束后句柄无人销毁而泄漏）。其余情况清空并销毁，由下次发送重建。
-        const keepAgent =
-          loadingSessionId !== null &&
-          (loadingSessionId === activeSessionId || loadingSessionId === id);
+        // 离开的会话若正在执行，保留 agent 句柄（回合继续、可取消）。N7：
+        // 运行中的回合与用户正在查看哪个会话无关——只要某会话仍在执行
+        // （loadingSessionId 非空），agent 就必须保留。旧实现只保留「当前或
+        // 目标会话正在执行」的情况，A 运行→切 B→切 C 时把 A 的 agent 销毁，
+        // A 的回合被静默终止。其余情况（无回合运行）清空并销毁，由下次发送重建。
+        const keepAgent = loadingSessionId !== null;
         if (!keepAgent) {
           disposeAgentHandle(get);
         }

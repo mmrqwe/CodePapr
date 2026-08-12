@@ -418,22 +418,44 @@ describe('useAgentStore.sendMessage', () => {
     expect(useAgentStore.getState()._persistenceError).toBeFalsy();
   });
 
-  it('preserves the running agent only when setSettings is called with preserveAgent', async () => {
+  it('setSettings 保留运行中回合的 agent（N7），空闲时才销毁', async () => {
     const destroy = vi.fn();
     const fakeAgent = { destroy } as unknown as import('../agent/WorkerBackedAgent').AgentRuntimeHandle;
 
-    // 默认行为：设置变更销毁进行中的 agent（配置已变，需按新配置重建）
-    useAgentStore.setState({ _agent: fakeAgent });
+    // 空闲：默认销毁进行中的 agent（配置已变，需按新配置重建）
+    useAgentStore.setState({ _agent: fakeAgent, isLoading: false });
     useAgentStore.getState().setSettings({ lang: 'en' });
     expect(destroy).toHaveBeenCalledTimes(1);
     expect(useAgentStore.getState()._agent).toBeNull();
 
-    // preserveAgent：纯 UI 变更（置顶/移除项目）不打断运行中的回合
-    useAgentStore.setState({ _agent: fakeAgent });
-    useAgentStore.getState().setSettings({ lang: 'zh-TW' }, { preserveAgent: true });
+    // 回合运行中：保存设置不得静默杀掉回合（agent 保留，回合用旧配置跑完）；
+    // 但 model/promptKey 置空，强制下一条消息按新设置重建。
+    useAgentStore.setState({
+      _agent: fakeAgent,
+      _agentModel: 'deepseek-v4-pro',
+      _agentPromptKey: 'old-key',
+      _agentSessionId: 'session-1',
+      isLoading: true,
+    });
+    useAgentStore.getState().setSettings({ lang: 'zh-TW' });
     expect(destroy).toHaveBeenCalledTimes(1);
     expect(useAgentStore.getState()._agent).not.toBeNull();
+    expect(useAgentStore.getState()._agentSessionId).toBe('session-1');
+    expect(useAgentStore.getState()._agentModel).toBeNull();
+    expect(useAgentStore.getState()._agentPromptKey).toBeNull();
     expect(useAgentStore.getState().settings.lang).toBe('zh-TW');
+
+    // preserveAgent：纯 UI 变更（置顶/移除项目）不打断运行中的回合
+    useAgentStore.setState({
+      _agent: fakeAgent,
+      _agentModel: 'deepseek-v4-pro',
+      _agentPromptKey: 'old-key',
+      isLoading: false,
+    });
+    useAgentStore.getState().setSettings({ lang: 'en' }, { preserveAgent: true });
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(useAgentStore.getState()._agent).not.toBeNull();
+    expect(useAgentStore.getState()._agentModel).not.toBeNull();
   });
 
   it('clears a stale persistence error once a settings save succeeds', async () => {
@@ -3596,6 +3618,58 @@ describe('per-session execution and input state', () => {
     expect(state._agentSessionId).toBe('s-a');
     expect(state.isLoading).toBe(true);
     expect(state.loadingSessionId).toBe('s-a');
+  });
+
+  it('selectSession 连续切换两次会话不杀死运行中回合（N7）', () => {
+    const destroy = vi.fn();
+    const agent = createMockAgent({ destroy });
+    setTwoSessionState({
+      sessions: [
+        { id: 's-a', name: 'A', provider: 'deepseek' as const, model: 'deepseek-v4-pro', createdAt: 2, updatedAt: 2 },
+        { id: 's-b', name: 'B', provider: 'deepseek' as const, model: 'deepseek-v4-pro', createdAt: 1, updatedAt: 1 },
+        { id: 's-c', name: 'C', provider: 'deepseek' as const, model: 'deepseek-v4-pro', createdAt: 1, updatedAt: 1 },
+      ],
+      isLoading: true,
+      loadingSessionId: 's-a',
+      _agent: agent,
+      _agentSessionId: 's-a',
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    // A 运行 → 切 B（保留）
+    useAgentStore.getState().selectSession('s-b');
+    expect(useAgentStore.getState()._agent).toBe(agent);
+    expect(destroy).not.toHaveBeenCalled();
+
+    // B → 切 C：旧实现把「既非当前也非目标」的 A 当无关会话销毁，
+    // A 的回合被静默终止——必须继续保留。
+    useAgentStore.getState().selectSession('s-c');
+    expect(useAgentStore.getState()._agent).toBe(agent);
+    expect(useAgentStore.getState()._agentSessionId).toBe('s-a');
+    expect(destroy).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().isLoading).toBe(true);
+    expect(useAgentStore.getState().loadingSessionId).toBe('s-a');
+  });
+
+  it('newSession 不静默杀掉运行中回合（N7）', () => {
+    const destroy = vi.fn();
+    const agent = createMockAgent({ destroy });
+    setTwoSessionState({
+      isLoading: true,
+      loadingSessionId: 's-a',
+      _agent: agent,
+      _agentSessionId: 's-a',
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    useAgentStore.getState().newSession();
+
+    const state = useAgentStore.getState();
+    expect(state._agent).toBe(agent);
+    expect(state._agentSessionId).toBe('s-a');
+    expect(state.isLoading).toBe(true);
+    expect(state.loadingSessionId).toBe('s-a');
+    expect(destroy).not.toHaveBeenCalled();
   });
 
   it('selectSession drops the agent when idle', () => {
