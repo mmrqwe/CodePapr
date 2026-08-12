@@ -531,6 +531,18 @@ type InstallResult =
   | { ok: true; installed: string[]; resources: number; error?: never }
   | { ok: false; installed: string[]; resources: number; error: string };
 
+/** N20：重装会覆盖本地 SKILL.md（用户可能改过 frontmatter/正文）——
+ *  必须弹确认，绝不静默覆盖。返回用户是否同意。 */
+export function confirmSkillOverwrite(lang: string | undefined, title: string): boolean {
+  const confirmText =
+    lang === 'en'
+      ? `"${title}" is already installed. Reinstalling will overwrite your local changes (including edits to its SKILL.md). Continue?`
+      : lang === 'zh-TW'
+        ? `「${title}」已安裝。重新安裝將覆蓋本地修改（包括對 SKILL.md 的編輯）。繼續？`
+        : `「${title}」已安装。重新安装将覆盖本地修改（包括对 SKILL.md 的编辑）。继续？`;
+  return typeof window !== 'undefined' && window.confirm(confirmText);
+}
+
 async function installSkillToWorkspace(
   name: string,
   workspacePath: string,
@@ -616,6 +628,7 @@ async function refreshSkills(workspacePath: string) {
 export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
   const settings = useAgentStore((s) => s.settings);
   const workspacePath = useAgentStore((s) => s.workspacePath);
+  const skillDefinitions = useAgentStore((s) => s._skillDefinitions);
   const c = copy(settings.lang);
   const [listings, setListings] = useState<SkillMarketListing[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -627,6 +640,25 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
   const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // N20：已安装状态与本地 .CodePapr/skills 同步（含嵌套 skill 目录），
+  // 安装/刷新后 _skillDefinitions 更新，标记随之更新。
+  useEffect(() => {
+    setInstalledIds((prev) => {
+      const next = new Set(prev);
+      for (const skill of skillDefinitions) {
+        const key = skill.id || skill.name;
+        if (key) next.add(key);
+      }
+      return next;
+    });
+  }, [skillDefinitions]);
+
+  const isSkillInstalled = useCallback(
+    (listing: SkillMarketListing): boolean =>
+      installedIds.has(listing.id) || installedIds.has(listing.name),
+    [installedIds]
+  );
 
   useEffect(() => {
     setIsLoading(true);
@@ -663,6 +695,25 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
       setToastMessage(c.noWorkspace);
       setTimeout(() => setToastMessage(null), 3000);
       return;
+    }
+
+    // N20：重装会覆盖本地 SKILL.md（用户可能改过 frontmatter/正文）——
+    // 先确认本地是否已存在，再要求用户明确确认，绝不静默覆盖。
+    let localExists = false;
+    try {
+      await invoke<{ content: string }>('read_text_file', {
+        workspacePath,
+        relativePath: `.CodePapr/skills/${listing.name}/SKILL.md`,
+        maxBytes: 1024,
+      });
+      localExists = true;
+    } catch {
+      localExists = false;
+    }
+    if (localExists) {
+      if (!confirmSkillOverwrite(settings.lang, listing.title)) {
+        return;
+      }
     }
 
     setInstallingIds((prev) => new Set(prev).add(listing.id));
@@ -776,7 +827,7 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
                   <ListingCard
                     key={listing.id}
                     listing={listing}
-                    isInstalled={installedIds.has(listing.id)}
+                    isInstalled={isSkillInstalled(listing)}
                     isInstalling={installingIds.has(listing.id)}
                     installError={installErrors[listing.id]}
                     onSelect={setSelectedListing}
@@ -793,7 +844,7 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
             <div className="absolute right-0 top-0 h-full w-[400px] border-l border-[#2a2d3a] bg-[#161922]">
               <SkillDetail
                 listing={selectedListing}
-                isInstalled={installedIds.has(selectedListing.id)}
+                isInstalled={isSkillInstalled(selectedListing)}
                 isInstalling={installingIds.has(selectedListing.id)}
                 installError={installErrors[selectedListing.id]}
                 onInstall={handleInstall}

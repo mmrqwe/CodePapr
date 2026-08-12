@@ -12,6 +12,7 @@ import {
 } from '../utils/mcpMarketTypes';
 import {
   normalizeMcpServer,
+  sanitizeMcpToolPart,
   type McpServerConfig,
 } from '../utils/mcpTypes';
 import { previewMcpServer, type McpPreviewResult } from '../tools/mcpTools';
@@ -129,15 +130,30 @@ function useInstalledServerIds(): Set<string> {
   return useMemo(() => {
     const ids = new Set<string>();
     for (const server of mcp.servers) {
+      // N20：安装时 normalizeMcpServer 用 sanitizeMcpToolPart 消毒 id——
+      // 判定"已安装"必须用同一消毒函数，否则含特殊字符的服务（@scope/name
+      // 等）永远对不上号、始终显示未安装。
       ids.add(server.id);
-      if (server.name) ids.add(server.name.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase());
+      ids.add(sanitizeMcpToolPart(server.id).toLowerCase());
+      if (server.name) {
+        ids.add(sanitizeMcpToolPart(server.name).toLowerCase());
+      }
     }
     return ids;
   }, [mcp.servers]);
 }
 
+/** 与 useInstalledServerIds 同口径的列表项判定。 */
+export function isListingInstalled(installedIds: Set<string>, listing: MarketMCPListing): boolean {
+  if (listing.id && installedIds.has(listing.id)) return true;
+  if (listing.id && installedIds.has(sanitizeMcpToolPart(listing.id).toLowerCase())) return true;
+  return installedIds.has(sanitizeMcpToolPart(listing.name).toLowerCase());
+}
+
 function listingToServerConfig(listing: MarketMCPListing): McpServerConfig {
-  const baseId = listing.id || listing.name.replace(/[./]/g, '_');
+  // N20：id 消毒统一交给 normalizeMcpServer（sanitizeMcpToolPart + lowercase），
+  // 与已安装判定同源，杜绝特殊字符服务安装后仍显示"未安装"。
+  const baseId = listing.id || listing.name;
 
   const envLines: string[] = [];
   for (const ev of listing.envVars) {
@@ -735,6 +751,16 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
           setToastMessage(`✓ ${listing.title} installed. Open MCP Settings → enable the server → send a message.`);
         }
         setTimeout(() => setToastMessage(null), 6000);
+      } else {
+        // N20：重复点击安装必须给出明确反馈，而不是静默跳过。
+        setToastMessage(
+          settings.lang === 'en'
+            ? `Already installed — a server matching "${exists.name}" already exists.`
+            : settings.lang === 'zh-TW'
+              ? `已安裝——列表中已存在同名服務「${exists.name}」。`
+              : `已安装——列表中已存在同名服务「${exists.name}」。`
+        );
+        setTimeout(() => setToastMessage(null), 6000);
       }
     } finally {
       setInstallingId(null);
@@ -852,7 +878,7 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
                   <ListingCard
                     key={listing.id}
                     listing={listing}
-                    isInstalled={installedIds.has(listing.id) || installedIds.has(listing.name.toLowerCase())}
+                    isInstalled={isListingInstalled(installedIds, listing)}
                     isInstalling={installingId === listing.id}
                     onInstall={handleInstall}
                     onSelect={setSelectedListing}
@@ -881,7 +907,7 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
             <div className="absolute right-0 top-0 h-full w-[400px] border-l border-[#2a2d3a] bg-[#161922]">
               <ListingDetail
                 listing={selectedListing}
-                isInstalled={installedIds.has(selectedListing.id) || installedIds.has(selectedListing.name.toLowerCase())}
+                isInstalled={isListingInstalled(installedIds, selectedListing)}
                 isInstalling={installingId === selectedListing.id}
                 onInstall={handleInstall}
                 onClose={() => setSelectedListing(null)}
