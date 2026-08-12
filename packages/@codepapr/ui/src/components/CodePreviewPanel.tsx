@@ -41,6 +41,9 @@ interface ReadFileResult {
   path: string;
   content: string;
   bytes: number;
+  /** 内容超过 maxBytes 被截断（Rust 侧返回）。预览必须提示用户，
+   *  否则把不完整的文件当全文展示（#7）。 */
+  truncatedByBytes: boolean;
 }
 
 interface CommandResult {
@@ -142,14 +145,19 @@ const PREVIEW_PREWARM_START_DELAY_MS = 80;
 const PREVIEW_PREWARM_GAP_MS = 24;
 const SELECTED_FILE_LSP_WARMUP_DELAY_MS = 120;
 
-const previewContentCache = new Map<string, string>();
-const previewWarmPromises = new Map<string, Promise<string | null>>();
+interface PreviewFileContent {
+  content: string;
+  truncated: boolean;
+}
+
+const previewContentCache = new Map<string, PreviewFileContent>();
+const previewWarmPromises = new Map<string, Promise<PreviewFileContent | null>>();
 
 function previewCacheKey(workspacePath: string, relativePath: string): string {
   return `${workspacePath}\u0000${relativePath}`;
 }
 
-function getCachedPreviewContent(workspacePath: string, relativePath: string): string | null {
+function getCachedPreviewContent(workspacePath: string, relativePath: string): PreviewFileContent | null {
   return previewContentCache.get(previewCacheKey(workspacePath, relativePath)) ?? null;
 }
 
@@ -181,7 +189,10 @@ function clearPreviewCacheForWorkspace(workspacePath: string): void {
   }
 }
 
-async function warmPreviewFile(workspacePath: string, relativePath: string): Promise<string | null> {
+async function warmPreviewFile(
+  workspacePath: string,
+  relativePath: string
+): Promise<PreviewFileContent | null> {
   const cacheKey = previewCacheKey(workspacePath, relativePath);
   const cachedContent = previewContentCache.get(cacheKey);
   if (cachedContent !== undefined) {
@@ -201,11 +212,12 @@ async function warmPreviewFile(workspacePath: string, relativePath: string): Pro
       maxBytes: PREVIEW_MAX_BYTES,
     });
 
+    const entry: PreviewFileContent = { content: result.content, truncated: result.truncatedByBytes === true };
     if (!previewContentCache.has(cacheKey)) {
-      previewContentCache.set(cacheKey, result.content);
+      previewContentCache.set(cacheKey, entry);
     }
 
-    return result.content;
+    return entry;
   })()
     .finally(() => {
       previewWarmPromises.delete(cacheKey);
@@ -215,14 +227,15 @@ async function warmPreviewFile(workspacePath: string, relativePath: string): Pro
   return promise;
 }
 
-async function readPreviewFileNow(workspacePath: string, relativePath: string): Promise<string> {
+async function readPreviewFileNow(workspacePath: string, relativePath: string): Promise<PreviewFileContent> {
   const result = await invoke<ReadFileResult>('read_text_file', {
     workspacePath,
     relativePath,
     maxBytes: PREVIEW_MAX_BYTES,
   });
-  previewContentCache.set(previewCacheKey(workspacePath, relativePath), result.content);
-  return result.content;
+  const entry: PreviewFileContent = { content: result.content, truncated: result.truncatedByBytes === true };
+  previewContentCache.set(previewCacheKey(workspacePath, relativePath), entry);
+  return entry;
 }
 
 function createEmptyGitDiffViewState(): GitDiffViewState {
@@ -504,6 +517,7 @@ export function CodePreviewPanel({
   const [gitDiffView, setGitDiffView] = useState<GitDiffViewState>(createEmptyGitDiffViewState());
   const [isReadingFile, setIsReadingFile] = useState(false);
   const [previewError, setPreviewError] = useState('');
+  const [previewTruncated, setPreviewTruncated] = useState(false);
   const [lspStatus, setLspStatus] = useState<LspStatusState>(createIdleLspStatus());
   const [managedLspActivity, setManagedLspActivity] = useState<ManagedLspActivityState>(
     createIdleManagedLspActivity()
@@ -791,6 +805,7 @@ export function CodePreviewPanel({
         setPreviewContent('');
         setPreviewContentPath(null);
         setPreviewError('');
+        setPreviewTruncated(false);
         setImagePreviewUrl(null);
         return;
       }
@@ -800,6 +815,7 @@ export function CodePreviewPanel({
         setPreviewContent('');
         setPreviewContentPath(null);
         setPreviewError('');
+        setPreviewTruncated(false);
         setImagePreviewUrl(null);
         return;
       }
@@ -809,6 +825,7 @@ export function CodePreviewPanel({
         setPreviewContent('');
         setPreviewContentPath(selectedPath);
         setPreviewError('');
+        setPreviewTruncated(false);
         const url = await buildImagePreviewUrl(workspacePath, selectedPath, workspaceMutationVersion);
         if (!cancelled) {
           setImagePreviewUrl(url);
@@ -819,9 +836,10 @@ export function CodePreviewPanel({
       const cachedContent = getCachedPreviewContent(workspacePath, selectedPath);
       if (cachedContent !== null) {
         setIsReadingFile(false);
-        setPreviewContent(cachedContent);
+        setPreviewContent(cachedContent.content);
         setPreviewContentPath(selectedPath);
         setPreviewError('');
+        setPreviewTruncated(cachedContent.truncated);
         setImagePreviewUrl(null);
         return;
       }
@@ -830,19 +848,22 @@ export function CodePreviewPanel({
       setPreviewContent('');
       setPreviewContentPath(null);
       setPreviewError('');
+      setPreviewTruncated(false);
       setImagePreviewUrl(null);
       try {
-        const content = await readPreviewFileNow(workspacePath, selectedPath);
+        const loaded = await readPreviewFileNow(workspacePath, selectedPath);
         if (!cancelled) {
-          setPreviewContent(content);
+          setPreviewContent(loaded.content);
           setPreviewContentPath(selectedPath);
           setPreviewError('');
+          setPreviewTruncated(loaded.truncated);
         }
       } catch (err) {
         if (!cancelled) {
           setPreviewContent('');
           setPreviewContentPath(null);
           setPreviewError(errorMessage(err));
+          setPreviewTruncated(false);
         }
       } finally {
         if (!cancelled) {
@@ -1074,6 +1095,11 @@ export function CodePreviewPanel({
               {t.previewUnavailable}: {previewError}
             </div>
           )}
+          {activeView === 'code' && !previewError && previewTruncated && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-200">
+              {t.previewTruncated}
+            </div>
+          )}
           {activeView === 'code' &&
             !previewError &&
             ['checking', 'downloading', 'extracting'].includes(managedLspActivity.phase) && (
@@ -1251,6 +1277,11 @@ export function CodePreviewPanel({
                 alt={selectedPath}
                 className="max-h-full max-w-full object-contain"
                 style={{ imageRendering: 'auto' }}
+                // #8：损坏/不支持的图片此前只显示空白区域、无任何提示。
+                onError={() => {
+                  setImagePreviewUrl(null);
+                  setPreviewError(t.imagePreviewLoadFailed);
+                }}
               />
             </div>
           )}

@@ -317,6 +317,50 @@ describe('CodePreviewPanel', () => {
     ).toBe(false);
   });
 
+  it('shows a truncation warning when the file exceeds the preview size limit', async () => {
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_text_file') {
+        const relativePath = String(args?.relativePath ?? '');
+        if (relativePath === 'scripts/example.py') {
+          return {
+            path: relativePath,
+            content: 'def run():\n    return 1\n',
+            bytes: 300001,
+            truncatedByBytes: true,
+          };
+        }
+        if (relativePath === 'package.json') {
+          return { path: relativePath, content: '{}', bytes: 2, truncatedByBytes: false };
+        }
+        if (relativePath === 'packages/@codepapr/core/package.json') {
+          return { path: relativePath, content: '{}', bytes: 2, truncatedByBytes: false };
+        }
+        return { path: relativePath, content: '', bytes: 0, truncatedByBytes: false };
+      }
+      if (command === 'lsp_open_document') return undefined;
+      if (command === 'lsp_close_document') return undefined;
+      return undefined;
+    });
+
+    await act(async () => {
+      root.render(
+        <CodePreviewPanel
+          workspacePath="/workspace"
+          selectedPath="scripts/example.py"
+          selectedGitFile={null}
+          selectedLocation={null}
+          lang="en"
+        />
+      );
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(container.textContent).toContain('exceeds the preview size limit');
+  });
+
   it('warms the selected file language intelligence asynchronously after the preview is ready', async () => {
     vi.useFakeTimers();
 

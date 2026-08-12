@@ -771,9 +771,9 @@ export function CodingWorkbench({
     setActivePath(path);
   }, []);
 
-  const loadDirectoryChildren = useCallback(async (dir: string) => {
+  const loadDirectoryChildren = useCallback(async (dir: string): Promise<boolean> => {
     if (!workspacePath) {
-      return;
+      return false;
     }
     const capturedPath = workspacePath;
     try {
@@ -786,8 +786,10 @@ export function CodingWorkbench({
       // 旧实现无守卫，旧工作区的在飞加载结果会无条件 merge 进新树，
       // 跨工作区数据互相污染（目录、truncated 标志、tree 签名全部错乱）。
       if (capturedPath !== workspacePathRef.current) {
-        return;
+        return false;
       }
+      // 本次加载成功：清除上一次懒加载失败留下的错误横幅。
+      setFolderError('');
       const nextDirEntries: Record<string, FileEntry[]> = {
         ...dirEntriesRef.current,
         [dir]: result?.entries ?? [],
@@ -807,8 +809,10 @@ export function CodingWorkbench({
         entries: mergedEntries,
         truncated: Boolean(result?.truncated),
       });
+      return true;
     } catch (err) {
       setFolderError(errorMessage(err));
+      return false;
     }
   }, [computeTreeSignature, workspacePath]);
 
@@ -826,15 +830,20 @@ export function CodingWorkbench({
       return;
     }
 
+    let loadedOk = true;
     if (isExpanded || isLoaded) {
-      await loadDirectoryChildren(path);
+      loadedOk = await loadDirectoryChildren(path);
     } else if (hasVisibleChildren || isKnownEmpty) {
       setExpandedDirectories((current) => (current.includes(path) ? current : [...current, path]));
       return;
     } else {
-      await loadDirectoryChildren(path);
+      loadedOk = await loadDirectoryChildren(path);
     }
-    setExpandedDirectories((current) => (current.includes(path) ? current : [...current, path]));
+    // #9：懒加载失败不得置为展开态——否则展开一个空目录，用户以为目录是空的
+    // （错误提示可能不显眼）。保持收起，下次点击会重试加载。
+    if (loadedOk) {
+      setExpandedDirectories((current) => (current.includes(path) ? current : [...current, path]));
+    }
   }, [entries, entryByPath, expandedDirectories, loadedDirectories, loadDirectoryChildren]);
 
   const handleTreeRowKeyDown = useCallback((
@@ -960,6 +969,11 @@ export function CodingWorkbench({
           >
             {t.reloadProject}
           </button>
+        </div>
+      )}
+      {!isLoadingTree && !folderError && treeTruncated && (
+        <div className="px-2 py-2 text-center text-xs leading-relaxed text-amber-300/90">
+          {t.fileTreeTruncated}
         </div>
       )}
       {treeNodes.map((node) => (

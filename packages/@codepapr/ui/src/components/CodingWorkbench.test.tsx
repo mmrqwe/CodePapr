@@ -462,6 +462,81 @@ describe('CodingWorkbench', () => {
     expect(lazyCall).toBeTruthy();
   });
 
+  it('does not expand a directory whose lazy load failed, and retries on the next click', async () => {
+    let lazyLoadFails = true;
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command !== 'list_workspace_files') {
+        return undefined;
+      }
+      if (args?.relativePath === 'src') {
+        if (lazyLoadFails) {
+          throw new Error('磁盘读取失败');
+        }
+        return {
+          root: '/tmp/codepapr-workspace',
+          entries: [
+            {
+              path: 'src/App.tsx',
+              name: 'App.tsx',
+              isDir: false,
+              bytes: 24,
+              hasChildren: false,
+            },
+          ],
+          truncated: false,
+        };
+      }
+      return {
+        root: '/tmp/codepapr-workspace',
+        entries: [
+          { path: 'README.md', name: 'README.md', isDir: false, bytes: 12, hasChildren: false },
+          { path: 'src', name: 'src', isDir: true, bytes: 0, hasChildren: true },
+        ],
+        truncated: false,
+      };
+    });
+
+    await act(async () => {
+      root.render(
+        <CodingWorkbench
+          selectedPath={null}
+          selectedGitFile={null}
+          selectedLocation={null}
+          previewPlacement="hidden"
+          onSelectPath={() => undefined}
+        />
+      );
+    });
+
+    await flushEffects();
+    expect(container.textContent).toContain('README.md');
+    expect(container.textContent).toContain('src');
+
+    const srcButton = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'src'
+    );
+    expect(srcButton).toBeTruthy();
+
+    // 第一次点击：懒加载失败 → 不得展开（不显示子文件），并展示错误提示
+    await act(async () => {
+      srcButton?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(container.textContent).not.toContain('App.tsx');
+    expect(container.textContent).toContain('文件列表加载失败');
+
+    // 第二次点击：重试成功 → 展开并清除错误
+    lazyLoadFails = false;
+    await act(async () => {
+      srcButton?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(container.textContent).toContain('App.tsx');
+    expect(container.textContent).not.toContain('文件列表加载失败');
+  });
+
   it('closeWorkspace 后 projectGraphLoading 重置为 false，不再卡在初始化浮层', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'list_workspace_files') {
