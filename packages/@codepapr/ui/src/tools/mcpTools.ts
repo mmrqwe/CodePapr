@@ -32,6 +32,7 @@ export type McpConfirmHandler = (request: McpConfirmRequest) => Promise<boolean>
 
 let confirmHandler: McpConfirmHandler | null = null;
 let confirmUnlisten: UnlistenFn | null = null;
+let confirmInitPromise: Promise<void> | null = null;
 
 export function setMcpConfirmHandler(handler: McpConfirmHandler | null): void {
   confirmHandler = handler;
@@ -39,18 +40,37 @@ export function setMcpConfirmHandler(handler: McpConfirmHandler | null): void {
 
 export async function initMcpConfirmListener(): Promise<void> {
   if (confirmUnlisten) return;
-  confirmUnlisten = await listen<McpConfirmRequest>('mcp-confirm-request', async (event) => {
-    const request = event.payload;
-    let approved = false;
-    if (confirmHandler) {
-      try {
-        approved = await confirmHandler(request);
-      } catch {
-        approved = false;
-      }
-    }
-    await invoke('mcp_confirm_response', { requestId: request.requestId, approved });
-  });
+  // 并发调用共享同一个在途注册：React StrictMode 双挂载时，cleanup 的
+  // dispose 先于 listen 完成执行（no-op），第二次 init 若再发起 listen
+  // 会留下两个监听器、事件被重复回复。共享 promise 保证只注册一次。
+  if (!confirmInitPromise) {
+    confirmInitPromise = (async () => {
+      const unlisten = await listen<McpConfirmRequest>('mcp-confirm-request', async (event) => {
+        const request = event.payload;
+        let approved = false;
+        if (confirmHandler) {
+          try {
+            approved = await confirmHandler(request);
+          } catch {
+            approved = false;
+          }
+        }
+        // Rust 端 120s 超时后会移除 pending 条目，迟到/重复回复会报
+        // "No pending confirmation"——吞掉该拒绝，避免未处理拒绝。
+        try {
+          await invoke('mcp_confirm_response', { requestId: request.requestId, approved });
+        } catch {
+          // confirmation already resolved (timeout or duplicate response)
+        }
+      });
+      confirmUnlisten = unlisten;
+    })().catch((error) => {
+      console.warn('[CodePapr] MCP 确认监听注册失败:', error);
+    }).finally(() => {
+      confirmInitPromise = null;
+    });
+  }
+  await confirmInitPromise;
 }
 
 export function disposeMcpConfirmListener(): void {

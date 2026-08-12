@@ -1,10 +1,14 @@
 import { ToolRegistry } from '@codepapr/core';
 import type { IToolDefinition } from '@codepapr/types';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clearMcpToolDefinitionCache,
+  disposeMcpConfirmListener,
+  initMcpConfirmListener,
   loadMcpToolDefinitions,
   registerMcpTools,
+  setMcpConfirmHandler,
+  type McpConfirmRequest,
 } from '../tools/mcpTools';
 import {
   createDefaultMcpSettings,
@@ -32,8 +36,16 @@ const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
 }));
 
+const { listenMock } = vi.hoisted(() => ({
+  listenMock: vi.fn(),
+}));
+
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
+}));
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: listenMock,
 }));
 
 vi.mock('../utils/cacheStorage', () => ({
@@ -81,8 +93,176 @@ const ENABLED_SETTINGS = norm({
 
 beforeEach(async () => {
   invokeMock.mockReset();
+  listenMock.mockReset();
   storedCache = {};
   await clearMcpToolDefinitionCache();
+});
+
+describe('initMcpConfirmListener', () => {
+  afterEach(() => {
+    disposeMcpConfirmListener();
+    setMcpConfirmHandler(null);
+  });
+
+  it('registers a single listener for mcp-confirm-request events', async () => {
+    listenMock.mockImplementation(async () => () => undefined);
+    await initMcpConfirmListener();
+    await initMcpConfirmListener();
+
+    expect(listenMock).toHaveBeenCalledTimes(1);
+    expect(listenMock.mock.calls[0][0]).toBe('mcp-confirm-request');
+  });
+
+  it('shares one in-flight registration when init races (StrictMode double-mount)', async () => {
+    let resolveListen: ((unlisten: () => void) => void) | undefined;
+    listenMock.mockImplementation(async () => {
+      return await new Promise<() => void>((resolve) => {
+        resolveListen = resolve;
+      });
+    });
+
+    const first = initMcpConfirmListener();
+    const second = initMcpConfirmListener();
+    await Promise.resolve();
+
+    expect(listenMock).toHaveBeenCalledTimes(1);
+
+    const unlisten = vi.fn();
+    resolveListen!(unlisten);
+    await first;
+    await second;
+
+    expect(listenMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('swallows a late reply rejection when the backend already timed out', async () => {
+    let handler: ((event: { payload: McpConfirmRequest }) => void) | undefined;
+    listenMock.mockImplementation(async (_event: string, cb: typeof handler) => {
+      handler = cb;
+      return () => undefined;
+    });
+    await initMcpConfirmListener();
+    setMcpConfirmHandler(async () => true);
+    invokeMock.mockRejectedValueOnce(new Error('No pending confirmation with id: mcp_srv_5'));
+
+    await expect(
+      handler!({
+        payload: {
+          requestId: 'mcp_srv_5',
+          serverId: 'srv',
+          serverName: 'Filesystem MCP',
+          toolName: 'write_file',
+          arguments: {},
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(invokeMock).toHaveBeenCalledWith('mcp_confirm_response', {
+      requestId: 'mcp_srv_5',
+      approved: true,
+    });
+  });
+
+  it('replies approved=true to the backend when the handler approves', async () => {
+    let handler: ((event: { payload: McpConfirmRequest }) => void) | undefined;
+    listenMock.mockImplementation(async (_event: string, cb: typeof handler) => {
+      handler = cb;
+      return () => undefined;
+    });
+    await initMcpConfirmListener();
+    setMcpConfirmHandler(async () => true);
+
+    await handler!({
+      payload: {
+        requestId: 'mcp_srv_1',
+        serverId: 'srv',
+        serverName: 'Filesystem MCP',
+        toolName: 'write_file',
+        arguments: { path: '/tmp/x.txt' },
+      },
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith('mcp_confirm_response', {
+      requestId: 'mcp_srv_1',
+      approved: true,
+    });
+  });
+
+  it('replies approved=false when the handler denies', async () => {
+    let handler: ((event: { payload: McpConfirmRequest }) => void) | undefined;
+    listenMock.mockImplementation(async (_event: string, cb: typeof handler) => {
+      handler = cb;
+      return () => undefined;
+    });
+    await initMcpConfirmListener();
+    setMcpConfirmHandler(async () => false);
+
+    await handler!({
+      payload: {
+        requestId: 'mcp_srv_2',
+        serverId: 'srv',
+        serverName: 'Filesystem MCP',
+        toolName: 'delete_file',
+        arguments: { path: '/tmp/x.txt' },
+      },
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith('mcp_confirm_response', {
+      requestId: 'mcp_srv_2',
+      approved: false,
+    });
+  });
+
+  it('replies approved=false when no handler is set (fail closed)', async () => {
+    let handler: ((event: { payload: McpConfirmRequest }) => void) | undefined;
+    listenMock.mockImplementation(async (_event: string, cb: typeof handler) => {
+      handler = cb;
+      return () => undefined;
+    });
+    await initMcpConfirmListener();
+
+    await handler!({
+      payload: {
+        requestId: 'mcp_srv_3',
+        serverId: 'srv',
+        serverName: 'Filesystem MCP',
+        toolName: 'write_file',
+        arguments: {},
+      },
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith('mcp_confirm_response', {
+      requestId: 'mcp_srv_3',
+      approved: false,
+    });
+  });
+
+  it('replies approved=false when the handler throws', async () => {
+    let handler: ((event: { payload: McpConfirmRequest }) => void) | undefined;
+    listenMock.mockImplementation(async (_event: string, cb: typeof handler) => {
+      handler = cb;
+      return () => undefined;
+    });
+    await initMcpConfirmListener();
+    setMcpConfirmHandler(async () => {
+      throw new Error('dialog crashed');
+    });
+
+    await handler!({
+      payload: {
+        requestId: 'mcp_srv_4',
+        serverId: 'srv',
+        serverName: 'Filesystem MCP',
+        toolName: 'write_file',
+        arguments: {},
+      },
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith('mcp_confirm_response', {
+      requestId: 'mcp_srv_4',
+      approved: false,
+    });
+  });
 });
 
 describe('loadMcpToolDefinitions', () => {

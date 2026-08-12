@@ -17,9 +17,16 @@ import { SplitPane } from './components/SplitPane';
 import { WorkspaceGitPanel } from './components/WorkspaceGitPanel';
 import { ToastContainer } from './components/ToastContainer';
 import { PermissionDialog } from './components/PermissionDialog';
+import { McpConfirmDialog } from './components/McpConfirmDialog';
 import { ProjectSwitcherModal } from './components/ProjectSwitcherModal';
 import type { GitFileSelection } from './utils/workspaceGitPanel';
 import { registerSettingsFlushListener } from './utils/settingsFlush';
+import {
+  disposeMcpConfirmListener,
+  initMcpConfirmListener,
+  setMcpConfirmHandler,
+} from './tools/mcpTools';
+import { useMcpConfirmStore } from './store/mcpConfirmStore';
 import type { ReviewScope } from './utils/codeReview';
 import { getTranslation } from './utils/i18n';
 import type { PreviewLocation } from './utils/projectDiagnosticLocations';
@@ -197,6 +204,15 @@ export default function App() {
     void loadSettings();
     void useCharactersStore.getState().loadCharacters();
     registerSettingsFlushListener();
+    // MCP 高风险调用确认：后端在 requireConfirmation 命中时发出
+    // mcp-confirm-request 事件并阻塞等待回复，这里必须注册监听与处理
+    // 回调，否则工具调用会挂到 120 秒超时才失败。
+    void initMcpConfirmListener();
+    setMcpConfirmHandler((request) => useMcpConfirmStore.getState().requestConfirm(request));
+    return () => {
+      setMcpConfirmHandler(null);
+      void disposeMcpConfirmListener();
+    };
   }, [loadSettings]);
 
   useEffect(() => {
@@ -794,6 +810,7 @@ export default function App() {
       </Suspense>
 
       <PermissionDialog />
+      <McpConfirmDialog />
 
       <ToastContainer />
     </>
