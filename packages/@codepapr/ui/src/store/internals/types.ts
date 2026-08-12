@@ -253,10 +253,30 @@ export type ResetToMessageResult =
     }
   | { ok: false; reason: 'no-checkpoint' | 'message-not-found' | 'git-failed'; error?: string };
 
+/** N8：最近一次对话重置/代码回退的撤销信息（重置时备份，撤销时回放）。 */
+export interface PendingRestoreUndo {
+  workspacePath: string;
+  /** 被重置的会话；null 表示纯文件回退（无对话影响）。 */
+  sessionId: string | null;
+  /** 被截掉的尾部消息（撤销时按 id 去重后追加回会话）。 */
+  truncatedMessages: UIMessage[];
+  /** 被移除的 checkpoint 锚点（撤销时恢复，保证后续 resetToMessage 可用）。 */
+  removedCheckpoints: Record<string, { sha: string; sessionId: string }>;
+  /** 重置是否执行了文件回滚（true 时撤销需先 restore_undo）。 */
+  filesRestored: boolean;
+}
+
+export interface UndoConversationResetResult {
+  ok: boolean;
+  message?: string;
+}
+
 export interface AgentState {
   settings: Settings;
   workspacePath: string;
   workspaceMutationVersion: number;
+  /** N8：待撤销的最近一次对话重置/代码回退（见 PendingRestoreUndo）。 */
+  _pendingRestoreUndo: PendingRestoreUndo | null;
   sessions: SessionMeta[];
   activeSessionId: string | null;
   messages: UIMessage[];
@@ -358,6 +378,8 @@ export interface AgentActions {
   cancelMessage: () => void;
   clearMessages: () => void;
   resetToMessage: (messageId: string) => Promise<ResetToMessageResult>;
+  undoConversationReset: () => Promise<UndoConversationResetResult>;
+  dismissRestoreUndo: () => void;
   setProjectDiagnosticsReport: (report: ProjectDiagnosticsReport | null) => void;
   setPersistenceError: (message: string | null) => void;
   refreshProjectDiagnostics: () => Promise<ProjectDiagnosticsReport | null>;

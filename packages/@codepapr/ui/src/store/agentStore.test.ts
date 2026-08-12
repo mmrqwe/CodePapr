@@ -3064,6 +3064,126 @@ describe('shouldDeferIdleWatchdog（N6）', () => {
   });
 });
 
+describe('resetToMessage 撤销（N8）', () => {
+  const sessionId = 'session-1';
+
+  function setResetState() {
+    useAgentStore.setState((state) => ({
+      ...state,
+      workspacePath: '/tmp/codepapr-undo-test',
+      sessions: [
+        { id: sessionId, name: '任务 1', provider: 'deepseek', model: 'deepseek-v4-pro', createdAt: 1, updatedAt: 1 },
+      ],
+      activeSessionId: sessionId,
+      messages: [
+        { id: 'm1', role: 'user', content: '第一步', timestamp: 1 },
+        { id: 'm2', role: 'assistant', content: '回复一', timestamp: 2 },
+        { id: 'm3', role: 'user', content: '第二步', timestamp: 3 },
+        { id: 'm4', role: 'assistant', content: '回复二', timestamp: 4 },
+      ],
+      sessionMessages: {
+        [sessionId]: [
+          { id: 'm1', role: 'user', content: '第一步', timestamp: 1 },
+          { id: 'm2', role: 'assistant', content: '回复一', timestamp: 2 },
+          { id: 'm3', role: 'user', content: '第二步', timestamp: 3 },
+          { id: 'm4', role: 'assistant', content: '回复二', timestamp: 4 },
+        ],
+      },
+      _messageCheckpoints: {
+        m1: { sha: 'sha-keep', sessionId },
+        m3: { sha: 'sha-reset', sessionId },
+      },
+      _pendingRestoreUndo: null,
+      isLoading: false,
+      _agent: null,
+      _agentSessionId: null,
+    }));
+  }
+
+  beforeEach(() => {
+    invokeMock.mockImplementation(async (command: string): Promise<Record<string, unknown>> => {
+      if (command === 'restore_execute') {
+        return {
+          ok: true,
+          filesRestored: 1,
+          filesDeleted: 0,
+          backupRef: 'refs/codepapr-backup-before-reset',
+          error: null,
+        };
+      }
+      if (command === 'restore_undo' || command === 'delete_checkpoint_by_message') {
+        return {};
+      }
+      throw new Error(`Unexpected invoke call: ${command}`);
+    });
+  });
+
+  it('重置备份撤销信息，undo 恢复消息与 checkpoint 并调用 restore_undo', async () => {
+    setResetState();
+
+    const result = await useAgentStore.getState().resetToMessage('m3');
+    expect(result.ok).toBe(true);
+
+    const pending = useAgentStore.getState()._pendingRestoreUndo;
+    expect(pending).not.toBeNull();
+    expect(pending?.sessionId).toBe(sessionId);
+    expect(pending?.filesRestored).toBe(true);
+    expect(pending?.truncatedMessages.map((m) => m.id)).toEqual(['m3', 'm4']);
+    expect(useAgentStore.getState().sessionMessages[sessionId]?.map((m) => m.id)).toEqual(['m1', 'm2']);
+    expect(useAgentStore.getState()._messageCheckpoints['m3']).toBeUndefined();
+
+    const undoResult = await useAgentStore.getState().undoConversationReset();
+    expect(undoResult.ok).toBe(true);
+    expect(
+      invokeMock.mock.calls.some(([command]) => command === 'restore_undo')
+    ).toBe(true);
+    expect(useAgentStore.getState().sessionMessages[sessionId]?.map((m) => m.id)).toEqual(['m1', 'm2', 'm3', 'm4']);
+    expect(useAgentStore.getState()._messageCheckpoints['m3']).toEqual({ sha: 'sha-reset', sessionId });
+    expect(useAgentStore.getState()._pendingRestoreUndo).toBeNull();
+  });
+
+  it('撤销只回放仍缺失的消息（重置后用户又发送过新消息时不重复）', async () => {
+    setResetState();
+    await useAgentStore.getState().resetToMessage('m3');
+
+    // 重置后用户又发了一条新消息（id 与旧消息不同）
+    useAgentStore.setState((state) => ({
+      ...state,
+      messages: [...(state.sessionMessages[sessionId] ?? []), { id: 'm-new', role: 'user', content: '新消息', timestamp: 5 }],
+      sessionMessages: {
+        ...state.sessionMessages,
+        [sessionId]: [...(state.sessionMessages[sessionId] ?? []), { id: 'm-new', role: 'user', content: '新消息', timestamp: 5 }],
+      },
+    }));
+
+    const undoResult = await useAgentStore.getState().undoConversationReset();
+    expect(undoResult.ok).toBe(true);
+    expect(useAgentStore.getState().sessionMessages[sessionId]?.map((m) => m.id)).toEqual(['m1', 'm2', 'm-new', 'm3', 'm4']);
+  });
+
+  it('dismissRestoreUndo 清除撤销信息；无撤销信息时 undo 返回失败', async () => {
+    setResetState();
+    await useAgentStore.getState().resetToMessage('m3');
+    expect(useAgentStore.getState()._pendingRestoreUndo).not.toBeNull();
+
+    useAgentStore.getState().dismissRestoreUndo();
+    expect(useAgentStore.getState()._pendingRestoreUndo).toBeNull();
+
+    const undoResult = await useAgentStore.getState().undoConversationReset();
+    expect(undoResult.ok).toBe(false);
+    expect(undoResult.message).toBe('nothing-to-undo');
+  });
+
+  it('deleteSession 清除对应会话的撤销信息', async () => {
+    setResetState();
+    await useAgentStore.getState().resetToMessage('m3');
+    expect(useAgentStore.getState()._pendingRestoreUndo).not.toBeNull();
+
+    useAgentStore.getState().deleteSession(sessionId);
+    expect(useAgentStore.getState()._pendingRestoreUndo).toBeNull();
+  });
+});
+
 describe('useAgentStore.closeWorkspace', () => {
   it('清空 workspacePath 及所有相关状态（含 projectGraphLoading/Phase）', () => {
     useAgentStore.setState({

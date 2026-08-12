@@ -28,6 +28,7 @@ import {
   snapshotEnsure,
   snapshotList,
   restoreExecute,
+  restoreUndo,
   loadCheckpointRecords,
   deleteCheckpointByMessage,
   deleteCheckpointsForSession,
@@ -85,12 +86,14 @@ import { toast } from './toastStore';
 import type {
   AgentActions,
   AgentState,
+  PendingRestoreUndo,
   ResetToMessageResult,
   SessionMeta,
   Settings,
   StoreGet,
   StoreSet,
   UIMessage,
+  UndoConversationResetResult,
 } from './internals/types';
 
 
@@ -101,6 +104,7 @@ export type {
   CumulativeStats,
   ImagePreview,
   Lang,
+  PendingRestoreUndo,
   ProviderName,
   ResetToMessageResult,
   SessionInputState,
@@ -109,6 +113,7 @@ export type {
   TextFileAttachment,
   UIMessage,
   UIToolInvocation,
+  UndoConversationResetResult,
   WorkspaceEntry,
 } from './internals/types';
 export {
@@ -301,6 +306,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       settings: DEFAULT_SETTINGS,
       workspacePath: '',
   workspaceMutationVersion: 0,
+      _pendingRestoreUndo: null,
       sessions: [],
       activeSessionId: null,
       messages: [],
@@ -1174,6 +1180,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             _latestContextSnapshot: isActive ? null : s._latestContextSnapshot,
             _sessionInputState: sessionInputState,
             _sessionLru: s._sessionLru.filter((x) => x !== id),
+            // N8：会话已删除，其重置撤销信息失效（消息无处回放）。
+            _pendingRestoreUndo:
+              s._pendingRestoreUndo?.sessionId === id
+                ? null
+                : s._pendingRestoreUndo,
           };
         });
         saveCurrentProjectState(get(), { purgeDeletedContent: true });
@@ -1261,12 +1272,14 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         const truncatedMessages = messages.slice(0, cutIndex);
         const keptIds = new Set(truncatedMessages.map((m) => m.id));
         const nextCheckpoints: Record<string, { sha: string; sessionId: string }> = {};
+        const removedCheckpoints: Record<string, { sha: string; sessionId: string }> = {};
         const removedIds: string[] = [];
         for (const [id, entry] of Object.entries(_messageCheckpoints)) {
           if (keptIds.has(id)) {
             nextCheckpoints[id] = entry;
           } else {
             removedIds.push(id);
+            removedCheckpoints[id] = entry;
           }
         }
         // 清理 timeline 表中被截掉的 checkpoint 记录
@@ -1289,6 +1302,14 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agentPromptKey: null,
           _agentSessionId: null,
           _latestContextSnapshot: null,
+          // N8：备份被截掉的尾部消息与 checkpoint 锚点，供撤销入口回放。
+          _pendingRestoreUndo: {
+            workspacePath,
+            sessionId: activeSessionId,
+            truncatedMessages: messages.slice(cutIndex),
+            removedCheckpoints,
+            filesRestored: codeReset === 'git',
+          },
         });
 
         get()._editHistory.clear();
@@ -1308,6 +1329,66 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       setProjectDiagnosticsReport: (report) => {
         set({ projectDiagnosticsReport: report });
         saveCurrentProjectState(get());
+      },
+
+      undoConversationReset: async (): Promise<UndoConversationResetResult> => {
+        const pending = get()._pendingRestoreUndo;
+        if (!pending) {
+          return { ok: false, message: 'nothing-to-undo' };
+        }
+        // 工作区已切换：撤销只对发起重置时的工作区有意义，拒绝跨工作区撤销。
+        if (pending.workspacePath !== get().workspacePath) {
+          return { ok: false, message: 'workspace-changed' };
+        }
+
+        // N8：代码回退撤销——restore_undo 把工作区文件恢复到重置前状态
+        // （BACKUP_REF）。仅当重置确实执行了文件回滚时才调用，否则会把
+        // 文件错误地恢复到更早的旧备份。
+        if (pending.filesRestored) {
+          try {
+            await restoreUndo(pending.workspacePath);
+          } catch (err) {
+            return {
+              ok: false,
+              message: err instanceof Error ? err.message : String(err),
+            };
+          }
+        }
+
+        const { sessionId, truncatedMessages, removedCheckpoints } = pending;
+        const sessionExists =
+          sessionId !== null && get().sessions.some((s) => s.id === sessionId);
+        if (sessionId && sessionExists && truncatedMessages.length > 0) {
+          set((s) => {
+            const current = s.sessionMessages[sessionId] ?? [];
+            const existingIds = new Set(current.map((m) => m.id));
+            // 重置后用户可能又发过消息：按 id 去重，只回放仍缺失的尾部消息。
+            const restored = [
+              ...current,
+              ...truncatedMessages.filter((m) => !existingIds.has(m.id)),
+            ];
+            return {
+              messages: s.activeSessionId === sessionId ? restored : s.messages,
+              sessionMessages: { ...s.sessionMessages, [sessionId]: restored },
+              _messageCheckpoints: {
+                ...s._messageCheckpoints,
+                ...removedCheckpoints,
+              },
+              _latestContextSnapshot: null,
+            };
+          });
+        }
+
+        // 上下文已变：失效 agent，下一条消息按恢复后的 sessionMessages 重建。
+        invalidateAgentHandle(get, set);
+        set({ _pendingRestoreUndo: null });
+        get().noteWorkspaceMutation();
+        saveCurrentProjectState(get());
+        return { ok: true };
+      },
+
+      dismissRestoreUndo: () => {
+        set({ _pendingRestoreUndo: null });
       },
 
       setPersistenceError: (message) => {

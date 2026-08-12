@@ -29,7 +29,7 @@ import { useAgentStore } from '../store/agentStore';
 import {
   snapshotChangedFiles,
   snapshotEnsure,
-  restoreExecute,
+  restoreUndo,
   gitStatus as gitStatusCmd,
   gitLog as gitLogCmd,
   gitDiff as gitDiffCmd,
@@ -37,9 +37,11 @@ import {
   gitBranchCheckout as gitBranchCheckoutCmd,
   gitRestoreFiles as gitRestoreFilesCmd,
   type CommitChangedFiles,
+  type RestoreResult,
 } from '../utils/snapshot';
 import { getTranslation, type Lang } from '../utils/i18n';
 import { GitDiffPreview } from './GitDiffPreview';
+import { RestoreConfirmDialog } from './RestoreConfirmDialog';
 
 interface ReadFileResult {
   path: string;
@@ -174,7 +176,6 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   const gitHistorySelectedText =
     t.workspaceGitHistorySelected || (lang === 'en' ? 'Selected commit' : '已选择提交');
   const gitResetActionText = t.workspaceGitResetAction || (lang === 'en' ? 'Rollback to Selected' : '回退到所选提交');
-  const gitResetRunningText = t.workspaceGitResetRunning || (lang === 'en' ? 'Rolling back...' : '回退中...');
   const gitResetSelectRequiredText =
     t.workspaceGitResetSelectRequired || (lang === 'en' ? 'Select a commit first.' : '请先选择一个提交。');
   const gitResetDonePrefixText =
@@ -207,6 +208,9 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   const [isInitializingGit, setIsInitializingGit] = useState(false);
   const [activeGitActionKey, setActiveGitActionKey] = useState<string | null>(null);
   const [gitActionMessage, setGitActionMessage] = useState('');
+  // N8：历史回退的确认目标（RestoreConfirmDialog 打开时非空）与撤销入口。
+  const [restoreTarget, setRestoreTarget] = useState<GitHistoryEntry | null>(null);
+  const [undoResetAvailable, setUndoResetAvailable] = useState(false);
   const [branchName, setBranchName] = useState('');
   const [commitMessage, setCommitMessage] = useState('');
   const [selectedHistoryHash, setSelectedHistoryHash] = useState<string | null>(null);
@@ -641,27 +645,46 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   }
 
   async function resetGitToHistoryEntry(entry: GitHistoryEntry): Promise<void> {
-    setActiveGitActionKey(`reset:${entry.hash}`);
+    // N8：回退是破坏性操作，先弹带预览的确认框（restorePlan 预览 + 确认后
+    // 才执行 restoreExecute），确认回调见 handleRestoreConfirmed。
+    setRestoreTarget(entry);
+  }
+
+  /** RestoreConfirmDialog 确认后的执行结果处理：刷新 git 状态、bump mutation
+   *  （N4）、并提供 restore_undo 撤销入口（N8）。 */
+  function handleRestoreConfirmed(result: RestoreResult): void {
+    const entry = restoreTarget;
+    setRestoreTarget(null);
+    if (!result.ok) {
+      setGitActionMessage(result.error ?? gitActionFailedText);
+      return;
+    }
+    const msgs: string[] = [];
+    if (entry) {
+      msgs.push(`${gitResetDonePrefixText} ${entry.shortHash}`);
+    }
+    if (result.backupRef) {
+      msgs.push(`${gitBackupBranchSavedPrefixText} ${result.backupRef}`);
+    }
+    if (result.filesRestored > 0) {
+      msgs.push(`${lang === 'en' ? 'Restored' : '恢复了'} ${result.filesRestored} ${lang === 'en' ? 'files' : '个文件'}`);
+    }
+    queueGitRefresh(msgs.join(' · '));
+    useAgentStore.getState().noteWorkspaceMutation();
+    setUndoResetAvailable(result.backupRef !== null);
+  }
+
+  /** N8：回退撤销——restore_undo 恢复到回退前的工作区状态（BACKUP_REF）。 */
+  async function undoHistoryReset(): Promise<void> {
+    setActiveGitActionKey('undo-reset');
     setGitActionMessage('');
     try {
-      const result = await restoreExecute(workspacePath, entry.hash);
-      if (result.ok) {
-        const msgs: string[] = [
-          `${gitResetDonePrefixText} ${entry.shortHash}`,
-        ];
-        if (result.backupRef) {
-          msgs.push(`${gitBackupBranchSavedPrefixText} ${result.backupRef}`);
-        }
-        if (result.filesRestored > 0) {
-          msgs.push(`${lang === 'en' ? 'Restored' : '恢复了'} ${result.filesRestored} ${lang === 'en' ? 'files' : '个文件'}`);
-        }
-        queueGitRefresh(msgs.join(' · '));
-        // N4：回退到历史/checkpoint 改写磁盘文件，必须走 mutation 通道失效
-        // 预览缓存（restoreExecute 不返回路径列表，仅 bump version 刷新预览）。
-        useAgentStore.getState().noteWorkspaceMutation();
-      } else {
-        throw new Error(result.error ?? gitActionFailedText);
-      }
+      await restoreUndo(workspacePath);
+      setUndoResetAvailable(false);
+      queueGitRefresh(
+        lang === 'en' ? 'Rollback undone · workspace restored.' : lang === 'zh-TW' ? '已撤銷回退 · 工作區已恢復。' : '已撤销回退 · 工作区已恢复。'
+      );
+      useAgentStore.getState().noteWorkspaceMutation();
     } catch (error) {
       setGitActionMessage((error instanceof Error ? error.message : String(error)) || gitActionFailedText);
     } finally {
@@ -1327,16 +1350,28 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                       ? `${gitHistorySelectedText}: ${selectedHistoryEntry.shortHash}`
                       : gitResetSelectRequiredText}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => selectedHistoryEntry && void resetGitToHistoryEntry(selectedHistoryEntry)}
-                    disabled={activeGitActionKey !== null || !selectedHistoryEntry}
-                    className="rounded-md border border-amber-500/40 px-3 py-1.5 text-[11px] text-amber-100 transition-colors hover:border-amber-400 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {activeGitActionKey === `reset:${selectedHistoryEntry?.hash ?? ''}`
-                      ? gitResetRunningText
-                      : gitResetActionText}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {undoResetAvailable && (
+                      <button
+                        type="button"
+                        onClick={() => void undoHistoryReset()}
+                        disabled={activeGitActionKey !== null}
+                        className="rounded-md border border-emerald-500/40 px-3 py-1.5 text-[11px] text-emerald-100 transition-colors hover:border-emerald-400 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {activeGitActionKey === 'undo-reset'
+                          ? (lang === 'en' ? 'Undoing...' : '撤销中...')
+                          : (lang === 'en' ? 'Undo rollback' : '撤销回退')}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => selectedHistoryEntry && void resetGitToHistoryEntry(selectedHistoryEntry)}
+                      disabled={activeGitActionKey !== null || !selectedHistoryEntry}
+                      className="rounded-md border border-amber-500/40 px-3 py-1.5 text-[11px] text-amber-100 transition-colors hover:border-amber-400 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {gitResetActionText}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1413,6 +1448,17 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
             </div>
           )}
         </div>
+      )}
+
+      {restoreTarget && (
+        <RestoreConfirmDialog
+          workspacePath={workspacePath}
+          targetSha={restoreTarget.hash}
+          targetLabel={restoreTarget.subject}
+          lang={lang ?? 'zh-CN'}
+          onConfirm={handleRestoreConfirmed}
+          onCancel={() => setRestoreTarget(null)}
+        />
       )}
     </section>
   );

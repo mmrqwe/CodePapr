@@ -109,6 +109,24 @@ describe('WorkspaceGitPanel', () => {
         };
       }
 
+      if (command === 'restore_plan') {
+        return {
+          targetSha: String(args?.targetSha ?? 'aaaaaaaa'),
+          targetLabel: 'checkpoint',
+          targetFileCount: 2,
+          filesToRestore: [
+            { path: 'README.md', oldPath: null, status: 'M', additions: 1, deletions: 0 },
+          ],
+          filesToDelete: [],
+          filesUnchanged: 0,
+        };
+      }
+
+      if (command === 'restore_undo') {
+        gitState = 'initial';
+        return undefined;
+      }
+
       if (command === 'snapshot_ensure') {
         return { ready: true, createdRepo: false, headSha: 'aaaaaaaa', error: null };
       }
@@ -551,6 +569,25 @@ describe('WorkspaceGitPanel', () => {
       ) ?? null
     );
     await flushEffects();
+
+    // N8：回退前先弹带预览的确认框（restore_plan），确认后才执行 restore_execute。
+    expect(
+      invokeMock.mock.calls.some(
+        ([command, payload]) =>
+          command === 'restore_plan' &&
+          payload?.targetSha === 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+      )
+    ).toBe(true);
+    expect(
+      invokeMock.mock.calls.some(([command]) => command === 'restore_execute')
+    ).toBe(false);
+
+    click(
+      Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('Confirm Restore')
+      ) ?? null
+    );
+    await flushEffects();
     await flushEffects();
 
     expect(
@@ -559,6 +596,20 @@ describe('WorkspaceGitPanel', () => {
           command === 'restore_execute' &&
           payload?.targetSha === 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
       )
+    ).toBe(true);
+
+    // N8：备份存在时出现撤销入口，点击后调用 restore_undo。
+    const undoButton =
+      Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('Undo rollback')
+      ) ?? null;
+    expect(undoButton).not.toBeNull();
+    click(undoButton);
+    await flushEffects();
+    await flushEffects();
+
+    expect(
+      invokeMock.mock.calls.some(([command]) => command === 'restore_undo')
     ).toBe(true);
   });
 
