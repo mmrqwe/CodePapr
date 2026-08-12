@@ -1151,6 +1151,46 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         saveCurrentProjectState(get());
       },
 
+      retryLoadSessionMessages: async (): Promise<boolean> => {
+        const { workspacePath, activeSessionId } = get();
+        if (!workspacePath || !activeSessionId) return false;
+        // 未被标记失败：无需重试。
+        if (!get()._messageLoadFailedSessions[activeSessionId]) return true;
+
+        try {
+          // 读前排空挂起保存队列（与 selectSession/openWorkspace 对齐），
+          // 避免读到旧数据。
+          await waitForPendingProjectStateSave(workspacePath);
+          const loaded = (await loadSessionMessages(
+            workspacePath,
+            activeSessionId
+          )) as unknown as UIMessage[];
+          // 竞态守卫：加载期间用户可能已切换会话/工作区。
+          const current = get();
+          if (
+            current.activeSessionId !== activeSessionId ||
+            current.workspacePath !== workspacePath
+          ) {
+            return false;
+          }
+          set((s) => ({
+            messages: loaded,
+            sessionMessages: { ...s.sessionMessages, [activeSessionId]: loaded },
+            sessionMessagesLoading: false,
+            _messageLoadFailedSessions: {
+              ...s._messageLoadFailedSessions,
+              [activeSessionId]: false,
+            },
+          }));
+          evictSessionMessageCache(get, set, [activeSessionId]);
+          saveCurrentProjectState(get());
+          return true;
+        } catch {
+          // 仍失败：保留失败标记（防止空视图回写覆盖 DB 历史）。
+          return false;
+        }
+      },
+
       deleteSession: (id) => {
         const running = get();
         // 释放该会话的进程级 TodoList 上下文，避免已删会话的条目被

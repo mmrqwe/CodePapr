@@ -102,6 +102,8 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     pendingRestoreUndo,
     undoConversationReset,
     dismissRestoreUndo,
+    messageLoadFailedSessions,
+    retryLoadSessionMessages,
   } = useAgentStore(
     useShallow((state) => ({
       messages: state.messages,
@@ -128,6 +130,8 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       pendingRestoreUndo: state._pendingRestoreUndo,
       undoConversationReset: state.undoConversationReset,
       dismissRestoreUndo: state.dismissRestoreUndo,
+      messageLoadFailedSessions: state._messageLoadFailedSessions,
+      retryLoadSessionMessages: state.retryLoadSessionMessages,
     }))
   );
   // 输入框状态（模式/草稿/附件）按会话存取：切换会话自动换到对应会话的状态，
@@ -214,6 +218,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
   const [resetConfirmMsgId, setResetConfirmMsgId] = useState<string | null>(null);
   const [resetInFlight, setResetInFlight] = useState(false);
   const [undoResetInFlight, setUndoResetInFlight] = useState(false);
+  const [retryMessagesLoading, setRetryMessagesLoading] = useState(false);
   const [resetBanner, setResetBanner] = useState<{ kind: 'success' | 'warn' | 'error'; text: string } | null>(null);
   useEffect(() => {
     if (!resetBanner) return;
@@ -239,6 +244,9 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
   // 当前查看会话自身的执行状态，输入框/按钮等 UI 一律按它对齐。
   const isActiveLoading = isLoading && loadingSessionId !== null && loadingSessionId === activeSessionId;
   const otherSessionRunning = isLoading && !isActiveLoading;
+  // N16：当前会话历史加载失败的可见提示（此前无任何 UI 消费者，空白会话无提示）。
+  const sessionMessagesLoadFailed =
+    activeSessionId !== null && messageLoadFailedSessions[activeSessionId] === true;
 
   useLayoutEffect(() => {
     if (isActiveLoading) {
@@ -1247,6 +1255,50 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
             </button>
           </div>
         )}
+      {sessionMessagesLoadFailed && !isActiveLoading && (
+        <div className="absolute inset-x-0 top-2 z-40 mx-auto flex w-fit max-w-[90%] items-center gap-2 rounded-full border border-red-500/40 bg-red-500/15 px-4 py-1.5 text-xs text-red-200 shadow-lg backdrop-blur-sm fade-in">
+          <span>
+            {settings.lang === 'en'
+              ? 'Session history failed to load — showing an incomplete view.'
+              : settings.lang === 'zh-TW'
+                ? '會話歷史載入失敗——目前顯示的內容可能不完整。'
+                : '会话历史加载失败——当前显示的内容可能不完整。'}
+          </span>
+          <button
+            type="button"
+            disabled={retryMessagesLoading}
+            onClick={async () => {
+              setRetryMessagesLoading(true);
+              const ok = await retryLoadSessionMessages();
+              setRetryMessagesLoading(false);
+              if (!ok) {
+                setResetBanner({
+                  kind: 'error',
+                  text:
+                    settings.lang === 'en'
+                      ? 'Reload failed — session history still unavailable.'
+                      : settings.lang === 'zh-TW'
+                        ? '重新載入失敗——會話歷史仍不可用。'
+                        : '重新加载失败——会话历史仍不可用。',
+                });
+              }
+            }}
+            className="rounded-md border border-red-400/50 px-2 py-0.5 font-medium text-red-100 transition-colors hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {retryMessagesLoading
+              ? settings.lang === 'en'
+                ? 'Retrying…'
+                : settings.lang === 'zh-TW'
+                  ? '重試中…'
+                  : '重试中…'
+              : settings.lang === 'en'
+                ? 'Retry'
+                : settings.lang === 'zh-TW'
+                  ? '重試'
+                  : '重试'}
+          </button>
+        </div>
+      )}
       {gitReadyError && !gitReady && (
         <div
           role="status"

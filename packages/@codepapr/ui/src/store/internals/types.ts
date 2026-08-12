@@ -385,6 +385,8 @@ export interface AgentActions {
   resetToMessage: (messageId: string) => Promise<ResetToMessageResult>;
   undoConversationReset: () => Promise<UndoConversationResetResult>;
   dismissRestoreUndo: () => void;
+  /** N16：重试加载当前会话的消息（会话历史加载失败后的 UI 恢复入口）。 */
+  retryLoadSessionMessages: () => Promise<boolean>;
   setProjectDiagnosticsReport: (report: ProjectDiagnosticsReport | null) => void;
   setPersistenceError: (message: string | null) => void;
   refreshProjectDiagnostics: () => Promise<ProjectDiagnosticsReport | null>;

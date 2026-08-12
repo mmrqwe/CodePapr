@@ -3259,6 +3259,61 @@ describe('N11 前置 await 阶段停止', () => {
   });
 });
 
+describe('retryLoadSessionMessages（N16）', () => {
+  function setN16State(extra: Partial<ReturnType<typeof useAgentStore.getState>> = {}) {
+    useAgentStore.setState((state) => ({
+      ...state,
+      workspacePath: '/tmp/codepapr-n16',
+      sessions: [
+        { id: 's-a', name: 'A', provider: 'deepseek' as const, model: 'deepseek-v4-pro', createdAt: 2, updatedAt: 2 },
+        { id: 's-b', name: 'B', provider: 'deepseek' as const, model: 'deepseek-v4-pro', createdAt: 1, updatedAt: 1 },
+      ],
+      activeSessionId: 's-a',
+      messages: [],
+      sessionMessages: { 's-a': [], 's-b': [] },
+      _messageLoadFailedSessions: { 's-a': true },
+      isLoading: false,
+      _agent: null,
+      ...extra,
+    }));
+  }
+
+  it('重试成功：恢复消息并清除失败标记', async () => {
+    setN16State();
+    loadSessionMessagesMock.mockResolvedValueOnce([
+      { id: 'm-1', role: 'user', content: '历史消息', timestamp: 1 },
+    ]);
+
+    const ok = await useAgentStore.getState().retryLoadSessionMessages();
+
+    expect(ok).toBe(true);
+    const state = useAgentStore.getState();
+    expect(state._messageLoadFailedSessions['s-a']).toBe(false);
+    expect(state.sessionMessages['s-a']?.map((m) => m.id)).toEqual(['m-1']);
+    expect(state.messages.map((m) => m.id)).toEqual(['m-1']);
+  });
+
+  it('重试失败：保留失败标记（禁止空视图回写覆盖 DB 历史）', async () => {
+    setN16State();
+    loadSessionMessagesMock.mockRejectedValueOnce(new Error('db locked'));
+
+    const ok = await useAgentStore.getState().retryLoadSessionMessages();
+
+    expect(ok).toBe(false);
+    expect(useAgentStore.getState()._messageLoadFailedSessions['s-a']).toBe(true);
+  });
+
+  it('未被标记失败时直接返回 true，不触发加载', async () => {
+    setN16State({ _messageLoadFailedSessions: {} });
+    loadSessionMessagesMock.mockClear();
+
+    const ok = await useAgentStore.getState().retryLoadSessionMessages();
+
+    expect(ok).toBe(true);
+    expect(loadSessionMessagesMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('useAgentStore.closeWorkspace', () => {
   it('清空 workspacePath 及所有相关状态（含 projectGraphLoading/Phase）', () => {
     useAgentStore.setState({

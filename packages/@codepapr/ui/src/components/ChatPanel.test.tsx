@@ -1246,4 +1246,74 @@ describe('ChatPanel', () => {
       expect(callArgs?.[2]).toBe('plan');
     });
   });
+
+  it('N16：会话消息加载失败时显示提示横幅，重试成功后消失', async () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      _messageLoadFailedSessions: { 'session-1': true },
+      messages: [],
+      sessionMessages: { 'session-1': [] },
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    // 空白会话必须有可见提示（此前 _messageLoadFailedSessions 无 UI 消费者）
+    expect(container.textContent).toContain('会话历史加载失败');
+
+    // 重试成功：横幅消失、消息恢复
+    invokeMock.mockResolvedValueOnce({
+      messagesJson: JSON.stringify([
+        { id: 'user-1', role: 'user', content: '把回复布局改成 VS Code 那样', timestamp: 1 },
+      ]),
+    });
+    await act(async () => {
+      const retryButton = Array.from(container.querySelectorAll('button')).find(
+        (el) => el.textContent?.includes('重试')
+      );
+      retryButton?.click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(container.textContent).not.toContain('会话历史加载失败');
+    expect(useAgentStore.getState()._messageLoadFailedSessions['session-1']).toBe(false);
+    expect(useAgentStore.getState().messages.map((m) => m.id)).toEqual(['user-1']);
+  });
+
+  it('N16：重试失败时横幅保留并提示', async () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      _messageLoadFailedSessions: { 'session-1': true },
+      messages: [],
+      sessionMessages: { 'session-1': [] },
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    invokeMock.mockRejectedValueOnce(new Error('db locked'));
+    await act(async () => {
+      const retryButton = Array.from(container.querySelectorAll('button')).find(
+        (el) => el.textContent?.includes('重试')
+      );
+      retryButton?.click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(useAgentStore.getState()._messageLoadFailedSessions['session-1']).toBe(true);
+    expect(container.textContent).toContain('会话历史加载失败');
+    expect(container.textContent).toContain('重新加载失败');
+  });
 });
