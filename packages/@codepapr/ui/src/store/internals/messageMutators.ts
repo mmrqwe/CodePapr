@@ -43,8 +43,19 @@ export function appendErrorMessage(set: StoreSet, content: string, sessionId?: s
   });
 }
 
-/** 追加一条仅展示、不进入模型上下文的信息消息（用于 --help 等本地命令反馈）。 */
-export function appendInfoMessage(set: StoreSet, content: string): void {
+/** 追加一条仅展示、不进入模型上下文的信息消息（用于 --help 等本地命令反馈）。
+ *  可选指定目标会话：/compact 等跨 await 的流程必须在 await 前捕获会话，
+ *  否则提示消息会落到用户中途切换后的会话（N22）。
+ *  resetLoading 默认 true（本地命令中止发送后复位 loading）；/compact 允许
+ *  与在飞回合并发，其提示必须传 false——否则提示会踩掉运行中回合的
+ *  loading 态并连带销毁 agent。 */
+export function appendInfoMessage(
+  set: StoreSet,
+  content: string,
+  sessionId?: string | null,
+  options?: { resetLoading?: boolean },
+): void {
+  const resetLoading = options?.resetLoading !== false;
   const infoMsg: UIMessage = {
     id: createId(),
     role: 'assistant',
@@ -55,22 +66,27 @@ export function appendInfoMessage(set: StoreSet, content: string): void {
   };
 
   set((s) => {
-    const sessionId = s.activeSessionId;
-    const currentSessionMessages = sessionId
-      ? s.sessionMessages[sessionId] ?? s.messages
+    const targetId = sessionId ?? s.activeSessionId;
+    // 会话已被删除时禁止写入：与 appendErrorMessage 同口径，防孤儿复活。
+    if (targetId && !s.sessions.some((x) => x.id === targetId)) {
+      return resetLoading
+        ? { isLoading: false, loadingSessionId: null }
+        : {};
+    }
+    const currentSessionMessages = targetId
+      ? s.sessionMessages[targetId] ?? s.messages
       : s.messages;
     const nextMessages = [...currentSessionMessages, infoMsg];
 
     return {
-      messages: sessionId === s.activeSessionId ? nextMessages : s.messages,
-      sessionMessages: sessionId
+      messages: targetId && targetId === s.activeSessionId ? nextMessages : s.messages,
+      sessionMessages: targetId
         ? {
             ...s.sessionMessages,
-            [sessionId]: nextMessages,
+            [targetId]: nextMessages,
           }
         : s.sessionMessages,
-      isLoading: false,
-      loadingSessionId: null,
+      ...(resetLoading ? { isLoading: false, loadingSessionId: null } : {}),
     };
   });
 }

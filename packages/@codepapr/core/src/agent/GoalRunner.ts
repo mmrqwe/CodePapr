@@ -201,7 +201,17 @@ export class GoalRunner {
         if (err instanceof DOMException && err.name === 'AbortError') {
           return this.markInterrupted();
         }
-        // Verifier 出错时降级：仅依赖条件评估结果
+        // N23：主观目标没有客观条件兜底——verifier 失败时循环永远无法判定
+        // 达成，继续跑只会烧满 maxIterations 轮 token。立即以 error 终止并
+        // 给出明确提示（结果文案在 sendMessage 的 goal 收尾中展示）。
+        if (this.condition.clauses.length === 0) {
+          this.state.status = 'error';
+          this.state.error = `Verifier 调用失败，无法评估目标：${(err as Error).message}`;
+          this.state.elapsedMs = Date.now() - this.state.startedAt;
+          this.notifyAndPersist();
+          return this.getState();
+        }
+        // 客观目标：降级为仅依赖条件评估结果
         verdict = {
           verdict: conditionResult.met ? 'SATISFIED' : 'NOT_MET',
           evidence: 'Verifier 调用失败，降级为仅条件评估',

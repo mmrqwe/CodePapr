@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   appendErrorMessage,
+  appendInfoMessage,
   appendSessionMessages,
   applyToolStreamEvent,
   cleanupStreamingAssistantMessage,
@@ -140,6 +141,42 @@ describe('finalizeCancelledToolInvocations（N10）', () => {
     expect(kept).toBeDefined();
     expect(kept?.isStreaming).toBe(false);
     expect(kept?.toolInvocations?.[0]?.status).toBe('cancelled');
+  });
+});
+
+describe('appendInfoMessage 目标会话（N22）', () => {
+  it('指定目标会话时写入该会话，不影响当前查看会话的镜像', () => {
+    const harness = createHarness({
+      activeSessionId: 'visible',
+      sessions: liveSessions(['visible', 'background']),
+      messages: [message('v1', { content: 'visible' })],
+      sessionMessages: {
+        visible: [message('v1', { content: 'visible' })],
+        background: [message('b1', { content: 'old' })],
+      },
+    });
+
+    appendInfoMessage(harness.set, '压缩完成', 'background');
+
+    const state = harness.get();
+    expect(
+      state.sessionMessages['background']?.some((m) => m.content === '压缩完成')
+    ).toBe(true);
+    expect(state.messages.map((m) => m.id)).toEqual(['v1']);
+  });
+
+  it('目标会话已被删除时不写入（防孤儿复活）', () => {
+    const harness = createHarness({
+      activeSessionId: 'visible',
+      sessions: liveSessions(['visible']),
+      messages: [message('v1', { content: 'visible' })],
+      sessionMessages: { visible: [message('v1', { content: 'visible' })] },
+    });
+
+    appendInfoMessage(harness.set, '迟到提示', 'deleted-session');
+
+    const state = harness.get();
+    expect(state.sessionMessages['deleted-session']).toBeUndefined();
   });
 });
 

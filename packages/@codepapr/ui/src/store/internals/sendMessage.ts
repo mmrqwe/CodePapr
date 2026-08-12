@@ -117,6 +117,9 @@ function formatRetryCounter(attempt: number, maxRetries?: number): string {
 // don't trigger duplicate generation. Module-level on purpose: the guard
 // spans the whole session, not a single store snapshot.
 let memoryBootstrapInFlight = false;
+// N22：/compact 在飞标记——压缩是 LLM 调用（可达数十秒），重复触发会并行
+// 生成双检查点。第二次触发只提示进行中，不发起新压缩。
+let compactCheckpointInFlight = false;
 
 // Serializes background memory.md read-modify-write operations (cold-start
 // bootstrap and post-reply consolidation). They share one file and each does a
@@ -342,12 +345,40 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // 压缩结果不得写入其它会话，也不得污染当前查看会话的视图。
             const compactSessionId = get().activeSessionId;
             const sessionMsgs = get().sessionMessages[compactSessionId ?? ''] ?? [];
-            const checkpointResult = await maybeGenerateContextCheckpoint(
-              normalizedSettings,
-              sessionMsgs,
-              true,
-              currentTodoDigest(compactSessionId)
-            );
+            // N22：防重复触发——第二次 /compact 只提示进行中，不并行生成
+            // 双检查点。
+            if (compactCheckpointInFlight) {
+              appendInfoMessage(
+                set,
+                '上下文压缩已在进行中，请稍候。',
+                compactSessionId,
+                { resetLoading: false }
+              );
+              return;
+            }
+            compactCheckpointInFlight = true;
+            // N22：进度反馈——压缩是 LLM 调用（可达数十秒），先给出可见提示。
+            appendInfoMessage(set, '正在压缩上下文…', compactSessionId, {
+              resetLoading: false,
+            });
+            let checkpointResult: Awaited<ReturnType<typeof maybeGenerateContextCheckpoint>>;
+            try {
+              checkpointResult = await maybeGenerateContextCheckpoint(
+                normalizedSettings,
+                sessionMsgs,
+                true,
+                currentTodoDigest(compactSessionId)
+              );
+            } catch (err) {
+              compactCheckpointInFlight = false;
+              appendInfoMessage(
+                set,
+                `上下文压缩失败：${errorMessage(err)}`,
+                compactSessionId,
+                { resetLoading: false }
+              );
+              return;
+            }
             if (checkpointResult) {
               if (checkpointResult.cacheStats && compactSessionId) {
                 const cpTier: 'primary' | 'fast' = checkpointResult.modelTier === 'primary' ? 'primary' : 'fast';
@@ -425,12 +456,17 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   checkpointResult.message.contextCheckpoint?.sourceChars
                     ? `${Math.round(checkpointResult.message.contextCheckpoint.sourceChars / 1024)} KB`
                     : '若干'
-                } 上下文。`
+                } 上下文。`,
+                compactSessionId,
+                { resetLoading: false }
               );
             } else {
-              appendInfoMessage(set, '当前上下文无需压缩。');
+              appendInfoMessage(set, '当前上下文无需压缩。', compactSessionId, {
+                resetLoading: false,
+              });
             }
             set({ _pendingMemoryConsolidation: true });
+            compactCheckpointInFlight = false;
             return;
           }
           if (lower === 'goal') {

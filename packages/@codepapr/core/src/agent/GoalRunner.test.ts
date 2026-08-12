@@ -261,6 +261,56 @@ describe('GoalRunner', () => {
     expect(runVerifier).not.toHaveBeenCalled();
   });
 
+  it('N23：主观目标 verifier 失败时立即以 error 终止（不跑满迭代烧 token）', async () => {
+    const condition = parseGoalCondition('给我一个能运行的计算器应用');
+    expect(condition.clauses.length).toBe(0);
+    const runWorkerTurn = vi.fn().mockResolvedValue(makeWorkerResult('working'));
+    const runner = new GoalRunner({
+      condition,
+      userGoalText: '',
+      limits: { maxIterations: 20, maxWallClockMs: 60_000 },
+      callbacks: {
+        runWorkerTurn,
+        runVerifier: vi.fn().mockRejectedValue(new Error('provider exploded')),
+        evaluateCondition: vi.fn().mockResolvedValue(makeSubjectiveConditionResult()),
+        onStateChange: vi.fn(),
+        isAborted: () => false,
+      },
+    });
+
+    const result = await runner.run();
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('Verifier');
+    expect(runWorkerTurn).toHaveBeenCalledTimes(1);
+    expect(result.iteration).toBe(1);
+  });
+
+  it('客观目标 verifier 失败时降级为仅条件评估，循环继续', async () => {
+    const condition = parseGoalCondition('exec:npm test');
+    let evalCount = 0;
+    const runner = new GoalRunner({
+      condition,
+      userGoalText: '',
+      limits: { maxIterations: 5, maxWallClockMs: 60_000 },
+      callbacks: {
+        runWorkerTurn: vi.fn().mockResolvedValue(makeWorkerResult('working')),
+        runVerifier: vi.fn().mockRejectedValue(new Error('verifier down')),
+        evaluateCondition: vi.fn().mockImplementation(async () => {
+          evalCount += 1;
+          return makeConditionResult(evalCount >= 2);
+        }),
+        onStateChange: vi.fn(),
+        isAborted: () => false,
+      },
+    });
+
+    const result = await runner.run();
+
+    expect(result.status).toBe('satisfied');
+    expect(result.iteration).toBe(2);
+  });
+
   it('Worker turn 抛出错误时返回 error', async () => {
     const condition = parseGoalCondition('exec:npm test');
     const runner = new GoalRunner({

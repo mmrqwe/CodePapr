@@ -3314,6 +3314,96 @@ describe('retryLoadSessionMessages（N16）', () => {
   });
 });
 
+describe('N22 /compact 防重与进度反馈', () => {
+  beforeEach(() => {
+    maybeGenerateContextCheckpointMock.mockReset();
+    maybeGenerateContextCheckpointMock.mockImplementation(async () => null);
+    useAgentStore.setState((state) => ({
+      ...state,
+      workspacePath: '/tmp/codepapr-n22',
+      sessions: [
+        { id: 'session-1', name: '任务 1', provider: 'deepseek', model: 'deepseek-v4-pro', createdAt: 2, updatedAt: 2 },
+      ],
+      activeSessionId: 'session-1',
+      messages: [],
+      sessionMessages: { 'session-1': [] },
+      isLoading: false,
+      loadingSessionId: null,
+      _agent: null,
+      _agentModel: null,
+      _agentPromptKey: null,
+      _agentSessionId: null,
+      _gitReady: false,
+    }));
+  });
+
+  it('压缩在飞时重复触发只提示进行中，不产生双检查点', async () => {
+    let resolveCheckpoint!: (value: unknown) => void;
+    maybeGenerateContextCheckpointMock.mockImplementationOnce(
+      () =>
+        new Promise<unknown>((resolve) => {
+          resolveCheckpoint = resolve;
+        })
+    );
+
+    const first = useAgentStore.getState().sendMessage('/compact', '/compact', 'agent');
+    await waitForMacrotask();
+    await waitForMacrotask();
+
+    // 压缩在飞期间再次触发：只提示，不再发起新的压缩调用
+    await useAgentStore.getState().sendMessage('/compact', '/compact', 'agent');
+    expect(maybeGenerateContextCheckpointMock).toHaveBeenCalledTimes(1);
+
+    const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+    expect(
+      sessionMessages.some((m) => m.content.includes('压缩已在进行中'))
+    ).toBe(true);
+    // 开始压缩的进度提示也存在
+    expect(
+      sessionMessages.some((m) => m.content.includes('正在压缩上下文'))
+    ).toBe(true);
+
+    resolveCheckpoint(null);
+    await first;
+    expect(useAgentStore.getState().isLoading).toBe(false);
+  });
+
+  it('压缩提示消息落在发起时的会话，切换会话后不串台', async () => {
+    let resolveCheckpoint!: (value: unknown) => void;
+    maybeGenerateContextCheckpointMock.mockImplementationOnce(
+      () =>
+        new Promise<unknown>((resolve) => {
+          resolveCheckpoint = resolve;
+        })
+    );
+    useAgentStore.setState((state) => ({
+      ...state,
+      sessions: [
+        { id: 'session-1', name: '任务 1', provider: 'deepseek', model: 'deepseek-v4-pro', createdAt: 2, updatedAt: 2 },
+        { id: 'session-2', name: '任务 2', provider: 'deepseek', model: 'deepseek-v4-pro', createdAt: 1, updatedAt: 1 },
+      ],
+      sessionMessages: { ...state.sessionMessages, 'session-2': [] },
+    }));
+
+    const first = useAgentStore.getState().sendMessage('/compact', '/compact', 'agent');
+    await waitForMacrotask();
+    await waitForMacrotask();
+
+    // 压缩 LLM 调用期间用户切到会话 2
+    useAgentStore.getState().selectSession('session-2');
+
+    resolveCheckpoint(null);
+    await first;
+
+    const s1 = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+    const s2 = useAgentStore.getState().sessionMessages['session-2'] ?? [];
+    expect(s1.some((m) => m.content.includes('正在压缩上下文'))).toBe(true);
+    expect(s1.some((m) => m.content.includes('无需压缩'))).toBe(true);
+    // 提示绝不落入会话 2
+    expect(s2.some((m) => m.content.includes('压缩'))).toBe(false);
+  });
+});
+
 describe('useAgentStore.closeWorkspace', () => {
   it('清空 workspacePath 及所有相关状态（含 projectGraphLoading/Phase）', () => {
     useAgentStore.setState({
