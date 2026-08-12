@@ -80,6 +80,7 @@ import {
 import type { AgentRuntimeHandle } from '../agent/WorkerBackedAgent';
 import { handleWorkspaceMutation } from './internals/backgroundDiagnostics';
 import { createSendMessage, invalidateAgentHandle } from './internals/sendMessage';
+import { finalizeCancelledToolInvocations } from './internals/messageMutators';
 import { useGoalStore } from './goalStore';
 import { upsertRecentWorkspace, sortRecentWorkspaces } from './internals/recentWorkspaces';
 import { toast } from './toastStore';
@@ -1435,11 +1436,14 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           const currentMessages = s.sessionMessages[sessionId] ?? s.messages;
           // 补上取消时刻的时间戳：与 sendMessage 的取消路径（accumulateTurnRuntime）
           // 保持同口径，保证按消息时间戳回溯运行时长时不丢这一段。
-          const nextMessages = currentMessages.map((message) =>
-            message.isStreaming
+          // N10：同步把仍显示"执行中"的工具调用标记为已取消（晚到的 end
+          // 事件会被丢弃，不清理的话琥珀色脉冲点永远常亮）。
+          const nextMessages = currentMessages.map((message) => {
+            const next = message.isStreaming
               ? { ...message, isStreaming: false, statusText: undefined, timestamp: Date.now() }
-              : message
-          );
+              : message;
+            return finalizeCancelledToolInvocations(next);
+          });
 
           return {
             isLoading: false,

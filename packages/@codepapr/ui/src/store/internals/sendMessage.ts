@@ -70,6 +70,7 @@ import {
   appendStreamingAssistantMessage,
   applyToolStreamEvent,
   cleanupStreamingAssistantMessage,
+  finalizeCancelledToolInvocations,
   mergeMessageText,
   updateAssistantMessage,
 } from './messageMutators';
@@ -548,9 +549,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               if (!sessionId) return { isLoading: false, loadingSessionId: null };
               const currentMessages = s.sessionMessages[sessionId] ?? s.messages;
               const nextMessages = currentMessages.map((message) =>
-                message.isStreaming
-                  ? { ...message, isStreaming: false, statusText: undefined }
-                  : message
+                // N10：与 cancelMessage 同口径，收尾时清理"执行中"的工具调用
+                finalizeCancelledToolInvocations(
+                  message.isStreaming
+                    ? { ...message, isStreaming: false, statusText: undefined }
+                    : message
+                )
               );
               return {
                 isLoading: false,

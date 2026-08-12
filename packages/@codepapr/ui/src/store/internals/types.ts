@@ -170,7 +170,7 @@ export interface UIToolInvocation {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
-  status: 'running' | 'success' | 'error';
+  status: 'running' | 'success' | 'error' | 'cancelled';
   error?: string;
   statusText?: string;
   output?: string;

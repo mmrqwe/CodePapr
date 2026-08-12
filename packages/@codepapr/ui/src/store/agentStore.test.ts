@@ -3810,7 +3810,19 @@ describe('per-session execution and input state', () => {
       activeSessionId: 's-b',
       messages: [{ id: 'b-msg', role: 'user', content: 'B 的消息', timestamp: 1 }],
       sessionMessages: {
-        's-a': [{ id: 'a-stream', role: 'assistant', content: '流式中', timestamp: 1, isStreaming: true }],
+        's-a': [
+          {
+            id: 'a-stream',
+            role: 'assistant',
+            content: '流式中',
+            timestamp: 1,
+            isStreaming: true,
+            toolInvocations: [
+              { id: 'c1', name: 'bash', arguments: {}, status: 'running', statusText: '运行中' },
+              { id: 'c2', name: 'read', arguments: {}, status: 'success' },
+            ],
+          },
+        ],
         's-b': [{ id: 'b-msg', role: 'user', content: 'B 的消息', timestamp: 1 }],
       },
       isLoading: true,
@@ -3826,7 +3838,13 @@ describe('per-session execution and input state', () => {
     expect(cancelSession).toHaveBeenCalledTimes(1);
     expect(state.isLoading).toBe(false);
     expect(state.loadingSessionId).toBeNull();
-    expect(state.sessionMessages['s-a']?.[0]?.isStreaming).toBe(false);
+    const cancelled = state.sessionMessages['s-a']?.[0];
+    expect(cancelled?.isStreaming).toBe(false);
+    // N10 回归：取消后执行中的工具必须标记为已取消（晚到的 end 事件被丢弃，
+    // 不清理的话琥珀色脉冲点永远常亮），已完成的工具不受影响。
+    expect(cancelled?.toolInvocations?.[0]?.status).toBe('cancelled');
+    expect(cancelled?.toolInvocations?.[0]?.statusText).toBeUndefined();
+    expect(cancelled?.toolInvocations?.[1]?.status).toBe('success');
     // 当前查看会话（s-b）的消息镜像不受影响
     expect(state.messages.map((m) => m.id)).toEqual(['b-msg']);
     // N3 回归：取消的回合不会进入 agent 的 logStore，必须同步失效 agent，

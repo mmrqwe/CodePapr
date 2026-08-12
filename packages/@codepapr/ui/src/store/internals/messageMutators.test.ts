@@ -4,6 +4,7 @@ import {
   appendSessionMessages,
   applyToolStreamEvent,
   cleanupStreamingAssistantMessage,
+  finalizeCancelledToolInvocations,
   updateAssistantMessage,
 } from './messageMutators';
 import type { AgentState, StoreSet, UIMessage } from './types';
@@ -83,6 +84,64 @@ function createHarness(initial: Pick<AgentState, 'activeSessionId' | 'messages' 
 }
 
 const liveSessions = (ids: string[]) => ids.map((id) => ({ id })) as AgentState['sessions'];
+
+describe('finalizeCancelledToolInvocations（N10）', () => {
+  it('把 running 的工具调用标记为 cancelled 并清空 statusText', () => {
+    const next = finalizeCancelledToolInvocations(
+      message('m1', {
+        isStreaming: true,
+        statusText: '执行中',
+        toolInvocations: [
+          { id: 'c1', name: 'bash', arguments: {}, status: 'running', statusText: '运行中' },
+          { id: 'c2', name: 'read', arguments: {}, status: 'success' },
+        ],
+      })
+    );
+    expect(next.toolInvocations?.[0]?.status).toBe('cancelled');
+    expect(next.toolInvocations?.[0]?.statusText).toBeUndefined();
+    expect(next.toolInvocations?.[1]?.status).toBe('success');
+    expect(next.statusText).toBeUndefined();
+  });
+
+  it('无 running 调用时原样返回同一消息', () => {
+    const original = message('m1', {
+      toolInvocations: [{ id: 'c1', name: 'read', arguments: {}, status: 'error' }],
+    });
+    expect(finalizeCancelledToolInvocations(original)).toBe(original);
+  });
+
+  it('cleanupStreamingAssistantMessage 保留含工具调用的消息并标记已取消', () => {
+    const harness = createHarness({
+      activeSessionId: 'visible',
+      sessions: liveSessions(['visible']),
+      messages: [
+        message('v1', {
+          isStreaming: true,
+          toolInvocations: [
+            { id: 'c1', name: 'bash', arguments: {}, status: 'running' },
+          ],
+        }),
+      ],
+      sessionMessages: {
+        visible: [
+          message('v1', {
+            isStreaming: true,
+            toolInvocations: [
+              { id: 'c1', name: 'bash', arguments: {}, status: 'running' },
+            ],
+          }),
+        ],
+      },
+    });
+
+    cleanupStreamingAssistantMessage(harness.set, 'visible', 'v1');
+
+    const kept = harness.get().sessionMessages['visible']?.[0];
+    expect(kept).toBeDefined();
+    expect(kept?.isStreaming).toBe(false);
+    expect(kept?.toolInvocations?.[0]?.status).toBe('cancelled');
+  });
+});
 
 describe('session-scoped message mutators', () => {
   it('updateAssistantMessage updates the flat mirror only for the active session', () => {

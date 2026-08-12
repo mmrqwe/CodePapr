@@ -18,7 +18,7 @@ export function ToolInvocationsPanel({
   const bordered = useAgentStore((state) => state.settings.chatBordersEnabled);
   const toolInvocations = msg.toolInvocations ?? [];
   const anyRunning = toolInvocations.some((tool) => tool.status === 'running');
-  const allCompleted = toolInvocations.length > 0 && toolInvocations.every((tool) => tool.status === 'success' || tool.status === 'error');
+  const allCompleted = toolInvocations.length > 0 && toolInvocations.every((tool) => tool.status === 'success' || tool.status === 'error' || tool.status === 'cancelled');
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
@@ -68,6 +68,7 @@ export function ToolInvocationsPanel({
           {toolInvocations.map((tool) => {
             const isRunning = tool.status === 'running';
             const isFailed = tool.status === 'error';
+            const isCancelled = tool.status === 'cancelled';
             const summary = getToolInvocationSummary(tool);
             const diffCards = buildDiffCards(tool);
             const args = tool.arguments ?? {};
@@ -78,7 +79,13 @@ export function ToolInvocationsPanel({
               <div key={tool.id} className="px-3.5 py-2 text-[11px] text-slate-300">
                 <div className="flex items-start gap-2">
                   <span className={`mt-0.5 h-1.5 w-1.5 flex-shrink-0 rounded-full ${
-                    isRunning ? 'bg-amber-400 animate-pulse' : isFailed ? 'bg-red-400' : 'bg-emerald-400'
+                    isRunning
+                      ? 'bg-amber-400 animate-pulse'
+                      : isFailed
+                        ? 'bg-red-400'
+                        : isCancelled
+                          ? 'bg-slate-500'
+                          : 'bg-emerald-400'
                   }`} />
                   {toolPath ? (
                     <ToolPathLink
@@ -90,9 +97,21 @@ export function ToolInvocationsPanel({
                     <span className="flex-1 leading-snug text-slate-300">{summary}</span>
                   )}
                   <span className={`flex-shrink-0 text-[10px] ${
-                    isRunning ? 'text-amber-400' : isFailed ? 'text-red-400' : 'text-emerald-500'
+                    isRunning
+                      ? 'text-amber-400'
+                      : isFailed
+                        ? 'text-red-400'
+                        : isCancelled
+                          ? 'text-slate-500'
+                          : 'text-emerald-500'
                   }`}>
-                    {isRunning ? t.toolRunning : isFailed ? t.toolFailed : t.toolCompleted}
+                    {isRunning
+                      ? t.toolRunning
+                      : isFailed
+                        ? t.toolFailed
+                        : isCancelled
+                          ? t.cancel
+                          : t.toolCompleted}
                   </span>
                 </div>
                 {diffCards}

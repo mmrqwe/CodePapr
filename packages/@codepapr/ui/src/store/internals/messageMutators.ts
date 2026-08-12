@@ -264,6 +264,25 @@ export function appendSessionMessages(
   });
 }
 
+/** N10：取消/出错收尾时把仍显示"执行中"的工具调用标记为已取消。
+ *  取消后晚到的 tool-call-end 事件会被丢弃（pending 请求已移除），
+ *  不清理的话 UI 永远显示琥珀色脉冲点。 */
+export function finalizeCancelledToolInvocations(message: UIMessage): UIMessage {
+  const invocations = message.toolInvocations;
+  if (!invocations || !invocations.some((inv) => inv.status === 'running')) {
+    return message;
+  }
+  return {
+    ...message,
+    statusText: undefined,
+    toolInvocations: invocations.map((inv) =>
+      inv.status === 'running'
+        ? { ...inv, status: 'cancelled' as const, statusText: undefined }
+        : inv
+    ),
+  };
+}
+
 export function cleanupStreamingAssistantMessage(
   set: StoreSet,
   sessionId: string,
@@ -283,7 +302,9 @@ export function cleanupStreamingAssistantMessage(
     const nextMessages = shouldRemove
       ? currentSessionMessages.filter((message) => message.id !== messageId)
       : currentSessionMessages.map((message) =>
-          message.id === messageId ? { ...message, isStreaming: false } : message
+          message.id === messageId
+            ? finalizeCancelledToolInvocations({ ...message, isStreaming: false })
+            : message
         );
 
     return {
