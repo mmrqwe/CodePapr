@@ -420,6 +420,50 @@ describe('WorkspaceGitPanel', () => {
     expect(container.textContent).not.toContain('Local Commit');
   });
 
+  it('N15：inline diff 的「Diff in editor」入口打通主编辑器并排 Diff（MonacoDiffEditor）', async () => {
+    const onSelectPath = vi.fn();
+    const onSelectGitFile = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <WorkspaceGitPanel
+          workspacePath="/workspace"
+          lang="en"
+          selectedPath={null}
+          selectedGitFile={null}
+          onSelectPath={onSelectPath}
+          onSelectGitFile={onSelectGitFile}
+        />
+      );
+    });
+
+    click(container.querySelector('button[aria-label="Git Delta"]'));
+    await flushEffects();
+
+    // 展开 README.md 的 inline diff
+    click(
+      Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('README.md')
+      ) ?? null
+    );
+    await flushEffects();
+
+    // N15：此前没有任何 UI 路径能触发非空 onSelectGitFile，
+    // 主编辑器并排 Diff（MonacoDiffEditor）是死代码。
+    const diffButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Diff in editor')
+    );
+    expect(diffButton).not.toBeNull();
+    click(diffButton ?? null);
+    await flushEffects();
+
+    expect(onSelectGitFile).toHaveBeenCalledTimes(1);
+    const selection = onSelectGitFile.mock.calls[0]?.[0];
+    expect(selection?.path).toBe('README.md');
+    expect(selection?.mode).toBe('unstaged');
+    expect(onSelectPath).not.toHaveBeenCalled();
+  });
+
   it('commits all changes by default (one-click) and supports deselecting a file', async () => {
     await act(async () => {
       root.render(

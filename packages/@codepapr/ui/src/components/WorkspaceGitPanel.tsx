@@ -11,6 +11,7 @@ import {
 } from '../tools/workspaceToolUtils';
 import {
   buildGitDiffClipboardText,
+  buildGitFileSelection,
   buildSyntheticUntrackedGitDiff,
   canOpenGitFileWorkspaceVersion,
   describeGitChange,
@@ -1124,6 +1125,19 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                       </div>
 
                       <div className="flex flex-wrap items-center justify-end gap-2">
+                        {onSelectGitFile && (
+                          <button
+                            type="button"
+                            onClick={() => onSelectGitFile(buildGitFileSelection(file, mode))}
+                            className="rounded-md border border-indigo-500/40 px-2 py-1 text-[10px] text-indigo-100 transition-colors hover:border-indigo-400 hover:bg-indigo-500/10"
+                          >
+                            {lang === 'en'
+                              ? 'Diff in editor'
+                              : lang === 'zh-TW'
+                                ? '在編輯器中並排對比'
+                                : '在编辑器中并排对比'}
+                          </button>
+                        )}
                         {canOpenWorkspaceFile && onSelectPath && (
                           <button
                             type="button"
