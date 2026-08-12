@@ -13,6 +13,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 import { WorkspaceGitPanel } from './WorkspaceGitPanel';
+import { useAgentStore } from '../store/agentStore';
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
 
@@ -520,6 +521,7 @@ describe('WorkspaceGitPanel', () => {
     });
     await flushEffects();
 
+    const versionBeforeCheckout = useAgentStore.getState().workspaceMutationVersion;
     click(
       Array.from(container.querySelectorAll('button')).find((button) =>
         button.textContent?.includes('Create / Switch')
@@ -536,6 +538,12 @@ describe('WorkspaceGitPanel', () => {
       )
     ).toBe(true);
     expect(container.textContent).toContain('feature/sandbox');
+
+    // N4：分支切换改写磁盘文件，必须 bump mutation version 失效预览缓存。
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    });
+    expect(useAgentStore.getState().workspaceMutationVersion).toBeGreaterThan(versionBeforeCheckout);
 
     click(
       Array.from(container.querySelectorAll('button')).find((button) =>
@@ -570,6 +578,7 @@ describe('WorkspaceGitPanel', () => {
     click(container.querySelector('button[aria-label="Git Delta"]'));
     await flushEffects();
 
+    const versionBefore = useAgentStore.getState().workspaceMutationVersion;
     click(
       Array.from(container.querySelectorAll('button')).find((button) =>
         button.textContent?.includes('Discard Local Changes')
@@ -586,6 +595,12 @@ describe('WorkspaceGitPanel', () => {
     ).toBe(true);
     expect(container.textContent).toContain('There are no uncommitted changes right now.');
     expect(container.textContent).toContain('There are no uncommitted changes right now.');
+
+    // N4：restore 改写磁盘文件，必须 bump mutation version 失效预览缓存。
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    });
+    expect(useAgentStore.getState().workspaceMutationVersion).toBeGreaterThan(versionBefore);
   });
 
   it('exposes commit-comparison buttons that fire onOpenCommitReview with proper scope', async () => {

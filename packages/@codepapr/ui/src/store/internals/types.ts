@@ -337,7 +337,10 @@ export interface AgentActions {
   closeWorkspace: () => void;
   openWorkspace: (path: string) => Promise<void>;
   ensureDefaultWorkspace: () => Promise<string | null>;
-  noteWorkspaceMutation: (paths?: string[]) => void;
+  noteWorkspaceMutation: (
+    paths?: string[],
+    options?: { scheduleDiagnostics?: boolean; autoRepair?: boolean },
+  ) => void;
   setShowSettings: (v: boolean) => void;
   setProjectGraphLoading: (
     loading: boolean,

@@ -25,6 +25,7 @@ import {
   type GitFileSelection,
 } from '../utils/workspaceGitPanel';
 import { pushDebugLog } from '../store/debugLogStore';
+import { useAgentStore } from '../store/agentStore';
 import {
   snapshotChangedFiles,
   snapshotEnsure,
@@ -604,6 +605,9 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
       }
       setBranchName('');
       queueGitRefresh(`${gitBranchDonePrefixText} ${trimmedBranchName}`);
+      // N4：分支切换会改写磁盘文件，必须走 mutation 通道失效预览缓存，
+      // 否则已打开文件永久显示旧内容。
+      useAgentStore.getState().noteWorkspaceMutation();
     } catch (error) {
       setGitActionMessage((error instanceof Error ? error.message : String(error)) || gitActionFailedText);
     } finally {
@@ -625,6 +629,10 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
         throw new Error(result.message);
       }
       queueGitRefresh(gitRestoreDoneText);
+      // N4：restore 改写磁盘文件，必须走 mutation 通道失效预览缓存。
+      useAgentStore.getState().noteWorkspaceMutation(
+        visibleGitFiles.map((file) => file.path)
+      );
     } catch (error) {
       setGitActionMessage((error instanceof Error ? error.message : String(error)) || gitActionFailedText);
     } finally {
@@ -648,6 +656,9 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
           msgs.push(`${lang === 'en' ? 'Restored' : '恢复了'} ${result.filesRestored} ${lang === 'en' ? 'files' : '个文件'}`);
         }
         queueGitRefresh(msgs.join(' · '));
+        // N4：回退到历史/checkpoint 改写磁盘文件，必须走 mutation 通道失效
+        // 预览缓存（restoreExecute 不返回路径列表，仅 bump version 刷新预览）。
+        useAgentStore.getState().noteWorkspaceMutation();
       } else {
         throw new Error(result.error ?? gitActionFailedText);
       }

@@ -466,6 +466,60 @@ describe('CodePreviewPanel', () => {
     });
   });
 
+  it('re-reads the open file when workspaceMutationVersion bumps (N4)', async () => {
+    const baseImpl = invokeMock.getMockImplementation();
+    let exampleReadCount = 0;
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_text_file' && String(args?.relativePath ?? '') === 'scripts/example.py') {
+        exampleReadCount += 1;
+        return {
+          path: 'scripts/example.py',
+          content: exampleReadCount === 1 ? 'def run():\n    return 1\n' : 'def run():\n    return 2\n',
+          bytes: 0,
+        };
+      }
+      return await baseImpl!(command, args);
+    });
+
+    await act(async () => {
+      root.render(
+        <CodePreviewPanel
+          workspacePath="/workspace"
+          selectedPath="scripts/example.py"
+          selectedGitFile={null}
+          selectedLocation={null}
+          lang="en"
+        />
+      );
+    });
+
+    for (let index = 0; index < 5; index += 1) {
+      await flushEffects();
+    }
+
+    expect(exampleReadCount).toBe(1);
+    expect(
+      monacoPropsSpy.mock.calls.some((call) => (call[0] as { value?: string }).value?.includes('return 1'))
+    ).toBe(true);
+
+    // agent 修改文件：mutation version bump（noteWorkspaceMutation 的防抖版本递增）。
+    await act(async () => {
+      useAgentStore.setState((state) => ({
+        ...state,
+        workspaceMutationVersion: state.workspaceMutationVersion + 1,
+      }));
+    });
+
+    for (let index = 0; index < 5; index += 1) {
+      await flushEffects();
+    }
+
+    expect(exampleReadCount).toBeGreaterThanOrEqual(2);
+    expect(
+      monacoPropsSpy.mock.calls.some((call) => (call[0] as { value?: string }).value?.includes('return 2'))
+    ).toBe(true);
+  });
+
   it('keeps routine project and static diagnostics out of the code surface', async () => {
     useAgentStore.setState((state) => ({
       ...state,

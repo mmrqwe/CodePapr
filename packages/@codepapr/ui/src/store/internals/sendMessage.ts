@@ -262,6 +262,26 @@ function buildModeSwitchMessage(mode: WorkMode): UIMessage {
   };
 }
 
+/** 失效并回收当前 agent（app-agent 在飞时改为结算后自毁，不连带杀掉）。
+ *  同步置空 _agent 等字段：取消/出错的回合不会进入 agent 的 logStore
+ *  （worker 取消/出错不提交 delta），复用旧实例会让下一条消息的上下文
+ *  缺少被取消/失败的回合——UI 显示但模型看不到（N3 失忆）。置空后下一条
+ *  消息按 sessionMessages 全量重建，上下文与 UI 一致。 */
+export function invalidateAgentHandle(get: StoreGet, set: StoreSet): void {
+  const stale = get()._agent;
+  if (!stale) return;
+  set({ _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
+  try {
+    if (stale.hasActiveAppAgentRequests?.()) {
+      stale.detachAndCleanupWhenIdle?.();
+    } else {
+      stale.destroy();
+    }
+  } catch {
+    // already torn down
+  }
+}
+
 export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['sendMessage'] {
   return async (input, displayContent, mode = 'agent', images) => {
         const { settings } = get();
@@ -491,6 +511,11 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               get()._agent?.cancel();
             } catch {
               // ignore — we still force-clear UI state below
+            }
+            // 与 cancelMessage 同口径：看门狗取消的回合同样不会进入 logStore，
+            // 必须同步失效 agent，避免下一条消息复用缺上下文的旧实例（N3）。
+            if (get()._agent) {
+              invalidateAgentHandle(get, set);
             }
             set((s) => {
               // 以实际执行回合的会话为准（用户可能已切换到别的会话查看）。
@@ -1895,6 +1920,13 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               });
             } else if (stillCurrentTurn) {
               set({ isLoading: false, loadingSessionId: null });
+              // N3：取消/销毁的回合不会进入 agent 的 logStore。外部动作
+              // （切会话/改设置）销毁 agent 时 store 已同步置空 _agent；
+              // 此处 _agent 非空即本回合仍在使用的实例（含崩溃恢复重建的），
+              // 失效它，下一条消息按 sessionMessages 全量重建。
+              if (get()._agent) {
+                invalidateAgentHandle(get, set);
+              }
             }
             if (assistantMessageId && sid) {
               cleanupStreamingAssistantMessage(set, sid, assistantMessageId);
@@ -1916,6 +1948,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             });
           } else if (stillCurrentTurn) {
             set({ isLoading: false, loadingSessionId: null });
+            // N3：出错的回合不会进入 agent 的 logStore（worker 出错不提交
+            // delta），复用旧实例会让下一条消息丢失本次失败的用户消息。
+            // 失效后按 sessionMessages（含错误提示消息）全量重建。
+            if (get()._agent) {
+              invalidateAgentHandle(get, set);
+            }
           }
 
           if (assistantMessageId && sid) {

@@ -78,7 +78,7 @@ import {
 } from './internals/agentFactory';
 import type { AgentRuntimeHandle } from '../agent/WorkerBackedAgent';
 import { handleWorkspaceMutation } from './internals/backgroundDiagnostics';
-import { createSendMessage } from './internals/sendMessage';
+import { createSendMessage, invalidateAgentHandle } from './internals/sendMessage';
 import { upsertRecentWorkspace, sortRecentWorkspaces } from './internals/recentWorkspaces';
 import { toast } from './toastStore';
 import type {
@@ -754,13 +754,13 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         }
       },
 
-      noteWorkspaceMutation: (paths) => {
+      noteWorkspaceMutation: (paths, options) => {
         handleWorkspaceMutation({
           get,
           set,
           paths,
-          scheduleDiagnostics: true,
-          autoRepair: (paths ?? []).length > 0,
+          scheduleDiagnostics: options?.scheduleDiagnostics ?? true,
+          autoRepair: options?.autoRepair ?? (paths ?? []).length > 0,
         });
       },
 
@@ -1318,6 +1318,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         // 停止按钮只取消当前聊天回合：旧实现调用 cancel() 会连带
         // cancelAllAppAgents()，把独立的 papr app-agent 运行一并杀掉。
         _agent.cancelSession();
+
+        // 失效 agent（N3）：取消的回合不会进入 agent 的 logStore（worker
+        // 取消不提交 delta），复用旧实例会让下一条消息的上下文缺少被取消
+        // 回合——UI 显示但模型看不到。必须与 isLoading 复位同步完成：复位
+        // 后立刻发送的新消息不能撞上仍存活的旧 agent。
+        invalidateAgentHandle(get, set);
 
         set((s) => {
           const sessionId = loadingSessionId ?? s.activeSessionId;

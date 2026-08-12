@@ -425,14 +425,17 @@ function isImagePath(path: string): boolean {
   return IMAGE_EXTENSIONS.has(ext);
 }
 
-async function buildImagePreviewUrl(workspacePath: string, relativePath: string): Promise<string> {
+async function buildImagePreviewUrl(workspacePath: string, relativePath: string, version = 0): Promise<string> {
   const fullPath = await join(workspacePath, relativePath);
   // 权衡说明（#67）：tauri.conf.json 的 assetProtocol scope 为 $HOME/** + /**，
   // 全盘可读——工作区可能位于 $HOME 之外（外置盘/自定义目录），收紧会破坏
   // 非 HOME 工作区的图片预览。风险面受 CSP 约束：asset: 仅出现在 img-src
   // （script/style/media/font 均不含），外部页面无法借 asset 协议执行脚本。
   // 若未来需要收紧，可改为 $HOME/** + $TMPDIR/** 并接受外置盘预览降级。
-  return convertFileSrc(fullPath);
+  // N4：同名文件内容被改写后 URL 不变，WebView 可能命中图片缓存；
+  // 追加版本 query 强制换缓存键（asset 协议按 path 解析，query 无影响）。
+  const url = convertFileSrc(fullPath);
+  return version > 0 ? `${url}?v=${version}` : url;
 }
 
 export function CodePreviewPanel({
@@ -806,7 +809,7 @@ export function CodePreviewPanel({
         setPreviewContent('');
         setPreviewContentPath(selectedPath);
         setPreviewError('');
-        const url = await buildImagePreviewUrl(workspacePath, selectedPath);
+        const url = await buildImagePreviewUrl(workspacePath, selectedPath, workspaceMutationVersion);
         if (!cancelled) {
           setImagePreviewUrl(url);
         }
@@ -853,7 +856,10 @@ export function CodePreviewPanel({
     return () => {
       cancelled = true;
     };
-  }, [activeGitSelection, selectedPath, workspacePath]);
+    // N4：依赖 workspaceMutationVersion——agent 写入/回退等文件变更后，
+    // 已打开文件必须重读刷新（此前只清缓存不重读，预览保持旧内容）。
+    // effect 声明顺序保证清缓存（mutation 版本 effect 在前）先于本读取执行。
+  }, [activeGitSelection, selectedPath, workspaceMutationVersion, workspacePath]);
 
   useEffect(() => {
     if (

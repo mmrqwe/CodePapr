@@ -2743,7 +2743,8 @@ describe('useAgentStore.sendMessage', () => {
           throw new DOMException('Session was cancelled', 'AbortError');
         },
       );
-      const retryAgent = createMockAgent({ chat: cancelledChat, isCrashed: false });
+      const retryDestroy = vi.fn();
+      const retryAgent = createMockAgent({ chat: cancelledChat, isCrashed: false, destroy: retryDestroy });
       createAgentMock.mockReturnValue(retryAgent);
       setCrashRecoveryState(crashing);
 
@@ -2752,8 +2753,10 @@ describe('useAgentStore.sendMessage', () => {
       // 首次崩溃重建一次后，重试中的取消立即终止恢复链：不再继续重建。
       expect(createAgentMock).toHaveBeenCalledTimes(1);
       expect(createMainThreadAgentMock).not.toHaveBeenCalled();
-      // 取消时 agent 未崩溃：保留（非崩溃语义）。
-      expect(useAgentStore.getState()._agent).toBe(retryAgent);
+      // 取消的回合不会进入 logStore：即使 agent 未崩溃也必须失效（N3），
+      // 下一条消息按 sessionMessages 全量重建，避免模型上下文缺被取消回合。
+      expect(useAgentStore.getState()._agent).toBeNull();
+      expect(retryDestroy).toHaveBeenCalledTimes(1);
       expect(useAgentStore.getState().isLoading).toBe(false);
     });
 
@@ -2779,18 +2782,22 @@ describe('useAgentStore.sendMessage', () => {
       expect(sessionMessages.filter((m) => m.role === 'error')).toHaveLength(0);
     });
 
-    it('keeps the agent on a normal user cancel (not crashed)', async () => {
+    it('invalidates the agent on a normal user cancel (N3: cancelled turn never enters the logStore)', async () => {
       const chat = vi.fn(
         async (): Promise<never> => {
           throw new DOMException('Session was cancelled', 'AbortError');
         },
       );
-      const healthy = createMockAgent({ chat, isCrashed: false });
+      const destroy = vi.fn();
+      const healthy = createMockAgent({ chat, isCrashed: false, destroy });
       setCrashRecoveryState(healthy);
 
       await useAgentStore.getState().sendMessage('任务', '任务', 'agent');
 
-      expect(useAgentStore.getState()._agent).toBe(healthy);
+      // 取消的回合不会进入 agent 的 logStore：保留旧实例会让下一条消息的
+      // 上下文缺少被取消回合（UI 显示但模型看不到），必须失效重建。
+      expect(useAgentStore.getState()._agent).toBeNull();
+      expect(destroy).toHaveBeenCalledTimes(1);
       expect(useAgentStore.getState().isLoading).toBe(false);
     });
 
@@ -2881,6 +2888,46 @@ describe('useAgentStore.sendMessage', () => {
 
       expect(powerCalls).toEqual(['prevent_idle_sleep', 'allow_idle_sleep']);
       expect(useAgentStore.getState().isLoading).toBe(false);
+    });
+
+    it('invalidates the agent after a turn error so the next message rebuilds with full context (N3)', async () => {
+      invokeMock.mockImplementation(async (command: string): Promise<Record<string, unknown>> => {
+        if (command === 'prevent_idle_sleep' || command === 'allow_idle_sleep') {
+          return {};
+        }
+        if (command === 'list_workspace_files') {
+          return { root: '', entries: [], truncated: false };
+        }
+        throw new Error(`Unexpected invoke call: ${command}`);
+      });
+      const chat = vi.fn(
+        async (): Promise<never> => {
+          throw new Error('provider exploded');
+        },
+      );
+      const destroy = vi.fn();
+      useAgentStore.setState((state) => ({
+        ...state,
+        isLoading: false,
+        _agent: createMockAgent({ chat, destroy }),
+        _agentModel: 'deepseek-v4-pro',
+        _agentPromptKey: null,
+        _agentSessionId: 'session-1',
+        _gitReady: false,
+      }));
+
+      await useAgentStore.getState().sendMessage('失败的任务', '失败的任务', 'agent');
+
+      const state = useAgentStore.getState();
+      expect(state.isLoading).toBe(false);
+      // 出错的回合不会进入 agent 的 logStore：必须失效 agent，下一条消息
+      // 按 sessionMessages（含错误提示）全量重建，模型才不会丢失失败的用户消息。
+      expect(state._agent).toBeNull();
+      expect(state._agentSessionId).toBeNull();
+      expect(destroy).toHaveBeenCalledTimes(1);
+      // 错误消息已入 UI 会话（重建上下文的依据）
+      const sessionMessages = state.sessionMessages['session-1'] ?? [];
+      expect(sessionMessages.some((m) => m.role === 'error')).toBe(true);
     });
   });
 });
@@ -3535,7 +3582,8 @@ describe('per-session execution and input state', () => {
 
   it('cancelMessage finalizes the loading session even if it is not the active one', () => {
     const cancelSession = vi.fn();
-    const agent = createMockAgent({ cancel: cancelSession, cancelSession });
+    const destroy = vi.fn();
+    const agent = createMockAgent({ cancel: cancelSession, cancelSession, destroy });
     setTwoSessionState({
       activeSessionId: 's-b',
       messages: [{ id: 'b-msg', role: 'user', content: 'B 的消息', timestamp: 1 }],
@@ -3559,6 +3607,11 @@ describe('per-session execution and input state', () => {
     expect(state.sessionMessages['s-a']?.[0]?.isStreaming).toBe(false);
     // 当前查看会话（s-b）的消息镜像不受影响
     expect(state.messages.map((m) => m.id)).toEqual(['b-msg']);
+    // N3 回归：取消的回合不会进入 agent 的 logStore，必须同步失效 agent，
+    // 下一条消息按 sessionMessages 全量重建，否则模型上下文缺被取消回合。
+    expect(state._agent).toBeNull();
+    expect(state._agentSessionId).toBeNull();
+    expect(destroy).toHaveBeenCalledTimes(1);
   });
 
   it('deleteSession cancels a running session and clears its loading/input state', () => {

@@ -522,6 +522,14 @@ export function CodingWorkbench({
         }
 
         lastTreeSignatureRef.current = nextSignature;
+        // N4：原生层文件变化（git 面板操作、外部编辑器等未走 agent 写入
+        // 通道的改动）也必须 bump mutation version，让已打开文件的预览与
+        // 预暖按 version 失效重读。无路径列表：不调度后台诊断/自动修复
+        // （agent 写入路径已单独调度），避免外部编辑器每次保存触发全量诊断。
+        useAgentStore.getState().noteWorkspaceMutation(undefined, {
+          scheduleDiagnostics: false,
+          autoRepair: false,
+        });
         shallowEntriesRef.current = nextShallow;
         dirEntriesRef.current = mergedDirEntries;
         setFolderError('');
