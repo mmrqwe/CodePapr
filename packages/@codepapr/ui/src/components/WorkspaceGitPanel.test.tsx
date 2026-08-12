@@ -549,6 +549,83 @@ describe('WorkspaceGitPanel', () => {
     expect(container.textContent).toContain('There are no uncommitted changes right now.');
   });
 
+  it('N17：>24 个改动文件时提交集与可见选择集一致（隐藏文件不被强制提交）', async () => {
+    // 30 个改动文件：列表只显示前 24 个（必须在 render 前覆盖 mock，
+    // git status 在组件挂载时加载）
+    const baseImpl = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'git_status') {
+        return {
+          available: true,
+          isRepo: true,
+          branch: 'main',
+          headShort: 'aaaaaaa',
+          entries: Array.from({ length: 30 }, (_, i) => ({
+            path: `src/file-${String(i + 1).padStart(2, '0')}.ts`,
+            oldPath: null,
+            indexStatus: ' ',
+            worktreeStatus: 'M',
+            isUntracked: false,
+          })),
+          message: null,
+        };
+      }
+      return await baseImpl(command, args);
+    });
+
+    await act(async () => {
+      root.render(
+        <WorkspaceGitPanel
+          workspacePath="/workspace"
+          lang="en"
+          selectedPath={null}
+          selectedGitFile={null}
+          onSelectGitFile={() => undefined}
+        />
+      );
+    });
+
+    click(container.querySelector('button[aria-label="Git Delta"]'));
+    await flushEffects();
+
+    // 选择集以可见列表为准
+    expect(container.textContent).toContain('24 of 24 selected');
+    expect(container.textContent).toContain('6 more changed file(s) are not shown');
+
+    const commitBox = container.querySelector('#workspace-git-commit-message') as HTMLTextAreaElement | null;
+    expect(commitBox).not.toBeNull();
+    act(() => {
+      const setValue = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value'
+      )?.set;
+      setValue?.call(commitBox, 'commit visible only');
+      commitBox!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flushEffects();
+
+    click(
+      Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('Commit Selected')
+      ) ?? null
+    );
+    await flushEffects();
+    await flushEffects();
+
+    const commitCall = invokeMock.mock.calls.find(
+      ([command, payload]) =>
+        command === 'git_commit' && payload?.message === 'commit visible only'
+    );
+    expect(commitCall).toBeDefined();
+    const pathspecs = (commitCall?.[1] as { pathspecs?: string[] })?.pathspecs ?? [];
+    expect(pathspecs).toHaveLength(24);
+    expect(pathspecs.includes('src/file-01.ts')).toBe(true);
+    expect(pathspecs.includes('src/file-24.ts')).toBe(true);
+    // N17：第 25 个之后的文件不再被静默强制提交
+    expect(pathspecs.includes('src/file-25.ts')).toBe(false);
+    expect(pathspecs.includes('src/file-30.ts')).toBe(false);
+  });
+
   it('creates a sandbox branch from the selected commit and supports safe rollback', async () => {
     await act(async () => {
       root.render(

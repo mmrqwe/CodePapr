@@ -385,9 +385,13 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     gitStatus?.available && gitStatus.isRepo ? listAllChangedGitFiles(visibleGitFiles) : [];
   const visibleChangedFiles = changedGitFiles.slice(0, MAX_GIT_CHANGED_FILES);
   const changedCount = changedGitFiles.length;
-  const selectedChangedFiles = changedGitFiles.filter((file) => !deselectedPaths.has(file.path));
+  // N17：列表只展示前 MAX_GIT_CHANGED_FILES 个文件，选择集与提交集必须一致——
+  // 提交只包含「已显示且勾选」的文件。旧实现基于全量 changedGitFiles 过滤勾选，
+  // 第 25 个之后用户看不到、也无法取消勾选的文件被静默强制提交。
+  const hiddenChangedCount = Math.max(0, changedGitFiles.length - visibleChangedFiles.length);
+  const selectedChangedFiles = visibleChangedFiles.filter((file) => !deselectedPaths.has(file.path));
   const selectedCount = selectedChangedFiles.length;
-  const allSelected = selectedCount === changedGitFiles.length && changedGitFiles.length > 0;
+  const allSelected = selectedCount === visibleChangedFiles.length && visibleChangedFiles.length > 0;
   const historyEntries = gitHistory?.entries ?? [];
   const filteredHistoryEntries = historyEntries.filter((entry) => {
     if (historyFilter === 'all') return true;
@@ -1406,7 +1410,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                         {(t.workspaceGitSelectedCount ||
                           (lang === 'en' ? '{{count}} of {{total}} selected' : '已选 {{count}} / {{total}}'))
                           .replace('{{count}}', String(selectedCount))
-                          .replace('{{total}}', String(changedGitFiles.length))}
+                          .replace('{{total}}', String(visibleChangedFiles.length))}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1449,11 +1453,20 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                           : `${gitCommitSelectedActionText} (${selectedCount})`}
                       </button>
                     </div>
+                    {hiddenChangedCount > 0 && (
+                      <p className="text-[10px] leading-relaxed text-amber-300/80">
+                        {lang === 'en'
+                          ? `${hiddenChangedCount} more changed file(s) are not shown. This commit only includes the listed files you selected.`
+                          : lang === 'zh-TW'
+                            ? `另有 ${hiddenChangedCount} 個改動檔案未顯示。本次提交僅包含列表中已顯示且勾選的檔案。`
+                            : `另有 ${hiddenChangedCount} 个改动文件未显示。本次提交仅包含列表中已显示且勾选的文件。`}
+                      </p>
+                    )}
                   </div>
 
-                  {changedGitFiles.length > visibleChangedFiles.length && (
+                  {hiddenChangedCount > 0 && (
                     <div className="text-[10px] text-slate-500">
-                      +{changedGitFiles.length - visibleChangedFiles.length}
+                      +{hiddenChangedCount}
                     </div>
                   )}
                   {renderGitFileList(visibleChangedFiles)}
