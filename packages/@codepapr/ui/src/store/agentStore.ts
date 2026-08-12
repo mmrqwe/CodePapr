@@ -344,6 +344,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _persistenceError: null,
       _checkpointSeq: 0,
       _turnSeq: 0,
+      _stopRequestedSeq: 0,
       _pendingMemoryConsolidation: false,
       _latestContextSnapshot: null,
       _currentMode: 'agent',
@@ -1417,17 +1418,24 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         // （在飞的那条命令/LLM 调用本身不可中止，完成后立即停下）。
         useGoalStore.getState().abortGoal();
 
-        if (!isLoading || !_agent) return;
+        if (!isLoading) return;
 
-        // 停止按钮只取消当前聊天回合：旧实现调用 cancel() 会连带
-        // cancelAllAppAgents()，把独立的 papr app-agent 运行一并杀掉。
-        _agent.cancelSession();
+        // N11：agent 创建前的前置 await 阶段（MCP 发现/图缓存等，可达数十
+        // 秒）没有在飞的 agent 请求可取消——记录停止请求序号，sendMessage
+        // 的前置 await 检查到变化即抛 AbortError 终止回合。
+        set({ _stopRequestedSeq: get()._stopRequestedSeq + 1 });
 
-        // 失效 agent（N3）：取消的回合不会进入 agent 的 logStore（worker
-        // 取消不提交 delta），复用旧实例会让下一条消息的上下文缺少被取消
-        // 回合——UI 显示但模型看不到。必须与 isLoading 复位同步完成：复位
-        // 后立刻发送的新消息不能撞上仍存活的旧 agent。
-        invalidateAgentHandle(get, set);
+        if (_agent) {
+          // 停止按钮只取消当前聊天回合：旧实现调用 cancel() 会连带
+          // cancelAllAppAgents()，把独立的 papr app-agent 运行一并杀掉。
+          _agent.cancelSession();
+
+          // 失效 agent（N3）：取消的回合不会进入 agent 的 logStore（worker
+          // 取消不提交 delta），复用旧实例会让下一条消息的上下文缺少被取消
+          // 回合——UI 显示但模型看不到。必须与 isLoading 复位同步完成：复位
+          // 后立刻发送的新消息不能撞上仍存活的旧 agent。
+          invalidateAgentHandle(get, set);
+        }
 
         set((s) => {
           const sessionId = loadingSessionId ?? s.activeSessionId;

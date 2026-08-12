@@ -313,6 +313,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         // 回合启动时的工作区路径（finally 中关闭浏览器页面用：切工作区后
         // 页面仍属于回合启动时的工作区）。
         let turnWorkspacePath = '';
+        // N11：捕获启动时的停止请求序号。cancelMessage 在前置 await 阶段
+        // （agent 创建前）无法取消任何在飞请求，只能递增该序号；本回合在
+        // 每个前置 await 之后检查序号变化即终止。
+        const stopSeqAtStart = get()._stopRequestedSeq;
 
         let effectiveInput = input;
         let effectiveDisplay = displayContent;
@@ -603,6 +607,16 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           turnSeq = get()._turnSeq + 1;
           set({ _turnSeq: turnSeq });
 
+          // N11：前置 await 阶段（agent 创建前）的停止检查器——cancelMessage
+          // 在此阶段没有在飞的 agent 请求可取消，只能递增 _stopRequestedSeq；
+          // 本回合在每次前置 await 之后检查序号变化即抛 AbortError 终止。
+          const ensureNotStopped = () => {
+            if (get()._stopRequestedSeq !== stopSeqAtStart) {
+              throw new DOMException('Turn was cancelled before the agent started', 'AbortError');
+            }
+          };
+          ensureNotStopped();
+
           // ── 消息加载失败守卫 ──
           // 该会话的消息此前从 DB 读取失败（内存中是空视图）。若直接在空视图上
           // 追加并保存，全量替换语义会把 DB 里该会话的历史消息全部抹掉。
@@ -612,6 +626,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             try {
               // 读前排空挂起保存队列，避免重载读到旧数据（与 openWorkspace 对齐）。
               await waitForPendingProjectStateSave(workspacePath);
+              ensureNotStopped();
               const reloaded = (await loadSessionMessages(
                 workspacePath,
                 guardSid
@@ -625,6 +640,11 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 },
               }));
             } catch (reloadErr) {
+              // N11：停止请求（前置 await 阶段）必须原样向上传播，不得被当作
+              // 重载失败吞掉（否则停止无效且弹错误提示）。
+              if (reloadErr instanceof DOMException && reloadErr.name === 'AbortError') {
+                throw reloadErr;
+              }
               console.error('[CodePapr] 会话消息重载失败，拒绝发送以防覆盖历史:', reloadErr);
               appendInfoMessage(
                 set,
@@ -680,13 +700,15 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               'load_projectgraph_cache',
               { workspacePath },
             );
+            ensureNotStopped();
             if (cachedRaw) {
               const cacheData = JSON.parse(cachedRaw);
               if (cacheData?.projectGraph) {
                 projectGraphBootstrapSummary = buildProjectGraphBootstrapSummary(cacheData.projectGraph);
               }
             }
-          } catch {
+          } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') throw err;
             // Cache not available - proceed without
           }
           let memorySection: string | undefined;
@@ -699,8 +721,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 maxBytes: 50_000,
               }
             );
+            ensureNotStopped();
             memorySection = memoryResult.content?.trim();
-          } catch {
+          } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') throw err;
             // No memory file - proceed without
           }
           if (planMemoryConsolidation(memorySection, MEMORY_CONSOLIDATION_MAX_LINES)) {
@@ -751,6 +775,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           if (normalizedSettings.mcp.enabled && normalizedSettings.mcp.exposeTools) {
             try {
               const loadedMcpTools = await loadMcpToolDefinitions(normalizedSettings.mcp);
+              ensureNotStopped();
               mcpToolDefinitions = loadedMcpTools.definitions;
               mcpToolMappings = loadedMcpTools.toolMappings;
               if (loadedMcpTools.errors.length > 0) {
@@ -759,6 +784,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 toast.warning(`MCP 初始化失败 (${loadedMcpTools.errors.length}): ${names}`, { durationMs: 8000 });
               }
             } catch (err) {
+              if (err instanceof DOMException && err.name === 'AbortError') throw err;
               console.warn('[MCP] Tool discovery failed:', err);
             }
           }
@@ -981,6 +1007,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 userMessageText: previewSource,
               });
               const cp = await snapshotCreate(get().workspacePath, label);
+              ensureNotStopped();
               if (cp) {
                 set((s) => ({
                   _messageCheckpoints: {
@@ -1011,6 +1038,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 // Rust side still logs "0 files to snapshot" to stderr for debug.)
               }
             } catch (err) {
+              // N11：停止请求必须向上传播，不得被当作 checkpoint 失败吞掉。
+              if (err instanceof DOMException && err.name === 'AbortError') {
+                throw err;
+              }
               const msg = err instanceof Error ? err.message : String(err);
               console.warn('[CodePapr] checkpoint 创建失败:', msg);
               set({ _checkpointError: msg });

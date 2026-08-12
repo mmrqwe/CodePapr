@@ -3184,6 +3184,81 @@ describe('resetToMessage 撤销（N8）', () => {
   });
 });
 
+describe('N11 前置 await 阶段停止', () => {
+  function setTwoSessionStateHelper() {
+    useAgentStore.setState((state) => ({
+      ...state,
+      workspacePath: '/tmp/codepapr-n11',
+      sessions: [
+        { id: 's-a', name: 'A', provider: 'deepseek' as const, model: 'deepseek-v4-pro', createdAt: 2, updatedAt: 2 },
+      ],
+      activeSessionId: 's-a',
+      messages: [{ id: 'u-1', role: 'user', content: '前置消息', timestamp: 1 }],
+      sessionMessages: {
+        's-a': [{ id: 'u-1', role: 'user', content: '前置消息', timestamp: 1 }],
+      },
+      isLoading: true,
+      loadingSessionId: 's-a',
+      _agent: null,
+      _agentSessionId: null,
+      _stopRequestedSeq: 0,
+    }));
+  }
+
+  it('cancelMessage 无 agent 时生效（复位 loading + 递增停止序号，N11）', () => {
+    setTwoSessionStateHelper();
+
+    useAgentStore.getState().cancelMessage();
+
+    const state = useAgentStore.getState();
+    expect(state.isLoading).toBe(false);
+    expect(state.loadingSessionId).toBeNull();
+    expect(state._stopRequestedSeq).toBe(1);
+  });
+
+  it('前置 await 完成后回合立即终止（静默停止，无错误消息，N11）', async () => {
+    let resolveGraphCache: (value: unknown) => void = () => undefined;
+    invokeMock.mockImplementation(async (command: string): Promise<Record<string, unknown>> => {
+      if (command === 'load_projectgraph_cache') {
+        return new Promise<Record<string, unknown>>((resolve) => {
+          resolveGraphCache = resolve as (value: unknown) => void;
+        });
+      }
+      if (command === 'read_text_file') {
+        return { path: '.CodePapr/memory.md', content: '', bytes: 0 };
+      }
+      if (command === 'prevent_idle_sleep' || command === 'allow_idle_sleep') {
+        return {};
+      }
+      if (command === 'list_workspace_files') {
+        return { root: '', entries: [], truncated: false };
+      }
+      throw new Error(`Unexpected invoke call: ${command}`);
+    });
+    setTwoSessionStateHelper();
+
+    const sendPromise = useAgentStore.getState().sendMessage('任务', '任务', 'agent');
+    await waitForMacrotask();
+    await waitForMacrotask();
+    expect(useAgentStore.getState().isLoading).toBe(true);
+
+    // 前置 await（图缓存）挂起期间点停止：无在飞 agent 请求，只能递增序号
+    useAgentStore.getState().cancelMessage();
+    expect(useAgentStore.getState().isLoading).toBe(false);
+    expect(useAgentStore.getState()._stopRequestedSeq).toBe(1);
+
+    // 挂起的 await 返回后，回合必须立即终止而不是继续创建 agent 执行
+    resolveGraphCache(null);
+    await sendPromise;
+
+    expect(useAgentStore.getState().isLoading).toBe(false);
+    const sessionMessages = useAgentStore.getState().sessionMessages['s-a'] ?? [];
+    expect(sessionMessages.filter((m) => m.role === 'error')).toHaveLength(0);
+    // 未创建任何 agent 执行（没有 assistant 回复）
+    expect(sessionMessages.filter((m) => m.role === 'assistant')).toHaveLength(0);
+  });
+});
+
 describe('useAgentStore.closeWorkspace', () => {
   it('清空 workspacePath 及所有相关状态（含 projectGraphLoading/Phase）', () => {
     useAgentStore.setState({

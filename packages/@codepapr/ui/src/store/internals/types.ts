@@ -334,6 +334,11 @@ export interface AgentState {
    *  的 catch）只有在序号未变时才允许复位 isLoading——否则取消 ACK 晚于新回合
    *  启动到达时，旧回合的收尾会踩掉新回合的 loading 态，破坏单执行模型。 */
   _turnSeq: number;
+  /** N11：停止请求序号。cancelMessage 置位（+1）——覆盖 agent 创建前的
+   *  前置 await 阶段（MCP 发现/图缓存等），此时没有在飞的 agent 请求可取消，
+   *  sendMessage 的前置 await 检查到序号变化即抛 AbortError 终止回合。
+   *  运行时字段，不持久化。 */
+  _stopRequestedSeq: number;
   _pendingMemoryConsolidation: boolean;
   _latestContextSnapshot: { sessionId: string; snapshot: IContextSnapshot } | null;
   _currentMode: WorkMode;
