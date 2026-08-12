@@ -17,6 +17,22 @@ interface EmbeddedBrowserPanelProps {
   lang?: Lang;
 }
 
+/** N19：无 scheme 的地址默认补全协议。环回地址（localhost/127.x/[::1]）
+ *  一律默认 http——本地 dev server 都是 http，强升 https 会导致导航失败
+ *  且完全静默。其余地址保持 https 默认。 */
+export function normalizeEmbeddedBrowserUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) {
+    return trimmed;
+  }
+  const isLoopback =
+    /^(localhost|127(\.\d{1,3}){3}|\[::1\]|\[::\])(:\d+)?([/?#]|$)/i.test(trimmed);
+  return `${isLoopback ? 'http' : 'https'}://${trimmed}`;
+}
+
 export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPanelProps) {
   const t = getTranslation(lang);
   const pageSession = useBrowserViewStore((state) => state.pageSession);
@@ -108,7 +124,7 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
     async (rawUrl: string) => {
       const trimmed = rawUrl.trim();
       if (!trimmed) return;
-      const url = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+      const url = normalizeEmbeddedBrowserUrl(trimmed);
       setIsNavigating(true);
       setActionError('');
       try {

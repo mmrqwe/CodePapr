@@ -690,8 +690,10 @@ export default function App() {
             )}
 
             {browserPanelOpen && browserEngine === 'embedded' && workspacePath && (
-              <div className="absolute inset-0 z-40 flex items-center justify-center bg-[#07090d]/70 p-6 backdrop-blur-sm">
-                <div className="h-full max-h-[88vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#0f1117] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
+              <div className="absolute inset-0 z-40 flex items-center justify-center bg-[#07090d]/70 p-3 backdrop-blur-sm">
+                {/* N19：内置浏览器应只比主界面小一点——旧实现 max-w-6xl +
+                    max-h-[88vh] 在大屏上过小。现在仅保留小边距，随窗口伸缩。 */}
+                <div className="h-full w-full overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#0f1117] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
                   <Suspense fallback={null}>
                     <EmbeddedBrowserPanel workspacePath={workspacePath} lang={settings.lang} />
                   </Suspense>
