@@ -154,6 +154,61 @@ describe('CodingWorkbench', () => {
     expect(container.textContent).toContain('NEW.md');
   });
 
+  it('N21：文件树加载失败时显示错误与重试入口，而非误导性的「没有文件」', async () => {
+    let failListing = true;
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_workspace_files') {
+        if (failListing) {
+          throw new Error('permission denied');
+        }
+        return {
+          root: '/tmp/codepapr-workspace',
+          entries: [{ path: 'README.md', name: 'README.md', isDir: false, bytes: 12 }],
+          truncated: false,
+        };
+      }
+      // 自愈 effect 只对默认项目生效：返回不同路径跳过重建
+      if (command === 'ensure_default_project') {
+        return { path: '/tmp/some-other-project' };
+      }
+      return undefined;
+    });
+
+    await act(async () => {
+      root.render(
+        <CodingWorkbench
+          selectedPath={null}
+          selectedGitFile={null}
+          selectedLocation={null}
+          previewPlacement="hidden"
+          onSelectPath={() => undefined}
+        />
+      );
+    });
+    await flushEffects();
+    await flushEffects();
+
+    // 加载失败：绝不显示「没有文件」，而是可见的错误与重试入口
+    expect(container.textContent).not.toContain('没有文件');
+    expect(container.textContent).toContain('文件列表加载失败');
+    expect(container.textContent).toContain('permission denied');
+
+    // 重试成功：树恢复显示
+    failListing = false;
+    const retry = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('重新加载')
+    );
+    expect(retry).not.toBeNull();
+    act(() => {
+      retry?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+    await flushEffects();
+
+    expect(container.textContent).toContain('README.md');
+    expect(container.textContent).not.toContain('文件列表加载失败');
+  });
+
   it('does not schedule any startup LSP warmup from the workbench shell', async () => {
     vi.useFakeTimers();
 

@@ -941,8 +941,26 @@ export function CodingWorkbench({
           </span>
         </div>
       )}
-      {!isLoadingTree && entries.length === 0 && (
+      {!isLoadingTree && entries.length === 0 && !folderError && (
         <div className="px-2 py-6 text-center text-xs text-slate-600">{t.noFiles}</div>
+      )}
+      {!isLoadingTree && folderError && (
+        <div className="flex flex-col items-center gap-2 px-2 py-6 text-center">
+          <p className="text-xs leading-relaxed text-red-300">
+            {settings.lang === 'en'
+              ? `Failed to load the file list: ${folderError}`
+              : settings.lang === 'zh-TW'
+                ? `檔案列表載入失敗：${folderError}`
+                : `文件列表加载失败：${folderError}`}
+          </p>
+          <button
+            type="button"
+            onClick={() => void loadProject(workspacePath)}
+            className="rounded-md border border-red-400/50 px-2.5 py-1 text-[11px] text-red-200 transition-colors hover:bg-red-500/10"
+          >
+            {t.reloadProject}
+          </button>
+        </div>
       )}
       {treeNodes.map((node) => (
         <FileTreeRow
