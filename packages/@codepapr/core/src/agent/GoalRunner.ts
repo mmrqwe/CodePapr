@@ -20,6 +20,7 @@ import type {
   GoalIterationFeedback,
   ConditionResult,
   ConditionClauseResult,
+  QuestionData,
 } from '@codepapr/types';
 
 export interface WorkerTurnResult {
@@ -29,6 +30,9 @@ export interface WorkerTurnResult {
   transcript: string;
   /** 本轮消耗的 output tokens */
   outputTokens: number;
+  /** Worker 在本轮通过 question 工具向用户提问（自主循环无法自答，
+   *  循环应暂停并交给用户） */
+  question?: QuestionData;
 }
 
 export interface GoalRunnerCallbacks {
@@ -156,6 +160,16 @@ export class GoalRunner {
 
       this.state.totalOutputTokens += workerResult.outputTokens;
       this.state.elapsedMs = Date.now() - this.state.startedAt;
+
+      // Worker 通过 question 工具向用户提问：自主循环无法自行回答，
+      // 暂停循环并把问题交回 UI（status=awaiting_input），由用户的回答
+      // 开启新回合继续。#24——旧实现静默丢弃提问，循环带空输出空转。
+      if (workerResult.question) {
+        this.state.question = workerResult.question;
+        this.state.status = 'awaiting_input';
+        this.notifyAndPersist();
+        return this.getState();
+      }
 
       // ── plan-first 模式：第 1 轮只规划，跳过评估 ──────────────
       if (this.limits.planFirst && iteration === 0) {

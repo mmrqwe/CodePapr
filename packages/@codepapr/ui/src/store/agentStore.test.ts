@@ -1050,7 +1050,7 @@ describe('useAgentStore.sendMessage', () => {
     const originalSendMessage = useAgentStore.getState().sendMessage;
 
     try {
-      const sendMessageMock = vi.fn(async (..._args: unknown[]) => undefined);
+      const sendMessageMock = vi.fn(async (..._args: unknown[]) => true);
       invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
         if (command === 'list_workspace_files') {
           return {

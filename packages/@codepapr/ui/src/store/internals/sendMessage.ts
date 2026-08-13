@@ -313,6 +313,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         let turnSessionId: string | null = null;
         // 本回合的序号（catch 中判断是否仍是当前回合，同 turnSessionId 需在 try 外声明）。
         let turnSeq = 0;
+        // #26：消息是否已被消费（乐观追加进会话 = 草稿已被使用）。返回 false
+        // 表示消息在追加前被拒绝（slash 模板展开失败等），调用方可恢复输入框
+        // 草稿供用户修改重试。
+        let messageConsumed = false;
         // 回合启动时的工作区路径（finally 中关闭浏览器页面用：切工作区后
         // 页面仍属于回合启动时的工作区）。
         let turnWorkspacePath = '';
@@ -338,7 +342,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               ? await listCommandDefinitions(invoke, workspaceForSlash).catch(() => [] as CommandDefinition[])
               : [];
             appendInfoMessage(set, buildCommandHelpMessage(customCommands, normalizedSettings.lang));
-            return;
+            return true;
           }
           if (lower === 'compact') {
             // 以 await 前捕获的会话为准：压缩模型调用期间用户可能切换会话，
@@ -354,7 +358,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 compactSessionId,
                 { resetLoading: false }
               );
-              return;
+              return true;
             }
             compactCheckpointInFlight = true;
             // N22：进度反馈——压缩是 LLM 调用（可达数十秒），先给出可见提示。
@@ -377,7 +381,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 compactSessionId,
                 { resetLoading: false }
               );
-              return;
+              return true;
             }
             if (checkpointResult) {
               if (checkpointResult.cacheStats && compactSessionId) {
@@ -472,7 +476,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             }
             set({ _pendingMemoryConsolidation: true });
             compactCheckpointInFlight = false;
-            return;
+            return true;
           }
           if (lower === 'goal') {
             const goalArgs = slash.args.join(' ');
@@ -490,7 +494,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 ? err.message
                 : getTranslation(normalizedSettings.lang).goalParseErrorPrefix.replace('{{error}}', errorMessage(err));
               appendInfoMessage(set, msg);
-              return;
+              return false;
             }
           }
           if (!isGoalMode && workspaceForSlash) {
@@ -509,7 +513,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 effectiveDisplay = input;
               } catch (err) {
                 appendErrorMessage(set, formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'));
-                return;
+                return false;
               }
             }
           } else if (!isGoalMode) {
@@ -524,7 +528,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 effectiveDisplay = input;
               } catch (err) {
                 appendErrorMessage(set, formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'));
-                return;
+                return false;
               }
             }
           }
@@ -534,7 +538,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         if (settingsError) {
           appendErrorMessage(set, settingsError);
           saveCurrentProjectState(get());
-          return;
+          return false;
         }
 
         // 兜底：若当前没有打开任何项目（如用户中途关闭了工作区），自动创建并打开
@@ -542,6 +546,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         // 退化到原有的 requireWorkspace 报错行为。
         if (!get().workspacePath.trim()) {
           await get().ensureDefaultWorkspace();
+          // #28：创建默认项目失败时给出明确提示并拒绝发送——旧实现静默继续，
+          // 后续文件工具只会报"没有可用的工作区"，用户无从下手。
+          if (!get().workspacePath.trim()) {
+            appendErrorMessage(set, getTranslation(normalizedSettings.lang).ensureDefaultWorkspaceFailed);
+            return false;
+          }
         }
 
         // Idle safety net: guarantees isLoading/isStreaming can never stay stuck
@@ -691,7 +701,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 set,
                 getTranslation(normalizedSettings.lang).sessionHistoryLoadFailed
               );
-              return;
+              return false;
             }
           }
 
@@ -731,6 +741,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               loadingSessionId: optimisticSid,
             };
           });
+          // 点不可逆：消息已进入会话，草稿视为已消费。
+          messageConsumed = true;
           saveCurrentProjectState(get());
           armStoreIdle();
 
@@ -1207,8 +1219,11 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   return {
                     ...message,
                     reasoningContent: `${message.reasoningContent ?? ''}${event.delta}`,
-                    isStreaming: true,
-                    statusText: undefined,
+                    // #23：迟到 delta（用户取消后 / 回合收尾后到达）不得把消息
+                    // 拉回流式态——cancelMessage 已置 isStreaming:false，
+                    // 240ms 缓冲定时器晚到的 delta 会造成"已停止又闪回执行中"。
+                    isStreaming: message.isStreaming,
+                    statusText: message.isStreaming ? undefined : message.statusText,
                   };
                 }
 
@@ -1216,8 +1231,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   return {
                     ...message,
                     content: `${message.content}${event.delta}`,
-                    isStreaming: true,
-                    statusText: undefined,
+                    isStreaming: message.isStreaming,
+                    statusText: message.isStreaming ? undefined : message.statusText,
                   };
                 }
 
@@ -1407,8 +1422,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             useGoalStore.getState().setGoalActive(goalCondition, goalUserText);
             const verifierProvider = buildProviderInstance(normalizedSettings);
             const verifierProviderName = resolveProviderName(normalizedSettings);
-            /** 追踪最后一轮 Worker 的输出，用于最终回复 */
-            let lastWorkerContent = '';
 
             const goalRunner = new GoalRunner({
               condition: goalCondition,
@@ -1479,7 +1492,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     }
                     throw err;
                   }
-                  lastWorkerContent = response.content;
 
                   sessionLogStartIndex =
                     typeof agent?.getSession === 'function'
@@ -1513,6 +1525,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     content: response.content,
                     transcript,
                     outputTokens: response.cacheStats?.outputTokens ?? 0,
+                    // #24：Worker 提问必须透传给 GoalRunner——旧实现只取
+                    // content/transcript，提问被静默丢弃、循环空转。
+                    question: response.question,
                   };
                 },
                 runVerifier: async (transcript, conditionResult) => {
@@ -1660,7 +1675,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               appendErrorMessage(set, goalErrMsg);
               accumulateTurnRuntime(activeSessionId);
               saveCurrentProjectState(get());
-              return;
+              return false;
             }
             useGoalStore.getState().clearGoal();
 
@@ -1675,6 +1690,14 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   : `✅ 目标达成（${goalResult.iteration} 轮，${Math.round(goalResult.elapsedMs / 1000)} 秒）`;
             } else if (goalResult.status === 'interrupted') {
               goalStatusLine = isEn ? '⏹ Goal interrupted by user.' : isTw ? '⏹ 目標已中斷。' : '⏹ 目标已中断。';
+            } else if (goalResult.status === 'awaiting_input') {
+              // #24：Worker 在循环中提问——状态行提示 + 把问题挂到最终消息，
+              // UI 渲染问题卡片，用户回答后开启新回合继续。
+              goalStatusLine = isEn
+                ? '❓ Goal paused — the agent needs your answer above.'
+                : isTw
+                  ? '❓ 目標暫停——代理需要你先回答上方的問題。'
+                  : '❓ 目标暂停——代理需要你先回答上方的问题。';
             } else if (goalResult.status === 'limit_exceeded') {
               goalStatusLine = isEn
                 ? `⚠ Goal limit exceeded (${goalResult.iteration} iterations)`
@@ -1689,10 +1712,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
 
             resp = {
               role: 'assistant',
-              content: lastWorkerContent
-                ? `${goalStatusLine}\n\n---\n\n${lastWorkerContent}`
-                : goalStatusLine,
+              // #27：只返回状态行——Worker 各轮输出已实时流式显示在流式消息中
+              //（mergeMessageText 会按包含关系合并）。旧实现再拼 lastWorkerContent
+              // 会把最后一轮回复重复显示一遍（中断时尤为明显）。
+              content: goalStatusLine,
               cacheStats: accumulatedStats,
+              ...(goalResult.question ? { question: goalResult.question } : {}),
             };
           } else {
           try {
@@ -2052,7 +2077,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // 取消也算已消耗的执行时长（墙钟口径：发送 → 取消）。
             accumulateTurnRuntime(sid);
             saveCurrentProjectState(get());
-            return;
+            return messageConsumed;
           }
 
           // Worker crash: null out the agent so a fresh one is created on retry.
@@ -2091,6 +2116,13 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           clearStoreIdle();
           void (async () => {
             try {
+              // #25：旧回合的 finally 可能晚于新回合启动才执行（取消 ACK 晚到后
+              // 立刻重发）。此时 close_browser_page 会关掉新回合刚打开的同
+              // 工作区浏览器页。仅当本回合仍是当前回合时才关闭；否则交给
+              // 新回合自己的 finally 清理（每回合 finally 都会执行关闭）。
+              if (get()._turnSeq !== turnSeq) {
+                return;
+              }
               // 用回合开始时的捕获路径而非实时路径：回合中途切换工作区时，
               // 浏览器页面属于回合启动时的工作区，按实时路径关闭会 miss，
               // 导致旧工作区的浏览器会话泄漏（close_browser_page 按键查找）。
@@ -2100,5 +2132,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             }
           })();
         }
+        return messageConsumed;
   };
 }

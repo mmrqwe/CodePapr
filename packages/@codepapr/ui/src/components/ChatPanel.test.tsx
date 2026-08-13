@@ -744,7 +744,7 @@ describe('ChatPanel', () => {
   });
 
   it('allows typing and sending in a project without any session', async () => {
-    const sendSpy = vi.fn(async () => {});
+    const sendSpy = vi.fn(async () => true);
     useAgentStore.setState((state) => ({
       ...state,
       settings: normalizeSettings({ fastModelEnabled: false, apiKey: 'test-key' }),
@@ -789,6 +789,96 @@ describe('ChatPanel', () => {
       'agent',
       undefined
     );
+  });
+
+  it('#26：slash 命令发送被拒绝（sendMessage 返回 false）时保留草稿供重试', async () => {
+    const sendSpy = vi.fn(async () => false);
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ fastModelEnabled: false, apiKey: 'test-key' }),
+      sessions: [],
+      activeSessionId: null,
+      messages: [],
+      sessionMessages: {},
+      _sessionInputState: {},
+      isLoading: false,
+      loadingSessionId: null,
+      sessionMessagesLoading: false,
+      sendMessage: sendSpy,
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    expect(textarea).not.toBeNull();
+
+    const setNativeValue = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      'value'
+    )!.set!;
+    await act(async () => {
+      setNativeValue.call(textarea, '/review 我的代码');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      // 输入 '/' 会弹出命令下拉，Enter 被下拉拦截（选择建议）；先 Escape 关闭
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(sendSpy).toHaveBeenCalled();
+    // 发送被拒绝：草稿必须保留，用户可直接修改重试（旧实现先清空再发送，草稿永久丢失）
+    expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(
+      '/review 我的代码'
+    );
+  });
+
+  it('#26：slash 命令发送成功（返回 true）时正常清空草稿', async () => {
+    const sendSpy = vi.fn(async () => true);
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ fastModelEnabled: false, apiKey: 'test-key' }),
+      sessions: [],
+      activeSessionId: null,
+      messages: [],
+      sessionMessages: {},
+      _sessionInputState: {},
+      isLoading: false,
+      loadingSessionId: null,
+      sessionMessagesLoading: false,
+      sendMessage: sendSpy,
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const setNativeValue = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      'value'
+    )!.set!;
+    await act(async () => {
+      setNativeValue.call(textarea, '/help');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(sendSpy).toHaveBeenCalled();
+    expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
   });
 
   describe('batched history rendering (sliding window)', () => {
@@ -1048,14 +1138,15 @@ describe('ChatPanel', () => {
       displayContent?: string,
       mode?: WorkMode,
       images?: IImageContent[]
-    ) => Promise<void>;
+    ) => Promise<boolean>;
 
     function makeSendSpy(): ReturnType<typeof vi.fn<SendMessageSpy>> {
-      return vi.fn<SendMessageSpy>(async () => {});
+      return vi.fn<SendMessageSpy>(async () => true);
     }
 
     function setPlanQuestion(
-      sendMessageSpy: (input: string, displayContent?: string, mode?: WorkMode, images?: IImageContent[]) => Promise<void>,      extraMessages: UIMessage[] = []
+      sendMessageSpy: (input: string, displayContent?: string, mode?: WorkMode, images?: IImageContent[]) => Promise<boolean>,
+      extraMessages: UIMessage[] = []
     ) {
       const baseMessages: UIMessage[] = [
         {

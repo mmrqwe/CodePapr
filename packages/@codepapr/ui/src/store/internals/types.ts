@@ -379,7 +379,7 @@ export interface AgentActions {
     displayContent?: string,
     mode?: WorkMode,
     images?: IImageContent[]
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   cancelMessage: () => void;
   clearMessages: () => void;
   resetToMessage: (messageId: string) => Promise<ResetToMessageResult>;

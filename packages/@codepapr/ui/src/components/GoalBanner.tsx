@@ -32,6 +32,7 @@ export function GoalBanner() {
     satisfied: 'goal-banner--satisfied',
     limit_exceeded: 'goal-banner--limit',
     interrupted: 'goal-banner--interrupted',
+    awaiting_input: 'goal-banner--interrupted',
     error: 'goal-banner--error',
   };
 
@@ -46,6 +47,8 @@ export function GoalBanner() {
           : '超过限制',
     interrupted:
       lang === 'en' ? 'Interrupted' : lang === 'zh-TW' ? '已中斷' : '已中断',
+    awaiting_input:
+      lang === 'en' ? 'Waiting for answer' : lang === 'zh-TW' ? '等待回答' : '等待回答',
     error: lang === 'en' ? 'Error' : 'Error',
   };
 

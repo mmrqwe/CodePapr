@@ -530,6 +530,8 @@ export type GoalRunnerStatus =
   | 'satisfied'
   | 'limit_exceeded'
   | 'interrupted'
+  /** Worker 在回合中向用户提问（question 工具），循环暂停等待回答。 */
+  | 'awaiting_input'
   | 'error';
 
 /** 单轮迭代的反馈记录 */
@@ -549,6 +551,8 @@ export interface GoalRunnerState {
   lastVerdict: GoalVerdict | null;
   lastConditionResult: ConditionResult | null;
   feedbackHistory: GoalIterationFeedback[];
+  /** Worker 在回合中通过 question 工具向用户提问（status=awaiting_input）。 */
+  question?: QuestionData;
   error?: string;
 }
 

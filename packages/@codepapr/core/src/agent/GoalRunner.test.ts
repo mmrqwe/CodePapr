@@ -63,6 +63,33 @@ function makeWorkerResult(content: string, outputTokens = 100): WorkerTurnResult
 }
 
 describe('GoalRunner', () => {
+  it('#24：Worker 回合中提问（question）→ 循环暂停并返回 awaiting_input', async () => {
+    const condition = parseGoalCondition('exec:npm test');
+    const question = {
+      question: '要修改哪些文件？',
+      header: '确认',
+      options: [{ label: '仅 core 包' }, { label: '全部' }],
+    };
+    const runner = new GoalRunner({
+      condition,
+      userGoalText: '',
+      limits: { maxIterations: 5, maxWallClockMs: 60_000 },
+      callbacks: {
+        runWorkerTurn: vi.fn().mockResolvedValue({ ...makeWorkerResult('等一下'), question }),
+        runVerifier: vi.fn(),
+        evaluateCondition: vi.fn(),
+        onStateChange: vi.fn(),
+        isAborted: () => false,
+      },
+    });
+
+    const result = await runner.run();
+    expect(result.status).toBe('awaiting_input');
+    expect(result.question).toEqual(question);
+    // 提问回合后不得继续评估/验证（循环立即终止）
+    expect(runner.getState().iteration).toBe(1);
+  });
+
   it('条件立即满足时第一轮就结束', async () => {
     const condition = parseGoalCondition('exec:npm test');
     const runner = new GoalRunner({

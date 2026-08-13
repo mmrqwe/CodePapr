@@ -886,12 +886,26 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     const images = pendingImages.map(({ mediaType, data }) => ({ mediaType, data }));
     if ((!userText && images.length === 0 && pendingFiles.length === 0) || isLoading || !isConfigured) return;
     ttsStop();
-    setInput('');
-    setPendingImages([]);
     const files = pendingFiles;
-    setPendingFiles([]);
     const promptText = buildUserPromptWithFiles(userText, files);
     const displayText = userText || files.map((f) => f.name).join(', ') || (images.length ? '🖼️' : '');
+
+    // #26：slash 命令先发送、成功后才清空草稿——模板展开/条件解析失败时
+    // sendMessage 返回 false（消息未进入会话），此时保留草稿供用户修改重试。
+    // 旧实现先 setInput('') 再发送，失败后用户打好的命令文本永久丢失。
+    if (userText.startsWith('/')) {
+      const consumed = await sendMessage(promptText, displayText, mode, images.length ? images : undefined);
+      if (consumed) {
+        setInput('');
+        setPendingImages([]);
+        setPendingFiles([]);
+      }
+      return;
+    }
+
+    setInput('');
+    setPendingImages([]);
+    setPendingFiles([]);
     await submitMessage(promptText, displayText, mode, images.length ? images : undefined);
   };
 

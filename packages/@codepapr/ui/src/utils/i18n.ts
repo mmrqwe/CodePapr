@@ -894,6 +894,7 @@ settingsGeneralTab: '通用',
     commandHelpProjectLabel: '项目命令:',
     commandHelpProjectEmpty: '项目命令: 当前没有自定义命令（在 .CodePapr/commands/ 添加 *.md）',
     taskTitleFallback: '新任务',
+    ensureDefaultWorkspaceFailed: '无法创建默认项目，请手动打开一个项目文件夹后重试。',
     sessionHistoryLoadFailed: '会话历史加载失败，为避免覆盖已有消息已暂停发送。请重新打开项目或切换会话后重试。',
   },
   'zh-TW': {
@@ -1789,6 +1790,7 @@ settingsGeneralTab: '通用',
     commandHelpProjectLabel: '專案命令:',
     commandHelpProjectEmpty: '專案命令: 目前沒有自訂命令（在 .CodePapr/commands/ 添加 *.md）',
     taskTitleFallback: '新任務',
+    ensureDefaultWorkspaceFailed: '無法建立預設專案，請手動開啟一個專案資料夾後重試。',
     sessionHistoryLoadFailed: '會話歷史載入失敗，為避免覆蓋已有訊息已暫停傳送。請重新開啟專案或切換會話後重試。',
   },
   en: {
@@ -2684,6 +2686,7 @@ settingsGeneralTab: '通用',
     commandHelpProjectLabel: 'Project commands:',
     commandHelpProjectEmpty: 'Project commands: no custom commands yet (add *.md under .CodePapr/commands/)',
     taskTitleFallback: 'New task',
+    ensureDefaultWorkspaceFailed: 'Failed to create the default project. Please open a project folder manually and retry.',
     sessionHistoryLoadFailed: 'Session history failed to load. Sending has been paused to avoid overwriting existing messages. Please reopen the project or switch sessions and retry.',
   }
 };
