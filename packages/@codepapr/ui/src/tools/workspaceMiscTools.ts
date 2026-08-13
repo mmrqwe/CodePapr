@@ -12,8 +12,10 @@ export function registerWorkspaceMiscTools(ctx: WorkspaceToolContext): void {
     workspace,
   } = ctx;
 
-  registry.register(toolByName('workspace_project_diagnostics'), async () => {
-    return await runProjectDiagnostics(workspace(), invoke);
+  registry.register(toolByName('workspace_project_diagnostics'), async (_args, context) => {
+    // 透传工具取消通道：诊断阶段串行且各自超时 270s，取消/超时后
+    // 必须停止等待后续阶段，否则命令继续在后台跑完。
+    return await runProjectDiagnostics(workspace(), invoke, { signal: context?.signal });
   });
 
   registry.register(toolByName('local_time_now'), async () => {

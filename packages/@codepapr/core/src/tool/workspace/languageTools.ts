@@ -241,6 +241,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`${label} 超时（${ms}ms）。`)), ms);
   });
+  // host 层没有取消通道：超时先胜出后底层 LSP 请求仍在运行（由其自身 IPC
+  // 超时兜底）。落败的 promise 稍后可能 reject，必须挂 handler，否则成为
+  // unhandled rejection。
+  promise.catch(() => undefined);
   return Promise.race([promise, timeout]).finally(() => {
     if (timer) clearTimeout(timer);
   }) as Promise<T>;

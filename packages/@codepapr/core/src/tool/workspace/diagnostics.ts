@@ -503,6 +503,30 @@ export function createProjectDiagnosticsPlan(params: {
   };
 }
 
+/** 等待 promise，signal abort 时立即以 AbortError 拒绝（底层命令继续受其
+ *  自身超时约束，但调用方不再等待）。 */
+async function raceAbortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    throw new DOMException('Diagnostics was cancelled', 'AbortError');
+  }
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(new DOMException('Diagnostics was cancelled', 'AbortError'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    );
+  });
+}
+
 function buildExcerpt(stdout: string, stderr: string, maxLines: number = 12): string {
   const source = `${stderr || ''}\n${stdout || ''}`.trim();
   if (!source) {
@@ -523,8 +547,18 @@ function buildExcerpt(stdout: string, stderr: string, maxLines: number = 12): st
 
 export async function runProjectDiagnostics(
   host: Pick<WorkspaceHost, 'workspacePath' | 'listFiles' | 'readTextFile' | 'runCommand'>,
-  options: { changedPaths?: readonly string[] } = {}
+  options: { changedPaths?: readonly string[]; signal?: AbortSignal } = {}
 ): Promise<ProjectDiagnosticsReport> {
+  const signal = options.signal;
+  // 取消通道：诊断最多串行跑约 8 个阶段、每个阶段自身超时 270s（总计可远超
+  // 30 分钟）。Agent 工具超时/用户取消后若不响应，剩余阶段会继续在后台跑完。
+  const ensureNotAborted = (): void => {
+    if (signal?.aborted) {
+      throw new DOMException('Diagnostics was cancelled', 'AbortError');
+    }
+  };
+  ensureNotAborted();
+
   const listResult = await host.listFiles({ maxDepth: 4 });
   let packageJsonContent = '';
   try {
@@ -596,14 +630,18 @@ export async function runProjectDiagnostics(
 
   const stages: ProjectDiagnosticStageResult[] = [];
   for (const stage of plan.stages) {
+    // 每个阶段启动前检查取消：已取消则不再启动后续阶段（当前阶段若已在跑，
+    // 由其自身 270s 超时兜底，但调用方立即得到 AbortError，不再串行等待）。
+    ensureNotAborted();
     try {
+      const commandPromise = host.runCommand({
+        command: stage.command,
+        args: stage.args,
+        timeoutSeconds: 270,
+        workdir: stage.workdir,
+      });
       const result = asProjectDiagnosticsCommandResult(
-        await host.runCommand({
-          command: stage.command,
-          args: stage.args,
-          timeoutSeconds: 270,
-          workdir: stage.workdir,
-        })
+        signal ? await raceAbortable(commandPromise, signal) : await commandPromise
       );
       stages.push({
         ...stage,
@@ -615,6 +653,10 @@ export async function runProjectDiagnostics(
         excerpt: buildExcerpt(result.stdout, result.stderr),
       });
     } catch (error) {
+      // 取消必须原样向上传播，不得被当作阶段失败吞掉后继续跑后续阶段。
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw error;
+      }
       // 单个阶段（如缺少 dotnet/cargo/go 等工具链）spawn 失败时，记录为失败阶段并继续后续阶段，
       // 而不是让整个诊断流程中断、丢失其余阶段的结果。
       const message = error instanceof Error ? error.message : String(error);

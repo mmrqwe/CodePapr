@@ -196,7 +196,11 @@ export function stripGraphNoise(
   const keepSet = new Set(graph.files.slice(0, half).map((f) => f.path));
   graph.files.length = half;
   graph.nodes = graph.nodes.filter((n) => keepSet.has(n.path));
-  graph.edges = graph.edges.filter((e) => keepSet.has(e.from) && keepSet.has(e.to));
+  // 边的 from/to 是节点 ID（file:<path> / symbol:<path>:...），不是裸路径：
+  // 必须按保留后的节点 ID 集合过滤。旧实现用裸路径集合比较节点 ID，
+  // has() 恒为 false，图超 token 上限进入减半分支时所有语义边被静默清空。
+  const keepNodeIds = new Set(graph.nodes.map((n) => n.id));
+  graph.edges = graph.edges.filter((e) => keepNodeIds.has(e.from) && keepNodeIds.has(e.to));
   if (graphJsonTokens(graph) <= maxTokens) return graph;
 
   graph.files.length = 0;
@@ -1917,11 +1921,15 @@ function extractJsTsStructuralSymbols(content: string): StructuralSymbol[] {
     const containerName = containerStack.length > 0 ? containerStack[containerStack.length - 1].name : undefined;
 
     const classMatch = trimmed.match(
-      /^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?(?:class|interface|enum|trait)\s+(\w+)/
+      /^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?(class|interface|enum|trait)\s+(\w+)/
     );
     if (classMatch) {
-      const name = classMatch[1];
-      const kind = 'class';
+      const name = classMatch[2];
+      // kind 必须按实际关键字映射：旧实现硬编码 'class'，TS 的 interface/enum
+      // 全部被记成 class——lookup 按 symbolKind=interface/enum 查询漏检，
+      // extractSymbolRelations 里 kind==='interface' 的 extends/implements
+      // 分支对这些符号永不生效。
+      const kind = classMatch[1];
       symbols.push({
         name,
         kind,
@@ -1936,7 +1944,7 @@ function extractJsTsStructuralSymbols(content: string): StructuralSymbol[] {
       continue;
     }
 
-    const typeAliasMatch = trimmed.match(/^\s*(?:export\s+)?(?:type|interface)\s+(\w+)\s*[=<{]/);
+    const typeAliasMatch = trimmed.match(/^\s*(?:export\s+)?type\s+(\w+)\s*[=<{]/);
     if (typeAliasMatch) {
       symbols.push({
         name: typeAliasMatch[1],
@@ -2996,11 +3004,10 @@ function buildCallEdges(
       if (semanticEdgeCount.value >= maxEdges) break;
       const funcLine = func.symbol!.line;
       const funcEndLine = findFunctionEndLine(content, funcLine, file.path, file.language);
-      const sourceId = symbolNodeId(
-        file.path,
-        func.symbol!,
-        fileCandidates.indexOf(func),
-      );
+      // candidate.id 与建图时 symbolNodeId(path, symbol, index) 生成的节点 ID
+      // 完全一致，直接复用：旧实现用 fileCandidates.indexOf(func) 重建索引是
+      // O(符号数²)，且一旦候选数组中途被过滤/重排就会指向错误节点。
+      const sourceId = func.id;
 
       for (const call of callTargets) {
         if (!callableNames.has(call.name)) continue;
@@ -3299,6 +3306,13 @@ function resolveCallTarget(
         return callableMatch ?? candidates[0];
       }
     }
+
+    // receiver 存在但全部解析路径（import 命名空间/导入绑定/限定名）都未命中：
+    // 绝不能跌落到下方的裸名解析——那会把 ctx.json()、utils.format() 等
+    // 方法调用解析到项目里任意同名的函数上，产生系统性假 calls 边，
+    // 污染 dead_code（假"被使用"证据）与 impact 分析。receiver 信息无法
+    // 利用时宁可返回 null（丢失一条边）也不制造错误边。
+    return null;
   }
 
   if (moduleContext) {
@@ -3321,8 +3335,15 @@ function resolveCallTarget(
 
   const fileCandidates = candidatesByPath.get(callerPath);
   if (fileCandidates) {
-    const match = fileCandidates.find((c) => c.symbol?.name === name);
-    if (match) return match;
+    // 与其它分支同口径：多个同名候选时优先可调用符号。旧实现直接返回
+    // 第一个同名候选，同文件存在同名变量/类时 calls 边会指向非可调用符号
+    // （例如让 deadCode 误判该变量"被使用"）。
+    const matches = fileCandidates.filter((c) => c.symbol?.name === name);
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) {
+      const callableMatch = matches.find((c) => isCallableSymbolKind(c.symbol.kind));
+      if (callableMatch) return callableMatch;
+    }
   }
 
   const qualifiedKey = normalizeIdentifierKey(name);

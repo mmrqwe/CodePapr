@@ -177,7 +177,7 @@ describe('withStreamIdleRetry', () => {
         if (calls === 1) throw new StreamIdleTimeoutError(50);
         return 'ok';
       },
-      { hasEmitted: () => false, maxRetries: 1, ...noDelay }
+      { maxRetries: 1, ...noDelay }
     );
     expect(result).toBe('ok');
     expect(calls).toBe(2);
@@ -191,7 +191,7 @@ describe('withStreamIdleRetry', () => {
         if (calls === 1) throw new StreamIdleTimeoutError(50);
         return 'recovered';
       },
-      { hasEmitted: () => true, maxRetries: 3, ...noDelay }
+      { maxRetries: 3, ...noDelay }
     );
     expect(result).toBe('recovered');
     expect(calls).toBe(2);
@@ -206,7 +206,7 @@ describe('withStreamIdleRetry', () => {
         if (calls <= 7) throw new StreamIdleTimeoutError(50);
         return 'recovered-late';
       },
-      { hasEmitted: () => true, ...noDelay }
+      { ...noDelay }
     );
     expect(result).toBe('recovered-late');
     expect(calls).toBe(8);
@@ -220,7 +220,7 @@ describe('withStreamIdleRetry', () => {
           calls += 1;
           throw new StreamIdleTimeoutError(50);
         },
-        { hasEmitted: () => true, maxRetries: 6, ...noDelay }
+        { maxRetries: 6, ...noDelay }
       )
     ).rejects.toBeInstanceOf(StreamIdleTimeoutError);
     expect(calls).toBe(7);
@@ -246,7 +246,6 @@ describe('withStreamIdleRetry', () => {
         throw new StreamIdleTimeoutError(50);
       },
       {
-        hasEmitted: () => false,
         maxRetries: 3,
         signal: controller.signal,
         retryDelayMs: () => 60_000,
@@ -267,7 +266,7 @@ describe('withStreamIdleRetry', () => {
           calls += 1;
           throw new Error('boom');
         },
-        { hasEmitted: () => false, maxRetries: 3 }
+        { maxRetries: 3 }
       )
     ).rejects.toThrow('boom');
     expect(calls).toBe(1);
@@ -283,7 +282,7 @@ describe('withStreamIdleRetry', () => {
           calls += 1;
           throw new StreamIdleTimeoutError(50);
         },
-        { hasEmitted: () => false, maxRetries: 3, signal: controller.signal }
+        { maxRetries: 3, signal: controller.signal }
       )
     ).rejects.toBeInstanceOf(StreamIdleTimeoutError);
     expect(calls).toBe(1);
@@ -299,7 +298,6 @@ describe('withStreamIdleRetry', () => {
         return 'done';
       },
       {
-        hasEmitted: () => false,
         maxRetries: 2,
         onRetry: (attempt) => retries.push(attempt),
         ...noDelay,
@@ -323,7 +321,7 @@ describe('withStreamIdleRetry', () => {
         }
         return 'recovered';
       },
-      { hasEmitted: () => false, maxRetries: 1, ...noDelay }
+      { maxRetries: 1, ...noDelay }
     );
     expect(result).toBe('recovered');
     expect(calls).toBe(2);
@@ -341,7 +339,7 @@ describe('withStreamIdleRetry', () => {
             retriable: false,
           });
         },
-        { hasEmitted: () => false, maxRetries: 3 }
+        { maxRetries: 3 }
       )
     ).rejects.toBeInstanceOf(ProviderRequestError);
     expect(calls).toBe(1);
@@ -361,7 +359,6 @@ describe('withStreamIdleRetry', () => {
           });
         },
         {
-          hasEmitted: () => true,
           maxRetries: 3,
           onRetry: (attempt) => retries.push(attempt),
           ...noDelay,

@@ -68,7 +68,7 @@ function createInvokeWorkspaceHost(workspacePath: string, invoke: InvokeLike): P
 export async function runProjectDiagnostics(
   workspacePath: string,
   invoke: InvokeLike,
-  options: { changedPaths?: readonly string[] } = {}
+  options: { changedPaths?: readonly string[]; signal?: AbortSignal } = {}
 ): Promise<ProjectDiagnosticsReport> {
   return await runSharedProjectDiagnostics(createInvokeWorkspaceHost(workspacePath, invoke), options);
 }

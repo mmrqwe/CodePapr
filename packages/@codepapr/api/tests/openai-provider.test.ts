@@ -568,7 +568,12 @@ describe('safeParseToolArguments', () => {
       );
     vi.stubGlobal('fetch', fetchMock);
 
-    const provider = new OpenAIProvider({ apiKey: 'test-key' });
+    // thinking 字段只发给中继端点（官方 OpenAI 会 400 未知参数）：
+    // 该回退场景正是 Console Go 类中继，用中继 baseURL 构造。
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      baseURL: 'https://relay.example.com/v1',
+    });
     const response = await provider.chat({
       model: 'gpt-4o',
       thinking: { type: 'enabled', reasoningEffort: 'max' },
@@ -609,6 +614,36 @@ describe('safeParseToolArguments', () => {
     ) as { thinking?: { type: string }; reasoning_effort?: string };
     expect(secondBody.thinking).toEqual({ type: 'disabled' });
     expect(secondBody.reasoning_effort).toBeUndefined();
+  });
+
+  it('官方 OpenAI 端点不下发非标准 thinking 参数（避免 400 Unrecognized request argument）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 'resp-official',
+        choices: [
+          {
+            message: { role: 'assistant', content: '官方端点', reasoning_content: '' },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: { prompt_tokens: 5, completion_tokens: 2 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    // 缺省 baseURL 即官方 api.openai.com
+    const provider = new OpenAIProvider({ apiKey: 'test-key' });
+    await provider.chat({
+      model: 'gpt-4o',
+      thinking: { type: 'enabled' },
+      messages: [{ id: 'user-1', role: 'user', content: '你好', timestamp: 1 }],
+      maxTokens: 1024,
+    });
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string
+    ) as { thinking?: unknown };
+    expect(body.thinking).toBeUndefined();
   });
 });
 

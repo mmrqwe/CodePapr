@@ -18,7 +18,10 @@ export function discoverAndMapTests(
   const testFunctions: Array<{ path: string; name: string; line: number }> = [];
 
   const TEST_FILE_PATTERNS = /[._](test|spec|_test)\.\w+$|^test[._]|\.test\./i;
-  const TEST_FUNC_PATTERNS = /^test[A-Z_]|^it\(|^describe\(|^Spec_|^Test[A-Z]/;
+  // 符号名来自 AST/LSP 提取，是纯标识符（不含括号）：旧模式的 ^it\( / ^describe\(
+  // 恒不匹配，vitest/jest 的 it/test/describe 与裸 test 函数全部漏检。
+  // 改为按标识符精确匹配框架入口名 + 前缀约定（testFoo/test_foo、TestFoo、Spec_）。
+  const TEST_FUNC_PATTERNS = /^(it|test|describe|suite)$|^test[A-Z_]|^Spec_|^Test[A-Z_]/;
 
   for (const node of nodeMap.values()) {
     if (node.kind !== 'symbol' || !node.symbol) continue;

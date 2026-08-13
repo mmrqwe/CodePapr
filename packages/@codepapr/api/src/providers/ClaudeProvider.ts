@@ -26,10 +26,14 @@ import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
 const log = new Logger('ClaudeProvider');
 
 /** Claude thinking 的思考预算（token）。Anthropic API 硬性要求
- *  thinking.enabled 时必须携带 budget_tokens（≥1024 且 ≤ max_tokens），
+ *  thinking.enabled 时必须携带 budget_tokens（≥1024 且 < max_tokens），
  *  缺失立即 400 invalid_request_error——旧实现只发 {type:"enabled"}，任何
  *  调用方启用 thinking 都会当场 400。 */
 export const CLAUDE_THINKING_BUDGET_TOKENS = 4096;
+
+/** Anthropic 对 budget_tokens 的最小值硬约束。max_tokens 不超过该值时
+ *  无法同时满足「budget ≥ 1024 且 budget < max_tokens」，只能降级关闭 thinking。 */
+export const CLAUDE_THINKING_MIN_BUDGET_TOKENS = 1024;
 
 function isPrefixSystemMessage(metadata: Record<string, unknown> | undefined): boolean {
   return metadata?.isPrefixSystem === true;
@@ -236,13 +240,6 @@ export class ClaudeProvider extends BaseLLMProvider {
       messageCount: payload.messages.length,
     });
 
-    let emitted = false;
-    const trackEvent = (event: IChatStreamEvent): void => {
-      if (event.type === 'content-delta' || event.type === 'reasoning-delta') {
-        emitted = true;
-      }
-      onEvent(event);
-    };
 
     return withStreamIdleRetry(
       async () => {
@@ -333,7 +330,7 @@ export class ClaudeProvider extends BaseLLMProvider {
             if (chunk.type === 'content_block_delta') {
               if (chunk.delta?.type === 'text_delta' && chunk.delta.text) {
                 content += chunk.delta.text;
-                trackEvent({ type: 'content-delta', delta: chunk.delta.text });
+                onEvent({ type: 'content-delta', delta: chunk.delta.text });
                 return;
               }
 
@@ -431,7 +428,6 @@ export class ClaudeProvider extends BaseLLMProvider {
         signal,
         // undefined = 无限重试：可重试故障不终止回合。
         maxRetries: this.config.streamMaxRetries,
-        hasEmitted: () => emitted,
         retryDelayMs: this.config.streamRetryDelayMs,
         onRetry: (attempt, err) => {
           // 无论是否已有输出都发 stream-restart：让 UI 状态可见，也让上层
@@ -458,6 +454,8 @@ export class ClaudeProvider extends BaseLLMProvider {
       stream: false,
     });
 
+    // 非流式 body 读取必须保持在超时/取消保护之下（见 fetchWithRetry 注释）。
+    const protection: { release: () => void } = { release: () => undefined };
     const response = await this.fetchWithRetry(url, {
       method: 'POST',
       headers: {
@@ -466,12 +464,17 @@ export class ClaudeProvider extends BaseLLMProvider {
         'anthropic-version': '2023-06-01',
       },
       body: sortedStringify(payload),
-    }, signal);
+    }, signal, undefined, protection);
 
     let data: ClaudeResponse;
     try {
       data = (await response.json()) as ClaudeResponse;
     } catch (err) {
+      // 超时/取消中止 body 读取时产生 AbortError：原样上抛，不得误归为
+      // 「响应不是合法 JSON」。
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw err;
+      }
       // 200 但非 JSON 正文（代理 HTML 错误页等）：转成带 provider 上下文的
       // 错误，而不是裸 SyntaxError。
       throw new ProviderRequestError({
@@ -479,6 +482,8 @@ export class ClaudeProvider extends BaseLLMProvider {
         message: `响应不是合法 JSON: ${(err as Error).message}`,
         retriable: false,
       });
+    } finally {
+      protection.release();
     }
     log.info('LLM request completed', {
       model: payload.model,
@@ -526,17 +531,19 @@ export class ClaudeProvider extends BaseLLMProvider {
             }),
           })),
         }),
-      ...(request.thinking?.type === 'enabled' && {
-        thinking: {
-          type: 'enabled' as const,
-          // 必须携带 budget_tokens（≥1024 且 ≤ max_tokens），且不超过本次
-          // 输出预算；缺 budget_tokens 或 budget > max_tokens 都会 400。
-          budget_tokens: Math.min(
-            CLAUDE_THINKING_BUDGET_TOKENS,
-            request.maxTokens ?? DEFAULT_MAX_TOKENS
-          ),
-        },
-      }),
+      // budget_tokens 必须 ≥1024 且 < max_tokens：输出预算过小时（如连接
+      // 测试发 maxTokens:8）两个约束无法同时满足，降级不带 thinking 字段，
+      // 而不是发出必然 400 的请求。
+      ...(request.thinking?.type === 'enabled' &&
+        (request.maxTokens ?? DEFAULT_MAX_TOKENS) > CLAUDE_THINKING_MIN_BUDGET_TOKENS && {
+          thinking: {
+            type: 'enabled' as const,
+            budget_tokens: Math.min(
+              CLAUDE_THINKING_BUDGET_TOKENS,
+              (request.maxTokens ?? DEFAULT_MAX_TOKENS) - 1
+            ),
+          },
+        }),
       ...(stream ? { stream: true } : {}),
     };
   }

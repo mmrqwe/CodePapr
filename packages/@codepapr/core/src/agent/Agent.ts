@@ -72,6 +72,11 @@ export const EMPTY_COMPLETION_RETRY_DELAYS_MS: readonly number[] = [
 /** 连续空完成达到该次数后关闭 thinking 再试（思考输出异常是常见诱因）。 */
 export const EMPTY_COMPLETION_DISABLE_THINKING_AFTER = 5;
 
+/** 单回合空完成重试上限：超过后抛错终止回合。退避表 6 档（共约 105s），
+ *  超出后每 30s 一次；8 次覆盖约 3 分钟退避。无上限时 provider 持续返回
+ *  空完成（模型配置错误/中转异常）会让 chat() 永久挂起并持续烧 token。 */
+export const MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND = 8;
+
 /** Tools that can pause while waiting for a user folder-access decision. */
 export const PERMISSION_WAITING_TOOL_TIMEOUTS: Readonly<Record<string, number>> = {
   read: Number.POSITIVE_INFINITY,
@@ -729,6 +734,17 @@ export class Agent {
           (!segment.toolCalls || segment.toolCalls.length === 0);
         if (isEmptyCompletion) {
           emptyAttempt += 1;
+          if (emptyAttempt > MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND) {
+            // 安全阀（与 length 截断的 MAX_CONTINUATIONS_PER_ROUND 对齐）：
+            // 持续空完成说明 provider/模型配置异常，抛错终止而不是无限重试。
+            log.error('Empty completion retry limit exceeded; aborting round', {
+              round: roundNumber,
+              attempts: emptyAttempt - 1,
+            });
+            throw new Error(
+              `模型连续 ${MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND} 次返回空完成，回合终止（请检查模型配置或中转服务是否正常）`
+            );
+          }
           onStreamEvent?.({ type: 'round-retry', reason: 'empty', attempt: emptyAttempt });
           if (emptyAttempt >= EMPTY_COMPLETION_DISABLE_THINKING_AFTER) {
             roundThinking = thinkingDisabled;

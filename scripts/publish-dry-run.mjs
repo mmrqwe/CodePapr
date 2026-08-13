@@ -44,6 +44,9 @@ for (const workspace of workspaces) {
   const result = spawnSync('npm', ['pack', '--dry-run', '--json'], {
     cwd: packageDir,
     encoding: 'utf8',
+    // Windows 上 npm 是 npm.cmd：不经 shell 无法 spawn（恒 ENOENT），
+    // 该发布前检查会在 Windows 上永远失败。
+    shell: process.platform === 'win32',
   });
   if (result.status !== 0) {
     failures.push(`${workspace} npm pack --dry-run 失败:\n${result.stderr || result.stdout}`);

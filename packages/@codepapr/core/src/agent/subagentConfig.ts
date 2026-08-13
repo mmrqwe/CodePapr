@@ -397,6 +397,14 @@ export async function runSubagentSession(
       deps.abortSignal
     );
   } catch (err) {
+    // 取消（AbortError）必须原样向上传播：全仓库用
+    // `err instanceof DOMException && err.name === 'AbortError'` 识别取消
+    // （GoalRunner、verifierRunner、agentRuntime.worker 等）。包装成普通
+    // Error 会让取消被误报为子代理失败——例如 Goal 验收器取消后走
+    // 「Verifier 调用失败」降级分支继续烧下一轮。
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw err;
+    }
     const errName = err instanceof Error ? err.name : undefined;
     const errMsg = err instanceof Error ? err.message : String(err);
     const contextTag = `[Subagent=${definition.name} model=${exec.route.model} tier=${exec.tier}]`;

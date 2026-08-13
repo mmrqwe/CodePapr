@@ -38,18 +38,29 @@ export function selectTestsByChangeImpact(
     }
   }
 
+  // 宽松子串匹配会严重过度选择：短路径（a.ts→"a"、util.ts→"util"）去掉
+  // 扩展名后做 includes 会命中几乎所有测试路径。改为按 basename stem 精确
+  // 等价（剥离 .test/.spec/_test 等后缀后比较）：util.ts 只匹配
+  // util.test.ts/util.spec.ts，不再匹配 utility.test.ts 等无关文件。
+  // 旧实现的第二个条件（用测试函数名反查 impactedFile）误报率更高，直接移除。
+  const stemOf = (p: string): string => {
+    const base = p.split(/[\\/]/).pop() ?? p;
+    return base
+      .replace(/\.[^.]+$/, '')
+      .replace(/[._-]?(test|spec)$/i, '');
+  };
+  const impactedStems = new Set(
+    [...impactedFiles]
+      .map(stemOf)
+      .filter((stem) => stem.length > 0),
+  );
+
   for (const tf of testDiscovery.testFunctions) {
     if (affectedTests.has(tf.path)) {
       selectedTests.push(tf);
-    } else {
-      for (const impactedFile of impactedFiles) {
-        if (tf.path.includes(impactedFile.replace(/\.[^.]+$/, '')) ||
-            impactedFile.includes(tf.name.replace(/^(test|spec|Test|it\s*\(['"])\s*/, ''))) {
-          selectedTests.push(tf);
-          affectedTests.add(tf.path);
-          break;
-        }
-      }
+    } else if (impactedStems.has(stemOf(tf.path))) {
+      selectedTests.push(tf);
+      affectedTests.add(tf.path);
     }
   }
 

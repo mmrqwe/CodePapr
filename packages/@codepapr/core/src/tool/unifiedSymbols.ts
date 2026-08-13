@@ -139,6 +139,9 @@ export class UnifiedSymbolDispatcher {
         UnifiedSymbolDispatcher.PROVIDER_TIMEOUT_MS,
       );
     });
+    // provider 没有取消通道：超时先胜出后底层请求仍在运行。落败的 promise
+    // 稍后可能 reject，必须挂 handler，否则成为 unhandled rejection。
+    promise.catch(() => undefined);
     return Promise.race([promise, timeout]).finally(() => {
       if (timer) clearTimeout(timer);
     }) as Promise<T>;

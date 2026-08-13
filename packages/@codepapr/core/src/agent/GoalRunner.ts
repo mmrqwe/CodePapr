@@ -164,6 +164,13 @@ export class GoalRunner {
         return this.getState();
       }
 
+      // 用户在 worker 回合期间点停止时，Agent.chat 可能提前正常返回（部分/空
+      // 内容）而不抛 AbortError。进入评估前必须检查 aborted，否则会白跑一轮
+      // 最长 120s 且不可中止的验证命令（N5 只覆盖了「评估期间点停止」）。
+      if (this.callbacks.isAborted()) {
+        return this.markInterrupted();
+      }
+
       this.state.totalOutputTokens += workerResult.outputTokens;
       this.state.elapsedMs = Date.now() - this.state.startedAt;
 

@@ -196,11 +196,14 @@ function escapeRawControlCharsInStrings(text: string): string {
 export function sanitizeToolCallArguments(
   args: Record<string, unknown>
 ): Record<string, unknown> {
-  const { _raw, _parseError, error, ...clean } = args as Record<string, unknown>;
-  if (_parseError) {
-    return { _error: String(error ?? 'JSON 解析失败') };
+  // 只处理 safeParseToolArguments 解析失败时写入的标记对象（_parseError:true）。
+  // 旧实现对一切参数对象无条件剔除 error/_raw/_parseError 三个键——合法 schema
+  // 含 `error` 参数的工具在历史回传时该参数被静默丢弃，模型下一轮看到的
+  // 工具参数与当初实际执行的不一致。
+  if (args._parseError !== true) {
+    return args;
   }
-  return clean;
+  return { _error: String(args.error ?? 'JSON 解析失败') };
 }
 
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000;
@@ -267,7 +270,11 @@ export async function readSseStream(
         reject(new StreamIdleTimeoutError(idleTimeoutMs));
       }, idleTimeoutMs);
     });
-    return Promise.race([reader.read(), timeout]).finally(() => {
+    const read = reader.read();
+    // 超时先胜出后，落败的 read promise 仍可能稍后 reject（超时与断流同一
+    // 瞬间发生）；不挂 handler 会成为 unhandled rejection。
+    read.catch(() => undefined);
+    return Promise.race([read, timeout]).finally(() => {
       if (timer !== undefined) {
         clearTimeout(timer);
       }
@@ -301,6 +308,15 @@ export async function readSseStream(
     const trailing = buffer.trim();
     if (trailing) {
       consumeEvent(trailing);
+    }
+
+    // abort 发生在 reader.read() 挂起期间时，abortHandler 的 reader.cancel()
+    // 会让挂起的 read 按 fetch 规范以 {done:true} 正常解决，循环走到这里
+    // 「正常结束」。不抛 AbortError 的话，provider 会因缺 [DONE]/finish_reason
+    // 把它误判为「流中断错误」——用户按了停止反而可能触发 fallback 重跑
+    // 整回合。取消必须原样向上传播。
+    if (signal?.aborted) {
+      throw new DOMException('Stream was cancelled', 'AbortError');
     }
   } catch (err) {
     if (err instanceof StreamIdleTimeoutError) {
@@ -349,10 +365,11 @@ async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
 
 export interface StreamIdleRetryOptions {
   /** 重试次数上限。缺省（undefined）= 无限重试：只要故障可重试且用户未取消，
-   *  就一直重连直到成功——网络波动/限流不应终止回合。测试可注入小值。 */
+   *  就一直重连直到成功——网络波动/限流不应终止回合。测试可注入小值。
+   *  已输出内容后同样允许重试：provider 通过 onRetry 发 stream-restart 事件，
+   *  由消费方丢弃死掉的尝试产生的部分输出（见 isRetriableStreamError 注释）。 */
   maxRetries?: number;
   signal?: AbortSignal;
-  hasEmitted: () => boolean;
   onRetry?: (attempt: number, error: Error) => void;
   /** 每次重试前的等待时长（毫秒），attempt 从 1 开始。默认 5s → 10s → 15s → 20s → 25s → 30s。 */
   retryDelayMs?: (attempt: number) => number;

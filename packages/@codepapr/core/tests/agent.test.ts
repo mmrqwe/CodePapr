@@ -6,6 +6,7 @@ import {
   DEFAULT_AGENT_MAX_TOOL_ROUNDS,
   ImmutablePrefix,
   MAX_CONTINUATIONS_PER_ROUND,
+  MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND,
   Session,
   ToolRegistry,
   type ContextCompactionConfig,
@@ -1102,5 +1103,24 @@ describe('Agent completion-quality guards (no silent stops)', () => {
     const messages = agent.getSession().logStore.getAllMessages();
     expect(messages).toHaveLength(2);
     expect(messages[1]?.content).toBe('最终答案');
+  });
+
+  it('throws after MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND consecutive empty completions', async () => {
+    const chatMock = vi.fn<(_: IChatRequest) => Promise<IChatResponse>>();
+    // 持续空完成：旧实现会每 30s 无限重试、永久挂起并烧 token。
+    for (let i = 0; i < MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND + 2; i += 1) {
+      chatMock.mockResolvedValueOnce(emptyResponse());
+    }
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: chatMock,
+    };
+    const agent = createGuardedAgent(provider, 'openai', () => undefined);
+
+    await expect(agent.chat('请回答')).rejects.toThrow(/空完成/);
+    // 重试上限次请求后抛错，而不是无限继续
+    expect(chatMock).toHaveBeenCalledTimes(MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND + 1);
   });
 });

@@ -161,14 +161,6 @@ export class DeepSeekProvider extends BaseLLMProvider {
       messageCount: payload.messages.length,
     });
 
-    let emitted = false;
-    const trackEvent = (event: IChatStreamEvent): void => {
-      if (event.type === 'content-delta' || event.type === 'reasoning-delta') {
-        emitted = true;
-      }
-      onEvent(event);
-    };
-
     return withStreamIdleRetry(
       async () => {
         const response = await this.fetchWithRetry(url, {
@@ -235,12 +227,12 @@ export class DeepSeekProvider extends BaseLLMProvider {
               const reasoningDelta = delta.reasoning_content ?? delta.reasoning;
               if (reasoningDelta) {
                 reasoningContent += reasoningDelta;
-                trackEvent({ type: 'reasoning-delta', delta: reasoningDelta });
+                onEvent({ type: 'reasoning-delta', delta: reasoningDelta });
               }
 
               if (delta.content) {
                 content += delta.content;
-                trackEvent({ type: 'content-delta', delta: delta.content });
+                onEvent({ type: 'content-delta', delta: delta.content });
               }
 
               if (delta.tool_calls?.length) {
@@ -283,6 +275,17 @@ export class DeepSeekProvider extends BaseLLMProvider {
 
         const normalizedUsage = normalizeDeepSeekUsage(usage);
 
+        // 部分中转只发 [DONE] 不发 finish_reason：绝不能默认按 'stop' 处理——
+        // 那会掩盖实际被截断的输出，绕过 Agent 侧针对 'length' 的续写守卫。
+        // 无 finish_reason 时以输出 token 达到 max_tokens 作为截断证据降级为
+        // 'length'；否则显式标记 'unknown'（Agent 按正常结束处理，但语义不再
+        // 被伪装成模型主动停止）。
+        const effectiveFinishReason = sawFinishReason
+          ? finishReason
+          : normalizedUsage.outputTokens >= (request.maxTokens ?? DEFAULT_MAX_TOKENS)
+            ? 'length'
+            : 'unknown';
+
         const result: IChatResponse = {
           id: responseId,
           choices: [
@@ -293,7 +296,7 @@ export class DeepSeekProvider extends BaseLLMProvider {
                 reasoningContent: stripLegacyReasoningPlaceholder(reasoningContent),
                 toolCalls: finalizeStreamingToolCalls(toolCallStates),
               },
-              finishReason,
+              finishReason: effectiveFinishReason,
             },
           ],
           usage: {
@@ -310,7 +313,7 @@ export class DeepSeekProvider extends BaseLLMProvider {
         log.info('LLM request completed', {
           model: payload.model,
           stream: true,
-          finishReason,
+          finishReason: effectiveFinishReason,
           inputTokens: result.usage?.input_tokens ?? 0,
           outputTokens: result.usage?.output_tokens ?? 0,
         });
@@ -321,7 +324,6 @@ export class DeepSeekProvider extends BaseLLMProvider {
         signal,
         // undefined = 无限重试：可重试故障不终止回合。
         maxRetries: this.config.streamMaxRetries,
-        hasEmitted: () => emitted,
         retryDelayMs: this.config.streamRetryDelayMs,
         onRetry: (attempt, err) => {
           // 无论是否已有输出都发 stream-restart：让 UI 状态可见，也让上层
@@ -364,6 +366,8 @@ export class DeepSeekProvider extends BaseLLMProvider {
       prefixHash: request.metadata?.prefixHash,
     });
 
+    // 非流式 body 读取必须保持在超时/取消保护之下（见 fetchWithRetry 注释）。
+    const protection: { release: () => void } = { release: () => undefined };
     const response = await this.fetchWithRetry(url, {
       method: 'POST',
       headers: {
@@ -371,12 +375,17 @@ export class DeepSeekProvider extends BaseLLMProvider {
         Authorization: `Bearer ${this.config.apiKey}`,
       },
       body: sortedStringify(payload),
-    }, signal);
+    }, signal, undefined, protection);
 
     let data: DeepSeekResponse;
     try {
       data = (await response.json()) as DeepSeekResponse;
     } catch (err) {
+      // 超时/取消中止 body 读取时产生 AbortError：原样上抛，不得误归为
+      // 「响应不是合法 JSON」。
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw err;
+      }
       // 200 但非 JSON 正文（代理 HTML 错误页等）：转成带 provider 上下文的
       // 错误，而不是裸 SyntaxError。
       throw new ProviderRequestError({
@@ -384,6 +393,8 @@ export class DeepSeekProvider extends BaseLLMProvider {
         message: `响应不是合法 JSON: ${(err as Error).message}`,
         retriable: false,
       });
+    } finally {
+      protection.release();
     }
 
     log.info('LLM request completed', {

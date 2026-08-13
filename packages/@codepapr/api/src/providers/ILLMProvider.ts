@@ -150,11 +150,17 @@ export abstract class BaseLLMProvider implements ILLMProvider {
     });
   }
 
+  /** 非流式调用方传入该持有器时，2xx 响应返回后超时/取消保护保持激活
+   *  （body 由调用方读取：坏中继可能只发 200 响应头后滴灌/挂起 body，
+   *  脱离保护的 response.json() 会永久挂起且用户取消无效）。
+   *  调用方读完 body 后必须调用 release() 释放定时器与监听器。
+   *  流式调用方不传：body 由流层的空闲超时保护。 */
   protected async fetchWithRetry(
     url: string,
     options: RequestInit,
     signal?: AbortSignal,
-    onRequestRetry?: (attempt: number, maxRetries: number, error: Error) => void
+    onRequestRetry?: (attempt: number, maxRetries: number, error: Error) => void,
+    holdProtectionOnOk?: { release: () => void }
   ): Promise<Response> {
     const maxRetries = this.config.maxRetries ?? DEFAULT_REQUEST_MAX_RETRIES;
     const notifyRetry = onRequestRetry ?? this.config.onRequestRetry;
@@ -191,7 +197,13 @@ export abstract class BaseLLMProvider implements ILLMProvider {
         });
 
         if (response.ok) {
-          cleanup();
+          if (holdProtectionOnOk) {
+            // 保护移交给调用方：body 读取（response.json()）仍在超时与
+            // 取消保护之下。调用方读完必须 release。
+            holdProtectionOnOk.release = cleanup;
+          } else {
+            cleanup();
+          }
           return response;
         }
 

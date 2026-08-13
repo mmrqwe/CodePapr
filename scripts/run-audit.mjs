@@ -136,5 +136,12 @@ console.warn('[audit] npm registry audit endpoint remained unavailable after mul
 if (lastNetworkError.trim()) {
   console.warn(lastNetworkError.trim());
 }
-console.warn('[audit] Skipping audit failure because the endpoint could not be reached; publish checks will continue.');
-process.exit(0);
+// 审计是发布门禁（verify:ci → audit）的一部分：注册表不可达时静默放行，
+// 等于网络波动（或被人为制造的干扰）即可让含已知漏洞依赖的构建通过发布链路。
+// 默认按失败处理；确需离线跳过时显式设置 CODEPAPR_AUDIT_SKIP_ON_NETWORK_FAILURE=1。
+if (process.env.CODEPAPR_AUDIT_SKIP_ON_NETWORK_FAILURE === '1') {
+  console.warn('[audit] CODEPAPR_AUDIT_SKIP_ON_NETWORK_FAILURE=1：显式跳过审计失败，发布检查继续。');
+  process.exit(0);
+}
+console.error('[audit] 审计端点不可达，按失败处理（如需离线跳过，设置 CODEPAPR_AUDIT_SKIP_ON_NETWORK_FAILURE=1）。');
+process.exit(1);
