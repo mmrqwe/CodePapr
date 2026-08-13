@@ -56,6 +56,7 @@ function copy(lang: Lang | undefined) {
       errors: 'Errors',
       status: 'Status',
       refreshStatus: 'Refresh status',
+      mcpGloballyDisabled: 'MCP is globally disabled — no servers were contacted. Enable MCP (and "Expose MCP tools") first.',
       disconnect: 'Disconnect all',
       connected: 'Connected',
       disconnected: 'Disconnected',
@@ -114,6 +115,7 @@ function copy(lang: Lang | undefined) {
       errors: '錯誤',
       status: '狀態',
       refreshStatus: '刷新狀態',
+      mcpGloballyDisabled: 'MCP 已全域關閉，未連接任何伺服器。請先啟用 MCP（及「向 Agent 暴露 MCP 工具」）。',
       disconnect: '斷開全部',
       connected: '已連接',
       disconnected: '未連接',
@@ -171,6 +173,7 @@ confirmation: '高风险调用确认',
       errors: '错误',
       status: '状态',
       refreshStatus: '刷新状态',
+      mcpGloballyDisabled: 'MCP 已全局关闭，未连接任何服务器。请先启用 MCP（及「向 Agent 暴露 MCP 工具」）。',
       disconnect: '断开全部',
       connected: '已连接',
       disconnected: '未连接',
@@ -268,11 +271,17 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
     setActiveId(nextServers[0]?.id ?? '');
   };
 
+  // #18：错误去重追加——旧实现重复失败时同一错误无限堆叠，
+  // 错误面板被重复条目塞满。
+  const appendError = (message: string) => {
+    setErrors((current) => (current.includes(message) ? current : [...current, message]));
+  };
+
   const refreshStatus = async () => {
     try {
       setServerStatus(await listMcpServerStatus(local));
     } catch (err) {
-      setErrors((current) => [...current, errorMessage(err)]);
+      appendError(errorMessage(err));
     }
   };
 
@@ -282,7 +291,7 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
       setMessage(`Disconnected ${closed} MCP servers`);
       await refreshStatus();
     } catch (err) {
-      setErrors((current) => [...current, errorMessage(err)]);
+      appendError(errorMessage(err));
     }
   };
 
@@ -315,13 +324,23 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
       setMessage(closed > 0 ? `Disconnected '${serverId}'` : `'${serverId}' was not connected`);
       await refreshStatus();
     } catch (err) {
-      setErrors((current) => [...current, errorMessage(err)]);
+      appendError(errorMessage(err));
     } finally {
       setBusyServerId(null);
     }
   };
 
   const discoverTools = async (serverIdFilter?: string) => {
+    // #17：MCP 全局关闭时不得显示误导性的 "0 tools · cache refreshed"——
+    // 旧实现 listMcpTools 在禁用时直接返回空结果，用户误以为服务器没有工具
+    // （实际根本没去连接）。
+    if (!local.enabled || !local.exposeTools) {
+      setStatus('idle');
+      setTools([]);
+      setErrors([]);
+      setMessage(c.mcpGloballyDisabled);
+      return;
+    }
     setStatus('loading');
     setMessage('');
     setErrors([]);

@@ -137,6 +137,7 @@ function ListingCard({
   installError,
   onSelect,
   onInstall,
+  onRetryInstall,
   c,
 }: {
   listing: SkillMarketListing;
@@ -145,6 +146,7 @@ function ListingCard({
   installError?: string;
   onSelect: (listing: SkillMarketListing) => void;
   onInstall: (listing: SkillMarketListing) => void;
+  onRetryInstall: (listing: SkillMarketListing) => void;
   c: ReturnType<typeof copy>;
 }) {
   const initial = listing.title.charAt(0).toUpperCase();
@@ -192,7 +194,20 @@ function ListingCard({
         ) : isInstalling ? (
           <span className="rounded-lg bg-purple-500/20 px-3 py-1.5 text-[10px] font-semibold text-purple-200">{c.installing}</span>
         ) : installError ? (
-          <span className="rounded-lg bg-red-500/15 px-3 py-1.5 text-[10px] font-semibold text-red-200">{installError}</span>
+          // #19：失败时除错误信息外提供「重试」按钮——旧实现只有错误徽标，
+          // 只能进详情页重试，卡片上无法直接重来。
+          <div className="flex items-center gap-2">
+            <span className="max-w-[180px] truncate rounded-lg bg-red-500/15 px-3 py-1.5 text-[10px] font-semibold text-red-200" title={installError}>
+              {installError}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onRetryInstall(listing); }}
+              className="shrink-0 rounded-lg bg-red-500/25 px-3 py-1.5 text-[10px] font-semibold text-red-100 transition-colors hover:bg-red-500/40"
+            >
+              {c.retry}
+            </button>
+          </div>
         ) : (
           <button
             type="button"
@@ -640,6 +655,29 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
   const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // #19：toast 定时清除统一入口。旧实现用闭包里的 toastMessage 判断是否
+  // 安排清除——首次安装时闭包值为 null，永远不安排 → toast 常驻不消失；
+  // 连续安装时还会出现旧定时器提前清掉新 toast 的竞态。
+  const showToast = useCallback((message: string) => {
+    setToastMessage(message);
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => {
+      toastTimerRef.current = null;
+      setToastMessage(null);
+    }, 3_000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   // N20：已安装状态与本地 .CodePapr/skills 同步（含嵌套 skill 目录），
   // 安装/刷新后 _skillDefinitions 更新，标记随之更新。
@@ -692,8 +730,7 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
 
   const handleInstall = useCallback(async (listing: SkillMarketListing) => {
     if (!workspacePath) {
-      setToastMessage(c.noWorkspace);
-      setTimeout(() => setToastMessage(null), 3000);
+      showToast(c.noWorkspace);
       return;
     }
 
@@ -731,11 +768,11 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
       });
       if (result.installed.length > 1) {
         const resInfo = result.resources > 0 ? ` + ${result.resources} resources` : '';
-        setToastMessage(`${listing.title}: ${result.installed.length} skills${resInfo} installed`);
+        showToast(`${listing.title}: ${result.installed.length} skills${resInfo} installed`);
       } else if (result.resources > 0) {
-        setToastMessage(`${listing.title}: SKILL.md + ${result.resources} resources installed`);
+        showToast(`${listing.title}: SKILL.md + ${result.resources} resources installed`);
       } else {
-        setToastMessage(`${listing.title} ${c.installSuccess}`);
+        showToast(`${listing.title} ${c.installSuccess}`);
       }
       await refreshSkills(workspacePath);
     } else {
@@ -747,11 +784,19 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
       next.delete(listing.id);
       return next;
     });
+  }, [workspacePath, c, showToast]);
 
-    if (toastMessage) {
-      setTimeout(() => setToastMessage(null), 3000);
-    }
-  }, [workspacePath, c, toastMessage]);
+  const handleRetryInstall = useCallback(
+    (listing: SkillMarketListing) => {
+      setInstallErrors((prev) => {
+        const next = { ...prev };
+        delete next[listing.id];
+        return next;
+      });
+      void handleInstall(listing);
+    },
+    [handleInstall]
+  );
 
   const filteredListings = useMemo(() => {
     return searchSkills(listings, searchQuery);
@@ -832,6 +877,7 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
                     installError={installErrors[listing.id]}
                     onSelect={setSelectedListing}
                     onInstall={handleInstall}
+                    onRetryInstall={handleRetryInstall}
                     c={c}
                   />
                 ))}

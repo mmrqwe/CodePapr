@@ -115,6 +115,32 @@ describe('McpSettingsModal', () => {
     expect(container.innerHTML).toContain('已连接');
   });
 
+  it('N17：MCP 全局关闭时刷新工具给出明确提示，不显示误导性的 0 tools', async () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: buildStoreState({ enabled: false, exposeTools: true }),
+    }));
+
+    await act(async () => {
+      root.render(<McpSettingsModal onClose={onClose} />);
+    });
+
+    // 找到「刷新工具」按钮（全局关闭时仍可点击）。
+    const refreshButton = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('刷新工具')
+    );
+    expect(refreshButton).toBeTruthy();
+
+    await act(async () => {
+      refreshButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.innerHTML).toContain('MCP 已全局关闭');
+    expect(container.innerHTML).not.toContain('0 tools');
+    // 绝不能真正去连接服务器
+    expect(invokeMock.mock.calls.some(([command]) => command === 'mcp_list_tools')).toBe(false);
+  });
+
   it('calls onClose when the close button is clicked', async () => {
     await act(async () => {
       root.render(<McpSettingsModal onClose={onClose} />);
