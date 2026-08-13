@@ -698,6 +698,8 @@ async function runSubagent(
     defaultMaxTokens: DEFAULT_MAX_TOKENS,
     globalMaxToolRounds: s.maxToolRounds,
     thinkingFallback: s.thinkingEnabled ?? true,
+    reasoningEffort: s.thinkingEffort ?? '',
+    thinkingBudgetTokens: s.thinkingBudgetTokens ?? 0,
     explore: {
       topP: s.exploreTopP,
       maxTokens: s.exploreMaxTokens,
@@ -722,6 +724,8 @@ async function runSubagent(
       apiFormat: s.mentorApiFormat,
       maxTokens: s.mentorMaxTokens,
       thinkingEnabled: s.mentorThinkingEnabled,
+      thinkingEffort: s.mentorThinkingEffort ?? '',
+      thinkingBudgetTokens: s.mentorThinkingBudgetTokens ?? 0,
     },
     fallbackApiKey: s.apiKey,
     fallbackBaseURL: s.baseURL,
@@ -1035,6 +1039,13 @@ async function handleRunAppAgent(
     topP: 0.9,
     maxTokens: isMentor ? (cachedSettings.mentorMaxTokens ?? 10000) : cachedSettings.maxTokens,
     thinkingEnabled: isMentor ? (cachedSettings.mentorThinkingEnabled ?? false) : cachedSettings.appSubAgentThinkingEnabled,
+    // 强度继承：mentor 模型用 mentor 强度，否则跟随主模型强度
+    ...(isMentor
+      ? { reasoningEffort: cachedSettings.mentorThinkingEffort ?? '' }
+      : { reasoningEffort: cachedSettings.thinkingEffort ?? '' }),
+    ...(isMentor
+      ? { thinkingBudgetTokens: cachedSettings.mentorThinkingBudgetTokens ?? 0 }
+      : { thinkingBudgetTokens: cachedSettings.thinkingBudgetTokens ?? 0 }),
   };
 
   const log = new AppendOnlyLog(`app-agent-${payload.appId}-${Date.now()}`);
@@ -1265,6 +1276,7 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
       maxTokens: payload.parameters.maxTokens,
       thinkingEnabled: payload.parameters.thinkingEnabled,
       reasoningEffort: payload.parameters.reasoningEffort,
+      thinkingBudgetTokens: payload.parameters.thinkingBudgetTokens,
     },
   });
   const session = new Session({

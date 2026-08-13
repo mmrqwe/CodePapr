@@ -534,12 +534,17 @@ export class ClaudeProvider extends BaseLLMProvider {
       // budget_tokens 必须 ≥1024 且 < max_tokens：输出预算过小时（如连接
       // 测试发 maxTokens:8）两个约束无法同时满足，降级不带 thinking 字段，
       // 而不是发出必然 400 的请求。
+      // 预算优先取调用方设置（第三方 Claude 兼容端点可自由取值），缺省用
+      // CLAUDE_THINKING_BUDGET_TOKENS；无论来源都钳制到 [1024, max_tokens-1]。
       ...(request.thinking?.type === 'enabled' &&
         (request.maxTokens ?? DEFAULT_MAX_TOKENS) > CLAUDE_THINKING_MIN_BUDGET_TOKENS && {
           thinking: {
             type: 'enabled' as const,
             budget_tokens: Math.min(
-              CLAUDE_THINKING_BUDGET_TOKENS,
+              Math.max(
+                request.thinking.budgetTokens ?? CLAUDE_THINKING_BUDGET_TOKENS,
+                CLAUDE_THINKING_MIN_BUDGET_TOKENS
+              ),
               (request.maxTokens ?? DEFAULT_MAX_TOKENS) - 1
             ),
           },

@@ -645,6 +645,39 @@ describe('safeParseToolArguments', () => {
     ) as { thinking?: unknown };
     expect(body.thinking).toBeUndefined();
   });
+
+  it('中继端点透传任意 reasoning_effort 取值（第三方强度各异，如 xhigh）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 'resp-effort',
+        choices: [
+          {
+            message: { role: 'assistant', content: 'ok', reasoning_content: '' },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: { prompt_tokens: 5, completion_tokens: 2 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      baseURL: 'https://relay.example.com/v1',
+    });
+    await provider.chat({
+      model: 'gpt-4o',
+      thinking: { type: 'enabled', reasoningEffort: 'xhigh' },
+      messages: [{ id: 'user-1', role: 'user', content: '你好', timestamp: 1 }],
+      maxTokens: 1024,
+    });
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string
+    ) as { thinking?: { type?: string }; reasoning_effort?: string };
+    expect(body.thinking).toEqual({ type: 'enabled' });
+    expect(body.reasoning_effort).toBe('xhigh');
+  });
 });
 
 describe('OpenAIProvider stream error events', () => {

@@ -228,6 +228,8 @@ export interface MentorConfig {
   maxTokens: number;
   maxConsultations: number;
   thinkingEnabled: boolean;
+  thinkingEffort: string;
+  thinkingBudgetTokens: number;
 }
 
 /**
@@ -353,7 +355,12 @@ export interface ILLMProvider {
 
 export interface IChatThinking {
   type: 'enabled' | 'disabled';
-  reasoningEffort?: 'high' | 'max';
+  /** OpenAI 兼容推理强度（reasoning_effort）：minimal/low/medium/high/xhigh/max，
+   *  第三方端点可能自定义取值，按原样透传。 */
+  reasoningEffort?: string;
+  /** Claude 格式思考预算（token）。Anthropic 硬约束 ≥1024 且 < max_tokens，
+   *  provider 侧钳制；第三方 Claude 兼容端点可自由取值。 */
+  budgetTokens?: number;
 }
 
 export interface IChatRequest {

@@ -574,4 +574,82 @@ describe('ClaudeProvider', () => {
     expect(body.temperature).toBe(0.5);
     expect(body.thinking).toBeUndefined();
   });
+
+  it('uses the caller-provided budget_tokens when thinking is enabled', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 'claude-budget-custom',
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'ok' }],
+        model: 'claude-sonnet',
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 5, output_tokens: 3 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new ClaudeProvider({ apiKey: 'test-key' });
+    await provider.chat({
+      model: 'claude-sonnet-4-6',
+      messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+      maxTokens: 20000,
+      thinking: { type: 'enabled', budgetTokens: 8000 },
+    });
+
+    const [, options] = fetchMock.mock.calls[0] ?? [];
+    const body = JSON.parse((options as RequestInit).body as string) as {
+      thinking?: { budget_tokens?: number };
+    };
+    expect(body.thinking?.budget_tokens).toBe(8000);
+  });
+
+  it('clamps the caller budget into [1024, maxTokens-1]', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: 'claude-budget-clamp-1',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'ok' }],
+          model: 'claude-sonnet',
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 5, output_tokens: 3 },
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: 'claude-budget-clamp-2',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'ok' }],
+          model: 'claude-sonnet',
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 5, output_tokens: 3 },
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new ClaudeProvider({ apiKey: 'test-key' });
+    // 过小 → 抬到 1024；过大 → 压到 maxTokens-1
+    await provider.chat({
+      model: 'claude-sonnet-4-6',
+      messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+      maxTokens: 4096,
+      thinking: { type: 'enabled', budgetTokens: 100 },
+    });
+    await provider.chat({
+      model: 'claude-sonnet-4-6',
+      messages: [{ id: 'u2', role: 'user', content: 'hello', timestamp: 2 }],
+      maxTokens: 4096,
+      thinking: { type: 'enabled', budgetTokens: 999999 },
+    });
+
+    const calls = fetchMock.mock.calls as Array<[string, RequestInit]>;
+    const first = JSON.parse(calls[0][1].body as string) as { thinking?: { budget_tokens?: number } };
+    const second = JSON.parse(calls[1][1].body as string) as { thinking?: { budget_tokens?: number } };
+    expect(first.thinking?.budget_tokens).toBe(1024);
+    expect(second.thinking?.budget_tokens).toBe(4095);
+  });
 });

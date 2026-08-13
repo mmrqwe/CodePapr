@@ -24,6 +24,7 @@ export {
   MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND,
   PERMISSION_WAITING_TOOL_TIMEOUTS,
   buildContextSnapshot,
+  buildThinking,
 } from './agent/Agent';
 export type { AgentOptions, IRequestBuilder, ICacheValidator, ContextCompactionConfig, ContextSnapshotSource } from './agent/Agent';
 export { Session } from './agent/Session';

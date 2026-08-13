@@ -130,8 +130,16 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     typeof input.thinkingEnabled === 'boolean'
       ? input.thinkingEnabled
       : DEFAULT_SETTINGS.thinkingEnabled;
-  const thinkingEffort: 'high' | 'max' =
-    input.thinkingEffort === 'high' ? 'high' : 'max';
+  // 推理强度为任意字符串（OpenAI 兼容 reasoning_effort，第三方端点取值各异）：
+  // 非空字符串原样透传，空/非法值回退默认。旧持久化值 high/max 依然有效。
+  const thinkingEffort: string =
+    typeof input.thinkingEffort === 'string' && input.thinkingEffort.trim()
+      ? input.thinkingEffort.trim()
+      : DEFAULT_SETTINGS.thinkingEffort;
+  const thinkingBudgetTokens =
+    typeof input.thinkingBudgetTokens === 'number' && Number.isFinite(input.thinkingBudgetTokens)
+      ? Math.max(0, Math.floor(input.thinkingBudgetTokens))
+      : DEFAULT_SETTINGS.thinkingBudgetTokens;
   const debugEnabled =
     typeof input.debugEnabled === 'boolean'
       ? input.debugEnabled
@@ -277,6 +285,14 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     typeof input.mentorThinkingEnabled === 'boolean'
       ? input.mentorThinkingEnabled
       : DEFAULT_SETTINGS.mentorThinkingEnabled;
+  const mentorThinkingEffort: string =
+    typeof input.mentorThinkingEffort === 'string' && input.mentorThinkingEffort.trim()
+      ? input.mentorThinkingEffort.trim()
+      : DEFAULT_SETTINGS.mentorThinkingEffort;
+  const mentorThinkingBudgetTokens =
+    typeof input.mentorThinkingBudgetTokens === 'number' && Number.isFinite(input.mentorThinkingBudgetTokens)
+      ? Math.max(0, Math.floor(input.mentorThinkingBudgetTokens))
+      : DEFAULT_SETTINGS.mentorThinkingBudgetTokens;
 
   const exploreTopP =
     typeof input.exploreTopP === 'number' && Number.isFinite(input.exploreTopP)
@@ -436,6 +452,7 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     systemPrompt,
     thinkingEnabled,
     thinkingEffort,
+    thinkingBudgetTokens,
     debugEnabled,
     chatBordersEnabled,
     temperature,
@@ -490,6 +507,8 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     mentorMaxTokens,
     maxMentorConsultations,
     mentorThinkingEnabled,
+    mentorThinkingEffort,
+    mentorThinkingBudgetTokens,
     explorePrompt:
       typeof input.explorePrompt === 'string' ? input.explorePrompt.trim() : '',
     scoutPrompt:

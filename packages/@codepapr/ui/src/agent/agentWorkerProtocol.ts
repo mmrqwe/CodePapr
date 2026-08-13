@@ -28,7 +28,8 @@ export interface WorkerAgentSettings {
   maxTokens: number;
   maxToolRounds: number;
   thinkingEnabled: boolean;
-  thinkingEffort: 'high' | 'max';
+  thinkingEffort: string;
+  thinkingBudgetTokens: number;
   lang?: Lang;
   mentorEnabled: boolean;
   mentorModel: string;
@@ -37,6 +38,8 @@ export interface WorkerAgentSettings {
   mentorApiFormat: WorkerApiFormat;
   mentorMaxTokens: number;
   mentorThinkingEnabled: boolean;
+  mentorThinkingEffort: string;
+  mentorThinkingBudgetTokens: number;
   exploreTopP: number;
   exploreMaxTokens: number;
   exploreThinkingEnabled: boolean;
@@ -84,7 +87,8 @@ export interface WorkerAgentParameters {
   topP: number;
   maxTokens: number;
   thinkingEnabled: boolean;
-  reasoningEffort: 'high' | 'max';
+  reasoningEffort: string;
+  thinkingBudgetTokens?: number;
 }
 
 export interface WorkerAgentRuntimeConfig {

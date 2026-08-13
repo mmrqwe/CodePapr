@@ -271,7 +271,7 @@ export function buildUiTaskToolContext(
   workspacePath: string,
   runtime: AgentRuntimeConfig,
   overrides: Partial<
-    Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'temperature' | 'maxTokens' | 'systemPrompt'>
+    Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'thinkingBudgetTokens' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   > = {},
 ): UiTaskToolContext | undefined {
   if (!runtime.agentDefinitions || runtime.agentDefinitions.length === 0) {
@@ -336,12 +336,14 @@ export function buildUiTaskToolContext(
     lang: runtime.lang ?? settings.lang,
     skillDefinitions: runtime.skillDefinitions ?? [],
     agents: availableAgents,
-    mentor: { enabled: settings.mentorEnabled, model: settings.mentorModel, baseURL: settings.mentorBaseURL, apiKey: settings.mentorApiKey, apiFormat: settings.mentorApiFormat as ApiFormat, maxTokens: settings.mentorMaxTokens, maxConsultations: settings.maxMentorConsultations, thinkingEnabled: settings.mentorThinkingEnabled },
+    mentor: { enabled: settings.mentorEnabled, model: settings.mentorModel, baseURL: settings.mentorBaseURL, apiKey: settings.mentorApiKey, apiFormat: settings.mentorApiFormat as ApiFormat, maxTokens: settings.mentorMaxTokens, maxConsultations: settings.maxMentorConsultations, thinkingEnabled: settings.mentorThinkingEnabled, thinkingEffort: settings.mentorThinkingEffort, thinkingBudgetTokens: settings.mentorThinkingBudgetTokens },
     baseURL: settings.baseURL,
     apiKey: settings.apiKey,
     multimodalEnabled: resolveMultimodalEnabled(settings, baseModel),
     toolOutputTruncation: buildToolOutputTruncation(settings, workspacePath),
     thinkingEnabled: settings.thinkingEnabled,
+    reasoningEffort: settings.thinkingEffort,
+    thinkingBudgetTokens: settings.thinkingBudgetTokens,
     editHistory: runtime.editHistory,
     onWorkspaceMutated,
     exploreTopP: settings.exploreTopP,
@@ -372,7 +374,7 @@ export function buildAgentSessionParts(
   workspacePath: string,
   messages: UIMessage[] = [],
   overrides: Partial<
-    Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'temperature' | 'maxTokens' | 'systemPrompt'>
+    Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'thinkingBudgetTokens' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   > = {},
   runtime: AgentRuntimeConfig = {}
 ): AgentSessionParts {
@@ -423,6 +425,7 @@ export function buildAgentSessionParts(
       maxTokens: overrides.maxTokens ?? settings.maxTokens,
       thinkingEnabled: overrides.thinkingEnabled ?? settings.thinkingEnabled,
       reasoningEffort: overrides.thinkingEffort ?? settings.thinkingEffort,
+      thinkingBudgetTokens: overrides.thinkingBudgetTokens ?? settings.thinkingBudgetTokens,
     },
   });
   const log = createLogFromMessages(sessionId, messages, sessionBootstrapPrompt);
@@ -440,7 +443,7 @@ export function createMainThreadAgent(
   workspacePath: string,
   messages: UIMessage[] = [],
   overrides: Partial<
-    Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'temperature' | 'maxTokens' | 'systemPrompt'>
+    Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'thinkingBudgetTokens' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   > = {},
   runtime: AgentRuntimeConfig = {}
 ): AgentRuntimeHandle {
@@ -453,7 +456,7 @@ function _createLocalAgent(
   workspacePath: string,
   messages: UIMessage[] = [],
   overrides: Partial<
-    Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'temperature' | 'maxTokens' | 'systemPrompt'>
+    Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'thinkingBudgetTokens' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   > = {},
   runtime: AgentRuntimeConfig = {}
 ): AgentRuntimeHandle {
@@ -498,7 +501,7 @@ export function createAgent(
   workspacePath: string,
   messages: UIMessage[] = [],
   overrides: Partial<
-    Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'temperature' | 'maxTokens' | 'systemPrompt'>
+    Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'thinkingBudgetTokens' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   > = {},
   runtime: AgentRuntimeConfig = {},
 ): AgentRuntimeHandle {
@@ -538,6 +541,7 @@ export function createAgent(
           maxTokens: overrides.maxTokens ?? settings.maxTokens,
           thinkingEnabled: overrides.thinkingEnabled ?? settings.thinkingEnabled,
           reasoningEffort: overrides.thinkingEffort ?? settings.thinkingEffort,
+          thinkingBudgetTokens: overrides.thinkingBudgetTokens ?? settings.thinkingBudgetTokens,
         },
         runtime: {
           editHistory: runtime.editHistory,

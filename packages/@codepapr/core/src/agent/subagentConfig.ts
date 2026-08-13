@@ -68,6 +68,8 @@ export interface SubagentMentorSettings {
   apiFormat: 'openai' | 'claude';
   maxTokens: number;
   thinkingEnabled: boolean;
+  thinkingEffort?: string;
+  thinkingBudgetTokens?: number;
 }
 
 export interface SubagentExecutionInput {
@@ -82,6 +84,9 @@ export interface SubagentExecutionInput {
   globalMaxToolRounds: number;
   /** 非 mentor/explore/scout 子代理的 thinking 兜底（通常为主代理 thinkingEnabled）。 */
   thinkingFallback: boolean;
+  /** 主模型思考强度：explore/scout 及普通子代理继承（与主代理共用同一模型）。 */
+  reasoningEffort?: string;
+  thinkingBudgetTokens?: number;
   explore?: SubagentTierSettings;
   scout?: SubagentTierSettings;
   mentor?: SubagentMentorSettings;
@@ -96,6 +101,8 @@ export interface ResolvedSubagentParameters {
   topP: number;
   maxTokens: number;
   thinkingEnabled: boolean;
+  reasoningEffort?: string;
+  thinkingBudgetTokens?: number;
 }
 
 export interface ResolvedSubagentMentor {
@@ -175,13 +182,28 @@ export function resolveSubagentExecution(
     : isScout
     ? (tierSettings?.thinkingEnabled ?? false)
     : input.thinkingFallback;
+  // 思考强度继承：mentor 用自己独立的强度设置；其余子代理（explore/scout/
+  // 普通）与主代理共用模型，继承主设置。空字符串 = 不设置（交给 API 默认）。
+  const reasoningEffort = usingMentor
+    ? (input.mentor?.thinkingEffort ?? '')
+    : (input.reasoningEffort ?? '');
+  const thinkingBudgetTokens = usingMentor
+    ? (input.mentor?.thinkingBudgetTokens ?? 0)
+    : (input.thinkingBudgetTokens ?? 0);
 
   const agentMaxToolRounds = tierSettings?.maxToolRounds ?? SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS;
   const maxToolRounds = Math.min(input.globalMaxToolRounds, agentMaxToolRounds);
 
   return {
     route,
-    parameters: { temperature, topP, maxTokens, thinkingEnabled },
+    parameters: {
+      temperature,
+      topP,
+      maxTokens,
+      thinkingEnabled,
+      ...(reasoningEffort.trim() ? { reasoningEffort: reasoningEffort.trim() } : {}),
+      ...(thinkingBudgetTokens > 0 ? { thinkingBudgetTokens } : {}),
+    },
     maxToolRounds,
     mentor,
     usingMentor,

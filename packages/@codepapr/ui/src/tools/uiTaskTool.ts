@@ -48,6 +48,9 @@ export interface UiTaskToolContext {
   apiKey?: string;
   currentDepth?: number;
   thinkingEnabled?: boolean;
+  /** 主模型思考强度：explore/scout 及普通子代理继承（与主代理共用模型）。 */
+  reasoningEffort?: string;
+  thinkingBudgetTokens?: number;
   exploreTopP?: number;
   exploreMaxTokens?: number;
   exploreThinkingEnabled?: boolean;
@@ -106,6 +109,8 @@ export async function runSubagent(
     defaultMaxTokens: context.defaultMaxTokens ?? DEFAULT_MAX_TOKENS,
     globalMaxToolRounds: context.maxToolRounds,
     thinkingFallback: context.thinkingEnabled ?? true,
+    reasoningEffort: context.reasoningEffort ?? '',
+    thinkingBudgetTokens: context.thinkingBudgetTokens ?? 0,
     explore: {
       topP: context.exploreTopP,
       maxTokens: context.exploreMaxTokens,

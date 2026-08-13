@@ -41,7 +41,8 @@ export interface Settings {
   fastModelEnabled: boolean;
   systemPrompt: string;
   thinkingEnabled: boolean;
-  thinkingEffort: 'high' | 'max';
+  thinkingEffort: string;
+  thinkingBudgetTokens: number;
   multimodalEnabled: boolean;
   multimodalModelTier: MultimodalModelTier;
   debugEnabled: boolean;
@@ -84,6 +85,8 @@ export interface Settings {
   mentorMaxTokens: number;
   maxMentorConsultations: number;
   mentorThinkingEnabled: boolean;
+  mentorThinkingEffort: string;
+  mentorThinkingBudgetTokens: number;
   explorePrompt: string;
   scoutPrompt: string;
   mentorPrompt: string;

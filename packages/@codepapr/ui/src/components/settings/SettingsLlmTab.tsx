@@ -1,7 +1,17 @@
 import { DEEPSEEK_MAX_TOKENS } from '@codepapr/api/tokenLimits';
 import type { ApiFormat, ApiMode } from '../../store/agentStore';
 import { InlineSelectRow, TextField, ToggleField } from '../forms';
-import { CUSTOM_URL_PLACEHOLDERS, LOCAL_URL_PLACEHOLDER, MODEL_PRESETS } from './constants';
+import {
+  CUSTOM_URL_PLACEHOLDERS,
+  LOCAL_URL_PLACEHOLDER,
+  MODEL_PRESETS,
+  THINKING_EFFORT_CUSTOM,
+  THINKING_EFFORT_PRESETS,
+} from './constants';
+import { ConnectionTestButton } from './ConnectionTestButton';
+import { runConnectionTest } from './testConnection';
+import { buildProviderInstance } from '../../store/internals/providerFactory';
+import { resolveProviderName } from '../../store/internals/settingsNormalizer';
 import type { SettingsTabProps } from './types';
 
 function modeButtonClass(active: boolean): string {
@@ -33,11 +43,73 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
       : MODEL_PRESETS[local.apiFormat];
   const maxTokensLimit = local.apiMode === 'deepseek' ? DEEPSEEK_MAX_TOKENS : 32000;
   const isLocal = local.apiMode === 'local';
+  const isClaudeFormat = local.apiMode === 'custom' && local.apiFormat === 'claude';
   const localLabel = currentLang === 'en' ? 'Local Model' : '本地模型';
   const localDesc =
     currentLang === 'en'
       ? 'OpenAI-compatible local server (llama.cpp / Ollama / LM Studio)'
       : '本地 OpenAI 兼容服务（llama.cpp / Ollama / LM Studio）';
+
+  const effortIsCustom = !(THINKING_EFFORT_PRESETS as readonly string[]).includes(
+    local.thinkingEffort,
+  );
+  const effortSelectValue = effortIsCustom ? THINKING_EFFORT_CUSTOM : local.thinkingEffort;
+
+  const validateModelForTest = (modelName: string) => {
+    if (!modelName.trim()) {
+      throw new Error(
+        currentLang === 'en'
+          ? 'Please fill in the model name first'
+          : currentLang === 'zh-TW'
+          ? '請先填寫模型名稱'
+          : '请先填写模型名称',
+      );
+    }
+    if (local.apiMode === 'custom' && !activeModeConfig.baseURL.trim()) {
+      throw new Error(
+        currentLang === 'en'
+          ? 'Please fill in the API address first'
+          : currentLang === 'zh-TW'
+          ? '請先填寫 API 地址'
+          : '请先填写 API 地址',
+      );
+    }
+    if (local.apiMode !== 'local' && !activeModeConfig.apiKey.trim()) {
+      throw new Error(
+        currentLang === 'en'
+          ? 'Please fill in the API Key first'
+          : currentLang === 'zh-TW'
+          ? '請先填寫 API Key'
+          : '请先填写 API Key',
+      );
+    }
+  };
+
+  const runModelTest = async (modelName: string) => {
+    validateModelForTest(modelName);
+    const provider = buildProviderInstance(local);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    try {
+      await runConnectionTest(provider, {
+        model: modelName.trim(),
+        providerName: resolveProviderName(local),
+        thinkingEnabled: local.thinkingEnabled,
+        reasoningEffort: local.thinkingEffort,
+        thinkingBudgetTokens: local.thinkingBudgetTokens,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
+  const testLabels = (idle: string) => ({
+    idle,
+    connecting: t.llmTestConnecting,
+    success: t.llmTestSuccess,
+    failedPrefix: t.llmTestFailed,
+  });
 
   return (
     <div className="space-y-5">
@@ -150,6 +222,19 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
         />
       </div>
 
+      <div className="flex flex-wrap items-start gap-4">
+        <ConnectionTestButton
+          labels={testLabels(t.llmTestPrimary)}
+          onTest={() => runModelTest(activeModeConfig.model)}
+        />
+        {local.fastModelEnabled && (
+          <ConnectionTestButton
+            labels={testLabels(t.llmTestFast)}
+            onTest={() => runModelTest(activeModeConfig.fastModel)}
+          />
+        )}
+      </div>
+
       <ToggleField
         checked={local.fastModelEnabled}
         onChange={(checked) => update({ fastModelEnabled: checked })}
@@ -159,26 +244,67 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
         title={t.fastModelDesc}
       />
 
-      {local.apiMode === 'deepseek' && (
+      {!isLocal && (
         <>
           <ToggleField
             checked={local.thinkingEnabled}
             onChange={(checked) => update({ thinkingEnabled: checked })}
             label={t.thinkingMode}
-            desc={t.thinkingModeDesc}
-            title={t.thinkingModeDesc}
+            desc={local.apiMode === 'deepseek' ? t.thinkingModeDesc : t.thinkingModeCustomDesc}
+            title={local.apiMode === 'deepseek' ? t.thinkingModeDesc : t.thinkingModeCustomDesc}
           />
 
-          {local.thinkingEnabled && (
-            <InlineSelectRow
-              title={t.thinkingEffort}
-              desc={t.thinkingEffortDesc}
-              value={local.thinkingEffort}
-              onChange={(value) => update({ thinkingEffort: value as 'high' | 'max' })}
-            >
-              <option value="max">max</option>
-              <option value="high">high</option>
-            </InlineSelectRow>
+          {local.thinkingEnabled && isClaudeFormat && (
+            <TextField
+              label={t.thinkingBudgetLabel}
+              hint={t.thinkingBudgetHint}
+              type="number"
+              min={1024}
+              max={maxTokensLimit}
+              step={512}
+              value={local.thinkingBudgetTokens}
+              onChange={(e) => {
+                const parsed = parseInt(e.target.value, 10);
+                update({
+                  thinkingBudgetTokens: Number.isFinite(parsed)
+                    ? parsed
+                    : local.thinkingBudgetTokens,
+                });
+              }}
+              title={t.thinkingBudgetLabel}
+            />
+          )}
+
+          {local.thinkingEnabled && !isClaudeFormat && (
+            <>
+              <InlineSelectRow
+                title={t.thinkingEffort}
+                desc={t.thinkingEffortDesc}
+                value={effortSelectValue}
+                onChange={(value) => {
+                  update({
+                    thinkingEffort: value === THINKING_EFFORT_CUSTOM ? '' : value,
+                  });
+                }}
+              >
+                {THINKING_EFFORT_PRESETS.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+                <option value={THINKING_EFFORT_CUSTOM}>{t.thinkingEffortCustom}</option>
+              </InlineSelectRow>
+
+              {effortSelectValue === THINKING_EFFORT_CUSTOM && (
+                <TextField
+                  label={t.thinkingEffortCustomLabel}
+                  value={effortIsCustom ? local.thinkingEffort : ''}
+                  onChange={(e) => update({ thinkingEffort: e.target.value.trim() })}
+                  title={t.thinkingEffortCustomLabel}
+                  placeholder={t.thinkingEffortCustomPlaceholder}
+                />
+              )}
+            </>
           )}
         </>
       )}

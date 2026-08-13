@@ -1,9 +1,14 @@
-import { errorMessage } from '@codepapr/common';
 import { useState } from 'react';
 import { OpenAIProvider, ClaudeProvider } from '@codepapr/api';
 import { BUILTIN_AGENTS, resolveAgentPrompt } from '@codepapr/core';
 import type { ApiFormat, Settings } from '../../store/agentStore';
 import { SelectField } from '../forms';
+import {
+  THINKING_EFFORT_CUSTOM,
+  THINKING_EFFORT_PRESETS,
+} from './constants';
+import { ConnectionTestButton } from './ConnectionTestButton';
+import { runConnectionTest } from './testConnection';
 import type { SettingsTabProps } from './types';
 
 const FIELD_CLASS =
@@ -15,8 +20,6 @@ type SubAgentKey = 'explore' | 'scout' | 'mentor';
 
 export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTabProps) {
   const [subAgent, setSubAgent] = useState<SubAgentKey>('explore');
-  const [testStatus, setTestStatus] = useState<'idle' | 'connecting' | 'success' | 'error'>('idle');
-  const [testMessage, setTestMessage] = useState('');
 
   const defaultPrompts: Record<string, string> = {};
   for (const agent of BUILTIN_AGENTS) {
@@ -26,62 +29,45 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
   const activeModeConfig = local[local.apiMode];
 
   const handleTestMentorConnection = async () => {
-    setTestStatus('connecting');
-    setTestMessage('');
+    const apiKey = (local.mentorApiKey || activeModeConfig.apiKey).trim();
+    if (!apiKey) {
+      throw new Error(
+        currentLang === 'en'
+          ? 'API Key is required'
+          : currentLang === 'zh-TW'
+          ? '請填寫 API Key'
+          : '请填写 API Key',
+      );
+    }
+    const baseURL = (local.mentorBaseURL || activeModeConfig.baseURL).trim().replace(/\/+$/, '');
+    if (!baseURL) {
+      throw new Error(
+        currentLang === 'en'
+          ? 'API URL is required'
+          : currentLang === 'zh-TW'
+          ? '請填寫 API 地址'
+          : '请填写 API 地址',
+      );
+    }
+    const model = local.mentorModel.trim() || 'gpt-4o-mini';
+
+    const isClaude = local.mentorApiFormat === 'claude';
+    const config = { apiKey, baseURL, timeout: 15000, maxRetries: 1 };
+    const provider = isClaude ? new ClaudeProvider(config) : new OpenAIProvider(config);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
     try {
-      const apiKey = (local.mentorApiKey || activeModeConfig.apiKey).trim();
-      if (!apiKey) {
-        throw new Error(
-          currentLang === 'en'
-            ? 'API Key is required'
-            : currentLang === 'zh-TW'
-            ? '請填寫 API Key'
-            : '请填写 API Key',
-        );
-      }
-      const baseURL = (local.mentorBaseURL || activeModeConfig.baseURL).trim().replace(/\/+$/, '');
-      if (!baseURL) {
-        throw new Error(
-          currentLang === 'en'
-            ? 'API URL is required'
-            : currentLang === 'zh-TW'
-            ? '請填寫 API 地址'
-            : '请填写 API 地址',
-        );
-      }
-      const model = local.mentorModel.trim() || 'gpt-4o-mini';
-
-      const isClaude = local.mentorApiFormat === 'claude';
-      const config = { apiKey, baseURL, timeout: 15000, maxRetries: 1 };
-      const provider = isClaude
-        ? new ClaudeProvider(config)
-        : new OpenAIProvider(config);
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-      try {
-        await provider.chat(
-          {
-            model,
-            messages: [{ id: 'test', role: 'user' as const, content: 'Hi', timestamp: Date.now() }],
-            maxTokens: 8,
-            temperature: 0.3,
-            topP: 0.9,
-            thinking: local.mentorThinkingEnabled ? { type: 'enabled' } : { type: 'disabled' },
-          },
-          controller.signal,
-        );
-      } finally {
-        clearTimeout(timeoutId);
-      }
-
-      setTestStatus('success');
-      setTestMessage(t.mentorTestSuccess);
-    } catch (err) {
-      setTestStatus('error');
-      const message = errorMessage(err).slice(0, 500);
-      setTestMessage(`${t.mentorTestFailed}: ${message}`);
+      await runConnectionTest(provider, {
+        model,
+        providerName: isClaude ? 'claude' : 'openai',
+        thinkingEnabled: local.mentorThinkingEnabled,
+        reasoningEffort: local.mentorThinkingEffort,
+        thinkingBudgetTokens: local.mentorThinkingBudgetTokens,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
     }
   };
 
@@ -387,32 +373,15 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
                   </div>
                 </div>
                 <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={() => void handleTestMentorConnection()}
-                    disabled={testStatus === 'connecting'}
-                    className="rounded-xl border border-indigo-500/40 px-4 py-2 text-xs font-medium text-indigo-200 transition-colors hover:border-indigo-400 hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {testStatus === 'connecting' ? (
-                      <span className="inline-flex items-center gap-2">
-                        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-indigo-300 border-t-transparent" />
-                        {t.mentorTestConnecting}
-                      </span>
-                    ) : (
-                      t.mentorTestButton
-                    )}
-                  </button>
-                  {testMessage && (
-                    <div
-                      className={`mt-2 rounded-lg px-3 py-2 text-xs leading-relaxed ${
-                        testStatus === 'success'
-                          ? 'border border-green-500/30 bg-green-500/10 text-green-200'
-                          : 'border border-red-500/30 bg-red-500/10 text-red-200'
-                      }`}
-                    >
-                      {testMessage}
-                    </div>
-                  )}
+                  <ConnectionTestButton
+                    labels={{
+                      idle: t.mentorTestButton,
+                      connecting: t.mentorTestConnecting,
+                      success: t.mentorTestSuccess,
+                      failedPrefix: t.mentorTestFailed,
+                    }}
+                    onTest={() => handleTestMentorConnection()}
+                  />
                 </div>
               </div>
 
@@ -476,6 +445,73 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
                   </label>
                   <p className="mt-2 text-[10px] leading-relaxed text-slate-600">{t.mentorThinkingEnabledHint}</p>
                 </div>
+
+                {local.mentorThinkingEnabled && local.mentorApiFormat !== 'claude' && (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label className={LABEL_CLASS}>{t.mentorThinkingEffortLabel}</label>
+                      <select
+                        value={
+                          (THINKING_EFFORT_PRESETS as readonly string[]).includes(local.mentorThinkingEffort)
+                            ? local.mentorThinkingEffort
+                            : THINKING_EFFORT_CUSTOM
+                        }
+                        onChange={(e) => {
+                          update({
+                            mentorThinkingEffort:
+                              e.target.value === THINKING_EFFORT_CUSTOM ? '' : e.target.value,
+                          });
+                        }}
+                        title={t.mentorThinkingEffortLabel}
+                        className={FIELD_CLASS}
+                      >
+                        <option value={THINKING_EFFORT_CUSTOM}>{t.thinkingEffortCustom}</option>
+                        {THINKING_EFFORT_PRESETS.map((value) => (
+                          <option key={value} value={value}>
+                            {value}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.mentorThinkingEffortHint}</p>
+                    </div>
+                    {!(THINKING_EFFORT_PRESETS as readonly string[]).includes(local.mentorThinkingEffort) && (
+                      <div>
+                        <label className={LABEL_CLASS}>{t.thinkingEffortCustomLabel}</label>
+                        <input
+                          value={local.mentorThinkingEffort}
+                          onChange={(e) => update({ mentorThinkingEffort: e.target.value.trim() })}
+                          title={t.thinkingEffortCustomLabel}
+                          placeholder={t.thinkingEffortCustomPlaceholder}
+                          className={FIELD_CLASS}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {local.mentorThinkingEnabled && local.mentorApiFormat === 'claude' && (
+                  <div className="mt-3">
+                    <label className={LABEL_CLASS}>{t.mentorThinkingBudgetLabel}</label>
+                    <input
+                      type="number"
+                      min={1024}
+                      max={200000}
+                      step={512}
+                      value={local.mentorThinkingBudgetTokens}
+                      onChange={(e) => {
+                        const parsed = Number(e.target.value);
+                        update({
+                          mentorThinkingBudgetTokens: Number.isFinite(parsed)
+                            ? parsed
+                            : local.mentorThinkingBudgetTokens,
+                        });
+                      }}
+                      title={t.mentorThinkingBudgetLabel}
+                      className={FIELD_CLASS}
+                    />
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.mentorThinkingBudgetHint}</p>
+                  </div>
+                )}
               </div>
             </div>
           )}

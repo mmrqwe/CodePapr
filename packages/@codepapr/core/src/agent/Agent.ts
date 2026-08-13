@@ -317,14 +317,38 @@ function accumulateStats(
   };
 }
 
-function buildDeepSeekThinking(params: Record<string, unknown>): IChatThinking {
-  const type = params.thinkingEnabled === false ? 'disabled' : 'enabled';
+/**
+ * 由统一参数构建 thinking 字段（主代理与子代理共用）：
+ * - thinkingEnabled 缺省视为开启；显式 false 时，DeepSeek 必须发
+ *   {type:'disabled'}（省略字段默认开思考），OpenAI/Claude 格式直接省略字段
+ *   （缺省即不思考，且避免第三方端点对未知 thinking 字段返回 400）。
+ * - reasoningEffort 任意非空字符串透传（OpenAI 兼容生态取值各异）。
+ * - budgetTokens 仅 Claude 格式使用，provider 侧按 API 硬约束钳制。
+ */
+export function buildThinking(
+  params: Record<string, unknown>,
+  providerName: 'deepseek' | 'openai' | 'claude',
+): IChatThinking | undefined {
+  const enabled = params.thinkingEnabled !== false;
+  if (!enabled) {
+    return providerName === 'deepseek' ? { type: 'disabled' } : undefined;
+  }
   const reasoningEffort =
-    params.reasoningEffort === 'max' || params.reasoningEffort === 'high'
-      ? params.reasoningEffort
+    typeof params.reasoningEffort === 'string' && params.reasoningEffort.trim()
+      ? params.reasoningEffort.trim()
       : undefined;
-
-  return reasoningEffort ? { type, reasoningEffort } : { type };
+  const budgetTokens =
+    typeof params.thinkingBudgetTokens === 'number' && Number.isFinite(params.thinkingBudgetTokens)
+      ? Math.floor(params.thinkingBudgetTokens)
+      : undefined;
+  if (!reasoningEffort && !budgetTokens) {
+    return { type: 'enabled' };
+  }
+  return {
+    type: 'enabled',
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+    ...(budgetTokens ? { budgetTokens } : {}),
+  };
 }
 
 function isImageError(err: unknown): boolean {
@@ -564,10 +588,10 @@ export class Agent {
       }
 
       const params = this.session.prefix.getParameters();
-      const baseThinking =
-        this.providerName === 'deepseek'
-          ? buildDeepSeekThinking(params as Record<string, unknown>)
-          : undefined;
+      const baseThinking = buildThinking(
+        params as Record<string, unknown>,
+        this.providerName,
+      );
 
       // ── 回合完成质量守卫 ──────────────────────────────────────────────
       // 目标：只要 LLM 还能连上，回合就必须产出有效结果，绝不静默结束。

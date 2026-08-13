@@ -155,6 +155,47 @@ describe('resolveSubagentExecution - 工具轮数', () => {
   });
 });
 
+describe('resolveSubagentExecution - 思考强度继承', () => {
+  it('explore/scout 继承主设置的 effort 与 budget', () => {
+    const definition: AgentDefinition = { name: 'explore', description: 'e', mode: 'subagent', prompt: 'p' };
+    const exec = resolveSubagentExecution(
+      makeInput({ definition, reasoningEffort: 'xhigh', thinkingBudgetTokens: 8000 })
+    );
+    expect(exec.parameters.reasoningEffort).toBe('xhigh');
+    expect(exec.parameters.thinkingBudgetTokens).toBe(8000);
+  });
+
+  it('mentor 使用自己的强度设置（不继承主设置）', () => {
+    const definition: AgentDefinition = { name: 'mentor', description: 'm', mode: 'subagent', model: 'mentor', prompt: 'p' };
+    const exec = resolveSubagentExecution(
+      makeInput({
+        definition,
+        reasoningEffort: 'max',
+        thinkingBudgetTokens: 4096,
+        mentor: {
+          enabled: true,
+          model: 'mentor-model',
+          apiKey: 'k',
+          baseURL: 'https://m.example.com',
+          apiFormat: 'openai',
+          maxTokens: 10000,
+          thinkingEnabled: true,
+          thinkingEffort: 'medium',
+          thinkingBudgetTokens: 6000,
+        },
+      })
+    );
+    expect(exec.parameters.reasoningEffort).toBe('medium');
+    expect(exec.parameters.thinkingBudgetTokens).toBe(6000);
+  });
+
+  it('强度为空时不注入参数（交给 API 默认）', () => {
+    const exec = resolveSubagentExecution(makeInput({ reasoningEffort: '', thinkingBudgetTokens: 0 }));
+    expect(exec.parameters.reasoningEffort).toBeUndefined();
+    expect(exec.parameters.thinkingBudgetTokens).toBeUndefined();
+  });
+});
+
 describe('FilteringToolRegistry', () => {
   it('按谓词跳过被禁工具（不注册 handler）', async () => {
     const registry = new FilteringToolRegistry((t) => t.name !== 'write');

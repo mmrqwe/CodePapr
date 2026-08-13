@@ -1056,6 +1056,90 @@ describe('Agent completion-quality guards (no silent stops)', () => {
     expect(builds[1]?.thinking).toEqual({ type: 'disabled' });
   });
 
+  it('openai/claude 提供者开启思考时发送 thinking（任意 effort 透传 + budget）', async () => {
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi.fn<(_: IChatRequest) => Promise<IChatResponse>>().mockResolvedValue(stopResponse('ok')),
+    };
+    const builds: Array<{ thinking?: unknown }> = [];
+    const agent = createGuardedAgent(
+      provider,
+      'openai',
+      (opts) => builds.push({ thinking: opts.thinking }),
+      { temperature: 0.7, topP: 0.9, maxTokens: 1000, thinkingEnabled: true, reasoningEffort: 'xhigh', thinkingBudgetTokens: 8000 },
+    );
+
+    await agent.chat('请回答');
+
+    expect(builds[0]?.thinking).toEqual({
+      type: 'enabled',
+      reasoningEffort: 'xhigh',
+      budgetTokens: 8000,
+    });
+  });
+
+  it('openai/claude 提供者关闭思考时不发 thinking 字段（避免第三方端点 400）', async () => {
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi.fn<(_: IChatRequest) => Promise<IChatResponse>>().mockResolvedValue(stopResponse('ok')),
+    };
+    const builds: Array<{ thinking?: unknown }> = [];
+    const agent = createGuardedAgent(
+      provider,
+      'openai',
+      (opts) => builds.push({ thinking: opts.thinking }),
+      { temperature: 0.7, topP: 0.9, maxTokens: 1000, thinkingEnabled: false },
+    );
+
+    await agent.chat('请回答');
+
+    expect(builds[0]?.thinking).toBeUndefined();
+  });
+
+  it('claude 提供者思考开启时携带 budgetTokens', async () => {
+    const provider: ILLMProvider = {
+      name: 'claude',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi.fn<(_: IChatRequest) => Promise<IChatResponse>>().mockResolvedValue(stopResponse('ok')),
+    };
+    const builds: Array<{ thinking?: unknown }> = [];
+    const agent = createGuardedAgent(
+      provider,
+      'claude',
+      (opts) => builds.push({ thinking: opts.thinking }),
+      { temperature: 0.7, topP: 0.9, maxTokens: 1000, thinkingEnabled: true, thinkingBudgetTokens: 6000 },
+    );
+
+    await agent.chat('请回答');
+
+    expect(builds[0]?.thinking).toEqual({ type: 'enabled', budgetTokens: 6000 });
+  });
+
+  it('deepseek 提供者任意 effort 值透传（不再只认 high/max）', async () => {
+    const provider: ILLMProvider = {
+      name: 'deepseek',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi.fn<(_: IChatRequest) => Promise<IChatResponse>>().mockResolvedValue(stopResponse('ok')),
+    };
+    const builds: Array<{ thinking?: unknown }> = [];
+    const agent = createGuardedAgent(
+      provider,
+      'deepseek',
+      (opts) => builds.push({ thinking: opts.thinking }),
+      { temperature: 0.7, topP: 0.9, maxTokens: 1000, thinkingEnabled: true, reasoningEffort: 'medium' },
+    );
+
+    await agent.chat('请回答');
+
+    expect(builds[0]?.thinking).toEqual({ type: 'enabled', reasoningEffort: 'medium' });
+  });
+
   it('stops continuing after MAX_CONTINUATIONS_PER_ROUND and ends gracefully (no throw)', async () => {
     const chatMock = vi.fn<(_: IChatRequest) => Promise<IChatResponse>>();
     for (let i = 0; i < MAX_CONTINUATIONS_PER_ROUND + 1; i += 1) {
