@@ -63,16 +63,26 @@ export interface UiTaskToolContext {
   subagentCacheStats?: Array<{ tier: 'primary' | 'fast' | 'mentor'; stats: ICacheStatistics }>;
   graphToolTimeoutMs: number;
   multimodalEnabled: boolean;
+  /** 非 mentor/explore/scout 子代理的 maxTokens 兜底（缺省 DEFAULT_MAX_TOKENS）。
+   *  内部子代理（如 verifier）可用克隆上下文覆盖。 */
+  defaultMaxTokens?: number;
   toolOutputTruncation?: ToolOutputTruncationOptions;
   /** 主会话工作模式：app 模式下子代理同样需要能搜索 .CodePapr/apps 应用源码。 */
   mode?: PromptMode;
 }
 
-async function runSubagent(
+/**
+ * 在 Tauri UI 中执行一个声明式子代理会话（task 工具与内部子代理共用）。
+ * 子代理拥有独立的 Session、ToolRegistry 与（按声明过滤的）工具集，
+ * 复用主代理的 Provider，执行结束后把最终回答返回。
+ * maxWallClockMs 可覆盖默认的 20 分钟墙钟预算（如 verifier 用更紧的预算）。
+ */
+export async function runSubagent(
   context: UiTaskToolContext,
   definition: AgentDefinition,
   prompt: string,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  maxWallClockMs?: number
 ): Promise<SubagentSessionResult> {
   startSubagentProgress(definition.name, prompt);
 
@@ -93,7 +103,7 @@ async function runSubagent(
     baseModel: context.baseModel,
     fastModel: context.fastModel,
     fastModelEnabled: context.fastModelEnabled,
-    defaultMaxTokens: DEFAULT_MAX_TOKENS,
+    defaultMaxTokens: context.defaultMaxTokens ?? DEFAULT_MAX_TOKENS,
     globalMaxToolRounds: context.maxToolRounds,
     thinkingFallback: context.thinkingEnabled ?? true,
     explore: {
@@ -147,6 +157,7 @@ async function runSubagent(
     memorySection: context.memorySection,
     projectGraphSummary: context.projectGraphSummary,
     graphToolTimeoutMs: context.graphToolTimeoutMs,
+    maxWallClockMs,
     abortSignal,
     toolOutputTruncation: context.toolOutputTruncation,
     onToolCallEnd: (event) => {

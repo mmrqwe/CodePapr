@@ -47,6 +47,7 @@ export function buildMentionItems(
   const agents = agentDefinitions
     .filter((a) => {
       if (a.mode === 'primary') return false;
+      if (a.internal) return false;
       if (a.name === 'mentor' && mentorEnabled === false) return false;
       return true;
     })

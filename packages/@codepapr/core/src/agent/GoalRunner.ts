@@ -4,7 +4,8 @@
  * 核心机制：
  *  1. Worker 模型（主 Agent）执行一轮工作
  *  2. 客观条件函数执行验证命令，判定条件是否达成
- *  3. Verifier 子代理（无工具）读取 transcript，防止 Worker 伪造成功假象
+ *  3. Verifier 只读子代理（read/grep/glob/list）读取 transcript + Worker 自述，
+ *     可亲自核实文件内容，防止 Worker 伪造成功假象
  *  4. 条件函数判定 + Verifier 反伪造 = 双保险
  *  5. 未达成 → 生成反馈注入下一轮 → 继续循环
  *
@@ -38,8 +39,13 @@ export interface WorkerTurnResult {
 export interface GoalRunnerCallbacks {
   /** 执行一轮 Worker turn，返回结果和 transcript */
   runWorkerTurn: (prompt: string, isFeedback: boolean) => Promise<WorkerTurnResult>;
-  /** 调用 Verifier 子代理，让它基于 transcript 判定 Worker 是否在伪造成功 */
-  runVerifier: (transcript: string, conditionResult: ConditionResult) => Promise<GoalVerdict>;
+  /** 调用 Verifier 只读子代理，让它基于 transcript、Worker 自述与条件结果
+   *  判定 Worker 是否在伪造成功（子代理可用 read/grep 亲自核实文件）。 */
+  runVerifier: (
+    transcript: string,
+    conditionResult: ConditionResult,
+    workerContent: string
+  ) => Promise<GoalVerdict>;
   /** 执行验证条件命令，返回客观结果 */
   evaluateCondition: () => Promise<ConditionResult>;
   /** 状态变更通知（UI 更新 banner） */
@@ -208,7 +214,8 @@ export class GoalRunner {
       try {
         verdict = await this.callbacks.runVerifier(
           workerResult.transcript,
-          conditionResult
+          conditionResult,
+          workerResult.content
         );
       } catch (err) {
         // 用户中断（verifier 调用前检测到 aborted，回调抛 AbortError）
@@ -332,7 +339,7 @@ export class GoalRunner {
   ): string {
     const verificationSection = isSubjective
       ? `## Verification
-An AI verifier will review your tool-call transcript after each round. It judges based on what you ACTUALLY did, not what you say you'll do.
+An AI verifier will review your tool-call transcript after each round and may read project files to independently verify your changes. It judges based on what you ACTUALLY did, not what you say you'll do.
 
 Strictness level: **${strictLabel}**`
       : `## Verification Condition
@@ -375,7 +382,7 @@ ${verificationSection}
 ${planSection}
 
 ## Non-Negotiable Rules
-1. **No empty talk.** Don't describe what you "would" do — actually do it. The verifier checks tool calls.
+1. **No empty talk.** Don't describe what you "would" do — actually do it. The verifier checks tool calls and reads files.
 2. **No self-declared victory.** Never claim the goal is done — verification decides.
 3. **No fabricated output.** Never make up test results or command output.
 4. **No repeating failures.** If an approach failed, analyze why and pivot before trying again.
@@ -402,7 +409,7 @@ Focus on execution. Make this round count.`;
 
     const verificationSection = isSubjective
       ? `## ${t('验收方式', '驗收方式')}
-${t('每轮结束后，AI 审查者会检查你的工具调用记录。它只看你实际做了什么，不看你说了什么。', '每輪結束後，AI 審查者會檢查你的工具調用記錄。它只看你實際做了什麼，不看你說了什麼。')}
+${t('每轮结束后，AI 审查者会检查你的工具调用记录，并可能读取项目文件独立核实你的改动。它只看你实际做了什么，不看你说了什么。', '每輪結束後，AI 審查者會檢查你的工具調用記錄，並可能讀取項目檔案獨立核實你的改動。它只看你實際做了什麼，不看你說了什麼。')}
 
 ${t('严格度', '嚴格度')}：**${strictLabel}**`
       : `## ${t('验收条件', '驗收條件')}
@@ -445,7 +452,7 @@ ${verificationSection}
 ${planSection}
 
 ## ${t('铁律', '鐵律')}
-1. **${t('不说空话。', '不說空話。')}** ${t('不要描述你"将会"做什么 —— 实际去做。审查者看的是工具调用记录。', '不要描述你「將會」做什麼 —— 實際去做。審查者看的是工具調用記錄。')}
+1. **${t('不说空话。', '不說空話。')}** ${t('不要描述你"将会"做什么 —— 实际去做。审查者会检查工具调用记录并读取文件核实。', '不要描述你「將會」做什麼 —— 實際去做。審查者會檢查工具調用記錄並讀取檔案核實。')}
 2. **${t('不自我宣告胜利。', '不自我宣告勝利。')}** ${t('永远不要声称目标已完成 —— 验收说了算。', '永遠不要聲稱目標已完成 —— 驗收說了算。')}
 3. **${t('不伪造输出。', '不偽造輸出。')}** ${t('绝不编造测试结果或命令输出。', '絕不編造測試結果或命令輸出。')}
 4. **${t('不重复失败。', '不重複失敗。')}** ${t('一个方法失败了，先分析原因再换方向重试。', '一個方法失敗了，先分析原因再換方向重試。')}
@@ -634,7 +641,7 @@ ${t('专注执行。让这一轮物有所值。', '專注執行。讓這一輪�
 
     lines.push('### Strategy for This Round');
     lines.push(isSubjective
-      ? 'The verifier checks your ACTUAL tool calls, not your words. Make real changes.'
+      ? 'The verifier checks your ACTUAL tool calls and may read files to verify. Make real changes.'
       : 'The verification output above is REAL. Read it. Understand the root cause. Don\'t guess.');
     lines.push('');
     lines.push('- **Pivot hard.** If the same approach has failed multiple times, try something fundamentally different.');
@@ -717,7 +724,7 @@ ${t('专注执行。让这一轮物有所值。', '專注執行。讓這一輪�
 
     lines.push('### 本輪策略'.replace('本輪', t('本轮', '本輪')));
     lines.push(isSubjective
-      ? t('审查者看的是你实际的工具调用，不是你说的话。做出真正的改变。', '審查者看的是你實際的工具調用，不是你說的話。做出真正的改變。')
+      ? t('审查者检查你实际的工具调用并读取文件核实，不是听你说的话。做出真正的改变。', '審查者檢查你實際的工具調用並讀取檔案核實，不是聽你說的話。做出真正的改變。')
       : t('上面的验收输出是真实的。认真读。理解根因。不要猜。', '上面的驗收輸出是真實的。認真讀。理解根因。不要猜。'));
     lines.push('');
     lines.push(`- ${t('果断换方向。', '果斷換方向。')}${t('同样的方法已经失败多次，试试完全不同的思路。', '同樣的方法已經失敗多次，試試完全不同的思路。')}`);

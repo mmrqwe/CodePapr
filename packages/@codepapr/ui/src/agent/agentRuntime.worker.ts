@@ -850,6 +850,9 @@ function createRegistry(
       if (!target) {
         throw new Error(`未找到子代理: ${name}`);
       }
+      if (target.internal) {
+        throw new Error(`子代理 "${name}" 是内部代理，不能直接委派`);
+      }
 
       const result = await runWithActivity(() =>
         runSubagent(requestId, payload, target, prompt, currentDepth + 1, context?.signal)

@@ -333,7 +333,7 @@ ChatPanel → useTtsPlayer hook → Rust TTS Module → GPT-SoVITS Python Server
 
 > **主代理工具集**：主代理拥有全部读写/执行工具（read/write/edit/patch/grep/glob/list/lsp/lsp_edit/diagnostics/git/bash/browser/webfetch/skill/question/todo/task 等），但 `graph` 对其**软隐藏**——项目结构与符号导航改由 `list` + `lsp` 承担，跨模块依赖/影响分析则委派给 Explore。`graph` 的定义与 handler 仍保留注册，子代理（Explore）可经白名单选取并执行。
 
-> Goal 自主循环的验收器（Verifier）是一个独立的无工具模型调用，在高级设置中配置（`verifierModelTier`），不属于内置子代理，也不经 `task` 工具暴露。
+> Goal 自主循环的验收器（Verifier）是一个内置的只读子代理（read/grep/glob/list），在高级设置中配置（`verifierModelTier`）。它是内部代理，不经 `task` 工具暴露，仅供 GoalRunner 内部调用。
 
 `task` 工具只暴露 `mode` 为 `subagent` / `all` 的 agent；`mode: primary`（仅作 @ 提及主代理）与 `internal: true` 的 agent 都不会出现在委派列表。
 

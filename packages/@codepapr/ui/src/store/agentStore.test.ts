@@ -3538,14 +3538,16 @@ describe('sendMessage /goal', () => {
     };
     const chat = vi.fn(async (_prompt: string) => mockResponse);
 
-    // Mock fetch for verifier LLM calls
+    // Mock fetch for verifier LLM calls（verifier 现为只读子代理，走流式 chat）
+    const verifierSseBody = [
+      'data: {"id":"resp-verifier","choices":[{"index":0,"delta":{"content":"{\\"verdict\\":\\"SATISFIED\\",\\"evidence\\":\\"Condition met.\\"}"},"finish_reason":null}]}\n\n',
+      'data: {"id":"resp-verifier","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}\n\n',
+      'data: [DONE]\n\n',
+    ].join('');
     vi.stubGlobal('fetch', vi.fn(() =>
       Promise.resolve(new Response(
-        JSON.stringify({
-          choices: [{ message: { role: 'assistant', content: '{"verdict":"SATISFIED","evidence":"Condition met."}' }, finish_reason: 'stop' }],
-          usage: { prompt_tokens: 10, completion_tokens: 5 },
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
+        verifierSseBody,
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
       ))
     ));
 
@@ -3631,14 +3633,16 @@ describe('sendMessage /goal', () => {
     };
     const chat = vi.fn(async (_prompt: string) => mockResponse);
 
-    // Mock fetch for verifier LLM calls
+    // Mock fetch for verifier LLM calls（verifier 现为只读子代理，走流式 chat）
+    const verifierSseBody = [
+      'data: {"id":"resp-verifier","choices":[{"index":0,"delta":{"content":"{\\"verdict\\":\\"SATISFIED\\",\\"evidence\\":\\"Task completed.\\"}"},"finish_reason":null}]}\n\n',
+      'data: {"id":"resp-verifier","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}\n\n',
+      'data: [DONE]\n\n',
+    ].join('');
     vi.stubGlobal('fetch', vi.fn(() =>
       Promise.resolve(new Response(
-        JSON.stringify({
-          choices: [{ message: { role: 'assistant', content: '{"verdict":"SATISFIED","evidence":"Task completed."}' }, finish_reason: 'stop' }],
-          usage: { prompt_tokens: 10, completion_tokens: 5 },
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
+        verifierSseBody,
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
       ))
     ));
 

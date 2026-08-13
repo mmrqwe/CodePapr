@@ -466,6 +466,32 @@ describe('GoalRunner', () => {
     expect(DEFAULT_GOAL_MAX_WALL_CLOCK_MS).toBe(1_800_000);
   });
 
+  it('runVerifier 回调收到 Worker 的文字回复（反伪造需要自述与工具记录对照）', async () => {
+    const condition = parseGoalCondition('exec:npm test');
+    const runVerifier = vi.fn().mockResolvedValue(makeVerdict('SATISFIED'));
+
+    const runner = new GoalRunner({
+      condition,
+      userGoalText: '修复测试',
+      limits: { maxIterations: 2, maxWallClockMs: 60_000 },
+      callbacks: {
+        runWorkerTurn: vi.fn().mockResolvedValue(makeWorkerResult('已完成修复，测试通过')),
+        runVerifier,
+        evaluateCondition: vi.fn().mockResolvedValue(makeConditionResult(true)),
+        onStateChange: vi.fn(),
+        isAborted: () => false,
+      },
+    });
+
+    await runner.run();
+
+    expect(runVerifier).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ met: true }),
+      '已完成修复，测试通过'
+    );
+  });
+
   it('plan-first 模式第 1 轮跳过条件评估和 Verifier', async () => {
     const condition = parseGoalCondition('--plan-first exec:npm test');
     let evalCount = 0;

@@ -263,6 +263,105 @@ export interface AgentSessionParts {
 }
 
 /**
+ * 构建主线程子代理执行上下文（UiTaskToolContext），供 task 工具与内部子代理
+ * （如 Goal 验收器 verifier）共用。无可用子代理定义时返回 undefined。
+ */
+export function buildUiTaskToolContext(
+  settings: Settings,
+  workspacePath: string,
+  runtime: AgentRuntimeConfig,
+  overrides: Partial<
+    Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'temperature' | 'maxTokens' | 'systemPrompt'>
+  > = {},
+): UiTaskToolContext | undefined {
+  if (!runtime.agentDefinitions || runtime.agentDefinitions.length === 0) {
+    return undefined;
+  }
+  const mode: PromptMode = runtime.mode ?? 'agent';
+  const onWorkspaceMutated = runtime.onWorkspaceMutated ?? defaultOnWorkspaceMutatedResolver();
+  const characterPrompt = getActiveCharacterPrompt();
+  const customPromptWithCharacter = [
+    runtime.customPrompt ?? settings.systemPrompt,
+    characterPrompt,
+  ]
+    .map((part) => part?.trim() ?? '')
+    .filter((part) => part.length > 0)
+    .join('\n\n');
+
+  const baseModel = (overrides.model ?? settings.model).trim();
+  const provider = buildProviderInstance(settings);
+  const providerName = resolveProviderName(settings);
+
+  // Filter out mentor agent when mentor is not enabled
+  const availableAgents = runtime.agentDefinitions.filter(
+    (agent) => agent.model !== 'mentor' || settings.mentorEnabled
+  ).map((agent) => {
+    // Override model based on tier selection for explore/scout
+    if (agent.name === 'explore') {
+      const tier = settings.exploreModelTier;
+      const agentDef = { ...agent, model: tier === 'primary' ? undefined : 'fast' };
+      if (!subagentMultimodalAllowed(settings, tier) && agentDef.tools) {
+        agentDef.tools = { ...agentDef.tools };
+        delete (agentDef.tools as Record<string, boolean>)['read_image'];
+      }
+      return agentDef;
+    }
+    if (agent.name === 'scout') {
+      const tier = settings.scoutModelTier;
+      const agentDef = { ...agent, model: tier === 'primary' ? undefined : 'fast' };
+      if (!subagentMultimodalAllowed(settings, tier) && agentDef.tools) {
+        agentDef.tools = { ...agentDef.tools };
+        delete (agentDef.tools as Record<string, boolean>)['read_image'];
+      }
+      return agentDef;
+    }
+    return agent;
+  });
+  if (availableAgents.length === 0) {
+    return undefined;
+  }
+
+  return {
+    workspacePath,
+    provider,
+    providerName,
+    baseModel,
+    fastModelEnabled: settings.fastModelEnabled,
+    fastModel: settings.fastModel,
+    maxToolRounds: settings.maxToolRounds,
+    rulesSection: runtime.rulesSection ?? '',
+    customPrompt: runtime.customPrompt ? runtime.customPrompt : customPromptWithCharacter,
+    memorySection: runtime.memorySection,
+    projectGraphSummary: runtime.projectGraphSummary,
+    lang: runtime.lang ?? settings.lang,
+    skillDefinitions: runtime.skillDefinitions ?? [],
+    agents: availableAgents,
+    mentor: { enabled: settings.mentorEnabled, model: settings.mentorModel, baseURL: settings.mentorBaseURL, apiKey: settings.mentorApiKey, apiFormat: settings.mentorApiFormat as ApiFormat, maxTokens: settings.mentorMaxTokens, maxConsultations: settings.maxMentorConsultations, thinkingEnabled: settings.mentorThinkingEnabled },
+    baseURL: settings.baseURL,
+    apiKey: settings.apiKey,
+    multimodalEnabled: resolveMultimodalEnabled(settings, baseModel),
+    toolOutputTruncation: buildToolOutputTruncation(settings, workspacePath),
+    thinkingEnabled: settings.thinkingEnabled,
+    editHistory: runtime.editHistory,
+    onWorkspaceMutated,
+    exploreTopP: settings.exploreTopP,
+    exploreMaxTokens: settings.exploreMaxTokens,
+    exploreThinkingEnabled: settings.exploreThinkingEnabled,
+    exploreTemperature: settings.exploreTemperature,
+    exploreMaxToolRounds: settings.exploreMaxToolRounds,
+    exploreMaxDepth: settings.exploreMaxDepth,
+    scoutTopP: settings.scoutTopP,
+    scoutMaxTokens: settings.scoutMaxTokens,
+    scoutThinkingEnabled: settings.scoutThinkingEnabled,
+    scoutTemperature: settings.scoutTemperature,
+    scoutMaxToolRounds: settings.scoutMaxToolRounds,
+    scoutMaxDepth: settings.scoutMaxDepth,
+    graphToolTimeoutMs: settings.graphToolTimeoutMs,
+    mode,
+  };
+}
+
+/**
  * 组装会话的「前缀 + 日志 + 工具」（系统提示词、工具定义、会话引导、历史消息），
  * 与真实发送共用同一份逻辑。既用于创建主线程 Agent，也用于按需重建上下文快照
  * （computeContextSnapshot），保证两者组装结果一致。
@@ -286,13 +385,6 @@ export function buildAgentSessionParts(
     runtime.sessionBootstrapPrompt ??
     buildAgentSessionBootstrapPrompt(settings, workspacePath, runtime.skillDefinitions ?? []);
   const characterPrompt = getActiveCharacterPrompt();
-  const customPromptWithCharacter = [
-    runtime.customPrompt ?? settings.systemPrompt,
-    characterPrompt,
-  ]
-    .map((part) => part?.trim() ?? '')
-    .filter((part) => part.length > 0)
-    .join('\n\n');
   const composedSystemPrompt = [
     (overrides.systemPrompt ?? settings.systemPrompt).trim(),
     characterPrompt,
@@ -312,80 +404,14 @@ export function buildAgentSessionParts(
 
   registerMcpTools(toolRegistry, settings.mcp, runtime.mcpToolDefinitions ?? [], runtime.mcpToolMappings);
 
-  let uiTaskToolContext: UiTaskToolContext | undefined;
+  const uiTaskToolContext = buildUiTaskToolContext(settings, workspacePath, runtime, overrides);
+  if (uiTaskToolContext) {
+    registerUiTaskTool(toolRegistry, uiTaskToolContext);
+  }
 
   const baseModel = (overrides.model ?? settings.model).trim();
   const provider = buildProviderInstance(settings);
   const providerName = resolveProviderName(settings);
-
-  if (runtime.agentDefinitions && runtime.agentDefinitions.length > 0) {
-    // Filter out mentor agent when mentor is not enabled
-    const availableAgents = runtime.agentDefinitions.filter(
-      (agent) => agent.model !== 'mentor' || settings.mentorEnabled
-    ).map((agent) => {
-      // Override model based on tier selection for explore/scout
-      if (agent.name === 'explore') {
-        const tier = settings.exploreModelTier;
-        const agentDef = { ...agent, model: tier === 'primary' ? undefined : 'fast' };
-        if (!subagentMultimodalAllowed(settings, tier) && agentDef.tools) {
-          agentDef.tools = { ...agentDef.tools };
-          delete (agentDef.tools as Record<string, boolean>)['read_image'];
-        }
-        return agentDef;
-      }
-      if (agent.name === 'scout') {
-        const tier = settings.scoutModelTier;
-        const agentDef = { ...agent, model: tier === 'primary' ? undefined : 'fast' };
-        if (!subagentMultimodalAllowed(settings, tier) && agentDef.tools) {
-          agentDef.tools = { ...agentDef.tools };
-          delete (agentDef.tools as Record<string, boolean>)['read_image'];
-        }
-        return agentDef;
-      }
-      return agent;
-    });
-    if (availableAgents.length > 0) {
-      uiTaskToolContext = {
-        workspacePath,
-        provider,
-        providerName,
-        baseModel,
-        fastModelEnabled: settings.fastModelEnabled,
-        fastModel: settings.fastModel,
-        maxToolRounds: settings.maxToolRounds,
-        rulesSection: runtime.rulesSection ?? '',
-        customPrompt: runtime.customPrompt ? runtime.customPrompt : customPromptWithCharacter,
-        memorySection: runtime.memorySection,
-        projectGraphSummary: runtime.projectGraphSummary,
-        lang: runtime.lang ?? settings.lang,
-        skillDefinitions: runtime.skillDefinitions ?? [],
-        agents: availableAgents,
-      mentor: { enabled: settings.mentorEnabled, model: settings.mentorModel, baseURL: settings.mentorBaseURL, apiKey: settings.mentorApiKey, apiFormat: settings.mentorApiFormat as ApiFormat, maxTokens: settings.mentorMaxTokens, maxConsultations: settings.maxMentorConsultations, thinkingEnabled: settings.mentorThinkingEnabled },
-      baseURL: settings.baseURL,
-      apiKey: settings.apiKey,
-      multimodalEnabled: resolveMultimodalEnabled(settings, baseModel),
-      toolOutputTruncation: buildToolOutputTruncation(settings, workspacePath),
-      thinkingEnabled: settings.thinkingEnabled,
-      editHistory: runtime.editHistory,
-      onWorkspaceMutated,
-      exploreTopP: settings.exploreTopP,
-      exploreMaxTokens: settings.exploreMaxTokens,
-      exploreThinkingEnabled: settings.exploreThinkingEnabled,
-      exploreTemperature: settings.exploreTemperature,
-      exploreMaxToolRounds: settings.exploreMaxToolRounds,
-      exploreMaxDepth: settings.exploreMaxDepth,
-      scoutTopP: settings.scoutTopP,
-      scoutMaxTokens: settings.scoutMaxTokens,
-      scoutThinkingEnabled: settings.scoutThinkingEnabled,
-      scoutTemperature: settings.scoutTemperature,
-      scoutMaxToolRounds: settings.scoutMaxToolRounds,
-      scoutMaxDepth: settings.scoutMaxDepth,
-        graphToolTimeoutMs: settings.graphToolTimeoutMs,
-        mode,
-      };
-      registerUiTaskTool(toolRegistry, uiTaskToolContext);
-    }
-  }
 
   const prefix = new ImmutablePrefix({
     systemPrompt: composedSystemPrompt,

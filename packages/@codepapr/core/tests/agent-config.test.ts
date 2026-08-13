@@ -5,6 +5,8 @@ import {
   filterToolsForMode,
   buildTaskToolDefinition,
   BUILTIN_AGENTS,
+  VERIFIER_PROMPT_OBJECTIVE,
+  VERIFIER_PROMPT_SUBJECTIVE,
   type AgentDefinition,
 } from '../src/agent/agentConfig';
 import type { IToolDefinition } from '@codepapr/types';
@@ -210,5 +212,32 @@ describe('agentConfig - BUILTIN_AGENTS', () => {
     const mentor = BUILTIN_AGENTS.find((a) => a.name === 'mentor')!;
     expect(mentor).toBeDefined();
     expect(mentor.tools).toEqual({});
+  });
+
+  it('verifier 是只读内部代理（不暴露给 task 工具）', () => {
+    const verifier = BUILTIN_AGENTS.find((a) => a.name === 'verifier')!;
+    expect(verifier).toBeDefined();
+    expect(verifier.internal).toBe(true);
+    expect(verifier.mode).toBe('subagent');
+    expect(verifier.tools).toEqual({
+      read: true,
+      grep: true,
+      glob: true,
+      list: true,
+    });
+    // internal 代理不出现在主 Agent 的 task 工具可见列表
+    const visible = buildTaskToolDefinition([verifier], 'zh-CN');
+    expect(visible).toBeNull();
+  });
+
+  it('verifier 提示词包含客观与主观两套三语 Record', () => {
+    expect(typeof VERIFIER_PROMPT_OBJECTIVE['zh-CN']).toBe('string');
+    expect(typeof VERIFIER_PROMPT_OBJECTIVE['zh-TW']).toBe('string');
+    expect(typeof VERIFIER_PROMPT_OBJECTIVE.en).toBe('string');
+    expect(typeof VERIFIER_PROMPT_SUBJECTIVE['zh-CN']).toBe('string');
+    expect(typeof VERIFIER_PROMPT_SUBJECTIVE['zh-TW']).toBe('string');
+    expect(typeof VERIFIER_PROMPT_SUBJECTIVE.en).toBe('string');
+    expect(VERIFIER_PROMPT_OBJECTIVE['zh-CN']).toContain('SATISFIED');
+    expect(VERIFIER_PROMPT_SUBJECTIVE.en).toContain('Scoring Rubric');
   });
 });

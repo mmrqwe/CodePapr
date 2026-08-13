@@ -56,11 +56,11 @@ import { isPermissionWaitActive } from '../permissionStore';
 import { delay, waitForPageVisible } from '../../utils/crashRecovery';
 import { insertCheckpointAtRetainedBoundary } from '../../utils/contextCompaction';
 import { loadSessionMessages, waitForPendingProjectStateSave } from '../../utils/projectStorage';
-import { runVerifier } from '../../utils/verifierRunner';
+import { runVerifierSubagent } from '../../utils/verifierRunner';
 import { useGoalStore } from '../goalStore';
 import type { CommandResult } from '../../tools/streamingWorkspaceCommand';
 
-import { normalizeSettings, getSettingsError, resolveProviderName } from './settingsNormalizer';
+import { normalizeSettings, getSettingsError } from './settingsNormalizer';
 import { addConversationRuntime, addConversationStats, getSessionConversationStats } from './stats';
 import { maybeApplySessionTitle, touchSession } from './persistence';
 import { saveCurrentProjectState } from './projectSnapshot';
@@ -85,11 +85,11 @@ import {
 } from './promptBuilders';
 import {
   AgentRuntimeConfig,
+  buildUiTaskToolContext,
   createAgent,
   createMainThreadAgent,
   getAgentMessagesSince,
 } from './agentFactory';
-import { buildProviderInstance } from './providerFactory';
 import { maybeGenerateContextCheckpoint } from './contextCheckpoint';
 import { handleWorkspaceMutation } from './backgroundDiagnostics';
 import type {
@@ -1420,8 +1420,22 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // eslint-disable-next-line no-console
             console.log('[Goal] Starting goal loop:', goalCondition.humanReadable);
             useGoalStore.getState().setGoalActive(goalCondition, goalUserText);
-            const verifierProvider = buildProviderInstance(normalizedSettings);
-            const verifierProviderName = resolveProviderName(normalizedSettings);
+
+            // Verifier 是内置只读子代理（read/grep/glob/list），不经 task 工具
+            // 暴露。这里构建与主会话一致的主线程子代理执行上下文（provider、
+            // 模型路由、skills/custom/memory 等），GoalRunner 每轮验收复用。
+            const verifierTaskContext = buildUiTaskToolContext(
+              normalizedSettings,
+              workspacePath,
+              runtimeAgentConfig,
+              {
+                model: route.model,
+                thinkingEnabled: route.thinkingEnabled,
+                temperature: route.temperature,
+                maxTokens: route.maxTokens,
+                systemPrompt: runtimeSystemPrompt,
+              }
+            );
 
             const goalRunner = new GoalRunner({
               condition: goalCondition,
@@ -1530,32 +1544,35 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     question: response.question,
                   };
                 },
-                runVerifier: async (transcript, conditionResult) => {
-                  // N5：验证命令结束后用户可能已点停止——跳过 verifier LLM
-                  // 调用（不可中止），GoalRunner 收到 AbortError 立即中断。
+                runVerifier: async (transcript, conditionResult, workerContent) => {
+                  // N5：验证命令结束后用户可能已点停止——跳过 verifier 子代理
+                  // 调用，GoalRunner 收到 AbortError 立即中断。子代理中飞时也可
+                  // 通过 goalStore 的 abort 信号取消（runSubagent abort → AbortError）。
                   if (useGoalStore.getState().isAborted()) {
                     throw new DOMException('Goal aborted', 'AbortError');
                   }
+                  if (!verifierTaskContext) {
+                    // 理论上不会发生（BUILTIN_AGENTS 恒存在）：无子代理执行上下文时
+                    // 直接抛错，GoalRunner 按既有降级语义处理（客观→仅条件评估，
+                    // 主观→error 终止）。
+                    throw new Error('Verifier 子代理执行上下文不可用');
+                  }
                   const isSubjective = goalCondition!.clauses.length === 0;
                   const currentState = goalRunner.getState();
-                  const verifierResult = await runVerifier(
+                  const verifierResult = await runVerifierSubagent(verifierTaskContext, {
                     transcript,
+                    workerContent,
                     conditionResult,
-                    goalCondition!.humanReadable,
+                    goalText: goalCondition!.humanReadable,
                     isSubjective,
-                    goalCondition!.strictness,
-                    (normalizedSettings.lang ?? 'zh-CN') as 'zh-CN' | 'zh-TW' | 'en',
-                    currentState.iteration,
-                    normalizedSettings.goalMaxIterations,
-                    {
-                      provider: verifierProvider,
-                      providerName: verifierProviderName,
-                      settings: normalizedSettings,
-                      primaryModel: normalizedSettings.model,
-                      fastModel: normalizedSettings.fastModel,
-                      fastModelEnabled: normalizedSettings.fastModelEnabled,
-                    }
-                  );
+                    strictness: goalCondition!.strictness,
+                    lang: (normalizedSettings.lang ?? 'zh-CN') as 'zh-CN' | 'zh-TW' | 'en',
+                    iteration: currentState.iteration,
+                    maxIterations: normalizedSettings.goalMaxIterations,
+                    settings: normalizedSettings,
+                    primaryModel: normalizedSettings.model,
+                    abortSignal: useGoalStore.getState().goalAbortController?.signal,
+                  });
                   if (verifierResult.cacheStats) {
                     if (verifierResult.tier === 'fast') {
                       accumulatedSubagentFast = accumulateCacheStats(

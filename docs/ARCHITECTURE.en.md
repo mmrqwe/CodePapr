@@ -335,7 +335,7 @@ On Apple Silicon Macs, users can manually click "GPU Warmup" in the Voice Tab of
 
 > **Main Agent tool set**: the main Agent has all read/write/execution tools (read/write/edit/patch/grep/glob/list/lsp/lsp_edit/diagnostics/git/bash/browser/webfetch/skill/question/todo/task, etc.), but `graph` is **soft-hidden** from it — project structure and symbol navigation are handled by `list` + `lsp`, while cross-module dependency/impact analysis is delegated to Explore. The `graph` definition and handler stay registered, so sub-agents (Explore) can select it via allowlist and execute it.
 
-> The Goal autonomous loop's verifier is a standalone no-tools model call configured in Advanced settings (`verifierModelTier`). It is not a built-in sub-agent and is never exposed via the `task` tool.
+> The Goal autonomous loop's verifier is a built-in read-only sub-agent (read/grep/glob/list) configured in Advanced settings (`verifierModelTier`). It is an internal agent, never exposed via the `task` tool, and only invoked internally by GoalRunner.
 
 The `task` tool only exposes agents whose `mode` is `subagent` / `all`; agents with `mode: primary` (only usable as an @-mentioned primary agent) or `internal: true` never appear in the delegation list.
 

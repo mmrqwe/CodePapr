@@ -1460,9 +1460,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         const { _agent, isLoading, loadingSessionId } = get();
 
         // N5：goal 外循环的验证阶段没有在飞的 agent 请求（120s 验证命令 +
-        // verifier 直连 LLM），cancelSession 是空操作——停止按钮必须通过
-        // goalStore 的 aborted 标志让 GoalRunner 在验证步骤之间感知中断
-        // （在飞的那条命令/LLM 调用本身不可中止，完成后立即停下）。
+        // verifier 只读子代理在主线程独立执行），cancelSession 是空操作——停止
+        // 按钮必须通过 goalStore 的 aborted 标志 + goalAbortController 让
+        // GoalRunner / verifier 子代理感知中断（在飞的命令/子代理调用完成后
+        // 立即停下；verifier 子代理中飞可通过 abort 信号直接取消）。
         useGoalStore.getState().abortGoal();
 
         if (!isLoading) return;

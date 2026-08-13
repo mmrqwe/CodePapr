@@ -19,6 +19,8 @@ export interface GoalStoreState {
   userGoalText: string;
   /** 中断信号 */
   aborted: boolean;
+  /** 本轮 goal 的中止控制器：Verifier 子代理等中飞阶段可借此取消 */
+  goalAbortController: AbortController | null;
 
   setGoalActive: (condition: GoalCondition, userGoalText: string) => void;
   setGoalState: (state: GoalRunnerState) => void;
@@ -33,6 +35,7 @@ export const useGoalStore = create<GoalStoreState>((set, get) => ({
   goalCondition: null,
   userGoalText: '',
   aborted: false,
+  goalAbortController: null,
 
   setGoalActive: (condition, userGoalText) =>
     set({
@@ -41,20 +44,27 @@ export const useGoalStore = create<GoalStoreState>((set, get) => ({
       userGoalText,
       goalState: null,
       aborted: false,
+      goalAbortController: new AbortController(),
     }),
 
   setGoalState: (state) => set({ goalState: state }),
 
-  abortGoal: () => set({ aborted: true }),
+  abortGoal: () => {
+    get().goalAbortController?.abort();
+    set({ aborted: true });
+  },
 
-  clearGoal: () =>
+  clearGoal: () => {
+    get().goalAbortController?.abort();
     set({
       isGoalActive: false,
       goalState: null,
       goalCondition: null,
       userGoalText: '',
       aborted: false,
-    }),
+      goalAbortController: null,
+    });
+  },
 
   isAborted: () => get().aborted,
 }));

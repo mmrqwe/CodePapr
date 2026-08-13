@@ -1309,7 +1309,7 @@ When a task requires public information, current facts, third-party API usage, o
             <tr><td><strong>mentor</strong></td><td>High-level architecture/algorithm/debugging guidance (no code writing, no tool usage)</td><td>mentor*</td><td>None</td></tr>
           </tbody>
         </table>
-        <p><small>* Mentor uses the primary model by default; an independent mentor model can be enabled in settings (supports independent API Key, Base URL, and model selection; falls back to the main API Key when no dedicated key is configured).<br>The Goal autonomous loop's verifier is a standalone no-tools model call configured in advanced settings (<code>verifierModelTier</code>: fast or primary). It is not a built-in sub-agent and is never exposed via the <code>task</code> tool.</small></p>
+        <p><small>* Mentor uses the primary model by default; an independent mentor model can be enabled in settings (supports independent API Key, Base URL, and model selection; falls back to the main API Key when no dedicated key is configured).<br>The Goal autonomous loop's verifier is a built-in read-only sub-agent (read/grep/glob/list) configured in advanced settings (<code>verifierModelTier</code>: fast, primary, or mentor). It is an internal agent and is never exposed to the main Agent via the <code>task</code> tool.</small></p>
 
         <h3>Custom Sub-agents</h3>
         <p>Declare a sub-agent in <code>.CodePapr/agents/&lt;name&gt;.md</code> with YAML frontmatter + body. The main agent can delegate subtasks to it. An agent with the same name will override the built-in definition.</p>
@@ -1447,7 +1447,7 @@ Current status: !`git status -s`</code></pre>
         <p>The core mechanism is not adding "keep working until done" to the prompt — it's an engineered self-play system:</p>
         <ul>
           <li><strong>Worker (primary model)</strong>: has full tool permissions, responsible for planning, writing code, running tests</li>
-           <li><strong>Verifier (standalone no-tools model call)</strong>: reads the Worker's execution transcript, determines if success is being fabricated</li>
+           <li><strong>Verifier (read-only sub-agent: read/grep/glob/list)</strong>: reads the Worker's execution transcript and can independently verify files, determines if success is being fabricated</li>
           <li><strong>Objective condition function</strong>: executes verification commands, uses exit codes and output matching for objective judgment</li>
         </ul>
         <p>The three work together: <strong>condition function + Verifier anti-forgery = double insurance</strong>. Only when the condition is met AND the Verifier confirms the Worker didn't cheat is it judged SATISFIED.</p>
@@ -1477,14 +1477,14 @@ Current status: !`git status -s`</code></pre>
         </table>
 
         <div class="callout">
-          <strong>Key constraint:</strong> Conditions must be "machine-verifiable" (e.g. tests pass, exit code 0, lint clean), not subjective (e.g. "write a nice login page"). The tool-less Verifier can only judge via terminal logs.
+          <strong>Key constraint:</strong> Conditions must be "machine-verifiable" (e.g. tests pass, exit code 0, lint clean), not subjective (e.g. "write a nice login page"). The read-only Verifier judges the transcript and spot-checks files, but only machine-verifiable conditions give hard guarantees.
         </div>
 
         <h3>How It Works</h3>
         <ol>
           <li><strong>Worker turn</strong>: the main Agent executes one round of work (read files, write code, run commands)</li>
           <li><strong>Objective condition evaluation</strong>: the system automatically runs the verification command and gets exit code + output</li>
-           <li><strong>Verifier anti-forgery check</strong>: the tool-less Verifier model call reads the Worker's execution transcript, detecting completion bias like "claiming tests pass without actually running them"</li>
+           <li><strong>Verifier anti-forgery check</strong>: the read-only Verifier sub-agent (read/grep/glob/list) reads the Worker's execution transcript and independently verifies key claims with its tools, detecting completion bias like "claiming tests pass without actually running them"</li>
           <li><strong>Judgment</strong>: condition met AND Verifier confirms → <strong>SATISFIED</strong>, loop ends; otherwise detailed feedback is injected into the next round</li>
           <li><strong>Context rot mitigation</strong>: auto-compaction every 5 iterations; state persisted to <code>.CodePapr/goal-state.md</code></li>
         </ol>
