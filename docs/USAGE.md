@@ -389,6 +389,7 @@ macOS 上 `bash` 工具、Shell 会话与 app 后端进程都通过 `sandbox-exe
 - **可写**：工作区、临时目录、工具缓存目录（~/.npm、~/.cache、~/.cargo、~/.local、~/.nvm、~/.volta）、已授权的外部路径
 - **始终禁止**（YOLO 模式也不例外）：~/.ssh、~/.gnupg、~/.config、~/.aws、~/.azure、~/.kube、~/.git、~/.CodePapr
 - HOME 下的常见工具配置（.gitconfig、.npmrc 等）默认只读放行；其他 HOME 文件需要时通过外部授权放行
+- **IPC**：放行 mach-lookup（`osascript` 等需要连接系统服务）、lsopen（`open` 启动 app/文件/URL 的专用操作）与 sysctl-read（`ps`/`pgrep` 读进程表）；各系统服务自带鉴权，文件与网络仍按上述规则约束
 
 ## Toast 通知
 

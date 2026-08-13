@@ -350,6 +350,7 @@ On macOS the `bash` tool, shell sessions, and app backend processes run inside a
 - **Writable**: the workspace, the temp directory, tool cache dirs (~/.npm, ~/.cache, ~/.cargo, ~/.local, ~/.nvm, ~/.volta), and authorized external paths
 - **Always denied** (even in YOLO mode): ~/.ssh, ~/.gnupg, ~/.config, ~/.aws, ~/.azure, ~/.kube, ~/.git, ~/.CodePapr
 - Common HOME tool configs (.gitconfig, .npmrc, etc.) are allowed read-only by default; other HOME files require external authorization when needed
+- **IPC**: mach-lookup is allowed (`osascript` etc. need to reach system services), along with lsopen (the dedicated operation for `open` to launch apps/files/URLs) and sysctl-read (`ps`/`pgrep` reading the process table); each system service enforces its own authorization, and file/network rules above still apply
 
 ## Toast Notifications
 

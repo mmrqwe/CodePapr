@@ -179,6 +179,15 @@ fn build_profile(
         "(import \"system.sb\")".to_string(),
         "(deny default)".to_string(),
         "(allow process*)".to_string(),
+        // IPC 放行：mach-lookup 是「找到系统服务」的入口，缺了它 `osascript`
+        // 发不出 AppleEvents（-1728）；lsopen 是 LaunchServices 的专用沙箱操作，
+        // 缺了它 `open` 一律 -54/kLSNoExecutableErr（内核日志可见 deny lsopen）。
+        // 各 daemon 自带鉴权，文件/网络仍按本 profile 约束；且既已放行 process*
+        // （任意可读二进制可执行），这些 IPC 放行的边际风险与之匹配。
+        // sysctl-read 供 ps/pgrep 读进程表（纯读）。
+        "(allow mach-lookup)".to_string(),
+        "(allow lsopen)".to_string(),
+        "(allow sysctl-read)".to_string(),
     ];
     // 网络轴：出站网络按开关；监听 localhost 由 allow_bind 单独控制（后端进程需要）。
     // 注意：SBPL 的 network-bind 地址过滤在本平台无法限制 bind 地址——
@@ -740,6 +749,31 @@ mod tests {
         )
         .expect("profile should build");
         assert!(full.contains("(allow network*)"), "got:\n{full}");
+
+        let _ = fs::remove_dir_all(&workspace);
+    }
+
+    /// 回归：profile 必须放行 mach-lookup、lsopen 与 sysctl-read，否则
+    /// `open`（内核 deny lsopen → -54/kLSNoExecutableErr）、`osascript`
+    /// AppleEvents（-1728）、`ps`/`pgrep`（sysctl kern.proc）全部失效。
+    /// 与两轴权限无关，任何访问档下都要存在。
+    #[test]
+    fn profile_allows_mach_lookup_and_sysctl_read() {
+        let workspace =
+            std::env::temp_dir().join(format!("codepapr-sandbox-ipc-{}", std::process::id()));
+        fs::create_dir_all(&workspace).expect("sandbox test workspace should exist");
+
+        for access in [
+            None,
+            Some(SandboxAccess { network: false, workspace_write: false, allow_bind: false }),
+            Some(SandboxAccess { network: true, workspace_write: true, allow_bind: true }),
+        ] {
+            let profile = build_profile("/bin/zsh", &workspace, access, None)
+                .expect("profile should build");
+            assert!(profile.contains("(allow mach-lookup)"), "got:\n{profile}");
+            assert!(profile.contains("(allow lsopen)"), "got:\n{profile}");
+            assert!(profile.contains("(allow sysctl-read)"), "got:\n{profile}");
+        }
 
         let _ = fs::remove_dir_all(&workspace);
     }
