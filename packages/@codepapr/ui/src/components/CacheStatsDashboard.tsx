@@ -4,29 +4,66 @@ import { aggregateProjectStats } from '../store/internals/stats';
 import type { ConversationStats, ModelTierStats } from '../store/internals/types';
 import { getTranslation, type Lang } from '../utils/i18n';
 
-interface DeepSeekPricing {
-  modelLabel: string;
+interface DeepSeekPriceTier {
   cacheReadPerMillionRmb: number;
   cacheMissInputPerMillionRmb: number;
   outputPerMillionRmb: number;
 }
 
+interface DeepSeekPricing {
+  modelLabel: string;
+  offPeak: DeepSeekPriceTier;
+  peak: DeepSeekPriceTier;
+}
+
 const PRIMARY_PRICING: DeepSeekPricing = {
   modelLabel: 'deepseek-v4-pro',
-  cacheReadPerMillionRmb: 0.025,
-  cacheMissInputPerMillionRmb: 3,
-  outputPerMillionRmb: 6,
+  offPeak: {
+    cacheReadPerMillionRmb: 0.15,
+    cacheMissInputPerMillionRmb: 4.5,
+    outputPerMillionRmb: 13.5,
+  },
+  peak: {
+    cacheReadPerMillionRmb: 0.3,
+    cacheMissInputPerMillionRmb: 9,
+    outputPerMillionRmb: 27,
+  },
 };
 
 const FAST_PRICING: DeepSeekPricing = {
   modelLabel: 'deepseek-v4-flash',
-  cacheReadPerMillionRmb: 0.02,
-  cacheMissInputPerMillionRmb: 1,
-  outputPerMillionRmb: 2,
+  offPeak: {
+    cacheReadPerMillionRmb: 0.05,
+    cacheMissInputPerMillionRmb: 1.5,
+    outputPerMillionRmb: 4.5,
+  },
+  peak: {
+    cacheReadPerMillionRmb: 0.1,
+    cacheMissInputPerMillionRmb: 3,
+    outputPerMillionRmb: 9,
+  },
 };
 
 function formatRmb(value: number): string {
   return `¥${value.toFixed(5)}`;
+}
+
+function formatRmbRange(low: number, high: number): string {
+  return low === high ? formatRmb(low) : `${formatRmb(low)} ~ ${formatRmb(high)}`;
+}
+
+function tierCost(
+  cacheRead: number,
+  cacheMissInput: number,
+  output: number,
+  tier: DeepSeekPriceTier
+): number {
+  return (
+    (cacheRead * tier.cacheReadPerMillionRmb +
+      cacheMissInput * tier.cacheMissInputPerMillionRmb +
+      output * tier.outputPerMillionRmb) /
+    1_000_000
+  );
 }
 
 function formatDuration(ms: number | undefined): string {
@@ -66,19 +103,19 @@ function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss, sh
   const totalCacheMissInput = totalCacheCreation + totalInput;
   const hitRate = totalTokens > 0 ? totalCacheRead / totalTokens : 0;
 
-  const costWithCache = pricing
-    ? (
-        totalCacheRead * pricing.cacheReadPerMillionRmb +
-        totalCacheMissInput * pricing.cacheMissInputPerMillionRmb +
-        totalOutput * pricing.outputPerMillionRmb
-      ) /
-      1_000_000
+  const costWithCacheOffPeak = pricing
+    ? tierCost(totalCacheRead, totalCacheMissInput, totalOutput, pricing.offPeak)
     : 0;
-  const costWithoutCache = pricing
-    ? (totalTokens * pricing.cacheMissInputPerMillionRmb + totalOutput * pricing.outputPerMillionRmb) /
-      1_000_000
+  const costWithCachePeak = pricing
+    ? tierCost(totalCacheRead, totalCacheMissInput, totalOutput, pricing.peak)
     : 0;
-  const savings = costWithoutCache > 0 ? 1 - costWithCache / costWithoutCache : 0;
+  const costWithoutCacheOffPeak = pricing
+    ? tierCost(totalTokens, 0, totalOutput, pricing.offPeak)
+    : 0;
+  const costWithoutCachePeak = pricing
+    ? tierCost(totalTokens, 0, totalOutput, pricing.peak)
+    : 0;
+  const savings = costWithoutCacheOffPeak > 0 ? 1 - costWithCacheOffPeak / costWithoutCacheOffPeak : 0;
 
   const hitColor =
     hitRate >= 0.8 ? 'text-green-400' : hitRate >= 0.5 ? 'text-yellow-400' : 'text-slate-400';
@@ -115,8 +152,16 @@ function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss, sh
       {showCost && pricing && (
         <div>
           <p className="mb-2 text-[11px] font-medium text-slate-500">{t.costEstimation}</p>
-          <StatRow label={t.actualCost} value={formatRmb(costWithCache)} color="text-indigo-400" />
-          <StatRow label={t.withoutCache} value={formatRmb(costWithoutCache)} color="text-slate-500" />
+          <StatRow
+            label={t.actualCost}
+            value={formatRmbRange(costWithCacheOffPeak, costWithCachePeak)}
+            color="text-indigo-400"
+          />
+          <StatRow
+            label={t.withoutCache}
+            value={formatRmbRange(costWithoutCacheOffPeak, costWithoutCachePeak)}
+            color="text-slate-500"
+          />
           <div className="mt-2 border-t border-[#2a2d3a] pt-2">
             <StatRow
               label={t.savings}
@@ -124,6 +169,7 @@ function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss, sh
               color={savings > 0.5 ? 'text-green-400' : 'text-slate-400'}
             />
           </div>
+          <p className="mt-2 text-[10px] leading-relaxed text-slate-600">{t.priceNotice}</p>
         </div>
       )}
 
