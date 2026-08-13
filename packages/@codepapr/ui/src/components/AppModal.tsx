@@ -26,30 +26,42 @@ export function AppModal({ lang, isDark }: AppModalProps) {
   // loaded 值，从已加载 app 切到失败 app 时 10s 后 `if (!loaded)` 恒 false，
   // 白屏且无任何错误提示。
   const loadedRef = useRef(false);
+  // #16：协议层错误页（404/403 文本）也会触发 iframe onLoad，单靠 onLoad
+  // 无法区分成功失败。以 SDK 的 app-ready 握手为成功信号；onLoad 后短宽限
+  // 内未收到握手 → 判定加载失败并提示。
+  const readyRef = useRef(false);
+  const sdkCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleIframeLoad = useCallback(() => {
-    loadedRef.current = true;
+  const clearTimers = useCallback(() => {
     if (loadTimerRef.current) {
       clearTimeout(loadTimerRef.current);
       loadTimerRef.current = null;
     }
+    if (sdkCheckTimerRef.current) {
+      clearTimeout(sdkCheckTimerRef.current);
+      sdkCheckTimerRef.current = null;
+    }
   }, []);
+
+  const handleIframeLoad = useCallback(() => {
+    loadedRef.current = true;
+    clearTimers();
+  }, [clearTimers]);
 
   useEffect(() => {
     loadedRef.current = false;
+    readyRef.current = false;
     setError('');
+    clearTimers();
     loadTimerRef.current = setTimeout(() => {
       if (!loadedRef.current) {
         setError(t.appModalLoadFailed);
       }
     }, 10_000);
     return () => {
-      if (loadTimerRef.current) {
-        clearTimeout(loadTimerRef.current);
-        loadTimerRef.current = null;
-      }
+      clearTimers();
     };
-  }, [openedAppId, openedApp?.updatedAt]);
+  }, [openedAppId, openedApp?.updatedAt, clearTimers]);
 
   const manifest: PaprManifest | null = useMemo(() => {
     if (!openedApp?.manifestJson) return null;
@@ -60,18 +72,34 @@ export function AppModal({ lang, isDark }: AppModalProps) {
     }
   }, [openedApp?.manifestJson]);
 
+  // #15：入口文件尊重 manifest.entry（与 Rust scan_workspace_apps / 协议层一致）。
+  // 旧实现硬编码 index.html，声明 entry: "app.html" 的 app 白屏/404 文本。
+  const entryFile = useMemo(() => {
+    const raw = manifest?.entry?.trim();
+    if (!raw || raw.includes('..') || raw.includes('\\')) {
+      return 'index.html';
+    }
+    return raw;
+  }, [manifest]);
+
   const { postTheme } = usePaprBridge({
     iframeRef,
     appId: openedApp?.appId ?? '',
     manifest,
     dark: isDark,
+    // #16：SDK 握手到达 = 真实页面渲染成功，清除宽限检测定时器。
+    onAppReady: () => {
+      readyRef.current = true;
+      loadedRef.current = true;
+      clearTimers();
+    },
   });
 
   if (!openedApp) {
     return null;
   }
 
-  const iframeSrc = `codepapr-app://${openedApp.appId}/index.html`;
+  const iframeSrc = `codepapr-app://${openedApp.appId}/${entryFile}`;
 
   const hasMeta = (manifest?.permissions && manifest.permissions.length > 0)
     || (manifest?.agents && manifest.agents.length > 0);
@@ -165,6 +193,16 @@ export function AppModal({ lang, isDark }: AppModalProps) {
           onLoad={() => {
             handleIframeLoad();
             postTheme(isDark);
+            // #16：onLoad 只证明有响应（协议层 404/403 也会触发）。SDK 握手
+            // 通常在 onLoad 前到达（head 内同步脚本）；未到达则给短宽限期，
+            // 仍无握手 → 判定加载失败并提示（旧实现静默白屏）。
+            if (!readyRef.current) {
+              sdkCheckTimerRef.current = setTimeout(() => {
+                if (!readyRef.current) {
+                  setError(t.appModalSdkLoadFailed);
+                }
+              }, 2_500);
+            }
           }}
           onError={() => setError(t.appModalLoadFailed)}
         />

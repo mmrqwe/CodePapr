@@ -27,9 +27,12 @@ interface UsePaprBridgeOptions {
   appId: string;
   manifest: PaprManifest | null;
   dark: boolean;
+  /** 应用页面 SDK 执行握手（papr://app-ready）到达时回调。
+   *  AppModal 用它区分「协议层错误页」与「真实页面加载成功」。 */
+  onAppReady?: () => void;
 }
 
-export function usePaprBridge({ iframeRef, appId, manifest, dark }: UsePaprBridgeOptions) {
+export function usePaprBridge({ iframeRef, appId, manifest, dark, onAppReady }: UsePaprBridgeOptions) {
   const cacheManifest = usePermissionStore((s) => s.cacheManifest);
   const [appSettings, setAppSettings] = useState<PaprAppSettings | null>(null);
 
@@ -68,6 +71,10 @@ export function usePaprBridge({ iframeRef, appId, manifest, dark }: UsePaprBridg
   const manifestRef = useRef(manifest);
   manifestRef.current = manifest;
 
+  // onAppReady 同样走 ref：不得改变 handleMessage identity（同上）。
+  const onAppReadyRef = useRef(onAppReady);
+  onAppReadyRef.current = onAppReady;
+
   const handleMessage = useCallback(
     (event: MessageEvent) => {
       const appOrigin = appOriginFor(appId);
@@ -77,6 +84,17 @@ export function usePaprBridge({ iframeRef, appId, manifest, dark }: UsePaprBridg
       if (iframeRef.current && event.source !== iframeRef.current.contentWindow) return;
 
       const data = event.data;
+      if (!data || typeof data !== 'object' || (data as { __papr?: unknown }).__papr !== true) {
+        return;
+      }
+
+      // 加载检测握手（无 reqId，先于 isPaprMessage 的 reqId 校验处理）：
+      // SDK 执行即证明真实应用页面已渲染——协议层错误页（404/403）不注入 SDK。
+      if ((data as { type?: string }).type === 'papr://app-ready') {
+        onAppReadyRef.current?.();
+        return;
+      }
+
       if (!isPaprMessage(data)) return;
 
       const resolvedManifest = manifestRef.current ?? usePermissionStore.getState().manifests[appId];

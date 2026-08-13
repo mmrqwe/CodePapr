@@ -272,11 +272,25 @@ export default function App() {
               appId: app.app_id,
               workspacePath,
             }).catch(() => {});
+            // #15：入口文件尊重 manifest.entry（与 Rust scan_workspace_apps 一致），
+            // 旧实现硬编码 index.html。
+            let appEntryFile = 'index.html';
+            if (app.manifest_json) {
+              try {
+                const parsedManifest = JSON.parse(app.manifest_json) as { entry?: string };
+                const rawEntry = parsedManifest.entry?.trim();
+                if (rawEntry && !rawEntry.includes('..') && !rawEntry.includes('\\')) {
+                  appEntryFile = rawEntry;
+                }
+              } catch {
+                // keep default
+              }
+            }
             mountApp({
               appId: app.app_id,
               title: app.title || app.app_id,
               html: app.html,
-              filePath: `.CodePapr/apps/${app.app_id}/index.html`,
+              filePath: `.CodePapr/apps/${app.app_id}/${appEntryFile}`,
               manifestJson: app.manifest_json ?? undefined,
               command: app.command ?? undefined,
               args: app.args ?? undefined,

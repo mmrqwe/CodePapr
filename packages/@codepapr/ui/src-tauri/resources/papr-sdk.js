@@ -195,4 +195,11 @@
       }
     }
   };
+
+  // 父窗口加载检测握手：SDK 执行即证明真实应用页面已渲染（协议层错误页
+  // 404/403 不注入 SDK）。父侧 AppModal 以此区分「加载失败」与「页面正常」，
+  // 因为 iframe 的 onLoad 对协议错误响应同样会触发。
+  try {
+    window.parent.postMessage({ __papr: true, type: 'papr://app-ready' }, parentOrigin);
+  } catch (e) { /* 跨源受限时忽略：父侧有超时兜底 */ }
 })();
