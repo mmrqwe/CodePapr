@@ -48,10 +48,6 @@ function formatRmb(value: number): string {
   return `¥${value.toFixed(5)}`;
 }
 
-function formatRmbRange(low: number, high: number): string {
-  return low === high ? formatRmb(low) : `${formatRmb(low)} ~ ${formatRmb(high)}`;
-}
-
 function tierCost(
   cacheRead: number,
   cacheMissInput: number,
@@ -110,10 +106,10 @@ function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss, sh
     ? tierCost(totalCacheRead, totalCacheMissInput, totalOutput, pricing.peak)
     : 0;
   const costWithoutCacheOffPeak = pricing
-    ? tierCost(totalTokens, 0, totalOutput, pricing.offPeak)
+    ? tierCost(0, totalTokens, totalOutput, pricing.offPeak)
     : 0;
   const costWithoutCachePeak = pricing
-    ? tierCost(totalTokens, 0, totalOutput, pricing.peak)
+    ? tierCost(0, totalTokens, totalOutput, pricing.peak)
     : 0;
   const savings = costWithoutCacheOffPeak > 0 ? 1 - costWithCacheOffPeak / costWithoutCacheOffPeak : 0;
 
@@ -152,16 +148,27 @@ function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss, sh
       {showCost && pricing && (
         <div>
           <p className="mb-2 text-[11px] font-medium text-slate-500">{t.costEstimation}</p>
-          <StatRow
-            label={t.actualCost}
-            value={formatRmbRange(costWithCacheOffPeak, costWithCachePeak)}
-            color="text-indigo-400"
-          />
-          <StatRow
-            label={t.withoutCache}
-            value={formatRmbRange(costWithoutCacheOffPeak, costWithoutCachePeak)}
-            color="text-slate-500"
-          />
+          <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-1.5">
+            <span />
+            <span className="text-right text-[10px] text-slate-600">{t.offPeakLabel}</span>
+            <span className="text-right text-[10px] text-slate-600">{t.peakLabel}</span>
+
+            <span className="text-xs text-slate-500">{t.actualCost}</span>
+            <span className="text-right font-mono text-xs font-medium text-indigo-400">
+              {formatRmb(costWithCacheOffPeak)}
+            </span>
+            <span className="text-right font-mono text-xs font-medium text-indigo-400">
+              {formatRmb(costWithCachePeak)}
+            </span>
+
+            <span className="text-xs text-slate-500">{t.withoutCache}</span>
+            <span className="text-right font-mono text-xs text-slate-500">
+              {formatRmb(costWithoutCacheOffPeak)}
+            </span>
+            <span className="text-right font-mono text-xs text-slate-500">
+              {formatRmb(costWithoutCachePeak)}
+            </span>
+          </div>
           <div className="mt-2 border-t border-[#2a2d3a] pt-2">
             <StatRow
               label={t.savings}

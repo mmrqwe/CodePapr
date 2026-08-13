@@ -35,7 +35,11 @@ export declare const I18N_DICTS: {
         runtimeDurationTip: string;
         thisConversation: string;
         entireProject: string;
-        priceNotice: string;
+        offPeakLabel: string;
+        peakLabel: string;
+        offPeakLabel: string;
+    peakLabel: string;
+    priceNotice: string;
         workbench: string;
         workbenchDesc: string;
         workspaceInsights: string;
@@ -539,7 +543,11 @@ export declare const I18N_DICTS: {
         runtimeDurationTip: string;
         thisConversation: string;
         entireProject: string;
-        priceNotice: string;
+        offPeakLabel: string;
+        peakLabel: string;
+        offPeakLabel: string;
+    peakLabel: string;
+    priceNotice: string;
         workbench: string;
         workbenchDesc: string;
         workspaceInsights: string;
@@ -1041,7 +1049,11 @@ export declare const I18N_DICTS: {
         runtimeDurationTip: string;
         thisConversation: string;
         entireProject: string;
-        priceNotice: string;
+        offPeakLabel: string;
+        peakLabel: string;
+        offPeakLabel: string;
+    peakLabel: string;
+    priceNotice: string;
         workbench: string;
         workbenchDesc: string;
         workspaceInsights: string;
@@ -1541,6 +1553,8 @@ export declare function getTranslation(lang?: Lang): {
     roundsLabel: string;
     runtimeDuration: string;
     runtimeDurationTip: string;
+    offPeakLabel: string;
+    peakLabel: string;
     priceNotice: string;
     workbench: string;
     workbenchDesc: string;
@@ -1909,6 +1923,8 @@ export declare function getTranslation(lang?: Lang): {
     roundsLabel: string;
     runtimeDuration: string;
     runtimeDurationTip: string;
+    offPeakLabel: string;
+    peakLabel: string;
     priceNotice: string;
     workbench: string;
     workbenchDesc: string;
@@ -2277,6 +2293,8 @@ export declare function getTranslation(lang?: Lang): {
     roundsLabel: string;
     runtimeDuration: string;
     runtimeDurationTip: string;
+    offPeakLabel: string;
+    peakLabel: string;
     priceNotice: string;
     workbench: string;
     workbenchDesc: string;
