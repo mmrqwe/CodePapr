@@ -43,6 +43,9 @@ pub(crate) struct BackgroundProcessEntry {
 pub(crate) struct StopBackgroundProcessResult {
     pub(crate) pid: u32,
     pub(crate) stopped: bool,
+    /// stopped=false 时的原因："not-found"（进程已退出，良性）；
+    /// "kill-failed"（3 秒内未退出，可能仍在运行）。
+    pub(crate) reason: Option<String>,
 }
 
 #[derive(Serialize)]

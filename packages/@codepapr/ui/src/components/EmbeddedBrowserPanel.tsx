@@ -66,6 +66,19 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
     }
   }, [workspacePath]);
 
+  // #21：导航类操作可能重建会话（如预览弹窗关闭连带关闭会话后再导航），
+  // Rust 侧新建的 WebView 默认隐藏，而 show 只在面板挂载时调用一次——
+  // 重建后的 WebView 会一直隐藏（占位区空白）。每次动作成功后补一次
+  // show + 重新定位（幂等）。
+  const ensureVisible = useCallback(async () => {
+    try {
+      await invoke('embedded_browser_show', { workspacePath });
+    } catch {
+      // 无会话时 show 会失败，属正常情况。
+    }
+    await syncBounds();
+  }, [workspacePath, syncBounds]);
+
   // 打开面板：显示原生 WebView 并持续跟随布局变化。
   useEffect(() => {
     let disposed = false;
@@ -138,13 +151,14 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
           workspacePath,
           startedAt: Date.now(),
         });
+        await ensureVisible();
       } catch (err) {
         setActionError(errorMessage(err));
       } finally {
         setIsNavigating(false);
       }
     },
-    [workspacePath, setPageSession]
+    [workspacePath, setPageSession, ensureVisible]
   );
 
   const runAction = useCallback(
@@ -158,11 +172,12 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
           workspacePath,
           startedAt: Date.now(),
         });
+        await ensureVisible();
       } catch (err) {
         setActionError(errorMessage(err));
       }
     },
-    [workspacePath, setPageSession]
+    [workspacePath, setPageSession, ensureVisible]
   );
 
   const goBack = useCallback(

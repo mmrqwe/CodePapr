@@ -875,6 +875,7 @@ pub(crate) fn stop_background_process(
             return Ok(StopBackgroundProcessResult {
                 pid,
                 stopped: false,
+                reason: Some("not-found".to_string()),
             });
         };
 
@@ -905,6 +906,11 @@ pub(crate) fn stop_background_process(
         Ok(StopBackgroundProcessResult {
             pid,
             stopped: still_running,
+            reason: if still_running {
+                Some("kill-failed".to_string())
+            } else {
+                None
+            },
         })
     })
 }

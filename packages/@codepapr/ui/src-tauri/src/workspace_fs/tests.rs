@@ -1,6 +1,7 @@
 use super::*;
 use crate::test_helpers::TestWorkspace;
 use std::fs;
+use std::path::Path;
 
 #[test]
 fn read_text_file_clamps_tiny_max_bytes_instead_of_failing() {
@@ -1337,4 +1338,23 @@ fn write_tmp_file_exclusive_writes_fresh_path() {
         fs::read_to_string(&tmp).expect("should read back"),
         "hello"
     );
+}
+
+/// #22：watcher 放行白名单——.CodePapr 下只有用户可见内容子树（apps/skills/
+/// commands/agents）穿透忽略过滤；内部状态（project.sqlite/git/memory.md）保持静默。
+#[test]
+fn path_touches_codepapr_content_allowlists_visible_subtrees() {
+    use super::path_touches_codepapr_content;
+
+    assert!(path_touches_codepapr_content(Path::new(".CodePapr/apps/myapp/index.html")));
+    assert!(path_touches_codepapr_content(Path::new(".CodePapr/apps")));
+    assert!(path_touches_codepapr_content(Path::new(".CodePapr/skills/web-search/SKILL.md")));
+    assert!(path_touches_codepapr_content(Path::new(".CodePapr/commands/review.md")));
+    assert!(path_touches_codepapr_content(Path::new(".CodePapr/agents/explorer.md")));
+
+    assert!(!path_touches_codepapr_content(Path::new(".CodePapr/project.sqlite")));
+    assert!(!path_touches_codepapr_content(Path::new(".CodePapr/git/HEAD")));
+    assert!(!path_touches_codepapr_content(Path::new(".CodePapr/memory.md")));
+    assert!(!path_touches_codepapr_content(Path::new(".CodePapr/downloads/a.zip")));
+    assert!(!path_touches_codepapr_content(Path::new("src/main.rs")));
 }

@@ -460,6 +460,8 @@ export interface BackgroundProcessEntry {
 export interface StopBackgroundProcessResult {
   pid: number;
   stopped: boolean;
+  /** stopped=false 时的原因："not-found"（已退出，良性）/"kill-failed"（可能仍在运行）。 */
+  reason?: string | null;
 }
 
 export interface StopAllBackgroundProcessesResult {

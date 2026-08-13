@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use tauri::{AppHandle, Emitter};
 
-use super::path_touches_ignored_dir;
+use super::{path_touches_codepapr_content, path_touches_ignored_dir};
 
 /// Quiet window that must elapse after the last filesystem event before a
 /// single `workspace-files-changed` event is emitted. Absorbs the rapid
@@ -91,8 +91,14 @@ pub(crate) fn start_workspace_watcher_impl(
                 return;
             }
             // Drop events that only touch ignored directories (node_modules,
-            // target, dot-dirs) so dependency churn stays quiet.
-            if event.paths.iter().all(|p| path_touches_ignored_dir(p)) {
+            // target, dot-dirs) so dependency churn stays quiet. .CodePapr 下
+            // 的用户可见内容子树（apps/skills/commands/agents）例外放行：
+            // app_render / skill 安装落盘后依赖 watcher 的视图需要刷新（#22）。
+            if event
+                .paths
+                .iter()
+                .all(|p| path_touches_ignored_dir(p) && !path_touches_codepapr_content(p))
+            {
                 return;
             }
             let _ = signal_tx.send(());

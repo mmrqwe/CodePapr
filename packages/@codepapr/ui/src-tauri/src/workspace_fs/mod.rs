@@ -86,6 +86,25 @@ pub(crate) fn path_touches_ignored_dir(path: &std::path::Path) -> bool {
     })
 }
 
+/// 内置 watcher 的放行白名单：#22——.CodePapr 下只有用户可见内容子树
+/// （apps/skills/commands/agents）的变更值得通知前端刷新（app_render 与
+/// skill 安装都在这里落盘）。project.sqlite / git / memory.md 等内部状态
+/// 高频写入，继续静默，避免每轮对话都触发整树刷新。
+pub(crate) fn path_touches_codepapr_content(path: &std::path::Path) -> bool {
+    let mut saw_codepapr = false;
+    for component in path.components() {
+        let name = component.as_os_str().to_string_lossy();
+        if !saw_codepapr {
+            if name == ".CodePapr" {
+                saw_codepapr = true;
+            }
+            continue;
+        }
+        return matches!(name.as_ref(), "apps" | "skills" | "commands" | "agents");
+    }
+    false
+}
+
 /// Filters OS-generated noise files (e.g. macOS `.DS_Store`, Windows `Thumbs.db`)
 /// so they never enter workspace listings or the project graph tree.
 pub(crate) fn should_ignore_file(name: &str) -> bool {

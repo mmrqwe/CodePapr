@@ -19,6 +19,8 @@ interface BackgroundProcessEntry {
 interface StopBackgroundProcessResult {
   pid: number;
   stopped: boolean;
+  /** stopped=false 时的原因："not-found"（已退出，良性）/"kill-failed"（可能仍在运行）。 */
+  reason?: string | null;
 }
 
 interface StopAllBackgroundProcessesResult {
@@ -136,7 +138,14 @@ export function BackgroundProcessPanel({ workspacePath, lang }: BackgroundProces
     }
     setStoppingPid(pid);
     try {
-      await invoke<StopBackgroundProcessResult>('stop_background_process', { pid, source: 'background-process-panel' });
+      const result = await invoke<StopBackgroundProcessResult>('stop_background_process', { pid, source: 'background-process-panel' });
+      // #20：区分"没停成"与"已停"——kill 失败（3s 未退出，进程可能仍在运行）
+      // 时必须给出可见警告；not-found（进程早已退出）是良性场景，保持静默。
+      if (!result.stopped && result.reason === 'kill-failed') {
+        await refreshProcesses(true);
+        setError(t.backgroundProcessStopFailed.replace('{pid}', String(pid)));
+        return;
+      }
       clearPreviewSessionByPid(pid);
       await refreshProcesses(true);
     } catch (err) {
