@@ -2,7 +2,7 @@
 
 > **[codepapr.com](https://codepapr.com/)** — 官网 / 下载 / 文档
 
-**本地优先的编码 Agent 运行时。Tauri 桌面 + CLI 自动化。**
+**本地优先的编码 Agent 运行时。Tauri 桌面工作台。**
 
 CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主 Agent 调度 **Explore**（代码分析）、**Scout**（网页搜索）、**Mentor**（架构指导）三个内置子代理协作，支持自定义扩展。文件读写、命令执行、Git 操作、浏览器预览、LSP 诊断——全在本地完成。
 
@@ -33,28 +33,26 @@ CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主
 ## 架构
 
 ```
-┌──────────────────────────┐  ┌──────────────────────┐
-│  Tauri 2 桌面            │  │  CLI 终端入口        │
-│  React + Monaco          │  │  Node.js             │
-└───────────┬──────────────┘  └─────────┬────────────┘
-            │                           │
-            └─────────────┬─────────────┘
-                          │
-             ┌────────────▼─────────────┐
-             │      @codepapr/core      │
-             │    Agent / Session       │
-             │    三层缓存分区          │
-             │    BUILTIN_AGENTS        │
-             │    TodoList / Graph      │
-             └────────────┬─────────────┘
-                          │
-             ┌────────────▼─────────────┐
-             │   Rust 后端 (Tauri)      │
-             │   工作区 IO · LSP        │
-             │   SQLite 持久化          │
-             │   ProjectGraph 缓存      │
-             │   浏览器 · Web 搜索      │
-             └──────────────────────────┘
+┌────────────────────────────────────────┐
+│  Tauri 2 桌面                          │
+│  React + Monaco                        │
+└───────────────────┬────────────────────┘
+                    │
+       ┌────────────▼─────────────┐
+       │      @codepapr/core      │
+       │    Agent / Session       │
+       │    三层缓存分区          │
+       │    BUILTIN_AGENTS        │
+       │    TodoList / Graph      │
+       └────────────┬─────────────┘
+                    │
+       ┌────────────▼─────────────┐
+       │   Rust 后端 (Tauri)      │
+       │   工作区 IO · LSP        │
+       │   SQLite 持久化          │
+       │   ProjectGraph 缓存      │
+       │   浏览器 · Web 搜索      │
+       └──────────────────────────┘
 ```
 
 ## 快速开始
@@ -156,8 +154,7 @@ packages/
 ├── @codepapr/common       # 日志等通用工具
 ├── @codepapr/core         # Agent/Session/缓存/ToolRegistry/BUILTIN_AGENTS/TodoList
 ├── @codepapr/api          # Provider (DeepSeek/OpenAI/Claude) 抽象
-├── @codepapr/db           # SQLite 数据层
 ├── @codepapr/editor       # 编辑器集成
-├── @codepapr/ui           # Tauri 桌面端 (React + Monaco)
-│   └── src-tauri/         # Rust 后端
+└── @codepapr/ui           # Tauri 桌面端 (React + Monaco)
+    └── src-tauri/         # Rust 后端（SQLite 持久化位于此处）
 ```

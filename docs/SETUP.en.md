@@ -117,6 +117,8 @@ CodePapr's current verification pipeline can be understood in terms of "scope" a
 | npm run verify | verify:ci + cargo check | Most complete local verification |
 | npm run smoke:agent-tools | Live model tool smoke | Changing tool selection, preview, shell, browser interaction, project diagnostics, or absolute path file reading |
 
+> `npm run audit` now **fails by default** when the registry is unreachable (so a transient network issue can't silently pass dependencies with known vulnerabilities into the release path). To skip while offline, explicitly set `CODEPAPR_AUDIT_SKIP_ON_NETWORK_FAILURE=1`.
+
 ### 5.2 Recommended Regression Order
 
 Pre-commit recommended order:

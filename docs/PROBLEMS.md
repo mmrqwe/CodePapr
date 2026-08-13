@@ -151,17 +151,26 @@ dotnet tool install csharp-ls --tool-path generated/lsp-tools/csharp-ls/bin
 
 ### 状态
 
-此问题影响的是 **系统安装工具的 fallback 路径**，捆绑版（如果 MSI 路径正确）不受影响。但 Go 用户在自行安装 `gopls` 后，运行时仍然无法通过 GOPATH fallback 找到它。
+✅ **已修复**（2026-08-14）。此问题影响的是 **系统安装工具的 fallback 路径**，捆绑版（如果 MSI 路径正确）不受影响。但 Go 用户在自行安装 `gopls` 后，运行时无法通过 GOPATH fallback 找到它。
 
-`expanded_path()` 函数（`lsp.rs:969`）已正确处理 `USERPROFILE` fallback：
+`expanded_path()` 函数（`lsp.rs`）已正确处理 `USERPROFILE` fallback：
 ```rust
 let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))
 ```
-但 `lsp_managed_tools.rs` 中的 gopls 和 rust-analyzer 查找未做同样处理。
+原实现中 `lsp_managed_tools.rs` 的 gopls 和 rust-analyzer 查找未做同样处理。
 
 ### 修复
 
-待后续版本修复。当捆包版工具已可用时影响较小。
+**文件**：`packages/@codepapr/ui/src-tauri/src/lsp_managed_tools.rs`
+
+1. `managed_rust_commands()` / `managed_go_commands()` 的 home 目录改用
+   `shared::paths::home_dir()`（HOME → USERPROFILE 回退，与 `expanded_path()` 同口径）。
+2. 修复同时发现的**路径拼接错误**：原实现对 `HOME` 与 `CARGO_HOME`/`GOPATH`
+   使用同一拼接式，产生 `$CARGO_HOME/.cargo/bin/rust-analyzer` 与
+   `$GOPATH/go/bin/gopls` 两个不存在的路径——`CARGO_HOME` 本身就是 `.cargo`
+   目录（正确为 `$CARGO_HOME/bin/`），`GOPATH` 是工作区根（正确为 `$GOPATH/bin/`）。
+   即使 Unix 上设置了这些环境变量，fallback 也永远命中不了。现已分别改为
+   `$HOME/.cargo/bin/` + `$CARGO_HOME/bin/` 与 `$HOME/go/bin/` + `$GOPATH/bin/`。
 
 ---
 

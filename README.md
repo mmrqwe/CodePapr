@@ -2,7 +2,7 @@
 
 > **[codepapr.com](https://codepapr.com/)** — Website / Download / Docs
 
-**Local-first coding agent runtime. Tauri desktop + CLI automation.**
+**Local-first coding agent runtime. Tauri desktop workbench.**
 
 CodePapr is a local coding agent system built with DeepSeek cache optimization. The main agent orchestrates three built-in sub-agents — **Explore** (code analysis), **Scout** (web search), and **Mentor** (architecture guidance) — with support for custom extensions. File I/O, command execution, Git operations, browser preview, and LSP diagnostics all run locally.
 
@@ -33,28 +33,26 @@ CodePapr is a local coding agent system built with DeepSeek cache optimization. 
 ## Architecture
 
 ```
-┌──────────────────────────┐  ┌──────────────────────┐
-│  Tauri 2 Desktop         │  │  CLI Terminal        │
-│  React + Monaco          │  │  Node.js             │
-└───────────┬──────────────┘  └─────────┬────────────┘
-            │                           │
-            └─────────────┬─────────────┘
-                          │
-             ┌────────────▼─────────────┐
-             │      @codepapr/core      │
-             │    Agent / Session       │
-             │    3-Zone Caching        │
-             │    BUILTIN_AGENTS        │
-             │    TodoList / Graph      │
-             └────────────┬─────────────┘
-                          │
-             ┌────────────▼─────────────┐
-             │   Rust Backend (Tauri)   │
-             │   Workspace IO · LSP     │
-             │   SQLite Persistence     │
-             │   ProjectGraph Cache     │
-             │   Browser · Web Search   │
-             └──────────────────────────┘
+┌────────────────────────────────────────┐
+│  Tauri 2 Desktop                       │
+│  React + Monaco                        │
+└───────────────────┬────────────────────┘
+                    │
+       ┌────────────▼─────────────┐
+       │      @codepapr/core      │
+       │    Agent / Session       │
+       │    3-Zone Caching        │
+       │    BUILTIN_AGENTS        │
+       │    TodoList / Graph      │
+       └────────────┬─────────────┘
+                    │
+       ┌────────────▼─────────────┐
+       │   Rust Backend (Tauri)   │
+       │   Workspace IO · LSP     │
+       │   SQLite Persistence     │
+       │   ProjectGraph Cache     │
+       │   Browser · Web Search   │
+       └──────────────────────────┘
 ```
 
 ## Quick Start
@@ -156,8 +154,7 @@ packages/
 ├── @codepapr/common       # Logging and common utilities
 ├── @codepapr/core         # Agent/Session/Cache/ToolRegistry/BUILTIN_AGENTS/TodoList
 ├── @codepapr/api          # Provider (DeepSeek/OpenAI/Claude) abstraction
-├── @codepapr/db           # SQLite data layer
 ├── @codepapr/editor       # Editor integration
-├── @codepapr/ui           # Tauri desktop (React + Monaco)
-│   └── src-tauri/         # Rust backend
+└── @codepapr/ui           # Tauri desktop (React + Monaco)
+    └── src-tauri/         # Rust backend (SQLite persistence lives here)
 ```

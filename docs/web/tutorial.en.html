@@ -404,14 +404,14 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
       <div class="section-header"><h2>CodePapr Introduction</h2></div>
       <div class="content">
         <h3>What is CodePapr</h3>
-        <p>CodePapr is a <strong>cache-first coding agent system</strong> offering two entry points: a Tauri desktop workbench and a CLI terminal interface. It shares a common Agent Runtime to provide desktop and terminal CLI with the same capabilities, enabling AI agents to <strong>read, modify, execute, verify, and preview</strong> within real project repositories.</p>
+        <p>CodePapr is a <strong>cache-first coding agent system</strong> offering a Tauri desktop workbench. It enables AI agents to <strong>read, modify, execute, verify, and preview</strong> within real project repositories.</p>
 
-        <p>CodePapr is neither a traditional AI chat tool nor an IDE plugin. It is an <strong>autonomous agent running in the terminal/desktop</strong> that genuinely understands your project context and automatically executes development tasks.</p>
+        <p>CodePapr is neither a traditional AI chat tool nor an IDE plugin. It is an <strong>autonomous agent running on the desktop</strong> that genuinely understands your project context and automatically executes development tasks.</p>
 
         <h3>Core Design Principles</h3>
         <ul>
           <li><strong>Local-first</strong>: Project context stays within the workspace as much as possible; file and command execution happen locally</li>
-          <li><strong>Single Runtime, Multiple Entry Points</strong>: The desktop workbench and CLI terminal share the same Agent, Session, ToolRegistry, and Provider semantics</li>
+          <li><strong>Single Runtime</strong>: Unified Agent, Session, ToolRegistry, and Provider semantics</li>
           <li><strong>DeepSeek Cache Optimization</strong>: Stable content upfront, volatile content at the end, maximizing prefix cache hit rates to reduce token costs</li>
           <li><strong>Structured Code Editing</strong>: Uses Search/Replace Diff mechanism, validates before writing, avoids line-number drift</li>
           <li><strong>Verifiable Execution Chain</strong>: Every round of request, response, tool call, and cache statistics is traceable</li>
@@ -492,7 +492,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
 
         <h3>Installation Verification</h3>
         <pre><code><span class="hl-keyword">npm</span> run verify</code></pre>
-        <p>Passing this step confirms that your machine at least satisfies: correct Node dependencies, successful workspace build, passing workspace tests, passing CLI E2E tests, and passing Tauri cargo check.</p>
+        <p>Passing this step confirms that your machine at least satisfies: correct Node dependencies, successful workspace build, passing workspace tests, and passing Tauri cargo check.</p>
 
         <h3>Supported Platforms</h3>
         <table>
@@ -553,7 +553,7 @@ https://api.deepseek.com/v1</code></pre>
         <p>CodePapr's DeepSeek provider always uses the OpenAI-compatible <code>https://api.deepseek.com/v1</code>. If you want to use the Anthropic protocol with DeepSeek, select Claude as the provider and set baseURL to DeepSeek's Anthropic-compatible endpoint.</p>
 
         <h3>Environment Variable Fallback Order</h3>
-        <p>The desktop and CLI provider compatibility layer reads API keys in the following order:</p>
+        <p>The desktop provider compatibility layer reads API keys in the following order:</p>
         <ol>
           <li><code>DEEPSEEK_API_KEY</code></li>
           <li><code>OPENAI_API_KEY</code></li>
@@ -640,12 +640,11 @@ https://api.deepseek.com/v1</code></pre>
           <thead><tr><th>Entry Point</th><th>Best For</th></tr></thead>
           <tbody>
             <tr><td>Desktop Workbench</td><td>Long sessions, file tree, Git, preview, browser interaction — a visual workbench</td></tr>
-            <tr><td>CLI (<code>codepapr</code> command)</td><td>Terminal interaction, scripted automation; provides <code>chat</code> / <code>ask</code> / <code>plan</code> / <code>agent</code> / <code>init</code> / <code>session</code> / <code>stats</code> / <code>config</code> subcommands</td></tr>
           </tbody>
         </table>
 
         <p class="callout">
-          <strong>Note:</strong> The CLI includes two built-in sub-agents: Explore and Scout; Mentor is only available and configurable in the desktop's "Sub-agents" tab.
+          <strong>Note:</strong> All three built-in sub-agents — Explore, Scout, and Mentor — can be enabled and configured in the desktop's "Sub-agents" tab.
         </p>
       </div>
     </section>
@@ -984,7 +983,7 @@ After the change, at least run verification for the affected scope; if no narrow
         </table>
 
         <h3>External Path Permissions</h3>
-        <p>In the desktop, <code>read</code> / <code>list</code> operations on absolute paths outside the project trigger a <strong>PermissionDialog</strong> popup for authorization; the CLI's read boundaries are more lenient, while writes remain restricted to the workspace.</p>
+        <p>In the desktop, <code>read</code> / <code>list</code> operations on absolute paths outside the project trigger a <strong>PermissionDialog</strong> popup for authorization; writes remain restricted to the workspace. For a file directly under the filesystem root, choosing "Allow this folder" is automatically downgraded to granting that single file only, so one click can never grant the entire filesystem root.</p>
 
         <h3>File Size Limits</h3>
         <p>A single <code>read</code> / <code>write</code> / <code>edit</code> / <code>patch</code> operation is capped at <strong>20MB</strong>, covering most source code and binary resource files, though large files will significantly increase token consumption.</p>
@@ -1495,7 +1494,7 @@ Current status: !`git status -s`</code></pre>
           <tbody>
             <tr><td>Max iterations</td><td>20</td><td>Maximum outer loop iterations, auto-stops when exceeded</td></tr>
             <tr><td>Max wall clock</td><td>30 minutes</td><td>Wall clock timeout, auto-stops</td></tr>
-            <tr><td>User interrupt</td><td>Anytime</td><td>"Stop" button on GoalBanner or Ctrl+C in CLI</td></tr>
+            <tr><td>User interrupt</td><td>Anytime</td><td>"Stop" button on GoalBanner</td></tr>
             <tr><td>State persistence</td><td>Every iteration</td><td>Writes to <code>.CodePapr/goal-state.md</code>, prevents context rot</td></tr>
           </tbody>
         </table>
@@ -1664,9 +1663,8 @@ X-API-Key: your-api-key</code></pre>
             <tr><td><code>@codepapr/common</code></td><td>Common infrastructure</td><td>Logging, hashing, and general utilities</td></tr>
             <tr><td><code>@codepapr/core</code></td><td>Runtime core</td><td>Agent, Session, ToolRegistry, cache partitioning, ProjectGraph, Prompt assembly</td></tr>
             <tr><td><code>@codepapr/api</code></td><td>Provider adapter layer</td><td>RequestBuilder, CacheValidator, provider implementations</td></tr>
-            <tr><td><code>@codepapr/db</code></td><td>Persistence layer</td><td>SQLite wrapper and repository</td></tr>
             <tr><td><code>@codepapr/editor</code></td><td>Editor contract</td><td>Framework-agnostic Monaco types, markers, navigation, and static check contracts</td></tr>
-            <tr><td><code>@codepapr/ui</code></td><td>Desktop workbench</td><td>React, Zustand, Tauri, WorkerBackedAgent</td></tr>
+            <tr><td><code>@codepapr/ui</code></td><td>Desktop workbench</td><td>React, Zustand, Tauri, WorkerBackedAgent; SQLite persistence lives in <code>ui/src-tauri</code> (Rust)</td></tr>
           </tbody>
         </table>
 
@@ -1868,7 +1866,6 @@ Cross-session (different projects):
           <tbody>
             <tr><td><code>npm run build</code></td><td>Full workspace build</td><td>After source changes, confirm artifacts can be generated</td></tr>
             <tr><td><code>npm run test</code></td><td>Full workspace tests</td><td>Daily main regression</td></tr>
-            <tr><td><code>npm run test:e2e</code></td><td>CLI E2E</td><td>Changes to CLI, session assembly, or scripted provider</td></tr>
             <tr><td><code>npm run test:e2e:ui</code></td><td>Playwright UI E2E</td><td>Changes to desktop UI components, Toast, permissions, Code Review</td></tr>
             <tr><td><code>npm run test:e2e:ui:install</code></td><td>Install Playwright Chromium</td><td>Preparation before first UI E2E run</td></tr>
             <tr><td><code>npm run lint</code></td><td>Static analysis</td><td>Pre-commit quality gate</td></tr>
@@ -1999,7 +1996,7 @@ First locate the statistics aggregation logic, then make a minimal fix, and fina
         <h3>1. Prompt says no API key after startup</h3>
         <p>First check whether the desktop settings have been saved, and whether the corresponding environment variables are set (<code>DEEPSEEK_API_KEY</code> / <code>OPENAI_API_KEY</code> / <code>ANTHROPIC_API_KEY</code>).</p>
 
-        <h3>2. Installation or CLI commands won't run / not found</h3>
+        <h3>2. Installation or npm scripts won't run / not found</h3>
         <p>Confirm whether <code>npm install</code> and <code>npm run build</code> have been executed, and whether the current repository is under a OneDrive path causing .bin shim anomalies.</p>
 
         <h3>3. Agent encounters vite, tsc, eslint, or missing module errors</h3>

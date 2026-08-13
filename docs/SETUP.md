@@ -120,6 +120,8 @@ CodePapr 当前的验证链路可以按“范围”和“成本”来理解。
 | npm run verify | verify:ci + cargo check | 本地最完整验证 |
 | npm run smoke:agent-tools | 真实模型工具烟测 | 改到工具选择、预览、shell、浏览器交互、project diagnostics 或绝对路径文件读取 |
 
+> `npm run audit` 对注册表不可达默认**按失败处理**（避免网络波动时静默放行含已知漏洞的依赖进入发布链路）。确需离线跳过时，显式设置 `CODEPAPR_AUDIT_SKIP_ON_NETWORK_FAILURE=1`。
+
 ### 5.2 推荐回归顺序
 
 提交前推荐顺序：

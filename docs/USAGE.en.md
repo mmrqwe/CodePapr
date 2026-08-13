@@ -339,9 +339,8 @@ The desktop app requires explicit authorization for reading/listing absolute pat
 - When Agent invokes `read` / `list` with an absolute path outside the workspace, a **PermissionDialog** appears
 - Options: **Deny**, **Allow this file**, **Allow this folder**
 - Authorizations are added to an allowlist; subsequent accesses to the same path don't re-prompt
+- For a file directly under the filesystem root (e.g. `/secret.txt`), choosing "Allow this folder" is automatically downgraded to granting that single file only, so one click can never grant the entire filesystem root
 - Write, edit, and command execution are still restricted to the workspace regardless
-
-The CLI has looser read path boundaries (can read any absolute path), but writes remain workspace-scoped.
 
 ## macOS Command Sandbox
 

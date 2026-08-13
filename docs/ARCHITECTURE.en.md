@@ -25,7 +25,6 @@ This document describes the formal system design of CodePapr, focusing on:
 
 - Not a multi-tenant cloud proxy platform
 - Not a pure web chat product
-- Not two separate implementations for CLI and desktop
 
 ## 3. Logical Layers
 
@@ -37,9 +36,8 @@ This document describes the formal system design of CodePapr, focusing on:
 | @codepapr/common | Common Infrastructure | Logging, hashing, and general utilities |
 | @codepapr/core | Runtime Core | Agent, Session, ToolRegistry, cache partitions, ProjectGraph, TodoList, Built-in Agents |
 | @codepapr/api | Provider Adapter | RequestBuilder, CacheValidator, provider implementations |
-| @codepapr/db | Persistence Layer | SQLite wrapper and repositories |
 | @codepapr/editor | Editor Contracts | Framework-agnostic Monaco types, markers, navigation, and static analysis contracts |
-| @codepapr/ui | Desktop Workbench | React, Zustand, Tauri, WorkerBackedAgent |
+| @codepapr/ui | Desktop Workbench | React, Zustand, Tauri, WorkerBackedAgent; SQLite persistence lives in `ui/src-tauri` (Rust) |
 
 ## 4. Core Components
 
@@ -148,7 +146,7 @@ All 30 tools are registered in ToolRegistry, frozen and hashed for cache consist
 
 Ask / Plan read-only modes use `FilteringToolRegistry` (a `ToolRegistry` subclass): at registration it skips mutating tools (`MUTATING_TOOL_NAMES`: write/edit/patch/lsp_edit/bash/git/app_*) by predicate, so they appear neither in the tool set nor as registered handlers — a hard block rather than a prompt-level soft constraint. Agent / App modes use the plain `ToolRegistry`.
 
-**External path permissions**: The desktop app shows a `PermissionDialog` for `read`/`list` operations on absolute paths outside the project. The user can choose "Deny / Allow this file / Allow this folder". Authorizations are stored in the `permissionStore` allowlist. CLI read boundaries are more permissive; writes remain workspace-scoped.
+**External path permissions**: The desktop app shows a `PermissionDialog` for `read`/`list` operations on absolute paths outside the project. The user can choose "Deny / Allow this file / Allow this folder". Authorizations are stored in the `permissionStore` allowlist. For a file directly under the filesystem root, choosing "Allow this folder" is downgraded to granting that single file only (so one click can never grant the entire filesystem root).
 
 ### 4.7 Papr App Runtime
 
@@ -522,8 +520,8 @@ Consolidation reuses the `selectContextCompactionModelRoute` fast-model route, s
 
 ### 9.2 Implementation Location
 
-- Core function in `core/src/tool/workspace/graphQuery.ts` (~2,400 lines)
-- CLI and UI each implement handler branches
+- Public entry point is `core/src/tool/workspace/graphQuery.ts` (a barrel); implementations are split by query domain under `core/src/tool/workspace/graph/` (19 modules: symbolLookup / dependency / overview / rename / circularDeps / deadCode / typeHierarchy / testDiscovery / refactorSuggestions / testImpact / architecture / semanticDiff / testGeneration / refactorPlans / incrementalUpdate, etc.)
+- The UI registers the tool handlers via `workspaceGraphLspTools.ts`
 - The Explore sub-agent selects this tool via allowlist (`graph: true`); its system prompt lists the commonly-used actions
 
 ## 10. Prompt Assembly and DeepSeek Cache Optimization
@@ -577,7 +575,7 @@ Currently active routing functions (old planner/summary routes removed):
 | Sub-agent execution | `selectSubagentExecutionRoute` | Determined by task weight | User-configured `subagentTemperature` |
 | Primary model fallback | `buildPrimaryModelRoute` | Primary model | User-configured |
 
-Slash command `model` field (declared in `BUILTIN_PROMPT_COMMANDS` or `.CodePapr/commands/<name>.md` frontmatter) is passed as `preferredTier` to routing: `'fast'` routes to fast model; UI uses `selectTaskModelRoute(..., 'fast')`, CLI uses `createEphemeralAgent` for a temporary fast Agent.
+Slash command `model` field (declared in `BUILTIN_PROMPT_COMMANDS` or `.CodePapr/commands/<name>.md` frontmatter) is passed as `preferredTier` to routing: `'fast'` routes to the fast model (`selectTaskModelRoute(..., 'fast')`); otherwise the primary model is used.
 
 ## 12. Execution Model
 

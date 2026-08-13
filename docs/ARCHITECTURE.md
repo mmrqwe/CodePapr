@@ -25,7 +25,6 @@
 
 - 不是多租户云端代理平台
 - 不是纯网页聊天产品
-- 不是把 CLI 和桌面端分别实现成两套独立系统
 
 ## 3. 逻辑分层
 
@@ -37,9 +36,8 @@
 | @codepapr/common | 公共基础设施 | 日志、哈希与通用工具 |
 | @codepapr/core | 运行时核心 | Agent、Session、ToolRegistry、缓存分区、ProjectGraph、TodoList、Built-in Agents |
 | @codepapr/api | provider 适配层 | RequestBuilder、CacheValidator、provider 实现 |
-| @codepapr/db | 持久化层 | SQLite 封装与 repository |
 | @codepapr/editor | 编辑器契约 | 框架无关的 Monaco 类型、标记、导航与静态检查契约 |
-| @codepapr/ui | 桌面工作台 | React、Zustand、Tauri、WorkerBackedAgent |
+| @codepapr/ui | 桌面工作台 | React、Zustand、Tauri、WorkerBackedAgent；SQLite 持久化位于 `ui/src-tauri`（Rust） |
 
 ## 4. 核心组件
 
@@ -148,7 +146,7 @@ LLM 可调用 30 个独立工具（含 `task` / `todo` 两个动态工具），�
 
 Ask / Plan 只读模式使用 `FilteringToolRegistry`（`ToolRegistry` 子类）：注册时按谓词跳过变更类工具（`MUTATING_TOOL_NAMES`：write/edit/patch/lsp_edit/bash/git/app_*），使其既不出现在工具集也不注册 handler——硬拦截而非提示词软约束。Agent / App 模式使用普通 `ToolRegistry`。
 
-**外部路径权限**：桌面端对 `read` / `list` 操作的项目外绝对路径会弹出 `PermissionDialog`，由用户选择“拒绝 / 允许此文件 / 允许此文件夹”，授权结果保存在 `permissionStore` 白名单中。CLI 的读取路径边界相对宽松，写入仍限制在工作区内。
+**外部路径权限**：桌面端对 `read` / `list` 操作的项目外绝对路径会弹出 `PermissionDialog`，由用户选择“拒绝 / 允许此文件 / 允许此文件夹”，授权结果保存在 `permissionStore` 白名单中。根目录直属文件选择“允许此文件夹”时会降级为仅授权该文件本身（避免一次点击授予整个文件系统根）。
 
 ### 4.7 Papr App Runtime
 
@@ -520,8 +518,8 @@ agent 回复完成
 
 ### 9.2 实现位置
 
-- 核心函数在 `core/src/tool/workspace/graphQuery.ts`（~2,400 行）
-- CLI 和 UI 分别实现 handler 分支
+- 公共出口为 `core/src/tool/workspace/graphQuery.ts`（barrel），实现按查询域拆分在 `core/src/tool/workspace/graph/` 子目录（symbolLookup / dependency / overview / rename / circularDeps / deadCode / typeHierarchy / testDiscovery / refactorSuggestions / testImpact / architecture / semanticDiff / testGeneration / refactorPlans / incrementalUpdate 等 19 个模块）
+- UI 侧经 `workspaceGraphLspTools.ts` 注册为工具 handler
 - Explore 子代理经白名单（`graph: true`）选取本工具，其系统提示词中列出常用 action
 
 ## 10. Prompt 组装与 DeepSeek 缓存优化
@@ -575,7 +573,7 @@ agent 回复完成
 | 子代理执行 | `selectSubagentExecutionRoute` | 按任务重量判断 | 用户配置 `subagentTemperature` |
 | 主模型降级 | `buildPrimaryModelRoute` | 主模型 | 用户配置 |
 
-Slash 命令的 `model` 字段（在 `BUILTIN_PROMPT_COMMANDS` 或 `.CodePapr/commands/<name>.md` frontmatter 中声明）作为 `preferredTier` 传入路由：声明 `'fast'` 时路由到快速模型；UI 走 `selectTaskModelRoute(..., 'fast')`，CLI 走 `createEphemeralAgent` 创建临时快速 Agent。
+Slash 命令的 `model` 字段（在 `BUILTIN_PROMPT_COMMANDS` 或 `.CodePapr/commands/<name>.md` frontmatter 中声明）作为 `preferredTier` 传入路由：声明 `'fast'` 时路由到快速模型（`selectTaskModelRoute(..., 'fast')`），未声明则使用主模型。
 
 ## 12. 执行模型
 

@@ -404,14 +404,14 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
       <div class="section-header"><h2>CodePapr 简介</h2></div>
       <div class="content">
         <h3>什么是 CodePapr</h3>
-        <p>CodePapr 是一个<strong>缓存优先的编码代理（Agent）系统</strong>，提供 Tauri 桌面工作台和 CLI 终端入口两种入口。它通过共享 Agent Runtime 为桌面端与终端 CLI 提供能力，使 AI 代理能够在真实项目仓库里完成<strong>读取、修改、执行、验证与预览</strong>。</p>
+        <p>CodePapr 是一个<strong>缓存优先的编码代理（Agent）系统</strong>，提供 Tauri 桌面工作台。AI 代理能够在真实项目仓库里完成<strong>读取、修改、执行、验证与预览</strong>。</p>
 
-        <p>CodePapr 不是传统的 AI 聊天工具，也不是 IDE 插件。它是一个<strong>在终端/桌面中运行的自主代理</strong>，能真正理解你的项目上下文并自动执行开发任务。</p>
+        <p>CodePapr 不是传统的 AI 聊天工具，也不是 IDE 插件。它是一个<strong>在桌面中运行的自主代理</strong>，能真正理解你的项目上下文并自动执行开发任务。</p>
 
         <h3>核心设计理念</h3>
         <ul>
           <li><strong>本地优先</strong>：项目上下文尽量不离开工作区，文件和命令执行都在本地完成</li>
-          <li><strong>单一 Runtime，多入口复用</strong>：桌面工作台与 CLI 终端入口共用同一套 Agent、Session、ToolRegistry、Provider 语义</li>
+          <li><strong>单一 Runtime</strong>：统一的 Agent、Session、ToolRegistry、Provider 语义</li>
           <li><strong>DeepSeek 缓存优化</strong>：稳定内容前置、易变内容后置，最大化前缀缓存命中率以降低 token 成本</li>
           <li><strong>结构化代码修改</strong>：使用 Search/Replace Diff 机制，先校验再写入，避免行号错位</li>
           <li><strong>可验证执行链路</strong>：每一轮请求、响应、工具调用和缓存统计都可追踪</li>
@@ -492,7 +492,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
 
         <h3>安装验收</h3>
         <pre><code><span class="hl-keyword">npm</span> run verify</code></pre>
-        <p>通过这一步，说明当前机器至少满足：Node 依赖正确、workspace 构建正常、workspace 测试正常、CLI E2E 正常、Tauri cargo check 正常。</p>
+        <p>通过这一步，说明当前机器至少满足：Node 依赖正确、workspace 构建正常、workspace 测试正常、Tauri cargo check 正常。</p>
 
         <h3>支持平台</h3>
         <table>
@@ -553,7 +553,7 @@ https://api.deepseek.com/v1</code></pre>
         <p>CodePapr 的 DeepSeek provider 固定使用 OpenAI 兼容的 <code>https://api.deepseek.com/v1</code>。如果你想用 Anthropic 协议接 DeepSeek，可在 provider 中选择 Claude，并把 baseURL 设为 DeepSeek 提供的 Anthropic 兼容端点。</p>
 
         <h3>环境变量回退顺序</h3>
-        <p>桌面端与 CLI 提供 provider 兼容层会按以下顺序读取 API key：</p>
+        <p>桌面端 provider 兼容层会按以下顺序读取 API key：</p>
         <ol>
           <li><code>DEEPSEEK_API_KEY</code></li>
           <li><code>OPENAI_API_KEY</code></li>
@@ -640,12 +640,11 @@ https://api.deepseek.com/v1</code></pre>
           <thead><tr><th>入口</th><th>适合场景</th></tr></thead>
           <tbody>
             <tr><td>Desktop Workbench</td><td>长会话、文件树、Git、预览、浏览器交互——可视化工作台</td></tr>
-            <tr><td>CLI（<code>codepapr</code> 命令）</td><td>终端交互、脚本化自动化；提供 <code>chat</code> / <code>ask</code> / <code>plan</code> / <code>agent</code> / <code>init</code> / <code>session</code> / <code>stats</code> / <code>config</code> 子命令</td></tr>
           </tbody>
         </table>
 
         <p class="callout">
-          <strong>注意：</strong>CLI 内置 Explore、Scout 两个子代理；Mentor 仅在桌面端的"子Agent"标签页可启用并配置。
+          <strong>注意：</strong>Explore、Scout、Mentor 三个内置子代理均可在桌面端的"子Agent"标签页启用并配置。
         </p>
       </div>
     </section>
@@ -984,7 +983,7 @@ https://api.deepseek.com/v1</code></pre>
         </table>
 
         <h3>外部路径权限</h3>
-        <p>桌面端对项目外绝对路径的 <code>read</code> / <code>list</code> 操作会触发 <strong>PermissionDialog</strong> 弹窗授权；CLI 的读取边界较宽松，写入仍限制在工作区内。</p>
+        <p>桌面端对项目外绝对路径的 <code>read</code> / <code>list</code> 操作会触发 <strong>PermissionDialog</strong> 弹窗授权；写入仍限制在工作区内。根目录直属文件选择「允许此文件夹」时会自动降级为仅授权该文件本身，避免一次点击授予整个文件系统根。</p>
 
         <h3>文件大小限制</h3>
         <p>单次 <code>read</code> / <code>write</code> / <code>edit</code> / <code>patch</code> 操作的上限为 <strong>20MB</strong>，可覆盖大多数源码和二进制资源文件，但大文件会显著增加 token 消耗。</p>
@@ -1495,7 +1494,7 @@ TTS 数据流：
           <tbody>
             <tr><td>最大迭代轮数</td><td>20</td><td>外循环最大轮数，超过自动停止</td></tr>
             <tr><td>最大运行时间</td><td>30 分钟</td><td>墙钟超时自动停止</td></tr>
-            <tr><td>用户中断</td><td>随时</td><td>GoalBanner 上的"停止"按钮或 CLI 的 Ctrl+C</td></tr>
+            <tr><td>用户中断</td><td>随时</td><td>GoalBanner 上的"停止"按钮</td></tr>
             <tr><td>状态持久化</td><td>每轮</td><td>写入 <code>.CodePapr/goal-state.md</code>，防上下文腐烂</td></tr>
           </tbody>
         </table>
@@ -1664,9 +1663,8 @@ X-API-Key: your-api-key</code></pre>
             <tr><td><code>@codepapr/common</code></td><td>公共基础设施</td><td>日志、哈希与通用工具</td></tr>
             <tr><td><code>@codepapr/core</code></td><td>运行时核心</td><td>Agent、Session、ToolRegistry、缓存分区、ProjectGraph、Prompt 组装</td></tr>
             <tr><td><code>@codepapr/api</code></td><td>Provider 适配层</td><td>RequestBuilder、CacheValidator、provider 实现</td></tr>
-            <tr><td><code>@codepapr/db</code></td><td>持久化层</td><td>SQLite 封装与 repository</td></tr>
             <tr><td><code>@codepapr/editor</code></td><td>编辑器契约</td><td>框架无关的 Monaco 类型、标记、导航与静态检查契约</td></tr>
-            <tr><td><code>@codepapr/ui</code></td><td>桌面工作台</td><td>React、Zustand、Tauri、WorkerBackedAgent</td></tr>
+            <tr><td><code>@codepapr/ui</code></td><td>桌面工作台</td><td>React、Zustand、Tauri、WorkerBackedAgent；SQLite 持久化位于 <code>ui/src-tauri</code>（Rust）</td></tr>
           </tbody>
         </table>
 
@@ -1868,7 +1866,6 @@ X-API-Key: your-api-key</code></pre>
           <tbody>
             <tr><td><code>npm run build</code></td><td>全 workspace 构建</td><td>改完源码后确认产物可生成</td></tr>
             <tr><td><code>npm run test</code></td><td>全 workspace 测试</td><td>日常主回归</td></tr>
-            <tr><td><code>npm run test:e2e</code></td><td>CLI E2E</td><td>改到 CLI、会话装配或 scripted provider</td></tr>
             <tr><td><code>npm run test:e2e:ui</code></td><td>Playwright UI E2E</td><td>改到桌面端 UI 组件、Toast、权限、Code Review</td></tr>
             <tr><td><code>npm run test:e2e:ui:install</code></td><td>安装 Playwright Chromium</td><td>首次运行 UI E2E 前准备</td></tr>
             <tr><td><code>npm run lint</code></td><td>静态检查</td><td>提交前质量门禁</td></tr>
@@ -1999,7 +1996,7 @@ X-API-Key: your-api-key</code></pre>
         <h3>1. 启动后提示没有 API key</h3>
         <p>先检查桌面端设置是否已保存，以及是否设置了对应环境变量（<code>DEEPSEEK_API_KEY</code> / <code>OPENAI_API_KEY</code> / <code>ANTHROPIC_API_KEY</code>）。</p>
 
-        <h3>2. 安装或 CLI 命令跑不起来 / 找不到</h3>
+        <h3>2. 安装或 npm 脚本跑不起来 / 找不到</h3>
         <p>确认是否执行过 <code>npm install</code> 和 <code>npm run build</code>，以及当前仓库是否位于 OneDrive 路径下导致 .bin shim 异常。</p>
 
         <h3>3. Agent 遇到 vite、tsc、eslint、模块缺失错误</h3>
