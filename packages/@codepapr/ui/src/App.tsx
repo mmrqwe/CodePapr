@@ -421,7 +421,6 @@ export default function App() {
         first={
           <div className="flex h-full min-h-0 flex-col border-r border-[#202432] bg-[#10131b]">
             <SplitPane
-              key={isGitPanelExpanded ? 'sidebar-expanded' : 'sidebar-collapsed'}
               direction="vertical"
               defaultRatio={isGitPanelExpanded ? 0.42 : 0.72}
               minFirstSize={120}
@@ -436,45 +435,22 @@ export default function App() {
               }
               second={
                 <div className="flex-1 min-h-0 flex flex-col border-t border-[#202432]">
-                  {isGitPanelExpanded ? (
-                    <SplitPane
-                      direction="vertical"
-                      defaultRatio={0.45}
-                      minFirstSize={120}
-                      minSecondSize={120}
-                      className="flex-1 min-h-0"
-                      firstPaneClassName="min-h-0 bg-[#10131b]"
-                      secondPaneClassName="flex flex-col min-h-0 bg-[#10131b]"
-                      first={
-                        <div className="h-full min-h-0">
-                          <BackgroundProcessPanel workspacePath={workspacePath} lang={settings.lang} />
-                        </div>
-                      }
-                      second={
-                        <div className="grid flex-1 min-h-0">
-                          <WorkspaceGitPanel
-                            workspacePath={workspacePath}
-                            lang={settings.lang}
-                            selectedPath={selectedPath}
-                            selectedGitFile={selectedGitFile}
-                            onSelectPath={handleSelectPath}
-                            onSelectGitFile={(file) => {
-                              setSelectedPath(file?.path ?? null);
-                              setSelectedDiagnosticLocation(null);
-                              setSelectedGitFile(file);
-                              setActiveMainTab(file ? 'code' : 'chat');
-                            }}
-                            onOpenCommitReview={(scope) => setShowCodeReview(scope)}
-                            isExpanded={isGitPanelExpanded}
-                            onExpandedChange={setIsGitPanelExpanded}
-                          />
-                        </div>
-                      }
-                    />
-                  ) : (
-                    <>
-                      <BackgroundProcessPanel workspacePath={workspacePath} lang={settings.lang} />
-                      <div className="shrink-0">
+                  <SplitPane
+                    direction="vertical"
+                    defaultRatio={0.45}
+                    minFirstSize={120}
+                    minSecondSize={isGitPanelExpanded ? 120 : 0}
+                    hideSeparator={!isGitPanelExpanded}
+                    className="flex-1 min-h-0"
+                    firstPaneClassName="min-h-0 bg-[#10131b]"
+                    secondPaneClassName="flex flex-col min-h-0 bg-[#10131b]"
+                    first={
+                      <div className="h-full min-h-0">
+                        <BackgroundProcessPanel workspacePath={workspacePath} lang={settings.lang} />
+                      </div>
+                    }
+                    second={
+                      <div className={isGitPanelExpanded ? 'grid flex-1 min-h-0' : 'shrink-0'}>
                         <WorkspaceGitPanel
                           workspacePath={workspacePath}
                           lang={settings.lang}
@@ -492,8 +468,8 @@ export default function App() {
                           onExpandedChange={setIsGitPanelExpanded}
                         />
                       </div>
-                    </>
-                  )}
+                    }
+                  />
                 </div>
               }
             />

@@ -21,6 +21,9 @@ export interface SplitPaneProps {
   className?: string;
   firstPaneClassName?: string;
   secondPaneClassName?: string;
+  /** 隐藏分隔条：第一面板占满剩余空间，第二面板按内容高度收缩（折叠态布局）。
+   *  用于"折叠/展开"两种布局共用同一组件树，避免切换时子组件被卸载重建。 */
+  hideSeparator?: boolean;
 }
 
 export function SplitPane({
@@ -33,12 +36,19 @@ export function SplitPane({
   className = '',
   firstPaneClassName = '',
   secondPaneClassName = '',
+  hideSeparator = false,
 }: SplitPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<{ startPosition: number; startRatio: number } | null>(null);
   const isHorizontal = direction === 'horizontal';
   const [ratio, setRatio] = useState(defaultRatio);
   const [isDragging, setIsDragging] = useState(false);
+
+  // defaultRatio 变化时重置比例（如面板折叠/展开切换布局档位）。原实现靠改
+  // key 强制重挂载来获得同样的效果，但那会卸载子组件、丢失面板内部状态。
+  useEffect(() => {
+    setRatio(defaultRatio);
+  }, [defaultRatio]);
 
   const clampRatio = useCallback((nextRatio: number) => {
     const container = containerRef.current;
@@ -147,38 +157,54 @@ export function SplitPane({
     setIsDragging(true);
   };
 
-  const firstPaneStyle = isHorizontal
-    ? { flexBasis: `${ratio * 100}%`, minWidth: `${minFirstSize}px` }
-    : { flexBasis: `${ratio * 100}%`, minHeight: `${minFirstSize}px` };
-  const secondPaneStyle = isHorizontal
-    ? { minWidth: `${minSecondSize}px` }
-    : { minHeight: `${minSecondSize}px` };
+  const firstPaneStyle = hideSeparator
+    ? { minHeight: `${minFirstSize}px` }
+    : isHorizontal
+      ? { flexBasis: `${ratio * 100}%`, minWidth: `${minFirstSize}px` }
+      : { flexBasis: `${ratio * 100}%`, minHeight: `${minFirstSize}px` };
+  const secondPaneStyle = hideSeparator
+    ? {}
+    : isHorizontal
+      ? { minWidth: `${minSecondSize}px` }
+      : { minHeight: `${minSecondSize}px` };
 
   return (
     <div
       ref={containerRef}
       className={`flex min-h-0 min-w-0 ${isHorizontal ? 'flex-row' : 'flex-col'} ${className}`.trim()}
     >
-      <div className={`min-h-0 min-w-0 shrink-0 ${firstPaneClassName}`.trim()} style={firstPaneStyle}>
+      <div
+        className={`min-h-0 min-w-0 ${
+          hideSeparator ? 'flex-1' : 'shrink-0'
+        } ${firstPaneClassName}`.trim()}
+        style={firstPaneStyle}
+      >
         {first}
       </div>
 
-      <div
-        role="separator"
-        aria-orientation={isHorizontal ? 'vertical' : 'horizontal'}
-        onPointerDown={handlePointerDown}
-        className={`group flex-shrink-0 bg-[#0f1117] ${
-          isHorizontal ? 'w-2 cursor-col-resize px-[3px]' : 'h-2 cursor-row-resize py-[3px]'
-        }`}
-      >
+      {!hideSeparator && (
         <div
-          className={`h-full w-full rounded-full transition-colors ${
-            isDragging ? 'bg-indigo-400/80' : 'bg-[#2a2d3a] group-hover:bg-indigo-500/60'
+          role="separator"
+          aria-orientation={isHorizontal ? 'vertical' : 'horizontal'}
+          onPointerDown={handlePointerDown}
+          className={`group flex-shrink-0 bg-[#0f1117] ${
+            isHorizontal ? 'w-2 cursor-col-resize px-[3px]' : 'h-2 cursor-row-resize py-[3px]'
           }`}
-        />
-      </div>
+        >
+          <div
+            className={`h-full w-full rounded-full transition-colors ${
+              isDragging ? 'bg-indigo-400/80' : 'bg-[#2a2d3a] group-hover:bg-indigo-500/60'
+            }`}
+          />
+        </div>
+      )}
 
-      <div className={`min-h-0 min-w-0 flex-1 ${secondPaneClassName}`.trim()} style={secondPaneStyle}>
+      <div
+        className={`min-h-0 min-w-0 ${
+          hideSeparator ? 'shrink-0' : 'flex-1'
+        } ${secondPaneClassName}`.trim()}
+        style={secondPaneStyle}
+      >
         {second}
       </div>
     </div>

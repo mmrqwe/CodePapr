@@ -223,6 +223,11 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   const [commitFilesError, setCommitFilesError] = useState<Map<string, string>>(new Map());
   const [historyFilter, setHistoryFilter] = useState<'all' | 'user' | 'checkpoint'>('all');
   const [historyLimit, setHistoryLimit] = useState(20);
+  // #14：订阅工作区变更版本——agent 写入/回退后自动刷新 git 状态，与文件树
+  // 的 watcher 行为一致。旧实现只靠手动刷新，两个面板状态长期矛盾。
+  const workspaceMutationVersion = useAgentStore((state) => state.workspaceMutationVersion) ?? 0;
+  const lastSeenMutationVersionRef = useRef(workspaceMutationVersion);
+  const gitMutationRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 方案 A（去暂存概念）：UI 不再区分 staged / unstaged，
   // 改为"未提交改动列表 + 每行 checkbox（默认全选）"。
   // deselectedPaths 记录"用户主动取消勾选"的路径——比白名单更稳健，
@@ -233,6 +238,10 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     let cancelled = false;
 
     const loadGitStatus = async (retryCount = 0) => {
+      // 委托重试标志：auto-init 分支会递归调用 loadGitStatus(retryCount+1)，
+      // 本帧的 finally 不得清除 loading——否则重试请求还在飞，加载指示就熄灭，
+      // 面板短暂闪现"不可用"（#13）。
+      let delegatedToRetry = false;
       if (!workspacePath) {
         setGitStatus(null);
         setIsLoading(false);
@@ -293,6 +302,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
               const ensureResult = await snapshotEnsure(workspacePath);
               pushDebugLog('git', 'snapshotEnsure returned', { ready: ensureResult.ready, error: ensureResult.error });
               if (!cancelled && ensureResult.ready) {
+                delegatedToRetry = true;
                 void loadGitStatus(retryCount + 1);
                 return;
               }
@@ -337,7 +347,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
           } satisfies GitStatusSummary);
         }
       } finally {
-        if (!cancelled) {
+        if (!cancelled && !delegatedToRetry) {
           setIsLoading(false);
         }
       }
@@ -349,6 +359,32 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
       cancelled = true;
     };
   }, [refreshVersion, workspacePath, historyLimit]);
+
+  // #14：工作区文件变更后自动刷新 git 状态（防抖合并突发变更，跳过挂载首帧
+  // 与工作区切换，避免与上面的主加载 effect 重复触发）。
+  useEffect(() => {
+    if (!workspacePath) {
+      lastSeenMutationVersionRef.current = workspaceMutationVersion;
+      return;
+    }
+    if (lastSeenMutationVersionRef.current === workspaceMutationVersion) {
+      return;
+    }
+    lastSeenMutationVersionRef.current = workspaceMutationVersion;
+    if (gitMutationRefreshTimerRef.current !== null) {
+      clearTimeout(gitMutationRefreshTimerRef.current);
+    }
+    gitMutationRefreshTimerRef.current = setTimeout(() => {
+      gitMutationRefreshTimerRef.current = null;
+      setRefreshVersion((value) => value + 1);
+    }, 400);
+    return () => {
+      if (gitMutationRefreshTimerRef.current !== null) {
+        clearTimeout(gitMutationRefreshTimerRef.current);
+        gitMutationRefreshTimerRef.current = null;
+      }
+    };
+  }, [workspaceMutationVersion, workspacePath]);
 
   useEffect(() => {
     setExpandedGitDiffKey(null);
@@ -812,7 +848,11 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
           const isFilesLoading = commitFilesLoading.has(entry.hash);
           const filesError = commitFilesError.get(entry.hash);
           const isAuto = subjectInfo.kind !== 'user';
-          const isRootCommit = entry === entries[entries.length - 1];
+          // 根提交判定必须基于完整历史列表，不能用过滤后的 entries：
+          // 筛选器激活时过滤列表的最后一项会被误判为 root（"与上一次对比"错误禁用）。
+          const isRootCommit =
+            historyEntries.length > 0 &&
+            entry.hash === historyEntries[historyEntries.length - 1]?.hash;
           const titleTone =
             subjectInfo.kind === 'user'
               ? 'text-slate-100 font-semibold'

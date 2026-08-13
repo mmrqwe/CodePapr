@@ -826,4 +826,39 @@ describe('WorkspaceGitPanel', () => {
       headRef: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     });
   });
+
+  it('N14：工作区文件变更（mutation 版本递增）后自动刷新 git 状态', async () => {
+    await act(async () => {
+      root.render(
+        <WorkspaceGitPanel
+          workspacePath="/workspace"
+          lang="en"
+          selectedPath={null}
+          selectedGitFile={null}
+          onSelectGitFile={() => undefined}
+          onOpenCommitReview={() => undefined}
+        />
+      );
+    });
+    await flushEffects();
+
+    const callsBefore = invokeMock.mock.calls.filter(([command]) => command === 'git_status').length;
+    expect(callsBefore).toBeGreaterThan(0);
+
+    // 直接递增版本号（生产路径 noteWorkspaceMutation 上游带 150ms 防抖，
+    // 测试中直接 set 避免 act 环境下的定时器 flush 时序干扰）。
+    act(() => {
+      useAgentStore.setState((state) => ({
+        workspaceMutationVersion: state.workspaceMutationVersion + 1,
+      }));
+    });
+
+    // 面板对版本变化做 400ms 防抖后触发刷新。
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    });
+
+    const callsAfter = invokeMock.mock.calls.filter(([command]) => command === 'git_status').length;
+    expect(callsAfter).toBeGreaterThan(callsBefore);
+  });
 });
