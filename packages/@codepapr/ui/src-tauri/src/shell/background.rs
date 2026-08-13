@@ -416,10 +416,13 @@ pub(crate) fn run_workspace_command_impl(
     };
 
     let cancel_flag = register_command_cancel(cancel_token.as_deref().unwrap_or(""));
-    let (status, stdout, stderr, timed_out) = collect_command_output_with_cancel(child, timeout, cancel_flag.clone())?;
+    let collected =
+        collect_command_output_with_cancel(child, timeout, cancel_flag.clone());
+    // 无论成功失败都必须注销取消令牌，否则错误路径会让条目永久泄漏。
     if let Some(token) = cancel_token.as_deref() {
         unregister_command_cancel(token);
     }
+    let (status, stdout, stderr, timed_out) = collected?;
 
     Ok(CommandResult {
         command,
@@ -463,19 +466,32 @@ fn decode_command_output(bytes: &[u8]) -> String {
 /// 则杀进程树终止。只保留上限内的输出，但持续读到底：旧实现 read_to_end
 /// 无上限，超时窗口内输出几百 MB 会先撑爆内存；只读到上限就停又会让子进程
 /// 阻塞在满管道上。取消与超时统一标记为 timed_out（命令未正常完成）。
+/// 错误路径上必须回收子进程：Rust 的 Child drop 不会 wait，
+/// 直接返回 Err 会留下僵尸进程直到宿主退出。先杀进程树再有界等待。
+fn reap_child_quietly(child: &mut Child) {
+    let _ = kill_process_tree(child);
+    wait_for_child_exit(child, Duration::from_secs(3));
+}
+
 fn collect_command_output_with_cancel(
     mut child: Child,
     timeout: Duration,
     cancel_flag: Option<Arc<AtomicBool>>,
 ) -> Result<(Option<i32>, String, String, bool), String> {
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "无法捕获命令标准输出".to_string())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "无法捕获命令标准错误".to_string())?;
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
+            reap_child_quietly(&mut child);
+            return Err("无法捕获命令标准输出".to_string());
+        }
+    };
+    let stderr = match child.stderr.take() {
+        Some(stderr) => stderr,
+        None => {
+            reap_child_quietly(&mut child);
+            return Err("无法捕获命令标准错误".to_string());
+        }
+    };
 
     // 读线程把结果发回通道而非 join 直接取：孙进程逃逸进程组后仍持有管道
     // 写端时，读线程永远等不到 EOF（join 永久阻塞）。通道版可用 recv_timeout
@@ -493,12 +509,16 @@ fn collect_command_output_with_cancel(
     let mut timed_out = false;
     let status;
     loop {
-        if let Some(exit_status) = child
-            .try_wait()
-            .map_err(|err| format!("等待命令失败: {err}"))?
-        {
-            status = exit_status.code();
-            break;
+        match child.try_wait() {
+            Ok(Some(exit_status)) => {
+                status = exit_status.code();
+                break;
+            }
+            Ok(None) => {}
+            Err(err) => {
+                reap_child_quietly(&mut child);
+                return Err(format!("等待命令失败: {err}"));
+            }
         }
         let cancelled = cancel_flag
             .as_ref()
@@ -506,13 +526,20 @@ fn collect_command_output_with_cancel(
             .unwrap_or(false);
         if cancelled || started.elapsed() >= timeout {
             timed_out = true;
-            kill_process_tree(&mut child)
-                .map_err(|err| format!("终止超时/取消命令失败: {err}"))?;
-            status = child
-                .wait()
-                .map_err(|err| format!("等待命令退出失败: {err}"))?
-                .code();
-            break;
+            if let Err(err) = kill_process_tree(&mut child) {
+                reap_child_quietly(&mut child);
+                return Err(format!("终止超时/取消命令失败: {err}"));
+            }
+            match child.wait() {
+                Ok(exit_status) => {
+                    status = exit_status.code();
+                    break;
+                }
+                Err(err) => {
+                    reap_child_quietly(&mut child);
+                    return Err(format!("等待命令退出失败: {err}"));
+                }
+            }
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -637,10 +664,12 @@ pub(crate) fn run_workspace_shell_command_impl(
     let mut cmd = build_shell_spawn_command(&command, &cwd, &workspace, sandbox.map(Into::into))?;
     let child = cmd.spawn().map_err(|err| format!("启动命令失败: {err}"))?;
     let cancel_flag = register_command_cancel(cancel_token.as_deref().unwrap_or(""));
-    let (status, stdout, stderr, timed_out) = collect_command_output_with_cancel(child, timeout, cancel_flag)?;
+    let collected = collect_command_output_with_cancel(child, timeout, cancel_flag);
+    // 无论成功失败都必须注销取消令牌，否则错误路径会让条目永久泄漏。
     if let Some(token) = cancel_token.as_deref() {
         unregister_command_cancel(token);
     }
+    let (status, stdout, stderr, timed_out) = collected?;
     Ok(CommandResult {
         command,
         args: Vec::new(),
@@ -691,9 +720,11 @@ pub(crate) fn start_workspace_background_command(
 
     #[cfg(windows)]
     const CREATE_NO_WINDOW_BG: u32 = 0x08000000;
+    // sandboxed_command 内部已把 args 追加到 Command（macOS: sandbox-exec -p <profile>
+    // <program> <args...>；其他平台: <program> <args...>），此处不得再次 .args(&args)，
+    // 否则所有后台命令都会以重复的 argv 启动（如 `node server.js server.js`）。
     let mut bg_cmd = sandboxed_command(&command, &args, &workspace, sandbox.map(Into::into))?;
     bg_cmd
-        .args(&args)
         // GUI 壳进程的 PATH 只有系统目录（无 /opt/homebrew/bin 等），不注入则
         // sandbox-exec 里 exec "node"/"python" 直接失败，后端进程秒退且无任何日志。
         .env("PATH", expanded_path())
@@ -870,13 +901,14 @@ pub(crate) fn stop_background_process(
     source: Option<String>,
 ) -> Result<StopBackgroundProcessResult, String> {
     let source = source.unwrap_or_else(|| "unknown".to_string());
-    with_background_processes(|processes| {
-        let Some(process) = processes.get_mut(&pid) else {
-            return Ok(StopBackgroundProcessResult {
-                pid,
-                stopped: false,
-                reason: Some("not-found".to_string()),
-            });
+    // 锁内只做日志记录与移除；kill + 等待退出（最多 3s+）在锁外执行。
+    // 旧实现持锁等待进程退出，单个慢退出进程会把所有后台进程的
+    // list/spawn/stop 全部卡住（stop-all 场景为 N 倍）。
+    // 代价：kill 期间进程不再出现在 list 中（短暂的可见性窗口），
+    // 相比全局阻塞是可接受的取舍。
+    let removed = with_background_processes(|processes| {
+        let Some(process) = processes.get(&pid) else {
+            return Ok(None);
         };
 
         log_background_event(
@@ -887,31 +919,36 @@ pub(crate) fn stop_background_process(
             ),
         );
 
-        let still_running = match process.child.try_wait() {
-            Ok(Some(_)) => false,
-            Ok(None) => true,
-            Err(_) => true,
-        };
+        Ok(processes.remove(&pid))
+    })?;
 
-        // 先杀后移除：kill + 等待最多 3s 期间进程仍在注册表中（状态查询可见
-        // "stopping"），避免先 remove 造成的失联窗口——那时 list/status 查
-        // 不到进程，用户会看到进程"凭空消失"又"回来"。
-        if still_running {
-            let _ = kill_process_tree(&mut process.child);
-            wait_for_child_exit(&mut process.child, Duration::from_secs(3));
-        }
-
-        processes.remove(&pid);
-
-        Ok(StopBackgroundProcessResult {
+    let Some(mut process) = removed else {
+        return Ok(StopBackgroundProcessResult {
             pid,
-            stopped: still_running,
-            reason: if still_running {
-                Some("kill-failed".to_string())
-            } else {
-                None
-            },
-        })
+            stopped: false,
+            reason: Some("not-found".to_string()),
+        });
+    };
+
+    let still_running = match process.child.try_wait() {
+        Ok(Some(_)) => false,
+        Ok(None) => true,
+        Err(_) => true,
+    };
+
+    if still_running {
+        let _ = kill_process_tree(&mut process.child);
+        wait_for_child_exit(&mut process.child, Duration::from_secs(3));
+    }
+
+    Ok(StopBackgroundProcessResult {
+        pid,
+        stopped: still_running,
+        reason: if still_running {
+            Some("kill-failed".to_string())
+        } else {
+            None
+        },
     })
 }
 
@@ -923,7 +960,8 @@ pub(crate) fn stop_all_background_processes(
     let source = source.unwrap_or_else(|| "unknown".to_string());
     let workspace_filter = normalize_workspace_filter(workspace_path)?;
 
-    with_background_processes(|processes| {
+    // 锁内只做日志记录与批量移除；kill + 等待在锁外逐个执行（同 stop_background_process）。
+    let removed: Vec<ManagedBackgroundProcess> = with_background_processes(|processes| {
         let target_pids: Vec<u32> = processes
             .iter()
             .filter(|(_, process)| {
@@ -935,11 +973,9 @@ pub(crate) fn stop_all_background_processes(
             .map(|(pid, _)| *pid)
             .collect();
 
-        let mut stopped = 0usize;
-
+        let mut removed = Vec::new();
         for pid in target_pids {
-            let mut still_running = false;
-            if let Some(process) = processes.get_mut(&pid) {
+            if let Some(process) = processes.get(&pid) {
                 log_background_event(
                     &process.workspace_path,
                     format!(
@@ -947,25 +983,30 @@ pub(crate) fn stop_all_background_processes(
                         process.command
                     ),
                 );
-                still_running = match process.child.try_wait() {
-                    Ok(Some(_)) => false,
-                    Ok(None) => true,
-                    Err(_) => true,
-                };
-
-                if still_running {
-                    let _ = kill_process_tree(&mut process.child);
-                    wait_for_child_exit(&mut process.child, Duration::from_secs(3));
-                }
             }
-            processes.remove(&pid);
-            if still_running {
-                stopped += 1;
+            if let Some(process) = processes.remove(&pid) {
+                removed.push(process);
             }
         }
 
-        Ok(StopAllBackgroundProcessesResult { stopped })
-    })
+        Ok(removed)
+    })?;
+
+    let mut stopped = 0usize;
+    for mut process in removed {
+        let still_running = match process.child.try_wait() {
+            Ok(Some(_)) => false,
+            Ok(None) => true,
+            Err(_) => true,
+        };
+        if still_running {
+            let _ = kill_process_tree(&mut process.child);
+            wait_for_child_exit(&mut process.child, Duration::from_secs(3));
+            stopped += 1;
+        }
+    }
+
+    Ok(StopAllBackgroundProcessesResult { stopped })
 }
 
 #[cfg(all(test, unix))]

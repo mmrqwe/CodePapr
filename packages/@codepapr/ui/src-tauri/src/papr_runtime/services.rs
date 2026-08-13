@@ -581,30 +581,34 @@ fn stop_app_backend_processes(workspace_path: &str, port: u16) -> Result<usize, 
             .map(|(pid, _)| *pid)
             .collect();
 
+        let removed: Vec<crate::shell::types::ManagedBackgroundProcess> = target_pids
+            .into_iter()
+            .filter_map(|pid| processes.remove(&pid))
+            .collect();
+        Ok(removed)
+    })
+    // 锁外击杀：kill + 有界等待（最多 3s+）不得持有全局注册表锁，
+    // 否则慢退出进程会阻塞所有后台进程操作。
+    // 进程树击杀（而非只杀直接子进程）保证 shell 包装器派生的工作进程
+    // 不会变孤儿继续占端口。
+    .map(|removed| {
         let mut stopped = 0usize;
-        for pid in target_pids {
-            if let Some(mut process) = processes.remove(&pid) {
-                let still_running = match process.child.try_wait() {
-                    Ok(Some(_)) => false,
-                    Ok(None) => true,
-                    Err(_) => true,
-                };
-                if still_running {
-                    // 旧实现：process.child.kill() 只杀直接子进程（shell 包装器），
-                    // 真正的工作进程（server.js 派生的子进程等）变成孤儿继续占端口；
-                    // 且 child.wait() 无界阻塞——子进程处于 D 状态（不可中断）时
-                    // with_background_processes 的全局锁被无限持有，所有后台进程
-                    // 操作全部死锁。改用进程树击杀 + 有界等待（与 shell 路径一致）。
-                    let _ = crate::shell::process_tree::kill_process_tree(&mut process.child);
-                    crate::shell::process_tree::wait_for_child_exit(
-                        &mut process.child,
-                        std::time::Duration::from_secs(3),
-                    );
-                    stopped += 1;
-                }
+        for mut process in removed {
+            let still_running = match process.child.try_wait() {
+                Ok(Some(_)) => false,
+                Ok(None) => true,
+                Err(_) => true,
+            };
+            if still_running {
+                let _ = crate::shell::process_tree::kill_process_tree(&mut process.child);
+                crate::shell::process_tree::wait_for_child_exit(
+                    &mut process.child,
+                    std::time::Duration::from_secs(3),
+                );
+                stopped += 1;
             }
         }
-        Ok(stopped)
+        stopped
     })
 }
 

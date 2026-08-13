@@ -27,6 +27,10 @@ interface PendingExternalRequest {
   resolve: (value: ExternalAccessResponse) => void;
   reject: (reason: unknown) => void;
   responding: boolean;
+  /** 该请求绑定了工具执行的 AbortSignal：取消时由 signal 的 abort 监听器
+   *  按请求精确回收，跨运行的全局取消（cancelSession/cancelAppAgent）不得
+   *  连带拒绝它——只有无绑定的请求才走全局取消兜底。 */
+  trackedBySignal: boolean;
 }
 
 function normalizePathDots(p: string): string {
@@ -90,6 +94,7 @@ interface PermissionStoreState {
     operation: ExternalAccessRequest['operation'],
     workspacePath?: string,
     allowFile?: boolean,
+    signal?: AbortSignal,
   ) => Promise<ExternalAccessResponse>;
   respondToExternalAccess: (
     approved: boolean,
@@ -114,11 +119,35 @@ export function isPermissionWaitActive(): boolean {
   return pendingQueue.length > 0;
 }
 
-export function cancelExternalAccessRequests(reason: unknown = new DOMException('权限请求已取消', 'AbortError')): void {
-  const requests = pendingQueue.splice(0);
-  usePermissionStore.setState({ pendingRequest: null });
-  if (requests.length > 0) publishPermissionWait(false);
-  for (const entry of requests) {
+/** 取消排队中的外部访问请求。
+ *
+ *  默认（destroy/完整 cancel）：全部拒绝。
+ *  `onlyUntracked: true`（cancelSession/cancelAppAgent 等按运行取消）：
+ *  只拒绝未绑定工具 AbortSignal 的请求——绑定了 signal 的请求属于仍在
+ *  运行的其它执行（聊天回合与 papr app-agent 可并发），由各自的 signal
+ *  abort 时精确回收，全局取消不得连带误伤。 */
+export function cancelExternalAccessRequests(
+  reason: unknown = new DOMException('权限请求已取消', 'AbortError'),
+  options?: { onlyUntracked?: boolean },
+): void {
+  const removed: PendingExternalRequest[] = [];
+  if (options?.onlyUntracked) {
+    const kept: PendingExternalRequest[] = [];
+    for (const entry of pendingQueue.splice(0)) {
+      if (entry.trackedBySignal) {
+        kept.push(entry);
+      } else {
+        removed.push(entry);
+      }
+    }
+    pendingQueue.push(...kept);
+  } else {
+    removed.push(...pendingQueue.splice(0));
+  }
+  if (removed.length === 0) return;
+  usePermissionStore.setState({ pendingRequest: currentPendingRequest() });
+  if (pendingQueue.length === 0) publishPermissionWait(false);
+  for (const entry of removed) {
     entry.reject(reason);
   }
 }
@@ -180,7 +209,12 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
     operation: ExternalAccessRequest['operation'],
     workspacePath?: string,
     allowFile = true,
+    signal?: AbortSignal,
   ) => {
+    const abortReason = () =>
+      signal?.reason instanceof Error
+        ? signal.reason
+        : new DOMException('权限请求已取消', 'AbortError');
     const normalized = normalizePathDots(rawPath);
     const existing = pendingQueue.find(
       (entry) => entry.request.path === normalized && entry.request.operation === operation,
@@ -197,12 +231,21 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
           originalReject(reason);
           reject(reason);
         };
+        // 并入已有请求的调用方：自己的 signal abort 只拒绝自己的 promise，
+        // 不得影响队列条目（它还服务其它执行）。
+        if (signal) {
+          if (signal.aborted) {
+            reject(abortReason());
+            return;
+          }
+          signal.addEventListener('abort', () => reject(abortReason()), { once: true });
+        }
       });
     }
 
     return new Promise<ExternalAccessResponse>((resolve, reject) => {
       const wasEmpty = pendingQueue.length === 0;
-      pendingQueue.push({
+      const entry: PendingExternalRequest = {
         request: {
           id: createId(),
           path: normalized,
@@ -213,7 +256,30 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
         resolve,
         reject,
         responding: false,
-      });
+        trackedBySignal: signal !== undefined,
+      };
+      pendingQueue.push(entry);
+      if (signal) {
+        if (signal.aborted) {
+          pendingQueue.pop();
+          reject(abortReason());
+          return;
+        }
+        // 工具执行被取消（会话取消 / app-agent 取消 / 工具超时）时按请求
+        // 精确回收：移出队列并拒绝，不影响其它执行的排队请求。
+        signal.addEventListener(
+          'abort',
+          () => {
+            const index = pendingQueue.indexOf(entry);
+            if (index === -1) return;
+            pendingQueue.splice(index, 1);
+            syncPending(set);
+            if (pendingQueue.length === 0) publishPermissionWait(false);
+            reject(abortReason());
+          },
+          { once: true },
+        );
+      }
       syncPending(set);
       if (wasEmpty) publishPermissionWait(true);
     });
@@ -226,17 +292,30 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
 
     try {
       if (approved) {
-        const grantPath =
+        let grantScope: 'directory' | 'file' = scope;
+        let grantPath: string;
+        if (
           scope === 'directory' &&
           (entry.request.operation === 'list' || entry.request.operation === 'execute')
-            ? entry.request.path
-            : scope === 'directory'
-              ? getDirname(entry.request.path)
-              : entry.request.path;
+        ) {
+          grantPath = entry.request.path;
+        } else if (scope === 'directory') {
+          const dir = getDirname(entry.request.path);
+          if (dir === '/') {
+            // 根目录直属文件：「允许此文件夹」等价于授予整个文件系统根，
+            // 一次点击的授权面过大，降级为仅授予该文件本身。
+            grantScope = 'file';
+            grantPath = entry.request.path;
+          } else {
+            grantPath = dir;
+          }
+        } else {
+          grantPath = entry.request.path;
+        }
         const policy = await invoke<ExternalAccessPolicyPayload>('grant_external_access', {
           workspacePath: entry.request.workspacePath,
           rawPath: grantPath,
-          scope,
+          scope: grantScope,
         });
         applyPolicy(set, policy);
       }

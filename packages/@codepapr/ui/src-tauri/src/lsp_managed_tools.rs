@@ -11,7 +11,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::OnceLock,
+    sync::{Mutex, OnceLock},
     thread,
     time::{Duration, Instant},
 };
@@ -127,6 +127,14 @@ pub fn managed_lsp_commands(workspace: &Path, language_id: &str) -> Vec<ManagedL
     }
 }
 
+/// 全局安装互斥锁：所有 ensure_* 安装流程都写共享目录
+/// （~/.codepapr/lsp-tools/node-packages、dotnet 全局工具存储、GOPATH/bin 等）。
+/// lsp.rs 的创建锁按 workspace::family 隔离，不同 family 的 LSP（如 html 与 css）
+/// 并发触发时，两个 npm install 会同时在同一 package.json/node_modules 上执行，
+/// npm 并发写同一目录极易造成 node_modules 损坏/安装失败。
+/// 安装低频且只在首次触发，全局串行是最简单正确的方案。
+static MANAGED_INSTALL_LOCK: Mutex<()> = Mutex::new(());
+
 pub fn ensure_managed_language_server(
     workspace: &Path,
     language_id: &str,
@@ -136,12 +144,21 @@ pub fn ensure_managed_language_server(
         return Ok(());
     }
 
-    if language_id == "csharp" {
-        return ensure_csharp_support(workspace, reporter);
+    if language_id != "csharp" && !managed_lsp_commands(workspace, language_id).is_empty() {
+        return Ok(());
     }
 
-    if !managed_lsp_commands(workspace, language_id).is_empty() {
+    let _install_guard = MANAGED_INSTALL_LOCK
+        .lock()
+        .map_err(|_| "获取托管安装锁失败".to_string())?;
+
+    // 双重检查：等锁期间另一线程可能刚完成同一工具的安装。
+    if language_id != "csharp" && !managed_lsp_commands(workspace, language_id).is_empty() {
         return Ok(());
+    }
+
+    if language_id == "csharp" {
+        return ensure_csharp_support(workspace, reporter);
     }
 
     match language_id {
@@ -273,22 +290,27 @@ fn managed_rust_commands() -> Vec<ManagedLspCommand> {
         });
     }
 
-    for home_var in &["HOME", "CARGO_HOME"] {
-        if let Ok(home) = env::var(home_var) {
-            let cargo_bin = PathBuf::from(&home)
-                .join(".cargo")
-                .join("bin")
-                .join(&executable);
-            if cargo_bin.is_file() {
-                commands.push(ManagedLspCommand {
-                    command: cargo_bin.to_string_lossy().to_string(),
-                    args: Vec::new(),
-                    tool_origin: "managed".to_string(),
-                    tool_source: "cargo-install".to_string(),
-                    tool_label: "rust-analyzer".to_string(),
-                    managed_cache_path: None,
-                });
-            }
+    // cargo install 的 rust-analyzer 位于 ~/.cargo/bin/。
+    // home 目录用 HOME → USERPROFILE 回退（Windows 上通常没有 HOME）。
+    // CARGO_HOME 本身就是 .cargo 目录（默认 ~/.cargo），其下直接是 bin/，
+    // 不能再拼 .cargo/bin。
+    let mut cargo_bin_candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(home) = crate::shared::paths::home_dir() {
+        cargo_bin_candidates.push(home.join(".cargo").join("bin").join(&executable));
+    }
+    if let Ok(cargo_home) = env::var("CARGO_HOME") {
+        cargo_bin_candidates.push(PathBuf::from(cargo_home).join("bin").join(&executable));
+    }
+    for cargo_bin in cargo_bin_candidates {
+        if cargo_bin.is_file() {
+            commands.push(ManagedLspCommand {
+                command: cargo_bin.to_string_lossy().to_string(),
+                args: Vec::new(),
+                tool_origin: "managed".to_string(),
+                tool_source: "cargo-install".to_string(),
+                tool_label: "rust-analyzer".to_string(),
+                managed_cache_path: None,
+            });
         }
     }
 
@@ -319,22 +341,26 @@ fn managed_go_commands() -> Vec<ManagedLspCommand> {
         }
     }
 
-    for home_var in &["HOME", "GOPATH"] {
-        if let Ok(home) = env::var(home_var) {
-            let go_bin = PathBuf::from(&home)
-                .join("go")
-                .join("bin")
-                .join(&executable);
-            if go_bin.is_file() {
-                commands.push(ManagedLspCommand {
-                    command: go_bin.to_string_lossy().to_string(),
-                    args: Vec::new(),
-                    tool_origin: "managed".to_string(),
-                    tool_source: "go-install".to_string(),
-                    tool_label: "gopls".to_string(),
-                    managed_cache_path: None,
-                });
-            }
+    // go install 的 gopls 位于 $GOPATH/bin/，GOPATH 默认为 ~/go。
+    // home 目录用 HOME → USERPROFILE 回退（Windows 上通常没有 HOME）。
+    // GOPATH 本身就是工作区根（默认 ~/go），其下直接是 bin/，不能再拼 go/bin。
+    let mut go_bin_candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(home) = crate::shared::paths::home_dir() {
+        go_bin_candidates.push(home.join("go").join("bin").join(&executable));
+    }
+    if let Ok(gopath) = env::var("GOPATH") {
+        go_bin_candidates.push(PathBuf::from(gopath).join("bin").join(&executable));
+    }
+    for go_bin in go_bin_candidates {
+        if go_bin.is_file() {
+            commands.push(ManagedLspCommand {
+                command: go_bin.to_string_lossy().to_string(),
+                args: Vec::new(),
+                tool_origin: "managed".to_string(),
+                tool_source: "go-install".to_string(),
+                tool_label: "gopls".to_string(),
+                managed_cache_path: None,
+            });
         }
     }
 
@@ -357,12 +383,15 @@ fn managed_swift_commands() -> Vec<ManagedLspCommand> {
         }
 
         if commands.is_empty() {
-            if let Ok(output) = std::process::Command::new("xcrun")
-                .args(["-f", "sourcekit-lsp"])
-                .output()
-            {
-                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !path.is_empty() {
+            // xcrun 可能卡在 Xcode 许可协议 / CLI tools 安装弹窗，必须有超时。
+            if let Ok(output) = run_command_with_timeout(
+                "xcrun",
+                &["-f", "sourcekit-lsp"],
+                &env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+                Duration::from_secs(30),
+            ) {
+                let path = output.stdout.trim().to_string();
+                if !path.is_empty() && !output.timed_out {
                     commands.push(ManagedLspCommand {
                         command: path,
                         args: vec!["--stdio".to_string()],
@@ -923,14 +952,16 @@ fn ensure_csharp_support(
                 "正在恢复 NuGet 包...".to_string(),
                 cache_path.as_deref(),
             );
-            let restore = std::process::Command::new(dotnet_binary())
-                .args(["restore"])
-                .current_dir(workspace)
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::piped())
-                .output();
+            // 必须走 run_command_with_timeout：裸 .output() 无超时，
+            // dotnet 挂起（网络/nuget 源异常）会永久楔死 LSP 启动链路。
+            let restore = run_command_with_timeout(
+                dotnet_binary(),
+                &["restore"],
+                workspace,
+                MANAGED_COMMAND_TIMEOUT,
+            );
             match restore {
-                Ok(output) if output.status.success() => {
+                Ok(output) if output.status_code == Some(0) && !output.timed_out => {
                     emit_progress(
                         reporter,
                         "ready",
@@ -940,8 +971,7 @@ fn ensure_csharp_support(
                     );
                 }
                 Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    let msg = format!("dotnet restore 失败: {}", stderr.trim());
+                    let msg = format!("dotnet restore 失败: {}", output.stderr.trim());
                     emit_progress(
                         reporter,
                         "failed",
@@ -978,24 +1008,29 @@ fn ensure_csharp_support(
             cache_path.as_deref(),
         );
 
-        let install_output = std::process::Command::new(dotnet_binary())
-            .args(["tool", "install", "--global", "csharp-ls"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .output();
+        // 同样必须有超时：tool install/update 依赖网络（nuget.org），
+        // 受限网络下裸阻塞调用可永久卡死 LSP 启动链路。
+        let install_output = run_command_with_timeout(
+            dotnet_binary(),
+            &["tool", "install", "--global", "csharp-ls"],
+            workspace,
+            MANAGED_COMMAND_TIMEOUT,
+        );
 
-        let install_succeeded = install_output.as_ref().is_ok_and(|o| o.status.success());
-        let already_installed = install_output.as_ref().is_ok_and(|o| {
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            stderr.contains("already installed")
-        });
+        let install_succeeded = install_output
+            .as_ref()
+            .is_ok_and(|o| o.status_code == Some(0) && !o.timed_out);
+        let already_installed = install_output
+            .as_ref()
+            .is_ok_and(|o| o.stderr.contains("already installed"));
 
         if already_installed {
-            let _ = std::process::Command::new(dotnet_binary())
-                .args(["tool", "update", "--global", "csharp-ls"])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
+            let _ = run_command_with_timeout(
+                dotnet_binary(),
+                &["tool", "update", "--global", "csharp-ls"],
+                workspace,
+                MANAGED_COMMAND_TIMEOUT,
+            );
         }
 
         if install_succeeded || already_installed {

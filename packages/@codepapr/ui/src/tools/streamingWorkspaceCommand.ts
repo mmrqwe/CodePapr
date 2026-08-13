@@ -194,14 +194,14 @@ export async function runStreamingWorkspaceCommand(
         await invokeFn('close_shell_session', {
           sessionId: session.sessionId,
         }).catch(() => undefined);
-        return {
-          command: params.command,
-          args,
-          status: null,
-          stdout: latestOutput,
-          stderr: '',
-          timedOut: true,
-        };
+        // 必须与超时区分：抛 AbortError 而不是返回 timedOut:true。
+        // 旧实现把用户主动中止报告成「超时」，模型通常会原样重试——
+        // 一条已被中止、可能已产生半副作用（写文件、git 操作）的命令
+        // 会被再次完整执行。
+        throw new DOMException(
+          `命令被取消：${params.command}（已产生的输出：${latestOutput.slice(0, 500)}）`,
+          'AbortError',
+        );
       }
       const output = await invokeFn<ShellReadOutputResult>('read_shell_output', {
         sessionId: session.sessionId,

@@ -140,6 +140,15 @@ function maybeStartBackgroundRepair(params: {
         '后台诊断发现问题，自动进入修复流',
         'agent'
       )
+      .then((consumed) => {
+        // sendMessage 的单执行守卫可能拒绝本次调用（isLoading 检查通过后
+        // 用户恰好发起回合）。拒绝时回滚指纹/计数，保留后续重试机会，
+        // 避免该失败签名永远得不到修复。
+        if (!consumed) {
+          backgroundRepairFingerprints.delete(fingerprint);
+          backgroundRepairAttemptsByWorkspace.set(params.workspacePath, attempts);
+        }
+      })
       .catch((error) => {
         appendErrorMessage(params.set, formatAgentError(error, state.settings.lang ?? 'zh-CN'));
       });

@@ -316,7 +316,6 @@ pub(crate) async fn search_web(
         if searxng_active {
             let base_url = searxng_base_url.as_deref().unwrap_or("").trim().to_string();
             match searxng::collect_searxng_results(
-                &client,
                 &base_url,
                 query,
                 max_results,

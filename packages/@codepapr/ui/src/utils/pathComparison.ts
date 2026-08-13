@@ -5,8 +5,29 @@
  *  外部路径放行匹配、recent 去重、URI 归属判断都会误拒/重复。
  *  Linux 保持大小写敏感。
  */
+/** 探测运行平台。
+ *
+ *  生产环境运行在 WKWebView/WebView2 中，没有 Node 的 `process` 全局对象
+ *  （构建产物中 `process.platform` 不会被 polyfill），裸用会抛 ReferenceError。
+ *  因此优先用 `process.platform`（Node/测试环境可用），否则回退到 userAgent 判断。
+ */
+function detectPlatform(): 'darwin' | 'win32' | 'linux' {
+  if (typeof process !== 'undefined' && typeof process.platform === 'string') {
+    return process.platform === 'darwin' || process.platform === 'win32'
+      ? process.platform
+      : 'linux';
+  }
+  if (typeof navigator !== 'undefined') {
+    const ua = navigator.userAgent;
+    if (/Macintosh|Mac OS X/i.test(ua)) return 'darwin';
+    if (/Windows/i.test(ua)) return 'win32';
+  }
+  return 'linux';
+}
+
 export function isCaseInsensitiveFilesystem(): boolean {
-  return process.platform === 'darwin' || process.platform === 'win32';
+  const platform = detectPlatform();
+  return platform === 'darwin' || platform === 'win32';
 }
 
 export function pathsEquivalent(left: string, right: string): boolean {

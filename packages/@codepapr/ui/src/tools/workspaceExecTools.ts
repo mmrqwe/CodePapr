@@ -91,13 +91,17 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     ensureExternalPathAllowed,
   } = ctx;
 
-  const ensureCommandPathsAllowed = async (command: string, args: string[] = []): Promise<void> => {
+  const ensureCommandPathsAllowed = async (
+    command: string,
+    args: string[] = [],
+    signal?: AbortSignal,
+  ): Promise<void> => {
     const candidates = [
       ...extractAbsoluteCommandPaths(command),
       ...args.flatMap((arg) => extractAbsoluteCommandPaths(arg)),
     ];
     for (const candidate of [...new Set(candidates)]) {
-      await ensureExternalPathAllowed(candidate, 'execute');
+      await ensureExternalPathAllowed(candidate, 'execute', signal);
     }
   };
 
@@ -107,7 +111,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
       args: asOptionalStringArray(args.args),
       timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
     };
-    await ensureCommandPathsAllowed(parsed.command, parsed.args ?? []);
+    await ensureCommandPathsAllowed(parsed.command, parsed.args ?? [], context?.signal);
     // 取消通道：会话取消 / 工具超时（Agent 的 withTimeout）会 abort signal，
     // 此时通过 cancel_running_command 杀掉 Rust 侧正在执行的进程树，而不是
     // 让命令在后台继续跑完、副作用滞后落地。
@@ -129,8 +133,8 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
   registry.register(toolByName('workspace_run_shell_command'), async (args: Record<string, unknown>, context) => {
     const workdir = asOptionalString(args.workdir);
     const command = asString(args.command, 'command');
-    await ensureExternalPathAllowed(workdir, 'execute');
-    await ensureCommandPathsAllowed(command);
+    await ensureExternalPathAllowed(workdir, 'execute', context?.signal);
+    await ensureCommandPathsAllowed(command, [], context?.signal);
     // app agent 调用时按两轴构建沙箱：网络关 → 无网络；local 非 write → 工作区只读
     const appAccess = context?.appAccess;
     const cancelToken = context?.signal ? createCancelToken() : undefined;
@@ -149,11 +153,11 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     });
   });
 
-  registry.register(toolByName('workspace_start_shell_background_command'), async (args: Record<string, unknown>) => {
+  registry.register(toolByName('workspace_start_shell_background_command'), async (args: Record<string, unknown>, context) => {
     const workdir = asOptionalString(args.workdir);
     const command = asString(args.command, 'command');
-    await ensureExternalPathAllowed(workdir, 'execute');
-    await ensureCommandPathsAllowed(command);
+    await ensureExternalPathAllowed(workdir, 'execute', context?.signal);
+    await ensureCommandPathsAllowed(command, [], context?.signal);
     return await invoke<BackgroundCommandResult>('start_workspace_shell_background_command', {
       workspacePath: workspace(),
       command,
@@ -163,13 +167,13 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
   });
 
 
-  registry.register(toolByName('workspace_start_background_command'), async (args: Record<string, unknown>) => {
+  registry.register(toolByName('workspace_start_background_command'), async (args: Record<string, unknown>, context) => {
     const parsed: BackgroundCommandArgs = {
       command: asString(args.command, 'command'),
       args: asOptionalStringArray(args.args),
       previewUrl: asOptionalString(args.previewUrl),
     };
-    await ensureCommandPathsAllowed(parsed.command, parsed.args ?? []);
+    await ensureCommandPathsAllowed(parsed.command, parsed.args ?? [], context?.signal);
 
     return await invoke<BackgroundCommandResult>('start_workspace_background_command', {
       workspacePath: workspace(),
@@ -179,14 +183,14 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     });
   });
 
-  registry.register(toolByName('workspace_start_preview_session'), async (args: Record<string, unknown>) => {
+  registry.register(toolByName('workspace_start_preview_session'), async (args: Record<string, unknown>, context) => {
     const parsed: PreviewSessionArgs = {
       command: asString(args.command, 'command'),
       args: asOptionalStringArray(args.args),
       previewUrl: asHttpOrHttpsUrl(args.previewUrl, 'previewUrl'),
       title: asOptionalString(args.title),
     };
-    await ensureCommandPathsAllowed(parsed.command, parsed.args ?? []);
+    await ensureCommandPathsAllowed(parsed.command, parsed.args ?? [], context?.signal);
 
     const result = await invoke<BackgroundCommandResult>('start_workspace_background_command', {
       workspacePath: workspace(),

@@ -422,34 +422,38 @@ pub(crate) fn compute_project_stats_impl(workspace_path: &str) -> Result<Project
             let path = entry.into_path();
             let relative = relative_string(workspace.as_path(), &path);
 
-            let mut agg = lock(&aggregator);
-            if agg.truncated {
-                return ignore::WalkState::Quit;
-            }
-            agg.total_files += 1;
-            if agg.total_files > MAX_FILES as u64 {
-                agg.truncated = true;
-                return ignore::WalkState::Quit;
+            // 第一阶段（持锁）：只做计数与截断判断，立即放锁。
+            // fs::read（单文件上限 100MB）/解码/行分类绝不能在锁内进行，
+            // 否则并行 walker 被完全串行化，一个慢文件阻塞所有遍历线程。
+            {
+                let mut agg = lock(&aggregator);
+                if agg.truncated {
+                    return ignore::WalkState::Quit;
+                }
+                agg.total_files += 1;
+                if agg.total_files > MAX_FILES as u64 {
+                    agg.truncated = true;
+                    return ignore::WalkState::Quit;
+                }
+                if too_large {
+                    agg.skipped_files += 1;
+                    return ignore::WalkState::Continue;
+                }
             }
 
             let language = language_from_path(&relative);
 
-            if too_large {
-                agg.skipped_files += 1;
-                return ignore::WalkState::Continue;
-            }
-
             let buffer = match fs::read(&path) {
                 Ok(b) => b,
                 Err(_) => {
-                    agg.skipped_files += 1;
+                    lock(&aggregator).skipped_files += 1;
                     return ignore::WalkState::Continue;
                 }
             };
             let content = match decode_text_bytes(buffer) {
                 Ok(c) => c,
                 Err(_) => {
-                    agg.skipped_files += 1;
+                    lock(&aggregator).skipped_files += 1;
                     return ignore::WalkState::Continue;
                 }
             };
@@ -457,6 +461,8 @@ pub(crate) fn compute_project_stats_impl(workspace_path: &str) -> Result<Project
             let counts = classify_lines(&content, comment_syntax(language));
             let lines = counts.code + counts.blank + counts.comment;
 
+            // 第二阶段（持锁）：合并本文件的统计结果。
+            let mut agg = lock(&aggregator);
             agg.text_files += 1;
             agg.total_lines += lines;
             agg.code_lines += counts.code;

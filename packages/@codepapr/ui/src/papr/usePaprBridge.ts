@@ -5,6 +5,7 @@ import { isPaprMessage, createPaprResponse } from './paprProtocol';
 import { usePermissionStore } from './permissionStore';
 import { accessAllows, resolveEffectiveAccess } from './levelGrants';
 import { useAgentStore } from '../store/agentStore';
+import { invalidateAgentHandle } from '../store/internals/sendMessage';
 import { WorkerCrashError } from '../agent/WorkerBackedAgent';
 import { acquireSleepPrevention, releaseSleepPrevention } from '../utils/sleepPrevention';
 
@@ -279,8 +280,15 @@ export function usePaprBridge({ iframeRef, appId, manifest, dark, onAppReady }: 
             .then((result) => respond(result))
             .catch((err) => {
               // Worker 崩溃时清空 store 中的 agent，避免后续聊天复用死 worker。
+              // 仅当 store 仍持有本次运行使用的同一实例时才清理：运行期间
+              // 聊天回合可能已销毁旧 agent 并重建了新实例，无条件置 null 会
+              // 把新 agent 的 store 引用 orphan 掉（其 Worker、心跳定时器、
+              // visibilitychange 监听器永不销毁，全部泄漏），且不同步重置
+              // _agentModel/_agentPromptKey/_agentSessionId。
               if (err instanceof WorkerCrashError || (err instanceof Error && err.name === 'WorkerCrashError')) {
-                useAgentStore.setState({ _agent: null });
+                if (useAgentStore.getState()._agent === agent) {
+                  invalidateAgentHandle(useAgentStore.getState, useAgentStore.setState);
+                }
               }
               const errMsg = String(err);
               let code = 'AGENT_ERROR';

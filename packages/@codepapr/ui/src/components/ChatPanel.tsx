@@ -868,13 +868,13 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     displayText: string,
     nextMode: WorkMode,
     images?: IImageContent[]
-  ) => {
+  ): Promise<boolean> => {
     if (workspacePath && nextMode !== 'ask') {
       refreshProjectDiagnostics().catch(() => {});
     }
 
     shouldStickToBottomRef.current = true;
-    await sendMessage(taskText, displayText, nextMode, images);
+    return await sendMessage(taskText, displayText, nextMode, images);
   }, [
     refreshProjectDiagnostics,
     sendMessage,
@@ -903,10 +903,21 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       return;
     }
 
+    // 乐观清空（回合期间输入框不残留草稿），但发送被拒绝时恢复草稿：
+    // sendMessage 返回 false（单执行守卫拒绝、默认项目创建失败等）表示
+    // 消息未进入会话，旧实现先清空再发送，失败后用户打好的内容永久丢失。
+    // sendMessage 会 await 整个回合，不能等它返回再清空（输入框会残留数分钟）。
+    const draftImages = pendingImages;
     setInput('');
     setPendingImages([]);
     setPendingFiles([]);
-    await submitMessage(promptText, displayText, mode, images.length ? images : undefined);
+    const consumed = await submitMessage(promptText, displayText, mode, images.length ? images : undefined);
+    if (!consumed) {
+      // 仅当输入框仍为空时恢复：等待期间用户可能已重新输入，不得覆盖。
+      setInput((current) => (current.trim() ? current : userText));
+      setPendingImages((current) => (current.length ? current : draftImages));
+      setPendingFiles((current) => (current.length ? current : files));
+    }
   };
 
   const addImageFiles = async (files: File[]) => {

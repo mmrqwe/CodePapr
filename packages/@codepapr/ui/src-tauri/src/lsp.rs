@@ -207,9 +207,14 @@ impl Drop for ManagedLspServer {
     /// 结构体被丢弃就必须杀掉并回收子进程。正常 stop 流程已 kill+wait 过时，
     /// 这里重复调用只会得到被忽略的错误，不会有害；但缺了它，被并发顶掉的
     /// LSP 进程会成为永久孤儿进程。
+    /// 用进程树击杀（而非只杀直接子进程），避免 pyright node worker、
+    /// dotnet 子进程等变孤儿；等待必须有界，drop 绝不能无限阻塞。
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let _ = crate::shell::process_tree::kill_process_tree(&mut self.child);
+        crate::shell::process_tree::wait_for_child_exit(
+            &mut self.child,
+            std::time::Duration::from_secs(3),
+        );
     }
 }
 
@@ -884,7 +889,9 @@ fn fallback_server_status(
 }
 
 fn force_stop_server_process(server: &mut ManagedLspServer) {
-    let _ = server.child.kill();
+    // 进程树击杀：只杀直接子进程会让 LSP 派生的工作进程
+    // （pyright node worker、csharp-ls→dotnet、JDTLS 等）变孤儿。
+    let _ = crate::shell::process_tree::kill_process_tree(&mut server.child);
     crate::shell::process_tree::wait_for_child_exit(&mut server.child, std::time::Duration::from_secs(3));
 }
 
@@ -1234,6 +1241,10 @@ fn spawn_server_candidate(
         .stderr(Stdio::piped());
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
+    // 独立进程组：停止 LSP 时 kill_process_tree 才能连后代一起杀。
+    // pyright 的 node worker、csharp-ls→dotnet、JDTLS 等都会派生子进程，
+    // 只杀直接子进程会留下常驻孤儿占内存。
+    crate::shell::process_tree::prepare_new_process_group(&mut cmd);
     {
         let dotnet_root = std::env::var("DOTNET_ROOT")
             .ok()

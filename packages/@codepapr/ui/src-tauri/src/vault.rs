@@ -82,14 +82,48 @@ impl AppSecrets {
         let _salt = Self::load_or_create_salt(&salt_path)?;
 
         // Derive the 32‑byte password via argon2.
-        let password = KeyDerivation::argon2(
-            &String::from_utf8_lossy(&vault_key),
+        //
+        // 主密钥必须先 hex 编码再作为 argon2 口令：32 字节随机密钥直接走
+        // String::from_utf8_lossy（旧实现）时，所有非法 UTF-8 序列都被替换成
+        // 同一个 U+FFFD，口令实际熵从 256bit 坍缩到远低于设计值，拿到
+        // vault.hold + salt.txt 的攻击者离线爆破成本骤降。
+        let password = Zeroizing::new(KeyDerivation::argon2(
+            &hex::encode(&*vault_key),
             &salt_path,
-        );
+        ));
 
         // Open or create the Stronghold snapshot.
-        let stronghold = Stronghold::new(&snapshot_path, password)
-            .map_err(map_stronghold_err)?;
+        // 存量 vault 是旧口令（lossy UTF-8）加密的：先用新口令尝试打开，
+        // 失败则用旧口令打开并以新口令重加密落盘（一次性迁移）。
+        let stronghold = if snapshot_path.exists() {
+            match Stronghold::new(&snapshot_path, password.to_vec()) {
+                Ok(stronghold) => stronghold,
+                Err(_) => {
+                    let legacy_password = Zeroizing::new(KeyDerivation::argon2(
+                        &String::from_utf8_lossy(&vault_key),
+                        &salt_path,
+                    ));
+                    let legacy = Stronghold::new(&snapshot_path, legacy_password.to_vec())
+                        .map_err(map_stronghold_err)?;
+                    // 必须先把 client 状态从快照载入内存，否则 commit 写入的
+                    // 内存 clients 映射为空，重加密会丢光所有已存密钥。
+                    let _ = legacy.load_client(CLIENT_NAME);
+                    let new_keyprovider =
+                        iota_stronghold::KeyProvider::try_from(password.clone())
+                            .map_err(|e| format!("Stronghold 操作失败: {e}"))?;
+                    let snapshot = iota_stronghold::SnapshotPath::from_path(&snapshot_path);
+                    legacy
+                        .inner()
+                        .commit_with_keyprovider(&snapshot, &new_keyprovider)
+                        .map_err(|e| format!("Stronghold 操作失败: {e}"))?;
+                    drop(legacy);
+                    Stronghold::new(&snapshot_path, password.to_vec())
+                        .map_err(map_stronghold_err)?
+                }
+            }
+        } else {
+            Stronghold::new(&snapshot_path, password.to_vec()).map_err(map_stronghold_err)?
+        };
 
         // Restore client state from the loaded snapshot into the in-memory
         // HashMap. Without this, get_client only sees an empty HashMap and
@@ -348,6 +382,46 @@ mod tests {
 
         // Delete again – still ok.
         assert!(secrets.delete_secret("del_key").is_ok());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn migrates_legacy_lossy_password_vault() {
+        let dir = temp_dir();
+        let key_path = dir.join(VAULT_KEY_FILE);
+        let salt_path = dir.join(VAULT_SALT_FILE);
+        let snapshot_path = dir.join(VAULT_SNAPSHOT_FILE);
+
+        // 手工构造旧版本 vault：口令为原始密钥字节的 lossy UTF-8 字符串。
+        let vault_key: Vec<u8> = (0..VAULT_KEY_LEN as u8).collect();
+        fs::write(&key_path, &vault_key).unwrap();
+        let legacy_password =
+            KeyDerivation::argon2(&String::from_utf8_lossy(&vault_key), &salt_path);
+        let legacy = Stronghold::new(&snapshot_path, legacy_password).unwrap();
+        legacy.create_client(CLIENT_NAME).unwrap();
+        let client = legacy.get_client(CLIENT_NAME).unwrap();
+        client
+            .store()
+            .insert(b"legacy_key".to_vec(), b"legacy-secret".to_vec(), None)
+            .unwrap();
+        legacy.save().unwrap();
+        drop(legacy);
+
+        // 新版 init 必须自动迁移并能读到旧密钥。
+        let secrets = AppSecrets::init(&dir).expect("init should migrate legacy vault");
+        assert_eq!(
+            secrets.get_secret("legacy_key").as_deref(),
+            Some("legacy-secret")
+        );
+
+        // 迁移后重启（此时快照已是新口令）仍能打开。
+        drop(secrets);
+        let secrets2 = AppSecrets::init(&dir).expect("re-init after migration should succeed");
+        assert_eq!(
+            secrets2.get_secret("legacy_key").as_deref(),
+            Some("legacy-secret")
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

@@ -55,6 +55,10 @@ tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 futures-util = "0.3"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 tauri-plugin-stronghold = { version = "2", features = ["kdf"] }
+# 与 tauri-plugin-stronghold 的传递依赖同版本（已在 Cargo.lock 中），
+# 用于 vault 重加密迁移（KeyProvider/SnapshotPath）与主密钥 hex 编码。
+iota_stronghold = "2"
+hex = "0.4"
 rand = "0.8"
 zeroize = "1"
 toml = "0.8"

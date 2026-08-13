@@ -1,21 +1,54 @@
 use crate::shared::unix_millis;
 use crate::shell::session::SHELL_SESSION_COUNTER;
-use crate::shell::types::{ManagedShellSession, ShellFamily, ShellSendInputResult};
+use crate::shell::types::{ShellFamily, ShellSendInputResult};
 use std::io::Write;
 use std::path::Path;
+use std::process::ChildStdin;
 use std::sync::atomic::Ordering;
+use std::sync::Mutex;
 
-pub(crate) fn detect_default_shell(custom_shell: Option<String>) -> String {
+/// 允许作为会话 shell 的程序（按文件名小写匹配，含 Windows .exe 形式）。
+/// open_shell_session 是 LLM 可调用工具，若允许把任意程序（ssh/sudo/任意
+/// 二进制）当"shell"拉起，会绕过 BLOCKED_COMMANDS 拦截清单——
+/// 例如 `open_shell_session(shell="ssh")` 可开出交互式远程会话。
+const ALLOWED_SESSION_SHELLS: &[&str] = &[
+    "sh",
+    "bash",
+    "zsh",
+    "fish",
+    "dash",
+    "ksh",
+    "csh",
+    "tcsh",
+    "cmd",
+    "cmd.exe",
+    "pwsh",
+    "pwsh.exe",
+    "powershell",
+    "powershell.exe",
+];
+
+pub(crate) fn detect_default_shell(custom_shell: Option<String>) -> Result<String, String> {
     if let Some(shell) = custom_shell {
         let trimmed = shell.trim();
         if !trimmed.is_empty() {
-            return trimmed.to_string();
+            let name = Path::new(trimmed)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(trimmed)
+                .to_lowercase();
+            if !ALLOWED_SESSION_SHELLS.contains(&name.as_str()) {
+                return Err(format!(
+                    "安全限制：`{trimmed}` 不能作为会话 shell，仅允许 sh/bash/zsh/fish/dash/ksh/csh/tcsh/cmd/pwsh/powershell"
+                ));
+            }
+            return Ok(trimmed.to_string());
         }
     }
 
     #[cfg(target_os = "windows")]
     {
-        return std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
+        return Ok(std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string()));
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -23,15 +56,15 @@ pub(crate) fn detect_default_shell(custom_shell: Option<String>) -> String {
         if let Ok(shell) = std::env::var("SHELL") {
             let trimmed = shell.trim();
             if !trimmed.is_empty() {
-                return trimmed.to_string();
+                return Ok(trimmed.to_string());
             }
         }
 
         if Path::new("/bin/zsh").exists() {
-            return "/bin/zsh".to_string();
+            return Ok("/bin/zsh".to_string());
         }
 
-        "/bin/sh".to_string()
+        Ok("/bin/sh".to_string())
     }
 }
 
@@ -194,17 +227,20 @@ pub(crate) fn build_shell_command_line(
     Ok(parts.join(" "))
 }
 
+/// 向会话 stdin 写入 payload。只持有该会话自己的 stdin 锁，
+/// 绝不持有全局 SHELL_SESSIONS 注册表锁——否则当子进程不读 stdin
+/// （如正在执行长命令）导致管道写满时，write_all 会无限期阻塞，
+/// 把所有会话的 list/read/send/close 全部卡死。
 pub(crate) fn write_shell_payload(
     session_id: &str,
-    session: &ManagedShellSession,
+    stdin_lock: &Mutex<ChildStdin>,
     mut payload: String,
 ) -> Result<ShellSendInputResult, String> {
     if !payload.ends_with('\n') {
         payload.push('\n');
     }
 
-    let mut stdin = session
-        .stdin
+    let mut stdin = stdin_lock
         .lock()
         .map_err(|_| format!("Shell 会话输入流锁定失败: {session_id}"))?;
     stdin

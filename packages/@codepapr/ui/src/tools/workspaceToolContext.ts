@@ -243,6 +243,7 @@ export function createWorkspaceToolContext(params: WorkspaceToolContextParams) {
   const ensureExternalPathAllowed = async (
     relativePath: string | undefined,
     operation: 'read' | 'list' | 'write' | 'execute',
+    signal?: AbortSignal,
   ): Promise<void> => {
     if (!relativePath || !isAbsolutePath(relativePath)) return;
     const currentWorkspace = workspace();
@@ -264,11 +265,14 @@ export function createWorkspaceToolContext(params: WorkspaceToolContextParams) {
 
     const { requestExternalAccess } = usePermissionStore.getState();
     const requestPath = check.exists ? check.canonicalPath : relativePath;
+    // signal 把权限请求绑定到本次工具执行：执行被取消时按请求精确回收，
+    // 其它并发运行的排队请求不受影响。
     const result = await requestExternalAccess(
       requestPath,
       operation,
       currentWorkspace,
       check.exists,
+      signal,
     );
     if (!result.approved) {
       throw new Error(`用户拒绝访问外部路径：${check.canonicalPath}`);

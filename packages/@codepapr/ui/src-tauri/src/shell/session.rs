@@ -114,7 +114,7 @@ pub(crate) fn open_shell_session(
     shell: Option<String>,
 ) -> Result<ShellSessionResult, String> {
     let workspace = canonical_workspace(&workspace_path)?;
-    let shell = detect_default_shell(shell);
+    let shell = detect_default_shell(shell)?;
     #[cfg(windows)]
     const CREATE_NO_WINDOW_SHELL: u32 = 0x08000000;
     let mut shell_cmd = sandboxed_command(&shell, &[], &workspace, None)?;
@@ -227,7 +227,10 @@ pub(crate) fn send_shell_input(
     session_id: String,
     input: String,
 ) -> Result<ShellSendInputResult, String> {
-    with_shell_sessions(|sessions| {
+    // 注册表锁内只做校验并取出 stdin 句柄；实际写出在锁外执行。
+    // 子进程不读 stdin 时管道缓冲写满会让 write_all 长时间阻塞，
+    // 若在注册表锁内执行会卡死所有会话的全部操作。
+    let stdin = with_shell_sessions(|sessions| {
         let session = sessions
             .get(&session_id)
             .ok_or_else(|| format!("Shell 会话不存在: {session_id}"))?;
@@ -248,8 +251,9 @@ pub(crate) fn send_shell_input(
             ));
         }
 
-        write_shell_payload(&session_id, session, input)
-    })
+        Ok(Arc::clone(&session.stdin))
+    })?;
+    write_shell_payload(&session_id, &stdin, input)
 }
 
 #[tauri::command]
@@ -258,7 +262,8 @@ pub(crate) fn send_shell_command(
     command: String,
     args: Option<Vec<String>>,
 ) -> Result<ShellSendInputResult, String> {
-    with_shell_sessions(|sessions| {
+    // 注册表锁内只做校验并取出 stdin 句柄；实际写出在锁外执行（同 send_shell_input）。
+    let (stdin_handle, payload) = with_shell_sessions(|sessions| {
         let session = sessions
             .get(&session_id)
             .ok_or_else(|| format!("Shell 会话不存在: {session_id}"))?;
@@ -278,41 +283,47 @@ pub(crate) fn send_shell_command(
         }
         let payload =
             build_shell_command_line(&session.shell, &command, &args.unwrap_or_default())?;
-        write_shell_payload(&session_id, session, payload)
-    })
+        Ok((Arc::clone(&session.stdin), payload))
+    })?;
+    write_shell_payload(&session_id, &stdin_handle, payload)
 }
 
 #[tauri::command]
 pub(crate) fn close_shell_session(session_id: String) -> Result<ShellCloseSessionResult, String> {
-    with_shell_sessions(|sessions| {
-        let Some(mut session) = sessions.remove(&session_id) else {
-            return Ok(ShellCloseSessionResult {
-                session_id,
-                closed: false,
-            });
-        };
-
-        let still_running = match session.child.try_wait() {
-            Ok(Some(_)) => false,
-            Ok(None) => true,
-            Err(_) => true,
-        };
-
-        if still_running {
-            let _ = kill_process_tree(&mut session.child);
-            wait_for_child_exit(&mut session.child, Duration::from_secs(3));
-        }
-
-        Ok(ShellCloseSessionResult {
+    // 锁内只做移除；kill + 等待退出（最多 3s+）在锁外执行，
+    // 否则单个慢退出进程会把所有会话操作卡住。
+    let removed = with_shell_sessions(|sessions| Ok(sessions.remove(&session_id)))?;
+    let Some(mut session) = removed else {
+        return Ok(ShellCloseSessionResult {
             session_id,
-            closed: true,
-        })
+            closed: false,
+        });
+    };
+
+    let still_running = match session.child.try_wait() {
+        Ok(Some(_)) => false,
+        Ok(None) => true,
+        Err(_) => true,
+    };
+
+    if still_running {
+        let _ = kill_process_tree(&mut session.child);
+        wait_for_child_exit(&mut session.child, Duration::from_secs(3));
+    }
+
+    Ok(ShellCloseSessionResult {
+        session_id,
+        closed: true,
     })
 }
 
 pub(crate) fn stop_all_shell_sessions() {
-    let Ok(mut sessions) = shell_sessions().lock() else { return };
-    for (_, mut session) in sessions.drain() {
+    // 先在锁内取走全部会话，再在锁外逐个 kill，避免持锁等待进程退出。
+    let drained: Vec<ManagedShellSession> = match shell_sessions().lock() {
+        Ok(mut sessions) => sessions.drain().map(|(_, session)| session).collect(),
+        Err(_) => return,
+    };
+    for mut session in drained {
         let _ = kill_process_tree(&mut session.child);
         wait_for_child_exit(&mut session.child, Duration::from_secs(3));
     }

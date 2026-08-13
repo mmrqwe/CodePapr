@@ -120,6 +120,13 @@ let memoryBootstrapInFlight = false;
 // N22：/compact 在飞标记——压缩是 LLM 调用（可达数十秒），重复触发会并行
 // 生成双检查点。第二次触发只提示进行中，不发起新压缩。
 let compactCheckpointInFlight = false;
+// 单执行守卫：sendMessage 在置 isLoading=true 之前有多个前置 await（消息重载、
+// project-graph 缓存、memory bootstrap、MCP 发现等，可达数十秒）。该窗口内
+// isLoading 仍是 false，第二次调用（用户重复点击、后台自动修复）会通过
+// isLoading 检查并行启动第二个回合：会话日志交错污染、cancel 只能路由到最后
+// 一个请求、bash/git 副作用重复执行。JS 单线程下「检查 + 占位」在同一同步块
+// 完成（中间无 await），不存在 TOCTOU。置位/清理见 sendMessage 主体。
+let turnInFlight = false;
 
 // Serializes background memory.md read-modify-write operations (cold-start
 // bootstrap and post-reply consolidation). They share one file and each does a
@@ -335,6 +342,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         // 聊天命令：先处理本地命令，再处理项目自定义模板，最后落到内置提示模板。
         const slash = parseSlashInput(input);
         if (slash) {
+          // 本地命令（/help、/compact 等）的反馈经 appendInfoMessage 写入
+          // 「当前会话」：无活动会话时消息只落在临时扁平镜像，任何会话切换/
+          // 新建都会让它无声消失，重启后亦无记录。先确保有会话可承载。
+          if (!get().activeSessionId) {
+            get().newSession();
+          }
           const workspaceForSlash = get().workspacePath;
           const lower = slash.name.toLowerCase();
           if (lower === 'help' || lower === 'commands') {
@@ -541,6 +554,15 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           return false;
         }
 
+        // 单执行守卫：已有回合在飞（isLoading）或正在启动（turnInFlight，
+        // 即处于置 isLoading 前的前置 await 窗口）时拒绝第二次调用。
+        // 返回 false = 消息未消费，调用方保留输入框草稿。
+        // 占位与清理：下方 finally（正常/取消/崩溃收尾）与提前 return 处。
+        if (get().isLoading || turnInFlight) {
+          return false;
+        }
+        turnInFlight = true;
+
         // 兜底：若当前没有打开任何项目（如用户中途关闭了工作区），自动创建并打开
         // 默认项目，保证本次对话的文件工具有可用工作目录。失败时保持空工作区，
         // 退化到原有的 requireWorkspace 报错行为。
@@ -549,6 +571,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // #28：创建默认项目失败时给出明确提示并拒绝发送——旧实现静默继续，
           // 后续文件工具只会报"没有可用的工作区"，用户无从下手。
           if (!get().workspacePath.trim()) {
+            turnInFlight = false;
+            // 同 slash 路径：无活动会话时先建会话，否则错误提示只落在
+            // 临时扁平镜像，切换/新建会话后无声消失。
+            if (!get().activeSessionId) {
+              get().newSession();
+            }
             appendErrorMessage(set, getTranslation(normalizedSettings.lang).ensureDefaultWorkspaceFailed);
             return false;
           }
@@ -2130,6 +2158,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           accumulateTurnRuntime(sid);
           saveCurrentProjectState(get());
         } finally {
+          // 释放单执行占位（与入口处 turnInFlight = true 配对）。
+          turnInFlight = false;
           clearStoreIdle();
           void (async () => {
             try {

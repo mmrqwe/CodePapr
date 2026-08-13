@@ -299,6 +299,8 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   private permissionWaitActive = false;
   private activeRequestId: string | null = null;
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 取消请求发起时刻：重武装宽限窗的硬上限基准（见 handleWorkerMessage）。 */
+  private cancelRequestedAt: number | null = null;
   private crashed = false;
   /** Original crash cause, kept so errors thrown after the crash (chat() on a
    *  dead agent) can report why the worker died instead of a generic message. */
@@ -497,9 +499,11 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.cancelAllAppAgents();
   }
 
-  /** 仅取消当前会话回合：停止按钮不能连带杀掉 papr app-agent 的独立运行。 */
+  /** 仅取消当前会话回合：停止按钮不能连带杀掉 papr app-agent 的独立运行。
+   *  权限请求同理：只回收无 signal 绑定的排队请求；绑定了工具 AbortSignal
+   *  的请求（可能属于并发的 app-agent 运行）由各自 signal abort 精确回收。 */
   cancelSession(): void {
-    cancelExternalAccessRequests();
+    cancelExternalAccessRequests(undefined, { onlyUntracked: true });
     const requestId = this.activeRequestId;
     if (!requestId) return;
 
@@ -521,13 +525,16 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
     // 会话取消同样中止主线程在飞的工具执行（bash 等），旧实现只 cancel
     // worker 侧的 chat promise，工具继续在后台跑完。
-    this.abortInflightTools();
+    // skipAppAgentTools：会话取消不得中止 papr app-agent 运行的工具
+    // （与 cancelSession「不连带杀掉 app-agent」的语义一致）。
+    this.abortInflightTools(undefined, { skipAppAgentTools: true });
 
     this.postToWorker({
       type: 'cancel-session',
       requestId,
     } satisfies MainToAgentWorkerMessage);
 
+    this.cancelRequestedAt = Date.now();
     this.scheduleCancelTermination(requestId, pending, CANCEL_ACK_GRACE_MS);
   }
 
@@ -756,7 +763,10 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   }
 
   cancelAppAgent(requestId: string): void {
-    cancelExternalAccessRequests();
+    // 只回收无 signal 绑定的排队请求；本次运行自己的权限请求由其工具
+    // signal（下方 abortInflightTools）精确拒绝，其它运行（聊天回合/
+    // 其它 app-agent）的请求不受影响。
+    cancelExternalAccessRequests(undefined, { onlyUntracked: true });
     this.abortInflightTools(requestId);
     this.postToWorker({
       type: 'cancel-app-agent',
@@ -774,9 +784,23 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
   /** 中止主线程在飞的工具执行。appAgentRequestId 提供时只中止该 app-agent
    *  run 发起的工具（toolRequestId 以 `${requestId}:` 开头）。 */
-  private abortInflightTools(appAgentRequestId?: string): void {
+  private abortInflightTools(
+    appAgentRequestId?: string,
+    options?: { skipAppAgentTools?: boolean },
+  ): void {
     for (const [toolRequestId, controller] of this.inflightToolExecutions) {
       if (appAgentRequestId && !toolRequestId.startsWith(`${appAgentRequestId}:`)) {
+        continue;
+      }
+      // app-agent 的工具请求 id 形如 `${appAgentRequestId}:${toolRequestId}`：
+      // 会话取消（skipAppAgentTools）不得中止属于任一 app-agent 运行的工具。
+      if (
+        !appAgentRequestId &&
+        options?.skipAppAgentTools &&
+        [...this.appAgentRequests.keys()].some((reqId) =>
+          toolRequestId.startsWith(`${reqId}:`),
+        )
+      ) {
         continue;
       }
       try {
@@ -813,9 +837,23 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
     // 取消 ACK 等待期间 worker 仍在响应（任何消息都算活着）：重新武装
     // 终止宽限窗口。大上下文同步会阻塞事件循环，worker 只是"慢"而非死。
-    if (message.type !== 'cancelled' && this.cancelTimer !== null && this.activeRequestId) {
+    // 两个限制防止无限拖延：
+    // 1. pong 不算"活着"——心跳每 5s 一次，若它能无限重武装 10s 窗口，
+    //    「能回 ping 但永不处理 cancel-session」的卡死 worker 永远不会被
+    //    terminate（只能等 330s 的 store 级看门狗，慢 30 倍）。真正的事件循环
+    //    阻塞连 pong 也发不出；能发 pong 却不 ACK cancel 的 worker 应当被终止。
+    // 2. 硬上限：自取消发起起最多等待 MAX_CANCEL_WAIT_MS，之后无论 worker
+    //    多"活跃"都强制终止。
+    const MAX_CANCEL_WAIT_MS = 30_000;
+    if (
+      message.type !== 'cancelled' &&
+      message.type !== 'pong' &&
+      this.cancelTimer !== null &&
+      this.activeRequestId
+    ) {
       const pending = this.pendingRequests.get(this.activeRequestId);
-      if (pending) {
+      const waitedMs = this.cancelRequestedAt !== null ? Date.now() - this.cancelRequestedAt : 0;
+      if (pending && waitedMs < MAX_CANCEL_WAIT_MS) {
         clearTimeout(this.cancelTimer);
         this.cancelTimer = null;
         this.scheduleCancelTermination(this.activeRequestId, pending, CANCEL_ACK_GRACE_MS);
@@ -1117,7 +1155,11 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       this.clearSnapshotTimer();
       this.flushDeltas(pending);
       this.pendingRequests.delete(message.requestId);
-      this.activeRequestId = null;
+      // 与 cancelled 分支同口径：旧回合迟到的 result（取消后立即重发、并发
+      // 回合）不得踩掉新回合的 activeRequestId，否则新回合的 cancel 失效。
+      if (this.activeRequestId === message.requestId) {
+        this.activeRequestId = null;
+      }
       let apply: Promise<unknown>;
       if (message.compacted && message.fullMessages) {
         // Mid-loop compaction replaced the worker log this turn: adopt the
@@ -1143,7 +1185,11 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.clearSnapshotTimer();
     this.flushDeltas(pending);
     this.pendingRequests.delete(message.requestId);
-    this.activeRequestId = null;
+    // 同 result 分支：仅当本请求仍是当前活跃请求时才清空，避免旧回合
+    // 迟到的错误响应踩掉新回合的 activeRequestId。
+    if (this.activeRequestId === message.requestId) {
+      this.activeRequestId = null;
+    }
     this.workerSyncedLength.delete(this.config.sessionId);
     pending.reject(reconstructWorkerError(message));
   };
@@ -1400,6 +1446,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       clearTimeout(this.cancelTimer);
       this.cancelTimer = null;
     }
+    this.cancelRequestedAt = null;
   }
 
   private flushDeltas(pending: PendingWorkerRequest): void {

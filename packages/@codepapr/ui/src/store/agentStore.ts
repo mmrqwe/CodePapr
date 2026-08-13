@@ -1240,6 +1240,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       clearMessages: () => {
+        // N7：不得静默杀掉运行中的回合——disposeAgentHandle 会以
+        // AgentDestroyedError 终止在飞回合；清空运行中会话的消息也会让
+        // 回合的消息写入落在空视图上。与 newSession/setSettings/selectSession
+        // 的回合守卫保持一致。
+        if (get().isLoading) return;
         const sessionId = get().activeSessionId;
         disposeAgentHandle(get);
         set((s) => ({
