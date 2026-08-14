@@ -23,34 +23,26 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
 }));
 
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
+  emit: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: openMock,
 }));
 
-vi.mock('../utils/projectStorage', () => ({
-  createEmptyProjectState: () => ({
-    version: 1,
-    sessions: [],
-    activeSessionId: null,
-    sessionMessages: {},
-    cumulativeStats: {
-      totalCacheRead: 0,
-      totalCacheCreation: 0,
-      totalInput: 0,
-      totalOutput: 0,
-      promptCacheHitTokens: 0,
-      promptCacheMissTokens: 0,
-      rounds: 0,
-    },
-    sessionCumulativeStats: {},
-    projectDiagnosticsReport: null,
-
-    updatedAt: Date.now(),
-  }),
-  loadProjectState: loadProjectStateMock,
-  saveProjectState: saveProjectStateMock,
-  waitForPendingProjectStateSave: async () => undefined,
-}));
+// 用 importOriginal 展开真实模块：生产代码演进新增的导出（loadSessions、
+// aggregateSessionRuntimeInDb 等）必须存在，否则 openWorkspace 直接抛
+// "No export defined" 并走旧格式回退，掩盖真实路径的问题。
+vi.mock('../utils/projectStorage', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../utils/projectStorage')>();
+  return {
+    ...actual,
+    loadProjectState: loadProjectStateMock,
+    saveProjectState: saveProjectStateMock,
+  };
+});
 
 vi.mock('./SplitPane', async () => {
   const React = await import('react');
@@ -158,7 +150,6 @@ import type {
 const externalWorkspacePath = process.env.CODEPAPR_EXTERNAL_WORKSPACE?.trim() ?? '';
 const itIfExternalWorkspace = externalWorkspacePath ? it : it.skip;
 const PROJECT_PASSED_TEXT = '通过';
-const LOCAL_HINT_TEXT = '以下仅为本地编辑器标记，可能与真实项目诊断不一致。';
 
 function createEmptyProjectSnapshot() {
   return {
@@ -348,6 +339,42 @@ beforeEach(() => {
       });
     }
 
+    // 工作区打开/持久化路径的良性后端命令：空仓库语义（无会话、无缓存、无 watcher）。
+    if (command === 'load_sessions') {
+      return { sessionsJson: '[]' };
+    }
+    if (command === 'load_all_project_meta') {
+      return { metaJson: '{}' };
+    }
+    if (command === 'load_session_messages') {
+      return { messagesJson: '[]' };
+    }
+    if (command === 'load_all_session_messages') {
+      return { messagesBySessionJson: '{}' };
+    }
+    if (command === 'aggregate_session_runtime') {
+      return { runtimeJson: '{}' };
+    }
+    if (command === 'load_projectgraph_cache') {
+      return null;
+    }
+    if (command === 'cache_get') {
+      return null;
+    }
+    if (
+      command === 'start_workspace_watcher' ||
+      command === 'stop_workspace_watcher' ||
+      command === 'save_session' ||
+      command === 'save_message_batch' ||
+      command === 'save_project_meta' ||
+      command === 'save_project_state' ||
+      command === 'delete_session' ||
+      command === 'cache_set' ||
+      command === 'cache_remove'
+    ) {
+      return undefined;
+    }
+
     throw new Error(`Unexpected invoke call: ${command}`);
   });
 
@@ -420,7 +447,7 @@ afterEach(async () => {
 
 describe('desktop diagnostics smoke', () => {
   itIfExternalWorkspace(
-    'selects an external workspace, runs project diagnostics, opens representative files, and downgrades local markers under clean project diagnostics',
+    'selects an external workspace, runs project diagnostics, opens representative files, and keeps local markers from leaking under clean project diagnostics',
     async () => {
       if (!container || !root) {
         throw new Error('test host not initialized');
@@ -451,10 +478,9 @@ describe('desktop diagnostics smoke', () => {
       await click(findTreeItem(container, 'vite.config.ts'));
 
       await waitFor(
-        () => container!.textContent?.includes('vite.config.ts') === true,
+        () => findTreeItem(container!, 'vite.config.ts')?.getAttribute('aria-selected') === 'true',
         'vite.config.ts should be selected in the workbench'
       );
-      expect(container.textContent).not.toContain(LOCAL_HINT_TEXT);
       expect(container.textContent).not.toContain(
         "Cannot find module 'vite' or its corresponding type declarations."
       );
@@ -475,12 +501,8 @@ describe('desktop diagnostics smoke', () => {
       await click(findTreeItem(container, 'src/App.tsx'));
 
       await waitFor(
-        () => container!.textContent?.includes('src/App.tsx') === true,
+        () => findTreeItem(container!, 'src/App.tsx')?.getAttribute('aria-selected') === 'true',
         'src/App.tsx should be selected in the workbench'
-      );
-      await waitFor(
-        () => container!.textContent?.includes(LOCAL_HINT_TEXT) !== true,
-        'local diagnostics downgrade hint should clear for representative files without Monaco markers'
       );
       expect(
         container.textContent?.includes(
