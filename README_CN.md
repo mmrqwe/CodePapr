@@ -59,7 +59,7 @@ CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主
 
 ### 环境要求
 
-- Node.js 18+
+- Node.js 20.19+
 - npm 9+
 - Rust toolchain + Cargo（仅桌面端编译需要）
 - DeepSeek API Key（或 OpenAI/Claude 兼容端点）
@@ -141,7 +141,7 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 ## 验证
 
 ```bash
-npm run verify    # build + test + lint
+npm run verify    # lint + audit + build + test + check:tauri
 npm test          # 仅运行测试
 npm run lint      # ESLint
 ```

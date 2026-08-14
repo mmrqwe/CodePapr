@@ -340,7 +340,7 @@ export const DEFAULT_STREAM_RETRY_DELAYS_MS: readonly number[] = [
 
 export function defaultStreamRetryDelayMs(attempt: number): number {
   const delays = DEFAULT_STREAM_RETRY_DELAYS_MS;
-  return delays[Math.min(Math.max(attempt, 1), delays.length) - 1] ?? 30_000;
+  return delays[Math.min(Math.max(attempt, 1), delays.length) - 1];
 }
 
 async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {

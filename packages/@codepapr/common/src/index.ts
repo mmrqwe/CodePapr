@@ -275,5 +275,3 @@ export function getByteLength(str: string): number {
 export function estimateTokens(content: string): number {
   return Math.ceil(getByteLength(content) / 4);
 }
-
-export * from './git';

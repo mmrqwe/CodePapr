@@ -5,6 +5,9 @@
   "description": "Local-first coding agent with Tauri desktop workbench. Multi-agent collaboration with built-in Explore/Scout/Mentor sub-agents.",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "workspaces": [
     "packages/@codepapr/types",
     "packages/@codepapr/common",

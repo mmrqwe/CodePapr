@@ -462,7 +462,32 @@ export function registerWorkspaceGraphLspTools(ctx: WorkspaceToolContext): void 
       const providers = await invoke<Array<{ languageId: string }>>('list_available_symbol_providers');
       langIds = providers.map((p) => p.languageId);
     } catch {
-      langIds = ['typescript', 'html', 'css', 'json', 'yaml', 'python', 'csharp', 'rust', 'java', 'cpp', 'go', 'shellscript', 'swift', 'sql', 'markdown'];
+      // 兜底列表需与 Rust 侧注册的所有 SymbolProvider 语言保持同步
+      // （src-tauri/src/symbol_provider.rs：LSP + AST + Regex 注册的并集），
+      // 漂移会导致部分语言在 invoke 失败时静默缺失诊断。
+      langIds = [
+        'typescript',
+        'html',
+        'css',
+        'json',
+        'yaml',
+        'python',
+        'csharp',
+        'rust',
+        'java',
+        'cpp',
+        'go',
+        'shellscript',
+        'swift',
+        'sql',
+        'markdown',
+        'typescriptreact',
+        'javascript',
+        'php',
+        'ruby',
+        'kotlin',
+        'dart',
+      ];
     }
     for (const langId of langIds) {
       try {

@@ -6,7 +6,7 @@ import { usePreviewStore } from './store/previewStore';
 import { useBrowserViewStore } from './store/browserViewStore';
 import { useAppRuntimeStore } from './store/appRuntimeStore';
 import { useCharactersStore } from './store/charactersStore';
-import { useDebugLogStore } from './store/debugLogStore';
+import { useDebugLogStore, pushDebugLog } from './store/debugLogStore';
 import { SessionManager } from './components/SessionManager';
 import { ChatPanel } from './components/ChatPanel';
 import { CodingWorkbench } from './components/CodingWorkbench';
@@ -25,6 +25,8 @@ import {
   disposeMcpConfirmListener,
   initMcpConfirmListener,
   setMcpConfirmHandler,
+  startMcpHealthCheck,
+  stopMcpHealthCheck,
 } from './tools/mcpTools';
 import { useMcpConfirmStore } from './store/mcpConfirmStore';
 import type { ReviewScope } from './utils/codeReview';
@@ -209,7 +211,12 @@ export default function App() {
     // 回调，否则工具调用会挂到 120 秒超时才失败。
     void initMcpConfirmListener();
     setMcpConfirmHandler((request) => useMcpConfirmStore.getState().requestConfirm(request));
+    // 周期清理后端已断开的 MCP 连接，剪枝结果写入调试日志便于排障。
+    startMcpHealthCheck(30_000, (serverIds) => {
+      pushDebugLog('mcp', 'pruned dead MCP connections', { serverIds });
+    });
     return () => {
+      stopMcpHealthCheck();
       setMcpConfirmHandler(null);
       void disposeMcpConfirmListener();
     };

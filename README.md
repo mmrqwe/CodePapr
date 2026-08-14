@@ -59,7 +59,7 @@ CodePapr is a local coding agent system built with DeepSeek cache optimization. 
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20.19+
 - npm 9+
 - Rust toolchain + Cargo (desktop build only)
 - DeepSeek API Key (or OpenAI/Claude-compatible endpoint)
@@ -141,7 +141,7 @@ The main agent dispatches sub-agents via the `task` tool. Each sub-agent has its
 ## Verify
 
 ```bash
-npm run verify    # build + test + lint
+npm run verify    # lint + audit + build + test + check:tauri
 npm test          # run tests only
 npm run lint      # ESLint
 ```

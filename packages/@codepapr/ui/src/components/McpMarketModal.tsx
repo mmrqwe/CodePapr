@@ -685,6 +685,28 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
   const [selectedListing, setSelectedListing] = useState<MarketMCPListing | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 与 SkillMarketModal 一致的 toast 统一入口：旧实现裸 setTimeout 无卸载清理，
+  // 且连续安装时旧定时器会提前清掉新 toast。
+  const showToast = useCallback((message: string) => {
+    setToastMessage(message);
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => {
+      toastTimerRef.current = null;
+      setToastMessage(null);
+    }, 6_000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   const loadServers = useCallback(async (options: FetchMarketOptions = {}) => {
     setIsLoading(true);
@@ -746,26 +768,24 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
           mcp: { ...mcp, servers: newServers, enabled: true, exposeTools: true },
         });
         if (config.enabled) {
-          setToastMessage(`✓ ${listing.title} installed and enabled. Send a message to use its tools.`);
+          showToast(`✓ ${listing.title} installed and enabled. Send a message to use its tools.`);
         } else {
-          setToastMessage(`✓ ${listing.title} installed. Open MCP Settings → enable the server → send a message.`);
+          showToast(`✓ ${listing.title} installed. Open MCP Settings → enable the server → send a message.`);
         }
-        setTimeout(() => setToastMessage(null), 6000);
       } else {
         // N20：重复点击安装必须给出明确反馈，而不是静默跳过。
-        setToastMessage(
+        showToast(
           settings.lang === 'en'
             ? `Already installed — a server matching "${exists.name}" already exists.`
             : settings.lang === 'zh-TW'
               ? `已安裝——列表中已存在同名服務「${exists.name}」。`
               : `已安装——列表中已存在同名服务「${exists.name}」。`
         );
-        setTimeout(() => setToastMessage(null), 6000);
       }
     } finally {
       setInstallingId(null);
     }
-  }, [settings, setSettings, c]);
+  }, [settings, setSettings, c, showToast]);
 
   const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);

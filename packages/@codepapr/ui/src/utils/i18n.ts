@@ -773,7 +773,7 @@ export const I18N_DICTS = {
     subAgentPromptDefaultNote: '默认提示词为英文，可编辑覆盖。',
     subAgentPromptHint: '可选。覆盖默认的 Agent 系统提示词。留空使用内置默认。',
     subAgentPromptHintEn: '避免写时间戳或会频繁变化的内容，这会破坏缓存前缀稳定性。',
-settingsGeneralTab: '通用',
+    settingsGeneralTab: '通用',
     settingsLlmTab: 'LLM',
     settingsPromptTab: '提示词',
     settingsGeneralType: '全局行为',
