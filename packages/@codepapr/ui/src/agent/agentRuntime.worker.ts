@@ -51,7 +51,6 @@ import {
   resolveToolIpcTimeoutMs,
   resolveGraphIpcTimeoutMs,
 } from './toolIpcTimeouts';
-import type { Settings } from '../store/internals/types';
 // Shared with app_render validation (fail fast at render time instead of
 // silently stripping tools the app's level does not grant).
 import { agentToolsFor, legacyLevelToAccess } from '../papr/levelGrants';
@@ -1075,7 +1074,7 @@ async function handleRunAppAgent(
           content: bootstrapPrompt.trim(),
           timestamp: Date.now(),
           metadata: { sessionBootstrap: true, isPrefixSystem: true },
-        } as unknown as IMessage);
+        });
       }
     }
   }
@@ -1305,7 +1304,7 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     toolOutputTruncation: buildToolOutputTruncation(payload.settings),
     toolContextConfig: buildToolContextConfig(payload.settings),
     contextCompaction: createContextCompactionHandler(
-      payload.settings as unknown as Settings,
+      payload.settings,
       payload.providerName,
       payload.sessionId,
       () => _refreshBootstrapRequest(payload.requestId)

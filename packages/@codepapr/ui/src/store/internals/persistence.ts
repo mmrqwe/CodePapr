@@ -1,8 +1,14 @@
-import { createEmptyProjectState, type ProjectStateSnapshot } from '../../utils/projectStorage';
+import { createEmptyProjectState, type ProjectSessionMeta, type ProjectStateSnapshot } from '../../utils/projectStorage';
 import { buildTaskTitle } from '../../utils/taskTitle';
 import { createEmptyStats, createEmptyConversationStats } from './defaults';
 import { cloneStats, cloneConversationStats, migrateCumulativeToConversationStats } from './stats';
-import type { SessionMeta, UIMessage } from './types';
+import type { ProviderName, SessionMeta, UIMessage } from './types';
+
+/** DB 以 string 存 provider；归一化到合法 ProviderName，非法值回退应用默认
+ *  deepseek（历史/损坏数据兜底）。合法值原样通过，运行期恒等。 */
+export function normalizeSessionProvider(value: string): ProviderName {
+  return value === 'openai' || value === 'claude' ? value : 'deepseek';
+}
 
 export function maybeApplySessionTitle(
   sessions: SessionMeta[],
@@ -34,10 +40,11 @@ export function touchSession(
   return [touched, ...sessions.filter((session) => session.id !== sessionId)];
 }
 
-export function normalizeSessionMetaList(sessions: SessionMeta[]): SessionMeta[] {
+export function normalizeSessionMetaList(sessions: ProjectSessionMeta[]): SessionMeta[] {
   return [...sessions]
     .map((session) => ({
       ...session,
+      provider: normalizeSessionProvider(session.provider),
       updatedAt: session.updatedAt ?? session.createdAt,
     }))
     .sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt);
@@ -133,7 +140,7 @@ export function normalizeProjectSnapshot(
   return {
     ...createEmptyProjectState(),
     ...snapshot,
-    sessions: normalizeSessionMetaList(snapshot.sessions as SessionMeta[]),
+    sessions: normalizeSessionMetaList(snapshot.sessions),
     activeSessionId,
     sessionMessages: sanitizeSessionMessagesForPersistence(
       (snapshot.sessionMessages ?? {}) as Record<string, UIMessage[]>,

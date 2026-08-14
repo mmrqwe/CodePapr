@@ -555,7 +555,7 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
   };
 }
 
-export function resolveProviderName(settings: Settings): ProviderName {
+export function resolveProviderName(settings: { apiMode: ApiMode; apiFormat: ApiFormat }): ProviderName {
   if (settings.apiMode === 'deepseek') return 'deepseek';
   if (settings.apiMode === 'local') return 'openai';
   return settings.apiFormat;

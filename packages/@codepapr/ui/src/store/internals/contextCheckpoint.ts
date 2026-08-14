@@ -16,10 +16,10 @@ import { runCachedModelRequest } from '../../utils/cachedModelRequest';
 import { effectiveMaxContextTokens } from '../../utils/contextLimits';
 import { buildProviderInstance } from './providerFactory';
 import { resolveProviderName } from './settingsNormalizer';
-import type { Settings, UIMessage } from './types';
+import type { CompactionSettings, UIMessage } from './types';
 
 export async function maybeGenerateContextCheckpoint(
-  settings: Settings,
+  settings: CompactionSettings,
   messages: UIMessage[],
   force?: boolean,
   todoDigest?: string

@@ -7,9 +7,11 @@ import {
 } from '@codepapr/api';
 import type { WorkerAgentSettings } from '../../agent/agentWorkerProtocol';
 import { resolveProviderName } from './settingsNormalizer';
-import type { Settings } from './types';
+import type { ApiFormat, ApiMode, Settings } from './types';
 
-export function buildProviderInstance(s: Settings) {
+export function buildProviderInstance(
+  s: { apiMode: ApiMode; apiFormat: ApiFormat; apiKey: string; baseURL: string; streamIdleTimeoutMs: number }
+) {
   if (s.apiMode === 'local') {
     return new LocalProvider({
       apiKey: s.apiKey.trim() || 'local',

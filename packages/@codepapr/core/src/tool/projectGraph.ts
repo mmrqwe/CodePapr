@@ -144,30 +144,37 @@ function dropAllSignatures(graph: WorkspaceProjectGraphResult): void {
   }
 }
 
+/** Type-safe field deletion: `Partial<T>` makes every property optional so the
+ *  `delete` operator type-checks even on required fields. Runtime behaviour is
+ *  identical to a bare `delete obj[key]`. */
+function deleteField<T>(obj: T, key: keyof T): void {
+  delete (obj as Partial<T>)[key];
+}
+
 function stripCoreNoise(graph: WorkspaceProjectGraphResult): void {
   for (const edge of graph.edges) {
-    delete (edge as unknown as Record<string, unknown>).id;
+    deleteField(edge, 'id');
   }
   graph.edges = graph.edges.filter((e) => e.kind !== 'contains');
 
   delete graph.quality;
 
   for (const file of graph.files) {
-    delete (file as unknown as Record<string, unknown>).bytes;
-    delete (file as unknown as Record<string, unknown>).symbolSource;
-    delete (file as unknown as Record<string, unknown>).entryPointScore;
-    delete (file as unknown as Record<string, unknown>).stubs;
+    deleteField(file, 'bytes');
+    deleteField(file, 'symbolSource');
+    deleteField(file, 'entryPointScore');
+    deleteField(file, 'stubs');
   }
 
   for (const node of graph.nodes) {
-    delete (node as unknown as Record<string, unknown>).bytes;
-    delete (node as unknown as Record<string, unknown>).symbolSource;
+    deleteField(node, 'bytes');
+    deleteField(node, 'symbolSource');
   }
 
-  if (!graph.truncated) delete (graph as unknown as Record<string, unknown>).truncated;
+  if (!graph.truncated) deleteField(graph, 'truncated');
   if (!graph.degraded) {
-    delete (graph as unknown as Record<string, unknown>).degraded;
-    delete (graph as unknown as Record<string, unknown>).degradedReason;
+    deleteField(graph, 'degraded');
+    deleteField(graph, 'degradedReason');
   }
 }
 
@@ -182,12 +189,12 @@ export function stripGraphNoise(
 
   for (const file of graph.files) {
     for (const sym of file.symbols) {
-      delete (sym as unknown as Record<string, unknown>).signature;
+      deleteField(sym, 'signature');
     }
   }
   for (const node of graph.nodes) {
     if (node.symbol) {
-      delete (node.symbol as unknown as Record<string, unknown>).signature;
+      deleteField(node.symbol, 'signature');
     }
   }
   if (graphJsonTokens(graph) <= maxTokens) return graph;

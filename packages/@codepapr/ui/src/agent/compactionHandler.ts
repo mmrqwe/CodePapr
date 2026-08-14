@@ -13,13 +13,13 @@ import {
 import { maybeGenerateContextCheckpoint } from '../store/internals/contextCheckpoint';
 import { effectiveMaxContextTokens, type ContextProvider } from '../utils/contextLimits';
 import { getTodoListContext } from '../tools/todoListTool';
-import type { Settings, UIMessage, UIToolInvocation } from '../store/internals/types';
+import type { CompactionSettings, UIToolInvocation } from '../store/internals/types';
 
 const PRUNE_PROTECTED_TOOLS = new Set(['todo', 'question', 'skill']);
 
 /** Prune options used when building the compacted context (shared with the
  *  rebuild-time pruning in agentFactory). */
-export function buildPruneOptions(settings: Settings): PruneOptions {
+export function buildPruneOptions(settings: CompactionSettings): PruneOptions {
   return {
     enabled: settings.pruneOldToolResults,
     protectRecentRounds: settings.pruneProtectRounds,
@@ -133,7 +133,7 @@ export function buildSessionBootstrapMessage(bootstrap: string): IMessage {
  * reset anyway).
  */
 export function createContextCompactionHandler(
-  settings: Settings,
+  settings: CompactionSettings,
   providerName: ContextProvider,
   sessionId: string,
   refreshBootstrap?: () => Promise<string | null>
@@ -146,7 +146,7 @@ export function createContextCompactionHandler(
       const contextMessages = coreMessagesToContextMessages(coreMessages);
       const checkpoint = await maybeGenerateContextCheckpoint(
         settings,
-        contextMessages as unknown as UIMessage[],
+        contextMessages,
         true,
         currentTodoDigest(sessionId)
       );
@@ -159,7 +159,7 @@ export function createContextCompactionHandler(
       // treat the tail as empty and drop the recent tool calls.
       const withCheckpoint = insertCheckpointAtRetainedBoundary(
         contextMessages,
-        checkpoint.message as unknown as ContextMessageLike,
+        checkpoint.message,
         checkpoint.insertIndex
       );
       const compacted = buildEffectiveContextMessages(

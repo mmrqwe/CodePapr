@@ -132,6 +132,29 @@ export interface Settings {
   folderAccessYolo: boolean;
 }
 
+/** 压缩管线（checkpoint/剪枝）所需的最小 settings 子集：主线程传完整
+ *  Settings、worker 传 WorkerAgentSettings，两者结构上均满足。 */
+export interface CompactionSettings {
+  apiMode: ApiMode;
+  apiFormat: ApiFormat;
+  apiKey: string;
+  baseURL: string;
+  streamIdleTimeoutMs: number;
+  maxContextTokens: number;
+  maxConversationRounds: number;
+  lang?: Lang;
+  model: string;
+  fastModelEnabled: boolean;
+  fastModel: string;
+  temperature: number;
+  compactionModel: 'fast' | 'primary';
+  compactionMaxTokens: number;
+  compactionTemperature: number;
+  pruneOldToolResults: boolean;
+  pruneProtectRounds: number;
+  pruneMinChars: number;
+}
+
 export interface WorkspaceEntry {
   path: string;
   name: string;

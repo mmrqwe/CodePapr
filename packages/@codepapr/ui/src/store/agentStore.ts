@@ -64,6 +64,7 @@ import {
 } from './internals/stats';
 import {
   normalizeProjectSnapshot,
+  normalizeSessionProvider,
   normalizeSkillEnabledState,
 } from './internals/persistence';
 import { saveCurrentProjectState } from './internals/projectSnapshot';
@@ -571,9 +572,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         try {
           sessions = (await loadSessions(normalizedWorkspacePath)).map((meta) => ({
             ...meta,
+            provider: normalizeSessionProvider(meta.provider),
             createdAt: meta.createdAt,
             updatedAt: meta.updatedAt ?? meta.createdAt,
-          })) as unknown as SessionMeta[];
+          }));
 
           const meta = await loadAllProjectMeta(normalizedWorkspacePath);
           const rawActiveSessionId = (meta.active_session_id as string) ?? null;
@@ -588,7 +590,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           if (activeSessionId) {
             try {
               const msgs = await loadSessionMessages(normalizedWorkspacePath, activeSessionId);
-              sessionMessages[activeSessionId] = msgs as unknown as UIMessage[];
+              sessionMessages[activeSessionId] = msgs;
             } catch {
               // 读取失败 ≠ 会话为空：置 [] 但标记失败，禁止后续把空数组
               // 全量替换回 DB（会抹掉该会话的全部消息）。
@@ -624,7 +626,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           const snapshot = normalizeProjectSnapshot(await loadProjectState(normalizedWorkspacePath), {
             debugEnabled: get().settings.debugEnabled,
           });
-          sessions = snapshot.sessions as SessionMeta[];
+          sessions = snapshot.sessions.map((meta) => ({
+            ...meta,
+            provider: normalizeSessionProvider(meta.provider),
+            updatedAt: meta.updatedAt ?? meta.createdAt,
+          }));
           activeSessionId = snapshot.activeSessionId;
           // Keep only the active session's messages resident; the rest are
           // loaded on demand (see selectSession).
@@ -1125,7 +1131,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           let loaded: UIMessage[] = [];
           let loadFailed = false;
           try {
-            loaded = (await loadSessionMessages(workspacePath, id)) as unknown as UIMessage[];
+            loaded = await loadSessionMessages(workspacePath, id);
           } catch {
             // 读取失败 ≠ 会话为空：标记失败，禁止把空数组全量替换回 DB。
             loaded = [];
@@ -1161,10 +1167,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           // 读前排空挂起保存队列（与 selectSession/openWorkspace 对齐），
           // 避免读到旧数据。
           await waitForPendingProjectStateSave(workspacePath);
-          const loaded = (await loadSessionMessages(
+          const loaded = await loadSessionMessages(
             workspacePath,
             activeSessionId
-          )) as unknown as UIMessage[];
+          );
           // 竞态守卫：加载期间用户可能已切换会话/工作区。
           const current = get();
           if (

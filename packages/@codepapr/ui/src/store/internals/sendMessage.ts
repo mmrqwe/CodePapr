@@ -706,10 +706,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               // 读前排空挂起保存队列，避免重载读到旧数据（与 openWorkspace 对齐）。
               await waitForPendingProjectStateSave(workspacePath);
               ensureNotStopped();
-              const reloaded = (await loadSessionMessages(
+              const reloaded = await loadSessionMessages(
                 workspacePath,
                 guardSid
-              )) as unknown as UIMessage[];
+              );
               set((s) => ({
                 messages: s.activeSessionId === guardSid ? reloaded : s.messages,
                 sessionMessages: { ...s.sessionMessages, [guardSid]: reloaded },
