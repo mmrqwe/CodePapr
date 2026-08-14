@@ -5,6 +5,7 @@ import {
   type ProjectDiagnosticStagePlan,
   type ProjectDiagnosticStageResult,
   type ProjectDiagnosticsListEntry,
+  type ProjectDiagnosticsProjectType,
   type ProjectDiagnosticsReport,
   type WorkspaceHost,
 } from '@codepapr/core';
@@ -17,6 +18,7 @@ export type {
   ProjectDiagnosticStagePlan,
   ProjectDiagnosticStageResult,
   ProjectDiagnosticsListEntry,
+  ProjectDiagnosticsProjectType,
   ProjectDiagnosticsReport,
 };
 

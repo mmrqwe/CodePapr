@@ -329,13 +329,15 @@ describe('useAgentStore.sendMessage', () => {
   });
 
   it('persists cached project diagnostics into project state', async () => {
-    const report = {
+    const report: import('../utils/projectDiagnostics').ProjectDiagnosticsReport = {
       available: true,
-      packageManager: 'npm' as const,
+      projectTypes: ['node'],
+      primaryProjectType: 'node',
+      packageManager: 'npm',
       packageJsonPath: 'package.json',
       stages: [],
       ranAt: 123,
-      overallStatus: 'passed' as const,
+      overallStatus: 'passed',
     };
 
     useAgentStore.getState().setProjectDiagnosticsReport(report);
@@ -1259,12 +1261,14 @@ describe('useAgentStore.sendMessage', () => {
       void prompt;
       return createAgentResponse('已完成 App.tsx 静态错误修复。');
     });
-    const diagnosticsReport = {
+    const diagnosticsReport: import('../utils/projectDiagnostics').ProjectDiagnosticsReport = {
       available: true,
-      packageManager: 'npm' as const,
+      projectTypes: ['node'],
+      primaryProjectType: 'node',
+      packageManager: 'npm',
       packageJsonPath: 'package.json',
       ranAt: 1,
-      overallStatus: 'failed' as const,
+      overallStatus: 'failed',
       stages: [
         {
           id: 'typecheck' as const,

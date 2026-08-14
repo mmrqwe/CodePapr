@@ -29,12 +29,16 @@ export interface ProjectDiagnosticStagePlan {
   kind?:
     | 'package-script'
     | 'python-static'
-    | 'python-syntax'
     | 'dotnet-build'
     | 'cargo-check'
-    | 'go-test'
+    | 'go-build'
+    | 'go-vet'
     | 'maven-compile'
-    | 'gradle-check';
+    | 'gradle-classes';
+  /** 检查语义分类（替代以 TS lint/typecheck 为中心的两段式隐式模型）：
+   *  lint=代码风格检查，typecheck=类型检查，syntax=语法检查，
+   *  compile=编译检查，static-analysis=静态分析。 */
+  category?: 'lint' | 'typecheck' | 'syntax' | 'compile' | 'static-analysis';
 }
 
 export interface ProjectDiagnosticStageResult extends ProjectDiagnosticStagePlan {
@@ -44,12 +48,31 @@ export interface ProjectDiagnosticStageResult extends ProjectDiagnosticStagePlan
   stdout: string;
   stderr: string;
   excerpt: string;
+  /** 失败原因：spawn=工具链缺失/无法启动（环境问题，不是代码问题），
+   *  exit=命令跑完但退出码非 0（代码问题），timeout=超时；成功为 null。
+   *  旧报告可能没有该字段（undefined），消费方按可修复处理。 */
+  failureReason?: 'spawn' | 'exit' | 'timeout' | null;
 }
+
+export type ProjectDiagnosticsProjectType =
+  | 'node'
+  | 'python'
+  | 'dotnet'
+  | 'rust'
+  | 'go'
+  | 'maven'
+  | 'gradle';
 
 export interface ProjectDiagnosticsReport {
   available: boolean;
-  packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun';
-  packageJsonPath: string;
+  /** 检测到的项目类型（多技术栈可共存，如 node + rust）。 */
+  projectTypes: ProjectDiagnosticsProjectType[];
+  /** 主项目类型：拥有最多诊断阶段的类型；无任何阶段时为 null。 */
+  primaryProjectType: ProjectDiagnosticsProjectType | null;
+  /** 仅 Node 系项目有值；非 Node 项目为 null（不再默认 'npm'，避免误导 Agent）。 */
+  packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun' | null;
+  /** 仅 Node 系项目有值；非 Node 项目为 null。 */
+  packageJsonPath: string | null;
   stages: ProjectDiagnosticStageResult[];
   ranAt: number;
   overallStatus: 'passed' | 'failed' | 'unavailable';
@@ -256,6 +279,7 @@ function buildPackageScriptStages(
         args: runner.args,
         fallback: false,
         kind: 'package-script',
+        category: 'lint',
       })
     );
   }
@@ -272,6 +296,7 @@ function buildPackageScriptStages(
         args: runner.args,
         fallback: typecheck.fallback,
         kind: 'package-script',
+        category: 'typecheck',
       })
     );
   }
@@ -355,6 +380,43 @@ function asProjectDiagnosticsCommandResult(result: WorkspaceHostCommandResult): 
   };
 }
 
+/** stage kind → 项目类型映射：用于统计主项目类型。 */
+const PROJECT_TYPE_BY_KIND: Record<string, ProjectDiagnosticsProjectType> = {
+  'package-script': 'node',
+  'python-static': 'python',
+  'dotnet-build': 'dotnet',
+  'cargo-check': 'rust',
+  'go-build': 'go',
+  'go-vet': 'go',
+  'maven-compile': 'maven',
+  'gradle-classes': 'gradle',
+};
+
+function computePrimaryProjectType(
+  projectTypes: readonly ProjectDiagnosticsProjectType[],
+  stages: readonly Pick<ProjectDiagnosticStagePlan, 'kind'>[]
+): ProjectDiagnosticsProjectType | null {
+  const counts = new Map<ProjectDiagnosticsProjectType, number>();
+  for (const stage of stages) {
+    const type = stage.kind ? PROJECT_TYPE_BY_KIND[stage.kind] : undefined;
+    if (type) {
+      counts.set(type, (counts.get(type) ?? 0) + 1);
+    }
+  }
+  if (counts.size === 0) {
+    return null;
+  }
+  let primary: ProjectDiagnosticsProjectType | null = null;
+  let max = 0;
+  for (const [type, count] of counts) {
+    if (count > max) {
+      primary = type;
+      max = count;
+    }
+  }
+  return primary;
+}
+
 export function createProjectDiagnosticsPlan(params: {
   entries: readonly ProjectDiagnosticsListEntry[];
   packageJsonContent?: string;
@@ -362,11 +424,20 @@ export function createProjectDiagnosticsPlan(params: {
 }): {
   available: boolean;
   packageManager: ProjectDiagnosticsReport['packageManager'];
-  packageJsonPath: string;
+  packageJsonPath: string | null;
+  projectTypes: ProjectDiagnosticsProjectType[];
+  primaryProjectType: ProjectDiagnosticsProjectType | null;
   stages: ProjectDiagnosticStagePlan[];
   message?: string;
 } {
-  const packageManager = detectPackageManager(params.entries);
+  const packageJsonFiles = findProjectFiles(
+    params.entries,
+    (_entry, path) => path.endsWith('package.json')
+  );
+  const hasNodeProject = packageJsonFiles.length > 0;
+  const packageManager: ProjectDiagnosticsReport['packageManager'] = hasNodeProject
+    ? detectPackageManager(params.entries)
+    : null;
   const pkg = normalizePackageJson(params.packageJsonContent ?? '');
   const changedPaths = params.changedPaths ?? [];
   const scripts = isRecord(pkg.scripts)
@@ -395,6 +466,7 @@ export function createProjectDiagnosticsPlan(params: {
       args: ['-c', PYTHON_STATIC_CHECK_SCRIPT],
       fallback: false,
       kind: 'python-static',
+      category: 'syntax',
     });
   }
 
@@ -415,6 +487,7 @@ export function createProjectDiagnosticsPlan(params: {
       args: ['build', preferredDotnetTarget, '--nologo'],
       fallback: false,
       kind: 'dotnet-build',
+      category: 'compile',
     });
   }
 
@@ -431,6 +504,7 @@ export function createProjectDiagnosticsPlan(params: {
         : ['check', '--workspace', '--all-targets'],
       fallback: false,
       kind: 'cargo-check',
+      category: 'compile',
     });
   }
 
@@ -438,17 +512,31 @@ export function createProjectDiagnosticsPlan(params: {
   const preferredGoMod = chooseProjectFileForChangedPaths(goModFiles, changedPaths) ?? goModFiles[0] ?? null;
   if (preferredGoMod && shouldIncludeNestedProject(preferredGoMod, changedPaths)) {
     const goModDir = entryDir(preferredGoMod);
+    // go 没有 --manifest-path 之类的标志：嵌套 go.mod 必须在其模块目录内
+    // 执行，旧实现从 workspace 根运行会测错模块或直接失败。
+    // 诊断语义：go build 做编译检查、go vet 做静态分析；不再用 go test
+    //（测试失败 ≠ 代码有编译/静态问题，且会误触发后台自动修复）。
     stages.push({
-      id: 'go-test',
-      scriptName: 'go-test',
-      label: goModDir ? `go test ./...（${goModDir}）` : 'go test ./...',
+      id: 'go-build',
+      scriptName: 'go-build',
+      label: goModDir ? `go build ./...（${goModDir}）` : 'go build ./...',
       command: 'go',
-      args: ['test', './...'],
+      args: ['build', './...'],
       fallback: false,
-      // go 没有 --manifest-path 之类的标志：嵌套 go.mod 必须在其模块目录内
-      // 执行，旧实现从 workspace 根运行会测错模块或直接失败。
       ...(goModDir ? { workdir: goModDir } : {}),
-      kind: 'go-test',
+      kind: 'go-build',
+      category: 'compile',
+    });
+    stages.push({
+      id: 'go-vet',
+      scriptName: 'go-vet',
+      label: goModDir ? `go vet ./...（${goModDir}）` : 'go vet ./...',
+      command: 'go',
+      args: ['vet', './...'],
+      fallback: false,
+      ...(goModDir ? { workdir: goModDir } : {}),
+      kind: 'go-vet',
+      category: 'static-analysis',
     });
   }
 
@@ -465,6 +553,7 @@ export function createProjectDiagnosticsPlan(params: {
         : ['-q', '-DskipTests', 'compile'],
       fallback: false,
       kind: 'maven-compile',
+      category: 'compile',
     });
   }
 
@@ -475,30 +564,47 @@ export function createProjectDiagnosticsPlan(params: {
   const hasGradleWrapper = params.entries.some((entry) => !entry.isDir && normalizeEntryPath(entry) === 'gradlew');
   if (preferredGradle && shouldIncludeNestedProject(preferredGradle, changedPaths)) {
     stages.push({
-      id: 'gradle-check',
-      scriptName: 'gradle-check',
-      label: 'gradle check',
+      id: 'gradle-classes',
+      scriptName: 'gradle-classes',
+      label: 'gradle classes',
+      // classes 编译主源集（Java/Kotlin/Groovy 通用），不跑测试：
+      // 旧实现用 `gradle check` 会把测试失败混进诊断并误触发自动修复。
       command: hasGradleWrapper ? './gradlew' : 'gradle',
-      args: ['check'],
+      args: ['classes'],
       fallback: false,
-      kind: 'gradle-check',
+      kind: 'gradle-classes',
+      category: 'compile',
     });
   }
+
+  const projectTypes: ProjectDiagnosticsProjectType[] = [];
+  if (hasNodeProject) projectTypes.push('node');
+  if (isPythonWorkspace) projectTypes.push('python');
+  if (solutionFiles.length + csprojFiles.length > 0) projectTypes.push('dotnet');
+  if (cargoFiles.length > 0) projectTypes.push('rust');
+  if (goModFiles.length > 0) projectTypes.push('go');
+  if (pomFiles.length > 0) projectTypes.push('maven');
+  if (gradleFiles.length > 0) projectTypes.push('gradle');
+  const primaryProjectType = computePrimaryProjectType(projectTypes, stages);
 
   if (stages.length === 0) {
     return {
       available: false,
       packageManager,
-      packageJsonPath: 'package.json',
+      packageJsonPath: hasNodeProject ? 'package.json' : null,
+      projectTypes,
+      primaryProjectType,
       stages: [],
-      message: 'package.json 中没有可用的 lint 或 typecheck/build 脚本',
+      message: '未检测到可用的项目诊断阶段（lint/typecheck/build/compile 等脚本或工具链配置）',
     };
   }
 
   return {
     available: true,
     packageManager,
-    packageJsonPath: 'package.json',
+    packageJsonPath: hasNodeProject ? 'package.json' : null,
+    projectTypes,
+    primaryProjectType,
     stages,
   };
 }
@@ -602,11 +708,13 @@ export async function runProjectDiagnostics(
           entryDir(nestedPath)
         );
         if (nestedStages.length > 0) {
+          const mergedStages = [...nestedStages, ...plan.stages];
           plan = {
             ...plan,
             available: true,
             packageJsonPath: nestedPath,
-            stages: [...nestedStages, ...plan.stages],
+            stages: mergedStages,
+            primaryProjectType: computePrimaryProjectType(plan.projectTypes, mergedStages),
             message: undefined,
           };
         }
@@ -619,6 +727,8 @@ export async function runProjectDiagnostics(
   if (!plan.available) {
     return {
       available: false,
+      projectTypes: plan.projectTypes,
+      primaryProjectType: plan.primaryProjectType,
       packageManager: plan.packageManager,
       packageJsonPath: plan.packageJsonPath,
       stages: [],
@@ -643,14 +753,16 @@ export async function runProjectDiagnostics(
       const result = asProjectDiagnosticsCommandResult(
         signal ? await raceAbortable(commandPromise, signal) : await commandPromise
       );
+      const success = !result.timedOut && (result.status ?? 1) === 0;
       stages.push({
         ...stage,
-        success: !result.timedOut && (result.status ?? 1) === 0,
+        success,
         status: result.status,
         timedOut: result.timedOut,
         stdout: result.stdout,
         stderr: result.stderr,
         excerpt: buildExcerpt(result.stdout, result.stderr),
+        failureReason: result.timedOut ? 'timeout' : success ? null : 'exit',
       });
     } catch (error) {
       // 取消必须原样向上传播，不得被当作阶段失败吞掉后继续跑后续阶段。
@@ -668,12 +780,15 @@ export async function runProjectDiagnostics(
         stdout: '',
         stderr: message,
         excerpt: buildExcerpt('', message),
+        failureReason: 'spawn',
       });
     }
   }
 
   return {
     available: true,
+    projectTypes: plan.projectTypes,
+    primaryProjectType: computePrimaryProjectType(plan.projectTypes, plan.stages),
     packageManager: plan.packageManager,
     packageJsonPath: plan.packageJsonPath,
     stages,

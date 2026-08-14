@@ -85,7 +85,7 @@ describe('promptSystem', () => {
       toolNames: ['diagnostics'],
     });
     expect(prompt).toContain('diagnostics');
-    expect(prompt).toContain('npm run lint');
+    expect(prompt).toContain('lint/typecheck/build');
   });
 
   it('includes write/edit/patch parameter guidance', () => {

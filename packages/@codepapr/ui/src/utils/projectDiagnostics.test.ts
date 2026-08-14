@@ -221,4 +221,74 @@ describe('projectDiagnostics', () => {
       })
     );
   });
+
+  it('adds go build and vet stages for the owning go.mod after a changed file', () => {
+    const plan = createProjectDiagnosticsPlan({
+      entries: [{ path: 'services/api/go.mod', name: 'go.mod', isDir: false, bytes: 40 }],
+      changedPaths: ['services/api/internal/handler.go'],
+    });
+
+    expect(plan.available).toBe(true);
+    expect(plan.projectTypes).toEqual(['go']);
+    expect(plan.primaryProjectType).toBe('go');
+    expect(plan.packageManager).toBeNull();
+    expect(plan.packageJsonPath).toBeNull();
+    expect(plan.stages).toContainEqual(
+      expect.objectContaining({
+        id: 'go-build',
+        command: 'go',
+        args: ['build', './...'],
+        workdir: 'services/api',
+        kind: 'go-build',
+        category: 'compile',
+      })
+    );
+    expect(plan.stages).toContainEqual(
+      expect.objectContaining({
+        id: 'go-vet',
+        command: 'go',
+        args: ['vet', './...'],
+        workdir: 'services/api',
+        kind: 'go-vet',
+        category: 'static-analysis',
+      })
+    );
+    expect(plan.stages.some((stage) => stage.id === 'go-test')).toBe(false);
+  });
+
+  it('uses gradle classes with the wrapper and marks the stage as compile', () => {
+    const plan = createProjectDiagnosticsPlan({
+      entries: [
+        { path: 'build.gradle.kts', name: 'build.gradle.kts', isDir: false, bytes: 120 },
+        { path: 'gradlew', name: 'gradlew', isDir: false, bytes: 40 },
+      ],
+    });
+
+    expect(plan.available).toBe(true);
+    expect(plan.projectTypes).toEqual(['gradle']);
+    expect(plan.stages).toContainEqual(
+      expect.objectContaining({
+        id: 'gradle-classes',
+        command: './gradlew',
+        args: ['classes'],
+        kind: 'gradle-classes',
+        category: 'compile',
+      })
+    );
+  });
+
+  it('reports node as primary type when it owns more stages than rust', () => {
+    const plan = createProjectDiagnosticsPlan({
+      entries: [
+        { path: 'package.json', name: 'package.json', isDir: false, bytes: 100 },
+        { path: 'Cargo.toml', name: 'Cargo.toml', isDir: false, bytes: 100 },
+      ],
+      packageJsonContent: JSON.stringify({ scripts: { lint: 'eslint .', typecheck: 'tsc' } }),
+    });
+
+    expect(plan.projectTypes).toEqual(['node', 'rust']);
+    expect(plan.primaryProjectType).toBe('node');
+    expect(plan.packageManager).toBe('npm');
+    expect(plan.packageJsonPath).toBe('package.json');
+  });
 });

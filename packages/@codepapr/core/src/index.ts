@@ -103,6 +103,7 @@ export type {
   ProjectDiagnosticStagePlan,
   ProjectDiagnosticStageResult,
   ProjectDiagnosticsListEntry,
+  ProjectDiagnosticsProjectType,
   ProjectDiagnosticsReport,
 } from './tool/workspace/diagnostics';
 export type {

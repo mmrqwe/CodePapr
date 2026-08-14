@@ -73,4 +73,53 @@ describe('projectDiagnosticLocations', () => {
     });
     expect(locations[0]?.message).toContain('unused value');
   });
+
+  it('parses cargo diagnostics with --> arrows and carries the head severity', () => {
+    const locations = parseProjectDiagnosticLocations(
+      '/tmp/workspace',
+      createStage({
+        stderr: [
+          'error[E0382]: borrow of moved value: x',
+          '   --> src/main.rs:10:5',
+          '    |',
+          '9   |     let y = x;',
+          '    |         ^ value moved here',
+          'warning: unused variable: z',
+          '   --> src/main.rs:14:9',
+        ].join('\n'),
+      })
+    );
+
+    expect(locations).toHaveLength(2);
+    expect(locations[0]).toMatchObject({
+      path: 'src/main.rs',
+      line: 10,
+      column: 5,
+      severity: 'error',
+    });
+    expect(locations[1]).toMatchObject({
+      path: 'src/main.rs',
+      line: 14,
+      column: 9,
+      severity: 'warning',
+    });
+  });
+
+  it('parses maven compiler bracket locations', () => {
+    const locations = parseProjectDiagnosticLocations(
+      '/tmp/workspace',
+      createStage({
+        stderr: '[ERROR] /tmp/workspace/src/main/java/app/Main.java:[10,20] error: ; expected',
+      })
+    );
+
+    expect(locations).toEqual([
+      expect.objectContaining({
+        path: 'src/main/java/app/Main.java',
+        line: 10,
+        column: 20,
+        severity: 'error',
+      }),
+    ]);
+  });
 });

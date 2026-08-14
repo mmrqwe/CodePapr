@@ -55,18 +55,44 @@ function isPackageScriptCoverageStage(scriptName: string): boolean {
   return /(?:build|check|lint|typecheck)/i.test(scriptName);
 }
 
+/** 单阶段是否覆盖给定文件：按 stage.kind 判断语言族 + 文件后缀匹配。
+ *  阶段必须成功跑完才算"覆盖"（spawn 失败/退出码非 0 时该项目文件
+ *  实际未被有效检查；失败输出命中该文件的场景由 items 兜底标记 covered）。 */
+function stageCoversPath(
+  stage: ProjectDiagnosticsReport['stages'][number],
+  path: string
+): boolean {
+  if (!stage.success) {
+    return false;
+  }
+
+  switch (stage.kind) {
+    case 'package-script':
+    case undefined:
+      return isTypeScriptFamilyPath(path) && isPackageScriptCoverageStage(stage.scriptName);
+    case 'python-static':
+      return isPythonDiagnosticsCoveredPath(path);
+    case 'cargo-check':
+      return /\.rs$/i.test(path);
+    case 'dotnet-build':
+      return /\.(?:cs|csx)$/i.test(path);
+    case 'go-build':
+    case 'go-vet':
+      return /\.go$/i.test(path);
+    case 'maven-compile':
+      return /\.java$/i.test(path);
+    case 'gradle-classes':
+      return /\.(?:java|kt|kts|groovy)$/i.test(path);
+    default:
+      return false;
+  }
+}
+
 function isPathCoveredByProjectDiagnostics(
   report: ProjectDiagnosticsReport,
   selectedPath: string
 ): boolean {
-  return report.stages.some(
-    (stage) =>
-      (stage.kind === 'python-syntax' && isPythonDiagnosticsCoveredPath(selectedPath)) ||
-      ((stage.kind === 'package-script' || !stage.kind) &&
-        stage.success &&
-        isTypeScriptFamilyPath(selectedPath) &&
-        isPackageScriptCoverageStage(stage.scriptName))
-  );
+  return report.stages.some((stage) => stageCoversPath(stage, selectedPath));
 }
 
 export function summarizeProjectFileDiagnostics(params: {

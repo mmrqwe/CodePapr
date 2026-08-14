@@ -46,12 +46,19 @@ function failedDiagnosticStages(report: ProjectDiagnosticsReport): ProjectDiagno
   return report.available ? report.stages.filter((stage) => !stage.success) : [];
 }
 
+/** 自动修复只接手"代码问题"阶段：spawn 失败是工具链缺失/环境问题，
+ *  Agent 修不了，接手只会浪费修复尝试额度并污染上下文。
+ *  旧报告无 failureReason 字段（undefined）时按可修复处理。 */
+function repairableDiagnosticStages(report: ProjectDiagnosticsReport): ProjectDiagnosticsReport['stages'] {
+  return failedDiagnosticStages(report).filter((stage) => stage.failureReason !== 'spawn');
+}
+
 function buildDiagnosticsRepairFingerprint(
   workspacePath: string,
   report: ProjectDiagnosticsReport,
   changedPaths: readonly string[]
 ): string {
-  const stageFingerprint = failedDiagnosticStages(report)
+  const stageFingerprint = repairableDiagnosticStages(report)
     .map((stage) => `${stage.id}:${stage.status ?? 'unknown'}:${stage.excerpt}`)
     .join('|');
   return `${workspacePath}:${[...changedPaths].sort().join(',')}:${stageFingerprint}`;
@@ -62,7 +69,7 @@ function buildDiagnosticsRepairPrompt(
   changedPaths: readonly string[]
 ): string {
   const changedPathList = changedPaths.length ? changedPaths.map((path) => `- ${path}`).join('\n') : '- 未知文件';
-  const failedStages = failedDiagnosticStages(report)
+  const failedStages = repairableDiagnosticStages(report)
     .map((stage) => {
       const command = [stage.command, ...stage.args].join(' ');
       const excerpt = stage.excerpt || stage.stderr || stage.stdout || '没有输出摘要';
@@ -93,7 +100,7 @@ function maybeStartBackgroundRepair(params: {
   const changedPaths = params.changedPaths
     .map((path) => path.trim())
     .filter((path) => path && !path.startsWith('.CodePapr/'));
-  if (changedPaths.length === 0 || failedDiagnosticStages(params.report).length === 0) {
+  if (changedPaths.length === 0 || repairableDiagnosticStages(params.report).length === 0) {
     return;
   }
 

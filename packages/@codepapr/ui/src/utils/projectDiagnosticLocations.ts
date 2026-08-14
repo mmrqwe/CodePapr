@@ -18,7 +18,7 @@ function normalizeSlashes(value: string): string {
 }
 
 function normalizeCandidatePath(value: string): string {
-  const trimmed = value.trim().replace(/^at\s+/, '');
+  const trimmed = value.trim().replace(/^at\s+/, '').replace(/^-->\s*/, '');
   const decoded = trimmed.startsWith('file://')
     ? decodeURIComponent(trimmed.replace(/^file:\/\/+/, '/'))
     : trimmed;
@@ -128,6 +128,7 @@ export function parseProjectDiagnosticLocations(
   const locations: ProjectDiagnosticLocation[] = [];
   const seen = new Set<string>();
   let stylishPath: string | null = null;
+  let cargoSeverity: 'error' | 'warning' | 'info' | null = null;
 
   const pushLocation = (location: ProjectDiagnosticLocation | null) => {
     if (!location) {
@@ -156,6 +157,19 @@ export function parseProjectDiagnosticLocations(
       continue;
     }
 
+    // cargo 头部行（error[E0001]: / warning: / note:）只记录严重级别，
+    // 位置在随后的 `--> path:line:col` 行。
+    const cargoHead = trimmed.match(/^(error|warning|note)(?:\[[^\]]+\])?:/i);
+    if (cargoHead) {
+      cargoSeverity =
+        cargoHead[1]!.toLowerCase() === 'error'
+          ? 'error'
+          : cargoHead[1]!.toLowerCase() === 'warning'
+            ? 'warning'
+            : 'info';
+      continue;
+    }
+
     if (!trimmed.includes(':') && !trimmed.includes('(')) {
       const pathCandidate = toWorkspaceRelativePath(trimmed, workspacePath);
       if (pathCandidate) {
@@ -174,6 +188,23 @@ export function parseProjectDiagnosticLocations(
           stylishMatch[1]!,
           stylishMatch[2]!,
           `${stylishMatch[3]} ${stylishMatch[4]}`
+        )
+      );
+      continue;
+    }
+
+    // cargo 位置行：`--> src/main.rs:10:5`；无消息时用头部行记录的严重级别
+    // 作为占位消息，保证 severity 正确（normalizeCandidatePath 也会剥离 --> 前缀）。
+    const cargoMatch = trimmed.match(/^-->\s*(.+):(\d+):(\d+)(?::?\s*)(.*)$/);
+    if (cargoMatch) {
+      pushLocation(
+        buildLocation(
+          workspacePath,
+          stage,
+          cargoMatch[1]!,
+          cargoMatch[2]!,
+          cargoMatch[3]!,
+          cargoMatch[4] || (cargoSeverity ?? 'cargo diagnostic')
         )
       );
       continue;
@@ -204,6 +235,22 @@ export function parseProjectDiagnosticLocations(
           parenMatch[2]!,
           parenMatch[3]!,
           parenMatch[4]!
+        )
+      );
+      continue;
+    }
+
+    // Maven：[ERROR] /abs/path/Foo.java:[10,20] error message
+    const mavenMatch = trimmed.match(/^\[(ERROR|WARNING|INFO)\]\s+(.+?):\[(\d+),(\d+)\](?::?\s*)(.*)$/i);
+    if (mavenMatch) {
+      pushLocation(
+        buildLocation(
+          workspacePath,
+          stage,
+          mavenMatch[2]!,
+          mavenMatch[3]!,
+          mavenMatch[4]!,
+          `${mavenMatch[1]} ${mavenMatch[5]}`.trim()
         )
       );
     }

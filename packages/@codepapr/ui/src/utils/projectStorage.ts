@@ -197,11 +197,12 @@ function parseProjectDiagnosticsReport(value: unknown): ProjectDiagnosticsReport
   const packageManager = value.packageManager;
   if (
     typeof value.available !== 'boolean' ||
-    (packageManager !== 'npm' &&
+    (packageManager !== null &&
+      packageManager !== 'npm' &&
       packageManager !== 'pnpm' &&
       packageManager !== 'yarn' &&
       packageManager !== 'bun') ||
-    typeof value.packageJsonPath !== 'string' ||
+    (value.packageJsonPath !== null && typeof value.packageJsonPath !== 'string') ||
     typeof value.ranAt !== 'number' ||
     (overallStatus !== 'passed' &&
       overallStatus !== 'failed' &&
@@ -211,13 +212,15 @@ function parseProjectDiagnosticsReport(value: unknown): ProjectDiagnosticsReport
     return null;
   }
 
+  // 阶段 id 不再限定 lint/typecheck：go-build/go-vet/cargo-check 等
+  // 各语言阶段同样会被持久化，校验只保证通用字段形状。
   const stages = value.stages.filter((stage): stage is ProjectDiagnosticsReport['stages'][number] => {
     if (!isRecord(stage)) {
       return false;
     }
 
     return (
-      (stage.id === 'lint' || stage.id === 'typecheck') &&
+      typeof stage.id === 'string' &&
       typeof stage.scriptName === 'string' &&
       typeof stage.label === 'string' &&
       typeof stage.command === 'string' &&
@@ -234,8 +237,15 @@ function parseProjectDiagnosticsReport(value: unknown): ProjectDiagnosticsReport
 
   return {
     available: value.available,
-    packageManager,
-    packageJsonPath: value.packageJsonPath,
+    projectTypes: isStringArray(value.projectTypes)
+      ? (value.projectTypes as ProjectDiagnosticsReport['projectTypes'])
+      : [],
+    primaryProjectType:
+      typeof value.primaryProjectType === 'string'
+        ? (value.primaryProjectType as ProjectDiagnosticsReport['primaryProjectType'])
+        : null,
+    packageManager: packageManager as ProjectDiagnosticsReport['packageManager'],
+    packageJsonPath: value.packageJsonPath as ProjectDiagnosticsReport['packageJsonPath'],
     stages,
     ranAt: value.ranAt,
     overallStatus,

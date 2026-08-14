@@ -883,10 +883,10 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
   if (hasTool(toolNames, 'diagnostics') && !isApp) {
     highPriority.push(
       lang === 'en'
-        ? '- [diagnostics] ① After editing each file → `diagnostics(relativePath)` for incremental error check. ② After all edits → `diagnostics(project: true)` for final check. Faster than `npm run lint`.'
+        ? '- [diagnostics] ① After editing each file → `diagnostics(relativePath)` for incremental error check. ② After all edits → `diagnostics(project: true)` for final check. Faster than manually running the project lint/typecheck/build scripts.'
         : lang === 'zh-TW'
-        ? '- [diagnostics] ① 每改完一個檔案立即 `diagnostics(relativePath)` 查增量錯誤 ② 全部完成後跑 `diagnostics(project: true)` 做終檢。比 `npm run lint` 快。'
-        : '- [diagnostics] ① 每改完一个文件立即 `diagnostics(relativePath)` 查增量错误 ② 全部完成后跑 `diagnostics(project: true)` 做终检。比 `npm run lint` 快。'
+        ? '- [diagnostics] ① 每改完一個檔案立即 `diagnostics(relativePath)` 查增量錯誤 ② 全部完成後跑 `diagnostics(project: true)` 做終檢。比手動跑專案的 lint/typecheck/build 腳本快。'
+        : '- [diagnostics] ① 每改完一个文件立即 `diagnostics(relativePath)` 查增量错误 ② 全部完成后跑 `diagnostics(project: true)` 做终检。比手动跑项目的 lint/typecheck/build 脚本快。'
     );
   }
   if (hasTool(toolNames, 'task') && !isApp) {

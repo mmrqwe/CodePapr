@@ -293,7 +293,8 @@ export const WORKSPACE_INTELLIGENCE_TOOL_DEFINITIONS: IToolDefinition[] = [
   },
   {
     name: 'workspace_project_diagnostics',
-    description: '运行项目级 lint/typecheck/build 诊断，优先返回最 relevant 的静态检查结果。',
+    description:
+      '运行项目级诊断，按检测到的技术栈自动选择检查命令（Node: lint/typecheck 脚本；Python: 语法+pyright；Rust: cargo check；Go: go build+go vet；.NET: dotnet build；Java: mvn compile 或 gradle classes）。多技术栈共存时各阶段独立运行、独立报告。',
     parameters: {
       type: 'object',
       properties: {},
