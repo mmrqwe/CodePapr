@@ -190,7 +190,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
       if (isInline) {
         return (
-          <code className="rounded bg-base px-1.5 py-0.5 text-[12px] text-warn">
+          <code className="rounded bg-base px-1.5 py-0.5 text-[12px] text-code-fg">
             {text}
           </code>
         );

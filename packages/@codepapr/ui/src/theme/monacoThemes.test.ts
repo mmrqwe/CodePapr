@@ -85,7 +85,9 @@ describe('registerMonacoTheme', () => {
     expect(definition.colors['editor.background']).toBe(nord.tokens['code-bg']);
     expect(definition.rules.length).toBeGreaterThan(10);
     const keyword = definition.rules.find((rule) => rule.token === 'keyword');
-    expect(keyword?.foreground).toBe(nord.tokens['accent']);
+    expect(keyword?.foreground).toBe(nord.tokens['syntax-keyword']);
+    const string = definition.rules.find((rule) => rule.token === 'string');
+    expect(string?.foreground).toBe(nord.tokens['syntax-string']);
   });
 
   it('is idempotent per theme and accent', () => {
@@ -97,14 +99,34 @@ describe('registerMonacoTheme', () => {
     expect(defineThemeMock).toHaveBeenCalledTimes(2);
   });
 
-  it('derives accent tokens from the accent override', () => {
+  it('keeps syntax colors decoupled from the accent override', () => {
     const solarized = getBuiltinTheme('solarized-dark')!;
     registerMonacoTheme(solarized.id, solarized.tokens, solarized.mode, '#ff0000');
     const definition = defineThemeMock.mock.calls[0][1] as {
       rules: Array<{ token: string; foreground?: string }>;
     };
     const keyword = definition.rules.find((rule) => rule.token === 'keyword');
-    expect(keyword?.foreground).toBe('#ff0000');
+    // 强调色为红时，关键字仍使用主题自身的语法色，不随 accent 变红
+    expect(keyword?.foreground).toBe(solarized.tokens['syntax-keyword']);
+    expect(keyword?.foreground).not.toBe('#ff0000');
+  });
+
+  it('keeps selection colors neutral per mode, decoupled from accent', () => {
+    const paperLight = getBuiltinTheme('paper-light')!;
+    registerMonacoTheme(paperLight.id, paperLight.tokens, paperLight.mode, '#ff0000');
+    const lightDefinition = defineThemeMock.mock.calls[0][1] as {
+      colors: Record<string, string>;
+    };
+    expect(lightDefinition.colors['editor.selectionBackground']).toBe('#ADD6FF');
+    expect(lightDefinition.colors['editor.inactiveSelectionBackground']).toBe('#E5EBF1');
+
+    const nord = getBuiltinTheme('nord')!;
+    registerMonacoTheme(nord.id, nord.tokens, nord.mode, '#ff0000');
+    const darkDefinition = defineThemeMock.mock.calls[1][1] as {
+      colors: Record<string, string>;
+    };
+    expect(darkDefinition.colors['editor.selectionBackground']).toBe('#264F78');
+    expect(darkDefinition.colors['editor.inactiveSelectionBackground']).toBe('#3A3D41');
   });
 });
 
@@ -131,7 +153,8 @@ describe('applyActiveMonacoTheme', () => {
       rules: Array<{ token: string; foreground?: string }>;
     };
     const keyword = definition.rules.find((rule) => rule.token === 'keyword');
-    expect(keyword?.foreground).toBe('#ff0000');
+    // 语法色来自 base（paper-light）回退，不随强调色变红
+    expect(keyword?.foreground).toBe('#1a5fb4');
     themeStoreState.customThemes = {};
     themeStoreState.accent = null;
   });

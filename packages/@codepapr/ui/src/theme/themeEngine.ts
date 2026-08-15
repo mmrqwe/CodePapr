@@ -58,6 +58,19 @@ export const AUX_TOKEN_KEYS = [
   'gantt-think',
   'gantt-body',
   'gantt-tool',
+  'syntax-keyword',
+  'syntax-string',
+  'syntax-number',
+  'syntax-type',
+  'syntax-function',
+  'syntax-comment',
+  'syntax-variable',
+  'syntax-tag',
+  'syntax-attribute',
+  'syntax-regexp',
+  'syntax-operator',
+  'syntax-bool',
+  'syntax-delimiter',
 ] as const;
 
 /** 防止注入/破坏规则块：剔除 CSS 值中可逃逸出声明块的字符。 */
