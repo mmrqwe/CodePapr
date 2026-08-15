@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeSettings } from './settingsNormalizer';
+import { CORE_TOKEN_KEYS } from '../../theme/themeEngine';
+import type { CustomThemeRecord } from '../../theme/types';
+import type { Settings } from './types';
 
 describe('normalizeSettings mentor 字段防御', () => {
   // 回归 #22：mentor 三字段此前用 `?? default` + .trim()，非字符串的损坏
@@ -71,5 +74,56 @@ describe('normalizeSettings thinking 强度字段', () => {
     expect(result.mentorThinkingEffort).toBe('medium');
     expect(result.mentorThinkingBudgetTokens).toBe(6000);
     expect(normalizeSettings({ mentorThinkingEffort: '' }).mentorThinkingEffort).toBe('');
+  });
+});
+
+describe('normalizeSettings 主题字段防御', () => {
+  it('内置主题 id 保留，未知 id 回退 null（跟随系统）', () => {
+    expect(normalizeSettings({ theme: 'nord' } as Partial<Settings>).theme).toBe('nord');
+    expect(normalizeSettings({ theme: 'bogus' } as Partial<Settings>).theme).toBeNull();
+    expect(normalizeSettings({ theme: '' } as Partial<Settings>).theme).toBeNull();
+    expect(normalizeSettings({} as Partial<Settings>).theme).toBeNull();
+  });
+
+  it('自定义主题 id 仅在记录通过校验时保留', () => {
+    const valid: CustomThemeRecord = {
+      name: 'M',
+      mode: 'dark',
+      tokens: Object.fromEntries(CORE_TOKEN_KEYS.map((k) => [k, '#111'])),
+    };
+    expect(
+      normalizeSettings({
+        theme: 'custom-1',
+        customThemes: { 'custom-1': valid },
+      } as Partial<Settings>).theme,
+    ).toBe('custom-1');
+    expect(
+      normalizeSettings({
+        theme: 'custom-1',
+        customThemes: {},
+      } as Partial<Settings>).theme,
+    ).toBeNull();
+  });
+
+  it('非法自定义主题记录被丢弃，不阻塞设置加载', () => {
+    const settings = normalizeSettings({
+      customThemes: {
+        'ok-theme': {
+          name: 'OK',
+          mode: 'dark',
+          tokens: Object.fromEntries(CORE_TOKEN_KEYS.map((k) => [k, '#111'])),
+        },
+        'bad-theme': { name: 'Bad', mode: 'blue' as unknown as 'light', tokens: {} },
+      },
+    } as unknown as Partial<Settings>);
+    expect(Object.keys(settings.customThemes)).toEqual(['ok-theme']);
+  });
+
+  it('accent 仅接受 #rgb / #rrggbb', () => {
+    expect(normalizeSettings({ accent: '#ff0000' } as Partial<Settings>).accent).toBe('#ff0000');
+    expect(normalizeSettings({ accent: '#f00' } as Partial<Settings>).accent).toBe('#f00');
+    expect(normalizeSettings({ accent: 'red' } as Partial<Settings>).accent).toBeNull();
+    expect(normalizeSettings({ accent: 123 as unknown as string } as Partial<Settings>).accent).toBeNull();
+    expect(normalizeSettings({} as Partial<Settings>).accent).toBeNull();
   });
 });

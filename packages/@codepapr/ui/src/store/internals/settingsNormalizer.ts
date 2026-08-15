@@ -1,5 +1,9 @@
 import { sanitizeMaxTokens } from '@codepapr/api';
 import { normalizeMcpSettings } from '../../utils/mcpTypes';
+import { isBuiltinThemeId } from '../../theme/themes';
+import { validateCustomTheme } from '../../theme/themeEngine';
+import type { CustomThemeRecord } from '../../theme/types';
+import { ACCENT_PATTERN } from '../../theme/types';
 import { DEFAULT_SETTINGS, normalizeCustomSystemPrompt } from './defaults';
 import type { ApiFormat, ApiMode, Lang, ModeConfig, ProviderName, Settings, WorkspaceEntry } from './types';
 
@@ -78,6 +82,21 @@ function normalizeRecentWorkspaces(
     result.push({ path, name, lastOpenedAt, pinned });
     if (result.length >= 10) {
       break;
+    }
+  }
+  return result;
+}
+
+/** 自定义主题清洗：逐条校验，非法记录直接丢弃（不阻塞设置加载）。 */
+function normalizeCustomThemes(input: unknown): Record<string, CustomThemeRecord> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return {};
+  }
+  const result: Record<string, CustomThemeRecord> = {};
+  for (const [id, raw] of Object.entries(input as Record<string, unknown>)) {
+    const record = raw as CustomThemeRecord;
+    if (validateCustomTheme(id, record).ok) {
+      result[id] = record;
     }
   }
   return result;
@@ -432,6 +451,18 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
       : DEFAULT_SETTINGS.folderAccessYolo;
   const mcp = normalizeMcpSettings(input.mcp);
 
+  const customThemes = normalizeCustomThemes(input.customThemes);
+  // 主题 id 必须是内置主题或已通过校验的自定义主题，否则回退跟随系统。
+  const theme =
+    typeof input.theme === 'string' &&
+    (isBuiltinThemeId(input.theme) || customThemes[input.theme])
+      ? input.theme
+      : null;
+  const accent =
+    typeof input.accent === 'string' && ACCENT_PATTERN.test(input.accent.trim())
+      ? input.accent.trim()
+      : null;
+
   return {
     ...DEFAULT_SETTINGS,
     ...input,
@@ -486,6 +517,9 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     projectGraphMaxFileBytes,
     projectGraphMaxTreeEntries,
     lang,
+    theme,
+    accent,
+    customThemes,
     recentWorkspaces: normalizeRecentWorkspaces(input.recentWorkspaces),
     mentorEnabled:
       typeof input.mentorEnabled === 'boolean'

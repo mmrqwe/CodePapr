@@ -2,8 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── 主题：浅色（默认）/ 深色（.dark） ───────── */
+/* ── 主题：静态 fallback（paper-light / paper-dark） ─────────
+ * JS 就绪前首帧依赖这两个静态块；运行时由 themeEngine 注入
+ * `:root[data-theme="…"]` token 块（特异性更高，天然覆盖此 fallback）。
+ * index.html 静态声明 data-theme="paper-light"。 */
 :root {
+  color-scheme: light;
   --bg-deep: #f7f4ef;
   --bg-base: #fffdf9;
   --bg-raised: #f5f0e9;
@@ -50,7 +54,9 @@
   --gantt-tool: 217, 119, 6;   /* 工具调用：amber-600 */
 }
 
+/* paper-dark 静态 fallback（跟随系统/深色用户的 JS 前首帧兜底） */
 .dark {
+  color-scheme: dark;
   --bg-deep: #0A0D14;
   --bg-base: #0F1117;
   --bg-raised: #1A1D27;
@@ -112,258 +118,260 @@ body {
 .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 .scrollbar-stable { scrollbar-gutter: stable both-edges; }
 
-/* ── 浅色主题全局覆盖 ::not(.dark) ──────────── */
+/* ── paper-light 主题全局覆盖层 ─────────────────────────────
+ * 组件迁移（Phase 3）完成前的过渡补丁：把硬编码深色类重映射为浅色。
+ * 只作用于 paper-light；新主题不再使用该层。 */
 
 /* --- 输入控件 --- */
-:root:not(.dark) input:not([type="checkbox"]):not([type="radio"]),
-:root:not(.dark) textarea,
-:root:not(.dark) select {
+:root[data-theme="paper-light"] input:not([type="checkbox"]):not([type="radio"]),
+:root[data-theme="paper-light"] textarea,
+:root[data-theme="paper-light"] select {
   background-color: var(--bg-base) !important;
   color: var(--foreground) !important;
   border-color: var(--border) !important;
 }
-:root:not(.dark) input[type="checkbox"],
-:root:not(.dark) input[type="radio"] { accent-color: var(--accent) !important; }
-:root:not(.dark) input::placeholder,
-:root:not(.dark) textarea::placeholder { color: var(--foreground-dim) !important; }
+:root[data-theme="paper-light"] input[type="checkbox"],
+:root[data-theme="paper-light"] input[type="radio"] { accent-color: var(--accent) !important; }
+:root[data-theme="paper-light"] input::placeholder,
+:root[data-theme="paper-light"] textarea::placeholder { color: var(--foreground-dim) !important; }
 
 /* ChatPanel 输入框背景 — 与父容器 bg-[#1a1d27] 一致，覆盖全局 textarea 规则 */
-:root:not(.dark) .chat-input-box textarea {
+:root[data-theme="paper-light"] .chat-input-box textarea {
   background-color: var(--bg-raised) !important;
 }
 
 /* --- 所有 dark bg-[#xxxxxx] → 浅色背景 --- */
-:root:not(.dark) [class*="bg-[#0f1117]"],
-:root:not(.dark) [class*="bg-[#10131b]"],
-:root:not(.dark) [class*="bg-[#101722]"],
-:root:not(.dark) [class*="bg-[#0b0d12]"],
-:root:not(.dark) [class*="bg-[#0d0f17]"],
-:root:not(.dark) [class*="bg-[#0f1118]"],
-:root:not(.dark) [class*="bg-[#0d1118]"],
-:root:not(.dark) [class*="bg-[#0e1117]"],
-:root:not(.dark) [class*="bg-[#0f141d]"],
-:root:not(.dark) [class*="bg-[#10141d]"],
-:root:not(.dark) [class*="bg-[#11141c]"],
-:root:not(.dark) [class*="bg-[#11151d]"],
-:root:not(.dark) [class*="bg-[#111623]"],
-:root:not(.dark) [class*="bg-[#101520]"],
-:root:not(.dark) [class*="bg-[#121722]"],
-:root:not(.dark) [class*="bg-[#151720]"],
-:root:not(.dark) [class*="bg-[#0d1017]"],
-:root:not(.dark) [class*="bg-[#0c0e14]"],
-:root:not(.dark) [class*="bg-[#0b0d13]"],
-:root:not(.dark) [class*="bg-[#131722]"],
-:root:not(.dark) [class*="bg-[#161922]"],
-:root:not(.dark) [class*="bg-[#161923]"],
-:root:not(.dark) [class*="bg-[#161a24]"],
-:root:not(.dark) [class*="bg-[#171c29]"],
-:root:not(.dark) [class*="bg-[#1a1d2a]"],
-:root:not(.dark) [class*="bg-[#1a2232]"] {
+:root[data-theme="paper-light"] [class*="bg-[#0f1117]"],
+:root[data-theme="paper-light"] [class*="bg-[#10131b]"],
+:root[data-theme="paper-light"] [class*="bg-[#101722]"],
+:root[data-theme="paper-light"] [class*="bg-[#0b0d12]"],
+:root[data-theme="paper-light"] [class*="bg-[#0d0f17]"],
+:root[data-theme="paper-light"] [class*="bg-[#0f1118]"],
+:root[data-theme="paper-light"] [class*="bg-[#0d1118]"],
+:root[data-theme="paper-light"] [class*="bg-[#0e1117]"],
+:root[data-theme="paper-light"] [class*="bg-[#0f141d]"],
+:root[data-theme="paper-light"] [class*="bg-[#10141d]"],
+:root[data-theme="paper-light"] [class*="bg-[#11141c]"],
+:root[data-theme="paper-light"] [class*="bg-[#11151d]"],
+:root[data-theme="paper-light"] [class*="bg-[#111623]"],
+:root[data-theme="paper-light"] [class*="bg-[#101520]"],
+:root[data-theme="paper-light"] [class*="bg-[#121722]"],
+:root[data-theme="paper-light"] [class*="bg-[#151720]"],
+:root[data-theme="paper-light"] [class*="bg-[#0d1017]"],
+:root[data-theme="paper-light"] [class*="bg-[#0c0e14]"],
+:root[data-theme="paper-light"] [class*="bg-[#0b0d13]"],
+:root[data-theme="paper-light"] [class*="bg-[#131722]"],
+:root[data-theme="paper-light"] [class*="bg-[#161922]"],
+:root[data-theme="paper-light"] [class*="bg-[#161923]"],
+:root[data-theme="paper-light"] [class*="bg-[#161a24]"],
+:root[data-theme="paper-light"] [class*="bg-[#171c29]"],
+:root[data-theme="paper-light"] [class*="bg-[#1a1d2a]"],
+:root[data-theme="paper-light"] [class*="bg-[#1a2232]"] {
   background-color: var(--bg-base) !important;
 }
-:root:not(.dark) [class*="bg-[#1a1d27]"],
-:root:not(.dark) [class*="bg-[#202432]"],
-:root:not(.dark) [class*="bg-[#202434]"],
-:root:not(.dark) [class*="bg-[#1a1f2b]"],
-:root:not(.dark) [class*="bg-[#1f2430]"],
-:root:not(.dark) [class*="bg-[#232734]"],
-:root:not(.dark) [class*="bg-[#232938]"],
-:root:not(.dark) [class*="bg-[#161c2b]"],
-:root:not(.dark) [class*="bg-[#1b2130]"],
-:root:not(.dark) [class*="bg-[#1e2535]"],
-:root:not(.dark) [class*="bg-[#222639]"],
-:root:not(.dark) [class*="bg-[#2b2d35]"] {
+:root[data-theme="paper-light"] [class*="bg-[#1a1d27]"],
+:root[data-theme="paper-light"] [class*="bg-[#202432]"],
+:root[data-theme="paper-light"] [class*="bg-[#202434]"],
+:root[data-theme="paper-light"] [class*="bg-[#1a1f2b]"],
+:root[data-theme="paper-light"] [class*="bg-[#1f2430]"],
+:root[data-theme="paper-light"] [class*="bg-[#232734]"],
+:root[data-theme="paper-light"] [class*="bg-[#232938]"],
+:root[data-theme="paper-light"] [class*="bg-[#161c2b]"],
+:root[data-theme="paper-light"] [class*="bg-[#1b2130]"],
+:root[data-theme="paper-light"] [class*="bg-[#1e2535]"],
+:root[data-theme="paper-light"] [class*="bg-[#222639]"],
+:root[data-theme="paper-light"] [class*="bg-[#2b2d35]"] {
   background-color: var(--bg-raised) !important;
 }
-:root:not(.dark) [class*="bg-[#090c12]"],
-:root:not(.dark) [class*="bg-[#06070a]"],
-:root:not(.dark) [class*="bg-[#06080c]"],
-:root:not(.dark) [class*="bg-[#07090d]"],
-:root:not(.dark) [class*="bg-[#0d0f15]"] {
+:root[data-theme="paper-light"] [class*="bg-[#090c12]"],
+:root[data-theme="paper-light"] [class*="bg-[#06070a]"],
+:root[data-theme="paper-light"] [class*="bg-[#06080c]"],
+:root[data-theme="paper-light"] [class*="bg-[#07090d]"],
+:root[data-theme="paper-light"] [class*="bg-[#0d0f15]"] {
   background-color: var(--bg-deep) !important;
 }
 
 /* 深灰底（开关关闭态/hover 底）→ 浅色描边强度 */
-:root:not(.dark) [class*="bg-[#2a2d3a]"] {
+:root[data-theme="paper-light"] [class*="bg-[#2a2d3a]"] {
   background-color: var(--border-strong) !important;
 }
 
 /* 弹窗遮罩：浅色主题用暖色薄纱替代 70% 纯黑，避免整体发黑 */
-:root:not(.dark) .bg-black\/70 {
+:root[data-theme="paper-light"] .bg-black\/70 {
   background-color: rgba(27, 18, 10, 0.38) !important;
 }
 
 /* Active/selected bg → warm accent, matching session tab */
-:root:not(.dark) [class*="bg-[#2b3150]"] {
+:root[data-theme="paper-light"] [class*="bg-[#2b3150]"] {
   background-color: var(--accent-soft) !important;
 }
 /* Session tab selection style: bg-indigo-600/20 → warm accent */
-:root:not(.dark) .bg-indigo-600\/20,
-:root:not(.dark) [class*="bg-indigo-600/"] { background-color: var(--accent-soft) !important; }
-:root:not(.dark) [class*="bg-[#114a88]"] {
+:root[data-theme="paper-light"] .bg-indigo-600\/20,
+:root[data-theme="paper-light"] [class*="bg-indigo-600/"] { background-color: var(--accent-soft) !important; }
+:root[data-theme="paper-light"] [class*="bg-[#114a88]"] {
   background-color: var(--accent-soft) !important;
 }
 
 /* 渐变背景 → 浅色梯度 */
-:root:not(.dark) [class*="bg-[linear-gradient"]:not([class*="bg-indigo"]) {
+:root[data-theme="paper-light"] [class*="bg-[linear-gradient"]:not([class*="bg-indigo"]) {
   background-image: var(--surface-gradient) !important;
 }
 
 /* --- 代码块背景 → 浅色 --- */
-:root:not(.dark) pre,
-:root:not(.dark) code { background-color: var(--code-bg) !important; color: var(--code-fg) !important; }
-:root:not(.dark) .monaco-editor,
-:root:not(.dark) .monaco-editor-background,
-:root:not(.dark) .monaco-editor .margin,
-:root:not(.dark) .monaco-editor .margin-view-overlays,
-:root:not(.dark) [class*="monaco-editor"] { background-color: var(--code-bg) !important; }
-:root:not(.dark) .monaco-editor .line-numbers { color: var(--foreground-dim) !important; }
-:root:not(.dark) .monaco-editor .current-line ~ .line-numbers { color: var(--foreground-muted) !important; }
-:root:not(.dark) [class*="bg-[#0b0d12]"] pre,
-:root:not(.dark) [class*="bg-[#0b0d12]"] code { background-color: var(--code-bg) !important; color: var(--code-fg) !important; }
+:root[data-theme="paper-light"] pre,
+:root[data-theme="paper-light"] code { background-color: var(--code-bg) !important; color: var(--code-fg) !important; }
+:root[data-theme="paper-light"] .monaco-editor,
+:root[data-theme="paper-light"] .monaco-editor-background,
+:root[data-theme="paper-light"] .monaco-editor .margin,
+:root[data-theme="paper-light"] .monaco-editor .margin-view-overlays,
+:root[data-theme="paper-light"] [class*="monaco-editor"] { background-color: var(--code-bg) !important; }
+:root[data-theme="paper-light"] .monaco-editor .line-numbers { color: var(--foreground-dim) !important; }
+:root[data-theme="paper-light"] .monaco-editor .current-line ~ .line-numbers { color: var(--foreground-muted) !important; }
+:root[data-theme="paper-light"] [class*="bg-[#0b0d12]"] pre,
+:root[data-theme="paper-light"] [class*="bg-[#0b0d12]"] code { background-color: var(--code-bg) !important; color: var(--code-fg) !important; }
 
 /* --- 代码语法高亮 token 颜色 → 浅色主题 --- */
 /* Monaco colorize 输出 vs-dark 主题的内联 style="color:#XXXXXX"，
    在浅色模式下这些深色 token 颜色对比度太低，需要重映射。 */
-:root:not(.dark) code span[style*="color:#d4d4d4"],
-:root:not(.dark) code span[style*="color:#d4d4d4;"] { color: #1e1b18 !important; }   /* default text */
-:root:not(.dark) code span[style*="color:#808080"],
-:root:not(.dark) code span[style*="color:#808080;"] { color: #5a5248 !important; }   /* comments / punctuation (darker gray) */
-:root:not(.dark) code span[style*="color:#858585"],
-:root:not(.dark) code span[style*="color:#858585;"] { color: #5a5248 !important; }   /* comments variant */
-:root:not(.dark) code span[style*="color:#6a9955"],
-:root:not(.dark) code span[style*="color:#6a9955;"] { color: #4a6530 !important; }   /* comments (green, darker) */
-:root:not(.dark) code span[style*="color:#608b4e"],
-:root:not(.dark) code span[style*="color:#608b4e;"] { color: #4a6530 !important; }   /* comments variant 2 */
-:root:not(.dark) code span[style*="color:#569cd6"],
-:root:not(.dark) code span[style*="color:#569cd6;"] { color: #1a5fb4 !important; }   /* keywords */
-:root:not(.dark) code span[style*="color:#4ec9b0"],
-:root:not(.dark) code span[style*="color:#4ec9b0;"] { color: #1a7a64 !important; }   /* types / interfaces */
-:root:not(.dark) code span[style*="color:#9cdcfe"],
-:root:not(.dark) code span[style*="color:#9cdcfe;"] { color: #0060bf !important; }   /* variables / properties */
-:root:not(.dark) code span[style*="color:#4fc1ff"],
-:root:not(.dark) code span[style*="color:#4fc1ff;"] { color: #0060bf !important; }   /* light blue variables */
-:root:not(.dark) code span[style*="color:#ce9178"],
-:root:not(.dark) code span[style*="color:#ce9178;"] { color: #a3471a !important; }   /* strings */
-:root:not(.dark) code span[style*="color:#b5cea8"],
-:root:not(.dark) code span[style*="color:#b5cea8;"] { color: #4a7c3c !important; }   /* numbers */
-:root:not(.dark) code span[style*="color:#c586c0"],
-:root:not(.dark) code span[style*="color:#c586c0;"] { color: #8b3a7c !important; }   /* built-in functions */
-:root:not(.dark) code span[style*="color:#dcdcaa"],
-:root:not(.dark) code span[style*="color:#dcdcaa;"] { color: #7a6020 !important; }   /* function names */
-:root:not(.dark) code span[style*="color:#e6db74"],
-:root:not(.dark) code span[style*="color:#e6db74;"] { color: #7a6020 !important; }   /* CSS property names (dark yellow → amber) */
-:root:not(.dark) code span[style*="color:#f8c555"],
-:root:not(.dark) code span[style*="color:#f8c555;"] { color: #8a5a00 !important; }   /* CSS tags / selectors */
-:root:not(.dark) code span[style*="color:#d7ba7d"],
-:root:not(.dark) code span[style*="color:#d7ba7d;"] { color: #6b4c10 !important; }   /* CSS attribute names */
-:root:not(.dark) code span[style*="color:#d16969"],
-:root:not(.dark) code span[style*="color:#d16969;"] { color: #a81c1c !important; }   /* CSS values / important */
-:root:not(.dark) code span[style*="color:#4fc1ff"],
-:root:not(.dark) code span[style*="color:#4fc1ff;"] { color: #006bb3 !important; }   /* CSS units / numbers */
-:root:not(.dark) code span[style*="color:#608b4e"],
-:root:not(.dark) code span[style*="color:#608b4e;"] { color: #4a6e3c !important; }   /* CSS comment */
-:root:not(.dark) code span[style*="color:#4e94ce"],
-:root:not(.dark) code span[style*="color:#4e94ce;"] { color: #1a5fb4 !important; }   /* tag names (HTML) */
-:root:not(.dark) code span[style*="color:#c8c8c8"],
-:root:not(.dark) code span[style*="color:#c8c8c8;"] { color: #3a362f !important; }   /* metadata / dim */
+:root[data-theme="paper-light"] code span[style*="color:#d4d4d4"],
+:root[data-theme="paper-light"] code span[style*="color:#d4d4d4;"] { color: #1e1b18 !important; }   /* default text */
+:root[data-theme="paper-light"] code span[style*="color:#808080"],
+:root[data-theme="paper-light"] code span[style*="color:#808080;"] { color: #5a5248 !important; }   /* comments / punctuation (darker gray) */
+:root[data-theme="paper-light"] code span[style*="color:#858585"],
+:root[data-theme="paper-light"] code span[style*="color:#858585;"] { color: #5a5248 !important; }   /* comments variant */
+:root[data-theme="paper-light"] code span[style*="color:#6a9955"],
+:root[data-theme="paper-light"] code span[style*="color:#6a9955;"] { color: #4a6530 !important; }   /* comments (green, darker) */
+:root[data-theme="paper-light"] code span[style*="color:#608b4e"],
+:root[data-theme="paper-light"] code span[style*="color:#608b4e;"] { color: #4a6530 !important; }   /* comments variant 2 */
+:root[data-theme="paper-light"] code span[style*="color:#569cd6"],
+:root[data-theme="paper-light"] code span[style*="color:#569cd6;"] { color: #1a5fb4 !important; }   /* keywords */
+:root[data-theme="paper-light"] code span[style*="color:#4ec9b0"],
+:root[data-theme="paper-light"] code span[style*="color:#4ec9b0;"] { color: #1a7a64 !important; }   /* types / interfaces */
+:root[data-theme="paper-light"] code span[style*="color:#9cdcfe"],
+:root[data-theme="paper-light"] code span[style*="color:#9cdcfe;"] { color: #0060bf !important; }   /* variables / properties */
+:root[data-theme="paper-light"] code span[style*="color:#4fc1ff"],
+:root[data-theme="paper-light"] code span[style*="color:#4fc1ff;"] { color: #0060bf !important; }   /* light blue variables */
+:root[data-theme="paper-light"] code span[style*="color:#ce9178"],
+:root[data-theme="paper-light"] code span[style*="color:#ce9178;"] { color: #a3471a !important; }   /* strings */
+:root[data-theme="paper-light"] code span[style*="color:#b5cea8"],
+:root[data-theme="paper-light"] code span[style*="color:#b5cea8;"] { color: #4a7c3c !important; }   /* numbers */
+:root[data-theme="paper-light"] code span[style*="color:#c586c0"],
+:root[data-theme="paper-light"] code span[style*="color:#c586c0;"] { color: #8b3a7c !important; }   /* built-in functions */
+:root[data-theme="paper-light"] code span[style*="color:#dcdcaa"],
+:root[data-theme="paper-light"] code span[style*="color:#dcdcaa;"] { color: #7a6020 !important; }   /* function names */
+:root[data-theme="paper-light"] code span[style*="color:#e6db74"],
+:root[data-theme="paper-light"] code span[style*="color:#e6db74;"] { color: #7a6020 !important; }   /* CSS property names (dark yellow → amber) */
+:root[data-theme="paper-light"] code span[style*="color:#f8c555"],
+:root[data-theme="paper-light"] code span[style*="color:#f8c555;"] { color: #8a5a00 !important; }   /* CSS tags / selectors */
+:root[data-theme="paper-light"] code span[style*="color:#d7ba7d"],
+:root[data-theme="paper-light"] code span[style*="color:#d7ba7d;"] { color: #6b4c10 !important; }   /* CSS attribute names */
+:root[data-theme="paper-light"] code span[style*="color:#d16969"],
+:root[data-theme="paper-light"] code span[style*="color:#d16969;"] { color: #a81c1c !important; }   /* CSS values / important */
+:root[data-theme="paper-light"] code span[style*="color:#4fc1ff"],
+:root[data-theme="paper-light"] code span[style*="color:#4fc1ff;"] { color: #006bb3 !important; }   /* CSS units / numbers */
+:root[data-theme="paper-light"] code span[style*="color:#608b4e"],
+:root[data-theme="paper-light"] code span[style*="color:#608b4e;"] { color: #4a6e3c !important; }   /* CSS comment */
+:root[data-theme="paper-light"] code span[style*="color:#4e94ce"],
+:root[data-theme="paper-light"] code span[style*="color:#4e94ce;"] { color: #1a5fb4 !important; }   /* tag names (HTML) */
+:root[data-theme="paper-light"] code span[style*="color:#c8c8c8"],
+:root[data-theme="paper-light"] code span[style*="color:#c8c8c8;"] { color: #3a362f !important; }   /* metadata / dim */
 
 /* --- 边框 --- */
-:root:not(.dark) [class*="border-[#2a2d3a]"],
-:root:not(.dark) [class*="border-[#1f2430]"],
-:root:not(.dark) [class*="border-[#232734]"],
-:root:not(.dark) [class*="border-[#232938]"],
-:root:not(.dark) [class*="border-[#202432]"],
-:root:not(.dark) [class*="border-[#111622]"],
-:root:not(.dark) [class*="border-[#1a1f2b]"],
-:root:not(.dark) [class*="border-[#243040]"] {
+:root[data-theme="paper-light"] [class*="border-[#2a2d3a]"],
+:root[data-theme="paper-light"] [class*="border-[#1f2430]"],
+:root[data-theme="paper-light"] [class*="border-[#232734]"],
+:root[data-theme="paper-light"] [class*="border-[#232938]"],
+:root[data-theme="paper-light"] [class*="border-[#202432]"],
+:root[data-theme="paper-light"] [class*="border-[#111622]"],
+:root[data-theme="paper-light"] [class*="border-[#1a1f2b]"],
+:root[data-theme="paper-light"] [class*="border-[#243040]"] {
   border-color: var(--border) !important;
 }
-:root:not(.dark) [class*="border-[#3a3f55]"],
-:root:not(.dark) [class*="border-[#3a4154]"] {
+:root[data-theme="paper-light"] [class*="border-[#3a3f55]"],
+:root[data-theme="paper-light"] [class*="border-[#3a4154]"] {
   border-color: var(--border-strong) !important;
 }
-:root:not(.dark) [class*="divide-[#1f2430]"] > * + * {
+:root[data-theme="paper-light"] [class*="divide-[#1f2430]"] > * + * {
   border-color: var(--border) !important;
 }
 
 /* --- 文本颜色 --- */
-:root:not(.dark) .text-slate-100,
-:root:not(.dark) .text-slate-200,
-:root:not(.dark) .text-white { color: var(--foreground) !important; }
-:root:not(.dark) .text-slate-300 { color: var(--foreground-soft) !important; }
-:root:not(.dark) .text-slate-400 { color: var(--foreground-muted) !important; }
-:root:not(.dark) .text-slate-500 { color: var(--foreground-muted) !important; }
-:root:not(.dark) .text-slate-600 { color: var(--foreground-dim) !important; }
+:root[data-theme="paper-light"] .text-slate-100,
+:root[data-theme="paper-light"] .text-slate-200,
+:root[data-theme="paper-light"] .text-white { color: var(--foreground) !important; }
+:root[data-theme="paper-light"] .text-slate-300 { color: var(--foreground-soft) !important; }
+:root[data-theme="paper-light"] .text-slate-400 { color: var(--foreground-muted) !important; }
+:root[data-theme="paper-light"] .text-slate-500 { color: var(--foreground-muted) !important; }
+:root[data-theme="paper-light"] .text-slate-600 { color: var(--foreground-dim) !important; }
 /* 保持 slate-400/90 类可读 — 加深到 muted */
-:root:not(.dark) .text-slate-400\/90,
-:root:not(.dark) [class*="text-slate-400/"],
-:root:not(.dark) [class*="text-slate-300/"] { color: var(--foreground-muted) !important; }
-:root:not(.dark) .text-slate-500\/90,
-:root:not(.dark) [class*="text-slate-500/"] { color: var(--foreground-muted) !important; }
+:root[data-theme="paper-light"] .text-slate-400\/90,
+:root[data-theme="paper-light"] [class*="text-slate-400/"],
+:root[data-theme="paper-light"] [class*="text-slate-300/"] { color: var(--foreground-muted) !important; }
+:root[data-theme="paper-light"] .text-slate-500\/90,
+:root[data-theme="paper-light"] [class*="text-slate-500/"] { color: var(--foreground-muted) !important; }
 
 /* Indigo → 暖橙（按钮、标签、卡片边框） */
-:root:not(.dark) .text-indigo-100,
-:root:not(.dark) .text-indigo-200,
-:root:not(.dark) .text-indigo-300,
-:root:not(.dark) .text-indigo-300\/70,
-:root:not(.dark) .text-indigo-300\/80,
-:root:not(.dark) [class*="text-indigo-300"] { color: var(--accent-text) !important; }
-:root:not(.dark) .text-indigo-400,
-:root:not(.dark) .text-indigo-500 { color: var(--accent) !important; }
-:root:not(.dark) [class*="border-indigo-"] { border-color: var(--accent-soft) !important; }
-:root:not(.dark) [class*="hover:border-indigo-"]:hover { border-color: var(--accent) !important; }
-:root:not(.dark) .bg-indigo-600 { background-color: var(--accent) !important; color: white !important; }
-:root:not(.dark) .bg-indigo-500 { background-color: var(--accent) !important; }
-:root:not(.dark) [class*="bg-indigo-500/"] { background-color: var(--accent-soft) !important; }
-:root:not(.dark) [class*="bg-indigo-400"] { background-color: var(--accent) !important; }
-:root:not(.dark) .accent-indigo-500 { accent-color: var(--accent) !important; }
-:root:not(.dark) .bg-indigo-600 .text-white,
-:root:not(.dark) .bg-indigo-600 .text-slate-200,
-:root:not(.dark) .bg-indigo-500 .text-white,
-:root:not(.dark) .bg-indigo-500 .text-slate-100 { color: white !important; }
+:root[data-theme="paper-light"] .text-indigo-100,
+:root[data-theme="paper-light"] .text-indigo-200,
+:root[data-theme="paper-light"] .text-indigo-300,
+:root[data-theme="paper-light"] .text-indigo-300\/70,
+:root[data-theme="paper-light"] .text-indigo-300\/80,
+:root[data-theme="paper-light"] [class*="text-indigo-300"] { color: var(--accent-text) !important; }
+:root[data-theme="paper-light"] .text-indigo-400,
+:root[data-theme="paper-light"] .text-indigo-500 { color: var(--accent) !important; }
+:root[data-theme="paper-light"] [class*="border-indigo-"] { border-color: var(--accent-soft) !important; }
+:root[data-theme="paper-light"] [class*="hover:border-indigo-"]:hover { border-color: var(--accent) !important; }
+:root[data-theme="paper-light"] .bg-indigo-600 { background-color: var(--accent) !important; color: white !important; }
+:root[data-theme="paper-light"] .bg-indigo-500 { background-color: var(--accent) !important; }
+:root[data-theme="paper-light"] [class*="bg-indigo-500/"] { background-color: var(--accent-soft) !important; }
+:root[data-theme="paper-light"] [class*="bg-indigo-400"] { background-color: var(--accent) !important; }
+:root[data-theme="paper-light"] .accent-indigo-500 { accent-color: var(--accent) !important; }
+:root[data-theme="paper-light"] .bg-indigo-600 .text-white,
+:root[data-theme="paper-light"] .bg-indigo-600 .text-slate-200,
+:root[data-theme="paper-light"] .bg-indigo-500 .text-white,
+:root[data-theme="paper-light"] .bg-indigo-500 .text-slate-100 { color: white !important; }
 /* User bubble: softer background in light mode */
-:root:not(.dark) .max-w-\[80\%\].rounded-2xl.rounded-br-sm.bg-indigo-600 {
+:root[data-theme="paper-light"] .max-w-\[80\%\].rounded-2xl.rounded-br-sm.bg-indigo-600 {
   background-color: #e07b54 !important;
 }
 
 /* Emerald/Green */
-:root:not(.dark) .text-emerald-100,
-:root:not(.dark) .text-emerald-200,
-:root:not(.dark) .text-emerald-300 { color: var(--green) !important; }
-:root:not(.dark) [class*="border-emerald-"] { border-color: var(--green-bg) !important; }
-:root:not(.dark) [class*="bg-emerald-500/"] { background-color: var(--green-bg) !important; }
-:root:not(.dark) .bg-emerald-300 { background-color: var(--green) !important; }
+:root[data-theme="paper-light"] .text-emerald-100,
+:root[data-theme="paper-light"] .text-emerald-200,
+:root[data-theme="paper-light"] .text-emerald-300 { color: var(--green) !important; }
+:root[data-theme="paper-light"] [class*="border-emerald-"] { border-color: var(--green-bg) !important; }
+:root[data-theme="paper-light"] [class*="bg-emerald-500/"] { background-color: var(--green-bg) !important; }
+:root[data-theme="paper-light"] .bg-emerald-300 { background-color: var(--green) !important; }
 
 /* Amber */
-:root:not(.dark) .text-amber-100,
-:root:not(.dark) .text-amber-200,
-:root:not(.dark) .text-amber-300 { color: var(--amber) !important; }
-:root:not(.dark) .text-amber-400,
-:root:not(.dark) [class*="text-amber-400/"] { color: var(--amber) !important; }
+:root[data-theme="paper-light"] .text-amber-100,
+:root[data-theme="paper-light"] .text-amber-200,
+:root[data-theme="paper-light"] .text-amber-300 { color: var(--amber) !important; }
+:root[data-theme="paper-light"] .text-amber-400,
+:root[data-theme="paper-light"] [class*="text-amber-400/"] { color: var(--amber) !important; }
 /* 带透明度的 amber-100（如 text-amber-100/70）在浅底上接近白色，加深为可读色 */
-:root:not(.dark) [class*="text-amber-100/"] { color: var(--foreground-soft) !important; }
-:root:not(.dark) [class*="border-amber-"] { border-color: var(--amber-bg) !important; }
-:root:not(.dark) [class*="bg-amber-500/"],
-:root:not(.dark) [class*="bg-amber-950/"] { background-color: var(--amber-bg) !important; }
+:root[data-theme="paper-light"] [class*="text-amber-100/"] { color: var(--foreground-soft) !important; }
+:root[data-theme="paper-light"] [class*="border-amber-"] { border-color: var(--amber-bg) !important; }
+:root[data-theme="paper-light"] [class*="bg-amber-500/"],
+:root[data-theme="paper-light"] [class*="bg-amber-950/"] { background-color: var(--amber-bg) !important; }
 
 /* Cyan */
-:root:not(.dark) .text-cyan-50,
-:root:not(.dark) .text-cyan-100,
-:root:not(.dark) .text-cyan-200,
-:root:not(.dark) .text-cyan-300,
-:root:not(.dark) .text-cyan-400 { color: var(--cyan) !important; }
-:root:not(.dark) [class*="border-cyan-"] { border-color: var(--cyan-bg) !important; }
-:root:not(.dark) [class*="bg-cyan-500/"],
-:root:not(.dark) [class*="bg-cyan-600/"] { background-color: var(--cyan-bg) !important; }
+:root[data-theme="paper-light"] .text-cyan-50,
+:root[data-theme="paper-light"] .text-cyan-100,
+:root[data-theme="paper-light"] .text-cyan-200,
+:root[data-theme="paper-light"] .text-cyan-300,
+:root[data-theme="paper-light"] .text-cyan-400 { color: var(--cyan) !important; }
+:root[data-theme="paper-light"] [class*="border-cyan-"] { border-color: var(--cyan-bg) !important; }
+:root[data-theme="paper-light"] [class*="bg-cyan-500/"],
+:root[data-theme="paper-light"] [class*="bg-cyan-600/"] { background-color: var(--cyan-bg) !important; }
 
 /* Sky */
-:root:not(.dark) .text-sky-400 { color: #0369a1 !important; }
+:root[data-theme="paper-light"] .text-sky-400 { color: #0369a1 !important; }
 
 /* Red */
-:root:not(.dark) .text-red-200,
-:root:not(.dark) .text-red-300,
-:root:not(.dark) .text-red-400 { color: var(--red) !important; }
+:root[data-theme="paper-light"] .text-red-200,
+:root[data-theme="paper-light"] .text-red-300,
+:root[data-theme="paper-light"] .text-red-400 { color: var(--red) !important; }
 /* ── 对话轮次指示器 ────────────────────────── */
 .rounds-indicator-bar {
   position: absolute;

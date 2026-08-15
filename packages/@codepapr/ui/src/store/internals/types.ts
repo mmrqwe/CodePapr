@@ -8,6 +8,7 @@ import type { CacheValidator, RequestBuilder } from '@codepapr/api';
 import type { AgentRuntimeHandle } from '../../agent/WorkerBackedAgent';
 import type { ProjectDiagnosticsReport } from '../../utils/projectDiagnostics';
 import type { TaskChecklist } from '../../utils/taskChecklistTypes';
+import type { CustomThemeRecord } from '../../theme/types';
 
 export type ApiMode = 'deepseek' | 'custom' | 'local';
 export type ApiFormat = 'openai' | 'claude';
@@ -76,6 +77,12 @@ export interface Settings {
   projectGraphMaxFileBytes: number;
   projectGraphMaxTreeEntries: number;
   lang?: Lang;
+  /** 主题 id（内置或自定义），null = 跟随系统。 */
+  theme: string | null;
+  /** 强调色覆盖（#rgb/#rrggbb），null = 使用主题自带强调色。 */
+  accent: string | null;
+  /** 自定义主题（JSON token 映射导入）。 */
+  customThemes: Record<string, CustomThemeRecord>;
   recentWorkspaces: WorkspaceEntry[];
   mentorEnabled: boolean;
   mentorModel: string;

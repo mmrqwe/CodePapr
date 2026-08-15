@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * 浅色主题靠 index.css 的 `:root:not(.dark)` 覆盖层把硬编码深色类重映射成浅色。
+ * paper-light 主题靠 index.css 的 `:root[data-theme="paper-light"]` 覆盖层
+ * 把硬编码深色类重映射成浅色（Phase 3 组件迁移前的过渡补丁）。
  * 授权相关面板曾因类名漏在覆盖清单外，出现"浅色主题下发黑、看不清字"。
  * 这些测试保证：授权面板用到的每个深色类都有对应的浅色覆盖规则。
  */
@@ -11,17 +12,20 @@ import { describe, expect, it } from 'vitest';
 const SRC_DIR = __dirname;
 const indexCss = readFileSync(join(SRC_DIR, '..', 'index.css'), 'utf-8');
 
-/** 解析 index.css 中所有 :root:not(.dark) 选择器，产出 (类名匹配器) 列表。 */
+const THEME_SCOPE = ':root[data-theme="paper-light"]';
+
+/** 解析 index.css 中所有 :root[data-theme="paper-light"] 选择器，产出 (类名匹配器) 列表。 */
 function parseLightThemeMatchers(css: string): Array<(className: string) => boolean> {
   const matchers: Array<(className: string) => boolean> = [];
-  const ruleRegex = /:root:not\(\.dark\)\s+([^{]+)\{/g;
+  const escapedScope = THEME_SCOPE.replace(/[.*+?^${}()|[\]\\"]/g, '\\$&');
+  const ruleRegex = new RegExp(`${escapedScope}\\s+([^{]+)\\{`, 'g');
   let rule: RegExpExecArray | null;
   while ((rule = ruleRegex.exec(css)) !== null) {
     for (const rawSelector of rule[1].split(',')) {
-      // 多选择器规则里每个片段都可能自带 :root:not(.dark) 前缀
+      // 多选择器规则里每个片段都可能自带主题作用域前缀
       const selector = rawSelector
         .trim()
-        .replace(/^:root:not\(\.dark\)\s*/, '')
+        .replace(new RegExp(`^${escapedScope}\\s*`), '')
         .trim();
       const exact = selector.match(/^\.((?:[^.\\\s]|\\.)+)$/);
       if (exact) {
@@ -46,7 +50,7 @@ function isCovered(matchers: Array<(className: string) => boolean>, className: s
 const matchers = parseLightThemeMatchers(indexCss);
 
 describe('light theme coverage for authorization panels', () => {
-  it('index.css has parseable :root:not(.dark) override rules', () => {
+  it('index.css has parseable :root[data-theme="paper-light"] override rules', () => {
     expect(matchers.length).toBeGreaterThan(50);
   });
 

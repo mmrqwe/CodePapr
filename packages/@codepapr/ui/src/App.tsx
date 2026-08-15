@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, useCallback } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { invoke } from '@tauri-apps/api/core';
 import { useAgentStore, isApiConfigured } from './store/agentStore';
@@ -29,13 +29,26 @@ import {
   stopMcpHealthCheck,
 } from './tools/mcpTools';
 import { useMcpConfirmStore } from './store/mcpConfirmStore';
+import { useThemeStore } from './store/themeStore';
 import type { ReviewScope } from './utils/codeReview';
 import { getTranslation } from './utils/i18n';
 import type { PreviewLocation } from './utils/projectDiagnosticLocations';
 import { cacheGet, cacheSet } from './utils/cacheStorage';
 
 const THEME_CACHE_KEY = 'ui.theme';
-let storedTheme: 'dark' | 'light' | null = null;
+
+/** 启动缓存镜像（防闪烁）。旧版为 'dark' | 'light' 字符串，新版为对象。 */
+interface ThemeCacheValue {
+  theme: string | null;
+  accent: string | null;
+}
+
+/** 旧版布尔主题缓存 → 新主题 id。 */
+function legacyCacheThemeToId(value: unknown): string | null {
+  if (value === 'dark') return 'paper-dark';
+  if (value === 'light') return 'paper-light';
+  return null;
+}
 
 // Code-split: these only render conditionally, so keep them out of the main bundle.
 const SettingsModal = lazy(() =>
@@ -89,21 +102,6 @@ const CodeReviewPanel = lazy(() =>
 const OnboardingPanel = lazy(() =>
   import('./components/OnboardingPanel').then((m) => ({ default: m.OnboardingPanel }))
 );
-
-function isDarkTheme(): boolean {
-  if (storedTheme === 'light') return false;
-  if (storedTheme === 'dark') return true;
-  return window.matchMedia('(prefers-color-scheme: dark)').matches;
-}
-
-function applyTheme(dark: boolean): void {
-  const root = document.documentElement;
-  if (dark) {
-    root.classList.add('dark');
-  } else {
-    root.classList.remove('dark');
-  }
-}
 
 function normalizeSelectedPath(path: string | null, workspacePath: string): string | null {
   if (!path) {
@@ -166,7 +164,9 @@ export default function App() {
   const clearApps = useAppRuntimeStore((state) => state.clearApps);
   const mountApp = useAppRuntimeStore((state) => state.mountApp);
   const t = getTranslation(settings.lang);
-  const [isDark, setIsDark] = useState(isDarkTheme);
+  const isDark = useThemeStore((state) => state.mode === 'dark');
+  const themeId = useThemeStore((state) => state.themeId);
+  const themeAccent = useThemeStore((state) => state.accent);
   const [showCacheStats, setShowCacheStats] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showProjectSwitcher, setShowProjectSwitcher] = useState(false);
@@ -196,11 +196,9 @@ export default function App() {
   const selectedFileName = selectedPath ? basename(selectedPath) : null;
 
   const toggleTheme = useCallback(() => {
-    const next = !isDark;
-    setIsDark(next);
-    storedTheme = next ? 'dark' : 'light';
-    void cacheSet(THEME_CACHE_KEY, storedTheme);
-  }, [isDark]);
+    const next = useThemeStore.getState().mode === 'dark' ? 'paper-light' : 'paper-dark';
+    useThemeStore.getState().setTheme(next);
+  }, []);
 
   useEffect(() => {
     void loadSettings();
@@ -222,25 +220,91 @@ export default function App() {
     };
   }, [loadSettings]);
 
+  // ── 主题引导 ──────────────────────────────────────────────
+  // 启动顺序：index.html 静态 data-theme="paper-light" 保证首帧可用；
+  // 缓存镜像（防闪烁）→ Settings（权威）→ 旧偏好迁移进 Settings。
+  const cachedThemeRef = useRef<{ theme: string | null; accent: string | null } | null>(null);
+  const themeHydratedRef = useRef(false);
+
   useEffect(() => {
-    cacheGet<'dark' | 'light'>(THEME_CACHE_KEY).then((theme) => {
-      if (theme === 'dark' || theme === 'light') {
-        storedTheme = theme;
-        setIsDark(theme === 'dark');
+    void cacheGet<unknown>(THEME_CACHE_KEY).then((cached) => {
+      if (typeof cached === 'string') {
+        const legacyId = legacyCacheThemeToId(cached);
+        if (legacyId) cachedThemeRef.current = { theme: legacyId, accent: null };
+      } else if (cached && typeof cached === 'object') {
+        const record = cached as Partial<ThemeCacheValue>;
+        cachedThemeRef.current = {
+          theme: typeof record.theme === 'string' ? record.theme : null,
+          accent: typeof record.accent === 'string' ? record.accent : null,
+        };
       }
+      const cachedTheme = cachedThemeRef.current;
+      const { settings, settingsLoaded } = useAgentStore.getState();
+      if (settingsLoaded) {
+        if (settings.theme == null && cachedTheme?.theme) {
+          // 旧版布尔主题偏好 → 迁移进 Settings（一次性）
+          useAgentStore.getState().setSettings(
+            { theme: cachedTheme.theme, accent: settings.accent ?? cachedTheme.accent },
+            { preserveAgent: true },
+          );
+          useThemeStore.getState().applyFromSettings({
+            theme: cachedTheme.theme,
+            accent: settings.accent ?? cachedTheme.accent,
+            customThemes: settings.customThemes,
+          });
+        } else {
+          useThemeStore.getState().applyFromSettings({
+            theme: settings.theme,
+            accent: settings.accent,
+            customThemes: settings.customThemes,
+          });
+        }
+      } else {
+        // Settings 尚未加载：先用缓存防闪烁，加载后由下方 effect 接管。
+        useThemeStore.getState().applyFromSettings({
+          theme: cachedTheme?.theme ?? null,
+          accent: cachedTheme?.accent ?? null,
+          customThemes: {},
+        });
+      }
+      themeHydratedRef.current = true;
     });
   }, []);
 
+  // Settings 加载完成后以 Settings 为准（含旧偏好迁移兜底）。
   useEffect(() => {
-    applyTheme(isDark);
-  }, [isDark]);
+    if (!settingsLoaded) return;
+    const current = useAgentStore.getState().settings;
+    const cachedTheme = cachedThemeRef.current;
+    if (current.theme == null && cachedTheme?.theme) {
+      useAgentStore.getState().setSettings(
+        { theme: cachedTheme.theme, accent: current.accent ?? cachedTheme.accent },
+        { preserveAgent: true },
+      );
+      useThemeStore.getState().applyFromSettings({
+        theme: cachedTheme.theme,
+        accent: current.accent ?? cachedTheme.accent,
+        customThemes: current.customThemes,
+      });
+      return;
+    }
+    useThemeStore.getState().applyFromSettings({
+      theme: current.theme,
+      accent: current.accent,
+      customThemes: current.customThemes,
+    });
+  }, [settingsLoaded]);
+
+  // 启动缓存镜像回写：仅在水合完成后允许，避免空值覆盖旧版缓存。
+  useEffect(() => {
+    if (!themeHydratedRef.current) return;
+    void cacheSet<ThemeCacheValue>(THEME_CACHE_KEY, { theme: themeId, accent: themeAccent });
+  }, [themeId, themeAccent]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const onChange = (e: MediaQueryListEvent) => {
-      if (!storedTheme) {
-        setIsDark(e.matches);
-      }
+      useThemeStore.getState().syncFromSystem(e.matches);
     };
     mediaQuery.addEventListener('change', onChange);
     return () => mediaQuery.removeEventListener('change', onChange);
