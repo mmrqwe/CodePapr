@@ -240,6 +240,25 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
   'app_delete',
 ]);
 
+/**
+ * 可并行执行的只读工具。同一轮内连续命中该名单的工具调用会合并为一个并行段
+ * 并发执行（墙钟从 sum 降到 max）；变更类（write/edit/bash/git）、交互类
+ * （question/task）与网络类（websearch/web_fetch/mcp__*）工具不在此列，
+ * 各自保持串行段以保留 question 短路、editHistory 顺序与同文件竞争安全。
+ * 准入标准：纯读取、无外部副作用、调用间无数据依赖。
+ */
+export const PARALLEL_SAFE_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'read',
+  'grep',
+  'glob',
+  'list',
+  'graph',
+  'lsp',
+  'diagnostics',
+  'read_image',
+  'local_time_now',
+]);
+
 /** 仅在 app 模式下可用的工具（应用管理/渲染相关）。 */
 export const APP_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
   'app_render',

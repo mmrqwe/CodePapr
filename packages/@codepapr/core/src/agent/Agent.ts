@@ -36,6 +36,7 @@ import {
   ContextStage,
 } from '@codepapr/types';
 import { Logger, estimateTokens } from '@codepapr/common';
+import { PARALLEL_SAFE_TOOL_NAMES } from './agentConfig';
 import { Session, mergeOptionalTokenCount } from './Session';
 import { MessageFactory } from '../message/Message';
 import { Serializer } from '../cache/Serializer';
@@ -53,6 +54,10 @@ import {
 const log = new Logger('Agent');
 
 const DEFAULT_TOOL_TIMEOUT_MS = 270_000;
+
+/** 单个并行段内同时执行的工具调用上限：只读突发（一次发十几个 read/grep）
+ *  分块并发，避免瞬时打满 IPC/Tauri 命令通道。块间串行、块内并行。 */
+export const PARALLEL_TOOL_CHUNK_SIZE = 8;
 
 /** 输出被 max_tokens 截断（finish_reason='length'）后，单回合自动续写的上限。
  *  防止遇到中转的极小输出上限时无限续写；达到上限后以已合并内容正常收尾
@@ -842,80 +847,145 @@ export class Agent {
         break;
       }
 
-      let executedToolCalls = 0;
-      for (const call of assistant.toolCalls) {
+      // ── 分段执行：并行安全（只读）工具并行，其余串行 ──────────────────
+      // 连续命中 PARALLEL_SAFE_TOOL_NAMES 的调用合并为一个并行段并发执行
+      // （墙钟从 sum 降到 max）；变更/交互类工具（question/task/bash/git 等）
+      // 各自成串行段，保留 question 短路等原语义。全部结果按原始调用顺序
+      // 落账——日志字节顺序与串行执行一致，缓存哈希、toolOutputSummary 与
+      // 上下文压缩均不受影响。
+      interface ToolCallRecord {
+        call: IToolCall;
+        result: unknown;
+        success: boolean;
+        errorMessage?: string;
+        toolDurationMs?: number;
+      }
+
+      const executeOne = async (call: IToolCall): Promise<ToolCallRecord> => {
+        if (call.arguments._parseError) {
+          const parseErrorMessage = `工具参数 JSON 解析失败: ${call.arguments.error}. 原始参数(前500字符): ${call.arguments._raw}`;
+          log.error(`Tool argument parse failed: ${call.name}`, { error: parseErrorMessage });
+          return { call, result: { error: parseErrorMessage }, success: false, errorMessage: parseErrorMessage };
+        }
+        // 每个工具调用独立 AbortController：主会话取消或工具超时都会
+        // abort 它，并通过 ToolExecutionContext.signal 下发给工具实现
+        // （bash 杀进程、task 取消子代理等）。旧实现 withTimeout 只抛弃
+        // promise，工具继续在后台跑完并滞后落地副作用。
+        const callController = new AbortController();
+        const propagateAbort = (): void => callController.abort();
         if (effectiveSignal?.aborted) {
+          callController.abort();
+        } else {
+          effectiveSignal?.addEventListener('abort', propagateAbort, { once: true });
+        }
+        const toolStartedAt = Date.now();
+        try {
+          const toolTimeoutMs = this.toolTimeouts[call.name] ?? DEFAULT_TOOL_TIMEOUT_MS;
+          const result = await withTimeout(
+            this.session.toolRegistry.execute(call.name, call.arguments, {
+              toolCallId: call.id,
+              signal: callController.signal,
+            }),
+            toolTimeoutMs,
+            effectiveSignal,
+            () => callController.abort()
+          );
+          return { call, result, success: true, toolDurationMs: Math.round(Date.now() - toolStartedAt) };
+        } catch (err) {
+          const errorMessage = (err as Error).message;
+          log.error(`Tool execution failed: ${call.name}`, { error: err });
+          return {
+            call,
+            result: { error: errorMessage },
+            success: false,
+            errorMessage,
+            toolDurationMs: Math.round(Date.now() - toolStartedAt),
+          };
+        } finally {
+          effectiveSignal?.removeEventListener('abort', propagateAbort);
+        }
+      };
+
+      const records: ToolCallRecord[] = [];
+      const isParallelSafe = (call: IToolCall): boolean =>
+        PARALLEL_SAFE_TOOL_NAMES.has(call.name) && !call.arguments._parseError;
+      let cursor = 0;
+      while (cursor < assistant.toolCalls.length) {
+        if (effectiveSignal?.aborted || question) {
           break;
         }
-        // 检测到 question 后立即终止本轮剩余的 tool call：plan 模式模型可能
-        // 在提问前先发了变更类工具，必须保证提问一旦发生就不再执行后续调用。
-        if (question) {
-          break;
+        const head = assistant.toolCalls[cursor];
+
+        if (!isParallelSafe(head)) {
+          // 串行段：question 短路依赖执行后立即提取 __question
+          onStreamEvent?.({
+            type: 'tool-call-start',
+            toolCallId: head.id,
+            toolName: head.name,
+            arguments: head.arguments,
+          });
+          const record = await executeOne(head);
+          records.push(record);
+          if (
+            record.result &&
+            typeof record.result === 'object' &&
+            '__question' in record.result &&
+            (record.result as Record<string, unknown>).__question === true
+          ) {
+            const q = record.result as Record<string, unknown>;
+            question = {
+              question: (q.question as string) || '',
+              header: (q.header as string) || '',
+              options: Array.isArray(q.options) ? q.options as QuestionData['options'] : undefined,
+              multiple: q.multiple === true,
+            };
+          }
+          cursor += 1;
+          continue;
         }
 
-          let result: unknown;
-          let success = true;
-          let errorMessage: string | undefined;
-          let toolDurationMs: number | undefined;
-
+        // 并行段：合并连续安全调用，全段先发 start，再按块并发执行
+        const group: IToolCall[] = [head];
+        let next = cursor + 1;
+        while (next < assistant.toolCalls.length && isParallelSafe(assistant.toolCalls[next])) {
+          group.push(assistant.toolCalls[next]);
+          next += 1;
+        }
+        for (const call of group) {
           onStreamEvent?.({
             type: 'tool-call-start',
             toolCallId: call.id,
             toolName: call.name,
             arguments: call.arguments,
           });
-
-          if (call.arguments._parseError) {
-            errorMessage = `工具参数 JSON 解析失败: ${call.arguments.error}. 原始参数(前500字符): ${call.arguments._raw}`;
-            result = { error: errorMessage };
-            success = false;
-            log.error(`Tool argument parse failed: ${call.name}`, { error: errorMessage });
-          } else {
-            // 每个工具调用独立 AbortController：主会话取消或工具超时都会
-            // abort 它，并通过 ToolExecutionContext.signal 下发给工具实现
-            // （bash 杀进程、task 取消子代理等）。旧实现 withTimeout 只抛弃
-            // promise，工具继续在后台跑完并滞后落地副作用。
-            const callController = new AbortController();
-            const propagateAbort = (): void => callController.abort();
-            if (effectiveSignal?.aborted) {
-              callController.abort();
-            } else {
-              effectiveSignal?.addEventListener('abort', propagateAbort, { once: true });
-            }
-            const toolStartedAt = Date.now();
-            try {
-              const toolTimeoutMs = this.toolTimeouts[call.name] ?? DEFAULT_TOOL_TIMEOUT_MS;
-              result = await withTimeout(
-                this.session.toolRegistry.execute(call.name, call.arguments, {
-                  toolCallId: call.id,
-                  signal: callController.signal,
-                }),
-                toolTimeoutMs,
-                effectiveSignal,
-                () => callController.abort()
-              );
-            } catch (err) {
-              errorMessage = (err as Error).message;
-              result = { error: errorMessage };
-              success = false;
-              log.error(`Tool execution failed: ${call.name}`, { error: err });
-            } finally {
-              effectiveSignal?.removeEventListener('abort', propagateAbort);
-            }
-            toolDurationMs = Math.round(Date.now() - toolStartedAt);
+        }
+        for (let chunkStart = 0; chunkStart < group.length; chunkStart += PARALLEL_TOOL_CHUNK_SIZE) {
+          if (effectiveSignal?.aborted) {
+            // 段内取消：尚未发出的块不再执行，稍后补占位结果
+            break;
           }
+          const chunk = group.slice(chunkStart, chunkStart + PARALLEL_TOOL_CHUNK_SIZE);
+          const chunkRecords = await Promise.all(chunk.map((call) => executeOne(call)));
+          records.push(...chunkRecords);
+        }
+        cursor = next;
+      }
+
+      // 按原始调用顺序落账：tool 消息 + end 事件 + __images 提取。顺序与
+      // 串行执行一致，日志字节、缓存哈希与下游管线不受影响。
+      for (const record of records) {
+        const { call, result, success, errorMessage, toolDurationMs } = record;
         let contextResult: unknown = result;
         let subagentToolInvocations: ISubagentToolInvocation[] | undefined;
         if (result && typeof result === 'object' && '__subagentToolInvocations' in result) {
-          const record = result as Record<string, unknown>;
-          subagentToolInvocations = record.__subagentToolInvocations as ISubagentToolInvocation[];
-          const stripped = { ...record };
+          const recordObject = result as Record<string, unknown>;
+          subagentToolInvocations = recordObject.__subagentToolInvocations as ISubagentToolInvocation[];
+          const stripped = { ...recordObject };
           delete stripped.__subagentToolInvocations;
           contextResult = stripped;
         }
         const toolMsg = await this.buildToolMessage(call, contextResult, success, toolDurationMs);
         await this.session.logStore.append(toolMsg);
-        executedToolCalls += 1;
         onStreamEvent?.({
           type: 'tool-call-end',
           toolCallId: call.id,
@@ -932,16 +1002,6 @@ export class Agent {
           ...(toolDurationMs !== undefined ? { durationMs: toolDurationMs } : {}),
         });
 
-        if (result && typeof result === 'object' && '__question' in result && (result as Record<string, unknown>).__question === true) {
-          const q = result as Record<string, unknown>;
-          question = {
-            question: (q.question as string) || '',
-            header: (q.header as string) || '',
-            options: Array.isArray(q.options) ? q.options as QuestionData['options'] : undefined,
-            multiple: q.multiple === true,
-          };
-        }
-
         if (result && typeof result === 'object' && '__images' in result) {
           const images = (result as Record<string, unknown>).__images as IImageContent[] | undefined;
           if (images && images.length > 0) {
@@ -953,6 +1013,8 @@ export class Agent {
           }
         }
       }
+
+      const executedToolCalls = records.length;
 
       // 为被跳过的 tool call 补占位结果：OpenAI/DeepSeek 要求每个 tool_call 都有
       // 配对的 tool 消息、Claude 要求每个 tool_use 后必须跟 tool_result，否则下一
