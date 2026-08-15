@@ -671,6 +671,52 @@ describe('app_start 后端启动工作目录', () => {
       sandbox: { network: true, workspaceWrite: false, allowBind: true },
     });
   });
+
+  it('启动失败时把退出码与进程真实输出返回给 agent（自愈诊断证据）', async () => {
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'check_port_available') return true;
+      if (command === 'start_workspace_background_command') {
+        return { pid: 4242, started: true, previewUrl: args?.previewUrl ?? null };
+      }
+      // math-mentor 场景：进程秒退，端口始终无人监听（v4/v6 都 refused）
+      if (command === 'check_port_available_structured') return { v4: false, v6: false };
+      if (command === 'check_port_available_detail') return 'v4=refused v6=refused';
+      if (command === 'background_process_exit_info') {
+        return {
+          pid: 4242,
+          command: 'node',
+          args: ['server.js'],
+          exitCode: 1,
+          signal: null,
+          logTail: "[err] Error: Cannot find module '/tmp/ws/server.js'",
+        };
+      }
+      return {};
+    });
+
+    // 快进 Date.now 越过 8s 轮询上限：首轮探测（端口仍空闲）后即判失败，
+    // 避免测试真等 8 秒。每次调用步进 9s（> 8000ms 上限）。
+    let clock = 1_000_000;
+    const dateSpy = vi.spyOn(Date, 'now').mockImplementation(() => {
+      clock += 9000;
+      return clock;
+    });
+
+    try {
+      const promise = build({ mode: 'app' }).execute('app_start', { appId: 'demo-app' });
+      await expect(promise).rejects.toThrow(/exit=1/);
+      await expect(promise).rejects.toThrow(/Cannot find module/);
+    } finally {
+      dateSpy.mockRestore();
+    }
+
+    // 失败后必须清理 spawned 进程，不留孤儿占端口
+    expect(
+      invokeMock.mock.calls.some(
+        ([command, args]) => command === 'stop_background_process' && args?.pid === 4242,
+      ),
+    ).toBe(true);
+  });
 });
 
 describe('workspace_apply_diff 写入原子性', () => {

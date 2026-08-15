@@ -457,6 +457,17 @@ export interface BackgroundProcessEntry {
   logTail: string;
 }
 
+/** 后台进程勘验信息：存活进程返回实时输出（exitCode=null）；已退出进程返回
+ * 归档的退出码/信号 + 回收前捕获的输出尾部（app_start 失败诊断的证据来源）。 */
+export interface BackgroundProcessExitInfo {
+  pid: number;
+  command: string;
+  args: string[];
+  exitCode: number | null;
+  signal: number | null;
+  logTail: string;
+}
+
 export interface StopBackgroundProcessResult {
   pid: number;
   stopped: boolean;

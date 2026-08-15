@@ -7,7 +7,7 @@ import {
 } from '@codepapr/core';
 import { toolByName } from './workspaceToolDefinitions';
 import {
-  type BackgroundProcessEntry,
+  type BackgroundProcessExitInfo,
   type WriteTextFileResult,
 } from './workspaceToolHelpers';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
@@ -521,22 +521,23 @@ export async function launchAppBackend(
     pollTrace.push(`+${Date.now() - startedAt}ms:ERROR(${pollError})`);
   }
   if (!portTaken || !portOwnedByUs) {
-    // 先取进程捕获的输出再停掉它：spawn 秒退的真实原因（如 sandbox-exec
-    // 找不到 node、脚本语法错误）只存在于 log_tail，不捞出来就死无对证。
-    let spawnLog = '';
-    try {
-      const procs = await invoke<BackgroundProcessEntry[]>('list_background_processes', { workspacePath });
-      spawnLog = procs.find((p) => p.pid === result.pid)?.logTail?.trim() ?? '';
-    } catch { /* best-effort */ }
+    // 先取进程勘验信息再停掉它：spawn 秒退的真实原因（如 sandbox-exec
+    // 找不到 node、脚本语法错误）只存在于捕获的输出，不捞出来就死无对证。
+    // 旧实现用 list_background_processes——它内部先跑 cleanup，死亡条目连同
+    // log_tail 已被移除，秒退进程永远取不到输出。exit_info 对已退出进程返回
+    // 归档的退出码 + 回收前捕获的输出，agent 凭真实报错自行修复应用。
+    const exitInfo = await fetchProcessExitInfo(result.pid);
     // Kill the spawned child so a slow-starting server does not become an
     // orphan that later grabs the port untracked by the store.
     try { await invoke('stop_background_process', { pid: result.pid, source: 'app_start-failure' }); } catch { /* best-effort */ }
     try { await invoke('log_ui_event', { workspacePath, message: `app_start-failure ${app.appId} port=${app.port} pid=${result.pid} ownedByUs=${portOwnedByUs} polls=[${pollTrace.join(' ')}]` }); } catch { /* best-effort */ }
-    const detail = spawnLog ? `\n进程输出：\n${spawnLog}` : '';
+    const detail = formatExitDetail(exitInfo);
     const reason = !portTaken
-      ? (pollError ? `端口探测失败（${pollError}）` : '进程已退出或端口未被监听')
+      ? (pollError ? `端口探测失败（${pollError}）` : `进程未能监听端口${formatExitStatus(exitInfo)}`)
       : '端口监听者不是本次启动的进程（可能被外部进程抢占）';
-    throw new Error(`应用 '${app.appId}' 后端启动失败：${reason}，请检查 command/args 配置。${detail}`);
+    throw new Error(
+      `应用 '${app.appId}' 后端启动失败：${reason}。请根据进程输出定位问题（常见：args 脚本路径错误、依赖缺失、语法错误、端口占用），修复后用 app_start 重新启动。${detail}`,
+    );
   }
 
   // #60 回环约束：沙箱 SBPL 的 network-bind 地址过滤对本平台无效（实测
@@ -562,11 +563,7 @@ export async function launchAppBackend(
   }
   const nonLoopbackHosts = bindHosts.filter((host) => !isLoopbackBindHost(host) && !isWildcardBindHost(host));
   if (nonLoopbackHosts.length > 0) {
-    let spawnLog = '';
-    try {
-      const procs = await invoke<BackgroundProcessEntry[]>('list_background_processes', { workspacePath });
-      spawnLog = procs.find((p) => p.pid === result.pid)?.logTail?.trim() ?? '';
-    } catch { /* best-effort */ }
+    const exitInfo = await fetchProcessExitInfo(result.pid);
     try { await invoke('stop_background_process', { pid: result.pid, source: 'app_start-loopback-failure' }); } catch { /* best-effort */ }
     try {
       await invoke('log_ui_event', {
@@ -574,7 +571,7 @@ export async function launchAppBackend(
         message: `app_start-failure ${app.appId} port=${app.port} pid=${result.pid} reason=non-loopback-bind hosts=[${nonLoopbackHosts.join(',')}]`,
       });
     } catch { /* best-effort */ }
-    const detail = spawnLog ? `\n进程输出：\n${spawnLog}` : '';
+    const detail = formatExitDetail(exitInfo);
     throw new Error(
       `应用 '${app.appId}' 后端监听在非回环地址（${nonLoopbackHosts.join(', ')}），` +
       `服务会暴露到局域网。请在 command/args 中配置服务只监听 localhost/127.0.0.1。${detail}`
@@ -582,6 +579,29 @@ export async function launchAppBackend(
   }
 
   return { pid: result.pid, url };
+}
+
+/** 进程勘验信息：存活进程返回实时输出；已退出进程返回归档的退出码 + 回收前
+ * 捕获的输出（cleanup 移除条目时归档）。取不到不致命，返回 null。 */
+async function fetchProcessExitInfo(pid: number): Promise<BackgroundProcessExitInfo | null> {
+  try {
+    return await invoke<BackgroundProcessExitInfo | null>('background_process_exit_info', { pid });
+  } catch {
+    return null;
+  }
+}
+
+/** 退出状态描述：exit=1 / signal=9；无信息时为空串。 */
+function formatExitStatus(exitInfo: BackgroundProcessExitInfo | null): string {
+  if (!exitInfo) return '';
+  if (exitInfo.exitCode != null) return `（exit=${exitInfo.exitCode}）`;
+  if (exitInfo.signal != null) return `（signal=${exitInfo.signal}）`;
+  return '';
+}
+
+function formatExitDetail(exitInfo: BackgroundProcessExitInfo | null): string {
+  const spawnLog = exitInfo?.logTail?.trim() ?? '';
+  return spawnLog ? `\n进程输出：\n${spawnLog}` : '';
 }
 
 /** #60：通配监听（IPv6 双栈 `*`，node listen(PORT) 平台默认）。 */

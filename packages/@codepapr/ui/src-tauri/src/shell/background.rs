@@ -9,8 +9,9 @@ use crate::shell::sandbox::{
     validate_restricted_shell_command, SandboxAccess, SandboxAccessArgs,
 };
 use crate::shell::types::{
-    BackgroundCommandResult, BackgroundProcessEntry, CommandResult, ManagedBackgroundProcess,
-    StopAllBackgroundProcessesResult, StopBackgroundProcessResult,
+    BackgroundCommandResult, BackgroundProcessEntry, BackgroundProcessExitInfo, CommandResult,
+    ManagedBackgroundProcess, ReapedBackgroundProcess, StopAllBackgroundProcessesResult,
+    StopBackgroundProcessResult,
 };
 use std::{
     collections::{HashMap, VecDeque},
@@ -113,25 +114,32 @@ pub(crate) fn background_processes() -> &'static Mutex<HashMap<u32, ManagedBackg
     BACKGROUND_PROCESSES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// 已退出后台进程的勘验档案（pid → 退出信息 + 输出尾部）。cleanup 移除死亡
+/// 条目时归档于此：app_start 失败路径随后按 pid 取回真实死因。条目上限
+/// MAX_REAPED_BACKGROUND_PROCESSES，超限按回收时间淘汰最旧。
+static REAPED_BACKGROUND_PROCESSES: OnceLock<Mutex<HashMap<u32, ReapedBackgroundProcess>>> =
+    OnceLock::new();
+
+const MAX_REAPED_BACKGROUND_PROCESSES: usize = 64;
+
+fn reaped_background_processes() -> &'static Mutex<HashMap<u32, ReapedBackgroundProcess>> {
+    REAPED_BACKGROUND_PROCESSES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 pub(crate) fn cleanup_finished_background_processes(
     processes: &mut HashMap<u32, ManagedBackgroundProcess>,
 ) {
-    let finished: Vec<(u32, Option<std::process::ExitStatus>, String, String)> = processes
+    let finished: Vec<(u32, Option<std::process::ExitStatus>, ManagedBackgroundProcessSnapshot)> = processes
         .iter_mut()
         .filter_map(|(pid, process)| match process.child.try_wait() {
             // 注意：Ok(None) = 进程仍存活，绝不能当作已退出（会把活进程踢出注册表）
-            Ok(Some(status)) => Some((
-                *pid,
-                Some(status),
-                process.command.clone(),
-                process.workspace_path.clone(),
-            )),
+            Ok(Some(status)) => Some((*pid, Some(status), snapshot_reaped(process))),
             Ok(None) => None,
-            Err(_) => Some((*pid, None, process.command.clone(), process.workspace_path.clone())),
+            Err(_) => Some((*pid, None, snapshot_reaped(process))),
         })
         .collect();
 
-    for (pid, status, command, workspace_path) in finished {
+    for (pid, status, reaped) in finished {
         processes.remove(&pid);
         // 能走到这里的都是「未经 stop 请求的意外退出」（stop_* 会先移除条目再杀）。
         // 退出信号是辨认凶手的第一证据：signal=9 即被外部 SIGKILL。
@@ -139,6 +147,7 @@ pub(crate) fn cleanup_finished_background_processes(
             Some(status) => (status.code(), exit_signal(status)),
             None => (None, None),
         };
+        archive_reaped_process(pid, code, signal, &reaped);
         let hint = match (code, signal) {
             (_, Some(9)) => "SIGKILL：系统内存压力或外部进程所杀",
             (_, Some(_)) => "被信号终止（非宿主 stop 路径）",
@@ -147,12 +156,97 @@ pub(crate) fn cleanup_finished_background_processes(
             (None, None) => "未知退出状态",
         };
         log_background_event(
-            &workspace_path,
+            &reaped.workspace_path,
             format!(
-                "unexpected-exit pid={pid} command={command} code={code:?} signal={signal:?} (no stop request; {hint})"
+                "unexpected-exit pid={pid} command={} code={code:?} signal={signal:?} (no stop request; {hint})",
+                reaped.command
             ),
         );
     }
+}
+
+/// 从注册表条目快照归档所需字段（log_tail 必须在条目移除前取出）。
+fn snapshot_reaped(process: &ManagedBackgroundProcess) -> ManagedBackgroundProcessSnapshot {
+    ManagedBackgroundProcessSnapshot {
+        command: process.command.clone(),
+        args: process.args.clone(),
+        workspace_path: process.workspace_path.clone(),
+        log_tail: snapshot_background_log_tail(&process.log_tail),
+    }
+}
+
+struct ManagedBackgroundProcessSnapshot {
+    command: String,
+    args: Vec<String>,
+    workspace_path: String,
+    log_tail: String,
+}
+
+fn archive_reaped_process(
+    pid: u32,
+    exit_code: Option<i32>,
+    signal: Option<i32>,
+    snapshot: &ManagedBackgroundProcessSnapshot,
+) {
+    let Ok(mut reaped) = reaped_background_processes().lock() else {
+        return;
+    };
+    if reaped.len() >= MAX_REAPED_BACKGROUND_PROCESSES {
+        // 淘汰最旧条目：按回收时间而非 pid（pid 会回绕，时间单调）
+        let oldest = reaped
+            .iter()
+            .min_by_key(|(_, entry)| entry.reaped_at)
+            .map(|(pid, _)| *pid);
+        if let Some(oldest) = oldest {
+            reaped.remove(&oldest);
+        }
+    }
+    reaped.insert(
+        pid,
+        ReapedBackgroundProcess {
+            command: snapshot.command.clone(),
+            args: snapshot.args.clone(),
+            exit_code,
+            signal,
+            log_tail: snapshot.log_tail.clone(),
+            reaped_at: unix_millis().unwrap_or(0),
+        },
+    );
+}
+
+/// 按 pid 取后台进程勘验信息：存活进程返回实时 log_tail（exit_code=None），
+/// 已退出进程返回归档的退出码/信号 + 回收前捕获的输出尾部。供 app_start
+/// 失败诊断——agent 凭真实报错（而非空洞的「进程已退出」）自行修复应用。
+#[tauri::command]
+pub(crate) fn background_process_exit_info(
+    pid: u32,
+) -> Result<Option<BackgroundProcessExitInfo>, String> {
+    // with_background_processes 会先跑 cleanup：刚退出的进程在此被归档，
+    // 随后即可从 reaped 存储取回——存活与已退出两种情形一次查询全覆盖。
+    let live = with_background_processes(|processes| {
+        Ok(processes.get(&pid).map(|process| BackgroundProcessExitInfo {
+            pid,
+            command: process.command.clone(),
+            args: process.args.clone(),
+            exit_code: None,
+            signal: None,
+            log_tail: snapshot_background_log_tail(&process.log_tail),
+        }))
+    })?;
+    if live.is_some() {
+        return Ok(live);
+    }
+    let reaped = reaped_background_processes()
+        .lock()
+        .map_err(|_| "已退出进程档案锁定失败".to_string())?;
+    Ok(reaped.get(&pid).map(|entry| BackgroundProcessExitInfo {
+        pid,
+        command: entry.command.clone(),
+        args: entry.args.clone(),
+        exit_code: entry.exit_code,
+        signal: entry.signal,
+        log_tail: entry.log_tail.clone(),
+    }))
 }
 
 #[cfg(unix)]
@@ -1095,5 +1189,114 @@ mod tests {
             !processes.contains_key(&pid),
             "finished process must be reaped"
         );
+    }
+
+    /// 回归：死亡进程被 cleanup 移除时，退出码与输出尾部必须归档，
+    /// background_process_exit_info 随后能取回。旧实现移除即丢 log_tail，
+    /// app_start 失败时只能报「进程已退出」，agent 拿不到真实报错无法自愈。
+    #[test]
+    fn cleanup_archives_exit_info_for_dead_processes() {
+        let mut processes = HashMap::new();
+        // ls 一个不存在的路径：非零退出且 stderr 有真实报错文本
+        let mut child = Command::new("ls")
+            .arg("/nonexistent-codepapr-exitinfo-probe")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("ls should spawn");
+        let pid = child.id();
+        let log_tail = Arc::new(Mutex::new(VecDeque::new()));
+        if let Some(stdout) = child.stdout.take() {
+            spawn_background_log_reader(stdout, Arc::clone(&log_tail), "out");
+        }
+        if let Some(stderr) = child.stderr.take() {
+            spawn_background_log_reader(stderr, Arc::clone(&log_tail), "err");
+        }
+        processes.insert(
+            pid,
+            ManagedBackgroundProcess {
+                child,
+                command: "ls".to_string(),
+                args: vec!["/nonexistent-codepapr-exitinfo-probe".to_string()],
+                workspace_path: std::env::temp_dir().to_string_lossy().to_string(),
+                started_at: 0,
+                preview_url: None,
+                log_tail: Arc::clone(&log_tail),
+            },
+        );
+
+        // 等待退出且读线程把 stderr 收进 log_tail
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let exited = matches!(
+                processes.get_mut(&pid).map(|p| p.child.try_wait()),
+                Some(Ok(Some(_)))
+            );
+            let has_output = log_tail.lock().map(|l| !l.is_empty()).unwrap_or(false);
+            if exited && has_output {
+                break;
+            }
+            if Instant::now() >= deadline {
+                panic!("ls should exit quickly with stderr output");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        cleanup_finished_background_processes(&mut processes);
+        assert!(!processes.contains_key(&pid), "dead process must be reaped");
+
+        let info = background_process_exit_info(pid)
+            .expect("exit info lookup must not fail")
+            .expect("reaped process must be archived");
+        assert_eq!(info.pid, pid);
+        assert_eq!(info.command, "ls");
+        assert_eq!(info.exit_code, Some(1), "ls on missing path exits 1");
+        assert!(
+            info.log_tail.contains("No such file or directory"),
+            "archived log must carry the real error; got: {:?}",
+            info.log_tail
+        );
+
+        // 清理本测试归档条目，避免跨测试泄漏
+        if let Ok(mut reaped) = reaped_background_processes().lock() {
+            reaped.remove(&pid);
+        }
+    }
+
+    /// 存活进程查询 exit_info：返回实时 log_tail 且 exit_code=None。
+    #[test]
+    fn exit_info_reports_live_process() {
+        let mut processes = HashMap::new();
+        let child = Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("sleep should spawn");
+        let pid = child.id();
+        processes.insert(pid, make_entry(child));
+        // 直接放进全局注册表供 background_process_exit_info 查询
+        background_processes()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(pid, processes.remove(&pid).unwrap());
+
+        let info = background_process_exit_info(pid)
+            .expect("exit info lookup must not fail")
+            .expect("live process must be found");
+        assert!(info.exit_code.is_none(), "live process has no exit code");
+        assert_eq!(info.command, "sleep");
+
+        // 清理：从全局注册表移除并杀掉进程
+        if let Some(mut entry) = background_processes()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&pid)
+        {
+            let _ = entry.child.kill();
+            let _ = entry.child.wait();
+        }
     }
 }
