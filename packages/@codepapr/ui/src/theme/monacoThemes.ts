@@ -91,7 +91,9 @@ function buildThemeColors(
     'editor.foreground': tokens['code-fg'] ?? '#e2e8f0',
     'editorLineNumber.foreground': tokens['foreground-dim'] ?? '#475569',
     'editorLineNumber.activeForeground': tokens['foreground-soft'] ?? '#94a3b8',
-    'editorCursor.foreground': tokens['accent'] ?? '#6366f1',
+    // 光标/滚动条等编辑器内部件不随强调色走（VS Code 同款原则）：
+    // 红色系强调色下若跟随 accent，光标与滚动条悬停会整片泛红刺眼。
+    'editorCursor.foreground': tokens['code-fg'] ?? tokens['foreground'] ?? '#e2e8f0',
     'editor.selectionBackground': selection.active,
     'editor.inactiveSelectionBackground': selection.inactive,
     'editor.lineHighlightBackground': tokens['bg-hover'] ?? 'rgba(255,255,255,0.04)',
@@ -101,8 +103,8 @@ function buildThemeColors(
     'editorWidget.foreground': tokens['foreground'] ?? '#e2e8f0',
     'editorSuggestWidget.selectedBackground': tokens['accent-soft'] ?? 'rgba(99,102,241,0.2)',
     'scrollbarSlider.background': tokens['scrollbar-thumb'] ?? '#2a2d3a',
-    'scrollbarSlider.hoverBackground': tokens['accent'] ?? '#6366f1',
-    'scrollbarSlider.activeBackground': tokens['accent'] ?? '#6366f1',
+    'scrollbarSlider.hoverBackground': tokens['foreground-soft'] ?? '#94a3b8',
+    'scrollbarSlider.activeBackground': tokens['foreground-muted'] ?? '#64748b',
     'minimap.background': tokens['code-bg'] ?? '#0b0d12',
     'focusBorder': tokens['accent'] ?? '#6366f1',
   };

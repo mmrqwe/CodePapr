@@ -128,6 +128,27 @@ describe('registerMonacoTheme', () => {
     expect(darkDefinition.colors['editor.selectionBackground']).toBe('#264F78');
     expect(darkDefinition.colors['editor.inactiveSelectionBackground']).toBe('#3A3D41');
   });
+
+  it('keeps editor chrome (cursor / scrollbar hover) decoupled from accent', () => {
+    // 红色强调色下，光标与滚动条悬停/拖动态不得变红（编辑器中无整片红色）
+    const paperLight = getBuiltinTheme('paper-light')!;
+    registerMonacoTheme(paperLight.id, paperLight.tokens, paperLight.mode, '#ff2200');
+    const lightDefinition = defineThemeMock.mock.calls[0][1] as {
+      colors: Record<string, string>;
+    };
+    expect(lightDefinition.colors['editorCursor.foreground']).toBe(
+      paperLight.tokens['code-fg'],
+    );
+    expect(lightDefinition.colors['editorCursor.foreground']).not.toBe('#ff2200');
+    expect(lightDefinition.colors['scrollbarSlider.hoverBackground']).toBe(
+      paperLight.tokens['foreground-soft'],
+    );
+    expect(lightDefinition.colors['scrollbarSlider.hoverBackground']).not.toBe('#ff2200');
+    expect(lightDefinition.colors['scrollbarSlider.activeBackground']).toBe(
+      paperLight.tokens['foreground-muted'],
+    );
+    expect(lightDefinition.colors['scrollbarSlider.activeBackground']).not.toBe('#ff2200');
+  });
 });
 
 describe('applyActiveMonacoTheme', () => {
