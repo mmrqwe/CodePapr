@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
 import { validateCustomTheme } from '../../theme/themeEngine';
+import { BUILTIN_THEMES } from '../../theme/themes';
 import type { CustomThemeRecord, ThemeMode } from '../../theme/types';
 import { toast } from '../../store/toastStore';
 import { FieldCard, FieldLabel } from '../forms';
@@ -142,9 +143,7 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
     setImportSuccess(t.themeCustomImportSuccess);
   };
 
-  const exportCustomTheme = async (id: string) => {
-    const record = local.customThemes[id];
-    if (!record) return;
+  const exportThemeRecord = async (record: CustomThemeRecord) => {
     try {
       const safeName = record.name.replace(/[^\w\u4e00-\u9fa5-]+/g, '-') || 'theme';
       const filePath = await save({
@@ -166,6 +165,12 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
     } catch (e) {
       toast.error(`${t.themeCustomExportError}: ${e}`);
     }
+  };
+
+  const exportCustomTheme = async (id: string) => {
+    const record = local.customThemes[id];
+    if (!record) return;
+    await exportThemeRecord(record);
   };
 
   const deleteCustomTheme = (id: string) => {
@@ -220,6 +225,37 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
             />
             {local.accent ?? t.themeAccentReset}
           </label>
+        </div>
+      </FieldCard>
+
+      <FieldCard>
+        <FieldLabel className="mb-1">{t.themeBuiltinExportSection}</FieldLabel>
+        <p className="mb-3 text-xs text-fg-muted">{t.themeBuiltinExportDesc}</p>
+        <div className="flex flex-wrap gap-2">
+          {BUILTIN_THEMES.map((theme) => (
+            <div
+              key={theme.id}
+              className="flex items-center gap-2 rounded-lg border border-line bg-base px-3 py-1.5"
+            >
+              <span
+                className="inline-block h-3 w-3 rounded-full border border-white/20"
+                style={{ background: theme.preview.accent }}
+              />
+              <span className="text-xs text-fg-soft">
+                {theme.mode === 'dark' ? '🌙' : '☀️'} {theme.name}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  void exportThemeRecord({ name: theme.name, mode: theme.mode, tokens: theme.tokens })
+                }
+                title={t.themeCustomExport}
+                className="rounded-md border border-line px-2 py-0.5 text-[10px] text-fg-muted transition-colors hover:border-line-strong hover:text-fg"
+              >
+                {t.themeCustomExport}
+              </button>
+            </div>
+          ))}
         </div>
       </FieldCard>
 

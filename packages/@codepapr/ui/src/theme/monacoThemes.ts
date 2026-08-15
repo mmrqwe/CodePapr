@@ -28,12 +28,42 @@ export function detectMonacoThemeName(): string {
 }
 
 /**
+ * Monaco 主题颜色只接受 #hex（#RGB/#RGBA/#RRGGBB/#RRGGBBAA）。
+ * 其余格式（如 rgba()）会被 `Color.fromHex` 解析失败并回退为纯红
+ * （`Color.fromHex = parseHex(hex) || Color.red`），导致点击行/滚动条等
+ * 大面积变红。这里把 rgba() 统一转成八位 hex（alpha 保留）。
+ */
+function toMonacoColor(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('#')) {
+    return trimmed;
+  }
+  const match =
+    /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*([\d.]+)\s*)?\)$/i.exec(
+      trimmed
+    );
+  if (!match) {
+    return trimmed;
+  }
+  const channel = (v: string): string =>
+    Math.max(0, Math.min(255, Math.round(Number(v))))
+      .toString(16)
+      .padStart(2, '0');
+  const alpha =
+    match[4] === undefined
+      ? 'ff'
+      : channel(String(Math.round(Math.min(1, Math.max(0, Number(match[4]))) * 255)));
+  return `#${channel(match[1])}${channel(match[2])}${channel(match[3])}${alpha}`;
+}
+
+/**
  * 语法高亮规则：使用主题专用 syntax-* token（与 UI 状态色/强调色解耦，
  * 每套主题手工调教，避免霓虹感与语义重叠）。缺失时回退到旧推导值。
  */
 function buildThemeRules(tokens: ThemeTokens): monaco.editor.ITokenThemeRule[] {
-  const fg = tokens['code-fg'] ?? tokens['foreground'] ?? '#cccccc';
-  const pick = (key: string, fallback: string): string => tokens[key] ?? fallback;
+  const pick = (key: string, fallback: string): string =>
+    toMonacoColor(tokens[key] ?? fallback);
+  const fg = pick('code-fg', tokens['foreground'] ?? '#cccccc');
   const keyword = pick('syntax-keyword', tokens['accent'] ?? '#569cd6');
   const string = pick('syntax-string', tokens['green'] ?? '#ce9178');
   const number = pick('syntax-number', tokens['amber'] ?? '#b5cea8');
@@ -87,7 +117,7 @@ function buildThemeColors(
 ): Record<string, string> {
   const selection = selectionColors(mode);
   const dark = mode === 'dark';
-  return {
+  const colors: Record<string, string> = {
     'editor.background': tokens['code-bg'] ?? '#0b0d12',
     'editor.foreground': tokens['code-fg'] ?? '#e2e8f0',
     'editorLineNumber.foreground': tokens['foreground-dim'] ?? '#475569',
@@ -144,6 +174,10 @@ function buildThemeColors(
     'minimap.background': tokens['code-bg'] ?? '#0b0d12',
     'focusBorder': tokens['accent'] ?? '#6366f1',
   };
+  // Monaco 只接受 hex：rgba() 会解析失败并回退为纯红，统一转换。
+  return Object.fromEntries(
+    Object.entries(colors).map(([key, value]) => [key, toMonacoColor(value)])
+  );
 }
 
 /** 为（主题, 强调色）注册 monaco 主题（幂等），返回主题名。 */

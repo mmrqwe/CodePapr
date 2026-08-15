@@ -168,16 +168,31 @@ describe('registerMonacoTheme', () => {
     expect(definition.colors['scrollbarSlider.background']).toBe(
       paperLight.tokens['foreground-dim'],
     );
-    expect(definition.colors['diffEditor.insertedTextBackground']).toBe(
-      paperLight.tokens['green-bg'],
-    );
-    expect(definition.colors['diffEditor.removedTextBackground']).toBe(
-      paperLight.tokens['red-bg'],
-    );
     expect(definition.colors['editor.wordHighlightBackground']).toBeTruthy();
     expect(definition.colors['editor.selectionHighlightBackground']).toBeTruthy();
-    expect(definition.colors['editor.lineHighlightBorder']).toBe('rgba(0,0,0,0)');
+    expect(definition.colors['editor.lineHighlightBorder']).toBe('#00000000');
     expect(definition.colors['editor.findMatchBackground']).toBeTruthy();
+  });
+
+  it('converts rgba colors to 8-digit hex: Monaco fails on rgba and falls back to pure red', () => {
+    // Color.fromHex = parseHex(hex) || Color.red：任何 rgba() 值都会被解析为
+    // 纯红——历史上"点击行大红/滚动条静止大红"的总根源。生成主题必须全部为 hex。
+    const paperLight = getBuiltinTheme('paper-light')!;
+    registerMonacoTheme(paperLight.id, paperLight.tokens, paperLight.mode, '#00ffbb');
+    const definition = defineThemeMock.mock.calls[0][1] as {
+      colors: Record<string, string>;
+    };
+    for (const [key, value] of Object.entries(definition.colors)) {
+      expect(value, `${key} 使用了非 hex 颜色值: ${value}`).toMatch(/^#[0-9a-fA-F]{3,8}$/);
+    }
+    // 行高亮：bg-hover rgba(54,32,17,0.04) → #3620110A（不再是红色）
+    expect(definition.colors['editor.lineHighlightBackground']).toBe('#3620110a');
+    // diff 删除行：red-bg rgba(194,24,91,0.08) → #c2185b14
+    expect(definition.colors['diffEditor.removedTextBackground']).toBe('#c2185b14');
+    // 补全选中：accent 派生的 accent-soft rgba(0,255,187,0.18) → #00ffbb2e
+    expect(definition.colors['editorSuggestWidget.selectedBackground']).toBe('#00ffbb2e');
+    // 选中高亮（浅色模式字面量）
+    expect(definition.colors['editor.selectionHighlightBackground']).toBe('#add6ff66');
   });
 });
 
