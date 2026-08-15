@@ -219,6 +219,61 @@ describe('contextCompaction', () => {
     expect(effective[1]?.durationMs).toBeUndefined();
   });
 
+  it('marks UI-injected synthetic assistants with uiInjected metadata', () => {
+    const messages: ContextMessageLike[] = [
+      {
+        id: 'mode-switch-1',
+        role: 'assistant',
+        content: '[Mode: APP] You are now in App mode.',
+        synthetic: true,
+        hidden: true,
+        carryForwardInContext: true,
+        timestamp: 10,
+      },
+      {
+        id: 'evidence-1',
+        role: 'assistant',
+        content: '执行证据摘要\n- npm run test -> 退出码 0',
+        synthetic: true,
+        hidden: true,
+        carryForwardInContext: true,
+        timestamp: 11,
+      },
+      createAssistant('a1', '真实回复。'),
+    ];
+
+    const effective = buildEffectiveContextMessages(messages);
+    expect(effective[0]?.metadata?.uiInjected).toBe(true);
+    expect(effective[1]?.metadata?.uiInjected).toBe(true);
+    expect(effective[2]?.metadata?.uiInjected).toBeUndefined();
+  });
+
+  it('does not mark real assistant output as uiInjected', () => {
+    const messages: ContextMessageLike[] = [
+      createUser('u1', '跑测试'),
+      {
+        id: 'a1',
+        role: 'assistant',
+        content: '执行中。',
+        toolInvocations: [
+          {
+            id: 't-1',
+            name: 'bash',
+            arguments: { command: 'npm test' },
+            status: 'success',
+            output: 'ok',
+            contextContent: 'ok',
+          },
+        ],
+        timestamp: 100,
+      },
+    ];
+
+    const effective = buildEffectiveContextMessages(messages);
+    const assistantMsg = effective.find((m) => m.role === 'assistant') as IMessage;
+    expect(assistantMsg.metadata?.uiInjected).toBeUndefined();
+  });
+
   it('excludes ordinary synthetic display summaries from model context', () => {
     const messages: ContextMessageLike[] = [
       createUser('u1', '修复类型错误'),

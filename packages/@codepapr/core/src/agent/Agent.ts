@@ -244,6 +244,10 @@ export function buildContextSnapshot(request: ContextSnapshotSource, round: numb
       view.durationMs = message.durationMs;
     }
 
+    if (message.metadata?.uiInjected === true) {
+      view.uiInjected = true;
+    }
+
     if (message.reasoningContent) {
       view.reasoningContent = message.reasoningContent;
       view.reasoningTokens = estimateTokens(message.reasoningContent);

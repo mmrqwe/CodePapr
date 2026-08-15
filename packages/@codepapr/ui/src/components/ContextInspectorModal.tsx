@@ -108,6 +108,12 @@ function formatTimeSpan(ms: number): string {
   return `${totalSeconds}s`;
 }
 
+/** 真实时间戳判定：注入消息（session-bootstrap 等）用哨兵值 timestamp=1，
+ *  若参与耗时域会把时间轴拉回 1970 年，必须排除。 */
+function isRealTimestamp(ts?: number): ts is number {
+  return typeof ts === 'number' && ts > 1_000_000_000_000;
+}
+
 export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspectorModalProps) {
   const t = getTranslation(lang);
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
@@ -165,7 +171,18 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
     }
     for (let index = 0; index < snapshot.messages.length; index += 1) {
       const message = snapshot.messages[index];
-      const cat: RowCat = message.role === 'assistant' ? 'model' : message.role === 'tool' ? 'tool' : 'user';
+      // 分类按 stage 权威判定：稳定前缀（system/工具/few-shot）与会话状态
+      // （引导注入，role 是 assistant）都是「发送给模型的内容」，属于用户输入；
+      // 对话历史里 UI 注入的 assistant（mode-switch/carry-forward）同样归用户
+      // 输入；只有真正的模型生成才归模型输出。
+      const cat: RowCat =
+        message.stage === 'conversation'
+          ? message.role === 'tool'
+            ? 'tool'
+            : message.role === 'assistant' && !message.uiInjected
+              ? 'model'
+              : 'user'
+          : 'user';
       built.push({
         key: `msg-${index}`,
         cat,
@@ -196,13 +213,13 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
   // 用户消息无耗时概念，作为时间点标记参与域扩展。没有任何耗时数据时不可用。
   const timeDomain = useMemo(() => {
     const timed = rows.filter(
-      (row) => row.timestamp && row.timestamp > 0 && typeof row.durationMs === 'number' && row.durationMs > 0
+      (row) => isRealTimestamp(row.timestamp) && typeof row.durationMs === 'number' && row.durationMs > 0
     );
     if (timed.length === 0) return null;
     let minStart = Infinity;
     let maxEnd = 0;
     for (const row of rows) {
-      if (!row.timestamp || row.timestamp <= 0) continue;
+      if (!isRealTimestamp(row.timestamp)) continue;
       const start = typeof row.durationMs === 'number' && row.durationMs > 0 ? row.timestamp - row.durationMs : row.timestamp;
       if (start < minStart) minStart = start;
       if (row.timestamp > maxEnd) maxEnd = row.timestamp;
@@ -245,10 +262,10 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
     let width: number;
     let isMarker = false;
     if (effectiveMode === 'time' && timeDomain) {
-      if (typeof row.durationMs === 'number' && row.durationMs > 0 && row.timestamp && row.timestamp > 0) {
+      if (typeof row.durationMs === 'number' && row.durationMs > 0 && isRealTimestamp(row.timestamp)) {
         left = ((row.timestamp - row.durationMs - timeDomain.minStart) / timeDomain.span) * 100;
         width = Math.max((row.durationMs / timeDomain.span) * 100, 0.2);
-      } else if (row.timestamp && row.timestamp > 0) {
+      } else if (isRealTimestamp(row.timestamp)) {
         // 无耗时概念的行（用户输入/工具定义）在耗时轴上渲染为时间点标记
         left = ((row.timestamp - timeDomain.minStart) / timeDomain.span) * 100;
         width = 0.2;
@@ -339,7 +356,7 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
           <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${style.badge}`}>
             {stageLabels[row.stage]}
           </span>
-          {row.timestamp ? (
+          {isRealTimestamp(row.timestamp) ? (
             <span>{t.ganttAt} {formatClock(row.timestamp)}</span>
           ) : null}
           {row.durationMs ? (
@@ -623,7 +640,7 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
               {tip.row.reasoningTokens > 0 ? ` + ${formatTokens(tip.row.reasoningTokens)} ${t.ganttThinking}` : ''}
               {tip.row.durationMs ? ` · ${t.ganttDuration} ${formatMs(tip.row.durationMs)}` : ''}
             </p>
-            {tip.row.timestamp ? (
+            {isRealTimestamp(tip.row.timestamp) ? (
               <p className="font-mono text-slate-600">{t.ganttAt} {formatClock(tip.row.timestamp)}</p>
             ) : null}
           </div>

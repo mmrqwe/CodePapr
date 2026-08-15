@@ -267,6 +267,9 @@ export interface IContextMessageView {
   reasoningTokens?: number;
   /** assistant 消息 = LLM 生成耗时；tool 消息 = 工具执行耗时（毫秒，缺省=未测量） */
   durationMs?: number;
+  /** UI 注入的 assistant 消息（mode-switch 指令、carry-forward 证据等），
+   *  非本轮模型生成，上下文检查器据此归入用户输入泳道 */
+  uiInjected?: boolean;
 }
 
 export interface IContextSnapshot {

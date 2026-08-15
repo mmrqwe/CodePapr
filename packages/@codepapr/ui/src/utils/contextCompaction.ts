@@ -263,6 +263,12 @@ function toCoreTailMessages(messages: readonly ContextMessageLike[]): IMessage[]
           ...(message.role === 'assistant' && typeof message.durationMs === 'number'
             ? { durationMs: message.durationMs }
             : {}),
+          // UI 注入的 assistant 消息（mode-switch 指令 / carry-forward 证据）打上
+          // 标记：非模型生成，上下文检查器归入用户输入泳道。checkpoint 消息不
+          // 经过此路径（由 buildEffectiveContextMessages 以 user role 重建）。
+          ...(message.role === 'assistant' && message.synthetic
+            ? { metadata: { uiInjected: true } }
+            : {}),
         },
       ];
     });
