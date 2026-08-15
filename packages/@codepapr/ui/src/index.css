@@ -110,12 +110,12 @@ body {
 ::-webkit-scrollbar { width: 7px; height: 7px; }
 ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
 ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border: 1px solid var(--scrollbar-track); border-radius: 9999px; }
-::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+::-webkit-scrollbar-thumb:hover { background: var(--foreground-soft); }
 .scrollbar-thin { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }
 .scrollbar-thin::-webkit-scrollbar { width: 10px; height: 10px; }
 .scrollbar-thin::-webkit-scrollbar-track { background: var(--scrollbar-track); }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border: 2px solid var(--scrollbar-track); border-radius: 9999px; }
-.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: var(--foreground-soft); }
 .scrollbar-stable { scrollbar-gutter: stable both-edges; }
 
 /* ── 对话轮次指示器 ────────────────────────── */

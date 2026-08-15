@@ -86,6 +86,7 @@ function buildThemeColors(
   mode: 'light' | 'dark',
 ): Record<string, string> {
   const selection = selectionColors(mode);
+  const dark = mode === 'dark';
   return {
     'editor.background': tokens['code-bg'] ?? '#0b0d12',
     'editor.foreground': tokens['code-fg'] ?? '#e2e8f0',
@@ -96,13 +97,48 @@ function buildThemeColors(
     'editorCursor.foreground': tokens['code-fg'] ?? tokens['foreground'] ?? '#e2e8f0',
     'editor.selectionBackground': selection.active,
     'editor.inactiveSelectionBackground': selection.inactive,
+    'editor.selectionHighlightBackground': dark
+      ? 'rgba(38,79,120,0.45)'
+      : 'rgba(173,214,255,0.4)',
+    'editor.wordHighlightBackground': dark
+      ? 'rgba(148,163,184,0.18)'
+      : 'rgba(100,116,139,0.14)',
+    'editor.wordHighlightStrongBackground': dark
+      ? 'rgba(148,163,184,0.28)'
+      : 'rgba(100,116,139,0.22)',
     'editor.lineHighlightBackground': tokens['bg-hover'] ?? 'rgba(255,255,255,0.04)',
+    'editor.lineHighlightBorder': 'rgba(0,0,0,0)',
+    'editorBracketMatch.background': 'rgba(0,0,0,0)',
+    'editorBracketMatch.border': tokens['foreground-dim'] ?? '#b9b9b9',
+    'editor.findMatchBackground': dark
+      ? 'rgba(217,119,6,0.35)'
+      : 'rgba(181,137,0,0.25)',
+    'editor.findMatchHighlightBackground': dark
+      ? 'rgba(217,119,6,0.18)'
+      : 'rgba(181,137,0,0.14)',
+    // 诊断装饰色使用低饱和 editor-* token，不直接复用鲜艳的 --red/--amber。
+    // 否则错误尺标会透过滚动条，形成整条刺眼的红色竖带。
+    'editorError.foreground': tokens['editor-error'] ?? (dark ? '#c47c83' : '#a65d65'),
+    'editorWarning.foreground': tokens['editor-warning'] ?? (dark ? '#d0ad6b' : '#9a7534'),
+    'editorInfo.foreground': tokens['editor-info'] ?? (dark ? '#78afc0' : '#3e7085'),
+    'editorHint.foreground': tokens['editor-hint'] ?? (dark ? '#8995a2' : '#7b8178'),
+    'editorOverviewRuler.errorForeground': tokens['editor-error'] ?? (dark ? '#c47c83' : '#a65d65'),
+    'editorOverviewRuler.warningForeground': tokens['editor-warning'] ?? (dark ? '#d0ad6b' : '#9a7534'),
+    'editorOverviewRuler.infoForeground': tokens['editor-info'] ?? (dark ? '#78afc0' : '#3e7085'),
+    'minimap.errorHighlight': tokens['editor-error'] ?? (dark ? '#c47c83' : '#a65d65'),
+    'minimap.warningHighlight': tokens['editor-warning'] ?? (dark ? '#d0ad6b' : '#9a7534'),
+    // diff 增删行：基底继承的 #FF000026/#9BB95533 改为主题语义色。
+    'diffEditor.insertedTextBackground': tokens['green-bg'] ?? 'rgba(34,197,94,0.1)',
+    'diffEditor.insertedLineBackground': tokens['green-bg'] ?? 'rgba(34,197,94,0.1)',
+    'diffEditor.removedTextBackground': tokens['red-bg'] ?? 'rgba(239,68,68,0.1)',
+    'diffEditor.removedLineBackground': tokens['red-bg'] ?? 'rgba(239,68,68,0.1)',
     'editorGutter.background': tokens['code-bg'] ?? '#0b0d12',
     'editorWidget.background': tokens['bg-raised'] ?? '#1a1d27',
     'editorWidget.border': tokens['border'] ?? '#2a2d3a',
     'editorWidget.foreground': tokens['foreground'] ?? '#e2e8f0',
     'editorSuggestWidget.selectedBackground': tokens['accent-soft'] ?? 'rgba(99,102,241,0.2)',
-    'scrollbarSlider.background': tokens['scrollbar-thumb'] ?? '#2a2d3a',
+    // 静止态使用不透明中性灰，避免错误 Overview Ruler 从透明滑块后透出。
+    'scrollbarSlider.background': tokens['foreground-dim'] ?? '#64748b',
     'scrollbarSlider.hoverBackground': tokens['foreground-soft'] ?? '#94a3b8',
     'scrollbarSlider.activeBackground': tokens['foreground-muted'] ?? '#64748b',
     'minimap.background': tokens['code-bg'] ?? '#0b0d12',

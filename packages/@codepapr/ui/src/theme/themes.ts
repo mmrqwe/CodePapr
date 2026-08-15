@@ -39,7 +39,7 @@ const PAPER_LIGHT_TOKENS: ThemeDefinition['tokens'] = {
   'code-bg': '#f5f0e9',
   'code-fg': '#1e1b18',
   'scrollbar-track': '#f5f0e9',
-  'scrollbar-thumb': 'rgba(27,18,10,0.12)',
+  'scrollbar-thumb': 'rgba(27,18,10,0.3)',
   'shadow-sm': '0 2px 8px rgba(0,0,0,0.04)',
   'shadow-md': '0 8px 24px rgba(0,0,0,0.06)',
   'surface-gradient': 'linear-gradient(180deg, #faf7f3 0%, #f5f0e9 100%)',
@@ -74,6 +74,10 @@ const PAPER_LIGHT_TOKENS: ThemeDefinition['tokens'] = {
   'syntax-operator': '#6e665e',
   'syntax-bool': '#8b3a7c',
   'syntax-delimiter': '#8a8275',
+  'editor-error': '#a65d65',
+  'editor-warning': '#9a7534',
+  'editor-info': '#3e7085',
+  'editor-hint': '#7b8178',
 };
 
 const PAPER_DARK_TOKENS: ThemeDefinition['tokens'] = {
@@ -136,6 +140,10 @@ const PAPER_DARK_TOKENS: ThemeDefinition['tokens'] = {
   'syntax-operator': '#aab4c8',
   'syntax-bool': '#d98bc4',
   'syntax-delimiter': '#6e7890',
+  'editor-error': '#c47c83',
+  'editor-warning': '#d0ad6b',
+  'editor-info': '#78afc0',
+  'editor-hint': '#8995a2',
 };
 
 const MIDNIGHT_TOKENS: ThemeDefinition['tokens'] = {
@@ -198,6 +206,10 @@ const MIDNIGHT_TOKENS: ThemeDefinition['tokens'] = {
   'syntax-operator': '#9aa6b8',
   'syntax-bool': '#d18bc6',
   'syntax-delimiter': '#6d7788',
+  'editor-error': '#c87878',
+  'editor-warning': '#d1a969',
+  'editor-info': '#71b4c5',
+  'editor-hint': '#84919f',
 };
 
 const NORD_TOKENS: ThemeDefinition['tokens'] = {
@@ -260,6 +272,10 @@ const NORD_TOKENS: ThemeDefinition['tokens'] = {
   'syntax-operator': '#9aa8bd',
   'syntax-bool': '#b48ead',
   'syntax-delimiter': '#7b88a1',
+  'editor-error': '#c27d86',
+  'editor-warning': '#d4b778',
+  'editor-info': '#80adbd',
+  'editor-hint': '#8793a3',
 };
 
 const SOLARIZED_LIGHT_TOKENS: ThemeDefinition['tokens'] = {
@@ -291,7 +307,7 @@ const SOLARIZED_LIGHT_TOKENS: ThemeDefinition['tokens'] = {
   'code-bg': '#eee8d5',
   'code-fg': '#586e75',
   'scrollbar-track': '#eee8d5',
-  'scrollbar-thumb': 'rgba(101,123,131,0.2)',
+  'scrollbar-thumb': 'rgba(101,123,131,0.35)',
   'shadow-sm': '0 2px 8px rgba(0,0,0,0.05)',
   'shadow-md': '0 8px 24px rgba(0,0,0,0.08)',
   'surface-gradient': 'linear-gradient(180deg, #fbf3e0 0%, #eee8d5 100%)',
@@ -326,6 +342,10 @@ const SOLARIZED_LIGHT_TOKENS: ThemeDefinition['tokens'] = {
   'syntax-operator': '#6569b7',
   'syntax-bool': '#6569b7',
   'syntax-delimiter': '#586e75',
+  'editor-error': '#a85454',
+  'editor-warning': '#92700b',
+  'editor-info': '#317f86',
+  'editor-hint': '#718286',
 };
 
 const SOLARIZED_DARK_TOKENS: ThemeDefinition['tokens'] = {
@@ -388,6 +408,10 @@ const SOLARIZED_DARK_TOKENS: ThemeDefinition['tokens'] = {
   'syntax-operator': '#7f84cc',
   'syntax-bool': '#7f84cc',
   'syntax-delimiter': '#7a8d94',
+  'editor-error': '#d47777',
+  'editor-warning': '#d6ad5f',
+  'editor-info': '#62b0b2',
+  'editor-hint': '#768b96',
 };
 
 function define(

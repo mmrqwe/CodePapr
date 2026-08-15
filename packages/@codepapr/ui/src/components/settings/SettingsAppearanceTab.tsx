@@ -1,6 +1,9 @@
 import { useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/plugin-dialog';
 import { validateCustomTheme } from '../../theme/themeEngine';
 import type { CustomThemeRecord, ThemeMode } from '../../theme/types';
+import { toast } from '../../store/toastStore';
 import { FieldCard, FieldLabel } from '../forms';
 import type { SettingsTabProps } from './types';
 
@@ -78,7 +81,29 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
   const importCustomTheme = () => {
     setImportError('');
     setImportSuccess('');
-    const name = importName.trim();
+    // 支持两种格式：扁平 token 映射；或导出产生的完整包 {name, mode, tokens}。
+    let tokensJson = importJson;
+    let envelopeName: string | null = null;
+    let envelopeMode: ThemeMode | null = null;
+    try {
+      const raw = JSON.parse(importJson) as Record<string, unknown>;
+      if (
+        raw &&
+        typeof raw === 'object' &&
+        !Array.isArray(raw) &&
+        raw.tokens &&
+        typeof raw.tokens === 'object' &&
+        !Array.isArray(raw.tokens)
+      ) {
+        envelopeName = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : null;
+        envelopeMode = raw.mode === 'light' || raw.mode === 'dark' ? raw.mode : null;
+        tokensJson = JSON.stringify(raw.tokens);
+      }
+    } catch {
+      // 非法 JSON 交给 parseImportedJson 统一报错
+    }
+    const name = envelopeName ?? importName.trim();
+    const mode = envelopeMode ?? importMode;
     const missingName =
       currentLang === 'en'
         ? 'Name is required'
@@ -89,13 +114,13 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
       setImportError(missingName);
       return;
     }
-    const parsed = parseImportedJson(importJson, currentLang);
+    const parsed = parseImportedJson(tokensJson, currentLang);
     if (!parsed.ok) {
       setImportError(parsed.error);
       return;
     }
     const id = `custom-${Math.random().toString(36).slice(2, 8)}`;
-    const record: CustomThemeRecord = { name, mode: importMode, tokens: parsed.tokens };
+    const record: CustomThemeRecord = { name, mode, tokens: parsed.tokens };
     const validation = validateCustomTheme(id, record);
     if (!validation.ok) {
       setImportError(
@@ -110,11 +135,37 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
     // 导入即接入对应深浅槽位，主题在 设置 → 通用 中随时可换。
     update({
       customThemes: { ...local.customThemes, [id]: record },
-      ...(importMode === 'light' ? { lightTheme: id } : { darkTheme: id }),
+      ...(mode === 'light' ? { lightTheme: id } : { darkTheme: id }),
     });
     setImportName('');
     setImportJson('');
     setImportSuccess(t.themeCustomImportSuccess);
+  };
+
+  const exportCustomTheme = async (id: string) => {
+    const record = local.customThemes[id];
+    if (!record) return;
+    try {
+      const safeName = record.name.replace(/[^\w\u4e00-\u9fa5-]+/g, '-') || 'theme';
+      const filePath = await save({
+        title: t.themeCustomExport,
+        defaultPath: `${safeName}.codepapr-theme.json`,
+        filters: [{ name: 'CodePapr Theme', extensions: ['json'] }],
+      });
+      if (!filePath) return;
+      const payload: CustomThemeRecord = {
+        name: record.name,
+        mode: record.mode,
+        tokens: record.tokens,
+      };
+      await invoke('export_text_file', {
+        savePath: filePath,
+        content: JSON.stringify(payload, null, 2),
+      });
+      toast.success(t.themeCustomExportSuccess);
+    } catch (e) {
+      toast.error(`${t.themeCustomExportError}: ${e}`);
+    }
   };
 
   const deleteCustomTheme = (id: string) => {
@@ -207,6 +258,14 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
                 </span>
                 {inUse && <span className="text-xs text-accent-text">✓</span>}
                 <div className="flex-1" />
+                <button
+                  type="button"
+                  onClick={() => void exportCustomTheme(id)}
+                  title={t.themeCustomExport}
+                  className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg-muted transition-colors hover:border-line-strong hover:text-fg"
+                >
+                  {t.themeCustomExport}
+                </button>
                 <button
                   type="button"
                   onClick={() => deleteCustomTheme(id)}

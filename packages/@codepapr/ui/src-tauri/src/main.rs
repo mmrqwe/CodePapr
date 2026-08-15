@@ -10,6 +10,7 @@ mod character_card;
 mod db;
 mod download_verification;
 mod embedded_browser;
+mod file_export;
 mod git_operations;
 mod lsp;
 mod lsp_fallback;
@@ -382,6 +383,7 @@ fn main() {
             tts::tts_check_training_data_exists,
             tts::tts_generate_training_data,
             character_card::export_character_card,
+            file_export::export_text_file,
             app_runtime::register_app_workspace,
             app_runtime::unregister_app_workspace,
             app_runtime::check_port_available,

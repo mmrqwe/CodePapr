@@ -71,6 +71,10 @@ export const AUX_TOKEN_KEYS = [
   'syntax-operator',
   'syntax-bool',
   'syntax-delimiter',
+  'editor-error',
+  'editor-warning',
+  'editor-info',
+  'editor-hint',
 ] as const;
 
 /** 防止注入/破坏规则块：剔除 CSS 值中可逃逸出声明块的字符。 */

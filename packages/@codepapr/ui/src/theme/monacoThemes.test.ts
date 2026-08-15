@@ -149,6 +149,36 @@ describe('registerMonacoTheme', () => {
     );
     expect(lightDefinition.colors['scrollbarSlider.activeBackground']).not.toBe('#ff2200');
   });
+
+  it('covers diagnostic and inherited colors from theme tokens instead of base neon red', () => {
+    // 基底继承的 #E51400 诊断红曾透过滚动条/波浪线整片刺眼：
+    // 生成主题必须显式覆盖诊断色、diff 色与点击词高亮等全部继承项。
+    const paperLight = getBuiltinTheme('paper-light')!;
+    registerMonacoTheme(paperLight.id, paperLight.tokens, paperLight.mode, '#00ffaa');
+    const definition = defineThemeMock.mock.calls[0][1] as {
+      colors: Record<string, string>;
+    };
+    expect(definition.colors['editorError.foreground']).toBe(paperLight.tokens['editor-error']);
+    expect(definition.colors['editorError.foreground']).not.toBe('#e51400');
+    expect(definition.colors['editorOverviewRuler.errorForeground']).toBe(
+      paperLight.tokens['editor-error'],
+    );
+    expect(definition.colors['editorWarning.foreground']).toBe(paperLight.tokens['editor-warning']);
+    expect(definition.colors['editorInfo.foreground']).toBe(paperLight.tokens['editor-info']);
+    expect(definition.colors['scrollbarSlider.background']).toBe(
+      paperLight.tokens['foreground-dim'],
+    );
+    expect(definition.colors['diffEditor.insertedTextBackground']).toBe(
+      paperLight.tokens['green-bg'],
+    );
+    expect(definition.colors['diffEditor.removedTextBackground']).toBe(
+      paperLight.tokens['red-bg'],
+    );
+    expect(definition.colors['editor.wordHighlightBackground']).toBeTruthy();
+    expect(definition.colors['editor.selectionHighlightBackground']).toBeTruthy();
+    expect(definition.colors['editor.lineHighlightBorder']).toBe('rgba(0,0,0,0)');
+    expect(definition.colors['editor.findMatchBackground']).toBeTruthy();
+  });
 });
 
 describe('applyActiveMonacoTheme', () => {

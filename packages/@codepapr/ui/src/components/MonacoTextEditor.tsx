@@ -118,7 +118,7 @@ function ensureMonacoThemeAutoSync(): void {
 }
 
 export function configureMonacoLanguageServices(): void {
-  monaco.editor.setTheme(detectMonacoThemeName());
+  // 先注册/应用主题（defineTheme 必须在 setTheme 之前），再挂语言服务。
   ensureMonacoThemeAutoSync();
   if (didConfigureMonaco) return;
   didConfigureMonaco = true;
@@ -322,7 +322,9 @@ export function MonacoTextEditor({
         padding: { top: 12, bottom: 12 },
         guides: { bracketPairs: true, indentation: true },
         lineNumbersMinChars: 3,
-        renderLineHighlight: 'line',
+        // 不给当前行铺满背景；编辑器只在 gutter 提示当前位置，避免
+        // 点击普通文本时整行出现强烈色块。
+        renderLineHighlight: 'gutter',
         overviewRulerBorder: false,
         hideCursorInOverviewRuler: true,
         accessibilitySupport: 'auto',
