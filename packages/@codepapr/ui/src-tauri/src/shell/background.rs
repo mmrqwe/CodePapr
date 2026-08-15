@@ -390,7 +390,7 @@ pub(crate) fn run_workspace_command_impl(
 
     #[cfg(windows)]
     const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let mut cmd = sandboxed_command(&command, &args, &workspace, None)?;
+    let mut cmd = sandboxed_command(&command, &args, &workspace, None, &cwd)?;
     cmd
         .env("PATH", expanded_path())
         .current_dir(cwd)
@@ -615,7 +615,7 @@ fn build_shell_spawn_command(
     #[cfg(not(windows))]
     {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-        let mut cmd = sandboxed_shell_command(&shell, command, workspace, access)?;
+        let mut cmd = sandboxed_shell_command(&shell, command, workspace, access, cwd)?;
         cmd.current_dir(cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -685,6 +685,7 @@ pub(crate) fn start_workspace_background_command(
     workspace_path: String,
     command: String,
     args: Option<Vec<String>>,
+    workdir: Option<String>,
     preview_url: Option<String>,
     sandbox: Option<SandboxAccessArgs>,
 ) -> Result<BackgroundCommandResult, String> {
@@ -713,6 +714,11 @@ pub(crate) fn start_workspace_background_command(
     let args = args.unwrap_or_default();
     validate_restricted_command(&command, &args, &workspace)?;
     super::path_guard::ensure_command_paths_accessible(&workspace, &command, &args)?;
+    // 后端 app 的 cwd 是它的 app 目录（workdir 由 app_start 传入
+    // .CodePapr/apps/<appId>）：manifest args 里的相对脚本（"server.js"）
+    // 相对该目录解析——用工作区根当 cwd 会「Cannot find module」秒退。
+    // 沙箱的 app 目录写放行也按同一 cwd 推导，两侧永不漂移。
+    let cwd = resolve_shell_workdir(&workspace, workdir)?;
     let preview_url = preview_url
         .map(|raw_url| parse_browser_url(&raw_url))
         .transpose()?;
@@ -723,12 +729,12 @@ pub(crate) fn start_workspace_background_command(
     // sandboxed_command 内部已把 args 追加到 Command（macOS: sandbox-exec -p <profile>
     // <program> <args...>；其他平台: <program> <args...>），此处不得再次 .args(&args)，
     // 否则所有后台命令都会以重复的 argv 启动（如 `node server.js server.js`）。
-    let mut bg_cmd = sandboxed_command(&command, &args, &workspace, sandbox.map(Into::into))?;
+    let mut bg_cmd = sandboxed_command(&command, &args, &workspace, sandbox.map(Into::into), &cwd)?;
     bg_cmd
         // GUI 壳进程的 PATH 只有系统目录（无 /opt/homebrew/bin 等），不注入则
         // sandbox-exec 里 exec "node"/"python" 直接失败，后端进程秒退且无任何日志。
         .env("PATH", expanded_path())
-        .current_dir(&workspace)
+        .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

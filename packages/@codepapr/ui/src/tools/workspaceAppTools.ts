@@ -315,7 +315,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       bytes: totalBytes,
       mounted: true,
       hasBackend,
-      ...(hasBackend ? { command, args: cmdArgs, port, hint: '应用已生成并注册后端服务。用户点击"运行"启动后端后，可在管理面板点"打开"查看。后端进程运行在工作区目录下，可直接读写项目文件（如数据库）。' } : { hint: '应用已渲染到应用管理面板。用户可点击"打开"查看。如需修改应用，用相同 appId 再次调用 app_render 即可覆盖更新。' }),
+      ...(hasBackend ? { command, args: cmdArgs, port, hint: '应用已生成并注册后端服务。用户点击"运行"启动后端后，可在管理面板点"打开"查看。后端进程运行在应用目录（.CodePapr/apps/<appId>/）下，args 中的相对路径（如 "server.js"）按该目录解析；应用自己的运行时数据（数据库等）也应写在应用目录内。' } : { hint: '应用已渲染到应用管理面板。用户可点击"打开"查看。如需修改应用，用相同 appId 再次调用 app_render 即可覆盖更新。' }),
     };
   });
 
@@ -453,10 +453,14 @@ export async function launchAppBackend(
   }
 
   const url = `http://localhost:${app.port}/`;
+  // cwd 必须是 app 目录：manifest args 里的相对脚本（如 "server.js"）相对
+  // 该目录解析。用工作区根当 cwd 时 node 会「Cannot find module」秒退，
+  // 表现为端口轮询全 refused 的启动失败（math-mentor 事故）。
   const result = await invoke<{ pid: number }>('start_workspace_background_command', {
     workspacePath,
     command: app.command,
     args: app.args,
+    workdir: `.CodePapr/apps/${app.appId}`,
     previewUrl: url,
     sandbox: {
       network: appAccess.network,

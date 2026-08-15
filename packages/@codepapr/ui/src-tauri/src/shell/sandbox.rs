@@ -338,15 +338,21 @@ impl From<SandboxAccessArgs> for SandboxAccess {
 }
 
 /// 后端进程（allow_bind）的脚本所在目录：即使工作区只读，app 也要能写自己的
-/// 运行时数据（DB/WAL/日志）。相对路径按工作区解析；无法推导时不放行。
+/// 运行时数据（DB/WAL/日志）。相对路径按进程工作目录解析（后端 app 的 cwd
+/// 是其 app 目录，manifest args 里的 "server.js" 即相对该目录）；args[0] 是
+/// 标志位（如 -c/-m）或无法推导时不放行。绝不能按工作区根解析：
+/// "server.js" 的父目录会变成工作区根本身，等于给只读 app 放行整个工作区写。
 #[cfg(target_os = "macos")]
-fn backend_app_dir(args: &[String], workspace: &Path) -> Option<PathBuf> {
+fn backend_app_dir(args: &[String], cwd: &Path) -> Option<PathBuf> {
     let script = args.first().map(String::as_str)?;
+    if script.starts_with('-') {
+        return None;
+    }
     let script_path = Path::new(script);
     let resolved = if script_path.is_absolute() {
         script_path.to_path_buf()
     } else {
-        workspace.join(script_path)
+        cwd.join(script_path)
     };
     let parent = resolved.parent()?;
     if parent.as_os_str().is_empty() {
@@ -355,17 +361,20 @@ fn backend_app_dir(args: &[String], workspace: &Path) -> Option<PathBuf> {
     Some(parent.to_path_buf())
 }
 
+/// `cwd` 是进程的实际工作目录：backend_app_dir 按它解析 args 里的相对脚本
+/// 路径。调用方必须传入与 `current_dir` 一致的值，否则沙箱写放行会落错目录。
 pub(crate) fn sandboxed_command(
     program: &str,
     args: &[String],
     workspace: &Path,
     access: Option<SandboxAccess>,
+    cwd: &Path,
 ) -> Result<Command, String> {
     #[cfg(target_os = "macos")]
     {
         let access = access.unwrap_or_default();
         let app_write_dir = if access.allow_bind {
-            backend_app_dir(args, workspace)
+            backend_app_dir(args, cwd)
         } else {
             None
         };
@@ -377,7 +386,7 @@ pub(crate) fn sandboxed_command(
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (workspace, access);
+        let _ = (workspace, access, cwd);
         let mut command = Command::new(program);
         command.args(args);
         Ok(command)
@@ -389,12 +398,13 @@ pub(crate) fn sandboxed_shell_command(
     command_line: &str,
     workspace: &Path,
     access: Option<SandboxAccess>,
+    cwd: &Path,
 ) -> Result<Command, String> {
     #[cfg(windows)]
     let shell_args = ["/C".to_string(), command_line.to_string()];
     #[cfg(not(windows))]
     let shell_args = ["-c".to_string(), command_line.to_string()];
-    let mut command = sandboxed_command(shell, &shell_args, workspace, access)?;
+    let mut command = sandboxed_command(shell, &shell_args, workspace, access, cwd)?;
     #[cfg(not(target_os = "windows"))]
     command.env("PATH", crate::shared::expanded_path());
     Ok(command)
@@ -640,8 +650,8 @@ pub(crate) fn validate_restricted_shell_command(
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::{
-        build_profile, profile_quote, sandboxed_command, validate_restricted_command,
-        validate_restricted_shell_command, SandboxAccess,
+        backend_app_dir, build_profile, profile_quote, sandboxed_command,
+        validate_restricted_command, validate_restricted_shell_command, SandboxAccess,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -652,8 +662,9 @@ mod tests {
             std::env::temp_dir().join(format!("codepapr-sandbox-test-{}", std::process::id()));
         fs::create_dir_all(&workspace).expect("sandbox test workspace should exist");
 
-        let mut command = sandboxed_command("/bin/echo", &["sandbox-ok".to_string()], &workspace, None)
-            .expect("sandbox command should build");
+        let mut command =
+            sandboxed_command("/bin/echo", &["sandbox-ok".to_string()], &workspace, None, &workspace)
+                .expect("sandbox command should build");
         let output = command.output().expect("sandbox command should start");
 
         let _ = fs::remove_dir_all(&workspace);
@@ -843,6 +854,7 @@ mod tests {
             &[script.display().to_string()],
             &workspace,
             Some(access),
+            &app_dir,
         )
         .expect("sandbox command should build");
         let output = command.output().expect("sandbox command should start");
@@ -884,6 +896,7 @@ mod tests {
             &[script.display().to_string()],
             &workspace,
             Some(access),
+            &app_dir,
         )
         .expect("sandbox command should build");
         let output = command.output().expect("sandbox command should start");
@@ -895,6 +908,80 @@ mod tests {
         assert!(
             !stdout.contains("APP_WRITE_OK") && !written,
             "non-backend spawn must not gain app dir write; stdout={stdout}"
+        );
+    }
+
+    /// 回归：相对脚本路径必须按进程工作目录解析，不能按工作区根解析。
+    /// 旧实现 workspace.join("server.js").parent() = 工作区根，等于给
+    /// local=read 的后端 app 放行整个工作区的 file-write*。
+    #[test]
+    fn backend_app_dir_resolves_relative_script_against_cwd() {
+        let workspace = PathBuf::from("/tmp/codepapr-ws");
+        let app_dir = workspace.join(".CodePapr/apps/demo");
+
+        let resolved = backend_app_dir(&["server.js".to_string()], &app_dir)
+            .expect("relative script must resolve against cwd");
+        assert_eq!(resolved, app_dir, "app dir must be the script's parent under cwd");
+
+        // 绝对脚本不受 cwd 影响
+        let abs = backend_app_dir(
+            &["/opt/tools/runner/main.py".to_string()],
+            &app_dir,
+        )
+        .expect("absolute script must resolve to its own parent");
+        assert_eq!(abs, PathBuf::from("/opt/tools/runner"));
+
+        // args[0] 是标志位（node -e / python -m / zsh -c）：无脚本可推导，不放行
+        assert!(backend_app_dir(&["-c".to_string(), "node server.js".to_string()], &app_dir).is_none());
+        assert!(backend_app_dir(&["-m".to_string(), "http.server".to_string()], &app_dir).is_none());
+        assert!(backend_app_dir(&[], &app_dir).is_none());
+    }
+
+    /// 功能回归（math-mentor 事故）：manifest args 是相对 app 目录的
+    /// "server.js"，cwd=app 目录时后端必须能写自己的目录、不能写只读工作区。
+    #[test]
+    fn backend_spawn_relative_args_with_app_cwd_writes_only_app_dir() {
+        let workspace = home_test_workspace("appdir-rel");
+        let app_dir = workspace.join(".CodePapr/apps/demo");
+        fs::create_dir_all(&app_dir).expect("app dir should exist");
+
+        let app_probe = app_dir.join("runtime.txt");
+        let ws_probe = workspace.join("outside.txt");
+        fs::write(
+            app_dir.join("run.sh"),
+            format!(
+                "touch {} && echo APP_WRITE_OK\ntouch {} && echo WS_WRITE_OK\nexit 0\n",
+                app_probe.display(),
+                ws_probe.display()
+            ),
+        )
+        .expect("script should be written");
+
+        let access = SandboxAccess { network: false, workspace_write: false, allow_bind: true };
+        let mut command = sandboxed_command(
+            "/bin/zsh",
+            &["run.sh".to_string()],
+            &workspace,
+            Some(access),
+            &app_dir,
+        )
+        .expect("sandbox command should build");
+        command.current_dir(&app_dir);
+        let output = command.output().expect("sandbox command should start");
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let app_written = app_probe.exists();
+        let ws_written = ws_probe.exists();
+        let _ = fs::remove_dir_all(&workspace);
+
+        assert!(
+            stdout.contains("APP_WRITE_OK") && app_written,
+            "relative script under app cwd must write its own dir; stdout={stdout} stderr={:?}",
+            output.stderr
+        );
+        assert!(
+            !stdout.contains("WS_WRITE_OK") && !ws_written,
+            "read-only workspace must stay read-only; stdout={stdout}"
         );
     }
 
@@ -941,7 +1028,7 @@ mod tests {
         let probe = std::env::temp_dir().join(format!("codepapr-probe-{}", std::process::id()));
         let script = format!("touch {} && echo TMP_WRITE_OK", probe.display());
         let mut command =
-            sandboxed_command("/bin/zsh", &["-c".to_string(), script], &workspace, None)
+            sandboxed_command("/bin/zsh", &["-c".to_string(), script], &workspace, None, &workspace)
                 .expect("sandbox command should build");
         command.env("PATH", crate::shared::expanded_path());
         let output = command.output().expect("sandbox command should start");
@@ -971,6 +1058,7 @@ mod tests {
             &["-e".to_string(), "console.log('node-ok')".to_string()],
             &workspace,
             None,
+            &workspace,
         )
         .expect("sandbox command should build");
         let output = command.output().expect("sandbox command should start");
@@ -996,8 +1084,14 @@ mod tests {
         fs::create_dir_all(&workspace).expect("sandbox test workspace should exist");
 
         let mut command =
-            sandboxed_command("/opt/homebrew/bin/npm", &["--version".to_string()], &workspace, None)
-                .expect("sandbox command should build");
+            sandboxed_command(
+                "/opt/homebrew/bin/npm",
+                &["--version".to_string()],
+                &workspace,
+                None,
+                &workspace,
+            )
+            .expect("sandbox command should build");
         // 与真实调用路径一致：cwd 必须在工作区内，否则 process.cwd() 会被拒
         command
             .current_dir(&workspace)

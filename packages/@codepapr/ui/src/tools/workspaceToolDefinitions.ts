@@ -1148,12 +1148,12 @@ name: 'web_download_file',
         },
         command: {
           type: 'string',
-          description: '可选。后端启动命令名。例如：node。如果提供，应用将具有后端服务，用户可点击"运行"启动。',
+          description: '可选。后端启动命令名。例如：node。如果提供，应用将具有后端服务，用户可点击"运行"启动。后端进程的工作目录是应用目录 .CodePapr/apps/<appId>/。',
         },
         args: {
           type: 'array',
           items: { type: 'string' },
-          description: '可选。后端启动命令参数。例如：["server.js"]。仅在提供 command 时有效。',
+          description: '可选。后端启动命令参数。相对路径按应用目录（.CodePapr/apps/<appId>/）解析，因此后端文件要放在应用目录内并只写文件名。例如：["server.js"]（对应 files 里的 server.js）。仅在提供 command 时有效。',
         },
         port: {
           type: 'number',

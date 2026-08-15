@@ -620,6 +620,59 @@ describe('app_render agent tools validation', () => {
   });
 });
 
+describe('app_start 后端启动工作目录', () => {
+  beforeEach(() => {
+    invokeMock.mockClear();
+    invokeMock.mockResolvedValue({});
+    useAppRuntimeStore.setState((state) => ({
+      ...state,
+      apps: [
+        {
+          appId: 'demo-app',
+          title: 'Demo App',
+          html: '<html></html>',
+          filePath: '.CodePapr/apps/demo-app/index.html',
+          command: 'node',
+          args: ['server.js'],
+          port: 3456,
+          manifestJson: JSON.stringify({ spec: 'papr/0.1', name: 'Demo App', local: 'read', network: true }),
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+    }));
+  });
+
+  it('以 app 目录为 workdir 启动后端（相对 args 才能解析；math-mentor 回归）', async () => {
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'check_port_available') return true;
+      if (command === 'start_workspace_background_command') {
+        return { pid: 4242, started: true, previewUrl: args?.previewUrl ?? null };
+      }
+      if (command === 'check_port_available_structured') return { v4: true, v6: false };
+      if (command === 'check_port_available_detail') return 'v4=conn v6=refused';
+      if (command === 'check_port_owned_by') return true;
+      if (command === 'check_port_bind_address') return ['127.0.0.1'];
+      return {};
+    });
+
+    await expect(
+      build({ mode: 'app' }).execute('app_start', { appId: 'demo-app' }),
+    ).resolves.toMatchObject({ appId: 'demo-app', pid: 4242, started: true });
+
+    const spawnCall = invokeMock.mock.calls.find(
+      ([command]) => command === 'start_workspace_background_command',
+    );
+    // 旧实现不带 workdir，Rust 侧 cwd=工作区根，`node server.js` 找不到模块秒退
+    expect(spawnCall?.[1]).toMatchObject({
+      command: 'node',
+      args: ['server.js'],
+      workdir: '.CodePapr/apps/demo-app',
+      sandbox: { network: true, workspaceWrite: false, allowBind: true },
+    });
+  });
+});
+
 describe('workspace_apply_diff 写入原子性', () => {
   beforeEach(() => {
     useAppRuntimeStore.setState((state) => ({ ...state, apps: [] }));

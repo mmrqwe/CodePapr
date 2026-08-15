@@ -117,7 +117,7 @@ pub(crate) fn open_shell_session(
     let shell = detect_default_shell(shell)?;
     #[cfg(windows)]
     const CREATE_NO_WINDOW_SHELL: u32 = 0x08000000;
-    let mut shell_cmd = sandboxed_command(&shell, &[], &workspace, None)?;
+    let mut shell_cmd = sandboxed_command(&shell, &[], &workspace, None, &workspace)?;
     shell_cmd
         .current_dir(&workspace)
         .stdin(Stdio::piped())
