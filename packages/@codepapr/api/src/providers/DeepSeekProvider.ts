@@ -18,7 +18,7 @@ import { BaseLLMProvider, ProviderConfig, ProviderRequestError } from './ILLMPro
 import {
   buildOpenAICompatibleMessages,
   isReasoningRoundTripError,
-  stripLegacyReasoningPlaceholder,
+  stripReasoningPlaceholderEchoes,
   withReasoningRoundTripFallback,
 } from './reasoningRoundTrip';
 import {
@@ -293,7 +293,7 @@ export class DeepSeekProvider extends BaseLLMProvider {
               message: {
                 role: 'assistant',
                 content,
-                reasoningContent: stripLegacyReasoningPlaceholder(reasoningContent),
+                reasoningContent: stripReasoningPlaceholderEchoes(reasoningContent),
                 toolCalls: finalizeStreamingToolCalls(toolCallStates),
               },
               finishReason: effectiveFinishReason,
@@ -463,7 +463,7 @@ export class DeepSeekProvider extends BaseLLMProvider {
         message: {
           role: 'assistant' as const,
           content: c.message.content,
-          reasoningContent: stripLegacyReasoningPlaceholder(c.message.reasoning_content),
+          reasoningContent: stripReasoningPlaceholderEchoes(c.message.reasoning_content),
           toolCalls: c.message.tool_calls?.map(
             (tc): IToolCall => ({
               id: tc.id,

@@ -82,6 +82,60 @@ describe('DeepSeekProvider', () => {
     expect(body.messages[0]?.metadata).toBeUndefined();
   });
 
+  it('响应中的占位符回声会被剥离（含旧字面量与新模板句）', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: 'resp-echo-legacy',
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: 'done',
+                reasoning_content: '[reasoning not captured]',
+              },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 5, completion_tokens: 2 },
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: 'resp-echo-new',
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: '',
+                reasoning_content: 'Called browser to proceed.',
+              },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 5, completion_tokens: 2 },
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new DeepSeekProvider({ apiKey: 'test-key' });
+    const request: IChatRequest = {
+      model: 'deepseek-v4-pro',
+      messages: [{ id: 'u1', role: 'user', content: 'go', timestamp: 1 }],
+      maxTokens: 1024,
+    };
+
+    const legacy = await provider.chat(request);
+    expect(legacy.choices[0]?.message.reasoningContent).toBeUndefined();
+    expect(legacy.choices[0]?.message.content).toBe('done');
+
+    // 新模板句回声同样剥离：响应变为真正的空完成，交由 Agent 空完成守卫重试
+    const echo = await provider.chat(request);
+    expect(echo.choices[0]?.message.reasoningContent).toBeUndefined();
+    expect(echo.choices[0]?.message.content).toBe('');
+  });
+
   it('发送 system 角色并稳定序列化工具参数', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({

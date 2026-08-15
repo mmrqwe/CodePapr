@@ -63,19 +63,21 @@ export const MAX_CONTINUATIONS_PER_ROUND = 12;
 export const CONTINUATION_NUDGE =
   '你上一次的输出因达到最大输出长度而被截断。请从截断处继续输出，不要重复已经输出的内容。';
 
-/** 模型返回空完成（无内容/无思考/无工具调用）时的退避重试延迟（毫秒）。
- *  空完成是瞬态故障，退避重发即可；绝不因空完成而静默结束回合。 */
+/** 模型返回空完成（无内容/无工具调用；仅有思考也算——见 isEmptyCompletion）
+ *  时的退避重试延迟（毫秒）。空完成是瞬态故障，退避重发即可；绝不因空完成
+ *  而静默结束回合。20 档逐次递增（5s→100s），与重试上限一一对应。 */
 export const EMPTY_COMPLETION_RETRY_DELAYS_MS: readonly number[] = [
-  5_000, 10_000, 15_000, 20_000, 25_000, 30_000,
+  5_000, 10_000, 15_000, 20_000, 25_000, 30_000, 35_000, 40_000, 45_000, 50_000,
+  55_000, 60_000, 65_000, 70_000, 75_000, 80_000, 85_000, 90_000, 95_000, 100_000,
 ];
 
 /** 连续空完成达到该次数后关闭 thinking 再试（思考输出异常是常见诱因）。 */
-export const EMPTY_COMPLETION_DISABLE_THINKING_AFTER = 5;
+export const EMPTY_COMPLETION_DISABLE_THINKING_AFTER = 10;
 
-/** 单回合空完成重试上限：超过后抛错终止回合。退避表 6 档（共约 105s），
- *  超出后每 30s 一次；8 次覆盖约 3 分钟退避。无上限时 provider 持续返回
- *  空完成（模型配置错误/中转异常）会让 chat() 永久挂起并持续烧 token。 */
-export const MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND = 8;
+/** 单回合空完成重试上限：超过后抛错终止回合。退避表 20 档逐次递增（共约
+ *  17.5 分钟），等待期间用户可随时取消。无上限时 provider 持续返回空完成
+ *  （模型配置错误/中转异常）会让 chat() 永久挂起并持续烧 token。 */
+export const MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND = 20;
 
 /** Tools that can pause while waiting for a user folder-access decision. */
 export const PERMISSION_WAITING_TOOL_TIMEOUTS: Readonly<Record<string, number>> = {
@@ -608,8 +610,10 @@ export class Agent {
       //  - finish_reason='length'（max_tokens 耗尽，常见于思考过长）：片段不
       //    落日志，内存合并后关闭 thinking，用临时 suffix（部分输出 + 续写
       //    指令）从截断处续写，直到某段正常结束再整体落日志。
-      //  - 空完成（无内容/无思考/无工具调用）：退避重试，连续多次后关闭
-      //    thinking 再试。
+      //  - 空完成（无内容/无工具调用）：退避重试，连续多次后关闭 thinking
+      //    再试。仅有思考的响应同样是空完成——正常结束必然携带回复文本或
+      //    工具调用；实测模型会把历史中的 reasoning 占位符鹦鹉学舌成唯一
+      //    输出（"Called X to proceed."），若因思考非空放行，回合会静默终止。
       let continuationAttempt = 0;
       let emptyAttempt = 0;
       let mergedContent = '';
@@ -767,9 +771,10 @@ export class Agent {
           continue;
         }
 
+        // 空完成 = 无内容且无工具调用。reasoningContent 不参与判定：仅有
+        // 思考的响应没有任何可执行载荷，与空响应等价（见守卫头部注释）。
         const isEmptyCompletion =
           !(segment.content ?? '') &&
-          !segment.reasoningContent &&
           (!segment.toolCalls || segment.toolCalls.length === 0);
         if (isEmptyCompletion) {
           emptyAttempt += 1;

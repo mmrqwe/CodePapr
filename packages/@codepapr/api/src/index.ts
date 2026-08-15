@@ -21,8 +21,10 @@ export {
 } from './providers/streaming';
 export {
   LEGACY_REASONING_PLACEHOLDER,
+  REASONING_PLACEHOLDER_FALLBACK,
   isLegacyReasoningPlaceholder,
-  stripLegacyReasoningPlaceholder,
+  isReasoningPlaceholderEcho,
+  stripReasoningPlaceholderEchoes,
 } from './providers/reasoningRoundTrip';
 
 // Request / Response

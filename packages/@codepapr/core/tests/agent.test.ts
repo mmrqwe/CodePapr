@@ -4,6 +4,8 @@ import {
   Agent,
   CONTINUATION_NUDGE,
   DEFAULT_AGENT_MAX_TOOL_ROUNDS,
+  EMPTY_COMPLETION_DISABLE_THINKING_AFTER,
+  EMPTY_COMPLETION_RETRY_DELAYS_MS,
   ImmutablePrefix,
   MAX_CONTINUATIONS_PER_ROUND,
   MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND,
@@ -948,6 +950,20 @@ describe('Agent completion-quality guards (no silent stops)', () => {
     };
   }
 
+  /** 仅有思考、无内容、无工具调用的退化响应（实测为 reasoning 占位符回声）。 */
+  function reasoningOnlyResponse(reasoningContent: string): IChatResponse {
+    return {
+      id: 'resp-reasoning-only',
+      choices: [
+        {
+          message: { role: 'assistant', content: '', reasoningContent },
+          finishReason: 'stop',
+        },
+      ],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    };
+  }
+
   const noopValidator = {
     validate: () => ({
       prefixCached: false,
@@ -1206,5 +1222,65 @@ describe('Agent completion-quality guards (no silent stops)', () => {
     await expect(agent.chat('请回答')).rejects.toThrow(/空完成/);
     // 重试上限次请求后抛错，而不是无限继续
     expect(chatMock).toHaveBeenCalledTimes(MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND + 1);
+  });
+
+  it('retries a reasoning-only completion instead of silently ending the turn', async () => {
+    // 实测故障：模型把 reasoning 占位符回声成唯一输出（无内容/无工具调用）。
+    // 旧实现因 reasoningContent 非空判为正常结束，回合静默终止。
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi
+        .fn<(_: IChatRequest) => Promise<IChatResponse>>()
+        .mockResolvedValueOnce(reasoningOnlyResponse('Called browser to proceed.'))
+        .mockResolvedValueOnce(reasoningOnlyResponse('Called browser to proceed.'))
+        .mockResolvedValueOnce(stopResponse('最终答案')),
+    };
+    const agent = createGuardedAgent(provider, 'openai', () => undefined);
+    const attempts: number[] = [];
+
+    const response = await agent.chat('请回答', (e) => {
+      if (e.type === 'round-retry' && e.reason === 'empty') attempts.push(e.attempt);
+    });
+
+    expect(response.content).toBe('最终答案');
+    expect(provider.chat).toHaveBeenCalledTimes(3);
+    expect(attempts).toEqual([1, 2]);
+    // reasoning-only 响应不落日志：仅 user + 最终 assistant
+    const messages = agent.getSession().logStore.getAllMessages();
+    expect(messages).toHaveLength(2);
+    expect(messages[1]?.content).toBe('最终答案');
+  });
+
+  it('throws after sustained reasoning-only completions (never hangs silently)', async () => {
+    const chatMock = vi.fn<(_: IChatRequest) => Promise<IChatResponse>>();
+    for (let i = 0; i < MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND + 2; i += 1) {
+      chatMock.mockResolvedValueOnce(reasoningOnlyResponse('Called browser to proceed.'));
+    }
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: chatMock,
+    };
+    const agent = createGuardedAgent(provider, 'openai', () => undefined);
+
+    await expect(agent.chat('请回答')).rejects.toThrow(/空完成/);
+    expect(chatMock).toHaveBeenCalledTimes(MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND + 1);
+  });
+
+  it('empty-completion retry schedule: delays strictly increase and cover the retry cap', () => {
+    expect(EMPTY_COMPLETION_RETRY_DELAYS_MS).toHaveLength(MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND);
+    for (let i = 1; i < EMPTY_COMPLETION_RETRY_DELAYS_MS.length; i += 1) {
+      expect(EMPTY_COMPLETION_RETRY_DELAYS_MS[i]).toBeGreaterThan(
+        EMPTY_COMPLETION_RETRY_DELAYS_MS[i - 1] ?? Number.NaN
+      );
+    }
+    // 关 thinking 阈值必须落在重试区间内（太早浪费思考、太晚失去兜底意义）
+    expect(EMPTY_COMPLETION_DISABLE_THINKING_AFTER).toBeGreaterThanOrEqual(1);
+    expect(EMPTY_COMPLETION_DISABLE_THINKING_AFTER).toBeLessThanOrEqual(
+      MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND
+    );
   });
 });

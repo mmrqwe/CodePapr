@@ -14,7 +14,7 @@ import { Logger, sortedStringify } from '@codepapr/common';
 import { BaseLLMProvider, ProviderConfig, ProviderRequestError } from './ILLMProvider';
 import {
   buildOpenAICompatibleMessages,
-  stripLegacyReasoningPlaceholder,
+  stripReasoningPlaceholderEchoes,
   withReasoningRoundTripFallback,
 } from './reasoningRoundTrip';
 import {
@@ -321,7 +321,7 @@ export class OpenAIProvider extends BaseLLMProvider {
               message: {
                 role: 'assistant',
                 content,
-                reasoningContent: stripLegacyReasoningPlaceholder(reasoningContent),
+                reasoningContent: stripReasoningPlaceholderEchoes(reasoningContent),
                 toolCalls: finalizeStreamingToolCalls(toolCallStates),
               },
               finishReason: effectiveFinishReason,
@@ -486,7 +486,7 @@ export class OpenAIProvider extends BaseLLMProvider {
         message: {
           role: 'assistant' as const,
           content: normalizeOpenAIContent(c.message.content),
-          reasoningContent: stripLegacyReasoningPlaceholder(c.message.reasoning_content),
+          reasoningContent: stripReasoningPlaceholderEchoes(c.message.reasoning_content),
           toolCalls: c.message.tool_calls?.map(
             (tc): IToolCall => ({
               id: tc.id,

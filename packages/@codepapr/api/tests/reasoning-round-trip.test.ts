@@ -3,10 +3,11 @@ import type { IMessage } from '@codepapr/types';
 import {
   buildReasoningPlaceholder,
   isLegacyReasoningPlaceholder,
+  isReasoningPlaceholderEcho,
   LEGACY_REASONING_PLACEHOLDER,
   REASONING_PLACEHOLDER_FALLBACK,
   resolveReasoningContent,
-  stripLegacyReasoningPlaceholder,
+  stripReasoningPlaceholderEchoes,
 } from '../src/providers/reasoningRoundTrip';
 
 function toolCallAssistantMessage(
@@ -62,7 +63,7 @@ describe('buildReasoningPlaceholder（动态占位符）', () => {
   });
 });
 
-describe('isLegacyReasoningPlaceholder / stripLegacyReasoningPlaceholder', () => {
+describe('isLegacyReasoningPlaceholder / isReasoningPlaceholderEcho / stripReasoningPlaceholderEchoes', () => {
   it('精确识别旧字面量（含首尾空白）', () => {
     expect(isLegacyReasoningPlaceholder(LEGACY_REASONING_PLACEHOLDER)).toBe(true);
     expect(isLegacyReasoningPlaceholder(`  ${LEGACY_REASONING_PLACEHOLDER}\n`)).toBe(true);
@@ -72,11 +73,31 @@ describe('isLegacyReasoningPlaceholder / stripLegacyReasoningPlaceholder', () =>
     expect(isLegacyReasoningPlaceholder(null)).toBe(false);
   });
 
-  it('strip：旧占位符与空串置空，真实推理原样保留', () => {
-    expect(stripLegacyReasoningPlaceholder(LEGACY_REASONING_PLACEHOLDER)).toBeUndefined();
-    expect(stripLegacyReasoningPlaceholder('')).toBeUndefined();
-    expect(stripLegacyReasoningPlaceholder(undefined)).toBeUndefined();
-    expect(stripLegacyReasoningPlaceholder('先想清楚再回答')).toBe('先想清楚再回答');
+  it('识别各代占位符回声（trim 后精确匹配）', () => {
+    expect(isReasoningPlaceholderEcho(LEGACY_REASONING_PLACEHOLDER)).toBe(true);
+    expect(isReasoningPlaceholderEcho('Called browser to proceed.')).toBe(true);
+    expect(isReasoningPlaceholderEcho('Called read_image to proceed.')).toBe(true);
+    expect(isReasoningPlaceholderEcho('  Called bash to proceed.\n')).toBe(true);
+    expect(isReasoningPlaceholderEcho(REASONING_PLACEHOLDER_FALLBACK)).toBe(true);
+  });
+
+  it('真实推理不误判为回声', () => {
+    expect(isReasoningPlaceholderEcho('Called browser to proceed')).toBe(false);
+    expect(isReasoningPlaceholderEcho('Called browser to proceed. Now check the dialog.')).toBe(false);
+    expect(isReasoningPlaceholderEcho('I called browser to proceed.')).toBe(false);
+    expect(isReasoningPlaceholderEcho('先想清楚再回答')).toBe(false);
+    expect(isReasoningPlaceholderEcho('')).toBe(false);
+    expect(isReasoningPlaceholderEcho(undefined)).toBe(false);
+    expect(isReasoningPlaceholderEcho(null)).toBe(false);
+  });
+
+  it('strip：各代回声与空串置空，真实推理原样保留', () => {
+    expect(stripReasoningPlaceholderEchoes(LEGACY_REASONING_PLACEHOLDER)).toBeUndefined();
+    expect(stripReasoningPlaceholderEchoes('Called browser to proceed.')).toBeUndefined();
+    expect(stripReasoningPlaceholderEchoes(REASONING_PLACEHOLDER_FALLBACK)).toBeUndefined();
+    expect(stripReasoningPlaceholderEchoes('')).toBeUndefined();
+    expect(stripReasoningPlaceholderEchoes(undefined)).toBeUndefined();
+    expect(stripReasoningPlaceholderEchoes('先想清楚再回答')).toBe('先想清楚再回答');
   });
 });
 

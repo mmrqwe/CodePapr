@@ -125,6 +125,63 @@ describe('OpenAIProvider', () => {
     expect(response.choices[0]?.message.content).toBe('done');
   });
 
+  it('filters new-generation placeholder echoes out of responses', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'resp-echo-new',
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: '',
+                reasoning_content: 'Called browser to proceed.',
+              },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 5, completion_tokens: 2 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAIProvider({ apiKey: 'test-key' });
+    const response = await provider.chat({
+      model: 'gpt-4o',
+      messages: [{ id: 'u1', role: 'user', content: 'go', timestamp: 1 }],
+      maxTokens: 1024,
+    });
+
+    // 回声被剥离后响应变为真正的空完成，交由 Agent 空完成守卫重试
+    expect(response.choices[0]?.message.reasoningContent).toBeUndefined();
+    expect(response.choices[0]?.message.content).toBe('');
+  });
+
+  it('filters placeholder echoes accumulated by stream deltas', async () => {
+    const sse =
+      'data: {"id":"resp-stream-echo","choices":[{"index":0,"delta":{"reasoning_content":"Called browser to proceed."},"finish_reason":null}]}\n\n' +
+      'data: {"id":"resp-stream-echo","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}\n\n' +
+      'data: [DONE]\n\n';
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAIProvider({ apiKey: 'test-key' });
+    const response = await provider.streamChat(
+      {
+        model: 'gpt-4o',
+        messages: [{ id: 'u1', role: 'user', content: 'go', timestamp: 1 }],
+        maxTokens: 1024,
+      },
+      () => undefined
+    );
+
+    expect(response.choices[0]?.message.reasoningContent).toBeUndefined();
+  });
+
   it('streamChat emits reasoning/content deltas and normalizes cached tokens', async () => {
     const chunks = [
       'data: {"id":"resp-stream","choices":[{"index":0,"delta":{"reasoning_content":"先想"},"finish_reason":null}]}\n\n',
