@@ -17,8 +17,8 @@ import type { SettingsTabProps } from './types';
 function modeButtonClass(active: boolean): string {
   return `rounded-xl border px-4 py-3 text-left transition-colors ${
     active
-      ? 'border-indigo-500/60 bg-indigo-500/15 text-indigo-100 shadow-[0_0_12px_rgba(99,102,241,0.1)]'
-      : 'border-[#2a2d3a] bg-[#0f1117] text-slate-400 hover:border-slate-500/60 hover:text-slate-200'
+      ? 'border-accent-soft bg-accent-soft text-accent-text shadow-[0_0_12px_rgba(99,102,241,0.1)]'
+      : 'border-line bg-base text-fg-muted hover:border-line-strong hover:text-fg'
   }`;
 }
 
@@ -113,12 +113,12 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-4 text-sm leading-relaxed text-slate-400">
+      <div className="rounded-2xl border border-line bg-base px-5 py-4 text-sm leading-relaxed text-fg-muted">
         {t.settingsLlmDesc}
       </div>
 
       <div>
-        <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+        <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
           {t.apiType}
         </label>
         <div className="grid grid-cols-2 gap-3">
@@ -165,14 +165,14 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
       {local.apiMode === 'custom' && (
         <div className="grid gap-5 xl:grid-cols-2">
           <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
               {t.apiFormat}
             </label>
             <select
               value={local.apiFormat}
               onChange={(e) => setApiFormat(e.target.value as ApiFormat)}
               title={t.apiFormat}
-              className="w-full cursor-pointer rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+              className="w-full cursor-pointer rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg focus:border-accent-soft focus:outline-none"
             >
               <option value="openai">OpenAI Chat Completions</option>
               <option value="claude">Claude Messages</option>
@@ -190,7 +190,7 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
       )}
 
       {local.apiMode === 'deepseek' && (
-        <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-5 py-4 text-sm text-emerald-200">
+        <div className="rounded-2xl border border-ok-bg bg-ok-bg px-5 py-4 text-sm text-ok">
           {t.deepseekNotice}
         </div>
       )}
@@ -354,8 +354,8 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
         />
 
         <div>
-          <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-            {t.temperature}: <span className="font-mono text-indigo-300">{local.temperature}</span>
+          <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
+            {t.temperature}: <span className="font-mono text-accent-text">{local.temperature}</span>
           </label>
           <input
             type="range"
@@ -365,13 +365,13 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
             value={local.temperature}
             onChange={(e) => update({ temperature: parseFloat(e.target.value) })}
             title={t.temperature}
-            className="mt-3 w-full cursor-pointer accent-indigo-500"
+            className="mt-3 w-full cursor-pointer accent-accent"
           />
         </div>
 
         <div>
-          <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-            {t.topPLabel}: <span className="font-mono text-indigo-300">{local.topP}</span>
+          <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
+            {t.topPLabel}: <span className="font-mono text-accent-text">{local.topP}</span>
           </label>
           <input
             type="range"
@@ -381,9 +381,9 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
             value={local.topP}
             onChange={(e) => update({ topP: parseFloat(e.target.value) })}
             title={t.topPHint}
-            className="mt-3 w-full cursor-pointer accent-indigo-500"
+            className="mt-3 w-full cursor-pointer accent-accent"
           />
-          <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.topPHint}</p>
+          <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{t.topPHint}</p>
         </div>
 
         <TextField

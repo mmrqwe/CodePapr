@@ -110,21 +110,21 @@ interface SkillMarketModalProps {
 
 function SkeletonCard() {
   return (
-    <div className="rounded-2xl border border-[#2a2d3a] bg-[#121722] p-4">
+    <div className="rounded-2xl border border-line bg-base p-4">
       <div className="flex items-start gap-3">
-        <div className="h-10 w-10 flex-shrink-0 animate-pulse rounded-xl bg-[#1d2332]" />
+        <div className="h-10 w-10 flex-shrink-0 animate-pulse rounded-xl bg-raised" />
         <div className="flex-1 space-y-2">
-          <div className="h-4 w-2/3 animate-pulse rounded bg-[#1d2332]" />
-          <div className="h-3 w-1/3 animate-pulse rounded bg-[#1d2332]" />
+          <div className="h-4 w-2/3 animate-pulse rounded bg-raised" />
+          <div className="h-3 w-1/3 animate-pulse rounded bg-raised" />
         </div>
       </div>
       <div className="mt-3 space-y-1.5">
-        <div className="h-3 w-full animate-pulse rounded bg-[#1d2332]" />
-        <div className="h-3 w-4/5 animate-pulse rounded bg-[#1d2332]" />
+        <div className="h-3 w-full animate-pulse rounded bg-raised" />
+        <div className="h-3 w-4/5 animate-pulse rounded bg-raised" />
       </div>
       <div className="mt-3 flex gap-1.5">
-        <div className="h-5 w-16 animate-pulse rounded-md bg-[#1d2332]" />
-        <div className="h-5 w-12 animate-pulse rounded-md bg-[#1d2332]" />
+        <div className="h-5 w-16 animate-pulse rounded-md bg-raised" />
+        <div className="h-5 w-12 animate-pulse rounded-md bg-raised" />
       </div>
     </div>
   );
@@ -155,55 +155,55 @@ function ListingCard({
     <button
       type="button"
       onClick={() => onSelect(listing)}
-      className="group relative flex flex-col gap-3 rounded-2xl border border-[#2a2d3a] bg-[#121722] p-4 text-left transition-all hover:border-purple-500/40 hover:bg-[#161b27]"
+      className="group relative flex flex-col gap-3 rounded-2xl border border-line bg-base p-4 text-left transition-all hover:border-purple-500/40 hover:bg-base"
     >
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-[#1d2332] text-sm font-bold text-slate-300">
+        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-raised text-sm font-bold text-fg-soft">
           {initial}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <h3 className="truncate text-sm font-semibold text-slate-100">{listing.title}</h3>
+            <h3 className="truncate text-sm font-semibold text-fg">{listing.title}</h3>
             {listing.verified ? (
-              <span className="flex-shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-medium text-emerald-200">{c.verified}</span>
+              <span className="flex-shrink-0 rounded-full border border-ok-bg bg-ok-bg px-1.5 py-0.5 text-[9px] font-medium text-ok">{c.verified}</span>
             ) : (
-              <span className="flex-shrink-0 rounded-full border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium text-amber-200">{c.notVerified}</span>
+              <span className="flex-shrink-0 rounded-full border border-warn-bg bg-warn-bg px-1.5 py-0.5 text-[9px] font-medium text-warn">{c.notVerified}</span>
             )}
           </div>
-          <p className="mt-0.5 truncate text-[11px] text-slate-500">{listing.sourceRepo}</p>
+          <p className="mt-0.5 truncate text-[11px] text-fg-muted">{listing.sourceRepo}</p>
         </div>
         <span className="flex-shrink-0 rounded-full border border-purple-500/30 bg-purple-500/15 px-2 py-0.5 text-[9px] font-medium text-purple-200">
           {c.agentuse}
         </span>
       </div>
 
-      <p className="line-clamp-2 text-xs leading-relaxed text-slate-400">{listing.description}</p>
+      <p className="line-clamp-2 text-xs leading-relaxed text-fg-muted">{listing.description}</p>
 
       <div className="flex flex-wrap items-center gap-1.5">
         {listing.tags.slice(0, 4).map((tag) => (
-          <span key={tag} className="rounded-md border border-[#2a2d3a] px-1.5 py-0.5 text-[10px] text-slate-400">
+          <span key={tag} className="rounded-md border border-line px-1.5 py-0.5 text-[10px] text-fg-muted">
             {tag}
           </span>
         ))}
       </div>
 
-      <div className="mt-auto flex items-center justify-between border-t border-[#2a2d3a] pt-2.5">
+      <div className="mt-auto flex items-center justify-between border-t border-line pt-2.5">
         <span />
         {isInstalled ? (
-          <span className="rounded-lg bg-emerald-500/15 px-3 py-1.5 text-[10px] font-semibold text-emerald-200">{c.installed}</span>
+          <span className="rounded-lg bg-ok-bg px-3 py-1.5 text-[10px] font-semibold text-ok">{c.installed}</span>
         ) : isInstalling ? (
           <span className="rounded-lg bg-purple-500/20 px-3 py-1.5 text-[10px] font-semibold text-purple-200">{c.installing}</span>
         ) : installError ? (
           // #19：失败时除错误信息外提供「重试」按钮——旧实现只有错误徽标，
           // 只能进详情页重试，卡片上无法直接重来。
           <div className="flex items-center gap-2">
-            <span className="max-w-[180px] truncate rounded-lg bg-red-500/15 px-3 py-1.5 text-[10px] font-semibold text-red-200" title={installError}>
+            <span className="max-w-[180px] truncate rounded-lg bg-danger-bg px-3 py-1.5 text-[10px] font-semibold text-danger" title={installError}>
               {installError}
             </span>
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onRetryInstall(listing); }}
-              className="shrink-0 rounded-lg bg-red-500/25 px-3 py-1.5 text-[10px] font-semibold text-red-100 transition-colors hover:bg-red-500/40"
+              className="shrink-0 rounded-lg bg-danger-bg px-3 py-1.5 text-[10px] font-semibold text-danger transition-colors hover:bg-danger-bg"
             >
               {c.retry}
             </button>
@@ -243,11 +243,11 @@ function SkillDetail({
 }) {
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-[#2a2d3a] px-6 py-4">
+      <div className="flex items-center justify-between border-b border-line px-6 py-4">
         <button
           type="button"
           onClick={onClose}
-          className="flex items-center gap-2 text-xs text-slate-400 transition-colors hover:text-slate-200"
+          className="flex items-center gap-2 text-xs text-fg-muted transition-colors hover:text-fg"
         >
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M19 12H5M12 19l-7-7 7-7" />
@@ -255,24 +255,24 @@ function SkillDetail({
           {c.back}
         </button>
         <div className="flex items-center gap-2">
-          <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${listing.verified ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-200' : 'border-amber-500/30 bg-amber-500/15 text-amber-200'}`}>
+          <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${listing.verified ? 'border-ok-bg bg-ok-bg text-ok' : 'border-warn-bg bg-warn-bg text-warn'}`}>
             {listing.verified ? c.verified : c.notVerified}
           </span>
-          <button onClick={onCloseModal} title={c.close} className="text-2xl leading-none text-slate-500 hover:text-slate-300">×</button>
+          <button onClick={onCloseModal} title={c.close} className="text-2xl leading-none text-fg-muted hover:text-fg-soft">×</button>
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
         <div className="flex items-start gap-4">
-          <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-[#1d2332] text-xl font-bold text-slate-300">
+          <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-raised text-xl font-bold text-fg-soft">
             {listing.title.charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-bold text-slate-100">{listing.title}</h2>
-            <p className="mt-0.5 text-xs text-slate-500">{listing.id}</p>
+            <h2 className="text-lg font-bold text-fg">{listing.title}</h2>
+            <p className="mt-0.5 text-xs text-fg-muted">{listing.id}</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {listing.tags.map((tag) => (
-                <span key={tag} className="rounded-md border border-[#2a2d3a] px-2 py-0.5 text-[10px] text-slate-400">
+                <span key={tag} className="rounded-md border border-line px-2 py-0.5 text-[10px] text-fg-muted">
                   {tag}
                 </span>
               ))}
@@ -280,14 +280,14 @@ function SkillDetail({
           </div>
         </div>
 
-        <p className="mt-5 text-sm leading-relaxed text-slate-300">{listing.description}</p>
+        <p className="mt-5 text-sm leading-relaxed text-fg-soft">{listing.description}</p>
 
         {listing.features.length > 0 && (
           <div className="mt-5">
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{c.features}</h3>
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{c.features}</h3>
             <ul className="space-y-2">
               {listing.features.map((feat, i) => (
-                <li key={i} className="flex items-start gap-2 text-xs text-slate-400">
+                <li key={i} className="flex items-start gap-2 text-xs text-fg-muted">
                   <span className="mt-0.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-purple-400" />
                   {feat}
                 </li>
@@ -296,21 +296,21 @@ function SkillDetail({
           </div>
         )}
 
-        <div className="mt-5 rounded-2xl border border-[#2a2d3a] bg-[#0f1117] p-4">
-          <h3 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{c.repository}</h3>
-          <code className="mt-2 block truncate text-[11px] text-slate-400">{listing.sourceRepo}</code>
+        <div className="mt-5 rounded-2xl border border-line bg-base p-4">
+          <h3 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-muted">{c.repository}</h3>
+          <code className="mt-2 block truncate text-[11px] text-fg-muted">{listing.sourceRepo}</code>
         </div>
 
         {listing.isPlugin && (
-          <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+          <div className="mt-4 rounded-2xl border border-warn-bg bg-warn-bg p-4">
             <div className="flex items-start gap-2.5">
-              <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
               </svg>
               <div className="min-w-0">
-                <p className="text-xs font-semibold text-amber-300">{c.pluginNoticeTitle}</p>
-                <p className="mt-1 text-[11px] leading-relaxed text-amber-200/70">{c.pluginNoticeDesc}</p>
-                <p className="mt-2 text-[11px] text-amber-200/60">{c.pluginNoticeHint}</p>
+                <p className="text-xs font-semibold text-warn">{c.pluginNoticeTitle}</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-warn">{c.pluginNoticeDesc}</p>
+                <p className="mt-2 text-[11px] text-warn">{c.pluginNoticeHint}</p>
               </div>
             </div>
           </div>
@@ -322,7 +322,7 @@ function SkillDetail({
               href={listing.sourceRepo}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-lg border border-[#2a2d3a] px-3 py-1.5 text-[10px] font-medium text-slate-400 transition-colors hover:border-purple-500/40 hover:text-purple-200"
+              className="rounded-lg border border-line px-3 py-1.5 text-[10px] font-medium text-fg-muted transition-colors hover:border-purple-500/40 hover:text-purple-200"
             >
               {c.repository}
             </a>
@@ -332,7 +332,7 @@ function SkillDetail({
               href={listing.websiteUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-lg border border-[#2a2d3a] px-3 py-1.5 text-[10px] font-medium text-slate-400 transition-colors hover:border-purple-500/40 hover:text-purple-200"
+              className="rounded-lg border border-line px-3 py-1.5 text-[10px] font-medium text-fg-muted transition-colors hover:border-purple-500/40 hover:text-purple-200"
             >
               {c.website}
             </a>
@@ -340,9 +340,9 @@ function SkillDetail({
         </div>
       </div>
 
-      <div className="border-t border-[#2a2d3a] px-6 py-4">
+      <div className="border-t border-line px-6 py-4">
         {isInstalled ? (
-          <span className="inline-flex w-full items-center justify-center rounded-xl bg-emerald-500/15 py-3 text-sm font-semibold text-emerald-200">
+          <span className="inline-flex w-full items-center justify-center rounded-xl bg-ok-bg py-3 text-sm font-semibold text-ok">
             <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
             </svg>
@@ -354,7 +354,7 @@ function SkillDetail({
           </span>
         ) : installError ? (
           <div className="text-center">
-            <span className="text-xs text-red-400">{installError}</span>
+            <span className="text-xs text-danger">{installError}</span>
             <button
               type="button"
               onClick={() => onInstall(listing)}
@@ -367,7 +367,7 @@ function SkillDetail({
           <button
             type="button"
             onClick={() => onInstall(listing)}
-            className="flex w-full items-center justify-center rounded-xl border border-amber-500/40 bg-amber-500/10 py-3 text-sm font-semibold text-amber-200 transition-colors hover:bg-amber-500/20"
+            className="flex w-full items-center justify-center rounded-xl border border-warn-bg bg-warn-bg py-3 text-sm font-semibold text-warn transition-colors hover:bg-warn-bg"
           >
             {c.tryInstallSubskills}
           </button>
@@ -803,24 +803,24 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
   }, [listings, searchQuery]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="flex h-[90vh] w-[min(96vw,1100px)] flex-col rounded-3xl border border-[#2a2d3a] bg-[#1a1d27] shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay backdrop-blur-sm">
+      <div className="flex h-[90vh] w-[min(96vw,1100px)] flex-col rounded-3xl border border-line bg-raised shadow-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[#2a2d3a] px-6 py-4">
+        <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-slate-100">{c.title}</h2>
+            <h2 className="text-lg font-semibold text-fg">{c.title}</h2>
             <span className="rounded-lg border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-[10px] font-semibold text-purple-200">{c.agentuse}</span>
             {!workspacePath && (
-              <span className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">No workspace open</span>
+              <span className="rounded-lg border border-warn-bg bg-warn-bg px-2 py-1 text-[10px] text-warn">No workspace open</span>
             )}
           </div>
-          <button onClick={onClose} title={c.close} className="text-2xl leading-none text-slate-500 hover:text-slate-300">×</button>
+          <button onClick={onClose} title={c.close} className="text-2xl leading-none text-fg-muted hover:text-fg-soft">×</button>
         </div>
 
         {/* Search */}
-        <div className="border-b border-[#2a2d3a] px-6 py-3">
+        <div className="border-b border-line px-6 py-3">
           <div className="relative">
-            <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="11" cy="11" r="8" />
               <path d="M21 21l-4.35-4.35" />
             </svg>
@@ -830,7 +830,7 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={c.search}
-              className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] py-2 pl-9 pr-3 text-sm text-slate-200 placeholder-slate-600 focus:border-purple-500/60 focus:outline-none"
+              className="w-full rounded-xl border border-line bg-base py-2 pl-9 pr-3 text-sm text-fg placeholder-slate-600 focus:border-purple-500/60 focus:outline-none"
             />
           </div>
         </div>
@@ -848,12 +848,12 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
 
             {error && (
               <div className="flex h-64 flex-col items-center justify-center gap-4">
-                <p className="text-sm text-red-400">{c.error}</p>
-                <p className="text-xs text-slate-600">{error}</p>
+                <p className="text-sm text-danger">{c.error}</p>
+                <p className="text-xs text-fg-dim">{error}</p>
                 <button
                   type="button"
                   onClick={handleRetry}
-                  className="rounded-xl border border-red-500/30 px-4 py-2 text-xs font-medium text-red-300 transition-colors hover:bg-red-500/10"
+                  className="rounded-xl border border-danger-bg px-4 py-2 text-xs font-medium text-danger transition-colors hover:bg-danger-bg"
                 >
                   {c.retry}
                 </button>
@@ -862,7 +862,7 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
 
             {!isLoading && !error && filteredListings.length === 0 && (
               <div className="flex h-64 items-center justify-center">
-                <p className="text-sm text-slate-500">{c.empty}</p>
+                <p className="text-sm text-fg-muted">{c.empty}</p>
               </div>
             )}
 
@@ -887,7 +887,7 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
 
           {/* Detail slide-out */}
           {selectedListing && (
-            <div className="absolute right-0 top-0 h-full w-[400px] border-l border-[#2a2d3a] bg-[#161922]">
+            <div className="absolute right-0 top-0 h-full w-[400px] border-l border-line bg-base">
               <SkillDetail
                 listing={selectedListing}
                 isInstalled={isSkillInstalled(selectedListing)}

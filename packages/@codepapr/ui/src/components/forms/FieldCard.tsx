@@ -15,7 +15,7 @@ export function FieldCard({
 }: FieldCardProps) {
   return (
     <div
-      className={`rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 ${
+      className={`rounded-2xl border border-line bg-base px-5 ${
         padding === 'loose' ? 'py-5' : 'py-4'
       } ${className}`}
       {...rest}

@@ -171,8 +171,8 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
           <circle cx="14" cy="14" r="1" fill="currentColor" />
           <path d="M18 28l4 4 8-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
         </svg>
-        <div className="text-xs font-semibold text-slate-400">{t.appDockEmptyTitle}</div>
-        <p className="mt-1.5 max-w-[260px] text-[11px] leading-relaxed text-slate-600">
+        <div className="text-xs font-semibold text-fg-muted">{t.appDockEmptyTitle}</div>
+        <p className="mt-1.5 max-w-[260px] text-[11px] leading-relaxed text-fg-dim">
           {t.appDockEmptyDesc}
         </p>
       </div>
@@ -183,37 +183,37 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
   const btnActive = (active: boolean) =>
     `${btnBase} ${
       active
-        ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-200 hover:border-indigo-400 hover:text-white'
-        : 'border-[#2a2d3a] text-slate-600 cursor-not-allowed'
+        ? 'border-accent-soft bg-accent-soft text-accent-text hover:border-accent hover:text-fg'
+        : 'border-line text-fg-dim cursor-not-allowed'
     }`;
 
   const btnGreen = (active: boolean) =>
     `${btnBase} ${
       active
-        ? 'border-emerald-500/40 text-emerald-200 hover:border-emerald-400 hover:text-white'
-        : 'border-[#2a2d3a] text-slate-600 cursor-not-allowed'
+        ? 'border-ok-bg text-ok hover:border-ok hover:text-fg'
+        : 'border-line text-fg-dim cursor-not-allowed'
     }`;
 
   const btnAmber = (active: boolean) =>
     `${btnBase} ${
       active
-        ? 'border-amber-500/40 text-amber-200 hover:border-amber-400 hover:text-white'
-        : 'border-[#2a2d3a] text-slate-600 cursor-not-allowed'
+        ? 'border-warn-bg text-warn hover:border-warn hover:text-fg'
+        : 'border-line text-fg-dim cursor-not-allowed'
     }`;
 
   const btnRed = (active: boolean) =>
     `${btnBase} ${
       active
-        ? 'border-red-500/30 text-red-200 hover:border-red-400/60 hover:text-red-100'
-        : 'border-[#2a2d3a] text-slate-600 cursor-not-allowed'
+        ? 'border-danger-bg text-danger hover:border-danger-bg hover:text-danger'
+        : 'border-line text-fg-dim cursor-not-allowed'
     }`;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {error && (
-        <div className="shrink-0 mx-3 mt-2 rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-[10px] text-red-300">
+        <div className="shrink-0 mx-3 mt-2 rounded border border-danger-bg bg-danger-bg px-2 py-1 text-[10px] text-danger">
           {error}
-          <button type="button" onClick={() => setError('')} className="ml-2 text-slate-500 hover:text-slate-300">×</button>
+          <button type="button" onClick={() => setError('')} className="ml-2 text-fg-muted hover:text-fg-soft">×</button>
         </div>
       )}
 
@@ -228,25 +228,25 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
               onDoubleClick={() => handleDoubleClick(app)}
               className={`flex cursor-pointer items-center gap-2 px-3 py-2 transition-colors ${
                 isSelected
-                  ? 'bg-indigo-500/15 border-l-2 border-indigo-500'
-                  : 'hover:bg-[#1a1d28] border-l-2 border-transparent'
+                  ? 'bg-accent-soft border-l-2 border-accent'
+                  : 'hover:bg-base border-l-2 border-transparent'
               }`}
             >
               <span
                 className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${
-                  appRunning ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.4)]' : 'bg-red-400'
+                  appRunning ? 'bg-ok shadow-[0_0_6px_rgba(52,211,153,0.4)]' : 'bg-danger'
                 }`}
               />
               <span className="flex-shrink-0 text-sm leading-none">
                 {app.icon && app.icon.trim().length > 0 ? app.icon.trim().slice(0, 2) : '🖥️'}
               </span>
-              <span className="truncate text-xs text-slate-200">{app.title}</span>
+              <span className="truncate text-xs text-fg">{app.title}</span>
             </div>
           );
         })}
       </div>
 
-      <div className="shrink-0 flex items-center gap-1.5 border-t border-[#2a2d3a] px-3 py-2">
+      <div className="shrink-0 flex items-center gap-1.5 border-t border-line px-3 py-2">
         <button type="button" disabled={!canStart} onClick={handleStart} className={btnGreen(canStart)}>
           ▶ {t.appDockRun}
         </button>

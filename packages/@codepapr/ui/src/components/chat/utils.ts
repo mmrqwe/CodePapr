@@ -243,18 +243,18 @@ export function getToolInvocationSummary(tool: UIToolInvocation): string {
 
 export function diffLineClass(line: string): string {
   if (line.startsWith('--- a/') || line.startsWith('+++ b/')) {
-    return 'bg-[#101520] text-slate-400';
+    return 'bg-base text-fg-muted';
   }
   if (line.startsWith('@@')) {
-    return 'bg-sky-500/10 text-sky-200';
+    return 'bg-info-bg text-info';
   }
   if (line.startsWith('+')) {
-    return 'bg-emerald-500/10 text-emerald-200';
+    return 'bg-ok-bg text-ok';
   }
   if (line.startsWith('-')) {
-    return 'bg-rose-500/10 text-rose-200';
+    return 'bg-danger-bg text-danger';
   }
-  return 'text-slate-400';
+  return 'text-fg-muted';
 }
 
 export interface DiffInfo {

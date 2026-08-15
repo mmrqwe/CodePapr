@@ -1,7 +1,7 @@
 import { sanitizeMaxTokens } from '@codepapr/api';
 import { normalizeMcpSettings } from '../../utils/mcpTypes';
 import { isBuiltinThemeId } from '../../theme/themes';
-import { validateCustomTheme } from '../../theme/themeEngine';
+import { resolveTheme, validateCustomTheme } from '../../theme/themeEngine';
 import type { CustomThemeRecord } from '../../theme/types';
 import { ACCENT_PATTERN } from '../../theme/types';
 import { DEFAULT_SETTINGS, normalizeCustomSystemPrompt } from './defaults';
@@ -102,7 +102,11 @@ function normalizeCustomThemes(input: unknown): Record<string, CustomThemeRecord
   return result;
 }
 
-export function normalizeSettings(input: Partial<Settings> = {}): Settings {
+export function normalizeSettings(
+  input: Partial<Settings> & { theme?: string | null } = {},
+): Settings {
+  // 旧版单一 theme 字段不进入输出对象（避免把废弃字段持久化回去）。
+  const { theme: __legacyTheme, ...cleanInput } = input;
   const apiMode: ApiMode =
     input.apiMode ?? (input.provider && input.provider !== 'deepseek' ? 'custom' : 'deepseek');
   const apiFormat: ApiFormat =
@@ -452,12 +456,34 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
   const mcp = normalizeMcpSettings(input.mcp);
 
   const customThemes = normalizeCustomThemes(input.customThemes);
-  // 主题 id 必须是内置主题或已通过校验的自定义主题，否则回退跟随系统。
-  const theme =
-    typeof input.theme === 'string' &&
-    (isBuiltinThemeId(input.theme) || customThemes[input.theme])
-      ? input.theme
-      : null;
+  const isValidThemeId = (id: unknown): id is string =>
+    typeof id === 'string' && (isBuiltinThemeId(id) || customThemes[id] !== undefined);
+
+  // 旧版单一 theme 字段（可空 = 跟随系统）→ 新浅/深双主题模型：
+  // 按其 mode 落入对应槽位，并转为手动模式。
+  const legacyTheme = isValidThemeId(input.theme) ? input.theme : null;
+  const legacyMode = legacyTheme ? resolveTheme(legacyTheme, customThemes)?.mode ?? null : null;
+  const lightTheme = isValidThemeId(input.lightTheme)
+    ? input.lightTheme
+    : legacyMode === 'light' && legacyTheme
+      ? legacyTheme
+      : DEFAULT_SETTINGS.lightTheme;
+  const darkTheme = isValidThemeId(input.darkTheme)
+    ? input.darkTheme
+    : legacyMode === 'dark' && legacyTheme
+      ? legacyTheme
+      : DEFAULT_SETTINGS.darkTheme;
+  // 旧字段为 null 表示"跟随系统"；未迁移过（无 theme 字段）时保持默认。
+  const followSystem =
+    typeof input.followSystem === 'boolean'
+      ? input.followSystem
+      : legacyTheme !== null || Object.prototype.hasOwnProperty.call(input, 'theme')
+        ? legacyTheme === null
+        : DEFAULT_SETTINGS.followSystem;
+  const themeMode: 'light' | 'dark' =
+    input.themeMode === 'light' || input.themeMode === 'dark'
+      ? input.themeMode
+      : legacyMode ?? DEFAULT_SETTINGS.themeMode;
   const accent =
     typeof input.accent === 'string' && ACCENT_PATTERN.test(input.accent.trim())
       ? input.accent.trim()
@@ -465,7 +491,7 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
 
   return {
     ...DEFAULT_SETTINGS,
-    ...input,
+    ...cleanInput,
     apiMode,
     apiFormat,
     provider,
@@ -517,7 +543,10 @@ export function normalizeSettings(input: Partial<Settings> = {}): Settings {
     projectGraphMaxFileBytes,
     projectGraphMaxTreeEntries,
     lang,
-    theme,
+    lightTheme,
+    darkTheme,
+    followSystem,
+    themeMode,
     accent,
     customThemes,
     recentWorkspaces: normalizeRecentWorkspaces(input.recentWorkspaces),

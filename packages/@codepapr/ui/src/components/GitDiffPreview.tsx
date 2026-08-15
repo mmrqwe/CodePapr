@@ -7,18 +7,18 @@ interface GitDiffPreviewProps {
 
 function lineClassName(line: string): string {
   if (line.startsWith('diff --git ') || line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) {
-    return 'bg-[#101520] text-slate-400';
+    return 'bg-base text-fg-muted';
   }
   if (line.startsWith('@@')) {
-    return 'bg-sky-500/10 text-sky-200';
+    return 'bg-info-bg text-info';
   }
   if (line.startsWith('+') && !line.startsWith('+++')) {
-    return 'bg-emerald-500/10 text-emerald-200';
+    return 'bg-ok-bg text-ok';
   }
   if (line.startsWith('-') && !line.startsWith('---')) {
-    return 'bg-rose-500/10 text-rose-200';
+    return 'bg-danger-bg text-danger';
   }
-  return 'text-slate-400';
+  return 'text-fg-muted';
 }
 
 export function GitDiffPreview({
@@ -28,7 +28,7 @@ export function GitDiffPreview({
   const lines = useMemo(() => diff.split('\n'), [diff]);
 
   return (
-    <div className={`overflow-auto rounded-lg border border-[#202432] bg-[#0b0d13] ${maxHeightClassName}`}>
+    <div className={`overflow-auto rounded-lg border border-line bg-base ${maxHeightClassName}`}>
       <div className="min-w-full font-mono text-[10px] leading-5">
         {lines.map((line, index) => (
           <div

@@ -17,22 +17,22 @@ interface StageStyle {
 
 const STAGE_STYLES: Record<ContextStage, StageStyle> = {
   'stable-prefix': {
-    dot: 'bg-indigo-400',
-    border: 'border-indigo-500/40',
-    bg: 'bg-indigo-500/5',
-    badge: 'bg-indigo-500/15 text-indigo-300',
+    dot: 'bg-accent',
+    border: 'border-accent-soft',
+    bg: 'bg-accent-soft',
+    badge: 'bg-accent-soft text-accent-text',
   },
   'session-state': {
-    dot: 'bg-amber-400',
-    border: 'border-amber-500/40',
-    bg: 'bg-amber-500/5',
-    badge: 'bg-amber-500/15 text-amber-300',
+    dot: 'bg-warn',
+    border: 'border-warn-bg',
+    bg: 'bg-warn-bg',
+    badge: 'bg-warn-bg text-warn',
   },
   conversation: {
     dot: 'bg-slate-400',
     border: 'border-slate-600/50',
     bg: 'bg-slate-700/10',
-    badge: 'bg-slate-600/20 text-slate-300',
+    badge: 'bg-slate-600/20 text-fg-soft',
   },
 };
 
@@ -326,23 +326,23 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
       <button
         type="button"
         onClick={() => toggleKey(row.key, false)}
-        className="flex min-h-[36px] w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors hover:bg-white/5"
+        className="flex min-h-[36px] w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors hover:bg-hover"
       >
-        <span className={`w-3.5 flex-shrink-0 text-[10px] text-slate-600 transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
+        <span className={`w-3.5 flex-shrink-0 text-[10px] text-fg-dim transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
         <span
           className="flex-shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
           style={{ background: catColor(row.cat, 0.15), color: catColor(row.cat) }}
         >
           {meta.badge}
         </span>
-        <span className="flex-shrink-0 font-mono text-[11px] text-slate-500">
+        <span className="flex-shrink-0 font-mono text-[11px] text-fg-muted">
           {isToolsRow ? t.toolsEstimate : row.role}
           {row.toolName ? ` · ${row.toolName}` : ''}
         </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-slate-400">
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg-muted">
           {isToolsRow ? snapshot.toolNames.join(', ') : row.toolCallNames && row.toolCallNames.length > 0 ? `工具: ${row.toolCallNames.join(', ')}` : ''}
         </span>
-        <span className="flex-shrink-0 font-mono text-[10px] text-slate-600">
+        <span className="flex-shrink-0 font-mono text-[10px] text-fg-dim">
           {row.reasoningTokens > 0
             ? `${(row.tokens + row.reasoningTokens).toLocaleString()} tok (${row.reasoningTokens.toLocaleString()}${t.ganttThinking}+${row.tokens.toLocaleString()}${t.ganttResponse})`
             : formatTokens(row.tokens)}
@@ -352,7 +352,7 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
 
     const body = (
       <div className="px-3 pb-2.5 pl-9">
-        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-slate-600">
+        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-fg-dim">
           <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${style.badge}`}>
             {stageLabels[row.stage]}
           </span>
@@ -367,7 +367,7 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
           </span>
         </div>
         {isToolsRow ? (
-          <div className="overflow-hidden rounded-lg border border-[#2a2d3a] bg-[#0b0d12]">
+          <div className="overflow-hidden rounded-lg border border-line bg-base">
             <div className="divide-y divide-white/5">
               {(snapshot.toolDefinitions ?? snapshot.toolNames.map((n) => ({ name: n, description: '', parameters: null }))).map((td) => {
                 const toolExpanded = expandedTools.has(td.name);
@@ -380,16 +380,16 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
                         if (next.has(td.name)) next.delete(td.name); else next.add(td.name);
                         return next;
                       })}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-white/5"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-hover"
                     >
-                      <span className={`text-[10px] text-slate-600 transition-transform ${toolExpanded ? 'rotate-90' : ''}`}>▶</span>
-                      <span className="font-mono text-xs font-medium text-indigo-300">{td.name}</span>
+                      <span className={`text-[10px] text-fg-dim transition-transform ${toolExpanded ? 'rotate-90' : ''}`}>▶</span>
+                      <span className="font-mono text-xs font-medium text-accent-text">{td.name}</span>
                       {td.description && (
-                        <span className="min-w-0 flex-1 truncate text-[11px] text-slate-500">{td.description}</span>
+                        <span className="min-w-0 flex-1 truncate text-[11px] text-fg-muted">{td.description}</span>
                       )}
                     </button>
                     {toolExpanded && td.parameters != null && (
-                      <pre className="whitespace-pre-wrap break-words bg-black/20 px-4 py-2 text-[10px] leading-relaxed text-slate-400">
+                      <pre className="whitespace-pre-wrap break-words bg-overlay px-4 py-2 text-[10px] leading-relaxed text-fg-muted">
                         {JSON.stringify(td.parameters, null, 2)}
                       </pre>
                     )}
@@ -413,7 +413,7 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
                 </pre>
               </>
             ) : null}
-            <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-[#2a2d3a] bg-[#0b0d12] p-2.5 text-xs leading-relaxed text-slate-300 scrollbar-thin">
+            <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-base p-2.5 text-xs leading-relaxed text-fg-soft scrollbar-thin">
               {row.content || ' '}
             </pre>
           </>
@@ -425,7 +425,7 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
       <div
         key={row.key}
         id={`gantt-detail-${row.key}`}
-        className={`overflow-hidden rounded-xl border border-[#2a2d3a] bg-[#0f1117] transition-opacity ${hidden ? 'opacity-35' : ''}`}
+        className={`overflow-hidden rounded-xl border border-line bg-base transition-opacity ${hidden ? 'opacity-35' : ''}`}
         style={{ borderLeft: `3px solid ${catColor(row.cat, 0.9)}` }}
       >
         {header}
@@ -443,25 +443,25 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
   }, [axisTotal, effectiveMode, timeDomain]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm md:p-4">
-      <div className="flex h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#161922] shadow-2xl">
-        <div className="flex items-center justify-between border-b border-[#2a2d3a] px-5 py-3.5">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-3 backdrop-blur-sm md:p-4">
+      <div className="flex h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl">
+        <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-slate-200">{t.contextInspectorTitle}</h2>
-            <p className="mt-0.5 text-xs text-slate-500">{t.contextInspectorTip}</p>
+            <h2 className="text-sm font-semibold text-fg">{t.contextInspectorTitle}</h2>
+            <p className="mt-0.5 text-xs text-fg-muted">{t.contextInspectorTip}</p>
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => void navigator.clipboard.writeText(fullText)}
-              className="rounded-lg border border-[#2a2d3a] px-2.5 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:border-indigo-400 hover:text-white"
+              className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-fg-soft transition-colors hover:border-accent hover:text-fg"
             >
               {t.copy}
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="text-lg leading-none text-slate-500 transition-colors hover:text-slate-200"
+              className="text-lg leading-none text-fg-muted transition-colors hover:text-fg"
               title={t.cancel}
             >
               ×
@@ -469,39 +469,39 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-[#2a2d3a] bg-[#1a1d27] px-5 py-2.5">
-          <span className="text-xs font-semibold text-slate-200">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-line bg-raised px-5 py-2.5">
+          <span className="text-xs font-semibold text-fg">
             {t.currentContextLength}{' '}
-            <span className="font-mono text-indigo-300">
+            <span className="font-mono text-accent-text">
               {formatTokens(snapshot.totalTokens)} {t.tokensUnit}
             </span>
           </span>
           {STAGE_ORDER.map((stage) => (
-            <span key={stage} className="flex items-center gap-1.5 text-[11px] text-slate-400">
+            <span key={stage} className="flex items-center gap-1.5 text-[11px] text-fg-muted">
               <span className={`inline-block h-2 w-2 rounded-full ${STAGE_STYLES[stage].dot}`} />
               {stageLabels[stage]}
-              <span className="font-mono text-slate-500">
+              <span className="font-mono text-fg-muted">
                 {formatTokens(snapshot.tokensByStage[stage])}
               </span>
             </span>
           ))}
-          <span className="ml-auto text-[11px] text-slate-600">
+          <span className="ml-auto text-[11px] text-fg-dim">
             {t.roundsLabel} {snapshot.round} · {snapshot.model}
           </span>
         </div>
 
         {/* ── 甘特图 ── */}
-        <div className="border-b border-[#2a2d3a] bg-[#1a1d27] px-5 py-3">
+        <div className="border-b border-line bg-raised px-5 py-3">
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <p className="text-xs font-semibold text-indigo-300">{t.ganttTimeline}</p>
-            <span className="flex rounded-md border border-[#2a2d3a] p-0.5">
+            <p className="text-xs font-semibold text-accent-text">{t.ganttTimeline}</p>
+            <span className="flex rounded-md border border-line p-0.5">
               <button
                 type="button"
                 onClick={() => setAxisMode('token')}
                 className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
                   effectiveMode === 'token'
-                    ? 'bg-indigo-500/20 text-indigo-300'
-                    : 'text-slate-500 hover:text-slate-300'
+                    ? 'bg-accent-soft text-accent-text'
+                    : 'text-fg-muted hover:text-fg-soft'
                 }`}
               >
                 {t.ganttAxisToken}
@@ -513,14 +513,14 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
                 title={timeDomain ? undefined : t.ganttTimeUnavailableTip}
                 className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                   effectiveMode === 'time'
-                    ? 'bg-indigo-500/20 text-indigo-300'
-                    : 'text-slate-500 hover:text-slate-300'
+                    ? 'bg-accent-soft text-accent-text'
+                    : 'text-fg-muted hover:text-fg-soft'
                 }`}
               >
                 {t.ganttAxisTime}
               </button>
             </span>
-            <span className="text-[10px] text-slate-600">{t.ganttTimelineHint}</span>
+            <span className="text-[10px] text-fg-dim">{t.ganttTimelineHint}</span>
             <span className="ml-auto flex items-center gap-2">
               {(['user', 'model', 'tool'] as RowCat[]).map((cat) => {
                 const off = hiddenCats.has(cat);
@@ -551,18 +551,18 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
               })}
             </span>
           </div>
-          <p className="mb-2 text-[10px] text-slate-600">{t.ganttLegendHint}</p>
+          <p className="mb-2 text-[10px] text-fg-dim">{t.ganttLegendHint}</p>
 
           <div className="overflow-x-auto scrollbar-thin">
             <div className="relative min-w-[720px]">
               {/* 横轴 */}
               <div className="flex h-[22px] items-stretch">
-                <div className="sticky left-0 z-20 w-[200px] flex-shrink-0 bg-[#1a1d27]" />
-                <div className="relative flex-1 border-l border-[#2a2d3a]">
+                <div className="sticky left-0 z-20 w-[200px] flex-shrink-0 bg-raised" />
+                <div className="relative flex-1 border-l border-line">
                   {axisTicks.map((tick) => (
                     <span
                       key={tick.p}
-                      className="absolute top-0 -translate-x-1/2 font-mono text-[10px] text-slate-600"
+                      className="absolute top-0 -translate-x-1/2 font-mono text-[10px] text-fg-dim"
                       style={{ left: `${tick.p}%` }}
                     >
                       {tick.label}
@@ -577,9 +577,9 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
                 const meta = catMeta[cat];
                 return (
                   <div key={cat} className="flex h-[30px] items-stretch">
-                    <div className="sticky left-0 z-20 flex w-[200px] flex-shrink-0 items-center gap-1.5 bg-[#1a1d27] pr-3 shadow-[6px_0_8px_-8px_rgba(0,0,0,0.6)]">
+                    <div className="sticky left-0 z-20 flex w-[200px] flex-shrink-0 items-center gap-1.5 bg-raised pr-3 shadow-[6px_0_8px_-8px_rgba(0,0,0,0.6)]">
                       <span className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-sm" style={{ background: catColor(cat) }} />
-                      <span className="truncate text-[11px] text-slate-400">{meta.label}</span>
+                      <span className="truncate text-[11px] text-fg-muted">{meta.label}</span>
                     </div>
                     <div className="relative flex-1">
                       {rows.filter((row) => row.cat === cat).map((row) => barFor(row))}
@@ -592,30 +592,30 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
         </div>
 
         {/* ── 明细列表 ── */}
-        <div className="flex min-h-0 flex-1 flex-col bg-[#161922]">
-          <div className="flex items-center gap-2 border-b border-[#2a2d3a] px-5 py-2.5">
-            <p className="text-xs font-semibold text-slate-300">{t.ganttDetails}</p>
-            <span className="text-[10px] text-slate-600">{t.ganttDetailsHint}</span>
+        <div className="flex min-h-0 flex-1 flex-col bg-base">
+          <div className="flex items-center gap-2 border-b border-line px-5 py-2.5">
+            <p className="text-xs font-semibold text-fg-soft">{t.ganttDetails}</p>
+            <span className="text-[10px] text-fg-dim">{t.ganttDetailsHint}</span>
             <span className="ml-auto flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => setAll(true)}
-                className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] font-medium text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100"
+                className="rounded-md border border-line px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
               >
                 {t.ganttExpandAll}
               </button>
               <button
                 type="button"
                 onClick={() => setAll(false)}
-                className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] font-medium text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100"
+                className="rounded-md border border-line px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
               >
                 {t.ganttCollapseAll}
               </button>
             </span>
           </div>
-          <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable bg-[#0f1117] p-4">
+          <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable bg-base p-4">
             {rows.length === 0 ? (
-              <p className="py-10 text-center text-xs text-slate-500">{t.contextInspectorEmpty}</p>
+              <p className="py-10 text-center text-xs text-fg-muted">{t.contextInspectorEmpty}</p>
             ) : (
               detailRows
             )}
@@ -629,19 +629,19 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
         const stage = stageLabels[tip.row.stage];
         return (
           <div
-            className="pointer-events-none fixed z-[60] max-w-[360px] rounded-lg border border-[#2a2d3a] bg-[#0b0d13] px-3 py-2 text-[11px] leading-relaxed text-slate-200 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
+            className="pointer-events-none fixed z-[60] max-w-[360px] rounded-lg border border-line bg-base px-3 py-2 text-[11px] leading-relaxed text-fg shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
             style={{ left: tip.x, top: tip.y }}
           >
             <p className="font-semibold" style={{ color: catColor(tip.row.cat) }}>
               {meta.label} · {tip.row.role === 'tools' ? t.toolsEstimate : `${tip.row.role}${tip.row.toolName ? ` · ${tip.row.toolName}` : ''}`}
             </p>
-            <p className="font-mono text-slate-500">
+            <p className="font-mono text-fg-muted">
               {stage} · {formatTokens(tip.row.tokens)}
               {tip.row.reasoningTokens > 0 ? ` + ${formatTokens(tip.row.reasoningTokens)} ${t.ganttThinking}` : ''}
               {tip.row.durationMs ? ` · ${t.ganttDuration} ${formatMs(tip.row.durationMs)}` : ''}
             </p>
             {isRealTimestamp(tip.row.timestamp) ? (
-              <p className="font-mono text-slate-600">{t.ganttAt} {formatClock(tip.row.timestamp)}</p>
+              <p className="font-mono text-fg-dim">{t.ganttAt} {formatClock(tip.row.timestamp)}</p>
             ) : null}
           </div>
         );

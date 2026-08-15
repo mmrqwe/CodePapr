@@ -118,121 +118,10 @@ body {
 .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 .scrollbar-stable { scrollbar-gutter: stable both-edges; }
 
-/* ── paper-light 主题全局覆盖层 ─────────────────────────────
- * 组件迁移（Phase 3）完成前的过渡补丁：把硬编码深色类重映射为浅色。
- * 只作用于 paper-light；新主题不再使用该层。 */
-
-/* --- 输入控件 --- */
-:root[data-theme="paper-light"] input:not([type="checkbox"]):not([type="radio"]),
-:root[data-theme="paper-light"] textarea,
-:root[data-theme="paper-light"] select {
-  background-color: var(--bg-base) !important;
-  color: var(--foreground) !important;
-  border-color: var(--border) !important;
-}
-:root[data-theme="paper-light"] input[type="checkbox"],
-:root[data-theme="paper-light"] input[type="radio"] { accent-color: var(--accent) !important; }
-:root[data-theme="paper-light"] input::placeholder,
-:root[data-theme="paper-light"] textarea::placeholder { color: var(--foreground-dim) !important; }
-
-/* ChatPanel 输入框背景 — 与父容器 bg-[#1a1d27] 一致，覆盖全局 textarea 规则 */
-:root[data-theme="paper-light"] .chat-input-box textarea {
-  background-color: var(--bg-raised) !important;
-}
-
-/* --- 所有 dark bg-[#xxxxxx] → 浅色背景 --- */
-:root[data-theme="paper-light"] [class*="bg-[#0f1117]"],
-:root[data-theme="paper-light"] [class*="bg-[#10131b]"],
-:root[data-theme="paper-light"] [class*="bg-[#101722]"],
-:root[data-theme="paper-light"] [class*="bg-[#0b0d12]"],
-:root[data-theme="paper-light"] [class*="bg-[#0d0f17]"],
-:root[data-theme="paper-light"] [class*="bg-[#0f1118]"],
-:root[data-theme="paper-light"] [class*="bg-[#0d1118]"],
-:root[data-theme="paper-light"] [class*="bg-[#0e1117]"],
-:root[data-theme="paper-light"] [class*="bg-[#0f141d]"],
-:root[data-theme="paper-light"] [class*="bg-[#10141d]"],
-:root[data-theme="paper-light"] [class*="bg-[#11141c]"],
-:root[data-theme="paper-light"] [class*="bg-[#11151d]"],
-:root[data-theme="paper-light"] [class*="bg-[#111623]"],
-:root[data-theme="paper-light"] [class*="bg-[#101520]"],
-:root[data-theme="paper-light"] [class*="bg-[#121722]"],
-:root[data-theme="paper-light"] [class*="bg-[#151720]"],
-:root[data-theme="paper-light"] [class*="bg-[#0d1017]"],
-:root[data-theme="paper-light"] [class*="bg-[#0c0e14]"],
-:root[data-theme="paper-light"] [class*="bg-[#0b0d13]"],
-:root[data-theme="paper-light"] [class*="bg-[#131722]"],
-:root[data-theme="paper-light"] [class*="bg-[#161922]"],
-:root[data-theme="paper-light"] [class*="bg-[#161923]"],
-:root[data-theme="paper-light"] [class*="bg-[#161a24]"],
-:root[data-theme="paper-light"] [class*="bg-[#171c29]"],
-:root[data-theme="paper-light"] [class*="bg-[#1a1d2a]"],
-:root[data-theme="paper-light"] [class*="bg-[#1a2232]"] {
-  background-color: var(--bg-base) !important;
-}
-:root[data-theme="paper-light"] [class*="bg-[#1a1d27]"],
-:root[data-theme="paper-light"] [class*="bg-[#202432]"],
-:root[data-theme="paper-light"] [class*="bg-[#202434]"],
-:root[data-theme="paper-light"] [class*="bg-[#1a1f2b]"],
-:root[data-theme="paper-light"] [class*="bg-[#1f2430]"],
-:root[data-theme="paper-light"] [class*="bg-[#232734]"],
-:root[data-theme="paper-light"] [class*="bg-[#232938]"],
-:root[data-theme="paper-light"] [class*="bg-[#161c2b]"],
-:root[data-theme="paper-light"] [class*="bg-[#1b2130]"],
-:root[data-theme="paper-light"] [class*="bg-[#1e2535]"],
-:root[data-theme="paper-light"] [class*="bg-[#222639]"],
-:root[data-theme="paper-light"] [class*="bg-[#2b2d35]"] {
-  background-color: var(--bg-raised) !important;
-}
-:root[data-theme="paper-light"] [class*="bg-[#090c12]"],
-:root[data-theme="paper-light"] [class*="bg-[#06070a]"],
-:root[data-theme="paper-light"] [class*="bg-[#06080c]"],
-:root[data-theme="paper-light"] [class*="bg-[#07090d]"],
-:root[data-theme="paper-light"] [class*="bg-[#0d0f15]"] {
-  background-color: var(--bg-deep) !important;
-}
-
-/* 深灰底（开关关闭态/hover 底）→ 浅色描边强度 */
-:root[data-theme="paper-light"] [class*="bg-[#2a2d3a]"] {
-  background-color: var(--border-strong) !important;
-}
-
-/* 弹窗遮罩：浅色主题用暖色薄纱替代 70% 纯黑，避免整体发黑 */
-:root[data-theme="paper-light"] .bg-black\/70 {
-  background-color: rgba(27, 18, 10, 0.38) !important;
-}
-
-/* Active/selected bg → warm accent, matching session tab */
-:root[data-theme="paper-light"] [class*="bg-[#2b3150]"] {
-  background-color: var(--accent-soft) !important;
-}
-/* Session tab selection style: bg-indigo-600/20 → warm accent */
-:root[data-theme="paper-light"] .bg-indigo-600\/20,
-:root[data-theme="paper-light"] [class*="bg-indigo-600/"] { background-color: var(--accent-soft) !important; }
-:root[data-theme="paper-light"] [class*="bg-[#114a88]"] {
-  background-color: var(--accent-soft) !important;
-}
-
-/* 渐变背景 → 浅色梯度 */
-:root[data-theme="paper-light"] [class*="bg-[linear-gradient"]:not([class*="bg-indigo"]) {
-  background-image: var(--surface-gradient) !important;
-}
-
-/* --- 代码块背景 → 浅色 --- */
-:root[data-theme="paper-light"] pre,
-:root[data-theme="paper-light"] code { background-color: var(--code-bg) !important; color: var(--code-fg) !important; }
-:root[data-theme="paper-light"] .monaco-editor,
-:root[data-theme="paper-light"] .monaco-editor-background,
-:root[data-theme="paper-light"] .monaco-editor .margin,
-:root[data-theme="paper-light"] .monaco-editor .margin-view-overlays,
-:root[data-theme="paper-light"] [class*="monaco-editor"] { background-color: var(--code-bg) !important; }
-:root[data-theme="paper-light"] .monaco-editor .line-numbers { color: var(--foreground-dim) !important; }
-:root[data-theme="paper-light"] .monaco-editor .current-line ~ .line-numbers { color: var(--foreground-muted) !important; }
-:root[data-theme="paper-light"] [class*="bg-[#0b0d12]"] pre,
-:root[data-theme="paper-light"] [class*="bg-[#0b0d12]"] code { background-color: var(--code-bg) !important; color: var(--code-fg) !important; }
-
-/* --- 代码语法高亮 token 颜色 → 浅色主题 --- */
-/* Monaco colorize 输出 vs-dark 主题的内联 style="color:#XXXXXX"，
-   在浅色模式下这些深色 token 颜色对比度太低，需要重映射。 */
+/* ── paper-light 代码语法高亮 token 重映射
+ * Monaco colorize 输出 vs-dark 主题的内联 style="color:#XXXXXX"，
+ * 浅色模式下这些深色 token 对比度太低，需要重映射。
+ * （Phase 4 将改为按主题生成语法配色，此块届时删除） */
 :root[data-theme="paper-light"] code span[style*="color:#d4d4d4"],
 :root[data-theme="paper-light"] code span[style*="color:#d4d4d4;"] { color: #1e1b18 !important; }   /* default text */
 :root[data-theme="paper-light"] code span[style*="color:#808080"],
@@ -275,103 +164,6 @@ body {
 :root[data-theme="paper-light"] code span[style*="color:#4e94ce;"] { color: #1a5fb4 !important; }   /* tag names (HTML) */
 :root[data-theme="paper-light"] code span[style*="color:#c8c8c8"],
 :root[data-theme="paper-light"] code span[style*="color:#c8c8c8;"] { color: #3a362f !important; }   /* metadata / dim */
-
-/* --- 边框 --- */
-:root[data-theme="paper-light"] [class*="border-[#2a2d3a]"],
-:root[data-theme="paper-light"] [class*="border-[#1f2430]"],
-:root[data-theme="paper-light"] [class*="border-[#232734]"],
-:root[data-theme="paper-light"] [class*="border-[#232938]"],
-:root[data-theme="paper-light"] [class*="border-[#202432]"],
-:root[data-theme="paper-light"] [class*="border-[#111622]"],
-:root[data-theme="paper-light"] [class*="border-[#1a1f2b]"],
-:root[data-theme="paper-light"] [class*="border-[#243040]"] {
-  border-color: var(--border) !important;
-}
-:root[data-theme="paper-light"] [class*="border-[#3a3f55]"],
-:root[data-theme="paper-light"] [class*="border-[#3a4154]"] {
-  border-color: var(--border-strong) !important;
-}
-:root[data-theme="paper-light"] [class*="divide-[#1f2430]"] > * + * {
-  border-color: var(--border) !important;
-}
-
-/* --- 文本颜色 --- */
-:root[data-theme="paper-light"] .text-slate-100,
-:root[data-theme="paper-light"] .text-slate-200,
-:root[data-theme="paper-light"] .text-white { color: var(--foreground) !important; }
-:root[data-theme="paper-light"] .text-slate-300 { color: var(--foreground-soft) !important; }
-:root[data-theme="paper-light"] .text-slate-400 { color: var(--foreground-muted) !important; }
-:root[data-theme="paper-light"] .text-slate-500 { color: var(--foreground-muted) !important; }
-:root[data-theme="paper-light"] .text-slate-600 { color: var(--foreground-dim) !important; }
-/* 保持 slate-400/90 类可读 — 加深到 muted */
-:root[data-theme="paper-light"] .text-slate-400\/90,
-:root[data-theme="paper-light"] [class*="text-slate-400/"],
-:root[data-theme="paper-light"] [class*="text-slate-300/"] { color: var(--foreground-muted) !important; }
-:root[data-theme="paper-light"] .text-slate-500\/90,
-:root[data-theme="paper-light"] [class*="text-slate-500/"] { color: var(--foreground-muted) !important; }
-
-/* Indigo → 暖橙（按钮、标签、卡片边框） */
-:root[data-theme="paper-light"] .text-indigo-100,
-:root[data-theme="paper-light"] .text-indigo-200,
-:root[data-theme="paper-light"] .text-indigo-300,
-:root[data-theme="paper-light"] .text-indigo-300\/70,
-:root[data-theme="paper-light"] .text-indigo-300\/80,
-:root[data-theme="paper-light"] [class*="text-indigo-300"] { color: var(--accent-text) !important; }
-:root[data-theme="paper-light"] .text-indigo-400,
-:root[data-theme="paper-light"] .text-indigo-500 { color: var(--accent) !important; }
-:root[data-theme="paper-light"] [class*="border-indigo-"] { border-color: var(--accent-soft) !important; }
-:root[data-theme="paper-light"] [class*="hover:border-indigo-"]:hover { border-color: var(--accent) !important; }
-:root[data-theme="paper-light"] .bg-indigo-600 { background-color: var(--accent) !important; color: white !important; }
-:root[data-theme="paper-light"] .bg-indigo-500 { background-color: var(--accent) !important; }
-:root[data-theme="paper-light"] [class*="bg-indigo-500/"] { background-color: var(--accent-soft) !important; }
-:root[data-theme="paper-light"] [class*="bg-indigo-400"] { background-color: var(--accent) !important; }
-:root[data-theme="paper-light"] .accent-indigo-500 { accent-color: var(--accent) !important; }
-:root[data-theme="paper-light"] .bg-indigo-600 .text-white,
-:root[data-theme="paper-light"] .bg-indigo-600 .text-slate-200,
-:root[data-theme="paper-light"] .bg-indigo-500 .text-white,
-:root[data-theme="paper-light"] .bg-indigo-500 .text-slate-100 { color: white !important; }
-/* User bubble: softer background in light mode */
-:root[data-theme="paper-light"] .max-w-\[80\%\].rounded-2xl.rounded-br-sm.bg-indigo-600 {
-  background-color: #e07b54 !important;
-}
-
-/* Emerald/Green */
-:root[data-theme="paper-light"] .text-emerald-100,
-:root[data-theme="paper-light"] .text-emerald-200,
-:root[data-theme="paper-light"] .text-emerald-300 { color: var(--green) !important; }
-:root[data-theme="paper-light"] [class*="border-emerald-"] { border-color: var(--green-bg) !important; }
-:root[data-theme="paper-light"] [class*="bg-emerald-500/"] { background-color: var(--green-bg) !important; }
-:root[data-theme="paper-light"] .bg-emerald-300 { background-color: var(--green) !important; }
-
-/* Amber */
-:root[data-theme="paper-light"] .text-amber-100,
-:root[data-theme="paper-light"] .text-amber-200,
-:root[data-theme="paper-light"] .text-amber-300 { color: var(--amber) !important; }
-:root[data-theme="paper-light"] .text-amber-400,
-:root[data-theme="paper-light"] [class*="text-amber-400/"] { color: var(--amber) !important; }
-/* 带透明度的 amber-100（如 text-amber-100/70）在浅底上接近白色，加深为可读色 */
-:root[data-theme="paper-light"] [class*="text-amber-100/"] { color: var(--foreground-soft) !important; }
-:root[data-theme="paper-light"] [class*="border-amber-"] { border-color: var(--amber-bg) !important; }
-:root[data-theme="paper-light"] [class*="bg-amber-500/"],
-:root[data-theme="paper-light"] [class*="bg-amber-950/"] { background-color: var(--amber-bg) !important; }
-
-/* Cyan */
-:root[data-theme="paper-light"] .text-cyan-50,
-:root[data-theme="paper-light"] .text-cyan-100,
-:root[data-theme="paper-light"] .text-cyan-200,
-:root[data-theme="paper-light"] .text-cyan-300,
-:root[data-theme="paper-light"] .text-cyan-400 { color: var(--cyan) !important; }
-:root[data-theme="paper-light"] [class*="border-cyan-"] { border-color: var(--cyan-bg) !important; }
-:root[data-theme="paper-light"] [class*="bg-cyan-500/"],
-:root[data-theme="paper-light"] [class*="bg-cyan-600/"] { background-color: var(--cyan-bg) !important; }
-
-/* Sky */
-:root[data-theme="paper-light"] .text-sky-400 { color: #0369a1 !important; }
-
-/* Red */
-:root[data-theme="paper-light"] .text-red-200,
-:root[data-theme="paper-light"] .text-red-300,
-:root[data-theme="paper-light"] .text-red-400 { color: var(--red) !important; }
 /* ── 对话轮次指示器 ────────────────────────── */
 .rounds-indicator-bar {
   position: absolute;
@@ -385,7 +177,7 @@ body {
   transition: background 0.15s ease;
 }
 .rounds-indicator-bar:hover {
-  background: rgba(99, 102, 241, 0.08);
+  background: var(--accent-bg);
 }
 
 .rounds-indicator-tick {

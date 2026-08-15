@@ -34,12 +34,12 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
       return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-3 p-6 text-center">
           <div className="text-3xl">⚠</div>
-          <p className="max-w-md text-sm text-slate-300">
+          <p className="max-w-md text-sm text-fg-soft">
             {this.state.error?.message ?? '组件渲染时发生错误'}
           </p>
           <button
             onClick={this.handleReset}
-            className="rounded-lg border border-slate-600 px-4 py-2 text-xs text-slate-300 hover:bg-slate-700/50"
+            className="rounded-lg border border-slate-600 px-4 py-2 text-xs text-fg-soft hover:bg-slate-700/50"
           >
             重试
           </button>

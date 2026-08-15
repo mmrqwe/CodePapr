@@ -142,7 +142,7 @@ const SlashCommandDropdown = forwardRef<SlashCommandDropdownHandle, SlashCommand
         ref={containerRef}
         className="absolute bottom-full left-0 right-0 flex mb-2 z-50"
       >
-        <div className="flex-1 max-h-[240px] overflow-y-auto rounded-xl border border-[#2a2d3a] bg-[#1a1d27] shadow-lg shadow-black/30 py-1">
+        <div className="flex-1 max-h-[240px] overflow-y-auto rounded-xl border border-line bg-raised shadow-lg shadow-black/30 py-1">
           {filtered.map((cmd, index) => (
             <div
               key={cmd.name}
@@ -163,16 +163,16 @@ const SlashCommandDropdown = forwardRef<SlashCommandDropdownHandle, SlashCommand
               onClick={() => onSelect(cmd.name)}
               className={`group/item relative flex items-center gap-3 px-4 py-2.5 text-sm cursor-pointer transition-colors ${
                 index === selectedIndex
-                  ? 'bg-indigo-600/20 text-white'
-                  : 'text-slate-300 hover:bg-[#222639]'
+                  ? 'bg-accent-soft text-fg'
+                  : 'text-fg-soft hover:bg-raised'
               }`}
             >
-              <span className="font-mono text-indigo-400 whitespace-nowrap">/{cmd.name}</span>
+              <span className="font-mono text-accent whitespace-nowrap">/{cmd.name}</span>
               {cmd.description && (
-                <span className="text-slate-500 truncate flex-1 min-w-0">{cmd.description}</span>
+                <span className="text-fg-muted truncate flex-1 min-w-0">{cmd.description}</span>
               )}
               {cmd.example && (
-                <span className="hidden group-hover/item:inline text-[10px] text-slate-600 whitespace-nowrap ml-auto">
+                <span className="hidden group-hover/item:inline text-[10px] text-fg-dim whitespace-nowrap ml-auto">
                   {cmd.example}
                 </span>
               )}
@@ -180,20 +180,20 @@ const SlashCommandDropdown = forwardRef<SlashCommandDropdownHandle, SlashCommand
           ))}
         </div>
         {tooltipIndex != null && filtered[tooltipIndex] && filtered[tooltipIndex].usage && (
-          <div className="ml-2 w-[320px] max-h-[240px] overflow-y-auto rounded-xl border border-[#2a2d3a] bg-[#161923] px-4 py-3 text-xs text-slate-400 shadow-lg shadow-black/30 flex-shrink-0">
-            <div className="text-indigo-400 font-mono text-sm mb-1.5">
+          <div className="ml-2 w-[320px] max-h-[240px] overflow-y-auto rounded-xl border border-line bg-base px-4 py-3 text-xs text-fg-muted shadow-lg shadow-black/30 flex-shrink-0">
+            <div className="text-accent font-mono text-sm mb-1.5">
               /{filtered[tooltipIndex].name}
             </div>
             {filtered[tooltipIndex].usage!.split('\n').map((line, i) => (
               <p key={i} className="leading-relaxed">{line}</p>
             ))}
             {filtered[tooltipIndex].agent && (
-              <p className="mt-1.5 text-indigo-400/70">
+              <p className="mt-1.5 text-accent">
                 Agent: {filtered[tooltipIndex].agent}
               </p>
             )}
             {filtered[tooltipIndex].model && (
-              <p className="text-indigo-400/70">Model: {filtered[tooltipIndex].model}</p>
+              <p className="text-accent">Model: {filtered[tooltipIndex].model}</p>
             )}
           </div>
         )}

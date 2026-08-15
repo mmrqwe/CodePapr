@@ -130,14 +130,14 @@ const AtMentionDropdown = forwardRef<AtMentionDropdownHandle, AtMentionDropdownP
 
     const typeLabel = (type: string) => (type === 'agent' ? 'Agent' : 'Skill');
     const typeColor = (type: string) =>
-      type === 'agent' ? 'text-emerald-400' : 'text-amber-400';
+      type === 'agent' ? 'text-ok' : 'text-warn';
 
     return (
       <div
         ref={containerRef}
         className="absolute bottom-full left-0 right-0 flex mb-2 z-50"
       >
-        <div className="flex-1 max-h-[240px] overflow-y-auto rounded-xl border border-[#2a2d3a] bg-[#1a1d27] shadow-lg shadow-black/30 py-1">
+        <div className="flex-1 max-h-[240px] overflow-y-auto rounded-xl border border-line bg-raised shadow-lg shadow-black/30 py-1">
           {filtered.map((item, index) => (
             <div
               key={`${item.type}:${item.name}`}
@@ -154,16 +154,16 @@ const AtMentionDropdown = forwardRef<AtMentionDropdownHandle, AtMentionDropdownP
               onClick={() => onSelect(item)}
               className={`group/item relative flex items-center gap-3 px-4 py-2.5 text-sm cursor-pointer transition-colors ${
                 index === selectedIndex
-                  ? 'bg-indigo-600/20 text-white'
-                  : 'text-slate-300 hover:bg-[#222639]'
+                  ? 'bg-accent-soft text-fg'
+                  : 'text-fg-soft hover:bg-raised'
               }`}
             >
               <span className={`text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded ${typeColor(item.type)} bg-slate-800/80`}>
                 {typeLabel(item.type)}
               </span>
-              <span className="font-mono text-indigo-400 whitespace-nowrap">@{item.name}</span>
+              <span className="font-mono text-accent whitespace-nowrap">@{item.name}</span>
               {item.description && (
-                <span className="text-slate-500 truncate flex-1 min-w-0">{item.description}</span>
+                <span className="text-fg-muted truncate flex-1 min-w-0">{item.description}</span>
               )}
             </div>
           ))}

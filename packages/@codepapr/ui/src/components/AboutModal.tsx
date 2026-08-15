@@ -5,28 +5,28 @@ interface AboutModalProps {
 
 export function AboutModal({ lang, onClose }: AboutModalProps) {
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-overlay p-6" onClick={onClose}>
       <div
-        className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-2xl border border-[#2a2d3a] bg-[#10131b] shadow-2xl"
+        className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-2xl border border-line bg-base shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-[#2a2d3a] px-5 py-4">
-          <h2 className="text-base font-semibold text-slate-100">
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
+          <h2 className="text-base font-semibold text-fg">
             {lang === 'en' ? 'About CodePapr' : lang === 'zh-TW' ? '關於 CodePapr' : '关于 CodePapr'}
           </h2>
           <button
             onClick={onClose}
-            className="rounded-lg p-1 text-slate-500 transition-colors hover:text-slate-200"
+            className="rounded-lg p-1 text-fg-muted transition-colors hover:text-fg"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
         </div>
-        <div className="overflow-y-auto px-5 py-5 text-sm leading-relaxed text-slate-400">
+        <div className="overflow-y-auto px-5 py-5 text-sm leading-relaxed text-fg-muted">
           <div className="mb-4">
-            <p className="text-lg font-bold text-slate-100">CodePapr</p>
-            <p className="text-xs text-slate-500">v0.1.0</p>
+            <p className="text-lg font-bold text-fg">CodePapr</p>
+            <p className="text-xs text-fg-muted">v0.1.0</p>
           </div>
           <p className="mb-4">
             {lang === 'en'
@@ -36,7 +36,7 @@ export function AboutModal({ lang, onClose }: AboutModalProps) {
               : '一个面向 DeepSeek 缓存优化的本地编程 Agent 工作台。支持 Explore、Scout、Mentor 子代理多智能体协作。'}
           </p>
 
-          <h3 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
+          <h3 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-[0.15em] text-fg-muted">
             {lang === 'en' ? 'License' : lang === 'zh-TW' ? '許可證' : '许可证'}
           </h3>
           <p className="mb-4">MIT License</p>
@@ -61,7 +61,7 @@ export function AboutModal({ lang, onClose }: AboutModalProps) {
             SOFTWARE.
           </p>
 
-          <h3 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
+          <h3 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-[0.15em] text-fg-muted">
             {lang === 'en' ? 'Built With' : lang === 'zh-TW' ? '技術棧' : '技术栈'}
           </h3>
           <p className="text-xs">Tauri 2 · React · TypeScript · Rust · DeepSeek · Monaco Editor</p>

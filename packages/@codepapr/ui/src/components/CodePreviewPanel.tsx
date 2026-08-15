@@ -1080,33 +1080,33 @@ export function CodePreviewPanel({
 
   if (!selectedPath) {
     return (
-      <div className="flex h-full items-center justify-center px-4 text-center text-xs text-slate-600">
+      <div className="flex h-full items-center justify-center px-4 text-center text-xs text-fg-dim">
         {t.selectFileToPreview}
       </div>
     );
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-[#0f1117]">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-base">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
         <div className="flex min-h-0 flex-1 flex-col gap-3">
           {activeView === 'code' && previewError && (
-            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-200">
+            <div className="rounded-xl border border-danger-bg bg-danger-bg px-3 py-2 text-xs leading-relaxed text-danger">
               {t.previewUnavailable}: {previewError}
             </div>
           )}
           {activeView === 'code' && !previewError && previewTruncated && (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-200">
+            <div className="rounded-xl border border-warn-bg bg-warn-bg px-3 py-2 text-xs leading-relaxed text-warn">
               {t.previewTruncated}
             </div>
           )}
           {activeView === 'code' &&
             !previewError &&
             ['checking', 'downloading', 'extracting'].includes(managedLspActivity.phase) && (
-              <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs leading-relaxed text-sky-100">
-                <div className="font-semibold text-sky-50">{managedLspActivityMessage}</div>
+              <div className="rounded-xl border border-info-bg bg-info-bg px-3 py-2 text-xs leading-relaxed text-info">
+                <div className="font-semibold text-info">{managedLspActivityMessage}</div>
                 {managedLspActivity.cachePath && (
-                  <div className="mt-1 font-mono text-[11px] text-sky-100/85">
+                  <div className="mt-1 font-mono text-[11px] text-info">
                     {lspManagedCachePathText}: {managedLspActivity.cachePath}
                   </div>
                 )}
@@ -1115,20 +1115,20 @@ export function CodePreviewPanel({
           {activeView === 'code' &&
             !previewError &&
             managedLspActivity.phase === 'failed' && (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-200">
-                <div className="font-semibold text-amber-100">{managedLspActivityMessage}</div>
+              <div className="rounded-xl border border-warn-bg bg-warn-bg px-3 py-2 text-xs leading-relaxed text-warn">
+                <div className="font-semibold text-warn">{managedLspActivityMessage}</div>
                 {managedLspActivity.detail && (
-                  <div className="mt-1 font-mono text-[11px] text-amber-100/85">
+                  <div className="mt-1 font-mono text-[11px] text-fg-soft">
                     {lspErrorDetailsText}: {managedLspActivity.detail}
                   </div>
                 )}
                 {managedLspActivity.cachePath && (
-                  <div className="mt-1 font-mono text-[11px] text-amber-100/85">
+                  <div className="mt-1 font-mono text-[11px] text-fg-soft">
                     {lspManagedCachePathText}: {managedLspActivity.cachePath}
                   </div>
                 )}
                 {lspStatus.status === 'ready' && lspServerDetails?.toolOrigin === 'builtin' && (
-                  <div className="mt-1 text-amber-100/90">{lspManagedFallbackActiveText}</div>
+                  <div className="mt-1 text-fg-soft">{lspManagedFallbackActiveText}</div>
                 )}
               </div>
             )}
@@ -1136,8 +1136,8 @@ export function CodePreviewPanel({
             !previewError &&
             lspStatus.status === 'unavailable' &&
             lspStatus.installHint && (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-200">
-                <div className="font-semibold text-amber-100">
+              <div className="rounded-xl border border-warn-bg bg-warn-bg px-3 py-2 text-xs leading-relaxed text-warn">
+                <div className="font-semibold text-warn">
                   {lspMissingServerSummaryText.replace('{language}', lspStatus.installHint.languageLabel)}
                 </div>
                 <div className="mt-1">{lspMissingServerBannerText}</div>
@@ -1151,11 +1151,11 @@ export function CodePreviewPanel({
                 <div className="mt-1">
                   {lspRecommendedServersText}: {lspStatus.installHint.recommendedServers.join(' / ')}
                 </div>
-                <div className="mt-1 font-mono text-[11px] text-amber-100/90">
+                <div className="mt-1 font-mono text-[11px] text-fg-soft">
                   {lspCandidateCommandsText}: {lspStatus.installHint.candidateCommands.join(', ')}
                 </div>
                 {lspStatus.detail && (
-                  <div className="mt-2 font-mono text-[11px] text-amber-100/80">
+                  <div className="mt-2 font-mono text-[11px] text-fg-soft">
                     {lspErrorDetailsText}: {lspStatus.detail}
                   </div>
                 )}
@@ -1166,7 +1166,7 @@ export function CodePreviewPanel({
             lspStatus.status === 'unavailable' &&
             !lspStatus.installHint &&
             lspStatus.detail && (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-200">
+              <div className="rounded-xl border border-warn-bg bg-warn-bg px-3 py-2 text-xs leading-relaxed text-warn">
                 {t.lspUnavailable}: {lspStatus.detail}
               </div>
             )}
@@ -1178,20 +1178,20 @@ export function CodePreviewPanel({
                 <button
                   type="button"
                   onClick={() => setShowLspProblems((v) => !v)}
-                  className="flex w-full items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-200 transition-colors hover:border-amber-500/50 hover:bg-amber-500/15"
+                  className="flex w-full items-center justify-between rounded-xl border border-warn-bg bg-warn-bg px-3 py-2 text-xs leading-relaxed text-warn transition-colors hover:border-warn-bg hover:bg-warn-bg"
                 >
                   <span>{codeCheckProblemMessage}</span>
                   <svg
                     viewBox="0 0 16 16"
                     aria-hidden="true"
-                    className={`ml-2 h-3.5 w-3.5 flex-shrink-0 text-amber-300 transition-transform ${showLspProblems ? 'rotate-180' : ''}`}
+                    className={`ml-2 h-3.5 w-3.5 flex-shrink-0 text-warn transition-transform ${showLspProblems ? 'rotate-180' : ''}`}
                   >
                     <path d="M4 6 8 10 12 6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
                   </svg>
                 </button>
                 {showLspProblems && (
-                  <div className="mt-2 rounded-xl border border-[#2a2d3a] bg-[#10131b] p-3">
-                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  <div className="mt-2 rounded-xl border border-line bg-base p-3">
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-fg-muted">
                       {t.lspDiagnosticDetails}
                     </div>
                     <div className="max-h-[320px] space-y-3 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable">
@@ -1199,22 +1199,22 @@ export function CodePreviewPanel({
                         lspMarkersBySeverity[severity].length > 0 ? (
                           <div key={severity}>
                             <div className={`mb-1.5 flex items-center gap-1.5 text-[10px] font-medium ${
-                              severity === 'error' ? 'text-red-300' :
-                              severity === 'warning' ? 'text-amber-300' :
-                              severity === 'info' ? 'text-sky-300' :
-                              'text-slate-400'
+                              severity === 'error' ? 'text-danger' :
+                              severity === 'warning' ? 'text-warn' :
+                              severity === 'info' ? 'text-info' :
+                              'text-fg-muted'
                             }`}>
                               <span className={`inline-block h-1.5 w-1.5 rounded-full ${
-                                severity === 'error' ? 'bg-red-400' :
-                                severity === 'warning' ? 'bg-amber-400' :
-                                severity === 'info' ? 'bg-sky-400' :
+                                severity === 'error' ? 'bg-danger' :
+                                severity === 'warning' ? 'bg-warn' :
+                                severity === 'info' ? 'bg-info' :
                                 'bg-slate-500'
                               }`} />
                               {severity === 'error' ? t.editorErrors :
                                severity === 'warning' ? t.editorWarnings :
                                severity === 'info' ? t.lspDiagnosticDetails :
                                'Hints'}
-                              <span className="tabular-nums text-slate-600">
+                              <span className="tabular-nums text-fg-dim">
                                 {lspMarkersBySeverity[severity].length}
                               </span>
                             </div>
@@ -1222,9 +1222,9 @@ export function CodePreviewPanel({
                               {lspMarkersBySeverity[severity].map((marker, index) => (
                                 <div
                                   key={index}
-                                  className="flex items-start gap-2 rounded-md border border-[#2a2d3a]/50 px-2 py-1.5 text-[11px] leading-snug text-slate-300 hover:border-[#3a3d4a] hover:bg-[#161a24] transition-colors cursor-default"
+                                  className="flex items-start gap-2 rounded-md border border-line/50 px-2 py-1.5 text-[11px] leading-snug text-fg-soft hover:border-line-strong hover:bg-base transition-colors cursor-default"
                                 >
-                                  <span className="mt-px flex-shrink-0 rounded-full border border-slate-600 px-1.5 py-0 text-[10px] tabular-nums text-slate-500">
+                                  <span className="mt-px flex-shrink-0 rounded-full border border-slate-600 px-1.5 py-0 text-[10px] tabular-nums text-fg-muted">
                                     {marker.startLineNumber}
                                   </span>
                                   <span className="min-w-0 break-words">{marker.message}</span>
@@ -1246,8 +1246,8 @@ export function CodePreviewPanel({
                 onClick={() => setMdPreviewMode(false)}
                 className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                   !mdPreviewMode
-                    ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-100'
-                    : 'border-[#2a2d3a] text-slate-400 hover:border-indigo-500/30 hover:text-slate-200'
+                    ? 'border-accent-soft bg-accent-soft text-accent-text'
+                    : 'border-line text-fg-muted hover:border-accent-soft hover:text-fg'
                 }`}
               >
                 {t.markdownSource}
@@ -1257,8 +1257,8 @@ export function CodePreviewPanel({
                 onClick={() => setMdPreviewMode(true)}
                 className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                   mdPreviewMode
-                    ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-100'
-                    : 'border-[#2a2d3a] text-slate-400 hover:border-indigo-500/30 hover:text-slate-200'
+                    ? 'border-accent-soft bg-accent-soft text-accent-text'
+                    : 'border-line text-fg-muted hover:border-accent-soft hover:text-fg'
                 }`}
               >
                 {t.markdownPreviewLabel}
@@ -1266,12 +1266,12 @@ export function CodePreviewPanel({
             </div>
           )}
           {activeView === 'code' && !previewError && mdPreviewMode && isMarkdownPath && (
-            <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin scrollbar-stable rounded-xl border border-[#2a2d3a] bg-[#0b0d12] px-5 py-4">
-              <MarkdownRenderer content={previewContent} copyLabel={t.copy} className="text-slate-200" />
+            <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin scrollbar-stable rounded-xl border border-line bg-base px-5 py-4">
+              <MarkdownRenderer content={previewContent} copyLabel={t.copy} className="text-fg" />
             </div>
           )}
           {activeView === 'code' && !previewError && isImagePath(selectedPath) && imagePreviewUrl && (
-            <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-xl border border-[#2a2d3a] bg-[#0b0d12]/70">
+            <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-xl border border-line bg-base/70">
               <img
                 src={imagePreviewUrl}
                 alt={selectedPath}
@@ -1307,14 +1307,14 @@ export function CodePreviewPanel({
             </div>
           )}
           {activeView === 'diff' && activeGitSelection && gitDiffView.error && (
-            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-200">
+            <div className="rounded-xl border border-danger-bg bg-danger-bg px-3 py-2 text-xs leading-relaxed text-danger">
               {t.workspaceGitFileDiffUnavailable}: {gitDiffView.error}
             </div>
           )}
           {activeView === 'diff' && activeGitSelection && !gitDiffView.error && (
             <>
-              <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
-                <span className="rounded-md border border-[#2a2d3a] px-2 py-1">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-fg-muted">
+                <span className="rounded-md border border-line px-2 py-1">
                   {t.workspaceGitDiffStat}: +{diffStats.added}/-{diffStats.deleted}
                 </span>
               </div>

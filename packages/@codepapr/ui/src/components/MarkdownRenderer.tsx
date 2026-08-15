@@ -86,25 +86,25 @@ function CodeBlock({
   };
 
   return (
-    <div className="my-2 overflow-hidden rounded-xl border border-[#2a2d3a] bg-[#0b0d12]">
-      <div className="flex items-center justify-between border-b border-[#2a2d3a] px-3 py-1.5">
-        <span className="text-[11px] text-slate-500">{normalizedLanguage || 'code'}</span>
+    <div className="my-2 overflow-hidden rounded-xl border border-line bg-base">
+      <div className="flex items-center justify-between border-b border-line px-3 py-1.5">
+        <span className="text-[11px] text-fg-muted">{normalizedLanguage || 'code'}</span>
         <button
           type="button"
           onClick={copy}
-          className="text-[11px] text-slate-500 transition-colors hover:text-slate-200"
+          className="text-[11px] text-fg-muted transition-colors hover:text-fg"
         >
           {copyLabel}
         </button>
       </div>
-      <pre className="overflow-x-auto px-3 py-2 text-xs leading-relaxed text-slate-200">
+      <pre className="overflow-x-auto px-3 py-2 text-xs leading-relaxed text-fg">
         {highlightedHtml ? (
           <code
-            className="block text-slate-100"
+            className="block text-fg"
             dangerouslySetInnerHTML={{ __html: highlightedHtml }}
           />
         ) : (
-          <code className="block whitespace-pre text-slate-200">{code}</code>
+          <code className="block whitespace-pre text-fg">{code}</code>
         )}
       </pre>
     </div>
@@ -145,7 +145,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     ol: ({ children }) => <ol className="my-2 list-decimal pl-5 space-y-1">{children}</ol>,
     li: ({ children }) => <li className="break-words">{children}</li>,
     blockquote: ({ children }) => (
-      <blockquote className="my-3 border-l-2 border-slate-600/70 pl-3 text-slate-400">
+      <blockquote className="my-3 border-l-2 border-slate-600/70 pl-3 text-fg-muted">
         {children}
       </blockquote>
     ),
@@ -157,7 +157,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
           <button
             type="button"
             onClick={() => onOpenWorkspacePath(workspacePath)}
-            className="text-left text-sky-300 underline decoration-sky-500/40 underline-offset-2 hover:text-sky-200"
+            className="text-left text-info underline decoration-sky-500/40 underline-offset-2 hover:text-info"
           >
             {children}
           </button>
@@ -169,29 +169,29 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
           href={href}
           target="_blank"
           rel="noreferrer"
-          className="text-sky-300 underline decoration-sky-500/40 underline-offset-2 hover:text-sky-200"
+          className="text-info underline decoration-sky-500/40 underline-offset-2 hover:text-info"
         >
           {children}
         </a>
       );
     },
-    h1: ({ children }) => <h1 className="mt-4 mb-2 text-lg font-semibold text-slate-100">{children}</h1>,
-    h2: ({ children }) => <h2 className="mt-4 mb-2 text-base font-semibold text-slate-100">{children}</h2>,
-    h3: ({ children }) => <h3 className="mt-3 mb-1.5 text-sm font-semibold text-slate-100">{children}</h3>,
-    h4: ({ children }) => <h4 className="mt-3 mb-1 text-sm font-semibold text-slate-200">{children}</h4>,
-    h5: ({ children }) => <h5 className="mt-2 mb-1 text-sm font-semibold text-slate-200">{children}</h5>,
-    h6: ({ children }) => <h6 className="mt-2 mb-1 text-xs font-semibold text-slate-300">{children}</h6>,
-    hr: () => <hr className="my-3 border-[#2a2d3a]" />,
+    h1: ({ children }) => <h1 className="mt-4 mb-2 text-lg font-semibold text-fg">{children}</h1>,
+    h2: ({ children }) => <h2 className="mt-4 mb-2 text-base font-semibold text-fg">{children}</h2>,
+    h3: ({ children }) => <h3 className="mt-3 mb-1.5 text-sm font-semibold text-fg">{children}</h3>,
+    h4: ({ children }) => <h4 className="mt-3 mb-1 text-sm font-semibold text-fg">{children}</h4>,
+    h5: ({ children }) => <h5 className="mt-2 mb-1 text-sm font-semibold text-fg">{children}</h5>,
+    h6: ({ children }) => <h6 className="mt-2 mb-1 text-xs font-semibold text-fg-soft">{children}</h6>,
+    hr: () => <hr className="my-3 border-line" />,
     table: ({ children }) => (
-      <div className="my-3 overflow-x-auto rounded-xl border border-[#2a2d3a]">
+      <div className="my-3 overflow-x-auto rounded-xl border border-line">
         <table className="min-w-full border-collapse text-xs">{children}</table>
       </div>
     ),
-    thead: ({ children }) => <thead className="bg-[#0f1117] text-slate-300">{children}</thead>,
+    thead: ({ children }) => <thead className="bg-base text-fg-soft">{children}</thead>,
     tbody: ({ children }) => <tbody>{children}</tbody>,
-    tr: ({ children }) => <tr className="border-t border-[#2a2d3a]">{children}</tr>,
+    tr: ({ children }) => <tr className="border-t border-line">{children}</tr>,
     th: ({ children }) => <th className="px-3 py-2 text-left font-semibold">{children}</th>,
-    td: ({ children }) => <td className="px-3 py-2 align-top text-slate-300">{children}</td>,
+    td: ({ children }) => <td className="px-3 py-2 align-top text-fg-soft">{children}</td>,
     pre: ({ children }) => <>{children}</>,
     code: ({ className: codeClassName, children }) => {
       const text = String(children as ReactNode).replace(/\n$/, '');
@@ -200,7 +200,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
       if (isInline) {
         return (
-          <code className="rounded bg-[#0b0d12] px-1.5 py-0.5 text-[12px] text-amber-200">
+          <code className="rounded bg-base px-1.5 py-0.5 text-[12px] text-warn">
             {text}
           </code>
         );
@@ -208,13 +208,13 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
       return <CodeBlock code={text} language={language} copyLabel={copyLabel} />;
     },
-    em: ({ children }) => <em className="italic text-slate-400">{children}</em>,
-    strong: ({ children }) => <strong className="font-semibold text-slate-100">{children}</strong>,
+    em: ({ children }) => <em className="italic text-fg-muted">{children}</em>,
+    strong: ({ children }) => <strong className="font-semibold text-fg">{children}</strong>,
     img: ({ src, alt }) => (
       <img
         src={src}
         alt={alt}
-        className="my-2 max-w-full rounded-lg border border-[#2a2d3a]"
+        className="my-2 max-w-full rounded-lg border border-line"
         loading="lazy"
       />
     ),
@@ -225,7 +225,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
             type="checkbox"
             checked={checked}
             readOnly
-            className="mr-1.5 align-middle accent-indigo-500"
+            className="mr-1.5 align-middle accent-accent"
             {...rest}
           />
         );

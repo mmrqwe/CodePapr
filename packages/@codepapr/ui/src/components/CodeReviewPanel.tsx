@@ -83,10 +83,10 @@ async function loadFileList(workspacePath: string, base: string, head: string): 
 }
 
 const STATUS_COLORS: Record<FileEntry['status'], string> = {
-  added: 'text-emerald-400',
-  modified: 'text-amber-400',
-  deleted: 'text-rose-400',
-  renamed: 'text-sky-400',
+  added: 'text-ok',
+  modified: 'text-warn',
+  deleted: 'text-danger',
+  renamed: 'text-info',
 };
 
 interface CodeReviewPanelProps {
@@ -157,19 +157,19 @@ export function CodeReviewPanel({ scope, onClose }: CodeReviewPanelProps) {
   const headLabel = shortRef(scope.headRef, lang);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="flex h-[88vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#0f1117] shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 backdrop-blur-sm">
+      <div className="flex h-[88vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[#2a2d3a] px-5 py-4">
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div className="flex items-center gap-3">
-            <h2 className="text-sm font-semibold text-slate-200">
+            <h2 className="text-sm font-semibold text-fg">
               {lang === 'en' ? 'Code Comparison' : lang === 'zh-TW' ? '程式碼對比' : '代码对比'}
             </h2>
-            <span className="rounded-full border border-[#2a2d3a] bg-[#1a1d27] px-2.5 py-0.5 font-mono text-[10px] text-slate-400">
+            <span className="rounded-full border border-line bg-raised px-2.5 py-0.5 font-mono text-[10px] text-fg-muted">
               {baseLabel} → {headLabel}
             </span>
             {files.length > 0 && (
-              <span className="text-[11px] text-slate-500">
+              <span className="text-[11px] text-fg-muted">
                 {files.length} {lang === 'en' ? (files.length === 1 ? 'file' : 'files') : '个文件'}
               </span>
             )}
@@ -177,7 +177,7 @@ export function CodeReviewPanel({ scope, onClose }: CodeReviewPanelProps) {
           <button
             type="button"
             onClick={onClose}
-            className="text-lg leading-none text-slate-500 transition-colors hover:text-slate-200"
+            className="text-lg leading-none text-fg-muted transition-colors hover:text-fg"
           >
             ×
           </button>
@@ -185,9 +185,9 @@ export function CodeReviewPanel({ scope, onClose }: CodeReviewPanelProps) {
 
         <div className="flex min-h-0 flex-1">
           {/* File list sidebar */}
-          <div className="w-56 shrink-0 overflow-y-auto border-r border-[#2a2d3a] bg-[#10131b]">
+          <div className="w-56 shrink-0 overflow-y-auto border-r border-line bg-base">
             {files.length === 0 && !isLoading && !error && (
-              <div className="p-4 text-xs text-slate-500">
+              <div className="p-4 text-xs text-fg-muted">
                 {lang === 'en' ? 'No file changes in this range.' : '此范围内没有文件改动。'}
               </div>
             )}
@@ -198,8 +198,8 @@ export function CodeReviewPanel({ scope, onClose }: CodeReviewPanelProps) {
                 onClick={() => setActiveFilePath(file.path)}
                 className={`flex w-full items-center gap-2 border-l-2 px-3 py-2 text-left text-xs transition-colors ${
                   activeFilePath === file.path
-                    ? 'border-indigo-500 bg-indigo-500/10 text-slate-100'
-                    : 'border-transparent text-slate-400 hover:bg-slate-700/30'
+                    ? 'border-accent bg-accent-soft text-fg'
+                    : 'border-transparent text-fg-muted hover:bg-slate-700/30'
                 }`}
               >
                 <span className={`shrink-0 font-mono text-[10px] ${STATUS_COLORS[file.status]}`}>
@@ -213,14 +213,14 @@ export function CodeReviewPanel({ scope, onClose }: CodeReviewPanelProps) {
           {/* Diff viewer */}
           <div className="flex min-w-0 flex-1 flex-col">
             {error && (
-              <div className="border-b border-rose-500/20 bg-rose-500/5 px-4 py-2 text-xs text-rose-300">
+              <div className="border-b border-danger-bg bg-danger-bg px-4 py-2 text-xs text-danger">
                 {error}
               </div>
             )}
             {activeFilePath && (
               <>
-                <div className="flex items-center gap-2 border-b border-[#2a2d3a] px-4 py-2">
-                  <span className="font-mono text-xs text-slate-300">{activeFilePath}</span>
+                <div className="flex items-center gap-2 border-b border-line px-4 py-2">
+                  <span className="font-mono text-xs text-fg-soft">{activeFilePath}</span>
                 </div>
                 <div className="min-h-0 flex-1">
                   <MonacoDiffEditor
@@ -233,7 +233,7 @@ export function CodeReviewPanel({ scope, onClose }: CodeReviewPanelProps) {
               </>
             )}
             {!activeFilePath && !isLoading && !error && (
-              <div className="flex h-full items-center justify-center text-xs text-slate-500">
+              <div className="flex h-full items-center justify-center text-xs text-fg-muted">
                 {lang === 'en' ? 'Select a file to view its diff.' : '选择左侧文件查看差异。'}
               </div>
             )}

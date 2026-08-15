@@ -609,30 +609,30 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="flex h-full max-h-[86vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#161922] shadow-2xl">
-        <div className="flex items-center justify-between gap-3 border-b border-[#2a2d3a] px-5 py-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 backdrop-blur-sm">
+      <div className="flex h-full max-h-[86vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl">
+        <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-slate-200">{t.projectConfigTitle}</h2>
-            <p className="mt-1 truncate text-xs text-slate-500">{workspacePath}</p>
+            <h2 className="text-sm font-semibold text-fg">{t.projectConfigTitle}</h2>
+            <p className="mt-1 truncate text-xs text-fg-muted">{workspacePath}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-lg leading-none text-slate-500 transition-colors hover:text-slate-200"
+            className="text-lg leading-none text-fg-muted transition-colors hover:text-fg"
           >
             x
           </button>
         </div>
 
-        <div className="flex items-center gap-2 border-b border-[#2a2d3a] px-5 py-3">
+        <div className="flex items-center gap-2 border-b border-line px-5 py-3">
           <button
             type="button"
             onClick={() => setActiveTab('rules')}
             className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
               activeTab === 'rules'
-                ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-100'
-                : 'border-[#2a2d3a] text-slate-400 hover:border-indigo-500/40 hover:text-slate-200'
+                ? 'border-accent-soft bg-accent-soft text-accent-text'
+                : 'border-line text-fg-muted hover:border-accent-soft hover:text-fg'
             }`}
           >
             {t.projectConfigRulesTab}
@@ -642,8 +642,8 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
             onClick={() => setActiveTab('agents')}
             className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
               activeTab === 'agents'
-                ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-100'
-                : 'border-[#2a2d3a] text-slate-400 hover:border-indigo-500/40 hover:text-slate-200'
+                ? 'border-accent-soft bg-accent-soft text-accent-text'
+                : 'border-line text-fg-muted hover:border-accent-soft hover:text-fg'
             }`}
           >
             {t.projectConfigAgentsTab}
@@ -653,16 +653,16 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
             onClick={() => setActiveTab('skills')}
             className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
               activeTab === 'skills'
-                ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-100'
-                : 'border-[#2a2d3a] text-slate-400 hover:border-indigo-500/40 hover:text-slate-200'
+                ? 'border-accent-soft bg-accent-soft text-accent-text'
+                : 'border-line text-fg-muted hover:border-accent-soft hover:text-fg'
             }`}
           >
             {t.projectConfigSkillsTab}
           </button>
           <div className="ml-auto flex items-center gap-2 text-xs">
-            {isLoading && <span className="text-slate-500">{t.loadingProject}</span>}
-            {status && <span className="text-emerald-300">{status}</span>}
-            {error && <span className="max-w-[360px] truncate text-red-300">{error}</span>}
+            {isLoading && <span className="text-fg-muted">{t.loadingProject}</span>}
+            {status && <span className="text-ok">{status}</span>}
+            {error && <span className="max-w-[360px] truncate text-danger">{error}</span>}
           </div>
         </div>
 
@@ -670,23 +670,23 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
           {activeTab === 'rules' ? (
             <div className="flex h-full min-h-0 flex-col gap-3">
               <div className="flex items-center justify-between gap-3">
-                <div className="text-xs leading-relaxed text-slate-400">{t.projectConfigRulesDesc}</div>
+                <div className="text-xs leading-relaxed text-fg-muted">{t.projectConfigRulesDesc}</div>
                 <button
                   type="button"
                   onClick={saveRules}
                   disabled={isSaving || !workspacePath}
-                  className="rounded-lg border border-indigo-500/50 px-3 py-1.5 text-xs font-medium text-indigo-100 transition-colors hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-lg border border-accent-soft px-3 py-1.5 text-xs font-medium text-accent-text transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isSaving ? t.projectConfigSaving : t.projectConfigSaveRules}
                 </button>
               </div>
-              <div className="grid gap-2 text-xs leading-relaxed text-slate-400 md:grid-cols-2">
-                <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] p-3">
-                  <div className="mb-1 font-semibold text-slate-200">{t.projectConfigRulesTab}</div>
+              <div className="grid gap-2 text-xs leading-relaxed text-fg-muted md:grid-cols-2">
+                <div className="rounded-xl border border-line bg-base p-3">
+                  <div className="mb-1 font-semibold text-fg">{t.projectConfigRulesTab}</div>
                   {t.projectConfigRulesRole}
                 </div>
-                <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] p-3">
-                  <div className="mb-1 font-semibold text-slate-200">{t.projectConfigAgentsTab}</div>
+                <div className="rounded-xl border border-line bg-base p-3">
+                  <div className="mb-1 font-semibold text-fg">{t.projectConfigAgentsTab}</div>
                   {t.projectConfigAgentRole}
                 </div>
               </div>
@@ -703,21 +703,21 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
             </div>
           ) : activeTab === 'agents' ? (
             <div className="grid h-full min-h-0 grid-cols-[240px_minmax(0,1fr)] gap-4">
-              <div className="flex min-h-0 flex-col rounded-xl border border-[#2a2d3a] bg-[#10141d]">
-                <div className="border-b border-[#2a2d3a] p-3">
-                  <div className="text-xs font-semibold text-slate-200">{t.projectConfigAgentsTab}</div>
+              <div className="flex min-h-0 flex-col rounded-xl border border-line bg-base">
+                <div className="border-b border-line p-3">
+                  <div className="text-xs font-semibold text-fg">{t.projectConfigAgentsTab}</div>
                   <div className="mt-2 flex gap-2">
                     <input
                       value={newAgentName}
                       onChange={(event) => setNewAgentName(event.target.value)}
                       placeholder="reviewer"
-                      className="min-w-0 flex-1 rounded-lg border border-[#2a2d3a] bg-[#0f1117] px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-indigo-500/70"
+                      className="min-w-0 flex-1 rounded-lg border border-line bg-base px-2 py-1.5 text-xs text-fg outline-none focus:border-accent-soft"
                     />
                     <button
                       type="button"
                       onClick={createAgent}
                       disabled={isSaving || !workspacePath}
-                      className="rounded-lg border border-indigo-500/50 px-2.5 py-1.5 text-xs font-medium text-indigo-100 transition-colors hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-lg border border-accent-soft px-2.5 py-1.5 text-xs font-medium text-accent-text transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {t.projectConfigCreateAgent}
                     </button>
@@ -725,7 +725,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto p-2">
                   {agentNames.length === 0 && (
-                    <div className="px-2 py-6 text-center text-xs text-slate-600">
+                    <div className="px-2 py-6 text-center text-xs text-fg-dim">
                       {t.projectConfigNoAgents}
                     </div>
                   )}
@@ -737,8 +737,8 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
                       title={`${AGENTS_DIR}/${name}.md`}
                       className={`mb-1 w-full truncate rounded-lg px-3 py-2 text-left text-xs transition-colors ${
                         selectedAgentName === name
-                          ? 'bg-indigo-500/15 text-indigo-100 ring-1 ring-indigo-500/40 ring-inset'
-                          : 'text-slate-400 hover:bg-[#171c29] hover:text-slate-100'
+                          ? 'bg-accent-soft text-accent-text ring-1 ring-accent-soft ring-inset'
+                          : 'text-fg-muted hover:bg-base hover:text-fg'
                       }`}
                     >
                       {name}
@@ -748,13 +748,13 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
               </div>
 
               <div className="flex min-h-0 flex-col gap-3">
-                <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] p-3 text-xs leading-relaxed text-slate-400">
-                  <div className="mb-1 font-semibold text-slate-200">{t.projectConfigDifferenceTitle}</div>
+                <div className="rounded-xl border border-line bg-base p-3 text-xs leading-relaxed text-fg-muted">
+                  <div className="mb-1 font-semibold text-fg">{t.projectConfigDifferenceTitle}</div>
                   <div>{t.projectConfigAgentRole}</div>
-                  <div className="mt-2 text-slate-500">{t.projectConfigAgentExampleHint}</div>
+                  <div className="mt-2 text-fg-muted">{t.projectConfigAgentExampleHint}</div>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0 text-xs leading-relaxed text-slate-400">
+                  <div className="min-w-0 text-xs leading-relaxed text-fg-muted">
                     {selectedAgentPath ?? t.projectConfigAgentDesc}
                   </div>
                   <div className="flex items-center gap-2">
@@ -762,7 +762,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
                       type="button"
                       onClick={saveAgent}
                       disabled={isSaving || !selectedAgentPath}
-                      className="rounded-lg border border-indigo-500/50 px-3 py-1.5 text-xs font-medium text-indigo-100 transition-colors hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-lg border border-accent-soft px-3 py-1.5 text-xs font-medium text-accent-text transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {isSaving ? t.projectConfigSaving : t.projectConfigSaveAgent}
                     </button>
@@ -770,7 +770,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
                       type="button"
                       onClick={deleteAgent}
                       disabled={isSaving || !selectedAgentPath}
-                      className="rounded-lg border border-red-500/40 px-3 py-1.5 text-xs font-medium text-red-200 transition-colors hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-lg border border-danger-bg px-3 py-1.5 text-xs font-medium text-danger transition-colors hover:border-danger disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {t.projectConfigDeleteAgent}
                     </button>
@@ -791,15 +791,15 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
             </div>
           ) : (
             <div className="grid h-full min-h-0 grid-cols-[240px_minmax(0,1fr)] gap-4">
-              <div className="flex min-h-0 flex-col rounded-xl border border-[#2a2d3a] bg-[#10141d]">
-                <div className="border-b border-[#2a2d3a] p-3">
+              <div className="flex min-h-0 flex-col rounded-xl border border-line bg-base">
+                <div className="border-b border-line p-3">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-xs font-semibold text-slate-200">{t.projectConfigSkillsTab}</div>
+                    <div className="text-xs font-semibold text-fg">{t.projectConfigSkillsTab}</div>
                     {onOpenSkillMarket && (
                       <button
                         type="button"
                         onClick={() => { onClose(); onOpenSkillMarket(); }}
-                        className="rounded-lg border border-emerald-500/30 px-2 py-1 text-[10px] font-medium text-emerald-200 transition-colors hover:bg-emerald-500/10"
+                        className="rounded-lg border border-ok-bg px-2 py-1 text-[10px] font-medium text-ok transition-colors hover:bg-ok-bg"
                       >
                         {lang === 'en' ? 'Browse Market' : lang === 'zh-TW' ? '瀏覽市場' : '浏览市场'}
                       </button>
@@ -810,13 +810,13 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
                       value={newSkillName}
                       onChange={(event) => setNewSkillName(event.target.value)}
                       placeholder={DEFAULT_SEARCH_SKILL_NAME}
-                      className="min-w-0 flex-1 rounded-lg border border-[#2a2d3a] bg-[#0f1117] px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-indigo-500/70"
+                      className="min-w-0 flex-1 rounded-lg border border-line bg-base px-2 py-1.5 text-xs text-fg outline-none focus:border-accent-soft"
                     />
                     <button
                       type="button"
                       onClick={createSkill}
                       disabled={isSaving || !workspacePath}
-                      className="rounded-lg border border-indigo-500/50 px-2.5 py-1.5 text-xs font-medium text-indigo-100 transition-colors hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-lg border border-accent-soft px-2.5 py-1.5 text-xs font-medium text-accent-text transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {t.projectConfigCreateSkill}
                     </button>
@@ -824,7 +824,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto p-2">
                   {skillEntries.length === 0 && (
-                    <div className="px-2 py-6 text-center text-xs text-slate-600">
+                    <div className="px-2 py-6 text-center text-xs text-fg-dim">
                       {t.projectConfigNoSkills}
                     </div>
                   )}
@@ -836,49 +836,49 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
                       title={entry.relativePath}
                       className={`mb-1 w-full overflow-hidden rounded-lg px-3 py-2 text-left text-xs transition-colors ${
                         selectedSkillName === entry.id
-                          ? 'bg-indigo-500/15 text-indigo-100 ring-1 ring-indigo-500/40 ring-inset'
-                          : 'text-slate-400 hover:bg-[#171c29] hover:text-slate-100'
+                          ? 'bg-accent-soft text-accent-text ring-1 ring-accent-soft ring-inset'
+                          : 'text-fg-muted hover:bg-base hover:text-fg'
                       }`}
                     >
                       <div className="truncate font-medium">{entry.skillName}</div>
                       <div className="mt-1 flex items-center gap-2 text-[10px]">
-                        <span className={entry.enabled ? 'text-emerald-300' : 'text-slate-600'}>
+                        <span className={entry.enabled ? 'text-ok' : 'text-fg-dim'}>
                           {entry.enabled ? t.projectConfigSkillEnabled : t.projectConfigSkillDisabled}
                         </span>
                         {entry.skillName !== entry.id && (
-                          <span className="truncate text-slate-500">{entry.id}</span>
+                          <span className="truncate text-fg-muted">{entry.id}</span>
                         )}
                       </div>
-                      <div className="mt-1 truncate text-[10px] text-slate-500">{entry.description}</div>
+                      <div className="mt-1 truncate text-[10px] text-fg-muted">{entry.description}</div>
                     </button>
                   ))}
                 </div>
               </div>
 
               <div className="flex min-h-0 flex-col gap-3">
-                <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] p-3 text-xs leading-relaxed text-slate-400">
-                  <div className="mb-1 font-semibold text-slate-200">{t.projectConfigSkillRoleTitle}</div>
+                <div className="rounded-xl border border-line bg-base p-3 text-xs leading-relaxed text-fg-muted">
+                  <div className="mb-1 font-semibold text-fg">{t.projectConfigSkillRoleTitle}</div>
                   <div>{t.projectConfigSkillRole}</div>
-                  <div className="mt-2 text-slate-500">{t.projectConfigSkillExampleHint}</div>
+                  <div className="mt-2 text-fg-muted">{t.projectConfigSkillExampleHint}</div>
                   {selectedSkillEntry && (
-                    <label className="mt-3 flex items-start gap-2 text-xs text-slate-300">
+                    <label className="mt-3 flex items-start gap-2 text-xs text-fg-soft">
                       <input
                         type="checkbox"
                         aria-label={`${t.projectConfigSkillEnabled}: ${selectedSkillEntry.id}`}
                         checked={selectedSkillEntry.enabled}
                         disabled={isSaving || !selectedSkillPath}
                         onChange={(event) => void toggleSkillEnabled(selectedSkillEntry.id, event.target.checked)}
-                        className="mt-0.5 h-3.5 w-3.5 rounded border border-[#46506b] bg-[#0f1117]"
+                        className="mt-0.5 h-3.5 w-3.5 rounded border border-line-strong bg-base"
                       />
                       <span className="flex min-w-0 flex-col gap-1">
                         <span>{t.projectConfigSkillEnabled}</span>
-                        <span className="text-slate-500">{t.projectConfigSkillToggleHint}</span>
+                        <span className="text-fg-muted">{t.projectConfigSkillToggleHint}</span>
                       </span>
                     </label>
                   )}
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0 text-xs leading-relaxed text-slate-400">
+                  <div className="min-w-0 text-xs leading-relaxed text-fg-muted">
                     {selectedSkillPath ?? t.projectConfigSkillDesc}
                   </div>
                   <div className="flex items-center gap-2">
@@ -886,7 +886,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
                       type="button"
                       onClick={saveSkill}
                       disabled={isSaving || !selectedSkillPath}
-                      className="rounded-lg border border-indigo-500/50 px-3 py-1.5 text-xs font-medium text-indigo-100 transition-colors hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-lg border border-accent-soft px-3 py-1.5 text-xs font-medium text-accent-text transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {isSaving ? t.projectConfigSaving : t.projectConfigSaveSkill}
                     </button>
@@ -894,7 +894,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
                       type="button"
                       onClick={deleteSkill}
                       disabled={isSaving || !selectedSkillPath}
-                      className="rounded-lg border border-red-500/40 px-3 py-1.5 text-xs font-medium text-red-200 transition-colors hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-lg border border-danger-bg px-3 py-1.5 text-xs font-medium text-danger transition-colors hover:border-danger disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {t.projectConfigDeleteSkill}
                     </button>

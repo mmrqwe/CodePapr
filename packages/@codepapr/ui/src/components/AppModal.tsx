@@ -105,20 +105,20 @@ export function AppModal({ lang, isDark }: AppModalProps) {
     || (manifest?.agents && manifest.agents.length > 0);
 
   return (
-    <div className="flex h-full w-full flex-col bg-[#0f1117]">
-      <div className="flex shrink-0 items-center gap-2 border-b border-[#2a2d3a] px-3 py-2">
+    <div className="flex h-full w-full flex-col bg-base">
+      <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
         <button
           type="button"
           onClick={closeAppModal}
           title={t.appModalClose}
-          className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-slate-400 transition-colors hover:bg-[#1a1d28] hover:text-slate-200"
+          className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-fg-muted transition-colors hover:bg-base hover:text-fg"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">          <path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           {t.appModalClose}
         </button>
 
         <div className="min-w-0 flex-1">
-          <span className="truncate text-xs font-semibold text-slate-200">{openedApp.title}</span>
+          <span className="truncate text-xs font-semibold text-fg">{openedApp.title}</span>
         </div>
 
         {hasMeta && (
@@ -128,8 +128,8 @@ export function AppModal({ lang, isDark }: AppModalProps) {
             title="Details"
             className={`shrink-0 rounded px-1.5 py-1 text-[10px] transition-colors ${
               showDetails
-                ? 'bg-indigo-500/15 text-indigo-300'
-                : 'text-slate-600 hover:text-slate-400'
+                ? 'bg-accent-soft text-accent-text'
+                : 'text-fg-dim hover:text-fg-muted'
             }`}
           >
             {showDetails ? '▾' : '▸'} Info
@@ -139,7 +139,7 @@ export function AppModal({ lang, isDark }: AppModalProps) {
         <button
           type="button"
           onClick={() => { setError(''); reloadApp(openedApp.appId); }}
-          className="shrink-0 rounded px-1.5 py-1 text-[10px] text-slate-500 transition-colors hover:text-slate-300"
+          className="shrink-0 rounded px-1.5 py-1 text-[10px] text-fg-muted transition-colors hover:text-fg-soft"
           title={t.appModalReload}
         >
           ⟳ {t.appModalReload}
@@ -147,17 +147,17 @@ export function AppModal({ lang, isDark }: AppModalProps) {
       </div>
 
       {error && (
-        <div className="mx-3 mt-2 shrink-0 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[11px] text-red-200">
+        <div className="mx-3 mt-2 shrink-0 rounded-lg border border-danger-bg bg-danger-bg px-3 py-1.5 text-[11px] text-danger">
           {error}
         </div>
       )}
 
       {showDetails && manifest && (
-        <div className="shrink-0 border-b border-[#2a2d3a] px-3 py-1.5">
+        <div className="shrink-0 border-b border-line px-3 py-1.5">
           {manifest.permissions && manifest.permissions.length > 0 && (
             <div className="flex flex-wrap items-center gap-1 mb-1">
               {manifest.permissions.map((p) => (
-                <span key={p} className="rounded bg-indigo-500/10 px-1.5 py-0.5 text-[9px] text-indigo-300 font-mono">
+                <span key={p} className="rounded bg-accent-soft px-1.5 py-0.5 text-[9px] text-accent-text font-mono">
                   {p}
                 </span>
               ))}
@@ -166,7 +166,7 @@ export function AppModal({ lang, isDark }: AppModalProps) {
           {manifest.agents && manifest.agents.length > 0 && (
             <div className="flex flex-col gap-0.5">
               {manifest.agents.map((a) => (
-                <div key={a.name} className="text-[10px] text-slate-500">
+                <div key={a.name} className="text-[10px] text-fg-muted">
                   {'🤖'} {a.name}{a.model ? ` (${a.model})` : ''}
                   {a.tools && a.tools.length > 0 && ` · tools: ${a.tools.join(', ')}`}
                   {a.maxToolRounds && ` · maxRounds: ${a.maxToolRounds}`}
@@ -177,7 +177,7 @@ export function AppModal({ lang, isDark }: AppModalProps) {
         </div>
       )}
       {showDetails && !hasMeta && (
-        <div className="shrink-0 border-b border-[#2a2d3a] px-3 py-1.5 text-[10px] text-slate-600">
+        <div className="shrink-0 border-b border-line px-3 py-1.5 text-[10px] text-fg-dim">
           No permissions or agents declared
         </div>
       )}

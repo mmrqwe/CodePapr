@@ -219,8 +219,8 @@ function LanguageBar({ languages, totalLines }: { languages: ProjectLanguageStat
                 className="inline-block h-2.5 w-2.5 rounded-sm flex-shrink-0"
                 style={{ backgroundColor: resolveLanguageColor(lang.id) }}
               />
-              <span className="text-slate-300">{lang.label}</span>
-              <span className="text-slate-500">{pct}%</span>
+              <span className="text-fg-soft">{lang.label}</span>
+              <span className="text-fg-muted">{pct}%</span>
             </div>
           );
         })}
@@ -233,18 +233,18 @@ function HorizontalBar({ label, value, max, color = '#6366f1', suffix = '' }: { 
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;
   return (
     <div className="flex items-center gap-3">
-      <span className="w-28 flex-shrink-0 text-[11px] text-slate-400 truncate">{label}</span>
-      <div className="flex-1 h-5 bg-[#0a0d14] rounded-md overflow-hidden">
+      <span className="w-28 flex-shrink-0 text-[11px] text-fg-muted truncate">{label}</span>
+      <div className="flex-1 h-5 bg-deep rounded-md overflow-hidden">
         <div
           className="h-full rounded-md transition-all duration-300 flex items-center justify-end pr-1.5"
           style={{ width: `${Math.max(pct, value > 0 ? 2 : 0)}%`, backgroundColor: color }}
         >
           {pct >= 15 && (
-            <span className="text-[10px] font-medium text-white/80">{pct}%</span>
+            <span className="text-[10px] font-medium text-fg/80">{pct}%</span>
           )}
         </div>
       </div>
-      <span className="w-36 flex-shrink-0 text-right text-[11px] text-slate-500 tabular-nums truncate">
+      <span className="w-36 flex-shrink-0 text-right text-[11px] text-fg-muted tabular-nums truncate">
         {value.toLocaleString()}{suffix}
       </span>
     </div>
@@ -266,18 +266,18 @@ function RatioBar({ code, config, doc }: CodeRatio) {
       <div className="flex gap-4 text-[11px]">
         <div className="flex items-center gap-1.5">
           <span className="inline-block h-2.5 w-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: '#6366f1' }} />
-          <span className="text-slate-300">Code</span>
-          <span className="text-slate-500">{total > 0 ? ((code / total) * 100).toFixed(1) : 0}%</span>
+          <span className="text-fg-soft">Code</span>
+          <span className="text-fg-muted">{total > 0 ? ((code / total) * 100).toFixed(1) : 0}%</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="inline-block h-2.5 w-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: '#f59e0b' }} />
-          <span className="text-slate-300">Config</span>
-          <span className="text-slate-500">{total > 0 ? ((config / total) * 100).toFixed(1) : 0}%</span>
+          <span className="text-fg-soft">Config</span>
+          <span className="text-fg-muted">{total > 0 ? ((config / total) * 100).toFixed(1) : 0}%</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="inline-block h-2.5 w-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: '#a855f7' }} />
-          <span className="text-slate-300">Doc</span>
-          <span className="text-slate-500">{total > 0 ? ((doc / total) * 100).toFixed(1) : 0}%</span>
+          <span className="text-fg-soft">Doc</span>
+          <span className="text-fg-muted">{total > 0 ? ((doc / total) * 100).toFixed(1) : 0}%</span>
         </div>
       </div>
     </div>
@@ -293,10 +293,10 @@ function SizeDistribution({ buckets }: { buckets: FileSizeBucket[] }) {
     <div className="space-y-1.5">
       {buckets.map((bucket) => (
         <div key={bucket.label} className="flex items-center gap-3">
-          <span className="w-14 flex-shrink-0 text-[11px] text-slate-400">
+          <span className="w-14 flex-shrink-0 text-[11px] text-fg-muted">
             {labels[bucket.label as keyof typeof labels] ?? bucket.label}
           </span>
-          <div className="flex-1 h-5 bg-[#0a0d14] rounded-md overflow-hidden relative">
+          <div className="flex-1 h-5 bg-deep rounded-md overflow-hidden relative">
             <div
               className="h-full rounded-md transition-all duration-300"
               style={{
@@ -305,7 +305,7 @@ function SizeDistribution({ buckets }: { buckets: FileSizeBucket[] }) {
               }}
             />
           </div>
-          <span className="w-20 flex-shrink-0 text-right text-[11px] text-slate-500 tabular-nums">
+          <span className="w-20 flex-shrink-0 text-right text-[11px] text-fg-muted tabular-nums">
             {bucket.files.toLocaleString()} files
           </span>
         </div>
@@ -372,7 +372,7 @@ function DirectoryTreemap({ dirs, totalLines }: { dirs: DirectoryStat[]; totalLi
   if (rects.length === 0) return null;
 
   return (
-    <div className="relative h-44 w-full overflow-hidden rounded-lg border border-[#2a2d3a] bg-[#0a0d14]">
+    <div className="relative h-44 w-full overflow-hidden rounded-lg border border-line bg-deep">
       {rects.map((rect, i) => {
         const stat = byName.get(rect.id);
         const color = TREEMAP_COLORS[i % TREEMAP_COLORS.length];
@@ -383,7 +383,7 @@ function DirectoryTreemap({ dirs, totalLines }: { dirs: DirectoryStat[]; totalLi
         return (
           <div
             key={rect.id}
-            className="treemap-cell absolute flex flex-col justify-between overflow-hidden border border-[#0a0d14] p-1.5 transition-[opacity,filter] duration-200"
+            className="treemap-cell absolute flex flex-col justify-between overflow-hidden border border-line p-1.5 transition-[opacity,filter] duration-200"
             style={{
               left: `${rect.x}%`,
               top: `${rect.y}%`,
@@ -401,9 +401,9 @@ function DirectoryTreemap({ dirs, totalLines }: { dirs: DirectoryStat[]; totalLi
           >
             {showLabel && (
               <>
-                <span className="truncate text-[10px] font-semibold leading-tight text-white/90">{rect.id}</span>
+                <span className="truncate text-[10px] font-semibold leading-tight text-fg/90">{rect.id}</span>
                 {rect.h > 26 && (
-                  <span className="truncate text-[9px] leading-tight text-white/70">
+                  <span className="truncate text-[9px] leading-tight text-fg/70">
                     {rect.value.toLocaleString()} lines
                   </span>
                 )}
@@ -449,9 +449,9 @@ function LanguageTable({
       <th
         key={col.key}
         onClick={() => onSort(col.key)}
-        className={`cursor-pointer select-none whitespace-nowrap px-2 py-1.5 font-medium transition-colors hover:text-indigo-300 ${
+        className={`cursor-pointer select-none whitespace-nowrap px-2 py-1.5 font-medium transition-colors hover:text-accent-text ${
           col.numeric ? 'text-right' : 'text-left'
-        } ${active ? 'text-indigo-300' : 'text-slate-500'}`}
+        } ${active ? 'text-accent-text' : 'text-fg-muted'}`}
       >
         {col.label} {arrow}
       </th>
@@ -461,21 +461,21 @@ function LanguageTable({
   return (
     <table className="w-full border-collapse text-[11px]">
       <thead>
-        <tr className="border-b border-[#2a2d3a]">{columns.map(header)}</tr>
+        <tr className="border-b border-line">{columns.map(header)}</tr>
       </thead>
       <tbody>
         {languages.map((lang) => (
-          <tr key={lang.id} className="border-b border-[#1a1f2c] transition-colors last:border-0 hover:bg-white/[0.04]">
+          <tr key={lang.id} className="border-b border-line transition-colors last:border-0 hover:bg-hover">
             <td className="px-2 py-1.5">
               <span className="flex items-center gap-1.5">
                 <span className="inline-block h-2 w-2 flex-shrink-0 rounded-sm" style={{ backgroundColor: resolveLanguageColor(lang.id) }} />
-                <span className="text-slate-300">{lang.label}</span>
+                <span className="text-fg-soft">{lang.label}</span>
               </span>
             </td>
-            <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">{lang.files.toLocaleString()}</td>
-            <td className="px-2 py-1.5 text-right tabular-nums text-slate-300">{lang.lines.toLocaleString()}</td>
-            <td className="px-2 py-1.5 text-right tabular-nums text-indigo-300">{lang.code.toLocaleString()}</td>
-            <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{lang.blank.toLocaleString()}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums text-fg-muted">{lang.files.toLocaleString()}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums text-fg-soft">{lang.lines.toLocaleString()}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums text-accent-text">{lang.code.toLocaleString()}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums text-fg-muted">{lang.blank.toLocaleString()}</td>
             <td className="px-2 py-1.5 text-right tabular-nums text-green-300">{lang.comment.toLocaleString()}</td>
           </tr>
         ))}
@@ -573,15 +573,15 @@ export function ProjectStatsModal({
   const truncatedLabel = lang === 'en' ? 'file list truncated' : lang === 'zh-TW' ? '文件列表已截斷' : '文件列表已截断';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="flex h-[90vh] w-[min(96vw,1280px)] flex-col overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#161922] shadow-2xl">
-        <div className="flex items-center justify-between border-b border-[#2a2d3a] px-5 py-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 backdrop-blur-sm">
+      <div className="flex h-[90vh] w-[min(96vw,1280px)] flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl">
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div>
-            <h2 className="text-sm font-semibold text-slate-200">{t.projectStatsTitle}</h2>
-            <p className="mt-1 text-xs text-slate-500">
+            <h2 className="text-sm font-semibold text-fg">{t.projectStatsTitle}</h2>
+            <p className="mt-1 text-xs text-fg-muted">
               {t.projectStatsAnalysisDepth}
               {statsAt !== null && (
-                <span className="ml-2 text-slate-600">
+                <span className="ml-2 text-fg-dim">
                   · {t.projectStatsAsOf} {formatClock(statsAt)}
                 </span>
               )}
@@ -593,7 +593,7 @@ export function ProjectStatsModal({
               onClick={() => void refreshStats()}
               title={t.projectStatsTip}
               disabled={isLoading || !workspacePath}
-              className="rounded-lg border border-[#2a2d3a] px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-fg-soft transition-colors hover:border-accent-soft hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isLoading ? t.projectStatsLoading : t.projectStatsRefresh}
             </button>
@@ -601,7 +601,7 @@ export function ProjectStatsModal({
               type="button"
               onClick={onClose}
               title={t.cancel}
-              className="text-lg leading-none text-slate-500 transition-colors hover:text-slate-200"
+              className="text-lg leading-none text-fg-muted transition-colors hover:text-fg"
             >
               ×
             </button>
@@ -610,13 +610,13 @@ export function ProjectStatsModal({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {isLoading && (
-            <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] px-4 py-3 text-sm text-slate-400">
+            <div className="rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg-muted">
               {t.projectStatsLoading}
             </div>
           )}
 
           {!isLoading && error && (
-            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            <div className="rounded-xl border border-danger-bg bg-danger-bg px-4 py-3 text-sm text-danger">
               {t.projectStatsUnavailable}: {error}
             </div>
           )}
@@ -624,35 +624,35 @@ export function ProjectStatsModal({
           {!isLoading && !error && stats && (
             <>
               <div className="stats-reveal grid grid-cols-3 gap-3">
-                <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] px-4 py-3">
-                  <div className="text-[11px] text-slate-500">{t.projectStatsTotalFiles}</div>
-                  <div className="mt-1 text-lg font-semibold text-slate-100">{stats.totalFiles.toLocaleString()}</div>
-                  <div className="text-[11px] text-slate-600">
+                <div className="rounded-xl border border-line bg-base px-4 py-3">
+                  <div className="text-[11px] text-fg-muted">{t.projectStatsTotalFiles}</div>
+                  <div className="mt-1 text-lg font-semibold text-fg">{stats.totalFiles.toLocaleString()}</div>
+                  <div className="text-[11px] text-fg-dim">
                     {stats.totalDirectories.toLocaleString()} {dirLabel}
                   </div>
                 </div>
-                <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] px-4 py-3">
-                  <div className="text-[11px] text-slate-500">{t.projectStatsTotalLines}</div>
-                  <div className="mt-1 text-lg font-semibold text-slate-100">{stats.totalLines.toLocaleString()}</div>
-                  <div className="text-[11px] text-slate-600">{stats.codeLines.toLocaleString()} code</div>
+                <div className="rounded-xl border border-line bg-base px-4 py-3">
+                  <div className="text-[11px] text-fg-muted">{t.projectStatsTotalLines}</div>
+                  <div className="mt-1 text-lg font-semibold text-fg">{stats.totalLines.toLocaleString()}</div>
+                  <div className="text-[11px] text-fg-dim">{stats.codeLines.toLocaleString()} code</div>
                 </div>
-                <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] px-4 py-3">
-                  <div className="text-[11px] text-slate-500">{t.projectStatsTextFiles}</div>
-                  <div className="mt-1 text-lg font-semibold text-slate-100">{stats.textFiles.toLocaleString()}</div>
-                  <div className="text-[11px] text-slate-600">{stats.skippedFiles} skipped</div>
+                <div className="rounded-xl border border-line bg-base px-4 py-3">
+                  <div className="text-[11px] text-fg-muted">{t.projectStatsTextFiles}</div>
+                  <div className="mt-1 text-lg font-semibold text-fg">{stats.textFiles.toLocaleString()}</div>
+                  <div className="text-[11px] text-fg-dim">{stats.skippedFiles} skipped</div>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '60ms' }}>
+                <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '60ms' }}>
                   <div className="mb-3 flex items-center justify-between gap-3">
-                    <p className="text-xs font-semibold text-slate-300">{t.projectStatsLanguages}</p>
+                    <p className="text-xs font-semibold text-fg-soft">{t.projectStatsLanguages}</p>
                     <input
                       type="text"
                       value={langFilter}
                       onChange={(e) => setLangFilter(e.target.value)}
                       placeholder={t.projectStatsFilterPlaceholder}
-                      className="w-32 rounded-lg border border-[#2a2d3a] bg-[#0a0d14] px-2.5 py-1 text-[11px] text-slate-300 placeholder-slate-600 transition-colors focus:border-indigo-500/50 focus:outline-none"
+                      className="w-32 rounded-lg border border-line bg-deep px-2.5 py-1 text-[11px] text-fg-soft placeholder-slate-600 transition-colors focus:border-accent-soft focus:outline-none"
                     />
                   </div>
                   <LanguageBar languages={stats.languages.slice(0, 12)} totalLines={stats.totalLines} />
@@ -667,32 +667,32 @@ export function ProjectStatsModal({
                   </div>
                 </div>
 
-                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '90ms' }}>
+                <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '90ms' }}>
                   <ToolUsageStats lang={lang} />
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4">
-                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '120ms' }}>
-                  <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsAvgMetrics}</p>
+                <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '120ms' }}>
+                  <p className="text-xs font-semibold text-fg-soft mb-3">{t.projectStatsAvgMetrics}</p>
                   <div className="space-y-3">
                     <div>
-                      <div className="text-[11px] text-slate-500">{t.projectStatsAvgLines}</div>
-                      <div className="text-base font-semibold text-indigo-300">{stats.avgMetrics.avgLinesPerFile.toLocaleString()}</div>
+                      <div className="text-[11px] text-fg-muted">{t.projectStatsAvgLines}</div>
+                      <div className="text-base font-semibold text-accent-text">{stats.avgMetrics.avgLinesPerFile.toLocaleString()}</div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-slate-500">{t.projectStatsMedianLines}</div>
-                      <div className="text-base font-semibold text-indigo-300">{stats.avgMetrics.medianLinesPerFile.toLocaleString()}</div>
+                      <div className="text-[11px] text-fg-muted">{t.projectStatsMedianLines}</div>
+                      <div className="text-base font-semibold text-accent-text">{stats.avgMetrics.medianLinesPerFile.toLocaleString()}</div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-slate-500">{t.projectStatsMaxLines}</div>
-                      <div className="text-base font-semibold text-indigo-300">{stats.avgMetrics.maxLinesPerFile.toLocaleString()}</div>
+                      <div className="text-[11px] text-fg-muted">{t.projectStatsMaxLines}</div>
+                      <div className="text-base font-semibold text-accent-text">{stats.avgMetrics.maxLinesPerFile.toLocaleString()}</div>
                     </div>
                   </div>
                 </div>
 
-                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '150ms' }}>
-                  <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsLineComposition}</p>
+                <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '150ms' }}>
+                  <p className="text-xs font-semibold text-fg-soft mb-3">{t.projectStatsLineComposition}</p>
                   <StackedBar
                     segments={[
                       { color: '#6366f1', width: stats.codeLines, label: t.projectStatsCodeLines },
@@ -703,29 +703,29 @@ export function ProjectStatsModal({
                   />
                   <div className="mt-3 space-y-3">
                     <div>
-                      <div className="text-[11px] text-slate-500">{t.projectStatsCodeLines}</div>
-                      <div className="text-base font-semibold text-indigo-300">{stats.codeLines.toLocaleString()}</div>
+                      <div className="text-[11px] text-fg-muted">{t.projectStatsCodeLines}</div>
+                      <div className="text-base font-semibold text-accent-text">{stats.codeLines.toLocaleString()}</div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-slate-500">{t.projectStatsBlankLines}</div>
-                      <div className="text-base font-semibold text-slate-300">{stats.blankLines.toLocaleString()}</div>
+                      <div className="text-[11px] text-fg-muted">{t.projectStatsBlankLines}</div>
+                      <div className="text-base font-semibold text-fg-soft">{stats.blankLines.toLocaleString()}</div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-slate-500">{t.projectStatsCommentLines}</div>
+                      <div className="text-[11px] text-fg-muted">{t.projectStatsCommentLines}</div>
                       <div className="text-base font-semibold text-green-300">{stats.commentLines.toLocaleString()}</div>
                     </div>
                   </div>
                 </div>
 
-                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '180ms' }}>
-                  <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsCodeRatio}</p>
+                <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '180ms' }}>
+                  <p className="text-xs font-semibold text-fg-soft mb-3">{t.projectStatsCodeRatio}</p>
                   <RatioBar code={stats.codeRatio.code} config={stats.codeRatio.config} doc={stats.codeRatio.doc} />
                 </div>
               </div>
 
               {stats.directoryBreakdown.length > 0 && (
-                <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '180ms' }}>
-                  <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsDirectories}</p>
+                <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '180ms' }}>
+                  <p className="text-xs font-semibold text-fg-soft mb-3">{t.projectStatsDirectories}</p>
                   <DirectoryTreemap dirs={stats.directoryBreakdown} totalLines={stats.totalLines} />
                   <div className="mt-3 space-y-1.5">
                     {stats.directoryBreakdown.map((dir) => (
@@ -744,19 +744,19 @@ export function ProjectStatsModal({
 
               <div className="grid grid-cols-2 gap-4">
                 {stats.fileSizeDistribution.length > 0 && (
-                  <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4" style={{ animationDelay: '210ms' }}>
-                    <p className="text-xs font-semibold text-slate-300 mb-3">{t.projectStatsFileSize}</p>
+                  <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '210ms' }}>
+                    <p className="text-xs font-semibold text-fg-soft mb-3">{t.projectStatsFileSize}</p>
                     <SizeDistribution buckets={stats.fileSizeDistribution} />
                   </div>
                 )}
 
                 {stats.largestFile && (
-                  <div className="stats-reveal rounded-xl border border-[#2a2d3a] bg-[#10141d] px-4 py-3" style={{ animationDelay: '240ms' }}>
-                    <div className="text-xs font-semibold text-slate-200">{t.projectStatsLargestFile}</div>
-                    <div className="mt-2 break-all text-sm text-slate-300">
+                  <div className="stats-reveal rounded-xl border border-line bg-base px-4 py-3" style={{ animationDelay: '240ms' }}>
+                    <div className="text-xs font-semibold text-fg">{t.projectStatsLargestFile}</div>
+                    <div className="mt-2 break-all text-sm text-fg-soft">
                       {stats.largestFile.path} · {stats.largestFile.lines.toLocaleString()} lines
                     </div>
-                    <div className="mt-1 text-[11px] text-slate-500">
+                    <div className="mt-1 text-[11px] text-fg-muted">
                       {stats.truncated ? truncatedLabel : ''}
                     </div>
                   </div>
@@ -765,7 +765,7 @@ export function ProjectStatsModal({
             </>
           )}
 
-          <div className="border-t border-[#2a2d3a] pt-4">
+          <div className="border-t border-line pt-4">
             <AgentContribution workspacePath={workspacePath} lang={lang} />
           </div>
         </div>

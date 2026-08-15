@@ -12,28 +12,28 @@ const TOOL_CONTEXT_CATEGORIES = [
 export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsTabProps) {
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-4 text-sm leading-relaxed text-slate-400">
+      <div className="rounded-2xl border border-line bg-base px-5 py-4 text-sm leading-relaxed text-fg-muted">
         {t.settingsAdvancedDesc}
       </div>
 
-      <div className="rounded-2xl border border-amber-500/30 bg-amber-950/10 px-5 py-5">
+      <div className="rounded-2xl border border-warn-bg bg-warn-bg px-5 py-5">
         <label className="flex cursor-pointer items-center gap-3">
           <input
             type="checkbox"
             checked={local.folderAccessYolo}
             onChange={(e) => update({ folderAccessYolo: e.target.checked })}
-            className="h-4 w-4 cursor-pointer rounded border-[#3a3f55] bg-[#0b0d12] accent-amber-500"
+            className="h-4 w-4 cursor-pointer rounded border-line-strong bg-base accent-warn"
           />
-          <span className="text-sm font-semibold text-amber-200">{t.folderAccessYoloLabel}</span>
+          <span className="text-sm font-semibold text-warn">{t.folderAccessYoloLabel}</span>
         </label>
-        <p className="mt-2 text-[11px] leading-relaxed text-amber-100/70">{t.folderAccessYoloHint}</p>
+        <p className="mt-2 text-[11px] leading-relaxed text-fg-soft">{t.folderAccessYoloHint}</p>
       </div>
 
       <FieldCard padding="loose">
-        <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+        <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
           {t.contextCompactionSettings}
         </label>
-        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">{t.contextCompactionDesc}</p>
+        <p className="mb-3 text-[11px] leading-relaxed text-fg-muted">{t.contextCompactionDesc}</p>
         <div className="grid gap-5 md:grid-cols-3">
           <SelectField
             label={t.compactionModelLabel}
@@ -59,8 +59,8 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
             title={t.compactionMaxTokensLabel}
           />
           <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              {t.compactionTemperatureLabel}: <span className="font-mono text-indigo-300">{local.compactionTemperature}</span>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
+              {t.compactionTemperatureLabel}: <span className="font-mono text-accent-text">{local.compactionTemperature}</span>
             </label>
             <input
               type="range"
@@ -70,9 +70,9 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
               value={local.compactionTemperature}
               onChange={(e) => update({ compactionTemperature: parseFloat(e.target.value) })}
               title={t.compactionTemperatureHint}
-              className="mt-3 w-full cursor-pointer accent-indigo-500"
+              className="mt-3 w-full cursor-pointer accent-accent"
             />
-            <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.compactionTemperatureHint}</p>
+            <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{t.compactionTemperatureHint}</p>
           </div>
         </div>
         <div className="mt-4 grid gap-5 md:grid-cols-2">
@@ -122,10 +122,10 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
       </FieldCard>
 
       <FieldCard padding="loose">
-        <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+        <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
           {t.streamOutputSettings}
         </label>
-        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">{t.streamOutputDesc}</p>
+        <p className="mb-3 text-[11px] leading-relaxed text-fg-muted">{t.streamOutputDesc}</p>
         <div className="grid gap-5 md:grid-cols-2">
           <TextField
             label={t.streamIdleTimeoutLabel}
@@ -159,14 +159,14 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
       </FieldCard>
 
       <FieldCard padding="loose">
-        <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+        <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
           {t.embeddedBrowserEngine}
         </label>
-        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">{t.embeddedBrowserEngineTip}</p>
+        <p className="mb-3 text-[11px] leading-relaxed text-fg-muted">{t.embeddedBrowserEngineTip}</p>
         <select
           value={local.browserEngine}
           onChange={(e) => update({ browserEngine: e.target.value as 'embedded' | 'headless' })}
-          className="w-full cursor-pointer rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+          className="w-full cursor-pointer rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg focus:border-accent-soft focus:outline-none"
         >
           <option value="embedded">{t.embeddedBrowserEngineEmbedded}</option>
           <option value="headless">{t.embeddedBrowserEngineHeadless}</option>
@@ -174,10 +174,10 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
       </FieldCard>
 
       <FieldCard padding="loose">
-        <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+        <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
           {t.toolContextSettings}
         </label>
-        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">{t.toolContextDesc}</p>
+        <p className="mb-3 text-[11px] leading-relaxed text-fg-muted">{t.toolContextDesc}</p>
         <div className="grid gap-5 md:grid-cols-3">
           <SelectField
             label={t.toolContextDefaultModeLabel}
@@ -222,8 +222,8 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
               DEFAULT_TOOL_CONTEXT_OVERRIDES[tools[0]] ?? local.toolContextDefaultMode;
             const mode = currentOverride ?? effectiveDefault;
             return (
-              <div key={labelKey} className="flex items-center justify-between rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3">
-                <span className="text-xs text-slate-400">{t[labelKey]}</span>
+              <div key={labelKey} className="flex items-center justify-between rounded-xl border border-line bg-base px-4 py-3">
+                <span className="text-xs text-fg-muted">{t[labelKey]}</span>
                 <select
                   value={mode}
                   onChange={(e) => {
@@ -238,7 +238,7 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
                     }
                     update({ toolContextOverrides: overrides });
                   }}
-                  className="cursor-pointer rounded-lg border border-[#2a2d3a] bg-[#161922] px-3 py-1.5 text-xs text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+                  className="cursor-pointer rounded-lg border border-line bg-base px-3 py-1.5 text-xs text-fg focus:border-accent-soft focus:outline-none"
                 >
                   <option value="full">{t.toolContextModeFull}</option>
                   <option value="summary">{t.toolContextModeSummary}</option>
@@ -251,7 +251,7 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
       </FieldCard>
 
       <FieldCard padding="loose">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">TodoList</h3>
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">TodoList</h3>
         <div className="grid gap-5 md:grid-cols-2">
           <TextField
             label={t.todoMaxRetriesLabel}
@@ -270,8 +270,8 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
       </FieldCard>
 
       <FieldCard padding="loose">
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t.goalSettingsTitle}</h3>
-        <p className="mb-4 text-[10px] leading-relaxed text-slate-600">{t.goalSettingsDesc}</p>
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{t.goalSettingsTitle}</h3>
+        <p className="mb-4 text-[10px] leading-relaxed text-fg-dim">{t.goalSettingsDesc}</p>
         <div className="grid gap-5 md:grid-cols-2">
           <TextField
             label={t.goalMaxIterationsLabel}
@@ -320,18 +320,18 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
             title={t.verifierMaxTokensHint}
           />
           <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t.verifierTemperatureLabel}: <span className="font-mono text-indigo-300">{local.verifierTemperature}</span></label>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{t.verifierTemperatureLabel}: <span className="font-mono text-accent-text">{local.verifierTemperature}</span></label>
             <input type="range" min="0" max="2" step="0.1" value={local.verifierTemperature}
               onChange={(e) => update({ verifierTemperature: parseFloat(e.target.value) })}
               title={t.verifierTemperatureHint}
-              className="mt-3 w-full cursor-pointer accent-indigo-500" />
-            <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.verifierTemperatureHint}</p>
+              className="mt-3 w-full cursor-pointer accent-accent" />
+            <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{t.verifierTemperatureHint}</p>
           </div>
         </div>
       </FieldCard>
 
       <FieldCard padding="loose">
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t.workspaceProjectGraph}</h3>
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{t.workspaceProjectGraph}</h3>
         <div className="mt-4 grid gap-5 md:grid-cols-2">
           <TextField
             label={t.projectGraphMaxFilesLabel}
@@ -363,16 +363,16 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
       </FieldCard>
 
       <FieldCard padding="loose">
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t.systemPrompt}</h3>
-        <p className="mb-4 text-[10px] leading-relaxed text-slate-600">{t.settingsPromptDesc}</p>
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{t.systemPrompt}</h3>
+        <p className="mb-4 text-[10px] leading-relaxed text-fg-dim">{t.settingsPromptDesc}</p>
         <textarea
           value={local.systemPrompt}
           onChange={(e) => update({ systemPrompt: e.target.value })}
           rows={5}
           placeholder={currentLang === 'en' ? 'e.g. Always respond in English. Prefer functional style.' : currentLang === 'zh-TW' ? '例如：始終使用繁體中文回覆。偏好函數式風格。' : '例如：始终使用中文回复。偏好函数式风格。'}
-          className="w-full resize-y rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 placeholder-slate-700 focus:border-indigo-500/60 focus:outline-none"
+          className="w-full resize-y rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
         />
-        <p className="mt-2 text-[10px] leading-relaxed text-slate-600">{t.settingsPromptStackDesc}</p>
+        <p className="mt-2 text-[10px] leading-relaxed text-fg-dim">{t.settingsPromptStackDesc}</p>
       </FieldCard>
     </div>
   );

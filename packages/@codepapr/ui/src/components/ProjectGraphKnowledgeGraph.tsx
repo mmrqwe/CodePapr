@@ -1193,18 +1193,18 @@ const ProjectGraphKnowledgeGraph = forwardRef<
   return (
     <div className="relative flex min-h-0 flex-1 w-full flex-col">
       {graphError && (
-        <div className={`m-3 rounded-xl border px-3 py-3 text-xs ${dark ? 'border-red-500/30 bg-red-500/10 text-red-300' : 'border-red-400/30 bg-red-50 text-red-600'}`}>
+        <div className="m-3 rounded-xl border border-danger-bg bg-danger-bg px-3 py-3 text-xs text-danger">
           知识图谱初始化失败: {graphError}
         </div>
       )}
       {/* 统计摘要 */}
       {!graphError && (
-        <div className={`flex flex-wrap gap-1.5 px-1 py-1.5 text-[10px] ${dark ? 'text-slate-400' : 'text-slate-500'}`}>
-          <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-[#2a2d3a] bg-[#1a1d27]' : 'border-slate-200 bg-white'}`}>
+        <div className="flex flex-wrap gap-1.5 px-1 py-1.5 text-[10px] text-fg-muted">
+          <span className="rounded-full border border-line bg-raised px-2 py-0.5">
             {lang === 'en' ? 'Files' : '文件'} {summary.files}
           </span>
           {(summary.testFiles ?? 0) > 0 && (
-            <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-amber-500/30 bg-amber-500/10 text-amber-400' : 'border-amber-400/30 bg-amber-50 text-amber-600'}`}>
+            <span className="rounded-full border border-warn-bg bg-warn-bg px-2 py-0.5 text-warn">
               测试 {(summary.testFiles ?? 0)}
             </span>
           )}
@@ -1218,34 +1218,34 @@ const ProjectGraphKnowledgeGraph = forwardRef<
               文档 {(summary.docFiles ?? 0)}
             </span>
           )}
-          <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-[#2a2d3a] bg-[#1a1d27]' : 'border-slate-200 bg-white'}`}>
+          <span className="rounded-full border border-line bg-raised px-2 py-0.5">
             {lang === 'en' ? 'Symbols' : '符号'} {summary.symbols}
           </span>
-          <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-[#2a2d3a] bg-[#1a1d27]' : 'border-slate-200 bg-white'}`}>
+          <span className="rounded-full border border-line bg-raised px-2 py-0.5">
             {lang === 'en' ? 'Edges' : '边'} {summary.edges}
           </span>
-          <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-[#2a2d3a] bg-[#1a1d27]' : 'border-slate-200 bg-white'}`}>
+          <span className="rounded-full border border-line bg-raised px-2 py-0.5">
             {t.workspaceProjectGraphImports} {summary.imports}
           </span>
-          <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-[#2a2d3a] bg-[#1a1d27]' : 'border-slate-200 bg-white'}`}>
+          <span className="rounded-full border border-line bg-raised px-2 py-0.5">
             {t.workspaceProjectGraphExtends} {summary.extends}
           </span>
-          <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-[#2a2d3a] bg-[#1a1d27]' : 'border-slate-200 bg-white'}`}>
+          <span className="rounded-full border border-line bg-raised px-2 py-0.5">
             {t.workspaceProjectGraphImplements} {summary.implements}
           </span>
-          <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-[#2a2d3a] bg-[#1a1d27]' : 'border-slate-200 bg-white'}`}>
+          <span className="rounded-full border border-line bg-raised px-2 py-0.5">
             {lang === 'en' ? 'Calls' : '调用'} {summary.calls}
           </span>
           {(summary.testedBy ?? 0) > 0 && (
-            <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : 'border-emerald-400/30 bg-emerald-50 text-emerald-600'}`}>
+            <span className="rounded-full border border-ok-bg bg-ok-bg px-2 py-0.5 text-ok">
               测试覆盖 {summary.testedBy}
             </span>
           )}
-          <span className={`rounded-full border px-2 py-0.5 ${dark ? 'border-[#2a2d3a] bg-[#1a1d27]' : 'border-slate-200 bg-white'}`}>
+          <span className="rounded-full border border-line bg-raised px-2 py-0.5">
             {lang === 'en' ? 'Entry Points' : '入口点'} {summary.entryPoints}
           </span>
           {summary.lspEnhanced && (
-            <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-emerald-400">
+            <span className="rounded-full border border-ok-bg bg-ok-bg px-2 py-0.5 text-ok">
               LSP
             </span>
           )}
@@ -1256,41 +1256,41 @@ const ProjectGraphKnowledgeGraph = forwardRef<
         {!graphError && (
         <div
           ref={containerRef}
-          className={`relative min-h-0 flex-1 overflow-hidden rounded-xl border ${dark ? 'border-[#2a2d3a] bg-[#0d1117]' : 'border-slate-200 bg-[#f5f0e9]'}`}
+          className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-line bg-base"
         >
           {/* 居中详情浮层 */}
           {selectedNode && (
             <div
-              className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+              className="absolute inset-0 z-20 flex items-center justify-center bg-overlay backdrop-blur-sm"
               onClick={() => { setSelectedNode(null); setConnectedEdges({ inbound: [], outbound: [] }); }}
             >
               <div
-                className={`flex max-h-[75vh] w-[440px] max-w-[92vw] flex-col overflow-y-auto rounded-2xl border p-5 shadow-2xl text-[12px] leading-relaxed ${dark ? 'border-[#2a2d3a] bg-[#1a1d27] text-slate-200' : 'border-slate-200 bg-white text-slate-700'}`}
+                className="flex max-h-[75vh] w-[440px] max-w-[92vw] flex-col overflow-y-auto rounded-2xl border border-line bg-raised p-5 shadow-2xl text-[12px] leading-relaxed text-fg"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-500">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.15em] text-fg-muted">
                     {lang === 'en' ? 'Node Details' : '节点详情'}
                   </span>
                   <button
                     type="button"
                     onClick={() => { setSelectedNode(null); setConnectedEdges({ inbound: [], outbound: [] }); }}
-                    className="text-slate-500 hover:text-slate-300 text-base leading-none"
+                    className="text-fg-muted hover:text-fg-soft text-base leading-none"
                   >
                     &times;
                   </button>
                 </div>
                 <div className="mb-2 font-semibold text-sm break-all">
                   {selectedNode.symbolKind && (
-                    <span className={`mr-1.5 rounded px-1.5 py-0.5 text-[10px] uppercase ${dark ? 'bg-[#2a2d3a] text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                    <span className="mr-1.5 rounded bg-control px-1.5 py-0.5 text-[10px] uppercase text-fg-muted">
                       {selectedNode.symbolKind}
                     </span>
                   )}
-                  {selectedNode.exported && <span className="mr-1 text-amber-400" title="exported">★</span>}
+                  {selectedNode.exported && <span className="mr-1 text-warn" title="exported">★</span>}
                   {selectedNode.async && <span className="mr-1 text-blue-400" title="async">▸</span>}
                   {selectedNode.label}
                 </div>
-                <div className={`mb-3 rounded px-2.5 py-1.5 font-mono text-[10px] break-all ${dark ? 'bg-[#0d1117] text-slate-400' : 'bg-slate-50 text-slate-500'}`}>
+                <div className="mb-3 rounded bg-base px-2.5 py-1.5 font-mono text-[10px] break-all text-fg-muted">
                   {selectedNode.fullPath}
                 </div>
                 <div className="space-y-1.5 text-[11px]">
@@ -1329,23 +1329,23 @@ const ProjectGraphKnowledgeGraph = forwardRef<
                   </div>
                   <div className="flex justify-between">
                     <span className="opacity-50">{lang === 'en' ? 'Out-degree' : '出度'}</span>
-                    <span className="text-amber-400">↑ {selectedNode.outDegree}</span>
+                    <span className="text-warn">↑ {selectedNode.outDegree}</span>
                   </div>
                   {selectedNode.isEntry && (
                     <div className="flex justify-between">
                       <span className="opacity-50">{lang === 'en' ? 'Entry' : '入口'}</span>
-                      <span className="text-emerald-400">✓</span>
+                      <span className="text-ok">✓</span>
                     </div>
                   )}
                 </div>
                 {selectedNode.signature && (
-                  <div className={`mt-3 rounded px-2.5 py-1.5 font-mono text-[10px] leading-relaxed break-all ${dark ? 'bg-[#0d1117] text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
+                  <div className="mt-3 rounded bg-base px-2.5 py-1.5 font-mono text-[10px] leading-relaxed break-all text-fg-soft">
                     {selectedNode.signature}
                   </div>
                 )}
                 {connectedEdges.inbound.length > 0 && (
                   <div className="mt-3">
-                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-muted">
                       {lang === 'en' ? 'Dependents' : '被依赖'} ({connectedEdges.inbound.length})
                     </div>
                     <div className="flex flex-col gap-0.5 max-h-36 overflow-y-auto">
@@ -1354,7 +1354,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
                           key={rel.edgeId}
                           type="button"
                           onClick={() => navigateToNode(rel.targetNodeId)}
-                          className={`flex items-center gap-1.5 rounded px-2 py-1 text-[10px] text-left transition-colors ${dark ? 'hover:bg-[#2a2d3a]' : 'hover:bg-slate-100'}`}
+                          className="flex items-center gap-1.5 rounded px-2 py-1 text-[10px] text-left transition-colors hover:bg-control"
                         >
                           <span className="inline-block h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: EDGE_COLORS[rel.kind] ?? '#6e7681' }} />
                           <span className="shrink-0 text-[10px] opacity-60">{edgeKindLabel(rel.kind)}</span>
@@ -1366,7 +1366,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
                 )}
                 {connectedEdges.outbound.length > 0 && (
                   <div className="mt-2">
-                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-muted">
                       {lang === 'en' ? 'Depends On' : '依赖'} ({connectedEdges.outbound.length})
                     </div>
                     <div className="flex flex-col gap-0.5 max-h-36 overflow-y-auto">
@@ -1375,7 +1375,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
                           key={rel.edgeId}
                           type="button"
                           onClick={() => navigateToNode(rel.targetNodeId)}
-                          className={`flex items-center gap-1.5 rounded px-2 py-1 text-[10px] text-left transition-colors ${dark ? 'hover:bg-[#2a2d3a]' : 'hover:bg-slate-100'}`}
+                          className="flex items-center gap-1.5 rounded px-2 py-1 text-[10px] text-left transition-colors hover:bg-control"
                         >
                           <span className="inline-block h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: EDGE_COLORS[rel.kind] ?? '#6e7681' }} />
                           <span className="shrink-0 text-[10px] opacity-60">{edgeKindLabel(rel.kind)}</span>
@@ -1393,14 +1393,14 @@ const ProjectGraphKnowledgeGraph = forwardRef<
                         onRequestFocus?.(selectedNode.nodeId);
                       }
                     }}
-                    className={`w-full rounded-lg border px-3 py-2 text-[11px] font-medium transition-colors ${dark ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20' : 'border-emerald-300 bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}
+                    className="w-full rounded-lg border border-ok-bg bg-ok-bg px-3 py-2 text-[11px] font-medium text-ok transition-colors hover:bg-ok-bg"
                   >
                     {t.graphNodeFocus}
                   </button>
                   <button
                     type="button"
                     onClick={handleOpenFile}
-                    className={`w-full rounded-lg border px-3 py-2 text-[11px] font-medium transition-colors ${dark ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20' : 'border-indigo-300 bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}
+                    className="w-full rounded-lg border border-accent-soft bg-accent-soft px-3 py-2 text-[11px] font-medium text-accent-text transition-colors hover:bg-accent-soft"
                   >
                     {lang === 'en' ? 'Open File' : '打开文件'}
                   </button>
@@ -1413,16 +1413,16 @@ const ProjectGraphKnowledgeGraph = forwardRef<
       </div>
       {tooltipInfo && (
         <div
-          className={`pointer-events-none absolute z-30 max-w-[320px] rounded-lg border px-2.5 py-2 text-[10px] leading-relaxed shadow-lg ${dark ? 'border-[#2a2d3a] bg-[#1a1d27] text-slate-200' : 'border-slate-200 bg-white text-slate-700'}`}
+          className="pointer-events-none absolute z-30 max-w-[320px] rounded-lg border border-line bg-raised px-2.5 py-2 text-[10px] leading-relaxed text-fg shadow-lg"
           style={{ left: tooltipInfo.x, top: tooltipInfo.y }}
         >
           <div className="mb-1 font-semibold">
             {tooltipInfo.nodeKind === 'symbol' && tooltipInfo.symbolKind && (
-              <span className={`mr-1 rounded px-1 py-0.5 text-[8px] uppercase ${dark ? 'bg-[#2a2d3a] text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+              <span className="mr-1 rounded bg-control px-1 py-0.5 text-[8px] uppercase text-fg-muted">
                 {tooltipInfo.symbolKind}
               </span>
             )}
-            {tooltipInfo.exported && <span className="mr-1 text-amber-400" title="exported">★</span>}
+            {tooltipInfo.exported && <span className="mr-1 text-warn" title="exported">★</span>}
             {tooltipInfo.async && <span className="mr-1 text-blue-400" title="async">▸</span>}
             {tooltipInfo.label}
           </div>
@@ -1431,7 +1431,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
             <div className="text-[9px] opacity-60">L{tooltipInfo.line}</div>
           )}
           {tooltipInfo.signature && (
-            <div className={`mt-1 rounded px-1.5 py-0.5 font-mono text-[9px] ${dark ? 'bg-[#0d1117] text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
+            <div className="mt-1 rounded bg-base px-1.5 py-0.5 font-mono text-[9px] text-fg-soft">
               {tooltipInfo.signature}
             </div>
           )}
@@ -1441,7 +1441,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
           </div>
         </div>
       )}
-      <div className={`pointer-events-none absolute bottom-2 right-2 rounded-lg border px-2.5 py-2 text-[9px] leading-relaxed ${dark ? 'border-[#2a2d3a] bg-[#1a1d27]/90 text-slate-400' : 'border-slate-200 bg-white/90 text-slate-500'}`}>
+      <div className="pointer-events-none absolute bottom-2 right-2 rounded-lg border border-line bg-raised px-2.5 py-2 text-[9px] leading-relaxed text-fg-muted">
         <div className="mb-1.5 font-semibold opacity-70">{t.graphLegendTitle}</div>
         <div className="grid grid-cols-2 gap-x-3 gap-y-1">
           {(['imports', 'reexports', 'extends', 'implements', 'calls', 'tested_by', 'configures'] as const).map((kind) => (

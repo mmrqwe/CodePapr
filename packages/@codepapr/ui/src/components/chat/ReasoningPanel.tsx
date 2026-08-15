@@ -62,7 +62,7 @@ export function ReasoningPanel({
 
   return (
     <div
-      className={`mb-3 overflow-hidden ${bordered ? 'rounded-xl border border-indigo-500/20 bg-[#0b0d12]/50' : ''}`}
+      className={`mb-3 overflow-hidden ${bordered ? 'rounded-xl border border-accent-soft bg-base/50' : ''}`}
       data-reasoning-panel-state={isOpen ? 'open' : 'closed'}
     >
       <button
@@ -72,14 +72,14 @@ export function ReasoningPanel({
       >
         <span className="min-w-0 flex-1">
           {isOpen ? (
-            <span className="text-xs font-semibold text-indigo-300">{t.thinkingProcess}</span>
+            <span className="text-xs font-semibold text-accent-text">{t.thinkingProcess}</span>
           ) : (
-            <span className="block truncate text-xs text-slate-400/80">
-              <span className="font-semibold text-indigo-300/70">{t.thinkingProcess}</span> · {collapsedText}
+            <span className="block truncate text-xs text-fg-muted">
+              <span className="font-semibold text-accent-text/70">{t.thinkingProcess}</span> · {collapsedText}
             </span>
           )}
         </span>
-        <span className="shrink-0 text-[11px] text-slate-500">
+        <span className="shrink-0 text-[11px] text-fg-muted">
           {isStreaming ? t.streamingStatus : isOpen ? t.collapse : t.expand}
         </span>
       </button>
@@ -90,14 +90,14 @@ export function ReasoningPanel({
           onScroll={(event) => {
             shouldStickToBottomRef.current = isScrollContainerNearBottom(event.currentTarget);
           }}
-          className={`overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable px-3.5 py-2 text-xs leading-relaxed text-slate-400/90 ${
-            bordered ? 'border-t border-indigo-500/10 ' : ''
+          className={`overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable px-3.5 py-2 text-xs leading-relaxed text-fg-muted ${
+            bordered ? 'border-t border-accent-soft ' : ''
           }${
             isStreaming ? 'max-h-[4.5rem]' : 'max-h-56'
           }`}
           style={{ overflowAnchor: 'none' }}
         >
-          <p ref={reasoningContentRef} className="whitespace-pre-wrap text-slate-300/90 select-text">{visibleContent}</p>
+          <p ref={reasoningContentRef} className="whitespace-pre-wrap text-fg-muted select-text">{visibleContent}</p>
         </div>
       )}
     </div>
@@ -107,9 +107,9 @@ export function ReasoningPanel({
 export function RunningStatusIndicator({ label }: { label: string }) {
   return (
     <div className="mb-2 select-none">
-      <p className="text-xs font-medium text-slate-400/90">{label}</p>
-      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#11151d]">
-        <div className="status-indicator-bar h-full w-24 rounded-full bg-gradient-to-r from-indigo-500/10 via-indigo-300 to-cyan-300" />
+      <p className="text-xs font-medium text-fg-muted">{label}</p>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-base">
+        <div className="status-indicator-bar h-full w-24 rounded-full bg-gradient-to-r from-accent-soft via-accent-text to-info" />
       </div>
     </div>
   );

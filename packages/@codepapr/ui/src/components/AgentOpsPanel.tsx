@@ -1,5 +1,6 @@
 import { useAgentStore } from '../store/agentStore';
 import { useCharactersStore } from '../store/charactersStore';
+import { useThemeStore } from '../store/themeStore';
 import { getTranslation, type Lang } from '../utils/i18n';
 import { ConversationSearch } from './ConversationSearch';
 import type { PreviewLocation } from '../utils/projectDiagnosticLocations';
@@ -21,17 +22,16 @@ interface AgentOpsPanelProps {
   onOpenCharacters: () => void;
   onOpenCacheStats: () => void;
   onOpenAbout: () => void;
-  isDark: boolean;
-  onToggleTheme: () => void;
   onNavigateToFile: (location: PreviewLocation) => void;
 }
 
 export function AgentOpsPanel({
   onOpenSettings, onOpenMcpSettings, onOpenCharacters, onOpenCacheStats,
-  onOpenAbout, isDark, onToggleTheme, onNavigateToFile,
+  onOpenAbout, onNavigateToFile,
 }: AgentOpsPanelProps) {
   const settings = useAgentStore((state) => state.settings);
   const isLoading = useAgentStore((state) => state.isLoading);
+  const mode = useThemeStore((state) => state.mode);
   const t = getTranslation(settings.lang);
   const copy = getOpsCopy(settings.lang);
   const activeCharacterId = useCharactersStore((state) => state.activeCharacterId);
@@ -39,16 +39,21 @@ export function AgentOpsPanel({
     state.characters.find((c) => c.id === state.activeCharacterId) ?? null
   );
 
-  const buttonClass = 'flex-shrink-0 rounded-lg border border-[#2a2d3a] px-2.5 py-2 text-xs font-medium text-slate-300 transition-colors hover:border-indigo-400 hover:text-white';
+  const buttonClass = 'flex-shrink-0 rounded-lg border border-line px-2.5 py-2 text-xs font-medium text-fg-soft transition-colors hover:border-accent hover:text-fg';
   const characterButtonClass = activeCharacterId
-    ? 'flex-shrink-0 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-2.5 py-2 text-xs font-medium text-emerald-100 transition-colors hover:bg-emerald-500/20'
+    ? 'flex-shrink-0 rounded-lg border border-ok-bg bg-ok-bg px-2.5 py-2 text-xs font-medium text-ok transition-colors hover:bg-ok-bg'
     : buttonClass;
 
   return (
-    <div className="flex items-center border-b border-[#202432] px-4 min-h-[60px]">
+    <div className="flex items-center border-b border-line px-4 min-h-[60px]">
       <div className="flex items-center gap-2 overflow-x-auto">
-        <button type="button" onClick={onToggleTheme} title={isDark ? '切换到浅色主题' : '切换到深色主题'} className={buttonClass}>
-          {isDark ? '\u2600\uFE0F' : '\uD83C\uDF19'}
+        <button
+          type="button"
+          onClick={() => useThemeStore.getState().toggleMode()}
+          title={t.themeToggleTip}
+          className={buttonClass}
+        >
+          {mode === 'dark' ? '\u2600\uFE0F' : '\uD83C\uDF19'}
         </button>
         <button type="button" onClick={onOpenSettings} title={t.settingsTip} className={buttonClass}>
           <span>{t.modelSettings}</span>
@@ -65,9 +70,9 @@ export function AgentOpsPanel({
         <button type="button" onClick={onOpenCacheStats} title={t.cacheStatsTip} className={buttonClass}>
           {t.cacheStatsTitle}
         </button>
-        <div className="flex min-w-[76px] flex-shrink-0 items-center gap-2 rounded-lg border border-[#2a2d3a] px-2.5 py-2" title={isLoading ? copy.active : copy.idle}>
-          <span className={`inline-block h-2.5 w-2.5 rounded-full ${isLoading ? 'animate-pulse bg-amber-300' : 'bg-emerald-300'}`} />
-          <span className="text-xs font-medium text-slate-400">{isLoading ? copy.active : copy.idle}</span>
+        <div className="flex min-w-[76px] flex-shrink-0 items-center gap-2 rounded-lg border border-line px-2.5 py-2" title={isLoading ? copy.active : copy.idle}>
+          <span className={`inline-block h-2.5 w-2.5 rounded-full ${isLoading ? 'animate-pulse bg-warn' : 'bg-ok'}`} />
+          <span className="text-xs font-medium text-fg-muted">{isLoading ? copy.active : copy.idle}</span>
         </div>
         <ConversationSearch onNavigateToFile={onNavigateToFile} />
         <button type="button" onClick={onOpenAbout} title="About" className={buttonClass}>{'ⓘ'}</button>

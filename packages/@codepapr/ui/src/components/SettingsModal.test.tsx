@@ -14,8 +14,16 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 import { normalizeSettings, useAgentStore } from '../store/agentStore';
 import { SettingsModal } from './SettingsModal';
+import { THEME_STYLE_ID } from '../theme/themeEngine';
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
+
+function setInputValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
+  const proto =
+    el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(el, value);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
 
 describe('SettingsModal', () => {
   let container: HTMLDivElement;
@@ -48,6 +56,11 @@ describe('SettingsModal', () => {
       root.unmount();
     });
     container.remove();
+    document.getElementById(THEME_STYLE_ID)?.remove();
+    document.documentElement.removeAttribute('data-theme');
+    document.documentElement.removeAttribute('data-mode');
+    document.documentElement.classList.remove('dark');
+    document.documentElement.style.colorScheme = '';
   });
 
   it('shows tab labels so each settings area is reachable', async () => {
@@ -95,5 +108,129 @@ describe('SettingsModal', () => {
     expect(treeInput).toBeDefined();
     expect(filesInput!.getAttribute('min')).toBe('0');
     expect(treeInput!.getAttribute('min')).toBe('0');
+  });
+
+  it('general tab theme selects preview live and revert on cancel', async () => {
+    await act(async () => {
+      root.render(<SettingsModal />);
+    });
+
+    // 通用页默认激活：浅色主题选择器即时预览
+    const lightSelect = container.querySelector(
+      'select[title="浅色模式下使用的主题。"]'
+    ) as HTMLSelectElement;
+    expect(lightSelect).not.toBeNull();
+    expect(container.innerHTML).toContain('Nord');
+    expect(container.innerHTML).toContain('Solarized');
+    expect(container.innerHTML).toContain('实验性');
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(
+        lightSelect,
+        'solarized-light',
+      );
+      lightSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    // 跟随系统 + jsdom 无 matchMedia → 浅色模式 → solarized-light 生效
+    expect(document.documentElement.dataset.theme).toBe('solarized-light');
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+
+    // 取消保存 → 回滚到已持久化设置（默认 paper-light）
+    const closeButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '×'
+    );
+    await act(async () => {
+      closeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(document.documentElement.dataset.theme).toBe('paper-light');
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+  });
+
+  it('appearance tab previews accent live and imports custom themes', async () => {
+    await act(async () => {
+      root.render(<SettingsModal />);
+    });
+    const appearanceTab = container.querySelector(
+      'button[title="选择主题、强调色，导入自定义主题。"]'
+    );
+    expect(appearanceTab).not.toBeNull();
+    await act(async () => {
+      appearanceTab!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    // 强调色预设实时预览
+    const redSwatch = container.querySelector('button[title="#ef4444"]');
+    expect(redSwatch).not.toBeNull();
+    await act(async () => {
+      redSwatch!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    const style = document.getElementById(THEME_STYLE_ID) as HTMLStyleElement;
+    expect(style.textContent).toContain('--accent: #ef4444;');
+
+    // 自定义主题导入
+    const nameInput = Array.from(container.querySelectorAll('input')).find(
+      (input) => input.getAttribute('placeholder') === '名称'
+    ) as HTMLInputElement;
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const importButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '导入'
+    );
+    expect(nameInput).toBeDefined();
+    expect(textarea).toBeDefined();
+    expect(importButton).toBeDefined();
+
+    await act(async () => {
+      setInputValue(nameInput, 'My Theme');
+      setInputValue(textarea, '{ not json');
+    });
+    await act(async () => {
+      importButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(container.innerHTML).toContain('JSON 无效');
+
+    const tokens = {
+      'bg-deep': '#010203',
+      'bg-base': '#111111',
+      'bg-raised': '#222222',
+      'bg-input': '#111111',
+      'bg-hover': 'rgba(255,255,255,0.05)',
+      'foreground': '#eeeeee',
+      'foreground-soft': '#cccccc',
+      'foreground-muted': '#999999',
+      'foreground-dim': '#666666',
+      'border': '#333333',
+      'border-strong': '#444444',
+      'accent': '#ff0000',
+      'accent-soft': 'rgba(255,0,0,0.16)',
+      'accent-bg': 'rgba(255,0,0,0.08)',
+      'accent-text': '#ff8888',
+      'accent-glow': 'rgba(255,0,0,0.2)',
+      'green': '#22c55e',
+      'green-bg': 'rgba(34,197,94,0.08)',
+      'amber': '#f59e0b',
+      'amber-bg': 'rgba(245,158,11,0.08)',
+      'red': '#ef4444',
+      'cyan': '#22d3ee',
+      'cyan-bg': 'rgba(6,182,212,0.08)',
+      'code-bg': '#0b0d12',
+      'code-fg': '#e2e8f0',
+      'scrollbar-track': '#111111',
+      'scrollbar-thumb': '#333333',
+      'shadow-sm': '0 2px 8px rgba(0,0,0,0.3)',
+      'shadow-md': '0 8px 24px rgba(0,0,0,0.5)',
+      'surface-gradient': 'linear-gradient(180deg, #121212 0%, #101010 100%)',
+    };
+    await act(async () => {
+      setInputValue(nameInput, 'My Theme');
+      setInputValue(textarea, JSON.stringify(tokens));
+    });
+    await act(async () => {
+      importButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.innerHTML).toContain('已导入并应用');
+    expect(container.innerHTML).toContain('My Theme');
   });
 });

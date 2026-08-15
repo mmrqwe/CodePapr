@@ -220,13 +220,13 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#2a2d3a] bg-[#11141c] px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-base px-3 py-2">
         <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={goBack}
             title={t.embeddedBrowserBack}
-            className="rounded-md border border-[#2a2d3a] px-2 py-1 text-xs text-slate-300 transition-colors hover:border-indigo-500/50 hover:text-white"
+            className="rounded-md border border-line px-2 py-1 text-xs text-fg-soft transition-colors hover:border-accent-soft hover:text-fg"
           >
             ←
           </button>
@@ -234,7 +234,7 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
             type="button"
             onClick={goForward}
             title={t.embeddedBrowserForward}
-            className="rounded-md border border-[#2a2d3a] px-2 py-1 text-xs text-slate-300 transition-colors hover:border-indigo-500/50 hover:text-white"
+            className="rounded-md border border-line px-2 py-1 text-xs text-fg-soft transition-colors hover:border-accent-soft hover:text-fg"
           >
             →
           </button>
@@ -242,7 +242,7 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
             type="button"
             onClick={reload}
             title={t.embeddedBrowserReload}
-            className="rounded-md border border-[#2a2d3a] px-2 py-1 text-xs text-slate-300 transition-colors hover:border-indigo-500/50 hover:text-white"
+            className="rounded-md border border-line px-2 py-1 text-xs text-fg-soft transition-colors hover:border-accent-soft hover:text-fg"
           >
             ⟳
           </button>
@@ -260,7 +260,7 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
             value={addressInput}
             onChange={(event) => setAddressInput(event.target.value)}
             placeholder={t.embeddedBrowserAddressPlaceholder}
-            className="w-full rounded-md border border-[#2a2d3a] bg-[#0b0d12] px-2 py-1 text-xs text-slate-200 outline-none transition-colors focus:border-indigo-500/60"
+            className="w-full rounded-md border border-line bg-base px-2 py-1 text-xs text-fg outline-none transition-colors focus:border-accent-soft"
             spellCheck={false}
           />
         </form>
@@ -270,14 +270,14 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
             type="button"
             onClick={openInSystemBrowser}
             title={t.embeddedBrowserOpenExternal}
-            className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] font-medium text-slate-300 transition-colors hover:border-indigo-500/50 hover:text-white"
+            className="rounded-md border border-line px-2 py-1 text-[10px] font-medium text-fg-soft transition-colors hover:border-accent-soft hover:text-fg"
           >
             {t.embeddedBrowserOpenExternal}
           </button>
           <button
             type="button"
             onClick={closePanel}
-            className="rounded-md border border-red-500/30 px-2 py-1 text-[10px] font-medium text-red-200 transition-colors hover:border-red-400/60 hover:text-red-100"
+            className="rounded-md border border-danger-bg px-2 py-1 text-[10px] font-medium text-danger transition-colors hover:border-danger-bg hover:text-danger"
           >
             {t.embeddedBrowserClose}
           </button>
@@ -285,22 +285,22 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
       </div>
 
       {activeSession?.title && (
-        <div className="truncate px-1 text-[11px] text-slate-400">{activeSession.title}</div>
+        <div className="truncate px-1 text-[11px] text-fg-muted">{activeSession.title}</div>
       )}
 
       {actionError && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-200">
+        <div className="rounded-xl border border-danger-bg bg-danger-bg px-3 py-2 text-xs leading-relaxed text-danger">
           {actionError}
         </div>
       )}
 
-      <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-[#2a2d3a] bg-[#0b0d12]">
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-line bg-base">
         {isNavigating && (
-          <div className="absolute left-0 top-0 z-10 h-0.5 w-full animate-pulse bg-indigo-500/70" />
+          <div className="absolute left-0 top-0 z-10 h-0.5 w-full animate-pulse bg-accent-soft" />
         )}
         <div ref={placeholderRef} className="h-full w-full" />
         {!activeSession && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-xs text-slate-600">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-xs text-fg-dim">
             {t.embeddedBrowserEmpty}
           </div>
         )}

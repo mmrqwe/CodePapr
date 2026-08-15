@@ -30,6 +30,7 @@ import {
 } from './tools/mcpTools';
 import { useMcpConfirmStore } from './store/mcpConfirmStore';
 import { useThemeStore } from './store/themeStore';
+import { getBuiltinTheme } from './theme/themes';
 import type { ReviewScope } from './utils/codeReview';
 import { getTranslation } from './utils/i18n';
 import type { PreviewLocation } from './utils/projectDiagnosticLocations';
@@ -37,16 +38,81 @@ import { cacheGet, cacheSet } from './utils/cacheStorage';
 
 const THEME_CACHE_KEY = 'ui.theme';
 
-/** 启动缓存镜像（防闪烁）。旧版为 'dark' | 'light' 字符串，新版为对象。 */
+/** 启动缓存镜像（防闪烁）。v2：浅/深主题槽位 + 模式。 */
 interface ThemeCacheValue {
-  theme: string | null;
+  mode: 'light' | 'dark';
+  light: string;
+  dark: string;
+  followSystem: boolean;
   accent: string | null;
 }
 
-/** 旧版布尔主题缓存 → 新主题 id。 */
-function legacyCacheThemeToId(value: unknown): string | null {
-  if (value === 'dark') return 'paper-dark';
-  if (value === 'light') return 'paper-light';
+interface ParsedThemeCache {
+  value: ThemeCacheValue;
+  /** 旧格式（'dark'|'light' 字符串或 v1 {theme} 对象）：settings 加载后需一次性迁移。 */
+  legacy: boolean;
+  kind: 'string' | 'v1' | 'v2';
+}
+
+/** 解析缓存镜像，兼容旧版 'dark'|'light' 字符串与 v1 {theme, accent} 对象。 */
+function parseThemeCache(cached: unknown): ParsedThemeCache | null {
+  if (typeof cached === 'string') {
+    const mode = cached === 'dark' ? 'dark' : cached === 'light' ? 'light' : null;
+    if (!mode) return null;
+    return {
+      value: { mode, light: 'paper-light', dark: 'paper-dark', followSystem: false, accent: null },
+      legacy: true,
+      kind: 'string',
+    };
+  }
+  if (cached && typeof cached === 'object') {
+    const record = cached as Record<string, unknown>;
+    // v2 格式
+    if (record.mode === 'light' || record.mode === 'dark') {
+      return {
+        value: {
+          mode: record.mode,
+          light: typeof record.light === 'string' ? record.light : 'paper-light',
+          dark: typeof record.dark === 'string' ? record.dark : 'paper-dark',
+          followSystem: record.followSystem === true,
+          accent: typeof record.accent === 'string' ? record.accent : null,
+        },
+        legacy: false,
+        kind: 'v2',
+      };
+    }
+    // v1 格式 {theme, accent}
+    if ('theme' in record) {
+      const theme = typeof record.theme === 'string' ? record.theme : null;
+      const accent = typeof record.accent === 'string' ? record.accent : null;
+      if (!theme) {
+        return {
+          value: {
+            mode: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+            light: 'paper-light',
+            dark: 'paper-dark',
+            followSystem: true,
+            accent,
+          },
+          legacy: true,
+          kind: 'v1',
+        };
+      }
+      const def = getBuiltinTheme(theme);
+      if (!def) return null;
+      return {
+        value: {
+          mode: def.mode,
+          light: def.mode === 'light' ? theme : 'paper-light',
+          dark: def.mode === 'dark' ? theme : 'paper-dark',
+          followSystem: false,
+          accent,
+        },
+        legacy: true,
+        kind: 'v1',
+      };
+    }
+  }
   return null;
 }
 
@@ -165,7 +231,11 @@ export default function App() {
   const mountApp = useAppRuntimeStore((state) => state.mountApp);
   const t = getTranslation(settings.lang);
   const isDark = useThemeStore((state) => state.mode === 'dark');
-  const themeId = useThemeStore((state) => state.themeId);
+  const themeId = useThemeStore((state) => state.resolvedThemeId);
+  const themeMode = useThemeStore((state) => state.mode);
+  const themeLightTheme = useThemeStore((state) => state.lightTheme);
+  const themeDarkTheme = useThemeStore((state) => state.darkTheme);
+  const themeFollowSystem = useThemeStore((state) => state.followSystem);
   const themeAccent = useThemeStore((state) => state.accent);
   const [showCacheStats, setShowCacheStats] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
@@ -195,11 +265,6 @@ export default function App() {
   const projectName = workspacePath ? basename(workspacePath) : t.unselected;
   const selectedFileName = selectedPath ? basename(selectedPath) : null;
 
-  const toggleTheme = useCallback(() => {
-    const next = useThemeStore.getState().mode === 'dark' ? 'paper-light' : 'paper-dark';
-    useThemeStore.getState().setTheme(next);
-  }, []);
-
   useEffect(() => {
     void loadSettings();
     void useCharactersStore.getState().loadCharacters();
@@ -223,47 +288,54 @@ export default function App() {
   // ── 主题引导 ──────────────────────────────────────────────
   // 启动顺序：index.html 静态 data-theme="paper-light" 保证首帧可用；
   // 缓存镜像（防闪烁）→ Settings（权威）→ 旧偏好迁移进 Settings。
-  const cachedThemeRef = useRef<{ theme: string | null; accent: string | null } | null>(null);
+  const cachedThemeRef = useRef<ParsedThemeCache | null>(null);
   const themeHydratedRef = useRef(false);
 
   useEffect(() => {
     void cacheGet<unknown>(THEME_CACHE_KEY).then((cached) => {
-      if (typeof cached === 'string') {
-        const legacyId = legacyCacheThemeToId(cached);
-        if (legacyId) cachedThemeRef.current = { theme: legacyId, accent: null };
-      } else if (cached && typeof cached === 'object') {
-        const record = cached as Partial<ThemeCacheValue>;
-        cachedThemeRef.current = {
-          theme: typeof record.theme === 'string' ? record.theme : null,
-          accent: typeof record.accent === 'string' ? record.accent : null,
-        };
-      }
+      const parsed = parseThemeCache(cached);
+      if (parsed) cachedThemeRef.current = parsed;
       const cachedTheme = cachedThemeRef.current;
       const { settings, settingsLoaded } = useAgentStore.getState();
       if (settingsLoaded) {
-        if (settings.theme == null && cachedTheme?.theme) {
-          // 旧版布尔主题偏好 → 迁移进 Settings（一次性）
+        const pristineSlots =
+          settings.lightTheme === 'paper-light' &&
+          settings.darkTheme === 'paper-dark' &&
+          settings.followSystem === true;
+        if (cachedTheme?.legacy && pristineSlots) {
+          // 旧版偏好迁移进 Settings（一次性），随后以 Settings 为准应用。
+          const patch =
+            cachedTheme.kind === 'string'
+              ? { followSystem: false, themeMode: cachedTheme.value.mode }
+              : {
+                  lightTheme: cachedTheme.value.light,
+                  darkTheme: cachedTheme.value.dark,
+                  followSystem: cachedTheme.value.followSystem,
+                  themeMode: cachedTheme.value.mode,
+                };
           useAgentStore.getState().setSettings(
-            { theme: cachedTheme.theme, accent: settings.accent ?? cachedTheme.accent },
+            { ...patch, accent: settings.accent ?? cachedTheme.value.accent },
             { preserveAgent: true },
           );
-          useThemeStore.getState().applyFromSettings({
-            theme: cachedTheme.theme,
-            accent: settings.accent ?? cachedTheme.accent,
-            customThemes: settings.customThemes,
-          });
-        } else {
-          useThemeStore.getState().applyFromSettings({
-            theme: settings.theme,
-            accent: settings.accent,
-            customThemes: settings.customThemes,
-          });
         }
+        const current = useAgentStore.getState().settings;
+        useThemeStore.getState().applyFromSettings({
+          lightTheme: current.lightTheme,
+          darkTheme: current.darkTheme,
+          followSystem: current.followSystem,
+          themeMode: current.themeMode,
+          accent: current.accent,
+          customThemes: current.customThemes,
+        });
       } else {
         // Settings 尚未加载：先用缓存防闪烁，加载后由下方 effect 接管。
+        const value = cachedTheme?.value ?? null;
         useThemeStore.getState().applyFromSettings({
-          theme: cachedTheme?.theme ?? null,
-          accent: cachedTheme?.accent ?? null,
+          lightTheme: value?.light ?? 'paper-light',
+          darkTheme: value?.dark ?? 'paper-dark',
+          followSystem: value?.followSystem ?? true,
+          themeMode: value?.mode ?? 'light',
+          accent: value?.accent ?? null,
           customThemes: {},
         });
       }
@@ -276,20 +348,41 @@ export default function App() {
     if (!settingsLoaded) return;
     const current = useAgentStore.getState().settings;
     const cachedTheme = cachedThemeRef.current;
-    if (current.theme == null && cachedTheme?.theme) {
+    const pristineSlots =
+      current.lightTheme === 'paper-light' &&
+      current.darkTheme === 'paper-dark' &&
+      current.followSystem === true;
+    if (cachedTheme?.legacy && pristineSlots) {
       useAgentStore.getState().setSettings(
-        { theme: cachedTheme.theme, accent: current.accent ?? cachedTheme.accent },
+        {
+          ...(cachedTheme.kind === 'v1'
+            ? {
+                lightTheme: cachedTheme.value.light,
+                darkTheme: cachedTheme.value.dark,
+                followSystem: cachedTheme.value.followSystem,
+              }
+            : { followSystem: false }),
+          themeMode: cachedTheme.value.mode,
+          accent: current.accent ?? cachedTheme.value.accent,
+        },
         { preserveAgent: true },
       );
+      const migrated = useAgentStore.getState().settings;
       useThemeStore.getState().applyFromSettings({
-        theme: cachedTheme.theme,
-        accent: current.accent ?? cachedTheme.accent,
-        customThemes: current.customThemes,
+        lightTheme: migrated.lightTheme,
+        darkTheme: migrated.darkTheme,
+        followSystem: migrated.followSystem,
+        themeMode: migrated.themeMode,
+        accent: migrated.accent,
+        customThemes: migrated.customThemes,
       });
       return;
     }
     useThemeStore.getState().applyFromSettings({
-      theme: current.theme,
+      lightTheme: current.lightTheme,
+      darkTheme: current.darkTheme,
+      followSystem: current.followSystem,
+      themeMode: current.themeMode,
       accent: current.accent,
       customThemes: current.customThemes,
     });
@@ -298,8 +391,15 @@ export default function App() {
   // 启动缓存镜像回写：仅在水合完成后允许，避免空值覆盖旧版缓存。
   useEffect(() => {
     if (!themeHydratedRef.current) return;
-    void cacheSet<ThemeCacheValue>(THEME_CACHE_KEY, { theme: themeId, accent: themeAccent });
-  }, [themeId, themeAccent]);
+    const theme = useThemeStore.getState();
+    void cacheSet<ThemeCacheValue>(THEME_CACHE_KEY, {
+      mode: theme.mode,
+      light: theme.lightTheme,
+      dark: theme.darkTheme,
+      followSystem: theme.followSystem,
+      accent: theme.accent,
+    });
+  }, [themeId, themeMode, themeLightTheme, themeDarkTheme, themeFollowSystem, themeAccent]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -453,13 +553,13 @@ export default function App() {
   return (
     <>
       {projectGraphLoading && workspacePath && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#07090d]/85 backdrop-blur-md">
-          <div className="w-[min(92vw,520px)] rounded-3xl border border-[var(--border-strong)] bg-[#10131b]/95 px-8 py-10 text-center shadow-2xl">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-deep/85 backdrop-blur-md">
+          <div className="w-[min(92vw,520px)] rounded-3xl border border-[var(--border-strong)] bg-base/95 px-8 py-10 text-center shadow-2xl">
             <div className="loading-spinner mx-auto mb-5 h-12 w-12 animate-spin rounded-full border-2" />
-            <h2 className="text-base font-semibold text-slate-100">
+            <h2 className="text-base font-semibold text-fg">
               {projectGraphPhase ? t.workspaceInsightsLoading : t.workspaceInitLoading}
             </h2>
-            <p className="mt-1.5 text-xs text-slate-500">
+            <p className="mt-1.5 text-xs text-fg-muted">
               {projectGraphPhase
                 ? {
                     'reading-files': 'Reading project files',
@@ -473,18 +573,18 @@ export default function App() {
             </p>
             {projectGraphPhase && projectGraphPhase.total > 0 && (
               <div className="mt-5">
-                <div className="mx-auto h-1.5 w-64 overflow-hidden rounded-full bg-[#1a1f2b]">
-                  <div className="status-indicator-bar h-full rounded-full bg-indigo-500/70" />
+                <div className="mx-auto h-1.5 w-64 overflow-hidden rounded-full bg-raised">
+                  <div className="status-indicator-bar h-full rounded-full bg-accent-soft" />
                 </div>
-                <p className="mt-2 text-[10px] tabular-nums text-slate-600">
+                <p className="mt-2 text-[10px] tabular-nums text-fg-dim">
                   {projectGraphPhase.current} / {projectGraphPhase.total}
                 </p>
               </div>
             )}
             {!projectGraphPhase && (
               <div className="mt-5">
-                <div className="mx-auto h-1.5 w-64 overflow-hidden rounded-full bg-[#1a1f2b]">
-                  <div className="status-indicator-bar h-full rounded-full bg-indigo-500/70" />
+                <div className="mx-auto h-1.5 w-64 overflow-hidden rounded-full bg-raised">
+                  <div className="status-indicator-bar h-full rounded-full bg-accent-soft" />
                 </div>
               </div>
             )}
@@ -494,32 +594,32 @@ export default function App() {
       {/* 打开 app 时主界面保持挂载（invisible 仅视觉隐藏），避免退出 app 后
           CodingWorkbench/WorkspaceInsightPanel 重挂载导致 ProjectGraph、LSP 预热、
           文件树等初始化流程全部重跑。AppModal 以全屏覆盖层形式渲染在其上。 */}
-      <div className={`h-screen w-screen overflow-hidden bg-[#0f1117] ${openedAppId ? 'invisible' : ''}`}>
+      <div className={`h-screen w-screen overflow-hidden bg-base ${openedAppId ? 'invisible' : ''}`}>
       <SplitPane
         direction="horizontal"
         defaultRatio={0.18}
         minFirstSize={200}
         minSecondSize={650}
-        className="h-screen w-screen overflow-hidden bg-[#0f1117] select-none"
-        firstPaneClassName="bg-[#10131b]"
-        secondPaneClassName="bg-[#0f1117]"
+        className="h-screen w-screen overflow-hidden bg-base select-none"
+        firstPaneClassName="bg-base"
+        secondPaneClassName="bg-base"
         first={
-          <div className="flex h-full min-h-0 flex-col border-r border-[#202432] bg-[#10131b]">
+          <div className="flex h-full min-h-0 flex-col border-r border-line bg-base">
             <SplitPane
               direction="vertical"
               defaultRatio={isGitPanelExpanded ? 0.42 : 0.72}
               minFirstSize={120}
               minSecondSize={isGitPanelExpanded ? 300 : 160}
               className="h-full"
-              firstPaneClassName="min-h-0 bg-[#10131b]"
-              secondPaneClassName="flex flex-col min-h-0 bg-[#10131b]"
+              firstPaneClassName="min-h-0 bg-base"
+              secondPaneClassName="flex flex-col min-h-0 bg-base"
               first={
                 <div className="h-full min-h-0">
                   <SessionManager />
                 </div>
               }
               second={
-                <div className="flex-1 min-h-0 flex flex-col border-t border-[#202432]">
+                <div className="flex-1 min-h-0 flex flex-col border-t border-line">
                   <SplitPane
                     direction="vertical"
                     defaultRatio={0.45}
@@ -527,8 +627,8 @@ export default function App() {
                     minSecondSize={isGitPanelExpanded ? 120 : 0}
                     hideSeparator={!isGitPanelExpanded}
                     className="flex-1 min-h-0"
-                    firstPaneClassName="min-h-0 bg-[#10131b]"
-                    secondPaneClassName="flex flex-col min-h-0 bg-[#10131b]"
+                    firstPaneClassName="min-h-0 bg-base"
+                    secondPaneClassName="flex flex-col min-h-0 bg-base"
                     first={
                       <div className="h-full min-h-0">
                         <BackgroundProcessPanel workspacePath={workspacePath} lang={settings.lang} />
@@ -568,8 +668,8 @@ export default function App() {
               minFirstSize={380}
               minSecondSize={280}
               className="h-full"
-              firstPaneClassName="min-w-0 bg-[#0f1117]"
-              secondPaneClassName="bg-[#10141d]"
+              firstPaneClassName="min-w-0 bg-base"
+              secondPaneClassName="bg-base"
               first={
                 <div className="flex h-full min-w-0 flex-col overflow-hidden font-sans">
                     <AgentOpsPanel
@@ -578,11 +678,9 @@ export default function App() {
                       onOpenCharacters={() => setShowCharacters(true)}
                       onOpenCacheStats={() => setShowCacheStats(true)}
                       onOpenAbout={() => setShowAbout(true)}
-                      isDark={isDark}
-                      onToggleTheme={toggleTheme}
                       onNavigateToFile={handleNavigateToLocation}
                     />
-                  <div className="border-b border-[#202432] bg-[#0f141d] px-3 py-2">
+                  <div className="border-b border-line bg-base px-3 py-2">
                     <div className="flex items-center gap-2 overflow-x-auto">
                       <button
                         type="button"
@@ -590,8 +688,8 @@ export default function App() {
                         title={t.sessionTabTip}
                         className={`flex-shrink-0 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                           activeMainTab === 'chat'
-                            ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-100'
-                            : 'border-[#2a2d3a] text-slate-500 hover:border-indigo-500/30 hover:text-slate-200'
+                            ? 'border-accent-soft bg-accent-soft text-accent-text'
+                            : 'border-line text-fg-muted hover:border-accent-soft hover:text-fg'
                         }`}
                       >
                         {t.session}
@@ -600,8 +698,8 @@ export default function App() {
                         <div
                           className={`flex min-w-0 items-center gap-2 rounded-lg border px-2 py-1 ${
                             activeMainTab === 'code'
-                              ? 'border-indigo-500/50 bg-indigo-500/15'
-                              : 'border-[#2a2d3a] bg-[#121722]'
+                              ? 'border-accent-soft bg-accent-soft'
+                              : 'border-line bg-base'
                           }`}
                         >
                           <button
@@ -610,8 +708,8 @@ export default function App() {
                             title={t.codePreviewTabTip}
                             className={`min-w-0 truncate text-left text-xs font-medium transition-colors ${
                               activeMainTab === 'code'
-                                ? 'text-indigo-100'
-                                : 'text-slate-400 hover:text-slate-200'
+                                ? 'text-accent-text'
+                                : 'text-fg-muted hover:text-fg'
                             }`}
                           >
                             {selectedFileName}
@@ -619,7 +717,7 @@ export default function App() {
                           <button
                             type="button"
                             onClick={handleCloseCodeTab}
-                            className="flex-shrink-0 text-sm leading-none text-slate-500 transition-colors hover:text-slate-200"
+                            className="flex-shrink-0 text-sm leading-none text-fg-muted transition-colors hover:text-fg"
                             title={t.closeCodeTabTip}
                           >
                             ×
@@ -651,11 +749,11 @@ export default function App() {
               }
               second={
                 <div className="flex h-full min-h-0 flex-col">
-                   <div className="flex items-center justify-between gap-3 border-b border-[#202432] px-4 min-h-[60px]">
+                   <div className="flex items-center justify-between gap-3 border-b border-line px-4 min-h-[60px]">
                     <button
                       type="button"
                       onClick={() => setShowProjectSwitcher(true)}
-                      className="min-w-0 truncate text-xs font-semibold text-slate-300 transition-colors hover:text-indigo-300"
+                      className="min-w-0 truncate text-xs font-semibold text-fg-soft transition-colors hover:text-accent-text"
                     >
                       {projectName}
                     </button>
@@ -665,7 +763,7 @@ export default function App() {
                         onClick={() => setShowProjectStats(true)}
                         title={t.projectStatsTip}
                         disabled={!workspacePath}
-                        className="flex-shrink-0 rounded-lg border border-[#2a2d3a] px-2.5 py-2 text-xs font-medium text-slate-300 transition-colors hover:border-indigo-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex-shrink-0 rounded-lg border border-line px-2.5 py-2 text-xs font-medium text-fg-soft transition-colors hover:border-accent hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {t.projectStats}
                       </button>
@@ -674,7 +772,7 @@ export default function App() {
                         onClick={() => setShowProjectConfig(true)}
                         title={t.projectConfigTip}
                         disabled={!workspacePath}
-                        className="flex-shrink-0 rounded-lg border border-[#2a2d3a] px-2.5 py-2 text-xs font-medium text-slate-300 transition-colors hover:border-indigo-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex-shrink-0 rounded-lg border border-line px-2.5 py-2 text-xs font-medium text-fg-soft transition-colors hover:border-accent hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {t.projectConfigButton}
                       </button>
@@ -684,7 +782,7 @@ export default function App() {
                           onClick={() => setShowContextDebug(true)}
                           title={hasContextDebugEntries ? t.contextDebugTip : t.contextDebugEmpty}
                           disabled={!hasContextDebugEntries}
-                          className="flex-shrink-0 rounded-lg border border-[#2a2d3a] px-2.5 py-2 text-xs font-medium text-slate-300 transition-colors hover:border-indigo-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          className="flex-shrink-0 rounded-lg border border-line px-2.5 py-2 text-xs font-medium text-fg-soft transition-colors hover:border-accent hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {t.contextDebugButton}
                         </button>
@@ -694,11 +792,11 @@ export default function App() {
                           type="button"
                           onClick={() => setShowDebugLog(true)}
                           title={t.debugLogTitle}
-                          className="flex-shrink-0 rounded-lg border border-[#2a2d3a] px-2.5 py-2 text-xs font-medium text-slate-300 transition-colors hover:border-amber-400 hover:text-amber-200"
+                          className="flex-shrink-0 rounded-lg border border-line px-2.5 py-2 text-xs font-medium text-fg-soft transition-colors hover:border-warn hover:text-warn"
                         >
                           {t.debugLogButton}
                           {useDebugLogStore.getState().logs.length > 0 && (
-                            <span className="ml-1 inline-flex items-center justify-center rounded-full bg-amber-500/20 px-1.5 text-[9px] text-amber-300">
+                            <span className="ml-1 inline-flex items-center justify-center rounded-full bg-warn-bg px-1.5 text-[9px] text-warn">
                               {useDebugLogStore.getState().logs.length}
                             </span>
                           )}
@@ -709,7 +807,7 @@ export default function App() {
                           type="button"
                           onClick={() => openBrowserPanel()}
                           title={t.embeddedBrowserToolbarTip}
-                          className="flex-shrink-0 rounded-lg border border-emerald-500/40 px-2.5 py-2 text-xs font-medium text-emerald-200 transition-colors hover:border-emerald-400 hover:text-white"
+                          className="flex-shrink-0 rounded-lg border border-ok-bg px-2.5 py-2 text-xs font-medium text-ok transition-colors hover:border-ok hover:text-fg"
                         >
                           {t.embeddedBrowserTab}
                         </button>
@@ -718,7 +816,7 @@ export default function App() {
                         type="button"
                         onClick={() => setShowProjectSwitcher(true)}
                         title={t.switchProjectTip}
-                        className="flex-shrink-0 rounded-lg border border-indigo-500/40 px-2.5 py-2 text-xs font-medium text-indigo-200 transition-colors hover:border-indigo-400 hover:text-white"
+                        className="flex-shrink-0 rounded-lg border border-accent-soft px-2.5 py-2 text-xs font-medium text-accent-text transition-colors hover:border-accent hover:text-fg"
                       >
                         {t.switchProject}
                       </button>
@@ -741,8 +839,8 @@ export default function App() {
             />
 
             {activePreviewSession && (
-              <div className="absolute inset-0 z-40 flex items-center justify-center bg-[#07090d]/70 p-6 backdrop-blur-sm">
-                <div className="h-full max-h-[88vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#0f1117] shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
+              <div className="absolute inset-0 z-40 flex items-center justify-center bg-deep/70 p-6 backdrop-blur-sm">
+                <div className="h-full max-h-[88vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-line bg-base shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
                   <Suspense fallback={null}>
                     <PreviewSessionPanel workspacePath={activePreviewSession.workspacePath} lang={settings.lang} />
                   </Suspense>
@@ -751,10 +849,10 @@ export default function App() {
             )}
 
             {browserPanelOpen && browserEngine === 'embedded' && workspacePath && (
-              <div className="absolute inset-0 z-40 flex items-center justify-center bg-[#07090d]/70 p-3 backdrop-blur-sm">
+              <div className="absolute inset-0 z-40 flex items-center justify-center bg-deep/70 p-3 backdrop-blur-sm">
                 {/* N19：内置浏览器应只比主界面小一点——旧实现 max-w-6xl +
                     max-h-[88vh] 在大屏上过小。现在仅保留小边距，随窗口伸缩。 */}
-                <div className="h-full w-full overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#0f1117] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
+                <div className="h-full w-full overflow-hidden rounded-2xl border border-line bg-base p-4 shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
                   <Suspense fallback={null}>
                     <EmbeddedBrowserPanel workspacePath={workspacePath} lang={settings.lang} />
                   </Suspense>
@@ -768,7 +866,7 @@ export default function App() {
       </div>
 
       {openedAppId && (
-        <div className="fixed inset-0 z-[60] overflow-hidden bg-[#0f1117]">
+        <div className="fixed inset-0 z-[60] overflow-hidden bg-base">
           <AppModal lang={settings.lang} isDark={isDark} />
         </div>
       )}
@@ -817,14 +915,14 @@ export default function App() {
         )}
 
         {showCacheStats && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-            <div className="flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#161922] shadow-2xl">
-              <div className="flex items-center justify-between border-b border-[#2a2d3a] px-5 py-4">
-                <h2 className="text-sm font-semibold text-slate-200">{t.cacheStatsTitle}</h2>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 backdrop-blur-sm">
+            <div className="flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl">
+              <div className="flex items-center justify-between border-b border-line px-5 py-4">
+                <h2 className="text-sm font-semibold text-fg">{t.cacheStatsTitle}</h2>
                 <button
                   type="button"
                   onClick={() => setShowCacheStats(false)}
-                  className="text-lg leading-none text-slate-500 transition-colors hover:text-slate-200"
+                  className="text-lg leading-none text-fg-muted transition-colors hover:text-fg"
                 >
                   ×
                 </button>

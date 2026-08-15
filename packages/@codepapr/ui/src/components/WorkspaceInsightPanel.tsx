@@ -179,7 +179,7 @@ function projectGraphFolderPath(path: string): string {
 }
 
 const INSIGHT_ITEM_CLASS =
-  'flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[10px] text-slate-300 transition-colors hover:bg-[#1a1d28]';
+  'flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[10px] text-fg-soft transition-colors hover:bg-base';
 
 function InsightSection({
   title,
@@ -197,12 +197,12 @@ function InsightSection({
   return (
     <div>
       <div className="mb-1 flex items-center justify-between gap-1" title={tip}>
-        <span className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+        <span className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-muted">
           {title}
         </span>
         <span
           className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] tabular-nums ${
-            count > 0 ? badgeClass : 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+            count > 0 ? badgeClass : 'border border-ok-bg bg-ok-bg text-ok'
           }`}
         >
           {count > 0 ? count : '✓'}
@@ -223,7 +223,7 @@ function InsightFileList({
   onPick: (id: string, path: string) => void;
 }) {
   if (items.length === 0) {
-    return <div className="px-1.5 text-[10px] text-slate-600">{emptyText}</div>;
+    return <div className="px-1.5 text-[10px] text-fg-dim">{emptyText}</div>;
   }
   return (
     <div className="flex flex-col gap-0.5">
@@ -1463,7 +1463,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable p-3">
         {isLoading && (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-            <div className="flex items-center gap-2 text-xs text-indigo-300">
+            <div className="flex items-center gap-2 text-xs text-accent-text">
               {projectGraphProgress ? (
                 <>
                   <span>
@@ -1478,9 +1478,9 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                             : t.workspaceGitInitProgress}
                   </span>
                   {projectGraphProgress.total > 0 && (
-                    <span className="inline-flex h-1.5 w-24 overflow-hidden rounded-full bg-[#1a1f2b]">
+                    <span className="inline-flex h-1.5 w-24 overflow-hidden rounded-full bg-raised">
                       <span
-                        className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+                        className="h-full rounded-full bg-accent transition-all duration-300"
                         style={{ width: `${Math.round((projectGraphProgress.current / projectGraphProgress.total) * 100)}%` }}
                       />
                     </span>
@@ -1490,23 +1490,23 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                 t.workspaceInsightsLoading
               )}
             </div>
-            <div className="h-1 w-32 overflow-hidden rounded-full bg-[#1a1f2b]">
-              <div className="status-indicator-bar h-full w-8 rounded-full bg-indigo-500/60" />
+            <div className="h-1 w-32 overflow-hidden rounded-full bg-raised">
+              <div className="status-indicator-bar h-full w-8 rounded-full bg-accent-soft" />
             </div>
           </div>
         )}
 
         {!isLoading && prewarming && (
-          <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-3 py-3 text-xs leading-relaxed text-indigo-200">
+          <div className="rounded-xl border border-accent-soft bg-accent-soft px-3 py-3 text-xs leading-relaxed text-accent-text">
             <div className="flex items-center gap-2">
-              <div className="h-3 w-3 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent"></div>
+              <div className="h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent"></div>
               正在预热 LSP，逐个分析项目文件
-              {prewarmingProgress && <span className="text-indigo-400 font-medium ml-1">{prewarmingProgress}</span>}
+              {prewarmingProgress && <span className="text-accent font-medium ml-1">{prewarmingProgress}</span>}
             </div>
             {prewarmingProgress && (
-              <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-[#1a1d2a]">
+              <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-base">
                 <div
-                  className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+                  className="h-full rounded-full bg-accent transition-all duration-300"
                   style={{ width: `${(() => {
                     const [done, total] = prewarmingProgress.split('/').map(Number);
                     return total > 0 ? Math.round((done / total) * 100) : 0;
@@ -1521,24 +1521,24 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
           <textarea
             readOnly
             value={debugLog.join('\n')}
-            className="w-full rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[10px] leading-relaxed text-amber-200 font-mono resize-none"
+            className="w-full rounded-xl border border-warn-bg bg-warn-bg px-3 py-2 text-[10px] leading-relaxed text-warn font-mono resize-none"
             rows={Math.min(debugLog.length, 10)}
           />
         )}
 
         {!isLoading && !prewarming && error && (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-200">
+          <div className="rounded-xl border border-danger-bg bg-danger-bg px-3 py-2 text-xs leading-relaxed text-danger">
             {t.workspaceInsightsUnavailable}: {error}
           </div>
         )}
 
         {!isLoading && !error && (
           <div className="flex min-h-full flex-col space-y-3">
-            <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-[#2a2d3a] bg-[#10131b] p-3">
+            <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-line bg-base p-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   {projectGraph?.truncated && (
-                    <span className="text-[10px] text-amber-300">{t.workspaceProjectGraphTruncated}</span>
+                    <span className="text-[10px] text-warn">{t.workspaceProjectGraphTruncated}</span>
                   )}
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -1546,7 +1546,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                     type="button"
                     onClick={() => setRefreshVersion((value) => value + 1)}
                     disabled={isLoading}
-                    className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] font-medium text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-md border border-line px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:border-accent-soft hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t.workspaceInsightsRefresh}
                   </button>
@@ -1554,7 +1554,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                     type="button"
                     onClick={runDiagnosticCheck}
                     disabled={isCheckingDiag}
-                    className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] font-medium text-slate-400 transition-colors hover:border-emerald-500/50 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-md border border-line px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:border-ok-bg hover:text-ok disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {isCheckingDiag ? '...' : t.diagCheckButton}
                   </button>
@@ -1563,7 +1563,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                       type="button"
                       onClick={() => setShowKnowledgeGraph(true)}
                       title={t.workspaceProjectGraphKnowledgeGraphTip}
-                      className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] font-medium text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100"
+                      className="rounded-md border border-line px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
                     >
                       {t.workspaceProjectGraphKnowledgeGraph}
                     </button>
@@ -1572,44 +1572,44 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
               </div>
 
               {projectGraph && (
-                <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-slate-400">
-                  <span className="rounded-full border border-[#2a2d3a] px-2 py-1" title={t.workspaceProjectGraphFilesTip}>{t.workspaceProjectGraphFiles} {projectGraph.summary.files}</span>
-                  <span className="rounded-full border border-[#2a2d3a] px-2 py-1" title={t.directoriesLabelTip}>{t.directoriesLabel} {projectGraphFolderGroups.length}</span>
-                  <span className="rounded-full border border-[#2a2d3a] px-2 py-1" title={t.workspaceProjectGraphSymbolsTip}>{t.workspaceProjectGraphSymbols} {projectGraph.summary.symbols}</span>
-                  <span className="rounded-full border border-[#2a2d3a] px-2 py-1" title={t.workspaceProjectGraphImportsTip}>{t.workspaceProjectGraphImports} {projectGraph.summary.imports}</span>
-                  <span className="rounded-full border border-[#2a2d3a] px-2 py-1" title={t.workspaceProjectGraphReexportsTip}>{t.workspaceProjectGraphReexports} {projectGraph.summary.reexports}</span>
-                  <span className="rounded-full border border-[#2a2d3a] px-2 py-1" title={t.workspaceProjectGraphExtendsTip}>{t.workspaceProjectGraphExtends} {projectGraph.summary.extends}</span>
-                  <span className="rounded-full border border-[#2a2d3a] px-2 py-1" title={t.workspaceProjectGraphImplementsTip}>{t.workspaceProjectGraphImplements} {projectGraph.summary.implements}</span>
-                  <span className="rounded-full border border-[#2a2d3a] px-2 py-1" title={t.workspaceProjectGraphEntryPointsTip}>{t.workspaceProjectGraphEntryPoints} {projectGraph.summary.entryPoints}</span>
+                <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-fg-muted">
+                  <span className="rounded-full border border-line px-2 py-1" title={t.workspaceProjectGraphFilesTip}>{t.workspaceProjectGraphFiles} {projectGraph.summary.files}</span>
+                  <span className="rounded-full border border-line px-2 py-1" title={t.directoriesLabelTip}>{t.directoriesLabel} {projectGraphFolderGroups.length}</span>
+                  <span className="rounded-full border border-line px-2 py-1" title={t.workspaceProjectGraphSymbolsTip}>{t.workspaceProjectGraphSymbols} {projectGraph.summary.symbols}</span>
+                  <span className="rounded-full border border-line px-2 py-1" title={t.workspaceProjectGraphImportsTip}>{t.workspaceProjectGraphImports} {projectGraph.summary.imports}</span>
+                  <span className="rounded-full border border-line px-2 py-1" title={t.workspaceProjectGraphReexportsTip}>{t.workspaceProjectGraphReexports} {projectGraph.summary.reexports}</span>
+                  <span className="rounded-full border border-line px-2 py-1" title={t.workspaceProjectGraphExtendsTip}>{t.workspaceProjectGraphExtends} {projectGraph.summary.extends}</span>
+                  <span className="rounded-full border border-line px-2 py-1" title={t.workspaceProjectGraphImplementsTip}>{t.workspaceProjectGraphImplements} {projectGraph.summary.implements}</span>
+                  <span className="rounded-full border border-line px-2 py-1" title={t.workspaceProjectGraphEntryPointsTip}>{t.workspaceProjectGraphEntryPoints} {projectGraph.summary.entryPoints}</span>
                 </div>
               )}
 
               {highlightedProjectGraphFiles.length === 0 ? (
-                <div className="mt-3 text-xs text-slate-600">{t.workspaceProjectGraphEmpty}</div>
+                <div className="mt-3 text-xs text-fg-dim">{t.workspaceProjectGraphEmpty}</div>
               ) : (
                 <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable pr-1">
                   {projectGraphFolderGroups.map((group) => {
                     const isCollapsed = collapsedProjectGraphGroupSet.has(group.path);
 
                     return (
-                      <div key={group.path} className="rounded-lg border border-[#202432] bg-[#0d1017] p-2">
+                      <div key={group.path} className="rounded-lg border border-line bg-base p-2">
                         <button
                           type="button"
                           onClick={() => toggleProjectGraphGroup(group.path)}
-                          className="flex w-full items-center justify-between gap-2 text-left text-[11px] text-slate-200 transition-colors hover:text-white"
+                          className="flex w-full items-center justify-between gap-2 text-left text-[11px] text-fg transition-colors hover:text-fg"
                           title={group.path}
                         >
                           <div className="flex min-w-0 items-center gap-2">
-                            <span className="flex h-5 w-5 items-center justify-center rounded border border-[#2a2d3a] font-mono text-[9px] text-slate-500">
+                            <span className="flex h-5 w-5 items-center justify-center rounded border border-line font-mono text-[9px] text-fg-muted">
                               {isCollapsed ? '+' : '-'}
                             </span>
                             <span className="truncate font-medium">{group.path}</span>
                           </div>
-                          <div className="flex flex-wrap items-center justify-end gap-1 text-[9px] text-slate-500">
-                            <span className="rounded-full border border-[#2a2d3a] px-1.5 py-0.5">{t.workspaceProjectGraphFiles} {group.files.length}</span>
-                            <span className="rounded-full border border-[#2a2d3a] px-1.5 py-0.5">{t.workspaceProjectGraphSymbols} {group.symbolCount}</span>
+                          <div className="flex flex-wrap items-center justify-end gap-1 text-[9px] text-fg-muted">
+                            <span className="rounded-full border border-line px-1.5 py-0.5">{t.workspaceProjectGraphFiles} {group.files.length}</span>
+                            <span className="rounded-full border border-line px-1.5 py-0.5">{t.workspaceProjectGraphSymbols} {group.symbolCount}</span>
                             {group.entryPoints > 0 && (
-                              <span className="rounded-full border border-[#2a2d3a] px-1.5 py-0.5">{t.workspaceProjectGraphEntryPoints} {group.entryPoints}</span>
+                              <span className="rounded-full border border-line px-1.5 py-0.5">{t.workspaceProjectGraphEntryPoints} {group.entryPoints}</span>
                             )}
                           </div>
                         </button>
@@ -1620,45 +1620,45 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                               const relationSummary = projectGraphRelationsByPath.get(file.path) ?? createEmptyProjectGraphRelationSummary();
 
                               return (
-                                <div key={file.path} className="rounded-lg border border-[#1a1f2b] bg-[#0b0d13] p-2">
+                                <div key={file.path} className="rounded-lg border border-line bg-base p-2">
                                   <button
                                     type="button"
                                     onClick={() => onSelectPath(file.path)}
                                     className={`flex w-full items-center justify-between gap-2 text-left text-[11px] transition-colors ${
                                       selectedPath === file.path
-                                        ? 'text-indigo-200'
-                                        : 'text-slate-200 hover:text-white'
+                                        ? 'text-accent-text'
+                                        : 'text-fg hover:text-fg'
                                     }`}
                                     title={file.path}
                                   >
                                     <span className="min-w-0 truncate font-medium">{file.path}</span>
                                     <div className="flex flex-shrink-0 items-center gap-1">
                                       {file.entryPoint && (
-                                        <span className="rounded-full border border-indigo-500/40 px-1.5 py-0.5 text-[9px] text-indigo-200">
+                                        <span className="rounded-full border border-accent-soft px-1.5 py-0.5 text-[9px] text-accent-text">
                                           {t.workspaceProjectGraphEntryPointBadge}
                                         </span>
                                       )}
-                                      <span className="rounded-full border border-[#2a2d3a] px-1.5 py-0.5 text-[9px] text-slate-500">
+                                      <span className="rounded-full border border-line px-1.5 py-0.5 text-[9px] text-fg-muted">
                                         {file.language}
                                       </span>
                                     </div>
                                   </button>
 
-                                  <div className="mt-2 flex flex-wrap gap-1 text-[9px] text-slate-500">
+                                  <div className="mt-2 flex flex-wrap gap-1 text-[9px] text-fg-muted">
                                     {relationSummary.imports > 0 && (
-                                      <span className="rounded-full border border-[#2a2d3a] px-1.5 py-0.5">{t.workspaceProjectGraphImports} {relationSummary.imports}</span>
+                                      <span className="rounded-full border border-line px-1.5 py-0.5">{t.workspaceProjectGraphImports} {relationSummary.imports}</span>
                                     )}
                                     {relationSummary.reexports > 0 && (
-                                      <span className="rounded-full border border-[#2a2d3a] px-1.5 py-0.5">{t.workspaceProjectGraphReexports} {relationSummary.reexports}</span>
+                                      <span className="rounded-full border border-line px-1.5 py-0.5">{t.workspaceProjectGraphReexports} {relationSummary.reexports}</span>
                                     )}
                                     {relationSummary.extends > 0 && (
-                                      <span className="rounded-full border border-[#2a2d3a] px-1.5 py-0.5">{t.workspaceProjectGraphExtends} {relationSummary.extends}</span>
+                                      <span className="rounded-full border border-line px-1.5 py-0.5">{t.workspaceProjectGraphExtends} {relationSummary.extends}</span>
                                     )}
                                     {relationSummary.implements > 0 && (
-                                      <span className="rounded-full border border-[#2a2d3a] px-1.5 py-0.5">{t.workspaceProjectGraphImplements} {relationSummary.implements}</span>
+                                      <span className="rounded-full border border-line px-1.5 py-0.5">{t.workspaceProjectGraphImplements} {relationSummary.implements}</span>
                                     )}
                                     {!relationSummary.imports && !relationSummary.reexports && !relationSummary.extends && !relationSummary.implements && (
-                                      <span className="text-slate-600">—</span>
+                                      <span className="text-fg-dim">—</span>
                                     )}
                                   </div>
                                 </div>
@@ -1674,58 +1674,58 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
             </div>
 
             {showGitPanel && (
-              <div className="rounded-xl border border-[#2a2d3a] bg-[#10131b] p-3">
+              <div className="rounded-xl border border-line bg-base p-3">
               <div className="flex items-center justify-between gap-2">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-muted">
                   {t.workspaceGit}
                 </div>
               {gitStatus?.isRepo && gitStatus.branch && (
-                  <span className="max-w-[150px] truncate rounded-full border border-emerald-500/40 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                  <span className="max-w-[150px] truncate rounded-full border border-ok-bg px-2 py-0.5 text-[10px] font-semibold text-ok">
                     {gitStatus.branch}
                   </span>
                 )}
               </div>
 
               {!gitStatus && (
-                <div className="mt-3 text-xs text-slate-600">{t.workspaceInsightsUnavailable}</div>
+                <div className="mt-3 text-xs text-fg-dim">{t.workspaceInsightsUnavailable}</div>
               )}
 
               {gitStatus && !gitStatus.available && (
-                <div className="mt-3 text-xs leading-relaxed text-slate-500">
+                <div className="mt-3 text-xs leading-relaxed text-fg-muted">
                   {gitStatus.message || t.workspaceGitUnavailable}
                 </div>
               )}
 
               {gitStatus && gitStatus.available && !gitStatus.isRepo && (
-                <div className="mt-3 space-y-2 rounded-lg border border-[#202432] bg-[#0d1118] px-3 py-3">
-                  <div className="text-xs leading-relaxed text-slate-500">
+                <div className="mt-3 space-y-2 rounded-lg border border-line bg-base px-3 py-3">
+                  <div className="text-xs leading-relaxed text-fg-muted">
                     {gitStatus.message || t.workspaceGitNotRepo}
                   </div>
-                  <div className="text-[11px] leading-relaxed text-slate-500">{t.workspaceGitInitHint}</div>
+                  <div className="text-[11px] leading-relaxed text-fg-muted">{t.workspaceGitInitHint}</div>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => void initializeGitRepository()}
                       disabled={isInitializingGit}
-                      className="rounded-md border border-indigo-500/40 px-2 py-1 text-[11px] text-indigo-100 transition-colors hover:border-indigo-400 hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-md border border-accent-soft px-2 py-1 text-[11px] text-accent-text transition-colors hover:border-accent hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {isInitializingGit ? t.workspaceGitInitRunning : t.workspaceGitInitRepo}
                     </button>
                     {gitActionMessage && (
-                      <span className="text-[11px] text-slate-500">{gitActionMessage}</span>
+                      <span className="text-[11px] text-fg-muted">{gitActionMessage}</span>
                     )}
                   </div>
                 </div>
               )}
 
               {gitStatus && gitStatus.available && gitStatus.isRepo && gitStatus.repoRoot && (
-                <div className="mt-3 rounded-lg border border-[#202432] bg-[#0d1118] px-3 py-2 text-[11px] text-slate-500">
+                <div className="mt-3 rounded-lg border border-line bg-base px-3 py-2 text-[11px] text-fg-muted">
                   {t.workspaceGitRepoRoot}: {gitStatus.repoRoot}
                 </div>
               )}
 
               {gitStatus && gitStatus.available && gitStatus.isRepo && gitStatus.files.length === 0 && (
-                <div className="mt-3 text-xs text-slate-600">{t.workspaceGitNoChanges}</div>
+                <div className="mt-3 text-xs text-fg-dim">{t.workspaceGitNoChanges}</div>
               )}
 
               {gitStatus && gitStatus.available && gitStatus.isRepo && gitStatus.files.length > 0 && (
@@ -1739,8 +1739,8 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                       }}
                       className={`inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[10px] font-semibold transition-colors ${
                         gitMode === 'unstaged'
-                          ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-100'
-                          : 'border-[#2a2d3a] text-slate-500 hover:border-indigo-500/30 hover:text-slate-200'
+                          ? 'border-accent-soft bg-accent-soft text-accent-text'
+                          : 'border-line text-fg-muted hover:border-accent-soft hover:text-fg'
                       }`}
                     >
                       <span>{t.workspaceGitUnstagedTab}</span>
@@ -1756,8 +1756,8 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                       }}
                       className={`inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[10px] font-semibold transition-colors ${
                         gitMode === 'staged'
-                          ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-100'
-                          : 'border-[#2a2d3a] text-slate-500 hover:border-indigo-500/30 hover:text-slate-200'
+                          ? 'border-accent-soft bg-accent-soft text-accent-text'
+                          : 'border-line text-fg-muted hover:border-accent-soft hover:text-fg'
                       }`}
                     >
                       <span>{t.workspaceGitStagedTab}</span>
@@ -1768,22 +1768,22 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                   </div>
 
                   {activeGitModeDiff.isLoading && (
-                    <div className="mt-3 text-xs text-slate-600">{t.workspaceGitLoading}</div>
+                    <div className="mt-3 text-xs text-fg-dim">{t.workspaceGitLoading}</div>
                   )}
 
                   {!activeGitModeDiff.isLoading && activeGitModeDiff.summary?.stat && (
                     <div className="mt-3">
-                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-dim">
                         {t.workspaceGitDiffStat}
                       </div>
-                      <pre className="max-h-32 overflow-auto rounded-lg bg-[#0b0d13] px-2 py-2 font-mono text-[10px] leading-5 text-slate-400">
+                      <pre className="max-h-32 overflow-auto rounded-lg bg-base px-2 py-2 font-mono text-[10px] leading-5 text-fg-muted">
                         {activeGitModeDiff.summary.stat}
                       </pre>
                     </div>
                   )}
 
                   {!activeGitModeDiff.isLoading && visibleGitFiles.length === 0 && (
-                    <div className="mt-3 text-xs text-slate-600">
+                    <div className="mt-3 text-xs text-fg-dim">
                       {gitMode === 'staged' ? t.workspaceGitNoStagedChanges : t.workspaceGitNoUnstagedChanges}
                     </div>
                   )}
@@ -1805,35 +1805,35 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                         return (
                           <div
                             key={`${cacheKey}:${file.indexStatus}:${file.worktreeStatus}`}
-                            className="rounded-lg border border-[#202432] bg-[#0d1017]"
+                            className="rounded-lg border border-line bg-base"
                           >
                             <button
                               type="button"
                               onClick={() => toggleGitFileDiff(file)}
                               className={`grid w-full grid-cols-[42px_minmax(0,1fr)_42px] items-center gap-2 px-2 py-2 text-left text-[11px] transition-colors ${
                                 selectedPath === file.path || isExpanded
-                                  ? 'text-indigo-200'
-                                  : 'text-slate-200 hover:text-white'
+                                  ? 'text-accent-text'
+                                  : 'text-fg hover:text-fg'
                               }`}
                               title={rowLabel}
                             >
-                              <span className="rounded border border-[#2a2d3a] px-1 py-0.5 text-center font-mono text-[9px] text-slate-500">
+                              <span className="rounded border border-line px-1 py-0.5 text-center font-mono text-[9px] text-fg-muted">
                                 {gitStatusCodeForMode(file, gitMode)}
                               </span>
                               <span className="truncate">{rowLabel}</span>
-                              <span className="justify-self-end text-[10px] text-slate-500">
+                              <span className="justify-self-end text-[10px] text-fg-muted">
                                 {isExpanded ? t.workspaceGitCollapseDiff : t.workspaceGitExpandDiff}
                               </span>
                             </button>
 
                             {isExpanded && (
-                              <div className="border-t border-[#202432] px-2 py-2">
+                              <div className="border-t border-line px-2 py-2">
                                 {fileDiffState.isLoading && (
-                                  <div className="text-xs text-slate-600">{t.workspaceGitFileDiffLoading}</div>
+                                  <div className="text-xs text-fg-dim">{t.workspaceGitFileDiffLoading}</div>
                                 )}
 
                                 {!fileDiffState.isLoading && fileDiffState.error && (
-                                  <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-2 text-xs leading-relaxed text-red-200">
+                                  <div className="rounded-lg border border-danger-bg bg-danger-bg px-2 py-2 text-xs leading-relaxed text-danger">
                                     {t.workspaceGitFileDiffUnavailable}: {fileDiffState.error}
                                   </div>
                                 )}
@@ -1844,14 +1844,14 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                                       <button
                                         type="button"
                                         onClick={() => onSelectPath(file.path)}
-                                        className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] font-medium text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100"
+                                        className="rounded-md border border-line px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
                                       >
                                         {t.workspaceGitOpenFile}
                                       </button>
                                       <button
                                         type="button"
                                         onClick={() => void copyGitDiff(cacheKey, fileDiffState.summary!)}
-                                        className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] font-medium text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100"
+                                        className="rounded-md border border-line px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
                                       >
                                         {copyLabel}
                                       </button>
@@ -1859,30 +1859,30 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
 
                                     {fileDiffState.summary.stat && (
                                       <div className="mb-2">
-                                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-dim">
                                           {t.workspaceGitFileStat}
                                         </div>
-                                        <pre className="overflow-x-auto rounded-lg bg-[#0b0d13] px-2 py-2 font-mono text-[10px] leading-5 text-slate-400">
+                                        <pre className="overflow-x-auto rounded-lg bg-base px-2 py-2 font-mono text-[10px] leading-5 text-fg-muted">
                                           {fileDiffState.summary.stat}
                                         </pre>
                                       </div>
                                     )}
 
                                     {fileDiffState.summary.truncated && (
-                                      <div className="mb-2 text-[10px] text-amber-300">{t.workspaceGitDiffTruncated}</div>
+                                      <div className="mb-2 text-[10px] text-warn">{t.workspaceGitDiffTruncated}</div>
                                     )}
 
                                     {fileDiffState.summary.diff ? (
                                       <div>
-                                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-dim">
                                           {t.workspaceGitDiffPreview}
                                         </div>
-                                        <pre className="max-h-80 overflow-auto rounded-lg bg-[#0b0d13] px-2 py-2 font-mono text-[10px] leading-5 text-slate-400">
+                                        <pre className="max-h-80 overflow-auto rounded-lg bg-base px-2 py-2 font-mono text-[10px] leading-5 text-fg-muted">
                                           {fileDiffState.summary.diff}
                                         </pre>
                                       </div>
                                     ) : (
-                                      <div className="text-xs text-slate-600">
+                                      <div className="text-xs text-fg-dim">
                                         {fileDiffState.summary.message || t.workspaceGitFileDiffEmpty}
                                       </div>
                                     )}
@@ -1897,7 +1897,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                   )}
 
                   {!activeGitModeDiff.isLoading && activeGitModeDiff.summary?.message && (
-                    <div className="mt-3 text-xs leading-relaxed text-slate-500">
+                    <div className="mt-3 text-xs leading-relaxed text-fg-muted">
                       {activeGitModeDiff.summary.message}
                     </div>
                   )}
@@ -1910,54 +1910,54 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
       </div>
 
       {showDiagModal && diagResult && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowDiagModal(false)}>
-          <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[#2a2d3a] bg-[#10131b] p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4" onClick={() => setShowDiagModal(false)}>
+          <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-line bg-base p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-200">{t.diagModalTitle}</h3>
-              <button onClick={() => setShowDiagModal(false)} className="rounded-md px-2 py-1 text-xs text-slate-500 hover:text-slate-300">✕</button>
+              <h3 className="text-sm font-semibold text-fg">{t.diagModalTitle}</h3>
+              <button onClick={() => setShowDiagModal(false)} className="rounded-md px-2 py-1 text-xs text-fg-muted hover:text-fg-soft">✕</button>
             </div>
-            <div className="mb-4 text-[10px] text-slate-500">
+            <div className="mb-4 text-[10px] text-fg-muted">
               {workspacePath} &middot; {new Date(diagResult.checkedAt).toLocaleTimeString()}
             </div>
             {diagError && (
-              <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">{diagError}</div>
+              <div className="mb-3 rounded-lg border border-danger-bg bg-danger-bg px-3 py-2 text-xs text-danger">{diagError}</div>
             )}
             <div className="space-y-2">
-              <div className="grid grid-cols-12 gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+              <div className="grid grid-cols-12 gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-muted">
                 <span className="col-span-3">{t.diagColLanguage}</span>
                 <span className="col-span-2">{t.diagColStatus}</span>
                 <span className="col-span-7">{t.diagColProvider}</span>
               </div>
               {diagResult.providers.map((p) => (
-                <div key={p.languageId} className="grid grid-cols-12 gap-2 rounded-lg border border-[#2a2d3a] bg-[#0c0e14] px-3 py-2 text-xs">
-                  <span className="col-span-3 text-slate-300 truncate">{p.languageLabel}</span>
+                <div key={p.languageId} className="grid grid-cols-12 gap-2 rounded-lg border border-line bg-base px-3 py-2 text-xs">
+                  <span className="col-span-3 text-fg-soft truncate">{p.languageLabel}</span>
                   <span className={`col-span-2 font-medium truncate ${
-                    p.status === 'lsp' ? 'text-emerald-400' :
+                    p.status === 'lsp' ? 'text-ok' :
                     p.status === 'ast' ? 'text-blue-400' :
-                    p.status === 'fallback' ? 'text-amber-400' :
-                    'text-red-400'
+                    p.status === 'fallback' ? 'text-warn' :
+                    'text-danger'
                   }`}>
                     {p.status === 'lsp' ? '✓ LSP' :
                      p.status === 'ast' ? 'AST' :
                      p.status === 'fallback' ? '降级' :
                      '不可用'}
                   </span>
-                  <span className="col-span-7 text-[10px] text-slate-400 leading-relaxed truncate" title={p.details}>
+                  <span className="col-span-7 text-[10px] text-fg-muted leading-relaxed truncate" title={p.details}>
                     {p.details || `${p.providerSource}: ${p.providerName}`}
                   </span>
                 </div>
               ))}
             </div>
-            <div className="mt-3 flex gap-3 text-[10px] text-slate-500">
-              <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-emerald-400"></span> LSP</span>
+            <div className="mt-3 flex gap-3 text-[10px] text-fg-muted">
+              <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-ok"></span> LSP</span>
               <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-blue-400"></span> AST</span>
-              <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-amber-400"></span> 降级</span>
-              <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-red-400"></span> 不可用</span>
+              <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-warn"></span> 降级</span>
+              <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-danger"></span> 不可用</span>
             </div>
             {diagResult.rawProviders != null && (
               <details className="mt-4">
-                <summary className="cursor-pointer text-[10px] text-slate-500 hover:text-slate-400">原始数据 / Raw Data</summary>
-                <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-[#2a2d3a] bg-[#0c0e14] p-2 text-[10px] text-slate-400 font-mono">{JSON.stringify(diagResult.rawProviders, null, 2)}</pre>
+                <summary className="cursor-pointer text-[10px] text-fg-muted hover:text-fg-muted">原始数据 / Raw Data</summary>
+                <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-line bg-base p-2 text-[10px] text-fg-muted font-mono">{JSON.stringify(diagResult.rawProviders, null, 2)}</pre>
               </details>
             )}
           </div>
@@ -1965,23 +1965,23 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
       )}
 
       {showKnowledgeGraph && projectGraph && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm" onClick={closeKnowledgeGraph}>
-          <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#0f1117] shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-[#2a2d3a] px-5 py-3">
-              <h2 className="text-sm font-semibold text-slate-200">{t.workspaceProjectGraphKnowledgeGraph}</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-3 backdrop-blur-sm" onClick={closeKnowledgeGraph}>
+          <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-line px-5 py-3">
+              <h2 className="text-sm font-semibold text-fg">{t.workspaceProjectGraphKnowledgeGraph}</h2>
               <div className="flex items-center gap-2">
                 <input
                   type="text"
                   value={graphSearchQuery}
                   onChange={(e) => setGraphSearchQuery(e.target.value)}
                   placeholder="搜索节点..."
-                  className="w-32 rounded-md border border-[#2a2d3a] bg-[#0d1117] px-2 py-1 text-[10px] text-slate-300 outline-none transition-colors focus:border-indigo-500/50 placeholder:text-slate-600"
+                  className="w-32 rounded-md border border-line bg-base px-2 py-1 text-[10px] text-fg-soft outline-none transition-colors focus:border-accent-soft placeholder:text-fg-dim"
                 />
                 <button
                   type="button"
                   onClick={() => knowledgeGraphRef.current?.zoomIn()}
                   title="Zoom In"
-                  className="rounded-md border border-[#2a2d3a] px-2.5 py-1 text-xs text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100"
+                  className="rounded-md border border-line px-2.5 py-1 text-xs text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
                 >
                   +
                 </button>
@@ -1989,7 +1989,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                   type="button"
                   onClick={() => knowledgeGraphRef.current?.zoomOut()}
                   title="Zoom Out"
-                  className="rounded-md border border-[#2a2d3a] px-2.5 py-1 text-xs text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100"
+                  className="rounded-md border border-line px-2.5 py-1 text-xs text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
                 >
                   &minus;
                 </button>
@@ -1997,27 +1997,27 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                   type="button"
                   onClick={() => knowledgeGraphRef.current?.fitView()}
                   title={t.expand}
-                  className="rounded-md border border-[#2a2d3a] px-2.5 py-1 text-xs text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100"
+                  className="rounded-md border border-line px-2.5 py-1 text-xs text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
                 >
                   &#x26F6;
                 </button>
                 <button
                   type="button"
                   onClick={closeKnowledgeGraph}
-                  className="text-lg leading-none text-slate-500 transition-colors hover:text-slate-200"
+                  className="text-lg leading-none text-fg-muted transition-colors hover:text-fg"
                 >
                   &times;
                 </button>
               </div>
             </div>
-            <div className="flex items-center gap-3 border-b border-[#2a2d3a] px-5 py-1.5">
-              <span className="text-[10px] text-slate-500">显示:</span>
+            <div className="flex items-center gap-3 border-b border-line px-5 py-1.5">
+              <span className="text-[10px] text-fg-muted">显示:</span>
               {([
                 ['deps', '文件依赖'],
                 ['hierarchy', '继承关系'],
                 ['calls', '跨文件调用'],
               ] as const).map(([mode, label]) => (
-                <label key={mode} className="flex cursor-pointer items-center gap-1 text-[10px] text-slate-400">
+                <label key={mode} className="flex cursor-pointer items-center gap-1 text-[10px] text-fg-muted">
                   <input
                     type="checkbox"
                     checked={graphViewModes.has(mode)}
@@ -2030,8 +2030,8 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
             </div>
             <div className="flex min-h-0 flex-1">
               {/* 洞察侧栏：由已构建的图同步计算，点击条目在图中高亮或进入聚焦模式 */}
-              <div className="w-60 shrink-0 space-y-3 overflow-y-auto overscroll-contain border-r border-[#2a2d3a] p-3 scrollbar-thin scrollbar-stable">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+              <div className="w-60 shrink-0 space-y-3 overflow-y-auto overscroll-contain border-r border-line p-3 scrollbar-thin scrollbar-stable">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.15em] text-fg-muted">
                   {t.graphInsightsTitle}
                 </div>
                 {projectGraphInsights && (
@@ -2040,10 +2040,10 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                       title={t.graphInsightsCircular}
                       tip={t.graphInsightsCircularTip}
                       count={projectGraphInsights.circularDeps.total}
-                      badgeClass="border border-red-500/40 bg-red-500/10 text-red-300"
+                      badgeClass="border border-danger-bg bg-danger-bg text-danger"
                     >
                       {projectGraphInsights.circularDeps.total === 0 ? (
-                        <div className="px-1.5 text-[10px] text-slate-600">{t.graphInsightsNone}</div>
+                        <div className="px-1.5 text-[10px] text-fg-dim">{t.graphInsightsNone}</div>
                       ) : (
                         <div className="flex flex-col gap-0.5">
                           {projectGraphInsights.circularDeps.cycles.slice(0, 10).map((cycle, idx) => (
@@ -2058,7 +2058,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                             </button>
                           ))}
                           {projectGraphInsights.circularDeps.total > 10 && (
-                            <div className="px-1.5 text-[9px] text-slate-600">+{projectGraphInsights.circularDeps.total - 10}</div>
+                            <div className="px-1.5 text-[9px] text-fg-dim">+{projectGraphInsights.circularDeps.total - 10}</div>
                           )}
                         </div>
                       )}
@@ -2068,10 +2068,10 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                       title={t.graphInsightsDeadCode}
                       tip={t.graphInsightsDeadCodeTip}
                       count={projectGraphInsights.deadCode.total}
-                      badgeClass="border border-amber-500/40 bg-amber-500/10 text-amber-300"
+                      badgeClass="border border-warn-bg bg-warn-bg text-warn"
                     >
                       {projectGraphInsights.deadCode.total === 0 ? (
-                        <div className="px-1.5 text-[10px] text-slate-600">{t.graphInsightsNone}</div>
+                        <div className="px-1.5 text-[10px] text-fg-dim">{t.graphInsightsNone}</div>
                       ) : (
                         <div className="flex flex-col gap-0.5">
                           {projectGraphInsights.deadCode.unusedSymbols.slice(0, 30).map((s) => (
@@ -2082,14 +2082,14 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                               title={`${s.path}:${s.line}`}
                               className={INSIGHT_ITEM_CLASS}
                             >
-                              {s.exported && <span className="shrink-0 text-amber-400">★</span>}
-                              <span className="shrink-0 rounded bg-[#2a2d3a] px-1 text-[8px] uppercase text-slate-500">{s.kind}</span>
+                              {s.exported && <span className="shrink-0 text-warn">★</span>}
+                              <span className="shrink-0 rounded bg-control px-1 text-[8px] uppercase text-fg-muted">{s.kind}</span>
                               <span className="truncate">{s.name}</span>
-                              <span className="ml-auto shrink-0 text-[9px] text-slate-600">{s.path.split('/').pop()}:L{s.line}</span>
+                              <span className="ml-auto shrink-0 text-[9px] text-fg-dim">{s.path.split('/').pop()}:L{s.line}</span>
                             </button>
                           ))}
                           {projectGraphInsights.deadCode.total > 30 && (
-                            <div className="px-1.5 text-[9px] text-slate-600">+{projectGraphInsights.deadCode.total - 30}</div>
+                            <div className="px-1.5 text-[9px] text-fg-dim">+{projectGraphInsights.deadCode.total - 30}</div>
                           )}
                         </div>
                       )}
@@ -2099,10 +2099,10 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                       title={t.graphInsightsHubs}
                       tip={t.graphInsightsHubsTip}
                       count={projectGraphInsights.hubs.length}
-                      badgeClass="border border-indigo-500/40 bg-indigo-500/10 text-indigo-300"
+                      badgeClass="border border-accent-soft bg-accent-soft text-accent-text"
                     >
                       {projectGraphInsights.hubs.length === 0 ? (
-                        <div className="px-1.5 text-[10px] text-slate-600">{t.graphInsightsNone}</div>
+                        <div className="px-1.5 text-[10px] text-fg-dim">{t.graphInsightsNone}</div>
                       ) : (
                         <div className="flex flex-col gap-0.5">
                           {projectGraphInsights.hubs.map((hub) => (
@@ -2114,7 +2114,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                               className={INSIGHT_ITEM_CLASS}
                             >
                               <span className="truncate">{hub.path}</span>
-                              <span className="ml-auto shrink-0 text-[9px] text-slate-600">{t.graphInsightsInDegree} {hub.inDegree}</span>
+                              <span className="ml-auto shrink-0 text-[9px] text-fg-dim">{t.graphInsightsInDegree} {hub.inDegree}</span>
                             </button>
                           ))}
                         </div>
@@ -2138,7 +2138,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                       title={t.graphInsightsOrphans}
                       tip={t.graphInsightsOrphansTip}
                       count={projectGraphInsights.orphans.length}
-                      badgeClass="border border-[#2a2d3a] bg-[#1a1d27] text-slate-300"
+                      badgeClass="border border-line bg-raised text-fg-soft"
                     >
                       <InsightFileList
                         items={projectGraphInsights.orphans.map((n) => ({ id: n.id, path: n.path }))}
@@ -2151,7 +2151,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                       title={t.graphInsightsEntryPoints}
                       tip={t.graphInsightsEntryPointsTip}
                       count={projectGraphInsights.entryPoints.total}
-                      badgeClass="border border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                      badgeClass="border border-ok-bg bg-ok-bg text-ok"
                     >
                       <InsightFileList
                         items={projectGraphInsights.entryPoints.entries.map((e) => ({ id: e.nodeId, path: e.path }))}
@@ -2165,9 +2165,9 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
 
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 {graphFocus && (
-                  <div className="flex items-center gap-2 border-b border-[#2a2d3a] px-4 py-1.5 text-[10px]">
-                    <span className="shrink-0 text-slate-500">{t.graphFocusLabel}:</span>
-                    <span className="min-w-0 truncate font-medium text-emerald-300" title={graphFocus.label}>
+                  <div className="flex items-center gap-2 border-b border-line px-4 py-1.5 text-[10px]">
+                    <span className="shrink-0 text-fg-muted">{t.graphFocusLabel}:</span>
+                    <span className="min-w-0 truncate font-medium text-ok" title={graphFocus.label}>
                       {graphFocus.label}
                     </span>
                     <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -2178,8 +2178,8 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                           onClick={() => setGraphFocus({ ...graphFocus, depth })}
                           className={`rounded border px-1.5 py-0.5 transition-colors ${
                             graphFocus.depth === depth
-                              ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'
-                              : 'border-[#2a2d3a] text-slate-500 hover:text-slate-300'
+                              ? 'border-ok-bg bg-ok-bg text-ok'
+                              : 'border-line text-fg-muted hover:text-fg-soft'
                           }`}
                         >
                           {depth} {t.graphFocusHop}
@@ -2188,7 +2188,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                       <button
                         type="button"
                         onClick={() => setGraphFocus(null)}
-                        className="rounded border border-[#2a2d3a] px-1.5 py-0.5 text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100"
+                        className="rounded border border-line px-1.5 py-0.5 text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
                       >
                         {t.graphFocusBack}
                       </button>

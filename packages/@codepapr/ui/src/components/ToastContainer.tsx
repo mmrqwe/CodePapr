@@ -6,24 +6,24 @@ import { getTranslation } from '../utils/i18n';
 
 const VARIANT_CLASS: Record<ToastVariant, { frame: string; accent: string; icon: string }> = {
   info: {
-    frame: 'border-sky-500/40 bg-[#0d1620]/95 text-sky-100 shadow-[0_18px_48px_rgba(14,165,233,0.18)]',
-    accent: 'bg-sky-400',
-    icon: 'text-sky-300',
+    frame: 'border-info-bg bg-toast-info text-info shadow-[0_18px_48px_rgba(14,165,233,0.18)]',
+    accent: 'bg-info',
+    icon: 'text-info',
   },
   success: {
-    frame: 'border-emerald-500/40 bg-[#0d1a14]/95 text-emerald-100 shadow-[0_18px_48px_rgba(16,185,129,0.20)]',
-    accent: 'bg-emerald-400',
-    icon: 'text-emerald-300',
+    frame: 'border-ok-bg bg-toast-ok text-ok shadow-[0_18px_48px_rgba(16,185,129,0.20)]',
+    accent: 'bg-ok',
+    icon: 'text-ok',
   },
   warning: {
-    frame: 'border-amber-500/45 bg-[#1c170b]/95 text-amber-100 shadow-[0_18px_48px_rgba(245,158,11,0.22)]',
-    accent: 'bg-amber-400',
-    icon: 'text-amber-300',
+    frame: 'border-warn-bg bg-toast-warn text-warn shadow-[0_18px_48px_rgba(245,158,11,0.22)]',
+    accent: 'bg-warn',
+    icon: 'text-warn',
   },
   error: {
-    frame: 'border-rose-500/45 bg-[#1c0d12]/95 text-rose-100 shadow-[0_18px_48px_rgba(244,63,94,0.24)]',
-    accent: 'bg-rose-400',
-    icon: 'text-rose-300',
+    frame: 'border-danger-bg bg-toast-danger text-danger shadow-[0_18px_48px_rgba(244,63,94,0.24)]',
+    accent: 'bg-danger',
+    icon: 'text-danger',
   },
 };
 

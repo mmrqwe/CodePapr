@@ -31,35 +31,35 @@ export function DebugLogModal({ lang = 'zh-CN', onClose }: DebugLogModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#07090d]/80 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-deep/80 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="flex h-[80vh] w-[min(92vw,900px)] flex-col overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#0f1117] shadow-2xl"
+        className="flex h-[80vh] w-[min(92vw,900px)] flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-[#2a2d3a] px-5 py-3">
+        <div className="flex items-center justify-between border-b border-line px-5 py-3">
           <div className="flex items-center gap-3">
-            <h2 className="text-sm font-semibold text-slate-200">{t.debugLogTitle}</h2>
-            <span className="text-[10px] text-slate-600">{logs.length} {lang === 'en' ? 'entries' : '条'}</span>
+            <h2 className="text-sm font-semibold text-fg">{t.debugLogTitle}</h2>
+            <span className="text-[10px] text-fg-dim">{logs.length} {lang === 'en' ? 'entries' : '条'}</span>
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={copyAll}
-              className="rounded-md border border-[#2a2d3a] px-2.5 py-1 text-[11px] text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-200"
+              className="rounded-md border border-line px-2.5 py-1 text-[11px] text-fg-muted transition-colors hover:border-line-strong hover:text-fg"
             >
               {lang === 'en' ? 'Copy' : '复制'}
             </button>
             <button
               type="button"
               onClick={clearLogs}
-              className="rounded-md border border-[#2a2d3a] px-2.5 py-1 text-[11px] text-slate-400 transition-colors hover:border-red-500/40 hover:text-red-300"
+              className="rounded-md border border-line px-2.5 py-1 text-[11px] text-fg-muted transition-colors hover:border-danger-bg hover:text-danger"
             >
               {lang === 'en' ? 'Clear' : '清空'}
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-[#2a2d3a] px-2.5 py-1 text-[11px] text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-200"
+              className="rounded-md border border-line px-2.5 py-1 text-[11px] text-fg-muted transition-colors hover:border-line-strong hover:text-fg"
             >
               ✕
             </button>
@@ -68,7 +68,7 @@ export function DebugLogModal({ lang = 'zh-CN', onClose }: DebugLogModalProps) {
 
         <div ref={scrollRef} className="flex-1 overflow-auto overscroll-contain scrollbar-thin scrollbar-stable p-3 font-mono text-[11px] leading-relaxed">
           {logs.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-slate-600">
+            <div className="flex h-full items-center justify-center text-fg-dim">
               {lang === 'en' ? 'No logs yet.' : '暂无日志。'}
             </div>
           ) : (
@@ -82,16 +82,16 @@ export function DebugLogModal({ lang = 'zh-CN', onClose }: DebugLogModalProps) {
                   key={index}
                   className={`whitespace-pre-wrap break-all px-1 py-0.5 ${
                     isErr
-                      ? 'text-red-300'
+                      ? 'text-danger'
                       : isWarn
-                      ? 'text-amber-300'
-                      : 'text-slate-400'
+                      ? 'text-warn'
+                      : 'text-fg-muted'
                   }`}
                 >
-                  <span className="text-slate-600">[{time}]</span>{' '}
-                  <span className="text-slate-500">[{entry.category}]</span>{' '}
+                  <span className="text-fg-dim">[{time}]</span>{' '}
+                  <span className="text-fg-muted">[{entry.category}]</span>{' '}
                   {entry.message}
-                  {dataStr && <span className="text-slate-600">{dataStr}</span>}
+                  {dataStr && <span className="text-fg-dim">{dataStr}</span>}
                 </div>
               );
             })

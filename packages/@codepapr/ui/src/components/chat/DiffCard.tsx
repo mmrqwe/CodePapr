@@ -12,28 +12,28 @@ export function DiffCard({ info }: { info: DiffInfo }) {  const [open, setOpen] 
   const lines = useMemo(() => info.diff.split('\n'), [info.diff]);
 
   return (
-    <div className="mt-1.5 ml-3.5 overflow-hidden rounded-lg border border-[#202432] bg-[#0b0d13]">
+    <div className="mt-1.5 ml-3.5 overflow-hidden rounded-lg border border-line bg-base">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-[#10131e] transition-colors"
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-base transition-colors"
       >
-        <svg className="w-3.5 h-3.5 flex-shrink-0 text-indigo-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <svg className="w-3.5 h-3.5 flex-shrink-0 text-accent" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
           <path strokeLinecap="round" strokeLinejoin="round" d="M14 2v6h6" />
         </svg>
-        <span className="flex-1 truncate text-[10px] font-medium text-slate-300">{info.filePath}</span>
+        <span className="flex-1 truncate text-[10px] font-medium text-fg-soft">{info.filePath}</span>
         <span className="flex-shrink-0 text-[10px]">
-          {info.added > 0 && <span className="text-emerald-400">+{info.added}</span>}
-          {info.added > 0 && info.deleted > 0 && <span className="text-slate-600 mx-0.5"> </span>}
-          {info.deleted > 0 && <span className="text-rose-400">-{info.deleted}</span>}
+          {info.added > 0 && <span className="text-ok">+{info.added}</span>}
+          {info.added > 0 && info.deleted > 0 && <span className="text-fg-dim mx-0.5"> </span>}
+          {info.deleted > 0 && <span className="text-danger">-{info.deleted}</span>}
         </span>
-        <svg className={`w-3 h-3 flex-shrink-0 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <svg className={`w-3 h-3 flex-shrink-0 text-fg-muted transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
         </svg>
       </button>
       {open && (
-        <div className="max-h-48 overflow-y-auto border-t border-[#202432] font-mono text-[10px] leading-5">
+        <div className="max-h-48 overflow-y-auto border-t border-line font-mono text-[10px] leading-5">
           {lines.map((line, i) => (
             <div
               key={`${i}:${line.slice(0, 16)}`}
@@ -79,24 +79,24 @@ export function ToolPathLink({
 }) {
   const path = extractToolPath(args);
   if (!path || !onOpenWorkspacePath) {
-    return <span className="flex-1 leading-snug text-slate-300">{summary}</span>;
+    return <span className="flex-1 leading-snug text-fg-soft">{summary}</span>;
   }
 
   const idx = summary.indexOf(path);
   if (idx === -1) {
-    return <span className="flex-1 leading-snug text-slate-300">{summary}</span>;
+    return <span className="flex-1 leading-snug text-fg-soft">{summary}</span>;
   }
 
   const before = summary.slice(0, idx);
   const after = summary.slice(idx + path.length);
 
   return (
-    <span className="flex-1 leading-snug text-slate-300">
+    <span className="flex-1 leading-snug text-fg-soft">
       {before}
       <button
         type="button"
         onClick={() => onOpenWorkspacePath(path)}
-        className="text-sky-300 underline decoration-sky-500/40 underline-offset-2 hover:text-sky-200"
+        className="text-info underline decoration-sky-500/40 underline-offset-2 hover:text-info"
       >
         {path}
       </button>

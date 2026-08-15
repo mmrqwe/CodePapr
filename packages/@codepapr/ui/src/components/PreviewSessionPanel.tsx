@@ -109,7 +109,7 @@ export function PreviewSessionPanel({ workspacePath, lang }: PreviewSessionPanel
 
   if (!activePreview) {
     return (
-      <div className="flex h-full items-center justify-center px-4 text-center text-xs text-slate-600">
+      <div className="flex h-full items-center justify-center px-4 text-center text-xs text-fg-dim">
         {t.previewSessionEmpty}
       </div>
     );
@@ -117,22 +117,22 @@ export function PreviewSessionPanel({ workspacePath, lang }: PreviewSessionPanel
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#2a2d3a] bg-[#11141c] px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-base px-3 py-2">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-semibold text-slate-200">{activePreview.title}</div>
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
+          <div className="truncate text-xs font-semibold text-fg">{activePreview.title}</div>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-fg-muted">
             <span>{t.previewSessionUrl}: {activePreview.url}</span>
             <span>{t.previewSessionPid}: {activePreview.pid ?? t.previewSessionUnlinkedPid}</span>
           </div>
-          <div className="mt-1 text-[10px] text-slate-600">{t.previewSessionHint}</div>
+          <div className="mt-1 text-[10px] text-fg-dim">{t.previewSessionHint}</div>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={reloadPreview}
-            className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] font-medium text-slate-300 transition-colors
-                       hover:border-indigo-500/50 hover:text-white"
+            className="rounded-md border border-line px-2 py-1 text-[10px] font-medium text-fg-soft transition-colors
+                       hover:border-accent-soft hover:text-fg"
           >
             {t.previewSessionReload}
           </button>
@@ -140,8 +140,8 @@ export function PreviewSessionPanel({ workspacePath, lang }: PreviewSessionPanel
             type="button"
             onClick={() => void closeAndStopPreview()}
             disabled={isStopping}
-            className="rounded-md border border-red-500/30 px-2 py-1 text-[10px] font-medium text-red-200 transition-colors
-                       hover:border-red-400/60 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md border border-danger-bg px-2 py-1 text-[10px] font-medium text-danger transition-colors
+                       hover:border-danger-bg hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isStopping ? t.previewSessionClosing : t.previewSessionClose}
           </button>
@@ -149,12 +149,12 @@ export function PreviewSessionPanel({ workspacePath, lang }: PreviewSessionPanel
       </div>
 
       {error && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-200">
+        <div className="rounded-xl border border-danger-bg bg-danger-bg px-3 py-2 text-xs leading-relaxed text-danger">
           {error}
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-[#2a2d3a] bg-[#0b0d12]">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-line bg-base">
         <iframe
           key={frameKey}
           src={activePreview.url}

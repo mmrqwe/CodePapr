@@ -8,9 +8,9 @@ export function TtsStatusBadge({ status }: TtsStatusBadgeProps) {
   const colors: Record<string, string> = {
     unknown: 'bg-slate-500',
     starting: 'bg-blue-400',
-    running: 'bg-emerald-400',
+    running: 'bg-ok',
     stopped: 'bg-slate-500',
-    error: 'bg-red-400',
+    error: 'bg-danger',
   };
 
   const animate = status === 'unknown' || status === 'starting';

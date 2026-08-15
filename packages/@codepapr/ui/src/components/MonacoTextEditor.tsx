@@ -530,7 +530,7 @@ export function MonacoTextEditor({
   return (
     <div
       ref={containerRef}
-      className="h-full min-h-0 overflow-hidden rounded-xl border border-[#2a2d3a] bg-[#0f1117] transition-colors focus-within:border-indigo-500/60"
+      className="h-full min-h-0 overflow-hidden rounded-xl border border-line bg-base transition-colors focus-within:border-accent-soft"
       style={{ minHeight }}
     />
   );

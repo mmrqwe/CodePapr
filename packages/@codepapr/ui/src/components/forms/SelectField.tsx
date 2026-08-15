@@ -2,7 +2,7 @@ import type { ReactNode, SelectHTMLAttributes } from 'react';
 import { FieldLabel } from './FieldLabel';
 
 const SELECT_BASE =
-  'w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none';
+  'w-full rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg focus:border-accent-soft focus:outline-none';
 
 export interface SelectFieldProps extends SelectHTMLAttributes<HTMLSelectElement> {
   label: ReactNode;
@@ -33,7 +33,7 @@ export function SelectField({
       >
         {children}
       </select>
-      {hint && <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{hint}</p>}
+      {hint && <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{hint}</p>}
     </div>
   );
 }

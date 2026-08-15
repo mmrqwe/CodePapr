@@ -28,11 +28,11 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
   const apps = useAppRuntimeStore((state) => state.apps);
 
   if (loadError) {
-    return <div className="p-4 text-xs text-red-400">{t.appPermLoadFailed}: {loadError}</div>;
+    return <div className="p-4 text-xs text-danger">{t.appPermLoadFailed}: {loadError}</div>;
   }
 
   if (!value) {
-    return <div className="p-4 text-xs text-slate-500">{t.appPermLoading}</div>;
+    return <div className="p-4 text-xs text-fg-muted">{t.appPermLoading}</div>;
   }
 
   const settings = value;
@@ -91,8 +91,8 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
   const localButton = (local: PaprLocalAccess, active: boolean) =>
     `rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
       active
-        ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-200'
-        : 'border-[#2a2d3a] text-slate-400 hover:border-indigo-500/30 hover:text-slate-200'
+        ? 'border-accent-soft bg-accent-soft text-accent-text'
+        : 'border-line text-fg-muted hover:border-accent-soft hover:text-fg'
     }`;
 
   const networkToggle = (enabled: boolean, onChangeNetwork: (v: boolean) => void, trackColor: string) => (
@@ -102,7 +102,7 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
       aria-checked={enabled}
       onClick={() => onChangeNetwork(!enabled)}
       className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors ${
-        enabled ? trackColor : 'bg-[#2a2d3a]'
+        enabled ? trackColor : 'bg-control'
       }`}
     >
       <span
@@ -121,22 +121,22 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
   ) => (
     <div className="flex items-center justify-between gap-3">
       <div className="min-w-0">
-        <div className="text-xs font-semibold text-slate-200">{label}</div>
-        <div className="mt-0.5 text-[10px] leading-relaxed text-slate-500">{hint}</div>
+        <div className="text-xs font-semibold text-fg">{label}</div>
+        <div className="mt-0.5 text-[10px] leading-relaxed text-fg-muted">{hint}</div>
       </div>
-      {networkToggle(enabled, onChangeNetwork, 'bg-emerald-500')}
+      {networkToggle(enabled, onChangeNetwork, 'bg-ok')}
     </div>
   );
 
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <p className="text-xs leading-relaxed text-slate-400">{t.appPermTitle}</p>
+        <p className="text-xs leading-relaxed text-fg-muted">{t.appPermTitle}</p>
       </div>
 
       {/* 本地访问轴 */}
-      <div className="rounded-xl border border-[#2a2d3a] bg-[#11141c] p-4">
-        <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
+      <div className="rounded-xl border border-line bg-base p-4">
+        <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.15em] text-fg-muted">
           {t.appPermGlobalLevel} · 本地访问
         </label>
         <div className="flex gap-2">
@@ -151,14 +151,14 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
             </button>
           ))}
         </div>
-        <p className="mt-2 text-[10px] leading-relaxed text-slate-600">
+        <p className="mt-2 text-[10px] leading-relaxed text-fg-dim">
           {LOCAL_DESC[settings.defaultLocal]}
         </p>
       </div>
 
       {/* 网络轴 */}
-      <div className="rounded-xl border border-[#2a2d3a] bg-[#11141c] p-4">
-        <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
+      <div className="rounded-xl border border-line bg-base p-4">
+        <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.15em] text-fg-muted">
           网络
         </label>
         {networkRow(
@@ -171,7 +171,7 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
 
       {apps.length > 0 && (
         <div>
-          <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
+          <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.15em] text-fg-muted">
             {t.appPermAppList}
           </label>
           <div className="flex flex-col gap-2">
@@ -182,16 +182,16 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
               return (
                 <div
                   key={app.appId}
-                  className="flex items-center gap-3 rounded-lg border border-[#2a2d3a] bg-[#11141c] px-3 py-2.5"
+                  className="flex items-center gap-3 rounded-lg border border-line bg-base px-3 py-2.5"
                 >
                   <span className="text-sm">
                     {app.icon && app.icon.trim().length > 0 ? app.icon.trim().slice(0, 2) : '🖥️'}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-xs font-semibold text-slate-200">{app.title}</div>
-                    <div className="text-[10px] text-slate-600">
+                    <div className="truncate text-xs font-semibold text-fg">{app.title}</div>
+                    <div className="text-[10px] text-fg-dim">
                       声明: L{LOCAL_LABEL[declared.local]}{declared.network ? '·联网' : '·离线'} → 生效:{' '}
-                      <span className={effective.local === 'write' ? 'text-amber-400' : effective.local === 'read' ? 'text-sky-400' : 'text-slate-400'}>
+                      <span className={effective.local === 'write' ? 'text-warn' : effective.local === 'read' ? 'text-info' : 'text-fg-muted'}>
                         {LOCAL_LABEL[effective.local]}{effective.network ? '·联网' : '·离线'}
                       </span>
                       {hasOverride ? ' ·已覆盖' : ''}
@@ -209,7 +209,7 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
                         }
                       }}
                       title="本地访问覆盖"
-                      className="rounded-md border border-[#2a2d3a] bg-[#0f1117] px-1.5 py-1 text-[10px] text-slate-300 outline-none focus:border-indigo-500/50"
+                      className="rounded-md border border-line bg-base px-1.5 py-1 text-[10px] text-fg-soft outline-none focus:border-accent-soft"
                     >
                       <option value="auto">本地: 自动</option>
                       <option value="none">本地: 无</option>
@@ -227,7 +227,7 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
                       }
                       title="网络覆盖（联网/离线）"
                       className={`relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors ${
-                        effective.network ? 'bg-emerald-500' : 'bg-[#2a2d3a]'
+                        effective.network ? 'bg-ok' : 'bg-control'
                       }`}
                     >
                       <span
@@ -245,18 +245,18 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
       )}
 
       {apps.length === 0 && (
-        <div className="rounded-xl border border-[#2a2d3a] bg-[#11141c] p-6 text-center text-xs text-slate-600">
+        <div className="rounded-xl border border-line bg-base p-6 text-center text-xs text-fg-dim">
           {t.appPermNoApps}
         </div>
       )}
 
-      <div className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] p-4">
-        <h4 className="mb-2 text-xs font-semibold text-slate-300">{t.appPermLevelInfo}</h4>
-        <div className="flex flex-col gap-1.5 text-[10px] leading-relaxed text-slate-500">
-          <div><span className="text-slate-400 font-mono">无</span> · 纯计算，仅 papr.db / papr.fs（app 自有沙箱）</div>
-          <div><span className="text-slate-400 font-mono">只读</span> · + 读取项目文件（agent 只读工具）</div>
-          <div><span className="text-slate-400 font-mono">读写执行</span> · + 修改项目/执行命令（agent write/edit/patch/bash）</div>
-          <div><span className="text-slate-400 font-mono">网络</span> · 与本地轴正交：联网访问公网（https/wss），离线完全断网</div>
+      <div className="rounded-xl border border-line bg-base p-4">
+        <h4 className="mb-2 text-xs font-semibold text-fg-soft">{t.appPermLevelInfo}</h4>
+        <div className="flex flex-col gap-1.5 text-[10px] leading-relaxed text-fg-muted">
+          <div><span className="text-fg-muted font-mono">无</span> · 纯计算，仅 papr.db / papr.fs（app 自有沙箱）</div>
+          <div><span className="text-fg-muted font-mono">只读</span> · + 读取项目文件（agent 只读工具）</div>
+          <div><span className="text-fg-muted font-mono">读写执行</span> · + 修改项目/执行命令（agent write/edit/patch/bash）</div>
+          <div><span className="text-fg-muted font-mono">网络</span> · 与本地轴正交：联网访问公网（https/wss），离线完全断网</div>
         </div>
       </div>
     </div>

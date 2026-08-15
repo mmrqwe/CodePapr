@@ -11,7 +11,7 @@ interface FieldLabelProps {
 export function FieldLabel({ children, hint, tight = false, className = '' }: FieldLabelProps) {
   return (
     <label
-      className={`block text-xs font-semibold uppercase text-slate-500 ${
+      className={`block text-xs font-semibold uppercase text-fg-muted ${
         tight ? 'mb-1.5 tracking-[0.15em]' : 'mb-2 tracking-[0.18em]'
       } ${className}`}
       title={hint}

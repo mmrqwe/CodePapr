@@ -87,10 +87,10 @@ function sumRuntimeAcrossTiers(
   return total;
 }
 
-function StatRow({ label, value, color = 'text-slate-300' }: { label: string; value: string | number; color?: string }) {
+function StatRow({ label, value, color = 'text-fg-soft' }: { label: string; value: string | number; color?: string }) {
   return (
     <div className="flex justify-between items-center py-1.5">
-      <span className="text-xs text-slate-500">{label}</span>
+      <span className="text-xs text-fg-muted">{label}</span>
       <span className={`text-xs font-mono font-medium ${color}`}>{value}</span>
     </div>
   );
@@ -128,25 +128,25 @@ function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss, sh
   const savings = costWithoutCacheOffPeak > 0 ? 1 - costWithCacheOffPeak / costWithoutCacheOffPeak : 0;
 
   const hitColor =
-    hitRate >= 0.8 ? 'text-green-400' : hitRate >= 0.5 ? 'text-yellow-400' : 'text-slate-400';
+    hitRate >= 0.8 ? 'text-green-400' : hitRate >= 0.5 ? 'text-yellow-400' : 'text-fg-muted';
 
   return (
-    <div className="rounded-xl border border-[#2a2d3a] bg-[#1a1d27] p-3">
-      <p className="mb-3 text-xs font-semibold text-indigo-400">{title}</p>
+    <div className="rounded-xl border border-line bg-raised p-3">
+      <p className="mb-3 text-xs font-semibold text-accent">{title}</p>
 
-      <div className="rounded-lg border border-[#2a2d3a] bg-[#151720] p-3 text-center mb-3">
-        <p className="mb-1 text-[11px] text-slate-500">{t.cacheHitRate}</p>
+      <div className="rounded-lg border border-line bg-base p-3 text-center mb-3">
+        <p className="mb-1 text-[11px] text-fg-muted">{t.cacheHitRate}</p>
         <p className={`text-2xl font-bold font-mono ${hitColor}`}>
           {(hitRate * 100).toFixed(1)}%
         </p>
         <div className="mt-2 flex justify-center gap-4">
-          <span className="text-[11px] text-slate-600">{t.callCount}: {calls.toLocaleString()}</span>
-          <span className="text-[11px] text-slate-600">{t.roundsLabel}: {rounds.toLocaleString()}</span>
+          <span className="text-[11px] text-fg-dim">{t.callCount}: {calls.toLocaleString()}</span>
+          <span className="text-[11px] text-fg-dim">{t.roundsLabel}: {rounds.toLocaleString()}</span>
         </div>
       </div>
 
       <div className="mb-3">
-        <p className="mb-2 text-[11px] font-medium text-slate-500">{t.tokenUsage}</p>
+        <p className="mb-2 text-[11px] font-medium text-fg-muted">{t.tokenUsage}</p>
         <StatRow label={t.cacheRead} value={totalCacheRead.toLocaleString()} color="text-green-400" />
         {showsDeepSeekPromptMiss ? (
           <StatRow label={t.cacheMissInput} value={totalInput.toLocaleString()} color="text-yellow-400" />
@@ -161,57 +161,57 @@ function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss, sh
 
       {(stats.modelRuntimeMs !== undefined || stats.toolRuntimeMs !== undefined) && (
         <div className="mb-3">
-          <p className="mb-2 text-[11px] font-medium text-slate-500">{t.runtimeBreakdown}</p>
+          <p className="mb-2 text-[11px] font-medium text-fg-muted">{t.runtimeBreakdown}</p>
           <StatRow
             label={t.modelRuntimeLabel}
             value={formatDuration(stats.modelRuntimeMs)}
-            color="text-indigo-300"
+            color="text-accent-text"
           />
           <StatRow
             label={t.toolRuntimeLabel}
             value={formatDuration(stats.toolRuntimeMs)}
-            color="text-slate-300"
+            color="text-fg-soft"
           />
         </div>
       )}
 
       {showCost && pricing && (
         <div>
-          <p className="mb-2 text-[11px] font-medium text-slate-500">{t.costEstimation}</p>
+          <p className="mb-2 text-[11px] font-medium text-fg-muted">{t.costEstimation}</p>
           <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-1.5">
             <span />
-            <span className="text-right text-[10px] text-slate-600">{t.offPeakLabel}</span>
-            <span className="text-right text-[10px] text-slate-600">{t.peakLabel}</span>
+            <span className="text-right text-[10px] text-fg-dim">{t.offPeakLabel}</span>
+            <span className="text-right text-[10px] text-fg-dim">{t.peakLabel}</span>
 
-            <span className="text-xs text-slate-500">{t.actualCost}</span>
-            <span className="text-right font-mono text-xs font-medium text-indigo-400">
+            <span className="text-xs text-fg-muted">{t.actualCost}</span>
+            <span className="text-right font-mono text-xs font-medium text-accent">
               {formatRmb(costWithCacheOffPeak)}
             </span>
-            <span className="text-right font-mono text-xs font-medium text-indigo-400">
+            <span className="text-right font-mono text-xs font-medium text-accent">
               {formatRmb(costWithCachePeak)}
             </span>
 
-            <span className="text-xs text-slate-500">{t.withoutCache}</span>
-            <span className="text-right font-mono text-xs text-slate-500">
+            <span className="text-xs text-fg-muted">{t.withoutCache}</span>
+            <span className="text-right font-mono text-xs text-fg-muted">
               {formatRmb(costWithoutCacheOffPeak)}
             </span>
-            <span className="text-right font-mono text-xs text-slate-500">
+            <span className="text-right font-mono text-xs text-fg-muted">
               {formatRmb(costWithoutCachePeak)}
             </span>
           </div>
-          <div className="mt-2 border-t border-[#2a2d3a] pt-2">
+          <div className="mt-2 border-t border-line pt-2">
             <StatRow
               label={t.savings}
               value={`${(savings * 100).toFixed(1)}%`}
-              color={savings > 0.5 ? 'text-green-400' : 'text-slate-400'}
+              color={savings > 0.5 ? 'text-green-400' : 'text-fg-muted'}
             />
           </div>
-          <p className="mt-2 text-[10px] leading-relaxed text-slate-600">{t.priceNotice}</p>
+          <p className="mt-2 text-[10px] leading-relaxed text-fg-dim">{t.priceNotice}</p>
         </div>
       )}
 
       {footnote && (
-        <p className="mt-2 text-[10px] leading-relaxed text-slate-600">{footnote}</p>
+        <p className="mt-2 text-[10px] leading-relaxed text-fg-dim">{footnote}</p>
       )}
     </div>
   );
@@ -262,9 +262,9 @@ export function CacheStatsDashboard({ lang, collapsible = true, onOpenContextIns
       {collapsible && (
         <div className="flex items-center justify-between px-4 py-3">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-slate-300">{t.cacheStatsTitle}</h2>
+            <h2 className="text-sm font-semibold text-fg-soft">{t.cacheStatsTitle}</h2>
             {activeSession && (
-              <p className="truncate text-[11px] text-slate-500">
+              <p className="truncate text-[11px] text-fg-muted">
                 {t.session}: {activeSession.name}
               </p>
             )}
@@ -272,7 +272,7 @@ export function CacheStatsDashboard({ lang, collapsible = true, onOpenContextIns
           <button
             type="button"
             onClick={() => setCollapsed((value) => !value)}
-            className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] font-medium text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-100"
+            className="rounded-md border border-line px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
           >
             {collapsed ? t.expand : t.collapse}
           </button>
@@ -280,22 +280,22 @@ export function CacheStatsDashboard({ lang, collapsible = true, onOpenContextIns
       )}
 
       {showContent && (
-        <div className={`min-h-0 flex-1 space-y-4 overflow-y-scroll scrollbar-thin ${collapsible ? 'border-t border-[#2a2d3a] px-4 py-4' : 'px-4 py-4'}`}>
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-[#2a2d3a] bg-[#1a1d27] px-3 py-2.5">
+        <div className={`min-h-0 flex-1 space-y-4 overflow-y-scroll scrollbar-thin ${collapsible ? 'border-t border-line px-4 py-4' : 'px-4 py-4'}`}>
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-raised px-3 py-2.5">
             <div className="min-w-0">
-              <p className="text-[11px] text-slate-500">{t.currentContextLength}</p>
-              <p className="font-mono text-sm font-semibold text-indigo-300">
+              <p className="text-[11px] text-fg-muted">{t.currentContextLength}</p>
+              <p className="font-mono text-sm font-semibold text-accent-text">
                 {contextSnapshot
                   ? `~${contextSnapshot.totalTokens.toLocaleString()} ${t.tokensUnit}`
                   : '—'}
               </p>
             </div>
             <div className="min-w-0" title={t.modelRuntimeTip}>
-              <p className="text-[11px] text-slate-500">{t.modelRuntimeLabel}</p>
-              <p className="font-mono text-sm font-semibold text-indigo-300">
+              <p className="text-[11px] text-fg-muted">{t.modelRuntimeLabel}</p>
+              <p className="font-mono text-sm font-semibold text-accent-text">
                 {formatDuration(sumRuntimeAcrossTiers(displayedStats, 'modelRuntimeMs'))}
               </p>
-              <p className="font-mono text-[10px] text-slate-600">
+              <p className="font-mono text-[10px] text-fg-dim">
                 {t.toolRuntimeLabel}{' '}
                 {formatDuration(sumRuntimeAcrossTiers(displayedStats, 'toolRuntimeMs'))}
               </p>
@@ -304,20 +304,20 @@ export function CacheStatsDashboard({ lang, collapsible = true, onOpenContextIns
               type="button"
               onClick={onOpenContextInspector}
               disabled={!onOpenContextInspector || !activeSessionId}
-              className="flex-shrink-0 rounded-lg border border-[#2a2d3a] px-2.5 py-1.5 text-xs font-medium text-slate-300 transition-colors enabled:hover:border-indigo-400 enabled:hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex-shrink-0 rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-fg-soft transition-colors enabled:hover:border-accent enabled:hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t.viewContext}
             </button>
           </div>
 
-          <div className="flex rounded-lg border border-[#2a2d3a] bg-[#1a1d27] p-0.5">
+          <div className="flex rounded-lg border border-line bg-raised p-0.5">
             <button
               type="button"
               onClick={() => setViewMode('conversation')}
               className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 viewMode === 'conversation'
-                  ? 'bg-indigo-500/20 text-indigo-300'
-                  : 'text-slate-500 hover:text-slate-300'
+                  ? 'bg-accent-soft text-accent-text'
+                  : 'text-fg-muted hover:text-fg-soft'
               }`}
             >
               {t.thisConversation}
@@ -327,8 +327,8 @@ export function CacheStatsDashboard({ lang, collapsible = true, onOpenContextIns
               onClick={() => setViewMode('project')}
               className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 viewMode === 'project'
-                  ? 'bg-indigo-500/20 text-indigo-300'
-                  : 'text-slate-500 hover:text-slate-300'
+                  ? 'bg-accent-soft text-accent-text'
+                  : 'text-fg-muted hover:text-fg-soft'
               }`}
             >
               {t.entireProject}

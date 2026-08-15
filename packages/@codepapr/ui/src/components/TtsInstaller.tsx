@@ -75,26 +75,26 @@ export function TtsInstaller({ onClose }: TtsInstallerProps) {
 
   const statusIcon = (status: string) => {
     switch (status) {
-      case 'ok': return <span className="text-emerald-400">&#10003;</span>;
-      case 'fail': return <span className="text-red-400">&#10007;</span>;
-      case 'cancelled': return <span className="text-amber-400">&#8855;</span>;
-      case 'running': return <span className="animate-spin text-amber-400">&#8635;</span>;
-      default: return <span className="text-slate-600">&#9679;</span>;
+      case 'ok': return <span className="text-ok">&#10003;</span>;
+      case 'fail': return <span className="text-danger">&#10007;</span>;
+      case 'cancelled': return <span className="text-warn">&#8855;</span>;
+      case 'running': return <span className="animate-spin text-warn">&#8635;</span>;
+      default: return <span className="text-fg-dim">&#9679;</span>;
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="w-[440px] rounded-2xl border border-[#2a2d3a] bg-[#1a1d27] shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between border-b border-[#2a2d3a] px-5 py-3">
-          <h2 className="text-sm font-semibold text-slate-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay backdrop-blur-sm">
+      <div className="w-[440px] rounded-2xl border border-line bg-raised shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between border-b border-line px-5 py-3">
+          <h2 className="text-sm font-semibold text-fg">
             {running ? 'Installing GPT-SoVITS...' : 'GPT-SoVITS Setup'}
           </h2>
           <button
             type="button"
             onClick={onClose}
             disabled={running}
-            className="text-slate-500 hover:text-slate-300 text-lg leading-none disabled:opacity-30"
+            className="text-fg-muted hover:text-fg-soft text-lg leading-none disabled:opacity-30"
           >
             x
           </button>
@@ -105,24 +105,24 @@ export function TtsInstaller({ onClose }: TtsInstallerProps) {
             <div key={step.step_id} className="flex items-center gap-2.5">
               <span className="w-4 text-center text-xs">{statusIcon(step.status)}</span>
               <span className={`text-xs flex-1 ${
-                step.status === 'fail' ? 'text-red-300' :
-                step.status === 'cancelled' ? 'text-amber-300' :
-                step.status === 'ok' ? 'text-emerald-300' :
-                step.status === 'running' ? 'text-slate-200' :
-                'text-slate-500'
+                step.status === 'fail' ? 'text-danger' :
+                step.status === 'cancelled' ? 'text-warn' :
+                step.status === 'ok' ? 'text-ok' :
+                step.status === 'running' ? 'text-fg' :
+                'text-fg-muted'
               }`}>
                 {step.label}
               </span>
               {step.percent !== null && step.percent < 100 && (
-                <span className="text-[10px] text-slate-600">{step.percent}%</span>
+                <span className="text-[10px] text-fg-dim">{step.percent}%</span>
               )}
             </div>
           ))}
         </div>
 
-        <div className="mx-4 border-t border-[#2a2d3a]" />
+        <div className="mx-4 border-t border-line" />
 
-        <div className="px-5 py-2 h-40 overflow-y-auto bg-[#10131b] font-mono text-[11px] leading-relaxed text-slate-500 scrollbar-thin">
+        <div className="px-5 py-2 h-40 overflow-y-auto bg-base font-mono text-[11px] leading-relaxed text-fg-muted scrollbar-thin">
           {logs.length === 0 && (
             <span className="text-slate-700">
               {running ? 'Starting...' : 'Click "Install" to begin.'}
@@ -134,12 +134,12 @@ export function TtsInstaller({ onClose }: TtsInstallerProps) {
           <div ref={logEndRef} />
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-[#2a2d3a] px-5 py-3">
+        <div className="flex items-center justify-end gap-2 border-t border-line px-5 py-3">
           {running ? (
             <button
               type="button"
               onClick={handleCancel}
-              className="rounded-lg border border-red-500/30 px-4 py-2 text-xs font-medium text-red-300 hover:bg-red-500/10 transition-colors"
+              className="rounded-lg border border-danger-bg px-4 py-2 text-xs font-medium text-danger hover:bg-danger-bg transition-colors"
             >
               Cancel
             </button>
@@ -147,7 +147,7 @@ export function TtsInstaller({ onClose }: TtsInstallerProps) {
             <button
               type="button"
               onClick={() => { void startInstall(); }}
-              className="rounded-lg bg-indigo-500/20 border border-indigo-500/40 px-4 py-2 text-xs font-medium text-indigo-200 hover:bg-indigo-500/30 transition-colors"
+              className="rounded-lg bg-accent-soft border border-accent-soft px-4 py-2 text-xs font-medium text-accent-text hover:bg-accent-soft transition-colors"
             >
               Install GPT-SoVITS
             </button>

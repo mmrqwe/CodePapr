@@ -62,19 +62,19 @@ export function ToolUsageStats({ lang }: { lang?: Lang }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-slate-300">{t.toolUsageTitle}</p>
-        <span className="text-[11px] text-slate-500">
+        <p className="text-xs font-semibold text-fg-soft">{t.toolUsageTitle}</p>
+        <span className="text-[11px] text-fg-muted">
           {totalCalls.toLocaleString()} {t.toolUsageTotalCalls} · {usage.length} {t.toolUsageDistinctTools}
         </span>
       </div>
 
       {usage.length === 0 ? (
-        <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] px-4 py-3 text-xs text-slate-500">
+        <div className="rounded-xl border border-line bg-base px-4 py-3 text-xs text-fg-muted">
           {t.toolUsageEmpty}
         </div>
       ) : (
         <>
-          <div className="flex items-center gap-3 px-1 text-[10px] text-slate-600">
+          <div className="flex items-center gap-3 px-1 text-[10px] text-fg-dim">
             <span className="w-44 flex-shrink-0">{t.toolUsageToolCol}</span>
             <span className="flex-1" />
             <span className="w-16 flex-shrink-0 text-right">{t.toolUsageCountCol}</span>
@@ -87,25 +87,25 @@ export function ToolUsageStats({ lang }: { lang?: Lang }) {
               return (
                 <div key={u.name} className="flex items-center gap-3">
                   <span
-                    className="w-44 flex-shrink-0 truncate font-mono text-[11px] text-slate-300"
+                    className="w-44 flex-shrink-0 truncate font-mono text-[11px] text-fg-soft"
                     title={`${u.name} · ${u.success} ok / ${u.error} err`}
                   >
                     {u.name}
                   </span>
-                  <div className="h-5 flex-1 overflow-hidden rounded-md bg-[#0a0d14]">
+                  <div className="h-5 flex-1 overflow-hidden rounded-md bg-deep">
                     <div
-                      className="bar-grow flex h-full items-center justify-end rounded-md bg-indigo-500/70 pr-1.5"
+                      className="bar-grow flex h-full items-center justify-end rounded-md bg-accent-soft pr-1.5"
                       style={{ width: `${Math.max(pct, 2)}%`, animationDelay: `${i * 25}ms` }}
                     >
-                      {pct >= 15 && <span className="text-[10px] font-medium text-white/80">{u.count}</span>}
+                      {pct >= 15 && <span className="text-[10px] font-medium text-fg/80">{u.count}</span>}
                     </div>
                   </div>
-                  <span className="w-16 flex-shrink-0 text-right text-[11px] tabular-nums text-slate-400">
+                  <span className="w-16 flex-shrink-0 text-right text-[11px] tabular-nums text-fg-muted">
                     {u.count.toLocaleString()}
                   </span>
                   <span
                     className={`w-14 flex-shrink-0 text-right text-[11px] tabular-nums ${
-                      successRate >= 90 ? 'text-green-400' : successRate >= 60 ? 'text-yellow-400' : 'text-red-400'
+                      successRate >= 90 ? 'text-green-400' : successRate >= 60 ? 'text-yellow-400' : 'text-danger'
                     }`}
                   >
                     {successRate.toFixed(0)}%
@@ -114,7 +114,7 @@ export function ToolUsageStats({ lang }: { lang?: Lang }) {
               );
             })}
           </div>
-          <p className="px-1 text-[10px] leading-relaxed text-slate-600">{t.toolUsageNote}</p>
+          <p className="px-1 text-[10px] leading-relaxed text-fg-dim">{t.toolUsageNote}</p>
         </>
       )}
     </div>

@@ -2,7 +2,7 @@ import type { InputHTMLAttributes, ReactNode } from 'react';
 import { FieldLabel } from './FieldLabel';
 
 const INPUT_CLASS =
-  'w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 placeholder-slate-700 focus:border-indigo-500/60 focus:outline-none';
+  'w-full rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none';
 
 export interface TextFieldProps extends InputHTMLAttributes<HTMLInputElement> {
   label: ReactNode;
@@ -35,7 +35,7 @@ export function TextField({
         {...rest}
       />
       {children}
-      {hint && <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{hint}</p>}
+      {hint && <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{hint}</p>}
     </div>
   );
 }

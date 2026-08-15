@@ -85,9 +85,9 @@ export function RestoreConfirmDialog({
 
   if (loading) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-        <div className="mx-4 w-full max-w-md rounded-2xl border border-[#2a2d3a] bg-[#121722] p-6 shadow-2xl">
-          <p className="text-sm text-slate-400">{t.loading}</p>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay">
+        <div className="mx-4 w-full max-w-md rounded-2xl border border-line bg-base p-6 shadow-2xl">
+          <p className="text-sm text-fg-muted">{t.loading}</p>
         </div>
       </div>
     );
@@ -95,12 +95,12 @@ export function RestoreConfirmDialog({
 
   if (planError) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onCancel}>
-        <div className="mx-4 w-full max-w-md rounded-2xl border border-red-500/30 bg-[#121722] p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-          <p className="mb-3 text-sm text-red-300">{t.error}</p>
-          <p className="mb-4 text-xs text-slate-500">{planError}</p>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay" onClick={onCancel}>
+        <div className="mx-4 w-full max-w-md rounded-2xl border border-danger-bg bg-base p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <p className="mb-3 text-sm text-danger">{t.error}</p>
+          <p className="mb-4 text-xs text-fg-muted">{planError}</p>
           <div className="flex justify-end">
-            <button onClick={onCancel} className="rounded-lg border border-[#2a2d3a] px-4 py-2 text-xs text-slate-400 hover:border-slate-500 hover:text-slate-200">
+            <button onClick={onCancel} className="rounded-lg border border-line px-4 py-2 text-xs text-fg-muted hover:border-line-strong hover:text-fg">
               {t.cancel}
             </button>
           </div>
@@ -114,26 +114,26 @@ export function RestoreConfirmDialog({
   const unchangedCount = plan?.filesUnchanged ?? 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => !executing && onCancel()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay" onClick={() => !executing && onCancel()}>
       <div
-        className="mx-4 w-full max-w-lg rounded-2xl border border-[#2a2d3a] bg-[#121722] p-6 shadow-2xl"
+        className="mx-4 w-full max-w-lg rounded-2xl border border-line bg-base p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-1 text-sm font-medium text-slate-200">{t.title}</h3>
-        <p className="mb-4 truncate text-xs text-slate-500">{targetLabel}</p>
+        <h3 className="mb-1 text-sm font-medium text-fg">{t.title}</h3>
+        <p className="mb-4 truncate text-xs text-fg-muted">{targetLabel}</p>
 
         <div className="mb-4 space-y-1.5 text-xs">
-          <div className="flex items-center gap-2 text-emerald-300">
+          <div className="flex items-center gap-2 text-ok">
             <span>↻</span>
             <span>{t.willRestore}: <span className="font-medium">{restoreCount}</span></span>
           </div>
           {deleteCount > 0 && (
-            <div className="flex items-center gap-2 text-rose-300">
+            <div className="flex items-center gap-2 text-danger">
               <span>✗</span>
               <span>{t.willDelete}: <span className="font-medium">{deleteCount}</span></span>
             </div>
           )}
-          <div className="flex items-center gap-2 text-slate-500">
+          <div className="flex items-center gap-2 text-fg-muted">
             <span>-</span>
             <span>{t.unchanged}: <span className="font-medium">{unchangedCount}</span></span>
           </div>
@@ -141,41 +141,41 @@ export function RestoreConfirmDialog({
 
         <button
           onClick={() => setShowDetails(!showDetails)}
-          className="mb-3 text-[10px] text-indigo-400 hover:text-indigo-300"
+          className="mb-3 text-[10px] text-accent hover:text-accent-text"
         >
           {showDetails ? t.hide : t.details}
         </button>
 
         {showDetails && plan && (
-          <div className="mb-4 max-h-48 overflow-y-auto rounded-lg border border-[#2a2d3a] bg-[#0b0d12] p-3">
+          <div className="mb-4 max-h-48 overflow-y-auto rounded-lg border border-line bg-base p-3">
             {plan.filesToRestore.map((f, i) => (
               <div key={i} className="flex items-center gap-2 py-0.5 text-[10px]">
-                <span className={`w-4 ${f.status === 'A' ? 'text-emerald-400' : f.status === 'D' ? 'text-rose-400' : 'text-amber-400'}`}>
+                <span className={`w-4 ${f.status === 'A' ? 'text-ok' : f.status === 'D' ? 'text-danger' : 'text-warn'}`}>
                   {f.status}
                 </span>
-                <span className="truncate text-slate-400">{f.path}</span>
+                <span className="truncate text-fg-muted">{f.path}</span>
                 {(f.additions > 0 || f.deletions > 0) && (
-                  <span className="ml-auto text-slate-600">+{f.additions} -{f.deletions}</span>
+                  <span className="ml-auto text-fg-dim">+{f.additions} -{f.deletions}</span>
                 )}
               </div>
             ))}
           </div>
         )}
 
-        <p className="mb-4 text-[10px] leading-relaxed text-amber-500/70">{t.warning}</p>
+        <p className="mb-4 text-[10px] leading-relaxed text-warn">{t.warning}</p>
 
         <div className="flex justify-end gap-3">
           <button
             onClick={onCancel}
             disabled={executing}
-            className="rounded-lg border border-[#2a2d3a] px-4 py-2 text-xs text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg border border-line px-4 py-2 text-xs text-fg-muted transition-colors hover:border-line-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t.cancel}
           </button>
           <button
             onClick={handleConfirm}
             disabled={executing}
-            className="rounded-lg bg-red-600 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-lg bg-danger px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-danger disabled:cursor-not-allowed disabled:opacity-60"
           >
             {executing ? t.executing : t.confirm}
           </button>

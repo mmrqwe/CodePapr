@@ -241,16 +241,16 @@ function ListingCard({
   const initial = (listing.title || listing.name).charAt(0).toUpperCase();
   const isRemote = listing.transport.type === 'streamable-http' || listing.transport.type === 'sse';
   const hostname = isRemote && listing.url ? (() => { try { return new URL(listing.url).hostname; } catch { return ''; } })() : '';
-  const cardGlow = 'hover:border-cyan-500/40';
+  const cardGlow = 'hover:border-info-bg';
 
   return (
     <button
       type="button"
       onClick={() => onSelect(listing)}
-      className={`group relative flex flex-col gap-3 rounded-2xl border border-[#2a2d3a] bg-[#121722] p-4 text-left transition-all ${cardGlow} hover:bg-[#161b27]`}
+      className={`group relative flex flex-col gap-3 rounded-2xl border border-line bg-base p-4 text-left transition-all ${cardGlow} hover:bg-base`}
     >
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-[#1d2332] text-sm font-bold text-slate-300">
+        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-raised text-sm font-bold text-fg-soft">
           {listing.iconUrl ? (
             <img src={listing.iconUrl} alt="" className="h-8 w-8 rounded-lg object-contain" />
           ) : (
@@ -258,50 +258,50 @@ function ListingCard({
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold text-slate-100">{listing.title}</h3>
-          <p className="mt-0.5 truncate text-[11px] text-slate-500">
+          <h3 className="truncate text-sm font-semibold text-fg">{listing.title}</h3>
+          <p className="mt-0.5 truncate text-[11px] text-fg-muted">
             {hostname || listing.name}
           </p>
         </div>
         {listing.verified && (
-          <svg className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-cyan-400" viewBox="0 0 24 24" fill="currentColor">
+          <svg className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-info" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
           </svg>
         )}
       </div>
 
-      <p className="line-clamp-3 text-xs leading-relaxed text-slate-400">{listing.description}</p>
+      <p className="line-clamp-3 text-xs leading-relaxed text-fg-muted">{listing.description}</p>
 
       <div className="flex flex-wrap items-center gap-1.5">
         <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${
           isRemote
-            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-            : 'border-[#2a2d3a] text-slate-400'
+            ? 'border-ok-bg bg-ok-bg text-ok'
+            : 'border-line text-fg-muted'
         }`}>
           <TransportIcon type={listing.transport.type} />
           {isRemote ? 'Remote' : listing.transport.type}
         </span>
         {hostname && (
-          <span className="inline-flex items-center gap-1 rounded-md border border-[#2a2d3a] px-1.5 py-0.5 text-[10px] text-slate-400">
+          <span className="inline-flex items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-[10px] text-fg-muted">
             {hostname}
           </span>
         )}
         {listing.categories.slice(0, 2).map((cat) => (
-          <span key={cat} className="inline-flex items-center gap-1 rounded-md border border-[#2a2d3a] px-1.5 py-0.5 text-[10px] text-slate-400">
+          <span key={cat} className="inline-flex items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-[10px] text-fg-muted">
             {cat}
           </span>
         ))}
       </div>
 
-      <div className="mt-auto flex items-center justify-between border-t border-[#2a2d3a] pt-2.5">
+      <div className="mt-auto flex items-center justify-between border-t border-line pt-2.5">
         {listing.useCount > 0 && (
-          <span className="text-[10px] text-slate-600">{listing.useCount.toLocaleString()} {c.byCount}</span>
+          <span className="text-[10px] text-fg-dim">{listing.useCount.toLocaleString()} {c.byCount}</span>
         )}
         {listing.useCount <= 0 && <span />}
         {isInstalled ? (
-          <span className="rounded-lg bg-emerald-500/15 px-3 py-1.5 text-[10px] font-semibold text-emerald-200">{c.installedBadge}</span>
+          <span className="rounded-lg bg-ok-bg px-3 py-1.5 text-[10px] font-semibold text-ok">{c.installedBadge}</span>
         ) : isInstalling ? (
-          <span className="rounded-lg bg-slate-500/20 px-3 py-1.5 text-[10px] font-semibold text-slate-300">
+          <span className="rounded-lg bg-slate-500/20 px-3 py-1.5 text-[10px] font-semibold text-fg-soft">
             <svg className="mr-1 inline h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
               <circle cx="12" cy="12" r="10" opacity="0.25" />
               <path d="M22 12a10 10 0 0 0-10-10" opacity="0.9" />
@@ -315,7 +315,7 @@ function ListingCard({
               e.stopPropagation();
               onInstall(listing);
             }}
-            className="rounded-lg bg-cyan-500/20 px-3 py-1.5 text-[10px] font-semibold text-cyan-100 transition-colors hover:bg-cyan-500/35"
+            className="rounded-lg bg-info-bg px-3 py-1.5 text-[10px] font-semibold text-info transition-colors hover:bg-info-bg"
           >
             {c.install}
           </span>
@@ -375,23 +375,23 @@ function ListingDetail({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-[#2a2d3a] px-6 py-4">
+      <div className="flex items-center justify-between border-b border-line px-6 py-4">
         <button
           type="button"
           onClick={onClose}
-          className="flex items-center gap-2 text-xs text-slate-400 transition-colors hover:text-slate-200"
+          className="flex items-center gap-2 text-xs text-fg-muted transition-colors hover:text-fg"
         >
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M19 12H5M12 19l-7-7 7-7" />
           </svg>
           {c.back}
         </button>
-        <button onClick={onCloseModal} title={c.close} className="text-2xl leading-none text-slate-500 hover:text-slate-300">×</button>
+        <button onClick={onCloseModal} title={c.close} className="text-2xl leading-none text-fg-muted hover:text-fg-soft">×</button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
         <div className="flex items-start gap-4">
-          <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-[#1d2332] text-xl font-bold text-slate-300">
+          <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-raised text-xl font-bold text-fg-soft">
             {listing.iconUrl ? (
               <img src={listing.iconUrl} alt="" className="h-12 w-12 rounded-xl object-contain" />
             ) : (
@@ -399,29 +399,29 @@ function ListingDetail({
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-bold text-slate-100">{listing.title}</h2>
-            <p className="mt-0.5 text-xs text-slate-500">{listing.name}</p>
+            <h2 className="text-lg font-bold text-fg">{listing.title}</h2>
+            <p className="mt-0.5 text-xs text-fg-muted">{listing.name}</p>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <span className="rounded-md border border-[#2a2d3a] px-2 py-0.5 text-[10px] text-slate-400">
+              <span className="rounded-md border border-line px-2 py-0.5 text-[10px] text-fg-muted">
                 v{listing.version}
               </span>
-              <span className="rounded-md border border-[#2a2d3a] px-2 py-0.5 text-[10px] text-slate-400">
+              <span className="rounded-md border border-line px-2 py-0.5 text-[10px] text-fg-muted">
                 {listing.registryType}
               </span>
-              <span className="rounded-md border border-[#2a2d3a] px-2 py-0.5 text-[10px] text-slate-400">
+              <span className="rounded-md border border-line px-2 py-0.5 text-[10px] text-fg-muted">
                 {listing.runtimeHint}
               </span>
             </div>
           </div>
         </div>
 
-        <p className="mt-5 text-sm leading-relaxed text-slate-300">{listing.description}</p>
+        <p className="mt-5 text-sm leading-relaxed text-fg-soft">{listing.description}</p>
 
         {isRemote && (
           <div className="mt-4">
             {/* Status badge */}
             {previewLoading && (
-              <div className="inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800/50 px-3 py-1.5 text-[11px] text-slate-300">
+              <div className="inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800/50 px-3 py-1.5 text-[11px] text-fg-soft">
                 <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                   <circle cx="12" cy="12" r="10" opacity="0.25" />
                   <path d="M22 12a10 10 0 0 0-10-10" opacity="0.9" />
@@ -430,7 +430,7 @@ function ListingDetail({
               </div>
             )}
             {previewDone && previewResult && (
-              <div className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-medium text-emerald-200">
+              <div className="inline-flex items-center gap-2 rounded-lg border border-ok-bg bg-ok-bg px-3 py-1.5 text-[11px] font-medium text-ok">
                 <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
                 </svg>
@@ -438,7 +438,7 @@ function ListingDetail({
               </div>
             )}
             {previewDone && isAuthRequired && (
-              <div className="inline-flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[11px] font-medium text-red-200">
+              <div className="inline-flex items-center gap-2 rounded-lg border border-danger-bg bg-danger-bg px-3 py-1.5 text-[11px] font-medium text-danger">
                 <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <rect x="3" y="11" width="18" height="11" rx="2" />
                   <path d="M7 11V7a5 5 0 0 1 10 0v4" />
@@ -447,7 +447,7 @@ function ListingDetail({
               </div>
             )}
             {previewDone && previewError && !isAuthRequired && (
-              <div className="inline-flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-medium text-amber-200">
+              <div className="inline-flex items-center gap-2 rounded-lg border border-warn-bg bg-warn-bg px-3 py-1.5 text-[11px] font-medium text-warn">
                 <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" />
                   <path d="M12 8v4M12 16h.01" />
@@ -461,7 +461,7 @@ function ListingDetail({
               <button
                 type="button"
                 onClick={handlePreview}
-                className="ml-2 text-[10px] text-slate-500 underline transition-colors hover:text-slate-300"
+                className="ml-2 text-[10px] text-fg-muted underline transition-colors hover:text-fg-soft"
               >
                 Retry
               </button>
@@ -469,13 +469,13 @@ function ListingDetail({
 
             {/* Tool list */}
             {previewResult && previewResult.tools.length > 0 && (
-              <div className="mt-3 rounded-xl border border-[#2a2d3a] bg-[#0f1117]">
+              <div className="mt-3 rounded-xl border border-line bg-base">
                 <div className="max-h-[240px] overflow-y-auto p-2">
                   {previewResult.tools.map((tool) => (
-                    <div key={tool.name} className="rounded-lg px-3 py-2 transition-colors hover:bg-[#141a25]">
-                      <code className="text-xs font-semibold text-cyan-200">{tool.name}</code>
+                    <div key={tool.name} className="rounded-lg px-3 py-2 transition-colors hover:bg-base">
+                      <code className="text-xs font-semibold text-info">{tool.name}</code>
                       {tool.description && (
-                        <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400">{tool.description}</p>
+                        <p className="mt-0.5 text-[11px] leading-relaxed text-fg-muted">{tool.description}</p>
                       )}
                     </div>
                   ))}
@@ -493,7 +493,7 @@ function ListingDetail({
                 href={listing.websiteUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[11px] font-medium text-cyan-200 transition-colors hover:bg-cyan-500/20"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-info-bg bg-info-bg px-3 py-1.5 text-[11px] font-medium text-info transition-colors hover:bg-info-bg"
               >
                 <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" />
@@ -507,7 +507,7 @@ function ListingDetail({
                 href={listing.repositoryUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[#2a2d3a] bg-[#0f1117] px-3 py-1.5 text-[11px] font-medium text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-base px-3 py-1.5 text-[11px] font-medium text-fg-soft transition-colors hover:border-line-strong hover:text-fg"
               >
                 <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
@@ -519,72 +519,72 @@ function ListingDetail({
         )}
 
         {/* Configuration Guide */}
-        <div className="mt-4 rounded-xl border border-[#2a2d3a] bg-[#0f1117] p-4">
-          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">How to use</h4>
+        <div className="mt-4 rounded-xl border border-line bg-base p-4">
+          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-muted">How to use</h4>
           {isRemote && !listing.envVars.some(e => e.isRequired) ? (
-            <ol className="space-y-1.5 text-[11px] leading-relaxed text-slate-400">
-              <li><span className="text-cyan-300">1.</span> Click "Add to My Servers" below — server is auto-enabled.</li>
-              <li><span className="text-cyan-300">2.</span> Send any message in chat — tools load automatically.</li>
-              <li><span className="text-cyan-300">3.</span> The agent will offer to call MCP tools when relevant.</li>
+            <ol className="space-y-1.5 text-[11px] leading-relaxed text-fg-muted">
+              <li><span className="text-info">1.</span> Click "Add to My Servers" below — server is auto-enabled.</li>
+              <li><span className="text-info">2.</span> Send any message in chat — tools load automatically.</li>
+              <li><span className="text-info">3.</span> The agent will offer to call MCP tools when relevant.</li>
             </ol>
           ) : isRemote && listing.envVars.some(e => e.isRequired) ? (
-            <ol className="space-y-1.5 text-[11px] leading-relaxed text-slate-400">
-              <li><span className="text-cyan-300">1.</span> Click "Add to My Servers" below.</li>
-              <li><span className="text-cyan-300">2.</span> Open <strong className="text-slate-300">MCP Settings</strong> → select this server.</li>
-              <li><span className="text-cyan-300">3.</span> Fill in required environment variables (marked <span className="text-red-300">Required</span>).</li>
-              <li><span className="text-cyan-300">4.</span> Enable the server checkbox → click <strong className="text-slate-300">Save</strong>.</li>
-              <li><span className="text-cyan-300">5.</span> Send any message in chat — tools load automatically.</li>
+            <ol className="space-y-1.5 text-[11px] leading-relaxed text-fg-muted">
+              <li><span className="text-info">1.</span> Click "Add to My Servers" below.</li>
+              <li><span className="text-info">2.</span> Open <strong className="text-fg-soft">MCP Settings</strong> → select this server.</li>
+              <li><span className="text-info">3.</span> Fill in required environment variables (marked <span className="text-danger">Required</span>).</li>
+              <li><span className="text-info">4.</span> Enable the server checkbox → click <strong className="text-fg-soft">Save</strong>.</li>
+              <li><span className="text-info">5.</span> Send any message in chat — tools load automatically.</li>
             </ol>
           ) : (
-            <ol className="space-y-1.5 text-[11px] leading-relaxed text-slate-400">
-              <li><span className="text-cyan-300">1.</span> Click "Add to My Servers" below.</li>
-              <li><span className="text-cyan-300">2.</span> Open <strong className="text-slate-300">MCP Settings</strong> → select this server.</li>
-              <li><span className="text-cyan-300">3.</span> Ensure the command is correct (e.g. <code className="text-slate-300">npx -y @package/name</code>).</li>
-              <li><span className="text-cyan-300">4.</span> Fill in required environment variables if any.</li>
-              <li><span className="text-cyan-300">5.</span> Enable the server checkbox → click <strong className="text-slate-300">Save</strong>.</li>
-              <li><span className="text-cyan-300">6.</span> Send any message in chat — tools load automatically.</li>
+            <ol className="space-y-1.5 text-[11px] leading-relaxed text-fg-muted">
+              <li><span className="text-info">1.</span> Click "Add to My Servers" below.</li>
+              <li><span className="text-info">2.</span> Open <strong className="text-fg-soft">MCP Settings</strong> → select this server.</li>
+              <li><span className="text-info">3.</span> Ensure the command is correct (e.g. <code className="text-fg-soft">npx -y @package/name</code>).</li>
+              <li><span className="text-info">4.</span> Fill in required environment variables if any.</li>
+              <li><span className="text-info">5.</span> Enable the server checkbox → click <strong className="text-fg-soft">Save</strong>.</li>
+              <li><span className="text-info">6.</span> Send any message in chat — tools load automatically.</li>
             </ol>
           )}
         </div>
 
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-2xl border border-[#2a2d3a] bg-[#0f1117] p-4">
-            <h4 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{c.transport}</h4>
-            <p className={`mt-1 text-sm font-medium ${isRemote ? 'text-emerald-200' : 'text-slate-200'}`}>
+          <div className="rounded-2xl border border-line bg-base p-4">
+            <h4 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-muted">{c.transport}</h4>
+            <p className={`mt-1 text-sm font-medium ${isRemote ? 'text-ok' : 'text-fg'}`}>
               {listing.transport.type}
-              {isRemote && <span className="ml-1.5 text-[10px] font-normal text-emerald-400/70">remote</span>}
+              {isRemote && <span className="ml-1.5 text-[10px] font-normal text-ok">remote</span>}
             </p>
             {hostname && (
-              <p className="mt-1 truncate text-[11px] text-slate-500">{listing.url}</p>
+              <p className="mt-1 truncate text-[11px] text-fg-muted">{listing.url}</p>
             )}
           </div>
-          <div className="rounded-2xl border border-[#2a2d3a] bg-[#0f1117] p-4">
-            <h4 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{c.category}</h4>
-            <p className="mt-1 text-sm text-slate-200">{listing.categories.join(', ')}</p>
+          <div className="rounded-2xl border border-line bg-base p-4">
+            <h4 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-muted">{c.category}</h4>
+            <p className="mt-1 text-sm text-fg">{listing.categories.join(', ')}</p>
           </div>
         </div>
 
         {listing.envVars.length > 0 && (
           <div className="mt-4">
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{c.envVars}</h3>
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{c.envVars}</h3>
             <div className="space-y-2">
               {listing.envVars.map((ev: RegistryEnvVar) => (
-                <div key={ev.name} className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2.5">
+                <div key={ev.name} className="rounded-xl border border-line bg-base px-3 py-2.5">
                   <div className="flex items-center gap-2">
-                    <code className="text-sm font-medium text-slate-200">{ev.name}</code>
+                    <code className="text-sm font-medium text-fg">{ev.name}</code>
                     {ev.isRequired ? (
-                      <span className="rounded border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-red-200">{c.required}</span>
+                      <span className="rounded border border-danger-bg bg-danger-bg px-1.5 py-0.5 text-[9px] font-semibold text-danger">{c.required}</span>
                     ) : (
-                      <span className="rounded border border-[#2a2d3a] px-1.5 py-0.5 text-[9px] text-slate-500">{c.optional}</span>
+                      <span className="rounded border border-line px-1.5 py-0.5 text-[9px] text-fg-muted">{c.optional}</span>
                     )}
                     {ev.isSecret && (
-                      <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-amber-200">{c.secret}</span>
+                      <span className="rounded border border-warn-bg bg-warn-bg px-1.5 py-0.5 text-[9px] font-semibold text-warn">{c.secret}</span>
                     )}
                   </div>
-                  {ev.description && <p className="mt-1 text-[11px] text-slate-500">{ev.description}</p>}
+                  {ev.description && <p className="mt-1 text-[11px] text-fg-muted">{ev.description}</p>}
                   {ev.default !== undefined && ev.default !== '' && (
-                    <p className="mt-1 text-[10px] text-slate-600">
-                      Default: <code className="text-slate-400">{ev.default}</code>
+                    <p className="mt-1 text-[10px] text-fg-dim">
+                      Default: <code className="text-fg-muted">{ev.default}</code>
                     </p>
                   )}
                 </div>
@@ -595,9 +595,9 @@ function ListingDetail({
 
         {listing.command && (
           <div className="mt-4">
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{c.packages}</h3>
-            <div className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2.5">
-              <code className="text-xs text-slate-200">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{c.packages}</h3>
+            <div className="rounded-xl border border-line bg-base px-3 py-2.5">
+              <code className="text-xs text-fg">
                 {listing.command} {listing.args}
               </code>
             </div>
@@ -605,26 +605,26 @@ function ListingDetail({
         )}
       </div>
 
-      <div className="border-t border-[#2a2d3a] px-6 py-4">
+      <div className="border-t border-line px-6 py-4">
         {listing.needsManualConfig && (
-          <div className="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
+          <div className="mb-3 rounded-xl border border-warn-bg bg-warn-bg px-3 py-2 text-[11px] leading-relaxed text-warn">
             {listing.manualConfigNote || 'This server requires manual configuration after adding.'}
           </div>
         )}
         {isRemote && previewDone && isAuthRequired && !isInstalled && (
-          <div className="mb-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-[11px] leading-relaxed text-red-200">
+          <div className="mb-3 rounded-xl border border-danger-bg bg-danger-bg px-3 py-2 text-[11px] leading-relaxed text-danger">
             ⚠ This server requires authentication. Installing it will fail at tool discovery unless you provide credentials in MCP Settings.
           </div>
         )}
         {isInstalled ? (
-          <span className="inline-flex w-full items-center justify-center rounded-xl bg-emerald-500/15 py-3 text-sm font-semibold text-emerald-200">
+          <span className="inline-flex w-full items-center justify-center rounded-xl bg-ok-bg py-3 text-sm font-semibold text-ok">
             <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
             </svg>
             {c.installedBadge}
           </span>
         ) : isInstalling ? (
-          <span className="inline-flex w-full items-center justify-center rounded-xl bg-slate-500/15 py-3 text-sm font-semibold text-slate-300">
+          <span className="inline-flex w-full items-center justify-center rounded-xl bg-slate-500/15 py-3 text-sm font-semibold text-fg-soft">
             <svg className="mr-2 h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
               <circle cx="12" cy="12" r="10" opacity="0.25" />
               <path d="M22 12a10 10 0 0 0-10-10" opacity="0.9" />
@@ -635,7 +635,7 @@ function ListingDetail({
           <button
             type="button"
             onClick={() => onInstall(listing)}
-            className="flex w-full items-center justify-center rounded-xl border border-cyan-500/50 bg-cyan-500/15 py-3 text-sm font-semibold text-cyan-100 transition-colors hover:bg-cyan-500/25"
+            className="flex w-full items-center justify-center rounded-xl border border-info-bg bg-info-bg py-3 text-sm font-semibold text-info transition-colors hover:bg-info-bg"
           >
             {c.addToMyServers}
           </button>
@@ -647,21 +647,21 @@ function ListingDetail({
 
 function SkeletonCard() {
   return (
-    <div className="rounded-2xl border border-[#2a2d3a] bg-[#121722] p-4">
+    <div className="rounded-2xl border border-line bg-base p-4">
       <div className="flex items-start gap-3">
-        <div className="h-10 w-10 flex-shrink-0 animate-pulse rounded-xl bg-[#1d2332]" />
+        <div className="h-10 w-10 flex-shrink-0 animate-pulse rounded-xl bg-raised" />
         <div className="flex-1 space-y-2">
-          <div className="h-4 w-2/3 animate-pulse rounded bg-[#1d2332]" />
-          <div className="h-3 w-1/3 animate-pulse rounded bg-[#1d2332]" />
+          <div className="h-4 w-2/3 animate-pulse rounded bg-raised" />
+          <div className="h-3 w-1/3 animate-pulse rounded bg-raised" />
         </div>
       </div>
       <div className="mt-3 space-y-1.5">
-        <div className="h-3 w-full animate-pulse rounded bg-[#1d2332]" />
-        <div className="h-3 w-4/5 animate-pulse rounded bg-[#1d2332]" />
+        <div className="h-3 w-full animate-pulse rounded bg-raised" />
+        <div className="h-3 w-4/5 animate-pulse rounded bg-raised" />
       </div>
       <div className="mt-3 flex gap-1.5">
-        <div className="h-5 w-16 animate-pulse rounded-md bg-[#1d2332]" />
-        <div className="h-5 w-12 animate-pulse rounded-md bg-[#1d2332]" />
+        <div className="h-5 w-16 animate-pulse rounded-md bg-raised" />
+        <div className="h-5 w-12 animate-pulse rounded-md bg-raised" />
       </div>
     </div>
   );
@@ -794,21 +794,21 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
   const hasMore = hasMoreOfficial;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="flex h-[90vh] w-[min(96vw,1100px)] flex-col rounded-3xl border border-[#2a2d3a] bg-[#1a1d27] shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay backdrop-blur-sm">
+      <div className="flex h-[90vh] w-[min(96vw,1100px)] flex-col rounded-3xl border border-line bg-raised shadow-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[#2a2d3a] px-6 py-4">
+        <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-slate-100">{c.title}</h2>
+            <h2 className="text-lg font-semibold text-fg">{c.title}</h2>
           </div>
-          <button onClick={onClose} title={c.close} className="text-2xl leading-none text-slate-500 hover:text-slate-300">×</button>
+          <button onClick={onClose} title={c.close} className="text-2xl leading-none text-fg-muted hover:text-fg-soft">×</button>
         </div>
 
         {/* Search + Filters */}
-        <div className="border-b border-[#2a2d3a] px-6 py-3">
+        <div className="border-b border-line px-6 py-3">
           <div className="flex items-center gap-3">
             <div className="relative flex-1">
-              <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="11" cy="11" r="8" />
                 <path d="M21 21l-4.35-4.35" />
               </svg>
@@ -818,13 +818,13 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
                 value={searchQuery}
                 onChange={(e) => handleSearchChange(e.target.value)}
                 placeholder={c.search}
-                className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] py-2 pl-9 pr-3 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-500/60 focus:outline-none"
+                className="w-full rounded-xl border border-line bg-base py-2 pl-9 pr-3 text-sm text-fg placeholder-slate-600 focus:border-info focus:outline-none"
               />
             </div>
             <select
               value={transportFilter}
               onChange={(e) => setTransportFilter(e.target.value)}
-              className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-xs text-slate-300 focus:border-cyan-500/60 focus:outline-none"
+              className="rounded-xl border border-line bg-base px-3 py-2 text-xs text-fg-soft focus:border-info focus:outline-none"
             >
               <option value="">{c.transport}: {c.all}</option>
               <option value="stdio">stdio</option>
@@ -834,7 +834,7 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
             <select
               value={runtimeFilter}
               onChange={(e) => setRuntimeFilter(e.target.value)}
-              className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-xs text-slate-300 focus:border-cyan-500/60 focus:outline-none"
+              className="rounded-xl border border-line bg-base px-3 py-2 text-xs text-fg-soft focus:border-info focus:outline-none"
             >
               <option value="">{c.runtime}: {c.all}</option>
               <option value="npx">npx</option>
@@ -844,7 +844,7 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-xs text-slate-300 focus:border-cyan-500/60 focus:outline-none"
+              className="rounded-xl border border-line bg-base px-3 py-2 text-xs text-fg-soft focus:border-info focus:outline-none"
             >
               <option value="">{c.category}: {c.all}</option>
               <option value="search">{c.all === 'All' ? 'Search' : '搜索'}</option>
@@ -868,12 +868,12 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
 
             {error && listings.length === 0 && (
               <div className="flex h-64 flex-col items-center justify-center gap-4">
-                <p className="text-sm text-red-400">{c.error}</p>
-                <p className="text-xs text-slate-600">{error}</p>
+                <p className="text-sm text-danger">{c.error}</p>
+                <p className="text-xs text-fg-dim">{error}</p>
                 <button
                   type="button"
                   onClick={() => loadServers()}
-                  className="rounded-xl border border-red-500/30 px-4 py-2 text-xs font-medium text-red-300 transition-colors hover:bg-red-500/10"
+                  className="rounded-xl border border-danger-bg px-4 py-2 text-xs font-medium text-danger transition-colors hover:bg-danger-bg"
                 >
                   {c.retry}
                 </button>
@@ -882,13 +882,13 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
 
             {!isLoading && !error && filteredListings.length === 0 && listings.length > 0 && (
               <div className="flex h-64 items-center justify-center">
-                <p className="text-sm text-slate-500">{c.empty}</p>
+                <p className="text-sm text-fg-muted">{c.empty}</p>
               </div>
             )}
 
             {!isLoading && !error && filteredListings.length === 0 && listings.length === 0 && (
               <div className="flex h-64 items-center justify-center">
-                <p className="text-sm text-slate-500">{c.empty}</p>
+                <p className="text-sm text-fg-muted">{c.empty}</p>
               </div>
             )}
 
@@ -914,7 +914,7 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
                   type="button"
                   onClick={handleLoadMore}
                   disabled={isLoading}
-                  className="rounded-xl border border-[#2a2d3a] px-6 py-2.5 text-xs font-medium text-slate-400 transition-colors hover:border-cyan-500/40 hover:text-cyan-200 disabled:opacity-50"
+                  className="rounded-xl border border-line px-6 py-2.5 text-xs font-medium text-fg-muted transition-colors hover:border-info-bg hover:text-info disabled:opacity-50"
                 >
                   {isLoading ? c.loading : c.loadMore}
                 </button>
@@ -924,7 +924,7 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
 
           {/* Detail slide-out panel */}
           {selectedListing && (
-            <div className="absolute right-0 top-0 h-full w-[400px] border-l border-[#2a2d3a] bg-[#161922]">
+            <div className="absolute right-0 top-0 h-full w-[400px] border-l border-line bg-base">
               <ListingDetail
                 listing={selectedListing}
                 isInstalled={isListingInstalled(installedIds, selectedListing)}
@@ -940,7 +940,7 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
 
         {/* Toast */}
         {toastMessage && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-2xl border border-emerald-500/30 bg-emerald-500/15 px-5 py-3 text-sm text-emerald-100 shadow-lg backdrop-blur">
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-2xl border border-ok-bg bg-ok-bg px-5 py-3 text-sm text-ok shadow-lg backdrop-blur">
             {toastMessage}
           </div>
         )}

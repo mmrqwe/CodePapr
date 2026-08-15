@@ -22,7 +22,7 @@ export const MessageContent = memo(function MessageContent({
     const visibleContent = getStreamingPreviewContent(content, MAX_STREAMING_MESSAGE_CHARS);
 
     return (
-      <p className="text-sm leading-relaxed whitespace-pre-wrap break-words text-slate-200">
+      <p className="text-sm leading-relaxed whitespace-pre-wrap break-words text-fg">
         {visibleContent}
       </p>
     );

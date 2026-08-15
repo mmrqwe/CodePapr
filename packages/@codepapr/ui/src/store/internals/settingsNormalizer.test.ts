@@ -4,6 +4,9 @@ import { CORE_TOKEN_KEYS } from '../../theme/themeEngine';
 import type { CustomThemeRecord } from '../../theme/types';
 import type { Settings } from './types';
 
+/** 旧版本 Settings 输入（含已废弃的 theme 字段）。 */
+type LegacySettingsInput = Partial<Settings> & { theme?: string | null };
+
 describe('normalizeSettings mentor 字段防御', () => {
   // 回归 #22：mentor 三字段此前用 `?? default` + .trim()，非字符串的损坏
   // 持久化值（数字/对象/null 以外的类型）会让 .trim() 抛 TypeError，
@@ -78,31 +81,44 @@ describe('normalizeSettings thinking 强度字段', () => {
 });
 
 describe('normalizeSettings 主题字段防御', () => {
-  it('内置主题 id 保留，未知 id 回退 null（跟随系统）', () => {
-    expect(normalizeSettings({ theme: 'nord' } as Partial<Settings>).theme).toBe('nord');
-    expect(normalizeSettings({ theme: 'bogus' } as Partial<Settings>).theme).toBeNull();
-    expect(normalizeSettings({ theme: '' } as Partial<Settings>).theme).toBeNull();
-    expect(normalizeSettings({} as Partial<Settings>).theme).toBeNull();
+  it('lightTheme/darkTheme 只接受内置或已校验的自定义主题', () => {
+    const base = normalizeSettings({} as Partial<Settings>);
+    expect(base.lightTheme).toBe('paper-light');
+    expect(base.darkTheme).toBe('paper-dark');
+    expect(base.followSystem).toBe(true);
+
+    const withThemes = normalizeSettings({
+      lightTheme: 'solarized-light',
+      darkTheme: 'nord',
+    } as Partial<Settings>);
+    expect(withThemes.lightTheme).toBe('solarized-light');
+    expect(withThemes.darkTheme).toBe('nord');
+
+    const invalid = normalizeSettings({
+      lightTheme: 'bogus',
+      darkTheme: 'bogus',
+    } as Partial<Settings>);
+    expect(invalid.lightTheme).toBe('paper-light');
+    expect(invalid.darkTheme).toBe('paper-dark');
   });
 
-  it('自定义主题 id 仅在记录通过校验时保留', () => {
+  it('自定义主题 id 仅在记录通过校验时可用于槽位', () => {
     const valid: CustomThemeRecord = {
       name: 'M',
       mode: 'dark',
       tokens: Object.fromEntries(CORE_TOKEN_KEYS.map((k) => [k, '#111'])),
     };
-    expect(
-      normalizeSettings({
-        theme: 'custom-1',
-        customThemes: { 'custom-1': valid },
-      } as Partial<Settings>).theme,
-    ).toBe('custom-1');
-    expect(
-      normalizeSettings({
-        theme: 'custom-1',
-        customThemes: {},
-      } as Partial<Settings>).theme,
-    ).toBeNull();
+    const settings = normalizeSettings({
+      darkTheme: 'custom-1',
+      customThemes: { 'custom-1': valid },
+    } as Partial<Settings>);
+    expect(settings.darkTheme).toBe('custom-1');
+
+    const missing = normalizeSettings({
+      darkTheme: 'custom-1',
+      customThemes: {},
+    } as Partial<Settings>);
+    expect(missing.darkTheme).toBe('paper-dark');
   });
 
   it('非法自定义主题记录被丢弃，不阻塞设置加载', () => {
@@ -117,6 +133,38 @@ describe('normalizeSettings 主题字段防御', () => {
       },
     } as unknown as Partial<Settings>);
     expect(Object.keys(settings.customThemes)).toEqual(['ok-theme']);
+  });
+
+  it('旧版单一 theme 字段迁移到浅/深槽位', () => {
+    // 旧字段 = 深色主题 → 落入 darkTheme，转手动模式
+    const dark = normalizeSettings({ theme: 'nord' } as LegacySettingsInput);
+    expect(dark.darkTheme).toBe('nord');
+    expect(dark.lightTheme).toBe('paper-light');
+    expect(dark.followSystem).toBe(false);
+    expect(dark.themeMode).toBe('dark');
+
+    // 旧字段 = 浅色主题
+    const light = normalizeSettings({ theme: 'solarized-light' } as LegacySettingsInput);
+    expect(light.lightTheme).toBe('solarized-light');
+    expect(light.darkTheme).toBe('paper-dark');
+    expect(light.followSystem).toBe(false);
+    expect(light.themeMode).toBe('light');
+
+    // 旧字段 = null → 跟随系统
+    const follow = normalizeSettings({ theme: null } as LegacySettingsInput);
+    expect(follow.followSystem).toBe(true);
+    expect(follow.lightTheme).toBe('paper-light');
+    expect(follow.darkTheme).toBe('paper-dark');
+  });
+
+  it('themeMode/followSystem 非法值回退默认', () => {
+    const settings = normalizeSettings({
+      followSystem: 'yes' as unknown as boolean,
+      themeMode: 'blue' as unknown as 'light',
+    } as Partial<Settings>);
+    expect(settings.followSystem).toBe(true);
+    expect(settings.themeMode).toBe('light');
+    expect(normalizeSettings({ themeMode: 'dark' } as Partial<Settings>).themeMode).toBe('dark');
   });
 
   it('accent 仅接受 #rgb / #rrggbb', () => {

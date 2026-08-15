@@ -20,7 +20,7 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-4 text-sm leading-relaxed text-slate-400">
+      <div className="rounded-2xl border border-line bg-base px-5 py-4 text-sm leading-relaxed text-fg-muted">
         {t.settingsSearchDesc}
       </div>
 
@@ -30,11 +30,11 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
             type="checkbox"
             checked={local.searxngEnabled}
             onChange={(e) => update({ searxngEnabled: e.target.checked })}
-            className="h-5 w-5 rounded accent-indigo-500"
+            className="h-5 w-5 rounded accent-accent"
           />
           <div>
-            <span className="text-sm font-medium text-slate-200">{t.searxngEnable}</span>
-            <p className="mt-0.5 text-xs text-slate-500">{t.searxngEnableDesc}</p>
+            <span className="text-sm font-medium text-fg">{t.searxngEnable}</span>
+            <p className="mt-0.5 text-xs text-fg-muted">{t.searxngEnableDesc}</p>
           </div>
         </label>
       </FieldCard>
@@ -54,20 +54,20 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
             />
           </FieldCard>
 
-          <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b]">
+          <div className="rounded-2xl border border-line bg-base">
             <button
               type="button"
               onClick={() => setShowSearxngAdvanced(!showSearxngAdvanced)}
-              className="flex w-full items-center justify-between px-5 py-4 text-sm font-medium text-slate-300 hover:text-slate-100 transition-colors"
+              className="flex w-full items-center justify-between px-5 py-4 text-sm font-medium text-fg-soft hover:text-fg transition-colors"
             >
               <span>{t.searxngAdvancedLabel}</span>
-              <span className={`text-xs text-slate-500 transition-transform ${showSearxngAdvanced ? 'rotate-90' : ''}`}>
+              <span className={`text-xs text-fg-muted transition-transform ${showSearxngAdvanced ? 'rotate-90' : ''}`}>
                 {'\u25B8'}
               </span>
             </button>
 
             {showSearxngAdvanced && (
-              <div className="px-5 pb-5 space-y-5 border-t border-[#2a2d3a] pt-4">
+              <div className="px-5 pb-5 space-y-5 border-t border-line pt-4">
                 <div>
                   <FieldLabel tight>{t.searxngCategoriesLabel}</FieldLabel>
                   <div className="flex flex-wrap gap-2">
@@ -86,8 +86,8 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
                           onClick={toggle}
                           className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
                             active
-                              ? 'border-indigo-500/60 bg-indigo-500/20 text-indigo-200'
-                              : 'border-[#2a2d3a] text-slate-500 hover:border-slate-500/60 hover:text-slate-300'
+                              ? 'border-accent-soft bg-accent-soft text-accent-text'
+                              : 'border-line text-fg-muted hover:border-line-strong hover:text-fg-soft'
                           }`}
                         >
                           {t[cat.labelKey]}
@@ -95,7 +95,7 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
                       );
                     })}
                   </div>
-                  <p className="mt-1.5 text-[10px] leading-relaxed text-slate-600">{t.searxngCategoriesHint}</p>
+                  <p className="mt-1.5 text-[10px] leading-relaxed text-fg-dim">{t.searxngCategoriesHint}</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-5">
@@ -104,7 +104,7 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
                     <select
                       value={local.searxngTimeRange}
                       onChange={(e) => update({ searxngTimeRange: e.target.value })}
-                      className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+                      className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg focus:border-accent-soft focus:outline-none"
                     >
                       <option value="">{t.searxngTimeRangeNone}</option>
                       <option value="day">{t.searxngTimeRangeDay}</option>
@@ -112,7 +112,7 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
                       <option value="month">{t.searxngTimeRangeMonth}</option>
                       <option value="year">{t.searxngTimeRangeYear}</option>
                     </select>
-                    <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{t.searxngTimeRangeHint}</p>
+                    <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{t.searxngTimeRangeHint}</p>
                   </div>
                   <div>
                     <TextField
@@ -138,21 +138,21 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
                           name="searxngSafeSearch"
                           checked={local.searxngSafeSearch === level}
                           onChange={() => update({ searxngSafeSearch: level })}
-                          className="h-4 w-4 accent-indigo-500"
+                          className="h-4 w-4 accent-accent"
                         />
-                        <span className="text-sm text-slate-300">
+                        <span className="text-sm text-fg-soft">
                           {level === 0 ? t.searxngSafeSearch0 : level === 1 ? t.searxngSafeSearch1 : t.searxngSafeSearch2}
                         </span>
                       </label>
                     ))}
                   </div>
-                  <p className="mt-1.5 text-[10px] leading-relaxed text-slate-600">{t.searxngSafeSearchHint}</p>
+                  <p className="mt-1.5 text-[10px] leading-relaxed text-fg-dim">{t.searxngSafeSearchHint}</p>
                 </div>
               </div>
             )}
           </div>
 
-          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-5 py-4 text-xs leading-relaxed text-amber-400/80">
+          <div className="rounded-2xl border border-warn-bg bg-warn-bg px-5 py-4 text-xs leading-relaxed text-warn">
             {t.searxngNotice}
           </div>
         </>

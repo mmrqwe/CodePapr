@@ -111,13 +111,13 @@ function getMsgSnippet(text: string, query: string) {
 
 function renderFileSnippet(preview: string, query: string) {
   const idx = preview.toLowerCase().indexOf(query.toLowerCase());
-  if (idx < 0) return <span className="text-slate-500">{preview.slice(0, 80)}</span>;
+  if (idx < 0) return <span className="text-fg-muted">{preview.slice(0, 80)}</span>;
   const bs = Math.max(0, idx - CONTEXT_RADIUS);
   const ae = idx + query.length + CONTEXT_RADIUS;
   return (
-    <span className="text-slate-500">
+    <span className="text-fg-muted">
       {bs > 0 ? '…' : ''}{preview.slice(bs, idx)}
-      <span className="font-semibold text-amber-200 bg-amber-500/15 rounded-sm px-0.5">{preview.slice(idx, idx + query.length)}</span>
+      <span className="font-semibold text-warn bg-warn-bg rounded-sm px-0.5">{preview.slice(idx, idx + query.length)}</span>
       {preview.slice(idx + query.length, ae)}{ae < preview.length ? '…' : ''}
     </span>
   );
@@ -235,10 +235,10 @@ export const ConversationSearch = memo(function ConversationSearch({ onNavigateT
   const panel = showPanel ? (
     <div ref={panelRef} className="search-panel" style={panelStyle}>
       <div className="search-panel-header">
-        <span className="text-[11px] font-medium text-slate-400">
+        <span className="text-[11px] font-medium text-fg-muted">
           {tab === 'conversation' && !hasMessages ? copy.noMessages : tab === 'files' && !workspacePath ? copy.noWorkspace : hasResults ? copy.resultsCount(totalCount) : fileLoading ? copy.searching : copy.noResults}
         </span>
-        {hasResults && <span className="text-[10px] text-slate-600 tabular-nums">{selectedIndex + 1}/{results.length}</span>}
+        {hasResults && <span className="text-[10px] text-fg-dim tabular-nums">{selectedIndex + 1}/{results.length}</span>}
       </div>
       <div className="flex items-center border-b border-[var(--border)]">
         {tabs.map((t) => <button key={t.key} type="button" onClick={() => { setTab(t.key); setSelectedIndex(0); }} className={`search-panel-tab ${tab === t.key ? 'active' : ''}`}>{t.label}</button>)}
@@ -263,8 +263,8 @@ export const ConversationSearch = memo(function ConversationSearch({ onNavigateT
                 return (<button key={m.id} ref={isSel ? selectedRef : undefined} type="button" className={`search-panel-item ${isSel ? 'selected' : ''}`} onClick={() => scrollToMessage(m.id)} onMouseEnter={() => setSelectedIndex(idx)}>
                   <span className={`search-role-badge ${isUser ? 'user' : 'assistant'}`}>{isUser ? copy.userLabel : copy.aiLabel}</span>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-0.5"><span className="text-[10px] text-slate-500 font-mono tabular-nums">#{m.roundIndex}</span><span className="text-[10px] text-slate-600">{formatRelativeTime(m.timestamp, lang)}</span></div>
-                    <p className="text-[12px] leading-relaxed text-slate-400 line-clamp-1"><span className="text-slate-500">{ctx.before}</span><span className="font-semibold text-amber-200 bg-amber-500/15 rounded-sm px-0.5">{ctx.match}</span><span className="text-slate-500">{ctx.after}</span></p>
+                    <div className="flex items-center gap-2 mb-0.5"><span className="text-[10px] text-fg-muted font-mono tabular-nums">#{m.roundIndex}</span><span className="text-[10px] text-fg-dim">{formatRelativeTime(m.timestamp, lang)}</span></div>
+                    <p className="text-[12px] leading-relaxed text-fg-muted line-clamp-1"><span className="text-fg-muted">{ctx.before}</span><span className="font-semibold text-warn bg-warn-bg rounded-sm px-0.5">{ctx.match}</span><span className="text-fg-muted">{ctx.after}</span></p>
                   </div>
                 </button>);
               }
@@ -272,26 +272,26 @@ export const ConversationSearch = memo(function ConversationSearch({ onNavigateT
               return (<button key={`${f.path}:${f.line}:${idx}`} ref={isSel ? selectedRef : undefined} type="button" className={`search-panel-item ${isSel ? 'selected' : ''}`} onClick={() => navigateToFile(f)} onMouseEnter={() => setSelectedIndex(idx)}>
                 <span className="search-role-badge file">📄</span>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 mb-0.5"><span className="text-[11px] text-slate-300 truncate font-mono">{fn}</span><span className="flex-shrink-0 text-[10px] text-slate-500 font-mono">:{f.line}</span></div>
-                  <p className="text-[12px] leading-relaxed text-slate-400 line-clamp-1">{fileMode === 'filename' ? <span className="text-slate-500">{f.path}</span> : renderFileSnippet(f.preview, query)}</p>
+                  <div className="flex items-center gap-2 mb-0.5"><span className="text-[11px] text-fg-soft truncate font-mono">{fn}</span><span className="flex-shrink-0 text-[10px] text-fg-muted font-mono">:{f.line}</span></div>
+                  <p className="text-[12px] leading-relaxed text-fg-muted line-clamp-1">{fileMode === 'filename' ? <span className="text-fg-muted">{f.path}</span> : renderFileSnippet(f.preview, query)}</p>
                 </div>
               </button>);
             })}
           </div>
-          {isTruncated && (<div className="border-t border-amber-500/20 bg-amber-500/5 px-3 py-2"><p className="text-[11px] leading-relaxed text-amber-300/80">{copy.truncated(MAX_RESULTS, totalCount)}</p></div>)}
+          {isTruncated && (<div className="border-t border-warn-bg bg-warn-bg px-3 py-2"><p className="text-[11px] leading-relaxed text-warn">{copy.truncated(MAX_RESULTS, totalCount)}</p></div>)}
         </>
       )}
       {(hasResults || tab === 'files' || (tab === 'conversation' && !hasMessages)) && (
-        <div className="border-t border-[var(--border)] px-3 py-1.5"><span className="text-[10px] text-slate-600">{copy.keyboardHint}</span></div>
+        <div className="border-t border-[var(--border)] px-3 py-1.5"><span className="text-[10px] text-fg-dim">{copy.keyboardHint}</span></div>
       )}
     </div>
   ) : null;
 
   return (
     <div className="conversation-search relative flex items-center">
-      <svg className="absolute left-2.5 h-3.5 w-3.5 text-slate-500 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-      <input ref={inputRef} type="text" value={query} onFocus={handleFocus} onChange={handleChange} onKeyDown={handleKeyDown} placeholder={copy.placeholder} className="h-[34px] w-[160px] rounded-lg border border-[var(--border)] bg-[var(--bg-base)] pl-8 pr-7 text-xs text-slate-300 placeholder-slate-600 outline-none transition-colors hover:border-indigo-500/30 focus:border-indigo-500/50 focus:bg-[var(--bg-deep)]" />
-      {hasQuery && (<button type="button" onClick={handleClear} tabIndex={-1} className="absolute right-1.5 flex h-5 w-5 items-center justify-center rounded text-slate-500 transition-colors hover:text-slate-300"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-3 w-3"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button>)}
+      <svg className="absolute left-2.5 h-3.5 w-3.5 text-fg-muted pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+      <input ref={inputRef} type="text" value={query} onFocus={handleFocus} onChange={handleChange} onKeyDown={handleKeyDown} placeholder={copy.placeholder} className="h-[34px] w-[160px] rounded-lg border border-[var(--border)] bg-[var(--bg-base)] pl-8 pr-7 text-xs text-fg-soft placeholder-slate-600 outline-none transition-colors hover:border-accent-soft focus:border-accent-soft focus:bg-[var(--bg-deep)]" />
+      {hasQuery && (<button type="button" onClick={handleClear} tabIndex={-1} className="absolute right-1.5 flex h-5 w-5 items-center justify-center rounded text-fg-muted transition-colors hover:text-fg-soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-3 w-3"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button>)}
       {panel && createPortal(panel, document.body)}
     </div>
   );

@@ -111,16 +111,16 @@ function formatLocalTime(isoString: string): string {
 function statusBadgeClassName(kind: ReturnType<typeof describeGitChange>['kind']): string {
   switch (kind) {
     case 'added':
-      return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200';
+      return 'border-ok-bg bg-ok-bg text-ok';
     case 'deleted':
-      return 'border-rose-500/30 bg-rose-500/10 text-rose-200';
+      return 'border-danger-bg bg-danger-bg text-danger';
     case 'renamed':
-      return 'border-amber-500/30 bg-amber-500/10 text-amber-200';
+      return 'border-warn-bg bg-warn-bg text-warn';
     case 'untracked':
-      return 'border-sky-500/30 bg-sky-500/10 text-sky-200';
+      return 'border-info-bg bg-info-bg text-info';
     case 'modified':
     default:
-      return 'border-indigo-500/30 bg-indigo-500/10 text-indigo-200';
+      return 'border-accent-soft bg-accent-soft text-accent-text';
   }
 }
 
@@ -782,14 +782,14 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   function commitKindBadgeStyle(kind: CommitKind): string {
     switch (kind) {
       case 'user':
-        return 'border-emerald-500/40 text-emerald-200';
+        return 'border-ok-bg text-ok';
       case 'baseline':
-        return 'border-slate-600 text-slate-500';
+        return 'border-slate-600 text-fg-muted';
       case 'legacy-checkpoint':
-        return 'border-amber-500/40 text-amber-200';
+        return 'border-warn-bg text-warn';
       case 'checkpoint':
       default:
-        return 'border-[#2a2d3a] text-slate-400';
+        return 'border-line text-fg-muted';
     }
   }
 
@@ -810,28 +810,28 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   function changedFileStatusClass(status: string): string {
     switch (status) {
       case 'A':
-        return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200';
+        return 'border-ok-bg bg-ok-bg text-ok';
       case 'D':
-        return 'border-rose-500/40 bg-rose-500/10 text-rose-200';
+        return 'border-danger-bg bg-danger-bg text-danger';
       case 'R':
       case 'C':
-        return 'border-sky-500/40 bg-sky-500/10 text-sky-200';
+        return 'border-info-bg bg-info-bg text-info';
       case 'T':
         return 'border-violet-500/40 bg-violet-500/10 text-violet-200';
       case 'M':
       default:
-        return 'border-indigo-500/40 bg-indigo-500/10 text-indigo-200';
+        return 'border-accent-soft bg-accent-soft text-accent-text';
     }
   }
 
   function renderGitHistoryList(entries: readonly GitHistoryEntry[]) {
     if (isLoading && !gitHistory) {
-      return <div className="text-xs text-slate-500">{gitHistoryLoadingText}</div>;
+      return <div className="text-xs text-fg-muted">{gitHistoryLoadingText}</div>;
     }
 
     if (entries.length === 0) {
       return (
-        <div className="rounded-xl border border-dashed border-[#2a2d3a] px-3 py-3 text-xs text-slate-500">
+        <div className="rounded-xl border border-dashed border-line px-3 py-3 text-xs text-fg-muted">
           {gitHistory?.message || gitHistoryEmptyText}
         </div>
       );
@@ -855,20 +855,20 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
             entry.hash === historyEntries[historyEntries.length - 1]?.hash;
           const titleTone =
             subjectInfo.kind === 'user'
-              ? 'text-slate-100 font-semibold'
+              ? 'text-fg font-semibold'
               : subjectInfo.kind === 'baseline'
-              ? 'text-slate-500 italic'
+              ? 'text-fg-muted italic'
               : subjectInfo.kind === 'legacy-checkpoint'
-              ? 'text-amber-200'
-              : 'text-slate-300';
+              ? 'text-warn'
+              : 'text-fg-soft';
 
           return (
             <div
               key={entry.hash}
               className={`rounded-xl border transition-colors ${
                 isSelected
-                  ? 'border-indigo-500/50 bg-indigo-500/10'
-                  : 'border-[#202432] bg-[#10141d]'
+                  ? 'border-accent-soft bg-accent-soft'
+                  : 'border-line bg-base'
               }`}
             >
               <div
@@ -883,8 +883,8 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                 }}
                 className="block w-full cursor-pointer px-3 py-2 text-left"
               >
-                <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
-                  <span className="rounded-full border border-[#2a2d3a] px-2 py-0.5 font-mono text-[9px] text-slate-400">
+                <div className="flex flex-wrap items-center gap-2 text-[10px] text-fg-muted">
+                  <span className="rounded-full border border-line px-2 py-0.5 font-mono text-[9px] text-fg-muted">
                     {entry.shortHash}
                   </span>
                   <span aria-hidden className="text-[10px]">
@@ -902,19 +902,19 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                     </span>
                   )}
                   {entry.isHead && (
-                    <span className="rounded-full border border-emerald-500/30 px-2 py-0.5 text-emerald-200">
+                    <span className="rounded-full border border-ok-bg px-2 py-0.5 text-ok">
                       {gitHistoryHeadLabelText}
                     </span>
                   )}
                   {secondaryRefs.slice(0, 1).map((refName) => (
                     <span
                       key={refName}
-                      className="rounded-full border border-[#2a2d3a] px-2 py-0.5 text-slate-400"
+                      className="rounded-full border border-line px-2 py-0.5 text-fg-muted"
                     >
                       {refName}
                     </span>
                   ))}
-                  <span aria-hidden className="ml-auto text-[10px] text-slate-500">
+                  <span aria-hidden className="ml-auto text-[10px] text-fg-muted">
                     {isExpanded ? '▾' : '▸'}
                   </span>
                 </div>
@@ -924,7 +924,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                 >
                   {subjectInfo.display}
                 </div>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-fg-muted">
                   <span>{entry.authorName}</span>
                   <span aria-hidden>·</span>
                   <span>{formatLocalTime(entry.committedAt)}</span>
@@ -934,8 +934,8 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                       <span>
                         {cachedFiles.files.length} {lang === 'en' ? 'files' : '个文件'}
                       </span>
-                      <span className="text-emerald-400">+{cachedFiles.totalAdditions}</span>
-                      <span className="text-rose-400">−{cachedFiles.totalDeletions}</span>
+                      <span className="text-ok">+{cachedFiles.totalAdditions}</span>
+                      <span className="text-danger">−{cachedFiles.totalDeletions}</span>
                     </>
                   )}
                   <button
@@ -946,8 +946,8 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                     }}
                     className={`ml-auto rounded-md border px-2 py-0.5 text-[10px] transition-colors ${
                       isSelected
-                        ? 'border-amber-500/50 bg-amber-500/10 text-amber-100'
-                        : 'border-[#2a2d3a] text-slate-400 hover:border-amber-500/50 hover:text-slate-200'
+                        ? 'border-warn-bg bg-warn-bg text-warn'
+                        : 'border-line text-fg-muted hover:border-warn-bg hover:text-fg'
                     }`}
                   >
                     {isSelected
@@ -962,7 +962,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
               </div>
 
               {isExpanded && (
-                <div className="border-t border-[#202432] px-3 py-2">
+                <div className="border-t border-line px-3 py-2">
                   {onOpenCommitReview && (
                     <div className="mb-2 flex flex-wrap items-center gap-2">
                       <button
@@ -979,7 +979,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                             ? 'Compare this commit against your current working tree.'
                             : '对比该提交与你当前工作区的差异。'
                         }
-                        className="rounded-md border border-indigo-500/40 px-2 py-1 text-[10px] text-indigo-100 transition-colors hover:border-indigo-400 hover:bg-indigo-500/10"
+                        className="rounded-md border border-accent-soft px-2 py-1 text-[10px] text-accent-text transition-colors hover:border-accent hover:bg-accent-soft"
                       >
                         {gitCompareWithCurrentText}
                       </button>
@@ -1000,24 +1000,24 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                             ? 'Compare this commit against its parent commit.'
                             : '对比该提交与它的上一次提交。'
                         }
-                        className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] text-slate-300 transition-colors hover:border-indigo-500/50 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[#2a2d3a] disabled:hover:text-slate-300"
+                        className="rounded-md border border-line px-2 py-1 text-[10px] text-fg-soft transition-colors hover:border-accent-soft hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line disabled:hover:text-fg-soft"
                       >
                         {gitCompareWithParentText}
                       </button>
                     </div>
                   )}
                   {isFilesLoading && (
-                    <div className="text-[10px] text-slate-500">
+                    <div className="text-[10px] text-fg-muted">
                       {lang === 'en' ? 'Loading changed files...' : '正在读取改动文件...'}
                     </div>
                   )}
                   {filesError && (
-                    <div className="text-[10px] text-rose-300">
+                    <div className="text-[10px] text-danger">
                       {(lang === 'en' ? 'Failed to load: ' : '加载失败：') + filesError}
                     </div>
                   )}
                   {!isFilesLoading && !filesError && cachedFiles && cachedFiles.files.length === 0 && (
-                    <div className="text-[10px] text-slate-500">
+                    <div className="text-[10px] text-fg-muted">
                       {lang === 'en' ? 'No file changes.' : '此提交没有文件改动。'}
                     </div>
                   )}
@@ -1035,16 +1035,16 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                             {file.status}
                           </span>
                           <span
-                            className="flex-1 truncate text-slate-300"
+                            className="flex-1 truncate text-fg-soft"
                             title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
                           >
                             {file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
                           </span>
                           {file.additions > 0 && (
-                            <span className="text-emerald-400">+{file.additions}</span>
+                            <span className="text-ok">+{file.additions}</span>
                           )}
                           {file.deletions > 0 && (
-                            <span className="text-rose-400">−{file.deletions}</span>
+                            <span className="text-danger">−{file.deletions}</span>
                           )}
                         </li>
                       ))}
@@ -1062,7 +1062,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   function renderGitFileList(files: readonly GitStatusFile[]) {
     if (files.length === 0) {
       return (
-        <div className="rounded-xl border border-dashed border-[#2a2d3a] px-3 py-3 text-xs text-slate-500">
+        <div className="rounded-xl border border-dashed border-line px-3 py-3 text-xs text-fg-muted">
           {t.workspaceGitNoChanges}
         </div>
       );
@@ -1092,15 +1092,15 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
           return (
             <div
               key={`${cacheKey}:${file.indexStatus}:${file.worktreeStatus}`}
-              className="rounded-xl border border-[#202432] bg-[#111623]"
+              className="rounded-xl border border-line bg-base"
             >
               <div
                 className={`grid w-full grid-cols-[20px_36px_minmax(0,1fr)_58px] items-center gap-2 px-2.5 py-2 text-[11px] transition-colors ${
                   isExpandedDiff
-                    ? 'text-indigo-100'
+                    ? 'text-accent-text'
                     : isWorkspaceFileSelected
-                      ? 'text-slate-100'
-                      : 'text-slate-200'
+                      ? 'text-fg'
+                      : 'text-fg'
                 }`}
               >
                 <input
@@ -1113,7 +1113,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                       ? `Include ${file.path} in next commit`
                       : `将 ${file.path} 加入下次提交`
                   }
-                  className="h-3.5 w-3.5 cursor-pointer accent-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-3.5 w-3.5 cursor-pointer accent-accent disabled:cursor-not-allowed disabled:opacity-50"
                 />
                 <button
                   type="button"
@@ -1121,20 +1121,20 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                   className="contents text-left"
                   title={gitFileLabel(file)}
                 >
-                  <span className="rounded border border-[#2a2d3a] px-1 py-0.5 text-center font-mono text-[9px] text-slate-500">
+                  <span className="rounded border border-line px-1 py-0.5 text-center font-mono text-[9px] text-fg-muted">
                     {gitStatusCodeForChange(file)}
                   </span>
-                  <span className="truncate hover:text-white">{gitFileDisplayName(file)}</span>
-                  <span className="justify-self-end text-[10px] text-slate-500">
+                  <span className="truncate hover:text-fg">{gitFileDisplayName(file)}</span>
+                  <span className="justify-self-end text-[10px] text-fg-muted">
                     {isExpandedDiff ? t.workspaceGitCollapseDiff : t.workspaceGitExpandDiff}
                   </span>
                 </button>
               </div>
 
               {isExpandedDiff && (
-                <div className="space-y-2 border-t border-[#202432] px-2.5 py-2">
+                <div className="space-y-2 border-t border-line px-2.5 py-2">
                   {fileDiffState.isLoading && (
-                    <div className="text-xs text-slate-500">{t.workspaceGitFileDiffLoading}</div>
+                    <div className="text-xs text-fg-muted">{t.workspaceGitFileDiffLoading}</div>
                   )}
 
                   {!fileDiffState.isLoading && fileDiffState.summary && (
@@ -1157,13 +1157,13 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                             }
                           })()}
                         </span>
-                        <span className="rounded-full border border-emerald-500/20 px-2 py-0.5 text-emerald-200">
+                        <span className="rounded-full border border-ok-bg px-2 py-0.5 text-ok">
                           +{diffMetrics?.additions ?? 0}
                         </span>
-                        <span className="rounded-full border border-rose-500/20 px-2 py-0.5 text-rose-200">
+                        <span className="rounded-full border border-danger-bg px-2 py-0.5 text-danger">
                           -{diffMetrics?.deletions ?? 0}
                         </span>
-                        <span className="rounded-full border border-sky-500/20 px-2 py-0.5 text-sky-200">
+                        <span className="rounded-full border border-info-bg px-2 py-0.5 text-info">
                           {diffMetrics?.hunks ?? 0} {t.workspaceGitHunks}
                         </span>
                       </div>
@@ -1173,7 +1173,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                           <button
                             type="button"
                             onClick={() => onSelectGitFile(buildGitFileSelection(file, mode))}
-                            className="rounded-md border border-indigo-500/40 px-2 py-1 text-[10px] text-indigo-100 transition-colors hover:border-indigo-400 hover:bg-indigo-500/10"
+                            className="rounded-md border border-accent-soft px-2 py-1 text-[10px] text-accent-text transition-colors hover:border-accent hover:bg-accent-soft"
                           >
                             {lang === 'en'
                               ? 'Diff in editor'
@@ -1189,7 +1189,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                               onSelectGitFile?.(null);
                               onSelectPath(file.path);
                             }}
-                            className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-200"
+                            className="rounded-md border border-line px-2 py-1 text-[10px] text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
                           >
                             {t.workspaceGitOpenFile}
                           </button>
@@ -1197,26 +1197,26 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                         <button
                           type="button"
                           onClick={() => void copyGitDiff(cacheKey, fileDiffState.summary as GitDiffSummary)}
-                          className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-200"
+                          className="rounded-md border border-line px-2 py-1 text-[10px] text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
                         >
                           {copyLabel}
                         </button>
                       </div>
 
                       {fileDiffState.summary.stat && (
-                        <pre className="overflow-x-auto rounded-lg bg-[#0b0d13] px-2 py-2 font-mono text-[10px] leading-5 text-slate-400">
+                        <pre className="overflow-x-auto rounded-lg bg-base px-2 py-2 font-mono text-[10px] leading-5 text-fg-muted">
                           {fileDiffState.summary.stat}
                         </pre>
                       )}
 
                       {fileDiffState.summary.truncated && (
-                        <div className="text-[10px] text-amber-300">{t.workspaceGitDiffTruncated}</div>
+                        <div className="text-[10px] text-warn">{t.workspaceGitDiffTruncated}</div>
                       )}
 
                       {fileDiffState.summary.diff ? (
                         <GitDiffPreview diff={fileDiffState.summary.diff} />
                       ) : (
-                        <div className="text-xs text-slate-500">
+                        <div className="text-xs text-fg-muted">
                           {fileDiffState.summary.message || t.workspaceGitFileDiffEmpty}
                         </div>
                       )}
@@ -1232,7 +1232,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   }
 
   return (
-    <section className="flex min-h-0 flex-col overflow-hidden border-t border-[#202432] bg-[#0d1118]">
+    <section className="flex min-h-0 flex-col overflow-hidden border-t border-line bg-base">
       <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2.5">
         <button
           type="button"
@@ -1241,13 +1241,13 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
           aria-expanded={isExpanded}
           aria-label={t.workspaceGit}
         >
-          <span className="text-[10px] text-slate-500">{isExpanded ? '▾' : '▸'}</span>
-          <span className="text-xs font-semibold text-slate-300">{t.workspaceGit}</span>
-          <span className="rounded-full border border-[#2a2d3a] px-1.5 py-0.5 text-[10px] text-slate-500">
+          <span className="text-[10px] text-fg-muted">{isExpanded ? '▾' : '▸'}</span>
+          <span className="text-xs font-semibold text-fg-soft">{t.workspaceGit}</span>
+          <span className="rounded-full border border-line px-1.5 py-0.5 text-[10px] text-fg-muted">
             {changedCount}
           </span>
           {gitStatus?.available && gitStatus.isRepo && gitStatus.branch && (
-            <span className="min-w-0 truncate rounded-full border border-emerald-500/30 px-2 py-0.5 text-[10px] text-emerald-200">
+            <span className="min-w-0 truncate rounded-full border border-ok-bg px-2 py-0.5 text-[10px] text-ok">
               {gitStatus.branch}
             </span>
           )}
@@ -1259,54 +1259,54 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
               type="button"
               onClick={() => setRefreshVersion((value) => value + 1)}
               disabled={isLoading || activeGitActionKey !== null}
-              className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md border border-line px-2 py-1 text-[10px] text-fg-muted transition-colors hover:border-accent-soft hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
             >
               {t.workspaceInsightsRefresh}
             </button>
           )}
-          <span className="text-[10px] text-slate-500">{isExpanded ? t.collapse : t.expand}</span>
+          <span className="text-[10px] text-fg-muted">{isExpanded ? t.collapse : t.expand}</span>
         </div>
       </div>
 
       {isExpanded && (
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable border-t border-[#202432] px-3 py-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable border-t border-line px-3 py-3">
           {!workspacePath && (
-            <div className="rounded-xl border border-[#202432] bg-[#10141d] px-3 py-3 text-xs leading-relaxed text-slate-500">
+            <div className="rounded-xl border border-line bg-base px-3 py-3 text-xs leading-relaxed text-fg-muted">
               {t.projectEmptyDesc}
             </div>
           )}
 
           {workspacePath && isLoading && (
-            <div className="text-xs text-slate-500">{t.workspaceGitLoading}</div>
+            <div className="text-xs text-fg-muted">{t.workspaceGitLoading}</div>
           )}
 
           {workspacePath && !isLoading && !gitStatus && (
-            <div className="text-xs text-slate-500">{t.workspaceInsightsUnavailable}</div>
+            <div className="text-xs text-fg-muted">{t.workspaceInsightsUnavailable}</div>
           )}
 
           {gitStatus && !gitStatus.available && (
-            <div className="text-xs leading-relaxed text-slate-500">
+            <div className="text-xs leading-relaxed text-fg-muted">
               {gitStatus.message || t.workspaceGitUnavailable}
             </div>
           )}
 
           {gitStatus && gitStatus.available && !gitStatus.isRepo && (
-            <div className="space-y-2 rounded-xl border border-[#202432] bg-[#10141d] px-3 py-3">
-              <div className="text-xs leading-relaxed text-slate-500">
+            <div className="space-y-2 rounded-xl border border-line bg-base px-3 py-3">
+              <div className="text-xs leading-relaxed text-fg-muted">
                 {gitStatus.message || t.workspaceGitNotRepo}
               </div>
-              <div className="text-[11px] leading-relaxed text-slate-500">{t.workspaceGitInitHint}</div>
+              <div className="text-[11px] leading-relaxed text-fg-muted">{t.workspaceGitInitHint}</div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => void initializeGitRepository()}
                   disabled={isInitializingGit}
-                  className="rounded-md border border-indigo-500/40 px-2 py-1 text-[11px] text-indigo-100 transition-colors hover:border-indigo-400 hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-md border border-accent-soft px-2 py-1 text-[11px] text-accent-text transition-colors hover:border-accent hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isInitializingGit ? t.workspaceGitInitRunning : t.workspaceGitInitRepo}
                 </button>
                 {gitActionMessage && (
-                  <span className="text-[11px] text-slate-500">{gitActionMessage}</span>
+                  <span className="text-[11px] text-fg-muted">{gitActionMessage}</span>
                 )}
               </div>
             </div>
@@ -1315,46 +1315,46 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
           {gitStatus && gitStatus.available && gitStatus.isRepo && (
             <div className="space-y-3">
               {gitActionMessage && (
-                <div className="rounded-lg border border-[#202432] bg-[#10141d] px-2.5 py-2 text-[11px] text-slate-400">
+                <div className="rounded-lg border border-line bg-base px-2.5 py-2 text-[11px] text-fg-muted">
                   {gitActionMessage}
                 </div>
               )}
 
-              <div className="space-y-2 rounded-xl border border-[#202432] bg-[#10141d] px-3 py-3">
-                <div className="text-[11px] font-semibold text-slate-300">{gitBranchLabelText}</div>
-                <div className="text-[10px] leading-relaxed text-slate-500">{gitBranchHintText}</div>
+              <div className="space-y-2 rounded-xl border border-line bg-base px-3 py-3">
+                <div className="text-[11px] font-semibold text-fg-soft">{gitBranchLabelText}</div>
+                <div className="text-[10px] leading-relaxed text-fg-muted">{gitBranchHintText}</div>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <input
                     type="text"
                     value={branchName}
                     onChange={(event) => setBranchName(event.currentTarget.value)}
                     placeholder={gitBranchPlaceholderText}
-                    className="min-w-0 flex-1 rounded-lg border border-[#2a2d3a] bg-[#0b0d13] px-3 py-2 text-xs text-slate-200 outline-none transition-colors placeholder:text-slate-500 focus:border-indigo-500/60"
+                    className="min-w-0 flex-1 rounded-lg border border-line bg-base px-3 py-2 text-xs text-fg outline-none transition-colors placeholder:text-fg-muted focus:border-accent-soft"
                   />
                   <button
                     type="button"
                     onClick={() => void checkoutGitBranch()}
                     disabled={activeGitActionKey !== null || !branchName.trim()}
-                    className="rounded-md border border-indigo-500/40 px-3 py-1.5 text-[11px] text-indigo-100 transition-colors hover:border-indigo-400 hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-md border border-accent-soft px-3 py-1.5 text-[11px] text-accent-text transition-colors hover:border-accent hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {activeGitActionKey === 'branch-checkout' ? gitBranchRunningText : gitBranchActionText}
                   </button>
                 </div>
                 {selectedHistoryEntry && (
-                  <div className="text-[10px] text-slate-500">
+                  <div className="text-[10px] text-fg-muted">
                     {gitHistorySelectedText}: {selectedHistoryEntry.shortHash}
                   </div>
                 )}
               </div>
 
-              <div className="space-y-2 rounded-xl border border-[#202432] bg-[#10141d] px-3 py-3">
+              <div className="space-y-2 rounded-xl border border-line bg-base px-3 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-[11px] font-semibold text-slate-300">{gitHistoryTitleText}</div>
+                  <div className="text-[11px] font-semibold text-fg-soft">{gitHistoryTitleText}</div>
                   <button
                     type="button"
                     onClick={() => void restoreGitWorkspace()}
                     disabled={activeGitActionKey !== null || visibleGitFiles.length === 0}
-                    className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] text-slate-400 transition-colors hover:border-rose-500/50 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-md border border-line px-2 py-1 text-[10px] text-fg-muted transition-colors hover:border-danger hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {activeGitActionKey === 'restore' ? gitRestoreRunningText : gitRestoreActionText}
                   </button>
@@ -1375,15 +1375,15 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                           onClick={() => setHistoryFilter(opt.key)}
                           className={`rounded-md border px-2 py-0.5 transition-colors ${
                             isActive
-                              ? 'border-indigo-500/50 bg-indigo-500/10 text-indigo-100'
-                              : 'border-[#2a2d3a] text-slate-400 hover:border-[#2f3650] hover:text-slate-200'
+                              ? 'border-accent-soft bg-accent-soft text-accent-text'
+                              : 'border-line text-fg-muted hover:border-line-strong hover:text-fg'
                           }`}
                         >
                           {lang === 'en' ? opt.enLabel : opt.cnLabel}
                         </button>
                       );
                     })}
-                    <span className="ml-auto text-slate-500">
+                    <span className="ml-auto text-fg-muted">
                       {filteredHistoryEntries.length} / {historyEntries.length}
                     </span>
                   </div>
@@ -1396,14 +1396,14 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                     type="button"
                     onClick={() => setHistoryLimit((n) => Math.min(n + 20, 50))}
                     disabled={isLoading}
-                    className="w-full rounded-md border border-[#2a2d3a] py-1 text-[10px] text-slate-400 transition-colors hover:border-[#2f3650] hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="w-full rounded-md border border-line py-1 text-[10px] text-fg-muted transition-colors hover:border-line-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {lang === 'en' ? 'Load more' : '加载更多'}
                   </button>
                 )}
 
-                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#202432] pt-2">
-                  <div className="text-[10px] text-slate-500">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2">
+                  <div className="text-[10px] text-fg-muted">
                     {selectedHistoryEntry
                       ? `${gitHistorySelectedText}: ${selectedHistoryEntry.shortHash}`
                       : gitResetSelectRequiredText}
@@ -1414,7 +1414,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                         type="button"
                         onClick={() => void undoHistoryReset()}
                         disabled={activeGitActionKey !== null}
-                        className="rounded-md border border-emerald-500/40 px-3 py-1.5 text-[11px] text-emerald-100 transition-colors hover:border-emerald-400 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-md border border-ok-bg px-3 py-1.5 text-[11px] text-ok transition-colors hover:border-ok hover:bg-ok-bg disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {activeGitActionKey === 'undo-reset'
                           ? (lang === 'en' ? 'Undoing...' : '撤销中...')
@@ -1425,7 +1425,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                       type="button"
                       onClick={() => selectedHistoryEntry && void resetGitToHistoryEntry(selectedHistoryEntry)}
                       disabled={activeGitActionKey !== null || !selectedHistoryEntry}
-                      className="rounded-md border border-amber-500/40 px-3 py-1.5 text-[11px] text-amber-100 transition-colors hover:border-amber-400 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-md border border-warn-bg px-3 py-1.5 text-[11px] text-warn transition-colors hover:border-warn hover:bg-warn-bg disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {gitResetActionText}
                     </button>
@@ -1434,7 +1434,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
               </div>
 
               {changedGitFiles.length === 0 && (
-                <div className="text-xs text-slate-500">{t.workspaceGitNoChanges}</div>
+                <div className="text-xs text-fg-muted">{t.workspaceGitNoChanges}</div>
               )}
 
               {changedGitFiles.length > 0 && (
@@ -1443,10 +1443,10 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                       不再展示 "暂存 / 未暂存" 两个分区。 */}
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <div className="text-[11px] font-semibold text-slate-300">
+                      <div className="text-[11px] font-semibold text-fg-soft">
                         {gitChangesTabText}
                       </div>
-                      <span className="rounded-lg border border-[#2a2d3a] px-2 py-0.5 text-[10px] text-slate-400">
+                      <span className="rounded-lg border border-line px-2 py-0.5 text-[10px] text-fg-muted">
                         {(t.workspaceGitSelectedCount ||
                           (lang === 'en' ? '{{count}} of {{total}} selected' : '已选 {{count}} / {{total}}'))
                           .replace('{{count}}', String(selectedCount))
@@ -1458,15 +1458,15 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                         type="button"
                         onClick={allSelected ? deselectAllGitFiles : selectAllGitFiles}
                         disabled={activeGitActionKey !== null}
-                        className="rounded-md border border-[#2a2d3a] px-2 py-1 text-[10px] text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-md border border-line px-2 py-1 text-[10px] text-fg-muted transition-colors hover:border-accent-soft hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {allSelected ? gitDeselectAllText : gitSelectAllText}
                       </button>
                     </div>
                   </div>
 
-                  <div className="space-y-2 rounded-xl border border-[#202432] bg-[#10141d] px-3 py-3">
-                    <label className="block text-[11px] font-medium text-slate-300" htmlFor="workspace-git-commit-message">
+                  <div className="space-y-2 rounded-xl border border-line bg-base px-3 py-3">
+                    <label className="block text-[11px] font-medium text-fg-soft" htmlFor="workspace-git-commit-message">
                       {gitCommitTitleText}
                     </label>
                     <textarea
@@ -1475,7 +1475,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                       onChange={(event) => setCommitMessage(event.currentTarget.value)}
                       placeholder={gitCommitPlaceholderText}
                       rows={2}
-                      className="w-full rounded-lg border border-[#2a2d3a] bg-[#0b0d13] px-3 py-2 text-xs text-slate-200 outline-none transition-colors placeholder:text-slate-500 focus:border-indigo-500/60"
+                      className="w-full rounded-lg border border-line bg-base px-3 py-2 text-xs text-fg outline-none transition-colors placeholder:text-fg-muted focus:border-accent-soft"
                     />
                     <div className="flex items-center justify-end">
                       <button
@@ -1486,7 +1486,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                           selectedCount === 0 ||
                           !commitMessage.trim()
                         }
-                        className="rounded-md border border-indigo-500/40 px-3 py-1.5 text-[11px] text-indigo-100 transition-colors hover:border-indigo-400 hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-md border border-accent-soft px-3 py-1.5 text-[11px] text-accent-text transition-colors hover:border-accent hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {activeGitActionKey === 'commit'
                           ? gitCommitRunningText
@@ -1494,7 +1494,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                       </button>
                     </div>
                     {hiddenChangedCount > 0 && (
-                      <p className="text-[10px] leading-relaxed text-amber-300/80">
+                      <p className="text-[10px] leading-relaxed text-warn">
                         {lang === 'en'
                           ? `${hiddenChangedCount} more changed file(s) are not shown. This commit only includes the listed files you selected.`
                           : lang === 'zh-TW'
@@ -1505,7 +1505,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                   </div>
 
                   {hiddenChangedCount > 0 && (
-                    <div className="text-[10px] text-slate-500">
+                    <div className="text-[10px] text-fg-muted">
                       +{hiddenChangedCount}
                     </div>
                   )}

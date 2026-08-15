@@ -6,18 +6,20 @@ import { getTranslation } from '../utils/i18n';
 import { useSettingsForm } from '../hooks/useSettingsForm';
 import { tabResetKeys } from './settings/constants';
 import { SettingsGeneralTab } from './settings/SettingsGeneralTab';
+import { SettingsAppearanceTab } from './settings/SettingsAppearanceTab';
 import { SettingsLlmTab } from './settings/SettingsLlmTab';
 import { SettingsSearchTab } from './settings/SettingsSearchTab';
 import { SettingsMentorTab } from './settings/SettingsMentorTab';
 import { SettingsAdvancedTab } from './settings/SettingsAdvancedTab';
 import { SettingsAppTab } from './settings/SettingsAppTab';
+import { useThemeStore } from '../store/themeStore';
 import type { SettingsTab } from './settings/types';
 
 function tabButtonClass(active: boolean): string {
   return `rounded-xl border px-3 py-3 text-left transition-colors ${
     active
-      ? 'border-indigo-500/60 bg-[#2b3150] text-slate-100 shadow-[0_0_14px_rgba(99,102,241,0.12)]'
-      : 'border-[#2a2d3a] text-slate-400 hover:border-slate-500/60 hover:bg-[#202434] hover:text-slate-200'
+      ? 'border-accent-soft bg-accent-soft text-fg shadow-[0_0_14px_rgba(99,102,241,0.12)]'
+      : 'border-line text-fg-muted hover:border-line-strong hover:bg-raised hover:text-fg'
   }`;
 }
 
@@ -50,6 +52,18 @@ export function SettingsModal() {
     update(resetPart);
   };
 
+  // 主题相关草稿即时应用到 DOM（实时预览）；取消保存时回滚到已持久化值。
+  useEffect(() => {
+    useThemeStore.getState().applyFromSettings({
+      lightTheme: local.lightTheme,
+      darkTheme: local.darkTheme,
+      followSystem: local.followSystem,
+      themeMode: useThemeStore.getState().mode,
+      accent: local.accent,
+      customThemes: local.customThemes,
+    });
+  }, [local.lightTheme, local.darkTheme, local.followSystem, local.accent, local.customThemes]);
+
   const save = () => {
     if (appDraft && !appLoadError) {
       invoke('papr_set_app_settings', { settings: appDraft }).catch(() => {
@@ -60,8 +74,23 @@ export function SettingsModal() {
     setShowSettings(false);
   };
 
+  // 外观页会实时把草稿主题应用到 DOM（预览）；取消保存时回滚到已持久化值。
+  const closeWithoutSave = () => {
+    const persisted = useAgentStore.getState().settings;
+    useThemeStore.getState().applyFromSettings({
+      lightTheme: persisted.lightTheme,
+      darkTheme: persisted.darkTheme,
+      followSystem: persisted.followSystem,
+      themeMode: persisted.themeMode,
+      accent: persisted.accent,
+      customThemes: persisted.customThemes,
+    });
+    setShowSettings(false);
+  };
+
   const tabs: Array<{ id: SettingsTab; label: string; tip: string }> = [
     { id: 'general', label: t.settingsGeneralTab, tip: t.settingsGeneralTabTip },
+    { id: 'appearance', label: t.settingsAppearanceTab, tip: t.settingsAppearanceTabTip },
     { id: 'llm', label: t.settingsLlmTab, tip: t.settingsLlmTabTip },
     { id: 'search', label: t.settingsSearchTab, tip: t.settingsSearchTabTip },
     { id: 'mentor', label: t.settingsMentorTab, tip: t.settingsMentorTabTip },
@@ -72,29 +101,29 @@ export function SettingsModal() {
   const tabProps = { local, update, t, currentLang };
 
   return (
-    <div className="fixed inset-0 z-50 flex select-none items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-50 flex select-none items-center justify-center bg-overlay backdrop-blur-sm animate-fade-in">
       {/* onBlur bubbles (React focusout), so leaving any field clamps/trims the
           whole draft once — numeric ranges snap on blur instead of mid-typing. */}
       <div
         onBlur={clampOnBlur}
-        className="flex max-h-[94vh] h-[94vh] w-[min(96vw,1480px)] flex-col overflow-hidden rounded-3xl border border-[#2a2d3a] bg-[#1a1d27] shadow-2xl"
+        className="flex max-h-[94vh] h-[94vh] w-[min(96vw,1480px)] flex-col overflow-hidden rounded-3xl border border-line bg-raised shadow-2xl"
       >
-        <div className="flex items-start justify-between border-b border-[#2a2d3a] px-7 py-5">
+        <div className="flex items-start justify-between border-b border-line px-7 py-5">
           <div>
-            <h2 className="text-lg font-semibold text-slate-100">{t.modelSettings}</h2>
-            <p className="mt-1 text-sm text-slate-500">{t.settingsLlmDesc}</p>
+            <h2 className="text-lg font-semibold text-fg">{t.modelSettings}</h2>
+            <p className="mt-1 text-sm text-fg-muted">{t.settingsLlmDesc}</p>
           </div>
           <button
-            onClick={() => setShowSettings(false)}
+            onClick={closeWithoutSave}
             title={t.cancel}
-            className="text-2xl leading-none text-slate-500 hover:text-slate-300"
+            className="text-2xl leading-none text-fg-muted hover:text-fg-soft"
           >
             ×
           </button>
         </div>
 
-        <div className="border-b border-[#2a2d3a] bg-[#161922] px-5 py-3">
-          <div className="grid grid-cols-6 gap-2">
+        <div className="border-b border-line bg-base px-5 py-3">
+          <div className="grid grid-cols-7 gap-2">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -111,6 +140,7 @@ export function SettingsModal() {
 
         <div className="flex-1 overflow-y-auto px-7 py-6 scrollbar-thin">
           {activeTab === 'general' && <SettingsGeneralTab {...tabProps} />}
+          {activeTab === 'appearance' && <SettingsAppearanceTab {...tabProps} />}
           {activeTab === 'llm' && <SettingsLlmTab {...tabProps} />}
           {activeTab === 'search' && <SettingsSearchTab {...tabProps} />}
           {activeTab === 'mentor' && <SettingsMentorTab {...tabProps} />}
@@ -125,21 +155,21 @@ export function SettingsModal() {
           )}
 
           {settingsError && (
-            <div className="mt-5 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            <div className="mt-5 rounded-2xl border border-warn-bg bg-warn-bg px-4 py-3 text-sm text-warn">
               {settingsError}
             </div>
           )}
         </div>
 
-        <div className="flex justify-end gap-3 border-t border-[#2a2d3a] bg-[#161922] px-7 py-5">
-          <button type="button" onClick={() => resetTab(activeTab)} className="rounded-lg border border-[#2a2d3a] px-3 py-1.5 text-xs text-slate-500 transition-colors hover:border-red-500/30 hover:text-red-400" title={currentLang === 'en' ? 'Reset current tab to defaults' : '重置当前分页为默认'}>
+        <div className="flex justify-end gap-3 border-t border-line bg-base px-7 py-5">
+          <button type="button" onClick={() => resetTab(activeTab)} className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg-muted transition-colors hover:border-danger-bg hover:text-danger" title={currentLang === 'en' ? 'Reset current tab to defaults' : '重置当前分页为默认'}>
             &#8634;
           </button>
           <div className="flex-1" />
           <button
-            onClick={() => setShowSettings(false)}
+            onClick={closeWithoutSave}
             title={currentLang === 'en' ? 'Close settings without saving the current edits.' : '关闭设置，不保存当前修改。'}
-            className="px-5 py-2.5 text-sm text-slate-400 transition-colors hover:text-slate-200"
+            className="px-5 py-2.5 text-sm text-fg-muted transition-colors hover:text-fg"
           >
             {t.cancel}
           </button>
@@ -150,7 +180,7 @@ export function SettingsModal() {
                 ? 'Save the current settings for the desktop runtime and internal automation host.'
                 : '保存当前设置，并同时影响桌面端与内部自动化宿主的运行行为。'
             }
-            className="rounded-xl bg-indigo-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-500"
+            className="rounded-xl bg-accent px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent"
           >
             {t.save}
           </button>

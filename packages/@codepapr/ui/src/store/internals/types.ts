@@ -77,8 +77,14 @@ export interface Settings {
   projectGraphMaxFileBytes: number;
   projectGraphMaxTreeEntries: number;
   lang?: Lang;
-  /** 主题 id（内置或自定义），null = 跟随系统。 */
-  theme: string | null;
+  /** 浅色模式下使用的主题 id（内置或自定义）。 */
+  lightTheme: string;
+  /** 深色模式下使用的主题 id（内置或自定义）。 */
+  darkTheme: string;
+  /** 跟随系统深浅色；false 时以 themeMode 为准。 */
+  followSystem: boolean;
+  /** 手动模式（followSystem=false）下当前生效的深浅模式。 */
+  themeMode: 'light' | 'dark';
   /** 强调色覆盖（#rgb/#rrggbb），null = 使用主题自带强调色。 */
   accent: string | null;
   /** 自定义主题（JSON token 映射导入）。 */

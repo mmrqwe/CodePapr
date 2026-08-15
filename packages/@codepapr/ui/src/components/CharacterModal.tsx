@@ -431,25 +431,25 @@ Requirements:
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex select-none items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in">
-      <div className="flex max-h-[94vh] h-[94vh] w-[min(96vw,1480px)] flex-col overflow-hidden rounded-3xl border border-[#2a2d3a] bg-[#1a1d27] shadow-2xl">
-        <div className="flex items-start justify-between border-b border-[#2a2d3a] px-7 py-5">
+    <div className="fixed inset-0 z-50 flex select-none items-center justify-center bg-overlay backdrop-blur-sm animate-fade-in">
+      <div className="flex max-h-[94vh] h-[94vh] w-[min(96vw,1480px)] flex-col overflow-hidden rounded-3xl border border-line bg-raised shadow-2xl">
+        <div className="flex items-start justify-between border-b border-line px-7 py-5">
           <div>
-            <h2 className="text-lg font-semibold text-slate-100">{t.charactersTitle}</h2>
-            <p className="mt-1 text-sm text-slate-500">{t.charactersDesc}</p>
+            <h2 className="text-lg font-semibold text-fg">{t.charactersTitle}</h2>
+            <p className="mt-1 text-sm text-fg-muted">{t.charactersDesc}</p>
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handleNew}
-              className="rounded-xl border border-indigo-500/40 px-3 py-2 text-xs font-medium text-indigo-200 transition-colors hover:border-indigo-400 hover:bg-indigo-500/10"
+              className="rounded-xl border border-accent-soft px-3 py-2 text-xs font-medium text-accent-text transition-colors hover:border-accent hover:bg-accent-soft"
             >
               {t.characterNew}
             </button>
             <button
               type="button"
               onClick={handlePickFile}
-              className="rounded-xl border border-[#2a2d3a] px-3 py-2 text-xs font-medium text-slate-200 transition-colors hover:border-indigo-400 hover:text-white"
+              className="rounded-xl border border-line px-3 py-2 text-xs font-medium text-fg transition-colors hover:border-accent hover:text-fg"
             >
               {t.characterImport}
             </button>
@@ -463,7 +463,7 @@ Requirements:
             <button
               onClick={onClose}
               title={t.cancel}
-              className="ml-2 text-2xl leading-none text-slate-500 hover:text-slate-300"
+              className="ml-2 text-2xl leading-none text-fg-muted hover:text-fg-soft"
             >
               ×
             </button>
@@ -471,15 +471,15 @@ Requirements:
         </div>
 
         {importError && (
-          <div className="border-b border-red-500/20 bg-red-500/10 px-7 py-3 text-xs text-red-200">
+          <div className="border-b border-danger-bg bg-danger-bg px-7 py-3 text-xs text-danger">
             {importError}
           </div>
         )}
 
         <div className="flex flex-1 min-h-0">
-          <aside className="w-72 shrink-0 overflow-y-auto border-r border-[#2a2d3a] bg-[#10131b] scrollbar-thin">
+          <aside className="w-72 shrink-0 overflow-y-auto border-r border-line bg-base scrollbar-thin">
             {sortedCharacters.length === 0 ? (
-              <div className="px-5 py-6 text-xs leading-relaxed text-slate-500">
+              <div className="px-5 py-6 text-xs leading-relaxed text-fg-muted">
                 {t.characterEmpty}
               </div>
             ) : (
@@ -494,11 +494,11 @@ Requirements:
                         onClick={() => setEditing(c)}
                         className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2 text-left transition-colors ${
                           isEditing
-                            ? 'border-indigo-500/50 bg-indigo-500/15'
-                            : 'border-transparent hover:border-[#2a2d3a] hover:bg-[#1a1d27]'
+                            ? 'border-accent-soft bg-accent-soft'
+                            : 'border-transparent hover:border-line hover:bg-raised'
                         }`}
                       >
-                        <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full border border-[#2a2d3a] bg-[#0f1117]">
+                        <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full border border-line bg-base">
                           {c.avatarDataUrl ? (
                             <img
                               src={c.avatarDataUrl}
@@ -506,24 +506,24 @@ Requirements:
                               className="h-full w-full object-cover"
                             />
                           ) : (
-                            <div className="flex h-full w-full items-center justify-center text-xs text-slate-600">
+                            <div className="flex h-full w-full items-center justify-center text-xs text-fg-dim">
                               {c.name.slice(0, 1) || '?'}
                             </div>
                           )}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <span className="truncate text-sm font-medium text-slate-200">
+                            <span className="truncate text-sm font-medium text-fg">
                               {c.name || '—'}
                             </span>
                             {isActive && (
-                              <span className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-200">
+                              <span className="shrink-0 rounded-full border border-ok-bg bg-ok-bg px-1.5 py-0.5 text-[10px] font-semibold text-ok">
                                 {t.characterEnabled}
                               </span>
                             )}
                           </div>
                           {c.tags.length > 0 && (
-                            <div className="truncate text-[11px] text-slate-500">
+                            <div className="truncate text-[11px] text-fg-muted">
                               {c.tags.join(', ')}
                             </div>
                           )}
@@ -538,13 +538,13 @@ Requirements:
 
           <div className="flex-1 overflow-y-auto px-7 py-6 scrollbar-thin">
             {!editing ? (
-              <div className="flex h-full items-center justify-center text-sm text-slate-500">
+              <div className="flex h-full items-center justify-center text-sm text-fg-muted">
                 {t.characterEmpty}
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="flex items-center gap-4 rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-4">
-                  <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#0f1117]">
+                <div className="flex items-center gap-4 rounded-2xl border border-line bg-base px-5 py-4">
+                  <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl border border-line bg-base">
                     {editing.avatarDataUrl ? (
                       <img
                         src={editing.avatarDataUrl}
@@ -552,7 +552,7 @@ Requirements:
                         className="h-full w-full object-cover"
                       />
                     ) : (
-                      <div className="flex h-full w-full items-center justify-center text-2xl text-slate-600">
+                      <div className="flex h-full w-full items-center justify-center text-2xl text-fg-dim">
                         {editing.name.slice(0, 1) || '?'}
                       </div>
                     )}
@@ -561,7 +561,7 @@ Requirements:
                     <button
                       type="button"
                       onClick={() => avatarInputRef.current?.click()}
-                      className="rounded-lg border border-[#2a2d3a] px-3 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:border-indigo-400 hover:text-white"
+                      className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-fg transition-colors hover:border-accent hover:text-fg"
                     >
                       {t.characterAvatarChoose}
                     </button>
@@ -576,7 +576,7 @@ Requirements:
                       <button
                         type="button"
                         onClick={() => updateField({ avatarDataUrl: null })}
-                        className="rounded-lg border border-[#2a2d3a] px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:border-red-400 hover:text-red-300"
+                        className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-fg-soft transition-colors hover:border-danger hover:text-danger"
                       >
                         {t.characterAvatarRemove}
                       </button>
@@ -589,8 +589,8 @@ Requirements:
                             onClick={() => handleEnable(editing.id)}
                             className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                               activeCharacterId === editing.id
-                                ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/20'
-                                : 'border-[#2a2d3a] text-slate-300 hover:border-indigo-400 hover:text-white'
+                                ? 'border-ok-bg bg-ok-bg text-ok hover:bg-ok-bg'
+                                : 'border-line text-fg-soft hover:border-accent hover:text-fg'
                             }`}
                           >
                             {activeCharacterId === editing.id ? t.characterDisable : t.characterEnable}
@@ -598,14 +598,14 @@ Requirements:
                           <button
                             type="button"
                             onClick={handleExport}
-                            className="rounded-lg border border-[#2a2d3a] px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:border-indigo-400 hover:text-white"
+                            className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-fg-soft transition-colors hover:border-accent hover:text-fg"
                           >
                             {t.characterExport}
                           </button>
                           <button
                             type="button"
                             onClick={() => handleDelete(editing.id)}
-                            className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-medium text-red-300 transition-colors hover:border-red-400 hover:bg-red-500/10"
+                            className="rounded-lg border border-danger-bg px-3 py-1.5 text-xs font-medium text-danger transition-colors hover:border-danger hover:bg-danger-bg"
                           >
                             {t.characterDelete}
                           </button>
@@ -616,13 +616,13 @@ Requirements:
                 </div>
 
                 {editing.avatarDataUrl && (
-                  <div className="flex items-center justify-between rounded-xl border border-[#2a2d3a] bg-[#10131b] px-4 py-3">
-                    <span className="text-xs font-medium text-slate-300">{t.characterShowAvatar}</span>
+                  <div className="flex items-center justify-between rounded-xl border border-line bg-base px-4 py-3">
+                    <span className="text-xs font-medium text-fg-soft">{t.characterShowAvatar}</span>
                     <button
                       type="button"
                       onClick={() => updateField({ showAvatar: !(editing.showAvatar ?? true) })}
                       className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
-                        (editing.showAvatar ?? true) ? 'bg-indigo-500' : 'bg-slate-700'
+                        (editing.showAvatar ?? true) ? 'bg-accent' : 'bg-slate-700'
                       }`}
                     >
                       <span
@@ -634,7 +634,7 @@ Requirements:
                   </div>
                 )}
 
-                <div className="flex items-center gap-1 rounded-xl border border-[#2a2d3a] bg-[#10131b] p-1">
+                <div className="flex items-center gap-1 rounded-xl border border-line bg-base p-1">
                   {(['basic', 'voice'] as const).map((tab) => (
                     <button
                       key={tab}
@@ -642,8 +642,8 @@ Requirements:
                       onClick={() => setVoiceTab(tab)}
                       className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                         voiceTab === tab
-                          ? 'bg-indigo-500/20 text-indigo-200'
-                          : 'text-slate-500 hover:text-slate-300'
+                          ? 'bg-accent-soft text-accent-text'
+                          : 'text-fg-muted hover:text-fg-soft'
                       }`}
                     >
                       {tab === 'basic' ? t.voiceTabBasic : t.voiceTabVoice}
@@ -658,7 +658,7 @@ Requirements:
                     value={editing.name}
                     onChange={(e) => updateField({ name: e.target.value })}
                     placeholder={t.characterNamePlaceholder}
-                    className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 placeholder-slate-700 focus:border-indigo-500/60 focus:outline-none"
+                    className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
                   />
                 </FieldRow>
 
@@ -667,14 +667,14 @@ Requirements:
                     <input
                       value={editing.creator}
                       onChange={(e) => updateField({ creator: e.target.value })}
-                      className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+                      className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg focus:border-accent-soft focus:outline-none"
                     />
                   </FieldRow>
                   <FieldRow label={t.characterVersion}>
                     <input
                       value={editing.characterVersion}
                       onChange={(e) => updateField({ characterVersion: e.target.value })}
-                      className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+                      className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg focus:border-accent-soft focus:outline-none"
                     />
                   </FieldRow>
                 </div>
@@ -687,7 +687,7 @@ Requirements:
                         tags: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
                       })
                     }
-                    className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm text-slate-200 focus:border-indigo-500/60 focus:outline-none"
+                    className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg focus:border-accent-soft focus:outline-none"
                   />
                 </FieldRow>
 
@@ -697,7 +697,7 @@ Requirements:
                     onChange={(e) => updateField({ description: e.target.value })}
                     placeholder={t.characterDescriptionPlaceholder}
                     rows={4}
-                    className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm leading-relaxed text-slate-200 placeholder-slate-700 focus:border-indigo-500/60 focus:outline-none"
+                    className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm leading-relaxed text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
                   />
                 </FieldRow>
 
@@ -707,7 +707,7 @@ Requirements:
                     onChange={(e) => updateField({ personality: e.target.value })}
                     placeholder={t.characterPersonalityPlaceholder}
                     rows={3}
-                    className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm leading-relaxed text-slate-200 placeholder-slate-700 focus:border-indigo-500/60 focus:outline-none"
+                    className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm leading-relaxed text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
                   />
                 </FieldRow>
 
@@ -717,7 +717,7 @@ Requirements:
                     onChange={(e) => updateField({ scenario: e.target.value })}
                     placeholder={t.characterScenarioPlaceholder}
                     rows={3}
-                    className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm leading-relaxed text-slate-200 placeholder-slate-700 focus:border-indigo-500/60 focus:outline-none"
+                    className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm leading-relaxed text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
                   />
                 </FieldRow>
 
@@ -727,7 +727,7 @@ Requirements:
                     onChange={(e) => updateField({ firstMessage: e.target.value })}
                     placeholder={t.characterFirstMessagePlaceholder}
                     rows={3}
-                    className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm leading-relaxed text-slate-200 placeholder-slate-700 focus:border-indigo-500/60 focus:outline-none"
+                    className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm leading-relaxed text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
                   />
                 </FieldRow>
 
@@ -737,7 +737,7 @@ Requirements:
                     onChange={(e) => updateField({ exampleMessages: e.target.value })}
                     placeholder={t.characterExampleMessagesPlaceholder}
                     rows={4}
-                    className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm leading-relaxed text-slate-200 placeholder-slate-700 focus:border-indigo-500/60 focus:outline-none"
+                    className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm leading-relaxed text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
                   />
                 </FieldRow>
 
@@ -747,18 +747,18 @@ Requirements:
                     onChange={(e) => updateField({ systemPrompt: e.target.value })}
                     placeholder={t.characterSystemPromptPlaceholder}
                     rows={3}
-                    className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm leading-relaxed text-slate-200 placeholder-slate-700 focus:border-indigo-500/60 focus:outline-none"
+                    className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm leading-relaxed text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
                   />
                 </FieldRow>
               </div>
             ) : (
               <div className="space-y-4">
                 {/* Hero info card explaining how voice cloning works */}
-                <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 px-5 py-4">
+                <div className="rounded-2xl border border-accent-soft bg-accent-soft px-5 py-4">
                   <div className="flex items-start gap-3">
-                    <div className="text-indigo-300 text-xl leading-none">{'\u{1F50A}'}</div>
-                    <div className="text-xs leading-relaxed text-slate-300 space-y-1.5">
-                      <p className="text-sm font-medium text-slate-200">{t.voiceHowItWorks}</p>
+                    <div className="text-accent-text text-xl leading-none">{'\u{1F50A}'}</div>
+                    <div className="text-xs leading-relaxed text-fg-soft space-y-1.5">
+                      <p className="text-sm font-medium text-fg">{t.voiceHowItWorks}</p>
                       <p>{t.voiceUsageStep1}</p>
                       <p>{t.voiceUsageStep2}</p>
                       <p>{t.voiceUsageStep3}</p>
@@ -766,16 +766,16 @@ Requirements:
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-3">
+                <div className="flex items-center justify-between rounded-2xl border border-line bg-base px-5 py-3">
                   <div>
-                    <div className="text-sm font-medium text-slate-200">{t.voiceEnabled}</div>
-                    <div className="mt-0.5 text-xs text-slate-500">{t.voiceEnabledDesc}</div>
+                    <div className="text-sm font-medium text-fg">{t.voiceEnabled}</div>
+                    <div className="mt-0.5 text-xs text-fg-muted">{t.voiceEnabledDesc}</div>
                   </div>
                   <button
                     type="button"
                     onClick={() => updateVoiceField({ enabled: !editing?.voice?.enabled })}
                     className={`relative inline-flex h-6 w-10 items-center rounded-full transition-colors ${
-                      editing?.voice?.enabled ? 'bg-indigo-500' : 'bg-slate-700'
+                      editing?.voice?.enabled ? 'bg-accent' : 'bg-slate-700'
                     }`}
                   >
                     <span
@@ -795,15 +795,15 @@ Requirements:
                         onClick={() => updateVoiceField({ engine })}
                         className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                           (editing?.voice?.engine ?? 'gpt-sovits') === engine
-                            ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-200'
-                            : 'border-[#2a2d3a] text-slate-400 hover:text-slate-200'
+                            ? 'border-accent-soft bg-accent-soft text-accent-text'
+                            : 'border-line text-fg-muted hover:text-fg'
                         }`}
                       >
                         {engine === 'gpt-sovits' ? t.voiceEngineGptSovits : engine}
                       </button>
                     ))}
                   </div>
-                  <p className="mt-1.5 text-[11px] text-slate-500">
+                  <p className="mt-1.5 text-[11px] text-fg-muted">
                     {t.voiceEngineGptSovitsHint}
                   </p>
                 </FieldRow>
@@ -826,8 +826,8 @@ Requirements:
                             onClick={() => updateVoiceField({ sampleSteps: steps })}
                             className={`flex-1 rounded-lg border px-2 py-1.5 text-center text-xs transition-colors ${
                               active
-                                ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-200'
-                                : 'border-[#2a2d3a] text-slate-400 hover:border-slate-500/60 hover:text-slate-200'
+                                ? 'border-accent-soft bg-accent-soft text-accent-text'
+                                : 'border-line text-fg-muted hover:border-line-strong hover:text-fg'
                             }`}
                           >
                             <div>{steps}</div>
@@ -836,7 +836,7 @@ Requirements:
                         );
                       })}
                     </div>
-                    <p className="mt-1.5 text-[11px] text-slate-500">{t.voiceSampleStepsHint}</p>
+                    <p className="mt-1.5 text-[11px] text-fg-muted">{t.voiceSampleStepsHint}</p>
                   </FieldRow>
                 )}
 
@@ -853,8 +853,8 @@ Requirements:
                             onClick={() => updateVoiceField({ sentencesPerChunk: n })}
                             className={`flex-1 rounded-lg border px-2 py-1.5 text-center text-xs transition-colors ${
                               active
-                                ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-200'
-                                : 'border-[#2a2d3a] text-slate-400 hover:border-slate-500/60 hover:text-slate-200'
+                                ? 'border-accent-soft bg-accent-soft text-accent-text'
+                                : 'border-line text-fg-muted hover:border-line-strong hover:text-fg'
                             }`}
                           >
                             {n}
@@ -862,7 +862,7 @@ Requirements:
                         );
                       })}
                     </div>
-                    <p className="mt-1.5 text-[11px] text-slate-500">{t.voiceChunkSizeHint}</p>
+                    <p className="mt-1.5 text-[11px] text-fg-muted">{t.voiceChunkSizeHint}</p>
                   </FieldRow>
                 )}
 
@@ -874,22 +874,22 @@ Requirements:
                       max="200"
                       value={((editing?.voice?.speed ?? 1) * 100) | 0}
                       onChange={(e) => updateVoiceField({ speed: Number(e.target.value) / 100 })}
-                      className="flex-1 accent-indigo-500"
+                      className="flex-1 accent-accent"
                     />
-                    <span className="w-12 text-right text-xs font-medium text-slate-300">
+                    <span className="w-12 text-right text-xs font-medium text-fg-soft">
                       {((editing?.voice?.speed ?? 1) * 100) | 0}%
                     </span>
                   </div>
                 </FieldRow>
 
                 {(editing?.voice?.engine ?? 'gpt-sovits') === 'gpt-sovits' && (
-                  <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-4">
+                  <div className="rounded-2xl border border-line bg-base px-5 py-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <div className="text-sm font-medium text-slate-200">{t.voiceWarmupTitle}</div>
-                        <div className="mt-0.5 text-xs text-slate-500">{t.voiceWarmupHint}</div>
+                        <div className="text-sm font-medium text-fg">{t.voiceWarmupTitle}</div>
+                        <div className="mt-0.5 text-xs text-fg-muted">{t.voiceWarmupHint}</div>
                         {warmupResult !== 'idle' && (
-                          <div className={`mt-1 text-[11px] ${warmupResult === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
+                          <div className={`mt-1 text-[11px] ${warmupResult === 'success' ? 'text-ok' : 'text-danger'}`}>
                             {warmupResult === 'success' ? t.voiceWarmupSuccess : (warmupError || t.voiceWarmupFailed)}
                           </div>
                         )}
@@ -926,8 +926,8 @@ Requirements:
                         }}
                         className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                           warmupRunning
-                            ? 'border-slate-500/30 bg-slate-500/10 text-slate-500 cursor-not-allowed'
-                            : 'border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20'
+                            ? 'border-slate-500/30 bg-slate-500/10 text-fg-muted cursor-not-allowed'
+                            : 'border-warn-bg bg-warn-bg text-warn hover:bg-warn-bg'
                         }`}
                       >
                         {warmupRunning ? '\u23F3 ' + t.voiceWarmupRunning : t.voiceWarmupButton}
@@ -937,36 +937,36 @@ Requirements:
                 )}
 
                 {(editing?.voice?.engine ?? 'gpt-sovits') === 'gpt-sovits' && (
-                  <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-4">
+                  <div className="rounded-2xl border border-line bg-base px-5 py-4">
                     <div className="flex items-center justify-between mb-3">
                       <div>
-                        <div className="text-sm font-medium text-slate-200">{t.voiceFinetuneTitle}</div>
-                        <div className="mt-0.5 text-xs text-slate-500">{t.voiceFinetuneGenerateHint}</div>
+                        <div className="text-sm font-medium text-fg">{t.voiceFinetuneTitle}</div>
+                        <div className="mt-0.5 text-xs text-fg-muted">{t.voiceFinetuneGenerateHint}</div>
                       </div>
                     </div>
 
                     {finetuneDone ? (
                       <div className="space-y-2">
-                        <div className="text-xs text-emerald-400 font-medium">{t.voiceFinetuneDone}</div>
+                        <div className="text-xs text-ok font-medium">{t.voiceFinetuneDone}</div>
                         <label className="flex items-center gap-2 cursor-pointer">
                           <button
                             type="button"
                             onClick={() => updateVoiceField({ useFineTuned: !(editing?.voice?.useFineTuned ?? true) })}
                             className={`relative w-8 h-4 rounded-full transition-colors ${
-                              (editing?.voice?.useFineTuned ?? true) ? 'bg-emerald-500' : 'bg-slate-600'
+                              (editing?.voice?.useFineTuned ?? true) ? 'bg-ok' : 'bg-slate-600'
                             }`}
                           >
                             <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${
                               (editing?.voice?.useFineTuned ?? true) ? 'translate-x-4.5' : 'translate-x-0.5'
                             }`} />
                           </button>
-                          <span className="text-[10px] text-slate-400">{t.voiceFinetuneUseModel}</span>
+                          <span className="text-[10px] text-fg-muted">{t.voiceFinetuneUseModel}</span>
                         </label>
                         <div className="flex items-center gap-1">
                           <button
                             type="button"
                             onClick={() => { setFinetuneDone(false); setGenerateDone(false); setGenerateError(''); }}
-                            className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[10px] text-amber-300 hover:bg-amber-500/20 transition-colors"
+                            className="rounded-lg border border-warn-bg bg-warn-bg px-2.5 py-1 text-[10px] text-warn hover:bg-warn-bg transition-colors"
                           >
                             {t.voiceFinetuneRetrain}
                           </button>
@@ -975,31 +975,31 @@ Requirements:
                     ) : finetuneRunning ? (
                       <div className="space-y-2">
                         <div className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-                          <span className="text-xs text-indigo-300 font-medium">
+                          <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+                          <span className="text-xs text-accent-text font-medium">
                             {finetuneStep === 'preprocess' ? t.voiceFinetunePreprocessStatus : finetuneStep === 'train' ? t.voiceFinetuneTrainStatus : t.voiceFinetunePreparingStatus}
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <div className="flex-1 h-1.5 rounded-full bg-[#1a1d2a] overflow-hidden">
+                          <div className="flex-1 h-1.5 rounded-full bg-base overflow-hidden">
                             <div
-                              className="h-full rounded-full bg-indigo-500 transition-all duration-500"
+                              className="h-full rounded-full bg-accent transition-all duration-500"
                               style={{ width: `${Math.max(finetuneProgress, 2)}%` }}
                             />
                           </div>
-                          <span className="text-[10px] text-slate-500 tabular-nums">{finetuneProgress}%</span>
+                          <span className="text-[10px] text-fg-muted tabular-nums">{finetuneProgress}%</span>
                         </div>
                         {finetuneLog && (
-                          <p className="text-[10px] text-slate-400 leading-tight truncate">{finetuneLog}</p>
+                          <p className="text-[10px] text-fg-muted leading-tight truncate">{finetuneLog}</p>
                         )}
-                        <p className="text-[10px] text-slate-500">{t.voiceFinetuneTrainingHint}</p>
+                        <p className="text-[10px] text-fg-muted">{t.voiceFinetuneTrainingHint}</p>
                         <button
                           type="button"
                           onClick={async () => {
                             await invoke('tts_finetune_cancel');
                             setFinetuneRunning(false);
                           }}
-                          className="rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-[10px] text-red-300 hover:bg-red-500/20 transition-colors"
+                          className="rounded-lg border border-danger-bg bg-danger-bg px-2.5 py-1 text-[10px] text-danger hover:bg-danger-bg transition-colors"
                         >
                           {t.voiceFinetuneCancel}
                         </button>
@@ -1007,30 +1007,30 @@ Requirements:
                     ) : generateRunning ? (
                       <div className="space-y-2">
                         <div className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-                          <span className="text-xs text-slate-300">{t.voiceFinetuneGenerating}</span>
+                          <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+                          <span className="text-xs text-fg-soft">{t.voiceFinetuneGenerating}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <div className="flex-1 h-1.5 rounded-full bg-[#1a1d2a] overflow-hidden">
+                          <div className="flex-1 h-1.5 rounded-full bg-base overflow-hidden">
                             <div
-                              className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+                              className="h-full rounded-full bg-accent transition-all duration-300"
                               style={{ width: `${generateTotal > 0 ? (generateCurrent / generateTotal) * 100 : 4}%` }}
                             />
                           </div>
-                          <span className="text-[10px] text-slate-500 tabular-nums whitespace-nowrap">
+                          <span className="text-[10px] text-fg-muted tabular-nums whitespace-nowrap">
                             {generateCurrent}/{generateTotal}
                           </span>
                         </div>
                         {generateSentence && (
-                          <p className="text-[10px] text-slate-400 leading-tight truncate">{generateSentence}</p>
+                          <p className="text-[10px] text-fg-muted leading-tight truncate">{generateSentence}</p>
                         )}
                       </div>
                     ) : generateDone ? (
                       <div className="space-y-2">
-                        <p className="text-[10px] text-emerald-400">{t.voiceFinetuneGenerateDone}</p>
-                        <p className="text-[10px] text-slate-500">{t.voiceFinetuneGeneratedCount.replace('{{count}}', String(generateTotal))}</p>
+                        <p className="text-[10px] text-ok">{t.voiceFinetuneGenerateDone}</p>
+                        <p className="text-[10px] text-fg-muted">{t.voiceFinetuneGeneratedCount.replace('{{count}}', String(generateTotal))}</p>
                         {generateFailedCount > 0 && (
-                          <p className="text-[10px] text-amber-400">失败 {generateFailedCount} 句（共 {generateTotal + generateFailedCount} 句，成功 {generateTotal} 句）</p>
+                          <p className="text-[10px] text-warn">失败 {generateFailedCount} 句（共 {generateTotal + generateFailedCount} 句，成功 {generateTotal} 句）</p>
                         )}
                         <button
                           type="button"
@@ -1051,30 +1051,30 @@ Requirements:
                               setFinetuneLog(String(e));
                             }
                           }}
-                          className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-500/20 transition-colors"
+                          className="rounded-lg border border-ok-bg bg-ok-bg px-3 py-1.5 text-xs text-ok hover:bg-ok-bg transition-colors"
                         >
                           {t.voiceFinetuneStartTraining}
                         </button>
                       </div>
                     ) : scriptGenerating ? (
                       <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                        <span className="text-xs text-amber-300">{t.voiceFinetuneScriptGenerating}</span>
+                        <span className="w-2 h-2 rounded-full bg-warn animate-pulse" />
+                        <span className="text-xs text-warn">{t.voiceFinetuneScriptGenerating}</span>
                       </div>
                     ) : (
                       <div className="space-y-2">
                         {generateError && (
-                          <p className="text-[10px] text-red-400">{generateError}</p>
+                          <p className="text-[10px] text-danger">{generateError}</p>
                         )}
                         {trainingDataExists && (
-                          <p className="text-[10px] text-slate-500">{t.voiceFinetuneDataExistsHint}</p>
+                          <p className="text-[10px] text-fg-muted">{t.voiceFinetuneDataExistsHint}</p>
                         )}
                         <div className="flex items-center gap-2">
-                          <label className="text-[10px] text-slate-400 whitespace-nowrap">{t.voiceFinetuneTrainingLanguage}</label>
+                          <label className="text-[10px] text-fg-muted whitespace-nowrap">{t.voiceFinetuneTrainingLanguage}</label>
                           <select
                             value={editing?.voice?.trainingLanguage || 'all_zh'}
                             onChange={(e) => updateVoiceField({ trainingLanguage: e.target.value })}
-                            className="text-[10px] bg-slate-800 border border-slate-600 rounded px-1.5 py-0.5 text-slate-300"
+                            className="text-[10px] bg-slate-800 border border-slate-600 rounded px-1.5 py-0.5 text-fg-soft"
                           >
                             <option value="all_zh">简体中文</option>
                             <option value="all_yue">粤语（广东话）</option>
@@ -1132,8 +1132,8 @@ Requirements:
                             disabled={scriptGenerating}
                             className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
                               scriptGenerating
-                                ? 'border-slate-500/30 bg-slate-500/10 text-slate-500 cursor-not-allowed'
-                                : 'border-indigo-500/30 bg-indigo-500/10 text-indigo-200 hover:bg-indigo-500/20'
+                                ? 'border-slate-500/30 bg-slate-500/10 text-fg-muted cursor-not-allowed'
+                                : 'border-accent-soft bg-accent-soft text-accent-text hover:bg-accent-soft'
                             }`}
                           >
                             {trainingDataExists ? t.voiceFinetuneRegenerate : t.voiceFinetuneGenerate}
@@ -1157,7 +1157,7 @@ Requirements:
                                   setFinetuneLog(String(e));
                                 }
                               }}
-                              className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-500/20 transition-colors"
+                              className="rounded-lg border border-ok-bg bg-ok-bg px-3 py-1.5 text-xs text-ok hover:bg-ok-bg transition-colors"
                             >
                               {t.voiceFinetuneStartTraining}
                             </button>
@@ -1171,8 +1171,8 @@ Requirements:
                 {(editing?.voice?.engine ?? 'gpt-sovits') === 'gpt-sovits' && (
                   <>
                     <FieldRow label={t.voiceSampleRef}>
-                      <div className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] p-4 space-y-3">
-                        <ul className="text-[11px] leading-relaxed text-slate-400 space-y-1 list-disc pl-4">
+                      <div className="rounded-xl border border-line bg-base p-4 space-y-3">
+                        <ul className="text-[11px] leading-relaxed text-fg-muted space-y-1 list-disc pl-4">
                           <li>{t.voiceSampleSpec1}</li>
                           <li>{t.voiceSampleSpec2}</li>
                           <li>{t.voiceSampleSpec3}</li>
@@ -1180,8 +1180,8 @@ Requirements:
                         </ul>
 
                         {editing?.voice?.referenceSamplePath && (
-                          <div className="space-y-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
-                            <div className="flex items-center gap-2 text-[11px] text-emerald-300">
+                          <div className="space-y-2 rounded-lg border border-ok-bg bg-ok-bg p-3">
+                            <div className="flex items-center gap-2 text-[11px] text-ok">
                               <span>{'\u2713'}</span>
                               <span className="font-medium">{t.voiceSampleLoaded}</span>
                             </div>
@@ -1192,7 +1192,7 @@ Requirements:
                               <button
                                 type="button"
                                 onClick={() => updateVoiceField({ referenceSamplePath: undefined, referenceText: '' })}
-                                className="rounded-lg border border-red-500/30 px-2.5 py-1 text-[11px] font-medium text-red-300 hover:border-red-400"
+                                className="rounded-lg border border-danger-bg px-2.5 py-1 text-[11px] font-medium text-danger hover:border-danger"
                               >
                                 {t.voiceSampleRemove}
                               </button>
@@ -1202,8 +1202,8 @@ Requirements:
                                 disabled={testVoicePlaying}
                                 className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors ${
                                   testVoicePlaying
-                                    ? 'border-slate-500/30 bg-slate-500/10 text-slate-500 cursor-not-allowed'
-                                    : 'border-indigo-500/30 bg-indigo-500/10 text-indigo-200 hover:bg-indigo-500/20'
+                                    ? 'border-slate-500/30 bg-slate-500/10 text-fg-muted cursor-not-allowed'
+                                    : 'border-accent-soft bg-accent-soft text-accent-text hover:bg-accent-soft'
                                 }`}
                               >
                                 {testVoicePlaying ? (settings.lang === 'en' ? 'Playing...' : '播放中...') : t.voiceTest}
@@ -1212,7 +1212,7 @@ Requirements:
                                 <button
                                   type="button"
                                   onClick={() => setTestVoiceError(null)}
-                                  className="text-[10px] text-red-400 hover:text-red-300 max-w-[200px] truncate"
+                                  className="text-[10px] text-danger hover:text-danger max-w-[200px] truncate"
                                   title={testVoiceError}
                                 >
                                   {testVoiceError.length > 40 ? testVoiceError.slice(0, 40) + '...' : testVoiceError}
@@ -1226,7 +1226,7 @@ Requirements:
                           <button
                             type="button"
                             onClick={() => voiceSampleInputRef.current?.click()}
-                            className="rounded-lg border border-[#2a2d3a] px-3 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:border-indigo-400 hover:text-white"
+                            className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-fg transition-colors hover:border-accent hover:text-fg"
                           >
                             {editing?.voice?.referenceSamplePath ? t.voiceSampleReplace : t.voiceSampleUpload}
                           </button>
@@ -1248,11 +1248,11 @@ Requirements:
                           onChange={(e) => updateVoiceField({ referenceText: e.target.value })}
                           placeholder={t.voiceReferenceTextPlaceholder}
                           rows={2}
-                          className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-4 py-3 text-sm leading-relaxed text-slate-200 placeholder-slate-700 focus:border-indigo-500/60 focus:outline-none"
+                          className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm leading-relaxed text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
                         />
-                        <p className="mt-1 text-[11px] text-slate-500">{t.voiceReferenceTextHint}</p>
+                        <p className="mt-1 text-[11px] text-fg-muted">{t.voiceReferenceTextHint}</p>
                         <div className="flex items-center gap-2 mt-1">
-                          <label className="text-[10px] text-slate-400 whitespace-nowrap">参考音频语言</label>
+                          <label className="text-[10px] text-fg-muted whitespace-nowrap">参考音频语言</label>
                           <select
                             value={editing?.voice?.referenceTextLanguage || 'zh'}
                             onChange={(e) => {
@@ -1267,7 +1267,7 @@ Requirements:
                                 updateVoiceField({ referenceTextLanguage: newRefLang });
                               }
                             }}
-                            className="text-[10px] bg-slate-800 border border-slate-600 rounded px-1.5 py-0.5 text-slate-300"
+                            className="text-[10px] bg-slate-800 border border-slate-600 rounded px-1.5 py-0.5 text-fg-soft"
                           >
                             <option value="all_zh">中文</option>
                             <option value="all_yue">粤语</option>
@@ -1277,11 +1277,11 @@ Requirements:
                           </select>
                         </div>
                         <div className="flex items-center gap-2 mt-1">
-                          <label className="text-[10px] text-slate-400 whitespace-nowrap">说话语言</label>
+                          <label className="text-[10px] text-fg-muted whitespace-nowrap">说话语言</label>
                           <select
                             value={editing?.voice?.textLanguage || editing?.voice?.referenceTextLanguage || 'zh'}
                             onChange={(e) => updateVoiceField({ textLanguage: e.target.value })}
-                            className="text-[10px] bg-slate-800 border border-slate-600 rounded px-1.5 py-0.5 text-slate-300"
+                            className="text-[10px] bg-slate-800 border border-slate-600 rounded px-1.5 py-0.5 text-fg-soft"
                           >
                             <option value="all_zh">中文</option>
                             <option value="all_yue">粤语</option>
@@ -1304,11 +1304,11 @@ Requirements:
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-3 border-t border-[#2a2d3a] px-7 py-4">
+        <div className="flex items-center justify-end gap-3 border-t border-line px-7 py-4">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl border border-[#2a2d3a] px-4 py-2 text-sm font-medium text-slate-300 transition-colors hover:border-slate-500/60 hover:text-slate-100"
+            className="rounded-xl border border-line px-4 py-2 text-sm font-medium text-fg-soft transition-colors hover:border-line-strong hover:text-fg"
           >
             {t.characterCancel}
           </button>
@@ -1316,7 +1316,7 @@ Requirements:
             type="button"
             onClick={handleSave}
             disabled={!editing || !editing.name.trim()}
-            className="rounded-xl border border-indigo-500/50 bg-indigo-500/15 px-4 py-2 text-sm font-medium text-indigo-100 transition-colors hover:bg-indigo-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-xl border border-accent-soft bg-accent-soft px-4 py-2 text-sm font-medium text-accent-text transition-colors hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t.characterSave}
           </button>
@@ -1329,7 +1329,7 @@ Requirements:
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+      <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
         {label}
       </label>
       {children}

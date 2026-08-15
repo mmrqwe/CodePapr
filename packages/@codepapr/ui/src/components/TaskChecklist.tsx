@@ -50,25 +50,25 @@ export function TaskChecklist({ checklist, lang, isLoading }: TaskChecklistProps
     return (
       <button
         onClick={() => setCollapsed(false)}
-        className="w-full rounded-2xl border border-[#2a2d3a] bg-[#121722] px-4 py-2.5 text-left flex items-center justify-between hover:bg-[#161c2b] transition-colors"
+        className="w-full rounded-2xl border border-line bg-base px-4 py-2.5 text-left flex items-center justify-between hover:bg-raised transition-colors"
       >
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-slate-300">{t.todoTitle}</span>
-          <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${allDone ? 'bg-emerald-500/15 text-emerald-300' : 'bg-indigo-500/15 text-indigo-300'}`}>
+          <span className="text-xs font-semibold text-fg-soft">{t.todoTitle}</span>
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${allDone ? 'bg-ok-bg text-ok' : 'bg-accent-soft text-accent-text'}`}>
             {allDone ? t.todoAllDone : `${done}/${total}`}
           </span>
           {isLoading && (
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />
           )}
         </div>
         <div className="flex items-center gap-2">
-          <div className="h-1 w-16 rounded-full bg-[#1e2535]">
+          <div className="h-1 w-16 rounded-full bg-raised">
             <div
-              className={`h-1 rounded-full ${allDone ? 'bg-emerald-500' : 'bg-indigo-500'}`}
+              className={`h-1 rounded-full ${allDone ? 'bg-ok' : 'bg-accent'}`}
               style={{ width: `${total > 0 ? (done / total) * 100 : 0}%` }}
             />
           </div>
-          <span className="text-[10px] text-slate-500">{lang === 'en' ? 'Expand' : '展开'}</span>
+          <span className="text-[10px] text-fg-muted">{lang === 'en' ? 'Expand' : '展开'}</span>
         </div>
       </button>
     );
@@ -76,25 +76,25 @@ export function TaskChecklist({ checklist, lang, isLoading }: TaskChecklistProps
 
   // ── 完整展开 ──
   return (
-    <div className="rounded-2xl border border-[#2a2d3a] bg-[#121722] p-4">
+    <div className="rounded-2xl border border-line bg-base p-4">
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-slate-200">{t.todoTitle}</span>
-          <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${allDone ? 'bg-emerald-500/15 text-emerald-300' : 'bg-indigo-500/15 text-indigo-300'}`}>
+          <span className="text-xs font-semibold text-fg">{t.todoTitle}</span>
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${allDone ? 'bg-ok-bg text-ok' : 'bg-accent-soft text-accent-text'}`}>
             {allDone ? t.todoAllDone : `${done}/${total}`}
           </span>
         </div>
         <button
-          className="rounded-md px-2 py-0.5 text-[10px] text-slate-500 transition-colors hover:bg-[#1e2535] hover:text-slate-300"
+          className="rounded-md px-2 py-0.5 text-[10px] text-fg-muted transition-colors hover:bg-raised hover:text-fg-soft"
           onClick={() => setCollapsed(true)}
         >
           {lang === 'en' ? 'Collapse' : '收起'}
         </button>
       </div>
 
-      <div className="mb-3 h-1 w-full rounded-full bg-[#1e2535]">
+      <div className="mb-3 h-1 w-full rounded-full bg-raised">
         <div
-          className={`h-1 rounded-full transition-all duration-500 ${allDone ? 'bg-emerald-500' : 'bg-indigo-500'}`}
+          className={`h-1 rounded-full transition-all duration-500 ${allDone ? 'bg-ok' : 'bg-accent'}`}
           style={{ width: `${total > 0 ? (done / total) * 100 : 0}%` }}
         />
       </div>
@@ -109,16 +109,16 @@ export function TaskChecklist({ checklist, lang, isLoading }: TaskChecklistProps
             <div
               key={item.id}
               className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 ${
-                isRunning ? 'bg-amber-500/8 border border-amber-500/20' :
-                isFailed ? 'bg-red-500/8 border border-red-500/20' :
-                isDone ? 'bg-emerald-500/5' :
-                'bg-[#0d1118]'
+                isRunning ? 'bg-warn-bg border border-warn-bg' :
+                isFailed ? 'bg-danger-bg border border-danger-bg' :
+                isDone ? 'bg-ok-bg' :
+                'bg-base'
               }`}
             >
-              <span className={`flex-shrink-0 text-[11px] ${isDone ? 'text-emerald-400' : isFailed ? 'text-red-400' : isRunning ? 'text-amber-400 animate-pulse' : 'text-slate-600'}`}>
+              <span className={`flex-shrink-0 text-[11px] ${isDone ? 'text-ok' : isFailed ? 'text-danger' : isRunning ? 'text-warn animate-pulse' : 'text-fg-dim'}`}>
                 {isDone ? '\u2713' : isFailed ? '\u2717' : isRunning ? '\u25B6' : '\u25CB'}
               </span>
-              <span className={`min-w-0 flex-1 truncate text-[11px] leading-snug ${isDone ? 'text-slate-500 line-through' : isFailed ? 'text-red-300' : isRunning ? 'text-amber-100' : 'text-slate-400'}`}>
+              <span className={`min-w-0 flex-1 truncate text-[11px] leading-snug ${isDone ? 'text-fg-muted line-through' : isFailed ? 'text-danger' : isRunning ? 'text-warn' : 'text-fg-muted'}`}>
                 {item.title}
               </span>
             </div>

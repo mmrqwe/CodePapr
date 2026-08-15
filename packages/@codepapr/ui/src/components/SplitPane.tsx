@@ -187,13 +187,13 @@ export function SplitPane({
           role="separator"
           aria-orientation={isHorizontal ? 'vertical' : 'horizontal'}
           onPointerDown={handlePointerDown}
-          className={`group flex-shrink-0 bg-[#0f1117] ${
+          className={`group flex-shrink-0 bg-base ${
             isHorizontal ? 'w-2 cursor-col-resize px-[3px]' : 'h-2 cursor-row-resize py-[3px]'
           }`}
         >
           <div
             className={`h-full w-full rounded-full transition-colors ${
-              isDragging ? 'bg-indigo-400/80' : 'bg-[#2a2d3a] group-hover:bg-indigo-500/60'
+              isDragging ? 'bg-accent-soft' : 'bg-control group-hover:bg-accent-soft'
             }`}
           />
         </div>

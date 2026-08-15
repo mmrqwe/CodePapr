@@ -1203,10 +1203,10 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
           className={
             'pointer-events-none absolute inset-x-0 top-2 z-40 mx-auto w-fit max-w-[90%] rounded-full border px-4 py-1.5 text-xs shadow-lg backdrop-blur-sm fade-in ' +
             (resetBanner.kind === 'success'
-              ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-200'
+              ? 'border-ok-bg bg-ok-bg text-ok'
               : resetBanner.kind === 'warn'
-              ? 'border-amber-500/30 bg-amber-500/15 text-amber-200'
-              : 'border-red-500/30 bg-red-500/15 text-red-200')
+              ? 'border-warn-bg bg-warn-bg text-warn'
+              : 'border-danger-bg bg-danger-bg text-danger')
           }
         >
           {resetBanner.text}
@@ -1215,7 +1215,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       {pendingRestoreUndo &&
         pendingRestoreUndo.sessionId === activeSessionId &&
         !isLoading && (
-          <div className="absolute inset-x-0 top-2 z-40 mx-auto flex w-fit max-w-[90%] items-center gap-2 rounded-full border border-indigo-500/40 bg-[#121722]/95 px-4 py-1.5 text-xs text-slate-200 shadow-lg backdrop-blur-sm fade-in">
+          <div className="absolute inset-x-0 top-2 z-40 mx-auto flex w-fit max-w-[90%] items-center gap-2 rounded-full border border-accent-soft bg-base/95 px-4 py-1.5 text-xs text-fg shadow-lg backdrop-blur-sm fade-in">
             <span>
               {settings.lang === 'en'
                 ? 'Reset applied'
@@ -1255,7 +1255,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                   setUndoResetInFlight(false);
                 }
               }}
-              className="rounded-md border border-indigo-400/50 px-2 py-0.5 font-medium text-indigo-200 transition-colors hover:bg-indigo-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md border border-accent-soft px-2 py-0.5 font-medium text-accent-text transition-colors hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
             >
               {undoResetInFlight
                 ? settings.lang === 'en'
@@ -1273,7 +1273,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
               type="button"
               disabled={undoResetInFlight}
               onClick={() => dismissRestoreUndo()}
-              className="rounded-md px-1 text-slate-500 transition-colors hover:text-slate-300 disabled:cursor-not-allowed"
+              className="rounded-md px-1 text-fg-muted transition-colors hover:text-fg-soft disabled:cursor-not-allowed"
               aria-label={settings.lang === 'en' ? 'Dismiss undo' : '关闭撤销'}
             >
               ×
@@ -1281,7 +1281,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
           </div>
         )}
       {sessionMessagesLoadFailed && !isActiveLoading && (
-        <div className="absolute inset-x-0 top-2 z-40 mx-auto flex w-fit max-w-[90%] items-center gap-2 rounded-full border border-red-500/40 bg-red-500/15 px-4 py-1.5 text-xs text-red-200 shadow-lg backdrop-blur-sm fade-in">
+        <div className="absolute inset-x-0 top-2 z-40 mx-auto flex w-fit max-w-[90%] items-center gap-2 rounded-full border border-danger-bg bg-danger-bg px-4 py-1.5 text-xs text-danger shadow-lg backdrop-blur-sm fade-in">
           <span>
             {settings.lang === 'en'
               ? 'Session history failed to load — showing an incomplete view.'
@@ -1308,7 +1308,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                 });
               }
             }}
-            className="rounded-md border border-red-400/50 px-2 py-0.5 font-medium text-red-100 transition-colors hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md border border-danger-bg px-2 py-0.5 font-medium text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-50"
           >
             {retryMessagesLoading
               ? settings.lang === 'en'
@@ -1327,7 +1327,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       {gitReadyError && !gitReady && (
         <div
           role="status"
-          className="pointer-events-none absolute inset-x-0 top-2 z-30 mx-auto w-fit max-w-[90%] rounded-full border border-amber-500/30 bg-amber-500/15 px-4 py-1.5 text-xs text-amber-200 shadow-lg backdrop-blur-sm"
+          className="pointer-events-none absolute inset-x-0 top-2 z-30 mx-auto w-fit max-w-[90%] rounded-full border border-warn-bg bg-warn-bg px-4 py-1.5 text-xs text-warn shadow-lg backdrop-blur-sm"
         >
           {settings.lang === 'en'
             ? `Code reset disabled: ${gitReadyError}`
@@ -1339,7 +1339,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       {checkpointError && gitReady && (
         <div
           role="status"
-          className="pointer-events-none absolute inset-x-0 top-2 z-30 mx-auto w-fit max-w-[90%] rounded-full border border-amber-500/30 bg-amber-500/15 px-4 py-1.5 text-xs text-amber-200 shadow-lg backdrop-blur-sm"
+          className="pointer-events-none absolute inset-x-0 top-2 z-30 mx-auto w-fit max-w-[90%] rounded-full border border-warn-bg bg-warn-bg px-4 py-1.5 text-xs text-warn shadow-lg backdrop-blur-sm"
         >
           {settings.lang === 'en'
             ? `Code snapshot failed: ${checkpointError} (see console)`
@@ -1351,7 +1351,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       {persistenceError && (
         <div
           role="status"
-          className="pointer-events-none absolute inset-x-0 top-2 z-30 mx-auto w-fit max-w-[90%] rounded-full border border-red-500/30 bg-red-500/15 px-4 py-1.5 text-xs text-red-200 shadow-lg backdrop-blur-sm"
+          className="pointer-events-none absolute inset-x-0 top-2 z-30 mx-auto w-fit max-w-[90%] rounded-full border border-danger-bg bg-danger-bg px-4 py-1.5 text-xs text-danger shadow-lg backdrop-blur-sm"
         >
           {settings.lang === 'en'
             ? `Failed to persist data: ${persistenceError} — your changes may not survive restart`
@@ -1418,18 +1418,18 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
         {/* 重置到此点确认对话框 */}
         {resetConfirmMsgId !== null && (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-overlay"
             onClick={() => { if (!resetInFlight) setResetConfirmMsgId(null); }}
           >
-            <div className="mx-4 w-full max-w-sm rounded-2xl border border-[#2a2d3a] bg-[#121722] p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-              <p className="mb-3 text-sm text-slate-200">
+            <div className="mx-4 w-full max-w-sm rounded-2xl border border-line bg-base p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <p className="mb-3 text-sm text-fg">
                 {settings.lang === 'en'
                   ? 'Revert code and conversation to this point? Subsequent messages and code changes will be lost.'
                   : settings.lang === 'zh-TW'
                   ? '要將程式碼和對話重設到此位置嗎？後續的訊息和程式碼變更將會遺失。'
                   : '要将代码和对话重置到此位置吗？后续的消息和代码变更将会丢失。'}
               </p>
-              <p className="mb-4 text-[11px] leading-relaxed text-slate-500">
+              <p className="mb-4 text-[11px] leading-relaxed text-fg-muted">
                 {settings.lang === 'en'
                   ? 'Tip: any unsaved edits in open files will be overwritten when files are reloaded. Files matched by .gitignore (e.g. node_modules/, dist/, downloaded assets) and CodePapr\u2019s own .codepapr/ data are not affected.'
                   : settings.lang === 'zh-TW'
@@ -1438,14 +1438,14 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
               </p>
               <div className="flex justify-end gap-3">
                 <button
-                  className="rounded-lg border border-[#2a2d3a] px-4 py-2 text-xs text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-lg border border-line px-4 py-2 text-xs text-fg-muted transition-colors hover:border-line-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={resetInFlight}
                   onClick={() => setResetConfirmMsgId(null)}
                 >
                   {settings.lang === 'en' ? 'Cancel' : '取消'}
                 </button>
                 <button
-                  className="rounded-lg bg-red-600 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-lg bg-danger px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-danger disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={resetInFlight}
                   onClick={async () => {
                     const msgId = resetConfirmMsgId;
@@ -1530,13 +1530,13 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       </div>
 
       {/* 输入区 */}
-      <div className="px-4 py-3 border-t border-[#2a2d3a] bg-[#10131b]">
+      <div className="px-4 py-3 border-t border-line bg-base">
         {!isConfigured && (
-          <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-warn-bg bg-warn-bg px-4 py-3 text-sm text-warn">
             <span>{settingsError}</span>
             <button
               onClick={() => setShowSettings(true)}
-              className="flex-shrink-0 rounded-lg border border-amber-400/40 px-3 py-1.5 text-xs font-medium text-amber-100 transition-colors hover:border-amber-300 hover:text-white"
+              className="flex-shrink-0 rounded-lg border border-warn-bg px-3 py-1.5 text-xs font-medium text-warn transition-colors hover:border-warn hover:text-fg"
             >
               {t.toSettings}
             </button>
@@ -1572,17 +1572,17 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
             {pendingFiles.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mb-1.5">
                 {pendingFiles.map((file) => (
-                  <div key={file.id} className="group flex items-center gap-1 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-1">
-                    <svg className="w-3.5 h-3.5 flex-shrink-0 text-indigo-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <div key={file.id} className="group flex items-center gap-1 rounded-md border border-accent-soft bg-accent-soft px-2 py-1">
+                    <svg className="w-3.5 h-3.5 flex-shrink-0 text-accent" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="M14 2v6h6" />
                     </svg>
-                    <span className="text-xs font-medium text-indigo-200 max-w-[140px] truncate" title={file.name}>{file.name}</span>
+                    <span className="text-xs font-medium text-accent-text max-w-[140px] truncate" title={file.name}>{file.name}</span>
                     <button
                       type="button"
                       onClick={() => removePendingFile(file.id)}
                       title={t.cancel}
-                      className="flex-shrink-0 ml-0.5 rounded-full p-0.5 text-indigo-400 hover:bg-indigo-500/30 hover:text-white transition-colors"
+                      className="flex-shrink-0 ml-0.5 rounded-full p-0.5 text-accent hover:bg-accent-soft hover:text-fg transition-colors"
                     >
                       <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M18 6L6 18M6 6l12 12" />
@@ -1599,14 +1599,14 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                     <img
                       src={image.dataUri}
                       alt="pending"
-                      className="h-10 w-10 rounded-lg border border-[#2a2d3a] object-cover"
+                      className="h-10 w-10 rounded-lg border border-line object-cover"
                     />
                     <button
                       type="button"
                       onClick={() => removePendingImage(image.id)}
                       title={t.cancel}
-                      className="absolute -right-1 -top-1 h-4 w-4 rounded-full border border-[#2a2d3a] bg-[#1a1d27]
-                                 text-[9px] leading-none text-slate-300 hover:text-white"
+                      className="absolute -right-1 -top-1 h-4 w-4 rounded-full border border-line bg-raised
+                                 text-[9px] leading-none text-fg-soft hover:text-fg"
                     >
                       ×
                     </button>
@@ -1614,10 +1614,10 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                 ))}
               </div>
             )}
-            <div className={`chat-input-box relative flex flex-col rounded-2xl border bg-[#1a1d27] px-3 pt-3 pb-2 transition-all duration-200 ${isActiveLoading ? 'border-[#2a2d3a]' : 'border-[#2a2d3a] focus-within:border-indigo-500/60'}`}>
+            <div className={`chat-input-box relative flex flex-col rounded-2xl border bg-raised px-3 pt-3 pb-2 transition-all duration-200 ${isActiveLoading ? 'border-line' : 'border-line focus-within:border-accent-soft'}`}>
               <textarea
                 ref={textareaRef}
-                className="w-full bg-[#1a1d27] text-slate-200 placeholder-slate-600 outline-none resize-none text-[15px] leading-relaxed overflow-y-auto min-h-[44px] max-h-[80px]"
+                className="w-full bg-raised text-fg placeholder-slate-600 outline-none resize-none text-[15px] leading-relaxed overflow-y-auto min-h-[44px] max-h-[80px]"
                 placeholder={
                   isConfigured
                     ? t.chatPlaceholderConfigured
@@ -1696,7 +1696,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isActiveLoading}
                     title="上传文件或图片"
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="p-1.5 rounded-lg text-fg-muted hover:text-fg hover:bg-slate-700/50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -1723,15 +1723,15 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                       }
                       className={`p-1.5 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-wait ${
                         ttsServerStatus === 'running'
-                          ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10'
+                          ? 'text-ok hover:text-ok hover:bg-ok-bg'
                           : ttsServerStatus === 'error'
-                            ? 'text-red-400 hover:bg-red-500/10'
+                            ? 'text-danger hover:bg-danger-bg'
                             : ttsServerStatus === 'starting' || ttsStarting
                               ? 'text-blue-400 hover:bg-blue-500/10'
                               : ttsInstalled === false
-                                ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
-                                : 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/10'
-                      } ${ttsIsPlaying || ttsStarting || ttsServerStatus === 'starting' ? 'animate-pulse' : ''} ${showTtsLog ? 'ring-1 ring-emerald-400/50' : ''}`}
+                                ? 'text-fg-muted hover:text-fg hover:bg-slate-700/50'
+                                : 'text-warn hover:text-warn hover:bg-warn-bg'
+                      } ${ttsIsPlaying || ttsStarting || ttsServerStatus === 'starting' ? 'animate-pulse' : ''} ${showTtsLog ? 'ring-1 ring-ok-bg' : ''}`}
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
@@ -1739,16 +1739,16 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                     </button>
                     <TtsStatusBadge status={ttsServerStatus} />
                     {showTtsLog && (
-                      <div className="absolute bottom-full left-0 mb-1 w-[52rem] max-w-[calc(100vw-3rem)] rounded-xl border border-slate-600/40 bg-slate-900/95 backdrop-blur px-3 py-2.5 text-xs text-slate-200 z-40 max-h-[420px] overflow-y-auto select-text whitespace-pre-wrap break-words font-mono shadow-xl">
+                      <div className="absolute bottom-full left-0 mb-1 w-[52rem] max-w-[calc(100vw-3rem)] rounded-xl border border-slate-600/40 bg-slate-900/95 backdrop-blur px-3 py-2.5 text-xs text-fg z-40 max-h-[420px] overflow-y-auto select-text whitespace-pre-wrap break-words font-mono shadow-xl">
                         <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-700/50 sticky top-0 bg-slate-900/95 z-10">
-                          <span className="text-[11px] font-semibold text-slate-400 select-none">
+                          <span className="text-[11px] font-semibold text-fg-muted select-none">
                             TTS 服务器日志 ({ttsServerLog.length} 行)
                           </span>
                           <div className="flex items-center gap-1.5 select-none">
                             <button
                               type="button"
                               onClick={() => ttsClearServerLog()}
-                              className="text-[10px] text-slate-500 hover:text-slate-300 px-1.5 py-0.5 rounded transition-colors"
+                              className="text-[10px] text-fg-muted hover:text-fg-soft px-1.5 py-0.5 rounded transition-colors"
                               title="清空日志"
                             >
                               清空
@@ -1756,24 +1756,24 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                             <button
                               type="button"
                               onClick={() => setShowTtsLog(false)}
-                              className="text-slate-500 hover:text-slate-300 px-1"
+                              className="text-fg-muted hover:text-fg-soft px-1"
                             >
                               ×
                             </button>
                           </div>
                         </div>
                         {ttsServerLog.length === 0 ? (
-                          <div className="text-slate-600 italic text-[11px]">暂无日志</div>
+                          <div className="text-fg-dim italic text-[11px]">暂无日志</div>
                         ) : (
                           ttsServerLog.map((entry, i) => (
                             <div
                               key={i}
                               className={`text-[10px] leading-snug ${
                                 entry.stream === 'stderr'
-                                  ? 'text-amber-200'
+                                  ? 'text-warn'
                                   : entry.stream === 'system'
-                                    ? 'text-cyan-200'
-                                    : 'text-slate-400'
+                                    ? 'text-info'
+                                    : 'text-fg-muted'
                               }`}
                             >
                               {entry.line}
@@ -1783,20 +1783,20 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                       </div>
                     )}
                     {ttsError && (
-                      <div className="absolute bottom-full left-0 mb-1 w-96 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200 z-30 max-h-[480px] overflow-auto whitespace-pre-wrap break-words">
+                      <div className="absolute bottom-full left-0 mb-1 w-96 rounded-xl border border-danger-bg bg-danger-bg px-3 py-2 text-xs text-danger z-30 max-h-[480px] overflow-auto whitespace-pre-wrap break-words">
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0 font-mono text-[11px] leading-relaxed">{ttsError}</div>
                           <button
                             type="button"
                             onClick={ttsClearError}
-                            className="shrink-0 text-red-400 hover:text-red-200"
+                            className="shrink-0 text-danger hover:text-danger"
                           >
                             ×
                           </button>
                         </div>
                         {ttsServerLog.length > 0 && (
-                          <details className="mt-2 border-t border-red-500/20 pt-2">
-                            <summary className="cursor-pointer text-[11px] font-semibold text-red-300 hover:text-red-200">
+                          <details className="mt-2 border-t border-danger-bg pt-2">
+                            <summary className="cursor-pointer text-[11px] font-semibold text-danger hover:text-danger">
                               查看完整 TTS 服务器日志 ({ttsServerLog.length} 行)
                             </summary>
                             <div className="mt-2 font-mono text-[10px] leading-snug">
@@ -1805,10 +1805,10 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                                   key={i}
                                   className={
                                     entry.stream === 'stderr'
-                                      ? 'text-amber-200'
+                                      ? 'text-warn'
                                       : entry.stream === 'system'
-                                        ? 'text-cyan-200'
-                                        : 'text-slate-300'
+                                        ? 'text-info'
+                                        : 'text-fg-soft'
                                   }
                                 >
                                   {entry.line}
@@ -1823,7 +1823,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                       <div className="absolute bottom-full left-0 mb-1 w-80 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-[11px] text-blue-100 z-30 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono">
                         <div className="text-blue-300 mb-1 font-semibold">TTS 启动日志（实时）</div>
                         {ttsServerLog.slice(-6).map((entry, i) => (
-                          <div key={i} className={entry.stream === 'stderr' ? 'text-amber-200' : entry.stream === 'system' ? 'text-cyan-200' : 'text-blue-100'}>
+                          <div key={i} className={entry.stream === 'stderr' ? 'text-warn' : entry.stream === 'system' ? 'text-info' : 'text-blue-100'}>
                             {entry.line}
                           </div>
                         ))}
@@ -1842,7 +1842,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                 {isActiveLoading ? (
                   <button
                     onClick={() => cancelMessage()}
-                    className="flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-500"
+                    className="flex items-center gap-1.5 rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-danger"
                   >
                     <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 16 16">
                       <rect x="2" y="2" width="12" height="12" rx="1" />
@@ -1857,7 +1857,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                     className={`p-1.5 rounded-lg transition-all shadow-sm flex items-center justify-center
                       ${canSubmit
                         ? 'bg-slate-200 text-slate-900 hover:bg-white'
-                        : 'bg-[#2b2d35] text-slate-500'}
+                        : 'bg-raised text-fg-muted'}
                       disabled:cursor-not-allowed`}
                   >
                     <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
@@ -1873,7 +1873,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       {/* 图片预览灯箱 */}
       {previewImage && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm cursor-pointer"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-overlay backdrop-blur-sm cursor-pointer"
           onClick={() => setPreviewImage(null)}
         >
           <img

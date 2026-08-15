@@ -205,16 +205,16 @@ function getServerHint(server: McpServerConfig, c: ReturnType<typeof copy>): str
 
 function panelClass(active: boolean): string {
   return `rounded-2xl border px-4 py-4 transition-colors ${
-    active ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-[#2a2d3a] bg-[#10131b]'
+    active ? 'border-info-bg bg-info-bg' : 'border-line bg-base'
   }`;
 }
 
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return (
     <div>
-      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">{label}</label>
+      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.15em] text-fg-muted">{label}</label>
       {children}
-      {hint && <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{hint}</p>}
+      {hint && <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{hint}</p>}
     </div>
   );
 }
@@ -388,62 +388,62 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex select-none items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fade-in">
-      <div className="flex h-[92vh] w-[min(96vw,1280px)] flex-col overflow-hidden rounded-3xl border border-[#2a2d3a] bg-[#1a1d27] shadow-2xl">
-        <div className="flex items-start justify-between border-b border-[#2a2d3a] px-7 py-5">
+    <div className="fixed inset-0 z-50 flex select-none items-center justify-center bg-overlay p-4 backdrop-blur-sm animate-fade-in">
+      <div className="flex h-[92vh] w-[min(96vw,1280px)] flex-col overflow-hidden rounded-3xl border border-line bg-raised shadow-2xl">
+        <div className="flex items-start justify-between border-b border-line px-7 py-5">
           <div>
             <div className="flex items-center gap-2">
-              <span className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200">rmcp</span>
-              <h2 className="text-lg font-semibold text-slate-100">{c.title}</h2>
+              <span className="rounded-lg border border-info-bg bg-info-bg px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-info">rmcp</span>
+              <h2 className="text-lg font-semibold text-fg">{c.title}</h2>
             </div>
-            <p className="mt-1 text-sm text-slate-500">{c.desc}</p>
+            <p className="mt-1 text-sm text-fg-muted">{c.desc}</p>
           </div>
-          <button onClick={onClose} title={c.cancel} className="text-2xl leading-none text-slate-500 hover:text-slate-300">×</button>
+          <button onClick={onClose} title={c.cancel} className="text-2xl leading-none text-fg-muted hover:text-fg-soft">×</button>
         </div>
 
         <div className="grid min-h-0 flex-1 grid-cols-[340px_minmax(0,1fr)] overflow-hidden">
-          <aside className="min-h-0 overflow-y-auto border-r border-[#2a2d3a] bg-[#161922] p-4">
+          <aside className="min-h-0 overflow-y-auto border-r border-line bg-base p-4">
             <div className={panelClass(local.enabled)}>
-              <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{c.global}</h3>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{c.global}</h3>
               <label className="mb-3 flex cursor-pointer items-start gap-3">
-                <input type="checkbox" checked={local.enabled} onChange={(event) => update({ enabled: event.target.checked })} className="mt-0.5 h-5 w-5 rounded accent-cyan-500" />
-                <span className="text-sm font-medium text-slate-200">{c.enabled}</span>
+                <input type="checkbox" checked={local.enabled} onChange={(event) => update({ enabled: event.target.checked })} className="mt-0.5 h-5 w-5 rounded accent-info" />
+                <span className="text-sm font-medium text-fg">{c.enabled}</span>
               </label>
               <label className="mb-4 flex cursor-pointer items-start gap-3">
-                <input type="checkbox" checked={local.exposeTools} onChange={(event) => update({ exposeTools: event.target.checked })} className="mt-0.5 h-5 w-5 rounded accent-cyan-500" />
-                <span className="text-sm font-medium text-slate-200">{c.expose}</span>
+                <input type="checkbox" checked={local.exposeTools} onChange={(event) => update({ exposeTools: event.target.checked })} className="mt-0.5 h-5 w-5 rounded accent-info" />
+                <span className="text-sm font-medium text-fg">{c.expose}</span>
               </label>
               <Field label={c.resultLimit}>
                 <input
                   type="number"
                   value={local.resultMaxBytes}
                   onChange={(event) => update({ resultMaxBytes: Number(event.target.value) })}
-                  className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none"
+                  className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg focus:border-info focus:outline-none"
                 />
               </Field>
               <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2">
-                  <div className="text-slate-500">{c.enabledServers}</div>
-                  <div className="mt-1 font-semibold text-slate-100">{enabledCount}</div>
+                <div className="rounded-xl border border-line bg-base px-3 py-2">
+                  <div className="text-fg-muted">{c.enabledServers}</div>
+                  <div className="mt-1 font-semibold text-fg">{enabledCount}</div>
                 </div>
-                <div className="rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2">
-                  <div className="text-slate-500">{c.connected}</div>
-                  <div className="mt-1 font-semibold text-cyan-100">{connectedCount}</div>
+                <div className="rounded-xl border border-line bg-base px-3 py-2">
+                  <div className="text-fg-muted">{c.connected}</div>
+                  <div className="mt-1 font-semibold text-info">{connectedCount}</div>
                 </div>
               </div>
               <div className="mt-3 flex gap-2">
-                <button onClick={refreshStatus} className="flex-1 rounded-lg border border-[#2a2d3a] px-2.5 py-1.5 text-[10px] font-medium text-slate-300 hover:border-cyan-500/40 hover:text-cyan-100">{c.refreshStatus}</button>
-                <button onClick={disconnectAll} className="flex-1 rounded-lg border border-red-500/20 px-2.5 py-1.5 text-[10px] font-medium text-red-300 hover:bg-red-500/10">{c.disconnect}</button>
+                <button onClick={refreshStatus} className="flex-1 rounded-lg border border-line px-2.5 py-1.5 text-[10px] font-medium text-fg-soft hover:border-info-bg hover:text-info">{c.refreshStatus}</button>
+                <button onClick={disconnectAll} className="flex-1 rounded-lg border border-danger-bg px-2.5 py-1.5 text-[10px] font-medium text-danger hover:bg-danger-bg">{c.disconnect}</button>
               </div>
             </div>
 
             <div className="mt-4 flex items-center justify-between">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{c.servers}</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{c.servers}</h3>
               <div className="flex items-center gap-2">
                 {onOpenMarket && (
                   <button onClick={onOpenMarket} className="rounded-lg border border-purple-500/30 px-2.5 py-1.5 text-[10px] font-medium text-purple-200 hover:bg-purple-500/10">Browse Market</button>
                 )}
-                <button onClick={addServer} className="rounded-lg border border-cyan-500/30 px-2.5 py-1.5 text-[10px] font-medium text-cyan-200 hover:bg-cyan-500/10">{c.add}</button>
+                <button onClick={addServer} className="rounded-lg border border-info-bg px-2.5 py-1.5 text-[10px] font-medium text-info hover:bg-info-bg">{c.add}</button>
               </div>
             </div>
 
@@ -455,15 +455,15 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
                   onClick={() => setActiveId(server.id)}
                   className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
                     activeServer?.id === server.id
-                      ? 'border-cyan-500/50 bg-cyan-500/10 text-slate-100'
-                      : 'border-[#2a2d3a] bg-[#0f1117] text-slate-400 hover:border-slate-500/60 hover:text-slate-200'
+                      ? 'border-info-bg bg-info-bg text-fg'
+                      : 'border-line bg-base text-fg-muted hover:border-line-strong hover:text-fg'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-sm font-semibold">{server.name}</span>
-                    <span className={`h-2.5 w-2.5 rounded-full ${server.enabled ? 'bg-emerald-300' : 'bg-slate-600'}`} />
+                    <span className={`h-2.5 w-2.5 rounded-full ${server.enabled ? 'bg-ok' : 'bg-slate-600'}`} />
                   </div>
-                  <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-slate-600">{server.category} · {server.transport}</div>
+                  <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-fg-dim">{server.category} · {server.transport}</div>
                 </button>
               ))}
             </div>
@@ -472,21 +472,21 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
           <main className="min-h-0 overflow-y-auto p-6">
             {activeServer ? (
               <div className="space-y-5">
-                <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-5">
+                <div className="rounded-2xl border border-line bg-base px-5 py-5">
                   <div className="mb-5 flex items-start justify-between gap-4">
                     <label className="flex cursor-pointer items-start gap-3">
-                      <input type="checkbox" checked={activeServer.enabled} onChange={(event) => patchServer(activeServer.id, { enabled: event.target.checked })} className="mt-0.5 h-5 w-5 rounded accent-cyan-500" />
+                      <input type="checkbox" checked={activeServer.enabled} onChange={(event) => patchServer(activeServer.id, { enabled: event.target.checked })} className="mt-0.5 h-5 w-5 rounded accent-info" />
                       <div>
                         <div className="flex items-center gap-2">
-                          <div className="text-sm font-semibold text-slate-100">{activeServer.name}</div>
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${activeStatus?.connected ? 'bg-emerald-500/10 text-emerald-300' : 'bg-slate-700/50 text-slate-400'}`}>
+                          <div className="text-sm font-semibold text-fg">{activeServer.name}</div>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${activeStatus?.connected ? 'bg-ok-bg text-ok' : 'bg-slate-700/50 text-fg-muted'}`}>
                             {activeStatus?.connected ? c.connected : c.disconnected}
                           </span>
                         </div>
-                        <p className="mt-1 text-xs text-slate-500">{getServerHint(activeServer, c)}</p>
+                        <p className="mt-1 text-xs text-fg-muted">{getServerHint(activeServer, c)}</p>
                       </div>
                     </label>
-                    <button onClick={() => removeServer(activeServer.id)} className="rounded-lg border border-red-500/20 px-3 py-2 text-xs text-red-300 hover:bg-red-500/10">{c.remove}</button>
+                    <button onClick={() => removeServer(activeServer.id)} className="rounded-lg border border-danger-bg px-3 py-2 text-xs text-danger hover:bg-danger-bg">{c.remove}</button>
                   </div>
 
                   <div className="mb-4 flex flex-wrap gap-2">
@@ -494,7 +494,7 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
                       type="button"
                       onClick={() => handleTestServer(activeServer.id)}
                       disabled={!activeServer.enabled || busyServerId === activeServer.id}
-                      className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-100 transition-colors hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-lg border border-info-bg bg-info-bg px-3 py-1.5 text-xs font-medium text-info transition-colors hover:bg-info-bg disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {busyServerId === activeServer.id ? c.testingServer : c.testServer}
                     </button>
@@ -502,7 +502,7 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
                       type="button"
                       onClick={() => handleDisconnectServer(activeServer.id)}
                       disabled={!activeStatus?.connected || busyServerId === activeServer.id}
-                      className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-xs font-medium text-amber-200 transition-colors hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-lg border border-warn-bg bg-warn-bg px-3 py-1.5 text-xs font-medium text-warn transition-colors hover:bg-warn-bg disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {c.disconnectServer}
                     </button>
@@ -510,20 +510,20 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
 
                   <div className="grid grid-cols-2 gap-4">
                     <Field label="ID">
-                      <input value={activeServer.id} disabled className="w-full rounded-xl border border-[#2a2d3a] bg-[#0b0e14] px-3 py-2 text-sm text-slate-500" />
+                      <input value={activeServer.id} disabled className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg-muted" />
                     </Field>
                     <Field label="Name">
-                      <input value={activeServer.name} onChange={(event) => patchServer(activeServer.id, { name: event.target.value })} className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                      <input value={activeServer.name} onChange={(event) => patchServer(activeServer.id, { name: event.target.value })} className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg focus:border-info focus:outline-none" />
                     </Field>
                     <Field label={c.transport}>
-                      <select value={activeServer.transport} onChange={(event) => patchServer(activeServer.id, { transport: event.target.value as McpServerConfig['transport'] })} className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none">
+                      <select value={activeServer.transport} onChange={(event) => patchServer(activeServer.id, { transport: event.target.value as McpServerConfig['transport'] })} className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg focus:border-info focus:outline-none">
                         <option value="stdio">stdio</option>
                         <option value="sse">sse</option>
                         <option value="streamable-http">streamable-http</option>
                       </select>
                     </Field>
                     <Field label="Category">
-                      <select value={activeServer.category} onChange={(event) => patchServer(activeServer.id, { category: event.target.value as McpServerConfig['category'] })} className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none">
+                      <select value={activeServer.category} onChange={(event) => patchServer(activeServer.id, { category: event.target.value as McpServerConfig['category'] })} className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg focus:border-info focus:outline-none">
                         <option value="search">{c.search}</option>
                         <option value="database">{c.database}</option>
                         <option value="custom">{c.custom}</option>
@@ -532,25 +532,25 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-5">
+                <div className="rounded-2xl border border-line bg-base px-5 py-5">
                   {activeServer.transport === 'stdio' ? (
                     <>
                       <div className="grid grid-cols-2 gap-4">
                         <Field label={c.command}>
-                          <input value={activeServer.command} onChange={(event) => patchServer(activeServer.id, { command: event.target.value })} placeholder="npx / uvx / python" className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                          <input value={activeServer.command} onChange={(event) => patchServer(activeServer.id, { command: event.target.value })} placeholder="npx / uvx / python" className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg focus:border-info focus:outline-none" />
                         </Field>
                         <Field label={c.timeout}>
-                          <input type="number" value={activeServer.timeoutSeconds} onChange={(event) => patchServer(activeServer.id, { timeoutSeconds: Number(event.target.value) })} className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                          <input type="number" value={activeServer.timeoutSeconds} onChange={(event) => patchServer(activeServer.id, { timeoutSeconds: Number(event.target.value) })} className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg focus:border-info focus:outline-none" />
                         </Field>
                       </div>
                       <div className="mt-4">
                         <Field label={c.args}>
-                          <input value={activeServer.args} onChange={(event) => patchServer(activeServer.id, { args: event.target.value })} className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                          <input value={activeServer.args} onChange={(event) => patchServer(activeServer.id, { args: event.target.value })} className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg focus:border-info focus:outline-none" />
                         </Field>
                       </div>
                       <div className="mt-4">
                         <Field label={c.env} hint="KEY=value，每行一个。不会进入模型上下文。">
-                          <textarea value={activeServer.env} onChange={(event) => patchServer(activeServer.id, { env: event.target.value })} rows={4} className="w-full resize-none rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 font-mono text-xs text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                          <textarea value={activeServer.env} onChange={(event) => patchServer(activeServer.id, { env: event.target.value })} rows={4} className="w-full resize-none rounded-xl border border-line bg-base px-3 py-2 font-mono text-xs text-fg focus:border-info focus:outline-none" />
                         </Field>
                       </div>
                     </>
@@ -558,80 +558,80 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
                     <>
                       <div className="grid grid-cols-2 gap-4">
                         <Field label={c.url} hint={activeServer.transport === 'sse' ? 'SSE endpoint URL' : 'Streamable HTTP endpoint URL'}>
-                          <input value={activeServer.url} onChange={(event) => patchServer(activeServer.id, { url: event.target.value })} placeholder="https://example.com/mcp" className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                          <input value={activeServer.url} onChange={(event) => patchServer(activeServer.id, { url: event.target.value })} placeholder="https://example.com/mcp" className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg focus:border-info focus:outline-none" />
                         </Field>
                         <Field label={c.timeout}>
-                          <input type="number" value={activeServer.timeoutSeconds} onChange={(event) => patchServer(activeServer.id, { timeoutSeconds: Number(event.target.value) })} className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                          <input type="number" value={activeServer.timeoutSeconds} onChange={(event) => patchServer(activeServer.id, { timeoutSeconds: Number(event.target.value) })} className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg focus:border-info focus:outline-none" />
                         </Field>
                       </div>
                       <div className="mt-4">
                         <Field label={c.headers} hint="Header-Name: value，每行一个。用于 HTTP/SSE 认证。">
-                          <textarea value={activeServer.headers} onChange={(event) => patchServer(activeServer.id, { headers: event.target.value })} rows={4} placeholder={'Authorization: Bearer token\nX-API-Key: key'} className="w-full resize-none rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 font-mono text-xs text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                          <textarea value={activeServer.headers} onChange={(event) => patchServer(activeServer.id, { headers: event.target.value })} rows={4} placeholder={'Authorization: Bearer token\nX-API-Key: key'} className="w-full resize-none rounded-xl border border-line bg-base px-3 py-2 font-mono text-xs text-fg focus:border-info focus:outline-none" />
                         </Field>
                       </div>
                     </>
                   )}
                 </div>
 
-                <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-5">
+                <div className="rounded-2xl border border-line bg-base px-5 py-5">
                   <div className="grid grid-cols-2 gap-4">
                     <Field label={c.allowed} hint="逗号分隔，支持 * 通配；留空表示全部允许。">
-                      <input value={activeServer.allowedTools} onChange={(event) => patchServer(activeServer.id, { allowedTools: event.target.value })} placeholder="query,search*,list*" className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                      <input value={activeServer.allowedTools} onChange={(event) => patchServer(activeServer.id, { allowedTools: event.target.value })} placeholder="query,search*,list*" className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg focus:border-info focus:outline-none" />
                     </Field>
                     <Field label={c.denied} hint="逗号分隔，拒绝规则优先。">
-                      <input value={activeServer.deniedTools} onChange={(event) => patchServer(activeServer.id, { deniedTools: event.target.value })} placeholder="delete*,drop*,truncate*" className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                      <input value={activeServer.deniedTools} onChange={(event) => patchServer(activeServer.id, { deniedTools: event.target.value })} placeholder="delete*,drop*,truncate*" className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg focus:border-info focus:outline-none" />
                     </Field>
                     <Field label={c.forceMutating} hint={c.forceMutatingHint}>
-                      <input value={activeServer.forceMutating} onChange={(event) => patchServer(activeServer.id, { forceMutating: event.target.value })} placeholder="do_delete,execute*" className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                      <input value={activeServer.forceMutating} onChange={(event) => patchServer(activeServer.id, { forceMutating: event.target.value })} placeholder="do_delete,execute*" className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg focus:border-info focus:outline-none" />
                     </Field>
                     <Field label={c.forceReadonly} hint={c.forceReadonlyHint}>
-                      <input value={activeServer.forceReadonly} onChange={(event) => patchServer(activeServer.id, { forceReadonly: event.target.value })} placeholder="create_report*,run_query" className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none" />
+                      <input value={activeServer.forceReadonly} onChange={(event) => patchServer(activeServer.id, { forceReadonly: event.target.value })} placeholder="create_report*,run_query" className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg focus:border-info focus:outline-none" />
                     </Field>
                     <Field label={c.permission} hint={c.permissionHint}>
-                      <select value={activeServer.permissionMode} onChange={(event) => patchServer(activeServer.id, { permissionMode: event.target.value as McpServerConfig['permissionMode'] })} className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/60 focus:outline-none">
+                      <select value={activeServer.permissionMode} onChange={(event) => patchServer(activeServer.id, { permissionMode: event.target.value as McpServerConfig['permissionMode'] })} className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg focus:border-info focus:outline-none">
                         <option value="read-only">{c.readOnly}</option>
                         <option value="read-write">{c.readWrite}</option>
                         <option value="dangerous">{c.dangerous}</option>
                       </select>
                       {activeServer.permissionMode === 'dangerous' && (
-                        <p className="mt-1 text-[10px] leading-relaxed text-amber-400/80">{c.dangerousNote}</p>
+                        <p className="mt-1 text-[10px] leading-relaxed text-warn">{c.dangerousNote}</p>
                       )}
                     </Field>
                     <label
-                      className="mt-6 flex cursor-pointer items-start gap-3 rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2"
+                      className="mt-6 flex cursor-pointer items-start gap-3 rounded-xl border border-line bg-base px-3 py-2"
                     >
                       <input
                         type="checkbox"
                         checked={activeServer.requireConfirmation}
                         onChange={(event) => patchServer(activeServer.id, { requireConfirmation: event.target.checked })}
-                        className="mt-0.5 h-5 w-5 rounded accent-cyan-500"
+                        className="mt-0.5 h-5 w-5 rounded accent-info"
                       />
                       <div>
-                        <span className="text-sm text-slate-200">{c.confirmationLabel}</span>
-                        <p className="mt-0.5 text-[10px] leading-relaxed text-slate-600">{c.confirmationHint}</p>
+                        <span className="text-sm text-fg">{c.confirmationLabel}</span>
+                        <p className="mt-0.5 text-[10px] leading-relaxed text-fg-dim">{c.confirmationHint}</p>
                       </div>
                     </label>
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-[#2a2d3a] bg-[#10131b] px-5 py-5">
+                <div className="rounded-2xl border border-line bg-base px-5 py-5">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-sm font-semibold text-slate-100">{c.discovered}</h3>
-                      <p className="mt-1 text-xs text-slate-500">{message || c.empty}</p>
+                      <h3 className="text-sm font-semibold text-fg">{c.discovered}</h3>
+                      <p className="mt-1 text-xs text-fg-muted">{message || c.empty}</p>
                     </div>
-                    <button onClick={() => discoverTools(activeServer?.id)} disabled={status === 'loading'} className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-xs font-semibold text-cyan-100 transition-colors hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60">
+                    <button onClick={() => discoverTools(activeServer?.id)} disabled={status === 'loading'} className="rounded-xl border border-info-bg bg-info-bg px-4 py-2 text-xs font-semibold text-info transition-colors hover:bg-info-bg disabled:cursor-not-allowed disabled:opacity-60">
                       {status === 'loading' ? c.testing : c.test}
                     </button>
                   </div>
                   {(tools.length > 0 || errors.length > 0) && (
                     <div className="mt-4 grid grid-cols-2 gap-4">
-                      <div className="max-h-52 overflow-y-auto rounded-xl border border-[#2a2d3a] bg-[#0f1117] p-3">
-                        {tools.map((tool) => <div key={tool} className="mb-2 break-all text-xs leading-relaxed text-slate-300">{tool}</div>)}
+                      <div className="max-h-52 overflow-y-auto rounded-xl border border-line bg-base p-3">
+                        {tools.map((tool) => <div key={tool} className="mb-2 break-all text-xs leading-relaxed text-fg-soft">{tool}</div>)}
                       </div>
-                      <div className="max-h-52 overflow-y-auto rounded-xl border border-[#2a2d3a] bg-[#0f1117] p-3">
-                        <div className="mb-2 text-xs font-semibold text-slate-500">{c.errors}</div>
-                        {errors.length === 0 ? <div className="text-xs text-emerald-300">OK</div> : errors.map((error) => <div key={error} className="mb-2 break-all text-xs leading-relaxed text-red-300">{error}</div>)}
+                      <div className="max-h-52 overflow-y-auto rounded-xl border border-line bg-base p-3">
+                        <div className="mb-2 text-xs font-semibold text-fg-muted">{c.errors}</div>
+                        {errors.length === 0 ? <div className="text-xs text-ok">OK</div> : errors.map((error) => <div key={error} className="mb-2 break-all text-xs leading-relaxed text-danger">{error}</div>)}
                       </div>
                     </div>
                   )}
@@ -641,9 +641,9 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
           </main>
         </div>
 
-        <div className="flex items-center justify-end gap-3 border-t border-[#2a2d3a] px-7 py-4">
-          <button onClick={onClose} className="rounded-xl border border-[#2a2d3a] px-4 py-2 text-sm text-slate-400 hover:text-slate-200">{c.cancel}</button>
-          <button onClick={save} className="rounded-xl border border-cyan-500/40 bg-cyan-500/15 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/25">{c.save}</button>
+        <div className="flex items-center justify-end gap-3 border-t border-line px-7 py-4">
+          <button onClick={onClose} className="rounded-xl border border-line px-4 py-2 text-sm text-fg-muted hover:text-fg">{c.cancel}</button>
+          <button onClick={save} className="rounded-xl border border-info-bg bg-info-bg px-4 py-2 text-sm font-semibold text-info hover:bg-info-bg">{c.save}</button>
         </div>
       </div>
     </div>

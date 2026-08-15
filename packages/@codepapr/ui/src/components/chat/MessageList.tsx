@@ -96,20 +96,20 @@ export const MessageList = memo(function MessageList({
           <button
             type="button"
             onClick={() => onSlideWindow('up')}
-            className="rounded-full border border-[#2a2d3a] bg-[#10131b] px-4 py-1.5 text-xs text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-200"
+            className="rounded-full border border-line bg-base px-4 py-1.5 text-xs text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
           >
             {t.chatLoadEarlierRounds.replace('{n}', String(effectiveRoundWindow.lo))}
           </button>
         </div>
       )}
       {!deferMessages && sessionMessagesLoading && visibleMessagesCount === 0 && (
-        <div className="flex flex-col items-center justify-center h-full text-slate-600 select-none">
+        <div className="flex flex-col items-center justify-center h-full text-fg-dim select-none">
           <div className="h-5 w-5 mb-3 animate-spin rounded-full border-2 border-slate-700 border-t-indigo-400" />
           <p className="text-xs">{t.loadingSessionMessages}</p>
         </div>
       )}
       {!deferMessages && !sessionMessagesLoading && visibleMessagesCount === 0 && (
-        <div className="flex flex-col items-center justify-center h-full text-slate-600 select-none">
+        <div className="flex flex-col items-center justify-center h-full text-fg-dim select-none">
           <div className="text-4xl mb-3">⌘</div>
           <p className="text-sm">CodePapr</p>
           <p className="text-xs mt-1">
@@ -118,7 +118,7 @@ export const MessageList = memo(function MessageList({
           {!isConfigured && (
             <button
               onClick={() => onShowSettings(true)}
-              className="mt-4 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500"
+              className="mt-4 rounded-xl bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent"
             >
               {t.toSettings}
             </button>
@@ -126,32 +126,32 @@ export const MessageList = memo(function MessageList({
         </div>
       )}
       {!deferMessages && subagentRuns.map((run, idx) => (
-        <div key={idx} className="mx-3 mb-3 rounded-xl border border-cyan-500/20 bg-[#0b0d12]/60 overflow-hidden">
+        <div key={idx} className="mx-3 mb-3 rounded-xl border border-info-bg bg-base/60 overflow-hidden">
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition-colors hover:bg-[#0f141d]/50"
+            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition-colors hover:bg-base/50"
             onClick={() => onToggleSubagentCollapse(idx)}
           >
-            <span className={`inline-block h-2 w-2 rounded-full flex-shrink-0 ${run.state === 'running' ? 'animate-pulse bg-cyan-400' : 'bg-emerald-400'}`} />
+            <span className={`inline-block h-2 w-2 rounded-full flex-shrink-0 ${run.state === 'running' ? 'animate-pulse bg-info' : 'bg-ok'}`} />
             <span className="flex-1 min-w-0">
-              <span className="text-xs font-semibold text-cyan-300">
+              <span className="text-xs font-semibold text-info">
                 {run.agent === 'explore' ? (run.state === 'running' ? 'Explore 正在分析代码...' : 'Explore 分析完成') :
                  run.agent === 'scout' ? (run.state === 'running' ? 'Scout 正在搜索网络...' : 'Scout 搜索完成') :
                  run.agent === 'mentor' ? (run.state === 'running' ? 'Mentor 正在思考...' : 'Mentor 思考完成') :
                  (run.state === 'running' ? `${run.agent} 正在执行...` : `${run.agent} 执行完成`)}
               </span>
               {run.prompt && (
-                <span className="block mt-0.5 text-[11px] text-slate-500 truncate">{run.prompt}</span>
+                <span className="block mt-0.5 text-[11px] text-fg-muted truncate">{run.prompt}</span>
               )}
             </span>
-            <span className="text-[9px] text-slate-600 transition-transform flex-shrink-0" style={{ transform: run.collapsed ? 'rotate(-90deg)' : 'none' }}>
+            <span className="text-[9px] text-fg-dim transition-transform flex-shrink-0" style={{ transform: run.collapsed ? 'rotate(-90deg)' : 'none' }}>
               ▼
             </span>
           </button>
           {!run.collapsed && (
-            <div className="border-t border-cyan-500/10 px-3.5 py-2.5">
+            <div className="border-t border-info-bg px-3.5 py-2.5">
               {run.content && run.state === 'completed' && (
-                <div className="mb-2 max-h-32 overflow-y-auto rounded-lg bg-[#0d1118] px-3 py-2 text-[11px] leading-relaxed text-slate-400 whitespace-pre-wrap">
+                <div className="mb-2 max-h-32 overflow-y-auto rounded-lg bg-base px-3 py-2 text-[11px] leading-relaxed text-fg-muted whitespace-pre-wrap">
                   {run.content.length > 600 ? `${run.content.slice(0, 600)}...` : run.content}
                 </div>
               )}
@@ -159,12 +159,12 @@ export const MessageList = memo(function MessageList({
                 <div className="space-y-0.5">
                   {run.steps.map((step, i) => (
                     <div key={i} className="flex items-center gap-2 text-[10px]">
-                      <span className={step.status === 'error' ? 'text-red-400' : 'text-emerald-400'}>
+                      <span className={step.status === 'error' ? 'text-danger' : 'text-ok'}>
                         {step.status === 'error' ? '✗' : '✓'}
                       </span>
-                      <span className="font-mono text-slate-400">{step.name}</span>
+                      <span className="font-mono text-fg-muted">{step.name}</span>
                       {step.summary && step.summary !== step.name && (
-                        <span className="truncate text-slate-500">· {step.summary}</span>
+                        <span className="truncate text-fg-muted">· {step.summary}</span>
                       )}
                     </div>
                   ))}
@@ -251,7 +251,7 @@ export const MessageList = memo(function MessageList({
               >
                 {m.role === 'assistant' && !m.synthetic && m.content && (
                   <button
-                    className="rounded-md border border-[#2a2d3a] bg-[#10131b] px-2.5 py-1 text-[10px] text-slate-400 transition-colors hover:border-indigo-500/40 hover:bg-indigo-500/10 hover:text-indigo-300"
+                    className="rounded-md border border-line bg-base px-2.5 py-1 text-[10px] text-fg-muted transition-colors hover:border-accent-soft hover:bg-accent-soft hover:text-accent-text"
                     onClick={() => onTtsReplay(m.content)}
                     title={lang === 'en' ? 'Replay' : '重播'}
                   >
@@ -259,7 +259,7 @@ export const MessageList = memo(function MessageList({
                   </button>
                 )}
                 <button
-                  className="rounded-md border border-[#2a2d3a] bg-[#10131b] px-2.5 py-1 text-[10px] text-slate-400 transition-colors enabled:hover:border-indigo-500/40 enabled:hover:bg-indigo-500/10 enabled:hover:text-indigo-300 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-md border border-line bg-base px-2.5 py-1 text-[10px] text-fg-muted transition-colors enabled:hover:border-accent-soft enabled:hover:bg-accent-soft enabled:hover:text-accent-text disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={!canReset}
                   title={canReset ? undefined : noCheckpointTip}
                   onClick={() => onRequestReset(m.id)}
@@ -267,7 +267,7 @@ export const MessageList = memo(function MessageList({
                   {resetLabel}
                 </button>
                 <button
-                  className="rounded-md border border-[#2a2d3a] bg-[#10131b] px-2.5 py-1 text-[10px] text-slate-400 transition-colors hover:border-slate-500/40 hover:bg-slate-500/10 hover:text-slate-300"
+                  className="rounded-md border border-line bg-base px-2.5 py-1 text-[10px] text-fg-muted transition-colors hover:border-line-strong/40 hover:bg-slate-500/10 hover:text-fg-soft"
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(m.content);
@@ -288,7 +288,7 @@ export const MessageList = memo(function MessageList({
           <button
             type="button"
             onClick={() => onSlideWindow('down')}
-            className="rounded-full border border-[#2a2d3a] bg-[#10131b] px-4 py-1.5 text-xs text-slate-400 transition-colors hover:border-indigo-500/50 hover:text-slate-200"
+            className="rounded-full border border-line bg-base px-4 py-1.5 text-xs text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
           >
             {t.chatLoadLaterRounds.replace('{n}', String(totalRounds - effectiveRoundWindow.hi))}
           </button>
@@ -298,7 +298,7 @@ export const MessageList = memo(function MessageList({
         <div aria-hidden style={{ height: bottomSpacerHeight }} />
       )}
       {activeSessionId && taskChecklists[activeSessionId] ? (
-        <div className="mx-3 mb-4 rounded-2xl border-2 border-indigo-500/50 bg-[#10131b]">{/* debug-visible wrapper */}
+        <div className="mx-3 mb-4 rounded-2xl border-2 border-accent-soft bg-base">{/* debug-visible wrapper */}
           <TaskChecklist
             checklist={taskChecklists[activeSessionId]!}
             lang={lang}
@@ -310,9 +310,9 @@ export const MessageList = memo(function MessageList({
         <div className="mb-4 flex justify-start fade-in">
           <div className="flex items-center gap-1.5 px-1 py-2">
             <div className="flex gap-1.5 items-center">
-              <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:0ms]" />
-              <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:150ms]" />
-              <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:300ms]" />
+              <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce [animation-delay:0ms]" />
+              <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce [animation-delay:150ms]" />
+              <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce [animation-delay:300ms]" />
             </div>
           </div>
         </div>

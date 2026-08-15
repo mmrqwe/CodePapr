@@ -68,20 +68,20 @@ export function QuestionCard({
 
   return (
     <div className="mb-3">
-      <div className="rounded-xl border border-cyan-500/20 bg-[#0b0d12]/55 px-3.5 py-3">
+      <div className="rounded-xl border border-info-bg bg-base/55 px-3.5 py-3">
         <div className="mb-2 flex items-center gap-2">
-          <span className="inline-flex items-center rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-100">
+          <span className="inline-flex items-center rounded-full border border-info-bg bg-info-bg px-2 py-0.5 text-[10px] font-semibold text-info">
             {answered ? t.planQuestionAnswered : t.planDecisionTag}
           </span>
-          <h4 className="text-sm font-semibold text-slate-100">{question.question}</h4>
+          <h4 className="text-sm font-semibold text-fg">{question.question}</h4>
           {multiple && !answered && (
-            <span className="rounded-full border border-slate-600/60 px-2 py-0.5 text-[10px] text-slate-400">
+            <span className="rounded-full border border-slate-600/60 px-2 py-0.5 text-[10px] text-fg-muted">
               {t.planMultiSelectHint}
             </span>
           )}
         </div>
         {question.note && (
-          <div className="mb-3 rounded-lg border border-[#243040] bg-[#101722] px-3 py-2">
+          <div className="mb-3 rounded-lg border border-line bg-base px-3 py-2">
             <MessageContent
               content={question.note}
               lang={lang}
@@ -101,19 +101,19 @@ export function QuestionCard({
                   onClick={() => handleOptionClick(option)}
                   className={`flex w-full items-start justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     isSelected
-                      ? 'border-cyan-400/60 bg-cyan-500/18'
-                      : 'border-cyan-500/25 bg-cyan-500/8 hover:border-cyan-400/45 hover:bg-cyan-500/12'
+                      ? 'border-info-bg bg-info-bg'
+                      : 'border-info-bg bg-info-bg hover:border-info-bg hover:bg-info-bg'
                   }`}
                 >
                   <div className="min-w-0">
-                    <div className="text-sm font-medium text-cyan-50">{option.label}</div>
+                    <div className="text-sm font-medium text-info">{option.label}</div>
                     {option.description && (
-                      <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-slate-300">
+                      <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-fg-soft">
                         {option.description}
                       </p>
                     )}
                   </div>
-                  <span className="flex-shrink-0 text-[11px] font-medium text-cyan-200">
+                  <span className="flex-shrink-0 text-[11px] font-medium text-info">
                     {multiple ? (isSelected ? '✓' : '') : t.planDecisionTag}
                   </span>
                 </button>
@@ -124,14 +124,14 @@ export function QuestionCard({
                 type="button"
                 disabled={disabled || answered || selected.length === 0}
                 onClick={() => submitSelection(selectedOptions)}
-                className="w-full rounded-xl border border-cyan-500/40 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition-colors hover:border-cyan-400/60 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full rounded-xl border border-info-bg bg-info-bg px-3 py-2 text-sm font-semibold text-info transition-colors hover:border-info-bg hover:bg-info-bg disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {t.planConfirmSelection}
               </button>
             )}
           </div>
         ) : (
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-fg-muted">
             {answered ? t.planQuestionAnswered : t.planQuestionFreeTextHint}
           </p>
         )}

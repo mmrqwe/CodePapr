@@ -54,21 +54,21 @@ export function OnboardingPanel({ onDismiss, onOpenFullSettings }: OnboardingPan
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-      <div className="flex w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#161922] shadow-[0_24px_90px_rgba(0,0,0,0.55)]">
-        <div className="border-b border-[#2a2d3a] px-6 py-5">
-          <h2 className="text-base font-semibold text-slate-100">{t.onboardingTitle}</h2>
-          <p className="mt-1 text-xs text-slate-400">{t.onboardingSubtitle}</p>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-overlay p-4 backdrop-blur-sm">
+      <div className="flex w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-[0_24px_90px_rgba(0,0,0,0.55)]">
+        <div className="border-b border-line px-6 py-5">
+          <h2 className="text-base font-semibold text-fg">{t.onboardingTitle}</h2>
+          <p className="mt-1 text-xs text-fg-muted">{t.onboardingSubtitle}</p>
         </div>
 
         <div className="flex flex-col gap-4 px-6 py-5">
-          <div className="rounded-lg border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-xs text-slate-400">
-            <span className="text-slate-300">{t.onboardingGetKey}</span>
-            <span className="ml-1 break-all text-indigo-300">{DEEPSEEK_KEYS_URL}</span>
+          <div className="rounded-lg border border-line bg-base px-3 py-2 text-xs text-fg-muted">
+            <span className="text-fg-soft">{t.onboardingGetKey}</span>
+            <span className="ml-1 break-all text-accent-text">{DEEPSEEK_KEYS_URL}</span>
           </div>
 
           <label className="flex flex-col gap-1.5">
-            <span className="text-xs text-slate-300">{t.onboardingApiKeyLabel}</span>
+            <span className="text-xs text-fg-soft">{t.onboardingApiKeyLabel}</span>
             <div className="relative">
               <input
                 type={showKey ? 'text' : 'password'}
@@ -77,12 +77,12 @@ export function OnboardingPanel({ onDismiss, onOpenFullSettings }: OnboardingPan
                 placeholder={t.onboardingApiKeyPlaceholder}
                 autoFocus
                 spellCheck={false}
-                className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 pr-16 text-sm text-slate-100 placeholder:text-slate-600 focus:border-indigo-500/60 focus:outline-none"
+                className="w-full rounded-xl border border-line bg-base px-3 py-2 pr-16 text-sm text-fg placeholder:text-fg-dim focus:border-accent-soft focus:outline-none"
               />
               <button
                 type="button"
                 onClick={() => setShowKey((v) => !v)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-[11px] text-slate-400 hover:bg-[#202434] hover:text-slate-200"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-[11px] text-fg-muted hover:bg-raised hover:text-fg"
               >
                 {showKey ? t.onboardingHideKey : t.onboardingShowKey}
               </button>
@@ -90,11 +90,11 @@ export function OnboardingPanel({ onDismiss, onOpenFullSettings }: OnboardingPan
           </label>
 
           <label className="flex flex-col gap-1.5">
-            <span className="text-xs text-slate-300">{t.onboardingModelLabel}</span>
+            <span className="text-xs text-fg-soft">{t.onboardingModelLabel}</span>
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              className="w-full rounded-xl border border-[#2a2d3a] bg-[#0f1117] px-3 py-2 text-sm text-slate-100 focus:border-indigo-500/60 focus:outline-none"
+              className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-fg focus:border-accent-soft focus:outline-none"
             >
               {DEEPSEEK_MODELS.map((m) => (
                 <option key={m} value={m}>
@@ -104,14 +104,14 @@ export function OnboardingPanel({ onDismiss, onOpenFullSettings }: OnboardingPan
             </select>
           </label>
 
-          <p className="text-[11px] text-slate-500">{t.onboardingHint}</p>
+          <p className="text-[11px] text-fg-muted">{t.onboardingHint}</p>
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-[#2a2d3a] bg-[#0f1117] px-6 py-4">
+        <div className="flex items-center justify-between gap-3 border-t border-line bg-base px-6 py-4">
           <button
             type="button"
             onClick={handleUseOther}
-            className="text-xs text-slate-400 underline-offset-2 hover:text-indigo-300 hover:underline"
+            className="text-xs text-fg-muted underline-offset-2 hover:text-accent-text hover:underline"
           >
             {t.onboardingUseOther}
           </button>
@@ -119,7 +119,7 @@ export function OnboardingPanel({ onDismiss, onOpenFullSettings }: OnboardingPan
             <button
               type="button"
               onClick={handleSkip}
-              className="rounded-xl border border-[#2a2d3a] px-4 py-2 text-xs text-slate-300 transition-colors hover:border-slate-500/60 hover:bg-[#202434]"
+              className="rounded-xl border border-line px-4 py-2 text-xs text-fg-soft transition-colors hover:border-line-strong hover:bg-raised"
             >
               {t.onboardingSkip}
             </button>
@@ -129,8 +129,8 @@ export function OnboardingPanel({ onDismiss, onOpenFullSettings }: OnboardingPan
               disabled={!canSave}
               className={`rounded-xl px-4 py-2 text-xs font-medium transition-colors ${
                 canSave
-                  ? 'bg-indigo-500 text-white hover:bg-indigo-400'
-                  : 'cursor-not-allowed bg-indigo-500/30 text-indigo-200/50'
+                  ? 'bg-accent text-white hover:bg-accent'
+                  : 'cursor-not-allowed bg-accent-soft text-accent-text/50'
               }`}
             >
               {t.onboardingSave}

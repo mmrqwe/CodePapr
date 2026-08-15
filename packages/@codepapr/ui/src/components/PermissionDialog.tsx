@@ -26,24 +26,24 @@ export function PermissionDialog() {
           : '执行命令';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="flex w-full max-w-md flex-col overflow-hidden rounded-2xl border border-[#2a2d3a] bg-[#161922] shadow-2xl">
-        <div className="border-b border-[#2a2d3a] px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-200">外部文件访问</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 backdrop-blur-sm">
+      <div className="flex w-full max-w-md flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl">
+        <div className="border-b border-line px-5 py-4">
+          <h2 className="text-sm font-semibold text-fg">外部文件访问</h2>
         </div>
         <div className="px-5 py-4">
-          <p className="mb-3 text-sm leading-relaxed text-slate-300">
+          <p className="mb-3 text-sm leading-relaxed text-fg-soft">
             CodePapr 请求{operationLabel}项目外的路径：
           </p>
-          <div className="mb-4 rounded-lg border border-[#2a2d3a] bg-[#0d0f15] px-3 py-2.5">
-            <code className="break-all text-xs text-cyan-400">{pendingRequest.path}</code>
+          <div className="mb-4 rounded-lg border border-line bg-deep px-3 py-2.5">
+            <code className="break-all text-xs text-info">{pendingRequest.path}</code>
           </div>
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-[#2a2d3a] px-5 py-3">
+        <div className="flex items-center justify-end gap-2 border-t border-line px-5 py-3">
           <button
             type="button"
             onClick={handleDeny}
-            className="rounded-lg border border-[#2a2d3a] bg-transparent px-3.5 py-1.5 text-xs font-medium text-slate-400 transition-colors hover:border-red-500/40 hover:text-red-400"
+            className="rounded-lg border border-line bg-transparent px-3.5 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-danger-bg hover:text-danger"
           >
             拒绝
           </button>
@@ -51,7 +51,7 @@ export function PermissionDialog() {
             <button
               type="button"
               onClick={handleAllowFile}
-              className="rounded-lg border border-[#2a2d3a] bg-transparent px-3.5 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:border-cyan-500/40 hover:text-cyan-300"
+              className="rounded-lg border border-line bg-transparent px-3.5 py-1.5 text-xs font-medium text-fg-soft transition-colors hover:border-info-bg hover:text-info"
             >
               允许此文件
             </button>
@@ -59,7 +59,7 @@ export function PermissionDialog() {
           <button
             type="button"
             onClick={handleAllowDirectory}
-            className="rounded-lg bg-cyan-600/20 border border-cyan-500/30 px-3.5 py-1.5 text-xs font-medium text-cyan-300 transition-colors hover:bg-cyan-600/35 hover:border-cyan-500/50"
+            className="rounded-lg bg-info-bg border border-info-bg px-3.5 py-1.5 text-xs font-medium text-info transition-colors hover:bg-info-bg hover:border-info-bg"
           >
             允许此文件夹
           </button>

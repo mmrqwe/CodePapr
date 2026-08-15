@@ -57,6 +57,10 @@ const PAPER_LIGHT_TOKENS: ThemeDefinition['tokens'] = {
   'gantt-think': '13, 148, 136',
   'gantt-body': '5, 150, 105',
   'gantt-tool': '217, 119, 6',
+  'toast-info': '#e8f1f7',
+  'toast-ok': '#e9f5ec',
+  'toast-warn': '#faf3e3',
+  'toast-danger': '#faebee',
 };
 
 const PAPER_DARK_TOKENS: ThemeDefinition['tokens'] = {
@@ -253,6 +257,10 @@ const SOLARIZED_LIGHT_TOKENS: ThemeDefinition['tokens'] = {
   'gantt-think': '42, 161, 152',
   'gantt-body': '133, 153, 0',
   'gantt-tool': '181, 137, 0',
+  'toast-info': '#e6f0f5',
+  'toast-ok': '#e8f3ea',
+  'toast-warn': '#f9f1df',
+  'toast-danger': '#f9e8eb',
 };
 
 const SOLARIZED_DARK_TOKENS: ThemeDefinition['tokens'] = {

@@ -129,19 +129,19 @@ export function AgentContribution({ workspacePath, lang }: AgentContributionProp
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-slate-300">{t.agentContributionTitle}</p>
+        <p className="text-xs font-semibold text-fg-soft">{t.agentContributionTitle}</p>
         <button
           type="button"
           onClick={() => void refresh()}
           disabled={isLoading || !workspacePath}
-          className="rounded-lg border border-[#2a2d3a] px-2.5 py-1 text-[11px] font-medium text-slate-400 transition-colors hover:border-indigo-500/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-lg border border-line px-2.5 py-1 text-[11px] font-medium text-fg-muted transition-colors hover:border-accent-soft hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isLoading ? t.projectStatsLoading : t.projectStatsRefresh}
         </button>
       </div>
 
       {!data.available && !isLoading && (
-        <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] px-4 py-3 text-xs text-slate-500">
+        <div className="rounded-xl border border-line bg-base px-4 py-3 text-xs text-fg-muted">
           {t.agentContributionUnavailable}
         </div>
       )}
@@ -149,43 +149,43 @@ export function AgentContribution({ workspacePath, lang }: AgentContributionProp
       {data.available && (
         <>
           <div className="grid grid-cols-4 gap-3">
-            <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] px-3 py-3">
-              <div className="text-[11px] text-slate-500">{t.agentContributionFilesChanged}</div>
-              <div className="mt-1 text-lg font-semibold text-slate-100">{data.filesChanged.toLocaleString()}</div>
+            <div className="rounded-xl border border-line bg-base px-3 py-3">
+              <div className="text-[11px] text-fg-muted">{t.agentContributionFilesChanged}</div>
+              <div className="mt-1 text-lg font-semibold text-fg">{data.filesChanged.toLocaleString()}</div>
             </div>
-            <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] px-3 py-3">
-              <div className="text-[11px] text-slate-500">{t.agentContributionAdditions}</div>
+            <div className="rounded-xl border border-line bg-base px-3 py-3">
+              <div className="text-[11px] text-fg-muted">{t.agentContributionAdditions}</div>
               <div className="mt-1 text-lg font-semibold text-green-400">+{data.additions.toLocaleString()}</div>
             </div>
-            <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] px-3 py-3">
-              <div className="text-[11px] text-slate-500">{t.agentContributionDeletions}</div>
-              <div className="mt-1 text-lg font-semibold text-red-400">−{data.deletions.toLocaleString()}</div>
+            <div className="rounded-xl border border-line bg-base px-3 py-3">
+              <div className="text-[11px] text-fg-muted">{t.agentContributionDeletions}</div>
+              <div className="mt-1 text-lg font-semibold text-danger">−{data.deletions.toLocaleString()}</div>
             </div>
-            <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] px-3 py-3">
-              <div className="text-[11px] text-slate-500">{t.agentContributionNet}</div>
-              <div className={`mt-1 text-lg font-semibold ${net >= 0 ? 'text-indigo-300' : 'text-red-400'}`}>
+            <div className="rounded-xl border border-line bg-base px-3 py-3">
+              <div className="text-[11px] text-fg-muted">{t.agentContributionNet}</div>
+              <div className={`mt-1 text-lg font-semibold ${net >= 0 ? 'text-accent-text' : 'text-danger'}`}>
                 {net >= 0 ? '+' : '−'}{Math.abs(net).toLocaleString()}
               </div>
             </div>
           </div>
 
           {data.topFiles.length > 0 && (
-            <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4">
-              <p className="mb-3 text-xs font-semibold text-slate-300">{t.agentContributionTopFiles}</p>
+            <div className="rounded-xl border border-line bg-base p-4">
+              <p className="mb-3 text-xs font-semibold text-fg-soft">{t.agentContributionTopFiles}</p>
               <div className="space-y-2">
                 {data.topFiles.map((file) => (
                   <div key={file.path} className="flex items-center gap-3">
-                    <span className="w-40 flex-shrink-0 truncate text-[11px] text-slate-400" title={file.path}>
+                    <span className="w-40 flex-shrink-0 truncate text-[11px] text-fg-muted" title={file.path}>
                       {fileName(file.path)}
                     </span>
-                    <div className="flex h-4 flex-1 overflow-hidden rounded-md bg-[#0a0d14]">
+                    <div className="flex h-4 flex-1 overflow-hidden rounded-md bg-deep">
                       <div className="h-full bg-green-500/70" style={{ width: `${(file.additions / maxChurn) * 100}%` }} />
-                      <div className="h-full bg-red-500/70" style={{ width: `${(file.deletions / maxChurn) * 100}%` }} />
+                      <div className="h-full bg-danger-bg" style={{ width: `${(file.deletions / maxChurn) * 100}%` }} />
                     </div>
                     <span className="w-24 flex-shrink-0 text-right text-[11px] tabular-nums">
                       <span className="text-green-400">+{file.additions}</span>
-                      <span className="text-slate-600"> / </span>
-                      <span className="text-red-400">−{file.deletions}</span>
+                      <span className="text-fg-dim"> / </span>
+                      <span className="text-danger">−{file.deletions}</span>
                     </span>
                   </div>
                 ))}
@@ -194,15 +194,15 @@ export function AgentContribution({ workspacePath, lang }: AgentContributionProp
           )}
 
           {data.sessions.length > 0 && (
-            <div className="rounded-xl border border-[#2a2d3a] bg-[#10141d] p-4">
-              <p className="mb-3 text-xs font-semibold text-slate-300">{t.agentContributionSessions}</p>
+            <div className="rounded-xl border border-line bg-base p-4">
+              <p className="mb-3 text-xs font-semibold text-fg-soft">{t.agentContributionSessions}</p>
               <div className="space-y-1.5">
                 {data.sessions.slice(0, 10).map((session) => (
                   <div key={session.sessionId} className="flex items-center justify-between text-[11px]">
-                    <span className="truncate font-mono text-slate-400" title={session.sessionId}>
+                    <span className="truncate font-mono text-fg-muted" title={session.sessionId}>
                       {session.sessionId.slice(0, 8)}
                     </span>
-                    <span className="flex-shrink-0 text-slate-500">
+                    <span className="flex-shrink-0 text-fg-muted">
                       {session.checkpoints} {t.agentContributionCheckpoints} · {formatTimestamp(session.firstAt)}
                       {session.lastAt !== session.firstAt ? ` → ${formatTimestamp(session.lastAt)}` : ''}
                     </span>
@@ -212,7 +212,7 @@ export function AgentContribution({ workspacePath, lang }: AgentContributionProp
             </div>
           )}
 
-          <p className="px-1 text-[10px] leading-relaxed text-slate-600">{t.agentContributionNote}</p>
+          <p className="px-1 text-[10px] leading-relaxed text-fg-dim">{t.agentContributionNote}</p>
         </>
       )}
     </div>

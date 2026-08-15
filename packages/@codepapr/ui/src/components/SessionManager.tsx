@@ -25,17 +25,17 @@ function SessionItem({ session, isActive }: { session: SessionMeta; isActive: bo
     <div
       onClick={() => selectSession(session.id)}
       className={`group flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
-        isActive ? 'bg-indigo-600/20 border border-indigo-500/30' : 'hover:bg-[#1a1d27] border border-transparent'
+        isActive ? 'bg-accent-soft border border-accent-soft' : 'hover:bg-raised border border-transparent'
       }`}
     >
       <div className="flex-1 min-w-0">
-        <p className={`text-xs font-medium truncate ${isActive ? 'text-indigo-300' : 'text-slate-300'}`}>
+        <p className={`text-xs font-medium truncate ${isActive ? 'text-accent-text' : 'text-fg-soft'}`}>
           {session.name}
         </p>
       </div>
       <button
         onClick={handleDeleteClick}
-        className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all text-xs px-1"
+        className="opacity-0 group-hover:opacity-100 text-fg-dim hover:text-danger transition-all text-xs px-1"
         title={t.deleteSession}
       >
         ✕
@@ -53,11 +53,11 @@ export function SessionManager() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center border-b border-[#202432] px-4 min-h-[60px]">
+      <div className="flex items-center border-b border-line px-4 min-h-[60px]">
         <button
           onClick={newSession}
           title={t.newTaskTip}
-          className="w-full rounded-xl bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500"
+          className="w-full rounded-xl bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent"
         >
           {t.newTask}
         </button>
@@ -65,7 +65,7 @@ export function SessionManager() {
 
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable px-3 pt-2 pb-3">
         {sessions.length === 0 && (
-          <p className="py-6 text-center text-xs text-slate-600 select-none">{t.noTasks}</p>
+          <p className="py-6 text-center text-xs text-fg-dim select-none">{t.noTasks}</p>
         )}
         {sessions.map((s) => (
           <SessionItem key={s.id} session={s} isActive={s.id === activeSessionId} />
