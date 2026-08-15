@@ -40,6 +40,8 @@ export interface ProjectMessage {
   question?: QuestionData;
   questionAnswered?: boolean;
   timestamp: number;
+  /** assistant 消息的 LLM 生成耗时（毫秒），经 messages.extras 持久化 */
+  durationMs?: number;
 }
 
 export interface ProjectCumulativeStats {
@@ -61,6 +63,8 @@ export interface ProjectModelTierStats {
   promptCacheMissTokens: number;
   calls: number;
   rounds: number;
+  modelRuntimeMs?: number;
+  toolRuntimeMs?: number;
 }
 
 export interface ProjectConversationStats {
@@ -264,6 +268,8 @@ function parseModelTierStats(value: unknown): ProjectModelTierStats {
     promptCacheMissTokens: typeof value.promptCacheMissTokens === 'number' ? value.promptCacheMissTokens : 0,
     calls: typeof value.calls === 'number' ? value.calls : 0,
     rounds: typeof value.rounds === 'number' ? value.rounds : 0,
+    modelRuntimeMs: typeof value.modelRuntimeMs === 'number' ? value.modelRuntimeMs : undefined,
+    toolRuntimeMs: typeof value.toolRuntimeMs === 'number' ? value.toolRuntimeMs : undefined,
   };
 }
 

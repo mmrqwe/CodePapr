@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   addConversationRuntime,
+  addConversationStats,
+  addTierRuntimeMs,
   aggregateProjectStats,
   cloneConversationStats,
 } from './stats';
@@ -95,5 +97,92 @@ describe('aggregateProjectStats runtimeMs', () => {
       s1: createEmptyConversationStats(),
     });
     expect(aggregated.runtimeMs).toBeUndefined();
+  });
+});
+
+describe('addTierRuntimeMs (model/tool durations)', () => {
+  it('accumulates model runtime onto the target tier', () => {
+    const next = addTierRuntimeMs(createEmptyConversationStats(), 'primary', 'model', 1200);
+    expect(next.primary.modelRuntimeMs).toBe(1200);
+    expect(next.primary.toolRuntimeMs).toBeUndefined();
+  });
+
+  it('accumulates tool runtime onto the target tier', () => {
+    const next = addTierRuntimeMs(createEmptyConversationStats(), 'fast', 'tool', 640);
+    expect(next.fast.toolRuntimeMs).toBe(640);
+    expect(next.fast.modelRuntimeMs).toBeUndefined();
+  });
+
+  it('accumulates across turns and rounds fractional values per add', () => {
+    const once = addTierRuntimeMs(createEmptyConversationStats(), 'primary', 'model', 500.4);
+    const twice = addTierRuntimeMs(once, 'primary', 'model', 300.4);
+    expect(twice.primary.modelRuntimeMs).toBe(800);
+  });
+
+  it('ignores zero, negative and non-finite deltas', () => {
+    const base = createEmptyConversationStats();
+    expect(addTierRuntimeMs(base, 'primary', 'model', 0)).toBe(base);
+    expect(addTierRuntimeMs(base, 'primary', 'tool', -5)).toBe(base);
+    expect(addTierRuntimeMs(base, 'primary', 'model', Number.NaN)).toBe(base);
+  });
+
+  it('does not mutate other tiers', () => {
+    const next = addTierRuntimeMs(createEmptyConversationStats(), 'mentor', 'tool', 100);
+    expect(next.primary).toEqual(createEmptyConversationStats().primary);
+    expect(next.fast).toEqual(createEmptyConversationStats().fast);
+  });
+});
+
+describe('runtime fields survive cache-stats accumulation', () => {
+  it('addConversationStats preserves measured durations', () => {
+    const withRuntime = addTierRuntimeMs(
+      addTierRuntimeMs(createEmptyConversationStats(), 'primary', 'model', 900),
+      'primary',
+      'tool',
+      400
+    );
+    const next = addConversationStats(withRuntime, 'primary', {
+      cacheReadTokens: 10,
+      cacheCreationTokens: 2,
+      newInputTokens: 5,
+      outputTokens: 8,
+    });
+    expect(next.primary.modelRuntimeMs).toBe(900);
+    expect(next.primary.toolRuntimeMs).toBe(400);
+    expect(next.primary.totalCacheRead).toBe(10);
+  });
+
+  it('aggregateProjectStats sums tier durations across sessions', () => {
+    const s1 = addTierRuntimeMs(
+      addTierRuntimeMs(createEmptyConversationStats(), 'primary', 'model', 1000),
+      'primary',
+      'tool',
+      500
+    );
+    const s2 = addTierRuntimeMs(
+      addTierRuntimeMs(createEmptyConversationStats(), 'primary', 'model', 2000),
+      'fast',
+      'tool',
+      300
+    );
+    const aggregated = aggregateProjectStats({ s1, s2 });
+    expect(aggregated.primary.modelRuntimeMs).toBe(3000);
+    expect(aggregated.primary.toolRuntimeMs).toBe(500);
+    expect(aggregated.fast.toolRuntimeMs).toBe(300);
+    expect(aggregated.fast.modelRuntimeMs).toBeUndefined();
+    expect(aggregated.mentor.modelRuntimeMs).toBeUndefined();
+    expect(aggregated.mentor.toolRuntimeMs).toBeUndefined();
+  });
+
+  it('cloneConversationStats preserves tier durations', () => {
+    const source = addTierRuntimeMs(
+      addTierRuntimeMs(createEmptyConversationStats(), 'primary', 'model', 700),
+      'primary',
+      'tool',
+      250
+    );
+    const cloned = cloneConversationStats(source);
+    expect(cloned.primary.modelRuntimeMs).toBe(700);
+    expect(cloned.primary.toolRuntimeMs).toBe(250);
   });
 });

@@ -235,7 +235,17 @@ export function buildContextSnapshot(request: ContextSnapshotSource, round: numb
       content: message.content ?? '',
       stage,
       estimatedTokens,
+      timestamp: message.timestamp,
     };
+
+    if (typeof message.durationMs === 'number' && message.durationMs > 0) {
+      view.durationMs = message.durationMs;
+    }
+
+    if (message.reasoningContent) {
+      view.reasoningContent = message.reasoningContent;
+      view.reasoningTokens = estimateTokens(message.reasoningContent);
+    }
 
     if (message.role === 'tool' && message.toolResult) {
       const toolName = toolCallNameById.get(message.toolResult.toolCallId);
@@ -610,6 +620,9 @@ export class Agent {
         this.providerName === 'deepseek' ? { type: 'disabled' } : undefined;
       let request!: IChatRequest;
       let assistant!: IChatResponse['choices'][number]['message'];
+      // 本轮 LLM 实际生成耗时：只累计 provider 请求本身的墙钟（含续写重试的
+      // 额外请求），不含空完成退避等待——那是等待而非生成。
+      let roundModelMs = 0;
 
       for (;;) {
         if (effectiveSignal?.aborted) {
@@ -658,6 +671,7 @@ export class Agent {
         });
 
         let response: IChatResponse;
+        const requestStartedAt = Date.now();
         try {
           response =
             onStreamEvent && this.provider.streamChat
@@ -697,6 +711,7 @@ export class Agent {
           }
           throw err;
         }
+        roundModelMs += Date.now() - requestStartedAt;
 
         const validation = this.cacheValidator.validate(
           request,
@@ -797,7 +812,8 @@ export class Agent {
       const assistantMsg = MessageFactory.assistant(
         roundContent,
         assistant.toolCalls,
-        roundReasoning
+        roundReasoning,
+        roundModelMs
       );
       await this.session.logStore.append(assistantMsg);
 
@@ -806,6 +822,7 @@ export class Agent {
         round: roundNumber,
         content: roundContent,
         reasoningContent: roundReasoning,
+        ...(roundModelMs > 0 ? { durationMs: Math.round(roundModelMs) } : {}),
       });
 
       finalContent = roundContent;
@@ -827,54 +844,57 @@ export class Agent {
           break;
         }
 
-        let result: unknown;
-        let success = true;
-        let errorMessage: string | undefined;
+          let result: unknown;
+          let success = true;
+          let errorMessage: string | undefined;
+          let toolDurationMs: number | undefined;
 
-        onStreamEvent?.({
-          type: 'tool-call-start',
-          toolCallId: call.id,
-          toolName: call.name,
-          arguments: call.arguments,
-        });
+          onStreamEvent?.({
+            type: 'tool-call-start',
+            toolCallId: call.id,
+            toolName: call.name,
+            arguments: call.arguments,
+          });
 
-        if (call.arguments._parseError) {
-          errorMessage = `工具参数 JSON 解析失败: ${call.arguments.error}. 原始参数(前500字符): ${call.arguments._raw}`;
-          result = { error: errorMessage };
-          success = false;
-          log.error(`Tool argument parse failed: ${call.name}`, { error: errorMessage });
-        } else {
-          // 每个工具调用独立 AbortController：主会话取消或工具超时都会
-          // abort 它，并通过 ToolExecutionContext.signal 下发给工具实现
-          // （bash 杀进程、task 取消子代理等）。旧实现 withTimeout 只抛弃
-          // promise，工具继续在后台跑完并滞后落地副作用。
-          const callController = new AbortController();
-          const propagateAbort = (): void => callController.abort();
-          if (effectiveSignal?.aborted) {
-            callController.abort();
-          } else {
-            effectiveSignal?.addEventListener('abort', propagateAbort, { once: true });
-          }
-          try {
-            const toolTimeoutMs = this.toolTimeouts[call.name] ?? DEFAULT_TOOL_TIMEOUT_MS;
-            result = await withTimeout(
-              this.session.toolRegistry.execute(call.name, call.arguments, {
-                toolCallId: call.id,
-                signal: callController.signal,
-              }),
-              toolTimeoutMs,
-              effectiveSignal,
-              () => callController.abort()
-            );
-          } catch (err) {
-            errorMessage = (err as Error).message;
+          if (call.arguments._parseError) {
+            errorMessage = `工具参数 JSON 解析失败: ${call.arguments.error}. 原始参数(前500字符): ${call.arguments._raw}`;
             result = { error: errorMessage };
             success = false;
-            log.error(`Tool execution failed: ${call.name}`, { error: err });
-          } finally {
-            effectiveSignal?.removeEventListener('abort', propagateAbort);
+            log.error(`Tool argument parse failed: ${call.name}`, { error: errorMessage });
+          } else {
+            // 每个工具调用独立 AbortController：主会话取消或工具超时都会
+            // abort 它，并通过 ToolExecutionContext.signal 下发给工具实现
+            // （bash 杀进程、task 取消子代理等）。旧实现 withTimeout 只抛弃
+            // promise，工具继续在后台跑完并滞后落地副作用。
+            const callController = new AbortController();
+            const propagateAbort = (): void => callController.abort();
+            if (effectiveSignal?.aborted) {
+              callController.abort();
+            } else {
+              effectiveSignal?.addEventListener('abort', propagateAbort, { once: true });
+            }
+            const toolStartedAt = Date.now();
+            try {
+              const toolTimeoutMs = this.toolTimeouts[call.name] ?? DEFAULT_TOOL_TIMEOUT_MS;
+              result = await withTimeout(
+                this.session.toolRegistry.execute(call.name, call.arguments, {
+                  toolCallId: call.id,
+                  signal: callController.signal,
+                }),
+                toolTimeoutMs,
+                effectiveSignal,
+                () => callController.abort()
+              );
+            } catch (err) {
+              errorMessage = (err as Error).message;
+              result = { error: errorMessage };
+              success = false;
+              log.error(`Tool execution failed: ${call.name}`, { error: err });
+            } finally {
+              effectiveSignal?.removeEventListener('abort', propagateAbort);
+            }
+            toolDurationMs = Math.round(Date.now() - toolStartedAt);
           }
-        }
         let contextResult: unknown = result;
         let subagentToolInvocations: ISubagentToolInvocation[] | undefined;
         if (result && typeof result === 'object' && '__subagentToolInvocations' in result) {
@@ -884,7 +904,7 @@ export class Agent {
           delete stripped.__subagentToolInvocations;
           contextResult = stripped;
         }
-        const toolMsg = await this.buildToolMessage(call, contextResult, success);
+        const toolMsg = await this.buildToolMessage(call, contextResult, success, toolDurationMs);
         await this.session.logStore.append(toolMsg);
         executedToolCalls += 1;
         onStreamEvent?.({
@@ -900,6 +920,7 @@ export class Agent {
               ? (toolMsg.metadata[TOOL_SUMMARY_METADATA_KEY] as string)
               : undefined,
           ...(subagentToolInvocations ? { subagentToolInvocations } : {}),
+          ...(toolDurationMs !== undefined ? { durationMs: toolDurationMs } : {}),
         });
 
         if (result && typeof result === 'object' && '__question' in result && (result as Record<string, unknown>).__question === true) {
@@ -979,7 +1000,12 @@ export class Agent {
     };
   }
 
-  private async buildToolMessage(call: IToolCall, result: unknown, success: boolean) {
+  private async buildToolMessage(
+    call: IToolCall,
+    result: unknown,
+    success: boolean,
+    durationMs?: number
+  ) {
     let content: string;
     let originalChars: number;
     let spilledPath: string | undefined;
@@ -1011,6 +1037,6 @@ export class Agent {
       }
     }
 
-    return MessageFactory.tool(call.id, content, success, metadata);
+    return MessageFactory.tool(call.id, content, success, metadata, durationMs);
   }
 }

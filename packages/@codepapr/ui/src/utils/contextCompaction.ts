@@ -57,6 +57,7 @@ export interface ContextMessageLike {
   toolInvocations?: UIToolInvocation[];
   images?: IImageContent[];
   timestamp: number;
+  durationMs?: number;
   synthetic?: boolean;
   hidden?: boolean;
   carryForwardInContext?: boolean;
@@ -200,6 +201,7 @@ function toCoreTailMessages(messages: readonly ContextMessageLike[]): IMessage[]
             arguments: ti.arguments,
           })),
           timestamp: message.timestamp,
+          ...(typeof message.durationMs === 'number' ? { durationMs: message.durationMs } : {}),
         };
         const toolMsgs: IMessage[] = message.toolInvocations.map((ti) => {
           const cleanedOutput =
@@ -235,6 +237,7 @@ function toCoreTailMessages(messages: readonly ContextMessageLike[]): IMessage[]
             ...(ti.contextSummary
               ? { metadata: { [TOOL_SUMMARY_METADATA_KEY]: ti.contextSummary } }
               : {}),
+            ...(typeof ti.durationMs === 'number' ? { durationMs: ti.durationMs } : {}),
           };
         });
         return [assistantMsg, ...toolMsgs];
@@ -256,6 +259,9 @@ function toCoreTailMessages(messages: readonly ContextMessageLike[]): IMessage[]
               ? message.images
               : undefined,
           timestamp: message.timestamp,
+          ...(message.role === 'assistant' && typeof message.durationMs === 'number'
+            ? { durationMs: message.durationMs }
+            : {}),
         },
       ];
     });

@@ -73,6 +73,20 @@ function formatDuration(ms: number | undefined): string {
   return `${seconds}s`;
 }
 
+/** 跨 tier 汇总耗时字段；所有 tier 都未测量时返回 undefined（显示 —）。 */
+function sumRuntimeAcrossTiers(
+  stats: ConversationStats,
+  field: 'modelRuntimeMs' | 'toolRuntimeMs'
+): number | undefined {
+  let total: number | undefined;
+  for (const tier of [stats.primary, stats.fast, stats.mentor]) {
+    if (typeof tier[field] === 'number') {
+      total = (total ?? 0) + tier[field];
+    }
+  }
+  return total;
+}
+
 function StatRow({ label, value, color = 'text-slate-300' }: { label: string; value: string | number; color?: string }) {
   return (
     <div className="flex justify-between items-center py-1.5">
@@ -144,6 +158,22 @@ function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss, sh
         )}
         <StatRow label={t.output} value={totalOutput.toLocaleString()} />
       </div>
+
+      {(stats.modelRuntimeMs !== undefined || stats.toolRuntimeMs !== undefined) && (
+        <div className="mb-3">
+          <p className="mb-2 text-[11px] font-medium text-slate-500">{t.runtimeBreakdown}</p>
+          <StatRow
+            label={t.modelRuntimeLabel}
+            value={formatDuration(stats.modelRuntimeMs)}
+            color="text-indigo-300"
+          />
+          <StatRow
+            label={t.toolRuntimeLabel}
+            value={formatDuration(stats.toolRuntimeMs)}
+            color="text-slate-300"
+          />
+        </div>
+      )}
 
       {showCost && pricing && (
         <div>
@@ -260,10 +290,14 @@ export function CacheStatsDashboard({ lang, collapsible = true, onOpenContextIns
                   : '—'}
               </p>
             </div>
-            <div className="min-w-0" title={t.runtimeDurationTip}>
-              <p className="text-[11px] text-slate-500">{t.runtimeDuration}</p>
-              <p className="font-mono text-sm font-semibold text-slate-300">
-                {formatDuration(displayedStats.runtimeMs)}
+            <div className="min-w-0" title={t.modelRuntimeTip}>
+              <p className="text-[11px] text-slate-500">{t.modelRuntimeLabel}</p>
+              <p className="font-mono text-sm font-semibold text-indigo-300">
+                {formatDuration(sumRuntimeAcrossTiers(displayedStats, 'modelRuntimeMs'))}
+              </p>
+              <p className="font-mono text-[10px] text-slate-600">
+                {t.toolRuntimeLabel}{' '}
+                {formatDuration(sumRuntimeAcrossTiers(displayedStats, 'toolRuntimeMs'))}
               </p>
             </div>
             <button

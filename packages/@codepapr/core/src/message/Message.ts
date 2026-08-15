@@ -19,7 +19,8 @@ export class MessageFactory {
   static assistant(
     content: string,
     toolCalls?: IToolCall[],
-    reasoningContent?: string
+    reasoningContent?: string,
+    durationMs?: number
   ): IMessage {
     return deepFreeze({
       id: generateUUID(),
@@ -28,6 +29,7 @@ export class MessageFactory {
       timestamp: Date.now(),
       reasoningContent,
       toolCalls,
+      ...(typeof durationMs === 'number' && durationMs > 0 ? { durationMs } : {}),
     }) as IMessage;
   }
 
@@ -35,7 +37,8 @@ export class MessageFactory {
     toolCallId: string,
     result: unknown,
     success: boolean = true,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
+    durationMs?: number
   ): IMessage {
     const cleanedResult =
       typeof result === 'string' ? result : stripInternalFields(result);
@@ -51,6 +54,7 @@ export class MessageFactory {
       timestamp: Date.now(),
       toolResult,
       ...(metadata ? { metadata } : {}),
+      ...(typeof durationMs === 'number' && durationMs > 0 ? { durationMs } : {}),
     }) as IMessage;
   }
 }

@@ -61,7 +61,7 @@ import { useGoalStore } from '../goalStore';
 import type { CommandResult } from '../../tools/streamingWorkspaceCommand';
 
 import { normalizeSettings, getSettingsError } from './settingsNormalizer';
-import { addConversationRuntime, addConversationStats, getSessionConversationStats } from './stats';
+import { addConversationRuntime, addConversationStats, addTierRuntimeMs, getSessionConversationStats } from './stats';
 import { maybeApplySessionTitle, touchSession } from './persistence';
 import { saveCurrentProjectState } from './projectSnapshot';
 import {
@@ -974,6 +974,13 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           let accumulatedSubagentFast: ICacheStatistics | undefined;
           let accumulatedSubagentPrimary: ICacheStatistics | undefined;
           let accumulatedSubagentMentor: ICacheStatistics | undefined;
+          // 模型生成耗时 / 工具执行耗时（毫秒）：事件驱动累加。
+          //  - pass 级：单次 runAgentPass 内重置（崩溃恢复重跑时避免重复计数）
+          //  - turn 级：跨 pass 累加（Goal 循环多次 runAgentPass 属于同一回合）
+          let passModelRuntimeMs = 0;
+          let passToolRuntimeMs = 0;
+          let turnModelRuntimeMs = 0;
+          let turnToolRuntimeMs = 0;
           const primaryRoute = buildPrimaryModelRoute(
             {
               model: normalizedSettings.model,
@@ -1165,6 +1172,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           await yieldToMainThread();
 
           const runAgentPass = async (passInput: string, passImages?: import('@codepapr/types').IImageContent[]) => {
+            // 本次 pass 的耗时累加器：崩溃恢复会重跑整个 pass，事件也会重新
+            // 发射，因此按 pass 重置、按回合（turn）累加，避免重试路径重复计数。
+            passModelRuntimeMs = 0;
+            passToolRuntimeMs = 0;
             const response = await agent!.chat(passInput, (event) => {
               armStoreIdle();
               if (event.type === 'assistant-round-start') {
@@ -1240,6 +1251,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                       : mergedReasoning,
                     isStreaming: false,
                     statusText: undefined,
+                    ...(typeof event.durationMs === 'number' && event.durationMs > 0
+                      ? { durationMs: event.durationMs }
+                      : {}),
                   };
                 }
 
@@ -1311,9 +1325,19 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
 
                 return applyToolStreamEvent(message, event);
               });
+
+              // 耗时测量：事件回调内更新完消息后再累加（保持 updater 纯函数）。
+              if (event.type === 'assistant-round-complete' && typeof event.durationMs === 'number') {
+                passModelRuntimeMs += event.durationMs;
+              }
+              if (event.type === 'tool-call-end' && typeof event.durationMs === 'number') {
+                passToolRuntimeMs += event.durationMs;
+              }
             }, passImages);
 
             accumulatedStats = accumulateCacheStats(accumulatedStats, response.cacheStats);
+            turnModelRuntimeMs += passModelRuntimeMs;
+            turnToolRuntimeMs += passToolRuntimeMs;
             if (response.subagentCacheStatsByTier?.fast) {
               accumulatedSubagentFast = accumulateCacheStats(
                 accumulatedSubagentFast,
@@ -1909,10 +1933,20 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               base: ConversationStats,
             ): ConversationStats =>
               addConversationRuntime(
-                tierDeltas.reduce(
-                  (acc, delta) =>
-                    addConversationStats(acc, delta.tier, delta.stats, delta.incrementRounds ? { incrementRounds: true } : undefined),
-                  base,
+                addTierRuntimeMs(
+                  addTierRuntimeMs(
+                    tierDeltas.reduce(
+                      (acc, delta) =>
+                        addConversationStats(acc, delta.tier, delta.stats, delta.incrementRounds ? { incrementRounds: true } : undefined),
+                      base,
+                    ),
+                    route.tier,
+                    'model',
+                    turnModelRuntimeMs,
+                  ),
+                  route.tier,
+                  'tool',
+                  turnToolRuntimeMs,
                 ),
                 turnRuntimeMs,
               );

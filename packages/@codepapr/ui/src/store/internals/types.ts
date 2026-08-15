@@ -200,6 +200,8 @@ export interface UIToolInvocation {
   error?: string;
   statusText?: string;
   output?: string;
+  /** 工具实际执行耗时（毫秒）；占位/跳过的调用无此字段 */
+  durationMs?: number;
   /** Byte-exact tool message content appended to the log (truncated +
    *  deterministically serialized). Used to rebuild tool messages byte-identically
    *  on restore so the prefix cache is not broken. `output` is the full raw result
@@ -236,6 +238,8 @@ export interface UIMessage {
   /** 该消息上的 plan 问题/决策卡片是否已被用户回答（防重复作答，持久化）。 */
   questionAnswered?: boolean;
   timestamp: number;
+  /** assistant 消息：本轮 LLM 生成耗时（毫秒，持久化到 messages.extras） */
+  durationMs?: number;
 }
 
 export interface CumulativeStats {
@@ -257,6 +261,11 @@ export interface ModelTierStats {
   promptCacheMissTokens: number;
   calls: number;
   rounds: number;
+  /** 模型实际生成耗时（LLM 请求墙钟，不含工具执行与空完成退避），毫秒。
+   *  undefined 表示旧数据/该 tier 从未产生过测量值。 */
+  modelRuntimeMs?: number;
+  /** 工具实际执行耗时（毫秒），undefined 同上。 */
+  toolRuntimeMs?: number;
 }
 
 export interface ConversationStats {

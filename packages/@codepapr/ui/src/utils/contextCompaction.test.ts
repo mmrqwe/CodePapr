@@ -177,6 +177,48 @@ describe('contextCompaction', () => {
     expect(effective[3]?.content).toBe('已继续处理。');
   });
 
+  it('carries measured durations into rebuilt core messages (assistant + tool)', () => {
+    const messages: ContextMessageLike[] = [
+      createUser('u1', '跑一下测试'),
+      {
+        id: 'a1',
+        role: 'assistant',
+        content: '执行测试。',
+        durationMs: 3200,
+        toolInvocations: [
+          {
+            id: 't-1',
+            name: 'bash',
+            arguments: { command: 'npm test' },
+            status: 'success',
+            output: 'Tests passed',
+            contextContent: 'Tests passed',
+            durationMs: 8400,
+          },
+        ],
+        timestamp: 100,
+      },
+    ];
+
+    const effective = buildEffectiveContextMessages(messages);
+    expect(effective).toHaveLength(3);
+    const assistantMsg = effective.find((m) => m.role === 'assistant') as IMessage;
+    const toolMsg = effective.find((m) => m.role === 'tool') as IMessage;
+    expect(assistantMsg.durationMs).toBe(3200);
+    expect(toolMsg.durationMs).toBe(8400);
+  });
+
+  it('omits durationMs from rebuilt user messages and duration-less assistants', () => {
+    const messages: ContextMessageLike[] = [
+      { ...createUser('u1', '你好'), durationMs: 999 },
+      createAssistant('a1', '回复'),
+    ];
+
+    const effective = buildEffectiveContextMessages(messages);
+    expect(effective[0]?.durationMs).toBeUndefined();
+    expect(effective[1]?.durationMs).toBeUndefined();
+  });
+
   it('excludes ordinary synthetic display summaries from model context', () => {
     const messages: ContextMessageLike[] = [
       createUser('u1', '修复类型错误'),

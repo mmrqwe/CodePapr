@@ -236,6 +236,7 @@ export function applyToolStreamEvent(
     contextSummary: event.contextSummary ?? baseInvocation.contextSummary,
     ...(event.error ? { error: event.error } : {}),
     ...(event.subagentToolInvocations ? { subagentToolInvocations: event.subagentToolInvocations } : {}),
+    ...(typeof event.durationMs === 'number' && event.durationMs > 0 ? { durationMs: event.durationMs } : {}),
   };
 
   if (existingIndex === -1) {

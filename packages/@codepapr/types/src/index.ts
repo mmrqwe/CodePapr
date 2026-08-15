@@ -22,6 +22,8 @@ export interface IMessage {
   reasoningContent?: string;
   toolCalls?: IToolCall[];
   toolResult?: IToolResult;
+  /** 可选：assistant 消息 = 本轮 LLM 生成耗时；tool 消息 = 工具执行耗时（毫秒） */
+  durationMs?: number;
   /** 可选的图片输入，仅 user 消息使用，由 Provider 映射为多模态内容 */
   images?: IImageContent[];
   metadata?: Record<string, unknown>;
@@ -257,6 +259,14 @@ export interface IContextMessageView {
   toolName?: string;
   /** assistant 消息：本轮发起的工具调用概要（名称列表） */
   toolCallNames?: string[];
+  /** 消息进入上下文的时间戳（用于甘特图时间线展示） */
+  timestamp?: number;
+  /** assistant 消息：思考模式下的思维链内容 */
+  reasoningContent?: string;
+  /** assistant 消息：思维链 token 估算（不含在 estimatedTokens 内） */
+  reasoningTokens?: number;
+  /** assistant 消息 = LLM 生成耗时；tool 消息 = 工具执行耗时（毫秒，缺省=未测量） */
+  durationMs?: number;
 }
 
 export interface IContextSnapshot {
@@ -282,6 +292,8 @@ export type IChatStreamEvent =
       round: number;
       content: string;
       reasoningContent?: string;
+      /** 本轮 LLM 生成总耗时（含续写重试的请求，不含空完成退避等待），毫秒 */
+      durationMs?: number;
     }
   | { type: 'reasoning-delta'; delta: string }
   | { type: 'content-delta'; delta: string }
@@ -333,6 +345,8 @@ export type IChatStreamEvent =
          *  byte-identically. Absent when the tool stays full in history. */
         contextSummary?: string;
         subagentToolInvocations?: ISubagentToolInvocation[];
+        /** 工具实际执行耗时（毫秒）；跳过的占位调用无此字段 */
+        durationMs?: number;
       }
   | { type: 'context-compacted'; round: number };
 

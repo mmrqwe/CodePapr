@@ -94,6 +94,10 @@ export function addModelTierStats(
     promptCacheMissTokens: current.promptCacheMissTokens + (delta.promptCacheMissTokens ?? 0),
     calls: current.calls + (delta.calls ?? 0),
     rounds: current.rounds + (options?.incrementRounds ? 1 : 0),
+    // 耗时字段不进 delta：由 addTierRuntimeMs 单独累加，这里必须原样保留，
+    // 否则常规 cache stats 累加会把已有的耗时测量清掉。
+    modelRuntimeMs: current.modelRuntimeMs,
+    toolRuntimeMs: current.toolRuntimeMs,
   };
 }
 
@@ -130,6 +134,12 @@ export function addModelTierStatsToStats(
     promptCacheMissTokens: base.promptCacheMissTokens + other.promptCacheMissTokens,
     calls: base.calls + other.calls,
     rounds: base.rounds + other.rounds,
+    ...(typeof base.modelRuntimeMs === 'number' || typeof other.modelRuntimeMs === 'number'
+      ? { modelRuntimeMs: (base.modelRuntimeMs ?? 0) + (other.modelRuntimeMs ?? 0) }
+      : {}),
+    ...(typeof base.toolRuntimeMs === 'number' || typeof other.toolRuntimeMs === 'number'
+      ? { toolRuntimeMs: (base.toolRuntimeMs ?? 0) + (other.toolRuntimeMs ?? 0) }
+      : {}),
   };
 }
 
@@ -161,6 +171,25 @@ export function addConversationRuntime(
   return {
     ...current,
     runtimeMs: (current.runtimeMs ?? 0) + Math.round(runtimeMs),
+  };
+}
+
+/** 累加某 tier 的模型生成耗时 / 工具执行耗时（毫秒，undefined = 尚无测量值）。 */
+export function addTierRuntimeMs(
+  current: ConversationStats,
+  tier: ModelTier,
+  kind: 'model' | 'tool',
+  runtimeMs: number
+): ConversationStats {
+  if (!Number.isFinite(runtimeMs) || runtimeMs <= 0) return current;
+  const field = kind === 'model' ? 'modelRuntimeMs' : 'toolRuntimeMs';
+  const tierStats = current[tier];
+  return {
+    ...current,
+    [tier]: {
+      ...tierStats,
+      [field]: (tierStats[field] ?? 0) + Math.round(runtimeMs),
+    },
   };
 }
 

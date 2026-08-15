@@ -1356,6 +1356,7 @@ pub(crate) fn save_message_batch(
             "contextCheckpoint",
             "question",
             "questionAnswered",
+            "durationMs",
         ] {
             if let Some(val) = msg.get(key) {
                 if !val.is_null() {

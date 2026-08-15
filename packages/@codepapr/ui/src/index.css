@@ -43,6 +43,11 @@
   --goal-banner-error-bg: rgba(185,28,28,0.06);
   --goal-banner-error-border: rgba(185,28,28,0.25);
   --goal-banner-error-fg: #7a1212;
+  /* 上下文甘特图三类泳道色（RGB 三元组，配合 rgba(var(--gantt-*)) 使用） */
+  --gantt-user: 2, 132, 199;   /* 用户输入（含 system 提示词）：sky-700 */
+  --gantt-think: 13, 148, 136; /* 思维链：teal-600 */
+  --gantt-body: 5, 150, 105;   /* 正文：emerald-600 */
+  --gantt-tool: 217, 119, 6;   /* 工具调用：amber-600 */
 }
 
 .dark {
@@ -76,6 +81,11 @@
   --shadow-sm: 0 2px 8px rgba(0,0,0,0.3);
   --shadow-md: 0 8px 24px rgba(0,0,0,0.5);
   --surface-gradient: linear-gradient(180deg, #121722 0%, #0f141d 100%);
+  /* 上下文甘特图三类泳道色 */
+  --gantt-user: 56, 189, 248;  /* sky-400 */
+  --gantt-think: 45, 212, 191; /* teal-400 */
+  --gantt-body: 52, 211, 153;  /* emerald-400 */
+  --gantt-tool: 251, 191, 36;  /* amber-400 */
 }
 
 * { box-sizing: border-box; }
