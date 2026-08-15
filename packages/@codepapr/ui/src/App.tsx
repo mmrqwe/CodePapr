@@ -660,7 +660,7 @@ export default function App() {
           </div>
         }
         second={
-          <div className="relative h-full min-h-0">
+          <div className="h-full min-h-0">
             <SplitPane
               direction="horizontal"
               defaultRatio={0.68}
@@ -836,32 +836,33 @@ export default function App() {
                 </div>
               }
             />
-
-            {activePreviewSession && (
-              <div className="absolute inset-0 z-40 flex items-center justify-center bg-deep/70 p-6 backdrop-blur-sm">
-                <div className="h-full max-h-[88vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-line bg-base shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
-                  <Suspense fallback={null}>
-                    <PreviewSessionPanel workspacePath={activePreviewSession.workspacePath} lang={settings.lang} />
-                  </Suspense>
-                </div>
-              </div>
-            )}
-
-            {browserPanelOpen && browserEngine === 'embedded' && workspacePath && (
-              <div className="absolute inset-0 z-40 flex items-center justify-center bg-deep/70 p-3 backdrop-blur-sm">
-                {/* N19：内置浏览器应只比主界面小一点——旧实现 max-w-6xl +
-                    max-h-[88vh] 在大屏上过小。现在仅保留小边距，随窗口伸缩。 */}
-                <div className="h-full w-full overflow-hidden rounded-2xl border border-line bg-base p-4 shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
-                  <Suspense fallback={null}>
-                    <EmbeddedBrowserPanel workspacePath={workspacePath} lang={settings.lang} />
-                  </Suspense>
-                </div>
-              </div>
-            )}
-
           </div>
         }
       />
+
+      {activePreviewSession && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-deep/70 p-4 backdrop-blur-sm">
+          <div className="h-full w-full overflow-hidden rounded-2xl border border-line bg-base shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
+            <Suspense fallback={null}>
+              <PreviewSessionPanel workspacePath={activePreviewSession.workspacePath} lang={settings.lang} />
+            </Suspense>
+          </div>
+        </div>
+      )}
+
+      {browserPanelOpen && browserEngine === 'embedded' && workspacePath && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-deep/70 p-4 backdrop-blur-sm">
+          {/* N19：内置浏览器应只比主界面小一点——旧实现 max-w-6xl +
+              max-h-[88vh] 在大屏上过小。现在仅保留小边距，随窗口伸缩。
+              覆盖层必须挂在窗口顶层（SplitPane 之外），否则 absolute
+              inset-0 只覆盖右侧主 pane，盖不住左侧栏。 */}
+          <div className="h-full w-full overflow-hidden rounded-2xl border border-line bg-base p-4 shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
+            <Suspense fallback={null}>
+              <EmbeddedBrowserPanel workspacePath={workspacePath} lang={settings.lang} />
+            </Suspense>
+          </div>
+        </div>
+      )}
       </div>
 
       {openedAppId && (
