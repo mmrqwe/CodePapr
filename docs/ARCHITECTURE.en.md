@@ -330,10 +330,14 @@ On Apple Silicon Macs, users can manually click "GPU Warmup" in the Voice Tab of
 | explore | Read-only code analysis | fast | read, read_image, list, graph, glob, lsp, diagnostics, grep |
 | scout | Web search + download | fast | websearch, webfetch, browser, read_image |
 | mentor | Architecture/algorithm guidance | Configurable independent model | None |
+| compactor | Context compaction (recoverable checkpoint generation) | `compactionModel` tier (fast/primary) | None (pure reasoning) |
+| verifier | Goal verification | `verifierModelTier` tier | read, grep, glob, list |
 
 > **Main Agent tool set**: the main Agent has all read/write/execution tools (read/write/edit/patch/grep/glob/list/lsp/lsp_edit/diagnostics/git/bash/browser/webfetch/skill/question/todo/task, etc.), but `graph` is **soft-hidden** from it — project structure and symbol navigation are handled by `list` + `lsp`, while cross-module dependency/impact analysis is delegated to Explore. The `graph` definition and handler stay registered, so sub-agents (Explore) can select it via allowlist and execute it.
 
 > The Goal autonomous loop's verifier is a built-in read-only sub-agent (read/grep/glob/list) configured in Advanced settings (`verifierModelTier`). It is an internal agent, never exposed via the `task` tool, and only invoked internally by GoalRunner.
+
+> Context compaction (Compactor) is likewise a built-in internal sub-agent (`compactionModel` tier + `compactionTemperature`/`compactionMaxTokens`), zero-tool pure reasoning — the compaction input (transcript) already contains all facts. It is invoked directly by the runtime compaction pipeline (between-turn and mid-loop compaction), never exposed via the `task` tool. Execution reuses core's `resolveSubagentExecution` + `runSubagentSession` (`utils/compactorRunner.ts`), shared by both threads (main-thread between-turn / Worker mid-loop); mid-loop compaction wires the `sessionAbortControllers` cancel signal, and a mid-flight cancel makes the handler return null for graceful teardown. The wall-clock budget keeps the sub-agent default of 20 minutes.
 
 The `task` tool only exposes agents whose `mode` is `subagent` / `all`; agents with `mode: primary` (only usable as an @-mentioned primary agent) or `internal: true` never appear in the delegation list.
 
@@ -473,7 +477,7 @@ agent reply completes
                  └─ silently catch, no impact on main flow
 ```
 
-Consolidation reuses the `selectContextCompactionModelRoute` fast-model route, sharing configuration with context compaction (`compactionModel` / `compactionMaxTokens` / `compactionTemperature`).
+Consolidation routes its model through `selectContextCompactionModelRoute`, sharing configuration with context compaction (`compactionModel` / `compactionMaxTokens` / `compactionTemperature`); context compaction itself now runs as the internal compactor sub-agent (`resolveSubagentExecution`).
 
 ### 8.6 Key Invariants
 
@@ -571,7 +575,8 @@ Currently active routing functions (old planner/summary routes removed):
 |---|---|---|---|
 | Main Agent conversation | `selectTaskModelRoute` | Primary model | User-configured |
 | Slash commands (declaring `model: 'fast'`) | `selectTaskModelRoute(..., 'fast')` | Fast model (falls back to primary if disabled) | User-configured |
-| Context compaction | `selectContextCompactionModelRoute` | Fast/Primary model | User-configured `compactionTemperature` |
+| Context compaction (compactor sub-agent) | `selectSubagentExecutionRoute` (via `resolveSubagentExecution`) | `compactionModel` tier (fast/primary; LLM skipped when fast is disabled — rule-based fallback) | User-configured `compactionTemperature` |
+| Memory consolidation | `selectContextCompactionModelRoute` | Fast/Primary model | User-configured `compactionTemperature` |
 | Sub-agent execution | `selectSubagentExecutionRoute` | Determined by task weight | User-configured `subagentTemperature` |
 | Primary model fallback | `buildPrimaryModelRoute` | Primary model | User-configured |
 

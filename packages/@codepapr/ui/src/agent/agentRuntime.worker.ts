@@ -1307,7 +1307,8 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
       payload.settings,
       payload.providerName,
       payload.sessionId,
-      () => _refreshBootstrapRequest(payload.requestId)
+      () => _refreshBootstrapRequest(payload.requestId),
+      () => sessionAbortControllers.get(payload.requestId)?.signal
     ),
   });
 

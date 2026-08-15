@@ -34,24 +34,24 @@ CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主
 
 ```
 ┌────────────────────────────────────────┐
-│  Tauri 2 桌面                          │
+│  Tauri 2 桌面                           │
 │  React + Monaco                        │
 └───────────────────┬────────────────────┘
                     │
        ┌────────────▼─────────────┐
        │      @codepapr/core      │
        │    Agent / Session       │
-       │    三层缓存分区          │
+       │    三层缓存分区            │
        │    BUILTIN_AGENTS        │
        │    TodoList / Graph      │
        └────────────┬─────────────┘
                     │
        ┌────────────▼─────────────┐
-       │   Rust 后端 (Tauri)      │
-       │   工作区 IO · LSP        │
-       │   SQLite 持久化          │
-       │   ProjectGraph 缓存      │
-       │   浏览器 · Web 搜索      │
+       │   Rust 后端 (Tauri)       │
+       │   工作区 IO · LSP         │
+       │   SQLite 持久化           │
+       │   ProjectGraph 缓存       │
+       │   浏览器 · Web 搜索        │
        └──────────────────────────┘
 ```
 

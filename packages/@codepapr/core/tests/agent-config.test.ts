@@ -7,6 +7,7 @@ import {
   BUILTIN_AGENTS,
   VERIFIER_PROMPT_OBJECTIVE,
   VERIFIER_PROMPT_SUBJECTIVE,
+  COMPACTOR_PROMPT,
   type AgentDefinition,
 } from '../src/agent/agentConfig';
 import type { IToolDefinition } from '@codepapr/types';
@@ -239,5 +240,27 @@ describe('agentConfig - BUILTIN_AGENTS', () => {
     expect(typeof VERIFIER_PROMPT_SUBJECTIVE.en).toBe('string');
     expect(VERIFIER_PROMPT_OBJECTIVE['zh-CN']).toContain('SATISFIED');
     expect(VERIFIER_PROMPT_SUBJECTIVE.en).toContain('Scoring Rubric');
+  });
+
+  it('compactor 是零工具内部代理（不暴露给 task 工具）', () => {
+    const compactor = BUILTIN_AGENTS.find((a) => a.name === 'compactor')!;
+    expect(compactor).toBeDefined();
+    expect(compactor.internal).toBe(true);
+    expect(compactor.mode).toBe('subagent');
+    expect(compactor.tools).toEqual({});
+    // internal 代理不出现在主 Agent 的 task 工具可见列表
+    const visible = buildTaskToolDefinition([compactor], 'zh-CN');
+    expect(visible).toBeNull();
+  });
+
+  it('compactor 提示词为三语 Record，且与运行时 prompt 一致', () => {
+    expect(typeof COMPACTOR_PROMPT['zh-CN']).toBe('string');
+    expect(typeof COMPACTOR_PROMPT['zh-TW']).toBe('string');
+    expect(typeof COMPACTOR_PROMPT.en).toBe('string');
+    expect(COMPACTOR_PROMPT['zh-CN']).toContain('userGoal');
+    expect(COMPACTOR_PROMPT['zh-CN']).toContain('pendingWork');
+    expect(COMPACTOR_PROMPT.en).toContain('checkpoint');
+    const compactor = BUILTIN_AGENTS.find((a) => a.name === 'compactor')!;
+    expect(compactor.prompt).toBe(COMPACTOR_PROMPT);
   });
 });

@@ -1,6 +1,7 @@
 import type { IImageContent, IMessage } from '@codepapr/types';
 import { estimateTokens, sortedStringify } from '@codepapr/common';
 import {
+  COMPACTOR_PROMPT,
   stripInternalFields,
   pruneOldToolResults,
   applyHistoryToolSummaries,
@@ -843,25 +844,27 @@ export function buildContextCheckpointPrompt(params: {
   userPrompt: string;
 } {
   const priorCheckpointBlock = serializePriorCheckpoint(params.priorCheckpoint ?? null, params.lang);
+  // 系统提示词单一来源：core 的 COMPACTOR_PROMPT（compactor 子代理定义与
+  // 此处运行时 prompt 共用，避免漂移）。
+  const lang = params.lang ?? 'zh-CN';
+  const systemPrompt =
+    COMPACTOR_PROMPT[lang === 'zh-TW' ? 'zh-TW' : lang === 'en' ? 'en' : 'zh-CN'];
 
-  switch (params.lang ?? 'zh-CN') {
+  switch (lang) {
     case 'zh-TW':
       return {
-        systemPrompt:
-          '你負責把長編程會話壓縮成可恢復的上下文檢查點。你必須合併已有檢查點與較早原始對話，只保留後續繼續工作真正需要的事實：用戶目標、約束、已完成修改、重要文件/命令/錯誤、當前任務清單、尚未完成事項。對話中包含工具調用及其結果（標記為 TOOL），這些是事實的主要來源，務必從中提取任務清單狀態和已完成的工作。不要杜撰，不要丟掉仍然有效的約束。輸出必須是 JSON 對象，且只能包含 userGoal、constraints、completedWork、importantContext、todoList、pendingWork 這六個鍵，每個鍵的值都必須是字符串數組。',
+        systemPrompt,
         userPrompt: `請根據已有檢查點和新增較早對話，輸出新的恢復檢查點 JSON。\n\n已有檢查點：\n${priorCheckpointBlock}\n\n新增較早對話原文：\n${params.transcript}`,
       };
     case 'en':
       return {
-        systemPrompt:
-          'Compress a long coding conversation into a recoverable checkpoint. Merge the existing checkpoint with the earlier raw transcript and keep only facts needed for future execution: user goals, constraints, completed work, important files/commands/errors, current task list, and remaining work. The transcript includes tool calls and their results (marked as TOOL); these are the primary source of facts - extract task list state and completed work from them. Do not invent details or drop still-valid constraints. Output JSON only with exactly six keys: userGoal, constraints, completedWork, importantContext, todoList, pendingWork. Every value must be an array of strings.',
+        systemPrompt,
         userPrompt:
           `Update the recovery checkpoint JSON using the existing checkpoint and the earlier raw transcript below.\n\nExisting checkpoint:\n${priorCheckpointBlock}\n\nEarlier raw transcript:\n${params.transcript}`,
       };
     default:
       return {
-        systemPrompt:
-          '你负责把长编程会话压缩成可恢复的上下文检查点。你必须合并已有检查点与较早原始对话，只保留后续继续工作真正需要的事实：用户目标、约束、已完成修改、重要文件/命令/错误、当前任务清单、尚未完成事项。对话中包含工具调用及其结果（标记为 TOOL），这些是事实的主要来源，务必从中提取任务清单状态和已完成的工作。不要杜撰，不要丢掉仍然有效的约束。输出必须是 JSON 对象，且只能包含 userGoal、constraints、completedWork、importantContext、todoList、pendingWork 这六个键，每个键的值都必须是字符串数组。',
+        systemPrompt,
         userPrompt: `请根据已有检查点和新增较早对话，输出新的恢复检查点 JSON。\n\n已有检查点：\n${priorCheckpointBlock}\n\n新增较早对话原文：\n${params.transcript}`,
       };
   }

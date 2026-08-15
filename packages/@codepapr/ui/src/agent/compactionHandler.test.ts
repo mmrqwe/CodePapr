@@ -275,3 +275,51 @@ describe('createContextCompactionHandler (bootstrap refresh)', () => {
     expect(result!.messages[0]?.content).toContain('检查点摘要');
   });
 });
+
+describe('createContextCompactionHandler (abort)', () => {
+  const settings = {
+    pruneOldToolResults: false,
+    pruneProtectRounds: 6,
+    pruneMinChars: 20000,
+    maxContextTokens: 500000,
+    maxTokens: 8000,
+  } as unknown as Settings;
+
+  it('getAbortSignal 的 signal 透传给 maybeGenerateContextCheckpoint', async () => {
+    vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue(null);
+    const controller = new AbortController();
+    const getAbortSignal = vi.fn(() => controller.signal);
+
+    const config = createContextCompactionHandler(settings, 'deepseek', 'session-test', undefined, getAbortSignal);
+    await config.handler([{ id: 'u1', role: 'user', content: 'hi', timestamp: 1 }]);
+
+    expect(getAbortSignal).toHaveBeenCalledTimes(1);
+    expect(maybeGenerateContextCheckpoint).toHaveBeenCalledWith(
+      settings,
+      expect.anything(),
+      true,
+      undefined,
+      controller.signal
+    );
+  });
+
+  it('压缩中飞被取消（AbortError）→ 返回 null 优雅收尾，不误报压缩失败', async () => {
+    vi.mocked(maybeGenerateContextCheckpoint).mockRejectedValue(
+      new DOMException('已取消', 'AbortError')
+    );
+
+    const config = createContextCompactionHandler(settings, 'deepseek', 'session-test');
+    const result = await config.handler([{ id: 'u1', role: 'user', content: 'hi', timestamp: 1 }]);
+
+    expect(result).toBeNull();
+  });
+
+  it('非取消错误继续上抛（保留旧语义：压缩失败由上层决定）', async () => {
+    vi.mocked(maybeGenerateContextCheckpoint).mockRejectedValue(new Error('provider down'));
+
+    const config = createContextCompactionHandler(settings, 'deepseek', 'session-test');
+    await expect(
+      config.handler([{ id: 'u1', role: 'user', content: 'hi', timestamp: 1 }])
+    ).rejects.toThrow('provider down');
+  });
+});

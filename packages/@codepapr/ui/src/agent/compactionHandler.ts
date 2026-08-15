@@ -136,50 +136,77 @@ export function createContextCompactionHandler(
   settings: CompactionSettings,
   providerName: ContextProvider,
   sessionId: string,
-  refreshBootstrap?: () => Promise<string | null>
+  refreshBootstrap?: () => Promise<string | null>,
+  getAbortSignal?: () => AbortSignal | undefined
 ): ContextCompactionConfig {
   return {
     maxContextTokens: effectiveMaxContextTokens(settings, providerName),
     handler: async (
       coreMessages: IMessage[]
     ): Promise<{ messages: IMessage[]; cacheStats?: ICacheStatistics } | null> => {
-      const contextMessages = coreMessagesToContextMessages(coreMessages);
-      const checkpoint = await maybeGenerateContextCheckpoint(
-        settings,
-        contextMessages,
-        true,
-        currentTodoDigest(sessionId)
-      );
-      if (!checkpoint) {
-        return null;
-      }
-      // Insert the checkpoint at the planned retention boundary (not at the end)
-      // so the recent tool-call tail follows it and stays verbatim in the rebuilt
-      // context. Appending at the end would make buildEffectiveContextMessages
-      // treat the tail as empty and drop the recent tool calls.
-      const withCheckpoint = insertCheckpointAtRetainedBoundary(
-        contextMessages,
-        checkpoint.message,
-        checkpoint.insertIndex
-      );
-      const compacted = buildEffectiveContextMessages(
-        withCheckpoint,
-        { pruneOptions: buildPruneOptions(settings) }
-      );
-      if (refreshBootstrap) {
-        try {
-          const freshBootstrap = await refreshBootstrap();
-          if (freshBootstrap && freshBootstrap.trim()) {
-            return {
-              messages: [buildSessionBootstrapMessage(freshBootstrap.trim()), ...compacted],
-              cacheStats: checkpoint.cacheStats,
-            };
-          }
-        } catch {
-          // Refresh failure is non-fatal: fall through to the bootstrap-less epoch.
+      try {
+        return await runCompactionHandler(
+          settings,
+          sessionId,
+          coreMessages,
+          refreshBootstrap,
+          getAbortSignal?.()
+        );
+      } catch (err) {
+        // 用户中断：mid-loop 压缩中飞被 abort → 返回 null 让 Agent 轮循环
+        // 优雅收尾（轮首 aborted 检查立即 break），不把取消误报为压缩失败。
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return null;
         }
+        throw err;
       }
-      return { messages: compacted, cacheStats: checkpoint.cacheStats };
     },
   };
+}
+
+async function runCompactionHandler(
+  settings: CompactionSettings,
+  sessionId: string,
+  coreMessages: IMessage[],
+  refreshBootstrap: (() => Promise<string | null>) | undefined,
+  abortSignal: AbortSignal | undefined
+): Promise<{ messages: IMessage[]; cacheStats?: ICacheStatistics } | null> {
+  const contextMessages = coreMessagesToContextMessages(coreMessages);
+  const checkpoint = await maybeGenerateContextCheckpoint(
+    settings,
+    contextMessages,
+    true,
+    currentTodoDigest(sessionId),
+    abortSignal
+  );
+  if (!checkpoint) {
+    return null;
+  }
+  // Insert the checkpoint at the planned retention boundary (not at the end)
+  // so the recent tool-call tail follows it and stays verbatim in the rebuilt
+  // context. Appending at the end would make buildEffectiveContextMessages
+  // treat the tail as empty and drop the recent tool calls.
+  const withCheckpoint = insertCheckpointAtRetainedBoundary(
+    contextMessages,
+    checkpoint.message,
+    checkpoint.insertIndex
+  );
+  const compacted = buildEffectiveContextMessages(
+    withCheckpoint,
+    { pruneOptions: buildPruneOptions(settings) }
+  );
+  if (refreshBootstrap) {
+    try {
+      const freshBootstrap = await refreshBootstrap();
+      if (freshBootstrap && freshBootstrap.trim()) {
+        return {
+          messages: [buildSessionBootstrapMessage(freshBootstrap.trim()), ...compacted],
+          cacheStats: checkpoint.cacheStats,
+        };
+      }
+    } catch {
+      // Refresh failure is non-fatal: fall through to the bootstrap-less epoch.
+    }
+  }
+  return { messages: compacted, cacheStats: checkpoint.cacheStats };
 }

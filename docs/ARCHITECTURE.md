@@ -328,10 +328,14 @@ ChatPanel → useTtsPlayer hook → Rust TTS Module → GPT-SoVITS Python Server
 | explore | 只读代码分析 | fast | read, read_image, list, graph, glob, lsp, diagnostics, grep |
 | scout | 网页搜索 + 下载 | fast | websearch, webfetch, browser, read_image |
 | mentor | 架构/算法指导 | 可配置独立模型 | 无 |
+| compactor | 上下文压缩（生成恢复检查点） | `compactionModel` 档位（fast/primary） | 无（纯推理） |
+| verifier | Goal 验收 | `verifierModelTier` 档位 | read, grep, glob, list |
 
 > **主代理工具集**：主代理拥有全部读写/执行工具（read/write/edit/patch/grep/glob/list/lsp/lsp_edit/diagnostics/git/bash/browser/webfetch/skill/question/todo/task 等），但 `graph` 对其**软隐藏**——项目结构与符号导航改由 `list` + `lsp` 承担，跨模块依赖/影响分析则委派给 Explore。`graph` 的定义与 handler 仍保留注册，子代理（Explore）可经白名单选取并执行。
 
 > Goal 自主循环的验收器（Verifier）是一个内置的只读子代理（read/grep/glob/list），在高级设置中配置（`verifierModelTier`）。它是内部代理，不经 `task` 工具暴露，仅供 GoalRunner 内部调用。
+
+> 上下文压缩（Compactor）同样是内置内部子代理（`compactionModel` 档位 + `compactionTemperature`/`compactionMaxTokens`），零工具纯推理——压缩输入（transcript）已含全部事实。它由运行时压缩管线（轮间压缩与 mid-loop 压缩）直接调用，不经 `task` 工具暴露。执行复用 core 的 `resolveSubagentExecution` + `runSubagentSession`（`utils/compactorRunner.ts`），两条线程（主线程轮间 / Worker mid-loop）共用；mid-loop 压缩接 `sessionAbortControllers` 取消信号，压缩中飞被取消时 handler 返回 null 优雅收尾。墙钟预算沿用子代理默认 20 分钟。
 
 `task` 工具只暴露 `mode` 为 `subagent` / `all` 的 agent；`mode: primary`（仅作 @ 提及主代理）与 `internal: true` 的 agent 都不会出现在委派列表。
 
@@ -471,7 +475,7 @@ agent 回复完成
                  └─ 静默 catch，不影响主流程
 ```
 
-整理用的 fast model 路由复用 `selectContextCompactionModelRoute`，与上下文压缩共享配置（`compactionModel` / `compactionMaxTokens` / `compactionTemperature`）。
+整理用的模型路由走 `selectContextCompactionModelRoute`，与上下文压缩共享配置项（`compactionModel` / `compactionMaxTokens` / `compactionTemperature`）；上下文压缩自身已改经 compactor 子代理（`resolveSubagentExecution`）执行。
 
 ### 8.6 关键不变量
 
@@ -569,7 +573,8 @@ agent 回复完成
 |---|---|---|---|
 | 主 Agent 对话 | `selectTaskModelRoute` | 主模型 | 用户配置 |
 | Slash 命令（声明 `model: 'fast'`） | `selectTaskModelRoute(..., 'fast')` | 快速模型（未启用时回退主模型） | 用户配置 |
-| 上下文压缩 | `selectContextCompactionModelRoute` | 快速/主模型 | 用户配置 `compactionTemperature` |
+| 上下文压缩（compactor 子代理） | `selectSubagentExecutionRoute`（经 `resolveSubagentExecution`） | `compactionModel` 档位（fast/primary；fast 未启用时跳过 LLM 走规则降级） | 用户配置 `compactionTemperature` |
+| 项目记忆整理 | `selectContextCompactionModelRoute` | 快速/主模型 | 用户配置 `compactionTemperature` |
 | 子代理执行 | `selectSubagentExecutionRoute` | 按任务重量判断 | 用户配置 `subagentTemperature` |
 | 主模型降级 | `buildPrimaryModelRoute` | 主模型 | 用户配置 |
 
