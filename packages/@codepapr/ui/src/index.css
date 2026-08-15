@@ -118,52 +118,6 @@ body {
 .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 .scrollbar-stable { scrollbar-gutter: stable both-edges; }
 
-/* ── paper-light 代码语法高亮 token 重映射
- * Monaco colorize 输出 vs-dark 主题的内联 style="color:#XXXXXX"，
- * 浅色模式下这些深色 token 对比度太低，需要重映射。
- * （Phase 4 将改为按主题生成语法配色，此块届时删除） */
-:root[data-theme="paper-light"] code span[style*="color:#d4d4d4"],
-:root[data-theme="paper-light"] code span[style*="color:#d4d4d4;"] { color: #1e1b18 !important; }   /* default text */
-:root[data-theme="paper-light"] code span[style*="color:#808080"],
-:root[data-theme="paper-light"] code span[style*="color:#808080;"] { color: #5a5248 !important; }   /* comments / punctuation (darker gray) */
-:root[data-theme="paper-light"] code span[style*="color:#858585"],
-:root[data-theme="paper-light"] code span[style*="color:#858585;"] { color: #5a5248 !important; }   /* comments variant */
-:root[data-theme="paper-light"] code span[style*="color:#6a9955"],
-:root[data-theme="paper-light"] code span[style*="color:#6a9955;"] { color: #4a6530 !important; }   /* comments (green, darker) */
-:root[data-theme="paper-light"] code span[style*="color:#608b4e"],
-:root[data-theme="paper-light"] code span[style*="color:#608b4e;"] { color: #4a6530 !important; }   /* comments variant 2 */
-:root[data-theme="paper-light"] code span[style*="color:#569cd6"],
-:root[data-theme="paper-light"] code span[style*="color:#569cd6;"] { color: #1a5fb4 !important; }   /* keywords */
-:root[data-theme="paper-light"] code span[style*="color:#4ec9b0"],
-:root[data-theme="paper-light"] code span[style*="color:#4ec9b0;"] { color: #1a7a64 !important; }   /* types / interfaces */
-:root[data-theme="paper-light"] code span[style*="color:#9cdcfe"],
-:root[data-theme="paper-light"] code span[style*="color:#9cdcfe;"] { color: #0060bf !important; }   /* variables / properties */
-:root[data-theme="paper-light"] code span[style*="color:#4fc1ff"],
-:root[data-theme="paper-light"] code span[style*="color:#4fc1ff;"] { color: #0060bf !important; }   /* light blue variables */
-:root[data-theme="paper-light"] code span[style*="color:#ce9178"],
-:root[data-theme="paper-light"] code span[style*="color:#ce9178;"] { color: #a3471a !important; }   /* strings */
-:root[data-theme="paper-light"] code span[style*="color:#b5cea8"],
-:root[data-theme="paper-light"] code span[style*="color:#b5cea8;"] { color: #4a7c3c !important; }   /* numbers */
-:root[data-theme="paper-light"] code span[style*="color:#c586c0"],
-:root[data-theme="paper-light"] code span[style*="color:#c586c0;"] { color: #8b3a7c !important; }   /* built-in functions */
-:root[data-theme="paper-light"] code span[style*="color:#dcdcaa"],
-:root[data-theme="paper-light"] code span[style*="color:#dcdcaa;"] { color: #7a6020 !important; }   /* function names */
-:root[data-theme="paper-light"] code span[style*="color:#e6db74"],
-:root[data-theme="paper-light"] code span[style*="color:#e6db74;"] { color: #7a6020 !important; }   /* CSS property names (dark yellow → amber) */
-:root[data-theme="paper-light"] code span[style*="color:#f8c555"],
-:root[data-theme="paper-light"] code span[style*="color:#f8c555;"] { color: #8a5a00 !important; }   /* CSS tags / selectors */
-:root[data-theme="paper-light"] code span[style*="color:#d7ba7d"],
-:root[data-theme="paper-light"] code span[style*="color:#d7ba7d;"] { color: #6b4c10 !important; }   /* CSS attribute names */
-:root[data-theme="paper-light"] code span[style*="color:#d16969"],
-:root[data-theme="paper-light"] code span[style*="color:#d16969;"] { color: #a81c1c !important; }   /* CSS values / important */
-:root[data-theme="paper-light"] code span[style*="color:#4fc1ff"],
-:root[data-theme="paper-light"] code span[style*="color:#4fc1ff;"] { color: #006bb3 !important; }   /* CSS units / numbers */
-:root[data-theme="paper-light"] code span[style*="color:#608b4e"],
-:root[data-theme="paper-light"] code span[style*="color:#608b4e;"] { color: #4a6e3c !important; }   /* CSS comment */
-:root[data-theme="paper-light"] code span[style*="color:#4e94ce"],
-:root[data-theme="paper-light"] code span[style*="color:#4e94ce;"] { color: #1a5fb4 !important; }   /* tag names (HTML) */
-:root[data-theme="paper-light"] code span[style*="color:#c8c8c8"],
-:root[data-theme="paper-light"] code span[style*="color:#c8c8c8;"] { color: #3a362f !important; }   /* metadata / dim */
 /* ── 对话轮次指示器 ────────────────────────── */
 .rounds-indicator-bar {
   position: absolute;

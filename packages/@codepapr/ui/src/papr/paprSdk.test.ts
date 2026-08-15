@@ -77,13 +77,33 @@ describe('papr-sdk.js message source validation (#26)', () => {
 
   it('伪造来源的主题消息不生效', () => {
     loadSdk();
-    document.documentElement.setAttribute('data-theme', 'light');
+    document.documentElement.setAttribute('data-theme', 'paper-light');
 
     dispatchFrom({}, { __papr: true, type: 'papr://theme', payload: { dark: true } });
-    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('paper-light');
 
+    // v2 payload：theme id + mode
+    dispatchFrom(window.parent, {
+      __papr: true,
+      type: 'papr://theme',
+      payload: { theme: 'nord', mode: 'dark', dark: true },
+    });
+    expect(document.documentElement.getAttribute('data-theme')).toBe('nord');
+    expect(document.documentElement.getAttribute('data-mode')).toBe('dark');
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+  });
+
+  it('旧版 v1 payload（仅 dark 布尔）仍兼容：映射到 paper-dark/paper-light', () => {
+    loadSdk();
     dispatchFrom(window.parent, { __papr: true, type: 'papr://theme', payload: { dark: true } });
-    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('paper-dark');
+    expect(document.documentElement.getAttribute('data-mode')).toBe('dark');
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+
+    dispatchFrom(window.parent, { __papr: true, type: 'papr://theme', payload: { dark: false } });
+    expect(document.documentElement.getAttribute('data-theme')).toBe('paper-light');
+    expect(document.documentElement.getAttribute('data-mode')).toBe('light');
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
   });
 });
 

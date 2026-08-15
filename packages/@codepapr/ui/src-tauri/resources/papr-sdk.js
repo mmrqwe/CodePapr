@@ -14,18 +14,27 @@
   var themeListeners = [];
 
   function applyTheme(payload) {
-    var value = payload && payload.dark ? 'dark' : 'light';
-    if (currentTheme === value) return;
-    currentTheme = value;
+    // 协议 v2：{ theme: 'paper-dark', mode: 'dark', dark: true }
+    // 协议 v1（向后兼容）：{ dark: true } → 深浅二元
+    var themeId = payload && typeof payload.theme === 'string' && payload.theme ? payload.theme : null;
+    var mode = payload && (payload.mode === 'dark' || payload.mode === 'light') ? payload.mode : null;
+    var dark = payload ? !!payload.dark : false;
+    var nextMode = mode || (dark ? 'dark' : 'light');
+    var nextTheme = themeId || (nextMode === 'dark' ? 'paper-dark' : 'paper-light');
+    var stateKey = nextTheme + '|' + nextMode;
+    if (currentTheme === stateKey) return;
+    currentTheme = stateKey;
     var root = document.documentElement;
     if (root) {
-      root.setAttribute('data-theme', value);
-      try { root.style.colorScheme = value; } catch (e) { /* older engines */ }
+      root.setAttribute('data-theme', nextTheme);
+      root.setAttribute('data-mode', nextMode);
+      root.classList.toggle('dark', nextMode === 'dark');
+      try { root.style.colorScheme = nextMode; } catch (e) { /* older engines */ }
     }
     for (var i = 0; i < themeListeners.length; i++) {
-      try { themeListeners[i](value); } catch (e) { /* listener errors are isolated */ }
+      try { themeListeners[i](nextMode); } catch (e) { /* listener errors are isolated */ }
     }
-    try { window.dispatchEvent(new CustomEvent('papr-theme-change', { detail: { theme: value } })); } catch (e) { /* noop */ }
+    try { window.dispatchEvent(new CustomEvent('papr-theme-change', { detail: { theme: nextTheme, mode: nextMode } })); } catch (e) { /* noop */ }
   }
 
   function armIdleTimer(reqId) {

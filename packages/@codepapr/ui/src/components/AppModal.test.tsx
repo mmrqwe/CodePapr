@@ -71,7 +71,7 @@ describe('AppModal', () => {
     });
 
     await act(async () => {
-      root.render(<AppModal lang="en" isDark={false} />);
+      root.render(<AppModal lang="en" />);
     });
 
     const iframe = container.querySelector('iframe');
@@ -113,7 +113,7 @@ describe('AppModal', () => {
     });
 
     await act(async () => {
-      root.render(<AppModal lang="en" isDark={false} />);
+      root.render(<AppModal lang="en" />);
     });
 
     const iframe = container.querySelector('iframe');
@@ -144,7 +144,7 @@ describe('AppModal', () => {
     });
 
     await act(async () => {
-      root.render(<AppModal lang="en" isDark={false} />);
+      root.render(<AppModal lang="en" />);
     });
 
     const iframe = container.querySelector('iframe');

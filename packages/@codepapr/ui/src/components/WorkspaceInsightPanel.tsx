@@ -355,7 +355,11 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   }, [projectGraph]);
 
   function isGraphDarkTheme(): boolean {
-    return document.documentElement.classList.contains('dark');
+    // 主题模式由 themeEngine 写入 data-mode；.dark class 作为兼容兜底。
+    return (
+      document.documentElement.dataset.mode === 'dark' ||
+      document.documentElement.classList.contains('dark')
+    );
   }
 
   function closeKnowledgeGraph() {

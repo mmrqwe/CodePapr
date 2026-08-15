@@ -1,5 +1,9 @@
 import { useEffect, useRef } from 'react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
+import {
+  detectMonacoThemeName as detectMonacoThemeNameFromTheme,
+  ensureMonacoThemeSync,
+} from '../theme/monacoThemes';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import CssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
 import HtmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
@@ -104,19 +108,13 @@ export function scheduleSecondPassRelayout(callback: () => void): void {
   globalThis.setTimeout(callback, 0);
 }
 
-export function detectMonacoThemeName(): 'vs' | 'vs-dark' {
-  if (typeof document === 'undefined') return 'vs-dark';
-  return document.documentElement.classList.contains('dark') ? 'vs-dark' : 'vs';
+export function detectMonacoThemeName(): string {
+  return detectMonacoThemeNameFromTheme();
 }
 
-let monacoThemeObserver: MutationObserver | null = null;
-
 function ensureMonacoThemeAutoSync(): void {
-  if (monacoThemeObserver || typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
-  monacoThemeObserver = new MutationObserver(() => {
-    monaco.editor.setTheme(detectMonacoThemeName());
-  });
-  monacoThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+  // 主题切换监听迁移到 theme/monacoThemes（按主题 token 生成 monaco 主题）。
+  ensureMonacoThemeSync();
 }
 
 export function configureMonacoLanguageServices(): void {

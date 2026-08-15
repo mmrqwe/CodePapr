@@ -7,10 +7,9 @@ import { usePaprBridge } from '../papr/usePaprBridge';
 
 interface AppModalProps {
   lang?: Lang;
-  isDark: boolean;
 }
 
-export function AppModal({ lang, isDark }: AppModalProps) {
+export function AppModal({ lang }: AppModalProps) {
   const t = getTranslation(lang);
   const openedAppId = useAppRuntimeStore((state) => state.openedAppId);
   const openedApp = useAppRuntimeStore((state) =>
@@ -82,11 +81,10 @@ export function AppModal({ lang, isDark }: AppModalProps) {
     return raw;
   }, [manifest]);
 
-  const { postTheme } = usePaprBridge({
+  const { postThemeNow } = usePaprBridge({
     iframeRef,
     appId: openedApp?.appId ?? '',
     manifest,
-    dark: isDark,
     // #16：SDK 握手到达 = 真实页面渲染成功，清除宽限检测定时器。
     onAppReady: () => {
       readyRef.current = true;
@@ -192,7 +190,7 @@ export function AppModal({ lang, isDark }: AppModalProps) {
           className="h-full w-full border-0"
           onLoad={() => {
             handleIframeLoad();
-            postTheme(isDark);
+            postThemeNow();
             // #16：onLoad 只证明有响应（协议层 404/403 也会触发）。SDK 握手
             // 通常在 onLoad 前到达（head 内同步脚本）；未到达则给短宽限期，
             // 仍无握手 → 判定加载失败并提示（旧实现静默白屏）。

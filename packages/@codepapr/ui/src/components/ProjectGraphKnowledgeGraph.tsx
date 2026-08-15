@@ -41,6 +41,13 @@ const FILE_TYPE_COLORS: Record<string, string> = {
   source: '#6366f1',
 };
 
+/** 读取主题 CSS 变量（canvas 无法用 class，取计算值；无 DOM 时回退）。 */
+function readCssVar(name: string, fallback: string): string {
+  if (typeof document === 'undefined') return fallback;
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
 const FOLDER_COLORS = [
   '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316',
   '#eab308', '#22c55e', '#14b8a6', '#06b6d4', '#3b82b6',
@@ -304,7 +311,7 @@ function buildG6Data(
       },
       style: {
         fill: ft && ft !== 'source' ? (FILE_TYPE_COLORS[ft] ?? folderColor(folder)) : folderColor(folder),
-        stroke: isEntry ? '#f0883e' : '#30363d',
+        stroke: isEntry ? readCssVar('--accent', '#f0883e') : '#30363d',
         size: scaleSize(deg, minFileDeg, maxFileDeg, 30, 70),
       },
     });
@@ -358,7 +365,7 @@ function buildG6Data(
         },
         style: {
           fill: symbolNodeColor(symNode.symbol?.kind ?? ''),
-          stroke: symNode.symbol?.exported ? '#f0883e' : '#30363d',
+          stroke: symNode.symbol?.exported ? readCssVar('--accent', '#f0883e') : '#30363d',
           size: scaleSize(deg, minHSymDeg, maxHSymDeg, 20, 45),
         },
       });
@@ -424,7 +431,7 @@ function buildG6Data(
         },
         style: {
           fill: symbolNodeColor(symNode.symbol?.kind ?? ''),
-          stroke: symNode.symbol?.exported ? '#f0883e' : '#30363d',
+          stroke: symNode.symbol?.exported ? readCssVar('--accent', '#f0883e') : '#30363d',
           size: scaleSize(deg, minCSymDeg, maxCSymDeg, 20, 45),
         },
       });
@@ -864,7 +871,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
         style: {
           labelText: (d: NodeData) => ((d.data?.label as string) ?? String(d.id)),
           labelPlacement: 'bottom',
-          labelFill: dark ? '#e0e0e0' : '#1e1b18',
+          labelFill: readCssVar('--foreground', dark ? '#e0e0e0' : '#1e1b18'),
           labelFontSize: 10,
           labelFontFamily: 'Consolas, monospace',
           labelWordWrap: true,
@@ -873,7 +880,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
         },
         state: {
           highlight: {
-            stroke: dark ? '#f0883e' : '#d9673e',
+            stroke: readCssVar('--accent', dark ? '#f0883e' : '#d9673e'),
             lineWidth: 3,
             // 大图标签降密度后 label 可能为空，悬停/高亮时恢复显示完整标签。
             labelText: (d: NodeData) => ((d.data?.hoverLabel as string) ?? ''),
@@ -900,9 +907,9 @@ const ProjectGraphKnowledgeGraph = forwardRef<
             lineWidth: 2,
             labelText: (d: EdgeData) => ((d.data?.label as string) ?? ''),
             labelFontSize: 7,
-            labelFill: dark ? '#aaa' : '#5a544c',
+            labelFill: readCssVar('--foreground-soft', dark ? '#aaa' : '#5a544c'),
             labelBackground: true,
-            labelBackgroundFill: dark ? '#10131b' : '#f5f0e9',
+            labelBackgroundFill: readCssVar('--bg-base', dark ? '#10131b' : '#f5f0e9'),
             labelBackgroundOpacity: 0.9,
             labelBackgroundRadius: 2,
             labelBackgroundPadding: [1, 3],
@@ -1451,7 +1458,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
             </div>
           ))}
           <div className="flex items-center gap-1.5">
-            <span className="inline-block h-3 w-3 rounded-full border-2" style={{ borderColor: '#f0883e' }} />
+            <span className="inline-block h-3 w-3 rounded-full border-2" style={{ borderColor: 'var(--accent, #f0883e)' }} />
             <span>{lang === 'en' ? 'Entry / Exported' : '入口 / 导出'}</span>
           </div>
           <div className="col-span-2 flex items-center gap-1.5 opacity-70">

@@ -5,6 +5,8 @@ import { isPaprMessage, createPaprResponse } from './paprProtocol';
 import { usePermissionStore } from './permissionStore';
 import { accessAllows, resolveEffectiveAccess } from './levelGrants';
 import { useAgentStore } from '../store/agentStore';
+import { useThemeStore } from '../store/themeStore';
+import type { ThemeMode } from '../theme/types';
 import { invalidateAgentHandle } from '../store/internals/sendMessage';
 import { WorkerCrashError } from '../agent/WorkerBackedAgent';
 import { acquireSleepPrevention, releaseSleepPrevention } from '../utils/sleepPrevention';
@@ -27,13 +29,12 @@ interface UsePaprBridgeOptions {
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   appId: string;
   manifest: PaprManifest | null;
-  dark: boolean;
   /** 应用页面 SDK 执行握手（papr://app-ready）到达时回调。
    *  AppModal 用它区分「协议层错误页」与「真实页面加载成功」。 */
   onAppReady?: () => void;
 }
 
-export function usePaprBridge({ iframeRef, appId, manifest, dark, onAppReady }: UsePaprBridgeOptions) {
+export function usePaprBridge({ iframeRef, appId, manifest, onAppReady }: UsePaprBridgeOptions) {
   const cacheManifest = usePermissionStore((s) => s.cacheManifest);
   const [appSettings, setAppSettings] = useState<PaprAppSettings | null>(null);
 
@@ -46,21 +47,31 @@ export function usePaprBridge({ iframeRef, appId, manifest, dark, onAppReady }: 
     invoke<PaprAppSettings>('papr_get_app_settings').then(setAppSettings).catch(() => {});
   }, [appId, manifest, cacheManifest]);
 
+  const themeId = useThemeStore((s) => s.resolvedThemeId);
+  const themeMode = useThemeStore((s) => s.mode);
+
+  // papr://theme 协议 v2：携带 theme id + mode，SDK 按主题设置
+  // data-theme/data-mode/.dark；dark 布尔保留向后兼容旧 SDK。
   const postTheme = useCallback(
-    (isDark: boolean) => {
+    (resolvedThemeId: string, mode: ThemeMode, isDark: boolean) => {
       const win = iframeRef.current?.contentWindow;
       if (!win) return;
       win.postMessage(
-        { __papr: true, type: 'papr://theme', payload: { dark: isDark } },
+        { __papr: true, type: 'papr://theme', payload: { theme: resolvedThemeId, mode, dark: isDark } },
         appOriginFor(appId),
       );
     },
     [appId, iframeRef],
   );
 
+  const postThemeNow = useCallback(() => {
+    const state = useThemeStore.getState();
+    postTheme(state.resolvedThemeId, state.mode, state.mode === 'dark');
+  }, [postTheme]);
+
   useEffect(() => {
-    postTheme(dark);
-  }, [dark, postTheme]);
+    postTheme(themeId, themeMode, themeMode === 'dark');
+  }, [themeId, themeMode, postTheme]);
 
   const effectiveAccess = resolveEffectiveAccess(manifest, appSettings, appId);
   const effectiveAccessRef = useRef(effectiveAccess);
@@ -458,5 +469,5 @@ export function usePaprBridge({ iframeRef, appId, manifest, dark, onAppReady }: 
     };
   }, [handleMessage]);
 
-  return { postTheme };
+  return { postThemeNow };
 }

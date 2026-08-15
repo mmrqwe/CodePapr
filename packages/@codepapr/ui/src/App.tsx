@@ -230,7 +230,6 @@ export default function App() {
   const clearApps = useAppRuntimeStore((state) => state.clearApps);
   const mountApp = useAppRuntimeStore((state) => state.mountApp);
   const t = getTranslation(settings.lang);
-  const isDark = useThemeStore((state) => state.mode === 'dark');
   const themeId = useThemeStore((state) => state.resolvedThemeId);
   const themeMode = useThemeStore((state) => state.mode);
   const themeLightTheme = useThemeStore((state) => state.lightTheme);
@@ -867,7 +866,7 @@ export default function App() {
 
       {openedAppId && (
         <div className="fixed inset-0 z-[60] overflow-hidden bg-base">
-          <AppModal lang={settings.lang} isDark={isDark} />
+          <AppModal lang={settings.lang} />
         </div>
       )}
 

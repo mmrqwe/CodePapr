@@ -7,6 +7,8 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { normalizeMarkdownCodeLanguage } from '../utils/markdownCodeLanguage';
 import { configureMonacoLanguageServices } from './MonacoTextEditor';
+import { applyActiveMonacoTheme } from '../theme/monacoThemes';
+import { useThemeStore } from '../store/themeStore';
 
 function decodeWorkspaceFileHref(href: string | undefined): string | null {
   if (!href || !href.startsWith('codepapr-file:')) {
@@ -18,21 +20,6 @@ function decodeWorkspaceFileHref(href: string | undefined): string | null {
   } catch {
     return href.slice('codepapr-file:'.length);
   }
-}
-
-function useDarkThemeFlag(): boolean {
-  const [isDark, setIsDark] = useState(
-    typeof document === 'undefined' ? true : document.documentElement.classList.contains('dark')
-  );
-  useEffect(() => {
-    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
-    const update = () => setIsDark(document.documentElement.classList.contains('dark'));
-    update();
-    const observer = new MutationObserver(update);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    return () => observer.disconnect();
-  }, []);
-  return isDark;
 }
 
 function CodeBlock({
@@ -49,7 +36,8 @@ function CodeBlock({
   const normalizedLanguage = normalizeMarkdownCodeLanguage(language);
   const usesMonacoColorize = !skipColorize && normalizedLanguage !== 'plaintext';
   const [highlightedHtml, setHighlightedHtml] = useState('');
-  const isDark = useDarkThemeFlag();
+  const resolvedThemeId = useThemeStore((state) => state.resolvedThemeId);
+  const accent = useThemeStore((state) => state.accent);
 
   useEffect(() => {
     if (!usesMonacoColorize) {
@@ -59,7 +47,9 @@ function CodeBlock({
 
     let cancelled = false;
     configureMonacoLanguageServices();
-    monaco.editor.setTheme(isDark ? 'vs-dark' : 'vs');
+    // 按当前应用主题（含强调色）生成 monaco 主题，colorize 输出的内联
+    // token 颜色与主题一致，无需任何 CSS 重映射。
+    applyActiveMonacoTheme();
 
     void monaco.editor
       .colorize(code, normalizedLanguage, {
@@ -79,7 +69,7 @@ function CodeBlock({
     return () => {
       cancelled = true;
     };
-  }, [code, normalizedLanguage, usesMonacoColorize, isDark]);
+  }, [code, normalizedLanguage, usesMonacoColorize, resolvedThemeId, accent]);
 
   const copy = async () => {
     await navigator.clipboard.writeText(code);
