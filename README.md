@@ -4,7 +4,7 @@
 
 **Local-first coding agent runtime. Tauri desktop workbench.**
 
-CodePapr is a local coding agent system built with DeepSeek cache optimization. The main agent orchestrates three built-in sub-agents — **Explore** (code analysis), **Scout** (web search), and **Mentor** (architecture guidance) — with support for custom extensions. File I/O, command execution, Git operations, browser preview, and LSP diagnostics all run locally.
+CodePapr is a local coding agent system built with DeepSeek cache optimization. The main agent orchestrates three built-in sub-agents — **Explore** (code analysis), **Scout** (web search), and **Mentor** (architecture guidance) — plus two runtime-internal agents (**Verifier** for goal acceptance, **Compactor** for context compaction), with support for custom extensions. File I/O, command execution, Git operations, browser preview, and LSP diagnostics all run locally.
 
 ---
 
@@ -135,8 +135,12 @@ See `packages/@codepapr/core/docs/CONFIGURATION.md` for the full parameter refer
 | **explore** | Read-only code analysis | fast | read, read_image, list, lsp, diagnostics, grep |
 | **scout** | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image |
 | **mentor** | Architecture/algorithm guidance | Configurable model | None |
+| **verifier** *(internal)* | Goal acceptance — read-only audit of the Worker's work (`/goal`) | `verifierModelTier` (fast/primary/mentor) | read, grep, glob, list |
+| **compactor** *(internal)* | Context compaction — generates recoverable checkpoints | `compactionModel` tier (fast/primary) | None |
 
 The main agent dispatches sub-agents via the `task` tool. Each sub-agent has its own **isolated session and blank context**, receiving only the delegated task description — uncontaminated by the main agent's conversation history. Sub-agents have a 5-minute overall timeout and a 90-second per-tool-call timeout.
+
+> **Verifier** and **Compactor** are runtime-controlled internal agents (`internal: true`) — never exposed via the `task` tool. Verifier is invoked by the GoalRunner acceptance loop; Compactor is invoked by the context-compaction pipeline (between-turn and mid-loop). Compactor runs with zero tools (pure reasoning over the transcript) and keeps the sub-agent default 20-minute wall-clock budget.
 
 ## Verify
 

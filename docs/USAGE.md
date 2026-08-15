@@ -167,10 +167,14 @@ LLM 可通过 4 个工具管理 app：
 | **explore** | 只读代码分析 | fast | read, read_image, list, graph, glob, lsp, diagnostics, grep |
 | **scout** | 网页搜索 + 下载 | fast | websearch, webfetch, browser, read_image |
 | **mentor** | 架构/算法指导 | 可配置独立模型 | 无 |
+| **verifier**（内部） | Goal 验收——只读核实 Worker 是否真正达成目标 | `verifierModelTier` 档位 | read, grep, glob, list |
+| **compactor**（内部） | 上下文压缩——生成可恢复检查点 | `compactionModel` 档位 | 无（纯推理） |
 
 主 Agent 通过 `task` 工具调度子代理。每个子代理拥有独立的 Session，只接收委派的任务描述，不受历史对话污染。主 Agent 的 TodoList 指令会提示它主动委派代码分析给 Explore、网页搜索给 Scout。
 
 > Goal 自主循环的验收器（Verifier）是一个内置的只读子代理（工具白名单 read/grep/glob/list，可亲自核实 Worker 的改动），在高级设置中配置（`verifierModelTier` 可选快速/主模型/导师模型）。它是内部代理（`internal: true`），不经 `task` 工具暴露给主 Agent，仅供 GoalRunner 内部调用。主观目标（无 `exec:` 条件）默认使用导师模型验收，未配置导师模型时静默降级为主模型。
+
+> 上下文压缩（Compactor）同样是内置内部代理（`internal: true`），零工具纯推理——压缩输入（transcript）已含全部事实。它由运行时压缩管线（轮间压缩与 mid-loop 压缩）直接调用，不经 `task` 工具暴露；模型档位与参数复用压缩配置（`compactionModel` / `compactionTemperature` / `compactionMaxTokens`，fast 档未启用快速模型时跳过 LLM 走规则降级）。墙钟预算沿用子代理默认 20 分钟。
 
 子代理有 **5 分钟整体 wall-clock 超时**（超时自动取消），单次工具调用有 **90 秒超时保护**，Worker IPC 通信有 **120 秒超时保护**。超时返回错误给 LLM 自主决策，而非永久等待。
 

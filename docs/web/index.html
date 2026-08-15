@@ -514,14 +514,14 @@
     <div class="section-header reveal">
       <div class="section-label"><span class="dot"></span> 内置命令</div>
       <h2>输入 <code>/</code> 即可调用</h2>
-      <p>18 个内置命令，按任务复杂度自动路由到主模型或快速模型；<code>/help</code> <code>/commands</code> <code>/compact</code> 不走模型，零 Token 消耗</p>
+      <p>18 个内置命令，按任务复杂度自动路由到主模型或快速模型；<code>/help</code> <code>/commands</code> 不走模型，零 Token 消耗</p>
     </div>
     <div class="cmd-table-wrap reveal">
       <table class="cmd-table">
         <thead><tr><th>命令</th><th>用途</th><th>模型</th></tr></thead>
         <tbody>
           <tr><td><code>/help</code> &nbsp; <code>/commands</code></td><td>列出所有可用命令及说明</td><td><span class="badge-model badge-local">本地</span></td></tr>
-          <tr><td><code>/compact</code></td><td>强制压缩当前会话上下文，生成检查点</td><td><span class="badge-model badge-local">本地</span></td></tr>
+          <tr><td><code>/compact</code></td><td>强制压缩当前会话上下文，Compactor 内部代理生成检查点（LLM 失败时降级为规则摘要）</td><td><span class="badge-model badge-primary">主 / 快速</span></td></tr>
           <tr><td><code>/goal</code></td><td>自主循环：Worker 执行 + Verifier 验收，直到验证条件通过</td><td><span class="badge-model badge-primary">主模型</span></td></tr>
           <tr><td><code>/review</code></td><td>审查改动或指定范围，优先报告 bug 和回归风险</td><td><span class="badge-model badge-primary">主模型</span></td></tr>
           <tr><td><code>/fix</code></td><td>定位并修复问题，自动运行验证</td><td><span class="badge-model badge-primary">主模型</span></td></tr>
@@ -562,7 +562,7 @@
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/><line x1="12" y1="22" x2="12" y2="15.5"/><polyline points="22 8.5 12 15.5 2 8.5"/></svg></div>
-        <h4>Core Agent</h4><p>缓存分区 · 会话<br>30 工具集成 · 3 内置子代理<br>MCP · TodoList · Goal 循环 · 对话重置</p>
+        <h4>Core Agent</h4><p>缓存分区 · 会话<br>30 工具集成 · 3 内置子代理<br>+ 2 运行时内部代理（Verifier / Compactor）<br>MCP · TodoList · Goal 循环 · 对话重置</p>
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="2.18"/><path d="M7 2v20"/><path d="M17 2v20"/><path d="M2 12h20"/><path d="M2 7h5"/><path d="M2 17h5"/><path d="M17 17h5"/><path d="M17 7h5"/></svg></div>

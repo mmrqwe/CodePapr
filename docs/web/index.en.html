@@ -512,14 +512,14 @@
     <div class="section-header reveal">
       <div class="section-label"><span class="dot"></span> Built-in Commands</div>
       <h2>Type <code>/</code> to Invoke</h2>
-      <p>18 built-in commands, auto-routed to primary or fast model by task complexity; <code>/help</code> <code>/commands</code> <code>/compact</code> bypass models, zero token cost</p>
+      <p>18 built-in commands, auto-routed to primary or fast model by task complexity; <code>/help</code> <code>/commands</code> bypass models, zero token cost</p>
     </div>
     <div class="cmd-table-wrap reveal">
       <table class="cmd-table">
         <thead><tr><th>Command</th><th>Purpose</th><th>Model</th></tr></thead>
         <tbody>
           <tr><td><code>/help</code> &nbsp; <code>/commands</code></td><td>List all available commands and descriptions</td><td><span class="badge-model badge-local">Local</span></td></tr>
-          <tr><td><code>/compact</code></td><td>Force-compress current session context, generate checkpoint</td><td><span class="badge-model badge-local">Local</span></td></tr>
+          <tr><td><code>/compact</code></td><td>Force-compress current session context; the internal Compactor agent generates the checkpoint (rule-based fallback on LLM failure)</td><td><span class="badge-model badge-primary">Primary / Fast</span></td></tr>
           <tr><td><code>/goal</code></td><td>Autonomous loop: Worker executes + Verifier audits, until condition passes</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
           <tr><td><code>/review</code></td><td>Review changes or specified scope, prioritize bugs and regression risks</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
           <tr><td><code>/fix</code></td><td>Locate and fix issues, auto-run verification</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
@@ -560,7 +560,7 @@
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/><line x1="12" y1="22" x2="12" y2="15.5"/><polyline points="22 8.5 12 15.5 2 8.5"/></svg></div>
-        <h4>Core Agent</h4><p>Cache Partitioning · Sessions<br>30 Tools · 3 Sub-Agents<br>MCP · TodoList · Reset</p>
+        <h4>Core Agent</h4><p>Cache Partitioning · Sessions<br>30 Tools · 3 Sub-Agents<br>+ 2 runtime-internal agents (Verifier / Compactor)<br>MCP · TodoList · Reset</p>
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="2.18"/><path d="M7 2v20"/><path d="M17 2v20"/><path d="M2 12h20"/><path d="M2 7h5"/><path d="M2 17h5"/><path d="M17 17h5"/><path d="M17 7h5"/></svg></div>

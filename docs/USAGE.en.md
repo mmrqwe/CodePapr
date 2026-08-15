@@ -167,10 +167,14 @@ Full parameter reference: `packages/@codepapr/core/docs/CONFIGURATION.md`.
 | **explore** | Read-only code analysis | fast | read, read_image, list, graph, glob, lsp, diagnostics, grep |
 | **scout** | Web search + download | fast | websearch, webfetch, browser, read_image |
 | **mentor** | Architecture/algorithm guidance | Configurable independent model | None |
+| **verifier** *(internal)* | Goal acceptance — read-only audit of the Worker's work | `verifierModelTier` tier | read, grep, glob, list |
+| **compactor** *(internal)* | Context compaction — recoverable checkpoint generation | `compactionModel` tier | None (pure reasoning) |
 
 The main Agent dispatches sub-agents via the `task` tool. Each sub-agent has an independent Session and only receives the delegated task description, free from history pollution. The main Agent's TodoList instructions encourage it to proactively delegate code analysis to Explore and web search to Scout.
 
 > The Goal autonomous loop's verifier is a built-in read-only sub-agent (tools whitelist: read/grep/glob/list — it can independently verify the Worker's changes), configured in Advanced settings (`verifierModelTier`: fast, primary, or mentor). It is an internal agent (`internal: true`), never exposed to the main Agent via the `task` tool, and only invoked internally by GoalRunner. Subjective goals (no `exec:` condition) default to the mentor model, silently falling back to the primary model when no mentor is configured.
+
+> Context compaction (Compactor) is likewise a built-in internal agent (`internal: true`) with zero tools — pure reasoning, since the compaction input (transcript) already contains all facts. It is invoked directly by the runtime compaction pipeline (between-turn and mid-loop compaction), never exposed via the `task` tool; model tier and parameters reuse the compaction settings (`compactionModel` / `compactionTemperature` / `compactionMaxTokens`; when the fast tier is selected but the fast model is disabled, the LLM call is skipped in favor of rule-based fallback). The wall-clock budget keeps the sub-agent default of 20 minutes.
 
 Sub-agents have a **5-minute overall wall-clock timeout** (auto-cancels on timeout), individual tool calls have a **90-second timeout**, and Worker IPC has a **120-second timeout**. Timeouts return errors to the LLM instead of hanging indefinitely.
 

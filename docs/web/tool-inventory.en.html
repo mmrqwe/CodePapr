@@ -576,9 +576,9 @@
           <div class="idx">07</div>
           <div class="tt">
             <h3>Agent Tool Matrix <span>Who gets which tools</span></h3>
-            <div class="tags"><span class="tag">Main + Explore / Scout / Mentor</span><span class="tag">allowlist filtering</span><span class="tag">agentConfig.ts</span></div>
+            <div class="tags"><span class="tag">Main + Explore / Scout / Mentor + internal Verifier / Compactor</span><span class="tag">allowlist filtering</span><span class="tag">agentConfig.ts</span></div>
           </div>
-          <div class="hz"><b>Who gets which tools</b>Main = full set (graph soft-hidden) · sub-agents = allowlist</div>
+          <div class="hz"><b>Who gets which tools</b>Main = full set (graph soft-hidden) · sub-agents = allowlist · internal agents run via the runtime (never via the task tool)</div>
         </div>
 
         <div class="sublabel"><b>Main Agent</b> full read/write/execute · graph soft-hidden (delegated to Explore)</div>
@@ -627,6 +627,30 @@
           </div>
           <div class="desc"><b>No tools (<code>{}</code>)</b>. Deliberate design: makes architecture/algorithm/debugging decisions purely from the context the main Agent reports; when information is insufficient it replies "need to supplement: X" and has the engineer collect it, rather than querying code itself (avoids overlap with Explore and slows nothing down).</div>
           <div class="more"><div class="mbox"><code>filterToolsForAgent</code> returns an empty tool list for the empty object <code>{}</code> (explicit disable). When Mentor is disabled (<code>mentorEnabled:false</code>) it is filtered out of the delegation list.</div></div>
+        </div>
+
+        <div class="sublabel"><b>Runtime-internal agents</b> internal:true · never exposed via the task tool · invoked directly by the runtime</div>
+
+        <div class="item">
+          <div class="row">
+            <div class="addr">VRFY</div>
+            <div class="name">Verifier<small>Goal acceptance · model: verifierModelTier · agentConfig.ts:783</small></div>
+            <div class="src"><span class="chip">4 read-only tools</span><span class="chip">internal:true</span><span class="chip">GoalRunner invokes</span></div>
+            <div class="cchip c-lsp">Read-only audit</div>
+          </div>
+          <div class="desc"><code>read / grep / glob / list</code>. The Goal autonomous loop's acceptance auditor: reads the Worker's transcript and can independently inspect files — anti-completion-bias, anti-forgery. Read-only, never modifies files.</div>
+          <div class="more"><div class="mbox">The runtime definition is built by <code>buildVerifierDefinition</code> (verifierRunner.ts), overriding model/temperature per <code>verifierModelTier</code>; dedicated budget: 6 tool rounds / 3-minute wall clock / <code>verifierMaxTokens</code> / thinking off. Subjective goals auto-upgrade the fast tier to mentor.</div></div>
+        </div>
+
+        <div class="item">
+          <div class="row">
+            <div class="addr">CMPT</div>
+            <div class="name">Compactor<small>context compaction · model: compactionModel · agentConfig.ts:801</small></div>
+            <div class="src"><span class="chip">no tools {}</span><span class="chip">internal:true</span><span class="chip">compaction pipeline invokes</span></div>
+            <div class="cchip c-mm">Pure reasoning</div>
+          </div>
+          <div class="desc"><b>Zero tools (<code>{}</code>)</b>: the compaction input (transcript) already contains all facts — no need to re-read the workspace. Compresses a long conversation into a recoverable checkpoint JSON (userGoal/constraints/completedWork/importantContext/todoList/pendingWork).</div>
+          <div class="more"><div class="mbox">Execution reuses <code>resolveSubagentExecution</code> + <code>runSubagentSession</code> (compactorRunner.ts): empty registry, no skills/memory/project-graph injection (bootstrap isolation), <code>compactionMaxTokens</code> as output cap, thinking off; wall clock keeps the sub-agent default of 20 minutes. Shared by between-turn and mid-loop compaction; mid-loop wires the <code>sessionAbortControllers</code> cancel signal — a mid-flight cancel makes the handler return null for graceful teardown. When the fast tier is selected but the fast model is disabled, the LLM call is skipped in favor of rule-based fallback (legacy selectContextCompactionModelRoute semantics).</div></div>
         </div>
       </section>
 

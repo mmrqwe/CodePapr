@@ -524,6 +524,10 @@
         <div class="no">M·05</div><h5>子代理上下文继承</h5>
         <p>子代理通过 <code>SubagentSessionDeps</code> 继承主会话的 skills、memory、project-graph 和 customPrompt，注入自己的 Session Bootstrap。Bootstrap 以 <code>role: assistant</code> + <code>metadata.isPrefixSystem: true</code> 注入——Claude 提供商据此将其提取为 system 内容，避免首条消息非 user 的 400 错误；DeepSeek/OpenAI 按原样发送。</p>
       </div>
+      <div class="led">
+        <div class="no">M·06</div><h5>内部代理例外：Compactor 零继承</h5>
+        <p><b>Compactor</b>（上下文压缩内部子代理）是例外——<code>runCompactorSession</code>（compactorRunner.ts）不传 skills / memory / project-graph 三节：压缩输入（transcript）已含全部事实，且注入会徒增 token、污染检查点摘要。它只接收「系统提示词 + transcript user 提示词」，由运行时压缩管线（轮间 + mid-loop）直接调用，不经 <code>task</code> 工具。</p>
+      </div>
     </div>
   </section>
 

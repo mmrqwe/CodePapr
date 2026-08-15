@@ -4,7 +4,7 @@
 
 **本地优先的编码 Agent 运行时。Tauri 桌面工作台。**
 
-CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主 Agent 调度 **Explore**（代码分析）、**Scout**（网页搜索）、**Mentor**（架构指导）三个内置子代理协作，支持自定义扩展。文件读写、命令执行、Git 操作、浏览器预览、LSP 诊断——全在本地完成。
+CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主 Agent 调度 **Explore**（代码分析）、**Scout**（网页搜索）、**Mentor**（架构指导）三个内置子代理协作，另有 **Verifier**（Goal 验收）与 **Compactor**（上下文压缩）两个运行时内部代理，支持自定义扩展。文件读写、命令执行、Git 操作、浏览器预览、LSP 诊断——全在本地完成。
 
 ---
 
@@ -135,8 +135,12 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 | **explore** | 只读代码分析 | fast | read, read_image, list, lsp, diagnostics, grep |
 | **scout** | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image |
 | **mentor** | 架构/算法指导 | 可配置独立模型 | 无 |
+| **verifier**（内部） | Goal 验收——只读核实 Worker 是否真正达成目标（`/goal`） | `verifierModelTier` 档位（fast/primary/mentor） | read, grep, glob, list |
+| **compactor**（内部） | 上下文压缩——生成可恢复检查点 | `compactionModel` 档位（fast/primary） | 无 |
 
 主 Agent 通过 `task` 工具调度子代理。每个子代理拥有**独立的 Session 和空白上下文**，只接收委派的任务描述，不受主 Agent 历史对话污染。子代理有 5 分钟整体超时，单次工具调用有 90 秒超时保护。
+
+> **Verifier** 与 **Compactor** 是运行时控制的内部代理（`internal: true`）——不经 `task` 工具暴露。Verifier 由 GoalRunner 验收循环调用；Compactor 由上下文压缩管线（轮间 + mid-loop）调用。Compactor 零工具纯推理（基于 transcript），墙钟预算沿用子代理默认 20 分钟。
 
 ## 验证
 

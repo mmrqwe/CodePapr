@@ -423,7 +423,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
           <thead><tr><th>Dimension</th><th>Cline (62k⭐)</th><th>Aider (46k⭐)</th><th>Devin Desktop</th><th class="highlight-cell">CodePapr</th></tr></thead>
           <tbody>
             <tr><td><strong>Form Factor</strong></td><td>SDK / VS Code / JetBrains / CLI / Kanban</td><td>Terminal Command</td><td>Standalone Desktop IDE</td><td class="highlight-cell">Standalone Desktop App (Tauri 2)</td></tr>
-            <tr><td><strong>Multi-Agent</strong></td><td>✅ Team + Coordinator + Scheduled Dispatch</td><td>❌ Single Agent</td><td>✅ Multi-Agent Fleet + ACP Protocol</td><td class="highlight-cell">✅ Main Agent + 3 Built-in Sub-agents + Custom</td></tr>
+            <tr><td><strong>Multi-Agent</strong></td><td>✅ Team + Coordinator + Scheduled Dispatch</td><td>❌ Single Agent</td><td>✅ Multi-Agent Fleet + ACP Protocol</td><td class="highlight-cell">✅ Main Agent + 3 Built-in Sub-agents + 2 Internal Agents + Custom</td></tr>
             <tr><td><strong>Task Planning</strong></td><td>Kanban Board</td><td>❌</td><td>Spaces + Kanban</td><td class="highlight-cell">TodoList: auto-create / progress tracking / re-plan</td></tr>
             <tr><td><strong>Code Understanding</strong></td><td>Read Files + grep + LSP</td><td>Repo Map</td><td>Fast Context (milliseconds)</td><td class="highlight-cell">ProjectGraph Semantic Graph: 14 analysis actions</td></tr>
             <tr><td><strong>Rollback</strong></td><td>Checkpoints Snapshot</td><td>Git commit rollback</td><td>Diff review</td><td class="highlight-cell">Git auto-commit checkpoint + <code>reset --hard</code>: atomic code and message recovery</td></tr>
@@ -593,7 +593,7 @@ https://api.deepseek.com/v1</code></pre>
           <thead><tr><th>Scenario</th><th>Model Used</th><th>Temperature</th></tr></thead>
           <tbody>
             <tr><td>Main Agent conversation</td><td>Primary model (default <code>deepseek-v4-pro</code>)</td><td>Default</td></tr>
-            <tr><td>Context compression</td><td>Fast model (default <code>deepseek-v4-flash</code>)</td><td>0.1</td></tr>
+            <tr><td>Context compression (internal Compactor agent)</td><td><code>compactionModel</code> tier (default fast model <code>deepseek-v4-flash</code>, switchable to primary)</td><td>0.1</td></tr>
             <tr><td>Sub-agent dispatch (heavy/execution type)</td><td>Primary model</td><td>User configured</td></tr>
             <tr><td>Sub-agent dispatch (Explore/Scout fast mode)</td><td>Fast model (switchable to primary)</td><td>User configured</td></tr>
             <tr><td>Slash commands declaring <code>model: fast</code> (e.g. <code>/search</code>, <code>/lint</code>, <code>/clean</code>, <code>/commit</code>, <code>/summary</code>, <code>/build</code>)</td><td>Fast model (falls back to primary if not enabled)</td><td>0.3</td></tr>
@@ -644,7 +644,7 @@ https://api.deepseek.com/v1</code></pre>
         </table>
 
         <p class="callout">
-          <strong>Note:</strong> All three built-in sub-agents — Explore, Scout, and Mentor — can be enabled and configured in the desktop's "Sub-agents" tab.
+          <strong>Note:</strong> The three built-in sub-agents — Explore, Scout, and Mentor — can be enabled and configured in the desktop settings panel (Mentor tab); the internal Verifier / Compactor model tiers are configured in the Advanced tab (<code>verifierModelTier</code> / <code>compactionModel</code>) and are never exposed via the <code>task</code> tool.
         </p>
       </div>
     </section>
@@ -1182,7 +1182,7 @@ TTS Data Flow:
         <p>Manually trigger conversation compression, merging earlier messages into structured checkpoints to free token space:</p>
         <ul>
           <li><strong>Force mode:</strong> Not limited by <code>maxConversationRounds</code> and <code>maxContextTokens</code> thresholds</li>
-          <li><strong>Local command:</strong> Zero token cost; calls the existing compression pipeline to generate checkpoints</li>
+          <li><strong>Internal Compactor agent:</strong> Calls the compression pipeline; the zero-tool Compactor sub-agent generates the checkpoint (model tier follows <code>compactionModel</code>; rule-based fallback on LLM failure)</li>
           <li><strong>Incidentally triggers memory organization:</strong> After successful compression, marks memory.md as pending; next round's agent reply triggers async organization</li>
           <li><strong>Use case:</strong> When approaching context limits or responses slow down, compress to restore smooth conversation</li>
         </ul>
@@ -1308,7 +1308,17 @@ When a task requires public information, current facts, third-party API usage, o
             <tr><td><strong>mentor</strong></td><td>High-level architecture/algorithm/debugging guidance (no code writing, no tool usage)</td><td>mentor*</td><td>None</td></tr>
           </tbody>
         </table>
-        <p><small>* Mentor uses the primary model by default; an independent mentor model can be enabled in settings (supports independent API Key, Base URL, and model selection; falls back to the main API Key when no dedicated key is configured).<br>The Goal autonomous loop's verifier is a built-in read-only sub-agent (read/grep/glob/list) configured in advanced settings (<code>verifierModelTier</code>: fast, primary, or mentor). It is an internal agent and is never exposed to the main Agent via the <code>task</code> tool.</small></p>
+        <p><small>* Mentor uses the primary model by default; an independent mentor model can be enabled in settings (supports independent API Key, Base URL, and model selection; falls back to the main API Key when no dedicated key is configured).</small></p>
+
+        <h3>Runtime-Internal Agents (never exposed via the task tool)</h3>
+        <table>
+          <thead><tr><th>Agent</th><th>Purpose</th><th>Model</th><th>Tools</th></tr></thead>
+          <tbody>
+            <tr><td><strong>verifier</strong></td><td>Goal acceptance: read-only audit of whether the Worker truly achieved the goal — anti-completion-bias, anti-forgery (<code>/goal</code>)</td><td><code>verifierModelTier</code> (fast/primary/mentor)</td><td>read, grep, glob, list</td></tr>
+            <tr><td><strong>compactor</strong></td><td>Context compaction: compresses a long conversation into a recoverable checkpoint (shared by between-turn and mid-loop compaction)</td><td><code>compactionModel</code> (fast/primary)</td><td>None (pure reasoning)</td></tr>
+          </tbody>
+        </table>
+        <p><small>Both internal agents are <code>internal: true</code>, invoked directly by the runtime: Verifier by the GoalRunner acceptance loop (dedicated budget: 6 tool rounds / 3-minute wall clock); Compactor by the compaction pipeline — zero tools (the transcript already contains all facts), no skills/memory/project-graph injection (bootstrap isolation), and the sub-agent default 20-minute wall clock. Compactor skips the LLM in favor of rule-based fallback when the fast tier is selected but the fast model is disabled.</small></p>
 
         <h3>Custom Sub-agents</h3>
         <p>Declare a sub-agent in <code>.CodePapr/agents/&lt;name&gt;.md</code> with YAML frontmatter + body. The main agent can delegate subtasks to it. An agent with the same name will override the built-in definition.</p>
@@ -1389,8 +1399,8 @@ Output Format:
           <tbody>
             <tr><td><code>/help</code></td><td>List all commands and descriptions</td><td>Local</td><td><code>/help</code></td></tr>
             <tr><td><code>/commands</code></td><td>Alias for <code>/help</code></td><td>Local</td><td><code>/commands</code></td></tr>
-            <tr><td><code>/compact</code></td><td>Force compress current session context, generate checkpoint to free tokens</td><td>Local</td><td><code>/compact</code></td></tr>
-            <tr><td><code>/goal</code></td><td>Autonomous loop: Worker executes + Verifier validates, until condition is met</td><td>Local</td><td><code>/goal exec:npm test</code></td></tr>
+            <tr><td><code>/compact</code></td><td>Force compress current session context — the internal Compactor agent generates the checkpoint (rule-based fallback on LLM failure)</td><td>Primary / Fast</td><td><code>/compact</code></td></tr>
+            <tr><td><code>/goal</code></td><td>Autonomous loop: Worker executes + Verifier validates, until condition is met</td><td>Primary</td><td><code>/goal exec:npm test</code></td></tr>
             <tr><td><code>/review</code></td><td>Review current changes or specified scope</td><td>Primary</td><td><code>/review src/App.tsx</code></td></tr>
             <tr><td><code>/fix</code></td><td>Locate and fix a specified issue</td><td>Primary</td><td><code>/fix Login button not responding</code></td></tr>
             <tr><td><code>/test</code></td><td>Add tests or run relevant tests</td><td>Primary</td><td><code>/test src/utils/format.ts</code></td></tr>

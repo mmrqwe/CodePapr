@@ -516,6 +516,10 @@
         <div class="no">M·05</div><h5>Sub-Agent Context Inheritance</h5>
         <p>Sub-agents inherit the main session's skills, memory, project-graph, and customPrompt via <code>SubagentSessionDeps</code>, injected into their own Session Bootstrap. The bootstrap is injected with <code>role: assistant</code> + <code>metadata.isPrefixSystem: true</code> — the Claude provider extracts it as system content, avoiding a 400 error from a non-user first message; DeepSeek/OpenAI send it as-is.</p>
       </div>
+      <div class="led">
+        <div class="no">M·06</div><h5>Internal-Agent Exception: Compactor Inherits Nothing</h5>
+        <p><b>Compactor</b> (the context-compaction internal sub-agent) is the exception — <code>runCompactorSession</code> (compactorRunner.ts) passes no skills / memory / project-graph sections: the compaction input (transcript) already contains all facts, and injecting them would add tokens and pollute the checkpoint summary. It receives only "system prompt + transcript user prompt", invoked directly by the runtime compaction pipeline (between-turn + mid-loop), never via the <code>task</code> tool.</p>
+      </div>
     </div>
   </section>
 

@@ -423,7 +423,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
           <thead><tr><th>维度</th><th>Cline (62k⭐)</th><th>Aider (46k⭐)</th><th>Devin Desktop</th><th class="highlight-cell">CodePapr</th></tr></thead>
           <tbody>
             <tr><td><strong>形态</strong></td><td>SDK / VS Code / JetBrains / CLI / Kanban</td><td>终端命令</td><td>独立桌面 IDE</td><td class="highlight-cell">独立桌面应用（Tauri 2）</td></tr>
-            <tr><td><strong>多 Agent</strong></td><td>✅ 团队 + 协调者 + 定时调度</td><td>❌ 单 Agent</td><td>✅ 多 Agent 舰队 + ACP 协议</td><td class="highlight-cell">✅ 主 Agent + 3 内置子代理 + 自定义</td></tr>
+            <tr><td><strong>多 Agent</strong></td><td>✅ 团队 + 协调者 + 定时调度</td><td>❌ 单 Agent</td><td>✅ 多 Agent 舰队 + ACP 协议</td><td class="highlight-cell">✅ 主 Agent + 3 内置子代理 + 2 内部代理 + 自定义</td></tr>
             <tr><td><strong>任务规划</strong></td><td>Kanban 看板</td><td>❌</td><td>Spaces + Kanban</td><td class="highlight-cell">TodoList：自动创建 / 进度追踪 / re-plan</td></tr>
             <tr><td><strong>代码理解</strong></td><td>读取文件 + grep + LSP</td><td>Repo Map</td><td>Fast Context（毫秒级）</td><td class="highlight-cell">ProjectGraph 语义图：14 个分析 action</td></tr>
             <tr><td><strong>回退机制</strong></td><td>Checkpoints 快照</td><td>Git commit 回退</td><td>Diff review</td><td class="highlight-cell">Git auto-commit checkpoint + <code>reset --hard</code>：代码与消息原子性恢复</td></tr>
@@ -593,7 +593,7 @@ https://api.deepseek.com/v1</code></pre>
           <thead><tr><th>场景</th><th>使用模型</th><th>温度</th></tr></thead>
           <tbody>
             <tr><td>主 Agent 对话</td><td>主模型（默认 <code>deepseek-v4-pro</code>）</td><td>默认</td></tr>
-            <tr><td>上下文压缩</td><td>快速模型（默认 <code>deepseek-v4-flash</code>）</td><td>0.1</td></tr>
+            <tr><td>上下文压缩（Compactor 内部代理）</td><td><code>compactionModel</code> 档位（默认快速模型 <code>deepseek-v4-flash</code>，可切主模型）</td><td>0.1</td></tr>
             <tr><td>子代理派发（重型/执行类）</td><td>主模型</td><td>用户配置</td></tr>
             <tr><td>子代理派发（Explore/Scout 快速模式）</td><td>快速模型（可切换为主模型）</td><td>用户配置</td></tr>
             <tr><td>Slash 命令声明 <code>model: fast</code>（如 <code>/search</code>、<code>/lint</code>、<code>/clean</code>、<code>/commit</code>、<code>/summary</code>、<code>/build</code>）</td><td>快速模型（未启用时回退主模型）</td><td>0.3</td></tr>
@@ -644,7 +644,7 @@ https://api.deepseek.com/v1</code></pre>
         </table>
 
         <p class="callout">
-          <strong>注意：</strong>Explore、Scout、Mentor 三个内置子代理均可在桌面端的"子Agent"标签页启用并配置。
+          <strong>注意：</strong>Explore、Scout、Mentor 三个内置子代理均可在桌面端设置面板（Mentor Tab）启用并配置；内部代理 Verifier / Compactor 的模型档位在高级 Tab 配置（<code>verifierModelTier</code> / <code>compactionModel</code>），不经 <code>task</code> 工具暴露。
         </p>
       </div>
     </section>
@@ -1182,7 +1182,7 @@ TTS 数据流：
         <p>手动触发对话压缩，将早前消息合并为结构化检查点释放 token 空间：</p>
         <ul>
           <li><strong>强制模式：</strong>不受 <code>maxConversationRounds</code> 和 <code>maxContextTokens</code> 阈值限制</li>
-          <li><strong>本地命令：</strong>零 token 消耗，调用现有压缩管线生成检查点</li>
+          <li><strong>Compactor 内部代理：</strong>调用压缩管线，由零工具 Compactor 子代理生成检查点（模型档位随 <code>compactionModel</code>；LLM 失败时降级为规则摘要）</li>
           <li><strong>顺带触发记忆整理：</strong>压缩成功后会标记 memory.md 为待整理，下一轮 agent 回复后异步整理</li>
           <li><strong>使用场景：</strong>接近上下文上限或响应变慢时，压缩即可恢复流畅对话</li>
         </ul>
@@ -1308,7 +1308,17 @@ TTS 数据流：
             <tr><td><strong>mentor</strong></td><td>架构/算法/调试高层指导（不写代码、不调工具）</td><td>mentor*</td><td>无</td></tr>
           </tbody>
         </table>
-        <p><small>* Mentor 默认使用主模型，可在设置中启用独立导师模型（支持独立的 API Key、Base URL 和模型选择；未单独配置 API Key 时回退到主 API Key）。<br>Goal 自主循环的验收器（Verifier）是内置的只读子代理（read/grep/glob/list），在高级设置中配置（<code>verifierModelTier</code> 可选快速/主模型/导师模型），属于内部代理，不经 <code>task</code> 工具暴露给主 Agent。</small></p>
+        <p><small>* Mentor 默认使用主模型，可在设置中启用独立导师模型（支持独立的 API Key、Base URL 和模型选择；未单独配置 API Key 时回退到主 API Key）。</small></p>
+
+        <h3>运行时内部代理（不经 task 工具暴露）</h3>
+        <table>
+          <thead><tr><th>Agent</th><th>用途</th><th>模型</th><th>工具</th></tr></thead>
+          <tbody>
+            <tr><td><strong>verifier</strong></td><td>Goal 验收：只读核实 Worker 是否真正达成目标，防完工偏见、防伪造成功（<code>/goal</code>）</td><td><code>verifierModelTier</code>（快速/主/导师）</td><td>read, grep, glob, list</td></tr>
+            <tr><td><strong>compactor</strong></td><td>上下文压缩：把长会话压缩成可恢复检查点（轮间压缩与 mid-loop 压缩共用）</td><td><code>compactionModel</code>（快速/主）</td><td>无（纯推理）</td></tr>
+          </tbody>
+        </table>
+        <p><small>两个内部代理均 <code>internal: true</code>，由运行时直接调用：Verifier 由 GoalRunner 验收循环调用（专属预算：6 轮工具 / 3 分钟墙钟）；Compactor 由压缩管线调用，零工具（transcript 已含全部事实）、不注入 skills/memory/project-graph（bootstrap 隔离），墙钟沿用子代理默认 20 分钟。Compactor 在 fast 档未启用快速模型时跳过 LLM 走规则降级。</small></p>
 
         <h3>自定义子代理</h3>
         <p>在 <code>.CodePapr/agents/&lt;name&gt;.md</code> 中用 YAML frontmatter + 正文声明一个子代理，主代理可以把子任务委派给它。同名 Agent 会覆盖内置定义。</p>
@@ -1389,8 +1399,8 @@ TTS 数据流：
           <tbody>
             <tr><td><code>/help</code></td><td>列出所有命令及说明</td><td>本地</td><td><code>/help</code></td></tr>
             <tr><td><code>/commands</code></td><td><code>/help</code> 的别名</td><td>本地</td><td><code>/commands</code></td></tr>
-            <tr><td><code>/compact</code></td><td>强制压缩当前会话上下文，生成检查点释放 token</td><td>本地</td><td><code>/compact</code></td></tr>
-            <tr><td><code>/goal</code></td><td>自主循环：Worker 执行 + Verifier 验收，直到验证条件通过</td><td>本地</td><td><code>/goal exec:npm test</code></td></tr>
+            <tr><td><code>/compact</code></td><td>强制压缩当前会话上下文——Compactor 内部代理生成检查点（LLM 失败时降级为规则摘要）</td><td>主 / 快速</td><td><code>/compact</code></td></tr>
+            <tr><td><code>/goal</code></td><td>自主循环：Worker 执行 + Verifier 验收，直到验证条件通过</td><td>主模型</td><td><code>/goal exec:npm test</code></td></tr>
             <tr><td><code>/review</code></td><td>审查当前改动或指定范围</td><td>主模型</td><td><code>/review src/App.tsx</code></td></tr>
             <tr><td><code>/fix</code></td><td>定位并修复指定问题</td><td>主模型</td><td><code>/fix 登录按钮无响应</code></td></tr>
             <tr><td><code>/test</code></td><td>补测试或运行相关测试</td><td>主模型</td><td><code>/test src/utils/format.ts</code></td></tr>
