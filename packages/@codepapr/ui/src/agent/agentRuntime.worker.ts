@@ -1323,7 +1323,8 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
       (commit) => {
         // PR1：mid-loop 压缩提交数据随 result 消息送回主线程（ADR-005）。
         lastCompactionCommit = commit;
-      }
+      },
+      payload.userMessageId
     ),
   });
 

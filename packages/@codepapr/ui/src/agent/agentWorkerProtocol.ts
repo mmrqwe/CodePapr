@@ -210,6 +210,13 @@ export interface MidLoopCompactionCommit {
   insertIndex: number;
   sourceMessageIds: string[];
   retainedMessageIds: string[];
+  /**
+   * 本回合锚点（ADR-009 第14条的延伸）：retained 起点落在 worker-only 区域
+   * （本回合 assistant/tool 消息 ID 由 worker 生成、不在 archive）时，主线程
+   * 用 user 消息 ID + source 区间内本回合 assistant 回合数做回合映射定位边界。
+   */
+  turnUserMessageId?: string;
+  sourceAssistantRoundsInTurn?: number;
 }
 
 export type MainToAgentWorkerMessage =

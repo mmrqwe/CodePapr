@@ -148,6 +148,121 @@ describe('createContextCompactionHandler (mid-loop retained tail)', () => {
 
     expect(result).toBeNull();
   });
+
+  it('attaches the turn anchor (user id + source assistant rounds) to the commit', async () => {
+    const settings = {
+      pruneOldToolResults: false,
+      pruneProtectRounds: 6,
+      pruneMinChars: 20000,
+      maxContextTokens: 500000,
+      maxTokens: 8000,
+    } as unknown as Settings;
+
+    const checkpointMessage = {
+      id: 'cp1',
+      role: 'assistant',
+      content: '',
+      synthetic: true,
+      hidden: true,
+      timestamp: 999,
+      contextCheckpoint: {
+        version: 2,
+        summary: '检查点',
+        renderedContent: '检查点摘要',
+        sourceMessageCount: 4,
+        sourceChars: 100,
+        generatedAt: 999,
+        modelName: 'test-model',
+        modelTier: 'fast',
+      },
+    } as unknown as UIMessage;
+
+    // insertIndex=4：source = [old-u, old-a, turn-user, w-a1]，retained = [w-a2]
+    vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
+      message: checkpointMessage,
+      modelTier: 'fast',
+      insertIndex: 4,
+    });
+
+    const coreMessages: IMessage[] = [
+      { id: 'old-u', role: 'user', content: '旧消息', timestamp: 1 },
+      { id: 'old-a', role: 'assistant', content: '旧回复', timestamp: 2 },
+      { id: 'turn-user', role: 'user', content: '本回合输入', timestamp: 3 },
+      { id: 'w-a1', role: 'assistant', content: '本回合回复 1', timestamp: 4 },
+      { id: 'w-a2', role: 'assistant', content: '本回合回复 2', timestamp: 5 },
+    ];
+
+    const commits: Array<Record<string, unknown>> = [];
+    const config = createContextCompactionHandler(
+      settings,
+      'deepseek',
+      'session-test',
+      undefined,
+      undefined,
+      (commit) => commits.push(commit as unknown as Record<string, unknown>),
+      'turn-user'
+    );
+    await config.handler(coreMessages);
+
+    expect(commits).toHaveLength(1);
+    expect(commits[0]?.turnUserMessageId).toBe('turn-user');
+    // source 区间内本回合 user 之后只有 w-a1 一条 assistant。
+    expect(commits[0]?.sourceAssistantRoundsInTurn).toBe(1);
+  });
+
+  it('omits the turn anchor when no user message id is provided', async () => {
+    const settings = {
+      pruneOldToolResults: false,
+      pruneProtectRounds: 6,
+      pruneMinChars: 20000,
+      maxContextTokens: 500000,
+      maxTokens: 8000,
+    } as unknown as Settings;
+
+    const checkpointMessage = {
+      id: 'cp1',
+      role: 'assistant',
+      content: '',
+      synthetic: true,
+      hidden: true,
+      timestamp: 999,
+      contextCheckpoint: {
+        version: 2,
+        summary: '检查点',
+        renderedContent: '检查点摘要',
+        sourceMessageCount: 2,
+        sourceChars: 50,
+        generatedAt: 999,
+        modelName: 'test-model',
+        modelTier: 'fast',
+      },
+    } as unknown as UIMessage;
+
+    vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
+      message: checkpointMessage,
+      modelTier: 'fast',
+      insertIndex: 2,
+    });
+
+    const commits: Array<Record<string, unknown>> = [];
+    const config = createContextCompactionHandler(
+      settings,
+      'deepseek',
+      'session-test',
+      undefined,
+      undefined,
+      (commit) => commits.push(commit as unknown as Record<string, unknown>)
+    );
+    await config.handler([
+      { id: 'u1', role: 'user', content: 'hi', timestamp: 1 },
+      { id: 'a1', role: 'assistant', content: 'hello', timestamp: 2 },
+      { id: 'a2', role: 'assistant', content: 'more', timestamp: 3 },
+    ]);
+
+    expect(commits).toHaveLength(1);
+    expect(commits[0]?.turnUserMessageId).toBeUndefined();
+    expect(commits[0]?.sourceAssistantRoundsInTurn).toBeUndefined();
+  });
 });
 
 describe('createContextCompactionHandler (bootstrap refresh)', () => {

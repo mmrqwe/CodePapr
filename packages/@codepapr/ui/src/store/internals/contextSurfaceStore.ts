@@ -17,7 +17,6 @@ import type { PruneOptions } from '@codepapr/core';
 import { createId } from '../../utils/createId';
 import {
   computeSurfaceNodes,
-  getLatestCheckpointPayload,
   parseRenderParams,
   resolveCheckpointSummaryInfo,
   serializeDisabledRenderParams,
@@ -41,6 +40,22 @@ const surfaceCache = new Map<string, PersistedContextSurface | null>();
 /** 内存缓存上限（LRU 逐出最旧条目）：长期运行 + 多工作区不会无限增长。 */
 const SURFACE_CACHE_MAX = 64;
 
+/**
+ * 在途压缩登记（compactionId 集合）：checkpoint 消息已插入消息数组、commit
+ * 事务尚未结算的窗口。维护路径对该窗口内的 checkpoint 跳过写 surface
+ * （commit/fail 路径拥有推进权）；窗口外的 generation 不匹配 checkpoint
+ * 视为失败残留/崩溃孤儿，按孤儿处理（不采纳进节点，见 maintainContextSurface）。
+ */
+const inFlightCompactionIds = new Set<string>();
+
+export function markCompactionInFlight(compactionId: string): void {
+  inFlightCompactionIds.add(compactionId);
+}
+
+export function clearCompactionInFlight(compactionId: string): void {
+  inFlightCompactionIds.delete(compactionId);
+}
+
 function cacheKey(workspacePath: string, sessionId: string): string {
   return `${workspacePath}\u0000${sessionId}`;
 }
@@ -51,6 +66,13 @@ function evictSurfaceCacheIfNeeded(): void {
     if (oldest === undefined) break;
     surfaceCache.delete(oldest);
   }
+}
+
+function rememberCacheEntry(workspacePath: string, sessionId: string, surface: PersistedContextSurface | null): void {
+  const key = cacheKey(workspacePath, sessionId);
+  surfaceCache.delete(key);
+  surfaceCache.set(key, surface);
+  evictSurfaceCacheIfNeeded();
 }
 
 export async function getContextSurfaceCached(
@@ -65,14 +87,11 @@ export async function getContextSurfaceCached(
     surfaceCache.set(key, surface);
     return surface;
   }
-  let surface: PersistedContextSurface | null = null;
-  try {
-    surface = await loadContextSurface(workspacePath, sessionId);
-  } catch (err) {
-    console.warn('[surface] 读取 surface 失败:', err instanceof Error ? err.message : err);
-  }
-  surfaceCache.set(key, surface);
-  evictSurfaceCacheIfNeeded();
+  // 读取失败不得缓存 null：瞬时 IPC/IO 错误若被缓存成「无 surface」，
+  // 后续 commit 会以 generation 0 为基准覆盖真实 generation（缓存投毒）。
+  // 错误上抛给调用方，下次调用重试加载。
+  const surface = await loadContextSurface(workspacePath, sessionId);
+  rememberCacheEntry(workspacePath, sessionId, surface);
   return surface;
 }
 
@@ -104,7 +123,32 @@ export async function maintainContextSurface(
 ): Promise<void> {
   try {
     const surface = await getContextSurfaceCached(workspacePath, sessionId);
-    const nodes = computeSurfaceNodes(messages);
+    const checkpoint = getLatestCheckpoint(messages);
+    const payload = checkpoint?.payload ?? null;
+
+    // 最新 checkpoint 的三态判定：
+    // 1. 在途（commit 进行中，含 mid-loop generation 未定的 checkpoint）→
+    //    跳过，commit/fail 路径拥有推进权；
+    // 2. generation 与 active 不匹配且不在途（失败残留 / 崩溃孤儿）→
+    //    不采纳进节点（不变式 5：失败压缩不得破坏上一个 completed
+    //    generation），从投影中排除后照常维护。孤儿消息本身保留在
+    //    archive（ADR-005 判定无害，synthetic+hidden，Surface 权威下
+    //    不参与重建）。
+    let projectionMessages: readonly ContextMessageLike[] = messages;
+    if (checkpoint && payload?.compactionId) {
+      if (inFlightCompactionIds.has(payload.compactionId)) {
+        return;
+      }
+      if (
+        surface &&
+        typeof payload.generation === 'number' &&
+        payload.generation !== surface.generation
+      ) {
+        projectionMessages = messages.filter((m) => m.id !== checkpoint.message.id);
+      }
+    }
+
+    const nodes = computeSurfaceNodes(projectionMessages);
 
     if (!surface) {
       const created: PersistedContextSurface = {
@@ -120,16 +164,6 @@ export async function maintainContextSurface(
       };
       await saveContextSurface(workspacePath, created);
       rememberContextSurface(workspacePath, created);
-      return;
-    }
-
-    const payload = getLatestCheckpointPayload(messages);
-    if (
-      payload?.compactionId &&
-      typeof payload.generation === 'number' &&
-      payload.generation !== surface.generation
-    ) {
-      // 未提交/失败的压缩在途：等 commit/fail 路径处理，不覆盖旧 generation。
       return;
     }
 
@@ -159,6 +193,10 @@ export interface CommitContextCheckpointOptions {
 /**
  * 压缩提交（ADR-005）：单事务 started → surface → completed。
  * 成功后更新内存缓存；失败向上抛，由调用方 failContextCheckpoint 溯源。
+ *
+ * 调用方契约（ADR-005 顺序）：checkpoint 消息必须先持久化进 archive
+ * （saveMessageBatch 落库完成）再调用本函数，否则崩溃窗口内 surface
+ * 引用的 checkpoint ID 在 archive 中不存在。
  */
 export async function commitContextCheckpoint(
   options: CommitContextCheckpointOptions
@@ -169,6 +207,8 @@ export async function commitContextCheckpoint(
   }
   const payload = checkpoint.payload;
 
+  // surface 读取失败必须上抛：以未知 generation 为基准计算 targetGeneration
+  // 会静默覆盖真实 generation 行（缓存投毒的写侧等价物）。
   const surface = await getContextSurfaceCached(options.workspacePath, options.sessionId);
   const sourceGeneration = surface?.generation ?? 0;
   const targetGeneration = sourceGeneration + 1;
@@ -206,19 +246,26 @@ export async function commitContextCheckpoint(
     renderParamsJson,
   };
 
-  const result = await commitContextCompaction(options.workspacePath, request);
+  // 兜底登记：调用方应在插入 checkpoint 时就 markCompactionInFlight，
+  // 此处确保任何路径进入事务窗口都被维护守卫感知。
+  inFlightCompactionIds.add(request.id);
+  try {
+    const result = await commitContextCompaction(options.workspacePath, request);
 
-  rememberContextSurface(options.workspacePath, {
-    sessionId: options.sessionId,
-    generation: targetGeneration,
-    parentGeneration: sourceGeneration,
-    compactionId: request.id,
-    renderParamsJson,
-    createdAt,
-    nodes,
-  });
+    rememberContextSurface(options.workspacePath, {
+      sessionId: options.sessionId,
+      generation: targetGeneration,
+      parentGeneration: sourceGeneration,
+      compactionId: request.id,
+      renderParamsJson,
+      createdAt,
+      nodes,
+    });
 
-  return result;
+    return result;
+  } finally {
+    inFlightCompactionIds.delete(request.id);
+  }
 }
 
 export interface FailContextCheckpointOptions {
@@ -235,7 +282,16 @@ export async function failContextCheckpoint(
   options: FailContextCheckpointOptions
 ): Promise<void> {
   const payload = options.payload;
-  const surface = await getContextSurfaceCached(options.workspacePath, options.sessionId);
+  if (payload?.compactionId) {
+    inFlightCompactionIds.delete(payload.compactionId);
+  }
+  let surface: PersistedContextSurface | null = null;
+  try {
+    surface = await getContextSurfaceCached(options.workspacePath, options.sessionId);
+  } catch (err) {
+    // 读取失败不阻断失败溯源：sourceGeneration 记 0（审计字段，可容忍）。
+    console.warn('[surface] 失败溯源读取 surface 失败:', err instanceof Error ? err.message : err);
+  }
   const summaryInfo = payload ? resolveCheckpointSummaryInfo(payload) : { kind: 'local-fallback' as const };
   try {
     await markContextCompactionFailed(options.workspacePath, {
@@ -254,6 +310,26 @@ export async function failContextCheckpoint(
 }
 
 /**
+ * 提交失败后的核实：IPC 拒绝不等于事务失败——提交可能已落库但响应丢失。
+ * 绕过缓存直读最新 surface：compactionId 匹配即视为已提交（刷新缓存、
+ * 保留 checkpoint）；否则按未提交处理。读取失败保守返回 false。
+ */
+export async function verifyCompactionLanded(
+  workspacePath: string,
+  sessionId: string,
+  compactionId: string
+): Promise<boolean> {
+  try {
+    const surface = await loadContextSurface(workspacePath, sessionId);
+    rememberCacheEntry(workspacePath, sessionId, surface);
+    return surface?.compactionId === compactionId;
+  } catch (err) {
+    console.warn('[surface] 核实提交落库失败:', err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
+/**
  * 会话重建用的 prune 参数（ADR-006）：优先取 surface 冻结参数（压缩 epoch
  * 与 generation 0 分别冻结「压缩时参数」与「禁用」），无 surface / 解析失败
  * 时回退调用方提供的当前 settings 参数。
@@ -263,7 +339,12 @@ export async function getSessionPruneOptions(
   sessionId: string,
   fallback: PruneOptions
 ): Promise<PruneOptions> {
-  const surface = await getContextSurfaceCached(workspacePath, sessionId);
+  let surface: PersistedContextSurface | null = null;
+  try {
+    surface = await getContextSurfaceCached(workspacePath, sessionId);
+  } catch {
+    return fallback;
+  }
   if (!surface) return fallback;
   const parsed = parseRenderParams(surface.renderParamsJson);
   return parsed?.pruneOptions ?? fallback;
@@ -279,7 +360,13 @@ export async function updateSurfaceRenderParams(
   sessionId: string,
   renderParamsJson: string
 ): Promise<void> {
-  const surface = await getContextSurfaceCached(workspacePath, sessionId);
+  let surface: PersistedContextSurface | null = null;
+  try {
+    surface = await getContextSurfaceCached(workspacePath, sessionId);
+  } catch (err) {
+    console.warn('[surface] 更新渲染参数读取 surface 失败:', err instanceof Error ? err.message : err);
+    return;
+  }
   if (!surface) return;
   const updated: PersistedContextSurface = { ...surface, renderParamsJson };
   await saveContextSurface(workspacePath, updated);

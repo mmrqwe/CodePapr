@@ -107,7 +107,7 @@ describe('computeCheckpointProvenanceRanges', () => {
 describe('findCheckpointInsertIndex', () => {
   const messages = [user('a'), assistant('b'), user('c'), assistant('d')];
 
-  it('inserts after the last source message when sources are found', () => {
+  it('inserts before the first retained message when retained ids resolve', () => {
     expect(findCheckpointInsertIndex(messages, ['a', 'b'], ['c', 'd'])).toBe(2);
   });
 
@@ -117,6 +117,70 @@ describe('findCheckpointInsertIndex', () => {
 
   it('returns null when neither side matches', () => {
     expect(findCheckpointInsertIndex(messages, ['x'], ['y'])).toBeNull();
+  });
+
+  describe('turn anchor (worker-only retained tail)', () => {
+    // archive 视图：旧消息 + 本回合 user + UI 流式 assistant 回合；
+    // worker-only ID（w-*）不在 archive 里。
+    const turnMessages = [
+      user('old1'),
+      assistant('old2'),
+      user('turn-user'),
+      assistant('ui-round-1'),
+      assistant('ui-round-2'),
+      assistant('ui-round-3'),
+    ];
+
+    it('maps the boundary by assistant rounds when retained ids are worker-only', () => {
+      // source 含 2 个本回合 assistant 回合（worker ID 不在 archive）→
+      // 插在第 2 个 UI assistant 之后。
+      expect(
+        findCheckpointInsertIndex(
+          turnMessages,
+          ['old1', 'old2', 'turn-user', 'w-a1', 'w-a2'],
+          ['w-a3'],
+          { userMessageId: 'turn-user', sourceAssistantRoundsInTurn: 2 }
+        )
+      ).toBe(5);
+    });
+
+    it('inserts right after the user message when no turn round is in source', () => {
+      // retained 起点是 worker-only 的首个 assistant 回合（user 消息是 source
+      // 的最后一条）：rounds=0 → 插在 user 消息之后。
+      expect(
+        findCheckpointInsertIndex(turnMessages, ['old1', 'old2', 'turn-user'], ['w-a1'], {
+          userMessageId: 'turn-user',
+          sourceAssistantRoundsInTurn: 0,
+        })
+      ).toBe(3);
+    });
+
+    it('returns null when the archive has fewer turn rounds than claimed (不可信映射)', () => {
+      expect(
+        findCheckpointInsertIndex(turnMessages, ['turn-user', 'w-a1'], ['w-a2'], {
+          userMessageId: 'turn-user',
+          sourceAssistantRoundsInTurn: 5,
+        })
+      ).toBeNull();
+    });
+
+    it('returns null when the anchor user message is missing', () => {
+      expect(
+        findCheckpointInsertIndex(turnMessages, ['x'], ['w-a1'], {
+          userMessageId: 'missing-user',
+          sourceAssistantRoundsInTurn: 1,
+        })
+      ).toBeNull();
+    });
+
+    it('still prefers an archive-resolvable retained start over round mapping', () => {
+      expect(
+        findCheckpointInsertIndex(turnMessages, ['old1'], ['old2', 'turn-user'], {
+          userMessageId: 'turn-user',
+          sourceAssistantRoundsInTurn: 0,
+        })
+      ).toBe(1);
+    });
   });
 });
 

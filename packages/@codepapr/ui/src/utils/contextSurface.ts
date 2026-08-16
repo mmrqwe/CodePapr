@@ -115,25 +115,63 @@ export function computeCheckpointProvenanceRanges(
   };
 }
 
+/** mid-loop 提交的本回合锚点：主线程 user 消息 ID + source 区间内本回合的
+ *  model-visible assistant 回合数（worker log 坐标，compactionHandler 计算）。 */
+export interface TurnAnchor {
+  userMessageId: string;
+  sourceAssistantRoundsInTurn: number;
+}
+
 /**
  * mid-loop 压缩的 checkpoint 在 store 消息数组里的安全插入位置（按 ID 定位，
  * 抗 insertIndex 漂移）：
- * 1. 优先插入到最后一条 source 消息之后；
- * 2. 否则插入到第一条 retained 消息之前；
- * 3. 都找不到返回 null（调用方应放弃提交并标记失败）。
+ * 1. 优先插入到第一条 retained 消息之前（retained 起点在 archive 可解析时
+ *    这是精确边界）；
+ * 2. retained 起点整体落在 worker-only 区域（本回合 assistant/tool 消息的 ID
+ *    由 worker 生成、不在 archive）时，按回合映射：anchor user 消息之后跳过
+ *    sourceAssistantRoundsInTurn 条 model-visible assistant 消息，插在其后——
+ *    worker log 与 UI 的 assistant 回合按顺序一一对应；
+ * 3. 回退：插入到最后一条 source 消息之后（legacy 兼容，无 anchor 时）；
+ * 4. 都定位不到返回 null（调用方应放弃提交并标记失败——宁可放弃压缩，
+ *    不可错位插入，同 ADR-009 anchor miss 兜底语义）。
  */
 export function findCheckpointInsertIndex(
   liveMessages: readonly ContextMessageLike[],
   sourceMessageIds: readonly string[],
-  retainedMessageIds: readonly string[]
+  retainedMessageIds: readonly string[],
+  turnAnchor?: TurnAnchor
 ): number | null {
-  const sourceIndex = lastIndexOfAny(liveMessages, sourceMessageIds);
-  if (sourceIndex !== null) {
-    return sourceIndex + 1;
-  }
   const retainedIndex = firstIndexOfAny(liveMessages, retainedMessageIds);
   if (retainedIndex !== null) {
     return retainedIndex;
+  }
+
+  if (turnAnchor && turnAnchor.sourceAssistantRoundsInTurn >= 0) {
+    const userIndex = firstIndexOfAny(liveMessages, [turnAnchor.userMessageId]);
+    if (userIndex !== null) {
+      if (turnAnchor.sourceAssistantRoundsInTurn === 0) {
+        return userIndex + 1;
+      }
+      let seen = 0;
+      for (let i = userIndex + 1; i < liveMessages.length; i++) {
+        const message = liveMessages[i]!;
+        if (message.role === 'assistant' && isModelVisibleUiMessage(message)) {
+          seen += 1;
+          if (seen === turnAnchor.sourceAssistantRoundsInTurn) {
+            return i + 1;
+          }
+        }
+      }
+      // archive 里本回合 assistant 回合数少于 source 声称的数量（消息被
+      // reset/取消、回合计数漂移）：映射不可信，不回退旧逻辑（会把已摘要
+      // 内容留在 checkpoint 之后造成重复），直接放弃。
+      return null;
+    }
+  }
+
+  const sourceIndex = lastIndexOfAny(liveMessages, sourceMessageIds);
+  if (sourceIndex !== null) {
+    return sourceIndex + 1;
   }
   return null;
 }

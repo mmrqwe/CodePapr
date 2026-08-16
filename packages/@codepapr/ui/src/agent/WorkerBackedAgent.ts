@@ -1060,17 +1060,24 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
           }
           // PR5（ADR-009 第11条）：memory_search 的结果可能携带 re-recall
           // insertion，随 tool-response 下发给 worker push 进本回合 insertions。
-          const reRecallInsertion: RequestContextInsertion | undefined =
-            result && typeof result === 'object' && 'reRecallInsertion' in result
-              ? (result as { reRecallInsertion?: RequestContextInsertion }).reRecallInsertion
-              : undefined;
+          // 第13条：insertion 本体必须从工具结果中剥离后再回传，否则会被
+          // stringify 进 tool 消息，泄漏到 AppendOnlyLog / archive / checkpoint。
+          let reRecallInsertion: RequestContextInsertion | undefined;
+          let cleanedResult = result;
+          if (result && typeof result === 'object' && 'reRecallInsertion' in result) {
+            const { reRecallInsertion: extracted, ...rest } = result as {
+              reRecallInsertion?: RequestContextInsertion;
+            } & Record<string, unknown>;
+            reRecallInsertion = extracted;
+            cleanedResult = rest;
+          }
           this.postToWorker({
             type: 'tool-response',
             payload: {
               requestId: message.requestId,
               toolRequestId: message.toolRequestId,
               success: true,
-              result,
+              result: cleanedResult,
               ...(reRecallInsertion ? { reRecallInsertion } : {}),
             },
           } satisfies MainToAgentWorkerMessage);

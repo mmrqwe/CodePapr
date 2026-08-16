@@ -91,6 +91,23 @@ export function appendInfoMessage(
   });
 }
 
+/** 从会话消息数组中移除指定消息（按 ID，幂等）。
+ *  压缩提交失败回滚用：失败的 checkpoint 消息不得留在数组里，
+ *  否则维护守卫会把它当作未结算压缩，永久跳过 surface 维护。 */
+export function removeMessageById(set: StoreSet, sessionId: string, messageId: string): void {
+  set((s) => {
+    const current = s.sessionMessages[sessionId];
+    if (!current || !current.some((message) => message.id === messageId)) {
+      return {};
+    }
+    const nextMessages = current.filter((message) => message.id !== messageId);
+    return {
+      messages: s.activeSessionId === sessionId ? nextMessages : s.messages,
+      sessionMessages: { ...s.sessionMessages, [sessionId]: nextMessages },
+    };
+  });
+}
+
 export function updateAssistantMessage(
   set: StoreSet,
   sessionId: string,

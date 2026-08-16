@@ -56,11 +56,14 @@ import {
   serializeRenderParams,
 } from '../../utils/contextSurface';
 import {
+  clearCompactionInFlight,
   commitContextCheckpoint,
   failContextCheckpoint,
   getContextSurfaceCached,
   getSessionPruneOptions,
+  markCompactionInFlight,
   updateSurfaceRenderParams,
+  verifyCompactionLanded,
 } from './contextSurfaceStore';
 import { refreshMemoryLedgerProjection } from './memoryLedgerStore';
 import { buildPruneOptions } from '../../agent/compactionHandler';
@@ -108,6 +111,7 @@ import {
   cleanupStreamingAssistantMessage,
   finalizeCancelledToolInvocations,
   mergeMessageText,
+  removeMessageById,
   updateAssistantMessage,
 } from './messageMutators';
 import { formatAgentError } from './errorFormatting';
@@ -375,6 +379,104 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         let goalCondition: GoalCondition | null = null;
         let goalUserText = '';
 
+        /**
+         * 压缩提交失败的统一收尾（ADR-005 不变式 5）：
+         * 1. 先核实事务是否实际落库——IPC 拒绝可能只是响应丢失，
+         *    已落库则保留 checkpoint（verifyCompactionLanded 刷新缓存）；
+         * 2. 未落库 → 记 failed 行 + 移除已插入的 checkpoint 消息并持久化：
+         *    失败 checkpoint 留在数组里会让维护守卫永久跳过 surface 维护，
+         *    其后所有消息静默退出模型上下文（必须回滚到压缩前投影）。
+         */
+        const handleCheckpointCommitFailure = async (opts: {
+          sessionId: string;
+          workspace: string;
+          payload: import('../../utils/contextCompaction').ContextCheckpointPayload | null;
+          trigger: import('@codepapr/types').CompactionTrigger;
+          error: unknown;
+          /** checkpoint 已插入 sessionMessages 时给出其 ID；回滚时移除。 */
+          checkpointMessageId?: string;
+        }): Promise<void> => {
+          const { sessionId, workspace, payload, trigger, error, checkpointMessageId } = opts;
+          const failureMessage = error instanceof Error ? error.message : String(error);
+          const compactionId = payload?.compactionId;
+          if (compactionId) {
+            clearCompactionInFlight(compactionId);
+            const landed = await verifyCompactionLanded(workspace, sessionId, compactionId);
+            if (landed) {
+              console.warn(
+                '[surface] 压缩提交 IPC 拒绝但事务已落库，保留 checkpoint:',
+                failureMessage
+              );
+              return;
+            }
+          }
+          await failContextCheckpoint({
+            workspacePath: workspace,
+            sessionId,
+            payload,
+            trigger,
+            failureCode: 'commit_failed',
+            failureMessage,
+          });
+          if (checkpointMessageId) {
+            removeMessageById(set, sessionId, checkpointMessageId);
+            saveCurrentProjectState(get());
+          }
+          toast.warning(`上下文压缩持久化失败，已回滚：${failureMessage}`, { durationMs: 8000 });
+        };
+
+        /**
+         * ADR-005 顺序的压缩提交：
+         * 1. checkpoint 消息先随消息批持久化进 archive（saveMessageBatch）；
+         * 2. 等待保存队列排空，确认落库；
+         * 3. 再提交 surface 单事务；
+         * 4. 失败走 handleCheckpointCommitFailure（核实落库 → failed 行 →
+         *    回滚移除 checkpoint）。
+         * 顺序颠倒会在崩溃窗口留下「surface 引用 archive 中不存在的
+         * checkpoint ID」的 degraded 状态。
+         *
+         * 返回 Promise 供需要串行化的调用方 await（mid-loop 提交必须在回合
+         * 结算前落库）；无需等待的调用方用 void 忽略（fire-and-forget）。
+         * 内部已吞掉失败（转 handleCheckpointCommitFailure），不会向上抛。
+         */
+        const commitCheckpointOrdered = async (opts: {
+          sessionId: string;
+          workspace: string;
+          messages: UIMessage[];
+          trigger: import('@codepapr/types').CompactionTrigger;
+          payload: import('../../utils/contextCompaction').ContextCheckpointPayload | null;
+          checkpointMessageId: string;
+        }): Promise<void> => {
+          const { sessionId, workspace, messages, trigger, payload, checkpointMessageId } = opts;
+          const compactionId = payload?.compactionId;
+          if (compactionId) {
+            markCompactionInFlight(compactionId);
+          }
+          try {
+            saveCurrentProjectState(get());
+            await waitForPendingProjectStateSave(workspace);
+            await commitContextCheckpoint({
+              workspacePath: workspace,
+              sessionId,
+              messages,
+              trigger,
+              pruneOptions: buildPruneOptions(normalizedSettings),
+            });
+            if (compactionId) {
+              clearCompactionInFlight(compactionId);
+            }
+          } catch (err) {
+            await handleCheckpointCommitFailure({
+              sessionId,
+              workspace,
+              payload,
+              trigger,
+              error: err,
+              checkpointMessageId,
+            });
+          }
+        };
+
         // 聊天命令：先处理本地命令，再处理项目自定义模板，最后落到内置提示模板。
         const slash = parseSlashInput(input);
         if (slash) {
@@ -493,25 +595,17 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 });
 
                 // PR1：压缩提交（ADR-005）——单事务写 compaction 行 + 新 surface
-                // generation；失败只记 failed 行，保留上一个 completed generation。
+                // generation；失败记 failed 行并回滚 checkpoint 消息（不变式 5）。
+                // commitCheckpointOrdered 保证 checkpoint 消息先落 archive 再提交。
                 if (compactApplied && compactNextMessages && workspaceForSlash) {
-                  const compactTrigger: import('@codepapr/types').CompactionTrigger = 'manual';
-                  void commitContextCheckpoint({
-                    workspacePath: workspaceForSlash,
+                  void commitCheckpointOrdered({
                     sessionId: compactSessionId,
+                    workspace: workspaceForSlash,
                     messages: compactNextMessages,
-                    trigger: compactTrigger,
-                    pruneOptions: buildPruneOptions(normalizedSettings),
-                  }).catch((err) =>
-                    failContextCheckpoint({
-                      workspacePath: workspaceForSlash,
-                      sessionId: compactSessionId,
-                      payload: checkpointResult.message.contextCheckpoint ?? null,
-                      trigger: compactTrigger,
-                      failureCode: 'commit_failed',
-                      failureMessage: err instanceof Error ? err.message : String(err),
-                    })
-                  );
+                    trigger: 'manual',
+                    payload: checkpointResult.message.contextCheckpoint ?? null,
+                    checkpointMessageId: checkpointResult.message.id,
+                  });
                 }
 
                 // ⚠️ 修复：压缩后必须让下一回合真正使用压缩后的上下文。
@@ -961,16 +1055,25 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // worker 只产出 commit 数据；这里按 message ID 定位插入 checkpoint、
           // 提交 surface，失败只记 failed 行（不变式 5）。
           const handleMidLoopCompactionCommit = async (commit: MidLoopCompactionCommit): Promise<void> => {
+            const sid = activeSessionId!;
+            const commitPayload = commit.checkpointMessage.contextCheckpoint ?? null;
             try {
-              const sid = activeSessionId!;
               const liveMessages = get().sessionMessages[sid] ?? [];
               const insertIndex = findCheckpointInsertIndex(
                 liveMessages,
                 commit.sourceMessageIds,
-                commit.retainedMessageIds
+                commit.retainedMessageIds,
+                commit.turnUserMessageId && typeof commit.sourceAssistantRoundsInTurn === 'number'
+                  ? {
+                      userMessageId: commit.turnUserMessageId,
+                      sourceAssistantRoundsInTurn: commit.sourceAssistantRoundsInTurn,
+                    }
+                  : undefined
               );
               if (insertIndex === null) {
-                throw new Error('无法在消息数组中定位 checkpoint 插入位置');
+                // 宁可放弃压缩（archive 保持未压缩全量，安全）也不可错位插入：
+                // 错位会把已摘要内容留在 checkpoint 之后，重建时重复注入。
+                throw new Error('无法在消息数组中定位 checkpoint 插入位置（retained 锚点缺失）');
               }
               const checkpointMessage = commit.checkpointMessage as UIMessage;
               let appliedMessages: UIMessage[] | null = null;
@@ -991,25 +1094,30 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 };
               });
               if (!appliedMessages) {
-                // checkpoint 已存在（重跑兜底）视为已提交，直接推进。
-                appliedMessages = liveMessages;
+                // checkpoint 已存在（重跑兜底）：失败回滚会移除未提交 checkpoint，
+                // 存在即代表已提交（或提交在途）——不再重复提交，避免生成
+                // 指向同一 checkpoint 的多余 generation。
+                return;
               }
-              await commitContextCheckpoint({
-                workspacePath,
+              // await：mid-loop 提交必须在回合结算（resolve response）前落库，
+              // 否则回合后的重建/保存会与未落库提交竞态。
+              await commitCheckpointOrdered({
                 sessionId: sid,
+                workspace: workspacePath,
                 messages: appliedMessages,
                 trigger: 'token-limit',
-                pruneOptions: buildPruneOptions(normalizedSettings),
+                payload: commitPayload,
+                checkpointMessageId: commit.checkpointMessageId,
               });
-              saveCurrentProjectState(get());
             } catch (err) {
-              await failContextCheckpoint({
-                workspacePath,
-                sessionId: activeSessionId!,
-                payload: commit.checkpointMessage.contextCheckpoint ?? null,
+              // 此处 checkpoint 尚未插入（定位失败/set 未应用）：只记 failed 行，
+              // 不做消息回滚。
+              await handleCheckpointCommitFailure({
+                sessionId: sid,
+                workspace: workspacePath,
+                payload: commitPayload,
                 trigger: 'token-limit',
-                failureCode: 'commit_failed',
-                failureMessage: err instanceof Error ? err.message : String(err),
+                error: err,
               });
             }
           };
@@ -1986,25 +2094,17 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                         },
                       };
                     });
-                    // PR1：压缩提交（ADR-005）。
+                    // PR1：压缩提交（ADR-005）。checkpoint 消息先落 archive 再
+                    // 提交 surface；失败回滚移除 checkpoint（不变式 5）。
                     if (goalNextMessages) {
-                      const goalTrigger: import('@codepapr/types').CompactionTrigger = 'manual';
-                      void commitContextCheckpoint({
-                        workspacePath,
+                      void commitCheckpointOrdered({
                         sessionId: activeSessionId!,
+                        workspace: workspacePath,
                         messages: goalNextMessages,
-                        trigger: goalTrigger,
-                        pruneOptions: buildPruneOptions(normalizedSettings),
-                      }).catch((err) =>
-                        failContextCheckpoint({
-                          workspacePath,
-                          sessionId: activeSessionId!,
-                          payload: cp.message.contextCheckpoint ?? null,
-                          trigger: goalTrigger,
-                          failureCode: 'commit_failed',
-                          failureMessage: err instanceof Error ? err.message : String(err),
-                        })
-                      );
+                        trigger: 'manual',
+                        payload: cp.message.contextCheckpoint ?? null,
+                        checkpointMessageId: cp.message.id,
+                      });
                     }
                   }
                 },
@@ -2429,24 +2529,17 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             }
 
             // PR1：压缩提交（ADR-005）——trigger 以 payload 为准（plan 判定）。
+            // commitCheckpointOrdered：checkpoint 消息先落 archive 再提交 surface；
+            // 失败回滚移除 checkpoint（不变式 5）。
             if (checkpointApplied && turnNextMessages) {
-              const autoTrigger: import('@codepapr/types').CompactionTrigger = 'token-limit';
-              void commitContextCheckpoint({
-                workspacePath,
+              void commitCheckpointOrdered({
                 sessionId: activeSessionId!,
+                workspace: workspacePath,
                 messages: turnNextMessages,
-                trigger: autoTrigger,
-                pruneOptions: buildPruneOptions(normalizedSettings),
-              }).catch((err) =>
-                failContextCheckpoint({
-                  workspacePath,
-                  sessionId: activeSessionId!,
-                  payload: checkpointResult.message.contextCheckpoint ?? null,
-                  trigger: autoTrigger,
-                  failureCode: 'commit_failed',
-                  failureMessage: err instanceof Error ? err.message : String(err),
-                })
-              );
+                trigger: 'token-limit',
+                payload: checkpointResult.message.contextCheckpoint ?? null,
+                checkpointMessageId: checkpointResult.message.id,
+              });
             }
           }
           // PR4（ADR-008）：已验证命令 → 候选 → 准入 → 双区投影。

@@ -61,7 +61,9 @@ export class MessageFactory {
   }
 }
 
-const INTERNAL_FIELDS = new Set(['__images', '__question']);
+// reRecallInsertion（ADR-009 第13条）：request-only augmentation，绝不允许
+// 随工具结果进入 AppendOnlyLog / archive / 搜索 / checkpoint。
+const INTERNAL_FIELDS = new Set(['__images', '__question', 'reRecallInsertion']);
 
 export function stripInternalFields(value: unknown): unknown {
   if (value === null || value === undefined) return value;

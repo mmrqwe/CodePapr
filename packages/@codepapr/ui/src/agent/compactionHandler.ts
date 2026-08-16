@@ -141,7 +141,9 @@ export function createContextCompactionHandler(
   sessionId: string,
   refreshBootstrap?: () => Promise<string | null>,
   getAbortSignal?: () => AbortSignal | undefined,
-  onCheckpoint?: (commit: MidLoopCompactionCommit) => void
+  onCheckpoint?: (commit: MidLoopCompactionCommit) => void,
+  /** 本回合 user 消息 ID（主线程生成）：commit 的回合映射锚点。 */
+  turnUserMessageId?: string
 ): ContextCompactionConfig {
   const hardBudget = effectiveMaxContextTokens(settings, providerName);
   return {
@@ -163,7 +165,8 @@ export function createContextCompactionHandler(
           refreshBootstrap,
           getAbortSignal?.(),
           onCheckpoint,
-          trigger ?? 'token-limit'
+          trigger ?? 'token-limit',
+          turnUserMessageId
         );
       } catch (err) {
         // 用户中断：mid-loop 压缩中飞被 abort → 返回 null 让 Agent 轮循环
@@ -184,7 +187,8 @@ async function runCompactionHandler(
   refreshBootstrap: (() => Promise<string | null>) | undefined,
   abortSignal: AbortSignal | undefined,
   onCheckpoint: ((commit: MidLoopCompactionCommit) => void) | undefined,
-  trigger: import('@codepapr/types').CompactionTrigger
+  trigger: import('@codepapr/types').CompactionTrigger,
+  turnUserMessageId?: string
 ): Promise<{ messages: IMessage[]; cacheStats?: ICacheStatistics } | null> {
   const contextMessages = coreMessagesToContextMessages(coreMessages);
   const checkpoint = await maybeGenerateContextCheckpoint(
@@ -212,6 +216,19 @@ async function runCompactionHandler(
 
   // PR1：把压缩提交数据交给主线程 Store 持久化（ADR-005）。
   if (onCheckpoint) {
+    // 回合映射锚点：source 区间内、本回合 user 消息之后的 model-visible
+    // assistant 回合数。retained 起点落在 worker-only 区域（本回合 assistant ID
+    // 不在 archive）时，主线程据此在 UI 数组里按回合顺序定位插入边界。
+    let sourceAssistantRoundsInTurn: number | undefined;
+    if (turnUserMessageId) {
+      const turnStartIndex = contextMessages.findIndex((m) => m.id === turnUserMessageId);
+      if (turnStartIndex >= 0) {
+        sourceAssistantRoundsInTurn = contextMessages
+          .slice(turnStartIndex + 1, checkpoint.insertIndex)
+          .filter((m) => m.role === 'assistant' && isModelVisibleUiMessage(m))
+          .length;
+      }
+    }
     onCheckpoint({
       checkpointMessageId: checkpoint.message.id,
       checkpointMessage: {
@@ -232,6 +249,10 @@ async function runCompactionHandler(
         .slice(checkpoint.insertIndex)
         .filter(isModelVisibleUiMessage)
         .map((message) => message.id),
+      ...(turnUserMessageId ? { turnUserMessageId } : {}),
+      ...(typeof sourceAssistantRoundsInTurn === 'number'
+        ? { sourceAssistantRoundsInTurn }
+        : {}),
     });
   }
 
