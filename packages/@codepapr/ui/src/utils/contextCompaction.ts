@@ -1,4 +1,4 @@
-import type { IImageContent, IMessage } from '@codepapr/types';
+import type { CompactionTrigger, IImageContent, IMessage } from '@codepapr/types';
 import { estimateTokens, sortedStringify } from '@codepapr/common';
 import {
   COMPACTOR_PROMPT,
@@ -47,6 +47,28 @@ export interface ContextCheckpointPayload {
    *  re-rendering from live todo state on every rebuild) keeps the rebuilt
    *  context byte-stable so the prefix cache is not broken on agent rebuild. */
   todoDigest?: string;
+  /** PR1：不可变 provenance（ADR-001/005）。全部为可选：旧 payload 与
+   *  worker 生成路径（generation 未定）允许缺省，缺失时由主线程 commit
+   *  补齐到 context_compactions 行。 */
+  compactionId?: string;
+  generation?: number;
+  parentGeneration?: number;
+  trigger?: CompactionTrigger;
+  sourceStartMessageId?: string;
+  sourceEndMessageId?: string;
+  retainedTailStartMessageId?: string;
+  retainedMessageCount?: number;
+  tokenStats?: {
+    estimatedTokensBefore: number;
+    estimatedTokensAfter: number;
+    sourceTokens: number;
+    checkpointTokens: number;
+  };
+  summaryInfo?: {
+    kind: 'llm' | 'local-fallback';
+    provider?: string;
+    model?: string;
+  };
 }
 
 export interface ContextMessageLike {
@@ -81,9 +103,11 @@ export interface ContextCompactionPlan {
    * the end) keeps the recent tool-call tail verbatim in the rebuilt context.
    */
   insertIndex: number;
+  /** PR1：本次压缩的触发来源（shouldCompact 为 true 时有效）。 */
+  trigger?: CompactionTrigger;
 }
 
-interface CheckpointMatch {
+export interface CheckpointMatch {
   index: number;
   message: ContextMessageLike;
   payload: ContextCheckpointPayload;
@@ -167,7 +191,7 @@ function createEmptySections(): ContextCheckpointSections {
   };
 }
 
-function getLatestCheckpoint(messages: readonly ContextMessageLike[]): CheckpointMatch | null {
+export function getLatestCheckpoint(messages: readonly ContextMessageLike[]): CheckpointMatch | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message?.contextCheckpoint) {
@@ -629,6 +653,12 @@ export function planContextCompaction(
     retainedMessages: finalRetainedMessages,
     effectiveTokens,
     insertIndex: tailStart + retainedUIStart,
+    // force 表示用户/流程显式触发；否则按实际越限维度归因。
+    trigger: force
+      ? 'manual'
+      : effectiveRoundCount > maxRounds
+        ? 'round-limit'
+        : 'token-limit',
   };
 }
 

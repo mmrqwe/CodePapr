@@ -25,6 +25,7 @@ import {
   type AgentWorkerChatPayload,
   type AgentWorkerToMainMessage,
   type MainToAgentWorkerMessage,
+  type MidLoopCompactionCommit,
   type WorkerAgentParameters,
   type WorkerAgentRuntimeConfig,
   type WorkerAgentSettings,
@@ -138,7 +139,9 @@ export interface AgentRuntimeHandle {
   chat(
     userInput: string,
     onStreamEvent?: (event: AgentRuntimeStreamEvent) => void,
-    images?: IImageContent[]
+    images?: IImageContent[],
+    /** PR1：主线程生成的 canonical user 消息 ID（ADR-009 前置）。 */
+    userMessageId?: string
   ): Promise<IAgentResponse>;
   getSession(): { logStore: AppendOnlyLog };
   cancel(): void;
@@ -183,6 +186,9 @@ export interface WorkerBackedAgentConfig {
     *  bootstrap. Invoked when the worker's mid-loop compaction resets the epoch
     *  so memory stays fresh across long sessions. Returns null/empty to skip. */
   onRefreshBootstrap?: () => Promise<string | null>;
+  /** PR1（ADR-005）：worker 产出 mid-loop 压缩提交数据后，由主线程 Store
+   *  校验并单事务持久化 surface/compaction 记录。 */
+  onMidLoopCompactionCommit?: (commit: MidLoopCompactionCommit) => Promise<void> | void;
 }
 
 function stableStringify(value: unknown): string {
@@ -625,7 +631,8 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   async chat(
     userInput: string,
     onStreamEvent?: (event: AgentRuntimeStreamEvent) => void,
-    images?: IImageContent[]
+    images?: IImageContent[],
+    userMessageId?: string
   ): Promise<IAgentResponse> {
     if (this.destroyed) {
       // 已被销毁的 agent 拒绝新回合：用 AgentDestroyedError（而非
@@ -665,6 +672,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       messages: chatMessages,
       ...(incrementalSync ? { incrementalSync } : {}),
       userInput,
+      ...(userMessageId ? { userMessageId } : {}),
       images,
       settings: this.config.settings,
       providerName: this.config.providerName,
@@ -1169,6 +1177,20 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         apply = this.logStore.appendBatch(message.fullMessages);
       } else {
         apply = this.logStore.appendBatch(message.deltaMessages);
+      }
+      // PR1（ADR-005）：mid-loop 压缩的持久化由主线程 Store 完成。顺序保证：
+      // 先落消息批/日志镜像，再提交 surface 事务；失败只记 failed 行。
+      if (message.compactionCommit && this.config.onMidLoopCompactionCommit) {
+        const compactionCommit = message.compactionCommit;
+        const onCommit = this.config.onMidLoopCompactionCommit;
+        apply = apply.then(() =>
+          Promise.resolve(onCommit(compactionCommit)).catch((error) => {
+            console.warn(
+              '[surface] mid-loop 压缩提交失败:',
+              error instanceof Error ? error.message : error
+            );
+          })
+        );
       }
       void apply.then(() => {
         // Record the worker's authoritative log length so the next chat can sync

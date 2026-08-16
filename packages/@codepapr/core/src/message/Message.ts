@@ -6,9 +6,11 @@ import { IMessage, IToolCall, IToolResult, IImageContent } from '@codepapr/types
 import { generateUUID, deepFreeze, sortedStringify } from '@codepapr/common';
 
 export class MessageFactory {
-  static user(content: string, images?: IImageContent[]): IMessage {
+  /** PR1（ADR-009 前置）：user 消息 ID 由主线程生成并贯穿 log，作为
+   *  recall anchor 与 surface 引用的稳定 ID；缺省时回退 UUID。 */
+  static user(content: string, images?: IImageContent[], id?: string): IMessage {
     return deepFreeze({
-      id: generateUUID(),
+      id: id || generateUUID(),
       role: 'user',
       content,
       timestamp: Date.now(),

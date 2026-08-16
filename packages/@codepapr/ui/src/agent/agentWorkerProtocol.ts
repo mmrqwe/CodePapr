@@ -12,6 +12,7 @@ import type {
   RequestContextInsertion,
 } from '@codepapr/types';
 import type { ContextCheckpointPayloadV3 } from '../utils/contextCheckpointState';
+import type { ContextCheckpointPayload } from '../utils/contextCompaction';
 import type { Lang } from '../utils/i18n';
 
 export type WorkerApiMode = 'deepseek' | 'custom' | 'local';
@@ -182,6 +183,29 @@ export interface CommitContextCompactionResponse {
   compactionId?: string;
   materializedMessages?: IMessage[];
   error?: string;
+}
+
+/**
+ * mid-loop 压缩的提交数据（ADR-005）：worker 只产出该结构，主线程 Store
+ * 校验并单事务持久化（contextSurfaceStore.commitContextCheckpoint）。
+ * provenance 全部来自 checkpoint payload（message.contextCheckpoint）。
+ */
+export interface MidLoopCompactionCommit {
+  checkpointMessageId: string;
+  /** UI 形状的 checkpoint 消息（含完整 payload），主线程插入 sessionMessages。 */
+  checkpointMessage: {
+    id: string;
+    role: 'assistant';
+    content: string;
+    timestamp: number;
+    synthetic?: boolean;
+    hidden?: boolean;
+    contextCheckpoint?: ContextCheckpointPayload;
+  };
+  /** 相对 worker contextMessages 的插入位置（仅作诊断参考；主线程按 ID 定位）。 */
+  insertIndex: number;
+  sourceMessageIds: string[];
+  retainedMessageIds: string[];
 }
 
 export type MainToAgentWorkerMessage =
@@ -364,6 +388,8 @@ export type AgentWorkerToMainMessage =
          *  indices no longer line up after the worker reset its log. */
         compacted?: boolean;
         fullMessages?: IMessage[];
+        /** mid-loop 压缩提交数据（PR1）：主线程 Store 负责持久化（ADR-005）。 */
+        compactionCommit?: MidLoopCompactionCommit;
       }
   | {
       type: 'error';

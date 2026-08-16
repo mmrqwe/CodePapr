@@ -40,6 +40,7 @@ import {
   type AgentWorkerChatPayload,
   type AgentWorkerToMainMessage,
   type MainToAgentWorkerMessage,
+  type MidLoopCompactionCommit,
   type WorkerAgentSettings,
   type WorkerAgentRuntimeConfig,
   type WorkerApiFormat,
@@ -1308,11 +1309,16 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
       payload.providerName,
       payload.sessionId,
       () => _refreshBootstrapRequest(payload.requestId),
-      () => sessionAbortControllers.get(payload.requestId)?.signal
+      () => sessionAbortControllers.get(payload.requestId)?.signal,
+      (commit) => {
+        // PR1：mid-loop 压缩提交数据随 result 消息送回主线程（ADR-005）。
+        lastCompactionCommit = commit;
+      }
     ),
   });
 
   let compacted = false;
+  let lastCompactionCommit: MidLoopCompactionCommit | undefined;
   // Idle backstop: if the whole agent produces no stream/tool activity for this
   // long, declare it hung and abort. Permission waits explicitly suspend this
   // backstop; the timer still catches unrelated worker/tool hangs.
@@ -1365,6 +1371,7 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     },
     payload.images,
     abortController.signal,
+    payload.userMessageId
   );
 
   armIdle();
@@ -1400,6 +1407,7 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     ...(compacted
       ? { compacted: true, fullMessages: session.logStore.getAllMessages().slice() }
       : {}),
+    ...(lastCompactionCommit ? { compactionCommit: lastCompactionCommit } : {}),
   });
   } finally {
     sessionAbortControllers.delete(payload.requestId);

@@ -242,11 +242,73 @@ fn open_project_db(workspace_path: &str) -> Result<(Connection, PathBuf, PathBuf
           CREATE INDEX IF NOT EXISTS idx_cp_timeline_msg
             ON checkpoint_timeline(message_id);
           CREATE INDEX IF NOT EXISTS idx_cp_timeline_session
-            ON checkpoint_timeline(session_id);",
+            ON checkpoint_timeline(session_id);
+          CREATE TABLE IF NOT EXISTS context_surfaces (
+            session_id TEXT NOT NULL,
+            generation INTEGER NOT NULL,
+            parent_generation INTEGER,
+            compaction_id TEXT,
+            render_params TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (session_id, generation)
+          );
+          CREATE TABLE IF NOT EXISTS context_surface_nodes (
+            session_id TEXT NOT NULL,
+            generation INTEGER NOT NULL,
+            position INTEGER NOT NULL,
+            message_id TEXT NOT NULL,
+            node_kind TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (session_id, generation, position)
+          );
+          CREATE INDEX IF NOT EXISTS idx_context_surface_nodes_message
+            ON context_surface_nodes(message_id);
+          CREATE TABLE IF NOT EXISTS context_compactions (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            trigger TEXT NOT NULL,
+            source_generation INTEGER NOT NULL,
+            target_generation INTEGER,
+            checkpoint_message_id TEXT,
+            parent_checkpoint_message_id TEXT,
+            source_start_message_id TEXT,
+            source_end_message_id TEXT,
+            retained_tail_start_message_id TEXT,
+            source_message_count INTEGER NOT NULL DEFAULT 0,
+            retained_message_count INTEGER NOT NULL DEFAULT 0,
+            estimated_tokens_before INTEGER,
+            estimated_tokens_after INTEGER,
+            source_tokens INTEGER,
+            checkpoint_tokens INTEGER,
+            summary_mode TEXT NOT NULL,
+            summary_provider TEXT,
+            summary_model TEXT,
+            failure_code TEXT,
+            failure_message TEXT,
+            created_at INTEGER NOT NULL,
+            completed_at INTEGER
+          );
+          CREATE INDEX IF NOT EXISTS idx_context_compactions_session_time
+            ON context_compactions(session_id, created_at DESC);
+          CREATE INDEX IF NOT EXISTS idx_context_compactions_checkpoint
+            ON context_compactions(checkpoint_message_id);",
     )
     .map_err(|err| format!("初始化项目状态表失败: {err}"))?;
 
     migrate_project_db(&conn, &workspace)?;
+
+    // 崩溃恢复（ADR-005）：压缩提交是单事务（started → surface → completed
+    // 一步提交），正常不会残留 started 行；此 UPDATE 是防御性清理，防止
+    // 旧版本或异常路径留下的中断事务污染 active surface 判定。
+    let _ = conn.execute(
+        "UPDATE context_compactions
+         SET status = 'failed',
+             failure_code = 'interrupted',
+             failure_message = '应用在压缩提交完成前退出'
+         WHERE status = 'started'",
+        [],
+    );
 
     Ok((conn, workspace, db_path))
 }
@@ -1306,6 +1368,22 @@ pub(crate) fn delete_session(workspace_path: String, session_id: String) -> Resu
     let (conn, ..) = open_project_db(&workspace_path)?;
     conn.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])
         .map_err(|err| format!("删除会话失败: {err}"))?;
+    // surface/compaction 表按 ADR-002 不对 sessions 建外键，需手动清理。
+    conn.execute(
+        "DELETE FROM context_surface_nodes WHERE session_id = ?1",
+        params![session_id],
+    )
+    .map_err(|err| format!("清理会话 surface 节点失败: {err}"))?;
+    conn.execute(
+        "DELETE FROM context_surfaces WHERE session_id = ?1",
+        params![session_id],
+    )
+    .map_err(|err| format!("清理会话 surface 失败: {err}"))?;
+    conn.execute(
+        "DELETE FROM context_compactions WHERE session_id = ?1",
+        params![session_id],
+    )
+    .map_err(|err| format!("清理会话压缩记录失败: {err}"))?;
     Ok(())
 }
 
@@ -2015,6 +2093,437 @@ pub(crate) fn papr_save_permission_settings(settings_json: &str) -> Result<(), S
     )
     .map_err(|err| format!("保存 Papr 权限设置失败: {err}"))?;
     Ok(())
+}
+
+// ── Context Surface / Compaction（ADR-001~007，PR1）────────────────────
+//
+// 设计约束（docs/adr/）：
+// - 不对 messages 建外键：save_message_batch 是全量替换（DELETE+INSERT），
+//   级联会每次保存清空 surface 节点；
+// - 压缩提交是单事务：started → surface → completed 一步提交，正常不残留
+//   started 行（open_project_db 有防御性清理）。
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ContextSurfaceNodeResult {
+    pub(crate) position: i64,
+    pub(crate) message_id: String,
+    pub(crate) node_kind: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ContextSurfaceResult {
+    pub(crate) session_id: String,
+    pub(crate) generation: i64,
+    pub(crate) parent_generation: Option<i64>,
+    pub(crate) compaction_id: Option<String>,
+    pub(crate) render_params_json: String,
+    pub(crate) created_at: i64,
+    pub(crate) nodes: Vec<ContextSurfaceNodeResult>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ContextSurfaceNodeInput {
+    pub(crate) position: i64,
+    pub(crate) message_id: String,
+    pub(crate) node_kind: String,
+}
+
+#[tauri::command]
+pub(crate) fn load_context_surface(
+    workspace_path: String,
+    session_id: String,
+) -> Result<Option<ContextSurfaceResult>, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+
+    let surface = conn
+        .query_row(
+            "SELECT generation, parent_generation, compaction_id, render_params, created_at
+             FROM context_surfaces
+             WHERE session_id = ?1
+             ORDER BY generation DESC LIMIT 1",
+            params![session_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|err| format!("读取 context surface 失败: {err}"))?;
+
+    let Some((generation, parent_generation, compaction_id, render_params, created_at)) = surface
+    else {
+        return Ok(None);
+    };
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT position, message_id, node_kind
+             FROM context_surface_nodes
+             WHERE session_id = ?1 AND generation = ?2
+             ORDER BY position ASC",
+        )
+        .map_err(|err| format!("准备 surface 节点查询失败: {err}"))?;
+    let nodes = stmt
+        .query_map(params![session_id, generation], |row| {
+            Ok(ContextSurfaceNodeResult {
+                position: row.get(0)?,
+                message_id: row.get(1)?,
+                node_kind: row.get(2)?,
+            })
+        })
+        .map_err(|err| format!("读取 surface 节点失败: {err}"))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|err| format!("收集 surface 节点失败: {err}"))?;
+
+    Ok(Some(ContextSurfaceResult {
+        session_id,
+        generation,
+        parent_generation,
+        compaction_id,
+        render_params_json: render_params,
+        created_at,
+        nodes,
+    }))
+}
+
+/// 维护路径：按当前 model-visible 投影整体替换某一 generation 的节点
+/// （全量替换保存语义下，重算比增量 append 更稳）。generation 0 = legacy
+/// 引导；compaction 提交应走 commit_context_compaction（单事务）。
+#[tauri::command]
+pub(crate) fn save_context_surface(
+    workspace_path: String,
+    session_id: String,
+    generation: i64,
+    parent_generation: Option<i64>,
+    compaction_id: Option<String>,
+    render_params_json: String,
+    nodes_json: String,
+) -> Result<(), String> {
+    let nodes: Vec<ContextSurfaceNodeInput> = serde_json::from_str(&nodes_json)
+        .map_err(|err| format!("surface 节点 JSON 不合法: {err}"))?;
+
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|err| format!("开启事务失败: {err}"))?;
+
+    tx.execute(
+        "INSERT INTO context_surfaces
+           (session_id, generation, parent_generation, compaction_id, render_params, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(session_id, generation) DO UPDATE SET
+           parent_generation = excluded.parent_generation,
+           compaction_id = excluded.compaction_id,
+           render_params = excluded.render_params",
+        params![
+            session_id,
+            generation,
+            parent_generation,
+            compaction_id,
+            render_params_json,
+            unix_millis()?
+        ],
+    )
+    .map_err(|err| format!("保存 context surface 失败: {err}"))?;
+
+    tx.execute(
+        "DELETE FROM context_surface_nodes WHERE session_id = ?1 AND generation = ?2",
+        params![session_id, generation],
+    )
+    .map_err(|err| format!("清理旧 surface 节点失败: {err}"))?;
+
+    for node in &nodes {
+        tx.execute(
+            "INSERT INTO context_surface_nodes
+               (session_id, generation, position, message_id, node_kind, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                session_id,
+                generation,
+                node.position,
+                node.message_id,
+                node.node_kind,
+                unix_millis()?
+            ],
+        )
+        .map_err(|err| format!("保存 surface 节点失败: {err}"))?;
+    }
+
+    tx.commit()
+        .map_err(|err| format!("提交 surface 事务失败: {err}"))?;
+    Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CompactionCommitInput {
+    pub(crate) id: String,
+    pub(crate) session_id: String,
+    pub(crate) trigger: String,
+    pub(crate) source_generation: i64,
+    pub(crate) target_generation: i64,
+    pub(crate) checkpoint_message_id: Option<String>,
+    pub(crate) parent_checkpoint_message_id: Option<String>,
+    pub(crate) source_start_message_id: Option<String>,
+    pub(crate) source_end_message_id: Option<String>,
+    pub(crate) retained_tail_start_message_id: Option<String>,
+    pub(crate) source_message_count: i64,
+    pub(crate) retained_message_count: i64,
+    pub(crate) estimated_tokens_before: Option<i64>,
+    pub(crate) estimated_tokens_after: Option<i64>,
+    pub(crate) source_tokens: Option<i64>,
+    pub(crate) checkpoint_tokens: Option<i64>,
+    pub(crate) summary_mode: String,
+    pub(crate) summary_provider: Option<String>,
+    pub(crate) summary_model: Option<String>,
+    pub(crate) created_at: i64,
+    pub(crate) nodes: Vec<ContextSurfaceNodeInput>,
+    pub(crate) render_params_json: String,
+}
+
+/// 压缩提交（ADR-005）：单事务内 started 行 → surface generation + nodes →
+/// completed 行一步提交。任何一步失败整个事务回滚，之前 completed 的
+/// generation 保持 active。
+#[tauri::command]
+pub(crate) fn commit_context_compaction(
+    workspace_path: String,
+    request_json: String,
+) -> Result<serde_json::Value, String> {
+    let input: CompactionCommitInput = serde_json::from_str(&request_json)
+        .map_err(|err| format!("压缩提交 JSON 不合法: {err}"))?;
+
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|err| format!("开启事务失败: {err}"))?;
+
+    tx.execute(
+        "INSERT INTO context_compactions
+           (id, session_id, status, trigger, source_generation, target_generation,
+            checkpoint_message_id, parent_checkpoint_message_id,
+            source_start_message_id, source_end_message_id,
+            retained_tail_start_message_id, source_message_count, retained_message_count,
+            estimated_tokens_before, estimated_tokens_after, source_tokens, checkpoint_tokens,
+            summary_mode, summary_provider, summary_model, created_at)
+         VALUES (?1, ?2, 'started', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                 ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+        params![
+            input.id,
+            input.session_id,
+            input.trigger,
+            input.source_generation,
+            input.target_generation,
+            input.checkpoint_message_id,
+            input.parent_checkpoint_message_id,
+            input.source_start_message_id,
+            input.source_end_message_id,
+            input.retained_tail_start_message_id,
+            input.source_message_count,
+            input.retained_message_count,
+            input.estimated_tokens_before,
+            input.estimated_tokens_after,
+            input.source_tokens,
+            input.checkpoint_tokens,
+            input.summary_mode,
+            input.summary_provider,
+            input.summary_model,
+            input.created_at,
+        ],
+    )
+    .map_err(|err| format!("插入压缩记录失败: {err}"))?;
+
+    tx.execute(
+        "INSERT INTO context_surfaces
+           (session_id, generation, parent_generation, compaction_id, render_params, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(session_id, generation) DO UPDATE SET
+           parent_generation = excluded.parent_generation,
+           compaction_id = excluded.compaction_id,
+           render_params = excluded.render_params",
+        params![
+            input.session_id,
+            input.target_generation,
+            input.source_generation,
+            input.id,
+            input.render_params_json,
+            unix_millis()?
+        ],
+    )
+    .map_err(|err| format!("插入新 surface generation 失败: {err}"))?;
+
+    tx.execute(
+        "DELETE FROM context_surface_nodes WHERE session_id = ?1 AND generation = ?2",
+        params![input.session_id, input.target_generation],
+    )
+    .map_err(|err| format!("清理新 generation 节点失败: {err}"))?;
+
+    for node in &input.nodes {
+        tx.execute(
+            "INSERT INTO context_surface_nodes
+               (session_id, generation, position, message_id, node_kind, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                input.session_id,
+                input.target_generation,
+                node.position,
+                node.message_id,
+                node.node_kind,
+                unix_millis()?
+            ],
+        )
+        .map_err(|err| format!("保存新 generation 节点失败: {err}"))?;
+    }
+
+    tx.execute(
+        "UPDATE context_compactions
+         SET status = 'completed', completed_at = ?1
+         WHERE id = ?2",
+        params![unix_millis()?, input.id],
+    )
+    .map_err(|err| format!("标记压缩完成失败: {err}"))?;
+
+    tx.commit()
+        .map_err(|err| format!("提交压缩事务失败: {err}"))?;
+
+    Ok(serde_json::json!({
+        "compactionId": input.id,
+        "generation": input.target_generation,
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CompactionFailureInput {
+    pub(crate) id: String,
+    pub(crate) session_id: String,
+    pub(crate) trigger: String,
+    pub(crate) source_generation: i64,
+    pub(crate) summary_mode: String,
+    pub(crate) created_at: i64,
+    pub(crate) failure_code: String,
+    pub(crate) failure_message: String,
+}
+
+/// 失败压缩的溯源记录（不变式 5：失败不得破坏上一个 completed surface，
+/// 只新增 failed 行供审计）。若事务内已写过 started 行则更新，否则插入。
+#[tauri::command]
+pub(crate) fn mark_context_compaction_failed(
+    workspace_path: String,
+    failure_json: String,
+) -> Result<(), String> {
+    let input: CompactionFailureInput = serde_json::from_str(&failure_json)
+        .map_err(|err| format!("失败记录 JSON 不合法: {err}"))?;
+
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    conn.execute(
+        "INSERT INTO context_compactions
+           (id, session_id, status, trigger, source_generation,
+            summary_mode, created_at, failure_code, failure_message)
+         VALUES (?1, ?2, 'failed', ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(id) DO UPDATE SET
+           status = 'failed',
+           failure_code = excluded.failure_code,
+           failure_message = excluded.failure_message",
+        params![
+            input.id,
+            input.session_id,
+            input.trigger,
+            input.source_generation,
+            input.summary_mode,
+            input.created_at,
+            input.failure_code,
+            input.failure_message,
+        ],
+    )
+    .map_err(|err| format!("记录压缩失败失败: {err}"))?;
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ContextCompactionResult {
+    pub(crate) id: String,
+    pub(crate) session_id: String,
+    pub(crate) status: String,
+    pub(crate) trigger: String,
+    pub(crate) source_generation: i64,
+    pub(crate) target_generation: Option<i64>,
+    pub(crate) checkpoint_message_id: Option<String>,
+    pub(crate) source_start_message_id: Option<String>,
+    pub(crate) source_end_message_id: Option<String>,
+    pub(crate) retained_tail_start_message_id: Option<String>,
+    pub(crate) source_message_count: i64,
+    pub(crate) retained_message_count: i64,
+    pub(crate) estimated_tokens_before: Option<i64>,
+    pub(crate) estimated_tokens_after: Option<i64>,
+    pub(crate) summary_mode: String,
+    pub(crate) summary_model: Option<String>,
+    pub(crate) failure_code: Option<String>,
+    pub(crate) failure_message: Option<String>,
+    pub(crate) created_at: i64,
+    pub(crate) completed_at: Option<i64>,
+}
+
+#[tauri::command]
+pub(crate) fn load_context_compactions(
+    workspace_path: String,
+    session_id: String,
+    limit: Option<i64>,
+) -> Result<Vec<ContextCompactionResult>, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let limit = limit.unwrap_or(50).clamp(1, 500);
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, session_id, status, trigger, source_generation, target_generation,
+                    checkpoint_message_id, source_start_message_id, source_end_message_id,
+                    retained_tail_start_message_id, source_message_count, retained_message_count,
+                    estimated_tokens_before, estimated_tokens_after, summary_mode, summary_model,
+                    failure_code, failure_message, created_at, completed_at
+             FROM context_compactions
+             WHERE session_id = ?1
+             ORDER BY created_at DESC LIMIT ?2",
+        )
+        .map_err(|err| format!("准备压缩记录查询失败: {err}"))?;
+
+    let rows = stmt
+        .query_map(params![session_id, limit], |row| {
+            Ok(ContextCompactionResult {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                status: row.get(2)?,
+                trigger: row.get(3)?,
+                source_generation: row.get(4)?,
+                target_generation: row.get(5)?,
+                checkpoint_message_id: row.get(6)?,
+                source_start_message_id: row.get(7)?,
+                source_end_message_id: row.get(8)?,
+                retained_tail_start_message_id: row.get(9)?,
+                source_message_count: row.get(10)?,
+                retained_message_count: row.get(11)?,
+                estimated_tokens_before: row.get(12)?,
+                estimated_tokens_after: row.get(13)?,
+                summary_mode: row.get(14)?,
+                summary_model: row.get(15)?,
+                failure_code: row.get(16)?,
+                failure_message: row.get(17)?,
+                created_at: row.get(18)?,
+                completed_at: row.get(19)?,
+            })
+        })
+        .map_err(|err| format!("读取压缩记录失败: {err}"))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|err| format!("收集压缩记录失败: {err}"))?;
+
+    Ok(rows)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────

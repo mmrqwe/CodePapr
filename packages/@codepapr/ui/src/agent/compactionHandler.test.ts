@@ -299,7 +299,8 @@ describe('createContextCompactionHandler (abort)', () => {
       expect.anything(),
       true,
       undefined,
-      controller.signal
+      controller.signal,
+      { trigger: 'token-limit' }
     );
   });
 

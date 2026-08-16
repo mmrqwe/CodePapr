@@ -48,33 +48,11 @@ export interface ContextCheckpointStateV3 {
   provenance: ContextFactPlaceholder[];
 }
 
-export interface CheckpointTokenStats {
-  estimatedTokensBefore: number;
-  estimatedTokensAfter: number;
-  sourceTokens: number;
-  checkpointTokens: number;
-}
-
-export interface CheckpointSummaryInfo {
-  kind: 'llm' | 'local-fallback';
-  provider?: string;
-  model?: string;
-}
-
-/** v3 payload：在 v2 字段之上新增结构化 state 与不可变 provenance（ADR-001）。 */
+/** v3 payload：在 v2 字段（含 PR1 provenance）之上新增结构化 state（ADR-001/007）。 */
 export interface ContextCheckpointPayloadV3 extends ContextCheckpointPayload {
   version: typeof CONTEXT_CHECKPOINT_VERSION_3;
   state: ContextCheckpointStateV3;
-  compactionId?: string;
-  generation?: number;
-  parentGeneration?: number;
-  trigger?: 'round-limit' | 'token-limit' | 'manual' | 'provider-overflow';
-  sourceStartMessageId?: string;
-  sourceEndMessageId?: string;
-  retainedTailStartMessageId?: string;
-  retainedMessageCount?: number;
-  tokenStats?: CheckpointTokenStats;
-  summaryInfo: CheckpointSummaryInfo;
+  summaryInfo: NonNullable<ContextCheckpointPayload['summaryInfo']>;
 }
 
 export function createEmptyCheckpointStateV3(): ContextCheckpointStateV3 {
@@ -147,7 +125,9 @@ function splitValidationNotes(items: string[]): {
 }
 
 /** v2 modelTier → v3 summaryInfo（ADR-007 映射）。 */
-function summaryInfoFromPayload(payload: ContextCheckpointPayload): CheckpointSummaryInfo {
+function summaryInfoFromPayload(
+  payload: ContextCheckpointPayload
+): NonNullable<ContextCheckpointPayload['summaryInfo']> {
   if (payload.modelTier === 'local') {
     return { kind: 'local-fallback' };
   }
@@ -222,7 +202,17 @@ export function migrateContextCheckpointToV3(
     modelTier: v2.modelTier ?? 'local',
     sections: v2.sections,
     todoDigest: v2.todoDigest,
+    // PR1 provenance 透传（旧 v2 无这些字段时为 undefined）。
+    compactionId: v2.compactionId,
+    generation: v2.generation,
+    parentGeneration: v2.parentGeneration,
+    trigger: v2.trigger,
+    sourceStartMessageId: v2.sourceStartMessageId,
+    sourceEndMessageId: v2.sourceEndMessageId,
+    retainedTailStartMessageId: v2.retainedTailStartMessageId,
+    retainedMessageCount: v2.retainedMessageCount,
+    tokenStats: v2.tokenStats,
     state: migrateCheckpointSectionsToV3(v2.sections),
-    summaryInfo: summaryInfoFromPayload(v2),
+    summaryInfo: v2.summaryInfo ?? summaryInfoFromPayload(v2),
   };
 }

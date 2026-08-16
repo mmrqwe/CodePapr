@@ -25,6 +25,7 @@ import {
   type AgentRuntimeHandle,
   type AgentRuntimeStreamEvent,
 } from '../../agent/WorkerBackedAgent';
+import type { MidLoopCompactionCommit } from '../../agent/agentWorkerProtocol';
 import { createContextCompactionHandler } from '../../agent/compactionHandler';
 import { registerWorkspaceTools } from '../../tools/workspaceTools';
 import { registerUiTaskTool, type UiTaskToolContext } from '../../tools/uiTaskTool';
@@ -139,6 +140,8 @@ export interface AgentRuntimeConfig {
   mcpToolMappings?: Array<{ serverId: string; toolName: string; displayName: string }>;
   onWorkspaceMutated?: (paths?: string[]) => void;
   onStreamSnapshot?: () => void;
+  /** PR1（ADR-005）：mid-loop 压缩提交回调，主线程 Store 单事务持久化。 */
+  onMidLoopCompactionCommit?: (commit: MidLoopCompactionCommit) => Promise<void> | void;
 }
 
 class _MainThreadAgentHandle implements AgentRuntimeHandle {
@@ -156,11 +159,18 @@ class _MainThreadAgentHandle implements AgentRuntimeHandle {
   async chat(
     userInput: string,
     onStreamEvent?: (event: AgentRuntimeStreamEvent) => void,
-    images?: IImageContent[]
+    images?: IImageContent[],
+    userMessageId?: string
   ): Promise<IAgentResponse> {
     this.abortController = new AbortController();
     try {
-      const response = await this.agent.chat(userInput, onStreamEvent, images, this.abortController.signal);
+      const response = await this.agent.chat(
+        userInput,
+        onStreamEvent,
+        images,
+        this.abortController.signal,
+        userMessageId
+      );
       if (this.subagentCacheStatsRef) {
         const subStats = this.subagentCacheStatsRef();
         if (subStats.length > 0) {
@@ -490,7 +500,9 @@ function _createLocalAgent(
       settings,
       parts.providerName,
       sessionId,
-      buildBootstrapRefresher(settings, workspacePath, runtime)
+      buildBootstrapRefresher(settings, workspacePath, runtime),
+      undefined,
+      runtime.onMidLoopCompactionCommit
     ),
   }), () => parts.uiTaskToolContext?.subagentCacheStats ?? []);
 }
@@ -581,6 +593,7 @@ export function createAgent(
         },
         onStreamSnapshot: runtime.onStreamSnapshot,
         onRefreshBootstrap: buildBootstrapRefresher(settings, workspacePath, runtime),
+        onMidLoopCompactionCommit: runtime.onMidLoopCompactionCommit,
       });
     }
   } catch (e) {

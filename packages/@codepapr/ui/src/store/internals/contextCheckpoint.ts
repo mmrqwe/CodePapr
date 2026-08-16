@@ -1,5 +1,9 @@
 import type { ICacheStatistics } from '@codepapr/types';
+import { estimateTokens } from '@codepapr/common';
 import { createId } from '../../utils/createId';
+import {
+  computeCheckpointProvenanceRanges,
+} from '../../utils/contextSurface';
 import {
   CONTEXT_COMPACTION_VERSION,
   buildContextCheckpointPrompt,
@@ -20,12 +24,21 @@ import { effectiveMaxContextTokens } from '../../utils/contextLimits';
 import { resolveProviderName } from './settingsNormalizer';
 import type { CompactionSettings, UIMessage } from './types';
 
+export interface ContextCheckpointProvenanceOptions {
+  /** 触发来源；缺省时由 plan 判定（force → manual / rounds / tokens）。 */
+  trigger?: import('@codepapr/types').CompactionTrigger;
+  /** 目标 generation（主线程可在生成前读取最新 surface 得出）。 */
+  generation?: number;
+  parentGeneration?: number;
+}
+
 export async function maybeGenerateContextCheckpoint(
   settings: CompactionSettings,
   messages: UIMessage[],
   force?: boolean,
   todoDigest?: string,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  provenance?: ContextCheckpointProvenanceOptions
 ): Promise<{ message: UIMessage; cacheStats?: ICacheStatistics; modelTier: 'primary' | 'fast' | 'local'; insertIndex: number } | null> {
   const plan = planContextCompaction(messages, {
     maxRounds: settings.maxConversationRounds,
@@ -106,6 +119,16 @@ export async function maybeGenerateContextCheckpoint(
   }
 
   const timestamp = Date.now();
+  const compactionId = createId();
+  const ranges = computeCheckpointProvenanceRanges(messages, plan.insertIndex);
+  const renderedContent = renderContextCheckpointContent(summary, settings.lang);
+  const checkpointTokens = estimateTokens(renderedContent || summary || '');
+  const retainedTokens = plan.retainedMessages.reduce(
+    (sum, message) =>
+      sum +
+      estimateTokens([message.role, message.content ?? ''].filter(Boolean).join('\n')),
+    0
+  );
   return {
     message: {
       id: createId(),
@@ -117,7 +140,7 @@ export async function maybeGenerateContextCheckpoint(
       contextCheckpoint: {
         version: CONTEXT_COMPACTION_VERSION,
         summary,
-        renderedContent: renderContextCheckpointContent(summary, settings.lang),
+        renderedContent,
         sourceMessageCount: plan.sourceMessages.length,
         sourceChars: plan.sourceChars,
         generatedAt: timestamp,
@@ -125,6 +148,28 @@ export async function maybeGenerateContextCheckpoint(
         modelTier,
         sections,
         todoDigest: todoDigest?.trim() || undefined,
+        // PR1 provenance（ADR-001/005）：全部用不可变 message ID，不用
+        // 可变 positional index。generation/parentGeneration 由主线程在
+        // 生成前读取最新 surface 传入；worker（mid-loop）路径留空由
+        // 主线程 commit 时定 generation。
+        compactionId,
+        generation: provenance?.generation,
+        parentGeneration: provenance?.parentGeneration,
+        trigger: provenance?.trigger ?? plan.trigger,
+        sourceStartMessageId: ranges.sourceStartMessageId,
+        sourceEndMessageId: ranges.sourceEndMessageId,
+        retainedTailStartMessageId: ranges.retainedTailStartMessageId,
+        retainedMessageCount: plan.retainedMessages.length,
+        tokenStats: {
+          estimatedTokensBefore: plan.effectiveTokens,
+          estimatedTokensAfter: checkpointTokens + retainedTokens,
+          sourceTokens: plan.sourceTokens,
+          checkpointTokens,
+        },
+        summaryInfo:
+          modelTier === 'local'
+            ? { kind: 'local-fallback' }
+            : { kind: 'llm', model: modelName },
       },
     },
     cacheStats,

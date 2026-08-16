@@ -10,10 +10,12 @@ import {
   insertCheckpointAtRetainedBoundary,
   type ContextMessageLike,
 } from '../utils/contextCompaction';
+import { isModelVisibleUiMessage } from '../utils/contextSurface';
 import { maybeGenerateContextCheckpoint } from '../store/internals/contextCheckpoint';
 import { effectiveMaxContextTokens, type ContextProvider } from '../utils/contextLimits';
 import { getTodoListContext } from '../tools/todoListTool';
 import type { CompactionSettings, UIToolInvocation } from '../store/internals/types';
+import type { MidLoopCompactionCommit } from './agentWorkerProtocol';
 
 const PRUNE_PROTECTED_TOOLS = new Set(['todo', 'question', 'skill']);
 
@@ -137,7 +139,8 @@ export function createContextCompactionHandler(
   providerName: ContextProvider,
   sessionId: string,
   refreshBootstrap?: () => Promise<string | null>,
-  getAbortSignal?: () => AbortSignal | undefined
+  getAbortSignal?: () => AbortSignal | undefined,
+  onCheckpoint?: (commit: MidLoopCompactionCommit) => void
 ): ContextCompactionConfig {
   return {
     maxContextTokens: effectiveMaxContextTokens(settings, providerName),
@@ -150,7 +153,8 @@ export function createContextCompactionHandler(
           sessionId,
           coreMessages,
           refreshBootstrap,
-          getAbortSignal?.()
+          getAbortSignal?.(),
+          onCheckpoint
         );
       } catch (err) {
         // 用户中断：mid-loop 压缩中飞被 abort → 返回 null 让 Agent 轮循环
@@ -169,7 +173,8 @@ async function runCompactionHandler(
   sessionId: string,
   coreMessages: IMessage[],
   refreshBootstrap: (() => Promise<string | null>) | undefined,
-  abortSignal: AbortSignal | undefined
+  abortSignal: AbortSignal | undefined,
+  onCheckpoint: ((commit: MidLoopCompactionCommit) => void) | undefined
 ): Promise<{ messages: IMessage[]; cacheStats?: ICacheStatistics } | null> {
   const contextMessages = coreMessagesToContextMessages(coreMessages);
   const checkpoint = await maybeGenerateContextCheckpoint(
@@ -177,7 +182,9 @@ async function runCompactionHandler(
     contextMessages,
     true,
     currentTodoDigest(sessionId),
-    abortSignal
+    abortSignal,
+    // mid-loop 压缩由 token 溢出驱动（PR3 引入 provider-overflow 细分）。
+    { trigger: 'token-limit' }
   );
   if (!checkpoint) {
     return null;
@@ -191,6 +198,32 @@ async function runCompactionHandler(
     checkpoint.message,
     checkpoint.insertIndex
   );
+
+  // PR1：把压缩提交数据交给主线程 Store 持久化（ADR-005）。
+  if (onCheckpoint) {
+    onCheckpoint({
+      checkpointMessageId: checkpoint.message.id,
+      checkpointMessage: {
+        id: checkpoint.message.id,
+        role: 'assistant',
+        content: checkpoint.message.content,
+        timestamp: checkpoint.message.timestamp,
+        synthetic: true,
+        hidden: true,
+        contextCheckpoint: checkpoint.message.contextCheckpoint,
+      },
+      insertIndex: checkpoint.insertIndex,
+      sourceMessageIds: contextMessages
+        .slice(0, checkpoint.insertIndex)
+        .filter(isModelVisibleUiMessage)
+        .map((message) => message.id),
+      retainedMessageIds: contextMessages
+        .slice(checkpoint.insertIndex)
+        .filter(isModelVisibleUiMessage)
+        .map((message) => message.id),
+    });
+  }
+
   const compacted = buildEffectiveContextMessages(
     withCheckpoint,
     { pruneOptions: buildPruneOptions(settings) }

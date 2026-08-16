@@ -663,3 +663,142 @@ export async function loadAllProjectMeta(workspacePath: string): Promise<Record<
     })
   );
 }
+
+// ── Context Surface / Compaction（ADR-001~007，PR1）────────────────────
+
+export interface PersistedSurfaceNode {
+  position: number;
+  messageId: string;
+  nodeKind: 'checkpoint' | 'conversation' | 'injected';
+}
+
+export interface PersistedContextSurface {
+  sessionId: string;
+  generation: number;
+  parentGeneration: number | null;
+  compactionId: string | null;
+  renderParamsJson: string;
+  createdAt: number;
+  nodes: PersistedSurfaceNode[];
+}
+
+export async function loadContextSurface(
+  workspacePath: string,
+  sessionId: string
+): Promise<PersistedContextSurface | null> {
+  return invoke<PersistedContextSurface | null>('load_context_surface', {
+    workspacePath: workspacePath.trim(),
+    sessionId,
+  });
+}
+
+export async function saveContextSurface(
+  workspacePath: string,
+  surface: {
+    sessionId: string;
+    generation: number;
+    parentGeneration: number | null;
+    compactionId: string | null;
+    renderParamsJson: string;
+    nodes: PersistedSurfaceNode[];
+  }
+): Promise<void> {
+  await invoke('save_context_surface', {
+    workspacePath: workspacePath.trim(),
+    sessionId: surface.sessionId,
+    generation: surface.generation,
+    parentGeneration: surface.parentGeneration,
+    compactionId: surface.compactionId,
+    renderParamsJson: surface.renderParamsJson,
+    nodesJson: JSON.stringify(surface.nodes),
+  });
+}
+
+export interface PersistedCompactionRecord {
+  id: string;
+  sessionId: string;
+  status: 'started' | 'completed' | 'failed';
+  trigger: string;
+  sourceGeneration: number;
+  targetGeneration: number | null;
+  checkpointMessageId: string | null;
+  sourceStartMessageId: string | null;
+  sourceEndMessageId: string | null;
+  retainedTailStartMessageId: string | null;
+  sourceMessageCount: number;
+  retainedMessageCount: number;
+  estimatedTokensBefore: number | null;
+  estimatedTokensAfter: number | null;
+  summaryMode: 'llm' | 'local-fallback';
+  summaryModel: string | null;
+  failureCode: string | null;
+  failureMessage: string | null;
+  createdAt: number;
+  completedAt: number | null;
+}
+
+export interface CompactionCommitRequest {
+  id: string;
+  sessionId: string;
+  trigger: string;
+  sourceGeneration: number;
+  targetGeneration: number;
+  checkpointMessageId: string | null;
+  parentCheckpointMessageId: string | null;
+  sourceStartMessageId: string | null;
+  sourceEndMessageId: string | null;
+  retainedTailStartMessageId: string | null;
+  sourceMessageCount: number;
+  retainedMessageCount: number;
+  estimatedTokensBefore: number | null;
+  estimatedTokensAfter: number | null;
+  sourceTokens: number | null;
+  checkpointTokens: number | null;
+  summaryMode: 'llm' | 'local-fallback';
+  summaryProvider: string | null;
+  summaryModel: string | null;
+  createdAt: number;
+  nodes: PersistedSurfaceNode[];
+  renderParamsJson: string;
+}
+
+export async function commitContextCompaction(
+  workspacePath: string,
+  request: CompactionCommitRequest
+): Promise<{ compactionId: string; generation: number }> {
+  return invoke<{ compactionId: string; generation: number }>('commit_context_compaction', {
+    workspacePath: workspacePath.trim(),
+    requestJson: JSON.stringify(request),
+  });
+}
+
+export async function markContextCompactionFailed(
+  workspacePath: string,
+  failure: {
+    id: string;
+    sessionId: string;
+    trigger: string;
+    sourceGeneration: number;
+    summaryMode: 'llm' | 'local-fallback';
+    createdAt: number;
+    failureCode: string;
+    failureMessage: string;
+  }
+): Promise<void> {
+  await invoke('mark_context_compaction_failed', {
+    workspacePath: workspacePath.trim(),
+    failureJson: JSON.stringify(failure),
+  });
+}
+
+export async function loadContextCompactions(
+  workspacePath: string,
+  sessionId: string,
+  limit = 50
+): Promise<PersistedCompactionRecord[]> {
+  return invoke<PersistedCompactionRecord[]>('load_context_compactions', {
+    workspacePath: workspacePath.trim(),
+    sessionId,
+    limit,
+  });
+}

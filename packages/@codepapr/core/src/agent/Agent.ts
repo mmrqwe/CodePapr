@@ -532,14 +532,16 @@ export class Agent {
     userInput: string,
     onStreamEvent?: (event: IChatStreamEvent) => void,
     images?: IImageContent[],
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    /** PR1：主线程生成的 canonical user 消息 ID（ADR-009 前置）。 */
+    userMessageId?: string
   ): Promise<IAgentResponse> {
     const effectiveSignal = signal ?? (() => {
       const controller = new AbortController();
       this.abortController = controller;
       return controller.signal;
     })();
-    const userMsg = MessageFactory.user(userInput, images);
+    const userMsg = MessageFactory.user(userInput, images, userMessageId);
 
     let finalContent = '';
     let finalReasoningContent: string | undefined;
