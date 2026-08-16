@@ -143,20 +143,26 @@ interface MemoryToolContext {
 
 async function reprojectManagedZone(workspacePath: string): Promise<void> {
   try {
-    const entries = await loadMemoryEntries(workspacePath, true);
-    const projection = buildMemoryProjection(
-      entries.map((entry) => ({
-        category: entry.category,
-        content: entry.content,
-        confidence: entry.confidence,
-        trust: entry.trust,
-        verifiedAt: entry.verifiedAt,
-      }))
-    );
-    await projectMemoryFile(workspacePath, projection);
+    await reprojectMemoryManagedZone(workspacePath);
   } catch (err) {
     console.warn('[memory-tools] 重新投影失败:', err instanceof Error ? err.message : err);
   }
+}
+
+/** 重投影 managed zone（active entries → buildMemoryProjection → 落盘）。
+ *  供 memory 工具与 Memory Inspector 面板共用。 */
+export async function reprojectMemoryManagedZone(workspacePath: string): Promise<void> {
+  const entries = await loadMemoryEntries(workspacePath, true);
+  const projection = buildMemoryProjection(
+    entries.map((entry) => ({
+      category: entry.category,
+      content: entry.content,
+      confidence: entry.confidence,
+      trust: entry.trust,
+      verifiedAt: entry.verifiedAt,
+    }))
+  );
+  await projectMemoryFile(workspacePath, projection);
 }
 
 function renderCandidateList(candidates: PersistedMemoryCandidate[]): string {

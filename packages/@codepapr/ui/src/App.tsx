@@ -951,6 +951,7 @@ export default function App() {
             <ContextInspectorModal
               snapshot={latestContextSnapshot.snapshot}
               lang={settings.lang}
+              workspacePath={workspacePath ?? undefined}
               onClose={() => setShowContextInspector(false)}
             />
           )}

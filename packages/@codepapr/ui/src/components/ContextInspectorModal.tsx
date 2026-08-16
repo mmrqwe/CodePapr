@@ -1,10 +1,13 @@
 import { useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import type { ContextStage, IContextMessageView, IContextSnapshot } from '@codepapr/types';
 import { getTranslation, type Lang } from '../utils/i18n';
+import { MemoryLedgerPanel } from './MemoryLedgerPanel';
 
 interface ContextInspectorModalProps {
   snapshot: IContextSnapshot;
   lang?: Lang;
+  /** 提供后启用「项目记忆」管理标签页（ADR-008/009 可观测性）。 */
+  workspacePath?: string;
   onClose: () => void;
 }
 
@@ -114,13 +117,14 @@ function isRealTimestamp(ts?: number): ts is number {
   return typeof ts === 'number' && ts > 1_000_000_000_000;
 }
 
-export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspectorModalProps) {
+export function ContextInspectorModal({ snapshot, lang, workspacePath, onClose }: ContextInspectorModalProps) {
   const t = getTranslation(lang);
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const [hiddenCats, setHiddenCats] = useState<Set<RowCat>>(new Set());
   const [tip, setTip] = useState<{ x: number; y: number; row: TimelineRow } | null>(null);
   const [axisMode, setAxisMode] = useState<'token' | 'time'>('token');
+  const [activeTab, setActiveTab] = useState<'context' | 'memory'>('context');
 
   const stageLabels: Record<ContextStage, string> = {
     'stable-prefix': t.stageStablePrefix,
@@ -451,13 +455,41 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
             <p className="mt-0.5 text-xs text-fg-muted">{t.contextInspectorTip}</p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void navigator.clipboard.writeText(fullText)}
-              className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-fg-soft transition-colors hover:border-accent hover:text-fg"
-            >
-              {t.copy}
-            </button>
+            {workspacePath ? (
+              <span className="flex rounded-md border border-line p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('context')}
+                  className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                    activeTab === 'context'
+                      ? 'bg-accent-soft text-accent-text'
+                      : 'text-fg-muted hover:text-fg-soft'
+                  }`}
+                >
+                  {t.viewContext}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('memory')}
+                  className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                    activeTab === 'memory'
+                      ? 'bg-accent-soft text-accent-text'
+                      : 'text-fg-muted hover:text-fg-soft'
+                  }`}
+                >
+                  {t.memoryLedgerTab}
+                </button>
+              </span>
+            ) : null}
+            {activeTab === 'context' ? (
+              <button
+                type="button"
+                onClick={() => void navigator.clipboard.writeText(fullText)}
+                className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-fg-soft transition-colors hover:border-accent hover:text-fg"
+              >
+                {t.copy}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onClose}
@@ -469,6 +501,13 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
           </div>
         </div>
 
+        {activeTab === 'memory' && workspacePath ? (
+          <MemoryLedgerPanel workspacePath={workspacePath} lang={lang} />
+        ) : (
+          <></>
+        )}
+        {activeTab === 'context' ? (
+          <>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-line bg-raised px-5 py-2.5">
           <span className="text-xs font-semibold text-fg">
             {t.currentContextLength}{' '}
@@ -697,6 +736,8 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
             )}
           </div>
         </div>
+          </>
+        ) : null}
       </div>
 
       {/* 甘特条悬停提示 */}
