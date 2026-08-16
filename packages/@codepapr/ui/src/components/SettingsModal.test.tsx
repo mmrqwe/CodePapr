@@ -110,12 +110,20 @@ describe('SettingsModal', () => {
     expect(treeInput!.getAttribute('min')).toBe('0');
   });
 
-  it('general tab theme selects preview live and revert on cancel', async () => {
+  it('appearance tab theme selects preview live and revert on cancel', async () => {
     await act(async () => {
       root.render(<SettingsModal />);
     });
 
-    // 通用页默认激活：浅色主题选择器即时预览
+    // 主题选择已移至外观页：先切到外观 tab
+    const appearanceTab = container.querySelector(
+      'button[title="选择主题、强调色，导入自定义主题。"]'
+    );
+    expect(appearanceTab).not.toBeNull();
+    await act(async () => {
+      appearanceTab!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
     const lightSelect = container.querySelector(
       'select[title="浅色模式下使用的主题。"]'
     ) as HTMLSelectElement;

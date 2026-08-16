@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
 import { validateCustomTheme } from '../../theme/themeEngine';
-import { BUILTIN_THEMES } from '../../theme/themes';
+import { BUILTIN_THEMES, getBuiltinTheme } from '../../theme/themes';
 import type { CustomThemeRecord, ThemeMode } from '../../theme/types';
+import { useThemeStore } from '../../store/themeStore';
 import { toast } from '../../store/toastStore';
-import { FieldCard, FieldLabel } from '../forms';
+import { FieldCard, FieldLabel, ToggleField } from '../forms';
 import type { SettingsTabProps } from './types';
 
 const ACCENT_PRESETS = [
@@ -22,6 +23,26 @@ const ACCENT_PRESETS = [
   '#f472b6',
   '#14b8a6',
 ];
+
+/** 组件迁移（Phase 3）完成前，新浅色主题不能完整渲染。 */
+const EXPERIMENTAL_THEME_IDS = new Set(['solarized-light']);
+
+function themeOptions(
+  mode: ThemeMode,
+  customThemes: Record<string, { name: string; mode: ThemeMode }>,
+  lang: string,
+): Array<{ id: string; label: string }> {
+  const experimentalSuffix =
+    lang === 'en' ? ' (Experimental)' : lang === 'zh-TW' ? '（實驗性）' : '（实验性）';
+  const builtin = BUILTIN_THEMES.filter((t) => t.mode === mode).map((t) => ({
+    id: t.id,
+    label: EXPERIMENTAL_THEME_IDS.has(t.id) ? `${t.name}${experimentalSuffix}` : t.name,
+  }));
+  const custom = Object.entries(customThemes)
+    .filter(([, record]) => record.mode === mode)
+    .map(([id, record]) => ({ id, label: record.name }));
+  return [...builtin, ...custom];
+}
 
 function jsonPlaceholder(lang: string): string {
   const sample = {
@@ -74,6 +95,9 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
   const [importJson, setImportJson] = useState('');
   const [importError, setImportError] = useState('');
   const [importSuccess, setImportSuccess] = useState('');
+
+  const lightOptions = themeOptions('light', local.customThemes, currentLang);
+  const darkOptions = themeOptions('dark', local.customThemes, currentLang);
 
   const selectAccent = (accent: string | null) => {
     update({ accent });
@@ -133,7 +157,7 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
       );
       return;
     }
-    // 导入即接入对应深浅槽位，主题在 设置 → 通用 中随时可换。
+    // 导入即接入对应深浅槽位，上方主题选择中随时可换。
     update({
       customThemes: { ...local.customThemes, [id]: record },
       ...(mode === 'light' ? { lightTheme: id } : { darkTheme: id }),
@@ -167,10 +191,18 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
     }
   };
 
-  const exportCustomTheme = async (id: string) => {
-    const record = local.customThemes[id];
-    if (!record) return;
-    await exportThemeRecord(record);
+  /** 导出当前生效的主题（内置或自定义），无需选择。 */
+  const exportCurrentTheme = async () => {
+    const themeId = useThemeStore.getState().resolvedThemeId;
+    const custom = local.customThemes[themeId];
+    if (custom) {
+      await exportThemeRecord(custom);
+      return;
+    }
+    const record = getBuiltinTheme(themeId) ?? getBuiltinTheme('paper-light');
+    if (record) {
+      await exportThemeRecord({ name: record.name, mode: record.mode, tokens: record.tokens });
+    }
   };
 
   const deleteCustomTheme = (id: string) => {
@@ -187,6 +219,54 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
 
   return (
     <div className="space-y-5">
+      <FieldCard>
+        <FieldLabel className="mb-1">{t.themeSelect}</FieldLabel>
+        <p className="mb-3 text-xs text-fg-muted">{t.themeSelectDesc}</p>
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">
+              {t.themeLightSelect}
+            </label>
+            <select
+              value={local.lightTheme}
+              onChange={(e) => update({ lightTheme: e.target.value })}
+              title={t.themeLightSelectDesc}
+              className="w-full cursor-pointer rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg focus:border-accent-soft focus:outline-none"
+            >
+              {lightOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">
+              {t.themeDarkSelect}
+            </label>
+            <select
+              value={local.darkTheme}
+              onChange={(e) => update({ darkTheme: e.target.value })}
+              title={t.themeDarkSelectDesc}
+              className="w-full cursor-pointer rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg focus:border-accent-soft focus:outline-none"
+            >
+              {darkOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <ToggleField
+            checked={local.followSystem}
+            onChange={(checked) => update({ followSystem: checked })}
+            label={t.themeFollowSystem}
+            desc={t.themeFollowSystemDesc}
+            title={t.themeFollowSystemDesc}
+          />
+        </div>
+      </FieldCard>
+
       <FieldCard>
         <FieldLabel className="mb-1">{t.themeAccent}</FieldLabel>
         <p className="mb-3 text-xs text-fg-muted">{t.themeAccentDesc}</p>
@@ -229,34 +309,15 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
       </FieldCard>
 
       <FieldCard>
-        <FieldLabel className="mb-1">{t.themeBuiltinExportSection}</FieldLabel>
+        <FieldLabel className="mb-1">{t.themeCustomExport}</FieldLabel>
         <p className="mb-3 text-xs text-fg-muted">{t.themeBuiltinExportDesc}</p>
-        <div className="flex flex-wrap gap-2">
-          {BUILTIN_THEMES.map((theme) => (
-            <div
-              key={theme.id}
-              className="flex items-center gap-2 rounded-lg border border-line bg-base px-3 py-1.5"
-            >
-              <span
-                className="inline-block h-3 w-3 rounded-full border border-white/20"
-                style={{ background: theme.preview.accent }}
-              />
-              <span className="text-xs text-fg-soft">
-                {theme.mode === 'dark' ? '🌙' : '☀️'} {theme.name}
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  void exportThemeRecord({ name: theme.name, mode: theme.mode, tokens: theme.tokens })
-                }
-                title={t.themeCustomExport}
-                className="rounded-md border border-line px-2 py-0.5 text-[10px] text-fg-muted transition-colors hover:border-line-strong hover:text-fg"
-              >
-                {t.themeCustomExport}
-              </button>
-            </div>
-          ))}
-        </div>
+        <button
+          type="button"
+          onClick={() => void exportCurrentTheme()}
+          className="rounded-xl border border-accent-soft px-5 py-2 text-sm font-medium text-accent-text transition-colors hover:border-accent hover:bg-accent-soft"
+        >
+          {t.themeExportCurrent}
+        </button>
       </FieldCard>
 
       <FieldCard padding="loose">
@@ -264,10 +325,10 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
         <p className="mb-3 text-xs text-fg-muted">
           {t.themeCustomThemesDesc}
           {currentLang === 'en'
-            ? ' Imported themes appear in Settings → General.'
+            ? ' Imported themes appear in the theme selection above.'
             : currentLang === 'zh-TW'
-              ? ' 導入後可在 設置 → 通用 中選擇。'
-              : ' 导入后可在 设置 → 通用 中选择。'}
+              ? ' 導入後可在上方主題選擇中選用。'
+              : ' 导入后可在上方主题选择中选用。'}
         </p>
 
         {customIds.length === 0 && <p className="mb-3 text-xs text-fg-muted">{t.themeCustomNone}</p>}
@@ -294,14 +355,6 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
                 </span>
                 {inUse && <span className="text-xs text-accent-text">✓</span>}
                 <div className="flex-1" />
-                <button
-                  type="button"
-                  onClick={() => void exportCustomTheme(id)}
-                  title={t.themeCustomExport}
-                  className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg-muted transition-colors hover:border-line-strong hover:text-fg"
-                >
-                  {t.themeCustomExport}
-                </button>
                 <button
                   type="button"
                   onClick={() => deleteCustomTheme(id)}
