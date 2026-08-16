@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use git2::DiffOptions;
 use crate::snapshot::types::{GitDiffResult, FileDiff};
 use super::open_repo;
@@ -72,9 +71,6 @@ pub fn git_diff_impl(
             .or_else(|| delta.old_file().path())
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
-        let old_path = if delta.status() == git2::Delta::Renamed {
-            delta.old_file().path().map(|p| p.to_string_lossy().to_string())
-        } else { None };
         let (additions, deletions) = if let Ok(Some(patch)) = git2::Patch::from_diff(&diff, i) {
             let (_context, additions, deletions) = patch.line_stats().unwrap_or((0, 0, 0));
             (additions, deletions)

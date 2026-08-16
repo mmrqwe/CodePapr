@@ -9,7 +9,7 @@ pub mod stage;
 pub mod status;
 
 use git2::Repository;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub(crate) fn open_repo(workspace: &Path) -> Result<Repository, String> {
     let git_path = workspace.join(".CodePapr/git");

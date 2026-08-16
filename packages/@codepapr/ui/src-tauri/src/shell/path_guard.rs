@@ -210,7 +210,7 @@ mod tests {
     #[test]
     fn sandbox_read_root_paths_are_allowed_without_grant() {
         let ws = TestWorkspace::new("path-guard-read-root");
-        let policy = policy_with(&[], &[]);
+        let _policy = policy_with(&[], &[]);
 
         // 工具缓存目录（unix_tool_dirs）与系统临时目录都是沙箱读放行根
         let tool_bin = std::env::temp_dir().join("codepapr-tool-cache/bin/tool");

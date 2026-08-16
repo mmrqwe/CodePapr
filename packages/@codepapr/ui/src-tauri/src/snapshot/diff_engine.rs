@@ -113,7 +113,7 @@ impl DiffEngine {
         let to_tree = repo.find_commit(to_oid)
             .and_then(|c| c.tree()).ok();
 
-        let mut diff = repo.diff_tree_to_tree(
+        let diff = repo.diff_tree_to_tree(
             from_tree.as_ref(), to_tree.as_ref(), None,
         ).map_err(|e| format!("diff: {}", e.message()))?;
 

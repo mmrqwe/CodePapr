@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 use git2::{Repository, ResetType, Oid, Tree};
 use super::types::{RestorePlan, RestoreResult, FileChange};
-use super::snapshot_engine::SnapshotEngine;
 use super::ignore_resolver::{git_relative_path, IgnoreResolver};
 use crate::git_operations::validate_git_ref;
 
@@ -9,7 +8,7 @@ use crate::git_operations::validate_git_ref;
 /// 这一步是必须的：libgit2 的 reset --hard 只恢复被跟踪的文件，
 /// 不会删除自目标快照之后新增的未跟踪文件，导致恢复不彻底。
 fn remove_untracked_not_in_tree(
-    repo: &Repository,
+    _repo: &Repository,
     workspace: &Path,
     target_tree: &Tree,
 ) -> usize {
@@ -315,12 +314,11 @@ impl RestoreEngine {
 
         // 备份 = reset 前工作区的真实状态（而非最后一次快照），
         // 确保最后一次快照之后新增/修改的文件也能通过 undo 找回。
-        let mut backup_ref = None;
-        match create_backup_snapshot(&repo, &self.workspace) {
+        let backup_ref = match create_backup_snapshot(&repo, &self.workspace) {
             Ok(backup_oid) => {
                 eprintln!("[CodePapr] restore_execute: backup ref -> {}", backup_oid);
                 match repo.reference(BACKUP_REF, backup_oid, true, "codepapr backup before reset") {
-                    Ok(_) => backup_ref = Some(BACKUP_REF.to_string()),
+                    Ok(_) => Some(BACKUP_REF.to_string()),
                     Err(e) => return Err(format!(
                         "failed to create backup ref: {} (refusing reset without safety net)", e.message()
                     )),
@@ -331,7 +329,7 @@ impl RestoreEngine {
                     "failed to create backup snapshot: {e} (refusing reset without safety net)"
                 ))
             }
-        }
+        };
 
         let mut checkout = git2::build::CheckoutBuilder::new();
         checkout.force();

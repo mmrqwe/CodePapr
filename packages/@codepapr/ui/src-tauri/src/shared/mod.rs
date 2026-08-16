@@ -19,6 +19,6 @@ pub(crate) use paths::{
     path_is_same_or_child, write_file_rejecting_symlink, PathLocationInput,
 };
 pub(crate) use runtime::run_blocking_workspace_task;
-pub(crate) use strings::{parse_browser_url, truncate_utf8};
+pub(crate) use strings::parse_browser_url;
 pub(crate) use sync::{lock, read, write};
 pub(crate) use time::unix_millis;

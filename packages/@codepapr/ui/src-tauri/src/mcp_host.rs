@@ -641,6 +641,9 @@ pub async fn list_tools(
     settings: McpSettings,
     refresh: bool,
 ) -> Result<McpListToolsResult, String> {
+    // 目前工具列表走缓存路径，refresh 参数预留（保留 invoke 契约，避免破坏
+    // 前端调用）；显式消费以避免 unused 警告。
+    let _ = refresh;
     update_settings(settings.clone()).await;
 
     if !settings.enabled || !settings.expose_tools {

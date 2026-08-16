@@ -47,7 +47,7 @@ async fn main() {
         Ok(Ok(running_service)) => {
             eprintln!("Connected successfully!");
 
-            let mut client = running_service;
+            let client = running_service;
 
             eprintln!("Listing tools...");
             match tokio::time::timeout(Duration::from_secs(15), client.list_tools(None)).await {

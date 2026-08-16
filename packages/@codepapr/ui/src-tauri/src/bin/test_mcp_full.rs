@@ -5,7 +5,7 @@ use rmcp::{
     },
     ServiceExt,
 };
-use serde_json::{json, Map};
+use serde_json::Map;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -38,7 +38,7 @@ async fn main() {
         }
     };
 
-    let mut client = running_service;
+    let client = running_service;
     println!(">>> Initialized.");
 
     // List tools

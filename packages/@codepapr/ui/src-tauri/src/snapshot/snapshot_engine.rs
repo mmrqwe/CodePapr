@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use git2::{IndexAddOption, Repository, RepositoryInitOptions, Signature};
+use git2::{Repository, RepositoryInitOptions, Signature};
 use super::types::{EnsureResult, SnapshotInfo};
 use super::ignore_resolver::{git_relative_path, IgnoreResolver};
 
@@ -345,7 +345,7 @@ mod tests {
 
         // 3. Modify and snapshot again
         fs::write(workspace.join("test.txt"), b"modified").unwrap();
-        let cp2 = engine.create("checkpoint #2").expect("create cp2");
+        let _cp2 = engine.create("checkpoint #2").expect("create cp2");
 
         // 4. List
         let list = engine.list(10);
@@ -375,7 +375,6 @@ mod tests {
     #[test]
     /// #23：工具定义宣称接受「回退目标引用」——短 SHA、分支名、HEAD 都必须
     /// 可解析。旧实现 Oid::from_str 只认完整 40 位 SHA，LLM 拿 shortHash 必失败。
-    #[test]
     fn restore_plan_accepts_short_sha_and_head_ref() {
         let workspace = temp_workspace("restore-short-sha");
         let engine = SnapshotEngine::new(&workspace);
@@ -410,7 +409,12 @@ mod tests {
         fs::remove_dir_all(&workspace).ok();
     }
 
-    fn test_restore_removes_untracked_files_created_after_snapshot() {        let workspace = temp_workspace("untracked-cleanup");
+    /// #24：恢复后清理「快照之后新建的未跟踪文件」（硬 reset 只恢复被跟踪
+    /// 文件，未跟踪文件会残留——恢复必须彻底）。此前因 #[test] 属性被重复
+    /// 放在上一个用例上，本用例从未被运行。
+    #[test]
+    fn test_restore_removes_untracked_files_created_after_snapshot() {
+        let workspace = temp_workspace("untracked-cleanup");
         let engine = SnapshotEngine::new(&workspace);
         engine.ensure();
 
@@ -556,7 +560,7 @@ mod tests {
 
         fs::write(workspace.join("main.rs"), "fn main() {}\n").unwrap();
         fs::write(workspace.join("lib.rs"), "pub fn add() {}\n").unwrap();
-        let baseline = engine.create("baseline").expect("baseline");
+        let _baseline = engine.create("baseline").expect("baseline");
 
         fs::write(workspace.join("main.rs"), "fn main() { println!(\"v2\"); }\n").unwrap();
 

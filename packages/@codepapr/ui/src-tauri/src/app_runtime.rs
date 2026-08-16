@@ -213,7 +213,9 @@ fn parse_lsof_bind_hosts(stdout: &str) -> Vec<String> {
     hosts
 }
 
-/// 监听地址是否为回环（127.0.0.0/8、::1、localhost）。供 app_start 校验。
+/// 监听地址是否为回环（127.0.0.0/8、::1、localhost）。当前仅由单元测试
+/// 校验使用（供未来 app_start 监听地址校验），保留以待接线。
+#[allow(dead_code)]
 pub(crate) fn is_loopback_bind(host: &str) -> bool {
     host == "localhost" || host == "::1" || host == "127.0.0.1" || host.starts_with("127.")
 }

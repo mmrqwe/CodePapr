@@ -76,6 +76,7 @@ pub(crate) async fn search_workspace_paths(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)] // 仅单元测试使用（workspace_fs/tests.rs）；命令走 _full 变体
 pub(crate) fn search_workspace_text_impl(
     workspace_path: String,
     query: String,
@@ -144,6 +145,7 @@ pub(crate) fn search_workspace_text_impl_full(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)] // 仅单元测试使用（workspace_fs/tests.rs）；命令走 _full 变体
 pub(crate) fn search_workspace_paths_impl(
     workspace_path: String,
     query: String,

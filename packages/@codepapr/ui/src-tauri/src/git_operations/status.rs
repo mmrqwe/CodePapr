@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-use git2::{Repository, StatusOptions};
+use git2::StatusOptions;
 use crate::snapshot::types::{GitStatusResult, GitStatusEntry};
 use super::open_repo;
 

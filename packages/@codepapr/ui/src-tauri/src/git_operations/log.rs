@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use crate::snapshot::types::GitLogEntry;
 use super::open_repo;
 

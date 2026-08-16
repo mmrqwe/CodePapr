@@ -495,7 +495,7 @@ pub(crate) fn run_workspace_command_impl(
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
     prepare_new_process_group(&mut cmd);
-    let mut child = match cmd.spawn() {
+    let child = match cmd.spawn() {
         Ok(child) => child,
         Err(err) => {
             return Ok(CommandResult {

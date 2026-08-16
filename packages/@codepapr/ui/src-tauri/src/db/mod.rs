@@ -2113,6 +2113,9 @@ pub(crate) fn papr_load_permission_settings() -> Result<Option<String>, String> 
     .map_err(|err| format!("读取 Papr 权限设置失败: {err}"))
 }
 
+// 测试构建下调用方（permission.rs 的 persist_settings）被 #[cfg(not(test))]
+// 排除（避免测试污染真实用户 DB），此处仅在测试 profile 静默。
+#[cfg_attr(test, allow(dead_code))]
 pub(crate) fn papr_save_permission_settings(settings_json: &str) -> Result<(), String> {
     let (conn, _) = open_app_db()?;
     conn.execute(

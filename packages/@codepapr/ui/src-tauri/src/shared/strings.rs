@@ -1,8 +1,3 @@
-/// Convert raw bytes to a lossy UTF-8 string.
-pub(crate) fn truncate_utf8(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
-
 /// Validate and normalise a browser URL (http/https only).
 pub(crate) fn parse_browser_url(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
