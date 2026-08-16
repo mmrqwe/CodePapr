@@ -841,17 +841,20 @@ export interface MemoryCandidateInput {
   confidence: 'confirmed' | 'reported' | 'unverified';
   trust: 'trusted' | 'workspace' | 'derived' | 'untrusted';
   sourceSessionId?: string;
-  sourceMessageIdsJson?: string;
-  evidenceJson?: string;
-  riskFlagsJson?: string;
+  /** 字段名必须与 Rust MemoryCandidateInput（serde camelCase）一致，
+   *  否则 serde 静默映射为 None，溯源数据丢失。 */
+  sourceMessageIds?: string;
+  evidence?: string;
+  riskFlags?: string;
   createdAt: number;
 }
 
+/** 保存候选。返回 false 表示同 contentHash 候选已存在（去重跳过）。 */
 export async function saveMemoryCandidate(
   workspacePath: string,
   candidate: MemoryCandidateInput
-): Promise<void> {
-  await invoke('save_memory_candidate', {
+): Promise<boolean> {
+  return invoke<boolean>('save_memory_candidate', {
     workspacePath: workspacePath.trim(),
     candidateJson: JSON.stringify(candidate),
   });

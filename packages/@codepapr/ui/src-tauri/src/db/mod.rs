@@ -2629,14 +2629,31 @@ pub(crate) struct MemoryCandidateInput {
     pub(crate) created_at: i64,
 }
 
+/// 保存候选。按 content_hash 去重：同内容候选已存在（pending/admitted/
+/// rejected 任一状态）时静默跳过并返回 false——回合后抽取会全量重扫历史
+/// 消息，不去重会让同一命令每回合重复入队（候选表线性增长 + 反复准入）。
+/// 返回 true 表示新插入。
 #[tauri::command]
 pub(crate) fn save_memory_candidate(
     workspace_path: String,
     candidate_json: String,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let input: MemoryCandidateInput = serde_json::from_str(&candidate_json)
         .map_err(|err| format!("记忆候选 JSON 不合法: {err}"))?;
     let (conn, ..) = open_project_db(&workspace_path)?;
+
+    let duplicate: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM memory_candidates WHERE content_hash = ?1 LIMIT 1",
+            params![input.content_hash],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| format!("查询重复候选失败: {err}"))?;
+    if duplicate.is_some() {
+        return Ok(false);
+    }
+
     conn.execute(
         "INSERT INTO memory_candidates
            (id, category, content, content_hash, confidence, trust,
@@ -2668,10 +2685,12 @@ pub(crate) fn save_memory_candidate(
         ],
     )
     .map_err(|err| format!("保存记忆候选失败: {err}"))?;
-    Ok(())
+    Ok(true)
 }
 
 /// 准入：候选 → entry（单事务），并 supersede 同内容哈希的旧 active entry。
+/// 幂等与遗忘保护：同 hash 已有 forgotten entry → 拒绝（候选标记 rejected）；
+/// 同 hash 已有 active entry → 不新建条目，仅标记候选 admitted 并返回既有 id。
 #[tauri::command]
 pub(crate) fn admit_memory_candidate(
     workspace_path: String,
@@ -2708,7 +2727,59 @@ pub(crate) fn admit_memory_candidate(
         .map_err(|err| format!("读取记忆候选失败: {err}"))?
         .ok_or_else(|| "候选不存在或已处理".to_string())?;
 
+    // risk_flags 只存候选表（准入审计）：带风险标记的内容本就不允许准入，
+    // active entry 上不会出现有意义的 risk_flags。
     let (category, content, content_hash, confidence, trust, source_session_id, source_message_ids, evidence, _risk_flags, created_at) = candidate;
+
+    // 已遗忘的同内容条目：遗忘是用户的显式决定，自动重扫（回合后抽取会
+    // 对同一命令反复生成候选）不得让它复活。候选标记 rejected 并阻断，
+    // 避免每回合重复提议。
+    let forgotten: Option<String> = tx
+        .query_row(
+            "SELECT id FROM memory_entries
+              WHERE content_hash = ?1 AND status = 'forgotten' LIMIT 1",
+            params![content_hash],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| format!("查询遗忘条目失败: {err}"))?;
+    if forgotten.is_some() {
+        tx.execute(
+            "UPDATE memory_candidates
+             SET status = 'rejected', decided_at = ?1, rejection_reason = 'content-forgotten'
+             WHERE id = ?2",
+            params![unix_millis()?, candidate_id],
+        )
+        .map_err(|err| format!("标记候选拒绝失败: {err}"))?;
+        tx.commit()
+            .map_err(|err| format!("提交候选拒绝失败: {err}"))?;
+        return Err("候选内容已被遗忘（memory_forget），不再准入".to_string());
+    }
+
+    // 同内容 active 条目已存在：幂等准入——不新建条目、不 supersede 抖动，
+    // 只把候选标记为 admitted 并返回既有 entry id。
+    let existing_active: Option<String> = tx
+        .query_row(
+            "SELECT id FROM memory_entries
+              WHERE content_hash = ?1 AND status = 'active' LIMIT 1",
+            params![content_hash],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| format!("查询既有条目失败: {err}"))?;
+    if let Some(existing_id) = existing_active {
+        tx.execute(
+            "UPDATE memory_candidates
+             SET status = 'admitted', decided_at = ?1
+             WHERE id = ?2",
+            params![unix_millis()?, candidate_id],
+        )
+        .map_err(|err| format!("标记候选已准入失败: {err}"))?;
+        tx.commit()
+            .map_err(|err| format!("提交准入事务失败: {err}"))?;
+        return Ok(existing_id);
+    }
+
     let verified_at = unix_millis()?;
 
     tx.execute(
@@ -2930,6 +3001,10 @@ fn map_memory_candidate_row(row: &rusqlite::Row) -> rusqlite::Result<MemoryCandi
 
 /// 双区投影：保留 user zone，覆盖 managed zone（ADR-008）。
 /// 无标记的旧文件整体视为 user zone，原样保留。
+///
+/// 标题（"## User Notes" 等）渲染在标记**之外**：标记之间的内容会被
+/// extract_user_zone 原样回读，若标题在标记内，每次投影都会把上次的
+/// 标题当作 user 内容再嵌回去，导致 memory.md 无限增长。
 #[tauri::command]
 pub(crate) fn project_memory_file(
     workspace_path: String,
@@ -2953,15 +3028,15 @@ pub(crate) fn project_memory_file(
     let rendered = [
         "# Project Memory",
         "",
-        USER_START,
         "## User Notes",
         "",
+        USER_START,
         &user_zone,
         USER_END,
         "",
-        MANAGED_START,
         "## Verified Project Knowledge",
         "",
+        MANAGED_START,
         managed_zone,
         MANAGED_END,
     ]
@@ -2976,10 +3051,12 @@ pub(crate) fn project_memory_file(
 }
 
 /// 提取 memory.md 的 user zone 内容（无标记的旧文件整体视为 user zone）。
+/// 历史 bug 曾把 "## User Notes" 标题渲染进标记内，每次投影累积一行；
+/// 提取时剥离开头的遗留标题行（迁移清理，绝不丢失用户内容）。
 fn extract_user_zone(existing: &str) -> String {
     const USER_START: &str = "<!-- CodePapr:user-memory:start -->";
     const USER_END: &str = "<!-- CodePapr:user-memory:end -->";
-    if existing.contains(USER_START) && existing.contains(USER_END) {
+    let zone = if existing.contains(USER_START) && existing.contains(USER_END) {
         existing
             .split(USER_START)
             .nth(1)
@@ -2989,7 +3066,12 @@ fn extract_user_zone(existing: &str) -> String {
             .to_string()
     } else {
         existing.trim().to_string()
+    };
+    let mut zone = zone.as_str();
+    while let Some(rest) = zone.strip_prefix("## User Notes") {
+        zone = rest.trim_start();
     }
+    zone.trim().to_string()
 }
 
 /// ADR-008 第4点：用户手编 memory.md 的 user zone 读入 ledger——trust=trusted /
@@ -4323,14 +4405,17 @@ mod tests {
         let entry2 = entries2.iter().find(|e| e.id == "user-zone").expect("entry2");
         assert!(entry2.content.contains("bun"));
 
-        // 4. 投影后的标记文件：只提取 user zone（managed zone 内容不混入）
-        let marked = "# Project Memory\n\n<!-- CodePapr:user-memory:start -->\n## User Notes\n\n用户手写的偏好：只用中文注释\n<!-- CodePapr:user-memory:end -->\n\n<!-- CodePapr:managed-memory:start -->\n## Verified Project Knowledge\n\n- [verified] pnpm test 通过\n<!-- CodePapr:managed-memory:end -->\n";
+        // 4. 投影后的标记文件：只提取 user zone（managed zone 内容不混入）；
+        //    历史 bug 遗留在标记内的 "## User Notes" 标题行必须被剥离，
+        //    不得作为用户内容进入 ledger。
+        let marked = "# Project Memory\n\n## User Notes\n\n<!-- CodePapr:user-memory:start -->\n## User Notes\n\n## User Notes\n\n用户手写的偏好：只用中文注释\n<!-- CodePapr:user-memory:end -->\n\n## Verified Project Knowledge\n\n<!-- CodePapr:managed-memory:start -->\n- [verified] pnpm test 通过\n<!-- CodePapr:managed-memory:end -->\n";
         fs::write(&memory_path, marked).unwrap();
         sync_user_zone_to_ledger(ws.clone()).expect("sync marked");
         let entries3 = load_memory_entries(ws.clone(), Some(true)).expect("load3");
         let entry3 = entries3.iter().find(|e| e.id == "user-zone").expect("entry3");
         assert!(entry3.content.contains("中文注释"));
         assert!(!entry3.content.contains("pnpm test 通过"));
+        assert!(!entry3.content.contains("## User Notes"));
 
         // 5. user zone 清空 → forgotten
         fs::write(
@@ -4341,5 +4426,249 @@ mod tests {
         sync_user_zone_to_ledger(ws.clone()).expect("sync cleared");
         let active = load_memory_entries(ws.clone(), Some(true)).expect("load active");
         assert!(!active.iter().any(|e| e.id == "user-zone"));
+    }
+
+    /// 回归：投影不得在 user zone 累积 "## User Notes" 标题（标题渲染在
+    /// 标记外；遗留在标记内的旧标题提取时剥离）。
+    #[test]
+    fn project_memory_file_keeps_user_zone_and_single_header() {
+        let workspace = TestWorkspace::new("memory-project-header");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        let memory_path = workspace.file_path(".CodePapr/memory.md");
+
+        // 1. 首次投影（空 user zone）：恰好一个标题
+        project_memory_file(ws.clone(), "- [verified] fact A".to_string())
+            .expect("project 1");
+        let first = fs::read_to_string(&memory_path).unwrap();
+        assert_eq!(first.matches("## User Notes").count(), 1);
+        assert!(first.contains("- [verified] fact A"));
+
+        // 2. 用户手编 user zone 后再次投影：内容保留、标题不累积
+        let with_note = first.replace(
+            "<!-- CodePapr:user-memory:start -->\n\n<!-- CodePapr:user-memory:end -->",
+            "<!-- CodePapr:user-memory:start -->\nmy note\n<!-- CodePapr:user-memory:end -->",
+        );
+        assert_ne!(with_note, first, "user zone marker replacement must apply");
+        fs::write(&memory_path, with_note).unwrap();
+        project_memory_file(ws.clone(), "- [verified] fact B".to_string())
+            .expect("project 2");
+        let second = fs::read_to_string(&memory_path).unwrap();
+        assert_eq!(second.matches("## User Notes").count(), 1);
+        assert!(second.contains("my note"));
+        assert!(second.contains("- [verified] fact B"));
+
+        // 3. 历史 bug 文件（标记内已累积多行标题）：一次投影即清理干净
+        let legacy = "# Project Memory\n\n<!-- CodePapr:user-memory:start -->\n## User Notes\n\n## User Notes\n\nreal content\n<!-- CodePapr:user-memory:end -->\n\n<!-- CodePapr:managed-memory:start -->\nold\n<!-- CodePapr:managed-memory:end -->\n";
+        fs::write(&memory_path, legacy).unwrap();
+        project_memory_file(ws.clone(), "- [verified] fact C".to_string())
+            .expect("project 3");
+        let third = fs::read_to_string(&memory_path).unwrap();
+        assert_eq!(third.matches("## User Notes").count(), 1);
+        assert!(third.contains("real content"));
+    }
+
+    /// 回归：候选按 content_hash 去重——同内容候选已存在（无论状态）时
+    /// 静默跳过，回合后全量重扫不得重复入队。
+    #[test]
+    fn save_memory_candidate_dedups_by_content_hash() {
+        let workspace = TestWorkspace::new("memory-candidate-dedup");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        let candidate = |id: &str| {
+            serde_json::json!({
+                "id": id,
+                "category": "verification",
+                "content": "[bash] ✓ pnpm test",
+                "contentHash": "h-dedup",
+                "confidence": "confirmed",
+                "trust": "workspace",
+                "sourceSessionId": "s1",
+                "sourceMessageIds": "[]",
+                "evidence": null,
+                "riskFlags": null,
+                "createdAt": 1i64,
+            })
+        };
+
+        assert_eq!(
+            save_memory_candidate(ws.clone(), candidate("c1").to_string()).expect("save 1"),
+            true
+        );
+        // 同 hash 第二次保存（新 id）→ 跳过
+        assert_eq!(
+            save_memory_candidate(ws.clone(), candidate("c2").to_string()).expect("save 2"),
+            false
+        );
+
+        // 准入后同 hash 依然去重（不再重复入队/准入）
+        admit_memory_candidate(ws.clone(), "c1".to_string(), "e1".to_string()).expect("admit");
+        assert_eq!(
+            save_memory_candidate(ws.clone(), candidate("c3").to_string()).expect("save 3"),
+            false
+        );
+
+        // 被拒绝后同 hash 同样去重（不得每回合重新提议）
+        let rejected = serde_json::json!({
+            "id": "c4",
+            "category": "general",
+            "content": "被拒绝的内容",
+            "contentHash": "h-rejected",
+            "confidence": "reported",
+            "trust": "derived",
+            "sourceSessionId": "s1",
+            "sourceMessageIds": "[]",
+            "evidence": null,
+            "riskFlags": null,
+            "createdAt": 2i64,
+        });
+        assert_eq!(
+            save_memory_candidate(ws.clone(), rejected.to_string()).expect("save 4"),
+            true
+        );
+        reject_memory_candidate(ws.clone(), "c4".to_string(), Some("no".to_string()))
+            .expect("reject");
+        let mut repost = rejected.clone();
+        repost["id"] = serde_json::json!("c5");
+        assert_eq!(
+            save_memory_candidate(ws.clone(), repost.to_string()).expect("save 5"),
+            false
+        );
+
+        // 候选表只有一条 h-dedup 记录（无重复行）
+        let candidates = load_memory_candidates(ws.clone(), None).expect("load candidates");
+        assert_eq!(
+            candidates.iter().filter(|c| c.content_hash == "h-dedup").count(),
+            1
+        );
+    }
+
+    /// 回归：forgotten 条目不得随重新准入复活；同 hash active 条目幂等准入。
+    #[test]
+    fn admit_memory_candidate_respects_forgotten_and_idempotent_active() {
+        let workspace = TestWorkspace::new("memory-admit-guard");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        let memory_path = workspace.file_path(".CodePapr/memory.md");
+
+        let candidate = |id: &str, hash: &str, content: &str| {
+            serde_json::json!({
+                "id": id,
+                "category": "verification",
+                "content": content,
+                "contentHash": hash,
+                "confidence": "confirmed",
+                "trust": "workspace",
+                "sourceSessionId": "s1",
+                "sourceMessageIds": "[]",
+                "evidence": null,
+                "riskFlags": null,
+                "createdAt": 1i64,
+            })
+        };
+
+        // 1. 准入 → 遗忘后，同 hash 候选在 save 层即被去重（第一道防线：
+        //    遗忘内容不再重新入队提议）。
+        save_memory_candidate(ws.clone(), candidate("c1", "h-f", "过时事实").to_string())
+            .expect("save c1");
+        admit_memory_candidate(ws.clone(), "c1".to_string(), "e1".to_string()).expect("admit c1");
+        forget_memory_entry(ws.clone(), "e1".to_string(), None).expect("forget");
+        assert_eq!(
+            save_memory_candidate(ws.clone(), candidate("c2", "h-f", "过时事实").to_string())
+                .expect("save c2"),
+            false
+        );
+        let active = load_memory_entries(ws.clone(), Some(true)).expect("load active");
+        assert!(!active.iter().any(|e| e.content_hash == "h-f"));
+
+        // 2. admit 层的遗忘守卫（无候选行的遗留条目，如 user-zone）：
+        //    user zone 内容 → entry → 遗忘 → 同内容候选准入必须被拒绝，
+        //    候选标记 rejected。
+        fs::write(&memory_path, "用户写过后又作废的内容").unwrap();
+        sync_user_zone_to_ledger(ws.clone()).expect("sync user zone");
+        forget_memory_entry(ws.clone(), "user-zone".to_string(), None).expect("forget user zone");
+        use sha2::{Digest, Sha256};
+        let zone_hash = {
+            let mut hasher = Sha256::new();
+            hasher.update("用户写过后又作废的内容".as_bytes());
+            format!("{:x}", hasher.finalize())
+        };
+        save_memory_candidate(
+            ws.clone(),
+            candidate("c3", &zone_hash, "用户写过后又作废的内容").to_string(),
+        )
+        .expect("save c3");
+        let err = admit_memory_candidate(ws.clone(), "c3".to_string(), "e3".to_string())
+            .expect_err("admit forgotten content must fail");
+        assert!(err.contains("遗忘"));
+        let rejected = load_memory_candidates(ws.clone(), Some("rejected".to_string()))
+            .expect("load rejected");
+        assert!(rejected.iter().any(|c| c.id == "c3"));
+
+        // 3. 同 hash active 条目：幂等准入——返回既有 entry id，不新建条目。
+        //    （无候选行的遗留条目场景：user zone 已生成 active entry，
+        //    agent 又对同内容建候选。）
+        fs::write(&memory_path, "稳定的项目事实").unwrap();
+        sync_user_zone_to_ledger(ws.clone()).expect("sync user zone 2");
+        let zone_hash2 = {
+            let mut hasher = Sha256::new();
+            hasher.update("稳定的项目事实".as_bytes());
+            format!("{:x}", hasher.finalize())
+        };
+        save_memory_candidate(ws.clone(), candidate("c4", &zone_hash2, "稳定的项目事实").to_string())
+            .expect("save c4");
+        let existing = admit_memory_candidate(ws.clone(), "c4".to_string(), "e4".to_string())
+            .expect("idempotent admit");
+        assert_eq!(existing, "user-zone");
+        let entries = load_memory_entries(ws.clone(), Some(false)).expect("load all");
+        assert_eq!(
+            entries.iter().filter(|e| e.content_hash == zone_hash2).count(),
+            1
+        );
+        // 候选被标记 admitted（审计闭环）
+        let admitted = load_memory_candidates(ws.clone(), Some("admitted".to_string()))
+            .expect("load admitted");
+        assert!(admitted.iter().any(|c| c.id == "c4"));
+    }
+
+    /// 回归：候选溯源字段（sourceMessageIds/evidence/riskFlags）按 Rust serde
+    /// 契约落库并随准入进入 entry（字段名不匹配曾被静默丢弃）。
+    #[test]
+    fn memory_candidate_provenance_roundtrip() {
+        let workspace = TestWorkspace::new("memory-provenance");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        let candidate = serde_json::json!({
+            "id": "cand-p",
+            "category": "verification",
+            "content": "[bash] ✓ pnpm test auth",
+            "contentHash": "h-prov",
+            "confidence": "confirmed",
+            "trust": "workspace",
+            "sourceSessionId": "s1",
+            "sourceMessageIds": "[\"m1\",\"m2\"]",
+            "evidence": "{\"origin\":\"bash:pnpm test auth\"}",
+            "riskFlags": "[]",
+            "createdAt": 1i64,
+        });
+        save_memory_candidate(ws.clone(), candidate.to_string()).expect("save");
+
+        let candidates = load_memory_candidates(ws.clone(), Some("pending".to_string()))
+            .expect("load candidates");
+        let loaded = candidates.iter().find(|c| c.id == "cand-p").expect("candidate");
+        assert_eq!(loaded.source_message_ids.as_deref(), Some("[\"m1\",\"m2\"]"));
+        assert_eq!(loaded.risk_flags.as_deref(), Some("[]"));
+
+        admit_memory_candidate(ws.clone(), "cand-p".to_string(), "entry-p".to_string())
+            .expect("admit");
+        let entries = load_memory_entries(ws.clone(), Some(true)).expect("load entries");
+        let entry = entries.iter().find(|e| e.id == "entry-p").expect("entry");
+        assert_eq!(entry.source_message_ids.as_deref(), Some("[\"m1\",\"m2\"]"));
+        assert_eq!(
+            entry.evidence.as_deref(),
+            Some("{\"origin\":\"bash:pnpm test auth\"}")
+        );
     }
 }

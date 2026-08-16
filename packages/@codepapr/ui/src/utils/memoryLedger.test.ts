@@ -170,9 +170,11 @@ describe('buildMemoryCandidateInput', () => {
       createdAt: 123,
     });
     expect(input.sourceSessionId).toBe('s1');
-    expect(JSON.parse(input.sourceMessageIdsJson)).toEqual(['a1']);
+    // 字段名与 Rust serde 契约对齐（无 Json 后缀，否则溯源静默丢失）。
+    expect(JSON.parse(input.sourceMessageIds)).toEqual(['a1']);
     expect(input.contentHash).toMatch(/^[0-9a-f]{64}$/);
     expect(input.trust).toBe('workspace');
-    expect(JSON.parse(input.evidenceJson).origin).toBe('bash:pnpm test auth');
+    expect(JSON.parse(input.evidence).origin).toBe('bash:pnpm test auth');
+    expect(JSON.parse(input.riskFlags)).toEqual([]);
   });
 });

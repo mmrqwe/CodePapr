@@ -1227,18 +1227,18 @@ name: 'web_download_file',
   {
     name: 'memory_review_candidates',
     description:
-      '审查记忆候选队列：默认列出 pending 候选；可对候选执行 admit（准入稳定记忆）或 reject（拒绝）。',
+      '查看记忆候选队列：默认列出 pending 候选；可 reject（拒绝）候选。准入（admit）必须由用户在记忆面板确认，Agent 不可自我准入。',
     parameters: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          description: '可选。list（默认）/ admit / reject。',
+          description: '可选。list（默认）/ reject。',
         },
         candidateIds: {
           type: 'array',
           items: { type: 'string' },
-          description: '可选。要处理的候选 id 列表（admit/reject 时必填）。',
+          description: '可选。要处理的候选 id 列表（reject 时必填）。',
         },
         reason: {
           type: 'string',

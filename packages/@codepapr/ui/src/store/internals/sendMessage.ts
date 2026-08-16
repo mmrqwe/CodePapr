@@ -1005,13 +1005,17 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                       return;
                     }
                     // 候选 → 准入 → 投影（managed zone）。
-                    const { candidateId } = await proposeMemoryCandidateFromWrite({
+                    const { candidateId, deduplicated } = await proposeMemoryCandidateFromWrite({
                       workspacePath,
                       sessionId: activeSessionId ?? undefined,
                       content: generated,
                       origin: 'cold-start-bootstrap',
                     });
-                    await admitMemoryCandidate(workspacePath, candidateId, createId());
+                    // 同内容候选已存在（deduplicated）时本次未落库新候选：
+                    // 无新 id 可准入，直接跳过（既有候选/条目已覆盖该内容）。
+                    if (!deduplicated) {
+                      await admitMemoryCandidate(workspacePath, candidateId, createId());
+                    }
                     const entries = await loadMemoryEntries(workspacePath, true);
                     const projection = buildMemoryProjection(
                       entries.map((entry) => ({

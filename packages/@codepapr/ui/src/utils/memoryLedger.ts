@@ -120,7 +120,8 @@ export function buildMemoryProjection(entries: readonly ProjectionEntry[]): stri
   return lines.join('\n');
 }
 
-/** 生成候选落库所需的输入（含内容哈希、来源溯源）。 */
+/** 生成候选落库所需的输入（含内容哈希、来源溯源）。字段名与 Rust
+ *  MemoryCandidateInput 的 serde camelCase 对齐（否则溯源静默丢失）。 */
 export function buildMemoryCandidateInput(params: {
   sessionId: string;
   sourceMessageIds: string[];
@@ -135,9 +136,9 @@ export function buildMemoryCandidateInput(params: {
   confidence: 'confirmed';
   trust: 'trusted' | 'workspace' | 'derived' | 'untrusted';
   sourceSessionId: string;
-  sourceMessageIdsJson: string;
-  evidenceJson: string;
-  riskFlagsJson: string;
+  sourceMessageIds: string;
+  evidence: string;
+  riskFlags: string;
   createdAt: number;
 } {
   const content = redactSecrets(params.envelope.content);
@@ -149,9 +150,9 @@ export function buildMemoryCandidateInput(params: {
     confidence: 'confirmed',
     trust: params.envelope.trust,
     sourceSessionId: params.sessionId,
-    sourceMessageIdsJson: JSON.stringify(params.sourceMessageIds),
-    evidenceJson: JSON.stringify({ origin: params.envelope.origin }),
-    riskFlagsJson: JSON.stringify(params.envelope.riskFlags),
+    sourceMessageIds: JSON.stringify(params.sourceMessageIds),
+    evidence: JSON.stringify({ origin: params.envelope.origin }),
+    riskFlags: JSON.stringify(params.envelope.riskFlags),
     createdAt: params.createdAt ?? Date.now(),
   };
 }

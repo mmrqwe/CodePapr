@@ -42,7 +42,12 @@ export async function refreshMemoryLedgerProjection(
     );
   }
 
-  // 1. 候选抽取 + 确定性准入裁决
+  // 1. 候选抽取 + 确定性准入裁决。
+  // 每回合全量重扫历史消息，去重全部依赖 content_hash（Rust 侧）：
+  // - save 对同 hash 候选（pending/admitted/rejected）静默跳过 → 同一命令
+  //   不再每回合重复入队；
+  // - admit 对同 hash 已 forgotten 的条目拒绝、已 active 的条目幂等，
+  //   被遗忘的记忆不会随重扫复活。
   const candidates = collectVerifiedMemoryCandidates(messages);
   let admitted = false;
   for (const { envelope, category, sourceMessageIds } of candidates) {
@@ -58,7 +63,11 @@ export async function refreshMemoryLedgerProjection(
         envelope,
         category,
       });
-      await saveMemoryCandidate(workspacePath, input);
+      const inserted = await saveMemoryCandidate(workspacePath, input);
+      if (!inserted) {
+        // 同内容候选已存在（通常已准入）：无新内容，跳过。
+        continue;
+      }
       await admitMemoryCandidate(workspacePath, input.id, createId());
       admitted = true;
     } catch (err) {

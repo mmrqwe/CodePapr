@@ -52,6 +52,10 @@ describe('memoryTools (ADR-008 PR4)', () => {
   });
 
   it('memory_write creates a pending candidate (never writes memory.md)', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'save_memory_candidate') return true;
+      return {};
+    });
     const registry = buildRegistry();
     const result = (await registry.execute('memory_write', {
       content: '项目使用 pnpm workspace',
@@ -67,13 +71,40 @@ describe('memoryTools (ADR-008 PR4)', () => {
       confidence: string;
       trust: string;
       content: string;
+      sourceMessageIds?: string;
+      evidence?: string;
+      riskFlags?: string;
+      sourceMessageIdsJson?: string;
+      evidenceJson?: string;
+      riskFlagsJson?: string;
     };
     expect(payload.category).toBe('decision');
     expect(payload.confidence).toBe('reported');
     expect(payload.trust).toBe('derived');
     expect(payload.content).toContain('pnpm workspace');
+    // 溯源字段与 Rust serde 契约对齐（无 Json 后缀，否则静默丢失）。
+    expect(payload.sourceMessageIds).toBe('[]');
+    expect(payload.evidence).toContain('memory_write');
+    expect(payload.riskFlags).toBe('[]');
+    expect(payload.sourceMessageIdsJson).toBeUndefined();
+    expect(payload.evidenceJson).toBeUndefined();
+    expect(payload.riskFlagsJson).toBeUndefined();
     // 绝不直写 memory.md。
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'write_text_file')).toBe(false);
+  });
+
+  it('memory_write reports duplicate when the same content was already proposed', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'save_memory_candidate') return false;
+      return {};
+    });
+    const registry = buildRegistry();
+    const result = (await registry.execute('memory_write', {
+      content: '项目使用 pnpm workspace',
+    })) as { status: string; note: string };
+
+    expect(result.status).toBe('duplicate');
+    expect(result.note).toContain('未重复入队');
   });
 
   it('memory_write rejects content flagged by the risk detection', async () => {
@@ -195,43 +226,32 @@ describe('memoryTools (ADR-008 PR4)', () => {
     expect(result.candidates).toContain('c1');
   });
 
-  it('memory_review_candidates admits a candidate and reprojects', async () => {
-    invokeMock.mockImplementation(async (command: string) => {
-      if (command === 'load_memory_candidates') {
-        return [
-          {
-            id: 'c1',
-            category: 'general',
-            content: '这是一个足够长的候选记忆内容用于准入测试',
-            contentHash: 'h',
-            confidence: 'reported',
-            trust: 'derived',
-            status: 'pending',
-            riskFlags: null,
-            sourceSessionId: null,
-            sourceMessageIds: null,
-            createdAt: 1,
-            decidedAt: null,
-            rejectionReason: null,
-          },
-        ];
-      }
-      if (command === 'load_memory_entries') return [];
-      return {};
-    });
+  it('memory_review_candidates refuses admit: agent cannot self-admit (ADR-008 user-confirmed)', async () => {
+    const registry = buildRegistry();
+    await expect(
+      registry.execute('memory_review_candidates', {
+        action: 'admit',
+        candidateIds: ['c1'],
+      })
+    ).rejects.toThrow(/不能自我准入/);
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'admit_memory_candidate')).toBe(false);
+  });
+
+  it('memory_review_candidates rejects a candidate', async () => {
+    invokeMock.mockImplementation(async () => ({}));
     const registry = buildRegistry();
     const result = (await registry.execute('memory_review_candidates', {
-      action: 'admit',
+      action: 'reject',
       candidateIds: ['c1'],
+      reason: '不准确',
     })) as { action: string; results: string[] };
 
-    expect(result.results[0]).toContain('admitted: c1');
-    expect(invokeMock).toHaveBeenCalledWith('admit_memory_candidate', {
+    expect(result.results[0]).toContain('rejected: c1');
+    expect(invokeMock).toHaveBeenCalledWith('reject_memory_candidate', {
       workspacePath: '/tmp/ws',
       candidateId: 'c1',
-      entryId: expect.any(String),
+      reason: '不准确',
     });
-    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'project_memory_file')).toBe(true);
   });
 
   it('rejects unknown actions', async () => {

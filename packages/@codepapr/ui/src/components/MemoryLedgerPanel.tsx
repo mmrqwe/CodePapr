@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { envelopeContent, planMemoryAdmission } from '@codepapr/core';
 import { getTranslation, type Lang } from '../utils/i18n';
 import { createId } from '../utils/createId';
 import {
@@ -204,6 +205,19 @@ export function MemoryLedgerPanel({ workspacePath, lang }: MemoryLedgerPanelProp
                     <span className="ml-auto flex items-center gap-1.5">
                       {actionButton(candidate.id, t.memoryLedgerAdmit, 'accent', () =>
                         void withBusy(candidate.id, async () => {
+                          // 准入策略（真正防线，ADR-008）：面板是唯一准入入口，
+                          // 用户确认前仍须过 planMemoryAdmission 风险检测。
+                          const admission = planMemoryAdmission(
+                            envelopeContent({
+                              source: 'memory-candidate',
+                              trust: candidate.trust as 'trusted' | 'workspace' | 'derived' | 'untrusted',
+                              origin: 'memory-ledger-panel',
+                              content: candidate.content,
+                            })
+                          );
+                          if (!admission.admitted) {
+                            throw new Error(`准入策略拒绝: ${admission.reason}`);
+                          }
                           await admitMemoryCandidate(workspacePath, candidate.id, createId());
                           await reprojectMemoryManagedZone(workspacePath);
                         })
