@@ -957,6 +957,14 @@ export async function projectMemoryFile(
   });
 }
 
+/** ADR-008 第4点：user zone 读入 ledger（trust=trusted / source=user-edit /
+ *  confirmed），供 Recall 检索命中。幂等（内容哈希不变则无操作）。 */
+export async function syncUserZoneToLedger(workspacePath: string): Promise<void> {
+  await invoke('sync_user_zone_to_ledger', {
+    workspacePath: workspacePath.trim(),
+  });
+}
+
 // ── Memory Recall（PR5，ADR-009 B3）───────────────────────────────────
 
 export interface RecallSearchInput {

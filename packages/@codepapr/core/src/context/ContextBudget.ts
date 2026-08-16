@@ -100,6 +100,10 @@ export interface ContextBudgetDecisionInput {
   providerOverflowDetected?: boolean;
   /** 本次溢出已尝试过 emergency-compact（PR3：至多一次重试）。 */
   emergencyAlreadyAttempted?: boolean;
+  /** provider 实测输入 token（上一次请求的 usage.input_tokens，且当前 log
+   *  状态与测量时一致才可传入）——对账覆盖 heuristic 估算，
+   *  estimateSource 取 'provider'。 */
+  providerMeasuredTotalTokens?: number;
   estimateSource: ContextEstimateSource;
 }
 
@@ -115,20 +119,23 @@ export interface ContextBudgetDecision {
 export function decideContextBudgetAction(input: ContextBudgetDecisionInput): ContextBudgetDecision {
   const { breakdown } = input;
   const providerLimit = input.providerContextLimitTokens;
-  const overSoftBy = Math.max(0, breakdown.totalTokens - input.softBudgetTokens);
-  const overHardBy = Math.max(0, breakdown.totalTokens - input.hardBudgetTokens);
+  const measured = input.providerMeasuredTotalTokens;
+  const estimateSource = measured !== undefined ? 'provider' : input.estimateSource;
+  const totalTokens = measured ?? breakdown.totalTokens;
+  const overSoftBy = Math.max(0, totalTokens - input.softBudgetTokens);
+  const overHardBy = Math.max(0, totalTokens - input.hardBudgetTokens);
 
   if (input.providerOverflowDetected) {
     return {
       action: input.emergencyAlreadyAttempted ? 'reject-request' : 'emergency-compact',
       overSoftBy,
       overHardBy,
-      estimateSource: input.estimateSource,
+      estimateSource,
     };
   }
 
   if (overSoftBy === 0) {
-    return { action: 'none', overSoftBy: 0, overHardBy: 0, estimateSource: input.estimateSource };
+    return { action: 'none', overSoftBy: 0, overHardBy: 0, estimateSource };
   }
 
   if (overHardBy === 0) {
@@ -136,18 +143,18 @@ export function decideContextBudgetAction(input: ContextBudgetDecisionInput): Co
       action: 'prune-tool-results',
       overSoftBy,
       overHardBy: 0,
-      estimateSource: input.estimateSource,
+      estimateSource,
     };
   }
 
-  if (providerLimit !== undefined && breakdown.totalTokens > providerLimit) {
+  if (providerLimit !== undefined && totalTokens > providerLimit) {
     return {
       action: 'emergency-compact',
       overSoftBy,
       overHardBy,
-      estimateSource: input.estimateSource,
+      estimateSource,
     };
   }
 
-  return { action: 'compact', overSoftBy, overHardBy, estimateSource: input.estimateSource };
+  return { action: 'compact', overSoftBy, overHardBy, estimateSource };
 }

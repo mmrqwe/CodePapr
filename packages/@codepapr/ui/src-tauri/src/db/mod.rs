@@ -2944,18 +2944,8 @@ pub(crate) fn project_memory_file(
     const MANAGED_START: &str = "<!-- CodePapr:managed-memory:start -->";
     const MANAGED_END: &str = "<!-- CodePapr:managed-memory:end -->";
 
-    let user_zone = if existing.contains(USER_START) && existing.contains(USER_END) {
-        existing
-            .split(USER_START)
-            .nth(1)
-            .and_then(|after| after.split(USER_END).next())
-            .unwrap_or("")
-            .trim()
-            .to_string()
-    } else {
-        // 旧文件无标记：整体视为 user zone（绝不丢失用户内容）
-        existing.trim().to_string()
-    };
+    // 旧文件无标记时 extract_user_zone 将整体视为 user zone（绝不丢失用户内容）
+    let user_zone = extract_user_zone(&existing);
 
     let managed_zone = managed_zone_markdown.trim();
 
@@ -2981,6 +2971,84 @@ pub(crate) fn project_memory_file(
         .map_err(|err| format!("创建项目目录失败: {err}"))?;
     fs::write(&memory_path, rendered)
         .map_err(|err| format!("写入 memory.md 失败: {err}"))?;
+    Ok(())
+}
+
+/// 提取 memory.md 的 user zone 内容（无标记的旧文件整体视为 user zone）。
+fn extract_user_zone(existing: &str) -> String {
+    const USER_START: &str = "<!-- CodePapr:user-memory:start -->";
+    const USER_END: &str = "<!-- CodePapr:user-memory:end -->";
+    if existing.contains(USER_START) && existing.contains(USER_END) {
+        existing
+            .split(USER_START)
+            .nth(1)
+            .and_then(|after| after.split(USER_END).next())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    } else {
+        existing.trim().to_string()
+    }
+}
+
+/// ADR-008 第4点：用户手编 memory.md 的 user zone 读入 ledger——trust=trusted /
+/// source=user-edit / confidence=confirmed，供 Recall 检索命中。确定性 id
+/// （"user-zone"）+ 内容哈希幂等：未变化不写；清空则 forgotten。
+#[tauri::command]
+pub(crate) fn sync_user_zone_to_ledger(workspace_path: String) -> Result<(), String> {
+    const USER_ZONE_ENTRY_ID: &str = "user-zone";
+    let (workspace, ..) = project_db_path(&workspace_path)?;
+    let memory_path = workspace.join(".CodePapr").join("memory.md");
+    let existing = fs::read_to_string(&memory_path).unwrap_or_default();
+    let user_zone = extract_user_zone(&existing);
+
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    if user_zone.is_empty() {
+        conn.execute(
+            "UPDATE memory_entries
+             SET status = 'forgotten', forgotten_reason = 'user-zone-cleared'
+             WHERE id = ?1 AND status = 'active'",
+            params![USER_ZONE_ENTRY_ID],
+        )
+        .map_err(|err| format!("清空 user zone 条目失败: {err}"))?;
+        return Ok(());
+    }
+
+    use sha2::{Digest, Sha256};
+    let hash = {
+        let mut hasher = Sha256::new();
+        hasher.update(user_zone.as_bytes());
+        format!("{:x}", hasher.finalize())
+    };
+
+    let existing_hash: Option<String> = conn
+        .query_row(
+            "SELECT content_hash FROM memory_entries WHERE id = ?1",
+            params![USER_ZONE_ENTRY_ID],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| format!("读取 user zone 条目哈希失败: {err}"))?;
+    if existing_hash.as_deref() == Some(hash.as_str()) {
+        return Ok(());
+    }
+
+    let now = unix_millis()?;
+    conn.execute(
+        "INSERT INTO memory_entries
+           (id, category, content, content_hash, confidence, trust, status,
+            evidence, created_at, verified_at)
+         VALUES (?1, 'user-note', ?2, ?3, 'confirmed', 'trusted', 'active',
+                 '{\"source\":\"user-edit\"}', ?4, ?4)
+         ON CONFLICT(id) DO UPDATE SET
+           content = excluded.content,
+           content_hash = excluded.content_hash,
+           status = 'active',
+           created_at = excluded.created_at,
+           verified_at = excluded.verified_at",
+        params![USER_ZONE_ENTRY_ID, user_zone, hash, now],
+    )
+    .map_err(|err| format!("同步 user zone 到 ledger 失败: {err}"))?;
     Ok(())
 }
 
@@ -4081,5 +4149,54 @@ mod tests {
 
         // 二次遗忘（非 active）报错，不静默成功
         assert!(forget_memory_entry(ws.clone(), "entry-f1".to_string(), None).is_err());
+    }
+
+    /// ADR-008 第4点：user zone 读入 ledger——trusted/user-edit/confirmed，
+    /// 哈希幂等；清空则 forgotten。
+    #[test]
+    fn sync_user_zone_to_ledger_roundtrip() {
+        let workspace = TestWorkspace::new("memory-user-zone-sync");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        let memory_path = workspace.file_path(".CodePapr/memory.md");
+
+        // 1. 旧文件无标记：整体视为 user zone
+        fs::write(&memory_path, "# Project Memory\n\n用户手写的偏好：使用 pnpm").unwrap();
+        sync_user_zone_to_ledger(ws.clone()).expect("sync legacy");
+        let entries = load_memory_entries(ws.clone(), Some(true)).expect("load");
+        let entry = entries.iter().find(|e| e.id == "user-zone").expect("entry");
+        assert_eq!(entry.category, "user-note");
+        assert_eq!(entry.confidence, "confirmed");
+        assert_eq!(entry.trust, "trusted");
+        assert!(entry.content.contains("用户手写的偏好"));
+
+        // 2. 未变化：同步幂等（content_hash 不变，不报错）
+        sync_user_zone_to_ledger(ws.clone()).expect("sync unchanged");
+
+        // 3. 变化：内容更新
+        fs::write(&memory_path, "# Project Memory\n\n用户手写的偏好：改用 bun").unwrap();
+        sync_user_zone_to_ledger(ws.clone()).expect("sync changed");
+        let entries2 = load_memory_entries(ws.clone(), Some(true)).expect("load2");
+        let entry2 = entries2.iter().find(|e| e.id == "user-zone").expect("entry2");
+        assert!(entry2.content.contains("bun"));
+
+        // 4. 投影后的标记文件：只提取 user zone（managed zone 内容不混入）
+        let marked = "# Project Memory\n\n<!-- CodePapr:user-memory:start -->\n## User Notes\n\n用户手写的偏好：只用中文注释\n<!-- CodePapr:user-memory:end -->\n\n<!-- CodePapr:managed-memory:start -->\n## Verified Project Knowledge\n\n- [verified] pnpm test 通过\n<!-- CodePapr:managed-memory:end -->\n";
+        fs::write(&memory_path, marked).unwrap();
+        sync_user_zone_to_ledger(ws.clone()).expect("sync marked");
+        let entries3 = load_memory_entries(ws.clone(), Some(true)).expect("load3");
+        let entry3 = entries3.iter().find(|e| e.id == "user-zone").expect("entry3");
+        assert!(entry3.content.contains("中文注释"));
+        assert!(!entry3.content.contains("pnpm test 通过"));
+
+        // 5. user zone 清空 → forgotten
+        fs::write(
+            &memory_path,
+            "<!-- CodePapr:user-memory:start -->\n<!-- CodePapr:user-memory:end -->\n",
+        )
+        .unwrap();
+        sync_user_zone_to_ledger(ws.clone()).expect("sync cleared");
+        let active = load_memory_entries(ws.clone(), Some(true)).expect("load active");
+        assert!(!active.iter().any(|e| e.id == "user-zone"));
     }
 }

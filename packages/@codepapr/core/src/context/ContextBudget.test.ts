@@ -109,6 +109,34 @@ describe('decideContextBudgetAction', () => {
     });
     expect(decision.estimateSource).toBe('provider');
   });
+
+  it('PR2：provider 实测 token 覆盖 heuristic 估算（estimateSource=provider）', () => {
+    // heuristic 估算低于 soft，但 provider 实测高于 soft 且低于 hard → prune。
+    const heuristic = buildContextBudgetBreakdown(stages, 2_000);
+    expect(heuristic.totalTokens).toBeLessThan(soft);
+    const decision = decideContextBudgetAction({
+      breakdown: heuristic,
+      softBudgetTokens: soft,
+      hardBudgetTokens: hard,
+      providerMeasuredTotalTokens: 50_000,
+      estimateSource: 'heuristic',
+    });
+    expect(decision.action).toBe('prune-tool-results');
+    expect(decision.estimateSource).toBe('provider');
+    expect(decision.overSoftBy).toBe(10_000);
+
+    // 实测高于 hard → compact。
+    const overHard = decideContextBudgetAction({
+      breakdown: heuristic,
+      softBudgetTokens: soft,
+      hardBudgetTokens: hard,
+      providerMeasuredTotalTokens: 70_000,
+      estimateSource: 'heuristic',
+    });
+    expect(overHard.action).toBe('compact');
+    expect(overHard.estimateSource).toBe('provider');
+    expect(overHard.overHardBy).toBe(10_000);
+  });
 });
 
 describe('fact summary truncation', () => {

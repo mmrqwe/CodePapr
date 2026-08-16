@@ -505,6 +505,14 @@ export class Agent {
   private overflowCompactionAttempted = false;
   /** PR5（ADR-009 B3）：本回合 request-only 锚定插入（Recall Block）。 */
   private contextInsertions: RequestContextInsertion[] = [];
+  /** PR2：provider 实测输入 token（上次成功响应的 usage.input_tokens）与
+   *  测量时的 log 状态（长度 + 末条消息 id）。仅当状态一致时用于对账覆盖
+   *  heuristic 估算（estimateSource='provider'）；replaceLog 后失效。 */
+  private lastProviderUsage: {
+    inputTokens: number;
+    logLength: number;
+    lastMessageId: string | undefined;
+  } | null = null;
 
   constructor(opts: AgentOptions) {
     this.session = opts.session;
@@ -643,6 +651,7 @@ export class Agent {
       }
       this.lastCompactionFailed = false;
       this.session.replaceLog(compacted.messages);
+      this.lastProviderUsage = null;
       this.requestBuilder.resetLogTracking?.();
       if (compacted.cacheStats) {
         this.session.recordStats(compacted.cacheStats);
@@ -653,6 +662,21 @@ export class Agent {
       // 压缩失败：不吞掉原始 provider 错误，由调用方按原错误处理。
       return false;
     }
+  }
+
+  /**
+   * PR2：provider 实测对账——上次成功响应的 usage.input_tokens 仅在 log
+   * 状态（长度 + 末条消息 id）与测量时一致才有效（典型场景：续写/空完成
+   * 重试，log 不变、suffix 是临时的；工具轮后 log 已增长则回落 heuristic）。
+   */
+  private currentProviderMeasuredTokens(): number | undefined {
+    const usage = this.lastProviderUsage;
+    if (!usage) return undefined;
+    if (usage.logLength !== this.session.logStore.length()) return undefined;
+    if (usage.lastMessageId !== (this.session.logStore.getLastMessage()?.id ?? undefined)) {
+      return undefined;
+    }
+    return usage.inputTokens;
   }
 
   /** 可被取消的等待：空完成退避重试使用。取消立即抛 AbortError。 */
@@ -749,6 +773,8 @@ export class Agent {
           breakdown,
           softBudgetTokens: this.contextCompaction.softMaxTokens,
           hardBudgetTokens: this.contextCompaction.maxContextTokens,
+          // PR2：provider 实测对账——log 状态与测量时一致才覆盖 heuristic。
+          providerMeasuredTotalTokens: this.currentProviderMeasuredTokens(),
           estimateSource: 'heuristic',
         });
 
@@ -769,6 +795,7 @@ export class Agent {
           );
           if (pruned !== (current as IMessage[])) {
             this.session.replaceLog(pruned);
+            this.lastProviderUsage = null;
             this.requestBuilder.resetLogTracking?.();
             onStreamEvent?.({ type: 'context-pruned', round: roundNumber });
           }
@@ -787,6 +814,7 @@ export class Agent {
             if (compacted && compacted.messages.length > 0) {
               this.lastCompactionFailed = false;
               this.session.replaceLog(compacted.messages);
+              this.lastProviderUsage = null;
               this.requestBuilder.resetLogTracking?.();
               if (compacted.cacheStats) {
                 this.session.recordStats(compacted.cacheStats);
@@ -857,6 +885,47 @@ export class Agent {
               ]
             : undefined;
 
+        // PR2：provider 实测对账——续写请求的 log 与上次测量时完全一致
+        // （suffix 是临时消息），用 usage.input_tokens 决策；只执行
+        // prune-tool-results / reject-request（compact 会替换 log，使已合并
+        // 的部分输出相对新 epoch 失效）。
+        if (continuationAttempt > 0 && this.contextCompaction) {
+          const measured = this.currentProviderMeasuredTokens();
+          if (measured !== undefined) {
+            const decision = decideContextBudgetAction({
+              breakdown: this.computeBudgetBreakdown(0),
+              softBudgetTokens: this.contextCompaction.softMaxTokens,
+              hardBudgetTokens: this.contextCompaction.maxContextTokens,
+              providerMeasuredTotalTokens: measured,
+              estimateSource: 'heuristic',
+            });
+            if (decision.action === 'reject-request') {
+              throw new ContextBudgetRejectedError(
+                decision.overHardBy,
+                decision.estimateSource
+              );
+            }
+            if (
+              decision.action === 'prune-tool-results' &&
+              this.contextCompaction.pruneOptions
+            ) {
+              const current = this.session.logStore.getAllMessages();
+              const pruned = pruneOldToolResults(
+                current as IMessage[],
+                this.contextCompaction.pruneOptions
+              );
+              if (pruned !== (current as IMessage[])) {
+                this.session.replaceLog(pruned);
+                this.lastProviderUsage = null;
+                this.requestBuilder.resetLogTracking?.();
+                onStreamEvent?.({ type: 'context-pruned', round: roundNumber });
+              }
+            }
+          }
+        }
+
+        const requestLogLength = this.session.logStore.length();
+        const requestLastMessageId = this.session.logStore.getLastMessage()?.id;
         request = this.requestBuilder.build({
           prefix: this.session.prefix,
           appendLog: this.session.logStore,
@@ -885,6 +954,15 @@ export class Agent {
             onStreamEvent && this.provider.streamChat
               ? await this.provider.streamChat(request, onStreamEvent, effectiveSignal)
               : await this.provider.chat(request, effectiveSignal);
+          // PR2：provider 实测记录（usage.input_tokens + 测量时 log 状态），
+          // 供后续状态一致的请求对账覆盖 heuristic 估算。
+          if (typeof response.usage?.input_tokens === 'number') {
+            this.lastProviderUsage = {
+              inputTokens: response.usage.input_tokens,
+              logLength: requestLogLength,
+              lastMessageId: requestLastMessageId,
+            };
+          }
         } catch (err) {
           // PR3：provider 上下文溢出 → emergency-compact 后重试一次。
           // 与流层重连（overloaded/rate_limit 无限重连）完全正交：溢出是
@@ -940,6 +1018,7 @@ export class Agent {
               throw err;
             }
             this.session.replaceLog(stripped);
+            this.lastProviderUsage = null;
             this.requestBuilder.resetLogTracking?.();
             onStreamEvent?.({
               type: 'tool-call-end',

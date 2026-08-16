@@ -5,7 +5,9 @@ import {
   estimateRecallItemTokens,
   MAX_RECALL_ITEMS,
   MAX_RECALL_TOKENS,
+  MIN_RECALL_BUDGET_TOKENS,
   renderRecallBlock,
+  resolveRecallBudget,
   type RecallDisplayItem,
 } from './memoryRecall';
 
@@ -98,5 +100,49 @@ describe('estimateRecallItemTokens', () => {
   it('sums title+content estimates', () => {
     const tokens = estimateRecallItemTokens([item('t', 'c'.repeat(40))]);
     expect(tokens).toBeGreaterThan(0);
+  });
+});
+
+describe('resolveRecallBudget (ADR-009 第10条)', () => {
+  it('uses the configured budget when no remaining-soft info is given', () => {
+    expect(resolveRecallBudget({})).toEqual({
+      maxItems: MAX_RECALL_ITEMS,
+      maxTokens: MAX_RECALL_TOKENS,
+    });
+  });
+
+  it('reduces to min(configured, remainingSoft * 0.20) when tight', () => {
+    const budget = resolveRecallBudget({ remainingSoftBudgetTokens: 2_000 });
+    expect(budget).toEqual({ maxItems: MAX_RECALL_ITEMS, maxTokens: 400 });
+  });
+
+  it('keeps the configured budget when remaining-soft is roomy', () => {
+    const budget = resolveRecallBudget({ remainingSoftBudgetTokens: 50_000 });
+    expect(budget?.maxTokens).toBe(MAX_RECALL_TOKENS);
+  });
+
+  it('returns null below the minimum budget (skip recall)', () => {
+    expect(resolveRecallBudget({ remainingSoftBudgetTokens: 999 })).toBeNull();
+    expect(resolveRecallBudget({ remainingSoftBudgetTokens: 0 })).toBeNull();
+    expect(resolveRecallBudget({ remainingSoftBudgetTokens: -100 })).toBeNull();
+  });
+
+  it('respects a custom configured max', () => {
+    const budget = resolveRecallBudget({
+      configuredMaxTokens: 600,
+      remainingSoftBudgetTokens: 10_000,
+    });
+    expect(budget?.maxTokens).toBe(600);
+  });
+
+  it('skips when the configured budget itself is below the floor', () => {
+    expect(
+      resolveRecallBudget({ configuredMaxTokens: 100, remainingSoftBudgetTokens: 100_000 })
+    ).toBeNull();
+  });
+
+  it('min floor boundary', () => {
+    const budget = resolveRecallBudget({ remainingSoftBudgetTokens: MIN_RECALL_BUDGET_TOKENS * 5 });
+    expect(budget?.maxTokens).toBe(MIN_RECALL_BUDGET_TOKENS);
   });
 });

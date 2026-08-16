@@ -112,6 +112,21 @@ vi.mock('../utils/projectStorage', () => ({
   enqueueProjectStateSave: enqueueProjectStateSaveMock,
   aggregateSessionRuntimeInDb: aggregateSessionRuntimeInDbMock,
   waitForPendingProjectStateSave: waitForPendingProjectStateSaveMock,
+  syncUserZoneToLedger: async (workspacePath: string) => {
+    await invokeMock('sync_user_zone_to_ledger', { workspacePath });
+  },
+  searchMemoryForRecall: async (workspacePath: string, query: unknown) =>
+    invokeMock('search_memory_for_recall', {
+      workspacePath,
+      queryJson: JSON.stringify(query),
+    }),
+  saveMemoryRecall: async (workspacePath: string, recall: unknown) =>
+    invokeMock('save_memory_recall', {
+      workspacePath,
+      recallJson: JSON.stringify(recall),
+    }),
+  archiveMemoryRecall: async (workspacePath: string, recallId: string) =>
+    invokeMock('archive_memory_recall', { workspacePath, recallId }),
 }));
 
 vi.mock('../utils/appSettingsStorage', () => ({
@@ -949,6 +964,69 @@ describe('useAgentStore.sendMessage', () => {
     expect(
       memoryWrites.filter((w) => w.relativePath === '.CodePapr/memory.md')
     ).toHaveLength(0);
+  });
+
+  it('PR5：回合级 Recall 集成——user zone 同步 → 检索 → 锚定插入 → 审计归档', async () => {
+    const invokeCalls: string[] = [];
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      invokeCalls.push(command);
+      if (command === 'list_workspace_files') {
+        return { root: '', entries: [], truncated: false };
+      }
+      if (command === 'read_text_file') {
+        return { path: String(args?.relativePath), content: '', bytes: 0 };
+      }
+      if (command === 'search_memory_for_recall') {
+        return [
+          {
+            id: 'e1',
+            source: 'stable-memory',
+            title: 'verification',
+            content: 'pnpm test auth 通过',
+            confidence: 'confirmed',
+            trust: 'workspace',
+            score: 40,
+            sessionId: null,
+            messageIds: null,
+            verifiedAt: 1,
+          },
+        ];
+      }
+      return undefined;
+    });
+
+    const chatCalls: unknown[][] = [];
+    const chat = vi.fn(async (...args: unknown[]) => {
+      chatCalls.push(args);
+      return createAgentResponse('回复');
+    });
+    useAgentStore.setState((state) => ({
+      ...state,
+      _agent: createMockAgent({ chat: chat as never }),
+      _agentModel: 'deepseek-v4-pro',
+      _agentSessionId: 'session-1',
+    }));
+
+    await useAgentStore.getState().sendMessage('pnpm test auth 情况', 'pnpm test auth 情况', 'agent');
+
+    // ADR-008 第4点：user zone 先同步（幂等），再检索。
+    const syncIdx = invokeCalls.indexOf('sync_user_zone_to_ledger');
+    const searchIdx = invokeCalls.indexOf('search_memory_for_recall');
+    expect(syncIdx).toBeGreaterThanOrEqual(0);
+    expect(searchIdx).toBeGreaterThan(syncIdx);
+
+    // Recall Block 作为 anchored insertion 传给 agent.chat（第 5 参）。
+    const insertions = chatCalls[0]?.[4] as
+      | Array<{ anchorMessageId?: string; placement?: string; source?: string }>
+      | undefined;
+    expect(insertions).toBeDefined();
+    expect(insertions![0]?.source).toBe('memory-recall');
+    expect(insertions![0]?.placement).toBe('before');
+    expect(typeof insertions![0]?.anchorMessageId).toBe('string');
+
+    // 审计：检索落库，回合结束归档（fire-and-forget，等待完成）。
+    expect(invokeCalls).toContain('save_memory_recall');
+    await vi.waitFor(() => expect(invokeCalls).toContain('archive_memory_recall'));
   });
 
   it('persists the recent workspace path after opening a workspace', async () => {

@@ -85,6 +85,8 @@ export interface ProjectionEntry {
 /**
  * managed zone 渲染（token-budgeted）：每条目一行 `- [verified] content`，
  * 带上类别；超预算按条数/字符截断。
+ * user-note（user zone 同步条目，ADR-008 第4点）不进 managed zone——它已在
+ * user zone 展示，只进 ledger 供 Recall 检索。
  */
 export function buildMemoryProjection(entries: readonly ProjectionEntry[]): string {
   const lines: string[] = [];
@@ -93,6 +95,7 @@ export function buildMemoryProjection(entries: readonly ProjectionEntry[]): stri
   const maxChars = MEMORY_MANAGED_ZONE_MAX_CHARS;
 
   for (const entry of entries) {
+    if (entry.category === 'user-note') continue;
     if (lines.length >= maxEntries) break;
     const content = redactSecrets(entry.content).replace(/\s+/g, ' ').trim();
     if (!content) continue;

@@ -115,6 +115,27 @@ describe('buildMemoryProjection', () => {
     ]);
     expect(projection).toContain('[REDACTED]');
   });
+
+  it('excludes user-note entries from the managed zone (ADR-008 第4点)', () => {
+    const projection = buildMemoryProjection([
+      {
+        category: 'verification',
+        content: 'pnpm test 通过',
+        confidence: 'confirmed',
+        trust: 'workspace',
+        verifiedAt: 1,
+      },
+      {
+        category: 'user-note',
+        content: '用户手写的偏好',
+        confidence: 'confirmed',
+        trust: 'trusted',
+        verifiedAt: 2,
+      },
+    ]);
+    expect(projection).toContain('pnpm test');
+    expect(projection).not.toContain('用户手写');
+  });
 });
 
 describe('buildMemoryCandidateInput', () => {

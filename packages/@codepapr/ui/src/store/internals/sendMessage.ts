@@ -69,9 +69,13 @@ import {
   buildRecallInsertion,
   buildRecallQuery,
   renderRecallBlock,
+  resolveRecallBudget,
   RETRIEVAL_STRATEGY,
   RETRIEVAL_VERSION,
 } from '../../utils/memoryRecall';
+import { CONTEXT_COMPACTION_SOFT_BUDGET_RATIO } from '../../utils/contextCompaction';
+import { effectiveMaxContextTokens } from '../../utils/contextLimits';
+import { isModelVisibleUiMessage } from '../../utils/contextSurface';
 import {
   admitMemoryCandidate,
   archiveMemoryRecall,
@@ -79,6 +83,7 @@ import {
   projectMemoryFile,
   saveMemoryRecall,
   searchMemoryForRecall,
+  syncUserZoneToLedger,
 } from '../../utils/projectStorage';
 import { buildMemoryProjection } from '../../utils/memoryLedger';
 import {
@@ -91,7 +96,7 @@ import { runVerifierSubagent } from '../../utils/verifierRunner';
 import { useGoalStore } from '../goalStore';
 import type { CommandResult } from '../../tools/streamingWorkspaceCommand';
 
-import { normalizeSettings, getSettingsError } from './settingsNormalizer';
+import { normalizeSettings, getSettingsError, resolveProviderName } from './settingsNormalizer';
 import { addConversationRuntime, addConversationStats, addTierRuntimeMs, getSessionConversationStats } from './stats';
 import { maybeApplySessionTitle, touchSession } from './persistence';
 import { saveCurrentProjectState } from './projectSnapshot';
@@ -1349,36 +1354,65 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           let recallRecordId: string | undefined;
           if (mode !== 'ask' && userMsg?.id && workspacePath) {
             try {
+              // ADR-008 第4点：先把用户手编的 user zone 读入 ledger（幂等），
+              // 保证本回合 Recall 能命中用户手写记忆。
+              await syncUserZoneToLedger(workspacePath);
               const queryTokens = buildRecallQuery(effectiveDisplay ?? effectiveInput ?? '');
-              const items = await searchMemoryForRecall(workspacePath, {
-                tokens: queryTokens,
-                limit: 8,
+              // ADR-009 第10条：软预算紧张时 recallBudget = min(configured,
+              // remainingSoftBudget * 0.20)；预算过低则跳过本轮 Recall。
+              const softBudgetTokens = Math.floor(
+                effectiveMaxContextTokens(normalizedSettings, resolveProviderName(normalizedSettings)) *
+                  CONTEXT_COMPACTION_SOFT_BUDGET_RATIO
+              );
+              const currentContextTokens = get()
+                .sessionMessages[activeSessionId]
+                ?.filter(isModelVisibleUiMessage)
+                .reduce(
+                  (sum, message) => sum + estimateTokens(message.content ?? ''),
+                  0
+                ) ?? 0;
+              const recallBudget = resolveRecallBudget({
+                remainingSoftBudgetTokens: softBudgetTokens - currentContextTokens,
               });
-              if (items.length > 0) {
-                const block = renderRecallBlock(items, { lang: normalizedSettings.lang });
-                if (block) {
-                  const recallId = createId();
-                  recallInsertions = [
-                    buildRecallInsertion({
-                      recallId,
+              if (!recallBudget) {
+                console.warn(
+                  `[recall] 软预算紧张（剩余 ${Math.max(0, softBudgetTokens - currentContextTokens)} token），跳过本轮 Recall`
+                );
+              } else {
+                const items = await searchMemoryForRecall(workspacePath, {
+                  tokens: queryTokens,
+                  limit: 8,
+                });
+                if (items.length > 0) {
+                  const block = renderRecallBlock(items, {
+                    lang: normalizedSettings.lang,
+                    maxTokens: recallBudget.maxTokens,
+                    maxItems: recallBudget.maxItems,
+                  });
+                  if (block) {
+                    const recallId = createId();
+                    recallInsertions = [
+                      buildRecallInsertion({
+                        recallId,
+                        anchorMessageId: userMsg.id,
+                        renderedBlock: block,
+                      }),
+                    ];
+                    recallRecordId = recallId;
+                    await saveMemoryRecall(workspacePath, {
+                      id: recallId,
+                      workspaceId: workspacePath,
+                      sessionId: activeSessionId!,
                       anchorMessageId: userMsg.id,
-                      renderedBlock: block,
-                    }),
-                  ];
-                  recallRecordId = recallId;
-                  await saveMemoryRecall(workspacePath, {
-                    id: recallId,
-                    workspaceId: workspacePath,
-                    sessionId: activeSessionId!,
-                    anchorMessageId: userMsg.id,
-                    queryText: queryTokens.join(' '),
-                    renderedContent: block,
-                    itemsJson: JSON.stringify(items),
-                    estimatedTokens: estimateTokens(block),
-                    retrievalStrategy: RETRIEVAL_STRATEGY,
-                    retrievalVersion: RETRIEVAL_VERSION,
-                    createdAt: Date.now(),
-                  }).catch(() => undefined);
+                      queryText: queryTokens.join(' '),
+                      renderedContent: block,
+                      itemsJson: JSON.stringify(items),
+                      estimatedTokens: estimateTokens(block),
+                      retrievalStrategy: RETRIEVAL_STRATEGY,
+                      retrievalVersion: RETRIEVAL_VERSION,
+                      createdAt: Date.now(),
+                    }).catch(() => undefined);
+                  }
                 }
               }
             } catch {

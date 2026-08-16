@@ -16,6 +16,9 @@ export const MAX_RECALL_ITEM_CHARS = 350;
 export const RETRIEVAL_STRATEGY = 'like-token-v1';
 export const RETRIEVAL_VERSION = 1;
 
+/** Recall 预算下限：低于该值不值得注入，直接跳过本轮 Recall。 */
+export const MIN_RECALL_BUDGET_TOKENS = 200;
+
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'is', 'are', 'was', 'were', 'of', 'to', 'in', 'on', 'for', 'and', 'or',
   '这个', '那个', '一下', '怎么', '为什么', '什么', '可以', '如何', '帮', '我', '你',
@@ -125,6 +128,27 @@ export function buildRecallInsertion(params: {
     source: 'memory-recall',
     order: params.order ?? 0,
   };
+}
+
+/**
+ * ADR-009 第10条：Recall 预算——`recallBudget = min(configured,
+ * remainingSoftBudget * 0.20)`。软预算紧张时自动缩减；低于下限返回 null
+ * （调用方跳过本轮 Recall）。
+ */
+export function resolveRecallBudget(params: {
+  configuredMaxTokens?: number;
+  remainingSoftBudgetTokens?: number;
+}): { maxItems: number; maxTokens: number } | null {
+  const configured = params.configuredMaxTokens ?? MAX_RECALL_TOKENS;
+  const remaining = params.remainingSoftBudgetTokens;
+  const maxTokens =
+    remaining === undefined
+      ? configured
+      : Math.min(configured, Math.max(0, Math.floor(remaining * 0.2)));
+  if (maxTokens < MIN_RECALL_BUDGET_TOKENS) {
+    return null;
+  }
+  return { maxItems: MAX_RECALL_ITEMS, maxTokens };
 }
 
 /** 单条 recall item 的 token 估算（用于审计记录）。 */

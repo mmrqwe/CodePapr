@@ -19,17 +19,29 @@ import {
   loadMemoryEntries,
   projectMemoryFile,
   saveMemoryCandidate,
+  syncUserZoneToLedger,
 } from '../../utils/projectStorage';
 
 /**
- * 回合结束调用：从本轮消息抽取已验证命令 → 候选 → 准入 → 重新投影
- * memory.md 的 managed zone（user zone 由 Rust 侧保留，ADR-008）。
+ * 回合结束调用：用户手编 user zone 读入 ledger（ADR-008 第4点，幂等）→
+ * 从本轮消息抽取已验证命令 → 候选 → 准入 → 重新投影 memory.md 的
+ * managed zone（user zone 由 Rust 侧保留，ADR-008）。
  */
 export async function refreshMemoryLedgerProjection(
   workspacePath: string,
   sessionId: string,
   messages: readonly ContextMessageLike[]
 ): Promise<void> {
+  // 0. user zone → ledger（幂等；失败静默，不阻断后续准入/投影）
+  try {
+    await syncUserZoneToLedger(workspacePath);
+  } catch (err) {
+    console.warn(
+      '[memory-ledger] user zone 同步失败:',
+      err instanceof Error ? err.message : err
+    );
+  }
+
   // 1. 候选抽取 + 确定性准入裁决
   const candidates = collectVerifiedMemoryCandidates(messages);
   let admitted = false;
