@@ -17,7 +17,8 @@ export type ContentSourceKind =
   | 'session-recall'
   | 'checkpoint-extraction'
   | 'memory-candidate'
-  | 'agent-proposed';
+  | 'agent-proposed'
+  | 'cold-start-bootstrap';
 
 export type ContentTrust = 'trusted' | 'workspace' | 'derived' | 'untrusted';
 
@@ -149,6 +150,12 @@ export type MemoryAdmissionResult =
   | { admitted: true }
   | { admitted: false; reason: string };
 
+/** 记忆内容尺寸上限（字符）：入队门槛与准入门共用同一常量，
+ *  避免「可入队但永不可准入」的契约断裂。 */
+export const MEMORY_CONTENT_MAX_CHARS = 8_000;
+/** 记忆内容尺寸下限（字符）：过短内容无记忆价值。 */
+export const MEMORY_CONTENT_MIN_CHARS = 8;
+
 /**
  * 记忆准入门（不变式：只有 user-confirmed / 执行验证 / 可信项目证据 /
  * 多可信来源才能自动准入；web/MCP 永不自动准入）。
@@ -167,15 +174,18 @@ export function planMemoryAdmission(envelope: ContentEnvelope): MemoryAdmissionR
     };
   }
   const trimmed = envelope.content.trim();
-  if (trimmed.length < 8 || trimmed.length > 2_000) {
+  if (trimmed.length < MEMORY_CONTENT_MIN_CHARS || trimmed.length > MEMORY_CONTENT_MAX_CHARS) {
     return { admitted: false, reason: 'content-size' };
   }
   // 允许准入的自动来源：工具执行验证（workspace）与用户/检查点抽取（trusted/derived）。
+  // cold-start-bootstrap：LLM 对可信项目文件（project graph / rules）的首次
+  // 摘要，属可信项目证据；risk flags / 尺寸门同样生效。
   const allowedSource =
     envelope.source === 'tool-output' ||
     envelope.source === 'user' ||
     envelope.source === 'checkpoint-extraction' ||
-    envelope.source === 'memory-candidate';
+    envelope.source === 'memory-candidate' ||
+    envelope.source === 'cold-start-bootstrap';
   if (!allowedSource) {
     return { admitted: false, reason: `source-${envelope.source}` };
   }

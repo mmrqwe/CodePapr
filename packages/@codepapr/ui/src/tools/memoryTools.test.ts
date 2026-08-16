@@ -51,6 +51,12 @@ describe('memoryTools (ADR-008 PR4)', () => {
     expect(isMemoryFilePath('src/memory.md')).toBe(false);
   });
 
+  it('isMemoryFilePath is case-insensitive (macOS 大小写不敏感文件系统防绕过)', () => {
+    expect(isMemoryFilePath('.codepapr/memory.md')).toBe(true);
+    expect(isMemoryFilePath('.CODEPAPR/MEMORY.MD')).toBe(true);
+    expect(isMemoryFilePath('.CodePapr/Memory.md')).toBe(true);
+  });
+
   it('memory_write creates a pending candidate (never writes memory.md)', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'save_memory_candidate') return true;

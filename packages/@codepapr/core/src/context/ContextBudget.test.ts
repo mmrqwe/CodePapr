@@ -26,6 +26,17 @@ describe('buildContextBudgetBreakdown', () => {
     expect(breakdown.totalTokens).toBe(30_200);
     expect(breakdown.outputReserveTokens).toBe(2_000);
   });
+
+  it('includes request-only insertion tokens (ADR-009 rule 15)', () => {
+    const breakdown = buildContextBudgetBreakdown({ ...stages, insertionTokens: 1_200 }, 2_000);
+    expect(breakdown.totalInputTokens).toBe(29_400);
+    expect(breakdown.totalTokens).toBe(31_400);
+  });
+
+  it('treats missing insertionTokens as zero (backward compatible)', () => {
+    const breakdown = buildContextBudgetBreakdown(stages, 0);
+    expect(breakdown.totalInputTokens).toBe(28_200);
+  });
 });
 
 describe('decideContextBudgetAction', () => {

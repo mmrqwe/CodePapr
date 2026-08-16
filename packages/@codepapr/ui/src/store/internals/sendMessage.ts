@@ -3,12 +3,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../toastStore';
 import {
   type CommandDefinition,
+  envelopeContent,
   expandCommandTemplate,
   getBuiltinPromptCommand,
   parseSlashInput,
   parseGoalCondition,
   evaluateGoalCondition,
   GoalRunner,
+  planMemoryAdmission,
   serializeGoalState,
   GoalConditionParseError,
   renderTodoListDigest,
@@ -371,6 +373,25 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         // （agent 创建前）无法取消任何在飞请求，只能递增该序号；本回合在
         // 每个前置 await 之后检查序号变化即终止。
         const stopSeqAtStart = get()._stopRequestedSeq;
+        // 本回合的 Recall 审计行 id（try 内赋值）：catch 路径也要归档，
+        // 声明提升到 try 外（ADR-009 生命周期：turn 结束 → archived）。
+        let recallRecordId: string | undefined;
+        /** ADR-009 生命周期收尾：归档回合 Recall 与 re-recall 审计行。
+         *  成功/取消/出错路径都必须执行，否则审计行永久停留 active。
+         *  幂等：归档后置空，重复调用无副作用。 */
+        const archiveTurnRecalls = (sessionId: string | null): void => {
+          const ws = get().workspacePath;
+          if (!ws) return;
+          if (recallRecordId) {
+            void archiveMemoryRecall(ws, recallRecordId).catch(() => undefined);
+            recallRecordId = undefined;
+          }
+          if (sessionId) {
+            for (const id of drainReRecallAuditIds(sessionId)) {
+              void archiveMemoryRecall(ws, id).catch(() => undefined);
+            }
+          }
+        };
 
         let effectiveInput = input;
         let effectiveDisplay = displayContent;
@@ -1014,6 +1035,21 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     // 同内容候选已存在（deduplicated）时本次未落库新候选：
                     // 无新 id 可准入，直接跳过（既有候选/条目已覆盖该内容）。
                     if (!deduplicated) {
+                      // 准入门（真正防线，ADR-008）：bootstrap 是 LLM 生成内容，
+                      // 自动准入前必须过 planMemoryAdmission（risk flags / 尺寸）。
+                      // 被拒时保留 pending 候选供用户在记忆面板审查，不自动准入。
+                      const admission = planMemoryAdmission(
+                        envelopeContent({
+                          source: 'cold-start-bootstrap',
+                          trust: 'derived',
+                          origin: 'cold-start-bootstrap',
+                          content: generated,
+                        })
+                      );
+                      if (!admission.admitted) {
+                        console.warn('[memory] bootstrap admission rejected:', admission.reason);
+                        return;
+                      }
                       await admitMemoryCandidate(workspacePath, candidateId, createId());
                     }
                     const entries = await loadMemoryEntries(workspacePath, true);
@@ -1463,7 +1499,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // 不进 log/surface/archive messages；审计记录存 memory_recalls）。
           // 检索失败静默：本回合不带 Recall，不阻塞发送。
           let recallInsertions: RequestContextInsertion[] | undefined;
-          let recallRecordId: string | undefined;
           if (mode !== 'ask' && userMsg?.id && workspacePath) {
             try {
               // ADR-008 第4点：先把用户手编的 user zone 读入 ledger（幂等），
@@ -2565,26 +2600,17 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               }
             })();
           }
-          // PR5（ADR-009 B3）：回合结束归档 Recall（request-only，不再随后续
-          // 回合注入；审计记录保留在 memory_recalls）。
-          if (recallRecordId && get().workspacePath) {
-            void archiveMemoryRecall(get().workspacePath!, recallRecordId).catch(
-              () => undefined
-            );
-          }
-          // PR5（ADR-009 第11条）：归档本回合 memory_search 触发的 re-recall
-          // 审计行（lifecycle 与回合 Recall 一致：turn 结束 → archived）。
-          if (get().workspacePath) {
-            const reRecallIds = drainReRecallAuditIds(activeSessionId);
-            for (const id of reRecallIds) {
-              void archiveMemoryRecall(get().workspacePath!, id).catch(() => undefined);
-            }
-          }
+          // PR5（ADR-009 B3/第11条）：回合结束归档 Recall 与 re-recall 审计行
+          // （request-only，不再随后续回合注入；审计记录保留在 memory_recalls）。
+          archiveTurnRecalls(activeSessionId);
           saveCurrentProjectState(get());
         } catch (err) {
           console.error('[sendMessage] outer catch:', err);
           // 以本回合捕获的会话为准收尾（用户可能已切换到别的会话）。
           const sid = turnSessionId ?? get().activeSessionId;
+          // 取消/出错同样要归档 Recall 审计行（ADR-009 生命周期），
+          // 否则 memory_recalls 永久停留 active、reRecallAuditIds 泄漏。
+          archiveTurnRecalls(sid);
           // 销毁（AgentDestroyedError）与取消等价：用户切会话/新建/改设置导致
           // agent 被销毁时，回合必须安静停止——既不重跑（旧实现把销毁误当
           // WorkerCrashError 重建重跑，bash/git commit 等副作用重复执行），

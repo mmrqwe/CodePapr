@@ -25,7 +25,7 @@ import {
   loadContextCompactions,
   loadLatestMemoryRecall,
 } from '../utils/projectStorage';
-import { getContextSurfaceCached } from './internals/contextSurfaceStore';
+import { getContextSurfaceCached, forgetContextSurface } from './internals/contextSurfaceStore';
 import { runProjectDiagnostics } from '../utils/projectDiagnostics';
 import { loadAppSettings, queueAppSettingsSave } from '../utils/appSettingsStorage';
 import {
@@ -1294,6 +1294,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         if (running._agentSessionId === id && running._agent) {
           disposeAgentHandle(get);
         }
+        // surface 内存缓存失效：会话已删，缓存的 surface 不得再被复用。
+        if (running.workspacePath) {
+          forgetContextSurface(running.workspacePath, id);
+        }
         set((s) => {
           const sessions = s.sessions.filter((x) => x.id !== id);
           const isActive = s.activeSessionId === id;
@@ -1340,6 +1344,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         if (get().isLoading) return;
         const sessionId = get().activeSessionId;
         disposeAgentHandle(get);
+        // surface 内存缓存失效：消息已清空，缓存的 surface 节点全部脱节。
+        if (sessionId && get().workspacePath) {
+          forgetContextSurface(get().workspacePath, sessionId);
+        }
         set((s) => ({
           messages: [],
           sessionMessages: s.activeSessionId
@@ -1435,6 +1443,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         }
 
         disposeAgentHandle(get);
+        // surface 内存缓存失效：消息被截断，缓存的 surface 节点可能引用已删消息。
+        if (activeSessionId && workspacePath) {
+          forgetContextSurface(workspacePath, activeSessionId);
+        }
         set({
           messages: truncatedMessages,
           sessionMessages: activeSessionId
@@ -1528,6 +1540,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
         // 上下文已变：失效 agent，下一条消息按恢复后的 sessionMessages 重建。
         invalidateAgentHandle(get, set);
+        // surface 内存缓存失效：消息尾部被回放，缓存的 surface 节点可能已脱节。
+        if (sessionId && sessionExists) {
+          forgetContextSurface(pending.workspacePath, sessionId);
+        }
         set({ _pendingRestoreUndo: null });
         get().noteWorkspaceMutation();
         saveCurrentProjectState(get());

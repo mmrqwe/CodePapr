@@ -554,6 +554,9 @@ export class Agent {
    * Rough context size estimate (tokens) = prefix (system + tools, immutable so
    * cached once) + current log bytes, using the bytes/4 heuristic. Used only to
    * decide when to trigger mid-loop compaction; precision is not critical.
+   *
+   * ADR-009 第15条：request-only 插入（Recall Block）不进 log 但随每次请求
+   * 发送，必须计入估算，否则预算决策会系统性低估。
    */
   private estimateContextTokens(): number {
     if (this.cachedPrefixTokens === undefined) {
@@ -561,7 +564,20 @@ export class Agent {
         Serializer.stringify(this.session.prefix.toJSON())
       );
     }
-    return this.cachedPrefixTokens + Math.ceil(this.session.logStore.getContentBytes() / 4);
+    return (
+      this.cachedPrefixTokens +
+      Math.ceil(this.session.logStore.getContentBytes() / 4) +
+      this.estimateInsertionTokens()
+    );
+  }
+
+  /** ADR-009 第15条：request-only 插入（Recall Block）的 token 估算。 */
+  private estimateInsertionTokens(): number {
+    if (this.contextInsertions.length === 0) return 0;
+    return this.contextInsertions.reduce(
+      (sum, insertion) => sum + estimateTokens(insertion.content),
+      0
+    );
   }
 
   /**
@@ -626,6 +642,8 @@ export class Agent {
         retainedTailTokens,
         currentUserInputTokens,
         suffixTokens,
+        // ADR-009 第15条：request-only 插入（Recall Block）计入预算分解。
+        insertionTokens: this.estimateInsertionTokens(),
       },
       0
     );

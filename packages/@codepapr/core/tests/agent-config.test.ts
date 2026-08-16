@@ -109,10 +109,34 @@ describe('agentConfig - filterToolsForMode', () => {
     tool('app_delete'),
     tool('question'),
     tool('task'),
+    tool('memory_write'),
+    tool('memory_search'),
+    tool('memory_forget'),
+    tool('memory_review_candidates'),
   ];
 
   it('ask 模式：移除变更类工具和 app 工具和 question，保留只读工具 + task', () => {
-    expect(filterToolsForMode(all, 'ask').map((t) => t.name)).toEqual(['read', 'task']);
+    expect(filterToolsForMode(all, 'ask').map((t) => t.name)).toEqual([
+      'read',
+      'task',
+      'memory_search',
+    ]);
+  });
+
+  it('ask 模式：记忆变更工具被屏蔽，只读 memory_search 保留（ADR-008）', () => {
+    const names = filterToolsForMode(all, 'ask').map((t) => t.name);
+    expect(names).not.toContain('memory_write');
+    expect(names).not.toContain('memory_forget');
+    expect(names).not.toContain('memory_review_candidates');
+    expect(names).toContain('memory_search');
+  });
+
+  it('agent 模式：记忆工具全部可用', () => {
+    const names = filterToolsForMode(all, 'agent').map((t) => t.name);
+    expect(names).toContain('memory_write');
+    expect(names).toContain('memory_search');
+    expect(names).toContain('memory_forget');
+    expect(names).toContain('memory_review_candidates');
   });
 
   it('plan 模式：有变更工具 + question，无 app 工具', () => {

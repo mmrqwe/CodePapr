@@ -105,6 +105,12 @@ function rememberContextSurface(
   evictSurfaceCacheIfNeeded();
 }
 
+/**
+ * 使某会话的 surface 内存缓存失效（下次读取回源 DB）。
+ * 凡是会改变会话消息集合、使缓存的 surface 与真实状态脱节的操作
+ * （resetToMessage / clearMessages / deleteSession / undoConversationReset）
+ * 都必须调用，否则重建会用到过期的 surface 节点。
+ */
 export function forgetContextSurface(workspacePath: string, sessionId: string): void {
   surfaceCache.delete(cacheKey(workspacePath, sessionId));
 }

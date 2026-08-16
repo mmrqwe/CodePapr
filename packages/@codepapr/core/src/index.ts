@@ -409,4 +409,10 @@ export type {
   EnvelopeInput,
   MemoryAdmissionResult,
 } from "./context/ContentEnvelope";
-export { envelopeContent, redactSecrets, planMemoryAdmission } from "./context/ContentEnvelope";
+export {
+  envelopeContent,
+  redactSecrets,
+  planMemoryAdmission,
+  MEMORY_CONTENT_MAX_CHARS,
+  MEMORY_CONTENT_MIN_CHARS,
+} from "./context/ContentEnvelope";

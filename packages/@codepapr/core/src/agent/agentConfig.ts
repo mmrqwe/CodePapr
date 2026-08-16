@@ -238,6 +238,11 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
   'app_start',
   'app_stop',
   'app_delete',
+  // 记忆变更类（ADR-008）：ask 只读模式不得写稳定记忆/遗忘/拒绝候选。
+  // memory_search 是只读检索，保留可用。
+  'memory_write',
+  'memory_forget',
+  'memory_review_candidates',
 ]);
 
 /**

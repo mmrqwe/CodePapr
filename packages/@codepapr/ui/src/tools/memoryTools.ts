@@ -22,6 +22,7 @@ import {
   asOptionalStringArray,
   envelopeContent,
   redactSecrets,
+  MEMORY_CONTENT_MAX_CHARS,
 } from '@codepapr/core';
 import { sha256 } from '@codepapr/common';
 import { toolByName } from './workspaceToolDefinitions';
@@ -55,16 +56,21 @@ const MEMORY_CATEGORIES = new Set([
   'fact',
 ]);
 
-const MEMORY_WRITE_MAX_CHARS = 8_000;
+/** 入队尺寸上限与准入门共用 core 常量（MEMORY_CONTENT_MAX_CHARS），
+ *  避免「可入队但永不可准入」的契约断裂。 */
+const MEMORY_WRITE_MAX_CHARS = MEMORY_CONTENT_MAX_CHARS;
 
-/** 拦截路径归一化后与 .CodePapr/memory.md 比对。 */
+/** 拦截路径归一化后与 .CodePapr/memory.md 比对。
+ *  大小写不敏感：macOS 默认 APFS 大小写不敏感，`.codepapr/memory.md` 等
+ *  变体指向同一文件，严格大小写比对会被绕过（注入内容直接落盘）。 */
 export function isMemoryFilePath(relativePath: string): boolean {
   const normalized = relativePath
     .replace(/\\/g, '/')
     .replace(/^\.\/+/, '')
     .replace(/\/{2,}/g, '/')
-    .replace(/\/+$/, '');
-  return normalized === '.CodePapr/memory.md';
+    .replace(/\/+$/, '')
+    .toLowerCase();
+  return normalized === '.codepapr/memory.md';
 }
 
 /**

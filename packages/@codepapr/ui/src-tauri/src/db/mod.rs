@@ -2849,6 +2849,11 @@ pub(crate) fn forget_memory_entry(
     entry_id: String,
     reason: Option<String>,
 ) -> Result<(), String> {
+    // user-zone 是用户手写内容（user-edit 权威）：只能由用户编辑 memory.md
+    // 管理（清空 → forgotten，恢复 → 重新激活），Agent 不得通过工具遗忘。
+    if entry_id == "user-zone" {
+        return Err("user zone 记忆由用户手编 memory.md 管理，不能通过 memory_forget 遗忘".to_string());
+    }
     let (conn, ..) = open_project_db(&workspace_path)?;
     let affected = conn
         .execute(
@@ -3045,17 +3050,28 @@ pub(crate) fn project_memory_file(
     let project_dir = workspace.join(".CodePapr");
     fs::create_dir_all(&project_dir)
         .map_err(|err| format!("创建项目目录失败: {err}"))?;
-    fs::write(&memory_path, rendered)
-        .map_err(|err| format!("写入 memory.md 失败: {err}"))?;
+    // 原子写（temp + rename）：直接 fs::write 在崩溃窗口会把 memory.md
+    // 截断成半个文件，而截断内容随后又会被当成 user zone 读回。
+    let tmp_path = project_dir.join(format!(".memory.md.tmp.{}", std::process::id()));
+    fs::write(&tmp_path, rendered).map_err(|err| format!("写入 memory.md 临时文件失败: {err}"))?;
+    fs::rename(&tmp_path, &memory_path).map_err(|err| {
+        let _ = fs::remove_file(&tmp_path);
+        format!("写入 memory.md 失败: {err}")
+    })?;
     Ok(())
 }
 
-/// 提取 memory.md 的 user zone 内容（无标记的旧文件整体视为 user zone）。
-/// 历史 bug 曾把 "## User Notes" 标题渲染进标记内，每次投影累积一行；
-/// 提取时剥离开头的遗留标题行（迁移清理，绝不丢失用户内容）。
+/// 提取 memory.md 的 user zone 内容。绝不丢失用户内容：
+/// 1. 双标记齐全 → 取标记之间；
+/// 2. user 标记缺失/残缺但 managed 标记存在 → 取 MANAGED_START 之前的部分
+///    （否则整个文件连同 managed 内容会被冻进 user zone）；
+/// 3. 无任何标记的旧文件 → 整体视为 user zone。
+/// 历史 bug 曾把 "## User Notes" 等标题渲染进标记内，每次投影累积一行；
+/// 提取时剥离开头的遗留标题行（迁移清理）。
 fn extract_user_zone(existing: &str) -> String {
     const USER_START: &str = "<!-- CodePapr:user-memory:start -->";
     const USER_END: &str = "<!-- CodePapr:user-memory:end -->";
+    const MANAGED_START: &str = "<!-- CodePapr:managed-memory:start -->";
     let zone = if existing.contains(USER_START) && existing.contains(USER_END) {
         existing
             .split(USER_START)
@@ -3064,12 +3080,23 @@ fn extract_user_zone(existing: &str) -> String {
             .unwrap_or("")
             .trim()
             .to_string()
+    } else if let Some(pos) = existing.find(MANAGED_START) {
+        existing.get(..pos).unwrap_or("").trim().to_string()
     } else {
         existing.trim().to_string()
     };
     let mut zone = zone.as_str();
-    while let Some(rest) = zone.strip_prefix("## User Notes") {
-        zone = rest.trim_start();
+    loop {
+        let mut changed = false;
+        for header in ["## User Notes", "## Verified Project Knowledge", "# Project Memory"] {
+            if let Some(rest) = zone.strip_prefix(header) {
+                zone = rest.trim_start();
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
     }
     zone.trim().to_string()
 }
@@ -3104,16 +3131,30 @@ pub(crate) fn sync_user_zone_to_ledger(workspace_path: String) -> Result<(), Str
         format!("{:x}", hasher.finalize())
     };
 
-    let existing_hash: Option<String> = conn
+    let existing_row: Option<(String, String)> = conn
         .query_row(
-            "SELECT content_hash FROM memory_entries WHERE id = ?1",
+            "SELECT content_hash, status FROM memory_entries WHERE id = ?1",
             params![USER_ZONE_ENTRY_ID],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(|err| format!("读取 user zone 条目哈希失败: {err}"))?;
-    if existing_hash.as_deref() == Some(hash.as_str()) {
-        return Ok(());
+    if let Some((existing_hash, status)) = existing_row.as_ref() {
+        if existing_hash == &hash {
+            if status == "active" {
+                return Ok(());
+            }
+            // 内容未变但状态非 active（曾被清空标记 forgotten，用户又恢复了
+            // 相同内容）：重新激活，否则用户记忆永久不可召回。
+            conn.execute(
+                "UPDATE memory_entries
+                 SET status = 'active', forgotten_reason = NULL, verified_at = ?1
+                 WHERE id = ?2",
+                params![unix_millis()?, USER_ZONE_ENTRY_ID],
+            )
+            .map_err(|err| format!("恢复 user zone 条目失败: {err}"))?;
+            return Ok(());
+        }
     }
 
     let now = unix_millis()?;
@@ -3355,26 +3396,42 @@ fn ensure_memory_fts_candidates(
 
     // 短 token 补齐：trigram 索引不到 <3 字符的 token，用 LIKE 精确补齐，
     // 保证「仅命中短 token」的条目不被预筛漏掉（确定性语义与全量扫描一致）。
+    // token 现可含 LIKE 通配符 `_`/`%`，必须转义（ESCAPE '\'）保持字面匹配。
     let short_tokens: Vec<&str> = tokens
         .iter()
         .filter(|t| t.chars().count() < 3)
         .map(|t| t.as_str())
         .collect();
     for token in short_tokens {
+        let escaped = escape_like_pattern(token);
         let mut like_stmt = conn
             .prepare(
                 "SELECT id FROM memory_entries
-                 WHERE status = 'active' AND lower(content) LIKE '%' || ?1 || '%'",
+                 WHERE status = 'active'
+                   AND lower(content) LIKE '%' || ?1 || '%' ESCAPE '\\'",
             )
             .ok()?;
         let like_rows = like_stmt
-            .query_map(params![token], |row| row.get::<_, String>(0))
+            .query_map(params![escaped], |row| row.get::<_, String>(0))
             .ok()?;
         for row in like_rows.flatten() {
             ids.insert(row);
         }
     }
     Some(ids)
+}
+
+/// LIKE 模式转义：`\`、`%`、`_` 均为 LIKE 元字符，需加反斜杠保持字面匹配
+/// （配合 `ESCAPE '\'` 使用）。recall token 允许含 `_`（代码标识符）。
+fn escape_like_pattern(token: &str) -> String {
+    let mut out = String::with_capacity(token.len() + 4);
+    for c in token.chars() {
+        if c == '\\' || c == '%' || c == '_' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Recall 检索（token 子串匹配 + 确定性加权重排，无 embedding）：
@@ -3390,13 +3447,15 @@ pub(crate) fn search_memory_for_recall(
 ) -> Result<Vec<RecallSearchItem>, String> {
     let input: RecallSearchInput = serde_json::from_str(&query_json)
         .map_err(|err| format!("Recall 查询 JSON 不合法: {err}"))?;
+    // 与 TS buildRecallQuery 对齐：保留 `_`/`-`（代码标识符如
+    // TEST_COMMAND_PATTERN / oauth-callback 否则永远匹配不到），上限同为 12。
     let tokens: Vec<String> = input
         .tokens
         .iter()
         .filter_map(|t| {
             let cleaned: String = t
                 .chars()
-                .filter(|c| c.is_alphanumeric())
+                .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
                 .collect::<String>()
                 .to_lowercase();
             if cleaned.is_empty() || cleaned.len() < 2 {
@@ -3405,7 +3464,7 @@ pub(crate) fn search_memory_for_recall(
                 Some(cleaned)
             }
         })
-        .take(10)
+        .take(12)
         .collect();
     let limit = input.limit.unwrap_or(8).clamp(1, 20);
 
@@ -4294,6 +4353,44 @@ mod tests {
         assert_eq!(latest.as_ref().map(|r| r.anchor_message_id.as_str()), Some("u1"));
     }
 
+    /// 回归：代码标识符（含 `_`/`-`）必须可召回——token 清洗不得剥离
+    /// 下划线/连字符，LIKE 通配符须转义（与 TS buildRecallQuery 对齐）。
+    #[test]
+    fn memory_recall_matches_underscore_and_hyphen_identifiers() {
+        let workspace = TestWorkspace::new("memory-recall-identifiers");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        let candidate = serde_json::json!({
+            "id": "cand-id",
+            "category": "verification",
+            "content": "[bash] ✓ TEST_COMMAND_PATTERN 与 oauth-callback 需在配置中注册",
+            "contentHash": "h-id",
+            "confidence": "confirmed",
+            "trust": "workspace",
+            "sourceSessionId": "s1",
+            "sourceMessageIds": "[]",
+            "evidence": null,
+            "riskFlags": null,
+            "createdAt": 1i64,
+        });
+        save_memory_candidate(ws.clone(), candidate.to_string()).expect("save");
+        admit_memory_candidate(ws.clone(), "cand-id".to_string(), "entry-id".to_string())
+            .expect("admit");
+
+        // 下划线标识符（原实现剥离 `_` 后永不匹配）
+        let q1 = serde_json::json!({ "tokens": ["test_command_pattern"], "limit": 8 });
+        let items1 = search_memory_for_recall(ws.clone(), q1.to_string()).expect("search _");
+        assert_eq!(items1.len(), 1);
+        assert_eq!(items1[0].id, "entry-id");
+
+        // 连字符标识符
+        let q2 = serde_json::json!({ "tokens": ["oauth-callback"], "limit": 8 });
+        let items2 = search_memory_for_recall(ws.clone(), q2.to_string()).expect("search -");
+        assert_eq!(items2.len(), 1);
+        assert_eq!(items2[0].id, "entry-id");
+    }
+
     /// 检索升级（ADR-009 第8条 runtime probe）：FTS5 trigram 候选预筛 +
     /// 短 token LIKE 补齐；确定性 scoring 语义与全量扫描一致。
     #[test]
@@ -4426,6 +4523,40 @@ mod tests {
         sync_user_zone_to_ledger(ws.clone()).expect("sync cleared");
         let active = load_memory_entries(ws.clone(), Some(true)).expect("load active");
         assert!(!active.iter().any(|e| e.id == "user-zone"));
+    }
+
+    /// 回归：user-zone 条目受保护——memory_forget 不得遗忘用户手写内容；
+    /// 清空后恢复相同内容必须重新激活（同 hash 早退不得阻止恢复）。
+    #[test]
+    fn user_zone_entry_protected_from_forget_and_restorable() {
+        let workspace = TestWorkspace::new("memory-user-zone-protect");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        let memory_path = workspace.file_path(".CodePapr/memory.md");
+
+        // 1. memory_forget 对 user-zone 直接报错
+        fs::write(&memory_path, "用户的手写记忆").unwrap();
+        sync_user_zone_to_ledger(ws.clone()).expect("sync");
+        let err = forget_memory_entry(ws.clone(), "user-zone".to_string(), None)
+            .expect_err("forget user-zone must fail");
+        assert!(err.contains("user zone"));
+
+        // 2. 清空 zone → forgotten；恢复相同内容 → 重新激活
+        fs::write(
+            &memory_path,
+            "<!-- CodePapr:user-memory:start -->\n<!-- CodePapr:user-memory:end -->\n",
+        )
+        .unwrap();
+        sync_user_zone_to_ledger(ws.clone()).expect("clear");
+        let active = load_memory_entries(ws.clone(), Some(true)).expect("load active");
+        assert!(!active.iter().any(|e| e.id == "user-zone"));
+
+        fs::write(&memory_path, "用户的手写记忆").unwrap();
+        sync_user_zone_to_ledger(ws.clone()).expect("restore same content");
+        let active2 = load_memory_entries(ws.clone(), Some(true)).expect("load active 2");
+        let entry = active2.iter().find(|e| e.id == "user-zone").expect("restored");
+        assert_eq!(entry.status, "active");
+        assert!(entry.content.contains("用户的手写记忆"));
     }
 
     /// 回归：投影不得在 user zone 累积 "## User Notes" 标题（标题渲染在
@@ -4583,11 +4714,16 @@ mod tests {
         assert!(!active.iter().any(|e| e.content_hash == "h-f"));
 
         // 2. admit 层的遗忘守卫（无候选行的遗留条目，如 user-zone）：
-        //    user zone 内容 → entry → 遗忘 → 同内容候选准入必须被拒绝，
-        //    候选标记 rejected。
+        //    user zone 内容 → entry → 清空 zone（用户管理路径）→ 同内容候选
+        //    准入必须被拒绝，候选标记 rejected。
         fs::write(&memory_path, "用户写过后又作废的内容").unwrap();
         sync_user_zone_to_ledger(ws.clone()).expect("sync user zone");
-        forget_memory_entry(ws.clone(), "user-zone".to_string(), None).expect("forget user zone");
+        fs::write(
+            &memory_path,
+            "<!-- CodePapr:user-memory:start -->\n<!-- CodePapr:user-memory:end -->\n",
+        )
+        .unwrap();
+        sync_user_zone_to_ledger(ws.clone()).expect("clear user zone");
         use sha2::{Digest, Sha256};
         let zone_hash = {
             let mut hasher = Sha256::new();
