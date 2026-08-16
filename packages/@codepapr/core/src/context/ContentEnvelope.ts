@@ -16,7 +16,8 @@ export type ContentSourceKind =
   | 'mcp'
   | 'session-recall'
   | 'checkpoint-extraction'
-  | 'memory-candidate';
+  | 'memory-candidate'
+  | 'agent-proposed';
 
 export type ContentTrust = 'trusted' | 'workspace' | 'derived' | 'untrusted';
 

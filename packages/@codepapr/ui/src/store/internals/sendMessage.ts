@@ -913,7 +913,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     // 候选 → 准入 → 投影（managed zone）。
                     const { candidateId } = await proposeMemoryCandidateFromWrite({
                       workspacePath,
-                      sessionId: activeSessionId,
+                      sessionId: activeSessionId ?? undefined,
                       content: generated,
                       origin: 'cold-start-bootstrap',
                     });
@@ -1573,6 +1573,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 if (event.type === 'context-compacted') {
                   // Context epoch reset happened inside the agent loop; no message
                   // mutation is needed here (the log was replaced internally).
+                  return message;
+                }
+
+                if (event.type === 'context-pruned') {
+                  // 软区间原地裁剪（PR2）：log 内旧工具结果已替换为占位符，
+                  // 无消息级 UI 变更。
                   return message;
                 }
 

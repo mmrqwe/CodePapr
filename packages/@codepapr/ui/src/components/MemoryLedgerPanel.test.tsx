@@ -12,12 +12,12 @@ const {
   forgetMemoryEntryMock,
   reprojectMock,
 } = vi.hoisted(() => ({
-  loadMemoryEntriesMock: vi.fn(async () => []),
-  loadMemoryCandidatesMock: vi.fn(async () => []),
-  admitMemoryCandidateMock: vi.fn(async () => 'e1'),
-  rejectMemoryCandidateMock: vi.fn(async () => undefined),
-  forgetMemoryEntryMock: vi.fn(async () => undefined),
-  reprojectMock: vi.fn(async () => undefined),
+  loadMemoryEntriesMock: vi.fn(async (): Promise<unknown[]> => []),
+  loadMemoryCandidatesMock: vi.fn(async (): Promise<unknown[]> => []),
+  admitMemoryCandidateMock: vi.fn(async (): Promise<unknown> => 'e1'),
+  rejectMemoryCandidateMock: vi.fn(async (): Promise<void> => undefined),
+  forgetMemoryEntryMock: vi.fn(async (): Promise<void> => undefined),
+  reprojectMock: vi.fn(async (): Promise<void> => undefined),
 }));
 
 vi.mock('../utils/projectStorage', () => ({

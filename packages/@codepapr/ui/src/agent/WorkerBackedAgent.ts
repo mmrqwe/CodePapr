@@ -1060,9 +1060,9 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
           }
           // PR5（ADR-009 第11条）：memory_search 的结果可能携带 re-recall
           // insertion，随 tool-response 下发给 worker push 进本回合 insertions。
-          const reRecallInsertion =
+          const reRecallInsertion: RequestContextInsertion | undefined =
             result && typeof result === 'object' && 'reRecallInsertion' in result
-              ? (result as { reRecallInsertion?: unknown }).reRecallInsertion
+              ? (result as { reRecallInsertion?: RequestContextInsertion }).reRecallInsertion
               : undefined;
           this.postToWorker({
             type: 'tool-response',

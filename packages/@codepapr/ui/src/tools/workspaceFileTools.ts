@@ -272,6 +272,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
         intercepted: true,
         candidateId: memoryIntercept.candidateId,
         bytes: 0,
+        change: { kind: 'updated', added: 0, deleted: 0, beforeLines: 0, afterLines: 0 },
         notes: [MEMORY_WRITE_INTERCEPT_NOTE],
       } satisfies WriteFileResult;
     }
@@ -358,6 +359,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
         candidateId: memoryIntercept.candidateId,
         replacements: patched.replacements,
         bytes: 0,
+        change: { kind: 'updated', added: 0, deleted: 0, beforeLines: 0, afterLines: 0 },
         notes: [MEMORY_WRITE_INTERCEPT_NOTE],
       } satisfies ApplyPatchResult;
     }
@@ -468,6 +470,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
         patches: file.patches,
         replacements: file.replacements,
         bytes: 0,
+        change: { kind: 'updated', added: 0, deleted: 0, beforeLines: 0, afterLines: 0 },
         notes: [MEMORY_WRITE_INTERCEPT_NOTE],
       });
     }

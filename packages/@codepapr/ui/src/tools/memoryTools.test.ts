@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolRegistry } from '@codepapr/core';
 
 const { invokeMock } = vi.hoisted(() => ({
-  invokeMock: vi.fn(async (_command: string, _args?: Record<string, unknown>) => ({})),
+  invokeMock: vi.fn(async (_command: string, _args?: Record<string, unknown>): Promise<unknown> => ({})),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -112,7 +112,7 @@ describe('memoryTools (ADR-008 PR4)', () => {
     const result = (await registry.execute(
       'memory_search',
       { query: '测试命令' },
-      { userMessageId: 'user-msg-1' }
+      { userMessageId: 'user-msg-1' } as unknown as Parameters<ToolRegistry['execute']>[2]
     )) as {
       query: string;
       results: string;

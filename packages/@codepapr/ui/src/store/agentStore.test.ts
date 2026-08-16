@@ -5,7 +5,7 @@ import type { Settings, UIMessage } from './agentStore';
 import { createMockAgent } from './__test-utils__/createMockAgent';
 
 const { invokeMock } = vi.hoisted(() => ({
-  invokeMock: vi.fn(async (command: string): Promise<Record<string, unknown>> => {
+  invokeMock: vi.fn(async (command: string, _args?: Record<string, unknown>): Promise<unknown> => {
     if (command === 'list_workspace_files') {
       return {
         root: '',
