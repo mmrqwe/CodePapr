@@ -20,7 +20,7 @@ import {
 } from '@codepapr/core';
 import type { PromptMode } from '@codepapr/core';
 import { CacheValidator, RequestBuilder } from '@codepapr/api';
-import type { ICacheStatistics, IAgentResponse, IImageContent, IMessage, IToolDefinition } from '@codepapr/types';
+import type { ICacheStatistics, IAgentResponse, IImageContent, IMessage, IToolDefinition, RequestContextInsertion } from '@codepapr/types';
 import {
   WorkerBackedAgent,
   type AgentRuntimeHandle,
@@ -161,7 +161,8 @@ class _MainThreadAgentHandle implements AgentRuntimeHandle {
     userInput: string,
     onStreamEvent?: (event: AgentRuntimeStreamEvent) => void,
     images?: IImageContent[],
-    userMessageId?: string
+    userMessageId?: string,
+    contextInsertions?: RequestContextInsertion[]
   ): Promise<IAgentResponse> {
     this.abortController = new AbortController();
     try {
@@ -170,7 +171,8 @@ class _MainThreadAgentHandle implements AgentRuntimeHandle {
         onStreamEvent,
         images,
         this.abortController.signal,
-        userMessageId
+        userMessageId,
+        contextInsertions
       );
       if (this.subagentCacheStatsRef) {
         const subStats = this.subagentCacheStatsRef();

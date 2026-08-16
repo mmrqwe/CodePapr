@@ -329,7 +329,25 @@ fn open_project_db(workspace_path: &str) -> Result<(Connection, PathBuf, PathBuf
             rejection_reason TEXT
           );
           CREATE INDEX IF NOT EXISTS idx_memory_candidates_status
-            ON memory_candidates(status);",
+            ON memory_candidates(status);
+          CREATE TABLE IF NOT EXISTS memory_recalls (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            anchor_message_id TEXT NOT NULL,
+            query_text TEXT NOT NULL,
+            rendered_content TEXT NOT NULL,
+            items_json TEXT NOT NULL,
+            estimated_tokens INTEGER NOT NULL,
+            retrieval_strategy TEXT NOT NULL,
+            retrieval_version INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active'
+          );
+          CREATE INDEX IF NOT EXISTS idx_memory_recalls_session_anchor
+            ON memory_recalls(session_id, anchor_message_id);
+          CREATE INDEX IF NOT EXISTS idx_memory_recalls_workspace_time
+            ON memory_recalls(workspace_id, created_at DESC);",
     )
     .map_err(|err| format!("初始化项目状态表失败: {err}"))?;
 
@@ -2924,6 +2942,340 @@ pub(crate) fn project_memory_file(
     Ok(())
 }
 
+// ── Memory Recall（PR5，ADR-009 B3）────────────────────────────────────
+//
+// turn-scoped Recall：主线程每用户回合检索一次（LIKE/token + 确定性加权重排，
+// v1 不上 FTS5/embedding），Recall Block 只存 memory_recalls 做审计，
+// 不进 messages/surface/log（request-only anchored insertion）。
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MemoryRecallInput {
+    pub(crate) id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) session_id: String,
+    pub(crate) anchor_message_id: String,
+    pub(crate) query_text: String,
+    pub(crate) rendered_content: String,
+    pub(crate) items_json: String,
+    pub(crate) estimated_tokens: i64,
+    pub(crate) retrieval_strategy: String,
+    pub(crate) retrieval_version: i64,
+    pub(crate) created_at: i64,
+}
+
+#[tauri::command]
+pub(crate) fn save_memory_recall(
+    workspace_path: String,
+    recall_json: String,
+) -> Result<(), String> {
+    let input: MemoryRecallInput = serde_json::from_str(&recall_json)
+        .map_err(|err| format!("Recall JSON 不合法: {err}"))?;
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    conn.execute(
+        "INSERT INTO memory_recalls
+           (id, workspace_id, session_id, anchor_message_id, query_text,
+            rendered_content, items_json, estimated_tokens, retrieval_strategy,
+            retrieval_version, created_at, status)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'active')",
+        params![
+            input.id,
+            input.workspace_id,
+            input.session_id,
+            input.anchor_message_id,
+            input.query_text,
+            input.rendered_content,
+            input.items_json,
+            input.estimated_tokens,
+            input.retrieval_strategy,
+            input.retrieval_version,
+            input.created_at,
+        ],
+    )
+    .map_err(|err| format!("保存 Recall 失败: {err}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn archive_memory_recall(
+    workspace_path: String,
+    recall_id: String,
+) -> Result<(), String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    conn.execute(
+        "UPDATE memory_recalls SET status = 'archived' WHERE id = ?1",
+        params![recall_id],
+    )
+    .map_err(|err| format!("归档 Recall 失败: {err}"))?;
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MemoryRecallResult {
+    pub(crate) id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) session_id: String,
+    pub(crate) anchor_message_id: String,
+    pub(crate) query_text: String,
+    pub(crate) rendered_content: String,
+    pub(crate) items_json: String,
+    pub(crate) estimated_tokens: i64,
+    pub(crate) retrieval_strategy: String,
+    pub(crate) retrieval_version: i64,
+    pub(crate) created_at: i64,
+    pub(crate) status: String,
+}
+
+#[tauri::command]
+pub(crate) fn load_latest_memory_recall(
+    workspace_path: String,
+    session_id: String,
+) -> Result<Option<MemoryRecallResult>, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let recall = conn
+        .query_row(
+            "SELECT id, workspace_id, session_id, anchor_message_id, query_text,
+                    rendered_content, items_json, estimated_tokens, retrieval_strategy,
+                    retrieval_version, created_at, status
+             FROM memory_recalls
+             WHERE session_id = ?1
+             ORDER BY created_at DESC LIMIT 1",
+            params![session_id],
+            |row| {
+                Ok(MemoryRecallResult {
+                    id: row.get(0)?,
+                    workspace_id: row.get(1)?,
+                    session_id: row.get(2)?,
+                    anchor_message_id: row.get(3)?,
+                    query_text: row.get(4)?,
+                    rendered_content: row.get(5)?,
+                    items_json: row.get(6)?,
+                    estimated_tokens: row.get(7)?,
+                    retrieval_strategy: row.get(8)?,
+                    retrieval_version: row.get(9)?,
+                    created_at: row.get(10)?,
+                    status: row.get(11)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|err| format!("读取 Recall 失败: {err}"))?;
+    Ok(recall)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RecallSearchInput {
+    pub(crate) tokens: Vec<String>,
+    pub(crate) limit: Option<usize>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RecallSearchItem {
+    pub(crate) id: String,
+    pub(crate) source: String,
+    pub(crate) title: String,
+    pub(crate) content: String,
+    pub(crate) confidence: String,
+    pub(crate) trust: String,
+    pub(crate) score: i64,
+    pub(crate) session_id: Option<String>,
+    pub(crate) message_ids: Option<String>,
+    pub(crate) verified_at: Option<i64>,
+}
+
+fn token_overlap_score(tokens: &[String], text: &str) -> i64 {
+    let lower = text.to_lowercase();
+    let mut score = 0i64;
+    for token in tokens {
+        if lower.contains(token.as_str()) {
+            score += 2;
+        }
+    }
+    score
+}
+
+/// v1 检索（LIKE/token + 确定性加权重排，无 embedding）：
+/// 1. memory_entries（active，verified 优先）；
+/// 2. 历史 session checkpoint（messages.extras 里的 contextCheckpoint.summary）。
+/// untrusted 条目直接跳过（准入策略已保证 active 里没有，防御性再过滤）。
+#[tauri::command]
+pub(crate) fn search_memory_for_recall(
+    workspace_path: String,
+    query_json: String,
+) -> Result<Vec<RecallSearchItem>, String> {
+    let input: RecallSearchInput = serde_json::from_str(&query_json)
+        .map_err(|err| format!("Recall 查询 JSON 不合法: {err}"))?;
+    let tokens: Vec<String> = input
+        .tokens
+        .iter()
+        .filter_map(|t| {
+            let cleaned: String = t
+                .chars()
+                .filter(|c| c.is_alphanumeric())
+                .collect::<String>()
+                .to_lowercase();
+            if cleaned.is_empty() || cleaned.len() < 2 {
+                None
+            } else {
+                Some(cleaned)
+            }
+        })
+        .take(10)
+        .collect();
+    let limit = input.limit.unwrap_or(8).clamp(1, 20);
+
+    if tokens.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let now = unix_millis()?;
+    let mut items: Vec<RecallSearchItem> = Vec::new();
+
+    // ── 语料 1：active memory_entries ──
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, category, content, confidence, trust, source_session_id,
+                        source_message_ids, verified_at
+                 FROM memory_entries
+                 WHERE status = 'active'
+                 ORDER BY verified_at DESC, created_at DESC
+                 LIMIT 500",
+            )
+            .map_err(|err| format!("准备记忆条目检索失败: {err}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<i64>>(7)?,
+                ))
+            })
+            .map_err(|err| format!("读取记忆条目检索失败: {err}"))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|err| format!("收集记忆条目检索失败: {err}"))?;
+
+        for (id, category, content, confidence, trust, session_id, message_ids, verified_at) in rows {
+            let overlap = token_overlap_score(&tokens, &content);
+            if overlap == 0 {
+                continue;
+            }
+            let confidence_weight = match confidence.as_str() {
+                "confirmed" => 30,
+                "reported" => 10,
+                _ => -20,
+            };
+            let trust_weight = match trust.as_str() {
+                "trusted" => 10,
+                "workspace" => 5,
+                "derived" => 0,
+                _ => -50,
+            };
+            let category_weight = match category.as_str() {
+                "verification" | "decision" => 8,
+                "constraint" | "preference" => 5,
+                _ => 0,
+            };
+            let recency_weight = match verified_at {
+                Some(at) if now - at < 30 * 24 * 3600 * 1000 => 10,
+                Some(_) => 0,
+                None => 0,
+            };
+            let score = overlap + confidence_weight + trust_weight + category_weight + recency_weight;
+            if score <= 0 {
+                continue;
+            }
+            items.push(RecallSearchItem {
+                id,
+                source: "stable-memory".to_string(),
+                title: category,
+                content,
+                confidence,
+                trust,
+                score,
+                session_id,
+                message_ids,
+                verified_at,
+            });
+        }
+    }
+
+    // ── 语料 2：历史 session checkpoint（messages.extras JSON） ──
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, session_id, extras, timestamp
+                 FROM messages
+                 WHERE extras LIKE '%\"contextCheckpoint\"%'
+                 ORDER BY timestamp DESC
+                 LIMIT 300",
+            )
+            .map_err(|err| format!("准备 checkpoint 检索失败: {err}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })
+            .map_err(|err| format!("读取 checkpoint 检索失败: {err}"))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|err| format!("收集 checkpoint 检索失败: {err}"))?;
+
+        for (message_id, session_id, extras, timestamp) in rows {
+            let Some(extras_json) = extras else { continue };
+            let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&extras_json) else {
+                continue;
+            };
+            let summary = parsed
+                .get("contextCheckpoint")
+                .and_then(|cp| cp.get("summary"))
+                .and_then(|s| s.as_str())
+                .unwrap_or("");
+            if summary.is_empty() {
+                continue;
+            }
+            let overlap = token_overlap_score(&tokens, summary);
+            if overlap == 0 {
+                continue;
+            }
+            let recency_weight = if now - timestamp < 90 * 24 * 3600 * 1000 {
+                5
+            } else {
+                0
+            };
+            let score = overlap + 8 + recency_weight;
+            items.push(RecallSearchItem {
+                id: format!("cp-{message_id}"),
+                source: "session-checkpoint".to_string(),
+                title: "历史会话结论".to_string(),
+                content: summary.chars().take(400).collect(),
+                confidence: "reported".to_string(),
+                trust: "derived".to_string(),
+                score,
+                session_id: Some(session_id),
+                message_ids: Some(message_id),
+                verified_at: None,
+            });
+        }
+    }
+
+    items.sort_by(|a, b| b.score.cmp(&a.score));
+    items.truncate(limit);
+    Ok(items)
+}
+
 // ── Tests ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -3587,5 +3939,66 @@ mod tests {
     fn wait_for_epoch_times_out_when_epoch_stays_put() {
         let epoch = AtomicU64::new(7);
         assert!(!wait_for_epoch(&epoch, 7, std::time::Duration::from_millis(40)));
+    }
+
+    /// PR5：memory recall 检索（stable-memory 语料）+ 审计记录 round-trip。
+    #[test]
+    fn memory_recall_search_and_audit_roundtrip() {
+        let workspace = TestWorkspace::new("memory-recall-search");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        // 准入一条 verified entry（候选 → entry）
+        let candidate = serde_json::json!({
+            "id": "cand-1",
+            "category": "verification",
+            "content": "[bash] ✓ pnpm test auth",
+            "contentHash": "h1",
+            "confidence": "confirmed",
+            "trust": "workspace",
+            "sourceSessionId": "s1",
+            "sourceMessageIds": "[\"m1\"]",
+            "evidence": "{\"origin\":\"bash:pnpm test auth\"}",
+            "riskFlags": null,
+            "createdAt": 1i64,
+        });
+        save_memory_candidate(ws.clone(), candidate.to_string()).expect("save candidate");
+        admit_memory_candidate(ws.clone(), "cand-1".to_string(), "entry-1".to_string())
+            .expect("admit");
+
+        // 相关检索命中 stable-memory 且得分 > 0
+        let query = serde_json::json!({ "tokens": ["pnpm", "test", "auth"], "limit": 8 });
+        let items =
+            search_memory_for_recall(ws.clone(), query.to_string()).expect("search");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].source, "stable-memory");
+        assert_eq!(items[0].confidence, "confirmed");
+        assert!(items[0].score > 0);
+
+        // 不相关查询返回空
+        let query2 = serde_json::json!({ "tokens": ["zzzz", "qqqq"], "limit": 8 });
+        let items2 =
+            search_memory_for_recall(ws.clone(), query2.to_string()).expect("search2");
+        assert!(items2.is_empty());
+
+        // 审计记录 round-trip：保存 → 归档 → 最新状态
+        let recall = serde_json::json!({
+            "id": "recall-1",
+            "workspaceId": ws,
+            "sessionId": "s1",
+            "anchorMessageId": "u1",
+            "queryText": "pnpm test auth",
+            "renderedContent": "- [verified] pnpm test auth",
+            "itemsJson": serde_json::to_string(&items).unwrap(),
+            "estimatedTokens": 120i64,
+            "retrievalStrategy": "like-token-v1",
+            "retrievalVersion": 1i64,
+            "createdAt": 2i64,
+        });
+        save_memory_recall(ws.clone(), recall.to_string()).expect("save recall");
+        archive_memory_recall(ws.clone(), "recall-1".to_string()).expect("archive recall");
+        let latest = load_latest_memory_recall(ws.clone(), "s1".to_string()).expect("load");
+        assert_eq!(latest.as_ref().map(|r| r.status.as_str()), Some("archived"));
+        assert_eq!(latest.as_ref().map(|r| r.anchor_message_id.as_str()), Some("u1"));
     }
 }

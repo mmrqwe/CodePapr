@@ -943,3 +943,92 @@ export async function projectMemoryFile(
     managedZoneMarkdown,
   });
 }
+
+// ── Memory Recall（PR5，ADR-009 B3）───────────────────────────────────
+
+export interface RecallSearchInput {
+  tokens: string[];
+  limit?: number;
+}
+
+export interface RecallSearchItem {
+  id: string;
+  source: 'stable-memory' | 'session-checkpoint' | 'artifact' | 'archive';
+  title: string;
+  content: string;
+  confidence: string;
+  trust: string;
+  score: number;
+  sessionId: string | null;
+  messageIds: string | null;
+  verifiedAt: number | null;
+}
+
+export async function searchMemoryForRecall(
+  workspacePath: string,
+  query: RecallSearchInput
+): Promise<RecallSearchItem[]> {
+  return invoke<RecallSearchItem[]>('search_memory_for_recall', {
+    workspacePath: workspacePath.trim(),
+    queryJson: JSON.stringify(query),
+  });
+}
+
+export interface MemoryRecallRecordInput {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  anchorMessageId: string;
+  queryText: string;
+  renderedContent: string;
+  itemsJson: string;
+  estimatedTokens: number;
+  retrievalStrategy: string;
+  retrievalVersion: number;
+  createdAt: number;
+}
+
+export async function saveMemoryRecall(
+  workspacePath: string,
+  recall: MemoryRecallRecordInput
+): Promise<void> {
+  await invoke('save_memory_recall', {
+    workspacePath: workspacePath.trim(),
+    recallJson: JSON.stringify(recall),
+  });
+}
+
+export async function archiveMemoryRecall(
+  workspacePath: string,
+  recallId: string
+): Promise<void> {
+  await invoke('archive_memory_recall', {
+    workspacePath: workspacePath.trim(),
+    recallId,
+  });
+}
+
+export interface PersistedMemoryRecall {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  anchorMessageId: string;
+  queryText: string;
+  renderedContent: string;
+  itemsJson: string;
+  estimatedTokens: number;
+  retrievalStrategy: string;
+  retrievalVersion: number;
+  createdAt: number;
+  status: string;
+}
+
+export async function loadLatestMemoryRecall(
+  workspacePath: string,
+  sessionId: string
+): Promise<PersistedMemoryRecall | null> {
+  return invoke<PersistedMemoryRecall | null>('load_latest_memory_recall', {
+    workspacePath: workspacePath.trim(),
+    sessionId,
+  });
+}

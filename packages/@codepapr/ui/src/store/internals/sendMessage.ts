@@ -1,4 +1,4 @@
-import { errorMessage } from '@codepapr/common';
+import { errorMessage, estimateTokens } from '@codepapr/common';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../toastStore';
 import {
@@ -70,6 +70,19 @@ import {
 import { refreshMemoryLedgerProjection } from './memoryLedgerStore';
 import { buildPruneOptions } from '../../agent/compactionHandler';
 import type { MidLoopCompactionCommit } from '../../agent/agentWorkerProtocol';
+import {
+  buildRecallInsertion,
+  buildRecallQuery,
+  renderRecallBlock,
+  RETRIEVAL_STRATEGY,
+  RETRIEVAL_VERSION,
+} from '../../utils/memoryRecall';
+import {
+  archiveMemoryRecall,
+  saveMemoryRecall,
+  searchMemoryForRecall,
+} from '../../utils/projectStorage';
+import type { RequestContextInsertion } from '@codepapr/types';
 import { loadSessionMessages, waitForPendingProjectStateSave } from '../../utils/projectStorage';
 import { runVerifierSubagent } from '../../utils/verifierRunner';
 import { useGoalStore } from '../goalStore';
@@ -1313,6 +1326,51 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           );
           await yieldToMainThread();
 
+          // PR5（ADR-009 B3）：turn-scoped Recall —— 每用户回合检索一次，
+          // 同一 tool loop 复用同一 Recall Block（request-only 锚定插入，
+          // 不进 log/surface/archive messages；审计记录存 memory_recalls）。
+          // 检索失败静默：本回合不带 Recall，不阻塞发送。
+          let recallInsertions: RequestContextInsertion[] | undefined;
+          let recallRecordId: string | undefined;
+          if (mode !== 'ask' && userMsg?.id && workspacePath) {
+            try {
+              const queryTokens = buildRecallQuery(effectiveDisplay ?? effectiveInput ?? '');
+              const items = await searchMemoryForRecall(workspacePath, {
+                tokens: queryTokens,
+                limit: 8,
+              });
+              if (items.length > 0) {
+                const block = renderRecallBlock(items, { lang: normalizedSettings.lang });
+                if (block) {
+                  const recallId = createId();
+                  recallInsertions = [
+                    buildRecallInsertion({
+                      recallId,
+                      anchorMessageId: userMsg.id,
+                      renderedBlock: block,
+                    }),
+                  ];
+                  recallRecordId = recallId;
+                  await saveMemoryRecall(workspacePath, {
+                    id: recallId,
+                    workspaceId: workspacePath,
+                    sessionId: activeSessionId!,
+                    anchorMessageId: userMsg.id,
+                    queryText: queryTokens.join(' '),
+                    renderedContent: block,
+                    itemsJson: JSON.stringify(items),
+                    estimatedTokens: estimateTokens(block),
+                    retrievalStrategy: RETRIEVAL_STRATEGY,
+                    retrievalVersion: RETRIEVAL_VERSION,
+                    createdAt: Date.now(),
+                  }).catch(() => undefined);
+                }
+              }
+            } catch {
+              // Recall 检索失败静默降级（不带 Recall 发送）
+            }
+          }
+
           const runAgentPass = async (passInput: string, passImages?: import('@codepapr/types').IImageContent[]) => {
             // 本次 pass 的耗时累加器：崩溃恢复会重跑整个 pass，事件也会重新
             // 发射，因此按 pass 重置、按回合（turn）累加，避免重试路径重复计数。
@@ -1475,7 +1533,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               if (event.type === 'tool-call-end' && typeof event.durationMs === 'number') {
                 passToolRuntimeMs += event.durationMs;
               }
-            }, passImages, userMsg?.id);
+            }, passImages, userMsg?.id, recallInsertions);
 
             accumulatedStats = accumulateCacheStats(accumulatedStats, response.cacheStats);
             turnModelRuntimeMs += passModelRuntimeMs;
@@ -2370,6 +2428,13 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 // Silent fail - don't disrupt the session
               }
             })();
+          }
+          // PR5（ADR-009 B3）：回合结束归档 Recall（request-only，不再随后续
+          // 回合注入；审计记录保留在 memory_recalls）。
+          if (recallRecordId && get().workspacePath) {
+            void archiveMemoryRecall(get().workspacePath!, recallRecordId).catch(
+              () => undefined
+            );
           }
           saveCurrentProjectState(get());
         } catch (err) {

@@ -310,6 +310,20 @@ export interface IContextSnapshot {
       completedAt: number | null;
     } | null;
   };
+  /** PR5（ADR-009）：本会话最新一次 Recall 检索（审计观测）。 */
+  memoryRecall?: {
+    recallId: string;
+    query: string;
+    estimatedTokens: number;
+    createdAt: number;
+    status: string;
+    items: Array<{
+      title: string;
+      source: string;
+      confidence: string;
+      score: number;
+    }>;
+  };
 }
 
 export type IChatStreamEvent =

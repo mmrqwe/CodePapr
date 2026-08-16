@@ -1371,7 +1371,8 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     },
     payload.images,
     abortController.signal,
-    payload.userMessageId
+    payload.userMessageId,
+    payload.contextInsertions
   );
 
   armIdle();

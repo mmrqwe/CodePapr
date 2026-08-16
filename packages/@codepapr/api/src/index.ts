@@ -28,7 +28,7 @@ export {
 } from './providers/reasoningRoundTrip';
 
 // Request / Response
-export { RequestBuilder, stripConsumedImages } from './request/RequestBuilder';
+export { RequestBuilder, stripConsumedImages, insertAnchoredContext } from './request/RequestBuilder';
 export { CacheValidator } from './response/CacheValidator';
 export { DEFAULT_MAX_TOKENS, DEEPSEEK_MAX_TOKENS, getProviderMaxTokensLimit, getProviderContextLimit, CONTEXT_LIMITS, sanitizeMaxTokens } from './tokenLimits';
 

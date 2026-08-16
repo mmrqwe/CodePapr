@@ -32,6 +32,7 @@ import {
   type AppAgentPayload,
   type AppAgentResult,
 } from './agentWorkerProtocol';
+import type { RequestContextInsertion } from '@codepapr/types';
 
 function resolveWorkerMultimodalEnabled(settings: WorkerAgentSettings, currentModel: string): boolean {
   if (!settings.multimodalEnabled) return false;
@@ -141,7 +142,9 @@ export interface AgentRuntimeHandle {
     onStreamEvent?: (event: AgentRuntimeStreamEvent) => void,
     images?: IImageContent[],
     /** PR1：主线程生成的 canonical user 消息 ID（ADR-009 前置）。 */
-    userMessageId?: string
+    userMessageId?: string,
+    /** PR5（ADR-009 B3）：request-only 锚定插入（Recall Block）。 */
+    contextInsertions?: RequestContextInsertion[]
   ): Promise<IAgentResponse>;
   getSession(): { logStore: AppendOnlyLog };
   cancel(): void;
@@ -632,7 +635,8 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     userInput: string,
     onStreamEvent?: (event: AgentRuntimeStreamEvent) => void,
     images?: IImageContent[],
-    userMessageId?: string
+    userMessageId?: string,
+    contextInsertions?: RequestContextInsertion[]
   ): Promise<IAgentResponse> {
     if (this.destroyed) {
       // 已被销毁的 agent 拒绝新回合：用 AgentDestroyedError（而非
@@ -673,6 +677,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       ...(incrementalSync ? { incrementalSync } : {}),
       userInput,
       ...(userMessageId ? { userMessageId } : {}),
+      ...(contextInsertions && contextInsertions.length > 0 ? { contextInsertions } : {}),
       images,
       settings: this.config.settings,
       providerName: this.config.providerName,

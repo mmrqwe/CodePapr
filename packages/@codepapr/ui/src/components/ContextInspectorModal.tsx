@@ -550,6 +550,19 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
             ) : (
               <span className="text-[11px] text-fg-dim">{t.contextSurfaceNoCompaction}</span>
             )}
+            {snapshot.memoryRecall ? (
+              <span className="text-[11px] text-fg-muted">
+                {t.contextMemoryRecall}{' '}
+                <span className="font-mono text-fg-soft">
+                  {snapshot.memoryRecall.items.length} 项 ·{' '}
+                  {formatTokens(snapshot.memoryRecall.estimatedTokens)} {t.tokensUnit}
+                </span>{' '}
+                <span className="font-mono text-fg-dim">
+                  ({snapshot.memoryRecall.status} · {snapshot.memoryRecall.query.slice(0, 40)}
+                  {snapshot.memoryRecall.query.length > 40 ? '…' : ''})
+                </span>
+              </span>
+            ) : null}
           </div>
         ) : null}
 

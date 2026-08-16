@@ -35,6 +35,7 @@ import {
   IContextMessageView,
   ContextStage,
   CompactionTrigger,
+  RequestContextInsertion,
 } from '@codepapr/types';
 import { Logger, estimateTokens } from '@codepapr/common';
 import { PARALLEL_SAFE_TOOL_NAMES } from './agentConfig';
@@ -409,6 +410,8 @@ export interface IRequestBuilder {
     tools?: IToolDefinition[];
     /** 仅影响本次请求的临时尾部消息（不落日志）：用于 max_tokens 截断后的自动续写。 */
     suffixMessages?: IMessage[];
+    /** PR5（ADR-009 B3）：request-only 锚定插入（Recall Block），不落日志。 */
+    contextInsertions?: RequestContextInsertion[];
   }): IChatRequest;
   syncAfterPop?(appendLog: IAppendOnlyLog): void;
   resetLogTracking?(): void;
@@ -488,6 +491,8 @@ export class Agent {
   private lastCompactionFailed = false;
   /** PR3：provider 上下文溢出的 emergency-compact 至多一次（溢出重试 ≤1）。 */
   private overflowCompactionAttempted = false;
+  /** PR5（ADR-009 B3）：本回合 request-only 锚定插入（Recall Block）。 */
+  private contextInsertions: RequestContextInsertion[] = [];
 
   constructor(opts: AgentOptions) {
     this.session = opts.session;
@@ -586,7 +591,11 @@ export class Agent {
     images?: IImageContent[],
     signal?: AbortSignal,
     /** PR1：主线程生成的 canonical user 消息 ID（ADR-009 前置）。 */
-    userMessageId?: string
+    userMessageId?: string,
+    /** PR5（ADR-009 B3）：本回合 request-only 锚定插入（Recall Block），
+     *  tool loop 内字节稳定；mid-loop replaceLog 后仍存活（存 Agent 字段，
+     *  不进 log）。 */
+    contextInsertions?: RequestContextInsertion[]
   ): Promise<IAgentResponse> {
     const effectiveSignal = signal ?? (() => {
       const controller = new AbortController();
@@ -594,6 +603,9 @@ export class Agent {
       return controller.signal;
     })();
     const userMsg = MessageFactory.user(userInput, images, userMessageId);
+    // PR5（ADR-009 B3）：turn-scoped 插入挂在 Agent 字段上（不进 log），
+    // 本回合所有 request build 复用；replaceLog（mid-loop 压缩）不清除。
+    this.contextInsertions = contextInsertions ?? [];
 
     let finalContent = '';
     let finalReasoningContent: string | undefined;
@@ -730,6 +742,7 @@ export class Agent {
           maxTokens: params.maxTokens,
           tools: [...this.session.prefix.getToolDefinitions()],
           suffixMessages,
+          contextInsertions: this.contextInsertions,
         });
 
         onStreamEvent?.({
