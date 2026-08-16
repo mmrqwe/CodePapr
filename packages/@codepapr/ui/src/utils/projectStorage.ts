@@ -802,3 +802,31 @@ export async function loadContextCompactions(
     limit,
   });
 }
+
+// ── Artifact 回读（PR2：history_read_artifact 的 TS 接口）────────────────
+
+export interface ArtifactReadResult {
+  artifactId: string;
+  content: string;
+  totalChars: number;
+  truncated: boolean;
+}
+
+/**
+ * 只读取回已外置的 artifact 内容（offset/limit 按字符）。安全边界在 Rust 侧：
+ * 仅允许 `.CodePapr/tool-output/` 内的相对路径；此接口不会自动把内容注入
+ * 未来上下文——调用方必须显式使用返回值。
+ */
+export async function readArtifact(
+  workspacePath: string,
+  artifactId: string,
+  offsetChars?: number,
+  limitChars?: number
+): Promise<ArtifactReadResult> {
+  return invoke<ArtifactReadResult>('read_artifact', {
+    workspacePath: workspacePath.trim(),
+    artifactId,
+    offsetChars,
+    limitChars,
+  });
+}

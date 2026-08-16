@@ -10,26 +10,13 @@
  *   不重写已持久化的 v2 payload。
  */
 
+import type { ContextFact } from '@codepapr/core';
 import type {
   ContextCheckpointPayload,
   ContextCheckpointSections,
 } from './contextCompaction';
 
 export const CONTEXT_CHECKPOINT_VERSION_3 = 3;
-
-/**
- * 最小 ContextFact 占位（PR2 在 core/src/context 补全并收敛正式定义；
- * 届时本文件改为从 core 导入）。providence 字段仅为形状占位。
- */
-export interface ContextFactPlaceholder {
-  id: string;
-  kind: string;
-  trust: 'trusted' | 'workspace' | 'derived' | 'untrusted';
-  disposition: 'pinned' | 'retained' | 'summarized' | 'externalized' | 'discarded';
-  summary: string;
-  artifactRef?: string;
-  sourceMessageIds?: string[];
-}
 
 /** 结构化 checkpoint 状态（ADR-007）。所有分区为 string[]。 */
 export interface ContextCheckpointStateV3 {
@@ -45,7 +32,8 @@ export interface ContextCheckpointStateV3 {
   todos: string[];
   openQuestions: string[];
   references: string[];
-  provenance: ContextFactPlaceholder[];
+  /** PR2：压缩分类的紧凑事实来源（core 的正式 ContextFact）。 */
+  provenance: ContextFact[];
 }
 
 /** v3 payload：在 v2 字段（含 PR1 provenance）之上新增结构化 state（ADR-001/007）。 */

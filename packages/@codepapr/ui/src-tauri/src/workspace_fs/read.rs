@@ -248,8 +248,94 @@ fn slice_content_by_window(content: &str, window: &ReadWindow) -> (String, usize
     (selected, bytes)
 }
 
-fn is_probably_binary_content(bytes: &[u8]) -> bool {
-    if bytes.contains(&0) {
+// ── Artifact 回读（PR2：history_read_artifact 的 Rust 实现）────────────────
+//
+// 只读接口，供模型/UI 按需取回已外置的大工具输出。安全约束：
+// - artifactId 必须是 `.CodePapr/tool-output/` 内的相对路径（禁止 `..`/绝对路径）；
+// - 只读，不写入任何内容；
+// - 字节/字符上限钳制，绝不把完整大文件整体注入未来上下文。
+
+const ARTIFACT_DIR: &str = ".CodePapr/tool-output";
+/// 单次回读的字符上限（offset/limit 语义，`truncated` 标记是否还有更多内容）。
+const MAX_ARTIFACT_READ_CHARS: usize = 200_000;
+/// 整文件读取的字节硬上限（超出部分不读；artifact 是工具输出，正常远小于此）。
+const MAX_ARTIFACT_SOURCE_BYTES: usize = 5_000_000;
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArtifactReadResult {
+    pub(crate) artifact_id: String,
+    pub(crate) content: String,
+    pub(crate) total_chars: usize,
+    pub(crate) truncated: bool,
+}
+
+#[tauri::command]
+pub(crate) async fn read_artifact(
+    workspace_path: String,
+    artifact_id: String,
+    offset_chars: Option<usize>,
+    limit_chars: Option<usize>,
+) -> Result<ArtifactReadResult, String> {
+    run_blocking_workspace_task(move || {
+        read_artifact_impl(workspace_path, artifact_id, offset_chars, limit_chars)
+    })
+    .await
+}
+
+pub(crate) fn read_artifact_impl(
+    workspace_path: String,
+    artifact_id: String,
+    offset_chars: Option<usize>,
+    limit_chars: Option<usize>,
+) -> Result<ArtifactReadResult, String> {
+    // 路径约束：相对路径、无 `..` 段、必须位于 ARTIFACT_DIR 内
+    let normalized = artifact_id.replace('\\', "/");
+    if normalized.starts_with('/')
+        || normalized.split('/').any(|segment| segment == ".." || segment.is_empty())
+    {
+        return Err("artifact 路径非法".to_string());
+    }
+    let dir_prefix = format!("{ARTIFACT_DIR}/");
+    if !normalized.starts_with(&dir_prefix) || normalized.len() <= dir_prefix.len() {
+        return Err(format!("artifact 必须位于 {ARTIFACT_DIR}/ 目录内"));
+    }
+
+    let path_input = parse_workspace_path_input(Some(&normalized));
+    let (workspace, target) = resolve_existing_path(&workspace_path, Some(&path_input.path))?;
+    if !target.is_file() {
+        return Err("artifact 不存在".to_string());
+    }
+
+    let mut file = fs::File::open(&target)
+        .map_err(|err| format!("无法打开 artifact {}: {err}", target.display()))?;
+    let mut buffer = Vec::new();
+    std::io::Read::by_ref(&mut file)
+        .take((MAX_ARTIFACT_SOURCE_BYTES + 1) as u64)
+        .read_to_end(&mut buffer)
+        .map_err(|err| format!("读取 artifact 失败: {err}"))?;
+    if buffer.len() > MAX_ARTIFACT_SOURCE_BYTES {
+        buffer.truncate(MAX_ARTIFACT_SOURCE_BYTES);
+    }
+    let content = decode_text_bytes(buffer)?;
+    let total_chars = content.chars().count();
+
+    let offset = offset_chars.unwrap_or(0).min(total_chars);
+    let limit = limit_chars
+        .unwrap_or(MAX_ARTIFACT_READ_CHARS)
+        .clamp(1, MAX_ARTIFACT_READ_CHARS);
+    let selected: String = content.chars().skip(offset).take(limit).collect();
+    let truncated = offset + limit < total_chars;
+
+    Ok(ArtifactReadResult {
+        artifact_id: relative_string(&workspace, &target),
+        content: selected,
+        total_chars,
+        truncated,
+    })
+}
+
+fn is_probably_binary_content(bytes: &[u8]) -> bool {    if bytes.contains(&0) {
         return true;
     }
 

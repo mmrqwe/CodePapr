@@ -281,6 +281,7 @@ fn main() {
             workspace_fs::read::read_text_file,
             workspace_fs::read::read_text_files_batch,
             workspace_fs::read::read_image_file,
+            workspace_fs::read::read_artifact,
             workspace_fs::write::write_text_file,
             workspace_fs::write::delete_workspace_file,
             workspace_fs::write::delete_workspace_dir,

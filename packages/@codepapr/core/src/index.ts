@@ -378,3 +378,21 @@ export {
   SymbolProviderRegistry,
   UnifiedSymbolDispatcher,
 } from './tool/unifiedSymbols';
+
+export type {
+  ContextTrust,
+  ContextDisposition,
+  ContextFactKind,
+  ContextArtifactRef,
+  ContextFact,
+} from "./context/ContextFacts";
+export { CONTEXT_FACT_MAX_SUMMARY_CHARS, truncateFactSummary } from "./context/ContextFacts";
+export type {
+  ContextBudgetAction,
+  ContextEstimateSource,
+  ContextBudgetStageTokens,
+  ContextBudgetBreakdown,
+  ContextBudgetDecisionInput,
+  ContextBudgetDecision,
+} from "./context/ContextBudget";
+export { buildContextBudgetBreakdown, decideContextBudgetAction } from "./context/ContextBudget";
