@@ -418,83 +418,88 @@ Hover 用户消息 → 显示"重置到此点"按钮：
 
 ## 8. 项目记忆系统 (Project Memory)
 
-> **规划中（PR0 已冻结架构决策）**：本节描述现有实现。Context Surface / Compaction
-> Provenance / Memory Ledger / Recall 的重设计见 `docs/adr/`（ADR-001 ~ ADR-009），
-> 其中与本系统直接相关的是 ADR-008（memory.md 双区模型 + 写者迁移）与
-> ADR-009（turn-scoped Memory Recall）。ADR 落地前行为不变。
+> **2026-08 重设计已落地（PR0–PR5）**：记忆系统从「单文件记忆」升级为
+> **Memory Ledger（SQLite）+ 双区 memory.md 投影 + turn-scoped Recall**。
+> 架构决策见 `docs/adr/`（ADR-001 ~ ADR-009），完整分层见 §16。
 
 ### 8.1 设计定位
 
-`.CodePapr/memory.md` 是项目的**跨会话长期记忆**，区别于 TodoList（短期工作记忆）和 ProjectGraph（语义索引）。它存放：
+项目记忆分为三个正交层：
 
-- 用户画像与偏好（语言、工具链、代码风格）
-- 项目约定（构建/部署/配置约定）
-- 错误模式与解法（同一错误多次踩坑的应对）
-- 架构决策原因
-- 经验教训
+| 层 | 载体 | 内容 | 生命周期 |
+| --- | --- | --- | --- |
+| Session Checkpoint | 合成消息的 `contextCheckpoint` payload（v3 结构化 state） | 当前任务状态：目标/约束/已完成/验证/待办/提问 | 随会话压缩演进，不等于完整历史 |
+| Project Memory | SQLite `memory_entries` + `.CodePapr/memory.md` 双区投影 | 跨会话稳定知识：用户偏好、项目约定、错误模式与解法、架构决策 | 准入后长期存活，supersede 更新 |
+| Archive / Artifact Recall | SQLite messages 原文 + `.CodePapr/tool-output/` 落盘 | 大工具输出、历史对话等原始资料 | 按需回读（`read_artifact`），不整体注入 |
 
-### 8.2 写入机制
+### 8.2 memory.md 双区模型
 
-Agent 没有专用的 memory 工具--通过 prompt 约定，让 Agent 在以下场景下用通用 `write` 工具追加条目：
+`memory.md` 是 **ledger 的人类可读投影**，采用双区结构：
 
-1. 发现项目目录结构、技术栈、构建/lint/test 命令等值得跨会话复用的事实
-2. 同一错误在本次会话中踩了两次
-3. 发现项目特有的构建/部署/配置约定
-4. 用户明确要求记住
+```markdown
+# Project Memory
 
-每条以 `## YYYY-MM-DD 主题` 起始，纯 Markdown，可手动编辑。
+<!-- CodePapr:user-memory:start -->
+## User Notes
+（用户手编内容，投影器永不覆盖）
+<!-- CodePapr:user-memory:end -->
 
-> 写入条件刻意放宽：项目结构、构建命令等"项目特定事实"是跨会话复用价值最高的内容，不应归为"常规发现"被禁止写入。通用知识与临时状态仍不写入。
-
-### 8.3 加载机制
-
-会话启动时，`agentStore.sendMessage` 调用 Tauri `read_text_file` 读取 `.CodePapr/memory.md`（上限 50KB），结果通过 `buildSessionBootstrapPrompt` 注入第二层 Session Bootstrap，不进入 ImmutablePrefix。这样：
-
-- Memory 内容变化不会破坏 system prompt 缓存
-- 所有会话启动时都是一次性全量加载，不做按需检索（保持简单）
-
-**冷启动自动生成**：若读取发现 `memory.md` 不存在或为空，且 ProjectGraph 缓存摘要可用，则在后台异步触发 `bootstrapMemoryContent`：用快速模型基于 ProjectGraph 摘要 + 项目规则 + 用户首条消息生成初始记忆（项目结构/技术栈/构建命令/关键约定），写入 `.CodePapr/memory.md`。该任务 fire-and-forget，不阻塞当前会话；用模块级 `memoryBootstrapInFlight` 标志防重入。若 ProjectGraph 缓存也为空则跳过，等下次会话。这避免了"每次都从零探索项目"的冷启动死循环。
-
-### 8.4 自动整理
-
-Memory 文件单调增长，需要周期性整理避免膨胀。三个触发点：
-
-| 触发 | 时机 | 行为 |
-|---|---|---|
-| T1 | session 启动，读完 memory.md | 行数 > 200 → 标记 `_pendingMemoryConsolidation = true` |
-| T2 | 上下文压缩成功（自动或 `/compact`） | 同上标记 |
-| T3 | 每次 agent 回复完成后 | pending? → 异步整理 → 写回文件 |
-
-### 8.5 整理流程
-
-整理是 fire-and-forget 的异步任务，不阻塞当前会话：
-
-```
-agent 回复完成
-  └─ pending? → 关标记 → 重读 memory.md（获取最新内容）
-                 ├─ 仍 > 200 行？
-                 │    ├─ 是 → 调 fast model 整理（合并/去重/压缩）
-                 │    │       ├─ 成功 → write_text_file 写回
-                 │    │       └─ 失败 → 规则降级（按 `## ` 分节去重 + 按日期排序截断）
-                 │    └─ 否 → skip（agent 期间已自行精简）
-                 └─ 静默 catch，不影响主流程
+<!-- CodePapr:managed-memory:start -->
+## Verified Project Knowledge
+- [verified] verification — [bash] ✓ pnpm test auth
+<!-- CodePapr:managed-memory:end -->
 ```
 
-整理用的模型路由走 `selectContextCompactionModelRoute`，与上下文压缩共享配置项（`compactionModel` / `compactionMaxTokens` / `compactionTemperature`）；上下文压缩自身已改经 compactor 子代理（`resolveSubagentExecution`）执行。
+- **User Zone**：用户手编内容。旧版无标记文件整体视为 user zone，绝不丢失。
+- **Managed Zone**：仅来自 verified / admitted `memory_entries` 的投影，由
+  `project_memory_file`（Rust）覆盖生成；条目上限 24 条 / 6k 字符（token 预算）。
 
-### 8.6 关键不变量
+### 8.3 写入与准入（防注入）
 
-- **不新增工具**：所有读写都走通用 `read_text_file` / `write_text_file` Tauri 命令；模型不感知整理逻辑，无 prefix 变更
-- **不破坏缓存**：整理永远在 agent 回复**之后**触发，写回的新 memory 在下次会话启动时才被加载；当前会话的 ImmutablePrefix 不受影响
-- **当前会话用旧记忆**：异步整理意味着收益延迟到下次会话；好处是启动延迟为零，且整理质量低的风险被隔离
-- **静默降级**：LLM 失败 → 规则去重（按标题去重、按日期保留最近的，截断到 200 行）；规则降级也失败 → 保持原文件不动
+**准入策略是确定性规则（非 LLM），核心在 `ContentEnvelope`**（core）：
+所有外部内容先包信封（source / trust / origin / risk flags），
+`planMemoryAdmission` 只读信封裁决：
+
+- **自动准入**仅限：执行验证（bash 测试命令成功 → workspace/confirmed）、
+  用户确认、checkpoint 抽取；
+- **永不自动准入**：web / MCP 内容、注入指令、策略绕过措辞、密钥
+  （先经 `redactSecrets` 脱敏）、shell/上传命令、未验证猜测、reasoning、临时状态。
+
+v1 唯一的自动准入路径是「已验证命令」：回合结束后 `refreshMemoryLedgerProjection`
+扫描本轮回合的 tool invocations，bash 测试命令成功 → 候选（`memory_candidates`）
+→ 裁决 → 准入（`memory_entries`，同内容哈希的旧 active 条目自动 supersede）→
+重新投影 managed zone。Agent 的 `write` 工具写 memory.md、冷启动 bootstrap、
+回合后 consolidation 均按 ADR-008 迁移进该管道。
+
+### 8.4 加载机制（缓存行为）
+
+- 会话启动时读取 `memory.md`（≤50KB）注入 Session Bootstrap（`log[0]`），
+  按 (session × 稳定签名) 冻结——**普通回合不重载**；
+- 压缩 epoch 重写时随 `refreshBootstrap` 刷新（零额外缓存代价）；
+- 新会话总是重读；
+- 冷启动自动生成（`bootstrapMemoryContent`，基于 ProjectGraph 摘要 + 规则 +
+  首条消息）保留。
+
+### 8.5 自动整理（Consolidation）
+
+ledger 之外的存量行为保留：memory.md 超过 200 行时触发
+`consolidateMemoryContent`（fast 模型整理 + 规则降级），三个触发点
+（会话启动读后 / 压缩成功 / 回复完成后），fire-and-forget 不阻塞会话。
+
+### 8.6 Memory Recall（按需检索）
+
+见 §16.6（L5 层）：每用户回合检索一次 memory ledger + 历史 checkpoint，
+形成 turn-scoped Recall Block，锚定插入到当前 user 消息之前，tool loop 内
+复用；不进入 log / surface / archive messages，审计记录存 `memory_recalls`。
 
 ### 8.7 关键源码定位
 
-- `packages/@codepapr/ui/src/utils/memoryConsolidation.ts`：整理逻辑、冷启动生成、三语 prompt、LLM 调用、规则降级
-- `packages/@codepapr/ui/src/store/internals/types.ts`：`_pendingMemoryConsolidation: boolean` 状态
-- `packages/@codepapr/ui/src/store/agentStore.ts`：三个整理触发点（启动/压缩/回复后）+ 冷启动生成触发点（启动读取后）
-- `packages/@codepapr/core/src/agent/promptSystem.ts`：写入条件 prompt、Memory section 的 bootstrap 渲染
+- `packages/@codepapr/core/src/context/ContentEnvelope.ts`：信封 / 脱敏 / 准入门
+- `packages/@codepapr/ui/src/utils/memoryLedger.ts`：候选抽取 / 投影渲染（纯函数）
+- `packages/@codepapr/ui/src/store/internals/memoryLedgerStore.ts`：准入 + 投影编排
+- `packages/@codepapr/ui/src/utils/memoryConsolidation.ts`：整理逻辑（存量保留）
+- `packages/@codepapr/ui/src-tauri/src/db/mod.rs`：memory_entries / memory_candidates /
+  memory_recalls 表与命令；`project_memory_file`（双区投影）
 
 ## 9. ProjectGraph 语义分析
 
@@ -626,6 +631,11 @@ CodePapr 的核心架构决策是**围绕 DeepSeek 隐式前缀缓存做提示�
 
 压缩后的有效上下文 = `[checkpoint 摘要, ...保留尾部]`。checkpoint **按保留边界插入**（`planContextCompaction.insertIndex`，经 `insertCheckpointAtRetainedBoundary` 落到 UI 消息边界），而非追加到列表末尾——`buildEffectiveContextMessages` 取 checkpoint **之后**的消息作为保留尾部，因此最近若干轮（含工具调用↔结果配对）原文保留在 checkpoint 之后，只有更早的消息被摘要。保留边界在 **UI 消息粒度**选取（每个 assistant+tools 组是原子单元），不会切出孤儿 tool 消息。checkpoint 在有效上下文中以 **user 轮**发出（非 assistant），避免压缩后出现"首条 / 连续 assistant"，提升跨 provider（OpenAI / Claude）正确性；checkpoint 识别基于 `contextCheckpoint` payload，与角色无关。
 
+> **2026-08 更新**：checkpoint 已是 **v3 结构化状态**（13 分区 + ContextFact provenance，
+> 见 §16.4）；每次压缩有完整溯源（compactionId / generation / trigger / 来源区间 /
+> tokenStats，见 §16.2）；软硬预算分层与 prune-first 见 §16.5。压缩事务由主线程
+> Store 单事务提交，失败压缩保留上一个 completed surface。
+
 ### 13.3 中途溢出 → 压缩（mid-loop compaction）
 
 工具循环内上下文会随 tool 结果增长。`Agent.chat` 在**每轮构建请求之前**做溢出检查（`estimateContextTokens`：前缀字节 + 日志字节 / 4 的粗估）：
@@ -634,9 +644,15 @@ CodePapr 的核心架构决策是**围绕 DeepSeek 隐式前缀缓存做提示�
    - 把当前日志（core `IMessage`）转成 ui `ContextMessageLike`（`coreMessagesToContextMessages`，tool 结果回填到 assistant 的 `toolInvocations`，往返保真）；
    - 走与轮间压缩相同的管线（`maybeGenerateContextCheckpoint` 生成 checkpoint 摘要，并冻结当前 TodoList digest）；
    - `buildEffectiveContextMessages` 在保留边界插入 checkpoint（其后保留近期尾部原文，含工具调用）+ 剪枝尾部旧 tool 结果；
-   - `Session.replaceLog` 重置日志（`AppendOnlyLog.reset` + 重载），`RequestBuilder.resetLogTracking` 重置 append-only 跟踪避免误报；
-   - 合并压缩的 cacheStats，发出 `context-compacted` 流事件，循环继续。
+    - `Session.replaceLog` 重置日志（`AppendOnlyLog.reset` + 重载），`RequestBuilder.resetLogTracking` 重置 append-only 跟踪避免误报；
+    - 合并压缩的 cacheStats，发出 `context-compacted` 流事件，循环继续。
+    - **（2026-08）** mid-loop 的压缩提交数据（checkpoint 消息 + 来源区间）随
+      result 消息回传主线程，由 Store 单事务落库（surface + compaction 溯源），
+      见 §16.2。
 2. **检查时机：仅轮首**。tool 结果在一轮末尾追加，其导致的超限在**下一轮轮首**被拦截——任何 LLM 请求都不会用超限上下文发送；工具调用任务在压缩后基于"摘要 + 近期尾部"继续。
+   - **（2026-08）** provider 上下文溢出（`context_length_exceeded`）还会触发
+     emergency-compact 后**重试一次**（`tryEmergencyCompact`，trigger 记为
+     `provider-overflow`），与流层 retriable 重连正交，见 §16.5。
 3. **不在工具执行中途压缩**：一轮内多个工具调用原子执行完再到轮边界压缩，避免破坏"工具调用↔结果"配对。
 4. **防死循环**：`lastCompactionRound` 保证两次压缩至少间隔 2 轮；handler 返回 null 不重置。
 5. **防御纵深**：`toolOutputTruncation` 把单个 tool 结果限制在 ~100KB（或落盘留预览），单轮增长有界，不会单轮撑爆 provider 硬上限。中间截断保留字符数默认为 20k，可通过 `toolOutputMiddleKeepChars` 配置。工具上下文模式（完整/摘要/自动，默认完整）不影响当轮——工具结果始终以全文（受本截断管线约束）发给 LLM；它只控制结果变成历史后是否替换为冻结摘要，见 §13.10。
@@ -769,7 +785,126 @@ OpenAI/Claude 兼容端点常是转发网关（如 OpenAI 网关转发 DeepSeek 
 
 弹窗整体放大至 `w-[min(96vw,1280px)] h-[90vh]`（略小于主界面），并采用多列网格布局（语言表 + 工具统计双列、指标三联、文件大小双列）充分利用宽度。
 
-## 16. 关键源码定位
+## 16. 上下文记忆新架构（Context Surface · Provenance · Memory Ledger · Recall）
+
+> PR0–PR5 已全部落地（2026-08）。完整决策记录见 `docs/adr/`（ADR-001 ~ ADR-009）。
+> 设计原则：SQLite messages 仍是 canonical 原始归档；新增的可持久化「模型上下文
+> 投影」不复制消息文本、不对 messages 建外键、由主线程 Store 统一写。
+
+### 16.1 六层模型
+
+```text
+L0. Archive（SQLite messages）
+    原始对话真相：UI、搜索、回放、恢复。唯一 raw 文本权威。
+
+L1. Context Surface（SQLite context_surfaces + nodes）
+    当前模型历史选择的唯一权威：checkpoint + retained tail 的 message ID 序列，
+    带 generation / parent_generation / 冻结渲染参数（ADR-006）。
+
+L2. Active Runtime Cache（AppendOnlyLog）
+    Agent 执行的快速读取缓存；由 Surface 经确定性编译器重放重建。
+    压缩后 reset 是合法 epoch 重置。
+
+L3. Session Checkpoint（ContextCheckpointPayload v3）
+    结构化当前任务状态（goal/constraints/confirmedFacts/assumptions/decisions/
+    completedWork/activeWork/verification/failuresAndRisks/todos/openQuestions/
+    references + ContextFact[] provenance），不等于完整历史。
+
+L4. Project Memory（SQLite memory_entries + memory.md 双区投影）
+    跨会话稳定知识（§8），准入制 + 防注入。
+
+L5. Turn-scoped Memory Recall（SQLite memory_recalls + request-time insertion）
+    request-time augmentation 层：每用户回合检索一次，锚定插入到当前 user
+    消息之前；不进 log / surface / archive messages；tool loop 内字节稳定。
+```
+
+最终请求形态（ADR-001）：
+
+```text
+[Immutable Prefix]        system prompt / tools / model parameters
+[Session Bootstrap]       frozen AGENTS / skills / epoch memory snapshot（永远在 Surface 外）
+[Surface Materialization] checkpoint + retained model-visible history
+[Turn-scoped Recall]      anchored before current user message（request-only）
+[Current User Message]    canonical message in AppendOnlyLog
+[Current Turn History]    assistant/tool messages
+[Suffix]                  continuation / question-answer mechanics only
+```
+
+### 16.2 Context Surface 与压缩事务（ADR-002/003/005）
+
+- **无外键**：`context_surfaces` / `context_surface_nodes` / `context_compactions`
+  只存 message ID 字符串——`save_message_batch` 是全量 DELETE+INSERT，FK 级联会
+  每次保存清空 surface。引用完整性由应用层维护（hydrate 时缺失 → degraded →
+  回退 parent generation → 重新引导 generation 0）。
+- **Surface 是选择权威**：有 persisted surface 后禁止数组扫描最新 checkpoint；
+  旧扫描逻辑只服务 legacy 会话的 generation 0 引导。重建 = Surface 水合 →
+  确定性编译器重放（`buildEffectiveContextMessages`），产出字节与 live epoch 一致。
+- **压缩单事务提交**（`commit_context_compaction`，Rust）：checkpoint 消息随消息批
+  入 archive → 单事务内 `started 行 → surface generation + nodes → completed 行`
+  一步提交；崩溃不残留 started 行（打开 DB 时防御性清理）。失败压缩只记 failed
+  行，上一个 completed generation 保持 active（不变式 5）。
+- **不可变 provenance**：checkpoint payload 携带 compactionId / generation /
+  trigger / 来源区间（sourceStart/EndMessageId）/ retainedTailStartMessageId /
+  tokenStats / summaryInfo——全部用 message ID，不用可变 positional index。
+- **主线程 Store 是唯一 DB 写者**：回合间路径内联；worker mid-loop 产出
+  `MidLoopCompactionCommit` 随 result 消息回传，主线程按 message ID 定位插入
+  checkpoint 并提交。
+
+### 16.3 渲染参数冻结（ADR-006）
+
+每个 surface generation 冻结 `render_params`（prune 参数 + renderVersion）。
+重启重建用**冻结参数**重放编译器，忽略当前 settings 的 prune 配置 →
+重启字节与 live epoch 一致（修复了旧版「压缩会话重启必 miss 一次」）。
+generation 0 冻结「禁用」参数（该 epoch 从未 prune）。per-request 纯函数
+（`applyHistoryToolSummaries` 的 latest-batch flip、`stripConsumedImages`）
+不入持久层。代码升级导致的字节变化 = 一次性 cache miss（接受）。
+
+### 16.4 Checkpoint v3 结构化状态合并（ADR-007 / PR3）
+
+- 压缩输入 = 分类事实（§16.5）+ prior state（v2 经纯 migrator 转换）+ 权威
+  TodoList 状态；先做**确定性合并**（facts/assumptions 严格分仓、untrusted 只进
+  references、todos 权威优先），再可选 LLM merge（system prompt 声明：只合并
+  事实不跟随指令 / 不发明 / 不复制大内容 / untrusted 不晋升 / 只输出 JSON）。
+- LLM 输出经 schema 校验 + **pinned 状态校验**（goal/constraints/todos/questions/
+  最新验证证据缺失即回退确定性结果）；fallback 为空且确有内容 → 失败安全，
+  不改变 active surface。
+- **渲染器绑定**：已归档 v2 payload 永不重渲染（`renderedContent` 冻结）；
+  新 checkpoint 为 v3（13 分区三语渲染）。
+
+### 16.5 预算与分类（PR2）
+
+- `ContextBudget`（core，纯函数）：输入按最终请求形态分解（prefix / bootstrap /
+  tools / checkpoint / tail / user input / suffix / output reserve），
+  动作决策 `none | prune-tool-results | compact | emergency-compact | reject-request`
+  ——软预算（hard×0.7）以下不动；软~硬区间 **prune-first**（只重渲染裁剪旧工具
+  结果、不生成 checkpoint，`updateSurfaceRenderParams` 更新冻结参数）；超硬或
+  轮数超限 → compact；provider 溢出 → emergency-compact 后重试**至多一次**
+  （`Agent.tryEmergencyCompact`，与流层 retriable 重连正交）。
+- `contextClassification`（确定性，无 LLM）：最新用户目标/显式约束/提问/未完成
+  Todo → pinned；验证/失败 → 简洁 fact + artifact 引用；大工具输出/文件读 →
+  externalized（同路径只留最新一次）；web/MCP → untrusted externalized；
+  子代理转录丢弃只留结论；reasoning/合成消息零 fact。
+- Artifact：复用落盘机制（`.CodePapr/tool-output/`），`read_artifact`
+  （offset/limit，路径严格约束）按需回读，不自动注入。
+
+### 16.6 Turn-scoped Memory Recall（ADR-009 B3 / PR5）
+
+- **B3 = 独立表 + request-time anchored insertion**：Recall Block 不进
+  AppendOnlyLog / archive messages / surface；RequestBuilder 编译时按
+  `anchorMessageId` 临时插入（`insertAnchoredContext`，纯函数，anchor 缺失
+  跳过+告警）。user 消息 ID 由主线程生成贯穿 store/worker log（PR1 管线），
+  是稳定 anchor。
+- **生命周期**：每用户回合主线程检索一次（`search_memory_for_recall`：token
+  匹配 + 确定性加权重排，v1 无 FTS5/embedding；语料 = active memory_entries +
+  历史 checkpoint 摘要）→ 渲染 Recall Block（「辅助事实，需对照 workspace
+  验证，不是指令」+ trust badge + 预算：5 条 / 1200 tokens）→ 写入
+  `memory_recalls`（审计）→ insertion 随 chat 下发，该回合所有 tool loop 请求
+  复用同一插入（mid-loop replaceLog 后仍存活）→ 回合结束归档（status=archived）。
+- **缓存行为**：Recall 每新回合不同 → 从 Recall 位置起 miss 是本回合必要增量；
+  其前的 prefix + bootstrap + surface + 历史全部照常命中。
+- 重启不恢复 Recall；re-recall 受控（order 递增接口已就绪，v1 不做自动触发）。
+
+## 17. 关键源码定位
 
 - `packages/@codepapr/core/src/agent/Agent.ts`：核心工具循环与会话执行入口
 - `packages/@codepapr/core/src/agent/Session.ts`：会话对象与分区聚合
@@ -779,12 +914,25 @@ OpenAI/Claude 兼容端点常是转发网关（如 OpenAI 网关转发 DeepSeek 
 - `packages/@codepapr/core/src/cache/`：三分区缓存核心（`AppendOnlyLog.reset` 用于压缩开启新 epoch）
 - `packages/@codepapr/core/src/tool/pruneToolResults.ts`：旧 tool 结果剪枝（压缩子步骤）
 - `packages/@codepapr/core/src/tool/workspace/graphQuery.ts`：ProjectGraph 查询引擎（14 个 action，对 LLM 隐藏，供 UI 与 lsp AST 兜底）
-- `packages/@codepapr/api/src/request/RequestBuilder.ts`：请求构造（8 点校验 + `resetLogTracking`）
+- `packages/@codepapr/api/src/request/RequestBuilder.ts`：请求构造（8 点校验 + `resetLogTracking` + `insertAnchoredContext` 锚定插入）
 - `packages/@codepapr/api/src/response/CacheValidator.ts`：响应校验
 - `packages/@codepapr/ui/src/agent/compactionHandler.ts`：中途压缩 handler + core↔ui 消息转换
 - `packages/@codepapr/ui/src/utils/contextLimits.ts`：`effectiveMaxContextTokens`（provider-aware 有效阈值）
-- `packages/@codepapr/ui/src/utils/contextCompaction.ts`：压缩计划 / checkpoint / `buildEffectiveContextMessages`
-- `packages/@codepapr/ui/src/store/internals/contextCheckpoint.ts`：checkpoint 生成（`maybeGenerateContextCheckpoint`）
+- `packages/@codepapr/ui/src/utils/contextCompaction.ts`：压缩计划 / checkpoint / `buildEffectiveContextMessages`（软硬预算分层）
+- `packages/@codepapr/ui/src/store/internals/contextCheckpoint.ts`：checkpoint 生成（`maybeGenerateContextCheckpoint`，v3 状态合并）
+- `packages/@codepapr/ui/src/utils/contextStateMerge.ts`：v3 状态确定性合并 / schema 校验 / pinned 校验 / LLM 合并 prompt / 渲染
+- `packages/@codepapr/ui/src/utils/contextCheckpointState.ts`：v3 类型 + v2→v3 纯 migrator
+- `packages/@codepapr/ui/src/utils/contextClassification.ts`：压缩前确定性分类器
+- `packages/@codepapr/ui/src/utils/contextSurface.ts`：surface 节点/水合/来源区间/冻结渲染参数（纯函数）
+- `packages/@codepapr/ui/src/store/internals/contextSurfaceStore.ts`：surface 缓存 + 维护 + 压缩提交 + 失败溯源编排
+- `packages/@codepapr/core/src/context/ContextFacts.ts`：ContextFact 类型与摘要截断
+- `packages/@codepapr/core/src/context/ContextBudget.ts`：预算分解与动作决策
+- `packages/@codepapr/core/src/context/ContentEnvelope.ts`：内容信封 / 密钥脱敏 / 记忆准入门
+- `packages/@codepapr/ui/src/utils/memoryLedger.ts`：记忆候选抽取 / 双区投影渲染（纯函数）
+- `packages/@codepapr/ui/src/store/internals/memoryLedgerStore.ts`：准入 + 投影编排
+- `packages/@codepapr/ui/src/utils/memoryRecall.ts`：Recall 查询/渲染/锚定插入（纯函数）
+- `packages/@codepapr/ui/src/store/internals/projectSnapshot.ts`：保存流程（含 surface 维护）
+- `packages/@codepapr/ui/src/store/agentStore.ts`：桌面端主编排器（含 memory 整理触发点 + Context Inspector 观测数据）
 - `packages/@codepapr/ui/src-tauri/src/workspace_fs/stats.rs`：原生项目统计引擎（语言检测 + code/blank/comment 分类 + 并行遍历聚合 + `compute_project_stats`）
 - `packages/@codepapr/ui/src/components/ProjectStatsModal.tsx`：项目统计弹窗（treemap、可排序语言表、结果缓存）
 - `packages/@codepapr/ui/src/components/AgentContribution.tsx`：Agent 贡献统计（checkpoint diff）

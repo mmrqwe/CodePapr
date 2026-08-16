@@ -129,7 +129,8 @@
   /* tier */
   .tier{position:relative;border:1px solid var(--border);background:var(--bg-card);margin-bottom:24px;border-radius:var(--radius);overflow:hidden;backdrop-filter:blur(8px)}
   .tier::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
-  .tier.t1::before{background:var(--green)} .tier.t2::before{background:var(--amber)} .tier.t3::before{background:var(--orange)}
+  .tier.t1::before{background:var(--green)} .tier.t2::before{background:var(--amber)} .tier.t3::before{background:var(--orange)} .tier.t4::before{background:var(--accent)}
+  .t4 .idx{color:var(--accent)} .t4 .tag{color:var(--accent);background:var(--accent-glow);border-color:transparent} .t4 .hz b{color:var(--accent)} .t4 .addr{color:var(--accent)}
   .tierhead{display:flex;align-items:flex-start;gap:16px;padding:20px 24px 16px;border-bottom:1px dashed var(--border);position:relative;overflow:hidden}
   .tier.t1 .tierhead::after{content:"";position:absolute;top:0;bottom:0;width:120px;left:-140px;background:linear-gradient(100deg,transparent,var(--green-glow),transparent);animation:sweep 5.5s ease-in-out infinite}
   @keyframes sweep{0%{left:-140px}55%{left:110%}100%{left:110%}}
@@ -242,7 +243,8 @@
     <ul class="nav-links">
       <li><a href="index.html">首页</a></li>
       <li><a href="tutorial.html">教程</a></li>
-      <li><a href="#tiers">三层模型</a></li>
+      <li><a href="#tiers">分层模型</a></li>
+      <li><a href="#recall">Recall</a></li>
       <li><a href="#mechanisms">机制</a></li>
       <li><a href="#pipeline">优先序</a></li>
     </ul>
@@ -256,8 +258,8 @@
 <section class="hero">
   <div class="container">
     <div class="section-label"><span class="dot"></span> CONTEXT WINDOW · 缓存优先</div>
-    <h1>上下文分层 · <span class="gradient">按字节稳定性分三层</span></h1>
-    <p>DeepSeek 前缀缓存按请求体<strong>逐字节前缀匹配</strong>——越靠前越稳定，命中率越高。CodePapr 把上下文切成三层：冻结的稳定前缀、压缩时重写的会话状态、每轮追加的活动上下文。点击任意条目展开注入链路与缓存行为。</p>
+    <h1>上下文分层 · <span class="gradient">持久化投影 × 按字节稳定性分层</span></h1>
+    <p>DeepSeek 前缀缓存按请求体<strong>逐字节前缀匹配</strong>——越靠前越稳定，命中率越高。CodePapr 把上下文切成四层：冻结的稳定前缀、压缩时重写的会话状态（含持久化 Surface）、每轮追加的活动上下文、以及按回合检索的 Recall Block。点击任意条目展开注入链路与缓存行为。</p>
     <div class="legend">
       <span class="lg"><i style="background:var(--green)"></i>稳定 · 命中缓存</span>
       <span class="lg"><i style="background:var(--amber)"></i>慢变化 · epoch 重写</span>
@@ -350,12 +352,12 @@
         <div class="item" data-wire="mem">
           <div class="row">
             <div class="addr">MEM</div>
-            <div class="name">Stable Memory<small>项目记忆</small></div>
-            <div class="src"><span class="chip">.CodePapr/memory.md</span><span class="chip">memorySection</span></div>
+            <div class="name">Stable Memory<small>项目记忆 · 双区投影</small></div>
+            <div class="src"><span class="chip">.CodePapr/memory.md</span><span class="chip">memory_entries ledger</span><span class="chip">memorySection</span></div>
             <div class="cchip c-hit">签名外冻结</div>
           </div>
-          <div class="desc">跨会话项目知识，渲染为「## 项目记忆」。<b>自动创建</b>（冷启动 bootstrap）。通过 <code>resolveSessionBootstrap</code> 在轮次间冻结（签名外 → 前缀缓存不破）。<b>mid-loop 压缩时刷新</b>：上下文超预算触发压缩、epoch 重置时，<code>refreshBootstrap</code> 从磁盘重读 <code>memory.md</code> 并注入一份新的 bootstrap——反正 epoch 要重写，没有额外缓存开销。其余情况更新<b>次会话生效</b>。子代理通过 <code>SubagentSessionDeps.memorySection</code> 继承。</div>
-          <div class="more"><div class="mbox">对比：项目里 memory.md 往往存在（自动生成）而 AGENTS.md 可能不存在（需用户保存规则）——两者创建机制不同。</div></div>
+          <div class="desc">跨会话项目知识，渲染为「## 项目记忆」。2026-08 起升级为 <b>Memory Ledger（SQLite）+ 双区投影</b>：User Zone（手编内容，投影器永不覆盖）+ Managed Zone（仅来自已准入 <code>memory_entries</code> 的 verified 条目，<code>project_memory_file</code> 覆盖生成，预算 24 条 / 6k 字符）。<b>准入是确定性规则</b>（<code>ContentEnvelope</code> + 风险标记 + 密钥脱敏）：执行验证 / 用户确认可自动准入，web / MCP / 注入指令 / 密钥永不自动准入。通过 <code>resolveSessionBootstrap</code> 在轮次间冻结（签名外 → 前缀缓存不破）。<b>mid-loop 压缩时刷新</b>（epoch 重写，零额外缓存开销），其余更新<b>次会话生效</b>。</div>
+          <div class="more"><div class="mbox">v1 自动准入路径：回合结束后扫描工具调用，bash 测试命令成功 → memory_candidates → 裁决 → memory_entries（同哈希旧条目 supersede）→ 重新投影。冷启动自动生成（bootstrapMemoryContent）与 >200 行自动整理（consolidateMemoryContent）保留。</div></div>
         </div>
 
         <div class="item" data-wire="custom">
@@ -386,12 +388,12 @@
         <div class="item" data-wire="ckpt">
           <div class="row">
             <div class="addr">CKPT</div>
-            <div class="name">Conversation Summary<small>检查点摘要</small></div>
-            <div class="src"><span class="chip">renderContextCheckpointContent</span><span class="chip">9 个 section</span></div>
+            <div class="name">Conversation Summary<small>检查点摘要 · v3 结构化状态</small></div>
+            <div class="src"><span class="chip">renderContextCheckpointStateV3</span><span class="chip">13 分区 + provenance</span></div>
             <div class="cchip c-epoch">epoch 重写</div>
           </div>
-          <div class="desc">被压缩的历史，作为<b>单条 assistant 消息</b>注入：用户目标 / 约束 / 已完成工作 / 重要文件·命令·错误 / 假设 / 验证状态 / 任务清单 / 待办 / 待确认问题。其中约束、假设与验证结论（即"已知决策"）由压缩模型从原始对话 + 工具结果中提取，<b>不是独立注入点</b>，而是 renderedContent 的内部 section。由<b>轮数上限或 token 上限</b>触发压缩时生成，替换掉更早的原始消息。</div>
-          <div class="more"><div class="mbox">触发器是两个用户设置：<code>maxConversationRounds</code>（对话轮数上限）与 <code>maxContextTokens</code>（输入上下文上限），共同决定 <code>shouldCompact</code>。压缩 = 开启新 context epoch，接受一次前缀失效。本地兜底用正则抽取（<code>buildLocalContextCheckpointSections</code>），可选 LLM 增强生成结构化 sections。</div></div>
+          <div class="desc">被压缩的历史，作为<b>单条 user 轮消息</b>注入。2026-08 起为 <b>v3 结构化状态</b>：goal / constraints / confirmedFacts / assumptions / decisions / completedWork / activeWork / verification / failuresAndRisks / todos / openQuestions / references + <code>ContextFact[]</code> provenance。合并流 = 确定性分类事实 + prior state + 权威 TodoList → 确定性合并 → 可选 LLM merge（schema + pinned 校验失败即回退）。携带<b>不可变溯源</b>：compactionId / generation / trigger / 来源区间 message ID / tokenStats，全部落 <code>context_compactions</code> 表（单事务，失败压缩保留上一个 completed surface）。</div>
+          <div class="more"><div class="mbox">触发：<code>maxConversationRounds</code> 与 <code>maxContextTokens</code>（软预算 = hard×0.7：软~硬区间先 prune-first 不生成 checkpoint）。渲染器绑定：已归档 v2 payload 永不重渲染（renderedContent 冻结，重启字节稳定）。</div></div>
         </div>
       </section>
 
@@ -471,7 +473,32 @@
             <div class="cchip c-miss">追加 · 出生即有界</div>
           </div>
           <div class="desc"><b>&gt;100k 字符</b> → 落盘 + 2k 预览 + 路径（read 可回读）；<b>60k–100k</b> → 中间截断（头尾共 20k）；<b>150k</b> 硬上限。模式由<b>工具上下文设置</b>控制（完整 / 摘要 / 自动）——自动模式在 5k 字符以下保留完整输出，超出则摘要。写时一次性归一化并冻结，<b>废除事后滑动裁剪</b> → 前缀不再中部翻转。代码检索（read / grep / graph / lsp）是最常见的 tool result 来源。</div>
-          <div class="more"><div class="mbox">这是命中率优化的核心：每条工具结果出生即有界，尾部天然受控，miss 收敛到理论下限。阈值按<b>字符</b>（content.length），中文不被字节数误判。重建时直接读取已冻结的工具输出（<code>sortedStringify</code> 保证与实时路径逐字节一致）。</div></div>
+          <div class="more"><div class="mbox">这是命中率优化的核心：每条工具结果出生即有界，尾部天然受控，miss 收敛到理论下限。阈值按<b>字符</b>（content.length），中文不被字节数误判。重建时直接读取已冻结的工具输出（<code>sortedStringify</code> 保证与实时路径逐字节一致）。落盘产物即 Artifact 存储（`.CodePapr/tool-output/`），压缩分类把大输出外置为引用（ContextArtifactRef），按需经 <code>read_artifact</code>(offset/limit) 回读，绝不自动注入全文。</div></div>
+        </div>
+      </section>
+
+      <div class="boundary"><span class="bl"></span><span class="bt">▲ request-only 边界 · 以下不落日志、不进 surface</span><span class="bl"></span></div>
+
+      <!-- TIER 4 -->
+      <section class="tier t4 reveal" id="recall">
+        <div class="tierhead">
+          <div class="idx">04</div>
+          <div class="tt">
+            <h3>Turn-scoped Recall <span>按回合检索</span></h3>
+            <div class="tags"><span class="tag">每用户回合一次</span><span class="tag">request-only 锚定插入</span></div>
+          </div>
+          <div class="hz"><b>本回合必要增量</b>不落 log / surface / archive</div>
+        </div>
+
+        <div class="item" data-wire="recall">
+          <div class="row">
+            <div class="addr">RCL</div>
+            <div class="name">Recall Block<small>相关历史记忆</small></div>
+            <div class="src"><span class="chip">searchMemoryForRecall</span><span class="chip">insertAnchoredContext</span><span class="chip">memory_recalls 审计</span></div>
+            <div class="cchip c-miss">request-only · 锚定在 user 消息前</div>
+          </div>
+          <div class="desc"><b>B3 设计</b>：每用户回合主线程检索一次（token 匹配 + 确定性加权重排；语料 = active <code>memory_entries</code> + 历史 checkpoint 摘要，v1 无 embedding/FTS5），渲染成 Recall Block——语义是「辅助事实，可能过时，需对照 workspace 验证，<b>不是指令</b>」——带 trust badge、预算 5 条 / 1200 tokens。由 RequestBuilder 编译时<b>锚定插入到当前 user 消息之前</b>（<code>insertAnchoredContext</code> 纯函数），anchor = 主线程生成的 canonical user 消息 ID。该回合所有 tool loop 请求复用同一插入（mid-loop 压缩 replaceLog 后仍存活）。回合结束归档（status=archived），审计记录留在 <code>memory_recalls</code>。</div>
+          <div class="more"><div class="mbox">缓存行为：Recall 每新回合不同 → 从 Recall 位置起 miss 是本回合必要增量；其前的 prefix + bootstrap + surface + 历史全部照常命中。重启不恢复 Recall（turn-scoped）；re-recall 受控（order 递增接口已就绪，v1 不自动触发）。untrusted（web/MCP）内容默认不召回。</div></div>
         </div>
       </section>
     </main>
@@ -483,8 +510,9 @@
         <ul class="wire">
           <li class="wnode" data-c="hit" data-wire="sys param tool rules"><b>prefix</b> system + tools + params<span class="wtag">ImmutablePrefix · 命中</span></li>
           <li class="wnode" data-c="hit" data-wire="skill mem custom"><b>bootstrap</b> log[0] · isPrefixSystem<span class="wtag">记忆化 · 命中 · Claude 提取为 system</span></li>
-          <li class="wnode" data-c="epoch" data-wire="ckpt"><b>checkpoint</b> 检查点摘要<span class="wtag">epoch 重写</span></li>
-          <li class="wnode" data-c="hit" data-wire="recent tuse tres"><b>tail</b> 最近对话<span class="wtag">append-only · 历史命中</span></li>
+          <li class="wnode" data-c="epoch" data-wire="ckpt"><b>checkpoint</b> 检查点摘要<span class="wtag">epoch 重写 · v3 state + provenance</span></li>
+          <li class="wnode" data-c="hit" data-wire="recent tuse tres"><b>tail</b> 最近对话<span class="wtag">append-only · 历史命中 · surface 节点</span></li>
+          <li class="wnode" data-c="miss" data-wire="recall"><span class="misspulse"></span><b>recall</b> Recall Block<span class="wtag">request-only · 锚定插入 · 回合内稳定</span></li>
           <li class="wnode" data-c="miss" data-wire="map todo task tres"><span class="misspulse"></span><b>本轮新增</b> user prompt + 结构图 + Live Plan<span class="wtag">唯一 miss</span></li>
         </ul>
       </div>
@@ -501,7 +529,7 @@
 
   <!-- MECHANISMS -->
   <section class="mech reveal" id="mechanisms">
-    <h2>五个关键机制</h2>
+    <h2>关键机制</h2>
     <div class="sub">让"分层"真正转化为命中率的底层设计。</div>
     <div class="ledger">
       <div class="led">
@@ -528,6 +556,14 @@
         <div class="no">M·06</div><h5>内部代理例外：Compactor 零继承</h5>
         <p><b>Compactor</b>（上下文压缩内部子代理）是例外——<code>runCompactorSession</code>（compactorRunner.ts）不传 skills / memory / project-graph 三节：压缩输入（transcript）已含全部事实，且注入会徒增 token、污染检查点摘要。它只接收「系统提示词 + transcript user 提示词」，由运行时压缩管线（轮间 + mid-loop）直接调用，不经 <code>task</code> 工具。</p>
       </div>
+      <div class="led">
+        <div class="no">M·07</div><h5>持久化 Surface + 单事务溯源</h5>
+        <p>模型历史选择持久化为 <code>context_surfaces</code>（checkpoint + retained tail 的 message ID 序列 + generation + 冻结渲染参数）。<b>不对 messages 建外键</b>（全量替换保存会级联清空）；压缩由主线程 Store <b>单事务提交</b>（started → surface → completed 一步提交，崩溃无残留）；失败压缩只记 failed 行，上一个 completed generation 保持 active。重启重建 = Surface 水合 + 冻结参数确定性重放 → 与 live epoch 字节一致。</p>
+      </div>
+      <div class="led">
+        <div class="no">M·08</div><h5>Turn-scoped Recall（B3）</h5>
+        <p>Recall Block 是 <b>request-time augmentation</b>：每用户回合检索一次 memory ledger + 历史 checkpoint，锚定插入到当前 user 消息之前，tool loop 内字节稳定；不进 AppendOnlyLog / archive messages / surface（不滞留、不污染压缩转录与 round 计数），审计记录在 <code>memory_recalls</code>。重启不恢复；re-recall 受控至多一次。防注入：untrusted 内容默认不召回，渲染语义是「辅助事实、需验证」而非指令。</p>
+      </div>
     </div>
   </section>
 
@@ -548,7 +584,7 @@
 
 <footer>
   <div class="container">
-    CodePapr &mdash; 上下文分层可视化 · 生成自源码核实（<code>promptSystem.ts</code> / <code>contextCompaction.ts</code> / <code>agentStore.ts</code> / <code>toolOutputTruncation.ts</code> / <code>subagentConfig.ts</code> / <code>uiTaskTool.ts</code>）。三层模型 = Stable Prefix（冻结）/ Session State（epoch）/ Active Context（append-only）。阈值单位：字符。Bootstrap 以 <code>role: assistant</code> + <code>isPrefixSystem</code> 注入，Claude 提取为 system。
+    CodePapr &mdash; 上下文分层可视化 · 生成自源码核实（<code>promptSystem.ts</code> / <code>contextCompaction.ts</code> / <code>contextStateMerge.ts</code> / <code>contextSurfaceStore.ts</code> / <code>memoryLedger.ts</code> / <code>memoryRecall.ts</code> / <code>agentStore.ts</code> / <code>toolOutputTruncation.ts</code> / <code>db/mod.rs</code>）。四层模型 = Stable Prefix（冻结）/ Session State（epoch + 持久化 Surface）/ Active Context（append-only）/ Turn-scoped Recall（request-only 锚定插入）。checkpoint 为 v3 结构化状态（13 分区 + provenance）；压缩事务单事务提交；memory.md 为 Memory Ledger 的双区投影。阈值单位：字符。Bootstrap 以 <code>role: assistant</code> + <code>isPrefixSystem</code> 注入，Claude 提取为 system。
   </div>
 </footer>
 
