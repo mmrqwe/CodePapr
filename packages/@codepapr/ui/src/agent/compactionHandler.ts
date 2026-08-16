@@ -145,7 +145,8 @@ export function createContextCompactionHandler(
   return {
     maxContextTokens: effectiveMaxContextTokens(settings, providerName),
     handler: async (
-      coreMessages: IMessage[]
+      coreMessages: IMessage[],
+      trigger?: import('@codepapr/types').CompactionTrigger
     ): Promise<{ messages: IMessage[]; cacheStats?: ICacheStatistics } | null> => {
       try {
         return await runCompactionHandler(
@@ -154,7 +155,8 @@ export function createContextCompactionHandler(
           coreMessages,
           refreshBootstrap,
           getAbortSignal?.(),
-          onCheckpoint
+          onCheckpoint,
+          trigger ?? 'token-limit'
         );
       } catch (err) {
         // 用户中断：mid-loop 压缩中飞被 abort → 返回 null 让 Agent 轮循环
@@ -174,7 +176,8 @@ async function runCompactionHandler(
   coreMessages: IMessage[],
   refreshBootstrap: (() => Promise<string | null>) | undefined,
   abortSignal: AbortSignal | undefined,
-  onCheckpoint: ((commit: MidLoopCompactionCommit) => void) | undefined
+  onCheckpoint: ((commit: MidLoopCompactionCommit) => void) | undefined,
+  trigger: import('@codepapr/types').CompactionTrigger
 ): Promise<{ messages: IMessage[]; cacheStats?: ICacheStatistics } | null> {
   const contextMessages = coreMessagesToContextMessages(coreMessages);
   const checkpoint = await maybeGenerateContextCheckpoint(
@@ -183,10 +186,11 @@ async function runCompactionHandler(
     true,
     currentTodoDigest(sessionId),
     abortSignal,
-    // mid-loop 压缩由 token 溢出驱动（PR3 引入 provider-overflow 细分）。
-    { trigger: 'token-limit' }
+    // mid-loop 压缩：round 首溢出 → token-limit；provider 溢出恢复 → provider-overflow。
+    { trigger },
+    sessionId
   );
-  if (!checkpoint) {
+  if (!checkpoint || !('message' in checkpoint)) {
     return null;
   }
   // Insert the checkpoint at the planned retention boundary (not at the end)

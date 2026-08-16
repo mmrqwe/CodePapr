@@ -5,16 +5,27 @@ import {
   computeCheckpointProvenanceRanges,
 } from '../../utils/contextSurface';
 import {
-  CONTEXT_COMPACTION_VERSION,
-  buildContextCheckpointPrompt,
-  buildContextCompactionTranscript,
-  buildLocalContextCheckpointSections,
-  parseContextCheckpointSections,
+  CONTEXT_COMPACTION_SOFT_BUDGET_RATIO,
+  getLatestCheckpoint,
   planContextCompaction,
   renderContextCheckpointContent,
-  renderContextCheckpointSummary,
   type ContextCheckpointPayload,
 } from '../../utils/contextCompaction';
+import {
+  CONTEXT_CHECKPOINT_VERSION_3,
+  createEmptyCheckpointStateV3,
+  migrateContextCheckpointToV3,
+  type ContextCheckpointStateV3,
+} from '../../utils/contextCheckpointState';
+import {
+  buildStateMergePrompt,
+  mergeContextStateDeterministic,
+  parseContextCheckpointStateV3,
+  renderContextCheckpointStateV3,
+  validatePinnedStatePreserved,
+} from '../../utils/contextStateMerge';
+import { classifyContextMessages } from '../../utils/contextClassification';
+import { getTodoListContext } from '../../tools/todoListTool';
 import {
   buildCompactorDefinition,
   resolveEffectiveCompactorTier,
@@ -32,32 +43,91 @@ export interface ContextCheckpointProvenanceOptions {
   parentGeneration?: number;
 }
 
+export type ContextCheckpointResult =
+  | {
+      message: UIMessage;
+      cacheStats?: ICacheStatistics;
+      modelTier: 'primary' | 'fast' | 'local';
+      insertIndex: number;
+    }
+  | { pruneOnly: true }
+  | null;
+
+function isEmptyState(state: ContextCheckpointStateV3): boolean {
+  return (
+    state.goal.length === 0 &&
+    state.constraints.length === 0 &&
+    state.confirmedFacts.length === 0 &&
+    state.assumptions.length === 0 &&
+    state.decisions.length === 0 &&
+    state.completedWork.length === 0 &&
+    state.activeWork.length === 0 &&
+    state.verification.length === 0 &&
+    state.failuresAndRisks.length === 0 &&
+    state.todos.length === 0 &&
+    state.openQuestions.length === 0 &&
+    state.references.length === 0 &&
+    state.provenance.length === 0
+  );
+}
+
 export async function maybeGenerateContextCheckpoint(
   settings: CompactionSettings,
   messages: UIMessage[],
   force?: boolean,
   todoDigest?: string,
   abortSignal?: AbortSignal,
-  provenance?: ContextCheckpointProvenanceOptions
-): Promise<{ message: UIMessage; cacheStats?: ICacheStatistics; modelTier: 'primary' | 'fast' | 'local'; insertIndex: number } | null> {
+  provenance?: ContextCheckpointProvenanceOptions,
+  /** PR3：TodoList 权威状态查询需要 session id（缺省则跳过 todo 分区）。 */
+  sessionId?: string
+): Promise<ContextCheckpointResult> {
+  const hardBudget = effectiveMaxContextTokens(settings, resolveProviderName(settings));
   const plan = planContextCompaction(messages, {
     maxRounds: settings.maxConversationRounds,
-    maxTokens: effectiveMaxContextTokens(settings, resolveProviderName(settings)),
+    maxTokens: hardBudget,
+    // PR3：软预算 = 硬预算 × 比例；软硬区间走 prune-first。
+    softMaxTokens: Math.floor(hardBudget * CONTEXT_COMPACTION_SOFT_BUDGET_RATIO),
     force,
   });
   if (!plan.shouldCompact) {
+    if (plan.shouldPrune) {
+      return { pruneOnly: true };
+    }
     return null;
   }
 
-  const fallbackSections = buildLocalContextCheckpointSections({
-    priorCheckpoint: plan.priorCheckpoint,
-    sourceMessages: plan.sourceMessages,
-    retainedMessages: plan.retainedMessages,
-    lang: settings.lang,
+  // ── PR3：结构化状态合并（deterministic fallback → 可选 LLM merge） ──
+  const priorCheckpointIndex = getLatestCheckpoint(messages)?.index ?? -1;
+  const sourceUI = messages.slice(priorCheckpointIndex + 1, plan.insertIndex);
+
+  const todoContext = sessionId ? getTodoListContext(sessionId) : undefined;
+  const incompleteTodos = (todoContext?.tasks ?? [])
+    .filter((task) => task.status !== 'completed')
+    .map((task) => ({ title: task.title }));
+
+  const facts = classifyContextMessages({ messages: sourceUI, incompleteTodos });
+  const priorState = plan.priorCheckpoint
+    ? migrateContextCheckpointToV3(plan.priorCheckpoint).state
+    : null;
+
+  const fallbackState = mergeContextStateDeterministic({
+    priorState,
+    facts,
+    incompleteTodos,
   });
-  const fallbackSummary = renderContextCheckpointSummary(fallbackSections, settings.lang);
-  let sections = fallbackSections;
-  let summary = fallbackSummary;
+
+  // 失败安全：fallback 也产出空状态且确有可压缩内容 → 不改变 active surface。
+  if (isEmptyState(fallbackState) && plan.sourceMessages.length > 0) {
+    return null;
+  }
+
+  // pinned 基线：todos 以权威状态为准（非空时），LLM 输出必须保住基线内容。
+  const pinnedBaseline: ContextCheckpointStateV3 = {
+    ...(priorState ?? createEmptyCheckpointStateV3()),
+    todos: incompleteTodos.length > 0 ? incompleteTodos.map((todo) => todo.title) : (priorState?.todos ?? []),
+  };
+
+  let state = fallbackState;
   let modelName = 'local-checkpoint';
   let modelTier: ContextCheckpointPayload['modelTier'] = 'local';
   let cacheStats: ICacheStatistics | undefined;
@@ -67,8 +137,7 @@ export async function maybeGenerateContextCheckpoint(
   const baseModel = settings.model.trim();
 
   // 与旧 selectContextCompactionModelRoute 语义对齐：compactionModel 为 fast 但
-  // fastModel 未启用时，路由返回 null → 完全跳过 LLM 压缩，走本地规则降级。
-  // （verifier 式的 fast→primary 降级不适用于压缩：旧行为是「不调 LLM」。）
+  // fastModel 未启用时，路由返回 null → 完全跳过 LLM 合并，走确定性降级。
   const compactorTier = resolveEffectiveCompactorTier(settings);
   const canRunLlm =
     settings.compactionModel === 'fast'
@@ -76,16 +145,21 @@ export async function maybeGenerateContextCheckpoint(
       : true;
 
   if (canRunLlm) {
-    const definition = buildCompactorDefinition({
-      settings,
+    const { systemPrompt, userPrompt } = buildStateMergePrompt({
+      priorState,
+      facts,
+      incompleteTodos,
       lang,
-      baseModel,
     });
-    const { userPrompt } = buildContextCheckpointPrompt({
-      transcript: buildContextCompactionTranscript(plan.sourceMessages),
-      priorCheckpoint: plan.priorCheckpoint,
-      lang: settings.lang,
-    });
+    // PR3：LLM 合并的系统提示词 = 状态合并规则（ADR-007），覆盖 compactor 默认提示词。
+    const definition = {
+      ...buildCompactorDefinition({
+        settings,
+        lang,
+        baseModel,
+      }),
+      prompt: systemPrompt,
+    };
 
     try {
       const result = await runCompactorSession({
@@ -100,12 +174,19 @@ export async function maybeGenerateContextCheckpoint(
 
       const content = result.content?.trim();
       if (content) {
-        const parsedSections = parseContextCheckpointSections(content);
-        if (parsedSections) {
-          sections = parsedSections;
-          summary = renderContextCheckpointSummary(parsedSections, settings.lang);
-          modelName = compactorTier === 'fast' ? settings.fastModel.trim() : baseModel;
-          modelTier = compactorTier;
+        const parsedState = parseContextCheckpointStateV3(content);
+        if (parsedState) {
+          const pinned = validatePinnedStatePreserved(pinnedBaseline, parsedState);
+          if (pinned.ok) {
+            state = parsedState;
+            modelName = compactorTier === 'fast' ? settings.fastModel.trim() : baseModel;
+            modelTier = compactorTier;
+          } else {
+            console.warn(
+              '[checkpoint] LLM 合并丢失 pinned 状态，回退确定性合并:',
+              pinned.missing.slice(0, 3)
+            );
+          }
         }
       }
     } catch (e) {
@@ -114,10 +195,11 @@ export async function maybeGenerateContextCheckpoint(
       if (e instanceof DOMException && e.name === 'AbortError') {
         throw e;
       }
-      console.warn('Smart context enrichment failed:', e);
+      console.warn('Smart context state merge failed:', e);
     }
   }
 
+  const summary = renderContextCheckpointStateV3(state, settings.lang);
   const timestamp = Date.now();
   const compactionId = createId();
   const ranges = computeCheckpointProvenanceRanges(messages, plan.insertIndex);
@@ -138,7 +220,7 @@ export async function maybeGenerateContextCheckpoint(
       hidden: true,
       timestamp,
       contextCheckpoint: {
-        version: CONTEXT_COMPACTION_VERSION,
+        version: CONTEXT_CHECKPOINT_VERSION_3,
         summary,
         renderedContent,
         sourceMessageCount: plan.sourceMessages.length,
@@ -146,7 +228,6 @@ export async function maybeGenerateContextCheckpoint(
         generatedAt: timestamp,
         modelName,
         modelTier,
-        sections,
         todoDigest: todoDigest?.trim() || undefined,
         // PR1 provenance（ADR-001/005）：全部用不可变 message ID，不用
         // 可变 positional index。generation/parentGeneration 由主线程在
@@ -170,6 +251,8 @@ export async function maybeGenerateContextCheckpoint(
           modelTier === 'local'
             ? { kind: 'local-fallback' }
             : { kind: 'llm', model: modelName },
+        // PR3：v3 payload 用结构化 state（渲染器绑定：旧 v2 payload 不重渲染）
+        state,
       },
     },
     cacheStats,

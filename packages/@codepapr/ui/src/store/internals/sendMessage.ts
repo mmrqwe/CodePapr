@@ -55,12 +55,17 @@ import { AgentDestroyedError, WorkerCrashError, type AgentRuntimeHandle } from '
 import { isPermissionWaitActive } from '../permissionStore';
 import { delay, waitForPageVisible } from '../../utils/crashRecovery';
 import { insertCheckpointAtRetainedBoundary } from '../../utils/contextCompaction';
-import { findCheckpointInsertIndex, hydrateSurfaceMessages } from '../../utils/contextSurface';
+import {
+  findCheckpointInsertIndex,
+  hydrateSurfaceMessages,
+  serializeRenderParams,
+} from '../../utils/contextSurface';
 import {
   commitContextCheckpoint,
   failContextCheckpoint,
   getContextSurfaceCached,
   getSessionPruneOptions,
+  updateSurfaceRenderParams,
 } from './contextSurfaceStore';
 import { buildPruneOptions } from '../../agent/compactionHandler';
 import type { MidLoopCompactionCommit } from '../../agent/agentWorkerProtocol';
@@ -406,7 +411,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   trigger: 'manual',
                   generation: (compactSurface?.generation ?? 0) + 1,
                   parentGeneration: compactSurface?.generation,
-                }
+                },
+                compactSessionId ?? undefined
               );
             } catch (err) {
               compactCheckpointInFlight = false;
@@ -418,7 +424,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               );
               return true;
             }
-            if (checkpointResult) {
+            if (checkpointResult && 'message' in checkpointResult) {
               if (checkpointResult.cacheStats && compactSessionId) {
                 const cpTier: 'primary' | 'fast' = checkpointResult.modelTier === 'primary' ? 'primary' : 'fast';
                 set((s) => ({
@@ -1829,9 +1835,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                       trigger: 'manual',
                       generation: (goalSurface?.generation ?? 0) + 1,
                       parentGeneration: goalSurface?.generation,
-                    }
+                    },
+                    activeSessionId ?? undefined
                   );
-                  if (cp) {
+                  if (cp && 'message' in cp) {
                     if (cp.cacheStats) {
                       const cpTier: 'primary' | 'fast' = cp.modelTier === 'primary' ? 'primary' : 'fast';
                       if (cpTier === 'fast') {
@@ -2165,15 +2172,48 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             {
               generation: (turnSurface?.generation ?? 0) + 1,
               parentGeneration: turnSurface?.generation,
-            }
+            },
+            activeSessionId
           );
-          if (checkpointResult && (get().isLoading || get().loadingSessionId !== null)) {
+          if (checkpointResult && 'pruneOnly' in checkpointResult && checkpointResult.pruneOnly) {
+            // PR3 预算分层：soft~hard 区间 → prune-first（不生成 checkpoint）。
+            // 更新 surface 冻结参数（同一 generation，节点不变），使下一次
+            // agent 重建按新参数裁剪旧工具结果；当前 agent 失效留给重建。
+            const turnPruneOptions = buildPruneOptions(normalizedSettings);
+            await updateSurfaceRenderParams(
+              workspacePath,
+              activeSessionId,
+              serializeRenderParams(turnPruneOptions)
+            ).catch(() => undefined);
+            const pruneAgent = get()._agent;
+            const pruneOwner = get()._agentSessionId;
+            if (
+              pruneAgent &&
+              pruneOwner === activeSessionId &&
+              !(get().isLoading && get().loadingSessionId === activeSessionId)
+            ) {
+              try {
+                if (pruneAgent.hasActiveAppAgentRequests?.()) {
+                  pruneAgent.detachAndCleanupWhenIdle?.();
+                } else {
+                  pruneAgent.destroy();
+                }
+              } catch {
+                // already torn down
+              }
+              set({ _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
+            }
+          } else if (
+            checkpointResult &&
+            'message' in checkpointResult &&
+            (get().isLoading || get().loadingSessionId !== null)
+          ) {
             // 检查点模型调用 await 期间 isLoading 已置 false，用户可能已发出新
             // 回合（T2），T2 正运行在同一个 agent 上。此时应用检查点会换掉并
             // destroy T2 正在使用的 agent（destroy 会让 T2 的 chat() 被拒）。
             // 整个检查点直接丢弃（T2 回合结束时会重新评估），绝不触碰运行中
             // 的 agent。
-          } else if (checkpointResult) {
+          } else if (checkpointResult && 'message' in checkpointResult) {
             const prevAgent = get()._agent;
             const prevAgentOwner = get()._agentSessionId;
             let checkpointApplied = false;

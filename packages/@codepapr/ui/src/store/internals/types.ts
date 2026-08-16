@@ -2,6 +2,7 @@ import type { IContextSnapshot, IImageContent, ISubagentToolInvocation, Question
 import type { WorkMode } from '../../utils/agentPrompts';
 import type { TaskModelRoute } from '../../utils/modelRouting';
 import type { ContextCheckpointPayload } from '../../utils/contextCompaction';
+import type { ContextCheckpointPayloadV3 } from '../../utils/contextCheckpointState';
 import type { McpSettings } from '../../utils/mcpTypes';
 import type { AgentDefinition, EditHistory, SkillDefinition } from '@codepapr/core';
 import type { CacheValidator, RequestBuilder } from '@codepapr/api';
@@ -246,7 +247,8 @@ export interface UIMessage {
   hidden?: boolean;
   synthetic?: boolean;
   carryForwardInContext?: boolean;
-  contextCheckpoint?: ContextCheckpointPayload;
+  /** PR3：v2（sections）与 v3（state）payload 并存；旧数据只有 v2 字段。 */
+  contextCheckpoint?: ContextCheckpointPayload | ContextCheckpointPayloadV3;
   question?: QuestionData;
   /** 该消息上的 plan 问题/决策卡片是否已被用户回答（防重复作答，持久化）。 */
   questionAnswered?: boolean;

@@ -17,6 +17,8 @@ export const TOOL_RESULT_MISSING_ERROR = '工具执行中断，结果缺失';
 export const CONTEXT_COMPACTION_VERSION = 2;
 export const CONTEXT_COMPACTION_DEFAULT_MAX_ROUNDS = 24;
 export const CONTEXT_COMPACTION_DEFAULT_MAX_TOKENS = 200_000;
+/** PR3：软预算占硬预算的比例（用户 maxContextTokens 为硬预算）。 */
+export const CONTEXT_COMPACTION_SOFT_BUDGET_RATIO = 0.7;
 export const CONTEXT_COMPACTION_MIN_RETAIN_MESSAGES = 6;
 export const CONTEXT_COMPACTION_MAX_RETAIN_MESSAGES = 12;
 export const CONTEXT_COMPACTION_TARGET_RETAIN_TOKENS = 8_000;
@@ -105,6 +107,9 @@ export interface ContextCompactionPlan {
   insertIndex: number;
   /** PR1：本次压缩的触发来源（shouldCompact 为 true 时有效）。 */
   trigger?: CompactionTrigger;
+  /** PR3：预算动作。prune-tool-results 时 shouldCompact=false、shouldPrune=true。 */
+  budgetAction?: 'none' | 'prune-tool-results' | 'compact' | 'emergency-compact';
+  shouldPrune?: boolean;
 }
 
 export interface CheckpointMatch {
@@ -592,10 +597,17 @@ export function repairOrphanedToolCalls(messages: IMessage[]): IMessage[] {
 
 export function planContextCompaction(
   messages: readonly ContextMessageLike[],
-  options?: { maxRounds?: number; maxTokens?: number; force?: boolean }
+  options?: {
+    maxRounds?: number;
+    maxTokens?: number;
+    /** PR3：软预算（tokens）。缺省 = maxTokens（保持旧行为：软硬不分）。 */
+    softMaxTokens?: number;
+    force?: boolean;
+  }
 ): ContextCompactionPlan {
   const maxRounds = options?.maxRounds ?? CONTEXT_COMPACTION_DEFAULT_MAX_ROUNDS;
   const maxTokens = options?.maxTokens ?? CONTEXT_COMPACTION_DEFAULT_MAX_TOKENS;
+  const softMaxTokens = options?.softMaxTokens ?? maxTokens;
   const force = options?.force ?? false;
   const checkpoint = getLatestCheckpoint(messages);
   const tailStart = checkpoint ? checkpoint.index + 1 : 0;
@@ -616,15 +628,34 @@ export function planContextCompaction(
     retainedMessages: tailMessages,
     effectiveTokens,
     insertIndex: messages.length,
+    budgetAction: 'none',
   };
+
+  // PR3 预算分层（用户 maxContextTokens 是硬预算权威，provider 窗口不钳制）：
+  // - 低于 soft：不压缩；
+  // - soft ~ hard 且回合数未超限：prune-first（重建裁剪旧工具结果，不生成 checkpoint）；
+  // - 超过 hard 或回合数超限：compact（checkpoint + retained tail）。
+  if (
+    !force &&
+    effectiveRoundCount <= maxRounds &&
+    effectiveTokens <= softMaxTokens
+  ) {
+    return noCompact;
+  }
 
   if (
     !force &&
     effectiveRoundCount <= maxRounds &&
     effectiveTokens <= maxTokens
   ) {
-    return noCompact;
+    return {
+      ...noCompact,
+      budgetAction: 'prune-tool-results',
+      shouldPrune: true,
+    };
   }
+
+  const roundsExceeded = effectiveRoundCount > maxRounds;
 
   // Split in UI-message space so the new checkpoint can be inserted at a UI
   // boundary (assistant+tools groups stay atomic), and the retained tail keeps
@@ -656,9 +687,10 @@ export function planContextCompaction(
     // force 表示用户/流程显式触发；否则按实际越限维度归因。
     trigger: force
       ? 'manual'
-      : effectiveRoundCount > maxRounds
+      : roundsExceeded
         ? 'round-limit'
         : 'token-limit',
+    budgetAction: force || effectiveTokens > maxTokens ? 'emergency-compact' : 'compact',
   };
 }
 

@@ -300,7 +300,8 @@ describe('createContextCompactionHandler (abort)', () => {
       true,
       undefined,
       controller.signal,
-      { trigger: 'token-limit' }
+      { trigger: 'token-limit' },
+      'session-test'
     );
   });
 

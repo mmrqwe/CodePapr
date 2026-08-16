@@ -34,6 +34,7 @@ import {
   IContextSnapshot,
   IContextMessageView,
   ContextStage,
+  CompactionTrigger,
 } from '@codepapr/types';
 import { Logger, estimateTokens } from '@codepapr/common';
 import { PARALLEL_SAFE_TOOL_NAMES } from './agentConfig';
@@ -380,6 +381,21 @@ function isImageError(err: unknown): boolean {
   return /image|dimension|pixel/i.test(msg);
 }
 
+/**
+ * PR3：provider 上下文溢出检测。确定性错误（流层已不重试），特征为
+ * `retriable === false` 且错误文本携带 context 超限签名。用鸭子类型检测
+ * （core 不依赖 api 包），仅凭 message/retriable 两个公开字段。
+ */
+function isProviderContextOverflowError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const error = err as Record<string, unknown>;
+  if (error.retriable === true) return false;
+  const msg = typeof error.message === 'string' ? error.message : '';
+  return /context_length_exceeded|request_too_large|maximum context|context window|超出.*上下文|上下文.*超/i.test(
+    msg
+  );
+}
+
 export interface IRequestBuilder {
   build(opts: {
     prefix: IImmutablePrefix;
@@ -419,7 +435,9 @@ export interface ICacheValidator {
 export interface ContextCompactionConfig {
   maxContextTokens: number;
   handler: (
-    messages: IMessage[]
+    messages: IMessage[],
+    /** 压缩触发来源（PR3：round-limit / token-limit / provider-overflow）。 */
+    trigger?: CompactionTrigger
   ) => Promise<{ messages: IMessage[]; cacheStats?: ICacheStatistics } | null>;
 }
 
@@ -468,6 +486,8 @@ export class Agent {
    *  避免每轮都空试昂贵的压缩 handler。成功压缩会清除该标志——压缩成功后
    *  日志已低于预算，再次超限属于正常需求，绝不因冷却把超预算请求放行。 */
   private lastCompactionFailed = false;
+  /** PR3：provider 上下文溢出的 emergency-compact 至多一次（溢出重试 ≤1）。 */
+  private overflowCompactionAttempted = false;
 
   constructor(opts: AgentOptions) {
     this.session = opts.session;
@@ -508,6 +528,38 @@ export class Agent {
       );
     }
     return this.cachedPrefixTokens + Math.ceil(this.session.logStore.getContentBytes() / 4);
+  }
+
+  /**
+   * PR3：provider 上下文溢出后的 emergency-compact（每回合至多一次，由
+   * overflowCompactionAttempted 保证）。成功返回 true（调用方 continue
+   * roundLoop 重试同一轮请求），失败返回 false（调用方按原始错误上抛）。
+   */
+  private async tryEmergencyCompact(
+    roundNumber: number,
+    onStreamEvent?: (event: IChatStreamEvent) => void
+  ): Promise<boolean> {
+    if (!this.contextCompaction) return false;
+    try {
+      const compacted = await this.contextCompaction.handler(
+        this.session.logStore.getAllMessages().slice(),
+        'provider-overflow'
+      );
+      if (!compacted || compacted.messages.length === 0) {
+        return false;
+      }
+      this.lastCompactionFailed = false;
+      this.session.replaceLog(compacted.messages);
+      this.requestBuilder.resetLogTracking?.();
+      if (compacted.cacheStats) {
+        this.session.recordStats(compacted.cacheStats);
+      }
+      onStreamEvent?.({ type: 'context-compacted', round: roundNumber });
+      return true;
+    } catch {
+      // 压缩失败：不吞掉原始 provider 错误，由调用方按原错误处理。
+      return false;
+    }
   }
 
   /** 可被取消的等待：空完成退避重试使用。取消立即抛 AbortError。 */
@@ -561,6 +613,7 @@ export class Agent {
       // chat 在 round N 压缩过，本次 chat 前 N+2 轮即使超预算也无法压缩。
       this.lastCompactionRound = -Infinity;
       this.lastCompactionFailed = false;
+      this.overflowCompactionAttempted = false;
 
       this.session.partition.validate();
 
@@ -591,7 +644,8 @@ export class Agent {
         !(this.lastCompactionFailed && round === this.lastCompactionRound + 1)
       ) {
         const compacted = await this.contextCompaction.handler(
-          this.session.logStore.getAllMessages().slice()
+          this.session.logStore.getAllMessages().slice(),
+          'token-limit'
         );
         this.lastCompactionRound = round;
         if (compacted && compacted.messages.length > 0) {
@@ -693,6 +747,20 @@ export class Agent {
               ? await this.provider.streamChat(request, onStreamEvent, effectiveSignal)
               : await this.provider.chat(request, effectiveSignal);
         } catch (err) {
+          // PR3：provider 上下文溢出 → emergency-compact 后重试一次。
+          // 与流层重连（overloaded/rate_limit 无限重连）完全正交：溢出是
+          // 确定性错误（流层不重试），这里在 request boundary 恢复。
+          if (
+            this.contextCompaction &&
+            !this.overflowCompactionAttempted &&
+            isProviderContextOverflowError(err)
+          ) {
+            this.overflowCompactionAttempted = true;
+            const recovered = await this.tryEmergencyCompact(roundNumber, onStreamEvent);
+            if (recovered) {
+              continue roundLoop;
+            }
+          }
           if (isImageError(err)) {
             // 被拒绝的图片可能位于任意一条 user 消息（工具 __images 会在日志中段
             // 插入图片消息），而不只是最后一条；且必须保留消息文本（旧实现整条

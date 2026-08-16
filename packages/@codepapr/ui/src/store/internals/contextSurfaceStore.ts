@@ -250,3 +250,20 @@ export async function getSessionPruneOptions(
   const parsed = parseRenderParams(surface.renderParamsJson);
   return parsed?.pruneOptions ?? fallback;
 }
+
+/**
+ * PR3 prune-first：更新最新 generation 的冻结渲染参数（节点不变、generation
+ * 不变——这不是压缩，只是该 epoch 的重渲染参数变化）。下一次重建按新参数
+ * 重放编译器裁剪旧工具结果。
+ */
+export async function updateSurfaceRenderParams(
+  workspacePath: string,
+  sessionId: string,
+  renderParamsJson: string
+): Promise<void> {
+  const surface = await getContextSurfaceCached(workspacePath, sessionId);
+  if (!surface) return;
+  const updated: PersistedContextSurface = { ...surface, renderParamsJson };
+  await saveContextSurface(workspacePath, updated);
+  rememberContextSurface(workspacePath, updated);
+}
