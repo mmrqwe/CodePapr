@@ -14,6 +14,7 @@ import {
   type SkillDefinition,
   type ToolOutputTruncationOptions,
   type ToolContextConfig,
+  type PruneOptions,
   SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
   PERMISSION_WAITING_TOOL_TIMEOUTS,
 } from '@codepapr/core';
@@ -386,7 +387,9 @@ export function buildAgentSessionParts(
   overrides: Partial<
     Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'thinkingBudgetTokens' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   > = {},
-  runtime: AgentRuntimeConfig = {}
+  runtime: AgentRuntimeConfig = {},
+  /** PR1（ADR-006）：重建用的 prune 参数（surface 冻结参数优先）。 */
+  pruneOptions?: PruneOptions
 ): AgentSessionParts {
   const mode: PromptMode = runtime.mode ?? 'agent';
   const toolRegistry = isReadOnlyMode(mode)
@@ -438,7 +441,7 @@ export function buildAgentSessionParts(
       thinkingBudgetTokens: overrides.thinkingBudgetTokens ?? settings.thinkingBudgetTokens,
     },
   });
-  const log = createLogFromMessages(sessionId, messages, sessionBootstrapPrompt);
+  const log = createLogFromMessages(sessionId, messages, sessionBootstrapPrompt, pruneOptions);
   return { prefix, log, model: baseModel, toolRegistry, provider, providerName, uiTaskToolContext };
 }
 
@@ -455,9 +458,10 @@ export function createMainThreadAgent(
   overrides: Partial<
     Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'thinkingBudgetTokens' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   > = {},
-  runtime: AgentRuntimeConfig = {}
+  runtime: AgentRuntimeConfig = {},
+  pruneOptions?: PruneOptions
 ): AgentRuntimeHandle {
-  return _createLocalAgent(settings, sessionId, workspacePath, messages, overrides, runtime);
+  return _createLocalAgent(settings, sessionId, workspacePath, messages, overrides, runtime, pruneOptions);
 }
 
 function _createLocalAgent(
@@ -468,9 +472,10 @@ function _createLocalAgent(
   overrides: Partial<
     Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'thinkingBudgetTokens' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   > = {},
-  runtime: AgentRuntimeConfig = {}
+  runtime: AgentRuntimeConfig = {},
+  pruneOptions?: PruneOptions
 ): AgentRuntimeHandle {
-  const parts = buildAgentSessionParts(settings, sessionId, workspacePath, messages, overrides, runtime);
+  const parts = buildAgentSessionParts(settings, sessionId, workspacePath, messages, overrides, runtime, pruneOptions);
   const session = new Session({
     sessionId,
     prefix: parts.prefix,
@@ -516,6 +521,9 @@ export function createAgent(
     Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'thinkingBudgetTokens' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   > = {},
   runtime: AgentRuntimeConfig = {},
+  /** PR1（ADR-006）：重建用的 prune 参数（surface 冻结参数优先；缺省沿用
+   *  现有行为——不 prune）。 */
+  pruneOptions?: PruneOptions,
 ): AgentRuntimeHandle {
   const onWorkspaceMutated = runtime.onWorkspaceMutated ?? defaultOnWorkspaceMutatedResolver();
   const baseModel = (overrides.model ?? settings.model).trim();
@@ -542,7 +550,7 @@ export function createAgent(
       return new WorkerBackedAgent({
         sessionId,
         workspacePath,
-        initialMessages: toCoreMessages(messages, sessionBootstrapPrompt),
+        initialMessages: toCoreMessages(messages, sessionBootstrapPrompt, pruneOptions),
         settings: toWorkerAgentSettings(settings),
         providerName: provider,
         model: baseModel,

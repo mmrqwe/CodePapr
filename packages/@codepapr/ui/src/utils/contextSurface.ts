@@ -173,10 +173,60 @@ export function freezePruneParams(pruneOptions: PruneOptions): FrozenPruneParams
   };
 }
 
+/**
+ * generation 0（未压缩会话）的冻结参数：该 epoch 从未经过 prune，重启重建
+ * 必须同样不 prune 才能与 live 字节一致（ADR-006）。
+ */
+export function buildDisabledFrozenPruneParams(): FrozenPruneParams {
+  return {
+    enabled: false,
+    protectRecentRounds: 0,
+    minPrunableChars: 0,
+    protectedTools: [],
+    placeholder: '',
+  };
+}
+
+/** 冻结形式 → PruneOptions（string[] → Set）。解析失败返回 null。 */
+export function parseRenderParams(json: string): { pruneOptions: PruneOptions } | null {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const record = parsed as { pruneParams?: FrozenPruneParams };
+    const params = record.pruneParams;
+    if (!params || typeof params !== 'object') return null;
+    const protectedTools = new Set<string>();
+    if (Array.isArray(params.protectedTools)) {
+      for (const tool of params.protectedTools) {
+        if (typeof tool === 'string') protectedTools.add(tool);
+      }
+    }
+    return {
+      pruneOptions: {
+        enabled: params.enabled === true,
+        protectRecentRounds: typeof params.protectRecentRounds === 'number' ? params.protectRecentRounds : 0,
+        minPrunableChars: typeof params.minPrunableChars === 'number' ? params.minPrunableChars : 0,
+        protectedTools,
+        placeholder: typeof params.placeholder === 'string' ? params.placeholder : '',
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** generation 行 render_params 列的 JSON（ADR-006）。 */
 export function serializeRenderParams(pruneOptions: PruneOptions): string {
   return JSON.stringify({
     pruneParams: freezePruneParams(pruneOptions),
+    renderVersion: CONTEXT_SURFACE_RENDER_VERSION,
+  });
+}
+
+/** generation 0 的 render_params JSON（禁用 prune，见 buildDisabledFrozenPruneParams）。 */
+export function serializeDisabledRenderParams(): string {
+  return JSON.stringify({
+    pruneParams: buildDisabledFrozenPruneParams(),
     renderVersion: CONTEXT_SURFACE_RENDER_VERSION,
   });
 }

@@ -18,7 +18,9 @@ import { createId } from '../../utils/createId';
 import {
   computeSurfaceNodes,
   getLatestCheckpointPayload,
+  parseRenderParams,
   resolveCheckpointSummaryInfo,
+  serializeDisabledRenderParams,
   serializeRenderParams,
   type SurfaceNodeInput,
 } from '../../utils/contextSurface';
@@ -80,8 +82,7 @@ export function forgetContextSurface(workspacePath: string, sessionId: string): 
 export async function maintainContextSurface(
   workspacePath: string,
   sessionId: string,
-  messages: readonly ContextMessageLike[],
-  pruneOptions: PruneOptions
+  messages: readonly ContextMessageLike[]
 ): Promise<void> {
   try {
     const surface = await getContextSurfaceCached(workspacePath, sessionId);
@@ -93,7 +94,9 @@ export async function maintainContextSurface(
         generation: 0,
         parentGeneration: null,
         compactionId: null,
-        renderParamsJson: serializeRenderParams(pruneOptions),
+        // generation 0 的 epoch 从未 prune，冻结禁用参数保证重启重建字节一致
+        // （ADR-006）。
+        renderParamsJson: serializeDisabledRenderParams(),
         createdAt: Date.now(),
         nodes,
       };
@@ -230,4 +233,20 @@ export async function failContextCheckpoint(
   } catch (err) {
     console.warn('[surface] 记录压缩失败失败:', err instanceof Error ? err.message : err);
   }
+}
+
+/**
+ * 会话重建用的 prune 参数（ADR-006）：优先取 surface 冻结参数（压缩 epoch
+ * 与 generation 0 分别冻结「压缩时参数」与「禁用」），无 surface / 解析失败
+ * 时回退调用方提供的当前 settings 参数。
+ */
+export async function getSessionPruneOptions(
+  workspacePath: string,
+  sessionId: string,
+  fallback: PruneOptions
+): Promise<PruneOptions> {
+  const surface = await getContextSurfaceCached(workspacePath, sessionId);
+  if (!surface) return fallback;
+  const parsed = parseRenderParams(surface.renderParamsJson);
+  return parsed?.pruneOptions ?? fallback;
 }

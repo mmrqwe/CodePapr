@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PruneOptions } from '@codepapr/core';
 import {
+  buildDisabledFrozenPruneParams,
   computeCheckpointProvenanceRanges,
   computeSurfaceNodes,
   findCheckpointInsertIndex,
@@ -8,6 +9,8 @@ import {
   getLatestCheckpointPayload,
   hydrateSurfaceMessages,
   isModelVisibleUiMessage,
+  parseRenderParams,
+  serializeDisabledRenderParams,
   serializeRenderParams,
 } from './contextSurface';
 import type { ContextCheckpointPayload, ContextMessageLike } from './contextCompaction';
@@ -140,6 +143,27 @@ describe('render params freeze', () => {
     const parsed = JSON.parse(json);
     expect(parsed.renderVersion).toBe(1);
     expect(parsed.pruneParams.placeholder).toBe('[cleared]');
+  });
+
+  it('generation 0 freezes disabled params so restart rebuild does not prune', () => {
+    const disabled = buildDisabledFrozenPruneParams();
+    expect(disabled.enabled).toBe(false);
+    const json = serializeDisabledRenderParams();
+    expect(JSON.parse(json).pruneParams.enabled).toBe(false);
+  });
+
+  it('parseRenderParams round-trips freezePruneParams (string[] → Set)', () => {
+    const parsed = parseRenderParams(serializeRenderParams(testPruneOptions));
+    expect(parsed).not.toBeNull();
+    expect(parsed!.pruneOptions.enabled).toBe(true);
+    expect(parsed!.pruneOptions.protectRecentRounds).toBe(2);
+    expect([...parsed!.pruneOptions.protectedTools]).toEqual(['todo', 'question']);
+  });
+
+  it('parseRenderParams returns null on malformed input', () => {
+    expect(parseRenderParams('not json')).toBeNull();
+    expect(parseRenderParams('{}')).toBeNull();
+    expect(parseRenderParams('{"pruneParams":{"enabled":"yes"}}')).not.toBeNull();
   });
 });
 

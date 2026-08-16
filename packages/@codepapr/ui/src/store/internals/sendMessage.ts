@@ -60,6 +60,7 @@ import {
   commitContextCheckpoint,
   failContextCheckpoint,
   getContextSurfaceCached,
+  getSessionPruneOptions,
 } from './contextSurfaceStore';
 import { buildPruneOptions } from '../../agent/compactionHandler';
 import type { MidLoopCompactionCommit } from '../../agent/agentWorkerProtocol';
@@ -1101,6 +1102,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // agent 与创建它的会话绑定（logStore/上下文），切换会话后绝不复用，
           // 否则会把新会话的消息写进旧会话的上下文。
           const agentSessionId = get()._agentSessionId;
+          // PR1（ADR-006）：重建用的 prune 参数。surface 存在时取冻结参数，
+          // 供本回合内所有 createAgent（含崩溃重建/降级重建）复用。
+          let sessionPruneOptions: import('@codepapr/core').PruneOptions | undefined;
           if (!agent || agent.isCrashed() || (agentSessionId !== null && agentSessionId !== activeSessionId) || agentModel !== route.model || (agentPromptKey !== null && agentPromptKey !== runtimePromptKey)) {
             if (agent) {
               try {
@@ -1134,6 +1138,13 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   );
                   if (hydrated.complete) {
                     contextMessages = hydrated.messages as UIMessage[];
+                    // ADR-006：重建用 surface 冻结参数（generation 0 = 禁用；
+                    // 压缩 epoch = 压缩时参数），保证重启重建字节与 live epoch 一致。
+                    sessionPruneOptions = await getSessionPruneOptions(
+                      workspacePath,
+                      activeSessionId,
+                      buildPruneOptions(normalizedSettings)
+                    );
                   }
                 }
               } catch {
@@ -1155,6 +1166,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   systemPrompt: runtimeSystemPrompt,
                 },
                 runtimeAgentConfig,
+                sessionPruneOptions,
               );
               set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey, _agentSessionId: activeSessionId });
             } else {
@@ -1513,6 +1525,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     systemPrompt: runtimeSystemPrompt,
                   },
                   runtimeAgentConfig,
+                  sessionPruneOptions,
                 )
               : createAgent(
                   normalizedSettings,
@@ -1527,6 +1540,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     systemPrompt: runtimeSystemPrompt,
                   },
                   runtimeAgentConfig,
+                  sessionPruneOptions,
                 );
             set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey, _agentSessionId: activeSessionId });
           };
@@ -1971,6 +1985,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 systemPrompt: runtimeSystemPrompt,
               },
               runtimeAgentConfig,
+              sessionPruneOptions,
             );
             set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey, _agentSessionId: activeSessionId });
 
@@ -2203,6 +2218,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                           systemPrompt: runtimeSystemPrompt,
                         },
                         runtimeAgentConfig,
+                        // 新 epoch 由 compactionHandler 用当前 settings 的 prune
+                        // 参数构建；就地重建必须用同一参数（surface 冻结参数
+                        // 的提交是异步的，不能依赖它已落库）。
+                        buildPruneOptions(normalizedSettings),
                       )
                     : null,
                 _agentModel: isCurrentSession ? route.model : null,

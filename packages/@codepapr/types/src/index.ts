@@ -285,6 +285,31 @@ export interface IContextSnapshot {
   totalTokens: number;
   tokensByStage: Record<ContextStage, number>;
   capturedAt: number;
+  /** PR1（ADR-001/005）：context surface / compaction provenance 观测数据 */
+  contextSurface?: {
+    generation: number | null;
+    nodeCount: number;
+    nodeKinds: Record<string, number>;
+    latestCompaction: {
+      id: string;
+      status: string;
+      trigger: string;
+      sourceGeneration: number;
+      targetGeneration: number | null;
+      checkpointMessageId: string | null;
+      sourceStartMessageId: string | null;
+      sourceEndMessageId: string | null;
+      retainedTailStartMessageId: string | null;
+      sourceMessageCount: number;
+      retainedMessageCount: number;
+      estimatedTokensBefore: number | null;
+      estimatedTokensAfter: number | null;
+      summaryMode: string;
+      summaryModel: string | null;
+      createdAt: number;
+      completedAt: number | null;
+    } | null;
+  };
 }
 
 export type IChatStreamEvent =

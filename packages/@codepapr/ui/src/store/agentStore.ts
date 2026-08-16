@@ -22,7 +22,9 @@ import {
   loadAllProjectMeta,
   aggregateSessionRuntimeInDb,
   waitForPendingProjectStateSave,
+  loadContextCompactions,
 } from '../utils/projectStorage';
+import { getContextSurfaceCached } from './internals/contextSurfaceStore';
 import { runProjectDiagnostics } from '../utils/projectDiagnostics';
 import { loadAppSettings, queueAppSettingsSave } from '../utils/appSettingsStorage';
 import {
@@ -1024,6 +1026,47 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           },
           0
         );
+
+        // PR1：Context Inspector 观测数据（ADR-001/005）——current generation、
+        // 最新 compaction、checkpoint 来源区间、surface 节点统计。
+        try {
+          const surface = await getContextSurfaceCached(workspacePath, activeSessionId);
+          const compactions = surface
+            ? await loadContextCompactions(workspacePath, activeSessionId, 1)
+            : [];
+          const latest = compactions[0] ?? null;
+          snapshot.contextSurface = {
+            generation: surface?.generation ?? null,
+            nodeCount: surface?.nodes.length ?? 0,
+            nodeKinds: (surface?.nodes ?? []).reduce<Record<string, number>>((acc, node) => {
+              acc[node.nodeKind] = (acc[node.nodeKind] ?? 0) + 1;
+              return acc;
+            }, {}),
+            latestCompaction: latest
+              ? {
+                  id: latest.id,
+                  status: latest.status,
+                  trigger: latest.trigger,
+                  sourceGeneration: latest.sourceGeneration,
+                  targetGeneration: latest.targetGeneration,
+                  checkpointMessageId: latest.checkpointMessageId,
+                  sourceStartMessageId: latest.sourceStartMessageId,
+                  sourceEndMessageId: latest.sourceEndMessageId,
+                  retainedTailStartMessageId: latest.retainedTailStartMessageId,
+                  sourceMessageCount: latest.sourceMessageCount,
+                  retainedMessageCount: latest.retainedMessageCount,
+                  estimatedTokensBefore: latest.estimatedTokensBefore,
+                  estimatedTokensAfter: latest.estimatedTokensAfter,
+                  summaryMode: latest.summaryMode,
+                  summaryModel: latest.summaryModel,
+                  createdAt: latest.createdAt,
+                  completedAt: latest.completedAt,
+                }
+              : null,
+          };
+        } catch {
+          // surface 观测失败不阻塞上下文快照
+        }
 
         set({ _latestContextSnapshot: { sessionId: activeSessionId, snapshot } });
       },

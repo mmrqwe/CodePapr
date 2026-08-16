@@ -490,6 +490,69 @@ export function ContextInspectorModal({ snapshot, lang, onClose }: ContextInspec
           </span>
         </div>
 
+        {/* ── PR1：Surface / Compaction 观测（ADR-001/005） ── */}
+        {snapshot.contextSurface ? (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-line bg-raised px-5 py-2">
+            <span className="text-[11px] text-fg-muted">
+              {t.contextSurfaceGeneration}{' '}
+              <span className="font-mono text-fg-soft">
+                {snapshot.contextSurface.generation ?? '—'}
+              </span>
+            </span>
+            <span className="text-[11px] text-fg-muted">
+              {t.contextSurfaceNodes}{' '}
+              <span className="font-mono text-fg-soft">
+                {snapshot.contextSurface.nodeCount}
+              </span>
+              {Object.keys(snapshot.contextSurface.nodeKinds).length > 0 && (
+                <span className="font-mono text-fg-dim">
+                  {' '}
+                  (
+                  {Object.entries(snapshot.contextSurface.nodeKinds)
+                    .map(([kind, count]) => `${kind}:${count}`)
+                    .join(' · ')}
+                  )
+                </span>
+              )}
+            </span>
+            {snapshot.contextSurface.latestCompaction ? (
+              (() => {
+                const c = snapshot.contextSurface.latestCompaction;
+                return (
+                  <>
+                    <span className="text-[11px] text-fg-muted">
+                      {t.contextSurfaceLatestCompaction}{' '}
+                      <span
+                        className={`font-mono ${
+                          c.status === 'completed' ? 'text-fg-soft' : 'text-warning-text'
+                        }`}
+                      >
+                        {c.status}
+                      </span>{' '}
+                      <span className="font-mono text-fg-dim">
+                        ({c.trigger} · {c.summaryMode}
+                        {c.summaryModel ? ` · ${c.summaryModel}` : ''})
+                      </span>
+                    </span>
+                    <span className="text-[11px] text-fg-muted">
+                      <span className="font-mono text-fg-soft">
+                        gen {c.sourceGeneration} → {c.targetGeneration ?? '—'}
+                      </span>{' '}
+                      <span className="font-mono text-fg-dim">
+                        {c.estimatedTokensBefore != null && c.estimatedTokensAfter != null
+                          ? `${formatTokens(c.estimatedTokensBefore)} → ${formatTokens(c.estimatedTokensAfter)} ${t.tokensUnit}`
+                          : `${c.sourceMessageCount} → ${c.retainedMessageCount} msg`}
+                      </span>
+                    </span>
+                  </>
+                );
+              })()
+            ) : (
+              <span className="text-[11px] text-fg-dim">{t.contextSurfaceNoCompaction}</span>
+            )}
+          </div>
+        ) : null}
+
         {/* ── 甘特图 ── */}
         <div className="border-b border-line bg-raised px-5 py-3">
           <div className="mb-2 flex flex-wrap items-center gap-2">
