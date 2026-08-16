@@ -11,6 +11,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -3207,7 +3208,96 @@ fn token_overlap_score(tokens: &[String], text: &str) -> i64 {
     score
 }
 
-/// v1 检索（LIKE/token + 确定性加权重排，无 embedding）：
+/// FTS5 runtime probe（ADR-009 第8条）：rusqlite bundled 是否编译了 FTS5。
+/// 结果对整个二进制恒定，探一次缓存。None = 未探测，Some(false) = 不可用。
+static FTS5_PROBE: OnceLock<Option<bool>> = OnceLock::new();
+
+fn fts5_available(conn: &Connection) -> bool {
+    FTS5_PROBE
+        .get_or_init(|| {
+            Some(
+                conn.execute_batch(
+                    "CREATE VIRTUAL TABLE _codepapr_fts_probe USING fts5(x, tokenize='trigram');
+                     DROP TABLE _codepapr_fts_probe;",
+                )
+                .is_ok(),
+            )
+        })
+        .unwrap_or(false)
+}
+
+/// FTS5 trigram 候选索引（倒排加速，确定性 scoring 不变）：
+/// - 不可用时返回 false，调用方走全量扫描（LIKE/contains 语义）；
+/// - 可用时惰性建表并重建（DELETE + INSERT active entries，条目 ≤ 数百，毫秒级）；
+/// - 短 token（<3 字符，trigram 无法索引）单独 LIKE 补齐，避免候选漏检。
+fn ensure_memory_fts_candidates(
+    conn: &Connection,
+    tokens: &[String],
+) -> Option<HashSet<String>> {
+    if !fts5_available(conn) {
+        return None;
+    }
+    // trigram 最小 3 字符：全部 token 都短于 3 时 FTS 帮不上忙。
+    let long_tokens: Vec<&str> = tokens
+        .iter()
+        .filter(|t| t.chars().count() >= 3)
+        .map(|t| t.as_str())
+        .collect();
+    if long_tokens.is_empty() {
+        return None;
+    }
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS memory_entries_fts
+           USING fts5(id UNINDEXED, content, tokenize='trigram');
+         DELETE FROM memory_entries_fts;
+         INSERT INTO memory_entries_fts(id, content)
+           SELECT id, content FROM memory_entries WHERE status = 'active';",
+    )
+    .ok()?;
+
+    let query = long_tokens
+        .iter()
+        .map(|t| format!("\"{}\"", t.replace('"', "")))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let mut stmt = conn
+        .prepare("SELECT id FROM memory_entries_fts WHERE memory_entries_fts MATCH ?1")
+        .ok()?;
+    let rows = stmt
+        .query_map(params![query], |row| row.get::<_, String>(0))
+        .ok()?;
+    let mut ids = HashSet::new();
+    for row in rows.flatten() {
+        ids.insert(row);
+    }
+
+    // 短 token 补齐：trigram 索引不到 <3 字符的 token，用 LIKE 精确补齐，
+    // 保证「仅命中短 token」的条目不被预筛漏掉（确定性语义与全量扫描一致）。
+    let short_tokens: Vec<&str> = tokens
+        .iter()
+        .filter(|t| t.chars().count() < 3)
+        .map(|t| t.as_str())
+        .collect();
+    for token in short_tokens {
+        let mut like_stmt = conn
+            .prepare(
+                "SELECT id FROM memory_entries
+                 WHERE status = 'active' AND lower(content) LIKE '%' || ?1 || '%'",
+            )
+            .ok()?;
+        let like_rows = like_stmt
+            .query_map(params![token], |row| row.get::<_, String>(0))
+            .ok()?;
+        for row in like_rows.flatten() {
+            ids.insert(row);
+        }
+    }
+    Some(ids)
+}
+
+/// Recall 检索（token 子串匹配 + 确定性加权重排，无 embedding）：
+/// FTS5 trigram 可用时做候选预筛（ADR-009 第8条 runtime probe），不可用
+/// 回退全量 contains 扫描；scoring 语义两者一致。
 /// 1. memory_entries（active，verified 优先）；
 /// 2. 历史 session checkpoint（messages.extras 里的 contextCheckpoint.summary）。
 /// untrusted 条目直接跳过（准入策略已保证 active 里没有，防御性再过滤）。
@@ -3245,6 +3335,11 @@ pub(crate) fn search_memory_for_recall(
     let now = unix_millis()?;
     let mut items: Vec<RecallSearchItem> = Vec::new();
 
+    // PR 检索升级（ADR-009 第8条 runtime probe）：FTS5 trigram 可用时用
+    // 倒排索引做候选预筛（scoring 仍走确定性 token_overlap，语义不变）；
+    // 不可用或全短 token 时回退全量扫描。
+    let fts_candidates = ensure_memory_fts_candidates(&conn, &tokens);
+
     // ── 语料 1：active memory_entries ──
     {
         let mut stmt = conn
@@ -3275,6 +3370,11 @@ pub(crate) fn search_memory_for_recall(
             .map_err(|err| format!("收集记忆条目检索失败: {err}"))?;
 
         for (id, category, content, confidence, trust, session_id, message_ids, verified_at) in rows {
+            if let Some(candidates) = &fts_candidates {
+                if !candidates.contains(&id) {
+                    continue;
+                }
+            }
             let overlap = token_overlap_score(&tokens, &content);
             if overlap == 0 {
                 continue;
@@ -4110,6 +4210,49 @@ mod tests {
         let latest = load_latest_memory_recall(ws.clone(), "s1".to_string()).expect("load");
         assert_eq!(latest.as_ref().map(|r| r.status.as_str()), Some("archived"));
         assert_eq!(latest.as_ref().map(|r| r.anchor_message_id.as_str()), Some("u1"));
+    }
+
+    /// 检索升级（ADR-009 第8条 runtime probe）：FTS5 trigram 候选预筛 +
+    /// 短 token LIKE 补齐；确定性 scoring 语义与全量扫描一致。
+    #[test]
+    fn memory_recall_fts_candidates_cjk_and_short_tokens() {
+        let workspace = TestWorkspace::new("memory-recall-fts");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        let c_cjk = serde_json::json!({
+            "id": "c-cjk", "category": "decision",
+            "content": "身份认证模块已迁移到新网关",
+            "contentHash": "hcjk", "confidence": "confirmed", "trust": "workspace",
+            "sourceSessionId": "s1", "sourceMessageIds": "[]",
+            "evidence": null, "riskFlags": null, "createdAt": 1i64,
+        });
+        save_memory_candidate(ws.clone(), c_cjk.to_string()).expect("save cjk");
+        admit_memory_candidate(ws.clone(), "c-cjk".to_string(), "e-cjk".to_string())
+            .expect("admit cjk");
+
+        let c_ui = serde_json::json!({
+            "id": "c-ui", "category": "general",
+            "content": "UI 组件库统一用 shadcn",
+            "contentHash": "hcui", "confidence": "reported", "trust": "derived",
+            "sourceSessionId": "s1", "sourceMessageIds": "[]",
+            "evidence": null, "riskFlags": null, "createdAt": 2i64,
+        });
+        save_memory_candidate(ws.clone(), c_ui.to_string()).expect("save ui");
+        admit_memory_candidate(ws.clone(), "c-ui".to_string(), "e-ui".to_string())
+            .expect("admit ui");
+
+        // 1. CJK 短语子串（trigram 预筛路径）
+        let q1 = serde_json::json!({ "tokens": ["认证模块"], "limit": 8 });
+        let items1 = search_memory_for_recall(ws.clone(), q1.to_string()).expect("search cjk");
+        assert_eq!(items1.len(), 1);
+        assert_eq!(items1[0].id, "e-cjk");
+
+        // 2. 长 token + 短 token 混合：短 token 补齐不丢候选
+        let q2 = serde_json::json!({ "tokens": ["shadcn", "ui"], "limit": 8 });
+        let items2 = search_memory_for_recall(ws.clone(), q2.to_string()).expect("search mixed");
+        assert_eq!(items2.len(), 1);
+        assert_eq!(items2[0].id, "e-ui");
     }
 
     /// ADR-008：memory_forget 软删除——active → forgotten，退出投影与召回。

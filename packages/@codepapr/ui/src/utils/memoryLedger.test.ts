@@ -86,7 +86,7 @@ describe('buildMemoryProjection', () => {
     expect(projection).toContain('pnpm test auth');
   });
 
-  it('caps entries and characters (token budget)', () => {
+  it('caps entries and token budget (estimateTokens)', () => {
     const entries = Array.from({ length: 100 }, (_, i) => ({
       category: 'verification',
       content: `条目 ${i} ${'x'.repeat(200)}`,
@@ -97,6 +97,22 @@ describe('buildMemoryProjection', () => {
     const projection = buildMemoryProjection(entries);
     expect(projection.split('\n').length).toBeLessThanOrEqual(24);
     expect(projection.length).toBeLessThanOrEqual(6_000);
+  });
+
+  it('P2-2：CJK 条目按 token 预算截断（不再被字符数低估）', () => {
+    const cjkEntry = (i: number) => ({
+      category: 'verification',
+      content: `验证条目 ${i} ${'测'.repeat(300)}`,
+      confidence: 'confirmed',
+      trust: 'workspace',
+      verifiedAt: i,
+    });
+    // 300 个 CJK 字符 ≈ 900 字节 ≈ 225 token/条；预算 1500 token ≈ 6 条。
+    const projection = buildMemoryProjection(Array.from({ length: 24 }, (_, i) => cjkEntry(i)));
+    const lines = projection.split('\n').length;
+    // 旧字符截断会塞进 ~19 条（6000 字符）；token 口径约 6 条。
+    expect(lines).toBeLessThan(12);
+    expect(lines).toBeGreaterThanOrEqual(2);
   });
 
   it('renders a placeholder when empty', () => {

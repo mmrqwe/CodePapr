@@ -13,13 +13,15 @@ import {
   type ContentEnvelope,
   type MemoryAdmissionResult,
 } from '@codepapr/core';
-import { sha256 } from '@codepapr/common';
+import { sha256, estimateTokens } from '@codepapr/common';
 import { createId } from './createId';
 import { TEST_COMMAND_PATTERN } from './contextClassification';
 import type { ContextMessageLike } from './contextCompaction';
 
 export const MEMORY_MANAGED_ZONE_MAX_ENTRIES = 24;
-export const MEMORY_MANAGED_ZONE_MAX_CHARS = 6_000;
+/** 投影 token 预算（≈ 旧 6000 字符 / 4 的口径，但用 estimateTokens 截断——
+ *  CJK 每字符 3 字节，字符数截断会低估实际注入 token，P2-2 修正）。 */
+export const MEMORY_MANAGED_ZONE_MAX_TOKENS = 1_500;
 
 /** 已验证命令 → 记忆候选（PR4 唯一 v1 自动准入来源：执行验证）。 */
 export function collectVerifiedMemoryCandidates(
@@ -84,15 +86,15 @@ export interface ProjectionEntry {
 
 /**
  * managed zone 渲染（token-budgeted）：每条目一行 `- [verified] content`，
- * 带上类别；超预算按条数/字符截断。
+ * 带上类别；超预算按条数/token 截断（estimateTokens，CJK 字节口径正确）。
  * user-note（user zone 同步条目，ADR-008 第4点）不进 managed zone——它已在
  * user zone 展示，只进 ledger 供 Recall 检索。
  */
 export function buildMemoryProjection(entries: readonly ProjectionEntry[]): string {
   const lines: string[] = [];
-  let totalChars = 0;
+  let totalTokens = 0;
   const maxEntries = MEMORY_MANAGED_ZONE_MAX_ENTRIES;
-  const maxChars = MEMORY_MANAGED_ZONE_MAX_CHARS;
+  const maxTokens = MEMORY_MANAGED_ZONE_MAX_TOKENS;
 
   for (const entry of entries) {
     if (entry.category === 'user-note') continue;
@@ -106,9 +108,10 @@ export function buildMemoryProjection(entries: readonly ProjectionEntry[]): stri
           ? '[verified]'
           : '[reported]';
     const line = `- ${badge} ${entry.category} — ${content}`;
-    if (totalChars + line.length > maxChars) break;
+    const lineTokens = estimateTokens(line);
+    if (totalTokens + lineTokens > maxTokens) break;
     lines.push(line);
-    totalChars += line.length;
+    totalTokens += lineTokens;
   }
 
   if (lines.length === 0) {

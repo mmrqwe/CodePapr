@@ -48,14 +48,53 @@ const SECRET_PATTERNS: ReadonlyArray<{ label: ContentRiskFlag; pattern: RegExp }
   { label: 'policy-bypass', pattern: /(disable|turn off|关闭|停用)\s+(sandbox|防火墙|firewall|permission|权限|安全)/i },
 ];
 
+/** 零宽字符（视觉不可见的拼接/混淆载体）：检测前剥离。 */
+const ZERO_WIDTH_CHARS = /[\u200B-\u200F\u2028\u2029\uFEFF\u2060-\u206F]/g;
+
+/** Base64 载荷启发式：≥40 字符的 base64 块（允许换行折叠）。 */
+const BASE64_BLOB_PATTERN = /(?:[A-Za-z0-9+/]{40,}={0,2}(?:\s{0,2})?)+/g;
+
+/** 尝试解码 Base64 为 UTF-8（标准/URL-safe 均支持）。 */
+function decodeBase64Utf8(input: string): string | null {
+  const compact = input.replace(/\s+/g, '');
+  if (compact.length % 4 !== 0) return null;
+  const normalized = compact.replace(/-/g, '+').replace(/_/g, '/');
+  try {
+    const binary = atob(normalized);
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * P2-3：注入检测加固。正则检测是 best-effort，这里补三类确定性归一化：
+ * 1. Unicode NFKC：同形字（𝕚𝕘𝕟𝕠𝕣𝕖 等）折叠回基础字形后再匹配；
+ * 2. 零宽字符剥离（视觉拼接混淆）；
+ * 3. Base64 载荷：解码后对解码文本再跑一次注入/命令检测。
+ */
 function detectRiskFlags(content: string): ContentRiskFlag[] {
   const flags = new Set<ContentRiskFlag>();
-  if (INJECTION_PATTERN.test(content)) {
-    flags.add('injection-instruction');
+
+  const normalizedCandidates = [
+    content.replace(ZERO_WIDTH_CHARS, '').normalize('NFKC'),
+  ];
+  for (const match of content.matchAll(BASE64_BLOB_PATTERN)) {
+    const decoded = decodeBase64Utf8(match[0]);
+    if (decoded && decoded.length > 0 && !/^[\x00-\x1F]*$/.test(decoded)) {
+      normalizedCandidates.push(decoded.replace(ZERO_WIDTH_CHARS, '').normalize('NFKC'));
+    }
   }
-  for (const { label, pattern } of SECRET_PATTERNS) {
-    if (pattern.test(content)) {
-      flags.add(label);
+
+  for (const candidate of normalizedCandidates) {
+    if (INJECTION_PATTERN.test(candidate)) {
+      flags.add('injection-instruction');
+    }
+    for (const { label, pattern } of SECRET_PATTERNS) {
+      if (pattern.test(candidate)) {
+        flags.add(label);
+      }
     }
   }
   return [...flags];

@@ -1415,8 +1415,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   }
                 }
               }
-            } catch {
-              // Recall 检索失败静默降级（不带 Recall 发送）
+            } catch (err) {
+              // Recall 检索失败静默降级（不带 Recall 发送），但留痕便于诊断。
+              console.warn(
+                '[recall] 检索失败，本轮不带 Recall:',
+                err instanceof Error ? err.message : err
+              );
             }
           }
 
