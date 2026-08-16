@@ -349,7 +349,6 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _checkpointSeq: 0,
       _turnSeq: 0,
       _stopRequestedSeq: 0,
-      _pendingMemoryConsolidation: false,
       _latestContextSnapshot: null,
       _currentMode: 'agent',
       _sessionLru: [],

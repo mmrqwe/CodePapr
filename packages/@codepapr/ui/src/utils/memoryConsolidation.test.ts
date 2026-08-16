@@ -22,16 +22,10 @@ vi.mock('../store/internals/settingsNormalizer', () => ({
 
 import {
   bootstrapMemoryContent,
-  MEMORY_CONSOLIDATION_MAX_LINES,
-  planMemoryConsolidation,
 } from './memoryConsolidation';
 import type { Settings } from '../store/internals/types';
 
 const fakeSettings = {} as Settings;
-
-function lines(n: number): string {
-  return Array.from({ length: n }, () => 'x').join('\n');
-}
 
 describe('memoryConsolidation', () => {
   beforeEach(() => {
@@ -39,36 +33,6 @@ describe('memoryConsolidation', () => {
     mocks.buildProviderInstance.mockReset();
     mocks.selectRoute.mockReset();
     mocks.resolveProviderName.mockReset();
-  });
-
-  describe('MEMORY_CONSOLIDATION_MAX_LINES', () => {
-    it('is 200 (aligned with docs)', () => {
-      expect(MEMORY_CONSOLIDATION_MAX_LINES).toBe(200);
-    });
-  });
-
-  describe('planMemoryConsolidation', () => {
-    it('returns false for empty/undefined content', () => {
-      expect(planMemoryConsolidation(undefined)).toBe(false);
-      expect(planMemoryConsolidation('')).toBe(false);
-    });
-
-    it('returns false when under the threshold', () => {
-      expect(planMemoryConsolidation(lines(199))).toBe(false);
-    });
-
-    it('returns false at exactly the threshold (200 lines, not greater-than)', () => {
-      expect(planMemoryConsolidation(lines(200))).toBe(false);
-    });
-
-    it('returns true when over the threshold (201 lines)', () => {
-      expect(planMemoryConsolidation(lines(201))).toBe(true);
-    });
-
-    it('respects an explicit maxLines override', () => {
-      expect(planMemoryConsolidation(lines(11), 10)).toBe(true);
-      expect(planMemoryConsolidation(lines(10), 10)).toBe(false);
-    });
   });
 
   describe('bootstrapMemoryContent', () => {

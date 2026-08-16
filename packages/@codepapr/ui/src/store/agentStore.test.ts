@@ -68,10 +68,6 @@ const { maybeGenerateContextCheckpointMock } = vi.hoisted(() => ({
   maybeGenerateContextCheckpointMock: vi.fn(async (): Promise<unknown> => null),
 }));
 
-const { consolidateMemoryContentMock } = vi.hoisted(() => ({
-  consolidateMemoryContentMock: vi.fn(async (_content: string): Promise<string | null> => null),
-}));
-
 const { createAgentMock, createMainThreadAgentMock, actualCreateAgentRef } = vi.hoisted(() => ({
   createAgentMock: vi.fn(),
   createMainThreadAgentMock: vi.fn(),
@@ -128,14 +124,7 @@ vi.mock('./internals/contextCheckpoint', () => ({
   maybeGenerateContextCheckpoint: maybeGenerateContextCheckpointMock,
 }));
 
-vi.mock('../utils/memoryConsolidation', () => ({
-  consolidateMemoryContent: consolidateMemoryContentMock,
-  MEMORY_CONSOLIDATION_MAX_LINES: 200,
-  planMemoryConsolidation: (content: string | undefined, maxLines = 200): boolean => {
-    const count = content ? content.split('\n').length : 0;
-    return count > maxLines;
-  },
-}));
+vi.mock('../utils/memoryConsolidation', () => ({}));
 
 // createAgent/createMainThreadAgent are spied so crash-recovery tests can
 // inject mock agents for rebuilt instances; defaults delegate to the real
@@ -922,9 +911,8 @@ describe('useAgentStore.sendMessage', () => {
     expect(destroy).not.toHaveBeenCalled();
   });
 
-  it('#14 consolidation 模型调用期间 agent 写入 memory.md：写前重读比对，放弃覆盖', async () => {
+  it('#14 回合后不再整文件重写 memory.md（consolidation 退役，ADR-008）', async () => {
     const longMemory = Array.from({ length: 210 }, (_, i) => `line-${i}`).join('\n');
-    const agentWritten = 'agent 在 consolidation 期间写入的新记忆';
     let memoryReads = 0;
     const memoryWrites: Array<Record<string, unknown>> = [];
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
@@ -933,10 +921,9 @@ describe('useAgentStore.sendMessage', () => {
       }
       if (command === 'read_text_file' && args?.relativePath === '.CodePapr/memory.md') {
         memoryReads += 1;
-        // 第 3 次读取 = 写前重读：agent 已写入新内容
         return {
           path: '.CodePapr/memory.md',
-          content: memoryReads >= 3 ? agentWritten : longMemory,
+          content: longMemory,
           bytes: 100,
         };
       }
@@ -946,7 +933,6 @@ describe('useAgentStore.sendMessage', () => {
       }
       throw new Error(`Unexpected invoke: ${command}`);
     });
-    consolidateMemoryContentMock.mockResolvedValue('consolidated-result');
 
     useAgentStore.setState((state) => ({
       ...state,
@@ -957,10 +943,9 @@ describe('useAgentStore.sendMessage', () => {
 
     await useAgentStore.getState().sendMessage('任务', '任务', 'agent');
 
-    // consolidation 是 fire-and-forget 的异步闭包：等待其完成（写前重读）
-    await vi.waitFor(() => expect(memoryReads).toBeGreaterThanOrEqual(3));
-
-    // 旧实现：consolidation 整文件覆盖，agent 在窗口内的写入全部丢失
+    // 旧实现：回合后 consolidation 读改写 memory.md；退役后（ADR-008）
+    // 回合结束只走 ledger 投影（save_memory_candidate / project_memory_file），
+    // 绝不 write_text_file 整文件覆盖 memory.md。
     expect(
       memoryWrites.filter((w) => w.relativePath === '.CodePapr/memory.md')
     ).toHaveLength(0);

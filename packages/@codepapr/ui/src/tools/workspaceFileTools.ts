@@ -36,6 +36,32 @@ import {
 import { applySearchReplaceDiff, applySearchReplacePatch } from './workspaceToolUtils';
 import { lspLanguageFromPath } from '../utils/editorLanguage';
 import { type WorkspaceToolContext } from './workspaceToolContext';
+import {
+  isMemoryFilePath,
+  proposeMemoryCandidateFromWrite,
+  MEMORY_WRITE_INTERCEPT_NOTE,
+} from './memoryTools';
+
+/**
+ * ADR-008：memory.md 的 Agent 直接写入被拦截 → 转候选。返回 true 表示已
+ * 拦截并完成转存（调用方应直接返回拦截结果，不继续走写盘路径）。
+ */
+async function interceptMemoryFileWrite(
+  ctx: WorkspaceToolContext,
+  relativePath: string,
+  content: string
+): Promise<{ intercepted: true; candidateId: string } | { intercepted: false }> {
+  if (!isMemoryFilePath(relativePath)) {
+    return { intercepted: false };
+  }
+  const { candidateId } = await proposeMemoryCandidateFromWrite({
+    workspacePath: ctx.workspace(),
+    sessionId: ctx.sessionId,
+    content,
+    origin: 'workspace-write-tool',
+  });
+  return { intercepted: true, candidateId };
+}
 
 /**
  * 读取结果若被字节上限截断则拒绝用于"读全文 → 局部替换 → 写回"链路：
@@ -71,6 +97,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
     notifyWorkspaceMutation,
     editHistory,
     options,
+    sessionId: toolSessionId,
   } = ctx;
   // app 模式下放行 .CodePapr/apps（Papr 应用源码存放处），其余模式保持屏蔽
   const includeCodePaprApps = options.mode === 'app';
@@ -236,6 +263,19 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       content: asString(args.content, 'content'),
     };
     await ensureExternalPathAllowed(parsed.relativePath, 'write', context?.signal);
+
+    // ADR-008：memory.md 拦截 → 候选（不落盘）。
+    const memoryIntercept = await interceptMemoryFileWrite(ctx, parsed.relativePath, parsed.content);
+    if (memoryIntercept.intercepted) {
+      return {
+        path: '.CodePapr/memory.md',
+        intercepted: true,
+        candidateId: memoryIntercept.candidateId,
+        bytes: 0,
+        notes: [MEMORY_WRITE_INTERCEPT_NOTE],
+      } satisfies WriteFileResult;
+    }
+
     const before = await readBeforeContent(parsed.relativePath);
 
     const notes: string[] = [];
@@ -308,6 +348,19 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       replaceAll: parsed.replaceAll,
       expectedOccurrences: parsed.expectedOccurrences,
     });
+
+    // ADR-008：memory.md 拦截 → 候选（不落盘）。
+    const memoryIntercept = await interceptMemoryFileWrite(ctx, parsed.relativePath, patched.content);
+    if (memoryIntercept.intercepted) {
+      return {
+        path: '.CodePapr/memory.md',
+        intercepted: true,
+        candidateId: memoryIntercept.candidateId,
+        replacements: patched.replacements,
+        bytes: 0,
+        notes: [MEMORY_WRITE_INTERCEPT_NOTE],
+      } satisfies ApplyPatchResult;
+    }
 
     // 前置 AST 语法预检：仅当修改引入新语法错误时拦截、不落盘（语言不支持则降级跳过）
     const notes: string[] = [];
@@ -397,9 +450,31 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
 
     const diff = applySearchReplaceDiff(fileContents, parsed.patches);
 
+    // ADR-008：memory.md 拦截 → 候选（不落盘）；其余文件正常走写盘。
+    const interceptedFiles: ApplyDiffFileResult[] = [];
+    const writeFiles = diff.files.filter((file) => !isMemoryFilePath(file.path));
+    for (const file of diff.files) {
+      if (!isMemoryFilePath(file.path)) continue;
+      const { candidateId } = await proposeMemoryCandidateFromWrite({
+        workspacePath: workspace(),
+        sessionId: toolSessionId,
+        content: file.content,
+        origin: 'workspace-apply-diff-tool',
+      });
+      interceptedFiles.push({
+        path: file.path,
+        intercepted: true,
+        candidateId,
+        patches: file.patches,
+        replacements: file.replacements,
+        bytes: 0,
+        notes: [MEMORY_WRITE_INTERCEPT_NOTE],
+      });
+    }
+
     // 前置 AST 语法预检：任一文件引入新语法错误则整体拦截、全部不落盘（语言不支持则降级跳过）
     const notes: string[] = [];
-    for (const file of diff.files) {
+    for (const file of writeFiles) {
       const preCheck = await astPreCheck(file.path, fileContents[file.path] ?? '', file.content);
       if (preCheck.rejected) {
         throw new Error(`${file.path}: ${preCheck.rejected}`);
@@ -416,7 +491,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
     // 失败则回滚已写入的文件（新文件删除、旧文件恢复原内容），整体报错。
     const applied: Array<{ path: string; before: string | null; result: WriteTextFileResult }> = [];
     try {
-      for (const file of diff.files) {
+      for (const file of writeFiles) {
         const result = await invoke<WriteTextFileResult>('write_text_file', {
           workspacePath: workspace(),
           relativePath: file.path,
@@ -458,7 +533,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
     }
 
     // 全部写入成功后才做后置处理：LSP 诊断钩子 + editHistory + 结果
-    for (const file of diff.files) {
+    for (const file of writeFiles) {
       const result = applied.find((entry) => entry.path === file.path)!.result;
       // 后置 LSP 诊断钩子：返回编译诊断供模型继续修复（无 LSP 则降级跳过）
       const diag = await lspDiagnosticsHook(file.path, file.content);
@@ -480,7 +555,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
     notifyWorkspaceMutation(files.map((file) => file.path));
 
     return {
-      files,
+      files: [...files, ...interceptedFiles],
       totalFiles: diff.totalFiles,
       totalPatches: diff.totalPatches,
       totalReplacements: diff.totalReplacements,

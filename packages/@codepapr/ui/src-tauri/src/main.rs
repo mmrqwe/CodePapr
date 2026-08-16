@@ -263,6 +263,7 @@ fn main() {
             db::save_memory_candidate,
             db::admit_memory_candidate,
             db::reject_memory_candidate,
+            db::forget_memory_entry,
             db::load_memory_entries,
             db::load_memory_candidates,
             db::project_memory_file,

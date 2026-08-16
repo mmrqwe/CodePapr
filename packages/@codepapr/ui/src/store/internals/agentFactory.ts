@@ -30,8 +30,10 @@ import type { MidLoopCompactionCommit } from '../../agent/agentWorkerProtocol';
 import { createContextCompactionHandler } from '../../agent/compactionHandler';
 import { registerWorkspaceTools } from '../../tools/workspaceTools';
 import { registerUiTaskTool, type UiTaskToolContext } from '../../tools/uiTaskTool';
-import { registerTodoListTools } from '../../tools/todoListTool';
+
 import { registerMcpTools } from '../../tools/mcpTools';
+import { registerMemoryTools } from '../../tools/memoryTools';
+import { registerTodoListTools } from '../../tools/todoListTool';
 import { hasEnabledMcpSearch } from '../../utils/mcpTypes';
 import {
   buildProviderInstance,
@@ -414,10 +416,14 @@ export function buildAgentSessionParts(
     disableWebSearchTools: hasEnabledMcpSearch(settings.mcp),
     multimodalEnabled: resolveMultimodalEnabled(settings, overrides.model ?? settings.model),
     mode,
+    sessionId,
   });
 
   // TodoList 工具：主 Agent 的"短期工作记忆"，与 task 工具正交协作
   registerTodoListTools(toolRegistry, sessionId, '', settings.todoMaxRetries);
+
+  // Memory 工具（ADR-008 PR4）：memory_write/search/forget/review_candidates。
+  registerMemoryTools(toolRegistry, workspacePath, sessionId);
 
   registerMcpTools(toolRegistry, settings.mcp, runtime.mcpToolDefinitions ?? [], runtime.mcpToolMappings);
 

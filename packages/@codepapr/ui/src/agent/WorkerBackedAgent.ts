@@ -17,8 +17,10 @@ import {
   subscribePermissionWait,
 } from '../store/permissionStore';
 import { registerWorkspaceTools, type WorkspaceMutationListener } from '../tools/workspaceTools';
-import { registerTodoListTools } from '../tools/todoListTool';
+
 import { registerMcpTools } from '../tools/mcpTools';
+import { registerMemoryTools } from '../tools/memoryTools';
+import { registerTodoListTools } from '../tools/todoListTool';
 import { hasEnabledMcpSearch } from '../utils/mcpTypes';
 import {
   resolveAppAgentIdleTimeoutMs,
@@ -69,6 +71,8 @@ interface ToolExecutionContext {
   signal?: AbortSignal;
   /** app agent 专属：该 app 的两轴访问档（bash 沙箱构建用） */
   appAccess?: { network: boolean; workspaceWrite: boolean };
+  /** PR5（ADR-009 第11条）：本回合 canonical user message id（recall anchor）。 */
+  userMessageId?: string;
 }
 
 type WorkerToolExecutor = (
@@ -225,11 +229,15 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
       disableWebSearchTools: hasEnabledMcpSearch(config.settings.mcp),
       multimodalEnabled: resolveWorkerMultimodalEnabled(config.settings, config.model),
       mode,
+      sessionId: config.sessionId,
     },
   );
 
   // TodoList 工具：handler 改主线程的 store，由 Worker 通过 tool-request 桥回执行
   registerTodoListTools(registry, config.sessionId, '');
+
+  // Memory 工具（ADR-008 PR4）：memory_write/search/forget/review_candidates。
+  registerMemoryTools(registry, config.workspacePath, config.sessionId);
 
   registerMcpTools(registry, config.settings.mcp, config.runtime.mcpToolDefinitions ?? [], config.runtime.mcpToolMappings);
 
@@ -1039,6 +1047,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         toolCallId: match?.toolCallId,
         appAccess: message.appAccess,
         signal: toolController.signal,
+        userMessageId: message.userMessageId,
         onProgress: pending?.streamListener
           ? (progressEvent) => {
               pending.streamListener?.(progressEvent);
@@ -1049,6 +1058,12 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
           if (appAgentEntry) {
             this.armAppAgentIdleTimer(message.requestId);
           }
+          // PR5（ADR-009 第11条）：memory_search 的结果可能携带 re-recall
+          // insertion，随 tool-response 下发给 worker push 进本回合 insertions。
+          const reRecallInsertion =
+            result && typeof result === 'object' && 'reRecallInsertion' in result
+              ? (result as { reRecallInsertion?: unknown }).reRecallInsertion
+              : undefined;
           this.postToWorker({
             type: 'tool-response',
             payload: {
@@ -1056,6 +1071,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
               toolRequestId: message.toolRequestId,
               success: true,
               result,
+              ...(reRecallInsertion ? { reRecallInsertion } : {}),
             },
           } satisfies MainToAgentWorkerMessage);
         })

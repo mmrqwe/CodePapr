@@ -1163,6 +1163,90 @@ name: 'web_download_file',
       required: ['appId', 'title', 'html'],
     },
   },
+  {
+    name: 'memory_write',
+    description:
+      '向项目记忆（.CodePapr/memory.md）提议一条候选记忆。注意：只创建候选（pending），不会直接写入稳定记忆；候选经审查准入后才会进入 managed zone 并在后续会话自动加载。不要用它记录敏感信息（密钥、令牌等）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        content: {
+          type: 'string',
+          description: '要记住的事实，一句话、明确、可验证。',
+        },
+        category: {
+          type: 'string',
+          description: '可选。记忆类别，如 verification / decision / api / 项目约定。默认 general。',
+        },
+        evidence: {
+          type: 'string',
+          description: '可选。支撑证据（如测试命令输出摘要、文件路径）。',
+        },
+      },
+      required: ['content'],
+    },
+  },
+  {
+    name: 'memory_search',
+    description:
+      '检索项目记忆（稳定记忆 + 历史会话 checkpoint 事实）。返回带信任标记的结果；结果只是辅助事实，可能过时，需对照当前 workspace 验证。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: '检索关键词或问题。',
+        },
+        category: {
+          type: 'string',
+          description: '可选。限定类别，如 verification。',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'memory_forget',
+    description:
+      '遗忘一条稳定记忆（软删除：不再参与投影与召回）。仅当记忆被确认过时、错误或不再适用时使用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: {
+          type: 'string',
+          description: '记忆条目 id（来自 memory_search / memory_review_candidates 返回的 id）。',
+        },
+        reason: {
+          type: 'string',
+          description: '可选。遗忘原因（审计溯源）。',
+        },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'memory_review_candidates',
+    description:
+      '审查记忆候选队列：默认列出 pending 候选；可对候选执行 admit（准入稳定记忆）或 reject（拒绝）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          description: '可选。list（默认）/ admit / reject。',
+        },
+        candidateIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '可选。要处理的候选 id 列表（admit/reject 时必填）。',
+        },
+        reason: {
+          type: 'string',
+          description: '可选。拒绝理由。',
+        },
+      },
+    },
+  },
   ...EXTENDED_WORKSPACE_INTELLIGENCE_TOOL_DEFINITIONS,
   ...MERGE_TOOL_DEFINITIONS,
 ];

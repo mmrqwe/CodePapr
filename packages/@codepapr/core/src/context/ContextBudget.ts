@@ -21,6 +21,26 @@ export type ContextBudgetAction =
   | 'emergency-compact'
   | 'reject-request';
 
+/**
+ * PR2：reject-request 的结构化错误（emergency-compact 已尝试仍超限）。
+ * 调用方（主线程 sendMessage）据此终止本轮并给用户结构化提示，
+ * 而不是把 raw provider error 展示给用户。
+ */
+export class ContextBudgetRejectedError extends Error {
+  readonly overHardBy: number;
+  readonly estimateSource: ContextEstimateSource;
+
+  constructor(overHardBy: number, estimateSource: ContextEstimateSource) {
+    super(
+      `上下文超出用户设定的上限（${estimateSource} 估算，超出硬预算 ${overHardBy} token），` +
+        '紧急压缩后仍然超限。请降低单次任务规模、清空旧会话或调大 maxContextTokens。'
+    );
+    this.name = 'ContextBudgetRejectedError';
+    this.overHardBy = overHardBy;
+    this.estimateSource = estimateSource;
+  }
+}
+
 export type ContextEstimateSource = 'heuristic' | 'provider';
 
 /** 各阶段输入 token（估算值，来源由 estimateSource 标注）。 */

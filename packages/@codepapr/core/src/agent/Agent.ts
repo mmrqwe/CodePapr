@@ -52,6 +52,13 @@ import {
   TOOL_SUMMARY_METADATA_KEY,
   type ToolContextConfig,
 } from '../tool/toolOutputSummary';
+import {
+  buildContextBudgetBreakdown,
+  ContextBudgetRejectedError,
+  decideContextBudgetAction,
+  type ContextBudgetBreakdown,
+} from '../context/ContextBudget';
+import { pruneOldToolResults, type PruneOptions } from '../tool/pruneToolResults';
 
 const log = new Logger('Agent');
 
@@ -437,6 +444,11 @@ export interface ICacheValidator {
  */
 export interface ContextCompactionConfig {
   maxContextTokens: number;
+  /** PR2：软预算（= 用户硬预算 × soft ratio）。soft~hard 区间先走
+   *  prune-tool-results（原地裁剪旧工具结果），超过 hard 才 compact。 */
+  softMaxTokens: number;
+  /** PR2：prune-tool-results 动作的裁剪参数。未提供时软区间动作降级为 compact。 */
+  pruneOptions?: PruneOptions;
   handler: (
     messages: IMessage[],
     /** 压缩触发来源（PR3：round-limit / token-limit / provider-overflow）。 */
@@ -513,6 +525,15 @@ export class Agent {
     return this.session;
   }
 
+  /**
+   * PR5（ADR-009 第11条）：re-recall 追加插入——memory_search 触发的受控
+   * 例外，新 block 追加在旧 insertion 之后、user 消息之前（order 递增由
+   * 调用方控制，每 turn 至多一次由 worker 侧守卫）。request-only，不落日志。
+   */
+  pushContextInsertions(insertions: RequestContextInsertion[]): void {
+    this.contextInsertions.push(...insertions);
+  }
+
   cancel(): void {
     this.abortController?.abort();
   }
@@ -533,6 +554,73 @@ export class Agent {
       );
     }
     return this.cachedPrefixTokens + Math.ceil(this.session.logStore.getContentBytes() / 4);
+  }
+
+  /**
+   * PR2：请求形态的 7 阶段 token 分解（heuristic，供 decideContextBudgetAction）。
+   *
+   * 阶段划分与最终请求结构对齐：
+   * - stablePrefixTokens = systemPrompt + fewShots（工具 schema 单独计）；
+   * - bootstrapTokens = log 中 sessionBootstrap 消息（memory.md / skills /
+   *   project-graph）；
+   * - checkpointTokens = log 中 checkpoint 消息（压缩摘要）；
+   * - currentUserInputTokens = 最后一条 user 消息；
+   * - retainedTailTokens = 其余 log 内容（tool 结果 / 历史对话），由总
+   *   log heuristic（bytes/4）减去已单独计量的阶段反推，保证各阶段之和
+   *   与 estimateContextTokens 的总量口径一致；
+   * - suffixTokens = 续写 suffix（本次请求临时尾部）。
+   *
+   * 总量 = stablePrefix + tools + bootstrap + checkpoint + retainedTail +
+   *         currentUserInput + suffix，与旧 estimateContextTokens 同口径。
+   */
+  private computeBudgetBreakdown(suffixTokens: number): ContextBudgetBreakdown {
+    const prefix = this.session.prefix;
+    const fewShots = prefix.getFewShots();
+    const stablePrefixTokens = estimateTokens(
+      prefix.getSystemPrompt() +
+        (fewShots.length > 0 ? Serializer.stringify({ fewShots }) : '')
+    );
+    const toolsTokens = estimateTokens(
+      Serializer.stringify({ tools: prefix.getToolDefinitions() })
+    );
+
+    const logMessages = this.session.logStore.getAllMessages();
+    let bootstrapTokens = 0;
+    let checkpointTokens = 0;
+    let currentUserInputTokens = 0;
+    for (const message of logMessages) {
+      const metadata = message.metadata ?? {};
+      if (metadata.sessionBootstrap === true) {
+        bootstrapTokens += estimateTokens(message.content ?? '');
+      } else if (metadata.contextCheckpoint === true) {
+        checkpointTokens += estimateTokens(message.content ?? '');
+      }
+    }
+    const lastUser = [...logMessages].reverse().find((m) => m.role === 'user');
+    if (lastUser) {
+      currentUserInputTokens = estimateTokens(
+        Serializer.stringify({ content: lastUser.content ?? '', images: lastUser.images ?? [] })
+      );
+    }
+
+    const totalLogTokens = Math.ceil(this.session.logStore.getContentBytes() / 4);
+    const retainedTailTokens = Math.max(
+      0,
+      totalLogTokens - bootstrapTokens - checkpointTokens - currentUserInputTokens
+    );
+
+    return buildContextBudgetBreakdown(
+      {
+        stablePrefixTokens,
+        bootstrapTokens,
+        toolsTokens,
+        checkpointTokens,
+        retainedTailTokens,
+        currentUserInputTokens,
+        suffixTokens,
+      },
+      0
+    );
   }
 
   /**
@@ -642,37 +730,75 @@ export class Agent {
         });
       }
 
-      // Mid-loop context compaction (round-start check): if the context exceeds
-      // the budget, compact into a new epoch BEFORE building this round's
-      // request, so no request is ever sent with an over-limit context. This
-      // catches overflow produced by the previous round's tool results.
+      // Mid-loop context budget decision (round-start check, PR2): 7 阶段
+      // token 分解 → decideContextBudgetAction，动作在发请求前执行，保证
+      // 任何请求都不超限：
+      //  - none：放行；
+      //  - prune-tool-results（soft~hard 区间）：原地裁剪旧工具结果为占位符
+      //    （与压缩 epoch 的 prune 语义一致，见 compactionHandler），不触发
+      //    昂贵的 LLM 压缩；
+      //  - compact / emergency-compact：走压缩 handler 换 epoch；
+      //  - reject-request：紧急压缩已尝试仍超限 → 抛结构化错误终止回合。
       // 冷却语义（旧实现 round - lastCompactionRound >= 2）会在「刚压缩过」的
       // 下一轮把超预算请求照发出去，与上面注释「任何请求都不超限」矛盾——
       // 压缩成功后日志已低于预算，重试压缩不会抖动；只有压缩失败（handler 返回
       // null）时下一轮才可能再次超限，此时空试无意义，冷却一轮再重试。
-      if (
-        this.contextCompaction &&
-        this.estimateContextTokens() > this.contextCompaction.maxContextTokens &&
-        !(this.lastCompactionFailed && round === this.lastCompactionRound + 1)
-      ) {
-        const compacted = await this.contextCompaction.handler(
-          this.session.logStore.getAllMessages().slice(),
-          'token-limit'
-        );
-        this.lastCompactionRound = round;
-        if (compacted && compacted.messages.length > 0) {
-          this.lastCompactionFailed = false;
-          this.session.replaceLog(compacted.messages);
-          this.requestBuilder.resetLogTracking?.();
-          if (compacted.cacheStats) {
-            this.session.recordStats(compacted.cacheStats);
-            aggregatedStats = accumulateStats(aggregatedStats, compacted.cacheStats);
+      if (this.contextCompaction) {
+        const breakdown = this.computeBudgetBreakdown(0);
+        const decision = decideContextBudgetAction({
+          breakdown,
+          softBudgetTokens: this.contextCompaction.softMaxTokens,
+          hardBudgetTokens: this.contextCompaction.maxContextTokens,
+          estimateSource: 'heuristic',
+        });
+
+        if (decision.action === 'reject-request') {
+          throw new ContextBudgetRejectedError(
+            decision.overHardBy,
+            decision.estimateSource
+          );
+        }
+
+        if (decision.action === 'prune-tool-results' && this.contextCompaction.pruneOptions) {
+          // pruneOldToolResults 无实际裁剪时返回原数组引用；仅在有裁剪时
+          // 才 replaceLog（避免无意义地破坏 prefix 追踪）。
+          const current = this.session.logStore.getAllMessages();
+          const pruned = pruneOldToolResults(
+            current as IMessage[],
+            this.contextCompaction.pruneOptions
+          );
+          if (pruned !== (current as IMessage[])) {
+            this.session.replaceLog(pruned);
+            this.requestBuilder.resetLogTracking?.();
+            onStreamEvent?.({ type: 'context-pruned', round: roundNumber });
           }
-          onStreamEvent?.({ type: 'context-compacted', round: roundNumber });
-        } else {
-          // 无法压缩：本次请求只能超预算发出（别无选择），记录失败状态，
-          // 下一轮冷却（不重复空试），再之后重试。
-          this.lastCompactionFailed = true;
+        } else if (
+          decision.action === 'compact' ||
+          decision.action === 'emergency-compact' ||
+          // 软区间动作但未提供 prune 参数：降级为 compact。
+          decision.action === 'prune-tool-results'
+        ) {
+          if (!(this.lastCompactionFailed && round === this.lastCompactionRound + 1)) {
+            const compacted = await this.contextCompaction.handler(
+              this.session.logStore.getAllMessages().slice(),
+              'token-limit'
+            );
+            this.lastCompactionRound = round;
+            if (compacted && compacted.messages.length > 0) {
+              this.lastCompactionFailed = false;
+              this.session.replaceLog(compacted.messages);
+              this.requestBuilder.resetLogTracking?.();
+              if (compacted.cacheStats) {
+                this.session.recordStats(compacted.cacheStats);
+                aggregatedStats = accumulateStats(aggregatedStats, compacted.cacheStats);
+              }
+              onStreamEvent?.({ type: 'context-compacted', round: roundNumber });
+            } else {
+              // 无法压缩：本次请求只能超预算发出（别无选择），记录失败状态，
+              // 下一轮冷却（不重复空试），再之后重试。
+              this.lastCompactionFailed = true;
+            }
+          }
         }
       }
 
@@ -773,6 +899,26 @@ export class Agent {
             if (recovered) {
               continue roundLoop;
             }
+          }
+          // PR2：emergency-compact 已尝试仍溢出 → 结构化 reject-request 错误
+          // （替代 raw provider error 上抛，供主线程给用户可读提示）。
+          if (
+            this.overflowCompactionAttempted &&
+            isProviderContextOverflowError(err)
+          ) {
+            const breakdown = this.computeBudgetBreakdown(0);
+            const decision = decideContextBudgetAction({
+              breakdown,
+              softBudgetTokens: this.contextCompaction?.softMaxTokens ?? 0,
+              hardBudgetTokens: this.contextCompaction?.maxContextTokens ?? 0,
+              providerOverflowDetected: true,
+              emergencyAlreadyAttempted: true,
+              estimateSource: 'heuristic',
+            });
+            throw new ContextBudgetRejectedError(
+              decision.overHardBy,
+              decision.estimateSource
+            );
           }
           if (isImageError(err)) {
             // 被拒绝的图片可能位于任意一条 user 消息（工具 __images 会在日志中段

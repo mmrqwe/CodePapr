@@ -430,6 +430,25 @@ fn migrate_project_db(conn: &Connection, workspace: &Path) -> Result<(), String>
             .map_err(|err| format!("设置数据库版本失败: {err}"))?;
     }
 
+    if version < 5 {
+        // v5: memory_entries 新增 forgotten_reason 列（memory_forget 工具溯源）。
+        let has_reason = conn
+            .prepare("PRAGMA table_info(memory_entries)")
+            .and_then(|mut stmt| {
+                let mut names = stmt
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .filter_map(|r| r.ok());
+                Ok(names.any(|name| name == "forgotten_reason"))
+            })
+            .unwrap_or(false);
+        if !has_reason {
+            conn.execute_batch("ALTER TABLE memory_entries ADD COLUMN forgotten_reason TEXT;")
+                .map_err(|err| format!("迁移 memory_entries.forgotten_reason 列失败: {err}"))?;
+        }
+        conn.pragma_update(None, "user_version", 5_i64)
+            .map_err(|err| format!("设置数据库版本失败: {err}"))?;
+    }
+
     Ok(())
 }
 
@@ -2750,6 +2769,29 @@ pub(crate) fn reject_memory_candidate(
     Ok(())
 }
 
+/// 遗忘（memory_forget 工具，ADR-008）：active entry → forgotten（软删除，
+/// 审计可溯源），不再参与投影 / Recall 检索。理由存 forgotten_reason。
+#[tauri::command]
+pub(crate) fn forget_memory_entry(
+    workspace_path: String,
+    entry_id: String,
+    reason: Option<String>,
+) -> Result<(), String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let affected = conn
+        .execute(
+            "UPDATE memory_entries
+             SET status = 'forgotten', forgotten_reason = ?1
+             WHERE id = ?2 AND status = 'active'",
+            params![reason, entry_id],
+        )
+        .map_err(|err| format!("遗忘记忆条目失败: {err}"))?;
+    if affected == 0 {
+        return Err("记忆条目不存在或已遗忘".to_string());
+    }
+    Ok(())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MemoryEntryResult {
@@ -3649,13 +3691,13 @@ mod tests {
         }
         std::fs::create_dir_all(workspace.file_path(".CodePapr/apps/live-app")).unwrap();
 
-        // 重新打开触发 v4 迁移
+        // 重新打开触发 v4 迁移（当前最新版本为 v5，v4 迁移后继续升级）
         {
             let (conn, ..) = open_project_db(&ws).unwrap();
             let version: i64 = conn
                 .pragma_query_value(None, "user_version", |row| row.get(0))
                 .unwrap();
-            assert_eq!(version, 4);
+            assert_eq!(version, 5);
             let table_gone: bool = conn
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_storage')",
@@ -4000,5 +4042,44 @@ mod tests {
         let latest = load_latest_memory_recall(ws.clone(), "s1".to_string()).expect("load");
         assert_eq!(latest.as_ref().map(|r| r.status.as_str()), Some("archived"));
         assert_eq!(latest.as_ref().map(|r| r.anchor_message_id.as_str()), Some("u1"));
+    }
+
+    /// ADR-008：memory_forget 软删除——active → forgotten，退出投影与召回。
+    #[test]
+    fn forget_memory_entry_soft_deletes_active_entry() {
+        let workspace = TestWorkspace::new("memory-forget");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        let candidate = serde_json::json!({
+            "id": "cand-f1",
+            "category": "general",
+            "content": "过时的项目事实",
+            "contentHash": "hf",
+            "confidence": "reported",
+            "trust": "derived",
+            "sourceSessionId": "s1",
+            "sourceMessageIds": "[]",
+            "evidence": null,
+            "riskFlags": null,
+            "createdAt": 1i64,
+        });
+        save_memory_candidate(ws.clone(), candidate.to_string()).expect("save candidate");
+        admit_memory_candidate(ws.clone(), "cand-f1".to_string(), "entry-f1".to_string())
+            .expect("admit");
+
+        // 遗忘：active → forgotten，理由落 forgotten_reason
+        forget_memory_entry(ws.clone(), "entry-f1".to_string(), Some("过时".to_string()))
+            .expect("forget");
+        let entries = load_memory_entries(ws.clone(), Some(false)).expect("load all");
+        let entry = entries.iter().find(|e| e.id == "entry-f1").expect("entry exists");
+        assert_eq!(entry.status, "forgotten");
+
+        // 不再参与 active 投影 / 召回
+        let active = load_memory_entries(ws.clone(), Some(true)).expect("load active");
+        assert!(!active.iter().any(|e| e.id == "entry-f1"));
+
+        // 二次遗忘（非 active）报错，不静默成功
+        assert!(forget_memory_entry(ws.clone(), "entry-f1".to_string(), None).is_err());
     }
 }

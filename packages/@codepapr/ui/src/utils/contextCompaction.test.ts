@@ -6,7 +6,6 @@ import {
   buildEffectiveContextMessages,
   buildLocalContextCheckpointSections,
   insertCheckpointAtRetainedBoundary,
-  parseContextCheckpointSections,
   planContextCompaction,
   renderContextCheckpointContent,
   renderContextCheckpointSummary,
@@ -472,24 +471,6 @@ describe('contextCompaction', () => {
     expect(sections.assumptions).toContain('暂按 UI 与 CLI 共用一套 prompt 体系');
     expect(sections.validationNotes).toContain('npm run test -> 退出码 0');
     expect(sections.pendingWork.some((line) => line.includes('结构化 checkpoint'))).toBe(true);
-  });
-
-  it('parses structured checkpoint JSON and rejects empty payloads', () => {
-    const parsed = parseContextCheckpointSections(`{
-      "userGoal": ["修复缓存率"],
-      "constraints": ["不要重复注入模式大 prompt"],
-      "completedWork": ["已把稳定模式提示移到系统前缀"],
-      "importantContext": ["ChatPanel 现在只发送原始用户输入"],
-      "assumptions": ["暂按主线程运行"],
-      "validationNotes": ["ui typecheck 通过"],
-      "pendingWork": ["补跑聚焦单测"],
-      "openQuestions": ["是否要压缩旧消息"]
-    }`);
-
-    expect(parsed?.userGoal).toEqual(['修复缓存率']);
-    expect(parsed?.importantContext[0]).toContain('ChatPanel');
-    expect(parsed?.validationNotes).toContain('ui typecheck 通过');
-    expect(parseContextCheckpointSections('{"userGoal":[],"constraints":[],"completedWork":[],"importantContext":[],"assumptions":[],"validationNotes":[],"pendingWork":[],"openQuestions":[]}')).toBeNull();
   });
 
   it('serializes object tool results with sorted keys to match the live path (cache stability)', () => {

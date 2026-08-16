@@ -390,7 +390,9 @@ export type IChatStreamEvent =
         /** 工具实际执行耗时（毫秒）；跳过的占位调用无此字段 */
         durationMs?: number;
       }
-  | { type: 'context-compacted'; round: number };
+  | { type: 'context-compacted'; round: number }
+  /** PR2：soft~hard 区间原地裁剪旧工具结果（非压缩 epoch 重置）。 */
+  | { type: 'context-pruned'; round: number };
 
 // ============================================================================
 // LLM Provider Types

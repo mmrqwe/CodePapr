@@ -38,9 +38,19 @@ import {
 } from '../../utils/projectStorage';
 
 const surfaceCache = new Map<string, PersistedContextSurface | null>();
+/** 内存缓存上限（LRU 逐出最旧条目）：长期运行 + 多工作区不会无限增长。 */
+const SURFACE_CACHE_MAX = 64;
 
 function cacheKey(workspacePath: string, sessionId: string): string {
   return `${workspacePath}\u0000${sessionId}`;
+}
+
+function evictSurfaceCacheIfNeeded(): void {
+  while (surfaceCache.size > SURFACE_CACHE_MAX) {
+    const oldest = surfaceCache.keys().next().value;
+    if (oldest === undefined) break;
+    surfaceCache.delete(oldest);
+  }
 }
 
 export async function getContextSurfaceCached(
@@ -49,7 +59,11 @@ export async function getContextSurfaceCached(
 ): Promise<PersistedContextSurface | null> {
   const key = cacheKey(workspacePath, sessionId);
   if (surfaceCache.has(key)) {
-    return surfaceCache.get(key) ?? null;
+    const surface = surfaceCache.get(key) ?? null;
+    // LRU：读取即刷新位置（重插到末尾）。
+    surfaceCache.delete(key);
+    surfaceCache.set(key, surface);
+    return surface;
   }
   let surface: PersistedContextSurface | null = null;
   try {
@@ -58,6 +72,7 @@ export async function getContextSurfaceCached(
     console.warn('[surface] 读取 surface 失败:', err instanceof Error ? err.message : err);
   }
   surfaceCache.set(key, surface);
+  evictSurfaceCacheIfNeeded();
   return surface;
 }
 
@@ -65,7 +80,10 @@ function rememberContextSurface(
   workspacePath: string,
   surface: PersistedContextSurface
 ): void {
-  surfaceCache.set(cacheKey(workspacePath, surface.sessionId), surface);
+  const key = cacheKey(workspacePath, surface.sessionId);
+  surfaceCache.delete(key);
+  surfaceCache.set(key, surface);
+  evictSurfaceCacheIfNeeded();
 }
 
 export function forgetContextSurface(workspacePath: string, sessionId: string): void {

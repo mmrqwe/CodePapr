@@ -7,6 +7,7 @@ import {
 } from '@codepapr/core';
 import {
   buildEffectiveContextMessages,
+  CONTEXT_COMPACTION_SOFT_BUDGET_RATIO,
   insertCheckpointAtRetainedBoundary,
   type ContextMessageLike,
 } from '../utils/contextCompaction';
@@ -142,8 +143,14 @@ export function createContextCompactionHandler(
   getAbortSignal?: () => AbortSignal | undefined,
   onCheckpoint?: (commit: MidLoopCompactionCommit) => void
 ): ContextCompactionConfig {
+  const hardBudget = effectiveMaxContextTokens(settings, providerName);
   return {
-    maxContextTokens: effectiveMaxContextTokens(settings, providerName),
+    maxContextTokens: hardBudget,
+    // PR2：软预算与 planContextCompaction 同源（硬预算 × soft ratio）；
+    // soft~hard 区间走 prune-tool-results，不触发昂贵的 LLM 压缩。
+    softMaxTokens: Math.floor(hardBudget * CONTEXT_COMPACTION_SOFT_BUDGET_RATIO),
+    // PR2：prune-tool-results 的裁剪参数（与压缩 epoch 的 prune 同源）。
+    pruneOptions: buildPruneOptions(settings),
     handler: async (
       coreMessages: IMessage[],
       trigger?: import('@codepapr/types').CompactionTrigger

@@ -389,7 +389,6 @@ export interface AgentState {
    *  sendMessage 的前置 await 检查到序号变化即抛 AbortError 终止回合。
    *  运行时字段，不持久化。 */
   _stopRequestedSeq: number;
-  _pendingMemoryConsolidation: boolean;
   _latestContextSnapshot: { sessionId: string; snapshot: IContextSnapshot } | null;
   _currentMode: WorkMode;
   /** LRU order (most recently used first) of sessions whose messages may live

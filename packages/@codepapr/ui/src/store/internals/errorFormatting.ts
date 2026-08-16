@@ -69,6 +69,20 @@ export function formatAgentError(error: unknown, lang: Lang): string {
     return formatNetworkInterruption(lang);
   }
 
+  // PR2：ContextBudget reject-request 的结构化错误。Worker 边界只保留
+  // name/message（errorName 透传），按 name 识别，文案本地化（不拼接
+  // core 侧的中文 message，避免双语混杂）。
+  if (
+    error instanceof Error &&
+    (error as Error & { name?: string }).name === 'ContextBudgetRejectedError'
+  ) {
+    return lang === 'en'
+      ? 'Context exceeds the configured limit even after emergency compaction. Reduce the task scope, clear older sessions, or increase maxContextTokens.'
+      : lang === 'zh-TW'
+        ? '上下文超出設定上限，緊急壓縮後仍超限。請縮小任務範圍、清空舊會話或調大 maxContextTokens。'
+        : '上下文超出设定上限，紧急压缩后仍超限。请缩小任务范围、清空旧会话或调大 maxContextTokens。';
+  }
+
   const message = error instanceof Error ? error.message : String(error);
   return lang === 'en'
     ? `Error: ${message}`

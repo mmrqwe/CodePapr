@@ -728,7 +728,7 @@ describe('Agent mid-loop context compaction', () => {
           cacheHitRate: 0,
         }),
       },
-      contextCompaction: { maxContextTokens, handler },
+      contextCompaction: { maxContextTokens, softMaxTokens: Math.floor(maxContextTokens * 0.8), handler },
     });
     return { agent, provider };
   }
@@ -833,7 +833,7 @@ describe('Agent mid-loop context compaction', () => {
           cacheHitRate: 0,
         }),
       },
-      contextCompaction: { maxContextTokens: 1, handler },
+      contextCompaction: { maxContextTokens: 1, softMaxTokens: 0, handler },
     });
     await agent.chat('读取并继续');
 
@@ -898,7 +898,7 @@ describe('Agent mid-loop context compaction', () => {
           cacheHitRate: 0,
         }),
       },
-      contextCompaction: { maxContextTokens: 1, handler },
+      contextCompaction: { maxContextTokens: 1, softMaxTokens: 0, handler },
     });
     const events: string[] = [];
     await agent.chat('读取并继续', (e) => {

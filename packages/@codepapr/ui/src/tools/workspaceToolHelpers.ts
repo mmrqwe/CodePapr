@@ -14,6 +14,9 @@ export interface RegisterWorkspaceToolsOptions {
   exposeGraphToLlm?: boolean;
   /** 工作模式，用于按模式过滤工具可见性。默认 agent。 */
   mode?: 'ask' | 'plan' | 'agent' | 'app';
+  /** ADR-008：Agent write 工具写 .CodePapr/memory.md 拦截 → 转 candidate 时
+   *  的会话溯源 id（缺失则候选不带会话来源）。 */
+  sessionId?: string;
 }
 
 export interface ListFilesArgs {
@@ -324,11 +327,17 @@ export interface ApplyPatchResult extends WriteTextFileResult {
   replacements: number;
   diagnostics?: unknown[];
   notes?: string[];
+  /** ADR-008：memory.md 拦截 → 候选（未落盘）。 */
+  intercepted?: boolean;
+  candidateId?: string;
 }
 
 export interface WriteFileResult extends WriteTextFileResult {
   diagnostics?: unknown[];
   notes?: string[];
+  /** ADR-008：memory.md 拦截 → 候选（未落盘）。 */
+  intercepted?: boolean;
+  candidateId?: string;
 }
 
 export interface ApplyDiffPatchArgs extends ApplyPatchArgs {
@@ -343,6 +352,10 @@ export interface ApplyDiffFileResult extends WriteTextFileResult {
   patches: number;
   replacements: number;
   diagnostics?: unknown[];
+  notes?: string[];
+  /** ADR-008：memory.md 拦截 → 候选（未落盘）。 */
+  intercepted?: boolean;
+  candidateId?: string;
 }
 
 export interface ApplyDiffResult {

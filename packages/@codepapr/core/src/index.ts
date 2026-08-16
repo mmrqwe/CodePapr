@@ -395,7 +395,11 @@ export type {
   ContextBudgetDecisionInput,
   ContextBudgetDecision,
 } from "./context/ContextBudget";
-export { buildContextBudgetBreakdown, decideContextBudgetAction } from "./context/ContextBudget";
+export {
+  buildContextBudgetBreakdown,
+  decideContextBudgetAction,
+  ContextBudgetRejectedError,
+} from "./context/ContextBudget";
 
 export type {
   ContentSourceKind,

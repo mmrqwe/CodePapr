@@ -468,6 +468,7 @@ export function createWorkspaceToolContext(params: WorkspaceToolContextParams) {
     options,
     editHistory,
     workspace,
+    sessionId: options.sessionId,
     notifyWorkspaceMutation,
     readBeforeContent,
     getWorkspaceHost,

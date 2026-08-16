@@ -158,6 +158,10 @@ export interface AgentWorkerToolResponse {
   success: boolean;
   result?: unknown;
   error?: string;
+  /** PR5（ADR-009 第11条）：memory_search 触发的 re-recall 插入（order 递增，
+   *  追加在旧 insertion 之后）。worker 收到后 push 进本回合 Agent 的
+   *  contextInsertions，每 turn 至多一次。 */
+  reRecallInsertion?: RequestContextInsertion;
 }
 
 /**
@@ -330,18 +334,21 @@ export type AgentWorkerToMainMessage =
       requestId: string;
       event: IChatStreamEvent;
     }
-    | {
-        type: 'tool-request';
-        requestId: string;
-        toolRequestId: string;
-        toolName: string;
-        arguments: Record<string, unknown>;
-        /** Assistant tool-call id this execution fulfills; preferred for matching
-         *  the pending call over name+arguments (robust for identical calls). */
-        toolCallId?: string;
-        /** app agent 专属：该 app 的两轴访问档，主线程据此构建 bash 等工具的沙箱 */
-        appAccess?: { network: boolean; workspaceWrite: boolean };
-      }
+  | {
+      type: 'tool-request';
+      requestId: string;
+      toolRequestId: string;
+      toolName: string;
+      arguments: Record<string, unknown>;
+      /** Assistant tool-call id this execution fulfills; preferred for matching
+       *  the pending call over name+arguments (robust for identical calls). */
+      toolCallId?: string;
+      /** PR5（ADR-009 第11条）：当前回合 canonical user message id，仅
+       *  memory_search 等需要 recall anchor 的工具随请求下发。 */
+      userMessageId?: string;
+      /** app agent 专属：该 app 的两轴访问档，主线程据此构建 bash 等工具的沙箱 */
+      appAccess?: { network: boolean; workspaceWrite: boolean };
+    }
   | {
       /** 父级（Agent 回合取消 / 工具超时）已放弃等待该工具：主线程必须中止
        *  正在执行的工具（如杀 bash 进程），否则工具在后台继续跑完、副作用

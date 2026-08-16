@@ -29,12 +29,7 @@ import {
   buildPrimaryModelRoute,
   selectTaskModelRoute,
 } from '../../utils/modelRouting';
-import {
-  bootstrapMemoryContent,
-  consolidateMemoryContent,
-  MEMORY_CONSOLIDATION_MAX_LINES,
-  planMemoryConsolidation,
-} from '../../utils/memoryConsolidation';
+import { bootstrapMemoryContent } from '../../utils/memoryConsolidation';
 import {
   accumulateCacheStats,
   buildExecutionContextSummary,
@@ -78,10 +73,18 @@ import {
   RETRIEVAL_VERSION,
 } from '../../utils/memoryRecall';
 import {
+  admitMemoryCandidate,
   archiveMemoryRecall,
+  loadMemoryEntries,
+  projectMemoryFile,
   saveMemoryRecall,
   searchMemoryForRecall,
 } from '../../utils/projectStorage';
+import { buildMemoryProjection } from '../../utils/memoryLedger';
+import {
+  drainReRecallAuditIds,
+  proposeMemoryCandidateFromWrite,
+} from '../../tools/memoryTools';
 import type { RequestContextInsertion } from '@codepapr/types';
 import { loadSessionMessages, waitForPendingProjectStateSave } from '../../utils/projectStorage';
 import { runVerifierSubagent } from '../../utils/verifierRunner';
@@ -553,7 +556,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 resetLoading: false,
               });
             }
-            set({ _pendingMemoryConsolidation: true });
             compactCheckpointInFlight = false;
             return true;
           }
@@ -870,19 +872,20 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               }
             );
             ensureNotStopped();
+            // ADR-008：consolidation 退役——由 memory_write + 准入策略替代；
+            // 回合结束只跑 ledger 投影（见下方 refreshMemoryLedgerProjection）。
             memorySection = memoryResult.content?.trim();
           } catch (err) {
             if (err instanceof DOMException && err.name === 'AbortError') throw err;
             // No memory file - proceed without
           }
-          if (planMemoryConsolidation(memorySection, MEMORY_CONSOLIDATION_MAX_LINES)) {
-            set({ _pendingMemoryConsolidation: true });
-          }
+          // ADR-008：consolidation 退役——由 memory_write + 准入策略替代；
+          // 回合结束只跑 ledger 投影（见下方 refreshMemoryLedgerProjection）。
           // Cold-start bootstrap: when memory.md is empty/missing and a
           // ProjectGraph summary is available, generate an initial memory
           // in the background so the next session doesn't explore from zero.
-          // Runs only when there's no consolidation pending (avoid clobbering
-          // an over-long file) and deduped via a module-level guard.
+          // ADR-008：不再直写 memory.md——改走 ledger（候选 → 准入 → 投影）。
+          // Deduped via a module-level guard.
           if (!memorySection && projectGraphBootstrapSummary && !memoryBootstrapInFlight) {
             memoryBootstrapInFlight = true;
             const bootstrapInput = {
@@ -895,20 +898,32 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 await withMemoryLock(async () => {
                   const generated = await bootstrapMemoryContent(bootstrapInput, normalizedSettings);
                   if (generated) {
-                    // #14：生成（读-改-写）窗口横跨整个模型调用，期间 agent
-                    // 可能已通过 write 工具写入 memory.md（原为空/缺失才触发
-                    // bootstrap）。写前重读：已有内容则放弃本次覆盖，绝不
-                    // 整文件覆盖丢失 agent 写入。
+                    // 写前重读：生成窗口内 agent 可能已写入 memory.md →
+                    // 放弃本次 bootstrap（绝不覆盖已有内容）。
                     const current = await readMemoryFile(workspacePath);
                     if (current) {
                       console.warn('[memory] bootstrap skipped: memory.md was written during generation');
                       return;
                     }
-                    await invoke('write_text_file', {
+                    // 候选 → 准入 → 投影（managed zone）。
+                    const { candidateId } = await proposeMemoryCandidateFromWrite({
                       workspacePath,
-                      relativePath: '.CodePapr/memory.md',
+                      sessionId: activeSessionId,
                       content: generated,
+                      origin: 'cold-start-bootstrap',
                     });
+                    await admitMemoryCandidate(workspacePath, candidateId, createId());
+                    const entries = await loadMemoryEntries(workspacePath, true);
+                    const projection = buildMemoryProjection(
+                      entries.map((entry) => ({
+                        category: entry.category,
+                        content: entry.content,
+                        confidence: entry.confidence,
+                        trust: entry.trust,
+                        verifiedAt: entry.verifiedAt,
+                      }))
+                    );
+                    await projectMemoryFile(workspacePath, projection);
                   }
                 });
               } catch {
@@ -2344,7 +2359,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                       ),
                     }
                   : s.sessionConversationStats,
-                _pendingMemoryConsolidation: true,
               };
             });
             // 被替换/失效的旧 agent 已空闲（回合结束），销毁以回收 worker；
@@ -2391,33 +2405,14 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               );
             }
           }
-          if (get()._pendingMemoryConsolidation) {
-            set({ _pendingMemoryConsolidation: false });
+          // PR4（ADR-008）：已验证命令 → 候选 → 准入 → 双区投影。
+          // consolidation 已退役（见上），回合结束只走 ledger 投影；
+          // 准入策略在纯函数层（确定性、非 LLM）；失败静默不打断会话。
+          if (get().workspacePath) {
             const ws = get().workspacePath;
             void (async () => {
               try {
                 await withMemoryLock(async () => {
-                  const content = await readMemoryFile(ws);
-                  if (!content || !planMemoryConsolidation(content, MEMORY_CONSOLIDATION_MAX_LINES)) return;
-                  const consolidated = await consolidateMemoryContent(content, normalizedSettings);
-                  if (consolidated && consolidated !== content) {
-                    // #14：consolidation 的读-改-写窗口横跨整个模型调用，期间
-                    // agent 可能已通过 write 工具写入 memory.md。写前重读：
-                    // 内容变了就放弃本次覆盖（下一回合会重新评估 consolidation），
-                    // 绝不整文件覆盖丢失 agent 写入。
-                    const current = await readMemoryFile(ws);
-                    if (current !== content) {
-                      console.warn('[memory] consolidation skipped: memory.md changed during generation');
-                      return;
-                    }
-                    await invoke('write_text_file', {
-                      workspacePath: ws,
-                      relativePath: '.CodePapr/memory.md',
-                      content: consolidated,
-                    });
-                  }
-                  // PR4（ADR-008）：已验证命令 → 候选 → 准入 → 双区投影。
-                  // 准入策略在纯函数层（确定性、非 LLM）；失败静默不打断会话。
                   await refreshMemoryLedgerProjection(
                     ws,
                     activeSessionId,
@@ -2435,6 +2430,14 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             void archiveMemoryRecall(get().workspacePath!, recallRecordId).catch(
               () => undefined
             );
+          }
+          // PR5（ADR-009 第11条）：归档本回合 memory_search 触发的 re-recall
+          // 审计行（lifecycle 与回合 Recall 一致：turn 结束 → archived）。
+          if (get().workspacePath) {
+            const reRecallIds = drainReRecallAuditIds(activeSessionId);
+            for (const id of reRecallIds) {
+              void archiveMemoryRecall(get().workspacePath!, id).catch(() => undefined);
+            }
           }
           saveCurrentProjectState(get());
         } catch (err) {

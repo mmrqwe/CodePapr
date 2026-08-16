@@ -881,6 +881,19 @@ export async function rejectMemoryCandidate(
   });
 }
 
+/** 遗忘条目（memory_forget 工具，ADR-008）：active → forgotten，软删除。 */
+export async function forgetMemoryEntry(
+  workspacePath: string,
+  entryId: string,
+  reason?: string
+): Promise<void> {
+  await invoke('forget_memory_entry', {
+    workspacePath: workspacePath.trim(),
+    entryId,
+    reason,
+  });
+}
+
 export interface PersistedMemoryEntry {
   id: string;
   category: string;
