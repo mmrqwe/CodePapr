@@ -1,7 +1,6 @@
 import type { CompactionTrigger, IImageContent, IMessage } from '@codepapr/types';
 import { estimateTokens, sortedStringify } from '@codepapr/common';
 import {
-  COMPACTOR_PROMPT,
   stripInternalFields,
   pruneOldToolResults,
   applyHistoryToolSummaries,

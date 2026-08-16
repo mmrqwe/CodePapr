@@ -68,6 +68,15 @@ function decodeBase64Utf8(input: string): string | null {
   }
 }
 
+/** 是否只含控制字符（二进制误判保护：解码出的乱码不参与注入检测）。 */
+function containsOnlyControlChars(text: string): boolean {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code > 31) return false;
+  }
+  return true;
+}
+
 /**
  * P2-3：注入检测加固。正则检测是 best-effort，这里补三类确定性归一化：
  * 1. Unicode NFKC：同形字（𝕚𝕘𝕟𝕠𝕣𝕖 等）折叠回基础字形后再匹配；
@@ -82,7 +91,7 @@ function detectRiskFlags(content: string): ContentRiskFlag[] {
   ];
   for (const match of content.matchAll(BASE64_BLOB_PATTERN)) {
     const decoded = decodeBase64Utf8(match[0]);
-    if (decoded && decoded.length > 0 && !/^[\x00-\x1F]*$/.test(decoded)) {
+    if (decoded && decoded.length > 0 && !containsOnlyControlChars(decoded)) {
       normalizedCandidates.push(decoded.replace(ZERO_WIDTH_CHARS, '').normalize('NFKC'));
     }
   }

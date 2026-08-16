@@ -62,7 +62,6 @@ export function MemoryLedgerPanel({ workspacePath, lang }: MemoryLedgerPanelProp
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspacePath]);
 
   const withBusy = async (id: string, task: () => Promise<void>): Promise<void> => {

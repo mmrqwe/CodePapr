@@ -202,7 +202,7 @@ export function registerMemoryTools(
   workspacePath: string,
   sessionId: string
 ): void {
-  registry.register(toolByName('memory_write'), async (args, context) => {
+  registry.register(toolByName('memory_write'), async (args) => {
     const content = asString(args.content, 'content').trim();
     if (!content) throw new Error('content 不能为空');
     if (content.length > MEMORY_WRITE_MAX_CHARS) {

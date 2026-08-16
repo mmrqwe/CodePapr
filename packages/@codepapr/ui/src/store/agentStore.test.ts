@@ -928,14 +928,12 @@ describe('useAgentStore.sendMessage', () => {
 
   it('#14 回合后不再整文件重写 memory.md（consolidation 退役，ADR-008）', async () => {
     const longMemory = Array.from({ length: 210 }, (_, i) => `line-${i}`).join('\n');
-    let memoryReads = 0;
     const memoryWrites: Array<Record<string, unknown>> = [];
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       if (command === 'list_workspace_files') {
         return { root: '', entries: [], truncated: false };
       }
       if (command === 'read_text_file' && args?.relativePath === '.CodePapr/memory.md') {
-        memoryReads += 1;
         return {
           path: '.CodePapr/memory.md',
           content: longMemory,
