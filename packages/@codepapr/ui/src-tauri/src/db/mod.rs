@@ -292,7 +292,44 @@ fn open_project_db(workspace_path: &str) -> Result<(Connection, PathBuf, PathBuf
           CREATE INDEX IF NOT EXISTS idx_context_compactions_session_time
             ON context_compactions(session_id, created_at DESC);
           CREATE INDEX IF NOT EXISTS idx_context_compactions_checkpoint
-            ON context_compactions(checkpoint_message_id);",
+            ON context_compactions(checkpoint_message_id);
+          CREATE TABLE IF NOT EXISTS memory_entries (
+            id TEXT PRIMARY KEY,
+            category TEXT NOT NULL,
+            content TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            confidence TEXT NOT NULL,
+            trust TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            source_session_id TEXT,
+            source_message_ids TEXT,
+            evidence TEXT,
+            created_at INTEGER NOT NULL,
+            verified_at INTEGER,
+            superseded_by TEXT
+          );
+          CREATE INDEX IF NOT EXISTS idx_memory_entries_status
+            ON memory_entries(status);
+          CREATE INDEX IF NOT EXISTS idx_memory_entries_hash
+            ON memory_entries(content_hash);
+          CREATE TABLE IF NOT EXISTS memory_candidates (
+            id TEXT PRIMARY KEY,
+            category TEXT NOT NULL,
+            content TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            confidence TEXT NOT NULL,
+            trust TEXT NOT NULL,
+            source_session_id TEXT,
+            source_message_ids TEXT,
+            evidence TEXT,
+            risk_flags TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at INTEGER NOT NULL,
+            decided_at INTEGER,
+            rejection_reason TEXT
+          );
+          CREATE INDEX IF NOT EXISTS idx_memory_candidates_status
+            ON memory_candidates(status);",
     )
     .map_err(|err| format!("初始化项目状态表失败: {err}"))?;
 
@@ -2524,6 +2561,364 @@ pub(crate) fn load_context_compactions(
         .map_err(|err| format!("收集压缩记录失败: {err}"))?;
 
     Ok(rows)
+}
+
+// ── Memory Ledger（PR4，ADR-008）────────────────────────────────────────
+//
+// 记忆分层：
+// - memory_candidates：准入前的候选（pending → admitted / rejected）；
+// - memory_entries：已准入的稳定项目记忆（active / superseded / deprecated）；
+// - .CodePapr/memory.md：双区投影（user zone 保留，managed zone 由
+//   project_memory_file 覆盖生成）。
+// 与 ADR-002 一致：不对 messages/sessions 建外键（应用级引用）。
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MemoryCandidateInput {
+    pub(crate) id: String,
+    pub(crate) category: String,
+    pub(crate) content: String,
+    pub(crate) content_hash: String,
+    pub(crate) confidence: String,
+    pub(crate) trust: String,
+    pub(crate) source_session_id: Option<String>,
+    pub(crate) source_message_ids: Option<String>,
+    pub(crate) evidence: Option<String>,
+    pub(crate) risk_flags: Option<String>,
+    pub(crate) created_at: i64,
+}
+
+#[tauri::command]
+pub(crate) fn save_memory_candidate(
+    workspace_path: String,
+    candidate_json: String,
+) -> Result<(), String> {
+    let input: MemoryCandidateInput = serde_json::from_str(&candidate_json)
+        .map_err(|err| format!("记忆候选 JSON 不合法: {err}"))?;
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    conn.execute(
+        "INSERT INTO memory_candidates
+           (id, category, content, content_hash, confidence, trust,
+            source_session_id, source_message_ids, evidence, risk_flags,
+            status, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', ?11)
+         ON CONFLICT(id) DO UPDATE SET
+           category = excluded.category,
+           content = excluded.content,
+           content_hash = excluded.content_hash,
+           confidence = excluded.confidence,
+           trust = excluded.trust,
+           source_session_id = excluded.source_session_id,
+           source_message_ids = excluded.source_message_ids,
+           evidence = excluded.evidence,
+           risk_flags = excluded.risk_flags",
+        params![
+            input.id,
+            input.category,
+            input.content,
+            input.content_hash,
+            input.confidence,
+            input.trust,
+            input.source_session_id,
+            input.source_message_ids,
+            input.evidence,
+            input.risk_flags,
+            input.created_at,
+        ],
+    )
+    .map_err(|err| format!("保存记忆候选失败: {err}"))?;
+    Ok(())
+}
+
+/// 准入：候选 → entry（单事务），并 supersede 同内容哈希的旧 active entry。
+#[tauri::command]
+pub(crate) fn admit_memory_candidate(
+    workspace_path: String,
+    candidate_id: String,
+    entry_id: String,
+) -> Result<String, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|err| format!("开启事务失败: {err}"))?;
+
+    let candidate: (String, String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, i64) = tx
+        .query_row(
+            "SELECT category, content, content_hash, confidence, trust,
+                    source_session_id, source_message_ids, evidence, risk_flags, created_at
+             FROM memory_candidates WHERE id = ?1 AND status = 'pending'",
+            params![candidate_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|err| format!("读取记忆候选失败: {err}"))?
+        .ok_or_else(|| "候选不存在或已处理".to_string())?;
+
+    let (category, content, content_hash, confidence, trust, source_session_id, source_message_ids, evidence, _risk_flags, created_at) = candidate;
+    let verified_at = unix_millis()?;
+
+    tx.execute(
+        "INSERT INTO memory_entries
+           (id, category, content, content_hash, confidence, trust, status,
+            source_session_id, source_message_ids, evidence, created_at, verified_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7, ?8, ?9, ?10, ?11)",
+        params![
+            entry_id,
+            category,
+            content,
+            content_hash,
+            confidence,
+            trust,
+            source_session_id,
+            source_message_ids,
+            evidence,
+            created_at,
+            verified_at,
+        ],
+    )
+    .map_err(|err| format!("写入记忆条目失败: {err}"))?;
+
+    tx.execute(
+        "UPDATE memory_entries
+         SET status = 'superseded', superseded_by = ?1
+         WHERE content_hash = ?2 AND status = 'active' AND id != ?1",
+        params![entry_id, content_hash],
+    )
+    .map_err(|err| format!("标记旧条目失败: {err}"))?;
+
+    tx.execute(
+        "UPDATE memory_candidates
+         SET status = 'admitted', decided_at = ?1
+         WHERE id = ?2",
+        params![unix_millis()?, candidate_id],
+    )
+    .map_err(|err| format!("标记候选已准入失败: {err}"))?;
+
+    tx.commit()
+        .map_err(|err| format!("提交准入事务失败: {err}"))?;
+    Ok(entry_id)
+}
+
+#[tauri::command]
+pub(crate) fn reject_memory_candidate(
+    workspace_path: String,
+    candidate_id: String,
+    reason: Option<String>,
+) -> Result<(), String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    conn.execute(
+        "UPDATE memory_candidates
+         SET status = 'rejected', decided_at = ?1, rejection_reason = ?2
+         WHERE id = ?3 AND status = 'pending'",
+        params![unix_millis()?, reason, candidate_id],
+    )
+    .map_err(|err| format!("拒绝记忆候选失败: {err}"))?;
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MemoryEntryResult {
+    pub(crate) id: String,
+    pub(crate) category: String,
+    pub(crate) content: String,
+    pub(crate) content_hash: String,
+    pub(crate) confidence: String,
+    pub(crate) trust: String,
+    pub(crate) status: String,
+    pub(crate) source_session_id: Option<String>,
+    pub(crate) source_message_ids: Option<String>,
+    pub(crate) evidence: Option<String>,
+    pub(crate) created_at: i64,
+    pub(crate) verified_at: Option<i64>,
+    pub(crate) superseded_by: Option<String>,
+}
+
+#[tauri::command]
+pub(crate) fn load_memory_entries(
+    workspace_path: String,
+    only_active: Option<bool>,
+) -> Result<Vec<MemoryEntryResult>, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let status_filter = if only_active.unwrap_or(true) {
+        "WHERE status = 'active'"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "SELECT id, category, content, content_hash, confidence, trust, status,
+                source_session_id, source_message_ids, evidence, created_at,
+                verified_at, superseded_by
+         FROM memory_entries {status_filter}
+         ORDER BY verified_at DESC, created_at DESC"
+    );
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|err| format!("准备记忆条目查询失败: {err}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(MemoryEntryResult {
+                id: row.get(0)?,
+                category: row.get(1)?,
+                content: row.get(2)?,
+                content_hash: row.get(3)?,
+                confidence: row.get(4)?,
+                trust: row.get(5)?,
+                status: row.get(6)?,
+                source_session_id: row.get(7)?,
+                source_message_ids: row.get(8)?,
+                evidence: row.get(9)?,
+                created_at: row.get(10)?,
+                verified_at: row.get(11)?,
+                superseded_by: row.get(12)?,
+            })
+        })
+        .map_err(|err| format!("读取记忆条目失败: {err}"))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|err| format!("收集记忆条目失败: {err}"))?;
+    Ok(rows)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MemoryCandidateResult {
+    pub(crate) id: String,
+    pub(crate) category: String,
+    pub(crate) content: String,
+    pub(crate) content_hash: String,
+    pub(crate) confidence: String,
+    pub(crate) trust: String,
+    pub(crate) status: String,
+    pub(crate) risk_flags: Option<String>,
+    pub(crate) source_session_id: Option<String>,
+    pub(crate) source_message_ids: Option<String>,
+    pub(crate) created_at: i64,
+    pub(crate) decided_at: Option<i64>,
+    pub(crate) rejection_reason: Option<String>,
+}
+
+#[tauri::command]
+pub(crate) fn load_memory_candidates(
+    workspace_path: String,
+    status: Option<String>,
+) -> Result<Vec<MemoryCandidateResult>, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let status_filter = match status.as_deref() {
+        Some(s) if !s.is_empty() => "WHERE status = ?1",
+        _ => "",
+    };
+    let sql = format!(
+        "SELECT id, category, content, content_hash, confidence, trust, status,
+                risk_flags, source_session_id, source_message_ids, created_at,
+                decided_at, rejection_reason
+         FROM memory_candidates {status_filter}
+         ORDER BY created_at DESC"
+    );
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|err| format!("准备记忆候选查询失败: {err}"))?;
+
+    let rows = match status_filter.is_empty() {
+        true => stmt
+            .query_map([], |row| map_memory_candidate_row(row))
+            .map_err(|err| format!("读取记忆候选失败: {err}"))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|err| format!("收集记忆候选失败: {err}"))?,
+        false => stmt
+            .query_map(params![status], |row| map_memory_candidate_row(row))
+            .map_err(|err| format!("读取记忆候选失败: {err}"))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|err| format!("收集记忆候选失败: {err}"))?,
+    };
+    Ok(rows)
+}
+
+fn map_memory_candidate_row(row: &rusqlite::Row) -> rusqlite::Result<MemoryCandidateResult> {
+    Ok(MemoryCandidateResult {
+        id: row.get(0)?,
+        category: row.get(1)?,
+        content: row.get(2)?,
+        content_hash: row.get(3)?,
+        confidence: row.get(4)?,
+        trust: row.get(5)?,
+        status: row.get(6)?,
+        risk_flags: row.get(7)?,
+        source_session_id: row.get(8)?,
+        source_message_ids: row.get(9)?,
+        created_at: row.get(10)?,
+        decided_at: row.get(11)?,
+        rejection_reason: row.get(12)?,
+    })
+}
+
+/// 双区投影：保留 user zone，覆盖 managed zone（ADR-008）。
+/// 无标记的旧文件整体视为 user zone，原样保留。
+#[tauri::command]
+pub(crate) fn project_memory_file(
+    workspace_path: String,
+    managed_zone_markdown: String,
+) -> Result<(), String> {
+    let (workspace, ..) = project_db_path(&workspace_path)?;
+    let memory_path = workspace.join(".CodePapr").join("memory.md");
+
+    let existing = fs::read_to_string(&memory_path).unwrap_or_default();
+
+    const USER_START: &str = "<!-- CodePapr:user-memory:start -->";
+    const USER_END: &str = "<!-- CodePapr:user-memory:end -->";
+    const MANAGED_START: &str = "<!-- CodePapr:managed-memory:start -->";
+    const MANAGED_END: &str = "<!-- CodePapr:managed-memory:end -->";
+
+    let user_zone = if existing.contains(USER_START) && existing.contains(USER_END) {
+        existing
+            .split(USER_START)
+            .nth(1)
+            .and_then(|after| after.split(USER_END).next())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    } else {
+        // 旧文件无标记：整体视为 user zone（绝不丢失用户内容）
+        existing.trim().to_string()
+    };
+
+    let managed_zone = managed_zone_markdown.trim();
+
+    let rendered = [
+        "# Project Memory",
+        "",
+        USER_START,
+        "## User Notes",
+        "",
+        &user_zone,
+        USER_END,
+        "",
+        MANAGED_START,
+        "## Verified Project Knowledge",
+        "",
+        managed_zone,
+        MANAGED_END,
+    ]
+    .join("\n");
+
+    let project_dir = workspace.join(".CodePapr");
+    fs::create_dir_all(&project_dir)
+        .map_err(|err| format!("创建项目目录失败: {err}"))?;
+    fs::write(&memory_path, rendered)
+        .map_err(|err| format!("写入 memory.md 失败: {err}"))?;
+    Ok(())
 }
 
 // ── Tests ────────────────────────────────────────────────────────────

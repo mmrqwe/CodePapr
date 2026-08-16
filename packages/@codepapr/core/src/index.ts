@@ -396,3 +396,13 @@ export type {
   ContextBudgetDecision,
 } from "./context/ContextBudget";
 export { buildContextBudgetBreakdown, decideContextBudgetAction } from "./context/ContextBudget";
+
+export type {
+  ContentSourceKind,
+  ContentTrust,
+  ContentRiskFlag,
+  ContentEnvelope,
+  EnvelopeInput,
+  MemoryAdmissionResult,
+} from "./context/ContentEnvelope";
+export { envelopeContent, redactSecrets, planMemoryAdmission } from "./context/ContentEnvelope";

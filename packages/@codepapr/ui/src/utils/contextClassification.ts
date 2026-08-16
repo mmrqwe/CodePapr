@@ -34,7 +34,7 @@ const CONSTRAINT_PATTERN =
 const QUESTION_PATTERN = /[?？]|是否|要不要|应该|哪个|怎么|如何|为什么|可以吗|行不行/i;
 
 /** 测试/验证类命令模式（bash 等工具的 args.command / content 命中）。 */
-const TEST_COMMAND_PATTERN =
+export const TEST_COMMAND_PATTERN =
   /(^|\s)(pnpm|npm|yarn|cargo|go|python3?|pytest|vitest|jest|mocha)\s+(test|run|check|build|lint)|pytest|vitest|jest/i;
 
 const UNTRUSTED_WEB_TOOLS = new Set(['web_fetch', 'webfetch', 'browser', 'search_web', 'websearch']);

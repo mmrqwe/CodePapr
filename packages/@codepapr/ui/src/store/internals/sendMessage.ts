@@ -67,6 +67,7 @@ import {
   getSessionPruneOptions,
   updateSurfaceRenderParams,
 } from './contextSurfaceStore';
+import { refreshMemoryLedgerProjection } from './memoryLedgerStore';
 import { buildPruneOptions } from '../../agent/compactionHandler';
 import type { MidLoopCompactionCommit } from '../../agent/agentWorkerProtocol';
 import { loadSessionMessages, waitForPendingProjectStateSave } from '../../utils/projectStorage';
@@ -2357,6 +2358,13 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                       content: consolidated,
                     });
                   }
+                  // PR4（ADR-008）：已验证命令 → 候选 → 准入 → 双区投影。
+                  // 准入策略在纯函数层（确定性、非 LLM）；失败静默不打断会话。
+                  await refreshMemoryLedgerProjection(
+                    ws,
+                    activeSessionId,
+                    get().sessionMessages[activeSessionId] ?? []
+                  );
                 });
               } catch {
                 // Silent fail - don't disrupt the session

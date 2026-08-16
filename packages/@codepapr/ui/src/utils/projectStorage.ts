@@ -830,3 +830,116 @@ export async function readArtifact(
     limitChars,
   });
 }
+
+// ── Memory Ledger（PR4，ADR-008）──────────────────────────────────────
+
+export interface MemoryCandidateInput {
+  id: string;
+  category: string;
+  content: string;
+  contentHash: string;
+  confidence: 'confirmed' | 'reported' | 'unverified';
+  trust: 'trusted' | 'workspace' | 'derived' | 'untrusted';
+  sourceSessionId?: string;
+  sourceMessageIdsJson?: string;
+  evidenceJson?: string;
+  riskFlagsJson?: string;
+  createdAt: number;
+}
+
+export async function saveMemoryCandidate(
+  workspacePath: string,
+  candidate: MemoryCandidateInput
+): Promise<void> {
+  await invoke('save_memory_candidate', {
+    workspacePath: workspacePath.trim(),
+    candidateJson: JSON.stringify(candidate),
+  });
+}
+
+export async function admitMemoryCandidate(
+  workspacePath: string,
+  candidateId: string,
+  entryId: string
+): Promise<string> {
+  return invoke<string>('admit_memory_candidate', {
+    workspacePath: workspacePath.trim(),
+    candidateId,
+    entryId,
+  });
+}
+
+export async function rejectMemoryCandidate(
+  workspacePath: string,
+  candidateId: string,
+  reason?: string
+): Promise<void> {
+  await invoke('reject_memory_candidate', {
+    workspacePath: workspacePath.trim(),
+    candidateId,
+    reason,
+  });
+}
+
+export interface PersistedMemoryEntry {
+  id: string;
+  category: string;
+  content: string;
+  contentHash: string;
+  confidence: string;
+  trust: string;
+  status: string;
+  sourceSessionId: string | null;
+  sourceMessageIds: string | null;
+  evidence: string | null;
+  createdAt: number;
+  verifiedAt: number | null;
+  supersededBy: string | null;
+}
+
+export async function loadMemoryEntries(
+  workspacePath: string,
+  onlyActive = true
+): Promise<PersistedMemoryEntry[]> {
+  return invoke<PersistedMemoryEntry[]>('load_memory_entries', {
+    workspacePath: workspacePath.trim(),
+    onlyActive,
+  });
+}
+
+export interface PersistedMemoryCandidate {
+  id: string;
+  category: string;
+  content: string;
+  contentHash: string;
+  confidence: string;
+  trust: string;
+  status: string;
+  riskFlags: string | null;
+  sourceSessionId: string | null;
+  sourceMessageIds: string | null;
+  createdAt: number;
+  decidedAt: number | null;
+  rejectionReason: string | null;
+}
+
+export async function loadMemoryCandidates(
+  workspacePath: string,
+  status?: string
+): Promise<PersistedMemoryCandidate[]> {
+  return invoke<PersistedMemoryCandidate[]>('load_memory_candidates', {
+    workspacePath: workspacePath.trim(),
+    status,
+  });
+}
+
+/** 双区投影（ADR-008）：保留 user zone，覆盖 managed zone（Rust 侧执行）。 */
+export async function projectMemoryFile(
+  workspacePath: string,
+  managedZoneMarkdown: string
+): Promise<void> {
+  await invoke('project_memory_file', {
+    workspacePath: workspacePath.trim(),
+    managedZoneMarkdown,
+  });
+}
