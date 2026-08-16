@@ -700,3 +700,5 @@ export interface PaprIPCResponse {
     message: string;
   };
 }
+
+export * from "./contextSurface";

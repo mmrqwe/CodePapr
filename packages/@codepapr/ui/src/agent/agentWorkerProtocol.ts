@@ -1,6 +1,7 @@
 import type { AgentDefinition, SkillDefinition } from '@codepapr/core';
 import type { McpSettings } from '../utils/mcpTypes';
 import type {
+  ContextCompactionIntent,
   IAgentResponse,
   IChatRequest,
   IChatResponse,
@@ -8,7 +9,9 @@ import type {
   IImageContent,
   IMessage,
   IToolDefinition,
+  RequestContextInsertion,
 } from '@codepapr/types';
+import type { ContextCheckpointPayloadV3 } from '../utils/contextCheckpointState';
 import type { Lang } from '../utils/i18n';
 
 export type WorkerApiMode = 'deepseek' | 'custom' | 'local';
@@ -118,6 +121,16 @@ export interface AgentWorkerChatPayload {
     newMessages: IMessage[];
   };
   userInput: string;
+  /**
+   * 当前回合 canonical user 消息的 ID（主线程生成，贯穿 store 与 worker log）。
+   * ADR-009：Recall 的 anchor 依赖此 ID 稳定；PR1 落地 ID 管线改造。
+   */
+  userMessageId?: string;
+  /**
+   * Request-only 上下文插入（ADR-009 B3）：RequestBuilder 编译时锚定插入，
+   * 不进 log / archive / surface。PR5 接线。
+   */
+  contextInsertions?: RequestContextInsertion[];
   images?: IImageContent[];
   settings: WorkerAgentSettings;
   providerName: WorkerProviderName;
@@ -143,6 +156,31 @@ export interface AgentWorkerToolResponse {
   toolRequestId: string;
   success: boolean;
   result?: unknown;
+  error?: string;
+}
+
+/**
+ * 压缩提交协议（ADR-005，PR1 接线）。
+ *
+ * Worker（mid-loop）或回合间流程产出 intent，主线程 Store 校验并单事务持久化，
+ * 返回 committed surface 与 materialized messages。PR0 只定义接口，
+ * 不加入 message union（加入即意味着必须处理）。
+ */
+export interface CommitContextCompactionRequest {
+  requestId: string;
+  intent: ContextCompactionIntent;
+  checkpoint: {
+    message: IMessage;
+    payload: ContextCheckpointPayloadV3;
+  };
+}
+
+export interface CommitContextCompactionResponse {
+  requestId: string;
+  success: boolean;
+  generation?: number;
+  compactionId?: string;
+  materializedMessages?: IMessage[];
   error?: string;
 }
 

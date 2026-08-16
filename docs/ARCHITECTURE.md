@@ -418,6 +418,11 @@ Hover 用户消息 → 显示"重置到此点"按钮：
 
 ## 8. 项目记忆系统 (Project Memory)
 
+> **规划中（PR0 已冻结架构决策）**：本节描述现有实现。Context Surface / Compaction
+> Provenance / Memory Ledger / Recall 的重设计见 `docs/adr/`（ADR-001 ~ ADR-009），
+> 其中与本系统直接相关的是 ADR-008（memory.md 双区模型 + 写者迁移）与
+> ADR-009（turn-scoped Memory Recall）。ADR 落地前行为不变。
+
 ### 8.1 设计定位
 
 `.CodePapr/memory.md` 是项目的**跨会话长期记忆**，区别于 TodoList（短期工作记忆）和 ProjectGraph（语义索引）。它存放：
