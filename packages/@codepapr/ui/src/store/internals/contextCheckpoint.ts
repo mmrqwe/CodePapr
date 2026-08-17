@@ -248,7 +248,8 @@ export async function maybeGenerateContextCheckpoint(
         sourceStartMessageId: ranges.sourceStartMessageId,
         sourceEndMessageId: ranges.sourceEndMessageId,
         retainedTailStartMessageId: ranges.retainedTailStartMessageId,
-        retainedMessageCount: plan.retainedMessages.length,
+        // 与 provenance ID 同口径：UI 可见 retained 条数，不是 core 展开后的消息数。
+        retainedMessageCount: ranges.retainedMessageCount,
         tokenStats: {
           estimatedTokensBefore: plan.effectiveTokens,
           estimatedTokensAfter: checkpointTokens + retainedTokens,

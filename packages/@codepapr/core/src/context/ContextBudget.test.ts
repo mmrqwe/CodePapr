@@ -148,6 +148,18 @@ describe('decideContextBudgetAction', () => {
     expect(overHard.estimateSource).toBe('provider');
     expect(overHard.overHardBy).toBe(10_000);
   });
+
+  it('does not hide a hard overflow when soft is misconfigured above hard', () => {
+    const decision = decideContextBudgetAction({
+      breakdown: buildContextBudgetBreakdown({ ...stages, retainedTailTokens: 90_000 }, 2_000),
+      softBudgetTokens: 200_000,
+      hardBudgetTokens: 60_000,
+      estimateSource: 'heuristic',
+    });
+    expect(decision.action).toBe('compact');
+    expect(decision.overSoftBy).toBe(0);
+    expect(decision.overHardBy).toBeGreaterThan(0);
+  });
 });
 
 describe('fact summary truncation', () => {

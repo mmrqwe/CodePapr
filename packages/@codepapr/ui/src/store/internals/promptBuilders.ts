@@ -19,6 +19,7 @@ import type { IMessage } from '@codepapr/types';
 import type { WorkMode } from '../../utils/agentPrompts';
 import { hasEnabledMcpSearch } from '../../utils/mcpTypes';
 import { buildEffectiveContextMessages } from '../../utils/contextCompaction';
+import { SESSION_BOOTSTRAP_MESSAGE_ID } from '../../utils/contextSurface';
 import { resolveMultimodalEnabled } from './settingsNormalizer';
 import type { Settings, UIMessage } from './types';
 
@@ -35,7 +36,7 @@ export function toCoreMessages(
 
   return [
     {
-      id: 'session-bootstrap',
+      id: SESSION_BOOTSTRAP_MESSAGE_ID,
       role: 'assistant',
       content: normalizedBootstrapPrompt,
       timestamp: 1,

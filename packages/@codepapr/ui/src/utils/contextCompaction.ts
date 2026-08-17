@@ -86,6 +86,8 @@ export interface ContextMessageLike {
   hidden?: boolean;
   carryForwardInContext?: boolean;
   contextCheckpoint?: ContextCheckpointPayload;
+  /** Worker log 注入的 session-bootstrap（不属于 archive / surface）。 */
+  sessionBootstrap?: boolean;
 }
 
 export interface ContextCompactionPlan {

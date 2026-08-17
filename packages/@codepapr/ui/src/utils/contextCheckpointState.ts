@@ -67,17 +67,60 @@ const FAILURE_RISK_PATTERN =
 
 /**
  * v2 importantContext → confirmedFacts / references 的确定性拆分规则（ADR-007）：
- * - 命中验证关键词（通过/成功/verified/passed/test/构建/修复/命令…）→ confirmedFacts；
+ * - 命中验证关键词（通过/失败/成功/verified/passed/failed/test/构建/修复…）→ confirmedFacts；
  * - 或包含文件路径（含扩展名）→ confirmedFacts；
  * - 其余 → references。
  */
 const VERIFIED_PATTERN =
-  /通过|成功|已验证|verified|passed|test|测试|构建成功|命令|实现|已修复|已完成|已确认/i;
+  /通过|失败|成功|已验证|verified|passed|failed|test|测试|构建|修复|命令|实现|已修复|已完成|已确认/i;
 const FILE_PATH_PATTERN = /[A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,8}(?:\s|$)/;
 
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+}
+
+function normalizeCheckpointStateV3(
+  state: Partial<ContextCheckpointStateV3> | undefined
+): ContextCheckpointStateV3 {
+  if (!state || typeof state !== 'object') {
+    return createEmptyCheckpointStateV3();
+  }
+  return {
+    goal: asStringArray(state.goal),
+    constraints: asStringArray(state.constraints),
+    confirmedFacts: asStringArray(state.confirmedFacts),
+    assumptions: asStringArray(state.assumptions),
+    decisions: asStringArray(state.decisions),
+    completedWork: asStringArray(state.completedWork),
+    activeWork: asStringArray(state.activeWork),
+    verification: asStringArray(state.verification),
+    failuresAndRisks: asStringArray(state.failuresAndRisks),
+    todos: asStringArray(state.todos),
+    openQuestions: asStringArray(state.openQuestions),
+    references: asStringArray(state.references),
+    provenance: Array.isArray(state.provenance) ? state.provenance : [],
+  };
+}
+
+function withPayloadDefaults(payload: ContextCheckpointPayload): {
+  summary: string;
+  renderedContent: string;
+  sourceMessageCount: number;
+  sourceChars: number;
+  generatedAt: number;
+  modelName: string;
+  modelTier: ContextCheckpointPayload['modelTier'];
+} {
+  return {
+    summary: payload.summary ?? '',
+    renderedContent: payload.renderedContent ?? '',
+    sourceMessageCount: payload.sourceMessageCount ?? 0,
+    sourceChars: payload.sourceChars ?? 0,
+    generatedAt: payload.generatedAt ?? 0,
+    modelName: payload.modelName ?? '',
+    modelTier: payload.modelTier ?? 'local',
+  };
 }
 
 function splitImportantContext(items: string[]): {
@@ -170,10 +213,9 @@ export function migrateContextCheckpointToV3(
     const v3 = payload as ContextCheckpointPayloadV3;
     return {
       ...v3,
-      state: {
-        ...createEmptyCheckpointStateV3(),
-        ...v3.state,
-      },
+      ...withPayloadDefaults(v3),
+      version: CONTEXT_CHECKPOINT_VERSION_3,
+      state: normalizeCheckpointStateV3(v3.state),
       summaryInfo: v3.summaryInfo ?? summaryInfoFromPayload(v3),
     };
   }
@@ -181,13 +223,7 @@ export function migrateContextCheckpointToV3(
   const v2 = payload as ContextCheckpointPayload;
   return {
     version: CONTEXT_CHECKPOINT_VERSION_3,
-    summary: v2.summary ?? '',
-    renderedContent: v2.renderedContent ?? '',
-    sourceMessageCount: v2.sourceMessageCount ?? 0,
-    sourceChars: v2.sourceChars ?? 0,
-    generatedAt: v2.generatedAt ?? 0,
-    modelName: v2.modelName ?? '',
-    modelTier: v2.modelTier ?? 'local',
+    ...withPayloadDefaults(v2),
     sections: v2.sections,
     todoDigest: v2.todoDigest,
     // PR1 provenance 透传（旧 v2 无这些字段时为 undefined）。

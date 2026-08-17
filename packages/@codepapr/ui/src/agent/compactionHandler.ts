@@ -11,7 +11,7 @@ import {
   insertCheckpointAtRetainedBoundary,
   type ContextMessageLike,
 } from '../utils/contextCompaction';
-import { isModelVisibleUiMessage } from '../utils/contextSurface';
+import { isModelVisibleUiMessage, SESSION_BOOTSTRAP_MESSAGE_ID } from '../utils/contextSurface';
 import { maybeGenerateContextCheckpoint } from '../store/internals/contextCheckpoint';
 import { effectiveMaxContextTokens, type ContextProvider } from '../utils/contextLimits';
 import { getTodoListContext } from '../tools/todoListTool';
@@ -89,6 +89,9 @@ export function coreMessagesToContextMessages(coreMessages: IMessage[]): Context
       reasoningContent: msg.reasoningContent,
       images: msg.images,
       timestamp: msg.timestamp,
+      ...(msg.id === SESSION_BOOTSTRAP_MESSAGE_ID || msg.metadata?.sessionBootstrap === true
+        ? { sessionBootstrap: true }
+        : {}),
     });
   }
 
@@ -110,7 +113,7 @@ function currentTodoDigest(sessionId: string): string | undefined {
  */
 export function buildSessionBootstrapMessage(bootstrap: string): IMessage {
   return {
-    id: 'session-bootstrap',
+    id: SESSION_BOOTSTRAP_MESSAGE_ID,
     role: 'assistant',
     content: bootstrap,
     timestamp: 1,

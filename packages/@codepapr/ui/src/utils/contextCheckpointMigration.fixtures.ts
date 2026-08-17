@@ -58,6 +58,7 @@ export const expectedFullV3: ContextCheckpointPayloadV3 = {
     confirmedFacts: [
       'auth 测试已通过 pnpm test auth',
       'src/auth/state.ts 是唯一 state parser',
+      '历史上 OAuth 曾因时钟漂移失败',
     ],
     assumptions: ['假设 state 参数总是 URL 编码'],
     decisions: [],
@@ -67,10 +68,7 @@ export const expectedFullV3: ContextCheckpointPayloadV3 = {
     failuresAndRisks: ['CI 仍然有 flaky timeout 风险'],
     todos: ['- [ ] 补测试', '← current 修复 state normalize'],
     openQuestions: ['是否需要在 v2 也打补丁？'],
-    references: [
-      '历史上 OAuth 曾因时钟漂移失败',
-      '旧代码里出现过 hardcoded secret 但已被清理',
-    ],
+    references: ['旧代码里出现过 hardcoded secret 但已被清理'],
     provenance: [],
   },
   summaryInfo: { kind: 'llm', model: 'deepseek-chat' },

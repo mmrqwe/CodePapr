@@ -177,6 +177,43 @@ describe('maintainContextSurface', () => {
     const saved = vi.mocked(saveContextSurface).mock.calls[0]?.[1];
     expect(saved?.nodes.map((n) => n.messageId)).toEqual(['cp-old', 'u1', 'a1']);
   });
+
+  it('bootstraps an uncompacted session with disabled prune', async () => {
+    const sid = freshSession();
+    vi.mocked(loadContextSurface).mockResolvedValue(null);
+    await maintainContextSurface('/ws', sid, [user('u1'), assistant('a1')]);
+    const saved = vi.mocked(saveContextSurface).mock.calls[0]?.[1];
+    expect(JSON.parse(saved?.renderParamsJson ?? '{}').pruneParams.enabled).toBe(false);
+  });
+
+  it('bootstraps a compacted legacy session with live prune params, not disabled', async () => {
+    const sid = freshSession();
+    vi.mocked(loadContextSurface).mockResolvedValue(null);
+    const live: PruneOptions = {
+      ...pruneOptions,
+      enabled: true,
+      protectRecentRounds: 6,
+    };
+    await maintainContextSurface(
+      '/ws',
+      sid,
+      [checkpoint('cp1', { compactionId: 'c1', generation: 1 }), user('u1')],
+      live
+    );
+    const saved = vi.mocked(saveContextSurface).mock.calls[0]?.[1];
+    expect(JSON.parse(saved?.renderParamsJson ?? '{}').pruneParams.enabled).toBe(true);
+    expect(JSON.parse(saved?.renderParamsJson ?? '{}').pruneParams.protectRecentRounds).toBe(6);
+  });
+
+  it('does not freeze disabled prune for compacted legacy sessions without live params', async () => {
+    const sid = freshSession();
+    vi.mocked(loadContextSurface).mockResolvedValue(null);
+    await maintainContextSurface('/ws', sid, [
+      checkpoint('cp1', { compactionId: 'c1', generation: 1 }),
+      user('u1'),
+    ]);
+    expect(saveContextSurface).not.toHaveBeenCalled();
+  });
 });
 
 describe('commitContextCheckpoint', () => {
@@ -324,5 +361,43 @@ describe('hydrateSessionContext', () => {
     const saved = vi.mocked(saveContextSurface).mock.calls[0]?.[1];
     expect(saved?.generation).toBe(0);
     expect(saved?.compactionId).toBeNull();
+  });
+
+  it('does not fall back to current settings when render params are malformed (ADR-006)', async () => {
+    const sid = freshSession();
+    vi.mocked(loadContextSurface).mockResolvedValue(
+      surface({
+        sessionId: sid,
+        renderParamsJson: 'not-json',
+        nodes: [{ position: 0, messageId: 'u1', nodeKind: 'conversation' }],
+      })
+    );
+    const current: PruneOptions = { ...pruneOptions, enabled: true, minPrunableChars: 99 };
+    const result = await hydrateSessionContext('/ws', sid, [user('u1')], current);
+    expect(result.degraded).toBe(false);
+    expect(result.pruneOptions.enabled).toBe(false);
+    expect(result.pruneOptions.minPrunableChars).toBe(0);
+  });
+
+  it('rebuilds generation 0 of a compacted archive with live prune, not disabled', async () => {
+    const sid = freshSession();
+    vi.mocked(loadContextSurface).mockResolvedValue(
+      surface({
+        sessionId: sid,
+        generation: 1,
+        parentGeneration: null,
+        nodes: [{ position: 0, messageId: 'missing-cp', nodeKind: 'checkpoint' }],
+      })
+    );
+    const live: PruneOptions = { ...pruneOptions, enabled: true, protectRecentRounds: 4 };
+    const archive = [
+      checkpoint('cp-old', { compactionId: 'comp-parent', generation: 1 }),
+      user('u1'),
+    ];
+    const result = await hydrateSessionContext('/ws', sid, archive, live);
+    expect(result.degraded).toBe(true);
+    const saved = vi.mocked(saveContextSurface).mock.calls[0]?.[1];
+    expect(JSON.parse(saved?.renderParamsJson ?? '{}').pruneParams.enabled).toBe(true);
+    expect(JSON.parse(saved?.renderParamsJson ?? '{}').pruneParams.protectRecentRounds).toBe(4);
   });
 });

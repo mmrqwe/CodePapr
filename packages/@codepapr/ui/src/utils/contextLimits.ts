@@ -1,5 +1,8 @@
 export type ContextProvider = 'deepseek' | 'openai' | 'claude';
 
+/** 与 settings 默认值对齐；NaN / Infinity 时回退到此值。 */
+export const DEFAULT_MAX_CONTEXT_TOKENS = 500_000;
+
 /**
  * 上下文压缩/中途溢出共用的"有效上下文阈值"。
  *
@@ -12,5 +15,9 @@ export function effectiveMaxContextTokens(
   settings: { maxContextTokens: number },
   _provider?: ContextProvider
 ): number {
-  return Math.max(1000, Math.floor(settings.maxContextTokens));
+  const raw = settings.maxContextTokens;
+  if (!Number.isFinite(raw)) {
+    return DEFAULT_MAX_CONTEXT_TOKENS;
+  }
+  return Math.max(1000, Math.floor(raw));
 }

@@ -259,6 +259,27 @@ describe('classifyContextMessages', () => {
     expect(facts.some((f) => f.summary.includes('steps'))).toBe(false);
   });
 
+  it('is deterministic for the same input (no createId / Date.now)', () => {
+    const messages = [user('u1', '修复 OAuth'), assistantText('a1', '已完成 normalize')];
+    const first = classifyContextMessages({ messages });
+    const second = classifyContextMessages({ messages });
+    expect(first).toEqual(second);
+    expect(first.every((fact) => fact.id.startsWith('fact:'))).toBe(true);
+    expect(first.find((fact) => fact.kind === 'completed-work')?.createdAt).toBe(1);
+  });
+
+  it('does not extract facts from session-bootstrap', () => {
+    const facts = classifyContextMessages({
+      messages: [
+        assistantText('session-bootstrap', '# 项目记忆\n不要把这段当完成工作'),
+        user('u1', '继续修复'),
+      ],
+    });
+    expect(facts.some((fact) => fact.sourceMessageIds.includes('session-bootstrap'))).toBe(false);
+    expect(facts.some((fact) => fact.summary.includes('项目记忆'))).toBe(false);
+    expect(facts.find((fact) => fact.kind === 'user-goal')?.summary).toContain('继续修复');
+  });
+
   it('drops synthetic hidden messages entirely', () => {
     const facts = classifyContextMessages({
       messages: [

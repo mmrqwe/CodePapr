@@ -17,6 +17,7 @@ import type { PruneOptions } from '@codepapr/core';
 import { createId } from '../../utils/createId';
 import {
   computeSurfaceNodes,
+  disabledPruneOptions,
   hydrateSurfaceMessages,
   parseRenderParams,
   resolveCheckpointSummaryInfo,
@@ -128,7 +129,8 @@ export function forgetContextSurface(workspacePath: string, sessionId: string): 
 export async function maintainContextSurface(
   workspacePath: string,
   sessionId: string,
-  messages: readonly ContextMessageLike[]
+  messages: readonly ContextMessageLike[],
+  livePruneOptions?: PruneOptions
 ): Promise<void> {
   try {
     const surface = await getContextSurfaceCached(workspacePath, sessionId);
@@ -160,14 +162,21 @@ export async function maintainContextSurface(
     const nodes = computeSurfaceNodes(projectionMessages);
 
     if (!surface) {
+      const hasCheckpoint = !!getLatestCheckpoint(projectionMessages);
+      if (hasCheckpoint && !livePruneOptions) {
+        // 已被压缩的 legacy 会话：禁止冻结「禁用 prune」，否则重启重建
+        // 会把 live 已裁剪的工具结果还原回来（ADR-006 字节漂移）。
+        return;
+      }
       const created: PersistedContextSurface = {
         sessionId,
         generation: 0,
         parentGeneration: null,
         compactionId: null,
-        // generation 0 的 epoch 从未 prune，冻结禁用参数保证重启重建字节一致
-        // （ADR-006）。
-        renderParamsJson: serializeDisabledRenderParams(),
+        // 未压缩会话冻结禁用 prune；已压缩 legacy 会话冻结当时的 live prune。
+        renderParamsJson: hasCheckpoint && livePruneOptions
+          ? serializeRenderParams(livePruneOptions)
+          : serializeDisabledRenderParams(),
         createdAt: Date.now(),
         nodes,
       };
@@ -344,8 +353,8 @@ export async function verifyCompactionLanded(
 
 /**
  * 会话重建用的 prune 参数（ADR-006）：优先取 surface 冻结参数（压缩 epoch
- * 与 generation 0 分别冻结「压缩时参数」与「禁用」），无 surface / 解析失败
- * 时回退调用方提供的当前 settings 参数。
+ * 与 generation 0 分别冻结「压缩时参数」与「禁用」）。无 surface 时回退
+ * 调用方当前 settings；解析失败不得回退当前 settings（改用冻结的禁用 prune）。
  */
 export async function getSessionPruneOptions(
   workspacePath: string,
@@ -360,7 +369,7 @@ export async function getSessionPruneOptions(
   }
   if (!surface) return fallback;
   const parsed = parseRenderParams(surface.renderParamsJson);
-  return parsed?.pruneOptions ?? fallback;
+  return parsed?.pruneOptions ?? disabledPruneOptions();
 }
 
 /**
@@ -425,7 +434,7 @@ export async function hydrateSessionContext(
     const parsed = parseRenderParams(surface.renderParamsJson);
     return {
       messages: hydrated.messages,
-      pruneOptions: parsed?.pruneOptions ?? fallbackPrune,
+      pruneOptions: parsed?.pruneOptions ?? disabledPruneOptions(),
       degraded: false,
     };
   }
@@ -448,7 +457,7 @@ export async function hydrateSessionContext(
           const parsed = parseRenderParams(parent.renderParamsJson);
           return {
             messages: parentHydrated.messages,
-            pruneOptions: parsed?.pruneOptions ?? fallbackPrune,
+            pruneOptions: parsed?.pruneOptions ?? disabledPruneOptions(),
             degraded: true,
           };
         }
@@ -464,12 +473,16 @@ export async function hydrateSessionContext(
   try {
     await discardContextSurfacesFromGeneration(workspacePath, sessionId, 0);
     const nodes = computeSurfaceNodes(archiveMessages);
+    const hasCheckpoint = !!getLatestCheckpoint(archiveMessages);
+    const renderParamsJson = hasCheckpoint
+      ? serializeRenderParams(fallbackPrune)
+      : serializeDisabledRenderParams();
     const created: PersistedContextSurface = {
       sessionId,
       generation: 0,
       parentGeneration: null,
       compactionId: null,
-      renderParamsJson: serializeDisabledRenderParams(),
+      renderParamsJson,
       createdAt: Date.now(),
       nodes,
     };
@@ -478,7 +491,7 @@ export async function hydrateSessionContext(
     const parsed = parseRenderParams(created.renderParamsJson);
     return {
       messages: [...archiveMessages],
-      pruneOptions: parsed?.pruneOptions ?? fallbackPrune,
+      pruneOptions: parsed?.pruneOptions ?? disabledPruneOptions(),
       degraded: true,
     };
   } catch (err) {

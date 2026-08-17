@@ -52,6 +52,22 @@ describe('migrateCheckpointSectionsToV3', () => {
     const state = migrateCheckpointSectionsToV3(sections);
     expect(state.goal).toEqual(['目标', '另一个目标']);
   });
+
+  it('routes ADR-007 verification keywords (失败/failed/修复) into confirmedFacts', () => {
+    const state = migrateCheckpointSectionsToV3({
+      userGoal: [],
+      constraints: [],
+      completedWork: [],
+      importantContext: ['构建失败', 'tests failed', '需要修复回调'],
+      assumptions: [],
+      validationNotes: [],
+      pendingWork: [],
+      openQuestions: [],
+      todoList: [],
+    });
+    expect(state.confirmedFacts).toEqual(['构建失败', 'tests failed', '需要修复回调']);
+    expect(state.references).toEqual([]);
+  });
 });
 
 describe('migrateContextCheckpointToV3', () => {
@@ -110,6 +126,22 @@ describe('migrateContextCheckpointToV3', () => {
     expect(v3.state.goal).toEqual(['x']);
     expect(v3.state.todos).toEqual([]);
     expect(v3.state.provenance).toEqual([]);
+  });
+
+  it('normalizes sparse v3 payloads (empty strings, missing scalars)', () => {
+    const v3 = migrateContextCheckpointToV3({
+      version: CONTEXT_CHECKPOINT_VERSION_3,
+      modelTier: 'local',
+      state: { goal: ['x', '', '  '] },
+    } as unknown as ContextCheckpointPayloadV3);
+    expect(v3.state.goal).toEqual(['x']);
+    expect(v3.state.constraints).toEqual([]);
+    expect(v3.state.todos).toEqual([]);
+    expect(v3.summary).toBe('');
+    expect(v3.renderedContent).toBe('');
+    expect(v3.sourceMessageCount).toBe(0);
+    expect(v3.generatedAt).toBe(0);
+    expect(v3.summaryInfo).toEqual({ kind: 'local-fallback' });
   });
 
   it('createEmptyCheckpointStateV3 matches the frozen empty shape', () => {

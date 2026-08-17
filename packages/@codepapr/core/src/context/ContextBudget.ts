@@ -138,27 +138,27 @@ export function decideContextBudgetAction(input: ContextBudgetDecisionInput): Co
     };
   }
 
+  // 硬预算优先：软>硬误配置时不得因 overSoftBy===0 掩盖真实溢出。
+  if (overHardBy > 0) {
+    if (providerLimit !== undefined && totalTokens > providerLimit) {
+      return {
+        action: 'emergency-compact',
+        overSoftBy,
+        overHardBy,
+        estimateSource,
+      };
+    }
+    return { action: 'compact', overSoftBy, overHardBy, estimateSource };
+  }
+
   if (overSoftBy === 0) {
     return { action: 'none', overSoftBy: 0, overHardBy: 0, estimateSource };
   }
 
-  if (overHardBy === 0) {
-    return {
-      action: 'prune-tool-results',
-      overSoftBy,
-      overHardBy: 0,
-      estimateSource,
-    };
-  }
-
-  if (providerLimit !== undefined && totalTokens > providerLimit) {
-    return {
-      action: 'emergency-compact',
-      overSoftBy,
-      overHardBy,
-      estimateSource,
-    };
-  }
-
-  return { action: 'compact', overSoftBy, overHardBy, estimateSource };
+  return {
+    action: 'prune-tool-results',
+    overSoftBy,
+    overHardBy: 0,
+    estimateSource,
+  };
 }

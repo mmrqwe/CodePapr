@@ -74,6 +74,19 @@ describe('coreMessagesToContextMessages', () => {
       output: 'boom',
     });
   });
+
+  it('marks session-bootstrap so classification and provenance can skip it', () => {
+    const result = coreMessagesToContextMessages([
+      {
+        id: 'session-bootstrap',
+        role: 'assistant',
+        content: '# 记忆',
+        timestamp: 1,
+        metadata: { sessionBootstrap: true, isPrefixSystem: true },
+      },
+    ]);
+    expect(result[0]).toMatchObject({ id: 'session-bootstrap', sessionBootstrap: true });
+  });
 });
 
 describe('createContextCompactionHandler (mid-loop retained tail)', () => {
@@ -408,6 +421,38 @@ describe('createContextCompactionHandler (bootstrap refresh)', () => {
     const result = await config.handler(fourRounds());
     expect(result).toBeNull();
     expect(onCheckpoint).toHaveBeenCalledTimes(1);
+  });
+
+  it('excludes session-bootstrap from provenance sourceMessageIds', async () => {
+    vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
+      message: checkpointMessage,
+      modelTier: 'fast',
+      insertIndex: 7,
+    });
+    const onCheckpoint = vi.fn().mockResolvedValue(undefined);
+    const config = createContextCompactionHandler(
+      settings,
+      'deepseek',
+      'session-test',
+      undefined,
+      undefined,
+      onCheckpoint
+    );
+    const core: IMessage[] = [
+      {
+        id: 'session-bootstrap',
+        role: 'assistant',
+        content: '# 项目记忆',
+        timestamp: 1,
+        metadata: { sessionBootstrap: true, isPrefixSystem: true },
+      },
+      ...fourRounds(),
+    ];
+    await config.handler(core);
+    expect(onCheckpoint).toHaveBeenCalledTimes(1);
+    const commit = onCheckpoint.mock.calls[0]?.[0] as { sourceMessageIds: string[] };
+    expect(commit.sourceMessageIds).not.toContain('session-bootstrap');
+    expect(commit.sourceMessageIds.length).toBeGreaterThan(0);
   });
 });
 

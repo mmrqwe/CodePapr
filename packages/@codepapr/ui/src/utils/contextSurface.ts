@@ -19,6 +19,21 @@ import {
 import { CONTEXT_CHECKPOINT_VERSION_3, type ContextCheckpointPayloadV3 } from './contextCheckpointState';
 import { validateContextCheckpointStateV3 } from './contextStateMerge';
 
+/** Worker log / 重建注入的 session bootstrap 消息 ID（不属于 archive / surface）。 */
+export const SESSION_BOOTSTRAP_MESSAGE_ID = 'session-bootstrap';
+
+export function isSessionBootstrapMessage(message: {
+  id: string;
+  sessionBootstrap?: boolean;
+  metadata?: { sessionBootstrap?: unknown };
+}): boolean {
+  return (
+    message.id === SESSION_BOOTSTRAP_MESSAGE_ID ||
+    message.sessionBootstrap === true ||
+    message.metadata?.sessionBootstrap === true
+  );
+}
+
 /** PR1 首版渲染参数版本；编译器代码升级时递增并接受一次性 cache miss（ADR-006）。 */
 export const CONTEXT_SURFACE_RENDER_VERSION = 1;
 
@@ -33,8 +48,12 @@ export interface SurfaceNodeInput {
 /**
  * toCoreTailMessages 的 UI 层过滤规则镜像：
  * 只保留 user/assistant；synthetic 仅当 assistant 且 carryForwardInContext。
+ * session-bootstrap 不是 archive 消息，不进入 surface / 溯源 ID。
  */
 export function isModelVisibleUiMessage(message: ContextMessageLike): boolean {
+  if (isSessionBootstrapMessage(message)) {
+    return false;
+  }
   if (message.role !== 'user' && message.role !== 'assistant') {
     return false;
   }
@@ -74,20 +93,32 @@ export function getLatestCheckpointPayload(
 }
 
 /**
- * 按 surface 节点 ID 从消息数组水合模型历史子集（ADR-003：surface 是唯一
- * 选择权威）。`complete=false` 表示有节点 ID 在数组里不存在（degraded），
+ * 按 surface 节点 position / nodeIds 顺序从消息数组水合模型历史子集
+ * （ADR-003：surface 是唯一选择权威）。不得按 archive 数组序重排。
+ * `complete=false` 表示有节点 ID 在数组里不存在（degraded），
  * 调用方应回退整数组并重新引导 surface。
  */
 export function hydrateSurfaceMessages(
   messages: readonly ContextMessageLike[],
   nodeIds: readonly string[]
 ): { messages: ContextMessageLike[]; complete: boolean } {
-  const idSet = new Set(nodeIds);
-  const filtered = messages.filter((message) => idSet.has(message.id));
-  const complete =
-    filtered.length === nodeIds.length &&
-    nodeIds.every((id) => messages.some((message) => message.id === id));
-  return { messages: filtered, complete };
+  const byId = new Map<string, ContextMessageLike>();
+  for (const message of messages) {
+    if (!byId.has(message.id)) {
+      byId.set(message.id, message);
+    }
+  }
+  const hydrated: ContextMessageLike[] = [];
+  let complete = true;
+  for (const id of nodeIds) {
+    const message = byId.get(id);
+    if (!message) {
+      complete = false;
+      continue;
+    }
+    hydrated.push(message);
+  }
+  return { messages: hydrated, complete };
 }
 
 /**
@@ -227,6 +258,27 @@ export function buildDisabledFrozenPruneParams(): FrozenPruneParams {
   };
 }
 
+function pruneOptionsFromFrozen(params: FrozenPruneParams): PruneOptions {
+  const protectedTools = new Set<string>();
+  if (Array.isArray(params.protectedTools)) {
+    for (const tool of params.protectedTools) {
+      if (typeof tool === 'string') protectedTools.add(tool);
+    }
+  }
+  return {
+    enabled: params.enabled === true,
+    protectRecentRounds: typeof params.protectRecentRounds === 'number' ? params.protectRecentRounds : 0,
+    minPrunableChars: typeof params.minPrunableChars === 'number' ? params.minPrunableChars : 0,
+    protectedTools,
+    placeholder: typeof params.placeholder === 'string' ? params.placeholder : '',
+  };
+}
+
+/** ADR-006：解析失败时的确定性回退（禁用 prune），不得用当前 settings。 */
+export function disabledPruneOptions(): PruneOptions {
+  return pruneOptionsFromFrozen(buildDisabledFrozenPruneParams());
+}
+
 /** 冻结形式 → PruneOptions（string[] → Set）。解析失败返回 null。 */
 export function parseRenderParams(json: string): { pruneOptions: PruneOptions } | null {
   try {
@@ -235,21 +287,7 @@ export function parseRenderParams(json: string): { pruneOptions: PruneOptions } 
     const record = parsed as { pruneParams?: FrozenPruneParams };
     const params = record.pruneParams;
     if (!params || typeof params !== 'object') return null;
-    const protectedTools = new Set<string>();
-    if (Array.isArray(params.protectedTools)) {
-      for (const tool of params.protectedTools) {
-        if (typeof tool === 'string') protectedTools.add(tool);
-      }
-    }
-    return {
-      pruneOptions: {
-        enabled: params.enabled === true,
-        protectRecentRounds: typeof params.protectRecentRounds === 'number' ? params.protectRecentRounds : 0,
-        minPrunableChars: typeof params.minPrunableChars === 'number' ? params.minPrunableChars : 0,
-        protectedTools,
-        placeholder: typeof params.placeholder === 'string' ? params.placeholder : '',
-      },
-    };
+    return { pruneOptions: pruneOptionsFromFrozen(params) };
   } catch {
     return null;
   }

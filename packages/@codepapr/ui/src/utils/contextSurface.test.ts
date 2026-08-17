@@ -63,6 +63,11 @@ describe('isModelVisibleUiMessage', () => {
       isModelVisibleUiMessage(assistant('a1', 'x', { synthetic: true, carryForwardInContext: true }))
     ).toBe(true);
   });
+
+  it('drops session-bootstrap (not an archive / surface message)', () => {
+    expect(isModelVisibleUiMessage(assistant('session-bootstrap', '# 记忆'))).toBe(false);
+    expect(isModelVisibleUiMessage(assistant('x', '# 记忆', { sessionBootstrap: true }))).toBe(false);
+  });
 });
 
 describe('computeSurfaceNodes', () => {
@@ -193,9 +198,17 @@ describe('hydrateSurfaceMessages', () => {
     expect(hydrated.messages.map((m) => m.id)).toEqual(['b', 'c']);
   });
 
+  it('hydrates in nodeIds / position order, not archive array order', () => {
+    const messages = [user('a'), assistant('b'), user('c')];
+    const hydrated = hydrateSurfaceMessages(messages, ['c', 'b']);
+    expect(hydrated.complete).toBe(true);
+    expect(hydrated.messages.map((m) => m.id)).toEqual(['c', 'b']);
+  });
+
   it('reports incomplete when a node id is missing', () => {
     const hydrated = hydrateSurfaceMessages([user('a')], ['a', 'z']);
     expect(hydrated.complete).toBe(false);
+    expect(hydrated.messages.map((m) => m.id)).toEqual(['a']);
   });
 });
 

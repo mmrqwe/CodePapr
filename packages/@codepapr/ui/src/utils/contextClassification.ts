@@ -20,8 +20,8 @@ import type {
   ContextTrust,
 } from '@codepapr/core';
 import { truncateFactSummary } from '@codepapr/core';
-import { createId } from './createId';
 import type { ContextMessageLike } from './contextCompaction';
+import { isSessionBootstrapMessage } from './contextSurface';
 
 /** 超过该字符数的大工具输出 → externalized（否则原样可摘要）。 */
 export const LARGE_TOOL_OUTPUT_CHARS = 4_000;
@@ -110,11 +110,12 @@ function makeFact(
   disposition: ContextDisposition,
   summary: string,
   sourceMessageIds: string[],
-  artifactRef?: ContextArtifactRef,
-  createdAt = Date.now()
+  createdAt: number,
+  factIndex: number,
+  artifactRef?: ContextArtifactRef
 ): ContextFact {
   return {
-    id: createId(),
+    id: `fact:${kind}:${sourceMessageIds.join('+') || '_'}:${factIndex}`,
     kind,
     trust,
     disposition,
@@ -138,8 +139,34 @@ export interface ContextClassificationInput {
  */
 export function classifyContextMessages(input: ContextClassificationInput): ContextFact[] {
   const facts: ContextFact[] = [];
+  let factIndex = 0;
+  const emit = (
+    kind: ContextFactKind,
+    trust: ContextTrust,
+    disposition: ContextDisposition,
+    summary: string,
+    sourceMessageIds: string[],
+    createdAt: number,
+    artifactRef?: ContextArtifactRef
+  ): ContextFact => {
+    const fact = makeFact(
+      kind,
+      trust,
+      disposition,
+      summary,
+      sourceMessageIds,
+      createdAt,
+      factIndex,
+      artifactRef
+    );
+    factIndex += 1;
+    facts.push(fact);
+    return fact;
+  };
+
   const visible = input.messages.filter(
     (message) =>
+      !isSessionBootstrapMessage(message) &&
       (message.role === 'user' || message.role === 'assistant') &&
       (!message.synthetic || (message.role === 'assistant' && message.carryForwardInContext === true))
   );
@@ -152,19 +179,20 @@ export function classifyContextMessages(input: ContextClassificationInput): Cont
   for (let index = 0; index < visible.length; index += 1) {
     const message = visible[index]!;
     const id = message.id;
+    const createdAt = Number.isFinite(message.timestamp) ? message.timestamp : 0;
 
     if (message.role === 'user') {
       // 分类用 display content，不用 promptContent：后者是带 wrapper 模板的
       // 完整运行时提示词，400 字符截断后真实目标会被样板顶掉。
       const content = message.content ?? '';
       if (index === lastUserIndex && content.trim()) {
-        facts.push(makeFact('user-goal', 'trusted', 'pinned', content, [id]));
+        emit('user-goal', 'trusted', 'pinned', content, [id], createdAt);
       }
       if (CONSTRAINT_PATTERN.test(content) && index !== lastUserIndex) {
-        facts.push(makeFact('user-constraint', 'trusted', 'pinned', content, [id]));
+        emit('user-constraint', 'trusted', 'pinned', content, [id], createdAt);
       }
       if (index !== lastUserIndex && QUESTION_PATTERN.test(content)) {
-        facts.push(makeFact('open-question', 'trusted', 'pinned', content, [id]));
+        emit('open-question', 'trusted', 'pinned', content, [id], createdAt);
       }
       continue;
     }
@@ -175,7 +203,7 @@ export function classifyContextMessages(input: ContextClassificationInput): Cont
     if (invocations.length === 0) {
       const content = (message.content ?? '').trim();
       if (content) {
-        facts.push(makeFact('completed-work', 'derived', 'summarized', content, [id]));
+        emit('completed-work', 'derived', 'summarized', content, [id], createdAt);
       }
       // reasoningContent 属于思维链：永远丢弃，不产生 fact。
       continue;
@@ -195,7 +223,7 @@ export function classifyContextMessages(input: ContextClassificationInput): Cont
             ? String((invocation.arguments as Record<string, unknown>)['question'])
             : invocation.contextSummary ?? '';
         if (questionText.trim()) {
-          facts.push(makeFact('open-question', 'trusted', 'pinned', questionText, [id]));
+          emit('open-question', 'trusted', 'pinned', questionText, [id], createdAt);
         }
         continue;
       }
@@ -208,15 +236,14 @@ export function classifyContextMessages(input: ContextClassificationInput): Cont
       // web / MCP 内容 → untrusted externalized（默认不成为约束/决策/规则）
       if (UNTRUSTED_WEB_TOOLS.has(toolName) || isMcpTool(toolName)) {
         const pathHint = pathArg(invocation.arguments);
-        facts.push(
-          makeFact(
-            isMcpTool(toolName) ? 'mcp-content' : 'web-content',
-            'untrusted',
-            'externalized',
-            outputHead(invocation.output, 200),
-            [id],
-            artifactRefOf(invocation, isMcpTool(toolName) ? 'mcp' : 'web', pathHint)
-          )
+        emit(
+          isMcpTool(toolName) ? 'mcp-content' : 'web-content',
+          'untrusted',
+          'externalized',
+          outputHead(invocation.output, 200),
+          [id],
+          createdAt,
+          artifactRefOf(invocation, isMcpTool(toolName) ? 'mcp' : 'web', pathHint)
         );
         continue;
       }
@@ -226,7 +253,7 @@ export function classifyContextMessages(input: ContextClassificationInput): Cont
         const record = invocation.output as { content?: string } | undefined;
         const finalContent = typeof record?.content === 'string' ? record.content : '';
         if (finalContent.trim()) {
-          facts.push(makeFact('subagent-result', 'derived', 'summarized', finalContent, [id]));
+          emit('subagent-result', 'derived', 'summarized', finalContent, [id], createdAt);
         }
         continue;
       }
@@ -238,15 +265,14 @@ export function classifyContextMessages(input: ContextClassificationInput): Cont
           ? String((invocation.arguments as Record<string, unknown>)['command'])
           : '';
       if (TEST_COMMAND_PATTERN.test(commandText) && toolName === 'bash') {
-        facts.push(
-          makeFact(
-            success ? 'verification' : 'failure',
-            'workspace',
-            'summarized',
-            `[${toolName}] ${success ? '✓' : '✗'} ${commandText}`,
-            [id],
-            artifactRefOf(invocation, 'tool-output')
-          )
+        emit(
+          success ? 'verification' : 'failure',
+          'workspace',
+          'summarized',
+          `[${toolName}] ${success ? '✓' : '✗'} ${commandText}`,
+          [id],
+          createdAt,
+          artifactRefOf(invocation, 'tool-output')
         );
         continue;
       }
@@ -259,30 +285,29 @@ export function classifyContextMessages(input: ContextClassificationInput): Cont
           const previousFactId = readFactIdByPath.get(pathHint);
           if (previousFactId) staleReadFactIds.add(previousFactId);
         }
-        const fact = makeFact(
+        const fact = emit(
           'file-read',
           'workspace',
           'externalized',
           `[read] ${pathHint ?? ''} | ${sizeChars} 字符`,
           [id],
+          createdAt,
           artifactRefOf(invocation, 'file-read', pathHint)
         );
-        facts.push(fact);
         if (pathHint) readFactIdByPath.set(pathHint, fact.id);
         continue;
       }
 
       // 大工具输出（grep/glob/graph/lsp/diagnostics/git/bash 等）→ externalized
       if (sizeChars > LARGE_TOOL_OUTPUT_CHARS || invocation.spilledPath) {
-        facts.push(
-          makeFact(
-            'tool-output',
-            'workspace',
-            'externalized',
-            `[${toolName}] ${sizeChars} 字符${pathHintSuffix(invocation)}`,
-            [id],
-            artifactRefOf(invocation, 'tool-output', pathArg(invocation.arguments))
-          )
+        emit(
+          'tool-output',
+          'workspace',
+          'externalized',
+          `[${toolName}] ${sizeChars} 字符${pathHintSuffix(invocation)}`,
+          [id],
+          createdAt,
+          artifactRefOf(invocation, 'tool-output', pathArg(invocation.arguments))
         );
         continue;
       }
@@ -293,7 +318,7 @@ export function classifyContextMessages(input: ContextClassificationInput): Cont
 
   // 未完成 Todo → pinned（权威 TodoList 状态，不来自消息推理）
   for (const todo of input.incompleteTodos ?? []) {
-    facts.push(makeFact('todo', 'trusted', 'pinned', todo.title, []));
+    emit('todo', 'trusted', 'pinned', todo.title, [], 0);
   }
 
   // 旧文件读取去重：同路径只保留最后一次读取的 fact（旧内容丢弃，保留最新引用）
