@@ -190,15 +190,16 @@ fn build_profile(
         "(allow sysctl-read)".to_string(),
     ];
     // 网络轴：出站网络按开关；监听 localhost 由 allow_bind 单独控制（后端进程需要）。
-    // 注意：SBPL 的 network-bind 地址过滤在本平台无法限制 bind 地址——
-    // `(local ip "127.0.0.1")` 是语法错误（"port missing in network address"），
-    // `(local ip "localhost:*")` 虽可解析但实测 bind 0.0.0.0 依旧成功（过滤器
-    // 不约束 bind 行为）。因此这里只放行 network-bind，回环约束由 app_start 的
-    // 监听地址校验（check_port_bind_address）在启动期强制。
+    // 本平台 Node listen() 对应 SBPL 的 network-inbound，不是 network-bind：
+    // 只放行 `(allow network-bind)` 时 bind/listen 一律 EPERM（errno=-1）。
+    // network-inbound 不放出站。地址过滤器对本平台无效（`(local ip "127.0.0.1")`
+    // 语法错误；`(local ip "localhost:*")` 不约束 bind 地址），回环约束由
+    // app_start 的 check_port_bind_address 在启动期强制。
     if access.network {
         lines.push("(allow network*)".to_string());
     } else if access.allow_bind {
         lines.push("(allow network-bind)".to_string());
+        lines.push("(allow network-inbound)".to_string());
     }
     // 所有读放行的根路径：用于推导祖先目录的 metadata 规则。
     // 与命令预检共用 unix_allowed_read_roots，保证两侧放行集不漂移。
@@ -737,10 +738,10 @@ mod tests {
             "workspace write must be absent:\n{restricted}"
         );
         assert!(!restricted.contains("(allow network-bind)"), "got:\n{restricted}");
+        assert!(!restricted.contains("(allow network-inbound)"), "got:\n{restricted}");
 
-        // 后端进程（网络关）：允许 network-bind、无出站。回环约束不在
-        // SBPL 层（本平台过滤器无法限制 bind 地址，见 build_profile 注释），
-        // 由 app_start 的监听地址校验（check_port_bind_address）强制。
+        // 后端进程（网络关）：允许 bind + inbound（Node listen 需要后者），无出站。
+        // 回环约束不在 SBPL 层，由 app_start 的 check_port_bind_address 强制。
         let backend = build_profile(
             "/bin/zsh",
             &workspace,
@@ -749,6 +750,7 @@ mod tests {
         )
         .expect("profile should build");
         assert!(backend.contains("(allow network-bind)"), "got:\n{backend}");
+        assert!(backend.contains("(allow network-inbound)"), "got:\n{backend}");
         assert!(!backend.contains("(allow network*)"), "got:\n{backend}");
 
         // 网络开：完整 network*

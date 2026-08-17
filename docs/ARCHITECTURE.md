@@ -265,7 +265,7 @@ app 通过 manifest 的 `local`（`none`/`read`/`write`）× `network`（`true`/
 **网络强制链（两轴模型的核心）：**
 
 1. **iframe 直接联网**：`handle_app_protocol` 按 manifest 访问档注入 CSP 响应头（`build_app_csp`）。网络关：`connect-src 'self' [自身后端端口]`、`img-src 'self' data:`、`form-action 'none'`——浏览器引擎执行，JS 无法绕过；CDN 脚本（`script-src https:`）保留但无法回传数据。网络开：放行 `https:/wss:/ws:`。
-2. **后端进程**：`app_start` 从 manifest 解析访问档，经 `sandbox` 参数传入 `start_workspace_background_command`；sandbox-exec profile 按轴构建（网络关仅 `network-bind` 监听 localhost，无出站；local=read 时工作区只读）。
+2. **后端进程**：`app_start` 从 manifest 解析访问档，经 `sandbox` 参数传入 `start_workspace_background_command`；sandbox-exec profile 按轴构建（网络关放行 `network-bind` + `network-inbound` 以监听 localhost，无出站；local=read 时工作区只读）。
 3. **app agent 的 bash**：worker 在 tool-request 桥接中携带 `appAccess`，主线程 `run_workspace_shell_command` 按访问档构建沙箱。
 4. **agent webfetch**：`fetch_web_url` 增加 SSRF 防护（与 papr.http 对齐），禁止访问内网地址。
 

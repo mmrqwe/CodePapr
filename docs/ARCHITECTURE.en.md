@@ -266,7 +266,7 @@ Resolution: `effective = manifest_access ∩ user_override` (overrides can only 
 **Network enforcement chain (core of the two-axis model):**
 
 1. **Direct iframe networking**: `handle_app_protocol` injects a CSP response header (`build_app_csp`) per the manifest access profile. Network off: `connect-src 'self' [own backend port]`, `img-src 'self' data:`, `form-action 'none'` — enforced by the browser engine, JS cannot bypass; CDN scripts (`script-src https:`) stay but cannot exfiltrate. Network on: `https:/wss:/ws:` opened.
-2. **Backend processes**: `app_start` resolves the access profile from the manifest and passes it via the `sandbox` argument to `start_workspace_background_command`; the sandbox-exec profile is built per axis (network off = `network-bind` for localhost listen only, no outbound; local=read = workspace read-only).
+2. **Backend processes**: `app_start` resolves the access profile from the manifest and passes it via the `sandbox` argument to `start_workspace_background_command`; the sandbox-exec profile is built per axis (network off = `network-bind` + `network-inbound` for localhost listen, no outbound; local=read = workspace read-only).
 3. **App-agent bash**: the worker carries `appAccess` in the tool-request bridge; the main-thread `run_workspace_shell_command` builds the sandbox per the access profile.
 4. **Agent webfetch**: `fetch_web_url` now has SSRF protection (aligned with papr.http), blocking internal/private addresses.
 
