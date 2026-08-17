@@ -23,6 +23,7 @@ import { registerWorkspaceGitTools } from './workspaceGitTools';
 import { registerWorkspaceMiscTools } from './workspaceMiscTools';
 import type { WorkspaceToolContext } from './workspaceToolContext';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
+import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
 
 const names = (registry: ToolRegistry): string[] =>
   registry.getAll().map((tool) => tool.name).sort();
@@ -624,6 +625,7 @@ describe('app_start 后端启动工作目录', () => {
   beforeEach(() => {
     invokeMock.mockClear();
     invokeMock.mockResolvedValue({});
+    usePaprPermissionStore.getState().clearAll();
     useAppRuntimeStore.setState((state) => ({
       ...state,
       apps: [
@@ -669,6 +671,52 @@ describe('app_start 后端启动工作目录', () => {
       args: ['server.js'],
       workdir: '.CodePapr/apps/demo-app',
       sandbox: { network: true, workspaceWrite: false, allowBind: true },
+    });
+  });
+
+  it('后端沙箱使用设置覆盖后的生效档（覆盖只能收窄）', async () => {
+    useAppRuntimeStore.setState((state) => ({
+      ...state,
+      apps: state.apps.map((app) =>
+        app.appId === 'demo-app'
+          ? {
+              ...app,
+              manifestJson: JSON.stringify({
+                spec: 'papr/0.1',
+                name: 'Demo App',
+                local: 'write',
+                network: true,
+              }),
+            }
+          : app,
+      ),
+    }));
+    usePaprPermissionStore.getState().setAppSettings({
+      defaultLocal: 'none',
+      defaultNetwork: false,
+      appOverrides: { 'demo-app': { local: 'read', network: false } },
+    });
+
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'check_port_available') return true;
+      if (command === 'start_workspace_background_command') {
+        return { pid: 4242, started: true, previewUrl: args?.previewUrl ?? null };
+      }
+      if (command === 'check_port_available_structured') return { v4: true, v6: false };
+      if (command === 'check_port_owned_by') return true;
+      if (command === 'check_port_bind_address') return ['127.0.0.1'];
+      return {};
+    });
+
+    await expect(
+      build({ mode: 'app' }).execute('app_start', { appId: 'demo-app' }),
+    ).resolves.toMatchObject({ appId: 'demo-app', pid: 4242, started: true });
+
+    const spawnCall = invokeMock.mock.calls.find(
+      ([command]) => command === 'start_workspace_background_command',
+    );
+    expect(spawnCall?.[1]).toMatchObject({
+      sandbox: { network: false, workspaceWrite: false, allowBind: true },
     });
   });
 

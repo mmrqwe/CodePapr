@@ -1,15 +1,18 @@
 import { create } from 'zustand';
-import type { PaprManifest } from '@codepapr/types';
+import type { PaprAppSettings, PaprManifest } from '@codepapr/types';
 
 interface PermissionState {
   manifests: Record<string, PaprManifest>;
+  appSettings: PaprAppSettings | null;
   cacheManifest: (appId: string, manifest: PaprManifest) => void;
   clearManifest: (appId: string) => void;
+  setAppSettings: (settings: PaprAppSettings) => void;
   clearAll: () => void;
 }
 
 export const usePermissionStore = create<PermissionState>()((set) => ({
   manifests: {},
+  appSettings: null,
 
   cacheManifest: (appId, manifest) => {
     set((state) => ({
@@ -25,7 +28,11 @@ export const usePermissionStore = create<PermissionState>()((set) => ({
     });
   },
 
+  setAppSettings: (settings) => {
+    set({ appSettings: settings });
+  },
+
   clearAll: () => {
-    set({ manifests: {} });
+    set({ manifests: {}, appSettings: null });
   },
 }));

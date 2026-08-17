@@ -14,6 +14,8 @@ import { SettingsAdvancedTab } from './settings/SettingsAdvancedTab';
 import { SettingsAppTab } from './settings/SettingsAppTab';
 import { useThemeStore } from '../store/themeStore';
 import type { SettingsTab } from './settings/types';
+import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
+import { useAppRuntimeStore } from '../store/appRuntimeStore';
 
 function tabButtonClass(active: boolean): string {
   return `rounded-xl border px-3 py-3 text-left transition-colors ${
@@ -35,7 +37,14 @@ export function SettingsModal() {
   const [appLoadError, setAppLoadError] = useState('');
   useEffect(() => {
     invoke<PaprAppSettings>('papr_get_app_settings')
-      .then(setAppDraft)
+      .then((settings) => {
+        const next =
+          settings && typeof settings.defaultLocal === 'string'
+            ? settings
+            : { defaultLocal: 'none' as const, defaultNetwork: false, appOverrides: {} };
+        setAppDraft(next);
+        usePaprPermissionStore.getState().setAppSettings(next);
+      })
       .catch((err) => setAppLoadError(String(err)));
   }, []);
 
@@ -66,9 +75,16 @@ export function SettingsModal() {
 
   const save = () => {
     if (appDraft && !appLoadError) {
+      const prev = usePaprPermissionStore.getState().appSettings;
       invoke('papr_set_app_settings', { settings: appDraft }).catch(() => {
         /* best-effort: app permission persistence mirrors the draft model */
       });
+      usePaprPermissionStore.getState().setAppSettings(appDraft);
+      // CSP 在 HTML 响应头里，必须重挂 iframe 才生效。权限没改则不必重载。
+      const openedAppId = useAppRuntimeStore.getState().openedAppId;
+      if (openedAppId && JSON.stringify(prev) !== JSON.stringify(appDraft)) {
+        useAppRuntimeStore.getState().reloadApp(openedAppId);
+      }
     }
     setSettings(local);
     setShowSettings(false);

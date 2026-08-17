@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, useRef } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { PaprManifest, PaprAgentDef, PaprAppSettings } from '@codepapr/types';
 import { isPaprMessage, createPaprResponse } from './paprProtocol';
@@ -36,7 +36,8 @@ interface UsePaprBridgeOptions {
 
 export function usePaprBridge({ iframeRef, appId, manifest, onAppReady }: UsePaprBridgeOptions) {
   const cacheManifest = usePermissionStore((s) => s.cacheManifest);
-  const [appSettings, setAppSettings] = useState<PaprAppSettings | null>(null);
+  const appSettings = usePermissionStore((s) => s.appSettings);
+  const setAppSettings = usePermissionStore((s) => s.setAppSettings);
 
   const activeAgentRuns = useRef<Map<string, { cancel: () => void; agentName: string }>>(new Map());
 
@@ -44,8 +45,29 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady }: UsePap
     if (manifest) {
       cacheManifest(appId, manifest);
     }
-    invoke<PaprAppSettings>('papr_get_app_settings').then(setAppSettings).catch(() => {});
   }, [appId, manifest, cacheManifest]);
+
+  // 设置走 zustand：Settings 保存后打开中的 app 立刻拿到新档，不必重挂 iframe。
+  useEffect(() => {
+    if (appSettings) return;
+    let cancelled = false;
+    invoke<PaprAppSettings>('papr_get_app_settings')
+      .then((settings) => {
+        if (cancelled) return;
+        if (settings && typeof settings.defaultLocal === 'string') {
+          setAppSettings(settings);
+        } else {
+          setAppSettings({ defaultLocal: 'none', defaultNetwork: false, appOverrides: {} });
+        }
+      })
+      .catch(() => {
+        if (cancelled || usePermissionStore.getState().appSettings) return;
+        setAppSettings({ defaultLocal: 'none', defaultNetwork: false, appOverrides: {} });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [appSettings, setAppSettings]);
 
   const themeId = useThemeStore((s) => s.resolvedThemeId);
   const themeMode = useThemeStore((s) => s.mode);

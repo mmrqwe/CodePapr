@@ -742,8 +742,7 @@ mod tests {
             args: None,
             port: None,
             level: None,
-            // 两轴模型（#48）：fs/storage 按 local 轴门槛放行，
-            // 测试 app 声明 local=write 以覆盖读写场景。
+            // 两轴模型：papr.db/papr.fs 永远可用；local=write 覆盖 agent 写项目场景。
             local: Some(PaprLocalAccess::Write),
             network: None,
         };

@@ -12,11 +12,13 @@ import {
 } from './workspaceToolHelpers';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
+import type { PaprAppSettings, PaprManifest } from '@codepapr/types';
 import {
   LOCAL_ORDER,
   accessMeetsTool,
   legacyAccessToLevel,
   legacyLevelToAccess,
+  resolveEffectiveAccess,
   type PaprAccess,
   type PaprLocalAccess,
 } from '../papr/levelGrants';
@@ -432,8 +434,8 @@ export async function launchAppBackend(
   app: AppLaunchTarget,
   workspacePath: string,
 ): Promise<{ pid: number; url: string }> {
-  // 后端进程沙箱按 manifest 的两轴访问构建（防绕过：直接改文件启动也过不了 sandbox）
-  const appAccess = accessFromManifestJson(app.manifestJson);
+  // 后端沙箱按生效档（manifest ∩ 用户设置）构建：设置收窄后新启动的进程必须跟着收窄。
+  const appAccess = await resolveLaunchAccess(app.appId, app.manifestJson);
   if (appAccess.local !== 'read' && appAccess.local !== 'write') {
     throw new Error(`应用 '${app.appId}' 的 local 访问为 ${appAccess.local}，不允许启动后端服务`);
   }
@@ -615,17 +617,32 @@ function isLoopbackBindHost(host: string): boolean {
 }
 
 /** 从 manifest JSON 解析两轴访问（供 app_start 等校验沙箱档）。 */
-function accessFromManifestJson(manifestJson: string | null | undefined): PaprAccess {
-  if (manifestJson) {
-    try {
-      const manifest = JSON.parse(manifestJson) as { local?: PaprLocalAccess; network?: boolean; level?: number };
-      if (manifest.local) {
-        return { local: manifest.local, network: manifest.network === true };
-      }
-      if (typeof manifest.level === 'number') {
-        return legacyLevelToAccess(manifest.level);
-      }
-    } catch { /* 解析失败回落默认 */ }
+function accessFromManifestJson(manifestJson: string | null | undefined): PaprManifest | null {
+  if (!manifestJson) return null;
+  try {
+    return JSON.parse(manifestJson) as PaprManifest;
+  } catch {
+    return null;
   }
-  return { local: 'none', network: false };
+}
+
+/** 启动后端用的生效访问：manifest 声明 ∩ 用户设置覆盖（覆盖只能收窄）。 */
+async function resolveLaunchAccess(
+  appId: string,
+  manifestJson: string | null | undefined,
+): Promise<PaprAccess> {
+  const manifest = accessFromManifestJson(manifestJson);
+  let settings: PaprAppSettings | null = usePaprPermissionStore.getState().appSettings;
+  if (!settings) {
+    try {
+      const loaded = await invoke<PaprAppSettings>('papr_get_app_settings');
+      if (loaded && typeof loaded.defaultLocal === 'string') {
+        settings = loaded;
+        usePaprPermissionStore.getState().setAppSettings(loaded);
+      }
+    } catch {
+      settings = null;
+    }
+  }
+  return resolveEffectiveAccess(manifest, settings, appId);
 }

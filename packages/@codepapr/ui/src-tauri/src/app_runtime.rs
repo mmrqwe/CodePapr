@@ -402,17 +402,23 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
 /// 按两轴权限构建 app 文档的 CSP：
 /// - 网络关：只允许同源 + 自身后端端口（无后端则纯同源），img/form 全禁外发；
 /// - 网络开：额外放行 https/wss/ws 与 https 图片/表单；
-/// - script-src 始终放行 https:（CDN 图表库），connect-src 关闭时无法回传数据。
+/// - script-src 始终放行 https:（CDN 图表库），connect-src 关闭时无法回传数据；
+/// - frame-src / blob: 放行同源、自身后端与 blob URL，供 `<a download>` 与隐藏 iframe 下载。
 pub(crate) fn build_app_csp(
     access: crate::papr_runtime::permission::PaprAccess,
     port: Option<u16>,
 ) -> String {
     let mut connect: Vec<String> = vec!["'self'".to_string()];
-    let mut img: Vec<String> = vec!["'self'".to_string(), "data:".to_string()];
+    let mut frame: Vec<String> = vec!["'self'".to_string(), "blob:".to_string()];
+    let mut img: Vec<String> = vec!["'self'".to_string(), "data:".to_string(), "blob:".to_string()];
     let mut form: Vec<String> = vec!["'none'".to_string()];
     if let Some(p) = port {
-        connect.push(format!("http://localhost:{p}"));
-        connect.push(format!("http://127.0.0.1:{p}"));
+        let localhost = format!("http://localhost:{p}");
+        let loopback = format!("http://127.0.0.1:{p}");
+        connect.push(localhost.clone());
+        connect.push(loopback.clone());
+        frame.push(localhost);
+        frame.push(loopback);
     }
     if access.network {
         connect.push("https:".to_string());
@@ -425,8 +431,9 @@ pub(crate) fn build_app_csp(
         "default-src 'none'; script-src 'self' https: 'unsafe-inline' 'wasm-unsafe-eval'; \
          style-src 'self' 'unsafe-inline' https:; img-src {}; \
          font-src 'self' data: https:; media-src 'self' data: blob:; worker-src 'self' blob:; \
-         connect-src {}; form-action {}",
+         frame-src {}; connect-src {}; form-action {}",
         img.join(" "),
+        frame.join(" "),
         connect.join(" "),
         form.join(" ")
     )
@@ -705,6 +712,7 @@ mod tests {
         let csp = build_app_csp(access, None);
         // 无后端：connect-src 只有同源，任何外发通道关闭
         assert!(csp.contains("connect-src 'self';"), "got: {csp}");
+        assert!(csp.contains("frame-src 'self' blob:;"), "got: {csp}");
         assert!(csp.contains("form-action 'none'"), "got: {csp}");
         assert!(!csp.contains("wss:"), "got: {csp}");
         // connect/img/form 不允许 https（font-src/script-src 的 https: 是给 CDN 的，不算外发通道）
@@ -721,6 +729,7 @@ mod tests {
         let csp = build_app_csp(access, Some(3456));
         assert!(csp.contains("http://localhost:3456"), "got: {csp}");
         assert!(csp.contains("http://127.0.0.1:3456"), "got: {csp}");
+        assert!(csp.contains("frame-src 'self' blob: http://localhost:3456"), "got: {csp}");
         assert!(!csp.contains("wss:"), "got: {csp}");
     }
 
@@ -731,6 +740,7 @@ mod tests {
         let csp = build_app_csp(access, None);
         assert!(csp.contains("connect-src 'self' https: wss: ws:"), "got: {csp}");
         assert!(csp.contains("form-action 'none' https:"), "got: {csp}");
-        assert!(csp.contains("img-src 'self' data: https:"), "got: {csp}");
+        assert!(csp.contains("img-src 'self' data: blob: https:"), "got: {csp}");
+        assert!(csp.contains("frame-src 'self' blob:"), "got: {csp}");
     }
 }

@@ -5,6 +5,7 @@ import { usePreviewStore } from '../store/previewStore';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
+import { APP_IFRAME_SANDBOX, PREVIEW_IFRAME_SANDBOX } from '../papr/appIframe';
 
 interface StopBackgroundProcessResult {
   pid: number;
@@ -160,8 +161,8 @@ export function PreviewSessionPanel({ workspacePath, lang }: PreviewSessionPanel
           src={activePreview.url}
           title={activePreview.title}
           // 非 app 后端的任意 URL（agent 指定）必须沙箱化；app 后端需要
-          // 同源脚本 + 表单/弹窗能力，保持宽松。
-          sandbox={isAppBackend ? 'allow-scripts allow-same-origin allow-forms allow-modals' : 'allow-scripts allow-forms allow-modals'}
+          // 同源脚本 + 表单/弹窗能力。allow-downloads 缺了会让导出/保存静默失败。
+          sandbox={isAppBackend ? APP_IFRAME_SANDBOX : PREVIEW_IFRAME_SANDBOX}
           className="h-full w-full bg-white"
           onError={() => setError(t.previewSessionLoadFailed)}
         />

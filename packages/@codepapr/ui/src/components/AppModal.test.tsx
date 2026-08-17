@@ -12,6 +12,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 import { AppModal } from './AppModal';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
+import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
 
@@ -52,6 +53,13 @@ describe('AppModal', () => {
       root.unmount();
     });
     container.remove();
+    useAppRuntimeStore.setState({
+      apps: [],
+      activeAppId: null,
+      openedAppId: null,
+      mountSignal: 0,
+    });
+    usePaprPermissionStore.getState().clearAll();
   });
 
   it('#15 uses manifest.entry as the iframe entry file, falling back to index.html', async () => {
@@ -76,6 +84,7 @@ describe('AppModal', () => {
 
     const iframe = container.querySelector('iframe');
     expect(iframe?.getAttribute('src')).toBe('codepapr-app://app-1/custom.html');
+    expect(iframe?.getAttribute('sandbox')).toContain('allow-downloads');
 
     // 无 entry → 默认 index.html
     useAppRuntimeStore.setState({

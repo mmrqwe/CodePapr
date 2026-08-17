@@ -4,6 +4,7 @@ import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
 import type { PaprManifest } from '@codepapr/types';
 import { usePaprBridge } from '../papr/usePaprBridge';
+import { APP_IFRAME_SANDBOX } from '../papr/appIframe';
 
 interface AppModalProps {
   lang?: Lang;
@@ -186,7 +187,7 @@ export function AppModal({ lang }: AppModalProps) {
           key={`${openedApp.appId}-${openedApp.updatedAt}`}
           src={iframeSrc}
           title={openedApp.title}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-modals"
+          sandbox={APP_IFRAME_SANDBOX}
           className="h-full w-full border-0"
           onLoad={() => {
             handleIframeLoad();

@@ -66,14 +66,29 @@ export function resolveEffectiveAccess(
   appId: string,
 ): PaprAccess {
   const declared = manifestAccess(manifest, settings);
-  const override = settings?.appOverrides[appId];
+  const override = settings?.appOverrides?.[appId];
   return override ? intersectAccess(override, declared) : declared;
 }
 
-/** papr SDK 能力检查（两轴）：storage/fs 按 local 轴门槛放行（读操作需 ≥read，
- *  写操作需 =write），http 需网络轴，agent 需 manifest 声明。local=none 的
- *  app 不再无条件获得存储/文件能力（旧实现两轴中 local 轴完全不参与，
- *  无纵深防御）。 */
+/** 逐 app 覆盖打补丁：已有覆盖则改一轴，否则从 manifest 声明拷贝。
+ *  禁止从 {none,false} 起步——否则改本地档会把网络打成离线，点网络开关会把 local 打成 none。 */
+export function patchAccessOverride(
+  existing: PaprAccess | undefined,
+  declared: PaprAccess,
+  patch: Partial<PaprAccess>,
+): PaprAccess {
+  const base = existing ?? declared;
+  return {
+    local: patch.local ?? base.local,
+    network: patch.network ?? base.network,
+  };
+}
+
+/** papr SDK 能力检查（两轴）：
+ *  - papr.db / papr.fs 是 app 自有沙箱，永远放行（路径仍限制在 app data 目录）；
+ *  - http 需网络轴；
+ *  - agent 需 manifest 声明该 agent（工具集由 local/network 过滤）。
+ *  local 轴只约束「项目工作区」：agent 的 read/write/bash，不约束 app 私有存储。 */
 export function accessAllows(access: PaprAccess, capability: string, manifest: PaprManifest | null): boolean {
   if (capability.startsWith('http:')) return access.network;
   if (capability.startsWith('agent:run:')) {
@@ -81,8 +96,7 @@ export function accessAllows(access: PaprAccess, capability: string, manifest: P
     return manifest?.agents?.some((a) => a.name === name) ?? false;
   }
   if (capability.startsWith('storage:') || capability.startsWith('fs:')) {
-    const isWrite = capability.endsWith(':write');
-    return isWrite ? access.local === 'write' : localRank(access.local) >= 1;
+    return true;
   }
   return false;
 }

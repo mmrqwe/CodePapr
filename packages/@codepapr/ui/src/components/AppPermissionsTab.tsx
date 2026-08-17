@@ -2,7 +2,7 @@ import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
 import type { PaprAccess, PaprAppSettings, PaprLocalAccess } from '@codepapr/types';
-import { LOCAL_ORDER, legacyLevelToAccess } from '../papr/levelGrants';
+import { LOCAL_ORDER, legacyLevelToAccess, patchAccessOverride } from '../papr/levelGrants';
 
 interface AppPermissionsTabProps {
   lang?: Lang;
@@ -50,8 +50,7 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
     if (patch === 'auto') {
       delete overrides[appId];
     } else {
-      const current = overrides[appId] ?? { local: 'none', network: false };
-      overrides[appId] = { ...current, ...patch };
+      overrides[appId] = patchAccessOverride(overrides[appId], getAppDeclared(appId), patch);
     }
     onChange({ ...settings, appOverrides: overrides });
   };

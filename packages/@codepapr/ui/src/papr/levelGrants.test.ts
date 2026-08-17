@@ -8,6 +8,7 @@ import {
   legacyAccessToLevel,
   manifestAccess,
   minAccessForAgentTool,
+  patchAccessOverride,
   resolveEffectiveAccess,
 } from './levelGrants';
 import type { PaprAppSettings, PaprManifest } from '@codepapr/types';
@@ -69,22 +70,16 @@ describe('two-axis levelGrants', () => {
     });
   });
 
-  it('accessAllows: storage/fs 按 local 轴门槛，http 需网络，agent 需 manifest 声明', () => {
+  it('accessAllows: papr.db/papr.fs 永远放行，http 需网络，agent 需 manifest 声明', () => {
     const none = { local: 'none' as const, network: false };
     const read = { local: 'read' as const, network: false };
     const write = { local: 'write' as const, network: false };
-    // local=none：storage/fs 一律拒绝（旧实现无条件放行，local 轴无纵深）
-    expect(accessAllows(none, 'storage:read', null)).toBe(false);
-    expect(accessAllows(none, 'storage:write', null)).toBe(false);
-    expect(accessAllows(none, 'fs:read', null)).toBe(false);
-    expect(accessAllows(none, 'fs:write', null)).toBe(false);
-    // local=read：读放行、写拒绝
-    expect(accessAllows(read, 'storage:read', null)).toBe(true);
-    expect(accessAllows(read, 'fs:read', null)).toBe(true);
-    expect(accessAllows(read, 'storage:write', null)).toBe(false);
-    expect(accessAllows(read, 'fs:write', null)).toBe(false);
-    // local=write：读写都放行
-    expect(accessAllows(write, 'storage:write', null)).toBe(true);
+    // local=none：app 自有沙箱仍可用（Todo/笔记）；项目工作区才受 local 约束
+    expect(accessAllows(none, 'storage:read', null)).toBe(true);
+    expect(accessAllows(none, 'storage:write', null)).toBe(true);
+    expect(accessAllows(none, 'fs:read', null)).toBe(true);
+    expect(accessAllows(none, 'fs:write', null)).toBe(true);
+    expect(accessAllows(read, 'storage:write', null)).toBe(true);
     expect(accessAllows(write, 'fs:write', null)).toBe(true);
     // http 需网络轴
     expect(accessAllows(read, 'http:get', null)).toBe(false);
@@ -92,6 +87,21 @@ describe('two-axis levelGrants', () => {
     const manifest = makeManifest({ agents: [{ name: 'assistant' }] });
     expect(accessAllows(read, 'agent:run:assistant', manifest)).toBe(true);
     expect(accessAllows(read, 'agent:run:nobody', manifest)).toBe(false);
+  });
+
+  it('patchAccessOverride seeds from declared access, not {none,false}', () => {
+    const declared = { local: 'write' as const, network: true };
+    expect(patchAccessOverride(undefined, declared, { local: 'write' })).toEqual({
+      local: 'write',
+      network: true,
+    });
+    expect(patchAccessOverride(undefined, declared, { network: false })).toEqual({
+      local: 'write',
+      network: false,
+    });
+    expect(
+      patchAccessOverride({ local: 'write', network: false }, declared, { local: 'read' }),
+    ).toEqual({ local: 'read', network: false });
   });
 
   it('agentToolsFor derives tools from axes', () => {
