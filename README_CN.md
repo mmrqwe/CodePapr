@@ -124,7 +124,7 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 - **Search**：自部署 SearXNG 搜索（优先使用，失败自动降级到内置 Bing / Mojeek / Qwant / Wikipedia 等多源聚合）
 - **Mentor**：子代理选择、自定义提示词、子代理参数（temperature/topP/thinking/maxTokens/maxToolRounds/maxDepth）、独立 Mentor 模型配置
 - **高级**：上下文压缩（模型/温度/token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 深度/文件数限制
-- **App**：.papr 应用权限管理——全局默认级别、Level 3 全局开关、逐应用级别覆盖
+- **App**：.papr 应用权限管理——全局默认（本地访问 × 网络）与逐应用两轴覆盖
 
 详见 `packages/@codepapr/core/docs/CONFIGURATION.md` 完整参数参考。
 

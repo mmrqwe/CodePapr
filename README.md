@@ -124,7 +124,7 @@ Six tabs — `General / LLM / Search / Mentor / Advanced / App`:
 - **Search**: Self-hosted SearXNG search (preferred, with automatic fallback to built-in Bing / Mojeek / Qwant / Wikipedia multi-source aggregation)
 - **Mentor**: Sub-agent selection, custom prompts, sub-agent parameters (temperature/topP/thinking/maxTokens/maxToolRounds/maxDepth), independent Mentor model configuration
 - **Advanced**: Context compression (model/temperature/tokens/context limit/turn count), TodoList max retries, ProjectGraph depth/file limits
-- **App**: .papr app permission management — global default level, Level 3 global toggle, per-app level overrides
+- **App**: .papr app permission management — global defaults (local access × network) and per-app two-axis overrides
 
 See `packages/@codepapr/core/docs/CONFIGURATION.md` for the full parameter reference.
 

@@ -601,7 +601,7 @@ https://api.deepseek.com/v1</code></pre>
         </table>
 
         <div class="callout success">
-           <strong>提示：</strong>桌面端设置面板分为 <code>通用 / LLM / 搜索 / Mentor / 高级 / App</code> 六个 Tab。<strong>通用</strong>含语言、调试、许可证；<strong>LLM</strong>含主模型、快速模型、采样参数与思考强度；<strong>搜索</strong>用于配置自托管 SearXNG 搜索后端（SearXNG 优先，失败自动降级到内置 Bing / Mojeek / Qwant / Wikipedia 等多源聚合；搜索引擎选择器已移除；分类/时间/语言/安全搜索等高级参数收入折叠区）；<strong>Mentor</strong>配置导师子代理的独立 API Key、Base URL 和模型选择；<strong>高级</strong>含上下文压缩、TodoList 重试、Goal 自主循环、Verifier 模型、ProjectGraph 限制等；<strong>App</strong>管理 .papr 应用权限级别——全局默认级别、Level 3 全局开关、逐应用覆盖。语音配置不在主设置面板，而在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。
+           <strong>提示：</strong>桌面端设置面板分为 <code>通用 / LLM / 搜索 / Mentor / 高级 / App</code> 六个 Tab。<strong>通用</strong>含语言、调试、许可证；<strong>LLM</strong>含主模型、快速模型、采样参数与思考强度；<strong>搜索</strong>用于配置自托管 SearXNG 搜索后端（SearXNG 优先，失败自动降级到内置 Bing / Mojeek / Qwant / Wikipedia 等多源聚合；搜索引擎选择器已移除；分类/时间/语言/安全搜索等高级参数收入折叠区）；<strong>Mentor</strong>配置导师子代理的独立 API Key、Base URL 和模型选择；<strong>高级</strong>含上下文压缩、TodoList 重试、Goal 自主循环、Verifier 模型、ProjectGraph 限制等；<strong>App</strong>管理 .papr 应用权限——全局默认（本地访问 × 网络）与逐应用两轴覆盖。语音配置不在主设置面板，而在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。
         </div>
       </div>
     </section>
@@ -717,7 +717,7 @@ https://api.deepseek.com/v1</code></pre>
         </ul>
         <p><strong>模型策略：</strong>始终使用主模型（deepseek-v4-pro）以保证 HTML 生成质量。</p>
         <p><strong>应用管理：</strong>右侧面板的"应用"Tab 显示所有已注册的 .papr App。绿/红圆点指示运行状态。底部工具栏：▶ 启动 / 打开 / ■ 停止 / 🗑 删除。LLM 可通过 <code>app_list</code>、<code>app_start</code>、<code>app_stop</code>、<code>app_delete</code> 工具管理应用生命周期。</p>
-        <p><strong>权限分级：</strong>App 通过 manifest.level 声明权限级别（L0 纯计算 / L1 Runtime / L2 联网 / L3 系统，默认 L1）。设置 → App Tab 管理全局默认级别和逐 app 覆盖。</p>
+        <p><strong>权限模型：</strong>App 用 <code>local</code>（none / read / write）× <code>network</code>（true / false）两轴声明访问档。设置 → App Tab 可收窄全局默认与逐 app 覆盖；保存后正在运行的后端会按新沙箱重启。</p>
 
         <h3>App 模式典型场景</h3>
         <ul>
@@ -953,7 +953,7 @@ https://api.deepseek.com/v1</code></pre>
         <table>
           <thead><tr><th>工具</th><th>能力</th></tr></thead>
           <tbody>
-            <tr><td><code>app_render</code></td><td>生成 .papr App 并渲染到应用面板；自动写 manifest.json + index.html。支持声明 permissions、agents、level（权限级别 0-3）。HTML 可使用 <code>window.papr</code> SDK 调用 Agent/存储/HTTP/文件系统。相同 appId 覆盖更新。</td></tr>
+            <tr><td><code>app_render</code></td><td>生成 .papr App 并渲染到应用面板；自动写 manifest.json + index.html。用 local/network 声明访问档（旧 level 0-3 仍兼容）。HTML 可使用 <code>window.papr</code> SDK 调用 Agent/存储/HTTP/文件系统。相同 appId 覆盖更新。</td></tr>
             <tr><td><code>app_list</code></td><td>列出所有已注册 .papr App（名称、是否有后端、是否运行中）。创建前调用检查重复。</td></tr>
             <tr><td><code>app_start</code></td><td>按 appId 启动后端服务。检查端口可用性，成功后绿点亮起。</td></tr>
             <tr><td><code>app_stop</code></td><td>按 appId 停止后端服务。停止后绿点变红。</td></tr>

@@ -646,3 +646,57 @@ async function resolveLaunchAccess(
   }
   return resolveEffectiveAccess(manifest, settings, appId);
 }
+
+/** 设置变更后：对生效档（local/network）发生变化的运行中后端停掉再拉起，
+ *  让 sandbox-exec 与新权限一致。local 收到 none 时只停不启（后端至少要 read）。 */
+export async function syncRunningBackendsToAccess(
+  prev: PaprAppSettings | null,
+  next: PaprAppSettings,
+  workspacePath: string,
+): Promise<{ restarted: string[]; stoppedOnly: string[] }> {
+  const restarted: string[] = [];
+  const stoppedOnly: string[] = [];
+  if (!workspacePath) return { restarted, stoppedOnly };
+
+  const running = useAppRuntimeStore.getState().apps.filter(
+    (app) => app.pid && app.command && app.port,
+  );
+  for (const app of running) {
+    const manifest = accessFromManifestJson(app.manifestJson);
+    const before = resolveEffectiveAccess(manifest, prev, app.appId);
+    const after = resolveEffectiveAccess(manifest, next, app.appId);
+    if (before.local === after.local && before.network === after.network) continue;
+
+    try {
+      await invoke('stop_background_process', {
+        pid: app.pid,
+        source: 'app-permission-settings',
+      });
+    } catch {
+      /* best-effort */
+    }
+    useAppRuntimeStore.getState().setAppStopped(app.appId);
+
+    if (after.local !== 'read' && after.local !== 'write') {
+      stoppedOnly.push(app.appId);
+      continue;
+    }
+    try {
+      const { pid, url } = await launchAppBackend(
+        {
+          appId: app.appId,
+          command: app.command,
+          args: app.args ?? [],
+          port: app.port,
+          manifestJson: app.manifestJson,
+        },
+        workspacePath,
+      );
+      useAppRuntimeStore.getState().setAppRunning(app.appId, pid, url);
+      restarted.push(app.appId);
+    } catch {
+      stoppedOnly.push(app.appId);
+    }
+  }
+  return { restarted, stoppedOnly };
+}

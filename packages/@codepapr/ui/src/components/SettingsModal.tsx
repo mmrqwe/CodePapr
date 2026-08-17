@@ -16,6 +16,7 @@ import { useThemeStore } from '../store/themeStore';
 import type { SettingsTab } from './settings/types';
 import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
+import { syncRunningBackendsToAccess } from '../tools/workspaceAppTools';
 
 function tabButtonClass(active: boolean): string {
   return `rounded-xl border px-3 py-3 text-left transition-colors ${
@@ -82,8 +83,12 @@ export function SettingsModal() {
       usePaprPermissionStore.getState().setAppSettings(appDraft);
       // CSP 在 HTML 响应头里，必须重挂 iframe 才生效。权限没改则不必重载。
       const openedAppId = useAppRuntimeStore.getState().openedAppId;
-      if (openedAppId && JSON.stringify(prev) !== JSON.stringify(appDraft)) {
-        useAppRuntimeStore.getState().reloadApp(openedAppId);
+      const permissionsChanged = JSON.stringify(prev) !== JSON.stringify(appDraft);
+      if (permissionsChanged) {
+        const workspacePath = useAgentStore.getState().workspacePath;
+        void syncRunningBackendsToAccess(prev, appDraft, workspacePath).finally(() => {
+          if (openedAppId) useAppRuntimeStore.getState().reloadApp(openedAppId);
+        });
       }
     }
     setSettings(local);

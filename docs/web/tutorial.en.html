@@ -601,7 +601,7 @@ https://api.deepseek.com/v1</code></pre>
         </table>
 
         <div class="callout success">
-           <strong>Tip:</strong> The desktop settings panel is divided into six tabs: <code>General / LLM / Search / Mentor / Advanced / App</code>. <strong>General</strong> covers language, debugging, and license; <strong>LLM</strong> covers primary model, fast model, sampling parameters, and thinking effort; <strong>Search</strong> configures self-hosted SearXNG search backend (SearXNG first, with automatic fallback to built-in multi-source aggregation — Bing / Mojeek / Qwant / Wikipedia — when unavailable; engine selector removed; category/time/language/safe search moved to collapsible Advanced section); <strong>Mentor</strong> configures an independent API key, base URL, and model selection for the mentor sub-agent; <strong>Advanced</strong> covers context compression, TodoList retry, Goal autonomous loop, Verifier model config, ProjectGraph limits, and more; <strong>App</strong> manages .papr app permission levels — global default level, Level 3 global toggle, per-app overrides. Voice settings are not in the main settings panel but are configured per character in the Voice Tab of the Character Modal.
+           <strong>Tip:</strong> The desktop settings panel is divided into six tabs: <code>General / LLM / Search / Mentor / Advanced / App</code>. <strong>General</strong> covers language, debugging, and license; <strong>LLM</strong> covers primary model, fast model, sampling parameters, and thinking effort; <strong>Search</strong> configures self-hosted SearXNG search backend (SearXNG first, with automatic fallback to built-in multi-source aggregation — Bing / Mojeek / Qwant / Wikipedia — when unavailable; engine selector removed; category/time/language/safe search moved to collapsible Advanced section); <strong>Mentor</strong> configures an independent API key, base URL, and model selection for the mentor sub-agent; <strong>Advanced</strong> covers context compression, TodoList retry, Goal autonomous loop, Verifier model config, ProjectGraph limits, and more; <strong>App</strong> manages .papr app permissions — global defaults (local access × network) and per-app two-axis overrides. Voice settings are not in the main settings panel but are configured per character in the Voice Tab of the Character Modal.
         </div>
       </div>
     </section>
@@ -717,7 +717,7 @@ https://api.deepseek.com/v1</code></pre>
         </ul>
         <p><strong>Model Strategy:</strong> Always uses the primary model (deepseek-v4-pro) to ensure HTML generation quality.</p>
         <p><strong>App Management:</strong> The right panel's "Apps" tab shows all registered .papr apps. Green/red dots indicate running status. Bottom toolbar: ▶ Start / Open / ■ Stop / 🗑 Delete. LLM manages app lifecycle via <code>app_list</code>, <code>app_start</code>, <code>app_stop</code>, <code>app_delete</code> tools.</p>
-        <p><strong>Permission Levels:</strong> Apps declare a permission tier via manifest.level (L0 Pure Compute / L1 Runtime / L2 Network / L3 System, default L1). Settings → App Tab manages global default level and per-app overrides.</p>
+        <p><strong>Permission model:</strong> Apps declare access with <code>local</code> (none / read / write) × <code>network</code> (true / false). Settings → App Tab can narrow the global default and per-app overrides; saving restarts running backends with the new sandbox.</p>
 
         <h3>App Mode Example Scenarios</h3>
         <ul>
@@ -953,7 +953,7 @@ After the change, at least run verification for the affected scope; if no narrow
         <table>
           <thead><tr><th>Tool</th><th>Capability</th></tr></thead>
           <tbody>
-            <tr><td><code>app_render</code></td><td>Generate .papr Apps and render to the Application panel; auto-writes manifest.json + index.html. Supports declaring permissions, agents, and level (permission tier 0-3). HTML uses <code>window.papr</code> SDK for Agent/storage/HTTP/filesystem. Same appId updates in place.</td></tr>
+            <tr><td><code>app_render</code></td><td>Generate .papr Apps and render to the Application panel; auto-writes manifest.json + index.html. Declare access with local/network (legacy level 0-3 still works). HTML uses <code>window.papr</code> SDK for Agent/storage/HTTP/filesystem. Same appId updates in place.</td></tr>
             <tr><td><code>app_list</code></td><td>List all registered .papr apps (name, has backend, is running). Call before creating to check for duplicates.</td></tr>
             <tr><td><code>app_start</code></td><td>Start backend service by appId. Checks port availability, turns status green.</td></tr>
             <tr><td><code>app_stop</code></td><td>Stop backend service by appId. Turns status red.</td></tr>

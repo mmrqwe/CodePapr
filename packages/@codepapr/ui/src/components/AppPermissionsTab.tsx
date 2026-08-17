@@ -11,21 +11,26 @@ interface AppPermissionsTabProps {
   loadError?: string;
 }
 
-const LOCAL_LABEL: Record<PaprLocalAccess, string> = {
-  none: '无',
-  read: '只读',
-  write: '读写执行',
-};
-
-const LOCAL_DESC: Record<PaprLocalAccess, string> = {
-  none: '不能访问项目文件，仅使用 app 自己的存储（papr.db / papr.fs）',
-  read: '可读取项目文件（agent 工具：read/grep/list/lsp 等）',
-  write: '可读写项目文件并执行命令（agent 工具：write/edit/patch/bash）',
-};
-
 export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermissionsTabProps) {
   const t = getTranslation(lang);
   const apps = useAppRuntimeStore((state) => state.apps);
+  const localLabel: Record<PaprLocalAccess, string> = {
+    none: t.appPermL0Label,
+    read: t.appPermL1Label,
+    write: t.appPermL3Label,
+  };
+  const localDesc: Record<PaprLocalAccess, string> = {
+    none: t.appPermL0Desc,
+    read: t.appPermL1Desc,
+    write: t.appPermL3Desc,
+  };
+  const netOn = lang === 'en' ? 'online' : lang === 'zh-TW' ? '聯網' : '联网';
+  const netOff = lang === 'en' ? 'offline' : lang === 'zh-TW' ? '離線' : '离线';
+  const declaredPrefix = lang === 'en' ? 'Declared' : lang === 'zh-TW' ? '宣告' : '声明';
+  const effectivePrefix = lang === 'en' ? 'Effective' : lang === 'zh-TW' ? '生效' : '生效';
+  const overridden = lang === 'en' ? 'overridden' : lang === 'zh-TW' ? '已覆蓋' : '已覆盖';
+  const localPrefix = lang === 'en' ? 'Local' : lang === 'zh-TW' ? '本地' : '本地';
+  const autoLabel = lang === 'en' ? 'Auto' : lang === 'zh-TW' ? '自動' : '自动';
 
   if (loadError) {
     return <div className="p-4 text-xs text-danger">{t.appPermLoadFailed}: {loadError}</div>;
@@ -136,7 +141,7 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
       {/* 本地访问轴 */}
       <div className="rounded-xl border border-line bg-base p-4">
         <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.15em] text-fg-muted">
-          {t.appPermGlobalLevel} · 本地访问
+          {t.appPermGlobalLevel}
         </label>
         <div className="flex gap-2">
           {LOCAL_ORDER.map((lvl) => (
@@ -146,25 +151,25 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
               onClick={() => updateDefaultLocal(lvl)}
               className={localButton(lvl, settings.defaultLocal === lvl)}
             >
-              {LOCAL_LABEL[lvl]}
+              {localLabel[lvl]}
             </button>
           ))}
         </div>
         <p className="mt-2 text-[10px] leading-relaxed text-fg-dim">
-          {LOCAL_DESC[settings.defaultLocal]}
+          {localDesc[settings.defaultLocal]}
         </p>
       </div>
 
       {/* 网络轴 */}
       <div className="rounded-xl border border-line bg-base p-4">
         <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.15em] text-fg-muted">
-          网络
+          {t.appPermL2Label}
         </label>
         {networkRow(
           settings.defaultNetwork,
           updateDefaultNetwork,
-          '允许访问网络',
-          '开启后 app 可访问公网（papr.http / agent 联网工具），关闭则完全断网（CSP + 沙箱强制）',
+          t.appPermAllowL3,
+          t.appPermAllowL3Desc,
         )}
       </div>
 
@@ -189,11 +194,11 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-xs font-semibold text-fg">{app.title}</div>
                     <div className="text-[10px] text-fg-dim">
-                      声明: L{LOCAL_LABEL[declared.local]}{declared.network ? '·联网' : '·离线'} → 生效:{' '}
+                      {declaredPrefix}: {localLabel[declared.local]}{declared.network ? `·${netOn}` : `·${netOff}`} → {effectivePrefix}:{' '}
                       <span className={effective.local === 'write' ? 'text-warn' : effective.local === 'read' ? 'text-info' : 'text-fg-muted'}>
-                        {LOCAL_LABEL[effective.local]}{effective.network ? '·联网' : '·离线'}
+                        {localLabel[effective.local]}{effective.network ? `·${netOn}` : `·${netOff}`}
                       </span>
-                      {hasOverride ? ' ·已覆盖' : ''}
+                      {hasOverride ? ` ·${overridden}` : ''}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
@@ -210,10 +215,10 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
                       title="本地访问覆盖"
                       className="rounded-md border border-line bg-base px-1.5 py-1 text-[10px] text-fg-soft outline-none focus:border-accent-soft"
                     >
-                      <option value="auto">本地: 自动</option>
-                      <option value="none">本地: 无</option>
-                      <option value="read">本地: 只读</option>
-                      <option value="write">本地: 读写执行</option>
+                      <option value="auto">{localPrefix}: {autoLabel}</option>
+                      <option value="none">{localPrefix}: {localLabel.none}</option>
+                      <option value="read">{localPrefix}: {localLabel.read}</option>
+                      <option value="write">{localPrefix}: {localLabel.write}</option>
                     </select>
                     <button
                       type="button"
@@ -252,10 +257,10 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
       <div className="rounded-xl border border-line bg-base p-4">
         <h4 className="mb-2 text-xs font-semibold text-fg-soft">{t.appPermLevelInfo}</h4>
         <div className="flex flex-col gap-1.5 text-[10px] leading-relaxed text-fg-muted">
-          <div><span className="text-fg-muted font-mono">无</span> · 纯计算，仅 papr.db / papr.fs（app 自有沙箱）</div>
-          <div><span className="text-fg-muted font-mono">只读</span> · + 读取项目文件（agent 只读工具）</div>
-          <div><span className="text-fg-muted font-mono">读写执行</span> · + 修改项目/执行命令（agent write/edit/patch/bash）</div>
-          <div><span className="text-fg-muted font-mono">网络</span> · 与本地轴正交：联网访问公网（https/wss），离线完全断网</div>
+          <div><span className="text-fg-muted font-mono">{localLabel.none}</span> · {localDesc.none}</div>
+          <div><span className="text-fg-muted font-mono">{localLabel.read}</span> · {localDesc.read}</div>
+          <div><span className="text-fg-muted font-mono">{localLabel.write}</span> · {localDesc.write}</div>
+          <div><span className="text-fg-muted font-mono">{t.appPermL2Label}</span> · {t.appPermL2Desc}</div>
         </div>
       </div>
     </div>

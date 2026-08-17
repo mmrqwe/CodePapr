@@ -14,7 +14,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 import { registerWorkspaceTools } from './workspaceTools';
 import type { RegisterWorkspaceToolsOptions } from './workspaceTools';
 import { registerWorkspaceFileTools } from './workspaceFileTools';
-import { registerWorkspaceAppTools } from './workspaceAppTools';
+import { registerWorkspaceAppTools, syncRunningBackendsToAccess } from './workspaceAppTools';
 import { registerWorkspaceExecTools } from './workspaceExecTools';
 import { registerWorkspaceSearchWebTools } from './workspaceSearchWebTools';
 import { registerWorkspaceBrowserTools } from './workspaceBrowserTools';
@@ -718,6 +718,105 @@ describe('app_start 后端启动工作目录', () => {
     expect(spawnCall?.[1]).toMatchObject({
       sandbox: { network: false, workspaceWrite: false, allowBind: true },
     });
+  });
+
+  it('权限变更后停掉并按新沙箱重启正在运行的后端', async () => {
+    useAppRuntimeStore.setState((state) => ({
+      ...state,
+      apps: state.apps.map((app) =>
+        app.appId === 'demo-app'
+          ? {
+              ...app,
+              pid: 111,
+              url: 'http://localhost:3456/',
+              manifestJson: JSON.stringify({
+                spec: 'papr/0.1',
+                name: 'Demo App',
+                local: 'write',
+                network: true,
+              }),
+            }
+          : app,
+      ),
+    }));
+
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'stop_background_process') return { stopped: true };
+      if (command === 'check_port_available') return true;
+      if (command === 'start_workspace_background_command') {
+        return { pid: 222, started: true, previewUrl: args?.previewUrl ?? null };
+      }
+      if (command === 'check_port_available_structured') return { v4: true, v6: false };
+      if (command === 'check_port_owned_by') return true;
+      if (command === 'check_port_bind_address') return ['127.0.0.1'];
+      return {};
+    });
+
+    const prev = { defaultLocal: 'none' as const, defaultNetwork: false, appOverrides: {} };
+    const next = {
+      defaultLocal: 'none' as const,
+      defaultNetwork: false,
+      appOverrides: { 'demo-app': { local: 'read' as const, network: false } },
+    };
+    usePaprPermissionStore.getState().setAppSettings(next);
+
+    const result = await syncRunningBackendsToAccess(prev, next, '/tmp/ws');
+    expect(result.restarted).toEqual(['demo-app']);
+    expect(
+      invokeMock.mock.calls.some(
+        ([command, args]) => command === 'stop_background_process' && args?.pid === 111,
+      ),
+    ).toBe(true);
+    const spawnCall = invokeMock.mock.calls.find(
+      ([command]) => command === 'start_workspace_background_command',
+    );
+    expect(spawnCall?.[1]).toMatchObject({
+      sandbox: { network: false, workspaceWrite: false, allowBind: true },
+    });
+    expect(useAppRuntimeStore.getState().apps.find((a) => a.appId === 'demo-app')?.pid).toBe(222);
+  });
+
+  it('权限未变则不重启后端；local 收到 none 时只停不启', async () => {
+    useAppRuntimeStore.setState((state) => ({
+      ...state,
+      apps: state.apps.map((app) =>
+        app.appId === 'demo-app'
+          ? {
+              ...app,
+              pid: 111,
+              url: 'http://localhost:3456/',
+              manifestJson: JSON.stringify({
+                spec: 'papr/0.1',
+                name: 'Demo App',
+                local: 'write',
+                network: true,
+              }),
+            }
+          : app,
+      ),
+    }));
+
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'stop_background_process') return { stopped: true };
+      return {};
+    });
+
+    const unchanged = { defaultLocal: 'none' as const, defaultNetwork: false, appOverrides: {} };
+    const same = await syncRunningBackendsToAccess(unchanged, unchanged, '/tmp/ws');
+    expect(same.restarted).toEqual([]);
+    expect(same.stoppedOnly).toEqual([]);
+    expect(invokeMock.mock.calls.some(([command]) => command === 'stop_background_process')).toBe(false);
+
+    const narrowed = {
+      defaultLocal: 'none' as const,
+      defaultNetwork: false,
+      appOverrides: { 'demo-app': { local: 'none' as const, network: false } },
+    };
+    usePaprPermissionStore.getState().setAppSettings(narrowed);
+    const stopped = await syncRunningBackendsToAccess(unchanged, narrowed, '/tmp/ws');
+    expect(stopped.restarted).toEqual([]);
+    expect(stopped.stoppedOnly).toEqual(['demo-app']);
+    expect(useAppRuntimeStore.getState().apps.find((a) => a.appId === 'demo-app')?.pid).toBeUndefined();
   });
 
   it('启动失败时把退出码与进程真实输出返回给 agent（自愈诊断证据）', async () => {

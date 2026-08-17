@@ -399,8 +399,12 @@ describe('promptSystem', () => {
   it('app mode mandates papr.db as default in-app persistence', () => {
     const zhCN = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'zh-CN' });
     expect(zhCN).toContain('持久化默认用 papr.db');
+    expect(zhCN).toContain('无需权限（app 自有沙箱');
+    expect(zhCN).not.toContain('需要权限：storage');
     const en = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'en' });
     expect(en).toContain('default in-app persistence');
+    expect(en).toContain('No permission needed (app-owned sandbox');
+    expect(en).not.toContain('Permissions: storage');
   });
 
   it('app mode warns about the network:false CSP hard block', () => {
