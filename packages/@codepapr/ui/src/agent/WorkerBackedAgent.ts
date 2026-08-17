@@ -953,6 +953,11 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       return;
     }
 
+    if (message.type === 'commit-context-compaction') {
+      void this.handleCommitContextCompaction(message.request);
+      return;
+    }
+
     if (message.type === 'app-agent-stream') {
       const entry = this.appAgentRequests.get(message.requestId);
       if (!entry) return;
@@ -1206,20 +1211,6 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       } else {
         apply = this.logStore.appendBatch(message.deltaMessages);
       }
-      // PR1（ADR-005）：mid-loop 压缩的持久化由主线程 Store 完成。顺序保证：
-      // 先落消息批/日志镜像，再提交 surface 事务；失败只记 failed 行。
-      if (message.compactionCommit && this.config.onMidLoopCompactionCommit) {
-        const compactionCommit = message.compactionCommit;
-        const onCommit = this.config.onMidLoopCompactionCommit;
-        apply = apply.then(() =>
-          Promise.resolve(onCommit(compactionCommit)).catch((error) => {
-            console.warn(
-              '[surface] mid-loop 压缩提交失败:',
-              error instanceof Error ? error.message : error
-            );
-          })
-        );
-      }
       void apply.then(() => {
         // Record the worker's authoritative log length so the next chat can sync
         // incrementally (only when it matches this.logStore.length()).
@@ -1377,6 +1368,37 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         success: false,
         error: err instanceof Error ? err.message : String(err),
       } satisfies MainToAgentWorkerMessage);
+    }
+  }
+
+  private async handleCommitContextCompaction(
+    request: import('./agentWorkerProtocol').CommitContextCompactionRequest
+  ): Promise<void> {
+    const respond = (
+      success: boolean,
+      extra?: { generation?: number; compactionId?: string; error?: string }
+    ): void => {
+      this.postToWorker({
+        type: 'commit-context-compaction-response',
+        requestId: request.requestId,
+        success,
+        ...extra,
+      } satisfies MainToAgentWorkerMessage);
+    };
+
+    if (!this.config.onMidLoopCompactionCommit) {
+      respond(false, { error: '主线程未接线压缩提交回调' });
+      return;
+    }
+    try {
+      await this.config.onMidLoopCompactionCommit(request.commit);
+      const payload = request.commit.checkpointMessage.contextCheckpoint;
+      respond(true, {
+        compactionId: payload?.compactionId,
+        generation: payload?.generation,
+      });
+    } catch (err) {
+      respond(false, { error: err instanceof Error ? err.message : String(err) });
     }
   }
 

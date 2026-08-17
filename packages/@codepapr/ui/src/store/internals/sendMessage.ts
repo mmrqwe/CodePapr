@@ -54,15 +54,15 @@ import { delay, waitForPageVisible } from '../../utils/crashRecovery';
 import { insertCheckpointAtRetainedBoundary } from '../../utils/contextCompaction';
 import {
   findCheckpointInsertIndex,
-  hydrateSurfaceMessages,
   serializeRenderParams,
+  validateCompactionCommit,
 } from '../../utils/contextSurface';
 import {
   clearCompactionInFlight,
   commitContextCheckpoint,
   failContextCheckpoint,
   getContextSurfaceCached,
-  getSessionPruneOptions,
+  hydrateSessionContext,
   markCompactionInFlight,
   updateSurfaceRenderParams,
   verifyCompactionLanded,
@@ -467,7 +467,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           trigger: import('@codepapr/types').CompactionTrigger;
           payload: import('../../utils/contextCompaction').ContextCheckpointPayload | null;
           checkpointMessageId: string;
-        }): Promise<void> => {
+        }): Promise<boolean> => {
           const { sessionId, workspace, messages, trigger, payload, checkpointMessageId } = opts;
           const compactionId = payload?.compactionId;
           if (compactionId) {
@@ -476,7 +476,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           try {
             saveCurrentProjectState(get());
             await waitForPendingProjectStateSave(workspace);
-            await commitContextCheckpoint({
+            const result = await commitContextCheckpoint({
               workspacePath: workspace,
               sessionId,
               messages,
@@ -486,6 +486,29 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             if (compactionId) {
               clearCompactionInFlight(compactionId);
             }
+            // 提交成功后把 generation 写回 checkpoint 消息，维护路径才能
+            // 按 compactionId/generation 识别已提交节点（mid-loop 生成时未定）。
+            set((s) => {
+              const current = s.sessionMessages[sessionId];
+              if (!current) return {};
+              const next = current.map((message) => {
+                if (message.id !== checkpointMessageId || !message.contextCheckpoint) return message;
+                return {
+                  ...message,
+                  contextCheckpoint: {
+                    ...message.contextCheckpoint,
+                    compactionId: result.compactionId,
+                    generation: result.generation,
+                    parentGeneration: result.generation > 0 ? result.generation - 1 : undefined,
+                  },
+                };
+              });
+              return {
+                messages: s.activeSessionId === sessionId ? next : s.messages,
+                sessionMessages: { ...s.sessionMessages, [sessionId]: next },
+              };
+            });
+            return true;
           } catch (err) {
             await handleCheckpointCommitFailure({
               sessionId,
@@ -495,6 +518,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               error: err,
               checkpointMessageId,
             });
+            return false;
           }
         };
 
@@ -521,6 +545,17 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // 压缩结果不得写入其它会话，也不得污染当前查看会话的视图。
             const compactSessionId = get().activeSessionId;
             const sessionMsgs = get().sessionMessages[compactSessionId ?? ''] ?? [];
+            // 回合在飞时拒绝 /compact：slash 处理在 isLoading 守卫之前，
+            // 并发压缩会与 mid-loop/回合后 commit 竞争同一 target generation。
+            if (get().isLoading || turnInFlight) {
+              appendInfoMessage(
+                set,
+                getTranslation(normalizedSettings.lang).compactTurnInProgress,
+                compactSessionId,
+                { resetLoading: false }
+              );
+              return true;
+            }
             // N22：防重复触发——第二次 /compact 只提示进行中，不并行生成
             // 双检查点。
             if (compactCheckpointInFlight) {
@@ -533,6 +568,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               return true;
             }
             compactCheckpointInFlight = true;
+            try {
             // N22：进度反馈——压缩是 LLM 调用（可达数十秒），先给出可见提示。
             appendInfoMessage(set, getTranslation(normalizedSettings.lang).compactingContext, compactSessionId, {
               resetLoading: false,
@@ -560,7 +596,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 compactSessionId ?? undefined
               );
             } catch (err) {
-              compactCheckpointInFlight = false;
               appendInfoMessage(
                 set,
                 `上下文压缩失败：${errorMessage(err)}`,
@@ -676,8 +711,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 resetLoading: false,
               });
             }
-            compactCheckpointInFlight = false;
             return true;
+            } finally {
+              compactCheckpointInFlight = false;
+            }
           }
           if (lower === 'goal') {
             const goalArgs = slash.args.join(' ');
@@ -1097,68 +1134,71 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           const handleMidLoopCompactionCommit = async (commit: MidLoopCompactionCommit): Promise<void> => {
             const sid = activeSessionId!;
             const commitPayload = commit.checkpointMessage.contextCheckpoint ?? null;
-            try {
-              const liveMessages = get().sessionMessages[sid] ?? [];
-              const insertIndex = findCheckpointInsertIndex(
-                liveMessages,
-                commit.sourceMessageIds,
-                commit.retainedMessageIds,
-                commit.turnUserMessageId && typeof commit.sourceAssistantRoundsInTurn === 'number'
-                  ? {
-                      userMessageId: commit.turnUserMessageId,
-                      sourceAssistantRoundsInTurn: commit.sourceAssistantRoundsInTurn,
-                    }
-                  : undefined
-              );
-              if (insertIndex === null) {
-                // 宁可放弃压缩（archive 保持未压缩全量，安全）也不可错位插入：
-                // 错位会把已摘要内容留在 checkpoint 之后，重建时重复注入。
-                throw new Error('无法在消息数组中定位 checkpoint 插入位置（retained 锚点缺失）');
-              }
-              const checkpointMessage = commit.checkpointMessage as UIMessage;
-              let appliedMessages: UIMessage[] | null = null;
-              set((s) => {
-                const current = s.sessionMessages[sid];
-                if (!current || current.some((m) => m.id === commit.checkpointMessageId)) {
-                  return {};
-                }
-                const after = insertCheckpointAtRetainedBoundary(
-                  current,
-                  checkpointMessage,
-                  insertIndex
-                );
-                appliedMessages = after;
-                return {
-                  messages: s.activeSessionId === sid ? after : s.messages,
-                  sessionMessages: { ...s.sessionMessages, [sid]: after },
-                };
-              });
-              if (!appliedMessages) {
-                // checkpoint 已存在（重跑兜底）：失败回滚会移除未提交 checkpoint，
-                // 存在即代表已提交（或提交在途）——不再重复提交，避免生成
-                // 指向同一 checkpoint 的多余 generation。
-                return;
-              }
-              // await：mid-loop 提交必须在回合结算（resolve response）前落库，
-              // 否则回合后的重建/保存会与未落库提交竞态。
-              await commitCheckpointOrdered({
-                sessionId: sid,
-                workspace: workspacePath,
-                messages: appliedMessages,
-                trigger: 'token-limit',
-                payload: commitPayload,
-                checkpointMessageId: commit.checkpointMessageId,
-              });
-            } catch (err) {
-              // 此处 checkpoint 尚未插入（定位失败/set 未应用）：只记 failed 行，
-              // 不做消息回滚。
+            const validated = validateCompactionCommit(commitPayload);
+            if (!validated.ok) {
               await handleCheckpointCommitFailure({
                 sessionId: sid,
                 workspace: workspacePath,
                 payload: commitPayload,
                 trigger: 'token-limit',
-                error: err,
+                error: new Error(validated.error),
               });
+              throw new Error(validated.error);
+            }
+            const liveMessages = get().sessionMessages[sid] ?? [];
+            const insertIndex = findCheckpointInsertIndex(
+              liveMessages,
+              commit.sourceMessageIds,
+              commit.retainedMessageIds,
+              commit.turnUserMessageId && typeof commit.sourceAssistantRoundsInTurn === 'number'
+                ? {
+                    userMessageId: commit.turnUserMessageId,
+                    sourceAssistantRoundsInTurn: commit.sourceAssistantRoundsInTurn,
+                  }
+                : undefined
+            );
+            if (insertIndex === null) {
+              const error = new Error('无法在消息数组中定位 checkpoint 插入位置（retained 锚点缺失）');
+              await handleCheckpointCommitFailure({
+                sessionId: sid,
+                workspace: workspacePath,
+                payload: commitPayload,
+                trigger: 'token-limit',
+                error,
+              });
+              throw error;
+            }
+            const checkpointMessage = commit.checkpointMessage as UIMessage;
+            let appliedMessages: UIMessage[] | null = null;
+            set((s) => {
+              const current = s.sessionMessages[sid];
+              if (!current || current.some((m) => m.id === commit.checkpointMessageId)) {
+                return {};
+              }
+              const after = insertCheckpointAtRetainedBoundary(
+                current,
+                checkpointMessage,
+                insertIndex
+              );
+              appliedMessages = after;
+              return {
+                messages: s.activeSessionId === sid ? after : s.messages,
+                sessionMessages: { ...s.sessionMessages, [sid]: after },
+              };
+            });
+            if (!appliedMessages) {
+              return;
+            }
+            const committed = await commitCheckpointOrdered({
+              sessionId: sid,
+              workspace: workspacePath,
+              messages: appliedMessages,
+              trigger: 'token-limit',
+              payload: commitPayload,
+              checkpointMessageId: commit.checkpointMessageId,
+            });
+            if (!committed) {
+              throw new Error('压缩提交失败');
             }
           };
 
@@ -1311,30 +1351,19 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             }
             if (activeSessionId) {
               let contextMessages = sessionMessages[activeSessionId] ?? [];
-              // PR1（ADR-003）：存在 persisted surface 时，重建上下文以 surface
-              // 节点为选择权威（checkpoint + retained tail 的 message ID 子集）。
-              // 子集与全量数组经 buildEffectiveContextMessages 产出字节一致
-              // （surface 之外的旧消息本就被 checkpoint 遮蔽/过滤），因此不破坏
-              // prefix cache。节点 ID 缺失（degraded）时回退全量数组（legacy 行为），
-              // 下一次保存由维护路径自愈。
+              // PR1（ADR-002/003）：存在 persisted surface 时，重建上下文以
+              // surface 节点为选择权威。节点 ID 缺失 → degraded，回退 parent
+              // generation，无 parent 则重建 generation 0（禁止把全量数组
+              // 写回同一 compacted generation）。
               try {
-                const surface = await getContextSurfaceCached(workspacePath, activeSessionId);
-                if (surface && surface.nodes.length > 0) {
-                  const hydrated = hydrateSurfaceMessages(
-                    contextMessages,
-                    surface.nodes.map((node) => node.messageId)
-                  );
-                  if (hydrated.complete) {
-                    contextMessages = hydrated.messages as UIMessage[];
-                    // ADR-006：重建用 surface 冻结参数（generation 0 = 禁用；
-                    // 压缩 epoch = 压缩时参数），保证重启重建字节与 live epoch 一致。
-                    sessionPruneOptions = await getSessionPruneOptions(
-                      workspacePath,
-                      activeSessionId,
-                      buildPruneOptions(normalizedSettings)
-                    );
-                  }
-                }
+                const hydrated = await hydrateSessionContext(
+                  workspacePath,
+                  activeSessionId,
+                  contextMessages,
+                  buildPruneOptions(normalizedSettings)
+                );
+                contextMessages = hydrated.messages as UIMessage[];
+                sessionPruneOptions = hydrated.pruneOptions;
               } catch {
                 // surface 读取失败 → 沿用全量数组（legacy 行为）。
               }
@@ -1571,7 +1600,11 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             }
           }
 
-          const runAgentPass = async (passInput: string, passImages?: import('@codepapr/types').IImageContent[]) => {
+          const runAgentPass = async (
+            passInput: string,
+            passImages?: import('@codepapr/types').IImageContent[],
+            passUserMessageId?: string,
+          ) => {
             // 本次 pass 的耗时累加器：崩溃恢复会重跑整个 pass，事件也会重新
             // 发射，因此按 pass 重置、按回合（turn）累加，避免重试路径重复计数。
             passModelRuntimeMs = 0;
@@ -1739,7 +1772,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               if (event.type === 'tool-call-end' && typeof event.durationMs === 'number') {
                 passToolRuntimeMs += event.durationMs;
               }
-            }, passImages, userMsg?.id, recallInsertions);
+            }, passImages, passUserMessageId ?? userMsg?.id, recallInsertions);
 
             accumulatedStats = accumulateCacheStats(accumulatedStats, response.cacheStats);
             turnModelRuntimeMs += passModelRuntimeMs;
@@ -1827,6 +1860,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             passInput: string,
             passImages?: import('@codepapr/types').IImageContent[],
             onPassStart?: (logLength: number) => void,
+            passUserMessageId?: string,
           ): Promise<IAgentResponse> => {
             // 崩溃恢复可能已重建 agent（新 log 长度与旧 agent 不同）：每次
             // 真正执行前上报「即将执行」agent 的 log 坐标，调用方（Goal 循环
@@ -1835,7 +1869,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               if (onPassStart && typeof agent?.getSession === 'function') {
                 onPassStart(agent.getSession().logStore.length());
               }
-              return runAgentPass(passInput, passImages);
+              return runAgentPass(passInput, passImages, passUserMessageId);
             };
 
             try {
@@ -1910,6 +1944,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 runWorkerTurn: async (turnPrompt, isFeedback) => {
                   // eslint-disable-next-line no-console
             console.log('[Goal] runWorkerTurn start', { isFeedback, promptLength: turnPrompt.length });
+                  let turnUserMessageId = userMsg?.id;
                   if (isFeedback) {
                     if (assistantMessageId) {
                       updateAssistantMessage(set, activeSessionId!, assistantMessageId, (msg) => ({
@@ -1927,9 +1962,22 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                       carryForwardInContext: false,
                       timestamp: Date.now(),
                     };
+                    // 每轮 Goal 迭代使用独立 user 消息 ID 作为 mid-loop 压缩
+                    // 回合锚点：复用同一 ID 会让 worker log 出现重复 ID，
+                    // 极端情况下 findCheckpointInsertIndex 回合映射错位。
+                    const iterationUserId = createId();
+                    turnUserMessageId = iterationUserId;
+                    const iterationAnchor: UIMessage = {
+                      id: iterationUserId,
+                      role: 'user',
+                      content: '[Goal iteration]',
+                      synthetic: true,
+                      hidden: true,
+                      timestamp: Date.now(),
+                    };
                     set((s) => {
                       const cur = s.sessionMessages[activeSessionId!] ?? [];
-                      const next = [...cur, feedbackMsg];
+                      const next = [...cur, feedbackMsg, iterationAnchor];
                       return {
                         messages: s.activeSessionId === activeSessionId ? next : s.messages,
                         sessionMessages: { ...s.sessionMessages, [activeSessionId!]: next },
@@ -1956,7 +2004,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   try {
                     response = await runWithCrashRecovery(turnPrompt, undefined, (logLength) => {
                       turnStartIndex = logLength;
-                    });
+                    }, turnUserMessageId);
                   } catch (err) {
                     // agent 被销毁（切会话/新建/改设置）：GoalRunner 把它当
                     // 用户中断静默停止（AbortError → interrupted），绝不在

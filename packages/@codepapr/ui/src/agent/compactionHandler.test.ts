@@ -389,6 +389,26 @@ describe('createContextCompactionHandler (bootstrap refresh)', () => {
     expect(result!.messages).toHaveLength(3);
     expect(result!.messages[0]?.content).toContain('检查点摘要');
   });
+
+  it('returns null when onCheckpoint rejects so the agent does not replaceLog', async () => {
+    vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
+      message: checkpointMessage,
+      modelTier: 'fast',
+      insertIndex: 6,
+    });
+    const onCheckpoint = vi.fn().mockRejectedValue(new Error('schema invalid'));
+    const config = createContextCompactionHandler(
+      settings,
+      'deepseek',
+      'session-test',
+      undefined,
+      undefined,
+      onCheckpoint
+    );
+    const result = await config.handler(fourRounds());
+    expect(result).toBeNull();
+    expect(onCheckpoint).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('createContextCompactionHandler (abort)', () => {

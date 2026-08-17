@@ -12,6 +12,7 @@ import {
   parseRenderParams,
   serializeDisabledRenderParams,
   serializeRenderParams,
+  validateCompactionCommit,
 } from './contextSurface';
 import type { ContextCheckpointPayload, ContextMessageLike } from './contextCompaction';
 
@@ -236,5 +237,45 @@ describe('getLatestCheckpointPayload', () => {
     const payload = checkpointPayload();
     expect(getLatestCheckpointPayload([checkpointMessage('cp1', payload)])).toEqual(payload);
     expect(getLatestCheckpointPayload([user('u1')])).toBeNull();
+  });
+});
+
+describe('validateCompactionCommit', () => {
+  it('rejects missing compactionId', () => {
+    expect(validateCompactionCommit(checkpointPayload()).ok).toBe(false);
+  });
+
+  it('rejects when token stats do not shrink', () => {
+    const result = validateCompactionCommit(
+      checkpointPayload({
+        compactionId: 'c1',
+        sourceMessageCount: 4,
+        tokenStats: {
+          estimatedTokensBefore: 100,
+          estimatedTokensAfter: 120,
+          sourceTokens: 80,
+          checkpointTokens: 40,
+        },
+      })
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('无效缩容');
+  });
+
+  it('accepts a shrinking checkpoint with compactionId', () => {
+    expect(
+      validateCompactionCommit(
+        checkpointPayload({
+          compactionId: 'c1',
+          sourceMessageCount: 4,
+          tokenStats: {
+            estimatedTokensBefore: 100,
+            estimatedTokensAfter: 40,
+            sourceTokens: 80,
+            checkpointTokens: 20,
+          },
+        })
+      ).ok
+    ).toBe(true);
   });
 });

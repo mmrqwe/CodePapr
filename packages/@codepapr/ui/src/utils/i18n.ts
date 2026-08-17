@@ -968,6 +968,7 @@ export const I18N_DICTS = {
     onboardingSave: '保存并开始',
 
     compactInProgress: '上下文压缩已在进行中，请稍候。',
+    compactTurnInProgress: '当前对话进行中，请待回合结束后再压缩。',
     compactingContext: '正在压缩上下文…',
     compactDoneMessage: '对话已压缩。{{count}} 条消息合并为检查点，节省 {{saved}} 上下文。',
     compactSavedKb: '{{kb}} KB',
@@ -1954,6 +1955,7 @@ export const I18N_DICTS = {
     onboardingSave: '儲存並開始',
 
     compactInProgress: '上下文壓縮已在進行中，請稍候。',
+    compactTurnInProgress: '目前對話進行中，請待回合結束後再壓縮。',
     compactingContext: '正在壓縮上下文…',
     compactDoneMessage: '對話已壓縮。{{count}} 條訊息合併為檢查點，節省 {{saved}} 上下文。',
     compactSavedKb: '{{kb}} KB',
@@ -2940,6 +2942,7 @@ export const I18N_DICTS = {
     onboardingSave: 'Save & start',
 
     compactInProgress: 'Context compaction is already in progress. Please wait.',
+    compactTurnInProgress: 'A conversation turn is in progress. Compact after it finishes.',
     compactingContext: 'Compacting context…',
     compactDoneMessage: 'Conversation compacted. {{count}} messages merged into a checkpoint, saving {{saved}} of context.',
     compactSavedKb: '{{kb}} KB',

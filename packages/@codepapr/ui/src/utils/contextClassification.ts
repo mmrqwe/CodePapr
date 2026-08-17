@@ -154,7 +154,9 @@ export function classifyContextMessages(input: ContextClassificationInput): Cont
     const id = message.id;
 
     if (message.role === 'user') {
-      const content = message.promptContent ?? message.content;
+      // 分类用 display content，不用 promptContent：后者是带 wrapper 模板的
+      // 完整运行时提示词，400 字符截断后真实目标会被样板顶掉。
+      const content = message.content ?? '';
       if (index === lastUserIndex && content.trim()) {
         facts.push(makeFact('user-goal', 'trusted', 'pinned', content, [id]));
       }

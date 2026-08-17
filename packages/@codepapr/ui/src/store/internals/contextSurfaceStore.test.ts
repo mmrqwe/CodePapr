@@ -8,10 +8,12 @@ vi.mock('../../utils/projectStorage', () => ({
   saveContextSurface: vi.fn(async () => undefined),
   commitContextCompaction: vi.fn(),
   markContextCompactionFailed: vi.fn(async () => undefined),
+  discardContextSurfacesFromGeneration: vi.fn(async () => undefined),
 }));
 
 import {
   commitContextCompaction,
+  discardContextSurfacesFromGeneration,
   loadContextSurface,
   markContextCompactionFailed,
   saveContextSurface,
@@ -21,6 +23,7 @@ import {
   commitContextCheckpoint,
   failContextCheckpoint,
   getContextSurfaceCached,
+  hydrateSessionContext,
   maintainContextSurface,
   markCompactionInFlight,
   verifyCompactionLanded,
@@ -119,6 +122,24 @@ describe('maintainContextSurface', () => {
     } finally {
       clearCompactionInFlight('comp-inflight');
     }
+  });
+
+  it('excludes a mid-loop orphan whose generation is still undefined', async () => {
+    const sid = freshSession();
+    vi.mocked(loadContextSurface).mockResolvedValue(surface({ sessionId: sid, generation: 2 }));
+    await maintainContextSurface('/ws', sid, [
+      checkpoint('cp-old', { compactionId: 'comp-1', generation: 2 }),
+      user('u1'),
+      assistant('a1'),
+      checkpoint('cp-orphan', { compactionId: 'comp-midloop', version: 3 }),
+      user('u2'),
+    ]);
+
+    expect(saveContextSurface).toHaveBeenCalledTimes(1);
+    const saved = vi.mocked(saveContextSurface).mock.calls[0]?.[1];
+    const nodeIds = saved?.nodes.map((n) => n.messageId) ?? [];
+    expect(nodeIds).not.toContain('cp-orphan');
+    expect(nodeIds[0]).toBe('cp-old');
   });
 
   it('excludes a stale (failed/orphan) checkpoint from the projection instead of freezing', async () => {
@@ -240,5 +261,68 @@ describe('failContextCheckpoint', () => {
     const arg = vi.mocked(markContextCompactionFailed).mock.calls[0]?.[1];
     expect(arg?.id).toBe('comp-f');
     expect(arg?.sourceGeneration).toBe(0);
+  });
+});
+
+describe('hydrateSessionContext', () => {
+  it('falls back to parent generation and discards the degraded latest', async () => {
+    const sid = freshSession();
+    const parent = surface({
+      sessionId: sid,
+      generation: 1,
+      parentGeneration: 0,
+      compactionId: 'comp-parent',
+      nodes: [
+        { position: 0, messageId: 'cp-old', nodeKind: 'checkpoint' },
+        { position: 1, messageId: 'u1', nodeKind: 'conversation' },
+      ],
+    });
+    const latest = surface({
+      sessionId: sid,
+      generation: 2,
+      parentGeneration: 1,
+      compactionId: 'comp-broken',
+      nodes: [
+        { position: 0, messageId: 'cp-missing', nodeKind: 'checkpoint' },
+        { position: 1, messageId: 'u1', nodeKind: 'conversation' },
+      ],
+    });
+    vi.mocked(loadContextSurface)
+      .mockResolvedValueOnce(latest)
+      .mockResolvedValueOnce(parent);
+
+    const result = await hydrateSessionContext(
+      '/ws',
+      sid,
+      [checkpoint('cp-old', { compactionId: 'comp-parent', generation: 1 }), user('u1')],
+      pruneOptions
+    );
+
+    expect(result.degraded).toBe(true);
+    expect(result.messages.map((m) => m.id)).toEqual(['cp-old', 'u1']);
+    expect(discardContextSurfacesFromGeneration).toHaveBeenCalledWith('/ws', sid, 2);
+  });
+
+  it('rebuilds generation 0 from archive when parent hydrate also fails', async () => {
+    const sid = freshSession();
+    vi.mocked(loadContextSurface).mockResolvedValue(
+      surface({
+        sessionId: sid,
+        generation: 1,
+        parentGeneration: null,
+        nodes: [{ position: 0, messageId: 'missing-cp', nodeKind: 'checkpoint' }],
+      })
+    );
+
+    const archive = [user('u1'), assistant('a1')];
+    const result = await hydrateSessionContext('/ws', sid, archive, pruneOptions);
+
+    expect(result.degraded).toBe(true);
+    expect(result.messages.map((m) => m.id)).toEqual(['u1', 'a1']);
+    expect(discardContextSurfacesFromGeneration).toHaveBeenCalledWith('/ws', sid, 0);
+    expect(saveContextSurface).toHaveBeenCalled();
+    const saved = vi.mocked(saveContextSurface).mock.calls[0]?.[1];
+    expect(saved?.generation).toBe(0);
+    expect(saved?.compactionId).toBeNull();
   });
 });

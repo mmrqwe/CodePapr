@@ -684,11 +684,25 @@ export interface PersistedContextSurface {
 
 export async function loadContextSurface(
   workspacePath: string,
-  sessionId: string
+  sessionId: string,
+  generation?: number
 ): Promise<PersistedContextSurface | null> {
   return invoke<PersistedContextSurface | null>('load_context_surface', {
     workspacePath: workspacePath.trim(),
     sessionId,
+    generation: typeof generation === 'number' ? generation : null,
+  });
+}
+
+export async function discardContextSurfacesFromGeneration(
+  workspacePath: string,
+  sessionId: string,
+  fromGeneration: number
+): Promise<void> {
+  await invoke('discard_context_surfaces_from_generation', {
+    workspacePath: workspacePath.trim(),
+    sessionId,
+    fromGeneration,
   });
 }
 

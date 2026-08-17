@@ -46,7 +46,13 @@ import {
   type WorkerApiFormat,
   type AppAgentPayload,
 } from './agentWorkerProtocol';
-import { createContextCompactionHandler } from './compactionHandler';
+import { buildPruneOptions, createContextCompactionHandler } from './compactionHandler';
+import {
+  CONTEXT_SURFACE_RENDER_VERSION,
+  freezePruneParams,
+} from '../utils/contextSurface';
+import type { ContextCompactionIntent } from '@codepapr/types';
+import type { CompactionSettings } from '../store/internals/types';
 import {
   TOOL_IPC_TIMEOUT_MS,
   resolveToolIpcTimeoutMs,
@@ -110,6 +116,16 @@ const bootstrapResponseWaiters = new Map<
 >();
 
 let nextBootstrapRequestId = 0;
+
+const COMPACTION_COMMIT_TIMEOUT_MS = 60_000;
+const compactionCommitWaiters = new Map<
+  string,
+  {
+    resolve: (value: { success: boolean; generation?: number; compactionId?: string; error?: string }) => void;
+    reject: (error: Error) => void;
+  }
+>();
+let nextCompactionRequestId = 0;
 
 // PR5（ADR-009 第11条）：re-recall 的回合内状态。activeChatAgent 供
 // tool-response 分发时 push 新 insertion；每 chat 至多一次（第11条）。
@@ -681,6 +697,81 @@ async function _refreshBootstrapRequest(requestId: string): Promise<string | nul
 
   try {
     return await result;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function intentFromCommit(
+  sessionId: string,
+  commit: MidLoopCompactionCommit,
+  settings: WorkerAgentSettings
+): ContextCompactionIntent {
+  const payload = commit.checkpointMessage.contextCheckpoint;
+  return {
+    sessionId,
+    trigger: payload?.trigger ?? 'token-limit',
+    sourceGeneration: typeof payload?.parentGeneration === 'number' ? payload.parentGeneration : null,
+    checkpointMessageId: commit.checkpointMessageId,
+    sourceMessageIds: commit.sourceMessageIds,
+    retainedMessageIds: commit.retainedMessageIds,
+    renderParams: {
+      pruneParams: freezePruneParams(buildPruneOptions(settings as unknown as CompactionSettings)),
+      renderVersion: CONTEXT_SURFACE_RENDER_VERSION,
+    },
+    tokenStats: payload?.tokenStats ?? {
+      estimatedTokensBefore: 0,
+      estimatedTokensAfter: 0,
+      sourceTokens: 0,
+      checkpointTokens: 0,
+    },
+    summaryInfo: payload?.summaryInfo ?? { kind: 'local-fallback' },
+  };
+}
+
+/**
+ * ADR-005：mid-loop 压缩提交走 CommitContextCompaction 协议。
+ * 主线程校验 + 单事务持久化后应答；失败则本轮不 replaceLog。
+ */
+async function _commitContextCompactionRequest(
+  chatRequestId: string,
+  sessionId: string,
+  commit: MidLoopCompactionCommit,
+  settings: WorkerAgentSettings
+): Promise<void> {
+  const requestId = `${chatRequestId}:compaction-${++nextCompactionRequestId}`;
+  const result = new Promise<{
+    success: boolean;
+    generation?: number;
+    compactionId?: string;
+    error?: string;
+  }>((resolve, reject) => {
+    compactionCommitWaiters.set(requestId, { resolve, reject });
+  });
+
+  const timer = setTimeout(() => {
+    const waiter = compactionCommitWaiters.get(requestId);
+    if (waiter) {
+      compactionCommitWaiters.delete(requestId);
+      waiter.reject(new Error('压缩提交超时'));
+    }
+  }, COMPACTION_COMMIT_TIMEOUT_MS);
+
+  postMessageToMain({
+    type: 'commit-context-compaction',
+    chatRequestId,
+    request: {
+      requestId,
+      intent: intentFromCommit(sessionId, commit, settings),
+      commit,
+    },
+  });
+
+  try {
+    const response = await result;
+    if (!response.success) {
+      throw new Error(response.error || '压缩提交失败');
+    }
   } finally {
     clearTimeout(timer);
   }
@@ -1320,16 +1411,13 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
       payload.sessionId,
       () => _refreshBootstrapRequest(payload.requestId),
       () => sessionAbortControllers.get(payload.requestId)?.signal,
-      (commit) => {
-        // PR1：mid-loop 压缩提交数据随 result 消息送回主线程（ADR-005）。
-        lastCompactionCommit = commit;
-      },
+      (commit) =>
+        _commitContextCompactionRequest(payload.requestId, payload.sessionId, commit, payload.settings),
       payload.userMessageId
     ),
   });
 
   let compacted = false;
-  let lastCompactionCommit: MidLoopCompactionCommit | undefined;
   // Idle backstop: if the whole agent produces no stream/tool activity for this
   // long, declare it hung and abort. Permission waits explicitly suspend this
   // backstop; the timer still catches unrelated worker/tool hangs.
@@ -1426,7 +1514,6 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     ...(compacted
       ? { compacted: true, fullMessages: session.logStore.getAllMessages().slice() }
       : {}),
-    ...(lastCompactionCommit ? { compactionCommit: lastCompactionCommit } : {}),
   });
   } finally {
     sessionAbortControllers.delete(payload.requestId);
@@ -1495,6 +1582,13 @@ function dispatchWorkerMessage(message: MainToAgentWorkerMessage): void {
       if (id.startsWith(`${message.requestId}:`)) {
         bootstrapResponseWaiters.delete(id);
         waiter.resolve(null);
+      }
+    }
+
+    for (const [id, waiter] of compactionCommitWaiters) {
+      if (id.startsWith(`${message.requestId}:`)) {
+        compactionCommitWaiters.delete(id);
+        waiter.reject(new DOMException('Session was cancelled', 'AbortError'));
       }
     }
 
@@ -1567,6 +1661,21 @@ function dispatchWorkerMessage(message: MainToAgentWorkerMessage): void {
     } else {
       waiter.reject(new Error(message.error || 'Bootstrap refresh failed'));
     }
+    return;
+  }
+
+  if (message.type === 'commit-context-compaction-response') {
+    const waiter = compactionCommitWaiters.get(message.requestId);
+    if (!waiter) {
+      return;
+    }
+    compactionCommitWaiters.delete(message.requestId);
+    waiter.resolve({
+      success: message.success,
+      generation: message.generation,
+      compactionId: message.compactionId,
+      error: message.error,
+    });
     return;
   }
 

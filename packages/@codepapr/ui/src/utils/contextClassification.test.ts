@@ -36,13 +36,21 @@ function assistantText(id: string, content: string, extra: Partial<ContextMessag
 }
 
 describe('classifyContextMessages', () => {
-  it('pins the latest user goal', () => {
-    const facts = classifyContextMessages({ messages: [user('u1', '修复 OAuth 回调')] });
+  it('pins the latest user goal from display content, not promptContent wrappers', () => {
+    const facts = classifyContextMessages({
+      messages: [
+        user('u1', '修复 OAuth 回调', {
+          promptContent: '## 系统指令\n请遵循以下模板...\n'.repeat(20) + '修复 OAuth 回调',
+        }),
+      ],
+    });
     const goal = facts.find((f) => f.kind === 'user-goal');
     expect(goal).toBeDefined();
     expect(goal!.disposition).toBe('pinned');
     expect(goal!.trust).toBe('trusted');
     expect(goal!.sourceMessageIds).toEqual(['u1']);
+    expect(goal!.summary).toContain('修复 OAuth 回调');
+    expect(goal!.summary).not.toContain('系统指令');
   });
 
   it('pins explicit user constraints from earlier user messages', () => {

@@ -11,7 +11,6 @@ import type {
   IToolDefinition,
   RequestContextInsertion,
 } from '@codepapr/types';
-import type { ContextCheckpointPayloadV3 } from '../utils/contextCheckpointState';
 import type { ContextCheckpointPayload } from '../utils/contextCompaction';
 import type { Lang } from '../utils/i18n';
 
@@ -165,19 +164,17 @@ export interface AgentWorkerToolResponse {
 }
 
 /**
- * 压缩提交协议（ADR-005，PR1 接线）。
+ * 压缩提交协议（ADR-005）：worker mid-loop 产出 intent，主线程校验并
+ * 单事务持久化后应答。worker 仅在 success 后 replaceLog。
  *
- * Worker（mid-loop）或回合间流程产出 intent，主线程 Store 校验并单事务持久化，
- * 返回 committed surface 与 materialized messages。PR0 只定义接口，
- * 不加入 message union（加入即意味着必须处理）。
+ * materializedMessages 不由主线程回填：主线程 archive 没有 worker-only
+ * 本回合 assistant/tool 尾，runtime 继续使用 worker 本地压缩后的 log；
+ * 下一次 agent 重建按 committed surface hydrate。
  */
 export interface CommitContextCompactionRequest {
   requestId: string;
   intent: ContextCompactionIntent;
-  checkpoint: {
-    message: IMessage;
-    payload: ContextCheckpointPayloadV3;
-  };
+  commit: MidLoopCompactionCommit;
 }
 
 export interface CommitContextCompactionResponse {
@@ -248,6 +245,14 @@ export type MainToAgentWorkerMessage =
       bootstrapRequestId: string;
       success: boolean;
       bootstrap?: string | null;
+      error?: string;
+    }
+  | {
+      type: 'commit-context-compaction-response';
+      requestId: string;
+      success: boolean;
+      generation?: number;
+      compactionId?: string;
       error?: string;
     }
   | {
@@ -377,6 +382,11 @@ export type AgentWorkerToMainMessage =
       bootstrapRequestId: string;
     }
   | {
+      type: 'commit-context-compaction';
+      chatRequestId: string;
+      request: CommitContextCompactionRequest;
+    }
+  | {
       type: 'fetch-request';
       fetchId: string;
       url: string;
@@ -402,8 +412,6 @@ export type AgentWorkerToMainMessage =
          *  indices no longer line up after the worker reset its log. */
         compacted?: boolean;
         fullMessages?: IMessage[];
-        /** mid-loop 压缩提交数据（PR1）：主线程 Store 负责持久化（ADR-005）。 */
-        compactionCommit?: MidLoopCompactionCommit;
       }
   | {
       type: 'error';

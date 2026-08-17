@@ -17,10 +17,12 @@ import type { PruneOptions } from '@codepapr/core';
 import { createId } from '../../utils/createId';
 import {
   computeSurfaceNodes,
+  hydrateSurfaceMessages,
   parseRenderParams,
   resolveCheckpointSummaryInfo,
   serializeDisabledRenderParams,
   serializeRenderParams,
+  validateCompactionCommit,
   type SurfaceNodeInput,
 } from '../../utils/contextSurface';
 import {
@@ -30,6 +32,7 @@ import {
 } from '../../utils/contextCompaction';
 import {
   commitContextCompaction,
+  discardContextSurfacesFromGeneration,
   loadContextSurface,
   markContextCompactionFailed,
   saveContextSurface,
@@ -135,21 +138,21 @@ export async function maintainContextSurface(
     // 最新 checkpoint 的三态判定：
     // 1. 在途（commit 进行中，含 mid-loop generation 未定的 checkpoint）→
     //    跳过，commit/fail 路径拥有推进权；
-    // 2. generation 与 active 不匹配且不在途（失败残留 / 崩溃孤儿）→
-    //    不采纳进节点（不变式 5：失败压缩不得破坏上一个 completed
-    //    generation），从投影中排除后照常维护。孤儿消息本身保留在
-    //    archive（ADR-005 判定无害，synthetic+hidden，Surface 权威下
-    //    不参与重建）。
+    // 2. 未提交孤儿（generation 未定，或 generation 与 active 不匹配，且
+    //    compactionId 不是当前 surface 的 compaction）→ 不采纳进节点
+    //    （不变式 5：失败压缩不得破坏上一个 completed generation）。
+    //    mid-loop payload.generation 在 commit 前为 undefined，崩溃后
+    //    inFlight 集合为空，必须按孤儿排除，不能落入当前 generation 节点。
     let projectionMessages: readonly ContextMessageLike[] = messages;
     if (checkpoint && payload?.compactionId) {
       if (inFlightCompactionIds.has(payload.compactionId)) {
         return;
       }
-      if (
-        surface &&
-        typeof payload.generation === 'number' &&
-        payload.generation !== surface.generation
-      ) {
+      const matchesActive =
+        !!surface &&
+        (payload.compactionId === surface.compactionId ||
+          (typeof payload.generation === 'number' && payload.generation === surface.generation));
+      if (surface && !matchesActive) {
         projectionMessages = messages.filter((m) => m.id !== checkpoint.message.id);
       }
     }
@@ -212,10 +215,14 @@ export async function commitContextCheckpoint(
     throw new Error('[surface] 提交压缩失败：消息数组中没有 checkpoint');
   }
   const payload = checkpoint.payload;
+  const validated = validateCompactionCommit(payload);
+  if (!validated.ok) {
+    throw new Error(`[surface] 提交压缩失败：${validated.error}`);
+  }
 
-  // surface 读取失败必须上抛：以未知 generation 为基准计算 targetGeneration
-  // 会静默覆盖真实 generation 行（缓存投毒的写侧等价物）。
-  const surface = await getContextSurfaceCached(options.workspacePath, options.sessionId);
+  // 提交必须绕过缓存直读 DB：陈旧缓存会算出错误的 targetGeneration。
+  const surface = await loadContextSurface(options.workspacePath, options.sessionId);
+  rememberCacheEntry(options.workspacePath, options.sessionId, surface);
   const sourceGeneration = surface?.generation ?? 0;
   const targetGeneration = sourceGeneration + 1;
 
@@ -377,4 +384,106 @@ export async function updateSurfaceRenderParams(
   const updated: PersistedContextSurface = { ...surface, renderParamsJson };
   await saveContextSurface(workspacePath, updated);
   rememberContextSurface(workspacePath, updated);
+}
+
+export interface HydratedSessionContext {
+  messages: ContextMessageLike[];
+  pruneOptions: PruneOptions;
+  degraded: boolean;
+}
+
+/**
+ * ADR-002 水合：节点 ID 缺失时标记 degraded，回退 parent generation；
+ * 无 parent 或 parent 也缺失则从 archive 重建 generation 0。
+ * 禁止把全量数组写回同一 compacted generation（会破坏 generation 语义）。
+ */
+export async function hydrateSessionContext(
+  workspacePath: string,
+  sessionId: string,
+  archiveMessages: readonly ContextMessageLike[],
+  fallbackPrune: PruneOptions
+): Promise<HydratedSessionContext> {
+  const fallback: HydratedSessionContext = {
+    messages: [...archiveMessages],
+    pruneOptions: fallbackPrune,
+    degraded: false,
+  };
+
+  let surface: PersistedContextSurface | null;
+  try {
+    surface = await getContextSurfaceCached(workspacePath, sessionId);
+  } catch {
+    return fallback;
+  }
+  if (!surface || surface.nodes.length === 0) {
+    return fallback;
+  }
+
+  const nodeIds = surface.nodes.map((node) => node.messageId);
+  const hydrated = hydrateSurfaceMessages(archiveMessages, nodeIds);
+  if (hydrated.complete) {
+    const parsed = parseRenderParams(surface.renderParamsJson);
+    return {
+      messages: hydrated.messages,
+      pruneOptions: parsed?.pruneOptions ?? fallbackPrune,
+      degraded: false,
+    };
+  }
+
+  console.warn(
+    `[surface] generation ${surface.generation} degraded（节点 ID 缺失），按 ADR-002 回退`
+  );
+
+  if (typeof surface.parentGeneration === 'number') {
+    try {
+      const parent = await loadContextSurface(workspacePath, sessionId, surface.parentGeneration);
+      if (parent && parent.nodes.length > 0) {
+        const parentHydrated = hydrateSurfaceMessages(
+          archiveMessages,
+          parent.nodes.map((node) => node.messageId)
+        );
+        if (parentHydrated.complete) {
+          await discardContextSurfacesFromGeneration(workspacePath, sessionId, surface.generation);
+          rememberContextSurface(workspacePath, parent);
+          const parsed = parseRenderParams(parent.renderParamsJson);
+          return {
+            messages: parentHydrated.messages,
+            pruneOptions: parsed?.pruneOptions ?? fallbackPrune,
+            degraded: true,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn(
+        '[surface] parent generation 回退失败:',
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+
+  try {
+    await discardContextSurfacesFromGeneration(workspacePath, sessionId, 0);
+    const nodes = computeSurfaceNodes(archiveMessages);
+    const created: PersistedContextSurface = {
+      sessionId,
+      generation: 0,
+      parentGeneration: null,
+      compactionId: null,
+      renderParamsJson: serializeDisabledRenderParams(),
+      createdAt: Date.now(),
+      nodes,
+    };
+    await saveContextSurface(workspacePath, created);
+    rememberContextSurface(workspacePath, created);
+    const parsed = parseRenderParams(created.renderParamsJson);
+    return {
+      messages: [...archiveMessages],
+      pruneOptions: parsed?.pruneOptions ?? fallbackPrune,
+      degraded: true,
+    };
+  } catch (err) {
+    console.warn('[surface] 重建 generation 0 失败:', err instanceof Error ? err.message : err);
+    forgetContextSurface(workspacePath, sessionId);
+    return { ...fallback, degraded: true };
+  }
 }

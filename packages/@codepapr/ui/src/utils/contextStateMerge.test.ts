@@ -92,6 +92,23 @@ describe('mergeContextStateDeterministic', () => {
     expect(state.todos).toEqual(['新待办']);
   });
 
+  it('clears prior todos when the authoritative list is empty (all completed)', () => {
+    const state = mergeContextStateDeterministic({
+      priorState,
+      facts: [],
+      incompleteTodos: [],
+    });
+    expect(state.todos).toEqual([]);
+  });
+
+  it('keeps prior todos when authoritative TodoList data is missing', () => {
+    const state = mergeContextStateDeterministic({
+      priorState,
+      facts: [],
+    });
+    expect(state.todos).toEqual(['补测试']);
+  });
+
   it('adds externalized facts to references with artifact ids only', () => {
     const state = mergeContextStateDeterministic({
       priorState,

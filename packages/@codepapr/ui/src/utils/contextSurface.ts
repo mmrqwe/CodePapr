@@ -16,6 +16,8 @@ import {
   type ContextCheckpointPayload,
   type ContextMessageLike,
 } from './contextCompaction';
+import { CONTEXT_CHECKPOINT_VERSION_3, type ContextCheckpointPayloadV3 } from './contextCheckpointState';
+import { validateContextCheckpointStateV3 } from './contextStateMerge';
 
 /** PR1 首版渲染参数版本；编译器代码升级时递增并接受一次性 cache miss（ADR-006）。 */
 export const CONTEXT_SURFACE_RENDER_VERSION = 1;
@@ -285,4 +287,35 @@ export function resolveCheckpointTrigger(
   fallback: CompactionTrigger
 ): CompactionTrigger {
   return payload.trigger ?? fallback;
+}
+
+/**
+ * 主线程压缩提交校验（ADR-005）：schema 有效 + 有效缩容。
+ * pinned 内容在 maybeGenerateContextCheckpoint 生成时已校验；此处再拦
+ * 无 compactionId / 未缩容 / v3 state 不合法的 intent。
+ */
+export function validateCompactionCommit(
+  payload: ContextCheckpointPayload | null | undefined
+): { ok: true } | { ok: false; error: string } {
+  if (!payload) {
+    return { ok: false, error: '缺少 checkpoint payload' };
+  }
+  if (!payload.compactionId?.trim()) {
+    return { ok: false, error: '缺少 compactionId' };
+  }
+  if (typeof payload.sourceMessageCount === 'number' && payload.sourceMessageCount <= 0) {
+    return { ok: false, error: '无效缩容：sourceMessageCount 为 0' };
+  }
+  const before = payload.tokenStats?.estimatedTokensBefore;
+  const after = payload.tokenStats?.estimatedTokensAfter;
+  if (typeof before === 'number' && typeof after === 'number' && after >= before) {
+    return { ok: false, error: `无效缩容：${after} 未小于压缩前 ${before}` };
+  }
+  if (payload.version === CONTEXT_CHECKPOINT_VERSION_3) {
+    const state = (payload as ContextCheckpointPayloadV3).state;
+    if (!validateContextCheckpointStateV3(state)) {
+      return { ok: false, error: 'checkpoint state schema 不合法' };
+    }
+  }
+  return { ok: true };
 }

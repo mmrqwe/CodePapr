@@ -141,7 +141,7 @@ export function createContextCompactionHandler(
   sessionId: string,
   refreshBootstrap?: () => Promise<string | null>,
   getAbortSignal?: () => AbortSignal | undefined,
-  onCheckpoint?: (commit: MidLoopCompactionCommit) => void,
+  onCheckpoint?: (commit: MidLoopCompactionCommit) => void | Promise<void>,
   /** 本回合 user 消息 ID（主线程生成）：commit 的回合映射锚点。 */
   turnUserMessageId?: string
 ): ContextCompactionConfig {
@@ -186,7 +186,7 @@ async function runCompactionHandler(
   coreMessages: IMessage[],
   refreshBootstrap: (() => Promise<string | null>) | undefined,
   abortSignal: AbortSignal | undefined,
-  onCheckpoint: ((commit: MidLoopCompactionCommit) => void) | undefined,
+  onCheckpoint: ((commit: MidLoopCompactionCommit) => void | Promise<void>) | undefined,
   trigger: import('@codepapr/types').CompactionTrigger,
   turnUserMessageId?: string
 ): Promise<{ messages: IMessage[]; cacheStats?: ICacheStatistics } | null> {
@@ -215,6 +215,8 @@ async function runCompactionHandler(
   );
 
   // PR1：把压缩提交数据交给主线程 Store 持久化（ADR-005）。
+  // 必须 await：主线程校验失败则本轮不 replaceLog，避免 worker 已缩容但
+  // archive/surface 未提交。
   if (onCheckpoint) {
     // 回合映射锚点：source 区间内、本回合 user 消息之后的 model-visible
     // assistant 回合数。retained 起点落在 worker-only 区域（本回合 assistant ID
@@ -229,31 +231,39 @@ async function runCompactionHandler(
           .length;
       }
     }
-    onCheckpoint({
-      checkpointMessageId: checkpoint.message.id,
-      checkpointMessage: {
-        id: checkpoint.message.id,
-        role: 'assistant',
-        content: checkpoint.message.content,
-        timestamp: checkpoint.message.timestamp,
-        synthetic: true,
-        hidden: true,
-        contextCheckpoint: checkpoint.message.contextCheckpoint,
-      },
-      insertIndex: checkpoint.insertIndex,
-      sourceMessageIds: contextMessages
-        .slice(0, checkpoint.insertIndex)
-        .filter(isModelVisibleUiMessage)
-        .map((message) => message.id),
-      retainedMessageIds: contextMessages
-        .slice(checkpoint.insertIndex)
-        .filter(isModelVisibleUiMessage)
-        .map((message) => message.id),
-      ...(turnUserMessageId ? { turnUserMessageId } : {}),
-      ...(typeof sourceAssistantRoundsInTurn === 'number'
-        ? { sourceAssistantRoundsInTurn }
-        : {}),
-    });
+    try {
+      await onCheckpoint({
+        checkpointMessageId: checkpoint.message.id,
+        checkpointMessage: {
+          id: checkpoint.message.id,
+          role: 'assistant',
+          content: checkpoint.message.content,
+          timestamp: checkpoint.message.timestamp,
+          synthetic: true,
+          hidden: true,
+          contextCheckpoint: checkpoint.message.contextCheckpoint,
+        },
+        insertIndex: checkpoint.insertIndex,
+        sourceMessageIds: contextMessages
+          .slice(0, checkpoint.insertIndex)
+          .filter(isModelVisibleUiMessage)
+          .map((message) => message.id),
+        retainedMessageIds: contextMessages
+          .slice(checkpoint.insertIndex)
+          .filter(isModelVisibleUiMessage)
+          .map((message) => message.id),
+        ...(turnUserMessageId ? { turnUserMessageId } : {}),
+        ...(typeof sourceAssistantRoundsInTurn === 'number'
+          ? { sourceAssistantRoundsInTurn }
+          : {}),
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw err;
+      }
+      console.warn('[compaction] mid-loop 提交被主线程拒绝:', err instanceof Error ? err.message : err);
+      return null;
+    }
   }
 
   const compacted = buildEffectiveContextMessages(

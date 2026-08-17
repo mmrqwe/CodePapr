@@ -100,11 +100,13 @@ export function mergeContextStateDeterministic(input: {
     ...prior.failuresAndRisks,
     ...factsOf(input.facts, 'failure').map(factSummaryLine),
   ];
-  // todos：权威 TodoList 状态优先；权威数据缺失/为空时沿用 prior（不变式 7：
-  // 未完成 Todo 必须存活，不能被空覆盖清掉）。
+  // todos：权威 TodoList 状态优先。
+  // - incompleteTodos === undefined：无权威数据，沿用 prior（不变式 7）
+  // - incompleteTodos === []：权威「全部完成」，必须清空，不得把旧 todo
+  //   永久带进后续 checkpoint。
   state.todos =
-    (input.incompleteTodos ?? []).length > 0
-      ? input.incompleteTodos!.map((todo) => todo.title)
+    input.incompleteTodos !== undefined
+      ? input.incompleteTodos.map((todo) => todo.title)
       : [...prior.todos];
   state.openQuestions = [
     ...prior.openQuestions,

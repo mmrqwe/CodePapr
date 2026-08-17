@@ -101,11 +101,16 @@ export async function maybeGenerateContextCheckpoint(
   const sourceUI = messages.slice(priorCheckpointIndex + 1, plan.insertIndex);
 
   const todoContext = sessionId ? getTodoListContext(sessionId) : undefined;
-  const incompleteTodos = (todoContext?.tasks ?? [])
-    .filter((task) => task.status !== 'completed')
-    .map((task) => ({ title: task.title }));
+  const incompleteTodos = todoContext
+    ? todoContext.tasks
+        .filter((task) => task.status !== 'completed')
+        .map((task) => ({ title: task.title }))
+    : undefined;
 
-  const facts = classifyContextMessages({ messages: sourceUI, incompleteTodos });
+  const facts = classifyContextMessages({
+    messages: sourceUI,
+    incompleteTodos: incompleteTodos ?? [],
+  });
   const priorState = plan.priorCheckpoint
     ? migrateContextCheckpointToV3(plan.priorCheckpoint).state
     : null;
@@ -124,7 +129,10 @@ export async function maybeGenerateContextCheckpoint(
   // pinned 基线：todos 以权威状态为准（非空时），LLM 输出必须保住基线内容。
   const pinnedBaseline: ContextCheckpointStateV3 = {
     ...(priorState ?? createEmptyCheckpointStateV3()),
-    todos: incompleteTodos.length > 0 ? incompleteTodos.map((todo) => todo.title) : (priorState?.todos ?? []),
+    todos:
+      incompleteTodos !== undefined
+        ? incompleteTodos.map((todo) => todo.title)
+        : (priorState?.todos ?? []),
   };
 
   let state = fallbackState;

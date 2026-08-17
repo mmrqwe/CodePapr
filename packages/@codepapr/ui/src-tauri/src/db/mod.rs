@@ -2209,15 +2209,31 @@ pub(crate) struct ContextSurfaceNodeInput {
     pub(crate) node_kind: String,
 }
 
-#[tauri::command]
-pub(crate) fn load_context_surface(
-    workspace_path: String,
-    session_id: String,
+fn read_context_surface(
+    conn: &Connection,
+    session_id: &str,
+    generation: Option<i64>,
 ) -> Result<Option<ContextSurfaceResult>, String> {
-    let (conn, ..) = open_project_db(&workspace_path)?;
-
-    let surface = conn
-        .query_row(
+    let surface = if let Some(target) = generation {
+        conn.query_row(
+            "SELECT generation, parent_generation, compaction_id, render_params, created_at
+             FROM context_surfaces
+             WHERE session_id = ?1 AND generation = ?2",
+            params![session_id, target],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|err| format!("读取 context surface 失败: {err}"))?
+    } else {
+        conn.query_row(
             "SELECT generation, parent_generation, compaction_id, render_params, created_at
              FROM context_surfaces
              WHERE session_id = ?1
@@ -2234,7 +2250,8 @@ pub(crate) fn load_context_surface(
             },
         )
         .optional()
-        .map_err(|err| format!("读取 context surface 失败: {err}"))?;
+        .map_err(|err| format!("读取 context surface 失败: {err}"))?
+    };
 
     let Some((generation, parent_generation, compaction_id, render_params, created_at)) = surface
     else {
@@ -2262,7 +2279,7 @@ pub(crate) fn load_context_surface(
         .map_err(|err| format!("收集 surface 节点失败: {err}"))?;
 
     Ok(Some(ContextSurfaceResult {
-        session_id,
+        session_id: session_id.to_string(),
         generation,
         parent_generation,
         compaction_id,
@@ -2270,6 +2287,43 @@ pub(crate) fn load_context_surface(
         created_at,
         nodes,
     }))
+}
+
+#[tauri::command]
+pub(crate) fn load_context_surface(
+    workspace_path: String,
+    session_id: String,
+    generation: Option<i64>,
+) -> Result<Option<ContextSurfaceResult>, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    read_context_surface(&conn, &session_id, generation)
+}
+
+/// ADR-002：degraded generation 回退 parent / 重建 gen 0 时丢弃
+/// `generation >= from_generation` 的 surface 行与节点。
+#[tauri::command]
+pub(crate) fn discard_context_surfaces_from_generation(
+    workspace_path: String,
+    session_id: String,
+    from_generation: i64,
+) -> Result<(), String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|err| format!("开启事务失败: {err}"))?;
+    tx.execute(
+        "DELETE FROM context_surface_nodes WHERE session_id = ?1 AND generation >= ?2",
+        params![session_id, from_generation],
+    )
+    .map_err(|err| format!("丢弃 surface 节点失败: {err}"))?;
+    tx.execute(
+        "DELETE FROM context_surfaces WHERE session_id = ?1 AND generation >= ?2",
+        params![session_id, from_generation],
+    )
+    .map_err(|err| format!("丢弃 surface generation 失败: {err}"))?;
+    tx.commit()
+        .map_err(|err| format!("提交丢弃 surface 事务失败: {err}"))?;
+    Ok(())
 }
 
 /// 维护路径：按当前 model-visible 投影整体替换某一 generation 的节点
@@ -2293,13 +2347,15 @@ pub(crate) fn save_context_surface(
         .unchecked_transaction()
         .map_err(|err| format!("开启事务失败: {err}"))?;
 
+    // 维护路径只允许更新节点与 render_params（PR3 prune-first）。
+    // compaction_id / parent_generation 是 generation 身份，禁止在此覆写
+    // （ADR-002：degraded 自愈不得破坏 generation 语义；压缩提交走
+    // commit_context_compaction）。
     tx.execute(
         "INSERT INTO context_surfaces
            (session_id, generation, parent_generation, compaction_id, render_params, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(session_id, generation) DO UPDATE SET
-           parent_generation = excluded.parent_generation,
-           compaction_id = excluded.compaction_id,
            render_params = excluded.render_params",
         params![
             session_id,
@@ -2383,6 +2439,44 @@ pub(crate) fn commit_context_compaction(
         .unchecked_transaction()
         .map_err(|err| format!("开启事务失败: {err}"))?;
 
+    // 幂等：同一 compaction id 已 completed（IPC 响应丢失后的重试）直接成功。
+    let existing: Option<(String, Option<i64>)> = tx
+        .query_row(
+            "SELECT status, target_generation FROM context_compactions WHERE id = ?1",
+            params![input.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|err| format!("查询压缩记录失败: {err}"))?;
+    if let Some((status, target_gen)) = existing {
+        if status == "completed" {
+            return Ok(serde_json::json!({
+                "compactionId": input.id,
+                "generation": target_gen.unwrap_or(input.target_generation),
+            }));
+        }
+        return Err(format!(
+            "压缩提交冲突：compaction {} 状态为 {status}，拒绝覆盖",
+            input.id
+        ));
+    }
+
+    // 乐观并发：最新 generation 必须等于 source_generation，否则是陈旧缓存提交。
+    let latest: Option<i64> = tx
+        .query_row(
+            "SELECT MAX(generation) FROM context_surfaces WHERE session_id = ?1",
+            params![input.session_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .map_err(|err| format!("读取最新 surface generation 失败: {err}"))?;
+    let expected_source = latest.unwrap_or(0);
+    if expected_source != input.source_generation {
+        return Err(format!(
+            "压缩提交冲突：期望 source_generation={expected_source}，收到 {}",
+            input.source_generation
+        ));
+    }
+
     tx.execute(
         "INSERT INTO context_compactions
            (id, session_id, status, trigger, source_generation, target_generation,
@@ -2418,14 +2512,12 @@ pub(crate) fn commit_context_compaction(
     )
     .map_err(|err| format!("插入压缩记录失败: {err}"))?;
 
+    // 禁止 ON CONFLICT DO UPDATE：同一 generation 被陈旧提交静默覆盖会破坏
+    // parent/compaction/nodes 身份（乐观并发的写侧）。UNIQUE 冲突视为并发失败。
     tx.execute(
         "INSERT INTO context_surfaces
            (session_id, generation, parent_generation, compaction_id, render_params, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(session_id, generation) DO UPDATE SET
-           parent_generation = excluded.parent_generation,
-           compaction_id = excluded.compaction_id,
-           render_params = excluded.render_params",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             input.session_id,
             input.target_generation,
@@ -2435,7 +2527,16 @@ pub(crate) fn commit_context_compaction(
             unix_millis()?
         ],
     )
-    .map_err(|err| format!("插入新 surface generation 失败: {err}"))?;
+    .map_err(|err| {
+        if err.sqlite_error_code() == Some(rusqlite::ErrorCode::ConstraintViolation) {
+            format!(
+                "压缩提交冲突：generation {} 已存在",
+                input.target_generation
+            )
+        } else {
+            format!("插入新 surface generation 失败: {err}")
+        }
+    })?;
 
     tx.execute(
         "DELETE FROM context_surface_nodes WHERE session_id = ?1 AND generation = ?2",
@@ -2501,6 +2602,8 @@ pub(crate) fn mark_context_compaction_failed(
         .map_err(|err| format!("失败记录 JSON 不合法: {err}"))?;
 
     let (conn, ..) = open_project_db(&workspace_path)?;
+    // 不得把 completed 行翻成 failed：IPC 响应丢失时提交可能已落库，
+    // 审计必须与 active surface 一致（WHERE 使 UPSERT 在 completed 上成为空操作）。
     conn.execute(
         "INSERT INTO context_compactions
            (id, session_id, status, trigger, source_generation,
@@ -2509,7 +2612,8 @@ pub(crate) fn mark_context_compaction_failed(
          ON CONFLICT(id) DO UPDATE SET
            status = 'failed',
            failure_code = excluded.failure_code,
-           failure_message = excluded.failure_message",
+           failure_message = excluded.failure_message
+         WHERE context_compactions.status != 'completed'",
         params![
             input.id,
             input.session_id,
@@ -4806,5 +4910,98 @@ mod tests {
             entry.evidence.as_deref(),
             Some("{\"origin\":\"bash:pnpm test auth\"}")
         );
+    }
+
+    fn compaction_commit_json(id: &str, session_id: &str, source: i64, target: i64) -> String {
+        serde_json::json!({
+            "id": id,
+            "sessionId": session_id,
+            "trigger": "token-limit",
+            "sourceGeneration": source,
+            "targetGeneration": target,
+            "checkpointMessageId": "cp-1",
+            "parentCheckpointMessageId": null,
+            "sourceStartMessageId": "u1",
+            "sourceEndMessageId": "a1",
+            "retainedTailStartMessageId": "u2",
+            "sourceMessageCount": 2,
+            "retainedMessageCount": 1,
+            "estimatedTokensBefore": 100,
+            "estimatedTokensAfter": 40,
+            "sourceTokens": 80,
+            "checkpointTokens": 20,
+            "summaryMode": "local-fallback",
+            "summaryProvider": null,
+            "summaryModel": "local-checkpoint",
+            "createdAt": 1i64,
+            "nodes": [{ "position": 0, "messageId": "cp-1", "nodeKind": "checkpoint" }],
+            "renderParamsJson": "{\"pruneParams\":{\"enabled\":false,\"protectRecentRounds\":0,\"minPrunableChars\":0,\"protectedTools\":[],\"placeholder\":\"\"},\"renderVersion\":1}",
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn commit_context_compaction_rejects_stale_source_generation() {
+        let workspace = TestWorkspace::new("compaction-occ");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        commit_context_compaction(ws.clone(), compaction_commit_json("c1", "s1", 0, 1))
+            .expect("first commit");
+
+        let err = commit_context_compaction(ws.clone(), compaction_commit_json("c2", "s1", 0, 1))
+            .expect_err("stale source must be rejected");
+        assert!(
+            err.contains("source_generation"),
+            "error should mention source_generation, got: {err}"
+        );
+
+        let surface = load_context_surface(ws.clone(), "s1".to_string(), None)
+            .expect("load")
+            .expect("surface");
+        assert_eq!(surface.generation, 1);
+        assert_eq!(surface.compaction_id.as_deref(), Some("c1"));
+    }
+
+    #[test]
+    fn commit_context_compaction_is_idempotent_for_completed_id() {
+        let workspace = TestWorkspace::new("compaction-idempotent");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        commit_context_compaction(ws.clone(), compaction_commit_json("c1", "s1", 0, 1))
+            .expect("first commit");
+        let again = commit_context_compaction(ws.clone(), compaction_commit_json("c1", "s1", 0, 1))
+            .expect("retry of completed id");
+        assert_eq!(again["compactionId"], "c1");
+        assert_eq!(again["generation"], 1);
+    }
+
+    #[test]
+    fn mark_context_compaction_failed_does_not_flip_completed() {
+        let workspace = TestWorkspace::new("compaction-fail-guard");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        commit_context_compaction(ws.clone(), compaction_commit_json("c1", "s1", 0, 1))
+            .expect("commit");
+
+        let failure = serde_json::json!({
+            "id": "c1",
+            "sessionId": "s1",
+            "trigger": "token-limit",
+            "sourceGeneration": 0,
+            "summaryMode": "local-fallback",
+            "createdAt": 1i64,
+            "failureCode": "commit_failed",
+            "failureMessage": "ipc lost",
+        })
+        .to_string();
+        mark_context_compaction_failed(ws.clone(), failure).expect("mark failed is a no-op");
+
+        let rows = load_context_compactions(ws, "s1".to_string(), None).expect("load rows");
+        let row = rows.iter().find(|r| r.id == "c1").expect("row");
+        assert_eq!(row.status, "completed");
+        assert!(row.failure_code.is_none());
     }
 }

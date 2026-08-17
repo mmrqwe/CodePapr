@@ -257,6 +257,7 @@ fn main() {
             db::load_all_project_meta,
             db::load_context_surface,
             db::save_context_surface,
+            db::discard_context_surfaces_from_generation,
             db::commit_context_compaction,
             db::mark_context_compaction_failed,
             db::load_context_compactions,
