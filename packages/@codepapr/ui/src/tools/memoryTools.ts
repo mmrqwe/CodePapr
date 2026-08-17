@@ -1,45 +1,35 @@
 /**
- * 记忆工具（ADR-008 PR4）：memory_write / memory_search / memory_forget /
- * memory_review_candidates。
+ * 记忆工具：memory_write / memory_search / memory_forget / memory_review_candidates。
  *
- * - memory_write：只创建 candidate（pending），绝不直写 stable memory；
- * - memory_search：检索稳定记忆 + checkpoint 事实；同时按 ADR-009 第11条
- *   触发受控 re-recall（order 递增的第二个 RequestContextInsertion，由
- *   Worker 桥回 Agent 的 contextInsertions，每 turn 至多一次）；
- * - memory_forget：active → forgotten（软删除）并重新投影 managed zone；
- * - memory_review_candidates：Agent 侧仅 list/reject；admit（准入）必须由
- *   用户在记忆面板完成——Agent 自我准入会绕过 human-in-the-loop（ADR-008
- *   「user-confirmed」安全边界）。
- *
- * 准入策略仍是唯一防线：本工具创建的候选 trust=derived（agent-proposed），
- * 只有用户审查准入后才进入稳定记忆。
+ * - memory_write：按确定性策略立刻 persist 或 drop，不排队等用户审核；
+ * - memory_search：检索稳定记忆 + checkpoint 事实；可触发受控 re-recall；
+ * - memory_forget：active → forgotten 并重新投影 managed zone；
+ * - memory_review_candidates：列出已写入的记忆（目录，不是审核队列）。
  */
 
 import {
   ToolRegistry,
   asString,
   asOptionalString,
-  asOptionalStringArray,
   envelopeContent,
-  redactSecrets,
   MEMORY_CONTENT_MAX_CHARS,
+  MEMORY_KINDS,
+  type ContentSourceKind,
+  type ContentTrust,
 } from '@codepapr/core';
-import { sha256, estimateTokens } from '@codepapr/common';
+import { estimateTokens } from '@codepapr/common';
 import { toolByName } from './workspaceToolDefinitions';
 import { createId } from '../utils/createId';
 import {
   forgetMemoryEntry,
-  loadMemoryCandidates,
   loadMemoryEntries,
   projectMemoryFile,
-  rejectMemoryCandidate,
-  saveMemoryCandidate,
   saveMemoryRecall,
   searchMemoryForRecall,
-  type PersistedMemoryCandidate,
   type RecallSearchItem,
 } from '../utils/projectStorage';
 import { buildMemoryProjection } from '../utils/memoryLedger';
+import { persistMemoryProposal, type PersistMemoryResult } from '../utils/memoryPersist';
 import {
   buildRecallInsertion,
   buildRecallQuery,
@@ -47,15 +37,7 @@ import {
 } from '../utils/memoryRecall';
 import { withMemoryLock } from '../utils/memoryWriteLock';
 
-const MEMORY_CATEGORIES = new Set([
-  'general',
-  'verification',
-  'decision',
-  'api',
-  'constraint',
-  'preference',
-  'fact',
-]);
+const MEMORY_CATEGORIES = MEMORY_KINDS;
 
 /** 入队尺寸上限与准入门共用 core 常量（MEMORY_CONTENT_MAX_CHARS），
  *  避免「可入队但永不可准入」的契约断裂。 */
@@ -75,66 +57,57 @@ export function isMemoryFilePath(relativePath: string): boolean {
 }
 
 /**
- * 候选入队门槛（非准入门）：风险标记 / 尺寸。准入门（planMemoryAdmission）
- * 在审查准入（memory_review_candidates action=admit）时执行，见下方。
- */
-function assertCandidateQueueable(envelope: ReturnType<typeof envelopeContent>): void {
-  if (envelope.riskFlags.length > 0) {
-    throw new Error(`候选被风险检测拦截: ${envelope.riskFlags.join(',')}`);
-  }
-  const trimmed = envelope.content.trim();
-  if (trimmed.length < 8) {
-    throw new Error('候选内容过短（至少 8 字符）');
-  }
-  if (trimmed.length > MEMORY_WRITE_MAX_CHARS) {
-    throw new Error(`候选内容超过 ${MEMORY_WRITE_MAX_CHARS} 字符上限`);
-  }
-}
-
-/**
- * ADR-008：Agent write/patch 工具写 .CodePapr/memory.md 时拦截，不落盘，
- * 转 memory_candidate（trust=derived，source=agent-proposed）。风险检测是
- * 入队门槛；准入策略在审查时才是真正防线。
+ * ADR-008/010：Agent write/patch 工具写 .CodePapr/memory.md 时拦截，不落盘，
+ * 转自动写入策略（persist 或 drop）。
  */
 export async function proposeMemoryCandidateFromWrite(params: {
   workspacePath: string;
   sessionId?: string;
   content: string;
   origin: string;
-}): Promise<{ candidateId: string; redacted: boolean; deduplicated: boolean }> {
+  source?: ContentSourceKind;
+  trust?: ContentTrust;
+  category?: string;
+}): Promise<{
+  candidateId: string;
+  redacted: boolean;
+  deduplicated: boolean;
+  status: PersistMemoryResult['status'];
+  note: string;
+  projectToBootstrap: boolean;
+}> {
   const content = params.content.trim();
   if (!content) throw new Error('memory.md 写入内容为空');
   const envelope = envelopeContent({
-    source: 'agent-proposed',
-    trust: 'derived',
+    source: params.source ?? 'agent-proposed',
+    trust: params.trust ?? 'derived',
     origin: params.origin,
     content,
   });
-  assertCandidateQueueable(envelope);
-  const redacted = redactSecrets(envelope.content);
-  const candidate = {
-    id: createId(),
-    category: 'general',
-    content: redacted,
-    contentHash: sha256(redacted),
-    confidence: 'reported' as const,
-    trust: envelope.trust,
-    sourceSessionId: params.sessionId,
-    sourceMessageIds: JSON.stringify([]),
-    evidence: JSON.stringify({ origin: params.origin }),
-    riskFlags: JSON.stringify(envelope.riskFlags),
-    createdAt: Date.now(),
-  };
-  const inserted = await saveMemoryCandidate(params.workspacePath, candidate);
+  if (envelope.riskFlags.length > 0) {
+    throw new Error(`候选被风险检测拦截: ${envelope.riskFlags.join(',')}`);
+  }
+  const result = await persistMemoryProposal({
+    workspacePath: params.workspacePath,
+    sessionId: params.sessionId,
+    envelope,
+    category: params.category ?? 'general',
+  });
+  if (result.status === 'dropped') {
+    throw new Error(result.note);
+  }
   return {
-    candidateId: candidate.id,
-    redacted: redacted !== envelope.content,
-    deduplicated: !inserted,
+    candidateId: result.id,
+    redacted: result.redacted,
+    deduplicated: result.status === 'duplicate',
+    status: result.status,
+    note: result.note,
+    projectToBootstrap: Boolean(result.projectToBootstrap),
   };
 }
 
 export const MEMORY_WRITE_INTERCEPT_NOTE =
-  'memory.md 由 CodePapr 双区管理（ADR-008）：Agent 直接写入已拦截并转为记忆候选（pending），未落盘。请改用 memory_write 工具提交记忆；候选需用户在记忆面板审查准入。';
+  'memory.md 由 CodePapr 双区管理：Agent 直接写入已拦截，并按自动策略写入记忆（或因风险丢弃），未落盘原文。请改用 memory_write。';
 
 /** memory_search 创建的 re-recall 审计行 id，按 session 归集；回合结束由
  *  sendMessage 排空并归档（ADR-009 生命周期：turn 结束 status='archived'）。 */
@@ -180,18 +153,6 @@ async function reprojectMemoryManagedZoneUnlocked(workspacePath: string): Promis
   await projectMemoryFile(workspacePath, projection);
 }
 
-function renderCandidateList(candidates: PersistedMemoryCandidate[]): string {
-  if (candidates.length === 0) {
-    return '（无 pending 候选）';
-  }
-  return candidates
-    .map((candidate) => {
-      const preview = candidate.content.replace(/\s+/g, ' ').trim().slice(0, 200);
-      return `- id: ${candidate.id}\n  category: ${candidate.category} | trust: ${candidate.trust} | confidence: ${candidate.confidence}\n  content: ${preview}${candidate.rejectionReason ? `\n  rejectionReason: ${candidate.rejectionReason}` : ''}`;
-    })
-    .join('\n');
-}
-
 function renderSearchResults(query: string, items: RecallSearchItem[]): string {
   const block = renderRecallBlock(
     items.map((item) => ({
@@ -228,46 +189,41 @@ export function registerMemoryTools(
       throw new Error(`未知类别: ${category}（可用：${[...MEMORY_CATEGORIES].join('/')}）`);
     }
     const evidence = asOptionalString(args.evidence)?.trim();
+    const origin =
+      evidence && /^https?:\/\//i.test(evidence) ? evidence : 'memory_write';
 
-    // 入队门槛：风险检测 + 尺寸（准入门在审查时执行）。
     const envelope = envelopeContent({
       source: 'agent-proposed',
       trust: 'derived',
-      origin: 'memory_write',
+      origin,
       content,
     });
-    assertCandidateQueueable(envelope);
-    const redacted = redactSecrets(envelope.content);
-    const candidate = {
-      id: createId(),
-      category,
-      content: redacted,
-      contentHash: sha256(redacted),
-      confidence: 'reported' as const,
-      trust: envelope.trust,
-      sourceSessionId: sessionId,
-      sourceMessageIds: JSON.stringify([]),
-      evidence: JSON.stringify({ origin: 'memory_write', evidence: evidence ?? null }),
-      riskFlags: JSON.stringify(envelope.riskFlags),
-      createdAt: Date.now(),
-    };
-    let inserted: boolean;
-    try {
-      inserted = await saveMemoryCandidate(workspacePath, candidate);
-    } catch (err) {
-      throw new Error(`候选落库失败: ${err instanceof Error ? err.message : String(err)}`);
+    if (envelope.riskFlags.length > 0) {
+      throw new Error(`候选被风险检测拦截: ${envelope.riskFlags.join(',')}`);
     }
-    if (!inserted) {
+
+    const result = await persistMemoryProposal({
+      workspacePath,
+      sessionId,
+      envelope,
+      category,
+    });
+    if (result.status === 'dropped') {
       return {
-        id: candidate.id,
-        status: 'duplicate',
-        note: '相同内容的候选已存在（pending/已准入/已拒绝），未重复入队。',
+        id: result.id || undefined,
+        status: 'dropped',
+        reason: result.reason,
+        note: result.note,
       };
     }
+    if (result.status === 'saved' && result.projectToBootstrap) {
+      await reprojectManagedZone(workspacePath);
+    }
     return {
-      id: candidate.id,
-      status: 'pending',
-      note: '已创建记忆候选（pending）。准入需要用户在记忆面板确认，Agent 不能自我准入。',
+      id: result.id,
+      status: result.status,
+      kind: result.kind,
+      note: result.note,
     };
   });
 
@@ -366,46 +322,33 @@ export function registerMemoryTools(
 
   registry.register(toolByName('memory_review_candidates'), async (args) => {
     const action = (asOptionalString(args.action) ?? 'list').trim() || 'list';
-    const candidateIds = asOptionalStringArray(args.candidateIds) ?? [];
-    const reason = asOptionalString(args.reason)?.trim();
 
-    if (action === 'list') {
-      let candidates: PersistedMemoryCandidate[];
-      try {
-        candidates = await loadMemoryCandidates(workspacePath, 'pending');
-      } catch (err) {
-        throw new Error(`读取候选失败: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return { action, count: candidates.length, candidates: renderCandidateList(candidates) };
-    }
-
-    // ADR-008 安全边界：准入 = user-confirmed。Agent 不允许自我准入
-    // （memory_write → 自我 admit 会绕过 human-in-the-loop，使「候选 only」
-    // 保证失效）；admit 只能在记忆面板由用户操作。
-    if (action === 'admit') {
+    if (action === 'admit' || action === 'reject') {
       throw new Error(
-        '准入需要用户确认：Agent 不能自我准入记忆候选。请告知用户在记忆面板（Memory Ledger）审查准入。'
+        '记忆已自动写入，无需审核。错误或过时的条目请用 memory_forget。'
       );
     }
 
-    if (action === 'reject') {
-      if (candidateIds.length === 0) {
-        throw new Error('reject 需要 candidateIds');
+    if (action === 'list') {
+      let entries: Awaited<ReturnType<typeof loadMemoryEntries>>;
+      try {
+        entries = await loadMemoryEntries(workspacePath, true);
+      } catch (err) {
+        throw new Error(`读取记忆失败: ${err instanceof Error ? err.message : String(err)}`);
       }
-      const results: string[] = [];
-      for (const candidateId of candidateIds) {
-        try {
-          await rejectMemoryCandidate(workspacePath, candidateId, reason);
-          results.push(`rejected: ${candidateId}`);
-        } catch (err) {
-          results.push(
-            `failed: ${candidateId} — ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
+      if (entries.length === 0) {
+        return { action, count: 0, memories: '（暂无稳定记忆）' };
       }
-      return { action, results };
+      const memories = entries
+        .slice(0, 40)
+        .map((entry) => {
+          const preview = entry.content.replace(/\s+/g, ' ').trim().slice(0, 200);
+          return `- id: ${entry.id}\n  category: ${entry.category} | trust: ${entry.trust} | confidence: ${entry.confidence}\n  content: ${preview}`;
+        })
+        .join('\n');
+      return { action, count: entries.length, memories };
     }
 
-    throw new Error(`未知 action: ${action}（可用：list / reject；admit 仅限用户在记忆面板操作）`);
+    throw new Error(`未知 action: ${action}（可用：list）`);
   });
 }

@@ -1,38 +1,28 @@
 /**
- * Memory Ledger 编排（PR4，ADR-008）：主线程 Store 的准入/投影落库路径。
+ * Memory Ledger 编排：主线程 Store 的自动写入 / 投影路径。
  *
- * v1 唯一自动准入来源：执行验证（bash 测试命令成功）。准入策略在
- * utils/memoryLedger 的纯函数层（信封 + 风险标记 + 脱敏 + 裁决），
- * 本文件只做 IPC 编排，失败静默不打断会话。
+ * 回合结束：user zone 同步 → 抽取已验证命令与用户原话 → persist/drop →
+ * 若有 Bootstrap 类新条目则重投影 managed zone。失败静默不打断会话。
  */
 
 import type { ContextMessageLike } from '../../utils/contextCompaction';
 import {
-  buildMemoryCandidateInput,
   buildMemoryProjection,
+  collectUserUtteranceMemoryCandidates,
   collectVerifiedMemoryCandidates,
-  decideMemoryCandidate,
 } from '../../utils/memoryLedger';
-import { createId } from '../../utils/createId';
+import { persistMemoryProposal } from '../../utils/memoryPersist';
 import {
-  admitMemoryCandidate,
   loadMemoryEntries,
   projectMemoryFile,
-  saveMemoryCandidate,
   syncUserZoneToLedger,
 } from '../../utils/projectStorage';
 
-/**
- * 回合结束调用：用户手编 user zone 读入 ledger（ADR-008 第4点，幂等）→
- * 从本轮消息抽取已验证命令 → 候选 → 准入 → 重新投影 memory.md 的
- * managed zone（user zone 由 Rust 侧保留，ADR-008）。
- */
 export async function refreshMemoryLedgerProjection(
   workspacePath: string,
   sessionId: string,
   messages: readonly ContextMessageLike[]
 ): Promise<void> {
-  // 0. user zone → ledger（幂等；失败静默，不阻断后续准入/投影）
   try {
     await syncUserZoneToLedger(workspacePath);
   } catch (err) {
@@ -42,48 +32,38 @@ export async function refreshMemoryLedgerProjection(
     );
   }
 
-  // 1. 候选抽取 + 确定性准入裁决。
-  // 每回合全量重扫历史消息，去重全部依赖 content_hash（Rust 侧）：
-  // - save 对同 hash 候选（pending/admitted/rejected）静默跳过 → 同一命令
-  //   不再每回合重复入队；
-  // - admit 对同 hash 已 forgotten 的条目拒绝、已 active 的条目幂等，
-  //   被遗忘的记忆不会随重扫复活。
-  const candidates = collectVerifiedMemoryCandidates(messages);
-  let admitted = false;
-  for (const { envelope, category, sourceMessageIds } of candidates) {
-    const decision = decideMemoryCandidate(envelope);
-    if (!decision.admitted) {
-      console.warn('[memory-ledger] 候选被拒绝:', decision.reason);
-      continue;
-    }
+  const extracted = [
+    ...collectVerifiedMemoryCandidates(messages),
+    ...collectUserUtteranceMemoryCandidates(messages),
+  ];
+  let shouldProject = false;
+  for (const { envelope, category, sourceMessageIds } of extracted) {
     try {
-      const input = buildMemoryCandidateInput({
+      const result = await persistMemoryProposal({
+        workspacePath,
         sessionId,
         sourceMessageIds,
         envelope,
         category,
       });
-      const inserted = await saveMemoryCandidate(workspacePath, input);
-      if (!inserted) {
-        // 同内容候选已存在（通常已准入）：无新内容，跳过。
-        continue;
+      if (
+        (result.status === 'saved' || result.status === 'stored-as-citation') &&
+        result.projectToBootstrap
+      ) {
+        shouldProject = true;
       }
-      await admitMemoryCandidate(workspacePath, input.id, createId());
-      admitted = true;
     } catch (err) {
       console.warn(
-        '[memory-ledger] 候选落库失败:',
+        '[memory-ledger] 记忆落库失败:',
         err instanceof Error ? err.message : err
       );
     }
   }
 
-  if (!admitted) {
-    // 无新准入：不触碰 memory.md（避免无意义的文件重写）。
+  if (!shouldProject) {
     return;
   }
 
-  // 2. 重新投影 managed zone（token-budgeted；user zone 保留）
   try {
     const entries = await loadMemoryEntries(workspacePath, true);
     const projection = buildMemoryProjection(

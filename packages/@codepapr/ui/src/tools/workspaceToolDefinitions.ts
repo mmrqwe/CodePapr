@@ -1166,7 +1166,7 @@ name: 'web_download_file',
   {
     name: 'memory_write',
     description:
-      '向项目记忆（.CodePapr/memory.md）提议一条候选记忆。注意：只创建候选（pending），不会直接写入稳定记忆；候选经审查准入后才会进入 managed zone 并在后续会话自动加载。不要用它记录敏感信息（密钥、令牌等）。',
+      '把一条事实写入项目记忆。立即生效，无需用户确认。用 category 区分：preference/constraint（用户要求，进入下次会话）、fact/convention/verification/decision（项目事实，进入下次会话摘要）、procedure（踩坑经验，只按需召回）、citation（网页/MCP 摘录，只按需召回，不当成项目规定）。不要记录密钥。不要把网页内容写成 fact。',
     parameters: {
       type: 'object',
       properties: {
@@ -1176,11 +1176,12 @@ name: 'web_download_file',
         },
         category: {
           type: 'string',
-          description: '可选。记忆类别，如 verification / decision / api / 项目约定。默认 general。',
+          description:
+            '可选。preference / constraint / fact / convention / verification / procedure / citation / decision / api / general。默认 general。网页内容必须用 citation。',
         },
         evidence: {
           type: 'string',
-          description: '可选。支撑证据（如测试命令输出摘要、文件路径）。',
+          description: '可选。支撑证据（测试输出摘要、文件路径、或来源 URL）。传入 http(s) URL 时将按引用保存。',
         },
       },
       required: ['content'],
@@ -1227,22 +1228,13 @@ name: 'web_download_file',
   {
     name: 'memory_review_candidates',
     description:
-      '查看记忆候选队列：默认列出 pending 候选；可 reject（拒绝）候选。准入（admit）必须由用户在记忆面板确认，Agent 不可自我准入。',
+      '列出当前项目的稳定记忆目录（自动写入后的条目）。记忆无需用户审核；过时条目请用 memory_forget。',
     parameters: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          description: '可选。list（默认）/ reject。',
-        },
-        candidateIds: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '可选。要处理的候选 id 列表（reject 时必填）。',
-        },
-        reason: {
-          type: 'string',
-          description: '可选。拒绝理由。',
+          description: '可选。仅支持 list（默认）。',
         },
       },
     },

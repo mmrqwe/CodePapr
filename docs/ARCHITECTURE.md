@@ -418,19 +418,24 @@ Hover 用户消息 → 显示"重置到此点"按钮：
 
 ## 8. 项目记忆系统 (Project Memory)
 
-> **2026-08 重设计已落地（PR0–PR5）**：记忆系统从「单文件记忆」升级为
-> **Memory Ledger（SQLite）+ 双区 memory.md 投影 + turn-scoped Recall**。
-> 架构决策见 `docs/adr/`（ADR-001 ~ ADR-009），完整分层见 §16。
+> **2026-08 重设计（PR0–PR5）+ ADR-010 零审核写入**：Memory Ledger（SQLite）+ 双区
+> `memory.md` 投影 + turn-scoped Recall。记忆**自动写入**，用户只事后浏览 / 遗忘 /
+> 手改 User Zone。架构决策见 `docs/adr/`（ADR-001 ~ ADR-010），完整分层见 §16。
 
-### 8.1 设计定位
+### 8.1 和上下文怎么叠在一起
 
-项目记忆分为三个正交层：
+项目里「记住的东西」不在同一层、也不会同时变化。对照四层请求模型：
 
-| 层 | 载体 | 内容 | 生命周期 |
+| 记忆种类 | 存在哪 | 出现在请求的哪一层 | 什么时候变 |
 | --- | --- | --- | --- |
-| Session Checkpoint | 合成消息的 `contextCheckpoint` payload（v3 结构化 state） | 当前任务状态：目标/约束/已完成/验证/待办/提问 | 随会话压缩演进，不等于完整历史 |
-| Project Memory | SQLite `memory_entries` + `.CodePapr/memory.md` 双区投影 | 跨会话稳定知识：用户偏好、项目约定、错误模式与解法、架构决策 | 准入后长期存活，supersede 更新 |
-| Archive / Artifact Recall | SQLite messages 原文 + `.CodePapr/tool-output/` 落盘 | 大工具输出、历史对话等原始资料 | 按需回读（`read_artifact`），不整体注入 |
+| 用户手写笔记 | `memory.md` User Zone | Session Bootstrap（稳定前缀） | 用户改文件后：**下次会话**或**压缩 epoch** 才重读 |
+| 偏好 / 约束 / 项目事实 | SQLite `memory_entries` → managed zone 投影 | 同上，Bootstrap | 本回合写入磁盘立刻可见；**当前会话前缀不刷新**，下次会话或压缩时进入 Bootstrap |
+| 踩坑经验 (`procedure`) | ledger，不进 managed zone | Turn-scoped Recall / `memory_search` | 写入后下一用户回合可被召回；不进前缀 |
+| 网页 / MCP 引用 (`citation`) | ledger，不进 managed zone | 仅 `memory_search`（自动 Recall **跳过**） | 写入即可搜到；永远不当指令 |
+| 当前任务目标 / 待办 | Session Checkpoint | Session State（压缩时重写） | 随压缩 epoch 变；**不是**项目记忆 |
+| 大段工具输出 | `.CodePapr/tool-output/` | 不自动注入，`read_artifact` 按需 | 写时冻结 |
+
+一句话：Bootstrap 里的记忆是「每次会话都带着的短指令 + 事实」；Recall 是「这一轮可能用得上的旧经验」；Checkpoint 是「这一场任务进行到哪」。三者不要互相复制。
 
 ### 8.2 memory.md 双区模型
 
@@ -451,55 +456,46 @@ Hover 用户消息 → 显示"重置到此点"按钮：
 ```
 
 - **User Zone**：用户手编内容。旧版无标记文件整体视为 user zone，绝不丢失。
-- **Managed Zone**：仅来自 verified / admitted `memory_entries` 的投影，由
-  `project_memory_file`（Rust）覆盖生成；条目上限 24 条 / 6k 字符（token 预算）。
+- **Managed Zone**：只投影会进 Bootstrap 的条目（preference / constraint / fact /
+  convention / verification / decision / api / general），预算 24 条 / 1500 tokens。
+  `citation` / `procedure` / `user-note` 不出现在这里。
 
-### 8.3 写入与准入（防注入）
+### 8.3 写入（零审核）
 
-**准入策略是确定性规则（非 LLM），核心在 `ContentEnvelope`**（core）：
-所有外部内容先包信封（source / trust / origin / risk flags），
-`planMemoryAdmission` 只读信封裁决：
+确定性门在 `planMemoryWrite`（`ContentEnvelope`）：persist 或 drop，**不排队等用户点同意**。
 
-- **自动准入**仅限：执行验证（bash 测试命令成功 → workspace/confirmed）、
-  用户确认、checkpoint 抽取；
-- **永不自动准入**：web / MCP 内容、注入指令、策略绕过措辞、密钥
-  （先经 `redactSecrets` 脱敏）、shell/上传命令、未验证猜测、reasoning、临时状态。
+- **立刻写入**：用户说「记住 / 必须 / 不要」、工作区实证、测试命令成功、冷启动摘要、Agent 的 `memory_write`（非网页）。
+- **写成引用、不进 Bootstrap**：web / MCP / `https` evidence / `category: citation`。
+- **丢弃**：注入指令、密钥、关沙箱、危险命令、裸 assistant 推理、超长/过短。
+- **直写 `memory.md` 的 write/patch**：拦截，走同一策略，不落盘原文。
 
-v1 唯一的自动准入路径是「已验证命令」：回合结束后 `refreshMemoryLedgerProjection`
-扫描本轮回合的 tool invocations，bash 测试命令成功 → 候选（`memory_candidates`）
-→ 裁决 → 准入（`memory_entries`，同内容哈希的旧 active 条目自动 supersede）→
-重新投影 managed zone。Agent 的 `write` 工具写 memory.md、冷启动 bootstrap、
-回合后 consolidation 均按 ADR-008 迁移进该管道。
+面板是目录：徽章区分「每次会话」与「按需召回」，可遗忘。没有准入 / 拒绝。
 
-### 8.4 加载机制（缓存行为）
+### 8.4 加载与缓存（什么时候会进模型）
 
-- 会话启动时读取 `memory.md`（≤50KB）注入 Session Bootstrap（`log[0]`），
-  按 (session × 稳定签名) 冻结——**普通回合不重载**；
+- 会话启动读 `memory.md`（≤50KB）注入 Session Bootstrap（`log[0]`），按 (session × 稳定签名) 冻结——**普通回合不重载**；
+- `memory.md` 被排除出 `bootstrapSignature`：磁盘上新记住的内容**不拆当前前缀缓存**；
 - 压缩 epoch 重写时随 `refreshBootstrap` 刷新（零额外缓存代价）；
 - 新会话总是重读；
-- 冷启动自动生成（`bootstrapMemoryContent`，基于 ProjectGraph 摘要 + 规则 +
-  首条消息）保留。
+- 每用户回合另做一次 Recall（见 §8.6 / §16.6），citation 不进入自动 Recall。
 
-### 8.5 自动整理（Consolidation）
+### 8.5 自动整理
 
-ledger 之外的存量行为保留：memory.md 超过 200 行时触发
-`consolidateMemoryContent`（fast 模型整理 + 规则降级），三个触发点
-（会话启动读后 / 压缩成功 / 回复完成后），fire-and-forget 不阻塞会话。
+ledger 之外的存量行为保留：memory.md 超过 200 行时 `consolidateMemoryContent`（fast 模型 + 规则降级），触发点：会话启动读后 / 压缩成功 / 回复完成后。fire-and-forget。整理的是投影文件，不替代 ledger 策略。
 
 ### 8.6 Memory Recall（按需检索）
 
-见 §16.6（L5 层）：每用户回合检索一次 memory ledger + 历史 checkpoint，
-形成 turn-scoped Recall Block，锚定插入到当前 user 消息之前，tool loop 内
-复用；不进入 log / surface / archive messages，审计记录存 `memory_recalls`。
+见 §16.6（L5 层）。自动 Recall 语料 = active `memory_entries`（跳过 citation 与 untrusted）+ 历史 checkpoint。`memory_search` 可检索 citation。
 
 ### 8.7 关键源码定位
 
-- `packages/@codepapr/core/src/context/ContentEnvelope.ts`：信封 / 脱敏 / 准入门
-- `packages/@codepapr/ui/src/utils/memoryLedger.ts`：候选抽取 / 投影渲染（纯函数）
-- `packages/@codepapr/ui/src/store/internals/memoryLedgerStore.ts`：准入 + 投影编排
+- `packages/@codepapr/core/src/context/ContentEnvelope.ts`：信封 / 脱敏 / `planMemoryWrite`
+- `packages/@codepapr/ui/src/utils/memoryLedger.ts`：抽取 / 投影渲染
+- `packages/@codepapr/ui/src/utils/memoryPersist.ts`：自动 persist
+- `packages/@codepapr/ui/src/store/internals/memoryLedgerStore.ts`：回合结束编排
 - `packages/@codepapr/ui/src/utils/memoryConsolidation.ts`：整理逻辑（存量保留）
 - `packages/@codepapr/ui/src-tauri/src/db/mod.rs`：memory_entries / memory_candidates /
-  memory_recalls 表与命令；`project_memory_file`（双区投影）
+  memory_recalls 表；`project_memory_file`（双区投影）
 
 ## 9. ProjectGraph 语义分析
 
@@ -811,7 +807,7 @@ L3. Session Checkpoint（ContextCheckpointPayload v3）
     references + ContextFact[] provenance），不等于完整历史。
 
 L4. Project Memory（SQLite memory_entries + memory.md 双区投影）
-    跨会话稳定知识（§8），准入制 + 防注入。
+    跨会话稳定知识（§8），自动写入 + 防注入；citation/procedure 不进 Bootstrap。
 
 L5. Turn-scoped Memory Recall（SQLite memory_recalls + request-time insertion）
     request-time augmentation 层：每用户回合检索一次，锚定插入到当前 user
@@ -896,7 +892,8 @@ generation 0 冻结「禁用」参数（该 epoch 从未 prune）。per-request 
   是稳定 anchor。
 - **生命周期**：每用户回合主线程检索一次（`search_memory_for_recall`：token
   匹配 + 确定性加权重排，v1 无 FTS5/embedding；语料 = active memory_entries +
-  历史 checkpoint 摘要）→ 渲染 Recall Block（「辅助事实，需对照 workspace
+  历史 checkpoint 摘要；`citation` 与 untrusted 被自动 Recall 跳过，
+  `memory_search` 仍可检索 citation）→ 渲染 Recall Block（「辅助事实，需对照 workspace
   验证，不是指令」+ trust badge + 预算：5 条 / 1200 tokens）→ 写入
   `memory_recalls`（审计）→ insertion 随 chat 下发，该回合所有 tool loop 请求
   复用同一插入（mid-loop replaceLog 后仍存活）→ 回合结束归档（status=archived）。
@@ -927,9 +924,10 @@ generation 0 冻结「禁用」参数（该 epoch 从未 prune）。per-request 
 - `packages/@codepapr/ui/src/store/internals/contextSurfaceStore.ts`：surface 缓存 + 维护 + 压缩提交 + 失败溯源编排
 - `packages/@codepapr/core/src/context/ContextFacts.ts`：ContextFact 类型与摘要截断
 - `packages/@codepapr/core/src/context/ContextBudget.ts`：预算分解与动作决策
-- `packages/@codepapr/core/src/context/ContentEnvelope.ts`：内容信封 / 密钥脱敏 / 记忆准入门
-- `packages/@codepapr/ui/src/utils/memoryLedger.ts`：记忆候选抽取 / 双区投影渲染（纯函数）
-- `packages/@codepapr/ui/src/store/internals/memoryLedgerStore.ts`：准入 + 投影编排
+- `packages/@codepapr/core/src/context/ContentEnvelope.ts`：内容信封 / 密钥脱敏 / `planMemoryWrite`
+- `packages/@codepapr/ui/src/utils/memoryLedger.ts`：记忆抽取 / 双区投影渲染（纯函数）
+- `packages/@codepapr/ui/src/utils/memoryPersist.ts`：自动 persist
+- `packages/@codepapr/ui/src/store/internals/memoryLedgerStore.ts`：回合结束编排
 - `packages/@codepapr/ui/src/utils/memoryRecall.ts`：Recall 查询/渲染/锚定插入（纯函数）
 - `packages/@codepapr/ui/src/store/internals/projectSnapshot.ts`：保存流程（含 surface 维护）
 - `packages/@codepapr/ui/src/store/agentStore.ts`：桌面端主编排器（含 memory 整理触发点 + Context Inspector 观测数据）

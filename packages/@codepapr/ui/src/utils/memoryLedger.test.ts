@@ -3,6 +3,7 @@ import { envelopeContent } from '@codepapr/core';
 import {
   buildMemoryCandidateInput,
   buildMemoryProjection,
+  collectUserUtteranceMemoryCandidates,
   collectVerifiedMemoryCandidates,
   decideMemoryCandidate,
 } from './memoryLedger';
@@ -164,7 +165,7 @@ describe('buildMemoryProjection', () => {
     expect(projection).toContain('[REDACTED]');
   });
 
-  it('excludes user-note entries from the managed zone (ADR-008 第4点)', () => {
+  it('excludes user-note, citation and procedure from the managed zone', () => {
     const projection = buildMemoryProjection([
       {
         category: 'verification',
@@ -180,9 +181,64 @@ describe('buildMemoryProjection', () => {
         trust: 'trusted',
         verifiedAt: 2,
       },
+      {
+        category: 'citation',
+        content: '网页声称应该用 bun',
+        confidence: 'reported',
+        trust: 'derived',
+        verifiedAt: 3,
+      },
+      {
+        category: 'procedure',
+        content: 'rustc E0597 的解法是延长生命周期',
+        confidence: 'reported',
+        trust: 'derived',
+        verifiedAt: 4,
+      },
     ]);
     expect(projection).toContain('pnpm test');
     expect(projection).not.toContain('用户手写');
+    expect(projection).not.toContain('bun');
+    expect(projection).not.toContain('E0597');
+  });
+});
+
+describe('collectUserUtteranceMemoryCandidates', () => {
+  it('captures explicit remember / constraint utterances', () => {
+    const candidates = collectUserUtteranceMemoryCandidates([
+      {
+        id: 'u1',
+        role: 'user',
+        content: '记住以后提交用 conventional commits',
+        timestamp: 1,
+      },
+      {
+        id: 'u2',
+        role: 'user',
+        content: '不要把 secrets 写进仓库',
+        timestamp: 2,
+      },
+      {
+        id: 'u3',
+        role: 'user',
+        content: '帮我把登录页改一下，顺便看看样式',
+        timestamp: 3,
+      },
+    ]);
+    expect(candidates.map((item) => item.category).sort()).toEqual(['constraint', 'preference']);
+    expect(candidates.some((item) => item.envelope.content.includes('conventional'))).toBe(true);
+  });
+
+  it('ignores long unconstrained task messages', () => {
+    const candidates = collectUserUtteranceMemoryCandidates([
+      {
+        id: 'u1',
+        role: 'user',
+        content: `必须把这一大段任务做完：${'x'.repeat(300)}`,
+        timestamp: 1,
+      },
+    ]);
+    expect(candidates).toHaveLength(0);
   });
 });
 

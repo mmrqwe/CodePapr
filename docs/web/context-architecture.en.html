@@ -221,6 +221,36 @@
   footer{border-top:1px solid var(--border);margin-top:50px;padding:28px 0 44px;color:var(--foreground-dim);font-size:0.8rem}
   footer code{color:var(--foreground-muted)}
 
+  /* memory × context */
+  .memsec{padding:46px 0 8px}
+  .memsec h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:8px}
+  .memsec .sub{color:var(--foreground-muted);font-size:0.9rem;margin-bottom:26px;max-width:860px}
+  .memsec h3{font-size:1.08rem;font-weight:700;margin:28px 0 12px;letter-spacing:-0.01em}
+  .memgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:8px 0 8px}
+  @media(max-width:900px){.memgrid{grid-template-columns:1fr}}
+  .memcard{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);border-top:3px solid var(--green)}
+  .memcard.recall{border-top-color:var(--accent)}
+  .memcard.hold{border-top-color:var(--amber)}
+  .memcard .k{font-family:var(--font-mono);font-size:0.68rem;letter-spacing:.12em;color:var(--foreground-dim);font-weight:700}
+  .memcard h5{font-size:1.05rem;font-weight:700;margin:8px 0 10px;letter-spacing:-0.01em}
+  .memcard p{color:var(--foreground-muted);font-size:0.84rem}
+  .memcard p code{color:var(--accent);font-size:0.76rem}
+  .memtable-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);margin:8px 0 8px}
+  .memtable{width:100%;border-collapse:collapse;font-size:0.78rem;min-width:860px}
+  .memtable th,.memtable td{border-bottom:1px solid var(--border);padding:11px 14px;text-align:left;vertical-align:top}
+  .memtable th{background:var(--surface);color:var(--foreground-muted);font-weight:600;font-size:0.7rem;letter-spacing:.04em;text-transform:uppercase}
+  .memtable tr:last-child td{border-bottom:none}
+  .memtable td{color:var(--foreground-muted)}
+  .memtable td:first-child{color:var(--foreground);font-weight:500;white-space:nowrap}
+  .memtable code{font-size:0.72rem;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
+  .timeline{display:grid;gap:0;margin:8px 0 8px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+  .tl{display:grid;grid-template-columns:92px 1fr;gap:0;background:var(--bg-card);border-bottom:1px solid var(--border)}
+  .tl:last-child{border-bottom:none}
+  .tl .t{font-family:var(--font-mono);font-size:0.72rem;color:var(--accent);padding:14px 16px;border-right:1px solid var(--border)}
+  .tl p{padding:14px 18px;color:var(--foreground-muted);font-size:0.84rem}
+  .memnote{padding:16px 20px;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--foreground-muted);font-size:0.84rem;margin-top:8px}
+  .memnote code{color:var(--accent);font-size:0.76rem}
+
   .reveal{opacity:0;transform:translateY(20px);transition:opacity 0.7s var(--easing),transform 0.7s var(--easing)}
   .reveal.visible{opacity:1;transform:none}
 </style>
@@ -237,6 +267,7 @@
       <li><a href="tutorial.en.html">Tutorial</a></li>
       <li><a href="#tiers">Layers</a></li>
       <li><a href="#recall">Recall</a></li>
+      <li><a href="#memory">Memory</a></li>
       <li><a href="#mechanisms">Mechanisms</a></li>
       <li><a href="#pipeline">Priority</a></li>
     </ul>
@@ -251,7 +282,7 @@
   <div class="container">
     <div class="section-label"><span class="dot"></span> CONTEXT WINDOW · CACHE-FIRST</div>
     <h1>Context Layering · <span class="gradient">Persistent Projection × Byte Stability</span></h1>
-    <p>DeepSeek prefix caching matches the request body <strong>byte-by-byte from the front</strong> — the more stable the prefix, the higher the hit rate. CodePapr splits context into four layers: a frozen stable prefix, session state rewritten on compaction (with a persisted Surface), append-only active context, and a per-turn Recall Block. Click any item to expand its injection chain and cache behavior.</p>
+    <p>DeepSeek prefix caching matches the request body <strong>byte-by-byte from the front</strong> — the more stable the prefix, the higher the hit rate. CodePapr splits context into four layers: a frozen stable prefix, session state rewritten on compaction (with a persisted Surface), append-only active context, and a per-turn Recall Block. Project memory <strong>is split across those layers</strong>: short instructions live in Bootstrap, procedures in Recall, web citations in search only. See <a href="#memory">which memory lives where, and when it changes</a>. Click any item to expand its injection chain and cache behavior.</p>
     <div class="legend">
       <span class="lg"><i style="background:var(--green)"></i>Stable · cache hit</span>
       <span class="lg"><i style="background:var(--amber)"></i>Slow-changing · epoch rewrite</span>
@@ -348,8 +379,8 @@
             <div class="src"><span class="chip">.CodePapr/memory.md</span><span class="chip">memory_entries ledger</span><span class="chip">memorySection</span></div>
             <div class="cchip c-hit">frozen outside signature</div>
           </div>
-          <div class="desc">Cross-session project knowledge, rendered as "## Project Memory". Since 2026-08 it is a <b>Memory Ledger (SQLite) + dual-zone projection</b>: User Zone (hand-edited, never overwritten by the projector) + Managed Zone (only verified entries admitted into <code>memory_entries</code>, regenerated by <code>project_memory_file</code>, budget 24 entries / 6k chars). <b>Admission is deterministic</b> (<code>ContentEnvelope</code> + risk flags + secret redaction): execution-verified / user-confirmed content may auto-admit; web / MCP / injection instructions / secrets never do. Frozen between runs via <code>resolveSessionBootstrap</code> (outside signature → prefix cache intact). <b>Refreshed at mid-loop compaction</b> (epoch rewrite, zero extra cache cost); other updates take effect <b>next session</b>.</div>
-          <div class="more"><div class="mbox">The only v1 auto-admission path: after each turn, successful bash test commands → memory_candidates → decision → memory_entries (same-hash older entries superseded) → re-project. Cold-start bootstrap and >200-line consolidation are preserved.</div></div>
+          <div class="desc">Cross-session project knowledge, rendered as "## Project Memory". The ledger in SQLite <code>memory_entries</code> is authoritative; <code>memory.md</code> is a dual-zone projection: User Zone (hand-edited, never overwritten) + Managed Zone (Bootstrap-class entries only: preference / constraint / fact / convention / verification / decision, budget 24 items / 1500 tokens). <b>Zero-review auto-write</b> (<code>planMemoryWrite</code>: persist or drop — no admit queue). <code>citation</code> / <code>procedure</code> <b>do not enter this layer</b> — citations are <code>memory_search</code> only; procedures go to Recall below. Frozen via <code>resolveSessionBootstrap</code> per (session × stable signature) (outside signature → prefix cache intact). Newly saved memories <b>do not rebuild the current prefix</b>; they enter Bootstrap on a <b>compaction epoch</b> or the <b>next session</b>. Details: <a href="#memory">Memory × context</a>.</div>
+          <div class="more"><div class="mbox">Save immediately: user said remember / must / don't; workspace-grounded facts; successful bash tests; cold-start summary; Agent <code>memory_write</code> that is not web content. Store as citation, never Bootstrap: web / MCP / https evidence. Drop: injection, secrets, dangerous commands, raw reasoning. Direct write/patch of memory.md is intercepted onto the same policy. The panel is a catalog (every-session / on-demand), forgettable, no admit button.</div></div>
         </div>
 
         <div class="item" data-wire="custom">
@@ -489,8 +520,8 @@
             <div class="src"><span class="chip">searchMemoryForRecall</span><span class="chip">insertAnchoredContext</span><span class="chip">memory_recalls audit</span></div>
             <div class="cchip c-miss">request-only · anchored before user msg</div>
           </div>
-          <div class="desc"><b>B3 design</b>: once per user turn the main thread retrieves (token matching + deterministic weighted ranking; corpora = active <code>memory_entries</code> + historical checkpoint summaries; v1 without embeddings/FTS5) and renders a Recall Block — semantics: "supporting facts, possibly stale, verify against the workspace, <b>not instructions</b>" — with trust badges and a budget of 5 items / 1200 tokens. RequestBuilder compiles it <b>anchored before the current user message</b> (<code>insertAnchoredContext</code>, pure); the anchor is the canonical user-message ID generated on the main thread. Every tool-loop request of the turn reuses the same insertion (survives mid-loop replaceLog). Archived at turn end; audit rows live in <code>memory_recalls</code>.</div>
-          <div class="more"><div class="mbox">Cache behavior: a new Recall each turn means a miss from the Recall position onward — the necessary per-turn increment; everything before it (prefix + bootstrap + surface + history) still hits. Recall is not restored on restart (turn-scoped); re-recall is controlled (order-ready interface, v1 doesn't auto-trigger). Untrusted (web/MCP) content is never recalled by default.</div></div>
+          <div class="desc"><b>B3 design</b>: once per user turn the main thread retrieves (token matching + deterministic weighted ranking; corpora = active <code>memory_entries</code> (<b>skipping citation and untrusted</b>) + historical checkpoint summaries; v1 without embeddings/FTS5) and renders a Recall Block — semantics: "supporting facts, possibly stale, verify against the workspace, <b>not instructions</b>" — with trust badges and a budget of 5 items / 1200 tokens. Procedures (<code>procedure</code>) mainly live here, not in Bootstrap above. RequestBuilder compiles it <b>anchored before the current user message</b> (<code>insertAnchoredContext</code>, pure); the anchor is the canonical user-message ID generated on the main thread. Every tool-loop request of the turn reuses the same insertion (survives mid-loop replaceLog). Archived at turn end; audit rows live in <code>memory_recalls</code>.</div>
+          <div class="more"><div class="mbox">Cache behavior: a new Recall each turn means a miss from the Recall position onward — the necessary per-turn increment; everything before it (prefix + bootstrap + surface + history) still hits. Recall is not restored on restart (turn-scoped); re-recall is controlled (order-ready interface, v1 doesn't auto-trigger). Citations (web/MCP) are excluded from automatic Recall but remain searchable via <code>memory_search</code>. Kind map: <a href="#memory">Memory × context</a>.</div></div>
         </div>
       </section>
     </main>
@@ -519,6 +550,125 @@
     </aside>
   </div>
 
+  <!-- MEMORY × CONTEXT -->
+  <section class="memsec reveal" id="memory">
+    <h2>Memory × context: which kind lives where</h2>
+    <p class="sub">Memory is not “one file dumped into the model”. The ledger in SQLite <code>memory_entries</code> is authoritative; <code>.CodePapr/memory.md</code> is a dual-zone projection for humans. A given fact appears in <em>one</em> of the four request layers — or not in the request at all, waiting in the ledger for search.</p>
+
+    <div class="memgrid">
+      <div class="memcard">
+        <div class="k">TIER 01 · BOOTSTRAP</div>
+        <h5>Carried every session</h5>
+        <p>User-zone notes plus Managed Zone preferences, constraints, project facts, conventions, verifications, decisions. Injected as <code>log[0]</code>, frozen per (session × stable signature). Disk changes <strong>do not rebuild the current prefix</strong>; a compaction epoch or a new session refreshes it.</p>
+      </div>
+      <div class="memcard recall">
+        <div class="k">TIER 04 · RECALL</div>
+        <h5>Might help this turn</h5>
+        <p>Mostly <code>procedure</code> (hard-won fixes) plus other active entries (citations skipped). Retrieved once per user turn, anchored before the current user message, byte-stable across the tool loop, never in log / surface.</p>
+      </div>
+      <div class="memcard hold">
+        <div class="k">LEDGER ONLY</div>
+        <h5>Not auto-injected</h5>
+        <p><code>citation</code> (web / MCP) is <code>memory_search</code> only. Forgotten rows, policy drops, the current-task checkpoint, and spilled tool output are not “every-session project memory”.</p>
+      </div>
+    </div>
+
+    <h3>Kind map: stored in · request layer · when it reaches the model · how it changes</h3>
+    <div class="memtable-wrap">
+      <table class="memtable">
+        <thead>
+          <tr>
+            <th>Kind</th>
+            <th>Stored in</th>
+            <th>Request layer</th>
+            <th>When it reaches this session</th>
+            <th>How it changes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Hand-written notes</td>
+            <td><code>memory.md</code> User Zone</td>
+            <td>Session Bootstrap (stable prefix)</td>
+            <td>Read at session start; compaction runs <code>refreshBootstrap</code></td>
+            <td>Your file edit hits disk immediately. The projector never overwrites this zone. Current prefix stays frozen.</td>
+          </tr>
+          <tr>
+            <td>Preference / constraint</td>
+            <td>ledger → Managed Zone</td>
+            <td>Same, Bootstrap</td>
+            <td>Written to disk this turn; enters the prefix on the <strong>next Bootstrap refresh</strong></td>
+            <td>You said remember / must / don't, or Agent <code>memory_write</code>. Persists immediately — no admit click.</td>
+          </tr>
+          <tr>
+            <td>Fact / convention / verification / decision</td>
+            <td>ledger → Managed Zone</td>
+            <td>Bootstrap</td>
+            <td>Same: disk changes now, prefix later</td>
+            <td>Workspace-grounded evidence, successful bash tests, cold-start summary. Same-hash active rows are superseded.</td>
+          </tr>
+          <tr>
+            <td>Procedure <code>procedure</code></td>
+            <td>ledger, <strong>not</strong> Managed Zone</td>
+            <td>Turn-scoped Recall / <code>memory_search</code></td>
+            <td><strong>Next user turn</strong> after save, if retrieval hits</td>
+            <td>Same error twice, etc. Never in the every-session prefix — old pitfalls are not treated as standing orders.</td>
+          </tr>
+          <tr>
+            <td>Web / MCP citation <code>citation</code></td>
+            <td>ledger, not Managed Zone</td>
+            <td><code>memory_search</code> only</td>
+            <td>Only if the model searches</td>
+            <td>Source is web / MCP, or evidence contains <code>https</code>. Never Bootstrap; auto-Recall skips them too.</td>
+          </tr>
+          <tr>
+            <td>Forgotten</td>
+            <td>ledger <code>status=forgotten</code></td>
+            <td>Not in the request</td>
+            <td>—</td>
+            <td>Forget in the panel. The same content hash will not be written again.</td>
+          </tr>
+          <tr>
+            <td>Policy drop</td>
+            <td>Not stored</td>
+            <td>Not in the request</td>
+            <td>—</td>
+            <td>Injection, secrets, disable-sandbox, dangerous commands, raw assistant reasoning, oversize / undersize. <code>planMemoryWrite</code> drops them.</td>
+          </tr>
+          <tr>
+            <td>Current-task goal / todos</td>
+            <td>Session Checkpoint</td>
+            <td>Session State (rewritten on compaction)</td>
+            <td>After compaction, as the checkpoint</td>
+            <td>Evolves with this task. <strong>Not</strong> cross-session project memory — do not copy todos into memory.md.</td>
+          </tr>
+          <tr>
+            <td>Large tool output</td>
+            <td><code>.CodePapr/tool-output/</code></td>
+            <td>Not auto-injected</td>
+            <td><code>read_artifact</code> on demand</td>
+            <td>Frozen at write time. This is Archive, not memory.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Timeline after something is remembered</h3>
+    <div class="timeline">
+      <div class="tl"><span class="t">T0 this turn</span><p>User utterance or Agent <code>memory_write</code> / intercepted write → envelope (source / trust / origin / risk) → <code>planMemoryWrite</code>: persist or drop. There is no pending-review queue.</p></div>
+      <div class="tl"><span class="t">T1 disk</span><p>Persisted rows enter <code>memory_entries</code> (same-hash active rows superseded). Bootstrap-class items immediately re-project the Managed Zone; the User Zone is left alone.</p></div>
+      <div class="tl"><span class="t">T2 current prefix</span><p><strong>Unchanged.</strong> Bootstrap is frozen for the session; <code>memory.md</code> is outside the signature. A newly saved preference is not in the prefix yet — that is how DeepSeek / Claude prefix cache stays intact.</p></div>
+      <div class="tl"><span class="t">T3 next turn</span><p>If it is a <code>procedure</code> and retrieval hits → it enters this turn’s Recall Block (before the user message). Citations still skip auto-Recall.</p></div>
+      <div class="tl"><span class="t">T4 compact</span><p>Epoch rewrite runs <code>refreshBootstrap</code>: new Managed Zone facts enter the stable prefix. The checkpoint is rewritten at the same time — that is task progress, not memory.</p></div>
+      <div class="tl"><span class="t">T5 new session</span><p>Always re-reads <code>memory.md</code>. On cold start, if the file is empty and a project graph exists, a structure / stack summary is written to the ledger and enters Bootstrap next session or after compaction.</p></div>
+    </div>
+
+    <h3>Boundary with AGENTS.md and the Checkpoint</h3>
+    <div class="memnote">
+      <code>AGENTS.md</code> is the project rules you wrote, <strong>inside</strong> the stable-prefix signature — editing it intentionally busts the cache. <code>memory.md</code> is auto-accumulated facts and preferences, <strong>outside</strong> the signature — editing it does not rebuild the current prefix. The Checkpoint is “where this task is”; it is rewritten on compaction — do not copy todos into memory. Web content is never treated as instructions: it is stored as a citation for search, never Bootstrap, never auto-Recall.
+    </div>
+  </section>
+
   <!-- MECHANISMS -->
   <section class="mech reveal" id="mechanisms">
     <h2>Key Mechanisms</h2>
@@ -526,7 +676,7 @@
     <div class="ledger">
       <div class="led">
         <div class="no">M·01</div><h5>Freeze Outside Signature</h5>
-        <p>memory.md and project-graph are volatile on disk but excluded from <code>bootstrapSignature</code>. <code>resolveSessionBootstrap</code> memoizes the bootstrap by (session × stable signature) — disk changes don't rebuild, updates take effect next session. Preserves the entire prefix cache.</p>
+        <p>memory.md and project-graph are volatile on disk but excluded from <code>bootstrapSignature</code>. <code>resolveSessionBootstrap</code> memoizes the bootstrap by (session × stable signature) — newly saved memories hit disk immediately but <b>do not rebuild the current prefix</b>. Bootstrap-class memory enters the model on a compaction epoch (<code>refreshBootstrap</code>) or the next session; procedures can enter Recall on the next user turn. Preserves the entire prefix cache.</p>
       </div>
       <div class="led">
         <div class="no">M·02</div><h5>Write-Time 3-Tier Truncation</h5>
@@ -554,7 +704,7 @@
       </div>
       <div class="led">
         <div class="no">M·08</div><h5>Turn-scoped Recall (B3)</h5>
-        <p>The Recall Block is <b>request-time augmentation</b>: retrieved once per user turn from the memory ledger + historical checkpoints, anchored before the current user message, byte-stable across the tool loop; never enters AppendOnlyLog / archive messages / surface (no lingering, no compaction-transcript or round-count pollution); audited in <code>memory_recalls</code>. Not restored on restart; controlled re-recall at most once. Injection-safe: untrusted content is never recalled by default, and the rendered semantics are "supporting facts, verify them" — not instructions.</p>
+        <p>The Recall Block is <b>request-time augmentation</b>: retrieved once per user turn from the memory ledger (skipping citation / untrusted) + historical checkpoints, anchored before the current user message, byte-stable across the tool loop; never enters AppendOnlyLog / archive messages / surface (no lingering, no compaction-transcript or round-count pollution); audited in <code>memory_recalls</code>. Not restored on restart; controlled re-recall at most once. Rendered semantics are "supporting facts, verify them" — not instructions. Which kinds enter Recall: <a href="#memory">Memory × context</a>.</p>
       </div>
     </div>
   </section>
@@ -576,7 +726,7 @@
 
 <footer>
   <div class="container">
-    CodePapr &mdash; Context layering visualization · verified against source (<code>promptSystem.ts</code> / <code>contextCompaction.ts</code> / <code>contextStateMerge.ts</code> / <code>contextSurfaceStore.ts</code> / <code>memoryLedger.ts</code> / <code>memoryRecall.ts</code> / <code>agentStore.ts</code> / <code>toolOutputTruncation.ts</code> / <code>db/mod.rs</code>). Four-layer model = Stable Prefix (frozen) / Session State (epoch + persisted Surface) / Active Context (append-only) / Turn-scoped Recall (request-only anchored insertion). Checkpoints are v3 structured state (13 sections + provenance); compaction commits in a single transaction; memory.md is the dual-zone projection of the Memory Ledger. Threshold unit: characters. Bootstrap injected with <code>role: assistant</code> + <code>isPrefixSystem</code>, Claude extracts as system.
+    CodePapr &mdash; Context layering visualization · verified against source (<code>promptSystem.ts</code> / <code>contextCompaction.ts</code> / <code>contextStateMerge.ts</code> / <code>contextSurfaceStore.ts</code> / <code>ContentEnvelope.ts</code> / <code>memoryLedger.ts</code> / <code>memoryPersist.ts</code> / <code>memoryRecall.ts</code> / <code>agentStore.ts</code> / <code>toolOutputTruncation.ts</code> / <code>db/mod.rs</code>). Four-layer model = Stable Prefix (frozen) / Session State (epoch + persisted Surface) / Active Context (append-only) / Turn-scoped Recall (request-only anchored insertion). Checkpoints are v3 structured state (13 sections + provenance); compaction commits in a single transaction; memory.md is the dual-zone projection of the Memory Ledger (zero-review writes; citation/procedure never enter Bootstrap). Threshold unit: characters. Bootstrap injected with <code>role: assistant</code> + <code>isPrefixSystem</code>, Claude extracts as system.
   </div>
 </footer>
 

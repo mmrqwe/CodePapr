@@ -39,12 +39,12 @@ import { type WorkspaceToolContext } from './workspaceToolContext';
 import {
   isMemoryFilePath,
   proposeMemoryCandidateFromWrite,
+  reprojectMemoryManagedZone,
   MEMORY_WRITE_INTERCEPT_NOTE,
 } from './memoryTools';
 
 /**
- * ADR-008：memory.md 的 Agent 直接写入被拦截 → 转候选。返回 true 表示已
- * 拦截并完成转存（调用方应直接返回拦截结果，不继续走写盘路径）。
+ * ADR-008/010：memory.md 的 Agent 直接写入被拦截 → 自动写入策略。
  */
 async function interceptMemoryFileWrite(
   ctx: WorkspaceToolContext,
@@ -54,13 +54,16 @@ async function interceptMemoryFileWrite(
   if (!isMemoryFilePath(relativePath)) {
     return { intercepted: false };
   }
-  const { candidateId } = await proposeMemoryCandidateFromWrite({
+  const result = await proposeMemoryCandidateFromWrite({
     workspacePath: ctx.workspace(),
     sessionId: ctx.sessionId,
     content,
     origin: 'workspace-write-tool',
   });
-  return { intercepted: true, candidateId };
+  if (result.status === 'saved' && result.projectToBootstrap) {
+    await reprojectMemoryManagedZone(ctx.workspace());
+  }
+  return { intercepted: true, candidateId: result.candidateId };
 }
 
 /**
@@ -452,21 +455,24 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
 
     const diff = applySearchReplaceDiff(fileContents, parsed.patches);
 
-    // ADR-008：memory.md 拦截 → 候选（不落盘）；其余文件正常走写盘。
+    // ADR-008/010：memory.md 拦截 → 自动写入（不落盘）；其余文件正常走写盘。
     const interceptedFiles: ApplyDiffFileResult[] = [];
     const writeFiles = diff.files.filter((file) => !isMemoryFilePath(file.path));
     for (const file of diff.files) {
       if (!isMemoryFilePath(file.path)) continue;
-      const { candidateId } = await proposeMemoryCandidateFromWrite({
+      const result = await proposeMemoryCandidateFromWrite({
         workspacePath: workspace(),
         sessionId: toolSessionId,
         content: file.content,
         origin: 'workspace-apply-diff-tool',
       });
+      if (result.status === 'saved' && result.projectToBootstrap) {
+        await reprojectMemoryManagedZone(workspace());
+      }
       interceptedFiles.push({
         path: file.path,
         intercepted: true,
-        candidateId,
+        candidateId: result.candidateId,
         patches: file.patches,
         replacements: file.replacements,
         bytes: 0,

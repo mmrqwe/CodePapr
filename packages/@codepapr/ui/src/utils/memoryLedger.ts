@@ -1,21 +1,21 @@
 /**
- * Memory Ledger（PR4）：候选抽取、准入、双区投影渲染的纯函数层。
+ * Memory Ledger（PR4）：候选抽取、自动写入、双区投影渲染的纯函数层。
  *
- * 准入策略（ADR-008，不变式 9）：只自动准入「执行验证 / 用户确认 / 可信项目
- * 证据」来源；web/MCP/注入/密钥/策略绕过永不自准入。基线判定确定性，不依赖
- * LLM。IPC 编排在 store 层（sendMessage），本文件纯函数可单测。
+ * 写入策略（ADR-010）：确定性 persist / drop，不产生用户审核队列。
+ * web/MCP 进 citation（不进 Bootstrap）；风险标记直接丢弃。
  */
 
 import {
   envelopeContent,
-  planMemoryAdmission,
+  planMemoryWrite,
   redactSecrets,
   type ContentEnvelope,
-  type MemoryAdmissionResult,
+  type MemoryWriteDecision,
 } from '@codepapr/core';
 import { sha256, estimateTokens } from '@codepapr/common';
 import { createId } from './createId';
 import { TEST_COMMAND_PATTERN } from './contextClassification';
+import { isSessionBootstrapMessage } from './contextSurface';
 import type { ContextMessageLike } from './contextCompaction';
 
 export const MEMORY_MANAGED_ZONE_MAX_ENTRIES = 24;
@@ -23,7 +23,14 @@ export const MEMORY_MANAGED_ZONE_MAX_ENTRIES = 24;
  *  CJK 每字符 3 字节，字符数截断会低估实际注入 token，P2-2 修正）。 */
 export const MEMORY_MANAGED_ZONE_MAX_TOKENS = 1_500;
 
-/** 已验证命令 → 记忆候选（PR4 唯一 v1 自动准入来源：执行验证）。 */
+const REMEMBER_PATTERN =
+  /记住|请记住|记得|以后都|往后都|下次请|please remember|remember (that|this|to)|from now on|always use|never (use|do)/i;
+const CONSTRAINT_PATTERN =
+  /必须|务必|不要|禁止|避免|只能|不得|must|should not|avoid|required|forbidden|never/i;
+
+const MANAGED_ZONE_EXCLUDED = new Set(['user-note', 'citation', 'procedure']);
+
+/** 已验证命令 → 记忆候选（执行验证，自动 persist）。 */
 export function collectVerifiedMemoryCandidates(
   messages: readonly ContextMessageLike[]
 ): Array<{
@@ -68,12 +75,59 @@ export function collectVerifiedMemoryCandidates(
   return candidates;
 }
 
-/** 准入裁决 + 脱敏后的最终内容（供落库）。 */
-export function decideMemoryCandidate(env: ContentEnvelope): MemoryAdmissionResult & {
+/** 用户原话「记住 / 必须 / 不要」→ 指令类记忆，自动 persist。 */
+export function collectUserUtteranceMemoryCandidates(
+  messages: readonly ContextMessageLike[]
+): Array<{
+  envelope: ContentEnvelope;
+  category: string;
+  sourceMessageIds: string[];
+}> {
+  const candidates: Array<{
+    envelope: ContentEnvelope;
+    category: string;
+    sourceMessageIds: string[];
+  }> = [];
+  for (const message of messages) {
+    if (message.role !== 'user') continue;
+    if (isSessionBootstrapMessage(message)) continue;
+    const content = (message.content ?? '').trim();
+    if (!content) continue;
+    const remembered = REMEMBER_PATTERN.test(content);
+    const constrained = CONSTRAINT_PATTERN.test(content);
+    if (!remembered && !constrained) continue;
+    if (!remembered && content.length > 240) continue;
+    const envelope = envelopeContent({
+      source: 'user',
+      trust: 'trusted',
+      origin: `user:${message.id}`,
+      content: content.slice(0, 500),
+    });
+    candidates.push({
+      envelope,
+      category: constrained ? 'constraint' : 'preference',
+      sourceMessageIds: [message.id],
+    });
+  }
+  return candidates;
+}
+
+/** 写入裁决 + 脱敏后的最终内容（供落库）。 */
+export function decideMemoryCandidate(
+  env: ContentEnvelope,
+  kind?: string
+): MemoryWriteDecision & {
+  admitted: boolean;
   redactedContent: string;
+  reason?: string;
 } {
-  const admission = planMemoryAdmission(env);
-  return { ...admission, redactedContent: redactSecrets(env.content) };
+  const decision = planMemoryWrite({ envelope: env, kind });
+  return {
+    ...decision,
+    admitted: decision.action === 'persist',
+    redactedContent: redactSecrets(env.content),
+    reason: decision.action === 'drop' ? decision.reason : undefined,
+  };
 }
 
 export interface ProjectionEntry {
@@ -97,7 +151,7 @@ export function buildMemoryProjection(entries: readonly ProjectionEntry[]): stri
   const maxTokens = MEMORY_MANAGED_ZONE_MAX_TOKENS;
 
   for (const entry of entries) {
-    if (entry.category === 'user-note') continue;
+    if (MANAGED_ZONE_EXCLUDED.has(entry.category)) continue;
     if (lines.length >= maxEntries) break;
     const content = redactSecrets(entry.content).replace(/\s+/g, ' ').trim();
     if (!content) continue;
@@ -127,13 +181,14 @@ export function buildMemoryCandidateInput(params: {
   sourceMessageIds: string[];
   envelope: ContentEnvelope;
   category: string;
+  confidence?: 'confirmed' | 'reported';
   createdAt?: number;
 }): {
   id: string;
   category: string;
   content: string;
   contentHash: string;
-  confidence: 'confirmed';
+  confidence: 'confirmed' | 'reported';
   trust: 'trusted' | 'workspace' | 'derived' | 'untrusted';
   sourceSessionId: string;
   sourceMessageIds: string;
@@ -147,7 +202,7 @@ export function buildMemoryCandidateInput(params: {
     category: params.category,
     content,
     contentHash: sha256(content),
-    confidence: 'confirmed',
+    confidence: params.confidence ?? 'confirmed',
     trust: params.envelope.trust,
     sourceSessionId: params.sessionId,
     sourceMessageIds: JSON.stringify(params.sourceMessageIds),

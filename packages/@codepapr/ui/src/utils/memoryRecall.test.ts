@@ -3,6 +3,7 @@ import {
   buildRecallInsertion,
   buildRecallQuery,
   estimateRecallItemTokens,
+  filterAutoRecallItems,
   MAX_RECALL_ITEMS,
   MAX_RECALL_ITEM_TOKENS,
   MAX_RECALL_TOKENS,
@@ -176,5 +177,16 @@ describe('truncateToMaxTokens', () => {
     const truncated = truncateToMaxTokens(text, MAX_RECALL_ITEM_TOKENS);
     expect(truncated.length).toBeGreaterThan(350);
     expect(truncated.length).toBeLessThan(800);
+  });
+});
+
+describe('filterAutoRecallItems', () => {
+  it('drops citations from automatic recall but keeps facts and procedures', () => {
+    const filtered = filterAutoRecallItems([
+      { title: 'fact', content: 'pnpm' },
+      { title: 'citation', content: 'blog' },
+      { title: 'procedure', content: 'E0597' },
+    ]);
+    expect(filtered.map((item) => item.title)).toEqual(['fact', 'procedure']);
   });
 });

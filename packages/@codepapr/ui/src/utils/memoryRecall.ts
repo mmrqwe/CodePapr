@@ -14,8 +14,11 @@ export const MAX_RECALL_ITEMS = 5;
 export const MAX_RECALL_TOKENS = 1_200;
 /** ADR-009 第10条：单条 recall item ≤ 350 token（字节口径，非字符数）。 */
 export const MAX_RECALL_ITEM_TOKENS = 350;
-export const RETRIEVAL_STRATEGY = 'like-token-v1';
-export const RETRIEVAL_VERSION = 1;
+export const AUTO_RECALL_EXCLUDED_CATEGORIES = new Set(['citation']);
+
+export function filterAutoRecallItems<T extends { title: string }>(items: readonly T[]): T[] {
+  return items.filter((item) => !AUTO_RECALL_EXCLUDED_CATEGORIES.has(item.title));
+}
 
 /** Recall 预算下限：低于该值不值得注入，直接跳过本轮 Recall。 */
 export const MIN_RECALL_BUDGET_TOKENS = 200;

@@ -409,11 +409,18 @@ export type {
   ContentEnvelope,
   EnvelopeInput,
   MemoryAdmissionResult,
+  MemoryKind,
+  MemoryWriteDecision,
 } from "./context/ContentEnvelope";
 export {
   envelopeContent,
   redactSecrets,
   planMemoryAdmission,
+  planMemoryWrite,
+  normalizeMemoryKind,
+  memoryProjectsToBootstrap,
   MEMORY_CONTENT_MAX_CHARS,
   MEMORY_CONTENT_MIN_CHARS,
+  MEMORY_KINDS,
+  BOOTSTRAP_EXCLUDED_MEMORY_KINDS,
 } from "./context/ContentEnvelope";

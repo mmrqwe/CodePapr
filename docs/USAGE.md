@@ -280,32 +280,26 @@ Hover 任意用户消息 → 下方出现"重置到此点"和"复制"按钮：
 - 搜索结果最多 50 条，超出时提示细化关键词
 - 搜索面板**视口居中**弹出，300ms 防抖，仅在该 Tab 激活时才执行搜索
 
-## 项目记忆（自动整理）
+## 项目记忆（零审核自动写入）
 
-`.CodePapr/memory.md` 是跨会话长期记忆，存放用户画像、偏好、项目约定、错误模式与解法、架构决策。
+项目记忆不是「一个 `memory.md` 整段塞进模型」。权威数据在 SQLite `memory_entries`；`.CodePapr/memory.md` 只是双区投影。不同种类的记忆进上下文的**不同层**，变化时机也不一样。
 
-**写入**：Agent 在以下场景下自动追加（用通用 `write` 工具）：
+| 种类 | 存在哪 | 进哪一层 | 何时进当前会话的模型 | 怎么变 |
+|---|---|---|---|---|
+| 用户手写笔记 | `memory.md` User Zone | Session Bootstrap（稳定前缀） | 会话启动读入；压缩 epoch 会刷新 | 你改文件立刻落盘；**当前会话前缀不重建**，下次会话或压缩后才带上 |
+| 偏好 / 约束 / 项目事实 | ledger → Managed Zone | 同上，Bootstrap | 同上：本回合写入磁盘，**下一次 Bootstrap 刷新**才进前缀 | 你说「记住 / 必须 / 不要」、工作区实证、测试成功、冷启动、Agent `memory_write` → 立刻 persist，无需点同意 |
+| 踩坑经验 (`procedure`) | ledger，**不进** Managed Zone | Turn-scoped Recall / `memory_search` | 写入后的**下一用户回合**，若检索命中 | 同一错误踩两次等；不进每次会话的前缀 |
+| 网页 / MCP 引用 (`citation`) | ledger，不进 Managed Zone | 仅 `memory_search` | 模型主动搜索才会看到 | web / MCP / `https` 证据；**永不进 Bootstrap，自动 Recall 也跳过** |
+| 当前任务目标 / 待办 | Session Checkpoint | Session State | 压缩后作为检查点 | 随压缩 epoch 变；**不是**跨会话项目记忆 |
+| 大段工具输出 | `.CodePapr/tool-output/` | 不自动注入 | `read_artifact` 按需 | 写时冻结 |
 
-1. 发现项目目录结构、技术栈、构建/lint/test 命令等值得跨会话复用的事实
-2. 同一错误在本次会话踩了两次
-3. 发现项目特有的构建/部署/配置约定
-4. 用户明确要求记住
+**写入（零审核）**：确定性门 `planMemoryWrite` 只做 persist 或 drop。面板是目录（徽章区分「每次会话」与「按需召回」，可遗忘），没有准入队列。Agent 不得让你去确认记忆。注入指令、密钥、危险命令会被丢弃。直写 `memory.md` 的 `write`/`patch` 会被拦截，走同一策略。
 
-每条以 `## YYYY-MM-DD 主题` 起始，可手动编辑。
+**加载与缓存**：会话启动时把 `memory.md`（≤50KB）注入 Session Bootstrap（`log[0]`，`isPrefixSystem`），按「会话 × 稳定签名」冻结。`memory.md` 排除在签名外，磁盘上新记住的内容**不拆当前前缀缓存**。压缩 epoch 随 `refreshBootstrap` 刷新；新会话总是重读。每用户回合另做一次 Recall（citation 不进入自动 Recall）。
 
-**加载**：每次会话启动时一次性全量注入到 Session Bootstrap（`log[0]`，`isPrefixSystem`）。该 bootstrap 按「会话 × 稳定签名」冻结，会话内字节稳定并随前缀缓存（Claude 折入 ephemeral system 块；DeepSeek/OpenAI 作为消息前缀命中）；`memory.md` 的磁盘改动不触发会话内重建，下次会话生效。
+**冷启动**：若 `memory.md` 为空且 ProjectGraph 可用，后台生成项目结构 / 技术栈 / 构建命令摘要，写入 ledger 后投影；不阻塞当前会话，下次会话或压缩后进入 Bootstrap。
 
-**冷启动自动生成**：若会话启动时 `memory.md` 不存在或为空，且 ProjectGraph 缓存可用，后台用快速模型自动生成一份初始记忆（项目结构/技术栈/构建命令/关键约定）。不阻塞当前会话，下次会话生效。
-
-**自动整理**：避免文件无限膨胀，三个触发点：
-
-| 触发 | 时机 |
-|---|---|
-| T1 | session 启动时 memory.md > 200 行 |
-| T2 | 上下文压缩成功（自动或 `/compact`） |
-| T3 | 每次 agent 回复完成 → 若标记 pending → 异步整理 |
-
-整理用快速模型对记忆做去重、合并、精简，写回文件；失败时降级为规则去重（按标题去重 + 按日期保留最近的）。整理是 fire-and-forget 的，不阻塞当前会话，收益在下次启动生效。
+**自动整理**：投影文件超过 200 行时，三个触发点（会话启动 / 压缩成功 / 回复完成后）用快速模型去重合并，失败则规则降级。整理是 fire-and-forget，改的是投影文件，不替代 ledger 策略。
 
 ## 代码智能（lsp / list）
 
@@ -482,7 +476,7 @@ macOS 上 `bash` 工具、Shell 会话与 app 后端进程都通过 `sandbox-exe
 | --- | --- |
 | `~/.codepapr/codepapr.sqlite` | 应用级设置 |
 | `<workspace>/.CodePapr/project.sqlite` | 项目级状态、聊天记录、缓存统计 |
-| `<workspace>/.CodePapr/memory.md` | 跨会话项目记忆（自动整理） |
+| `<workspace>/.CodePapr/memory.md` | 跨会话项目记忆的双区投影（User Zone 手写 + Managed Zone 自动投影） |
 | `<workspace>/.CodePapr/store` | 项目级文本记录 |
 | `<workspace>/.CodePapr/skills` | 项目级技能文件 |
 | `<workspace>/.CodePapr/agents` | 项目级自定义子代理 |

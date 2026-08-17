@@ -3,14 +3,12 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../toastStore';
 import {
   type CommandDefinition,
-  envelopeContent,
   expandCommandTemplate,
   getBuiltinPromptCommand,
   parseSlashInput,
   parseGoalCondition,
   evaluateGoalCondition,
   GoalRunner,
-  planMemoryAdmission,
   serializeGoalState,
   GoalConditionParseError,
   renderTodoListDigest,
@@ -73,6 +71,7 @@ import type { MidLoopCompactionCommit } from '../../agent/agentWorkerProtocol';
 import {
   buildRecallInsertion,
   buildRecallQuery,
+  filterAutoRecallItems,
   renderRecallBlock,
   resolveRecallBudget,
   RETRIEVAL_STRATEGY,
@@ -82,7 +81,6 @@ import { CONTEXT_COMPACTION_SOFT_BUDGET_RATIO } from '../../utils/contextCompact
 import { effectiveMaxContextTokens } from '../../utils/contextLimits';
 import { isModelVisibleUiMessage } from '../../utils/contextSurface';
 import {
-  admitMemoryCandidate,
   archiveMemoryRecall,
   loadMemoryEntries,
   projectMemoryFile,
@@ -1054,32 +1052,23 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                       console.warn('[memory] bootstrap skipped: memory.md was written during generation');
                       return;
                     }
-                    // 候选 → 准入 → 投影（managed zone）。
-                    const { candidateId, deduplicated } = await proposeMemoryCandidateFromWrite({
+                    const persist = await proposeMemoryCandidateFromWrite({
                       workspacePath,
                       sessionId: bootstrapSessionId ?? undefined,
                       content: generated,
                       origin: 'cold-start-bootstrap',
+                      source: 'cold-start-bootstrap',
+                      trust: 'derived',
+                      category: 'fact',
                     });
-                    // 同内容候选已存在（deduplicated）时本次未落库新候选：
-                    // 无新 id 可准入，直接跳过（既有候选/条目已覆盖该内容）。
-                    if (!deduplicated) {
-                      // 准入门（真正防线，ADR-008）：bootstrap 是 LLM 生成内容，
-                      // 自动准入前必须过 planMemoryAdmission（risk flags / 尺寸）。
-                      // 被拒时保留 pending 候选供用户在记忆面板审查，不自动准入。
-                      const admission = planMemoryAdmission(
-                        envelopeContent({
-                          source: 'cold-start-bootstrap',
-                          trust: 'derived',
-                          origin: 'cold-start-bootstrap',
-                          content: generated,
-                        })
-                      );
-                      if (!admission.admitted) {
-                        console.warn('[memory] bootstrap admission rejected:', admission.reason);
-                        return;
+                    if (persist.status === 'dropped' || persist.deduplicated) {
+                      if (persist.status === 'dropped') {
+                        console.warn('[memory] bootstrap dropped:', persist.note);
                       }
-                      await admitMemoryCandidate(workspacePath, candidateId, createId());
+                      return;
+                    }
+                    if (!persist.projectToBootstrap) {
+                      return;
                     }
                     const entries = await loadMemoryEntries(workspacePath, true);
                     const projection = buildMemoryProjection(
@@ -1546,10 +1535,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   `[recall] 软预算紧张（剩余 ${Math.max(0, softBudgetTokens - currentContextTokens)} token），跳过本轮 Recall`
                 );
               } else {
-                const items = await searchMemoryForRecall(workspacePath, {
-                  tokens: queryTokens,
-                  limit: 8,
-                });
+                const items = filterAutoRecallItems(
+                  await searchMemoryForRecall(workspacePath, {
+                    tokens: queryTokens,
+                    limit: 8,
+                  })
+                );
                 if (items.length > 0) {
                   const block = renderRecallBlock(items, {
                     lang: normalizedSettings.lang,

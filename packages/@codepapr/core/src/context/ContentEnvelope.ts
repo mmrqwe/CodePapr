@@ -1,11 +1,11 @@
 /**
- * ContentEnvelope：跨边界内容的安全信封（PR4，不变式 9）。
+ * ContentEnvelope：跨边界内容的安全信封（PR4 / ADR-010）。
  *
  * 所有「外部进入内部」的内容流（web / MCP / 工具输出 / session recall /
- * checkpoint 抽取 / memory 候选准入）都必须先包成信封，携带 source / trust /
- * origin / risk flags。准入策略只读信封字段，绝不直接消费裸内容。
+ * checkpoint 抽取 / memory 写入）都必须先包成信封，携带 source / trust /
+ * origin / risk flags。写入策略只读信封字段，绝不直接消费裸内容。
  *
- * 基线安全判定是确定性的，不依赖 LLM。
+ * 基线安全判定是确定性的，不依赖 LLM；不产生用户审核队列。
  */
 
 export type ContentSourceKind =
@@ -150,44 +150,122 @@ export type MemoryAdmissionResult =
   | { admitted: true }
   | { admitted: false; reason: string };
 
-/** 记忆内容尺寸上限（字符）：入队门槛与准入门共用同一常量，
- *  避免「可入队但永不可准入」的契约断裂。 */
+/** 记忆语义种类。Agent 自报的 category 只是建议；web/MCP 会被运行时改写成 citation。 */
+export type MemoryKind =
+  | 'preference'
+  | 'constraint'
+  | 'fact'
+  | 'convention'
+  | 'verification'
+  | 'procedure'
+  | 'citation'
+  | 'decision'
+  | 'api'
+  | 'general'
+  | 'user-note';
+
+export const MEMORY_KINDS: ReadonlySet<string> = new Set([
+  'preference',
+  'constraint',
+  'fact',
+  'convention',
+  'verification',
+  'procedure',
+  'citation',
+  'decision',
+  'api',
+  'general',
+  'user-note',
+]);
+
+/** 不投影进 memory.md managed zone / Session Bootstrap 的种类（只进 ledger，按需召回）。 */
+export const BOOTSTRAP_EXCLUDED_MEMORY_KINDS: ReadonlySet<string> = new Set([
+  'citation',
+  'procedure',
+  'user-note',
+]);
+
+export type MemoryWriteDecision =
+  | {
+      action: 'persist';
+      kind: MemoryKind;
+      projectToBootstrap: boolean;
+      confidence: 'confirmed' | 'reported';
+    }
+  | { action: 'drop'; reason: string };
+
+/** 记忆内容尺寸上限（字符）：入队门槛与写入门共用同一常量。 */
 export const MEMORY_CONTENT_MAX_CHARS = 8_000;
 /** 记忆内容尺寸下限（字符）：过短内容无记忆价值。 */
 export const MEMORY_CONTENT_MIN_CHARS = 8;
 
+export function normalizeMemoryKind(raw: string | undefined): MemoryKind {
+  const kind = (raw ?? 'general').trim().toLowerCase();
+  return MEMORY_KINDS.has(kind) ? (kind as MemoryKind) : 'general';
+}
+
+export function memoryProjectsToBootstrap(kind: string): boolean {
+  return !BOOTSTRAP_EXCLUDED_MEMORY_KINDS.has(normalizeMemoryKind(kind));
+}
+
+function looksLikeExternalOrigin(envelope: ContentEnvelope): boolean {
+  if (envelope.source === 'web' || envelope.source === 'mcp') return true;
+  return /^https?:\/\//i.test(envelope.origin);
+}
+
 /**
- * 记忆准入门（不变式：只有 user-confirmed / 执行验证 / 可信项目证据 /
- * 多可信来源才能自动准入；web/MCP 永不自动准入）。
+ * 零审核写入门：persist（含 citation）或 drop。不产生 pending 队列。
+ *
+ * - 风险标记 / 尺寸 / 裸 assistant 推理 → drop
+ * - web / MCP / 外部 URL origin → citation（可召回，不进 Bootstrap）
+ * - 其余可证明或 Agent 经 memory_write 提出的内容 → 立刻 persist
  */
-export function planMemoryAdmission(envelope: ContentEnvelope): MemoryAdmissionResult {
-  if (envelope.trust === 'untrusted') {
-    return { admitted: false, reason: 'untrusted-source' };
-  }
-  if (envelope.source === 'web' || envelope.source === 'mcp') {
-    return { admitted: false, reason: 'untrusted-source' };
-  }
+export function planMemoryWrite(input: {
+  envelope: ContentEnvelope;
+  kind?: string;
+}): MemoryWriteDecision {
+  const { envelope } = input;
   if (envelope.riskFlags.length > 0) {
-    return {
-      admitted: false,
-      reason: `risk-flags:${envelope.riskFlags.join(',')}`,
-    };
+    return { action: 'drop', reason: `risk-flags:${envelope.riskFlags.join(',')}` };
   }
   const trimmed = envelope.content.trim();
   if (trimmed.length < MEMORY_CONTENT_MIN_CHARS || trimmed.length > MEMORY_CONTENT_MAX_CHARS) {
-    return { admitted: false, reason: 'content-size' };
+    return { action: 'drop', reason: 'content-size' };
   }
-  // 允许准入的自动来源：工具执行验证（workspace）与用户/检查点抽取（trusted/derived）。
-  // cold-start-bootstrap：LLM 对可信项目文件（project graph / rules）的首次
-  // 摘要，属可信项目证据；risk flags / 尺寸门同样生效。
-  const allowedSource =
-    envelope.source === 'tool-output' ||
+  if (envelope.source === 'assistant') {
+    return { action: 'drop', reason: 'source-assistant' };
+  }
+
+  let kind = normalizeMemoryKind(input.kind);
+  if (kind === 'citation' || looksLikeExternalOrigin(envelope)) {
+    kind = 'citation';
+  }
+
+  if (envelope.trust === 'untrusted' && kind !== 'citation') {
+    return { action: 'drop', reason: 'untrusted-source' };
+  }
+
+  const attested =
     envelope.source === 'user' ||
-    envelope.source === 'checkpoint-extraction' ||
-    envelope.source === 'memory-candidate' ||
-    envelope.source === 'cold-start-bootstrap';
-  if (!allowedSource) {
-    return { admitted: false, reason: `source-${envelope.source}` };
-  }
-  return { admitted: true };
+    envelope.source === 'tool-output' ||
+    envelope.source === 'cold-start-bootstrap' ||
+    envelope.trust === 'trusted' ||
+    envelope.trust === 'workspace';
+
+  return {
+    action: 'persist',
+    kind,
+    projectToBootstrap: memoryProjectsToBootstrap(kind),
+    confidence: attested ? 'confirmed' : 'reported',
+  };
+}
+
+/**
+ * 兼容旧调用方：能进 ledger 即为 admitted（citation 也 admitted）。
+ * 新代码请用 planMemoryWrite。
+ */
+export function planMemoryAdmission(envelope: ContentEnvelope): MemoryAdmissionResult {
+  const decision = planMemoryWrite({ envelope });
+  if (decision.action === 'persist') return { admitted: true };
+  return { admitted: false, reason: decision.reason };
 }

@@ -229,6 +229,36 @@
   footer{border-top:1px solid var(--border);margin-top:50px;padding:28px 0 44px;color:var(--foreground-dim);font-size:0.8rem}
   footer code{color:var(--foreground-muted)}
 
+  /* memory × context */
+  .memsec{padding:46px 0 8px}
+  .memsec h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:8px}
+  .memsec .sub{color:var(--foreground-muted);font-size:0.9rem;margin-bottom:26px;max-width:860px}
+  .memsec h3{font-size:1.08rem;font-weight:700;margin:28px 0 12px;letter-spacing:-0.01em}
+  .memgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:8px 0 8px}
+  @media(max-width:900px){.memgrid{grid-template-columns:1fr}}
+  .memcard{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);border-top:3px solid var(--green)}
+  .memcard.recall{border-top-color:var(--accent)}
+  .memcard.hold{border-top-color:var(--amber)}
+  .memcard .k{font-family:var(--font-mono);font-size:0.68rem;letter-spacing:.12em;color:var(--foreground-dim);font-weight:700}
+  .memcard h5{font-size:1.05rem;font-weight:700;margin:8px 0 10px;letter-spacing:-0.01em}
+  .memcard p{color:var(--foreground-muted);font-size:0.84rem}
+  .memcard p code{color:var(--accent);font-size:0.76rem}
+  .memtable-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);margin:8px 0 8px}
+  .memtable{width:100%;border-collapse:collapse;font-size:0.78rem;min-width:860px}
+  .memtable th,.memtable td{border-bottom:1px solid var(--border);padding:11px 14px;text-align:left;vertical-align:top}
+  .memtable th{background:var(--surface);color:var(--foreground-muted);font-weight:600;font-size:0.7rem;letter-spacing:.04em;text-transform:uppercase}
+  .memtable tr:last-child td{border-bottom:none}
+  .memtable td{color:var(--foreground-muted)}
+  .memtable td:first-child{color:var(--foreground);font-weight:500;white-space:nowrap}
+  .memtable code{font-size:0.72rem;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
+  .timeline{display:grid;gap:0;margin:8px 0 8px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+  .tl{display:grid;grid-template-columns:92px 1fr;gap:0;background:var(--bg-card);border-bottom:1px solid var(--border)}
+  .tl:last-child{border-bottom:none}
+  .tl .t{font-family:var(--font-mono);font-size:0.72rem;color:var(--accent);padding:14px 16px;border-right:1px solid var(--border)}
+  .tl p{padding:14px 18px;color:var(--foreground-muted);font-size:0.84rem}
+  .memnote{padding:16px 20px;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--foreground-muted);font-size:0.84rem;margin-top:8px}
+  .memnote code{color:var(--accent);font-size:0.76rem}
+
   .reveal{opacity:0;transform:translateY(20px);transition:opacity 0.7s var(--easing),transform 0.7s var(--easing)}
   .reveal.visible{opacity:1;transform:none}
 </style>
@@ -245,6 +275,7 @@
       <li><a href="tutorial.html">教程</a></li>
       <li><a href="#tiers">分层模型</a></li>
       <li><a href="#recall">Recall</a></li>
+      <li><a href="#memory">记忆</a></li>
       <li><a href="#mechanisms">机制</a></li>
       <li><a href="#pipeline">优先序</a></li>
     </ul>
@@ -259,7 +290,7 @@
   <div class="container">
     <div class="section-label"><span class="dot"></span> CONTEXT WINDOW · 缓存优先</div>
     <h1>上下文分层 · <span class="gradient">持久化投影 × 按字节稳定性分层</span></h1>
-    <p>DeepSeek 前缀缓存按请求体<strong>逐字节前缀匹配</strong>——越靠前越稳定，命中率越高。CodePapr 把上下文切成四层：冻结的稳定前缀、压缩时重写的会话状态（含持久化 Surface）、每轮追加的活动上下文、以及按回合检索的 Recall Block。点击任意条目展开注入链路与缓存行为。</p>
+    <p>DeepSeek 前缀缓存按请求体<strong>逐字节前缀匹配</strong>——越靠前越稳定，命中率越高。CodePapr 把上下文切成四层：冻结的稳定前缀、压缩时重写的会话状态（含持久化 Surface）、每轮追加的活动上下文、以及按回合检索的 Recall Block。项目记忆<strong>拆开住进这些层</strong>：短指令进 Bootstrap，踩坑经验进 Recall，网页引用只进搜索。<a href="#memory">哪一种记忆在哪一层、什么时候变</a>见下方专章。点击任意条目展开注入链路与缓存行为。</p>
     <div class="legend">
       <span class="lg"><i style="background:var(--green)"></i>稳定 · 命中缓存</span>
       <span class="lg"><i style="background:var(--amber)"></i>慢变化 · epoch 重写</span>
@@ -356,8 +387,8 @@
             <div class="src"><span class="chip">.CodePapr/memory.md</span><span class="chip">memory_entries ledger</span><span class="chip">memorySection</span></div>
             <div class="cchip c-hit">签名外冻结</div>
           </div>
-          <div class="desc">跨会话项目知识，渲染为「## 项目记忆」。2026-08 起升级为 <b>Memory Ledger（SQLite）+ 双区投影</b>：User Zone（手编内容，投影器永不覆盖）+ Managed Zone（仅来自已准入 <code>memory_entries</code> 的 verified 条目，<code>project_memory_file</code> 覆盖生成，预算 24 条 / 6k 字符）。<b>准入是确定性规则</b>（<code>ContentEnvelope</code> + 风险标记 + 密钥脱敏）：执行验证 / 用户确认可自动准入，web / MCP / 注入指令 / 密钥永不自动准入。通过 <code>resolveSessionBootstrap</code> 在轮次间冻结（签名外 → 前缀缓存不破）。<b>mid-loop 压缩时刷新</b>（epoch 重写，零额外缓存开销），其余更新<b>次会话生效</b>。</div>
-          <div class="more"><div class="mbox">v1 自动准入路径：回合结束后扫描工具调用，bash 测试命令成功 → memory_candidates → 裁决 → memory_entries（同哈希旧条目 supersede）→ 重新投影。冷启动自动生成（bootstrapMemoryContent）与 >200 行自动整理（consolidateMemoryContent）保留。</div></div>
+          <div class="desc">跨会话项目知识，渲染为「## 项目记忆」。权威在 SQLite <code>memory_entries</code>；<code>memory.md</code> 是双区投影：User Zone（手编，投影器永不覆盖）+ Managed Zone（只投影会进 Bootstrap 的条目：偏好 / 约束 / 事实 / 约定 / 验证 / 决策，预算 24 条 / 1500 tokens）。<b>零审核自动写入</b>（<code>planMemoryWrite</code>：persist 或 drop，没有准入队列）。<code>citation</code> / <code>procedure</code> <b>不进这一层</b>——前者只进 <code>memory_search</code>，后者进下方 Recall。通过 <code>resolveSessionBootstrap</code> 按 (session × 稳定签名) 冻结（签名外 → 前缀缓存不破）。磁盘上新记住的内容<b>当前会话前缀不变</b>；<b>压缩 epoch 刷新</b>或<b>下次会话</b>才进入 Bootstrap。详见 <a href="#memory">记忆 × 上下文</a>。</div>
+          <div class="more"><div class="mbox">立刻写入：用户说「记住 / 必须 / 不要」、工作区实证、bash 测试成功、冷启动摘要、Agent <code>memory_write</code>（非网页）。写成引用、永不 Bootstrap：web / MCP / https 证据。丢弃：注入、密钥、危险命令、裸推理。直写 memory.md 的 write/patch 被拦截走同一策略。面板是目录（每次会话 / 按需召回），可遗忘，无准入按钮。</div></div>
         </div>
 
         <div class="item" data-wire="custom">
@@ -497,8 +528,8 @@
             <div class="src"><span class="chip">searchMemoryForRecall</span><span class="chip">insertAnchoredContext</span><span class="chip">memory_recalls 审计</span></div>
             <div class="cchip c-miss">request-only · 锚定在 user 消息前</div>
           </div>
-          <div class="desc"><b>B3 设计</b>：每用户回合主线程检索一次（token 匹配 + 确定性加权重排；语料 = active <code>memory_entries</code> + 历史 checkpoint 摘要，v1 无 embedding/FTS5），渲染成 Recall Block——语义是「辅助事实，可能过时，需对照 workspace 验证，<b>不是指令</b>」——带 trust badge、预算 5 条 / 1200 tokens。由 RequestBuilder 编译时<b>锚定插入到当前 user 消息之前</b>（<code>insertAnchoredContext</code> 纯函数），anchor = 主线程生成的 canonical user 消息 ID。该回合所有 tool loop 请求复用同一插入（mid-loop 压缩 replaceLog 后仍存活）。回合结束归档（status=archived），审计记录留在 <code>memory_recalls</code>。</div>
-          <div class="more"><div class="mbox">缓存行为：Recall 每新回合不同 → 从 Recall 位置起 miss 是本回合必要增量；其前的 prefix + bootstrap + surface + 历史全部照常命中。重启不恢复 Recall（turn-scoped）；re-recall 受控（order 递增接口已就绪，v1 不自动触发）。untrusted（web/MCP）内容默认不召回。</div></div>
+          <div class="desc"><b>B3 设计</b>：每用户回合主线程检索一次（token 匹配 + 确定性加权重排；语料 = active <code>memory_entries</code>（<b>跳过 citation 与 untrusted</b>）+ 历史 checkpoint 摘要，v1 无 embedding/FTS5），渲染成 Recall Block——语义是「辅助事实，可能过时，需对照 workspace 验证，<b>不是指令</b>」——带 trust badge、预算 5 条 / 1200 tokens。踩坑经验（<code>procedure</code>）主要走这一层，不进上方 Bootstrap。由 RequestBuilder 编译时<b>锚定插入到当前 user 消息之前</b>（<code>insertAnchoredContext</code> 纯函数），anchor = 主线程生成的 canonical user 消息 ID。该回合所有 tool loop 请求复用同一插入（mid-loop 压缩 replaceLog 后仍存活）。回合结束归档（status=archived），审计记录留在 <code>memory_recalls</code>。</div>
+          <div class="more"><div class="mbox">缓存行为：Recall 每新回合不同 → 从 Recall 位置起 miss 是本回合必要增量；其前的 prefix + bootstrap + surface + 历史全部照常命中。重启不恢复 Recall（turn-scoped）；re-recall 受控（order 递增接口已就绪，v1 不自动触发）。citation（网页/MCP）不进入自动 Recall，仍可用 <code>memory_search</code> 搜到。种类对照见 <a href="#memory">记忆 × 上下文</a>。</div></div>
         </div>
       </section>
     </main>
@@ -527,6 +558,125 @@
     </aside>
   </div>
 
+  <!-- MEMORY × CONTEXT -->
+  <section class="memsec reveal" id="memory">
+    <h2>记忆 × 上下文：哪一种在哪一层</h2>
+    <p class="sub">记忆不是「一个文件整段塞进模型」。权威在 SQLite <code>memory_entries</code>；<code>.CodePapr/memory.md</code> 只是给人看的双区投影。同一条知识只会出现在四层请求里的某一层——或者根本不进请求，只躺在账本里等搜索。</p>
+
+    <div class="memgrid">
+      <div class="memcard">
+        <div class="k">TIER 01 · BOOTSTRAP</div>
+        <h5>每次会话都带着</h5>
+        <p>User Zone 手写笔记 + Managed Zone 的偏好、约束、项目事实、约定、验证、决策。注入 <code>log[0]</code>，按 (session × 稳定签名) 冻结。磁盘变了<strong>当前前缀不重建</strong>；压缩 epoch 或新会话才刷新。</p>
+      </div>
+      <div class="memcard recall">
+        <div class="k">TIER 04 · RECALL</div>
+        <h5>这一轮可能用得上</h5>
+        <p>主要是 <code>procedure</code>（踩坑经验）以及其它 active 条目（跳过 citation）。每用户回合检索一次，锚定插在当前 user 消息前，tool loop 内字节稳定，不进 log / surface。</p>
+      </div>
+      <div class="memcard hold">
+        <div class="k">LEDGER ONLY</div>
+        <h5>不自动进请求</h5>
+        <p><code>citation</code>（网页 / MCP）只走 <code>memory_search</code>。已遗忘、被策略丢弃、当前任务 checkpoint、大工具落盘都不算「每次会话的项目记忆」。</p>
+      </div>
+    </div>
+
+    <h3>种类对照：存在哪 · 进哪一层 · 何时变 · 怎么变</h3>
+    <div class="memtable-wrap">
+      <table class="memtable">
+        <thead>
+          <tr>
+            <th>种类</th>
+            <th>存在哪</th>
+            <th>请求的哪一层</th>
+            <th>何时进当前会话的模型</th>
+            <th>怎么变</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>用户手写笔记</td>
+            <td><code>memory.md</code> User Zone</td>
+            <td>Session Bootstrap（稳定前缀）</td>
+            <td>会话启动读入；压缩 epoch 会 <code>refreshBootstrap</code></td>
+            <td>你改文件立刻落盘。投影器永不覆盖。当前会话前缀不重建。</td>
+          </tr>
+          <tr>
+            <td>偏好 / 约束</td>
+            <td>ledger → Managed Zone</td>
+            <td>同上，Bootstrap</td>
+            <td>本回合写入磁盘；<strong>下一次 Bootstrap 刷新</strong>才进前缀</td>
+            <td>你说「记住 / 必须 / 不要」，或 Agent <code>memory_write</code>。立刻 persist，无需点同意。</td>
+          </tr>
+          <tr>
+            <td>项目事实 / 约定 / 验证 / 决策</td>
+            <td>ledger → Managed Zone</td>
+            <td>Bootstrap</td>
+            <td>同上：磁盘立刻变，前缀延后</td>
+            <td>工作区实证、bash 测试成功、冷启动摘要。同内容哈希会 supersede 旧条。</td>
+          </tr>
+          <tr>
+            <td>踩坑经验 <code>procedure</code></td>
+            <td>ledger，<strong>不进</strong> Managed Zone</td>
+            <td>Turn-scoped Recall / <code>memory_search</code></td>
+            <td>写入后的<strong>下一用户回合</strong>，若检索命中</td>
+            <td>同一错误踩两次等。不进每次会话的前缀，避免把旧坑当指令。</td>
+          </tr>
+          <tr>
+            <td>网页 / MCP 引用 <code>citation</code></td>
+            <td>ledger，不进 Managed Zone</td>
+            <td>仅 <code>memory_search</code></td>
+            <td>模型主动搜索才会看到</td>
+            <td>来源是 web / MCP，或 evidence 含 <code>https</code>。永不 Bootstrap；自动 Recall 也跳过。</td>
+          </tr>
+          <tr>
+            <td>已遗忘</td>
+            <td>ledger <code>status=forgotten</code></td>
+            <td>不进请求</td>
+            <td>—</td>
+            <td>面板点遗忘。同内容哈希不会再写入。</td>
+          </tr>
+          <tr>
+            <td>被策略丢弃</td>
+            <td>不落盘</td>
+            <td>不进请求</td>
+            <td>—</td>
+            <td>注入指令、密钥、关沙箱、危险命令、裸 assistant 推理、过长/过短。<code>planMemoryWrite</code> 直接 drop。</td>
+          </tr>
+          <tr>
+            <td>当前任务目标 / 待办</td>
+            <td>Session Checkpoint</td>
+            <td>Session State（压缩 epoch 重写）</td>
+            <td>压缩完成后作为检查点</td>
+            <td>随这一场任务变。<strong>不是</strong>跨会话项目记忆，不要复制进 memory.md。</td>
+          </tr>
+          <tr>
+            <td>大段工具输出</td>
+            <td><code>.CodePapr/tool-output/</code></td>
+            <td>不自动注入</td>
+            <td><code>read_artifact</code> 按需</td>
+            <td>写时冻结。这是 Archive，不是记忆。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>一次「记住」之后的时间线</h3>
+    <div class="timeline">
+      <div class="tl"><span class="t">T0 本回合</span><p>用户话术或 Agent <code>memory_write</code> / 拦截的 write → 信封（source / trust / origin / 风险）→ <code>planMemoryWrite</code>：persist 或 drop。没有「待审核」队列。</p></div>
+      <div class="tl"><span class="t">T1 磁盘</span><p>persist 的条目进入 <code>memory_entries</code>（同哈希旧 active 条 supersede）。若是 Bootstrap 类，立刻重投影 Managed Zone；User Zone 不动。</p></div>
+      <div class="tl"><span class="t">T2 当前前缀</span><p><strong>不变。</strong> Bootstrap 按会话冻结，<code>memory.md</code> 在签名外。新记住的偏好此时还没进模型前缀——这是为了保住 DeepSeek / Claude 的前缀缓存。</p></div>
+      <div class="tl"><span class="t">T3 下一回合</span><p>若是 <code>procedure</code> 且检索命中 → 进入本回合 Recall Block（user 消息前）。citation 仍不自动召回。</p></div>
+      <div class="tl"><span class="t">T4 压缩</span><p>epoch 重写时 <code>refreshBootstrap</code>：Managed Zone 里的新事实进入稳定前缀。Checkpoint 同时重写——那是任务进度，不是记忆。</p></div>
+      <div class="tl"><span class="t">T5 新会话</span><p>总是重读 <code>memory.md</code>。冷启动若文件为空且有项目图，后台写一份结构/技术栈摘要进 ledger，下次或压缩后进入 Bootstrap。</p></div>
+    </div>
+
+    <h3>和 AGENTS.md、Checkpoint 的边界</h3>
+    <div class="memnote">
+      <code>AGENTS.md</code> 是你写的项目规则，在稳定前缀的<strong>签名内</strong>——改了会故意打破缓存。<code>memory.md</code> 是自动积累的事实与偏好，在<strong>签名外</strong>，改了不拆当前前缀。Checkpoint 是「这一场任务进行到哪」，压缩时重写，不要把待办抄进记忆。网页内容永远不当指令：写成 citation，等人或模型去搜，不进 Bootstrap、不进自动 Recall。
+    </div>
+  </section>
+
   <!-- MECHANISMS -->
   <section class="mech reveal" id="mechanisms">
     <h2>关键机制</h2>
@@ -534,7 +684,7 @@
     <div class="ledger">
       <div class="led">
         <div class="no">M·01</div><h5>签名外冻结</h5>
-        <p>memory.md 与 project-graph 在磁盘上易变，但被排除出 <code>bootstrapSignature</code>。<code>resolveSessionBootstrap</code> 按 (session × 稳定签名) 记忆化 bootstrap——磁盘变化不重建，更新次会话生效。保住整段前缀缓存。</p>
+        <p>memory.md 与 project-graph 在磁盘上易变，但被排除出 <code>bootstrapSignature</code>。<code>resolveSessionBootstrap</code> 按 (session × 稳定签名) 记忆化 bootstrap——本回合新写入的记忆立刻落盘，但<b>不重建当前前缀</b>。Bootstrap 类记忆在压缩 epoch（<code>refreshBootstrap</code>）或下次会话进入模型；procedure 可在下一用户回合进入 Recall。保住整段前缀缓存。</p>
       </div>
       <div class="led">
          <div class="no">M·02</div><h5>写时三阶梯截断</h5>
@@ -562,7 +712,7 @@
       </div>
       <div class="led">
         <div class="no">M·08</div><h5>Turn-scoped Recall（B3）</h5>
-        <p>Recall Block 是 <b>request-time augmentation</b>：每用户回合检索一次 memory ledger + 历史 checkpoint，锚定插入到当前 user 消息之前，tool loop 内字节稳定；不进 AppendOnlyLog / archive messages / surface（不滞留、不污染压缩转录与 round 计数），审计记录在 <code>memory_recalls</code>。重启不恢复；re-recall 受控至多一次。防注入：untrusted 内容默认不召回，渲染语义是「辅助事实、需验证」而非指令。</p>
+        <p>Recall Block 是 <b>request-time augmentation</b>：每用户回合检索一次 memory ledger（跳过 citation / untrusted）+ 历史 checkpoint，锚定插入到当前 user 消息之前，tool loop 内字节稳定；不进 AppendOnlyLog / archive messages / surface（不滞留、不污染压缩转录与 round 计数），审计记录在 <code>memory_recalls</code>。重启不恢复；re-recall 受控至多一次。渲染语义是「辅助事实、需验证」而非指令。哪一种记忆会进 Recall，见 <a href="#memory">记忆 × 上下文</a>。</p>
       </div>
     </div>
   </section>
@@ -584,7 +734,7 @@
 
 <footer>
   <div class="container">
-    CodePapr &mdash; 上下文分层可视化 · 生成自源码核实（<code>promptSystem.ts</code> / <code>contextCompaction.ts</code> / <code>contextStateMerge.ts</code> / <code>contextSurfaceStore.ts</code> / <code>memoryLedger.ts</code> / <code>memoryRecall.ts</code> / <code>agentStore.ts</code> / <code>toolOutputTruncation.ts</code> / <code>db/mod.rs</code>）。四层模型 = Stable Prefix（冻结）/ Session State（epoch + 持久化 Surface）/ Active Context（append-only）/ Turn-scoped Recall（request-only 锚定插入）。checkpoint 为 v3 结构化状态（13 分区 + provenance）；压缩事务单事务提交；memory.md 为 Memory Ledger 的双区投影。阈值单位：字符。Bootstrap 以 <code>role: assistant</code> + <code>isPrefixSystem</code> 注入，Claude 提取为 system。
+    CodePapr &mdash; 上下文分层可视化 · 生成自源码核实（<code>promptSystem.ts</code> / <code>contextCompaction.ts</code> / <code>contextStateMerge.ts</code> / <code>contextSurfaceStore.ts</code> / <code>ContentEnvelope.ts</code> / <code>memoryLedger.ts</code> / <code>memoryPersist.ts</code> / <code>memoryRecall.ts</code> / <code>agentStore.ts</code> / <code>toolOutputTruncation.ts</code> / <code>db/mod.rs</code>）。四层模型 = Stable Prefix（冻结）/ Session State（epoch + 持久化 Surface）/ Active Context（append-only）/ Turn-scoped Recall（request-only 锚定插入）。checkpoint 为 v3 结构化状态（13 分区 + provenance）；压缩事务单事务提交；memory.md 为 Memory Ledger 的双区投影（零审核写入；citation/procedure 不进 Bootstrap）。阈值单位：字符。Bootstrap 以 <code>role: assistant</code> + <code>isPrefixSystem</code> 注入，Claude 提取为 system。
   </div>
 </footer>
 

@@ -241,32 +241,26 @@ The toolbar search box supports **conversation search** and **file search**, swi
 - Search results capped at 50; refine your query if truncated
 - Panel is **horizontally centered** in the viewport, 300ms debounced, only runs when the Files tab is active
 
-## Project Memory (Auto-Consolidation)
+## Project Memory (zero-review auto-write)
 
-`.CodePapr/memory.md` is cross-session long-term memory, storing user profiles, preferences, project conventions, error patterns with solutions, and architecture decisions.
+Project memory is not “one `memory.md` dumped into the model”. The ledger in SQLite `memory_entries` is authoritative; `.CodePapr/memory.md` is a dual-zone projection. Different kinds of memory enter **different context layers** and change on different clocks.
 
-**Writing**: The Agent auto-appends (using the generic `write` tool) in these scenarios:
+| Kind | Stored in | Request layer | When it reaches this session’s model | How it changes |
+|---|---|---|---|---|
+| Hand-written notes | `memory.md` User Zone | Session Bootstrap (stable prefix) | Read at session start; refreshed on a compaction epoch | Your file edit hits disk immediately; **the current prefix is not rebuilt** until the next session or compaction |
+| Preferences / constraints / project facts | ledger → Managed Zone | Same, Bootstrap | Same: written to disk this turn, enters the prefix on the **next Bootstrap refresh** | You said remember / must / don't; workspace-grounded facts; successful tests; cold start; Agent `memory_write` → persist immediately, no admit click |
+| Procedures (`procedure`) | ledger, **not** Managed Zone | Turn-scoped Recall / `memory_search` | **Next user turn** after save, if retrieval hits | Same error twice, etc.; never in the every-session prefix |
+| Web / MCP citations (`citation`) | ledger, not Managed Zone | `memory_search` only | Only if the model searches | web / MCP / `https` evidence; **never Bootstrap; auto-Recall skips them** |
+| Current-task goal / todos | Session Checkpoint | Session State | After compaction, as the checkpoint | Evolves with the epoch; **not** cross-session project memory |
+| Large tool output | `.CodePapr/tool-output/` | Not auto-injected | `read_artifact` on demand | Frozen at write time |
 
-1. It discovers project directory structure, tech stack, or build/lint/test commands worth reusing across sessions
-2. The same error was encountered twice in the current session
-3. A project-specific build/deploy/config convention was discovered
-4. The user explicitly asks to remember
+**Writes (zero review)**: `planMemoryWrite` either persists or drops. The panel is a catalog (every-session vs on-demand badges, forget) — no admit queue. The Agent must not ask you to confirm memories. Injection, secrets, and dangerous commands are dropped. Direct `write`/`patch` of `memory.md` is intercepted onto the same policy.
 
-Each entry starts with `## YYYY-MM-DD Topic` and is manually editable.
+**Load and cache**: At session start, `memory.md` (≤50KB) is injected into Session Bootstrap (`log[0]`, `isPrefixSystem`), frozen per (session × stable signature). `memory.md` is outside the signature, so newly saved memories **do not bust the current prefix cache**. Compaction epochs refresh via `refreshBootstrap`; a new session always re-reads. Each user turn also runs Recall (citations excluded from automatic Recall).
 
-**Loading**: Injected once at session start into the Session Bootstrap (`log[0]`, `isPrefixSystem`). The bootstrap is frozen per (session × stable signature), stays byte-stable within the session, and is cached as part of the prefix (folded into Claude's ephemeral system block; the message prefix for DeepSeek/OpenAI). On-disk `memory.md` edits do not trigger an in-session rebuild; they take effect on the next session.
+**Cold start**: If `memory.md` is empty and a ProjectGraph cache exists, a background job writes a structure / stack / build-command summary into the ledger and projects it. It does not block the current session; it enters Bootstrap on the next session or compaction.
 
-**Cold-start auto-generation**: If `memory.md` is missing or empty at session start and a ProjectGraph cache is available, the fast model auto-generates an initial memory (project structure / tech stack / build commands / key conventions) in the background. It does not block the current session; benefits apply on the next session.
-
-**Auto-consolidation**: Prevents unbounded file growth via three triggers:
-
-| Trigger | Timing |
-|---|---|
-| T1 | Session start — memory.md > 200 lines |
-| T2 | Context compaction succeeds (auto or `/compact`) |
-| T3 | After each agent reply completes → if pending flag is set → async consolidation |
-
-Consolidation uses the fast model to deduplicate, merge, and compress memory, writing back to file. On failure, it degrades to rule-based dedup (by title + keep latest by date). Consolidation is fire-and-forget; the current session uses old memory, benefits apply on next startup.
+**Auto-consolidation**: When the projection file exceeds 200 lines, three triggers (session start / successful compaction / after a reply) run the fast model to dedupe and merge, with a rule-based fallback. Fire-and-forget; it rewrites the projection, it does not replace the ledger policy.
 
 ## Code Intelligence (lsp / list)
 
@@ -443,7 +437,7 @@ If the Agent goes off track, hover the previous correct user message and click "
 | --- | --- |
 | `~/.codepapr/codepapr.sqlite` | Application-level settings |
 | `<workspace>/.CodePapr/project.sqlite` | Project-level state, chat history, cache stats |
-| `<workspace>/.CodePapr/memory.md` | Cross-session project memory (auto-consolidated) |
+| `<workspace>/.CodePapr/memory.md` | Dual-zone projection of cross-session project memory (hand-written User Zone + auto Managed Zone) |
 | `<workspace>/.CodePapr/store` | Project-level text records |
 | `<workspace>/.CodePapr/skills` | Project-level skill files |
 | `<workspace>/.CodePapr/agents` | Project-level custom sub-agents |

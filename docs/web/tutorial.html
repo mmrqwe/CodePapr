@@ -1159,23 +1159,20 @@ TTS 数据流：
           <strong>自动注入流程：</strong>代理会读取规则文件 <code>.CodePapr/AGENTS.md</code> 并拼进稳定系统提示词。文件不存在会被自动跳过。
         </div>
 
-        <h3>.CodePapr/memory.md — 跨会话项目记忆（自动整理）</h3>
-        <p>Agent 在工作过程中会自动发现项目特有的模式、坑和约定，并将其写入记忆文件。下次会话启动时自动加载，帮助 Agent 避免重复踩坑。文件超过 200 行后会自动整理，避免无限膨胀。</p>
+        <h3>.CodePapr/memory.md — 跨会话项目记忆（零审核）</h3>
+        <p>权威在 SQLite 记忆账本；<code>memory.md</code> 只是双区投影。记忆<strong>拆开住进上下文的不同层</strong>：短指令进 Bootstrap，踩坑经验进 Recall，网页引用只进搜索。完整对照见 <a href="context-architecture.html#memory">上下文分层 · 记忆专章</a>。</p>
         <ul>
-          <li><strong>自动积累：</strong>Agent 发现项目特有知识后，用 <code>write</code> 追加到 <code>.CodePapr/memory.md</code>，每条以 <code>## YYYY-MM-DD 主题</code> 开头</li>
-          <li><strong>自动加载：</strong>每次会话启动时注入到 bootstrap 上下文，不影响系统提示词缓存</li>
-          <li><strong>自动整理：</strong>会话启动时若 memory.md &gt; 200 行，或上下文压缩 / <code>/compact</code> 触发，标记为待整理；当前轮 Agent 回复完成后，异步用快速模型对记忆做去重、合并、精简，写回文件</li>
-          <li><strong>不阻塞：</strong>整理是 fire-and-forget 异步执行，当前会话用旧记忆，下次启动用整理后的版本；失败时静默降级为规则去重，不影响主流程</li>
-          <li><strong>不新增工具：</strong>整理由 store 层后台逻辑触发，模型无感知，不破坏 ImmutablePrefix 缓存</li>
-          <li><strong>记录原则：</strong>用户偏好、项目约定、错误模式与解法、架构决策；不记录通用编程知识、临时任务状态、已在 <code>.CodePapr/AGENTS.md</code> 中的规则</li>
+          <li><strong>零审核写入：</strong>你说「记住 / 必须 / 不要」、工作区实证、测试成功、冷启动摘要、Agent <code>memory_write</code> 会立刻 persist。没有准入队列。注入 / 密钥 / 危险命令会被丢弃。网页 / MCP 写成 <code>citation</code>，永不进 Bootstrap。</li>
+          <li><strong>双区投影：</strong>User Zone 给你手写，投影器永不覆盖；Managed Zone 只投影偏好 / 约束 / 事实等 Bootstrap 类条目（24 条 / 1500 tokens）。<code>procedure</code> 与 <code>citation</code> 不出现在文件的机器区。</li>
+          <li><strong>Bootstrap 加载：</strong>会话启动注入稳定前缀，按「会话 × 稳定签名」冻结。<code>memory.md</code> 在签名外——本回合新记住的内容<strong>不拆当前前缀缓存</strong>，压缩 epoch 或下次会话才进入 Bootstrap。</li>
+          <li><strong>Recall：</strong>每用户回合检索一次。踩坑经验（<code>procedure</code>）主要走这里；citation 被自动召回跳过，仍可用 <code>memory_search</code>。</li>
+          <li><strong>自动整理：</strong>投影文件超过 200 行时，会话启动 / 压缩成功 / 回复完成后异步去重合并，不阻塞会话。整理的是投影，不替代写入策略。</li>
+          <li><strong>记录原则：</strong>用户偏好、项目约定、已验证事实；不记录通用编程知识、当前任务待办（那是 Checkpoint）、已在 <code>AGENTS.md</code> 里的规则。</li>
         </ul>
 
         <div class="callout">
-          <strong>整理触发链路：</strong><br>
-          T1: session 启动读 memory.md，行数 &gt; 200 → 标记 pending<br>
-          T2: 上下文压缩（自动或 <code>/compact</code>）→ 标记 pending<br>
-          T3: 每次 agent 回复完成 → pending? → 异步调 fast model 整理 → 写回 memory.md<br>
-          整理目标：保留用户偏好/项目约定/错误模式/架构决策，控制在 200 行以内。
+          <strong>记住之后什么时候进模型：</strong><br>
+          T0 本回合 persist 或 drop（无审核）→ T1 磁盘立刻变（Bootstrap 类会重投影 Managed Zone）→ T2 当前会话前缀不变 → T3 下一用户回合 procedure 可进 Recall → T4 压缩 epoch 刷新 Bootstrap → T5 新会话重读 memory.md。
         </div>
 
         <h3>/compact — 强制压缩上下文</h3>
@@ -1202,7 +1199,7 @@ TTS 数据流：
             <tr><td><code>~/.codepapr/codepapr.sqlite</code></td><td>应用级设置、会话和缓存统计</td></tr>
             <tr><td><code>~/.codepapr/lsp-tools/</code></td><td>托管 LSP 工具下载缓存（首次需要时下载，下次复用）</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/project.sqlite</code></td><td>项目级状态、聊天记录、缓存统计</td></tr>
-            <tr><td><code>&lt;workspace&gt;/.CodePapr/memory.md</code></td><td>跨会话项目记忆，Agent 自动积累 + 超 200 行自动整理</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/memory.md</code></td><td>跨会话项目记忆的双区投影（手写 User Zone + 自动 Managed Zone）；权威在 SQLite 账本</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/skills</code></td><td>项目级技能文件</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/agents</code></td><td>项目级子代理定义</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/commands</code></td><td>项目级自定义命令</td></tr>

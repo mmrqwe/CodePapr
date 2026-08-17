@@ -59,18 +59,21 @@ describe('memoryTools (ADR-008 PR4)', () => {
     expect(isMemoryFilePath('.CodePapr/Memory.md')).toBe(true);
   });
 
-  it('memory_write creates a pending candidate (never writes memory.md)', async () => {
+  it('memory_write persists immediately (no review queue)', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'save_memory_candidate') return true;
+      if (command === 'admit_memory_candidate') return 'e1';
+      if (command === 'load_memory_entries') return [];
       return {};
     });
     const registry = buildRegistry();
     const result = (await registry.execute('memory_write', {
       content: '项目使用 pnpm workspace',
       category: 'decision',
-    })) as { id: string; status: string };
+    })) as { id: string; status: string; kind?: string };
 
-    expect(result.status).toBe('pending');
+    expect(result.status).toBe('saved');
+    expect(result.kind).toBe('decision');
     expect(typeof result.id).toBe('string');
     const saveCalls = invokeMock.mock.calls.filter(([cmd]) => cmd === 'save_memory_candidate');
     expect(saveCalls).toHaveLength(1);
@@ -82,23 +85,17 @@ describe('memoryTools (ADR-008 PR4)', () => {
       sourceMessageIds?: string;
       evidence?: string;
       riskFlags?: string;
-      sourceMessageIdsJson?: string;
-      evidenceJson?: string;
-      riskFlagsJson?: string;
     };
     expect(payload.category).toBe('decision');
     expect(payload.confidence).toBe('reported');
     expect(payload.trust).toBe('derived');
     expect(payload.content).toContain('pnpm workspace');
-    // 溯源字段与 Rust serde 契约对齐（无 Json 后缀，否则静默丢失）。
     expect(payload.sourceMessageIds).toBe('[]');
     expect(payload.evidence).toContain('memory_write');
     expect(payload.riskFlags).toBe('[]');
-    expect(payload.sourceMessageIdsJson).toBeUndefined();
-    expect(payload.evidenceJson).toBeUndefined();
-    expect(payload.riskFlagsJson).toBeUndefined();
-    // 绝不直写 memory.md。
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'admit_memory_candidate')).toBe(true);
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'write_text_file')).toBe(false);
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'project_memory_file')).toBe(true);
   });
 
   it('memory_write reports duplicate when the same content was already proposed', async () => {
@@ -112,7 +109,29 @@ describe('memoryTools (ADR-008 PR4)', () => {
     })) as { status: string; note: string };
 
     expect(result.status).toBe('duplicate');
-    expect(result.note).toContain('未重复入队');
+    expect(result.note).toContain('未重复写入');
+  });
+
+  it('memory_write stores web evidence as citation and does not project bootstrap', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'save_memory_candidate') return true;
+      if (command === 'admit_memory_candidate') return 'e1';
+      return {};
+    });
+    const registry = buildRegistry();
+    const result = (await registry.execute('memory_write', {
+      content: '某文章说应该用 bun',
+      category: 'fact',
+      evidence: 'https://example.com/bun',
+    })) as { status: string; kind?: string };
+
+    expect(result.status).toBe('stored-as-citation');
+    expect(result.kind).toBe('citation');
+    const payload = JSON.parse(
+      invokeMock.mock.calls.find(([cmd]) => cmd === 'save_memory_candidate')![1]!.candidateJson as string
+    ) as { category: string };
+    expect(payload.category).toBe('citation');
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'project_memory_file')).toBe(false);
   });
 
   it('memory_write rejects content flagged by the risk detection', async () => {
@@ -244,24 +263,24 @@ describe('memoryTools (ADR-008 PR4)', () => {
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'project_memory_file')).toBe(true);
   });
 
-  it('memory_review_candidates lists pending candidates', async () => {
+  it('memory_review_candidates lists persisted memories, not a pending queue', async () => {
     invokeMock.mockImplementation(async (command: string) => {
-      if (command === 'load_memory_candidates') {
+      if (command === 'load_memory_entries') {
         return [
           {
-            id: 'c1',
-            category: 'general',
-            content: '候选内容',
+            id: 'e1',
+            category: 'fact',
+            content: '项目使用 pnpm',
             contentHash: 'h',
             confidence: 'reported',
             trust: 'derived',
-            status: 'pending',
-            riskFlags: null,
+            status: 'active',
             sourceSessionId: null,
             sourceMessageIds: null,
+            evidence: null,
             createdAt: 1,
-            decidedAt: null,
-            rejectionReason: null,
+            verifiedAt: null,
+            supersededBy: null,
           },
         ];
       }
@@ -270,55 +289,29 @@ describe('memoryTools (ADR-008 PR4)', () => {
     const registry = buildRegistry();
     const result = (await registry.execute('memory_review_candidates', {})) as {
       count: number;
-      candidates: string;
+      memories: string;
     };
     expect(result.count).toBe(1);
-    expect(result.candidates).toContain('c1');
+    expect(result.memories).toContain('e1');
+    expect(result.memories).toContain('pnpm');
   });
 
-  it('memory_review_candidates refuses admit: agent cannot self-admit (ADR-008 user-confirmed)', async () => {
+  it('memory_review_candidates refuses admit and reject: no review queue', async () => {
     const registry = buildRegistry();
     await expect(
       registry.execute('memory_review_candidates', {
         action: 'admit',
         candidateIds: ['c1'],
       })
-    ).rejects.toThrow(/不能自我准入/);
+    ).rejects.toThrow(/无需审核/);
+    await expect(
+      registry.execute('memory_review_candidates', {
+        action: 'reject',
+        candidateIds: ['c1'],
+      })
+    ).rejects.toThrow(/无需审核/);
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'admit_memory_candidate')).toBe(false);
-  });
-
-  it('memory_review_candidates rejects a candidate', async () => {
-    invokeMock.mockImplementation(async () => ({}));
-    const registry = buildRegistry();
-    const result = (await registry.execute('memory_review_candidates', {
-      action: 'reject',
-      candidateIds: ['c1'],
-      reason: '不准确',
-    })) as { action: string; results: string[] };
-
-    expect(result.results[0]).toContain('rejected: c1');
-    expect(invokeMock).toHaveBeenCalledWith('reject_memory_candidate', {
-      workspacePath: '/tmp/ws',
-      candidateId: 'c1',
-      reason: '不准确',
-    });
-  });
-
-  it('memory_review_candidates reject reports missing/already-handled candidates as failed', async () => {
-    invokeMock.mockImplementation(async (command: string) => {
-      if (command === 'reject_memory_candidate') {
-        throw new Error('候选不存在或已处理');
-      }
-      return {};
-    });
-    const registry = buildRegistry();
-    const result = (await registry.execute('memory_review_candidates', {
-      action: 'reject',
-      candidateIds: ['missing'],
-    })) as { results: string[] };
-
-    expect(result.results[0]).toContain('failed: missing');
-    expect(result.results[0]).not.toMatch(/^rejected:/);
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'reject_memory_candidate')).toBe(false);
   });
 
   it('rejects unknown actions', async () => {
@@ -335,7 +328,13 @@ describe('memory.md write interception (ADR-008)', () => {
     invokeMock.mockImplementation(async () => ({}));
   });
 
-  it('workspace_write_file to memory.md is intercepted into a candidate', async () => {
+  it('workspace_write_file to memory.md is intercepted and auto-persisted', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'save_memory_candidate') return true;
+      if (command === 'admit_memory_candidate') return 'e1';
+      if (command === 'load_memory_entries') return [];
+      return {};
+    });
     const ctx = stubFileCtx();
     registerWorkspaceFileTools(ctx);
     const result = (await ctx.registry.execute('workspace_write_file', {
@@ -345,8 +344,8 @@ describe('memory.md write interception (ADR-008)', () => {
 
     expect(result.intercepted).toBe(true);
     expect(typeof result.candidateId).toBe('string');
-    const saveCalls = invokeMock.mock.calls.filter(([cmd]) => cmd === 'save_memory_candidate');
-    expect(saveCalls).toHaveLength(1);
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'save_memory_candidate')).toBe(true);
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'admit_memory_candidate')).toBe(true);
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'write_text_file')).toBe(false);
   });
 
