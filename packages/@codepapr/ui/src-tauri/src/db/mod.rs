@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use rusqlite::functions::FunctionFlags;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +37,10 @@ const PAPR_APP_PERMISSION_SETTINGS_KEY: &str = "papr.appPermissionSettings";
 const EXTERNAL_ACCESS_POLICY_KEY: &str = "fs.externalAccessPolicy";
 const PROJECT_STORAGE_DIR: &str = ".CodePapr";
 const PROJECT_DB_FILE: &str = "project.sqlite";
+/// 当前 project.sqlite schema 版本。已达此版本的连接跳过全量 DDL 批。
+const PROJECT_SCHEMA_VERSION: i64 = 6;
+/// 每个 project.sqlite 路径在本进程只跑一次 ADR-005 启动防御清理。
+static STARTUP_DEFENSE_DONE: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
 const PAPR_APP_DB_FILE: &str = "db.sqlite";
 const PROJECT_STATE_KEY: &str = "project.state";
 const LEGACY_PROJECT_FILE: &str = ".CodePapr/project.json";
@@ -197,8 +202,86 @@ fn open_project_db(workspace_path: &str) -> Result<(Connection, PathBuf, PathBuf
         "PRAGMA journal_mode = WAL;
          PRAGMA busy_timeout = 5000;
          PRAGMA secure_delete = ON;
-         PRAGMA foreign_keys = ON;
-          CREATE TABLE IF NOT EXISTS project_state (
+         PRAGMA foreign_keys = ON;",
+    )
+    .map_err(|err| format!("设置项目数据库 PRAGMA 失败: {err}"))?;
+    register_unicode_lower(&conn)?;
+
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|err| format!("读取数据库版本失败: {err}"))?;
+    // schema 已是当前版本：跳过全量 CREATE TABLE IF NOT EXISTS 批（每命令固定开销）。
+    if version < PROJECT_SCHEMA_VERSION {
+        init_project_schema(&conn)?;
+        migrate_project_db(&conn, &workspace)?;
+    }
+
+    maybe_startup_defense(&conn, &db_path)?;
+    Ok((conn, workspace, db_path))
+}
+
+fn register_unicode_lower(conn: &Connection) -> Result<(), String> {
+    conn.create_scalar_function(
+        "unicode_lower",
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            let text: String = ctx.get(0)?;
+            Ok(text.to_lowercase())
+        },
+    )
+    .map_err(|err| format!("注册 unicode_lower 失败: {err}"))
+}
+
+fn maybe_startup_defense(conn: &Connection, db_path: &Path) -> Result<(), String> {
+    let mut done = STARTUP_DEFENSE_DONE
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !done.insert(db_path.to_path_buf()) {
+        return Ok(());
+    }
+    drop(done);
+
+    // 崩溃恢复（ADR-005）：压缩提交是单事务，正常不残留 started 行；
+    // 此 UPDATE 是防御性清理。错误上抛，避免静默留下中断事务。
+    conn.execute(
+        "UPDATE context_compactions
+         SET status = 'failed',
+             failure_code = 'interrupted',
+             failure_message = '应用在压缩提交完成前退出'
+         WHERE status = 'started'",
+        [],
+    )
+    .map_err(|err| format!("压缩中断防御清理失败: {err}"))?;
+
+    cleanup_orphan_checkpoint_messages(conn)
+}
+
+/// ADR-005：archive 已有、surface 不引用、且属于失败/中断压缩的 checkpoint 消息。
+/// 仅删除 failed/interrupted compaction 指向、且未被任何 surface 节点引用的行。
+fn cleanup_orphan_checkpoint_messages(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM messages
+         WHERE id IN (
+           SELECT c.checkpoint_message_id
+           FROM context_compactions c
+           WHERE c.status IN ('failed', 'interrupted')
+             AND c.checkpoint_message_id IS NOT NULL
+             AND NOT EXISTS (
+               SELECT 1 FROM context_surface_nodes n
+               WHERE n.message_id = c.checkpoint_message_id
+             )
+         )",
+        [],
+    )
+    .map_err(|err| format!("孤儿 checkpoint 防御清理失败: {err}"))?;
+    Ok(())
+}
+
+fn init_project_schema(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS project_state (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL,
             updated_at INTEGER NOT NULL
@@ -350,23 +433,7 @@ fn open_project_db(workspace_path: &str) -> Result<(Connection, PathBuf, PathBuf
           CREATE INDEX IF NOT EXISTS idx_memory_recalls_workspace_time
             ON memory_recalls(workspace_id, created_at DESC);",
     )
-    .map_err(|err| format!("初始化项目状态表失败: {err}"))?;
-
-    migrate_project_db(&conn, &workspace)?;
-
-    // 崩溃恢复（ADR-005）：压缩提交是单事务（started → surface → completed
-    // 一步提交），正常不会残留 started 行；此 UPDATE 是防御性清理，防止
-    // 旧版本或异常路径留下的中断事务污染 active surface 判定。
-    let _ = conn.execute(
-        "UPDATE context_compactions
-         SET status = 'failed',
-             failure_code = 'interrupted',
-             failure_message = '应用在压缩提交完成前退出'
-         WHERE status = 'started'",
-        [],
-    );
-
-    Ok((conn, workspace, db_path))
+    .map_err(|err| format!("初始化项目状态表失败: {err}"))
 }
 
 fn migrate_project_db(conn: &Connection, workspace: &Path) -> Result<(), String> {
@@ -450,7 +517,32 @@ fn migrate_project_db(conn: &Connection, workspace: &Path) -> Result<(), String>
             .map_err(|err| format!("设置数据库版本失败: {err}"))?;
     }
 
+    if version < 6 {
+        migrate_project_db_v6(conn)?;
+        conn.pragma_update(None, "user_version", 6_i64)
+            .map_err(|err| format!("设置数据库版本失败: {err}"))?;
+    }
+
     Ok(())
+}
+
+fn migrate_project_db_v6(conn: &Connection) -> Result<(), String> {
+    // 清理 FTS5 probe 残表：旧实现在项目库上 CREATE+DROP probe，CREATE 成功
+    // DROP 失败会留下 `_codepapr_fts_probe`，下次 probe 因表已存在失败并
+    // 把 FTS5_PROBE 缓存成 false，该工作区永久降级全扫。
+    conn.execute_batch("DROP TABLE IF EXISTS _codepapr_fts_probe;")
+        .map_err(|err| format!("清理 FTS probe 残表失败: {err}"))?;
+
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_messages_timestamp
+           ON messages(timestamp DESC);
+         CREATE INDEX IF NOT EXISTS idx_messages_checkpoint
+           ON messages(timestamp DESC)
+           WHERE extras LIKE '%\"contextCheckpoint\"%';",
+    )
+    .map_err(|err| format!("创建 messages 检索索引失败: {err}"))?;
+
+    ensure_memory_fts_schema(conn)
 }
 
 fn migrate_project_db_v4_papr_storage(conn: &Connection, workspace: &Path) -> Result<(), String> {
@@ -1441,24 +1533,34 @@ pub(crate) fn load_sessions(workspace_path: String) -> Result<SessionListResult,
 #[tauri::command]
 pub(crate) fn delete_session(workspace_path: String, session_id: String) -> Result<(), String> {
     let (conn, ..) = open_project_db(&workspace_path)?;
-    conn.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])
-        .map_err(|err| format!("删除会话失败: {err}"))?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|err| format!("开启事务失败: {err}"))?;
+    tx.execute(
+        "DELETE FROM memory_recalls WHERE session_id = ?1",
+        params![session_id],
+    )
+    .map_err(|err| format!("清理会话 Recall 审计失败: {err}"))?;
     // surface/compaction 表按 ADR-002 不对 sessions 建外键，需手动清理。
-    conn.execute(
+    tx.execute(
         "DELETE FROM context_surface_nodes WHERE session_id = ?1",
         params![session_id],
     )
     .map_err(|err| format!("清理会话 surface 节点失败: {err}"))?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM context_surfaces WHERE session_id = ?1",
         params![session_id],
     )
     .map_err(|err| format!("清理会话 surface 失败: {err}"))?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM context_compactions WHERE session_id = ?1",
         params![session_id],
     )
     .map_err(|err| format!("清理会话压缩记录失败: {err}"))?;
+    tx.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])
+        .map_err(|err| format!("删除会话失败: {err}"))?;
+    tx.commit()
+        .map_err(|err| format!("提交删除会话事务失败: {err}"))?;
     Ok(())
 }
 
@@ -1510,6 +1612,9 @@ pub(crate) fn save_message_batch(
             "question",
             "questionAnswered",
             "durationMs",
+            "modelTier",
+            "modelName",
+            "relatedFilePaths",
         ] {
             if let Some(val) = msg.get(key) {
                 if !val.is_null() {
@@ -1525,9 +1630,11 @@ pub(crate) fn save_message_batch(
         let timestamp = msg.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0);
         let message_index = idx as i64;
 
-        // 使用 INSERT OR IGNORE：DELETE 已清空当前 session 的消息，
-        // 如果 id 冲突（来自其他 session 的消息），跳过而非覆盖，避免跨 session 数据破坏
-        tx.execute(
+        // INSERT OR IGNORE：DELETE 已清空当前 session 的消息；
+        // 若 id 冲突（来自其他 session），必须失败而非静默跳过，否则本批
+        // 少一行、调用方以为全量替换成功。
+        let inserted = tx
+            .execute(
             "INSERT OR IGNORE INTO messages (id, session_id, message_index, role, work_mode, content, reasoning_content, tool_invocations, extras, timestamp)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
@@ -1538,6 +1645,11 @@ pub(crate) fn save_message_batch(
             ],
         )
         .map_err(|err| format!("保存消息 {msg_id} 失败: {err}"))?;
+        if inserted == 0 {
+            return Err(format!(
+                "保存消息 {msg_id} 失败: 主键冲突（INSERT OR IGNORE 跳过），已中止本批写入"
+            ));
+        }
     }
 
     tx.commit()
@@ -1584,8 +1696,8 @@ fn row_to_message_json(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Valu
         obj["toolInvocations"] = tool_invocations;
     }
     // 还原 extras（promptContent / synthetic / hidden / carryForwardInContext /
-    // contextCheckpoint / question / questionAnswered），供 buildEffectiveContextMessages
-    // 重建压缩历史与上下文成员资格。
+    // contextCheckpoint / question / questionAnswered / durationMs /
+    // modelTier / modelName / relatedFilePaths）。
     if let Some(s) = extras_raw {
         if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&s) {
             for (key, value) in map {
@@ -2214,8 +2326,13 @@ fn read_context_surface(
     session_id: &str,
     generation: Option<i64>,
 ) -> Result<Option<ContextSurfaceResult>, String> {
+    // 两段读（header + nodes）必须在同一读事务内，避免多窗口并发提交
+    // 时读到混合 generation 的 header/nodes。
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|err| format!("开启 surface 读事务失败: {err}"))?;
     let surface = if let Some(target) = generation {
-        conn.query_row(
+        tx.query_row(
             "SELECT generation, parent_generation, compaction_id, render_params, created_at
              FROM context_surfaces
              WHERE session_id = ?1 AND generation = ?2",
@@ -2233,7 +2350,7 @@ fn read_context_surface(
         .optional()
         .map_err(|err| format!("读取 context surface 失败: {err}"))?
     } else {
-        conn.query_row(
+        tx.query_row(
             "SELECT generation, parent_generation, compaction_id, render_params, created_at
              FROM context_surfaces
              WHERE session_id = ?1
@@ -2258,7 +2375,7 @@ fn read_context_surface(
         return Ok(None);
     };
 
-    let mut stmt = conn
+    let mut stmt = tx
         .prepare(
             "SELECT position, message_id, node_kind
              FROM context_surface_nodes
@@ -2277,6 +2394,9 @@ fn read_context_surface(
         .map_err(|err| format!("读取 surface 节点失败: {err}"))?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|err| format!("收集 surface 节点失败: {err}"))?;
+    drop(stmt);
+    tx.commit()
+        .map_err(|err| format!("提交 surface 读事务失败: {err}"))?;
 
     Ok(Some(ContextSurfaceResult {
         session_id: session_id.to_string(),
@@ -3347,11 +3467,15 @@ pub(crate) fn archive_memory_recall(
     recall_id: String,
 ) -> Result<(), String> {
     let (conn, ..) = open_project_db(&workspace_path)?;
-    conn.execute(
-        "UPDATE memory_recalls SET status = 'archived' WHERE id = ?1",
-        params![recall_id],
-    )
-    .map_err(|err| format!("归档 Recall 失败: {err}"))?;
+    let updated = conn
+        .execute(
+            "UPDATE memory_recalls SET status = 'archived' WHERE id = ?1",
+            params![recall_id],
+        )
+        .map_err(|err| format!("归档 Recall 失败: {err}"))?;
+    if updated == 0 {
+        return Err(format!("归档 Recall 失败: 未找到 id {recall_id}"));
+    }
     Ok(())
 }
 
@@ -3385,7 +3509,7 @@ pub(crate) fn load_latest_memory_recall(
                     retrieval_version, created_at, status
              FROM memory_recalls
              WHERE session_id = ?1
-             ORDER BY created_at DESC LIMIT 1",
+             ORDER BY created_at DESC, id DESC LIMIT 1",
             params![session_id],
             |row| {
                 Ok(MemoryRecallResult {
@@ -3443,32 +3567,73 @@ fn token_overlap_score(tokens: &[String], text: &str) -> i64 {
 }
 
 /// FTS5 runtime probe（ADR-009 第8条）：rusqlite bundled 是否编译了 FTS5。
-/// 结果对整个二进制恒定，探一次缓存。None = 未探测，Some(false) = 不可用。
-static FTS5_PROBE: OnceLock<Option<bool>> = OnceLock::new();
+/// 在内存库探测，避免污染项目库；残表 `_codepapr_fts_probe` 由 v6 迁移清理。
+static FTS5_PROBE: OnceLock<bool> = OnceLock::new();
 
-fn fts5_available(conn: &Connection) -> bool {
-    FTS5_PROBE
-        .get_or_init(|| {
-            Some(
-                conn.execute_batch(
-                    "CREATE VIRTUAL TABLE _codepapr_fts_probe USING fts5(x, tokenize='trigram');
-                     DROP TABLE _codepapr_fts_probe;",
+fn fts5_available() -> bool {
+    *FTS5_PROBE.get_or_init(|| {
+        Connection::open_in_memory()
+            .ok()
+            .and_then(|mem| {
+                mem.execute_batch(
+                    "CREATE VIRTUAL TABLE _codepapr_fts_probe USING fts5(x, tokenize='trigram');",
                 )
-                .is_ok(),
-            )
-        })
-        .unwrap_or(false)
+                .ok()
+            })
+            .is_some()
+    })
 }
 
-/// FTS5 trigram 候选索引（倒排加速，确定性 scoring 不变）：
-/// - 不可用时返回 false，调用方走全量扫描（LIKE/contains 语义）；
-/// - 可用时惰性建表并重建（DELETE + INSERT active entries，条目 ≤ 数百，毫秒级）；
-/// - 短 token（<3 字符，trigram 无法索引）单独 LIKE 补齐，避免候选漏检。
+/// 持久化 FTS 表 + 触发器（v6）：搜索路径不再每次 DELETE+INSERT 全量重建。
+/// 写入 unicode_lower(content)，与 Rust to_lowercase / 全扫评分同一套大小写折叠。
+fn ensure_memory_fts_schema(conn: &Connection) -> Result<(), String> {
+    if !fts5_available() {
+        return Ok(());
+    }
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS memory_entries_fts
+           USING fts5(id UNINDEXED, content, tokenize='trigram');
+         CREATE TRIGGER IF NOT EXISTS memory_entries_fts_ai
+           AFTER INSERT ON memory_entries BEGIN
+             INSERT INTO memory_entries_fts(id, content)
+               SELECT new.id, unicode_lower(new.content) WHERE new.status = 'active';
+           END;
+         CREATE TRIGGER IF NOT EXISTS memory_entries_fts_ad
+           AFTER DELETE ON memory_entries BEGIN
+             DELETE FROM memory_entries_fts WHERE id = old.id;
+           END;
+         CREATE TRIGGER IF NOT EXISTS memory_entries_fts_au
+           AFTER UPDATE ON memory_entries BEGIN
+             DELETE FROM memory_entries_fts WHERE id = old.id;
+             INSERT INTO memory_entries_fts(id, content)
+               SELECT new.id, unicode_lower(new.content) WHERE new.status = 'active';
+           END;
+         DELETE FROM memory_entries_fts;
+         INSERT INTO memory_entries_fts(id, content)
+           SELECT id, unicode_lower(content) FROM memory_entries WHERE status = 'active';",
+    )
+    .map_err(|err| format!("初始化 memory FTS 失败: {err}"))
+}
+
+/// FTS5 trigram 候选预筛（确定性 scoring 不变）：
+/// - 不可用或尚未建表时返回 None，调用方走全量扫描；
+/// - 不再每搜索重建 FTS 表（由触发器维持）；
+/// - 短 token（<3 字符）用 unicode_lower LIKE 补齐，与全扫 to_lowercase 对齐。
 fn ensure_memory_fts_candidates(
     conn: &Connection,
     tokens: &[String],
 ) -> Option<HashSet<String>> {
-    if !fts5_available(conn) {
+    if !fts5_available() {
+        return None;
+    }
+    let fts_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memory_entries_fts')",
+            [],
+            |row| row.get(0),
+        )
+        .ok()?;
+    if !fts_exists {
         return None;
     }
     // trigram 最小 3 字符：全部 token 都短于 3 时 FTS 帮不上忙。
@@ -3480,14 +3645,6 @@ fn ensure_memory_fts_candidates(
     if long_tokens.is_empty() {
         return None;
     }
-    conn.execute_batch(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS memory_entries_fts
-           USING fts5(id UNINDEXED, content, tokenize='trigram');
-         DELETE FROM memory_entries_fts;
-         INSERT INTO memory_entries_fts(id, content)
-           SELECT id, content FROM memory_entries WHERE status = 'active';",
-    )
-    .ok()?;
 
     let query = long_tokens
         .iter()
@@ -3505,9 +3662,8 @@ fn ensure_memory_fts_candidates(
         ids.insert(row);
     }
 
-    // 短 token 补齐：trigram 索引不到 <3 字符的 token，用 LIKE 精确补齐，
-    // 保证「仅命中短 token」的条目不被预筛漏掉（确定性语义与全量扫描一致）。
-    // token 现可含 LIKE 通配符 `_`/`%`，必须转义（ESCAPE '\'）保持字面匹配。
+    // 短 token 补齐：trigram 索引不到 <3 字符的 token，用 unicode_lower LIKE
+    // 精确补齐（与 Rust to_lowercase 同一套折叠，避免 ASCII lower() 漂移）。
     let short_tokens: Vec<&str> = tokens
         .iter()
         .filter(|t| t.chars().count() < 3)
@@ -3519,7 +3675,7 @@ fn ensure_memory_fts_candidates(
             .prepare(
                 "SELECT id FROM memory_entries
                  WHERE status = 'active'
-                   AND lower(content) LIKE '%' || ?1 || '%' ESCAPE '\\'",
+                   AND unicode_lower(content) LIKE '%' || ?1 || '%' ESCAPE '\\'",
             )
             .ok()?;
         let like_rows = like_stmt
@@ -4116,13 +4272,13 @@ mod tests {
         }
         std::fs::create_dir_all(workspace.file_path(".CodePapr/apps/live-app")).unwrap();
 
-        // 重新打开触发 v4 迁移（当前最新版本为 v5，v4 迁移后继续升级）
+        // 重新打开触发 v4 迁移（当前最新版本为 v6，v4 迁移后继续升级）
         {
             let (conn, ..) = open_project_db(&ws).unwrap();
             let version: i64 = conn
                 .pragma_query_value(None, "user_version", |row| row.get(0))
                 .unwrap();
-            assert_eq!(version, 5);
+            assert_eq!(version, 6);
             let table_gone: bool = conn
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_storage')",
@@ -5121,5 +5277,234 @@ mod tests {
         let row = rows.iter().find(|r| r.id == "c1").expect("row");
         assert_eq!(row.status, "completed");
         assert!(row.failure_code.is_none());
+    }
+
+    #[test]
+    fn delete_session_is_transactional_and_clears_memory_recalls() {
+        let workspace = TestWorkspace::new("delete-session-recalls");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        save_session(
+            ws.clone(),
+            r#"{"id":"s-del","name":"待删","provider":"deepseek","model":"m","createdAt":1}"#
+                .to_string(),
+        )
+        .expect("save session");
+        save_message_batch(
+            ws.clone(),
+            "s-del".to_string(),
+            r#"[{"id":"m1","role":"user","content":"hi","timestamp":1}]"#.to_string(),
+        )
+        .expect("save messages");
+        let recall = serde_json::json!({
+            "id": "recall-del",
+            "workspaceId": ws,
+            "sessionId": "s-del",
+            "anchorMessageId": "m1",
+            "queryText": "hi",
+            "renderedContent": "- hi",
+            "itemsJson": "[]",
+            "estimatedTokens": 1i64,
+            "retrievalStrategy": "like-token-v1",
+            "retrievalVersion": 1i64,
+            "createdAt": 2i64,
+        });
+        save_memory_recall(ws.clone(), recall.to_string()).expect("save recall");
+
+        delete_session(ws.clone(), "s-del".to_string()).expect("delete");
+
+        let latest = load_latest_memory_recall(ws.clone(), "s-del".to_string()).expect("load");
+        assert!(latest.is_none(), "memory_recalls must be cleared with the session");
+        let messages = load_session_messages(ws, "s-del".to_string()).expect("load messages");
+        let parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&messages.messages_json).expect("parse");
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn save_message_batch_rejects_duplicate_id_from_another_session() {
+        let workspace = TestWorkspace::new("save-message-dup-id");
+        let ws = workspace.workspace_arg();
+        save_session(
+            ws.clone(),
+            r#"{"id":"s-a","name":"A","provider":"deepseek","model":"m","createdAt":1}"#
+                .to_string(),
+        )
+        .expect("s-a");
+        save_session(
+            ws.clone(),
+            r#"{"id":"s-b","name":"B","provider":"deepseek","model":"m","createdAt":2}"#
+                .to_string(),
+        )
+        .expect("s-b");
+        save_message_batch(
+            ws.clone(),
+            "s-a".to_string(),
+            r#"[{"id":"shared-id","role":"user","content":"a","timestamp":1}]"#.to_string(),
+        )
+        .expect("s-a messages");
+        let err = save_message_batch(
+            ws,
+            "s-b".to_string(),
+            r#"[{"id":"shared-id","role":"user","content":"b","timestamp":1}]"#.to_string(),
+        )
+        .expect_err("duplicate id must fail");
+        assert!(err.contains("主键冲突"), "got: {err}");
+    }
+
+    #[test]
+    fn save_message_batch_persists_display_metadata_in_extras() {
+        let workspace = TestWorkspace::new("save-message-model-meta");
+        let ws = workspace.workspace_arg();
+        save_session(
+            ws.clone(),
+            r#"{"id":"s-meta","name":"M","provider":"deepseek","model":"m","createdAt":1}"#
+                .to_string(),
+        )
+        .expect("session");
+        save_message_batch(
+            ws.clone(),
+            "s-meta".to_string(),
+            r#"[{"id":"a1","role":"assistant","content":"ok","timestamp":1,"modelTier":"primary","modelName":"deepseek-v4-pro"}]"#
+                .to_string(),
+        )
+        .expect("save");
+        let loaded = load_session_messages(ws, "s-meta".to_string()).expect("load");
+        let parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&loaded.messages_json).expect("parse");
+        assert_eq!(parsed[0]["modelTier"], "primary");
+        assert_eq!(parsed[0]["modelName"], "deepseek-v4-pro");
+    }
+
+    #[test]
+    fn archive_memory_recall_errors_when_id_missing() {
+        let workspace = TestWorkspace::new("archive-recall-missing");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        let err = archive_memory_recall(ws, "no-such-recall".to_string())
+            .expect_err("unknown id must fail");
+        assert!(err.contains("未找到"), "got: {err}");
+    }
+
+    #[test]
+    fn load_latest_memory_recall_breaks_created_at_ties_by_id() {
+        let workspace = TestWorkspace::new("recall-tie-break");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        for id in ["recall-a", "recall-b"] {
+            let recall = serde_json::json!({
+                "id": id,
+                "workspaceId": ws,
+                "sessionId": "s1",
+                "anchorMessageId": "u1",
+                "queryText": id,
+                "renderedContent": id,
+                "itemsJson": "[]",
+                "estimatedTokens": 1i64,
+                "retrievalStrategy": "like-token-v1",
+                "retrievalVersion": 1i64,
+                "createdAt": 100i64,
+            });
+            save_memory_recall(ws.clone(), recall.to_string()).expect("save");
+        }
+        let latest = load_latest_memory_recall(ws, "s1".to_string())
+            .expect("load")
+            .expect("row");
+        assert_eq!(latest.id, "recall-b");
+    }
+
+    #[test]
+    fn memory_recall_unicode_casefold_matches_accented_letters() {
+        let workspace = TestWorkspace::new("memory-recall-unicode-case");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        let candidate = serde_json::json!({
+            "id": "c-ecole",
+            "category": "decision",
+            "content": "École auth gateway 已切换",
+            "contentHash": "hecole",
+            "confidence": "confirmed",
+            "trust": "workspace",
+            "sourceSessionId": "s1",
+            "sourceMessageIds": "[]",
+            "evidence": null,
+            "riskFlags": null,
+            "createdAt": 1i64,
+        });
+        save_memory_candidate(ws.clone(), candidate.to_string()).expect("save");
+        admit_memory_candidate(ws.clone(), "c-ecole".to_string(), "e-ecole".to_string())
+            .expect("admit");
+        let query = serde_json::json!({ "tokens": ["école"], "limit": 8 });
+        let items = search_memory_for_recall(ws, query.to_string()).expect("search");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "e-ecole");
+    }
+
+    #[test]
+    fn v6_migration_drops_fts_probe_leftover_table() {
+        let workspace = TestWorkspace::new("fts-probe-leftover");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        {
+            let (conn, ..) = open_project_db(&ws).unwrap();
+            let _ = conn.execute_batch(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS _codepapr_fts_probe USING fts5(x);",
+            );
+            conn.pragma_update(None, "user_version", 5_i64).unwrap();
+        }
+        let (conn, ..) = open_project_db(&ws).unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 6);
+        let leftover: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = '_codepapr_fts_probe')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!leftover, "v6 must drop leftover FTS probe table");
+    }
+
+    #[test]
+    fn orphan_checkpoint_cleanup_removes_failed_compaction_messages() {
+        let workspace = TestWorkspace::new("orphan-checkpoint");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        save_session(
+            ws.clone(),
+            r#"{"id":"s-orphan","name":"O","provider":"deepseek","model":"m","createdAt":1}"#
+                .to_string(),
+        )
+        .expect("session");
+        save_message_batch(
+            ws.clone(),
+            "s-orphan".to_string(),
+            r#"[{"id":"cp-orphan","role":"assistant","content":"摘要","timestamp":1,"contextCheckpoint":{"summary":"x"}}]"#
+                .to_string(),
+        )
+        .expect("checkpoint message");
+        {
+            let (conn, ..) = open_project_db(&ws).unwrap();
+            conn.execute(
+                "INSERT INTO context_compactions
+                   (id, session_id, status, trigger, source_generation, checkpoint_message_id,
+                    source_message_count, retained_message_count, summary_mode, created_at)
+                 VALUES ('c-fail', 's-orphan', 'failed', 'token-limit', 0, 'cp-orphan',
+                         1, 0, 'local-fallback', 1)",
+                [],
+            )
+            .unwrap();
+            cleanup_orphan_checkpoint_messages(&conn).expect("cleanup");
+        }
+        let loaded = load_session_messages(ws, "s-orphan".to_string()).expect("load");
+        let parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&loaded.messages_json).expect("parse");
+        assert!(
+            parsed.iter().all(|m| m["id"] != "cp-orphan"),
+            "orphan checkpoint message must be removed"
+        );
     }
 }

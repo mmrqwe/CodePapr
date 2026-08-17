@@ -1307,4 +1307,91 @@ describe('Agent completion-quality guards (no silent stops)', () => {
     expect(dump.messages).toHaveLength(1);
     expect(dump.messages[0]?.content).toBe('hello');
   });
+
+  it('injects memory_search re-recall into subsequent requests without storing it in the log', async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(
+      {
+        name: 'memory_search',
+        description: 'Search memory',
+        parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+      },
+      async () => ({
+        query: 'auth',
+        results: [{ title: 'oauth' }],
+        reRecallInsertion: {
+          id: 're-1',
+          anchorMessageId: 'user-1',
+          placement: 'before',
+          role: 'user',
+          content: '## Re-recall\noauth callback',
+          source: 'memory-recall',
+          order: 1,
+        },
+      })
+    );
+
+    const capturedInsertions: unknown[][] = [];
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi
+        .fn<(_: IChatRequest) => Promise<IChatResponse>>()
+        .mockResolvedValueOnce(
+          createResponse('searching', {
+            toolCalls: [{ id: 't-search', name: 'memory_search', arguments: { query: 'auth' } }],
+          })
+        )
+        .mockResolvedValueOnce(createResponse('done')),
+    };
+
+    const agent = new Agent({
+      session: new Session({
+        sessionId: 'session-rerecall',
+        prefix: new ImmutablePrefix({
+          systemPrompt: '你是测试助手',
+          tools: toolRegistry.getAll(),
+          model: 'test-model',
+          parameters: { temperature: 0.7, topP: 0.9, maxTokens: 1000 },
+        }),
+        toolRegistry,
+      }),
+      provider,
+      providerName: 'openai',
+      requestBuilder: {
+        build: ({ model, contextInsertions }) => {
+          capturedInsertions.push([...(contextInsertions ?? [])]);
+          return { model, messages: [] };
+        },
+      },
+      cacheValidator: {
+        validate: () => ({
+          prefixCached: false,
+          prefixCreated: false,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          newInputTokens: 1,
+          outputTokens: 1,
+          cacheHitRate: 0,
+        }),
+      },
+    });
+
+    await agent.chat('查一下 auth', undefined, undefined, undefined, 'user-1');
+
+    expect(capturedInsertions).toHaveLength(2);
+    expect(capturedInsertions[0]).toEqual([]);
+    expect(capturedInsertions[1]).toEqual([
+      expect.objectContaining({
+        id: 're-1',
+        order: 1,
+        source: 'memory-recall',
+        content: '## Re-recall\noauth callback',
+      }),
+    ]);
+    const logged = agent.getSession().logStore.getAllMessages();
+    expect(logged.some((m) => (m.content ?? '').includes('reRecallInsertion'))).toBe(false);
+    expect(logged.some((m) => (m.content ?? '').includes('## Re-recall'))).toBe(false);
+  });
 });

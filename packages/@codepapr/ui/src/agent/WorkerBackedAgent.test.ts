@@ -288,6 +288,49 @@ describe('WorkerBackedAgent', () => {
     expect(agent.getSession().logStore.getAllMessages().map((m) => m.id)).toEqual(['cp', 'a-new']);
   });
 
+  it('replaces its authoritative log when the worker reports prune-only via compacted+fullMessages', async () => {
+    const original: IMessage[] = [
+      { id: 'u1', role: 'user', content: '旧消息', timestamp: 1 },
+      {
+        id: 't1',
+        role: 'tool',
+        content: 'x'.repeat(4000),
+        timestamp: 2,
+        toolResult: { toolCallId: 'c1', result: 'x'.repeat(4000) },
+      },
+    ];
+    const agent = createAgent(original);
+    const response: IAgentResponse = { role: 'assistant', content: '裁剪后继续' };
+
+    const chatPromise = agent.chat('hello');
+    const worker = MockWorker.instances[0];
+    const chatMessage = chatMessages(worker)[0];
+    if (chatMessage?.type !== 'chat') {
+      throw new Error('expected chat message');
+    }
+
+    const pruned: IMessage[] = [
+      { id: 'u1', role: 'user', content: '旧消息', timestamp: 1 },
+      { id: 't1', role: 'tool', content: '[pruned]', timestamp: 2 },
+      { id: 'a-new', role: 'assistant', content: '裁剪后继续', timestamp: 3 },
+    ];
+    worker.emit({
+      type: 'result',
+      requestId: chatMessage.payload.requestId,
+      response,
+      deltaMessages: [],
+      logLength: pruned.length,
+      compacted: true,
+      fullMessages: pruned,
+    });
+    await expect(chatPromise).resolves.toEqual(response);
+    expect(agent.getSession().logStore.getAllMessages().map((m) => m.content)).toEqual([
+      '旧消息',
+      '[pruned]',
+      '裁剪后继续',
+    ]);
+  });
+
   it('syncs incrementally on subsequent turns instead of re-sending the full log', async () => {
     const agent = createAgent();
     const worker = MockWorker.instances[0];

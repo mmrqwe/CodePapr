@@ -1459,7 +1459,10 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     payload.userInput,
     (event) => {
       armIdle();
-      if (event.type === 'context-compacted') {
+      if (event.type === 'context-compacted' || event.type === 'context-pruned') {
+        // prune-only replaceLog 与 compact 一样改写了 worker log：必须走
+        // fullMessages 回传，否则主线程镜像仍是未裁剪工具结果，下次 full
+        // sync 会把它们复活进 worker。
         compacted = true;
       }
       postMessageToMain({
@@ -1508,9 +1511,11 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     response,
     deltaMessages: session.logStore.getMessagesSince(startIndex),
     logLength: session.logStore.length(),
-    // When compaction reset the log this turn, getMessagesSince(startIndex) no
-    // longer maps onto the original prefix; ship the whole compacted epoch so the
-    // main thread can replace its authoritative log and stay in sync.
+    // When compaction or prune-only replaceLog rewrote the log this turn,
+    // getMessagesSince(startIndex) no longer maps onto the original prefix;
+    // ship the whole epoch so the main thread can replace its authoritative
+    // log and stay in sync (otherwise the next full sync resurrects unpruned
+    // tool results from the main-thread mirror).
     ...(compacted
       ? { compacted: true, fullMessages: session.logStore.getAllMessages().slice() }
       : {}),

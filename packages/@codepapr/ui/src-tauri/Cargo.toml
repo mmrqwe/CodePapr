@@ -34,7 +34,7 @@ libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "cookies", "gzip", "brotli", "deflate"] }
 reqwest_0_13_tls = { package = "reqwest", version = "0.13.3", default-features = false, features = ["json", "rustls"] }
 url = "2"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled", "functions"] }
 ignore = "0.4"
 notify = "6"
 regex = "1"

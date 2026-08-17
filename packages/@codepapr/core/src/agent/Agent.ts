@@ -508,6 +508,9 @@ export class Agent {
   private overflowCompactionAttempted = false;
   /** PR5（ADR-009 B3）：本回合 request-only 锚定插入（Recall Block）。 */
   private contextInsertions: RequestContextInsertion[] = [];
+  /** 主线程 fallback 路径：memory_search 的 re-recall 每 chat 至多 push 一次
+   *  （与 worker 侧 `reRecallPushedThisChat` 对齐）。 */
+  private reRecallPushedThisChat = false;
   /** PR2：provider 实测输入 token（上次成功响应的 usage.input_tokens）与
    *  测量时的 log 状态（长度 + 末条消息 id）。仅当状态一致时用于对账覆盖
    *  heuristic 估算（estimateSource='provider'）；replaceLog 后失效。 */
@@ -543,6 +546,34 @@ export class Agent {
    */
   pushContextInsertions(insertions: RequestContextInsertion[]): void {
     this.contextInsertions.push(...insertions);
+  }
+
+  /**
+   * 剥离工具结果里的 request-only / UI 侧信道，避免进入 log。
+   * 主线程 fallback 在此注入 re-recall（worker 路径由 tool-response 注入，
+   * 到达此处时 reRecallInsertion 已被剥离，本方法是 no-op）。
+   */
+  private consumeToolResultSideChannels(result: unknown): {
+    contextResult: unknown;
+    subagentToolInvocations?: ISubagentToolInvocation[];
+  } {
+    if (!result || typeof result !== 'object') {
+      return { contextResult: result };
+    }
+    const record = { ...(result as Record<string, unknown>) };
+    const insertion = record.reRecallInsertion as RequestContextInsertion | undefined;
+    if (insertion && !this.reRecallPushedThisChat) {
+      this.reRecallPushedThisChat = true;
+      this.pushContextInsertions([insertion]);
+    }
+    delete record.reRecallInsertion;
+
+    let subagentToolInvocations: ISubagentToolInvocation[] | undefined;
+    if ('__subagentToolInvocations' in record) {
+      subagentToolInvocations = record.__subagentToolInvocations as ISubagentToolInvocation[];
+      delete record.__subagentToolInvocations;
+    }
+    return { contextResult: record, subagentToolInvocations };
   }
 
   cancel(): void {
@@ -739,6 +770,7 @@ export class Agent {
     // PR5（ADR-009 B3）：turn-scoped 插入挂在 Agent 字段上（不进 log），
     // 本回合所有 request build 复用；replaceLog（mid-loop 压缩）不清除。
     this.contextInsertions = contextInsertions ?? [];
+    this.reRecallPushedThisChat = false;
 
     let finalContent = '';
     let finalReasoningContent: string | undefined;
@@ -1304,15 +1336,9 @@ export class Agent {
       // 串行执行一致，日志字节、缓存哈希与下游管线不受影响。
       for (const record of records) {
         const { call, result, success, errorMessage, toolDurationMs } = record;
-        let contextResult: unknown = result;
-        let subagentToolInvocations: ISubagentToolInvocation[] | undefined;
-        if (result && typeof result === 'object' && '__subagentToolInvocations' in result) {
-          const recordObject = result as Record<string, unknown>;
-          subagentToolInvocations = recordObject.__subagentToolInvocations as ISubagentToolInvocation[];
-          const stripped = { ...recordObject };
-          delete stripped.__subagentToolInvocations;
-          contextResult = stripped;
-        }
+        const consumed = this.consumeToolResultSideChannels(result);
+        const contextResult = consumed.contextResult;
+        const subagentToolInvocations = consumed.subagentToolInvocations;
         const toolMsg = await this.buildToolMessage(call, contextResult, success, toolDurationMs);
         await this.session.logStore.append(toolMsg);
         onStreamEvent?.({

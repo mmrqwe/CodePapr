@@ -1036,6 +1036,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               rulesSection,
               firstUserMessage: effectiveInput,
             };
+            // 必须捕获已声明的 turnSessionId：IIFE 在 `let activeSessionId`
+            // （更下方）之前启动，回合若在声明前中止，闭包读 activeSessionId
+            // 会触发 TDZ ReferenceError，被下方 catch 静默吞掉后 bootstrap 丢失。
+            const bootstrapSessionId = turnSessionId;
             void (async () => {
               try {
                 // LLM 生成放在锁外：持锁数秒会堵住工具/面板投影。
@@ -1053,7 +1057,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     // 候选 → 准入 → 投影（managed zone）。
                     const { candidateId, deduplicated } = await proposeMemoryCandidateFromWrite({
                       workspacePath,
-                      sessionId: activeSessionId ?? undefined,
+                      sessionId: bootstrapSessionId ?? undefined,
                       content: generated,
                       origin: 'cold-start-bootstrap',
                     });

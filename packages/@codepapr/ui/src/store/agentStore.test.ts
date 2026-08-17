@@ -308,6 +308,8 @@ describe('useAgentStore.sendMessage', () => {
     );
     createAgentMock.mockClear();
     createMainThreadAgentMock.mockClear();
+    maybeGenerateContextCheckpointMock.mockReset();
+    maybeGenerateContextCheckpointMock.mockImplementation(async () => null);
     invokeMock.mockClear();
     loadProjectStateMock.mockClear();
     saveProjectStateMock.mockClear();

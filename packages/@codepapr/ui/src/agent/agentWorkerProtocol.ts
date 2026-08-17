@@ -406,10 +406,12 @@ export type AgentWorkerToMainMessage =
         /** Total length of the worker's authoritative log after this turn; the
          *  main thread records it to decide incremental vs full sync next turn. */
         logLength: number;
-        /** True when mid-loop compaction replaced the worker log this turn. The
-         *  main thread must then replace its authoritative log with `fullMessages`
-         *  (the compacted epoch) instead of appending `deltaMessages`, whose
-         *  indices no longer line up after the worker reset its log. */
+        /** True when mid-loop compaction or prune-only replaceLog rewrote the
+         *  worker log this turn. The main thread must then replace its
+         *  authoritative log with `fullMessages` instead of appending
+         *  `deltaMessages` (indices no longer line up after replaceLog).
+         *  Prune-only must use the same path: otherwise the next full sync
+         *  would resurrect unpruned tool results from the main-thread mirror. */
         compacted?: boolean;
         fullMessages?: IMessage[];
       }
