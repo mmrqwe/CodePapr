@@ -212,7 +212,9 @@ describe('createContextCompactionHandler (mid-loop retained tail)', () => {
       'session-test',
       undefined,
       undefined,
-      (commit) => commits.push(commit as unknown as Record<string, unknown>),
+      (commit) => {
+        commits.push(commit as unknown as Record<string, unknown>);
+      },
       'turn-user'
     );
     await config.handler(coreMessages);
@@ -264,7 +266,9 @@ describe('createContextCompactionHandler (mid-loop retained tail)', () => {
       'session-test',
       undefined,
       undefined,
-      (commit) => commits.push(commit as unknown as Record<string, unknown>)
+      (commit) => {
+        commits.push(commit as unknown as Record<string, unknown>);
+      }
     );
     await config.handler([
       { id: 'u1', role: 'user', content: 'hi', timestamp: 1 },

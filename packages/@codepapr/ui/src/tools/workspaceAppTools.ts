@@ -662,6 +662,9 @@ export async function syncRunningBackendsToAccess(
     (app) => app.pid && app.command && app.port,
   );
   for (const app of running) {
+    if (!app.command || app.port == null) continue;
+    const command = app.command;
+    const port = app.port;
     const manifest = accessFromManifestJson(app.manifestJson);
     const before = resolveEffectiveAccess(manifest, prev, app.appId);
     const after = resolveEffectiveAccess(manifest, next, app.appId);
@@ -685,9 +688,9 @@ export async function syncRunningBackendsToAccess(
       const { pid, url } = await launchAppBackend(
         {
           appId: app.appId,
-          command: app.command,
+          command,
           args: app.args ?? [],
-          port: app.port,
+          port,
           manifestJson: app.manifestJson,
         },
         workspacePath,

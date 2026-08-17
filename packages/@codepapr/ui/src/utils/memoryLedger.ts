@@ -126,7 +126,6 @@ export function decideMemoryCandidate(
     ...decision,
     admitted: decision.action === 'persist',
     redactedContent: redactSecrets(env.content),
-    reason: decision.action === 'drop' ? decision.reason : undefined,
   };
 }
 

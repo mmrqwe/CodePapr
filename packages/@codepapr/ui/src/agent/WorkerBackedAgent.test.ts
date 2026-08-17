@@ -296,7 +296,7 @@ describe('WorkerBackedAgent', () => {
         role: 'tool',
         content: 'x'.repeat(4000),
         timestamp: 2,
-        toolResult: { toolCallId: 'c1', result: 'x'.repeat(4000) },
+        toolResult: { toolCallId: 'c1', success: true, result: 'x'.repeat(4000) },
       },
     ];
     const agent = createAgent(original);
