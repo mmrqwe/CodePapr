@@ -164,7 +164,7 @@ function withTimeout<T>(
   });
 }
 
-function buildRequestContextDebugText(request: IChatRequest, round: number): string {
+export function buildRequestContextDebugText(request: IChatRequest, round: number): string {
   const debugPayload = {
     round,
     model: request.model,
@@ -180,31 +180,34 @@ function buildRequestContextDebugText(request: IChatRequest, round: number): str
         description: tool.description,
         parameters: tool.parameters,
       })) ?? [],
-    messages: request.messages.map((message) => ({
-      role: message.role,
-      content: message.content,
-      ...(message.reasoningContent
-        ? { reasoningContent: message.reasoningContent }
-        : {}),
-      ...(message.toolCalls
-        ? {
-            toolCalls: message.toolCalls.map((toolCall) => ({
-              id: toolCall.id,
-              name: toolCall.name,
-              arguments: toolCall.arguments,
-            })),
-          }
-        : {}),
-      ...(message.toolResult
-        ? {
-            toolResult: {
-              toolCallId: message.toolResult.toolCallId,
-              result: message.toolResult.result,
-              error: message.toolResult.error,
-            },
-          }
-        : {}),
-    })),
+    // ADR-009：Recall 是 request-only，不得随 debug 快照持久化进 promptContent。
+    messages: request.messages
+      .filter((message) => message.metadata?.requestOnly !== true)
+      .map((message) => ({
+        role: message.role,
+        content: message.content,
+        ...(message.reasoningContent
+          ? { reasoningContent: message.reasoningContent }
+          : {}),
+        ...(message.toolCalls
+          ? {
+              toolCalls: message.toolCalls.map((toolCall) => ({
+                id: toolCall.id,
+                name: toolCall.name,
+                arguments: toolCall.arguments,
+              })),
+            }
+          : {}),
+        ...(message.toolResult
+          ? {
+              toolResult: {
+                toolCallId: message.toolResult.toolCallId,
+                result: message.toolResult.result,
+                error: message.toolResult.error,
+              },
+            }
+          : {}),
+      })),
   };
 
   return JSON.stringify(debugPayload, null, 2);

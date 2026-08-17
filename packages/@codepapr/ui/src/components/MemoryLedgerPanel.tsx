@@ -65,11 +65,23 @@ export function MemoryLedgerPanel({ workspacePath, lang }: MemoryLedgerPanelProp
     void load();
   }, [workspacePath]);
 
-  const withBusy = async (id: string, task: () => Promise<void>): Promise<void> => {
+  const withBusy = async (
+    id: string,
+    task: () => Promise<void>,
+    refresh: 'entries' | 'drop-candidate' | 'full' = 'full'
+  ): Promise<void> => {
     setBusyIds((prev) => new Set(prev).add(id));
     try {
       await task();
-      await load();
+      if (refresh === 'full') {
+        await load();
+        return;
+      }
+      if (refresh === 'entries') {
+        const loadedEntries = await loadMemoryEntries(workspacePath, false);
+        setEntries(loadedEntries);
+      }
+      setCandidates((prev) => prev.filter((candidate) => candidate.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -164,10 +176,14 @@ export function MemoryLedgerPanel({ workspacePath, lang }: MemoryLedgerPanelProp
                     <span className="ml-auto">
                       {entry.status === 'active'
                         ? actionButton(entry.id, t.memoryLedgerForget, 'danger', () =>
-                            void withBusy(entry.id, async () => {
-                              await forgetMemoryEntry(workspacePath, entry.id);
-                              await reprojectMemoryManagedZone(workspacePath);
-                            })
+                            void withBusy(
+                              entry.id,
+                              async () => {
+                                await forgetMemoryEntry(workspacePath, entry.id);
+                                await reprojectMemoryManagedZone(workspacePath);
+                              },
+                              'entries'
+                            )
                           )
                         : null}
                     </span>
@@ -204,28 +220,36 @@ export function MemoryLedgerPanel({ workspacePath, lang }: MemoryLedgerPanelProp
                     <span className="font-mono text-[10px] text-fg-dim">{candidate.category}</span>
                     <span className="ml-auto flex items-center gap-1.5">
                       {actionButton(candidate.id, t.memoryLedgerAdmit, 'accent', () =>
-                        void withBusy(candidate.id, async () => {
-                          // 准入策略（真正防线，ADR-008）：面板是唯一准入入口，
-                          // 用户确认前仍须过 planMemoryAdmission 风险检测。
-                          const admission = planMemoryAdmission(
-                            envelopeContent({
-                              source: 'memory-candidate',
-                              trust: candidate.trust as 'trusted' | 'workspace' | 'derived' | 'untrusted',
-                              origin: 'memory-ledger-panel',
-                              content: candidate.content,
-                            })
-                          );
-                          if (!admission.admitted) {
-                            throw new Error(`准入策略拒绝: ${admission.reason}`);
-                          }
-                          await admitMemoryCandidate(workspacePath, candidate.id, createId());
-                          await reprojectMemoryManagedZone(workspacePath);
-                        })
+                        void withBusy(
+                          candidate.id,
+                          async () => {
+                            // 准入策略（真正防线，ADR-008）：面板是唯一准入入口，
+                            // 用户确认前仍须过 planMemoryAdmission 风险检测。
+                            const admission = planMemoryAdmission(
+                              envelopeContent({
+                                source: 'memory-candidate',
+                                trust: candidate.trust as 'trusted' | 'workspace' | 'derived' | 'untrusted',
+                                origin: 'memory-ledger-panel',
+                                content: candidate.content,
+                              })
+                            );
+                            if (!admission.admitted) {
+                              throw new Error(`准入策略拒绝: ${admission.reason}`);
+                            }
+                            await admitMemoryCandidate(workspacePath, candidate.id, createId());
+                            await reprojectMemoryManagedZone(workspacePath);
+                          },
+                          'entries'
+                        )
                       )}
                       {actionButton(candidate.id, t.memoryLedgerReject, 'warn', () =>
-                        void withBusy(candidate.id, async () => {
-                          await rejectMemoryCandidate(workspacePath, candidate.id, 'inspector-reject');
-                        })
+                        void withBusy(
+                          candidate.id,
+                          async () => {
+                            await rejectMemoryCandidate(workspacePath, candidate.id, 'inspector-reject');
+                          },
+                          'drop-candidate'
+                        )
                       )}
                     </span>
                   </div>

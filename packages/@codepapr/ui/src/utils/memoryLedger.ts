@@ -109,7 +109,7 @@ export function buildMemoryProjection(entries: readonly ProjectionEntry[]): stri
           : '[reported]';
     const line = `- ${badge} ${entry.category} — ${content}`;
     const lineTokens = estimateTokens(line);
-    if (totalTokens + lineTokens > maxTokens) break;
+    if (totalTokens + lineTokens > maxTokens) continue;
     lines.push(line);
     totalTokens += lineTokens;
   }

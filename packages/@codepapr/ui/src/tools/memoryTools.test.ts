@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolRegistry } from '@codepapr/core';
+import { estimateTokens } from '@codepapr/common';
 
 const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(async (_command: string, _args?: Record<string, unknown>): Promise<unknown> => ({})),
@@ -9,7 +10,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
 }));
 
-import { registerMemoryTools, isMemoryFilePath } from './memoryTools';
+import { registerMemoryTools, isMemoryFilePath, drainReRecallAuditIds } from './memoryTools';
 import { registerWorkspaceFileTools } from './workspaceFileTools';
 import type { WorkspaceToolContext } from './workspaceToolContext';
 
@@ -40,6 +41,7 @@ describe('memoryTools (ADR-008 PR4)', () => {
   beforeEach(() => {
     invokeMock.mockReset();
     invokeMock.mockImplementation(async () => ({}));
+    drainReRecallAuditIds('session-1');
   });
 
   it('isMemoryFilePath normalizes separators and ./ prefixes', () => {
@@ -161,7 +163,49 @@ describe('memoryTools (ADR-008 PR4)', () => {
     expect(result.reRecallInsertion!.anchorMessageId).toBe('user-msg-1');
     expect(result.reRecallInsertion!.order).toBe(1);
     expect(result.reRecallInsertion!.placement).toBe('before');
-    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'save_memory_recall')).toBe(true);
+    const recallSave = invokeMock.mock.calls.find(([cmd]) => cmd === 'save_memory_recall');
+    expect(recallSave).toBeDefined();
+    const recallPayload = JSON.parse(recallSave![1]!.recallJson as string) as {
+      estimatedTokens: number;
+      renderedContent: string;
+    };
+    expect(recallPayload.estimatedTokens).toBe(estimateTokens(recallPayload.renderedContent));
+    expect(recallPayload.estimatedTokens).toBeGreaterThan(
+      Math.ceil(recallPayload.renderedContent.length / 4)
+    );
+  });
+
+  it('memory_search writes at most one re-recall audit per turn', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'search_memory_for_recall') {
+        return [
+          {
+            id: 'e1',
+            source: 'stable-memory',
+            title: 'verification',
+            content: 'npm test 全部通过',
+            confidence: 'confirmed',
+            trust: 'workspace',
+            score: 45,
+            sessionId: null,
+            messageIds: null,
+            verifiedAt: 1,
+          },
+        ];
+      }
+      return {};
+    });
+    const registry = buildRegistry();
+    const ctx = { userMessageId: 'user-msg-1' } as unknown as Parameters<ToolRegistry['execute']>[2];
+    const first = (await registry.execute('memory_search', { query: '测试命令' }, ctx)) as {
+      reRecallInsertion?: unknown;
+    };
+    const second = (await registry.execute('memory_search', { query: '测试命令' }, ctx)) as {
+      reRecallInsertion?: unknown;
+    };
+    expect(first.reRecallInsertion).toBeDefined();
+    expect(second.reRecallInsertion).toBeUndefined();
+    expect(invokeMock.mock.calls.filter(([cmd]) => cmd === 'save_memory_recall')).toHaveLength(1);
   });
 
   it('memory_search without userMessageId does not build a re-recall insertion', async () => {
@@ -258,6 +302,23 @@ describe('memoryTools (ADR-008 PR4)', () => {
       candidateId: 'c1',
       reason: '不准确',
     });
+  });
+
+  it('memory_review_candidates reject reports missing/already-handled candidates as failed', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'reject_memory_candidate') {
+        throw new Error('候选不存在或已处理');
+      }
+      return {};
+    });
+    const registry = buildRegistry();
+    const result = (await registry.execute('memory_review_candidates', {
+      action: 'reject',
+      candidateIds: ['missing'],
+    })) as { results: string[] };
+
+    expect(result.results[0]).toContain('failed: missing');
+    expect(result.results[0]).not.toMatch(/^rejected:/);
   });
 
   it('rejects unknown actions', async () => {

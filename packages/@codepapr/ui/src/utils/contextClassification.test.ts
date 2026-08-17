@@ -154,6 +154,23 @@ describe('classifyContextMessages', () => {
     expect(fail!.summary).toContain('✗');
   });
 
+  it('does not classify npm run dev as a verification command', () => {
+    const facts = classifyContextMessages({
+      messages: [
+        assistantWithTools('a1', [
+          {
+            id: 't1',
+            name: 'bash',
+            status: 'success',
+            output: 'ready',
+            arguments: { command: 'npm run dev' },
+          },
+        ]),
+      ],
+    });
+    expect(facts.some((f) => f.kind === 'verification')).toBe(false);
+  });
+
   it('externalizes large tool results instead of copying them', () => {
     const bigOutput = 'x'.repeat(LARGE_TOOL_OUTPUT_CHARS + 1);
     const facts = classifyContextMessages({

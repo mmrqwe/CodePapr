@@ -11,6 +11,7 @@ import {
   MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND,
   Session,
   ToolRegistry,
+  buildRequestContextDebugText,
   type ContextCompactionConfig,
 } from '../src';
 
@@ -1282,5 +1283,28 @@ describe('Agent completion-quality guards (no silent stops)', () => {
     expect(EMPTY_COMPLETION_DISABLE_THINKING_AFTER).toBeLessThanOrEqual(
       MAX_EMPTY_COMPLETION_RETRIES_PER_ROUND
     );
+  });
+
+  it('omits request-only Recall from the debug compiled-request dump', () => {
+    const dump = JSON.parse(
+      buildRequestContextDebugText(
+        {
+          model: 'test-model',
+          messages: [
+            { id: 'u1', role: 'user', content: 'hello', timestamp: 1 },
+            {
+              id: 'recall-1',
+              role: 'user',
+              content: '## Relevant Project Memory\nsecret fact',
+              timestamp: 0,
+              metadata: { requestOnly: true, source: 'memory-recall' },
+            },
+          ],
+        },
+        1
+      )
+    ) as { messages: Array<{ content: string }> };
+    expect(dump.messages).toHaveLength(1);
+    expect(dump.messages[0]?.content).toBe('hello');
   });
 });

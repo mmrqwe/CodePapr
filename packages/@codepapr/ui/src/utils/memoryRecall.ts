@@ -12,7 +12,8 @@ import type { Lang } from './i18n';
 
 export const MAX_RECALL_ITEMS = 5;
 export const MAX_RECALL_TOKENS = 1_200;
-export const MAX_RECALL_ITEM_CHARS = 350;
+/** ADR-009 第10条：单条 recall item ≤ 350 token（字节口径，非字符数）。 */
+export const MAX_RECALL_ITEM_TOKENS = 350;
 export const RETRIEVAL_STRATEGY = 'like-token-v1';
 export const RETRIEVAL_VERSION = 1;
 
@@ -47,7 +48,7 @@ interface RenderOptions {
   lang?: Lang;
   maxItems?: number;
   maxTokens?: number;
-  maxItemChars?: number;
+  maxItemTokens?: number;
 }
 
 /** Recall 渲染所需的最小结构（RecallSearchItem / MemoryRecallItem 均兼容）。 */
@@ -69,7 +70,7 @@ export function renderRecallBlock(
   const lang = options.lang ?? 'zh-CN';
   const maxItems = options.maxItems ?? MAX_RECALL_ITEMS;
   const maxTokens = options.maxTokens ?? MAX_RECALL_TOKENS;
-  const maxItemChars = options.maxItemChars ?? MAX_RECALL_ITEM_CHARS;
+  const maxItemTokens = options.maxItemTokens ?? MAX_RECALL_ITEM_TOKENS;
 
   const wrap: Record<string, [string, string]> = {
     'zh-CN': [
@@ -98,11 +99,14 @@ export function renderRecallBlock(
         : item.trust === 'untrusted'
           ? '[unverified]'
           : '[reported]';
-    const content = item.content.replace(/\s+/g, ' ').trim().slice(0, maxItemChars);
+    const content = truncateToMaxTokens(
+      item.content.replace(/\s+/g, ' ').trim(),
+      maxItemTokens
+    );
     if (!content) continue;
     const line = `- **${item.title}** ${badge}\n  ${content}`;
     const lineTokens = estimateTokens(line);
-    if (tokens + lineTokens > maxTokens) break;
+    if (tokens + lineTokens > maxTokens) continue;
     lines.push(line);
     tokens += lineTokens;
     count += 1;
@@ -157,4 +161,18 @@ export function estimateRecallItemTokens(items: readonly RecallDisplayItem[]): n
     (sum, item) => sum + estimateTokens(`${item.title}\n${item.content}`),
     0
   );
+}
+
+/** 按 estimateTokens（UTF-8 字节/4）截断，避免 CJK 字符数口径低估。 */
+export function truncateToMaxTokens(text: string, maxTokens: number): string {
+  if (maxTokens <= 0 || !text) return '';
+  if (estimateTokens(text) <= maxTokens) return text;
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (estimateTokens(text.slice(0, mid)) <= maxTokens) lo = mid;
+    else hi = mid - 1;
+  }
+  return text.slice(0, lo);
 }

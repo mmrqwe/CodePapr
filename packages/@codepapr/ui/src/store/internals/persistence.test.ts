@@ -107,4 +107,44 @@ describe('sanitizeMessageForPersistence', () => {
     expect(invocation?.status).toBe('success');
     expect(invocation?.output).toBe('done');
   });
+
+  it('strips assistant debug dumps when debug is off and redacts Recall when on', () => {
+    const dump = JSON.stringify(
+      {
+        round: 1,
+        messages: [
+          { role: 'user', content: 'hello' },
+          {
+            role: 'user',
+            content: '## Relevant Project Memory\n\nsecret recalled fact',
+            metadata: { requestOnly: true },
+          },
+        ],
+      },
+      null,
+      2
+    );
+    const assistant: UIMessage = {
+      id: 'a1',
+      role: 'assistant',
+      content: 'ok',
+      timestamp: 1,
+      promptContent: dump,
+    };
+    expect(sanitizeMessageForPersistence(assistant, false).promptContent).toBeUndefined();
+    const kept = sanitizeMessageForPersistence(assistant, true).promptContent;
+    expect(kept).toBeDefined();
+    expect(kept).not.toContain('Relevant Project Memory');
+    expect(kept).not.toContain('secret recalled fact');
+    expect(kept).toContain('hello');
+
+    const user: UIMessage = {
+      id: 'u1',
+      role: 'user',
+      content: 'hi',
+      timestamp: 1,
+      promptContent: 'full wrapped prompt',
+    };
+    expect(sanitizeMessageForPersistence(user, false).promptContent).toBe('full wrapped prompt');
+  });
 });

@@ -33,9 +33,11 @@ const CONSTRAINT_PATTERN =
 /** 判定为「提问」的措辞模式。 */
 const QUESTION_PATTERN = /[?？]|是否|要不要|应该|哪个|怎么|如何|为什么|可以吗|行不行/i;
 
-/** 测试/验证类命令模式（bash 等工具的 args.command / content 命中）。 */
+/** 测试/验证类命令模式（bash 等工具的 args.command / content 命中）。
+ *  `npm run` 本身不是验证：必须跟 test/check/lint/build/ci/verify/spec，
+ *  否则 `npm run dev` 等长驻命令会被当成已验证事实自动准入。 */
 export const TEST_COMMAND_PATTERN =
-  /(^|\s)(pnpm|npm|yarn|cargo|go|python3?|pytest|vitest|jest|mocha)\s+(test|run|check|build|lint)|pytest|vitest|jest/i;
+  /(^|\s)((pnpm|npm|yarn)\s+(test|check|lint|build)\b|(pnpm|npm|yarn)\s+run\s+(test|check|lint|build|ci|verify|spec)\b|cargo\s+(test|check|clippy|build)\b|go\s+test\b|python3?\s+(-m\s+)?(pytest|unittest)\b|pytest\b|vitest\b|jest\b|mocha\b)/i;
 
 const UNTRUSTED_WEB_TOOLS = new Set(['web_fetch', 'webfetch', 'browser', 'search_web', 'websearch']);
 

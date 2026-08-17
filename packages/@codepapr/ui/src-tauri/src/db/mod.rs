@@ -2773,7 +2773,10 @@ pub(crate) fn save_memory_candidate(
            source_session_id = excluded.source_session_id,
            source_message_ids = excluded.source_message_ids,
            evidence = excluded.evidence,
-           risk_flags = excluded.risk_flags",
+           risk_flags = excluded.risk_flags,
+           status = 'pending',
+           decided_at = NULL,
+           rejection_reason = NULL",
         params![
             input.id,
             input.category,
@@ -2935,13 +2938,17 @@ pub(crate) fn reject_memory_candidate(
     reason: Option<String>,
 ) -> Result<(), String> {
     let (conn, ..) = open_project_db(&workspace_path)?;
-    conn.execute(
-        "UPDATE memory_candidates
-         SET status = 'rejected', decided_at = ?1, rejection_reason = ?2
-         WHERE id = ?3 AND status = 'pending'",
-        params![unix_millis()?, reason, candidate_id],
-    )
-    .map_err(|err| format!("拒绝记忆候选失败: {err}"))?;
+    let affected = conn
+        .execute(
+            "UPDATE memory_candidates
+             SET status = 'rejected', decided_at = ?1, rejection_reason = ?2
+             WHERE id = ?3 AND status = 'pending'",
+            params![unix_millis()?, reason, candidate_id],
+        )
+        .map_err(|err| format!("拒绝记忆候选失败: {err}"))?;
+    if affected == 0 {
+        return Err("候选不存在或已处理".to_string());
+    }
     Ok(())
 }
 
@@ -3615,6 +3622,11 @@ pub(crate) fn search_memory_for_recall(
             .map_err(|err| format!("收集记忆条目检索失败: {err}"))?;
 
         for (id, category, content, confidence, trust, session_id, message_ids, verified_at) in rows {
+            // ADR-009 第9条：untrusted 默认不自动召回。准入策略已挡住
+            // 主路径；此处硬跳过是防御纵深（评分 -50 仍可被高 overlap 过线）。
+            if trust == "untrusted" {
+                continue;
+            }
             if let Some(candidates) = &fts_candidates {
                 if !candidates.contains(&id) {
                     continue;
@@ -4910,6 +4922,112 @@ mod tests {
             entry.evidence.as_deref(),
             Some("{\"origin\":\"bash:pnpm test auth\"}")
         );
+    }
+
+    #[test]
+    fn search_memory_for_recall_skips_untrusted_even_with_high_overlap() {
+        let workspace = TestWorkspace::new("memory-recall-untrusted");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        {
+            let (conn, ..) = open_project_db(&ws).unwrap();
+            conn.execute(
+                "INSERT INTO memory_entries
+                   (id, category, content, content_hash, confidence, trust, status,
+                    created_at, verified_at)
+                 VALUES ('untrusted-1', 'verification', 'pnpm test auth oauth callback',
+                         'h-u', 'confirmed', 'untrusted', 'active', 1, 1)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let query = serde_json::json!({ "tokens": ["pnpm", "test", "auth", "oauth", "callback"], "limit": 8 });
+        let items = search_memory_for_recall(ws, query.to_string()).expect("search");
+        assert!(
+            items.iter().all(|item| item.trust != "untrusted"),
+            "untrusted entries must not be recalled"
+        );
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn reject_memory_candidate_errors_when_missing_or_already_decided() {
+        let workspace = TestWorkspace::new("memory-reject-missing");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        let candidate = serde_json::json!({
+            "id": "c-rej",
+            "category": "general",
+            "content": "待拒绝",
+            "contentHash": "h-rej",
+            "confidence": "reported",
+            "trust": "derived",
+            "sourceSessionId": "s1",
+            "sourceMessageIds": "[]",
+            "evidence": null,
+            "riskFlags": null,
+            "createdAt": 1i64,
+        });
+        save_memory_candidate(ws.clone(), candidate.to_string()).expect("save");
+        reject_memory_candidate(ws.clone(), "c-rej".to_string(), Some("no".to_string()))
+            .expect("first reject");
+        let err = reject_memory_candidate(ws.clone(), "c-rej".to_string(), None)
+            .expect_err("already rejected");
+        assert!(err.contains("不存在或已处理"), "got: {err}");
+        let missing = reject_memory_candidate(ws, "no-such".to_string(), None)
+            .expect_err("missing id");
+        assert!(missing.contains("不存在或已处理"), "got: {missing}");
+    }
+
+    #[test]
+    fn save_memory_candidate_id_conflict_resets_decision_fields() {
+        let workspace = TestWorkspace::new("memory-id-conflict");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        let first = serde_json::json!({
+            "id": "same-id",
+            "category": "general",
+            "content": "旧内容",
+            "contentHash": "h-old",
+            "confidence": "reported",
+            "trust": "derived",
+            "sourceSessionId": "s1",
+            "sourceMessageIds": "[]",
+            "evidence": null,
+            "riskFlags": null,
+            "createdAt": 1i64,
+        });
+        save_memory_candidate(ws.clone(), first.to_string()).expect("save first");
+        reject_memory_candidate(ws.clone(), "same-id".to_string(), Some("stale".to_string()))
+            .expect("reject");
+
+        let second = serde_json::json!({
+            "id": "same-id",
+            "category": "fact",
+            "content": "新内容不同哈希",
+            "contentHash": "h-new",
+            "confidence": "reported",
+            "trust": "derived",
+            "sourceSessionId": "s1",
+            "sourceMessageIds": "[]",
+            "evidence": null,
+            "riskFlags": null,
+            "createdAt": 2i64,
+        });
+        assert!(
+            save_memory_candidate(ws.clone(), second.to_string()).expect("save collision"),
+            "id collision with different hash must insert/update"
+        );
+        let candidates = load_memory_candidates(ws, Some("pending".to_string())).expect("load");
+        let loaded = candidates.iter().find(|c| c.id == "same-id").expect("row");
+        assert_eq!(loaded.status, "pending");
+        assert_eq!(loaded.content, "新内容不同哈希");
+        assert!(loaded.decided_at.is_none());
+        assert!(loaded.rejection_reason.is_none());
     }
 
     fn compaction_commit_json(id: &str, session_id: &str, source: i64, target: i64) -> String {

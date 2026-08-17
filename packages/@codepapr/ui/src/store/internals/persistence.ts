@@ -50,15 +50,23 @@ export function normalizeSessionMetaList(sessions: ProjectSessionMeta[]): Sessio
     .sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt);
 }
 
-export function sanitizeMessageForPersistence(message: UIMessage, _debugEnabled: boolean): UIMessage {
+export function sanitizeMessageForPersistence(message: UIMessage, debugEnabled: boolean): UIMessage {
+  const promptContent =
+    message.role === 'user'
+      ? message.promptContent
+      : debugEnabled
+        ? redactRecallFromDebugPrompt(message.promptContent)
+        : undefined;
+
   return {
     ...message,
     isStreaming: undefined,
     statusText: undefined,
-    // promptContent is intentionally preserved: it is the full runtime user prompt
-    // actually sent to the model. Restoring it (via the messages.extras column)
-    // keeps rebuilt history byte-identical to the live log, protecting the prefix
-    // cache. Only the short display `content` would be recovered otherwise.
+    // user.promptContent is the full runtime user prompt actually sent to the
+    // model — restoring it keeps rebuilt history byte-identical (prefix cache).
+    // assistant.promptContent is a debug dump of the compiled request: only
+    // persist when debug is on, and never persist request-only Recall (ADR-009).
+    promptContent,
     images: undefined,
     toolInvocations: message.toolInvocations?.map((ti) => ({
       ...ti,
@@ -70,6 +78,26 @@ export function sanitizeMessageForPersistence(message: UIMessage, _debugEnabled:
       output: ti.output ?? '',
     })),
   };
+}
+
+/** Strip request-only Recall blocks from a debug compiled-request dump. */
+export function redactRecallFromDebugPrompt(promptContent: string | undefined): string | undefined {
+  if (typeof promptContent !== 'string' || !promptContent.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(promptContent) as {
+      messages?: Array<{ content?: string; metadata?: Record<string, unknown> }>;
+    };
+    if (!Array.isArray(parsed.messages)) return promptContent;
+    const next = parsed.messages.filter((entry) => {
+      if (entry.metadata?.requestOnly === true) return false;
+      return typeof entry.content !== 'string' || !entry.content.includes('## Relevant Project Memory');
+    });
+    if (next.length === parsed.messages.length) return promptContent;
+    return JSON.stringify({ ...parsed, messages: next }, null, 2);
+  } catch {
+    if (!promptContent.includes('## Relevant Project Memory')) return promptContent;
+    return promptContent.replace(/## Relevant Project Memory[\s\S]*?(?=\n## |\n {2}"role":|$)/g, '');
+  }
 }
 
 export function sanitizeSessionMessagesForPersistence(

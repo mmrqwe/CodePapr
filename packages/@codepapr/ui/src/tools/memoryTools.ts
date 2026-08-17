@@ -24,7 +24,7 @@ import {
   redactSecrets,
   MEMORY_CONTENT_MAX_CHARS,
 } from '@codepapr/core';
-import { sha256 } from '@codepapr/common';
+import { sha256, estimateTokens } from '@codepapr/common';
 import { toolByName } from './workspaceToolDefinitions';
 import { createId } from '../utils/createId';
 import {
@@ -45,6 +45,7 @@ import {
   buildRecallQuery,
   renderRecallBlock,
 } from '../utils/memoryRecall';
+import { withMemoryLock } from '../utils/memoryWriteLock';
 
 const MEMORY_CATEGORIES = new Set([
   'general',
@@ -159,8 +160,13 @@ async function reprojectManagedZone(workspacePath: string): Promise<void> {
 }
 
 /** 重投影 managed zone（active entries → buildMemoryProjection → 落盘）。
- *  供 memory 工具与 Memory Inspector 面板共用。 */
+ *  供 memory 工具与 Memory Inspector 面板共用。经 withMemoryLock，避免与
+ *  bootstrap / 回合投影并发 last-writer-wins。 */
 export async function reprojectMemoryManagedZone(workspacePath: string): Promise<void> {
+  await withMemoryLock(() => reprojectMemoryManagedZoneUnlocked(workspacePath));
+}
+
+async function reprojectMemoryManagedZoneUnlocked(workspacePath: string): Promise<void> {
   const entries = await loadMemoryEntries(workspacePath, true);
   const projection = buildMemoryProjection(
     entries.map((entry) => ({
@@ -290,9 +296,11 @@ export function registerMemoryTools(
     // PR5（ADR-009 第11条）：memory_search 触发受控 re-recall——order 递增的
     // 第二个 insertion（锚定本回合 user 消息之前）。主线程 Agent 路径无
     // userMessageId 时不生成（worker 路径经 tool-request 桥下发）。
+    // 每 turn 至多一次：worker 只 push 第一次，后续搜索若再写审计行会虚增。
     const toolCtx = context as MemoryToolContext | undefined;
     let reRecallInsertion: ReturnType<typeof buildRecallInsertion> | undefined;
-    if (toolCtx?.userMessageId) {
+    const alreadyRecalledThisTurn = (reRecallAuditIds.get(sessionId)?.size ?? 0) > 0;
+    if (toolCtx?.userMessageId && !alreadyRecalledThisTurn) {
       const recallId = createId();
       const renderedBlock = renderRecallBlock(
         items.map((item) => ({
@@ -320,7 +328,7 @@ export function registerMemoryTools(
             queryText: query,
             renderedContent: renderedBlock,
             itemsJson: JSON.stringify(items.slice(0, 5)),
-            estimatedTokens: Math.ceil(renderedBlock.length / 4),
+            estimatedTokens: estimateTokens(renderedBlock),
             retrievalStrategy: 'like-token-v1',
             retrievalVersion: 1,
             createdAt: Date.now(),

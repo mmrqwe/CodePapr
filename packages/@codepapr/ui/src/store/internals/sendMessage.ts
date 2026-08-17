@@ -105,6 +105,7 @@ import { normalizeSettings, getSettingsError, resolveProviderName } from './sett
 import { addConversationRuntime, addConversationStats, addTierRuntimeMs, getSessionConversationStats } from './stats';
 import { maybeApplySessionTitle, touchSession } from './persistence';
 import { saveCurrentProjectState } from './projectSnapshot';
+import { withMemoryLock } from '../../utils/memoryWriteLock';
 import {
   appendErrorMessage,
   appendInfoMessage,
@@ -169,21 +170,6 @@ let compactCheckpointInFlight = false;
 // 一个请求、bash/git 副作用重复执行。JS 单线程下「检查 + 占位」在同一同步块
 // 完成（中间无 await），不存在 TOCTOU。置位/清理见 sendMessage 主体。
 let turnInFlight = false;
-
-// Serializes background memory.md read-modify-write operations (cold-start
-// bootstrap and post-reply consolidation). They share one file and each does a
-// full-overwrite write; without serialization a slow bootstrap write can land
-// between a consolidation's read and write (or vice versa) and clobber it. The
-// chain never rejects, so a failing task does not wedge subsequent ones.
-let memoryWriteChain: Promise<void> = Promise.resolve();
-function withMemoryLock<T>(task: () => Promise<T>): Promise<T> {
-  const result = memoryWriteChain.then(task);
-  memoryWriteChain = result.then(
-    () => undefined,
-    () => undefined
-  );
-  return result;
-}
 
 /** 读取 .CodePapr/memory.md 内容（trim 后）；不存在/读取失败返回 undefined。
  *  供 bootstrap/consolidation 写前重读：它们的读-改-写窗口横跨整个模型调用，
@@ -1052,11 +1038,13 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             };
             void (async () => {
               try {
+                // LLM 生成放在锁外：持锁数秒会堵住工具/面板投影。
+                const generated = await bootstrapMemoryContent(bootstrapInput, normalizedSettings);
+                if (!generated) return;
                 await withMemoryLock(async () => {
-                  const generated = await bootstrapMemoryContent(bootstrapInput, normalizedSettings);
-                  if (generated) {
-                    // 写前重读：生成窗口内 agent 可能已写入 memory.md →
-                    // 放弃本次 bootstrap（绝不覆盖已有内容）。
+                    // 写前重读在锁内：生成窗口内 agent/面板可能已写入 memory.md →
+                    // 放弃本次 bootstrap（绝不覆盖已有内容）。锁把重读与投影
+                    // 之间的窗口对其他写者关闭。
                     const current = await readMemoryFile(workspacePath);
                     if (current) {
                       console.warn('[memory] bootstrap skipped: memory.md was written during generation');
@@ -1100,7 +1088,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                       }))
                     );
                     await projectMemoryFile(workspacePath, projection);
-                  }
                 });
               } catch {
                 // Silent fail - don't disrupt the session

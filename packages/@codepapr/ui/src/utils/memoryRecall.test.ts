@@ -4,10 +4,12 @@ import {
   buildRecallQuery,
   estimateRecallItemTokens,
   MAX_RECALL_ITEMS,
+  MAX_RECALL_ITEM_TOKENS,
   MAX_RECALL_TOKENS,
   MIN_RECALL_BUDGET_TOKENS,
   renderRecallBlock,
   resolveRecallBudget,
+  truncateToMaxTokens,
   type RecallDisplayItem,
 } from './memoryRecall';
 
@@ -67,6 +69,21 @@ describe('renderRecallBlock', () => {
 
   it('returns empty string when nothing fits', () => {
     expect(renderRecallBlock([], { lang: 'zh-CN' })).toBe('');
+  });
+
+  it('skips an oversized item and still packs a later smaller one', () => {
+    const block = renderRecallBlock(
+      [item('大', 'x'.repeat(2_000)), item('小', 'pnpm test 通过')],
+      { lang: 'en', maxTokens: 100 }
+    );
+    expect(block).toContain('pnpm test 通过');
+    expect(block).not.toContain('x'.repeat(100));
+  });
+
+  it('keeps a CJK item longer than 350 chars when it still fits the 350-token cap', () => {
+    const cjk = '测'.repeat(400);
+    const block = renderRecallBlock([item('CJK', cjk)]);
+    expect(block).toContain(cjk);
   });
 });
 
@@ -144,5 +161,20 @@ describe('resolveRecallBudget (ADR-009 第10条)', () => {
   it('min floor boundary', () => {
     const budget = resolveRecallBudget({ remainingSoftBudgetTokens: MIN_RECALL_BUDGET_TOKENS * 5 });
     expect(budget?.maxTokens).toBe(MIN_RECALL_BUDGET_TOKENS);
+  });
+});
+
+describe('truncateToMaxTokens', () => {
+  it('keeps CJK text that fits in 350 tokens (~466 chars) instead of slicing at 350 chars', () => {
+    const text = '测'.repeat(400);
+    const truncated = truncateToMaxTokens(text, MAX_RECALL_ITEM_TOKENS);
+    expect(truncated).toBe(text);
+  });
+
+  it('truncates CJK that exceeds the token cap', () => {
+    const text = '测'.repeat(800);
+    const truncated = truncateToMaxTokens(text, MAX_RECALL_ITEM_TOKENS);
+    expect(truncated.length).toBeGreaterThan(350);
+    expect(truncated.length).toBeLessThan(800);
   });
 });

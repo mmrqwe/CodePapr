@@ -227,13 +227,40 @@ describe('MemoryLedgerPanel', () => {
     await flush();
     expect(admitMemoryCandidateMock).toHaveBeenCalledWith('/tmp/ws', 'c1', expect.any(String));
     expect(reprojectMock).toHaveBeenCalledWith('/tmp/ws');
+    // 准入后就地移除候选，不再全量 reload pending（O(n²) IPC）。
+    expect(loadMemoryCandidatesMock).toHaveBeenCalledTimes(1);
+    expect(container.textContent).not.toContain('这是一条用于准入测试的记忆候选内容');
+  });
 
-    rejectMemoryCandidateMock.mockClear();
-    reprojectMock.mockClear();
+  it('rejecting a candidate does not reproject or reload the pending list', async () => {
+    loadMemoryCandidatesMock.mockResolvedValue([
+      {
+        id: 'c1',
+        category: 'general',
+        content: '这是一条用于拒绝测试的记忆候选内容',
+        contentHash: 'hc',
+        confidence: 'reported',
+        trust: 'derived',
+        status: 'pending',
+        riskFlags: null,
+        sourceSessionId: null,
+        sourceMessageIds: null,
+        createdAt: 1,
+        decidedAt: null,
+        rejectionReason: null,
+      },
+    ]);
+
+    await act(async () => {
+      root.render(<MemoryLedgerPanel workspacePath="/tmp/ws" lang="zh-CN" />);
+    });
+    await flush();
+
     clickButton(container, '拒绝');
     await flush();
     expect(rejectMemoryCandidateMock).toHaveBeenCalledWith('/tmp/ws', 'c1', 'inspector-reject');
     expect(reprojectMock).not.toHaveBeenCalled();
+    expect(loadMemoryCandidatesMock).toHaveBeenCalledTimes(1);
   });
 
   it('admit is blocked by the admission policy even from the user panel', async () => {
