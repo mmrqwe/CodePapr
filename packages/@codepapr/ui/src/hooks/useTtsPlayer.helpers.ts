@@ -3,8 +3,8 @@ const SENTENCE_BOUNDARY_CJK = /[。！？\n\r!?;]+/g;
 const SENTENCE_BOUNDARY_EN = /[.!?;\n\r]+/g;
 /**
  * Clause-level boundary for fine-grained secondary splitting.
- * Splits on Chinese commas / enumeration commas / semicolons / colons /
- * em-dashes to keep GPT input short (benchmark: 56→9 char avg = 6x GPT speedup).
+ * Capturing group keeps the punctuation on the preceding clause so
+ * "你好，世界" becomes "你好，" + "世界" instead of "你好" + "世界".
  */
 const CLAUSE_BOUNDARY = /[，、；：——]+/g;
 
@@ -21,13 +21,19 @@ export function sentenceBoundaryFor(text: string): RegExp {
  * Strip markdown, code blocks, URLs, and other non-speakable text
  * from assistant content before sending to TTS.
  *
- * Roleplay-aware: action descriptors (italics like `*嘴角微扬*`, `*Johnny laughs*`,
- * or parenthetical asides like `（叹气）` `(sighs)`) are STRIPPED ENTIRELY,
- * not just unwrapped. The bold variants (`**word**`, `__word__`) are still
- * unwrapped because those are emphasis, not actions.
+ * Roleplay-aware: action descriptors (`*嘴角微扬*`, `*Johnny laughs*`) are
+ * always stripped — they are never spoken. Parenthetical asides
+ * (`（叹气）` `(sighs)`) are stripped only in `roleplay` mode. Persona
+ * replies use parentheses for glosses ("npm（包管理器）") that must be kept.
+ * Bold (`**word**`, `__word__`) is unwrapped as spoken emphasis.
  */
-export function sanitizeForSpeech(text: string): string {
-  return text
+export type SpeechSanitizeMode = 'persona' | 'roleplay';
+
+export function sanitizeForSpeech(
+  text: string,
+  mode: SpeechSanitizeMode = 'persona',
+): string {
+  let out = text
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`[^`\n]+`/g, ' ')
     .replace(/\[([^\]]*)\]\([^)]+\)/g, '$1')
@@ -38,9 +44,13 @@ export function sanitizeForSpeech(text: string): string {
     // Underscore italics only when the underscores sit on word boundaries —
     // otherwise identifiers like `snake_case` (underscores between word
     // chars) get their middle stripped out.
-    .replace(/(^|[^\w])_[^_]+?_(?=[^\w]|$)/g, '$1 ')
-    .replace(/（[^（）]*）/g, ' ')
-    .replace(/\([^()]*\)/g, ' ')
+    .replace(/(^|[^\w])_[^_]+?_(?=[^\w]|$)/g, '$1 ');
+  if (mode === 'roleplay') {
+    out = out
+      .replace(/（[^（）]*）/g, ' ')
+      .replace(/\([^()]*\)/g, ' ');
+  }
+  return out
     .replace(/…+/g, '。')
     .replace(/([。！？])。+/g, '$1')
     .replace(/(^|\n)\s*。+/g, '$1')
@@ -89,16 +99,32 @@ export function splitSentences(text: string): { sentences: string[]; lastEnd: nu
   }
 
   // Fine-grained secondary split: break each coarse sentence on clause
-  // boundaries (commas, semicolons, etc.) for dramatically faster GPT
-  // inference. GPT autoregressive time grows super-linearly with text
-  // length; 56-char avg → 9-char avg yields ~6x GPT speedup.
+  // boundaries (commas, semicolons, etc.) for faster GPT inference, but
+  // keep the punctuation on the preceding clause so speech doesn't drop
+  // commas / enumeration marks.
   const fine: string[] = [];
   for (const s of coarse) {
-    const clauses = s.split(CLAUSE_BOUNDARY).map(c => c.trim()).filter(c => c.length > 0);
-    if (clauses.length > 0) fine.push(...clauses);
+    fine.push(...splitKeepingDelimiters(s, CLAUSE_BOUNDARY));
   }
 
   return { sentences: fine, lastEnd };
+}
+
+/** Keep clause punctuation on the preceding fragment: "你好，世界" → ["你好，", "世界"]. */
+function splitKeepingDelimiters(text: string, re: RegExp): string[] {
+  const parts: string[] = [];
+  let last = 0;
+  const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
+  const global = new RegExp(re.source, flags);
+  for (const m of text.matchAll(global)) {
+    const end = (m.index ?? 0) + m[0].length;
+    const chunk = text.slice(last, end).trim();
+    if (chunk) parts.push(chunk);
+    last = end;
+  }
+  const tail = text.slice(last).trim();
+  if (tail) parts.push(tail);
+  return parts;
 }
 
 /**
@@ -241,11 +267,6 @@ export function findSafeSplitPoint(text: string): number {
       case '？':
       case '!':
       case '?':
-      case ';':
-      case '，':
-      case '、':
-      case '；':
-      case '：':
       case '…':
       case '\n':
       case '\r':

@@ -28,6 +28,7 @@ import { TtsStatusBadge } from './TtsPanel';
 import { TtsInstaller } from './TtsInstaller';
 import { useCharactersStore } from '../store/charactersStore';
 import { maybeInsertActiveCharacterGreeting } from '../utils/characterGreeting';
+import { resolveCharacterInteractionMode } from '../utils/characterTypes';
 import {
   isScrollContainerNearBottom,
   scrollContainerToBottom,
@@ -296,7 +297,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     [visibleMessages]
   );
   const t = getTranslation(settings.lang);
-  const { feedStream: ttsFeedStream, stop: ttsStop, isPlaying: ttsIsPlaying, lastError: ttsError, clearError: ttsClearError, serverStatus: ttsServerStatus, serverModelVersion: ttsServerModelVersion, serverHalfPrecision: ttsServerHalfPrecision, serverDevice: ttsServerDevice, installed: ttsInstalled, refreshInstalled: ttsRefreshInstalled, startServer: ttsStartServer, replayText: ttsReplayText, setVoiceConfig: ttsSetVoiceConfig, setTextLanguage: ttsSetTextLanguage, setVoiceModel: ttsSetVoiceModel, setFineTunedModel: ttsSetFineTunedModel, preloadModel: ttsPreloadModel, setPlaybackMode: ttsSetPlaybackMode, setSampleSteps: ttsSetSampleSteps, setSpeed: ttsSetSpeed, setSentencesPerChunk: ttsSetSentencesPerChunk, serverLog: ttsServerLog, clearServerLog: ttsClearServerLog } = useTtsPlayer();
+  const { feedStream: ttsFeedStream, stop: ttsStop, skip: ttsSkip, isPlaying: ttsIsPlaying, lastError: ttsError, clearError: ttsClearError, serverStatus: ttsServerStatus, serverModelVersion: ttsServerModelVersion, serverHalfPrecision: ttsServerHalfPrecision, serverDevice: ttsServerDevice, installed: ttsInstalled, refreshInstalled: ttsRefreshInstalled, startServer: ttsStartServer, replayText: ttsReplayText, setVoiceConfig: ttsSetVoiceConfig, setTextLanguage: ttsSetTextLanguage, setVoiceModel: ttsSetVoiceModel, setFineTunedModel: ttsSetFineTunedModel, preloadModel: ttsPreloadModel, setPlaybackMode: ttsSetPlaybackMode, setSampleSteps: ttsSetSampleSteps, setSpeed: ttsSetSpeed, setSentencesPerChunk: ttsSetSentencesPerChunk, setInteractionMode: ttsSetInteractionMode, volume: ttsVolume, setVolume: ttsSetVolume, serverLog: ttsServerLog, clearServerLog: ttsClearServerLog } = useTtsPlayer();
   const [showInstaller, setShowInstaller] = useState(false);
   const [ttsStarting, setTtsStarting] = useState(false);
   const [showTtsLog, setShowTtsLog] = useState(false);
@@ -364,18 +365,18 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
 
     const warnings: string[] = [];
     if (ttsServerModelVersion && ttsServerModelVersion !== 'v4') {
-      warnings.push(`模型版本为 ${ttsServerModelVersion}（建议 v4，v1 对日语极慢）`);
+      warnings.push(t.ttsWarnModelVersion.replace('{{version}}', ttsServerModelVersion));
     }
     if (ttsServerDevice === 'cpu') {
-      warnings.push('运行在 CPU 模式（MPS GPU 加速未生效，合成速度慢 5-10 倍）');
+      warnings.push(t.ttsWarnCpu);
     }
     if (!ttsServerHalfPrecision) {
-      warnings.push('未启用半精度（合成速度慢约 2 倍）');
+      warnings.push(t.ttsWarnNoHalf);
     }
     if (warnings.length > 0) {
-      toast.warning(`TTS 性能警告：${warnings.join('；')}`, { durationMs: 10000 });
+      toast.warning(t.ttsPerfWarning.replace('{{details}}', warnings.join('；')), { durationMs: 10000 });
     }
-  }, [ttsServerStatus, ttsServerModelVersion, ttsServerDevice, ttsServerHalfPrecision]);
+  }, [ttsServerStatus, ttsServerModelVersion, ttsServerDevice, ttsServerHalfPrecision, t.ttsWarnModelVersion, t.ttsWarnCpu, t.ttsWarnNoHalf, t.ttsPerfWarning]);
 
   const activeCharacter = useCharactersStore((s) =>
     s.characters.find((c) => c.id === s.activeCharacterId) ?? null
@@ -408,6 +409,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       const ftPath = vc.useFineTuned !== false && vc.fineTunedModelPath ? vc.fineTunedModelPath : '';
       ttsSetFineTunedModel(ftPath);
       ttsSetSentencesPerChunk(vc.sentencesPerChunk ?? 3);
+      ttsSetInteractionMode(resolveCharacterInteractionMode(activeCharacter));
       // Only preload/reset the model when the path actually changes
       // (avoiding an HTTP round-trip on every character save).
       if (ftPath !== prevFtPathRef.current && ttsServerStatus === 'running') {
@@ -419,12 +421,13 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       ttsSetTextLanguage('all_zh');
       ttsSetVoiceModel('');
       ttsSetFineTunedModel('');
+      ttsSetInteractionMode('persona');
       // Reset the preload tracker too, so switching back to a character that
       // DOES have a fine-tuned model re-triggers the preload (otherwise the
       // stale cached path would suppress it).
       prevFtPathRef.current = '';
     }
-  }, [activeCharacter?.voice?.referenceSamplePath, activeCharacter?.voice?.referenceText, activeCharacter?.voice?.referenceTextLanguage, activeCharacter?.voice?.textLanguage, activeCharacter?.voice?.engine, activeCharacter?.voice?.playbackMode, activeCharacter?.voice?.sampleSteps, activeCharacter?.voice?.speed, activeCharacter?.voice?.modelName, activeCharacter?.voice?.fineTunedModelPath, activeCharacter?.voice?.useFineTuned, activeCharacter?.voice?.sentencesPerChunk, ttsSetVoiceConfig, ttsSetTextLanguage, ttsSetVoiceModel, ttsSetFineTunedModel, ttsSetPlaybackMode, ttsSetSampleSteps, ttsSetSpeed, ttsSetSentencesPerChunk, ttsServerStatus]);
+  }, [activeCharacter?.voice?.referenceSamplePath, activeCharacter?.voice?.referenceText, activeCharacter?.voice?.referenceTextLanguage, activeCharacter?.voice?.textLanguage, activeCharacter?.voice?.engine, activeCharacter?.voice?.playbackMode, activeCharacter?.voice?.sampleSteps, activeCharacter?.voice?.speed, activeCharacter?.voice?.modelName, activeCharacter?.voice?.fineTunedModelPath, activeCharacter?.voice?.useFineTuned, activeCharacter?.voice?.sentencesPerChunk, activeCharacter?.interactionMode, ttsSetVoiceConfig, ttsSetTextLanguage, ttsSetVoiceModel, ttsSetFineTunedModel, ttsSetPlaybackMode, ttsSetSampleSteps, ttsSetSpeed, ttsSetSentencesPerChunk, ttsSetInteractionMode, ttsServerStatus]);
 
   const prevHasStreamingRef = useRef(hasStreamingMessage);
   const lastStreamingMsgIdRef = useRef<string | null>(null);
@@ -1753,16 +1756,16 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                         ttsError
                           ? `TTS error: ${ttsError}`
                           : ttsServerStatus === 'starting' || ttsStarting
-                            ? 'TTS 服务器启动中（首次加载模型可能需要 30-90 秒，请耐心等待，不要重复点击）'
+                            ? t.ttsServerStarting
                             : ttsInstalled === false
-                              ? 'TTS not installed. Click to install.'
+                              ? t.ttsNotInstalled
                               : ttsServerStatus === 'running' && ttsIsPlaying
                                 ? t.ttsStop
                                 : ttsServerStatus === 'running'
-                                  ? `${showTtsLog ? '关闭' : '查看'} TTS 服务器日志 (${ttsServerLog.length} 行)`
+                                  ? (showTtsLog ? t.ttsHideLog : t.ttsViewLog).replace('{{count}}', String(ttsServerLog.length))
                                   : ttsServerStatus === 'error'
                                     ? `TTS server error${ttsError ? `: ${ttsError}` : ''}`
-                                    : 'Click to start TTS server'
+                                    : t.ttsClickToStart
                       }
                       className={`p-1.5 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-wait ${
                         ttsServerStatus === 'running'
@@ -1781,20 +1784,43 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                       </svg>
                     </button>
                     <TtsStatusBadge status={ttsServerStatus} />
+                    {ttsIsPlaying && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => ttsSkip()}
+                          title={t.ttsSkip}
+                          className="p-1.5 rounded-lg text-fg-muted hover:text-fg hover:bg-slate-700/50 transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5M15.75 4.5v15" />
+                          </svg>
+                        </button>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={Math.round(ttsVolume * 100)}
+                          onChange={(e) => ttsSetVolume(Number(e.target.value) / 100)}
+                          title={t.ttsVolume}
+                          className="w-16 accent-accent"
+                        />
+                      </>
+                    )}
                     {showTtsLog && (
                       <div className="absolute bottom-full left-0 mb-1 w-[52rem] max-w-[calc(100vw-3rem)] rounded-xl border border-slate-600/40 bg-slate-900/95 backdrop-blur px-3 py-2.5 text-xs text-fg z-40 max-h-[420px] overflow-y-auto select-text whitespace-pre-wrap break-words font-mono shadow-xl">
                         <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-700/50 sticky top-0 bg-slate-900/95 z-10">
                           <span className="text-[11px] font-semibold text-fg-muted select-none">
-                            TTS 服务器日志 ({ttsServerLog.length} 行)
+                            {t.ttsServerLogTitle.replace('{{count}}', String(ttsServerLog.length))}
                           </span>
                           <div className="flex items-center gap-1.5 select-none">
                             <button
                               type="button"
                               onClick={() => ttsClearServerLog()}
                               className="text-[10px] text-fg-muted hover:text-fg-soft px-1.5 py-0.5 rounded transition-colors"
-                              title="清空日志"
+                              title={t.ttsClearLog}
                             >
-                              清空
+                              {t.ttsClearLog}
                             </button>
                             <button
                               type="button"
@@ -1806,7 +1832,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                           </div>
                         </div>
                         {ttsServerLog.length === 0 ? (
-                          <div className="text-fg-dim italic text-[11px]">暂无日志</div>
+                          <div className="text-fg-dim italic text-[11px]">{t.ttsNoLog}</div>
                         ) : (
                           ttsServerLog.map((entry, i) => (
                             <div
@@ -1840,7 +1866,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                         {ttsServerLog.length > 0 && (
                           <details className="mt-2 border-t border-danger-bg pt-2">
                             <summary className="cursor-pointer text-[11px] font-semibold text-danger hover:text-danger">
-                              查看完整 TTS 服务器日志 ({ttsServerLog.length} 行)
+                              {t.ttsViewFullLog.replace('{{count}}', String(ttsServerLog.length))}
                             </summary>
                             <div className="mt-2 font-mono text-[10px] leading-snug">
                               {ttsServerLog.map((entry, i) => (

@@ -81,14 +81,25 @@ describe('sanitizeForSpeech', () => {
     expect(out).toContain('你好');
   });
 
-  it('DELETES full-width parenthetical actions', () => {
-    const out = sanitizeForSpeech('他点点头（叹气）说没事。');
+  it('keeps parenthetical glosses in persona mode (default)', () => {
+    const out = sanitizeForSpeech('用 npm（包管理器）安装。');
+    expect(out).toContain('包管理器');
+    expect(out).toContain('npm');
+  });
+
+  it('keeps half-width parenthetical glosses in persona mode', () => {
+    const out = sanitizeForSpeech('Use npm (package manager) to install.');
+    expect(out).toContain('package manager');
+  });
+
+  it('DELETES full-width parenthetical actions in roleplay mode', () => {
+    const out = sanitizeForSpeech('他点点头（叹气）说没事。', 'roleplay');
     expect(out).not.toContain('叹气');
     expect(out).toContain('没事');
   });
 
-  it('DELETES half-width parenthetical actions', () => {
-    const out = sanitizeForSpeech('She nodded (sighs) and left.');
+  it('DELETES half-width parenthetical actions in roleplay mode', () => {
+    const out = sanitizeForSpeech('She nodded (sighs) and left.', 'roleplay');
     expect(out).not.toContain('sighs');
     expect(out).toContain('nodded');
     expect(out).toContain('left');
@@ -157,7 +168,7 @@ describe('sanitizeForSpeech', () => {
 
   it('handles realistic mixed roleplay output', () => {
     const input = `**Johnny**: *leans in* "Hello there." (smirks)\n\nWelcome to the show.`;
-    const out = sanitizeForSpeech(input);
+    const out = sanitizeForSpeech(input, 'roleplay');
     expect(out).toContain('Johnny');
     expect(out).toContain('Hello there');
     expect(out).toContain('Welcome to the show');
@@ -240,7 +251,7 @@ describe('splitSentences', () => {
     const { sentences } = splitSentences(text);
     // Should split on commas AND period → at least 3 clauses
     expect(sentences.length).toBeGreaterThanOrEqual(3);
-    expect(sentences.join('')).toContain('你好');
+    expect(sentences.join('')).toContain('你好，');
     expect(sentences.join('')).toContain('世界');
     expect(sentences.join('')).toContain('今天天气不错');
   });
@@ -331,8 +342,9 @@ describe('findSafeSplitPoint', () => {
     expect(findSafeSplitPoint('hello')).toBe(0);
   });
 
-  it('does NOT treat "." as a terminator (Chinese-oriented set)', () => {
-    // The current terminator set is 。！？!?;,，\n\r — "." is intentionally excluded.
+  it('does NOT treat "." as a terminator (avoids splitting Mr./Dr.)', () => {
+    // Streaming cuts only at 。！？!? and newlines. English abbreviations
+    // would be shredded if "." were a safe split point.
     expect(findSafeSplitPoint('Hello world.')).toBe(0);
   });
 
@@ -455,13 +467,14 @@ describe('findSafeSplitPoint', () => {
     expect(text.slice(0, pos)).toBe('Hello there!');
   });
 
-  it('DOES split on full-width comma (fine-grained for GPT speed)', () => {
-    // `，` IS now a split point — fine-grained splitting keeps GPT input
-    // short for dramatically faster inference (6x GPT speedup benchmarked).
-    const text = '你好，世界';
-    const pos = findSafeSplitPoint(text);
-    expect(pos).toBeGreaterThan(0);
-    expect(text.slice(0, pos)).toContain('你好');
+  it('does NOT split streaming text on full-width comma (wait for sentence end)', () => {
+    // Commas used to be safe split points, which fed TTS a stream of
+    // fragments. Sentence-end punctuation and newlines are the only
+    // streaming cut points; clause splits happen later in splitSentences
+    // and keep the comma attached to the preceding clause.
+    expect(findSafeSplitPoint('你好，世界')).toBe(0);
+    const text = '你好，世界。';
+    expect(findSafeSplitPoint(text)).toBe(text.length);
   });
 
   it('treats … (ellipsis) as a safe split point', () => {

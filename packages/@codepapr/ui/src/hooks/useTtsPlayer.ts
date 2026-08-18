@@ -2,6 +2,8 @@ import { useRef, useState, useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { toast } from '../store/toastStore';
+import { useAgentStore } from '../store/agentStore';
+import { getTranslation } from '../utils/i18n';
 import type { TtsPlaybackMode } from '../utils/characterTypes';
 import {
   sanitizeForSpeech,
@@ -12,6 +14,7 @@ import {
   planFeed,
   dedupParts,
   type FeedState,
+  type SpeechSanitizeMode,
 } from './useTtsPlayer.helpers';
 
 export { sanitizeForSpeech } from './useTtsPlayer.helpers';
@@ -115,6 +118,13 @@ export interface UseTtsPlayerReturn {
   setSampleSteps: (steps: number) => void;
   /** Set playback speed (0.5-2.0). */
   setSpeed: (speed: number) => void;
+  /** Set character interaction mode so sanitizer keeps persona glosses. */
+  setInteractionMode: (mode: SpeechSanitizeMode) => void;
+  /** Playback volume 0-2. */
+  volume: number;
+  setVolume: (volume: number) => void;
+  /** Re-open the default output device after headphones are swapped. */
+  resetAudioDevice: () => Promise<void>;
   /** Trigger GPU warmup synthesis (Metal kernel pre-compilation). */
   warmupGpu: () => Promise<void>;
   /** Clone a voice: send reference audio + text to GPT-SoVITS */
@@ -135,6 +145,8 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
   const [serverDevice, setServerDevice] = useState<string>('');
   const [installed, setInstalled] = useState<boolean | null>(null);
   const [serverLog, setServerLog] = useState<TtsServerLogLine[]>([]);
+  const [volume, setVolumeState] = useState(1);
+  const interactionModeRef = useRef<SpeechSanitizeMode>('persona');
   const queueRef = useRef<string[]>([]);
   const processingRef = useRef(false);
   const abortedRef = useRef(false);
@@ -187,6 +199,20 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
 
   const setSpeed = useCallback((speed: number) => {
     speedRef.current = Math.max(0.5, Math.min(2.0, speed));
+  }, []);
+
+  const setInteractionMode = useCallback((mode: SpeechSanitizeMode) => {
+    interactionModeRef.current = mode;
+  }, []);
+
+  const setVolume = useCallback((next: number) => {
+    const clamped = Math.max(0, Math.min(2, next));
+    setVolumeState(clamped);
+    safeInvoke('tts_set_volume', { volume: clamped }).catch(() => {});
+  }, []);
+
+  const resetAudioDevice = useCallback(async () => {
+    await safeInvoke('tts_reset_audio_device');
   }, []);
 
   const setSentencesPerChunk = useCallback((n: number) => {
@@ -324,7 +350,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
   const synthesize = useCallback(async (text: string) => {
     if (!firstSynthHintShownRef.current && serverDeviceRef.current === 'mps') {
       firstSynthHintShownRef.current = true;
-      toast.info('首次合成正在编译 GPU 加速 kernel，可能需要 5-15 秒，之后会很快。', {
+      toast.info(getTranslation(useAgentStore.getState().settings.lang).ttsFirstSynthHint, {
         durationMs: 8000,
       });
     }
@@ -373,8 +399,10 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
    *    immediately after `processingRef` is released, so they naturally
    *    pick up new items pushed to `queueRef` in the meantime.
    *  - `abortedRef` short-circuits the loop (set by `stop()`).
-   *  - `result => setIsPlaying(false)` is deferred to after the loop
-   *    exits, avoiding intermediate false→true→false flicker.
+   *  - `isPlaying` stays true until the rodio sink actually drains
+   *    (`tts-playback-ended` / `tts_is_playing`), not when the queue empties.
+   *  - After releasing `processingRef`, a non-empty queue re-enters
+   *    `processQueue` so a late enqueue during the last iteration is not stuck.
    *  - `errorCountRef` accumulates across batches; after 3 consecutive
    *    failures the queue is dropped and the server is marked `error`.
    */
@@ -382,6 +410,27 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
     if (processingRef.current) return;
     processingRef.current = true;
     setIsPlaying(true);
+
+    const releaseAndMaybeContinue = () => {
+      processingRef.current = false;
+      if (abortedRef.current) return;
+      if (queueRef.current.length > 0) {
+        void processQueue();
+        return;
+      }
+      void safeInvoke<boolean>('tts_is_playing')
+        .then((playing) => {
+          if (
+            !playing
+            && queueRef.current.length === 0
+            && !processingRef.current
+            && !abortedRef.current
+          ) {
+            setIsPlaying(false);
+          }
+        })
+        .catch(() => {});
+    };
 
     if (playbackModeRef.current === 'ws-batch') {
       while (queueRef.current.length > 0) {
@@ -495,10 +544,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
           }
         }
       }
-      processingRef.current = false;
-      if (queueRef.current.length === 0) {
-        setIsPlaying(false);
-      }
+      releaseAndMaybeContinue();
       return;
     }
 
@@ -536,10 +582,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
       }
     }
 
-    processingRef.current = false;
-    if (queueRef.current.length === 0) {
-      setIsPlaying(false);
-    }
+    releaseAndMaybeContinue();
   }, [synthesize]);
 
   const enqueue = useCallback((parts: string[]) => {
@@ -610,13 +653,13 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
       // sentence splitting (the synthesizer handles its own internal segmentation
       // in this mode) but still run sanitize to strip code blocks / markdown.
       if (action.isWholeMode) {
-        const cleaned = sanitizeForSpeech(action.chunkToSpeak);
+        const cleaned = sanitizeForSpeech(action.chunkToSpeak, interactionModeRef.current);
         if (cleaned) enqueue([cleaned]);
         return;
       }
 
       // Streaming-mode emission: sanitize → split → merge → chunk → enqueue.
-      const cleaned = sanitizeForSpeech(action.chunkToSpeak);
+      const cleaned = sanitizeForSpeech(action.chunkToSpeak, interactionModeRef.current);
       if (!cleaned) return;
 
       const { sentences, lastEnd } = splitSentences(cleaned);
@@ -662,6 +705,9 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
     // error. The backend auto-clears its cancel flag after one abort, so the
     // next sentence synthesises normally.
     skipRef.current = true;
+    // tts_stop_playback bumps reorder generation and zeros expected_seq.
+    // Reset the frontend seq so the next sentence is not stuck in pending.
+    batchSeqRef.current = 0;
     safeInvoke('tts_stop_playback').catch(() => {});
   }, []);
 
@@ -676,7 +722,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
     queueRef.current = [];
     feedStateRef.current = createFeedState();
     safeInvoke('tts_stop_playback').catch(() => {});
-    const cleaned = sanitizeForSpeech(text);
+    const cleaned = sanitizeForSpeech(text, interactionModeRef.current);
     if (!cleaned) return;
     // Defer one tick so the in-flight processQueue iteration sees
     // abortedRef=true, releases processingRef, and exits cleanly before
@@ -700,7 +746,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
     queueRef.current = [];
     feedStateRef.current = createFeedState();
     safeInvoke('tts_stop_playback').catch(() => {});
-    const cleaned = sanitizeForSpeech(text);
+    const cleaned = sanitizeForSpeech(text, interactionModeRef.current);
     if (!cleaned) return;
 
     const baseArgs: Record<string, unknown> = {
@@ -805,6 +851,11 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
       wsFallbackRef.current = false;
       setServerStatus('running');
     }));
+    track(safeListen('tts-playback-ended', () => {
+      if (queueRef.current.length === 0 && !processingRef.current && !abortedRef.current) {
+        setIsPlaying(false);
+      }
+    }));
     track(safeListen('tts-ws-unavailable', () => {
       wsFallbackRef.current = true;
     }));
@@ -892,6 +943,10 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
     setPlaybackMode,
     setSampleSteps,
     setSpeed,
+    setInteractionMode,
+    volume,
+    setVolume,
+    resetAudioDevice,
     warmupGpu,
     cloneVoice,
     saveVoiceFile,

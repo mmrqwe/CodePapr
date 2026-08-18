@@ -272,9 +272,13 @@ impl GptSovitsServer {
     }
 
     pub(crate) fn health_check(&self) -> Result<(), String> {
-        let url = format!("http://127.0.0.1:{GPT_SOVITS_API_PORT}/?text=&text_language=zh");
+        // Never hit `/?text=` — that is the synthesis endpoint and empty
+        // text still wakes the model. `/health` is a no-op on patched api.py;
+        // unpatched FastAPI returns 404, which is still proof the HTTP
+        // server accepted a connection.
+        let url = format!("http://127.0.0.1:{GPT_SOVITS_API_PORT}/health");
         let client = Client::builder()
-            .timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(2))
             .build()
             .map_err(|e| format!("HTTP client error: {e}"))?;
 
@@ -282,7 +286,6 @@ impl GptSovitsServer {
             .get(&url)
             .send()
             .map_err(|e| format!("Health check failed: {e}"))?;
-        // Any HTTP response means the server is alive and accepting connections.
         Ok(())
     }
 

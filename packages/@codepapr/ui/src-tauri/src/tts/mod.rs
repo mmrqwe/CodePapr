@@ -41,6 +41,7 @@ static FIRST_SYNTH_COMPLETED: AtomicBool = AtomicBool::new(false);
 /// Set by `tts_stop_playback` so long-running HTTP response readers can
 /// abort early instead of consuming a thread for the full timeout.
 static SYNTHESIS_CANCELLED: AtomicBool = AtomicBool::new(false);
+static PLAYBACK_WATCH_STARTED: AtomicBool = AtomicBool::new(false);
 /// Persistent HTTP client with connection pooling for GPT-SoVITS requests.
 /// Avoids TCP handshake per synthesis call.
 static HTTP_CLIENT: std::sync::OnceLock<Client> = std::sync::OnceLock::new();
@@ -382,6 +383,7 @@ pub fn tts_server_start(
     fine_tuned_model_path: Option<String>,
 ) -> Result<(), String> {
     ws::set_ws_app_handle(app_handle.clone());
+    ensure_playback_watch(app_handle.clone());
     // Each new server lifecycle starts with a fresh "first synthesis" flag
     // so the perf-warning heuristic correctly treats the first request after
     // restart as a Metal-warmup outlier.
@@ -1570,6 +1572,48 @@ pub fn tts_stop_playback() -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub fn tts_is_playing() -> Result<bool, String> {
+    let lock = tts_player_lock();
+    let guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
+    Ok(guard.is_playing())
+}
+
+#[tauri::command]
+pub fn tts_set_volume(volume: f32) -> Result<(), String> {
+    let lock = tts_player_lock();
+    let mut guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
+    guard.set_volume(volume);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn tts_reset_audio_device() -> Result<(), String> {
+    let lock = tts_player_lock();
+    let mut guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
+    guard.recreate_output()
+}
+
+fn ensure_playback_watch(app: tauri::AppHandle) {
+    if PLAYBACK_WATCH_STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let mut was_playing = false;
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let playing = tts_player_lock()
+                .lock()
+                .map(|g| g.is_playing())
+                .unwrap_or(false);
+            if was_playing && !playing {
+                let _ = app.emit("tts-playback-ended", ());
+            }
+            was_playing = playing;
+        }
+    });
+}
+
 // ---- Voice file management ----
 
 /// Validate that a voice file path resolves inside the given voices root.
@@ -1683,8 +1727,10 @@ pub fn tts_save_voice_file(
     if ext_lower != "wav" {
         let wav_path = dir.join(format!("{character_id}_ref.wav"));
         if let Err(e) = convert_to_wav(validated.as_path(), &wav_path) {
-            eprintln!("Voice file conversion to WAV failed: {e}");
-            return Ok(validated.to_string_lossy().to_string());
+            let _ = std::fs::remove_file(&validated);
+            return Err(format!(
+                "Could not convert reference audio to WAV ({e}). Install ffmpeg and upload again."
+            ));
         }
         let _ = std::fs::remove_file(&validated);
         let wav_validated = validate_voice_path(&wav_path.to_string_lossy(), true)?;

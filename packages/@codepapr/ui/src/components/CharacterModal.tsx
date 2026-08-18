@@ -13,6 +13,7 @@ import {
   type CharacterProfile,
   type CharacterInteractionMode,
   type VoiceConfig,
+  type TtsPlaybackMode,
   createEmptyCharacter,
 } from '../utils/characterTypes';
 import {
@@ -1021,6 +1022,30 @@ Requirements:
                   </FieldRow>
                 )}
 
+                {(editing?.voice?.engine ?? 'gpt-sovits') === 'gpt-sovits' && (
+                  <FieldRow label={t.voicePlaybackMode}>
+                    <select
+                      value={editing?.voice?.playbackMode ?? 'ws-batch'}
+                      onChange={(e) => updateVoiceField({ playbackMode: e.target.value as TtsPlaybackMode })}
+                      className="w-full rounded-xl border border-line bg-base px-3 py-2 text-xs text-fg"
+                    >
+                      <option value="ws-batch">{t.voicePlaybackModeWsBatch}</option>
+                      <option value="streamed-pipeline">{t.voicePlaybackModePipeline}</option>
+                      <option value="streamed-pcm">{t.voicePlaybackModePcm}</option>
+                      <option value="whole">{t.voicePlaybackModeWhole}</option>
+                    </select>
+                    <p className="mt-1.5 text-[11px] text-fg-muted">
+                      {(editing?.voice?.playbackMode ?? 'ws-batch') === 'whole'
+                        ? t.voicePlaybackModeWholeHint
+                        : (editing?.voice?.playbackMode ?? 'ws-batch') === 'streamed-pipeline'
+                          ? t.voicePlaybackModePipelineHint
+                          : (editing?.voice?.playbackMode ?? 'ws-batch') === 'streamed-pcm'
+                            ? t.voicePlaybackModePcmHint
+                            : t.voicePlaybackModeWsBatchHint}
+                    </p>
+                  </FieldRow>
+                )}
+
                 <FieldRow label={t.voiceSpeed}>
                   <div className="flex items-center gap-3">
                     <input
@@ -1088,6 +1113,18 @@ Requirements:
                         {warmupRunning ? '\u23F3 ' + t.voiceWarmupRunning : t.voiceWarmupButton}
                       </button>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void invoke('tts_reset_audio_device').then(
+                          () => toast.success(t.ttsResetAudioDevice),
+                          (e) => toast.error(String(e)),
+                        );
+                      }}
+                      className="mt-3 rounded-lg border border-line px-3 py-1.5 text-[11px] text-fg-muted hover:text-fg hover:border-accent"
+                    >
+                      {t.ttsResetAudioDevice}
+                    </button>
                   </div>
                 )}
 
@@ -1185,7 +1222,7 @@ Requirements:
                         <p className="text-[10px] text-ok">{t.voiceFinetuneGenerateDone}</p>
                         <p className="text-[10px] text-fg-muted">{t.voiceFinetuneGeneratedCount.replace('{{count}}', String(generateTotal))}</p>
                         {generateFailedCount > 0 && (
-                          <p className="text-[10px] text-warn">失败 {generateFailedCount} 句（共 {generateTotal + generateFailedCount} 句，成功 {generateTotal} 句）</p>
+                          <p className="text-[10px] text-warn">{t.voiceFinetuneFailedCount.replace('{{failed}}', String(generateFailedCount)).replace('{{total}}', String(generateTotal + generateFailedCount)).replace('{{ok}}', String(generateTotal))}</p>
                         )}
                           <button
                             type="button"
@@ -1215,14 +1252,14 @@ Requirements:
                             onChange={(e) => updateVoiceField({ trainingLanguage: e.target.value })}
                             className="text-[10px] bg-slate-800 border border-slate-600 rounded px-1.5 py-0.5 text-fg-soft"
                           >
-                            <option value="all_zh">简体中文</option>
-                            <option value="all_yue">粤语（广东话）</option>
-                            <option value="en">English</option>
-                            <option value="all_ja">日本語</option>
-                            <option value="all_ko">한국어</option>
-                            <option value="zh">中英混合</option>
-                            <option value="ja">日英混合</option>
-                            <option value="auto">多语种混合</option>
+                            <option value="all_zh">{t.voiceLangZh}</option>
+                            <option value="all_yue">{t.voiceLangYue}</option>
+                            <option value="en">{t.voiceLangEn}</option>
+                            <option value="all_ja">{t.voiceLangJa}</option>
+                            <option value="all_ko">{t.voiceLangKo}</option>
+                            <option value="zh">{t.voiceLangZhEn}</option>
+                            <option value="ja">{t.voiceLangJaEn}</option>
+                            <option value="auto">{t.voiceLangAuto}</option>
                           </select>
                         </div>
                         <div className="flex gap-2">
@@ -1384,7 +1421,7 @@ Requirements:
                         />
                         <p className="mt-1 text-[11px] text-fg-muted">{t.voiceReferenceTextHint}</p>
                         <div className="flex items-center gap-2 mt-1">
-                          <label className="text-[10px] text-fg-muted whitespace-nowrap">参考音频语言</label>
+                          <label className="text-[10px] text-fg-muted whitespace-nowrap">{t.voiceRefLang}</label>
                           <select
                             value={editing?.voice?.referenceTextLanguage || DEFAULT_REFERENCE_LANG}
                             onChange={(e) => {
@@ -1401,28 +1438,28 @@ Requirements:
                             }}
                             className="text-[10px] bg-slate-800 border border-slate-600 rounded px-1.5 py-0.5 text-fg-soft"
                           >
-                            <option value="all_zh">中文</option>
-                            <option value="all_yue">粤语</option>
-                            <option value="en">English</option>
-                            <option value="all_ja">日本語</option>
-                            <option value="all_ko">한국어</option>
+                            <option value="all_zh">{t.voiceLangZh}</option>
+                            <option value="all_yue">{t.voiceLangYue}</option>
+                            <option value="en">{t.voiceLangEn}</option>
+                            <option value="all_ja">{t.voiceLangJa}</option>
+                            <option value="all_ko">{t.voiceLangKo}</option>
                           </select>
                         </div>
                         <div className="flex items-center gap-2 mt-1">
-                          <label className="text-[10px] text-fg-muted whitespace-nowrap">说话语言</label>
+                          <label className="text-[10px] text-fg-muted whitespace-nowrap">{t.voiceSpeakLang}</label>
                           <select
                             value={editing?.voice?.textLanguage || editing?.voice?.referenceTextLanguage || DEFAULT_REFERENCE_LANG}
                             onChange={(e) => updateVoiceField({ textLanguage: e.target.value })}
                             className="text-[10px] bg-slate-800 border border-slate-600 rounded px-1.5 py-0.5 text-fg-soft"
                           >
-                            <option value="all_zh">中文</option>
-                            <option value="all_yue">粤语</option>
-                            <option value="en">English</option>
-                            <option value="all_ja">日本語</option>
-                            <option value="all_ko">한국어</option>
-                            <option value="zh">中英混合</option>
-                            <option value="ja">日英混合</option>
-                            <option value="auto">多语种自动</option>
+                            <option value="all_zh">{t.voiceLangZh}</option>
+                            <option value="all_yue">{t.voiceLangYue}</option>
+                            <option value="en">{t.voiceLangEn}</option>
+                            <option value="all_ja">{t.voiceLangJa}</option>
+                            <option value="all_ko">{t.voiceLangKo}</option>
+                            <option value="zh">{t.voiceLangZhEn}</option>
+                            <option value="ja">{t.voiceLangJaEn}</option>
+                            <option value="auto">{t.voiceLangAuto}</option>
                           </select>
                         </div>
                       </FieldRow>

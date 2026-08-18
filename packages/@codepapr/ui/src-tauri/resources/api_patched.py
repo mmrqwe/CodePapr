@@ -1724,6 +1724,11 @@ async def tts_endpoint(request: Request):
     )
 
 
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
 @app.get("/")
 async def tts_endpoint(
     refer_wav_path: str = None,
