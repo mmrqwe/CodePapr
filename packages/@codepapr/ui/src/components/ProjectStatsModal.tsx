@@ -1,5 +1,5 @@
 import { errorMessage } from '@codepapr/common';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getTranslation, type Lang } from '../utils/i18n';
 import { AgentContribution } from './AgentContribution';
@@ -492,51 +492,70 @@ function formatClock(ts: number): string {
 
 const statsCache = new Map<string, { stats: ProjectStatsResult; at: number }>();
 
+export function resetProjectStatsCache(): void {
+  statsCache.clear();
+}
+
 export function ProjectStatsModal({
   workspacePath,
   lang,
   onClose,
 }: ProjectStatsModalProps) {
   const t = getTranslation(lang);
-  const [stats, setStats] = useState<ProjectStatsResult | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const initialCached = workspacePath ? statsCache.get(workspacePath) : undefined;
+  const [stats, setStats] = useState<ProjectStatsResult | null>(initialCached?.stats ?? null);
+  const [isLoading, setIsLoading] = useState(Boolean(workspacePath));
   const [error, setError] = useState('');
-  const [statsAt, setStatsAt] = useState<number | null>(null);
+  const [statsAt, setStatsAt] = useState<number | null>(initialCached?.at ?? null);
   const [langSortKey, setLangSortKey] = useState<LangSortKey>('lines');
   const [langSortDir, setLangSortDir] = useState<'asc' | 'desc'>('desc');
   const [langFilter, setLangFilter] = useState('');
+  const requestIdRef = useRef(0);
 
   const refreshStats = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     if (!workspacePath) {
       setStats(null);
       setError('');
+      setStatsAt(null);
+      setIsLoading(false);
       return;
     }
     const cached = statsCache.get(workspacePath);
     if (cached) {
       setStats(cached.stats);
       setStatsAt(cached.at);
+    } else {
+      setStats(null);
+      setStatsAt(null);
     }
     setIsLoading(true);
     setError('');
     try {
       const result = await loadProjectStats(workspacePath);
+      if (requestId !== requestIdRef.current) return;
       const now = Date.now();
       statsCache.set(workspacePath, { stats: result, at: now });
       setStats(result);
       setStatsAt(now);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       if (!statsCache.get(workspacePath)) {
         setStats(null);
         setError(errorMessage(err));
       }
     } finally {
-      setIsLoading(false);
+      if (requestId === requestIdRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [workspacePath]);
 
   useEffect(() => {
     void refreshStats();
+    return () => {
+      requestIdRef.current += 1;
+    };
   }, [refreshStats]);
 
   const handleLangSort = (key: LangSortKey) => {
@@ -609,19 +628,19 @@ export function ProjectStatsModal({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {isLoading && (
+          {isLoading && !stats && (
             <div className="rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg-muted">
               {t.projectStatsLoading}
             </div>
           )}
 
-          {!isLoading && error && (
+          {error && !stats && (
             <div className="rounded-xl border border-danger-bg bg-danger-bg px-4 py-3 text-sm text-danger">
               {t.projectStatsUnavailable}: {error}
             </div>
           )}
 
-          {!isLoading && !error && stats && (
+          {stats && (
             <>
               <div className="stats-reveal grid grid-cols-3 gap-3">
                 <div className="rounded-xl border border-line bg-base px-4 py-3">
