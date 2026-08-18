@@ -269,6 +269,8 @@ fn main() {
             db::load_memory_candidates,
             db::project_memory_file,
             db::sync_user_zone_to_ledger,
+            db::ingest_legacy_memory_md,
+            db::update_memory_entry_content,
             db::save_memory_recall,
             db::archive_memory_recall,
             db::load_latest_memory_recall,

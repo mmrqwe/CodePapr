@@ -1159,20 +1159,20 @@ TTS Data Flow:
           <strong>Auto-injection Flow:</strong> The agent reads the rule file <code>.CodePapr/AGENTS.md</code> and merges it into the stable system prompt. Missing files are silently skipped.
         </div>
 
-        <h3>.CodePapr/memory.md — Cross-Session Project Memory (zero-review)</h3>
-        <p>The SQLite memory ledger is authoritative; <code>memory.md</code> is only a dual-zone projection. Memory <strong>is split across context layers</strong>: short instructions in Bootstrap, procedures in Recall, web citations in search only. Full map: <a href="context-architecture.en.html#memory">Context layering · Memory</a>.</p>
+        <h3>Memory panel — Cross-Session Project Memory (zero-review)</h3>
+        <p>The SQLite memory ledger is authoritative; the memory panel is the only human surface. Memory <strong>is split across context layers</strong>: short instructions in Bootstrap, procedures in Recall, web citations in search only. Full map: <a href="context-architecture.en.html#memory">Context layering · Memory</a>.</p>
         <ul>
-          <li><strong>Zero-review writes:</strong> You said remember / must / don't, workspace-grounded facts, successful tests, cold-start summary, Agent <code>memory_write</code> persist immediately. No admit queue. Injection / secrets / dangerous commands are dropped. Web / MCP becomes a <code>citation</code> and never enters Bootstrap.</li>
-          <li><strong>Dual-zone projection:</strong> User Zone is yours to edit; the projector never overwrites it. Managed Zone only projects Bootstrap-class items (preference / constraint / fact, 24 items / 1500 tokens). <code>procedure</code> and <code>citation</code> stay out of the machine zone.</li>
-          <li><strong>Bootstrap load:</strong> Injected into the stable prefix at session start, frozen per (session × stable signature). <code>memory.md</code> is outside the signature — newly saved memories <strong>do not bust the current prefix cache</strong>; they enter Bootstrap on a compaction epoch or the next session.</li>
+          <li><strong>Zero-review writes:</strong> You said remember / must / don't, workspace-grounded facts, successful tests, cold-start summary, Agent <code>memory_write</code>, panel handwritten notes persist immediately. No admit queue. Injection / secrets / dangerous commands are dropped. Web / MCP becomes a <code>citation</code> and never enters Bootstrap.</li>
+          <li><strong>Panel groups:</strong> Every session (handwritten notes / preference / constraint / fact, 24 items / 1500 tokens); on-demand recall (<code>procedure</code>); search only (<code>citation</code>).</li>
+          <li><strong>Bootstrap load:</strong> Rendered from the ledger into the stable prefix at session start, frozen per (session × stable signature). The rendered section is outside the signature — newly saved memories <strong>do not bust the current prefix cache</strong>; they enter Bootstrap on a compaction epoch or the next session.</li>
           <li><strong>Recall:</strong> Once per user turn. Procedures (<code>procedure</code>) mainly live here; citations skip auto-Recall but remain searchable via <code>memory_search</code>.</li>
-          <li><strong>Auto-organization:</strong> When the projection exceeds 200 lines, session start / successful compaction / post-reply asynchronously dedupes. Fire-and-forget. It rewrites the projection; it does not replace the write policy.</li>
+          <li><strong>Dedup:</strong> Same-hash rows are superseded. There is no LLM pass over a standalone memory file.</li>
           <li><strong>What to record:</strong> Preferences, conventions, verified facts. Not general programming knowledge, current-task todos (that is the Checkpoint), or rules already in <code>AGENTS.md</code>.</li>
         </ul>
 
         <div class="callout">
           <strong>When a remembered fact reaches the model:</strong><br>
-          T0 this turn persist or drop (no review) → T1 disk changes immediately (Bootstrap-class re-projects Managed Zone) → T2 current-session prefix unchanged → T3 next user turn procedures may enter Recall → T4 compaction epoch refreshes Bootstrap → T5 new session re-reads memory.md.
+          T0 this turn persist or drop (no review) → T1 ledger changes immediately (visible in the panel) → T2 current-session prefix unchanged → T3 next user turn procedures may enter Recall → T4 compaction epoch refreshes Bootstrap → T5 new session re-renders from the ledger.
         </div>
 
         <h3>/compact — Force Context Compression</h3>
@@ -1180,7 +1180,7 @@ TTS Data Flow:
         <ul>
           <li><strong>Force mode:</strong> Not limited by <code>maxConversationRounds</code> and <code>maxContextTokens</code> thresholds</li>
           <li><strong>Internal Compactor agent:</strong> Calls the compression pipeline; the zero-tool Compactor sub-agent generates the checkpoint (model tier follows <code>compactionModel</code>; rule-based fallback on LLM failure)</li>
-          <li><strong>Incidentally triggers memory organization:</strong> After successful compression, marks memory.md as pending; next round's agent reply triggers async organization</li>
+          <li><strong>Refreshes Bootstrap:</strong> On a compaction epoch rewrite, project memory is re-rendered from the ledger into the stable prefix</li>
           <li><strong>Use case:</strong> When approaching context limits or responses slow down, compress to restore smooth conversation</li>
         </ul>
 
@@ -1199,7 +1199,7 @@ TTS Data Flow:
             <tr><td><code>~/.codepapr/codepapr.sqlite</code></td><td>App-level settings, sessions, and cache statistics</td></tr>
             <tr><td><code>~/.codepapr/lsp-tools/</code></td><td>Managed LSP tool download cache (downloaded on first need, reused afterwards)</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/project.sqlite</code></td><td>Project-level state, chat history, cache statistics</td></tr>
-            <tr><td><code>&lt;workspace&gt;/.CodePapr/memory.md</code></td><td>Dual-zone projection of cross-session project memory (hand-written User Zone + auto Managed Zone); ledger in SQLite is authoritative</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/project.sqlite</code> <code>memory_entries</code></td><td>Cross-session project memory (panel is the only human surface; Bootstrap is rendered from the ledger)</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/skills</code></td><td>Project-level skill files</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/agents</code></td><td>Project-level sub-agent definitions</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/commands</code></td><td>Project-level custom commands</td></tr>
@@ -1753,7 +1753,7 @@ Cross-session (different projects):
           <li>Skills go into bootstrap, not the system prefix</li>
           <li>The workspace path only appears in the system prompt, not duplicated in bootstrap</li>
           <li>Custom guidance appears only once in bootstrap</li>
-          <li>Session bootstrap is cached per "session × stable signature"; volatile disk state (memory.md / project graph) does not trigger rebuilds</li>
+          <li>Session bootstrap is cached per "session × stable signature"; new ledger writes / project graph do not trigger rebuilds</li>
           <li>Per-turn dynamic content (date / diagnostics) is placed at the tail, not in the existing prefix</li>
         </ul>
 

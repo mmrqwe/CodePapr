@@ -1,6 +1,6 @@
 /**
  * 记忆自动落库：候选表只作去重/审计，写入后同一路径 admit 或 drop。
- * 不持 memory 文件锁、不投影——调用方按是否在锁内自行投影。
+ * Bootstrap 从账本渲染，不再投影 memory.md。
  */
 
 import { type ContentEnvelope } from '@codepapr/core';

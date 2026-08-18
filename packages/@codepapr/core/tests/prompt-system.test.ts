@@ -119,8 +119,8 @@ describe('promptSystem', () => {
       toolNames: ['write'],
     });
     expect(prompt).toContain('项目记忆');
-    expect(prompt).toContain('.CodePapr/memory.md');
-    expect(prompt).toContain('项目结构');
+    expect(prompt).toContain('memory_write');
+    expect(prompt).toContain('记忆账本');
     expect(prompt).not.toContain('常规发现');
   });
 

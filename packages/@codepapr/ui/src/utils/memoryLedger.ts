@@ -1,5 +1,5 @@
 /**
- * Memory Ledger（PR4）：候选抽取、自动写入、双区投影渲染的纯函数层。
+ * Memory Ledger（PR4）：候选抽取、自动写入、Bootstrap 渲染的纯函数层。
  *
  * 写入策略（ADR-010）：确定性 persist / drop，不产生用户审核队列。
  * web/MCP 进 citation（不进 Bootstrap）；风险标记直接丢弃。
@@ -28,7 +28,7 @@ const REMEMBER_PATTERN =
 const CONSTRAINT_PATTERN =
   /必须|务必|不要|禁止|避免|只能|不得|must|should not|avoid|required|forbidden|never/i;
 
-const MANAGED_ZONE_EXCLUDED = new Set(['user-note', 'citation', 'procedure']);
+const BOOTSTRAP_EXCLUDED = new Set(['citation', 'procedure']);
 
 /** 已验证命令 → 记忆候选（执行验证，自动 persist）。 */
 export function collectVerifiedMemoryCandidates(
@@ -138,19 +138,22 @@ export interface ProjectionEntry {
 }
 
 /**
- * managed zone 渲染（token-budgeted）：每条目一行 `- [verified] content`，
- * 带上类别；超预算按条数/token 截断（estimateTokens，CJK 字节口径正确）。
- * user-note（user zone 同步条目，ADR-008 第4点）不进 managed zone——它已在
- * user zone 展示，只进 ledger 供 Recall 检索。
+ * Session Bootstrap 渲染（token-budgeted）：每条目一行 `- [verified] content`。
+ * 含 user-note 与指令/事实类；排除 citation / procedure。超预算按条数/token 截断。
  */
 export function buildMemoryProjection(entries: readonly ProjectionEntry[]): string {
   const lines: string[] = [];
   let totalTokens = 0;
   const maxEntries = MEMORY_MANAGED_ZONE_MAX_ENTRIES;
   const maxTokens = MEMORY_MANAGED_ZONE_MAX_TOKENS;
+  const ranked = [...entries].sort((left, right) => {
+    const leftRank = left.category === 'user-note' ? 0 : 1;
+    const rightRank = right.category === 'user-note' ? 0 : 1;
+    return leftRank - rightRank;
+  });
 
-  for (const entry of entries) {
-    if (MANAGED_ZONE_EXCLUDED.has(entry.category)) continue;
+  for (const entry of ranked) {
+    if (BOOTSTRAP_EXCLUDED.has(entry.category)) continue;
     if (lines.length >= maxEntries) break;
     const content = redactSecrets(entry.content).replace(/\s+/g, ' ').trim();
     if (!content) continue;

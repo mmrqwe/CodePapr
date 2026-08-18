@@ -2831,10 +2831,9 @@ pub(crate) fn load_context_compactions(
 // ── Memory Ledger（PR4，ADR-008）────────────────────────────────────────
 //
 // 记忆分层：
-// - memory_candidates：准入前的候选（pending → admitted / rejected）；
-// - memory_entries：已准入的稳定项目记忆（active / superseded / deprecated）；
-// - .CodePapr/memory.md：双区投影（user zone 保留，managed zone 由
-//   project_memory_file 覆盖生成）。
+// - memory_candidates：内部去重/审计（pending → admitted / rejected）；
+// - memory_entries：稳定项目记忆（active / superseded / forgotten）；
+// Session Bootstrap 从 memory_entries 渲染，不再写 .CodePapr/memory.md。
 // 与 ADR-002 一致：不对 messages/sessions 建外键（应用级引用）。
 
 #[derive(Deserialize)]
@@ -3080,11 +3079,6 @@ pub(crate) fn forget_memory_entry(
     entry_id: String,
     reason: Option<String>,
 ) -> Result<(), String> {
-    // user-zone 是用户手写内容（user-edit 权威）：只能由用户编辑 memory.md
-    // 管理（清空 → forgotten，恢复 → 重新激活），Agent 不得通过工具遗忘。
-    if entry_id == "user-zone" {
-        return Err("user zone 记忆由用户手编 memory.md 管理，不能通过 memory_forget 遗忘".to_string());
-    }
     let (conn, ..) = open_project_db(&workspace_path)?;
     let affected = conn
         .execute(
@@ -3404,6 +3398,145 @@ pub(crate) fn sync_user_zone_to_ledger(workspace_path: String) -> Result<(), Str
         params![USER_ZONE_ENTRY_ID, user_zone, hash, now],
     )
     .map_err(|err| format!("同步 user zone 到 ledger 失败: {err}"))?;
+    Ok(())
+}
+
+fn sha256_hex(content: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn insert_user_note_if_new(conn: &Connection, content: &str) -> Result<bool, String> {
+    let trimmed = content.trim();
+    if trimmed.chars().count() < 8 {
+        return Ok(false);
+    }
+    let hash = sha256_hex(trimmed);
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT id FROM memory_entries
+              WHERE content_hash = ?1 AND status = 'active' LIMIT 1",
+            params![hash],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| format!("查询既有手写笔记失败: {err}"))?;
+    if existing.is_some() {
+        return Ok(false);
+    }
+    let id = format!("legacy-note-{}", &hash[..16.min(hash.len())]);
+    let now = unix_millis()?;
+    conn.execute(
+        "INSERT INTO memory_entries
+           (id, category, content, content_hash, confidence, trust, status,
+            evidence, created_at, verified_at)
+         VALUES (?1, 'user-note', ?2, ?3, 'confirmed', 'trusted', 'active',
+                 '{\"source\":\"user-edit\",\"origin\":\"legacy-memory-md\"}', ?4, ?4)
+         ON CONFLICT(id) DO UPDATE SET
+           content = excluded.content,
+           content_hash = excluded.content_hash,
+           status = 'active',
+           verified_at = excluded.verified_at",
+        params![id, trimmed, hash, now],
+    )
+    .map_err(|err| format!("写入遗留手写笔记失败: {err}"))?;
+    Ok(true)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct IngestLegacyMemoryResult {
+    pub ingested: u32,
+    pub deleted_file: bool,
+}
+
+/// 一次性把旧 `.CodePapr/memory.md` 收进 ledger，然后删除文件。
+/// User Zone 变成 user-note；若账本为空则整份文件收成一条笔记。
+#[tauri::command]
+pub(crate) fn ingest_legacy_memory_md(workspace_path: String) -> Result<IngestLegacyMemoryResult, String> {
+    let (workspace, ..) = project_db_path(&workspace_path)?;
+    let memory_path = workspace.join(".CodePapr").join("memory.md");
+    if !memory_path.is_file() {
+        return Ok(IngestLegacyMemoryResult {
+            ingested: 0,
+            deleted_file: false,
+        });
+    }
+    let existing = fs::read_to_string(&memory_path).unwrap_or_default();
+    let user_zone = extract_user_zone(&existing);
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let active_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM memory_entries WHERE status = 'active'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|err| format!("统计记忆条目失败: {err}"))?;
+
+    let mut ingested = 0u32;
+    if !user_zone.trim().is_empty() {
+        if insert_user_note_if_new(&conn, &user_zone)? {
+            ingested += 1;
+        }
+    } else if active_count == 0 {
+        let stripped = existing
+            .replace("<!-- CodePapr:user-memory:start -->", "")
+            .replace("<!-- CodePapr:user-memory:end -->", "")
+            .replace("<!-- CodePapr:managed-memory:start -->", "")
+            .replace("<!-- CodePapr:managed-memory:end -->", "");
+        if insert_user_note_if_new(&conn, &stripped)? {
+            ingested += 1;
+        }
+    }
+
+    fs::remove_file(&memory_path).map_err(|err| format!("删除遗留 memory.md 失败: {err}"))?;
+    Ok(IngestLegacyMemoryResult {
+        ingested,
+        deleted_file: true,
+    })
+}
+
+/// 面板编辑手写笔记（仅 user-note）。
+#[tauri::command]
+pub(crate) fn update_memory_entry_content(
+    workspace_path: String,
+    entry_id: String,
+    content: String,
+) -> Result<(), String> {
+    let trimmed = content.trim();
+    if trimmed.chars().count() < 8 {
+        return Err("笔记太短".to_string());
+    }
+    if trimmed.chars().count() > 8_000 {
+        return Err("笔记超过 8000 字符上限".to_string());
+    }
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let category: String = conn
+        .query_row(
+            "SELECT category FROM memory_entries WHERE id = ?1 AND status = 'active'",
+            params![entry_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| format!("读取记忆条目失败: {err}"))?
+        .ok_or_else(|| "记忆条目不存在或已遗忘".to_string())?;
+    if category != "user-note" {
+        return Err("只能编辑手写笔记".to_string());
+    }
+    let hash = sha256_hex(trimmed);
+    let affected = conn
+        .execute(
+            "UPDATE memory_entries
+             SET content = ?1, content_hash = ?2, verified_at = ?3
+             WHERE id = ?4 AND status = 'active'",
+            params![trimmed, hash, unix_millis()?, entry_id],
+        )
+        .map_err(|err| format!("更新手写笔记失败: {err}"))?;
+    if affected == 0 {
+        return Err("记忆条目不存在或已遗忘".to_string());
+    }
     Ok(())
 }
 
@@ -4797,23 +4930,19 @@ mod tests {
         assert!(!active.iter().any(|e| e.id == "user-zone"));
     }
 
-    /// 回归：user-zone 条目受保护——memory_forget 不得遗忘用户手写内容；
-    /// 清空后恢复相同内容必须重新激活（同 hash 早退不得阻止恢复）。
+    /// 手写笔记（含遗留 user-zone id）可由面板遗忘；清空后恢复相同内容仍可重新激活。
     #[test]
-    fn user_zone_entry_protected_from_forget_and_restorable() {
+    fn user_zone_entry_forgettable_from_panel_and_restorable() {
         let workspace = TestWorkspace::new("memory-user-zone-protect");
         fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
         let ws = workspace.workspace_arg();
         let memory_path = workspace.file_path(".CodePapr/memory.md");
 
-        // 1. memory_forget 对 user-zone 直接报错
         fs::write(&memory_path, "用户的手写记忆").unwrap();
         sync_user_zone_to_ledger(ws.clone()).expect("sync");
-        let err = forget_memory_entry(ws.clone(), "user-zone".to_string(), None)
-            .expect_err("forget user-zone must fail");
-        assert!(err.contains("user zone"));
+        forget_memory_entry(ws.clone(), "user-zone".to_string(), None)
+            .expect("panel may forget handwritten notes");
 
-        // 2. 清空 zone → forgotten；恢复相同内容 → 重新激活
         fs::write(
             &memory_path,
             "<!-- CodePapr:user-memory:start -->\n<!-- CodePapr:user-memory:end -->\n",
@@ -4829,6 +4958,34 @@ mod tests {
         let entry = active2.iter().find(|e| e.id == "user-zone").expect("restored");
         assert_eq!(entry.status, "active");
         assert!(entry.content.contains("用户的手写记忆"));
+    }
+
+    /// 遗留 memory.md：User Zone 收成 user-note，然后删除文件；无文件时幂等。
+    #[test]
+    fn ingest_legacy_memory_md_imports_user_zone_and_deletes_file() {
+        let workspace = TestWorkspace::new("memory-ingest-legacy");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        let memory_path = workspace.file_path(".CodePapr/memory.md");
+        fs::write(
+            &memory_path,
+            "# Project Memory\n\n<!-- CodePapr:user-memory:start -->\n用户手写的偏好必须用 pnpm\n<!-- CodePapr:user-memory:end -->\n\n<!-- CodePapr:managed-memory:start -->\n- [verified] fact A\n<!-- CodePapr:managed-memory:end -->\n",
+        )
+        .unwrap();
+
+        let result = ingest_legacy_memory_md(ws.clone()).expect("ingest");
+        assert_eq!(result.ingested, 1);
+        assert!(result.deleted_file);
+        assert!(!memory_path.exists());
+
+        let entries = load_memory_entries(ws.clone(), Some(true)).expect("load");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].category, "user-note");
+        assert!(entries[0].content.contains("pnpm"));
+
+        let again = ingest_legacy_memory_md(ws.clone()).expect("ingest again");
+        assert_eq!(again.ingested, 0);
+        assert!(!again.deleted_file);
     }
 
     /// 回归：投影不得在 user zone 累积 "## User Notes" 标题（标题渲染在

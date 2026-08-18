@@ -65,7 +65,7 @@ import {
   updateSurfaceRenderParams,
   verifyCompactionLanded,
 } from './contextSurfaceStore';
-import { refreshMemoryLedgerProjection } from './memoryLedgerStore';
+import { loadMemoryBootstrapSection, refreshMemoryLedgerProjection } from './memoryLedgerStore';
 import { buildPruneOptions } from '../../agent/compactionHandler';
 import type { MidLoopCompactionCommit } from '../../agent/agentWorkerProtocol';
 import {
@@ -82,13 +82,9 @@ import { effectiveMaxContextTokens } from '../../utils/contextLimits';
 import { isModelVisibleUiMessage } from '../../utils/contextSurface';
 import {
   archiveMemoryRecall,
-  loadMemoryEntries,
-  projectMemoryFile,
   saveMemoryRecall,
   searchMemoryForRecall,
-  syncUserZoneToLedger,
 } from '../../utils/projectStorage';
-import { buildMemoryProjection } from '../../utils/memoryLedger';
 import {
   drainReRecallAuditIds,
   proposeMemoryCandidateFromWrite,
@@ -103,7 +99,6 @@ import { normalizeSettings, getSettingsError, resolveProviderName } from './sett
 import { addConversationRuntime, addConversationStats, addTierRuntimeMs, getSessionConversationStats } from './stats';
 import { maybeApplySessionTitle, touchSession } from './persistence';
 import { saveCurrentProjectState } from './projectSnapshot';
-import { withMemoryLock } from '../../utils/memoryWriteLock';
 import {
   appendErrorMessage,
   appendInfoMessage,
@@ -168,22 +163,6 @@ let compactCheckpointInFlight = false;
 // 一个请求、bash/git 副作用重复执行。JS 单线程下「检查 + 占位」在同一同步块
 // 完成（中间无 await），不存在 TOCTOU。置位/清理见 sendMessage 主体。
 let turnInFlight = false;
-
-/** 读取 .CodePapr/memory.md 内容（trim 后）；不存在/读取失败返回 undefined。
- *  供 bootstrap/consolidation 写前重读：它们的读-改-写窗口横跨整个模型调用，
- *  期间 agent 的写入必须通过「写前比对」保护，不能被整文件覆盖（#14）。 */
-async function readMemoryFile(workspacePath: string): Promise<string | undefined> {
-  try {
-    const memResult = await invoke<{ content: string }>('read_text_file', {
-      workspacePath,
-      relativePath: '.CodePapr/memory.md',
-      maxBytes: 50_000,
-    });
-    return memResult.content?.trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 /** checkpoint 计划基于 base 消息数组计算（压缩模型调用期间 isLoading=false，
  *  用户可能 reset/清空/追加消息）。应用前校验当前数组是否仍是安全的插入基座：
@@ -1002,31 +981,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             if (err instanceof DOMException && err.name === 'AbortError') throw err;
             // Cache not available - proceed without
           }
-          let memorySection: string | undefined;
-          try {
-            const memoryResult = await invoke<{ path: string; content: string; bytes: number }>(
-              'read_text_file',
-              {
-                workspacePath,
-                relativePath: '.CodePapr/memory.md',
-                maxBytes: 50_000,
-              }
-            );
-            ensureNotStopped();
-            // ADR-008：consolidation 退役——由 memory_write + 准入策略替代；
-            // 回合结束只跑 ledger 投影（见下方 refreshMemoryLedgerProjection）。
-            memorySection = memoryResult.content?.trim();
-          } catch (err) {
-            if (err instanceof DOMException && err.name === 'AbortError') throw err;
-            // No memory file - proceed without
-          }
-          // ADR-008：consolidation 退役——由 memory_write + 准入策略替代；
-          // 回合结束只跑 ledger 投影（见下方 refreshMemoryLedgerProjection）。
-          // Cold-start bootstrap: when memory.md is empty/missing and a
-          // ProjectGraph summary is available, generate an initial memory
-          // in the background so the next session doesn't explore from zero.
-          // ADR-008：不再直写 memory.md——改走 ledger（候选 → 准入 → 投影）。
-          // Deduped via a module-level guard.
+          const memorySection = workspacePath
+            ? await loadMemoryBootstrapSection(workspacePath)
+            : undefined;
+          ensureNotStopped();
+          // Cold-start: ledger 里还没有 Bootstrap 记忆，且有项目图摘要时，
+          // 后台生成初始事实。不阻塞当前会话，下次会话或压缩 epoch 进入前缀。
           if (!memorySection && projectGraphBootstrapSummary && !memoryBootstrapInFlight) {
             memoryBootstrapInFlight = true;
             const bootstrapInput = {
@@ -1040,48 +1000,22 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             const bootstrapSessionId = turnSessionId;
             void (async () => {
               try {
-                // LLM 生成放在锁外：持锁数秒会堵住工具/面板投影。
                 const generated = await bootstrapMemoryContent(bootstrapInput, normalizedSettings);
                 if (!generated) return;
-                await withMemoryLock(async () => {
-                    // 写前重读在锁内：生成窗口内 agent/面板可能已写入 memory.md →
-                    // 放弃本次 bootstrap（绝不覆盖已有内容）。锁把重读与投影
-                    // 之间的窗口对其他写者关闭。
-                    const current = await readMemoryFile(workspacePath);
-                    if (current) {
-                      console.warn('[memory] bootstrap skipped: memory.md was written during generation');
-                      return;
-                    }
-                    const persist = await proposeMemoryCandidateFromWrite({
-                      workspacePath,
-                      sessionId: bootstrapSessionId ?? undefined,
-                      content: generated,
-                      origin: 'cold-start-bootstrap',
-                      source: 'cold-start-bootstrap',
-                      trust: 'derived',
-                      category: 'fact',
-                    });
-                    if (persist.status === 'dropped' || persist.deduplicated) {
-                      if (persist.status === 'dropped') {
-                        console.warn('[memory] bootstrap dropped:', persist.note);
-                      }
-                      return;
-                    }
-                    if (!persist.projectToBootstrap) {
-                      return;
-                    }
-                    const entries = await loadMemoryEntries(workspacePath, true);
-                    const projection = buildMemoryProjection(
-                      entries.map((entry) => ({
-                        category: entry.category,
-                        content: entry.content,
-                        confidence: entry.confidence,
-                        trust: entry.trust,
-                        verifiedAt: entry.verifiedAt,
-                      }))
-                    );
-                    await projectMemoryFile(workspacePath, projection);
+                const already = await loadMemoryBootstrapSection(workspacePath);
+                if (already) return;
+                const persist = await proposeMemoryCandidateFromWrite({
+                  workspacePath,
+                  sessionId: bootstrapSessionId ?? undefined,
+                  content: generated,
+                  origin: 'cold-start-bootstrap',
+                  source: 'cold-start-bootstrap',
+                  trust: 'derived',
+                  category: 'fact',
                 });
+                if (persist.status === 'dropped') {
+                  console.warn('[memory] bootstrap dropped:', persist.note);
+                }
               } catch {
                 // Silent fail - don't disrupt the session
               } finally {
@@ -1236,8 +1170,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               model: route.model,
             }
           );
-          // Signature of the STABLE bootstrap inputs. Volatile disk state
-          // (memory.md, project-graph summary) is deliberately excluded so its
+          // Signature of the STABLE bootstrap inputs. Volatile ledger memory
+          // (and project-graph summary) is deliberately excluded so its
           // changes don't rebuild the agent and break the prefix cache.
           const bootstrapSignature = [
             runtimeSystemPrompt,
@@ -1257,7 +1191,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               )
           );
           // Inject the frozen, memory-containing bootstrap so the main agent's
-          // log[0] actually carries memory.md / project-graph. The factory prefers
+          // log[0] actually carries ledger-rendered memory. The factory prefers
           // runtime.sessionBootstrapPrompt over its skills+custom-only fallback
           // (agentFactory.ts); without this the computed bootstrap above is used
           // only as a cache key and memory never reaches the primary agent.
@@ -1510,9 +1444,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           let recallInsertions: RequestContextInsertion[] | undefined;
           if (mode !== 'ask' && userMsg?.id && workspacePath) {
             try {
-              // ADR-008 第4点：先把用户手编的 user zone 读入 ledger（幂等），
-              // 保证本回合 Recall 能命中用户手写记忆。
-              await syncUserZoneToLedger(workspacePath);
               const queryTokens = buildRecallQuery(effectiveDisplay ?? effectiveInput ?? '');
               // ADR-009 第10条：软预算紧张时 recallBudget = min(configured,
               // remainingSoftBudget * 0.20)；预算过低则跳过本轮 Recall。
@@ -2611,20 +2542,16 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               });
             }
           }
-          // PR4（ADR-008）：已验证命令 → 候选 → 准入 → 双区投影。
-          // consolidation 已退役（见上），回合结束只走 ledger 投影；
-          // 准入策略在纯函数层（确定性、非 LLM）；失败静默不打断会话。
+          // 回合结束：已验证命令 / 用户原话 → persist。Bootstrap 仍冻结到下次会话或压缩。
           if (get().workspacePath) {
             const ws = get().workspacePath;
             void (async () => {
               try {
-                await withMemoryLock(async () => {
-                  await refreshMemoryLedgerProjection(
-                    ws,
-                    activeSessionId,
-                    get().sessionMessages[activeSessionId] ?? []
-                  );
-                });
+                await refreshMemoryLedgerProjection(
+                  ws,
+                  activeSessionId,
+                  get().sessionMessages[activeSessionId] ?? []
+                );
               } catch {
                 // Silent fail - don't disrupt the session
               }

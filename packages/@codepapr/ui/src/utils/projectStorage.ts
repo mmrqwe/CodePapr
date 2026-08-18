@@ -963,7 +963,7 @@ export async function loadMemoryCandidates(
   });
 }
 
-/** 双区投影（ADR-008）：保留 user zone，覆盖 managed zone（Rust 侧执行）。 */
+/** 双区投影（遗留）：新路径不再写 memory.md。保留 IPC 供测试与回滚。 */
 export async function projectMemoryFile(
   workspacePath: string,
   managedZoneMarkdown: string
@@ -974,8 +974,27 @@ export async function projectMemoryFile(
   });
 }
 
-/** ADR-008 第4点：user zone 读入 ledger（trust=trusted / source=user-edit /
- *  confirmed），供 Recall 检索命中。幂等（内容哈希不变则无操作）。 */
+export async function ingestLegacyMemoryMd(
+  workspacePath: string
+): Promise<{ ingested: number; deletedFile: boolean }> {
+  return invoke('ingest_legacy_memory_md', {
+    workspacePath: workspacePath.trim(),
+  });
+}
+
+export async function updateMemoryEntryContent(
+  workspacePath: string,
+  entryId: string,
+  content: string
+): Promise<void> {
+  await invoke('update_memory_entry_content', {
+    workspacePath: workspacePath.trim(),
+    entryId,
+    content,
+  });
+}
+
+/** ADR-008 第4点：user zone 读入 ledger（遗留，ingest 之后不再需要）。 */
 export async function syncUserZoneToLedger(workspacePath: string): Promise<void> {
   await invoke('sync_user_zone_to_ledger', {
     workspacePath: workspacePath.trim(),

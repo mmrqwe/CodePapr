@@ -383,12 +383,12 @@
         <div class="item" data-wire="mem">
           <div class="row">
             <div class="addr">MEM</div>
-            <div class="name">Stable Memory<small>项目记忆 · 双区投影</small></div>
-            <div class="src"><span class="chip">.CodePapr/memory.md</span><span class="chip">memory_entries ledger</span><span class="chip">memorySection</span></div>
+            <div class="name">Stable Memory<small>项目记忆 · 账本渲染</small></div>
+            <div class="src"><span class="chip">memory_entries ledger</span><span class="chip">记忆面板</span><span class="chip">memorySection</span></div>
             <div class="cchip c-hit">签名外冻结</div>
           </div>
-          <div class="desc">跨会话项目知识，渲染为「## 项目记忆」。权威在 SQLite <code>memory_entries</code>；<code>memory.md</code> 是双区投影：User Zone（手编，投影器永不覆盖）+ Managed Zone（只投影会进 Bootstrap 的条目：偏好 / 约束 / 事实 / 约定 / 验证 / 决策，预算 24 条 / 1500 tokens）。<b>零审核自动写入</b>（<code>planMemoryWrite</code>：persist 或 drop，没有准入队列）。<code>citation</code> / <code>procedure</code> <b>不进这一层</b>——前者只进 <code>memory_search</code>，后者进下方 Recall。通过 <code>resolveSessionBootstrap</code> 按 (session × 稳定签名) 冻结（签名外 → 前缀缓存不破）。磁盘上新记住的内容<b>当前会话前缀不变</b>；<b>压缩 epoch 刷新</b>或<b>下次会话</b>才进入 Bootstrap。详见 <a href="#memory">记忆 × 上下文</a>。</div>
-          <div class="more"><div class="mbox">立刻写入：用户说「记住 / 必须 / 不要」、工作区实证、bash 测试成功、冷启动摘要、Agent <code>memory_write</code>（非网页）。写成引用、永不 Bootstrap：web / MCP / https 证据。丢弃：注入、密钥、危险命令、裸推理。直写 memory.md 的 write/patch 被拦截走同一策略。面板是目录（每次会话 / 按需召回），可遗忘，无准入按钮。</div></div>
+          <div class="desc">跨会话项目知识，渲染为「## 项目记忆」。权威在 SQLite <code>memory_entries</code>；记忆面板是唯一给人看/改的面（每次会话 / 按需召回 / 仅搜索）。Bootstrap 只渲染会进前缀的条目：手写笔记 / 偏好 / 约束 / 事实 / 约定 / 验证 / 决策，预算 24 条 / 1500 tokens。<b>零审核自动写入</b>（<code>planMemoryWrite</code>：persist 或 drop，没有准入队列）。<code>citation</code> / <code>procedure</code> <b>不进这一层</b>——前者只进 <code>memory_search</code>，后者进下方 Recall。通过 <code>resolveSessionBootstrap</code> 按 (session × 稳定签名) 冻结（签名外 → 前缀缓存不破）。账本上新记住的内容<b>当前会话前缀不变</b>；<b>压缩 epoch 刷新</b>或<b>下次会话</b>才进入 Bootstrap。详见 <a href="#memory">记忆 × 上下文</a>。</div>
+          <div class="more"><div class="mbox">立刻写入：用户说「记住 / 必须 / 不要」、工作区实证、bash 测试成功、冷启动摘要、Agent <code>memory_write</code>（非网页）、面板手写笔记。写成引用、永不 Bootstrap：web / MCP / https 证据。丢弃：注入、密钥、危险命令、裸推理。若 Agent 仍直写 memory.md，write/patch 被拦截走同一策略。面板是完整目录，可遗忘，无准入按钮。</div></div>
         </div>
 
         <div class="item" data-wire="custom">
@@ -471,7 +471,7 @@
             <div class="cchip c-miss">每轮刷新 · user prompt 尾部</div>
           </div>
           <div class="desc">目录 / 文件 / 符号鸟瞰，渲染为「## 项目结构概览」，注入每轮的<b>user prompt</b>（运行时上下文之后、诊断之前）。<b>每轮从磁盘重读</b>，永不冻结进前缀。零缓存影响：它坐落在已缓存前缀边界之后，变化不会让历史失效。子代理仍通过 <code>SubagentSessionDeps.projectGraphSummary</code> 继承（注入它们的 bootstrap，因为子代理生命周期短）。</div>
-          <div class="more"><div class="mbox">用于冷启动：memory.md 为空且有 graph 时，后台用 graph 摘要生成初始 memory（<code>agentStore.ts</code>）。graph 同时作为工具（<code>graph(action: full/overview/...)</code>）供深度探索使用。</div></div>
+          <div class="more"><div class="mbox">用于冷启动：账本没有 Bootstrap 段且有 graph 时，后台用 graph 摘要生成初始 memory（<code>agentStore.ts</code>）。graph 同时作为工具（<code>graph(action: full/overview/...)</code>）供深度探索使用。</div></div>
         </div>
 
         <div class="item" data-wire="task">
@@ -561,13 +561,13 @@
   <!-- MEMORY × CONTEXT -->
   <section class="memsec reveal" id="memory">
     <h2>记忆 × 上下文：哪一种在哪一层</h2>
-    <p class="sub">记忆不是「一个文件整段塞进模型」。权威在 SQLite <code>memory_entries</code>；<code>.CodePapr/memory.md</code> 只是给人看的双区投影。同一条知识只会出现在四层请求里的某一层——或者根本不进请求，只躺在账本里等搜索。</p>
+    <p class="sub">记忆不是「整段塞进模型」。权威在 SQLite <code>memory_entries</code>；记忆面板是唯一给人看的面。同一条知识只会出现在四层请求里的某一层——或者根本不进请求，只躺在账本里等搜索。</p>
 
     <div class="memgrid">
       <div class="memcard">
         <div class="k">TIER 01 · BOOTSTRAP</div>
         <h5>每次会话都带着</h5>
-        <p>User Zone 手写笔记 + Managed Zone 的偏好、约束、项目事实、约定、验证、决策。注入 <code>log[0]</code>，按 (session × 稳定签名) 冻结。磁盘变了<strong>当前前缀不重建</strong>；压缩 epoch 或新会话才刷新。</p>
+        <p>手写笔记 + 偏好、约束、项目事实、约定、验证、决策。注入 <code>log[0]</code>，按 (session × 稳定签名) 冻结。账本变了<strong>当前前缀不重建</strong>；压缩 epoch 或新会话才刷新。</p>
       </div>
       <div class="memcard recall">
         <div class="k">TIER 04 · RECALL</div>
@@ -596,35 +596,35 @@
         <tbody>
           <tr>
             <td>用户手写笔记</td>
-            <td><code>memory.md</code> User Zone</td>
+            <td>账本；面板「每次会话」</td>
             <td>Session Bootstrap（稳定前缀）</td>
-            <td>会话启动读入；压缩 epoch 会 <code>refreshBootstrap</code></td>
-            <td>你改文件立刻落盘。投影器永不覆盖。当前会话前缀不重建。</td>
+            <td>会话启动从账本渲染；压缩 epoch 会 <code>refreshBootstrap</code></td>
+            <td>你在面板增改立刻落库。当前会话前缀不重建。</td>
           </tr>
           <tr>
             <td>偏好 / 约束</td>
-            <td>ledger → Managed Zone</td>
+            <td>账本；面板「每次会话」</td>
             <td>同上，Bootstrap</td>
-            <td>本回合写入磁盘；<strong>下一次 Bootstrap 刷新</strong>才进前缀</td>
+            <td>本回合写入账本；<strong>下一次 Bootstrap 刷新</strong>才进前缀</td>
             <td>你说「记住 / 必须 / 不要」，或 Agent <code>memory_write</code>。立刻 persist，无需点同意。</td>
           </tr>
           <tr>
             <td>项目事实 / 约定 / 验证 / 决策</td>
-            <td>ledger → Managed Zone</td>
+            <td>账本；面板「每次会话」</td>
             <td>Bootstrap</td>
-            <td>同上：磁盘立刻变，前缀延后</td>
+            <td>同上：账本立刻变，前缀延后</td>
             <td>工作区实证、bash 测试成功、冷启动摘要。同内容哈希会 supersede 旧条。</td>
           </tr>
           <tr>
             <td>踩坑经验 <code>procedure</code></td>
-            <td>ledger，<strong>不进</strong> Managed Zone</td>
+            <td>账本；面板「按需召回」</td>
             <td>Turn-scoped Recall / <code>memory_search</code></td>
             <td>写入后的<strong>下一用户回合</strong>，若检索命中</td>
             <td>同一错误踩两次等。不进每次会话的前缀，避免把旧坑当指令。</td>
           </tr>
           <tr>
             <td>网页 / MCP 引用 <code>citation</code></td>
-            <td>ledger，不进 Managed Zone</td>
+            <td>账本；面板「仅搜索」</td>
             <td>仅 <code>memory_search</code></td>
             <td>模型主动搜索才会看到</td>
             <td>来源是 web / MCP，或 evidence 含 <code>https</code>。永不 Bootstrap；自动 Recall 也跳过。</td>
@@ -648,7 +648,7 @@
             <td>Session Checkpoint</td>
             <td>Session State（压缩 epoch 重写）</td>
             <td>压缩完成后作为检查点</td>
-            <td>随这一场任务变。<strong>不是</strong>跨会话项目记忆，不要复制进 memory.md。</td>
+            <td>随这一场任务变。<strong>不是</strong>跨会话项目记忆，不要复制进记忆面板。</td>
           </tr>
           <tr>
             <td>大段工具输出</td>
@@ -664,16 +664,16 @@
     <h3>一次「记住」之后的时间线</h3>
     <div class="timeline">
       <div class="tl"><span class="t">T0 本回合</span><p>用户话术或 Agent <code>memory_write</code> / 拦截的 write → 信封（source / trust / origin / 风险）→ <code>planMemoryWrite</code>：persist 或 drop。没有「待审核」队列。</p></div>
-      <div class="tl"><span class="t">T1 磁盘</span><p>persist 的条目进入 <code>memory_entries</code>（同哈希旧 active 条 supersede）。若是 Bootstrap 类，立刻重投影 Managed Zone；User Zone 不动。</p></div>
-      <div class="tl"><span class="t">T2 当前前缀</span><p><strong>不变。</strong> Bootstrap 按会话冻结，<code>memory.md</code> 在签名外。新记住的偏好此时还没进模型前缀——这是为了保住 DeepSeek / Claude 的前缀缓存。</p></div>
+      <div class="tl"><span class="t">T1 账本</span><p>persist 的条目进入 <code>memory_entries</code>（同哈希旧 active 条 supersede）。面板立刻能看见；当前前缀仍冻结。</p></div>
+      <div class="tl"><span class="t">T2 当前前缀</span><p><strong>不变。</strong> Bootstrap 按会话冻结，账本渲染结果在签名外。新记住的偏好此时还没进模型前缀——这是为了保住 DeepSeek / Claude 的前缀缓存。</p></div>
       <div class="tl"><span class="t">T3 下一回合</span><p>若是 <code>procedure</code> 且检索命中 → 进入本回合 Recall Block（user 消息前）。citation 仍不自动召回。</p></div>
-      <div class="tl"><span class="t">T4 压缩</span><p>epoch 重写时 <code>refreshBootstrap</code>：Managed Zone 里的新事实进入稳定前缀。Checkpoint 同时重写——那是任务进度，不是记忆。</p></div>
-      <div class="tl"><span class="t">T5 新会话</span><p>总是重读 <code>memory.md</code>。冷启动若文件为空且有项目图，后台写一份结构/技术栈摘要进 ledger，下次或压缩后进入 Bootstrap。</p></div>
+      <div class="tl"><span class="t">T4 压缩</span><p>epoch 重写时 <code>refreshBootstrap</code>：账本里的 Bootstrap 类新事实进入稳定前缀。Checkpoint 同时重写——那是任务进度，不是记忆。</p></div>
+      <div class="tl"><span class="t">T5 新会话</span><p>总是从账本重渲染。冷启动若账本没有 Bootstrap 段且有项目图，后台写一份结构/技术栈摘要进 ledger，下次或压缩后进入 Bootstrap。</p></div>
     </div>
 
     <h3>和 AGENTS.md、Checkpoint 的边界</h3>
     <div class="memnote">
-      <code>AGENTS.md</code> 是你写的项目规则，在稳定前缀的<strong>签名内</strong>——改了会故意打破缓存。<code>memory.md</code> 是自动积累的事实与偏好，在<strong>签名外</strong>，改了不拆当前前缀。Checkpoint 是「这一场任务进行到哪」，压缩时重写，不要把待办抄进记忆。网页内容永远不当指令：写成 citation，等人或模型去搜，不进 Bootstrap、不进自动 Recall。
+      <code>AGENTS.md</code> 是你写的项目规则，在稳定前缀的<strong>签名内</strong>——改了会故意打破缓存。项目记忆是自动积累的事实与偏好，在<strong>签名外</strong>，面板改了不拆当前前缀。Checkpoint 是「这一场任务进行到哪」，压缩时重写，不要把待办抄进记忆。网页内容永远不当指令：写成 citation，等人或模型去搜，不进 Bootstrap、不进自动 Recall。
     </div>
   </section>
 
@@ -684,7 +684,7 @@
     <div class="ledger">
       <div class="led">
         <div class="no">M·01</div><h5>签名外冻结</h5>
-        <p>memory.md 与 project-graph 在磁盘上易变，但被排除出 <code>bootstrapSignature</code>。<code>resolveSessionBootstrap</code> 按 (session × 稳定签名) 记忆化 bootstrap——本回合新写入的记忆立刻落盘，但<b>不重建当前前缀</b>。Bootstrap 类记忆在压缩 epoch（<code>refreshBootstrap</code>）或下次会话进入模型；procedure 可在下一用户回合进入 Recall。保住整段前缀缓存。</p>
+        <p>账本与 project-graph 在磁盘上易变，但账本渲染结果被排除出 <code>bootstrapSignature</code>。<code>resolveSessionBootstrap</code> 按 (session × 稳定签名) 记忆化 bootstrap——本回合新写入的记忆立刻落库，但<b>不重建当前前缀</b>。Bootstrap 类记忆在压缩 epoch（<code>refreshBootstrap</code>）或下次会话进入模型；procedure 可在下一用户回合进入 Recall。保住整段前缀缓存。</p>
       </div>
       <div class="led">
          <div class="no">M·02</div><h5>写时三阶梯截断</h5>
@@ -734,7 +734,7 @@
 
 <footer>
   <div class="container">
-    CodePapr &mdash; 上下文分层可视化 · 生成自源码核实（<code>promptSystem.ts</code> / <code>contextCompaction.ts</code> / <code>contextStateMerge.ts</code> / <code>contextSurfaceStore.ts</code> / <code>ContentEnvelope.ts</code> / <code>memoryLedger.ts</code> / <code>memoryPersist.ts</code> / <code>memoryRecall.ts</code> / <code>agentStore.ts</code> / <code>toolOutputTruncation.ts</code> / <code>db/mod.rs</code>）。四层模型 = Stable Prefix（冻结）/ Session State（epoch + 持久化 Surface）/ Active Context（append-only）/ Turn-scoped Recall（request-only 锚定插入）。checkpoint 为 v3 结构化状态（13 分区 + provenance）；压缩事务单事务提交；memory.md 为 Memory Ledger 的双区投影（零审核写入；citation/procedure 不进 Bootstrap）。阈值单位：字符。Bootstrap 以 <code>role: assistant</code> + <code>isPrefixSystem</code> 注入，Claude 提取为 system。
+    CodePapr &mdash; 上下文分层可视化 · 生成自源码核实（<code>promptSystem.ts</code> / <code>contextCompaction.ts</code> / <code>contextStateMerge.ts</code> / <code>contextSurfaceStore.ts</code> / <code>ContentEnvelope.ts</code> / <code>memoryLedger.ts</code> / <code>memoryPersist.ts</code> / <code>memoryRecall.ts</code> / <code>agentStore.ts</code> / <code>toolOutputTruncation.ts</code> / <code>db/mod.rs</code>）。四层模型 = Stable Prefix（冻结）/ Session State（epoch + 持久化 Surface）/ Active Context（append-only）/ Turn-scoped Recall（request-only 锚定插入）。checkpoint 为 v3 结构化状态（13 分区 + provenance）；压缩事务单事务提交；Memory Ledger 以面板为唯一给人看的面（零审核写入；citation/procedure 不进 Bootstrap）。阈值单位：字符。Bootstrap 以 <code>role: assistant</code> + <code>isPrefixSystem</code> 注入，Claude 提取为 system。
   </div>
 </footer>
 

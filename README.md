@@ -19,7 +19,7 @@ CodePapr is a local coding agent system built with DeepSeek cache optimization. 
 | **Ask / Plan / Agent / App modes** | Single runtime for explanation, execution, and interactive HTML app generation |
 | **Multi-agent collaboration** | Main agent dispatches Explore/Scout/Mentor and custom sub-agents via the `task` tool |
 | **TodoList task planning** | Agents auto-create and track task lists with progress reporting and re-planning |
-| **Project memory (zero-review)** | Preferences, constraints, and verified facts save automatically. Short instructions go in every-session Bootstrap; procedures in per-turn Recall; web citations in search only. `.CodePapr/memory.md` is a dual-zone projection of the SQLite ledger. |
+| **Project memory (zero-review)** | Preferences, constraints, and verified facts save automatically. Short instructions go in every-session Bootstrap; procedures in per-turn Recall; web citations in search only. The memory panel is the only human surface over the SQLite ledger. |
 | **Code intelligence (LSP + AST)** | `lsp` tool with 9 navigation actions (go-to-definition, references, hover, document/workspace symbols, implementations, call hierarchy) — LSP-first with automatic AST project-graph fallback tagged by source/confidence; `list` shows the directory tree with per-file lightweight symbols. The ProjectGraph (UI-facing) further supports dead code detection, circular dependency checks, and refactoring suggestions |
 | **DeepSeek prefix cache optimization** | Three-layer prompt injection strategy to maximize cache hits and reduce costs |
 | **SEARCH/REPLACE Diff** | Validate before writing, with atomic multi-file patch support |
@@ -96,7 +96,7 @@ Create a `.CodePapr/` directory at the project root:
 | File/Directory | Purpose |
 |----------------|---------|
 | `.CodePapr/AGENTS.md` | Project-wide rules injected into the system prompt of all agents and sub-agents |
-| `.CodePapr/memory.md` | Dual-zone projection of cross-session project memory (hand-written User Zone + auto Managed Zone); ledger in SQLite is authoritative |
+| `.CodePapr/project.sqlite` (`memory_entries`) | Cross-session project memory (panel is the only human surface; Bootstrap is rendered from the ledger) |
 | `.CodePapr/agents/*.md` | Custom sub-agents (YAML frontmatter + Markdown body) |
 | `.CodePapr/skills/*/SKILL.md` | Reusable skills (search strategies, debugging workflows, release checklists); also supports flat layout `.CodePapr/skills/<name>.md`; skill marketplace with one-click install from GitHub |
 | `.CodePapr/commands/*.md` | Custom prompt templates (invoked with `--name`) |

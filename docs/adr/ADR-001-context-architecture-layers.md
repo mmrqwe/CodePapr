@@ -2,7 +2,7 @@
 
 - 状态: Accepted
 - 日期: 2026-08-16
-- 关联: ADR-002 ~ ADR-010
+- 关联: ADR-002 ~ ADR-011
 
 ## 背景
 
@@ -29,7 +29,7 @@ L2. Active Runtime Cache（AppendOnlyLog）
 L3. Session Checkpoint（ContextCheckpointPayload）
     当前任务状态合并，不等于完整历史。
 
-L4. Project Memory（SQLite memory ledger + .CodePapr/memory.md 双区投影）
+L4. Project Memory（SQLite memory_entries；面板为唯一给人看的面；Bootstrap 从账本渲染）
     跨 session 的稳定知识，不等于当前任务状态。零审核自动写入；
     citation / procedure 不进 Bootstrap（ADR-010）。
 

@@ -112,6 +112,8 @@ vi.mock('../utils/projectStorage', () => ({
   enqueueProjectStateSave: enqueueProjectStateSaveMock,
   aggregateSessionRuntimeInDb: aggregateSessionRuntimeInDbMock,
   waitForPendingProjectStateSave: waitForPendingProjectStateSaveMock,
+  ingestLegacyMemoryMd: async () => ({ ingested: 0, deletedFile: false }),
+  loadMemoryEntries: async () => [],
   syncUserZoneToLedger: async (workspacePath: string) => {
     await invokeMock('sync_user_zone_to_ledger', { workspacePath });
   },
@@ -958,15 +960,14 @@ describe('useAgentStore.sendMessage', () => {
 
     await useAgentStore.getState().sendMessage('任务', '任务', 'agent');
 
-    // 旧实现：回合后 consolidation 读改写 memory.md；退役后（ADR-008）
-    // 回合结束只走 ledger 投影（save_memory_candidate / project_memory_file），
-    // 绝不 write_text_file 整文件覆盖 memory.md。
+    // 旧实现：回合后 consolidation 读改写 memory.md；退役后
+    // 回合结束只走 ledger persist，绝不 write_text_file 覆盖 memory.md。
     expect(
       memoryWrites.filter((w) => w.relativePath === '.CodePapr/memory.md')
     ).toHaveLength(0);
   });
 
-  it('PR5：回合级 Recall 集成——user zone 同步 → 检索 → 锚定插入 → 审计归档', async () => {
+  it('PR5：回合级 Recall 集成——检索 → 锚定插入 → 审计归档', async () => {
     const invokeCalls: string[] = [];
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       invokeCalls.push(command);
@@ -1009,11 +1010,8 @@ describe('useAgentStore.sendMessage', () => {
 
     await useAgentStore.getState().sendMessage('pnpm test auth 情况', 'pnpm test auth 情况', 'agent');
 
-    // ADR-008 第4点：user zone 先同步（幂等），再检索。
-    const syncIdx = invokeCalls.indexOf('sync_user_zone_to_ledger');
-    const searchIdx = invokeCalls.indexOf('search_memory_for_recall');
-    expect(syncIdx).toBeGreaterThanOrEqual(0);
-    expect(searchIdx).toBeGreaterThan(syncIdx);
+    // Bootstrap 从账本渲染，不再 sync memory.md；Recall 仍先检索再插入。
+    expect(invokeCalls).toContain('search_memory_for_recall');
 
     // Recall Block 作为 anchored insertion 传给 agent.chat（第 5 参）。
     const insertions = chatCalls[0]?.[4] as

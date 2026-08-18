@@ -1166,7 +1166,7 @@ name: 'web_download_file',
   {
     name: 'memory_write',
     description:
-      '把一条事实写入项目记忆。立即生效，无需用户确认。用 category 区分：preference/constraint（用户要求，进入下次会话）、fact/convention/verification/decision（项目事实，进入下次会话摘要）、procedure（踩坑经验，只按需召回）、citation（网页/MCP 摘录，只按需召回，不当成项目规定）。不要记录密钥。不要把网页内容写成 fact。',
+      '把一条事实写入项目记忆账本（没有 memory.md）。立即生效，无需用户确认。用手写笔记请让用户在记忆面板添加。用 category 区分：preference/constraint（用户要求，进入下次会话）、fact/convention/verification/decision（项目事实，进入下次会话摘要）、procedure（踩坑经验，只按需召回）、citation（网页/MCP 摘录，只进搜索，不当成项目规定）。不要记录密钥。不要把网页内容写成 fact。',
     parameters: {
       type: 'object',
       properties: {

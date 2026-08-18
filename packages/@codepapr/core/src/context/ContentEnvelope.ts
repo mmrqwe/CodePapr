@@ -178,11 +178,10 @@ export const MEMORY_KINDS: ReadonlySet<string> = new Set([
   'user-note',
 ]);
 
-/** 不投影进 memory.md managed zone / Session Bootstrap 的种类（只进 ledger，按需召回）。 */
+/** 不进入 Session Bootstrap 的种类（只进 ledger：procedure 按需召回，citation 仅搜索）。 */
 export const BOOTSTRAP_EXCLUDED_MEMORY_KINDS: ReadonlySet<string> = new Set([
   'citation',
   'procedure',
-  'user-note',
 ]);
 
 export type MemoryWriteDecision =
@@ -237,6 +236,9 @@ export function planMemoryWrite(input: {
   }
 
   let kind = normalizeMemoryKind(input.kind);
+  if (kind === 'user-note' && envelope.source !== 'user') {
+    kind = 'general';
+  }
   if (kind === 'citation' || looksLikeExternalOrigin(envelope)) {
     kind = 'citation';
   }

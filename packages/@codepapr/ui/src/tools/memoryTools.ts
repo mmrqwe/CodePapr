@@ -3,7 +3,7 @@
  *
  * - memory_write：按确定性策略立刻 persist 或 drop，不排队等用户审核；
  * - memory_search：检索稳定记忆 + checkpoint 事实；可触发受控 re-recall；
- * - memory_forget：active → forgotten 并重新投影 managed zone；
+ * - memory_forget：active → forgotten（手写笔记只能在面板遗忘）；
  * - memory_review_candidates：列出已写入的记忆（目录，不是审核队列）。
  */
 
@@ -23,19 +23,16 @@ import { createId } from '../utils/createId';
 import {
   forgetMemoryEntry,
   loadMemoryEntries,
-  projectMemoryFile,
   saveMemoryRecall,
   searchMemoryForRecall,
   type RecallSearchItem,
 } from '../utils/projectStorage';
-import { buildMemoryProjection } from '../utils/memoryLedger';
 import { persistMemoryProposal, type PersistMemoryResult } from '../utils/memoryPersist';
 import {
   buildRecallInsertion,
   buildRecallQuery,
   renderRecallBlock,
 } from '../utils/memoryRecall';
-import { withMemoryLock } from '../utils/memoryWriteLock';
 
 const MEMORY_CATEGORIES = MEMORY_KINDS;
 
@@ -77,7 +74,7 @@ export async function proposeMemoryCandidateFromWrite(params: {
   projectToBootstrap: boolean;
 }> {
   const content = params.content.trim();
-  if (!content) throw new Error('memory.md 写入内容为空');
+  if (!content) throw new Error('记忆内容为空');
   const envelope = envelopeContent({
     source: params.source ?? 'agent-proposed',
     trust: params.trust ?? 'derived',
@@ -107,7 +104,7 @@ export async function proposeMemoryCandidateFromWrite(params: {
 }
 
 export const MEMORY_WRITE_INTERCEPT_NOTE =
-  'memory.md 由 CodePapr 双区管理：Agent 直接写入已拦截，并按自动策略写入记忆（或因风险丢弃），未落盘原文。请改用 memory_write。';
+  '没有独立的 memory.md。Agent 直接写入已被拦截，并按自动策略写入记忆账本（或因风险丢弃）。请改用 memory_write，手写笔记请在记忆面板添加。';
 
 /** memory_search 创建的 re-recall 审计行 id，按 session 归集；回合结束由
  *  sendMessage 排空并归档（ADR-009 生命周期：turn 结束 status='archived'）。 */
@@ -124,33 +121,8 @@ interface MemoryToolContext {
   userMessageId?: string;
 }
 
-async function reprojectManagedZone(workspacePath: string): Promise<void> {
-  try {
-    await reprojectMemoryManagedZone(workspacePath);
-  } catch (err) {
-    console.warn('[memory-tools] 重新投影失败:', err instanceof Error ? err.message : err);
-  }
-}
-
-/** 重投影 managed zone（active entries → buildMemoryProjection → 落盘）。
- *  供 memory 工具与 Memory Inspector 面板共用。经 withMemoryLock，避免与
- *  bootstrap / 回合投影并发 last-writer-wins。 */
-export async function reprojectMemoryManagedZone(workspacePath: string): Promise<void> {
-  await withMemoryLock(() => reprojectMemoryManagedZoneUnlocked(workspacePath));
-}
-
-async function reprojectMemoryManagedZoneUnlocked(workspacePath: string): Promise<void> {
-  const entries = await loadMemoryEntries(workspacePath, true);
-  const projection = buildMemoryProjection(
-    entries.map((entry) => ({
-      category: entry.category,
-      content: entry.content,
-      confidence: entry.confidence,
-      trust: entry.trust,
-      verifiedAt: entry.verifiedAt,
-    }))
-  );
-  await projectMemoryFile(workspacePath, projection);
+export async function reprojectMemoryManagedZone(_workspacePath: string): Promise<void> {
+  // Bootstrap 从账本渲染，不再写 memory.md。
 }
 
 function renderSearchResults(query: string, items: RecallSearchItem[]): string {
@@ -215,9 +187,6 @@ export function registerMemoryTools(
         reason: result.reason,
         note: result.note,
       };
-    }
-    if (result.status === 'saved' && result.projectToBootstrap) {
-      await reprojectManagedZone(workspacePath);
     }
     return {
       id: result.id,
@@ -312,12 +281,16 @@ export function registerMemoryTools(
     if (!id) throw new Error('id 不能为空');
     const reason = asOptionalString(args.reason)?.trim();
     try {
+      const entries = await loadMemoryEntries(workspacePath, false);
+      const target = entries.find((entry) => entry.id === id);
+      if (target?.category === 'user-note') {
+        throw new Error('手写笔记只能在记忆面板中遗忘');
+      }
       await forgetMemoryEntry(workspacePath, id, reason || undefined);
     } catch (err) {
       throw new Error(`遗忘失败: ${err instanceof Error ? err.message : String(err)}`);
     }
-    await reprojectManagedZone(workspacePath);
-    return { forgotten: id, note: '已遗忘（软删除），managed zone 已重新投影。' };
+    return { forgotten: id, note: '已遗忘（软删除）。下次会话前缀将不再包含该条目。' };
   });
 
   registry.register(toolByName('memory_review_candidates'), async (args) => {

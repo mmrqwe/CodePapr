@@ -39,7 +39,6 @@ import { type WorkspaceToolContext } from './workspaceToolContext';
 import {
   isMemoryFilePath,
   proposeMemoryCandidateFromWrite,
-  reprojectMemoryManagedZone,
   MEMORY_WRITE_INTERCEPT_NOTE,
 } from './memoryTools';
 
@@ -60,9 +59,6 @@ async function interceptMemoryFileWrite(
     content,
     origin: 'workspace-write-tool',
   });
-  if (result.status === 'saved' && result.projectToBootstrap) {
-    await reprojectMemoryManagedZone(ctx.workspace());
-  }
   return { intercepted: true, candidateId: result.candidateId };
 }
 
@@ -466,9 +462,6 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
         content: file.content,
         origin: 'workspace-apply-diff-tool',
       });
-      if (result.status === 'saved' && result.projectToBootstrap) {
-        await reprojectMemoryManagedZone(workspace());
-      }
       interceptedFiles.push({
         path: file.path,
         intercepted: true,

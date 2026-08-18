@@ -95,7 +95,7 @@ describe('memoryTools (ADR-008 PR4)', () => {
     expect(payload.riskFlags).toBe('[]');
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'admit_memory_candidate')).toBe(true);
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'write_text_file')).toBe(false);
-    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'project_memory_file')).toBe(true);
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'project_memory_file')).toBe(false);
   });
 
   it('memory_write reports duplicate when the same content was already proposed', async () => {
@@ -239,9 +239,27 @@ describe('memoryTools (ADR-008 PR4)', () => {
     expect(result.reRecallInsertion).toBeUndefined();
   });
 
-  it('memory_forget soft-deletes the entry and reprojects the managed zone', async () => {
+  it('memory_forget soft-deletes the entry without writing memory.md', async () => {
     invokeMock.mockImplementation(async (command: string) => {
-      if (command === 'load_memory_entries') return [];
+      if (command === 'load_memory_entries') {
+        return [
+          {
+            id: 'e1',
+            category: 'fact',
+            content: 'x',
+            contentHash: 'h',
+            confidence: 'reported',
+            trust: 'derived',
+            status: 'active',
+            sourceSessionId: null,
+            sourceMessageIds: null,
+            evidence: null,
+            createdAt: 1,
+            verifiedAt: null,
+            supersededBy: null,
+          },
+        ];
+      }
       return {};
     });
     const registry = buildRegistry();
@@ -256,11 +274,7 @@ describe('memoryTools (ADR-008 PR4)', () => {
       entryId: 'e1',
       reason: '过时',
     });
-    expect(invokeMock).toHaveBeenCalledWith('load_memory_entries', {
-      workspacePath: '/tmp/ws',
-      onlyActive: true,
-    });
-    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'project_memory_file')).toBe(true);
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'project_memory_file')).toBe(false);
   });
 
   it('memory_review_candidates lists persisted memories, not a pending queue', async () => {

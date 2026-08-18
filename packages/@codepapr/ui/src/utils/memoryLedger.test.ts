@@ -165,7 +165,7 @@ describe('buildMemoryProjection', () => {
     expect(projection).toContain('[REDACTED]');
   });
 
-  it('excludes user-note, citation and procedure from the managed zone', () => {
+  it('includes user-note in bootstrap and excludes citation / procedure', () => {
     const projection = buildMemoryProjection([
       {
         category: 'verification',
@@ -197,7 +197,7 @@ describe('buildMemoryProjection', () => {
       },
     ]);
     expect(projection).toContain('pnpm test');
-    expect(projection).not.toContain('用户手写');
+    expect(projection).toContain('用户手写');
     expect(projection).not.toContain('bun');
     expect(projection).not.toContain('E0597');
   });

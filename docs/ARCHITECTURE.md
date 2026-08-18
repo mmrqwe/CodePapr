@@ -57,7 +57,7 @@
 ChatPanel → agentStore.sendMessage()
   ├─ 乐观更新：用户消息立即 set() 到 UI（~50ms），不等任何 I/O
   ├─ 后台：refreshProjectDiagnostics（不阻塞）、load_projectgraph_cache、
-  │        read_text_file(.CodePapr/memory.md)、loadMcpToolDefinitions
+  │        loadMemoryBootstrapSection（从账本渲染）、loadMcpToolDefinitions
   ├─ WorkerBackedAgent.chat()
   │    ├─ Worker Thread: Agent.chat() → LLM
   │    └─ Main Thread: tool execution → Tauri invoke
@@ -418,9 +418,9 @@ Hover 用户消息 → 显示"重置到此点"按钮：
 
 ## 8. 项目记忆系统 (Project Memory)
 
-> **2026-08 重设计（PR0–PR5）+ ADR-010 零审核写入**：Memory Ledger（SQLite）+ 双区
-> `memory.md` 投影 + turn-scoped Recall。记忆**自动写入**，用户只事后浏览 / 遗忘 /
-> 手改 User Zone。架构决策见 `docs/adr/`（ADR-001 ~ ADR-010），完整分层见 §16。
+> **2026-08 重设计 + ADR-010 零审核 + ADR-011 退役 memory.md**：Memory Ledger（SQLite
+> `memory_entries`）是唯一存储；记忆面板是唯一给人看/改的面；Bootstrap 从账本渲染
+> 冻结字符串；turn-scoped Recall。架构决策见 `docs/adr/`（ADR-001 ~ ADR-011），完整分层见 §16。
 
 ### 8.1 和上下文怎么叠在一起
 
@@ -428,60 +428,47 @@ Hover 用户消息 → 显示"重置到此点"按钮：
 
 | 记忆种类 | 存在哪 | 出现在请求的哪一层 | 什么时候变 |
 | --- | --- | --- | --- |
-| 用户手写笔记 | `memory.md` User Zone | Session Bootstrap（稳定前缀） | 用户改文件后：**下次会话**或**压缩 epoch** 才重读 |
-| 偏好 / 约束 / 项目事实 | SQLite `memory_entries` → managed zone 投影 | 同上，Bootstrap | 本回合写入磁盘立刻可见；**当前会话前缀不刷新**，下次会话或压缩时进入 Bootstrap |
-| 踩坑经验 (`procedure`) | ledger，不进 managed zone | Turn-scoped Recall / `memory_search` | 写入后下一用户回合可被召回；不进前缀 |
-| 网页 / MCP 引用 (`citation`) | ledger，不进 managed zone | 仅 `memory_search`（自动 Recall **跳过**） | 写入即可搜到；永远不当指令 |
+| 用户手写笔记 (`user-note`) | SQLite `memory_entries`；面板「每次会话」 | Session Bootstrap（稳定前缀） | 面板增改后：**下次会话**或**压缩 epoch** 才进入前缀 |
+| 偏好 / 约束 / 项目事实 | 同上，账本 | 同上，Bootstrap | 本回合写入账本立刻可见；**当前会话前缀不刷新**，下次会话或压缩时进入 Bootstrap |
+| 踩坑经验 (`procedure`) | 账本；面板「按需召回」 | Turn-scoped Recall / `memory_search` | 写入后下一用户回合可被召回；不进前缀 |
+| 网页 / MCP 引用 (`citation`) | 账本；面板「仅搜索」 | 仅 `memory_search`（自动 Recall **跳过**） | 写入即可搜到；永远不当指令 |
 | 当前任务目标 / 待办 | Session Checkpoint | Session State（压缩时重写） | 随压缩 epoch 变；**不是**项目记忆 |
 | 大段工具输出 | `.CodePapr/tool-output/` | 不自动注入，`read_artifact` 按需 | 写时冻结 |
 
-一句话：Bootstrap 里的记忆是「每次会话都带着的短指令 + 事实」；Recall 是「这一轮可能用得上的旧经验」；Checkpoint 是「这一场任务进行到哪」。三者不要互相复制。
+一句话：Bootstrap 里的记忆是「每次会话都带着的短指令 + 事实」；Recall 是「这一轮可能用得上的旧经验」；Checkpoint 是「这一场任务进行到哪」。三者不要互相复制。没有独立的 `memory.md`。
 
-### 8.2 memory.md 双区模型
+### 8.2 账本 + 面板（唯一记忆面）
 
-`memory.md` 是 **ledger 的人类可读投影**，采用双区结构：
+权威在 SQLite `memory_entries`。面板按请求层分组：
 
-```markdown
-# Project Memory
+- **每次会话**：user-note / preference / constraint / fact / convention / verification / decision / api / general。渲染进 Bootstrap，预算 24 条 / 1500 tokens。
+- **按需召回**：`procedure`。
+- **仅搜索**：`citation`。
 
-<!-- CodePapr:user-memory:start -->
-## User Notes
-（用户手编内容，投影器永不覆盖）
-<!-- CodePapr:user-memory:end -->
-
-<!-- CodePapr:managed-memory:start -->
-## Verified Project Knowledge
-- [verified] verification — [bash] ✓ pnpm test auth
-<!-- CodePapr:managed-memory:end -->
-```
-
-- **User Zone**：用户手编内容。旧版无标记文件整体视为 user zone，绝不丢失。
-- **Managed Zone**：只投影会进 Bootstrap 的条目（preference / constraint / fact /
-  convention / verification / decision / api / general），预算 24 条 / 1500 tokens。
-  `citation` / `procedure` / `user-note` 不出现在这里。
+手写笔记只在面板新增/编辑。Agent 不能把条目标成 `user-note`，也不能用 `memory_forget` 删手写笔记。遗留 `.CodePapr/memory.md` 由 `ingest_legacy_memory_md` 一次性收进账本后删除。
 
 ### 8.3 写入（零审核）
 
 确定性门在 `planMemoryWrite`（`ContentEnvelope`）：persist 或 drop，**不排队等用户点同意**。
 
-- **立刻写入**：用户说「记住 / 必须 / 不要」、工作区实证、测试命令成功、冷启动摘要、Agent 的 `memory_write`（非网页）。
+- **立刻写入**：用户说「记住 / 必须 / 不要」、工作区实证、测试命令成功、冷启动摘要、Agent 的 `memory_write`（非网页）、面板手写笔记。
 - **写成引用、不进 Bootstrap**：web / MCP / `https` evidence / `category: citation`。
 - **丢弃**：注入指令、密钥、关沙箱、危险命令、裸 assistant 推理、超长/过短。
-- **直写 `memory.md` 的 write/patch**：拦截，走同一策略，不落盘原文。
+- **直写 `.CodePapr/memory.md` 的 write/patch**：拦截，走同一策略，不落盘原文。
 
-面板是目录：徽章区分「每次会话」与「按需召回」，可遗忘。没有准入 / 拒绝。
+面板是目录：分组可见全部记忆，可遗忘。没有准入 / 拒绝。
 
 ### 8.4 加载与缓存（什么时候会进模型）
 
-- 会话启动读 `memory.md`（≤50KB）注入 Session Bootstrap（`log[0]`），按 (session × 稳定签名) 冻结——**普通回合不重载**；
-- `memory.md` 被排除出 `bootstrapSignature`：磁盘上新记住的内容**不拆当前前缀缓存**；
+- 会话启动从账本渲染 Bootstrap 段注入 `log[0]`，按 (session × 稳定签名) 冻结——**普通回合不重载**；
+- 账本渲染结果排除出 `bootstrapSignature`：新记住的内容**不拆当前前缀缓存**；
 - 压缩 epoch 重写时随 `refreshBootstrap` 刷新（零额外缓存代价）；
-- 新会话总是重读；
+- 新会话总是重读账本；
 - 每用户回合另做一次 Recall（见 §8.6 / §16.6），citation 不进入自动 Recall。
 
-### 8.5 自动整理
+### 8.5 去重
 
-ledger 之外的存量行为保留：memory.md 超过 200 行时 `consolidateMemoryContent`（fast 模型 + 规则降级），触发点：会话启动读后 / 压缩成功 / 回复完成后。fire-and-forget。整理的是投影文件，不替代 ledger 策略。
+同内容哈希的旧 active 条被 supersede。不再对独立记忆文件做 LLM 整理。
 
 ### 8.6 Memory Recall（按需检索）
 
@@ -490,12 +477,12 @@ ledger 之外的存量行为保留：memory.md 超过 200 行时 `consolidateMem
 ### 8.7 关键源码定位
 
 - `packages/@codepapr/core/src/context/ContentEnvelope.ts`：信封 / 脱敏 / `planMemoryWrite`
-- `packages/@codepapr/ui/src/utils/memoryLedger.ts`：抽取 / 投影渲染
+- `packages/@codepapr/ui/src/utils/memoryLedger.ts`：抽取 / Bootstrap 渲染
 - `packages/@codepapr/ui/src/utils/memoryPersist.ts`：自动 persist
-- `packages/@codepapr/ui/src/store/internals/memoryLedgerStore.ts`：回合结束编排
-- `packages/@codepapr/ui/src/utils/memoryConsolidation.ts`：整理逻辑（存量保留）
+- `packages/@codepapr/ui/src/store/internals/memoryLedgerStore.ts`：会话启动渲染 + 回合结束编排
+- `packages/@codepapr/ui/src/components/MemoryLedgerPanel.tsx`：记忆面板
 - `packages/@codepapr/ui/src-tauri/src/db/mod.rs`：memory_entries / memory_candidates /
-  memory_recalls 表；`project_memory_file`（双区投影）
+  memory_recalls 表；`ingest_legacy_memory_md`
 
 ## 9. ProjectGraph 语义分析
 
@@ -564,11 +551,11 @@ ledger 之外的存量行为保留：memory.md 超过 200 行时 `consolidateMem
 - 用户自定义提示词进入 session bootstrap 而非每轮 user prompt
 - Skills 进入 bootstrap 而非 system prefix
 - 角色人设进入 bootstrap 而非 system prefix（切换角色不破坏缓存）
-- ProjectGraph Summary 不进入主 Agent 每轮 user prompt（token 浪费），由 `graph` 工具按需获取；仅子代理 bootstrap 与 memory.md 冷启动生成仍使用
+- ProjectGraph Summary 不进入主 Agent 每轮 user prompt（token 浪费），由 `graph` 工具按需获取；仅子代理 bootstrap 与账本冷启动生成仍使用
 - Workspace 路径只在 system prompt 出现一次
 - Custom guidance 只在 bootstrap 出现一次
 - `topP`、`temperature`、`maxTokens`、`thinkingEnabled` 一起冻结在 ImmutablePrefix 中，任意变化都会破坏缓存 hash
-- session bootstrap 按"会话 × 稳定签名"缓存，memory.md 等易变磁盘状态变化不触发重建（见 §13.6）；mid-loop 压缩时 memory 会随 bootstrap 一起刷新（反正 epoch 重写，无额外缓存代价）
+- session bootstrap 按"会话 × 稳定签名"缓存，账本新写入不触发重建（见 §13.6）；mid-loop 压缩时 memory 会随 bootstrap 一起刷新（反正 epoch 重写，无额外缓存代价）
 - 每轮 user prompt 的动态内容（日期 / TodoList digest）置于尾部，不改既有前缀
 
 ## 11. 模型路由
@@ -683,7 +670,7 @@ OpenAI/Claude 兼容端点常是转发网关（如 OpenAI 网关转发 DeepSeek 
 | --- | --- |
 | 无每请求前缀改动 | 剪枝只在压缩 / 重建时执行，不在每次请求构建时滑动剪枝 |
 | 重建序列化字节一致 | `toCoreTailMessages` 对象 tool 结果用 `sortedStringify`（与实时路径 `Message.tool` 一致）；空助手内容为 `''`（非 `' '`） |
-| 降低重建频率 | session bootstrap 按"会话 × 稳定签名"缓存（`resolveSessionBootstrap`）；memory.md 等易变磁盘状态变化不触发重建；mid-loop 压缩时 memory 随 bootstrap 一起刷新（利用 epoch 重写窗口，零额外代价） |
+| 降低重建频率 | session bootstrap 按"会话 × 稳定签名"缓存（`resolveSessionBootstrap`）；账本新写入不触发重建；mid-loop 压缩时 memory 随 bootstrap 一起刷新（利用 epoch 重写窗口，零额外代价） |
 | reasoning 回传稳定 | `reasoning_content` 按"是否存在 + 模型能力（`supportsThinkingPayload`）"回传，与每请求 thinking 开关解耦，避免重建时给历史消息增删 reasoning |
 | TodoList digest 冻结 | checkpoint 生成时冻结当前 digest 进 payload，重建时复用而非实时重渲染 |
 | 参数冻结 | topP / temperature / maxTokens / thinkingEnabled 冻结在 ImmutablePrefix，变化即换 hash |
@@ -806,8 +793,8 @@ L3. Session Checkpoint（ContextCheckpointPayload v3）
     completedWork/activeWork/verification/failuresAndRisks/todos/openQuestions/
     references + ContextFact[] provenance），不等于完整历史。
 
-L4. Project Memory（SQLite memory_entries + memory.md 双区投影）
-    跨会话稳定知识（§8），自动写入 + 防注入；citation/procedure 不进 Bootstrap。
+L4. Project Memory（SQLite memory_entries；面板为唯一给人看的面）
+    跨会话稳定知识（§8），自动写入 + 防注入；Bootstrap 从账本渲染；citation/procedure 不进 Bootstrap。
 
 L5. Turn-scoped Memory Recall（SQLite memory_recalls + request-time insertion）
     request-time augmentation 层：每用户回合检索一次，锚定插入到当前 user
@@ -925,18 +912,18 @@ generation 0 冻结「禁用」参数（该 epoch 从未 prune）。per-request 
 - `packages/@codepapr/core/src/context/ContextFacts.ts`：ContextFact 类型与摘要截断
 - `packages/@codepapr/core/src/context/ContextBudget.ts`：预算分解与动作决策
 - `packages/@codepapr/core/src/context/ContentEnvelope.ts`：内容信封 / 密钥脱敏 / `planMemoryWrite`
-- `packages/@codepapr/ui/src/utils/memoryLedger.ts`：记忆抽取 / 双区投影渲染（纯函数）
+- `packages/@codepapr/ui/src/utils/memoryLedger.ts`：记忆抽取 / Bootstrap 渲染（纯函数）
 - `packages/@codepapr/ui/src/utils/memoryPersist.ts`：自动 persist
 - `packages/@codepapr/ui/src/store/internals/memoryLedgerStore.ts`：回合结束编排
 - `packages/@codepapr/ui/src/utils/memoryRecall.ts`：Recall 查询/渲染/锚定插入（纯函数）
 - `packages/@codepapr/ui/src/store/internals/projectSnapshot.ts`：保存流程（含 surface 维护）
-- `packages/@codepapr/ui/src/store/agentStore.ts`：桌面端主编排器（含 memory 整理触发点 + Context Inspector 观测数据）
+- `packages/@codepapr/ui/src/store/agentStore.ts`：桌面端主编排器（含 Context Inspector 观测数据）
 - `packages/@codepapr/ui/src-tauri/src/workspace_fs/stats.rs`：原生项目统计引擎（语言检测 + code/blank/comment 分类 + 并行遍历聚合 + `compute_project_stats`）
 - `packages/@codepapr/ui/src/components/ProjectStatsModal.tsx`：项目统计弹窗（treemap、可排序语言表、结果缓存）
 - `packages/@codepapr/ui/src/components/AgentContribution.tsx`：Agent 贡献统计（checkpoint diff）
 - `packages/@codepapr/ui/src/components/ToolUsageStats.tsx`：工具调用统计（按调用次数/成功率聚合）
 - `packages/@codepapr/ui/src/utils/snapshot.ts`：checkpoint / diff 的 invoke 封装
-- `packages/@codepapr/ui/src/store/agentStore.ts`：桌面端主编排器（含 memory 整理三个触发点）
+- `packages/@codepapr/ui/src/store/agentStore.ts`：桌面端主编排器
 - `packages/@codepapr/ui/src/store/permissionStore.ts`：外部路径访问权限管理
 - `packages/@codepapr/ui/src/store/toastStore.ts`：全局 Toast 通知
 - `packages/@codepapr/ui/src/store/reviewStore.ts`：代码审查状态

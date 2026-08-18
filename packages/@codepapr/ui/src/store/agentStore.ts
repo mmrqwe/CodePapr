@@ -85,6 +85,7 @@ import {
 import type { AgentRuntimeHandle } from '../agent/WorkerBackedAgent';
 import { handleWorkspaceMutation } from './internals/backgroundDiagnostics';
 import { createSendMessage, invalidateAgentHandle } from './internals/sendMessage';
+import { loadMemoryBootstrapSection } from './internals/memoryLedgerStore';
 import { buildPruneOptions } from '../agent/compactionHandler';
 import { finalizeCancelledToolInvocations } from './internals/messageMutators';
 import { useGoalStore } from './goalStore';
@@ -261,14 +262,9 @@ async function ensureAgentForAppInternal(
 
   let memorySection: string | undefined;
   try {
-    const memoryResult = await invoke<{ content: string }>('read_text_file', {
-      workspacePath,
-      relativePath: '.CodePapr/memory.md',
-      maxBytes: 50_000,
-    });
-    memorySection = memoryResult.content?.trim();
+    memorySection = await loadMemoryBootstrapSection(workspacePath);
   } catch {
-    // 无 memory.md：跳过
+    memorySection = undefined;
   }
 
   let mcpToolDefinitions: IToolDefinition[] = [];
@@ -960,14 +956,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
         let memorySection: string | undefined;
         try {
-          const memoryResult = await invoke<{ content: string }>('read_text_file', {
-            workspacePath,
-            relativePath: '.CodePapr/memory.md',
-            maxBytes: 50_000,
-          });
-          memorySection = memoryResult.content?.trim();
+          memorySection = await loadMemoryBootstrapSection(workspacePath);
         } catch {
-          // 无 memory.md：跳过
+          memorySection = undefined;
         }
 
         let mcpToolDefinitions: IToolDefinition[] = [];

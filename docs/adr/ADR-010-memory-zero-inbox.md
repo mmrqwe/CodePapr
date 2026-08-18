@@ -2,7 +2,7 @@
 
 - 状态: Accepted
 - 日期: 2026-08-17
-- 关联: ADR-008（双区投影，本 ADR 修订其「用户准入队列」）、ADR-009（Recall）
+- 关联: ADR-008（双区投影，已被 ADR-011 取代）、ADR-009（Recall）、[ADR-011](./ADR-011-retire-memory-md.md)（退役 memory.md）
 
 ## 背景
 
@@ -26,7 +26,7 @@ Claude Code MEMORY.md 都不一样：那些产品是系统自己记，人事后�
 | 输入 | 落点 | 进 Session Bootstrap？ |
 |---|---|---|
 | 用户说记住 / 必须 / 不要（短约束或显式「记住」） | preference / constraint | 是 |
-| 用户手编 memory.md User Zone | user-note | 是（User Zone 原文） |
+| 用户在记忆面板手写笔记 | user-note | 是（账本渲染进 Bootstrap） |
 | 工作区实证、冷启动摘要、测试/构建成功 | fact / convention / verification | 摘要进 managed zone |
 | 同一错误踩两次 / `category: procedure` | procedure | 否，只 Recall |
 | web / MCP / `https` evidence / `category: citation` | citation | 否，永远不当指令 |
@@ -39,6 +39,6 @@ Agent 经 `memory_write` 提出的 fact/preference 立刻 persist（`[reported]`
 ## 后果
 
 - 正常使用中用户零次被要求「准入」一条记忆。
-- `memory.md` managed zone 只投影指令 + 高价值事实；经验与引用留在 ledger。
-- Bootstrap 仍按 (session × 稳定签名) 冻结：磁盘上的新记忆**下次会话或压缩 epoch** 才进入前缀。
-- ADR-008 的双区模型、路径拦截、风险检测、密钥脱敏全部保留。
+- 记忆面板是完整目录：每次会话 / 按需召回 / 仅搜索；经验与引用不进 Bootstrap。
+- Bootstrap 仍按 (session × 稳定签名) 冻结：账本上的新记忆**下次会话或压缩 epoch** 才进入前缀。
+- 路径拦截、风险检测、密钥脱敏全部保留；`memory.md` 文件面已由 ADR-011 退役。

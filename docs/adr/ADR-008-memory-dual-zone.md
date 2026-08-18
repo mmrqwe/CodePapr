@@ -1,6 +1,6 @@
 # ADR-008: .CodePapr/memory.md 双区模型与四个写者的迁移
 
-- 状态: Amended by [ADR-010](./ADR-010-memory-zero-inbox.md)（废除用户审核队列，改为自动 persist/drop）
+- 状态: Superseded by [ADR-011](./ADR-011-retire-memory-md.md)（退役 memory.md；双区文件不再是产品面）。Amended by [ADR-010](./ADR-010-memory-zero-inbox.md)（废除用户审核队列）
 - 日期: 2026-08-16
 - 关联: ADR-001（L4 层）、ADR-010
 

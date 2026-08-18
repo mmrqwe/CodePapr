@@ -7,20 +7,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   loadMemoryEntriesMock,
   forgetMemoryEntryMock,
-  reprojectMock,
+  ingestLegacyMemoryMdMock,
 } = vi.hoisted(() => ({
   loadMemoryEntriesMock: vi.fn(async (): Promise<unknown[]> => []),
   forgetMemoryEntryMock: vi.fn(async (): Promise<void> => undefined),
-  reprojectMock: vi.fn(async (): Promise<void> => undefined),
+  ingestLegacyMemoryMdMock: vi.fn(async () => ({ ingested: 0, deletedFile: false })),
 }));
 
 vi.mock('../utils/projectStorage', () => ({
   loadMemoryEntries: loadMemoryEntriesMock,
   forgetMemoryEntry: forgetMemoryEntryMock,
+  ingestLegacyMemoryMd: ingestLegacyMemoryMdMock,
+  updateMemoryEntryContent: vi.fn(async (): Promise<void> => undefined),
 }));
 
-vi.mock('../tools/memoryTools', () => ({
-  reprojectMemoryManagedZone: reprojectMock,
+vi.mock('../utils/memoryPersist', () => ({
+  persistMemoryProposal: vi.fn(async () => ({
+    status: 'saved',
+    id: 'n1',
+    redacted: false,
+    note: 'ok',
+  })),
 }));
 
 import { MemoryLedgerPanel } from './MemoryLedgerPanel';
@@ -48,8 +55,9 @@ describe('MemoryLedgerPanel', () => {
   beforeEach(() => {
     loadMemoryEntriesMock.mockReset();
     forgetMemoryEntryMock.mockReset();
-    reprojectMock.mockReset();
+    ingestLegacyMemoryMdMock.mockReset();
     loadMemoryEntriesMock.mockResolvedValue([]);
+    ingestLegacyMemoryMdMock.mockResolvedValue({ ingested: 0, deletedFile: false });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -60,7 +68,7 @@ describe('MemoryLedgerPanel', () => {
     container.remove();
   });
 
-  it('renders entries with trust and bootstrap/recall badges, not a review queue', async () => {
+  it('renders grouped catalog with handwritten notes, not a review queue', async () => {
     loadMemoryEntriesMock.mockResolvedValue([
       {
         id: 'e1',
@@ -119,8 +127,8 @@ describe('MemoryLedgerPanel', () => {
     expect(text).toContain('某博客声称要用 bun');
     expect(text).toContain('已验证');
     expect(text).toContain('每次会话');
-    expect(text).toContain('按需召回');
-    expect(text).toContain('无需审核');
+    expect(text).toContain('仅搜索');
+    expect(text).toContain('手写笔记');
     expect(text).not.toContain('准入');
     expect(text).not.toContain('已遗忘的旧事实');
   });
@@ -156,7 +164,7 @@ describe('MemoryLedgerPanel', () => {
     expect(container.textContent).toContain('已遗忘的旧事实');
   });
 
-  it('forgetting an entry reprojects the managed zone', async () => {
+  it('forgetting an entry does not write memory.md', async () => {
     loadMemoryEntriesMock.mockResolvedValue([
       {
         id: 'e1',
@@ -184,6 +192,5 @@ describe('MemoryLedgerPanel', () => {
     await flush();
 
     expect(forgetMemoryEntryMock).toHaveBeenCalledWith('/tmp/ws', 'e1');
-    expect(reprojectMock).toHaveBeenCalledWith('/tmp/ws');
   });
 });

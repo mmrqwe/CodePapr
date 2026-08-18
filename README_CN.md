@@ -19,7 +19,7 @@ CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主
 | **Ask / Plan / Agent / App 四种模式** | 同一个 Runtime，从解释到执行再到交互式应用生成 |
 | **多 Agent 协作** | 主 Agent 通过 `task` 工具调度 Explore/Scout/Mentor 及自定义子代理 |
 | **TodoList 任务规划** | Agent 自动创建并跟踪任务清单，支持进度汇报与重规划 |
-| **项目记忆（零审核）** | 偏好、约束与已验证事实自动写入。短指令进每次会话的 Bootstrap，踩坑经验按回合 Recall，网页引用只进搜索。`.CodePapr/memory.md` 是 SQLite 账本的双区投影。 |
+| **项目记忆（零审核）** | 偏好、约束与已验证事实自动写入。短指令进每次会话的 Bootstrap，踩坑经验按回合 Recall，网页引用只进搜索。记忆面板是 SQLite 账本上唯一给人看的面。 |
 | **代码智能（LSP + AST）** | `lsp` 工具 9 个导航 action（跳转定义、引用、hover、文件/工作区符号、实现、调用层级），LSP 优先并自动降级 AST 项目图（结果带 source/confidence）；`list` 浏览目录树并附带逐文件轻量符号。ProjectGraph（UI 侧）另支持死代码检测、循环依赖、重构建议等 |
 | **DeepSeek 前缀缓存优化** | 三层提示词注入策略，最大化缓存命中降低成本 |
 | **SEARCH/REPLACE Diff** | 先校验再写入，支持原子性多文件 patch |
@@ -96,7 +96,7 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 | 文件/目录 | 用途 |
 |-----------|------|
 | `.CodePapr/AGENTS.md` | 全项目规则，注入所有 Agent 和子代理的系统提示词 |
-| `.CodePapr/memory.md` | 跨会话项目记忆的双区投影（手写 User Zone + 自动 Managed Zone）；权威在 SQLite 账本 |
+| `.CodePapr/project.sqlite`（`memory_entries`） | 跨会话项目记忆（面板为唯一给人看的面；Bootstrap 从账本渲染） |
 | `.CodePapr/agents/*.md` | 自定义子代理（YAML frontmatter + Markdown 正文） |
 | `.CodePapr/skills/*/SKILL.md` | 可复用技能（搜索策略、排错流程、发布检查）；也支持平铺布局 `.CodePapr/skills/<name>.md`；技能市场一键安装 GitHub 技能 |
 | `.CodePapr/commands/*.md` | 自定义提示词模板（`--name` 调用） |

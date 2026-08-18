@@ -41,6 +41,7 @@ import {
   toWorkerAgentSettings,
 } from './providerFactory';
 import { resolveMultimodalEnabled, resolveProviderName } from './settingsNormalizer';
+import { loadMemoryBootstrapSection } from './memoryLedgerStore';
 import { getActiveCharacterPrompt } from '../charactersStore';
 import {
   buildAgentSessionBootstrapPrompt,
@@ -93,10 +94,10 @@ function buildToolContextConfig(settings: Settings): ToolContextConfig {
 }
 
 /**
- * Build a callback that re-reads memory.md from disk and rebuilds the session
- * bootstrap with fresh content. Used by mid-loop context compaction to refresh
- * memory at epoch boundaries (the epoch resets anyway, so no extra cache break).
- * Returns null when memory cannot be read and no bootstrap can be produced.
+ * Build a callback that re-renders session bootstrap from the memory ledger.
+ * Used by mid-loop context compaction to refresh memory at epoch boundaries
+ * (the epoch resets anyway, so no extra cache break).
+ * Returns null when no bootstrap can be produced.
  */
 function buildBootstrapRefresher(
   settings: Settings,
@@ -104,17 +105,7 @@ function buildBootstrapRefresher(
   runtime: AgentRuntimeConfig
 ): () => Promise<string | null> {
   return async () => {
-    let memorySection: string | undefined;
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const memoryResult = await invoke<{ path: string; content: string; bytes: number }>(
-        'read_text_file',
-        { workspacePath, relativePath: '.CodePapr/memory.md', maxBytes: 50_000 }
-      );
-      memorySection = memoryResult.content?.trim() || undefined;
-    } catch {
-      memorySection = undefined;
-    }
+    const memorySection = await loadMemoryBootstrapSection(workspacePath);
     const bootstrap = buildAgentSessionBootstrapPrompt(
       settings,
       workspacePath,
@@ -132,7 +123,7 @@ export interface AgentRuntimeConfig {
   memorySection?: string;
   projectGraphSummary?: string;
   /** 已按 session 记忆化（冻结）的会话引导，含 skills/memory/project-graph/custom。
-   *  优先用它注入 log[0]，兑现 memory.md「每次会话自动加载」；缺省时回退到仅 skills+custom。 */
+   *  优先用它注入 log[0]，兑现账本记忆每次会话自动加载；缺省时回退到仅 skills+custom。 */
   sessionBootstrapPrompt?: string;
   lang?: Lang;
   /** 当前工作模式：ask/plan 会在注册层屏蔽变更类工具。缺省 agent。 */

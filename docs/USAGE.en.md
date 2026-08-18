@@ -243,24 +243,24 @@ The toolbar search box supports **conversation search** and **file search**, swi
 
 ## Project Memory (zero-review auto-write)
 
-Project memory is not “one `memory.md` dumped into the model”. The ledger in SQLite `memory_entries` is authoritative; `.CodePapr/memory.md` is a dual-zone projection. Different kinds of memory enter **different context layers** and change on different clocks.
+Project memory is not “dumped into the model as one blob”. The ledger in SQLite `memory_entries` is authoritative; the memory panel is the only human surface. Different kinds of memory enter **different context layers** and change on different clocks. There is no standalone `memory.md`.
 
 | Kind | Stored in | Request layer | When it reaches this session’s model | How it changes |
 |---|---|---|---|---|
-| Hand-written notes | `memory.md` User Zone | Session Bootstrap (stable prefix) | Read at session start; refreshed on a compaction epoch | Your file edit hits disk immediately; **the current prefix is not rebuilt** until the next session or compaction |
-| Preferences / constraints / project facts | ledger → Managed Zone | Same, Bootstrap | Same: written to disk this turn, enters the prefix on the **next Bootstrap refresh** | You said remember / must / don't; workspace-grounded facts; successful tests; cold start; Agent `memory_write` → persist immediately, no admit click |
-| Procedures (`procedure`) | ledger, **not** Managed Zone | Turn-scoped Recall / `memory_search` | **Next user turn** after save, if retrieval hits | Same error twice, etc.; never in the every-session prefix |
-| Web / MCP citations (`citation`) | ledger, not Managed Zone | `memory_search` only | Only if the model searches | web / MCP / `https` evidence; **never Bootstrap; auto-Recall skips them** |
+| Hand-written notes | Ledger; panel “every session” | Session Bootstrap (stable prefix) | Rendered from the ledger at session start; refreshed on a compaction epoch | A panel edit hits the ledger immediately; **the current prefix is not rebuilt** until the next session or compaction |
+| Preferences / constraints / project facts | Ledger; panel “every session” | Same, Bootstrap | Same: written to the ledger this turn, enters the prefix on the **next Bootstrap refresh** | You said remember / must / don't; workspace-grounded facts; successful tests; cold start; Agent `memory_write` → persist immediately, no admit click |
+| Procedures (`procedure`) | Ledger; panel “on-demand” | Turn-scoped Recall / `memory_search` | **Next user turn** after save, if retrieval hits | Same error twice, etc.; never in the every-session prefix |
+| Web / MCP citations (`citation`) | Ledger; panel “search only” | `memory_search` only | Only if the model searches | web / MCP / `https` evidence; **never Bootstrap; auto-Recall skips them** |
 | Current-task goal / todos | Session Checkpoint | Session State | After compaction, as the checkpoint | Evolves with the epoch; **not** cross-session project memory |
 | Large tool output | `.CodePapr/tool-output/` | Not auto-injected | `read_artifact` on demand | Frozen at write time |
 
-**Writes (zero review)**: `planMemoryWrite` either persists or drops. The panel is a catalog (every-session vs on-demand badges, forget) — no admit queue. The Agent must not ask you to confirm memories. Injection, secrets, and dangerous commands are dropped. Direct `write`/`patch` of `memory.md` is intercepted onto the same policy.
+**Writes (zero review)**: `planMemoryWrite` either persists or drops. The panel is a full catalog (every-session / on-demand / search-only, forget) — no admit queue. The Agent must not ask you to confirm memories. Injection, secrets, and dangerous commands are dropped. If the Agent still `write`s/`patch`es `.CodePapr/memory.md`, it is intercepted onto the same policy and never written to disk.
 
-**Load and cache**: At session start, `memory.md` (≤50KB) is injected into Session Bootstrap (`log[0]`, `isPrefixSystem`), frozen per (session × stable signature). `memory.md` is outside the signature, so newly saved memories **do not bust the current prefix cache**. Compaction epochs refresh via `refreshBootstrap`; a new session always re-reads. Each user turn also runs Recall (citations excluded from automatic Recall).
+**Load and cache**: At session start, the ledger is rendered into Session Bootstrap (`log[0]`, `isPrefixSystem`), frozen per (session × stable signature). The rendered section is outside the signature, so newly saved memories **do not bust the current prefix cache**. Compaction epochs refresh via `refreshBootstrap`; a new session always re-reads the ledger. Each user turn also runs Recall (citations excluded from automatic Recall).
 
-**Cold start**: If `memory.md` is empty and a ProjectGraph cache exists, a background job writes a structure / stack / build-command summary into the ledger and projects it. It does not block the current session; it enters Bootstrap on the next session or compaction.
+**Cold start**: If the ledger has no Bootstrap section and a ProjectGraph cache exists, a background job writes a structure / stack / build-command summary into the ledger. It does not block the current session; it enters Bootstrap on the next session or compaction.
 
-**Auto-consolidation**: When the projection file exceeds 200 lines, three triggers (session start / successful compaction / after a reply) run the fast model to dedupe and merge, with a rule-based fallback. Fire-and-forget; it rewrites the projection, it does not replace the ledger policy.
+**Dedup**: Same-hash active rows are superseded. There is no LLM pass over a standalone memory file.
 
 ## Code Intelligence (lsp / list)
 
@@ -437,7 +437,7 @@ If the Agent goes off track, hover the previous correct user message and click "
 | --- | --- |
 | `~/.codepapr/codepapr.sqlite` | Application-level settings |
 | `<workspace>/.CodePapr/project.sqlite` | Project-level state, chat history, cache stats |
-| `<workspace>/.CodePapr/memory.md` | Dual-zone projection of cross-session project memory (hand-written User Zone + auto Managed Zone) |
+| `<workspace>/.CodePapr/project.sqlite` `memory_entries` | Cross-session project memory (panel is the only human surface; Bootstrap is rendered from the ledger) |
 | `<workspace>/.CodePapr/store` | Project-level text records |
 | `<workspace>/.CodePapr/skills` | Project-level skill files |
 | `<workspace>/.CodePapr/agents` | Project-level custom sub-agents |
