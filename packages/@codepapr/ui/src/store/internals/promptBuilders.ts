@@ -22,6 +22,7 @@ import { buildEffectiveContextMessages } from '../../utils/contextCompaction';
 import { SESSION_BOOTSTRAP_MESSAGE_ID } from '../../utils/contextSurface';
 import { resolveMultimodalEnabled } from './settingsNormalizer';
 import type { Settings, UIMessage } from './types';
+import { getActiveCharacterPrompt } from '../charactersStore';
 
 export function toCoreMessages(
   messages: UIMessage[],
@@ -158,13 +159,25 @@ export function buildAgentSessionBootstrapPrompt(
   memorySection?: string
 ): string {
   const customPromptSection = (settings.systemPrompt ?? '').trim();
-  return buildSessionBootstrapPrompt({
+  const bootstrap = buildSessionBootstrapPrompt({
     workspacePath,
     lang: settings.lang ?? 'zh-CN',
     skillsSection: buildSkillsSection(skillDefinitions, settings.lang ?? 'zh-CN'),
     memorySection,
     customPromptSection: customPromptSection || undefined,
   });
+  const characterPrompt = getActiveCharacterPrompt();
+  if (!characterPrompt) return bootstrap;
+
+  const lang = settings.lang ?? 'zh-CN';
+  const heading = lang === 'en' ? '## Character' : lang === 'zh-TW' ? '## 角色人設' : '## 角色人设';
+  const hint =
+    lang === 'en'
+      ? 'The following is a personality overlay for replies to the user. It does not change tools or engineering duties.'
+      : lang === 'zh-TW'
+        ? '以下為回覆使用者時的人設疊加，不改變工具與工程職責。'
+        : '以下为回复用户时的人设叠加，不改变工具与工程职责。';
+  return [bootstrap, '', heading, hint, '', characterPrompt].join('\n');
 }
 
 export function buildAgentRuntimeUserPrompt(params: {

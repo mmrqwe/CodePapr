@@ -385,9 +385,9 @@ Create, import, and activate AI personas so the Agent speaks to you with a speci
 
 **Exporting character cards:** Export characters as PNG cards for cross-tool use.
 
-**Activating a character:** Click the character name in the character list to activate. The character's profile is injected into the LLM system prompt, and the Agent responds with the character's identity, tone, and style. The character profile is in the Session Bootstrap, so switching characters does not break DeepSeek caching.
+**Activating a character:** Click Enable on the character editor. The profile is injected into the Session Bootstrap (not ImmutablePrefix), so switching characters does not break the DeepSeek system-prefix cache. Default is a coding persona: the character colors tone while still writing code and using tools. Switch to Roleplay in the character panel for stage-play format.
 
-**Roleplay format convention:**
+**Roleplay format convention (roleplay mode only):**
 - `*Asterisk-wrapped text*` → Actions/narration/scene description (not spoken by TTS)
 - Plain text → Character dialogue (spoken by TTS)
 - `**Bold text**` → Emphasis/stress (spoken with extra stress)

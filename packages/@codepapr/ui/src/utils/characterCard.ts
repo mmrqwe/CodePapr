@@ -1,6 +1,8 @@
 import {
   type CharacterProfile,
+  type CharacterInteractionMode,
   createCharacterId,
+  resolveCharacterInteractionMode,
 } from './characterTypes';
 
 const PNG_SIGNATURE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -165,6 +167,20 @@ export async function importCharacterCardFromFile(file: File): Promise<Character
   return normalizeCharacterCard(raw, avatarDataUrl);
 }
 
+function readCodepaprInteractionMode(
+  raw: Record<string, unknown>,
+  data: Record<string, unknown>
+): CharacterInteractionMode {
+  for (const ext of [data.extensions, raw.extensions]) {
+    if (!ext || typeof ext !== 'object' || Array.isArray(ext)) continue;
+    const cp = (ext as Record<string, unknown>).codepapr;
+    if (!cp || typeof cp !== 'object' || Array.isArray(cp)) continue;
+    const mode = (cp as Record<string, unknown>).interactionMode;
+    if (mode === 'roleplay' || mode === 'persona') return mode;
+  }
+  return 'persona';
+}
+
 export function normalizeCharacterCard(
   raw: Record<string, unknown>,
   avatarDataUrl: string | null
@@ -186,6 +202,7 @@ export function normalizeCharacterCard(
     id: createCharacterId(),
     name,
     avatarDataUrl,
+    interactionMode: readCodepaprInteractionMode(raw, data),
     description: readString(data.description),
     personality: readString(data.personality),
     scenario: readString(data.scenario),
@@ -220,6 +237,11 @@ export function buildCharacterCardSpec(character: CharacterProfile): Record<stri
       creator: character.creator,
       character_version: character.characterVersion,
       tags: character.tags,
+      extensions: {
+        codepapr: {
+          interactionMode: resolveCharacterInteractionMode(character),
+        },
+      },
     },
   };
 }

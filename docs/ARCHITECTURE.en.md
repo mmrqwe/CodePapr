@@ -281,17 +281,17 @@ Resolution: `effective = manifest_access ∩ per-app override` (overrides can on
 
 ### 5.1 Character Roleplay
 
-The character system allows users to create, import, and activate AI personas. When activated, a character's profile is injected into the LLM system prompt.
+The character system allows users to create, import, and activate AI personas. When activated, the profile is injected into the Session Bootstrap, not the ImmutablePrefix, so switching characters does not break the system-prefix cache.
 
-**CharacterProfile data model:** name, avatar, description, personality, scenario, first message, example messages, system prompt, tags, creator, version.
+**CharacterProfile data model:** name, avatar, description, personality, scenario, first message, example messages, system prompt, tags, creator, version, interaction mode (coding persona / roleplay).
 
 **Core capabilities:**
 - **Manual creation**: Fill in name, description, personality, scenario, first message, example dialog, etc.
 - **Import character cards**: Supports PNG (embedded chara-card-v3 JSON) and JSON file imports; compatible with SillyTavern and other tools using the CCv3 spec
 - **Export character cards**: Export characters as PNG cards with JSON embedded in tEXt/iTXt chunks
-- **Activate character**: When activated, the character's profile is injected via `buildCharacterSystemPrompt()` into the Session Bootstrap, **not** the ImmutablePrefix (preserving cache)
+- **Activate character**: When activated, the character's profile is injected via `buildCharacterSystemPrompt()` into the Session Bootstrap, **not** the ImmutablePrefix (preserving cache). Default is **coding persona**: voice and attitude only, tools and reply format unchanged. Optional **roleplay**: stage-play format for chat and TTS.
 
-**Roleplay format convention:** The system prompt instructs the LLM to wrap actions/narration in `*single asterisks*` (not spoken), keep spoken dialogue as plain text (read aloud), use `**double asterisks**` for emphasis (spoken with stress), and use `(parenthetical)` tone indicators like `(whispering)` (not spoken).
+**Roleplay format convention (roleplay mode only):** Wrap actions/narration in `*single asterisks*` (not spoken), keep spoken dialogue as plain text (read aloud), use `**double asterisks**` for emphasis, and use `(parenthetical)` tone indicators (not spoken). Coding-persona mode does not inject this format.
 
 ### 5.2 Text-to-Speech (TTS)
 
@@ -902,7 +902,8 @@ never enter the persistence layer. Code upgrades change bytes → one-time cache
 
 - `packages/@codepapr/core/src/agent/Agent.ts`: Core tool loop and session execution entry point
 - `packages/@codepapr/core/src/agent/Session.ts`: Session object and partition aggregation
-- `packages/@codepapr/core/src/agent/promptSystem.ts`: Three-layer prompt assembly + MODE_INTROS + character profile injection
+- `packages/@codepapr/core/src/agent/promptSystem.ts`: Three-layer prompt assembly + MODE_INTROS
+- `packages/@codepapr/ui/src/store/internals/promptBuilders.ts`: Session Bootstrap assembly (including character profile)
 - `packages/@codepapr/core/src/agent/todoList.ts`: TodoList core logic
 - `packages/@codepapr/core/src/agent/agentConfig.ts`: BUILTIN_AGENTS definition
 - `packages/@codepapr/core/src/cache/`: Three-partition cache core (`AppendOnlyLog.reset` used by compaction to start a new epoch)

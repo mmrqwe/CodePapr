@@ -11,6 +11,7 @@ import { buildProviderInstance } from '../store/internals/providerFactory';
 import { resolveProviderName } from '../store/internals/settingsNormalizer';
 import {
   type CharacterProfile,
+  type CharacterInteractionMode,
   type VoiceConfig,
   createEmptyCharacter,
 } from '../utils/characterTypes';
@@ -660,6 +661,35 @@ Requirements:
                     placeholder={t.characterNamePlaceholder}
                     className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
                   />
+                </FieldRow>
+
+                <FieldRow label={t.characterInteractionMode}>
+                  <div className="flex gap-2">
+                    {(['persona', 'roleplay'] as CharacterInteractionMode[]).map((mode) => {
+                      const active = (editing.interactionMode ?? 'persona') === mode;
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => updateField({ interactionMode: mode })}
+                          className={`flex-1 rounded-lg border px-3 py-2 text-left transition-colors ${
+                            active
+                              ? 'border-accent-soft bg-accent-soft text-accent-text'
+                              : 'border-line text-fg-muted hover:text-fg'
+                          }`}
+                        >
+                          <div className="text-xs font-medium">
+                            {mode === 'persona' ? t.characterInteractionPersona : t.characterInteractionRoleplay}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-fg-muted">
+                    {(editing.interactionMode ?? 'persona') === 'persona'
+                      ? t.characterInteractionPersonaDesc
+                      : t.characterInteractionRoleplayDesc}
+                  </p>
                 </FieldRow>
 
                 <div className="grid gap-4 xl:grid-cols-2">

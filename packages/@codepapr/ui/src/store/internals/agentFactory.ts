@@ -42,7 +42,6 @@ import {
 } from './providerFactory';
 import { resolveMultimodalEnabled, resolveProviderName } from './settingsNormalizer';
 import { loadMemoryBootstrapSection } from './memoryLedgerStore';
-import { getActiveCharacterPrompt } from '../charactersStore';
 import {
   buildAgentSessionBootstrapPrompt,
   createLogFromMessages,
@@ -122,7 +121,7 @@ export interface AgentRuntimeConfig {
   customPrompt?: string;
   memorySection?: string;
   projectGraphSummary?: string;
-  /** 已按 session 记忆化（冻结）的会话引导，含 skills/memory/project-graph/custom。
+  /** 已按 session 记忆化（冻结）的会话引导，含 skills/memory/character/custom。
    *  优先用它注入 log[0]，兑现账本记忆每次会话自动加载；缺省时回退到仅 skills+custom。 */
   sessionBootstrapPrompt?: string;
   lang?: Lang;
@@ -285,14 +284,6 @@ export function buildUiTaskToolContext(
   }
   const mode: PromptMode = runtime.mode ?? 'agent';
   const onWorkspaceMutated = runtime.onWorkspaceMutated ?? defaultOnWorkspaceMutatedResolver();
-  const characterPrompt = getActiveCharacterPrompt();
-  const customPromptWithCharacter = [
-    runtime.customPrompt ?? settings.systemPrompt,
-    characterPrompt,
-  ]
-    .map((part) => part?.trim() ?? '')
-    .filter((part) => part.length > 0)
-    .join('\n\n');
 
   const baseModel = (overrides.model ?? settings.model).trim();
   const provider = buildProviderInstance(settings);
@@ -336,7 +327,10 @@ export function buildUiTaskToolContext(
     fastModel: settings.fastModel,
     maxToolRounds: settings.maxToolRounds,
     rulesSection: runtime.rulesSection ?? '',
-    customPrompt: runtime.customPrompt ? runtime.customPrompt : customPromptWithCharacter,
+    // Character persona is for the primary agent talking to the user.
+    // Explore/scout must stay neutral workers; the main agent can still
+    // present their results in character.
+    customPrompt: runtime.customPrompt ?? settings.systemPrompt,
     memorySection: runtime.memorySection,
     projectGraphSummary: runtime.projectGraphSummary,
     lang: runtime.lang ?? settings.lang,
@@ -394,13 +388,7 @@ export function buildAgentSessionParts(
   const sessionBootstrapPrompt =
     runtime.sessionBootstrapPrompt ??
     buildAgentSessionBootstrapPrompt(settings, workspacePath, runtime.skillDefinitions ?? []);
-  const characterPrompt = getActiveCharacterPrompt();
-  const composedSystemPrompt = [
-    (overrides.systemPrompt ?? settings.systemPrompt).trim(),
-    characterPrompt,
-  ]
-    .filter((part) => part.length > 0)
-    .join('\n\n');
+  const composedSystemPrompt = (overrides.systemPrompt ?? settings.systemPrompt).trim();
   registerWorkspaceTools(toolRegistry, workspacePath, runtime.editHistory, (paths) => {
     onWorkspaceMutated(paths);
   }, {
@@ -526,19 +514,7 @@ export function createAgent(
 ): AgentRuntimeHandle {
   const onWorkspaceMutated = runtime.onWorkspaceMutated ?? defaultOnWorkspaceMutatedResolver();
   const baseModel = (overrides.model ?? settings.model).trim();
-  const characterPrompt = getActiveCharacterPrompt();
-  const baseSystemPrompt = (overrides.systemPrompt ?? settings.systemPrompt).trim();
-  const systemPrompt = [baseSystemPrompt, characterPrompt]
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0)
-    .join('\n\n');
-  const customPromptWithCharacter = [
-    runtime.customPrompt ?? settings.systemPrompt,
-    characterPrompt,
-  ]
-    .map((part) => part?.trim() ?? '')
-    .filter((part) => part.length > 0)
-    .join('\n\n');
+  const systemPrompt = (overrides.systemPrompt ?? settings.systemPrompt).trim();
   const sessionBootstrapPrompt =
     runtime.sessionBootstrapPrompt ??
     buildAgentSessionBootstrapPrompt(settings, workspacePath, runtime.skillDefinitions ?? []);
@@ -565,7 +541,7 @@ export function createAgent(
         runtime: {
           editHistory: runtime.editHistory,
           rulesSection: runtime.rulesSection,
-          customPrompt: runtime.customPrompt ? runtime.customPrompt : customPromptWithCharacter,
+          customPrompt: runtime.customPrompt ?? settings.systemPrompt,
           memorySection: runtime.memorySection,
           lang: runtime.lang ?? settings.lang,
           mode: runtime.mode,

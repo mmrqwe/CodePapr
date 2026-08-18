@@ -35,8 +35,13 @@ function buildStateFile(state: CharacterState): CharactersStateFile {
 // written to disk. A failed save is surfaced to the user rather than letting
 // in-memory state silently diverge from what is persisted.
 let saveChain: Promise<void> = Promise.resolve();
+let loadInFlight: Promise<void> | null = null;
 
 function persistState(state: CharacterState): Promise<void> {
+  if (!state.loaded) {
+    toast.error('角色数据尚未加载成功，已跳过保存以免覆盖已有角色卡。');
+    return Promise.resolve();
+  }
   const file = buildStateFile(state);
   saveChain = saveChain.then(() =>
     saveCharactersState(file).catch((err) => {
@@ -58,25 +63,35 @@ export const useCharactersStore = create<CharacterState & CharacterActions>((set
   characters: [],
   activeCharacterId: null,
   loadCharacters: async () => {
-    if (get().loaded || get().loading) return;
-    set({ loading: true });
-    try {
-      const file = await loadCharactersState();
-      set({
-        loaded: true,
-        loading: false,
-        characters: file.characters,
-        activeCharacterId: file.activeCharacterId,
-      });
-    } catch (err) {
-      console.warn('Failed to load characters:', err);
-      // Leave `loaded` false so a later invocation (e.g. reopening the
-      // characters modal) retries instead of being permanently blocked by a
-      // transient failure.
-      set({ loaded: false, loading: false });
-    }
+    if (get().loaded) return;
+    if (loadInFlight) return loadInFlight;
+    loadInFlight = (async () => {
+      set({ loading: true });
+      try {
+        const file = await loadCharactersState();
+        set({
+          loaded: true,
+          loading: false,
+          characters: file.characters,
+          activeCharacterId: file.activeCharacterId,
+        });
+      } catch (err) {
+        console.warn('Failed to load characters:', err);
+        toast.error('角色数据加载失败，已停止写入以免覆盖已有角色卡。');
+        // Leave `loaded` false so a later invocation retries, and so persist
+        // refuses to write an empty snapshot over disk.
+        set({ loaded: false, loading: false });
+      } finally {
+        loadInFlight = null;
+      }
+    })();
+    return loadInFlight;
   },
   upsertCharacter: async (character) => {
+    if (!get().loaded) {
+      await get().loadCharacters();
+    }
+    if (!get().loaded) return;
     // Functional update: compute `next` from the latest committed state so
     // two rapid upserts cannot lose one another's writes (the previous
     // read-then-set captured a stale snapshot).
@@ -91,6 +106,10 @@ export const useCharactersStore = create<CharacterState & CharacterActions>((set
     await persistState(get());
   },
   deleteCharacter: async (characterId) => {
+    if (!get().loaded) {
+      await get().loadCharacters();
+    }
+    if (!get().loaded) return;
     set((state) => ({
       characters: state.characters.filter((c) => c.id !== characterId),
       activeCharacterId: state.activeCharacterId === characterId ? null : state.activeCharacterId,
@@ -98,6 +117,10 @@ export const useCharactersStore = create<CharacterState & CharacterActions>((set
     await persistState(get());
   },
   setActiveCharacter: async (characterId) => {
+    if (!get().loaded) {
+      await get().loadCharacters();
+    }
+    if (!get().loaded) return;
     set({ activeCharacterId: characterId });
     await persistState(get());
   },

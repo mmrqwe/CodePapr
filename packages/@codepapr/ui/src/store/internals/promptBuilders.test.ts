@@ -49,7 +49,7 @@ describe('buildAgentSessionBootstrapPrompt', () => {
     expect(bootstrap).toContain('some memory');
   });
 
-  it('does NOT inject the active character description (character lives in the prefix system prompt)', () => {
+  it('injects the active character description into the bootstrap, not the prefix', () => {
     const character = makeCharacter();
     useCharactersStore.setState({
       characters: [character],
@@ -60,8 +60,9 @@ describe('buildAgentSessionBootstrapPrompt', () => {
     const bootstrap = buildAgentSessionBootstrapPrompt(settings, '/tmp/ws', [], 'some memory');
 
     expect(bootstrap).toContain('CUSTOM_SYS_PROMPT_MARKER');
-    expect(bootstrap).not.toContain('UNIQUE_CHAR_DESCRIPTION_MARKER');
-    expect(bootstrap).not.toContain('roleplaying as the character');
+    expect(bootstrap).toContain('UNIQUE_CHAR_DESCRIPTION_MARKER');
+    expect(bootstrap).toContain('Work in the voice of');
+    expect(bootstrap).toContain('## 角色人设');
   });
 
   it('omits the custom guidance section entirely when system prompt is empty', () => {
@@ -88,6 +89,21 @@ function makeRuntimeSettings(overrides: Partial<Settings> = {}): Settings {
 }
 
 describe('buildAgentRuntimeSystemPrompt', () => {
+  afterEach(() => {
+    useCharactersStore.setState({ characters: [], activeCharacterId: null });
+  });
+
+  it('keeps the active character out of the runtime system prompt', () => {
+    const character = makeCharacter();
+    useCharactersStore.setState({
+      characters: [character],
+      activeCharacterId: character.id,
+    });
+    const prompt = buildAgentRuntimeSystemPrompt(makeRuntimeSettings(), 'agent', '/tmp/ws');
+    expect(prompt).not.toContain('UNIQUE_CHAR_DESCRIPTION_MARKER');
+    expect(prompt).not.toContain('Work in the voice of');
+  });
+
   it('omits the read_image hint when multimodal is disabled', () => {
     const settings = makeRuntimeSettings({ multimodalEnabled: false });
     const prompt = buildAgentRuntimeSystemPrompt(settings, 'agent', '/tmp/ws');
