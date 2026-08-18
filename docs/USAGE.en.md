@@ -318,7 +318,7 @@ Skills are reusable playbooks for the main Agent, placed under `.CodePapr/skills
 
 They do not create sub-agents at runtime; instead they serve as project-level context the model can choose from. Only name + description are injected into stable context; full content is loaded on demand via the `skill` tool (max 500KB). Default includes a `search` Skill (search strategy). Enable/disable state is saved in `.CodePapr/project.sqlite`.
 
-**Skill Marketplace**: The desktop app includes a built-in skill marketplace that pulls listings from GitHub (`zerone-agent/agent-use-skills`), supporting one-click install into the project. Installed skills are tracked in `skills-lock.json` (with SHA-256 checksums).
+**Skill Marketplace**: The desktop app includes a built-in skill marketplace that pulls listings from GitHub (`zerone-agent/agent-use-skills`), supporting one-click install into the project. Installed skills are tracked in `.CodePapr/skills-lock.json` (listing id, written Skill paths, SHA-256). Plugin packs record their sub-skill directories; deleting a local Skill removes it from the lock file.
 
 ### Custom Chat Commands
 

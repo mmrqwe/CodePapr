@@ -42,6 +42,7 @@ describe('ProjectConfigModal', () => {
   let container: HTMLDivElement;
   let root: Root;
   let projectStateJson: string;
+  let skillsLockJson: string;
 
   beforeEach(() => {
     projectStateJson = JSON.stringify({
@@ -61,6 +62,21 @@ describe('ProjectConfigModal', () => {
       projectDiagnosticsReport: null,
       updatedAt: Date.now(),
     });
+    skillsLockJson = JSON.stringify({
+      version: 1,
+      skills: {
+        search: {
+          listingId: 'search',
+          listingName: 'search',
+          source: 'zerone-agent/agent-use-skills',
+          sourceType: 'github',
+          sourceRepo: 'https://github.com/zerone-agent/agent-use-skills',
+          skillIds: ['search'],
+          files: { '.CodePapr/skills/search/SKILL.md': 'abc' },
+          installedAt: 1,
+        },
+      },
+    });
     invokeMock.mockReset();
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       if (command === 'read_text_file') {
@@ -74,6 +90,9 @@ describe('ProjectConfigModal', () => {
             content: '---\ndescription: 搜索资料\n---\n优先查官方文档。',
             bytes: 32,
           };
+        }
+        if (relativePath === '.CodePapr/skills-lock.json') {
+          return { path: relativePath, content: skillsLockJson, bytes: skillsLockJson.length };
         }
         if (relativePath === '.CodePapr/commands/ship.md') {
           return {
@@ -123,6 +142,9 @@ describe('ProjectConfigModal', () => {
         command === 'delete_workspace_file' ||
         command === 'delete_workspace_dir'
       ) {
+        if (command === 'write_text_file' && args?.relativePath === '.CodePapr/skills-lock.json') {
+          skillsLockJson = String(args?.content ?? skillsLockJson);
+        }
         return true;
       }
       throw new Error(`Unexpected command: ${command}`);
@@ -243,6 +265,7 @@ describe('ProjectConfigModal', () => {
         .find((button) => button.textContent === '删除')
         ?.click();
     });
+    await flushEffects();
 
     expect(
       invokeMock.mock.calls.some(
@@ -251,6 +274,7 @@ describe('ProjectConfigModal', () => {
           args?.relativePath === '.CodePapr/skills/search'
       )
     ).toBe(true);
+    expect(skillsLockJson).not.toContain('"search"');
   });
 
   it('lists project slash commands on the Commands tab', async () => {

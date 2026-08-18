@@ -357,7 +357,7 @@ Skill 是主 Agent 的可复用操作手册，放在 `.CodePapr/skills/` 下，�
 
 运行时不创建子代理，而是作为项目级上下文供模型按需选择。仅 name + description 注入稳定上下文，完整内容通过 `skill` 工具按需加载（上限 500KB）。默认包含 `search` Skill（搜索策略）。启用状态保存在 `.CodePapr/project.sqlite`。
 
-**技能市场**：桌面端内置技能市场，从 GitHub（`zerone-agent/agent-use-skills`）拉取技能列表，支持一键安装到项目。已安装技能记录在 `skills-lock.json` 中（含 SHA-256 校验）。
+**技能市场**：桌面端内置技能市场，从 GitHub（`zerone-agent/agent-use-skills`）拉取技能列表，支持一键安装到项目。已安装技能记录在 `.CodePapr/skills-lock.json` 中（listing id、实际写入的 Skill 路径、SHA-256）。插件包按子 Skill 目录登记，删除本地 Skill 时会从锁文件里剔除。
 
 ### 自定义聊天命令
 

@@ -11,6 +11,7 @@ import { useAgentStore } from '../store/agentStore';
 import { MonacoTextEditor } from './MonacoTextEditor';
 import { getTranslation, type Lang } from '../utils/i18n';
 import { loadProjectState, saveProjectState } from '../utils/projectStorage';
+import { loadSkillsLock, pruneSkillFromLock, saveSkillsLock } from '../utils/skillsLock';
 
 interface ProjectConfigModalProps {
   workspacePath: string;
@@ -671,6 +672,11 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
         workspacePath,
         relativePath: deletePath,
       });
+      const currentLock = await loadSkillsLock(invoke, workspacePath);
+      const nextLock = pruneSkillFromLock(currentLock, selectedSkill.id);
+      if (nextLock !== currentLock) {
+        await saveSkillsLock(invoke, workspacePath, nextLock);
+      }
       await persistSkillEnabled(selectedSkill.id, null);
       await afterProjectConfigChanged([deletePath]);
       setStatus(t.projectConfigSkillDeleted);

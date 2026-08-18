@@ -4,6 +4,19 @@ import { useAgentStore } from '../store/agentStore';
 import { fetchSkillListings, searchSkills } from '../tools/marketSkillApi';
 import type { SkillMarketListing } from '../utils/marketSkillTypes';
 import type { Lang } from '../utils/i18n';
+import {
+  buildLockEntry,
+  collectDefinitionIds,
+  collectOverwriteCandidates,
+  emptySkillsLock,
+  isSkillListingInstalled,
+  listExistingSkillPaths,
+  loadSkillsLock,
+  saveSkillsLock,
+  skillMarkdownPath,
+  upsertLockEntry,
+  type SkillsLockFile,
+} from '../utils/skillsLock';
 
 const SKILL_BASE_URL = 'https://raw.githubusercontent.com/zerone-agent/agent-use-skills/main/awesome-skills/skills';
 
@@ -469,49 +482,35 @@ async function discoverRepoDirFiles(repoPath: string, dirPath: string): Promise<
   }
 }
 
-async function downloadDirToWorkspace(
+type PlannedFile = { relativePath: string; content: string };
+
+async function collectDirFiles(
   repoPath: string,
   repoDir: string,
   targetDir: string,
-  invokeFn: typeof invoke,
-  workspacePath: string,
-): Promise<number> {
+): Promise<PlannedFile[]> {
   const files = await discoverRepoDirFiles(repoPath, repoDir);
-  let count = 0;
+  const planned: PlannedFile[] = [];
   for (const file of files) {
     const content = await tryFetchText(
       `https://raw.githubusercontent.com/${repoPath}/main/${repoDir}/${file}`
     );
     if (!content) continue;
-    try {
-      await invokeFn('write_text_file', {
-        workspacePath,
-        relativePath: `${targetDir}/${file}`,
-        content,
-      });
-      count++;
-    } catch {
-      // skip failed file
-    }
+    planned.push({ relativePath: `${targetDir}/${file}`, content });
   }
-  return count;
+  return planned;
 }
 
 const PACK_RESOURCE_DIRS = ['agents', 'references', 'templates'] as const;
 
-async function downloadSkillPackResources(
-  repoPath: string,
-  subSkill: string,
-  workspacePath: string,
-  invokeFn: typeof invoke,
-): Promise<number> {
-  let total = 0;
+async function collectSkillPackResources(repoPath: string, subSkill: string): Promise<PlannedFile[]> {
+  const planned: PlannedFile[] = [];
   for (const dir of PACK_RESOURCE_DIRS) {
     const repoDir = `${subSkill}/${dir}`;
     const targetDir = `.CodePapr/skills/${subSkill}/${dir}`;
-    total += await downloadDirToWorkspace(repoPath, repoDir, targetDir, invokeFn, workspacePath);
+    planned.push(...(await collectDirFiles(repoPath, repoDir, targetDir)));
   }
-  return total;
+  return planned;
 }
 
 async function downloadSkillMarkdown(name: string, sourceRepo?: string): Promise<string | null> {
@@ -542,9 +541,14 @@ async function downloadSkillMarkdown(name: string, sourceRepo?: string): Promise
   return null;
 }
 
-type InstallResult =
-  | { ok: true; installed: string[]; resources: number; error?: never }
-  | { ok: false; installed: string[]; resources: number; error: string };
+type SkillInstallPlan = {
+  skillFiles: Array<{ skillId: string; relativePath: string; content: string }>;
+  extraFiles: PlannedFile[];
+};
+
+type PlanResult =
+  | { ok: true; plan: SkillInstallPlan; error?: never }
+  | { ok: false; plan?: never; error: string };
 
 /** N20：重装会覆盖本地 SKILL.md（用户可能改过 frontmatter/正文）——
  *  必须弹确认，绝不静默覆盖。返回用户是否同意。 */
@@ -558,66 +562,47 @@ export function confirmSkillOverwrite(lang: string | undefined, title: string): 
   return typeof window !== 'undefined' && window.confirm(confirmText);
 }
 
-async function installSkillToWorkspace(
-  name: string,
-  workspacePath: string,
-  sourceRepo: string,
-  invokeFn: typeof invoke,
-): Promise<InstallResult> {
+async function planSkillInstall(name: string, sourceRepo: string): Promise<PlanResult> {
   const content = await downloadSkillMarkdown(name, sourceRepo);
   if (content) {
-    const relativePath = `.CodePapr/skills/${name}/SKILL.md`;
-    try {
-      await invokeFn('write_text_file', {
-        workspacePath,
-        relativePath,
-        content,
-      });
-      const repoPath = extractRepoPath(sourceRepo);
-      let resources = 0;
-      if (repoPath && !repoPath.includes('agent-use-skills')) {
-        resources = await downloadSkillPackResources(repoPath, name, workspacePath, invokeFn);
-      }
-      return { ok: true, installed: [name], resources };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { ok: false, installed: [], resources: 0, error: `写入失败: ${msg}` };
+    const extraFiles: PlannedFile[] = [];
+    const repoPath = extractRepoPath(sourceRepo);
+    if (repoPath && !repoPath.includes('agent-use-skills')) {
+      extraFiles.push(...(await collectSkillPackResources(repoPath, name)));
     }
+    return {
+      ok: true,
+      plan: {
+        skillFiles: [{ skillId: name, relativePath: skillMarkdownPath(name), content }],
+        extraFiles,
+      },
+    };
   }
 
   const repoPath = extractRepoPath(sourceRepo);
   if (repoPath && !repoPath.includes('agent-use-skills')) {
     const subSkills = await discoverRepoSkills(repoPath);
     if (subSkills.length > 0) {
-      const installed: string[] = [];
-      let resources = 0;
+      const skillFiles: SkillInstallPlan['skillFiles'] = [];
+      const extraFiles: PlannedFile[] = [];
       for (const subSkill of subSkills) {
         const subContent = await downloadSubSkillMarkdown(repoPath, subSkill);
         if (!subContent) continue;
-        const relativePath = `.CodePapr/skills/${subSkill}/SKILL.md`;
-        try {
-          await invokeFn('write_text_file', {
-            workspacePath,
-            relativePath,
-            content: subContent,
-          });
-          installed.push(subSkill);
-          resources += await downloadSkillPackResources(repoPath, subSkill, workspacePath, invokeFn);
-        } catch {
-          // skip failed sub-skill
-        }
+        skillFiles.push({
+          skillId: subSkill,
+          relativePath: skillMarkdownPath(subSkill),
+          content: subContent,
+        });
+        extraFiles.push(...(await collectSkillPackResources(repoPath, subSkill)));
       }
-      if (installed.length > 0) {
-        const cmdCount = await downloadDirToWorkspace(
-          repoPath, 'commands', `.CodePapr/skills/${name}/commands`, invokeFn, workspacePath
+      if (skillFiles.length > 0) {
+        extraFiles.push(
+          ...(await collectDirFiles(repoPath, 'commands', `.CodePapr/skills/${name}/commands`))
         );
-        resources += cmdCount;
-        return { ok: true, installed, resources };
+        return { ok: true, plan: { skillFiles, extraFiles } };
       }
       return {
         ok: false,
-        installed: [],
-        resources: 0,
         error: `发现 ${subSkills.length} 个子技能但全部下载失败`,
       };
     }
@@ -625,16 +610,37 @@ async function installSkillToWorkspace(
 
   return {
     ok: false,
-    installed: [],
-    resources: 0,
     error: '无法下载 SKILL.md：请检查网络或确认该 Skill 是否支持 CodePapr',
   };
 }
 
+async function commitSkillInstall(
+  plan: SkillInstallPlan,
+  workspacePath: string,
+  invokeFn: typeof invoke,
+): Promise<{ ok: true; installed: string[]; resources: number } | { ok: false; error: string }> {
+  try {
+    for (const file of [...plan.skillFiles, ...plan.extraFiles]) {
+      await invokeFn('write_text_file', {
+        workspacePath,
+        relativePath: file.relativePath,
+        content: file.content,
+      });
+    }
+    return {
+      ok: true,
+      installed: plan.skillFiles.map((file) => file.skillId),
+      resources: plan.extraFiles.length,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `写入失败: ${msg}` };
+  }
+}
+
 async function refreshSkills(workspacePath: string) {
   try {
-    const store = useAgentStore.getState();
-    void (store as unknown as { _loadProjectConfig(path: string): Promise<void> })._loadProjectConfig(workspacePath);
+    await useAgentStore.getState()._loadProjectConfig(workspacePath);
   } catch {
     // silently fail
   }
@@ -652,7 +658,7 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
   const [selectedListing, setSelectedListing] = useState<SkillMarketListing | null>(null);
   const [installingIds, setInstallingIds] = useState<Set<string>>(new Set());
   const [installErrors, setInstallErrors] = useState<Record<string, string>>({});
-  const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
+  const [lock, setLock] = useState<SkillsLockFile>(emptySkillsLock);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -679,23 +685,31 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
     };
   }, []);
 
-  // N20：已安装状态与本地 .CodePapr/skills 同步（含嵌套 skill 目录），
-  // 安装/刷新后 _skillDefinitions 更新，标记随之更新。
   useEffect(() => {
-    setInstalledIds((prev) => {
-      const next = new Set(prev);
-      for (const skill of skillDefinitions) {
-        const key = skill.id || skill.name;
-        if (key) next.add(key);
+    if (!workspacePath) {
+      setLock(emptySkillsLock());
+      return;
+    }
+    let cancelled = false;
+    void loadSkillsLock(invoke, workspacePath).then((next) => {
+      if (!cancelled) {
+        setLock(next);
       }
-      return next;
     });
-  }, [skillDefinitions]);
+    return () => {
+      cancelled = true;
+    };
+  }, [workspacePath]);
+
+  const definitionIds = useMemo(
+    () => collectDefinitionIds(skillDefinitions),
+    [skillDefinitions]
+  );
 
   const isSkillInstalled = useCallback(
     (listing: SkillMarketListing): boolean =>
-      installedIds.has(listing.id) || installedIds.has(listing.name),
-    [installedIds]
+      isSkillListingInstalled(listing, lock, definitionIds),
+    [lock, definitionIds]
   );
 
   useEffect(() => {
@@ -734,38 +748,50 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
       return;
     }
 
-    // N20：重装会覆盖本地 SKILL.md（用户可能改过 frontmatter/正文）——
-    // 先确认本地是否已存在，再要求用户明确确认，绝不静默覆盖。
-    let localExists = false;
-    try {
-      await invoke<{ content: string }>('read_text_file', {
-        workspacePath,
-        relativePath: `.CodePapr/skills/${listing.name}/SKILL.md`,
-        maxBytes: 1024,
-      });
-      localExists = true;
-    } catch {
-      localExists = false;
-    }
-    if (localExists) {
-      if (!confirmSkillOverwrite(settings.lang, listing.title)) {
-        return;
-      }
-    }
-
     setInstallingIds((prev) => new Set(prev).add(listing.id));
     setInstallErrors((prev) => { const n = { ...prev }; delete n[listing.id]; return n; });
 
-    const result = await installSkillToWorkspace(listing.name, workspacePath, listing.sourceRepo, invoke);
-
-    if (result.ok) {
-      setInstalledIds((prev) => {
-        const next = new Set(prev).add(listing.id);
-        for (const sub of result.installed) {
-          next.add(sub);
-        }
+    const finish = () => {
+      setInstallingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(listing.id);
         return next;
       });
+    };
+
+    try {
+      const currentLock = await loadSkillsLock(invoke, workspacePath);
+      const planned = await planSkillInstall(listing.name, listing.sourceRepo);
+      if (!planned.ok) {
+        setInstallErrors((prev) => ({ ...prev, [listing.id]: planned.error || c.installError }));
+        return;
+      }
+
+      const plannedIds = planned.plan.skillFiles.map((file) => file.skillId);
+      const candidates = collectOverwriteCandidates(listing, currentLock, plannedIds);
+      const existing = await listExistingSkillPaths(invoke, workspacePath, candidates);
+      if (existing.length > 0 && !confirmSkillOverwrite(settings.lang, listing.title)) {
+        return;
+      }
+
+      const result = await commitSkillInstall(planned.plan, workspacePath, invoke);
+      if (!result.ok) {
+        setInstallErrors((prev) => ({ ...prev, [listing.id]: result.error || c.installError }));
+        return;
+      }
+
+      const nextLock = upsertLockEntry(
+        currentLock,
+        buildLockEntry({
+          listingId: listing.id,
+          listingName: listing.name,
+          sourceRepo: listing.sourceRepo,
+          skillFiles: planned.plan.skillFiles,
+        })
+      );
+      await saveSkillsLock(invoke, workspacePath, nextLock);
+      setLock(nextLock);
+
       if (result.installed.length > 1) {
         const resInfo = result.resources > 0 ? ` + ${result.resources} resources` : '';
         showToast(`${listing.title}: ${result.installed.length} skills${resInfo} installed`);
@@ -775,16 +801,13 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
         showToast(`${listing.title} ${c.installSuccess}`);
       }
       await refreshSkills(workspacePath);
-    } else {
-      setInstallErrors((prev) => ({ ...prev, [listing.id]: result.error || c.installError }));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setInstallErrors((prev) => ({ ...prev, [listing.id]: msg || c.installError }));
+    } finally {
+      finish();
     }
-
-    setInstallingIds((prev) => {
-      const next = new Set(prev);
-      next.delete(listing.id);
-      return next;
-    });
-  }, [workspacePath, c, showToast]);
+  }, [workspacePath, c, showToast, settings.lang]);
 
   const handleRetryInstall = useCallback(
     (listing: SkillMarketListing) => {
