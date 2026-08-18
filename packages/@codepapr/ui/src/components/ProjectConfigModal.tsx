@@ -56,10 +56,11 @@ interface SkillMetadata {
   description: string;
 }
 
-type ConfigTab = 'rules' | 'agents' | 'skills';
+type ConfigTab = 'rules' | 'agents' | 'skills' | 'commands';
 
 const AGENTS_DIR = '.CodePapr/agents';
 const SKILLS_DIR = '.CodePapr/skills';
+const COMMANDS_DIR = '.CodePapr/commands';
 const PROJECT_AGENTS_FILE = '.CodePapr/AGENTS.md';
 
 function createAgentTemplate(name: string): string {
@@ -95,6 +96,17 @@ function createAgentTemplate(name: string): string {
     '1. Findings：按严重程度列出问题；没有问题就明确说未发现阻塞项。',
     '2. Suggested Fix：给出最小修改方向。',
     '3. Verification：列出建议运行的验证命令。',
+  ].join('\n');
+}
+
+function createCommandTemplate(name: string): string {
+  const safeName = name.trim() || 'ship';
+  return [
+    '---',
+    `description: ${safeName} 项目命令`,
+    '---',
+    '',
+    `请处理：$ARGUMENTS`,
   ].join('\n');
 }
 
@@ -157,6 +169,7 @@ function normalizeAgentName(input: string): string {
 }
 
 const normalizeSkillName = normalizeAgentName;
+const normalizeCommandName = normalizeAgentName;
 
 function fileNameFromEntry(entry: ListFilesEntry): string {
   const segments = entry.path.split(/[\\/]/);
@@ -223,6 +236,10 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
   const [selectedSkillName, setSelectedSkillName] = useState<string | null>(null);
   const [skillContent, setSkillContent] = useState('');
   const [newSkillName, setNewSkillName] = useState(DEFAULT_SEARCH_SKILL_NAME);
+  const [commandNames, setCommandNames] = useState<string[]>([]);
+  const [selectedCommandName, setSelectedCommandName] = useState<string | null>(null);
+  const [commandContent, setCommandContent] = useState('');
+  const [newCommandName, setNewCommandName] = useState('ship');
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState('');
@@ -237,6 +254,10 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
     [selectedSkillName, skillEntries]
   );
   const selectedSkillPath = selectedSkillEntry?.relativePath ?? null;
+  const selectedCommandPath = useMemo(
+    () => (selectedCommandName ? `${COMMANDS_DIR}/${selectedCommandName}.md` : null),
+    [selectedCommandName]
+  );
 
   const loadRules = useCallback(async () => {
     if (!workspacePath) return;
@@ -279,6 +300,36 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
     setSelectedAgentName((current) => (current && names.includes(current) ? current : names[0] ?? null));
     if (names.length === 0) {
       setAgentContent('');
+    }
+  }, [workspacePath]);
+
+  const loadCommandNames = useCallback(async () => {
+    if (!workspacePath) return;
+    let result: ListFilesResult;
+    try {
+      result = await invoke<ListFilesResult>('list_workspace_files', {
+        workspacePath,
+        relativePath: COMMANDS_DIR,
+        maxDepth: 1,
+      });
+    } catch {
+      setCommandNames([]);
+      setSelectedCommandName(null);
+      setCommandContent('');
+      return;
+    }
+
+    const names = result.entries
+      .filter((entry) => entry.kind !== 'dir' && entry.isDir !== true)
+      .map(fileNameFromEntry)
+      .filter((name) => name.toLowerCase().endsWith('.md'))
+      .map((name) => name.replace(/\.md$/i, ''))
+      .sort((a, b) => a.localeCompare(b));
+
+    setCommandNames(names);
+    setSelectedCommandName((current) => (current && names.includes(current) ? current : names[0] ?? null));
+    if (names.length === 0) {
+      setCommandContent('');
     }
   }, [workspacePath]);
 
@@ -374,16 +425,35 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
     }
   }, [selectedSkillPath, workspacePath]);
 
+  const loadSelectedCommand = useCallback(async () => {
+    if (!workspacePath || !selectedCommandPath) {
+      setCommandContent('');
+      return;
+    }
+
+    try {
+      const result = await invoke<ReadFileResult>('read_text_file', {
+        workspacePath,
+        relativePath: selectedCommandPath,
+        maxBytes: 300_000,
+      });
+      setCommandContent(result.content);
+    } catch (err) {
+      setCommandContent('');
+      setError(errorMessage(err));
+    }
+  }, [selectedCommandPath, workspacePath]);
+
   const reloadAll = useCallback(async () => {
     setIsLoading(true);
     setError('');
     setStatus('');
     try {
-      await Promise.all([loadRules(), loadAgentNames(), loadSkillNames()]);
+      await Promise.all([loadRules(), loadAgentNames(), loadSkillNames(), loadCommandNames()]);
     } finally {
       setIsLoading(false);
     }
-  }, [loadAgentNames, loadRules, loadSkillNames]);
+  }, [loadAgentNames, loadCommandNames, loadRules, loadSkillNames]);
 
   useEffect(() => {
     void reloadAll();
@@ -396,6 +466,10 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
   useEffect(() => {
     void loadSelectedSkill();
   }, [loadSelectedSkill]);
+
+  useEffect(() => {
+    void loadSelectedCommand();
+  }, [loadSelectedCommand]);
 
   const afterProjectConfigChanged = async (paths: string[]) => {
     noteWorkspaceMutation(paths);
@@ -608,6 +682,74 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
     }
   };
 
+  const createCommand = async () => {
+    const name = normalizeCommandName(newCommandName);
+    if (!name) {
+      setError(t.projectConfigInvalidCommandName);
+      return;
+    }
+    const relativePath = `${COMMANDS_DIR}/${name}.md`;
+    setIsSaving(true);
+    setError('');
+    setStatus('');
+    try {
+      await invoke('write_text_file', {
+        workspacePath,
+        relativePath,
+        content: createCommandTemplate(name),
+      });
+      await afterProjectConfigChanged([relativePath]);
+      await loadCommandNames();
+      setSelectedCommandName(name);
+      setNewCommandName('ship');
+      setStatus(t.projectConfigCommandCreated);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const saveCommand = async () => {
+    if (!selectedCommandPath) return;
+    setIsSaving(true);
+    setError('');
+    setStatus('');
+    try {
+      await invoke('write_text_file', {
+        workspacePath,
+        relativePath: selectedCommandPath,
+        content: commandContent,
+      });
+      await afterProjectConfigChanged([selectedCommandPath]);
+      setStatus(t.projectConfigSaved);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const deleteCommand = async () => {
+    if (!selectedCommandPath || !selectedCommandName) return;
+    setIsSaving(true);
+    setError('');
+    setStatus('');
+    try {
+      await invoke('delete_workspace_file', {
+        workspacePath,
+        relativePath: selectedCommandPath,
+      });
+      await afterProjectConfigChanged([selectedCommandPath]);
+      setStatus(t.projectConfigCommandDeleted);
+      await loadCommandNames();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 backdrop-blur-sm">
       <div className="flex h-full max-h-[86vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl">
@@ -658,6 +800,17 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
             }`}
           >
             {t.projectConfigSkillsTab}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('commands')}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+              activeTab === 'commands'
+                ? 'border-accent-soft bg-accent-soft text-accent-text'
+                : 'border-line text-fg-muted hover:border-accent-soft hover:text-fg'
+            }`}
+          >
+            {t.projectConfigCommandsTab}
           </button>
           <div className="ml-auto flex items-center gap-2 text-xs">
             {isLoading && <span className="text-fg-muted">{t.loadingProject}</span>}
@@ -785,6 +938,94 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
                     readOnly={!selectedAgentPath}
                     ariaLabel={t.projectConfigAgentsTab}
                     modelPath={selectedAgentPath ?? '.CodePapr/agents/new.md'}
+                  />
+                </div>
+              </div>
+            </div>
+          ) : activeTab === 'commands' ? (
+            <div className="grid h-full min-h-0 grid-cols-[240px_minmax(0,1fr)] gap-4">
+              <div className="flex min-h-0 flex-col rounded-xl border border-line bg-base">
+                <div className="border-b border-line p-3">
+                  <div className="text-xs font-semibold text-fg">{t.projectConfigCommandsTab}</div>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      value={newCommandName}
+                      onChange={(event) => setNewCommandName(event.target.value)}
+                      placeholder="ship"
+                      className="min-w-0 flex-1 rounded-lg border border-line bg-base px-2 py-1.5 text-xs text-fg outline-none focus:border-accent-soft"
+                    />
+                    <button
+                      type="button"
+                      onClick={createCommand}
+                      disabled={isSaving || !workspacePath}
+                      className="rounded-lg border border-accent-soft px-2.5 py-1.5 text-xs font-medium text-accent-text transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {t.projectConfigCreateCommand}
+                    </button>
+                  </div>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                  {commandNames.length === 0 && (
+                    <div className="px-2 py-6 text-center text-xs text-fg-dim">
+                      {t.projectConfigNoCommands}
+                    </div>
+                  )}
+                  {commandNames.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => setSelectedCommandName(name)}
+                      title={`${COMMANDS_DIR}/${name}.md`}
+                      className={`mb-1 w-full truncate rounded-lg px-3 py-2 text-left text-xs transition-colors ${
+                        selectedCommandName === name
+                          ? 'bg-accent-soft text-accent-text ring-1 ring-accent-soft ring-inset'
+                          : 'text-fg-muted hover:bg-base hover:text-fg'
+                      }`}
+                    >
+                      {`/${name}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex min-h-0 flex-col gap-3">
+                <div className="rounded-xl border border-line bg-base p-3 text-xs leading-relaxed text-fg-muted">
+                  <div className="mb-1 font-semibold text-fg">{t.projectConfigCommandsTab}</div>
+                  <div>{t.projectConfigCommandRole}</div>
+                  <div className="mt-2 text-fg-muted">{t.projectConfigCommandExampleHint}</div>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0 text-xs leading-relaxed text-fg-muted">
+                    {selectedCommandPath ?? t.projectConfigCommandDesc}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={saveCommand}
+                      disabled={isSaving || !selectedCommandPath}
+                      className="rounded-lg border border-accent-soft px-3 py-1.5 text-xs font-medium text-accent-text transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isSaving ? t.projectConfigSaving : t.projectConfigSaveCommand}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={deleteCommand}
+                      disabled={isSaving || !selectedCommandPath}
+                      className="rounded-lg border border-danger-bg px-3 py-1.5 text-xs font-medium text-danger transition-colors hover:border-danger disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {t.projectConfigDeleteCommand}
+                    </button>
+                  </div>
+                </div>
+                <div className="min-h-0 flex-1">
+                  <MonacoTextEditor
+                    value={commandContent}
+                    onChange={setCommandContent}
+                    language="markdown"
+                    minHeight={300}
+                    readOnly={!selectedCommandPath}
+                    ariaLabel={t.projectConfigCommandsTab}
+                    modelPath={selectedCommandPath ?? '.CodePapr/commands/new.md'}
                   />
                 </div>
               </div>

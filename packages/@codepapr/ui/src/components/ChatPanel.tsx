@@ -1171,6 +1171,11 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
         slashDropdownRef.current?.navigateUp();
         return;
       }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        slashDropdownRef.current?.selectCurrent();
+        return;
+      }
       if (e.key === 'Enter') {
         e.preventDefault();
         const token = slashFilter.trim();

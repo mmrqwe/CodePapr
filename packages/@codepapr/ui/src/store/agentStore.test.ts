@@ -1383,7 +1383,7 @@ describe('useAgentStore.sendMessage', () => {
     expect(sessionMessages[0]?.content).toBe('修复 App.tsx 里的静态错误');
   });
 
-  it('expands custom --commands inline commands before sending to the agent', async () => {
+  it('expands custom slash commands inline commands before sending to the agent', async () => {
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       if (command === 'read_text_file') {
         const relativePath = String(args?.relativePath ?? '');
@@ -1420,7 +1420,7 @@ describe('useAgentStore.sendMessage', () => {
       _agentModel: 'deepseek-v4-pro',
     });
 
-    await useAgentStore.getState().sendMessage('--branch src/App.tsx', '--branch src/App.tsx', 'agent');
+    await useAgentStore.getState().sendMessage('/branch src/App.tsx', '/branch src/App.tsx', 'agent');
 
     expect(chat).toHaveBeenCalledTimes(1);
     expect(String(chat.mock.calls[0]?.[0])).toContain('当前分支：main');
@@ -1455,6 +1455,24 @@ describe('useAgentStore.sendMessage', () => {
     expect(prompt).toContain('SECRET_SHOULD_NOT_BE_AN_ARG');
     const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
     expect(sessionMessages[0]?.content).toBe(command);
+  });
+
+  it('slash 引号参数进入模板时不含引号', async () => {
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    await useAgentStore.getState().sendMessage(
+      '/review "src/auth service"',
+      '/review "src/auth service"',
+      'agent'
+    );
+
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(String(chat.mock.calls[0]?.[0])).toContain('检查 src/auth service');
+    expect(String(chat.mock.calls[0]?.[0])).not.toContain('"src/auth service"');
   });
 
   it('shows command descriptions in /help', async () => {

@@ -326,6 +326,8 @@ export {
   parseCommandMarkdown,
   parseInlineCommandLine,
   parseSlashInput,
+  tokenizeQuotedLine,
+  mergeSlashCommandList,
   resolveSlashCommandLine,
   splitSlashAttachmentBlock,
   expandCommandTemplate,
@@ -345,6 +347,8 @@ export type {
   ParsedSlashInput,
   ParsedInlineCommandLine,
   CommandExpandContext,
+  SlashCommandSource,
+  SlashCommandListItem,
 } from './agent/slashCommand';
 
 // Goal 自主循环（Worker + Evaluator 双模型）

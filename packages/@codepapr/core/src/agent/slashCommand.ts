@@ -315,32 +315,174 @@ export function parseCommandMarkdown(name: string, raw: string): CommandDefiniti
 export interface ParsedSlashInput {
   name: string;
   args: string[];
-  prefix: '--' | '/';
+  prefix: '/';
+}
+
+export type SlashCommandSource = 'meta' | 'builtin' | 'project';
+
+export interface SlashCommandListItem extends CommandDefinition {
+  source: SlashCommandSource;
 }
 
 /**
- * 解析用户输入中的聊天命令。
- * 当前主入口为 `--name args`，同时兼容历史 `/name args`。
+ * 按引号规则把一行拆成 token。引号本身不进入结果。
+ * slash 参数允许 `|` 等字符；内联 `!\`cmd\`` 再单独禁止复合 shell 操作符。
+ */
+export function tokenizeQuotedLine(
+  input: string,
+  options: {
+    unclosedQuotes?: 'throw' | 'include';
+    disallowedBareChars?: ReadonlySet<string>;
+    disallowedError?: string;
+  } = {}
+): string[] {
+  const unclosedQuotes = options.unclosedQuotes ?? 'include';
+  const tokens: string[] = [];
+  let current = '';
+  let quote: 'single' | 'double' | null = null;
+  let escaped = false;
+
+  const pushCurrent = () => {
+    if (!current) {
+      return;
+    }
+    tokens.push(current);
+    current = '';
+  };
+
+  for (const ch of input) {
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === '\\' && quote === null) {
+      escaped = true;
+      continue;
+    }
+
+    if (quote === 'single') {
+      if (ch === "'") {
+        quote = null;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+
+    if (quote === 'double') {
+      if (ch === '"') {
+        quote = null;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+
+    if (ch === "'") {
+      quote = 'single';
+      continue;
+    }
+
+    if (ch === '"') {
+      quote = 'double';
+      continue;
+    }
+
+    if (/\s/.test(ch)) {
+      pushCurrent();
+      continue;
+    }
+
+    if (options.disallowedBareChars?.has(ch)) {
+      throw new Error(options.disallowedError ?? '不支持该操作符');
+    }
+
+    current += ch;
+  }
+
+  if (escaped) {
+    current += '\\';
+  }
+
+  if (quote) {
+    if (unclosedQuotes === 'throw') {
+      throw new Error('内联命令存在未闭合的引号');
+    }
+  }
+
+  pushCurrent();
+  return tokens;
+}
+
+/**
+ * 解析聊天框 slash 命令。入口仅为 `/name args`；`--flag` 当普通文本。
  */
 export function parseSlashInput(input: string): ParsedSlashInput | null {
   const trimmed = input.trim();
-  const prefix = trimmed.startsWith('--') ? '--' : trimmed.startsWith('/') ? '/' : null;
-  if (!prefix || trimmed.length <= prefix.length) {
+  if (!trimmed.startsWith('/') || trimmed.length <= 1) {
     return null;
   }
 
-  const withoutPrefix = trimmed.slice(prefix.length);
-  const parts = withoutPrefix.split(/\s+/);
-  const name = parts[0];
+  const tokens = tokenizeQuotedLine(trimmed.slice(1));
+  const name = tokens[0];
   if (!name) {
     return null;
   }
 
-  if (prefix === '/' && isFilesystemPathSlashName(name)) {
+  if (isFilesystemPathSlashName(name)) {
     return null;
   }
 
-  return { name, args: parts.slice(1), prefix };
+  return { name, args: tokens.slice(1), prefix: '/' };
+}
+
+/** 合并下拉列表：项目命令覆盖同名内置；不覆盖 help/commands/compact/goal。 */
+export function mergeSlashCommandList(
+  meta: readonly CommandDefinition[],
+  builtin: readonly CommandDefinition[],
+  custom: readonly CommandDefinition[]
+): SlashCommandListItem[] {
+  const items: SlashCommandListItem[] = [];
+  const used = new Set<string>();
+  const customByName = new Map(
+    custom.map((command) => [command.name.trim().toLowerCase(), command] as const)
+  );
+
+  for (const command of meta) {
+    const key = command.name.trim().toLowerCase();
+    if (!key || used.has(key)) {
+      continue;
+    }
+    items.push({ ...command, source: 'meta' });
+    used.add(key);
+  }
+
+  for (const command of builtin) {
+    const key = command.name.trim().toLowerCase();
+    if (!key || used.has(key)) {
+      continue;
+    }
+    const override = customByName.get(key);
+    if (override) {
+      items.push({ ...override, source: 'project' });
+    } else {
+      items.push({ ...command, source: 'builtin' });
+    }
+    used.add(key);
+  }
+
+  for (const command of custom) {
+    const key = command.name.trim().toLowerCase();
+    if (!key || used.has(key)) {
+      continue;
+    }
+    items.push({ ...command, source: 'project' });
+    used.add(key);
+  }
+
+  return items;
 }
 
 /**
@@ -390,80 +532,11 @@ export function parseInlineCommandLine(input: string): ParsedInlineCommandLine {
     throw new Error('内联命令不能为空');
   }
 
-  const tokens: string[] = [];
-  let current = '';
-  let quote: 'single' | 'double' | null = null;
-  let escaped = false;
-
-  const pushCurrent = () => {
-    if (!current) {
-      return;
-    }
-    tokens.push(current);
-    current = '';
-  };
-
-  for (const ch of source) {
-    if (escaped) {
-      current += ch;
-      escaped = false;
-      continue;
-    }
-
-    if (ch === '\\' && quote === null) {
-      escaped = true;
-      continue;
-    }
-
-    if (quote === 'single') {
-      if (ch === "'") {
-        quote = null;
-      } else {
-        current += ch;
-      }
-      continue;
-    }
-
-    if (quote === 'double') {
-      if (ch === '"') {
-        quote = null;
-      } else {
-        current += ch;
-      }
-      continue;
-    }
-
-    if (ch === "'") {
-      quote = 'single';
-      continue;
-    }
-
-    if (ch === '"') {
-      quote = 'double';
-      continue;
-    }
-
-    if (/\s/.test(ch)) {
-      pushCurrent();
-      continue;
-    }
-
-    if (DISALLOWED_INLINE_SHELL_OPERATORS.has(ch)) {
-      throw new Error('内联命令只支持 command + args，不支持管道、重定向或复合 shell 操作符');
-    }
-
-    current += ch;
-  }
-
-  if (escaped) {
-    current += '\\';
-  }
-
-  if (quote) {
-    throw new Error('内联命令存在未闭合的引号');
-  }
-
-  pushCurrent();
+  const tokens = tokenizeQuotedLine(source, {
+    unclosedQuotes: 'throw',
+    disallowedBareChars: DISALLOWED_INLINE_SHELL_OPERATORS,
+    disallowedError: '内联命令只支持 command + args，不支持管道、重定向或复合 shell 操作符',
+  });
   const [command, ...args] = tokens;
   if (!command) {
     throw new Error('内联命令不能为空');

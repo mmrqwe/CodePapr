@@ -43,7 +43,7 @@ export function appendErrorMessage(set: StoreSet, content: string, sessionId?: s
   });
 }
 
-/** 追加一条仅展示、不进入模型上下文的信息消息（用于 --help 等本地命令反馈）。
+/** 追加一条仅展示、不进入模型上下文的信息消息（用于 /help 等本地命令反馈）。
  *  可选指定目标会话：/compact 等跨 await 的流程必须在 await 前捕获会话，
  *  否则提示消息会落到用户中途切换后的会话（N22）。
  *  resetLoading 默认 true（本地命令中止发送后复位 loading）；/compact 允许

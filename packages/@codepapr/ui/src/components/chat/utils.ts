@@ -51,19 +51,14 @@ export function readFileAsImagePreview(file: File): Promise<ImagePreview | null>
 }
 
 /**
- * 仅在用户还在输入命令名（`/` 或 `--` 后无空白、无换行）时返回过滤串。
+ * 仅在用户还在输入命令名（`/` 后无空白、无换行）时返回过滤串。
  * 已开始写参数则返回 null，调用方应关闭 slash 下拉，让 Enter 发送。
  */
 export function slashCommandNameFilter(value: string): string | null {
-  let rest: string | null = null;
-  if (value.startsWith('/')) {
-    rest = value.slice(1);
-  } else if (value.startsWith('--')) {
-    rest = value.slice(2);
-  }
-  if (rest === null) {
+  if (!value.startsWith('/')) {
     return null;
   }
+  const rest = value.slice(1);
   if (rest.includes('\n') || /\s/.test(rest)) {
     return null;
   }

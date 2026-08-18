@@ -256,7 +256,7 @@ export async function loadSkillDefinitions(
   return definitions;
 }
 
-/** 列出所有可用聊天命令定义（用于 --help）。 */
+/** 列出所有可用聊天命令定义（用于 /help）。 */
 export async function listCommandDefinitions(
   invoke: InvokeFn,
   workspacePath: string

@@ -75,6 +75,13 @@ describe('ProjectConfigModal', () => {
             bytes: 32,
           };
         }
+        if (relativePath === '.CodePapr/commands/ship.md') {
+          return {
+            path: relativePath,
+            content: '---\ndescription: 发布当前工作区改动\n---\n请发布：$ARGUMENTS',
+            bytes: 40,
+          };
+        }
         throw new Error(`not found: ${relativePath}`);
       }
       if (command === 'list_workspace_files') {
@@ -86,6 +93,13 @@ describe('ProjectConfigModal', () => {
               { path: '.CodePapr/skills/search', name: 'search', kind: 'dir', isDir: true },
               { path: '.CodePapr/skills/search/SKILL.md', name: 'SKILL.md', kind: 'file' },
             ],
+            truncated: false,
+          };
+        }
+        if (relativePath === '.CodePapr/commands') {
+          return {
+            root: relativePath,
+            entries: [{ path: '.CodePapr/commands/ship.md', name: 'ship.md', kind: 'file' }],
             truncated: false,
           };
         }
@@ -237,5 +251,29 @@ describe('ProjectConfigModal', () => {
           args?.relativePath === '.CodePapr/skills/search'
       )
     ).toBe(true);
+  });
+
+  it('lists project slash commands on the Commands tab', async () => {
+    await act(async () => {
+      root.render(
+        <ProjectConfigModal
+          workspacePath="/tmp/codepapr-workspace"
+          lang="zh-CN"
+          onClose={() => undefined}
+        />
+      );
+    });
+    await flushEffects();
+    await flushEffects();
+
+    await act(async () => {
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Commands')
+        ?.click();
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('/ship');
+    expect(container.textContent).toContain('请发布：$ARGUMENTS');
   });
 });

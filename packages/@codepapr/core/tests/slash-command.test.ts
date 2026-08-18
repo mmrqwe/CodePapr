@@ -5,6 +5,7 @@ import {
   parseCommandMarkdown,
   parseInlineCommandLine,
   parseSlashInput,
+  mergeSlashCommandList,
   resolveSlashCommandLine,
   splitSlashAttachmentBlock,
   expandCommandTemplate,
@@ -45,17 +46,14 @@ describe('slashCommand - parseCommandMarkdown', () => {
 });
 
 describe('slashCommand - parseSlashInput', () => {
-  it('优先解析新的双横杠命令格式，同时兼容旧斜杠格式', () => {
-    expect(parseSlashInput('--test foo bar')).toEqual({
-      name: 'test',
-      args: ['foo', 'bar'],
-      prefix: '--',
-    });
+  it('只把 / 当命令前缀，--flag 当普通文本', () => {
     expect(parseSlashInput('/test foo bar')).toEqual({
       name: 'test',
       args: ['foo', 'bar'],
       prefix: '/',
     });
+    expect(parseSlashInput('--test foo bar')).toBeNull();
+    expect(parseSlashInput('--verbose')).toBeNull();
   });
 
   it('非斜杠输入返回 null', () => {
@@ -63,6 +61,19 @@ describe('slashCommand - parseSlashInput', () => {
     expect(parseSlashInput('/')).toBeNull();
     expect(parseSlashInput('--')).toBeNull();
     expect(parseSlashInput('   ')).toBeNull();
+  });
+
+  it('按引号拆参数，引号不进入 $1', () => {
+    expect(parseSlashInput('/review "src/auth service" extra')).toEqual({
+      name: 'review',
+      args: ['src/auth service', 'extra'],
+      prefix: '/',
+    });
+    expect(parseSlashInput("/review 'src/auth service'")).toEqual({
+      name: 'review',
+      args: ['src/auth service'],
+      prefix: '/',
+    });
   });
 });
 
@@ -137,6 +148,12 @@ describe('slashCommand - expandCommandTemplate', () => {
   it('替换 $ARGUMENTS 与位置参数', async () => {
     const result = await expandCommandTemplate('运行 $1，全部参数：$ARGUMENTS', ['lint', 'build']);
     expect(result).toBe('运行 lint，全部参数：lint build');
+  });
+
+  it('slash 引号参数展开到 $1 时不含引号', async () => {
+    const parsed = parseSlashInput('/review "src/auth service"');
+    const result = await expandCommandTemplate('检查 $1', parsed?.args ?? []);
+    expect(result).toBe('检查 src/auth service');
   });
 
   it('内联执行 shell 命令', async () => {
@@ -262,5 +279,25 @@ describe('slashCommand - 路径与元数据', () => {
     expect(wrapAskModeCommandTemplate('TASK', 'zh-CN')).toContain('TASK');
     expect(wrapCommandForSubagent('TASK', 'explore', 'zh-CN')).toContain('explore');
     expect(wrapCommandForSubagent('TASK', 'explore', 'en')).toMatch(/subagent/i);
+  });
+});
+
+describe('slashCommand - mergeSlashCommandList', () => {
+  it('项目命令覆盖同名内置，不覆盖 meta，React key 用 source:name', () => {
+    const merged = mergeSlashCommandList(
+      [{ name: 'help', template: '' }],
+      [{ name: 'review', description: 'builtin', template: 'b' }],
+      [
+        { name: 'review', description: 'project review', template: 'p' },
+        { name: 'ship', description: 'ship it', template: 's' },
+        { name: 'help', description: 'should not win', template: 'nope' },
+      ]
+    );
+    expect(merged.map((item) => `${item.source}:${item.name}`)).toEqual([
+      'meta:help',
+      'project:review',
+      'project:ship',
+    ]);
+    expect(merged.find((item) => item.name === 'review')?.template).toBe('p');
   });
 });

@@ -916,6 +916,45 @@ describe('ChatPanel', () => {
     expect(sendSpy).toHaveBeenCalledWith('/help', '/help', 'agent', undefined);
   });
 
+  it('下拉打开时 Tab 补全命令名，不插入制表符', async () => {
+    const sendSpy = vi.fn(async () => true);
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ fastModelEnabled: false, apiKey: 'test-key' }),
+      sessions: [],
+      activeSessionId: null,
+      messages: [],
+      sessionMessages: {},
+      _sessionInputState: {},
+      isLoading: false,
+      loadingSessionId: null,
+      sessionMessagesLoading: false,
+      sendMessage: sendSpy,
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const setNativeValue = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      'value'
+    )!.set!;
+    await act(async () => {
+      setNativeValue.call(textarea, '/rev');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('/review ');
+  });
+
   it('回合进行中仍可发送本地 /help', async () => {
     const sendSpy = vi.fn(async () => true);
     useAgentStore.setState((state) => ({

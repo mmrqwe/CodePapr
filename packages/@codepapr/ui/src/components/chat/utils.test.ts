@@ -6,7 +6,7 @@ describe('slashCommandNameFilter', () => {
     expect(slashCommandNameFilter('/')).toBe('');
     expect(slashCommandNameFilter('/rev')).toBe('rev');
     expect(slashCommandNameFilter('/review')).toBe('review');
-    expect(slashCommandNameFilter('--goal')).toBe('goal');
+    expect(slashCommandNameFilter('--goal')).toBeNull();
   });
 
   it('开始写参数或换行后关闭过滤（Enter 应发送）', () => {

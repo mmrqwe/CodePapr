@@ -99,11 +99,11 @@ Create a `.CodePapr/` directory at the project root:
 | `.CodePapr/project.sqlite` (`memory_entries`) | Cross-session project memory (panel is the only human surface; session bootstrap is rendered from the ledger) |
 | `.CodePapr/agents/*.md` | Custom sub-agents (YAML frontmatter + Markdown body) |
 | `.CodePapr/skills/*/SKILL.md` | Reusable skills (search strategies, debugging workflows, release checklists); also supports flat layout `.CodePapr/skills/<name>.md`; skill marketplace with one-click install from GitHub |
-| `.CodePapr/commands/*.md` | Custom prompt templates (invoked with `--name`) |
+| `.CodePapr/commands/*.md` | Custom prompt templates (invoked with `/name`) |
 
 ### Built-in Commands
 
-Type `/` to bring up the command palette (`/` format is backward-compatible):
+Type `/` to bring up the command palette:
 
 **Main model (deep reasoning):** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize` `/build`
 

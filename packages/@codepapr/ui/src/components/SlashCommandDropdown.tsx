@@ -10,12 +10,14 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import {
   BUILTIN_PROMPT_COMMANDS,
+  mergeSlashCommandList,
   resolveCommandDescription,
   resolveCommandUsage,
   type CommandDefinition,
+  type SlashCommandListItem,
 } from '@codepapr/core';
 import { listCommandDefinitions } from '../utils/projectConfigLoader';
-import type { Lang } from '../utils/i18n';
+import { getTranslation, type Lang } from '../utils/i18n';
 
 export interface SlashCommandDropdownHandle {
   navigateDown: () => void;
@@ -65,10 +67,10 @@ const META_COMMANDS: readonly CommandDefinition[] = [
 
 const SlashCommandDropdown = forwardRef<SlashCommandDropdownHandle, SlashCommandDropdownProps>(
   ({ filter, workspacePath, lang = 'zh-CN', onSelect, onDismiss }, ref) => {
-    const [commands, setCommands] = useState<CommandDefinition[]>(() => [
-      ...META_COMMANDS,
-      ...BUILTIN_PROMPT_COMMANDS,
-    ]);
+    const t = getTranslation(lang);
+    const [commands, setCommands] = useState<SlashCommandListItem[]>(() =>
+      mergeSlashCommandList(META_COMMANDS, BUILTIN_PROMPT_COMMANDS, [])
+    );
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -84,7 +86,7 @@ const SlashCommandDropdown = forwardRef<SlashCommandDropdownHandle, SlashCommand
             custom = [];
           }
         }
-        setCommands([...META_COMMANDS, ...BUILTIN_PROMPT_COMMANDS, ...custom]);
+        setCommands(mergeSlashCommandList(META_COMMANDS, BUILTIN_PROMPT_COMMANDS, custom));
       };
       void loadCommands();
     }, [workspacePath]);
@@ -165,7 +167,7 @@ const SlashCommandDropdown = forwardRef<SlashCommandDropdownHandle, SlashCommand
             const description = resolveCommandDescription(cmd, lang);
             return (
             <div
-              key={cmd.name}
+              key={`${cmd.source}:${cmd.name}`}
               ref={(el) => {
                 if (el) {
                   itemRefs.current.set(index, el);
@@ -188,6 +190,11 @@ const SlashCommandDropdown = forwardRef<SlashCommandDropdownHandle, SlashCommand
               }`}
             >
               <span className="font-mono text-accent whitespace-nowrap">/{cmd.name}</span>
+              {cmd.source === 'project' && (
+                <span className="flex-shrink-0 rounded border border-accent-soft px-1 py-0.5 text-[10px] text-accent">
+                  {t.slashCommandProjectBadge}
+                </span>
+              )}
               {description && (
                 <span className="text-fg-muted truncate flex-1 min-w-0">{description}</span>
               )}
