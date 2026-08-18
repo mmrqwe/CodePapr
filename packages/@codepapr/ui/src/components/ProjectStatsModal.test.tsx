@@ -20,7 +20,13 @@ vi.mock('./ToolUsageStats', () => ({
   ToolUsageStats: () => null,
 }));
 
-import { computeTreemap, ProjectStatsModal, resetProjectStatsCache } from './ProjectStatsModal';
+import {
+  collapseLanguagesForBar,
+  computeTreemap,
+  OTHER_LANGUAGE_ID,
+  ProjectStatsModal,
+  resetProjectStatsCache,
+} from './ProjectStatsModal';
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
 
@@ -90,6 +96,39 @@ describe('computeTreemap', () => {
       expect(r.x + r.w).toBeLessThanOrEqual(100 + 1e-6);
       expect(r.y + r.h).toBeLessThanOrEqual(100 + 1e-6);
     }
+  });
+});
+
+describe('collapseLanguagesForBar', () => {
+  function lang(id: string, lines: number): {
+    id: string;
+    label: string;
+    files: number;
+    lines: number;
+    code: number;
+    blank: number;
+    comment: number;
+  } {
+    return { id, label: id, files: 1, lines, code: lines, blank: 0, comment: 0 };
+  }
+
+  it('returns the list unchanged when it fits the limit', () => {
+    const languages = [lang('ts', 10), lang('py', 5)];
+    expect(collapseLanguagesForBar(languages, '其他', 12)).toEqual(languages);
+  });
+
+  it('folds overflow languages into a single Other bucket', () => {
+    const languages = Array.from({ length: 14 }, (_, i) => lang(`l${i}`, 14 - i));
+    const collapsed = collapseLanguagesForBar(languages, '其他', 12);
+    expect(collapsed).toHaveLength(13);
+    expect(collapsed[12]).toMatchObject({
+      id: OTHER_LANGUAGE_ID,
+      label: '其他',
+      lines: 1 + 2,
+      files: 2,
+    });
+    const totalLines = collapsed.reduce((sum, item) => sum + item.lines, 0);
+    expect(totalLines).toBe(languages.reduce((sum, item) => sum + item.lines, 0));
   });
 });
 
@@ -186,5 +225,15 @@ describe('ProjectStatsModal cache display', () => {
       pending.resolve({ ...SAMPLE_STATS, totalFiles: 9 });
     });
     expect(container.textContent).toContain('9');
+  });
+
+  it('shows a truncated warning in the header and body, not only beside the largest file', async () => {
+    invokeMock.mockResolvedValue({ ...SAMPLE_STATS, truncated: true });
+    renderModal();
+    await act(async () => undefined);
+
+    const warning = '文件数量达到上限，统计结果不完整。';
+    expect(container.textContent).toContain(warning);
+    expect(container.textContent?.split(warning).length).toBeGreaterThan(2);
   });
 });

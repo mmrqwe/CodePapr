@@ -183,6 +183,8 @@ export declare const I18N_DICTS: {
         projectStatsCodeRatio: string;
         projectStatsDirectories: string;
         projectStatsFileSize: string;
+        projectStatsOther: string;
+        projectStatsTruncated: string;
         agentContributionTitle: string;
         agentContributionFilesChanged: string;
         agentContributionAdditions: string;
@@ -706,6 +708,8 @@ export declare const I18N_DICTS: {
         projectStatsCodeRatio: string;
         projectStatsDirectories: string;
         projectStatsFileSize: string;
+        projectStatsOther: string;
+        projectStatsTruncated: string;
         agentContributionTitle: string;
         agentContributionFilesChanged: string;
         agentContributionAdditions: string;
@@ -1227,6 +1231,8 @@ export declare const I18N_DICTS: {
         projectStatsCodeRatio: string;
         projectStatsDirectories: string;
         projectStatsFileSize: string;
+        projectStatsOther: string;
+        projectStatsTruncated: string;
         agentContributionTitle: string;
         agentContributionFilesChanged: string;
         agentContributionAdditions: string;
@@ -1719,6 +1725,8 @@ export declare function getTranslation(lang?: Lang): {
     projectStatsLargestFile: string;
     projectStatsLargestFileNone: string;
     projectStatsAnalysisDepth: string;
+    projectStatsOther: string;
+    projectStatsTruncated: string;
     unselected: string;
     selectFolder: string;
     selectFolderTip: string;
@@ -2093,6 +2101,8 @@ export declare function getTranslation(lang?: Lang): {
     projectStatsLargestFile: string;
     projectStatsLargestFileNone: string;
     projectStatsAnalysisDepth: string;
+    projectStatsOther: string;
+    projectStatsTruncated: string;
     unselected: string;
     selectFolder: string;
     selectFolderTip: string;
@@ -2467,6 +2477,8 @@ export declare function getTranslation(lang?: Lang): {
     projectStatsLargestFile: string;
     projectStatsLargestFileNone: string;
     projectStatsAnalysisDepth: string;
+    projectStatsOther: string;
+    projectStatsTruncated: string;
     unselected: string;
     selectFolder: string;
     selectFolderTip: string;

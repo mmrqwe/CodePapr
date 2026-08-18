@@ -64,6 +64,24 @@ export function languageFromPath(path: string): string {
     case 'json':
     case 'jsonc':
       return 'json';
+    case 'clj':
+    case 'cljs':
+    case 'cljc':
+    case 'edn':
+      return 'clojure';
+    case 'erl':
+    case 'hrl':
+      return 'erlang';
+    case 'ex':
+    case 'exs':
+    case 'heex':
+      return 'elixir';
+    case 'gradle':
+    case 'groovy':
+      return 'groovy';
+    case 'hs':
+    case 'lhs':
+      return 'haskell';
     case 'kt':
     case 'kts':
       return 'kotlin';
@@ -114,6 +132,8 @@ export function languageFromPath(path: string): string {
       return 'shell';
     case 'sql':
       return 'sql';
+    case 'svelte':
+      return 'svelte';
     case 'swift':
       return 'swift';
     case 'ts':
@@ -121,6 +141,8 @@ export function languageFromPath(path: string): string {
       return 'typescript';
     case 'vb':
       return 'vb';
+    case 'vue':
+      return 'vue';
     case 'xml':
     case 'xaml':
     case 'csproj':

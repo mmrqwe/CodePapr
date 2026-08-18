@@ -5,7 +5,7 @@ import { getTranslation, type Lang } from '../utils/i18n';
 import { AgentContribution } from './AgentContribution';
 import { ToolUsageStats } from './ToolUsageStats';
 
-interface ProjectLanguageStat {
+export interface ProjectLanguageStat {
   id: string;
   label: string;
   files: number;
@@ -91,6 +91,7 @@ const LANGUAGE_COLORS: Record<string, string> = {
   scala: '#c22d40',
   r: '#198CE7',
   graphql: '#e10098',
+  'objective-c': '#438eff',
   objective_c: '#438eff',
   fsharp: '#b845fc',
   json: '#292929',
@@ -111,10 +112,15 @@ const LANGUAGE_COLORS: Record<string, string> = {
   svelte: '#ff3e00',
   tsx: '#3178c6',
   jsx: '#f7df1e',
+  __other__: '#64748b',
 };
 
 function resolveLanguageColor(language: string): string {
-  return LANGUAGE_COLORS[language] ?? LANGUAGE_COLORS[language.toLowerCase()] ?? '#4a5568';
+  const key = language.toLowerCase();
+  return LANGUAGE_COLORS[language]
+    ?? LANGUAGE_COLORS[key]
+    ?? LANGUAGE_COLORS[key.replace(/-/g, '_')]
+    ?? '#4a5568';
 }
 
 function formatLanguageLabel(language: string): string {
@@ -198,12 +204,44 @@ function StackedBar({ segments, height = 12 }: { segments: { color: string; widt
   );
 }
 
-function LanguageBar({ languages, totalLines }: { languages: ProjectLanguageStat[]; totalLines: number }) {
-  if (languages.length === 0) return null;
+export const LANGUAGE_BAR_VISIBLE = 12;
+export const OTHER_LANGUAGE_ID = '__other__';
+
+export function collapseLanguagesForBar(
+  languages: ProjectLanguageStat[],
+  otherLabel: string,
+  limit = LANGUAGE_BAR_VISIBLE,
+): ProjectLanguageStat[] {
+  if (languages.length <= limit) return languages;
+  const head = languages.slice(0, limit);
+  const rest = languages.slice(limit);
+  const other: ProjectLanguageStat = {
+    id: OTHER_LANGUAGE_ID,
+    label: otherLabel,
+    files: rest.reduce((sum, lang) => sum + lang.files, 0),
+    lines: rest.reduce((sum, lang) => sum + lang.lines, 0),
+    code: rest.reduce((sum, lang) => sum + lang.code, 0),
+    blank: rest.reduce((sum, lang) => sum + lang.blank, 0),
+    comment: rest.reduce((sum, lang) => sum + lang.comment, 0),
+  };
+  return [...head, other];
+}
+
+function LanguageBar({
+  languages,
+  totalLines,
+  otherLabel,
+}: {
+  languages: ProjectLanguageStat[];
+  totalLines: number;
+  otherLabel: string;
+}) {
+  const barLanguages = collapseLanguagesForBar(languages, otherLabel);
+  if (barLanguages.length === 0) return null;
   return (
     <div className="space-y-2">
       <StackedBar
-        segments={languages.map((lang) => ({
+        segments={barLanguages.map((lang) => ({
           color: resolveLanguageColor(lang.id),
           width: lang.lines,
           label: lang.label,
@@ -211,7 +249,7 @@ function LanguageBar({ languages, totalLines }: { languages: ProjectLanguageStat
         height={10}
       />
       <div className="flex flex-wrap gap-x-4 gap-y-1">
-        {languages.map((lang) => {
+        {barLanguages.map((lang) => {
           const pct = totalLines > 0 ? ((lang.lines / totalLines) * 100).toFixed(1) : '0';
           return (
             <div key={lang.id} className="flex items-center gap-1.5 text-[11px]">
@@ -589,7 +627,6 @@ export function ProjectStatsModal({
 
   const fileCountLabel = lang === 'en' ? 'files' : lang === 'zh-TW' ? '個文件' : '个文件';
   const dirLabel = lang === 'en' ? 'dirs' : lang === 'zh-TW' ? '個目錄' : '个目录';
-  const truncatedLabel = lang === 'en' ? 'file list truncated' : lang === 'zh-TW' ? '文件列表已截斷' : '文件列表已截断';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 backdrop-blur-sm">
@@ -603,6 +640,9 @@ export function ProjectStatsModal({
                 <span className="ml-2 text-fg-dim">
                   · {t.projectStatsAsOf} {formatClock(statsAt)}
                 </span>
+              )}
+              {stats?.truncated && (
+                <span className="ml-2 text-warn">· {t.projectStatsTruncated}</span>
               )}
             </p>
           </div>
@@ -642,6 +682,11 @@ export function ProjectStatsModal({
 
           {stats && (
             <>
+              {stats.truncated && (
+                <div className="rounded-xl border border-warn-bg bg-warn-bg px-4 py-3 text-sm text-warn">
+                  {t.projectStatsTruncated}
+                </div>
+              )}
               <div className="stats-reveal grid grid-cols-3 gap-3">
                 <div className="rounded-xl border border-line bg-base px-4 py-3">
                   <div className="text-[11px] text-fg-muted">{t.projectStatsTotalFiles}</div>
@@ -674,7 +719,11 @@ export function ProjectStatsModal({
                       className="w-32 rounded-lg border border-line bg-deep px-2.5 py-1 text-[11px] text-fg-soft placeholder-slate-600 transition-colors focus:border-accent-soft focus:outline-none"
                     />
                   </div>
-                  <LanguageBar languages={stats.languages.slice(0, 12)} totalLines={stats.totalLines} />
+                  <LanguageBar
+                    languages={stats.languages}
+                    totalLines={stats.totalLines}
+                    otherLabel={t.projectStatsOther}
+                  />
                   <div className="mt-3 max-h-64 overflow-y-auto">
                     <LanguageTable
                       languages={visibleLanguages}
@@ -774,9 +823,6 @@ export function ProjectStatsModal({
                     <div className="text-xs font-semibold text-fg">{t.projectStatsLargestFile}</div>
                     <div className="mt-2 break-all text-sm text-fg-soft">
                       {stats.largestFile.path} · {stats.largestFile.lines.toLocaleString()} lines
-                    </div>
-                    <div className="mt-1 text-[11px] text-fg-muted">
-                      {stats.truncated ? truncatedLabel : ''}
                     </div>
                   </div>
                 )}

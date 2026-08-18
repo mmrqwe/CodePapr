@@ -72,6 +72,11 @@ pub(crate) fn language_from_path(path: &str) -> &'static str {
         "ini" | "conf" | "cfg" | "properties" | "toml" => "ini",
         "java" => "java",
         "js" | "jsx" | "mjs" | "cjs" => "javascript",
+        "clj" | "cljs" | "cljc" | "edn" => "clojure",
+        "erl" | "hrl" => "erlang",
+        "ex" | "exs" | "heex" => "elixir",
+        "gradle" | "groovy" => "groovy",
+        "hs" | "lhs" => "haskell",
         "json" | "jsonc" => "json",
         "kt" | "kts" => "kotlin",
         "less" => "less",
@@ -92,9 +97,11 @@ pub(crate) fn language_from_path(path: &str) -> &'static str {
         "scss" => "scss",
         "sh" | "bash" | "zsh" => "shell",
         "sql" => "sql",
+        "svelte" => "svelte",
         "swift" => "swift",
         "ts" | "tsx" => "typescript",
         "vb" => "vb",
+        "vue" => "vue",
         "xml" | "xaml" | "csproj" | "fsproj" | "props" | "svg" => "xml",
         "yaml" | "yml" => "yaml",
         _ => "plaintext",
@@ -123,14 +130,19 @@ static RUBY_STYLE: CommentSyntax = CommentSyntax { line: &["#"], block: &[("=beg
 static POWERSHELL_STYLE: CommentSyntax = CommentSyntax { line: &["#"], block: &[("<#", "#>")] };
 static FSHARP_STYLE: CommentSyntax = CommentSyntax { line: &["//"], block: &[("(*", "*)")] };
 static SEMI_HASH: CommentSyntax = CommentSyntax { line: &[";", "#"], block: &[] };
+static SEMI: CommentSyntax = CommentSyntax { line: &[";"], block: &[] };
+static PERCENT: CommentSyntax = CommentSyntax { line: &["%"], block: &[] };
 static VB_STYLE: CommentSyntax = CommentSyntax { line: &["'"], block: &[] };
 static BAT_STYLE: CommentSyntax = CommentSyntax { line: &["::"], block: &[] };
+static HASKELL_STYLE: CommentSyntax = CommentSyntax { line: &["--"], block: &[("{-", "-}")] };
+static WEB_SFC_STYLE: CommentSyntax =
+    CommentSyntax { line: &["//"], block: &[("<!--", "-->"), ("/*", "*/")] };
 
 fn comment_syntax(language: &str) -> Option<&'static CommentSyntax> {
     match language {
-        "cpp" | "csharp" | "dart" | "go" | "java" | "javascript" | "kotlin" | "objective-c"
-        | "protobuf" | "rust" | "scala" | "swift" | "typescript" | "graphql" | "less" | "scss"
-        | "bicep" => Some(&C_STYLE),
+        "cpp" | "csharp" | "dart" | "go" | "groovy" | "java" | "javascript" | "json" | "kotlin"
+        | "objective-c" | "protobuf" | "rust" | "scala" | "swift" | "typescript" | "graphql"
+        | "less" | "scss" | "bicep" => Some(&C_STYLE),
         "php" => Some(&C_STYLE_HASH),
         "css" => Some(&CSS_STYLE),
         "fsharp" => Some(&FSHARP_STYLE),
@@ -138,6 +150,11 @@ fn comment_syntax(language: &str) -> Option<&'static CommentSyntax> {
         "sql" | "mysql" | "pgsql" => Some(&SQL_STYLE),
         "lua" => Some(&LUA_STYLE),
         "html" | "xml" | "markdown" => Some(&HTML_STYLE),
+        "vue" | "svelte" => Some(&WEB_SFC_STYLE),
+        "haskell" => Some(&HASKELL_STYLE),
+        "elixir" => Some(&HASH),
+        "clojure" => Some(&SEMI),
+        "erlang" => Some(&PERCENT),
         "ruby" => Some(&RUBY_STYLE),
         "powershell" => Some(&POWERSHELL_STYLE),
         "ini" => Some(&SEMI_HASH),
@@ -184,11 +201,8 @@ fn classify_lines(content: &str, syntax: Option<&CommentSyntax>) -> LineCounts {
             continue;
         };
 
-        if syntax.line.iter().any(|prefix| trimmed.starts_with(prefix)) {
-            counts.comment += 1;
-            continue;
-        }
-
+        // Block openers first so a longer opener that starts with a line-comment
+        // prefix (Lua `--[[` vs `--`) is not eaten as a single-line comment.
         let mut handled = false;
         for (start, end) in syntax.block {
             if trimmed.starts_with(start) {
@@ -204,6 +218,11 @@ fn classify_lines(content: &str, syntax: Option<&CommentSyntax>) -> LineCounts {
             }
         }
         if handled {
+            continue;
+        }
+
+        if syntax.line.iter().any(|prefix| trimmed.starts_with(prefix)) {
+            counts.comment += 1;
             continue;
         }
 
@@ -617,6 +636,14 @@ mod tests {
         assert_eq!(language_from_path("README.md"), "markdown");
         assert_eq!(language_from_path("LICENSE"), "plaintext");
         assert_eq!(language_from_path("win\\script.ps1"), "powershell");
+        assert_eq!(language_from_path("src/App.vue"), "vue");
+        assert_eq!(language_from_path("src/Widget.svelte"), "svelte");
+        assert_eq!(language_from_path("lib/Math.hs"), "haskell");
+        assert_eq!(language_from_path("lib/mix.exs"), "elixir");
+        assert_eq!(language_from_path("src/core.clj"), "clojure");
+        assert_eq!(language_from_path("src/server.erl"), "erlang");
+        assert_eq!(language_from_path("build.gradle"), "groovy");
+        assert_eq!(language_from_path("tsconfig.jsonc"), "json");
     }
 
     #[test]
@@ -654,5 +681,30 @@ mod tests {
         assert_eq!(counts.code, 2);
         assert_eq!(counts.blank, 1);
         assert_eq!(counts.comment, 0);
+    }
+
+    #[test]
+    fn classifies_lua_block_comment_not_just_first_line() {
+        let content = "-- line\n--[[\nblock\n]]\nprint(1)\n";
+        let counts = classify_lines(content, comment_syntax("lua"));
+        assert_eq!(counts.comment, 4);
+        assert_eq!(counts.code, 1);
+        assert_eq!(counts.blank, 0);
+    }
+
+    #[test]
+    fn classifies_jsonc_line_and_block_comments() {
+        let content = "// note\n{\n  \"a\": 1\n}\n/* trailing */\n";
+        let counts = classify_lines(content, comment_syntax("json"));
+        assert_eq!(counts.comment, 2);
+        assert_eq!(counts.code, 3);
+    }
+
+    #[test]
+    fn classifies_vue_html_and_script_comments() {
+        let content = "<!-- tpl -->\n<template>\n</template>\n// script note\nconst x = 1;\n";
+        let counts = classify_lines(content, comment_syntax("vue"));
+        assert_eq!(counts.comment, 2);
+        assert_eq!(counts.code, 3);
     }
 }
