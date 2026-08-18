@@ -96,6 +96,10 @@ export function selectTaskModelRoute(
 
   const primary = buildPrimaryModelRoute(settings);
 
+  if (preferredTier === 'primary') {
+    return primary;
+  }
+
   if (mode === 'plan' || mode === 'app') {
     return {
       ...primary,

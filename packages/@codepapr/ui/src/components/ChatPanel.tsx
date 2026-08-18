@@ -20,6 +20,7 @@ import {
 } from '../store/agentStore';
 import { GoalBanner } from './GoalBanner';
 import type { IImageContent } from '@codepapr/types';
+import { isLocalSlashCommand, parseSlashInput } from '@codepapr/core';
 import { type WorkMode } from '../utils/agentPrompts';
 import { getTranslation } from '../utils/i18n';
 import { useTtsPlayer } from '../hooks/useTtsPlayer';
@@ -260,8 +261,13 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
   // Block sending while the session's history is still loading on demand —
   // submitting early would build context from an incomplete message list.
   // 全局 isLoading 阻断发送：单执行模型下任一会话执行中都不允许开启新回合。
+  // 本地 slash（/help /commands /compact）零 token，回合中仍可执行。
+  const localSlashReady = (() => {
+    const slash = parseSlashInput(input.trim());
+    return Boolean(slash && isLocalSlashCommand(slash.name));
+  })();
   const canSubmit = (!!input.trim() || pendingImages.length > 0 || pendingFiles.length > 0)
-    && !isLoading
+    && (!isLoading || localSlashReady)
     && !sessionMessagesLoading;
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden && !(message.synthetic && message.carryForwardInContext)),
@@ -885,7 +891,15 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
   const handleSend = async () => {
     const userText = input.trim();
     const images = pendingImages.map(({ mediaType, data }) => ({ mediaType, data }));
-    if ((!userText && images.length === 0 && pendingFiles.length === 0) || isLoading || !isConfigured) return;
+    const slash = parseSlashInput(userText);
+    const isLocalSlash = Boolean(slash && isLocalSlashCommand(slash.name));
+    if (
+      (!userText && images.length === 0 && pendingFiles.length === 0)
+      || (!isLocalSlash && isLoading)
+      || (!isLocalSlash && !isConfigured)
+    ) {
+      return;
+    }
     ttsStop();
     const files = pendingFiles;
     const promptText = buildUserPromptWithFiles(userText, files);
@@ -980,7 +994,9 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
 
   const handlePrimaryAction = async () => {
     if (!canSubmit) return;
-    if (!isConfigured) {
+    const slash = parseSlashInput(input.trim());
+    const isLocalSlash = Boolean(slash && isLocalSlashCommand(slash.name));
+    if (!isConfigured && !isLocalSlash) {
       setShowSettings(true);
       return;
     }
@@ -1157,7 +1173,18 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       }
       if (e.key === 'Enter') {
         e.preventDefault();
-        slashDropdownRef.current?.selectCurrent();
+        const token = slashFilter.trim();
+        const selectedName = slashDropdownRef.current?.getSelectedName() ?? null;
+        if (token && selectedName === token) {
+          setSlashFilter(null);
+          void handlePrimaryAction();
+          return;
+        }
+        const completed = slashDropdownRef.current?.selectCurrent() ?? false;
+        if (!completed) {
+          setSlashFilter(null);
+          void handlePrimaryAction();
+        }
         return;
       }
       if (e.key === 'Escape') {
@@ -1549,6 +1576,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                 ref={slashDropdownRef}
                 filter={slashFilter}
                 workspacePath={workspacePath}
+                lang={settings.lang}
                 onSelect={handleSlashSelect}
                 onDismiss={() => setSlashFilter(null)}
               />

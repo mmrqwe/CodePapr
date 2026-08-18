@@ -41,6 +41,18 @@ describe('modelRouting', () => {
     expect(route.reason).toBe('execution-heavy');
   });
 
+  it('honors an explicit primary model hint', () => {
+    const route = selectTaskModelRoute(settings, 'ask', '帮我摘要这篇文章', 'primary');
+    expect(route.tier).toBe('primary');
+    expect(route.model).toBe('deepseek-v4-pro');
+  });
+
+  it('honors an explicit fast model hint', () => {
+    const route = selectTaskModelRoute(settings, 'agent', '帮我摘要这篇文章', 'fast');
+    expect(route.tier).toBe('fast');
+    expect(route.model).toBe('deepseek-v4-flash');
+  });
+
   it('routes context compaction to the fast model when available', () => {
     const route = selectContextCompactionModelRoute(settings);
 

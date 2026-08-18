@@ -129,6 +129,14 @@ vi.mock('../utils/projectStorage', () => ({
     }),
   archiveMemoryRecall: async (workspacePath: string, recallId: string) =>
     invokeMock('archive_memory_recall', { workspacePath, recallId }),
+  loadContextSurface: async () => null,
+  commitContextCompaction: async (_workspacePath: string, request: { id: string; targetGeneration: number }) => ({
+    compactionId: request.id,
+    generation: request.targetGeneration,
+  }),
+  markContextCompactionFailed: async () => undefined,
+  saveContextSurface: async () => undefined,
+  discardContextSurfacesFromGeneration: async () => undefined,
 }));
 
 vi.mock('../utils/appSettingsStorage', () => ({
@@ -768,6 +776,7 @@ describe('useAgentStore.sendMessage', () => {
           model: 'local',
           createdAt: Date.now(),
           language: 'zh-CN',
+          compactionId: 'compact-test-1',
         },
         isStreaming: false,
       },
@@ -835,6 +844,7 @@ describe('useAgentStore.sendMessage', () => {
           model: 'local',
           createdAt: Date.now(),
           language: 'zh-CN',
+          compactionId: 'compact-test-1',
         },
         isStreaming: false,
       },
@@ -1475,6 +1485,180 @@ describe('useAgentStore.sendMessage', () => {
     expect(helpMessage).toContain('/help (或 /commands): 查看命令说明');
     expect(helpMessage).toContain('/review: 审查当前改动或指定范围');
     expect(helpMessage).toContain('/ship: 发布当前工作区改动');
+  });
+
+  it('未知 slash 命令提示 /help，不发给模型', async () => {
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    const consumed = await useAgentStore.getState().sendMessage('/not-a-real-cmd', '/not-a-real-cmd', 'agent');
+
+    expect(consumed).toBe(true);
+    expect(chat).not.toHaveBeenCalled();
+    const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+    expect(sessionMessages.at(-1)?.content ?? '').toContain('未知命令 /not-a-real-cmd');
+  });
+
+  it('/fix 无参数时提示用法并保留草稿', async () => {
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    const consumed = await useAgentStore.getState().sendMessage('/fix', '/fix', 'agent');
+
+    expect(consumed).toBe(false);
+    expect(chat).not.toHaveBeenCalled();
+    const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+    expect(sessionMessages.at(-1)?.content ?? '').toContain('需要参数');
+  });
+
+  it('/review 无参数时默认审查最近的改动', async () => {
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    await useAgentStore.getState().sendMessage('/review', '/review', 'agent');
+
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(String(chat.mock.calls[0]?.[0])).toContain('最近的改动');
+  });
+
+  it('ask 模式下变更类命令改成只读包装', async () => {
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    await useAgentStore.getState().sendMessage('/fix 登录按钮无响应', '/fix 登录按钮无响应', 'ask');
+
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(String(chat.mock.calls[0]?.[0])).toContain('只读模式');
+    expect(String(chat.mock.calls[0]?.[0])).toContain('登录按钮无响应');
+  });
+
+  it('ask 模式下拒绝 /goal', async () => {
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    const consumed = await useAgentStore.getState().sendMessage('/goal exec:npm test', '/goal exec:npm test', 'ask');
+
+    expect(consumed).toBe(false);
+    expect(chat).not.toHaveBeenCalled();
+    const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+    expect(sessionMessages.at(-1)?.content ?? '').toContain('/goal');
+  });
+
+  it('回合进行中不展开模板命令', async () => {
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    useAgentStore.setState({
+      isLoading: true,
+      loadingSessionId: 'session-1',
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    const consumed = await useAgentStore.getState().sendMessage('/review src/', '/review src/', 'agent');
+
+    expect(consumed).toBe(false);
+    expect(chat).not.toHaveBeenCalled();
+  });
+
+  it('自定义命令 agent frontmatter 委派给子代理', async () => {
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_text_file' && args?.relativePath === '.CodePapr/commands/ship.md') {
+        return {
+          path: '.CodePapr/commands/ship.md',
+          content: '---\nagent: explore\n---\n请发布：$ARGUMENTS',
+          bytes: 0,
+        };
+      }
+      if (command === 'list_workspace_files') {
+        return { root: '', entries: [], truncated: false };
+      }
+      throw new Error(`Unexpected invoke call: ${command}`);
+    });
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+      _agentDefinitions: [{ name: 'explore', description: 'e', mode: 'subagent', prompt: 'p' }],
+    });
+
+    await useAgentStore.getState().sendMessage('/ship prod', '/ship prod', 'agent');
+
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(String(chat.mock.calls[0]?.[0])).toContain('explore');
+    expect(String(chat.mock.calls[0]?.[0])).toContain('请发布：prod');
+  });
+
+  it('自定义命令引用未知 agent 时拒绝发送', async () => {
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_text_file' && args?.relativePath === '.CodePapr/commands/ship.md') {
+        return {
+          path: '.CodePapr/commands/ship.md',
+          content: '---\nagent: missing-bot\n---\n请发布：$ARGUMENTS',
+          bytes: 0,
+        };
+      }
+      if (command === 'list_workspace_files') {
+        return { root: '', entries: [], truncated: false };
+      }
+      throw new Error(`Unexpected invoke call: ${command}`);
+    });
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+      _agentDefinitions: [{ name: 'explore', description: 'e', mode: 'subagent', prompt: 'p' }],
+    });
+
+    const consumed = await useAgentStore.getState().sendMessage('/ship prod', '/ship prod', 'agent');
+
+    expect(consumed).toBe(false);
+    expect(chat).not.toHaveBeenCalled();
+    const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+    expect(sessionMessages.at(-1)?.content ?? '').toContain('missing-bot');
+  });
+
+  it('自定义命令 model 覆盖主模型名', async () => {
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_text_file' && args?.relativePath === '.CodePapr/commands/ship.md') {
+        return {
+          path: '.CodePapr/commands/ship.md',
+          content: '---\nmodel: custom-override-model\n---\n请发布：$ARGUMENTS',
+          bytes: 0,
+        };
+      }
+      if (command === 'list_workspace_files') {
+        return { root: '', entries: [], truncated: false };
+      }
+      throw new Error(`Unexpected invoke call: ${command}`);
+    });
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    createAgentMock.mockImplementation(() => createMockAgent({ chat }));
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    await useAgentStore.getState().sendMessage('/ship prod', '/ship prod', 'agent');
+
+    expect(createAgentMock).toHaveBeenCalled();
+    const runtimeArg = createAgentMock.mock.calls.find((call) =>
+      Boolean((call[4] as { model?: string } | undefined)?.model)
+    )?.[4] as { model?: string } | undefined;
+    expect(runtimeArg?.model).toBe('custom-override-model');
   });
 
   it('keeps auto-continuing until a final execution result arrives', async () => {

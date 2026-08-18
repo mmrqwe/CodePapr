@@ -10,19 +10,24 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import {
   BUILTIN_PROMPT_COMMANDS,
+  resolveCommandDescription,
+  resolveCommandUsage,
   type CommandDefinition,
 } from '@codepapr/core';
 import { listCommandDefinitions } from '../utils/projectConfigLoader';
+import type { Lang } from '../utils/i18n';
 
 export interface SlashCommandDropdownHandle {
   navigateDown: () => void;
   navigateUp: () => void;
-  selectCurrent: () => void;
+  selectCurrent: () => boolean;
+  getSelectedName: () => string | null;
 }
 
 interface SlashCommandDropdownProps {
   filter: string;
   workspacePath: string | null;
+  lang?: Lang;
   onSelect: (name: string) => void;
   onDismiss: () => void;
 }
@@ -59,8 +64,11 @@ const META_COMMANDS: readonly CommandDefinition[] = [
 ];
 
 const SlashCommandDropdown = forwardRef<SlashCommandDropdownHandle, SlashCommandDropdownProps>(
-  ({ filter, workspacePath, onSelect, onDismiss }, ref) => {
-    const [commands, setCommands] = useState<CommandDefinition[]>([]);
+  ({ filter, workspacePath, lang = 'zh-CN', onSelect, onDismiss }, ref) => {
+    const [commands, setCommands] = useState<CommandDefinition[]>(() => [
+      ...META_COMMANDS,
+      ...BUILTIN_PROMPT_COMMANDS,
+    ]);
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -106,12 +114,19 @@ const SlashCommandDropdown = forwardRef<SlashCommandDropdownHandle, SlashCommand
       setSelectedIndex((prev) => Math.max(prev - 1, 0));
     }, []);
 
-    const selectCurrent = useCallback(() => {
+    const selectCurrent = useCallback((): boolean => {
       const cmd = filtered[selectedIndex];
       if (cmd) {
         onSelect(cmd.name);
+        return true;
       }
+      return false;
     }, [filtered, selectedIndex, onSelect]);
+
+    const getSelectedName = useCallback(
+      () => filtered[selectedIndex]?.name ?? null,
+      [filtered, selectedIndex]
+    );
 
     useImperativeHandle(
       ref,
@@ -119,8 +134,9 @@ const SlashCommandDropdown = forwardRef<SlashCommandDropdownHandle, SlashCommand
         navigateDown,
         navigateUp,
         selectCurrent,
+        getSelectedName,
       }),
-      [navigateDown, navigateUp, selectCurrent]
+      [navigateDown, navigateUp, selectCurrent, getSelectedName]
     );
 
     useEffect(() => {
@@ -136,6 +152,8 @@ const SlashCommandDropdown = forwardRef<SlashCommandDropdownHandle, SlashCommand
     if (filtered.length === 0) return null;
 
     const tooltipIndex = hoveredIndex ?? selectedIndex;
+    const tooltipCmd = filtered[tooltipIndex];
+    const tooltipUsage = tooltipCmd ? resolveCommandUsage(tooltipCmd, lang) : undefined;
 
     return (
       <div
@@ -143,7 +161,9 @@ const SlashCommandDropdown = forwardRef<SlashCommandDropdownHandle, SlashCommand
         className="absolute bottom-full left-0 right-0 flex mb-2 z-50"
       >
         <div className="flex-1 max-h-[240px] overflow-y-auto rounded-xl border border-line bg-raised shadow-lg shadow-black/30 py-1">
-          {filtered.map((cmd, index) => (
+          {filtered.map((cmd, index) => {
+            const description = resolveCommandDescription(cmd, lang);
+            return (
             <div
               key={cmd.name}
               ref={(el) => {
@@ -168,8 +188,8 @@ const SlashCommandDropdown = forwardRef<SlashCommandDropdownHandle, SlashCommand
               }`}
             >
               <span className="font-mono text-accent whitespace-nowrap">/{cmd.name}</span>
-              {cmd.description && (
-                <span className="text-fg-muted truncate flex-1 min-w-0">{cmd.description}</span>
+              {description && (
+                <span className="text-fg-muted truncate flex-1 min-w-0">{description}</span>
               )}
               {cmd.example && (
                 <span className="hidden group-hover/item:inline text-[10px] text-fg-dim whitespace-nowrap ml-auto">
@@ -177,23 +197,24 @@ const SlashCommandDropdown = forwardRef<SlashCommandDropdownHandle, SlashCommand
                 </span>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
-        {tooltipIndex != null && filtered[tooltipIndex] && filtered[tooltipIndex].usage && (
+        {tooltipCmd && tooltipUsage && (
           <div className="ml-2 w-[320px] max-h-[240px] overflow-y-auto rounded-xl border border-line bg-base px-4 py-3 text-xs text-fg-muted shadow-lg shadow-black/30 flex-shrink-0">
             <div className="text-accent font-mono text-sm mb-1.5">
-              /{filtered[tooltipIndex].name}
+              /{tooltipCmd.name}
             </div>
-            {filtered[tooltipIndex].usage!.split('\n').map((line, i) => (
+            {tooltipUsage.split('\n').map((line, i) => (
               <p key={i} className="leading-relaxed">{line}</p>
             ))}
-            {filtered[tooltipIndex].agent && (
+            {tooltipCmd.agent && (
               <p className="mt-1.5 text-accent">
-                Agent: {filtered[tooltipIndex].agent}
+                Agent: {tooltipCmd.agent}
               </p>
             )}
-            {filtered[tooltipIndex].model && (
-              <p className="text-accent">Model: {filtered[tooltipIndex].model}</p>
+            {tooltipCmd.model && (
+              <p className="text-accent">Model: {tooltipCmd.model}</p>
             )}
           </div>
         )}

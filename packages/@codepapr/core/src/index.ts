@@ -331,9 +331,17 @@ export {
   expandCommandTemplate,
   getBuiltinPromptCommand,
   listBuiltinPromptCommandNames,
+  isLocalSlashCommand,
+  isKnownSlashCommandName,
+  isFilesystemPathSlashName,
+  resolveCommandDescription,
+  resolveCommandUsage,
+  wrapAskModeCommandTemplate,
+  wrapCommandForSubagent,
 } from './agent/slashCommand';
 export type {
   CommandDefinition,
+  LocalizedCommandText,
   ParsedSlashInput,
   ParsedInlineCommandLine,
   CommandExpandContext,

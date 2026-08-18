@@ -193,8 +193,8 @@ export function buildTaskToolDefinition(agents: AgentDefinition[], lang?: string
 }
 
 export const EXECUTION_HEAVY_PATTERNS = [
-  /\b(fix|implement|build|run|test|debug|refactor|edit|write|create|delete|rename)\b/i,
-  /(修复|修復|实现|實現|修改|重构|重構|构建|構建|运行|運行|测试|測試|调试|調試|写入|创建|建立|删除|刪除|重命名)/,
+  /\b(fix|implement|build|run|test|debug|refactor|edit|write|create|delete|rename|new|optimize)\b/i,
+  /(修复|修復|实现|實現|修改|重构|重構|构建|構建|运行|運行|测试|測試|调试|調試|写入|创建|建立|删除|刪除|重命名|优化|優化)/,
   /(文件|代[码碼]|命令|终端|終端|lint|compile|cargo|npm|pnpm|yarn|monaco|tauri)/i,
 ];
 

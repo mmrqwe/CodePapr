@@ -878,6 +878,82 @@ describe('ChatPanel', () => {
     );
   });
 
+  it('无参精确匹配 /help 时 Enter 直接发送，不必先补全空格', async () => {
+    const sendSpy = vi.fn(async () => true);
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ fastModelEnabled: false, apiKey: 'test-key' }),
+      sessions: [],
+      activeSessionId: null,
+      messages: [],
+      sessionMessages: {},
+      _sessionInputState: {},
+      isLoading: false,
+      loadingSessionId: null,
+      sessionMessagesLoading: false,
+      sendMessage: sendSpy,
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const setNativeValue = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      'value'
+    )!.set!;
+    await act(async () => {
+      setNativeValue.call(textarea, '/help');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(sendSpy).toHaveBeenCalledWith('/help', '/help', 'agent', undefined);
+  });
+
+  it('回合进行中仍可发送本地 /help', async () => {
+    const sendSpy = vi.fn(async () => true);
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ fastModelEnabled: false, apiKey: 'test-key' }),
+      sessions: [],
+      activeSessionId: null,
+      messages: [],
+      sessionMessages: {},
+      _sessionInputState: {},
+      isLoading: true,
+      loadingSessionId: 'session-busy',
+      sessionMessagesLoading: false,
+      sendMessage: sendSpy,
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const setNativeValue = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      'value'
+    )!.set!;
+    await act(async () => {
+      setNativeValue.call(textarea, '/help');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(sendSpy).toHaveBeenCalledWith('/help', '/help', 'agent', undefined);
+  });
+
   it('#26：slash 命令发送成功（返回 true）时正常清空草稿', async () => {
     const sendSpy = vi.fn(async () => true);
     useAgentStore.setState((state) => ({

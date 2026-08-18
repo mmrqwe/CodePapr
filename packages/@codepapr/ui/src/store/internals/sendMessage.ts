@@ -9,6 +9,10 @@ import {
   resolveSlashCommandLine,
   splitSlashAttachmentBlock,
   parseGoalCondition,
+  isLocalSlashCommand,
+  resolveCommandUsage,
+  wrapAskModeCommandTemplate,
+  wrapCommandForSubagent,
   evaluateGoalCondition,
   GoalRunner,
   serializeGoalState,
@@ -361,6 +365,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         let effectiveInput = input;
         let effectiveDisplay = displayContent;
         let slashCommandModelHint: 'primary' | 'fast' | undefined;
+        let slashCommandModelOverride: string | undefined;
         let isGoalMode = false;
         let goalCondition: GoalCondition | null = null;
         let goalUserText = '';
@@ -624,7 +629,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 // generation；失败记 failed 行并回滚 checkpoint 消息（不变式 5）。
                 // commitCheckpointOrdered 保证 checkpoint 消息先落 archive 再提交。
                 if (compactApplied && compactNextMessages && workspaceForSlash) {
-                  void commitCheckpointOrdered({
+                  const committed = await commitCheckpointOrdered({
                     sessionId: compactSessionId,
                     workspace: workspaceForSlash,
                     messages: compactNextMessages,
@@ -632,6 +637,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     payload: checkpointResult.message.contextCheckpoint ?? null,
                     checkpointMessageId: checkpointResult.message.id,
                   });
+                  if (!committed) {
+                    return true;
+                  }
                 }
 
                 // ⚠️ 修复：压缩后必须让下一回合真正使用压缩后的上下文。
@@ -686,6 +694,20 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               compactCheckpointInFlight = false;
             }
           }
+
+          const slashLang = normalizedSettings.lang ?? 'zh-CN';
+          const slashT = getTranslation(slashLang);
+
+          if (lower === 'goal' && mode === 'ask') {
+            appendInfoMessage(set, slashT.slashGoalAskMode);
+            return false;
+          }
+
+          // 模板展开含 !`cmd`：必须在单执行守卫之后，避免回合中误跑 shell。
+          if (!isLocalSlashCommand(lower) && (get().isLoading || turnInFlight)) {
+            return false;
+          }
+
           if (lower === 'goal') {
             const goalArgs = slash.args.join(' ');
             try {
@@ -708,39 +730,86 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               return false;
             }
           }
-          if (!isGoalMode && workspaceForSlash) {
-            const def = await loadCommandDefinition(invoke, workspaceForSlash, slash.name).catch(() => null);
+          if (!isGoalMode) {
+            const def = workspaceForSlash
+              ? await loadCommandDefinition(invoke, workspaceForSlash, slash.name).catch(() => null)
+              : null;
             const promptCommand = def ?? getBuiltinPromptCommand(lower);
-            if (promptCommand) {
-              if (promptCommand.model === 'fast') {
-                slashCommandModelHint = 'fast';
+            if (!promptCommand) {
+              appendInfoMessage(set, slashT.unknownSlashCommand.replace('{{name}}', slash.name));
+              return true;
+            }
+
+            let commandArgs = slash.args;
+            if (commandArgs.length === 0 && promptCommand.defaultArgs) {
+              commandArgs = promptCommand.defaultArgs.split(/\s+/).filter(Boolean);
+            }
+            if (promptCommand.requiresArgs && commandArgs.length === 0) {
+              const usage = resolveCommandUsage(promptCommand, slashLang) ?? `/${promptCommand.name}`;
+              appendInfoMessage(
+                set,
+                slashT.slashRequiresArgs
+                  .replace('{{name}}', promptCommand.name)
+                  .replace('{{usage}}', usage)
+              );
+              return false;
+            }
+
+            const commandModel = promptCommand.model?.trim();
+            if (commandModel === 'fast') {
+              slashCommandModelHint = 'fast';
+            } else if (commandModel === 'primary') {
+              slashCommandModelHint = 'primary';
+            } else if (commandModel === 'mentor') {
+              const mentorModel = normalizedSettings.mentorModel.trim();
+              if (!normalizedSettings.mentorEnabled || !mentorModel) {
+                appendInfoMessage(set, slashT.slashMentorModelMissing);
+                return false;
               }
-              try {
-                const expanded = await expandCommandTemplate(promptCommand.template, slash.args, {
-                  readFile: (p) => readWorkspaceTextFile(invoke, workspaceForSlash, p),
-                  runShell: (command) => runWorkspaceInlineCommand(invoke, workspaceForSlash, command),
-                });
-                effectiveInput = slashAttachments ? `${expanded}\n\n${slashAttachments}` : expanded;
-                effectiveDisplay = slashCommandLine;
-              } catch (err) {
-                appendErrorMessage(set, formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'));
+              slashCommandModelOverride = mentorModel;
+            } else if (commandModel) {
+              slashCommandModelOverride = commandModel;
+            }
+
+            if (promptCommand.agent) {
+              const agentName = promptCommand.agent.trim();
+              const found = get()._agentDefinitions.find(
+                (agent) => agent.name === agentName && !agent.internal
+              );
+              if (!found) {
+                appendInfoMessage(set, slashT.slashUnknownAgent.replace('{{agent}}', agentName));
                 return false;
               }
             }
-          } else if (!isGoalMode) {
-            const promptCommand = getBuiltinPromptCommand(lower);
-            if (promptCommand) {
-              if (promptCommand.model === 'fast') {
-                slashCommandModelHint = 'fast';
+
+            try {
+              const expandCtx = workspaceForSlash
+                ? {
+                    readFile: (p: string) => readWorkspaceTextFile(invoke, workspaceForSlash, p),
+                    runShell: (command: string) =>
+                      runWorkspaceInlineCommand(invoke, workspaceForSlash, command),
+                  }
+                : {};
+              let expanded = await expandCommandTemplate(
+                promptCommand.template,
+                commandArgs,
+                expandCtx
+              );
+              if ((mode === 'ask' || mode === 'plan') && promptCommand.mutating) {
+                expanded = wrapAskModeCommandTemplate(expanded, slashLang);
               }
-              try {
-                const expanded = await expandCommandTemplate(promptCommand.template, slash.args, {});
-                effectiveInput = slashAttachments ? `${expanded}\n\n${slashAttachments}` : expanded;
-                effectiveDisplay = slashCommandLine;
-              } catch (err) {
-                appendErrorMessage(set, formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'));
-                return false;
+              if (promptCommand.agent) {
+                expanded = wrapCommandForSubagent(
+                  expanded,
+                  promptCommand.agent.trim(),
+                  slashLang
+                );
               }
+              effectiveInput = slashAttachments ? `${expanded}\n\n${slashAttachments}` : expanded;
+              effectiveDisplay = slashCommandLine;
+            } catch (err) {
+              appendErrorMessage(set, formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'));
+              return false;
             }
           }
         }
@@ -1170,6 +1239,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             taskText,
             slashCommandModelHint
           );
+          if (slashCommandModelOverride) {
+            route = { ...route, model: slashCommandModelOverride };
+          }
           const runtimeSystemPrompt = buildAgentRuntimeSystemPrompt(
             normalizedSettings,
             mode,

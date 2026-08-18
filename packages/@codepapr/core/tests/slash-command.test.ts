@@ -8,6 +8,11 @@ import {
   resolveSlashCommandLine,
   splitSlashAttachmentBlock,
   expandCommandTemplate,
+  isLocalSlashCommand,
+  isKnownSlashCommandName,
+  resolveCommandDescription,
+  wrapAskModeCommandTemplate,
+  wrapCommandForSubagent,
 } from '../src/agent/slashCommand';
 
 describe('slashCommand - parseCommandMarkdown', () => {
@@ -107,7 +112,7 @@ describe('slashCommand - built-in prompt commands', () => {
   it('快速命令声明 fast model 路由偏好', () => {
     expect(getBuiltinPromptCommand('search')?.model).toBe('fast');
     expect(getBuiltinPromptCommand('lint')?.model).toBe('fast');
-    expect(getBuiltinPromptCommand('clean')?.model).toBe('fast');
+    expect(getBuiltinPromptCommand('clean')?.model).toBeUndefined();
     expect(getBuiltinPromptCommand('commit')?.model).toBe('fast');
     expect(getBuiltinPromptCommand('summary')?.model).toBe('fast');
     expect(getBuiltinPromptCommand('build')?.model).toBeUndefined();
@@ -218,5 +223,44 @@ describe('slashCommand - parseInlineCommandLine', () => {
   it('拒绝复合 shell 操作符', () => {
     expect(() => parseInlineCommandLine('git status | cat')).toThrow('不支持');
     expect(() => parseInlineCommandLine('npm test && npm run build')).toThrow('不支持');
+  });
+});
+
+describe('slashCommand - 路径与元数据', () => {
+  it('Unix/Windows 路径不当 slash 命令', () => {
+    expect(parseSlashInput('/Users/foo/src')).toBeNull();
+    expect(parseSlashInput('/usr/bin/env')).toBeNull();
+    expect(parseSlashInput('/C:\\Windows\\System32')).toBeNull();
+  });
+
+  it('内置命令声明 mutating / requiresArgs / defaultArgs', () => {
+    expect(getBuiltinPromptCommand('fix')?.mutating).toBe(true);
+    expect(getBuiltinPromptCommand('fix')?.requiresArgs).toBe(true);
+    expect(getBuiltinPromptCommand('review')?.defaultArgs).toBe('最近的改动');
+    expect(getBuiltinPromptCommand('lint')?.defaultArgs).toBe('.');
+    expect(getBuiltinPromptCommand('clean')?.defaultArgs).toBe('.');
+    expect(getBuiltinPromptCommand('summary')?.defaultArgs).toBe('整个项目');
+    expect(getBuiltinPromptCommand('explain')?.requiresArgs).toBe(true);
+  });
+
+  it('按语言解析内置命令描述', () => {
+    const review = getBuiltinPromptCommand('review');
+    expect(review).not.toBeNull();
+    expect(resolveCommandDescription(review!, 'en')).toMatch(/Review/i);
+    expect(resolveCommandDescription(review!, 'zh-CN')).toContain('审查');
+  });
+
+  it('本地命令与已知命令名', () => {
+    expect(isLocalSlashCommand('help')).toBe(true);
+    expect(isLocalSlashCommand('compact')).toBe(true);
+    expect(isKnownSlashCommandName('review')).toBe(true);
+    expect(isKnownSlashCommandName('not-a-cmd')).toBe(false);
+  });
+
+  it('Ask 包装与子代理包装', () => {
+    expect(wrapAskModeCommandTemplate('TASK', 'zh-CN')).toContain('只读模式');
+    expect(wrapAskModeCommandTemplate('TASK', 'zh-CN')).toContain('TASK');
+    expect(wrapCommandForSubagent('TASK', 'explore', 'zh-CN')).toContain('explore');
+    expect(wrapCommandForSubagent('TASK', 'explore', 'en')).toMatch(/subagent/i);
   });
 });
