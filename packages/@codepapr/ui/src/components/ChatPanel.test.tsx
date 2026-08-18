@@ -824,10 +824,6 @@ describe('ChatPanel', () => {
     });
 
     await act(async () => {
-      // 输入 '/' 会弹出命令下拉，Enter 被下拉拦截（选择建议）；先 Escape 关闭
-      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    });
-    await act(async () => {
       textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
@@ -836,6 +832,49 @@ describe('ChatPanel', () => {
     // 发送被拒绝：草稿必须保留，用户可直接修改重试（旧实现先清空再发送，草稿永久丢失）
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(
       '/review 我的代码'
+    );
+  });
+
+  it('带参数的 slash 命令 Enter 直接发送，不再被命令下拉拦截', async () => {
+    const sendSpy = vi.fn(async () => true);
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ fastModelEnabled: false, apiKey: 'test-key' }),
+      sessions: [],
+      activeSessionId: null,
+      messages: [],
+      sessionMessages: {},
+      _sessionInputState: {},
+      isLoading: false,
+      loadingSessionId: null,
+      sessionMessagesLoading: false,
+      sendMessage: sendSpy,
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const setNativeValue = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      'value'
+    )!.set!;
+    await act(async () => {
+      setNativeValue.call(textarea, '/goal exec:npm test');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(sendSpy).toHaveBeenCalledWith(
+      '/goal exec:npm test',
+      '/goal exec:npm test',
+      'agent',
+      undefined
     );
   });
 

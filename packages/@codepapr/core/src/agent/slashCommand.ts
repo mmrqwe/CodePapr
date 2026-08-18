@@ -138,7 +138,6 @@ export const BUILTIN_PROMPT_COMMANDS: readonly CommandDefinition[] = [
     description: '构建项目并诊断/修复构建错误',
     usage: '构建项目并诊断/修复构建错误。\n用法: /build\n（不带参数，自动运行项目构建命令）',
     example: '/build',
-    model: 'fast',
     template:
       '请构建项目并处理构建错误。先运行构建命令，若成功则输出构建结果摘要。若失败，逐个分析每个构建错误，定位相关文件，按从简到繁的顺序修复。每轮修复后重新构建验证。完成后汇报：构建是否通过、修复了多少个错误、修改了哪些文件。',
   },
@@ -240,6 +239,29 @@ export function parseSlashInput(input: string): ParsedSlashInput | null {
   }
 
   return { name, args: parts.slice(1), prefix };
+}
+
+/**
+ * Slash 解析用「用户键入的命令行」，不要用拼过附件后的 prompt。
+ * ChatPanel 把附件拼进 `input`，`displayContent` 仍是 textarea 原文。
+ */
+export function resolveSlashCommandLine(input: string, displayContent?: string): string {
+  const display = displayContent?.trim();
+  if (display && parseSlashInput(display)) {
+    return display;
+  }
+  return input;
+}
+
+/** 从拼过附件的 input 里取出命令行之后的附件块。 */
+export function splitSlashAttachmentBlock(input: string, commandLine: string): string {
+  if (!commandLine || input === commandLine) {
+    return '';
+  }
+  if (input.startsWith(commandLine)) {
+    return input.slice(commandLine.length).replace(/^\n+/, '');
+  }
+  return '';
 }
 
 export interface CommandExpandContext {

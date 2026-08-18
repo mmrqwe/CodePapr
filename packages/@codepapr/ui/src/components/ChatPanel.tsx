@@ -62,6 +62,7 @@ import { MessageList } from './chat/MessageList';
 import { ModeSelector } from './chat/ModeSelector';
 import {
   buildUserPromptWithFiles,
+  slashCommandNameFilter,
   DEFAULT_SESSION_INPUT,
   MAX_PENDING_FILES,
   MAX_TEXT_FILE_BYTES,
@@ -1629,7 +1630,6 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                   setInput(value);
 
                   let atDetected = false;
-                  let slashDetected = false;
 
                   if (!isComposingRef.current) {
                     const textarea = textareaRef.current;
@@ -1654,18 +1654,6 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                         atDetected = true;
                       }
                     }
-
-                    if (value.startsWith('/')) {
-                      const afterSlash = value.slice(1);
-                      if (!afterSlash.includes('\n')) {
-                        slashDetected = true;
-                      }
-                    } else if (value.startsWith('--')) {
-                      const afterDash = value.slice(2);
-                      if (!afterDash.includes('\n')) {
-                        slashDetected = true;
-                      }
-                    }
                   }
 
                   if (atDetected) {
@@ -1673,14 +1661,8 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                   } else {
                     setAtFilter(null);
                     atTriggerIndexRef.current = -1;
-                  }
-
-                  if (slashDetected) {
-                    setSlashFilter(value.startsWith('--') ? value.slice(2) : value.slice(1));
-                  } else if (atDetected) {
-                    setSlashFilter(null);
-                  } else {
-                    setSlashFilter(null);
+                    // 已开始写参数（命令名后有空白）则关闭下拉，Enter 走发送。
+                    setSlashFilter(slashCommandNameFilter(value));
                   }
                 }}
                 onCompositionStart={() => { isComposingRef.current = true; }}

@@ -5,6 +5,8 @@ import {
   parseCommandMarkdown,
   parseInlineCommandLine,
   parseSlashInput,
+  resolveSlashCommandLine,
+  splitSlashAttachmentBlock,
   expandCommandTemplate,
 } from '../src/agent/slashCommand';
 
@@ -59,6 +61,25 @@ describe('slashCommand - parseSlashInput', () => {
   });
 });
 
+describe('slashCommand - 命令行与附件分离', () => {
+  it('优先用 displayContent 作为命令行，避免附件正文被当成参数', () => {
+    const command = '/review src/App.tsx';
+    const withFiles = `${command}\n\n--- notes.md ---\nSECRET_TOKEN`;
+    expect(resolveSlashCommandLine(withFiles, command)).toBe(command);
+    expect(parseSlashInput(resolveSlashCommandLine(withFiles, command))).toEqual({
+      name: 'review',
+      args: ['src/App.tsx'],
+      prefix: '/',
+    });
+    expect(splitSlashAttachmentBlock(withFiles, command)).toBe('--- notes.md ---\nSECRET_TOKEN');
+  });
+
+  it('没有独立命令行时回退到 input', () => {
+    expect(resolveSlashCommandLine('/help')).toBe('/help');
+    expect(splitSlashAttachmentBlock('/help', '/help')).toBe('');
+  });
+});
+
 describe('slashCommand - built-in prompt commands', () => {
   it('提供常用内置提示命令', () => {
     expect(listBuiltinPromptCommandNames()).toEqual([
@@ -89,10 +110,11 @@ describe('slashCommand - built-in prompt commands', () => {
     expect(getBuiltinPromptCommand('clean')?.model).toBe('fast');
     expect(getBuiltinPromptCommand('commit')?.model).toBe('fast');
     expect(getBuiltinPromptCommand('summary')?.model).toBe('fast');
-    expect(getBuiltinPromptCommand('build')?.model).toBe('fast');
+    expect(getBuiltinPromptCommand('build')?.model).toBeUndefined();
   });
 
-  it('新创建和优化命令使用默认路由（未声明 model）', () => {
+  it('构建命令走默认主模型路由（修复构建错误不是 fast 活）', () => {
+    expect(getBuiltinPromptCommand('build')?.model).toBeUndefined();
     expect(getBuiltinPromptCommand('new')?.model).toBeUndefined();
     expect(getBuiltinPromptCommand('optimize')?.model).toBeUndefined();
   });

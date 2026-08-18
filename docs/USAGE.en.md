@@ -316,9 +316,9 @@ Declare templates in `.CodePapr/commands/<name>.md`, supporting `$ARGUMENTS`, `@
 
 Type `/` to open the command palette.
 
-**Primary model built-in commands:** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize`
+**Primary model built-in commands:** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize` `/build`
 
-**Fast model built-in commands:** `/search` `/lint` `/clean` `/commit` `/summary` `/build`
+**Fast model built-in commands:** `/search` `/lint` `/clean` `/commit` `/summary`
 
 **Local commands (zero tokens):** `/help` `/commands` `/compact`
 

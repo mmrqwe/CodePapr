@@ -1426,6 +1426,27 @@ describe('useAgentStore.sendMessage', () => {
     );
   });
 
+  it('slash 模板只用命令行参数，附件正文追加在展开结果之后', async () => {
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    const command = '/review src/App.tsx';
+    const attached = `${command}\n\n--- notes.md ---\nSECRET_SHOULD_NOT_BE_AN_ARG`;
+    await useAgentStore.getState().sendMessage(attached, command, 'agent');
+
+    expect(chat).toHaveBeenCalledTimes(1);
+    const prompt = String(chat.mock.calls[0]?.[0]);
+    expect(prompt).toContain('请以严格代码审查方式检查 src/App.tsx。');
+    expect(prompt).not.toMatch(/检查 src\/App\.tsx\s+---/);
+    expect(prompt).toContain('--- notes.md ---');
+    expect(prompt).toContain('SECRET_SHOULD_NOT_BE_AN_ARG');
+    const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+    expect(sessionMessages[0]?.content).toBe(command);
+  });
+
   it('shows command descriptions in /help', async () => {
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       if (command === 'list_workspace_files') {

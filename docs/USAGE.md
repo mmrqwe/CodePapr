@@ -355,9 +355,9 @@ Skill 是主 Agent 的可复用操作手册，放在 `.CodePapr/skills/` 下，�
 
 输入 `/` 弹出命令面板。
 
-**主模型内置命令：** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize`
+**主模型内置命令：** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize` `/build`
 
-**快速模型内置命令：** `/search` `/lint` `/clean` `/commit` `/summary` `/build`
+**快速模型内置命令：** `/search` `/lint` `/clean` `/commit` `/summary`
 
 **本地命令（零 token）：** `/help` `/commands` `/compact`
 

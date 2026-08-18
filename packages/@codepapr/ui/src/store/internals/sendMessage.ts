@@ -6,6 +6,8 @@ import {
   expandCommandTemplate,
   getBuiltinPromptCommand,
   parseSlashInput,
+  resolveSlashCommandLine,
+  splitSlashAttachmentBlock,
   parseGoalCondition,
   evaluateGoalCondition,
   GoalRunner,
@@ -486,7 +488,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         };
 
         // 聊天命令：先处理本地命令，再处理项目自定义模板，最后落到内置提示模板。
-        const slash = parseSlashInput(input);
+        // 解析用命令行原文：附件由 ChatPanel 拼进 input，不能当 $ARGUMENTS。
+        const slashCommandLine = resolveSlashCommandLine(input, displayContent);
+        const slash = parseSlashInput(slashCommandLine);
+        const slashAttachments = slash
+          ? splitSlashAttachmentBlock(input, slashCommandLine)
+          : '';
         if (slash) {
           // 本地命令（/help、/compact 等）的反馈经 appendInfoMessage 写入
           // 「当前会话」：无活动会话时消息只落在临时扁平镜像，任何会话切换/
@@ -689,7 +696,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               goalUserText = parenIdx > 0 ? hr.slice(0, parenIdx).trim() : (condition.clauses.length === 0 ? hr : '');
               isGoalMode = true;
               effectiveInput = goalUserText || condition.humanReadable;
-              effectiveDisplay = input;
+              if (slashAttachments) {
+                effectiveInput = `${effectiveInput}\n\n${slashAttachments}`;
+              }
+              effectiveDisplay = slashCommandLine;
             } catch (err) {
               const msg = err instanceof GoalConditionParseError
                 ? err.message
@@ -710,8 +720,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   readFile: (p) => readWorkspaceTextFile(invoke, workspaceForSlash, p),
                   runShell: (command) => runWorkspaceInlineCommand(invoke, workspaceForSlash, command),
                 });
-                effectiveInput = expanded;
-                effectiveDisplay = input;
+                effectiveInput = slashAttachments ? `${expanded}\n\n${slashAttachments}` : expanded;
+                effectiveDisplay = slashCommandLine;
               } catch (err) {
                 appendErrorMessage(set, formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'));
                 return false;
@@ -725,8 +735,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               }
               try {
                 const expanded = await expandCommandTemplate(promptCommand.template, slash.args, {});
-                effectiveInput = expanded;
-                effectiveDisplay = input;
+                effectiveInput = slashAttachments ? `${expanded}\n\n${slashAttachments}` : expanded;
+                effectiveDisplay = slashCommandLine;
               } catch (err) {
                 appendErrorMessage(set, formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'));
                 return false;

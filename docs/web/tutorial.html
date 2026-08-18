@@ -596,7 +596,7 @@ https://api.deepseek.com/v1</code></pre>
             <tr><td>上下文压缩（Compactor 内部代理）</td><td><code>compactionModel</code> 档位（默认快速模型 <code>deepseek-v4-flash</code>，可切主模型）</td><td>0.1</td></tr>
             <tr><td>子代理派发（重型/执行类）</td><td>主模型</td><td>用户配置</td></tr>
             <tr><td>子代理派发（Explore/Scout 快速模式）</td><td>快速模型（可切换为主模型）</td><td>用户配置</td></tr>
-            <tr><td>Slash 命令声明 <code>model: fast</code>（如 <code>/search</code>、<code>/lint</code>、<code>/clean</code>、<code>/commit</code>、<code>/summary</code>、<code>/build</code>）</td><td>快速模型（未启用时回退主模型）</td><td>0.3</td></tr>
+            <tr><td>Slash 命令声明 <code>model: fast</code>（如 <code>/search</code>、<code>/lint</code>、<code>/clean</code>、<code>/commit</code>、<code>/summary</code>）</td><td>快速模型（未启用时回退主模型）</td><td>0.3</td></tr>
           </tbody>
         </table>
 
@@ -1399,12 +1399,12 @@ TTS 数据流：
             <tr><td><code>/doc</code></td><td>为变更或功能更新文档</td><td>主模型</td><td><code>/doc 新增的退款接口</code></td></tr>
             <tr><td><code>/new</code></td><td>根据描述从零创建新文件、组件或功能</td><td>主模型</td><td><code>/new 创建用户重置密码 REST API</code></td></tr>
             <tr><td><code>/optimize</code></td><td>分析并修复性能瓶颈</td><td>主模型</td><td><code>/optimize src/pages/Dashboard.tsx</code></td></tr>
+            <tr><td><code>/build</code></td><td>构建项目并诊断/修复构建错误</td><td>主模型</td><td><code>/build</code></td></tr>
             <tr><td><code>/search</code></td><td>搜索代码库中的模式、用法、定义或引用</td><td>快速模型</td><td><code>/search auth middleware</code></td></tr>
             <tr><td><code>/lint</code></td><td>运行 linter 并修复违规</td><td>快速模型</td><td><code>/lint src/</code></td></tr>
             <tr><td><code>/clean</code></td><td>清理死代码、未用导入和遗留调试语句</td><td>快速模型</td><td><code>/clean src/utils/</code></td></tr>
             <tr><td><code>/commit</code></td><td>暂存改动并生成规范的 commit message</td><td>快速模型</td><td><code>/commit</code></td></tr>
             <tr><td><code>/summary</code></td><td>对文件、模块或整个项目做高层概述</td><td>快速模型</td><td><code>/summary src/core/</code></td></tr>
-            <tr><td><code>/build</code></td><td>构建项目并诊断/修复构建错误</td><td>快速模型</td><td><code>/build</code></td></tr>
           </tbody>
         </table>
 

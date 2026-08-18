@@ -105,9 +105,9 @@ Create a `.CodePapr/` directory at the project root:
 
 Type `/` to bring up the command palette (`/` format is backward-compatible):
 
-**Main model (deep reasoning):** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize`
+**Main model (deep reasoning):** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize` `/build`
 
-**Fast model (faster, cheaper):** `/search` `/lint` `/clean` `/commit` `/summary` `/build`
+**Fast model (faster, cheaper):** `/search` `/lint` `/clean` `/commit` `/summary`
 
 **Local (zero tokens):** `/help` `/commands` `/compact`
 

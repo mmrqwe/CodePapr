@@ -326,6 +326,8 @@ export {
   parseCommandMarkdown,
   parseInlineCommandLine,
   parseSlashInput,
+  resolveSlashCommandLine,
+  splitSlashAttachmentBlock,
   expandCommandTemplate,
   getBuiltinPromptCommand,
   listBuiltinPromptCommandNames,

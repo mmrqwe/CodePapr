@@ -596,7 +596,7 @@ https://api.deepseek.com/v1</code></pre>
             <tr><td>Context compression (internal Compactor agent)</td><td><code>compactionModel</code> tier (default fast model <code>deepseek-v4-flash</code>, switchable to primary)</td><td>0.1</td></tr>
             <tr><td>Sub-agent dispatch (heavy/execution type)</td><td>Primary model</td><td>User configured</td></tr>
             <tr><td>Sub-agent dispatch (Explore/Scout fast mode)</td><td>Fast model (switchable to primary)</td><td>User configured</td></tr>
-            <tr><td>Slash commands declaring <code>model: fast</code> (e.g. <code>/search</code>, <code>/lint</code>, <code>/clean</code>, <code>/commit</code>, <code>/summary</code>, <code>/build</code>)</td><td>Fast model (falls back to primary if not enabled)</td><td>0.3</td></tr>
+            <tr><td>Slash commands declaring <code>model: fast</code> (e.g. <code>/search</code>, <code>/lint</code>, <code>/clean</code>, <code>/commit</code>, <code>/summary</code>)</td><td>Fast model (falls back to primary if not enabled)</td><td>0.3</td></tr>
           </tbody>
         </table>
 
@@ -1399,12 +1399,12 @@ Output Format:
             <tr><td><code>/doc</code></td><td>Update documentation for changes or features</td><td>Primary</td><td><code>/doc New refund endpoint</code></td></tr>
             <tr><td><code>/new</code></td><td>Create new files, components, or features from scratch based on description</td><td>Primary</td><td><code>/new Create user password reset REST API</code></td></tr>
             <tr><td><code>/optimize</code></td><td>Analyze and fix performance bottlenecks</td><td>Primary</td><td><code>/optimize src/pages/Dashboard.tsx</code></td></tr>
+            <tr><td><code>/build</code></td><td>Build the project and diagnose/fix build errors</td><td>Primary</td><td><code>/build</code></td></tr>
             <tr><td><code>/search</code></td><td>Search codebase for patterns, usages, definitions, or references</td><td>Fast</td><td><code>/search auth middleware</code></td></tr>
             <tr><td><code>/lint</code></td><td>Run linter and fix violations</td><td>Fast</td><td><code>/lint src/</code></td></tr>
             <tr><td><code>/clean</code></td><td>Clean up dead code, unused imports, and leftover debug statements</td><td>Fast</td><td><code>/clean src/utils/</code></td></tr>
             <tr><td><code>/commit</code></td><td>Stage changes and generate a well-formed commit message</td><td>Fast</td><td><code>/commit</code></td></tr>
             <tr><td><code>/summary</code></td><td>Provide a high-level overview of a file, module, or entire project</td><td>Fast</td><td><code>/summary src/core/</code></td></tr>
-            <tr><td><code>/build</code></td><td>Build the project and diagnose/fix build errors</td><td>Fast</td><td><code>/build</code></td></tr>
           </tbody>
         </table>
 

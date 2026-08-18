@@ -50,6 +50,26 @@ export function readFileAsImagePreview(file: File): Promise<ImagePreview | null>
   });
 }
 
+/**
+ * 仅在用户还在输入命令名（`/` 或 `--` 后无空白、无换行）时返回过滤串。
+ * 已开始写参数则返回 null，调用方应关闭 slash 下拉，让 Enter 发送。
+ */
+export function slashCommandNameFilter(value: string): string | null {
+  let rest: string | null = null;
+  if (value.startsWith('/')) {
+    rest = value.slice(1);
+  } else if (value.startsWith('--')) {
+    rest = value.slice(2);
+  }
+  if (rest === null) {
+    return null;
+  }
+  if (rest.includes('\n') || /\s/.test(rest)) {
+    return null;
+  }
+  return rest;
+}
+
 export function buildUserPromptWithFiles(userText: string, files: TextFileAttachment[]): string {
   if (files.length === 0) return userText;
   const parts: string[] = [];

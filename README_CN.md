@@ -105,9 +105,9 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 
 输入 `/` 呼出命令面板（`/` 格式兼容旧版）：
 
-**主模型（深度推理）：** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize`
+**主模型（深度推理）：** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize` `/build`
 
-**快速模型（更快、更便宜）：** `/search` `/lint` `/clean` `/commit` `/summary` `/build`
+**快速模型（更快、更便宜）：** `/search` `/lint` `/clean` `/commit` `/summary`
 
 **本地（零 token）：** `/help` `/commands` `/compact`
 
