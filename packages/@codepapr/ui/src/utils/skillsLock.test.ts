@@ -4,10 +4,12 @@ import {
   buildLockEntry,
   collectDefinitionIds,
   collectOverwriteCandidates,
+  collectUninstallSkillIds,
   emptySkillsLock,
   isSkillListingInstalled,
   parseSkillsLock,
   pruneSkillFromLock,
+  removeListingFromLock,
   serializeSkillsLock,
   skillMarkdownPath,
   upsertLockEntry,
@@ -136,6 +138,30 @@ describe('skillsLock', () => {
     const paths = collectOverwriteCandidates(PLUGIN_LISTING, pluginLock(), []);
     expect(paths).toContain(skillMarkdownPath('illustrator'));
     expect(paths).toContain(skillMarkdownPath('palette'));
+  });
+
+  it('uninstall targets plugin sub-skills from the lock, not the card id', () => {
+    expect(
+      collectUninstallSkillIds(
+        PLUGIN_LISTING,
+        pluginLock(),
+        collectDefinitionIds([{ id: 'illustrator' }, { id: 'palette' }])
+      )
+    ).toEqual(['illustrator', 'palette']);
+  });
+
+  it('uninstall falls back to listing name for a legacy single-pack install', () => {
+    expect(
+      collectUninstallSkillIds(
+        SIMPLE_LISTING,
+        emptySkillsLock(),
+        collectDefinitionIds([{ id: 'search' }])
+      )
+    ).toEqual(['search']);
+  });
+
+  it('removeListingFromLock drops the whole plugin entry', () => {
+    expect(removeListingFromLock(pluginLock(), PLUGIN_LISTING).skills).toEqual({});
   });
 
   it('rebuilds installed identity from current definitions instead of accumulating stale ids', () => {

@@ -264,6 +264,22 @@ async function downloadSkillMarkdown(name: string, sourceRepo?: string): Promise
   return null;
 }
 
+const SKILL_PREVIEW_MAX_CHARS = 8_000;
+
+export async function previewSkillMarkdown(
+  name: string,
+  sourceRepo: string
+): Promise<string | null> {
+  const hit = await downloadSkillMarkdown(name, sourceRepo);
+  if (!hit) {
+    return null;
+  }
+  if (hit.content.length <= SKILL_PREVIEW_MAX_CHARS) {
+    return hit.content;
+  }
+  return `${hit.content.slice(0, SKILL_PREVIEW_MAX_CHARS)}\n\n…`;
+}
+
 async function discoverRepoSkills(
   repoPath: string,
   branch: string

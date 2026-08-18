@@ -284,6 +284,49 @@ export function pruneSkillFromLock(lock: SkillsLockFile, skillId: string): Skill
   return changed ? { version: 1, skills } : lock;
 }
 
+/** 卸载时要删的 Skill 目录名：优先锁里的子 Skill，否则回退 listing 身份。 */
+export function collectUninstallSkillIds(
+  listing: SkillListingRef,
+  lock: SkillsLockFile,
+  definitionIds: Set<string>
+): string[] {
+  const entry = findLockEntry(lock, listing);
+  if (entry) {
+    return [...new Set(entry.skillIds)];
+  }
+  const ids: string[] = [];
+  if (definitionIds.has(listing.id)) {
+    ids.push(listing.id);
+  }
+  if (listing.name !== listing.id && definitionIds.has(listing.name)) {
+    ids.push(listing.name);
+  }
+  if (ids.length === 0) {
+    ids.push(listing.name);
+  }
+  return ids;
+}
+
+/** 从锁中去掉整张市场卡片（含其全部子 Skill）。 */
+export function removeListingFromLock(
+  lock: SkillsLockFile,
+  listing: SkillListingRef
+): SkillsLockFile {
+  const entry = findLockEntry(lock, listing);
+  if (!entry) {
+    let next = pruneSkillFromLock(lock, listing.name);
+    if (listing.id !== listing.name) {
+      next = pruneSkillFromLock(next, listing.id);
+    }
+    return next;
+  }
+  let next = lock;
+  for (const skillId of entry.skillIds) {
+    next = pruneSkillFromLock(next, skillId);
+  }
+  return next;
+}
+
 export async function loadSkillsLock(
   invoke: SkillLockInvoke,
   workspacePath: string

@@ -1,18 +1,20 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAgentStore } from '../store/agentStore';
-import { fetchSkillListings, searchSkills } from '../tools/marketSkillApi';
-import { commitSkillInstall, planSkillInstall } from '../tools/marketSkillInstall';
+import { fetchSkillListings, listSkillTags, searchSkills } from '../tools/marketSkillApi';
+import { commitSkillInstall, planSkillInstall, previewSkillMarkdown } from '../tools/marketSkillInstall';
 import type { SkillMarketListing } from '../utils/marketSkillTypes';
 import type { Lang } from '../utils/i18n';
 import {
   buildLockEntry,
   collectDefinitionIds,
   collectOverwriteCandidates,
+  collectUninstallSkillIds,
   emptySkillsLock,
   isSkillListingInstalled,
   listExistingSkillPaths,
   loadSkillsLock,
+  removeListingFromLock,
   saveSkillsLock,
   upsertLockEntry,
   type SkillsLockFile,
@@ -29,7 +31,6 @@ function copy(lang: Lang | undefined) {
       installing: 'Installing...',
       installed: 'Installed',
       installError: 'Install failed',
-      loadMore: 'Load More',
       loading: 'Loading skills...',
       empty: 'No skills found.',
       error: 'Failed to load skills.',
@@ -42,13 +43,29 @@ function copy(lang: Lang | undefined) {
       verified: 'Verified',
       notVerified: 'Pending',
       noWorkspace: 'Open a project workspace first to install skills.',
+      noWorkspaceOpen: 'No workspace open',
       installSuccess: 'Skill installed to .CodePapr/skills/',
       tags: 'Tags',
+      allTags: 'All',
       back: 'Back to results',
       pluginNoticeTitle: 'This is a Claude Code Plugin',
       pluginNoticeDesc: 'This skill is designed as a Claude Code plugin with commands, hooks, and multi-agent orchestration. CodePapr can only install the SKILL.md instruction files; full plugin features may not work correctly.',
       pluginNoticeHint: 'Installing will attempt to extract available sub-skills as best-effort.',
       tryInstallSubskills: 'Try Install (sub-skills only)',
+      update: 'Update',
+      uninstall: 'Uninstall',
+      uninstalling: 'Uninstalling...',
+      preview: 'SKILL.md preview',
+      previewLoading: 'Loading preview…',
+      previewEmpty: 'No SKILL.md preview available.',
+      previewError: 'Failed to load preview.',
+      installMany: (title: string, count: number, resources: number) =>
+        resources > 0
+          ? `${title}: ${count} skills + ${resources} resources installed`
+          : `${title}: ${count} skills installed`,
+      installWithResources: (title: string, resources: number) =>
+        `${title}: SKILL.md + ${resources} resources installed`,
+      uninstallSuccess: (title: string) => `${title} uninstalled`,
     };
   }
   if (lang === 'zh-TW') {
@@ -61,7 +78,6 @@ function copy(lang: Lang | undefined) {
       installing: '安裝中...',
       installed: '已安裝',
       installError: '安裝失敗',
-      loadMore: '載入更多',
       loading: '載入中...',
       empty: '沒有找到 Skill。',
       error: '載入失敗。',
@@ -74,13 +90,29 @@ function copy(lang: Lang | undefined) {
       verified: '已驗證',
       notVerified: '待驗證',
       noWorkspace: '請先開啟專案工作區再安裝 Skill。',
+      noWorkspaceOpen: '尚未開啟工作區',
       installSuccess: 'Skill 已安裝到 .CodePapr/skills/',
       tags: '標籤',
+      allTags: '全部',
       back: '返回結果',
       pluginNoticeTitle: '這是 Claude Code 外掛',
       pluginNoticeDesc: '此 Skill 設計為 Claude Code 外掛，包含指令、鉤子與多 Agent 協作。CodePapr 僅能安裝 SKILL.md 指令檔，完整外掛功能可能無法正常運作。',
       pluginNoticeHint: '安裝將盡力提取可用的子技能。',
       tryInstallSubskills: '嘗試安裝（僅子技能）',
+      update: '更新',
+      uninstall: '卸載',
+      uninstalling: '卸載中...',
+      preview: 'SKILL.md 預覽',
+      previewLoading: '正在載入預覽…',
+      previewEmpty: '沒有可用的 SKILL.md 預覽。',
+      previewError: '預覽載入失敗。',
+      installMany: (title: string, count: number, resources: number) =>
+        resources > 0
+          ? `${title}：已安裝 ${count} 個 Skill + ${resources} 個資源`
+          : `${title}：已安裝 ${count} 個 Skill`,
+      installWithResources: (title: string, resources: number) =>
+        `${title}：已安裝 SKILL.md + ${resources} 個資源`,
+      uninstallSuccess: (title: string) => `已卸載 ${title}`,
     };
   }
   return {
@@ -92,7 +124,6 @@ function copy(lang: Lang | undefined) {
     installing: '安装中...',
     installed: '已安装',
     installError: '安装失败',
-    loadMore: '加载更多',
     loading: '加载中...',
     empty: '没有找到 Skill。',
     error: '加载失败。',
@@ -105,13 +136,29 @@ function copy(lang: Lang | undefined) {
     verified: '已验证',
     notVerified: '待验证',
     noWorkspace: '请先打开项目工作区再安装 Skill。',
+    noWorkspaceOpen: '尚未打开工作区',
     installSuccess: 'Skill 已安装到 .CodePapr/skills/',
     tags: '标签',
+    allTags: '全部',
     back: '返回结果',
     pluginNoticeTitle: '这是 Claude Code 插件',
     pluginNoticeDesc: '此 Skill 设计为 Claude Code 插件，包含命令、钩子与多 Agent 协作。CodePapr 仅能安装 SKILL.md 指令文件，完整插件功能可能无法正常运行。',
     pluginNoticeHint: '安装将尽力提取可用的子技能。',
     tryInstallSubskills: '尝试安装（仅子技能）',
+    update: '更新',
+    uninstall: '卸载',
+    uninstalling: '卸载中...',
+    preview: 'SKILL.md 预览',
+    previewLoading: '正在加载预览…',
+    previewEmpty: '没有可用的 SKILL.md 预览。',
+    previewError: '预览加载失败。',
+    installMany: (title: string, count: number, resources: number) =>
+      resources > 0
+        ? `${title}：已安装 ${count} 个 Skill + ${resources} 个资源`
+        : `${title}：已安装 ${count} 个 Skill`,
+    installWithResources: (title: string, resources: number) =>
+      `${title}：已安装 SKILL.md + ${resources} 个资源`,
+    uninstallSuccess: (title: string) => `已卸载 ${title}`,
   };
 }
 
@@ -145,18 +192,22 @@ function ListingCard({
   listing,
   isInstalled,
   isInstalling,
+  isUninstalling,
   installError,
   onSelect,
   onInstall,
+  onUninstall,
   onRetryInstall,
   c,
 }: {
   listing: SkillMarketListing;
   isInstalled: boolean;
   isInstalling: boolean;
+  isUninstalling: boolean;
   installError?: string;
   onSelect: (listing: SkillMarketListing) => void;
   onInstall: (listing: SkillMarketListing) => void;
+  onUninstall: (listing: SkillMarketListing) => void;
   onRetryInstall: (listing: SkillMarketListing) => void;
   c: ReturnType<typeof copy>;
 }) {
@@ -200,10 +251,27 @@ function ListingCard({
 
       <div className="mt-auto flex items-center justify-between border-t border-line pt-2.5">
         <span />
-        {isInstalled ? (
-          <span className="rounded-lg bg-ok-bg px-3 py-1.5 text-[10px] font-semibold text-ok">{c.installed}</span>
+        {isUninstalling ? (
+          <span className="rounded-lg bg-danger-bg px-3 py-1.5 text-[10px] font-semibold text-danger">{c.uninstalling}</span>
         ) : isInstalling ? (
           <span className="rounded-lg bg-purple-500/20 px-3 py-1.5 text-[10px] font-semibold text-purple-200">{c.installing}</span>
+        ) : isInstalled ? (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onInstall(listing); }}
+              className="rounded-lg bg-purple-500/20 px-3 py-1.5 text-[10px] font-semibold text-purple-100 transition-colors hover:bg-purple-500/35"
+            >
+              {c.update}
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onUninstall(listing); }}
+              className="rounded-lg bg-danger-bg px-3 py-1.5 text-[10px] font-semibold text-danger transition-colors hover:bg-danger-bg"
+            >
+              {c.uninstall}
+            </button>
+          </div>
         ) : installError ? (
           // #19：失败时除错误信息外提供「重试」按钮——旧实现只有错误徽标，
           // 只能进详情页重试，卡片上无法直接重来。
@@ -237,8 +305,10 @@ function SkillDetail({
   listing,
   isInstalled,
   isInstalling,
+  isUninstalling,
   installError,
   onInstall,
+  onUninstall,
   onClose,
   onCloseModal,
   c,
@@ -246,12 +316,42 @@ function SkillDetail({
   listing: SkillMarketListing;
   isInstalled: boolean;
   isInstalling: boolean;
+  isUninstalling: boolean;
   installError?: string;
   onInstall: (listing: SkillMarketListing) => void;
+  onUninstall: (listing: SkillMarketListing) => void;
   onClose: () => void;
   onCloseModal: () => void;
   c: ReturnType<typeof copy>;
 }) {
+  const [preview, setPreview] = useState<string | null>(null);
+  const [previewState, setPreviewState] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading');
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreview(null);
+    setPreviewState('loading');
+    void previewSkillMarkdown(listing.name, listing.sourceRepo)
+      .then((content) => {
+        if (cancelled) return;
+        if (content?.trim()) {
+          setPreview(content);
+          setPreviewState('ready');
+        } else {
+          setPreview(null);
+          setPreviewState('empty');
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPreview(null);
+        setPreviewState('error');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [listing.id, listing.name, listing.sourceRepo]);
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-line px-6 py-4">
@@ -307,6 +407,24 @@ function SkillDetail({
           </div>
         )}
 
+        <div className="mt-5">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{c.preview}</h3>
+          {previewState === 'loading' && (
+            <p className="text-xs text-fg-muted">{c.previewLoading}</p>
+          )}
+          {previewState === 'error' && (
+            <p className="text-xs text-danger">{c.previewError}</p>
+          )}
+          {previewState === 'empty' && (
+            <p className="text-xs text-fg-muted">{c.previewEmpty}</p>
+          )}
+          {previewState === 'ready' && preview && (
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-2xl border border-line bg-base p-3 text-[11px] leading-relaxed text-fg-muted">
+              {preview}
+            </pre>
+          )}
+        </div>
+
         <div className="mt-5 rounded-2xl border border-line bg-base p-4">
           <h3 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-muted">{c.repository}</h3>
           <code className="mt-2 block truncate text-[11px] text-fg-muted">{listing.sourceRepo}</code>
@@ -352,17 +470,31 @@ function SkillDetail({
       </div>
 
       <div className="border-t border-line px-6 py-4">
-        {isInstalled ? (
-          <span className="inline-flex w-full items-center justify-center rounded-xl bg-ok-bg py-3 text-sm font-semibold text-ok">
-            <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-            </svg>
-            {c.installed}
+        {isUninstalling ? (
+          <span className="inline-flex w-full items-center justify-center rounded-xl bg-danger-bg py-3 text-sm font-semibold text-danger">
+            {c.uninstalling}
           </span>
         ) : isInstalling ? (
           <span className="inline-flex w-full items-center justify-center rounded-xl bg-purple-500/20 py-3 text-sm font-semibold text-purple-200">
             {c.installing}
           </span>
+        ) : isInstalled ? (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => onInstall(listing)}
+              className="flex flex-1 items-center justify-center rounded-xl border border-purple-500/50 bg-purple-500/15 py-3 text-sm font-semibold text-purple-100 transition-colors hover:bg-purple-500/25"
+            >
+              {c.update}
+            </button>
+            <button
+              type="button"
+              onClick={() => onUninstall(listing)}
+              className="flex flex-1 items-center justify-center rounded-xl border border-danger-bg bg-danger-bg py-3 text-sm font-semibold text-danger transition-colors hover:bg-danger-bg"
+            >
+              {c.uninstall}
+            </button>
+          </div>
         ) : installError ? (
           <div className="text-center">
             <span className="text-xs text-danger">{installError}</span>
@@ -408,6 +540,16 @@ export function confirmSkillOverwrite(lang: string | undefined, title: string): 
   return typeof window !== 'undefined' && window.confirm(confirmText);
 }
 
+export function confirmSkillUninstall(lang: string | undefined, title: string): boolean {
+  const confirmText =
+    lang === 'en'
+      ? `Uninstall "${title}"? Local skill files will be deleted. This cannot be undone.`
+      : lang === 'zh-TW'
+        ? `卸載「${title}」？將刪除本地 Skill 檔案，此操作無法撤銷。`
+        : `卸载「${title}」？将删除本地 Skill 文件，此操作无法撤销。`;
+  return typeof window !== 'undefined' && window.confirm(confirmText);
+}
+
 async function refreshSkills(workspacePath: string) {
   try {
     await useAgentStore.getState()._loadProjectConfig(workspacePath);
@@ -427,9 +569,11 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [selectedListing, setSelectedListing] = useState<SkillMarketListing | null>(null);
   const [installingIds, setInstallingIds] = useState<Set<string>>(new Set());
+  const [uninstallingIds, setUninstallingIds] = useState<Set<string>>(new Set());
   const [installErrors, setInstallErrors] = useState<Record<string, string>>({});
   const [lock, setLock] = useState<SkillsLockFile>(emptySkillsLock);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -563,10 +707,9 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
       setLock(nextLock);
 
       if (result.installed.length > 1) {
-        const resInfo = result.resources > 0 ? ` + ${result.resources} resources` : '';
-        showToast(`${listing.title}: ${result.installed.length} skills${resInfo} installed`);
+        showToast(c.installMany(listing.title, result.installed.length, result.resources));
       } else if (result.resources > 0) {
-        showToast(`${listing.title}: SKILL.md + ${result.resources} resources installed`);
+        showToast(c.installWithResources(listing.title, result.resources));
       } else {
         showToast(`${listing.title} ${c.installSuccess}`);
       }
@@ -591,9 +734,69 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
     [handleInstall]
   );
 
+  const handleUninstall = useCallback(async (listing: SkillMarketListing) => {
+    if (!workspacePath) {
+      showToast(c.noWorkspace);
+      return;
+    }
+    if (!confirmSkillUninstall(settings.lang, listing.title)) {
+      return;
+    }
+
+    setUninstallingIds((prev) => new Set(prev).add(listing.id));
+    setInstallErrors((prev) => {
+      const next = { ...prev };
+      delete next[listing.id];
+      return next;
+    });
+
+    const finish = () => {
+      setUninstallingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(listing.id);
+        return next;
+      });
+    };
+
+    try {
+      const currentLock = await loadSkillsLock(invoke, workspacePath);
+      const skillIds = collectUninstallSkillIds(listing, currentLock, definitionIds);
+      for (const skillId of skillIds) {
+        try {
+          await invoke('delete_workspace_dir', {
+            workspacePath,
+            relativePath: `.CodePapr/skills/${skillId}`,
+          });
+        } catch {
+          try {
+            await invoke('delete_workspace_file', {
+              workspacePath,
+              relativePath: `.CodePapr/skills/${skillId}.md`,
+            });
+          } catch {
+            // 目录或扁平文件可能已经不在磁盘上
+          }
+        }
+      }
+
+      const nextLock = removeListingFromLock(currentLock, listing);
+      await saveSkillsLock(invoke, workspacePath, nextLock);
+      setLock(nextLock);
+      showToast(c.uninstallSuccess(listing.title));
+      await refreshSkills(workspacePath);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setInstallErrors((prev) => ({ ...prev, [listing.id]: msg || c.installError }));
+    } finally {
+      finish();
+    }
+  }, [workspacePath, c, showToast, settings.lang, definitionIds]);
+
+  const availableTags = useMemo(() => listSkillTags(listings), [listings]);
+
   const filteredListings = useMemo(() => {
-    return searchSkills(listings, searchQuery);
-  }, [listings, searchQuery]);
+    return searchSkills(listings, searchQuery, selectedTag);
+  }, [listings, searchQuery, selectedTag]);
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-overlay backdrop-blur-sm">
@@ -604,7 +807,7 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
             <h2 className="text-lg font-semibold text-fg">{c.title}</h2>
             <span className="rounded-lg border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-[10px] font-semibold text-purple-200">{c.agentuse}</span>
             {!workspacePath && (
-              <span className="rounded-lg border border-warn-bg bg-warn-bg px-2 py-1 text-[10px] text-warn">No workspace open</span>
+              <span className="rounded-lg border border-warn-bg bg-warn-bg px-2 py-1 text-[10px] text-warn">{c.noWorkspaceOpen}</span>
             )}
           </div>
           <button onClick={onClose} title={c.close} className="text-2xl leading-none text-fg-muted hover:text-fg-soft">×</button>
@@ -626,6 +829,35 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
               className="w-full rounded-xl border border-line bg-base py-2 pl-9 pr-3 text-sm text-fg placeholder-slate-600 focus:border-purple-500/60 focus:outline-none"
             />
           </div>
+          {availableTags.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => setSelectedTag(null)}
+                className={`rounded-md border px-2 py-0.5 text-[10px] ${
+                  selectedTag === null
+                    ? 'border-purple-500/50 bg-purple-500/15 text-purple-100'
+                    : 'border-line text-fg-muted hover:border-purple-500/40'
+                }`}
+              >
+                {c.allTags}
+              </button>
+              {availableTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => setSelectedTag((current) => (current === tag ? null : tag))}
+                  className={`rounded-md border px-2 py-0.5 text-[10px] ${
+                    selectedTag === tag
+                      ? 'border-purple-500/50 bg-purple-500/15 text-purple-100'
+                      : 'border-line text-fg-muted hover:border-purple-500/40'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Content */}
@@ -667,9 +899,11 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
                     listing={listing}
                     isInstalled={isSkillInstalled(listing)}
                     isInstalling={installingIds.has(listing.id)}
+                    isUninstalling={uninstallingIds.has(listing.id)}
                     installError={installErrors[listing.id]}
                     onSelect={setSelectedListing}
                     onInstall={handleInstall}
+                    onUninstall={handleUninstall}
                     onRetryInstall={handleRetryInstall}
                     c={c}
                   />
@@ -685,8 +919,10 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
                 listing={selectedListing}
                 isInstalled={isSkillInstalled(selectedListing)}
                 isInstalling={installingIds.has(selectedListing.id)}
+                isUninstalling={uninstallingIds.has(selectedListing.id)}
                 installError={installErrors[selectedListing.id]}
                 onInstall={handleInstall}
+                onUninstall={handleUninstall}
                 onClose={() => setSelectedListing(null)}
                 onCloseModal={onClose}
                 c={c}

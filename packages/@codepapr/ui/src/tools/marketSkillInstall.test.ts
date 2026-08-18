@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   isBinarySkillResource,
   packDirCandidates,
+  previewSkillMarkdown,
   rawGithubUrl,
   resourceDirCandidates,
 } from './marketSkillInstall';
@@ -34,5 +35,27 @@ describe('marketSkillInstall paths', () => {
     expect(rawGithubUrl('acme/skills', 'develop', 'skills/foo/SKILL.md')).toBe(
       'https://raw.githubusercontent.com/acme/skills/develop/skills/foo/SKILL.md'
     );
+  });
+});
+
+describe('previewSkillMarkdown', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('returns a truncated SKILL.md preview from the catalog', async () => {
+    const body = `# Search\n\n${'x'.repeat(9_000)}`;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => ({
+        ok: String(url).includes('awesome-skills/skills/search/SKILL.md'),
+        text: async () => body,
+      }))
+    );
+
+    const preview = await previewSkillMarkdown('search', '');
+    expect(preview?.startsWith('# Search')).toBe(true);
+    expect(preview?.endsWith('…')).toBe(true);
+    expect(preview?.length).toBeLessThan(body.length);
   });
 });

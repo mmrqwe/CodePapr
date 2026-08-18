@@ -181,13 +181,37 @@ export async function fetchSkillListings(options?: { forceRefresh?: boolean }): 
   return sorted;
 }
 
-export function searchSkills(listings: SkillMarketListing[], query: string): SkillMarketListing[] {
-  if (!query.trim()) return listings;
+export function listSkillTags(listings: SkillMarketListing[]): string[] {
+  const seen = new Map<string, string>();
+  for (const listing of listings) {
+    for (const tag of listing.tags) {
+      const trimmed = tag.trim();
+      if (!trimmed) continue;
+      const key = trimmed.toLowerCase();
+      if (!seen.has(key)) {
+        seen.set(key, trimmed);
+      }
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
+export function searchSkills(
+  listings: SkillMarketListing[],
+  query: string,
+  tag?: string | null,
+): SkillMarketListing[] {
   const q = query.toLowerCase().trim();
-  return listings.filter(
-    (item) =>
+  const tagNeedle = tag?.trim().toLowerCase() ?? '';
+  return listings.filter((item) => {
+    if (tagNeedle && !item.tags.some((t) => t.toLowerCase() === tagNeedle)) {
+      return false;
+    }
+    if (!q) return true;
+    return (
       item.title.toLowerCase().includes(q) ||
       item.description.toLowerCase().includes(q) ||
-      item.tags.some((t) => t.includes(q)),
-  );
+      item.tags.some((t) => t.toLowerCase().includes(q))
+    );
+  });
 }

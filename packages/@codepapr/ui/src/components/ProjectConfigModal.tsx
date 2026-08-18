@@ -10,7 +10,6 @@ import {
 import { useAgentStore } from '../store/agentStore';
 import { MonacoTextEditor } from './MonacoTextEditor';
 import { getTranslation, type Lang } from '../utils/i18n';
-import { loadProjectState, saveProjectState } from '../utils/projectStorage';
 import { loadSkillsLock, pruneSkillFromLock, saveSkillsLock } from '../utils/skillsLock';
 import { collectSkillEntryRefs } from '../utils/projectConfigLoader';
 
@@ -63,6 +62,7 @@ type ConfigTab = 'rules' | 'agents' | 'skills' | 'commands';
 
 const AGENTS_DIR = '.CodePapr/agents';
 const SKILLS_DIR = '.CodePapr/skills';
+const SKILL_METADATA_MAX_BYTES = 8_192;
 const COMMANDS_DIR = '.CodePapr/commands';
 const PROJECT_AGENTS_FILE = '.CodePapr/AGENTS.md';
 
@@ -223,6 +223,16 @@ function confirmOverwriteItem(lang: Lang | undefined, name: string): boolean {
   return typeof window !== 'undefined' && window.confirm(text);
 }
 
+function truncatedSkillsListHint(lang?: Lang): string {
+  if (lang === 'en') {
+    return 'The Skill list was truncated. Some skills may be missing.';
+  }
+  if (lang === 'zh-TW') {
+    return 'Skill 列表被截斷，部分 Skill 可能未顯示。';
+  }
+  return 'Skill 列表被截断，部分 Skill 可能未显示。';
+}
+
 export function ProjectConfigModal({
   workspacePath,
   lang,
@@ -257,6 +267,7 @@ export function ProjectConfigModal({
   const [savedAgentContent, setSavedAgentContent] = useState('');
   const [savedSkillContent, setSavedSkillContent] = useState('');
   const [savedCommandContent, setSavedCommandContent] = useState('');
+  const [skillsListTruncated, setSkillsListTruncated] = useState(false);
   const wasSkillMarketOpen = useRef(false);
 
   const selectedAgentPath = useMemo(
@@ -357,26 +368,23 @@ export function ProjectConfigModal({
     if (!workspacePath) return;
     let result: ListFilesResult;
     try {
-      const [listResult, snapshot] = await Promise.all([
-        invoke<ListFilesResult>('list_workspace_files', {
-          workspacePath,
-          relativePath: SKILLS_DIR,
-          maxDepth: 10,
-        }),
-        loadProjectState(workspacePath),
-      ]);
-      result = listResult;
-      const enabledById = normalizeSkillEnabledById(snapshot.skillEnabledById);
+      result = await invoke<ListFilesResult>('list_workspace_files', {
+        workspacePath,
+        relativePath: SKILLS_DIR,
+        maxDepth: 10,
+      });
+      setSkillsListTruncated(Boolean(result.truncated));
+      const enabledById = normalizeSkillEnabledById(useAgentStore.getState().skillEnabledById);
       const refs = collectSkillEntryRefs(result.entries);
       const entries = await Promise.all(
         refs.map(async (entry) => {
           try {
-            const result = await invoke<ReadFileResult>('read_text_file', {
+            const file = await invoke<ReadFileResult>('read_text_file', {
               workspacePath,
               relativePath: entry.relativePath,
-              maxBytes: 300_000,
+              maxBytes: SKILL_METADATA_MAX_BYTES,
             });
-            const metadata = readSkillMetadata(entry.id, result.content);
+            const metadata = readSkillMetadata(entry.id, file.content);
             return {
               ...entry,
               skillName: metadata.name,
@@ -412,6 +420,7 @@ export function ProjectConfigModal({
       setSelectedSkillName(null);
       setSkillContent('');
       setSavedSkillContent('');
+      setSkillsListTruncated(false);
     }
   }, [workspacePath]);
 
@@ -563,22 +572,9 @@ export function ProjectConfigModal({
 
   const persistSkillEnabled = useCallback(
     async (skillId: string, enabled: boolean | null) => {
-      const snapshot = await loadProjectState(workspacePath);
-      const nextSkillEnabledById = normalizeSkillEnabledById(snapshot.skillEnabledById);
-      if (enabled === null || enabled) {
-        delete nextSkillEnabledById[skillId];
-      } else {
-        nextSkillEnabledById[skillId] = false;
-      }
-
-      await saveProjectState(workspacePath, {
-        ...snapshot,
-        skillEnabledById: nextSkillEnabledById,
-      });
       setSkillEnabledState(skillId, enabled);
-      return nextSkillEnabledById;
     },
-    [setSkillEnabledState, workspacePath]
+    [setSkillEnabledState]
   );
 
   const saveRules = async () => {
@@ -1187,6 +1183,11 @@ export function ProjectConfigModal({
                   </div>
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                  {skillsListTruncated && (
+                    <div className="mb-2 rounded-lg border border-warn-bg bg-warn-bg px-2 py-1.5 text-[10px] leading-relaxed text-warn">
+                      {truncatedSkillsListHint(lang ?? settings.lang)}
+                    </div>
+                  )}
                   {skillEntries.length === 0 && (
                     <div className="px-2 py-6 text-center text-xs text-fg-dim">
                       {t.projectConfigNoSkills}

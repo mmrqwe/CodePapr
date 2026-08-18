@@ -3,7 +3,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { sanitizeMcpToolPart } from '../utils/mcpTypes';
 import { isListingInstalled } from './McpMarketModal';
-import { confirmSkillOverwrite } from './SkillMarketModal';
+import { confirmSkillOverwrite, confirmSkillUninstall } from './SkillMarketModal';
 import type { MarketMCPListing } from '../utils/mcpMarketTypes';
 
 function mcpListing(overrides: Partial<MarketMCPListing>): MarketMCPListing {
@@ -70,5 +70,22 @@ describe('confirmSkillOverwrite（N20 Skill 重装覆盖确认）', () => {
   it('用户取消时返回 false（不覆盖）', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false);
     expect(confirmSkillOverwrite('en', 'Article Illustrator')).toBe(false);
+  });
+});
+
+describe('confirmSkillUninstall', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('确认文案包含技能标题', () => {
+    let captured = '';
+    vi.spyOn(window, 'confirm').mockImplementation((message?: string) => {
+      captured = message ?? '';
+      return true;
+    });
+    expect(confirmSkillUninstall('zh-CN', '文章插画')).toBe(true);
+    expect(captured).toContain('文章插画');
+    expect(captured).toContain('卸载');
   });
 });

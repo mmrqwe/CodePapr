@@ -29,6 +29,7 @@ vi.mock('./MonacoTextEditor', () => ({
 }));
 
 import { ProjectConfigModal, unusedSkillDraftName } from './ProjectConfigModal';
+import { useAgentStore } from '../store/agentStore';
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
 
@@ -43,6 +44,7 @@ describe('ProjectConfigModal', () => {
   let root: Root;
   let projectStateJson: string;
   let skillsLockJson: string;
+  let skillsListTruncated: boolean;
 
   beforeEach(() => {
     projectStateJson = JSON.stringify({
@@ -77,6 +79,7 @@ describe('ProjectConfigModal', () => {
         },
       },
     });
+    skillsListTruncated = false;
     invokeMock.mockReset();
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
@@ -113,7 +116,7 @@ describe('ProjectConfigModal', () => {
               { path: '.CodePapr/skills/search', name: 'search', kind: 'dir', isDir: true },
               { path: '.CodePapr/skills/search/SKILL.md', name: 'SKILL.md', kind: 'file' },
             ],
-            truncated: false,
+            truncated: skillsListTruncated,
           };
         }
         if (relativePath === '.CodePapr/commands') {
@@ -161,6 +164,7 @@ describe('ProjectConfigModal', () => {
       root.unmount();
     });
     container.remove();
+    useAgentStore.setState({ skillEnabledById: {} });
     vi.restoreAllMocks();
   });
 
@@ -186,6 +190,22 @@ describe('ProjectConfigModal', () => {
 
     expect(container.textContent).toContain('search');
     expect(container.textContent).toContain('Skill 怎么工作');
+    expect(
+      invokeMock.mock.calls.some(
+        ([command, args]) =>
+          command === 'read_text_file' &&
+          args?.relativePath === '.CodePapr/skills/search/SKILL.md' &&
+          args?.maxBytes === 8192
+      )
+    ).toBe(true);
+    expect(
+      invokeMock.mock.calls.some(
+        ([command, args]) =>
+          command === 'read_text_file' &&
+          args?.relativePath === '.CodePapr/skills/search/SKILL.md' &&
+          args?.maxBytes === 300_000
+      )
+    ).toBe(true);
 
     await act(async () => {
       [...container.querySelectorAll('button')]
@@ -227,19 +247,17 @@ describe('ProjectConfigModal', () => {
     const checkbox = container.querySelector('input[aria-label="启用: search"]') as HTMLInputElement | null;
     expect(checkbox?.checked).toBe(true);
 
+    const loadCountBeforeToggle = invokeMock.mock.calls.filter(([command]) => command === 'load_project_state').length;
+
     await act(async () => {
       checkbox?.click();
     });
     await flushEffects();
 
+    expect(useAgentStore.getState().skillEnabledById.search).toBe(false);
     expect(
-      invokeMock.mock.calls.some(
-        ([command, args]) =>
-          command === 'save_project_state' &&
-          String(args?.stateJson).includes('"skillEnabledById"') &&
-          String(args?.stateJson).includes('"search": false')
-      )
-    ).toBe(true);
+      invokeMock.mock.calls.filter(([command]) => command === 'load_project_state').length
+    ).toBe(loadCountBeforeToggle);
   });
 
   it('deletes packaged skills by removing the whole folder', async () => {
@@ -301,6 +319,30 @@ describe('ProjectConfigModal', () => {
 
     expect(container.textContent).toContain('/ship');
     expect(container.textContent).toContain('请发布：$ARGUMENTS');
+  });
+
+  it('warns when the skills file list is truncated', async () => {
+    skillsListTruncated = true;
+    await act(async () => {
+      root.render(
+        <ProjectConfigModal
+          workspacePath="/tmp/codepapr-workspace"
+          lang="zh-CN"
+          onClose={() => undefined}
+        />
+      );
+    });
+    await flushEffects();
+    await flushEffects();
+
+    await act(async () => {
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Skills')
+        ?.click();
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('Skill 列表被截断');
   });
 
   it('asks before deleting a skill and keeps the folder when cancelled', async () => {
