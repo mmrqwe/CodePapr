@@ -55,6 +55,19 @@ fn build_text_chunk(keyword: &str, text: &str) -> Vec<u8> {
     build_chunk_bytes(b"tEXt", &data)
 }
 
+fn json_to_chara_payload(json: &str) -> String {
+    base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        json.as_bytes(),
+    )
+}
+
+fn inject_chara_chunks(output: &mut Vec<u8>, json: &str) {
+    let payload = json_to_chara_payload(json);
+    output.extend_from_slice(&build_text_chunk("ccv3", &payload));
+    output.extend_from_slice(&build_text_chunk("chara", &payload));
+}
+
 fn is_chara_text_chunk(chunk_type: &[u8; 4], data: &[u8]) -> bool {
     if chunk_type != b"tEXt" && chunk_type != b"iTXt" {
         return false;
@@ -118,7 +131,7 @@ fn embed_json_in_png(original_png: &[u8], json: &str) -> Result<Vec<u8>, String>
         let chunk_data = &original_png[data_start..data_end];
 
         if !injected && &chunk_type == b"IDAT" {
-            output.extend_from_slice(&build_text_chunk("chara", json));
+            inject_chara_chunks(&mut output, json);
             injected = true;
         }
 
@@ -189,7 +202,7 @@ fn generate_fallback_card(json: &str) -> Result<Vec<u8>, String> {
     };
     png.extend_from_slice(&build_chunk_bytes(b"IHDR", &ihdr_data));
 
-    png.extend_from_slice(&build_text_chunk("chara", json));
+    inject_chara_chunks(&mut png, json);
 
     png.extend_from_slice(&build_chunk_bytes(b"IDAT", &compressed));
 
@@ -205,7 +218,11 @@ fn generate_and_write(
 ) -> Result<(), String> {
     let png_bytes = if let Some(data_url) = avatar_data_url {
         let raw_avatar = parse_data_url(data_url)?;
-        embed_json_in_png(&raw_avatar, json_spec)?
+        if raw_avatar.len() >= 8 && raw_avatar[..8] == PNG_SIGNATURE {
+            embed_json_in_png(&raw_avatar, json_spec)?
+        } else {
+            generate_fallback_card(json_spec)?
+        }
     } else {
         generate_fallback_card(json_spec)?
     };
@@ -286,15 +303,69 @@ mod tests {
         assert!(&png[8..].windows(4).any(|w| w == b"IEND"));
     }
 
+    fn extract_text_chunks(png: &[u8]) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        let mut pos = 8usize;
+        while pos + 12 <= png.len() {
+            let length = read_u32(&png[pos..pos + 4]) as usize;
+            let chunk_type = &png[pos + 4..pos + 8];
+            let data_start = pos + 8;
+            let data_end = data_start + length;
+            if data_end + 4 > png.len() {
+                break;
+            }
+            if chunk_type == b"tEXt" {
+                let data = &png[data_start..data_end];
+                if let Some(null) = data.iter().position(|&b| b == 0) {
+                    let kw = String::from_utf8_lossy(&data[..null]).to_string();
+                    let text = String::from_utf8_lossy(&data[null + 1..]).to_string();
+                    out.push((kw, text));
+                }
+            }
+            pos = data_end + 4;
+        }
+        out
+    }
+
+    fn decode_chara_json(png: &[u8]) -> String {
+        let chunks = extract_text_chunks(png);
+        let payload = chunks
+            .iter()
+            .find(|(k, _)| k == "ccv3")
+            .or_else(|| chunks.iter().find(|(k, _)| k == "chara"))
+            .map(|(_, text)| text.as_str())
+            .expect("missing ccv3/chara chunk");
+        let bytes = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            payload,
+        )
+        .expect("chara payload should be base64");
+        String::from_utf8(bytes).expect("utf-8 json")
+    }
+
+    #[test]
+    fn test_export_writes_base64_ccv3_and_chara() {
+        let json = r#"{"spec":"chara_card_v3","data":{"name":"Exported"}}"#;
+        let png = generate_fallback_card(json).unwrap();
+        let chunks = extract_text_chunks(&png);
+        assert!(chunks.iter().any(|(k, _)| k == "ccv3"));
+        assert!(chunks.iter().any(|(k, _)| k == "chara"));
+        let decoded = decode_chara_json(&png);
+        assert!(decoded.contains("chara_card_v3"));
+        assert!(decoded.contains("Exported"));
+        let raw = String::from_utf8_lossy(&png);
+        assert!(!raw.contains("chara_card_v3"));
+    }
+
     #[test]
     fn test_embed_json_in_png() {
         let fallback = generate_fallback_card(r#"{"original":"data"}"#).unwrap();
         let new_json = r#"{"spec":"chara_card_v3","data":{"name":"Exported"}}"#;
         let result = embed_json_in_png(&fallback, new_json).unwrap();
         assert!(&result[8..].windows(4).any(|w| w == b"tEXt"));
-        let text = String::from_utf8_lossy(&result);
-        assert!(text.contains("chara_card_v3"));
-        assert!(text.contains("Exported"));
+        let decoded = decode_chara_json(&result);
+        assert!(decoded.contains("chara_card_v3"));
+        assert!(decoded.contains("Exported"));
     }
 
     #[test]
@@ -303,9 +374,22 @@ mod tests {
         let json2 = r#"{"spec":"new"}"#;
         let png1 = generate_fallback_card(json1).unwrap();
         let result = embed_json_in_png(&png1, json2).unwrap();
-        let text = String::from_utf8_lossy(&result);
-        assert!(text.contains("new"));
-        assert!(!text.contains("old"));
+        let decoded = decode_chara_json(&result);
+        assert!(decoded.contains("new"));
+        assert!(!decoded.contains("old"));
+    }
+
+    #[test]
+    fn test_non_png_avatar_falls_back() {
+        let jpegish = b"\xff\xd8\xffnot-a-png";
+        let json = r#"{"spec":"chara_card_v3","data":{"name":"Fallback"}}"#;
+        let result = if jpegish.len() >= 8 && jpegish[..8] == PNG_SIGNATURE {
+            embed_json_in_png(jpegish, json).unwrap()
+        } else {
+            generate_fallback_card(json).unwrap()
+        };
+        assert_eq!(&result[..8], &PNG_SIGNATURE);
+        assert!(decode_chara_json(&result).contains("Fallback"));
     }
 
     #[test]

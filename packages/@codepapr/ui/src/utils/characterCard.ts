@@ -6,8 +6,11 @@ import {
 } from './characterTypes';
 
 const PNG_SIGNATURE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const MAX_AVATAR_PX = 512;
 
 const CHARACTER_KEYWORDS = new Set(['chara', 'ccv3', 'character', 'character_card']);
+
+export type PngTextChunk = { keyword: string; text: string };
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
@@ -38,10 +41,25 @@ function decodeUtf8(bytes: Uint8Array): string {
   return new TextDecoder('utf-8').decode(bytes);
 }
 
-function decodePngTextChunks(buffer: ArrayBuffer): string[] {
+async function inflateZlib(data: Uint8Array): Promise<Uint8Array | null> {
+  if (typeof DecompressionStream === 'undefined') return null;
+  for (const format of ['deflate', 'deflate-raw'] as const) {
+    try {
+      const stream = new Blob([data as BlobPart]).stream().pipeThrough(
+        new DecompressionStream(format)
+      );
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    } catch {
+      // try the other wrapping
+    }
+  }
+  return null;
+}
+
+async function decodePngTextChunks(buffer: ArrayBuffer): Promise<PngTextChunk[]> {
   const bytes = new Uint8Array(buffer);
   const view = new DataView(buffer);
-  const results: string[] = [];
+  const results: PngTextChunk[] = [];
   let offset = PNG_SIGNATURE.length;
   while (offset + 12 <= bytes.length) {
     const length = readUInt32BE(view, offset);
@@ -55,7 +73,7 @@ function decodePngTextChunks(buffer: ArrayBuffer): string[] {
       if (sep > -1) {
         const keyword = decodeLatin1(data.subarray(0, sep)).trim().toLowerCase();
         if (CHARACTER_KEYWORDS.has(keyword)) {
-          results.push(decodeLatin1(data.subarray(sep + 1)));
+          results.push({ keyword, text: decodeLatin1(data.subarray(sep + 1)) });
         }
       }
     } else if (type === 'iTXt') {
@@ -63,7 +81,6 @@ function decodePngTextChunks(buffer: ArrayBuffer): string[] {
       if (sep > -1) {
         const keyword = decodeUtf8(data.subarray(0, sep)).trim().toLowerCase();
         if (CHARACTER_KEYWORDS.has(keyword)) {
-          // Skip compression flag/method, language tag, translated keyword
           const compressionFlag = data[sep + 1];
           let cursor = sep + 3;
           const langEnd = data.indexOf(0, cursor);
@@ -72,9 +89,13 @@ function decodePngTextChunks(buffer: ArrayBuffer): string[] {
           cursor = translatedEnd >= 0 ? translatedEnd + 1 : cursor;
           const payload = data.subarray(cursor);
           if (compressionFlag === 0) {
-            results.push(decodeUtf8(payload));
+            results.push({ keyword, text: decodeUtf8(payload) });
+          } else {
+            const inflated = await inflateZlib(payload);
+            if (inflated) {
+              results.push({ keyword, text: decodeUtf8(inflated) });
+            }
           }
-          // Skip compressed iTXt — would require zlib decompression in browser
         }
       }
     }
@@ -84,7 +105,7 @@ function decodePngTextChunks(buffer: ArrayBuffer): string[] {
   return results;
 }
 
-function tryParseCardJson(text: string): Record<string, unknown> | null {
+export function tryParseCardJson(text: string): Record<string, unknown> | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
   try {
@@ -109,6 +130,17 @@ function tryParseCardJson(text: string): Record<string, unknown> | null {
     return null;
   }
   return null;
+}
+
+/** Prefer `ccv3` over older `chara` / leftover chunks. */
+export function selectCharacterCardPayload(
+  chunks: PngTextChunk[]
+): Record<string, unknown> | null {
+  const parsed = chunks
+    .map((chunk) => ({ keyword: chunk.keyword, raw: tryParseCardJson(chunk.text) }))
+    .filter((chunk): chunk is { keyword: string; raw: Record<string, unknown> } => chunk.raw !== null);
+  const ccv3 = parsed.find((chunk) => chunk.keyword === 'ccv3');
+  return (ccv3 ?? parsed[0])?.raw ?? null;
 }
 
 function readString(value: unknown): string {
@@ -140,6 +172,26 @@ function arrayBufferToDataUrl(buffer: ArrayBuffer, mime: string): string {
   return `data:${mime};base64,${btoa(binary)}`;
 }
 
+export async function rasterImageFileToPngDataUrl(file: File): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const scale = Math.min(1, MAX_AVATAR_PX / Math.max(bitmap.width, bitmap.height, 1));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('无法把头像转成 PNG。');
+    }
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    return canvas.toDataURL('image/png');
+  } finally {
+    bitmap.close();
+  }
+}
+
 export async function importCharacterCardFromFile(file: File): Promise<CharacterProfile> {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
@@ -147,11 +199,8 @@ export async function importCharacterCardFromFile(file: File): Promise<Character
   let avatarDataUrl: string | null = null;
 
   if (isPngBytes(bytes)) {
-    const texts = decodePngTextChunks(buffer);
-    for (const text of texts) {
-      raw = tryParseCardJson(text);
-      if (raw) break;
-    }
+    const chunks = await decodePngTextChunks(buffer);
+    raw = selectCharacterCardPayload(chunks);
     if (!raw) {
       throw new Error('PNG 中没有找到可解析的角色卡数据。');
     }

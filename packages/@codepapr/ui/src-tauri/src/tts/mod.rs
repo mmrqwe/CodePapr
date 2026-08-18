@@ -1628,6 +1628,33 @@ pub fn tts_save_voice_file(
     Ok(validated.to_string_lossy().to_string())
 }
 
+pub(crate) fn delete_character_voices_in(
+    dir: &Path,
+    character_id: &str,
+) -> Result<(), String> {
+    let id = sanitize_character_id(character_id)?;
+    let prefix = format!("{id}_ref.");
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if name.to_string_lossy().starts_with(&prefix) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    let char_dir = dir.join(id);
+    if char_dir.is_dir() {
+        std::fs::remove_dir_all(&char_dir)
+            .map_err(|e| format!("Failed to delete character voice directory: {e}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn tts_delete_character_voices(character_id: String) -> Result<(), String> {
+    delete_character_voices_in(&voices_dir(), &character_id)
+}
+
 #[tauri::command]
 pub fn tts_read_voice_file(file_path: String) -> Result<String, String> {
     let safe_path = validate_voice_path(&file_path, true)?;

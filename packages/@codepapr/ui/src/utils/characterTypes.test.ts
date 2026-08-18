@@ -3,7 +3,10 @@ import {
   type CharacterProfile,
   buildCharacterSystemPrompt,
   createEmptyCharacter,
+  expandCharacterMacros,
+  normalizeLoadedCharacter,
   resolveCharacterInteractionMode,
+  sanitizeCachePrompt,
 } from './characterTypes';
 
 function makeCharacter(overrides: Partial<CharacterProfile> = {}): CharacterProfile {
@@ -31,6 +34,57 @@ describe('resolveCharacterInteractionMode', () => {
   });
 });
 
+describe('expandCharacterMacros', () => {
+  it('replaces {{char}} and {{user}} instead of stripping the braces', () => {
+    const expanded = expandCharacterMacros('Hello {{user}}, I am {{char}}.', {
+      char: 'Ada',
+    });
+    expect(expanded).toBe('Hello User, I am Ada.');
+    expect(expanded).not.toContain('{{');
+    expect(expanded).not.toMatch(/\bchar\b/);
+    expect(expanded).not.toMatch(/\buser\b/);
+  });
+
+  it('is case-insensitive and trims inner whitespace', () => {
+    expect(expandCharacterMacros('{{CHAR}} / {{ User }}', { char: 'Ada', user: 'Mr' })).toBe(
+      'Ada / Mr'
+    );
+  });
+});
+
+describe('sanitizeCachePrompt', () => {
+  it('drops leftover unknown macros after expansion', () => {
+    const text = sanitizeCachePrompt(expandCharacterMacros('Hi {{char}} {{unknown}}', { char: 'Ada' }));
+    expect(text).toBe('Hi Ada');
+  });
+});
+
+describe('normalizeLoadedCharacter', () => {
+  it('maps legacy referenceTextLanguage zh to all_zh', () => {
+    const loaded = normalizeLoadedCharacter({
+      id: 'char_1',
+      name: 'Ada',
+      voice: { enabled: true, engine: 'gpt-sovits', speed: 1, referenceTextLanguage: 'zh' },
+    });
+    expect(loaded?.voice?.referenceTextLanguage).toBe('all_zh');
+  });
+
+  it('does not remap stored textLanguage zh', () => {
+    const loaded = normalizeLoadedCharacter({
+      id: 'char_1',
+      name: 'Ada',
+      voice: {
+        enabled: true,
+        engine: 'gpt-sovits',
+        speed: 1,
+        referenceTextLanguage: 'all_zh',
+        textLanguage: 'zh',
+      },
+    });
+    expect(loaded?.voice?.textLanguage).toBe('zh');
+  });
+});
+
 describe('buildCharacterSystemPrompt', () => {
   it('persona mode overlays voice without forcing stage-play format', () => {
     const prompt = buildCharacterSystemPrompt(makeCharacter());
@@ -55,12 +109,28 @@ describe('buildCharacterSystemPrompt', () => {
     expect(prompt).not.toContain('*Wrap actions');
   });
 
-  it('roleplay mode keeps the stage-play contract and opening line', () => {
+  it('roleplay mode keeps the stage-play contract without stuffing first_mes into the prompt', () => {
     const prompt = buildCharacterSystemPrompt(makeCharacter({ interactionMode: 'roleplay' }));
     expect(prompt).toContain('You are roleplaying as the character "TestChar"');
     expect(prompt).toContain('Spoken dialogue must be plain text');
-    expect(prompt).toContain('Opening Line');
-    expect(prompt).toContain('You actually want this done?');
+    expect(prompt).not.toContain('Opening Line');
+    expect(prompt).not.toContain('You actually want this done?');
     expect(prompt).toContain('still produce real code in fenced blocks');
+  });
+
+  it('expands macros in description fields', () => {
+    const prompt = buildCharacterSystemPrompt(
+      makeCharacter({ description: 'I am {{char}}. I talk to {{user}}.' })
+    );
+    expect(prompt).toContain('I am TestChar. I talk to User.');
+    expect(prompt).not.toContain('{{char}}');
+  });
+
+  it('does not inject post-history instructions into the system prompt', () => {
+    const prompt = buildCharacterSystemPrompt(
+      makeCharacter({ postHistoryInstructions: 'Stay in character after history.' })
+    );
+    expect(prompt).not.toContain('Post-History');
+    expect(prompt).not.toContain('Stay in character after history.');
   });
 });

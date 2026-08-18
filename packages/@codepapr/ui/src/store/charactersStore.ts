@@ -115,6 +115,12 @@ export const useCharactersStore = create<CharacterState & CharacterActions>((set
       activeCharacterId: state.activeCharacterId === characterId ? null : state.activeCharacterId,
     }));
     await persistState(get());
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('tts_delete_character_voices', { characterId });
+    } catch (err) {
+      console.warn('Failed to delete character voice files:', err);
+    }
   },
   setActiveCharacter: async (characterId) => {
     if (!get().loaded) {

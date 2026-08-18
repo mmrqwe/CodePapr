@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildCharacterCardSpec, normalizeCharacterCard } from './characterCard';
+import {
+  buildCharacterCardSpec,
+  normalizeCharacterCard,
+  selectCharacterCardPayload,
+  tryParseCardJson,
+} from './characterCard';
 import { createEmptyCharacter } from './characterTypes';
 
 describe('character card interactionMode round-trip', () => {
@@ -32,5 +37,25 @@ describe('character card interactionMode round-trip', () => {
       data: { extensions: { codepapr: { interactionMode: string } } };
     };
     expect(spec.data.extensions.codepapr.interactionMode).toBe('roleplay');
+  });
+});
+
+describe('selectCharacterCardPayload', () => {
+  it('prefers ccv3 over an earlier chara chunk', () => {
+    const chara = JSON.stringify({ spec: 'chara_card_v2', data: { name: 'V2' } });
+    const ccv3 = JSON.stringify({ spec: 'chara_card_v3', data: { name: 'V3' } });
+    const raw = selectCharacterCardPayload([
+      { keyword: 'chara', text: chara },
+      { keyword: 'ccv3', text: ccv3 },
+    ]);
+    expect(raw).toEqual({ spec: 'chara_card_v3', data: { name: 'V3' } });
+  });
+
+  it('decodes base64 chara payloads', () => {
+    const json = JSON.stringify({ spec: 'chara_card_v3', data: { name: 'Ada' } });
+    const encoded = btoa(json);
+    expect(tryParseCardJson(encoded)).toEqual({ spec: 'chara_card_v3', data: { name: 'Ada' } });
+    const raw = selectCharacterCardPayload([{ keyword: 'chara', text: encoded }]);
+    expect(raw).toEqual({ spec: 'chara_card_v3', data: { name: 'Ada' } });
   });
 });

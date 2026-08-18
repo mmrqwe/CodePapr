@@ -18,7 +18,9 @@ import {
 import {
   buildCharacterCardSpec,
   importCharacterCardFromFile,
+  rasterImageFileToPngDataUrl,
 } from '../utils/characterCard';
+import { maybeInsertActiveCharacterGreeting } from '../utils/characterGreeting';
 import { getTranslation } from '../utils/i18n';
 
 interface CharacterModalProps {
@@ -26,6 +28,7 @@ interface CharacterModalProps {
 }
 
 type LangCode = 'all_zh' | 'all_yue' | 'en' | 'all_ja' | 'all_ko' | 'zh' | 'ja' | 'auto';
+const DEFAULT_REFERENCE_LANG = 'all_zh';
 const LANG_CONFIG: Record<LangCode, { name: string; instruction: string }> = {
   all_zh:  { name: '中文',   instruction: '生成中文独白或对话文本，每句以。！？结尾。' },
   all_yue: { name: '粤语',   instruction: '用粤语（广东话）生成独白或对话文本，使用口语化粤语表达。每句以。！？结尾。' },
@@ -78,6 +81,15 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const voiceSampleInputRef = useRef<HTMLInputElement | null>(null);
+  const savedSnapshotRef = useRef('');
+
+  const snapshotCharacter = (character: CharacterProfile) => JSON.stringify(character);
+  const isDirty = (character: CharacterProfile | null) =>
+    Boolean(character && snapshotCharacter(character) !== savedSnapshotRef.current);
+  const confirmDiscard = () => {
+    if (!isDirty(editing)) return true;
+    return typeof window === 'undefined' || window.confirm(t.characterUnsavedConfirm);
+  };
 
   useEffect(() => {
     void loadCharacters();
@@ -86,7 +98,9 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
   useEffect(() => {
     if (!loaded) return;
     if (!editing && characters.length > 0) {
-      setEditing(characters[0]!);
+      const first = characters[0]!;
+      setEditing(first);
+      savedSnapshotRef.current = snapshotCharacter(first);
     }
   }, [loaded, characters, editing]);
 
@@ -109,8 +123,10 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
   }, [characters]);
 
   const handleNew = () => {
+    if (!confirmDiscard()) return;
     const fresh = createEmptyCharacter();
     setEditing(fresh);
+    savedSnapshotRef.current = snapshotCharacter(fresh);
   };
 
   const handlePickFile = () => {
@@ -126,6 +142,7 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
       const character = await importCharacterCardFromFile(file);
       await upsertCharacter(character);
       setEditing(character);
+      savedSnapshotRef.current = snapshotCharacter(character);
     } catch (err) {
       setImportError(`${t.characterImportFailed}: ${errorMessage(err)}`);
     }
@@ -135,12 +152,13 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file || !editing) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = typeof reader.result === 'string' ? reader.result : null;
-      setEditing((current) => (current ? { ...current, avatarDataUrl: dataUrl } : current));
-    };
-    reader.readAsDataURL(file);
+    void rasterImageFileToPngDataUrl(file)
+      .then((dataUrl) => {
+        setEditing((current) => (current ? { ...current, avatarDataUrl: dataUrl } : current));
+      })
+      .catch((err) => {
+        toast.error(`${t.characterImportFailed}: ${err instanceof Error ? err.message : String(err)}`);
+      });
   };
 
   const handleSave = async () => {
@@ -156,7 +174,7 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
     };
     await upsertCharacter(next);
     setEditing(next);
-    onClose();
+    savedSnapshotRef.current = snapshotCharacter(next);
   };
 
   const handleDelete = async (id: string) => {
@@ -164,11 +182,28 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
     await deleteCharacter(id);
     if (editing?.id === id) {
       setEditing(null);
+      savedSnapshotRef.current = '';
     }
   };
 
   const handleEnable = async (id: string) => {
-    await setActiveCharacter(activeCharacterId === id ? null : id);
+    const enabling = activeCharacterId !== id;
+    await setActiveCharacter(enabling ? id : null);
+    if (enabling) {
+      maybeInsertActiveCharacterGreeting();
+    }
+  };
+
+  const handleSelectCharacter = (character: CharacterProfile) => {
+    if (editing?.id === character.id) return;
+    if (!confirmDiscard()) return;
+    setEditing(character);
+    savedSnapshotRef.current = snapshotCharacter(character);
+  };
+
+  const handleRequestClose = () => {
+    if (!confirmDiscard()) return;
+    onClose();
   };
 
   const handleExport = async () => {
@@ -208,12 +243,24 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
 
   const editingRef = useRef(editing);
   editingRef.current = editing;
+  const isPersisted = Boolean(editing && characters.some((c) => c.id === editing.id));
 
   useEffect(() => {
     const charId = editing?.id;
     if (!charId) return;
+    let cancelled = false;
     const unlistens: Array<() => void> = [];
-    listen<{ character_id: string; step: string; percent: number; log_line: string }>(
+    const bind = <T,>(eventName: string, handler: (event: { payload: T }) => void) => {
+      void listen<T>(eventName, handler).then((unlisten) => {
+        if (cancelled) {
+          unlisten();
+          return;
+        }
+        unlistens.push(unlisten);
+      });
+    };
+
+    bind<{ character_id: string; step: string; percent: number; log_line: string }>(
       'tts-finetune-progress',
       (event) => {
         if (event.payload.character_id === charId) {
@@ -222,23 +269,32 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
           setFinetuneStep(event.payload.step);
         }
       },
-    ).then((fn) => unlistens.push(fn));
-    listen<{ character_id: string; model_path: string }>(
+    );
+    bind<{ character_id: string; model_path: string }>(
       'tts-finetune-done',
       (event) => {
-        if (event.payload.character_id === charId) {
-          setFinetuneRunning(false);
-          setFinetuneDone(true);
-          setFinetuneProgress(100);
-          setFinetuneLog('Done');
-          updateVoiceField({
+        if (event.payload.character_id !== charId) return;
+        setFinetuneRunning(false);
+        setFinetuneDone(true);
+        setFinetuneProgress(100);
+        setFinetuneLog('Done');
+        const current = editingRef.current;
+        if (!current) return;
+        const next: CharacterProfile = {
+          ...current,
+          voice: {
+            ...(current.voice ?? { enabled: false, engine: 'gpt-sovits', speed: 1 }),
             fineTunedModelPath: event.payload.model_path,
             sampleSteps: 4,
-          });
-        }
+          },
+          updatedAt: new Date().toISOString(),
+        };
+        setEditing(next);
+        savedSnapshotRef.current = JSON.stringify(next);
+        void upsertCharacter(next);
       },
-    ).then((fn) => unlistens.push(fn));
-    listen<{ character_id: string; error: string }>(
+    );
+    bind<{ character_id: string; error: string }>(
       'tts-finetune-error',
       (event) => {
         if (event.payload.character_id === charId) {
@@ -246,8 +302,8 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
           setFinetuneLog(event.payload.error);
         }
       },
-    ).then((fn) => unlistens.push(fn));
-    listen<{ character_id: string; current: number; total: number; sentence: string }>(
+    );
+    bind<{ character_id: string; current: number; total: number; sentence: string }>(
       'tts-generate-progress',
       (event) => {
         if (event.payload.character_id === charId) {
@@ -256,8 +312,8 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
           setGenerateSentence(event.payload.sentence);
         }
       },
-    ).then((fn) => unlistens.push(fn));
-    listen<{ character_id: string; train_dir: string; count: number; reused?: boolean; error?: string; failed_count?: number }>(
+    );
+    bind<{ character_id: string; train_dir: string; count: number; reused?: boolean; error?: string; failed_count?: number }>(
       'tts-generate-done',
       (event) => {
         if (event.payload.character_id === charId) {
@@ -278,17 +334,12 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
           setGenerateTotal(event.payload.count);
         }
       },
-    ).then((fn) => unlistens.push(fn));
-    listen<{ index: number; error: string }>(
-      'tts-sentence-failed',
-      (event) => {
-        toast.warning(`第 ${event.payload.index + 1} 句合成失败，已跳过`);
-      },
-    ).then((fn) => unlistens.push(fn));
+    );
     return () => {
+      cancelled = true;
       unlistens.forEach((fn) => fn());
     };
-  }, [editing?.id, updateVoiceField]);
+  }, [editing?.id, upsertCharacter]);
 
   // Check if training data already exists for this character
   useEffect(() => {
@@ -382,6 +433,10 @@ Requirements:
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
+    if (!editing || !characters.some((c) => c.id === editing.id)) {
+      toast.warning(t.characterSaveFirstForVoice);
+      return;
+    }
     const reader = new FileReader();
     reader.onload = async () => {
       const dataUrl = typeof reader.result === 'string' ? reader.result : undefined;
@@ -416,7 +471,7 @@ Requirements:
     setTestVoiceError(null);
     setTestVoicePlaying(true);
     try {
-      const refLang = editing.voice.referenceTextLanguage || 'zh';
+      const refLang = editing.voice.referenceTextLanguage || DEFAULT_REFERENCE_LANG;
       const testText = editing.voice.referenceText || getTestTextForLang(refLang);
       await invoke('tts_synthesize_and_play', {
         text: testText,
@@ -462,7 +517,7 @@ Requirements:
               className="hidden"
             />
             <button
-              onClick={onClose}
+              onClick={handleRequestClose}
               title={t.cancel}
               className="ml-2 text-2xl leading-none text-fg-muted hover:text-fg-soft"
             >
@@ -492,7 +547,7 @@ Requirements:
                     <li key={c.id}>
                       <button
                         type="button"
-                        onClick={() => setEditing(c)}
+                        onClick={() => handleSelectCharacter(c)}
                         className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2 text-left transition-colors ${
                           isEditing
                             ? 'border-accent-soft bg-accent-soft'
@@ -780,6 +835,16 @@ Requirements:
                     className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm leading-relaxed text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
                   />
                 </FieldRow>
+
+                <FieldRow label={t.characterPostHistory}>
+                  <textarea
+                    value={editing.postHistoryInstructions}
+                    onChange={(e) => updateField({ postHistoryInstructions: e.target.value })}
+                    placeholder={t.characterPostHistoryPlaceholder}
+                    rows={3}
+                    className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm leading-relaxed text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
+                  />
+                </FieldRow>
               </div>
             ) : (
               <div className="space-y-4">
@@ -940,7 +1005,7 @@ Requirements:
                             if (!refPath) {
                               throw new Error(t.voiceWarmupNoRefAudio);
                             }
-                            const wmPromptLang = editing?.voice?.referenceTextLanguage || 'zh';
+                            const wmPromptLang = editing?.voice?.referenceTextLanguage || DEFAULT_REFERENCE_LANG;
                             await invoke('tts_warmup_gpu', {
                               refAudioPath: refPath,
                               promptText: editing?.voice?.referenceText ?? '',
@@ -1126,7 +1191,7 @@ Requirements:
                                 return;
                               }
                               const textLang = editing?.voice?.trainingLanguage || 'all_zh';
-                              const promptLang = editing?.voice?.referenceTextLanguage || 'zh';
+                              const promptLang = editing?.voice?.referenceTextLanguage || DEFAULT_REFERENCE_LANG;
                               setScriptGenerating(true);
                               try {
                                 const script = await generateTrainingScript(textLang);
@@ -1255,8 +1320,16 @@ Requirements:
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => voiceSampleInputRef.current?.click()}
-                            className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-fg transition-colors hover:border-accent hover:text-fg"
+                            disabled={!isPersisted}
+                            title={isPersisted ? undefined : t.characterSaveFirstForVoice}
+                            onClick={() => {
+                              if (!isPersisted) {
+                                toast.warning(t.characterSaveFirstForVoice);
+                                return;
+                              }
+                              voiceSampleInputRef.current?.click();
+                            }}
+                            className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-fg transition-colors hover:border-accent hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {editing?.voice?.referenceSamplePath ? t.voiceSampleReplace : t.voiceSampleUpload}
                           </button>
@@ -1284,10 +1357,10 @@ Requirements:
                         <div className="flex items-center gap-2 mt-1">
                           <label className="text-[10px] text-fg-muted whitespace-nowrap">参考音频语言</label>
                           <select
-                            value={editing?.voice?.referenceTextLanguage || 'zh'}
+                            value={editing?.voice?.referenceTextLanguage || DEFAULT_REFERENCE_LANG}
                             onChange={(e) => {
                               const newRefLang = e.target.value;
-                              const oldRefLang = editing?.voice?.referenceTextLanguage || 'zh';
+                              const oldRefLang = editing?.voice?.referenceTextLanguage || DEFAULT_REFERENCE_LANG;
                               const currentTextLang = editing?.voice?.textLanguage;
                               // Auto-sync textLanguage IFF it was following the old reference language
                               // (i.e. user never explicitly set a different textLanguage).
@@ -1309,7 +1382,7 @@ Requirements:
                         <div className="flex items-center gap-2 mt-1">
                           <label className="text-[10px] text-fg-muted whitespace-nowrap">说话语言</label>
                           <select
-                            value={editing?.voice?.textLanguage || editing?.voice?.referenceTextLanguage || 'zh'}
+                            value={editing?.voice?.textLanguage || editing?.voice?.referenceTextLanguage || DEFAULT_REFERENCE_LANG}
                             onChange={(e) => updateVoiceField({ textLanguage: e.target.value })}
                             className="text-[10px] bg-slate-800 border border-slate-600 rounded px-1.5 py-0.5 text-fg-soft"
                           >
@@ -1337,7 +1410,7 @@ Requirements:
         <div className="flex items-center justify-end gap-3 border-t border-line px-7 py-4">
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleRequestClose}
             className="rounded-xl border border-line px-4 py-2 text-sm font-medium text-fg-soft transition-colors hover:border-line-strong hover:text-fg"
           >
             {t.characterCancel}

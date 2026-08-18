@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildAgentRuntimeSystemPrompt, buildAgentSessionBootstrapPrompt } from './promptBuilders';
+import { buildAgentRuntimeSystemPrompt, buildAgentRuntimeUserPrompt, buildAgentSessionBootstrapPrompt } from './promptBuilders';
 import { useCharactersStore } from '../charactersStore';
 import type { CharacterProfile } from '../../utils/characterTypes';
 import { createDefaultMcpSettings } from '../../utils/mcpTypes';
@@ -171,5 +171,30 @@ describe('buildAgentRuntimeSystemPrompt', () => {
     const prompt = buildAgentRuntimeSystemPrompt(settings, 'agent', '/tmp/ws');
     expect(prompt).toContain('websearch');
     expect(prompt).toContain('webfetch');
+  });
+});
+
+describe('buildAgentRuntimeUserPrompt', () => {
+  afterEach(() => {
+    useCharactersStore.setState({ characters: [], activeCharacterId: null });
+  });
+
+  it('appends post-history instructions to the user prompt tail', () => {
+    const character = makeCharacter({
+      postHistoryInstructions: 'Stay in character, {{char}}.',
+    });
+    useCharactersStore.setState({
+      characters: [character],
+      activeCharacterId: character.id,
+    });
+    const prompt = buildAgentRuntimeUserPrompt({
+      settings: makeRuntimeSettings(),
+      mode: 'agent',
+      workspacePath: '/tmp/ws',
+      input: 'fix the bug',
+    });
+    expect(prompt).toContain('## Post-History Instructions');
+    expect(prompt).toContain('Stay in character, TestChar.');
+    expect(prompt.indexOf('fix the bug')).toBeLessThan(prompt.indexOf('Post-History Instructions'));
   });
 });

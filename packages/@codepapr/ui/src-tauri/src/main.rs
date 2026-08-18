@@ -397,6 +397,7 @@ fn main() {
             tts::tts_install_cancel,
             tts::tts_check_installed,
             tts::tts_save_voice_file,
+            tts::tts_delete_character_voices,
             tts::tts_read_voice_file,
             tts::tts_finetune_start,
             tts::tts_finetune_collect_and_start,

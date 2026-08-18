@@ -12,7 +12,7 @@
 use std::fs;
 
 use super::{
-    decode_pcm_chunk, first_line, is_port_in_use_error, normalize_lang_code,
+    decode_pcm_chunk, delete_character_voices_in, first_line, is_port_in_use_error, normalize_lang_code,
     parse_wav_header, refer_key, sanitize_character_id, validate_voice_path_in,
 };
 
@@ -291,6 +291,27 @@ fn sanitize_character_id_rejects_unicode() {
     // Only ASCII alphanumeric allowed.
     assert!(sanitize_character_id("角色").is_err());
     assert!(sanitize_character_id("café").is_err());
+}
+
+#[test]
+fn delete_character_voices_removes_ref_and_train_dir() {
+    let root = make_voices_root();
+    let ref_wav = root.path().join("char1_ref.wav");
+    let ref_mp3 = root.path().join("char1_ref.mp3");
+    let other = root.path().join("char2_ref.wav");
+    let train = root.path().join("char1").join("train");
+    fs::create_dir_all(&train).unwrap();
+    fs::write(&ref_wav, b"a").unwrap();
+    fs::write(&ref_mp3, b"b").unwrap();
+    fs::write(&other, b"c").unwrap();
+    fs::write(train.join("clip.wav"), b"d").unwrap();
+
+    delete_character_voices_in(root.path(), "char1").unwrap();
+
+    assert!(!ref_wav.exists());
+    assert!(!ref_mp3.exists());
+    assert!(!root.path().join("char1").exists());
+    assert!(other.exists());
 }
 
 // -------- validate_voice_path_in (S1) --------

@@ -145,9 +145,17 @@ export function normalizeLoadedCharacter(raw: unknown): CharacterProfile | null 
     createdAt: readStringField(c.createdAt, empty.createdAt),
     updatedAt: readStringField(c.updatedAt, empty.updatedAt),
     voice: c.voice && typeof c.voice === 'object' && !Array.isArray(c.voice)
-      ? (c.voice as CharacterProfile['voice'])
+      ? normalizeLoadedVoice(c.voice as VoiceConfig)
       : undefined,
   };
+}
+
+function normalizeLoadedVoice(voice: VoiceConfig): VoiceConfig {
+  const referenceTextLanguage =
+    !voice.referenceTextLanguage || voice.referenceTextLanguage === 'zh'
+      ? 'all_zh'
+      : voice.referenceTextLanguage;
+  return { ...voice, referenceTextLanguage };
 }
 
 export function createEmptyCharacter(): CharacterProfile {
@@ -249,14 +257,8 @@ export function buildCharacterSystemPrompt(character: CharacterProfile): string 
   if (character.exampleMessages.trim()) {
     parts.push(`# Example Dialog\n${character.exampleMessages.trim()}`);
   }
-  if (mode === 'roleplay' && character.firstMessage.trim()) {
-    parts.push(`# Opening Line\n${character.firstMessage.trim()}`);
-  }
   if (character.systemPrompt.trim()) {
     parts.push(`# Additional Instructions\n${character.systemPrompt.trim()}`);
-  }
-  if (character.postHistoryInstructions.trim()) {
-    parts.push(`# Post-History Instructions\n${character.postHistoryInstructions.trim()}`);
   }
   if (mode === 'persona' && character.voice?.enabled) {
     parts.push(PERSONA_VOICE_NOTE);
@@ -264,17 +266,33 @@ export function buildCharacterSystemPrompt(character: CharacterProfile): string 
   if (mode === 'roleplay') {
     parts.push(ROLEPLAY_FORMAT);
   }
-  return sanitizeCachePrompt(parts.join('\n\n'));
+  return sanitizeCachePrompt(
+    expandCharacterMacros(parts.join('\n\n'), { char: name })
+  );
+}
+
+const DEFAULT_USER_MACRO = 'User';
+
+/** SillyTavern-style macros. `{{char}}` / `{{user}}` are substituted; unknown `{{...}}` are dropped later. */
+export function expandCharacterMacros(
+  text: string,
+  vars: { char: string; user?: string }
+): string {
+  const char = vars.char.trim() || 'char';
+  const user = vars.user?.trim() || DEFAULT_USER_MACRO;
+  return text
+    .replace(/\{\{\s*char\s*\}\}/gi, char)
+    .replace(/\{\{\s*user\s*\}\}/gi, user);
 }
 
 /**
- * Strip character-card template patterns that would violate cache consistency:
- * {{user}} / {{char}} double-braces, ${...} interpolation, ISO timestamps, etc.
+ * Strip leftover character-card template patterns that would violate cache consistency:
+ * unknown {{...}} macros, ${...} interpolation, ISO timestamps, etc.
  */
 export function sanitizeCachePrompt(text: string): string {
   return text
-    .replace(/\{\{([^}]+)\}\}/g, '$1')
-    .replace(/\$\{([^}]+)\}/g, '$1')
+    .replace(/\{\{[^}]*\}\}/g, '')
+    .replace(/\$\{[^}]+\}/g, '')
     .replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?\b/g, '')
     .replace(/\[TIMESTAMP\]/gi, '')
     .replace(/\[SESSION\s*[^\]]*\]/gi, '')

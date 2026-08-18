@@ -27,6 +27,7 @@ import { useTtsPlayer } from '../hooks/useTtsPlayer';
 import { TtsStatusBadge } from './TtsPanel';
 import { TtsInstaller } from './TtsInstaller';
 import { useCharactersStore } from '../store/charactersStore';
+import { maybeInsertActiveCharacterGreeting } from '../utils/characterGreeting';
 import {
   isScrollContainerNearBottom,
   scrollContainerToBottom,
@@ -376,6 +377,10 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     s.characters.find((c) => c.id === s.activeCharacterId) ?? null
   );
 
+  useEffect(() => {
+    maybeInsertActiveCharacterGreeting();
+  }, [activeCharacter?.id, activeCharacter?.firstMessage, activeSessionId, sessionMessagesLoading, messages.length]);
+
   const characterAvatar = (activeCharacter?.showAvatar ?? true)
     ? (activeCharacter?.avatarDataUrl ?? null)
     : null;
@@ -388,7 +393,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
   useEffect(() => {
     const vc = activeCharacter?.voice;
     if (vc?.engine === 'gpt-sovits' && vc.referenceSamplePath) {
-      const promptLang = vc.referenceTextLanguage || 'zh';
+      const promptLang = vc.referenceTextLanguage || 'all_zh';
       const textLang = vc.textLanguage || promptLang;
       ttsSetVoiceConfig(vc.referenceSamplePath, vc.referenceText ?? '', promptLang);
       ttsSetTextLanguage(textLang);
@@ -406,8 +411,8 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
         ttsPreloadModel(ftPath).catch(() => {});
       }
     } else {
-      ttsSetVoiceConfig('', '', 'zh');
-      ttsSetTextLanguage('zh');
+      ttsSetVoiceConfig('', '', 'all_zh');
+      ttsSetTextLanguage('all_zh');
       ttsSetVoiceModel('');
       ttsSetFineTunedModel('');
       // Reset the preload tracker too, so switching back to a character that
