@@ -568,11 +568,14 @@ describe('app_render agent tools validation', () => {
     },
   );
 
-  it('accepts non-reserved files', async () => {
+  it('accepts frontend static files alongside backend files', async () => {
     await expect(
       appRegistry().execute('app_render', {
         ...BASE_ARGS,
-        files: [{ relativePath: 'server.js', content: 'console.log(1)' }],
+        files: [
+          { relativePath: 'app.css', content: 'body{margin:0}' },
+          { relativePath: 'app.js', content: 'window.ready=1' },
+        ],
       }),
     ).resolves.toMatchObject({ appId: 'demo-app', mounted: true });
   });

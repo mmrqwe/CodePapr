@@ -184,6 +184,13 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
               const declared = getAppDeclared(app.appId);
               const effective = getAppEffective(app.appId);
               const hasOverride = settings.appOverrides[app.appId] !== undefined;
+              const declaredRank = LOCAL_ORDER.indexOf(declared.local);
+              const allowedLocals = LOCAL_ORDER.filter((_, i) => i <= declaredRank);
+              const rawOverride = hasOverride ? settings.appOverrides[app.appId]!.local : 'auto';
+              const selectValue = rawOverride === 'auto' || allowedLocals.includes(rawOverride)
+                ? rawOverride
+                : declared.local;
+              const networkLocked = !declared.network;
               return (
                 <div
                   key={app.appId}
@@ -204,7 +211,7 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <select
-                      value={hasOverride ? settings.appOverrides[app.appId]!.local : 'auto'}
+                      value={selectValue}
                       onChange={(e) => {
                         const val = e.target.value;
                         if (val === 'auto') {
@@ -213,27 +220,30 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
                           updateAppOverride(app.appId, { local: val as PaprLocalAccess });
                         }
                       }}
-                      title="本地访问覆盖"
+                      title={t.appPermLocalCeiling}
                       className="rounded-md border border-line bg-base px-1.5 py-1 text-[10px] text-fg-soft outline-none focus:border-accent-soft"
                     >
                       <option value="auto">{localPrefix}: {autoLabel}</option>
-                      <option value="none">{localPrefix}: {localLabel.none}</option>
-                      <option value="read">{localPrefix}: {localLabel.read}</option>
-                      <option value="write">{localPrefix}: {localLabel.write}</option>
+                      {allowedLocals.map((lvl) => (
+                        <option key={lvl} value={lvl}>{localPrefix}: {localLabel[lvl]}</option>
+                      ))}
                     </select>
                     <button
                       type="button"
                       role="switch"
                       aria-checked={effective.network}
-                      onClick={() =>
+                      aria-disabled={networkLocked}
+                      disabled={networkLocked}
+                      onClick={() => {
+                        if (networkLocked) return;
                         hasOverride
                           ? updateAppOverride(app.appId, { network: !settings.appOverrides[app.appId]!.network })
-                          : updateAppOverride(app.appId, { network: !declared.network })
-                      }
-                      title="网络覆盖（联网/离线）"
-                      className={`relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors ${
-                        effective.network ? 'bg-ok' : 'bg-control'
-                      }`}
+                          : updateAppOverride(app.appId, { network: false });
+                      }}
+                      title={networkLocked ? t.appPermNetworkLocked : t.appPermNetworkOverride}
+                      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                        networkLocked ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
+                      } ${effective.network ? 'bg-ok' : 'bg-control'}`}
                     >
                       <span
                         className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${

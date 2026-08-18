@@ -424,10 +424,12 @@ fn main() {
             papr_runtime::app_storage::papr_set_app_settings,
             papr_runtime::services::papr_http_get,
             papr_runtime::services::papr_http_post,
+            papr_runtime::services::papr_http_request,
             papr_runtime::services::papr_fs_read,
             papr_runtime::services::papr_fs_write,
             papr_runtime::services::papr_fs_list,
             papr_runtime::services::papr_fs_delete,
+            papr_runtime::services::papr_fs_exists,
             papr_runtime::services::papr_delete_app,
             power::prevent_idle_sleep,
             power::allow_idle_sleep

@@ -422,15 +422,31 @@ pub(crate) fn build_app_csp(
     }
     if access.network {
         connect.push("https:".to_string());
+        connect.push("http:".to_string());
         connect.push("wss:".to_string());
         connect.push("ws:".to_string());
         img.push("https:".to_string());
         form.push("https:".to_string());
     }
+    let script_src = if access.network {
+        "'self' https: 'unsafe-inline' 'wasm-unsafe-eval'"
+    } else {
+        "'self' 'unsafe-inline' 'wasm-unsafe-eval'"
+    };
+    let style_src = if access.network {
+        "'self' 'unsafe-inline' https:"
+    } else {
+        "'self' 'unsafe-inline'"
+    };
+    let font_src = if access.network {
+        "'self' data: https:"
+    } else {
+        "'self' data:"
+    };
     format!(
-        "default-src 'none'; script-src 'self' https: 'unsafe-inline' 'wasm-unsafe-eval'; \
-         style-src 'self' 'unsafe-inline' https:; img-src {}; \
-         font-src 'self' data: https:; media-src 'self' data: blob:; worker-src 'self' blob:; \
+        "default-src 'none'; script-src {script_src}; \
+         style-src {style_src}; img-src {}; \
+         font-src {font_src}; media-src 'self' data: blob:; worker-src 'self' blob:; \
          frame-src {}; connect-src {}; form-action {}",
         img.join(" "),
         frame.join(" "),
@@ -735,11 +751,11 @@ mod tests {
         assert!(csp.contains("frame-src 'self' blob:;"), "got: {csp}");
         assert!(csp.contains("form-action 'none'"), "got: {csp}");
         assert!(!csp.contains("wss:"), "got: {csp}");
-        // connect/img/form 不允许 https（font-src/script-src 的 https: 是给 CDN 的，不算外发通道）
+        // connect/img/form 不允许 https；离线也不放行 CDN script-src https:
         assert!(!csp.contains("connect-src 'self' https:"), "got: {csp}");
         assert!(!csp.contains("img-src 'self' data: https:"), "got: {csp}");
-        // CDN 脚本仍然放行（图表库）
-        assert!(csp.contains("script-src 'self' https:"), "got: {csp}");
+        assert!(!csp.contains("script-src 'self' https:"), "got: {csp}");
+        assert!(csp.contains("script-src 'self' 'unsafe-inline'"), "got: {csp}");
     }
 
     #[test]
@@ -758,9 +774,10 @@ mod tests {
         use crate::papr_runtime::permission::{PaprAccess, PaprLocalAccess};
         let access = PaprAccess { local: PaprLocalAccess::Read, network: true };
         let csp = build_app_csp(access, None);
-        assert!(csp.contains("connect-src 'self' https: wss: ws:"), "got: {csp}");
+        assert!(csp.contains("connect-src 'self' https: http: wss: ws:"), "got: {csp}");
         assert!(csp.contains("form-action 'none' https:"), "got: {csp}");
         assert!(csp.contains("img-src 'self' data: blob: https:"), "got: {csp}");
         assert!(csp.contains("frame-src 'self' blob:"), "got: {csp}");
+        assert!(csp.contains("script-src 'self' https:"), "got: {csp}");
     }
 }

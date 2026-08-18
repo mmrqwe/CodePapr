@@ -32,52 +32,51 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
     setSelectedId(appId);
   }, []);
 
-  const handleDoubleClick = useCallback((app: AppInstance) => {
-    const hasBackend = !!(app.command && app.port);
-    const running = hasBackend && !!app.pid && !!app.url;
-    // N18：双击必须与「打开」按钮共用同一门禁——后端未启动时打开只会得到
-    // 半残 app（界面加载、后端接口全部失败）。
-    if (hasBackend && !running) {
-      setError(
-        lang === 'en'
-          ? `Start "${app.title}" first (Run), then open it.`
-          : lang === 'zh-TW'
-            ? `請先啟動「${app.title}」（執行），再開啟。`
-            : `请先启动「${app.title}」（运行），再打开。`
-      );
-      return;
-    }
-    openAppModal(app.appId);
-  }, [openAppModal, lang]);
-
-  const handleStart = useCallback(async () => {
-    if (!selected || !selected.command || !selected.port || isRunning) return;
+  const startBackendIfNeeded = useCallback(async (app: AppInstance): Promise<boolean> => {
+    const needsBackend = !!(app.command && app.port);
+    const running = needsBackend && !!app.pid && !!app.url;
+    if (!needsBackend || running) return true;
+    if (!app.command || app.port == null) return false;
     setBusy(true);
     setError('');
     try {
-      // 与 app_start 工具同一条启动路径：manifest 沙箱 + 端口预检 + 监听等待
       const { pid, url } = await launchAppBackend(
         {
-          appId: selected.appId,
-          command: selected.command,
-          args: selected.args ?? [],
-          port: selected.port,
-          manifestJson: selected.manifestJson,
+          appId: app.appId,
+          command: app.command,
+          args: app.args ?? [],
+          port: app.port,
+          manifestJson: app.manifestJson,
         },
         workspacePath,
       );
-      setAppRunning(selected.appId, pid, url);
+      setAppRunning(app.appId, pid, url);
+      return true;
     } catch (e) {
       setError((e as Error).message);
+      return false;
     } finally {
       setBusy(false);
     }
-  }, [selected, isRunning, workspacePath, setAppRunning]);
+  }, [workspacePath, setAppRunning]);
 
-  const handleOpen = useCallback(() => {
+  const handleDoubleClick = useCallback(async (app: AppInstance) => {
+    const ok = await startBackendIfNeeded(app);
+    if (!ok) return;
+    openAppModal(app.appId);
+  }, [startBackendIfNeeded, openAppModal]);
+
+  const handleStart = useCallback(async () => {
+    if (!selected || !selected.command || !selected.port || isRunning) return;
+    await startBackendIfNeeded(selected);
+  }, [selected, isRunning, startBackendIfNeeded]);
+
+  const handleOpen = useCallback(async () => {
     if (!selected) return;
+    const ok = await startBackendIfNeeded(selected);
+    if (!ok) return;
     openAppModal(selected.appId);
-  }, [selected, openAppModal]);
+  }, [selected, startBackendIfNeeded, openAppModal]);
 
   const handleStop = useCallback(async () => {
     if (!selected || !selected.pid) return;
@@ -133,7 +132,7 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
   }, [selected, selectedId, closeApp, lang]);
 
   const canStart = !!(selected && hasBackend && !isRunning && !busy);
-  const canOpen = !!(selected && !busy && (!hasBackend || isRunning));
+  const canOpen = !!(selected && !busy);
   const canStop = !!(selected && isRunning && !busy);
   const canDelete = !!(selected && !busy);
 

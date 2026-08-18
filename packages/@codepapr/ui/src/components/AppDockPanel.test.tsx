@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { invokeMock } = vi.hoisted(() => ({
-  invokeMock: vi.fn(async (_command?: string) => undefined),
+  invokeMock: vi.fn(async (_command?: string): Promise<unknown> => undefined),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -131,9 +131,18 @@ describe('AppDockPanel', () => {
     expect(container.textContent).toContain('删除应用失败');
   });
 
-  it('N18：后端未启动时双击不打开 app 并提示先启动', async () => {
+  it('N18：后端未启动时双击会先启动再打开；启动失败则留在 dock', async () => {
+    invokeMock.mockImplementation(async (command?: string) => {
+      if (command === 'check_port_available') return false;
+      return undefined;
+    });
     useAppRuntimeStore.setState({
-      apps: [makeApp({ command: 'npm', args: ['run', 'dev'], port: 3000 })],
+      apps: [makeApp({
+        command: 'npm',
+        args: ['run', 'dev'],
+        port: 3000,
+        manifestJson: JSON.stringify({ local: 'read', network: false }),
+      })],
       activeAppId: 'app-1',
       openedAppId: null,
     });
@@ -149,9 +158,48 @@ describe('AppDockPanel', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    // 门禁生效：openedAppId 保持 null，并给出可见提示
     expect(useAppRuntimeStore.getState().openedAppId).toBeNull();
-    expect(container.textContent).toContain('请先启动');
+    expect(container.textContent).toMatch(/端口|占用/);
+  });
+
+  it('N18：后端未启动时双击启动成功后打开 app', async () => {
+    invokeMock.mockImplementation(async (command?: string) => {
+      if (command === 'check_port_available') return true;
+      if (command === 'start_workspace_background_command') return { pid: 42 };
+      if (command === 'check_port_available_structured') return { v4: true, v6: false };
+      if (command === 'check_port_owned_by') return true;
+      if (command === 'check_port_bind_address') return ['127.0.0.1'];
+      if (command === 'check_port_available_detail') return 'listening';
+      return undefined;
+    });
+    useAppRuntimeStore.setState({
+      apps: [makeApp({
+        command: 'npm',
+        args: ['run', 'dev'],
+        port: 3000,
+        manifestJson: JSON.stringify({ local: 'read', network: false }),
+      })],
+      activeAppId: 'app-1',
+      openedAppId: null,
+    });
+    renderPanel();
+
+    const row = Array.from(container.querySelectorAll('div')).find(
+      (el) => el.className.includes('cursor-pointer') && el.textContent?.includes('我的应用'),
+    );
+    act(() => {
+      row?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      'start_workspace_background_command',
+      expect.objectContaining({ command: 'npm' }),
+    );
+    expect(useAppRuntimeStore.getState().openedAppId).toBe('app-1');
+    expect(useAppRuntimeStore.getState().apps[0]?.pid).toBe(42);
   });
 
   it('N18：后端已运行时双击正常打开 app', async () => {
@@ -167,6 +215,9 @@ describe('AppDockPanel', () => {
     );
     act(() => {
       row?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(useAppRuntimeStore.getState().openedAppId).toBe('app-1');
@@ -185,6 +236,9 @@ describe('AppDockPanel', () => {
     );
     act(() => {
       row?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(useAppRuntimeStore.getState().openedAppId).toBe('app-1');

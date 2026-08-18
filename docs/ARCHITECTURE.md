@@ -188,8 +188,8 @@ Papr 是 CodePapr 的应用运行时——AI 生成的 `.papr` App 可以直接�
 |---|---|
 | `papr.db.get(key)` / `papr.db.set(key, value)` / `papr.db.delete(key)` / `papr.db.keys()` | 键值持久化存储（按 app 隔离） |
 | `papr.agent.run({agent, task}, onProgress?)` | 调用 manifest 中定义的 Agent（流式事件 + steps 追踪） |
-| `papr.http.get(url)` / `papr.http.post(url, body)` | HTTP 请求 |
-| `papr.fs.readFile(path)` / `papr.fs.writeFile(path, content)` / `papr.fs.list(path)` / `papr.fs.delete(path)` | 文件读写（限定 .CodePapr/apps/<appId>/data/） |
+| `papr.http.request({method, url, headers?, body?})` / `get` / `post` | HTTP 请求（JSON 原样返回；headers 白名单） |
+| `papr.fs.readFile` / `writeFile` / `exists` / `list` / `delete` | 文件读写（限定 app data；`encoding: 'base64'` 支持二进制） |
 | `papr.app.info()` | 获取应用元数据 |
 
 **IPC 桥接：** iframe 内 SDK 通过 `window.parent.postMessage()` 发送 `{__papr:true, reqId, type, payload}` 协议消息，React 主窗口 `usePaprBridge` hook 监听 → 权限首检 → 路由到 `invoke()`（Rust）或 Worker（Agent）。

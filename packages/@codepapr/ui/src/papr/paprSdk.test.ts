@@ -179,3 +179,37 @@ describe('papr-sdk.js app.info does not cache stale access', () => {
     await expect(second).resolves.toMatchObject({ local: 'write', network: true });
   });
 });
+
+describe('papr-sdk.js http.request and fs encoding payloads', () => {
+  it('http.request 发送 method/headers', () => {
+    loadSdk();
+    const papr = (window as unknown as {
+      papr: { http: { request: (opts: Record<string, unknown>) => Promise<unknown> } };
+    }).papr;
+    const sent = captureSentMessages();
+    void papr.http.request({
+      method: 'PUT',
+      url: 'https://api.example.com/x',
+      headers: { Authorization: 'Bearer t' },
+      body: '{"a":1}',
+    });
+    expect(sent[0]?.type).toBe('papr://http.request');
+  });
+
+  it('fs.exists 与 readFile encoding 走对应通道', () => {
+    loadSdk();
+    const papr = (window as unknown as {
+      papr: {
+        fs: {
+          exists: (p: string) => Promise<unknown>;
+          readFile: (p: string, opts?: Record<string, unknown>) => Promise<unknown>;
+        };
+      };
+    }).papr;
+    const sent = captureSentMessages();
+    void papr.fs.exists('a.bin');
+    void papr.fs.readFile('a.bin', { encoding: 'base64' });
+    expect(sent[0]?.type).toBe('papr://fs.exists');
+    expect(sent[1]?.type).toBe('papr://fs.read');
+  });
+});

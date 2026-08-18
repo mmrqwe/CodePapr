@@ -7,6 +7,8 @@ import type { PaprManifest } from '@codepapr/types';
 import { usePaprBridge } from '../papr/usePaprBridge';
 import { APP_IFRAME_SANDBOX } from '../papr/appIframe';
 import { launchAppBackend } from '../tools/workspaceAppTools';
+import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
+import { resolveEffectiveAccess } from '../papr/levelGrants';
 
 interface AppModalProps {
   lang?: Lang;
@@ -128,8 +130,11 @@ export function AppModal({ lang }: AppModalProps) {
 
   const iframeSrc = `codepapr-app://${openedApp.appId}/${entryFile}`;
 
-  const hasMeta = (manifest?.permissions && manifest.permissions.length > 0)
-    || (manifest?.agents && manifest.agents.length > 0);
+  const appSettings = usePaprPermissionStore((state) => state.appSettings);
+  const effectiveAccess = manifest
+    ? resolveEffectiveAccess(manifest, appSettings, openedApp.appId)
+    : null;
+  const hasMeta = !!manifest;
   const hasBackend = !!(openedApp.command && openedApp.port);
   const backendStopped = hasBackend && !(openedApp.pid && openedApp.url);
 
@@ -195,18 +200,19 @@ export function AppModal({ lang }: AppModalProps) {
         </div>
       )}
 
-      {showDetails && manifest && (
+      {showDetails && (
         <div className="shrink-0 border-b border-line px-3 py-1.5">
-          {manifest.permissions && manifest.permissions.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1 mb-1">
-              {manifest.permissions.map((p) => (
-                <span key={p} className="rounded bg-accent-soft px-1.5 py-0.5 text-[9px] text-accent-text font-mono">
-                  {p}
-                </span>
-              ))}
+          {effectiveAccess && (
+            <div className="mb-1 flex flex-wrap items-center gap-1">
+              <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[9px] text-accent-text font-mono">
+                {t.appModalInfoLocal}: {effectiveAccess.local}
+              </span>
+              <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[9px] text-accent-text font-mono">
+                {t.appModalInfoNetwork}: {effectiveAccess.network ? t.appModalNetworkOn : t.appModalNetworkOff}
+              </span>
             </div>
           )}
-          {manifest.agents && manifest.agents.length > 0 && (
+          {manifest?.agents && manifest.agents.length > 0 ? (
             <div className="flex flex-col gap-0.5">
               {manifest.agents.map((a) => (
                 <div key={a.name} className="text-[10px] text-fg-muted">
@@ -216,12 +222,11 @@ export function AppModal({ lang }: AppModalProps) {
                 </div>
               ))}
             </div>
+          ) : (
+            !effectiveAccess && (
+              <div className="text-[10px] text-fg-dim">{t.appModalNoAccessMeta}</div>
+            )
           )}
-        </div>
-      )}
-      {showDetails && !hasMeta && (
-        <div className="shrink-0 border-b border-line px-3 py-1.5 text-[10px] text-fg-dim">
-          No permissions or agents declared
         </div>
       )}
 

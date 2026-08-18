@@ -405,6 +405,37 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady }: UsePap
         return;
       }
 
+      if (type === 'papr://http.request') {
+        if (!hasPermission('http:request')) return deny('http:request');
+        const payload = data.payload as Record<string, unknown> | undefined;
+        const url = payload?.url;
+        if (typeof url !== 'string' || url.length === 0) {
+          respond(undefined, { code: 'INVALID_REQUEST', message: 'url must be a non-empty string' });
+          return;
+        }
+        const method = typeof payload?.method === 'string' ? payload.method : 'GET';
+        const rawHeaders = payload?.headers;
+        const headers =
+          rawHeaders && typeof rawHeaders === 'object' && !Array.isArray(rawHeaders)
+            ? Object.fromEntries(
+                Object.entries(rawHeaders as Record<string, unknown>).filter(
+                  (entry): entry is [string, string] => typeof entry[1] === 'string',
+                ),
+              )
+            : undefined;
+        invoke('papr_http_request', {
+          appId,
+          method,
+          url,
+          headers,
+          body: typeof payload?.body === 'string' ? payload.body : undefined,
+          maxBytes: typeof payload?.maxBytes === 'number' ? payload.maxBytes : undefined,
+        })
+          .then((result) => respond(result))
+          .catch((err) => respond(undefined, { code: 'HTTP_ERROR', message: String(err) }));
+        return;
+      }
+
       if (type === 'papr://fs.read') {
         if (!hasPermission('fs:read')) return deny('fs:read');
         const payload = data.payload as Record<string, unknown> | undefined;
@@ -417,6 +448,7 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady }: UsePap
           appId,
           path,
           maxBytes: typeof payload?.maxBytes === 'number' ? payload.maxBytes : undefined,
+          encoding: typeof payload?.encoding === 'string' ? payload.encoding : undefined,
         })
           .then((result) => respond(result))
           .catch((err) => respond(undefined, { code: 'FS_ERROR', message: String(err) }));
@@ -435,8 +467,23 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady }: UsePap
           appId,
           path,
           content: typeof payload?.content === 'string' ? payload.content : '',
+          encoding: typeof payload?.encoding === 'string' ? payload.encoding : undefined,
         })
           .then(() => respond(null))
+          .catch((err) => respond(undefined, { code: 'FS_ERROR', message: String(err) }));
+        return;
+      }
+
+      if (type === 'papr://fs.exists') {
+        if (!hasPermission('fs:read')) return deny('fs:read');
+        const payload = data.payload as Record<string, unknown> | undefined;
+        const path = payload?.path;
+        if (typeof path !== 'string' || path.length === 0) {
+          respond(undefined, { code: 'INVALID_REQUEST', message: 'path must be a non-empty string' });
+          return;
+        }
+        invoke('papr_fs_exists', { appId, path })
+          .then((result) => respond(result))
           .catch((err) => respond(undefined, { code: 'FS_ERROR', message: String(err) }));
         return;
       }

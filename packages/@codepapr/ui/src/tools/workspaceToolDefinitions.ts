@@ -1064,7 +1064,7 @@ name: 'web_download_file',
   {
     name: 'app_render',
     description:
-      '生成一个交互式 HTML 应用到应用面板。用于数据分析可视化、仪表盘、关系图等。自动写入 manifest.json 和 index.html 到 .CodePapr/apps/<appId>/ 目录，并注册到应用管理面板。相同 appId 会覆盖已有应用。\n\n📦 Papr SDK 可用：生成的 HTML 可通过 window.papr 调用 CodePapr 能力：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 键值持久化存储（应用内数据持久化默认用它，永远可用）\n  • papr.agent.run({agent, task}) — 调用 AI Agent（Agent 读不到 papr.db，需要的数据要放进 task；工具集由 local/network 决定）\n  • papr.http.get(url) / papr.http.post(url, body) — HTTP 请求（仅限公网地址，需 network: true）\n  • papr.fs.readFile(path) / papr.fs.writeFile(path, content) / papr.fs.list(path) / papr.fs.delete(path) — 文件读写（限定 app data 目录，永远可用）\n  • papr.app.info() — 获取应用信息\n⚠️ 访问档用 local（none/read/write）+ network（true/false）两个参数声明；papr.db/papr.fs 无需权限，papr.http 需 network:true。',
+      '生成一个交互式 HTML 应用到应用面板。用于数据分析可视化、仪表盘、关系图等。自动写入 manifest.json 和 index.html 到 .CodePapr/apps/<appId>/ 目录，并注册到应用管理面板。相同 appId 会覆盖已有应用。\n\n📦 Papr SDK 可用：生成的 HTML 可通过 window.papr 调用 CodePapr 能力：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 键值持久化存储（应用内数据持久化默认用它，永远可用）\n  • papr.agent.run({agent, task}) — 调用 AI Agent（Agent 读不到 papr.db，需要的数据要放进 task；工具集由 local/network 决定）\n  • papr.http.request({method, url, headers?, body?, maxBytes?}) / papr.http.get / papr.http.post — HTTP 请求（仅限公网地址，需 network: true；JSON 原样返回）\n  • papr.fs.readFile(path, {encoding?}) / papr.fs.writeFile(path, content, {encoding?}) / papr.fs.exists(path) / papr.fs.list / papr.fs.delete — 文件读写（限定 app data 目录，永远可用；encoding: utf8|base64）\n  • papr.app.info() — 获取应用信息\n⚠️ 访问档用 local（none/read/write）+ network（true/false）两个参数声明；papr.db/papr.fs 无需权限，papr.http 需 network:true。',
     parameters: {
       type: 'object',
       properties: {
@@ -1078,7 +1078,7 @@ name: 'web_download_file',
         },
         html: {
           type: 'string',
-          description: '前端 HTML 文档内容（index.html）。可以内联 CSS/JS，可以引用 CDN（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js）。可使用 window.papr SDK 调用 CodePapr 能力（papr.db/papr.fs 永远可用；papr.http 需要 network: true）。',
+          description: '前端 HTML 文档内容（index.html 入口）。可以内联 CSS/JS，也可以用 files 放同目录的 app.css / app.js 再用相对路径引用。CDN 图表库仅在 network:true 时可用。可使用 window.papr SDK（papr.db/papr.fs 永远可用；papr.http 需要 network: true）。',
         },
         local: {
           type: 'string',
@@ -1139,12 +1139,12 @@ name: 'web_download_file',
           items: {
             type: 'object',
             properties: {
-              relativePath: { type: 'string', description: '相对于 .CodePapr/apps/<appId>/ 的文件路径。例如：server.js、package.json。' },
+              relativePath: { type: 'string', description: '相对于 .CodePapr/apps/<appId>/ 的文件路径。例如：app.css、app.js、server.js、package.json。' },
               content: { type: 'string', description: '文件完整内容。' },
             },
             required: ['relativePath', 'content'],
           },
-          description: '可选。额外的后端文件列表（server.js、package.json 等）。每个文件包含 relativePath 和 content。',
+          description: '可选。额外文件（前端静态资源 app.css/app.js，或后端 server.js、package.json 等）。每个文件包含 relativePath 和 content。不能覆盖 manifest.json、index.html、db.sqlite。',
         },
         command: {
           type: 'string',

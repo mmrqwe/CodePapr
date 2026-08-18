@@ -151,8 +151,26 @@
       }
     },
     http: {
-      get: function (url, maxBytes) {
-        return send('papr://http.get', { url: url, maxBytes: maxBytes });
+      request: function (opts) {
+        opts = opts || {};
+        return send('papr://http.request', {
+          method: opts.method,
+          url: opts.url,
+          headers: opts.headers,
+          body: opts.body,
+          maxBytes: opts.maxBytes
+        });
+      },
+      get: function (url, maxBytesOrOpts) {
+        if (maxBytesOrOpts && typeof maxBytesOrOpts === 'object') {
+          return send('papr://http.request', {
+            method: 'GET',
+            url: url,
+            headers: maxBytesOrOpts.headers,
+            maxBytes: maxBytesOrOpts.maxBytes
+          });
+        }
+        return send('papr://http.get', { url: url, maxBytes: maxBytesOrOpts });
       },
       post: function (url, body, contentType) {
         return send('papr://http.post', {
@@ -163,11 +181,25 @@
       }
     },
     fs: {
-      readFile: function (path, maxBytes) {
-        return send('papr://fs.read', { path: path, maxBytes: maxBytes });
+      readFile: function (path, maxBytesOrOpts) {
+        if (maxBytesOrOpts && typeof maxBytesOrOpts === 'object') {
+          return send('papr://fs.read', {
+            path: path,
+            maxBytes: maxBytesOrOpts.maxBytes,
+            encoding: maxBytesOrOpts.encoding
+          });
+        }
+        return send('papr://fs.read', { path: path, maxBytes: maxBytesOrOpts });
       },
-      writeFile: function (path, content) {
-        return send('papr://fs.write', { path: path, content: content });
+      writeFile: function (path, content, opts) {
+        return send('papr://fs.write', {
+          path: path,
+          content: content,
+          encoding: opts && opts.encoding
+        });
+      },
+      exists: function (path) {
+        return send('papr://fs.exists', { path: path });
       },
       list: function (path) {
         return send('papr://fs.list', { path: path });

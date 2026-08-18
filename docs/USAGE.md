@@ -80,9 +80,17 @@ const result = await papr.agent.run(
 
 // HTTP 请求
 const data = await papr.http.get('https://api.example.com/data');
+const updated = await papr.http.request({
+  method: 'PUT',
+  url: 'https://api.example.com/item',
+  headers: { Authorization: 'Bearer …', 'Content-Type': 'application/json' },
+  body: JSON.stringify({ ok: true }),
+});
 
-// 文件读写（限定 app data 目录；writeFile 自动创建父目录，如 'posts/x.md'）
+// 文件读写（限定 app data 目录；writeFile 自动创建父目录；二进制用 encoding: 'base64'）
 await papr.fs.writeFile('config.json', JSON.stringify(config));
+await papr.fs.writeFile('icon.png', pngBase64, { encoding: 'base64' });
+const exists = await papr.fs.exists('icon.png');
 const files = await papr.fs.list();
 ```
 

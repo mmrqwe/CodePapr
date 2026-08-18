@@ -211,7 +211,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       name: title,
       version: '0.1.0',
       entry: 'index.html',
-      permissions,
+      ...(permissions.length > 0 ? { permissions } : {}),
       local: access.local,
       network: access.network,
       level: appLevel ?? legacyAccessToLevel(access),

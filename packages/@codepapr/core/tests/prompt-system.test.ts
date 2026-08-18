@@ -448,8 +448,9 @@ describe('promptSystem', () => {
   it('app mode mandates themed dual dark/light UI matching the CodePapr palette in all languages', () => {
     for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
       const prompt = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang });
-      expect(prompt).toContain('data-theme');
-      expect(prompt).toContain('prefers-color-scheme');
+      expect(prompt).toContain('data-mode');
+      expect(prompt).toContain('--bg');
+      expect(prompt).not.toContain('prefers-color-scheme');
       expect(prompt).toContain('#0a0c12');
       expect(prompt).toContain('#f7f4ef');
       expect(prompt).toContain('#d9673e');
@@ -464,6 +465,17 @@ describe('promptSystem', () => {
     const en = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'en' });
     expect(en).toContain('auto-creates subdirectories');
     expect(en).toContain('Agents cannot read papr.db');
+  });
+
+  it('app mode documents multi-file frontend, http.request, and fs encoding', () => {
+    for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
+      const prompt = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang });
+      expect(prompt).toContain('app.css');
+      expect(prompt).toContain('app.js');
+      expect(prompt).toContain('papr.http.request');
+      expect(prompt).toContain('base64');
+      expect(prompt).toContain('exists');
+    }
   });
 
   it('all mode prompts pass the ImmutablePrefix static-content guard', () => {

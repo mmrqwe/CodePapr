@@ -188,8 +188,8 @@ JavaScript SDK injected into every app iframe, providing a unified API:
 |---|---|
 | `papr.db.get/set/delete/keys()` | Persistent key-value storage (per-app isolation) |
 | `papr.agent.run({agent, task}, onProgress?)` | Invoke manifest-defined agents (streaming events + step tracking) |
-| `papr.http.get/post(url, body)` | HTTP requests |
-| `papr.fs.readFile/writeFile/list/delete(path)` | File I/O (restricted to .CodePapr/apps/<appId>/data/) |
+| `papr.http.request({method, url, headers?, body?})` / `get` / `post` | HTTP requests (JSON returned as-is; header allowlist) |
+| `papr.fs.readFile` / `writeFile` / `exists` / `list` / `delete` | File I/O (app data dir; `encoding: 'base64'` for binary) |
 | `papr.app.info()` | Get app metadata |
 
 **IPC bridge:** The iframe SDK sends `{__papr:true, reqId, type, payload}` protocol messages via `window.parent.postMessage()`. The React main window's `usePaprBridge` hook listens → first-pass permission check → routes to `invoke()` (Rust) or Worker (Agent).

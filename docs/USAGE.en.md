@@ -80,9 +80,17 @@ const result = await papr.agent.run(
 
 // HTTP requests
 const data = await papr.http.get('https://api.example.com/data');
+const updated = await papr.http.request({
+  method: 'PUT',
+  url: 'https://api.example.com/item',
+  headers: { Authorization: 'Bearer …', 'Content-Type': 'application/json' },
+  body: JSON.stringify({ ok: true }),
+});
 
-// File I/O (restricted to the app data directory; writeFile auto-creates parent dirs, e.g. 'posts/x.md')
+// File I/O (restricted to the app data directory; writeFile auto-creates parent dirs; use encoding: 'base64' for binary)
 await papr.fs.writeFile('config.json', JSON.stringify(config));
+await papr.fs.writeFile('icon.png', pngBase64, { encoding: 'base64' });
+const exists = await papr.fs.exists('icon.png');
 const files = await papr.fs.list();
 ```
 

@@ -1,14 +1,16 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 
+use base64::Engine;
 use serde::Serialize;
 
 use crate::papr_runtime::permission;
 use crate::shared::{canonical_workspace, parse_browser_url};
 use crate::web::client::build_papr_http_client;
-use crate::web::text::{collapse_whitespace, html_to_text, truncate_text_to_bytes};
+use crate::web::text::{html_to_text, truncate_text_to_bytes};
 
 const MAX_PAPR_HTTP_BYTES: usize = 500_000;
 const PAPR_HTTP_POST_MAX_BYTES: usize = 100_000;
@@ -231,14 +233,93 @@ fn resolve_app_path(workspace_path: &str, app_id: &str, relative: &str) -> Resul
 
 // ── HTTP commands ──────────────────────────────────────────────────────
 
-#[tauri::command]
-pub async fn papr_http_get(
-    app_id: String,
+const ALLOWED_HTTP_METHODS: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"];
+const MAX_HTTP_HEADERS: usize = 16;
+const MAX_HEADER_NAME: usize = 64;
+const MAX_HEADER_VALUE: usize = 4096;
+
+fn header_name_allowed(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    if n.starts_with("proxy-") {
+        return false;
+    }
+    matches!(
+        n.as_str(),
+        "authorization" | "accept" | "content-type" | "accept-language" | "if-none-match" | "if-modified-since"
+    ) || n.starts_with("x-")
+}
+
+pub(crate) fn sanitize_http_headers(
+    raw: Option<HashMap<String, String>>,
+) -> Result<Vec<(String, String)>, String> {
+    let Some(map) = raw else {
+        return Ok(Vec::new());
+    };
+    if map.len() > MAX_HTTP_HEADERS {
+        return Err(format!("headers 最多 {MAX_HTTP_HEADERS} 个"));
+    }
+    let mut out = Vec::with_capacity(map.len());
+    for (key, value) in map {
+        if key.is_empty() || key.len() > MAX_HEADER_NAME || value.len() > MAX_HEADER_VALUE {
+            return Err("header 名称或值过长".to_string());
+        }
+        if key.bytes().any(|b| b == b'\r' || b == b'\n' || b == b':')
+            || value.bytes().any(|b| b == b'\r' || b == b'\n')
+        {
+            return Err("header 含非法字符".to_string());
+        }
+        if !header_name_allowed(&key) {
+            return Err(format!("不允许的请求头: {key}"));
+        }
+        out.push((key, value));
+    }
+    Ok(out)
+}
+
+fn parse_http_method(method: &str) -> Result<reqwest::Method, String> {
+    let upper = method.trim().to_ascii_uppercase();
+    if !ALLOWED_HTTP_METHODS.contains(&upper.as_str()) {
+        return Err(format!(
+            "不支持的 HTTP 方法: {method}（允许 GET/POST/PUT/PATCH/DELETE/HEAD）"
+        ));
+    }
+    upper
+        .parse()
+        .map_err(|_| format!("不支持的 HTTP 方法: {method}"))
+}
+
+/// JSON/文本原样返回（只按字节封顶）。仅 GET 且 content-type 为 HTML 时抽取正文，
+/// 避免把 JSON API 抽成纯文本。
+pub(crate) fn decode_http_body(
+    content_type: Option<&str>,
+    body: &[u8],
+    max: usize,
+    scrape_html: bool,
+) -> (String, bool) {
+    let body_str = String::from_utf8_lossy(body).into_owned();
+    let ct = content_type.unwrap_or("").to_ascii_lowercase();
+    let is_structured = ct.contains("json") || ct.contains("javascript") || ct.contains("xml");
+    let is_html = !is_structured
+        && (ct.contains("html") || (scrape_html && body_str.contains("<html")));
+    let text = if is_html && scrape_html {
+        html_to_text(&body_str)
+    } else {
+        body_str
+    };
+    truncate_text_to_bytes(text, max)
+}
+
+async fn papr_http_request_inner(
+    app_id: &str,
+    capability: &str,
+    method: reqwest::Method,
     url: String,
+    headers: Option<HashMap<String, String>>,
+    body: Option<String>,
     max_bytes: Option<usize>,
 ) -> Result<PaprHttpResult, String> {
-    let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
-    permission::check_permission(&manifest, &app_id, "http:get")?;
+    let manifest = crate::papr_runtime::manifest::get_manifest(app_id)?;
+    permission::check_permission(&manifest, app_id, capability)?;
 
     let parsed_url = parse_browser_url(&url)?;
     if !parsed_url.starts_with("https://") && !parsed_url.starts_with("http://") {
@@ -250,14 +331,45 @@ pub async fn papr_http_get(
     let parsed = url::Url::parse(&parsed_url).map_err(|err| format!("URL 解析失败: {err}"))?;
     let pin = resolve_safe_socket_addr(&parsed).await?;
 
-    let max = max_bytes.unwrap_or(50_000).clamp(1_000, MAX_PAPR_HTTP_BYTES);
+    let extra_headers = sanitize_http_headers(headers)?;
+    if let Some(raw) = &body {
+        if raw.len() > PAPR_HTTP_POST_MAX_BYTES {
+            return Err(format!("请求体超过上限 {PAPR_HTTP_POST_MAX_BYTES} 字节"));
+        }
+    }
+
+    let is_get = method == reqwest::Method::GET;
+    let max = max_bytes
+        .unwrap_or(if is_get { 50_000 } else { PAPR_HTTP_POST_MAX_BYTES })
+        .clamp(1_000, MAX_PAPR_HTTP_BYTES);
+
     let client = build_papr_http_client(pin)?;
-    let response = client
-        .get(parsed_url)
-        .header(reqwest::header::ACCEPT, "application/json, text/plain, text/html;q=0.9, */*;q=0.5")
+    let mut request = client.request(method.clone(), parsed_url);
+    let has_accept = extra_headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("accept"));
+    if !has_accept {
+        request = request.header(
+            reqwest::header::ACCEPT,
+            "application/json, text/plain, text/html;q=0.9, */*;q=0.5",
+        );
+    }
+    for (key, value) in extra_headers {
+        request = request.header(&key, &value);
+    }
+    if matches!(
+        method,
+        reqwest::Method::POST | reqwest::Method::PUT | reqwest::Method::PATCH | reqwest::Method::DELETE
+    ) {
+        if let Some(payload) = body {
+            request = request.body(payload);
+        }
+    }
+
+    let response = request
         .send()
         .await
-        .map_err(|err| format!("HTTP GET 失败: {err}"))?;
+        .map_err(|err| format!("HTTP {method} 失败: {err}"))?;
 
     let status = response.status();
     let content_type = response
@@ -266,24 +378,18 @@ pub async fn papr_http_get(
         .and_then(|v| v.to_str().ok())
         .map(|v| v.to_string());
 
-    // HTML 响应的标记/文本比高，原始读取上限放宽到硬顶，max 只约束转换后的
-    // 文本；非 HTML 直接按 max 封顶。两种情况下内存都封顶，达到上限即提前停止。
     let html_by_header = content_type
         .as_deref()
         .map(|v| v.contains("html"))
         .unwrap_or(false);
-    let read_cap = if html_by_header { MAX_PAPR_HTTP_BYTES } else { max };
-    let (body_bytes, body_truncated) = read_body_capped(response, read_cap).await?;
-    let body_str = String::from_utf8_lossy(&body_bytes).into_owned();
-
-    let is_html = html_by_header || body_str.contains("<html");
-    let text = if is_html {
-        html_to_text(&body_str)
+    let read_cap = if html_by_header && is_get {
+        MAX_PAPR_HTTP_BYTES
     } else {
-        collapse_whitespace(&body_str)
+        max
     };
-
-    let (content, text_truncated) = truncate_text_to_bytes(text, max);
+    let (body_bytes, body_truncated) = read_body_capped(response, read_cap).await?;
+    let (content, text_truncated) =
+        decode_http_body(content_type.as_deref(), &body_bytes, max, is_get);
 
     Ok(PaprHttpResult {
         status: status.as_u16(),
@@ -294,54 +400,67 @@ pub async fn papr_http_get(
 }
 
 #[tauri::command]
+pub async fn papr_http_get(
+    app_id: String,
+    url: String,
+    max_bytes: Option<usize>,
+) -> Result<PaprHttpResult, String> {
+    papr_http_request_inner(
+        &app_id,
+        "http:get",
+        reqwest::Method::GET,
+        url,
+        None,
+        None,
+        max_bytes,
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn papr_http_post(
     app_id: String,
     url: String,
     body: String,
     content_type: Option<String>,
 ) -> Result<PaprHttpResult, String> {
-    let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
-    permission::check_permission(&manifest, &app_id, "http:post")?;
+    let mut headers = HashMap::new();
+    headers.insert(
+        "Content-Type".to_string(),
+        content_type.unwrap_or_else(|| "application/json".to_string()),
+    );
+    papr_http_request_inner(
+        &app_id,
+        "http:post",
+        reqwest::Method::POST,
+        url,
+        Some(headers),
+        Some(body),
+        Some(PAPR_HTTP_POST_MAX_BYTES),
+    )
+    .await
+}
 
-    let parsed_url = parse_browser_url(&url)?;
-    if !parsed_url.starts_with("https://") && !parsed_url.starts_with("http://") {
-        return Err("url 必须是 http 或 https URL".to_string());
-    }
-    if is_private_or_internal_url(&parsed_url) {
-        return Err("安全限制：不允许访问内网/本地地址".to_string());
-    }
-    let parsed = url::Url::parse(&parsed_url).map_err(|err| format!("URL 解析失败: {err}"))?;
-    let pin = resolve_safe_socket_addr(&parsed).await?;
-
-    let ct = content_type.unwrap_or_else(|| "application/json".to_string());
-    let client = build_papr_http_client(pin)?;
-    let response = client
-        .post(parsed_url)
-        .header(reqwest::header::CONTENT_TYPE, &ct)
-        .body(body)
-        .send()
-        .await
-        .map_err(|err| format!("HTTP POST 失败: {err}"))?;
-
-    let status = response.status();
-    let resp_content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.to_string());
-
-    let (body_bytes, body_truncated) =
-        read_body_capped(response, PAPR_HTTP_POST_MAX_BYTES).await?;
-    let body_str = String::from_utf8_lossy(&body_bytes).into_owned();
-    let text = collapse_whitespace(&body_str);
-    let (content, text_truncated) = truncate_text_to_bytes(text, PAPR_HTTP_POST_MAX_BYTES);
-
-    Ok(PaprHttpResult {
-        status: status.as_u16(),
-        body: content,
-        content_type: resp_content_type,
-        truncated: body_truncated || text_truncated,
-    })
+#[tauri::command]
+pub async fn papr_http_request(
+    app_id: String,
+    method: String,
+    url: String,
+    headers: Option<HashMap<String, String>>,
+    body: Option<String>,
+    max_bytes: Option<usize>,
+) -> Result<PaprHttpResult, String> {
+    let parsed_method = parse_http_method(&method)?;
+    papr_http_request_inner(
+        &app_id,
+        "http:request",
+        parsed_method,
+        url,
+        headers,
+        body,
+        max_bytes,
+    )
+    .await
 }
 
 // ── FS commands ────────────────────────────────────────────────────────
@@ -358,6 +477,7 @@ pub fn papr_fs_read(
     app_id: String,
     path: String,
     max_bytes: Option<usize>,
+    encoding: Option<String>,
 ) -> Result<String, String> {
     let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
     permission::check_permission(&manifest, &app_id, "fs:read")?;
@@ -373,7 +493,12 @@ pub fn papr_fs_read(
     }
 
     let max = max_bytes.unwrap_or(200_000).clamp(1_000, 1_000_000);
-    read_capped_utf8(&resolved, max)
+    let as_base64 = encoding.as_deref().map(|v| v.eq_ignore_ascii_case("base64")).unwrap_or(false);
+    if as_base64 {
+        read_capped_base64(&resolved, max)
+    } else {
+        read_capped_utf8(&resolved, max)
+    }
 }
 
 /// 最多读取 max 字节，并在 UTF-8 字符边界处安全截断。
@@ -398,11 +523,31 @@ fn read_capped_utf8(path: &std::path::Path, max: usize) -> Result<String, String
     }
 }
 
+fn read_capped_base64(path: &std::path::Path, max: usize) -> Result<String, String> {
+    let file = fs::File::open(path).map_err(|err| format!("读取文件失败: {err}"))?;
+    let mut buf = Vec::new();
+    file.take(max as u64)
+        .read_to_end(&mut buf)
+        .map_err(|err| format!("读取文件失败: {err}"))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(buf))
+}
+
+fn decode_fs_content(content: &str, encoding: Option<&str>) -> Result<Vec<u8>, String> {
+    if encoding.map(|v| v.eq_ignore_ascii_case("base64")).unwrap_or(false) {
+        base64::engine::general_purpose::STANDARD
+            .decode(content.trim())
+            .map_err(|err| format!("base64 解码失败: {err}"))
+    } else {
+        Ok(content.as_bytes().to_vec())
+    }
+}
+
 #[tauri::command]
 pub fn papr_fs_write(
     app_id: String,
     path: String,
     content: String,
+    encoding: Option<String>,
 ) -> Result<(), String> {
     let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
     permission::check_permission(&manifest, &app_id, "fs:write")?;
@@ -413,6 +558,11 @@ pub fn papr_fs_write(
     }
 
     if content.len() > 5_000_000 {
+        return Err("文件内容超过上限 5MB".to_string());
+    }
+
+    let bytes = decode_fs_content(&content, encoding.as_deref())?;
+    if bytes.len() > 5_000_000 {
         return Err("文件内容超过上限 5MB".to_string());
     }
 
@@ -449,7 +599,7 @@ pub fn papr_fs_write(
     }
 
     // 父目录校验不能覆盖"目标本身是 symlink"的逃逸：写入走拒绝符号链接的闸门
-    crate::shared::write_file_rejecting_symlink(&resolved, &canonical_base, content.as_bytes())?;
+    crate::shared::write_file_rejecting_symlink(&resolved, &canonical_base, &bytes)?;
 
     Ok(())
 }
@@ -530,6 +680,23 @@ pub fn papr_fs_delete(
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn papr_fs_exists(app_id: String, path: String) -> Result<bool, String> {
+    let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
+    permission::check_permission(&manifest, &app_id, "fs:read")?;
+
+    let ctx = crate::papr_runtime::app_context::get(&app_id)?;
+    if path.contains("..") || path.contains('\\') || path.starts_with('/') || path.is_empty() {
+        return Err("invalid path".to_string());
+    }
+
+    match resolve_app_path(&ctx.workspace_path, &app_id, &path) {
+        Ok(resolved) => Ok(resolved.exists()),
+        Err(err) if err.contains("path traversal") => Err(err),
+        Err(_) => Ok(false),
+    }
 }
 
 // ── App lifecycle ────────────────────────────────────────────────────
@@ -762,8 +929,8 @@ mod tests {
         // app_overrides（内存态），共用同一 id 会被并行测试竞态误伤。
         register_test_app(&ws.workspace_arg(), "rw-app", &[]);
 
-        papr_fs_write("rw-app".into(), "hello.txt".into(), "Hello World".into()).unwrap();
-        let content = papr_fs_read("rw-app".into(), "hello.txt".into(), None).unwrap();
+        papr_fs_write("rw-app".into(), "hello.txt".into(), "Hello World".into(), None).unwrap();
+        let content = papr_fs_read("rw-app".into(), "hello.txt".into(), None, None).unwrap();
         assert_eq!(content, "Hello World");
 
         unregister_test_app("rw-app");
@@ -775,8 +942,8 @@ mod tests {
         register_test_app(&ws.workspace_arg(), "nested-app", &[]);
 
         // 写嵌套路径：父目录不存在时应自动创建（博客 posts/ 分目录场景）
-        papr_fs_write("nested-app".into(), "posts/first.md".into(), "# Hello".into()).unwrap();
-        papr_fs_write("nested-app".into(), "posts/archive/old.md".into(), "# Old".into()).unwrap();
+        papr_fs_write("nested-app".into(), "posts/first.md".into(), "# Hello".into(), None).unwrap();
+        papr_fs_write("nested-app".into(), "posts/archive/old.md".into(), "# Old".into(), None).unwrap();
 
         assert!(ws
             .file_path(".CodePapr/apps/nested-app/data/posts/first.md")
@@ -784,7 +951,7 @@ mod tests {
         assert!(ws
             .file_path(".CodePapr/apps/nested-app/data/posts/archive/old.md")
             .exists());
-        let content = papr_fs_read("nested-app".into(), "posts/archive/old.md".into(), None).unwrap();
+        let content = papr_fs_read("nested-app".into(), "posts/archive/old.md".into(), None, None).unwrap();
         assert_eq!(content, "# Old");
 
         // list 能列出新建的嵌套目录
@@ -802,9 +969,9 @@ mod tests {
         register_test_app(&ws.workspace_arg(), "escape-app", &[]);
 
         // 绝对路径与 .. 逃逸必须被拦截（不能写出 data/）
-        assert!(papr_fs_write("escape-app".into(), "/tmp/evil.txt".into(), "x".into()).is_err());
-        assert!(papr_fs_write("escape-app".into(), "../evil.txt".into(), "x".into()).is_err());
-        assert!(papr_fs_write("escape-app".into(), "a\\..\\evil.txt".into(), "x".into()).is_err());
+        assert!(papr_fs_write("escape-app".into(), "/tmp/evil.txt".into(), "x".into(), None).is_err());
+        assert!(papr_fs_write("escape-app".into(), "../evil.txt".into(), "x".into(), None).is_err());
+        assert!(papr_fs_write("escape-app".into(), "a\\..\\evil.txt".into(), "x".into(), None).is_err());
         assert!(!ws.file_path(".CodePapr/apps/escape-app/data/../evil.txt").exists());
         assert!(!ws.file_path("/tmp/evil.txt").exists());
 
@@ -819,7 +986,7 @@ mod tests {
         // read/list/delete 与 write 统一校验：.. / 反斜杠 / 绝对路径 / 空路径
         // 一律拒绝（write 的既有契约，回归 #19 的一致性修复）。
         for path in ["../secret.txt", "a\\..\\evil.txt", "/tmp/evil.txt", ""] {
-            let result = papr_fs_read("traversal-app".into(), path.to_string(), None);
+            let result = papr_fs_read("traversal-app".into(), path.to_string(), None, None);
             assert!(result.is_err(), "read 应拒绝路径: {:?}", path);
             let result = papr_fs_delete("traversal-app".into(), path.to_string());
             assert!(result.is_err(), "delete 应拒绝路径: {:?}", path);
@@ -839,9 +1006,9 @@ mod tests {
 
         // 500 个 CJK 字符 = 1500 字节；旧实现 take(1000 个字符) 会返回 3000 字节
         let cjk: String = "中".repeat(500);
-        papr_fs_write("mb-app".into(), "cjk.txt".into(), cjk).unwrap();
+        papr_fs_write("mb-app".into(), "cjk.txt".into(), cjk, None).unwrap();
 
-        let content = papr_fs_read("mb-app".into(), "cjk.txt".into(), Some(1_000)).unwrap();
+        let content = papr_fs_read("mb-app".into(), "cjk.txt".into(), Some(1_000), None).unwrap();
         assert!(content.len() <= 1_000, "按字节上限截断，实际 {} 字节", content.len());
         assert_eq!(content.len(), 999); // 3 字节/字符，边界回退到完整字符
         assert_eq!(content.chars().count(), 333);
@@ -870,11 +1037,11 @@ mod tests {
         let ws = TestWorkspace::new("papr-fs-delete");
         register_test_app(&ws.workspace_arg(), "delete-app", &[]);
 
-        papr_fs_write("delete-app".into(), "temp.txt".into(), "data".into()).unwrap();
-        assert!(papr_fs_read("delete-app".into(), "temp.txt".into(), None).is_ok());
+        papr_fs_write("delete-app".into(), "temp.txt".into(), "data".into(), None).unwrap();
+        assert!(papr_fs_read("delete-app".into(), "temp.txt".into(), None, None).is_ok());
 
         papr_fs_delete("delete-app".into(), "temp.txt".into()).unwrap();
-        assert!(papr_fs_read("delete-app".into(), "temp.txt".into(), None).is_err());
+        assert!(papr_fs_read("delete-app".into(), "temp.txt".into(), None, None).is_err());
 
         unregister_test_app("delete-app");
     }
@@ -884,8 +1051,8 @@ mod tests {
         let ws = TestWorkspace::new("papr-fs-list");
         register_test_app(&ws.workspace_arg(), "list-app", &[]);
 
-        papr_fs_write("list-app".into(), "a.txt".into(), "a".into()).unwrap();
-        papr_fs_write("list-app".into(), "b.txt".into(), "b".into()).unwrap();
+        papr_fs_write("list-app".into(), "a.txt".into(), "a".into(), None).unwrap();
+        papr_fs_write("list-app".into(), "b.txt".into(), "b".into(), None).unwrap();
 
         let entries = papr_fs_list("list-app".into(), None).unwrap();
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
@@ -900,7 +1067,7 @@ mod tests {
         let ws = TestWorkspace::new("papr-fs-missing");
         register_test_app(&ws.workspace_arg(), "missing-app", &[]);
 
-        let result = papr_fs_read("missing-app".into(), "nope.txt".into(), None);
+        let result = papr_fs_read("missing-app".into(), "nope.txt".into(), None, None);
         assert!(result.is_err());
 
         unregister_test_app("missing-app");
@@ -929,7 +1096,7 @@ mod tests {
 
         // 两轴模型（#48）：local 轴未声明 → 默认 none，papr.fs 写被拒绝
         // （旧实现 storage/fs 无条件放行，local 轴完全不参与）。
-        let result = papr_fs_write("noperm-app".into(), "f.txt".into(), "data".into());
+        let result = papr_fs_write("noperm-app".into(), "f.txt".into(), "data".into(), None);
         assert!(
             result.is_err(),
             "local=none 的 app 不得写入 papr.fs: {result:?}"
@@ -942,7 +1109,7 @@ mod tests {
         };
         manifest::store_manifest("noperm-app", m);
         manifest::store_manifest("noperm-app", m2);
-        let result = papr_fs_write("noperm-app".into(), "f.txt".into(), "data".into());
+        let result = papr_fs_write("noperm-app".into(), "f.txt".into(), "data".into(), None);
         assert!(result.is_ok(), "local=write 应允许 papr.fs 写入: {result:?}");
 
         crate::papr_runtime::app_context::unregister("noperm-app");
@@ -958,7 +1125,7 @@ mod tests {
         fs::create_dir_all(&app_dir).unwrap();
         fs::write(app_dir.join("index.html"), b"<html></html>").unwrap();
 
-        papr_fs_write("del-app".into(), "settings.json".into(), r#"{"theme":"dark"}"#.into()).unwrap();
+        papr_fs_write("del-app".into(), "settings.json".into(), r#"{"theme":"dark"}"#.into(), None).unwrap();
         crate::db::papr_storage_set(&ws.workspace_arg(), "del-app", "k", "v").unwrap();
         assert!(app_dir.join("db.sqlite").exists());
 
@@ -1061,5 +1228,50 @@ mod tests {
         let (body, truncated) = drain_chunks(&chunks, MAX_PAPR_HTTP_BYTES);
         assert!(body.len() <= MAX_PAPR_HTTP_BYTES);
         assert!(truncated);
+    }
+
+    #[test]
+    fn sanitize_http_headers_allowlist() {
+        let mut ok = HashMap::new();
+        ok.insert("Authorization".into(), "Bearer t".into());
+        ok.insert("X-Custom".into(), "1".into());
+        ok.insert("Content-Type".into(), "application/json".into());
+        assert_eq!(sanitize_http_headers(Some(ok)).unwrap().len(), 3);
+
+        let mut blocked = HashMap::new();
+        blocked.insert("Cookie".into(), "a=b".into());
+        assert!(sanitize_http_headers(Some(blocked)).unwrap_err().contains("不允许"));
+
+        let mut host = HashMap::new();
+        host.insert("Host".into(), "evil.test".into());
+        assert!(sanitize_http_headers(Some(host)).is_err());
+    }
+
+    #[test]
+    fn decode_http_body_keeps_json_whitespace() {
+        let json = "{\n  \"ok\": true\n}";
+        let (body, truncated) = decode_http_body(Some("application/json"), json.as_bytes(), 10_000, true);
+        assert!(!truncated);
+        assert_eq!(body, json);
+        assert!(body.contains('\n'));
+    }
+
+    #[test]
+    fn fs_base64_roundtrip_and_exists() {
+        let ws = TestWorkspace::new("papr-fs-b64");
+        register_test_app(&ws.workspace_arg(), "b64-app", &[]);
+
+        let raw = vec![0u8, 1, 2, 255, 128];
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&raw);
+        papr_fs_write("b64-app".into(), "blob.bin".into(), encoded, Some("base64".into())).unwrap();
+        let back = papr_fs_read("b64-app".into(), "blob.bin".into(), None, Some("base64".into())).unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD.decode(back).unwrap();
+        assert_eq!(decoded, raw);
+
+        assert!(papr_fs_exists("b64-app".into(), "blob.bin".into()).unwrap());
+        assert!(!papr_fs_exists("b64-app".into(), "missing.bin".into()).unwrap());
+        assert!(papr_fs_exists("b64-app".into(), "../evil".into()).is_err());
+
+        unregister_test_app("b64-app");
     }
 }

@@ -204,4 +204,43 @@ describe('AppModal', () => {
     expect(container.textContent).toContain('Backend stopped');
     expect(container.textContent).toContain('Restart');
   });
+
+  it('Info 展示两轴访问档，不再展示废弃的 permissions[]', async () => {
+    useAppRuntimeStore.setState({
+      apps: [
+        {
+          appId: 'app-1',
+          title: 'Test App',
+          html: '<html></html>',
+          filePath: '.CodePapr/apps/app-1/index.html',
+          createdAt: 1,
+          updatedAt: 2,
+          manifestJson: JSON.stringify({
+            local: 'read',
+            network: false,
+            permissions: ['storage:read', 'http:get'],
+            agents: [{ name: 'assistant' }],
+          }),
+        },
+      ],
+      openedAppId: 'app-1',
+    });
+
+    await act(async () => {
+      root.render(<AppModal lang="en" />);
+    });
+
+    const info = Array.from(container.querySelectorAll('button')).find((el) => el.textContent?.includes('Info'));
+    expect(info).toBeTruthy();
+    act(() => {
+      info?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.textContent).toContain('Local: read');
+    expect(container.textContent).toContain('Network: offline');
+    expect(container.textContent).toContain('assistant');
+    expect(container.textContent).not.toContain('storage:read');
+    expect(container.textContent).not.toContain('http:get');
+  });
 });
