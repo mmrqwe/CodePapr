@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use tauri::Emitter;
@@ -13,15 +14,11 @@ use crate::tts::server::GPT_SOVITS_API_PORT;
 
 static WS_APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
 
-static WS_RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
-
-fn ws_runtime() -> &'static tokio::runtime::Runtime {
-    WS_RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to build shared WS runtime")
-    })
+fn new_current_thread_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to build WS runtime")
 }
 
 pub(crate) fn set_ws_app_handle(handle: tauri::AppHandle) {
@@ -32,6 +29,140 @@ pub(crate) const WS_PATH: &str = "/ws/synthesize";
 
 pub(crate) fn ws_base_url() -> String {
     format!("ws://127.0.0.1:{GPT_SOVITS_API_PORT}{WS_PATH}")
+}
+
+pub(crate) fn is_ws_unavailable(e: &str) -> bool {
+    let lower = e.to_ascii_lowercase();
+    lower.contains("ws connect")
+        || lower.contains("websocket connection failed")
+        || lower.contains("websocket connect")
+        || lower.contains("pool is empty")
+        || lower.contains("pool channel closed")
+        || lower.contains("pool closed")
+}
+
+pub(crate) fn place_wav_by_index(
+    slots: &mut [Option<Vec<u8>>],
+    seen: &mut HashSet<usize>,
+    idx: usize,
+    payload: Vec<u8>,
+) -> bool {
+    if idx >= slots.len() || !seen.insert(idx) {
+        return false;
+    }
+    if !payload.is_empty() {
+        slots[idx] = Some(payload);
+    }
+    true
+}
+
+pub(crate) fn wavs_in_index_order(slots: Vec<Option<Vec<u8>>>) -> Vec<Vec<u8>> {
+    slots.into_iter().flatten().collect()
+}
+
+fn emit_ws_unavailable(err: &str) {
+    if let Some(app) = WS_APP_HANDLE.get() {
+        let _ = app.emit("tts-ws-unavailable", err);
+    }
+}
+
+type WsStream = tokio_tungstenite::WebSocketStream<
+    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+>;
+
+async fn collect_ws_audio(
+    ws: &mut WsStream,
+    sentence_count: usize,
+    invalidate_on_transport_err: bool,
+) -> Result<Vec<Vec<u8>>, String> {
+    let mut received_count: usize = 0;
+    let mut seen_indices: HashSet<usize> = HashSet::new();
+    let mut slots: Vec<Option<Vec<u8>>> = vec![None; sentence_count];
+
+    let ws_result = loop {
+        if super::synthesis_is_cancelled() {
+            let _ = ws.close(None).await;
+            break Err("Synthesis cancelled by user".to_string());
+        }
+        match tokio::time::timeout(Duration::from_millis(200), ws.next()).await {
+            Err(_elapsed) => continue,
+            Ok(None) => break Ok(received_count),
+            Ok(Some(Ok(Message::Binary(data)))) => {
+                if data.len() < 4 {
+                    continue;
+                }
+                let idx = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
+                if place_wav_by_index(&mut slots, &mut seen_indices, idx, data[4..].to_vec()) {
+                    received_count += 1;
+                }
+            }
+            Ok(Some(Ok(Message::Text(txt)))) => {
+                let v: serde_json::Value = serde_json::from_str(&txt).unwrap_or_default();
+                if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
+                    if let Some(idx) = v.get("index").and_then(|i| i.as_u64()) {
+                        if let Some(app) = WS_APP_HANDLE.get() {
+                            let _ = app.emit(
+                                "tts-sentence-failed",
+                                serde_json::json!({
+                                    "index": idx,
+                                    "error": err,
+                                }),
+                            );
+                        }
+                        let _ = seen_indices.insert(idx as usize);
+                        received_count += 1;
+                        continue;
+                    }
+                    if invalidate_on_transport_err {
+                        invalidate_pool();
+                    }
+                    break Err(format!("TTS server error: {err}"));
+                }
+                if v.get("done").is_some() {
+                    break Ok(received_count);
+                }
+                eprintln!("[tts-ws] unrecognised text frame: {txt}");
+            }
+            Ok(Some(Ok(Message::Close(_)))) => {
+                if invalidate_on_transport_err {
+                    invalidate_pool();
+                }
+                if received_count > 0 {
+                    break Ok(received_count);
+                }
+                break Err("WebSocket closed by server before any data received".to_string());
+            }
+            Ok(Some(Err(e))) => {
+                if invalidate_on_transport_err {
+                    invalidate_pool();
+                }
+                if received_count > 0 {
+                    break Ok(received_count);
+                }
+                break Err(format!("WebSocket error: {e}"));
+            }
+            Ok(Some(Ok(_))) => {}
+        }
+    };
+
+    let received_count = match ws_result {
+        Ok(n) => n,
+        Err(e) => return Err(e),
+    };
+
+    if received_count == 0 && sentence_count > 0 {
+        return Err(format!(
+            "WebSocket closed before any sentences were received (got 0/{sentence_count})"
+        ));
+    }
+
+    if received_count < sentence_count {
+        return Err(format!(
+            "Partial synthesis: got {received_count}/{sentence_count} sentences"
+        ));
+    }
+
+    Ok(wavs_in_index_order(slots))
 }
 
 struct ReorderBuffer {
@@ -134,12 +265,14 @@ fn get_or_init_pool() -> Result<(), String> {
         let (tx, mut rx) = mpsc::unbounded_channel::<WsRequest>();
 
         std::thread::spawn(move || {
-            let _ = ws_runtime().block_on(async move {
+            let rt = new_current_thread_runtime();
+            let _ = rt.block_on(async move {
                 let url = ws_base_url();
                 let (ws, _) = match connect_async(&url).await {
                     Ok(c) => c,
                     Err(e) => {
                         eprintln!("[tts-ws] pool conn #{i} connect error: {e}");
+                        emit_ws_unavailable(&format!("WS connect failed: {e}"));
                         while let Ok(req) = rx.try_recv() {
                             if let Some(tx) = req.done_tx {
                                 let _ = tx.send(Err(format!("WS connect failed: {e}")));
@@ -200,16 +333,18 @@ async fn process_one_request(
                 "prompt_text".to_string(),
                 serde_json::Value::String(req.prompt_text.clone().unwrap_or_default()),
             );
-            let lang = req.prompt_language
-                .clone()
-                .unwrap_or_else(|| "zh".to_string());
+            let lang = super::normalize_lang_code(
+                req.prompt_language.as_deref().unwrap_or("zh"),
+            )
+            .to_string();
             ref_obj.insert(
                 "prompt_language".to_string(),
                 serde_json::Value::String(lang.clone()),
             );
-            let text_lang = req.text_language
-                .clone()
-                .unwrap_or_else(|| lang.clone());
+            let text_lang = super::normalize_lang_code(
+                req.text_language.as_deref().unwrap_or(lang.as_str()),
+            )
+            .to_string();
             ref_obj.insert(
                 "text_language".to_string(),
                 serde_json::Value::String(text_lang),
@@ -276,89 +411,7 @@ async fn process_one_request(
             format!("WebSocket send failed: {e}")
         })?;
 
-    let mut received_count: usize = 0;
-    let mut seen_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
-    let mut collected_wavs: Vec<Vec<u8>> = Vec::new();
-    let ws_result = loop {
-        match ws.next().await {
-            Some(Ok(Message::Binary(data))) => {
-                if data.len() < 4 {
-                    continue;
-                }
-                let idx = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
-
-                if idx < req.sentences.len() {
-                    if !seen_indices.insert(idx) {
-                        continue;
-                    }
-                    if data.len() > 4 {
-                        collected_wavs.push(data[4..].to_vec());
-                    }
-                    received_count += 1;
-                }
-            }
-            Some(Ok(Message::Text(txt))) => {
-                let v: serde_json::Value =
-                    serde_json::from_str(&txt).unwrap_or_default();
-                if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
-                    if let Some(idx) = v.get("index").and_then(|i| i.as_u64()) {
-                        if let Some(app) = WS_APP_HANDLE.get() {
-                            let _ = app.emit("tts-sentence-failed", serde_json::json!({
-                                "index": idx,
-                                "error": err,
-                            }));
-                        }
-                        received_count += 1;
-                        continue;
-                    }
-                    invalidate_pool();
-                    break Err(format!("TTS server error: {err}"));
-                }
-                if v.get("done").is_some() {
-                    break Ok(received_count);
-                }
-                eprintln!("[tts-ws] unrecognised text frame: {txt}");
-            }
-            Some(Ok(Message::Close(_))) => {
-                invalidate_pool();
-                if received_count > 0 {
-                    break Ok(received_count);
-                }
-                break Err("WebSocket closed by server before any data received".to_string());
-            }
-            Some(Err(e)) => {
-                invalidate_pool();
-                if received_count > 0 {
-                    break Ok(received_count);
-                }
-                break Err(format!("WebSocket error: {e}"));
-            }
-            None => break Ok(received_count),
-            _ => {}
-        }
-    };
-
-    let received_count = match ws_result {
-        Ok(n) => n,
-        Err(e) => return Err(e),
-    };
-
-    if received_count == 0 && !req.sentences.is_empty() {
-        return Err(format!(
-            "WebSocket closed before any sentences were received (got 0/{})",
-            req.sentences.len()
-        ));
-    }
-
-    if received_count < req.sentences.len() {
-        return Err(format!(
-            "Partial synthesis: got {}/{} sentences",
-            received_count,
-            req.sentences.len()
-        ));
-    }
-
-    Ok(collected_wavs)
+    collect_ws_audio(ws, req.sentences.len(), true).await
 }
 
 fn invalidate_pool() {
@@ -495,12 +548,8 @@ pub(crate) fn synthesize_batch_ws(
 }
 
 /// Non-blocking variant: creates an independent WebSocket connection
-/// in a background thread. Multiple chunks can run in parallel — each
-/// with its own tokio runtime and TCP connection.
-///
-/// The Python server (uvicorn) handles concurrent WS connections
-/// natively, so chunk 1 can synthesize while chunk 0's audio is still
-/// playing from the rodio sink.
+/// in a background thread with its own tokio runtime. Multiple chunks
+/// can synthesise in parallel while earlier audio is still playing.
 pub(crate) fn synthesize_batch_ws_nonblocking(
     sentences: Vec<String>,
     model_name: Option<String>,
@@ -517,7 +566,14 @@ pub(crate) fn synthesize_batch_ws_nonblocking(
 ) {
     let gen = lock(reorder_buffer()).generation;
     std::thread::spawn(move || {
-        let result = ws_runtime().block_on(synthesize_batch_ws_async(
+        let sentences_fb = sentences.clone();
+        let model_fb = model_name.clone();
+        let ref_fb = ref_audio_path.clone();
+        let prompt_fb = prompt_text.clone();
+        let prompt_lang_fb = prompt_language.clone();
+        let text_lang_fb = text_language.clone();
+        let rt = new_current_thread_runtime();
+        let result = rt.block_on(synthesize_batch_ws_async(
             sentences,
             model_name,
             ref_audio_path,
@@ -532,13 +588,28 @@ pub(crate) fn synthesize_batch_ws_nonblocking(
         ));
         match result {
             Ok(wavs) => insert_and_drain(seq, wavs, gen),
+            Err(e) if is_ws_unavailable(&e) => {
+                emit_ws_unavailable(&e);
+                let _ = super::http_fallback_sentences(
+                    sentences_fb,
+                    model_fb,
+                    ref_fb,
+                    prompt_fb,
+                    prompt_lang_fb,
+                    text_lang_fb,
+                    sample_steps,
+                    speed,
+                );
+                // HTTP already pushed audio; advance the reorder seq without
+                // enqueueing a second copy.
+                insert_and_drain(seq, vec![], gen);
+            }
             Err(_) => insert_and_drain(seq, vec![], gen),
         }
     });
 }
 
-/// Connect independently, send JSON, receive all WAVs, enqueue each.
-/// Used by nonblocking calls for parallel chunk synthesis.
+/// Connect independently, send JSON, receive all WAVs in index order.
 async fn synthesize_batch_ws_async(
     sentences: Vec<String>,
     model_name: Option<String>,
@@ -553,32 +624,79 @@ async fn synthesize_batch_ws_async(
     temperature: f32,
 ) -> Result<Vec<Vec<u8>>, String> {
     let url = ws_base_url();
-    let (mut ws, _resp) = connect_async(&url)
-        .await
-        .map_err(|e| format!("WebSocket connection failed: {e}"))?;
+    let (mut ws, _resp) = connect_async(&url).await.map_err(|e| {
+        let msg = format!("WebSocket connection failed: {e}");
+        emit_ws_unavailable(&msg);
+        msg
+    })?;
 
     let mut ref_obj = serde_json::Map::new();
     if let Some(ref path) = ref_audio_path {
         if !path.is_empty() {
-            ref_obj.insert("refer_wav_path".to_string(), serde_json::Value::String(path.clone()));
-            ref_obj.insert("prompt_text".to_string(), serde_json::Value::String(prompt_text.unwrap_or_default()));
-            let lang = prompt_language.clone().unwrap_or_else(|| "zh".to_string());
-            ref_obj.insert("prompt_language".to_string(), serde_json::Value::String(lang.clone()));
-            let text_lang = text_language.clone().unwrap_or_else(|| lang.clone());
-            ref_obj.insert("text_language".to_string(), serde_json::Value::String(text_lang));
+            ref_obj.insert(
+                "refer_wav_path".to_string(),
+                serde_json::Value::String(path.clone()),
+            );
+            ref_obj.insert(
+                "prompt_text".to_string(),
+                serde_json::Value::String(prompt_text.unwrap_or_default()),
+            );
+            let lang = super::normalize_lang_code(prompt_language.as_deref().unwrap_or("zh")).to_string();
+            ref_obj.insert(
+                "prompt_language".to_string(),
+                serde_json::Value::String(lang.clone()),
+            );
+            let text_lang =
+                super::normalize_lang_code(text_language.as_deref().unwrap_or(lang.as_str())).to_string();
+            ref_obj.insert(
+                "text_language".to_string(),
+                serde_json::Value::String(text_lang),
+            );
         }
     }
 
     let mut payload = serde_json::Map::new();
-    payload.insert("texts".to_string(), serde_json::Value::Array(sentences.iter().map(|s| serde_json::Value::String(s.clone())).collect()));
-    payload.insert("sample_steps".to_string(), serde_json::Value::Number(serde_json::Number::from(sample_steps)));
-    payload.insert("speed_factor".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(speed as f64).unwrap_or(serde_json::Number::from(1))));
-    payload.insert("top_k".to_string(), serde_json::Value::Number(serde_json::Number::from(top_k)));
-    payload.insert("top_p".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(top_p as f64).unwrap_or(serde_json::Number::from(1))));
-    payload.insert("temperature".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(temperature as f64).unwrap_or(serde_json::Number::from(1))));
+    payload.insert(
+        "texts".to_string(),
+        serde_json::Value::Array(
+            sentences
+                .iter()
+                .map(|s| serde_json::Value::String(s.clone()))
+                .collect(),
+        ),
+    );
+    payload.insert(
+        "sample_steps".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(sample_steps)),
+    );
+    payload.insert(
+        "speed_factor".to_string(),
+        serde_json::Value::Number(
+            serde_json::Number::from_f64(speed as f64).unwrap_or(serde_json::Number::from(1)),
+        ),
+    );
+    payload.insert(
+        "top_k".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(top_k)),
+    );
+    payload.insert(
+        "top_p".to_string(),
+        serde_json::Value::Number(
+            serde_json::Number::from_f64(top_p as f64).unwrap_or(serde_json::Number::from(1)),
+        ),
+    );
+    payload.insert(
+        "temperature".to_string(),
+        serde_json::Value::Number(
+            serde_json::Number::from_f64(temperature as f64).unwrap_or(serde_json::Number::from(1)),
+        ),
+    );
     if let Some(ref model) = model_name {
         if !model.is_empty() {
-            payload.insert("model_name".to_string(), serde_json::Value::String(model.clone()));
+            payload.insert(
+                "model_name".to_string(),
+                serde_json::Value::String(model.clone()),
+            );
         }
     }
     if !ref_obj.is_empty() {
@@ -586,55 +704,10 @@ async fn synthesize_batch_ws_async(
     }
 
     let json = serde_json::Value::Object(payload).to_string();
-    ws.send(Message::Text(json)).await.map_err(|e| format!("WS send failed: {e}"))?;
+    ws.send(Message::Text(json))
+        .await
+        .map_err(|e| format!("WS send failed: {e}"))?;
 
-    let mut received: usize = 0;
-    let mut seen_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
-    let mut collected_wavs: Vec<Vec<u8>> = Vec::new();
-    loop {
-        match ws.next().await {
-            Some(Ok(Message::Binary(data))) => {
-                if data.len() < 4 { continue; }
-                let idx = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
-                if idx < sentences.len() {
-                    if !seen_indices.insert(idx) { continue; }
-                    if data.len() > 4 {
-                        collected_wavs.push(data[4..].to_vec());
-                    }
-                    received += 1;
-                }
-            }
-            Some(Ok(Message::Text(txt))) => {
-                let v: serde_json::Value = serde_json::from_str(&txt).unwrap_or_default();
-                if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
-                    if let Some(idx) = v.get("index").and_then(|i| i.as_u64()) {
-                        if let Some(app) = WS_APP_HANDLE.get() {
-                            let _ = app.emit("tts-sentence-failed", serde_json::json!({
-                                "index": idx,
-                                "error": err,
-                            }));
-                        }
-                        received += 1;
-                        continue;
-                    }
-                    return Err(format!("TTS error: {txt}"));
-                }
-                if v.get("done").is_some() { break; }
-            }
-            Some(Ok(Message::Close(_))) => { break; }
-            Some(Err(e)) => {
-                if received > 0 { break; }
-                return Err(format!("WS error: {e}"));
-            }
-            None => break,
-            _ => {}
-        }
-    }
-    if received == 0 && !sentences.is_empty() {
-        return Err(format!("WS got 0/{} sentences", sentences.len()));
-    }
-    if received < sentences.len() {
-        return Err(format!("Partial: got {}/{} sentences", received, sentences.len()));
-    }
-    Ok(collected_wavs)
+    collect_ws_audio(&mut ws, sentences.len(), false).await
 }
+

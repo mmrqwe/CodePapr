@@ -428,6 +428,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
 
   const prevHasStreamingRef = useRef(hasStreamingMessage);
   const lastStreamingMsgIdRef = useRef<string | null>(null);
+  const voiceServerHintShownRef = useRef(false);
   // We read `visibleMessages` from a ref inside the TTS effects so that the
   // effects do NOT re-run on every render (visibleMessages is an inline
   // `messages.filter(...)` result and gets a fresh reference each render).
@@ -435,6 +436,22 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
   // "the character keeps repeating the same sentence" bug.
   const visibleMessagesRef = useRef(visibleMessages);
   visibleMessagesRef.current = visibleMessages;
+
+  useEffect(() => {
+    if (!voiceEnabled) {
+      voiceServerHintShownRef.current = false;
+      return;
+    }
+    if (ttsServerStatus === 'running' || ttsServerStatus === 'starting' || ttsServerStatus === 'unknown') {
+      if (ttsServerStatus === 'running') {
+        voiceServerHintShownRef.current = false;
+      }
+      return;
+    }
+    if (voiceServerHintShownRef.current) return;
+    voiceServerHintShownRef.current = true;
+    toast.warning(t.voiceWarmupServerNotRunning);
+  }, [voiceEnabled, ttsServerStatus, t.voiceWarmupServerNotRunning]);
 
   // Streaming feed: sends new content chunks to TTS.
   // Also detects agent-round transitions (message ID changes) and force-completes

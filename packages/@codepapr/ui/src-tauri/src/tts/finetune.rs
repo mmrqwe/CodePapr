@@ -78,6 +78,18 @@ pub(crate) fn start_finetune(
         let _ = std::fs::remove_dir_all(&tune_dir);
     }
 
+    // Relative paths like `voices/{id}/train` resolve against CWD, not
+    // ~/.codepapr. Fall back to the canonical character train dir when the
+    // caller didn't pass an absolute tree that already contains metadata.
+    let default_train = voices_dir().join(&character_id).join("train");
+    let train_audio_dir = if train_audio_dir.join("metadata.list").exists()
+        || train_audio_dir.join("train").join("metadata.list").exists()
+    {
+        train_audio_dir
+    } else {
+        default_train
+    };
+
     let train_dir = if train_audio_dir.join("metadata.list").exists() {
         train_audio_dir
     } else if train_audio_dir.join("train").join("metadata.list").exists() {

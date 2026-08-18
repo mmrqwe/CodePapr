@@ -318,7 +318,7 @@ The current UI uses `ws-batch` (WebSocket batch streaming) as the default and on
 
 ### 5.3 Playback Interaction
 
-During voice playback, the currently-spoken paragraph is highlighted in the chat interface. Each AI reply has a "Replay" button on hover to re-speak that message. Cancelling the current Agent message stops ongoing playback.
+During voice playback, each AI reply has a "Replay" button on hover to re-speak that message. Cancelling the current Agent message stops ongoing playback.
 
 On Apple Silicon Macs, users can manually click "GPU Warmup" in the Voice Tab of the character editor to pre-compile Metal GPU kernels, avoiding 5-15 seconds of first-synthesis delay.
 

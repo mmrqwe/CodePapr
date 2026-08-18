@@ -472,18 +472,52 @@ Requirements:
     setTestVoiceError(null);
     setTestVoicePlaying(true);
     try {
-      const refLang = editing.voice.referenceTextLanguage || DEFAULT_REFERENCE_LANG;
-      const testText = editing.voice.referenceText || getTestTextForLang(refLang);
-      await invoke('tts_synthesize_and_play', {
+      const voice = editing.voice;
+      const refLang = voice.referenceTextLanguage || DEFAULT_REFERENCE_LANG;
+      const testText = voice.referenceText || getTestTextForLang(refLang);
+      const args: Record<string, unknown> = {
         text: testText,
-        refAudioPath: editing.voice.referenceSamplePath,
-        promptText: editing.voice.referenceText || '',
+        refAudioPath: voice.referenceSamplePath,
+        promptText: voice.referenceText || '',
         promptLanguage: refLang,
-      });
+        textLanguage: voice.textLanguage || refLang,
+        sampleSteps: voice.sampleSteps ?? 8,
+        speed: voice.speed ?? 1,
+      };
+      if (voice.useFineTuned !== false && voice.fineTunedModelPath) {
+        args.modelName = voice.fineTunedModelPath;
+      } else if (voice.modelName) {
+        args.modelName = voice.modelName;
+      }
+      await invoke('tts_synthesize_and_play', args);
     } catch (e) {
       setTestVoiceError(String(e));
     } finally {
       setTestVoicePlaying(false);
+    }
+  };
+
+  const startFinetuneTraining = async () => {
+    if (!editing) return;
+    setFinetuneRunning(true);
+    setFinetuneProgress(0);
+    setFinetuneLog('');
+    setFinetuneStep('');
+    setGenerateDone(false);
+    try {
+      if (generatedTrainDir) {
+        await invoke('tts_finetune_start', {
+          characterId: editing.id,
+          trainAudioDir: generatedTrainDir,
+        });
+      } else {
+        await invoke('tts_finetune_collect_and_start', {
+          characterId: editing.id,
+        });
+      }
+    } catch (e) {
+      setFinetuneRunning(false);
+      setFinetuneLog(String(e));
     }
   };
 
@@ -1153,29 +1187,13 @@ Requirements:
                         {generateFailedCount > 0 && (
                           <p className="text-[10px] text-warn">失败 {generateFailedCount} 句（共 {generateTotal + generateFailedCount} 句，成功 {generateTotal} 句）</p>
                         )}
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (!editing) return;
-                            setFinetuneRunning(true);
-                            setFinetuneProgress(0);
-                            setFinetuneLog('');
-                            setFinetuneStep('');
-                            setGenerateDone(false);
-                            try {
-                              await invoke('tts_finetune_start', {
-                                characterId: editing.id,
-                                trainAudioDir: generatedTrainDir || `voices/${editing.id}/train`,
-                              });
-                            } catch (e) {
-                              setFinetuneRunning(false);
-                              setFinetuneLog(String(e));
-                            }
-                          }}
-                          className="rounded-lg border border-ok-bg bg-ok-bg px-3 py-1.5 text-xs text-ok hover:bg-ok-bg transition-colors"
-                        >
-                          {t.voiceFinetuneStartTraining}
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => { void startFinetuneTraining(); }}
+                            className="rounded-lg border border-ok-bg bg-ok-bg px-3 py-1.5 text-xs text-ok hover:bg-ok-bg transition-colors"
+                          >
+                            {t.voiceFinetuneStartTraining}
+                          </button>
                       </div>
                     ) : scriptGenerating ? (
                       <div className="flex items-center gap-2">
@@ -1262,22 +1280,7 @@ Requirements:
                           {trainingDataExists && (
                             <button
                               type="button"
-                              onClick={async () => {
-                                if (!editing) return;
-                                setFinetuneRunning(true);
-                                setFinetuneProgress(0);
-                                setFinetuneLog('');
-                                setFinetuneStep('');
-                                try {
-                              await invoke('tts_finetune_start', {
-                                characterId: editing.id,
-                                trainAudioDir: generatedTrainDir || `voices/${editing.id}/train`,
-                                  });
-                                } catch (e) {
-                                  setFinetuneRunning(false);
-                                  setFinetuneLog(String(e));
-                                }
-                              }}
+                              onClick={() => { void startFinetuneTraining(); }}
                               className="rounded-lg border border-ok-bg bg-ok-bg px-3 py-1.5 text-xs text-ok hover:bg-ok-bg transition-colors"
                             >
                               {t.voiceFinetuneStartTraining}

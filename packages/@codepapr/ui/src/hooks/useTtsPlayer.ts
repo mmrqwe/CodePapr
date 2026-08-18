@@ -40,6 +40,18 @@ function safeListen<T = unknown>(event: string, handler: (event: { payload: T })
  */
 const WS_BATCH_CHUNKS = 1;
 
+function isWsUnavailableError(e: unknown): boolean {
+  const msg = String(e).toLowerCase();
+  return (
+    msg.includes('ws connect')
+    || msg.includes('websocket connection failed')
+    || msg.includes('websocket connect')
+    || msg.includes('pool is empty')
+    || msg.includes('pool channel closed')
+    || msg.includes('pool closed')
+  );
+}
+
 export type TtsServerStatus = 'unknown' | 'starting' | 'running' | 'stopped' | 'error';
 
 export interface TtsInstallStatus {
@@ -155,6 +167,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
   const speedRef = useRef<number>(1.0);
   const sentencesPerChunkRef = useRef<number>(3);
   const pcmFallbackWarnedRef = useRef(false);
+  const wsFallbackRef = useRef(false);
   const batchSeqRef = useRef(0);
   const startSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The startup status-poll interval. Kept on a ref (like the safety timer)
@@ -378,6 +391,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
         }
         const batch = queueRef.current.splice(0, WS_BATCH_CHUNKS);
         if (batch.length === 0) break;
+        const isLast = queueRef.current.length === 0;
 
         const maxSteps = Math.max(...batch.map((s) => pickSteps(s, sampleStepsRef.current)));
         const baseArgs: Record<string, unknown> = {
@@ -398,8 +412,40 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
           baseArgs.textLanguage = textLangRef.current;
         }
 
+        if (wsFallbackRef.current) {
+          let batchFailed = false;
+          for (const sentence of batch) {
+            if (abortedRef.current) break;
+            try {
+              await synthesize(sentence);
+              errorCountRef.current = 0;
+              skipRef.current = false;
+            } catch (e) {
+              if (skipRef.current) {
+                skipRef.current = false;
+                errorCountRef.current = 0;
+                continue;
+              }
+              errorCountRef.current++;
+              batchFailed = true;
+              if (errorCountRef.current <= 1) {
+                setLastError(String(e));
+              }
+              if (errorCountRef.current >= 3) {
+                queueRef.current = [];
+                setServerStatus('error');
+                errorCooldownUntilRef.current = Date.now() + 10_000;
+                break;
+              }
+            }
+          }
+          if (batchFailed && errorCountRef.current >= 3) break;
+          continue;
+        }
+
+        const cmd = isLast ? 'tts_synthesize_batch_ws' : 'tts_synthesize_batch_ws_nonblocking';
         try {
-          await safeInvoke('tts_synthesize_batch_ws', baseArgs);
+          await safeInvoke(cmd, baseArgs);
           errorCountRef.current = 0;
           skipRef.current = false;
         } catch (e) {
@@ -407,6 +453,35 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
             skipRef.current = false;
             errorCountRef.current = 0;
             continue;
+          }
+          if (isWsUnavailableError(e)) {
+            wsFallbackRef.current = true;
+            try {
+              for (const sentence of batch) {
+                if (abortedRef.current) break;
+                await synthesize(sentence);
+              }
+              errorCountRef.current = 0;
+              skipRef.current = false;
+              continue;
+            } catch (httpErr) {
+              if (skipRef.current) {
+                skipRef.current = false;
+                errorCountRef.current = 0;
+                continue;
+              }
+              errorCountRef.current++;
+              if (errorCountRef.current <= 1) {
+                setLastError(String(httpErr));
+              }
+              if (errorCountRef.current >= 3) {
+                queueRef.current = [];
+                setServerStatus('error');
+                errorCooldownUntilRef.current = Date.now() + 10_000;
+                break;
+              }
+              continue;
+            }
           }
           errorCountRef.current++;
           if (errorCountRef.current <= 1) {
@@ -727,7 +802,11 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
       // re-shows the hint (Metal kernel cache is per-process).
       firstSynthHintShownRef.current = false;
       modelPreloadedRef.current = false;
+      wsFallbackRef.current = false;
       setServerStatus('running');
+    }));
+    track(safeListen('tts-ws-unavailable', () => {
+      wsFallbackRef.current = true;
     }));
     track(safeListen('tts-server-error', (event: { payload: string }) => {
       const msg = typeof event.payload === 'string' ? event.payload : 'Unknown error';

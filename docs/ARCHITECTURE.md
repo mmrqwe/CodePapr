@@ -318,7 +318,7 @@ ChatPanel → useTtsPlayer hook → Rust TTS Module → GPT-SoVITS Python Server
 
 ### 5.3 字幕交互
 
-语音播放过程中，当前被朗读的段落会在聊天界面高亮。每条 AI 回复旁提供重播按钮，可重新朗读该条内容。若需中断，取消当前 Agent 消息即可停止朗读。Apple Silicon Mac 用户可在角色编辑面板手动点击"GPU 预热"，提前编译 Metal kernel，避免首次合成卡顿 5-15 秒。
+语音播放过程中，每条 AI 回复旁提供重播按钮，可重新朗读该条内容。若需中断，取消当前 Agent 消息即可停止朗读。Apple Silicon Mac 用户可在角色编辑面板手动点击"GPU 预热"，提前编译 Metal kernel，避免首次合成卡顿 5-15 秒。
 
 ## 6. 子代理
 

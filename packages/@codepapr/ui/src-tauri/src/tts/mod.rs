@@ -12,6 +12,20 @@ mod tests;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+
+pub(crate) fn synthesis_is_cancelled() -> bool {
+    SYNTHESIS_CANCELLED.load(Ordering::Relaxed)
+}
+
+pub(crate) fn take_synthesis_cancelled() -> bool {
+    SYNTHESIS_CANCELLED.swap(false, Ordering::Relaxed)
+}
+
+/// Clear the cancel flag so a new synthesis (including skip → next sentence)
+/// is not immediately aborted by a previous `tts_stop_playback`.
+fn begin_synthesis() {
+    SYNTHESIS_CANCELLED.store(false, Ordering::Relaxed);
+}
 use std::sync::Mutex;
 
 use reqwest::blocking::Client;
@@ -96,7 +110,7 @@ fn refer_key(ref_path: &str, prompt_text: &str, lang: &str) -> String {
     format!("{:016x}", h.finish())
 }
 
-fn normalize_lang_code(code: &str) -> &str {
+pub(crate) fn normalize_lang_code(code: &str) -> &str {
     match code {
         "zh" | "all_zh" => "all_zh",
         "yue" | "all_yue" => "all_yue",
@@ -900,6 +914,7 @@ pub async fn tts_synthesize_and_play(
             "TTS server is not running. Click the speaker icon to start it.".to_string(),
         );
     }
+    begin_synthesis();
 
     let mode = playback_mode
         .as_deref()
@@ -1000,6 +1015,7 @@ pub async fn tts_synthesize_batch_ws(
     if !tts_server_is_live()? {
         return Err("TTS server is not running.".to_string());
     }
+    begin_synthesis();
 
     let steps = sample_steps.unwrap_or(8).clamp(4, 32);
     let spd = speed.unwrap_or(1.0).clamp(0.5, 2.0);
@@ -1012,10 +1028,15 @@ pub async fn tts_synthesize_batch_ws(
     let temp = temperature.unwrap_or(1.0).clamp(0.0, 2.0) as f32;
 
     let sentences_clone = sentences.clone();
+    let model_fb = model_name.clone();
+    let ref_fb = ref_audio_path.clone();
+    let prompt_fb = prompt_text.clone();
+    let prompt_lang_fb = prompt_language.clone();
+    let text_lang_fb = text_language.clone();
     let (tx, rx) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
-        let result = ws::synthesize_batch_ws(
-            sentences_clone,
+        let result = match ws::synthesize_batch_ws(
+            sentences_clone.clone(),
             model_name,
             ref_audio_path,
             prompt_text,
@@ -1027,7 +1048,20 @@ pub async fn tts_synthesize_batch_ws(
             tp,
             temp,
             seq,
-        );
+        ) {
+            Ok(()) => Ok(()),
+            Err(e) if ws::is_ws_unavailable(&e) => http_fallback_sentences(
+                sentences_clone,
+                model_fb,
+                ref_fb,
+                prompt_fb,
+                prompt_lang_fb,
+                text_lang_fb,
+                steps,
+                spd,
+            ),
+            Err(e) => Err(e),
+        };
         let _ = tx.send(result);
     });
     match rx.await {
@@ -1061,6 +1095,7 @@ pub async fn tts_synthesize_batch_ws_nonblocking(
     if !tts_server_is_live()? {
         return Err("TTS server is not running.".to_string());
     }
+    begin_synthesis();
 
     let steps = sample_steps.unwrap_or(8).clamp(4, 32);
     let spd = speed.unwrap_or(1.0).clamp(0.5, 2.0);
@@ -1086,6 +1121,38 @@ pub async fn tts_synthesize_batch_ws_nonblocking(
         temp,
         seq,
     );
+    Ok(())
+}
+
+/// Per-sentence HTTP synthesis used when `/ws/synthesize` is missing or the
+/// connection pool cannot be established. Each sentence is streamed into the
+/// shared rodio sink so playback still overlaps with later sentences.
+pub(crate) fn http_fallback_sentences(
+    sentences: Vec<String>,
+    model_name: Option<String>,
+    ref_audio_path: Option<String>,
+    prompt_text: Option<String>,
+    prompt_language: Option<String>,
+    text_language: Option<String>,
+    sample_steps: u32,
+    speed: f32,
+) -> Result<(), String> {
+    for text in sentences {
+        if synthesis_is_cancelled() {
+            return Err("Synthesis cancelled by user".to_string());
+        }
+        synthesize_blocking(
+            text,
+            model_name.clone(),
+            ref_audio_path.clone(),
+            prompt_text.clone(),
+            prompt_language.clone(),
+            text_language.clone(),
+            MODE_STREAMED_PIPELINE,
+            sample_steps,
+            speed,
+        )?;
+    }
     Ok(())
 }
 
@@ -1132,10 +1199,10 @@ fn synthesize_blocking(
     }
 
     let sample_steps_str = sample_steps.to_string();
-    let text_lang = text_language.as_deref().unwrap_or("zh");
+    let text_lang = normalize_lang_code(text_language.as_deref().unwrap_or("zh")).to_string();
     let mut params: Vec<(&str, String)> = vec![
         ("text", text),
-        ("text_language", text_lang.to_string()),
+        ("text_language", text_lang.clone()),
         ("sample_steps", sample_steps_str),
         ("speed_factor", format!("{:.2}", speed)),
     ];
@@ -1147,10 +1214,10 @@ fn synthesize_blocking(
                     params.push(("prompt_text", pt.clone()));
                 }
             }
-            let lang = prompt_language.as_deref().unwrap_or("zh");
-            params.push(("prompt_language", lang.to_string()));
+            let lang = normalize_lang_code(prompt_language.as_deref().unwrap_or("zh")).to_string();
+            params.push(("prompt_language", lang.clone()));
 
-            let key = refer_key(audio_path, prompt_text.as_deref().unwrap_or(""), lang);
+            let key = refer_key(audio_path, prompt_text.as_deref().unwrap_or(""), &lang);
             let should_refer = last_refer_lock()
                 .lock()
                 .map(|g| g.as_ref() != Some(&key))
@@ -1164,7 +1231,7 @@ fn synthesize_blocking(
                     .query(&[
                         ("refer_wav_path", audio_path.as_str()),
                         ("prompt_text", prompt_text.as_deref().unwrap_or("")),
-                        ("prompt_language", lang),
+                        ("prompt_language", lang.as_str()),
                     ])
                     .send()
                     .map(|r| r.status().is_success())
@@ -1266,8 +1333,7 @@ fn synthesize_streaming_pcm(resp: &mut reqwest::blocking::Response) -> Result<()
     let mut total: u64 = 0;
 
     loop {
-        if SYNTHESIS_CANCELLED.load(Ordering::Relaxed) {
-            SYNTHESIS_CANCELLED.store(false, Ordering::Relaxed);
+        if take_synthesis_cancelled() {
             return Err("Synthesis cancelled by user".to_string());
         }
         let n = resp

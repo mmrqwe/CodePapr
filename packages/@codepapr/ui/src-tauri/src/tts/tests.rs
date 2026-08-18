@@ -8,9 +8,12 @@
 //! - `validate_voice_path_in` (S1/S2: voices-dir confinement)
 //! - `refer_key`            (cache-key stability)
 //! - `first_line` / `is_port_in_use_error` (small utilities)
+//! - WS WAV index ordering + unavailable-error detection
 
+use std::collections::HashSet;
 use std::fs;
 
+use super::ws::{is_ws_unavailable, place_wav_by_index, wavs_in_index_order};
 use super::{
     decode_pcm_chunk, delete_character_voices_in, first_line, is_port_in_use_error, normalize_lang_code,
     parse_wav_header, refer_key, sanitize_character_id, validate_voice_path_in,
@@ -502,4 +505,40 @@ mod tempdir {
             let _ = fs::remove_dir_all(&self.path);
         }
     }
+}
+
+// -------- WS WAV index order / unavailable detection --------
+
+#[test]
+fn place_wav_orders_by_index_not_arrival() {
+    let mut slots: Vec<Option<Vec<u8>>> = vec![None; 3];
+    let mut seen = HashSet::new();
+    assert!(place_wav_by_index(&mut slots, &mut seen, 2, b"c".to_vec()));
+    assert!(place_wav_by_index(&mut slots, &mut seen, 0, b"a".to_vec()));
+    assert!(place_wav_by_index(&mut slots, &mut seen, 1, b"b".to_vec()));
+    assert!(!place_wav_by_index(&mut slots, &mut seen, 1, b"dup".to_vec()));
+    assert!(!place_wav_by_index(&mut slots, &mut seen, 9, b"oob".to_vec()));
+    assert_eq!(
+        wavs_in_index_order(slots),
+        vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]
+    );
+}
+
+#[test]
+fn empty_payload_counts_as_received_but_is_dropped() {
+    let mut slots: Vec<Option<Vec<u8>>> = vec![None; 1];
+    let mut seen = HashSet::new();
+    assert!(place_wav_by_index(&mut slots, &mut seen, 0, vec![]));
+    assert!(wavs_in_index_order(slots).is_empty());
+}
+
+#[test]
+fn is_ws_unavailable_detects_connect_and_pool_errors() {
+    assert!(is_ws_unavailable("WebSocket connection failed: foo"));
+    assert!(is_ws_unavailable("WS connect failed: foo"));
+    assert!(is_ws_unavailable("pool is empty"));
+    assert!(is_ws_unavailable("WebSocket pool closed"));
+    assert!(is_ws_unavailable("pool channel closed"));
+    assert!(!is_ws_unavailable("TTS server error: OOM"));
+    assert!(!is_ws_unavailable("Synthesis cancelled by user"));
 }
