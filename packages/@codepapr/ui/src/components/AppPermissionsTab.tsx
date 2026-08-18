@@ -236,9 +236,11 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
                       disabled={networkLocked}
                       onClick={() => {
                         if (networkLocked) return;
-                        hasOverride
-                          ? updateAppOverride(app.appId, { network: !settings.appOverrides[app.appId]!.network })
-                          : updateAppOverride(app.appId, { network: false });
+                        if (hasOverride) {
+                          updateAppOverride(app.appId, { network: !settings.appOverrides[app.appId]!.network });
+                        } else {
+                          updateAppOverride(app.appId, { network: false });
+                        }
                       }}
                       title={networkLocked ? t.appPermNetworkLocked : t.appPermNetworkOverride}
                       className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
