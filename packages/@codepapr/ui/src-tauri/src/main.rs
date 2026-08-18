@@ -293,6 +293,7 @@ fn main() {
             workspace_fs::access::clear_external_access_grants,
             workspace_fs::default_project::ensure_default_project,
             workspace_fs::stats::compute_project_stats,
+            workspace_fs::stats::cancel_project_stats,
             workspace_fs::read::read_text_file,
             workspace_fs::read::read_text_files_batch,
             workspace_fs::read::read_image_file,

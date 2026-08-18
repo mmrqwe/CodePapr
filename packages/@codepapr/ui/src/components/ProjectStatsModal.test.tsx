@@ -4,12 +4,21 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { invokeMock } = vi.hoisted(() => ({
-  invokeMock: vi.fn(async (_command?: string, _args?: unknown): Promise<unknown> => undefined),
-}));
+const { invokeMock, listenMock, unlistenMock } = vi.hoisted(() => {
+  const unlistenMock = vi.fn();
+  return {
+    invokeMock: vi.fn(async (_command?: string, _args?: unknown): Promise<unknown> => undefined),
+    listenMock: vi.fn(async () => unlistenMock),
+    unlistenMock,
+  };
+});
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
+}));
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: listenMock,
 }));
 
 vi.mock('./AgentContribution', () => ({
@@ -45,7 +54,7 @@ const SAMPLE_STATS = {
   truncated: false,
   directoryBreakdown: [{ name: 'src', files: 2, lines: 50 }],
   fileSizeDistribution: [{ label: 'small', files: 10, lines: 100 }],
-  codeRatio: { code: 80, config: 10, doc: 10 },
+  codeRatio: { code: 80, config: 10, doc: 10, lockfile: 0 },
   avgMetrics: { avgLinesPerFile: 10, medianLinesPerFile: 10, maxLinesPerFile: 40, totalTextFiles: 10 },
 };
 
@@ -139,6 +148,13 @@ describe('ProjectStatsModal cache display', () => {
   beforeEach(() => {
     resetProjectStatsCache();
     invokeMock.mockReset();
+    listenMock.mockReset();
+    unlistenMock.mockReset();
+    listenMock.mockImplementation(async () => unlistenMock);
+    invokeMock.mockImplementation(async (command?: string) => {
+      if (command === 'cancel_project_stats') return undefined;
+      return SAMPLE_STATS;
+    });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -152,6 +168,13 @@ describe('ProjectStatsModal cache display', () => {
     resetProjectStatsCache();
   });
 
+  function mockCompute(compute: () => Promise<unknown>): void {
+    invokeMock.mockImplementation((command?: string) => {
+      if (command === 'cancel_project_stats') return Promise.resolve();
+      return compute();
+    });
+  }
+
   function renderModal(workspacePath = '/ws'): void {
     act(() => {
       root.render(
@@ -162,7 +185,7 @@ describe('ProjectStatsModal cache display', () => {
 
   it('shows a loading banner on first scan when there is no cache', async () => {
     const pending = defer<typeof SAMPLE_STATS>();
-    invokeMock.mockImplementation(() => pending.promise);
+    mockCompute(() => pending.promise);
     renderModal();
     await act(async () => undefined);
 
@@ -189,7 +212,7 @@ describe('ProjectStatsModal cache display', () => {
     root = createRoot(container);
 
     const pending = defer<typeof SAMPLE_STATS>();
-    invokeMock.mockImplementation(() => pending.promise);
+    mockCompute(() => pending.promise);
     renderModal();
     await act(async () => undefined);
 
@@ -210,7 +233,7 @@ describe('ProjectStatsModal cache display', () => {
     expect(container.textContent).toMatch(/4,?242/);
 
     const pending = defer<typeof SAMPLE_STATS>();
-    invokeMock.mockImplementation(() => pending.promise);
+    mockCompute(() => pending.promise);
     act(() => {
       root.render(
         <ProjectStatsModal workspacePath="/ws-b" lang="zh-CN" onClose={() => undefined} />,
@@ -235,5 +258,74 @@ describe('ProjectStatsModal cache display', () => {
     const warning = '文件数量达到上限，统计结果不完整。';
     expect(container.textContent).toContain(warning);
     expect(container.textContent?.split(warning).length).toBeGreaterThan(2);
+  });
+
+  it('closes when Escape is pressed or the overlay is clicked', async () => {
+    const onClose = vi.fn();
+    invokeMock.mockResolvedValue(SAMPLE_STATS);
+    act(() => {
+      root.render(
+        <ProjectStatsModal workspacePath="/ws" lang="zh-CN" onClose={onClose} />,
+      );
+    });
+    await act(async () => undefined);
+
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(container.textContent).toContain('代码');
+    expect(container.textContent).toContain('跳过文件');
+    expect(container.textContent).not.toContain(' skipped');
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    const overlay = container.firstElementChild as HTMLElement;
+    act(() => {
+      overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels the native scan when the modal unmounts', async () => {
+    const pending = defer<typeof SAMPLE_STATS>();
+    mockCompute(() => pending.promise);
+    renderModal('/ws');
+    await act(async () => undefined);
+
+    await act(async () => {
+      root.unmount();
+    });
+    expect(invokeMock).toHaveBeenCalledWith('cancel_project_stats', { workspacePath: '/ws' });
+    root = createRoot(container);
+    pending.resolve(SAMPLE_STATS);
+  });
+
+  it('shows native scan progress while the first scan is in flight', async () => {
+    const pending = defer<typeof SAMPLE_STATS>();
+    let onProgress: ((event: { payload: { workspacePath: string; files: number } }) => void) | undefined;
+    listenMock.mockImplementation(async (_event, handler) => {
+      onProgress = handler;
+      return unlistenMock;
+    });
+    mockCompute(() => pending.promise);
+    renderModal('/ws');
+    await act(async () => undefined);
+    expect(onProgress).toBeDefined();
+
+    await act(async () => {
+      onProgress?.({ payload: { workspacePath: '/other', files: 999 } });
+    });
+    expect(container.textContent).not.toContain('999');
+
+    await act(async () => {
+      onProgress?.({ payload: { workspacePath: '/ws', files: 250 } });
+    });
+    expect(container.textContent).toContain('已扫描 250 个文件');
+
+    await act(async () => {
+      pending.resolve(SAMPLE_STATS);
+    });
+    expect(container.textContent).toMatch(/4,?242/);
   });
 });

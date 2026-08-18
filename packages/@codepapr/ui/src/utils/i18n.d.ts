@@ -156,6 +156,7 @@ export declare const I18N_DICTS: {
     debugLogTitle: string;
         projectStatsTitle: string;
         projectStatsLoading: string;
+        projectStatsScanning: string;
         projectStatsUnavailable: string;
         projectStatsRefresh: string;
         projectStatsTotalFiles: string;
@@ -185,6 +186,11 @@ export declare const I18N_DICTS: {
         projectStatsFileSize: string;
         projectStatsOther: string;
         projectStatsTruncated: string;
+        projectStatsRatioCode: string;
+        projectStatsRatioConfig: string;
+        projectStatsRatioDoc: string;
+        projectStatsRatioLockfile: string;
+        projectStatsDirUnit: string;
         agentContributionTitle: string;
         agentContributionFilesChanged: string;
         agentContributionAdditions: string;
@@ -681,6 +687,7 @@ export declare const I18N_DICTS: {
     debugLogTitle: string;
         projectStatsTitle: string;
         projectStatsLoading: string;
+        projectStatsScanning: string;
         projectStatsUnavailable: string;
         projectStatsRefresh: string;
         projectStatsTotalFiles: string;
@@ -710,6 +717,11 @@ export declare const I18N_DICTS: {
         projectStatsFileSize: string;
         projectStatsOther: string;
         projectStatsTruncated: string;
+        projectStatsRatioCode: string;
+        projectStatsRatioConfig: string;
+        projectStatsRatioDoc: string;
+        projectStatsRatioLockfile: string;
+        projectStatsDirUnit: string;
         agentContributionTitle: string;
         agentContributionFilesChanged: string;
         agentContributionAdditions: string;
@@ -1204,6 +1216,7 @@ export declare const I18N_DICTS: {
     debugLogTitle: string;
         projectStatsTitle: string;
         projectStatsLoading: string;
+        projectStatsScanning: string;
         projectStatsUnavailable: string;
         projectStatsRefresh: string;
         projectStatsTotalFiles: string;
@@ -1233,6 +1246,11 @@ export declare const I18N_DICTS: {
         projectStatsFileSize: string;
         projectStatsOther: string;
         projectStatsTruncated: string;
+        projectStatsRatioCode: string;
+        projectStatsRatioConfig: string;
+        projectStatsRatioDoc: string;
+        projectStatsRatioLockfile: string;
+        projectStatsDirUnit: string;
         agentContributionTitle: string;
         agentContributionFilesChanged: string;
         agentContributionAdditions: string;
@@ -1713,6 +1731,7 @@ export declare function getTranslation(lang?: Lang): {
     debugLogTitle: string;
     projectStatsTitle: string;
     projectStatsLoading: string;
+    projectStatsScanning: string;
     projectStatsUnavailable: string;
     projectStatsRefresh: string;
     projectStatsTotalFiles: string;
@@ -1727,6 +1746,11 @@ export declare function getTranslation(lang?: Lang): {
     projectStatsAnalysisDepth: string;
     projectStatsOther: string;
     projectStatsTruncated: string;
+    projectStatsRatioCode: string;
+    projectStatsRatioConfig: string;
+    projectStatsRatioDoc: string;
+    projectStatsRatioLockfile: string;
+    projectStatsDirUnit: string;
     unselected: string;
     selectFolder: string;
     selectFolderTip: string;
@@ -2089,6 +2113,7 @@ export declare function getTranslation(lang?: Lang): {
     debugLogTitle: string;
     projectStatsTitle: string;
     projectStatsLoading: string;
+    projectStatsScanning: string;
     projectStatsUnavailable: string;
     projectStatsRefresh: string;
     projectStatsTotalFiles: string;
@@ -2103,6 +2128,11 @@ export declare function getTranslation(lang?: Lang): {
     projectStatsAnalysisDepth: string;
     projectStatsOther: string;
     projectStatsTruncated: string;
+    projectStatsRatioCode: string;
+    projectStatsRatioConfig: string;
+    projectStatsRatioDoc: string;
+    projectStatsRatioLockfile: string;
+    projectStatsDirUnit: string;
     unselected: string;
     selectFolder: string;
     selectFolderTip: string;
@@ -2465,6 +2495,7 @@ export declare function getTranslation(lang?: Lang): {
     debugLogTitle: string;
     projectStatsTitle: string;
     projectStatsLoading: string;
+    projectStatsScanning: string;
     projectStatsUnavailable: string;
     projectStatsRefresh: string;
     projectStatsTotalFiles: string;
@@ -2479,6 +2510,11 @@ export declare function getTranslation(lang?: Lang): {
     projectStatsAnalysisDepth: string;
     projectStatsOther: string;
     projectStatsTruncated: string;
+    projectStatsRatioCode: string;
+    projectStatsRatioConfig: string;
+    projectStatsRatioDoc: string;
+    projectStatsRatioLockfile: string;
+    projectStatsDirUnit: string;
     unselected: string;
     selectFolder: string;
     selectFolderTip: string;

@@ -1,6 +1,7 @@
 import { errorMessage } from '@codepapr/common';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getTranslation, type Lang } from '../utils/i18n';
 import { AgentContribution } from './AgentContribution';
 import { ToolUsageStats } from './ToolUsageStats';
@@ -31,6 +32,7 @@ interface CodeRatio {
   code: number;
   config: number;
   doc: number;
+  lockfile?: number;
 }
 
 interface AverageMetrics {
@@ -183,8 +185,9 @@ async function loadProjectStats(workspacePath: string): Promise<ProjectStatsResu
   };
 }
 
-function StackedBar({ segments, height = 12 }: { segments: { color: string; width: number; label?: string }[]; height?: number }) {
+function StackedBar({ segments, height = 12, unit = '' }: { segments: { color: string; width: number; label?: string }[]; height?: number; unit?: string }) {
   const total = segments.reduce((sum, s) => sum + s.width, 0);
+  const unitSuffix = unit ? ` ${unit}` : '';
   return (
     <div className="overflow-hidden rounded-full" style={{ height }}>
       <div className="flex h-full">
@@ -196,7 +199,7 @@ function StackedBar({ segments, height = 12 }: { segments: { color: string; widt
               backgroundColor: seg.color,
               minWidth: seg.width > 0 ? '4px' : '0px',
             }}
-            title={seg.label ? `${seg.label}: ${seg.width.toLocaleString()} lines (${total > 0 ? ((seg.width / total) * 100).toFixed(1) : 0}%)` : undefined}
+            title={seg.label ? `${seg.label}: ${seg.width.toLocaleString()}${unitSuffix} (${total > 0 ? ((seg.width / total) * 100).toFixed(1) : 0}%)` : undefined}
           />
         ))}
       </div>
@@ -231,10 +234,12 @@ function LanguageBar({
   languages,
   totalLines,
   otherLabel,
+  linesUnit,
 }: {
   languages: ProjectLanguageStat[];
   totalLines: number;
   otherLabel: string;
+  linesUnit: string;
 }) {
   const barLanguages = collapseLanguagesForBar(languages, otherLabel);
   if (barLanguages.length === 0) return null;
@@ -247,6 +252,7 @@ function LanguageBar({
           label: lang.label,
         }))}
         height={10}
+        unit={linesUnit}
       />
       <div className="flex flex-wrap gap-x-4 gap-y-1">
         {barLanguages.map((lang) => {
@@ -289,40 +295,38 @@ function HorizontalBar({ label, value, max, color = '#6366f1', suffix = '' }: { 
   );
 }
 
-function RatioBar({ code, config, doc }: CodeRatio) {
-  const total = code + config + doc;
+function RatioBar({
+  code,
+  config,
+  doc,
+  lockfile = 0,
+  labels,
+  unit,
+}: CodeRatio & { labels: { code: string; config: string; doc: string; lockfile: string }; unit: string }) {
+  const total = code + config + doc + lockfile;
+  const legend = [
+    { color: '#6366f1', width: code, label: labels.code },
+    { color: '#f59e0b', width: config, label: labels.config },
+    { color: '#a855f7', width: doc, label: labels.doc },
+    ...(lockfile > 0 ? [{ color: '#64748b', width: lockfile, label: labels.lockfile }] : []),
+  ];
   return (
     <div className="space-y-2">
-      <StackedBar
-        segments={[
-          { color: '#6366f1', width: code, label: 'Code' },
-          { color: '#f59e0b', width: config, label: 'Config' },
-          { color: '#a855f7', width: doc, label: 'Doc' },
-        ]}
-        height={12}
-      />
-      <div className="flex gap-4 text-[11px]">
-        <div className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: '#6366f1' }} />
-          <span className="text-fg-soft">Code</span>
-          <span className="text-fg-muted">{total > 0 ? ((code / total) * 100).toFixed(1) : 0}%</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: '#f59e0b' }} />
-          <span className="text-fg-soft">Config</span>
-          <span className="text-fg-muted">{total > 0 ? ((config / total) * 100).toFixed(1) : 0}%</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: '#a855f7' }} />
-          <span className="text-fg-soft">Doc</span>
-          <span className="text-fg-muted">{total > 0 ? ((doc / total) * 100).toFixed(1) : 0}%</span>
-        </div>
+      <StackedBar segments={legend} height={12} unit={unit} />
+      <div className="flex flex-wrap gap-4 text-[11px]">
+        {legend.map((item) => (
+          <div key={item.label} className="flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: item.color }} />
+            <span className="text-fg-soft">{item.label}</span>
+            <span className="text-fg-muted">{total > 0 ? ((item.width / total) * 100).toFixed(1) : 0}%</span>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-function SizeDistribution({ buckets }: { buckets: FileSizeBucket[] }) {
+function SizeDistribution({ buckets, filesLabel }: { buckets: FileSizeBucket[]; filesLabel: string }) {
   const maxFiles = Math.max(...buckets.map((b) => b.files), 1);
   const labels = { small: '<200', medium: '200–999', large: '1000+' };
   const colors: Record<string, string> = { small: '#22c55e', medium: '#eab308', large: '#ef4444' };
@@ -344,7 +348,7 @@ function SizeDistribution({ buckets }: { buckets: FileSizeBucket[] }) {
             />
           </div>
           <span className="w-20 flex-shrink-0 text-right text-[11px] text-fg-muted tabular-nums">
-            {bucket.files.toLocaleString()} files
+            {bucket.files.toLocaleString()} {filesLabel}
           </span>
         </div>
       ))}
@@ -400,13 +404,22 @@ export function computeTreemap(items: { id: string; value: number }[], width: nu
   return layout(positive, 0, 0, width, height);
 }
 
-function DirectoryTreemap({ dirs, totalLines }: { dirs: DirectoryStat[]; totalLines: number }) {
+function DirectoryTreemap({
+  dirs,
+  filesLabel,
+  linesLabel,
+}: {
+  dirs: DirectoryStat[];
+  filesLabel: string;
+  linesLabel: string;
+}) {
   const [hovered, setHovered] = useState<string | null>(null);
   const rects = useMemo(
     () => computeTreemap(dirs.map((d) => ({ id: d.name, value: d.lines })), 100, 100),
     [dirs],
   );
   const byName = useMemo(() => new Map(dirs.map((d) => [d.name, d])), [dirs]);
+  const dirTotal = useMemo(() => dirs.reduce((sum, dir) => sum + dir.lines, 0), [dirs]);
   if (rects.length === 0) return null;
 
   return (
@@ -414,7 +427,7 @@ function DirectoryTreemap({ dirs, totalLines }: { dirs: DirectoryStat[]; totalLi
       {rects.map((rect, i) => {
         const stat = byName.get(rect.id);
         const color = TREEMAP_COLORS[i % TREEMAP_COLORS.length];
-        const pct = totalLines > 0 ? ((rect.value / totalLines) * 100).toFixed(1) : '0';
+        const pct = dirTotal > 0 ? ((rect.value / dirTotal) * 100).toFixed(1) : '0';
         const isHovered = hovered === rect.id;
         const dimmed = hovered !== null && !isHovered;
         const showLabel = rect.w > 20 && rect.h > 16;
@@ -435,14 +448,14 @@ function DirectoryTreemap({ dirs, totalLines }: { dirs: DirectoryStat[]; totalLi
             }}
             onMouseEnter={() => setHovered(rect.id)}
             onMouseLeave={() => setHovered(null)}
-            title={`${rect.id} · ${stat?.files ?? 0} files · ${rect.value.toLocaleString()} lines (${pct}%)`}
+            title={`${rect.id} · ${stat?.files ?? 0} ${filesLabel} · ${rect.value.toLocaleString()} ${linesLabel} (${pct}%)`}
           >
             {showLabel && (
               <>
                 <span className="truncate text-[10px] font-semibold leading-tight text-fg/90">{rect.id}</span>
                 {rect.h > 26 && (
                   <span className="truncate text-[9px] leading-tight text-fg/70">
-                    {rect.value.toLocaleString()} lines
+                    {rect.value.toLocaleString()} {linesLabel}
                   </span>
                 )}
               </>
@@ -548,7 +561,12 @@ export function ProjectStatsModal({
   const [langSortKey, setLangSortKey] = useState<LangSortKey>('lines');
   const [langSortDir, setLangSortDir] = useState<'asc' | 'desc'>('desc');
   const [langFilter, setLangFilter] = useState('');
+  const [scanFiles, setScanFiles] = useState(0);
   const requestIdRef = useRef(0);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const scanningLabel = scanFiles > 0
+    ? t.projectStatsScanning.replace('{{count}}', scanFiles.toLocaleString())
+    : t.projectStatsLoading;
 
   const refreshStats = useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -568,6 +586,7 @@ export function ProjectStatsModal({
       setStatsAt(null);
     }
     setIsLoading(true);
+    setScanFiles(0);
     setError('');
     try {
       const result = await loadProjectStats(workspacePath);
@@ -578,6 +597,7 @@ export function ProjectStatsModal({
       setStatsAt(now);
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
+      if (String(errorMessage(err)).toLowerCase().includes('cancel')) return;
       if (!statsCache.get(workspacePath)) {
         setStats(null);
         setError(errorMessage(err));
@@ -590,11 +610,69 @@ export function ProjectStatsModal({
   }, [workspacePath]);
 
   useEffect(() => {
+    const path = workspacePath;
     void refreshStats();
     return () => {
       requestIdRef.current += 1;
+      if (path) {
+        void invoke('cancel_project_stats', { workspacePath: path }).catch(() => undefined);
+      }
     };
-  }, [refreshStats]);
+  }, [refreshStats, workspacePath]);
+
+  useEffect(() => {
+    if (!workspacePath || typeof listen !== 'function') return;
+    let active = true;
+    let unlisten: UnlistenFn | undefined;
+    void listen<{ workspacePath: string; files: number }>('project-stats-progress', (event) => {
+      if (!active) return;
+      if (event.payload.workspacePath !== workspacePath) return;
+      setScanFiles(event.payload.files);
+    }).then((fn) => {
+      if (!active) {
+        fn();
+        return;
+      }
+      unlisten = fn;
+    }).catch(() => undefined);
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, [workspacePath]);
+
+  useEffect(() => {
+    const node = dialogRef.current;
+    const previous = document.activeElement as HTMLElement | null;
+    node?.focus();
+    return () => previous?.focus?.();
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      )].filter((el) => !el.hasAttribute('disabled'));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
 
   const handleLangSort = (key: LangSortKey) => {
     if (langSortKey === key) {
@@ -620,20 +698,33 @@ export function ProjectStatsModal({
     });
   }, [stats, langFilter, langSortKey, langSortDir]);
 
-  const dirMaxFiles = useMemo(() => {
+  const dirMaxLines = useMemo(() => {
     if (!stats) return 1;
-    return Math.max(...stats.directoryBreakdown.map((d) => d.files), 1);
+    return Math.max(...stats.directoryBreakdown.map((d) => d.lines), 1);
   }, [stats]);
 
-  const fileCountLabel = lang === 'en' ? 'files' : lang === 'zh-TW' ? '個文件' : '个文件';
-  const dirLabel = lang === 'en' ? 'dirs' : lang === 'zh-TW' ? '個目錄' : '个目录';
+  const languageLineTotal = useMemo(() => {
+    if (!stats) return 0;
+    return stats.languages.reduce((sum, item) => sum + item.lines, 0);
+  }, [stats]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 backdrop-blur-sm">
-      <div className="flex h-[90vh] w-[min(96vw,1280px)] flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="project-stats-title"
+        tabIndex={-1}
+        className="flex h-[90vh] w-[min(96vw,1280px)] flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl outline-none"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div>
-            <h2 className="text-sm font-semibold text-fg">{t.projectStatsTitle}</h2>
+            <h2 id="project-stats-title" className="text-sm font-semibold text-fg">{t.projectStatsTitle}</h2>
             <p className="mt-1 text-xs text-fg-muted">
               {t.projectStatsAnalysisDepth}
               {statsAt !== null && (
@@ -654,7 +745,7 @@ export function ProjectStatsModal({
               disabled={isLoading || !workspacePath}
               className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-fg-soft transition-colors hover:border-accent-soft hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isLoading ? t.projectStatsLoading : t.projectStatsRefresh}
+              {isLoading ? scanningLabel : t.projectStatsRefresh}
             </button>
             <button
               type="button"
@@ -670,7 +761,7 @@ export function ProjectStatsModal({
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {isLoading && !stats && (
             <div className="rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg-muted">
-              {t.projectStatsLoading}
+              {scanningLabel}
             </div>
           )}
 
@@ -692,18 +783,18 @@ export function ProjectStatsModal({
                   <div className="text-[11px] text-fg-muted">{t.projectStatsTotalFiles}</div>
                   <div className="mt-1 text-lg font-semibold text-fg">{stats.totalFiles.toLocaleString()}</div>
                   <div className="text-[11px] text-fg-dim">
-                    {stats.totalDirectories.toLocaleString()} {dirLabel}
+                    {stats.totalDirectories.toLocaleString()} {t.projectStatsDirUnit}
                   </div>
                 </div>
                 <div className="rounded-xl border border-line bg-base px-4 py-3">
                   <div className="text-[11px] text-fg-muted">{t.projectStatsTotalLines}</div>
                   <div className="mt-1 text-lg font-semibold text-fg">{stats.totalLines.toLocaleString()}</div>
-                  <div className="text-[11px] text-fg-dim">{stats.codeLines.toLocaleString()} code</div>
+                  <div className="text-[11px] text-fg-dim">{stats.codeLines.toLocaleString()} {t.projectStatsRatioCode}</div>
                 </div>
                 <div className="rounded-xl border border-line bg-base px-4 py-3">
                   <div className="text-[11px] text-fg-muted">{t.projectStatsTextFiles}</div>
                   <div className="mt-1 text-lg font-semibold text-fg">{stats.textFiles.toLocaleString()}</div>
-                  <div className="text-[11px] text-fg-dim">{stats.skippedFiles} skipped</div>
+                  <div className="text-[11px] text-fg-dim">{stats.skippedFiles.toLocaleString()} {t.projectStatsSkippedFiles}</div>
                 </div>
               </div>
 
@@ -721,8 +812,9 @@ export function ProjectStatsModal({
                   </div>
                   <LanguageBar
                     languages={stats.languages}
-                    totalLines={stats.totalLines}
+                    totalLines={languageLineTotal}
                     otherLabel={t.projectStatsOther}
+                    linesUnit={t.projectStatsLines}
                   />
                   <div className="mt-3 max-h-64 overflow-y-auto">
                     <LanguageTable
@@ -768,6 +860,7 @@ export function ProjectStatsModal({
                       { color: '#22c55e', width: stats.commentLines, label: t.projectStatsCommentLines },
                     ]}
                     height={12}
+                    unit={t.projectStatsLines}
                   />
                   <div className="mt-3 space-y-3">
                     <div>
@@ -787,23 +880,39 @@ export function ProjectStatsModal({
 
                 <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '180ms' }}>
                   <p className="text-xs font-semibold text-fg-soft mb-3">{t.projectStatsCodeRatio}</p>
-                  <RatioBar code={stats.codeRatio.code} config={stats.codeRatio.config} doc={stats.codeRatio.doc} />
+                  <RatioBar
+                    code={stats.codeRatio.code}
+                    config={stats.codeRatio.config}
+                    doc={stats.codeRatio.doc}
+                    lockfile={stats.codeRatio.lockfile ?? 0}
+                    labels={{
+                      code: t.projectStatsRatioCode,
+                      config: t.projectStatsRatioConfig,
+                      doc: t.projectStatsRatioDoc,
+                      lockfile: t.projectStatsRatioLockfile,
+                    }}
+                    unit={t.projectStatsLines}
+                  />
                 </div>
               </div>
 
               {stats.directoryBreakdown.length > 0 && (
                 <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '180ms' }}>
                   <p className="text-xs font-semibold text-fg-soft mb-3">{t.projectStatsDirectories}</p>
-                  <DirectoryTreemap dirs={stats.directoryBreakdown} totalLines={stats.totalLines} />
+                  <DirectoryTreemap
+                    dirs={stats.directoryBreakdown}
+                    filesLabel={t.projectStatsFiles}
+                    linesLabel={t.projectStatsLines}
+                  />
                   <div className="mt-3 space-y-1.5">
                     {stats.directoryBreakdown.map((dir) => (
                       <HorizontalBar
                         key={dir.name}
                         label={dir.name}
-                        value={dir.files}
-                        max={dirMaxFiles}
+                        value={dir.lines}
+                        max={dirMaxLines}
                         color="#6366f1"
-                        suffix={` ${fileCountLabel} · ${dir.lines.toLocaleString()} lines`}
+                        suffix={` ${t.projectStatsLines} · ${dir.files.toLocaleString()} ${t.projectStatsFiles}`}
                       />
                     ))}
                   </div>
@@ -814,7 +923,7 @@ export function ProjectStatsModal({
                 {stats.fileSizeDistribution.length > 0 && (
                   <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '210ms' }}>
                     <p className="text-xs font-semibold text-fg-soft mb-3">{t.projectStatsFileSize}</p>
-                    <SizeDistribution buckets={stats.fileSizeDistribution} />
+                    <SizeDistribution buckets={stats.fileSizeDistribution} filesLabel={t.projectStatsFiles} />
                   </div>
                 )}
 
@@ -822,7 +931,7 @@ export function ProjectStatsModal({
                   <div className="stats-reveal rounded-xl border border-line bg-base px-4 py-3" style={{ animationDelay: '240ms' }}>
                     <div className="text-xs font-semibold text-fg">{t.projectStatsLargestFile}</div>
                     <div className="mt-2 break-all text-sm text-fg-soft">
-                      {stats.largestFile.path} · {stats.largestFile.lines.toLocaleString()} lines
+                      {stats.largestFile.path} · {stats.largestFile.lines.toLocaleString()} {t.projectStatsLines}
                     </div>
                   </div>
                 )}
