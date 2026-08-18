@@ -4,11 +4,15 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+type StatsProgressHandler = (event: { payload: { workspacePath: string; files: number } }) => void;
+
 const { invokeMock, listenMock, unlistenMock } = vi.hoisted(() => {
   const unlistenMock = vi.fn();
   return {
     invokeMock: vi.fn(async (_command?: string, _args?: unknown): Promise<unknown> => undefined),
-    listenMock: vi.fn(async () => unlistenMock),
+    listenMock: vi.fn(
+      async (_event?: string, _handler?: StatsProgressHandler) => unlistenMock
+    ),
     unlistenMock,
   };
 });
@@ -304,7 +308,7 @@ describe('ProjectStatsModal cache display', () => {
   it('shows native scan progress while the first scan is in flight', async () => {
     const pending = defer<typeof SAMPLE_STATS>();
     let onProgress: ((event: { payload: { workspacePath: string; files: number } }) => void) | undefined;
-    listenMock.mockImplementation(async (_event, handler) => {
+    listenMock.mockImplementation(async (_event?: string, handler?: StatsProgressHandler) => {
       onProgress = handler;
       return unlistenMock;
     });
