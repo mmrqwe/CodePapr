@@ -297,6 +297,8 @@ Hover 任意用户消息 → 下方出现"重置到此点"和"复制"按钮：
 
 **写入（零审核）**：确定性门 `planMemoryWrite` 只做 persist 或 drop。面板是完整目录（每次会话 / 按需召回 / 仅搜索，可遗忘），没有准入队列。Agent 不得让你去确认记忆。注入指令、密钥、危险命令会被丢弃。若 Agent 仍 `write`/`patch` `.CodePapr/memory.md`，会被拦截，走同一策略，不落盘。
 
+**读取**：不会把账本整库塞进请求。短指令已经在会话引导里；每个用户回合（Ask 除外）用你这句话做关键词召回（约 5 条 / 1200 tokens，跳过 citation）；不够时 Agent 调 `memory_search`（含 citation，Ask 也可用）。想看目录才调 `memory_review_candidates`（最多 40 条预览）。`memory_search` 不会每句话自动跑一遍。
+
 **加载与缓存**：会话启动时从账本渲染 Bootstrap 段注入 Session Bootstrap（`log[0]`，`isPrefixSystem`），按「会话 × 稳定签名」冻结。渲染结果排除在签名外，新记住的内容**不拆当前前缀缓存**。压缩 epoch 随 `refreshBootstrap` 刷新；新会话总是重读账本。每用户回合另做一次 Recall（citation 不进入自动 Recall）。
 
 **冷启动**：若账本没有 Bootstrap 段且 ProjectGraph 可用，后台生成项目结构 / 技术栈 / 构建命令摘要写入账本；不阻塞当前会话，下次会话或压缩后进入 Bootstrap。

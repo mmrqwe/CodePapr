@@ -463,6 +463,7 @@ Hover 用户消息 → 显示"重置到此点"按钮：
 - 压缩 epoch 重写时随 `refreshBootstrap` 刷新（零额外缓存代价）；
 - 新会话总是重读账本；
 - 每用户回合另做一次 Recall（见 §8.6 / §16.6），citation 不进入自动 Recall。
+- Agent 主动读：`memory_search`（关键词检索，含 citation；Ask 可用）；`memory_review_candidates`（目录预览，最多 40 条，Ask 不可用）。不会每句话自动搜一遍，也不会把账本整库塞进请求。
 
 ### 8.5 去重
 

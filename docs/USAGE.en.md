@@ -258,6 +258,8 @@ Project memory is not “dumped into the model as one blob”. The ledger in SQL
 
 **Writes (zero review)**: `planMemoryWrite` either persists or drops. The panel is a full catalog (every-session / on-demand / search-only, forget) — no admit queue. The Agent must not ask you to confirm memories. Injection, secrets, and dangerous commands are dropped. If the Agent still `write`s/`patch`es `.CodePapr/memory.md`, it is intercepted onto the same policy and never written to disk.
 
+**Reads**: the ledger is not dumped into a request. Short instructions already sit in session bootstrap; every user turn (except Ask) token-matches your message (~5 items / 1200 tokens, citations skipped); if that is not enough the Agent calls `memory_search` (includes citations; available in Ask). The catalog listing tool is `memory_review_candidates` (at most 40 previews). `memory_search` is not run on every message.
+
 **Load and cache**: At session start, the ledger is rendered into Session Bootstrap (`log[0]`, `isPrefixSystem`), frozen per (session × stable signature). The rendered section is outside the signature, so newly saved memories **do not bust the current prefix cache**. Compaction epochs refresh via `refreshBootstrap`; a new session always re-reads the ledger. Each user turn also runs Recall (citations excluded from automatic Recall).
 
 **Cold start**: If the ledger has no Bootstrap section and a ProjectGraph cache exists, a background job writes a structure / stack / build-command summary into the ledger. It does not block the current session; it enters Bootstrap on the next session or compaction.

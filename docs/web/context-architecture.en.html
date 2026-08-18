@@ -120,6 +120,13 @@
   .clock{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card)}
   .clock h3{font-size:1rem;margin-bottom:8px}
   .clock p{font-size:0.86rem;color:var(--foreground-muted)}
+  .tlist{margin-top:16px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card)}
+  .trow{display:grid;grid-template-columns:188px 1fr;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border);align-items:start}
+  .trow:last-child{border-bottom:none}
+  .trow .tn{font-family:var(--font-mono);font-size:0.82rem;color:var(--accent);font-weight:600;word-break:break-all}
+  .trow p{font-size:0.82rem;color:var(--foreground-muted)}
+  @media(max-width:640px){.trow{grid-template-columns:1fr}}
+
   .note{margin-top:22px;padding:16px 18px;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--foreground-muted);font-size:0.88rem}
   .note strong{color:var(--foreground)}
   footer{border-top:1px solid var(--border);margin-top:56px;padding:28px 0 44px;color:var(--foreground-dim);font-size:0.8rem}
@@ -140,6 +147,7 @@
       <li><a href="#request">Request</a></li>
       <li><a href="#layers">Layers</a></li>
       <li><a href="#memory">Memory</a></li>
+      <li><a href="#read">How it is read</a></li>
       <li><a href="#clocks">When it refreshes</a></li>
     </ul>
     <div class="nav-right">
@@ -298,6 +306,47 @@
       </article>
     </div>
     <p class="note"><strong><code>AGENTS.md</code></strong> is the project rules you wrote — editing it rebuilds the prefix. <strong>Project memory</strong> is accumulated facts and preferences — a new write does not bust the current prefix. <strong>The checkpoint</strong> is where this task is. Do not copy one into another.</p>
+  </section>
+
+  <section class="sec reveal" id="read">
+    <h2>How the model reads memory</h2>
+    <p class="lead">The ledger is never dumped into a request. There are only three read paths: already in the prefix, retrieved from this message, or the Agent calling a tool.</p>
+    <div class="dest">
+      <article class="dcard">
+        <div class="k">No tool</div>
+        <h3>Already in 02</h3>
+        <p>Short every-session instructions are visible as soon as the Agent speaks. A new write waits for compact or the next session — the current prefix is not rebuilt just to show a few more rows.</p>
+      </article>
+      <article class="dcard">
+        <div class="k">No tool</div>
+        <h3>Retrieved from this message</h3>
+        <p>Every user turn (except Ask) token-matches your message and inserts hitting procedures into 04. About 5 items / 1200 tokens. Citations and untrusted rows are skipped. If the query is too short or the budget is tight, this turn gets no recall — not a dump of the catalog.</p>
+      </article>
+      <article class="dcard">
+        <div class="k">Tool</div>
+        <h3>Agent searches</h3>
+        <p>When auto-recall is not enough, the Agent calls <code>memory_search</code>. That is the only path that can surface citations. Hits appear in the tool result, and can add one extra recall block for the rest of this turn (at most once per turn).</p>
+      </article>
+    </div>
+    <div class="tlist">
+      <div class="trow">
+        <div class="tn">memory_search</div>
+        <p>Keyword search over the ledger plus historical checkpoints. Optional category filter. Available in Ask. This is the main “read memory on purpose” tool.</p>
+      </div>
+      <div class="trow">
+        <div class="tn">memory_review_candidates</div>
+        <p>Lists the catalog, at most 40 previews. Runs only if the Agent calls it — not an automatic full-table scan each turn. Unavailable in Ask.</p>
+      </div>
+      <div class="trow">
+        <div class="tn">memory_write / memory_forget</div>
+        <p>Write or forget. Handwritten notes cannot be forgotten via tool. Unavailable in Ask.</p>
+      </div>
+      <div class="trow">
+        <div class="tn">skill_load</div>
+        <p>Loads one Skill’s full text on demand. 02 only has the name + one-liner. Skills are not ledger memory.</p>
+      </div>
+    </div>
+    <p class="note">The system prompt tells the Agent to <code>memory_write</code> when something should stick. <code>memory_search</code> stays on the tool list and is used when needed — it is not run on every message.</p>
   </section>
 
   <section class="sec reveal" id="clocks">

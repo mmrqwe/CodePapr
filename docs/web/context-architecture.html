@@ -129,6 +129,13 @@
   .clock h3{font-size:1rem;margin-bottom:8px}
   .clock p{font-size:0.86rem;color:var(--foreground-muted)}
 
+  .tlist{margin-top:16px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card)}
+  .trow{display:grid;grid-template-columns:188px 1fr;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border);align-items:start}
+  .trow:last-child{border-bottom:none}
+  .trow .tn{font-family:var(--font-mono);font-size:0.82rem;color:var(--accent);font-weight:600;word-break:break-all}
+  .trow p{font-size:0.82rem;color:var(--foreground-muted)}
+  @media(max-width:640px){.trow{grid-template-columns:1fr}}
+
   .note{margin-top:22px;padding:16px 18px;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--foreground-muted);font-size:0.88rem}
   .note strong{color:var(--foreground)}
 
@@ -150,6 +157,7 @@
       <li><a href="#request">请求</a></li>
       <li><a href="#layers">分层</a></li>
       <li><a href="#memory">记忆</a></li>
+      <li><a href="#read">怎么读</a></li>
       <li><a href="#clocks">何时刷新</a></li>
     </ul>
     <div class="nav-right">
@@ -308,6 +316,47 @@
       </article>
     </div>
     <p class="note"><strong><code>AGENTS.md</code></strong> 是你写的项目规则，改了会重建前缀。<strong>项目记忆</strong>是自动积累的事实与偏好，新写入不拆当前前缀。<strong>检查点</strong>是这一场任务进行到哪。三者不要互相复制。</p>
+  </section>
+
+  <section class="sec reveal" id="read">
+    <h2>模型怎么读到记忆</h2>
+    <p class="lead">不会把账本整库塞进请求。读取只有三条路：已经带着、系统按这句话搜、Agent 自己调工具。</p>
+    <div class="dest">
+      <article class="dcard">
+        <div class="k">不用工具</div>
+        <h3>已经在 02</h3>
+        <p>每次会话带着的短指令，Agent 张口就能看到。新写入要等压缩或下次会话，不会为了多看几条去拆当前前缀。</p>
+      </article>
+      <article class="dcard">
+        <div class="k">不用工具</div>
+        <h3>系统按这句话召回</h3>
+        <p>每个用户回合（Ask 除外）用你这句话做关键词匹配，命中的踩坑经验插进 04。最多约 5 条 / 1200 tokens。citation 和不可信内容跳过。查询太短或预算不够，本回合就不召回——不是把全部记忆倒进去。</p>
+      </article>
+      <article class="dcard">
+        <div class="k">用工具</div>
+        <h3>Agent 主动搜</h3>
+        <p>自动召回不够时，Agent 调用 <code>memory_search</code>。这是搜 citation 的唯一路径。结果出现在工具返回里，并可以再插一条召回块给本回合后续请求（每回合最多一次）。</p>
+      </article>
+    </div>
+    <div class="tlist">
+      <div class="trow">
+        <div class="tn">memory_search</div>
+        <p>按关键词检索账本 + 历史检查点。可限定类别。Ask 模式也能用。这是「主动读记忆」的主工具。</p>
+      </div>
+      <div class="trow">
+        <div class="tn">memory_review_candidates</div>
+        <p>列出目录，最多 40 条预览。只有 Agent 主动调才会跑；不是每回合自动全表扫描。Ask 模式不可用。</p>
+      </div>
+      <div class="trow">
+        <div class="tn">memory_write / memory_forget</div>
+        <p>写入或遗忘。手写笔记不能用工具删。Ask 模式不可用。</p>
+      </div>
+      <div class="trow">
+        <div class="tn">skill_load</div>
+        <p>按需读某个 Skill 全文。02 里只有名称 + 一句话，Skills 不是账本记忆。</p>
+      </div>
+    </div>
+    <p class="note">系统提示会教 Agent 用 <code>memory_write</code> 记下该记的东西；<code>memory_search</code> 作为工具一直挂着，需要时再调，不会每句话先搜一遍。</p>
   </section>
 
   <section class="sec reveal" id="clocks">

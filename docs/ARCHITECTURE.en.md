@@ -475,6 +475,10 @@ reject.
 - Always re-read from the ledger on a new session;
 - Each user turn also runs Recall (§8.6 / §16.6); citations are excluded from
   automatic Recall.
+- Agent-initiated reads: `memory_search` (keyword search, including citations;
+  available in Ask); `memory_review_candidates` (catalog preview, at most 40
+  rows, unavailable in Ask). Search is not run on every message, and the ledger
+  is never dumped into a request.
 
 ### 8.5 Dedup
 
