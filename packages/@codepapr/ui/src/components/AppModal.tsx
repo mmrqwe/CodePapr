@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { useAgentStore } from '../store/agentStore';
 import { getTranslation } from '../utils/i18n';
@@ -27,6 +28,8 @@ export function AppModal({ lang }: AppModalProps) {
   const [error, setError] = useState('');
   const [restarting, setRestarting] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [showConsole, setShowConsole] = useState(false);
+  const [consoleLogs, setConsoleLogs] = useState<Array<{ level: string; message: string; ts: number }>>([]);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const loadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 超时回调读 ref 而非 state：旧实现闭包捕获了 effect 运行时（切换前的）
@@ -70,6 +73,39 @@ export function AppModal({ lang }: AppModalProps) {
     };
   }, [openedAppId, openedApp?.updatedAt, clearTimers]);
 
+  useEffect(() => {
+    setConsoleLogs([]);
+    setShowConsole(false);
+  }, [openedAppId]);
+
+  useEffect(() => {
+    if (!openedApp || !workspacePath) return;
+    let cancelled = false;
+    let last = 0;
+    const tick = async () => {
+      try {
+        const mtime = await invoke<number>('app_frontend_mtime', {
+          workspacePath,
+          appId: openedApp.appId,
+        });
+        if (cancelled) return;
+        const next = Number(mtime) || 0;
+        if (last > 0 && next > last) {
+          reloadApp(openedApp.appId);
+        }
+        last = next;
+      } catch {
+        // 轮询失败不打断使用
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => { void tick(); }, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [openedApp, workspacePath, reloadApp]);
+
   const manifest: PaprManifest | null = useMemo(() => {
     if (!openedApp?.manifestJson) return null;
     try {
@@ -98,6 +134,9 @@ export function AppModal({ lang }: AppModalProps) {
       readyRef.current = true;
       loadedRef.current = true;
       clearTimers();
+    },
+    onConsole: (entry) => {
+      setConsoleLogs((prev) => [...prev.slice(-199), entry]);
     },
   });
 
@@ -172,6 +211,20 @@ export function AppModal({ lang }: AppModalProps) {
 
         <button
           type="button"
+          onClick={() => setShowConsole((v) => !v)}
+          title={t.appModalConsole}
+          className={`shrink-0 rounded px-1.5 py-1 text-[10px] transition-colors ${
+            showConsole
+              ? 'bg-accent-soft text-accent-text'
+              : 'text-fg-dim hover:text-fg-muted'
+          }`}
+        >
+          {showConsole ? '▾' : '▸'} {t.appModalConsole}
+          {consoleLogs.length > 0 ? ` (${consoleLogs.length})` : ''}
+        </button>
+
+        <button
+          type="button"
           onClick={() => { setError(''); reloadApp(openedApp.appId); }}
           className="shrink-0 rounded px-1.5 py-1 text-[10px] text-fg-muted transition-colors hover:text-fg-soft"
           title={t.appModalReload}
@@ -226,6 +279,29 @@ export function AppModal({ lang }: AppModalProps) {
             !effectiveAccess && (
               <div className="text-[10px] text-fg-dim">{t.appModalNoAccessMeta}</div>
             )
+          )}
+        </div>
+      )}
+
+      {showConsole && (
+        <div className="max-h-40 shrink-0 overflow-y-auto border-b border-line bg-base px-3 py-1.5 font-mono text-[10px] text-fg-muted">
+          {consoleLogs.length === 0 ? (
+            <div className="text-fg-dim">{t.appModalConsoleEmpty}</div>
+          ) : (
+            consoleLogs.map((entry, index) => (
+              <div
+                key={`${entry.ts}-${index}`}
+                className={
+                  entry.level === 'error'
+                    ? 'text-danger'
+                    : entry.level === 'warn'
+                      ? 'text-warn'
+                      : 'text-fg-muted'
+                }
+              >
+                [{entry.level}] {entry.message}
+              </div>
+            ))
           )}
         </div>
       )}

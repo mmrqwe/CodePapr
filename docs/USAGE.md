@@ -50,8 +50,8 @@ manifest.json 示例：
   "spec": "papr/0.1",
   "name": "Todo App",
   "version": "0.1.0",
-  "level": 2,
-  "permissions": ["storage:read", "storage:write", "agent:run:assistant"],
+  "local": "read",
+  "network": true,
   "agents": [{
     "name": "assistant",
     "model": "main",
@@ -101,7 +101,7 @@ const files = await papr.fs.list();
 
 ### 创建 App
 
-切换 **App 模式**，用自然语言描述想要的 App。Agent 会自动调用 `app_render` 工具生成完整的 manifest.json 和 index.html，注册到应用面板。相同 appId 再次调用会覆盖更新。
+切换 **App 模式**，用自然语言描述想要的 App。Agent 会自动调用 `app_render` 工具生成完整的 manifest.json 和 index.html，注册到应用面板。相同 appId 再次调用会覆盖更新（覆盖前保留上一版到 `.versions/`，可用面板导出 zip）。
 
 ### 权限（两轴模型）
 

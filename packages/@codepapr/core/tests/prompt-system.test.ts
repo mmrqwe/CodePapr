@@ -388,11 +388,14 @@ describe('promptSystem', () => {
     }
   });
 
-  it('app mode documents __PAPR_BACKEND_URL and CORS for backend apps in all languages', () => {
+  it('app mode documents PORT/HOST loopback listen template in all languages', () => {
     for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
       const prompt = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang });
-      expect(prompt).toContain('__PAPR_BACKEND_URL');
-      expect(prompt).toContain('Access-Control-Allow-Origin');
+      expect(prompt).toContain('process.env.PORT');
+      expect(prompt).toContain('process.env.HOST');
+      expect(prompt).toContain('127.0.0.1');
+      expect(prompt).toContain('.listen(port, host)');
+      expect(prompt).not.toContain('}).listen(<port>)');
     }
   });
 

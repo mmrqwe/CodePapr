@@ -167,7 +167,8 @@ Papr is CodePapr's application runtime — AI-generated `.papr` apps run directl
   "spec": "papr/0.1",
   "name": "Todo App",
   "version": "0.1.0",
-  "permissions": ["storage:read", "storage:write", "agent:run:assistant"],
+  "local": "read",
+  "network": true,
   "agents": [{
     "name": "assistant",
     "model": "deepseek",
@@ -178,7 +179,7 @@ Papr is CodePapr's application runtime — AI-generated `.papr` apps run directl
 }
 ```
 
-10 permission types: `storage:read/write`, `http:get/post`, `fs:read/write`, `llm:chat`, `workspace:read/write/exec`, `agent:run:<name>`.
+Access is two-axis: `local` (`none`/`read`/`write`) × `network` (`true`/`false`). Legacy `level` (0–3) is migration-only. `permissions[]` is not a runtime source (omitted when empty). `papr.db` / `papr.fs` are always available; `papr.http` needs `network: true`; Agent project tools follow `local`/`network`.
 
 **Papr SDK (`window.papr`):**
 
@@ -196,14 +197,14 @@ JavaScript SDK injected into every app iframe, providing a unified API:
 
 **Permission system (two-layer):**
 
-1. **React first-pass** — `usePaprBridge` fast-rejects based on manifest.permissions
-2. **Rust authoritative** — every `papr_*` Tauri command calls `check_permission(manifest, capability)` at the top, blocking even direct postMessage bypass
+1. **React first-pass** — `usePaprBridge` fast-rejects based on the effective access profile (manifest `local`/`network` ∩ user override)
+2. **Rust authoritative** — every `papr_*` Tauri command checks the two-axis profile at the top, blocking even direct postMessage bypass
 
-Tool permission mapping (`check_tool_permission`): `read/grep/list` → `workspace:read`, `write/edit` → `workspace:write`, `bash` → `workspace:exec`, `websearch/webfetch` → `http:get`.
+Tool permission mapping: `read/grep/list` → `local>=read`, `write/edit` → `local=write`, `bash` → `local=write`, `websearch/webfetch` → `network=true`.
 
 **App Agent system:**
 
-Independent from built-in sub-agents (explore/scout/mentor). Uses a dedicated Agent loop:
+Independent from built-in sub-agents (explore/scout/mentor) and from the main chat Worker (`_appAgent`):
 - manifest `agents[].tools` specifies a whitelist (15 allowed tools)
 - Worker-side `handleRunAppAgent` builds a full `Session` (`ImmutablePrefix` + `AppendOnlyLog` + `ToolRegistry`)
 - Runs `Agent.chat()` multi-turn tool loop (`maxToolRounds` default 20, max 50)
@@ -248,7 +249,7 @@ LLM can manage app lifecycle via 4 tools (registered as merge tools in `workspac
 
 **AppDockPanel — Application Management Panel:**
 
-App list + fixed bottom action bar. List items: status dot (green = backend running, red = backend stopped, gray = frontend-only ready) + emoji icon + app name. Bottom bar: ▶ Start / Open / ■ Stop / 🗑 Delete. Buttons auto-enable/disable based on selected app state. "Open" for pure frontend apps is always enabled; for backend apps, only when running. Stopping a backend leaves an already-open window in place and prompts to restart.
+App list + fixed bottom action bar. List items: status dot (green = backend running, red = backend stopped, gray = frontend-only ready) + emoji icon + app name. Bottom bar: ▶ Start / Open / ■ Stop / 🗑 Delete / Export zip. Open starts the backend first when needed; failure stays on the dock with process output. Stopping a backend leaves an already-open window in place and prompts to restart. Overwrites snapshot the previous tree into `.versions/` (excluding `db.sqlite*` / `node_modules`).
 
 **Permission Model (Two Axes: local × network):**
 
@@ -265,7 +266,7 @@ Resolution: `effective = manifest_access ∩ per-app override` (overrides can on
 
 **Network enforcement chain (core of the two-axis model):**
 
-1. **Direct iframe networking**: `handle_app_protocol` injects a CSP response header (`build_app_csp`) per the manifest access profile. Network off: `connect-src 'self' [own backend port]`, `img-src 'self' data:`, `form-action 'none'` — enforced by the browser engine, JS cannot bypass; CDN scripts (`script-src https:`) stay but cannot exfiltrate. Network on: `https:/wss:/ws:` opened.
+1. **Direct iframe networking**: `handle_app_protocol` injects a CSP response header (`build_app_csp`) per the manifest access profile. Network off: `connect-src 'self' [own backend port]`, `img-src 'self' data:`, `form-action 'none'`, `script-src` without `https:` — enforced by the browser engine, JS cannot bypass. Network on: `https:/http:/wss:/ws:` opened.
 2. **Backend processes**: `app_start` resolves the access profile from the manifest and passes it via the `sandbox` argument to `start_workspace_background_command`; the sandbox-exec profile is built per axis (network off = `network-bind` + `network-inbound` for localhost listen, no outbound; local=read = workspace read-only).
 3. **App-agent bash**: the worker carries `appAccess` in the tool-request bridge; the main-thread `run_workspace_shell_command` builds the sandbox per the access profile.
 4. **Agent webfetch**: `fetch_web_url` now has SSRF protection (aligned with papr.http), blocking internal/private addresses.

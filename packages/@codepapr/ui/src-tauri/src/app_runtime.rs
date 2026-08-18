@@ -13,9 +13,23 @@ use tauri::{
 use crate::papr_runtime;
 
 static APP_WORKSPACES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+/// 运行时实际监听端口（占用时可能与 manifest 声明不同）。协议注入 __PAPR_BACKEND_URL 读这里。
+static APP_BACKEND_PORTS: OnceLock<Mutex<HashMap<String, u16>>> = OnceLock::new();
 
 fn app_workspaces() -> &'static Mutex<HashMap<String, String>> {
     APP_WORKSPACES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn app_backend_ports() -> &'static Mutex<HashMap<String, u16>> {
+    APP_BACKEND_PORTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn runtime_backend_port(app_id: &str, fallback: Option<u16>) -> Option<u16> {
+    app_backend_ports()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(app_id).copied())
+        .or(fallback)
 }
 
 /// Build a plain HTTP response with the given status and body. Status codes
@@ -64,6 +78,284 @@ pub fn unregister_app_workspace(app_id: String) {
     map.remove(&app_id);
     papr_runtime::app_context::unregister(&app_id);
     papr_runtime::manifest::clear_manifest(&app_id);
+}
+
+#[tauri::command]
+pub fn register_app_backend_port(app_id: String, port: u16) {
+    if !is_valid_app_id(&app_id) {
+        return;
+    }
+    if let Ok(mut map) = app_backend_ports().lock() {
+        map.insert(app_id, port);
+    }
+}
+
+#[tauri::command]
+pub fn unregister_app_backend_port(app_id: String) {
+    if let Ok(mut map) = app_backend_ports().lock() {
+        map.remove(&app_id);
+    }
+}
+
+/// 声明端口空闲则原样返回；被占则在附近找空闲端口（偏好 +1..+32，再 1024–65535）。
+#[tauri::command]
+pub fn allocate_app_port(preferred: u16) -> Result<u16, String> {
+    let preferred = preferred.clamp(1024, 65535);
+    if !port_has_listener(("127.0.0.1", preferred)) && !port_has_listener(("::1", preferred)) {
+        return Ok(preferred);
+    }
+    for offset in 1u16..=32 {
+        let Some(candidate) = preferred.checked_add(offset) else {
+            break;
+        };
+        if !port_has_listener(("127.0.0.1", candidate)) && !port_has_listener(("::1", candidate)) {
+            return Ok(candidate);
+        }
+    }
+    for candidate in 1024u16..=65535 {
+        if candidate == preferred {
+            continue;
+        }
+        if !port_has_listener(("127.0.0.1", candidate)) && !port_has_listener(("::1", candidate)) {
+            return Ok(candidate);
+        }
+    }
+    Err("没有可用的本地端口".to_string())
+}
+
+/// 入口 HTML / manifest 的最新 mtime（毫秒）。AppModal 用来在磁盘被改写后自动 reload。
+#[tauri::command]
+pub fn app_frontend_mtime(workspace_path: String, app_id: String) -> Result<u64, String> {
+    if !is_valid_app_id(&app_id) {
+        return Err("invalid app id".to_string());
+    }
+    let app_dir = std::path::PathBuf::from(&workspace_path)
+        .join(".CodePapr")
+        .join("apps")
+        .join(&app_id);
+    let mut latest: u64 = 0;
+    for name in ["index.html", "manifest.json", "app.css", "app.js"] {
+        let path = app_dir.join(name);
+        if let Ok(meta) = fs::metadata(&path) {
+            if let Ok(modified) = meta.modified() {
+                if let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
+                    latest = latest.max(dur.as_millis() as u64);
+                }
+            }
+        }
+    }
+    Ok(latest)
+}
+
+fn app_dir_path(workspace_path: &str, app_id: &str) -> Result<std::path::PathBuf, String> {
+    if !is_valid_app_id(app_id) {
+        return Err("invalid app id".to_string());
+    }
+    Ok(std::path::PathBuf::from(workspace_path)
+        .join(".CodePapr")
+        .join("apps")
+        .join(app_id))
+}
+
+fn skip_app_export_entry(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower == "node_modules"
+        || lower == ".versions"
+        || lower == "data"
+        || lower == "db.sqlite"
+        || lower.starts_with("db.sqlite-")
+}
+
+/// 有 package.json 且尚未安装依赖时，在 app 目录跑 `npm install`（允许出站网络）。
+#[tauri::command]
+pub fn install_app_npm_deps(workspace_path: String, app_id: String) -> Result<String, String> {
+    use crate::shared::expanded_path;
+    use crate::shell::sandbox::{sandboxed_command, SandboxAccess};
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let app_dir = app_dir_path(&workspace_path, &app_id)?;
+    if !app_dir.join("package.json").is_file() {
+        return Ok("skipped: no package.json".to_string());
+    }
+    if app_dir.join("node_modules").is_dir() {
+        return Ok("skipped: node_modules exists".to_string());
+    }
+
+    let workspace = crate::shared::canonical_workspace(&workspace_path)?;
+    let access = SandboxAccess {
+        network: true,
+        workspace_write: false,
+        allow_bind: true,
+    };
+    let args = vec!["install".to_string(), "--no-fund".to_string(), "--no-audit".to_string()];
+    let mut cmd = sandboxed_command("npm", &args, &workspace, Some(access), &app_dir)?;
+    cmd.env("PATH", expanded_path())
+        .current_dir(&app_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|err| format!("启动 npm install 失败: {err}"))?;
+    let mut stdout = child.stdout.take();
+    let mut stderr = child.stderr.take();
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut out = String::new();
+                let mut err = String::new();
+                if let Some(ref mut s) = stdout {
+                    let mut buf = Vec::new();
+                    let _ = s.read_to_end(&mut buf);
+                    out = String::from_utf8_lossy(&buf).into_owned();
+                }
+                if let Some(ref mut s) = stderr {
+                    let mut buf = Vec::new();
+                    let _ = s.read_to_end(&mut buf);
+                    err = String::from_utf8_lossy(&buf).into_owned();
+                }
+                if status.success() {
+                    return Ok(out);
+                }
+                return Err(format!(
+                    "npm install 失败（{}）\n{}\n{}",
+                    status, out, err
+                ));
+            }
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("npm install 超时（120s）".to_string());
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(err) => return Err(format!("等待 npm install 失败: {err}")),
+        }
+    }
+}
+
+fn copy_app_tree(src: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
+    fs::create_dir_all(dest).map_err(|err| format!("创建快照目录失败: {err}"))?;
+    let entries = fs::read_dir(src).map_err(|err| format!("读取 app 目录失败: {err}"))?;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if skip_app_export_entry(&name_str) {
+            continue;
+        }
+        let from = entry.path();
+        let to = dest.join(&name);
+        let meta = entry.metadata().map_err(|err| format!("读取文件元数据失败: {err}"))?;
+        if meta.is_dir() {
+            copy_app_tree(&from, &to)?;
+        } else {
+            fs::copy(&from, &to).map_err(|err| format!("复制 {} 失败: {err}", name_str))?;
+        }
+    }
+    Ok(())
+}
+
+fn prune_app_versions(versions_dir: &std::path::Path, keep: usize) {
+    let Ok(entries) = fs::read_dir(versions_dir) else {
+        return;
+    };
+    let mut dirs: Vec<_> = entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .collect();
+    dirs.sort_by_key(|e| e.file_name());
+    let extra = dirs.len().saturating_sub(keep);
+    for entry in dirs.into_iter().take(extra) {
+        let _ = fs::remove_dir_all(entry.path());
+    }
+}
+
+/// 覆盖生成前把当前 app 目录快照到 `.versions/<timestamp>/`（排除 db / node_modules）。
+#[tauri::command]
+pub fn papr_snapshot_app(workspace_path: String, app_id: String) -> Result<Option<String>, String> {
+    let app_dir = app_dir_path(&workspace_path, &app_id)?;
+    if !app_dir.join("index.html").is_file() && !app_dir.join("manifest.json").is_file() {
+        return Ok(None);
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis().to_string())
+        .unwrap_or_else(|_| "0".to_string());
+    let versions = app_dir.join(".versions");
+    let dest = versions.join(&stamp);
+    copy_app_tree(&app_dir, &dest)?;
+    prune_app_versions(&versions, 5);
+    Ok(Some(dest.to_string_lossy().into_owned()))
+}
+
+fn zip_app_tree(
+    zip: &mut zip::ZipWriter<std::fs::File>,
+    dir: &std::path::Path,
+    prefix: &str,
+) -> Result<(), String> {
+    use std::io::Write;
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    let entries = fs::read_dir(dir).map_err(|err| format!("读取 app 目录失败: {err}"))?;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if skip_app_export_entry(&name_str) {
+            continue;
+        }
+        let from = entry.path();
+        let zip_path = if prefix.is_empty() {
+            name_str.to_string()
+        } else {
+            format!("{prefix}/{name_str}")
+        };
+        let meta = entry.metadata().map_err(|err| format!("读取文件元数据失败: {err}"))?;
+        if meta.is_dir() {
+            zip_app_tree(zip, &from, &zip_path)?;
+        } else {
+            let bytes = fs::read(&from).map_err(|err| format!("读取 {zip_path} 失败: {err}"))?;
+            zip.start_file(&zip_path, options)
+                .map_err(|err| format!("写入 zip 条目失败: {err}"))?;
+            zip.write_all(&bytes)
+                .map_err(|err| format!("写入 zip 内容失败: {err}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// 导出 app 为 zip（排除 db.sqlite* / node_modules / .versions / data）。
+#[tauri::command]
+pub fn papr_export_app(
+    workspace_path: String,
+    app_id: String,
+    dest_zip: String,
+) -> Result<(), String> {
+    let app_dir = app_dir_path(&workspace_path, &app_id)?;
+    if !app_dir.is_dir() {
+        return Err(format!("应用目录不存在: {}", app_dir.display()));
+    }
+    let dest = std::path::PathBuf::from(&dest_zip);
+    if dest.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("zip")) != Some(true)
+    {
+        return Err("导出路径必须以 .zip 结尾".to_string());
+    }
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(|err| format!("创建导出目录失败: {err}"))?;
+    }
+    let file = fs::File::create(&dest).map_err(|err| format!("创建 zip 失败: {err}"))?;
+    let mut zip = zip::ZipWriter::new(file);
+    zip_app_tree(&mut zip, &app_dir, "")?;
+    zip.finish()
+        .map_err(|err| format!("完成 zip 失败: {err}"))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -132,8 +424,19 @@ pub fn check_port_available_structured(port: u16) -> Result<PortProbeResult, Str
 /// 端口当前监听进程的 PID 列表（无监听返回空）。用于 app 启动时验证端口
 /// 归属：轮询到「端口被监听」≠「我们 spawn 的进程在监听」——外部进程抢占
 /// 端口时旧实现照样判「启动成功」，返回死进程 pid；调用方必须核对归属。
+/// macOS/Linux 优先 lsof；Windows / 无 lsof 时回落 netstat，不能只靠 lsof。
 #[tauri::command]
 pub fn check_port_owner(port: u16) -> Vec<u32> {
+    let mut pids = check_port_owner_lsof(port);
+    if pids.is_empty() {
+        pids = check_port_owner_netstat(port);
+    }
+    pids.sort_unstable();
+    pids.dedup();
+    pids
+}
+
+fn check_port_owner_lsof(port: u16) -> Vec<u32> {
     let output = std::process::Command::new("lsof")
         .args(["-ti", &format!(":{port}")])
         .output();
@@ -148,6 +451,59 @@ pub fn check_port_owner(port: u16) -> Vec<u32> {
     Vec::new()
 }
 
+fn check_port_owner_netstat(port: u16) -> Vec<u32> {
+    let output = if cfg!(windows) {
+        std::process::Command::new("netstat")
+            .args(["-ano", "-p", "TCP"])
+            .output()
+    } else {
+        std::process::Command::new("netstat")
+            .args(["-anv", "-p", "tcp"])
+            .output()
+            .or_else(|_| {
+                std::process::Command::new("netstat")
+                    .args(["-tlnp"])
+                    .output()
+            })
+    };
+    match output {
+        Ok(out) if out.status.success() => {
+            parse_netstat_listen_pids(&String::from_utf8_lossy(&out.stdout), port)
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn parse_netstat_listen_pids(stdout: &str, port: u16) -> Vec<u32> {
+    let needle = format!(":{port}");
+    let mut pids = Vec::new();
+    for line in stdout.lines() {
+        let upper = line.to_ascii_uppercase();
+        if !upper.contains("LISTEN") {
+            continue;
+        }
+        if !port_token_in_netstat_line(line, &needle) {
+            continue;
+        }
+        if let Some(pid) = line
+            .split_whitespace()
+            .last()
+            .and_then(|tok| tok.split('/').next())
+            .and_then(|tok| tok.parse::<u32>().ok())
+        {
+            pids.push(pid);
+        }
+    }
+    pids
+}
+
+fn port_token_in_netstat_line(line: &str, needle: &str) -> bool {
+    line.split_whitespace().any(|tok| {
+        let hostport = tok.split('%').next().unwrap_or(tok);
+        hostport.ends_with(needle) || hostport.contains(&format!("{needle}["))
+    })
+}
+
 /// 端口监听者是否属于给定 pid 的进程组。
 /// 注意：不能直接比 pid——后端经 sandbox-exec 包装时，注册表里的 pid 是
 /// sandbox-exec（进程组组长），真正监听的 node 是组内孙进程。spawn 用
@@ -160,11 +516,18 @@ pub fn check_port_owned_by(port: u16, pid: u32) -> bool {
     if listeners.is_empty() {
         return true;
     }
-    listeners.iter().any(|listener| {
-        // SAFETY: listener 是 lsof 返回的真实进程 pid；getpgid 接受任意 pid
-        let pgid = unsafe { libc::getpgid(*listener as libc::pid_t) };
-        pgid == pid as libc::pid_t
-    })
+    #[cfg(unix)]
+    {
+        return listeners.iter().any(|listener| {
+            // SAFETY: listener 是 lsof/netstat 返回的真实进程 pid；getpgid 接受任意 pid
+            let pgid = unsafe { libc::getpgid(*listener as libc::pid_t) };
+            pgid == pid as libc::pid_t || *listener == pid
+        });
+    }
+    #[cfg(not(unix))]
+    {
+        listeners.contains(&pid)
+    }
 }
 
 /// 端口监听地址（lsof NAME 列解析出的 host 部分，如 "127.0.0.1"、"*"、
@@ -173,15 +536,65 @@ pub fn check_port_owned_by(port: u16, pid: u32) -> bool {
 /// 说明后端把服务暴露到了局域网，启动必须失败并给出明确提示。
 #[tauri::command]
 pub fn check_port_bind_address(port: u16) -> Vec<String> {
-    let output = std::process::Command::new("lsof")
+    let lsof = std::process::Command::new("lsof")
         .args(["-nP", "-i", &format!(":{port}"), "-sTCP:LISTEN"])
         .output();
-    if let Ok(out) = output {
+    if let Ok(out) = lsof {
         if out.status.success() {
-            return parse_lsof_bind_hosts(&String::from_utf8_lossy(&out.stdout));
+            let hosts = parse_lsof_bind_hosts(&String::from_utf8_lossy(&out.stdout));
+            if !hosts.is_empty() {
+                return hosts;
+            }
         }
     }
-    Vec::new()
+    parse_netstat_bind_hosts(
+        &{
+            let output = if cfg!(windows) {
+                std::process::Command::new("netstat")
+                    .args(["-ano", "-p", "TCP"])
+                    .output()
+            } else {
+                std::process::Command::new("netstat")
+                    .args(["-an", "-p", "tcp"])
+                    .output()
+            };
+            match output {
+                Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
+                _ => String::new(),
+            }
+        },
+        port,
+    )
+}
+
+fn parse_netstat_bind_hosts(stdout: &str, port: u16) -> Vec<String> {
+    let needle = format!(":{port}");
+    let mut hosts = Vec::new();
+    for line in stdout.lines() {
+        let upper = line.to_ascii_uppercase();
+        if !upper.contains("LISTEN") {
+            continue;
+        }
+        let Some(addr) = line.split_whitespace().nth(1) else {
+            continue;
+        };
+        if !port_token_in_netstat_line(addr, &needle) && !addr.ends_with(&needle) {
+            continue;
+        }
+        let host = addr
+            .rsplit_once(':')
+            .map(|(h, _)| h.trim_matches(|c| c == '[' || c == ']'))
+            .unwrap_or(addr);
+        let normalized = if host == "0.0.0.0" || host == "*" || host == "::" {
+            "*".to_string()
+        } else {
+            host.to_string()
+        };
+        if !hosts.contains(&normalized) {
+            hosts.push(normalized);
+        }
+    }
+    hosts
 }
 
 fn parse_lsof_bind_hosts(stdout: &str) -> Vec<String> {
@@ -367,9 +780,9 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
         pre_scripts.push_str("<script>window.__PAPR_PARENT_ORIGIN='tauri://localhost';</script>\n");
 
         if let Ok(manifest) = papr_runtime::manifest::get_manifest(app_id) {
-            if let Some(port) = manifest.port {
+            if let Some(port) = runtime_backend_port(app_id, manifest.port) {
                 pre_scripts.push_str(&format!(
-                    "<script>window.__PAPR_BACKEND_URL='http://localhost:{}';</script>\n",
+                    "<script>window.__PAPR_BACKEND_URL='http://127.0.0.1:{}';</script>\n",
                     port
                 ));
             }
@@ -503,11 +916,7 @@ pub fn scan_workspace_apps(workspace_path: String) -> Vec<DiscoveredApp> {
             continue;
         }
 
-        let html = match fs::read_to_string(&index_path) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-
+        // 入口存在即可；HTML 由 codepapr-app:// 协议按需读取，扫描不再把整份塞进 JS store。
         let manifest_json = serde_json::to_string(&manifest).ok();
 
         papr_runtime::manifest::store_manifest(&app_id, manifest.clone());
@@ -515,7 +924,7 @@ pub fn scan_workspace_apps(workspace_path: String) -> Vec<DiscoveredApp> {
         apps.push(DiscoveredApp {
             app_id,
             title: manifest.name,
-            html,
+            html: String::new(),
             manifest_json,
             command: manifest.command,
             args: manifest.args,
@@ -685,7 +1094,7 @@ mod tests {
         let app = &result[0];
         assert_eq!(app.app_id, "full-app");
         assert_eq!(app.title, "Full App");
-        assert!(app.html.contains("<h1>Hello</h1>"));
+        assert!(app.html.is_empty());
         assert!(app.manifest_json.is_some());
         assert_eq!(app.command.as_deref(), Some("node"));
         assert_eq!(app.port, Some(3456));
@@ -779,5 +1188,74 @@ mod tests {
         assert!(csp.contains("img-src 'self' data: blob: https:"), "got: {csp}");
         assert!(csp.contains("frame-src 'self' blob:"), "got: {csp}");
         assert!(csp.contains("script-src 'self' https:"), "got: {csp}");
+    }
+
+    #[test]
+    fn skip_export_entries_exclude_runtime_payload() {
+        assert!(skip_app_export_entry("node_modules"));
+        assert!(skip_app_export_entry(".versions"));
+        assert!(skip_app_export_entry("data"));
+        assert!(skip_app_export_entry("db.sqlite"));
+        assert!(skip_app_export_entry("db.sqlite-wal"));
+        assert!(!skip_app_export_entry("index.html"));
+        assert!(!skip_app_export_entry("server.js"));
+        assert!(!skip_app_export_entry("package.json"));
+    }
+
+    #[test]
+    fn netstat_listen_pid_parsing() {
+        let win = "  TCP    127.0.0.1:3456         0.0.0.0:0              LISTENING       4242\r\n\
+              TCP    0.0.0.0:13456          0.0.0.0:0              LISTENING       99\r\n";
+        assert_eq!(parse_netstat_listen_pids(win, 3456), vec![4242]);
+        let linux = "tcp  0  0 127.0.0.1:8080  0.0.0.0:*  LISTEN  1001/node\n";
+        assert_eq!(parse_netstat_listen_pids(linux, 8080), vec![1001]);
+    }
+
+    #[test]
+    fn allocate_prefers_free_declared_port() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let busy = listener.local_addr().unwrap().port();
+        let allocated = allocate_app_port(busy).expect("should find a free port");
+        assert_ne!(allocated, busy);
+        drop(listener);
+        let same = allocate_app_port(busy).expect("freed port should be reusable");
+        assert_eq!(same, busy);
+    }
+
+    #[test]
+    fn snapshot_and_export_skip_sqlite_and_node_modules() {
+        let tmp = std::env::temp_dir().join(format!("papr-snap-{}", std::process::id()));
+        let app = tmp.join(".CodePapr/apps/snap-app");
+        fs::create_dir_all(app.join("node_modules/pkg")).unwrap();
+        fs::write(app.join("index.html"), "<html>v1</html>").unwrap();
+        fs::write(app.join("manifest.json"), "{\"name\":\"snap\"}").unwrap();
+        fs::write(app.join("db.sqlite"), "secret").unwrap();
+        fs::write(app.join("node_modules/pkg/index.js"), "x").unwrap();
+
+        let snap = papr_snapshot_app(tmp.to_string_lossy().into(), "snap-app".into())
+            .unwrap()
+            .expect("snapshot path");
+        let snap_path = std::path::PathBuf::from(&snap);
+        assert!(snap_path.join("index.html").is_file());
+        assert!(!snap_path.join("db.sqlite").exists());
+        assert!(!snap_path.join("node_modules").exists());
+
+        let zip_path = tmp.join("snap-app.zip");
+        papr_export_app(
+            tmp.to_string_lossy().into(),
+            "snap-app".into(),
+            zip_path.to_string_lossy().into(),
+        )
+        .unwrap();
+        assert!(zip_path.is_file());
+        let bytes = fs::read(&zip_path).unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let names: Vec<String> = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .collect();
+        assert!(names.iter().any(|n| n == "index.html" || n.ends_with("/index.html")));
+        assert!(names.iter().all(|n| !n.contains("db.sqlite") && !n.contains("node_modules")));
+
+        fs::remove_dir_all(&tmp).ok();
     }
 }

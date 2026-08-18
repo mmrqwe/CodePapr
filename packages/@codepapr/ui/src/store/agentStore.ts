@@ -203,6 +203,21 @@ function disposeAgentHandle(get: StoreGet): void {
   }
 }
 
+function disposeAppAgentHandle(get: StoreGet): void {
+  const agent = get()._appAgent;
+  if (!agent) return;
+  try {
+    agent.destroy();
+  } catch {
+    // already torn down
+  }
+}
+
+function disposeWorkspaceAgents(get: StoreGet): void {
+  disposeAgentHandle(get);
+  disposeAppAgentHandle(get);
+}
+
 /** 持久化设置：成功时清除历史持久化错误标记（横幅不再常驻）；
  *  失败时记录 _persistenceError 并 toast 提示。保存走串行队列。 */
 function persistAppSettings(get: StoreGet, set: StoreSet, settings: Settings): void {
@@ -220,14 +235,13 @@ function persistAppSettings(get: StoreGet, set: StoreSet, settings: Settings): v
   );
 }
 
-/** 为 App Agent 确保存在可用 Agent（复用聊天 Agent 的 Worker）。
- *  与 sendMessage 的创建路径对齐，但只产出「宿主」：空上下文、不绑定会话，
- *  下一条聊天消息总会重建，绝不会被误用于聊天回合。 */
+/** 为 App Agent 确保存在可用 Agent（独立 Worker，不占用聊天 `_agent`）。
+ *  与 sendMessage 的创建路径对齐，但只产出「宿主」：空上下文、不绑定会话。 */
 async function ensureAgentForAppInternal(
   get: StoreGet,
   set: StoreSet,
 ): Promise<AgentRuntimeHandle> {
-  const existing = get()._agent;
+  const existing = get()._appAgent;
   if (existing && !existing.isCrashed()) return existing;
   if (existing) {
     try {
@@ -235,7 +249,7 @@ async function ensureAgentForAppInternal(
     } catch {
       // already torn down
     }
-    set({ _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
+    set({ _appAgent: null });
   }
 
   const normalizedSettings = normalizeSettings(get().settings);
@@ -298,9 +312,7 @@ async function ensureAgentForAppInternal(
   };
 
   const agent = createAgent(normalizedSettings, sessionId, workspacePath, [], {}, runtimeConfig);
-  // _agentModel/_agentPromptKey/_agentSessionId 保持 null：下一条聊天消息
-  // 总会按会话上下文重建，这个空上下文 Agent 不会被复用到聊天回合。
-  set({ _agent: agent, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
+  set({ _appAgent: agent });
   return agent;
 }
 
@@ -330,6 +342,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _agentModel: null,
       _agentPromptKey: null,
       _agentSessionId: null,
+      _appAgent: null,
       _sessionInputState: {},
       _requestBuilder: new RequestBuilder(),
       _cacheValidator: new CacheValidator(),
@@ -356,8 +369,8 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         try {
           const storedSettings = await loadAppSettings();
           settings = normalizeSettings(storedSettings ?? get().settings);
-          disposeAgentHandle(get);
-           set({ settings, settingsLoaded: true, _settingsPersistable: true, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
+          disposeWorkspaceAgents(get);
+           set({ settings, settingsLoaded: true, _settingsPersistable: true, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null, _appAgent: null });
            void applyBrowserEngine(settings.browserEngine);
            void invoke('set_external_access_yolo', { enabled: settings.folderAccessYolo }).catch(() => undefined);
 
@@ -371,8 +384,8 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           // 加载失败：内存中是默认设置。保持 _settingsPersistable=false，
           // 禁止后续自动回写，避免用默认值（含空 apiKey）摧毁磁盘上的真实配置。
           settings = get().settings;
-          disposeAgentHandle(get);
-          set({ settingsLoaded: true, _settingsPersistable: false, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
+          disposeWorkspaceAgents(get);
+          set({ settingsLoaded: true, _settingsPersistable: false, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null, _appAgent: null });
         }
 
         const recentWorkspaces = sortRecentWorkspaces(settings.recentWorkspaces);
@@ -391,8 +404,8 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
               ...currentSettings,
               recentWorkspaces: withoutFailed,
             });
-            disposeAgentHandle(get);
-            set({ settings: nextSettings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
+            disposeWorkspaceAgents(get);
+            set({ settings: nextSettings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null, _appAgent: null });
             if (get()._settingsPersistable) {
               // 持久化失败不可静默：内存已推进，磁盘仍是旧设置，下次启动即分叉。
               persistAppSettings(get, set, nextSettings);
@@ -417,7 +430,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         // 避免旧配置（temperature/maxTokens 等不进 promptKey 的字段）被复用。
         const turnRunning = get().isLoading;
         if (!options?.preserveAgent && !turnRunning) {
-          disposeAgentHandle(get);
+          disposeWorkspaceAgents(get);
         }
         set(options?.preserveAgent || turnRunning
           ? {
@@ -426,7 +439,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
                 ? { _agentModel: null, _agentPromptKey: null }
                 : {}),
             }
-          : { settings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
+          : { settings, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null, _appAgent: null });
         // _settingsPersistable 为 false 表示启动时设置加载失败、内存中是默认值，
         // 此时回写会用默认值（含空 apiKey）覆盖磁盘真实配置：extract_and_store_secrets
         // 会把"存在但为空"的 apiKey 视为用户主动清除，导致 vault 密钥被永久删除。
@@ -443,11 +456,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       setWorkspacePath: (path) => {
-        disposeAgentHandle(get);
+        disposeWorkspaceAgents(get);
         clearAllTodoListContexts();
         set((s) => {
           if (s.workspacePath === path) {
-            return { workspacePath: path, _agent: null, workspaceMutationVersion: 0 };
+            return { workspacePath: path, _agent: null, _appAgent: null, workspaceMutationVersion: 0 };
           }
           return {
             workspacePath: path,
@@ -467,6 +480,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _agentModel: null,
       _agentPromptKey: null,
       _agentSessionId: null,
+      _appAgent: null,
       _sessionInputState: {},
       _editHistory: new EditHistory(),
       _projectRulesSection: '',
@@ -497,7 +511,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         // 同时递增工作区身份令牌：在飞的 openWorkspace 加载（先加载后切换，
         // N12）完成后必须丢弃结果，否则关闭后旧工作区会被重新打开。
         openWorkspaceSeq += 1;
-        disposeAgentHandle(get);
+        disposeWorkspaceAgents(get);
         clearAllTodoListContexts();
         set({
           workspacePath: '',
@@ -519,6 +533,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agentModel: null,
           _agentPromptKey: null,
           _agentSessionId: null,
+          _appAgent: null,
           _sessionInputState: {},
           _editHistory: new EditHistory(),
           _projectRulesSection: '',
@@ -723,6 +738,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agentModel: null,
           _agentPromptKey: null,
           _agentSessionId: null,
+          _appAgent: null,
           _editHistory: new EditHistory(),
           _projectRulesSection: '',
           _skillDefinitions: [],
@@ -824,7 +840,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           skillDefinitions,
           get().skillEnabledById
         );
-        disposeAgentHandle(get);
+        disposeWorkspaceAgents(get);
         set({
           _projectRulesSection: rulesSection,
           _skillDefinitions: enabledSkillDefinitions,
@@ -832,6 +848,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agent: null,
           _agentPromptKey: null,
           _agentSessionId: null,
+          _appAgent: null,
         });
       },
 
@@ -902,7 +919,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           return;
         }
 
-        disposeAgentHandle(get);
+        disposeWorkspaceAgents(get);
         set((state) => {
           const skillEnabledById = { ...state.skillEnabledById };
           if (enabled === null || enabled) {
@@ -919,6 +936,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             _agent: null,
             _agentPromptKey: null,
             _agentSessionId: null,
+            _appAgent: null,
           };
         });
 

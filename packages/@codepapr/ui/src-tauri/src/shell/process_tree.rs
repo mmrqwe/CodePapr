@@ -15,6 +15,122 @@ pub(crate) fn prepare_new_process_group(cmd: &mut Command) {
 #[cfg(not(unix))]
 pub(crate) fn prepare_new_process_group(_cmd: &mut Command) {}
 
+/// Windows：把子进程放进 Job Object（KILL_ON_JOB_CLOSE）。宿主退出时关掉
+/// 泄漏的 job handle，后端进程树一并结束，不依赖 lsof。
+#[cfg(windows)]
+pub(crate) fn assign_kill_on_close_job(child: &Child) {
+    use std::os::windows::io::AsRawHandle;
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+        if job.is_null() {
+            return;
+        }
+        let mut info = JobObjectExtendedLimitInformation::default();
+        info.basic.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let ok = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformationClass,
+            &mut info as *mut _ as *mut core::ffi::c_void,
+            std::mem::size_of::<JobObjectExtendedLimitInformation>() as u32,
+        );
+        if ok == 0 {
+            let _ = CloseHandle(job);
+            return;
+        }
+        let process = child.as_raw_handle();
+        if AssignProcessToJobObject(job, process) == 0 {
+            let _ = CloseHandle(job);
+            return;
+        }
+        // 必须保持 job handle 存活；关掉会立刻杀掉进程。泄漏到宿主退出即可。
+        std::mem::forget(JobHandle(job));
+    }
+}
+
+#[cfg(windows)]
+const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+#[cfg(windows)]
+const JobObjectExtendedLimitInformationClass: i32 = 9;
+
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Default)]
+struct JobObjectBasicLimitInformation {
+    per_process_user_time_limit: i64,
+    per_job_user_time_limit: i64,
+    limit_flags: u32,
+    _pad0: u32,
+    minimum_working_set_size: usize,
+    maximum_working_set_size: usize,
+    active_process_limit: u32,
+    _pad1: u32,
+    affinity: usize,
+    priority_class: u32,
+    scheduling_class: u32,
+}
+
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Default)]
+struct IoCounters {
+    _a: u64,
+    _b: u64,
+    _c: u64,
+    _d: u64,
+    _e: u64,
+    _f: u64,
+}
+
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Default)]
+struct JobObjectExtendedLimitInformation {
+    basic: JobObjectBasicLimitInformation,
+    io: IoCounters,
+    process_memory_limit: usize,
+    job_memory_limit: usize,
+    peak_process_memory_used: usize,
+    peak_job_memory_used: usize,
+}
+
+#[cfg(windows)]
+struct JobHandle(*mut core::ffi::c_void);
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn CreateJobObjectW(
+        lp_job_attributes: *mut core::ffi::c_void,
+        lp_name: *const u16,
+    ) -> *mut core::ffi::c_void;
+    fn SetInformationJobObject(
+        h_job: *mut core::ffi::c_void,
+        info_class: i32,
+        lp_info: *mut core::ffi::c_void,
+        cb_info: u32,
+    ) -> i32;
+    fn AssignProcessToJobObject(
+        h_job: *mut core::ffi::c_void,
+        h_process: *mut core::ffi::c_void,
+    ) -> i32;
+    fn CloseHandle(handle: *mut core::ffi::c_void) -> i32;
+}
+
+/// Linux：父进程死后杀子进程，避免宿主崩溃留下占端口的孤儿。
+#[cfg(target_os = "linux")]
+pub(crate) fn prepare_parent_death_signal(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0);
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn prepare_parent_death_signal(_cmd: &mut Command) {}
+
 /// 杀进程组（无 Child 句柄版）：按 pid 对整组先 SIGTERM 再 SIGKILL。
 /// 适用于只有 pid 的场景（如 CDP 浏览器主进程）。同样先 getpgid 确认
 /// 该 pid 是自身进程组组长，绝不用 `kill(-pid)` 误杀调用方所在组；

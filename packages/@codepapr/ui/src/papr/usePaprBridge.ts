@@ -5,9 +5,9 @@ import { isPaprMessage, createPaprResponse } from './paprProtocol';
 import { usePermissionStore } from './permissionStore';
 import { accessAllows, resolveEffectiveAccess } from './levelGrants';
 import { useAgentStore } from '../store/agentStore';
+import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { useThemeStore } from '../store/themeStore';
 import type { ThemeMode } from '../theme/types';
-import { invalidateAgentHandle } from '../store/internals/sendMessage';
 import { WorkerCrashError } from '../agent/WorkerBackedAgent';
 import { acquireSleepPrevention, releaseSleepPrevention } from '../utils/sleepPrevention';
 
@@ -32,9 +32,11 @@ interface UsePaprBridgeOptions {
   /** 应用页面 SDK 执行握手（papr://app-ready）到达时回调。
    *  AppModal 用它区分「协议层错误页」与「真实页面加载成功」。 */
   onAppReady?: () => void;
+  /** iframe 内 console / 未捕获错误转发。 */
+  onConsole?: (entry: { level: string; message: string; ts: number }) => void;
 }
 
-export function usePaprBridge({ iframeRef, appId, manifest, onAppReady }: UsePaprBridgeOptions) {
+export function usePaprBridge({ iframeRef, appId, manifest, onAppReady, onConsole }: UsePaprBridgeOptions) {
   const cacheManifest = usePermissionStore((s) => s.cacheManifest);
   const appSettings = usePermissionStore((s) => s.appSettings);
   const setAppSettings = usePermissionStore((s) => s.setAppSettings);
@@ -108,6 +110,8 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady }: UsePap
   // onAppReady 同样走 ref：不得改变 handleMessage identity（同上）。
   const onAppReadyRef = useRef(onAppReady);
   onAppReadyRef.current = onAppReady;
+  const onConsoleRef = useRef(onConsole);
+  onConsoleRef.current = onConsole;
 
   const handleMessage = useCallback(
     (event: MessageEvent) => {
@@ -126,6 +130,16 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady }: UsePap
       // SDK 执行即证明真实应用页面已渲染——协议层错误页（404/403）不注入 SDK。
       if ((data as { type?: string }).type === 'papr://app-ready') {
         onAppReadyRef.current?.();
+        return;
+      }
+
+      if ((data as { type?: string }).type === 'papr://console') {
+        const payload = (data as { payload?: { level?: string; message?: string; ts?: number } }).payload;
+        onConsoleRef.current?.({
+          level: typeof payload?.level === 'string' ? payload.level : 'log',
+          message: typeof payload?.message === 'string' ? payload.message : '',
+          ts: typeof payload?.ts === 'number' ? payload.ts : Date.now(),
+        });
         return;
       }
 
@@ -217,6 +231,8 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady }: UsePap
       }
 
       if (type === 'papr://app.info') {
+        const running = useAppRuntimeStore.getState().apps.find((a) => a.appId === appId);
+        const runningUrl = running?.url?.replace(/\/$/, '') ?? null;
         respond({
           appId,
           name: resolvedManifest.name,
@@ -224,7 +240,8 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady }: UsePap
           permissions,
           local: currentAccess.local,
           network: currentAccess.network,
-          backendUrl: resolvedManifest.port ? `http://localhost:${resolvedManifest.port}` : null,
+          backendUrl: runningUrl
+            ?? (resolvedManifest.port ? `http://127.0.0.1:${resolvedManifest.port}` : null),
         });
         return;
       }
@@ -276,8 +293,8 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady }: UsePap
 
           const workspacePath = useAgentStore.getState().workspacePath;
 
-          // App Agent 运行期间同样防休眠：它复用聊天 Agent 的 Worker，
-          // 休眠会连 Worker 一起杀掉。
+          // App Agent 运行期间防休眠：专用 Worker 被系统休眠杀掉后，
+          // iframe 内的 papr.agent.run 会挂起。
           void acquireSleepPrevention();
 
           const runPromise = agent.runAppAgent(
@@ -320,8 +337,13 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady }: UsePap
               // visibilitychange 监听器永不销毁，全部泄漏），且不同步重置
               // _agentModel/_agentPromptKey/_agentSessionId。
               if (err instanceof WorkerCrashError || (err instanceof Error && err.name === 'WorkerCrashError')) {
-                if (useAgentStore.getState()._agent === agent) {
-                  invalidateAgentHandle(useAgentStore.getState, useAgentStore.setState);
+                if (useAgentStore.getState()._appAgent === agent) {
+                  try {
+                    agent.destroy();
+                  } catch {
+                    // already torn down
+                  }
+                  useAgentStore.setState({ _appAgent: null });
                 }
               }
               const errMsg = String(err);

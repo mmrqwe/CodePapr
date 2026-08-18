@@ -468,7 +468,7 @@ export default function App() {
               appId: app.app_id,
               title: app.title || app.app_id,
               icon: appIcon,
-              html: app.html,
+              html: '',
               filePath: `.CodePapr/apps/${app.app_id}/${appEntryFile}`,
               manifestJson: app.manifest_json ?? undefined,
               command: app.command ?? undefined,
@@ -493,8 +493,8 @@ export default function App() {
             for (const app of discovered) {
               if (useAgentStore.getState().workspacePath !== workspacePath) return;
               if (!app.port) continue;
-              const url = `http://localhost:${app.port}/`;
-              const pid = runningByUrl.get(url);
+              const url = `http://127.0.0.1:${app.port}/`;
+              const pid = runningByUrl.get(url) ?? runningByUrl.get(`http://localhost:${app.port}/`);
               if (pid !== undefined) {
                 useAppRuntimeStore.getState().setAppRunning(app.app_id, pid, url);
               }

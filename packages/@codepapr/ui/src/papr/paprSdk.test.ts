@@ -213,3 +213,20 @@ describe('papr-sdk.js http.request and fs encoding payloads', () => {
     expect(sent[1]?.type).toBe('papr://fs.read');
   });
 });
+
+describe('papr-sdk.js console forwarding', () => {
+  it('console.error 以 papr://console 发给父窗口（无 reqId）', () => {
+    const sent: Array<{ type?: string; payload?: { level?: string; message?: string } }> = [];
+    const original = window.parent.postMessage.bind(window.parent);
+    window.parent.postMessage = ((message: unknown) => {
+      const data = message as { __papr?: boolean; type?: string; payload?: { level?: string; message?: string } };
+      if (data?.__papr) sent.push(data);
+      return (original as (m: unknown) => void)(message);
+    }) as typeof window.parent.postMessage;
+    loadSdk();
+    window.console.error('boom', { a: 1 });
+    const entry = sent.find((s) => s.type === 'papr://console');
+    expect(entry?.payload?.level).toBe('error');
+    expect(entry?.payload?.message).toContain('boom');
+  });
+});

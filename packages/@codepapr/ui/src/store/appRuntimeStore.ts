@@ -131,6 +131,7 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set) => ({
 
   setAppStopped: (appId) => {
     diagStoreEvent(`setAppStopped(${appId})`);
+    void invoke('unregister_app_backend_port', { appId }).catch(() => {});
     set((state) => ({
       apps: state.apps.map((app) =>
         app.appId === appId ? { ...app, pid: undefined, url: undefined } : app

@@ -167,7 +167,8 @@ Papr 是 CodePapr 的应用运行时——AI 生成的 `.papr` App 可以直接�
   "spec": "papr/0.1",
   "name": "Todo App",
   "version": "0.1.0",
-  "permissions": ["storage:read", "storage:write", "agent:run:assistant"],
+  "local": "read",
+  "network": true,
   "agents": [{
     "name": "assistant",
     "model": "deepseek",
@@ -178,7 +179,7 @@ Papr 是 CodePapr 的应用运行时——AI 生成的 `.papr` App 可以直接�
 }
 ```
 
-10 种权限：`storage:read/write`、`http:get/post`、`fs:read/write`、`llm:chat`、`workspace:read/write/exec`、`agent:run:<name>`。
+访问档是两轴：`local`（`none`/`read`/`write`）× `network`（`true`/`false`）。旧 `level`（0–3）只用于迁移。`permissions[]` 不再作为运行时权限源（写入时若为空则省略）。`papr.db` / `papr.fs` 永远可用；`papr.http` 需要 `network: true`；Agent 项目工具由 `local`/`network` 决定。
 
 **Papr SDK（`window.papr`）：**
 
@@ -196,14 +197,14 @@ Papr 是 CodePapr 的应用运行时——AI 生成的 `.papr` App 可以直接�
 
 **权限系统（两层）：**
 
-1. **React 首检** — `usePaprBridge` 根据 manifest.permissions 做快速拒绝
-2. **Rust 权威** — 每个 `papr_*` Tauri 命令开头调 `check_permission(manifest, capability)`，即使绕过 SDK 直接 postMessage 也被拦截
+1. **React 首检** — `usePaprBridge` 按生效访问档（manifest `local`/`network` ∩ 用户覆盖）快速拒绝
+2. **Rust 权威** — 每个 `papr_*` Tauri 命令开头按两轴校验，即使绕过 SDK 直接 postMessage 也被拦截
 
-工具权限映射（`check_tool_permission`）：`read/grep/list` → `workspace:read`、`write/edit` → `workspace:write`、`bash` → `workspace:exec`、`websearch/webfetch` → `http:get`。
+工具权限映射：`read/grep/list` → `local>=read`、`write/edit` → `local=write`、`bash` → `local=write`、`websearch/webfetch` → `network=true`。
 
 **App Agent 系统：**
 
-与内置子代理（explore/scout/mentor）独立，走专用 Agent loop：
+与内置子代理（explore/scout/mentor）独立，也与主会话聊天 Worker 隔离（`_appAgent`）：
 - manifest `agents[].tools` 声明白名单（仅 15 个允许工具）
 - Worker 端 `handleRunAppAgent` 构建完整 `Session`（`ImmutablePrefix` + `AppendOnlyLog` + `ToolRegistry`）
 - 走 `Agent.chat()` 多轮工具循环（`maxToolRounds` 默认 20，上限 50）
@@ -247,7 +248,7 @@ LLM 可通过 4 个工具管理 app 生命周期（在 `workspaceTools.ts` 注�
 
 **AppDockPanel — 应用管理面板：**
 
-应用列表 + 底部固定按钮栏。列表项：状态圆点（绿=后端运行中，红=后端已停止，灰=纯前端就绪）+ emoji 图标 + app 名称。底部栏：▶ 启动 / 打开 / ■ 停止 / 🗑 删除。按钮根据选中 app 的状态自动启用/禁用。纯前端 app 的"打开"始终可用；后端 app 的"打开"仅在已启动时可用。后端停止时已打开的窗口保持打开，并提示重启。
+应用列表 + 底部固定按钮栏。列表项：状态圆点（绿=后端运行中，红=后端已停止，灰=纯前端就绪）+ emoji 图标 + app 名称。底部栏：▶ 启动 / 打开 / ■ 停止 / 🗑 删除 / 导出 zip。纯前端与后端 app 的「打开」都会先尝试启动后端（若需要），失败则留在 dock 并显示进程输出。后端停止时已打开的窗口保持打开，并提示重启。覆盖生成前会把上一版快照到 `.versions/`（排除 `db.sqlite*` / `node_modules`）。
 
 **权限模型（两轴：本地 × 网络）：**
 
@@ -264,7 +265,7 @@ app 通过 manifest 的 `local`（`none`/`read`/`write`）× `network`（`true`/
 
 **网络强制链（两轴模型的核心）：**
 
-1. **iframe 直接联网**：`handle_app_protocol` 按 manifest 访问档注入 CSP 响应头（`build_app_csp`）。网络关：`connect-src 'self' [自身后端端口]`、`img-src 'self' data:`、`form-action 'none'`——浏览器引擎执行，JS 无法绕过；CDN 脚本（`script-src https:`）保留但无法回传数据。网络开：放行 `https:/wss:/ws:`。
+1. **iframe 直接联网**：`handle_app_protocol` 按 manifest 访问档注入 CSP 响应头（`build_app_csp`）。网络关：`connect-src 'self' [自身后端端口]`、`img-src 'self' data:`、`form-action 'none'`、`script-src` 不含 `https:`——浏览器引擎执行，JS 无法绕过。网络开：放行 `https:/http:/wss:/ws:`。
 2. **后端进程**：`app_start` 从 manifest 解析访问档，经 `sandbox` 参数传入 `start_workspace_background_command`；sandbox-exec profile 按轴构建（网络关放行 `network-bind` + `network-inbound` 以监听 localhost，无出站；local=read 时工作区只读）。
 3. **app agent 的 bash**：worker 在 tool-request 桥接中携带 `appAccess`，主线程 `run_workspace_shell_command` 按访问档构建沙箱。
 4. **agent webfetch**：`fetch_web_url` 增加 SSRF 防护（与 papr.http 对齐），禁止访问内网地址。

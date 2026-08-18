@@ -12,6 +12,10 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
 }));
 
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  save: vi.fn(async () => null),
+}));
+
 import { normalizeSettings, useAgentStore } from '../store/agentStore';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { AppDockPanel } from './AppDockPanel';
@@ -133,7 +137,8 @@ describe('AppDockPanel', () => {
 
   it('N18：后端未启动时双击会先启动再打开；启动失败则留在 dock', async () => {
     invokeMock.mockImplementation(async (command?: string) => {
-      if (command === 'check_port_available') return false;
+      if (command === 'install_app_npm_deps') return 'skipped';
+      if (command === 'allocate_app_port') throw new Error('没有可用的本地端口');
       return undefined;
     });
     useAppRuntimeStore.setState({
@@ -159,12 +164,13 @@ describe('AppDockPanel', () => {
     });
 
     expect(useAppRuntimeStore.getState().openedAppId).toBeNull();
-    expect(container.textContent).toMatch(/端口|占用/);
+    expect(container.textContent).toMatch(/端口|分配/);
   });
 
   it('N18：后端未启动时双击启动成功后打开 app', async () => {
-    invokeMock.mockImplementation(async (command?: string) => {
-      if (command === 'check_port_available') return true;
+    invokeMock.mockImplementation(async (command?: string, args?: Record<string, unknown>) => {
+      if (command === 'install_app_npm_deps') return 'skipped';
+      if (command === 'allocate_app_port') return args?.preferred ?? 3000;
       if (command === 'start_workspace_background_command') return { pid: 42 };
       if (command === 'check_port_available_structured') return { v4: true, v6: false };
       if (command === 'check_port_owned_by') return true;

@@ -362,6 +362,8 @@ export interface AgentState {
   _agentPromptKey: string | null;
   /** _agent 绑定的会话 ID；复用 agent 前必须校验与当前会话一致。 */
   _agentSessionId: string | null;
+  /** App 模式 `papr.agent.run` 专用 Worker，与聊天 `_agent` 隔离。 */
+  _appAgent: AgentRuntimeHandle | null;
   _sessionInputState: Record<string, SessionInputState>;
   _requestBuilder: RequestBuilder;
   _cacheValidator: CacheValidator;

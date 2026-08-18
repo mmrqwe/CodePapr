@@ -206,6 +206,15 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       disableWebSearchTools: ctx.options.disableWebSearchTools ?? false,
     });
 
+    try {
+      await invoke('papr_snapshot_app', {
+        workspacePath: workspace(),
+        appId: rawAppId,
+      });
+    } catch {
+      // 首次生成或目录尚不存在时跳过；快照失败不阻断覆盖。
+    }
+
     const manifest = {
       spec: 'papr/0.1',
       name: title,
@@ -311,7 +320,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       appId: rawAppId,
       title,
       icon: normalizedIcon,
-      html,
+      html: '',
       filePath: indexRelativePath,
       command: command ?? undefined,
       args: cmdArgs ?? undefined,
@@ -407,6 +416,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
 
     let killFailed = false;
     try { await invoke('stop_background_process', { pid: app.pid, source: 'app_stop-tool' }); } catch { killFailed = true; }
+    try { await invoke('unregister_app_backend_port', { appId }); } catch { /* best-effort */ }
     useAppRuntimeStore.getState().setAppStopped(appId);
     return { appId, stopped: true, ...(killFailed ? { warning: '进程停止命令失败，后端进程可能仍在运行并占用端口。' } : {}) };
   });
@@ -440,7 +450,7 @@ export interface AppLaunchTarget {
   manifestJson?: string;
 }
 
-/** 后端 app 启动核心路径：manifest 两轴沙箱 + 端口预检 + spawn + 轮询等待监听 +
+/** 后端 app 启动核心路径：manifest 两轴沙箱 + 依赖安装 + 端口分配 + spawn + 轮询等待监听 +
  * 失败时捕获进程输出。app_start 工具与应用面板 ▶ 按钮都走这里——
  * 保证无论从哪启动，沙箱权限、校验与诊断行为完全一致。 */
 export async function launchAppBackend(
@@ -453,21 +463,26 @@ export async function launchAppBackend(
     throw new Error(`应用 '${app.appId}' 的 local 访问为 ${appAccess.local}，不允许启动后端服务`);
   }
 
-  const available: boolean = await invoke('check_port_available', { port: app.port });
-  if (!available) {
-    let ownerInfo = '';
-    try {
-      const owners = await invoke<number[]>('check_port_owner', { port: app.port });
-      if (owners.length > 0) {
-        ownerInfo = `（占用进程 pid=${owners.join(',')}）`;
-      }
-    } catch { /* best-effort */ }
-    throw new Error(
-      `端口 ${app.port} 已被占用${ownerInfo}。若为上次启动残留的后端进程，请先在「后台进程」面板停止，或重启 CodePapr。`,
-    );
+  try {
+    await invoke<string>('install_app_npm_deps', {
+      workspacePath,
+      appId: app.appId,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(`应用 '${app.appId}' 安装依赖失败：${detail}`);
   }
 
-  const url = `http://localhost:${app.port}/`;
+  const preferred = app.port;
+  let port = preferred;
+  try {
+    port = await invoke<number>('allocate_app_port', { preferred });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(`应用 '${app.appId}' 无法分配端口 ${preferred}：${detail}`);
+  }
+
+  const url = `http://127.0.0.1:${port}/`;
   // cwd 必须是 app 目录：manifest args 里的相对脚本（如 "server.js"）相对
   // 该目录解析。用工作区根当 cwd 时 node 会「Cannot find module」秒退，
   // 表现为端口轮询全 refused 的启动失败（math-mentor 事故）。
@@ -482,12 +497,16 @@ export async function launchAppBackend(
       workspaceWrite: appAccess.local === 'write',
       allowBind: true,
     },
+    env: {
+      PORT: String(port),
+      HOST: '127.0.0.1',
+    },
   });
 
-  // 轮询等待端口被监听：冷启动在负载下可能超过固定短等待，过早判失败会误杀
-  // 正在启动的进程（随后它又绑上端口，变成 store 追踪不到的孤儿）。
+  // 轮询等待端口被监听：冷启动（尤其刚跑完 npm install）可能超过固定短等待，
+  // 过早判失败会误杀正在启动的进程（随后它又绑上端口，变成 store 追踪不到的孤儿）。
   const PORT_POLL_INTERVAL_MS = 250;
-  const PORT_POLL_TIMEOUT_MS = 8000;
+  const PORT_POLL_TIMEOUT_MS = 20_000;
   const deadline = Date.now() + PORT_POLL_TIMEOUT_MS;
   const startedAt = Date.now();
   const pollTrace: string[] = [];
@@ -502,12 +521,12 @@ export async function launchAppBackend(
       // "conn"（如 err:ConnectionRefused 之外的措辞）就会翻转判定，改用
       // 结构化布尔字段彻底消除对文案的依赖。
       const probe = await invoke<{ v4: boolean; v6: boolean }>('check_port_available_structured', {
-        port: app.port,
+        port,
       });
       const available = !probe.v4 && !probe.v6;
       let detail = 'n/a';
       try {
-        detail = await invoke<string>('check_port_available_detail', { port: app.port });
+        detail = await invoke<string>('check_port_available_detail', { port });
       } catch { /* detail 缺失不致命 */ }
       pollTrace.push(`+${Date.now() - startedAt}ms:${detail}`);
       if (!available) {
@@ -519,7 +538,7 @@ export async function launchAppBackend(
         // （容器/CI）时退化为仅存活检查。
         try {
           portOwnedByUs = await invoke<boolean>('check_port_owned_by', {
-            port: app.port,
+            port,
             pid: result.pid,
           });
         } catch {
@@ -545,7 +564,7 @@ export async function launchAppBackend(
     // Kill the spawned child so a slow-starting server does not become an
     // orphan that later grabs the port untracked by the store.
     try { await invoke('stop_background_process', { pid: result.pid, source: 'app_start-failure' }); } catch { /* best-effort */ }
-    try { await invoke('log_ui_event', { workspacePath, message: `app_start-failure ${app.appId} port=${app.port} pid=${result.pid} ownedByUs=${portOwnedByUs} polls=[${pollTrace.join(' ')}]` }); } catch { /* best-effort */ }
+    try { await invoke('log_ui_event', { workspacePath, message: `app_start-failure ${app.appId} port=${port} pid=${result.pid} ownedByUs=${portOwnedByUs} polls=[${pollTrace.join(' ')}]` }); } catch { /* best-effort */ }
     const detail = formatExitDetail(exitInfo);
     const reason = !portTaken
       ? (pollError ? `端口探测失败（${pollError}）` : `进程未能监听端口${formatExitStatus(exitInfo)}`)
@@ -563,7 +582,7 @@ export async function launchAppBackend(
   // 才判定暴露到局域网并拒绝启动。拿不到 lsof（容器/CI）时跳过。
   let bindHosts: string[] = [];
   try {
-    bindHosts = await invoke<string[]>('check_port_bind_address', { port: app.port });
+    bindHosts = await invoke<string[]>('check_port_bind_address', { port });
   } catch {
     bindHosts = [];
   }
@@ -572,7 +591,7 @@ export async function launchAppBackend(
     try {
       await invoke('log_ui_event', {
         workspacePath,
-        message: `app_start-warn ${app.appId} port=${app.port} pid=${result.pid} binds-wildcard（双栈通配，回环可达；如需局域网不可达请显式绑定 127.0.0.1/::1）`,
+        message: `app_start-warn ${app.appId} port=${port} pid=${result.pid} binds-wildcard（双栈通配，回环可达；如需局域网不可达请显式绑定 127.0.0.1/::1）`,
       });
     } catch { /* best-effort */ }
   }
@@ -583,7 +602,7 @@ export async function launchAppBackend(
     try {
       await invoke('log_ui_event', {
         workspacePath,
-        message: `app_start-failure ${app.appId} port=${app.port} pid=${result.pid} reason=non-loopback-bind hosts=[${nonLoopbackHosts.join(',')}]`,
+        message: `app_start-failure ${app.appId} port=${port} pid=${result.pid} reason=non-loopback-bind hosts=[${nonLoopbackHosts.join(',')}]`,
       });
     } catch { /* best-effort */ }
     const detail = formatExitDetail(exitInfo);
@@ -592,6 +611,10 @@ export async function launchAppBackend(
       `服务会暴露到局域网。请在 command/args 中配置服务只监听 localhost/127.0.0.1。${detail}`
     );
   }
+
+  try {
+    await invoke('register_app_backend_port', { appId: app.appId, port });
+  } catch { /* 协议注入回落到 manifest.port */ }
 
   return { pid: result.pid, url };
 }

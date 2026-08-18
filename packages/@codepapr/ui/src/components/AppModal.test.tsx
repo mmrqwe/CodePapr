@@ -243,4 +243,50 @@ describe('AppModal', () => {
     expect(container.textContent).not.toContain('storage:read');
     expect(container.textContent).not.toContain('http:get');
   });
+
+  it('shows iframe console entries forwarded over papr://console', async () => {
+    useAppRuntimeStore.setState({
+      apps: [
+        {
+          appId: 'app-1',
+          title: 'Test App',
+          html: '',
+          filePath: '.CodePapr/apps/app-1/index.html',
+          createdAt: 1,
+          updatedAt: 2,
+          manifestJson: JSON.stringify({ local: 'none', network: false }),
+        },
+      ],
+      openedAppId: 'app-1',
+    });
+
+    await act(async () => {
+      root.render(<AppModal lang="en" />);
+    });
+
+    const iframe = container.querySelector('iframe');
+    const toggle = Array.from(container.querySelectorAll('button')).find((el) =>
+      el.textContent?.includes('Console'),
+    );
+    expect(toggle).toBeTruthy();
+    act(() => {
+      toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const event = new MessageEvent('message', {
+      data: {
+        __papr: true,
+        type: 'papr://console',
+        payload: { level: 'error', message: 'hello from app', ts: 1 },
+      },
+    });
+    Object.defineProperty(event, 'origin', { value: 'codepapr-app://app-1' });
+    Object.defineProperty(event, 'source', { value: iframe?.contentWindow });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+    await flush();
+
+    expect(container.textContent).toContain('hello from app');
+  });
 });

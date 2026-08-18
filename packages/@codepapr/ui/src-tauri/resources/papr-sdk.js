@@ -242,4 +242,47 @@
   try {
     window.parent.postMessage({ __papr: true, type: 'papr://app-ready' }, parentOrigin);
   } catch (e) { /* 跨源受限时忽略：父侧有超时兜底 */ }
+
+  function emitConsole(level, args) {
+    try {
+      var parts = [];
+      for (var i = 0; i < args.length; i++) {
+        var value = args[i];
+        if (typeof value === 'string') {
+          parts.push(value);
+        } else {
+          try {
+            parts.push(JSON.stringify(value));
+          } catch (err) {
+            parts.push(String(value));
+          }
+        }
+      }
+      window.parent.postMessage({
+        __papr: true,
+        type: 'papr://console',
+        payload: { level: level, message: parts.join(' '), ts: Date.now() }
+      }, parentOrigin);
+    } catch (e) { /* 父窗口不可达时忽略 */ }
+  }
+
+  var nativeConsole = window.console || {};
+  var levels = ['log', 'info', 'warn', 'error', 'debug'];
+  for (var li = 0; li < levels.length; li++) {
+    (function (level) {
+      var orig = nativeConsole[level] ? nativeConsole[level].bind(nativeConsole) : function () {};
+      nativeConsole[level] = function () {
+        emitConsole(level, arguments);
+        try { orig.apply(nativeConsole, arguments); } catch (e) { /* noop */ }
+      };
+    })(levels[li]);
+  }
+
+  window.addEventListener('error', function (event) {
+    emitConsole('error', [event.message || 'Uncaught error', event.filename || '', event.lineno || '']);
+  });
+  window.addEventListener('unhandledrejection', function (event) {
+    var reason = event && event.reason;
+    emitConsole('error', ['Unhandled rejection', reason]);
+  });
 })();

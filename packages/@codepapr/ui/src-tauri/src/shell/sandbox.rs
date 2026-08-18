@@ -387,7 +387,16 @@ pub(crate) fn sandboxed_command(
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (workspace, access, cwd);
+        let _ = access;
+        let cwd_canon = canonicalize_with_existing_ancestor(cwd)?;
+        let ws_canon = canonicalize_with_existing_ancestor(workspace)?;
+        if !cwd_canon.starts_with(&ws_canon) {
+            return Err(format!(
+                "工作目录必须位于工作区内（cwd={}, workspace={}）",
+                cwd.display(),
+                workspace.display()
+            ));
+        }
         let mut command = Command::new(program);
         command.args(args);
         Ok(command)

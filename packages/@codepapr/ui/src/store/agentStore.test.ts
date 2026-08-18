@@ -4493,6 +4493,7 @@ describe('useAgentStore.ensureAgentForApp', () => {
       _agentModel: null,
       _agentPromptKey: null,
       _agentSessionId: null,
+      _appAgent: null,
     }));
   });
 
@@ -4504,7 +4505,7 @@ describe('useAgentStore.ensureAgentForApp', () => {
     invokeMock.mockClear();
   });
 
-  it('creates an agent on demand when no chat agent exists', async () => {
+  it('creates a dedicated app agent without taking the chat worker', async () => {
     const mockAgent = createMockAgent();
     createAgentMock.mockReturnValue(mockAgent);
 
@@ -4514,36 +4515,40 @@ describe('useAgentStore.ensureAgentForApp', () => {
     expect(createAgentMock).toHaveBeenCalledTimes(1);
     expect(createAgentMock.mock.calls[0]?.[5]).toMatchObject({ mode: 'app' });
     const state = useAgentStore.getState();
-    expect(state._agent).toBe(mockAgent);
-    // 空上下文宿主 Agent：不绑定模型/提示词/会话，下一条聊天消息总是重建。
+    expect(state._appAgent).toBe(mockAgent);
+    expect(state._agent).toBeNull();
     expect(state._agentModel).toBeNull();
     expect(state._agentPromptKey).toBeNull();
     expect(state._agentSessionId).toBeNull();
   });
 
-  it('reuses the existing chat agent when it is healthy', async () => {
+  it('reuses the existing app agent when it is healthy and leaves the chat agent alone', async () => {
+    const chat = createMockAgent();
     const existing = createMockAgent();
-    useAgentStore.setState({ _agent: existing });
+    useAgentStore.setState({ _agent: chat, _appAgent: existing });
     createAgentMock.mockReturnValue(createMockAgent());
 
     const agent = await useAgentStore.getState().ensureAgentForApp();
 
     expect(agent).toBe(existing);
     expect(createAgentMock).not.toHaveBeenCalled();
+    expect(useAgentStore.getState()._agent).toBe(chat);
   });
 
-  it('destroys and rebuilds a crashed agent', async () => {
+  it('destroys and rebuilds a crashed app agent without touching the chat agent', async () => {
     const destroySpy = vi.fn();
+    const chat = createMockAgent();
     const crashed = createMockAgent({ isCrashed: true, destroy: destroySpy });
     const fresh = createMockAgent();
-    useAgentStore.setState({ _agent: crashed });
+    useAgentStore.setState({ _agent: chat, _appAgent: crashed });
     createAgentMock.mockReturnValue(fresh);
 
     const agent = await useAgentStore.getState().ensureAgentForApp();
 
     expect(destroySpy).toHaveBeenCalledTimes(1);
     expect(agent).toBe(fresh);
-    expect(useAgentStore.getState()._agent).toBe(fresh);
+    expect(useAgentStore.getState()._appAgent).toBe(fresh);
+    expect(useAgentStore.getState()._agent).toBe(chat);
   });
 
   it('rejects with a settings error when the API key is missing', async () => {
@@ -4555,7 +4560,7 @@ describe('useAgentStore.ensureAgentForApp', () => {
 
     await expect(useAgentStore.getState().ensureAgentForApp()).rejects.toThrow(/API Key/);
     expect(createAgentMock).not.toHaveBeenCalled();
-    expect(useAgentStore.getState()._agent).toBeNull();
+    expect(useAgentStore.getState()._appAgent).toBeNull();
   });
 
   it('dedupes concurrent calls into a single agent creation', async () => {

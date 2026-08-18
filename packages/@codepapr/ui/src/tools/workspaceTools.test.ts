@@ -666,7 +666,8 @@ describe('app_start 后端启动工作目录', () => {
 
   it('以 app 目录为 workdir 启动后端（相对 args 才能解析；math-mentor 回归）', async () => {
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
-      if (command === 'check_port_available') return true;
+      if (command === 'install_app_npm_deps') return 'skipped';
+      if (command === 'allocate_app_port') return typeof args?.preferred === 'number' ? args.preferred : 3456;
       if (command === 'start_workspace_background_command') {
         return { pid: 4242, started: true, previewUrl: args?.previewUrl ?? null };
       }
@@ -690,6 +691,7 @@ describe('app_start 后端启动工作目录', () => {
       args: ['server.js'],
       workdir: '.CodePapr/apps/demo-app',
       sandbox: { network: true, workspaceWrite: false, allowBind: true },
+      env: { PORT: '3456', HOST: '127.0.0.1' },
     });
   });
 
@@ -717,7 +719,8 @@ describe('app_start 后端启动工作目录', () => {
     });
 
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
-      if (command === 'check_port_available') return true;
+      if (command === 'install_app_npm_deps') return 'skipped';
+      if (command === 'allocate_app_port') return typeof args?.preferred === 'number' ? args.preferred : 3456;
       if (command === 'start_workspace_background_command') {
         return { pid: 4242, started: true, previewUrl: args?.previewUrl ?? null };
       }
@@ -761,7 +764,8 @@ describe('app_start 后端启动工作目录', () => {
 
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       if (command === 'stop_background_process') return { stopped: true };
-      if (command === 'check_port_available') return true;
+      if (command === 'install_app_npm_deps') return 'skipped';
+      if (command === 'allocate_app_port') return typeof args?.preferred === 'number' ? args.preferred : 3456;
       if (command === 'start_workspace_background_command') {
         return { pid: 222, started: true, previewUrl: args?.previewUrl ?? null };
       }
@@ -840,7 +844,8 @@ describe('app_start 后端启动工作目录', () => {
 
   it('启动失败时把退出码与进程真实输出返回给 agent（自愈诊断证据）', async () => {
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
-      if (command === 'check_port_available') return true;
+      if (command === 'install_app_npm_deps') return 'skipped';
+      if (command === 'allocate_app_port') return typeof args?.preferred === 'number' ? args.preferred : 3456;
       if (command === 'start_workspace_background_command') {
         return { pid: 4242, started: true, previewUrl: args?.previewUrl ?? null };
       }
@@ -860,11 +865,11 @@ describe('app_start 后端启动工作目录', () => {
       return {};
     });
 
-    // 快进 Date.now 越过 8s 轮询上限：首轮探测（端口仍空闲）后即判失败，
-    // 避免测试真等 8 秒。每次调用步进 9s（> 8000ms 上限）。
+    // 快进 Date.now 越过 20s 轮询上限：首轮探测（端口仍空闲）后即判失败，
+    // 避免测试真等 20 秒。每次调用步进 25s（> 20000ms 上限）。
     let clock = 1_000_000;
     const dateSpy = vi.spyOn(Date, 'now').mockImplementation(() => {
-      clock += 9000;
+      clock += 25_000;
       return clock;
     });
 

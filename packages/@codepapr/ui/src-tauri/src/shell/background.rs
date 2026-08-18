@@ -3,7 +3,9 @@ use crate::shared::{
     parse_browser_url, run_blocking_workspace_task, unix_millis,
 };
 use crate::shell::dangerous::{detect_dangerous_command, detect_dangerous_invocation};
-use crate::shell::process_tree::{kill_process_tree, prepare_new_process_group, wait_for_child_exit};
+use crate::shell::process_tree::{
+    kill_process_tree, prepare_new_process_group, prepare_parent_death_signal, wait_for_child_exit,
+};
 use crate::shell::sandbox::{
     sandboxed_command, sandboxed_shell_command, validate_restricted_command,
     validate_restricted_shell_command, SandboxAccess, SandboxAccessArgs,
@@ -782,6 +784,7 @@ pub(crate) fn start_workspace_background_command(
     workdir: Option<String>,
     preview_url: Option<String>,
     sandbox: Option<SandboxAccessArgs>,
+    env: Option<HashMap<String, String>>,
 ) -> Result<BackgroundCommandResult, String> {
     if !command_allowed(&command) {
         return Err(format!(
@@ -832,9 +835,18 @@ pub(crate) fn start_workspace_background_command(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Some(extra) = env {
+        for (key, value) in extra {
+            if key == "PATH" {
+                continue;
+            }
+            bg_cmd.env(key, value);
+        }
+    }
     #[cfg(windows)]
     bg_cmd.creation_flags(CREATE_NO_WINDOW_BG);
     prepare_new_process_group(&mut bg_cmd);
+    prepare_parent_death_signal(&mut bg_cmd);
 
     spawn_and_register_background(workspace_path, command, args, preview_url, bg_cmd)
 }
@@ -886,6 +898,8 @@ fn spawn_and_register_background(
     let mut child = cmd
         .spawn()
         .map_err(|err| format!("启动后台命令失败: {err}"))?;
+    #[cfg(windows)]
+    crate::shell::process_tree::assign_kill_on_close_job(&child);
 
     let log_tail = Arc::new(Mutex::new(VecDeque::new()));
 

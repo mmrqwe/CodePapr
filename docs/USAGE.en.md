@@ -50,8 +50,8 @@ manifest.json example:
   "spec": "papr/0.1",
   "name": "Todo App",
   "version": "0.1.0",
-  "level": 2,
-  "permissions": ["storage:read", "storage:write", "agent:run:assistant"],
+  "local": "read",
+  "network": true,
   "agents": [{
     "name": "assistant",
     "model": "main",
@@ -101,7 +101,7 @@ const files = await papr.fs.list();
 
 ### Creating Apps
 
-Switch to **App mode** and describe the app you want in natural language. The Agent calls `app_render` to generate a complete manifest.json and index.html. Same appId updates in place.
+Switch to **App mode** and describe the app you want in natural language. The Agent calls `app_render` to generate a complete manifest.json and index.html. Same appId updates in place (the previous tree is snapshotted to `.versions/`; you can export a zip from the dock).
 
 ### Permissions (two-axis model)
 

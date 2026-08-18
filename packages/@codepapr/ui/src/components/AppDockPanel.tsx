@@ -3,6 +3,7 @@ import { useAppRuntimeStore, type AppInstance } from '../store/appRuntimeStore';
 import { useAgentStore } from '../store/agentStore';
 import { usePermissionStore } from '../papr/permissionStore';
 import { invoke } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/plugin-dialog';
 import { launchAppBackend } from '../tools/workspaceAppTools';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
@@ -135,6 +136,30 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
   const canOpen = !!(selected && !busy);
   const canStop = !!(selected && isRunning && !busy);
   const canDelete = !!(selected && !busy);
+  const canExport = !!(selected && !busy);
+
+  const handleExport = useCallback(async () => {
+    if (!selected) return;
+    setBusy(true);
+    setError('');
+    try {
+      const dest = await save({
+        defaultPath: `${selected.appId}.zip`,
+        filters: [{ name: 'Zip', extensions: ['zip'] }],
+      });
+      if (!dest) return;
+      await invoke('papr_export_app', {
+        workspacePath,
+        appId: selected.appId,
+        destZip: dest,
+      });
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      setError(`${t.appExportFailed}: ${detail}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [selected, workspacePath, t.appExportFailed]);
 
   useEffect(() => {
     const runningApps = apps.filter((a) => a.pid && a.port);
@@ -149,8 +174,12 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
           // 因此：只要进程还活着就绝不判停。
           const alive: boolean = await invoke('background_process_alive', { pid: app.pid });
           if (alive) continue;
-          // 进程确实已死，再用端口二次确认（进程条目可能刚被清理）
-          const available: boolean = await invoke('check_port_available', { port: app.port });
+          const runtimePort = app.url ? Number(new URL(app.url).port) : app.port;
+          if (!runtimePort) {
+            useAppRuntimeStore.getState().setAppStopped(app.appId);
+            continue;
+          }
+          const available: boolean = await invoke('check_port_available', { port: runtimePort });
           if (available) {
             useAppRuntimeStore.getState().setAppStopped(app.appId);
           }
@@ -268,6 +297,9 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
         </button>
         <button type="button" disabled={!canDelete} onClick={handleDelete} className={btnRed(canDelete)}>
           🗑 {t.appDockDelete}
+        </button>
+        <button type="button" disabled={!canExport} onClick={() => { void handleExport(); }} className={btnActive(canExport)}>
+          ⤓ {t.appDockExport}
         </button>
       </div>
     </div>
