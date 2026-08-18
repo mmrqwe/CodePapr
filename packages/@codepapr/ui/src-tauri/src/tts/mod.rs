@@ -43,6 +43,29 @@ fn tts_server_lock() -> &'static Mutex<Option<GptSovitsServer>> {
     TTS_SERVER.get_or_init(|| Mutex::new(None))
 }
 
+/// Keep a live GPT-SoVITS handle; drop a dead one so the next start is not
+/// blocked by a stale `Some`. The Python child can exit (crash, OOM, kill)
+/// while the mutex still holds the struct with `running == true`.
+fn retain_live_tts_server(guard: &mut Option<GptSovitsServer>) -> bool {
+    let live = match guard.as_mut() {
+        Some(srv) => srv.check_alive(),
+        None => return false,
+    };
+    if live {
+        return true;
+    }
+    if let Some(mut srv) = guard.take() {
+        let _ = srv.stop();
+    }
+    false
+}
+
+fn tts_server_is_live() -> Result<bool, String> {
+    let lock = tts_server_lock();
+    let mut guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
+    Ok(retain_live_tts_server(&mut guard))
+}
+
 fn tts_player_lock() -> &'static Mutex<player::AudioPlayer> {
     AUDIO_PLAYER.get_or_init(|| Mutex::new(player::AudioPlayer::new()))
 }
@@ -368,14 +391,14 @@ pub fn tts_server_start(
 
     let lock = tts_server_lock();
     {
-        let guard = match lock.lock() {
+        let mut guard = match lock.lock() {
             Ok(g) => g,
             Err(e) => {
                 STARTING.store(false, Ordering::SeqCst);
                 return Err(format!("Lock error: {e}"));
             }
         };
-        if guard.is_some() {
+        if retain_live_tts_server(&mut guard) {
             STARTING.store(false, Ordering::SeqCst);
             return Err("TTS server is already running. Stop it first.".to_string());
         }
@@ -676,9 +699,7 @@ pub(crate) fn tts_server_stop_internal() {
 
 #[tauri::command]
 pub fn tts_server_status() -> Result<bool, String> {
-    let lock = tts_server_lock();
-    let guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
-    Ok(guard.as_ref().map_or(false, |s| s.is_running()))
+    tts_server_is_live()
 }
 
 /// Synthesise a short dummy phrase to trigger Metal GPU kernel JIT
@@ -695,12 +716,8 @@ pub async fn tts_warmup_gpu(
     prompt_text: Option<String>,
     prompt_language: Option<String>,
 ) -> Result<(), String> {
-    {
-        let lock = tts_server_lock();
-        let guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
-        if !guard.as_ref().map_or(false, |s| s.is_running()) {
-            return Err("TTS server is not running. Start it first.".to_string());
-        }
+    if !tts_server_is_live()? {
+        return Err("TTS server is not running. Start it first.".to_string());
     }
 
     let _ = app_handle.emit(
@@ -795,12 +812,8 @@ pub fn tts_check_installed() -> Result<TtsInstallStatus, String> {
 #[tauri::command]
 pub async fn tts_set_model(model_name: String) -> Result<(), String> {
     run_blocking_workspace_task(move || {
-        {
-            let lock = tts_server_lock();
-            let guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
-            if !guard.as_ref().map_or(false, |s| s.is_running()) {
-                return Err("TTS server is not running.".to_string());
-            }
+        if !tts_server_is_live()? {
+            return Err("TTS server is not running.".to_string());
         }
         if model_name.is_empty() {
             // Reset to default v4 pretrained model.
@@ -882,15 +895,10 @@ pub async fn tts_synthesize_and_play(
     // Fail fast if the server isn't running yet — otherwise we'd waste time
     // making an HTTP request to a dead port and surface a confusing
     // "request or response body error" from reqwest.
-    {
-        let lock = tts_server_lock();
-        let guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
-        let running = guard.as_ref().map_or(false, |s| s.is_running());
-        if !running {
-            return Err(
-                "TTS server is not running. Click the speaker icon to start it.".to_string(),
-            );
-        }
+    if !tts_server_is_live()? {
+        return Err(
+            "TTS server is not running. Click the speaker icon to start it.".to_string(),
+        );
     }
 
     let mode = playback_mode
@@ -989,12 +997,8 @@ pub async fn tts_synthesize_batch_ws(
     temperature: Option<f64>,
     seq: u64,
 ) -> Result<(), String> {
-    {
-        let lock = tts_server_lock();
-        let guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
-        if !guard.as_ref().map_or(false, |s| s.is_running()) {
-            return Err("TTS server is not running.".to_string());
-        }
+    if !tts_server_is_live()? {
+        return Err("TTS server is not running.".to_string());
     }
 
     let steps = sample_steps.unwrap_or(8).clamp(4, 32);
@@ -1054,12 +1058,8 @@ pub async fn tts_synthesize_batch_ws_nonblocking(
     temperature: Option<f64>,
     seq: u64,
 ) -> Result<(), String> {
-    {
-        let lock = tts_server_lock();
-        let guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
-        if !guard.as_ref().map_or(false, |s| s.is_running()) {
-            return Err("TTS server is not running.".to_string());
-        }
+    if !tts_server_is_live()? {
+        return Err("TTS server is not running.".to_string());
     }
 
     let steps = sample_steps.unwrap_or(8).clamp(4, 32);
@@ -1842,12 +1842,8 @@ pub fn tts_generate_training_data(
     force: Option<bool>,
 ) -> Result<(), String> {
     sanitize_character_id(&character_id)?;
-    {
-        let lock = tts_server_lock();
-        let guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
-        if !guard.as_ref().map_or(false, |s| s.is_running()) {
-            return Err("TTS server is not running.".to_string());
-        }
+    if !tts_server_is_live()? {
+        return Err("TTS server is not running.".to_string());
     }
 
     let train_dir = voices_dir().join(&character_id).join("train");

@@ -736,6 +736,9 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
     }));
     track(safeListen('tts-server-stopped', () => {
       setServerStatus('stopped');
+      // Status now reaps a dead Python handle, so the next start is not
+      // rejected as "already running".
+      void safeInvoke('tts_server_status').catch(() => {});
     }));
     track(safeListen<{ stream: 'stdout' | 'stderr' | 'system'; line: string }>(
       'tts-server-log',

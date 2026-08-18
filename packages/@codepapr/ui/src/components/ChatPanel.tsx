@@ -309,7 +309,11 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       return;
     }
     if (ttsServerStatus === 'running') {
-      // Toggle server log panel.
+      // Playing: stop speech. Idle: toggle the server log.
+      if (ttsIsPlaying) {
+        ttsStop();
+        return;
+      }
       setShowTtsLog(!showTtsLog);
       return;
     }
@@ -336,7 +340,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     // permanently disabled if events get lost. The `starting` server status
     // owned by the hook is the source of truth for status display.
     setTimeout(() => setTtsStarting(false), 120_000);
-  }, [ttsRefreshInstalled, ttsServerStatus, ttsStartServer, ttsStarting, showTtsLog]);
+  }, [ttsRefreshInstalled, ttsServerStatus, ttsStartServer, ttsStarting, showTtsLog, ttsIsPlaying, ttsStop]);
 
   // Clear the local "starting" flag whenever the hook reports a terminal state.
   useEffect(() => {
@@ -455,13 +459,14 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     }
 
     if (!streaming?.content) return;
-    if ((streaming.toolInvocations?.length ?? 0) > 0) return;
 
+    // Tool rounds still have spoken commentary around the work. sanitizeForSpeech
+    // strips fences / traces; skipping the whole message made coding+voice silent.
     ttsFeedStream(streaming.content, false, streaming.id);
     lastStreamingMsgIdRef.current = streaming.id;
     // NOTE: deliberately NOT depending on `visibleMessages` (it changes
     // reference every render). We read it via `visibleMessagesRef`.
-  }, [streamingMessage?.content, streamingMessage?.id, streamingMessage?.toolInvocations?.length, voiceEnabled, ttsServerStatus, ttsFeedStream]);
+  }, [streamingMessage?.content, streamingMessage?.id, voiceEnabled, ttsServerStatus, ttsFeedStream]);
 
   // Finalization: when all streaming stops, force-complete the last message.
   // The "previous had streaming" tracking is updated INSIDE this same effect
@@ -480,7 +485,6 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     const msgs = visibleMessagesRef.current;
     const lastMsg = msgs[msgs.length - 1];
     if (!lastMsg || lastMsg.role !== 'assistant' || lastMsg.synthetic) return;
-    if ((lastMsg.toolInvocations?.length ?? 0) > 0) return;
     if (!lastMsg.content) return;
 
     // forceComplete=true flushes any tail buffered behind unclosed markers.
@@ -1735,11 +1739,13 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                             ? 'TTS 服务器启动中（首次加载模型可能需要 30-90 秒，请耐心等待，不要重复点击）'
                             : ttsInstalled === false
                               ? 'TTS not installed. Click to install.'
-                              : ttsServerStatus === 'running'
-                                ? `${showTtsLog ? '关闭' : '查看'} TTS 服务器日志 (${ttsServerLog.length} 行)`
-                                : ttsServerStatus === 'error'
-                                  ? `TTS server error${ttsError ? `: ${ttsError}` : ''}`
-                                  : 'Click to start TTS server'
+                              : ttsServerStatus === 'running' && ttsIsPlaying
+                                ? t.ttsStop
+                                : ttsServerStatus === 'running'
+                                  ? `${showTtsLog ? '关闭' : '查看'} TTS 服务器日志 (${ttsServerLog.length} 行)`
+                                  : ttsServerStatus === 'error'
+                                    ? `TTS server error${ttsError ? `: ${ttsError}` : ''}`
+                                    : 'Click to start TTS server'
                       }
                       className={`p-1.5 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-wait ${
                         ttsServerStatus === 'running'
@@ -1861,7 +1867,10 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                 </div>
                 {isActiveLoading ? (
                   <button
-                    onClick={() => cancelMessage()}
+                    onClick={() => {
+                      ttsStop();
+                      cancelMessage();
+                    }}
                     className="flex items-center gap-1.5 rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-danger"
                   >
                     <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 16 16">

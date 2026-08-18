@@ -176,7 +176,10 @@ export const MessageList = memo(function MessageList({
       ))}
       {!deferMessages && renderedMessages.map((m) => {
         const isUserMsg = m.role === 'user';
-        const canShowActions = isUserMsg && !isLoading;
+        const showUserActions = isUserMsg && !isLoading;
+        const showReplay =
+          m.role === 'assistant' && !m.synthetic && Boolean(m.content) && !m.isStreaming;
+        const showActionBar = showUserActions || showReplay;
 
         const bubble = m.id === tailExecutionProcessGroup?.summaryMessageId ? (
           <div key={`process-group:${tailExecutionProcessGroup.summaryMessageId}`}>
@@ -212,7 +215,7 @@ export const MessageList = memo(function MessageList({
           />
         );
 
-        if (!canShowActions) {
+        if (!showActionBar) {
           return (
             <div key={m.id} data-window-item data-message-id={m.id}>
               {bubble}
@@ -241,7 +244,7 @@ export const MessageList = memo(function MessageList({
           <div key={m.id} data-window-item data-message-id={m.id}>
             {bubble}
             <div
-              className="mb-4 flex justify-end"
+              className={`mb-4 flex ${showUserActions ? 'justify-end' : 'justify-start'}`}
               onMouseEnter={() => setHoveredActionMsgId(m.id)}
               onMouseLeave={() => setHoveredActionMsgId((prev) => (prev === m.id ? null : prev))}
             >
@@ -249,7 +252,7 @@ export const MessageList = memo(function MessageList({
                 className="flex items-center gap-1 mr-1 transition-opacity duration-150"
                 style={{ opacity: isHover ? 1 : 0, pointerEvents: isHover ? 'auto' : 'none' }}
               >
-                {m.role === 'assistant' && !m.synthetic && m.content && (
+                {showReplay && (
                   <button
                     className="rounded-md border border-line bg-base px-2.5 py-1 text-[10px] text-fg-muted transition-colors hover:border-accent-soft hover:bg-accent-soft hover:text-accent-text"
                     onClick={() => onTtsReplay(m.content)}
@@ -258,26 +261,30 @@ export const MessageList = memo(function MessageList({
                     {lang === 'en' ? 'Replay' : '重播'}
                   </button>
                 )}
-                <button
-                  className="rounded-md border border-line bg-base px-2.5 py-1 text-[10px] text-fg-muted transition-colors enabled:hover:border-accent-soft enabled:hover:bg-accent-soft enabled:hover:text-accent-text disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={!canReset}
-                  title={canReset ? undefined : noCheckpointTip}
-                  onClick={() => onRequestReset(m.id)}
-                >
-                  {resetLabel}
-                </button>
-                <button
-                  className="rounded-md border border-line bg-base px-2.5 py-1 text-[10px] text-fg-muted transition-colors hover:border-line-strong/40 hover:bg-slate-500/10 hover:text-fg-soft"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(m.content);
-                    } catch {
-                      // 复制失败静默忽略
-                    }
-                  }}
-                >
-                  {copyLabel}
-                </button>
+                {showUserActions && (
+                  <>
+                    <button
+                      className="rounded-md border border-line bg-base px-2.5 py-1 text-[10px] text-fg-muted transition-colors enabled:hover:border-accent-soft enabled:hover:bg-accent-soft enabled:hover:text-accent-text disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={!canReset}
+                      title={canReset ? undefined : noCheckpointTip}
+                      onClick={() => onRequestReset(m.id)}
+                    >
+                      {resetLabel}
+                    </button>
+                    <button
+                      className="rounded-md border border-line bg-base px-2.5 py-1 text-[10px] text-fg-muted transition-colors hover:border-line-strong/40 hover:bg-slate-500/10 hover:text-fg-soft"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(m.content);
+                        } catch {
+                          // 复制失败静默忽略
+                        }
+                      }}
+                    >
+                      {copyLabel}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>

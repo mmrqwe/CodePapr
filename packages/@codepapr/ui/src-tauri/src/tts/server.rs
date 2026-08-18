@@ -238,6 +238,7 @@ impl GptSovitsServer {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn is_running(&self) -> bool {
         self.running
     }
