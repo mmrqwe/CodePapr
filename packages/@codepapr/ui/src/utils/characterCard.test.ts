@@ -58,4 +58,30 @@ describe('selectCharacterCardPayload', () => {
     const raw = selectCharacterCardPayload([{ keyword: 'chara', text: encoded }]);
     expect(raw).toEqual({ spec: 'chara_card_v3', data: { name: 'Ada' } });
   });
+
+  it('imports alternate_greetings', () => {
+    const profile = normalizeCharacterCard(
+      {
+        spec: 'chara_card_v3',
+        data: {
+          name: 'Ada',
+          first_mes: 'Hi.',
+          alternate_greetings: ['Yo.', 'Hey.'],
+        },
+      },
+      null
+    );
+    expect(profile.firstMessage).toBe('Hi.');
+    expect(profile.alternateGreetings).toEqual(['Yo.', 'Hey.']);
+  });
+
+  it('exports alternate_greetings', () => {
+    const spec = buildCharacterCardSpec({
+      ...createEmptyCharacter(),
+      name: 'Ada',
+      firstMessage: 'Hi.',
+      alternateGreetings: ['Yo.'],
+    }) as { data: { alternate_greetings: string[] } };
+    expect(spec.data.alternate_greetings).toEqual(['Yo.']);
+  });
 });

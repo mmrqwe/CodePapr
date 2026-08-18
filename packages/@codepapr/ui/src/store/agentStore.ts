@@ -91,6 +91,7 @@ import { finalizeCancelledToolInvocations } from './internals/messageMutators';
 import { useGoalStore } from './goalStore';
 import { upsertRecentWorkspace, sortRecentWorkspaces } from './internals/recentWorkspaces';
 import { toast } from './toastStore';
+import { applySessionCharacterMap, syncActiveCharacterFromSession } from './charactersStore';
 import type {
   AgentActions,
   AgentState,
@@ -549,6 +550,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _turnSeq: 0,
           _sessionLru: [],
         });
+        syncActiveCharacterFromSession(null);
       },
 
       openWorkspace: async (path) => {
@@ -592,6 +594,8 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           }));
 
           const meta = await loadAllProjectMeta(normalizedWorkspacePath);
+          const characterMap = (meta.session_active_characters as Record<string, string | null>) ?? {};
+          sessions = applySessionCharacterMap(sessions, characterMap);
           const rawActiveSessionId = (meta.active_session_id as string) ?? null;
           activeSessionId = rawActiveSessionId && sessions.some(s => s.id === rawActiveSessionId)
             ? rawActiveSessionId
@@ -759,6 +763,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           ],
           _messageLoadFailedSessions: messageLoadFailed,
         });
+        syncActiveCharacterFromSession(
+          sessions.find((session) => session.id === activeSessionId)?.activeCharacterId ?? null
+        );
 
         if (sessionTodoLists && Object.keys(sessionTodoLists).length > 0) {
           restoreTodoListContexts(sessionTodoLists as Record<string, import('@codepapr/types').TodoListContext>);
@@ -1168,6 +1175,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           model: normalizedSettings.model,
           createdAt: now,
           updatedAt: now,
+          activeCharacterId: null,
         };
         // N7：新建任务不得静默杀掉运行中的回合（agent 绑定运行会话 A，
         // 新建后 activeSessionId 变更，下一条消息由复用检查自动重建）。
@@ -1198,6 +1206,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         }));
         evictSessionMessageCache(get, set, [id]);
         saveCurrentProjectState(get());
+        syncActiveCharacterFromSession(null);
       },
 
       selectSession: (id) => {
@@ -1225,6 +1234,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agentSessionId: keepAgent ? s._agentSessionId : null,
           _sessionLru: [id, ...s._sessionLru.filter((x) => x !== id)],
         }));
+        syncActiveCharacterFromSession(meta.activeCharacterId ?? null);
 
         const cached = get().sessionMessages[id];
         if (cached) {

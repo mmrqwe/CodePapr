@@ -4,7 +4,9 @@ import {
   buildCharacterSystemPrompt,
   createEmptyCharacter,
   expandCharacterMacros,
+  formatExampleDialog,
   normalizeLoadedCharacter,
+  resolveCharacterGreeting,
   resolveCharacterInteractionMode,
   sanitizeCachePrompt,
 } from './characterTypes';
@@ -133,4 +135,39 @@ describe('buildCharacterSystemPrompt', () => {
     expect(prompt).not.toContain('Post-History');
     expect(prompt).not.toContain('Stay in character after history.');
   });
+
+  it('splits <START> example blocks into labeled few-shot sections', () => {
+    const prompt = buildCharacterSystemPrompt(
+      makeCharacter({
+        exampleMessages: '<START>\n{{user}}: hi\n{{char}}: hello\n<START>\n{{user}}: later',
+      })
+    );
+    expect(prompt).toContain('## Example 1');
+    expect(prompt).toContain('## Example 2');
+    expect(prompt).not.toContain('<START>');
+  });
 });
+
+describe('formatExampleDialog', () => {
+  it('returns plain text unchanged when there is no START marker', () => {
+    expect(formatExampleDialog('just a sample')).toBe('just a sample');
+  });
+});
+
+describe('resolveCharacterGreeting', () => {
+  it('uses firstMessage by default', () => {
+    expect(resolveCharacterGreeting(makeCharacter({ firstMessage: 'Hello there.' }))).toBe(
+      'Hello there.'
+    );
+  });
+
+  it('selects an alternate greeting by index', () => {
+    const character = makeCharacter({
+      firstMessage: 'Default.',
+      alternateGreetings: ['Alt one.', 'Alt two.'],
+      selectedGreetingIndex: 2,
+    });
+    expect(resolveCharacterGreeting(character)).toBe('Alt two.');
+  });
+});
+

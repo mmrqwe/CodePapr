@@ -21,6 +21,7 @@ export interface ProjectSessionMeta {
   model: string;
   createdAt: number;
   updatedAt?: number;
+  activeCharacterId?: string | null;
 }
 
 export interface ProjectMessage {

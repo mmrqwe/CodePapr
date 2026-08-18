@@ -15,7 +15,7 @@ vi.mock('./toastStore', () => ({
   toast: { error: toastErrorMock, success: vi.fn(), warning: vi.fn() },
 }));
 
-import { useCharactersStore } from './charactersStore';
+import { useCharactersStore, applySessionCharacterMap, sessionActiveCharacterMap } from './charactersStore';
 
 describe('useCharactersStore persist guard', () => {
   beforeEach(() => {
@@ -100,5 +100,61 @@ describe('useCharactersStore persist guard', () => {
     expect(saveCharactersStateMock.mock.calls[0]?.[0].characters).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'char_new', name: 'Ada' })])
     );
+    expect(saveCharactersStateMock.mock.calls[0]?.[0].activeCharacterId).toBeNull();
+  });
+
+  it('strips avatar data URLs from the persisted blob', async () => {
+    loadCharactersStateMock.mockResolvedValueOnce({
+      version: 1,
+      activeCharacterId: null,
+      characters: [],
+    });
+    await useCharactersStore.getState().loadCharacters();
+    await useCharactersStore.getState().upsertCharacter({
+      id: 'char_img',
+      name: 'Ada',
+      avatarDataUrl: 'data:image/png;base64,aaaa',
+      description: '',
+      personality: '',
+      scenario: '',
+      firstMessage: '',
+      exampleMessages: '',
+      systemPrompt: '',
+      postHistoryInstructions: '',
+      tags: [],
+      creator: '',
+      characterVersion: '',
+      source: 'manual',
+      createdAt: '',
+      updatedAt: '',
+    });
+    expect(saveCharactersStateMock.mock.calls[0]?.[0].characters[0]?.avatarDataUrl).toBeNull();
+  });
+});
+
+describe('sessionActiveCharacterMap', () => {
+  it('keeps only sessions that have a character enabled', () => {
+    expect(
+      sessionActiveCharacterMap([
+        { id: 's1', activeCharacterId: 'c1' },
+        { id: 's2', activeCharacterId: null },
+        { id: 's3' },
+      ])
+    ).toEqual({ s1: 'c1' });
+  });
+
+  it('applies a persisted map without inventing characters for unknown sessions', () => {
+    expect(
+      applySessionCharacterMap(
+        [
+          { id: 's1', activeCharacterId: null },
+          { id: 's2', activeCharacterId: 'old' },
+        ],
+        { s1: 'c1' }
+      )
+    ).toEqual([
+      { id: 's1', activeCharacterId: 'c1' },
+      { id: 's2', activeCharacterId: 'old' },
+    ]);
   });
 });

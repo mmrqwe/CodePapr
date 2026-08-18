@@ -183,6 +183,8 @@ export interface SessionMeta {
   model: string;
   createdAt: number;
   updatedAt: number;
+  /** Character enabled for this session only. Missing/null means no persona. */
+  activeCharacterId?: string | null;
 }
 
 export interface ImagePreview extends IImageContent {

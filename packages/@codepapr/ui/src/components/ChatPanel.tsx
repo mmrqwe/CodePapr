@@ -379,7 +379,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
 
   useEffect(() => {
     maybeInsertActiveCharacterGreeting();
-  }, [activeCharacter?.id, activeCharacter?.firstMessage, activeSessionId, sessionMessagesLoading, messages.length]);
+  }, [activeCharacter?.id, activeCharacter?.firstMessage, activeCharacter?.selectedGreetingIndex, activeSessionId, sessionMessagesLoading, messages.length]);
 
   const characterAvatar = (activeCharacter?.showAvatar ?? true)
     ? (activeCharacter?.avatarDataUrl ?? null)

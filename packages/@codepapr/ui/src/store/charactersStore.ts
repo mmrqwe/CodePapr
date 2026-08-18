@@ -5,6 +5,12 @@ import {
   buildCharacterSystemPrompt,
 } from '../utils/characterTypes';
 import { loadCharactersState, saveCharactersState } from '../utils/characterStorage';
+import {
+  deleteCharacterAvatar,
+  hydrateCharacterAvatars,
+  persistCharacterAvatar,
+  stripAvatarDataUrl,
+} from '../utils/characterAvatar';
 import { toast } from './toastStore';
 
 interface CharacterState {
@@ -24,8 +30,8 @@ interface CharacterActions {
 function buildStateFile(state: CharacterState): CharactersStateFile {
   return {
     version: 1,
-    activeCharacterId: state.activeCharacterId,
-    characters: state.characters,
+    activeCharacterId: null,
+    characters: state.characters.map(stripAvatarDataUrl),
   };
 }
 
@@ -69,12 +75,16 @@ export const useCharactersStore = create<CharacterState & CharacterActions>((set
       set({ loading: true });
       try {
         const file = await loadCharactersState();
+        const characters = await hydrateCharacterAvatars(file.characters);
         set({
           loaded: true,
           loading: false,
-          characters: file.characters,
-          activeCharacterId: file.activeCharacterId,
+          characters,
+          activeCharacterId: get().activeCharacterId,
         });
+        if (characters.some((character, index) => character.avatarPath !== file.characters[index]?.avatarPath)) {
+          await persistState(get());
+        }
       } catch (err) {
         console.warn('Failed to load characters:', err);
         toast.error('角色数据加载失败，已停止写入以免覆盖已有角色卡。');
@@ -92,15 +102,13 @@ export const useCharactersStore = create<CharacterState & CharacterActions>((set
       await get().loadCharacters();
     }
     if (!get().loaded) return;
-    // Functional update: compute `next` from the latest committed state so
-    // two rapid upserts cannot lose one another's writes (the previous
-    // read-then-set captured a stale snapshot).
+    const next = await persistCharacterAvatar(character);
     set((state) => {
-      const idx = state.characters.findIndex((c) => c.id === character.id);
+      const idx = state.characters.findIndex((c) => c.id === next.id);
       const characters =
         idx === -1
-          ? [...state.characters, character]
-          : state.characters.map((c) => (c.id === character.id ? character : c));
+          ? [...state.characters, next]
+          : state.characters.map((c) => (c.id === next.id ? next : c));
       return { characters };
     });
     await persistState(get());
@@ -115,11 +123,26 @@ export const useCharactersStore = create<CharacterState & CharacterActions>((set
       activeCharacterId: state.activeCharacterId === characterId ? null : state.activeCharacterId,
     }));
     await persistState(get());
+    await deleteCharacterAvatar(characterId);
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('tts_delete_character_voices', { characterId });
     } catch (err) {
       console.warn('Failed to delete character voice files:', err);
+    }
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const { saveCurrentProjectState } = await import('./internals/projectSnapshot');
+      useAgentStore.setState((s) => ({
+        sessions: s.sessions.map((session) =>
+          session.activeCharacterId === characterId
+            ? { ...session, activeCharacterId: null }
+            : session
+        ),
+      }));
+      saveCurrentProjectState(useAgentStore.getState());
+    } catch (err) {
+      console.warn('Failed to clear session character after delete:', err);
     }
   },
   setActiveCharacter: async (characterId) => {
@@ -128,7 +151,20 @@ export const useCharactersStore = create<CharacterState & CharacterActions>((set
     }
     if (!get().loaded) return;
     set({ activeCharacterId: characterId });
-    await persistState(get());
+    try {
+      const { useAgentStore } = await import('./agentStore');
+      const { saveCurrentProjectState } = await import('./internals/projectSnapshot');
+      const sessionId = useAgentStore.getState().activeSessionId;
+      if (!sessionId) return;
+      useAgentStore.setState((s) => ({
+        sessions: s.sessions.map((session) =>
+          session.id === sessionId ? { ...session, activeCharacterId: characterId } : session
+        ),
+      }));
+      saveCurrentProjectState(useAgentStore.getState());
+    } catch (err) {
+      console.warn('Failed to bind character to the current session:', err);
+    }
   },
 }));
 
@@ -144,4 +180,33 @@ export function getActiveCharacter(): CharacterProfile | null {
   const { characters, activeCharacterId } = useCharactersStore.getState();
   if (!activeCharacterId) return null;
   return characters.find((c) => c.id === activeCharacterId) ?? null;
+}
+
+export function syncActiveCharacterFromSession(characterId: string | null | undefined): void {
+  useCharactersStore.setState({ activeCharacterId: characterId ?? null });
+}
+
+export function applySessionCharacterMap<T extends { id: string; activeCharacterId?: string | null }>(
+  sessions: T[],
+  map: Record<string, string | null> | undefined
+): T[] {
+  if (!map) return sessions;
+  return sessions.map((session) => ({
+    ...session,
+    activeCharacterId: Object.prototype.hasOwnProperty.call(map, session.id)
+      ? map[session.id] ?? null
+      : session.activeCharacterId ?? null,
+  }));
+}
+
+export function sessionActiveCharacterMap(
+  sessions: { id: string; activeCharacterId?: string | null }[]
+): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const session of sessions) {
+    if (session.activeCharacterId) {
+      map[session.id] = session.activeCharacterId;
+    }
+  }
+  return map;
 }

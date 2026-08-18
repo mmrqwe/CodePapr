@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -244,6 +245,84 @@ pub fn export_character_card(
     )
 }
 
+fn avatars_dir() -> PathBuf {
+    crate::shared::home_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(".codepapr")
+        .join("avatars")
+}
+
+fn sanitize_avatar_character_id(id: &str) -> Result<&str, String> {
+    if id.is_empty() || id.len() > 64 {
+        return Err("Character ID must be 1-64 characters".to_string());
+    }
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(
+            "Character ID contains invalid characters (only A-Z, a-z, 0-9, _, - allowed)"
+                .to_string(),
+        );
+    }
+    Ok(id)
+}
+
+fn parse_avatar_data_url(data_url: &str) -> Result<Vec<u8>, String> {
+    parse_data_url(data_url)
+}
+
+pub(crate) fn write_character_avatar_in(
+    dir: &Path,
+    character_id: &str,
+    bytes: &[u8],
+) -> Result<PathBuf, String> {
+    let id = sanitize_avatar_character_id(character_id)?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("Cannot create avatars dir: {e}"))?;
+    let path = dir.join(format!("{id}.png"));
+    std::fs::write(&path, bytes).map_err(|e| format!("Failed to write avatar: {e}"))?;
+    Ok(path)
+}
+
+pub(crate) fn delete_character_avatar_in(dir: &Path, character_id: &str) -> Result<(), String> {
+    let id = sanitize_avatar_character_id(character_id)?;
+    let path = dir.join(format!("{id}.png"));
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| format!("Failed to delete avatar: {e}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn save_character_avatar(character_id: String, data_url: String) -> Result<String, String> {
+    let bytes = parse_avatar_data_url(&data_url)?;
+    let path = write_character_avatar_in(&avatars_dir(), &character_id, &bytes)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn read_character_avatar(file_path: String) -> Result<String, String> {
+    let root = avatars_dir()
+        .canonicalize()
+        .unwrap_or_else(|_| avatars_dir());
+    let path = Path::new(&file_path);
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| format!("Cannot read avatar: {e}"))?;
+    if !canonical.starts_with(&root) {
+        return Err("Avatar path is outside the avatars directory".to_string());
+    }
+    let bytes = std::fs::read(&canonical).map_err(|e| format!("Cannot read avatar: {e}"))?;
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:image/png;base64,{b64}"))
+}
+
+#[tauri::command]
+pub fn delete_character_avatar(character_id: String) -> Result<(), String> {
+    delete_character_avatar_in(&avatars_dir(), &character_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,5 +483,24 @@ mod tests {
         let data_url = "data:image/jpeg;base64,dGVzdA==";
         let decoded = parse_data_url(data_url).unwrap();
         assert_eq!(decoded, b"test");
+    }
+
+    #[test]
+    fn test_write_and_delete_character_avatar() {
+        let dir = std::env::temp_dir().join(format!(
+            "codepapr-avatar-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = write_character_avatar_in(&dir, "char_1", b"png-bytes").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"png-bytes");
+        delete_character_avatar_in(&dir, "char_1").unwrap();
+        assert!(!path.exists());
+        assert!(sanitize_avatar_character_id("../x").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

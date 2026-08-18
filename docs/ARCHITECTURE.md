@@ -288,7 +288,7 @@ app 通过 manifest 的 `local`（`none`/`read`/`write`）× `network`（`true`/
 - **手动创建角色**：填写名称、描述、个性、场景、开场白、示例对话等字段
 - **导入角色卡**：支持 PNG（嵌入 chara-card-v3 JSON）和 JSON 文件的导入，兼容 SillyTavern 等工具的 CCv3 规范
 - **导出角色卡**：将角色导出为 PNG 角色卡，JSON 写入 tEXt/iTXt chunk
-- **启用角色**：激活后，角色人设通过 `buildCharacterSystemPrompt()` 注入到 Session Bootstrap 中，不进入 ImmutablePrefix（不破坏缓存）。默认 **编码人设**：只改口吻与态度，不改工具、代码块和回复格式。可选 **角色扮演**：舞台剧格式，供闲聊和语音朗读。
+- **启用角色**：启用只作用于**当前会话**（列表点名称是编辑）。人设通过 `buildCharacterSystemPrompt()` 注入 Session Bootstrap，不进入 ImmutablePrefix（不破坏缓存）。默认 **编码人设**：只改口吻与态度，不改工具、代码块和回复格式。可选 **角色扮演**：舞台剧格式，供闲聊和语音朗读。
 
 **角色扮演格式约定（仅「角色扮演」模式）：** 动作用 `*星号*` 包裹（不朗读），纯文本直接对话（可朗读），`**加粗**` 表示重读，`（括号）` 表示语气提示（不朗读）。编码人设模式不注入该格式。
 
@@ -535,7 +535,7 @@ Hover 用户消息 → 显示"重置到此点"按钮：
 跨轮次稳定：
 1. Skills Section
 2. Custom Guidance（用户长期偏好提示词）
-3. 角色人设（当前启用的 CharacterProfile）
+3. 角色人设（**当前会话**启用的 CharacterProfile；新会话默认无人设）
 
 **第三层：Runtime User Prompt（当前轮 user 消息）**
 每次用户输入时构建：
@@ -870,8 +870,9 @@ generation 0 冻结「禁用」参数（该 epoch 从未 prune）。per-request 
 
 - `packages/@codepapr/core/src/agent/Agent.ts`：核心工具循环与会话执行入口
 - `packages/@codepapr/core/src/agent/Session.ts`：会话对象与分区聚合
-- `packages/@codepapr/core/src/agent/promptSystem.ts`：三层 prompt 组装 + MODE_INTROS
-- `packages/@codepapr/ui/src/store/internals/promptBuilders.ts`：Session Bootstrap 组装（含角色人设）
+- `packages/@codepapr/core/src/agent/promptSystem.ts`：三层 prompt 组装 + MODE_INTROS（**不含**角色人设）
+- `packages/@codepapr/ui/src/store/internals/promptBuilders.ts`：Session Bootstrap 组装（当前会话角色人设）
+- `packages/@codepapr/ui/src/utils/characterTypes.ts`：`buildCharacterSystemPrompt` 人设正文
 - `packages/@codepapr/core/src/agent/todoList.ts`：TodoList 核心逻辑
 - `packages/@codepapr/core/src/agent/agentConfig.ts`：BUILTIN_AGENTS 定义
 - `packages/@codepapr/core/src/cache/`：三分区缓存核心（`AppendOnlyLog.reset` 用于压缩开启新 epoch）

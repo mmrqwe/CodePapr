@@ -2,7 +2,7 @@ import { useAgentStore } from '../store/agentStore';
 import { getActiveCharacter } from '../store/charactersStore';
 import { saveCurrentProjectState } from '../store/internals/projectSnapshot';
 import type { UIMessage } from '../store/internals/types';
-import { expandCharacterMacros, sanitizeCachePrompt } from './characterTypes';
+import { expandCharacterMacros, resolveCharacterGreeting, sanitizeCachePrompt } from './characterTypes';
 
 export function characterGreetingMessageId(sessionId: string, characterId: string): string {
   return `character-greeting:${sessionId}:${characterId}`;
@@ -25,7 +25,7 @@ export function expandCharacterGreeting(text: string, characterName: string): st
  */
 export function maybeInsertActiveCharacterGreeting(): boolean {
   const character = getActiveCharacter();
-  const greetingRaw = character?.firstMessage.trim() ?? '';
+  const greetingRaw = character ? resolveCharacterGreeting(character).trim() : '';
   if (!character || !greetingRaw) return false;
 
   const state = useAgentStore.getState();

@@ -161,17 +161,6 @@ function uniqueStrings(values: unknown): string[] {
   return out;
 }
 
-function arrayBufferToDataUrl(buffer: ArrayBuffer, mime: string): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const slice = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...slice);
-  }
-  return `data:${mime};base64,${btoa(binary)}`;
-}
-
 export async function rasterImageFileToPngDataUrl(file: File): Promise<string> {
   const bitmap = await createImageBitmap(file);
   try {
@@ -204,7 +193,11 @@ export async function importCharacterCardFromFile(file: File): Promise<Character
     if (!raw) {
       throw new Error('PNG 中没有找到可解析的角色卡数据。');
     }
-    avatarDataUrl = arrayBufferToDataUrl(buffer, 'image/png');
+    try {
+      avatarDataUrl = await rasterImageFileToPngDataUrl(file);
+    } catch {
+      avatarDataUrl = null;
+    }
   } else {
     const text = new TextDecoder('utf-8').decode(buffer);
     raw = tryParseCardJson(text);
@@ -256,6 +249,8 @@ export function normalizeCharacterCard(
     personality: readString(data.personality),
     scenario: readString(data.scenario),
     firstMessage: readString(data.first_mes || data.firstMessage || data.first_message),
+    alternateGreetings: uniqueStrings(data.alternate_greetings || data.alternateGreetings),
+    selectedGreetingIndex: 0,
     exampleMessages: readString(data.mes_example || data.exampleMessages || data.example_messages),
     systemPrompt: readString(data.system_prompt || data.systemPrompt),
     postHistoryInstructions: readString(
@@ -280,6 +275,7 @@ export function buildCharacterCardSpec(character: CharacterProfile): Record<stri
       personality: character.personality,
       scenario: character.scenario,
       first_mes: character.firstMessage,
+      alternate_greetings: character.alternateGreetings ?? [],
       mes_example: character.exampleMessages,
       system_prompt: character.systemPrompt,
       post_history_instructions: character.postHistoryInstructions,

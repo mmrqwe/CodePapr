@@ -289,7 +289,7 @@ The character system allows users to create, import, and activate AI personas. W
 - **Manual creation**: Fill in name, description, personality, scenario, first message, example dialog, etc.
 - **Import character cards**: Supports PNG (embedded chara-card-v3 JSON) and JSON file imports; compatible with SillyTavern and other tools using the CCv3 spec
 - **Export character cards**: Export characters as PNG cards with JSON embedded in tEXt/iTXt chunks
-- **Activate character**: When activated, the character's profile is injected via `buildCharacterSystemPrompt()` into the Session Bootstrap, **not** the ImmutablePrefix (preserving cache). Default is **coding persona**: voice and attitude only, tools and reply format unchanged. Optional **roleplay**: stage-play format for chat and TTS.
+- **Activate character**: Enable applies to the **current session only** (clicking a name in the list edits, it does not enable). The profile is injected via `buildCharacterSystemPrompt()` into the Session Bootstrap, **not** the ImmutablePrefix (preserving cache). Default is **coding persona**: voice and attitude only, tools and reply format unchanged. Optional **roleplay**: stage-play format for chat and TTS.
 
 **Roleplay format convention (roleplay mode only):** Wrap actions/narration in `*single asterisks*` (not spoken), keep spoken dialogue as plain text (read aloud), use `**double asterisks**` for emphasis, and use `(parenthetical)` tone indicators (not spoken). Coding-persona mode does not inject this format.
 
@@ -553,7 +553,7 @@ Fully fixed, cross-session reusable prefix:
 Stable across turns:
 1. Skills Section
 2. Custom Guidance (user long-term preference prompt)
-3. Character profile (currently active CharacterProfile)
+3. Character profile (**this session's** CharacterProfile; new sessions start with none)
 
 **Layer 3: Runtime User Prompt (current turn user message)**
 Built on each user input:
@@ -902,8 +902,9 @@ never enter the persistence layer. Code upgrades change bytes → one-time cache
 
 - `packages/@codepapr/core/src/agent/Agent.ts`: Core tool loop and session execution entry point
 - `packages/@codepapr/core/src/agent/Session.ts`: Session object and partition aggregation
-- `packages/@codepapr/core/src/agent/promptSystem.ts`: Three-layer prompt assembly + MODE_INTROS
-- `packages/@codepapr/ui/src/store/internals/promptBuilders.ts`: Session Bootstrap assembly (including character profile)
+- `packages/@codepapr/core/src/agent/promptSystem.ts`: Three-layer prompt assembly + MODE_INTROS (**no** character profile)
+- `packages/@codepapr/ui/src/store/internals/promptBuilders.ts`: Session Bootstrap assembly (current-session character profile)
+- `packages/@codepapr/ui/src/utils/characterTypes.ts`: `buildCharacterSystemPrompt` persona body
 - `packages/@codepapr/core/src/agent/todoList.ts`: TodoList core logic
 - `packages/@codepapr/core/src/agent/agentConfig.ts`: BUILTIN_AGENTS definition
 - `packages/@codepapr/core/src/cache/`: Three-partition cache core (`AppendOnlyLog.reset` used by compaction to start a new epoch)

@@ -77,12 +77,17 @@ export interface CharacterProfile {
   id: string;
   name: string;
   avatarDataUrl: string | null;
+  /** Filesystem path under ~/.codepapr/avatars. JSON stores this, not the data URL. */
+  avatarPath?: string;
   showAvatar?: boolean;
   interactionMode?: CharacterInteractionMode;
   description: string;
   personality: string;
   scenario: string;
   firstMessage: string;
+  /** Extra CCv3 greetings; index 0 in the picker is still `firstMessage`. */
+  alternateGreetings?: string[];
+  selectedGreetingIndex?: number;
   exampleMessages: string;
   systemPrompt: string;
   postHistoryInstructions: string;
@@ -129,12 +134,17 @@ export function normalizeLoadedCharacter(raw: unknown): CharacterProfile | null 
     id,
     name,
     avatarDataUrl: typeof c.avatarDataUrl === 'string' ? c.avatarDataUrl : null,
+    avatarPath: readStringField(c.avatarPath) || undefined,
     showAvatar: typeof c.showAvatar === 'boolean' ? c.showAvatar : true,
     interactionMode: c.interactionMode === 'roleplay' ? 'roleplay' : 'persona',
     description: readStringField(c.description),
     personality: readStringField(c.personality),
     scenario: readStringField(c.scenario),
     firstMessage: readStringField(c.firstMessage),
+    alternateGreetings: Array.isArray(c.alternateGreetings)
+      ? c.alternateGreetings.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : [],
+    selectedGreetingIndex: typeof c.selectedGreetingIndex === 'number' ? c.selectedGreetingIndex : 0,
     exampleMessages: readStringField(c.exampleMessages),
     systemPrompt: readStringField(c.systemPrompt),
     postHistoryInstructions: readStringField(c.postHistoryInstructions),
@@ -170,6 +180,8 @@ export function createEmptyCharacter(): CharacterProfile {
     personality: '',
     scenario: '',
     firstMessage: '',
+    alternateGreetings: [],
+    selectedGreetingIndex: 0,
     exampleMessages: '',
     systemPrompt: '',
     postHistoryInstructions: '',
@@ -255,7 +267,10 @@ export function buildCharacterSystemPrompt(character: CharacterProfile): string 
     parts.push(`# Scenario\n${character.scenario.trim()}`);
   }
   if (character.exampleMessages.trim()) {
-    parts.push(`# Example Dialog\n${character.exampleMessages.trim()}`);
+    const examples = formatExampleDialog(character.exampleMessages);
+    if (examples) {
+      parts.push(`# Example Dialog\n${examples}`);
+    }
   }
   if (character.systemPrompt.trim()) {
     parts.push(`# Additional Instructions\n${character.systemPrompt.trim()}`);
@@ -269,6 +284,29 @@ export function buildCharacterSystemPrompt(character: CharacterProfile): string 
   return sanitizeCachePrompt(
     expandCharacterMacros(parts.join('\n\n'), { char: name })
   );
+}
+
+export function resolveCharacterGreeting(character: CharacterProfile): string {
+  const alts = character.alternateGreetings ?? [];
+  const idx = character.selectedGreetingIndex ?? 0;
+  if (idx > 0) {
+    const alt = alts[idx - 1]?.trim();
+    if (alt) return alt;
+  }
+  return character.firstMessage;
+}
+
+/** Split SillyTavern `<START>` example blocks into labeled few-shot sections. */
+export function formatExampleDialog(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  if (!/<START>/i.test(trimmed)) return trimmed;
+  const blocks = trimmed
+    .split(/<START>/i)
+    .map((block) => block.trim())
+    .filter(Boolean);
+  if (blocks.length === 0) return '';
+  return blocks.map((block, index) => `## Example ${index + 1}\n${block}`).join('\n\n');
 }
 
 const DEFAULT_USER_MACRO = 'User';

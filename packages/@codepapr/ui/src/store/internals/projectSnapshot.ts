@@ -16,6 +16,7 @@ import { toast } from '../toastStore';
 import { maintainContextSurface } from './contextSurfaceStore';
 import type { ContextMessageLike } from '../../utils/contextCompaction';
 import type { AgentState } from './types';
+import { sessionActiveCharacterMap } from '../charactersStore';
 
 /** 项目状态落盘失败的可见提示。内部模块（无 store 依赖）直接 toast。 */
 function reportProjectStateSaveError(label: string, err: unknown): void {
@@ -135,6 +136,7 @@ async function saveProjectStateNormalized(
     ['session_todo_lists', sessionTodoLists],
     ['skill_enabled_by_id', state.skillEnabledById],
     ['project_diagnostics_report', state.projectDiagnosticsReport],
+    ['session_active_characters', sessionActiveCharacterMap(state.sessions)],
   ];
 
   for (const [key, value] of metaPairs) {

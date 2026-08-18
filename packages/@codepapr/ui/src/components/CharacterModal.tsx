@@ -97,12 +97,13 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
 
   useEffect(() => {
     if (!loaded) return;
-    if (!editing && characters.length > 0) {
-      const first = characters[0]!;
-      setEditing(first);
-      savedSnapshotRef.current = snapshotCharacter(first);
-    }
-  }, [loaded, characters, editing]);
+    if (editing) return;
+    const active = characters.find((c) => c.id === activeCharacterId);
+    const initial = active ?? characters.slice().sort((a, b) => a.name.localeCompare(b.name))[0];
+    if (!initial) return;
+    setEditing(initial);
+    savedSnapshotRef.current = snapshotCharacter(initial);
+  }, [loaded, characters, editing, activeCharacterId]);
 
   // Reload voice preview when switching to a character with an existing reference file.
   useEffect(() => {
@@ -573,7 +574,10 @@ Requirements:
                               {c.name || '—'}
                             </span>
                             {isActive && (
-                              <span className="shrink-0 rounded-full border border-ok-bg bg-ok-bg px-1.5 py-0.5 text-[10px] font-semibold text-ok">
+                              <span
+                                title={t.characterEnableSessionHint}
+                                className="shrink-0 rounded-full border border-ok-bg bg-ok-bg px-1.5 py-0.5 text-[10px] font-semibold text-ok"
+                              >
                                 {t.characterEnabled}
                               </span>
                             )}
@@ -631,7 +635,7 @@ Requirements:
                     {editing.avatarDataUrl && (
                       <button
                         type="button"
-                        onClick={() => updateField({ avatarDataUrl: null })}
+                        onClick={() => updateField({ avatarDataUrl: null, avatarPath: undefined })}
                         className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-fg-soft transition-colors hover:border-danger hover:text-danger"
                       >
                         {t.characterAvatarRemove}
@@ -642,6 +646,7 @@ Requirements:
                         <>
                           <button
                             type="button"
+                            title={t.characterEnableSessionHint}
                             onClick={() => handleEnable(editing.id)}
                             className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                               activeCharacterId === editing.id
@@ -815,6 +820,27 @@ Requirements:
                     className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm leading-relaxed text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
                   />
                 </FieldRow>
+
+                {(editing.alternateGreetings?.some((line) => line.trim()) ?? false) && (
+                  <FieldRow label={t.characterGreetingSelect}>
+                    <select
+                      value={editing.selectedGreetingIndex ?? 0}
+                      onChange={(e) => updateField({ selectedGreetingIndex: Number(e.target.value) })}
+                      className="w-full rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg focus:border-accent-soft focus:outline-none"
+                    >
+                      <option value={0}>
+                        {editing.firstMessage.trim()
+                          ? editing.firstMessage.trim().slice(0, 48)
+                          : t.characterGreetingDefault}
+                      </option>
+                      {(editing.alternateGreetings ?? []).map((line, index) => (
+                        <option key={`${index}-${line.slice(0, 12)}`} value={index + 1}>
+                          {t.characterGreetingAlternate.replace('{{n}}', String(index + 1))}: {line.trim().slice(0, 40)}
+                        </option>
+                      ))}
+                    </select>
+                  </FieldRow>
+                )}
 
                 <FieldRow label={t.characterExampleMessages}>
                   <textarea

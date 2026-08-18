@@ -998,7 +998,7 @@ After the change, at least run verification for the affected scope; if no narrow
     <section class="section" id="characters">
       <div class="section-header"><h2>Character Roleplay</h2></div>
       <div class="content">
-        <p>CodePapr supports creating, importing, and managing AI characters, allowing the Agent to converse with you in a specific persona. Once a character is activated, their identity, tone, and style are injected into the LLM system prompt, and the Agent responds in that character's persona.</p>
+        <p>CodePapr supports creating, importing, and managing AI characters, allowing the Agent to converse with you in a specific persona. Once enabled, the profile is injected into the Session Bootstrap (assembled in <code>promptBuilders.ts</code> / <code>characterTypes.ts</code>), not core <code>promptSystem.ts</code> and not ImmutablePrefix.</p>
 
         <h3>Character Data Model</h3>
         <p>Each character includes the following fields:</p>
@@ -1054,8 +1054,8 @@ After the change, at least run verification for the affected scope; if no narrow
         <p>Click a character's <strong>Export</strong> button in the character list to export it as a PNG character card. The PNG embeds the complete CCv3 JSON and can be used in tools like SillyTavern.</p>
 
         <h3>Activating/Switching Characters</h3>
-        <p><strong>Click a character name</strong> in the character list to activate it. The currently active character will display an "Active" marker. Every Agent response will be delivered in that character's persona.</p>
-        <p>Character personas are placed in the Session Bootstrap (<strong>not in the system prompt's ImmutablePrefix</strong>), so switching characters does not break the DeepSeek prefix cache.</p>
+        <p>Click <strong>Enable</strong> on the editor to apply the character to the <strong>current session only</strong>. Clicking a name in the list opens it for editing and does not activate it. Opening the panel selects the character already enabled for this session.</p>
+        <p>Character personas are placed in the Session Bootstrap (<strong>not in the system prompt's ImmutablePrefix</strong>), so switching characters does not break the DeepSeek prefix cache. New sessions start with no character.</p>
 
         <div class="callout success">
           <strong>Tip:</strong> Character roleplay does not affect the Agent's code understanding and execution abilities. The Agent can still search projects, modify files, and run commands — only the output tone and style will match the character setting.

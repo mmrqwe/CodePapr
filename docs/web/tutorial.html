@@ -998,7 +998,7 @@ https://api.deepseek.com/v1</code></pre>
     <section class="section" id="characters">
       <div class="section-header"><h2>角色扮演</h2></div>
       <div class="content">
-        <p>CodePapr 支持创建、导入和管理 AI 角色，让 Agent 以特定人设与你对话。激活角色后，角色的身份、语气、风格会被注入 LLM 系统提示词，Agent 以角色人设作出回应。</p>
+        <p>CodePapr 支持创建、导入和管理 AI 角色，让 Agent 以特定人设与你对话。启用角色后，人设进入 Session Bootstrap（由 <code>promptBuilders.ts</code> / <code>characterTypes.ts</code> 组装），不是 core 的 <code>promptSystem.ts</code>，也不进入 ImmutablePrefix。</p>
 
         <h3>角色数据模型</h3>
         <p>每个角色包含以下字段：</p>
@@ -1054,8 +1054,8 @@ https://api.deepseek.com/v1</code></pre>
         <p>在角色列表中点击角色的<strong>导出</strong>按钮，角色将被导出为 PNG 角色卡。PNG 中嵌入完整的 CCv3 JSON，可在 SillyTavern 等工具中使用。</p>
 
         <h3>启用/切换角色</h3>
-        <p>在角色列表中<strong>点击角色名称</strong>即可激活。当前激活的角色会显示"已启用"标记。Agent 的每次回复都会以该角色的人设进行。</p>
-        <p>角色人设放在 Session Bootstrap 中（<strong>不在系统提示词的 ImmutablePrefix 中</strong>），因此切换角色不会破坏 DeepSeek 前缀缓存。</p>
+        <p>在角色编辑页点击<strong>启用</strong>，只对<strong>当前会话</strong>生效。列表里点击角色名是进入编辑，不会激活。打开面板时会选中当前会话已启用的角色。</p>
+        <p>角色人设放在 Session Bootstrap 中（<strong>不在系统提示词的 ImmutablePrefix 中</strong>），因此切换角色不会破坏 DeepSeek 前缀缓存。新会话默认不带角色。</p>
 
         <div class="callout success">
           <strong>提示：</strong>角色扮演不影响 Agent 的代码理解和执行能力。Agent 仍然能搜索项目、修改文件、运行命令——只是输出的语气和风格会匹配角色设定。
