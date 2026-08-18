@@ -96,7 +96,7 @@ Create a `.CodePapr/` directory at the project root:
 | File/Directory | Purpose |
 |----------------|---------|
 | `.CodePapr/AGENTS.md` | Project-wide rules injected into the system prompt of all agents and sub-agents |
-| `.CodePapr/project.sqlite` (`memory_entries`) | Cross-session project memory (panel is the only human surface; Bootstrap is rendered from the ledger) |
+| `.CodePapr/project.sqlite` (`memory_entries`) | Cross-session project memory (panel is the only human surface; session bootstrap is rendered from the ledger) |
 | `.CodePapr/agents/*.md` | Custom sub-agents (YAML frontmatter + Markdown body) |
 | `.CodePapr/skills/*/SKILL.md` | Reusable skills (search strategies, debugging workflows, release checklists); also supports flat layout `.CodePapr/skills/<name>.md`; skill marketplace with one-click install from GitHub |
 | `.CodePapr/commands/*.md` | Custom prompt templates (invoked with `--name`) |

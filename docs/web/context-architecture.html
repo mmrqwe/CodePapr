@@ -12,7 +12,6 @@
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   html{scroll-behavior:smooth}
   @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:0.01ms!important;transition-duration:0.01ms!important}}
-
   :root{
     --bg-deep:#06070a;--bg-base:#0a0c12;--bg-elevated:#0f121a;--bg-card:rgba(15,18,26,0.8);
     --surface:rgba(255,255,255,0.04);--surface-hover:rgba(255,255,255,0.06);
@@ -23,8 +22,7 @@
     --radius:16px;--radius-sm:10px;--radius-xs:6px;
     --font-mono:'JetBrains Mono','Cascadia Code','SF Mono',monospace;
     --font-sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-    --easing:cubic-bezier(0.16,1,0.3,1);
-    --texture-opacity:0;
+    --easing:cubic-bezier(0.16,1,0.3,1);--texture-opacity:0;
   }
   [data-theme="light"]{
     --bg-deep:#f7f4ef;--bg-base:#fffdf9;--bg-elevated:#f5f0e9;--bg-card:rgba(245,241,236,0.85);
@@ -46,695 +44,295 @@
       --texture-opacity:1;
     }
   }
-
   body{font-family:var(--font-sans);background:var(--bg-deep);color:var(--foreground);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased;transition:background-color 0.4s,color 0.4s}
   body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opacity:calc(var(--texture-opacity) * 0.035);background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:256px 256px}
-  ::selection{background:var(--accent-soft)}
-  code,.mono{font-family:var(--font-mono)}
-
+  code{font-family:var(--font-mono);font-size:0.86em;color:var(--accent)}
   .ambient{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
-  .ambient::before{content:'';position:absolute;inset:0;
-    background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(99,102,241,0.06) 0%,transparent 60%),
-               radial-gradient(ellipse 60% 50% at 70% 85%,rgba(34,197,94,0.04) 0%,transparent 60%),
-               radial-gradient(ellipse 70% 80% at 50% 50%,rgba(99,102,241,0.03) 0%,transparent 70%)}
-  [data-theme="light"] .ambient::before{background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.04) 0%,transparent 60%),radial-gradient(ellipse 70% 80% at 50% 50%,rgba(217,103,62,0.04) 0%,transparent 70%)}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .ambient::before{background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.04) 0%,transparent 60%),radial-gradient(ellipse 70% 80% at 50% 50%,rgba(217,103,62,0.04) 0%,transparent 70%)}}
-  .ambient .blob{position:absolute;border-radius:50%;filter:blur(120px);opacity:0.08;transition:opacity 0.4s}
-  [data-theme="light"] .ambient .blob{opacity:0.05}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .ambient .blob{opacity:0.05}}
-  .blob-1{width:700px;height:700px;background:var(--accent);top:-15%;left:-10%;animation:drift 28s ease-in-out infinite}
-  .blob-2{width:500px;height:500px;background:var(--green);bottom:-10%;right:-8%;animation:drift 32s ease-in-out infinite reverse}
-  .blob-3{width:400px;height:400px;background:#8b5cf6;top:55%;left:55%;animation:drift 24s ease-in-out infinite}
-  @keyframes drift{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(50px,-30px) scale(1.08)}66%{transform:translate(-20px,40px) scale(0.94)}}
-
-  .grid-overlay{position:fixed;inset:0;pointer-events:none;z-index:0;opacity:0.3;transition:opacity 0.4s;
-    background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);
-    background-size:64px 64px;mask-image:radial-gradient(ellipse 60% 60% at 50% 50%,black 30%,transparent 70%)}
-  [data-theme="light"] .grid-overlay{opacity:0.6}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .grid-overlay{opacity:0.6}}
-
-  .container{max-width:1200px;margin:0 auto;padding:0 32px;position:relative;z-index:1}
+  .ambient::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(99,102,241,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(34,197,94,0.04) 0%,transparent 60%)}
+  [data-theme="light"] .ambient::before{background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.04) 0%,transparent 60%)}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .ambient::before{background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.04) 0%,transparent 60%)}}
+  .container{max-width:920px;margin:0 auto;padding:0 32px;position:relative;z-index:1}
   @media(max-width:768px){.container{padding:0 20px}}
 
-  /* Nav (mirrors index.html) */
-  nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(6,7,10,0.82);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);border-bottom:1px solid var(--border);transition:background-color 0.4s}
+  nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(6,7,10,0.82);backdrop-filter:blur(24px) saturate(180%);border-bottom:1px solid var(--border)}
   [data-theme="light"] nav{background:rgba(245,241,236,0.88)}
   @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) nav{background:rgba(245,241,236,0.88)}}
-  nav .container{display:flex;align-items:center;justify-content:space-between;height:64px}
-  .logo{display:flex;align-items:center;gap:12px;text-decoration:none;font-weight:700;font-size:1.1rem;color:var(--foreground);letter-spacing:-0.01em}
-  .logo-icon{width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:var(--radius-xs)}
+  nav .container{display:flex;align-items:center;justify-content:space-between;height:64px;max-width:1200px}
+  .logo{display:flex;align-items:center;gap:12px;text-decoration:none;font-weight:700;font-size:1.1rem;color:var(--foreground)}
+  .logo-icon{width:34px;height:34px;flex-shrink:0}
   .logo-icon svg{width:100%;height:100%}
-  [data-theme="light"] .logo-icon{background:rgba(0,0,0,0.04);box-shadow:0 1px 3px rgba(0,0,0,0.05)}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .logo-icon{background:rgba(0,0,0,0.04);box-shadow:0 1px 3px rgba(0,0,0,0.05)}}
-  .nav-links{display:flex;gap:32px;list-style:none}
-  .nav-links a{color:var(--foreground-muted);text-decoration:none;font-size:0.875rem;font-weight:500;transition:color 0.2s}
+  .nav-links{display:flex;gap:28px;list-style:none}
+  .nav-links a{color:var(--foreground-muted);text-decoration:none;font-size:0.875rem;font-weight:500}
   .nav-links a:hover{color:var(--foreground)}
-  .theme-toggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;transition:all 0.2s;margin-left:8px;flex-shrink:0}
-  .theme-toggle:hover{border-color:var(--border-hover);color:var(--foreground)}
+  .nav-right{display:flex;align-items:center;gap:6px}
+  .theme-toggle,.lang-toggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;text-decoration:none;font-size:0.73rem;font-weight:700;font-family:var(--font-mono)}
+  .theme-toggle:hover,.lang-toggle:hover{color:var(--foreground);border-color:var(--border-hover)}
   .theme-toggle svg{width:17px;height:17px}
   .theme-toggle .icon-sun{display:none}.theme-toggle .icon-moon{display:block}
-  [data-theme="light"] .theme-toggle .icon-sun{display:block}
-  [data-theme="light"] .theme-toggle .icon-moon{display:none}
+  [data-theme="light"] .theme-toggle .icon-sun{display:block}[data-theme="light"] .theme-toggle .icon-moon{display:none}
   @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .theme-toggle .icon-sun{display:block}:root:not([data-theme="dark"]) .theme-toggle .icon-moon{display:none}}
   @media(max-width:768px){.nav-links{display:none}}
 
-  /* Header */
-  .hero{padding:130px 0 30px}
-  .section-label{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;border-radius:100px;border:1px solid var(--border);font-size:0.78rem;color:var(--foreground-dim);font-weight:500;margin-bottom:20px;font-family:var(--font-mono)}
-  .section-label .dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
-  .hero h1{font-size:clamp(2rem,4.4vw,3.2rem);font-weight:700;letter-spacing:-0.02em;line-height:1.12;margin-bottom:16px}
-  .hero h1 .gradient{background:linear-gradient(120deg,var(--accent),#8b5cf6 60%,var(--orange));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-  [data-theme="light"] .hero h1 .gradient{background:linear-gradient(120deg,var(--orange),#b84e2a);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .hero h1 .gradient{background:linear-gradient(120deg,var(--orange),#b84e2a);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}}
-  .hero p{color:var(--foreground-muted);max-width:720px;font-size:1.02rem}
+  .hero{padding:120px 0 36px}
+  .kicker{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:0.75rem;color:var(--foreground-dim);letter-spacing:.08em;margin-bottom:16px}
+  .kicker i{width:6px;height:6px;border-radius:50%;background:var(--green)}
+  .hero h1{font-size:clamp(1.9rem,4vw,2.8rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:14px}
+  .hero h1 em{font-style:normal;color:var(--accent)}
+  .hero p{color:var(--foreground-muted);font-size:1.05rem;max-width:640px}
   .hero p strong{color:var(--foreground);font-weight:600}
 
-  .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}
-  .lg{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:0.76rem;color:var(--foreground-muted);border:1px solid var(--border);padding:6px 12px;border-radius:100px;background:var(--surface)}
-  .lg i{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .sec{padding:48px 0 8px}
+  .sec h2{font-size:1.35rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:8px}
+  .lead{color:var(--foreground-muted);margin-bottom:22px;max-width:640px}
 
-  /* dial */
-  .dial{display:flex;align-items:center;gap:14px;margin-top:26px;padding:16px 20px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card);width:fit-content}
-  .dial svg{width:56px;height:56px;transform:rotate(-90deg)}
-  .dial .track{fill:none;stroke:var(--surface-hover);stroke-width:5}
-  .dial .val{fill:none;stroke:var(--green);stroke-width:5;stroke-linecap:round;stroke-dasharray:138.2;stroke-dashoffset:138.2;transition:stroke-dashoffset 1.6s var(--easing)}
-  .dial .num{font-family:var(--font-mono);font-weight:700;font-size:1.5rem;line-height:1;color:var(--green)}
-  .dial .cap{font-size:0.78rem;color:var(--foreground-muted);line-height:1.4}
-  .dial .cap b{color:var(--foreground);font-weight:600}
+  .stack{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card)}
+  .slot{display:grid;grid-template-columns:52px 1fr 168px;gap:12px;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);border-left:4px solid var(--slot)}
+  .slot:last-child{border-bottom:none}
+  .slot .n{font-family:var(--font-mono);font-weight:700;font-size:0.95rem;color:var(--slot)}
+  .slot h3{font-size:0.98rem;font-weight:600}
+  .slot p{font-size:0.8rem;color:var(--foreground-muted);margin-top:2px}
+  .slot .when{font-family:var(--font-mono);font-size:0.7rem;color:var(--slot);text-align:right;line-height:1.4}
+  @media(max-width:640px){.slot{grid-template-columns:40px 1fr}.slot .when{grid-column:2;text-align:left;margin-top:4px}}
 
-  /* layout */
-  .cols{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:30px;padding:34px 0 10px;align-items:start}
-  @media(max-width:980px){.cols{grid-template-columns:1fr}.rail{position:static!important}}
+  .layers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  @media(max-width:720px){.layers{grid-template-columns:1fr}}
+  .layer{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);border-top:3px solid var(--c)}
+  .layer .tag{font-family:var(--font-mono);font-size:0.68rem;letter-spacing:.1em;color:var(--c);font-weight:700}
+  .layer h3{font-size:1.05rem;margin:6px 0 10px}
+  .layer ul{margin:0;padding-left:1.1em;color:var(--foreground-muted);font-size:0.86rem}
+  .layer li{margin:4px 0}
+  .layer li strong{color:var(--foreground);font-weight:600}
 
-  /* tier */
-  .tier{position:relative;border:1px solid var(--border);background:var(--bg-card);margin-bottom:24px;border-radius:var(--radius);overflow:hidden;backdrop-filter:blur(8px)}
-  .tier::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
-  .tier.t1::before{background:var(--green)} .tier.t2::before{background:var(--amber)} .tier.t3::before{background:var(--orange)} .tier.t4::before{background:var(--accent)}
-  .t4 .idx{color:var(--accent)} .t4 .tag{color:var(--accent);background:var(--accent-glow);border-color:transparent} .t4 .hz b{color:var(--accent)} .t4 .addr{color:var(--accent)}
-  .tierhead{display:flex;align-items:flex-start;gap:16px;padding:20px 24px 16px;border-bottom:1px dashed var(--border);position:relative;overflow:hidden}
-  .tier.t1 .tierhead::after{content:"";position:absolute;top:0;bottom:0;width:120px;left:-140px;background:linear-gradient(100deg,transparent,var(--green-glow),transparent);animation:sweep 5.5s ease-in-out infinite}
-  @keyframes sweep{0%{left:-140px}55%{left:110%}100%{left:110%}}
-  .tierhead .idx{font-family:var(--font-mono);font-weight:700;font-size:1.9rem;line-height:1}
-  .t1 .idx{color:var(--green)} .t2 .idx{color:var(--amber)} .t3 .idx{color:var(--orange)}
-  .tierhead .tt h3{font-size:1.25rem;font-weight:700;letter-spacing:-0.01em}
-  .tierhead .tt h3 span{font-weight:400;color:var(--foreground-muted);font-size:0.9rem;margin-left:8px}
-  .tierhead .tt .tags{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
-  .tag{font-family:var(--font-mono);font-size:0.7rem;padding:3px 10px;border-radius:100px;letter-spacing:.02em;border:1px solid var(--border)}
-  .t1 .tag{color:var(--green);background:var(--green-glow);border-color:transparent}
-  .t2 .tag{color:var(--amber);background:rgba(245,158,11,0.12);border-color:transparent}
-  .t3 .tag{color:var(--orange);background:rgba(217,103,62,0.12);border-color:transparent}
-  .tierhead .hz{margin-left:auto;text-align:right;font-family:var(--font-mono);font-size:0.7rem;color:var(--foreground-dim);line-height:1.5;white-space:nowrap}
-  .tierhead .hz b{display:block;font-size:0.82rem;font-weight:600}
-  .t1 .hz b{color:var(--green)} .t2 .hz b{color:var(--amber)} .t3 .hz b{color:var(--orange)}
+  .dest{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  @media(max-width:800px){.dest{grid-template-columns:1fr}}
+  .dcard{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card)}
+  .dcard .k{font-family:var(--font-mono);font-size:0.68rem;letter-spacing:.1em;color:var(--accent);font-weight:700}
+  .dcard h3{font-size:1.05rem;margin:6px 0 8px}
+  .dcard p{color:var(--foreground-muted);font-size:0.86rem}
+  .dcard .cap{margin-top:10px;font-family:var(--font-mono);font-size:0.72rem;color:var(--foreground-dim)}
 
-  .sublabel{font-family:var(--font-mono);font-size:0.7rem;letter-spacing:.1em;color:var(--foreground-dim);text-transform:uppercase;padding:14px 24px 4px;display:flex;align-items:center;gap:10px}
-  .sublabel::after{content:"";flex:1;height:1px;background:var(--border)}
-  .sublabel b{color:var(--accent);font-weight:600}
+  .flow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0}
+  @media(max-width:800px){.flow{grid-template-columns:1fr}}
+  .step{padding:18px 18px 20px;border:1px solid var(--border);background:var(--bg-card);position:relative}
+  .step:first-child{border-radius:var(--radius) 0 0 var(--radius)}
+  .step:last-child{border-radius:0 var(--radius) var(--radius) 0}
+  @media(max-width:800px){.step:first-child,.step:last-child{border-radius:var(--radius-sm)}}
+  .step + .step{border-left:none}
+  @media(max-width:800px){.step + .step{border-left:1px solid var(--border);border-top:none}}
+  .step .n{font-family:var(--font-mono);font-size:0.72rem;color:var(--accent);font-weight:700}
+  .step h3{font-size:0.95rem;margin:6px 0 6px}
+  .step p{font-size:0.82rem;color:var(--foreground-muted)}
 
-  .item{display:grid;grid-template-columns:60px minmax(0,1.05fr) minmax(0,1.55fr) auto;gap:0 16px;align-items:start;padding:15px 24px;border-top:1px solid var(--border);cursor:pointer;transition:background 0.25s}
-  .item:hover{background:var(--surface)}
-  .item .row{display:contents}
-  @media(max-width:760px){.item{grid-template-columns:48px 1fr}.item .src,.item .desc,.item .more{grid-column:2}}
-  .addr{font-family:var(--font-mono);font-size:0.7rem;font-weight:600;letter-spacing:.06em;padding-top:4px}
-  .t1 .addr{color:var(--green)} .t2 .addr{color:var(--amber)} .t3 .addr{color:var(--orange)}
-  .name{font-weight:600;font-size:0.98rem}
-  .name small{display:block;font-weight:400;color:var(--foreground-dim);font-size:0.74rem;margin-top:2px;font-family:var(--font-mono)}
-  .src{font-family:var(--font-mono);font-size:0.72rem;color:var(--foreground-muted);line-height:1.8;padding-top:2px}
-  .src .chip{display:inline-block;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xs);padding:1px 8px;margin:1px 3px 1px 0;color:var(--accent)}
-  .cchip{font-family:var(--font-mono);font-size:0.68rem;padding:3px 10px;border-radius:100px;white-space:nowrap;align-self:start}
-  .c-hit{background:var(--green-glow);color:var(--green)}
-  .c-epoch{background:rgba(245,158,11,0.12);color:var(--amber)}
-  .c-miss{background:rgba(217,103,62,0.12);color:var(--orange)}
-  .desc{grid-column:2 / -1;color:var(--foreground-muted);font-size:0.86rem;padding:6px 0 16px;max-width:840px}
-  .desc b{color:var(--foreground);font-weight:600}
-  .desc code{color:var(--accent);font-size:0.78rem}
-  .item .more{display:none;grid-column:2/-1;padding:0 0 16px;max-width:840px}
-  .item.open .more{display:block}
-  .more .mbox{border-left:2px solid var(--accent);padding:2px 0 2px 14px;font-size:0.82rem;color:var(--foreground-muted)}
-  .more .mbox code{color:var(--accent);font-size:0.76rem}
-  .item .exp{font-family:var(--font-mono);font-size:0.66rem;color:var(--foreground-dim);letter-spacing:.08em}
-  .item.open .exp::after{content:" ▴"} .item:not(.open) .exp::after{content:" ▾"}
+  .clocks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  @media(max-width:800px){.clocks{grid-template-columns:1fr}}
+  .clock{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card)}
+  .clock h3{font-size:1rem;margin-bottom:8px}
+  .clock p{font-size:0.86rem;color:var(--foreground-muted)}
 
-  .boundary{display:flex;align-items:center;gap:14px;margin:-6px 0 18px;font-family:var(--font-mono);font-size:0.7rem;color:var(--foreground-dim)}
-  .boundary .bl{flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent)}
-  .boundary .bt{border:1px dashed var(--border);padding:5px 14px;border-radius:100px;background:var(--bg-elevated)}
+  .note{margin-top:22px;padding:16px 18px;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--foreground-muted);font-size:0.88rem}
+  .note strong{color:var(--foreground)}
 
-  /* rail */
-  .rail{position:sticky;top:84px}
-  .railcard{border:1px solid var(--border);background:var(--bg-card);border-radius:var(--radius-sm);padding:18px 18px 20px;margin-bottom:18px;backdrop-filter:blur(8px)}
-  .railcard h4{font-family:var(--font-mono);font-size:0.7rem;letter-spacing:.14em;color:var(--accent);text-transform:uppercase;margin-bottom:14px}
-  .wire{list-style:none;position:relative}
-  .wire::before{content:"";position:absolute;left:9px;top:8px;bottom:8px;width:2px;background:linear-gradient(var(--green) 0%,var(--green) 55%,var(--amber) 72%,var(--orange) 100%);opacity:.5}
-  .wnode{position:relative;padding:0 0 13px 30px;font-size:0.8rem;color:var(--foreground-muted);transition:color .2s,transform .2s}
-  .wnode::before{content:"";position:absolute;left:4px;top:5px;width:12px;height:12px;border-radius:50%;background:var(--bg-deep);border:2px solid var(--foreground-dim);transition:.2s}
-  .wnode[data-c="hit"]::before{border-color:var(--green)}
-  .wnode[data-c="epoch"]::before{border-color:var(--amber)}
-  .wnode[data-c="miss"]::before{border-color:var(--orange)}
-  .wnode b{color:var(--foreground);font-weight:600}
-  .wnode.lit{color:var(--foreground);transform:translateX(3px)}
-  .wnode.lit::before{background:var(--accent);border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
-  .wnode .wtag{font-family:var(--font-mono);font-size:0.66rem;color:var(--foreground-dim);display:block}
-  .misspulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--orange);margin-right:6px;animation:pulse 1.6s infinite}
-  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(217,103,62,.5)}70%{box-shadow:0 0 0 8px rgba(217,103,62,0)}100%{box-shadow:0 0 0 0 rgba(217,103,62,0)}}
-  .stat{display:flex;justify-content:space-between;gap:10px;font-family:var(--font-mono);font-size:0.74rem;padding:8px 0;border-bottom:1px dashed var(--border)}
-  .stat:last-child{border-bottom:none}
-  .stat b{font-weight:600;text-align:right}
-  .stat .g{color:var(--green)} .stat .a{color:var(--amber)} .stat .r{color:var(--orange)}
-
-  /* mechanisms */
-  .mech{padding:46px 0 8px}
-  .mech h2,.pipe h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:8px}
-  .mech .sub,.pipe .sub{color:var(--foreground-muted);font-size:0.9rem;margin-bottom:26px}
-  .ledger{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--border)}
-  @media(max-width:820px){.ledger{grid-template-columns:1fr}}
-  .led{padding:24px 26px;background:var(--bg-card);transition:background .25s}
-  .led:hover{background:var(--bg-elevated)}
-  .led .no{font-family:var(--font-mono);font-weight:700;font-size:0.82rem;color:var(--accent);letter-spacing:.1em}
-  .led h5{font-size:1.06rem;font-weight:700;margin:8px 0 8px;letter-spacing:-0.01em}
-  .led p{color:var(--foreground-muted);font-size:0.86rem}
-  .led p code{color:var(--accent);font-size:0.78rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xs);padding:1px 6px}
-
-  /* pipeline */
-  .pipe{padding:46px 0 20px}
-  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
-  .fstep{flex:1;min-width:150px;background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--green);padding:14px 16px;transition:transform .2s}
-  .fstep:hover{transform:translateY(-3px)}
-  .fstep:nth-child(5),.fstep:nth-child(7){border-left-color:var(--amber)}
-  .fstep:nth-child(9),.fstep:nth-child(11){border-left-color:var(--orange)}
-  .fstep .fi{font-family:var(--font-mono);font-size:0.66rem;color:var(--foreground-dim)}
-  .fstep b{display:block;font-size:0.86rem;font-weight:600;margin-top:4px}
-  .farrow{display:flex;align-items:center;color:var(--foreground-dim);font-family:var(--font-mono);padding:0 6px}
-  @media(max-width:820px){.farrow{display:none}.fstep{margin-bottom:8px}}
-
-  footer{border-top:1px solid var(--border);margin-top:50px;padding:28px 0 44px;color:var(--foreground-dim);font-size:0.8rem}
-  footer code{color:var(--foreground-muted)}
-
-  /* memory × context */
-  .memsec{padding:46px 0 8px}
-  .memsec h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:8px}
-  .memsec .sub{color:var(--foreground-muted);font-size:0.9rem;margin-bottom:26px;max-width:860px}
-  .memsec h3{font-size:1.08rem;font-weight:700;margin:28px 0 12px;letter-spacing:-0.01em}
-  .memgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:8px 0 8px}
-  @media(max-width:900px){.memgrid{grid-template-columns:1fr}}
-  .memcard{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);border-top:3px solid var(--green)}
-  .memcard.recall{border-top-color:var(--accent)}
-  .memcard.hold{border-top-color:var(--amber)}
-  .memcard .k{font-family:var(--font-mono);font-size:0.68rem;letter-spacing:.12em;color:var(--foreground-dim);font-weight:700}
-  .memcard h5{font-size:1.05rem;font-weight:700;margin:8px 0 10px;letter-spacing:-0.01em}
-  .memcard p{color:var(--foreground-muted);font-size:0.84rem}
-  .memcard p code{color:var(--accent);font-size:0.76rem}
-  .memtable-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);margin:8px 0 8px}
-  .memtable{width:100%;border-collapse:collapse;font-size:0.78rem;min-width:860px}
-  .memtable th,.memtable td{border-bottom:1px solid var(--border);padding:11px 14px;text-align:left;vertical-align:top}
-  .memtable th{background:var(--surface);color:var(--foreground-muted);font-weight:600;font-size:0.7rem;letter-spacing:.04em;text-transform:uppercase}
-  .memtable tr:last-child td{border-bottom:none}
-  .memtable td{color:var(--foreground-muted)}
-  .memtable td:first-child{color:var(--foreground);font-weight:500;white-space:nowrap}
-  .memtable code{font-size:0.72rem;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
-  .timeline{display:grid;gap:0;margin:8px 0 8px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
-  .tl{display:grid;grid-template-columns:92px 1fr;gap:0;background:var(--bg-card);border-bottom:1px solid var(--border)}
-  .tl:last-child{border-bottom:none}
-  .tl .t{font-family:var(--font-mono);font-size:0.72rem;color:var(--accent);padding:14px 16px;border-right:1px solid var(--border)}
-  .tl p{padding:14px 18px;color:var(--foreground-muted);font-size:0.84rem}
-  .memnote{padding:16px 20px;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--foreground-muted);font-size:0.84rem;margin-top:8px}
-  .memnote code{color:var(--accent);font-size:0.76rem}
-
-  .reveal{opacity:0;transform:translateY(20px);transition:opacity 0.7s var(--easing),transform 0.7s var(--easing)}
+  footer{border-top:1px solid var(--border);margin-top:56px;padding:28px 0 44px;color:var(--foreground-dim);font-size:0.8rem}
+  footer a{color:var(--foreground-muted)}
+  .reveal{opacity:0;transform:translateY(16px);transition:opacity 0.6s var(--easing),transform 0.6s var(--easing)}
   .reveal.visible{opacity:1;transform:none}
 </style>
 </head>
 <body>
-<div class="ambient"><div class="blob blob-1"></div><div class="blob blob-2"></div><div class="blob blob-3"></div></div>
-<div class="grid-overlay"></div>
+<div class="ambient"></div>
 
 <nav>
   <div class="container">
-    <a href="index.html" class="logo"><span class="logo-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="lip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="lip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="lip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#lip)"/><rect x="96" y="96" width="832" height="832" rx="208" stroke="#FFF7EF" stroke-opacity=".52" stroke-width="12"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#lip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round"/></svg></span>CodePapr</a>
+    <a href="index.html" class="logo"><span class="logo-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="lip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="lip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="lip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#lip)"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#lip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round"/></svg></span>CodePapr</a>
     <ul class="nav-links">
       <li><a href="index.html">首页</a></li>
       <li><a href="tutorial.html">教程</a></li>
-      <li><a href="#tiers">分层模型</a></li>
-      <li><a href="#recall">Recall</a></li>
+      <li><a href="#request">请求</a></li>
+      <li><a href="#layers">分层</a></li>
       <li><a href="#memory">记忆</a></li>
-      <li><a href="#mechanisms">机制</a></li>
-      <li><a href="#pipeline">优先序</a></li>
+      <li><a href="#clocks">何时刷新</a></li>
     </ul>
-    <button class="theme-toggle" onclick="toggleTheme()" aria-label="切换主题">
-      <svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-      <svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-    </button>
+    <div class="nav-right">
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="切换主题">
+        <svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <a href="context-architecture.en.html" class="lang-toggle" onclick="localStorage.setItem('codepapr-lang','en')">EN</a>
+    </div>
   </div>
 </nav>
 
 <section class="hero">
   <div class="container">
-    <div class="section-label"><span class="dot"></span> CONTEXT WINDOW · 缓存优先</div>
-    <h1>上下文分层 · <span class="gradient">持久化投影 × 按字节稳定性分层</span></h1>
-    <p>DeepSeek 前缀缓存按请求体<strong>逐字节前缀匹配</strong>——越靠前越稳定，命中率越高。CodePapr 把上下文切成四层：冻结的稳定前缀、压缩时重写的会话状态（含持久化 Surface）、每轮追加的活动上下文、以及按回合检索的 Recall Block。项目记忆<strong>拆开住进这些层</strong>：短指令进 Bootstrap，踩坑经验进 Recall，网页引用只进搜索。<a href="#memory">哪一种记忆在哪一层、什么时候变</a>见下方专章。点击任意条目展开注入链路与缓存行为。</p>
-    <div class="legend">
-      <span class="lg"><i style="background:var(--green)"></i>稳定 · 命中缓存</span>
-      <span class="lg"><i style="background:var(--amber)"></i>慢变化 · epoch 重写</span>
-      <span class="lg"><i style="background:var(--orange)"></i>高频 · 追加增长</span>
-      <span class="lg"><i style="background:var(--accent)"></i>来源 / 注入点</span>
-    </div>
-    <div class="dial">
-      <svg viewBox="0 0 52 52"><circle class="track" cx="26" cy="26" r="22"/><circle class="val" id="dialArc" cx="26" cy="26" r="22"/></svg>
-      <div>
-        <div class="num"><span id="dialNum">0</span>%</div>
-        <div class="cap"><b>实测前缀命中率</b><br>miss 应只剩"本轮新增"</div>
-      </div>
-    </div>
+    <div class="kicker"><i></i>一次请求 · 从上到下</div>
+    <h1>上下文怎么拼，<em>记忆进哪一层</em></h1>
+    <p>发给模型的不是一锅炖。越靠前的内容越稳，前缀缓存越好用。<strong>项目记忆按该进哪层就进哪层</strong>：短指令每次带着，踩坑经验这一轮再用，网页引用只等人去搜。</p>
   </div>
 </section>
 
 <div class="container">
-  <div class="cols" id="tiers">
-    <main>
-      <!-- TIER 1 -->
-      <section class="tier t1 reveal">
-        <div class="tierhead">
-          <div class="idx">01</div>
-          <div class="tt">
-            <h3>Stable Prefix <span>稳定前缀</span></h3>
-            <div class="tags"><span class="tag">字节级冻结 · 整个会话</span><span class="tag">最大缓存区</span></div>
-          </div>
-          <div class="hz"><b>命中率最高</b>会话内逐字节不变</div>
+  <section class="sec reveal" id="request">
+    <h2>一次请求长什么样</h2>
+    <p class="lead">从上到下读。上面尽量不动，下面才增长。颜色表示变化快慢，不是重要程度。</p>
+    <div class="stack">
+      <div class="slot" style="--slot:var(--green)">
+        <div class="n">01</div>
+        <div>
+          <h3>系统核心</h3>
+          <p>系统提示、工具定义、模型参数、<code>AGENTS.md</code></p>
         </div>
-
-        <div class="sublabel"><b>ImmutablePrefix</b> 不可变前缀对象 · prefix.systemPrompt / tools / params</div>
-
-        <div class="item" data-wire="sys">
-          <div class="row">
-            <div class="addr">SYS</div>
-            <div class="name">System Prompt<small>系统提示词</small></div>
-            <div class="src"><span class="chip">buildRuntimeSystemPrompt</span><span class="chip">runtimeSystemPrompt</span></div>
-            <div class="cchip c-hit">冻结</div>
-          </div>
-          <div class="desc">模型身份与行为总纲：<b>身份 + 核心原则 + 模式 intro + workspace + 核心约束 + 工具约束</b>。构造 ImmutablePrefix 时校验禁止任何动态内容（时间戳 / 模板变量直接抛错），并一次性计算 SHA256。</div>
-          <div class="more"><div class="mbox">注入链路：settings + rulesSection + mode → <code>buildRuntimeSystemPrompt</code> → <code>ImmutablePrefix.systemPrompt</code> → 请求 <code>messages[0]</code>。前缀哈希在每次 build 时被 RequestBuilder 校验不可变。</div></div>
+        <div class="when">会话内冻结</div>
+      </div>
+      <div class="slot" style="--slot:var(--green)">
+        <div class="n">02</div>
+        <div>
+          <h3>会话引导</h3>
+          <p>Skills 目录、项目记忆段、长期指导</p>
         </div>
-
-        <div class="item" data-wire="rules">
-          <div class="row">
-            <div class="addr">RULE</div>
-            <div class="name">Runtime Rules<small>项目规则</small></div>
-            <div class="src"><span class="chip">.CodePapr/AGENTS.md</span><span class="chip">buildProjectRulesSection</span></div>
-            <div class="cchip c-hit">冻结</div>
-          </div>
-          <div class="desc">全项目规则，<b>所有模式与子代理都继承</b>。工作区打开时载入并缓存于 <code>_projectRulesSection</code>，注入系统提示词。<b>opt-in 文件</b>：只有用户在「配置」面板保存规则时才创建 <code>.CodePapr/AGENTS.md</code>，否则为空、不注入。</div>
-          <div class="more"><div class="mbox">注入链路：<code>.CodePapr/AGENTS.md</code> → <code>projectConfigLoader.ts:loadProjectRulesSection</code> → <code>agentStore._projectRulesSection</code>（缓存）→ <code>buildRuntimeSystemPrompt({ rulesSection })</code> → <code>promptSystem.ts:1168</code>，位于 identity/principles 之后、mode prompt 之前。子代理通过 <code>UiTaskToolContext.rulesSection</code> 继承。<br><br>入口：顶部「配置」按钮 → ProjectConfigModal 的 AGENTS.md 标签页编辑保存；文件不存在时用模板预填。注意与 <code>.CodePapr/agents/*.md</code>（子代理定义）区分——后者变成 task 工具，不是规则。</div></div>
+        <div class="when">记忆：压缩或新会话才换</div>
+      </div>
+      <div class="slot" style="--slot:var(--amber)">
+        <div class="n">03</div>
+        <div>
+          <h3>会话状态</h3>
+          <p>检查点（这一场任务进行到哪）+ 保留的近期对话</p>
         </div>
-
-        <div class="item" data-wire="tool">
-          <div class="row">
-            <div class="addr">TOOL</div>
-            <div class="name">Tool Schema<small>工具定义</small></div>
-            <div class="src"><span class="chip">ToolRegistry.getAll()</span><span class="chip">按名排序 + canonical</span></div>
-            <div class="cchip c-hit">冻结</div>
-          </div>
-          <div class="desc">会话开始时冻结全部工具定义（名称 + 描述 + 规范化参数）。<b>工具集变化</b>（MCP 加载、task 工具出现）会整体失效前缀——应由用户操作显式触发，避免隐性 churn。</div>
-          <div class="more"><div class="mbox">RequestBuilder 每次 build 校验 tools 不可变（<code>validateToolsImmutable</code>），并对比运行时工具与冻结前缀一致（<code>validateRuntimeToolsMatchPrefix</code>）。</div></div>
+        <div class="when">压缩时重写</div>
+      </div>
+      <div class="slot" style="--slot:var(--accent)">
+        <div class="n">04</div>
+        <div>
+          <h3>本回合召回</h3>
+          <p>这一轮可能用得上的旧经验，插在当前用户消息前</p>
         </div>
-
-        <div class="item" data-wire="param">
-          <div class="row">
-            <div class="addr">PARAM</div>
-            <div class="name">Model Params<small>模型参数</small></div>
-            <div class="src"><span class="chip">temperature / topP / maxTokens / thinking</span></div>
-            <div class="cchip c-hit">冻结</div>
-          </div>
-          <div class="desc">参与前缀哈希。<b>用户主动调参</b>（调 temperature、切换 thinking）= 一次有意的整体失效，属可接受代价；系统不应在会话中隐式改参。</div>
-          <div class="more"><div class="mbox">reasoning_content 回传按「历史消息是否存在」决定，与每轮 thinking 开关解耦，避免重建时给历史增删字节（<code>DeepSeekProvider</code>）。</div></div>
+        <div class="when">每个用户回合换新</div>
+      </div>
+      <div class="slot" style="--slot:var(--orange)">
+        <div class="n">05</div>
+        <div>
+          <h3>本轮对话</h3>
+          <p>当前用户消息、本轮工具结果；日期等动态内容也在这里</p>
         </div>
+        <div class="when">只往尾部追加</div>
+      </div>
+    </div>
+  </section>
 
-        <div class="sublabel"><b>Session Bootstrap</b> 会话引导 = log[0] · role: assistant + metadata.isPrefixSystem（Claude 提取为 system）· resolveSessionBootstrap 按 (session × 稳定签名) 记忆化</div>
-
-        <div class="item" data-wire="skill">
-          <div class="row">
-            <div class="addr">SKL</div>
-            <div class="name">Skills 摘要<small>技能目录</small></div>
-            <div class="src"><span class="chip">.CodePapr/skills/*</span><span class="chip">buildSkillsSection</span></div>
-            <div class="cchip c-hit">签名内</div>
-          </div>
-          <div class="desc">只注入<b>名称 + 一句话描述</b>，稳定且小。全文由模型按需调用 <code>skill_load</code> 工具读取，作为工具结果落在<b>尾部</b>——不进前缀。增删 skill 是用户操作（在签名内），触发一次重建。子代理通过 <code>SubagentSessionDeps.skillsSection</code> 继承。</div>
-          <div class="more"><div class="mbox">设计意图：「稳定上下文里只注入名称和描述，由模型自行判断是否需要，再按需调用 skill_load 读取完整说明」。</div></div>
-        </div>
-
-        <div class="item" data-wire="mem">
-          <div class="row">
-            <div class="addr">MEM</div>
-            <div class="name">Stable Memory<small>项目记忆 · 账本渲染</small></div>
-            <div class="src"><span class="chip">memory_entries ledger</span><span class="chip">记忆面板</span><span class="chip">memorySection</span></div>
-            <div class="cchip c-hit">签名外冻结</div>
-          </div>
-          <div class="desc">跨会话项目知识，渲染为「## 项目记忆」。权威在 SQLite <code>memory_entries</code>；记忆面板是唯一给人看/改的面（每次会话 / 按需召回 / 仅搜索）。Bootstrap 只渲染会进前缀的条目：手写笔记 / 偏好 / 约束 / 事实 / 约定 / 验证 / 决策，预算 24 条 / 1500 tokens。<b>零审核自动写入</b>（<code>planMemoryWrite</code>：persist 或 drop，没有准入队列）。<code>citation</code> / <code>procedure</code> <b>不进这一层</b>——前者只进 <code>memory_search</code>，后者进下方 Recall。通过 <code>resolveSessionBootstrap</code> 按 (session × 稳定签名) 冻结（签名外 → 前缀缓存不破）。账本上新记住的内容<b>当前会话前缀不变</b>；<b>压缩 epoch 刷新</b>或<b>下次会话</b>才进入 Bootstrap。详见 <a href="#memory">记忆 × 上下文</a>。</div>
-          <div class="more"><div class="mbox">立刻写入：用户说「记住 / 必须 / 不要」、工作区实证、bash 测试成功、冷启动摘要、Agent <code>memory_write</code>（非网页）、面板手写笔记。写成引用、永不 Bootstrap：web / MCP / https 证据。丢弃：注入、密钥、危险命令、裸推理。若 Agent 仍直写 memory.md，write/patch 被拦截走同一策略。面板是完整目录，可遗忘，无准入按钮。</div></div>
-        </div>
-
-        <div class="item" data-wire="custom">
-          <div class="row">
-            <div class="addr">CUS</div>
-            <div class="name">Custom Guidance<small>长期附加指导</small></div>
-            <div class="src"><span class="chip">settings.systemPrompt</span><span class="chip">character prompt</span></div>
-            <div class="cchip c-hit">签名内</div>
-          </div>
-          <div class="desc">用户自定义全局指导 + 角色设定，渲染为「## 长期附加指导」。作为附加约束生效，不覆盖系统级规则。<code>settings.systemPrompt</code> 可在设置 → 高级分页编辑；角色提示词通过 CharacterModal 设置。</div>
-          <div class="more"><div class="mbox">与 Runtime Rules 区别：rules 来自项目文件（AGENTS.md），custom 来自用户设置 + 角色；两者都在稳定区。子代理通过 <code>UiTaskToolContext.customPrompt</code> 继承。</div></div>
-        </div>
-      </section>
-
-      <div class="boundary"><span class="bl"></span><span class="bt">▲ 以上为命中区 · 以下为 epoch 边界（压缩时重写）</span><span class="bl"></span></div>
-
-      <!-- TIER 2 -->
-      <section class="tier t2 reveal">
-        <div class="tierhead">
-          <div class="idx">02</div>
-          <div class="tt">
-            <h3>Session State <span>会话状态</span></h3>
-            <div class="tags"><span class="tag">慢变化</span><span class="tag">压缩 epoch 重写</span></div>
-          </div>
-          <div class="hz"><b>一次性失效</b>仅在压缩时接受</div>
-        </div>
-
-        <div class="item" data-wire="ckpt">
-          <div class="row">
-            <div class="addr">CKPT</div>
-            <div class="name">Conversation Summary<small>检查点摘要 · v3 结构化状态</small></div>
-            <div class="src"><span class="chip">renderContextCheckpointStateV3</span><span class="chip">13 分区 + provenance</span></div>
-            <div class="cchip c-epoch">epoch 重写</div>
-          </div>
-          <div class="desc">被压缩的历史，作为<b>单条 user 轮消息</b>注入。2026-08 起为 <b>v3 结构化状态</b>：goal / constraints / confirmedFacts / assumptions / decisions / completedWork / activeWork / verification / failuresAndRisks / todos / openQuestions / references + <code>ContextFact[]</code> provenance。合并流 = 确定性分类事实 + prior state + 权威 TodoList → 确定性合并 → 可选 LLM merge（schema + pinned 校验失败即回退）。携带<b>不可变溯源</b>：compactionId / generation / trigger / 来源区间 message ID / tokenStats，全部落 <code>context_compactions</code> 表（单事务，失败压缩保留上一个 completed surface）。</div>
-          <div class="more"><div class="mbox">触发：<code>maxConversationRounds</code> 与 <code>maxContextTokens</code>（软预算 = hard×0.7：软~硬区间先 prune-first 不生成 checkpoint）。渲染器绑定：已归档 v2 payload 永不重渲染（renderedContent 冻结，重启字节稳定）。</div></div>
-        </div>
-      </section>
-
-      <div class="boundary"><span class="bl"></span><span class="bt">▲ append-only 边界 · 以下每轮增长</span><span class="bl"></span></div>
-
-      <!-- TIER 3 -->
-      <section class="tier t3 reveal">
-        <div class="tierhead">
-          <div class="idx">03</div>
-          <div class="tt">
-            <h3>Active Context <span>活动上下文</span></h3>
-            <div class="tags"><span class="tag">高频变化</span><span class="tag">append-only 尾部</span></div>
-          </div>
-          <div class="hz"><b>唯一不可约 miss</b>本轮新增</div>
-        </div>
-
-        <div class="item" data-wire="recent">
-          <div class="row">
-            <div class="addr">TAIL</div>
-            <div class="name">Recent Conversation<small>最近对话</small></div>
-            <div class="src"><span class="chip">pickRetainedTailMessages</span><span class="chip">6~12 条 / ~8k tokens</span></div>
-            <div class="cchip c-miss">追加 · 历史字节稳定</div>
-          </div>
-          <div class="desc">压缩后保留的最近原始消息。保留窗口由压缩逻辑决定；一旦写下，字节不再改动（append-only），对后续轮次仍是命中区。</div>
-          <div class="more"><div class="mbox">注意：触发压缩的"轮数上限"是用户设置（maxConversationRounds），但具体保留多少条尾部消息由压缩算法的窗口决定。</div></div>
-        </div>
-
-        <div class="item" data-wire="todo">
-          <div class="row">
-            <div class="addr">PLAN</div>
-            <div class="name">Live Plan<small>实时任务清单 · Todo</small></div>
-            <div class="src"><span class="chip">renderTodoListDigest</span><span class="chip">注入 user prompt 尾部</span></div>
-            <div class="cchip c-miss">每轮实时</div>
-          </div>
-          <div class="desc">每轮从 live TodoListContext 渲染的实时摘要（目标 + 各任务 status/title/error），由 <b>buildRuntimeUserPrompt</b> 追加到 user prompt 尾部。始终反映当前计划状态，<b>零额外缓存成本</b>（user prompt 本身就在 miss 区）。压缩后下一条 user message 自带 live digest，无需单独冻结快照。</div>
-          <div class="more"><div class="mbox">有损快照：仅含 status / title / retry / errorLog 前 200 字符，不含 description / dependsOn / artifacts。完整细节在 live 期间靠 <code>todo</code> 工具每轮回传。<code>checkpoint.payload.todoDigest</code> 仍存储（数据兼容），但不再单独注入为 user 消息。</div></div>
-        </div>
-
-        <div class="item" data-wire="map">
-          <div class="row">
-            <div class="addr">MAP</div>
-            <div class="name">Repository Map<small>项目结构概览</small></div>
-            <div class="src"><span class="chip">project graph 缓存</span><span class="chip">buildProjectGraphBootstrapSummary</span><span class="chip">每轮注入</span></div>
-            <div class="cchip c-miss">每轮刷新 · user prompt 尾部</div>
-          </div>
-          <div class="desc">目录 / 文件 / 符号鸟瞰，渲染为「## 项目结构概览」，注入每轮的<b>user prompt</b>（运行时上下文之后、诊断之前）。<b>每轮从磁盘重读</b>，永不冻结进前缀。零缓存影响：它坐落在已缓存前缀边界之后，变化不会让历史失效。子代理仍通过 <code>SubagentSessionDeps.projectGraphSummary</code> 继承（注入它们的 bootstrap，因为子代理生命周期短）。</div>
-          <div class="more"><div class="mbox">用于冷启动：账本没有 Bootstrap 段且有 graph 时，后台用 graph 摘要生成初始 memory（<code>agentStore.ts</code>）。graph 同时作为工具（<code>graph(action: full/overview/...)</code>）供深度探索使用。</div></div>
-        </div>
-
-        <div class="item" data-wire="task">
-          <div class="row">
-            <div class="addr">TASK</div>
-            <div class="name">Current Task<small>本轮用户消息 · 当前任务</small></div>
-            <div class="src"><span class="chip">buildRuntimeUserPrompt</span><span class="chip">目标 + 运行时上下文 + 诊断 + Live Plan</span><span class="chip">stripConsumedImages</span></div>
-            <div class="cchip c-miss">每轮新增</div>
-          </div>
-          <div class="desc">用户本轮输入（即当前任务）+ 运行时上下文（日期 / 时区）+ 项目诊断 + 实时任务清单，由 <b>buildRuntimeUserPrompt</b> 包装成一条 user 消息。<b>所有动态内容刻意放在尾部</b>，与前缀隔离——这是缓存安全的关键设计。已消费的图片会被剥离，避免 base64 反复膨胀后续请求。</div>
-          <div class="more"><div class="mbox">日期/时间绝不上前缀；<code>buildDefaultRuntimeContext</code> 只在需要精确时间时才加时间行。⚠ <code>stripConsumedImages</code> 按"后面是否有 assistant"条件剥离图片，属中部翻转，多模态场景需改为写时确定性剥离。</div></div>
-        </div>
-
-        <div class="item" data-wire="tuse">
-          <div class="row">
-            <div class="addr">CALL</div>
-            <div class="name">Tool Use<small>工具调用</small></div>
-            <div class="src"><span class="chip">assistant.toolCalls</span><span class="chip">sortedStringify 规范化</span></div>
-            <div class="cchip c-miss">追加</div>
-          </div>
-          <div class="desc">模型发起的工具调用（名称 + 参数）。参数经确定性序列化，保证重建字节一致。</div>
-          <div class="more"><div class="mbox">带 tool_calls 的 assistant 消息，其 reasoning_content 必须持续回传（DeepSeek 要求），否则 400。</div></div>
-        </div>
-
-        <div class="item" data-wire="tres">
-          <div class="row">
-            <div class="addr">RES</div>
-            <div class="name">Tool Result<small>工具结果</small></div>
-            <div class="src"><span class="chip">truncateToolOutput</span><span class="chip">写时三阶梯</span></div>
-            <div class="cchip c-miss">追加 · 出生即有界</div>
-          </div>
-          <div class="desc"><b>&gt;100k 字符</b> → 落盘 + 2k 预览 + 路径（read 可回读）；<b>60k–100k</b> → 中间截断（头尾共 20k）；<b>150k</b> 硬上限。模式由<b>工具上下文设置</b>控制（完整 / 摘要 / 自动）——自动模式在 5k 字符以下保留完整输出，超出则摘要。写时一次性归一化并冻结，<b>废除事后滑动裁剪</b> → 前缀不再中部翻转。代码检索（read / grep / graph / lsp）是最常见的 tool result 来源。</div>
-          <div class="more"><div class="mbox">这是命中率优化的核心：每条工具结果出生即有界，尾部天然受控，miss 收敛到理论下限。阈值按<b>字符</b>（content.length），中文不被字节数误判。重建时直接读取已冻结的工具输出（<code>sortedStringify</code> 保证与实时路径逐字节一致）。落盘产物即 Artifact 存储（`.CodePapr/tool-output/`），压缩分类把大输出外置为引用（ContextArtifactRef），按需经 <code>read_artifact</code>(offset/limit) 回读，绝不自动注入全文。</div></div>
-        </div>
-      </section>
-
-      <div class="boundary"><span class="bl"></span><span class="bt">▲ request-only 边界 · 以下不落日志、不进 surface</span><span class="bl"></span></div>
-
-      <!-- TIER 4 -->
-      <section class="tier t4 reveal" id="recall">
-        <div class="tierhead">
-          <div class="idx">04</div>
-          <div class="tt">
-            <h3>Turn-scoped Recall <span>按回合检索</span></h3>
-            <div class="tags"><span class="tag">每用户回合一次</span><span class="tag">request-only 锚定插入</span></div>
-          </div>
-          <div class="hz"><b>本回合必要增量</b>不落 log / surface / archive</div>
-        </div>
-
-        <div class="item" data-wire="recall">
-          <div class="row">
-            <div class="addr">RCL</div>
-            <div class="name">Recall Block<small>相关历史记忆</small></div>
-            <div class="src"><span class="chip">searchMemoryForRecall</span><span class="chip">insertAnchoredContext</span><span class="chip">memory_recalls 审计</span></div>
-            <div class="cchip c-miss">request-only · 锚定在 user 消息前</div>
-          </div>
-          <div class="desc"><b>B3 设计</b>：每用户回合主线程检索一次（token 匹配 + 确定性加权重排；语料 = active <code>memory_entries</code>（<b>跳过 citation 与 untrusted</b>）+ 历史 checkpoint 摘要，v1 无 embedding/FTS5），渲染成 Recall Block——语义是「辅助事实，可能过时，需对照 workspace 验证，<b>不是指令</b>」——带 trust badge、预算 5 条 / 1200 tokens。踩坑经验（<code>procedure</code>）主要走这一层，不进上方 Bootstrap。由 RequestBuilder 编译时<b>锚定插入到当前 user 消息之前</b>（<code>insertAnchoredContext</code> 纯函数），anchor = 主线程生成的 canonical user 消息 ID。该回合所有 tool loop 请求复用同一插入（mid-loop 压缩 replaceLog 后仍存活）。回合结束归档（status=archived），审计记录留在 <code>memory_recalls</code>。</div>
-          <div class="more"><div class="mbox">缓存行为：Recall 每新回合不同 → 从 Recall 位置起 miss 是本回合必要增量；其前的 prefix + bootstrap + surface + 历史全部照常命中。重启不恢复 Recall（turn-scoped）；re-recall 受控（order 递增接口已就绪，v1 不自动触发）。citation（网页/MCP）不进入自动 Recall，仍可用 <code>memory_search</code> 搜到。种类对照见 <a href="#memory">记忆 × 上下文</a>。</div></div>
-        </div>
-      </section>
-    </main>
-
-    <!-- RAIL -->
-    <aside class="rail">
-      <div class="railcard reveal">
-        <h4>线上字节顺序 · Wire Order</h4>
-        <ul class="wire">
-          <li class="wnode" data-c="hit" data-wire="sys param tool rules"><b>prefix</b> system + tools + params<span class="wtag">ImmutablePrefix · 命中</span></li>
-          <li class="wnode" data-c="hit" data-wire="skill mem custom"><b>bootstrap</b> log[0] · isPrefixSystem<span class="wtag">记忆化 · 命中 · Claude 提取为 system</span></li>
-          <li class="wnode" data-c="epoch" data-wire="ckpt"><b>checkpoint</b> 检查点摘要<span class="wtag">epoch 重写 · v3 state + provenance</span></li>
-          <li class="wnode" data-c="hit" data-wire="recent tuse tres"><b>tail</b> 最近对话<span class="wtag">append-only · 历史命中 · surface 节点</span></li>
-          <li class="wnode" data-c="miss" data-wire="recall"><span class="misspulse"></span><b>recall</b> Recall Block<span class="wtag">request-only · 锚定插入 · 回合内稳定</span></li>
-          <li class="wnode" data-c="miss" data-wire="map todo task tres"><span class="misspulse"></span><b>本轮新增</b> user prompt + 结构图 + Live Plan<span class="wtag">唯一 miss</span></li>
+  <section class="sec reveal" id="layers">
+    <h2>分层各管什么</h2>
+    <p class="lead">五段请求，四个变化节奏。同一条信息只应出现在其中一层。检查点是这场任务的进度，不是跨会话项目记忆。</p>
+    <div class="layers">
+      <article class="layer" style="--c:var(--green)">
+        <div class="tag">STABLE PREFIX</div>
+        <h3>稳定前缀 · 01 + 02</h3>
+        <ul>
+          <li><strong>装什么：</strong>身份与工具边界、<code>AGENTS.md</code>、Skills 名称+一句话、每次会话带着的短记忆、你设的长期指导。</li>
+          <li><strong>何时变：</strong>你改规则、技能或参数，会重建前缀。新记住的内容<strong>不拆当前前缀</strong>，等压缩或下次会话。</li>
+          <li><strong>预算：</strong>项目记忆段最多 24 条 / 1500 tokens。Skills 全文用 <code>skill_load</code> 按需读，不进前缀。</li>
         </ul>
-      </div>
-      <div class="railcard reveal">
-        <h4>缓存账本 · Cache Ledger</h4>
-        <div class="stat"><span>稳定区（命中）</span><b class="g">prefix → tail 历史</b></div>
-        <div class="stat"><span>epoch 边界</span><b class="a">压缩时一次性失效</b></div>
-        <div class="stat"><span>不可约 miss</span><b class="r">本轮新增 token</b></div>
-        <div class="stat"><span>中部翻转（已消除）</span><b class="g">滑动裁剪已废除</b></div>
-        <div class="stat"><span>中部翻转（遗留）</span><b class="r">stripConsumedImages</b></div>
-      </div>
-    </aside>
-  </div>
-
-  <!-- MEMORY × CONTEXT -->
-  <section class="memsec reveal" id="memory">
-    <h2>记忆 × 上下文：哪一种在哪一层</h2>
-    <p class="sub">记忆不是「整段塞进模型」。权威在 SQLite <code>memory_entries</code>；记忆面板是唯一给人看的面。同一条知识只会出现在四层请求里的某一层——或者根本不进请求，只躺在账本里等搜索。</p>
-
-    <div class="memgrid">
-      <div class="memcard">
-        <div class="k">TIER 01 · BOOTSTRAP</div>
-        <h5>每次会话都带着</h5>
-        <p>手写笔记 + 偏好、约束、项目事实、约定、验证、决策。注入 <code>log[0]</code>，按 (session × 稳定签名) 冻结。账本变了<strong>当前前缀不重建</strong>；压缩 epoch 或新会话才刷新。</p>
-      </div>
-      <div class="memcard recall">
-        <div class="k">TIER 04 · RECALL</div>
-        <h5>这一轮可能用得上</h5>
-        <p>主要是 <code>procedure</code>（踩坑经验）以及其它 active 条目（跳过 citation）。每用户回合检索一次，锚定插在当前 user 消息前，tool loop 内字节稳定，不进 log / surface。</p>
-      </div>
-      <div class="memcard hold">
-        <div class="k">LEDGER ONLY</div>
-        <h5>不自动进请求</h5>
-        <p><code>citation</code>（网页 / MCP）只走 <code>memory_search</code>。已遗忘、被策略丢弃、当前任务 checkpoint、大工具落盘都不算「每次会话的项目记忆」。</p>
-      </div>
-    </div>
-
-    <h3>种类对照：存在哪 · 进哪一层 · 何时变 · 怎么变</h3>
-    <div class="memtable-wrap">
-      <table class="memtable">
-        <thead>
-          <tr>
-            <th>种类</th>
-            <th>存在哪</th>
-            <th>请求的哪一层</th>
-            <th>何时进当前会话的模型</th>
-            <th>怎么变</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>用户手写笔记</td>
-            <td>账本；面板「每次会话」</td>
-            <td>Session Bootstrap（稳定前缀）</td>
-            <td>会话启动从账本渲染；压缩 epoch 会 <code>refreshBootstrap</code></td>
-            <td>你在面板增改立刻落库。当前会话前缀不重建。</td>
-          </tr>
-          <tr>
-            <td>偏好 / 约束</td>
-            <td>账本；面板「每次会话」</td>
-            <td>同上，Bootstrap</td>
-            <td>本回合写入账本；<strong>下一次 Bootstrap 刷新</strong>才进前缀</td>
-            <td>你说「记住 / 必须 / 不要」，或 Agent <code>memory_write</code>。立刻 persist，无需点同意。</td>
-          </tr>
-          <tr>
-            <td>项目事实 / 约定 / 验证 / 决策</td>
-            <td>账本；面板「每次会话」</td>
-            <td>Bootstrap</td>
-            <td>同上：账本立刻变，前缀延后</td>
-            <td>工作区实证、bash 测试成功、冷启动摘要。同内容哈希会 supersede 旧条。</td>
-          </tr>
-          <tr>
-            <td>踩坑经验 <code>procedure</code></td>
-            <td>账本；面板「按需召回」</td>
-            <td>Turn-scoped Recall / <code>memory_search</code></td>
-            <td>写入后的<strong>下一用户回合</strong>，若检索命中</td>
-            <td>同一错误踩两次等。不进每次会话的前缀，避免把旧坑当指令。</td>
-          </tr>
-          <tr>
-            <td>网页 / MCP 引用 <code>citation</code></td>
-            <td>账本；面板「仅搜索」</td>
-            <td>仅 <code>memory_search</code></td>
-            <td>模型主动搜索才会看到</td>
-            <td>来源是 web / MCP，或 evidence 含 <code>https</code>。永不 Bootstrap；自动 Recall 也跳过。</td>
-          </tr>
-          <tr>
-            <td>已遗忘</td>
-            <td>ledger <code>status=forgotten</code></td>
-            <td>不进请求</td>
-            <td>—</td>
-            <td>面板点遗忘。同内容哈希不会再写入。</td>
-          </tr>
-          <tr>
-            <td>被策略丢弃</td>
-            <td>不落盘</td>
-            <td>不进请求</td>
-            <td>—</td>
-            <td>注入指令、密钥、关沙箱、危险命令、裸 assistant 推理、过长/过短。<code>planMemoryWrite</code> 直接 drop。</td>
-          </tr>
-          <tr>
-            <td>当前任务目标 / 待办</td>
-            <td>Session Checkpoint</td>
-            <td>Session State（压缩 epoch 重写）</td>
-            <td>压缩完成后作为检查点</td>
-            <td>随这一场任务变。<strong>不是</strong>跨会话项目记忆，不要复制进记忆面板。</td>
-          </tr>
-          <tr>
-            <td>大段工具输出</td>
-            <td><code>.CodePapr/tool-output/</code></td>
-            <td>不自动注入</td>
-            <td><code>read_artifact</code> 按需</td>
-            <td>写时冻结。这是 Archive，不是记忆。</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <h3>一次「记住」之后的时间线</h3>
-    <div class="timeline">
-      <div class="tl"><span class="t">T0 本回合</span><p>用户话术或 Agent <code>memory_write</code> / 拦截的 write → 信封（source / trust / origin / 风险）→ <code>planMemoryWrite</code>：persist 或 drop。没有「待审核」队列。</p></div>
-      <div class="tl"><span class="t">T1 账本</span><p>persist 的条目进入 <code>memory_entries</code>（同哈希旧 active 条 supersede）。面板立刻能看见；当前前缀仍冻结。</p></div>
-      <div class="tl"><span class="t">T2 当前前缀</span><p><strong>不变。</strong> Bootstrap 按会话冻结，账本渲染结果在签名外。新记住的偏好此时还没进模型前缀——这是为了保住 DeepSeek / Claude 的前缀缓存。</p></div>
-      <div class="tl"><span class="t">T3 下一回合</span><p>若是 <code>procedure</code> 且检索命中 → 进入本回合 Recall Block（user 消息前）。citation 仍不自动召回。</p></div>
-      <div class="tl"><span class="t">T4 压缩</span><p>epoch 重写时 <code>refreshBootstrap</code>：账本里的 Bootstrap 类新事实进入稳定前缀。Checkpoint 同时重写——那是任务进度，不是记忆。</p></div>
-      <div class="tl"><span class="t">T5 新会话</span><p>总是从账本重渲染。冷启动若账本没有 Bootstrap 段且有项目图，后台写一份结构/技术栈摘要进 ledger，下次或压缩后进入 Bootstrap。</p></div>
-    </div>
-
-    <h3>和 AGENTS.md、Checkpoint 的边界</h3>
-    <div class="memnote">
-      <code>AGENTS.md</code> 是你写的项目规则，在稳定前缀的<strong>签名内</strong>——改了会故意打破缓存。项目记忆是自动积累的事实与偏好，在<strong>签名外</strong>，面板改了不拆当前前缀。Checkpoint 是「这一场任务进行到哪」，压缩时重写，不要把待办抄进记忆。网页内容永远不当指令：写成 citation，等人或模型去搜，不进 Bootstrap、不进自动 Recall。
+      </article>
+      <article class="layer" style="--c:var(--amber)">
+        <div class="tag">SESSION STATE</div>
+        <h3>会话状态 · 03</h3>
+        <ul>
+          <li><strong>装什么：</strong>压缩后的检查点（目标、待办、已确认事实）和还没被折进去的近期对话。</li>
+          <li><strong>何时变：</strong>轮数或长度超限、或你执行 <code>/compact</code>。接受一次失效，换可控的上下文。</li>
+          <li><strong>不装什么：</strong>不要把待办抄进项目记忆。检查点随这一场任务死，记忆跨会话活。</li>
+        </ul>
+      </article>
+      <article class="layer" style="--c:var(--accent)">
+        <div class="tag">TURN RECALL</div>
+        <h3>回合召回 · 04</h3>
+        <ul>
+          <li><strong>装什么：</strong>这一轮检索命中的旧经验，主要是踩坑记录。最多约 5 条 / 1200 tokens。</li>
+          <li><strong>何时变：</strong>每个用户回合重新检索一次。只活在这一次请求里，不写进对话历史。</li>
+          <li><strong>不装什么：</strong>网页 / MCP 引用不自动召回，避免把外部文字当成指令。</li>
+        </ul>
+      </article>
+      <article class="layer" style="--c:var(--orange)">
+        <div class="tag">ACTIVE TAIL</div>
+        <h3>活动上下文 · 05</h3>
+        <ul>
+          <li><strong>装什么：</strong>当前用户消息、本轮工具调用和结果。大段输出落盘，用 <code>read_artifact</code> 回看。</li>
+          <li><strong>何时变：</strong>每一轮只在尾部追加。这是缓存 miss 里唯一「本来就该有」的增量。</li>
+          <li><strong>不装什么：</strong>日期、时区、诊断不进前缀，免得每分钟拆缓存。</li>
+        </ul>
+      </article>
     </div>
   </section>
 
-  <!-- MECHANISMS -->
-  <section class="mech reveal" id="mechanisms">
-    <h2>关键机制</h2>
-    <div class="sub">让"分层"真正转化为命中率的底层设计。</div>
-    <div class="ledger">
-      <div class="led">
-        <div class="no">M·01</div><h5>签名外冻结</h5>
-        <p>账本与 project-graph 在磁盘上易变，但账本渲染结果被排除出 <code>bootstrapSignature</code>。<code>resolveSessionBootstrap</code> 按 (session × 稳定签名) 记忆化 bootstrap——本回合新写入的记忆立刻落库，但<b>不重建当前前缀</b>。Bootstrap 类记忆在压缩 epoch（<code>refreshBootstrap</code>）或下次会话进入模型；procedure 可在下一用户回合进入 Recall。保住整段前缀缓存。</p>
-      </div>
-      <div class="led">
-         <div class="no">M·02</div><h5>写时三阶梯截断</h5>
-         <p>工具输出在写入 AppendOnlyLog 前一次性归一化（<code>truncateToolOutput</code>）：60k 中间截断 / 100k 落盘 / 150k 硬上限。出生即有界，废除事后滑动裁剪，重建逐字节一致。可配置中间截断保留字符数（默认 20k）。工具上下文模式（完整/摘要/自动，默认完整）与截断解耦：当轮始终把全文发给模型，结果变成历史后按模式替换为写入时冻结的结构化摘要卡片（<code>applyHistoryToolSummaries</code>，最新一批保持全文）；每条消息只翻转一次，仅产生一次性缓存失效，摘要稳定区随对话增长照常命中。</p>
-      </div>
-      <div class="led">
-        <div class="no">M·03</div><h5>压缩 Epoch</h5>
-        <p>轮数或 token 超限时，把较早消息折叠成 checkpoint 摘要 + 保留尾部，开启新 context epoch。这是<b>有意</b>的全量前缀重写——接受一次失效，换上下文受控。checkpoint 按<b>保留边界插入</b>（非追加到末尾），其后保留近期尾部原文（含工具调用↔结果配对）；边界在 UI 消息粒度选取，assistant+tools 组不被切开。checkpoint 在有效上下文中以 <b>user 轮</b>发出，避免压缩后首条 / 连续 assistant，提升跨 provider 正确性。</p>
-      </div>
-      <div class="led">
-        <div class="no">M·04</div><h5>动态内容尾部隔离</h5>
-        <p>日期、时区、诊断等易变内容只进<b>尾部 user 消息</b>，绝不上前缀。前缀只装"会话内不变"的东西，这是前缀缓存能成立的前提。</p>
-      </div>
-      <div class="led">
-        <div class="no">M·05</div><h5>子代理上下文继承</h5>
-        <p>子代理通过 <code>SubagentSessionDeps</code> 继承主会话的 skills、memory、project-graph 和 customPrompt，注入自己的 Session Bootstrap。Bootstrap 以 <code>role: assistant</code> + <code>metadata.isPrefixSystem: true</code> 注入——Claude 提供商据此将其提取为 system 内容，避免首条消息非 user 的 400 错误；DeepSeek/OpenAI 按原样发送。</p>
-      </div>
-      <div class="led">
-        <div class="no">M·06</div><h5>内部代理例外：Compactor 零继承</h5>
-        <p><b>Compactor</b>（上下文压缩内部子代理）是例外——<code>runCompactorSession</code>（compactorRunner.ts）不传 skills / memory / project-graph 三节：压缩输入（transcript）已含全部事实，且注入会徒增 token、污染检查点摘要。它只接收「系统提示词 + transcript user 提示词」，由运行时压缩管线（轮间 + mid-loop）直接调用，不经 <code>task</code> 工具。</p>
-      </div>
-      <div class="led">
-        <div class="no">M·07</div><h5>持久化 Surface + 单事务溯源</h5>
-        <p>模型历史选择持久化为 <code>context_surfaces</code>（checkpoint + retained tail 的 message ID 序列 + generation + 冻结渲染参数）。<b>不对 messages 建外键</b>（全量替换保存会级联清空）；压缩由主线程 Store <b>单事务提交</b>（started → surface → completed 一步提交，崩溃无残留）；失败压缩只记 failed 行，上一个 completed generation 保持 active。重启重建 = Surface 水合 + 冻结参数确定性重放 → 与 live epoch 字节一致。</p>
-      </div>
-      <div class="led">
-        <div class="no">M·08</div><h5>Turn-scoped Recall（B3）</h5>
-        <p>Recall Block 是 <b>request-time augmentation</b>：每用户回合检索一次 memory ledger（跳过 citation / untrusted）+ 历史 checkpoint，锚定插入到当前 user 消息之前，tool loop 内字节稳定；不进 AppendOnlyLog / archive messages / surface（不滞留、不污染压缩转录与 round 计数），审计记录在 <code>memory_recalls</code>。重启不恢复；re-recall 受控至多一次。渲染语义是「辅助事实、需验证」而非指令。哪一种记忆会进 Recall，见 <a href="#memory">记忆 × 上下文</a>。</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- PIPELINE -->
-  <section class="pipe reveal" id="pipeline">
-    <h2>官方缓存优先序</h2>
-    <div class="sub">摘自设置说明 <code>settingsPromptStackDesc</code> —— 越靠前越稳定，命中率越高。</div>
+  <section class="sec reveal" id="memory">
+    <h2>一条记忆怎么走</h2>
+    <p class="lead">权威在 SQLite 账本。记忆面板是唯一给人看、改、遗忘的面。没有独立的记忆文件。</p>
     <div class="flow">
-      <div class="fstep"><span class="fi">L1</span><b>系统核心与工具边界</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L2</span><b>项目规则 AGENTS.md</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L3</span><b>模式约束</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L4</span><b>Skills 摘要与 workspace</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L5</span><b>历史对话</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L6</span><b>本轮诊断 / 任务</b></div>
+      <div class="step">
+        <div class="n">1 · 来源</div>
+        <h3>谁提出</h3>
+        <p>你说「记住 / 必须 / 不要」、测试跑通、冷启动摘要、Agent <code>memory_write</code>、或你在面板手写。</p>
+      </div>
+      <div class="step">
+        <div class="n">2 · 门</div>
+        <h3>留下或丢掉</h3>
+        <p>确定性规则立刻决定：正常事实留下，注入 / 密钥 / 危险命令丢掉。没有「请你点同意」。</p>
+      </div>
+      <div class="step">
+        <div class="n">3 · 账本</div>
+        <h3>面板立刻可见</h3>
+        <p>留下的进入 <code>memory_entries</code>。同内容会覆盖旧条。当前会话前缀这时还不变。</p>
+      </div>
+      <div class="step">
+        <div class="n">4 · 去向</div>
+        <h3>按种类进层</h3>
+        <p>短指令等压缩或下次会话进前缀；踩坑下一回合可召回；网页引用只出现在搜索里。</p>
+      </div>
+    </div>
+
+    <div class="dest" style="margin-top:16px">
+      <article class="dcard">
+        <div class="k">每次会话</div>
+        <h3>进 02 会话引导</h3>
+        <p>手写笔记、偏好、约束、项目事实、约定、验证、决策。最多 24 条 / 1500 tokens。</p>
+        <div class="cap">面板分组：每次会话</div>
+      </article>
+      <article class="dcard">
+        <div class="k">按需召回</div>
+        <h3>进 04 本回合召回</h3>
+        <p>踩坑经验 <code>procedure</code>。写入后的下一用户回合，检索命中才出现。不进每次会话的前缀。</p>
+        <div class="cap">面板分组：按需召回</div>
+      </article>
+      <article class="dcard">
+        <div class="k">仅搜索</div>
+        <h3>不自动进请求</h3>
+        <p>网页 / MCP 引用 <code>citation</code>。模型调用 <code>memory_search</code> 才会看到。永不进 02，也不自动召回。</p>
+        <div class="cap">面板分组：仅搜索</div>
+      </article>
+    </div>
+    <p class="note"><strong><code>AGENTS.md</code></strong> 是你写的项目规则，改了会重建前缀。<strong>项目记忆</strong>是自动积累的事实与偏好，新写入不拆当前前缀。<strong>检查点</strong>是这一场任务进行到哪。三者不要互相复制。</p>
+  </section>
+
+  <section class="sec reveal" id="clocks">
+    <h2>三种时钟</h2>
+    <p class="lead">同一条记忆落库之后，什么时候真正出现在模型眼前，取决于你现在处在哪一拍。</p>
+    <div class="clocks">
+      <article class="clock">
+        <h3>本回合</h3>
+        <p>账本和面板立刻更新。当前前缀不动。如果是踩坑经验，要等到<strong>下一个用户回合</strong>才可能被召回。</p>
+      </article>
+      <article class="clock">
+        <h3>压缩</h3>
+        <p>检查点重写（任务进度）。同时从账本重渲染项目记忆，短指令这才进入稳定前缀。</p>
+      </article>
+      <article class="clock">
+        <h3>新会话</h3>
+        <p>总是从账本重渲染会话引导。若账本还是空的、且有项目图，后台写一条结构 / 技术栈摘要，下次或压缩后进入前缀。</p>
+      </article>
     </div>
   </section>
 </div>
 
 <footer>
   <div class="container">
-    CodePapr &mdash; 上下文分层可视化 · 生成自源码核实（<code>promptSystem.ts</code> / <code>contextCompaction.ts</code> / <code>contextStateMerge.ts</code> / <code>contextSurfaceStore.ts</code> / <code>ContentEnvelope.ts</code> / <code>memoryLedger.ts</code> / <code>memoryPersist.ts</code> / <code>memoryRecall.ts</code> / <code>agentStore.ts</code> / <code>toolOutputTruncation.ts</code> / <code>db/mod.rs</code>）。四层模型 = Stable Prefix（冻结）/ Session State（epoch + 持久化 Surface）/ Active Context（append-only）/ Turn-scoped Recall（request-only 锚定插入）。checkpoint 为 v3 结构化状态（13 分区 + provenance）；压缩事务单事务提交；Memory Ledger 以面板为唯一给人看的面（零审核写入；citation/procedure 不进 Bootstrap）。阈值单位：字符。Bootstrap 以 <code>role: assistant</code> + <code>isPrefixSystem</code> 注入，Claude 提取为 system。
+    CodePapr · 上下文分层 · <a href="tutorial.html">使用教程</a> · <a href="index.html">首页</a>
   </div>
 </footer>
 
@@ -742,35 +340,18 @@
 (function(){
   const html=document.documentElement;
   const stored=localStorage.getItem('codepapr-theme');
-  if(stored==='light'){html.setAttribute('data-theme','light')}
-  else if(stored==='dark'){html.setAttribute('data-theme','dark')}
+  if(stored==='light') html.setAttribute('data-theme','light');
+  else if(stored==='dark') html.setAttribute('data-theme','dark');
   window.toggleTheme=function(){
     const cur=html.getAttribute('data-theme');
     const next=(!cur||cur==='dark')?'light':'dark';
     html.setAttribute('data-theme',next);
     localStorage.setItem('codepapr-theme',next);
   };
-
   const observer=new IntersectionObserver((entries)=>{
     entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');observer.unobserve(e.target)}})
   },{threshold:0.08,rootMargin:'0px 0px -40px 0px'});
   document.querySelectorAll('.reveal').forEach(el=>observer.observe(el));
-
-  document.querySelectorAll('.item').forEach(it=>{
-    it.addEventListener('click',()=>it.classList.toggle('open'));
-    const w=(it.dataset.wire||'').split(' ');
-    const nodes=[...document.querySelectorAll('.wnode')];
-    it.addEventListener('mouseenter',()=>nodes.forEach(n=>{
-      if((n.dataset.wire||'').split(' ').some(x=>w.includes(x))) n.classList.add('lit');
-    }));
-    it.addEventListener('mouseleave',()=>nodes.forEach(n=>n.classList.remove('lit')));
-  });
-
-  const arc=document.getElementById('dialArc'), num=document.getElementById('dialNum');
-  const C=2*Math.PI*22, target=99.6;
-  arc.style.strokeDasharray=C;
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{arc.style.strokeDashoffset=C*(1-target/100)}));
-  let cur=0; const tick=setInterval(()=>{cur+=2;if(cur>=target){cur=target;clearInterval(tick)}num.textContent=Number.isInteger(cur)?cur:cur.toFixed(1)},28);
 })();
 </script>
 </body>

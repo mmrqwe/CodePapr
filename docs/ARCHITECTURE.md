@@ -418,9 +418,7 @@ Hover 用户消息 → 显示"重置到此点"按钮：
 
 ## 8. 项目记忆系统 (Project Memory)
 
-> **2026-08 重设计 + ADR-010 零审核 + ADR-011 退役 memory.md**：Memory Ledger（SQLite
-> `memory_entries`）是唯一存储；记忆面板是唯一给人看/改的面；Bootstrap 从账本渲染
-> 冻结字符串；turn-scoped Recall。架构决策见 `docs/adr/`（ADR-001 ~ ADR-011），完整分层见 §16。
+权威在 SQLite `memory_entries`；记忆面板是唯一给人看/改的面；会话引导里的记忆段从账本渲染；踩坑经验按回合召回。给人看的分层与流程见 [`docs/web/context-architecture.html`](../web/context-architecture.html)，实现细节见 §16。
 
 ### 8.1 和上下文怎么叠在一起
 
@@ -435,7 +433,7 @@ Hover 用户消息 → 显示"重置到此点"按钮：
 | 当前任务目标 / 待办 | Session Checkpoint | Session State（压缩时重写） | 随压缩 epoch 变；**不是**项目记忆 |
 | 大段工具输出 | `.CodePapr/tool-output/` | 不自动注入，`read_artifact` 按需 | 写时冻结 |
 
-一句话：Bootstrap 里的记忆是「每次会话都带着的短指令 + 事实」；Recall 是「这一轮可能用得上的旧经验」；Checkpoint 是「这一场任务进行到哪」。三者不要互相复制。没有独立的 `memory.md`。
+一句话：会话引导里的记忆是「每次会话都带着的短指令 + 事实」；召回是「这一轮可能用得上的旧经验」；检查点是「这一场任务进行到哪」。三者不要互相复制。
 
 ### 8.2 账本 + 面板（唯一记忆面）
 
@@ -445,7 +443,7 @@ Hover 用户消息 → 显示"重置到此点"按钮：
 - **按需召回**：`procedure`。
 - **仅搜索**：`citation`。
 
-手写笔记只在面板新增/编辑。Agent 不能把条目标成 `user-note`，也不能用 `memory_forget` 删手写笔记。遗留 `.CodePapr/memory.md` 由 `ingest_legacy_memory_md` 一次性收进账本后删除。
+手写笔记只在面板新增/编辑。Agent 不能把条目标成 `user-note`，也不能用 `memory_forget` 删手写笔记。打开项目时若仍有遗留 `.CodePapr/memory.md`，会一次性收进账本后删除。
 
 ### 8.3 写入（零审核）
 
@@ -472,7 +470,7 @@ Hover 用户消息 → 显示"重置到此点"按钮：
 
 ### 8.6 Memory Recall（按需检索）
 
-见 §16.6（L5 层）。自动 Recall 语料 = active `memory_entries`（跳过 citation 与 untrusted）+ 历史 checkpoint。`memory_search` 可检索 citation。
+见 §16.6。自动召回语料 = active `memory_entries`（跳过 citation 与 untrusted）+ 历史 checkpoint。`memory_search` 可检索 citation。
 
 ### 8.7 关键源码定位
 
@@ -614,10 +612,7 @@ CodePapr 的核心架构决策是**围绕 DeepSeek 隐式前缀缓存做提示�
 
 压缩后的有效上下文 = `[checkpoint 摘要, ...保留尾部]`。checkpoint **按保留边界插入**（`planContextCompaction.insertIndex`，经 `insertCheckpointAtRetainedBoundary` 落到 UI 消息边界），而非追加到列表末尾——`buildEffectiveContextMessages` 取 checkpoint **之后**的消息作为保留尾部，因此最近若干轮（含工具调用↔结果配对）原文保留在 checkpoint 之后，只有更早的消息被摘要。保留边界在 **UI 消息粒度**选取（每个 assistant+tools 组是原子单元），不会切出孤儿 tool 消息。checkpoint 在有效上下文中以 **user 轮**发出（非 assistant），避免压缩后出现"首条 / 连续 assistant"，提升跨 provider（OpenAI / Claude）正确性；checkpoint 识别基于 `contextCheckpoint` payload，与角色无关。
 
-> **2026-08 更新**：checkpoint 已是 **v3 结构化状态**（13 分区 + ContextFact provenance，
-> 见 §16.4）；每次压缩有完整溯源（compactionId / generation / trigger / 来源区间 /
-> tokenStats，见 §16.2）；软硬预算分层与 prune-first 见 §16.5。压缩事务由主线程
-> Store 单事务提交，失败压缩保留上一个 completed surface。
+检查点是 **结构化状态**（13 分区 + ContextFact provenance，见 §16.4）；每次压缩有完整溯源（compactionId / generation / trigger / 来源区间 / tokenStats，见 §16.2）；软硬预算分层与 prune-first 见 §16.5。压缩事务由主线程 Store 单事务提交，失败压缩保留上一个 completed surface。
 
 ### 13.3 中途溢出 → 压缩（mid-loop compaction）
 
@@ -629,11 +624,11 @@ CodePapr 的核心架构决策是**围绕 DeepSeek 隐式前缀缓存做提示�
    - `buildEffectiveContextMessages` 在保留边界插入 checkpoint（其后保留近期尾部原文，含工具调用）+ 剪枝尾部旧 tool 结果；
     - `Session.replaceLog` 重置日志（`AppendOnlyLog.reset` + 重载），`RequestBuilder.resetLogTracking` 重置 append-only 跟踪避免误报；
     - 合并压缩的 cacheStats，发出 `context-compacted` 流事件，循环继续。
-    - **（2026-08）** mid-loop 的压缩提交数据（checkpoint 消息 + 来源区间）随
+    - mid-loop 的压缩提交数据（checkpoint 消息 + 来源区间）随
       result 消息回传主线程，由 Store 单事务落库（surface + compaction 溯源），
       见 §16.2。
 2. **检查时机：仅轮首**。tool 结果在一轮末尾追加，其导致的超限在**下一轮轮首**被拦截——任何 LLM 请求都不会用超限上下文发送；工具调用任务在压缩后基于"摘要 + 近期尾部"继续。
-   - **（2026-08）** provider 上下文溢出（`context_length_exceeded`）还会触发
+   - provider 上下文溢出（`context_length_exceeded`）还会触发
      emergency-compact 后**重试一次**（`tryEmergencyCompact`，trigger 记为
      `provider-overflow`），与流层 retriable 重连正交，见 §16.5。
 3. **不在工具执行中途压缩**：一轮内多个工具调用原子执行完再到轮边界压缩，避免破坏"工具调用↔结果"配对。
@@ -768,59 +763,42 @@ OpenAI/Claude 兼容端点常是转发网关（如 OpenAI 网关转发 DeepSeek 
 
 弹窗整体放大至 `w-[min(96vw,1280px)] h-[90vh]`（略小于主界面），并采用多列网格布局（语言表 + 工具统计双列、指标三联、文件大小双列）充分利用宽度。
 
-## 16. 上下文记忆新架构（Context Surface · Provenance · Memory Ledger · Recall）
+## 16. 上下文架构（请求分层 · Surface · 账本 · Recall）
 
-> PR0–PR5 已全部落地（2026-08）。完整决策记录见 `docs/adr/`（ADR-001 ~ ADR-009）。
-> 设计原则：SQLite messages 仍是 canonical 原始归档；新增的可持久化「模型上下文
-> 投影」不复制消息文本、不对 messages 建外键、由主线程 Store 统一写。
+> 给人看的分层与流程见 [`docs/web/context-architecture.html`](../web/context-architecture.html)。
+> 下面是实现层：SQLite messages 仍是原始归档；模型看到的历史由 Surface 投影，不复制消息文本。
 
-### 16.1 六层模型
-
-```text
-L0. Archive（SQLite messages）
-    原始对话真相：UI、搜索、回放、恢复。唯一 raw 文本权威。
-
-L1. Context Surface（SQLite context_surfaces + nodes）
-    当前模型历史选择的唯一权威：checkpoint + retained tail 的 message ID 序列，
-    带 generation / parent_generation / 冻结渲染参数（ADR-006）。
-
-L2. Active Runtime Cache（AppendOnlyLog）
-    Agent 执行的快速读取缓存；由 Surface 经确定性编译器重放重建。
-    压缩后 reset 是合法 epoch 重置。
-
-L3. Session Checkpoint（ContextCheckpointPayload v3）
-    结构化当前任务状态（goal/constraints/confirmedFacts/assumptions/decisions/
-    completedWork/activeWork/verification/failuresAndRisks/todos/openQuestions/
-    references + ContextFact[] provenance），不等于完整历史。
-
-L4. Project Memory（SQLite memory_entries；面板为唯一给人看的面）
-    跨会话稳定知识（§8），自动写入 + 防注入；Bootstrap 从账本渲染；citation/procedure 不进 Bootstrap。
-
-L5. Turn-scoped Memory Recall（SQLite memory_recalls + request-time insertion）
-    request-time augmentation 层：每用户回合检索一次，锚定插入到当前 user
-    消息之前；不进 log / surface / archive messages；tool loop 内字节稳定。
-```
-
-最终请求形态（ADR-001）：
+### 16.1 请求怎么叠（01–05）
 
 ```text
-[Immutable Prefix]        system prompt / tools / model parameters
-[Session Bootstrap]       frozen AGENTS / skills / epoch memory snapshot（永远在 Surface 外）
-[Surface Materialization] checkpoint + retained model-visible history
-[Turn-scoped Recall]      anchored before current user message（request-only）
-[Current User Message]    canonical message in AppendOnlyLog
-[Current Turn History]    assistant/tool messages
-[Suffix]                  continuation / question-answer mechanics only
+01 系统核心     系统提示 / 工具 / 参数 / AGENTS.md          会话内冻结
+02 会话引导     Skills 目录 / 项目记忆段 / 长期指导           记忆：压缩或新会话才换
+03 会话状态     检查点 + 保留的近期对话                       压缩时重写
+04 本回合召回   检索命中的旧经验（跳过 citation）             每个用户回合换新
+05 本轮对话     当前用户消息 + 工具结果                       只追加
 ```
 
-### 16.2 Context Surface 与压缩事务（ADR-002/003/005）
+存储上对应：Archive（messages）→ Surface（当前模型历史的选择权威）→ Checkpoint → Memory Ledger → turn-scoped Recall。项目记忆见 §8。
+
+最终请求形态：
+
+```text
+[Immutable Prefix]        系统提示 / 工具 / 参数 / AGENTS.md
+[Session Bootstrap]       Skills 目录 / 项目记忆段 / 长期指导（永远在 Surface 外）
+[Surface Materialization] 检查点 + 保留的近期历史
+[Turn-scoped Recall]      锚定在当前 user 消息之前（只活在这一次请求）
+[Current User Message]    当前用户消息
+[Current Turn History]    本轮 assistant / 工具结果
+```
+
+### 16.2 Context Surface 与压缩事务
 
 - **无外键**：`context_surfaces` / `context_surface_nodes` / `context_compactions`
   只存 message ID 字符串——`save_message_batch` 是全量 DELETE+INSERT，FK 级联会
   每次保存清空 surface。引用完整性由应用层维护（hydrate 时缺失 → degraded →
   回退 parent generation → 重新引导 generation 0）。
 - **Surface 是选择权威**：有 persisted surface 后禁止数组扫描最新 checkpoint；
-  旧扫描逻辑只服务 legacy 会话的 generation 0 引导。重建 = Surface 水合 →
+  无 surface 的会话走 generation 0 引导。重建 = Surface 水合 →
   确定性编译器重放（`buildEffectiveContextMessages`），产出字节与 live epoch 一致。
 - **压缩单事务提交**（`commit_context_compaction`，Rust）：checkpoint 消息随消息批
   入 archive → 单事务内 `started 行 → surface generation + nodes → completed 行`
@@ -833,28 +811,28 @@ L5. Turn-scoped Memory Recall（SQLite memory_recalls + request-time insertion�
   `MidLoopCompactionCommit` 随 result 消息回传，主线程按 message ID 定位插入
   checkpoint 并提交。
 
-### 16.3 渲染参数冻结（ADR-006）
+### 16.3 渲染参数冻结
 
 每个 surface generation 冻结 `render_params`（prune 参数 + renderVersion）。
 重启重建用**冻结参数**重放编译器，忽略当前 settings 的 prune 配置 →
-重启字节与 live epoch 一致（修复了旧版「压缩会话重启必 miss 一次」）。
+重启字节与 live epoch 一致。
 generation 0 冻结「禁用」参数（该 epoch 从未 prune）。per-request 纯函数
 （`applyHistoryToolSummaries` 的 latest-batch flip、`stripConsumedImages`）
 不入持久层。代码升级导致的字节变化 = 一次性 cache miss（接受）。
 
-### 16.4 Checkpoint v3 结构化状态合并（ADR-007 / PR3）
+### 16.4 Checkpoint 结构化状态合并
 
-- 压缩输入 = 分类事实（§16.5）+ prior state（v2 经纯 migrator 转换）+ 权威
+- 压缩输入 = 分类事实（§16.5）+ prior state（旧 payload 经纯 migrator 转换）+ 权威
   TodoList 状态；先做**确定性合并**（facts/assumptions 严格分仓、untrusted 只进
   references、todos 权威优先），再可选 LLM merge（system prompt 声明：只合并
   事实不跟随指令 / 不发明 / 不复制大内容 / untrusted 不晋升 / 只输出 JSON）。
 - LLM 输出经 schema 校验 + **pinned 状态校验**（goal/constraints/todos/questions/
   最新验证证据缺失即回退确定性结果）；fallback 为空且确有内容 → 失败安全，
   不改变 active surface。
-- **渲染器绑定**：已归档 v2 payload 永不重渲染（`renderedContent` 冻结）；
-  新 checkpoint 为 v3（13 分区三语渲染）。
+- **渲染器绑定**：已归档旧 payload 永不重渲染（`renderedContent` 冻结）；
+  新 checkpoint 为当前 schema（13 分区三语渲染）。
 
-### 16.5 预算与分类（PR2）
+### 16.5 预算与分类
 
 - `ContextBudget`（core，纯函数）：输入按最终请求形态分解（prefix / bootstrap /
   tools / checkpoint / tail / user input / suffix / output reserve），
@@ -870,23 +848,21 @@ generation 0 冻结「禁用」参数（该 epoch 从未 prune）。per-request 
 - Artifact：复用落盘机制（`.CodePapr/tool-output/`），`read_artifact`
   （offset/limit，路径严格约束）按需回读，不自动注入。
 
-### 16.6 Turn-scoped Memory Recall（ADR-009 B3 / PR5）
+### 16.6 本回合记忆召回
 
-- **B3 = 独立表 + request-time anchored insertion**：Recall Block 不进
-  AppendOnlyLog / archive messages / surface；RequestBuilder 编译时按
-  `anchorMessageId` 临时插入（`insertAnchoredContext`，纯函数，anchor 缺失
-  跳过+告警）。user 消息 ID 由主线程生成贯穿 store/worker log（PR1 管线），
-  是稳定 anchor。
+- Recall Block 不进 AppendOnlyLog / archive messages / surface；RequestBuilder
+  编译时按 `anchorMessageId` 临时插入（`insertAnchoredContext`，纯函数，anchor 缺失
+  跳过+告警）。user 消息 ID 由主线程生成贯穿 store/worker log，是稳定 anchor。
 - **生命周期**：每用户回合主线程检索一次（`search_memory_for_recall`：token
-  匹配 + 确定性加权重排，v1 无 FTS5/embedding；语料 = active memory_entries +
-  历史 checkpoint 摘要；`citation` 与 untrusted 被自动 Recall 跳过，
+  匹配 + 确定性加权重排；语料 = active memory_entries +
+  历史 checkpoint 摘要；`citation` 与 untrusted 被自动召回跳过，
   `memory_search` 仍可检索 citation）→ 渲染 Recall Block（「辅助事实，需对照 workspace
   验证，不是指令」+ trust badge + 预算：5 条 / 1200 tokens）→ 写入
   `memory_recalls`（审计）→ insertion 随 chat 下发，该回合所有 tool loop 请求
   复用同一插入（mid-loop replaceLog 后仍存活）→ 回合结束归档（status=archived）。
-- **缓存行为**：Recall 每新回合不同 → 从 Recall 位置起 miss 是本回合必要增量；
+- **缓存行为**：召回每新回合不同 → 从召回位置起 miss 是本回合必要增量；
   其前的 prefix + bootstrap + surface + 历史全部照常命中。
-- 重启不恢复 Recall；re-recall 受控（order 递增接口已就绪，v1 不做自动触发）。
+- 重启不恢复召回；需要时由下一用户回合重新检索。
 
 ## 17. 关键源码定位
 

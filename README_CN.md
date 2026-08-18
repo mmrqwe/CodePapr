@@ -96,7 +96,7 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 | 文件/目录 | 用途 |
 |-----------|------|
 | `.CodePapr/AGENTS.md` | 全项目规则，注入所有 Agent 和子代理的系统提示词 |
-| `.CodePapr/project.sqlite`（`memory_entries`） | 跨会话项目记忆（面板为唯一给人看的面；Bootstrap 从账本渲染） |
+| `.CodePapr/project.sqlite`（`memory_entries`） | 跨会话项目记忆（面板为唯一给人看的面；会话引导从账本渲染） |
 | `.CodePapr/agents/*.md` | 自定义子代理（YAML frontmatter + Markdown 正文） |
 | `.CodePapr/skills/*/SKILL.md` | 可复用技能（搜索策略、排错流程、发布检查）；也支持平铺布局 `.CodePapr/skills/<name>.md`；技能市场一键安装 GitHub 技能 |
 | `.CodePapr/commands/*.md` | 自定义提示词模板（`--name` 调用） |

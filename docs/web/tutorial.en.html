@@ -1159,28 +1159,20 @@ TTS Data Flow:
           <strong>Auto-injection Flow:</strong> The agent reads the rule file <code>.CodePapr/AGENTS.md</code> and merges it into the stable system prompt. Missing files are silently skipped.
         </div>
 
-        <h3>Memory panel — Cross-Session Project Memory (zero-review)</h3>
-        <p>The SQLite memory ledger is authoritative; the memory panel is the only human surface. Memory <strong>is split across context layers</strong>: short instructions in Bootstrap, procedures in Recall, web citations in search only. Full map: <a href="context-architecture.en.html#memory">Context layering · Memory</a>.</p>
+        <h3>Memory panel — cross-session project memory</h3>
+        <p>The ledger lives in SQLite; the memory panel is the only human surface. Short instructions go in every-session Bootstrap, procedures in per-turn recall, web citations in search only. Layers and timing: <a href="context-architecture.en.html">Context layering</a>.</p>
         <ul>
-          <li><strong>Zero-review writes:</strong> You said remember / must / don't, workspace-grounded facts, successful tests, cold-start summary, Agent <code>memory_write</code>, panel handwritten notes persist immediately. No admit queue. Injection / secrets / dangerous commands are dropped. Web / MCP becomes a <code>citation</code> and never enters Bootstrap.</li>
-          <li><strong>Panel groups:</strong> Every session (handwritten notes / preference / constraint / fact, 24 items / 1500 tokens); on-demand recall (<code>procedure</code>); search only (<code>citation</code>).</li>
-          <li><strong>Bootstrap load:</strong> Rendered from the ledger into the stable prefix at session start, frozen per (session × stable signature). The rendered section is outside the signature — newly saved memories <strong>do not bust the current prefix cache</strong>; they enter Bootstrap on a compaction epoch or the next session.</li>
-          <li><strong>Recall:</strong> Once per user turn. Procedures (<code>procedure</code>) mainly live here; citations skip auto-Recall but remain searchable via <code>memory_search</code>.</li>
-          <li><strong>Dedup:</strong> Same-hash rows are superseded. There is no LLM pass over a standalone memory file.</li>
-          <li><strong>What to record:</strong> Preferences, conventions, verified facts. Not general programming knowledge, current-task todos (that is the Checkpoint), or rules already in <code>AGENTS.md</code>.</li>
+          <li><strong>Auto-write:</strong> You said remember / must / don’t, a test passed, cold start, Agent <code>memory_write</code>, or a panel note — kept or dropped immediately. No admit button.</li>
+          <li><strong>Three panel groups:</strong> every session (notes / preferences / facts, 24 items / 1500 tokens), on-demand (procedures), search only (web citations).</li>
+          <li><strong>When it reaches the model:</strong> this turn updates the ledger only; the current prefix stays; compact or a new session brings short instructions into the prefix; procedures wait for the next user turn to be recalled.</li>
         </ul>
-
-        <div class="callout">
-          <strong>When a remembered fact reaches the model:</strong><br>
-          T0 this turn persist or drop (no review) → T1 ledger changes immediately (visible in the panel) → T2 current-session prefix unchanged → T3 next user turn procedures may enter Recall → T4 compaction epoch refreshes Bootstrap → T5 new session re-renders from the ledger.
-        </div>
 
         <h3>/compact — Force Context Compression</h3>
         <p>Manually trigger conversation compression, merging earlier messages into structured checkpoints to free token space:</p>
         <ul>
           <li><strong>Force mode:</strong> Not limited by <code>maxConversationRounds</code> and <code>maxContextTokens</code> thresholds</li>
           <li><strong>Internal Compactor agent:</strong> Calls the compression pipeline; the zero-tool Compactor sub-agent generates the checkpoint (model tier follows <code>compactionModel</code>; rule-based fallback on LLM failure)</li>
-          <li><strong>Refreshes Bootstrap:</strong> On a compaction epoch rewrite, project memory is re-rendered from the ledger into the stable prefix</li>
+          <li><strong>Refreshes session bootstrap:</strong> On compaction, project memory is re-rendered from the ledger into the stable prefix</li>
           <li><strong>Use case:</strong> When approaching context limits or responses slow down, compress to restore smooth conversation</li>
         </ul>
 
@@ -1722,29 +1714,31 @@ X-API-Key: your-api-key</code></pre>
     <section class="section" id="cache">
       <div class="section-header"><h2>DeepSeek Cache Optimization</h2></div>
       <div class="content">
-        <h3>Three-Layer Prompt Injection</h3>
-        <p>The system injects prompts in three layers, ordered from most to least stable to maximize DeepSeek automatic prefix cache hits:</p>
+        <h3>How a request is stacked (cache view)</h3>
+        <p>The model does not get one blob. Full layering and memory flow: <a href="context-architecture.en.html">Context layering</a>. Earlier bytes stay still so prefix cache works:</p>
 
         <table>
-          <thead><tr><th>Layer</th><th>Injection Location</th><th>Content</th><th>Stability</th></tr></thead>
+          <thead><tr><th></th><th>Holds</th><th>Changes when</th><th>Cache</th></tr></thead>
           <tbody>
-            <tr><td>Layer 1</td><td>System Prompt</td><td>Base Identity + Rules + Mode + Workspace Path + Core Constraints</td><td>Reused across sessions</td></tr>
-            <tr><td>Layer 2</td><td>Session Bootstrap</td><td>Skills Summary + ProjectGraph + Custom Guidance</td><td>Fully stable across rounds</td></tr>
-            <tr><td>Layer 3</td><td>Runtime User Prompt</td><td>Mode Header + User Input + Diagnostics</td><td>Changes each round</td></tr>
+            <tr><td>01 System core</td><td>System prompt, tools, params, <code>AGENTS.md</code></td><td>Frozen for the session</td><td>Hit</td></tr>
+            <tr><td>02 Session bootstrap</td><td>Skills catalog, memory slice, long-term guidance</td><td>Memory: compact or new session</td><td>Hit</td></tr>
+            <tr><td>03 Session state</td><td>Checkpoint + retained recent turns</td><td>Rewritten on compaction</td><td>Hit within an epoch</td></tr>
+            <tr><td>04 Turn recall</td><td>Old experience retrieved this turn</td><td>New every user turn</td><td>Miss from here</td></tr>
+            <tr><td>05 This turn</td><td>Current user message + tool results</td><td>Append-only</td><td>Tail increment</td></tr>
           </tbody>
         </table>
 
         <h3>Cache Hit Patterns</h3>
-        <div class="diagram">Multi-round tool calls in the same session:
-  Round 1: [system][bootstrap][user]                                   ← Fully cached
-  Round 2: [system][bootstrap][user][asst_1][tool_1]                   ← Prefix hit
-  Round 3: [system][bootstrap][user][asst_1][tool_1][asst_2][tool_2]   ← Prefix hit
+        <div class="diagram">Multiple tool calls in the same user turn:
+  [01][02][03][04 this-turn recall][05 user + tools...]
+  → bytes before 04 stay still (hit); from 04 onward is this turn’s increment
 
-Cross-session (same project):
-  Session A: [system][bootstrap][user_A]  → system+bootstrap cache reused by Session B
+Next user turn:
+  [01][02][03][04 new recall][05 new user...]
+  → 01–03 still hit; 04 is replaced
 
-Cross-session (different projects):
-  Each has a different workspace path → the base+constraints portion of system prompt can still be reused
+After compaction:
+  03 is rewritten, and 02’s memory slice refreshes; one miss, then hits accumulate again
 </div>
 
         <h3>Key Invariants</h3>

@@ -243,7 +243,9 @@ The toolbar search box supports **conversation search** and **file search**, swi
 
 ## Project Memory (zero-review auto-write)
 
-Project memory is not “dumped into the model as one blob”. The ledger in SQLite `memory_entries` is authoritative; the memory panel is the only human surface. Different kinds of memory enter **different context layers** and change on different clocks. There is no standalone `memory.md`.
+Layering and timing (the human-readable version): [`docs/web/context-architecture.en.html`](../web/context-architecture.en.html).
+
+Project memory is not “dumped into the model as one blob”. The ledger in SQLite `memory_entries` is authoritative; the memory panel is the only human surface. Different kinds of memory enter **different context layers** and change on different clocks.
 
 | Kind | Stored in | Request layer | When it reaches this session’s model | How it changes |
 |---|---|---|---|---|

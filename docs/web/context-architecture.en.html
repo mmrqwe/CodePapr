@@ -12,7 +12,6 @@
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   html{scroll-behavior:smooth}
   @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:0.01ms!important;transition-duration:0.01ms!important}}
-
   :root{
     --bg-deep:#06070a;--bg-base:#0a0c12;--bg-elevated:#0f121a;--bg-card:rgba(15,18,26,0.8);
     --surface:rgba(255,255,255,0.04);--surface-hover:rgba(255,255,255,0.06);
@@ -23,8 +22,7 @@
     --radius:16px;--radius-sm:10px;--radius-xs:6px;
     --font-mono:'JetBrains Mono','Cascadia Code','SF Mono',monospace;
     --font-sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-    --easing:cubic-bezier(0.16,1,0.3,1);
-    --texture-opacity:0;
+    --easing:cubic-bezier(0.16,1,0.3,1);--texture-opacity:0;
   }
   [data-theme="light"]{
     --bg-deep:#f7f4ef;--bg-base:#fffdf9;--bg-elevated:#f5f0e9;--bg-card:rgba(245,241,236,0.85);
@@ -46,687 +44,285 @@
       --texture-opacity:1;
     }
   }
-
   body{font-family:var(--font-sans);background:var(--bg-deep);color:var(--foreground);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased;transition:background-color 0.4s,color 0.4s}
   body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opacity:calc(var(--texture-opacity) * 0.035);background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:256px 256px}
-  ::selection{background:var(--accent-soft)}
-  code,.mono{font-family:var(--font-mono)}
-
+  code{font-family:var(--font-mono);font-size:0.86em;color:var(--accent)}
   .ambient{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
-  .ambient::before{content:'';position:absolute;inset:0;
-    background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(99,102,241,0.06) 0%,transparent 60%),
-               radial-gradient(ellipse 60% 50% at 70% 85%,rgba(34,197,94,0.04) 0%,transparent 60%),
-               radial-gradient(ellipse 70% 80% at 50% 50%,rgba(99,102,241,0.03) 0%,transparent 70%)}
-  [data-theme="light"] .ambient::before{background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.04) 0%,transparent 60%),radial-gradient(ellipse 70% 80% at 50% 50%,rgba(217,103,62,0.04) 0%,transparent 70%)}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .ambient::before{background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.04) 0%,transparent 60%),radial-gradient(ellipse 70% 80% at 50% 50%,rgba(217,103,62,0.04) 0%,transparent 70%)}}
-  .ambient .blob{position:absolute;border-radius:50%;filter:blur(120px);opacity:0.08;transition:opacity 0.4s}
-  [data-theme="light"] .ambient .blob{opacity:0.05}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .ambient .blob{opacity:0.05}}
-  .blob-1{width:700px;height:700px;background:var(--accent);top:-15%;left:-10%;animation:drift 28s ease-in-out infinite}
-  .blob-2{width:500px;height:500px;background:var(--green);bottom:-10%;right:-8%;animation:drift 32s ease-in-out infinite reverse}
-  .blob-3{width:400px;height:400px;background:#8b5cf6;top:55%;left:55%;animation:drift 24s ease-in-out infinite}
-  @keyframes drift{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(50px,-30px) scale(1.08)}66%{transform:translate(-20px,40px) scale(0.94)}}
-
-  .grid-overlay{position:fixed;inset:0;pointer-events:none;z-index:0;opacity:0.3;transition:opacity 0.4s;
-    background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);
-    background-size:64px 64px;mask-image:radial-gradient(ellipse 60% 60% at 50% 50%,black 30%,transparent 70%)}
-  [data-theme="light"] .grid-overlay{opacity:0.6}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .grid-overlay{opacity:0.6}}
-
-  .container{max-width:1200px;margin:0 auto;padding:0 32px;position:relative;z-index:1}
+  .ambient::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(99,102,241,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(34,197,94,0.04) 0%,transparent 60%)}
+  [data-theme="light"] .ambient::before{background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.04) 0%,transparent 60%)}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .ambient::before{background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.04) 0%,transparent 60%)}}
+  .container{max-width:920px;margin:0 auto;padding:0 32px;position:relative;z-index:1}
   @media(max-width:768px){.container{padding:0 20px}}
-
-  nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(6,7,10,0.82);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);border-bottom:1px solid var(--border);transition:background-color 0.4s}
+  nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(6,7,10,0.82);backdrop-filter:blur(24px) saturate(180%);border-bottom:1px solid var(--border)}
   [data-theme="light"] nav{background:rgba(245,241,236,0.88)}
   @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) nav{background:rgba(245,241,236,0.88)}}
-  nav .container{display:flex;align-items:center;justify-content:space-between;height:64px}
-  .logo{display:flex;align-items:center;gap:12px;text-decoration:none;font-weight:700;font-size:1.1rem;color:var(--foreground);letter-spacing:-0.01em}
-  .logo-icon{width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:var(--radius-xs)}
+  nav .container{display:flex;align-items:center;justify-content:space-between;height:64px;max-width:1200px}
+  .logo{display:flex;align-items:center;gap:12px;text-decoration:none;font-weight:700;font-size:1.1rem;color:var(--foreground)}
+  .logo-icon{width:34px;height:34px;flex-shrink:0}
   .logo-icon svg{width:100%;height:100%}
-  [data-theme="light"] .logo-icon{background:rgba(0,0,0,0.04);box-shadow:0 1px 3px rgba(0,0,0,0.05)}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .logo-icon{background:rgba(0,0,0,0.04);box-shadow:0 1px 3px rgba(0,0,0,0.05)}}
-  .nav-links{display:flex;gap:32px;list-style:none}
-  .nav-links a{color:var(--foreground-muted);text-decoration:none;font-size:0.875rem;font-weight:500;transition:color 0.2s}
+  .nav-links{display:flex;gap:28px;list-style:none}
+  .nav-links a{color:var(--foreground-muted);text-decoration:none;font-size:0.875rem;font-weight:500}
   .nav-links a:hover{color:var(--foreground)}
-  .theme-toggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;transition:all 0.2s;margin-left:8px;flex-shrink:0}
-  .theme-toggle:hover{border-color:var(--border-hover);color:var(--foreground)}
+  .nav-right{display:flex;align-items:center;gap:6px}
+  .theme-toggle,.lang-toggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;text-decoration:none;font-size:0.73rem;font-weight:700;font-family:var(--font-mono)}
+  .theme-toggle:hover,.lang-toggle:hover{color:var(--foreground);border-color:var(--border-hover)}
   .theme-toggle svg{width:17px;height:17px}
   .theme-toggle .icon-sun{display:none}.theme-toggle .icon-moon{display:block}
-  [data-theme="light"] .theme-toggle .icon-sun{display:block}
-  [data-theme="light"] .theme-toggle .icon-moon{display:none}
+  [data-theme="light"] .theme-toggle .icon-sun{display:block}[data-theme="light"] .theme-toggle .icon-moon{display:none}
   @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .theme-toggle .icon-sun{display:block}:root:not([data-theme="dark"]) .theme-toggle .icon-moon{display:none}}
   @media(max-width:768px){.nav-links{display:none}}
-
-  .hero{padding:130px 0 30px}
-  .section-label{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;border-radius:100px;border:1px solid var(--border);font-size:0.78rem;color:var(--foreground-dim);font-weight:500;margin-bottom:20px;font-family:var(--font-mono)}
-  .section-label .dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
-  .hero h1{font-size:clamp(2rem,4.4vw,3.2rem);font-weight:700;letter-spacing:-0.02em;line-height:1.12;margin-bottom:16px}
-  .hero h1 .gradient{background:linear-gradient(120deg,var(--accent),#8b5cf6 60%,var(--orange));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-  [data-theme="light"] .hero h1 .gradient{background:linear-gradient(120deg,var(--orange),#b84e2a);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .hero h1 .gradient{background:linear-gradient(120deg,var(--orange),#b84e2a);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}}
-  .hero p{color:var(--foreground-muted);max-width:720px;font-size:1.02rem}
+  .hero{padding:120px 0 36px}
+  .kicker{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:0.75rem;color:var(--foreground-dim);letter-spacing:.08em;margin-bottom:16px}
+  .kicker i{width:6px;height:6px;border-radius:50%;background:var(--green)}
+  .hero h1{font-size:clamp(1.9rem,4vw,2.8rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:14px}
+  .hero h1 em{font-style:normal;color:var(--accent)}
+  .hero p{color:var(--foreground-muted);font-size:1.05rem;max-width:640px}
   .hero p strong{color:var(--foreground);font-weight:600}
-
-  .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}
-  .lg{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:0.76rem;color:var(--foreground-muted);border:1px solid var(--border);padding:6px 12px;border-radius:100px;background:var(--surface)}
-  .lg i{width:9px;height:9px;border-radius:50%;display:inline-block}
-
-  .dial{display:flex;align-items:center;gap:14px;margin-top:26px;padding:16px 20px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card);width:fit-content}
-  .dial svg{width:56px;height:56px;transform:rotate(-90deg)}
-  .dial .track{fill:none;stroke:var(--surface-hover);stroke-width:5}
-  .dial .val{fill:none;stroke:var(--green);stroke-width:5;stroke-linecap:round;stroke-dasharray:138.2;stroke-dashoffset:138.2;transition:stroke-dashoffset 1.6s var(--easing)}
-  .dial .num{font-family:var(--font-mono);font-weight:700;font-size:1.5rem;line-height:1;color:var(--green)}
-  .dial .cap{font-size:0.78rem;color:var(--foreground-muted);line-height:1.4}
-  .dial .cap b{color:var(--foreground);font-weight:600}
-
-  .cols{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:30px;padding:34px 0 10px;align-items:start}
-  @media(max-width:980px){.cols{grid-template-columns:1fr}.rail{position:static!important}}
-
-  .tier{position:relative;border:1px solid var(--border);background:var(--bg-card);margin-bottom:24px;border-radius:var(--radius);overflow:hidden;backdrop-filter:blur(8px)}
-  .tier::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
-  .tier.t1::before{background:var(--green)} .tier.t2::before{background:var(--amber)} .tier.t3::before{background:var(--orange)} .tier.t4::before{background:var(--accent)}
-  .t4 .idx{color:var(--accent)} .t4 .tag{color:var(--accent);background:var(--accent-glow);border-color:transparent} .t4 .hz b{color:var(--accent)} .t4 .addr{color:var(--accent)}
-  .tierhead{display:flex;align-items:flex-start;gap:16px;padding:20px 24px 16px;border-bottom:1px dashed var(--border);position:relative;overflow:hidden}
-  .tier.t1 .tierhead::after{content:"";position:absolute;top:0;bottom:0;width:120px;left:-140px;background:linear-gradient(100deg,transparent,var(--green-glow),transparent);animation:sweep 5.5s ease-in-out infinite}
-  @keyframes sweep{0%{left:-140px}55%{left:110%}100%{left:110%}}
-  .tierhead .idx{font-family:var(--font-mono);font-weight:700;font-size:1.9rem;line-height:1}
-  .t1 .idx{color:var(--green)} .t2 .idx{color:var(--amber)} .t3 .idx{color:var(--orange)}
-  .tierhead .tt h3{font-size:1.25rem;font-weight:700;letter-spacing:-0.01em}
-  .tierhead .tt h3 span{font-weight:400;color:var(--foreground-muted);font-size:0.9rem;margin-left:8px}
-  .tierhead .tt .tags{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
-  .tag{font-family:var(--font-mono);font-size:0.7rem;padding:3px 10px;border-radius:100px;letter-spacing:.02em;border:1px solid var(--border)}
-  .t1 .tag{color:var(--green);background:var(--green-glow);border-color:transparent}
-  .t2 .tag{color:var(--amber);background:rgba(245,158,11,0.12);border-color:transparent}
-  .t3 .tag{color:var(--orange);background:rgba(217,103,62,0.12);border-color:transparent}
-  .tierhead .hz{margin-left:auto;text-align:right;font-family:var(--font-mono);font-size:0.7rem;color:var(--foreground-dim);line-height:1.5;white-space:nowrap}
-  .tierhead .hz b{display:block;font-size:0.82rem;font-weight:600}
-  .t1 .hz b{color:var(--green)} .t2 .hz b{color:var(--amber)} .t3 .hz b{color:var(--orange)}
-
-  .sublabel{font-family:var(--font-mono);font-size:0.7rem;letter-spacing:.1em;color:var(--foreground-dim);text-transform:uppercase;padding:14px 24px 4px;display:flex;align-items:center;gap:10px}
-  .sublabel::after{content:"";flex:1;height:1px;background:var(--border)}
-  .sublabel b{color:var(--accent);font-weight:600}
-
-  .item{display:grid;grid-template-columns:60px minmax(0,1.05fr) minmax(0,1.55fr) auto;gap:0 16px;align-items:start;padding:15px 24px;border-top:1px solid var(--border);cursor:pointer;transition:background 0.25s}
-  .item:hover{background:var(--surface)}
-  .item .row{display:contents}
-  @media(max-width:760px){.item{grid-template-columns:48px 1fr}.item .src,.item .desc,.item .more{grid-column:2}}
-  .addr{font-family:var(--font-mono);font-size:0.7rem;font-weight:600;letter-spacing:.06em;padding-top:4px}
-  .t1 .addr{color:var(--green)} .t2 .addr{color:var(--amber)} .t3 .addr{color:var(--orange)}
-  .name{font-weight:600;font-size:0.98rem}
-  .name small{display:block;font-weight:400;color:var(--foreground-dim);font-size:0.74rem;margin-top:2px;font-family:var(--font-mono)}
-  .src{font-family:var(--font-mono);font-size:0.72rem;color:var(--foreground-muted);line-height:1.8;padding-top:2px}
-  .src .chip{display:inline-block;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xs);padding:1px 8px;margin:1px 3px 1px 0;color:var(--accent)}
-  .cchip{font-family:var(--font-mono);font-size:0.68rem;padding:3px 10px;border-radius:100px;white-space:nowrap;align-self:start}
-  .c-hit{background:var(--green-glow);color:var(--green)}
-  .c-epoch{background:rgba(245,158,11,0.12);color:var(--amber)}
-  .c-miss{background:rgba(217,103,62,0.12);color:var(--orange)}
-  .desc{grid-column:2 / -1;color:var(--foreground-muted);font-size:0.86rem;padding:6px 0 16px;max-width:840px}
-  .desc b{color:var(--foreground);font-weight:600}
-  .desc code{color:var(--accent);font-size:0.78rem}
-  .item .more{display:none;grid-column:2/-1;padding:0 0 16px;max-width:840px}
-  .item.open .more{display:block}
-  .more .mbox{border-left:2px solid var(--accent);padding:2px 0 2px 14px;font-size:0.82rem;color:var(--foreground-muted)}
-  .more .mbox code{color:var(--accent);font-size:0.76rem}
-  .item .exp{font-family:var(--font-mono);font-size:0.66rem;color:var(--foreground-dim);letter-spacing:.08em}
-  .item.open .exp::after{content:" ▴"} .item:not(.open) .exp::after{content:" ▾"}
-
-  .boundary{display:flex;align-items:center;gap:14px;margin:-6px 0 18px;font-family:var(--font-mono);font-size:0.7rem;color:var(--foreground-dim)}
-  .boundary .bl{flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent)}
-  .boundary .bt{border:1px dashed var(--border);padding:5px 14px;border-radius:100px;background:var(--bg-elevated)}
-
-  .rail{position:sticky;top:84px}
-  .railcard{border:1px solid var(--border);background:var(--bg-card);border-radius:var(--radius-sm);padding:18px 18px 20px;margin-bottom:18px;backdrop-filter:blur(8px)}
-  .railcard h4{font-family:var(--font-mono);font-size:0.7rem;letter-spacing:.14em;color:var(--accent);text-transform:uppercase;margin-bottom:14px}
-  .wire{list-style:none;position:relative}
-  .wire::before{content:"";position:absolute;left:9px;top:8px;bottom:8px;width:2px;background:linear-gradient(var(--green) 0%,var(--green) 55%,var(--amber) 72%,var(--orange) 100%);opacity:.5}
-  .wnode{position:relative;padding:0 0 13px 30px;font-size:0.8rem;color:var(--foreground-muted);transition:color .2s,transform .2s}
-  .wnode::before{content:"";position:absolute;left:4px;top:5px;width:12px;height:12px;border-radius:50%;background:var(--bg-deep);border:2px solid var(--foreground-dim);transition:.2s}
-  .wnode[data-c="hit"]::before{border-color:var(--green)}
-  .wnode[data-c="epoch"]::before{border-color:var(--amber)}
-  .wnode[data-c="miss"]::before{border-color:var(--orange)}
-  .wnode b{color:var(--foreground);font-weight:600}
-  .wnode.lit{color:var(--foreground);transform:translateX(3px)}
-  .wnode.lit::before{background:var(--accent);border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
-  .wnode .wtag{font-family:var(--font-mono);font-size:0.66rem;color:var(--foreground-dim);display:block}
-  .misspulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--orange);margin-right:6px;animation:pulse 1.6s infinite}
-  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(217,103,62,.5)}70%{box-shadow:0 0 0 8px rgba(217,103,62,0)}100%{box-shadow:0 0 0 0 rgba(217,103,62,0)}}
-  .stat{display:flex;justify-content:space-between;gap:10px;font-family:var(--font-mono);font-size:0.74rem;padding:8px 0;border-bottom:1px dashed var(--border)}
-  .stat:last-child{border-bottom:none}
-  .stat b{font-weight:600;text-align:right}
-  .stat .g{color:var(--green)} .stat .a{color:var(--amber)} .stat .r{color:var(--orange)}
-
-  .mech{padding:46px 0 8px}
-  .mech h2,.pipe h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:8px}
-  .mech .sub,.pipe .sub{color:var(--foreground-muted);font-size:0.9rem;margin-bottom:26px}
-  .ledger{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--border)}
-  @media(max-width:820px){.ledger{grid-template-columns:1fr}}
-  .led{padding:24px 26px;background:var(--bg-card);transition:background .25s}
-  .led:hover{background:var(--bg-elevated)}
-  .led .no{font-family:var(--font-mono);font-weight:700;font-size:0.82rem;color:var(--accent);letter-spacing:.1em}
-  .led h5{font-size:1.06rem;font-weight:700;margin:8px 0 8px;letter-spacing:-0.01em}
-  .led p{color:var(--foreground-muted);font-size:0.86rem}
-  .led p code{color:var(--accent);font-size:0.78rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xs);padding:1px 6px}
-
-  .pipe{padding:46px 0 20px}
-  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
-  .fstep{flex:1;min-width:150px;background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--green);padding:14px 16px;transition:transform .2s}
-  .fstep:hover{transform:translateY(-3px)}
-  .fstep:nth-child(5),.fstep:nth-child(7){border-left-color:var(--amber)}
-  .fstep:nth-child(9),.fstep:nth-child(11){border-left-color:var(--orange)}
-  .fstep .fi{font-family:var(--font-mono);font-size:0.66rem;color:var(--foreground-dim)}
-  .fstep b{display:block;font-size:0.86rem;font-weight:600;margin-top:4px}
-  .farrow{display:flex;align-items:center;color:var(--foreground-dim);font-family:var(--font-mono);padding:0 6px}
-  @media(max-width:820px){.farrow{display:none}.fstep{margin-bottom:8px}}
-
-  footer{border-top:1px solid var(--border);margin-top:50px;padding:28px 0 44px;color:var(--foreground-dim);font-size:0.8rem}
-  footer code{color:var(--foreground-muted)}
-
-  /* memory × context */
-  .memsec{padding:46px 0 8px}
-  .memsec h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:8px}
-  .memsec .sub{color:var(--foreground-muted);font-size:0.9rem;margin-bottom:26px;max-width:860px}
-  .memsec h3{font-size:1.08rem;font-weight:700;margin:28px 0 12px;letter-spacing:-0.01em}
-  .memgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:8px 0 8px}
-  @media(max-width:900px){.memgrid{grid-template-columns:1fr}}
-  .memcard{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);border-top:3px solid var(--green)}
-  .memcard.recall{border-top-color:var(--accent)}
-  .memcard.hold{border-top-color:var(--amber)}
-  .memcard .k{font-family:var(--font-mono);font-size:0.68rem;letter-spacing:.12em;color:var(--foreground-dim);font-weight:700}
-  .memcard h5{font-size:1.05rem;font-weight:700;margin:8px 0 10px;letter-spacing:-0.01em}
-  .memcard p{color:var(--foreground-muted);font-size:0.84rem}
-  .memcard p code{color:var(--accent);font-size:0.76rem}
-  .memtable-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);margin:8px 0 8px}
-  .memtable{width:100%;border-collapse:collapse;font-size:0.78rem;min-width:860px}
-  .memtable th,.memtable td{border-bottom:1px solid var(--border);padding:11px 14px;text-align:left;vertical-align:top}
-  .memtable th{background:var(--surface);color:var(--foreground-muted);font-weight:600;font-size:0.7rem;letter-spacing:.04em;text-transform:uppercase}
-  .memtable tr:last-child td{border-bottom:none}
-  .memtable td{color:var(--foreground-muted)}
-  .memtable td:first-child{color:var(--foreground);font-weight:500;white-space:nowrap}
-  .memtable code{font-size:0.72rem;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
-  .timeline{display:grid;gap:0;margin:8px 0 8px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
-  .tl{display:grid;grid-template-columns:92px 1fr;gap:0;background:var(--bg-card);border-bottom:1px solid var(--border)}
-  .tl:last-child{border-bottom:none}
-  .tl .t{font-family:var(--font-mono);font-size:0.72rem;color:var(--accent);padding:14px 16px;border-right:1px solid var(--border)}
-  .tl p{padding:14px 18px;color:var(--foreground-muted);font-size:0.84rem}
-  .memnote{padding:16px 20px;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--foreground-muted);font-size:0.84rem;margin-top:8px}
-  .memnote code{color:var(--accent);font-size:0.76rem}
-
-  .reveal{opacity:0;transform:translateY(20px);transition:opacity 0.7s var(--easing),transform 0.7s var(--easing)}
+  .sec{padding:48px 0 8px}
+  .sec h2{font-size:1.35rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:8px}
+  .lead{color:var(--foreground-muted);margin-bottom:22px;max-width:640px}
+  .stack{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card)}
+  .slot{display:grid;grid-template-columns:52px 1fr 200px;gap:12px;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);border-left:4px solid var(--slot)}
+  .slot:last-child{border-bottom:none}
+  .slot .n{font-family:var(--font-mono);font-weight:700;font-size:0.95rem;color:var(--slot)}
+  .slot h3{font-size:0.98rem;font-weight:600}
+  .slot p{font-size:0.8rem;color:var(--foreground-muted);margin-top:2px}
+  .slot .when{font-family:var(--font-mono);font-size:0.7rem;color:var(--slot);text-align:right;line-height:1.4}
+  @media(max-width:640px){.slot{grid-template-columns:40px 1fr}.slot .when{grid-column:2;text-align:left;margin-top:4px}}
+  .layers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  @media(max-width:720px){.layers{grid-template-columns:1fr}}
+  .layer{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);border-top:3px solid var(--c)}
+  .layer .tag{font-family:var(--font-mono);font-size:0.68rem;letter-spacing:.1em;color:var(--c);font-weight:700}
+  .layer h3{font-size:1.05rem;margin:6px 0 10px}
+  .layer ul{margin:0;padding-left:1.1em;color:var(--foreground-muted);font-size:0.86rem}
+  .layer li{margin:4px 0}
+  .layer li strong{color:var(--foreground);font-weight:600}
+  .dest{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  @media(max-width:800px){.dest{grid-template-columns:1fr}}
+  .dcard{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card)}
+  .dcard .k{font-family:var(--font-mono);font-size:0.68rem;letter-spacing:.1em;color:var(--accent);font-weight:700}
+  .dcard h3{font-size:1.05rem;margin:6px 0 8px}
+  .dcard p{color:var(--foreground-muted);font-size:0.86rem}
+  .dcard .cap{margin-top:10px;font-family:var(--font-mono);font-size:0.72rem;color:var(--foreground-dim)}
+  .flow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0}
+  @media(max-width:800px){.flow{grid-template-columns:1fr}}
+  .step{padding:18px 18px 20px;border:1px solid var(--border);background:var(--bg-card);position:relative}
+  .step:first-child{border-radius:var(--radius) 0 0 var(--radius)}
+  .step:last-child{border-radius:0 var(--radius) var(--radius) 0}
+  @media(max-width:800px){.step:first-child,.step:last-child{border-radius:var(--radius-sm)}}
+  .step + .step{border-left:none}
+  @media(max-width:800px){.step + .step{border-left:1px solid var(--border);border-top:none}}
+  .step .n{font-family:var(--font-mono);font-size:0.72rem;color:var(--accent);font-weight:700}
+  .step h3{font-size:0.95rem;margin:6px 0 6px}
+  .step p{font-size:0.82rem;color:var(--foreground-muted)}
+  .clocks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  @media(max-width:800px){.clocks{grid-template-columns:1fr}}
+  .clock{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card)}
+  .clock h3{font-size:1rem;margin-bottom:8px}
+  .clock p{font-size:0.86rem;color:var(--foreground-muted)}
+  .note{margin-top:22px;padding:16px 18px;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--foreground-muted);font-size:0.88rem}
+  .note strong{color:var(--foreground)}
+  footer{border-top:1px solid var(--border);margin-top:56px;padding:28px 0 44px;color:var(--foreground-dim);font-size:0.8rem}
+  footer a{color:var(--foreground-muted)}
+  .reveal{opacity:0;transform:translateY(16px);transition:opacity 0.6s var(--easing),transform 0.6s var(--easing)}
   .reveal.visible{opacity:1;transform:none}
 </style>
 </head>
 <body>
-<div class="ambient"><div class="blob blob-1"></div><div class="blob blob-2"></div><div class="blob blob-3"></div></div>
-<div class="grid-overlay"></div>
+<div class="ambient"></div>
 
 <nav>
   <div class="container">
-    <a href="index.en.html" class="logo"><span class="logo-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="lip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="lip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="lip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#lip)"/><rect x="96" y="96" width="832" height="832" rx="208" stroke="#FFF7EF" stroke-opacity=".52" stroke-width="12"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#lip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round"/></svg></span>CodePapr</a>
+    <a href="index.en.html" class="logo"><span class="logo-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="lip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="lip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="lip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#lip)"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#lip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round"/></svg></span>CodePapr</a>
     <ul class="nav-links">
       <li><a href="index.en.html">Home</a></li>
       <li><a href="tutorial.en.html">Tutorial</a></li>
-      <li><a href="#tiers">Layers</a></li>
-      <li><a href="#recall">Recall</a></li>
+      <li><a href="#request">Request</a></li>
+      <li><a href="#layers">Layers</a></li>
       <li><a href="#memory">Memory</a></li>
-      <li><a href="#mechanisms">Mechanisms</a></li>
-      <li><a href="#pipeline">Priority</a></li>
+      <li><a href="#clocks">When it refreshes</a></li>
     </ul>
-    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
-      <svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-      <svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-    </button>
+    <div class="nav-right">
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
+        <svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <a href="context-architecture.html" class="lang-toggle" onclick="localStorage.setItem('codepapr-lang','zh')">中</a>
+    </div>
   </div>
 </nav>
 
 <section class="hero">
   <div class="container">
-    <div class="section-label"><span class="dot"></span> CONTEXT WINDOW · CACHE-FIRST</div>
-    <h1>Context Layering · <span class="gradient">Persistent Projection × Byte Stability</span></h1>
-    <p>DeepSeek prefix caching matches the request body <strong>byte-by-byte from the front</strong> — the more stable the prefix, the higher the hit rate. CodePapr splits context into four layers: a frozen stable prefix, session state rewritten on compaction (with a persisted Surface), append-only active context, and a per-turn Recall Block. Project memory <strong>is split across those layers</strong>: short instructions live in Bootstrap, procedures in Recall, web citations in search only. See <a href="#memory">which memory lives where, and when it changes</a>. Click any item to expand its injection chain and cache behavior.</p>
-    <div class="legend">
-      <span class="lg"><i style="background:var(--green)"></i>Stable · cache hit</span>
-      <span class="lg"><i style="background:var(--amber)"></i>Slow-changing · epoch rewrite</span>
-      <span class="lg"><i style="background:var(--orange)"></i>High-freq · append growth</span>
-      <span class="lg"><i style="background:var(--accent)"></i>Source / injection point</span>
-    </div>
-    <div class="dial">
-      <svg viewBox="0 0 52 52"><circle class="track" cx="26" cy="26" r="22"/><circle class="val" id="dialArc" cx="26" cy="26" r="22"/></svg>
-      <div>
-        <div class="num"><span id="dialNum">0</span>%</div>
-        <div class="cap"><b>Measured prefix hit rate</b><br>miss should only be "current turn"</div>
-      </div>
-    </div>
+    <div class="kicker"><i></i>ONE REQUEST · TOP TO BOTTOM</div>
+    <h1>How context is stacked, <em>where memory lives</em></h1>
+    <p>The model does not get one blob. Earlier bytes stay still so prefix cache works. <strong>Each memory kind enters one layer</strong>: short instructions every session, procedures this turn if useful, web citations only when searched.</p>
   </div>
 </section>
 
 <div class="container">
-  <div class="cols" id="tiers">
-    <main>
-      <!-- TIER 1 -->
-      <section class="tier t1 reveal">
-        <div class="tierhead">
-          <div class="idx">01</div>
-          <div class="tt">
-            <h3>Stable Prefix <span></span></h3>
-            <div class="tags"><span class="tag">byte-frozen · entire session</span><span class="tag">largest cache zone</span></div>
-          </div>
-          <div class="hz"><b>Highest hit rate</b>byte-identical within session</div>
+  <section class="sec reveal" id="request">
+    <h2>What one request looks like</h2>
+    <p class="lead">Read top to bottom. The top barely moves; the bottom grows. Color is how often it changes, not how important it is.</p>
+    <div class="stack">
+      <div class="slot" style="--slot:var(--green)">
+        <div class="n">01</div>
+        <div>
+          <h3>System core</h3>
+          <p>System prompt, tool schemas, model params, <code>AGENTS.md</code></p>
         </div>
-
-        <div class="sublabel"><b>ImmutablePrefix</b> immutable prefix object · prefix.systemPrompt / tools / params</div>
-
-        <div class="item" data-wire="sys">
-          <div class="row">
-            <div class="addr">SYS</div>
-            <div class="name">System Prompt<small></small></div>
-            <div class="src"><span class="chip">buildRuntimeSystemPrompt</span><span class="chip">runtimeSystemPrompt</span></div>
-            <div class="cchip c-hit">frozen</div>
-          </div>
-          <div class="desc">Model identity and behavior charter: <b>identity + core principles + mode intro + workspace + core constraints + tool constraints</b>. ImmutablePrefix construction validates that no dynamic content exists (timestamps / template variables throw immediately), and computes SHA256 once.</div>
-          <div class="more"><div class="mbox">Injection chain: settings + rulesSection + mode → <code>buildRuntimeSystemPrompt</code> → <code>ImmutablePrefix.systemPrompt</code> → request <code>messages[0]</code>. Prefix hash is validated immutable by RequestBuilder on every build.</div></div>
+        <div class="when">Frozen for the session</div>
+      </div>
+      <div class="slot" style="--slot:var(--green)">
+        <div class="n">02</div>
+        <div>
+          <h3>Session bootstrap</h3>
+          <p>Skills catalog, project-memory slice, long-term guidance</p>
         </div>
-
-        <div class="item" data-wire="rules">
-          <div class="row">
-            <div class="addr">RULE</div>
-            <div class="name">Runtime Rules<small>project rules</small></div>
-            <div class="src"><span class="chip">.CodePapr/AGENTS.md</span><span class="chip">buildProjectRulesSection</span></div>
-            <div class="cchip c-hit">frozen</div>
-          </div>
-          <div class="desc">Project-wide rules, <b>inherited by all modes and sub-agents</b>. Loaded and cached in <code>_projectRulesSection</code> when the workspace opens, injected into the system prompt. <b>Opt-in file</b>: <code>.CodePapr/AGENTS.md</code> is only created when the user saves rules in the Config panel; otherwise empty, not injected.</div>
-          <div class="more"><div class="mbox">Injection chain: <code>.CodePapr/AGENTS.md</code> → <code>projectConfigLoader.ts:loadProjectRulesSection</code> → <code>agentStore._projectRulesSection</code> (cached) → <code>buildRuntimeSystemPrompt({ rulesSection })</code> → <code>promptSystem.ts:1168</code>, placed after identity/principles, before mode prompt. Sub-agents inherit via <code>UiTaskToolContext.rulesSection</code>.<br><br>Entry: top "Config" button → ProjectConfigModal AGENTS.md tab; pre-filled with template if file missing. Distinct from <code>.CodePapr/agents/*.md</code> (sub-agent definitions) — those become task tools, not rules.</div></div>
+        <div class="when">Memory: compact or new session</div>
+      </div>
+      <div class="slot" style="--slot:var(--amber)">
+        <div class="n">03</div>
+        <div>
+          <h3>Session state</h3>
+          <p>Checkpoint (where this task is) + retained recent turns</p>
         </div>
-
-        <div class="item" data-wire="tool">
-          <div class="row">
-            <div class="addr">TOOL</div>
-            <div class="name">Tool Schema<small>tool definitions</small></div>
-            <div class="src"><span class="chip">ToolRegistry.getAll()</span><span class="chip">sorted by name + canonical</span></div>
-            <div class="cchip c-hit">frozen</div>
-          </div>
-          <div class="desc">All tool definitions frozen at session start (name + description + canonical parameters). <b>Tool set changes</b> (MCP loading, task tool appearing) invalidate the entire prefix — should be explicitly triggered by user action, avoiding implicit churn.</div>
-          <div class="more"><div class="mbox">RequestBuilder validates tools immutability on every build (<code>validateToolsImmutable</code>) and checks runtime tools match the frozen prefix (<code>validateRuntimeToolsMatchPrefix</code>).</div></div>
+        <div class="when">Rewritten on compaction</div>
+      </div>
+      <div class="slot" style="--slot:var(--accent)">
+        <div class="n">04</div>
+        <div>
+          <h3>Turn recall</h3>
+          <p>Old experience that might help this turn, inserted before the user message</p>
         </div>
-
-        <div class="item" data-wire="param">
-          <div class="row">
-            <div class="addr">PARAM</div>
-            <div class="name">Model Params<small></small></div>
-            <div class="src"><span class="chip">temperature / topP / maxTokens / thinking</span></div>
-            <div class="cchip c-hit">frozen</div>
-          </div>
-          <div class="desc">Participate in prefix hash. <b>User-initiated parameter changes</b> (adjusting temperature, toggling thinking) = one intentional full invalidation, an acceptable cost; the system should never implicitly change params mid-session.</div>
-          <div class="more"><div class="mbox">reasoning_content pass-through is determined by "whether historical messages exist", decoupled from per-turn thinking toggle, avoiding adding/removing bytes from history on rebuild (<code>DeepSeekProvider</code>).</div></div>
+        <div class="when">New every user turn</div>
+      </div>
+      <div class="slot" style="--slot:var(--orange)">
+        <div class="n">05</div>
+        <div>
+          <h3>This turn</h3>
+          <p>Current user message and tool results; date and other volatile bits live here too</p>
         </div>
+        <div class="when">Append-only at the tail</div>
+      </div>
+    </div>
+  </section>
 
-        <div class="sublabel"><b>Session Bootstrap</b> session guide = log[0] · role: assistant + metadata.isPrefixSystem (Claude extracts as system) · resolveSessionBootstrap memoized by (session × stable signature)</div>
-
-        <div class="item" data-wire="skill">
-          <div class="row">
-            <div class="addr">SKL</div>
-            <div class="name">Skills Summary<small>skill catalog</small></div>
-            <div class="src"><span class="chip">.CodePapr/skills/*</span><span class="chip">buildSkillsSection</span></div>
-            <div class="cchip c-hit">in signature</div>
-          </div>
-          <div class="desc">Only injects <b>name + one-line description</b>, stable and small. Full text is read on-demand via the <code>skill_load</code> tool, landing in the <b>tail</b> as a tool result — not in the prefix. Adding/removing skills is a user action (in signature), triggering one rebuild. Sub-agents inherit via <code>SubagentSessionDeps.skillsSection</code>.</div>
-          <div class="more"><div class="mbox">Design intent: "Only inject names and descriptions in stable context; let the model decide whether it needs them, then call skill_load on demand to read full instructions."</div></div>
-        </div>
-
-        <div class="item" data-wire="mem">
-          <div class="row">
-            <div class="addr">MEM</div>
-            <div class="name">Stable Memory<small>project memory · ledger render</small></div>
-            <div class="src"><span class="chip">memory_entries ledger</span><span class="chip">memory panel</span><span class="chip">memorySection</span></div>
-            <div class="cchip c-hit">frozen outside signature</div>
-          </div>
-          <div class="desc">Cross-session project knowledge, rendered as "## Project Memory". The ledger in SQLite <code>memory_entries</code> is authoritative; the memory panel is the only human surface (every-session / on-demand / search-only). Bootstrap only renders prefix-bound entries: handwritten notes / preference / constraint / fact / convention / verification / decision, budget 24 items / 1500 tokens. <b>Zero-review auto-write</b> (<code>planMemoryWrite</code>: persist or drop — no admit queue). <code>citation</code> / <code>procedure</code> <b>do not enter this layer</b> — citations are <code>memory_search</code> only; procedures go to Recall below. Frozen via <code>resolveSessionBootstrap</code> per (session × stable signature) (outside signature → prefix cache intact). Newly saved memories <b>do not rebuild the current prefix</b>; they enter Bootstrap on a <b>compaction epoch</b> or the <b>next session</b>. Details: <a href="#memory">Memory × context</a>.</div>
-          <div class="more"><div class="mbox">Save immediately: user said remember / must / don't; workspace-grounded facts; successful bash tests; cold-start summary; Agent <code>memory_write</code> that is not web content; panel handwritten notes. Store as citation, never Bootstrap: web / MCP / https evidence. Drop: injection, secrets, dangerous commands, raw reasoning. If the Agent still write/patches memory.md, it is intercepted onto the same policy. The panel is a full catalog, forgettable, no admit button.</div></div>
-        </div>
-
-        <div class="item" data-wire="custom">
-          <div class="row">
-            <div class="addr">CUS</div>
-            <div class="name">Custom Guidance<small>persistent additive guidance</small></div>
-            <div class="src"><span class="chip">settings.systemPrompt</span><span class="chip">character prompt</span></div>
-            <div class="cchip c-hit">in signature</div>
-          </div>
-          <div class="desc">User-defined global guidance + character persona, rendered as "## Persistent Custom Guidance". Effective as additive constraints, never overriding system-level rules. <code>settings.systemPrompt</code> is editable in Settings → Advanced tab; character prompts are set via CharacterModal.</div>
-          <div class="more"><div class="mbox">Distinction from Runtime Rules: rules come from project files (AGENTS.md), custom comes from user settings + character; both are in the stable zone. Sub-agents inherit via <code>UiTaskToolContext.customPrompt</code>.</div></div>
-        </div>
-      </section>
-
-      <div class="boundary"><span class="bl"></span><span class="bt">▲ Above = hit zone · Below = epoch boundary (rewritten on compaction)</span><span class="bl"></span></div>
-
-      <!-- TIER 2 -->
-      <section class="tier t2 reveal">
-        <div class="tierhead">
-          <div class="idx">02</div>
-          <div class="tt">
-            <h3>Session State <span></span></h3>
-            <div class="tags"><span class="tag">slow-changing</span><span class="tag">compaction epoch rewrite</span></div>
-          </div>
-          <div class="hz"><b>One-time invalidation</b>accepted only on compaction</div>
-        </div>
-
-        <div class="item" data-wire="ckpt">
-          <div class="row">
-            <div class="addr">CKPT</div>
-            <div class="name">Conversation Summary<small>checkpoint digest · v3 structured state</small></div>
-            <div class="src"><span class="chip">renderContextCheckpointStateV3</span><span class="chip">13 sections + provenance</span></div>
-            <div class="cchip c-epoch">epoch rewrite</div>
-          </div>
-          <div class="desc">Compacted history, injected as a <b>single user-turn message</b>. Since 2026-08 it is <b>v3 structured state</b>: goal / constraints / confirmedFacts / assumptions / decisions / completedWork / activeWork / verification / failuresAndRisks / todos / openQuestions / references + <code>ContextFact[]</code> provenance. Merge flow = classified facts + prior state + authoritative TodoList → deterministic merge → optional LLM merge (schema + pinned validation, fallback on any loss). Carries <b>immutable provenance</b> — compactionId / generation / trigger / source-range message IDs / tokenStats — persisted in <code>context_compactions</code> in a single transaction; failed compactions keep the previous completed surface.</div>
-          <div class="more"><div class="mbox">Triggers: <code>maxConversationRounds</code> + <code>maxContextTokens</code> (soft budget = hard×0.7; the soft–hard band runs prune-first without a checkpoint). Renderer binding: archived v2 payloads are never re-rendered (renderedContent frozen → restart bytes stable).</div></div>
-        </div>
-      </section>
-
-      <div class="boundary"><span class="bl"></span><span class="bt">▲ append-only boundary · below grows every turn</span><span class="bl"></span></div>
-
-      <!-- TIER 3 -->
-      <section class="tier t3 reveal">
-        <div class="tierhead">
-          <div class="idx">03</div>
-          <div class="tt">
-            <h3>Active Context <span></span></h3>
-            <div class="tags"><span class="tag">high-frequency</span><span class="tag">append-only tail</span></div>
-          </div>
-          <div class="hz"><b>Only irreducible miss</b>current turn additions</div>
-        </div>
-
-        <div class="item" data-wire="recent">
-          <div class="row">
-            <div class="addr">TAIL</div>
-            <div class="name">Recent Conversation<small></small></div>
-            <div class="src"><span class="chip">pickRetainedTailMessages</span><span class="chip">6–12 msgs / ~8k tokens</span></div>
-            <div class="cchip c-miss">append · history bytes stable</div>
-          </div>
-          <div class="desc">Recent raw messages retained after compaction. Retention window is determined by the compaction algorithm; once written, bytes are never modified (append-only), remaining a hit zone for subsequent turns.</div>
-          <div class="more"><div class="mbox">Note: the "round limit" triggering compaction is a user setting (maxConversationRounds), but the exact number of retained tail messages is determined by the compaction algorithm's window.</div></div>
-        </div>
-
-        <div class="item" data-wire="todo">
-          <div class="row">
-            <div class="addr">PLAN</div>
-            <div class="name">Live Plan<small>real-time task list · Todo</small></div>
-            <div class="src"><span class="chip">renderTodoListDigest</span><span class="chip">injected at user prompt tail</span></div>
-            <div class="cchip c-miss">real-time per turn</div>
-          </div>
-          <div class="desc">Real-time digest rendered from the live TodoListContext each turn (goal + each task's status/title/error), appended to the user prompt tail by <b>buildRuntimeUserPrompt</b>. Always reflects current plan state with <b>zero additional cache cost</b> (user prompt is already in the miss zone). After compaction, the next user message carries the live digest automatically — no separate frozen snapshot needed.</div>
-          <div class="more"><div class="mbox">Lossy snapshot: only contains status / title / retry / errorLog (first 200 chars), excludes description / dependsOn / artifacts. Full details are passed back every turn via the <code>todo</code> tool during live operation. <code>checkpoint.payload.todoDigest</code> is still stored (data compatibility) but no longer injected as a separate user message.</div></div>
-        </div>
-
-        <div class="item" data-wire="map">
-          <div class="row">
-            <div class="addr">MAP</div>
-            <div class="name">Repository Map<small>project structure overview</small></div>
-            <div class="src"><span class="chip">project graph cache</span><span class="chip">buildProjectGraphBootstrapSummary</span><span class="chip">injected per run</span></div>
-            <div class="cchip c-miss">fresh per turn · tail user prompt</div>
-          </div>
-          <div class="desc">Directory / file / symbol bird's-eye view, rendered as "## Project Structure Overview" and injected into each turn's <b>user prompt</b> (after runtime context, before diagnostics). <b>Fresh every run</b> — re-read from disk at send time, never frozen into the prefix. Zero cache impact: it sits after the cached prefix boundary, so changes don't invalidate any history. Sub-agents still inherit it via <code>SubagentSessionDeps.projectGraphSummary</code> (in their bootstrap, since they're short-lived).</div>
-          <div class="more"><div class="mbox">Used for cold start: when the ledger has no Bootstrap section and a graph exists, a background task generates initial memory from the graph summary (<code>agentStore.ts</code>). The graph is also available as a tool (<code>graph(action: full/overview/...)</code>) for deeper exploration.</div></div>
-        </div>
-
-        <div class="item" data-wire="task">
-          <div class="row">
-            <div class="addr">TASK</div>
-            <div class="name">Current Task<small>current turn user message</small></div>
-            <div class="src"><span class="chip">buildRuntimeUserPrompt</span><span class="chip">goal + runtime context + diagnostics + Live Plan</span><span class="chip">stripConsumedImages</span></div>
-            <div class="cchip c-miss">new per turn</div>
-          </div>
-          <div class="desc">User's current-turn input (the task) + runtime context (date / timezone) + project diagnostics + live task list, wrapped into a single user message by <b>buildRuntimeUserPrompt</b>. <b>All dynamic content is deliberately placed at the tail</b>, isolated from the prefix — this is the key design for cache safety. Consumed images are stripped to prevent base64 from bloating subsequent requests.</div>
-          <div class="more"><div class="mbox">Date/time never enters the prefix; <code>buildDefaultRuntimeContext</code> only adds a time line when precise time is needed. ⚠ <code>stripConsumedImages</code> strips images based on "whether an assistant message follows", a mid-section flip; multimodal scenarios need write-time deterministic stripping.</div></div>
-        </div>
-
-        <div class="item" data-wire="tuse">
-          <div class="row">
-            <div class="addr">CALL</div>
-            <div class="name">Tool Use<small>tool calls</small></div>
-            <div class="src"><span class="chip">assistant.toolCalls</span><span class="chip">sortedStringify canonical</span></div>
-            <div class="cchip c-miss">append</div>
-          </div>
-          <div class="desc">Tool calls initiated by the model (name + arguments). Arguments are deterministically serialized to guarantee byte-identical rebuilds.</div>
-          <div class="more"><div class="mbox">Assistant messages with tool_calls must continuously pass back reasoning_content (DeepSeek requirement), otherwise 400.</div></div>
-        </div>
-
-        <div class="item" data-wire="tres">
-          <div class="row">
-            <div class="addr">RES</div>
-            <div class="name">Tool Result<small></small></div>
-            <div class="src"><span class="chip">truncateToolOutput</span><span class="chip">write-time 3-tier</span></div>
-            <div class="cchip c-miss">append · bounded at birth</div>
-          </div>
-          <div class="desc"><b>&gt;100k chars</b> → spill to disk + 2k preview + path (read can re-read); <b>60k–100k</b> → middle truncation (head + tail, 20k total kept); <b>150k</b> hard ceiling. Normalized and frozen once at write time, <b>post-hoc sliding trim abolished</b> → no more mid-prefix flips. Separately, <b>tool context mode</b> (full / summary / auto, default full) governs history only: the current round always receives the full output; once a result becomes history it is replaced by a structured summary card frozen at write time (<code>applyHistoryToolSummaries</code>; the latest batch stays full) — each message flips once (a one-time cache invalidation), and auto mode summarizes only above 5k chars. Code retrieval (read / grep / graph / lsp) is the most common tool result source.</div>
-          <div class="more"><div class="mbox">This is the core of hit-rate optimization: every tool result is bounded at birth, the tail is naturally controlled, and miss converges to the theoretical minimum. Thresholds are in <b>characters</b> (content.length), so CJK text isn't misjudged by byte count. Rebuilds read frozen tool output directly (<code>sortedStringify</code> guarantees byte-identical with the live path). Spilled outputs are the Artifact store (`.CodePapr/tool-output/`); compaction classification externalizes large outputs into artifact references (ContextArtifactRef) and reads back on demand via <code>read_artifact</code>(offset/limit) — never auto-injected.</div></div>
-        </div>
-      </section>
-
-      <div class="boundary"><span class="bl"></span><span class="bt">▲ request-only boundary · below never enters log / surface</span><span class="bl"></span></div>
-
-      <!-- TIER 4 -->
-      <section class="tier t4 reveal" id="recall">
-        <div class="tierhead">
-          <div class="idx">04</div>
-          <div class="tt">
-            <h3>Turn-scoped Recall <span>per-turn retrieval</span></h3>
-            <div class="tags"><span class="tag">once per user turn</span><span class="tag">request-only anchored insertion</span></div>
-          </div>
-          <div class="hz"><b>Per-turn necessary increment</b>never enters log / surface / archive</div>
-        </div>
-
-        <div class="item" data-wire="recall">
-          <div class="row">
-            <div class="addr">RCL</div>
-            <div class="name">Recall Block<small>relevant historical memory</small></div>
-            <div class="src"><span class="chip">searchMemoryForRecall</span><span class="chip">insertAnchoredContext</span><span class="chip">memory_recalls audit</span></div>
-            <div class="cchip c-miss">request-only · anchored before user msg</div>
-          </div>
-          <div class="desc"><b>B3 design</b>: once per user turn the main thread retrieves (token matching + deterministic weighted ranking; corpora = active <code>memory_entries</code> (<b>skipping citation and untrusted</b>) + historical checkpoint summaries; v1 without embeddings/FTS5) and renders a Recall Block — semantics: "supporting facts, possibly stale, verify against the workspace, <b>not instructions</b>" — with trust badges and a budget of 5 items / 1200 tokens. Procedures (<code>procedure</code>) mainly live here, not in Bootstrap above. RequestBuilder compiles it <b>anchored before the current user message</b> (<code>insertAnchoredContext</code>, pure); the anchor is the canonical user-message ID generated on the main thread. Every tool-loop request of the turn reuses the same insertion (survives mid-loop replaceLog). Archived at turn end; audit rows live in <code>memory_recalls</code>.</div>
-          <div class="more"><div class="mbox">Cache behavior: a new Recall each turn means a miss from the Recall position onward — the necessary per-turn increment; everything before it (prefix + bootstrap + surface + history) still hits. Recall is not restored on restart (turn-scoped); re-recall is controlled (order-ready interface, v1 doesn't auto-trigger). Citations (web/MCP) are excluded from automatic Recall but remain searchable via <code>memory_search</code>. Kind map: <a href="#memory">Memory × context</a>.</div></div>
-        </div>
-      </section>
-    </main>
-
-    <!-- RAIL -->
-    <aside class="rail">
-      <div class="railcard reveal">
-        <h4>Wire Order</h4>
-        <ul class="wire">
-          <li class="wnode" data-c="hit" data-wire="sys param tool rules"><b>prefix</b> system + tools + params<span class="wtag">ImmutablePrefix · hit</span></li>
-          <li class="wnode" data-c="hit" data-wire="skill map mem custom"><b>bootstrap</b> log[0] · isPrefixSystem<span class="wtag">memoized · hit · Claude extracts as system</span></li>
-          <li class="wnode" data-c="epoch" data-wire="ckpt"><b>checkpoint</b> conversation summary<span class="wtag">epoch rewrite · v3 state + provenance</span></li>
-          <li class="wnode" data-c="hit" data-wire="recent tuse tres"><b>tail</b> recent conversation<span class="wtag">append-only · history hit · surface nodes</span></li>
-          <li class="wnode" data-c="miss" data-wire="recall"><span class="misspulse"></span><b>recall</b> Recall Block<span class="wtag">request-only · anchored · stable within turn</span></li>
-          <li class="wnode" data-c="miss" data-wire="todo task tres"><span class="misspulse"></span><b>current turn</b> user prompt + Live Plan<span class="wtag">only miss</span></li>
+  <section class="sec reveal" id="layers">
+    <h2>What each layer owns</h2>
+    <p class="lead">Five slots, four clocks. A given fact belongs in one layer. The checkpoint is this task’s progress, not cross-session project memory.</p>
+    <div class="layers">
+      <article class="layer" style="--c:var(--green)">
+        <div class="tag">STABLE PREFIX</div>
+        <h3>Stable prefix · 01 + 02</h3>
+        <ul>
+          <li><strong>Holds:</strong> identity and tool boundary, <code>AGENTS.md</code>, skill names + one-liners, short every-session memory, your long-term guidance.</li>
+          <li><strong>Changes when:</strong> you edit rules, skills, or params. Newly saved memories <strong>do not rebuild the current prefix</strong>; they wait for compaction or the next session.</li>
+          <li><strong>Budget:</strong> the memory slice is at most 24 items / 1500 tokens. Full skill files load via <code>skill_load</code>, not the prefix.</li>
         </ul>
-      </div>
-      <div class="railcard reveal">
-        <h4>Cache Ledger</h4>
-        <div class="stat"><span>Stable zone (hit)</span><b class="g">prefix → tail history</b></div>
-        <div class="stat"><span>Epoch boundary</span><b class="a">one-time invalidation on compaction</b></div>
-        <div class="stat"><span>Irreducible miss</span><b class="r">current turn tokens</b></div>
-        <div class="stat"><span>Mid-flip (eliminated)</span><b class="g">sliding trim abolished</b></div>
-        <div class="stat"><span>Mid-flip (legacy)</span><b class="r">stripConsumedImages</b></div>
-      </div>
-    </aside>
-  </div>
-
-  <!-- MEMORY × CONTEXT -->
-  <section class="memsec reveal" id="memory">
-    <h2>Memory × context: which kind lives where</h2>
-    <p class="sub">Memory is not “one blob dumped into the model”. The ledger in SQLite <code>memory_entries</code> is authoritative; the memory panel is the only human surface. A given fact appears in <em>one</em> of the four request layers — or not in the request at all, waiting in the ledger for search.</p>
-
-    <div class="memgrid">
-      <div class="memcard">
-        <div class="k">TIER 01 · BOOTSTRAP</div>
-        <h5>Carried every session</h5>
-        <p>Handwritten notes plus preferences, constraints, project facts, conventions, verifications, decisions. Injected as <code>log[0]</code>, frozen per (session × stable signature). Ledger changes <strong>do not rebuild the current prefix</strong>; a compaction epoch or a new session refreshes it.</p>
-      </div>
-      <div class="memcard recall">
-        <div class="k">TIER 04 · RECALL</div>
-        <h5>Might help this turn</h5>
-        <p>Mostly <code>procedure</code> (hard-won fixes) plus other active entries (citations skipped). Retrieved once per user turn, anchored before the current user message, byte-stable across the tool loop, never in log / surface.</p>
-      </div>
-      <div class="memcard hold">
-        <div class="k">LEDGER ONLY</div>
-        <h5>Not auto-injected</h5>
-        <p><code>citation</code> (web / MCP) is <code>memory_search</code> only. Forgotten rows, policy drops, the current-task checkpoint, and spilled tool output are not “every-session project memory”.</p>
-      </div>
-    </div>
-
-    <h3>Kind map: stored in · request layer · when it reaches the model · how it changes</h3>
-    <div class="memtable-wrap">
-      <table class="memtable">
-        <thead>
-          <tr>
-            <th>Kind</th>
-            <th>Stored in</th>
-            <th>Request layer</th>
-            <th>When it reaches this session</th>
-            <th>How it changes</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Hand-written notes</td>
-            <td>Ledger; panel “every session”</td>
-            <td>Session Bootstrap (stable prefix)</td>
-            <td>Rendered from the ledger at session start; compaction runs <code>refreshBootstrap</code></td>
-            <td>A panel edit hits the ledger immediately. Current prefix stays frozen.</td>
-          </tr>
-          <tr>
-            <td>Preference / constraint</td>
-            <td>Ledger; panel “every session”</td>
-            <td>Same, Bootstrap</td>
-            <td>Written to the ledger this turn; enters the prefix on the <strong>next Bootstrap refresh</strong></td>
-            <td>You said remember / must / don't, or Agent <code>memory_write</code>. Persists immediately — no admit click.</td>
-          </tr>
-          <tr>
-            <td>Fact / convention / verification / decision</td>
-            <td>Ledger; panel “every session”</td>
-            <td>Bootstrap</td>
-            <td>Same: ledger changes now, prefix later</td>
-            <td>Workspace-grounded evidence, successful bash tests, cold-start summary. Same-hash active rows are superseded.</td>
-          </tr>
-          <tr>
-            <td>Procedure <code>procedure</code></td>
-            <td>Ledger; panel “on-demand”</td>
-            <td>Turn-scoped Recall / <code>memory_search</code></td>
-            <td><strong>Next user turn</strong> after save, if retrieval hits</td>
-            <td>Same error twice, etc. Never in the every-session prefix — old pitfalls are not treated as standing orders.</td>
-          </tr>
-          <tr>
-            <td>Web / MCP citation <code>citation</code></td>
-            <td>Ledger; panel “search only”</td>
-            <td><code>memory_search</code> only</td>
-            <td>Only if the model searches</td>
-            <td>Source is web / MCP, or evidence contains <code>https</code>. Never Bootstrap; auto-Recall skips them too.</td>
-          </tr>
-          <tr>
-            <td>Forgotten</td>
-            <td>ledger <code>status=forgotten</code></td>
-            <td>Not in the request</td>
-            <td>—</td>
-            <td>Forget in the panel. The same content hash will not be written again.</td>
-          </tr>
-          <tr>
-            <td>Policy drop</td>
-            <td>Not stored</td>
-            <td>Not in the request</td>
-            <td>—</td>
-            <td>Injection, secrets, disable-sandbox, dangerous commands, raw assistant reasoning, oversize / undersize. <code>planMemoryWrite</code> drops them.</td>
-          </tr>
-          <tr>
-            <td>Current-task goal / todos</td>
-            <td>Session Checkpoint</td>
-            <td>Session State (rewritten on compaction)</td>
-            <td>After compaction, as the checkpoint</td>
-            <td>Evolves with this task. <strong>Not</strong> cross-session project memory — do not copy todos into the memory panel.</td>
-          </tr>
-          <tr>
-            <td>Large tool output</td>
-            <td><code>.CodePapr/tool-output/</code></td>
-            <td>Not auto-injected</td>
-            <td><code>read_artifact</code> on demand</td>
-            <td>Frozen at write time. This is Archive, not memory.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <h3>Timeline after something is remembered</h3>
-    <div class="timeline">
-      <div class="tl"><span class="t">T0 this turn</span><p>User utterance or Agent <code>memory_write</code> / intercepted write → envelope (source / trust / origin / risk) → <code>planMemoryWrite</code>: persist or drop. There is no pending-review queue.</p></div>
-      <div class="tl"><span class="t">T1 ledger</span><p>Persisted rows enter <code>memory_entries</code> (same-hash active rows superseded). The panel can see them immediately; the current prefix stays frozen.</p></div>
-      <div class="tl"><span class="t">T2 current prefix</span><p><strong>Unchanged.</strong> Bootstrap is frozen for the session; the rendered ledger section is outside the signature. A newly saved preference is not in the prefix yet — that is how DeepSeek / Claude prefix cache stays intact.</p></div>
-      <div class="tl"><span class="t">T3 next turn</span><p>If it is a <code>procedure</code> and retrieval hits → it enters this turn’s Recall Block (before the user message). Citations still skip auto-Recall.</p></div>
-      <div class="tl"><span class="t">T4 compact</span><p>Epoch rewrite runs <code>refreshBootstrap</code>: new Bootstrap-class facts from the ledger enter the stable prefix. The checkpoint is rewritten at the same time — that is task progress, not memory.</p></div>
-      <div class="tl"><span class="t">T5 new session</span><p>Always re-renders from the ledger. On cold start, if the ledger has no Bootstrap section and a project graph exists, a structure / stack summary is written to the ledger and enters Bootstrap next session or after compaction.</p></div>
-    </div>
-
-    <h3>Boundary with AGENTS.md and the Checkpoint</h3>
-    <div class="memnote">
-      <code>AGENTS.md</code> is the project rules you wrote, <strong>inside</strong> the stable-prefix signature — editing it intentionally busts the cache. Project memory is auto-accumulated facts and preferences, <strong>outside</strong> the signature — editing the panel does not rebuild the current prefix. The Checkpoint is “where this task is”; it is rewritten on compaction — do not copy todos into memory. Web content is never treated as instructions: it is stored as a citation for search, never Bootstrap, never auto-Recall.
+      </article>
+      <article class="layer" style="--c:var(--amber)">
+        <div class="tag">SESSION STATE</div>
+        <h3>Session state · 03</h3>
+        <ul>
+          <li><strong>Holds:</strong> the checkpoint after compaction (goal, todos, confirmed facts) and recent turns not yet folded in.</li>
+          <li><strong>Changes when:</strong> round or length limits hit, or you run <code>/compact</code>. One intentional miss in exchange for a bounded window.</li>
+          <li><strong>Does not hold:</strong> todos copied into project memory. Checkpoints die with the task; memory lives across sessions.</li>
+        </ul>
+      </article>
+      <article class="layer" style="--c:var(--accent)">
+        <div class="tag">TURN RECALL</div>
+        <h3>Turn recall · 04</h3>
+        <ul>
+          <li><strong>Holds:</strong> retrieved old experience for this turn, mostly procedures. About 5 items / 1200 tokens.</li>
+          <li><strong>Changes when:</strong> every user turn runs retrieval once. It exists only in this request — not in chat history.</li>
+          <li><strong>Does not hold:</strong> web / MCP citations. Those are never auto-recalled, so outside text cannot become standing orders.</li>
+        </ul>
+      </article>
+      <article class="layer" style="--c:var(--orange)">
+        <div class="tag">ACTIVE TAIL</div>
+        <h3>Active context · 05</h3>
+        <ul>
+          <li><strong>Holds:</strong> the current user message and this turn’s tool calls and results. Large dumps go to disk; reread with <code>read_artifact</code>.</li>
+          <li><strong>Changes when:</strong> each turn appends at the tail. That is the only cache miss that is supposed to happen.</li>
+          <li><strong>Does not hold:</strong> date, timezone, and diagnostics in the prefix — those would bust the cache every minute.</li>
+        </ul>
+      </article>
     </div>
   </section>
 
-  <!-- MECHANISMS -->
-  <section class="mech reveal" id="mechanisms">
-    <h2>Key Mechanisms</h2>
-    <div class="sub">The underlying designs that turn "layering" into actual hit rate.</div>
-    <div class="ledger">
-      <div class="led">
-        <div class="no">M·01</div><h5>Freeze Outside Signature</h5>
-        <p>The ledger and project-graph are volatile on disk, but the rendered ledger section is excluded from <code>bootstrapSignature</code>. <code>resolveSessionBootstrap</code> memoizes the bootstrap by (session × stable signature) — newly saved memories hit the ledger immediately but <b>do not rebuild the current prefix</b>. Bootstrap-class memory enters the model on a compaction epoch (<code>refreshBootstrap</code>) or the next session; procedures can enter Recall on the next user turn. Preserves the entire prefix cache.</p>
-      </div>
-      <div class="led">
-        <div class="no">M·02</div><h5>Write-Time 3-Tier Truncation</h5>
-        <p>Tool output is normalized once before writing to AppendOnlyLog (<code>truncateToolOutput</code>): 60k middle truncation / 100k disk spill / 150k hard ceiling. Bounded at birth, post-hoc sliding trim abolished, rebuilds byte-identical. Tool context mode (full/summary/auto, default full) is decoupled from truncation: the current round always receives full output, and history is folded into write-time frozen summaries.</p>
-      </div>
-      <div class="led">
-        <div class="no">M·03</div><h5>Compaction Epoch</h5>
-        <p>When rounds or tokens exceed limits, earlier messages are folded into a checkpoint summary + retained tail, opening a new context epoch. This is an <b>intentional</b> full prefix rewrite — accepting one invalidation in exchange for controlled context. The checkpoint is <b>inserted at the retention boundary</b> (not appended at the end); the recent tail after it stays verbatim (including tool-call↔result pairs). The boundary is chosen at UI-message granularity, so assistant+tools groups are never split. In the effective context the checkpoint is emitted as a <b>user turn</b>, avoiding a leading/consecutive assistant after compaction for better cross-provider correctness.</p>
-      </div>
-      <div class="led">
-        <div class="no">M·04</div><h5>Dynamic Content Tail Isolation</h5>
-        <p>Date, timezone, diagnostics, and other volatile content only enter the <b>tail user message</b>, never the prefix. The prefix only holds "session-invariant" content — this is the prerequisite for prefix caching to work.</p>
-      </div>
-      <div class="led">
-        <div class="no">M·05</div><h5>Sub-Agent Context Inheritance</h5>
-        <p>Sub-agents inherit the main session's skills, memory, project-graph, and customPrompt via <code>SubagentSessionDeps</code>, injected into their own Session Bootstrap. The bootstrap is injected with <code>role: assistant</code> + <code>metadata.isPrefixSystem: true</code> — the Claude provider extracts it as system content, avoiding a 400 error from a non-user first message; DeepSeek/OpenAI send it as-is.</p>
-      </div>
-      <div class="led">
-        <div class="no">M·06</div><h5>Internal-Agent Exception: Compactor Inherits Nothing</h5>
-        <p><b>Compactor</b> (the context-compaction internal sub-agent) is the exception — <code>runCompactorSession</code> (compactorRunner.ts) passes no skills / memory / project-graph sections: the compaction input (transcript) already contains all facts, and injecting them would add tokens and pollute the checkpoint summary. It receives only "system prompt + transcript user prompt", invoked directly by the runtime compaction pipeline (between-turn + mid-loop), never via the <code>task</code> tool.</p>
-      </div>
-      <div class="led">
-        <div class="no">M·07</div><h5>Persisted Surface + Single-Transaction Provenance</h5>
-        <p>The model-history selection is persisted as <code>context_surfaces</code> (checkpoint + retained-tail message-ID sequence + generation + frozen render params). <b>No FK to messages</b> (full-replace saves would cascade-wipe it); compaction commits in a <b>single transaction</b> on the main-thread Store (started → surface → completed; crashes leave no residue). Failed compactions only write a failed row; the previous completed generation stays active. Restart rebuild = Surface hydrate + frozen-param deterministic replay → byte-identical to the live epoch.</p>
-      </div>
-      <div class="led">
-        <div class="no">M·08</div><h5>Turn-scoped Recall (B3)</h5>
-        <p>The Recall Block is <b>request-time augmentation</b>: retrieved once per user turn from the memory ledger (skipping citation / untrusted) + historical checkpoints, anchored before the current user message, byte-stable across the tool loop; never enters AppendOnlyLog / archive messages / surface (no lingering, no compaction-transcript or round-count pollution); audited in <code>memory_recalls</code>. Not restored on restart; controlled re-recall at most once. Rendered semantics are "supporting facts, verify them" — not instructions. Which kinds enter Recall: <a href="#memory">Memory × context</a>.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- PIPELINE -->
-  <section class="pipe reveal" id="pipeline">
-    <h2>Official Cache Priority Order</h2>
-    <div class="sub">From settings description <code>settingsPromptStackDesc</code> — earlier = more stable = higher hit rate.</div>
+  <section class="sec reveal" id="memory">
+    <h2>How a memory travels</h2>
+    <p class="lead">The SQLite ledger is authoritative. The memory panel is the only place a human browses, edits, or forgets. There is no standalone memory file.</p>
     <div class="flow">
-      <div class="fstep"><span class="fi">L1</span><b>System core & tool boundaries</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L2</span><b>Project rules AGENTS.md</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L3</span><b>Mode constraints</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L4</span><b>Skills summary & workspace</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L5</span><b>Conversation history</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L6</span><b>Current-turn diagnostics / task</b></div>
+      <div class="step">
+        <div class="n">1 · Source</div>
+        <h3>Who proposed it</h3>
+        <p>You said remember / must / don’t, a test passed, cold-start summary, Agent <code>memory_write</code>, or a handwritten panel note.</p>
+      </div>
+      <div class="step">
+        <div class="n">2 · Gate</div>
+        <h3>Keep or drop</h3>
+        <p>A deterministic rule decides immediately: ordinary facts stay; injection, secrets, and dangerous commands are dropped. No “please click admit”.</p>
+      </div>
+      <div class="step">
+        <div class="n">3 · Ledger</div>
+        <h3>Visible in the panel</h3>
+        <p>Kept rows enter <code>memory_entries</code>. Same content replaces the old row. The current-session prefix still does not change.</p>
+      </div>
+      <div class="step">
+        <div class="n">4 · Destination</div>
+        <h3>Layer by kind</h3>
+        <p>Short instructions wait for compact or the next session; procedures can recall next turn; web citations appear only in search.</p>
+      </div>
+    </div>
+
+    <div class="dest" style="margin-top:16px">
+      <article class="dcard">
+        <div class="k">Every session</div>
+        <h3>Into 02 session bootstrap</h3>
+        <p>Handwritten notes, preferences, constraints, facts, conventions, verifications, decisions. At most 24 items / 1500 tokens.</p>
+        <div class="cap">Panel group: every session</div>
+      </article>
+      <article class="dcard">
+        <div class="k">On demand</div>
+        <h3>Into 04 turn recall</h3>
+        <p>Procedures. After save, the next user turn can retrieve them. They never sit in the every-session prefix.</p>
+        <div class="cap">Panel group: on-demand</div>
+      </article>
+      <article class="dcard">
+        <div class="k">Search only</div>
+        <h3>Not auto-injected</h3>
+        <p>Web / MCP citations. The model sees them only via <code>memory_search</code>. Never in 02, never auto-recalled.</p>
+        <div class="cap">Panel group: search only</div>
+      </article>
+    </div>
+    <p class="note"><strong><code>AGENTS.md</code></strong> is the project rules you wrote — editing it rebuilds the prefix. <strong>Project memory</strong> is accumulated facts and preferences — a new write does not bust the current prefix. <strong>The checkpoint</strong> is where this task is. Do not copy one into another.</p>
+  </section>
+
+  <section class="sec reveal" id="clocks">
+    <h2>Three clocks</h2>
+    <p class="lead">After a memory hits the ledger, when the model actually sees it depends on which beat you are on.</p>
+    <div class="clocks">
+      <article class="clock">
+        <h3>This turn</h3>
+        <p>Ledger and panel update immediately. The current prefix does not. A procedure waits until the <strong>next user turn</strong> before it can be recalled.</p>
+      </article>
+      <article class="clock">
+        <h3>Compaction</h3>
+        <p>The checkpoint is rewritten (task progress). Project memory is re-rendered from the ledger, so short instructions finally enter the stable prefix.</p>
+      </article>
+      <article class="clock">
+        <h3>New session</h3>
+        <p>Session bootstrap always re-renders from the ledger. If it is still empty and a project graph exists, a structure / stack summary is written in the background and enters the prefix next time or after compact.</p>
+      </article>
     </div>
   </section>
 </div>
 
 <footer>
   <div class="container">
-    CodePapr &mdash; Context layering visualization · verified against source (<code>promptSystem.ts</code> / <code>contextCompaction.ts</code> / <code>contextStateMerge.ts</code> / <code>contextSurfaceStore.ts</code> / <code>ContentEnvelope.ts</code> / <code>memoryLedger.ts</code> / <code>memoryPersist.ts</code> / <code>memoryRecall.ts</code> / <code>agentStore.ts</code> / <code>toolOutputTruncation.ts</code> / <code>db/mod.rs</code>). Four-layer model = Stable Prefix (frozen) / Session State (epoch + persisted Surface) / Active Context (append-only) / Turn-scoped Recall (request-only anchored insertion). Checkpoints are v3 structured state (13 sections + provenance); compaction commits in a single transaction; the Memory Ledger uses the panel as the only human surface (zero-review writes; citation/procedure never enter Bootstrap). Threshold unit: characters. Bootstrap injected with <code>role: assistant</code> + <code>isPrefixSystem</code>, Claude extracts as system.
+    CodePapr · Context layering · <a href="tutorial.en.html">Tutorial</a> · <a href="index.en.html">Home</a>
   </div>
 </footer>
 
@@ -734,35 +330,18 @@
 (function(){
   const html=document.documentElement;
   const stored=localStorage.getItem('codepapr-theme');
-  if(stored==='light'){html.setAttribute('data-theme','light')}
-  else if(stored==='dark'){html.setAttribute('data-theme','dark')}
+  if(stored==='light') html.setAttribute('data-theme','light');
+  else if(stored==='dark') html.setAttribute('data-theme','dark');
   window.toggleTheme=function(){
     const cur=html.getAttribute('data-theme');
     const next=(!cur||cur==='dark')?'light':'dark';
     html.setAttribute('data-theme',next);
     localStorage.setItem('codepapr-theme',next);
   };
-
   const observer=new IntersectionObserver((entries)=>{
     entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');observer.unobserve(e.target)}})
   },{threshold:0.08,rootMargin:'0px 0px -40px 0px'});
   document.querySelectorAll('.reveal').forEach(el=>observer.observe(el));
-
-  document.querySelectorAll('.item').forEach(it=>{
-    it.addEventListener('click',()=>it.classList.toggle('open'));
-    const w=(it.dataset.wire||'').split(' ');
-    const nodes=[...document.querySelectorAll('.wnode')];
-    it.addEventListener('mouseenter',()=>nodes.forEach(n=>{
-      if((n.dataset.wire||'').split(' ').some(x=>w.includes(x))) n.classList.add('lit');
-    }));
-    it.addEventListener('mouseleave',()=>nodes.forEach(n=>n.classList.remove('lit')));
-  });
-
-  const arc=document.getElementById('dialArc'), num=document.getElementById('dialNum');
-  const C=2*Math.PI*22, target=99.6;
-  arc.style.strokeDasharray=C;
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{arc.style.strokeDashoffset=C*(1-target/100)}));
-  let cur=0; const tick=setInterval(()=>{cur+=2;if(cur>=target){cur=target;clearInterval(tick)}num.textContent=Number.isInteger(cur)?cur:cur.toFixed(1)},28);
 })();
 </script>
 </body>

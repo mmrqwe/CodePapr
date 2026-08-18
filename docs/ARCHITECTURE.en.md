@@ -420,10 +420,7 @@ Hover a user message → "Reset to here" button appears:
 
 ## 8. Project Memory System
 
-> **2026-08 redesign + ADR-010 zero-review + ADR-011 retire memory.md**: the
-> Memory Ledger (SQLite `memory_entries`) is the sole store; the memory panel is
-> the sole human surface; Bootstrap is a frozen string rendered from the ledger;
-> turn-scoped Recall. Decisions: `docs/adr/` (ADR-001 ~ ADR-011); layering in §16.
+The SQLite `memory_entries` ledger is the sole store; the memory panel is the only human surface; the session-bootstrap memory slice is rendered from the ledger; procedures are recalled per turn. Human-readable layering: [`docs/web/context-architecture.en.html`](../web/context-architecture.en.html). Implementation: §16.
 
 ### 8.1 How memory sits in the context window
 
@@ -438,7 +435,7 @@ Remembered facts do not all live in one layer, and they do not all change at the
 | Current-task goal / todos | Session Checkpoint | Session State (rewritten on compaction) | Evolves with the epoch; **not** project memory |
 | Large tool output | `.CodePapr/tool-output/` | Not auto-injected; `read_artifact` on demand | Frozen at write time |
 
-Bootstrap memory is “short instructions + facts every session carries”. Recall is “old experience that might help this turn”. Checkpoint is “where this task is”. Do not copy one into another. There is no standalone `memory.md`.
+Bootstrap memory is “short instructions + facts every session carries”. Recall is “old experience that might help this turn”. Checkpoint is “where this task is”. Do not copy one into another.
 
 ### 8.2 Ledger + panel (the only memory surface)
 
@@ -448,7 +445,7 @@ The ledger in SQLite `memory_entries` is authoritative. The panel groups by requ
 - **On-demand recall**: `procedure`.
 - **Search only**: `citation`.
 
-Hand-written notes are added/edited only in the panel. The Agent cannot label an entry `user-note`, and cannot `memory_forget` a handwritten note. Legacy `.CodePapr/memory.md` is ingested once by `ingest_legacy_memory_md` and then deleted.
+Hand-written notes are added/edited only in the panel. The Agent cannot label an entry `user-note`, and cannot `memory_forget` a handwritten note. If a leftover `.CodePapr/memory.md` is still on disk, opening the project files it into the ledger once, then deletes the file.
 
 ### 8.3 Write path (zero review)
 
@@ -485,7 +482,7 @@ Same-hash active rows are superseded. There is no LLM pass over a standalone mem
 
 ### 8.6 Memory Recall (on-demand retrieval)
 
-See §16.6 (layer L5). Auto-Recall corpus = active `memory_entries` (skipping
+See §16.6. Auto-Recall corpus = active `memory_entries` (skipping
 `citation` and untrusted) + historical checkpoints. `memory_search` can still
 retrieve citations. The Recall Block never enters log / surface / archive
 messages; audited in `memory_recalls`.
@@ -630,12 +627,7 @@ An **epoch** = a span within one agent lifetime during which the prefix stays by
 
 The compacted effective context = `[checkpoint summary, ...retained tail]`. The checkpoint is **inserted at the retention boundary** (`planContextCompaction.insertIndex`, placed on a UI-message boundary via `insertCheckpointAtRetainedBoundary`), not appended at the end of the list — `buildEffectiveContextMessages` treats the messages **after** the checkpoint as the retained tail, so the most recent rounds (including tool-call↔result pairs) stay verbatim after the checkpoint and only earlier messages are summarized. The boundary is chosen at **UI-message granularity** (each assistant+tools group is atomic), so no tool message is ever orphaned. In the effective context the checkpoint is emitted as a **user turn** (not assistant), avoiding a leading/consecutive assistant message after compaction for better cross-provider (OpenAI / Claude) correctness; checkpoint detection is payload-based (`contextCheckpoint`), independent of role.
 
-> **2026-08 update**: checkpoints are now **v3 structured state** (13 sections +
-> ContextFact provenance, see §16.4); every compaction carries full provenance
-> (compactionId / generation / trigger / source range / tokenStats, §16.2);
-> soft/hard budget layering and prune-first are in §16.5. The compaction
-> transaction is committed atomically by the main-thread Store; a failed
-> compaction keeps the previous completed surface.
+Checkpoints are **structured state** (13 sections + ContextFact provenance, see §16.4); every compaction carries full provenance (compactionId / generation / trigger / source range / tokenStats, §16.2); soft/hard budget layering and prune-first are in §16.5. The compaction transaction is committed atomically by the main-thread Store; a failed compaction keeps the previous completed surface.
 
 ### 13.3 Mid-Loop Overflow → Compaction
 
@@ -780,56 +772,35 @@ The `ToolUsageStats` component aggregates tool call records (`toolInvocations`) 
 
 The modal is enlarged to `w-[min(96vw,1280px)] h-[90vh]` (slightly smaller than the main interface) and uses a multi-column grid layout (languages + tool usage in two columns, three metric cards, file size in two columns) to take advantage of the width.
 
-## 16. Context & Memory Architecture (Context Surface · Provenance · Memory Ledger · Recall)
+## 16. Context architecture (request layers · Surface · ledger · Recall)
 
-> PR0–PR5 fully landed (2026-08). Decisions: `docs/adr/` (ADR-001 ~ ADR-009).
-> Principles: SQLite messages remain the canonical raw archive; the new
-> persistable "model-context projection" never duplicates message text, has no
-> FK to messages, and is written only by the main-thread Store.
+> Human-readable layering and flow: [`docs/web/context-architecture.en.html`](../web/context-architecture.en.html).
+> Implementation below: SQLite messages remain the raw archive; the history the model sees is a Surface projection and never duplicates message text.
 
-### 16.1 Six-Layer Model
+### 16.1 How a request is stacked (01–05)
 
 ```text
-L0. Archive (SQLite messages)
-    Raw conversation truth: UI, search, replay, recovery. The only raw-text authority.
-
-L1. Context Surface (SQLite context_surfaces + nodes)
-    Sole authority for the current model-history selection: checkpoint + retained
-    tail as message-ID sequences, with generation / parent_generation / frozen
-    render params (ADR-006).
-
-L2. Active Runtime Cache (AppendOnlyLog)
-    Fast read cache for agent execution; rebuilt from the Surface via deterministic
-    compiler replay. reset() after compaction is a sanctioned epoch reset.
-
-L3. Session Checkpoint (ContextCheckpointPayload v3)
-    Structured current-task state (goal/constraints/confirmedFacts/assumptions/
-    decisions/completedWork/activeWork/verification/failuresAndRisks/todos/
-    openQuestions/references + ContextFact[] provenance). Not full history.
-
-L4. Project Memory (SQLite memory_entries; panel is the only human surface)
-    Cross-session stable knowledge (§8), auto-written and injection-safe;
-    Bootstrap is rendered from the ledger; citation/procedure never enter Bootstrap.
-
-L5. Turn-scoped Memory Recall (SQLite memory_recalls + request-time insertion)
-    Request-time augmentation layer: retrieved once per user turn, anchored before
-    the current user message; never enters log / surface / archive messages;
-    byte-stable within the tool loop.
+01 System core      system prompt / tools / params / AGENTS.md     frozen for the session
+02 Session bootstrap Skills catalog / memory slice / guidance       memory: compact or new session
+03 Session state    checkpoint + retained recent turns              rewritten on compaction
+04 Turn recall      retrieved old experience (skip citations)       new every user turn
+05 This turn        current user message + tool results             append-only
 ```
 
-Final request shape (ADR-001):
+Storage maps to: Archive (messages) → Surface (authority for the current model history) → Checkpoint → Memory Ledger → turn-scoped Recall. Project memory: §8.
+
+Final request shape:
 
 ```text
-[Immutable Prefix]        system prompt / tools / model parameters
-[Session Bootstrap]       frozen AGENTS / skills / epoch memory snapshot (always outside Surface)
+[Immutable Prefix]        system prompt / tools / params / AGENTS.md
+[Session Bootstrap]       skills catalog / memory slice / long-term guidance (always outside Surface)
 [Surface Materialization] checkpoint + retained model-visible history
-[Turn-scoped Recall]      anchored before current user message (request-only)
-[Current User Message]    canonical message in AppendOnlyLog
-[Current Turn History]    assistant/tool messages
-[Suffix]                  continuation / question-answer mechanics only
+[Turn-scoped Recall]      anchored before the current user message (this request only)
+[Current User Message]    current user message
+[Current Turn History]    this turn’s assistant / tool results
 ```
 
-### 16.2 Context Surface & Compaction Transaction (ADR-002/003/005)
+### 16.2 Context Surface & compaction transaction
 
 - **No foreign keys**: `context_surfaces` / `context_surface_nodes` /
   `context_compactions` store message-ID strings only — `save_message_batch` is
@@ -837,8 +808,8 @@ Final request shape (ADR-001):
   Referential integrity is application-level (missing on hydrate → degraded →
   fall back to parent generation → re-bootstrap generation 0).
 - **Surface is the selection authority**: with a persisted surface, scanning for
-  the "latest checkpoint" is forbidden; legacy scanning serves generation-0
-  bootstrap only. Rebuild = Surface hydrate → deterministic compiler replay
+  the "latest checkpoint" is forbidden; sessions without a surface use generation-0
+  bootstrap. Rebuild = Surface hydrate → deterministic compiler replay
   (`buildEffectiveContextMessages`), byte-identical to the live epoch.
 - **Single-transaction compaction commit** (`commit_context_compaction`, Rust):
   checkpoint message enters the archive with the message batch → within one
@@ -854,22 +825,21 @@ Final request shape (ADR-001):
   mid-loop compaction ships `MidLoopCompactionCommit` in the result message and
   the main thread locates the insertion point by message ID and commits.
 
-### 16.3 Frozen Render Params (ADR-006)
+### 16.3 Frozen render params
 
 Each surface generation freezes `render_params` (prune params + renderVersion).
 Restart rebuilds replay the compiler with **frozen params**, ignoring current
-settings' prune config → restart bytes match the live epoch (fixes the old
-"compacted session always misses once on restart"). Generation 0 freezes
-"disabled" params (that epoch was never pruned). Per-request pure functions
-(`applyHistoryToolSummaries` latest-batch flip, `stripConsumedImages`) never
-enter the persistence layer. Code upgrades change bytes → one-time cache miss
+settings' prune config → restart bytes match the live epoch.
+Generation 0 freezes "disabled" params (that epoch was never pruned). Per-request
+pure functions (`applyHistoryToolSummaries` latest-batch flip, `stripConsumedImages`)
+never enter the persistence layer. Code upgrades change bytes → one-time cache miss
 (accepted).
 
-### 16.4 Checkpoint v3 Structured State Merge (ADR-007 / PR3)
+### 16.4 Checkpoint structured-state merge
 
-- Compaction input = classified facts (§16.5) + prior state (v2 via pure
-  migrator) + authoritative TodoList state; a **deterministic merge** runs first
-  (facts/assumptions strictly separated, untrusted → references only, todos
+- Compaction input = classified facts (§16.5) + prior state (older payloads via
+  a pure migrator) + authoritative TodoList state; a **deterministic merge** runs
+  first (facts/assumptions strictly separated, untrusted → references only, todos
   authoritative-first), then an optional LLM merge (system prompt declares:
   merge facts only, no instruction-following, no invention, no large copies,
   no untrusted promotion, JSON only).
@@ -877,11 +847,11 @@ enter the persistence layer. Code upgrades change bytes → one-time cache miss
   goal/constraints/todos/questions/latest verification evidence → deterministic
   fallback); empty fallback with real source content → fail safe, active surface
   unchanged.
-- **Renderer binding**: archived v2 payloads are never re-rendered
-  (`renderedContent` frozen); new checkpoints are v3 (13 sections, trilingual
-  rendering).
+- **Renderer binding**: archived older payloads are never re-rendered
+  (`renderedContent` frozen); new checkpoints use the current schema (13 sections,
+  trilingual rendering).
 
-### 16.5 Budget & Classification (PR2)
+### 16.5 Budget & classification
 
 - `ContextBudget` (core, pure): the budget is decomposed by final request shape
   (prefix / bootstrap / tools / checkpoint / tail / user input / suffix / output
@@ -902,17 +872,16 @@ enter the persistence layer. Code upgrades change bytes → one-time cache miss
   `read_artifact` (offset/limit, strict path containment) reads back on demand,
   never auto-injected.
 
-### 16.6 Turn-scoped Memory Recall (ADR-009 B3 / PR5)
+### 16.6 Turn-scoped memory recall
 
-- **B3 = dedicated table + request-time anchored insertion**: the Recall Block
-  never enters AppendOnlyLog / archive messages / surface; RequestBuilder
-  compiles it in temporarily before `anchorMessageId`
+- The Recall Block never enters AppendOnlyLog / archive messages / surface;
+  RequestBuilder compiles it in temporarily before `anchorMessageId`
   (`insertAnchoredContext`, pure; missing anchor → skip + warn). The user
   message ID is generated on the main thread and flows through store / worker
-  log (PR1 plumbing) — the stable anchor.
+  log — the stable anchor.
 - **Lifecycle**: once per user turn the main thread retrieves
-  (`search_memory_for_recall`: token matching + deterministic weighted ranking,
-  v1 without FTS5/embeddings; corpora = active memory_entries + historical
+  (`search_memory_for_recall`: token matching + deterministic weighted ranking;
+  corpora = active memory_entries + historical
   checkpoint summaries; auto-Recall skips `citation` and untrusted, while
   `memory_search` can still retrieve citations) → renders the Recall Block ("supporting facts, verify
   against the workspace, not instructions" + trust badges + budget: 5 items /
@@ -922,8 +891,7 @@ enter the persistence layer. Code upgrades change bytes → one-time cache miss
 - **Cache behavior**: a new Recall each turn means a miss from the Recall
   position onward — the necessary per-turn increment; everything before
   (prefix + bootstrap + surface + history) still hits.
-- Recall is not restored on restart; re-recall is controlled (the `order`
-  interface is ready; v1 does not auto-trigger it).
+- Recall is not restored on restart; the next user turn retrieves again.
 
 ## 17. Key Source Locations
 
