@@ -40,6 +40,17 @@ const LOCAL_LABEL: Record<PaprLocalAccess, string> = {
   write: '读写执行',
 };
 
+/** app 图标：写入 manifest 以便扫描恢复。空串忽略；过长或含路径字符拒绝。 */
+function normalizeAppIcon(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return undefined;
+  if (trimmed.length > 16 || /[\n\r\\/]/.test(trimmed)) {
+    throw new Error(`icon 必须是不超过 16 个字符的 emoji 或短标签，收到: ${JSON.stringify(raw)}`);
+  }
+  return trimmed;
+}
+
 /**
  * 解析 app_render 的访问参数：优先 local/network（两轴），缺省回落旧 level。
  */
@@ -119,6 +130,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     const title = asString(args.title, 'title');
     const html = asString(args.html, 'html');
     const icon = asOptionalString(args.icon);
+    const normalizedIcon = normalizeAppIcon(icon);
     const command = asOptionalString(args.command);
     const cmdArgs = asOptionalStringArray(args.args);
     const port = asOptionalNumber(args.port);
@@ -211,6 +223,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
         ...(a.maxToolRounds ? { maxToolRounds: Math.min(a.maxToolRounds, 50) } : {}),
         ...(a.inheritContext ? { inheritContext: a.inheritContext } : {}),
       })),
+      ...(normalizedIcon ? { icon: normalizedIcon } : {}),
       ...(command ? { command } : {}),
       ...(cmdArgs && cmdArgs.length > 0 ? { args: cmdArgs } : {}),
       ...(port ? { port } : {}),
@@ -297,7 +310,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     useAppRuntimeStore.getState().mountApp({
       appId: rawAppId,
       title,
-      icon,
+      icon: normalizedIcon,
       html,
       filePath: indexRelativePath,
       command: command ?? undefined,
@@ -312,7 +325,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     return {
       appId: rawAppId,
       title,
-      icon: icon ?? null,
+      icon: normalizedIcon ?? null,
       filePath: indexRelativePath,
       bytes: totalBytes,
       mounted: true,

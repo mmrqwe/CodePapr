@@ -53,6 +53,38 @@ describe('two-axis levelGrants', () => {
     expect(manifestAccess(null, settings)).toEqual({ local: 'none', network: false });
   });
 
+  it('全局默认只在 manifest 未声明时生效，不是天花板也不能放大', () => {
+    const tight: PaprAppSettings = {
+      defaultLocal: 'none',
+      defaultNetwork: false,
+      appOverrides: {},
+    };
+    const loose: PaprAppSettings = {
+      defaultLocal: 'write',
+      defaultNetwork: true,
+      appOverrides: {},
+    };
+    const declared = makeManifest({ local: 'write', network: true });
+    expect(resolveEffectiveAccess(declared, tight, 'app-x')).toEqual({
+      local: 'write',
+      network: true,
+    });
+    const noneApp = makeManifest({ local: 'none', network: false });
+    expect(resolveEffectiveAccess(noneApp, loose, 'app-x')).toEqual({
+      local: 'none',
+      network: false,
+    });
+    const undeclared = makeManifest({});
+    expect(resolveEffectiveAccess(undeclared, tight, 'app-x')).toEqual({
+      local: 'none',
+      network: false,
+    });
+    expect(resolveEffectiveAccess(undeclared, loose, 'app-x')).toEqual({
+      local: 'write',
+      network: true,
+    });
+  });
+
   it('effective access = manifest ∩ override', () => {
     const manifest = makeManifest({ local: 'write', network: true });
     expect(resolveEffectiveAccess(manifest, settings, 'app-x')).toEqual({

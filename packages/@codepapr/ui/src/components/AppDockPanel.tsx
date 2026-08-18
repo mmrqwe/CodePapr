@@ -145,8 +145,8 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
         try {
           // 进程存活是后端生死的直接证据；端口探测只是间接证据——
           // check_port_available 只绑 IPv4 127.0.0.1，当后端监听在 IPv6（::）
-          // 时 IPv4 绑定会成功，误判「端口空闲」→ 错误 setAppStopped →
-          // 连带关掉打开的 app 弹窗（用户看到的「15 秒自动退出」）。
+          // 时 IPv4 绑定会成功，误判「端口空闲」→ 错误 setAppStopped。
+          // 停后端不再关闭已打开的窗口：AppModal 会提示「后端已停止」并提供重启。
           // 因此：只要进程还活着就绝不判停。
           const alive: boolean = await invoke('background_process_alive', { pid: app.pid });
           if (alive) continue;
@@ -219,8 +219,14 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {apps.map((app) => {
-          const appRunning = !!(app.command && app.port && app.pid && app.url);
+          const hasBackend = !!(app.command && app.port);
+          const appRunning = hasBackend && !!app.pid && !!app.url;
           const isSelected = app.appId === selectedId;
+          const statusLabel = !hasBackend
+            ? t.appDockReady
+            : appRunning
+              ? t.appDockRunning
+              : t.appDockStopped;
           return (
             <div
               key={app.appId}
@@ -233,8 +239,13 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
               }`}
             >
               <span
+                title={statusLabel}
                 className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${
-                  appRunning ? 'bg-ok shadow-[0_0_6px_rgba(52,211,153,0.4)]' : 'bg-danger'
+                  !hasBackend
+                    ? 'bg-fg-muted'
+                    : appRunning
+                      ? 'bg-ok shadow-[0_0_6px_rgba(52,211,153,0.4)]'
+                      : 'bg-danger'
                 }`}
               />
               <span className="flex-shrink-0 text-sm leading-none">

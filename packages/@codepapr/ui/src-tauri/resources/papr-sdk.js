@@ -8,7 +8,6 @@
   //（truthy 通过存在性检查，armIdleTimer 还会把 timer 写进原型，污染页面内
   // 所有对象）。null 原型对象上 '__proto__'/'constructor' 只是普通键。
   var pending = Object.create(null);
-  var appInfo = null;
   var parentOrigin = window.__PAPR_PARENT_ORIGIN || '*';
   var currentTheme = null;
   var themeListeners = [];
@@ -179,10 +178,10 @@
     },
     app: {
       info: function () {
-        if (appInfo) return Promise.resolve(appInfo);
         return send('papr://app.info').then(function (info) {
-          info.backendUrl = window.__PAPR_BACKEND_URL || null;
-          appInfo = info;
+          if (info && typeof info === 'object') {
+            info.backendUrl = window.__PAPR_BACKEND_URL || info.backendUrl || null;
+          }
           return info;
         });
       },

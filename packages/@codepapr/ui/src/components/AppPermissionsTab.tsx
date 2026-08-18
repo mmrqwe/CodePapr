@@ -136,6 +136,7 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
     <div className="flex flex-col gap-5">
       <div>
         <p className="text-xs leading-relaxed text-fg-muted">{t.appPermTitle}</p>
+        <p className="mt-1.5 text-[10px] leading-relaxed text-fg-dim">{t.appPermGlobalHint}</p>
       </div>
 
       {/* 本地访问轴 */}

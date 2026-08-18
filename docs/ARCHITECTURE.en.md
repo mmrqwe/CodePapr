@@ -248,7 +248,7 @@ LLM can manage app lifecycle via 4 tools (registered as merge tools in `workspac
 
 **AppDockPanel — Application Management Panel:**
 
-App list + fixed bottom action bar. List items: green/red status dot + emoji icon + app name. Bottom bar: ▶ Start / Open / ■ Stop / 🗑 Delete. Buttons auto-enable/disable based on selected app state. "Open" for pure frontend apps is always enabled; for backend apps, only when running.
+App list + fixed bottom action bar. List items: status dot (green = backend running, red = backend stopped, gray = frontend-only ready) + emoji icon + app name. Bottom bar: ▶ Start / Open / ■ Stop / 🗑 Delete. Buttons auto-enable/disable based on selected app state. "Open" for pure frontend apps is always enabled; for backend apps, only when running. Stopping a backend leaves an already-open window in place and prompts to restart.
 
 **Permission Model (Two Axes: local × network):**
 
@@ -261,7 +261,7 @@ Apps declare an access profile via manifest `local` (`none`/`read`/`write`) × `
 | `write` | + Agent write/execute (write/edit/patch/bash) |
 | network=true | + papr.http + Agent websearch/webfetch + MCP |
 
-Resolution: `effective = manifest_access ∩ user_override` (overrides can only narrow). Settings **App Tab** (`AppPermissionsTab.tsx`): global defaults (local × network) + per-app two-control overrides.
+Resolution: `effective = manifest_access ∩ per-app override` (overrides can only narrow). When the manifest does not declare `local`/`network`/`level`, it falls back to the user's **default when undeclared**. That fallback is **not** a ceiling for declared apps. Settings **App Tab** (`AppPermissionsTab.tsx`): default when undeclared (local × network) + per-app two-control overrides.
 
 **Network enforcement chain (core of the two-axis model):**
 
@@ -729,7 +729,7 @@ The settings panel has six tabs. Full parameter reference: `packages/@codepapr/c
 | Search | Self-hosted SearXNG first, with automatic fallback to built-in multi-source aggregation when unavailable; engine selector removed from UI; category/time/language/safe search parameters moved to collapsible Advanced Options section |
 | Mentor | Mentor sub-agent independent API key, Base URL, model selection |
 | Advanced | Context compaction (model/temperature/summary output tokens/context limit/conversation rounds), TodoList max retries, ProjectGraph depth/file limits, streaming & tool output (stream idle timeout, middle-truncation keep chars), tool context mode (full/summary/auto, default full; the current round always gets full output, only history is summarized per mode, see §13.10). The context limit `maxContextTokens` defaults to 500K; its effective value is clamped to the selected provider's context limit (see §13.5) |
-| App | .papr app permission management — global defaults (local access × network) and per-app two-axis overrides |
+| App | .papr app permissions — default when undeclared (local × network) and per-app two-axis overrides |
 
 Voice configuration is not in the main settings panel — it is configured per character in the CharacterModal Voice Tab.
 

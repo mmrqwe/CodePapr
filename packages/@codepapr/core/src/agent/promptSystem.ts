@@ -184,8 +184,8 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '无需权限（限定 app data 目录，永远可用）',
       '',
       '### papr.app.info — 获取应用元数据',
-      'await papr.app.info()  // 返回: { appId, name, version, permissions }',
-      '无需权限声明',
+      'await papr.app.info()  // 返回: { appId, name, version, permissions, local, network, backendUrl }',
+      '无需权限声明。每次调用都读取当前生效档（设置更改后立即反映）。',
 
       '## 权限模型（两轴：本地 × 网络）',
       '在 app_render 中用两个参数声明访问档：local（"none" | "read" | "write"）+ network（true/false）。',
@@ -218,7 +218,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
 
       '## 后端服务 vs 纯前端',
       '纯前端（推荐默认）：HTML 内用 papr SDK 完成存储/HTTP/Agent 调用。不需要后端。',
-      '后端服务：需要读写项目数据库、运行复杂查询时，提供 command/args/port + files（server.js）。后端进程运行在工作区目录下。',
+      '后端服务：需要读写项目数据库、运行复杂查询时，提供 command/args/port + files（server.js）。后端进程的工作目录是应用目录 .CodePapr/apps/<appId>/，相对路径只写文件名（如 server.js）。',
       '⚠️ 后端 app 的 HTML 中，API 调用必须用 window.__PAPR_BACKEND_URL 作为 base URL：',
       '  const API = window.__PAPR_BACKEND_URL || "";',
       '  fetch(API + "/api/data")  // -> http://localhost:<port>/api/data',
@@ -370,8 +370,8 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '無需權限（限定 app data 目錄，永遠可用）',
       '',
       '### papr.app.info — 獲取應用元資料',
-      'await papr.app.info()  // 返回: { appId, name, version, permissions }',
-      '無需權限宣告',
+      'await papr.app.info()  // 返回: { appId, name, version, permissions, local, network, backendUrl }',
+      '無需權限宣告。每次呼叫都讀取目前生效檔（設定更改後立即反映）。',
 
       '## 權限模型（兩軸：本地 × 網路）',
       '在 app_render 中用兩個參數宣告存取檔：local（"none" | "read" | "write"）+ network（true/false）。',
@@ -404,7 +404,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
 
       '## 後端服務 vs 純前端',
       '純前端（推薦預設）：HTML 內用 papr SDK 完成儲存/HTTP/Agent 調用。不需要後端。',
-      '後端服務：需要讀寫專案資料庫、執行複雜查詢時，提供 command/args/port + files（server.js）。後端進程執行在工作區目錄下。',
+      '後端服務：需要讀寫專案資料庫、執行複雜查詢時，提供 command/args/port + files（server.js）。後端進程的工作目錄是應用目錄 .CodePapr/apps/<appId>/，相對路徑只寫檔名（如 server.js）。',
       '⚠️ 後端 app 的 HTML 中，API 調用必須用 window.__PAPR_BACKEND_URL 作為 base URL：',
       '  const API = window.__PAPR_BACKEND_URL || "";',
       '  fetch(API + "/api/data")  // -> http://localhost:<port>/api/data',
@@ -548,8 +548,8 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       'No permission needed (restricted to the app data directory, always available).',
       '',
       '### papr.app.info — Get App Metadata',
-      'await papr.app.info()  // Returns: { appId, name, version, permissions }',
-      'No permission needed.',
+      'await papr.app.info()  // Returns: { appId, name, version, permissions, local, network, backendUrl }',
+      'No permission needed. Each call reads the current effective access (settings changes apply immediately).',
 
       '## Permission Model (two axes: local × network)',
       'Declare the access profile in app_render with two parameters: local ("none" | "read" | "write") + network (true/false).',
@@ -582,7 +582,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
 
       '## Backend vs Frontend-Only',
       'Frontend-only (recommended): Use the papr SDK for storage/HTTP/Agent calls. No backend needed.',
-      'Backend: Use command/args/port + files (server.js) when you need to read project databases or run complex queries. The backend process runs in the workspace directory.',
+      'Backend: Use command/args/port + files (server.js) when you need to read project databases or run complex queries. The backend process cwd is the app directory .CodePapr/apps/<appId>/; relative paths are filenames only (e.g. server.js).',
       '⚠️ In backend apps, API calls MUST use window.__PAPR_BACKEND_URL as base URL:',
       '  const API = window.__PAPR_BACKEND_URL || "";',
       '  fetch(API + "/api/data")  // -> http://localhost:<port>/api/data',

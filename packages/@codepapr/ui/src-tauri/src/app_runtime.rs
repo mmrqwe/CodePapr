@@ -450,6 +450,7 @@ pub struct DiscoveredApp {
     pub command: Option<String>,
     pub args: Option<Vec<String>>,
     pub port: Option<u16>,
+    pub icon: Option<String>,
 }
 
 #[tauri::command]
@@ -503,6 +504,7 @@ pub fn scan_workspace_apps(workspace_path: String) -> Vec<DiscoveredApp> {
             command: manifest.command,
             args: manifest.args,
             port: manifest.port,
+            icon: manifest.icon,
         });
     }
 
@@ -603,6 +605,24 @@ mod tests {
         assert_eq!(result[0].app_id, "valid-app");
         assert_eq!(result[0].title, "ValidApp");
         assert!(result[0].manifest_json.is_some());
+        assert_eq!(result[0].icon.as_deref(), None);
+
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_reads_icon_from_manifest() {
+        let tmp = std::env::temp_dir().join(format!("papr-scan-icon-{}", std::process::id()));
+        let apps_dir = tmp.join(".CodePapr/apps/icon-app");
+        fs::create_dir_all(&apps_dir).unwrap();
+
+        let manifest = r#"{"spec":"papr/0.1","name":"IconApp","icon":"📊"}"#;
+        fs::write(apps_dir.join("manifest.json"), manifest).unwrap();
+        fs::write(apps_dir.join("index.html"), "<html></html>").unwrap();
+
+        let result = scan_workspace_apps(tmp.to_string_lossy().to_string());
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].icon.as_deref(), Some("📊"));
 
         fs::remove_dir_all(&tmp).ok();
     }

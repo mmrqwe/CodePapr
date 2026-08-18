@@ -396,6 +396,17 @@ describe('promptSystem', () => {
     }
   });
 
+  it('app mode documents backend cwd as the app directory, not the workspace root', () => {
+    for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
+      const prompt = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang });
+      expect(prompt).toContain('.CodePapr/apps/<appId>/');
+    }
+    const en = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'en' });
+    expect(en).not.toMatch(/backend process runs in the workspace directory/i);
+    const zhCN = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'zh-CN' });
+    expect(zhCN).not.toContain('后端进程运行在工作区目录下');
+  });
+
   it('app mode mandates papr.db as default in-app persistence', () => {
     const zhCN = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'zh-CN' });
     expect(zhCN).toContain('持久化默认用 papr.db');

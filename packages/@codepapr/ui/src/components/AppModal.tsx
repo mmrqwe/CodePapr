@@ -1,10 +1,12 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
+import { useAgentStore } from '../store/agentStore';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
 import type { PaprManifest } from '@codepapr/types';
 import { usePaprBridge } from '../papr/usePaprBridge';
 import { APP_IFRAME_SANDBOX } from '../papr/appIframe';
+import { launchAppBackend } from '../tools/workspaceAppTools';
 
 interface AppModalProps {
   lang?: Lang;
@@ -18,7 +20,10 @@ export function AppModal({ lang }: AppModalProps) {
   );
   const closeAppModal = useAppRuntimeStore((state) => state.closeAppModal);
   const reloadApp = useAppRuntimeStore((state) => state.reloadApp);
+  const setAppRunning = useAppRuntimeStore((state) => state.setAppRunning);
+  const workspacePath = useAgentStore((state) => state.workspacePath);
   const [error, setError] = useState('');
+  const [restarting, setRestarting] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const loadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -94,6 +99,29 @@ export function AppModal({ lang }: AppModalProps) {
     },
   });
 
+  const handleRestartBackend = useCallback(async () => {
+    if (!openedApp?.command || !openedApp.port) return;
+    setRestarting(true);
+    setError('');
+    try {
+      const { pid, url } = await launchAppBackend(
+        {
+          appId: openedApp.appId,
+          command: openedApp.command,
+          args: openedApp.args ?? [],
+          port: openedApp.port,
+          manifestJson: openedApp.manifestJson,
+        },
+        workspacePath,
+      );
+      setAppRunning(openedApp.appId, pid, url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRestarting(false);
+    }
+  }, [openedApp, workspacePath, setAppRunning]);
+
   if (!openedApp) {
     return null;
   }
@@ -102,6 +130,8 @@ export function AppModal({ lang }: AppModalProps) {
 
   const hasMeta = (manifest?.permissions && manifest.permissions.length > 0)
     || (manifest?.agents && manifest.agents.length > 0);
+  const hasBackend = !!(openedApp.command && openedApp.port);
+  const backendStopped = hasBackend && !(openedApp.pid && openedApp.url);
 
   return (
     <div className="flex h-full w-full flex-col bg-base">
@@ -144,6 +174,20 @@ export function AppModal({ lang }: AppModalProps) {
           ⟳ {t.appModalReload}
         </button>
       </div>
+
+      {backendStopped && (
+        <div className="mx-3 mt-2 flex shrink-0 items-center justify-between gap-2 rounded-lg border border-warn-bg bg-warn-bg px-3 py-1.5 text-[11px] text-warn">
+          <span>{t.appModalBackendStopped}</span>
+          <button
+            type="button"
+            disabled={restarting}
+            onClick={() => { void handleRestartBackend(); }}
+            className="shrink-0 rounded border border-warn-bg px-2 py-0.5 text-[10px] font-medium text-warn hover:border-warn hover:text-fg disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {restarting ? t.appDockStarting : t.appModalRestartBackend}
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="mx-3 mt-2 shrink-0 rounded-lg border border-danger-bg bg-danger-bg px-3 py-1.5 text-[11px] text-danger">

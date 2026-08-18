@@ -135,7 +135,6 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set) => ({
       apps: state.apps.map((app) =>
         app.appId === appId ? { ...app, pid: undefined, url: undefined } : app
       ),
-      openedAppId: state.openedAppId === appId ? null : state.openedAppId,
     }));
   },
 

@@ -247,7 +247,7 @@ LLM 可通过 4 个工具管理 app 生命周期（在 `workspaceTools.ts` 注�
 
 **AppDockPanel — 应用管理面板：**
 
-应用列表 + 底部固定按钮栏。列表项：绿/红状态圆点 + emoji 图标 + app 名称。底部栏：▶ 启动 / 打开 / ■ 停止 / 🗑 删除。按钮根据选中 app 的状态自动启用/禁用。纯前端 app 的"打开"始终可用；后端 app 的"打开"仅在已启动时可用。
+应用列表 + 底部固定按钮栏。列表项：状态圆点（绿=后端运行中，红=后端已停止，灰=纯前端就绪）+ emoji 图标 + app 名称。底部栏：▶ 启动 / 打开 / ■ 停止 / 🗑 删除。按钮根据选中 app 的状态自动启用/禁用。纯前端 app 的"打开"始终可用；后端 app 的"打开"仅在已启动时可用。后端停止时已打开的窗口保持打开，并提示重启。
 
 **权限模型（两轴：本地 × 网络）：**
 
@@ -260,7 +260,7 @@ app 通过 manifest 的 `local`（`none`/`read`/`write`）× `network`（`true`/
 | `write` | + Agent 写入/执行（write/edit/patch/bash） |
 | network=true | + papr.http + Agent websearch/webfetch + MCP |
 
-权限解析：`effective = manifest_access ∩ user_override`（覆盖只能收窄）。设置面板 **App Tab**（`AppPermissionsTab.tsx`）：全局默认（本地 × 网络）+ 逐 app 两控件覆盖。
+权限解析：`effective = manifest_access ∩ 逐 app 覆盖`（覆盖只能收窄）。manifest 未声明 `local`/`network`/`level` 时，才回落到用户设置里的「未声明时的默认」。全局默认**不是**所有 app 的天花板。设置面板 **App Tab**（`AppPermissionsTab.tsx`）：未声明时的默认（本地 × 网络）+ 逐 app 两控件覆盖。
 
 **网络强制链（两轴模型的核心）：**
 
@@ -717,7 +717,7 @@ OpenAI/Claude 兼容端点常是转发网关（如 OpenAI 网关转发 DeepSeek 
 | Search | 自部署 SearXNG 优先，失败自动降级到内置多源聚合；搜索引擎选择器已移除；分类/时间/语言/安全搜索等高级参数收入折叠区 |
 | Mentor | Mentor 子代理独立 API key、Base URL、模型选择 |
 | 高级 | 上下文压缩（模型/温度/摘要输出 token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 深度/文件限制、流式与工具输出（流空闲超时、中间截断保留字符数）、工具上下文模式（完整/摘要/自动，默认完整；当轮始终全文，仅历史上下文按模式摘要，见 §13.10）。上下文上限 `maxContextTokens` 默认 500K，实际生效值按所选服务商上下文上限自动钳制（见 §13.5） |
-| App | .papr 应用权限管理——全局默认（本地访问 × 网络）与逐应用两轴覆盖 |
+| App | .papr 应用权限——未声明时的默认（本地访问 × 网络）与逐应用两轴覆盖 |
 
 语音配置不在主设置面板，而是在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。
 

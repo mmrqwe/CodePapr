@@ -577,6 +577,22 @@ describe('app_render agent tools validation', () => {
     ).resolves.toMatchObject({ appId: 'demo-app', mounted: true });
   });
 
+  it('writes icon into manifest.json so a later scan can restore it', async () => {
+    invokeMock.mockClear();
+    invokeMock.mockResolvedValue({ path: '/tmp/ws/.CodePapr/apps/demo-app/x', bytes: 1 });
+    await appRegistry().execute('app_render', { ...BASE_ARGS, icon: '📊' });
+    const manifestWrite = invokeMock.mock.calls.find(
+      ([command, args]) =>
+        command === 'write_text_file' &&
+        typeof args?.relativePath === 'string' &&
+        args.relativePath.endsWith('manifest.json'),
+    );
+    expect(manifestWrite).toBeTruthy();
+    const written = JSON.parse(String(manifestWrite?.[1]?.content ?? '{}')) as { icon?: string };
+    expect(written.icon).toBe('📊');
+    expect(useAppRuntimeStore.getState().apps.find((a) => a.appId === 'demo-app')?.icon).toBe('📊');
+  });
+
   it('app_delete 先停止运行中的后端进程再删文件（工具定义承诺会停）', async () => {
     invokeMock.mockClear();
     // 预置运行中的后端（store 有 pid）

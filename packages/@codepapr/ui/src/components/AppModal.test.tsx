@@ -168,4 +168,40 @@ describe('AppModal', () => {
 
     expect(container.textContent).not.toContain('failed to initialize');
   });
+
+  it('setAppStopped 不关闭已打开的窗口，并提示后端已停止', async () => {
+    useAppRuntimeStore.setState({
+      apps: [
+        {
+          appId: 'app-1',
+          title: 'Test App',
+          html: '<html></html>',
+          filePath: '.CodePapr/apps/app-1/index.html',
+          createdAt: 1,
+          updatedAt: 2,
+          command: 'node',
+          args: ['server.js'],
+          port: 3456,
+          pid: 99,
+          url: 'http://localhost:3456/',
+        },
+      ],
+      openedAppId: 'app-1',
+    });
+
+    await act(async () => {
+      root.render(<AppModal lang="en" />);
+    });
+    expect(container.textContent).not.toContain('Backend stopped');
+
+    act(() => {
+      useAppRuntimeStore.getState().setAppStopped('app-1');
+    });
+    await flush();
+
+    expect(useAppRuntimeStore.getState().openedAppId).toBe('app-1');
+    expect(container.querySelector('iframe')).toBeTruthy();
+    expect(container.textContent).toContain('Backend stopped');
+    expect(container.textContent).toContain('Restart');
+  });
 });

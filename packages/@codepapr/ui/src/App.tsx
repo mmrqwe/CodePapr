@@ -432,7 +432,7 @@ export default function App() {
     if (workspacePath) {
       void (async () => {
         try {
-          const discovered = await invoke<Array<{ app_id: string; title: string; html: string; manifest_json: string | null; command: string | null; args: string[] | null; port: number | null }>>(
+          const discovered = await invoke<Array<{ app_id: string; title: string; html: string; manifest_json: string | null; command: string | null; args: string[] | null; port: number | null; icon: string | null }>>(
             'scan_workspace_apps',
             { workspacePath },
           );
@@ -445,12 +445,20 @@ export default function App() {
             // #15：入口文件尊重 manifest.entry（与 Rust scan_workspace_apps 一致），
             // 旧实现硬编码 index.html。
             let appEntryFile = 'index.html';
+            let appIcon: string | undefined;
+            if (app.icon && app.icon.trim().length > 0) {
+              appIcon = app.icon.trim();
+            }
             if (app.manifest_json) {
               try {
-                const parsedManifest = JSON.parse(app.manifest_json) as { entry?: string };
+                const parsedManifest = JSON.parse(app.manifest_json) as { entry?: string; icon?: string };
                 const rawEntry = parsedManifest.entry?.trim();
                 if (rawEntry && !rawEntry.includes('..') && !rawEntry.includes('\\')) {
                   appEntryFile = rawEntry;
+                }
+                if (!appIcon) {
+                  const rawIcon = parsedManifest.icon?.trim();
+                  if (rawIcon) appIcon = rawIcon;
                 }
               } catch {
                 // keep default
@@ -459,6 +467,7 @@ export default function App() {
             mountApp({
               appId: app.app_id,
               title: app.title || app.app_id,
+              icon: appIcon,
               html: app.html,
               filePath: `.CodePapr/apps/${app.app_id}/${appEntryFile}`,
               manifestJson: app.manifest_json ?? undefined,

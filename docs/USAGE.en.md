@@ -114,13 +114,13 @@ App access is declared by two orthogonal axes in `app_render` (or the manifest):
 
 Agent tool whitelist (declare in `agents[].tools`, must fall within the access profile): `read`, `grep`, `list`, `lsp`, `diagnostics`, `read_image`, `skill_load`, `todo`, `local_time_now` (built-in), `websearch`, `webfetch` (require network), `write`, `edit`, `patch`, `bash` (require local=write).
 
-Settings → **App Tab** adjusts the global default (local access × network) and per-app overrides (overrides can only narrow).
+Settings → **App Tab** sets the **default when undeclared** (local × network) and per-app overrides (overrides can only narrow a declared profile). Apps that already declare `local`/`network` in their manifest are **not** capped or granted by this fallback.
 
 ### Application Management Panel
 
 The right panel's **Apps Tab** shows all registered .papr apps:
 
-- **Green dot** = running, **Red dot** = stopped
+- **Green dot** = backend running, **Red dot** = backend stopped, **Gray dot** = frontend-only (no backend; always openable)
 - Click to select, double-click to open
 - Bottom button bar: ▶ Start / Open / ■ Stop / 🗑 Delete
 - Backend apps must be "started" before "open"
@@ -152,7 +152,7 @@ Six tabs:
 - **Search**: Self-hosted SearXNG first, with automatic fallback to built-in multi-source aggregation (Bing / Mojeek / Qwant / Wikipedia); category/time/language/safe search parameters are in the collapsible Advanced section; the engine selector has been removed from the UI
 - **Mentor**: Mentor sub-agent independent API key, Base URL, model selection
 - **Advanced**: Context compaction (model/temperature/summary output tokens/context limit/conversation rounds), TodoList max retries, ProjectGraph limits, streaming & tool output (stream idle timeout default 300s, middle-truncation keep chars default 20000), tool context mode (full/summary/auto, default full). Tool context mode only affects history context: when a tool result is produced, the full output is always sent to the model for the current round (size bounded by the truncation pipeline); once it becomes history it is replaced by a structured summary per mode (success/failure + key info + head/tail preview, with the full output spilled to disk and readable via read). Full mode keeps full text even in history — identical to the legacy behavior. The context limit `maxContextTokens` defaults to 500K; when reached, context is auto-compacted: earlier messages are summarized into a checkpoint and old tool results cleared, while recent rounds (including tool-call↔result pairs) stay verbatim after the checkpoint. This value applies uniformly to DeepSeek, OpenAI-compatible, and Claude providers (no per-provider clamping)
-- **App**: .papr app permission management — global defaults (local access × network) and per-app two-axis overrides (overrides can only narrow; saving restarts running backends with the new sandbox)
+- **App**: .papr app permissions — default when undeclared (local × network) and per-app two-axis overrides (overrides can only narrow a declared profile; saving restarts running backends with the new sandbox)
 
 Voice configuration is not in the main settings panel — it is configured per character in the CharacterModal Voice Tab.
 

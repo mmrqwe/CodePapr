@@ -715,6 +715,7 @@ export interface PaprManifest {
   name: string;
   version?: string;
   entry?: string;
+  icon?: string;
   permissions?: PaprPermission[];
   agents?: PaprAgentDef[];
   command?: string;

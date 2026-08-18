@@ -189,4 +189,29 @@ describe('AppDockPanel', () => {
 
     expect(useAppRuntimeStore.getState().openedAppId).toBe('app-1');
   });
+
+  it('纯前端 app 用就绪态灰点，不用红点', () => {
+    useAppRuntimeStore.setState({
+      apps: [makeApp()],
+      activeAppId: 'app-1',
+      openedAppId: null,
+    });
+    renderPanel();
+    const dot = container.querySelector('span[title="就绪"]');
+    expect(dot).toBeTruthy();
+    expect(dot?.className).toContain('bg-fg-muted');
+    expect(dot?.className).not.toContain('bg-danger');
+  });
+
+  it('有后端且未运行时用红点「已停止」', () => {
+    useAppRuntimeStore.setState({
+      apps: [makeApp({ command: 'node', port: 3000 })],
+      activeAppId: 'app-1',
+      openedAppId: null,
+    });
+    renderPanel();
+    const dot = container.querySelector('span[title="已停止"]');
+    expect(dot).toBeTruthy();
+    expect(dot?.className).toContain('bg-danger');
+  });
 });

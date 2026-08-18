@@ -243,6 +243,7 @@ mod tests {
             name: "Test".into(),
             version: None,
             entry: None,
+            icon: None,
             permissions: None,
             agents: Some(vec![crate::papr_runtime::manifest::PaprAgentDef {
                 name: "assistant".into(),

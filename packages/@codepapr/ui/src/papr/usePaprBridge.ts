@@ -224,6 +224,7 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady }: UsePap
           permissions,
           local: currentAccess.local,
           network: currentAccess.network,
+          backendUrl: resolvedManifest.port ? `http://localhost:${resolvedManifest.port}` : null,
         });
         return;
       }

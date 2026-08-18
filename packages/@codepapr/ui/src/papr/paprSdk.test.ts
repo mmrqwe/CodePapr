@@ -148,3 +148,34 @@ describe('papr-sdk.js prototype pollution (#26)', () => {
     await expect(pending).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
   });
 });
+
+describe('papr-sdk.js app.info does not cache stale access', () => {
+  it('第二次 info() 再发请求，拿到新的 local/network', async () => {
+    loadSdk();
+    const papr = (window as unknown as {
+      papr: { app: { info: () => Promise<Record<string, unknown>> } };
+    }).papr;
+    const sent = captureSentMessages();
+
+    const first = papr.app.info();
+    const req1 = sent[0]?.reqId ?? '';
+    expect(req1).toBeTruthy();
+    dispatchFrom(window.parent, {
+      __papr: true,
+      reqId: req1,
+      result: { local: 'none', network: false, appId: 'a' },
+    });
+    await expect(first).resolves.toMatchObject({ local: 'none', network: false });
+
+    const second = papr.app.info();
+    const req2 = sent[1]?.reqId ?? '';
+    expect(req2).toBeTruthy();
+    expect(req2).not.toBe(req1);
+    dispatchFrom(window.parent, {
+      __papr: true,
+      reqId: req2,
+      result: { local: 'write', network: true, appId: 'a' },
+    });
+    await expect(second).resolves.toMatchObject({ local: 'write', network: true });
+  });
+});
