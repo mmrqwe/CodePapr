@@ -9,6 +9,7 @@ import {
   loadSkillDefinitions,
   loadSkillsSection,
   resolveSkillFilePath,
+  collectSkillEntryRefs,
   readWorkspaceTextFile,
   runWorkspaceInlineCommand,
   type InvokeFn,
@@ -184,6 +185,27 @@ describe('projectConfigLoader', () => {
     expect(section).toContain('`search` (搜索): 搜索资料');
     expect(skills.find((skill) => skill.id === 'search')?.enabled).toBeUndefined();
     expect(skills.find((skill) => skill.id === 'search')?.name).toBe('搜索');
+  });
+
+  it('忽略技能包 references/agents 下的 SKILL.md，不登记成独立 Skill', async () => {
+    const { invoke } = createInvoke({
+      '.CodePapr/skills/search/SKILL.md': '---\ndescription: 搜索\n---\nA',
+      '.CodePapr/skills/search/references/SKILL.md': '---\ndescription: 幽灵\n---\nB',
+      '.CodePapr/skills/search/agents/helper/SKILL.md': '---\ndescription: 子代理\n---\nC',
+    });
+
+    const skills = await loadSkillDefinitions(invoke, '/ws');
+    expect(skills.map((skill) => skill.id)).toEqual(['search']);
+  });
+
+  it('collectSkillEntryRefs 从列表结果收集包根 Skill', () => {
+    const refs = collectSkillEntryRefs([
+      { path: '.CodePapr/skills/search', kind: 'dir', isDir: true },
+      { path: '.CodePapr/skills/search/SKILL.md', name: 'SKILL.md', kind: 'file' },
+      { path: '.CodePapr/skills/search/references/SKILL.md', name: 'SKILL.md', kind: 'file' },
+      { path: '.CodePapr/skills/notes.md', name: 'notes.md', kind: 'file' },
+    ]);
+    expect(refs.map((ref) => ref.id)).toEqual(['notes', 'search']);
   });
 
   it('列出可用命令名称', async () => {

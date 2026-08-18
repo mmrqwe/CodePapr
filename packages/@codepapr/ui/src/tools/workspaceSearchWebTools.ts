@@ -6,6 +6,7 @@ import {
   asOptionalBoolean,
   asSafeSkillName,
   boundedNumber,
+  isSkillAvailableToLoad,
 } from '@codepapr/core';
 import { toolByName } from './workspaceToolDefinitions';
 import {
@@ -88,6 +89,10 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
     const relativePath = await resolveSkillFilePath(invoke, workspace(), parsed.name);
     if (!relativePath) {
       throw new Error(`Skill 不存在: ${parsed.name}`);
+    }
+    const { _skillDefinitions } = useAgentStore.getState();
+    if (!isSkillAvailableToLoad(parsed.name, _skillDefinitions) || !isSkillAvailableToLoad(relativePath, _skillDefinitions)) {
+      throw new Error(`Skill 已停用: ${parsed.name}`);
     }
     const result = await invoke<ReadFileResult>('read_text_file', {
       workspacePath: workspace(),

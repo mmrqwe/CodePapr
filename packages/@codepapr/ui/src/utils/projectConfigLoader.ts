@@ -58,11 +58,84 @@ interface SkillEntryRef {
   relativePath: string;
 }
 
+export type { SkillEntryRef };
+
 const AGENTS_DIR = '.CodePapr/agents';
 const COMMANDS_DIR = '.CodePapr/commands';
 const SKILLS_DIR = '.CodePapr/skills';
 const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
 const SAFE_SKILL_ID = /^[A-Za-z0-9._/-]+$/;
+/** 技能包内部资料目录：其中的 SKILL.md 不是独立 Skill。 */
+const SKILL_RESOURCE_SEGMENTS = new Set(['agents', 'references', 'templates', 'commands', 'scripts']);
+
+function isResourceNestedSkillId(skillId: string): boolean {
+  const segments = skillId.split('/').filter(Boolean);
+  if (segments.length === 0) {
+    return true;
+  }
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index]!.toLowerCase();
+    if (!SKILL_RESOURCE_SEGMENTS.has(segment)) {
+      continue;
+    }
+    if (index === 0 && segments.length === 1) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+export function collectSkillEntryRefs(entries: readonly ListFilesEntry[]): SkillEntryRef[] {
+  const refs = new Map<string, SkillEntryRef>();
+
+  for (const entry of entries) {
+    if (entry.kind === 'dir' || entry.isDir === true) {
+      continue;
+    }
+
+    const normalizedPath = entry.path.replace(/\\/g, '/');
+    const prefix = `${SKILLS_DIR}/`;
+    if (!normalizedPath.startsWith(prefix)) {
+      continue;
+    }
+
+    const rest = normalizedPath.slice(prefix.length);
+    if (!rest || rest.endsWith('/')) {
+      continue;
+    }
+
+    const nestedSkillMatch = rest.match(/^(.+)\/SKILL\.md$/i);
+    if (nestedSkillMatch) {
+      const skillId = nestedSkillMatch[1]!;
+      if (isResourceNestedSkillId(skillId)) {
+        continue;
+      }
+      const segments = skillId.split('/').filter(Boolean);
+      refs.set(skillId, {
+        id: skillId,
+        displayName: segments[segments.length - 1] ?? skillId,
+        rootPath: `${SKILLS_DIR}/${skillId}`,
+        relativePath: normalizedPath,
+      });
+      continue;
+    }
+
+    if (!rest.includes('/') && rest.toLowerCase().endsWith('.md')) {
+      const skillId = rest.replace(/\.md$/i, '');
+      if (!refs.has(skillId)) {
+        refs.set(skillId, {
+          id: skillId,
+          displayName: skillId,
+          rootPath: `${SKILLS_DIR}/${skillId}`,
+          relativePath: normalizedPath,
+        });
+      }
+    }
+  }
+
+  return [...refs.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
 
 async function readFileSafe(
   invoke: InvokeFn,
@@ -126,50 +199,7 @@ async function listSkillEntryRefs(
     return [];
   }
 
-  const entries = new Map<string, SkillEntryRef>();
-  for (const entry of result.entries) {
-    if (entry.kind === 'dir' || entry.isDir === true) {
-      continue;
-    }
-
-    const normalizedPath = entry.path.replace(/\\/g, '/');
-    const prefix = `${SKILLS_DIR}/`;
-    if (!normalizedPath.startsWith(prefix)) {
-      continue;
-    }
-
-    const rest = normalizedPath.slice(prefix.length);
-    if (!rest || rest.endsWith('/')) {
-      continue;
-    }
-
-    const nestedSkillMatch = rest.match(/^(.+)\/SKILL\.md$/i);
-    if (nestedSkillMatch) {
-      const skillId = nestedSkillMatch[1]!;
-      const segments = skillId.split('/').filter(Boolean);
-      entries.set(skillId, {
-        id: skillId,
-        displayName: segments[segments.length - 1] ?? skillId,
-        rootPath: `${SKILLS_DIR}/${skillId}`,
-        relativePath: normalizedPath,
-      });
-      continue;
-    }
-
-    if (!rest.includes('/') && rest.toLowerCase().endsWith('.md')) {
-      const skillId = rest.replace(/\.md$/i, '');
-      if (!entries.has(skillId)) {
-        entries.set(skillId, {
-          id: skillId,
-          displayName: skillId,
-          rootPath: `${SKILLS_DIR}/${skillId}`,
-          relativePath: normalizedPath,
-        });
-      }
-    }
-  }
-
-  return [...entries.values()].sort((a, b) => a.id.localeCompare(b.id));
+  return collectSkillEntryRefs(result.entries);
 }
 
 export async function resolveSkillFilePath(

@@ -1,5 +1,5 @@
 import { errorMessage } from '@codepapr/common';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   getDefaultAgentsTemplate,
@@ -12,12 +12,14 @@ import { MonacoTextEditor } from './MonacoTextEditor';
 import { getTranslation, type Lang } from '../utils/i18n';
 import { loadProjectState, saveProjectState } from '../utils/projectStorage';
 import { loadSkillsLock, pruneSkillFromLock, saveSkillsLock } from '../utils/skillsLock';
+import { collectSkillEntryRefs } from '../utils/projectConfigLoader';
 
 interface ProjectConfigModalProps {
   workspacePath: string;
   lang?: Lang;
   onClose: () => void;
   onOpenSkillMarket?: () => void;
+  skillMarketOpen?: boolean;
 }
 
 interface ReadFileResult {
@@ -177,51 +179,57 @@ function fileNameFromEntry(entry: ListFilesEntry): string {
   return entry.name ?? segments[segments.length - 1] ?? '';
 }
 
-function listSkillEntryRefs(result: ListFilesResult): SkillEntryRefBase[] {
-  const refs = new Map<string, SkillEntryRefBase>();
-
-  for (const entry of result.entries) {
-    if (entry.kind === 'dir' || entry.isDir === true) {
-      continue;
-    }
-
-    const normalizedPath = entry.path.replace(/\\/g, '/');
-    const prefix = `${SKILLS_DIR}/`;
-    if (!normalizedPath.startsWith(prefix)) {
-      continue;
-    }
-
-    const rest = normalizedPath.slice(prefix.length);
-    const nestedSkillMatch = rest.match(/^(.+)\/SKILL\.md$/i);
-    if (nestedSkillMatch) {
-      const skillId = nestedSkillMatch[1]!;
-      const segments = skillId.split('/').filter(Boolean);
-      refs.set(skillId, {
-        id: skillId,
-        displayName: segments[segments.length - 1] ?? skillId,
-        rootPath: `${SKILLS_DIR}/${skillId}`,
-        relativePath: normalizedPath,
-      });
-      continue;
-    }
-
-    if (!rest.includes('/') && rest.toLowerCase().endsWith('.md')) {
-      const skillId = rest.replace(/\.md$/i, '');
-      if (!refs.has(skillId)) {
-        refs.set(skillId, {
-          id: skillId,
-          displayName: skillId,
-          rootPath: `${SKILLS_DIR}/${skillId}`,
-          relativePath: normalizedPath,
-        });
-      }
+export function unusedSkillDraftName(existingIds: readonly string[]): string {
+  const taken = new Set(existingIds);
+  for (const candidate of [DEFAULT_SEARCH_SKILL_NAME, 'docs', 'workflow', 'notes']) {
+    if (!taken.has(candidate)) {
+      return candidate;
     }
   }
-
-  return [...refs.values()].sort((a, b) => a.id.localeCompare(b.id));
+  let index = 2;
+  while (taken.has(`skill-${index}`)) {
+    index += 1;
+  }
+  return `skill-${index}`;
 }
 
-export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMarket }: ProjectConfigModalProps) {
+function confirmUnsaved(lang?: Lang): boolean {
+  const text =
+    lang === 'en'
+      ? 'You have unsaved changes. Discard them and continue?'
+      : lang === 'zh-TW'
+        ? '有未儲存的修改。放棄後繼續？'
+        : '有未保存的修改。丢弃后继续？';
+  return typeof window !== 'undefined' && window.confirm(text);
+}
+
+function confirmDeleteItem(lang: Lang | undefined, name: string): boolean {
+  const text =
+    lang === 'en'
+      ? `Delete "${name}"? This cannot be undone.`
+      : lang === 'zh-TW'
+        ? `確定刪除「${name}」？此操作無法撤銷。`
+        : `确定删除「${name}」？此操作无法撤销。`;
+  return typeof window !== 'undefined' && window.confirm(text);
+}
+
+function confirmOverwriteItem(lang: Lang | undefined, name: string): boolean {
+  const text =
+    lang === 'en'
+      ? `"${name}" already exists. Overwriting will replace the current file. Continue?`
+      : lang === 'zh-TW'
+        ? `「${name}」已存在。覆蓋將取代現有內容。繼續？`
+        : `「${name}」已存在。覆盖将替换现有内容。继续？`;
+  return typeof window !== 'undefined' && window.confirm(text);
+}
+
+export function ProjectConfigModal({
+  workspacePath,
+  lang,
+  onClose,
+  onOpenSkillMarket,
+  skillMarketOpen = false,
+}: ProjectConfigModalProps) {
   const settings = useAgentStore((state) => state.settings);
   const noteWorkspaceMutation = useAgentStore((state) => state.noteWorkspaceMutation);
   const reloadProjectConfig = useAgentStore((state) => state._loadProjectConfig);
@@ -245,6 +253,11 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const [savedRules, setSavedRules] = useState('');
+  const [savedAgentContent, setSavedAgentContent] = useState('');
+  const [savedSkillContent, setSavedSkillContent] = useState('');
+  const [savedCommandContent, setSavedCommandContent] = useState('');
+  const wasSkillMarketOpen = useRef(false);
 
   const selectedAgentPath = useMemo(
     () => (selectedAgentName ? `${AGENTS_DIR}/${selectedAgentName}.md` : null),
@@ -269,8 +282,11 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
         maxBytes: 300_000,
       });
       setRulesContent(result.content);
+      setSavedRules(result.content);
     } catch {
-      setRulesContent(getDefaultAgentsTemplate(settings.lang));
+      const fallback = getDefaultAgentsTemplate(settings.lang);
+      setRulesContent(fallback);
+      setSavedRules(fallback);
     }
   }, [workspacePath]);
 
@@ -287,6 +303,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
       setAgentNames([]);
       setSelectedAgentName(null);
       setAgentContent('');
+      setSavedAgentContent('');
       return;
     }
 
@@ -317,6 +334,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
       setCommandNames([]);
       setSelectedCommandName(null);
       setCommandContent('');
+      setSavedCommandContent('');
       return;
     }
 
@@ -331,6 +349,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
     setSelectedCommandName((current) => (current && names.includes(current) ? current : names[0] ?? null));
     if (names.length === 0) {
       setCommandContent('');
+      setSavedCommandContent('');
     }
   }, [workspacePath]);
 
@@ -348,7 +367,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
       ]);
       result = listResult;
       const enabledById = normalizeSkillEnabledById(snapshot.skillEnabledById);
-      const refs = listSkillEntryRefs(result);
+      const refs = collectSkillEntryRefs(result.entries);
       const entries = await Promise.all(
         refs.map(async (entry) => {
           try {
@@ -378,19 +397,28 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
 
       setSkillEntries(entries);
       setSelectedSkillName((current) => (current && names.includes(current) ? current : names[0] ?? null));
+      setNewSkillName((current) => {
+        if (current !== DEFAULT_SEARCH_SKILL_NAME) {
+          return current;
+        }
+        return unusedSkillDraftName(names);
+      });
       if (entries.length === 0) {
         setSkillContent('');
+        setSavedSkillContent('');
       }
     } catch {
       setSkillEntries([]);
       setSelectedSkillName(null);
       setSkillContent('');
+      setSavedSkillContent('');
     }
   }, [workspacePath]);
 
   const loadSelectedAgent = useCallback(async () => {
     if (!workspacePath || !selectedAgentPath) {
       setAgentContent('');
+      setSavedAgentContent('');
       return;
     }
 
@@ -401,8 +429,10 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
         maxBytes: 300_000,
       });
       setAgentContent(result.content);
+      setSavedAgentContent(result.content);
     } catch (err) {
       setAgentContent('');
+      setSavedAgentContent('');
       setError(errorMessage(err));
     }
   }, [selectedAgentPath, workspacePath]);
@@ -410,6 +440,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
   const loadSelectedSkill = useCallback(async () => {
     if (!workspacePath || !selectedSkillPath) {
       setSkillContent('');
+      setSavedSkillContent('');
       return;
     }
 
@@ -420,8 +451,10 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
         maxBytes: 300_000,
       });
       setSkillContent(result.content);
+      setSavedSkillContent(result.content);
     } catch (err) {
       setSkillContent('');
+      setSavedSkillContent('');
       setError(errorMessage(err));
     }
   }, [selectedSkillPath, workspacePath]);
@@ -429,6 +462,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
   const loadSelectedCommand = useCallback(async () => {
     if (!workspacePath || !selectedCommandPath) {
       setCommandContent('');
+      setSavedCommandContent('');
       return;
     }
 
@@ -439,8 +473,10 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
         maxBytes: 300_000,
       });
       setCommandContent(result.content);
+      setSavedCommandContent(result.content);
     } catch (err) {
       setCommandContent('');
+      setSavedCommandContent('');
       setError(errorMessage(err));
     }
   }, [selectedCommandPath, workspacePath]);
@@ -471,6 +507,54 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
   useEffect(() => {
     void loadSelectedCommand();
   }, [loadSelectedCommand]);
+
+  useEffect(() => {
+    if (wasSkillMarketOpen.current && !skillMarketOpen) {
+      void loadSkillNames();
+    }
+    wasSkillMarketOpen.current = skillMarketOpen;
+  }, [skillMarketOpen, loadSkillNames]);
+
+  const currentEditorDirty =
+    (activeTab === 'rules' && rulesContent !== savedRules) ||
+    (activeTab === 'agents' && Boolean(selectedAgentName) && agentContent !== savedAgentContent) ||
+    (activeTab === 'skills' && Boolean(selectedSkillName) && skillContent !== savedSkillContent) ||
+    (activeTab === 'commands' && Boolean(selectedCommandName) && commandContent !== savedCommandContent);
+
+  const revertCurrentEditor = () => {
+    if (activeTab === 'rules') setRulesContent(savedRules);
+    if (activeTab === 'agents') setAgentContent(savedAgentContent);
+    if (activeTab === 'skills') setSkillContent(savedSkillContent);
+    if (activeTab === 'commands') setCommandContent(savedCommandContent);
+  };
+
+  const requestLeaveCurrentEditor = (): boolean => {
+    if (!currentEditorDirty) {
+      return true;
+    }
+    if (!confirmUnsaved(lang ?? settings.lang)) {
+      return false;
+    }
+    revertCurrentEditor();
+    return true;
+  };
+
+  const selectConfigTab = (tab: ConfigTab) => {
+    if (tab === activeTab) {
+      return;
+    }
+    if (!requestLeaveCurrentEditor()) {
+      return;
+    }
+    setActiveTab(tab);
+  };
+
+  const requestClose = () => {
+    if (!requestLeaveCurrentEditor()) {
+      return;
+    }
+    onClose();
+  };
 
   const afterProjectConfigChanged = async (paths: string[]) => {
     noteWorkspaceMutation(paths);
@@ -508,6 +592,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
         content: rulesContent,
       });
       await afterProjectConfigChanged([PROJECT_AGENTS_FILE]);
+      setSavedRules(rulesContent);
       setStatus(t.projectConfigSaved);
     } catch (err) {
       setError(errorMessage(err));
@@ -520,6 +605,9 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
     const name = normalizeAgentName(newAgentName);
     if (!name) {
       setError(t.projectConfigInvalidAgentName);
+      return;
+    }
+    if (agentNames.includes(name) && !confirmOverwriteItem(lang ?? settings.lang, name)) {
       return;
     }
     const relativePath = `${AGENTS_DIR}/${name}.md`;
@@ -556,6 +644,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
         content: agentContent,
       });
       await afterProjectConfigChanged([selectedAgentPath]);
+      setSavedAgentContent(agentContent);
       setStatus(t.projectConfigSaved);
     } catch (err) {
       setError(errorMessage(err));
@@ -566,6 +655,9 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
 
   const deleteAgent = async () => {
     if (!selectedAgentPath || !selectedAgentName) return;
+    if (!confirmDeleteItem(lang ?? settings.lang, selectedAgentName)) {
+      return;
+    }
     setIsSaving(true);
     setError('');
     setStatus('');
@@ -588,6 +680,9 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
     const name = normalizeSkillName(newSkillName);
     if (!name) {
       setError(t.projectConfigInvalidSkillName);
+      return;
+    }
+    if (skillEntries.some((entry) => entry.id === name) && !confirmOverwriteItem(lang ?? settings.lang, name)) {
       return;
     }
     const relativePath = `${SKILLS_DIR}/${name}/SKILL.md`;
@@ -626,6 +721,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
       });
       await afterProjectConfigChanged([selectedSkillPath]);
       await loadSkillNames();
+      setSavedSkillContent(skillContent);
       setStatus(t.projectConfigSaved);
     } catch (err) {
       setError(errorMessage(err));
@@ -659,6 +755,9 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
   const deleteSkill = async () => {
     const selectedSkill = skillEntries.find((entry) => entry.id === selectedSkillName);
     if (!selectedSkill) return;
+    if (!confirmDeleteItem(lang ?? settings.lang, selectedSkill.id)) {
+      return;
+    }
     setIsSaving(true);
     setError('');
     setStatus('');
@@ -692,6 +791,9 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
     const name = normalizeCommandName(newCommandName);
     if (!name) {
       setError(t.projectConfigInvalidCommandName);
+      return;
+    }
+    if (commandNames.includes(name) && !confirmOverwriteItem(lang ?? settings.lang, name)) {
       return;
     }
     const relativePath = `${COMMANDS_DIR}/${name}.md`;
@@ -728,6 +830,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
         content: commandContent,
       });
       await afterProjectConfigChanged([selectedCommandPath]);
+      setSavedCommandContent(commandContent);
       setStatus(t.projectConfigSaved);
     } catch (err) {
       setError(errorMessage(err));
@@ -738,6 +841,9 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
 
   const deleteCommand = async () => {
     if (!selectedCommandPath || !selectedCommandName) return;
+    if (!confirmDeleteItem(lang ?? settings.lang, `/${selectedCommandName}`)) {
+      return;
+    }
     setIsSaving(true);
     setError('');
     setStatus('');
@@ -766,7 +872,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             className="text-lg leading-none text-fg-muted transition-colors hover:text-fg"
           >
             x
@@ -776,7 +882,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
         <div className="flex items-center gap-2 border-b border-line px-5 py-3">
           <button
             type="button"
-            onClick={() => setActiveTab('rules')}
+            onClick={() => selectConfigTab('rules')}
             className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
               activeTab === 'rules'
                 ? 'border-accent-soft bg-accent-soft text-accent-text'
@@ -787,7 +893,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab('agents')}
+            onClick={() => selectConfigTab('agents')}
             className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
               activeTab === 'agents'
                 ? 'border-accent-soft bg-accent-soft text-accent-text'
@@ -798,7 +904,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab('skills')}
+            onClick={() => selectConfigTab('skills')}
             className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
               activeTab === 'skills'
                 ? 'border-accent-soft bg-accent-soft text-accent-text'
@@ -809,7 +915,7 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab('commands')}
+            onClick={() => selectConfigTab('commands')}
             className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
               activeTab === 'commands'
                 ? 'border-accent-soft bg-accent-soft text-accent-text'
@@ -892,7 +998,11 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
                     <button
                       key={name}
                       type="button"
-                      onClick={() => setSelectedAgentName(name)}
+                      onClick={() => {
+                        if (name === selectedAgentName) return;
+                        if (!requestLeaveCurrentEditor()) return;
+                        setSelectedAgentName(name);
+                      }}
                       title={`${AGENTS_DIR}/${name}.md`}
                       className={`mb-1 w-full truncate rounded-lg px-3 py-2 text-left text-xs transition-colors ${
                         selectedAgentName === name
@@ -980,7 +1090,11 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
                     <button
                       key={name}
                       type="button"
-                      onClick={() => setSelectedCommandName(name)}
+                      onClick={() => {
+                        if (name === selectedCommandName) return;
+                        if (!requestLeaveCurrentEditor()) return;
+                        setSelectedCommandName(name);
+                      }}
                       title={`${COMMANDS_DIR}/${name}.md`}
                       className={`mb-1 w-full truncate rounded-lg px-3 py-2 text-left text-xs transition-colors ${
                         selectedCommandName === name
@@ -1045,7 +1159,10 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
                     {onOpenSkillMarket && (
                       <button
                         type="button"
-                        onClick={() => { onClose(); onOpenSkillMarket(); }}
+                        onClick={() => {
+                          if (!requestLeaveCurrentEditor()) return;
+                          onOpenSkillMarket();
+                        }}
                         className="rounded-lg border border-ok-bg px-2 py-1 text-[10px] font-medium text-ok transition-colors hover:bg-ok-bg"
                       >
                         {lang === 'en' ? 'Browse Market' : lang === 'zh-TW' ? '瀏覽市場' : '浏览市场'}
@@ -1079,7 +1196,11 @@ export function ProjectConfigModal({ workspacePath, lang, onClose, onOpenSkillMa
                     <button
                       key={entry.id}
                       type="button"
-                      onClick={() => setSelectedSkillName(entry.id)}
+                      onClick={() => {
+                        if (entry.id === selectedSkillName) return;
+                        if (!requestLeaveCurrentEditor()) return;
+                        setSelectedSkillName(entry.id);
+                      }}
                       title={entry.relativePath}
                       className={`mb-1 w-full overflow-hidden rounded-lg px-3 py-2 text-left text-xs transition-colors ${
                         selectedSkillName === entry.id

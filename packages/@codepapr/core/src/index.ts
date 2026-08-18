@@ -294,6 +294,7 @@ export {
   DEFAULT_SEARCH_SKILL_TEMPLATE,
   parseSkillMarkdown,
   applySkillEnablement,
+  isSkillAvailableToLoad,
   buildSkillsSection,
 } from './agent/skillConfig';
 export type { SkillDefinition, SkillEnablementMap } from './agent/skillConfig';

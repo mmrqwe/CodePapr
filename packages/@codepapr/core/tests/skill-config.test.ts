@@ -3,6 +3,7 @@ import {
   DEFAULT_SEARCH_SKILL_TEMPLATE,
   applySkillEnablement,
   buildSkillsSection,
+  isSkillAvailableToLoad,
   parseSkillMarkdown,
 } from '../src/agent/skillConfig';
 
@@ -45,6 +46,23 @@ describe('skillConfig', () => {
     expect(section).not.toContain('`release-check`');
     expect(section).not.toContain('官方优先。');
     expect(section).not.toContain('生成配图流程');
+  });
+
+  it('refuses skill_load for a catalog skill that is disabled', () => {
+    const skills = applySkillEnablement(
+      [
+        {
+          ...parseSkillMarkdown('search', '---\ndescription: 搜索\n---\n正文'),
+          id: 'search',
+          sourcePath: '.CodePapr/skills/search/SKILL.md',
+        },
+      ],
+      { search: false }
+    );
+
+    expect(isSkillAvailableToLoad('search', skills)).toBe(false);
+    expect(isSkillAvailableToLoad('.CodePapr/skills/search/SKILL.md', skills)).toBe(false);
+    expect(isSkillAvailableToLoad('docs', skills)).toBe(true);
   });
 
   it('ships a practical default search skill', () => {

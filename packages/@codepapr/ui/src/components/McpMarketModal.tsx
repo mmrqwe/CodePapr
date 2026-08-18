@@ -794,7 +794,7 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
   const hasMore = hasMoreOfficial;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay backdrop-blur-sm">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-overlay backdrop-blur-sm">
       <div className="flex h-[90vh] w-[min(96vw,1100px)] flex-col rounded-3xl border border-line bg-raised shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-line px-6 py-4">

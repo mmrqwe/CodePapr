@@ -28,7 +28,7 @@ vi.mock('./MonacoTextEditor', () => ({
   ),
 }));
 
-import { ProjectConfigModal } from './ProjectConfigModal';
+import { ProjectConfigModal, unusedSkillDraftName } from './ProjectConfigModal';
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
 
@@ -78,6 +78,7 @@ describe('ProjectConfigModal', () => {
       },
     });
     invokeMock.mockReset();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       if (command === 'read_text_file') {
         const relativePath = String(args?.relativePath ?? '');
@@ -160,6 +161,7 @@ describe('ProjectConfigModal', () => {
       root.unmount();
     });
     container.remove();
+    vi.restoreAllMocks();
   });
 
   it('loads and saves project skills from the config modal', async () => {
@@ -299,5 +301,45 @@ describe('ProjectConfigModal', () => {
 
     expect(container.textContent).toContain('/ship');
     expect(container.textContent).toContain('请发布：$ARGUMENTS');
+  });
+
+  it('asks before deleting a skill and keeps the folder when cancelled', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await act(async () => {
+      root.render(
+        <ProjectConfigModal
+          workspacePath="/tmp/codepapr-workspace"
+          lang="zh-CN"
+          onClose={() => undefined}
+        />
+      );
+    });
+    await flushEffects();
+    await flushEffects();
+
+    await act(async () => {
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Skills')
+        ?.click();
+    });
+    await flushEffects();
+
+    await act(async () => {
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === '删除')
+        ?.click();
+    });
+
+    expect(
+      invokeMock.mock.calls.some(([command]) => command === 'delete_workspace_dir')
+    ).toBe(false);
+  });
+});
+
+describe('unusedSkillDraftName', () => {
+  it('uses search when available, otherwise the next unused draft name', () => {
+    expect(unusedSkillDraftName([])).toBe('search');
+    expect(unusedSkillDraftName(['search'])).toBe('docs');
+    expect(unusedSkillDraftName(['search', 'docs', 'workflow', 'notes'])).toBe('skill-2');
   });
 });

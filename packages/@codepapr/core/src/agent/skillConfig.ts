@@ -163,6 +163,35 @@ export function applySkillEnablement(
   });
 }
 
+/** skill_load 是否允许读取：目录里停用的 Skill 不能靠路径再把全文读出来。 */
+export function isSkillAvailableToLoad(
+  requestedName: string,
+  skills: readonly SkillDefinition[]
+): boolean {
+  const needle = requestedName.trim();
+  if (!needle) {
+    return false;
+  }
+
+  const matched = skills.find((skill) => {
+    const catalog = resolveSkillCatalogName(skill);
+    const leaf = resolveSkillLeafName(skill);
+    return (
+      catalog === needle ||
+      leaf === needle ||
+      skill.id === needle ||
+      skill.displayName === needle ||
+      skill.name === needle ||
+      skill.sourcePath === needle
+    );
+  });
+
+  if (!matched) {
+    return true;
+  }
+  return matched.enabled !== false;
+}
+
 export function buildSkillsSection(
   skills: readonly SkillDefinition[],
   lang: SkillPromptLang = 'zh-CN'

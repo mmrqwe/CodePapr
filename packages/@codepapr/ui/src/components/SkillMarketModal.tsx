@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAgentStore } from '../store/agentStore';
 import { fetchSkillListings, searchSkills } from '../tools/marketSkillApi';
+import { commitSkillInstall, planSkillInstall } from '../tools/marketSkillInstall';
 import type { SkillMarketListing } from '../utils/marketSkillTypes';
 import type { Lang } from '../utils/i18n';
 import {
@@ -13,12 +14,9 @@ import {
   listExistingSkillPaths,
   loadSkillsLock,
   saveSkillsLock,
-  skillMarkdownPath,
   upsertLockEntry,
   type SkillsLockFile,
 } from '../utils/skillsLock';
-
-const SKILL_BASE_URL = 'https://raw.githubusercontent.com/zerone-agent/agent-use-skills/main/awesome-skills/skills';
 
 function copy(lang: Lang | undefined) {
   if (lang === 'en') {
@@ -398,158 +396,6 @@ function SkillDetail({
   );
 }
 
-function buildCanonicalUrl(name: string): string {
-  return `${SKILL_BASE_URL}/${name}/SKILL.md`;
-}
-
-function extractRepoPath(urlOrPath: string): string | null {
-  const match = urlOrPath.match(/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/);
-  return match ? match[1] : null;
-}
-
-function buildExternalCandidates(externalRepo: string, name: string): string[] {
-  const shortName = name.replace(/-skill$/, '');
-  const base = `https://raw.githubusercontent.com/${externalRepo}/main`;
-  return [
-    `${base}/.CodePapr/skills/${shortName}/SKILL.md`,
-    `${base}/.CodePapr/skills/${name}/SKILL.md`,
-    `${base}/.claude/skills/${shortName}/SKILL.md`,
-    `${base}/.claude/skills/${name}/SKILL.md`,
-    `${base}/${shortName}/SKILL.md`,
-    `${base}/SKILL.md`,
-  ];
-}
-
-async function tryFetchText(url: string): Promise<string | null> {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    return response.text();
-  } catch {
-    return null;
-  }
-}
-
-async function findExternalRepoFromInstall(name: string): Promise<string | null> {
-  const baseUrl = 'https://raw.githubusercontent.com/zerone-agent/agent-use-skills/main/awesome-skills';
-  for (const platform of ['opencode', 'claudecode', 'cursor', 'codex']) {
-    const content = await tryFetchText(`${baseUrl}/${platform}/${name}/INSTALL-en.md`);
-    if (content) {
-      const match = content.match(/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/);
-      if (match && !match[1].includes('agent-use-skills')) {
-        return match[1];
-      }
-    }
-  }
-  return null;
-}
-
-async function discoverRepoSkills(repoPath: string): Promise<string[]> {
-  try {
-    const response = await fetch(`https://api.github.com/repos/${repoPath}/contents/skills`, {
-      headers: { Accept: 'application/json' },
-    });
-    if (!response.ok) return [];
-    const entries: Array<{ name: string; type: string }> = await response.json();
-    return entries.filter((e) => e.type === 'dir' || e.type === 'symlink').map((e) => e.name);
-  } catch {
-    return [];
-  }
-}
-
-async function downloadSubSkillMarkdown(repoPath: string, subSkill: string): Promise<string | null> {
-  const urls = [
-    `https://raw.githubusercontent.com/${repoPath}/main/skills/${subSkill}/SKILL.md`,
-    `https://raw.githubusercontent.com/${repoPath}/main/${subSkill}/SKILL.md`,
-  ];
-  for (const url of urls) {
-    const content = await tryFetchText(url);
-    if (content) return content;
-  }
-  return null;
-}
-
-async function discoverRepoDirFiles(repoPath: string, dirPath: string): Promise<string[]> {
-  try {
-    const response = await fetch(`https://api.github.com/repos/${repoPath}/contents/${dirPath}`, {
-      headers: { Accept: 'application/json' },
-    });
-    if (!response.ok) return [];
-    const entries: Array<{ name: string; type: string }> = await response.json();
-    return entries.filter((e) => e.type === 'file' && e.name.endsWith('.md')).map((e) => e.name);
-  } catch {
-    return [];
-  }
-}
-
-type PlannedFile = { relativePath: string; content: string };
-
-async function collectDirFiles(
-  repoPath: string,
-  repoDir: string,
-  targetDir: string,
-): Promise<PlannedFile[]> {
-  const files = await discoverRepoDirFiles(repoPath, repoDir);
-  const planned: PlannedFile[] = [];
-  for (const file of files) {
-    const content = await tryFetchText(
-      `https://raw.githubusercontent.com/${repoPath}/main/${repoDir}/${file}`
-    );
-    if (!content) continue;
-    planned.push({ relativePath: `${targetDir}/${file}`, content });
-  }
-  return planned;
-}
-
-const PACK_RESOURCE_DIRS = ['agents', 'references', 'templates'] as const;
-
-async function collectSkillPackResources(repoPath: string, subSkill: string): Promise<PlannedFile[]> {
-  const planned: PlannedFile[] = [];
-  for (const dir of PACK_RESOURCE_DIRS) {
-    const repoDir = `${subSkill}/${dir}`;
-    const targetDir = `.CodePapr/skills/${subSkill}/${dir}`;
-    planned.push(...(await collectDirFiles(repoPath, repoDir, targetDir)));
-  }
-  return planned;
-}
-
-async function downloadSkillMarkdown(name: string, sourceRepo?: string): Promise<string | null> {
-  // 1. Try canonical location first
-  let content = await tryFetchText(buildCanonicalUrl(name));
-  if (content) return content;
-
-  // 2. Try sourceRepo (external GitHub repo)
-  if (sourceRepo) {
-    const repoPath = extractRepoPath(sourceRepo);
-    if (repoPath && !repoPath.includes('agent-use-skills')) {
-      for (const url of buildExternalCandidates(repoPath, name)) {
-        content = await tryFetchText(url);
-        if (content) return content;
-      }
-    }
-  }
-
-  // 3. Detect external repo from INSTALL file in agent-use-skills
-  const externalRepo = await findExternalRepoFromInstall(name);
-  if (externalRepo) {
-    for (const url of buildExternalCandidates(externalRepo, name)) {
-      content = await tryFetchText(url);
-      if (content) return content;
-    }
-  }
-
-  return null;
-}
-
-type SkillInstallPlan = {
-  skillFiles: Array<{ skillId: string; relativePath: string; content: string }>;
-  extraFiles: PlannedFile[];
-};
-
-type PlanResult =
-  | { ok: true; plan: SkillInstallPlan; error?: never }
-  | { ok: false; plan?: never; error: string };
-
 /** N20：重装会覆盖本地 SKILL.md（用户可能改过 frontmatter/正文）——
  *  必须弹确认，绝不静默覆盖。返回用户是否同意。 */
 export function confirmSkillOverwrite(lang: string | undefined, title: string): boolean {
@@ -560,82 +406,6 @@ export function confirmSkillOverwrite(lang: string | undefined, title: string): 
         ? `「${title}」已安裝。重新安裝將覆蓋本地修改（包括對 SKILL.md 的編輯）。繼續？`
         : `「${title}」已安装。重新安装将覆盖本地修改（包括对 SKILL.md 的编辑）。继续？`;
   return typeof window !== 'undefined' && window.confirm(confirmText);
-}
-
-async function planSkillInstall(name: string, sourceRepo: string): Promise<PlanResult> {
-  const content = await downloadSkillMarkdown(name, sourceRepo);
-  if (content) {
-    const extraFiles: PlannedFile[] = [];
-    const repoPath = extractRepoPath(sourceRepo);
-    if (repoPath && !repoPath.includes('agent-use-skills')) {
-      extraFiles.push(...(await collectSkillPackResources(repoPath, name)));
-    }
-    return {
-      ok: true,
-      plan: {
-        skillFiles: [{ skillId: name, relativePath: skillMarkdownPath(name), content }],
-        extraFiles,
-      },
-    };
-  }
-
-  const repoPath = extractRepoPath(sourceRepo);
-  if (repoPath && !repoPath.includes('agent-use-skills')) {
-    const subSkills = await discoverRepoSkills(repoPath);
-    if (subSkills.length > 0) {
-      const skillFiles: SkillInstallPlan['skillFiles'] = [];
-      const extraFiles: PlannedFile[] = [];
-      for (const subSkill of subSkills) {
-        const subContent = await downloadSubSkillMarkdown(repoPath, subSkill);
-        if (!subContent) continue;
-        skillFiles.push({
-          skillId: subSkill,
-          relativePath: skillMarkdownPath(subSkill),
-          content: subContent,
-        });
-        extraFiles.push(...(await collectSkillPackResources(repoPath, subSkill)));
-      }
-      if (skillFiles.length > 0) {
-        extraFiles.push(
-          ...(await collectDirFiles(repoPath, 'commands', `.CodePapr/skills/${name}/commands`))
-        );
-        return { ok: true, plan: { skillFiles, extraFiles } };
-      }
-      return {
-        ok: false,
-        error: `发现 ${subSkills.length} 个子技能但全部下载失败`,
-      };
-    }
-  }
-
-  return {
-    ok: false,
-    error: '无法下载 SKILL.md：请检查网络或确认该 Skill 是否支持 CodePapr',
-  };
-}
-
-async function commitSkillInstall(
-  plan: SkillInstallPlan,
-  workspacePath: string,
-  invokeFn: typeof invoke,
-): Promise<{ ok: true; installed: string[]; resources: number } | { ok: false; error: string }> {
-  try {
-    for (const file of [...plan.skillFiles, ...plan.extraFiles]) {
-      await invokeFn('write_text_file', {
-        workspacePath,
-        relativePath: file.relativePath,
-        content: file.content,
-      });
-    }
-    return {
-      ok: true,
-      installed: plan.skillFiles.map((file) => file.skillId),
-      resources: plan.extraFiles.length,
-    };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: `写入失败: ${msg}` };
-  }
 }
 
 async function refreshSkills(workspacePath: string) {
@@ -730,7 +500,7 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
   const handleRetry = useCallback(() => {
     setIsLoading(true);
     setError(null);
-    fetchSkillListings()
+    fetchSkillListings({ forceRefresh: true })
       .then((result) => {
         setListings(result);
       })
@@ -826,7 +596,7 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
   }, [listings, searchQuery]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay backdrop-blur-sm">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-overlay backdrop-blur-sm">
       <div className="flex h-[90vh] w-[min(96vw,1100px)] flex-col rounded-3xl border border-line bg-raised shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-line px-6 py-4">

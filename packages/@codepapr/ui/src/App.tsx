@@ -888,9 +888,8 @@ export default function App() {
 
       <Suspense fallback={null}>
         {showSettings && <SettingsModal />}
-        {showMcpSettings && <McpSettingsModal onClose={() => setShowMcpSettings(false)} onOpenMarket={() => { setShowMcpSettings(false); setShowMcpMarket(true); }} />}
+        {showMcpSettings && <McpSettingsModal onClose={() => setShowMcpSettings(false)} onOpenMarket={() => setShowMcpMarket(true)} />}
         {showMcpMarket && <McpMarketModal onClose={() => setShowMcpMarket(false)} />}
-        {showSkillMarket && <SkillMarketModal onClose={() => setShowSkillMarket(false)} />}
         {showCharacters && settings.experimentalCharacters && <CharacterModal onClose={() => setShowCharacters(false)} />}
         {showAbout && <AboutModal lang={settings.lang} onClose={() => setShowAbout(false)} />}
         {showProjectSwitcher && <ProjectSwitcherModal onClose={() => setShowProjectSwitcher(false)} />}
@@ -909,8 +908,11 @@ export default function App() {
             lang={settings.lang}
             onClose={() => setShowProjectConfig(false)}
             onOpenSkillMarket={() => setShowSkillMarket(true)}
+            skillMarketOpen={showSkillMarket}
           />
         )}
+
+        {showSkillMarket && <SkillMarketModal onClose={() => setShowSkillMarket(false)} />}
 
         {showContextDebug && settings.debugEnabled && (
           <ContextDebugModal
