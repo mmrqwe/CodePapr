@@ -175,3 +175,17 @@ describe('normalizeSettings 主题字段防御', () => {
     expect(normalizeSettings({} as Partial<Settings>).accent).toBeNull();
   });
 });
+
+describe('normalizeSettings 实验性功能', () => {
+  it('角色和语音默认关闭，仅接受布尔值', () => {
+    const defaults = normalizeSettings({});
+    expect(defaults.experimentalCharacters).toBe(false);
+    expect(defaults.experimentalVoice).toBe(false);
+
+    expect(normalizeSettings({ experimentalCharacters: true }).experimentalCharacters).toBe(true);
+    expect(normalizeSettings({ experimentalVoice: true }).experimentalVoice).toBe(true);
+    expect(
+      normalizeSettings({ experimentalCharacters: 'yes' as unknown as boolean }).experimentalCharacters
+    ).toBe(false);
+  });
+});

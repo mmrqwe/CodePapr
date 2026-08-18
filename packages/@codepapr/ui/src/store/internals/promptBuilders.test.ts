@@ -56,13 +56,27 @@ describe('buildAgentSessionBootstrapPrompt', () => {
       activeCharacterId: character.id,
     });
 
-    const settings = makeSettings({ systemPrompt: 'CUSTOM_SYS_PROMPT_MARKER' });
+    const settings = makeSettings({ systemPrompt: 'CUSTOM_SYS_PROMPT_MARKER', experimentalCharacters: true });
     const bootstrap = buildAgentSessionBootstrapPrompt(settings, '/tmp/ws', [], 'some memory');
 
     expect(bootstrap).toContain('CUSTOM_SYS_PROMPT_MARKER');
     expect(bootstrap).toContain('UNIQUE_CHAR_DESCRIPTION_MARKER');
     expect(bootstrap).toContain('Work in the voice of');
     expect(bootstrap).toContain('## 角色人设');
+  });
+
+  it('omits the active character when experimental characters are disabled', () => {
+    const character = makeCharacter();
+    useCharactersStore.setState({
+      characters: [character],
+      activeCharacterId: character.id,
+    });
+
+    const settings = makeSettings({ experimentalCharacters: false });
+    const bootstrap = buildAgentSessionBootstrapPrompt(settings, '/tmp/ws', [], 'some memory');
+
+    expect(bootstrap).not.toContain('UNIQUE_CHAR_DESCRIPTION_MARKER');
+    expect(bootstrap).not.toContain('## 角色人设');
   });
 
   it('omits the custom guidance section entirely when system prompt is empty', () => {
@@ -188,7 +202,7 @@ describe('buildAgentRuntimeUserPrompt', () => {
       activeCharacterId: character.id,
     });
     const prompt = buildAgentRuntimeUserPrompt({
-      settings: makeRuntimeSettings(),
+      settings: makeRuntimeSettings({ experimentalCharacters: true }),
       mode: 'agent',
       workspacePath: '/tmp/ws',
       input: 'fix the bug',
@@ -196,5 +210,23 @@ describe('buildAgentRuntimeUserPrompt', () => {
     expect(prompt).toContain('## Post-History Instructions');
     expect(prompt).toContain('Stay in character, TestChar.');
     expect(prompt.indexOf('fix the bug')).toBeLessThan(prompt.indexOf('Post-History Instructions'));
+  });
+
+  it('omits post-history instructions when experimental characters are disabled', () => {
+    const character = makeCharacter({
+      postHistoryInstructions: 'Stay in character, {{char}}.',
+    });
+    useCharactersStore.setState({
+      characters: [character],
+      activeCharacterId: character.id,
+    });
+    const prompt = buildAgentRuntimeUserPrompt({
+      settings: makeRuntimeSettings({ experimentalCharacters: false }),
+      mode: 'agent',
+      workspacePath: '/tmp/ws',
+      input: 'fix the bug',
+    });
+    expect(prompt).not.toContain('Post-History Instructions');
+    expect(prompt).not.toContain('Stay in character');
   });
 });

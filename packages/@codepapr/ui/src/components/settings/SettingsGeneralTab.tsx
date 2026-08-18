@@ -45,6 +45,29 @@ export function SettingsGeneralTab({ local, update, t, currentLang }: SettingsTa
         title={t.chatBordersDesc}
       />
 
+      <div className="space-y-3">
+        <div className="px-1">
+          <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
+            {t.experimentalFeatures}
+          </h3>
+          <p className="mt-1 text-xs leading-relaxed text-fg-muted">{t.experimentalFeaturesDesc}</p>
+        </div>
+        <ToggleField
+          checked={local.experimentalCharacters}
+          onChange={(checked) => update({ experimentalCharacters: checked })}
+          label={t.characters}
+          desc={t.experimentalCharactersDesc}
+          title={t.experimentalCharactersDesc}
+        />
+        <ToggleField
+          checked={local.experimentalVoice}
+          onChange={(checked) => update({ experimentalVoice: checked })}
+          label={t.experimentalVoice}
+          desc={t.experimentalVoiceDesc}
+          title={t.experimentalVoiceDesc}
+        />
+      </div>
+
       <FieldCard padding="loose">
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
           {t.licenseSection}

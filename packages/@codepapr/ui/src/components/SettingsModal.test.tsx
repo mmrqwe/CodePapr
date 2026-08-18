@@ -71,11 +71,31 @@ describe('SettingsModal', () => {
     expect(container.innerHTML).toContain('w-[min(96vw,1480px)]');
     expect(container.innerHTML).toContain('h-[94vh]');
 
-    const generalTab = container.querySelector('button[title="配置语言、调试、许可证等全局界面行为。"]');
+    const generalTab = container.querySelector('button[title="配置语言、调试、实验性功能和许可证等全局界面行为。"]');
     const llmTab = container.querySelector('button[title="配置主模型、快速模型、API 接入方式和采样参数。"]');
 
     expect(generalTab?.textContent).toContain('通用');
     expect(llmTab?.textContent).toContain('LLM');
+  });
+
+  it('keeps experimental character and voice features off by default', async () => {
+    await act(async () => {
+      root.render(<SettingsModal />);
+    });
+
+    expect(container.innerHTML).toContain('实验性功能');
+
+    const characterToggle = container.querySelector(
+      'input[title="在主界面显示角色卡管理。未勾选时不会注入角色人设。"]'
+    ) as HTMLInputElement | null;
+    const voiceToggle = container.querySelector(
+      'input[title="在主界面显示语音朗读与克隆相关控件。"]'
+    ) as HTMLInputElement | null;
+
+    expect(characterToggle).not.toBeNull();
+    expect(voiceToggle).not.toBeNull();
+    expect(characterToggle?.checked).toBe(false);
+    expect(voiceToggle?.checked).toBe(false);
   });
 
   it('exposes ProjectGraph limit settings in the advanced tab', async () => {

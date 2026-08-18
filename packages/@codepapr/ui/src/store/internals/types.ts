@@ -49,6 +49,10 @@ export interface Settings {
   multimodalModelTier: MultimodalModelTier;
   debugEnabled: boolean;
   chatBordersEnabled: boolean;
+  /** 实验性：主界面显示角色卡。默认关闭。 */
+  experimentalCharacters: boolean;
+  /** 实验性：主界面显示语音朗读。默认关闭。 */
+  experimentalVoice: boolean;
   temperature: number;
   topP: number;
   maxTokens: number;

@@ -87,6 +87,10 @@ describe('maybeInsertActiveCharacterGreeting', () => {
       sessionMessagesLoading: false,
       _messageLoadFailedSessions: {},
       workspacePath: '',
+      settings: {
+        ...useAgentStore.getState().settings,
+        experimentalCharacters: true,
+      },
     });
 
     expect(maybeInsertActiveCharacterGreeting()).toBe(true);
@@ -117,5 +121,29 @@ describe('maybeInsertActiveCharacterGreeting', () => {
 
     expect(maybeInsertActiveCharacterGreeting()).toBe(false);
     expect(useAgentStore.getState().sessionMessages['sess-1']).toHaveLength(1);
+  });
+
+  it('does not insert when experimental characters are disabled', () => {
+    const character = makeCharacter();
+    useCharactersStore.setState({
+      characters: [character],
+      activeCharacterId: character.id,
+    });
+    useAgentStore.setState({
+      activeSessionId: 'sess-1',
+      sessions: [makeSession()],
+      messages: [],
+      sessionMessages: { 'sess-1': [] },
+      sessionMessagesLoading: false,
+      _messageLoadFailedSessions: {},
+      workspacePath: '',
+      settings: {
+        ...useAgentStore.getState().settings,
+        experimentalCharacters: false,
+      },
+    });
+
+    expect(maybeInsertActiveCharacterGreeting()).toBe(false);
+    expect(useAgentStore.getState().sessionMessages['sess-1']).toHaveLength(0);
   });
 });

@@ -515,6 +515,12 @@ export default function App() {
     }
   }, [settings.debugEnabled]);
 
+  useEffect(() => {
+    if (!settings.experimentalCharacters) {
+      setShowCharacters(false);
+    }
+  }, [settings.experimentalCharacters]);
+
   const hasContextDebugEntries = messages.some(
     (message) =>
       message.role === 'assistant' &&
@@ -885,7 +891,7 @@ export default function App() {
         {showMcpSettings && <McpSettingsModal onClose={() => setShowMcpSettings(false)} onOpenMarket={() => { setShowMcpSettings(false); setShowMcpMarket(true); }} />}
         {showMcpMarket && <McpMarketModal onClose={() => setShowMcpMarket(false)} />}
         {showSkillMarket && <SkillMarketModal onClose={() => setShowSkillMarket(false)} />}
-        {showCharacters && <CharacterModal onClose={() => setShowCharacters(false)} />}
+        {showCharacters && settings.experimentalCharacters && <CharacterModal onClose={() => setShowCharacters(false)} />}
         {showAbout && <AboutModal lang={settings.lang} onClose={() => setShowAbout(false)} />}
         {showProjectSwitcher && <ProjectSwitcherModal onClose={() => setShowProjectSwitcher(false)} />}
 

@@ -42,7 +42,7 @@ export const DEFAULT_THINKING_BUDGET_TOKENS = 4096;
 /// `update()`, so they need not be listed here.
 export function tabResetKeys(apiMode: ApiMode): Record<SettingsTab, (keyof Settings)[]> {
   return {
-    general: ['lang', 'debugEnabled', 'chatBordersEnabled'],
+    general: ['lang', 'debugEnabled', 'chatBordersEnabled', 'experimentalCharacters', 'experimentalVoice'],
     appearance: ['lightTheme', 'darkTheme', 'followSystem', 'accent', 'customThemes'],
     llm: ['apiMode', 'apiFormat', 'fastModelEnabled', 'thinkingEnabled', 'thinkingEffort', 'thinkingBudgetTokens', 'temperature', 'topP', 'maxToolRounds', apiMode],
     search: ['searxngEnabled', 'searxngBaseUrl', 'searxngCategories', 'searxngTimeRange', 'searxngLanguage', 'searxngSafeSearch'],

@@ -382,17 +382,27 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     s.characters.find((c) => c.id === s.activeCharacterId) ?? null
   );
 
+  const charactersEnabled = settings.experimentalCharacters;
+  const voiceUiEnabled = settings.experimentalVoice;
+
   useEffect(() => {
     maybeInsertActiveCharacterGreeting();
-  }, [activeCharacter?.id, activeCharacter?.firstMessage, activeCharacter?.selectedGreetingIndex, activeSessionId, sessionMessagesLoading, messages.length]);
+  }, [activeCharacter?.id, activeCharacter?.firstMessage, activeCharacter?.selectedGreetingIndex, activeSessionId, sessionMessagesLoading, messages.length, charactersEnabled]);
 
-  const characterAvatar = (activeCharacter?.showAvatar ?? true)
+  const characterAvatar = charactersEnabled && (activeCharacter?.showAvatar ?? true)
     ? (activeCharacter?.avatarDataUrl ?? null)
     : null;
-  const characterName = activeCharacter?.name;
+  const characterName = charactersEnabled ? activeCharacter?.name : undefined;
 
-  // Auto-speak only when the active character has voice enabled.
-  const voiceEnabled = activeCharacter?.voice?.enabled ?? false;
+  // Auto-speak only when experimental voice is on and the active character has voice enabled.
+  const voiceEnabled = voiceUiEnabled && (activeCharacter?.voice?.enabled ?? false);
+
+  useEffect(() => {
+    if (voiceUiEnabled) return;
+    ttsStop();
+    setShowTtsLog(false);
+    setShowInstaller(false);
+  }, [voiceUiEnabled, ttsStop]);
 
   // Sync voice config (ref audio path, prompt text) to the TTS hook.
   useEffect(() => {
@@ -409,7 +419,9 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       const ftPath = vc.useFineTuned !== false && vc.fineTunedModelPath ? vc.fineTunedModelPath : '';
       ttsSetFineTunedModel(ftPath);
       ttsSetSentencesPerChunk(vc.sentencesPerChunk ?? 3);
-      ttsSetInteractionMode(resolveCharacterInteractionMode(activeCharacter));
+      if (activeCharacter) {
+        ttsSetInteractionMode(resolveCharacterInteractionMode(activeCharacter));
+      }
       // Only preload/reset the model when the path actually changes
       // (avoiding an HTTP round-trip on every character save).
       if (ftPath !== prevFtPathRef.current && ttsServerStatus === 'running') {
@@ -1467,6 +1479,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
             messageCheckpoints={messageCheckpoints}
             gitReady={gitReady}
             onTtsReplay={ttsReplayText}
+            ttsReplayEnabled={voiceUiEnabled}
             onRequestReset={setResetConfirmMsgId}
             activeSessionId={activeSessionId}
             taskChecklists={_taskChecklists}
@@ -1746,7 +1759,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                     </svg>
                   </button>
-                  {activeCharacter && (
+                  {voiceUiEnabled && activeCharacter && (
                   <div className="relative flex-shrink-0">
                     <button
                       type="button"
@@ -1956,7 +1969,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
         </div>
       )}
 
-      {showInstaller && (
+      {showInstaller && voiceUiEnabled && (
         <TtsInstaller
           onClose={() => {
             setShowInstaller(false);

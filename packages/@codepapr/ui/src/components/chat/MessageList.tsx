@@ -35,6 +35,7 @@ interface MessageListProps {
   messageCheckpoints: Record<string, { sha: string; sessionId: string }>;
   gitReady: boolean;
   onTtsReplay: (text: string) => void;
+  ttsReplayEnabled?: boolean;
   onRequestReset: (msgId: string) => void;
   activeSessionId: string | null;
   taskChecklists: Record<string, TaskChecklistType | null>;
@@ -75,6 +76,7 @@ export const MessageList = memo(function MessageList({
   messageCheckpoints,
   gitReady,
   onTtsReplay,
+  ttsReplayEnabled = false,
   onRequestReset,
   activeSessionId,
   taskChecklists,
@@ -178,6 +180,7 @@ export const MessageList = memo(function MessageList({
         const isUserMsg = m.role === 'user';
         const showUserActions = isUserMsg && !isLoading;
         const showReplay =
+          ttsReplayEnabled &&
           m.role === 'assistant' && !m.synthetic && Boolean(m.content) && !m.isStreaming;
         const showActionBar = showUserActions || showReplay;
 

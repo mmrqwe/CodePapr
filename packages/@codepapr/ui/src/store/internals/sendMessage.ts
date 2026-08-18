@@ -1259,7 +1259,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             runtimeSystemPrompt,
             JSON.stringify(skillDefinitions),
             normalizedSettings.systemPrompt ?? '',
-            getActiveCharacterPrompt() ?? '',
+            normalizedSettings.experimentalCharacters ? (getActiveCharacterPrompt() ?? '') : '',
           ].join('\u0000');
           const runtimeSessionBootstrapPrompt = resolveSessionBootstrap(
             turnSessionId,

@@ -167,7 +167,7 @@ export function buildAgentSessionBootstrapPrompt(
     memorySection,
     customPromptSection: customPromptSection || undefined,
   });
-  const characterPrompt = getActiveCharacterPrompt();
+  const characterPrompt = settings.experimentalCharacters ? getActiveCharacterPrompt() : '';
   if (!characterPrompt) return bootstrap;
 
   const lang = settings.lang ?? 'zh-CN';
@@ -197,7 +197,7 @@ export function buildAgentRuntimeUserPrompt(params: {
     lang: params.settings.lang ?? 'zh-CN',
     todoDigest: params.todoDigest,
   });
-  const character = getActiveCharacter();
+  const character = params.settings.experimentalCharacters ? getActiveCharacter() : null;
   const postHistory = character?.postHistoryInstructions.trim() ?? '';
   if (!character || !postHistory) return userPrompt;
   const expanded = sanitizeCachePrompt(

@@ -24,11 +24,13 @@ export function expandCharacterGreeting(text: string, characterName: string): st
  * Returns true when a greeting was inserted.
  */
 export function maybeInsertActiveCharacterGreeting(): boolean {
+  const state = useAgentStore.getState();
+  if (!state.settings.experimentalCharacters) return false;
+
   const character = getActiveCharacter();
   const greetingRaw = character ? resolveCharacterGreeting(character).trim() : '';
   if (!character || !greetingRaw) return false;
 
-  const state = useAgentStore.getState();
   const sessionId = state.activeSessionId;
   if (!sessionId || state.sessionMessagesLoading) return false;
   if (state._messageLoadFailedSessions[sessionId]) return false;

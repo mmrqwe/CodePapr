@@ -69,6 +69,8 @@ export const DEFAULT_SETTINGS: Settings = {
   multimodalModelTier: 'all',
   debugEnabled: false,
   chatBordersEnabled: true,
+  experimentalCharacters: false,
+  experimentalVoice: false,
   temperature: 0.7,
   topP: 0.9,
   maxTokens: DEFAULT_MAX_TOKENS,

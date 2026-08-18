@@ -58,12 +58,14 @@ export function AgentOpsPanel({
         <button type="button" onClick={onOpenSettings} title={t.settingsTip} className={buttonClass}>
           <span>{t.modelSettings}</span>
         </button>
+        {settings.experimentalCharacters && (
         <button type="button" onClick={onOpenCharacters} title={t.charactersTip} className={characterButtonClass}>
           <span className="flex items-center gap-1.5">
             <span>{t.characters}</span>
             {activeCharacter && <span className="max-w-[120px] truncate text-[10px] font-semibold opacity-80">· {activeCharacter.name}</span>}
           </span>
         </button>
+        )}
         <button type="button" onClick={onOpenMcpSettings} title={settings.lang === 'en' ? 'Configure MCP servers and exposed tools.' : settings.lang === 'zh-TW' ? '配置 MCP 服務與暴露工具。' : '配置 MCP 服务与暴露工具。'} className={buttonClass}>
           <span>MCP</span>
         </button>

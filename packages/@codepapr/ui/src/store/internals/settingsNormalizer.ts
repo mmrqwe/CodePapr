@@ -171,6 +171,14 @@ export function normalizeSettings(
     typeof input.chatBordersEnabled === 'boolean'
       ? input.chatBordersEnabled
       : DEFAULT_SETTINGS.chatBordersEnabled;
+  const experimentalCharacters =
+    typeof input.experimentalCharacters === 'boolean'
+      ? input.experimentalCharacters
+      : DEFAULT_SETTINGS.experimentalCharacters;
+  const experimentalVoice =
+    typeof input.experimentalVoice === 'boolean'
+      ? input.experimentalVoice
+      : DEFAULT_SETTINGS.experimentalVoice;
   const lang: Lang =
     input.lang === 'zh-CN' || input.lang === 'zh-TW' || input.lang === 'en'
       ? input.lang
@@ -512,6 +520,8 @@ export function normalizeSettings(
     thinkingBudgetTokens,
     debugEnabled,
     chatBordersEnabled,
+    experimentalCharacters,
+    experimentalVoice,
     temperature,
     topP,
     multimodalEnabled,

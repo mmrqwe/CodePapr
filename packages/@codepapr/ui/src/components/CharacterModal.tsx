@@ -44,6 +44,7 @@ const LANG_CONFIG: Record<LangCode, { name: string; instruction: string }> = {
 export function CharacterModal({ onClose }: CharacterModalProps) {
   const { settings } = useAgentStore();
   const t = getTranslation(settings.lang);
+  const voiceFeatureEnabled = settings.experimentalVoice;
   const {
     characters,
     activeCharacterId,
@@ -87,6 +88,12 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
   const snapshotCharacter = (character: CharacterProfile) => JSON.stringify(character);
   const isDirty = (character: CharacterProfile | null) =>
     Boolean(character && snapshotCharacter(character) !== savedSnapshotRef.current);
+
+  useEffect(() => {
+    if (!voiceFeatureEnabled && voiceTab === 'voice') {
+      setVoiceTab('basic');
+    }
+  }, [voiceFeatureEnabled, voiceTab]);
   const confirmDiscard = () => {
     if (!isDirty(editing)) return true;
     return typeof window === 'undefined' || window.confirm(t.characterUnsavedConfirm);
@@ -730,6 +737,7 @@ Requirements:
                   </div>
                 )}
 
+                {voiceFeatureEnabled && (
                 <div className="flex items-center gap-1 rounded-xl border border-line bg-base p-1">
                   {(['basic', 'voice'] as const).map((tab) => (
                     <button
@@ -746,8 +754,9 @@ Requirements:
                     </button>
                   ))}
                 </div>
+                )}
 
-                {voiceTab === 'basic' ? (
+                {(!voiceFeatureEnabled || voiceTab === 'basic') ? (
                   <div className="space-y-4">
                 <FieldRow label={t.characterName}>
                   <input
