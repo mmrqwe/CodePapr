@@ -618,11 +618,17 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     setActiveGitActionKey('commit');
     setGitActionMessage('');
     try {
+      // rename 文件必须同时传旧路径与新路径：选择性提交先把 index 重置到
+      // HEAD 树，只传新路径会把旧文件残留在提交里（重复而非改名）。
+      // 旧路径已不在磁盘上，Rust 侧走 remove_path 把删除纳入提交。
+      const commitPathspecs = selectedChangedFiles.flatMap((f) =>
+        f.originalPath ? [f.originalPath, f.path] : [f.path]
+      );
       const result = await gitCommitCmd(
         workspacePath,
         trimmedMessage,
         false,
-        selectedChangedFiles.map((f) => f.path),
+        commitPathspecs,
         false,
       );
       if (result.ok) {
@@ -649,11 +655,14 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     setActiveGitActionKey('branch-checkout');
     setGitActionMessage('');
     try {
+      // 已选择历史提交时，新分支从该提交创建（分支已存在则直接切换，
+      // startPoint 只在创建路径生效——与表单提示文案一致）。
       const result = await gitBranchCheckoutCmd(
         workspacePath,
         trimmedBranchName,
         false,
         true,
+        selectedHistoryHash ?? undefined,
       );
       if (!result.ok) {
         throw new Error(result.message);

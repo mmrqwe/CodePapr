@@ -3411,7 +3411,7 @@ describe('resetToMessage 撤销（N8）', () => {
           error: null,
         };
       }
-      if (command === 'restore_undo' || command === 'delete_checkpoint_by_message') {
+      if (command === 'restore_undo' || command === 'delete_checkpoint_by_message' || command === 'delete_checkpoints_for_session') {
         return {};
       }
       throw new Error(`Unexpected invoke call: ${command}`);
@@ -3445,6 +3445,33 @@ describe('resetToMessage 撤销（N8）', () => {
     expect(useAgentStore.getState().sessionMessages[sessionId]?.map((m) => m.id)).toEqual(['m1', 'm2', 'm3', 'm4']);
     expect(useAgentStore.getState()._messageCheckpoints['m3']).toEqual({ sha: 'sha-reset', sessionId });
     expect(useAgentStore.getState()._pendingRestoreUndo).toBeNull();
+  });
+
+  it('重置当前会话不销毁其他会话的 checkpoint 锚点', async () => {
+    setResetState();
+    // 另一个会话的消息锚点
+    useAgentStore.setState((state) => ({
+      ...state,
+      sessions: [
+        ...state.sessions,
+        { id: 'session-2', name: '任务 2', provider: 'deepseek' as const, model: 'deepseek-v4-pro', createdAt: 1, updatedAt: 1 },
+      ],
+      _messageCheckpoints: {
+        ...state._messageCheckpoints,
+        'other-msg': { sha: 'sha-other', sessionId: 'session-2' },
+      },
+    }));
+
+    await useAgentStore.getState().resetToMessage('m3');
+
+    // 其他会话的锚点原样保留（旧实现会连带移除，销毁其他会话的回滚点）
+    expect(useAgentStore.getState()._messageCheckpoints['other-msg']).toEqual({
+      sha: 'sha-other',
+      sessionId: 'session-2',
+    });
+    // 撤销入口只包含当前会话被截掉的锚点
+    const pending = useAgentStore.getState()._pendingRestoreUndo;
+    expect(Object.keys(pending?.removedCheckpoints ?? {})).toEqual(['m3']);
   });
 
   it('重置时不删除 checkpoint timeline 记录；撤销入口失效（dismiss）后才删除', async () => {
@@ -3481,15 +3508,20 @@ describe('resetToMessage 撤销（N8）', () => {
     expect(useAgentStore.getState()._pendingRestoreUndo?.truncatedMessages.map((m) => m.id)).toEqual(['m1', 'm2']);
   });
 
-  it('deleteSession 失效撤销入口时删除其 checkpoint 记录', async () => {
+  it('deleteSession 清理该会话的 timeline 记录与内存锚点，并失效撤销入口', async () => {
     setResetState();
     await useAgentStore.getState().resetToMessage('m3');
 
     useAgentStore.getState().deleteSession(sessionId);
-    const deletedIds = invokeMock.mock.calls
-      .filter(([command]) => command === 'delete_checkpoint_by_message')
-      .map(([, payload]) => payload?.messageId);
-    expect(deletedIds).toEqual(['m3']);
+    // timeline 记录按会话整体清理（覆盖会话自身锚点 + 待撤销重置截掉的记录）
+    expect(
+      invokeMock.mock.calls.some(
+        ([command, payload]) =>
+          command === 'delete_checkpoints_for_session' && payload?.sessionId === sessionId
+      )
+    ).toBe(true);
+    // 内存锚点同步清理
+    expect(useAgentStore.getState()._messageCheckpoints['m1']).toBeUndefined();
     expect(useAgentStore.getState()._pendingRestoreUndo).toBeNull();
   });
 

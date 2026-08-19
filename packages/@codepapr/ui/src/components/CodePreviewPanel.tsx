@@ -36,6 +36,7 @@ import {
   type GitDiffContentSource,
   type GitFileSelection,
 } from '../utils/workspaceGitPanel';
+import { snapshotFileContent, snapshotIndexFileContent } from '../utils/snapshot';
 import type { PreviewLocation } from '../utils/projectDiagnosticLocations';
 
 interface ReadFileResult {
@@ -45,15 +46,6 @@ interface ReadFileResult {
   /** 内容超过 maxBytes 被截断（Rust 侧返回）。预览必须提示用户，
    *  否则把不完整的文件当全文展示（#7）。 */
   truncatedByBytes: boolean;
-}
-
-interface CommandResult {
-  command: string;
-  args: string[];
-  status: number | null;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
 }
 
 interface LspRequestEnvelope<T> {
@@ -1003,23 +995,14 @@ export function CodePreviewPanel({
         return result.content ?? '';
       }
 
-      const revisionPrefix = source.revision === 'HEAD' ? 'HEAD:' : ':';
-      const commandResult = await invoke<CommandResult>('run_workspace_command', {
-        workspacePath,
-        command: 'git',
-        args: ['show', `${revisionPrefix}${source.path}`],
-        timeoutSeconds: 15,
-      });
-
-      if ((commandResult.status ?? 1) !== 0) {
-        throw new Error(
-          (commandResult.stderr ?? '').trim() ||
-            (commandResult.stdout ?? '').trim() ||
-            t.workspaceGitFileDiffUnavailable
-        );
+      // 从 shadow repo（.CodePapr/git）读取：旧实现以 cwd=workspace 跑
+      // `git show`，命中的是用户自己的 .git——工作区不是 git 仓库时直接报错，
+      // 是 git 仓库时读到用户仓库的 HEAD，与面板/检查点的 shadow repo
+      // 语义完全脱节。
+      if (source.revision === 'INDEX') {
+        return await snapshotIndexFileContent(workspacePath, source.path);
       }
-
-      return commandResult.stdout ?? '';
+      return await snapshotFileContent(workspacePath, source.revision ?? 'HEAD', source.path);
     };
 
     const loadGitDiffView = async () => {
@@ -1066,7 +1049,7 @@ export function CodePreviewPanel({
     return () => {
       cancelled = true;
     };
-  }, [activeGitSelection, t.workspaceGitFileDiffUnavailable, workspacePath]);
+  }, [activeGitSelection, workspacePath]);
 
   if (!selectedPath) {
     return (

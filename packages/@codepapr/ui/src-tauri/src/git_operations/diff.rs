@@ -51,7 +51,14 @@ pub fn git_diff_impl(
             },
         }
     } else {
-        match repo.diff_index_to_workdir(None, Some(&mut opts)) {
+        // 「未提交改动」= HEAD vs 工作区（含未跟踪文件）。旧实现用
+        // index→workdir：index 与 HEAD 分叉时（例如 agent 调过 stage），
+        // 已暂存的改动会从 diff 里消失，与面板"去暂存概念"的语义矛盾。
+        let head_tree = repo.head().ok()
+            .and_then(|h| h.target())
+            .and_then(|oid| repo.find_commit(oid).ok())
+            .and_then(|c| c.tree().ok());
+        match repo.diff_tree_to_workdir(head_tree.as_ref(), Some(&mut opts)) {
             Ok(d) => d,
             Err(e) => return GitDiffResult {
                 available: true, stat: String::new(), diff: String::new(),
@@ -82,6 +89,17 @@ pub fn git_diff_impl(
             if let Ok(Some(mut patch)) = git2::Patch::from_diff(&diff, i) {
                 let mut buf = Vec::new();
                 let _ = patch.print(&mut |_d: git2::DiffDelta, _h: Option<git2::DiffHunk>, line: git2::DiffLine| {
+                    // content() 不含行首的 +/-/空格 前缀（origin 单独存放）：
+                    // 不补前缀的话，面板 diff 无法按 unified diff 着色，
+                    // summarizeGitDiff 也统计不出增删行数。
+                    // 文件头/hunk 头（F/H/B）的 content 自带完整文本，不加前缀。
+                    let prefix: &[u8] = match line.origin() {
+                        '+' => b"+",
+                        '-' => b"-",
+                        ' ' => b" ",
+                        _ => b"",
+                    };
+                    buf.extend_from_slice(prefix);
                     buf.extend_from_slice(line.content());
                     true
                 });
@@ -228,6 +246,37 @@ mod tests {
         let result = git_diff_impl(&workspace, true, &[]);
         assert!(result.available, "staged diff should be available");
         assert!(result.files.iter().any(|f| f.path == "x.txt"));
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    /// 回归：stage 使 index 与 HEAD 分叉后，unstaged diff 仍必须相对 HEAD
+    /// 计算（展示完整未提交改动）。旧实现用 index→workdir，已暂存的改动
+    /// 会从 diff 里消失，与面板"去暂存概念"（HEAD vs 工作区）语义矛盾。
+    #[test]
+    fn test_unstaged_diff_shows_staged_changes_against_head() {
+        let workspace = temp_workspace("staged-vs-head");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+        fs::write(workspace.join("x.txt"), "v1\n").unwrap();
+        engine.create("baseline").expect("baseline");
+
+        fs::write(workspace.join("x.txt"), "v2\n").unwrap();
+        super::super::stage::git_stage_impl(&workspace, false, &["x.txt".to_string()]);
+
+        // 此时 index == worktree != HEAD：旧实现（index→workdir）得到空 diff
+        let result = git_diff_impl(&workspace, false, &[]);
+        assert!(result.available);
+        assert!(
+            result.files.iter().any(|f| f.path == "x.txt"),
+            "stage 之后 unstaged diff 仍应显示相对 HEAD 的改动: {:?}",
+            result.files
+        );
+        assert!(
+            result.diff.contains("+v2"),
+            "diff 内容应包含工作区版本: {}",
+            result.diff
+        );
 
         fs::remove_dir_all(&workspace).ok();
     }

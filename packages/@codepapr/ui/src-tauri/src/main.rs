@@ -321,6 +321,7 @@ fn main() {
             snapshot::snapshot_changed_files,
             snapshot::diff_snapshots,
             snapshot::snapshot_file_content,
+            snapshot::snapshot_index_file_content,
             git_operations::status::git_status,
             git_operations::diff::git_diff,
             git_operations::log::git_log,

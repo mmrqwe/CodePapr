@@ -627,6 +627,80 @@ describe('WorkspaceGitPanel', () => {
     expect(pathspecs.includes('src/file-30.ts')).toBe(false);
   });
 
+  it('committing a renamed file passes both old and new pathspecs (#11)', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'git_status') {
+        return {
+          available: true,
+          isRepo: true,
+          branch: 'main',
+          headShort: 'aaaaaaa',
+          entries: [
+            {
+              path: 'src/new-name.ts',
+              oldPath: 'src/old-name.ts',
+              indexStatus: 'R',
+              worktreeStatus: ' ',
+              isUntracked: false,
+            },
+          ],
+          message: null,
+        };
+      }
+      if (command === 'git_log') {
+        return [];
+      }
+      if (command === 'git_commit') {
+        return { ok: true, action: 'commit', message: '已创建提交 abc1234', backupRef: null };
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    await act(async () => {
+      root.render(
+        <WorkspaceGitPanel
+          workspacePath="/workspace"
+          lang="en"
+          selectedPath={null}
+          selectedGitFile={null}
+          onSelectGitFile={() => undefined}
+        />
+      );
+    });
+    await flushEffects();
+
+    click(container.querySelector('button[aria-label="Git Delta"]'));
+    await flushEffects();
+
+    expect(container.textContent).toContain('new-name.ts');
+
+    const commitBox = container.querySelector('#workspace-git-commit-message') as HTMLTextAreaElement | null;
+    expect(commitBox).not.toBeNull();
+    act(() => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setValue?.call(commitBox, 'rename commit');
+      commitBox!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flushEffects();
+
+    click(
+      Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('Commit Selected')
+      ) ?? null
+    );
+    await flushEffects();
+    await flushEffects();
+
+    const commitCall = invokeMock.mock.calls.find(
+      ([command, payload]) => command === 'git_commit' && payload?.message === 'rename commit'
+    );
+    expect(commitCall).toBeDefined();
+    // rename 必须同时传旧路径（提交删除）与新路径（提交新增），
+    // 只传新路径会把旧文件残留进提交（重复而非改名）。
+    const pathspecs = (commitCall?.[1] as { pathspecs?: string[] })?.pathspecs ?? [];
+    expect(pathspecs).toEqual(['src/old-name.ts', 'src/new-name.ts']);
+  });
+
   it('creates a sandbox branch from the selected commit and supports safe rollback', async () => {
     await act(async () => {
       root.render(
@@ -675,6 +749,15 @@ describe('WorkspaceGitPanel', () => {
         ([command, payload]) =>
           command === 'git_branch_checkout' &&
           payload?.branchName === 'feature/sandbox'
+      )
+    ).toBe(true);
+    // #8：已选择提交时，新分支必须从该提交创建（startPoint 接线）
+    expect(
+      invokeMock.mock.calls.some(
+        ([command, payload]) =>
+          command === 'git_branch_checkout' &&
+          payload?.branchName === 'feature/sandbox' &&
+          payload?.startPoint === 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
       )
     ).toBe(true);
     expect(container.textContent).toContain('feature/sandbox');

@@ -156,3 +156,16 @@ pub async fn snapshot_file_content(
     })
     .await
 }
+
+#[tauri::command]
+pub async fn snapshot_index_file_content(
+    workspace_path: String,
+    path: String,
+) -> Result<String, String> {
+    run_blocking_workspace_task(move || {
+        let workspace = PathBuf::from(workspace_path);
+        let engine = DiffEngine::new(&workspace);
+        engine.index_file_content(&path)
+    })
+    .await
+}

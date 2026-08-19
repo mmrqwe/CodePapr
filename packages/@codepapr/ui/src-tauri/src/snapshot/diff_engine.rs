@@ -148,8 +148,14 @@ impl DiffEngine {
         repo.set_workdir(&self.workspace, false)
             .map_err(|e| format!("set workdir: {}", e.message()))?;
 
-        let oid = Oid::from_str(sha)
-            .map_err(|e| format!("parse sha: {}", e.message()))?;
+        // revparse 同时支持完整 SHA、短 SHA、分支名与 HEAD——编辑器 diff
+        // 以 "HEAD" 取基线版本；旧实现 Oid::from_str 只认完整 40 位 SHA。
+        let oid = repo
+            .revparse_single(sha)
+            .map_err(|e| format!("resolve '{sha}': {}", e.message()))?
+            .peel_to_commit()
+            .map_err(|e| format!("'{sha}' 不是提交对象: {}", e.message()))?
+            .id();
         let commit = repo.find_commit(oid)
             .map_err(|e| format!("find commit: {}", e.message()))?;
         let tree = commit.tree()
@@ -172,5 +178,103 @@ impl DiffEngine {
         let text = std::str::from_utf8(content)
             .map_err(|e| format!("utf8: {}", e))?;
         Ok(text.to_string())
+    }
+
+    /// 读取 shadow repo 索引（INDEX）中某路径的内容，供编辑器 diff 的
+    /// staged 视图使用。路径不在索引中（未暂存/已删除）时返回错误。
+    pub fn index_file_content(&self, path: &str) -> Result<String, String> {
+        let git_path = code_papr_git_path(&self.workspace);
+        let repo = Repository::open(&git_path)
+            .map_err(|e| format!("open repo: {}", e.message()))?;
+
+        let rel = super::ignore_resolver::git_relative_path(std::path::Path::new(path));
+        let index = repo.index()
+            .map_err(|e| format!("index: {}", e.message()))?;
+        let entry = index
+            .get_path(&rel, 0)
+            .ok_or_else(|| format!("路径不在索引中: {path}"))?;
+        let blob = repo.find_blob(entry.id)
+            .map_err(|e| format!("find_blob: {}", e.message()))?;
+        let content = blob.content();
+
+        if content.contains(&0u8) {
+            return Ok(format!(
+                "[binary file: {} bytes, content omitted]",
+                content.len()
+            ));
+        }
+
+        let text = std::str::from_utf8(content)
+            .map_err(|e| format!("utf8: {}", e))?;
+        Ok(text.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::snapshot::SnapshotEngine;
+    use std::fs;
+
+    fn temp_workspace(label: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        let unique = format!(
+            "codepapr-diffengine-{label}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        path.push(unique);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    /// 回归：file_content 必须支持 "HEAD" 等引用（编辑器 diff 用 HEAD 取基线）。
+    /// 旧实现 Oid::from_str 只认完整 40 位 SHA，"HEAD" 必然失败。
+    #[test]
+    fn test_file_content_accepts_head_ref() {
+        let workspace = temp_workspace("head-ref");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+        fs::write(workspace.join("a.txt"), "committed\n").unwrap();
+        engine.create("baseline").expect("baseline");
+
+        let diff_engine = DiffEngine::new(&workspace);
+        let content = diff_engine
+            .file_content("HEAD", "a.txt")
+            .expect("file_content('HEAD') should succeed");
+        assert_eq!(content, "committed\n");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    /// 回归：index_file_content 读取 shadow 索引中的内容（staged diff 视图）。
+    #[test]
+    fn test_index_file_content_reads_staged_version() {
+        let workspace = temp_workspace("index-content");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+        fs::write(workspace.join("a.txt"), "v1\n").unwrap();
+        engine.create("baseline").expect("baseline");
+
+        fs::write(workspace.join("a.txt"), "v2-staged\n").unwrap();
+        let stage = crate::git_operations::stage::git_stage_impl(
+            &workspace,
+            false,
+            &["a.txt".to_string()],
+        );
+        assert!(stage.ok, "stage should succeed: {}", stage.message);
+
+        let diff_engine = DiffEngine::new(&workspace);
+        let content = diff_engine
+            .index_file_content("a.txt")
+            .expect("index_file_content should succeed");
+        assert_eq!(content, "v2-staged\n");
+
+        // 未暂存/不在索引中的路径必须报错而非 panic
+        assert!(diff_engine.index_file_content("missing.txt").is_err());
+
+        fs::remove_dir_all(&workspace).ok();
     }
 }

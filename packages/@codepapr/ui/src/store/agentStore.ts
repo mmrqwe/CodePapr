@@ -1341,13 +1341,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         if (running.workspacePath) {
           forgetContextSurface(running.workspacePath, id);
         }
-        // N8：会话删除使撤销入口失效（消息无处回放）——被该重置截掉的
-        // checkpoint 的 timeline 记录一并删除（延迟删除的收口点之一）。
-        const superseded = running._pendingRestoreUndo;
-        if (superseded?.sessionId === id) {
-          for (const messageId of Object.keys(superseded.removedCheckpoints)) {
-            void deleteCheckpointByMessage(superseded.workspacePath, messageId).catch(() => undefined);
-          }
+        // 清理该会话的 checkpoint timeline 记录：既包括会话自身消息的锚点，
+        // 也覆盖待撤销重置截掉的记录（它们同属该会话）——不清理会无限累积，
+        // 重启后还会被 _ensureWorkspaceGitReady 重新加载成孤儿锚点。
+        if (running.workspacePath) {
+          void deleteCheckpointsForSession(running.workspacePath, id).catch(() => undefined);
         }
         set((s) => {
           const sessions = s.sessions.filter((x) => x.id !== id);
@@ -1377,6 +1375,13 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             _latestContextSnapshot: isActive ? null : s._latestContextSnapshot,
             _sessionInputState: sessionInputState,
             _sessionLru: s._sessionLru.filter((x) => x !== id),
+            // 清掉被删会话的 checkpoint 内存锚点：其他会话的锚点保留。
+            // 不清理会残留孤儿锚点，且与 timeline 记录的清理不一致。
+            _messageCheckpoints: Object.fromEntries(
+              Object.entries(s._messageCheckpoints).filter(
+                ([, entry]) => entry.sessionId !== id
+              )
+            ),
             // N8：会话已删除，其重置撤销信息失效（消息无处回放）。
             _pendingRestoreUndo:
               s._pendingRestoreUndo?.sessionId === id
@@ -1488,7 +1493,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         const nextCheckpoints: Record<string, { sha: string; sessionId: string }> = {};
         const removedCheckpoints: Record<string, { sha: string; sessionId: string }> = {};
         for (const [id, entry] of Object.entries(_messageCheckpoints)) {
-          if (keptIds.has(id)) {
+          // 其他会话的锚点必须原样保留：重置只截断当前会话，旧实现把
+          // 不在 keptIds 里的锚点全部移除，会连带销毁其他会话的回滚点。
+          if (keptIds.has(id) || entry.sessionId !== activeSessionId) {
             nextCheckpoints[id] = entry;
           } else {
             removedCheckpoints[id] = entry;

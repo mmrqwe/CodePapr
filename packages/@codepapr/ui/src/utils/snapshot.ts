@@ -161,6 +161,10 @@ export async function snapshotFileContent(workspacePath: string, sha: string, pa
   return invoke<string>('snapshot_file_content', { workspacePath, sha, path });
 }
 
+export async function snapshotIndexFileContent(workspacePath: string, path: string): Promise<string> {
+  return invoke<string>('snapshot_index_file_content', { workspacePath, path });
+}
+
 export async function gitStatus(workspacePath: string): Promise<GitStatusResult> {
   return invoke<GitStatusResult>('git_status', { workspacePath });
 }

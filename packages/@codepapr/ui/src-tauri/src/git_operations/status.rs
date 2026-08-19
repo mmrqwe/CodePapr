@@ -55,12 +55,26 @@ pub fn git_status_impl(workspace: &std::path::Path) -> GitStatusResult {
     let mut entries = Vec::new();
     for entry in statuses.iter() {
         let status = entry.status();
-        let path = entry.path().unwrap_or("").to_string();
-        let old_path = if status.contains(git2::Status::INDEX_RENAMED) || status.contains(git2::Status::WT_RENAMED) {
-            // libgit2 doesn't expose old path via StatusEntry directly;
-            // leave as None, frontend can infer from diff
+        let mut path = entry.path().unwrap_or("").to_string();
+        // libgit2 的 StatusEntry 通过 head_to_index/index_to_worktree 两个
+        // DiffDelta 暴露重命名两侧路径。注意：检测到重命名时 entry.path()
+        // 返回的是"旧路径"，新路径在 delta.new_file() 里——面板与选择性
+        // 提交需要 path=新路径、old_path=旧路径才能把 rename 当作
+        // "旧路径删除 + 新路径新增"正确处理。
+        let mut old_path: Option<String> = None;
+        let rename_delta = if status.contains(git2::Status::INDEX_RENAMED) {
+            entry.head_to_index()
+        } else if status.contains(git2::Status::WT_RENAMED) {
+            entry.index_to_workdir()
+        } else {
             None
-        } else { None };
+        };
+        if let Some(delta) = rename_delta {
+            if let Some(new_path) = delta.new_file().path() {
+                path = new_path.to_string_lossy().to_string();
+            }
+            old_path = delta.old_file().path().map(|p| p.to_string_lossy().to_string());
+        }
         let is_untracked = status.contains(git2::Status::WT_NEW) && !status.contains(git2::Status::INDEX_NEW);
         entries.push(GitStatusEntry {
             path,
@@ -157,6 +171,45 @@ mod tests {
         // 不调用 engine.ensure()，模拟仓库未初始化
         let result = git_status_impl(&workspace);
         assert!(!result.available || !result.is_repo, "未初始化时应返回不可用或非 repo");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    /// 回归：重命名（删除旧文件 + 暂存同内容新文件）必须报告 old_path，
+    /// 面板与选择性提交依赖它把 rename 当作"旧路径删除 + 新路径新增"。
+    /// 旧实现 old_path 恒为 None，rename 的旧路径会残留进提交。
+    #[test]
+    fn test_status_reports_rename_old_path() {
+        let workspace = temp_workspace("rename");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        let content = "same content for rename detection\n";
+        fs::write(workspace.join("original.txt"), content).unwrap();
+        engine.create("baseline").expect("baseline");
+
+        // 工作区改名：删除旧文件、新增同内容文件，并把两者都暂存进 index
+        fs::remove_file(workspace.join("original.txt")).unwrap();
+        fs::write(workspace.join("renamed.txt"), content).unwrap();
+        let stage = super::super::stage::git_stage_impl(
+            &workspace,
+            false,
+            &["original.txt".to_string(), "renamed.txt".to_string()],
+        );
+        assert!(stage.ok, "stage rename should succeed: {}", stage.message);
+
+        let result = git_status_impl(&workspace);
+        let entry = result
+            .entries
+            .iter()
+            .find(|e| e.path == "renamed.txt")
+            .expect("renamed.txt 应出现在状态里");
+        assert_eq!(entry.index_status, "R", "应识别为索引重命名");
+        assert_eq!(
+            entry.old_path.as_deref(),
+            Some("original.txt"),
+            "必须报告重命名旧路径"
+        );
 
         fs::remove_dir_all(&workspace).ok();
     }

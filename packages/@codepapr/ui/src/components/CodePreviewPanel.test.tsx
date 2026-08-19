@@ -869,6 +869,11 @@ describe('CodePreviewPanel', () => {
         throw new Error(`Unexpected file read: ${relativePath}`);
       }
 
+      if (command === 'snapshot_file_content') {
+        // shadow repo 读取 HEAD 版本（编辑器 diff 的 git 侧来源）
+        return 'const removed = true;\n';
+      }
+
       if (command === 'run_workspace_command') {
         const gitArgs = (args?.args as string[]) ?? [];
         if (gitArgs[0] === 'show') {
