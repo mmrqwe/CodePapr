@@ -111,6 +111,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     mentorEnabled,
     sessionMessagesLoading,
     pendingRestoreUndo,
+    restoreUndoCount,
     undoConversationReset,
     dismissRestoreUndo,
     messageLoadFailedSessions,
@@ -138,7 +139,10 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       _skillDefinitions: state._skillDefinitions,
       mentorEnabled: state.settings.mentorEnabled ?? true,
       sessionMessagesLoading: state.sessionMessagesLoading,
-      pendingRestoreUndo: state._pendingRestoreUndo,
+      // 撤销入口只暴露栈顶（最近一次重置）；撤销/放弃后下一级自动浮现。
+      pendingRestoreUndo:
+        state._pendingRestoreUndos[state._pendingRestoreUndos.length - 1] ?? null,
+      restoreUndoCount: state._pendingRestoreUndos.length,
       undoConversationReset: state.undoConversationReset,
       dismissRestoreUndo: state.dismissRestoreUndo,
       messageLoadFailedSessions: state._messageLoadFailedSessions,
@@ -1389,6 +1393,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                 : settings.lang === 'zh-TW'
                   ? '已套用重設'
                   : '已应用重置'}
+              {restoreUndoCount > 1 ? ` ×${restoreUndoCount}` : ''}
             </span>
             <button
               type="button"
@@ -1637,22 +1642,12 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                         } else {
                           setPendingImages([]);
                         }
-                        let text: string;
-                        if (result.codeReset === 'none') {
-                          text = lang === 'en'
-                            ? `Conversation reset (${result.messagesRemoved} messages removed); no code changes detected.`
-                            : lang === 'zh-TW'
-                            ? `對話已重設（移除 ${result.messagesRemoved} 條訊息），未偵測到程式碼變更。`
-                            : `对话已重置（移除 ${result.messagesRemoved} 条消息），未检测到代码变更。`;
-                          setResetBanner({ kind: 'warn', text });
-                        } else {
-                          text = lang === 'en'
-                            ? `Reset done · ${result.messagesRemoved} messages removed · ${result.filesChanged} files reverted (ignored files kept).`
-                            : lang === 'zh-TW'
-                            ? `重設完成 · 移除 ${result.messagesRemoved} 條訊息 · 回滾 ${result.filesChanged} 個檔案（被忽略的檔案保持不變）。`
-                            : `重置完成 · 移除 ${result.messagesRemoved} 条消息 · 回滚 ${result.filesChanged} 个文件（被忽略的文件保持不变）。`;
-                          setResetBanner({ kind: 'success', text });
-                        }
+                        const text = lang === 'en'
+                          ? `Reset done · ${result.messagesRemoved} messages removed · ${result.filesChanged} files reverted (ignored files kept).`
+                          : lang === 'zh-TW'
+                          ? `重設完成 · 移除 ${result.messagesRemoved} 條訊息 · 回滾 ${result.filesChanged} 個檔案（被忽略的檔案保持不變）。`
+                          : `重置完成 · 移除 ${result.messagesRemoved} 条消息 · 回滚 ${result.filesChanged} 个文件（被忽略的文件保持不变）。`;
+                        setResetBanner({ kind: 'success', text });
                       } else {
                         const lang = settings.lang;
                         let text: string;
@@ -1664,6 +1659,12 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                             : '此消息没有代码快照，无法重置。';
                         } else if (result.reason === 'message-not-found') {
                           text = lang === 'en' ? 'Message not found.' : lang === 'zh-TW' ? '找不到訊息。' : '找不到消息。';
+                        } else if (result.reason === 'turn-running') {
+                          text = lang === 'en'
+                            ? 'A turn is still running; stop it before resetting.'
+                            : lang === 'zh-TW'
+                            ? '目前仍有回合執行中，請先停止再重設。'
+                            : '当前仍有回合在运行，请先停止再重置。';
                         } else {
                           const detail = result.error ? ` (${result.error})` : '';
                           text = lang === 'en'

@@ -150,7 +150,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   const gitCommitMessageRequiredText =
     t.workspaceGitCommitMessageRequired || (lang === 'en' ? 'Enter a commit message first.' : '请先输入提交说明。');
   const gitCommitNoSelectionText =
-    lang === 'en' ? 'Select at least one file to commit.' : '请先勾选要提交的文件。';
+    t.workspaceGitCommitNoSelection || (lang === 'en' ? 'Select at least one file to commit.' : '请先勾选要提交的文件。');
   const gitCommitDoneText =
     t.workspaceGitCommitDone || (lang === 'en' ? 'Local commit completed.' : '本地提交已完成。');
   const gitActionFailedText = t.workspaceGitActionFailed || (lang === 'en' ? 'Git action failed.' : 'Git 操作失败。');
@@ -728,7 +728,9 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
       msgs.push(`${gitBackupBranchSavedPrefixText} ${result.backupRef}`);
     }
     if (result.filesRestored > 0) {
-      msgs.push(`${lang === 'en' ? 'Restored' : '恢复了'} ${result.filesRestored} ${lang === 'en' ? 'files' : '个文件'}`);
+      const restoredPrefix = t.workspaceGitRestoredPrefix || (lang === 'en' ? 'Restored' : '恢复了');
+      const filesUnit = t.workspaceGitFilesUnit || (lang === 'en' ? 'files' : '个文件');
+      msgs.push(`${restoredPrefix} ${result.filesRestored} ${filesUnit}`);
     }
     queueGitRefresh(msgs.join(' · '));
     useAgentStore.getState().noteWorkspaceMutation();
@@ -747,7 +749,8 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
       setUndoResetAvailable(false);
       setUndoBackupSha(null);
       queueGitRefresh(
-        lang === 'en' ? 'Rollback undone · workspace restored.' : lang === 'zh-TW' ? '已撤銷回退 · 工作區已恢復。' : '已撤销回退 · 工作区已恢复。'
+        t.workspaceGitUndoRollbackDone ||
+          (lang === 'en' ? 'Rollback undone · workspace restored.' : lang === 'zh-TW' ? '已撤銷回退 · 工作區已恢復。' : '已撤销回退 · 工作区已恢复。')
       );
       useAgentStore.getState().noteWorkspaceMutation();
     } catch (error) {
@@ -956,7 +959,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                     <>
                       <span aria-hidden>·</span>
                       <span>
-                        {cachedFiles.files.length} {lang === 'en' ? 'files' : '个文件'}
+                        {cachedFiles.files.length} {t.workspaceGitFilesUnit || (lang === 'en' ? 'files' : '个文件')}
                       </span>
                       <span className="text-ok">+{cachedFiles.totalAdditions}</span>
                       <span className="text-danger">−{cachedFiles.totalDeletions}</span>
@@ -975,12 +978,10 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                     }`}
                   >
                     {isSelected
-                      ? lang === 'en'
-                        ? '✓ Reset target'
-                        : '✓ 回滚目标'
-                      : lang === 'en'
-                      ? 'Set as reset target'
-                      : '选作回滚目标'}
+                      ? t.workspaceGitResetTargetActive ||
+                        (lang === 'en' ? '✓ Reset target' : '✓ 回滚目标')
+                      : t.workspaceGitResetTargetSet ||
+                        (lang === 'en' ? 'Set as reset target' : '选作回滚目标')}
                   </button>
                 </div>
               </div>
@@ -999,9 +1000,10 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                           });
                         }}
                         title={
-                          lang === 'en'
+                          t.workspaceGitCompareCurrentTip ||
+                          (lang === 'en'
                             ? 'Compare this commit against your current working tree.'
-                            : '对比该提交与你当前工作区的差异。'
+                            : '对比该提交与你当前工作区的差异。')
                         }
                         className="rounded-md border border-accent-soft px-2 py-1 text-[10px] text-accent-text transition-colors hover:border-accent hover:bg-accent-soft"
                       >
@@ -1019,10 +1021,12 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                         }}
                         title={
                           isRootCommit
-                            ? (lang === 'en' ? 'This is the initial commit; no parent to compare.' : '这是初始提交，没有父提交可对比。')
-                            : lang === 'en'
-                            ? 'Compare this commit against its parent commit.'
-                            : '对比该提交与它的上一次提交。'
+                            ? t.workspaceGitRootCommitTip ||
+                              (lang === 'en' ? 'This is the initial commit; no parent to compare.' : '这是初始提交，没有父提交可对比。')
+                            : t.workspaceGitCompareParentTip ||
+                              (lang === 'en'
+                                ? 'Compare this commit against its parent commit.'
+                                : '对比该提交与它的上一次提交。')
                         }
                         className="rounded-md border border-line px-2 py-1 text-[10px] text-fg-soft transition-colors hover:border-accent-soft hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line disabled:hover:text-fg-soft"
                       >
@@ -1032,17 +1036,17 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                   )}
                   {isFilesLoading && (
                     <div className="text-[10px] text-fg-muted">
-                      {lang === 'en' ? 'Loading changed files...' : '正在读取改动文件...'}
+                      {t.workspaceGitCommitFilesLoading || (lang === 'en' ? 'Loading changed files...' : '正在读取改动文件...')}
                     </div>
                   )}
                   {filesError && (
                     <div className="text-[10px] text-danger">
-                      {(lang === 'en' ? 'Failed to load: ' : '加载失败：') + filesError}
+                      {(t.workspaceGitCommitFilesErrorPrefix || (lang === 'en' ? 'Failed to load: ' : '加载失败：')) + filesError}
                     </div>
                   )}
                   {!isFilesLoading && !filesError && cachedFiles && cachedFiles.files.length === 0 && (
                     <div className="text-[10px] text-fg-muted">
-                      {lang === 'en' ? 'No file changes.' : '此提交没有文件改动。'}
+                      {t.workspaceGitCommitFilesEmpty || (lang === 'en' ? 'No file changes.' : '此提交没有文件改动。')}
                     </div>
                   )}
                   {!isFilesLoading && !filesError && cachedFiles && cachedFiles.files.length > 0 && (
@@ -1133,9 +1137,9 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                   onChange={() => toggleGitFileSelected(file.path)}
                   disabled={activeGitActionKey !== null}
                   aria-label={
-                    lang === 'en'
-                      ? `Include ${file.path} in next commit`
-                      : `将 ${file.path} 加入下次提交`
+                    (t.workspaceGitIncludeInCommit ||
+                      (lang === 'en' ? 'Include {{path}} in next commit' : '将 {{path}} 加入下次提交')
+                    ).replace('{{path}}', file.path)
                   }
                   className="h-3.5 w-3.5 cursor-pointer accent-accent disabled:cursor-not-allowed disabled:opacity-50"
                 />
@@ -1199,11 +1203,12 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                             onClick={() => onSelectGitFile(buildGitFileSelection(file, mode))}
                             className="rounded-md border border-accent-soft px-2 py-1 text-[10px] text-accent-text transition-colors hover:border-accent hover:bg-accent-soft"
                           >
-                            {lang === 'en'
-                              ? 'Diff in editor'
-                              : lang === 'zh-TW'
-                                ? '在編輯器中並排對比'
-                                : '在编辑器中并排对比'}
+                            {t.workspaceGitDiffInEditor ||
+                              (lang === 'en'
+                                ? 'Diff in editor'
+                                : lang === 'zh-TW'
+                                  ? '在編輯器中並排對比'
+                                  : '在编辑器中并排对比')}
                           </button>
                         )}
                         {canOpenWorkspaceFile && onSelectPath && (
@@ -1378,6 +1383,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                     type="button"
                     onClick={() => void restoreGitWorkspace()}
                     disabled={activeGitActionKey !== null || visibleGitFiles.length === 0}
+                    title={t.workspaceGitRestoreHint}
                     className="rounded-md border border-line px-2 py-1 text-[10px] text-fg-muted transition-colors hover:border-danger hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {activeGitActionKey === 'restore' ? gitRestoreRunningText : gitRestoreActionText}
@@ -1387,9 +1393,9 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                 {historyEntries.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1 text-[10px]">
                     {([
-                      { key: 'all', cnLabel: '全部', enLabel: 'All' },
-                      { key: 'user', cnLabel: '手动提交', enLabel: 'Manual' },
-                      { key: 'checkpoint', cnLabel: '自动快照', enLabel: 'Auto' },
+                      { key: 'all', label: t.workspaceGitFilterAll || (lang === 'en' ? 'All' : '全部') },
+                      { key: 'user', label: t.workspaceGitFilterManual || (lang === 'en' ? 'Manual' : '手动提交') },
+                      { key: 'checkpoint', label: t.workspaceGitFilterAuto || (lang === 'en' ? 'Auto' : '自动快照') },
                     ] as const).map((opt) => {
                       const isActive = historyFilter === opt.key;
                       return (
@@ -1403,7 +1409,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                               : 'border-line text-fg-muted hover:border-line-strong hover:text-fg'
                           }`}
                         >
-                          {lang === 'en' ? opt.enLabel : opt.cnLabel}
+                          {opt.label}
                         </button>
                       );
                     })}
@@ -1415,14 +1421,14 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
 
                 {renderGitHistoryList(filteredHistoryEntries)}
 
-                {historyEntries.length >= historyLimit && historyLimit < 50 && (
+                {historyEntries.length >= historyLimit && historyLimit < 100 && (
                   <button
                     type="button"
-                    onClick={() => setHistoryLimit((n) => Math.min(n + 20, 50))}
+                    onClick={() => setHistoryLimit((n) => Math.min(n + 20, 100))}
                     disabled={isLoading}
                     className="w-full rounded-md border border-line py-1 text-[10px] text-fg-muted transition-colors hover:border-line-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {lang === 'en' ? 'Load more' : '加载更多'}
+                    {t.workspaceGitLoadMore || (lang === 'en' ? 'Load more' : '加载更多')}
                   </button>
                 )}
 
@@ -1441,8 +1447,8 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                         className="rounded-md border border-ok-bg px-3 py-1.5 text-[11px] text-ok transition-colors hover:border-ok hover:bg-ok-bg disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {activeGitActionKey === 'undo-reset'
-                          ? (lang === 'en' ? 'Undoing...' : '撤销中...')
-                          : (lang === 'en' ? 'Undo rollback' : '撤销回退')}
+                          ? t.workspaceGitUndoRollbackRunning || (lang === 'en' ? 'Undoing...' : '撤销中...')
+                          : t.workspaceGitUndoRollback || (lang === 'en' ? 'Undo rollback' : '撤销回退')}
                       </button>
                     )}
                     <button
@@ -1519,20 +1525,17 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                     </div>
                     {hiddenChangedCount > 0 && (
                       <p className="text-[10px] leading-relaxed text-warn">
-                        {lang === 'en'
-                          ? `${hiddenChangedCount} more changed file(s) are not shown. This commit only includes the listed files you selected.`
-                          : lang === 'zh-TW'
-                            ? `另有 ${hiddenChangedCount} 個改動檔案未顯示。本次提交僅包含列表中已顯示且勾選的檔案。`
-                            : `另有 ${hiddenChangedCount} 个改动文件未显示。本次提交仅包含列表中已显示且勾选的文件。`}
+                        {(t.workspaceGitHiddenFilesWarning ||
+                          (lang === 'en'
+                            ? '{{count}} more changed file(s) are not shown. This commit only includes the listed files you selected.'
+                            : lang === 'zh-TW'
+                              ? '另有 {{count}} 個改動檔案未顯示。本次提交僅包含列表中已顯示且勾選的檔案。'
+                              : '另有 {{count}} 个改动文件未显示。本次提交仅包含列表中已显示且勾选的文件。')
+                        ).replace('{{count}}', String(hiddenChangedCount))}
                       </p>
                     )}
                   </div>
 
-                  {hiddenChangedCount > 0 && (
-                    <div className="text-[10px] text-fg-muted">
-                      +{hiddenChangedCount}
-                    </div>
-                  )}
                   {renderGitFileList(visibleChangedFiles)}
                 </div>
               )}

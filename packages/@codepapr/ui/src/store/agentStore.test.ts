@@ -3391,11 +3391,16 @@ describe('resetToMessage 撤销（N8）', () => {
         m1: { sha: 'sha-keep', sessionId },
         m3: { sha: 'sha-reset', sessionId },
       },
-      _pendingRestoreUndo: null,
+      _pendingRestoreUndos: [],
       isLoading: false,
       _agent: null,
       _agentSessionId: null,
     }));
+  }
+
+  function topUndo() {
+    const stack = useAgentStore.getState()._pendingRestoreUndos;
+    return stack[stack.length - 1] ?? null;
   }
 
   beforeEach(() => {
@@ -3424,7 +3429,7 @@ describe('resetToMessage 撤销（N8）', () => {
     const result = await useAgentStore.getState().resetToMessage('m3');
     expect(result.ok).toBe(true);
 
-    const pending = useAgentStore.getState()._pendingRestoreUndo;
+    const pending = topUndo();
     expect(pending).not.toBeNull();
     expect(pending?.sessionId).toBe(sessionId);
     expect(pending?.filesRestored).toBe(true);
@@ -3444,7 +3449,20 @@ describe('resetToMessage 撤销（N8）', () => {
     ).toBe(true);
     expect(useAgentStore.getState().sessionMessages[sessionId]?.map((m) => m.id)).toEqual(['m1', 'm2', 'm3', 'm4']);
     expect(useAgentStore.getState()._messageCheckpoints['m3']).toEqual({ sha: 'sha-reset', sessionId });
-    expect(useAgentStore.getState()._pendingRestoreUndo).toBeNull();
+    expect(useAgentStore.getState()._pendingRestoreUndos).toHaveLength(0);
+  });
+
+  it('回合运行中拒绝重置（store 层纵深防御）', async () => {
+    setResetState();
+    useAgentStore.setState({ isLoading: true });
+
+    const result = await useAgentStore.getState().resetToMessage('m3');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('turn-running');
+    }
+    expect(useAgentStore.getState()._pendingRestoreUndos).toHaveLength(0);
+    expect(useAgentStore.getState().sessionMessages[sessionId]).toHaveLength(4);
   });
 
   it('重置当前会话不销毁其他会话的 checkpoint 锚点', async () => {
@@ -3470,7 +3488,7 @@ describe('resetToMessage 撤销（N8）', () => {
       sessionId: 'session-2',
     });
     // 撤销入口只包含当前会话被截掉的锚点
-    const pending = useAgentStore.getState()._pendingRestoreUndo;
+    const pending = topUndo();
     expect(Object.keys(pending?.removedCheckpoints ?? {})).toEqual(['m3']);
   });
 
@@ -3490,7 +3508,7 @@ describe('resetToMessage 撤销（N8）', () => {
     expect(deletedIds.sort()).toEqual(['m3']);
   });
 
-  it('再次重置会删除被覆盖的旧撤销入口的 checkpoint 记录', async () => {
+  it('连续多次重置入栈，可逐级撤销（LIFO），期间不删除任何 timeline 记录', async () => {
     setResetState();
 
     await useAgentStore.getState().resetToMessage('m3');
@@ -3498,14 +3516,25 @@ describe('resetToMessage 撤销（N8）', () => {
       invokeMock.mock.calls.some(([command]) => command === 'delete_checkpoint_by_message')
     ).toBe(false);
 
-    // 在截断后的会话上再次重置（m1 的锚点仍在）
+    // 在截断后的会话上再次重置（m1 的锚点仍在）：第二次重置入栈而非覆盖
     await useAgentStore.getState().resetToMessage('m1');
-    const deletedIds = invokeMock.mock.calls
-      .filter(([command]) => command === 'delete_checkpoint_by_message')
-      .map(([, payload]) => payload?.messageId);
-    // 旧撤销入口被截掉的消息（m3）的记录被删除；新入口截掉的（m1）仍保留待撤销
-    expect(deletedIds).toEqual(['m3']);
-    expect(useAgentStore.getState()._pendingRestoreUndo?.truncatedMessages.map((m) => m.id)).toEqual(['m1', 'm2']);
+    expect(useAgentStore.getState()._pendingRestoreUndos).toHaveLength(2);
+    expect(
+      invokeMock.mock.calls.some(([command]) => command === 'delete_checkpoint_by_message')
+    ).toBe(false);
+
+    // 第一次撤销：恢复第二次重置截掉的 m1/m2
+    const firstUndo = await useAgentStore.getState().undoConversationReset();
+    expect(firstUndo.ok).toBe(true);
+    expect(useAgentStore.getState().sessionMessages[sessionId]?.map((m) => m.id)).toEqual(['m1', 'm2']);
+    expect(useAgentStore.getState()._pendingRestoreUndos).toHaveLength(1);
+
+    // 第二次撤销：恢复第一次重置截掉的 m3/m4
+    const secondUndo = await useAgentStore.getState().undoConversationReset();
+    expect(secondUndo.ok).toBe(true);
+    expect(useAgentStore.getState().sessionMessages[sessionId]?.map((m) => m.id)).toEqual(['m1', 'm2', 'm3', 'm4']);
+    expect(useAgentStore.getState()._messageCheckpoints['m3']).toEqual({ sha: 'sha-reset', sessionId });
+    expect(useAgentStore.getState()._pendingRestoreUndos).toHaveLength(0);
   });
 
   it('deleteSession 清理该会话的 timeline 记录与内存锚点，并失效撤销入口', async () => {
@@ -3522,7 +3551,7 @@ describe('resetToMessage 撤销（N8）', () => {
     ).toBe(true);
     // 内存锚点同步清理
     expect(useAgentStore.getState()._messageCheckpoints['m1']).toBeUndefined();
-    expect(useAgentStore.getState()._pendingRestoreUndo).toBeNull();
+    expect(useAgentStore.getState()._pendingRestoreUndos).toHaveLength(0);
   });
 
   it('撤销只回放仍缺失的消息（重置后用户又发送过新消息时不重复）', async () => {
@@ -3544,26 +3573,35 @@ describe('resetToMessage 撤销（N8）', () => {
     expect(useAgentStore.getState().sessionMessages[sessionId]?.map((m) => m.id)).toEqual(['m1', 'm2', 'm-new', 'm3', 'm4']);
   });
 
-  it('dismissRestoreUndo 清除撤销信息；无撤销信息时 undo 返回失败', async () => {
+  it('dismissRestoreUndo 只清除栈顶条目并删除其记录；栈空后 undo 返回失败', async () => {
     setResetState();
     await useAgentStore.getState().resetToMessage('m3');
-    expect(useAgentStore.getState()._pendingRestoreUndo).not.toBeNull();
+    await useAgentStore.getState().resetToMessage('m1');
+    expect(useAgentStore.getState()._pendingRestoreUndos).toHaveLength(2);
+
+    // dismiss 栈顶（第二次重置）：只删它的记录，栈中保留第一次重置条目
+    useAgentStore.getState().dismissRestoreUndo();
+    const deletedIds = invokeMock.mock.calls
+      .filter(([command]) => command === 'delete_checkpoint_by_message')
+      .map(([, payload]) => payload?.messageId);
+    expect(deletedIds).toEqual(['m1']);
+    expect(useAgentStore.getState()._pendingRestoreUndos).toHaveLength(1);
 
     useAgentStore.getState().dismissRestoreUndo();
-    expect(useAgentStore.getState()._pendingRestoreUndo).toBeNull();
+    expect(useAgentStore.getState()._pendingRestoreUndos).toHaveLength(0);
 
     const undoResult = await useAgentStore.getState().undoConversationReset();
     expect(undoResult.ok).toBe(false);
     expect(undoResult.message).toBe('nothing-to-undo');
   });
 
-  it('deleteSession 清除对应会话的撤销信息', async () => {
+  it('deleteSession 清除对应会话的撤销条目', async () => {
     setResetState();
     await useAgentStore.getState().resetToMessage('m3');
-    expect(useAgentStore.getState()._pendingRestoreUndo).not.toBeNull();
+    expect(useAgentStore.getState()._pendingRestoreUndos).toHaveLength(1);
 
     useAgentStore.getState().deleteSession(sessionId);
-    expect(useAgentStore.getState()._pendingRestoreUndo).toBeNull();
+    expect(useAgentStore.getState()._pendingRestoreUndos).toHaveLength(0);
   });
 });
 

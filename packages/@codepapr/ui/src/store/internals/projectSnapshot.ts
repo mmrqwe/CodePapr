@@ -137,6 +137,8 @@ async function saveProjectStateNormalized(
     ['skill_enabled_by_id', state.skillEnabledById],
     ['project_diagnostics_report', state.projectDiagnosticsReport],
     ['session_active_characters', sessionActiveCharacterMap(state.sessions)],
+    // 重置撤销栈持久化：重启后仍可撤销上次重置（加载见 openWorkspace）。
+    ['pending_restore_undos', state._pendingRestoreUndos],
   ];
 
   for (const [key, value] of metaPairs) {

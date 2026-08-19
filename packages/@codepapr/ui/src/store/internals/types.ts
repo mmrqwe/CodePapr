@@ -308,13 +308,17 @@ export interface ConversationStats {
 export type ResetToMessageResult =
   | {
       ok: true;
-      codeReset: 'git' | 'none';
+      codeReset: 'git';
       filesChanged: number;
       messagesRemoved: number;
       restoredInput: string;
       restoredImages?: IImageContent[];
     }
-  | { ok: false; reason: 'no-checkpoint' | 'message-not-found' | 'git-failed'; error?: string };
+  | {
+      ok: false;
+      reason: 'no-checkpoint' | 'message-not-found' | 'git-failed' | 'turn-running';
+      error?: string;
+    };
 
 /** N8：最近一次对话重置/代码回退的撤销信息（重置时备份，撤销时回放）。 */
 export interface PendingRestoreUndo {
@@ -341,8 +345,9 @@ export interface AgentState {
   settings: Settings;
   workspacePath: string;
   workspaceMutationVersion: number;
-  /** N8：待撤销的最近一次对话重置/代码回退（见 PendingRestoreUndo）。 */
-  _pendingRestoreUndo: PendingRestoreUndo | null;
+  /** N8：待撤销的对话重置栈（见 PendingRestoreUndo）。栈顶（最后一个元素）
+   *  是最近一次重置；支持连续多次重置逐级撤销。撤销/放弃只作用于栈顶。 */
+  _pendingRestoreUndos: PendingRestoreUndo[];
   sessions: SessionMeta[];
   activeSessionId: string | null;
   messages: UIMessage[];

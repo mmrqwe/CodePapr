@@ -225,6 +225,40 @@ impl SnapshotEngine {
         let signature = ensure_signature(&repo)
             .map_err(|e| format!("signature: {}", e.message()))?;
 
+        let parent_commit = repo.head().ok()
+            .and_then(|h| h.target())
+            .and_then(|oid| repo.find_commit(oid).ok());
+
+        // 快路径：相对 HEAD 无任何改动时不重建索引、不产生新提交，直接复用
+        // HEAD 作为锚点。checkpoint 在每条用户消息的关键路径上创建，用户没动
+        // 文件时全量重建（遍历工作区 + 逐文件哈希）纯属浪费；且每条消息一个
+        // 树完全相同的 checkpoint 提交会把历史列表灌满。status 依赖 index 的
+        // stat 缓存（上次快照写入），无改动时远比全量哈希便宜。
+        if let Some(ref parent) = parent_commit {
+            let mut opts = git2::StatusOptions::new();
+            opts.include_untracked(true);
+            opts.recurse_untracked_dirs(false);
+            if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
+                if statuses.is_empty() {
+                    let sha = parent.id().to_string();
+                    let short_hash = sha[..7.min(sha.len())].to_string();
+                    let file_count = parent.tree().map(|t| t.len()).unwrap_or(0);
+                    eprintln!(
+                        "[CodePapr] snapshot_create: no changes since HEAD, reusing {sha}"
+                    );
+                    return Ok(SnapshotInfo {
+                        sha,
+                        short_hash,
+                        label: label.to_string(),
+                        timestamp: parent.time().seconds(),
+                        file_count,
+                        is_head: true,
+                        skipped_count: 0,
+                    });
+                }
+            }
+        }
+
         let resolver = IgnoreResolver::new(&self.workspace);
         let files = resolver.collect_files();
 
@@ -270,9 +304,28 @@ impl SnapshotEngine {
         let tree = repo.find_tree(tree_oid)
             .map_err(|e| format!("find_tree: {}", e.message()))?;
 
-        let parent_commit = repo.head().ok()
-            .and_then(|h| h.target())
-            .and_then(|oid| repo.find_commit(oid).ok());
+        // 兜底：status 可能因 stat 变化（内容未变）报告改动，重建后树若仍与
+        // HEAD 相同则同样跳过提交，避免空转 checkpoint。
+        if let Some(ref parent) = parent_commit {
+            if let Ok(parent_tree) = parent.tree() {
+                if tree.id() == parent_tree.id() {
+                    let sha = parent.id().to_string();
+                    let short_hash = sha[..7.min(sha.len())].to_string();
+                    eprintln!(
+                        "[CodePapr] snapshot_create: tree identical to HEAD, reusing {sha}"
+                    );
+                    return Ok(SnapshotInfo {
+                        sha,
+                        short_hash,
+                        label: label.to_string(),
+                        timestamp: parent.time().seconds(),
+                        file_count: tree.len(),
+                        is_head: true,
+                        skipped_count: skipped,
+                    });
+                }
+            }
+        }
 
         let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
         let commit_oid = repo.commit(
@@ -650,6 +703,45 @@ mod tests {
 
         let snapshots = engine.list(10);
         assert!(snapshots.len() >= 2, "should have at least 2 snapshots");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    /// 回归 #15/#16：工作区无改动时 create 必须复用 HEAD（不产生树相同的
+    /// 空转 checkpoint 提交），有改动时正常提交。
+    #[test]
+    fn test_create_reuses_head_when_workspace_unchanged() {
+        let workspace = temp_workspace("no-change-reuse");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        fs::write(workspace.join("a.txt"), "v1\n").unwrap();
+        let cp1 = engine.create("cp1").expect("cp1");
+
+        // 无改动再建快照：复用 cp1 的 sha，不新增提交
+        let cp2 = engine.create("cp2").expect("cp2 (no changes)");
+        assert_eq!(cp2.sha, cp1.sha, "无改动时必须复用 HEAD 作为锚点");
+
+        let history = engine.list(10);
+        assert_eq!(
+            history.len(),
+            2,
+            "baseline + cp1，无改动的 cp2 不得产生新提交: {:?}",
+            history.iter().map(|s| s.label.as_str()).collect::<Vec<_>>()
+        );
+
+        // 有改动时正常提交
+        fs::write(workspace.join("a.txt"), "v2\n").unwrap();
+        let cp3 = engine.create("cp3").expect("cp3");
+        assert_ne!(cp3.sha, cp1.sha, "有改动时必须产生新提交");
+        assert_eq!(engine.list(10).len(), 3);
+
+        // 改动后又恢复原内容：status 报改动（stat 变化）但树与 HEAD 相同，
+        // 兜底守卫仍应跳过提交
+        fs::write(workspace.join("a.txt"), "v2\n").unwrap();
+        let cp4 = engine.create("cp4").expect("cp4 (same content)");
+        assert_eq!(cp4.sha, cp3.sha, "内容与 HEAD 相同时不得产生新提交");
+        assert_eq!(engine.list(10).len(), 3);
 
         fs::remove_dir_all(&workspace).ok();
     }

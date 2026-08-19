@@ -47,7 +47,7 @@ describe('SessionManager', () => {
       messages: [],
       sessionMessages: { 's-1': [], 's-2': [] },
       isLoading: false,
-      _pendingRestoreUndo: null,
+      _pendingRestoreUndos: [],
     }));
     container = document.createElement('div');
     document.body.appendChild(container);

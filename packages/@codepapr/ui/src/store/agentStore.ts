@@ -95,6 +95,7 @@ import { applySessionCharacterMap, syncActiveCharacterFromSession } from './char
 import type {
   AgentActions,
   AgentState,
+  PendingRestoreUndo,
   ResetToMessageResult,
   SessionMeta,
   Settings,
@@ -318,11 +319,33 @@ async function ensureAgentForAppInternal(
   return agent;
 }
 
+/** 重置撤销栈深度上限：防止无限连续重置导致栈（及其持久化体积）无界增长。 */
+const MAX_RESTORE_UNDOS = 20;
+
+/** 入栈并限深：超出上限时丢弃最旧条目，其 checkpoint timeline 记录一并删除
+ *  （被截消息已无处回放，记录失去意义）。 */
+function pushRestoreUndo(
+  stack: PendingRestoreUndo[],
+  entry: PendingRestoreUndo
+): PendingRestoreUndo[] {
+  const next = [...stack, entry];
+  if (next.length <= MAX_RESTORE_UNDOS) {
+    return next;
+  }
+  const dropped = next.slice(0, next.length - MAX_RESTORE_UNDOS);
+  for (const d of dropped) {
+    for (const id of Object.keys(d.removedCheckpoints)) {
+      void deleteCheckpointByMessage(d.workspacePath, id).catch(() => undefined);
+    }
+  }
+  return next.slice(next.length - MAX_RESTORE_UNDOS);
+}
+
 export const useAgentStore = create<AgentState & AgentActions>()((set, get) => ({
       settings: DEFAULT_SETTINGS,
       workspacePath: '',
   workspaceMutationVersion: 0,
-      _pendingRestoreUndo: null,
+      _pendingRestoreUndos: [],
       sessions: [],
       activeSessionId: null,
       messages: [],
@@ -489,6 +512,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _skillDefinitions: [],
       _agentDefinitions: [...BUILTIN_AGENTS],
       _taskChecklists: {},
+      _pendingRestoreUndos: [],
       _messageCheckpoints: {},
       _gitReady: false,
       _gitReadyError: null,
@@ -543,6 +567,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _skillDefinitions: [],
           _agentDefinitions: [...BUILTIN_AGENTS],
           _taskChecklists: {},
+          _pendingRestoreUndos: [],
           _messageCheckpoints: {},
           _gitReady: false,
           _gitReadyError: null,
@@ -588,6 +613,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         let projectDiagnosticsReport: unknown = null;
         let messageCheckpoints: Record<string, { sha: string; sessionId: string }> = {};
         let sessionTodoLists: Record<string, unknown> = {};
+        let pendingRestoreUndos: PendingRestoreUndo[] = [];
         const messageLoadFailed: Record<string, boolean> = {};
 
         try {
@@ -639,6 +665,16 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           }
           projectDiagnosticsReport = meta.project_diagnostics_report ?? null;
           sessionTodoLists = (meta.session_todo_lists as Record<string, unknown>) ?? {};
+          // 恢复持久化的重置撤销栈（#20：重启后仍可撤销上次重置）。
+          // 会话已不存在的条目无法回放消息，加载时即丢弃（其 timeline 记录
+          // 随会话删除已清理）。
+          const rawPendingUndos = (meta.pending_restore_undos as PendingRestoreUndo[] | null) ?? [];
+          pendingRestoreUndos = rawPendingUndos.filter(
+            (entry) =>
+              entry &&
+              typeof entry.workspacePath === 'string' &&
+              (entry.sessionId === null || sessions.some((s) => s.id === entry.sessionId))
+          );
 
           // 安全兜底：如果新表完全无数据（sessions 和 meta 都空），回退到旧格式
           if (sessions.length === 0 && Object.keys(meta).length === 0) {
@@ -754,6 +790,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agentDefinitions: [...BUILTIN_AGENTS],
           _taskChecklists: {},
           _messageCheckpoints: { ...messageCheckpoints },
+          _pendingRestoreUndos: pendingRestoreUndos,
           _gitReady: false,
           _gitReadyError: null,
           _checkpointError: null,
@@ -1387,11 +1424,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
                 ([, entry]) => entry.sessionId !== id
               )
             ),
-            // N8：会话已删除，其重置撤销信息失效（消息无处回放）。
-            _pendingRestoreUndo:
-              s._pendingRestoreUndo?.sessionId === id
-                ? null
-                : s._pendingRestoreUndo,
+            // N8：会话已删除，归属它的重置撤销条目失效（消息无处回放）。
+            // 其 checkpoint timeline 记录已由上方 deleteCheckpointsForSession
+            // 整体清理（被截掉的锚点同属该会话）。
+            _pendingRestoreUndos: s._pendingRestoreUndos.filter(
+              (entry) => entry.sessionId !== id
+            ),
           };
         });
         saveCurrentProjectState(get(), { purgeDeletedContent: true });
@@ -1437,11 +1475,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
               )
             : s._messageCheckpoints,
           // 清空会话会删掉该会话全部 checkpoint timeline 记录（含待撤销重置
-          // 截掉的那些）——撤销入口失去持久化基础，一并失效。
-          _pendingRestoreUndo:
-            s._pendingRestoreUndo?.sessionId === sessionId
-              ? null
-              : s._pendingRestoreUndo,
+          // 截掉的那些）——归属该会话的撤销条目失去持久化基础，一并失效。
+          _pendingRestoreUndos: s._pendingRestoreUndos.filter(
+            (entry) => entry.sessionId !== sessionId
+          ),
           _agent: null,
           _agentModel: null,
           _agentPromptKey: null,
@@ -1459,6 +1496,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       resetToMessage: async (messageId): Promise<ResetToMessageResult> => {
+        // 纵深防御：UI 在回合运行中已隐藏重置入口，store 层再守一道——
+        // 运行中的回合会持续写文件/消息，重置会与它互相践踏。
+        if (get().isLoading) {
+          return { ok: false, reason: 'turn-running' };
+        }
+
         const { messages, activeSessionId, _messageCheckpoints, workspacePath } = get();
         const targetSha = _messageCheckpoints[messageId]?.sha;
         if (!targetSha) return { ok: false, reason: 'no-checkpoint' };
@@ -1474,13 +1517,20 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         const restoredInput = messages[msgIndex]?.content ?? '';
         const restoredImages = messages[msgIndex]?.images;
 
-        let codeReset: 'git' | 'none' = 'none';
         let filesChanged = 0;
         let backupSha: string | null = null;
 
         try {
           const r = await restoreExecute(workspacePath, targetSha);
-          codeReset = 'git';
+          // Rust 侧失败通常走 Err（invoke 抛出），但 ok=false 是显式失败信号，
+          // 同样必须按 git-failed 处理，不得继续截断对话。
+          if (!r.ok) {
+            return {
+              ok: false,
+              reason: 'git-failed',
+              error: r.error ?? undefined,
+            };
+          }
           filesChanged = r.filesRestored;
           backupSha = r.backupSha ?? null;
         } catch (err) {
@@ -1508,16 +1558,8 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         }
         // 被截掉的 checkpoint 的 timeline 记录暂不删除：撤销（undoConversationReset）
         // 还要靠它们恢复锚点，删了的话撤销后一重启锚点就永久丢失。
-        // 记录的删除推迟到撤销入口失效时（dismissRestoreUndo / 被新重置覆盖 /
-        // 会话删除 / 清空会话）。
-        const superseded = get()._pendingRestoreUndo;
-        if (superseded && Object.keys(superseded.removedCheckpoints).length > 0) {
-          // 新重置覆盖了旧的撤销入口：旧入口被截掉的消息再也无法回放，
-          // 其 timeline 记录此时才可以安全删除。
-          for (const id of Object.keys(superseded.removedCheckpoints)) {
-            void deleteCheckpointByMessage(get().workspacePath, id).catch(() => undefined);
-          }
-        }
+        // 记录的删除推迟到撤销条目真正失效时（dismissRestoreUndo / 会话删除 /
+        // 清空会话）。多级撤销栈下，栈中较早条目的记录同样保留。
 
         disposeAgentHandle(get);
         // surface 内存缓存失效：消息被截断，缓存的 surface 节点可能引用已删消息。
@@ -1539,15 +1581,16 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agentSessionId: null,
           _latestContextSnapshot: null,
           // N8：备份被截掉的尾部消息与 checkpoint 锚点，供撤销入口回放。
+          // 入栈（栈顶=最近一次）：连续多次重置可逐级撤销。
           // backupSha：撤销时校验 BACKUP_REF 未被其它破坏性操作覆盖。
-          _pendingRestoreUndo: {
+          _pendingRestoreUndos: pushRestoreUndo(get()._pendingRestoreUndos, {
             workspacePath,
             sessionId: activeSessionId,
             truncatedMessages: messages.slice(cutIndex),
             removedCheckpoints,
-            filesRestored: codeReset === 'git',
+            filesRestored: true,
             backupSha,
-          },
+          }),
         });
 
         get()._editHistory.clear();
@@ -1556,7 +1599,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
         return {
           ok: true,
-          codeReset,
+          codeReset: 'git',
           filesChanged,
           messagesRemoved,
           restoredInput,
@@ -1570,7 +1613,8 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       undoConversationReset: async (): Promise<UndoConversationResetResult> => {
-        const pending = get()._pendingRestoreUndo;
+        const stack = get()._pendingRestoreUndos;
+        const pending = stack[stack.length - 1];
         if (!pending) {
           return { ok: false, message: 'nothing-to-undo' };
         }
@@ -1579,19 +1623,36 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           return { ok: false, message: 'workspace-changed' };
         }
 
-        // N8：代码回退撤销——restore_undo 把工作区文件恢复到重置前状态
-        // （BACKUP_REF）。仅当重置确实执行了文件回滚时才调用，否则会把
-        // 文件错误地恢复到更早的旧备份。传入重置时拿到的 backupSha：
-        // BACKUP_REF 被所有破坏性操作共用，若重置后又做过其它 git 操作，
-        // 备份已被覆盖，Rust 侧会拒绝撤销（避免恢复到错误状态）。
+        // N8：代码回退撤销——把工作区文件恢复到重置前状态。仅当重置确实
+        // 执行了文件回滚时才处理。优先走 restore_undo 并传入重置时拿到的
+        // backupSha 校验（BACKUP_REF 被所有破坏性操作共用，若重置后又做过
+        // 其它 git 操作，备份已被覆盖，Rust 侧会拒绝）。校验失败时降级为
+        // restore_execute(backupSha)：备份提交是不可变的，直接 reset 到它
+        // 仍是"恢复到重置前状态"的正确语义（且会先备份当前状态，可再撤销）。
+        // 多级撤销栈中撤销较早条目时，BACKUP_REF 必然已被后续操作覆盖，
+        // 降级路径是它们的唯一可行路径。
         if (pending.filesRestored) {
           try {
             await restoreUndo(pending.workspacePath, pending.backupSha);
           } catch (err) {
-            return {
-              ok: false,
-              message: err instanceof Error ? err.message : String(err),
-            };
+            if (pending.backupSha) {
+              try {
+                const r = await restoreExecute(pending.workspacePath, pending.backupSha);
+                if (!r.ok) {
+                  return { ok: false, message: r.error ?? 'restore failed' };
+                }
+              } catch (fallbackErr) {
+                return {
+                  ok: false,
+                  message: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
+                };
+              }
+            } else {
+              return {
+                ok: false,
+                message: err instanceof Error ? err.message : String(err),
+              };
+            }
           }
         }
 
@@ -1625,22 +1686,24 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         if (sessionId && sessionExists) {
           forgetContextSurface(pending.workspacePath, sessionId);
         }
-        set({ _pendingRestoreUndo: null });
+        // 弹出栈顶：栈中仍有较早条目时，撤销入口继续显示下一级。
+        set({ _pendingRestoreUndos: stack.slice(0, -1) });
         get().noteWorkspaceMutation();
         saveCurrentProjectState(get());
         return { ok: true };
       },
 
       dismissRestoreUndo: () => {
-        // 用户放弃撤销：被截掉的消息再也无法回放，此时才删除其 checkpoint
+        // 用户放弃栈顶条目：被截掉的消息再也无法回放，此时才删除其 checkpoint
         // 的 timeline 记录（重置时延迟删除，保证撤销后重启锚点仍在）。
-        const pending = get()._pendingRestoreUndo;
+        const stack = get()._pendingRestoreUndos;
+        const pending = stack[stack.length - 1];
         if (pending && Object.keys(pending.removedCheckpoints).length > 0) {
           for (const id of Object.keys(pending.removedCheckpoints)) {
             void deleteCheckpointByMessage(pending.workspacePath, id).catch(() => undefined);
           }
         }
-        set({ _pendingRestoreUndo: null });
+        set({ _pendingRestoreUndos: stack.slice(0, -1) });
       },
 
       setPersistenceError: (message) => {
