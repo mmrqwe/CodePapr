@@ -134,11 +134,11 @@ export const MessageBubble = memo(function MessageBubble({
                 key={`${file.name}-${index}`}
                 className="flex items-center gap-1 rounded-md border border-white/20 bg-white/10 px-2 py-1"
               >
-                <svg className="w-3.5 h-3.5 flex-shrink-0 text-white/80" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <svg className="w-3.5 h-3.5 flex-shrink-0 opacity-80" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
                   <path strokeLinecap="round" strokeLinejoin="round" d="M14 2v6h6" />
                 </svg>
-                <span className="text-xs font-medium text-white max-w-[140px] truncate" title={file.name}>{file.name}</span>
+                <span className="text-xs font-medium max-w-[140px] truncate" title={file.name}>{file.name}</span>
               </div>
             ))}
           </div>
