@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { lspLanguageFromPath } from './editorLanguage';
 import { describeLspSupport } from './lspSupport';
 import { workspaceFileUri } from '@codepapr/core';
+import { globalLspPool } from '../tools/workspaceProjectMapLsp';
 
 interface WarmupFileEntry {
   path: string;
@@ -13,6 +14,35 @@ const WARMUP_MAX_LANGUAGES = 8;
 const WARMUP_MAX_FILE_BYTES = 200_000;
 
 const warmupInFlight = new Set<string>();
+
+/** 覆盖 lsp.rs 全部 family_key，停止任一别名即可命中同一 server_key。 */
+const LSP_FAMILY_LANGUAGE_IDS = [
+  'typescript', 'python', 'rust', 'go', 'csharp', 'java', 'cpp',
+  'html', 'css', 'json', 'yaml', 'shellscript', 'swift', 'sql', 'markdown',
+] as const;
+
+/**
+ * 关闭工作区时停掉连接池句柄与后端 LSP 进程，避免切换/关闭后孤儿语言服务器继续占资源。
+ */
+export async function stopWorkspaceLsp(workspacePath: string): Promise<void> {
+  if (!workspacePath) {
+    return;
+  }
+  try {
+    await globalLspPool.closeWorkspace?.(workspacePath);
+  } catch {
+    // 忽略：池可能已空
+  }
+  await Promise.allSettled(
+    LSP_FAMILY_LANGUAGE_IDS.map(async (languageId) => {
+      try {
+        await invoke('lsp_stop_server', { workspacePath, languageId });
+      } catch {
+        // 忽略：服务器可能未启动
+      }
+    }),
+  );
+}
 
 /**
  * 工作区打开时后台预热 LSP：按文件列表推导语言，并行启动各语言服务器，

@@ -17,6 +17,7 @@
  * - testGeneration     测试骨架生成（基础 + 智能）
  * - refactorPlans      重构执行计划（提取方法 / 移动符号 / 内联变量）
  * - incrementalUpdate  图的增量更新
+ * - graphNodeId        节点 ID → 文件 ID（含 Windows 盘符路径）
  *
  * 共享 helper（graphUtils / graphSymbols / graphTraversal / codeMetrics）
  * 仅供内部使用，不从此 barrel 导出。
@@ -37,3 +38,4 @@ export * from './graph/semanticDiff';
 export * from './graph/testGeneration';
 export * from './graph/refactorPlans';
 export * from './graph/incrementalUpdate';
+export * from './graph/graphNodeId';

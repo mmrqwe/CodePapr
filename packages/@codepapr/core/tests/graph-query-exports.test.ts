@@ -17,6 +17,7 @@ const PUBLIC_FUNCTIONS = [
   'detectCircularDependencies',
   'detectDeadCode',
   'discoverAndMapTests',
+  'fileIdFromGraphNodeId',
   'findSymbolAtPosition',
   'findSymbolByNameInFile',
   'findWorkspaceEntrypoints',

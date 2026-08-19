@@ -260,6 +260,23 @@ describe('globalLspPool eviction', () => {
       expect.anything()
     );
   });
+
+  it('evicts overflow idle connections after release', async () => {
+    const busy = [];
+    for (let i = 0; i < 10; i++) {
+      busy.push(await globalLspPool.acquire('typescript', `/overflow-${i}`));
+    }
+    await globalLspPool.acquire('typescript', '/overflow-10');
+    invokeMock.mockClear();
+
+    globalLspPool.release(busy[0]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      'lsp_stop_server',
+      expect.objectContaining({ workspacePath: '/overflow-0', languageId: 'typescript' }),
+    );
+  });
 });
 
 describe('resolveProjectMapSymbolOverrides deadlines', () => {

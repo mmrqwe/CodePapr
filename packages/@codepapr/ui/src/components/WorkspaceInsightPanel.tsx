@@ -21,7 +21,8 @@ import {
   type WorkspaceMapSymbolSummary,
   type WorkspaceProjectGraphResult,
 } from '../tools/workspaceToolUtils';
-import { resolveProjectMapSymbolOverrides, globalLspPool } from '../tools/workspaceProjectMapLsp';
+import { resolveProjectMapSymbolOverrides } from '../tools/workspaceProjectMapLsp';
+import { stopWorkspaceLsp } from '../utils/lspWarmup';
 import { getTranslation, type Lang } from '../utils/i18n';
 import ProjectGraphKnowledgeGraph, {
   type ProjectGraphKnowledgeGraphHandle,
@@ -523,27 +524,18 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   const prewarmingInitializedRef = useRef(false);
 
   useEffect(() => {
-    if (!workspacePath) return;
-    prewarmingInitializedRef.current = false;
     const prev = prevWorkspaceRef.current;
-    prevWorkspaceRef.current = workspacePath;
-    prewarmingGenRef.current += 1;
-    setPrewarming(false);
-    setPrewarmingProgress('');
+    if (workspacePath) {
+      prewarmingInitializedRef.current = false;
+      prevWorkspaceRef.current = workspacePath;
+      prewarmingGenRef.current += 1;
+      setPrewarming(false);
+      setPrewarmingProgress('');
+    } else {
+      prevWorkspaceRef.current = '';
+    }
     if (prev && prev !== workspacePath) {
-      void (async () => {
-        // 先同步连接池：丢弃并关闭池中属于旧工作区的所有连接句柄，避免池持有已死服务器的陈旧句柄。
-        try { await globalLspPool.closeWorkspace?.(prev); } catch { /* ignore */ }
-        // 覆盖 lsp.rs 里全部 15 个 family_key（同一 family 下的多个别名，如 typescriptreact/jsonc，
-        // 停止其中任意一个即可命中同一个 server_key，无需逐个枚举），避免旧工作区遗留孤儿 LSP 进程。
-        const langIds = [
-          'typescript', 'python', 'rust', 'go', 'csharp', 'java', 'cpp',
-          'html', 'css', 'json', 'yaml', 'shellscript', 'swift', 'sql', 'markdown',
-        ];
-        await Promise.allSettled(langIds.map(async (langId) => {
-          try { await invoke('lsp_stop_server', { workspacePath: prev, languageId: langId }); } catch { /* ignore */ }
-        }));
-      })();
+      void stopWorkspaceLsp(prev);
     }
   }, [workspacePath]);
 

@@ -15,6 +15,15 @@ describe('workspaceFileUri', () => {
   it('keeps POSIX absolute paths as file:///…', () => {
     expect(workspaceFileUri('/tmp/proj', 'src/a.ts')).toBe('file:///tmp/proj/src/a.ts');
   });
+
+  it('uses host authority for Windows UNC workspaces', () => {
+    expect(workspaceFileUri('//fileserver/share/proj', 'src/a.ts')).toBe(
+      'file://fileserver/share/proj/src/a.ts',
+    );
+    expect(workspaceFileUri('\\\\fileserver\\share\\proj', 'src\\a.ts')).toBe(
+      'file://fileserver/share/proj/src/a.ts',
+    );
+  });
 });
 
 describe('relativePathFromFileUri', () => {
@@ -49,5 +58,14 @@ describe('relativePathFromFileUri', () => {
 describe('filePathFromFileUri', () => {
   it('strips the leading slash from Windows drive URIs', () => {
     expect(filePathFromFileUri('file:///C:/proj/src/a.ts')).toBe('C:/proj/src/a.ts');
+  });
+
+  it('round-trips Windows UNC file URIs', () => {
+    expect(filePathFromFileUri('file://fileserver/share/proj/src/a.ts')).toBe(
+      '//fileserver/share/proj/src/a.ts',
+    );
+    expect(
+      relativePathFromFileUri('//fileserver/share/proj', 'file://fileserver/share/proj/src/a.ts'),
+    ).toBe('src/a.ts');
   });
 });

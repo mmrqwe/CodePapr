@@ -627,4 +627,61 @@ describe('buildWorkspaceProjectGraph', () => {
     expect(enriched.edges).toContainEqual(expect.objectContaining({ kind: 'extends' }));
     expect(enriched.quality?.callGraphPrecision).toBe(beforePrecision);
   });
+
+  it('does not mark Python _Private classes as exported', () => {
+    const symbols = extractStructuralSymbols(
+      'pkg/mod.py',
+      ['class Public:', '    pass', 'class _Private:', '    pass', 'class __Dunder__:', '    pass'].join('\n'),
+    );
+    expect(symbols.find((symbol) => symbol.name === 'Public')?.exported).toBe(true);
+    expect(symbols.find((symbol) => symbol.name === '_Private')?.exported).toBe(false);
+    expect(symbols.find((symbol) => symbol.name === '__Dunder__')?.exported).toBe(true);
+  });
+
+  it('resolves named imports through export * barrels to the original symbol', () => {
+    const graph = buildWorkspaceProjectGraph({
+      root: '.',
+      tree: '.',
+      allFiles: [{ path: 'src/impl.ts' }, { path: 'src/barrel.ts' }, { path: 'src/consumer.ts' }],
+      fileContents: {
+        'src/impl.ts': { content: 'export function run() { return 1; }\n' },
+        'src/barrel.ts': { content: 'export * from "./impl";\nexport { run as execute } from "./impl";\n' },
+        'src/consumer.ts': { content: 'import { run, execute } from "./barrel";\nexport function main() { run(); execute(); }\n' },
+      },
+      files: [
+        {
+          path: 'src/impl.ts',
+          language: 'TypeScript',
+          bytes: 36,
+          symbols: [{ name: 'run', kind: 'function', signature: 'export function run()', line: 1, exported: true }],
+        },
+        {
+          path: 'src/barrel.ts',
+          language: 'TypeScript',
+          bytes: 64,
+          symbols: [],
+        },
+        {
+          path: 'src/consumer.ts',
+          language: 'TypeScript',
+          bytes: 88,
+          symbols: [{ name: 'main', kind: 'function', signature: 'export function main()', line: 2, exported: true }],
+        },
+      ],
+    });
+
+    const runId = graph.nodes.find((node) => node.kind === 'symbol' && node.path === 'src/impl.ts' && node.symbol?.name === 'run')?.id;
+    const mainId = graph.nodes.find((node) => node.kind === 'symbol' && node.path === 'src/consumer.ts' && node.symbol?.name === 'main')?.id;
+    expect(runId).toBeTruthy();
+    expect(mainId).toBeTruthy();
+    expect(graph.edges).toContainEqual(
+      expect.objectContaining({ kind: 'reexports', from: 'file:src/barrel.ts', to: 'file:src/impl.ts' }),
+    );
+    expect(graph.edges).toContainEqual(
+      expect.objectContaining({ kind: 'imports', from: 'file:src/consumer.ts', to: runId }),
+    );
+    expect(graph.edges).toContainEqual(
+      expect.objectContaining({ kind: 'calls', from: mainId, to: runId }),
+    );
+  });
 });

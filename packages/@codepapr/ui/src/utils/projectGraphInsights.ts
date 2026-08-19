@@ -2,6 +2,7 @@ import {
   detectDeadCode,
   detectCircularDependencies,
   findWorkspaceEntrypoints,
+  fileIdFromGraphNodeId,
   type CircularDependencyResult,
   type DeadCodeResult,
   type ProjectGraphNode,
@@ -33,17 +34,6 @@ const TEST_GAP_LIMIT = 30;
 // tested_by/configures 是辅助语义边，均不代表代码级依赖，不计入文件度数。
 const DEGREE_EDGE_KINDS = new Set(['imports', 'reexports', 'extends', 'implements', 'calls']);
 
-function fileIdOf(nodeId: string): string | null {
-  if (nodeId.startsWith('file:')) return nodeId;
-  if (nodeId.startsWith('symbol:')) {
-    const rest = nodeId.substring('symbol:'.length);
-    const nextColon = rest.indexOf(':');
-    const path = nextColon < 0 ? rest : rest.substring(0, nextColon);
-    return path ? `file:${path}` : null;
-  }
-  return null;
-}
-
 /**
  * 从已构建的 ProjectGraph 同步计算可操作的项目洞察：
  * 死代码、循环依赖、核心枢纽（被依赖最多）、孤儿文件、测试覆盖缺口、入口点。
@@ -69,8 +59,8 @@ export function computeProjectGraphInsights(
   // 符号级边归并到所属文件，得到文件级度数。
   for (const edge of graph.edges) {
     if (!DEGREE_EDGE_KINDS.has(edge.kind)) continue;
-    const from = fileIdOf(edge.from);
-    const to = fileIdOf(edge.to);
+    const from = fileIdFromGraphNodeId(edge.from);
+    const to = fileIdFromGraphNodeId(edge.to);
     if (!from || !to || from === to) continue;
     outDegree.set(from, (outDegree.get(from) ?? 0) + 1);
     inDegree.set(to, (inDegree.get(to) ?? 0) + 1);

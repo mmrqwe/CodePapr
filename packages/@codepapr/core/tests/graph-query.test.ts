@@ -14,6 +14,8 @@ import {
   computeRenameEditsForContent,
   applyRenameEditsToContent,
   applyIncrementalUpdate,
+  computeIncrementalUpdate,
+  fileIdFromGraphNodeId,
   findSymbolAtPosition,
 } from '../src';
 import type {
@@ -472,6 +474,81 @@ describe('Regression: audited graphQuery bugs', () => {
     const edgeIds = result.edges.map((e) => e.id);
     expect(new Set(nodeIds).size).toBe(nodeIds.length);
     expect(new Set(edgeIds).size).toBe(edgeIds.length);
+  });
+
+  it('applyIncrementalUpdate copies files, node metadata, and full summary', () => {
+    const before = makeGraph();
+    const after: WorkspaceProjectGraphResult = {
+      ...before,
+      files: before.files.map((file) =>
+        file.path === 'src/lib.ts' ? { ...file, bytes: file.bytes + 40 } : file,
+      ),
+      nodes: before.nodes.map((node) =>
+        node.kind === 'file' && node.path === 'src/lib.ts'
+          ? { ...node, bytes: (node.bytes ?? 0) + 40, entryPoint: true }
+          : node,
+      ),
+      summary: {
+        ...before.summary,
+        reexports: before.summary.reexports + 2,
+        lspEnhanced: true,
+        orphanNodes: before.summary.orphanNodes + 1,
+      },
+    };
+    const update = computeIncrementalUpdate(before, after);
+    expect(update.changedNodes.some((node) => node.path === 'src/lib.ts' && node.entryPoint)).toBe(true);
+    const applied = applyIncrementalUpdate(before, update);
+    expect(applied.files.find((file) => file.path === 'src/lib.ts')?.bytes).toBe(
+      after.files.find((file) => file.path === 'src/lib.ts')?.bytes,
+    );
+    expect(applied.summary.reexports).toBe(after.summary.reexports);
+    expect(applied.summary.lspEnhanced).toBe(true);
+    expect(applied.summary.orphanNodes).toBe(after.summary.orphanNodes);
+    expect(applied.nodes.find((node) => node.kind === 'file' && node.path === 'src/lib.ts')?.entryPoint).toBe(true);
+  });
+
+  it('fileIdFromGraphNodeId keeps Windows drive paths intact', () => {
+    expect(fileIdFromGraphNodeId('file:C:/repo/src/a.ts')).toBe('file:C:/repo/src/a.ts');
+    expect(fileIdFromGraphNodeId('symbol:C:/repo/src/a.ts:10:function::run:0')).toBe('file:C:/repo/src/a.ts');
+    expect(fileIdFromGraphNodeId('symbol:src/a.ts:run')).toBe('file:src/a.ts');
+  });
+
+  it('circular_deps follows Windows symbol IDs back to their files', () => {
+    const graph = makeGraph();
+    const windows: WorkspaceProjectGraphResult = {
+      ...graph,
+      nodes: [
+        ...graph.nodes,
+        {
+          id: 'file:C:/repo/src/a.ts',
+          kind: 'file',
+          label: 'a.ts',
+          path: 'C:/repo/src/a.ts',
+        },
+        {
+          id: 'file:C:/repo/src/b.ts',
+          kind: 'file',
+          label: 'b.ts',
+          path: 'C:/repo/src/b.ts',
+        },
+      ],
+      edges: [
+        {
+          id: 'cycle-ab',
+          kind: 'imports',
+          from: 'symbol:C:/repo/src/a.ts:1:function::ping:0',
+          to: 'file:C:/repo/src/b.ts',
+        },
+        {
+          id: 'cycle-ba',
+          kind: 'imports',
+          from: 'symbol:C:/repo/src/b.ts:1:function::pong:0',
+          to: 'file:C:/repo/src/a.ts',
+        },
+      ],
+    };
+    const result = detectCircularDependencies(windows);
+    expect(result.cycles.some((cycle) => cycle.files.includes('C:/repo/src/a.ts'))).toBe(true);
   });
 
   it('P2-23: circular_deps survives dangling imports edges (no file node for target)', () => {

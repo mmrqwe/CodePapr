@@ -77,37 +77,42 @@ class GlobalLspConnectionPool implements LspConnectionPool {
       activeDocuments: new Set(),
     };
     this.connections.set(key, handle);
-    this.poolSize++;
+    this.poolSize = this.connections.size;
 
-    // 如果连接池满了，停止并移除「最久未使用且当前空闲」的连接，避免被淘汰的后端 LSP 进程变成孤儿，
-    // 同时绝不淘汰仍有 in-flight 请求（refCount>0）的连接，否则会在请求进行中杀掉其语言服务器。
-    if (this.poolSize > this.maxPoolSize) {
-      let evictKey: string | null = null;
-      let oldestTime = Infinity;
-      for (const [k, v] of this.connections.entries()) {
-        if (v.refCount > 0) continue;
-        if (v.lastUsedAt < oldestTime) {
-          oldestTime = v.lastUsedAt;
-          evictKey = k;
-        }
-      }
-      if (evictKey) {
-        const evicted = this.connections.get(evictKey);
-        this.connections.delete(evictKey);
-        this.poolSize--;
-        if (evicted) {
-          await this.shutdownConnection(evicted);
-        }
-      }
-    }
-
+    await this.evictOverflow();
     return handle;
   }
 
   release(handle: LspConnectionHandle): void {
-    // 保持连接在池中，下次可以复用；仅递减引用计数并刷新最近使用时间。
     handle.refCount = Math.max(0, handle.refCount - 1);
     handle.lastUsedAt = Date.now();
+    void this.evictOverflow();
+  }
+
+  private findOldestIdleKey(): string | null {
+    let evictKey: string | null = null;
+    let oldestTime = Infinity;
+    for (const [k, v] of this.connections.entries()) {
+      if (v.refCount > 0) continue;
+      if (v.lastUsedAt < oldestTime) {
+        oldestTime = v.lastUsedAt;
+        evictKey = k;
+      }
+    }
+    return evictKey;
+  }
+
+  private async evictOverflow(): Promise<void> {
+    while (this.connections.size > this.maxPoolSize) {
+      const evictKey = this.findOldestIdleKey();
+      if (!evictKey) break;
+      const evicted = this.connections.get(evictKey);
+      this.connections.delete(evictKey);
+      this.poolSize = this.connections.size;
+      if (evicted) {
+        await this.shutdownConnection(evicted);
+      }
+    }
   }
 
   private async shutdownConnection(handle: LspConnectionHandle): Promise<void> {
@@ -136,7 +141,7 @@ class GlobalLspConnectionPool implements LspConnectionPool {
     for (const [key, handle] of [...this.connections.entries()]) {
       if (handle.workspacePath !== workspacePath) continue;
       this.connections.delete(key);
-      this.poolSize = Math.max(0, this.poolSize - 1);
+      this.poolSize = this.connections.size;
       await this.shutdownConnection(handle);
     }
   }

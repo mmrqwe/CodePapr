@@ -39,7 +39,7 @@ import {
 } from '../utils/snapshot';
 import { nextCheckpointSequence } from '../utils/workspaceGitPanel';
 import { acquireSleepPrevention, releaseSleepPrevention } from '../utils/sleepPrevention';
-import { warmupLspForWorkspace } from '../utils/lspWarmup';
+import { warmupLspForWorkspace, stopWorkspaceLsp } from '../utils/lspWarmup';
 import { restoreTodoListContexts, clearAllTodoListContexts, resetTodoListContext } from '../tools/todoListTool';
 import { loadMcpToolDefinitions } from '../tools/mcpTools';
 import {
@@ -511,6 +511,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         // 阻止系统休眠状态正确释放。
         // 同时递增工作区身份令牌：在飞的 openWorkspace 加载（先加载后切换，
         // N12）完成后必须丢弃结果，否则关闭后旧工作区会被重新打开。
+        const previousPath = get().workspacePath;
         openWorkspaceSeq += 1;
         disposeWorkspaceAgents(get);
         clearAllTodoListContexts();
@@ -551,6 +552,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _sessionLru: [],
         });
         syncActiveCharacterFromSession(null);
+        if (previousPath) {
+          void stopWorkspaceLsp(previousPath);
+        }
       },
 
       openWorkspace: async (path) => {

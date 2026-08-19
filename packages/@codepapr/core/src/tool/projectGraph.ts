@@ -243,10 +243,19 @@ interface ModuleBinding {
   namespace?: boolean;
 }
 
+interface ModuleReexport {
+  targetPath: string;
+  star?: boolean;
+  importedName?: string;
+  localName?: string;
+}
+
 interface FileModuleContext {
   references: ModuleReference[];
   importedSymbols: Map<string, ModuleBinding[]>;
   importedNamespaces: Map<string, ModuleBinding>;
+  /** barrel `export *` / `export { a as b }` 再导出，供导入方穿透解析到源符号。 */
+  reexports?: ModuleReexport[];
   /** 看起来是项目内导入（相对路径 / crate:: / mod 声明）但未能解析的数量。
    *  references 只记录解析成功的导入，质量指标需要它当分母的一部分，
    *  否则 importResolutionRate 结构性恒等于 1。外部包导入不计入。 */
@@ -1135,6 +1144,7 @@ function buildJsTsModuleContext(sourcePath: string, content: string, allFiles: R
   const references: ModuleReference[] = [];
   const importedSymbols = new Map<string, ModuleBinding[]>();
   const importedNamespaces = new Map<string, ModuleBinding>();
+  const reexports: ModuleReexport[] = [];
   let unresolvedLocalImports = 0;
   const code = buildCodeMask(content, 'c-like');
   // 相对/绝对路径导入必须解析到项目文件；解析失败说明图有缺口。
@@ -1201,6 +1211,29 @@ function buildJsTsModuleContext(sourcePath: string, content: string, allFiles: R
             importedName: 'default',
           });
         }
+      } else if (keyword === 'export') {
+        const clauseParts = splitTopLevelList(clause.replace(/^type\s+/i, '').trim());
+        for (const part of clauseParts) {
+          if (!part) {
+            continue;
+          }
+          if (part === '*' || /^\*\s*$/.test(part)) {
+            reexports.push({ targetPath, star: true });
+            continue;
+          }
+          if (/^\*\s+as\s+/i.test(part)) {
+            continue;
+          }
+          if (part.startsWith('{') && part.endsWith('}')) {
+            for (const binding of parseNamedBindings(part)) {
+              reexports.push({
+                targetPath,
+                importedName: binding.importedName,
+                localName: binding.localName,
+              });
+            }
+          }
+        }
       }
     }
 
@@ -1245,6 +1278,7 @@ function buildJsTsModuleContext(sourcePath: string, content: string, allFiles: R
     references,
     importedSymbols,
     importedNamespaces,
+    reexports,
     unresolvedLocalImports,
   };
 }
@@ -1277,7 +1311,7 @@ function buildPythonModuleContext(sourcePath: string, content: string, allFiles:
         const importedName = parts[0]?.trim();
         const localName = parts[1]?.trim() ?? importedName;
         if (!importedName || !localName || importedName === '*') continue;
-        let bindingPath = targetPath;
+        let bindingPath: string = targetPath;
         if (isRelative && /^[\.]+$/.test(modulePath)) {
           bindingPath =
             resolveImportTarget(sourcePath, `${modulePath}${importedName}`, allFiles, 'python') ?? targetPath;
@@ -1655,7 +1689,7 @@ function extractPythonStructuralSymbols(content: string): StructuralSymbol[] {
         signature: baseSig,
         line: lineNum,
         containerName: classStack.length > 0 ? classStack[classStack.length - 1].name : undefined,
-        exported: !rawLine.startsWith('_') || name.startsWith('__'),
+        exported: !name.startsWith('_') || name.startsWith('__'),
       });
       classStack.push({ name, indent });
       continue;
@@ -2306,33 +2340,100 @@ function resolveDefaultImportCandidate(candidates: ProjectGraphSymbolCandidate[]
   return exportedCandidates.length === 1 ? exportedCandidates[0] : null;
 }
 
+function pickUniqueExportedMatch(
+  matches: ProjectGraphSymbolCandidate[],
+): ProjectGraphSymbolCandidate | null {
+  if (matches.length === 1) {
+    return matches[0];
+  }
+  if (matches.length > 1) {
+    const callableMatch = matches.find((candidate) => isCallableSymbolKind(candidate.symbol.kind));
+    return callableMatch ?? null;
+  }
+  return null;
+}
+
+/** 从模块导出面解析符号：先看本文件，再沿 `export *` / `export { a as b }` 再导出穿透。 */
+function resolveExportedSymbolInModule(
+  modulePath: string,
+  importedName: string,
+  candidatesByPath: Map<string, ProjectGraphSymbolCandidate[]>,
+  moduleContexts: Map<string, FileModuleContext> | undefined,
+  visited: Set<string> = new Set(),
+): ProjectGraphSymbolCandidate | null {
+  if (!modulePath || visited.has(modulePath)) {
+    return null;
+  }
+  visited.add(modulePath);
+
+  const localCandidates = candidatesByPath.get(modulePath) ?? [];
+  if (importedName === 'default') {
+    const localDefault = resolveDefaultImportCandidate(localCandidates);
+    if (localDefault) {
+      return localDefault;
+    }
+  } else {
+    const localMatches = localCandidates.filter(
+      (candidate) => candidate.symbol.exported && symbolNameMatches(candidate, importedName),
+    );
+    const picked = pickUniqueExportedMatch(localMatches);
+    if (picked) {
+      return picked;
+    }
+  }
+
+  for (const reexport of moduleContexts?.get(modulePath)?.reexports ?? []) {
+    if (reexport.star) {
+      const found = resolveExportedSymbolInModule(
+        reexport.targetPath,
+        importedName,
+        candidatesByPath,
+        moduleContexts,
+        visited,
+      );
+      if (found) {
+        return found;
+      }
+      continue;
+    }
+    if (reexport.localName !== importedName) {
+      continue;
+    }
+    const found = resolveExportedSymbolInModule(
+      reexport.targetPath,
+      reexport.importedName ?? importedName,
+      candidatesByPath,
+      moduleContexts,
+      visited,
+    );
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
 function resolveTargetFromBindings(
   bindingCandidates: ModuleBinding[] | undefined,
   relation: RelationTargetDescriptor,
-  candidatesByPath: Map<string, ProjectGraphSymbolCandidate[]>
+  candidatesByPath: Map<string, ProjectGraphSymbolCandidate[]>,
+  moduleContexts?: Map<string, FileModuleContext>,
 ): ProjectGraphSymbolCandidate | null {
   if (!bindingCandidates?.length) {
     return null;
   }
 
   for (const binding of bindingCandidates) {
-    const targetCandidates = candidatesByPath.get(binding.targetPath) ?? [];
-    if (binding.importedName === 'default') {
-      const defaultCandidate = resolveDefaultImportCandidate(targetCandidates);
-      if (defaultCandidate) {
-        return defaultCandidate;
-      }
-      continue;
-    }
-
-    const matches = targetCandidates.filter((candidate) => symbolNameMatches(candidate, binding.importedName ?? relation.simpleName));
-    if (matches.length === 1) {
-      return matches[0];
-    }
-
-    const exportedMatches = matches.filter((candidate) => candidate.symbol.exported);
-    if (exportedMatches.length === 1) {
-      return exportedMatches[0];
+    const importedName = binding.importedName ?? relation.simpleName;
+    const resolved = resolveExportedSymbolInModule(
+      binding.targetPath,
+      importedName,
+      candidatesByPath,
+      moduleContexts,
+    );
+    if (resolved) {
+      return resolved;
     }
   }
 
@@ -2343,6 +2444,7 @@ function resolveRelatedSymbol(params: {
   sourcePath: string;
   relation: RelationTargetDescriptor;
   moduleContext: FileModuleContext | undefined;
+  moduleContexts?: Map<string, FileModuleContext>;
   candidatesByPath: Map<string, ProjectGraphSymbolCandidate[]>;
   candidatesBySimpleName: Map<string, ProjectGraphSymbolCandidate[]>;
   candidatesByQualifiedName: Map<string, ProjectGraphSymbolCandidate[]>;
@@ -2352,6 +2454,7 @@ function resolveRelatedSymbol(params: {
     sourcePath,
     relation,
     moduleContext,
+    moduleContexts,
     candidatesByPath,
     candidatesBySimpleName,
     candidatesByQualifiedName,
@@ -2395,7 +2498,8 @@ function resolveRelatedSymbol(params: {
     const directBindingCandidate = resolveTargetFromBindings(
       moduleContext.importedSymbols.get(relation.simpleName) ?? moduleContext.importedSymbols.get(relation.qualifiedName ?? ''),
       relation,
-      candidatesByPath
+      candidatesByPath,
+      moduleContexts,
     );
     if (directBindingCandidate) {
       return directBindingCandidate;
@@ -2406,6 +2510,15 @@ function resolveRelatedSymbol(params: {
       const namespaceBinding = moduleContext.importedNamespaces.get(namespaceAlias);
       if (namespaceBinding && restSegments.length > 0) {
         const namespaceTargetName = restSegments.join('.');
+        const viaReexport = resolveExportedSymbolInModule(
+          namespaceBinding.targetPath,
+          namespaceTargetName,
+          candidatesByPath,
+          moduleContexts,
+        );
+        if (viaReexport) {
+          return viaReexport;
+        }
         const targetCandidates = candidatesByPath.get(namespaceBinding.targetPath) ?? [];
         const namespaceMatches = targetCandidates.filter(
           (candidate) =>
@@ -2813,13 +2926,12 @@ function buildWorkspaceProjectGraphImpl(params: BuildWorkspaceProjectGraphParams
         break;
       }
       for (const binding of bindings) {
-        const targetCandidates = candidatesByPath.get(binding.targetPath) ?? [];
-        const resolved =
-          binding.importedName === 'default'
-            ? resolveDefaultImportCandidate(targetCandidates)
-            : binding.importedName
-              ? targetCandidates.find((c) => symbolNameMatches(c, binding.importedName as string))
-              : undefined;
+        const resolved = resolveExportedSymbolInModule(
+          binding.targetPath,
+          binding.importedName ?? '',
+          candidatesByPath,
+          moduleContexts,
+        );
         if (!resolved) {
           continue;
         }
@@ -2845,6 +2957,7 @@ function buildWorkspaceProjectGraphImpl(params: BuildWorkspaceProjectGraphParams
           sourcePath: file.path,
           relation: relation.target,
           moduleContext,
+          moduleContexts,
           candidatesByPath,
           candidatesBySimpleName,
           candidatesByQualifiedName,
@@ -3219,6 +3332,7 @@ function buildCallEdges(
           candidatesBySimpleName,
           candidatesByQualifiedName,
           moduleContext,
+          moduleContexts,
         );
         if (!target || target.id === sourceId) continue;
 
@@ -3470,34 +3584,31 @@ function resolveCallTarget(
   candidatesBySimpleName: Map<string, ProjectGraphSymbolCandidate[]>,
   candidatesByQualifiedName: Map<string, ProjectGraphSymbolCandidate[]>,
   moduleContext?: FileModuleContext,
+  moduleContexts?: Map<string, FileModuleContext>,
 ): ProjectGraphSymbolCandidate | null {
   if (receiver) {
     if (moduleContext) {
       const namespaceBinding = moduleContext.importedNamespaces.get(receiver);
       if (namespaceBinding?.targetPath) {
-        const targetCandidates = candidatesByPath.get(namespaceBinding.targetPath) ?? [];
-        const exportedMatches = targetCandidates.filter(
-          (c) => c.symbol.exported && c.symbol.name === name,
+        const viaReexport = resolveExportedSymbolInModule(
+          namespaceBinding.targetPath,
+          name,
+          candidatesByPath,
+          moduleContexts,
         );
-        if (exportedMatches.length === 1) return exportedMatches[0];
-        if (exportedMatches.length > 1) {
-          const callableMatch = exportedMatches.find((c) => isCallableSymbolKind(c.symbol.kind));
-          if (callableMatch) return callableMatch;
-        }
+        if (viaReexport) return viaReexport;
       }
 
       const bindingCandidates = moduleContext.importedSymbols.get(receiver);
       if (bindingCandidates?.length) {
         for (const binding of bindingCandidates) {
-          const targetCandidates = candidatesByPath.get(binding.targetPath) ?? [];
-          const matches = targetCandidates.filter(
-            (c) => symbolNameMatches(c, name) && c.symbol.exported,
+          const viaReexport = resolveExportedSymbolInModule(
+            binding.targetPath,
+            name,
+            candidatesByPath,
+            moduleContexts,
           );
-          if (matches.length === 1) return matches[0];
-          if (matches.length > 0) {
-            const callableMatch = matches.find((c) => isCallableSymbolKind(c.symbol.kind));
-            if (callableMatch) return callableMatch;
-          }
+          if (viaReexport) return viaReexport;
         }
       }
     }
@@ -3523,16 +3634,14 @@ function resolveCallTarget(
     const directBindings = moduleContext.importedSymbols.get(name);
     if (directBindings?.length) {
       for (const binding of directBindings) {
-        const targetCandidates = candidatesByPath.get(binding.targetPath) ?? [];
         const importedName = binding.importedName ?? name;
-        const matches = targetCandidates.filter(
-          (c) => c.symbol.name === importedName && c.symbol.exported,
+        const viaReexport = resolveExportedSymbolInModule(
+          binding.targetPath,
+          importedName,
+          candidatesByPath,
+          moduleContexts,
         );
-        if (matches.length === 1) return matches[0];
-        if (matches.length > 1) {
-          const callableMatch = matches.find((c) => isCallableSymbolKind(c.symbol.kind));
-          if (callableMatch) return callableMatch;
-        }
+        if (viaReexport) return viaReexport;
       }
     }
   }

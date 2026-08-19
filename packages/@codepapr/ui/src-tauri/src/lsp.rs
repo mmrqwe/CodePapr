@@ -368,27 +368,41 @@ fn percent_encode_path(path: &str) -> String {
     result
 }
 
-fn strip_windows_unc_prefix(path: &str) -> &str {
-    if path.starts_with("//?/") || path.starts_with("\\\\?\\") {
-        let rest = &path[4..];
+fn strip_windows_unc_prefix(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    if let Some(rest) = normalized.strip_prefix("//?/") {
         if rest.len() >= 2 && rest.as_bytes()[1] == b':' {
-            return rest;
+            return rest.to_string();
+        }
+        if let Some(unc) = rest.strip_prefix("UNC/") {
+            return format!("//{unc}");
         }
     }
-    path
+    normalized
 }
 
 fn strip_leading_slash(path: &str) -> &str {
     path.strip_prefix('/').unwrap_or(path)
 }
 
+fn is_unc_path(path: &str) -> bool {
+    path.starts_with("//") && !path.starts_with("//?/") && path.len() > 2 && path[2..].contains('/')
+}
+
+pub(crate) fn path_to_file_uri(path_str: &str) -> String {
+    let path_str = strip_windows_unc_prefix(path_str);
+    if is_unc_path(&path_str) {
+        return format!("file:{}", percent_encode_path(&path_str));
+    }
+    let normalized = strip_leading_slash(&path_str);
+    format!("file:///{}", percent_encode_path(normalized))
+}
+
 pub(crate) fn file_uri_for(workspace: &Path, relative_path: &str) -> Result<String, String> {
     let relative = normalize_relative_path(relative_path)?;
     let target = workspace.join(relative);
     let path_str = target.to_string_lossy().replace('\\', "/");
-    let path_str = strip_windows_unc_prefix(&path_str);
-    let normalized = strip_leading_slash(path_str);
-    Ok(format!("file:///{}", percent_encode_path(normalized)))
+    Ok(path_to_file_uri(&path_str))
 }
 
 fn detect_python_path() -> Option<String> {
@@ -1381,9 +1395,7 @@ fn spawn_server_candidate(
     };
 
     let workspace_path_str = workspace.to_string_lossy().replace('\\', "/");
-    let workspace_path_str = strip_windows_unc_prefix(&workspace_path_str);
-    let normalized = strip_leading_slash(workspace_path_str);
-    let root_uri = format!("file:///{}", percent_encode_path(normalized));
+    let root_uri = path_to_file_uri(&workspace_path_str);
     let mut init_params = json!({
         "processId": std::process::id(),
         "rootUri": root_uri,
@@ -2498,7 +2510,7 @@ mod tests {
         ensure_running_server_handle, file_uri_for, lock_server, lsp_batch_enrich_impl,
         lsp_batch_enrich_with_limits, lsp_batch_symbols_impl, lsp_batch_symbols_with_limits,
         lsp_close_document_impl, lsp_open_document_with_app, lsp_query_availability_impl,
-        lsp_request, lsp_server_config, lsp_stop_server_impl, normalize_relative_path,
+        lsp_request, lsp_server_config, lsp_stop_server_impl, normalize_relative_path, path_to_file_uri,
         remaining_until, resolve_lsp_command_candidates, resolved_command_display, send_request, server_key,
         LspBatchEnrichFile, LspBatchEnrichSymbol, LspBatchSymbolInput, LSP_REQUEST_TIMEOUT,
     };
@@ -2771,6 +2783,24 @@ mod tests {
     fn rejects_escaping_relative_paths() {
         assert!(normalize_relative_path("../x.ts").is_err());
         assert!(normalize_relative_path("/x.ts").is_err());
+    }
+
+    #[test]
+    fn file_uri_uses_unc_authority_and_keeps_drive_triple_slash() {
+        assert_eq!(
+            path_to_file_uri("//fileserver/share/proj/src/a.ts"),
+            "file://fileserver/share/proj/src/a.ts"
+        );
+        assert_eq!(
+            path_to_file_uri("//?/UNC/fileserver/share/proj/src/a.ts"),
+            "file://fileserver/share/proj/src/a.ts"
+        );
+        assert_eq!(path_to_file_uri("C:/proj/src/a.ts"), "file:///C:/proj/src/a.ts");
+        assert_eq!(path_to_file_uri("/tmp/proj/src/a.ts"), "file:///tmp/proj/src/a.ts");
+        assert_eq!(
+            file_uri_for(Path::new("//fileserver/share/proj"), "src/a.ts").expect("unc uri"),
+            "file://fileserver/share/proj/src/a.ts"
+        );
     }
 
     #[test]

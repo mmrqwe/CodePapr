@@ -1,4 +1,5 @@
 import type { WorkspaceProjectGraphResult } from '../../projectGraph';
+import { fileIdFromGraphNodeId } from './graphNodeId';
 
 export interface CircularDependency {
   cycle: string[];
@@ -25,8 +26,8 @@ export function detectCircularDependencies(
   }
   for (const edge of graph.edges) {
     if (edge.kind === 'imports' || edge.kind === 'reexports') {
-      const fromFile = extractFileId(edge.from);
-      const toFile = extractFileId(edge.to);
+      const fromFile = fileIdFromGraphNodeId(edge.from);
+      const toFile = fileIdFromGraphNodeId(edge.to);
       if (fromFile && toFile && fromFile !== toFile) {
         const neighbors = adjacency.get(fromFile);
         if (neighbors) neighbors.add(toFile);
@@ -102,13 +103,3 @@ export function detectCircularDependencies(
   return { cycles, total: cycles.length, summary };
 }
 
-function extractFileId(nodeId: string): string | null {
-  if (nodeId.startsWith('file:')) return nodeId;
-  if (nodeId.startsWith('symbol:')) {
-    const rest = nodeId.substring('symbol:'.length);
-    const nextColon = rest.indexOf(':');
-    const path = nextColon < 0 ? rest : rest.substring(0, nextColon);
-    return path ? `file:${path}` : null;
-  }
-  return null;
-}

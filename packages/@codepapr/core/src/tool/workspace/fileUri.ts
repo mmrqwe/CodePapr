@@ -1,5 +1,34 @@
+function isWindowsLongPathPrefix(value: string): boolean {
+  return value.startsWith('//?/') || value.startsWith('//./');
+}
+
+function isUncPath(value: string): boolean {
+  return /^\/\/[^/?]/.test(value) && !isWindowsLongPathPrefix(value);
+}
+
+function stripWindowsLongPathPrefix(value: string): string {
+  if (!value.startsWith('//?/')) {
+    return value;
+  }
+  const rest = value.slice(4);
+  if (/^[A-Za-z]:\//.test(rest)) {
+    return rest;
+  }
+  if (rest.startsWith('UNC/')) {
+    return `//${rest.slice(4)}`;
+  }
+  return value;
+}
+
 function normalizePath(value: string): string {
-  return value.replace(/\\/g, '/').replace(/\/+/g, '/');
+  let normalized = value.replace(/\\/g, '/');
+  normalized = stripWindowsLongPathPrefix(normalized);
+  const unc = isUncPath(normalized);
+  normalized = normalized.replace(/\/+/g, '/');
+  if (unc && !normalized.startsWith('//')) {
+    normalized = `/${normalized}`;
+  }
+  return normalized;
 }
 
 export function normalizeAbsolutePath(value: string): string {
@@ -8,7 +37,11 @@ export function normalizeAbsolutePath(value: string): string {
 }
 
 function encodeFileUriPath(fullPath: string): string {
-  const prefix = /^[A-Za-z]:\//.test(fullPath) ? 'file:///' : 'file://';
+  const prefix = isUncPath(fullPath)
+    ? 'file:'
+    : /^[A-Za-z]:\//.test(fullPath)
+      ? 'file:///'
+      : 'file://';
   return encodeURI(`${prefix}${fullPath}`).replace(/[?#]/g, (ch) => (ch === '?' ? '%3F' : '%23'));
 }
 
@@ -25,6 +58,9 @@ function pathFromFileUrl(url: URL): string {
   if (host && /^[A-Za-z]:?$/.test(host)) {
     const drive = host.endsWith(':') ? host : `${host}:`;
     return normalizeAbsolutePath(`${drive}${pathname}`);
+  }
+  if (host) {
+    return normalizeAbsolutePath(`//${host}${pathname}`);
   }
   return normalizeAbsolutePath(pathname);
 }

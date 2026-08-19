@@ -13,6 +13,29 @@ export interface IncrementalGraphUpdate {
     callsDelta: number;
     edgesDelta: number;
   };
+  /** 应用后应采用的完整 files 清单；缺省时保留原图 files。 */
+  files?: WorkspaceProjectGraphResult['files'];
+  /** 应用后应采用的完整 summary；缺省时按 summaryDelta 做字段级加减。 */
+  summary?: WorkspaceProjectGraphResult['summary'];
+  quality?: WorkspaceProjectGraphResult['quality'];
+  truncated?: boolean;
+}
+
+function nodeChanged(prev: ProjectGraphNode, next: ProjectGraphNode): boolean {
+  return (
+    prev.kind !== next.kind ||
+    prev.label !== next.label ||
+    prev.path !== next.path ||
+    prev.language !== next.language ||
+    prev.bytes !== next.bytes ||
+    prev.fileType !== next.fileType ||
+    prev.entryPoint !== next.entryPoint ||
+    prev.entryPointScore !== next.entryPointScore ||
+    prev.symbolSource !== next.symbolSource ||
+    prev.qualifiedName !== next.qualifiedName ||
+    prev.disambiguated !== next.disambiguated ||
+    JSON.stringify(prev.symbol) !== JSON.stringify(next.symbol)
+  );
 }
 
 export function computeIncrementalUpdate(
@@ -33,7 +56,7 @@ export function computeIncrementalUpdate(
       addedNodes.push(node);
     } else {
       const prev = beforeNodeMap.get(id)!;
-      if (node.symbol?.signature !== prev.symbol?.signature || node.symbol?.name !== prev.symbol?.name) {
+      if (nodeChanged(prev, node)) {
         changedNodes.push(node);
       }
     }
@@ -71,6 +94,10 @@ export function computeIncrementalUpdate(
       callsDelta: after.summary.calls - before.summary.calls,
       edgesDelta: after.summary.edges - before.summary.edges,
     },
+    files: after.files,
+    summary: after.summary,
+    quality: after.quality,
+    truncated: after.truncated,
   };
 }
 
@@ -108,7 +135,10 @@ export function applyIncrementalUpdate(
     ...graph,
     nodes,
     edges: uniqueEdges,
-    summary: {
+    files: update.files ?? graph.files,
+    truncated: update.truncated ?? graph.truncated,
+    quality: update.quality ?? graph.quality,
+    summary: update.summary ?? {
       ...graph.summary,
       files: graph.summary.files + update.summaryDelta.filesDelta,
       symbols: graph.summary.symbols + update.summaryDelta.symbolsDelta,

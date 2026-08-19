@@ -8,7 +8,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
 }));
 
-import { warmupLspForWorkspace } from './lspWarmup';
+import { warmupLspForWorkspace, stopWorkspaceLsp } from './lspWarmup';
 
 describe('warmupLspForWorkspace', () => {
   it('sends a Windows drive documentSymbol URI with three slashes', async () => {
@@ -38,6 +38,21 @@ describe('warmupLspForWorkspace', () => {
           textDocument: { uri: 'file:///C:/proj/src/a.ts' },
         },
       }),
+    );
+  });
+
+  it('closes pooled connections and backend servers for the previous workspace', async () => {
+    invokeMock.mockResolvedValue({});
+    const { globalLspPool } = await import('../tools/workspaceProjectMapLsp');
+    const handle = await globalLspPool.acquire('typescript', 'C:/proj');
+    globalLspPool.release(handle);
+    invokeMock.mockClear();
+
+    await stopWorkspaceLsp('C:/proj');
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      'lsp_stop_server',
+      expect.objectContaining({ workspacePath: 'C:/proj', languageId: 'typescript' }),
     );
   });
 });

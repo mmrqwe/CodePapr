@@ -148,6 +148,7 @@ export {
   generateSmartTestSkeletons,
   computeIncrementalUpdate,
   applyIncrementalUpdate,
+  fileIdFromGraphNodeId,
   findSymbolAtPosition,
   findSymbolByNameInFile,
   identifierAtPosition,
