@@ -13,6 +13,7 @@ import {
 import {
   createDefaultMcpSettings,
   normalizeMcpSettings,
+  buildMcpToolName,
   type McpServerConfig,
   type McpSettings,
 } from '../utils/mcpTypes';
@@ -345,7 +346,11 @@ describe('registerMcpTools', () => {
     ];
 
     const registry = new ToolRegistry();
-    registerMcpTools(registry, ENABLED_SETTINGS, definitions);
+    registerMcpTools(registry, ENABLED_SETTINGS, definitions, [{
+      serverId: 'search',
+      toolName: 'duckduckgo_search',
+      displayName: 'mcp__search__duckduckgo_search',
+    }]);
     registry.freeze();
 
     const allTools = registry.getAll();
@@ -417,7 +422,11 @@ describe('registerMcpTools', () => {
     ];
 
     const registry = new ToolRegistry();
-    registerMcpTools(registry, ENABLED_SETTINGS, definitions);
+    registerMcpTools(registry, ENABLED_SETTINGS, definitions, [{
+      serverId: 'image_server',
+      toolName: 'generate_image',
+      displayName: 'mcp__image_server__generate_image',
+    }]);
     registry.freeze();
 
     const result = (await registry.execute('mcp__image_server__generate_image', {})) as {
@@ -446,6 +455,24 @@ describe('registerMcpTools', () => {
     await expect(
       registry.execute('not_a_mcp_tool', {}),
     ).rejects.toThrow('Invalid MCP tool name');
+  });
+
+  it('does not send a sanitized hashed name when the original mapping is missing', async () => {
+    const displayName = buildMcpToolName('github', 'create.issue');
+    const definitions: IToolDefinition[] = [
+      {
+        name: displayName,
+        description: 'create issue',
+        parameters: { type: 'object', properties: {} },
+      },
+    ];
+    const registry = new ToolRegistry();
+    registerMcpTools(registry, ENABLED_SETTINGS, definitions);
+    await expect(registry.execute(displayName, {})).rejects.toThrow('mapping missing');
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      'mcp_call_tool',
+      expect.anything(),
+    );
   });
 });
 

@@ -40,7 +40,10 @@ describe('McpSettingsModal', () => {
 
   beforeEach(() => {
     invokeMock.mockReset();
-    invokeMock.mockResolvedValue({ settingsJson: null });
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'mcp_list_status') return [];
+      return { settingsJson: null };
+    });
 
     onClose = vi.fn() as () => void;
     useAgentStore.setState((state) => ({
@@ -104,6 +107,7 @@ describe('McpSettingsModal', () => {
     });
 
     expect(container.innerHTML).toContain('默认只读');
+    expect(invokeMock.mock.calls.some(([command]) => command === 'mcp_list_tools')).toBe(false);
   });
 
   it('shows enabled/connected stats with zero when no servers are active', async () => {

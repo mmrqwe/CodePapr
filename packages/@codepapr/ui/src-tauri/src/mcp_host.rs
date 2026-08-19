@@ -23,6 +23,9 @@ use tauri::{AppHandle, Emitter};
 use tokio::{process::Command, sync::Mutex as AsyncMutex};
 use futures_util::future::join_all;
 
+#[path = "mcp_sse.rs"]
+mod mcp_sse;
+
 const DEFAULT_RESULT_MAX_BYTES: usize = 200_000;
 
 type McpRunningClient = RunningService<RoleClient, ()>;
@@ -448,25 +451,57 @@ fn validate_tool_policy(server: &McpServerConfig, tool_name: &str) -> Result<(),
 }
 
 fn find_server(settings: &McpSettings, server_id: &str) -> Option<McpServerConfig> {
+    find_server_inner(settings, server_id, true)
+}
+
+fn find_server_any(settings: &McpSettings, server_id: &str) -> Option<McpServerConfig> {
+    find_server_inner(settings, server_id, false)
+}
+
+fn find_server_inner(
+    settings: &McpSettings,
+    server_id: &str,
+    require_enabled: bool,
+) -> Option<McpServerConfig> {
+    let sanitized = sanitize_name_part(server_id);
     settings
         .servers
         .iter()
-        .find(|server| server.enabled && server.id == server_id)
-        .or_else(|| {
-            let sanitized = sanitize_name_part(server_id);
-            settings
-                .servers
-                .iter()
-                .find(|server| server.enabled && sanitize_name_part(&server.id) == sanitized)
+        .find(|server| {
+            if require_enabled && !server.enabled {
+                return false;
+            }
+            server.id == server_id || sanitize_name_part(&server.id) == sanitized
         })
         .cloned()
+}
+
+fn is_retryable_transport_error(err: &str) -> bool {
+    let e = err.to_ascii_lowercase();
+    const NEEDLES: &[&str] = &[
+        "connection reset",
+        "connection closed",
+        "connection refused",
+        "broken pipe",
+        "not connected",
+        "transport",
+        "session closed",
+        "channel closed",
+        "connection abort",
+        "eof",
+        "os error 32",
+        "os error 54",
+        "os error 104",
+    ];
+    NEEDLES.iter().any(|needle| e.contains(needle))
 }
 
 async fn connect_client(server: &McpServerConfig) -> Result<SharedMcpClient, String> {
     let timeout = Duration::from_secs(server.timeout_seconds.unwrap_or(60).clamp(5, 600));
     match server.transport.as_str() {
         "stdio" => connect_stdio(server, timeout).await,
-        "sse" | "streamable-http" => connect_http(server, timeout).await,
+        "sse" => mcp_sse::connect_sse(server, timeout).await,
+        "streamable-http" => connect_http(server, timeout).await,
         other => Err(format!("Unsupported MCP transport: '{other}'")),
     }
 }
@@ -929,11 +964,16 @@ pub async fn call_tool(
             }
             Ok(Err(err)) => {
                 last_err = format!("Failed to call MCP tool: {err}");
-                // Invalidate cached client and retry once if it's potentially a connection/session error
                 invalidate_cached_client(&server).await;
-                if attempt == 0 {
-                    eprintln!("[MCP] Tool call failed ({err}), invalidating client and retrying once...");
+                let mutating = is_mutating_with_overrides(&server, &tool_name);
+                let retryable = is_retryable_transport_error(&err.to_string());
+                if attempt == 0 && !mutating && retryable {
+                    eprintln!(
+                        "[MCP] Tool call failed on transport ({err}), invalidating client and retrying once..."
+                    );
                     tokio::time::sleep(Duration::from_millis(200)).await;
+                } else {
+                    break;
                 }
             }
             Err(_) => {
@@ -1144,11 +1184,18 @@ pub async fn preview_mcp_server(
     };
 
     let client = connect_client(&server).await?;
-    let client = client.lock().await;
-    let tools = client
-        .list_all_tools()
-        .await
-        .map_err(|e| format!("Failed to list tools: {e}"))?;
+    let listed = {
+        let locked = client.lock().await;
+        locked
+            .list_all_tools()
+            .await
+            .map_err(|e| format!("Failed to list tools: {e}"))
+    };
+    {
+        let mut locked = client.lock().await;
+        let _ = locked.close_with_timeout(Duration::from_secs(2)).await;
+    }
+    let tools = listed?;
 
     let previews: Vec<McpToolPreviewItem> = tools
         .iter()
@@ -1176,14 +1223,13 @@ pub async fn preview_mcp_server(
 
 /** Disconnect a single server by id. Returns the number of clients closed (0 or 1). */
 pub async fn disconnect_server(settings: McpSettings, server_id: String) -> Result<usize, String> {
-    let server = find_server(&settings, &server_id)
-        .ok_or_else(|| format!("MCP server not found: {server_id}"))?;
-    let key = server_cache_key(&server);
-    let server_id_prefix = format!("{}\u{1e}", sanitize_name_part(&server.id));
+    let server = find_server_any(&settings, &server_id);
+    let sanitized_id = sanitize_name_part(server.as_ref().map(|s| s.id.as_str()).unwrap_or(&server_id));
+    let server_id_prefix = format!("{sanitized_id}\u{1e}");
+    let exact_key = server.as_ref().map(server_cache_key);
 
     let mut guard = clients().lock().await;
-    // Match by exact key first, fall back to any client whose key starts with this server id (handles stale configs).
-    let keys_to_close: Vec<String> = if guard.contains_key(&key) {
+    let keys_to_close: Vec<String> = if let Some(key) = exact_key.filter(|key| guard.contains_key(key)) {
         vec![key]
     } else {
         guard
@@ -1401,6 +1447,23 @@ mod tests {
         assert!(truncated.is_object());
         assert!(truncated.get("content").is_some());
         assert_eq!(truncated.get("isError").and_then(|v| v.as_bool()), Some(false));
+    }
+
+    #[test]
+    fn retryable_transport_errors_are_detected() {
+        assert!(super::is_retryable_transport_error("connection reset by peer"));
+        assert!(super::is_retryable_transport_error("session closed"));
+        assert!(!super::is_retryable_transport_error("MCP tool is not allowed by policy: write"));
+        assert!(!super::is_retryable_transport_error("invalid arguments"));
+    }
+
+    #[test]
+    fn find_server_any_includes_disabled() {
+        let mut server = make_server("stdio", "", &[]);
+        server.enabled = false;
+        let settings = settings_from(vec![server]);
+        assert!(super::find_server(&settings, "test").is_none());
+        assert!(super::find_server_any(&settings, "test").is_some());
     }
 
     fn settings_from(servers: Vec<McpServerConfig>) -> McpSettings {

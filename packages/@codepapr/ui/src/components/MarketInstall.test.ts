@@ -80,6 +80,19 @@ describe('listingToServerConfig（P0 安装默认）', () => {
     expect(config.enabled).toBe(false);
     expect(config.category).toBe('search');
   });
+
+  it('copies remote transport headers into settings', () => {
+    const config = listingToServerConfig(mcpListing({
+      transport: {
+        type: 'streamable-http',
+        url: 'https://example.com/mcp',
+        headers: [{ name: 'Authorization', default: 'Bearer tok' }],
+      },
+      url: 'https://example.com/mcp',
+      categories: ['custom'],
+    }));
+    expect(config.headers).toContain('Authorization: Bearer tok');
+  });
 });
 
 describe('confirmSkillOverwrite（N20 Skill 重装覆盖确认）', () => {

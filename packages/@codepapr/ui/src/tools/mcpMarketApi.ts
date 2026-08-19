@@ -5,6 +5,8 @@ import type {
   RegistryListResponse,
   RegistryServerEntry,
   RegistryPackage,
+  RegistryArgument,
+  RegistryTransport,
 } from '../utils/mcpMarketTypes';
 import { cacheGet, cacheSet } from '../utils/cacheStorage';
 
@@ -36,8 +38,10 @@ function mapOfficialRegistry(entry: RegistryServerEntry): MarketMCPListing {
   const transport = firstPkg?.transport ?? firstRemote ?? { type: 'stdio' as const };
 
   const command = firstPkg ? computeCommand(firstPkg) : '';
-  const args = firstPkg ? computeArgs(firstPkg) : '';
+  const argsResult = firstPkg ? computeArgs(firstPkg) : { args: '', missingRequired: false };
   const url = transport.url ?? '';
+  const unmappedRuntime = Boolean(firstPkg && !command);
+  const needsManualConfig = unmappedRuntime || argsResult.missingRequired || (!firstPkg && !(firstRemote?.url));
 
   return {
     id: server.name.replace(/[./]/g, '_'),
@@ -47,13 +51,13 @@ function mapOfficialRegistry(entry: RegistryServerEntry): MarketMCPListing {
     source: 'official',
     registryType: firstPkg?.registryType ?? 'npm',
     identifier: firstPkg?.identifier ?? server.name,
-    runtimeHint: firstPkg?.runtimeHint ?? (firstPkg ? 'npx' : ''),
+    runtimeHint: firstPkg?.runtimeHint ?? (isDockerPackage(firstPkg) ? 'docker' : (firstPkg ? computeCommand(firstPkg) : '')),
     transport: { ...transport, type: transport.type as 'stdio' | 'streamable-http' | 'sse' },
     envVars: firstPkg?.environmentVariables ?? [],
-    packageArgs: firstPkg?.packageArguments ?? [],
-    runtimeArgs: firstPkg?.runtimeArguments ?? [],
+    packageArgs: flattenRegistryArgs(firstPkg?.packageArguments).parts,
+    runtimeArgs: flattenRegistryArgs(firstPkg?.runtimeArguments).parts,
     command: command || (firstRemote ? '' : ''),
-    args: args || '',
+    args: argsResult.args || '',
     url,
     categories: inferCategories(server.name, server.description),
     iconUrl: server.icons?.[0]?.src ?? '',
@@ -62,40 +66,125 @@ function mapOfficialRegistry(entry: RegistryServerEntry): MarketMCPListing {
     verified: true,
     useCount: 0,
     version: server.version,
-    needsManualConfig: !firstPkg && !(firstRemote?.url),
-    manualConfigNote: firstRemote?.url ? '' : 'Remote server — install then configure the URL in MCP Settings.',
+    needsManualConfig,
+    manualConfigNote: unmappedRuntime
+      ? `Unsupported package type '${firstPkg?.registryType}'. Install then configure the command in MCP Settings.`
+      : firstRemote?.url
+        ? ''
+        : 'Remote server — install then configure the URL in MCP Settings.',
   };
 }
 
-function computeCommand(pkg?: RegistryPackage): string {
+function isDockerPackage(pkg?: RegistryPackage): boolean {
+  if (!pkg) return false;
+  if (pkg.runtimeHint === 'docker' || pkg.registryType === 'oci') return true;
+  return /^(ghcr\.io|docker\.io|quay\.io|registry\.|[\w.-]+\/[\w./-]+:[\w.-]+)/i.test(pkg.identifier);
+}
+
+function looksLikeTemplate(value: string): boolean {
+  return /\{[^{}]+\}/.test(value);
+}
+
+export function flattenRegistryArgs(args?: Array<string | RegistryArgument>): {
+  parts: string[];
+  missingRequired: boolean;
+} {
+  if (!args?.length) return { parts: [], missingRequired: false };
+  const parts: string[] = [];
+  let missingRequired = false;
+  for (const arg of args) {
+    if (typeof arg === 'string') {
+      if (looksLikeTemplate(arg)) {
+        missingRequired = true;
+        continue;
+      }
+      parts.push(arg);
+      continue;
+    }
+    const value = (arg.value ?? arg.default ?? '').trim();
+    if (arg.type === 'named' || arg.name) {
+      if (!value || looksLikeTemplate(value)) {
+        if (arg.isRequired || looksLikeTemplate(value)) missingRequired = true;
+        continue;
+      }
+      const flag = (arg.name ?? '').trim();
+      if (flag.includes('=')) {
+        parts.push(flag.endsWith('=') ? `${flag}${value}` : flag);
+      } else if (flag) {
+        parts.push(flag, value);
+      } else {
+        parts.push(value);
+      }
+      continue;
+    }
+    if (!value || looksLikeTemplate(value)) {
+      if (arg.isRequired || looksLikeTemplate(value)) missingRequired = true;
+      continue;
+    }
+    parts.push(value);
+  }
+  return { parts, missingRequired };
+}
+
+export function formatTransportHeaders(headers?: RegistryTransport['headers']): string {
+  if (!headers) return '';
+  if (Array.isArray(headers)) {
+    return headers
+      .map((item) => {
+        const value = (item.value ?? item.default ?? '').trim();
+        if (!item.name || !value || looksLikeTemplate(value)) return '';
+        return `${item.name}: ${value}`;
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  return Object.entries(headers)
+    .filter(([key, value]) => key.trim() && String(value).trim())
+    .map(([key, value]) => `${key}: ${value}`)
+    .join('\n');
+}
+
+export function computeCommand(pkg?: RegistryPackage): string {
   if (!pkg) return 'npx';
+  if (isDockerPackage(pkg)) return 'docker';
   const hint = pkg.runtimeHint;
-  if (hint === 'docker') return 'docker';
   if (hint === 'uvx') return 'uvx';
   if (hint === 'dnx') return 'dnx';
   if (pkg.registryType === 'pypi') return 'uvx';
-  return 'npx';
+  if (pkg.registryType === 'nuget') return 'dnx';
+  if (pkg.registryType === 'npm' || hint === 'npx' || !pkg.registryType) return 'npx';
+  return '';
 }
 
-function computeArgs(pkg?: RegistryPackage): string {
-  if (!pkg) return '';
+export function computeArgs(pkg?: RegistryPackage): { args: string; missingRequired: boolean } {
+  if (!pkg) return { args: '', missingRequired: false };
+  const runtime = flattenRegistryArgs(pkg.runtimeArguments);
+  const pack = flattenRegistryArgs(pkg.packageArguments);
+  const missingRequired = runtime.missingRequired || pack.missingRequired;
   const parts: string[] = [];
-  if (pkg.runtimeHint === 'docker') {
+  if (isDockerPackage(pkg)) {
+    const rest = runtime.parts[0] === 'run' ? runtime.parts.slice(1) : runtime.parts;
     parts.push('run');
+    if (!rest.includes('-i') && !rest.includes('--interactive')) parts.push('-i');
+    if (!rest.includes('--rm')) parts.push('--rm');
+    parts.push(...rest);
     parts.push(pkg.identifier);
+    parts.push(...pack.parts);
   } else if (pkg.runtimeHint === 'uvx' || pkg.registryType === 'pypi') {
+    parts.push(...runtime.parts);
     parts.push(pkg.identifier);
-    if (pkg.packageArguments?.length) {
-      parts.push(...pkg.packageArguments);
-    }
-  } else {
+    parts.push(...pack.parts);
+  } else if (computeCommand(pkg) === 'npx') {
     parts.push('-y');
+    parts.push(...runtime.parts);
     parts.push(pkg.identifier);
-    if (pkg.packageArguments?.length) {
-      parts.push(...pkg.packageArguments);
-    }
+    parts.push(...pack.parts);
+  } else {
+    parts.push(...runtime.parts);
+    if (pkg.identifier) parts.push(pkg.identifier);
+    parts.push(...pack.parts);
   }
-  return parts.join(' ');
+  return { args: parts.join(' '), missingRequired };
 }
 
 function inferCategories(name: string, description: string): ('search' | 'database' | 'custom')[] {
@@ -127,25 +216,22 @@ function dedupListings(listings: MarketMCPListing[]): MarketMCPListing[] {
   });
 }
 
-export async function fetchOfficialRegistry(cursor?: string): Promise<{
+export async function fetchOfficialRegistry(cursor?: string, search?: string): Promise<{
   listings: MarketMCPListing[];
   pagination: MarketPagination;
 }> {
-  const url = cursor
-    ? `${OFFICIAL_REGISTRY_URL}?limit=50&cursor=${encodeURIComponent(cursor)}`
-    : `${OFFICIAL_REGISTRY_URL}?limit=50`;
+  const params = new URLSearchParams({ limit: '50', version: 'latest' });
+  if (cursor) params.set('cursor', cursor);
+  const query = search?.trim();
+  if (query) params.set('search', query);
+  const url = `${OFFICIAL_REGISTRY_URL}?${params.toString()}`;
 
-  const ck = cursor ? `official_${cursor}` : 'official_page1';
-  const cached = await cacheGet<ReturnType<typeof fetchOfficialRegistry>>(cacheKey(ck));
+  const ck = `official_latest_${query || 'all'}_${cursor || 'page1'}`;
+  const cached = await cacheGet<Awaited<ReturnType<typeof fetchOfficialRegistry>>>(cacheKey(ck));
   if (cached) return cached;
 
   const data = await fetchJson<RegistryListResponse>(url);
-  const latestOnly = (data.servers || []).filter((entry) => {
-    const metas = entry._meta ? Object.values(entry._meta) : [];
-    if (metas.length === 0) return true;
-    return metas.some((m) => m.isLatest === true);
-  });
-  const listings = latestOnly
+  const listings = (data.servers || [])
     .map((entry) => {
       try {
         return mapOfficialRegistry(entry);
@@ -171,25 +257,18 @@ export interface FetchMarketOptions {
   source?: MarketSource;
   cursor?: string;
   pageSize?: number;
+  search?: string;
 }
 
 export async function fetchMarketServers(options: FetchMarketOptions = {}): Promise<{
   listings: MarketMCPListing[];
   pagination: MarketPagination;
 }> {
-  try {
-    const o = await fetchOfficialRegistry(options.cursor);
-    return {
-      listings: dedupListings(o.listings),
-      pagination: o.pagination,
-    };
-  } catch (err) {
-    console.warn('Failed to fetch MCP registry:', err);
-    return {
-      listings: [],
-      pagination: { currentPage: 1, hasMore: false },
-    };
-  }
+  const o = await fetchOfficialRegistry(options.cursor, options.search);
+  return {
+    listings: dedupListings(o.listings),
+    pagination: o.pagination,
+  };
 }
 
 export function searchListings(listings: MarketMCPListing[], query: string): MarketMCPListing[] {

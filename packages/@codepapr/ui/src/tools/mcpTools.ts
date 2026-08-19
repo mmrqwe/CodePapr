@@ -207,8 +207,21 @@ async function writeStoredToolCache(entry: McpToolCacheEntry): Promise<void> {
 
 export async function clearMcpToolDefinitionCache(): Promise<void> {
   memoryToolCache = null;
+  toolNameMap.clear();
+  toolNameMapLoaded = false;
   await cacheRemove(MCP_TOOL_CACHE_KEY);
   await cacheRemove(MCP_TOOL_NAME_MAP_KEY);
+}
+
+function hydrateToolNameMapFromTools(tools: McpToolInfo[]): void {
+  for (const tool of tools) {
+    toolNameMap.set(buildMcpToolName(tool.serverId, tool.toolName), {
+      serverId: tool.serverId,
+      toolName: tool.toolName,
+    });
+  }
+  toolNameMapLoaded = true;
+  void persistToolNameMap();
 }
 
 async function listMcpTools(settings: McpSettings, refresh = false): Promise<McpListToolsResult> {
@@ -220,9 +233,7 @@ async function listMcpTools(settings: McpSettings, refresh = false): Promise<Mcp
   if (!refresh) {
     const cached = await readPersistedToolCache();
     if (cached?.cacheKey === cacheKey) {
-      // 缓存命中也要把 settings 同步进 Rust：call_tool 在未传 settings
-      // 时读 STORED_SETTINGS，重启后这块是空的。同步失败不挡发现——
-      // callMcpTool 仍会带上 settings。
+      hydrateToolNameMapFromTools(cached.tools);
       try {
         await invoke('mcp_update_settings', { settings: toNativeSettings(settings) });
       } catch {
@@ -238,6 +249,7 @@ async function listMcpTools(settings: McpSettings, refresh = false): Promise<Mcp
   });
   const now = Date.now();
   await writeStoredToolCache({ cacheKey, tools: result.tools, errors: result.errors, updatedAt: now, expiresAt: now + MCP_TOOL_CACHE_TTL_MS });
+  hydrateToolNameMapFromTools(result.tools);
   return result;
 }
 
@@ -359,9 +371,18 @@ async function resolveOriginalToolName(displayName: string): Promise<{ serverId:
   const mapped = toolNameMap.get(displayName);
   if (mapped) return mapped;
 
-  const parsed = parseMcpToolName(displayName);
-  if (!parsed) return null;
-  return { serverId: parsed.serverId, toolName: parsed.sanitizedToolName };
+  if (!parseMcpToolName(displayName)) return null;
+
+  const cached = await readPersistedToolCache();
+  const fromCache = cached?.tools.find((tool) => buildMcpToolName(tool.serverId, tool.toolName) === displayName);
+  if (fromCache) {
+    const resolved = { serverId: fromCache.serverId, toolName: fromCache.toolName };
+    toolNameMap.set(displayName, resolved);
+    void persistToolNameMap();
+    return resolved;
+  }
+
+  throw new Error(`MCP tool mapping missing for '${displayName}'. Refresh MCP tools and retry.`);
 }
 
 function extractMcpImages(result: unknown): IImageContent[] {

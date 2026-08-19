@@ -257,6 +257,9 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
 
   const patchServer = (id: string, patch: Partial<McpServerConfig>) => {
     setLocal((current) => normalizeMcpSettings({ ...current, servers: updateServer(current.servers, id, patch) }));
+    if (patch.enabled === false) {
+      void disconnectMcpServer(local, id).then(() => refreshStatus()).catch((err) => appendError(errorMessage(err)));
+    }
   };
 
   const addServer = () => {
@@ -266,6 +269,7 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
   };
 
   const removeServer = (id: string) => {
+    void disconnectMcpServer(local, id).catch(() => undefined);
     const nextServers = local.servers.filter((server) => server.id !== id);
     setLocal((current) => normalizeMcpSettings({ ...current, servers: nextServers }));
     setActiveId(nextServers[0]?.id ?? '');
@@ -366,21 +370,9 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
     }
   };
 
-  // Auto-refresh tools when switching servers (only when MCP globally enabled)
   useEffect(() => {
-    if (local.enabled && activeId) {
-      const active = local.servers.find((s) => s.id === activeId);
-      if (active?.enabled) {
-        void discoverTools(active.id);
-      } else {
-        setTools([]);
-        setMessage('');
-        setStatus('idle');
-      }
-    } else {
-      setTools([]);
-    }
-  }, [activeId, local.enabled]);
+    void refreshStatus();
+  }, []);
 
   const save = () => {
     setSettings({ mcp: local });

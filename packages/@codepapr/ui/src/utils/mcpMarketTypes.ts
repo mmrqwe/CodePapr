@@ -6,13 +6,26 @@ export interface RegistryEnvVar {
   isRequired?: boolean;
   isSecret?: boolean;
   default?: string;
+  value?: string;
   choices?: string[];
 }
+
+export interface RegistryArgument {
+  type?: 'positional' | 'named';
+  name?: string;
+  value?: string;
+  valueHint?: string;
+  default?: string;
+  isRequired?: boolean;
+  isSecret?: boolean;
+}
+
+export type RegistryArgInput = string | RegistryArgument;
 
 export interface RegistryTransport {
   type: 'stdio' | 'streamable-http' | 'sse';
   url?: string;
-  headers?: Record<string, string>;
+  headers?: RegistryEnvVar[] | Record<string, string>;
   variables?: Record<string, string>;
 }
 
@@ -24,8 +37,8 @@ export interface RegistryPackage {
   fileSha256?: string;
   runtimeHint?: 'npx' | 'uvx' | 'docker' | 'dnx';
   transport: RegistryTransport;
-  runtimeArguments?: string[];
-  packageArguments?: string[];
+  runtimeArguments?: RegistryArgInput[];
+  packageArguments?: RegistryArgInput[];
   environmentVariables?: RegistryEnvVar[];
 }
 

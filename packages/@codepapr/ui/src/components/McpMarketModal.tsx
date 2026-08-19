@@ -2,8 +2,8 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useAgentStore } from '../store/agentStore';
 import {
   fetchMarketServers,
-  searchListings,
   filterListings,
+  formatTransportHeaders,
   type FetchMarketOptions,
 } from '../tools/mcpMarketApi';
 import {
@@ -197,7 +197,7 @@ export function listingToServerConfig(listing: MarketMCPListing): McpServerConfi
     args: listing.args || '',
     url: listing.url || '',
     env: envLines.join('\n'),
-    headers: '',
+    headers: formatTransportHeaders(listing.transport?.headers),
     // 空 = 发现全部工具；read-only 仍拦截变更。不要用 *，那会被当成显式放行写工具。
     allowedTools: '',
     deniedTools: '',
@@ -717,11 +717,13 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
     try {
       const result = await fetchMarketServers({
         cursor: options.cursor,
+        search: options.search,
       });
       setListings((prev) => (options.cursor ? [...prev, ...result.listings] : result.listings));
       setOfficialCursor(result.pagination.nextCursor);
       setHasMoreOfficial(result.pagination.hasMore);
     } catch (err: unknown) {
+      if (!options.cursor) setListings([]);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsLoading(false);
@@ -729,28 +731,34 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
   }, []);
 
   useEffect(() => {
-    setListings([]);
-    setOfficialCursor(undefined);
-    setHasMoreOfficial(false);
-    setSelectedListing(null);
-    void loadServers({ cursor: undefined });
-  }, []);
+    const query = searchQuery.trim();
+    const delay = query ? 350 : 0;
+    const handle = window.setTimeout(() => {
+      setListings([]);
+      setOfficialCursor(undefined);
+      setHasMoreOfficial(false);
+      setSelectedListing(null);
+      void loadServers({ search: query || undefined });
+    }, delay);
+    return () => window.clearTimeout(handle);
+  }, [searchQuery, loadServers]);
 
   const handleLoadMore = useCallback(() => {
     if (hasMoreOfficial) {
-      void loadServers({ cursor: officialCursor });
+      void loadServers({
+        cursor: officialCursor,
+        search: searchQuery.trim() || undefined,
+      });
     }
-  }, [hasMoreOfficial, officialCursor, loadServers]);
+  }, [hasMoreOfficial, officialCursor, loadServers, searchQuery]);
 
   const filteredListings = useMemo(() => {
-    let result = searchListings(listings, searchQuery);
-    result = filterListings(result, {
+    return filterListings(listings, {
       transport: transportFilter,
       runtime: runtimeFilter,
       category: categoryFilter,
     });
-    return result;
-  }, [listings, searchQuery, transportFilter, runtimeFilter, categoryFilter]);
+  }, [listings, transportFilter, runtimeFilter, categoryFilter]);
 
   const [installingId, setInstallingId] = useState<string | null>(null);
 
