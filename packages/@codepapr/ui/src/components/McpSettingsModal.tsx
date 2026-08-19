@@ -70,8 +70,9 @@ function copy(lang: Lang | undefined) {
       disconnectServer: 'Disconnect',
       confirmationLabel: 'Confirm risky calls',
       confirmationHint: 'When enabled, a confirmation dialog will appear before executing tools on this server.',
-      permissionHint: 'Read-only blocks tool names starting with create/insert/update/delete/drop/etc. Read-write and Dangerous behave the same. Use Allowed/Denied tools below for precise control.',
-      dangerousNote: 'Dangerous and Read-write behave identically; this label is informational only.',
+      browseMarket: 'Browse Market',
+      permissionHint: 'Read-only blocks tool names starting with create/insert/update/delete/drop/etc. Read-write allows writes. Dangerous allows writes, always requires confirmation, and ignores force-readonly overrides.',
+      dangerousNote: 'Every tool call requires confirmation. Force-readonly overrides are ignored so write tools cannot be disguised as read-only.',
       forceMutating: 'Force mutating',
       forceReadonly: 'Force read-only',
       forceMutatingHint: 'Comma-separated patterns. These tools are always treated as mutating (blocked in read-only mode).',
@@ -129,8 +130,9 @@ function copy(lang: Lang | undefined) {
       disconnectServer: '斷開',
       confirmationLabel: '高風險呼叫確認',
       confirmationHint: '啟用後，執行此服務的工具前將彈出確認對話框。',
-      permissionHint: '唯讀模式僅攔截以 create/insert/update/delete/drop 等前綴開頭的工具名。讀寫與危險模式行為完全一致。如需精確控制，請使用下方允許/拒絕工具列表。',
-      dangerousNote: '危險與讀寫模式行為完全一致，此標籤僅為提示作用。',
+      browseMarket: '瀏覽市場',
+      permissionHint: '唯讀模式僅攔截以 create/insert/update/delete/drop 等前綴開頭的工具名。讀寫允許寫入。危險模式允許寫入、一律要求確認，並忽略「強制視為唯讀」。',
+      dangerousNote: '每次工具呼叫都需要確認。忽略強制唯讀覆蓋，寫入工具不能被偽裝成唯讀。',
       forceMutating: '強制視為寫入',
       forceReadonly: '強制視為唯讀',
       forceMutatingHint: '逗號分隔，支持 * 通配。這些工具始終被視為寫入操作（唯讀模式下被攔截）。',
@@ -187,8 +189,9 @@ confirmation: '高风险调用确认',
       disconnectServer: '断开',
       confirmationLabel: '高风险调用确认',
       confirmationHint: '启用后，执行此服务的工具前将弹出确认对话框。',
-      permissionHint: '只读模式仅拦截以 create/insert/update/delete/drop 等前缀开头的工具名。读写与危险模式行为完全一致。如需精确控制，请使用下方允许/拒绝工具列表。',
-      dangerousNote: '危险与读写模式行为完全一致，此标签仅作提示之用。',
+      browseMarket: '浏览市场',
+      permissionHint: '只读模式仅拦截以 create/insert/update/delete/drop 等前缀开头的工具名。读写允许写入。危险模式允许写入、一律要求确认，并忽略「强制视为只读」。',
+      dangerousNote: '每次工具调用都需要确认。忽略强制只读覆盖，写入工具不能被伪装成只读。',
       forceMutating: '强制视为写入',
       forceReadonly: '强制视为只读',
       forceMutatingHint: '逗号分隔，支持 * 通配。这些工具始终被视为写入操作（只读模式下被拦截）。',
@@ -433,7 +436,7 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
               <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{c.servers}</h3>
               <div className="flex items-center gap-2">
                 {onOpenMarket && (
-                  <button onClick={onOpenMarket} className="rounded-lg border border-purple-500/30 px-2.5 py-1.5 text-[10px] font-medium text-purple-200 hover:bg-purple-500/10">Browse Market</button>
+                  <button onClick={onOpenMarket} className="rounded-lg border border-purple-500/30 px-2.5 py-1.5 text-[10px] font-medium text-purple-200 hover:bg-purple-500/10">{c.browseMarket}</button>
                 )}
                 <button onClick={addServer} className="rounded-lg border border-info-bg px-2.5 py-1.5 text-[10px] font-medium text-info hover:bg-info-bg">{c.add}</button>
               </div>
@@ -594,7 +597,8 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
                     >
                       <input
                         type="checkbox"
-                        checked={activeServer.requireConfirmation}
+                        checked={activeServer.requireConfirmation || activeServer.permissionMode === 'dangerous'}
+                        disabled={activeServer.permissionMode === 'dangerous'}
                         onChange={(event) => patchServer(activeServer.id, { requireConfirmation: event.target.checked })}
                         className="mt-0.5 h-5 w-5 rounded accent-info"
                       />

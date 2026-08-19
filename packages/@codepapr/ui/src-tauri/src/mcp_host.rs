@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use rmcp::{
-    model::CallToolRequestParams,
+    model::{CallToolRequestParams, ClientRequest, PingRequest},
     object,
     service::RunningService,
     transport::{
@@ -35,6 +35,7 @@ static MCP_CLIENTS: OnceLock<AsyncMutex<HashMap<String, SharedMcpClient>>> = Onc
 static EXPANDED_PATH_CACHE: OnceLock<String> = OnceLock::new();
 static PENDING_CONFIRMATIONS: OnceLock<AsyncMutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>> = OnceLock::new();
 static STORED_SETTINGS: OnceLock<AsyncMutex<Option<McpSettings>>> = OnceLock::new();
+static HEALTH_FAILS: OnceLock<AsyncMutex<HashMap<String, u8>>> = OnceLock::new();
 
 fn stored_settings() -> &'static AsyncMutex<Option<McpSettings>> {
     STORED_SETTINGS.get_or_init(|| AsyncMutex::new(None))
@@ -412,13 +413,27 @@ fn looks_mutating_tool(tool_name: &str) -> bool {
 }
 
 fn is_mutating_with_overrides(server: &McpServerConfig, tool_name: &str) -> bool {
-    if server.force_readonly.iter().any(|p| matches_pattern(p, tool_name)) {
+    // Dangerous 忽略 force_readonly：不能把写工具伪装成只读来跳过确认/重试限制。
+    if server.permission_mode != "dangerous"
+        && server
+            .force_readonly
+            .iter()
+            .any(|p| matches_pattern(p, tool_name))
+    {
         return false;
     }
     if server.force_mutating.iter().any(|p| matches_pattern(p, tool_name)) {
         return true;
     }
     looks_mutating_tool(tool_name)
+}
+
+fn confirmation_required(server: &McpServerConfig, tool_name: &str) -> bool {
+    let confirm = server.require_confirmation || server.permission_mode == "dangerous";
+    if !confirm {
+        return false;
+    }
+    server.permission_mode != "read-only" || is_mutating_with_overrides(server, tool_name)
 }
 
 /// `*` / `**` 只表示「发现范围」，不能当作对变更工具的显式放行。
@@ -663,9 +678,20 @@ async fn get_or_connect_client(server: &McpServerConfig) -> Result<SharedMcpClie
 }
 
 async fn invalidate_cached_client(server: &McpServerConfig) {
+    let _ = take_cached_client(server).await;
+}
+
+async fn take_cached_client(server: &McpServerConfig) -> Option<SharedMcpClient> {
     let key = server_cache_key(server);
     let mut guard = clients().lock().await;
-    guard.remove(&key);
+    guard.remove(&key)
+}
+
+async fn close_cached_client(server: &McpServerConfig) {
+    if let Some(client) = take_cached_client(server).await {
+        let mut locked = client.lock().await;
+        let _ = locked.close_with_timeout(Duration::from_secs(2)).await;
+    }
 }
 
 fn truncate_json(mut value: Value, max_bytes: usize) -> Value {
@@ -733,10 +759,12 @@ fn truncate_json(mut value: Value, max_bytes: usize) -> Value {
                     }
                 }
             }
+            map.insert("truncated".to_string(), Value::Bool(true));
             return value;
         }
     }
 
+    let original_error = value.get("isError").cloned();
     let text = serde_json::to_string(&value).unwrap_or_default();
     let end = text
         .char_indices()
@@ -744,22 +772,25 @@ fn truncate_json(mut value: Value, max_bytes: usize) -> Value {
         .take_while(|index| *index <= max_bytes.saturating_sub(100))
         .last()
         .unwrap_or(0);
-    serde_json::json!({
+    let mut envelope = serde_json::json!({
         "content": [{
             "type": "text",
             "text": format!("{}\n...[MCP result truncated: {} bytes > {} bytes]", &text[..end], text.len(), max_bytes)
         }],
-        "isError": false
-    })
+        "truncated": true
+    });
+    if let Some(flag) = original_error {
+        if let Some(map) = envelope.as_object_mut() {
+            map.insert("isError".to_string(), flag);
+        }
+    }
+    envelope
 }
 
 pub async fn list_tools(
     settings: McpSettings,
     refresh: bool,
 ) -> Result<McpListToolsResult, String> {
-    // 目前工具列表走缓存路径，refresh 参数预留（保留 invoke 契约，避免破坏
-    // 前端调用）；显式消费以避免 unused 警告。
-    let _ = refresh;
     update_settings(settings.clone()).await;
 
     if !settings.enabled || !settings.expose_tools {
@@ -776,6 +807,12 @@ pub async fn list_tools(
         .filter(|server| server.enabled)
         .cloned()
         .collect();
+
+    if refresh {
+        for server in &enabled_servers {
+            close_cached_client(server).await;
+        }
+    }
 
     let futures = enabled_servers.iter().map(|server| {
         let server = server.clone();
@@ -872,10 +909,8 @@ pub async fn call_tool(
     // #20：read-only 模式不再整体跳过确认。read-only 下变更工具默认被策略
     // 拦截（无需确认），但 allowed_tools 显式放行的变更工具仍会执行——此时
     // require_confirmation 必须生效，否则配合 allowed_tools 可无确认执行变更。
-    if server.require_confirmation
-        && (server.permission_mode != "read-only"
-            || is_mutating_with_overrides(&server, &tool_name))
-    {
+    // Dangerous 强制确认，且忽略 force_readonly。
+    if confirmation_required(&server, &tool_name) {
         // Fail-closed：没有 UI 通道就无法向用户要确认。旧实现在 app 为 None
         // 时直接跳过确认执行，会把需要确认的工具放行。
         let Some(app_handle) = &app else {
@@ -1034,8 +1069,76 @@ pub async fn list_status(settings: McpSettings) -> Vec<McpServerStatus> {
     result
 }
 
-/// Prune dead connections and return the list of server ids that were removed.
+/// Prune dead and hung connections. Closed sockets are dropped immediately;
+/// idle clients that fail a short ping twice in a row are also removed.
 pub async fn health_check() -> Vec<String> {
+    let mut pruned = prune_closed_clients().await;
+
+    let idle: Vec<(String, SharedMcpClient)> = {
+        let guard = clients().lock().await;
+        guard
+            .iter()
+            .filter_map(|(key, client)| match client.try_lock() {
+                Ok(locked) if !locked.is_closed() => Some((key.clone(), client.clone())),
+                _ => None,
+            })
+            .collect()
+    };
+
+    for (key, client) in idle {
+        let ping_ok = {
+            let Ok(locked) = client.try_lock() else {
+                continue;
+            };
+            if locked.is_closed() {
+                false
+            } else {
+                matches!(
+                    tokio::time::timeout(
+                        Duration::from_secs(3),
+                        locked.send_request(ClientRequest::PingRequest(PingRequest::default())),
+                    )
+                    .await,
+                    Ok(Ok(_))
+                )
+            }
+        };
+        if ping_ok {
+            health_fails().lock().await.remove(&key);
+            continue;
+        }
+        let fails = {
+            let mut map = health_fails().lock().await;
+            let entry = map.entry(key.clone()).or_insert(0);
+            *entry = entry.saturating_add(1);
+            *entry
+        };
+        if fails < 2 {
+            continue;
+        }
+        {
+            let mut guard = clients().lock().await;
+            if let Some(stale) = guard.remove(&key) {
+                drop(guard);
+                if let Ok(mut locked) = stale.try_lock() {
+                    let _ = locked.close_with_timeout(Duration::from_secs(2)).await;
+                }
+            }
+        }
+        health_fails().lock().await.remove(&key);
+        let server_id = key.split('\u{1e}').next().unwrap_or(&key).to_string();
+        if !pruned.contains(&server_id) {
+            pruned.push(server_id);
+        }
+    }
+    pruned
+}
+
+fn health_fails() -> &'static AsyncMutex<HashMap<String, u8>> {
+    HEALTH_FAILS.get_or_init(|| AsyncMutex::new(HashMap::new()))
+}
+
+async fn prune_closed_clients() -> Vec<String> {
     let mut guard = clients().lock().await;
     let dead_keys: Vec<String> = guard
         .iter()
@@ -1053,11 +1156,18 @@ pub async fn health_check() -> Vec<String> {
         .collect();
 
     let mut pruned = Vec::new();
-    for key in dead_keys {
-        guard.remove(&key);
-        let server_id = key.split('\u{1e}').next().unwrap_or(&key).to_string();
+    for key in &dead_keys {
+        guard.remove(key);
+        let server_id = key.split('\u{1e}').next().unwrap_or(key).to_string();
         if !pruned.contains(&server_id) {
             pruned.push(server_id);
+        }
+    }
+    drop(guard);
+    if !dead_keys.is_empty() {
+        let mut fails = health_fails().lock().await;
+        for key in dead_keys {
+            fails.remove(&key);
         }
     }
     pruned
@@ -1438,6 +1548,8 @@ mod tests {
         let text = first.get("text").and_then(|v| v.as_str()).expect("text must exist");
         assert!(text.contains("...[MCP content truncated: 10000 bytes >"));
         assert!(text.len() < 1_500);
+        assert_eq!(truncated.get("truncated").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(truncated.get("isError").and_then(|v| v.as_bool()), Some(false));
     }
 
     #[test]
@@ -1446,7 +1558,28 @@ mod tests {
         let truncated = super::truncate_json(raw, 200);
         assert!(truncated.is_object());
         assert!(truncated.get("content").is_some());
-        assert_eq!(truncated.get("isError").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(truncated.get("truncated").and_then(|v| v.as_bool()), Some(true));
+        assert!(truncated.get("isError").is_none());
+    }
+
+    #[test]
+    fn truncate_json_preserves_original_is_error() {
+        let raw = serde_json::json!({ "isError": true, "foo": "bar".repeat(5000) });
+        let truncated = super::truncate_json(raw, 200);
+        assert_eq!(truncated.get("isError").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(truncated.get("truncated").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    #[test]
+    fn dangerous_forces_confirmation_and_ignores_readonly_override() {
+        let mut server = make_server_with(make_server("sse", "", &[]), "dangerous", false, &[]);
+        assert!(super::confirmation_required(&server, "read"));
+        assert!(super::confirmation_required(&server, "write"));
+        server.force_readonly = vec!["write".to_string()];
+        assert!(super::is_mutating_with_overrides(&server, "write"));
+
+        let rw = make_server_with(make_server("sse", "", &[]), "read-write", false, &[]);
+        assert!(!super::confirmation_required(&rw, "write"));
     }
 
     #[test]

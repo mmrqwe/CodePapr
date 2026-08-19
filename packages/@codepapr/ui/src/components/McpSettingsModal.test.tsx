@@ -145,6 +145,14 @@ describe('McpSettingsModal', () => {
     expect(invokeMock.mock.calls.some(([command]) => command === 'mcp_list_tools')).toBe(false);
   });
 
+  it('uses localized Browse Market copy', async () => {
+    await act(async () => {
+      root.render(<McpSettingsModal onClose={onClose} onOpenMarket={() => undefined} />);
+    });
+    expect(container.innerHTML).toContain('浏览市场');
+    expect(container.innerHTML).not.toContain('Browse Market');
+  });
+
   it('calls onClose when the close button is clicked', async () => {
     await act(async () => {
       root.render(<McpSettingsModal onClose={onClose} />);

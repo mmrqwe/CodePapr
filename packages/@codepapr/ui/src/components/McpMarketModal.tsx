@@ -15,7 +15,7 @@ import {
   sanitizeMcpToolPart,
   type McpServerConfig,
 } from '../utils/mcpTypes';
-import { previewMcpServer, type McpPreviewResult } from '../tools/mcpTools';
+import { previewMcpServer, disconnectMcpServer, type McpPreviewResult } from '../tools/mcpTools';
 import type { Lang } from '../utils/i18n';
 
 function copy(lang: Lang | undefined) {
@@ -51,6 +51,39 @@ function copy(lang: Lang | undefined) {
       addToMyServers: 'Add to My Servers',
       added: 'Server added to MCP settings',
       serverAdded: 'added to your MCP servers. Configure it in MCP Settings.',
+      howToUse: 'How to use',
+      guideRemoteReady1: 'Click "Add to My Servers" below — the server is auto-enabled.',
+      guideRemoteReady2: 'Send any message in chat — tools load automatically.',
+      guideRemoteReady3: 'The agent will offer to call MCP tools when relevant.',
+      guideRemoteAuth1: 'Click "Add to My Servers" below.',
+      guideRemoteAuth2: 'Open MCP Settings → select this server.',
+      guideRemoteAuth3: 'Fill in required environment variables (marked Required).',
+      guideRemoteAuth4: 'Enable the server checkbox → click Save.',
+      guideRemoteAuth5: 'Send any message in chat — tools load automatically.',
+      guideStdio1: 'Click "Add to My Servers" below.',
+      guideStdio2: 'Open MCP Settings → select this server.',
+      guideStdio3: 'Ensure the command is correct (for example npx -y @package/name).',
+      guideStdio4: 'Fill in required environment variables if any.',
+      guideStdio5: 'Enable the server checkbox → click Save.',
+      guideStdio6: 'Send any message in chat — tools load automatically.',
+      previewChecking: 'Checking availability...',
+      previewAvailable: 'Available — {count} tools',
+      previewAuthRequired: 'Requires authentication — not usable without credentials',
+      previewFailed: 'Connection failed',
+      authInstallWarning: 'This server requires authentication. Installing it will fail at tool discovery unless you provide credentials in MCP Settings.',
+      manualConfigFallback: 'This server requires manual configuration after adding.',
+      installEnabledToast: '✓ {name} installed and enabled. Send a message to use its tools.',
+      installDisabledToast: '✓ {name} installed. Open MCP Settings → enable the server → send a message.',
+      alreadyInstalledToast: 'Already installed — a server matching "{name}" already exists.',
+      uninstall: 'Remove',
+      uninstalling: 'Removing...',
+      uninstalledToast: 'Removed {name}',
+      remote: 'Remote',
+      remoteLabel: 'remote',
+      categorySearch: 'Search',
+      categoryDatabase: 'Database',
+      categoryCustom: 'Custom',
+      defaultLabel: 'Default',
     };
   }
   if (lang === 'zh-TW') {
@@ -85,6 +118,39 @@ function copy(lang: Lang | undefined) {
       addToMyServers: '加入我的服務',
       added: '已加入 MCP 設定',
       serverAdded: '已加入你的 MCP 服務。在 MCP 設定中進行配置。',
+      howToUse: '使用方式',
+      guideRemoteReady1: '點擊下方「加入我的服務」——伺服器會自動啟用。',
+      guideRemoteReady2: '在對話中發送任意訊息——工具會自動載入。',
+      guideRemoteReady3: '相關時 Agent 會提議呼叫 MCP 工具。',
+      guideRemoteAuth1: '點擊下方「加入我的服務」。',
+      guideRemoteAuth2: '開啟 MCP 設定 → 選取此服務。',
+      guideRemoteAuth3: '填寫必填環境變數（標示為必須）。',
+      guideRemoteAuth4: '勾選啟用 → 點擊保存。',
+      guideRemoteAuth5: '在對話中發送任意訊息——工具會自動載入。',
+      guideStdio1: '點擊下方「加入我的服務」。',
+      guideStdio2: '開啟 MCP 設定 → 選取此服務。',
+      guideStdio3: '確認命令正確（例如 npx -y @package/name）。',
+      guideStdio4: '如有必填環境變數請填寫。',
+      guideStdio5: '勾選啟用 → 點擊保存。',
+      guideStdio6: '在對話中發送任意訊息——工具會自動載入。',
+      previewChecking: '正在檢查可用性...',
+      previewAvailable: '可用 — {count} 個工具',
+      previewAuthRequired: '需要驗證——沒有憑證無法使用',
+      previewFailed: '連線失敗',
+      authInstallWarning: '此服務需要驗證。除非你在 MCP 設定中提供憑證，否則安裝後工具發現會失敗。',
+      manualConfigFallback: '此服務加入後需要手動配置。',
+      installEnabledToast: '{name} 已安裝並啟用。發送訊息即可使用其工具。',
+      installDisabledToast: '{name} 已安裝。請開啟 MCP 設定 → 啟用服務 → 再發送訊息。',
+      alreadyInstalledToast: '已安裝——列表中已存在同名服務「{name}」。',
+      uninstall: '移除',
+      uninstalling: '移除中...',
+      uninstalledToast: '已移除 {name}',
+      remote: '遠端',
+      categorySearch: '搜尋',
+      categoryDatabase: '資料庫',
+      categoryCustom: '自訂',
+      remoteLabel: '遠端',
+      defaultLabel: '預設',
     };
   }
   return {
@@ -118,6 +184,39 @@ function copy(lang: Lang | undefined) {
     addToMyServers: '加入我的服务',
     added: '已加入 MCP 设置',
     serverAdded: '已加入你的 MCP 服务。在 MCP 设置中进行配置。',
+    howToUse: '使用方式',
+    guideRemoteReady1: '点击下方「加入我的服务」——服务器会自动启用。',
+    guideRemoteReady2: '在对话中发送任意消息——工具会自动加载。',
+    guideRemoteReady3: '相关时 Agent 会提议调用 MCP 工具。',
+    guideRemoteAuth1: '点击下方「加入我的服务」。',
+    guideRemoteAuth2: '打开 MCP 设置 → 选择此服务。',
+    guideRemoteAuth3: '填写必填环境变量（标示为必须）。',
+    guideRemoteAuth4: '勾选启用 → 点击保存。',
+    guideRemoteAuth5: '在对话中发送任意消息——工具会自动加载。',
+    guideStdio1: '点击下方「加入我的服务」。',
+    guideStdio2: '打开 MCP 设置 → 选择此服务。',
+    guideStdio3: '确认命令正确（例如 npx -y @package/name）。',
+    guideStdio4: '如有必填环境变量请填写。',
+    guideStdio5: '勾选启用 → 点击保存。',
+    guideStdio6: '在对话中发送任意消息——工具会自动加载。',
+    previewChecking: '正在检查可用性...',
+    previewAvailable: '可用 — {count} 个工具',
+    previewAuthRequired: '需要验证——没有凭据无法使用',
+    previewFailed: '连接失败',
+    authInstallWarning: '此服务需要验证。除非你在 MCP 设置中提供凭据，否则安装后工具发现会失败。',
+    manualConfigFallback: '此服务加入后需要手动配置。',
+    installEnabledToast: '{name} 已安装并启用。发送消息即可使用其工具。',
+    installDisabledToast: '{name} 已安装。请打开 MCP 设置 → 启用服务 → 再发送消息。',
+    alreadyInstalledToast: '已安装——列表中已存在同名服务「{name}」。',
+    uninstall: '移除',
+    uninstalling: '移除中...',
+    uninstalledToast: '已移除 {name}',
+    remote: '远程',
+    categorySearch: '搜索',
+    categoryDatabase: '数据库',
+    categoryCustom: '自定义',
+    remoteLabel: '远程',
+    defaultLabel: '默认',
   };
 }
 
@@ -148,6 +247,20 @@ export function isListingInstalled(installedIds: Set<string>, listing: MarketMCP
   if (listing.id && installedIds.has(listing.id)) return true;
   if (listing.id && installedIds.has(sanitizeMcpToolPart(listing.id).toLowerCase())) return true;
   return installedIds.has(sanitizeMcpToolPart(listing.name).toLowerCase());
+}
+
+export function findInstalledServer(
+  servers: McpServerConfig[],
+  listing: MarketMCPListing,
+): McpServerConfig | undefined {
+  return servers.find((server) => {
+    const ids = new Set<string>([
+      server.id,
+      sanitizeMcpToolPart(server.id).toLowerCase(),
+    ]);
+    if (server.name) ids.add(sanitizeMcpToolPart(server.name).toLowerCase());
+    return isListingInstalled(ids, listing);
+  });
 }
 
 export function listingToServerConfig(listing: MarketMCPListing): McpServerConfig {
@@ -282,7 +395,7 @@ function ListingCard({
             : 'border-line text-fg-muted'
         }`}>
           <TransportIcon type={listing.transport.type} />
-          {isRemote ? 'Remote' : listing.transport.type}
+          {isRemote ? c.remote : listing.transport.type}
         </span>
         {hostname && (
           <span className="inline-flex items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-[10px] text-fg-muted">
@@ -332,7 +445,9 @@ function ListingDetail({
   listing,
   isInstalled,
   isInstalling,
+  isUninstalling,
   onInstall,
+  onUninstall,
   onClose,
   onCloseModal,
   c,
@@ -340,7 +455,9 @@ function ListingDetail({
   listing: MarketMCPListing;
   isInstalled: boolean;
   isInstalling: boolean;
+  isUninstalling: boolean;
   onInstall: (listing: MarketMCPListing) => void;
+  onUninstall: (listing: MarketMCPListing) => void;
   onClose: () => void;
   onCloseModal: () => void;
   c: ReturnType<typeof copy>;
@@ -429,7 +546,7 @@ function ListingDetail({
                   <circle cx="12" cy="12" r="10" opacity="0.25" />
                   <path d="M22 12a10 10 0 0 0-10-10" opacity="0.9" />
                 </svg>
-                Checking availability...
+                {c.previewChecking}
               </div>
             )}
             {previewDone && previewResult && (
@@ -437,7 +554,7 @@ function ListingDetail({
                 <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
                 </svg>
-                Available — {previewResult.toolCount} tools
+                {c.previewAvailable.replace('{count}', String(previewResult.toolCount))}
               </div>
             )}
             {previewDone && isAuthRequired && (
@@ -446,7 +563,7 @@ function ListingDetail({
                   <rect x="3" y="11" width="18" height="11" rx="2" />
                   <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                 </svg>
-                Requires authentication — not usable without credentials
+                {c.previewAuthRequired}
               </div>
             )}
             {previewDone && previewError && !isAuthRequired && (
@@ -455,7 +572,7 @@ function ListingDetail({
                   <circle cx="12" cy="12" r="10" />
                   <path d="M12 8v4M12 16h.01" />
                 </svg>
-                Connection failed
+                {c.previewFailed}
               </div>
             )}
 
@@ -466,7 +583,7 @@ function ListingDetail({
                 onClick={handlePreview}
                 className="ml-2 text-[10px] text-fg-muted underline transition-colors hover:text-fg-soft"
               >
-                Retry
+                {c.retry}
               </button>
             )}
 
@@ -523,29 +640,29 @@ function ListingDetail({
 
         {/* Configuration Guide */}
         <div className="mt-4 rounded-xl border border-line bg-base p-4">
-          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-muted">How to use</h4>
+          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-muted">{c.howToUse}</h4>
           {isRemote && !listing.envVars.some(e => e.isRequired) ? (
             <ol className="space-y-1.5 text-[11px] leading-relaxed text-fg-muted">
-              <li><span className="text-info">1.</span> Click "Add to My Servers" below — server is auto-enabled.</li>
-              <li><span className="text-info">2.</span> Send any message in chat — tools load automatically.</li>
-              <li><span className="text-info">3.</span> The agent will offer to call MCP tools when relevant.</li>
+              <li><span className="text-info">1.</span> {c.guideRemoteReady1}</li>
+              <li><span className="text-info">2.</span> {c.guideRemoteReady2}</li>
+              <li><span className="text-info">3.</span> {c.guideRemoteReady3}</li>
             </ol>
           ) : isRemote && listing.envVars.some(e => e.isRequired) ? (
             <ol className="space-y-1.5 text-[11px] leading-relaxed text-fg-muted">
-              <li><span className="text-info">1.</span> Click "Add to My Servers" below.</li>
-              <li><span className="text-info">2.</span> Open <strong className="text-fg-soft">MCP Settings</strong> → select this server.</li>
-              <li><span className="text-info">3.</span> Fill in required environment variables (marked <span className="text-danger">Required</span>).</li>
-              <li><span className="text-info">4.</span> Enable the server checkbox → click <strong className="text-fg-soft">Save</strong>.</li>
-              <li><span className="text-info">5.</span> Send any message in chat — tools load automatically.</li>
+              <li><span className="text-info">1.</span> {c.guideRemoteAuth1}</li>
+              <li><span className="text-info">2.</span> {c.guideRemoteAuth2}</li>
+              <li><span className="text-info">3.</span> {c.guideRemoteAuth3}</li>
+              <li><span className="text-info">4.</span> {c.guideRemoteAuth4}</li>
+              <li><span className="text-info">5.</span> {c.guideRemoteAuth5}</li>
             </ol>
           ) : (
             <ol className="space-y-1.5 text-[11px] leading-relaxed text-fg-muted">
-              <li><span className="text-info">1.</span> Click "Add to My Servers" below.</li>
-              <li><span className="text-info">2.</span> Open <strong className="text-fg-soft">MCP Settings</strong> → select this server.</li>
-              <li><span className="text-info">3.</span> Ensure the command is correct (e.g. <code className="text-fg-soft">npx -y @package/name</code>).</li>
-              <li><span className="text-info">4.</span> Fill in required environment variables if any.</li>
-              <li><span className="text-info">5.</span> Enable the server checkbox → click <strong className="text-fg-soft">Save</strong>.</li>
-              <li><span className="text-info">6.</span> Send any message in chat — tools load automatically.</li>
+              <li><span className="text-info">1.</span> {c.guideStdio1}</li>
+              <li><span className="text-info">2.</span> {c.guideStdio2}</li>
+              <li><span className="text-info">3.</span> {c.guideStdio3}</li>
+              <li><span className="text-info">4.</span> {c.guideStdio4}</li>
+              <li><span className="text-info">5.</span> {c.guideStdio5}</li>
+              <li><span className="text-info">6.</span> {c.guideStdio6}</li>
             </ol>
           )}
         </div>
@@ -555,7 +672,7 @@ function ListingDetail({
             <h4 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-muted">{c.transport}</h4>
             <p className={`mt-1 text-sm font-medium ${isRemote ? 'text-ok' : 'text-fg'}`}>
               {listing.transport.type}
-              {isRemote && <span className="ml-1.5 text-[10px] font-normal text-ok">remote</span>}
+              {isRemote && <span className="ml-1.5 text-[10px] font-normal text-ok">{c.remoteLabel}</span>}
             </p>
             {hostname && (
               <p className="mt-1 truncate text-[11px] text-fg-muted">{listing.url}</p>
@@ -587,7 +704,7 @@ function ListingDetail({
                   {ev.description && <p className="mt-1 text-[11px] text-fg-muted">{ev.description}</p>}
                   {ev.default !== undefined && ev.default !== '' && (
                     <p className="mt-1 text-[10px] text-fg-dim">
-                      Default: <code className="text-fg-muted">{ev.default}</code>
+                      {c.defaultLabel}: <code className="text-fg-muted">{ev.default}</code>
                     </p>
                   )}
                 </div>
@@ -611,21 +728,31 @@ function ListingDetail({
       <div className="border-t border-line px-6 py-4">
         {listing.needsManualConfig && (
           <div className="mb-3 rounded-xl border border-warn-bg bg-warn-bg px-3 py-2 text-[11px] leading-relaxed text-warn">
-            {listing.manualConfigNote || 'This server requires manual configuration after adding.'}
+            {listing.manualConfigNote || c.manualConfigFallback}
           </div>
         )}
         {isRemote && previewDone && isAuthRequired && !isInstalled && (
           <div className="mb-3 rounded-xl border border-danger-bg bg-danger-bg px-3 py-2 text-[11px] leading-relaxed text-danger">
-            ⚠ This server requires authentication. Installing it will fail at tool discovery unless you provide credentials in MCP Settings.
+            ⚠ {c.authInstallWarning}
           </div>
         )}
         {isInstalled ? (
-          <span className="inline-flex w-full items-center justify-center rounded-xl bg-ok-bg py-3 text-sm font-semibold text-ok">
-            <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-            </svg>
-            {c.installedBadge}
-          </span>
+          <div className="flex gap-2">
+            <span className="inline-flex flex-1 items-center justify-center rounded-xl bg-ok-bg py-3 text-sm font-semibold text-ok">
+              <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+              </svg>
+              {c.installedBadge}
+            </span>
+            <button
+              type="button"
+              onClick={() => onUninstall(listing)}
+              disabled={isUninstalling}
+              className="rounded-xl border border-danger-bg px-4 py-3 text-sm font-semibold text-danger transition-colors hover:bg-danger-bg disabled:opacity-50"
+            >
+              {isUninstalling ? c.uninstalling : c.uninstall}
+            </button>
+          </div>
         ) : isInstalling ? (
           <span className="inline-flex w-full items-center justify-center rounded-xl bg-slate-500/15 py-3 text-sm font-semibold text-fg-soft">
             <svg className="mr-2 h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
@@ -761,6 +888,7 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
   }, [listings, transportFilter, runtimeFilter, categoryFilter]);
 
   const [installingId, setInstallingId] = useState<string | null>(null);
+  const [uninstallingId, setUninstallingId] = useState<string | null>(null);
 
   const handleInstall = useCallback(async (listing: MarketMCPListing) => {
     setInstallingId(listing.id);
@@ -779,22 +907,34 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
           mcp: { ...mcp, servers: newServers, enabled: true, exposeTools: true },
         });
         if (config.enabled) {
-          showToast(`✓ ${listing.title} installed and enabled. Send a message to use its tools.`);
+          showToast(c.installEnabledToast.replace('{name}', listing.title));
         } else {
-          showToast(`✓ ${listing.title} installed. Open MCP Settings → enable the server → send a message.`);
+          showToast(c.installDisabledToast.replace('{name}', listing.title));
         }
       } else {
-        // N20：重复点击安装必须给出明确反馈，而不是静默跳过。
-        showToast(
-          settings.lang === 'en'
-            ? `Already installed — a server matching "${exists.name}" already exists.`
-            : settings.lang === 'zh-TW'
-              ? `已安裝——列表中已存在同名服務「${exists.name}」。`
-              : `已安装——列表中已存在同名服务「${exists.name}」。`
-        );
+        showToast(c.alreadyInstalledToast.replace('{name}', exists.name));
       }
     } finally {
       setInstallingId(null);
+    }
+  }, [settings, setSettings, c, showToast]);
+
+  const handleUninstall = useCallback(async (listing: MarketMCPListing) => {
+    const match = findInstalledServer(settings.mcp.servers, listing);
+    if (!match) return;
+    setUninstallingId(listing.id);
+    try {
+      await disconnectMcpServer(settings.mcp, match.id);
+      setSettings({
+        ...settings,
+        mcp: {
+          ...settings.mcp,
+          servers: settings.mcp.servers.filter((server) => server.id !== match.id),
+        },
+      });
+      showToast(c.uninstalledToast.replace('{name}', listing.title));
+    } finally {
+      setUninstallingId(null);
     }
   }, [settings, setSettings, c, showToast]);
 
@@ -858,9 +998,9 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
               className="rounded-xl border border-line bg-base px-3 py-2 text-xs text-fg-soft focus:border-info focus:outline-none"
             >
               <option value="">{c.category}: {c.all}</option>
-              <option value="search">{c.all === 'All' ? 'Search' : '搜索'}</option>
-              <option value="database">{c.all === 'All' ? 'Database' : '数据库'}</option>
-              <option value="custom">{c.all === 'All' ? 'Custom' : '自订'}</option>
+              <option value="search">{c.categorySearch}</option>
+              <option value="database">{c.categoryDatabase}</option>
+              <option value="custom">{c.categoryCustom}</option>
             </select>
           </div>
         </div>
@@ -940,7 +1080,9 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
                 listing={selectedListing}
                 isInstalled={isListingInstalled(installedIds, selectedListing)}
                 isInstalling={installingId === selectedListing.id}
+                isUninstalling={uninstallingId === selectedListing.id}
                 onInstall={handleInstall}
+                onUninstall={handleUninstall}
                 onClose={() => setSelectedListing(null)}
                 onCloseModal={onClose}
                 c={c}

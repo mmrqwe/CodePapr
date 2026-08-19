@@ -63,7 +63,7 @@ function mapOfficialRegistry(entry: RegistryServerEntry): MarketMCPListing {
     iconUrl: server.icons?.[0]?.src ?? '',
     websiteUrl: server.websiteUrl ?? '',
     repositoryUrl: server.repository?.url ?? '',
-    verified: true,
+    verified: false,
     useCount: 0,
     version: server.version,
     needsManualConfig,

@@ -2,7 +2,7 @@
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { sanitizeMcpToolPart } from '../utils/mcpTypes';
-import { isListingInstalled, listingToServerConfig } from './McpMarketModal';
+import { isListingInstalled, listingToServerConfig, findInstalledServer } from './McpMarketModal';
 import { confirmSkillOverwrite, confirmSkillUninstall } from './SkillMarketModal';
 import type { MarketMCPListing } from '../utils/mcpMarketTypes';
 
@@ -47,6 +47,14 @@ describe('isListingInstalled（N20 MCP 已安装判定）', () => {
   it('未安装时返回 false', () => {
     const installedIds = new Set(['other-server']);
     expect(isListingInstalled(installedIds, mcpListing({}))).toBe(false);
+  });
+});
+
+describe('findInstalledServer', () => {
+  it('returns the settings server that matches a market listing', () => {
+    const name = '@modelcontextprotocol/server-filesystem';
+    const server = listingToServerConfig(mcpListing({ id: '', name }));
+    expect(findInstalledServer([server], mcpListing({ id: '', name }))?.id).toBe(server.id);
   });
 });
 
