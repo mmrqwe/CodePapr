@@ -83,10 +83,6 @@ interface LspCodeAction {
   edit?: LspWorkspaceEdit;
 }
 
-function normalizePath(value: string): string {
-  return value.replace(/\\/g, '/').replace(/\/+/g, '/');
-}
-
 function toLspPosition(line: number, column?: number): LspPosition {
   return {
     line: Math.max(0, line - 1),

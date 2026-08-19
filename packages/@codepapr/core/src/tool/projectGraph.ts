@@ -1312,7 +1312,7 @@ function buildPythonModuleContext(sourcePath: string, content: string, allFiles:
         const localName = parts[1]?.trim() ?? importedName;
         if (!importedName || !localName || importedName === '*') continue;
         let bindingPath: string = targetPath;
-        if (isRelative && /^[\.]+$/.test(modulePath)) {
+        if (isRelative && /^[.]+$/.test(modulePath)) {
           bindingPath =
             resolveImportTarget(sourcePath, `${modulePath}${importedName}`, allFiles, 'python') ?? targetPath;
           if (bindingPath !== targetPath) {
