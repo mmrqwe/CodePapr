@@ -242,6 +242,34 @@ describe('buildWorkspaceProjectGraph', () => {
     );
   });
 
+  it('does not treat a library file with many exports as an entry point', () => {
+    const graph = buildWorkspaceProjectGraph({
+      root: '.',
+      tree: '.\n- src/',
+      files: [
+        {
+          path: 'src/utils.ts',
+          language: 'TypeScript',
+          bytes: 200,
+          symbolSource: 'ast',
+          symbols: [
+            { name: 'formatDate', kind: 'function', signature: 'export function formatDate()', line: 1, exported: true },
+            { name: 'parseDate', kind: 'function', signature: 'export function parseDate()', line: 2, exported: true },
+            { name: 'clamp', kind: 'function', signature: 'export function clamp()', line: 3, exported: true },
+          ],
+        },
+      ],
+      fileContents: {
+        'src/utils.ts': {
+          content: 'export function formatDate() {}\nexport function parseDate() {}\nexport function clamp() {}\n',
+        },
+      },
+    });
+
+    expect(graph.files[0]?.entryPoint).toBeFalsy();
+    expect(graph.nodes.filter((node) => node.kind === 'file' && node.entryPoint)).toEqual([]);
+  });
+
   it('preserves LSP symbol provenance for semantic graph consumers', () => {
     const graph = buildWorkspaceProjectGraph({
       root: '.',

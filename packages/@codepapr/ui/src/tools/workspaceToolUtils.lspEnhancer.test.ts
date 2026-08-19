@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
@@ -9,10 +9,15 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 import { createLspProjectGraphEnhancer } from './workspaceToolUtils';
+import { globalLspPool } from './workspaceProjectMapLsp';
 
 describe('createLspProjectGraphEnhancer', () => {
   beforeEach(() => {
     invokeMock.mockReset();
+  });
+
+  afterEach(async () => {
+    await globalLspPool.closeAll();
   });
 
   it('attaches enrich edges to the URI-mapped file, not a shorter same-suffix sibling', async () => {

@@ -15,6 +15,7 @@ export interface WorkspaceEntrypointCandidate {
   score: number;
   language?: string;
   qualifiedName?: string;
+  heuristic: true;
 }
 
 export interface WorkspaceEntrypointsResult {
@@ -54,6 +55,7 @@ export function findWorkspaceEntrypoints(
       score: node.entryPointScore ?? 0,
       language: node.language,
       qualifiedName: node.qualifiedName,
+      heuristic: true as const,
     }))
     .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path));
 

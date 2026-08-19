@@ -175,6 +175,7 @@ export type {
   CircularDependencyResult,
   DeadCodeSymbol,
   DeadCodeResult,
+  DeadCodeConfidence,
   TypeNode,
   TypeHierarchyResult,
   TestDiscoveryResult,

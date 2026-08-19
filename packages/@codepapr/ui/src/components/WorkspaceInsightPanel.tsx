@@ -4,7 +4,7 @@ import { useAgentStore } from '../store/agentStore';
 import { yieldToMainThread } from '../utils/taskScheduling';
 import {
   buildWorkspaceProjectGraph,
-  buildWorkspaceProjectMap,
+  buildWorkspaceProjectMapSync,
   enrichWorkspaceProjectGraph,
   DEFAULT_LSP_ENRICH_SYMBOLS,
   buildGitDiffSummary,
@@ -872,7 +872,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
 
         const buildViaFallback = async (): Promise<WorkspaceProjectGraphResult> => {
           appendDebug('路径: 非Worker(fallback)');
-          const projectGraphProjectMap = await buildWorkspaceProjectMap({
+          const projectGraphProjectMap = buildWorkspaceProjectMapSync({
             rootRelativePath: insightRoot,
             entries: insightEntries,
             fileContents,
@@ -2076,11 +2076,11 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                       count={projectGraphInsights.deadCode.total}
                       badgeClass="border border-warn-bg bg-warn-bg text-warn"
                     >
-                      {projectGraphInsights.deadCode.total === 0 ? (
+                      {projectGraphInsights.deadCode.total === 0 && projectGraphInsights.deadCode.candidateTotal === 0 ? (
                         <div className="px-1.5 text-[10px] text-fg-dim">{t.graphInsightsNone}</div>
                       ) : (
                         <div className="flex flex-col gap-0.5">
-                          {projectGraphInsights.deadCode.unusedSymbols.slice(0, 30).map((s) => (
+                          {projectGraphInsights.deadCode.unusedSymbols.slice(0, 24).map((s) => (
                             <button
                               key={s.id}
                               type="button"
@@ -2088,14 +2088,27 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                               title={`${s.path}:${s.line}`}
                               className={INSIGHT_ITEM_CLASS}
                             >
-                              {s.exported && <span className="shrink-0 text-warn">★</span>}
                               <span className="shrink-0 rounded bg-control px-1 text-[8px] uppercase text-fg-muted">{s.kind}</span>
                               <span className="truncate">{s.name}</span>
                               <span className="ml-auto shrink-0 text-[9px] text-fg-dim">{s.path.split('/').pop()}:L{s.line}</span>
                             </button>
                           ))}
-                          {projectGraphInsights.deadCode.total > 30 && (
-                            <div className="px-1.5 text-[9px] text-fg-dim">+{projectGraphInsights.deadCode.total - 30}</div>
+                          {projectGraphInsights.deadCode.exportedCandidates.slice(0, 6).map((s) => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => handleInsightDeadCodeClick(s)}
+                              title={`${s.path}:${s.line} (${s.reason})`}
+                              className={INSIGHT_ITEM_CLASS}
+                            >
+                              <span className="shrink-0 text-warn">★</span>
+                              <span className="shrink-0 rounded bg-control px-1 text-[8px] uppercase text-fg-muted">{s.kind}</span>
+                              <span className="truncate">{s.name}</span>
+                              <span className="ml-auto shrink-0 text-[9px] text-fg-dim">{s.path.split('/').pop()}:L{s.line}</span>
+                            </button>
+                          ))}
+                          {projectGraphInsights.deadCode.total > 24 && (
+                            <div className="px-1.5 text-[9px] text-fg-dim">+{projectGraphInsights.deadCode.total - 24}</div>
                           )}
                         </div>
                       )}

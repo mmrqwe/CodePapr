@@ -43,7 +43,7 @@ function makeGraph(overrides: Partial<Parameters<typeof buildWorkspaceProjectGra
         content: 'import { helper, LibClass } from "./lib";\ndescribe("lib", () => { it("works", () => { expect(helper()).toBe(1); }); });\n',
       },
       'src/models.ts': {
-        content: 'export class Model { id = 0; }\nexport function unusedFn() {}\n',
+        content: 'export class Model { id = 0; }\nexport function unusedFn() {}\nfunction localUnused() {}\n',
       },
     },
     files: [
@@ -72,6 +72,7 @@ function makeGraph(overrides: Partial<Parameters<typeof buildWorkspaceProjectGra
         symbols: [
           { name: 'Model', kind: 'class', signature: 'export class Model', line: 1, exported: true },
           { name: 'unusedFn', kind: 'function', signature: 'export function unusedFn()', line: 2, exported: true },
+          { name: 'localUnused', kind: 'function', signature: 'function localUnused()', line: 3, exported: false },
         ],
       },
     ],
@@ -101,10 +102,40 @@ describe('ProjectGraph Analysis Functions', () => {
       const graph = makeGraph();
       const result = detectDeadCode(graph);
       const names = result.unusedSymbols.map((s) => s.name);
-      // unusedFn 在夹具里未被任何地方引用，必须被识别为死代码。
-      expect(names).toContain('unusedFn');
+      // localUnused 未导出且无引用，作为 likely 死代码。
+      expect(names).toContain('localUnused');
+      expect(names).not.toContain('unusedFn');
+      expect(result.exportedCandidates.map((s) => s.name)).toContain('unusedFn');
       expect(result.total).toBeGreaterThan(0);
       expect(result.summary).toBeTruthy();
+    });
+
+    it('keeps exported APIs and framework callbacks as candidates, not likely dead code', () => {
+      const graph = {
+        nodes: [
+          {
+            id: 'symbol:src/a.ts:onClick',
+            kind: 'symbol',
+            path: 'src/a.ts',
+            label: 'onClick',
+            symbol: { name: 'onClick', kind: 'method', line: 4, signature: 'onClick()', exported: false },
+          },
+          {
+            id: 'symbol:src/a.ts:Widget',
+            kind: 'symbol',
+            path: 'src/a.ts',
+            label: 'Widget',
+            symbol: { name: 'Widget', kind: 'function', line: 1, signature: 'export function Widget()', exported: true },
+          },
+        ],
+        edges: [],
+      } as unknown as WorkspaceProjectGraphResult;
+
+      const result = detectDeadCode(graph);
+      expect(result.unusedSymbols.map((s) => s.name)).toEqual([]);
+      expect(result.exportedCandidates.map((s) => s.name).sort()).toEqual(['Widget', 'onClick']);
+      expect(result.total).toBe(0);
+      expect(result.candidateTotal).toBe(2);
     });
 
     it('does not flag symbols that are actually referenced', () => {

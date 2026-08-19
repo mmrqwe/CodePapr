@@ -158,6 +158,25 @@ describe('resolveProjectMapSymbolOverrides', () => {
       ])
     );
   });
+
+  it('acquires and releases pool handles on the production batch-symbols path', async () => {
+    const acquire = vi.spyOn(globalLspPool, 'acquire');
+    const release = vi.spyOn(globalLspPool, 'release');
+    invokeMock.mockResolvedValue([]);
+
+    await resolveProjectMapSymbolOverrides(
+      '/tmp/codepapr-workspace',
+      {
+        'src/a.ts': { content: 'export const value = 1;\n', bytes: 24 },
+      },
+      4,
+    );
+
+    expect(acquire).toHaveBeenCalledWith('typescript', '/tmp/codepapr-workspace');
+    expect(release).toHaveBeenCalled();
+    acquire.mockRestore();
+    release.mockRestore();
+  });
 });
 
 describe('globalLspPool eviction', () => {

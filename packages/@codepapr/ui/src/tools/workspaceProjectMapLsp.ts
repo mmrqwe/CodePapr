@@ -295,6 +295,22 @@ export function normalizeProjectMapDocumentSymbols(
   return symbols;
 }
 
+export async function withLspPoolHandles<T>(
+  workspacePath: string,
+  languageIds: Iterable<string>,
+  run: () => Promise<T>,
+): Promise<T> {
+  const unique = [...new Set([...languageIds].filter(Boolean))];
+  const handles = await Promise.all(unique.map((languageId) => globalLspPool.acquire(languageId, workspacePath)));
+  try {
+    return await run();
+  } finally {
+    for (const handle of handles) {
+      globalLspPool.release(handle);
+    }
+  }
+}
+
 export const LSP_BATCH_SYMBOLS_DEADLINE_MS = 12_000;
 
 export async function resolveProjectMapSymbolOverrides(
@@ -322,72 +338,78 @@ export async function resolveProjectMapSymbolOverrides(
     return overrides;
   }
 
-  // 批量路径：一次 IPC 往返内完成整批文件的 open→documentSymbol→close，
-  // 避免旧实现每文件 3 次往返（500 文件 = 1500 次）的传输与解析开销。
-  // 分批限制单次 IPC payload 大小（每块约 40 个文件），块间并发。
-  const BATCH_CHUNK_SIZE = 40;
-  const chunks: Array<Array<(typeof lspSupportedFiles)[number]>> = [];
-  for (let i = 0; i < lspSupportedFiles.length; i += BATCH_CHUNK_SIZE) {
-    chunks.push(lspSupportedFiles.slice(i, i + BATCH_CHUNK_SIZE));
-  }
+  return withLspPoolHandles(
+    workspacePath,
+    lspSupportedFiles.map((file) => file.languageId),
+    async () => {
+      // 批量路径：一次 IPC 往返内完成整批文件的 open→documentSymbol→close，
+      // 避免旧实现每文件 3 次往返（500 文件 = 1500 次）的传输与解析开销。
+      // 分批限制单次 IPC payload 大小（每块约 40 个文件），块间并发。
+      const BATCH_CHUNK_SIZE = 40;
+      const chunks: Array<Array<(typeof lspSupportedFiles)[number]>> = [];
+      for (let i = 0; i < lspSupportedFiles.length; i += BATCH_CHUNK_SIZE) {
+        chunks.push(lspSupportedFiles.slice(i, i + BATCH_CHUNK_SIZE));
+      }
 
-  for (let i = 0; i < chunks.length; i += Math.max(1, concurrencyLimit)) {
-    if (isCancelled?.() || timedOut()) break;
-    const chunkBatch = chunks.slice(i, i + Math.max(1, concurrencyLimit));
-    const remainingMs = Math.max(1, deadlineMs - (Date.now() - started));
-    const batchResults = await Promise.allSettled(
-      chunkBatch.map(async (chunk) => {
-        if (isCancelled?.() || timedOut()) return [];
-        try {
-          const outputs = await new Promise<Array<{ path: string; result: unknown; error?: string | null }>>(
-            (resolve, reject) => {
-              const timer = setTimeout(() => reject(new Error('lsp_batch_symbols deadline')), remainingMs);
-              invoke<Array<{ path: string; result: unknown; error?: string | null }>>(
-                'lsp_batch_symbols',
-                {
-                  workspacePath,
-                  files: chunk.map((file) => ({
-                    path: file.path,
-                    languageId: file.languageId,
-                    content: file.content,
-                  })),
-                }
-              ).then(
-                (value) => {
-                  clearTimeout(timer);
-                  resolve(value);
-                },
-                (error) => {
-                  clearTimeout(timer);
-                  reject(error);
+      for (let i = 0; i < chunks.length; i += Math.max(1, concurrencyLimit)) {
+        if (isCancelled?.() || timedOut()) break;
+        const chunkBatch = chunks.slice(i, i + Math.max(1, concurrencyLimit));
+        const remainingMs = Math.max(1, deadlineMs - (Date.now() - started));
+        const batchResults = await Promise.allSettled(
+          chunkBatch.map(async (chunk) => {
+            if (isCancelled?.() || timedOut()) return [];
+            try {
+              const outputs = await new Promise<Array<{ path: string; result: unknown; error?: string | null }>>(
+                (resolve, reject) => {
+                  const timer = setTimeout(() => reject(new Error('lsp_batch_symbols deadline')), remainingMs);
+                  invoke<Array<{ path: string; result: unknown; error?: string | null }>>(
+                    'lsp_batch_symbols',
+                    {
+                      workspacePath,
+                      files: chunk.map((file) => ({
+                        path: file.path,
+                        languageId: file.languageId,
+                        content: file.content,
+                      })),
+                    }
+                  ).then(
+                    (value) => {
+                      clearTimeout(timer);
+                      resolve(value);
+                    },
+                    (error) => {
+                      clearTimeout(timer);
+                      reject(error);
+                    }
+                  );
                 }
               );
+              const collected: Array<{ path: string; symbols: WorkspaceMapSymbolSummary[] }> = [];
+              for (const output of outputs ?? []) {
+                if (output.error || !output.result) continue;
+                collected.push({
+                  path: output.path,
+                  symbols: normalizeProjectMapDocumentSymbols(output.result, maxSymbols),
+                });
+              }
+              return collected;
+            } catch {
+              return [];
             }
-          );
-          const collected: Array<{ path: string; symbols: WorkspaceMapSymbolSummary[] }> = [];
-          for (const output of outputs ?? []) {
-            if (output.error || !output.result) continue;
-            collected.push({
-              path: output.path,
-              symbols: normalizeProjectMapDocumentSymbols(output.result, maxSymbols),
-            });
-          }
-          return collected;
-        } catch {
-          return [];
-        }
-      })
-    );
+          })
+        );
 
-    for (const result of batchResults) {
-      if (result.status !== 'fulfilled') continue;
-      for (const item of result.value) {
-        if (item.symbols.length > 0) {
-          overrides[item.path] = item.symbols;
+        for (const result of batchResults) {
+          if (result.status !== 'fulfilled') continue;
+          for (const item of result.value) {
+            if (item.symbols.length > 0) {
+              overrides[item.path] = item.symbols;
+            }
+          }
         }
       }
-    }
-  }
 
-  return overrides;
+      return overrides;
+    },
+  );
 }

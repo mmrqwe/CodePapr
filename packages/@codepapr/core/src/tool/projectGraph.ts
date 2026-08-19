@@ -2307,6 +2307,28 @@ function resolveRelatedSymbol(params: {
   return null;
 }
 
+function fileHasEntrypointBootstrapEvidence(file: ProjectGraphFileInput, content?: string): boolean {
+  const normalizedPath = normalizePath(file.path).toLowerCase();
+  const fileName = basenameWithoutExtension(normalizedPath);
+  if (ENTRYPOINT_FILE_NAMES.has(fileName)) {
+    return true;
+  }
+  const normalizedContent = content ?? '';
+  return (
+    /require\.main\s*===\s*module/.test(normalizedContent) ||
+    /import\.meta\.main/.test(normalizedContent) ||
+    /createRoot\(|ReactDOM\.render\(|\.listen\(/.test(normalizedContent) ||
+    /:\s*(Node|Control|Node2D|Node3D|CanvasItem|SceneTree)\b/.test(normalizedContent) ||
+    /\b(GD\.Print|GetTree|GetNode|_Ready\s*\()/.test(normalizedContent) ||
+    /\b(Host\.CreateDefaultBuilder|Application\.Run|Build\(\)\.RunAsync)/.test(normalizedContent)
+  );
+}
+
+function symbolLooksLikeNamedEntrypoint(symbol: ProjectGraphSymbolInput): boolean {
+  const name = symbol.name.trim().toLowerCase();
+  return ENTRYPOINT_SYMBOL_NAMES.has(name) || name === 'main';
+}
+
 function symbolEntryPointScore(symbol: ProjectGraphSymbolInput): number {
   const name = symbol.name.trim().toLowerCase();
   let score = 0;
@@ -2345,9 +2367,11 @@ function fileEntryPointScore(file: ProjectGraphFileInput, content?: string): num
   if (depth <= 2) {
     score += 8;
   }
+  let bestSymbolScore = 0;
   for (const symbol of file.symbols) {
-    score += Math.min(35, symbolEntryPointScore(symbol));
+    bestSymbolScore = Math.max(bestSymbolScore, Math.min(35, symbolEntryPointScore(symbol)));
   }
+  score += bestSymbolScore;
 
   const normalizedContent = content ?? '';
   if (/require\.main\s*===\s*module/.test(normalizedContent) || /import\.meta\.main/.test(normalizedContent)) {
@@ -2489,7 +2513,7 @@ function buildWorkspaceProjectGraphImpl(params: BuildWorkspaceProjectGraphParams
       return {
         ...file,
         path: normalizedPath,
-        entryPoint: score >= 60,
+        entryPoint: fileHasEntrypointBootstrapEvidence(file, contentForScore) && score >= 60,
         entryPointScore: score,
       } satisfies ProjectGraphFileInput;
     })
@@ -2537,7 +2561,9 @@ function buildWorkspaceProjectGraphImpl(params: BuildWorkspaceProjectGraphParams
           symbol,
           symbolSource: file.symbolSource,
           qualifiedName,
-          ...(localEntryPointScore >= 35 ? { entryPoint: true, entryPointScore: localEntryPointScore } : {}),
+          ...(symbolLooksLikeNamedEntrypoint(symbol) && localEntryPointScore >= 35
+            ? { entryPoint: true, entryPointScore: localEntryPointScore }
+            : {}),
         });
         if (file.symbolSource === 'lsp') {
           lspSymbols += 1;
