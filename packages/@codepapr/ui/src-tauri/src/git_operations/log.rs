@@ -45,7 +45,9 @@ pub async fn git_log(workspace_path: String, limit: Option<usize>) -> Vec<GitLog
     // git2 历史遍历是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
     crate::shared::run_blocking_workspace_task(move || -> Result<Vec<GitLogEntry>, String> {
         let workspace = std::path::PathBuf::from(workspace_path);
-        Ok(git_log_impl(&workspace, limit.unwrap_or(20).min(100)))
+        Ok(crate::shared::with_workspace_git_read_lock(&workspace, || {
+            git_log_impl(&workspace, limit.unwrap_or(20).min(100))
+        }))
     })
     .await
     .unwrap_or_default()

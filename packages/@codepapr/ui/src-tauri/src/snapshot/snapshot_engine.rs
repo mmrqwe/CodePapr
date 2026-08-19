@@ -101,6 +101,7 @@ impl SnapshotEngine {
     pub fn ensure(&self) -> EnsureResult {
         let git_path = code_papr_git_path(&self.workspace);
         let dot_git = git_path.join(".git");
+        let mut rebuilt = false;
 
         // 清理可能因崩溃遗留的锁文件（config/index/HEAD/packed-refs .lock）。
         // 只删可证明陈旧的（存活超阈值）：无条件删除会把并发操作正在使用的
@@ -118,11 +119,38 @@ impl SnapshotEngine {
                     return EnsureResult {
                         ready: head_sha.is_some(),
                         created_repo: false,
+                        rebuilt: false,
                         head_sha,
                         error: None,
                     };
                 }
-                Err(_) => {}
+                Err(e) => {
+                    // 仓库损坏（无法打开）：把损坏目录改名保留（便于人工恢复），
+                    // 然后走下方初始化路径重建。ensure 在 per-workspace 写锁内执行，
+                    // 排除了本应用内并发操作造成的瞬时打开失败。
+                    eprintln!(
+                        "[CodePapr] snapshot_ensure: shadow repo 无法打开（{}），将改名保留损坏目录并重建",
+                        e.message()
+                    );
+                    let quarantine = self.workspace.join(format!(
+                        ".CodePapr/git.corrupt-{}",
+                        crate::shared::unix_millis().unwrap_or(0)
+                    ));
+                    if let Err(rename_err) = std::fs::rename(&git_path, &quarantine) {
+                        return EnsureResult {
+                            ready: false,
+                            created_repo: false,
+                            rebuilt: false,
+                            head_sha: None,
+                            error: Some(format!(
+                                "shadow repo 损坏且无法改名重建: {}（改名失败: {}）",
+                                e.message(),
+                                rename_err
+                            )),
+                        };
+                    }
+                    rebuilt = true;
+                }
             }
         }
 
@@ -132,7 +160,7 @@ impl SnapshotEngine {
         let repo = match Repository::init_opts(&git_path, &opts) {
             Ok(r) => r,
             Err(e) => return EnsureResult {
-                ready: false, created_repo: false, head_sha: None,
+                ready: false, created_repo: false, rebuilt: false, head_sha: None,
                 error: Some(e.message().to_string()),
             },
         };
@@ -141,7 +169,7 @@ impl SnapshotEngine {
             let mut config = match repo.config() {
                 Ok(c) => c,
                 Err(e) => return EnsureResult {
-                    ready: false, created_repo: false, head_sha: None,
+                    ready: false, created_repo: false, rebuilt: false, head_sha: None,
                     error: Some(e.message().to_string()),
                 },
             };
@@ -174,6 +202,7 @@ impl SnapshotEngine {
         EnsureResult {
             ready: head_sha.is_some(),
             created_repo: true,
+            rebuilt,
             head_sha,
             error: None,
         }
@@ -621,6 +650,43 @@ mod tests {
 
         let snapshots = engine.list(10);
         assert!(snapshots.len() >= 2, "should have at least 2 snapshots");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    /// 回归 #14：shadow repo 损坏（无法打开）时，ensure 必须自愈——把损坏目录
+    /// 改名保留并重建，而不是反复返回不可用。
+    #[test]
+    fn test_ensure_rebuilds_corrupt_repo_and_preserves_corrupt_dir() {
+        let workspace = temp_workspace("corrupt-rebuild");
+        let engine = SnapshotEngine::new(&workspace);
+        let first = engine.ensure();
+        assert!(first.ready, "first ensure should succeed: {:?}", first.error);
+        assert!(!first.rebuilt);
+
+        // 制造损坏：删掉 HEAD 后 libgit2 无法再打开该仓库
+        let head_path = workspace.join(".CodePapr/git/.git/HEAD");
+        fs::remove_file(&head_path).unwrap();
+
+        let second = engine.ensure();
+        assert!(second.ready, "rebuild should succeed: {:?}", second.error);
+        assert!(second.rebuilt, "必须报告 rebuilt");
+        assert!(second.created_repo, "重建属于重新创建");
+        assert!(head_path.exists(), "重建后的仓库必须有 HEAD");
+
+        // 损坏目录被改名保留（便于人工恢复），不得直接删除
+        let corrupt_dirs: Vec<String> = fs::read_dir(workspace.join(".CodePapr"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|name| name.starts_with("git.corrupt-"))
+            .collect();
+        assert_eq!(corrupt_dirs.len(), 1, "损坏目录应被改名保留: {:?}", corrupt_dirs);
+
+        // 重建后的仓库可正常使用
+        fs::write(workspace.join("a.txt"), "a\n").unwrap();
+        let cp = engine.create("after-rebuild").expect("snapshot after rebuild");
+        assert!(cp.file_count >= 1, "after-rebuild snapshot should include a.txt");
 
         fs::remove_dir_all(&workspace).ok();
     }

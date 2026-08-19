@@ -303,7 +303,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
             pushDebugLog('git', 'auto-init branch', { available: statusResult.available, isRepo: statusResult.isRepo });
             try {
               const ensureResult = await snapshotEnsure(workspacePath);
-              pushDebugLog('git', 'snapshotEnsure returned', { ready: ensureResult.ready, error: ensureResult.error });
+              pushDebugLog('git', 'snapshotEnsure returned', { ready: ensureResult.ready, rebuilt: ensureResult.rebuilt ?? false, error: ensureResult.error });
               if (!cancelled && ensureResult.ready) {
                 delegatedToRetry = true;
                 void loadGitStatus(retryCount + 1);
@@ -571,7 +571,8 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     try {
       const result = await snapshotEnsure(workspacePath);
       if (result.ready) {
-        setGitActionMessage(t.workspaceGitInitDone);
+        // 损坏仓库重建成功时明确告知（旧仓库已保留在 .CodePapr/ 下）。
+        setGitActionMessage(result.rebuilt ? t.workspaceGitRebuilt : t.workspaceGitInitDone);
         setRefreshVersion((value) => value + 1);
       } else {
         throw new Error(result.error ?? t.workspaceGitUnavailable);

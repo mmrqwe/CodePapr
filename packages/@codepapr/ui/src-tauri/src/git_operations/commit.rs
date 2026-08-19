@@ -198,14 +198,18 @@ pub async fn git_commit(
     allow_empty: Option<bool>,
 ) -> GitOperationResult {
     // git2 提交是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
+    // 写锁：选择性提交是多步流程（重置 index→stage→write→write_tree→commit），
+    // 中途被其它写者插入会提交错误的树。
     crate::shared::run_blocking_workspace_task(move || -> Result<GitOperationResult, String> {
         let workspace = std::path::PathBuf::from(workspace_path);
-        Ok(git_commit_impl(
-            &workspace, &message,
-            stage_all.unwrap_or(false),
-            &pathspecs.unwrap_or_default(),
-            allow_empty.unwrap_or(false),
-        ))
+        Ok(crate::shared::with_workspace_git_write_lock(&workspace, || {
+            git_commit_impl(
+                &workspace, &message,
+                stage_all.unwrap_or(false),
+                &pathspecs.unwrap_or_default(),
+                allow_empty.unwrap_or(false),
+            )
+        }))
     })
     .await
     .unwrap_or_else(|err| GitOperationResult {

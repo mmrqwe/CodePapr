@@ -877,6 +877,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             const result = await snapshotEnsure(path);
             if (get().workspacePath !== path) return;
             if (result.ready) {
+              if (result.rebuilt) {
+                // shadow repo 损坏被重建：历史快照已丢失（损坏目录保留在
+                // .CodePapr/ 下），明确记录便于排查"回滚点消失"问题。
+                console.warn('[CodePapr] shadow git 仓库损坏，已自动重建:', path);
+              }
               set({ _gitReady: true, _gitReadyError: null });
               try {
                 const [snapshots, records] = await Promise.all([

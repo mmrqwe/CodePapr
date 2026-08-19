@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 pub struct EnsureResult {
     pub ready: bool,
     pub created_repo: bool,
+    /// true 表示检测到既有 shadow repo 损坏，已把损坏目录改名保留并重建。
+    #[serde(default)]
+    pub rebuilt: bool,
     pub head_sha: Option<String>,
     pub error: Option<String>,
 }

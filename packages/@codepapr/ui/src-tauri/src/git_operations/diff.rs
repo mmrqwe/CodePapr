@@ -149,7 +149,9 @@ pub async fn git_diff(
     // git2 diff 是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
     crate::shared::run_blocking_workspace_task(move || -> Result<GitDiffResult, String> {
         let workspace = std::path::PathBuf::from(workspace_path);
-        Ok(git_diff_impl(&workspace, staged.unwrap_or(false), &pathspecs.unwrap_or_default()))
+        Ok(crate::shared::with_workspace_git_read_lock(&workspace, || {
+            git_diff_impl(&workspace, staged.unwrap_or(false), &pathspecs.unwrap_or_default())
+        }))
     })
     .await
     .unwrap_or_else(|err| GitDiffResult {

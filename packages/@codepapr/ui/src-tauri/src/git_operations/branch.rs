@@ -206,7 +206,9 @@ pub async fn git_branch_list(workspace_path: String) -> Vec<GitBranch> {
     // git2 分支遍历是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
     crate::shared::run_blocking_workspace_task(move || -> Result<Vec<GitBranch>, String> {
         let workspace = std::path::PathBuf::from(workspace_path);
-        Ok(git_branch_list_impl(&workspace))
+        Ok(crate::shared::with_workspace_git_read_lock(&workspace, || {
+            git_branch_list_impl(&workspace)
+        }))
     })
     .await
     .unwrap_or_default()
@@ -221,14 +223,17 @@ pub async fn git_branch_checkout(
     start_point: Option<String>,
 ) -> GitOperationResult {
     // git2 切换分支是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
+    // 写锁：备份→set_head→force checkout 是多步流程，必须独占。
     crate::shared::run_blocking_workspace_task(move || -> Result<GitOperationResult, String> {
         let workspace = std::path::PathBuf::from(workspace_path);
-        Ok(git_branch_checkout_impl(
-            &workspace, &branch_name,
-            create.unwrap_or(false),
-            create_if_missing.unwrap_or(true),
-            start_point.as_deref(),
-        ))
+        Ok(crate::shared::with_workspace_git_write_lock(&workspace, || {
+            git_branch_checkout_impl(
+                &workspace, &branch_name,
+                create.unwrap_or(false),
+                create_if_missing.unwrap_or(true),
+                start_point.as_deref(),
+            )
+        }))
     })
     .await
     .unwrap_or_else(|err| GitOperationResult {

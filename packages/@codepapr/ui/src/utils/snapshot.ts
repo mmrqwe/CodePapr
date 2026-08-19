@@ -3,6 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 export interface EnsureResult {
   ready: boolean;
   createdRepo: boolean;
+  /** true 表示检测到既有 shadow repo 损坏，已改名保留损坏目录并重建。 */
+  rebuilt?: boolean;
   headSha: string | null;
   error: string | null;
 }
@@ -121,6 +123,50 @@ export async function snapshotEnsure(workspacePath: string): Promise<EnsureResul
 
 export async function snapshotCreate(workspacePath: string, label: string): Promise<SnapshotInfo | null> {
   return invoke<SnapshotInfo | null>('snapshot_create', { workspacePath, label });
+}
+
+/** 锁冲突类错误：并发 git 操作互抢 index/ref 锁时的典型报错。 */
+const GIT_LOCK_CONTENTION_PATTERN = /lock|locked|busy|another git process/i;
+
+/**
+ * 带重试的 checkpoint 快照创建。
+ *
+ * checkpoint 在每条用户消息的关键路径上创建，与面板刷新/agent git 工具可能
+ * 并发。虽然 Rust 侧已按工作区串行化 shadow-git 操作，仍保留锁冲突重试作为
+ * 纵深防御（例如外部进程触碰 .CodePapr/git）。仅对锁冲突类错误重试，
+ * 其它错误立即抛出（由调用方降级处理）。
+ */
+export async function snapshotCreateWithRetry(
+  workspacePath: string,
+  label: string,
+  options?: {
+    attempts?: number;
+    baseDelayMs?: number;
+    /** 每次重试前调用；返回 true 时放弃重试并抛出最后一次错误。 */
+    shouldAbort?: () => boolean;
+  },
+): Promise<SnapshotInfo | null> {
+  const attempts = Math.max(1, options?.attempts ?? 3);
+  const baseDelayMs = options?.baseDelayMs ?? 400;
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await snapshotCreate(workspacePath, label);
+    } catch (err) {
+      lastError = err;
+      const message = err instanceof Error ? err.message : String(err);
+      const retriable = GIT_LOCK_CONTENTION_PATTERN.test(message);
+      if (!retriable || attempt === attempts - 1) {
+        break;
+      }
+      if (options?.shouldAbort?.()) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)));
+    }
+  }
+  throw lastError;
 }
 
 export async function snapshotList(workspacePath: string, limit?: number): Promise<SnapshotInfo[]> {

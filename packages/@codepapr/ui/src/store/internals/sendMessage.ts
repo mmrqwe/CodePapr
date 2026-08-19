@@ -26,7 +26,7 @@ import type {
   GoalCondition,
 } from '@codepapr/types';
 import { createId } from '../../utils/createId';
-import { snapshotCreate, saveCheckpointRecord } from '../../utils/snapshot';
+import { snapshotCreateWithRetry, saveCheckpointRecord } from '../../utils/snapshot';
 import { buildCheckpointCommitMessage } from '../../utils/workspaceGitPanel';
 import type { WorkMode } from '../../utils/agentPrompts';
 import { getTranslation } from '../../utils/i18n';
@@ -1444,7 +1444,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 userMessageId: userMsg.id,
                 userMessageText: previewSource,
               });
-              const cp = await snapshotCreate(get().workspacePath, label);
+              // 锁冲突重试：checkpoint 与面板刷新/agent git 工具可能并发，
+              // 偶发的锁冲突不应让用户永久失去这条消息的重置点。
+              // 回合已被停止时不再重试（shouldAbort），避免无谓等待。
+              const cp = await snapshotCreateWithRetry(get().workspacePath, label, {
+                shouldAbort: () => get()._stopRequestedSeq !== stopSeqAtStart,
+              });
               ensureNotStopped();
               if (cp) {
                 set((s) => ({

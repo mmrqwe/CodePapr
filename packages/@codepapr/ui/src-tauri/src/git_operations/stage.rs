@@ -91,9 +91,12 @@ pub async fn git_stage(
     pathspecs: Option<Vec<String>>,
 ) -> GitOperationResult {
     // git2 暂存是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
+    // 写锁：index 多步改动必须对工作区独占串行。
     crate::shared::run_blocking_workspace_task(move || -> Result<GitOperationResult, String> {
         let workspace = std::path::PathBuf::from(workspace_path);
-        Ok(git_stage_impl(&workspace, all.unwrap_or(false), &pathspecs.unwrap_or_default()))
+        Ok(crate::shared::with_workspace_git_write_lock(&workspace, || {
+            git_stage_impl(&workspace, all.unwrap_or(false), &pathspecs.unwrap_or_default())
+        }))
     })
     .await
     .unwrap_or_else(|err| GitOperationResult {

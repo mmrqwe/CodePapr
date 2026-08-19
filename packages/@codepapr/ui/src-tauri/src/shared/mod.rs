@@ -3,6 +3,7 @@
 //! These helpers are used by 3+ unrelated domains (db, fs, shell, browser, web)
 //! and have no dependencies on any domain-specific crate.
 
+pub(crate) mod git_guard;
 pub(crate) mod git_locks;
 pub(crate) mod paths;
 pub(crate) mod runtime;
@@ -10,6 +11,7 @@ pub(crate) mod strings;
 pub(crate) mod sync;
 pub(crate) mod time;
 
+pub(crate) use git_guard::{with_workspace_git_read_lock, with_workspace_git_write_lock};
 pub(crate) use git_locks::remove_stale_git_locks;
 pub(crate) use paths::{
     canonical_workspace, expanded_path, home_dir, normalize_relative_path,

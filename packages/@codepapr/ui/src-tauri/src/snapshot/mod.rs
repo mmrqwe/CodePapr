@@ -9,6 +9,7 @@ pub mod types;
 use std::path::PathBuf;
 
 use crate::shared::run_blocking_workspace_task;
+use crate::shared::{with_workspace_git_read_lock, with_workspace_git_write_lock};
 
 pub use diff_engine::DiffEngine;
 pub use restore_engine::RestoreEngine;
@@ -22,13 +23,16 @@ pub use types::*;
 pub async fn snapshot_ensure(workspace_path: String) -> EnsureResult {
     run_blocking_workspace_task(move || -> Result<EnsureResult, String> {
         let workspace = PathBuf::from(workspace_path);
-        let engine = SnapshotEngine::new(&workspace);
-        Ok(engine.ensure())
+        Ok(with_workspace_git_write_lock(&workspace, || {
+            let engine = SnapshotEngine::new(&workspace);
+            engine.ensure()
+        }))
     })
     .await
     .unwrap_or_else(|err| EnsureResult {
         ready: false,
         created_repo: false,
+        rebuilt: false,
         head_sha: None,
         error: Some(err),
     })
@@ -41,14 +45,16 @@ pub async fn snapshot_create(
 ) -> Result<Option<SnapshotInfo>, String> {
     run_blocking_workspace_task(move || {
         let workspace = PathBuf::from(workspace_path);
-        let engine = SnapshotEngine::new(&workspace);
-        // Benign skip: an empty/new workspace (or one whose files are all ignored)
-        // has nothing to snapshot. Return None — not an error — so the UI doesn't
-        // show a "snapshot failed" banner for a normal empty workspace.
-        if !engine.has_snapshotable_files() {
-            return Ok(None);
-        }
-        engine.create(&label).map(Some)
+        with_workspace_git_write_lock(&workspace, || {
+            let engine = SnapshotEngine::new(&workspace);
+            // Benign skip: an empty/new workspace (or one whose files are all ignored)
+            // has nothing to snapshot. Return None — not an error — so the UI doesn't
+            // show a "snapshot failed" banner for a normal empty workspace.
+            if !engine.has_snapshotable_files() {
+                return Ok(None);
+            }
+            engine.create(&label).map(Some)
+        })
     })
     .await
 }
@@ -60,8 +66,10 @@ pub async fn snapshot_list(
 ) -> Result<Vec<SnapshotInfo>, String> {
     run_blocking_workspace_task(move || {
         let workspace = PathBuf::from(workspace_path);
-        let engine = SnapshotEngine::new(&workspace);
-        Ok(engine.list(limit.unwrap_or(100)))
+        Ok(with_workspace_git_read_lock(&workspace, || {
+            let engine = SnapshotEngine::new(&workspace);
+            engine.list(limit.unwrap_or(100))
+        }))
     })
     .await
 }
@@ -70,8 +78,10 @@ pub async fn snapshot_list(
 pub async fn snapshot_head_sha(workspace_path: String) -> Option<String> {
     run_blocking_workspace_task(move || -> Result<Option<String>, String> {
         let workspace = PathBuf::from(workspace_path);
-        let engine = SnapshotEngine::new(&workspace);
-        Ok(engine.head_sha())
+        Ok(with_workspace_git_read_lock(&workspace, || {
+            let engine = SnapshotEngine::new(&workspace);
+            engine.head_sha()
+        }))
     })
     .await
     .unwrap_or(None)
@@ -84,8 +94,10 @@ pub async fn restore_plan(
 ) -> Result<RestorePlan, String> {
     run_blocking_workspace_task(move || {
         let workspace = PathBuf::from(workspace_path);
-        let engine = RestoreEngine::new(&workspace);
-        engine.plan(&target_sha)
+        with_workspace_git_read_lock(&workspace, || {
+            let engine = RestoreEngine::new(&workspace);
+            engine.plan(&target_sha)
+        })
     })
     .await
 }
@@ -97,8 +109,10 @@ pub async fn restore_execute(
 ) -> Result<RestoreResult, String> {
     run_blocking_workspace_task(move || {
         let workspace = PathBuf::from(workspace_path);
-        let engine = RestoreEngine::new(&workspace);
-        engine.execute(&target_sha)
+        with_workspace_git_write_lock(&workspace, || {
+            let engine = RestoreEngine::new(&workspace);
+            engine.execute(&target_sha)
+        })
     })
     .await
 }
@@ -110,8 +124,10 @@ pub async fn restore_undo(
 ) -> Result<(), String> {
     run_blocking_workspace_task(move || {
         let workspace = PathBuf::from(workspace_path);
-        let engine = RestoreEngine::new(&workspace);
-        engine.undo(expected_backup_sha.as_deref())
+        with_workspace_git_write_lock(&workspace, || {
+            let engine = RestoreEngine::new(&workspace);
+            engine.undo(expected_backup_sha.as_deref())
+        })
     })
     .await
 }
@@ -123,8 +139,10 @@ pub async fn snapshot_changed_files(
 ) -> Result<CommitChangedFiles, String> {
     run_blocking_workspace_task(move || {
         let workspace = PathBuf::from(workspace_path);
-        let engine = DiffEngine::new(&workspace);
-        engine.changed_files(&sha)
+        with_workspace_git_read_lock(&workspace, || {
+            let engine = DiffEngine::new(&workspace);
+            engine.changed_files(&sha)
+        })
     })
     .await
 }
@@ -137,8 +155,10 @@ pub async fn diff_snapshots(
 ) -> Result<Vec<FileDiff>, String> {
     run_blocking_workspace_task(move || {
         let workspace = PathBuf::from(workspace_path);
-        let engine = DiffEngine::new(&workspace);
-        engine.diff_snapshots(&from_sha, &to_sha)
+        with_workspace_git_read_lock(&workspace, || {
+            let engine = DiffEngine::new(&workspace);
+            engine.diff_snapshots(&from_sha, &to_sha)
+        })
     })
     .await
 }
@@ -151,8 +171,10 @@ pub async fn snapshot_file_content(
 ) -> Result<String, String> {
     run_blocking_workspace_task(move || {
         let workspace = PathBuf::from(workspace_path);
-        let engine = DiffEngine::new(&workspace);
-        engine.file_content(&sha, &path)
+        with_workspace_git_read_lock(&workspace, || {
+            let engine = DiffEngine::new(&workspace);
+            engine.file_content(&sha, &path)
+        })
     })
     .await
 }
@@ -164,8 +186,10 @@ pub async fn snapshot_index_file_content(
 ) -> Result<String, String> {
     run_blocking_workspace_task(move || {
         let workspace = PathBuf::from(workspace_path);
-        let engine = DiffEngine::new(&workspace);
-        engine.index_file_content(&path)
+        with_workspace_git_read_lock(&workspace, || {
+            let engine = DiffEngine::new(&workspace);
+            engine.index_file_content(&path)
+        })
     })
     .await
 }

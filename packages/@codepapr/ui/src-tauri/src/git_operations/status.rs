@@ -98,9 +98,12 @@ pub fn git_status_impl(workspace: &std::path::Path) -> GitStatusResult {
 #[tauri::command]
 pub async fn git_status(workspace_path: String) -> GitStatusResult {
     // git2 状态遍历是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
+    // 读锁：与写操作互斥，读读并发（面板 status+log 并行刷新不被串行）。
     crate::shared::run_blocking_workspace_task(move || -> Result<GitStatusResult, String> {
         let workspace = std::path::PathBuf::from(workspace_path);
-        Ok(git_status_impl(&workspace))
+        Ok(crate::shared::with_workspace_git_read_lock(&workspace, || {
+            git_status_impl(&workspace)
+        }))
     })
     .await
     .unwrap_or_else(|err| GitStatusResult {

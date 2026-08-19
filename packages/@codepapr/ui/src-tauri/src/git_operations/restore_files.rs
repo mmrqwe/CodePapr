@@ -118,14 +118,17 @@ pub async fn git_restore_files(
     include_untracked: Option<bool>,
 ) -> GitOperationResult {
     // git2 恢复是重阻塞操作，放阻塞线程池，别卡 tokio 共享 runtime。
+    // 写锁：备份→force checkout 是多步流程，必须独占。
     crate::shared::run_blocking_workspace_task(move || -> Result<GitOperationResult, String> {
         let workspace = std::path::PathBuf::from(workspace_path);
-        Ok(git_restore_files_impl(
-            &workspace,
-            &pathspecs.unwrap_or_default(),
-            source.as_deref(),
-            include_untracked,
-        ))
+        Ok(crate::shared::with_workspace_git_write_lock(&workspace, || {
+            git_restore_files_impl(
+                &workspace,
+                &pathspecs.unwrap_or_default(),
+                source.as_deref(),
+                include_untracked,
+            )
+        }))
     })
     .await
     .unwrap_or_else(|err| GitOperationResult {
