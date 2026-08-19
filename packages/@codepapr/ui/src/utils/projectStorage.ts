@@ -43,6 +43,8 @@ export interface ProjectMessage {
   timestamp: number;
   /** assistant 消息的 LLM 生成耗时（毫秒），经 messages.extras 持久化 */
   durationMs?: number;
+  /** 用户消息上的文本附件名（不含内容），经 messages.extras 持久化 */
+  attachedFiles?: Array<{ name: string; size: number }>;
 }
 
 export interface ProjectCumulativeStats {

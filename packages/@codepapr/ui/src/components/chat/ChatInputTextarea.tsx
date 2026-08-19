@@ -1,4 +1,4 @@
-import { forwardRef, memo, useEffect, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
+import { forwardRef, memo, useEffect, type ClipboardEvent, type KeyboardEvent } from 'react';
 
 interface ChatInputTextareaProps {
   value: string;
@@ -6,7 +6,6 @@ interface ChatInputTextareaProps {
   onValueChange: (value: string) => void;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
-  onDrop: (event: DragEvent<HTMLTextAreaElement>) => void;
   onCompositionStart: () => void;
   onCompositionEnd: (value: string, cursorPos: number) => void;
 }
@@ -14,6 +13,7 @@ interface ChatInputTextareaProps {
 /**
  * 输入框独立 memo：流式 token 刷新 ChatPanel 时，只要草稿没变就跳过 textarea
  * 重渲染，避免 IME 组字和光标被消息列表带着抖。
+ * 拖放由外层 composer 承接（须在 dragover 里 preventDefault，drop 才会触发）。
  */
 export const ChatInputTextarea = memo(forwardRef<HTMLTextAreaElement, ChatInputTextareaProps>(
   function ChatInputTextarea(
@@ -23,7 +23,6 @@ export const ChatInputTextarea = memo(forwardRef<HTMLTextAreaElement, ChatInputT
       onValueChange,
       onKeyDown,
       onPaste,
-      onDrop,
       onCompositionStart,
       onCompositionEnd,
     },
@@ -50,7 +49,6 @@ export const ChatInputTextarea = memo(forwardRef<HTMLTextAreaElement, ChatInputT
         }}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
-        onDrop={onDrop}
       />
     );
   },

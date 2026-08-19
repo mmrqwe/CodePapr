@@ -1615,6 +1615,7 @@ pub(crate) fn save_message_batch(
             "modelTier",
             "modelName",
             "relatedFilePaths",
+            "attachedFiles",
         ] {
             if let Some(val) = msg.get(key) {
                 if !val.is_null() {
@@ -1697,7 +1698,7 @@ fn row_to_message_json(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Valu
     }
     // 还原 extras（promptContent / synthetic / hidden / carryForwardInContext /
     // contextCheckpoint / question / questionAnswered / durationMs /
-    // modelTier / modelName / relatedFilePaths）。
+    // modelTier / modelName / relatedFilePaths / attachedFiles）。
     if let Some(s) = extras_raw {
         if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&s) {
             for (key, value) in map {
@@ -5532,6 +5533,30 @@ mod tests {
             serde_json::from_str(&loaded.messages_json).expect("parse");
         assert_eq!(parsed[0]["modelTier"], "primary");
         assert_eq!(parsed[0]["modelName"], "deepseek-v4-pro");
+    }
+
+    #[test]
+    fn save_message_batch_persists_attached_files_in_extras() {
+        let workspace = TestWorkspace::new("save-message-attached-files");
+        let ws = workspace.workspace_arg();
+        save_session(
+            ws.clone(),
+            r#"{"id":"s-files","name":"F","provider":"deepseek","model":"m","createdAt":1}"#
+                .to_string(),
+        )
+        .expect("session");
+        save_message_batch(
+            ws.clone(),
+            "s-files".to_string(),
+            r#"[{"id":"u1","role":"user","content":"see this","timestamp":1,"attachedFiles":[{"name":"a.ts","size":12}]}]"#
+                .to_string(),
+        )
+        .expect("save");
+        let loaded = load_session_messages(ws, "s-files".to_string()).expect("load");
+        let parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&loaded.messages_json).expect("parse");
+        assert_eq!(parsed[0]["attachedFiles"][0]["name"], "a.ts");
+        assert_eq!(parsed[0]["attachedFiles"][0]["size"], 12);
     }
 
     #[test]

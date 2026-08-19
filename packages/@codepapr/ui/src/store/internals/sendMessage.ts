@@ -320,7 +320,7 @@ export function invalidateAgentHandle(get: StoreGet, set: StoreSet): void {
 }
 
 export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['sendMessage'] {
-  return async (input, displayContent, mode = 'agent', images) => {
+  return async (input, displayContent, mode = 'agent', images, attachedFiles) => {
         const { settings } = get();
         const normalizedSettings = normalizeSettings(settings);
         let assistantMessageId: string | null = null;
@@ -1015,6 +1015,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             content: effectiveDisplay ?? effectiveInput,
             timestamp: Date.now(),
             images: images && images.length ? images : undefined,
+            attachedFiles: attachedFiles && attachedFiles.length ? attachedFiles : undefined,
           };
           set((s) => {
             const currentMsgs = s.sessionMessages[optimisticSid!] ?? s.messages;

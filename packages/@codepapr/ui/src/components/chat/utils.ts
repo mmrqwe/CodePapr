@@ -10,9 +10,140 @@ import { isExecutionHeavyTask } from '../../utils/modelRouting';
 export const MAX_STREAMING_MESSAGE_CHARS = 50_000;
 export const MAX_STREAMING_REASONING_CHARS = 12_000;
 
-export const SUPPORTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+export const SUPPORTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
 export const MAX_TEXT_FILE_BYTES = 1_000_000;
 export const MAX_PENDING_FILES = 20;
+export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+export const MAX_PENDING_IMAGES = 8;
+
+const IMAGE_EXT_TO_MIME: Record<string, (typeof SUPPORTED_IMAGE_TYPES)[number]> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+};
+
+const UNSUPPORTED_IMAGE_EXTENSIONS = new Set([
+  '.heic', '.heif', '.bmp', '.tif', '.tiff', '.ico', '.avif', '.jfif',
+]);
+
+const BINARY_EXTENSIONS = new Set([
+  '.pdf', '.zip', '.gz', '.tar', '.tgz', '.7z', '.rar', '.bz2', '.xz',
+  '.docx', '.xlsx', '.pptx', '.doc', '.xls', '.ppt', '.odt', '.ods', '.odp',
+  '.exe', '.dll', '.so', '.dylib', '.bin', '.wasm', '.class', '.jar', '.pyc',
+  '.woff', '.woff2', '.ttf', '.otf', '.eot',
+  '.mp3', '.mp4', '.mov', '.wav', '.avi', '.mkv', '.webm', '.ogg', '.flac',
+  '.dmg', '.pkg', '.iso', '.sqlite', '.db', '.psd', '.ai', '.sketch', '.icns',
+]);
+
+export type IncomingFileKind = 'image' | 'unsupported-image' | 'text' | 'binary';
+
+export function getFileExtension(name: string): string {
+  const base = name.split(/[/\\]/).pop() ?? name;
+  const dot = base.lastIndexOf('.');
+  if (dot <= 0) return '';
+  return base.slice(dot).toLowerCase();
+}
+
+export function inferImageMediaType(file: { name: string; type: string }): string | null {
+  if ((SUPPORTED_IMAGE_TYPES as readonly string[]).includes(file.type)) {
+    return file.type;
+  }
+  return IMAGE_EXT_TO_MIME[getFileExtension(file.name)] ?? null;
+}
+
+export function classifyIncomingFile(file: { name: string; type: string }): IncomingFileKind {
+  const type = (file.type || '').toLowerCase();
+  const ext = getFileExtension(file.name);
+  if (type === 'image/svg+xml' || ext === '.svg') {
+    return 'text';
+  }
+  if (inferImageMediaType(file)) {
+    return 'image';
+  }
+  if (type.startsWith('image/') || UNSUPPORTED_IMAGE_EXTENSIONS.has(ext)) {
+    return 'unsupported-image';
+  }
+  if (
+    type.startsWith('audio/')
+    || type.startsWith('video/')
+    || type.startsWith('font/')
+    || type === 'application/pdf'
+    || type === 'application/zip'
+    || type === 'application/gzip'
+    || type === 'application/octet-stream'
+    || type === 'application/x-msdownload'
+    || BINARY_EXTENSIONS.has(ext)
+  ) {
+    return 'binary';
+  }
+  return 'text';
+}
+
+export function partitionIncomingFiles(files: File[]): {
+  images: File[];
+  textFiles: File[];
+  unsupportedImages: string[];
+  binaries: string[];
+} {
+  const images: File[] = [];
+  const textFiles: File[] = [];
+  const unsupportedImages: string[] = [];
+  const binaries: string[] = [];
+  for (const file of files) {
+    const kind = classifyIncomingFile(file);
+    if (kind === 'image') images.push(file);
+    else if (kind === 'unsupported-image') unsupportedImages.push(file.name);
+    else if (kind === 'binary') binaries.push(file.name);
+    else textFiles.push(file);
+  }
+  return { images, textFiles, unsupportedImages, binaries };
+}
+
+export function collectDataTransferFiles(data: DataTransfer | null | undefined): File[] {
+  if (!data) return [];
+  const files: File[] = [];
+  const seen = new Set<string>();
+  const add = (file: File | null | undefined) => {
+    if (!file) return;
+    const key = `${file.name}\0${file.size}\0${file.type}\0${file.lastModified}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    files.push(file);
+  };
+  for (const file of Array.from(data.files ?? [])) add(file);
+  const items = data.items;
+  if (items) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item?.kind === 'file') add(item.getAsFile());
+    }
+  }
+  return files;
+}
+
+export function looksLikeBinaryText(text: string): boolean {
+  if (text.includes('\0')) return true;
+  const sample = text.slice(0, 8192);
+  if (sample.length === 0) return false;
+  let suspicious = 0;
+  for (let i = 0; i < sample.length; i++) {
+    const code = sample.charCodeAt(i);
+    if (code === 0xfffd) {
+      suspicious++;
+    } else if (code < 32 && code !== 9 && code !== 10 && code !== 13) {
+      suspicious++;
+    }
+  }
+  return suspicious / sample.length > 0.1;
+}
+
+export function formatBytesAsMbLabel(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1) return String(Math.round(mb));
+  return mb.toFixed(1).replace(/\.0$/, '');
+}
 
 export const DEFAULT_SESSION_INPUT: SessionInputState = { mode: 'agent', draft: '', images: [], files: [] };
 export const NO_PENDING_IMAGES: ImagePreview[] = [];
@@ -25,7 +156,8 @@ export function truncateText(value: string, maxLength: number = 120): string {
 /** 把 File 读取为 base64 图片内容（剥离 data URI 前缀）。 */
 export function readFileAsImagePreview(file: File): Promise<ImagePreview | null> {
   return new Promise((resolve) => {
-    if (!SUPPORTED_IMAGE_TYPES.includes(file.type)) {
+    const mediaType = inferImageMediaType(file);
+    if (!mediaType) {
       resolve(null);
       return;
     }
@@ -41,9 +173,11 @@ export function readFileAsImagePreview(file: File): Promise<ImagePreview | null>
       }
       resolve({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        mediaType: file.type,
+        mediaType,
         data,
-        dataUri,
+        dataUri: dataUri.startsWith('data:')
+          ? dataUri
+          : `data:${mediaType};base64,${data}`,
       });
     };
     reader.readAsDataURL(file);

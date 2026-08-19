@@ -36,6 +36,7 @@ function areMessageBubblePropsEqual(
     previous.characterAvatar === next.characterAvatar &&
     previous.characterName === next.characterName &&
     previous.showCharacterAvatar === next.showCharacterAvatar &&
+    previous.onPreviewImage === next.onPreviewImage &&
     (previous.showPlanActions || next.showPlanActions
       ? previous.onPlanAction === next.onPlanAction
       : true)
@@ -124,6 +125,22 @@ export const MessageBubble = memo(function MessageBubble({
               {modelUsageLabel}
             </span>
             {msg.modelName && <span className="text-fg-muted">{msg.modelName}</span>}
+          </div>
+        )}
+        {isUser && msg.attachedFiles && msg.attachedFiles.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {msg.attachedFiles.map((file, index) => (
+              <div
+                key={`${file.name}-${index}`}
+                className="flex items-center gap-1 rounded-md border border-white/20 bg-white/10 px-2 py-1"
+              >
+                <svg className="w-3.5 h-3.5 flex-shrink-0 text-white/80" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M14 2v6h6" />
+                </svg>
+                <span className="text-xs font-medium text-white max-w-[140px] truncate" title={file.name}>{file.name}</span>
+              </div>
+            ))}
           </div>
         )}
         {isUser && msg.images && msg.images.length > 0 && (

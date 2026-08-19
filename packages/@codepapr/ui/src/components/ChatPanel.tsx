@@ -66,9 +66,15 @@ import { ModeSelector } from './chat/ModeSelector';
 import { ChatInputTextarea } from './chat/ChatInputTextarea';
 import {
   buildUserPromptWithFiles,
+  collectDataTransferFiles,
+  formatBytesAsMbLabel,
+  looksLikeBinaryText,
+  partitionIncomingFiles,
   resolveComposerFilters,
   DEFAULT_SESSION_INPUT,
+  MAX_IMAGE_BYTES,
   MAX_PENDING_FILES,
+  MAX_PENDING_IMAGES,
   MAX_TEXT_FILE_BYTES,
   NO_PENDING_FILES,
   NO_PENDING_IMAGES,
@@ -244,7 +250,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
   const hasStreamingMessageRef = useRef(false);
   const isProgrammaticScrollRef = useRef(false);
   const isComposingRef = useRef(false);
-  const handleIncomingFilesRef = useRef<(imageFiles: File[], textFiles: File[]) => Promise<void>>(async () => {});
+  const handleIncomingFilesRef = useRef<(files: File[]) => Promise<void>>(async () => {});
   const handlePrimaryActionRef = useRef<() => Promise<void>>(async () => {});
   const slashFilterRef = useRef<string | null>(null);
   const atFilterRef = useRef<string | null>(null);
@@ -916,13 +922,17 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     taskText: string,
     displayText: string,
     nextMode: WorkMode,
-    images?: IImageContent[]
+    images?: IImageContent[],
+    attachedFiles?: { name: string; size: number }[]
   ): Promise<boolean> => {
     if (workspacePath && nextMode !== 'ask') {
       refreshProjectDiagnostics().catch(() => {});
     }
 
     shouldStickToBottomRef.current = true;
+    if (attachedFiles && attachedFiles.length > 0) {
+      return await sendMessage(taskText, displayText, nextMode, images, attachedFiles);
+    }
     return await sendMessage(taskText, displayText, nextMode, images);
   }, [
     refreshProjectDiagnostics,
@@ -946,12 +956,17 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     const files = pendingFiles;
     const promptText = buildUserPromptWithFiles(userText, files);
     const displayText = userText || files.map((f) => f.name).join(', ') || (images.length ? '🖼️' : '');
+    const attachedFiles = files.map((file) => ({ name: file.name, size: file.size }));
+    const sendImages = images.length ? images : undefined;
+    const sendFiles = attachedFiles.length ? attachedFiles : undefined;
 
     // #26：slash 命令先发送、成功后才清空草稿——模板展开/条件解析失败时
     // sendMessage 返回 false（消息未进入会话），此时保留草稿供用户修改重试。
     // 旧实现先 setInput('') 再发送，失败后用户打好的命令文本永久丢失。
     if (userText.startsWith('/')) {
-      const consumed = await sendMessage(promptText, displayText, mode, images.length ? images : undefined);
+      const consumed = sendFiles
+        ? await sendMessage(promptText, displayText, mode, sendImages, sendFiles)
+        : await sendMessage(promptText, displayText, mode, sendImages);
       if (consumed) {
         setInput('');
         setPendingImages([]);
@@ -968,7 +983,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     setInput('');
     setPendingImages([]);
     setPendingFiles([]);
-    const consumed = await submitMessage(promptText, displayText, mode, images.length ? images : undefined);
+    const consumed = await submitMessage(promptText, displayText, mode, sendImages, sendFiles);
     if (!consumed) {
       // 仅当输入框仍为空时恢复：等待期间用户可能已重新输入，不得覆盖。
       setInput((current) => (current.trim() ? current : userText));
@@ -979,26 +994,60 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
 
   const addImageFiles = async (files: File[]) => {
     if (files.length === 0) return;
-    const results = await Promise.all(files.map(readFileAsImagePreview));
-    const previews = results.filter((item): item is ImagePreview => item !== null);
-    const skipped = files.length - previews.length;
-    if (skipped > 0) {
-      toast.warning(
-        settings.lang === 'en'
-          ? `${skipped} image(s) skipped (unsupported format)`
-          : settings.lang === 'zh-TW'
-            ? `已跳過 ${skipped} 張不支援格式的圖片`
-            : `已跳过 ${skipped} 张不支持格式的图片`
+    const oversized: string[] = [];
+    const readable = files.filter((file) => {
+      if (file.size > MAX_IMAGE_BYTES) {
+        oversized.push(`${file.name} (${(file.size / 1024).toFixed(0)}KB)`);
+        return false;
+      }
+      return true;
+    });
+    if (oversized.length > 0) {
+      toast.error(
+        t.toastAttachmentTooLarge
+          .replace('{max}', formatBytesAsMbLabel(MAX_IMAGE_BYTES))
+          .replace('{names}', oversized.join('\n')),
       );
     }
-    if (previews.length > 0) {
-      setPendingImages((current) => [...current, ...previews]);
+    const results = await Promise.all(readable.map(readFileAsImagePreview));
+    const previews = results.filter((item): item is ImagePreview => item !== null);
+    const skipped = readable.length - previews.length;
+    if (skipped > 0) {
+      toast.warning(t.toastAttachmentImageSkipped.replace('{count}', String(skipped)));
+    }
+    if (previews.length === 0) return;
+
+    let droppedCount = 0;
+    setPendingImages((current) => {
+      const combined = [...current, ...previews];
+      if (combined.length > MAX_PENDING_IMAGES) {
+        droppedCount = combined.length - MAX_PENDING_IMAGES;
+        return combined.slice(combined.length - MAX_PENDING_IMAGES);
+      }
+      return combined;
+    });
+    if (droppedCount > 0) {
+      toast.warning(
+        t.toastAttachmentLimitExceeded
+          .replace('{max}', String(MAX_PENDING_IMAGES))
+          .replace('{dropped}', String(droppedCount)),
+      );
     }
   };
 
-  const handleIncomingFiles = async (imageFiles: File[], textFiles: File[]) => {
-    if (imageFiles.length > 0) {
-      await addImageFiles(imageFiles);
+  const handleIncomingFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+    const { images, textFiles, unsupportedImages, binaries } = partitionIncomingFiles(files);
+    if (unsupportedImages.length > 0) {
+      toast.warning(
+        t.toastAttachmentImageSkipped.replace('{count}', String(unsupportedImages.length)),
+      );
+    }
+    if (binaries.length > 0) {
+      toast.warning(t.toastAttachmentBinarySkipped.replace('{names}', binaries.join('\n')));
+    }
+    if (images.length > 0) {
+      await addImageFiles(images);
     }
     if (textFiles.length > 0) {
       await addTextFiles(textFiles);
@@ -1007,24 +1056,44 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
   handleIncomingFilesRef.current = handleIncomingFiles;
 
   const handlePaste = useCallback((event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const allFiles = Array.from(event.clipboardData.files ?? []);
-    if (allFiles.length === 0) return;
-    const imageFiles = allFiles.filter((f) => f.type.startsWith('image/'));
-    const textFiles = allFiles.filter((f) => !f.type.startsWith('image/'));
-    if (imageFiles.length > 0 || textFiles.length > 0) {
-      void handleIncomingFilesRef.current(imageFiles, textFiles);
-    }
+    const files = collectDataTransferFiles(event.clipboardData);
+    if (files.length === 0) return;
+    event.preventDefault();
+    void handleIncomingFilesRef.current(files);
   }, []);
 
-  const handleDrop = useCallback((event: DragEvent<HTMLTextAreaElement>) => {
+  const handleComposerDragOver = useCallback((event: DragEvent<HTMLElement>) => {
+    if (!Array.from(event.dataTransfer?.types ?? []).includes('Files')) return;
     event.preventDefault();
-    const allFiles = Array.from(event.dataTransfer.files ?? []);
-    if (allFiles.length === 0) return;
-    const imageFiles = allFiles.filter((f) => f.type.startsWith('image/'));
-    const textFiles = allFiles.filter((f) => !f.type.startsWith('image/'));
-    if (imageFiles.length > 0 || textFiles.length > 0) {
-      void handleIncomingFilesRef.current(imageFiles, textFiles);
-    }
+    event.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const handleComposerDrop = useCallback((event: DragEvent<HTMLElement>) => {
+    if (!Array.from(event.dataTransfer?.types ?? []).includes('Files')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const files = collectDataTransferFiles(event.dataTransfer);
+    if (files.length === 0) return;
+    void handleIncomingFilesRef.current(files);
+  }, []);
+
+  useEffect(() => {
+    const isFileDrag = (event: globalThis.DragEvent) =>
+      Array.from(event.dataTransfer?.types ?? []).includes('Files');
+    const onDragOver = (event: globalThis.DragEvent) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+    };
+    const onDrop = (event: globalThis.DragEvent) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+    };
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('drop', onDrop);
+    };
   }, []);
 
   const removePendingImage = (id: string) => {
@@ -1113,18 +1182,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
   const handleFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
     const fileList = e.currentTarget.files;
     if (!fileList || fileList.length === 0) return;
-    const files = Array.from(fileList);
-
-    const imageFiles = files.filter((f) => f.type.startsWith('image/'));
-    if (imageFiles.length > 0) {
-      await addImageFiles(imageFiles);
-    }
-
-    const textFiles = files.filter((f) => !f.type.startsWith('image/'));
-    if (textFiles.length > 0) {
-      await addTextFiles(textFiles);
-    }
-
+    await handleIncomingFiles(Array.from(fileList));
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -1143,6 +1201,10 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       }
       try {
         const text = await file.text();
+        if (looksLikeBinaryText(text)) {
+          skippedFiles.push(file.name);
+          continue;
+        }
         attachments.push({
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${file.name}`,
           name: file.name,
@@ -1175,7 +1237,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     if (oversizedFiles.length > 0) {
       toast.error(
         t.toastAttachmentTooLarge
-          .replace('{max}', String(MAX_TEXT_FILE_BYTES / 1024 / 1024))
+          .replace('{max}', formatBytesAsMbLabel(MAX_TEXT_FILE_BYTES))
           .replace('{names}', oversizedFiles.join('\n')),
       );
     }
@@ -1649,7 +1711,12 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
             </button>
           </div>
         )}
-          <div className="relative" ref={inputWrapperRef}>
+          <div
+            className="relative"
+            ref={inputWrapperRef}
+            onDragOver={handleComposerDragOver}
+            onDrop={handleComposerDrop}
+          >
             {slashFilter !== null && (
               <SlashCommandDropdown
                 ref={slashDropdownRef}
@@ -1734,7 +1801,6 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                 onValueChange={handleDraftValueChange}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
-                onDrop={handleDrop}
                 onCompositionStart={handleCompositionStart}
                 onCompositionEnd={handleCompositionEnd}
               />
@@ -1744,7 +1810,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isActiveLoading}
-                    title="上传文件或图片"
+                    title={t.attachFilesTitle}
                     className="p-1.5 rounded-lg text-fg-muted hover:text-fg hover:bg-slate-700/50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">

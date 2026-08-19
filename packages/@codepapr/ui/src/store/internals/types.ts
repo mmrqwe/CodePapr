@@ -204,6 +204,12 @@ export interface TextFileAttachment {
   size: number;
 }
 
+/** 已发送消息上展示的文本附件元数据（不含文件内容，体积小，可持久化）。 */
+export interface AttachedFileMeta {
+  name: string;
+  size: number;
+}
+
 /** 每会话输入框状态（运行时记忆，不持久化）：模式、草稿、待发送附件。 */
 export interface SessionInputState {
   mode: WorkMode;
@@ -243,6 +249,7 @@ export interface UIMessage {
   reasoningContent?: string;
   displayReasoningContent?: string;
   images?: IImageContent[];
+  attachedFiles?: AttachedFileMeta[];
   modelTier?: TaskModelRoute['tier'];
   modelName?: string;
   agentStep?: number;
@@ -435,7 +442,8 @@ export interface AgentActions {
     input: string,
     displayContent?: string,
     mode?: WorkMode,
-    images?: IImageContent[]
+    images?: IImageContent[],
+    attachedFiles?: AttachedFileMeta[]
   ) => Promise<boolean>;
   cancelMessage: () => void;
   clearMessages: () => void;

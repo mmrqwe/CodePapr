@@ -68,6 +68,7 @@ export function sanitizeMessageForPersistence(message: UIMessage, debugEnabled: 
     // assistant.promptContent is a debug dump of the compiled request: only
     // persist when debug is on, and never persist request-only Recall (ADR-009).
     promptContent,
+    // 图片 payload 是 base64，不落盘。文本附件只存 name/size（attachedFiles），随 extras 保留。
     images: undefined,
     toolInvocations: message.toolInvocations?.map((ti) => ({
       ...ti,

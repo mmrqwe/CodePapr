@@ -110,6 +110,7 @@ export type {
   ApiFormat,
   ApiMode,
   CumulativeStats,
+  AttachedFileMeta,
   ImagePreview,
   Lang,
   PendingRestoreUndo,

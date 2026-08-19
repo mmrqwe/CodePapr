@@ -799,6 +799,144 @@ describe('ChatPanel', () => {
     );
   });
 
+  it('sends pending text attachments in the prompt and as display chips', async () => {
+    const sendSpy = vi.fn(async () => true);
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ fastModelEnabled: false, apiKey: 'test-key' }),
+      sessions: [
+        {
+          id: 'session-1',
+          name: '会话 1',
+          provider: 'deepseek',
+          model: 'deepseek-v4-pro',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      activeSessionId: 'session-1',
+      messages: [],
+      sessionMessages: { 'session-1': [] },
+      _sessionInputState: {
+        'session-1': {
+          mode: 'agent',
+          draft: '看看这个',
+          images: [],
+          files: [{ id: 'f1', name: 'a.ts', content: 'export const x = 1;', size: 18 }],
+        },
+      },
+      isLoading: false,
+      loadingSessionId: null,
+      sessionMessagesLoading: false,
+      sendMessage: sendSpy,
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    expect(container.textContent).toContain('a.ts');
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+
+    expect(sendSpy).toHaveBeenCalledWith(
+      '看看这个\n\n--- a.ts ---\nexport const x = 1;',
+      '看看这个',
+      'agent',
+      undefined,
+      [{ name: 'a.ts', size: 18 }],
+    );
+  });
+
+  it('shows sent file chips on user messages', async () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      messages: [
+        {
+          id: 'user-file',
+          role: 'user',
+          content: '看看这个',
+          attachedFiles: [{ name: 'sent.ts', size: 18 }],
+          timestamp: 1,
+        },
+      ],
+      sessionMessages: {
+        'session-1': [
+          {
+            id: 'user-file',
+            role: 'user',
+            content: '看看这个',
+            attachedFiles: [{ name: 'sent.ts', size: 18 }],
+            timestamp: 1,
+          },
+        ],
+      },
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    expect(container.textContent).toContain('sent.ts');
+  });
+
+  it('prevents default paste when clipboard contains files', async () => {
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const file = new File(['hello'], 'note.txt', { type: 'text/plain', lastModified: 1 });
+    const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        files: [file],
+        items: [{ kind: 'file', type: file.type, getAsFile: () => file }],
+      },
+    });
+
+    await act(async () => {
+      textarea.dispatchEvent(event);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(container.textContent).toContain('note.txt');
+  });
+
+  it('accepts file drops on the composer without navigating away', async () => {
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const file = new File(['export {}'], 'dropped.ts', { type: 'text/plain', lastModified: 1 });
+    const dataTransfer = {
+      types: ['Files'],
+      files: [file],
+      items: [{ kind: 'file', type: file.type, getAsFile: () => file }],
+      dropEffect: 'none',
+    };
+
+    const dragOver = new Event('dragover', { bubbles: true, cancelable: true });
+    Object.defineProperty(dragOver, 'dataTransfer', { value: dataTransfer });
+    textarea.dispatchEvent(dragOver);
+    expect(dragOver.defaultPrevented).toBe(true);
+
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer });
+    await act(async () => {
+      textarea.dispatchEvent(drop);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(drop.defaultPrevented).toBe(true);
+    expect(container.textContent).toContain('dropped.ts');
+  });
+
   it('#26：slash 命令发送被拒绝（sendMessage 返回 false）时保留草稿供重试', async () => {
     const sendSpy = vi.fn(async () => false);
     useAgentStore.setState((state) => ({
