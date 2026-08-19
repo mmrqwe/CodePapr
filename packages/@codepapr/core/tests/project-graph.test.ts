@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildWorkspaceProjectGraph, enrichProjectGraphEdges, type LspProjectGraphEnhancer } from '../src';
+import { buildWorkspaceProjectGraph, enrichProjectGraphEdges, extractStructuralSymbols, type LspProjectGraphEnhancer } from '../src';
 
 describe('buildWorkspaceProjectGraph', () => {
   it('builds file, symbol, contains, and import edges', () => {
@@ -460,5 +460,171 @@ describe('buildWorkspaceProjectGraph', () => {
     expect(enriched.edges).not.toContainEqual(
       expect.objectContaining({ kind: 'imports', from: 'file:src/a.ts', to: 'file:src/b.ts' }),
     );
+  });
+
+  it('resolves Python relative imports and JS side-effect imports', () => {
+    const graph = buildWorkspaceProjectGraph({
+      root: '.',
+      tree: '.',
+      allFiles: [
+        { path: 'src/pkg/a.py' },
+        { path: 'src/pkg/b.py' },
+        { path: 'src/main.ts' },
+        { path: 'src/setup.ts' },
+      ],
+      fileContents: {
+        'src/pkg/a.py': { content: 'from .b import helper\nhelper()\n' },
+        'src/pkg/b.py': { content: 'def helper():\n    return 1\n' },
+        'src/main.ts': { content: "import './setup';\n" },
+        'src/setup.ts': { content: 'export {};\n' },
+      },
+      files: [
+        { path: 'src/pkg/a.py', language: 'Python', bytes: 30, symbols: [] },
+        { path: 'src/pkg/b.py', language: 'Python', bytes: 30, symbols: [{ name: 'helper', kind: 'function', signature: 'def helper()', line: 1, exported: true }] },
+        { path: 'src/main.ts', language: 'TypeScript', bytes: 20, symbols: [] },
+        { path: 'src/setup.ts', language: 'TypeScript', bytes: 12, symbols: [] },
+      ],
+    });
+
+    expect(graph.edges).toContainEqual(
+      expect.objectContaining({ kind: 'imports', from: 'file:src/pkg/a.py', to: 'file:src/pkg/b.py' }),
+    );
+    expect(graph.edges).toContainEqual(
+      expect.objectContaining({ kind: 'imports', from: 'file:src/main.ts', to: 'file:src/setup.ts' }),
+    );
+  });
+
+  it('ignores imports and calls that only appear in comments or strings', () => {
+    const graph = buildWorkspaceProjectGraph({
+      root: '.',
+      tree: '.',
+      allFiles: [{ path: 'src/a.ts' }, { path: 'src/ghost.ts' }],
+      fileContents: {
+        'src/a.ts': {
+          content: [
+            'export function visible() {}',
+            '/*',
+            'import { ghost } from "./ghost";',
+            'ghost();',
+            '*/',
+            'const sample = "import { ghost } from \\"./ghost\\"";',
+          ].join('\n'),
+        },
+        'src/ghost.ts': { content: 'export function ghost() {}\n' },
+      },
+      files: [
+        {
+          path: 'src/a.ts',
+          language: 'TypeScript',
+          bytes: 80,
+          symbols: [{ name: 'visible', kind: 'function', signature: 'visible()', line: 1, exported: true }],
+        },
+        {
+          path: 'src/ghost.ts',
+          language: 'TypeScript',
+          bytes: 26,
+          symbols: [{ name: 'ghost', kind: 'function', signature: 'ghost()', line: 1, exported: true }],
+        },
+      ],
+    });
+
+    expect(graph.edges).not.toContainEqual(
+      expect.objectContaining({ kind: 'imports', from: 'file:src/a.ts', to: 'file:src/ghost.ts' }),
+    );
+    expect(graph.edges.filter((edge) => edge.kind === 'calls' && edge.to.includes('ghost'))).toEqual([]);
+  });
+
+  it('keeps Rust impl methods attached to their type', () => {
+    const symbols = extractStructuralSymbols(
+      'src/lib.rs',
+      ['impl Foo {', '    fn run(&self) {}', '}', ''].join('\n'),
+    );
+    const run = symbols.find((symbol) => symbol.name === 'run');
+    expect(run).toMatchObject({ kind: 'method', containerName: 'Foo' });
+  });
+
+  it('binds LSP inheritance edges using toFilePath when names collide', async () => {
+    const graph = buildWorkspaceProjectGraph({
+      root: '.',
+      tree: '.',
+      allFiles: [{ path: 'src/a.ts' }, { path: 'src/b.ts' }, { path: 'src/child.ts' }],
+      fileContents: {
+        'src/a.ts': { content: 'export class Base {}\n' },
+        'src/b.ts': { content: 'export class Base {}\n' },
+        'src/child.ts': { content: 'export class Child extends Base {}\n' },
+      },
+      files: [
+        {
+          path: 'src/a.ts',
+          language: 'TypeScript',
+          bytes: 20,
+          symbols: [{ name: 'Base', kind: 'class', signature: 'class Base', line: 1, exported: true }],
+        },
+        {
+          path: 'src/b.ts',
+          language: 'TypeScript',
+          bytes: 20,
+          symbols: [{ name: 'Base', kind: 'class', signature: 'class Base', line: 1, exported: true }],
+        },
+        {
+          path: 'src/child.ts',
+          language: 'TypeScript',
+          bytes: 40,
+          symbols: [{ name: 'Child', kind: 'class', signature: 'class Child', line: 1, exported: true }],
+        },
+      ],
+    });
+
+    const enhancer: LspProjectGraphEnhancer = {
+      enhanceReferences: async () => [],
+      enhanceInheritance: async () => [
+        { fromSymbol: 'Child', toSymbol: 'Base', kind: 'extends', toFilePath: 'src/b.ts' },
+      ],
+    };
+
+    const enriched = await enrichProjectGraphEdges(graph, enhancer, {
+      'src/child.ts': { content: 'export class Child extends Base {}\n', bytes: 40 },
+    });
+    const childNode = enriched.nodes.find((node) => node.symbol?.name === 'Child');
+    const baseB = enriched.nodes.find((node) => node.path === 'src/b.ts' && node.symbol?.name === 'Base');
+    const baseA = enriched.nodes.find((node) => node.path === 'src/a.ts' && node.symbol?.name === 'Base');
+    expect(enriched.edges).toContainEqual(
+      expect.objectContaining({ kind: 'extends', from: childNode?.id, to: baseB?.id }),
+    );
+    expect(enriched.edges).not.toContainEqual(
+      expect.objectContaining({ kind: 'extends', from: childNode?.id, to: baseA?.id }),
+    );
+  });
+
+  it('does not fabricate call-graph precision from inheritance-only LSP edges', async () => {
+    const graph = buildWorkspaceProjectGraph({
+      root: '.',
+      tree: '.',
+      fileContents: {
+        'src/a.ts': { content: 'export class Base {}\nexport class Child {}\n' },
+      },
+      files: [
+        {
+          path: 'src/a.ts',
+          language: 'TypeScript',
+          bytes: 40,
+          symbolSource: 'lsp',
+          symbols: [
+            { name: 'Base', kind: 'class', signature: 'class Base', line: 1, exported: true },
+            { name: 'Child', kind: 'class', signature: 'class Child', line: 2, exported: true },
+          ],
+        },
+      ],
+    });
+    const beforePrecision = graph.quality?.callGraphPrecision ?? 0;
+    const enhancer: LspProjectGraphEnhancer = {
+      enhanceReferences: async () => [],
+      enhanceInheritance: async () => [{ fromSymbol: 'Child', toSymbol: 'Base', kind: 'extends', toFilePath: 'src/a.ts' }],
+    };
+    const enriched = await enrichProjectGraphEdges(graph, enhancer, {
+      'src/a.ts': { content: 'export class Base {}\nexport class Child {}\n', bytes: 40 },
+    });
+    expect(enriched.edges).toContainEqual(expect.objectContaining({ kind: 'extends' }));
+    expect(enriched.quality?.callGraphPrecision).toBe(beforePrecision);
   });
 });

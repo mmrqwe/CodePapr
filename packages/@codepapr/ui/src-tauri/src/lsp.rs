@@ -34,6 +34,15 @@ const LSP_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const LSP_BATCH_DEADLINE: Duration = Duration::from_secs(12);
 const LSP_BATCH_ITEM_TIMEOUT: Duration = Duration::from_secs(8);
 const LSP_BATCH_MAX_CONSECUTIVE_TIMEOUTS: usize = 2;
+
+fn remaining_until(deadline: Instant, cap: Duration) -> Option<Duration> {
+    let remaining = deadline.checked_duration_since(Instant::now())?;
+    if remaining.is_zero() {
+        None
+    } else {
+        Some(cap.min(remaining))
+    }
+}
 const MAX_LSP_REQUEST_BYTES: usize = 1_000_000;
 const MAX_LSP_RESPONSE_BYTES: usize = 2_000_000;
 const MAX_LSP_QUEUED_MESSAGES: usize = 256;
@@ -2154,6 +2163,9 @@ pub(crate) fn lsp_batch_symbols_with_limits(
         let mut consecutive_timeouts = 0usize;
         let mut circuit_open = false;
         for file in group.iter().copied() {
+            if remaining_until(deadline, item_timeout).is_none() {
+                break;
+            }
             let _ = lsp_open_document_with_app(
                 None,
                 workspace_path.to_string(),
@@ -2165,14 +2177,14 @@ pub(crate) fn lsp_batch_symbols_with_limits(
             );
         }
         for file in group.iter().copied() {
-            if Instant::now() >= deadline {
+            let Some(timeout) = remaining_until(deadline, item_timeout) else {
                 outputs.push(LspBatchSymbolOutput {
                     path: file.path.clone(),
                     result: Value::Null,
                     error: Some("LSP 批处理超过时限，已降级".to_string()),
                 });
                 continue;
-            }
+            };
             if circuit_open {
                 outputs.push(LspBatchSymbolOutput {
                     path: file.path.clone(),
@@ -2197,7 +2209,7 @@ pub(crate) fn lsp_batch_symbols_with_limits(
                 &file.language_id,
                 "textDocument/documentSymbol",
                 &json!({ "textDocument": { "uri": uri } }),
-                item_timeout,
+                timeout,
             ) {
                 Ok(response) => {
                     consecutive_timeouts = 0;
@@ -2331,7 +2343,15 @@ pub(crate) fn lsp_batch_enrich_with_limits(
     let mut circuit_open = false;
 
     for file in files {
-        if Instant::now() >= deadline || circuit_open {
+        let Some(_) = remaining_until(deadline, item_timeout) else {
+            outputs.push(LspBatchEnrichFileOutput {
+                path: file.path.clone(),
+                references: Vec::new(),
+                inheritance: Vec::new(),
+            });
+            continue;
+        };
+        if circuit_open {
             outputs.push(LspBatchEnrichFileOutput {
                 path: file.path.clone(),
                 references: Vec::new(),
@@ -2357,10 +2377,10 @@ pub(crate) fn lsp_batch_enrich_with_limits(
         let mut references: Vec<LspBatchEnrichReference> = Vec::new();
         let mut inheritance: Vec<LspBatchEnrichInheritance> = Vec::new();
         for sym in &file.symbols {
-            if Instant::now() >= deadline {
+            let Some(timeout) = remaining_until(deadline, item_timeout) else {
                 circuit_open = true;
                 break;
-            }
+            };
             // 与旧实现一致：单个请求失败静默跳过（符号提取不到引用/继承不
             // 影响其余符号与整体图构建）。
             match lsp_request_timed(
@@ -2372,7 +2392,7 @@ pub(crate) fn lsp_batch_enrich_with_limits(
                     "position": { "line": sym.line, "character": sym.character },
                     "context": { "includeDeclaration": false },
                 }),
-                item_timeout,
+                timeout,
             ) {
                 Ok(response) => {
                     consecutive_timeouts = 0;
@@ -2398,11 +2418,15 @@ pub(crate) fn lsp_batch_enrich_with_limits(
                 }
             }
 
-            if circuit_open || Instant::now() >= deadline {
+            if circuit_open || remaining_until(deadline, item_timeout).is_none() {
                 break;
             }
 
             if sym.kind == "class" || sym.kind == "interface" {
+                let Some(timeout) = remaining_until(deadline, item_timeout) else {
+                    circuit_open = true;
+                    break;
+                };
                 match lsp_request_timed(
                     workspace_path,
                     &file.language_id,
@@ -2411,7 +2435,7 @@ pub(crate) fn lsp_batch_enrich_with_limits(
                         "textDocument": { "uri": uri },
                         "position": { "line": sym.line, "character": sym.character },
                     }),
-                    item_timeout,
+                    timeout,
                 ) {
                     Ok(response) => {
                         consecutive_timeouts = 0;
@@ -2475,7 +2499,7 @@ mod tests {
         lsp_batch_enrich_with_limits, lsp_batch_symbols_impl, lsp_batch_symbols_with_limits,
         lsp_close_document_impl, lsp_open_document_with_app, lsp_query_availability_impl,
         lsp_request, lsp_server_config, lsp_stop_server_impl, normalize_relative_path,
-        resolve_lsp_command_candidates, resolved_command_display, send_request, server_key,
+        remaining_until, resolve_lsp_command_candidates, resolved_command_display, send_request, server_key,
         LspBatchEnrichFile, LspBatchEnrichSymbol, LspBatchSymbolInput, LSP_REQUEST_TIMEOUT,
     };
     use serde_json::{json, Value};
@@ -3526,5 +3550,23 @@ mod tests {
         assert_eq!(outputs.len(), 1);
         assert!(outputs[0].references.is_empty());
         let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn remaining_until_caps_item_timeout_to_deadline() {
+        let timeout = remaining_until(
+            Instant::now() + Duration::from_millis(40),
+            Duration::from_secs(8),
+        )
+        .expect("deadline in the future");
+        assert!(timeout <= Duration::from_millis(80));
+        assert!(timeout <= Duration::from_secs(8));
+    }
+
+    #[test]
+    fn remaining_until_none_when_deadline_passed() {
+        let past = Instant::now();
+        std::thread::sleep(Duration::from_millis(2));
+        assert!(remaining_until(past, Duration::from_secs(8)).is_none());
     }
 }

@@ -426,7 +426,7 @@ function resolveSymbolSource(
     return 'lsp';
   }
   const family = stubPatternFamily(path);
-  return family && TYPESCRIPT_AST_FAMILIES.has(family) ? 'ast' : 'pattern';
+  return family && STRUCTURAL_AST_FAMILIES.has(family) ? 'ast' : 'pattern';
 }
 
 export function buildWorkspaceProjectGraph(

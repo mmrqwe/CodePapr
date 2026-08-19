@@ -83,4 +83,32 @@ describe('workspaceProjectGraphShared', () => {
     expect(file?.symbolSource).toBe('lsp');
     expect(graph.nodes.filter((node) => node.kind === 'symbol')).toEqual([]);
   });
+
+  it('tags structurally extracted Python symbols as ast, not pattern', () => {
+    const params = {
+      rootRelativePath: '',
+      entries: [{ path: 'src/app.py', name: 'app.py', isDir: false, bytes: 40 }],
+      fileContents: {
+        'src/app.py': {
+          content: 'def run():\n    return 1\n',
+          bytes: 24,
+        },
+      },
+      symbolOverrides: {},
+      maxTreeEntries: 40,
+      maxStubsPerFile: 8,
+      truncated: false,
+    };
+
+    const graph = buildWorkspaceProjectGraph({
+      projectMap: buildWorkspaceProjectMapSync(params),
+      entries: params.entries,
+      fileContents: params.fileContents,
+      symbolOverrides: params.symbolOverrides,
+      maxEdges: 50,
+    });
+
+    expect(graph.files.find((file) => file.path === 'src/app.py')?.symbolSource).toBe('ast');
+    expect(graph.quality?.astCoverage).toBe(1);
+  });
 });

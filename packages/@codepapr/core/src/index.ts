@@ -234,6 +234,7 @@ export type {
 } from './tool/workspace/languageTools';
 export {
   filePathFromFileUri,
+  findFileUriForRelativePath,
   relativePathFromFileUri,
   workspaceFileUri,
 } from './tool/workspace/fileUri';

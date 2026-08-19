@@ -649,21 +649,48 @@ function resolveRelativeImport(
   return null;
 }
 
+function tryPythonModule(base: string, allFiles: ReadonlySet<string>): string | null {
+  const normalizedBase = normalizePath(base);
+  if (!normalizedBase) {
+    return null;
+  }
+  for (const ext of PYTHON_EXTENSION_CANDIDATES) {
+    const candidate = normalizePath(`${normalizedBase}${ext}`);
+    if (allFiles.has(candidate)) return candidate;
+  }
+  for (const indexFile of PYTHON_INDEX_CANDIDATES) {
+    const candidate = normalizePath(`${normalizedBase}/${indexFile}`);
+    if (allFiles.has(candidate)) return candidate;
+  }
+  return null;
+}
+
 function resolvePythonImport(sourcePath: string, specifier: string, allFiles: ReadonlySet<string>): string | null {
+  let dots = 0;
+  while (specifier[dots] === '.') dots++;
+  const remainder = specifier.slice(dots).replace(/^\.+/, '');
+
+  if (dots > 0) {
+    let dir = dirname(sourcePath);
+    for (let i = 1; i < dots; i++) {
+      if (!dir) break;
+      dir = dirname(dir);
+    }
+    if (remainder) {
+      const relative = remainder.replace(/\./g, '/');
+      return tryPythonModule(dir ? `${dir}/${relative}` : relative, allFiles);
+    }
+    return tryPythonModule(dir, allFiles);
+  }
+
   const parts = specifier.split('.');
   const basePath = parts.join('/');
   const sourceDir = dirname(sourcePath);
 
   for (const dir of [sourceDir, '']) {
     const base = dir ? `${dir}/${basePath}` : basePath;
-    for (const ext of PYTHON_EXTENSION_CANDIDATES) {
-      const candidate = normalizePath(`${base}${ext}`);
-      if (allFiles.has(candidate)) return candidate;
-    }
-    for (const indexFile of PYTHON_INDEX_CANDIDATES) {
-      const candidate = normalizePath(`${base}/${indexFile}`);
-      if (allFiles.has(candidate)) return candidate;
-    }
+    const resolved = tryPythonModule(base, allFiles);
+    if (resolved) return resolved;
   }
 
   for (const candidate of allFiles) {
@@ -1020,16 +1047,102 @@ function buildModuleContext(
   }
 }
 
+function buildCodeMask(content: string, style: 'c-like' | 'python'): boolean[] {
+  const mask = new Array<boolean>(content.length).fill(true);
+  const mark = (from: number, to: number): void => {
+    for (let i = from; i < to && i < mask.length; i++) {
+      if (content[i] !== '\n' && content[i] !== '\r') mask[i] = false;
+    }
+  };
+  let i = 0;
+  const n = content.length;
+
+  const consumeLineComment = (): void => {
+    const start = i;
+    while (i < n && content[i] !== '\n') i++;
+    mark(start, i);
+  };
+
+  while (i < n) {
+    const ch = content[i];
+    const next = i + 1 < n ? content[i + 1] : '';
+
+    if (style === 'python' && (content.startsWith('"""', i) || content.startsWith("'''", i))) {
+      const quote = content.slice(i, i + 3);
+      const start = i;
+      i += 3;
+      while (i < n && !content.startsWith(quote, i)) i++;
+      if (i < n) i += 3;
+      mark(start, i);
+      continue;
+    }
+
+    if (ch === '"' || ch === "'" || (style === 'c-like' && ch === '`')) {
+      const quote = ch;
+      const start = i;
+      i++;
+      while (i < n) {
+        if (content[i] === '\\') {
+          i += 2;
+          continue;
+        }
+        if (content[i] === quote) {
+          i++;
+          break;
+        }
+        if (content[i] === '\n' && quote !== '`') {
+          break;
+        }
+        i++;
+      }
+      mark(start, i);
+      continue;
+    }
+
+    if (style === 'c-like' && ch === '/' && next === '/') {
+      consumeLineComment();
+      continue;
+    }
+    if (style === 'c-like' && ch === '/' && next === '*') {
+      const start = i;
+      i += 2;
+      while (i < n) {
+        if (content[i] === '*' && i + 1 < n && content[i + 1] === '/') {
+          i += 2;
+          break;
+        }
+        i++;
+      }
+      mark(start, i);
+      continue;
+    }
+    if (style === 'python' && ch === '#') {
+      consumeLineComment();
+      continue;
+    }
+
+    i++;
+  }
+
+  return mask;
+}
+
+function isCodeIndex(mask: boolean[], index: number | undefined): boolean {
+  return index !== undefined && index >= 0 && index < mask.length && mask[index];
+}
+
 function buildJsTsModuleContext(sourcePath: string, content: string, allFiles: ReadonlySet<string>): FileModuleContext {
   const references: ModuleReference[] = [];
   const importedSymbols = new Map<string, ModuleBinding[]>();
   const importedNamespaces = new Map<string, ModuleBinding>();
   let unresolvedLocalImports = 0;
+  const code = buildCodeMask(content, 'c-like');
   // 相对/绝对路径导入必须解析到项目文件；解析失败说明图有缺口。
   // 裸包名（react、lodash 等）属于外部依赖，不计入。
   const isLocalSpecifier = (specifier: string): boolean =>
     specifier.startsWith('./') || specifier.startsWith('../') || specifier.startsWith('/');
   const staticModulePattern = /(?:^|\n)\s*(import|export)\s+([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g;
+  const sideEffectImportPattern = /(?:^|\n)\s*import\s+['"]([^'"]+)['"]/g;
   const dynamicModulePatterns: Array<{ pattern: RegExp; kind: ModuleReference['kind'] }> = [
     { pattern: /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g, kind: 'imports' },
     { pattern: /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g, kind: 'imports' },
@@ -1038,6 +1151,11 @@ function buildJsTsModuleContext(sourcePath: string, content: string, allFiles: R
   let staticMatch = staticModulePattern.exec(content);
   while (staticMatch) {
     const keyword = staticMatch[1]?.trim();
+    const keywordOffset = keyword ? staticMatch[0].search(new RegExp(`\\b${keyword}\\b`)) : -1;
+    if (!isCodeIndex(code, staticMatch.index + Math.max(0, keywordOffset))) {
+      staticMatch = staticModulePattern.exec(content);
+      continue;
+    }
     const clause = collapseWhitespace(staticMatch[2] ?? '');
     const specifier = staticMatch[3]?.trim() ?? '';
     const targetPath = resolveImportTarget(sourcePath, specifier, allFiles, 'typescript');
@@ -1089,9 +1207,30 @@ function buildJsTsModuleContext(sourcePath: string, content: string, allFiles: R
     staticMatch = staticModulePattern.exec(content);
   }
 
+  let sideEffectMatch = sideEffectImportPattern.exec(content);
+  while (sideEffectMatch) {
+    const importOffset = sideEffectMatch[0].search(/\bimport\b/);
+    if (!isCodeIndex(code, sideEffectMatch.index + Math.max(0, importOffset))) {
+      sideEffectMatch = sideEffectImportPattern.exec(content);
+      continue;
+    }
+    const specifier = sideEffectMatch[1]?.trim() ?? '';
+    const targetPath = resolveImportTarget(sourcePath, specifier, allFiles, 'typescript');
+    if (targetPath) {
+      references.push({ kind: 'imports', specifier });
+    } else if (isLocalSpecifier(specifier)) {
+      unresolvedLocalImports += 1;
+    }
+    sideEffectMatch = sideEffectImportPattern.exec(content);
+  }
+
   for (const { pattern, kind } of dynamicModulePatterns) {
     let match = pattern.exec(content);
     while (match) {
+      if (!isCodeIndex(code, match.index)) {
+        match = pattern.exec(content);
+        continue;
+      }
       const specifier = match[1]?.trim() ?? '';
       if (resolveImportTarget(sourcePath, specifier, allFiles, 'typescript')) {
         references.push({ kind, specifier });
@@ -1114,15 +1253,22 @@ function buildPythonModuleContext(sourcePath: string, content: string, allFiles:
   const references: ModuleReference[] = [];
   const importedSymbols = new Map<string, ModuleBinding[]>();
   const importedNamespaces = new Map<string, ModuleBinding>();
+  let unresolvedLocalImports = 0;
+  const code = buildCodeMask(content, 'python');
 
-  const fromImportPattern = /^[\t ]*from[\t ]+([A-Za-z_][\w.]*?)[\t ]+import[\t ]+(.+)/gm;
+  const fromImportPattern = /^[\t ]*from[\t ]+(\.+[A-Za-z_][\w.]*|\.+|[A-Za-z_][\w.]*)[\t ]+import[\t ]+(.+)/gm;
   const bareImportPattern = /^[\t ]*import[\t ]+([A-Za-z_][\w.]*)(?:[\t ]+as[\t ]+(\w+))?/gm;
 
   let match: RegExpExecArray | null;
   match = fromImportPattern.exec(content);
   while (match) {
+    if (!isCodeIndex(code, match.index)) {
+      match = fromImportPattern.exec(content);
+      continue;
+    }
     const modulePath = match[1].trim();
     const importList = match[2].trim();
+    const isRelative = modulePath.startsWith('.');
     const targetPath = resolveImportTarget(sourcePath, modulePath, allFiles, 'python');
     if (targetPath) {
       references.push({ kind: 'imports', specifier: modulePath });
@@ -1130,16 +1276,29 @@ function buildPythonModuleContext(sourcePath: string, content: string, allFiles:
         const parts = item.trim().split(/\s+as\s+/i);
         const importedName = parts[0]?.trim();
         const localName = parts[1]?.trim() ?? importedName;
-        if (importedName && localName) {
-          addImportedBinding(importedSymbols, localName, { targetPath, importedName });
+        if (!importedName || !localName || importedName === '*') continue;
+        let bindingPath = targetPath;
+        if (isRelative && /^[\.]+$/.test(modulePath)) {
+          bindingPath =
+            resolveImportTarget(sourcePath, `${modulePath}${importedName}`, allFiles, 'python') ?? targetPath;
+          if (bindingPath !== targetPath) {
+            references.push({ kind: 'imports', specifier: `${modulePath}${importedName}` });
+          }
         }
+        addImportedBinding(importedSymbols, localName, { targetPath: bindingPath, importedName });
       }
+    } else if (isRelative) {
+      unresolvedLocalImports += 1;
     }
     match = fromImportPattern.exec(content);
   }
 
   match = bareImportPattern.exec(content);
   while (match) {
+    if (!isCodeIndex(code, match.index)) {
+      match = bareImportPattern.exec(content);
+      continue;
+    }
     const modulePath = match[1].trim();
     const alias = match[2]?.trim();
     const targetPath = resolveImportTarget(sourcePath, modulePath, allFiles, 'python');
@@ -1157,7 +1316,7 @@ function buildPythonModuleContext(sourcePath: string, content: string, allFiles:
     match = bareImportPattern.exec(content);
   }
 
-  return { references, importedSymbols, importedNamespaces };
+  return { references, importedSymbols, importedNamespaces, unresolvedLocalImports };
 }
 
 function buildRustModuleContext(sourcePath: string, content: string, allFiles: ReadonlySet<string>): FileModuleContext {
@@ -1531,6 +1690,7 @@ function extractRustStructuralSymbols(content: string): StructuralSymbol[] {
   for (const [lineIdx, rawLine] of content.split(/\r?\n/).entries()) {
     const lineNum = lineIdx + 1;
     const trimmed = rawLine.trim();
+    const depthBefore = braceDepth;
 
     for (const ch of rawLine) {
       if (ch === '{') braceDepth++;
@@ -1581,7 +1741,7 @@ function extractRustStructuralSymbols(content: string): StructuralSymbol[] {
 
     const implMatch = trimmed.match(/^impl(?:\s*<[^>]*>)?\s+(?:([A-Za-z_]\w*)\s+for\s+)?([A-Za-z_]\w*)/);
     if (implMatch) {
-      implStack.push({ name: implMatch[2], braceDepth });
+      implStack.push({ name: implMatch[2], braceDepth: depthBefore });
       continue;
     }
 
@@ -3115,22 +3275,22 @@ function extractCallTargets(
   language?: string,
 ): CallTarget[] {
   const normLang = detectLanguage(_path, language);
+  const code = buildCodeMask(content, normLang === 'python' ? 'python' : 'c-like');
   const results: CallTarget[] = [];
   const seen = new Set<string>();
   let lineNum = 1;
+  let lineStart = 0;
 
   for (const rawLine of content.split(/\r?\n/)) {
     const line = rawLine.trim();
-    if (!line || line.startsWith('//') || line.startsWith('#') || line.startsWith('/*')) {
-      lineNum++;
-      continue;
-    }
-
+    const inCode = (index: number): boolean => isCodeIndex(code, lineStart + index);
+    if (line && !line.startsWith('//') && !line.startsWith('#') && !line.startsWith('/*')) {
     switch (normLang) {
       case 'python': {
         const pyPattern = /(?:(\w+)\s*\.\s*)?(\w+)\s*\(/g;
         let pyMatch: RegExpExecArray | null;
         while ((pyMatch = pyPattern.exec(rawLine)) !== null) {
+          if (!inCode(pyMatch.index)) continue;
           const receiver = pyMatch[1] || undefined;
           const name = pyMatch[2];
           if (!name || CALL_KEYWORDS.has(name)) continue;
@@ -3146,6 +3306,7 @@ function extractCallTargets(
         const rustPattern = /(?:(\w+(?:::\w+)*)\s*::\s*)?(\w+)\s*[(<]/g;
         let rsMatch: RegExpExecArray | null;
         while ((rsMatch = rustPattern.exec(rawLine)) !== null) {
+          if (!inCode(rsMatch.index)) continue;
           const receiver = rsMatch[1] || undefined;
           const name = rsMatch[2];
           if (!name || CALL_KEYWORDS.has(name)) continue;
@@ -3161,6 +3322,7 @@ function extractCallTargets(
         const goPattern = /(?:(\w+)\s*\.\s*)?(\w+)\s*\(/g;
         let goMatch: RegExpExecArray | null;
         while ((goMatch = goPattern.exec(rawLine)) !== null) {
+          if (!inCode(goMatch.index)) continue;
           const receiver = goMatch[1] || undefined;
           const name = goMatch[2];
           if (!name || CALL_KEYWORDS.has(name)) continue;
@@ -3176,6 +3338,7 @@ function extractCallTargets(
         const javaPattern = /(?:(\w+(?:\.\w+)*)\s*\.\s*)?(\w+)\s*\(/g;
         let jMatch: RegExpExecArray | null;
         while ((jMatch = javaPattern.exec(rawLine)) !== null) {
+          if (!inCode(jMatch.index)) continue;
           const receiver = jMatch[1] || undefined;
           const name = jMatch[2];
           if (!name || CALL_KEYWORDS.has(name) || /^[A-Z]/.test(name)) continue;
@@ -3191,6 +3354,7 @@ function extractCallTargets(
         const csPattern = /(?:(\w+(?:\.\w+)*)\s*\.\s*)?(\w+)\s*\(/g;
         let csMatch: RegExpExecArray | null;
         while ((csMatch = csPattern.exec(rawLine)) !== null) {
+          if (!inCode(csMatch.index)) continue;
           const receiver = csMatch[1] || undefined;
           const name = csMatch[2];
           if (!name || CALL_KEYWORDS.has(name)) continue;
@@ -3207,6 +3371,7 @@ function extractCallTargets(
         const cppPattern = /(?:(\w+(?:::[\w<>:]+)*)\s*(?:\.|->|::)\s*)?(\w+)\s*[(<]/g;
         let cppMatch: RegExpExecArray | null;
         while ((cppMatch = cppPattern.exec(rawLine)) !== null) {
+          if (!inCode(cppMatch.index)) continue;
           const receiver = cppMatch[1] || undefined;
           const name = cppMatch[2];
           if (!name || CALL_KEYWORDS.has(name) || name.startsWith('_')) continue;
@@ -3222,6 +3387,7 @@ function extractCallTargets(
         const swiftPattern = /(?:(\w+(?:\.\w+)*)\s*\.\s*)?(\w+)\s*\(/g;
         let swMatch: RegExpExecArray | null;
         while ((swMatch = swiftPattern.exec(rawLine)) !== null) {
+          if (!inCode(swMatch.index)) continue;
           const receiver = swMatch[1] || undefined;
           const name = swMatch[2];
           if (!name || CALL_KEYWORDS.has(name) || /^[A-Z]/.test(name)) continue;
@@ -3237,6 +3403,7 @@ function extractCallTargets(
         const pattern = /(?:(\w+)\s*\.\s*)?(\w+)\s*\(/g;
         let match: RegExpExecArray | null;
         while ((match = pattern.exec(rawLine)) !== null) {
+          if (!inCode(match.index)) continue;
           const receiver = match[1] || undefined;
           const name = match[2];
           if (!name || CALL_KEYWORDS.has(name)) continue;
@@ -3249,7 +3416,10 @@ function extractCallTargets(
         break;
       }
     }
+    }
 
+    const nextNl = content.indexOf('\n', lineStart);
+    lineStart = nextNl === -1 ? content.length : nextNl + 1;
     lineNum++;
   }
 
@@ -3398,7 +3568,6 @@ export async function enrichProjectGraphEdges(
 ): Promise<WorkspaceProjectGraphResult> {
   const edges = [...result.edges];
   const seenEdges = new Set(edges.map((e) => e.id));
-  let addedCount = 0;
 
   const addEdge = (edge: ProjectGraphEdge): boolean => {
     if (seenEdges.has(edge.id)) {
@@ -3406,7 +3575,6 @@ export async function enrichProjectGraphEdges(
     }
     seenEdges.add(edge.id);
     edges.push(edge);
-    addedCount++;
     return true;
   };
 
@@ -3477,6 +3645,9 @@ export async function enrichProjectGraphEdges(
             const candidates = symbolsByName.get(inh.toSymbol);
             if (!candidates || candidates.length === 0) continue;
             const toNode =
+              (inh.toFilePath
+                ? candidates.find((n) => n.path === inh.toFilePath)
+                : undefined) ??
               candidates.find((n) => n.path === fromNode.path) ??
               candidates.find((n) => n.symbol?.exported) ??
               candidates[0];
@@ -3509,18 +3680,6 @@ export async function enrichProjectGraphEdges(
       edges: edges.length,
       lspEnhanced: true,
     },
-    // 质量指标的 LSP 加成只在真正新增了边时才生效，避免增强实际上什么都没找到时
-    // 仍然显示一个固定提升、给人虚假的可信度提升错觉。
-    quality: result.quality
-      ? {
-          ...result.quality,
-          ...(addedCount > 0
-            ? {
-                lspCoverage: Math.min(1, result.quality.lspCoverage + 0.15),
-                callGraphPrecision: Math.min(1, result.quality.callGraphPrecision + 0.1),
-              }
-            : {}),
-        }
-      : undefined,
+    quality: result.quality,
   };
 }

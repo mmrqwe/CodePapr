@@ -44,6 +44,24 @@ export function filePathFromFileUri(uri: string): string | null {
   }
 }
 
+export function findFileUriForRelativePath(
+  workspacePath: string,
+  relativePath: string,
+  uris: Iterable<string>,
+): string | undefined {
+  const wanted = relativePath.replace(/\\/g, '/');
+  const wantedLower = wanted.toLowerCase();
+  for (const uri of uris) {
+    const mapped = relativePathFromFileUri(workspacePath, uri);
+    if (mapped === null) continue;
+    const normalized = mapped.replace(/\\/g, '/');
+    if (normalized === wanted || normalized.toLowerCase() === wantedLower) {
+      return uri;
+    }
+  }
+  return undefined;
+}
+
 export function relativePathFromFileUri(workspacePath: string, uri: string | undefined): string | null {
   if (!uri) {
     return null;

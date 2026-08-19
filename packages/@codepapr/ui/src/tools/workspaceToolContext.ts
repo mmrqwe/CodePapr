@@ -5,6 +5,7 @@ import {
   asOptionalString,
   asOptionalNumber,
   boundedNumber,
+  findFileUriForRelativePath,
 } from '@codepapr/core';
 import { usePermissionStore, isAbsolutePath } from '../store/permissionStore';
 import { lspLanguageFromPath } from '../utils/editorLanguage';
@@ -170,9 +171,7 @@ export function createWorkspaceToolContext(params: WorkspaceToolContextParams) {
         { workspacePath: workspace(), languageId, relativePath }
       );
       const allDiags = result.diagnostics ?? {};
-      const fileUri = Object.keys(allDiags).find(
-        (uri) => uri.endsWith(relativePath) || uri.endsWith(relativePath.replace(/\\/g, '/'))
-      );
+      const fileUri = findFileUriForRelativePath(workspace(), relativePath, Object.keys(allDiags));
       const fileDiags = fileUri ? (allDiags[fileUri]?.diagnostics ?? []) : [];
       if (fileDiags.length === 0) {
         return { diagnostics: [], note: 'LSP 检查通过，无编译错误。' };

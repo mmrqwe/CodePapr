@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   filePathFromFileUri,
+  findFileUriForRelativePath,
   relativePathFromFileUri,
   workspaceFileUri,
 } from '../src/tool/workspace/fileUri';
@@ -33,6 +34,15 @@ describe('relativePathFromFileUri', () => {
   it('round-trips POSIX paths', () => {
     const uri = workspaceFileUri('/tmp/proj', 'src/a.ts');
     expect(relativePathFromFileUri('/tmp/proj', uri)).toBe('src/a.ts');
+  });
+
+  it('maps a diagnostic URI to the exact relative path, not a same-suffix sibling', () => {
+    expect(
+      findFileUriForRelativePath('/Users/proj', 'src/index.ts', [
+        'file:///Users/proj/packages/a/src/index.ts',
+        'file:///Users/proj/src/index.ts',
+      ]),
+    ).toBe('file:///Users/proj/src/index.ts');
   });
 });
 
