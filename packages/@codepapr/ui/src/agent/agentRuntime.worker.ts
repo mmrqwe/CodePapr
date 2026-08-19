@@ -1040,7 +1040,7 @@ async function handleRunAppAgent(
     if (BLOCKED.has(tool.name)) continue;
     if (tool.name.startsWith('mcp__')) {
       if (!access.network) continue;
-      if (requestedTools.length === 0 || !requestedTools.includes(tool.name)) continue;
+      if (requestedTools.length > 0 && !requestedTools.includes(tool.name)) continue;
     } else {
       if (!allowedTools.has(tool.name)) continue;
       if (requestedTools.length > 0 && !requestedTools.includes(tool.name)) continue;

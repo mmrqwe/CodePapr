@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { ToolRegistry } from '@codepapr/core';
-import type { IToolDefinition } from '@codepapr/types';
+import type { IImageContent, IToolDefinition } from '@codepapr/types';
 import {
   buildMcpToolName,
   createMcpSettingsCacheKey,
@@ -356,7 +356,36 @@ async function resolveOriginalToolName(displayName: string): Promise<{ serverId:
   return { serverId: parsed.serverId, toolName: parsed.sanitizedToolName };
 }
 
-async function callMcpTool(settings: McpSettings, displayName: string, args: Record<string, unknown>): Promise<McpCallToolResult> {
+function extractMcpImages(result: unknown): IImageContent[] {
+  if (!result || typeof result !== 'object') return [];
+  const content = (result as { content?: unknown[] }).content;
+  if (!Array.isArray(content)) return [];
+  const images: IImageContent[] = [];
+  for (const item of content) {
+    if (item && typeof item === 'object') {
+      const itemRecord = item as Record<string, unknown>;
+      if (itemRecord.type === 'image') {
+        const data = typeof itemRecord.data === 'string' ? itemRecord.data : '';
+        const mediaType =
+          typeof itemRecord.mimeType === 'string'
+            ? itemRecord.mimeType
+            : typeof itemRecord.mediaType === 'string'
+              ? itemRecord.mediaType
+              : 'image/png';
+        if (data) {
+          images.push({ mediaType, data });
+        }
+      }
+    }
+  }
+  return images;
+}
+
+async function callMcpTool(
+  settings: McpSettings,
+  displayName: string,
+  args: Record<string, unknown>
+): Promise<McpCallToolResult & { __images?: IImageContent[] }> {
   const resolved = await resolveOriginalToolName(displayName);
   if (!resolved) {
     throw new Error(`Invalid MCP tool name: ${displayName}`);
@@ -364,11 +393,21 @@ async function callMcpTool(settings: McpSettings, displayName: string, args: Rec
 
   await validateToolArguments(displayName, args);
 
-  return await invoke<McpCallToolResult>('mcp_call_tool', {
+  const raw = await invoke<McpCallToolResult>('mcp_call_tool', {
     serverId: resolved.serverId,
     toolName: resolved.toolName,
     arguments: args,
   });
+
+  const images = extractMcpImages(raw.result);
+  if (images.length > 0) {
+    return {
+      ...raw,
+      __images: images,
+    };
+  }
+
+  return raw;
 }
 
 async function validateToolArguments(displayName: string, args: Record<string, unknown>): Promise<void> {

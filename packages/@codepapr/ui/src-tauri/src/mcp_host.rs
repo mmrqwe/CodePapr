@@ -614,27 +614,95 @@ async fn get_or_connect_client(server: &McpServerConfig) -> Result<SharedMcpClie
     Err(last_err)
 }
 
-fn truncate_json(value: Value, max_bytes: usize) -> Value {
-    let text = match serde_json::to_string(&value) {
-        Ok(text) => text,
+async fn invalidate_cached_client(server: &McpServerConfig) {
+    let key = server_cache_key(server);
+    let mut guard = clients().lock().await;
+    guard.remove(&key);
+}
+
+fn truncate_json(mut value: Value, max_bytes: usize) -> Value {
+    let total_len = match serde_json::to_string(&value) {
+        Ok(text) => text.len(),
         Err(_) => return value,
     };
-    if text.len() <= max_bytes {
+    if total_len <= max_bytes {
         return value;
     }
 
+    if let Value::Object(ref mut map) = value {
+        if let Some(Value::Array(content)) = map.get_mut("content") {
+            let mut current_size = total_len;
+            for item in content.iter_mut() {
+                if current_size <= max_bytes {
+                    break;
+                }
+                if let Value::Object(ref mut item_map) = item {
+                    if let Some(Value::String(ref mut text)) = item_map.get_mut("text") {
+                        let text_bytes = text.len();
+                        if text_bytes > 500 {
+                            let excess = current_size.saturating_sub(max_bytes);
+                            let allowed = text_bytes.saturating_sub(excess + 100);
+                            let safe_len = allowed.clamp(100, text_bytes);
+                            let end = text
+                                .char_indices()
+                                .map(|(idx, _)| idx)
+                                .take_while(|idx| *idx <= safe_len)
+                                .last()
+                                .unwrap_or(0);
+                            let new_text = format!(
+                                "{}\n...[MCP content truncated: {} bytes > {} bytes]",
+                                &text[..end],
+                                text_bytes,
+                                safe_len
+                            );
+                            let delta = text_bytes.saturating_sub(new_text.len());
+                            *text = new_text;
+                            current_size = current_size.saturating_sub(delta);
+                        }
+                    }
+                }
+            }
+
+            while current_size > max_bytes && content.len() > 1 {
+                if let Some(popped) = content.pop() {
+                    let popped_size = serde_json::to_string(&popped).map(|s| s.len()).unwrap_or(0);
+                    current_size = current_size.saturating_sub(popped_size);
+                }
+            }
+
+            if current_size > max_bytes {
+                if let Some(first) = content.get_mut(0) {
+                    if let Value::Object(ref mut item_map) = first {
+                        if let Some(Value::String(ref mut text)) = item_map.get_mut("text") {
+                            let end = text
+                                .char_indices()
+                                .map(|(i, _)| i)
+                                .take_while(|i| *i <= max_bytes.saturating_sub(200))
+                                .last()
+                                .unwrap_or(0);
+                            *text = format!("{}\n...[MCP content truncated]", &text[..end]);
+                        }
+                    }
+                }
+            }
+            return value;
+        }
+    }
+
+    let text = serde_json::to_string(&value).unwrap_or_default();
     let end = text
         .char_indices()
         .map(|(index, _)| index)
-        .take_while(|index| *index <= max_bytes)
+        .take_while(|index| *index <= max_bytes.saturating_sub(100))
         .last()
         .unwrap_or(0);
-    Value::String(format!(
-        "{}\n...[MCP result truncated: {} bytes > {} bytes]",
-        &text[..end],
-        text.len(),
-        max_bytes,
-    ))
+    serde_json::json!({
+        "content": [{
+            "type": "text",
+            "text": format!("{}\n...[MCP result truncated: {} bytes > {} bytes]", &text[..end], text.len(), max_bytes)
+        }],
+        "isError": false
+    })
 }
 
 pub async fn list_tools(
@@ -813,17 +881,60 @@ pub async fn call_tool(
     };
 
     let timeout = Duration::from_secs(server.timeout_seconds.unwrap_or(60).clamp(5, 600));
-    let client = get_or_connect_client(&server).await?;
-    let client = client.lock().await;
-    let result = tokio::time::timeout(
-        timeout,
-        client.call_tool(CallToolRequestParams::new(tool_name.clone()).with_arguments(args_object)),
-    )
-    .await
-    .map_err(|_| format!("Timed out calling MCP tool '{tool_name}'"))?
-    .map_err(|err| format!("Failed to call MCP tool: {err}"))?;
-    let value = serde_json::to_value(result)
-        .map_err(|err| format!("Failed to encode MCP result: {err}"))?;
+    let mut last_err = String::new();
+    let mut result_value = None;
+
+    for attempt in 0..2 {
+        let client = match get_or_connect_client(&server).await {
+            Ok(c) => c,
+            Err(e) => {
+                last_err = e;
+                break;
+            }
+        };
+
+        let call_res = {
+            let client = client.lock().await;
+            tokio::time::timeout(
+                timeout,
+                client.call_tool(CallToolRequestParams::new(tool_name.clone()).with_arguments(args_object.clone())),
+            )
+            .await
+        };
+
+        match call_res {
+            Ok(Ok(result)) => {
+                match serde_json::to_value(result) {
+                    Ok(val) => {
+                        result_value = Some(val);
+                        break;
+                    }
+                    Err(err) => {
+                        return Err(format!("Failed to encode MCP result: {err}"));
+                    }
+                }
+            }
+            Ok(Err(err)) => {
+                last_err = format!("Failed to call MCP tool: {err}");
+                // Invalidate cached client and retry once if it's potentially a connection/session error
+                invalidate_cached_client(&server).await;
+                if attempt == 0 {
+                    eprintln!("[MCP] Tool call failed ({err}), invalidating client and retrying once...");
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+            }
+            Err(_) => {
+                last_err = format!("Timed out calling MCP tool '{tool_name}'");
+                invalidate_cached_client(&server).await;
+                break; // Do not retry if timed out
+            }
+        }
+    }
+
+    let value = match result_value {
+        Some(v) => v,
+        None => return Err(last_err),
+    };
 
     Ok(McpCallToolResult {
         server_id: sanitize_name_part(&server_id),
@@ -1221,6 +1332,36 @@ mod tests {
             !err.contains("requires user confirmation"),
             "read-only tool must not require confirmation: {err}"
         );
+    }
+
+    #[test]
+    fn truncate_json_preserves_envelope_and_truncates_text() {
+        let large_text = "a".repeat(10_000);
+        let input = serde_json::json!({
+            "content": [{
+                "type": "text",
+                "text": large_text
+            }],
+            "isError": false
+        });
+        let truncated = super::truncate_json(input, 1_000);
+        assert!(truncated.is_object());
+        let content = truncated.get("content").and_then(|v| v.as_array()).expect("content array must exist");
+        assert_eq!(content.len(), 1);
+        let first = content[0].as_object().expect("first item must be object");
+        assert_eq!(first.get("type").and_then(|v| v.as_str()), Some("text"));
+        let text = first.get("text").and_then(|v| v.as_str()).expect("text must exist");
+        assert!(text.contains("...[MCP content truncated: 10000 bytes >"));
+        assert!(text.len() < 1_500);
+    }
+
+    #[test]
+    fn truncate_json_formats_raw_value_as_envelope() {
+        let raw = serde_json::json!({ "foo": "bar".repeat(5000) });
+        let truncated = super::truncate_json(raw, 200);
+        assert!(truncated.is_object());
+        assert!(truncated.get("content").is_some());
+        assert_eq!(truncated.get("isError").and_then(|v| v.as_bool()), Some(false));
     }
 
     fn settings_from(servers: Vec<McpServerConfig>) -> McpSettings {

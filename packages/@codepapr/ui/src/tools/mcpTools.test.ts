@@ -357,6 +357,43 @@ describe('registerMcpTools', () => {
     );
   });
 
+  it('extracts images from MCP tool result content', async () => {
+    invokeMock.mockResolvedValueOnce({
+      serverId: 'image_server',
+      toolName: 'generate_image',
+      result: {
+        content: [
+          { type: 'text', text: 'Generated image:' },
+          { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUg==' },
+        ],
+        isError: false,
+      },
+    });
+
+    const definitions: IToolDefinition[] = [
+      {
+        name: 'mcp__image_server__generate_image',
+        description: 'Generate image',
+        parameters: { type: 'object', properties: {} },
+      },
+    ];
+
+    const registry = new ToolRegistry();
+    registerMcpTools(registry, ENABLED_SETTINGS, definitions);
+    registry.freeze();
+
+    const result = (await registry.execute('mcp__image_server__generate_image', {})) as {
+      serverId: string;
+      toolName: string;
+      __images?: Array<{ mediaType: string; data: string }>;
+    };
+
+    expect(result.serverId).toBe('image_server');
+    expect(result.__images).toEqual([
+      { mediaType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUg==' },
+    ]);
+  });
+
   it('throws when the MCP tool name is invalid', async () => {
     const definitions: IToolDefinition[] = [
       {
