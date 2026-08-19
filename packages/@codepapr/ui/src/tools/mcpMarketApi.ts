@@ -102,7 +102,9 @@ function inferCategories(name: string, description: string): ('search' | 'databa
   const categories: ('search' | 'database' | 'custom')[] = [];
   const text = `${name} ${description}`.toLowerCase();
 
-  if (/\b(search|browser|scrape|fetch|crawl|web|http|url|duckduck|spider|tavily|exa|serp|link|page\w*)\b/.test(text)) {
+  // 只认明确的网页搜索产品，避免 "HTTP"/"URL"/"web" 把普通远程 MCP
+  // 标成 search，进而 hasEnabledMcpSearch 关掉内置 websearch。
+  if (/\b(web[-_ ]?search|duckduckgo?|tavily|exa|serp|brave[-_ ]?search|search[-_ ]?(engine|api))\b/.test(text)) {
     categories.push('search');
   }
   if (/\b(database|sql|postgres|mysql|sqlite|mongo|redis|query|supabase|prisma|d1|turso|neon)\b/.test(text)) {
@@ -222,4 +224,5 @@ export function filterListings(
 export {
   OFFICIAL_REGISTRY_URL,
   mapOfficialRegistry,
+  inferCategories,
 };

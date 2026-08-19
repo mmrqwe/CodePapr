@@ -58,6 +58,12 @@ async fn mcp_list_tools(
 }
 
 #[tauri::command]
+async fn mcp_update_settings(settings: mcp_host::McpSettings) -> Result<(), String> {
+    mcp_host::update_settings(settings).await;
+    Ok(())
+}
+
+#[tauri::command]
 async fn mcp_call_tool(
     app: tauri::AppHandle,
     settings: Option<mcp_host::McpSettings>,
@@ -234,6 +240,7 @@ fn main() {
             db::load_app_characters,
             db::save_app_characters,
             mcp_list_tools,
+            mcp_update_settings,
             mcp_call_tool,
             mcp_list_status,
             mcp_disconnect_all,

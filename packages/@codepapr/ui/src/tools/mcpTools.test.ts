@@ -293,7 +293,14 @@ describe('loadMcpToolDefinitions', () => {
     invokeMock.mockClear();
     const cached = await loadMcpToolDefinitions(ENABLED_SETTINGS);
     expect(cached.definitions).toHaveLength(1);
-    expect(invokeMock).not.toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith(
+      'mcp_update_settings',
+      expect.objectContaining({
+        settings: expect.objectContaining({ enabled: true, exposeTools: true }),
+      }),
+    );
+    expect(invokeMock.mock.calls.some(([command]) => command === 'mcp_list_tools')).toBe(false);
   });
 
   it('skips cache when refresh is true', async () => {
@@ -353,6 +360,37 @@ describe('registerMcpTools', () => {
         serverId: 'search',
         toolName: 'duckduckgo_search',
         arguments: { query: 'hello' },
+        settings: expect.objectContaining({
+          enabled: true,
+          exposeTools: true,
+        }),
+      }),
+    );
+  });
+
+  it('passes settings on call_tool after a tool-definition cache hit', async () => {
+    invokeMock.mockResolvedValueOnce(SAMPLE_TOOLS_RESULT);
+    const first = await loadMcpToolDefinitions(ENABLED_SETTINGS);
+
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+    const cached = await loadMcpToolDefinitions(ENABLED_SETTINGS);
+    expect(cached.definitions).toHaveLength(1);
+    expect(invokeMock.mock.calls.some(([command]) => command === 'mcp_list_tools')).toBe(false);
+
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValueOnce(SAMPLE_CALL_RESULT);
+    const registry = new ToolRegistry();
+    registerMcpTools(registry, ENABLED_SETTINGS, cached.definitions, first.toolMappings);
+    registry.freeze();
+
+    await registry.execute('mcp__search__duckduckgo_search', { query: 'hello' });
+    expect(invokeMock).toHaveBeenCalledWith(
+      'mcp_call_tool',
+      expect.objectContaining({
+        serverId: 'search',
+        toolName: 'duckduckgo_search',
+        settings: expect.objectContaining({ enabled: true }),
       }),
     );
   });

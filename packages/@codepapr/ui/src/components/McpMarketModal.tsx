@@ -150,7 +150,7 @@ export function isListingInstalled(installedIds: Set<string>, listing: MarketMCP
   return installedIds.has(sanitizeMcpToolPart(listing.name).toLowerCase());
 }
 
-function listingToServerConfig(listing: MarketMCPListing): McpServerConfig {
+export function listingToServerConfig(listing: MarketMCPListing): McpServerConfig {
   // N20：id 消毒统一交给 normalizeMcpServer（sanitizeMcpToolPart + lowercase），
   // 与已安装判定同源，杜绝特殊字符服务安装后仍显示"未安装"。
   const baseId = listing.id || listing.name;
@@ -183,12 +183,14 @@ function listingToServerConfig(listing: MarketMCPListing): McpServerConfig {
   const isRemote = transport === 'streamable-http' || transport === 'sse';
   const hasRequiredEnv = envLines.some((l) => l.includes('YOUR_') && l.includes('_HERE'));
   const needsAuth = listing.envVars.some((ev) => ev.isRequired && (ev.isSecret || /key|token|secret|password|auth/i.test(ev.name)));
+  const isSearch = listing.categories.includes('search');
 
   return normalizeMcpServer({
     id: baseId,
     name: listing.title || listing.name.split('/').pop() || listing.name,
     description: desc,
-    enabled: isRemote && !hasRequiredEnv && !needsAuth,
+    // 搜索类不自动 enable：hasEnabledMcpSearch 会关掉内置 websearch。
+    enabled: isRemote && !hasRequiredEnv && !needsAuth && !isSearch,
     category: listing.categories[0] || 'custom',
     transport,
     command: listing.command || '',
@@ -196,7 +198,8 @@ function listingToServerConfig(listing: MarketMCPListing): McpServerConfig {
     url: listing.url || '',
     env: envLines.join('\n'),
     headers: '',
-    allowedTools: '*',
+    // 空 = 发现全部工具；read-only 仍拦截变更。不要用 *，那会被当成显式放行写工具。
+    allowedTools: '',
     deniedTools: '',
     permissionMode: 'read-only',
     timeoutSeconds: 60,

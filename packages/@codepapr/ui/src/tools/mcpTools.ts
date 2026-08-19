@@ -220,6 +220,14 @@ async function listMcpTools(settings: McpSettings, refresh = false): Promise<Mcp
   if (!refresh) {
     const cached = await readPersistedToolCache();
     if (cached?.cacheKey === cacheKey) {
+      // 缓存命中也要把 settings 同步进 Rust：call_tool 在未传 settings
+      // 时读 STORED_SETTINGS，重启后这块是空的。同步失败不挡发现——
+      // callMcpTool 仍会带上 settings。
+      try {
+        await invoke('mcp_update_settings', { settings: toNativeSettings(settings) });
+      } catch {
+        // best-effort
+      }
       return { tools: cached.tools, errors: cached.errors };
     }
   }
@@ -397,6 +405,7 @@ async function callMcpTool(
     serverId: resolved.serverId,
     toolName: resolved.toolName,
     arguments: args,
+    settings: toNativeSettings(settings),
   });
 
   const images = extractMcpImages(raw.result);

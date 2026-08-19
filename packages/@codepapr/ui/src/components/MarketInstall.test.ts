@@ -2,7 +2,7 @@
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { sanitizeMcpToolPart } from '../utils/mcpTypes';
-import { isListingInstalled } from './McpMarketModal';
+import { isListingInstalled, listingToServerConfig } from './McpMarketModal';
 import { confirmSkillOverwrite, confirmSkillUninstall } from './SkillMarketModal';
 import type { MarketMCPListing } from '../utils/mcpMarketTypes';
 
@@ -47,6 +47,38 @@ describe('isListingInstalled（N20 MCP 已安装判定）', () => {
   it('未安装时返回 false', () => {
     const installedIds = new Set(['other-server']);
     expect(isListingInstalled(installedIds, mcpListing({}))).toBe(false);
+  });
+});
+
+describe('listingToServerConfig（P0 安装默认）', () => {
+  it('只读安装不写 allowedTools=*，避免放行变更工具', () => {
+    const config = listingToServerConfig(mcpListing({
+      transport: { type: 'streamable-http' },
+      url: 'https://example.com/mcp',
+      categories: ['custom'],
+    }));
+    expect(config.allowedTools).toBe('');
+    expect(config.permissionMode).toBe('read-only');
+  });
+
+  it('无密钥的远程 custom 服务仍可自动启用', () => {
+    const config = listingToServerConfig(mcpListing({
+      transport: { type: 'streamable-http' },
+      url: 'https://example.com/mcp',
+      categories: ['custom'],
+    }));
+    expect(config.enabled).toBe(true);
+    expect(config.category).toBe('custom');
+  });
+
+  it('搜索类即使是远程也不自动启用，避免关掉内置 websearch', () => {
+    const config = listingToServerConfig(mcpListing({
+      transport: { type: 'streamable-http' },
+      url: 'https://tavily.example/mcp',
+      categories: ['search'],
+    }));
+    expect(config.enabled).toBe(false);
+    expect(config.category).toBe('search');
   });
 });
 

@@ -418,12 +418,25 @@ fn is_mutating_with_overrides(server: &McpServerConfig, tool_name: &str) -> bool
     looks_mutating_tool(tool_name)
 }
 
+/// `*` / `**` 只表示「发现范围」，不能当作对变更工具的显式放行。
+/// 否则商城默认 `allowedTools=*` 会把 read-only 整档掏空。
+fn is_catch_all_allow_pattern(pattern: &str) -> bool {
+    let pattern = pattern.trim();
+    pattern == "*" || pattern == "**"
+}
+
+fn explicitly_allows_mutating_tool(server: &McpServerConfig, tool_name: &str) -> bool {
+    server.allowed_tools.iter().any(|pattern| {
+        !is_catch_all_allow_pattern(pattern) && matches_pattern(pattern, tool_name)
+    })
+}
+
 fn validate_tool_policy(server: &McpServerConfig, tool_name: &str) -> Result<(), String> {
     if !is_tool_allowed(server, tool_name) {
         return Err(format!("MCP tool is not allowed by policy: {tool_name}"));
     }
     if server.permission_mode == "read-only" && is_mutating_with_overrides(server, tool_name) {
-        if server.allowed_tools.iter().any(|p| matches_pattern(p, tool_name)) {
+        if explicitly_allows_mutating_tool(server, tool_name) {
             return Ok(());
         }
         return Err(format!(
@@ -1332,6 +1345,32 @@ mod tests {
             !err.contains("requires user confirmation"),
             "read-only tool must not require confirmation: {err}"
         );
+    }
+
+    #[test]
+    fn read_only_wildcard_allow_does_not_bypass_mutating_block() {
+        let star = make_server_with(make_server("sse", "", &[]), "read-only", false, &["*"]);
+        let err = super::validate_tool_policy(&star, "delete_row")
+            .expect_err("wildcard must not allow mutating tools in read-only");
+        assert!(
+            err.contains("read-only"),
+            "expected read-only policy error, got: {err}"
+        );
+        super::validate_tool_policy(&star, "query")
+            .expect("read-only tools must still be allowed under *");
+
+        let globstar = make_server_with(make_server("sse", "", &[]), "read-only", false, &["**"]);
+        super::validate_tool_policy(&globstar, "delete_row")
+            .expect_err("** must not allow mutating tools in read-only");
+    }
+
+    #[test]
+    fn read_only_explicit_pattern_still_allows_mutating() {
+        let server = make_server_with(make_server("sse", "", &[]), "read-only", false, &["delete*"]);
+        super::validate_tool_policy(&server, "delete_row")
+            .expect("explicit non-catch-all pattern may allow a mutating tool");
+        super::validate_tool_policy(&server, "write")
+            .expect_err("unrelated mutating tools stay blocked");
     }
 
     #[test]
