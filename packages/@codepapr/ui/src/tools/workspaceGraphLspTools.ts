@@ -45,6 +45,15 @@ import {
 import { type WorkspaceToolContext } from './workspaceToolContext';
 import { pathsEquivalent } from '../utils/pathComparison';
 
+export function adoptAuthoritativeLspResult<T extends { available: boolean }>(
+  lsp: T,
+): (T & { source: 'lsp'; confidence: 'high' }) | null {
+  if (!lsp.available) {
+    return null;
+  }
+  return { ...lsp, source: 'lsp', confidence: 'high' };
+}
+
 export function registerWorkspaceGraphLspTools(ctx: WorkspaceToolContext): void {
   const {
     registry,
@@ -274,8 +283,7 @@ export function registerWorkspaceGraphLspTools(ctx: WorkspaceToolContext): void 
       line,
       column,
     });
-    if (lsp.available && lsp.locations.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
-    return await astFallback.definition(args, relativePath, line, column);
+    return adoptAuthoritativeLspResult(lsp) ?? await astFallback.definition(args, relativePath, line, column);
   });
 
   registry.register(toolByName('workspace_symbol_references'), async (args: Record<string, unknown>) => {
@@ -289,8 +297,7 @@ export function registerWorkspaceGraphLspTools(ctx: WorkspaceToolContext): void 
       column,
       includeDeclaration: asOptionalBoolean(args.includeDeclaration, 'includeDeclaration'),
     });
-    if (lsp.available && lsp.locations.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
-    return await astFallback.references(args, relativePath, line, column);
+    return adoptAuthoritativeLspResult(lsp) ?? await astFallback.references(args, relativePath, line, column);
   });
 
   registry.register(toolByName('workspace_symbol_hover'), async (args: Record<string, unknown>) => {
@@ -303,8 +310,7 @@ export function registerWorkspaceGraphLspTools(ctx: WorkspaceToolContext): void 
       line,
       column,
     });
-    if (lsp.available && lsp.contents) return { ...lsp, source: 'lsp', confidence: 'high' };
-    return await astFallback.hover(args, relativePath, line, column);
+    return adoptAuthoritativeLspResult(lsp) ?? await astFallback.hover(args, relativePath, line, column);
   });
 
   registry.register(toolByName('workspace_document_symbol'), async (args: Record<string, unknown>) => {
@@ -315,8 +321,7 @@ export function registerWorkspaceGraphLspTools(ctx: WorkspaceToolContext): void 
       line: asOptionalNumber(args.line) ?? 1,
       column: asOptionalNumber(args.column),
     });
-    if (lsp.available && lsp.symbols.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
-    return await astFallback.documentSymbol(relativePath);
+    return adoptAuthoritativeLspResult(lsp) ?? await astFallback.documentSymbol(relativePath);
   });
 
   registry.register(toolByName('workspace_workspace_symbol'), async (args: Record<string, unknown>) => {
@@ -329,8 +334,7 @@ export function registerWorkspaceGraphLspTools(ctx: WorkspaceToolContext): void 
       column: asOptionalNumber(args.column),
       query,
     });
-    if (lsp.available && lsp.symbols.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
-    return await astFallback.workspaceSymbol(args, query);
+    return adoptAuthoritativeLspResult(lsp) ?? await astFallback.workspaceSymbol(args, query);
   });
 
   registry.register(toolByName('workspace_implementation'), async (args: Record<string, unknown>) => {
@@ -343,8 +347,7 @@ export function registerWorkspaceGraphLspTools(ctx: WorkspaceToolContext): void 
       line,
       column,
     });
-    if (lsp.available && lsp.locations.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
-    return await astFallback.implementation(args, relativePath, line, column);
+    return adoptAuthoritativeLspResult(lsp) ?? await astFallback.implementation(args, relativePath, line, column);
   });
 
   registry.register(toolByName('workspace_prepare_call_hierarchy'), async (args: Record<string, unknown>) => {
@@ -357,8 +360,7 @@ export function registerWorkspaceGraphLspTools(ctx: WorkspaceToolContext): void 
       line,
       column,
     });
-    if (lsp.available && lsp.items.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
-    return await astFallback.prepareCallHierarchy(args, relativePath, line, column);
+    return adoptAuthoritativeLspResult(lsp) ?? await astFallback.prepareCallHierarchy(args, relativePath, line, column);
   });
 
   registry.register(toolByName('workspace_incoming_calls'), async (args: Record<string, unknown>) => {
@@ -371,8 +373,7 @@ export function registerWorkspaceGraphLspTools(ctx: WorkspaceToolContext): void 
       line,
       column,
     });
-    if (lsp.available && lsp.calls.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
-    return await astFallback.incomingCalls(args, relativePath, line, column);
+    return adoptAuthoritativeLspResult(lsp) ?? await astFallback.incomingCalls(args, relativePath, line, column);
   });
 
   registry.register(toolByName('workspace_outgoing_calls'), async (args: Record<string, unknown>) => {
@@ -385,8 +386,7 @@ export function registerWorkspaceGraphLspTools(ctx: WorkspaceToolContext): void 
       line,
       column,
     });
-    if (lsp.available && lsp.calls.length > 0) return { ...lsp, source: 'lsp', confidence: 'high' };
-    return await astFallback.outgoingCalls(args, relativePath, line, column);
+    return adoptAuthoritativeLspResult(lsp) ?? await astFallback.outgoingCalls(args, relativePath, line, column);
   });
 
   registry.register(toolByName('workspace_rename_symbol'), async (args: Record<string, unknown>) => {

@@ -5,6 +5,7 @@ import {
   extractStructuralSymbols,
   SymbolProviderRegistry,
   UnifiedSymbolDispatcher,
+  relativePathFromFileUri,
   type ProjectGraphSymbolSource,
   type LspProjectGraphEnhancer,
   type WorkspaceProjectGraphResult,
@@ -604,6 +605,16 @@ function isProjectGraphContextCandidate(path: string, content: string): boolean 
   );
 }
 
+export function resolveLspReferencePath(
+  workspacePath: string | undefined,
+  uri: string,
+): string | null {
+  if (!workspacePath || !uri) {
+    return null;
+  }
+  return relativePathFromFileUri(workspacePath, uri);
+}
+
 export function createLspProjectGraphEnhancer(
   fileContents: Record<string, { content: string; bytes: number }>,
   workspacePath?: string,
@@ -632,20 +643,6 @@ export function createLspProjectGraphEnhancer(
       return match.index;
     }
     return 0;
-  };
-  const resolveRelativePath = (uri: string): string => {
-    let path = uri.startsWith('file://') ? uri.replace(/^file:\/\//, '') : uri;
-    try {
-      path = decodeURIComponent(path);
-    } catch {
-      /* keep raw */
-    }
-    const normalized = path.replace(/\\/g, '/').replace(/^\/+/, '');
-    for (const key of Object.keys(fileContents)) {
-      const nk = key.replace(/^\/+/, '');
-      if (normalized === nk || normalized.endsWith(`/${nk}`)) return nk;
-    }
-    return normalized;
   };
 
   interface BatchEnrichFileResult {
@@ -709,8 +706,10 @@ export function createLspProjectGraphEnhancer(
         const batch = await loadBatchForFile(filePath, fileContent, symbols);
         if (batch) {
           for (const ref of batch.references) {
+            const mappedPath = resolveLspReferencePath(workspacePath, ref.uri);
+            if (!mappedPath) continue;
             results.push({
-              filePath: resolveRelativePath(ref.uri),
+              filePath: mappedPath,
               line: ref.line,
               character: ref.character,
               fromSymbol: ref.fromSymbol,
@@ -728,8 +727,10 @@ export function createLspProjectGraphEnhancer(
           const column = findSymbolColumn(fileContent, sym.line - 1, sym.name);
           const refs = await WorkspaceSymbolProvider.references(lang, filePath, fileContent, sym.line - 1, column);
           for (const ref of refs) {
+            const mappedPath = resolveLspReferencePath(workspacePath, ref.uri);
+            if (!mappedPath) continue;
             results.push({
-              filePath: resolveRelativePath(ref.uri),
+              filePath: mappedPath,
               line: ref.line,
               character: ref.character,
               fromSymbol: sym.name,

@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   clearLanguageIntelligenceWorkspace,
   getCachedLanguageIntelligence,
+  LANGUAGE_INTELLIGENCE_DIAGNOSTIC_POLL_DELAYS_MS,
   scheduleLanguageIntelligenceRefresh,
 } from './languageIntelligence';
 
@@ -169,5 +170,150 @@ describe('languageIntelligence', () => {
       status: 'ready',
       diagnostics: 1,
     });
+  });
+
+  it('stops polling a clean file after two empty diagnostic checks', async () => {
+    vi.useFakeTimers();
+    const workspacePath = '/tmp/codepapr-lsp-workspace';
+    let pollCount = 0;
+    const invoke = async <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {
+      if (command === 'read_text_file') {
+        return {
+          path: args?.relativePath,
+          content: 'export const value = 1;\n',
+          bytes: 24,
+        } as T;
+      }
+
+      if (command === 'lsp_open_document') {
+        return {
+          message: {
+            opened: true,
+            diagnostics: [],
+            workspaceDiagnostics: [],
+            server: {
+              languageId: 'typescript',
+              serverFamily: 'typescript',
+              running: true,
+              command: 'typescript-language-server --stdio',
+              pid: 42,
+              openDocuments: 1,
+              stderrTail: [],
+            },
+          },
+        } as T;
+      }
+
+      if (command === 'lsp_request') {
+        return { message: { result: [] } } as T;
+      }
+
+      if (command === 'lsp_get_diagnostics') {
+        pollCount += 1;
+        return { diagnostics: {} } as T;
+      }
+
+      throw new Error(`unexpected command ${command}`);
+    };
+
+    try {
+      scheduleLanguageIntelligenceRefresh({
+        invoke,
+        workspacePath,
+        paths: ['src/Clean.ts'],
+        force: true,
+      });
+
+      await vi.runAllTimersAsync();
+
+      expect(pollCount).toBe(LANGUAGE_INTELLIGENCE_DIAGNOSTIC_POLL_DELAYS_MS.length);
+      expect(getCachedLanguageIntelligence(workspacePath, 'src/Clean.ts')).toMatchObject({
+        relativePath: 'src/Clean.ts',
+        status: 'ready',
+        diagnostics: 0,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops polling as soon as diagnostics appear', async () => {
+    vi.useFakeTimers();
+    const workspacePath = '/tmp/codepapr-lsp-workspace';
+    let pollCount = 0;
+    const invoke = async <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {
+      if (command === 'read_text_file') {
+        return {
+          path: args?.relativePath,
+          content: 'export const value = 1;\n',
+          bytes: 24,
+        } as T;
+      }
+
+      if (command === 'lsp_open_document') {
+        return {
+          message: {
+            opened: true,
+            diagnostics: [],
+            workspaceDiagnostics: [],
+            server: {
+              languageId: 'typescript',
+              serverFamily: 'typescript',
+              running: true,
+              command: 'typescript-language-server --stdio',
+              pid: 42,
+              openDocuments: 1,
+              stderrTail: [],
+            },
+          },
+        } as T;
+      }
+
+      if (command === 'lsp_request') {
+        return { message: { result: [] } } as T;
+      }
+
+      if (command === 'lsp_get_diagnostics') {
+        pollCount += 1;
+        return {
+          diagnostics: {
+            [`file://${workspacePath}/src/Dirty.ts`]: {
+              diagnostics: [
+                {
+                  severity: 1,
+                  message: 'Cannot find name x',
+                  range: {
+                    start: { line: 0, character: 0 },
+                    end: { line: 0, character: 1 },
+                  },
+                },
+              ],
+            },
+          },
+        } as T;
+      }
+
+      throw new Error(`unexpected command ${command}`);
+    };
+
+    try {
+      scheduleLanguageIntelligenceRefresh({
+        invoke,
+        workspacePath,
+        paths: ['src/Dirty.ts'],
+        force: true,
+      });
+
+      await vi.runAllTimersAsync();
+
+      expect(pollCount).toBe(1);
+      expect(getCachedLanguageIntelligence(workspacePath, 'src/Dirty.ts')).toMatchObject({
+        relativePath: 'src/Dirty.ts',
+        status: 'ready',
+        diagnostics: 1,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

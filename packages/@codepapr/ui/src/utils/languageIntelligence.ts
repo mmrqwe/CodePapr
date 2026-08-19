@@ -79,6 +79,7 @@ type LanguageIntelligenceListener = (snapshot: LanguageIntelligenceSnapshot) => 
 const LANGUAGE_INTELLIGENCE_MAX_BYTES = 300_000;
 const LANGUAGE_INTELLIGENCE_DEFAULT_LIMIT = 24;
 const LANGUAGE_INTELLIGENCE_INTER_TASK_DELAY_MS = 90;
+export const LANGUAGE_INTELLIGENCE_DIAGNOSTIC_POLL_DELAYS_MS = [400, 1200] as const;
 const languageIntelligenceCache = new Map<string, LanguageIntelligenceSnapshot>();
 const languageIntelligencePending = new Map<string, Promise<void>>();
 const languageIntelligenceListeners = new Set<LanguageIntelligenceListener>();
@@ -199,6 +200,27 @@ function processWorkspaceQueue(workspacePath: string): void {
     });
 
   languageIntelligencePending.set(key, promise);
+}
+
+function diagnosticsForRelativePath(
+  diagnosticsByUri: Record<string, { diagnostics?: unknown[] }> | undefined,
+  workspacePath: string,
+  relativePath: string,
+): LspDiagnostic[] {
+  if (!diagnosticsByUri) {
+    return [];
+  }
+  const expectedUri = workspaceFileUri(workspacePath, relativePath);
+  const exact = diagnosticsByUri[expectedUri];
+  if (exact) {
+    return (exact.diagnostics ?? []) as LspDiagnostic[];
+  }
+  for (const [uri, payload] of Object.entries(diagnosticsByUri)) {
+    if (relativePathFromFileUri(workspacePath, uri) === relativePath) {
+      return (payload.diagnostics ?? []) as LspDiagnostic[];
+    }
+  }
+  return [];
 }
 
 function latestLspDiagnostics(response: LspOpenDocumentResponse): LspDiagnostic[] {
@@ -394,30 +416,25 @@ async function refreshLanguageIntelligenceForFile(params: {
     publishResult(opened.message.diagnostics ?? [], opened.message.workspaceDiagnostics ?? []);
 
     void (async () => {
-      let hasDiagnostics = (opened.message.diagnostics?.length ?? 0) > 0;
-      const started = Date.now();
-      const MAX_POLL_MS = 30_000;
-      while (Date.now() - started < MAX_POLL_MS) {
-        await new Promise((r) => setTimeout(r, 500));
+      for (const delay of LANGUAGE_INTELLIGENCE_DIAGNOSTIC_POLL_DELAYS_MS) {
+        await new Promise((r) => setTimeout(r, delay));
         if (!isCurrentWorkspaceGeneration(workspacePath, generation)) return;
         try {
           const result = await invoke<{ diagnostics: Record<string, { diagnostics?: unknown[] }> }>('lsp_get_diagnostics', {
             workspacePath,
             languageId,
           });
-          const uriDiags = result.diagnostics?.[workspaceFileUri(workspacePath, relativePath)];
+          const currentDiags = diagnosticsForRelativePath(result.diagnostics, workspacePath, relativePath);
           const workspaceDiags: LspPublishDiagnostics[] = Object.entries(result.diagnostics ?? {}).map(([uri, d]) => ({
             uri,
             diagnostics: (d.diagnostics ?? []) as LspDiagnostic[],
           }));
-          const currentDiags = (uriDiags?.diagnostics ?? []) as LspDiagnostic[];
-          if (currentDiags.length > 0) hasDiagnostics = true;
           publishResult([
             { uri: workspaceFileUri(workspacePath, relativePath), diagnostics: currentDiags },
           ], workspaceDiags);
-          if (hasDiagnostics && currentDiags.length > 0) break;
+          if (currentDiags.length > 0) return;
         } catch {
-          break;
+          return;
         }
       }
     })();

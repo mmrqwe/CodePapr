@@ -9,6 +9,7 @@ import {
   filterWorkspaceInsightEntries,
   parseGitRepositoryRootCommandResult,
   parseGitStatusCommandResult,
+  resolveLspReferencePath,
   selectProjectMapFiles,
 } from './workspaceToolUtils';
 
@@ -577,5 +578,31 @@ describe('buildGitDiffSummary', () => {
     expect(result.pathspecs).toEqual(['src/App.tsx']);
     expect(result.stat).toContain('1 file changed');
     expect(result.diff).toContain('@@ -1 +1 @@');
+  });
+});
+
+describe('resolveLspReferencePath', () => {
+  it('maps a workspace file URI to the exact relative path, not a shorter same-suffix sibling', () => {
+    expect(
+      resolveLspReferencePath('/Users/proj', 'file:///Users/proj/packages/a/src/index.ts'),
+    ).toBe('packages/a/src/index.ts');
+    expect(
+      resolveLspReferencePath('/Users/proj', 'file:///Users/proj/src/index.ts'),
+    ).toBe('src/index.ts');
+    expect(
+      resolveLspReferencePath('/Users/proj', 'file:///Users/proj/packages/b/src/index.ts'),
+    ).toBe('packages/b/src/index.ts');
+  });
+
+  it('maps Windows file:///C:/… URIs without collapsing to a suffix match', () => {
+    expect(
+      resolveLspReferencePath('C:/proj', 'file:///C:/proj/packages/a/src/index.ts'),
+    ).toBe('packages/a/src/index.ts');
+  });
+
+  it('drops URIs outside the workspace and empty inputs', () => {
+    expect(resolveLspReferencePath('/Users/proj', 'file:///elsewhere/src/index.ts')).toBeNull();
+    expect(resolveLspReferencePath(undefined, 'file:///Users/proj/src/index.ts')).toBeNull();
+    expect(resolveLspReferencePath('/Users/proj', '')).toBeNull();
   });
 });
