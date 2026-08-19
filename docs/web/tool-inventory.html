@@ -100,43 +100,43 @@
   @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .theme-toggle .icon-sun{display:block}:root:not([data-theme="dark"]) .theme-toggle .icon-moon{display:none}}
   @media(max-width:768px){.nav-links{display:none}}
 
-  .hero{padding:130px 0 30px}
-  .section-label{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;border-radius:100px;border:1px solid var(--border);font-size:0.78rem;color:var(--foreground-dim);font-weight:500;margin-bottom:20px;font-family:var(--font-mono)}
+  .hero{padding:120px 0 24px}
+  .section-label{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;border-radius:100px;border:1px solid var(--border);font-size:0.78rem;color:var(--foreground-dim);font-weight:500;margin-bottom:18px;font-family:var(--font-mono)}
   .section-label .dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
-  .hero h1{font-size:clamp(2rem,4.4vw,3.2rem);font-weight:700;letter-spacing:-0.02em;line-height:1.12;margin-bottom:16px}
+  .hero h1{font-size:clamp(1.9rem,4vw,2.9rem);font-weight:700;letter-spacing:-0.02em;line-height:1.2;margin-bottom:14px}
   .hero h1 .gradient{background:linear-gradient(120deg,var(--accent),#8b5cf6 60%,var(--orange));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
   [data-theme="light"] .hero h1 .gradient{background:linear-gradient(120deg,var(--orange),#b84e2a);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
   @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .hero h1 .gradient{background:linear-gradient(120deg,var(--orange),#b84e2a);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}}
-  .hero p{color:var(--foreground-muted);max-width:760px;font-size:1.02rem}
+  .hero p{color:var(--foreground-muted);max-width:820px;font-size:0.98rem;line-height:1.68}
   .hero p strong{color:var(--foreground);font-weight:600}
 
-  .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}
-  .lg{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:0.76rem;color:var(--foreground-muted);border:1px solid var(--border);padding:6px 12px;border-radius:100px;background:var(--surface)}
-  .lg i{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+  .lg{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:0.75rem;color:var(--foreground-muted);border:1px solid var(--border);padding:5px 12px;border-radius:100px;background:var(--surface)}
+  .lg i{width:8px;height:8px;border-radius:50%;display:inline-block}
 
-  .stats{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}
-  .stat-card{border:1px solid var(--border);background:var(--bg-card);border-radius:var(--radius-sm);padding:14px 20px;min-width:120px;backdrop-filter:blur(8px);transition:transform .2s,border-color .2s}
-  .stat-card:hover{transform:translateY(-3px);border-color:var(--border-hover)}
-  .stat-card .num{font-family:var(--font-mono);font-weight:700;font-size:1.7rem;line-height:1}
-  .stat-card .cap{font-size:0.74rem;color:var(--foreground-muted);margin-top:6px}
+  .stats{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}
+  .stat-card{border:1px solid var(--border);background:var(--bg-card);border-radius:var(--radius-sm);padding:12px 18px;min-width:110px;backdrop-filter:blur(8px);transition:transform .2s,border-color .2s}
+  .stat-card:hover{transform:translateY(-2px);border-color:var(--border-hover)}
+  .stat-card .num{font-family:var(--font-mono);font-weight:700;font-size:1.6rem;line-height:1}
+  .stat-card .cap{font-size:0.72rem;color:var(--foreground-muted);margin-top:5px;line-height:1.35}
   .n-green{color:var(--green)} .n-amber{color:var(--amber)} .n-accent{color:var(--accent)} .n-violet{color:var(--violet)} .n-teal{color:var(--teal)} .n-orange{color:var(--orange)}
 
-  .cols{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:30px;padding:34px 0 10px;align-items:start}
+  .cols{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:28px;padding:28px 0 10px;align-items:start}
   @media(max-width:980px){.cols{grid-template-columns:1fr}.rail{position:static!important}}
 
-  .tier{position:relative;border:1px solid var(--border);background:var(--bg-card);margin-bottom:24px;border-radius:var(--radius);overflow:hidden;backdrop-filter:blur(8px)}
+  .tier{position:relative;border:1px solid var(--border);background:var(--bg-card);margin-bottom:20px;border-radius:var(--radius);overflow:hidden;backdrop-filter:blur(8px)}
   .tier::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
   .tier.t1::before{background:var(--green)} .tier.t2::before{background:var(--amber)} .tier.t3::before{background:var(--orange)}
   .tier.t4::before{background:var(--accent)} .tier.t5::before{background:var(--violet)} .tier.t6::before{background:var(--teal)}
   .tier.t7::before{background:#ec4899}
-  .tierhead{display:flex;align-items:flex-start;gap:16px;padding:20px 24px 16px;border-bottom:1px dashed var(--border)}
-  .tierhead .idx{font-family:var(--font-mono);font-weight:700;font-size:1.9rem;line-height:1}
+  .tierhead{display:flex;align-items:center;gap:16px;padding:16px 22px;border-bottom:1px solid var(--border)}
+  .tierhead .idx{font-family:var(--font-mono);font-weight:700;font-size:1.6rem;line-height:1}
   .t1 .idx{color:var(--green)} .t2 .idx{color:var(--amber)} .t3 .idx{color:var(--orange)}
   .t4 .idx{color:var(--accent)} .t5 .idx{color:var(--violet)} .t6 .idx{color:var(--teal)} .t7 .idx{color:#ec4899}
-  .tierhead .tt h3{font-size:1.25rem;font-weight:700;letter-spacing:-0.01em}
-  .tierhead .tt h3 span{font-weight:400;color:var(--foreground-muted);font-size:0.9rem;margin-left:8px}
-  .tierhead .tt .tags{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
-  .tag{font-family:var(--font-mono);font-size:0.7rem;padding:3px 10px;border-radius:100px;letter-spacing:.02em;border:1px solid var(--border)}
+  .tierhead .tt h3{font-size:1.15rem;font-weight:700;letter-spacing:-0.01em}
+  .tierhead .tt h3 span{font-weight:400;color:var(--foreground-muted);font-size:0.86rem;margin-left:6px}
+  .tierhead .tt .tags{display:flex;gap:6px;margin-top:4px;flex-wrap:wrap}
+  .tag{font-family:var(--font-mono);font-size:0.68rem;padding:2px 8px;border-radius:100px;border:1px solid var(--border)}
   .t1 .tag{color:var(--green);background:var(--green-glow);border-color:transparent}
   .t2 .tag{color:var(--amber);background:rgba(245,158,11,0.12);border-color:transparent}
   .t3 .tag{color:var(--orange);background:rgba(217,103,62,0.12);border-color:transparent}
@@ -144,87 +144,74 @@
   .t5 .tag{color:var(--violet);background:rgba(139,92,246,0.12);border-color:transparent}
   .t6 .tag{color:var(--teal);background:rgba(20,184,166,0.12);border-color:transparent}
   .t7 .tag{color:#ec4899;background:rgba(236,72,153,0.12);border-color:transparent}
-  .tierhead .hz{margin-left:auto;text-align:right;font-family:var(--font-mono);font-size:0.7rem;color:var(--foreground-dim);line-height:1.5;white-space:nowrap}
-  .tierhead .hz b{display:block;font-size:0.82rem;font-weight:600}
+  .tierhead .hz{margin-left:auto;text-align:right;font-family:var(--font-mono);font-size:0.7rem;color:var(--foreground-dim)}
+  .tierhead .hz b{display:block;font-size:0.8rem;font-weight:600}
   .t1 .hz b{color:var(--green)} .t2 .hz b{color:var(--amber)} .t3 .hz b{color:var(--orange)}
   .t4 .hz b{color:var(--accent)} .t5 .hz b{color:var(--violet)} .t6 .hz b{color:var(--teal)} .t7 .hz b{color:#ec4899}
 
-  .sublabel{font-family:var(--font-mono);font-size:0.7rem;letter-spacing:.1em;color:var(--foreground-dim);text-transform:uppercase;padding:14px 24px 4px;display:flex;align-items:center;gap:10px}
+  .sublabel{font-family:var(--font-mono);font-size:0.68rem;letter-spacing:.08em;color:var(--foreground-dim);text-transform:uppercase;padding:12px 22px 2px;display:flex;align-items:center;gap:10px}
   .sublabel::after{content:"";flex:1;height:1px;background:var(--border)}
   .sublabel b{color:var(--accent);font-weight:600}
 
-  .item{display:grid;grid-template-columns:64px minmax(0,1.05fr) minmax(0,1.55fr) auto;gap:0 16px;align-items:start;padding:15px 24px;border-top:1px solid var(--border);cursor:pointer;transition:background 0.25s}
+  .item{display:grid;grid-template-columns:54px minmax(0,1fr) auto;gap:0 14px;align-items:start;padding:14px 22px;border-top:1px solid var(--border);cursor:pointer;transition:background 0.2s}
   .item:hover{background:var(--surface)}
   .item .row{display:contents}
-  @media(max-width:760px){.item{grid-template-columns:52px 1fr}.item .src,.item .desc,.item .more{grid-column:2}}
-  .addr{font-family:var(--font-mono);font-size:0.68rem;font-weight:600;letter-spacing:.06em;padding-top:4px}
+  .addr{font-family:var(--font-mono);font-size:0.68rem;font-weight:600;letter-spacing:.04em;padding-top:2px}
   .t1 .addr{color:var(--green)} .t2 .addr{color:var(--amber)} .t3 .addr{color:var(--orange)}
   .t4 .addr{color:var(--accent)} .t5 .addr{color:var(--violet)} .t6 .addr{color:var(--teal)} .t7 .addr{color:#ec4899}
-  .name{font-weight:600;font-size:0.98rem}
-  .name small{display:block;font-weight:400;color:var(--foreground-dim);font-size:0.74rem;margin-top:2px;font-family:var(--font-mono)}
-  .src{font-family:var(--font-mono);font-size:0.72rem;color:var(--foreground-muted);line-height:1.8;padding-top:2px}
-  .src .chip{display:inline-block;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xs);padding:1px 8px;margin:1px 3px 1px 0;color:var(--accent)}
-  .cchip{font-family:var(--font-mono);font-size:0.66rem;padding:3px 10px;border-radius:100px;white-space:nowrap;align-self:start}
+  .name{font-weight:600;font-size:0.95rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .name small{font-weight:400;color:var(--foreground-dim);font-size:0.72rem;font-family:var(--font-mono)}
+  .cchip{font-family:var(--font-mono);font-size:0.65rem;padding:2px 8px;border-radius:100px;white-space:nowrap;margin-left:auto}
   .c-lsp{background:var(--green-glow);color:var(--green)}
   .c-ast{background:rgba(245,158,11,0.12);color:var(--amber)}
   .c-mix{background:var(--accent-soft);color:var(--accent)}
   .c-text{background:rgba(217,103,62,0.12);color:var(--orange)}
   .c-mm{background:rgba(139,92,246,0.12);color:var(--violet)}
-  .desc{grid-column:2 / -1;color:var(--foreground-muted);font-size:0.86rem;padding:6px 0 16px;max-width:860px}
+  .desc{grid-column:2 / -1;color:var(--foreground-muted);font-size:0.85rem;padding:4px 0 10px;line-height:1.55}
   .desc b{color:var(--foreground);font-weight:600}
   .desc code{color:var(--accent);font-size:0.78rem}
-  .item .more{display:none;grid-column:2/-1;padding:0 0 16px;max-width:860px}
+  .item .more{display:none;grid-column:2/-1;padding:0 0 12px}
   .item.open .more{display:block}
-  .more .mbox{border-left:2px solid var(--accent);padding:2px 0 2px 14px;font-size:0.82rem;color:var(--foreground-muted)}
+  .more .mbox{border-left:2px solid var(--accent);padding:4px 0 4px 12px;font-size:0.8rem;color:var(--foreground-muted);line-height:1.6}
   .more .mbox code{color:var(--accent);font-size:0.76rem}
-  .item .exp{font-family:var(--font-mono);font-size:0.66rem;color:var(--foreground-dim);letter-spacing:.08em}
-  .item.open .exp::after{content:" ▴"} .item:not(.open) .exp::after{content:" ▾"}
+  .item .exp{font-family:var(--font-mono);font-size:0.65rem;color:var(--foreground-dim)}
+  .item.open .exp::after{content:" ▴ 细节"} .item:not(.open) .exp::after{content:" ▾ 细节"}
 
-  .rail{position:sticky;top:84px}
-  .railcard{border:1px solid var(--border);background:var(--bg-card);border-radius:var(--radius-sm);padding:18px 18px 20px;margin-bottom:18px;backdrop-filter:blur(8px)}
-  .railcard h4{font-family:var(--font-mono);font-size:0.7rem;letter-spacing:.14em;color:var(--accent);text-transform:uppercase;margin-bottom:14px}
+  .rail{position:sticky;top:80px}
+  .railcard{border:1px solid var(--border);background:var(--bg-card);border-radius:var(--radius-sm);padding:16px;margin-bottom:16px;backdrop-filter:blur(8px)}
+  .railcard h4{font-family:var(--font-mono);font-size:0.68rem;letter-spacing:.12em;color:var(--accent);text-transform:uppercase;margin-bottom:12px}
   .wire{list-style:none;position:relative}
-  .wire::before{content:"";position:absolute;left:9px;top:8px;bottom:8px;width:2px;background:linear-gradient(var(--accent) 0%,var(--green) 55%,var(--amber) 80%,var(--orange) 100%);opacity:.5}
-  .wnode{position:relative;padding:0 0 13px 30px;font-size:0.8rem;color:var(--foreground-muted)}
-  .wnode::before{content:"";position:absolute;left:4px;top:5px;width:12px;height:12px;border-radius:50%;background:var(--bg-deep);border:2px solid var(--foreground-dim)}
+  .wire::before{content:"";position:absolute;left:8px;top:6px;bottom:6px;width:2px;background:linear-gradient(var(--accent) 0%,var(--green) 55%,var(--amber) 80%,var(--orange) 100%);opacity:.4}
+  .wnode{position:relative;padding:0 0 11px 26px;font-size:0.78rem;color:var(--foreground-muted)}
+  .wnode::before{content:"";position:absolute;left:3px;top:4px;width:12px;height:12px;border-radius:50%;background:var(--bg-deep);border:2px solid var(--foreground-dim)}
   .wnode b{color:var(--foreground);font-weight:600}
-  .wnode .wtag{font-family:var(--font-mono);font-size:0.66rem;color:var(--foreground-dim);display:block}
-  .stat{display:flex;justify-content:space-between;gap:10px;font-family:var(--font-mono);font-size:0.74rem;padding:8px 0;border-bottom:1px dashed var(--border)}
+  .wnode .wtag{font-family:var(--font-mono);font-size:0.65rem;color:var(--foreground-dim);display:block}
+  .stat{display:flex;justify-content:space-between;gap:8px;font-family:var(--font-mono);font-size:0.72rem;padding:6px 0;border-bottom:1px dashed var(--border)}
   .stat:last-child{border-bottom:none}
   .stat b{font-weight:600;text-align:right}
   .stat .g{color:var(--green)} .stat .a{color:var(--amber)} .stat .r{color:var(--orange)} .stat .ac{color:var(--accent)} .stat .v{color:var(--violet)}
-  .modelist{font-family:var(--font-mono);font-size:0.72rem;color:var(--foreground-muted);line-height:1.9}
+  .modelist{font-family:var(--font-mono);font-size:0.7rem;color:var(--foreground-muted);line-height:1.75}
   .modelist b{color:var(--foreground)}
   .modelist .mk{color:var(--accent)}
 
-  .mech{padding:46px 0 8px}
-  .mech h2,.pipe h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:8px}
-  .mech .sub,.pipe .sub{color:var(--foreground-muted);font-size:0.9rem;margin-bottom:26px}
-  .ledger{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--border)}
-  @media(max-width:820px){.ledger{grid-template-columns:1fr}}
-  .led{padding:24px 26px;background:var(--bg-card);transition:background .25s}
-  .led:hover{background:var(--bg-elevated)}
-  .led .no{font-family:var(--font-mono);font-weight:700;font-size:0.82rem;color:var(--accent);letter-spacing:.1em}
-  .led h5{font-size:1.06rem;font-weight:700;margin:8px 0 8px;letter-spacing:-0.01em}
-  .led p{color:var(--foreground-muted);font-size:0.86rem}
-  .led p code{color:var(--accent);font-size:0.78rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xs);padding:1px 6px}
-
-  .pipe{padding:46px 0 20px}
+  .pipe{padding:36px 0 16px}
+  .pipe h2{font-size:clamp(1.4rem,2.5vw,1.9rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:6px}
+  .pipe .sub{color:var(--foreground-muted);font-size:0.86rem;margin-bottom:20px}
   .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
-  .fstep{flex:1;min-width:140px;background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--accent);padding:14px 16px;transition:transform .2s}
-  .fstep:hover{transform:translateY(-3px)}
+  .fstep{flex:1;min-width:130px;background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--accent);padding:12px 14px;transition:transform .2s}
+  .fstep:hover{transform:translateY(-2px)}
   .fstep:nth-child(5){border-left-color:var(--green)}
   .fstep:nth-child(7){border-left-color:var(--amber)}
   .fstep:nth-child(9){border-left-color:var(--orange)}
-  .fstep .fi{font-family:var(--font-mono);font-size:0.66rem;color:var(--foreground-dim)}
-  .fstep b{display:block;font-size:0.84rem;font-weight:600;margin-top:4px}
+  .fstep .fi{font-family:var(--font-mono);font-size:0.65rem;color:var(--foreground-dim)}
+  .fstep b{display:block;font-size:0.82rem;font-weight:600;margin-top:2px}
   .farrow{display:flex;align-items:center;color:var(--foreground-dim);font-family:var(--font-mono);padding:0 6px}
   @media(max-width:820px){.farrow{display:none}.fstep{margin-bottom:8px}}
 
-  footer{border-top:1px solid var(--border);margin-top:50px;padding:28px 0 44px;color:var(--foreground-dim);font-size:0.8rem}
+  footer{border-top:1px solid var(--border);margin-top:40px;padding:24px 0 36px;color:var(--foreground-dim);font-size:0.78rem;line-height:1.6}
   footer code{color:var(--foreground-muted)}
 
-  .reveal{opacity:0;transform:translateY(20px);transition:opacity 0.7s var(--easing),transform 0.7s var(--easing)}
+  .reveal{opacity:0;transform:translateY(16px);transition:opacity 0.6s var(--easing),transform 0.6s var(--easing)}
   .reveal.visible{opacity:1;transform:none}
 </style>
 </head>
@@ -253,23 +240,23 @@
 
 <section class="hero" id="overview">
   <div class="container">
-    <div class="section-label"><span class="dot"></span> TOOL SURFACE · LSP / AST 盘点</div>
-    <h1>工具全景 · <span class="gradient">两层架构 × 语言智能</span></h1>
-    <p>CodePapr 对 LLM 暴露 <strong>25 个合并工具</strong>（<code>graph</code> 已转 UI-only），经分发器路由到 <strong>61 个细粒度 workspace_* 工具</strong>（对 LLM 隐藏），最终落到 Tauri / Rust 后端。代码智能（<code>lsp</code> 的 9 个导航 action）已接入 <strong>LSP → AST 项目图</strong> 降级，并以 <code>source</code>/<code>confidence</code> 标注精度；<code>list</code> 浏览目录树并逐文件嵌入轻量符号（AST）；<code>read</code> 支持 <code>symbol</code> 参数按 AST 定位符号读取，大文件自动附带符号大纲；<code>grep</code> 支持 <code>semantic:true</code> 切换 LSP workspace symbol 语义检索。write / edit / patch 也在文本匹配之上接入了 <strong>AST 语法预检</strong>与<strong>写后 LSP 诊断反馈</strong>（匹配仍为字面，但歧义报错会列出每处行号与所在符号）。点击任意条目展开分发链路与接入现状。</p>
+    <div class="section-label"><span class="dot"></span> TOOL SURFACE · LSP / AST 架构</div>
+    <h1>工具全景 · <span class="gradient">两层分发架构 × 语言智能</span></h1>
+    <p>CodePapr 面向 Agent 暴露 <strong>25 个合并工具</strong>，底层路由至 <strong>61 个细粒度执行引擎</strong>。代码智能深度融合 <strong>LSP 语义分析与 AST 语法树</strong>，提供自动降级容灾、写前语法预检与写后诊断反馈，兼顾大模型调用的简洁性与本地执行的确定性。</p>
     <div class="legend">
       <span class="lg"><i style="background:var(--green)"></i>LSP 接入</span>
       <span class="lg"><i style="background:var(--amber)"></i>AST 接入</span>
-      <span class="lg"><i style="background:var(--accent)"></i>LSP + AST</span>
-      <span class="lg"><i style="background:var(--orange)"></i>纯文本</span>
-      <span class="lg"><i style="background:var(--violet)"></i>多模态</span>
+      <span class="lg"><i style="background:var(--accent)"></i>LSP + AST 混合</span>
+      <span class="lg"><i style="background:var(--orange)"></i>文本/系统</span>
+      <span class="lg"><i style="background:var(--violet)"></i>多模态/推理</span>
     </div>
     <div class="stats">
-      <div class="stat-card"><div class="num n-green">25</div><div class="cap">LLM 可见合并工具<br>graph 转 UI-only</div></div>
-      <div class="stat-card"><div class="num n-accent">61</div><div class="cap">隐藏细粒度工具<br>workspace_* / shell_* / browser_*</div></div>
-      <div class="stat-card"><div class="num n-amber">15</div><div class="cap">真实 LSP 语言<br>Rust symbol_provider.rs</div></div>
-      <div class="stat-card"><div class="num n-violet">17</div><div class="cap">AST 语言<br>tree-sitter</div></div>
-      <div class="stat-card"><div class="num n-teal">11</div><div class="cap">regex 兜底语言</div></div>
-      <div class="stat-card"><div class="num n-orange">6</div><div class="cap">read/grep/list/write/edit/patch<br>接入 LSP/AST 的数量</div></div>
+      <div class="stat-card"><div class="num n-green">25</div><div class="cap">LLM 暴露合并工具<br>graph 专属子代理</div></div>
+      <div class="stat-card"><div class="num n-accent">61</div><div class="cap">底层细粒度实现<br>workspace / shell / browser</div></div>
+      <div class="stat-card"><div class="num n-amber">15</div><div class="cap">原生 LSP 语言<br>Rust 后端驱动</div></div>
+      <div class="stat-card"><div class="num n-violet">17</div><div class="cap">AST 语法支持<br>tree-sitter 引擎</div></div>
+      <div class="stat-card"><div class="num n-teal">11</div><div class="cap">Regex 兜底语言</div></div>
+      <div class="stat-card"><div class="num n-orange">6</div><div class="cap">核心读写工具<br>深度整合 LSP/AST</div></div>
     </div>
   </div>
 </section>
@@ -283,102 +270,86 @@
         <div class="tierhead">
           <div class="idx">01</div>
           <div class="tt">
-            <h3>File Ops <span>文件操作</span></h3>
-            <div class="tags"><span class="tag">read / write / edit / patch</span><span class="tag">grep / glob / list</span><span class="tag">read·grep·list·write·edit·patch 已接入 AST/LSP</span></div>
+            <h3>文件操作 <span>File Operations</span></h3>
+            <div class="tags"><span class="tag">read / write / edit / patch</span><span class="tag">grep / glob / list</span></div>
           </div>
-          <div class="hz"><b>已全面改造</b>read·grep·list·write·edit·patch 接入 LSP/AST</div>
+          <div class="hz"><b>AST 语法预检</b>写后自动回传 LSP 诊断</div>
         </div>
 
-        <div class="sublabel"><b>读写改</b> 直接操作文件内容 · write/edit/patch 文本匹配 + AST 预检 + LSP 诊断 · read 已接入 AST</div>
+        <div class="sublabel"><b>读写修改</b> 内容读写与精准补丁</div>
 
         <div class="item">
           <div class="row">
             <div class="addr">READ</div>
-            <div class="name">read<small>→ workspace_read_file · workspaceTools.ts:1913</small></div>
-            <div class="src"><span class="chip">invoke read_text_file</span><span class="chip">Rust read.rs:42</span><span class="chip">symbol AST 定位</span></div>
-            <div class="cchip c-mix">文本 + AST</div>
+            <div class="name">read <small>workspace_read_file</small><span class="cchip c-mix">文本 + AST</span><span class="exp"></span></div>
           </div>
-          <div class="desc">读取项目文件。支持 <code>startLine/endLine</code> 行范围、<code>aroundLine</code> 窗口、<code>maxBytes</code>（默认 500KB）。传 <code>symbol</code> 参数可按 AST 定位符号精确读取（无 AST 时降级文本搜索）。整文件读取较大文件时自动附带符号大纲。</div>
-          <div class="more"><div class="mbox">分发：<code>read</code> → <code>workspace_read_file</code> → <code>invoke('read_text_file')</code>。传 <code>symbol</code> 时先 <code>extract_file_symbols</code>（AST）定位符号行范围再切片返回。输出经 <code>truncateToolOutput</code>：&gt;60k 字符中间截断 / &gt;100k 落盘 + 2k 预览 / 150k 硬顶。</div></div>
+          <div class="desc">读取项目文件。支持 <code>startLine / endLine</code> 行范围切片与 <code>aroundLine</code> 窗口；支持 <code>symbol</code> 参数按 AST 精确定位符号代码块；大文件全量读取时自动附加符号大纲。</div>
+          <div class="more"><div class="mbox">调用链路：<code>read</code> → <code>workspace_read_file</code> → Rust <code>read_text_file</code>。传 <code>symbol</code> 时通过 AST 定位行区间再返回；输出经过截断保护（&gt;60k 字符中间折叠，&gt;100k 转存磁盘并返回 2k 预览，150k 硬顶）。</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">WRITE</div>
-            <div class="name">write<small>→ workspace_write_file · workspaceTools.ts:2370</small></div>
-            <div class="src"><span class="chip">invoke write_text_file</span><span class="chip">astPreCheck</span><span class="chip">lspDiagnosticsHook</span><span class="chip">notifyWorkspaceMutation</span></div>
-            <div class="cchip c-mix">文本 + AST/LSP</div>
+            <div class="name">write <small>workspace_write_file</small><span class="cchip c-mix">文本 + AST/LSP</span><span class="exp"></span></div>
           </div>
-          <div class="desc">创建或完整覆盖文件。写前跑 <b>AST 语法预检</b>（新增语法错误则拦截不落盘），写后重读校验一致性，并<b>同步 LSP 后返回该文件最新诊断</b>（结果含 <code>diagnostics</code>/<code>notes</code>）。</div>
-          <div class="more"><div class="mbox">分发：<code>write</code> → <code>workspace_write_file</code>。写前 <code>astPreCheck</code>（tree-sitter 比较前后语法错误数，仅错误数增加时拦截）；写后重读校验 + <code>lspDiagnosticsHook</code>（先 <code>lsp_open_document</code> 同步改后内容触发 didChange，再 <code>lsp_get_diagnostics</code> 按文件等待最新诊断）；末了 <code>editHistory.record</code> + <code>notifyWorkspaceMutation([path])</code>（同时清空 graph 建图缓存）。</div></div>
+          <div class="desc">创建或全量覆盖文件。写入前执行 <b>AST 语法预检</b>（拦截新增语法错误），写入后立即重读校验，并同步触发 LSP 文档变更，<b>直接随结果返回该文件最新诊断</b>。</div>
+          <div class="more"><div class="mbox">调用链路：<code>write</code> → <code>workspace_write_file</code>。预检对比前后语法错误数，错误增加则拒绝落盘；落盘后重读校验，通过 <code>lsp_open_document</code> 刷新诊断，最后触发工作区变更通知并清理项目图缓存。</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">EDIT</div>
-            <div class="name">edit<small>→ workspace_apply_patch · workspaceTools.ts:3875</small></div>
-            <div class="src"><span class="chip">applySearchReplacePatch</span><span class="chip">locateSearchOccurrences</span><span class="chip">astPreCheck · lspDiagnosticsHook</span></div>
-            <div class="cchip c-mix">文本 + AST/LSP</div>
+            <div class="name">edit <small>workspace_apply_patch</small><span class="cchip c-mix">文本 + AST/LSP</span><span class="exp"></span></div>
           </div>
-          <div class="desc">单文件精确 SEARCH/REPLACE。<b>字面 <code>String.indexOf</code> 匹配</b>（CRLF→LF 归一化），零模糊；<b>多处匹配时报错并列出每处行号 + 所在符号</b>。写前 AST 预检、写后重读校验并返回 LSP 诊断（<code>maxBytes 20MB</code>）。</div>
-          <div class="more"><div class="mbox">匹配语义：search 须逐字节命中；<code>expectedOccurrences</code> 校验次数；多匹配需 <code>replaceAll</code>。歧义时不再只说“匹配到 N 处”——经 <code>locateSearchOccurrences</code> 定位各行、<code>extractProjectMapSymbols</code>（AST）解析所在符号，抛出带 <code>L行号（位于 kind name）</code> 的富错误供精准消歧。改后 <code>lspDiagnosticsHook</code> 返回本文件最新诊断。</div></div>
+          <div class="desc">单文件精确 SEARCH/REPLACE 替换。<b>严格字面匹配</b>，杜绝模糊偏移；出现多处命中时<b>报错并明确列出每处的行号与所属符号</b>；内置写前 AST 预检与写后 LSP 诊断回传。</div>
+          <div class="more"><div class="mbox">调用链路：<code>edit</code> → <code>workspace_apply_patch</code>。字面 <code>String.indexOf</code> 逐字节命中，歧义时通过 AST 解析所在符号生成富错误提示；写后自动等待 LSP 单文件诊断，单次操作上限 20MB。</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">PATCH</div>
-            <div class="name">patch<small>→ workspace_apply_diff · workspaceTools.ts:3956</small></div>
-            <div class="src"><span class="chip">applySearchReplaceDiff</span><span class="chip">多文件原子</span><span class="chip">astPreCheck · lspDiagnosticsHook</span></div>
-            <div class="cchip c-mix">文本 + AST/LSP</div>
+            <div class="name">patch <small>workspace_apply_diff</small><span class="cchip c-mix">文本 + AST/LSP</span><span class="exp"></span></div>
           </div>
-          <div class="desc">多文件原子 SEARCH/REPLACE：所有补丁全部精确匹配后一起写入，任一失败回滚。匹配机制与 edit 相同（字面 + <b>歧义行号/符号报错</b>），逐文件 AST 预检与 LSP 诊断，仅多了跨文件原子性。</div>
-          <div class="more"><div class="mbox">分发：<code>patch</code> → <code>workspace_apply_diff</code>。逐文件重读原文 → 逐补丁歧义预检（按运行态内容定位行号 + 符号）→ <code>applySearchReplaceDiff</code> 顺序应用 → 逐文件 <code>astPreCheck</code> + 写入 + 重读校验 + <code>lspDiagnosticsHook</code> → 批量 <code>notifyWorkspaceMutation</code>（清空 graph 缓存）。</div></div>
+          <div class="desc">多文件原子 SEARCH/REPLACE 补丁。所有文件的修改全部匹配成功后才统一落盘，任一处失败则整体回滚。规则与 <code>edit</code> 一致，支持歧义定位、逐文件 AST 预检与 LSP 诊断。</div>
+          <div class="more"><div class="mbox">调用链路：<code>patch</code> → <code>workspace_apply_diff</code>。按运行态内容逐文件执行歧义预检 → 顺序应用差异 → 逐文件 AST 校验与写入 → 批量刷新工作区变更。</div></div>
         </div>
 
-        <div class="sublabel"><b>检索</b> 正则 + 语义搜索 · grep semantic 走 LSP workspace symbol · list 逐文件 AST 符号</div>
+        <div class="sublabel"><b>检索与遍历</b> 搜索与目录大纲</div>
 
         <div class="item">
           <div class="row">
             <div class="addr">GREP</div>
-            <div class="name">grep<small>→ workspace_search_text / workspace_workspace_symbol · workspaceTools.ts:2267</small></div>
-            <div class="src"><span class="chip">isRegexp:true</span><span class="chip">smart-case</span><span class="chip">semantic 可选</span></div>
-            <div class="cchip c-mix">文本 + LSP</div>
+            <div class="name">grep <small>workspace_search_text</small><span class="cchip c-mix">文本 + LSP</span><span class="exp"></span></div>
           </div>
-          <div class="desc">按正则搜索文件内容，是<b>搜索文件内容的默认工具</b>（字符串、标识符、日志模板、配置键都用它）。<code>contextLines</code> 默认 0 最大 8，<code>maxResults</code> 默认 80。<code>semantic:true</code> 切换语义模式（LSP workspace symbol 检索），无 LSP 时降级正则并告知。<b>不要用 <code>bash grep/rg</code> 搜索文件内容</b>——始终用本工具。</div>
-          <div class="more"><div class="mbox">分发：默认 <code>grep</code> → <code>workspace_search_text</code>（强制 <code>isRegexp:true</code>）；<code>semantic:true</code> 时 → <code>workspace_workspace_symbol</code>（LSP），无 LSP 则降级正则并返回 <code>degraded:true</code>。</div></div>
+          <div class="desc">代码内容搜索的核心入口（默认使用正则匹配，支持 <code>smart-case</code> 与 <code>contextLines</code> 上下文）。传 <code>semantic: true</code> 时切换为 LSP 工作区符号语义检索，LSP 不可用时自动降级正则。</div>
+          <div class="more"><div class="mbox">调用链路：默认路由至 <code>workspace_search_text</code>；开启 <code>semantic: true</code> 时路由至 <code>workspace_workspace_symbol</code>。无可用 LSP 时降级正则并标记 <code>degraded: true</code>。</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">GLOB</div>
-            <div class="name">glob<small>→ workspace_search_files · workspaceTools.ts:2289</small></div>
-            <div class="src"><span class="chip">globToRegex</span><span class="chip">registerSharedWorkspaceTools.ts:216</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="name">glob <small>workspace_search_files</small><span class="cchip c-text">纯文本</span><span class="exp"></span></div>
           </div>
-          <div class="desc">按 glob 模式搜文件名（如 <code>**/*.test.ts</code>）。分发器先把 glob 转成正则再交给 <code>workspace_search_files</code>。</div>
-          <div class="more"><div class="mbox">分发：<code>glob</code> → <code>globToRegex()</code> → <code>workspace_search_files</code>（<code>isRegexp:true</code>）。</div></div>
+          <div class="desc">按 glob 通配符搜索项目文件名（如 <code>**/*.test.ts</code>）。分发层自动将通配符转换为正则后进行快速匹配。</div>
+          <div class="more"><div class="mbox">调用链路：<code>glob</code> → <code>globToRegex</code> → <code>workspace_search_files</code>。</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">LIST</div>
-            <div class="name">list<small>→ workspace_list_files · workspaceTools.ts:1917</small></div>
-            <div class="src"><span class="chip">invoke list_workspace_files</span><span class="chip">extractSymbols</span></div>
-            <div class="cchip c-mix">文本 + AST</div>
+            <div class="name">list <small>workspace_list_files</small><span class="cchip c-mix">文本 + AST</span><span class="exp"></span></div>
           </div>
-          <div class="desc">浏览目录树（<code>maxDepth</code> 默认 2 最大 6），并<b>自动附带逐文件轻量符号</b>（每个代码文件的顶层符号，AST 实现，最多 40 个文件、每文件 6 个符号）。返回 <code>entries</code>（文件列表）+ <code>symbolsByFile</code>（文件→符号摘要）。无 AST 支持的文件仅返回路径（文件仍列出）。</div>
-          <div class="more"><div class="mbox">分发：<code>list</code> → <code>workspace_list_files</code> → <code>invoke('list_workspace_files')</code>，再对代码文件逐个 <code>extract_file_symbols</code>（AST）提取顶层符号附带到 <code>symbolsByFile</code>。无 action 参数。</div></div>
+          <div class="desc">浏览目录树结构（默认深度 2，最大 6），<b>自动附带每个代码文件的顶层 AST 符号摘要</b>（函数、类、接口等），快速建立项目骨架认知。</div>
+          <div class="more"><div class="mbox">调用链路：<code>list</code> → <code>workspace_list_files</code> → Rust 遍历，并发通过 AST 提取顶层符号注入 <code>symbolsByFile</code>。</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">IMG</div>
-            <div class="name">read_image<small>→ workspace_read_image · workspaceTools.ts:1934</small></div>
-            <div class="src"><span class="chip">invoke read_image_file</span><span class="chip">base64</span></div>
-            <div class="cchip c-mm">多模态</div>
+            <div class="name">read_image <small>workspace_read_image</small><span class="cchip c-mm">多模态</span><span class="exp"></span></div>
           </div>
-          <div class="desc">读取图片（PNG/JPEG/WebP/GIF）为 base64 供视觉模型识别。<code>maxBytes</code> 默认 5MB。<b>仅 multimodalEnabled 时对 LLM 可见</b>，否则 hideFromLlm。</div>
-          <div class="more"><div class="mbox">注册于 <code>workspaceTools.ts:3517</code>（直接转发 workspace_read_image）；<code>:3521</code> 在非多模态时 <code>hideFromLlm('read_image')</code>。结果带 <code>__images</code> 内部字段，截断时会被 stripInternalFields 剥离。</div></div>
+          <div class="desc">读取本地图片（PNG/JPEG/WebP/GIF）并转为 Base64 供视觉模型解析（大小上限 5MB）。仅在多模态配置开启时对模型可见。</div>
+          <div class="more"><div class="mbox">调用链路：<code>read_image</code> → <code>workspace_read_image</code> → Rust 原生读取。非多模态模型自动从可见工具集中剥离。</div></div>
         </div>
       </section>
 
@@ -387,71 +358,50 @@
         <div class="tierhead">
           <div class="idx">02</div>
           <div class="tt">
-            <h3>Code Intelligence <span>代码智能</span></h3>
-            <div class="tags"><span class="tag">lsp / lsp_edit / diagnostics</span><span class="tag">graph 转 UI-only</span><span class="tag">LSP→AST 降级</span></div>
+            <h3>代码智能 <span>Code Intelligence</span></h3>
+            <div class="tags"><span class="tag">lsp / lsp_edit / diagnostics</span><span class="tag">graph (子代理)</span></div>
           </div>
-          <div class="hz"><b>点查询已接降级</b>lsp 9 action · source/confidence</div>
+          <div class="hz"><b>LSP → AST 自动降级</b>标注 source 与 confidence</div>
         </div>
 
-        <div class="sublabel"><b>语义图</b> ProjectGraph · 符号来源 lsp / ast / pattern</div>
-
-        <div class="item">
-          <div class="row">
-            <div class="addr">GRAPH</div>
-            <div class="name">graph<small>→ workspace_project_graph 等 · workspaceTools.ts:3204 · <b>主代理软隐藏 · Explore 可用</b></small></div>
-            <div class="src"><span class="chip">14 个 action</span><span class="chip">建图缓存 TTL 60s</span><span class="chip">softHideFromLlm:4200</span></div>
-            <div class="cchip c-ast">Explore + UI + AST 兜底</div>
-          </div>
-          <div class="desc"><b>对主代理 LLM 软隐藏</b>（主代理用 <code>list</code> + <code>lsp</code>），但经白名单提供给 <b>Explore 子代理</b>做影响/依赖分析。14 个 action 仍在：<b>full / overview / lookup / dependency / entrypoints / impact / implementations / smart_context</b> + 6 个分析（<b>dead_code / circular_deps / type_hierarchy / suggest_refactors / test_impact / generate_tests</b>）。定义与 handler 保留注册，服务 Explore、UI 面板并作为 <code>lsp</code> 点查询的 <b>AST 兜底后端</b>。</div>
-          <div class="more"><div class="mbox">构建链：<code>list_workspace_files</code> → 逐文件 <code>read_text_file</code> → LSP documentSymbol 覆盖 → <code>buildWorkspaceProjectMap</code> → <code>buildWorkspaceProjectGraph</code> → LSP 边增强。<b>现已加建图缓存</b>：按“建图参数 + 工作区”做键，TTL 60s，任一工作区写入经 <code>notifyWorkspaceMutation</code> 清空，同键在途构建去重，上限 3 条 FIFO 淘汰——lookup→dependency→impact 三连只建一次图。符号经 <code>UnifiedSymbolDispatcher.extractSymbols</code>（lsp→ast→regex 降级）。</div></div>
-        </div>
-
-        <div class="sublabel"><b>LSP 导航与语义编辑</b> 精确到 file:line:column</div>
+        <div class="sublabel"><b>语义导航与编辑</b> 精确符号操作</div>
 
         <div class="item">
           <div class="row">
             <div class="addr">LSP</div>
-            <div class="name">lsp<small>→ workspace_symbol_* / document_symbol / workspace_symbol / implementation / *_call_hierarchy · :3068+</small></div>
-            <div class="src"><span class="chip">9 个 action（opencode 命名）</span><span class="chip">astFallback:2930</span></div>
-            <div class="cchip c-mix">LSP → AST</div>
+            <div class="name">lsp <small>9 个语义导航 Action</small><span class="cchip c-mix">LSP → AST</span><span class="exp"></span></div>
           </div>
-          <div class="desc">语言服务只读导航与分析，<b>9 个 action</b>：<b>goToDefinition / findReferences / hover / documentSymbol / workspaceSymbol / goToImplementation / prepareCallHierarchy / incomingCalls / outgoingCalls</b>。每个 action <b>LSP 优先</b>，LSP 不可用或无结果时<b>自动降级 AST 项目图</b>（graph 查询），结果以 <code>source</code>(lsp/ast) 与 <code>confidence</code>(high/medium/low) 标注精度。需 file:line（:column 可选）。</div>
-          <div class="more"><div class="mbox">分发：<code>lsp</code> → <code>createDefaultLspHandler</code> → <code>workspace_symbol_definition/references/hover/...</code>。每个 handler 先调 <code>requestWorkspace*</code>（LSP，30s 超时）；若 <code>!available</code> 或结果为空 → <code>astFallback</code>（workspaceTools.ts:2930）经 <code>findSymbolAtPosition</code> 定位符号后走 graph 查询（lookup / changeImpact / implementations / dependency）。AST 兜底为符号级（图符号仅有行号、无列号），confidence=medium。</div></div>
+          <div class="desc">代码语义只读导航：<code>goToDefinition</code>、<code>findReferences</code>、<code>hover</code>、<code>documentSymbol</code>、<code>workspaceSymbol</code>、<code>goToImplementation</code>、<code>prepareCallHierarchy</code>、<code>incomingCalls</code>、<code>outgoingCalls</code>。LSP 优先，未就绪时<b>自动降级至 AST 项目图</b>，并标注置信度。</div>
+          <div class="more"><div class="mbox">调用链路：分发至对应 LSP 处理函数；超时（30s）或服务未启动时自动回退至 AST 项目图做符号级查找，返回标记 <code>source: "ast", confidence: "medium"</code>。</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">LEDIT</div>
-            <div class="name">lsp_edit<small>→ rename / code_action / format · :3537 / :3558 / :3639</small></div>
-            <div class="src"><span class="chip">action: rename | code_action | format</span></div>
-            <div class="cchip c-lsp">LSP</div>
+            <div class="name">lsp_edit <small>rename / code_action / format</small><span class="cchip c-lsp">LSP 语义</span><span class="exp"></span></div>
           </div>
-          <div class="desc">语言服务<b>语义编辑入口，与字面 edit/patch 互补</b>：跨文件符号改名用 rename（应用 workspace edit，优先于 edit/patch）、按 title/kind 选代码动作（整理导入 source.organizeImports、快速修复 quickfix）、批量格式化。字面片段替换仍用 edit/patch。</div>
-          <div class="more"><div class="mbox">分发：<code>lsp_edit</code> → <code>workspace_rename_symbol</code> / <code>workspace_apply_code_action</code> / <code>workspace_format_files</code>。rename 经 LSP <code>textDocument/rename</code> 拿 WorkspaceEdit 后落盘。</div></div>
+          <div class="desc">代码语义编辑工具，与字面替换互补：跨文件安全符号重命名（<code>rename</code>）、执行快速修复与整理导入（<code>code_action</code>，如 <code>source.organizeImports</code>）、批量代码格式化（<code>format</code>）。</div>
+          <div class="more"><div class="mbox">调用链路：通过 LSP <code>textDocument/rename</code> 计算 WorkspaceEdit 并落盘，保障跨文件引用的原子一致性。</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">DIAG</div>
-            <div class="name">diagnostics<small>→ workspace_lsp_diagnostics / project_diagnostics · :3581 / :4066</small></div>
-            <div class="src"><span class="chip">invoke lsp_get_diagnostics</span><span class="chip">Rust lsp.rs:1689</span></div>
-            <div class="cchip c-lsp">LSP</div>
+            <div class="name">diagnostics <small>单文件复查 / 全项目检查</small><span class="cchip c-lsp">LSP 诊断</span><span class="exp"></span></div>
           </div>
-          <div class="desc">传 <code>relativePath</code> 查单文件 LSP 诊断；传 <code>project:true</code> 跑项目级 lint/typecheck。write/edit/patch 改后已会<b>自动返回单文件诊断</b>，无需紧接着再调本工具复查同一文件；本工具用于<b>按需单文件复查</b>与项目级 lint/typecheck（自动反馈不含项目级）。</div>
-          <div class="more"><div class="mbox">单文件：<code>invoke('lsp_get_diagnostics',{languageId, relativePath})</code>，Rust 侧按文件 uri 等待诊断刷新（命中即短路返回、硬上限 2s 防卡死），再按路径后缀匹配取本文件。全项目：遍历可用 provider 语言聚合 topIssues。</div></div>
+          <div class="desc">按需查询指定文件的 LSP 诊断信息，或传 <code>project: true</code> 触发项目级 Lint/Typecheck。注：常规文件写入已内置诊断回传，本工具主要用于按需复查与全项目检测。</div>
+          <div class="more"><div class="mbox">调用链路：单文件通过 Rust <code>lsp_get_diagnostics</code> 监听诊断刷新（短路返回，2s 超时防卡死）；全项目则聚合各语言 Provider 的静态检查结果。</div></div>
         </div>
 
-        <div class="sublabel"><b>隐藏细粒度</b> 被合并工具遮蔽 · 经 graph/lsp 分发触达</div>
+        <div class="sublabel"><b>全局图谱与深度分析</b> Explore 子代理专属</div>
 
         <div class="item">
           <div class="row">
-            <div class="addr">FINE</div>
-            <div class="name">symbol / graph 细粒度<small>lookup · dependency · entrypoints · impact · implementations · smart_context · organize_imports · fix_diagnostics</small></div>
-            <div class="src"><span class="chip">workspaceTools.ts:2849–2967</span><span class="chip">graphQuery.ts</span></div>
-            <div class="cchip c-mix">LSP + AST</div>
+            <div class="addr">GRAPH</div>
+            <div class="name">graph <small>14 个分析 Action · Explore 专属开放</small><span class="cchip c-ast">AST 项目图</span><span class="exp"></span></div>
           </div>
-          <div class="desc">隐藏的语义查询工具，由 <code>lsp_edit</code> 分发触达（整理导入、快速修复），并作为 <code>lsp</code> 点查询的 <b>AST 兜底后端</b>（符号查找、依赖子图、入口点、变更影响、接口实现、智能上下文）。<code>graph</code> 公共工具本身也已 <code>hideFromLlm</code>。全部基于 ProjectGraph 或 LSP。</div>
-          <div class="more"><div class="mbox">这些工具注册后由 <code>oldToolNames</code> 统一 <code>hideFromLlm</code>；<code>graph</code> 公共工具另在 workspaceTools.ts:3793 单独 <code>hideFromLlm</code>。smart_context = <code>getWorkspaceSmartContext</code>(lookup + entrypoints(5) + dependency)。</div></div>
+          <div class="desc">跨模块依赖与影响面分析工具。包含 8 个架构查询（<code>overview</code>、<code>lookup</code>、<code>dependency</code>、<code>entrypoints</code>、<code>impact</code>、<code>implementations</code>、<code>smart_context</code> 等）与 6 个静态分析（死代码、循环依赖、类型层级、重构建议、测试影响面等）。主代理软隐藏，委派给 Explore 子代理使用。</div>
+          <div class="more"><div class="mbox">基于 AST 与 LSP 混合构建全局项目图；具备 60 秒建图缓存与并发去重机制，任意文件修改自动失效。同时作为 <code>lsp</code> 点查询的 AST 兜底后端。</div></div>
         </div>
       </section>
 
@@ -460,80 +410,71 @@
         <div class="tierhead">
           <div class="idx">03</div>
           <div class="tt">
-            <h3>Command &amp; Process <span>命令与进程</span></h3>
-            <div class="tags"><span class="tag">bash</span></div>
+            <h3>命令与进程 <span>Command &amp; Process</span></h3>
+            <div class="tags"><span class="tag">bash</span><span class="tag">前台 / 后台 / 进程管理</span></div>
           </div>
-          <div class="hz"><b>执行面</b>阻塞 / 后台 / 持久会话</div>
+          <div class="hz"><b>穿透执行</b>支持工作目录与状态管理</div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">BASH</div>
-            <div class="name">bash<small>→ workspace_run_shell_command / workspace_start_shell_background_command / workspace_*_background_processes</small></div>
-            <div class="src"><span class="chip">action: run|list|stop|stop_all</span><span class="chip">background:true → 后台</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="name">bash <small>workspace_run_shell_command</small><span class="cchip c-text">系统进程</span><span class="exp"></span></div>
           </div>
-          <div class="desc">在项目环境执行 shell 命令（穿过 shell，支持管道/&&/变量）。<code>action: run</code> 默认阻塞等待；<code>background:true</code> 后台运行（dev server / 长驻命令）返回 pid；<code>workdir</code> 指定工作目录（相对项目根或绝对）。<code>list/stop/stop_all</code> 管理后台进程。<b>搜索文件内容请用 <code>grep</code> 工具，不要用 bash grep/rg</b>。</div>
-          <div class="more"><div class="mbox">分发：<code>bash</code> → run + background? → <code>workspace_start_shell_background_command</code>，否则 <code>workspace_run_shell_command</code>；list/stop/stop_all → <code>workspace_list_background_processes</code> / <code>workspace_stop_background_process</code> / <code>workspace_stop_all_background_processes</code>。</div></div>
+          <div class="desc">在项目根目录或指定 <code>workdir</code> 下执行终端命令。<code>action: "run"</code> 默认前台阻塞；<code>background: true</code> 启动常驻进程并返回 PID；支持 <code>list / stop / stop_all</code> 管理后台进程。代码搜索请统一使用 <code>grep</code> 工具，避免使用系统 grep/rg。</div>
+          <div class="more"><div class="mbox">调用链路：前台阻塞走 <code>workspace_run_shell_command</code>；后台常驻走 <code>workspace_start_shell_background_command</code>，具备进程保活与自动资源释放机制。</div></div>
         </div>
       </section>
 
-      <!-- ═══ TIER 4 · Git ═══ -->
+      <!-- ═══ TIER 4 · Git 版本空间 ═══ -->
       <section class="tier t4 reveal">
         <div class="tierhead">
           <div class="idx">04</div>
           <div class="tt">
-            <h3>Git <span>版本空间</span></h3>
-            <div class="tags"><span class="tag">8 个 action</span><span class="tag">CodePapr 独立版本空间</span></div>
+            <h3>版本控制 <span>Git Workspace</span></h3>
+            <div class="tags"><span class="tag">8 个 Action</span><span class="tag">独立操作空间</span></div>
           </div>
-          <div class="hz"><b>不影响用户仓库</b>自动备份分支</div>
+          <div class="hz"><b>安全快照</b>破坏性操作自动备份分支</div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">GIT</div>
-            <div class="name">git<small>→ workspace_git_* · :3053 / :3057 / :3091 / :3116 / :3141 / :3158 / :3179 / :3222</small></div>
-            <div class="src"><span class="chip">action: status|diff|log|branch|stage|commit|restore|reset</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="name">git <small>status / diff / log / branch / stage / commit / restore / reset</small><span class="cchip c-text">Git 管理</span><span class="exp"></span></div>
           </div>
-          <div class="desc">CodePapr 独立版本空间（不影响用户自身 Git 仓库）。commit 需 message；branch 需 branchName；reset 需 target 且自动创建备份分支；restore/reset 前默认创建安全快照。</div>
-          <div class="more"><div class="mbox">分发：<code>git</code> → <code>workspace_git_status/diff/history/branch_checkout/stage/commit/restore/reset</code>。另有隐藏的 <code>workspace_restore_undo</code>（:3255）。参数含 snapshot / includeUntracked / backupBranchPrefix。</div></div>
+          <div class="desc">CodePapr 内置 Git 版本控制。提供完整的暂存、提交、差异比较与分支切换能力；执行 <code>reset / restore</code> 等破坏性操作前自动创建安全快照并保留备份分支。</div>
+          <div class="more"><div class="mbox">分发至各 <code>workspace_git_*</code> 细粒度接口。reset 动作强制要求指定 target 并自动生成 backup 前缀分支，底层提供快照撤销保护机制。</div></div>
         </div>
       </section>
 
-      <!-- ═══ TIER 5 · Web 与浏览器 ═══ -->
+      <!-- ═══ TIER 5 · 网络与浏览器 ═══ -->
       <section class="tier t5 reveal">
         <div class="tierhead">
           <div class="idx">05</div>
           <div class="tt">
-            <h3>Web &amp; Browser <span>网络与浏览器</span></h3>
+            <h3>网络与浏览器 <span>Web &amp; Browser</span></h3>
             <div class="tags"><span class="tag">webfetch / websearch / browser</span></div>
           </div>
-          <div class="hz"><b>内置浏览器</b>桌面端完整支持</div>
+          <div class="hz"><b>内置浏览器</b>支持 DOM 交互与页面截图</div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">WEB</div>
-            <div class="name">webfetch / websearch<small>webfetch → web_fetch_url / web_download_file；websearch 原生直接注册</small></div>
-            <div class="src"><span class="chip">websearch 原生可见</span><span class="chip">searxng</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="name">webfetch / websearch <small>网页抓取与搜索</small><span class="cchip c-text">网络请求</span><span class="exp"></span></div>
           </div>
-          <div class="desc"><b>webfetch</b> 读网页正文转纯文本（maxBytes 默认 20000）；<code>save: true</code> 下载原始/二进制内容到 .CodePapr/downloads/ 并返回路径；<b>websearch</b> 是原生细粒度工具（不经合并层），走 searxng，可直接对 LLM 见。</div>
-          <div class="more"><div class="mbox">webfetch 经合并层转发（web_fetch_url / web_download_file）；websearch 直接注册（<code>!disableWebSearchTools</code> 时），参数 query/maxResults/searxng*。</div></div>
+          <div class="desc"><b>webfetch</b>：抓取网页正文并转换为清洗后的 Markdown 文本；传 <code>save: true</code> 可将原始资源或二进制文件下载至 <code>.CodePapr/downloads/</code>。<b>websearch</b>：接入聚合搜索引擎提供实时技术检索。</div>
+          <div class="more"><div class="mbox"><code>webfetch</code> 路由至 <code>web_fetch_url</code> 或 <code>web_download_file</code>；<code>websearch</code> 直接通过后端 SearXNG 引擎发起并发检索。</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">BRWS</div>
-            <div class="name">browser<small>→ browser_*_page · :2611 / :2625 / :2639 / :2647 / :2666 / :2691 / :2708 / :2729</small></div>
-            <div class="src"><span class="chip">action: open|navigate|reload|close|click|type|read|screenshot|get</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="name">browser <small>9 个交互 Action</small><span class="cchip c-text">内置浏览器</span><span class="exp"></span></div>
           </div>
-          <div class="desc">内置浏览器交互：打开/导航/刷新/关闭、点击元素、输入文本、读 DOM、截图、取状态。open/navigate 需 url；click/type 需 selector；type 需 text。仅桌面端完整支持。</div>
-          <div class="more"><div class="mbox">分发：<code>browser</code> → browserHandler → <code>browser_open_page/navigate_page/reload_page/click/input_text/read_dom/take_screenshot/close_page</code>。另有 preview 变体（browser_*_preview）服务 exec previewUrl。</div></div>
+          <div class="desc">桌面端内置沙箱浏览器交互：<code>open</code>、<code>navigate</code>、<code>reload</code>、<code>close</code>、<code>click</code>、<code>type</code>、<code>read</code>（读取 DOM 结构）、<code>screenshot</code>（页面截图）、<code>get</code>（获取状态）。</div>
+          <div class="more"><div class="mbox">基于 Tauri 内嵌 Webview 实现，支持选择器点击、表单输入与实时页面截屏，服务于 Web 页面自动化调试与视觉验证。</div></div>
         </div>
-
       </section>
 
       <!-- ═══ TIER 6 · 应用与辅助 ═══ -->
@@ -541,116 +482,100 @@
         <div class="tierhead">
           <div class="idx">06</div>
           <div class="tt">
-            <h3>App &amp; Misc <span>应用与辅助</span></h3>
-            <div class="tags"><span class="tag">app_render / app_* / skill / question / todo</span></div>
+            <h3>应用与会话辅助 <span>App &amp; Auxiliary</span></h3>
+            <div class="tags"><span class="tag">app_render / skill / question / todo</span></div>
           </div>
-          <div class="hz"><b>App 模式</b>app_render 是主输出</div>
+          <div class="hz"><b>沙箱渲染</b>提供交互式 HTML 应用能力</div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">APP</div>
-            <div class="name">app_render / app_list / app_start / app_stop / app_delete<small>· :1977 / :2168 / :2197 / :2227 / :2240</small></div>
-            <div class="src"><span class="chip">app_render 原生可见</span><span class="chip">.CodePapr/apps/&lt;appId&gt;</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="name">app_render / app_list / app_start / app_stop / app_delete<span class="cchip c-text">App 模式</span><span class="exp"></span></div>
           </div>
-          <div class="desc"><b>app_render</b> 是 App 模式的主输出工具：渲染交互式 HTML 应用到面板（沙箱 iframe + Papr SDK）。app_list/start/stop/delete 管理已注册 .papr 应用的后端生命周期。app_render 对子代理始终排除（防套娃）。</div>
-          <div class="more"><div class="mbox">app_render 参数：appId(kebab-case) / title / html / permissions / agents / level / command+args+port。app_list 等 4 个经合并层对 LLM 可见。</div></div>
+          <div class="desc"><b>app_render</b>：在独立面板中渲染交互式 HTML 应用（运行于沙箱 iframe，注入 Papr SDK）；搭配 <code>app_*</code> 系列工具管理 <code>.CodePapr/apps/</code> 下常驻微应用的完整生命周期。</div>
+          <div class="more"><div class="mbox"><code>app_render</code> 对子代理强制禁用（防止嵌套渲染）；支持配置前端 HTML、权限集、依赖的 Agent 与后端端口进程。</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">AUX</div>
-            <div class="name">skill / question / todo / local_time_now<small>→ skill_load · :2321 · question handler :3494</small></div>
-            <div class="src"><span class="chip">skill 经合并层</span><span class="chip">question 仅 Plan 模式</span></div>
-            <div class="cchip c-text">纯文本</div>
+            <div class="name">skill / question / todo / local_time_now<span class="cchip c-text">会话控制</span><span class="exp"></span></div>
           </div>
-          <div class="desc"><b>skill</b> 加载 .CodePapr/skills/ 说明文件；<b>question</b> 向用户提问（Plan 模式，返回 __question 结构）；<b>todo</b> 实时任务清单；<b>local_time_now</b> 本地时间（细粒度，模式白名单内）。</div>
-          <div class="more"><div class="mbox">skill 经合并层转发 <code>skill_load</code>；question 经 questionHandler 返回结构化标记；模式工具白名单见 agentRuntime.worker.ts:76-78。</div></div>
+          <div class="desc"><b>skill</b> 加载外部技能规则；<b>question</b> 在 Plan 模式下向用户发起结构化多选提问；<b>todo</b> 维护实时任务进度清单；<b>local_time_now</b> 获取当前本地时间戳。</div>
+          <div class="more"><div class="mbox"><code>skill</code> 路由至 <code>skill_load</code>；<code>question</code> 生成带选项卡片的交互式回调；各工具根据当前运行模式（Ask/Plan/Agent）由白名单控制可用性。</div></div>
         </div>
       </section>
 
-      <!-- ═══ TIER 7 · Agent 工具集 ═══ -->
+      <!-- ═══ TIER 7 · Agent 工具矩阵 ═══ -->
       <section class="tier t7 reveal" id="agents">
         <div class="tierhead">
           <div class="idx">07</div>
           <div class="tt">
-            <h3>Agent Tool Matrix <span>Agent 工具集</span></h3>
-            <div class="tags"><span class="tag">主代理 + Explore / Scout / Mentor + 内部 Verifier / Compactor</span><span class="tag">白名单过滤</span><span class="tag">agentConfig.ts</span></div>
+            <h3>Agent 权限矩阵 <span>Agent Tool Matrix</span></h3>
+            <div class="tags"><span class="tag">主代理 + 3 种外包子代理 + 2 种内部代理</span></div>
           </div>
-          <div class="hz"><b>谁拿到哪些工具</b>主代理全量（graph 软隐藏）· 子代理白名单 · 内部代理由运行时调用（不经 task 工具）</div>
+          <div class="hz"><b>最小权限原则</b>按角色白名单严格隔离</div>
         </div>
 
-        <div class="sublabel"><b>主代理</b> 全量读写执行 · graph 软隐藏（委派 Explore）</div>
+        <div class="sublabel"><b>主代理</b> 任务主控 · 全量读写执行</div>
 
         <div class="item">
           <div class="row">
             <div class="addr">MAIN</div>
-            <div class="name">主代理 Main Agent<small>agentFactory.ts · getLlmTools() · graph 软隐藏</small></div>
-            <div class="src"><span class="chip">读写执行全量</span><span class="chip">graph 不可见</span><span class="chip">task 委派</span></div>
-            <div class="cchip c-mix">读写执行</div>
+            <div class="name">主代理 Main Agent <small>全量读写执行</small><span class="cchip c-mix">全功能</span><span class="exp"></span></div>
           </div>
-          <div class="desc">拥有全部读写/执行工具：<code>read / write / edit / patch / grep / glob / list / lsp / lsp_edit / diagnostics / git / bash / browser / webfetch / websearch / skill / question / todo / task</code>（App 模式另有 <code>app_*</code>）。<b>唯独 <code>graph</code> 对其软隐藏</b>——项目结构用 <code>list</code>、符号导航用 <code>lsp</code>、跨模块依赖/影响分析委派给 Explore。</div>
-          <div class="more"><div class="mbox">工具集经 <code>toolRegistry.getLlmTools()</code> 构建（排除软隐藏工具）。<code>graph</code> 经 <code>softHideFromLlm</code> 软隐藏：定义与 handler 仍注册（供子代理与 UI 面板），仅从主代理 LLM 工具集排除。ask/plan 只读模式另经 <code>MUTATING_TOOL_NAMES</code> 硬拦截 write/edit/patch/lsp_edit/bash/git/app_*。</div></div>
+          <div class="desc">拥有除 <code>graph</code> 外的所有读写/执行工具。项目大纲浏览使用 <code>list</code>，符号定位使用 <code>lsp</code>，全局依赖与深层架构分析通过 <code>task</code> 委派给 Explore 子代理。在 Ask/Plan 只读模式下自动拦截文件写入与 Shell 执行。</div>
+          <div class="more"><div class="mbox">从 LLM 工具定义中软隐藏 <code>graph</code>（保留底层注册供 UI 面板与子代理调用）。只读模式下通过 <code>MUTATING_TOOL_NAMES</code> 统一拦截写操作。</div></div>
         </div>
 
-        <div class="sublabel"><b>子代理</b> 独立 Session · 工具按定义白名单过滤（filterToolsForAgent）</div>
+        <div class="sublabel"><b>子代理</b> 独立 Session · 白名单过滤</div>
 
         <div class="item">
           <div class="row">
             <div class="addr">EXPL</div>
-            <div class="name">Explore<small>只读代码分析 · model: fast · agentConfig.ts:257</small></div>
-            <div class="src"><span class="chip">8 工具</span><span class="chip">含 graph + glob</span><span class="chip">只读</span></div>
-            <div class="cchip c-lsp">只读分析</div>
+            <div class="name">Explore <small>代码探索与架构分析 · 8 个只读工具</small><span class="cchip c-lsp">只读分析</span><span class="exp"></span></div>
           </div>
-          <div class="desc"><code>read / read_image / list / graph / glob / lsp / diagnostics / grep</code>。<b>含 <code>graph</code></b>（影响/依赖/实现分析，主代理委派给它）与 <b><code>glob</code></b>（按文件名查找，与 grep 配对）。只读，不改文件。</div>
-          <div class="more"><div class="mbox">子代理注册时传 <code>exposeGraphToLlm:true</code>，graph 不软隐藏，白名单（<code>graph:true, glob:true</code>）即可选取。多模态关闭时 <code>read_image</code> 被动态剥离。</div></div>
+          <div class="desc">工具集：<code>read / read_image / list / graph / glob / lsp / diagnostics / grep</code>。专属开放 <code>graph</code> 项目图谱分析能力，专门处理依赖溯源、影响面评估与符号查找，不具备写权限。</div>
+          <div class="more"><div class="mbox">注册时声明 <code>exposeGraphToLlm: true</code> 解除图谱软隐藏；多模态关闭时动态剥离 <code>read_image</code>。</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">SCOUT</div>
-            <div class="name">Scout<small>网页搜索 + 下载 · model: fast · agentConfig.ts:331</small></div>
-            <div class="src"><span class="chip">4 工具</span><span class="chip">联网</span><span class="chip">不碰项目代码</span></div>
-            <div class="cchip c-text">联网</div>
+            <div class="name">Scout <small>网络调研与文档查阅 · 4 个工具</small><span class="cchip c-text">联网调研</span><span class="exp"></span></div>
           </div>
-          <div class="desc"><code>websearch / webfetch / browser / read_image</code>。负责联网找资料、读文档、下载资源（<code>webfetch save:true</code> 落到 <code>.CodePapr/downloads/</code>），不读写项目代码。</div>
-          <div class="more"><div class="mbox">多模态关闭时 <code>read_image</code> 被动态剥离。</div></div>
+          <div class="desc">工具集：<code>websearch / webfetch / browser / read_image</code>。专注于外部技术文档搜索、网页浏览与参考资料下载，完全不访问本地项目代码。</div>
+          <div class="more"><div class="mbox">通过 <code>webfetch save: true</code> 将外部资源安全下载至 <code>.CodePapr/downloads/</code> 目录供主代理引用。</div></div>
         </div>
 
         <div class="item">
           <div class="row">
-            <div class="addr">MENTOR</div>
-            <div class="name">Mentor<small>架构/算法/调试指导 · model: 可配置独立模型 · agentConfig.ts:392</small></div>
-            <div class="src"><span class="chip">无工具 {}</span><span class="chip">纯推理</span><span class="chip">听汇报做决策</span></div>
-            <div class="cchip c-mm">纯推理</div>
+            <div class="addr">MNTR</div>
+            <div class="name">Mentor <small>架构与算法决策 · 纯推理</small><span class="cchip c-mm">无工具</span><span class="exp"></span></div>
           </div>
-          <div class="desc"><b>无任何工具（<code>{}</code>）</b>。刻意设计：只基于主代理汇报的上下文做架构/算法/调试决策，信息不足时回复「需补充 X」让工程师去补，不自己查代码（避免与 Explore 重叠、拖慢响应）。</div>
-          <div class="more"><div class="mbox"><code>filterToolsForAgent</code> 对空对象 <code>{}</code> 返回空工具列表（显式禁用）。Mentor 未启用时（<code>mentorEnabled:false</code>）从委派列表过滤掉。</div></div>
+          <div class="desc"><b>配置零工具（<code>{}</code>）</b>。完全基于主代理汇报的上下文进行高层架构设计、算法选型与复杂调试决策，不自行搜索代码，避免工具争抢与响应延迟。</div>
+          <div class="more"><div class="mbox">白名单为空对象 <code>{}</code>，系统自动返回空工具集；信息不足时指示主代理补充上下文。</div></div>
         </div>
 
-        <div class="sublabel"><b>运行时内部代理</b> internal:true · 不经 task 工具暴露 · 由运行时直接调用</div>
+        <div class="sublabel"><b>内部代理</b> 系统运行时直接调用 · 不对任务暴露</div>
 
         <div class="item">
           <div class="row">
             <div class="addr">VRFY</div>
-            <div class="name">Verifier<small>Goal 验收 · model: verifierModelTier · agentConfig.ts:783</small></div>
-            <div class="src"><span class="chip">4 只读工具</span><span class="chip">internal:true</span><span class="chip">GoalRunner 调用</span></div>
-            <div class="cchip c-lsp">只读核实</div>
+            <div class="name">Verifier <small>目标验收器 · 4 个只读工具</small><span class="cchip c-lsp">只读核验</span><span class="exp"></span></div>
           </div>
-          <div class="desc"><code>read / grep / glob / list</code>。Goal 自主循环的验收器：读取 Worker 执行记录并可亲自核实文件，防完工偏见、防伪造成功。只读，不改文件。</div>
-          <div class="more"><div class="mbox">运行时定义由 <code>buildVerifierDefinition</code>（verifierRunner.ts）按 <code>verifierModelTier</code> 覆盖模型/温度；专属预算：6 轮工具 / 3 分钟墙钟 / <code>verifierMaxTokens</code> / thinking 关闭。主观目标 fast 档自动升级 mentor。</div></div>
+          <div class="desc">工具集：<code>read / grep / glob / list</code>。Goal 循环的自主验收器：核验执行记录并亲自检查产物文件，独立评估目标达成状态，杜绝完工偏差。</div>
+          <div class="more"><div class="mbox">由 GoalRunner 调度，专属配额：最多 6 轮工具调用、3 分钟超时、独立 Token 预算、关闭 Thinking 模式。</div></div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">CMPT</div>
-            <div class="name">Compactor<small>上下文压缩 · model: compactionModel · agentConfig.ts:801</small></div>
-            <div class="src"><span class="chip">无工具 {}</span><span class="chip">internal:true</span><span class="chip">压缩管线调用</span></div>
-            <div class="cchip c-mm">纯推理</div>
+            <div class="name">Compactor <small>上下文压缩器 · 纯推理</small><span class="cchip c-mm">无工具</span><span class="exp"></span></div>
           </div>
-          <div class="desc"><b>零工具（<code>{}</code>）</b>：压缩输入（transcript）已含全部事实，无需回读工作区。把长会话压缩成可恢复检查点 JSON（userGoal/constraints/completedWork/importantContext/todoList/pendingWork）。</div>
-          <div class="more"><div class="mbox">执行复用 <code>resolveSubagentExecution</code> + <code>runSubagentSession</code>（compactorRunner.ts）：空注册表、不注入 skills/memory/project-graph（bootstrap 隔离）、<code>compactionMaxTokens</code> 为输出上限、thinking 关闭；墙钟沿用子代理默认 20 分钟。轮间压缩与 mid-loop 压缩共用；mid-loop 接 <code>sessionAbortControllers</code> 取消信号，中飞取消时 handler 返回 null 优雅收尾。fast 档未启用快速模型时跳过 LLM 走规则降级（旧 selectContextCompactionModelRoute 语义）。</div></div>
+          <div class="desc"><b>配置零工具（<code>{}</code>）</b>。在会话达到阈值时介入，基于完整历史记录提取目标、约束、已完成工作与待办事项，压缩为结构化恢复快照 JSON。</div>
+          <div class="more"><div class="mbox">隔离 skills 与 memory 注入，支持中途取消信号处理；若未配置快速推理模型，自动回退至规则压缩管道。</div></div>
         </div>
       </section>
 
@@ -659,45 +584,43 @@
     <!-- ═══ RAIL ═══ -->
     <aside class="rail">
       <div class="railcard reveal">
-        <h4>两层架构 · Dispatch</h4>
+        <h4>两层分发架构</h4>
         <ul class="wire">
-          <li class="wnode"><b>LLM</b> 看见 25 个合并工具<span class="wtag">graph 转 UI-only</span></li>
-          <li class="wnode"><b>分发器</b> 合并 → 细粒度映射<span class="wtag">registerSharedWorkspaceTools.ts</span></li>
-          <li class="wnode"><b>细粒度</b> 61 个 workspace_* handler<span class="wtag">workspaceTools.ts（hideFromLlm）</span></li>
-          <li class="wnode"><b>Tauri</b> invoke → Rust 后端<span class="wtag">read_text_file / lsp_* / symbol_provider</span></li>
-          <li class="wnode"><b>Rust</b> LSP→AST→regex 降级引擎<span class="wtag">symbol_provider.rs:1343</span></li>
+          <li class="wnode"><b>LLM 视图</b> 25 个合并工具<span class="wtag">简洁抽象，降低决策成本</span></li>
+          <li class="wnode"><b>分发路由器</b> 参数重映射<span class="wtag">registerSharedWorkspaceTools</span></li>
+          <li class="wnode"><b>细粒度实现</b> 61 个底层 Handler<span class="wtag">workspaceTools 状态管理</span></li>
+          <li class="wnode"><b>Tauri IPC</b> 原生通道<span class="wtag">invoke Rust 后端模块</span></li>
+          <li class="wnode"><b>Rust 引擎</b> LSP / AST 降级核心<span class="wtag">symbol_provider 容灾引擎</span></li>
         </ul>
       </div>
 
       <div class="railcard reveal">
-        <h4>LSP / AST 覆盖账本</h4>
-        <div class="stat"><span>真实 LSP 服务器（Rust）</span><b class="g">15 语言</b></div>
-        <div class="stat"><span>TS 侧声明 LSP 适配器</span><b class="a">26 语言</b></div>
+        <h4>语言智能降级账本</h4>
+        <div class="stat"><span>原生 LSP 驱动（Rust）</span><b class="g">15 语言</b></div>
+        <div class="stat"><span>TS 侧 LSP 适配声明</span><b class="a">26 语言</b></div>
         <div class="stat"><span>AST（tree-sitter）</span><b class="v">17 语言</b></div>
-        <div class="stat"><span>regex 兜底</span><b class="ac">11 语言</b></div>
-        <div class="stat"><span>降级链</span><b class="g">lsp→ast→regex</b></div>
-        <div class="stat"><span>声明 26 vs 真实 15 的差</span><b class="r">落到 AST/regex</b></div>
+        <div class="stat"><span>Regex 正则兜底</span><b class="ac">11 语言</b></div>
+        <div class="stat"><span>降级链</span><b class="g">LSP → AST → Regex</b></div>
+        <div class="stat"><span>未启 LSP 语言</span><b class="r">平滑落入 AST/Regex</b></div>
       </div>
 
       <div class="railcard reveal">
-        <h4>三层限制 · 别混淆</h4>
-        <div class="stat"><span>全局上下文预算</span><b class="ac">500k tokens</b></div>
-        <div class="stat"><span>· 位置</span><b>defaults.ts:69</b></div>
-        <div class="stat"><span>工具结果截断 intercept</span><b class="a">30k 字符</b></div>
-        <div class="stat"><span>· offload / ceiling</span><b class="a">50k / 150k</b></div>
-        <div class="stat"><span>read 原始读取上限</span><b class="r">500KB 字节</b></div>
-        <div class="stat"><span>· 位置</span><b>workspace_fs/mod.rs:25</b></div>
+        <h4>三层配额保护</h4>
+        <div class="stat"><span>全局上下文预算</span><b class="ac">500k Tokens</b></div>
+        <div class="stat"><span>工具输出折叠阈值</span><b class="a">30k 字符</b></div>
+        <div class="stat"><span>转存磁盘 / 硬截断</span><b class="a">50k / 150k</b></div>
+        <div class="stat"><span>底层文件读取上限</span><b class="r">500 KB</b></div>
       </div>
 
       <div class="railcard reveal">
-        <h4>模式工具面 · Whitelist</h4>
+        <h4>运行模式权限白名单</h4>
         <div class="modelist">
-          <b>模式 1（只读）</b><br>
-          <span class="mk">read grep list lsp diagnostics</span> read_image skill_load todo local_time_now<br><br>
-          <b>模式 2（+联网）</b><br>
+          <b>只读模式 (Ask/Plan)</b><br>
+          <span class="mk">read grep list lsp diagnostics</span> read_image skill todo local_time<br><br>
+          <b>联网只读</b><br>
           <span class="mk">+ websearch webfetch</span><br><br>
-          <b>模式 3（+写执行）</b><br>
-          <span class="mk">+ write edit patch bash</span>
+          <b>全功能模式 (Agent/App)</b><br>
+          <span class="mk">+ write edit patch bash git app_*</span>
         </div>
       </div>
     </aside>
@@ -705,23 +628,23 @@
 
   <!-- ═══ PIPELINE ═══ -->
   <section class="pipe reveal" id="pipeline">
-    <h2>一次工具调用的完整链路</h2>
-    <div class="sub">以 <code>edit</code> 为例——从 LLM 发起到 Rust 落盘。</div>
+    <h2>单次工具调用的端到端链路</h2>
+    <div class="sub">以 <code>edit</code> 精准替换为例：从大模型调用到文件安全落盘的全流程。</div>
     <div class="flow">
-      <div class="fstep"><span class="fi">L0</span><b>LLM 调用 edit</b></div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L1</span><b>合并工具定义</b>mergeToolDefs</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L2</span><b>分发器映射</b>edit→apply_patch</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L3</span><b>细粒度 handler</b>重读原文 20MB · 歧义定位行号+符号</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L4</span><b>字面替换 + AST 预检</b>indexOf 匹配 · 新语法错误拦截</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L5</span><b>invoke write_text_file</b>Tauri → Rust</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L6</span><b>重读校验 + LSP 诊断</b>editHistory · notifyMutation(清 graph 缓存)</div>
+      <div class="fstep"><span class="fi">L0</span><b>LLM 发起调用</b>edit(search, replace)</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L1</span><b>合并层校验</b>参数类型与模式权限校验</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L2</span><b>分发路由</b>映射至 workspace_apply_patch</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L3</span><b>内容预检</b>重读原文，精准定位歧义符号</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L4</span><b>字面替换 &amp; AST 检查</b>字面替换，拦截新增语法错误</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L5</span><b>Rust 落盘</b>invoke write_text_file</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L6</span><b>重读校验 &amp; 诊断同步</b>回传 LSP 最新诊断，清理图缓存</div>
     </div>
   </section>
 </div>
 
 <footer>
   <div class="container">
-    CodePapr &mdash; 工具全景盘点 · 生成自源码核实（<code>mergeToolDefs.ts</code> / <code>registerSharedWorkspaceTools.ts</code> / <code>workspaceTools.ts</code> / <code>searchReplaceDiff.ts</code> / <code>toolDefinitions.ts</code> / <code>unifiedSymbols.ts</code> / <code>symbol_provider.rs</code> / <code>lsp.rs</code> / <code>toolOutputTruncation.ts</code> / <code>workspace_fs/mod.rs</code> / <code>agentRuntime.worker.ts</code>）。两层架构 = 25 合并工具（LLM 可见，graph 转 UI-only）→ 61 细粒度（hideFromLlm）→ Tauri/Rust。降级链 = lsp→ast（点查询）/ lsp→ast→regex（符号提取）。限制三层单位：tokens / 字符 / 字节，勿混淆。
+    CodePapr 工具全景架构 · 25 个大模型暴露工具 → 61 个细粒度底层 Handler → Tauri / Rust 原生后端。全链路覆盖 LSP 语义、AST 语法树与正则兜底，提供确定性与安全保障。
   </div>
 </footer>
 
