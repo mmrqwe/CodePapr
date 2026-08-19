@@ -32,6 +32,7 @@ interface MessageListProps {
   onPreviewImage: (src: string) => void;
   characterAvatar?: string | null;
   characterName?: string | null;
+  showCharacterAvatar?: boolean;
   messageCheckpoints: Record<string, { sha: string; sessionId: string }>;
   gitReady: boolean;
   onTtsReplay: (text: string) => void;
@@ -73,6 +74,7 @@ export const MessageList = memo(function MessageList({
   onPreviewImage,
   characterAvatar,
   characterName,
+  showCharacterAvatar = false,
   messageCheckpoints,
   gitReady,
   onTtsReplay,
@@ -190,6 +192,9 @@ export const MessageList = memo(function MessageList({
               group={tailExecutionProcessGroup}
               lang={lang}
               onOpenWorkspacePath={onOpenWorkspacePath}
+              characterAvatar={characterAvatar ?? undefined}
+              characterName={characterName ?? undefined}
+              showCharacterAvatar={showCharacterAvatar}
             />
             <MessageBubble
               msg={m}
@@ -201,6 +206,7 @@ export const MessageList = memo(function MessageList({
               onPreviewImage={onPreviewImage}
               characterAvatar={characterAvatar ?? undefined}
               characterName={characterName ?? undefined}
+              showCharacterAvatar={showCharacterAvatar}
             />
           </div>
         ) : (
@@ -215,6 +221,7 @@ export const MessageList = memo(function MessageList({
             onPreviewImage={onPreviewImage}
             characterAvatar={characterAvatar ?? undefined}
             characterName={characterName ?? undefined}
+            showCharacterAvatar={showCharacterAvatar}
           />
         );
 
@@ -308,7 +315,7 @@ export const MessageList = memo(function MessageList({
         <div aria-hidden style={{ height: bottomSpacerHeight }} />
       )}
       {activeSessionId && taskChecklists[activeSessionId] ? (
-        <div className="mx-3 mb-4 rounded-2xl border-2 border-accent-soft bg-base">{/* debug-visible wrapper */}
+        <div className="mx-3 mb-4 rounded-2xl border border-line bg-base">
           <TaskChecklist
             checklist={taskChecklists[activeSessionId]!}
             lang={lang}
@@ -318,6 +325,9 @@ export const MessageList = memo(function MessageList({
       ) : null}
       {isActiveLoading && !hasStreamingMessage && (
         <div className="mb-4 flex justify-start fade-in">
+          {showCharacterAvatar && (
+            <div className="mr-2 h-8 w-8 flex-shrink-0" aria-hidden />
+          )}
           <div className="flex items-center gap-1.5 px-1 py-2">
             <div className="flex gap-1.5 items-center">
               <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce [animation-delay:0ms]" />

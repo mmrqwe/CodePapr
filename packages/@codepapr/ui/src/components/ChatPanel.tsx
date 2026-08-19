@@ -63,9 +63,10 @@ import type { PlanFollowUpAction } from '../utils/planMode';
 import { buildTailExecutionProcessGroup } from './chat/ExecutionProcessPanel';
 import { MessageList } from './chat/MessageList';
 import { ModeSelector } from './chat/ModeSelector';
+import { ChatInputTextarea } from './chat/ChatInputTextarea';
 import {
   buildUserPromptWithFiles,
-  slashCommandNameFilter,
+  resolveComposerFilters,
   DEFAULT_SESSION_INPUT,
   MAX_PENDING_FILES,
   MAX_TEXT_FILE_BYTES,
@@ -243,6 +244,10 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
   const hasStreamingMessageRef = useRef(false);
   const isProgrammaticScrollRef = useRef(false);
   const isComposingRef = useRef(false);
+  const handleIncomingFilesRef = useRef<(imageFiles: File[], textFiles: File[]) => Promise<void>>(async () => {});
+  const handlePrimaryActionRef = useRef<() => Promise<void>>(async () => {});
+  const slashFilterRef = useRef<string | null>(null);
+  const atFilterRef = useRef<string | null>(null);
 
   // isLoading 是全局「任一会话在执行」（单执行模型）；isActiveLoading 才是
   // 当前查看会话自身的执行状态，输入框/按钮等 UI 一律按它对齐。
@@ -389,10 +394,13 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     maybeInsertActiveCharacterGreeting();
   }, [activeCharacter?.id, activeCharacter?.firstMessage, activeCharacter?.selectedGreetingIndex, activeSessionId, sessionMessagesLoading, messages.length, charactersEnabled]);
 
-  const characterAvatar = charactersEnabled && (activeCharacter?.showAvatar ?? true)
+  const showCharacterAvatar = Boolean(
+    charactersEnabled && activeCharacter && (activeCharacter.showAvatar ?? true)
+  );
+  const characterAvatar = showCharacterAvatar
     ? (activeCharacter?.avatarDataUrl ?? null)
     : null;
-  const characterName = charactersEnabled ? activeCharacter?.name : undefined;
+  const characterName = showCharacterAvatar ? activeCharacter?.name : undefined;
 
   // Auto-speak only when experimental voice is on and the active character has voice enabled.
   const voiceEnabled = voiceUiEnabled && (activeCharacter?.voice?.enabled ?? false);
@@ -829,13 +837,6 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     lastVisibleMessageIdRef.current = tailMessageId;
   }, [tailMessageId]);
 
-  useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 80)}px`;
-  }, [input]);
-
   useLayoutEffect(() => {
     const container = messageListRef.current;
     const content = messageListContentRef.current;
@@ -995,27 +996,6 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     }
   };
 
-  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const allFiles = Array.from(event.clipboardData.files ?? []);
-    if (allFiles.length === 0) return;
-    const imageFiles = allFiles.filter((f) => f.type.startsWith('image/'));
-    const textFiles = allFiles.filter((f) => !f.type.startsWith('image/'));
-    if (imageFiles.length > 0 || textFiles.length > 0) {
-      void handleIncomingFiles(imageFiles, textFiles);
-    }
-  };
-
-  const handleDrop = (event: DragEvent<HTMLTextAreaElement>) => {
-    event.preventDefault();
-    const allFiles = Array.from(event.dataTransfer.files ?? []);
-    if (allFiles.length === 0) return;
-    const imageFiles = allFiles.filter((f) => f.type.startsWith('image/'));
-    const textFiles = allFiles.filter((f) => !f.type.startsWith('image/'));
-    if (imageFiles.length > 0 || textFiles.length > 0) {
-      void handleIncomingFiles(imageFiles, textFiles);
-    }
-  };
-
   const handleIncomingFiles = async (imageFiles: File[], textFiles: File[]) => {
     if (imageFiles.length > 0) {
       await addImageFiles(imageFiles);
@@ -1024,6 +1004,28 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       await addTextFiles(textFiles);
     }
   };
+  handleIncomingFilesRef.current = handleIncomingFiles;
+
+  const handlePaste = useCallback((event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const allFiles = Array.from(event.clipboardData.files ?? []);
+    if (allFiles.length === 0) return;
+    const imageFiles = allFiles.filter((f) => f.type.startsWith('image/'));
+    const textFiles = allFiles.filter((f) => !f.type.startsWith('image/'));
+    if (imageFiles.length > 0 || textFiles.length > 0) {
+      void handleIncomingFilesRef.current(imageFiles, textFiles);
+    }
+  }, []);
+
+  const handleDrop = useCallback((event: DragEvent<HTMLTextAreaElement>) => {
+    event.preventDefault();
+    const allFiles = Array.from(event.dataTransfer.files ?? []);
+    if (allFiles.length === 0) return;
+    const imageFiles = allFiles.filter((f) => f.type.startsWith('image/'));
+    const textFiles = allFiles.filter((f) => !f.type.startsWith('image/'));
+    if (imageFiles.length > 0 || textFiles.length > 0) {
+      void handleIncomingFilesRef.current(imageFiles, textFiles);
+    }
+  }, []);
 
   const removePendingImage = (id: string) => {
     setPendingImages((current) => current.filter((image) => image.id !== id));
@@ -1043,6 +1045,32 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     }
     await handleSend();
   };
+  handlePrimaryActionRef.current = handlePrimaryAction;
+  slashFilterRef.current = slashFilter;
+  atFilterRef.current = atFilter;
+
+  const applyComposerFilters = useCallback((value: string, cursorPos: number) => {
+    if (isComposingRef.current) return;
+    const next = resolveComposerFilters(value, cursorPos);
+    atTriggerIndexRef.current = next.atTriggerIndex;
+    setAtFilter(next.atFilter);
+    setSlashFilter(next.slashFilter);
+  }, []);
+
+  const handleDraftValueChange = useCallback((value: string) => {
+    setInput(value);
+    const cursorPos = textareaRef.current?.selectionStart ?? value.length;
+    applyComposerFilters(value, cursorPos);
+  }, [setInput, applyComposerFilters]);
+
+  const handleCompositionStart = useCallback(() => {
+    isComposingRef.current = true;
+  }, []);
+
+  const handleCompositionEnd = useCallback((value: string, cursorPos: number) => {
+    isComposingRef.current = false;
+    applyComposerFilters(value, cursorPos);
+  }, [applyComposerFilters]);
 
   const handleSlashSelect = (name: string) => {
     setInput(`/${name} `);
@@ -1193,7 +1221,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
     await submitMessage(action.prompt, action.label, action.mode);
   }, [activeSessionId, isConfigured, isLoading, submitMessage]);
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
     const nativeEvent = e.nativeEvent;
     const isComposing = isComposingRef.current || nativeEvent.isComposing || nativeEvent.keyCode === 229;
 
@@ -1201,7 +1229,10 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       return;
     }
 
-    if (slashFilter !== null) {
+    const slashFilterValue = slashFilterRef.current;
+    const atFilterValue = atFilterRef.current;
+
+    if (slashFilterValue !== null) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         slashDropdownRef.current?.navigateDown();
@@ -1219,17 +1250,17 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       }
       if (e.key === 'Enter') {
         e.preventDefault();
-        const token = slashFilter.trim();
+        const token = slashFilterValue.trim();
         const selectedName = slashDropdownRef.current?.getSelectedName() ?? null;
         if (token && selectedName === token) {
           setSlashFilter(null);
-          void handlePrimaryAction();
+          void handlePrimaryActionRef.current();
           return;
         }
         const completed = slashDropdownRef.current?.selectCurrent() ?? false;
         if (!completed) {
           setSlashFilter(null);
-          void handlePrimaryAction();
+          void handlePrimaryActionRef.current();
         }
         return;
       }
@@ -1240,7 +1271,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
       }
     }
 
-    if (atFilter !== null) {
+    if (atFilterValue !== null) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         atDropdownRef.current?.navigateDown();
@@ -1265,9 +1296,9 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      void handlePrimaryAction();
+      void handlePrimaryActionRef.current();
     }
-  };
+  }, [handleAtDismiss]);
 
   return (
     <div className="relative flex flex-col h-full">
@@ -1476,6 +1507,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
             onPreviewImage={onPreviewImage}
             characterAvatar={characterAvatar}
             characterName={characterName}
+            showCharacterAvatar={showCharacterAvatar}
             messageCheckpoints={messageCheckpoints}
             gitReady={gitReady}
             onTtsReplay={ttsReplayText}
@@ -1690,61 +1722,21 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                 ))}
               </div>
             )}
-            <div className={`chat-input-box relative flex flex-col rounded-2xl border bg-raised px-3 pt-3 pb-2 transition-all duration-200 ${isActiveLoading ? 'border-line' : 'border-line focus-within:border-accent-soft'}`}>
-              <textarea
+            <div className={`chat-input-box relative flex flex-col rounded-2xl border bg-raised px-3 pt-3 pb-2 transition-colors duration-200 ${isActiveLoading ? 'border-line' : 'border-line focus-within:border-accent-soft'}`}>
+              <ChatInputTextarea
                 ref={textareaRef}
-                className="w-full bg-raised text-fg placeholder-slate-600 outline-none resize-none text-[15px] leading-relaxed overflow-y-auto min-h-[44px] max-h-[80px]"
+                value={input}
                 placeholder={
                   isConfigured
                     ? t.chatPlaceholderConfigured
                     : t.chatPlaceholderUnconfigured
                 }
-                value={input}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setInput(value);
-
-                  let atDetected = false;
-
-                  if (!isComposingRef.current) {
-                    const textarea = textareaRef.current;
-                    const cursorPos = textarea?.selectionStart ?? value.length;
-                    const textBeforeCursor = value.slice(0, cursorPos);
-                    const lastAtIndex = (() => {
-                      for (let i = textBeforeCursor.length - 1; i >= 0; i--) {
-                        if (textBeforeCursor[i] === '@') {
-                          if (i === 0 || (/\s|[^\w]/.test(textBeforeCursor[i - 1]) && textBeforeCursor[i - 1] !== '@')) {
-                            return i;
-                          }
-                        }
-                      }
-                      return -1;
-                    })();
-
-                    if (lastAtIndex >= 0) {
-                      const filterText = textBeforeCursor.slice(lastAtIndex + 1);
-                      if (!filterText.includes(' ') && !filterText.includes('\n')) {
-                        atTriggerIndexRef.current = lastAtIndex;
-                        setAtFilter(filterText);
-                        atDetected = true;
-                      }
-                    }
-                  }
-
-                  if (atDetected) {
-                    setSlashFilter(null);
-                  } else {
-                    setAtFilter(null);
-                    atTriggerIndexRef.current = -1;
-                    // 已开始写参数（命令名后有空白）则关闭下拉，Enter 走发送。
-                    setSlashFilter(slashCommandNameFilter(value));
-                  }
-                }}
-                onCompositionStart={() => { isComposingRef.current = true; }}
-                onCompositionEnd={() => { isComposingRef.current = false; }}
+                onValueChange={handleDraftValueChange}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
                 onDrop={handleDrop}
+                onCompositionStart={handleCompositionStart}
+                onCompositionEnd={handleCompositionEnd}
               />
               <div className="flex items-center justify-between pt-2">
                 <div className="flex items-center gap-1.5">
@@ -1939,7 +1931,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, deferMes
                     onClick={() => { void handlePrimaryAction(); }}
                     disabled={!canSubmit}
                     title={otherSessionRunning ? t.anotherSessionRunning : undefined}
-                    className={`p-1.5 rounded-lg transition-all shadow-sm flex items-center justify-center
+                    className={`p-1.5 rounded-lg transition-colors shadow-sm flex items-center justify-center
                       ${canSubmit
                         ? 'bg-slate-200 text-slate-900 hover:bg-white'
                         : 'bg-raised text-fg-muted'}

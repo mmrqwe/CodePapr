@@ -19,6 +19,8 @@ export interface MessageBubbleProps {
   onPreviewImage?: (src: string) => void;
   characterAvatar?: string | null;
   characterName?: string;
+  /** 仅在已启用角色且允许显示头像时为 true；未启用角色不占位。 */
+  showCharacterAvatar?: boolean;
 }
 
 function areMessageBubblePropsEqual(
@@ -33,6 +35,7 @@ function areMessageBubblePropsEqual(
     previous.onOpenWorkspacePath === next.onOpenWorkspacePath &&
     previous.characterAvatar === next.characterAvatar &&
     previous.characterName === next.characterName &&
+    previous.showCharacterAvatar === next.showCharacterAvatar &&
     (previous.showPlanActions || next.showPlanActions
       ? previous.onPlanAction === next.onPlanAction
       : true)
@@ -49,6 +52,7 @@ export const MessageBubble = memo(function MessageBubble({
   onPreviewImage,
   characterAvatar,
   characterName,
+  showCharacterAvatar,
 }: MessageBubbleProps) {
   const isUser = msg.role === 'user';
   const isError = msg.role === 'error';
@@ -80,10 +84,10 @@ export const MessageBubble = memo(function MessageBubble({
         : 'w-full max-w-4xl px-0 py-0 text-sm leading-relaxed text-fg';
 
   const avatarElement = (() => {
-    if (isError || isUser) return null;
+    if (isError || isUser || !showCharacterAvatar) return null;
     if (characterAvatar) {
       return (
-        <div className="mr-2 flex-shrink-0 self-start" title={characterName}>
+        <div className="mr-2 flex-shrink-0 self-start" title={characterName} data-chat-avatar="photo">
           <img
             src={characterAvatar}
             alt={characterName ?? ''}
@@ -93,7 +97,7 @@ export const MessageBubble = memo(function MessageBubble({
       );
     }
     return (
-      <div className="mr-2 flex-shrink-0 self-start">
+      <div className="mr-2 flex-shrink-0 self-start" data-chat-avatar="placeholder">
         <div className="h-8 w-8 rounded-full bg-slate-700/50 border border-line flex items-center justify-center">
           <svg className="h-4 w-4 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />

@@ -477,10 +477,31 @@
         </div>
       </section>
 
-      <!-- ═══ TIER 6 · 应用与辅助 ═══ -->
+      <!-- ═══ TIER 6 · 项目记忆 ═══ -->
       <section class="tier t6 reveal">
         <div class="tierhead">
           <div class="idx">06</div>
+          <div class="tt">
+            <h3>项目记忆 <span>Project Memory</span></h3>
+            <div class="tags"><span class="tag">memory_write / memory_search / memory_forget / memory_review_candidates</span></div>
+          </div>
+          <div class="hz"><b>SQLite 账本</b>跨会话记忆与按需精准召回</div>
+        </div>
+
+        <div class="item">
+          <div class="row">
+            <div class="addr">MEM</div>
+            <div class="name">memory_write / memory_search / memory_forget / memory_review_candidates<span class="cchip c-text">记忆账本</span><span class="exp"></span></div>
+          </div>
+          <div class="desc"><b>memory_write</b>：将结构化事实分类写入 SQLite 记忆账本（立即持久化，无需审核；拒绝凭空记录网页内容与敏感密钥）。<b>memory_search</b>：按关键词检索历史稳定记忆与会话检查点，支持受控 re-recall 注入。<b>memory_forget</b>：软删除过时条目。<b>memory_review_candidates</b>：列出稳定记忆目录。</div>
+          <div class="more"><div class="mbox">记忆按类别分层注入：用户偏好与项目事实进入下次会话前缀（Bootstrap），踩坑经验（procedure）按需召回，网页引用（citation）仅供检索；Ask 只读模式下仅开放 <code>memory_search</code>。</div></div>
+        </div>
+      </section>
+
+      <!-- ═══ TIER 7 · 应用与辅助 ═══ -->
+      <section class="tier t7 reveal">
+        <div class="tierhead">
+          <div class="idx">07</div>
           <div class="tt">
             <h3>应用与会话辅助 <span>App &amp; Auxiliary</span></h3>
             <div class="tags"><span class="tag">app_render / skill / question / todo</span></div>
@@ -507,10 +528,10 @@
         </div>
       </section>
 
-      <!-- ═══ TIER 7 · Agent 工具矩阵 ═══ -->
-      <section class="tier t7 reveal" id="agents">
+      <!-- ═══ TIER 8 · Agent 工具矩阵 ═══ -->
+      <section class="tier t8 reveal" id="agents">
         <div class="tierhead">
-          <div class="idx">07</div>
+          <div class="idx">08</div>
           <div class="tt">
             <h3>Agent 权限矩阵 <span>Agent Tool Matrix</span></h3>
             <div class="tags"><span class="tag">主代理 + 3 种外包子代理 + 2 种内部代理</span></div>
@@ -616,11 +637,11 @@
         <h4>运行模式权限白名单</h4>
         <div class="modelist">
           <b>只读模式 (Ask/Plan)</b><br>
-          <span class="mk">read grep list lsp diagnostics</span> read_image skill todo local_time<br><br>
+          <span class="mk">read grep list lsp diagnostics</span> read_image skill memory_search todo local_time<br><br>
           <b>联网只读</b><br>
           <span class="mk">+ websearch webfetch</span><br><br>
           <b>全功能模式 (Agent/App)</b><br>
-          <span class="mk">+ write edit patch bash git app_*</span>
+          <span class="mk">+ write edit patch bash git memory_write/forget app_*</span>
         </div>
       </div>
     </aside>

@@ -28,6 +28,8 @@ vi.mock('./MonacoTextEditor', () => ({
 }));
 
 import { normalizeSettings, useAgentStore, type UIMessage } from '../store/agentStore';
+import { useCharactersStore } from '../store/charactersStore';
+import type { CharacterProfile } from '../utils/characterTypes';
 import type { WorkMode } from '../utils/agentPrompts';
 import type { IImageContent } from '@codepapr/types';
 import { ChatPanel } from './ChatPanel';
@@ -194,6 +196,12 @@ describe('ChatPanel', () => {
     });
     container.remove();
     vi.unstubAllGlobals();
+    useCharactersStore.setState({
+      loaded: true,
+      loading: false,
+      characters: [],
+      activeCharacterId: null,
+    });
   });
 
   it('renders user messages as bubbles, assistant replies as plain blocks, and keeps reasoning/tool details collapsed', async () => {
@@ -1560,5 +1568,111 @@ describe('ChatPanel', () => {
     expect(useAgentStore.getState()._messageLoadFailedSessions['session-1']).toBe(true);
     expect(container.textContent).toContain('会话历史加载失败');
     expect(container.textContent).toContain('重新加载失败');
+  });
+
+  function setPlainAssistantThread() {
+    useAgentStore.setState((state) => ({
+      ...state,
+      messages: [
+        { id: 'user-plain', role: 'user', content: '你好', timestamp: 1 },
+        { id: 'assistant-plain', role: 'assistant', content: '你好，我是助手。', timestamp: 2 },
+      ],
+      sessionMessages: {
+        'session-1': [
+          { id: 'user-plain', role: 'user', content: '你好', timestamp: 1 },
+          { id: 'assistant-plain', role: 'assistant', content: '你好，我是助手。', timestamp: 2 },
+        ],
+      },
+    }));
+  }
+
+  function setActiveCharacter(overrides: Partial<CharacterProfile> = {}) {
+    const now = new Date().toISOString();
+    const character: CharacterProfile = {
+      id: 'char-1',
+      name: 'Ada',
+      avatarDataUrl: null,
+      showAvatar: true,
+      interactionMode: 'persona',
+      description: '',
+      personality: '',
+      scenario: '',
+      firstMessage: '',
+      alternateGreetings: [],
+      selectedGreetingIndex: 0,
+      exampleMessages: '',
+      systemPrompt: '',
+      postHistoryInstructions: '',
+      tags: [],
+      creator: '',
+      characterVersion: '',
+      source: 'manual',
+      createdAt: now,
+      updatedAt: now,
+      ...overrides,
+    };
+    useCharactersStore.setState({
+      loaded: true,
+      loading: false,
+      characters: [character],
+      activeCharacterId: character.id,
+    });
+  }
+
+  it('does not show a default avatar when no character is enabled', async () => {
+    setPlainAssistantThread();
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    expect(container.querySelector('[data-chat-avatar]')).toBeNull();
+  });
+
+  it('shows a placeholder avatar when a character is enabled without an image', async () => {
+    setPlainAssistantThread();
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ ...state.settings, experimentalCharacters: true, fastModelEnabled: false }),
+    }));
+    setActiveCharacter({ avatarDataUrl: null });
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    expect(container.querySelector('[data-chat-avatar="placeholder"]')).not.toBeNull();
+    expect(container.querySelector('[data-chat-avatar="photo"]')).toBeNull();
+  });
+
+  it('shows the character photo when an avatar data URL is present', async () => {
+    setPlainAssistantThread();
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ ...state.settings, experimentalCharacters: true, fastModelEnabled: false }),
+    }));
+    setActiveCharacter({ avatarDataUrl: 'data:image/png;base64,aaaa' });
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const photo = container.querySelector('[data-chat-avatar="photo"] img') as HTMLImageElement | null;
+    expect(photo?.getAttribute('src')).toBe('data:image/png;base64,aaaa');
+  });
+
+  it('hides the avatar when the enabled character turns showAvatar off', async () => {
+    setPlainAssistantThread();
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ ...state.settings, experimentalCharacters: true, fastModelEnabled: false }),
+    }));
+    setActiveCharacter({ showAvatar: false, avatarDataUrl: 'data:image/png;base64,aaaa' });
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    expect(container.querySelector('[data-chat-avatar]')).toBeNull();
   });
 });

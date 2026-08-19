@@ -15,10 +15,16 @@ export function ExecutionProcessPanel({
   group,
   lang,
   onOpenWorkspacePath,
+  characterAvatar,
+  characterName,
+  showCharacterAvatar,
 }: {
   group: ExecutionProcessGroup;
   lang: Lang;
   onOpenWorkspacePath?: (path: string) => void;
+  characterAvatar?: string | null;
+  characterName?: string;
+  showCharacterAvatar?: boolean;
 }) {
   const t = getTranslation(lang);
   const copy = getProcessGroupCopy(lang);
@@ -53,6 +59,9 @@ export function ExecutionProcessPanel({
               msg={message}
               lang={lang}
               onOpenWorkspacePath={onOpenWorkspacePath}
+              characterAvatar={characterAvatar}
+              characterName={characterName}
+              showCharacterAvatar={showCharacterAvatar}
             />
           ))}
         </div>

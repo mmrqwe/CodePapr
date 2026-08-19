@@ -51,6 +51,50 @@ export function readFileAsImagePreview(file: File): Promise<ImagePreview | null>
 }
 
 /**
+ * 从光标前文本里找最后一个可作为 @ 提及起点的位置。
+ * 要求 `@` 在开头，或前面是空白/非单词字符（且不是另一个 `@`）。
+ */
+export function findAtTriggerIndex(textBeforeCursor: string): number {
+  for (let i = textBeforeCursor.length - 1; i >= 0; i--) {
+    if (textBeforeCursor[i] !== '@') continue;
+    if (i === 0 || (/\s|[^\w]/.test(textBeforeCursor[i - 1]) && textBeforeCursor[i - 1] !== '@')) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+export interface ComposerFilterUpdate {
+  atFilter: string | null;
+  atTriggerIndex: number;
+  slashFilter: string | null;
+}
+
+/** 根据当前草稿和光标位置决定 slash / @ 下拉是否打开。 */
+export function resolveComposerFilters(
+  value: string,
+  cursorPos: number,
+): ComposerFilterUpdate {
+  const textBeforeCursor = value.slice(0, cursorPos);
+  const lastAtIndex = findAtTriggerIndex(textBeforeCursor);
+  if (lastAtIndex >= 0) {
+    const filterText = textBeforeCursor.slice(lastAtIndex + 1);
+    if (!filterText.includes(' ') && !filterText.includes('\n')) {
+      return {
+        atFilter: filterText,
+        atTriggerIndex: lastAtIndex,
+        slashFilter: null,
+      };
+    }
+  }
+  return {
+    atFilter: null,
+    atTriggerIndex: -1,
+    slashFilter: slashCommandNameFilter(value),
+  };
+}
+
+/**
  * 仅在用户还在输入命令名（`/` 后无空白、无换行）时返回过滤串。
  * 已开始写参数则返回 null，调用方应关闭 slash 下拉，让 Enter 发送。
  */
