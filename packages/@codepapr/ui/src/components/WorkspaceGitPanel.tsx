@@ -212,6 +212,9 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   // N8：历史回退的确认目标（RestoreConfirmDialog 打开时非空）与撤销入口。
   const [restoreTarget, setRestoreTarget] = useState<GitHistoryEntry | null>(null);
   const [undoResetAvailable, setUndoResetAvailable] = useState(false);
+  // 回退时创建的备份快照 SHA：撤销时传给 restore_undo 校验 BACKUP_REF
+  // 未被其它破坏性操作覆盖（所有破坏性操作共用同一个 BACKUP_REF）。
+  const [undoBackupSha, setUndoBackupSha] = useState<string | null>(null);
   const [branchName, setBranchName] = useState('');
   const [commitMessage, setCommitMessage] = useState('');
   const [selectedHistoryHash, setSelectedHistoryHash] = useState<string | null>(null);
@@ -404,6 +407,13 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     setHistoryFilter('all');
     setHistoryLimit(20);
     setDeselectedPaths(new Set());
+    // 切换工作区必须清掉上一个工作区的破坏性操作状态：否则"撤销回退"按钮
+    // 会残留，点击后撤销的是新工作区的最近一次备份（BACKUP_REF 按仓库隔离）。
+    setRestoreTarget(null);
+    setUndoResetAvailable(false);
+    setUndoBackupSha(null);
+    setActiveGitActionKey(null);
+    setIsInitializingGit(false);
   }, [workspacePath]);
 
   useEffect(() => {
@@ -713,15 +723,19 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     queueGitRefresh(msgs.join(' · '));
     useAgentStore.getState().noteWorkspaceMutation();
     setUndoResetAvailable(result.backupRef !== null);
+    setUndoBackupSha(result.backupSha ?? null);
   }
 
-  /** N8：回退撤销——restore_undo 恢复到回退前的工作区状态（BACKUP_REF）。 */
+  /** N8：回退撤销——restore_undo 恢复到回退前的工作区状态（BACKUP_REF）。
+   *  传入回退时的备份 SHA 校验：若回退后又做过其它破坏性 git 操作，
+   *  BACKUP_REF 已被覆盖，Rust 侧会拒绝撤销而不是恢复到错误状态。 */
   async function undoHistoryReset(): Promise<void> {
     setActiveGitActionKey('undo-reset');
     setGitActionMessage('');
     try {
-      await restoreUndo(workspacePath);
+      await restoreUndo(workspacePath, undoBackupSha);
       setUndoResetAvailable(false);
+      setUndoBackupSha(null);
       queueGitRefresh(
         lang === 'en' ? 'Rollback undone · workspace restored.' : lang === 'zh-TW' ? '已撤銷回退 · 工作區已恢復。' : '已撤销回退 · 工作区已恢复。'
       );

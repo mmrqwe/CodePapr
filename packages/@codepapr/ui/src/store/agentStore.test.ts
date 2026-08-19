@@ -3399,6 +3399,7 @@ describe('resetToMessage 撤销（N8）', () => {
   }
 
   beforeEach(() => {
+    invokeMock.mockClear();
     invokeMock.mockImplementation(async (command: string): Promise<Record<string, unknown>> => {
       if (command === 'restore_execute') {
         return {
@@ -3406,6 +3407,7 @@ describe('resetToMessage 撤销（N8）', () => {
           filesRestored: 1,
           filesDeleted: 0,
           backupRef: 'refs/codepapr-backup-before-reset',
+          backupSha: 'backup-sha-001',
           error: null,
         };
       }
@@ -3426,17 +3428,68 @@ describe('resetToMessage 撤销（N8）', () => {
     expect(pending).not.toBeNull();
     expect(pending?.sessionId).toBe(sessionId);
     expect(pending?.filesRestored).toBe(true);
+    expect(pending?.backupSha).toBe('backup-sha-001');
     expect(pending?.truncatedMessages.map((m) => m.id)).toEqual(['m3', 'm4']);
     expect(useAgentStore.getState().sessionMessages[sessionId]?.map((m) => m.id)).toEqual(['m1', 'm2']);
     expect(useAgentStore.getState()._messageCheckpoints['m3']).toBeUndefined();
 
     const undoResult = await useAgentStore.getState().undoConversationReset();
     expect(undoResult.ok).toBe(true);
+    // restore_undo 必须携带重置时的备份 SHA 校验（防 BACKUP_REF 被覆盖后误恢复）
     expect(
-      invokeMock.mock.calls.some(([command]) => command === 'restore_undo')
+      invokeMock.mock.calls.some(
+        ([command, payload]) =>
+          command === 'restore_undo' && payload?.expectedBackupSha === 'backup-sha-001'
+      )
     ).toBe(true);
     expect(useAgentStore.getState().sessionMessages[sessionId]?.map((m) => m.id)).toEqual(['m1', 'm2', 'm3', 'm4']);
     expect(useAgentStore.getState()._messageCheckpoints['m3']).toEqual({ sha: 'sha-reset', sessionId });
+    expect(useAgentStore.getState()._pendingRestoreUndo).toBeNull();
+  });
+
+  it('重置时不删除 checkpoint timeline 记录；撤销入口失效（dismiss）后才删除', async () => {
+    setResetState();
+
+    await useAgentStore.getState().resetToMessage('m3');
+    // 延迟删除：撤销还要靠这些记录恢复锚点，重置时不得删除
+    expect(
+      invokeMock.mock.calls.some(([command]) => command === 'delete_checkpoint_by_message')
+    ).toBe(false);
+
+    useAgentStore.getState().dismissRestoreUndo();
+    const deletedIds = invokeMock.mock.calls
+      .filter(([command]) => command === 'delete_checkpoint_by_message')
+      .map(([, payload]) => payload?.messageId);
+    expect(deletedIds.sort()).toEqual(['m3']);
+  });
+
+  it('再次重置会删除被覆盖的旧撤销入口的 checkpoint 记录', async () => {
+    setResetState();
+
+    await useAgentStore.getState().resetToMessage('m3');
+    expect(
+      invokeMock.mock.calls.some(([command]) => command === 'delete_checkpoint_by_message')
+    ).toBe(false);
+
+    // 在截断后的会话上再次重置（m1 的锚点仍在）
+    await useAgentStore.getState().resetToMessage('m1');
+    const deletedIds = invokeMock.mock.calls
+      .filter(([command]) => command === 'delete_checkpoint_by_message')
+      .map(([, payload]) => payload?.messageId);
+    // 旧撤销入口被截掉的消息（m3）的记录被删除；新入口截掉的（m1）仍保留待撤销
+    expect(deletedIds).toEqual(['m3']);
+    expect(useAgentStore.getState()._pendingRestoreUndo?.truncatedMessages.map((m) => m.id)).toEqual(['m1', 'm2']);
+  });
+
+  it('deleteSession 失效撤销入口时删除其 checkpoint 记录', async () => {
+    setResetState();
+    await useAgentStore.getState().resetToMessage('m3');
+
+    useAgentStore.getState().deleteSession(sessionId);
+    const deletedIds = invokeMock.mock.calls
+      .filter(([command]) => command === 'delete_checkpoint_by_message')
+      .map(([, payload]) => payload?.messageId);
+    expect(deletedIds).toEqual(['m3']);
     expect(useAgentStore.getState()._pendingRestoreUndo).toBeNull();
   });
 

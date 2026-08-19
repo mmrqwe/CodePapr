@@ -42,6 +42,16 @@ pub struct RestorePlan {
     pub files_to_restore: Vec<FileChange>,
     pub files_to_delete: Vec<String>,
     pub files_unchanged: usize,
+    /// 当前工作区中"不在目标树、也不被 gitignore 忽略"的未跟踪文件：
+    /// execute 时会被删除（与 remove_untracked_not_in_tree 的行为一致）。
+    /// 旧版 plan 不报告这部分，确认框对破坏性影响的预览不完整。
+    #[serde(default)]
+    pub untracked_to_delete: Vec<String>,
+    /// 当前工作区中将被覆盖的未提交改动数（index/worktree 相对 HEAD 的改动，
+    /// 不含未跟踪新文件）。这些改动会先进入备份快照（可 undo 找回），
+    /// 但确认时必须让用户知情。
+    #[serde(default)]
+    pub dirty_overwritten: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +61,11 @@ pub struct RestoreResult {
     pub files_restored: usize,
     pub files_deleted: usize,
     pub backup_ref: Option<String>,
+    /// 备份快照的 commit SHA。撤销时用它校验 BACKUP_REF 未被其它破坏性
+    /// 操作覆盖——所有破坏性操作共用同一个 BACKUP_REF，不校验的话，
+    /// 重置后又做了其它 git 操作时 undo 会静默恢复到错误状态。
+    #[serde(default)]
+    pub backup_sha: Option<String>,
     pub error: Option<String>,
 }
 

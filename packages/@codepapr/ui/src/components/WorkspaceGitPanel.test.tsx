@@ -105,6 +105,7 @@ describe('WorkspaceGitPanel', () => {
           filesRestored: 2,
           filesDeleted: 0,
           backupRef: 'refs/codepapr-backup-before-reset',
+          backupSha: 'backup-sha-001',
           error: null,
         };
       }
@@ -719,7 +720,8 @@ describe('WorkspaceGitPanel', () => {
       )
     ).toBe(true);
 
-    // N8：备份存在时出现撤销入口，点击后调用 restore_undo。
+    // N8：备份存在时出现撤销入口，点击后调用 restore_undo，
+    // 且携带回退时的备份 SHA 校验（防止 BACKUP_REF 被其它操作覆盖后误恢复）。
     const undoButton =
       Array.from(container.querySelectorAll('button')).find((button) =>
         button.textContent?.includes('Undo rollback')
@@ -730,7 +732,10 @@ describe('WorkspaceGitPanel', () => {
     await flushEffects();
 
     expect(
-      invokeMock.mock.calls.some(([command]) => command === 'restore_undo')
+      invokeMock.mock.calls.some(
+        ([command, payload]) =>
+          command === 'restore_undo' && payload?.expectedBackupSha === 'backup-sha-001'
+      )
     ).toBe(true);
   });
 

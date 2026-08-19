@@ -31,6 +31,10 @@ export interface RestorePlan {
   filesToRestore: FileChange[];
   filesToDelete: string[];
   filesUnchanged: number;
+  /** 执行时会被删除的未跟踪文件（不在目标快照中、也不被 gitignore 忽略）。 */
+  untrackedToDelete?: string[];
+  /** 执行时会被覆盖的未提交改动数（先进备份快照，可撤销找回）。 */
+  dirtyOverwritten?: number;
 }
 
 export interface RestoreResult {
@@ -38,6 +42,8 @@ export interface RestoreResult {
   filesRestored: number;
   filesDeleted: number;
   backupRef: string | null;
+  /** 备份快照的 commit SHA：撤销时校验 BACKUP_REF 未被其它操作覆盖。 */
+  backupSha?: string | null;
   error: string | null;
 }
 
@@ -133,8 +139,14 @@ export async function restoreExecute(workspacePath: string, targetSha: string): 
   return invoke<RestoreResult>('restore_execute', { workspacePath, targetSha });
 }
 
-export async function restoreUndo(workspacePath: string): Promise<void> {
-  return invoke<void>('restore_undo', { workspacePath });
+export async function restoreUndo(
+  workspacePath: string,
+  expectedBackupSha?: string | null,
+): Promise<void> {
+  return invoke<void>('restore_undo', {
+    workspacePath,
+    expectedBackupSha: expectedBackupSha ?? null,
+  });
 }
 
 export async function snapshotChangedFiles(workspacePath: string, sha: string): Promise<CommitChangedFiles> {

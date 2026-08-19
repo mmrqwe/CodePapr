@@ -327,6 +327,9 @@ export interface PendingRestoreUndo {
   removedCheckpoints: Record<string, { sha: string; sessionId: string }>;
   /** 重置是否执行了文件回滚（true 时撤销需先 restore_undo）。 */
   filesRestored: boolean;
+  /** 重置时创建的备份快照 SHA。BACKUP_REF 是所有破坏性操作共用的单一引用，
+   *  撤销时用它校验备份未被后续操作覆盖，避免恢复到错误状态。 */
+  backupSha: string | null;
 }
 
 export interface UndoConversationResetResult {

@@ -4,6 +4,27 @@ use super::types::{RestorePlan, RestoreResult, FileChange};
 use super::ignore_resolver::{git_relative_path, IgnoreResolver};
 use crate::git_operations::validate_git_ref;
 
+/// 列出工作区中"不在目标树"且未被 gitignore 忽略的文件（相对路径）。
+/// plan（预览将被删除的未跟踪文件）与 execute（实际删除）共用同一份
+/// 收集逻辑，保证预览与执行的影响范围严格一致。
+fn list_files_not_in_tree(workspace: &Path, target_tree: &Tree) -> Vec<PathBuf> {
+    let resolver = IgnoreResolver::new(workspace);
+    let files = resolver.collect_files();
+    files
+        .into_iter()
+        .filter(|relative| {
+            if relative.components().any(|c| {
+                matches!(c.as_os_str().to_str(), Some(".git" | ".CodePapr" | ".codepapr_git_backup"))
+            }) {
+                return false;
+            }
+            // Windows 上 relative 含 '\'，get_path 只按 '/' 解析：不转换会把
+            // 树中实际存在的文件误判为"不在目标树"，hard reset 后将其删除。
+            target_tree.get_path(&git_relative_path(relative)).is_err()
+        })
+        .collect()
+}
+
 /// 在 hard reset 之后清理"目标树中不存在但当前工作区存在"的未跟踪文件。
 /// 这一步是必须的：libgit2 的 reset --hard 只恢复被跟踪的文件，
 /// 不会删除自目标快照之后新增的未跟踪文件，导致恢复不彻底。
@@ -12,21 +33,10 @@ fn remove_untracked_not_in_tree(
     workspace: &Path,
     target_tree: &Tree,
 ) -> usize {
-    let resolver = IgnoreResolver::new(workspace);
-    let files = resolver.collect_files();
+    let files = list_files_not_in_tree(workspace, target_tree);
     let mut removed = 0usize;
 
     for relative in &files {
-        if relative.components().any(|c| {
-            matches!(c.as_os_str().to_str(), Some(".git" | ".CodePapr" | ".codepapr_git_backup"))
-        }) {
-            continue;
-        }
-        // Windows 上 relative 含 '\'，get_path 只按 '/' 解析：不转换会把
-        // 树中实际存在的文件误判为"不在目标树"，hard reset 后将其删除。
-        if target_tree.get_path(&git_relative_path(relative)).is_ok() {
-            continue;
-        }
         let abs = workspace.join(relative);
         if abs.is_file() || abs.is_symlink() {
             if std::fs::remove_file(&abs).is_ok() {
@@ -261,6 +271,43 @@ impl RestoreEngine {
             files_unchanged = head_count.saturating_sub(changed);
         }
 
+        // execute 会删除"不在目标树"的未跟踪文件——plan 必须如实预览。
+        // 只报告 HEAD 树中也不存在的文件：存在于 HEAD 树的已计入
+        // files_to_delete（status D），不重复报告。
+        let untracked_to_delete: Vec<String> = list_files_not_in_tree(&self.workspace, &target_tree)
+            .into_iter()
+            .filter(|relative| match &head_tree {
+                Some(ht) => ht.get_path(&git_relative_path(relative)).is_err(),
+                None => true,
+            })
+            .map(|relative| git_relative_path(&relative).to_string_lossy().to_string())
+            .collect();
+
+        // 将被覆盖的未提交改动（index/worktree 相对 HEAD 的改动，不含未跟踪
+        // 新文件——它们由 untracked_to_delete 单独报告）。这些改动会进入
+        // 备份快照（undo 可找回），但确认框必须让用户知情。
+        let dirty_overwritten = repo
+            .statuses(None)
+            .map(|statuses| {
+                statuses
+                    .iter()
+                    .filter(|entry| {
+                        let st = entry.status();
+                        st.is_index_new()
+                            || st.is_index_modified()
+                            || st.is_index_deleted()
+                            || st.is_index_renamed()
+                            || st.is_index_typechange()
+                            || st.is_wt_modified()
+                            || st.is_wt_deleted()
+                            || st.is_wt_renamed()
+                            || st.is_wt_typechange()
+                            || st.is_conflicted()
+                    })
+                    .count()
+            })
+            .unwrap_or(0);
+
         Ok(RestorePlan {
             target_sha: target_sha.to_string(),
             target_label,
@@ -268,6 +315,8 @@ impl RestoreEngine {
             files_to_restore,
             files_to_delete,
             files_unchanged,
+            untracked_to_delete,
+            dirty_overwritten,
         })
     }
 
@@ -314,11 +363,13 @@ impl RestoreEngine {
 
         // 备份 = reset 前工作区的真实状态（而非最后一次快照），
         // 确保最后一次快照之后新增/修改的文件也能通过 undo 找回。
-        let backup_ref = match create_backup_snapshot(&repo, &self.workspace) {
+        // backup_sha 一并返回：BACKUP_REF 是所有破坏性操作共用的单一引用，
+        // 撤销方必须能用它校验备份未被后续操作覆盖（见 undo）。
+        let (backup_ref, backup_sha) = match create_backup_snapshot(&repo, &self.workspace) {
             Ok(backup_oid) => {
                 eprintln!("[CodePapr] restore_execute: backup ref -> {}", backup_oid);
                 match repo.reference(BACKUP_REF, backup_oid, true, "codepapr backup before reset") {
-                    Ok(_) => Some(BACKUP_REF.to_string()),
+                    Ok(_) => (Some(BACKUP_REF.to_string()), Some(backup_oid.to_string())),
                     Err(e) => return Err(format!(
                         "failed to create backup ref: {} (refusing reset without safety net)", e.message()
                     )),
@@ -348,6 +399,7 @@ impl RestoreEngine {
             files_restored: files_changed,
             files_deleted,
             backup_ref,
+            backup_sha,
             error: None,
         })
     }
@@ -367,7 +419,11 @@ impl RestoreEngine {
         Ok(oid.to_string())
     }
 
-    pub fn undo(&self) -> Result<(), String> {
+    /// expected_backup_sha：发起方（对话重置/面板回退）执行破坏性操作时拿到的
+    /// 备份 commit SHA。BACKUP_REF 被所有破坏性操作共用，若重置之后又发生了
+    /// 其它破坏性操作，BACKUP_REF 已指向别的状态——此时盲目 undo 会把工作区
+    /// 恢复到错误快照。传入期望 SHA 时先校验，不一致即拒绝（fail-closed）。
+    pub fn undo(&self, expected_backup_sha: Option<&str>) -> Result<(), String> {
         let git_path = code_papr_git_path(&self.workspace);
         let repo = Repository::open(&git_path)
             .map_err(|e| format!("open repo: {}", e.message()))?;
@@ -378,6 +434,18 @@ impl RestoreEngine {
             .map_err(|_| format!("backup ref {} not found", BACKUP_REF))?;
         let target_oid = backup_ref.target()
             .ok_or_else(|| "backup ref has no target".to_string())?;
+
+        if let Some(expected) = expected_backup_sha.map(str::trim).filter(|s| !s.is_empty()) {
+            let expected_oid = Oid::from_str(expected)
+                .map_err(|_| format!("非法的备份 SHA: {expected}"))?;
+            if target_oid != expected_oid {
+                return Err(
+                    "备份引用在重置之后已被其它操作覆盖，撤销已中止（避免恢复到错误状态）"
+                        .to_string(),
+                );
+            }
+        }
+
         let target_commit = repo.find_commit(target_oid)
             .map_err(|e| format!("find backup commit: {}", e.message()))?;
         let target_tree = target_commit.tree()
@@ -452,7 +520,7 @@ mod tests {
         assert!(!workspace.join("brand-new.txt").exists());
 
         // undo 必须找回"最后一次快照之后"的改动（旧实现备份仅指向 HEAD 快照，会永久丢失）
-        restore.undo().expect("undo should succeed");
+        restore.undo(None).expect("undo should succeed");
         assert_eq!(
             fs::read_to_string(workspace.join("tracked.txt")).unwrap(),
             "v2-unsnapshotted\n",
@@ -491,11 +559,76 @@ mod tests {
         repo.reference(BACKUP_REF, baseline, true, "test").unwrap();
         drop(repo);
 
-        let err = restore.undo().expect_err("undo must refuse empty-tree backup");
+        let err = restore.undo(None).expect_err("undo must refuse empty-tree backup");
         assert!(err.contains("empty tree"), "unexpected error: {err}");
         assert!(
             workspace.join("file.txt").exists(),
             "workspace must be untouched after refused undo"
+        );
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    /// 回归：BACKUP_REF 是所有破坏性操作共用的单一引用。重置之后若又发生
+    /// 其它破坏性操作（备份被覆盖），带期望 SHA 的 undo 必须拒绝执行，
+    /// 否则会静默恢复到错误状态。
+    #[test]
+    fn test_undo_refuses_when_backup_ref_was_overwritten() {
+        let workspace = temp_workspace("backup-overwritten");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        fs::write(workspace.join("file.txt"), "v1\n").unwrap();
+        let cp1 = engine.create("cp1").expect("cp1");
+        fs::write(workspace.join("file.txt"), "v2\n").unwrap();
+        let cp2 = engine.create("cp2").expect("cp2");
+
+        let restore = RestoreEngine::new(&workspace);
+        let exec = restore.execute(&cp1.sha).expect("restore should succeed");
+        let original_backup = exec.backup_sha.expect("execute must report backup sha");
+
+        // 又一次破坏性操作覆盖了 BACKUP_REF
+        restore.execute(&cp2.sha).expect("second restore should succeed");
+
+        let err = restore
+            .undo(Some(&original_backup))
+            .expect_err("undo must refuse when backup ref was overwritten");
+        assert!(err.contains("覆盖"), "unexpected error: {err}");
+        assert_eq!(
+            fs::read_to_string(workspace.join("file.txt")).unwrap(),
+            "v2\n",
+            "workspace must be untouched after refused undo"
+        );
+
+        // 不传期望 SHA 时保持旧语义（agent 工具依赖此行为）
+        restore.undo(None).expect("unchecked undo should still work");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    /// 回归：execute 返回的 backup_sha 必须与 BACKUP_REF 实际指向一致，
+    /// 传入该 SHA 的 undo 必须成功。
+    #[test]
+    fn test_undo_with_matching_expected_sha_succeeds() {
+        let workspace = temp_workspace("backup-matching");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        fs::write(workspace.join("file.txt"), "v1\n").unwrap();
+        let cp = engine.create("cp").expect("cp");
+        fs::write(workspace.join("file.txt"), "v2\n").unwrap();
+
+        let restore = RestoreEngine::new(&workspace);
+        let exec = restore.execute(&cp.sha).expect("restore should succeed");
+        let backup = exec.backup_sha.expect("execute must report backup sha");
+
+        restore
+            .undo(Some(&backup))
+            .expect("undo with matching sha should succeed");
+        assert_eq!(
+            fs::read_to_string(workspace.join("file.txt")).unwrap(),
+            "v2\n",
+            "undo must restore the pre-reset worktree state"
         );
 
         fs::remove_dir_all(&workspace).ok();

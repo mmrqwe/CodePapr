@@ -365,7 +365,7 @@ mod tests {
         assert_eq!(content, "hello", "file should be restored");
 
         // 6. Undo
-        restore.undo().expect("undo should work");
+        restore.undo(None).expect("undo should work");
         let content2 = fs::read_to_string(workspace.join("test.txt")).unwrap();
         assert_eq!(content2, "modified", "file should be restored after undo");
 
@@ -447,7 +447,7 @@ mod tests {
         // 实际上 backup_ref 指向的是 restore 前的 HEAD，那里没有 untracked.txt，
         // 因为 untracked 文件从未被 snapshot 过。所以 undo 后它也不存在。
         // 这里只验证 undo 不报错即可。
-        restore.undo().expect("undo should work");
+        restore.undo(None).expect("undo should work");
 
         fs::remove_dir_all(&workspace).ok();
     }
@@ -617,7 +617,7 @@ mod tests {
         let restore_file = git_restore_files_impl(&workspace, &["main.rs".to_string()], None, None);
         assert!(restore_file.ok, "git_restore_files should succeed: {}", restore_file.message);
 
-        restore.undo().expect("undo should work");
+        restore.undo(None).expect("undo should work");
 
         let snapshots = engine.list(10);
         assert!(snapshots.len() >= 2, "should have at least 2 snapshots");

@@ -1341,6 +1341,14 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         if (running.workspacePath) {
           forgetContextSurface(running.workspacePath, id);
         }
+        // N8：会话删除使撤销入口失效（消息无处回放）——被该重置截掉的
+        // checkpoint 的 timeline 记录一并删除（延迟删除的收口点之一）。
+        const superseded = running._pendingRestoreUndo;
+        if (superseded?.sessionId === id) {
+          for (const messageId of Object.keys(superseded.removedCheckpoints)) {
+            void deleteCheckpointByMessage(superseded.workspacePath, messageId).catch(() => undefined);
+          }
+        }
         set((s) => {
           const sessions = s.sessions.filter((x) => x.id !== id);
           const isActive = s.activeSessionId === id;
@@ -1418,6 +1426,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
                 )
               )
             : s._messageCheckpoints,
+          // 清空会话会删掉该会话全部 checkpoint timeline 记录（含待撤销重置
+          // 截掉的那些）——撤销入口失去持久化基础，一并失效。
+          _pendingRestoreUndo:
+            s._pendingRestoreUndo?.sessionId === sessionId
+              ? null
+              : s._pendingRestoreUndo,
           _agent: null,
           _agentModel: null,
           _agentPromptKey: null,
@@ -1452,11 +1466,13 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
         let codeReset: 'git' | 'none' = 'none';
         let filesChanged = 0;
+        let backupSha: string | null = null;
 
         try {
           const r = await restoreExecute(workspacePath, targetSha);
           codeReset = 'git';
           filesChanged = r.filesRestored;
+          backupSha = r.backupSha ?? null;
         } catch (err) {
           // git2 reset 失败：通常是 .git 损坏或权限问题。本期不再做 EditHistory 降级，
           // 因为 git2 在 ensure 阶段已确保仓库可用，失败是真实异常。
@@ -1471,18 +1487,24 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         const keptIds = new Set(truncatedMessages.map((m) => m.id));
         const nextCheckpoints: Record<string, { sha: string; sessionId: string }> = {};
         const removedCheckpoints: Record<string, { sha: string; sessionId: string }> = {};
-        const removedIds: string[] = [];
         for (const [id, entry] of Object.entries(_messageCheckpoints)) {
           if (keptIds.has(id)) {
             nextCheckpoints[id] = entry;
           } else {
-            removedIds.push(id);
             removedCheckpoints[id] = entry;
           }
         }
-        // 清理 timeline 表中被截掉的 checkpoint 记录
-        for (const id of removedIds) {
-          void deleteCheckpointByMessage(get().workspacePath, id).catch(() => undefined);
+        // 被截掉的 checkpoint 的 timeline 记录暂不删除：撤销（undoConversationReset）
+        // 还要靠它们恢复锚点，删了的话撤销后一重启锚点就永久丢失。
+        // 记录的删除推迟到撤销入口失效时（dismissRestoreUndo / 被新重置覆盖 /
+        // 会话删除 / 清空会话）。
+        const superseded = get()._pendingRestoreUndo;
+        if (superseded && Object.keys(superseded.removedCheckpoints).length > 0) {
+          // 新重置覆盖了旧的撤销入口：旧入口被截掉的消息再也无法回放，
+          // 其 timeline 记录此时才可以安全删除。
+          for (const id of Object.keys(superseded.removedCheckpoints)) {
+            void deleteCheckpointByMessage(get().workspacePath, id).catch(() => undefined);
+          }
         }
 
         disposeAgentHandle(get);
@@ -1505,12 +1527,14 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           _agentSessionId: null,
           _latestContextSnapshot: null,
           // N8：备份被截掉的尾部消息与 checkpoint 锚点，供撤销入口回放。
+          // backupSha：撤销时校验 BACKUP_REF 未被其它破坏性操作覆盖。
           _pendingRestoreUndo: {
             workspacePath,
             sessionId: activeSessionId,
             truncatedMessages: messages.slice(cutIndex),
             removedCheckpoints,
             filesRestored: codeReset === 'git',
+            backupSha,
           },
         });
 
@@ -1545,10 +1569,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
         // N8：代码回退撤销——restore_undo 把工作区文件恢复到重置前状态
         // （BACKUP_REF）。仅当重置确实执行了文件回滚时才调用，否则会把
-        // 文件错误地恢复到更早的旧备份。
+        // 文件错误地恢复到更早的旧备份。传入重置时拿到的 backupSha：
+        // BACKUP_REF 被所有破坏性操作共用，若重置后又做过其它 git 操作，
+        // 备份已被覆盖，Rust 侧会拒绝撤销（避免恢复到错误状态）。
         if (pending.filesRestored) {
           try {
-            await restoreUndo(pending.workspacePath);
+            await restoreUndo(pending.workspacePath, pending.backupSha);
           } catch (err) {
             return {
               ok: false,
@@ -1594,6 +1620,14 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       dismissRestoreUndo: () => {
+        // 用户放弃撤销：被截掉的消息再也无法回放，此时才删除其 checkpoint
+        // 的 timeline 记录（重置时延迟删除，保证撤销后重启锚点仍在）。
+        const pending = get()._pendingRestoreUndo;
+        if (pending && Object.keys(pending.removedCheckpoints).length > 0) {
+          for (const id of Object.keys(pending.removedCheckpoints)) {
+            void deleteCheckpointByMessage(pending.workspacePath, id).catch(() => undefined);
+          }
+        }
         set({ _pendingRestoreUndo: null });
       },
 

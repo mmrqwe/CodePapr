@@ -104,11 +104,14 @@ pub async fn restore_execute(
 }
 
 #[tauri::command]
-pub async fn restore_undo(workspace_path: String) -> Result<(), String> {
+pub async fn restore_undo(
+    workspace_path: String,
+    expected_backup_sha: Option<String>,
+) -> Result<(), String> {
     run_blocking_workspace_task(move || {
         let workspace = PathBuf::from(workspace_path);
         let engine = RestoreEngine::new(&workspace);
-        engine.undo()
+        engine.undo(expected_backup_sha.as_deref())
     })
     .await
 }

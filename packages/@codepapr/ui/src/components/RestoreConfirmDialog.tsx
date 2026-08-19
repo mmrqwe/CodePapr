@@ -70,15 +70,17 @@ export function RestoreConfirmDialog({
     error: lang === 'en' ? 'Failed to load plan' : lang === 'zh-TW' ? '載入計劃失敗' : '加载计划失败',
     willRestore: lang === 'en' ? 'Files to restore' : lang === 'zh-TW' ? '將恢復的檔案' : '将恢复的文件',
     willDelete: lang === 'en' ? 'Files to delete' : lang === 'zh-TW' ? '將刪除的檔案' : '将删除的文件',
+    willDeleteUntracked: lang === 'en' ? 'Untracked files to delete' : lang === 'zh-TW' ? '將刪除的未追蹤檔案' : '将删除的未跟踪文件',
+    dirtyOverwritten: lang === 'en' ? 'Uncommitted changes overwritten' : lang === 'zh-TW' ? '將被覆蓋的未提交改動' : '将被覆盖的未提交改动',
     unchanged: lang === 'en' ? 'Unchanged' : lang === 'zh-TW' ? '不變' : '不变',
     details: lang === 'en' ? 'Show details' : lang === 'zh-TW' ? '查看詳情' : '查看详情',
     hide: lang === 'en' ? 'Hide' : lang === 'zh-TW' ? '收起' : '收起',
     warning: lang === 'en'
-      ? 'This will roll back code to the snapshot state. Untracked files are not affected. You can undo via the backup reference.'
+      ? 'This will roll back code to the snapshot state: uncommitted changes are overwritten, and untracked files not present in the snapshot (unless git-ignored) are deleted. A backup of the current state is taken first — you can undo via the backup reference.'
       : lang === 'zh-TW'
-      ? '這將回滾程式碼到快照狀態。未追蹤的檔案不受影響。可通過備份引用撤銷。'
-      : '这将回滚代码到快照状态。未跟踪的文件不受影响。可通过备份引用撤销。',
-    cancel: lang === 'en' ? 'Cancel' : '取消',
+      ? '這將回滾程式碼到快照狀態：未提交的改動會被覆蓋，快照中不存在的未追蹤檔案（未被 .gitignore 忽略的）會被刪除。執行前會先備份當前狀態——可通過備份引用撤銷。'
+      : '这将回滚代码到快照状态：未提交的改动会被覆盖，快照中不存在的未跟踪文件（未被 .gitignore 忽略的）会被删除。执行前会先备份当前状态——可通过备份引用撤销。',
+    cancel: lang === 'en' ? 'Cancel' : lang === 'zh-TW' ? '取消' : '取消',
     confirm: lang === 'en' ? 'Confirm Restore' : lang === 'zh-TW' ? '確認恢復' : '确认恢复',
     executing: lang === 'en' ? 'Restoring...' : lang === 'zh-TW' ? '恢復中...' : '恢复中...',
   };
@@ -112,6 +114,8 @@ export function RestoreConfirmDialog({
   const restoreCount = plan?.filesToRestore.length ?? 0;
   const deleteCount = plan?.filesToDelete.length ?? 0;
   const unchangedCount = plan?.filesUnchanged ?? 0;
+  const untrackedDeleteList = plan?.untrackedToDelete ?? [];
+  const dirtyCount = plan?.dirtyOverwritten ?? 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay" onClick={() => !executing && onCancel()}>
@@ -131,6 +135,18 @@ export function RestoreConfirmDialog({
             <div className="flex items-center gap-2 text-danger">
               <span>✗</span>
               <span>{t.willDelete}: <span className="font-medium">{deleteCount}</span></span>
+            </div>
+          )}
+          {untrackedDeleteList.length > 0 && (
+            <div className="flex items-center gap-2 text-danger">
+              <span>✗</span>
+              <span>{t.willDeleteUntracked}: <span className="font-medium">{untrackedDeleteList.length}</span></span>
+            </div>
+          )}
+          {dirtyCount > 0 && (
+            <div className="flex items-center gap-2 text-warn">
+              <span>!</span>
+              <span>{t.dirtyOverwritten}: <span className="font-medium">{dirtyCount}</span></span>
             </div>
           )}
           <div className="flex items-center gap-2 text-fg-muted">
@@ -157,6 +173,12 @@ export function RestoreConfirmDialog({
                 {(f.additions > 0 || f.deletions > 0) && (
                   <span className="ml-auto text-fg-dim">+{f.additions} -{f.deletions}</span>
                 )}
+              </div>
+            ))}
+            {untrackedDeleteList.map((path) => (
+              <div key={`untracked:${path}`} className="flex items-center gap-2 py-0.5 text-[10px]">
+                <span className="w-4 text-danger">✗</span>
+                <span className="truncate text-fg-muted" title={path}>{path}</span>
               </div>
             ))}
           </div>

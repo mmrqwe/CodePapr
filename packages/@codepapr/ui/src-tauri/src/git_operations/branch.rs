@@ -128,16 +128,10 @@ pub fn git_branch_checkout_impl(
         }
     };
 
-    let ref_name = format!("refs/heads/{}", branch_name);
-    if let Err(e) = repo.set_head(&ref_name) {
-        return GitOperationResult {
-            ok: false, action: "branch_checkout".to_string(),
-            message: format!("set_head: {}", e.message()), backup_ref: None,
-        };
-    }
-
     // shadow repo 的 workdir 就是用户工作区：force checkout 会直接覆盖工作区文件。
-    // 切换前先备份当前状态到 BACKUP_REF，使数据可通过 restore_undo 找回。
+    // 备份必须在 set_head 之前完成：set_head 会移动 HEAD，若备份失败中止切换，
+    // HEAD 必须尚未移动——否则 HEAD 指向新分支而工作区未变，status 会显示
+    // 全部文件为改动，后续 checkpoint 还会提交到错误的分支上。
     // 备份失败且工作区确有可快照文件时中止切换（fail-closed，防无安全网覆盖）。
     let backup_ref = match crate::snapshot::RestoreEngine::new(workspace).backup_current_state() {
         Ok(oid) => Some(oid),
@@ -153,8 +147,10 @@ pub fn git_branch_checkout_impl(
         }
     };
 
-    // force checkout 会静默覆盖工作区未提交改动：统计将被覆盖的改动文件数，
-    // 在结果消息中显式告知用户（改动已备份到 BACKUP_REF，可 restore_undo 找回）。
+    // force checkout 会静默覆盖工作区未提交改动：在 set_head 之前按"旧 HEAD"
+    // 统计将被覆盖的改动文件数，在结果消息中显式告知用户（改动已备份到
+    // BACKUP_REF，可 restore_undo 找回）。set_head 之后统计会相对新分支的树
+    // 计算，语义错误。
     let dirty_count = repo
         .statuses(None)
         .map(|statuses| {
@@ -173,12 +169,21 @@ pub fn git_branch_checkout_impl(
         })
         .unwrap_or(0);
 
+    let ref_name = format!("refs/heads/{}", branch_name);
+    if let Err(e) = repo.set_head(&ref_name) {
+        return GitOperationResult {
+            ok: false, action: "branch_checkout".to_string(),
+            message: format!("set_head: {}", e.message()), backup_ref,
+        };
+    }
+
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
     if let Err(e) = repo.checkout_head(Some(&mut checkout)) {
+        // HEAD 已移动：把备份引用返回给调用方，便于通过 restore_undo 恢复。
         return GitOperationResult {
             ok: false, action: "branch_checkout".to_string(),
-            message: format!("checkout: {}", e.message()), backup_ref: None,
+            message: format!("checkout: {}", e.message()), backup_ref,
         };
     }
 
@@ -324,6 +329,52 @@ mod tests {
             "新分支应在列表中: {:?}", branches.iter().map(|b| &b.name).collect::<Vec<_>>()
         );
 
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    /// 回归：备份失败中止切换时，HEAD 必须尚未移动。旧实现先 set_head 再备份，
+    /// 备份失败中止后 HEAD 已指向新分支而工作区未变——status 显示全部文件为
+    /// 改动，后续 checkpoint 还会提交到错误的分支上。
+    #[test]
+    fn test_branch_checkout_abort_leaves_head_untouched_when_backup_fails() {
+        let workspace = temp_workspace("backup-fail");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+        fs::write(workspace.join("a.txt"), "a\n").unwrap();
+        engine.create("baseline").expect("baseline");
+
+        let repo = git2::Repository::open(workspace.join(".CodePapr/git")).unwrap();
+        let original_branch = repo
+            .head()
+            .unwrap()
+            .shorthand()
+            .unwrap_or("")
+            .to_string();
+        drop(repo);
+
+        // 新鲜的 index.lock（未超陈旧阈值，不会被 open_repo 清理）会让
+        // 备份快照的 index.write() 失败，从而触发 fail-closed 中止。
+        let lock_path = workspace.join(".CodePapr/git/.git/index.lock");
+        fs::write(&lock_path, "locked").unwrap();
+
+        let result = git_branch_checkout_impl(&workspace, "feature/x", false, true, None);
+        assert!(!result.ok, "备份失败时必须中止切换: {}", result.message);
+        assert!(
+            result.message.contains("备份工作区失败"),
+            "错误消息应说明备份失败: {}",
+            result.message
+        );
+
+        let repo = git2::Repository::open(workspace.join(".CodePapr/git")).unwrap();
+        assert_eq!(
+            repo.head().unwrap().shorthand().unwrap_or(""),
+            original_branch,
+            "中止切换后 HEAD 必须仍在原分支"
+        );
+        drop(repo);
+        assert_eq!(fs::read_to_string(workspace.join("a.txt")).unwrap(), "a\n");
+
+        fs::remove_file(&lock_path).ok();
         fs::remove_dir_all(&workspace).ok();
     }
 

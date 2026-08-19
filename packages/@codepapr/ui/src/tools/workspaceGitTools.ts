@@ -222,7 +222,8 @@ export function registerWorkspaceGitTools(ctx: WorkspaceToolContext): void {
 
   registry.register(toolByName('workspace_restore_undo'), async (_args: Record<string, unknown>) => {
     try {
-      await invoke<void>('restore_undo', { workspacePath: workspace() });
+      // agent 工具不锚定期望的备份 SHA（null = 不校验，保持旧语义）
+      await invoke<void>('restore_undo', { workspacePath: workspace(), expectedBackupSha: null });
       return {
         available: true, isRepo: true, ok: true, action: 'undo', raw: '',
         message: '已撤销上一次恢复操作。',
