@@ -396,7 +396,7 @@ export function createWorkspaceToolContext(params: WorkspaceToolContextParams) {
     });
 
     try {
-      return await enrichWorkspaceProjectGraph(graph, fileContents, 4, Number.MAX_SAFE_INTEGER, workspace());
+      return await enrichWorkspaceProjectGraph(graph, fileContents, 4, undefined, workspace());
     } catch {
       return graph;
     }

@@ -1,5 +1,6 @@
 import { lspLanguageFromPath } from './editorLanguage';
 import type { MonacoExternalMarker } from '@codepapr/editor';
+import { relativePathFromFileUri, workspaceFileUri } from '@codepapr/core';
 import { yieldToMainThread } from './taskScheduling';
 
 interface ReadFileResult {
@@ -105,40 +106,12 @@ function cacheKey(workspacePath: string, relativePath: string): string {
   return `${workspacePath}\u0000${relativePath}`;
 }
 
-function workspaceFileUri(workspacePath: string, relativePath: string): string {
-  const normalizedWorkspacePath = workspacePath.replace(/\\/g, '/').replace(/\/+$/, '');
-  const normalizedRelativePath = relativePath.replace(/^\.\//, '').replace(/\\/g, '/');
-  return encodeURI(`file://${normalizedWorkspacePath}/${normalizedRelativePath}`).replace(/#/g, '%23');
-}
-
 function generationForWorkspace(workspacePath: string): number {
   return workspaceGenerations.get(workspacePath) ?? 0;
 }
 
 function normalizePath(path: string): string {
   return path.trim().replace(/^\.\//, '').replace(/\\/g, '/');
-}
-
-function normalizeFileUriPath(uri: string): string {
-  if (!uri.startsWith('file://')) {
-    return uri;
-  }
-
-  return decodeURIComponent(uri.replace(/^file:\/+/, '/')).replace(/\\/g, '/');
-}
-
-function relativePathFromFileUri(workspacePath: string, uri: string | undefined): string | null {
-  if (!uri) {
-    return null;
-  }
-
-  const workspace = workspacePath.replace(/\\/g, '/').replace(/\/+$/, '');
-  const filePath = normalizeFileUriPath(uri);
-  if (!workspace || !filePath.startsWith(`${workspace}/`)) {
-    return null;
-  }
-
-  return normalizePath(filePath.slice(workspace.length + 1));
 }
 
 function getOrCreateWorkspaceQueue(workspacePath: string, invoke: InvokeLike): WorkspaceLanguageQueueState {

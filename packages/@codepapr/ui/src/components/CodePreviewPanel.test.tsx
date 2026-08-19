@@ -228,6 +228,7 @@ describe('CodePreviewPanel', () => {
     });
     container.remove();
     clearLanguageIntelligenceWorkspace('/workspace');
+    clearLanguageIntelligenceWorkspace('C:/proj');
   });
 
   it('uses cached language intelligence without opening LSP from the selected-file click path', async () => {
@@ -410,6 +411,58 @@ describe('CodePreviewPanel', () => {
           ([command, args]) => command === 'lsp_request' && args?.method === 'textDocument/documentSymbol'
         )
       ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('requests documentSymbol with a Windows file:///C:/ URI', async () => {
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_text_file') {
+        return {
+          path: String(args?.relativePath ?? ''),
+          content: 'export const value = 1;\n',
+          bytes: 24,
+        };
+      }
+      if (command === 'lsp_open_document') {
+        return { message: { opened: true, diagnostics: [], server: { running: true } } };
+      }
+      if (command === 'lsp_request') {
+        return { message: { result: [] } };
+      }
+      if (command === 'lsp_close_document') {
+        return true;
+      }
+      return undefined;
+    });
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        root.render(
+          <CodePreviewPanel
+            workspacePath="C:/proj"
+            selectedPath="src/a.ts"
+            selectedGitFile={null}
+            selectedLocation={null}
+            lang="en"
+          />
+        );
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(200);
+      });
+
+      expect(invokeMock.mock.calls.some(
+        ([command, args]) =>
+          command === 'lsp_request'
+          && args?.method === 'textDocument/documentSymbol'
+          && (args?.params as { textDocument?: { uri?: string } } | undefined)?.textDocument?.uri === 'file:///C:/proj/src/a.ts'
+      )).toBe(true);
     } finally {
       vi.useRealTimers();
     }

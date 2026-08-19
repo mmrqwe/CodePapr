@@ -1,4 +1,5 @@
 import { errorMessage } from '@codepapr/common';
+import { filePathFromFileUri, relativePathFromFileUri, workspaceFileUri } from '@codepapr/core';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { join } from '@tauri-apps/api/path';
@@ -284,19 +285,6 @@ function formatTemplate(template: string, replacements: Record<string, string>):
     (current, [key, value]) => current.replaceAll(`{${key}}`, value),
     template
   );
-}
-
-function workspaceFileUri(workspacePath: string, relativePath: string): string {
-  const normalizedWorkspacePath = workspacePath.replace(/\\/g, '/').replace(/\/+$/, '');
-  const normalizedRelativePath = relativePath.replace(/^\.\//, '').replace(/\\/g, '/');
-  return encodeURI(`file://${normalizedWorkspacePath}/${normalizedRelativePath}`).replace(/#/g, '%23');
-}
-
-function decodeFileUri(value: string): string {
-  if (value.startsWith('file://')) {
-    return decodeURIComponent(value.replace(/^file:\/\/+/i, '/'));
-  }
-  return value;
 }
 
 function toLspPosition(lineNumber: number, column: number): Required<LspPosition> {
@@ -649,7 +637,9 @@ export function CodePreviewPanel({
   const handleOpenEditorLocation = useCallback(
     (location: MonacoEditorNavigationLocation) => {
       handleNavigateToPreviewLocation({
-        path: decodeFileUri(location.uri),
+        path: (workspacePath
+          ? relativePathFromFileUri(workspacePath, location.uri)
+          : null) ?? filePathFromFileUri(location.uri) ?? location.uri,
         line: location.lineNumber,
         column: location.column,
       });

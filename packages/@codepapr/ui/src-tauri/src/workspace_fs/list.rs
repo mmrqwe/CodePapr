@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 
 use crate::shared::{relative_string, resolve_existing_path, run_blocking_workspace_task};
 
@@ -126,6 +127,14 @@ fn dir_has_visible_children(
     false
 }
 
+fn file_mtime_ms(meta: &fs::Metadata) -> u64 {
+    meta.modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 fn collect_entries(
     workspace: &Path,
     current: &Path,
@@ -189,6 +198,7 @@ fn collect_entries(
             is_dir,
             bytes: if is_dir { 0 } else { metadata.len() },
             has_children,
+            mtime_ms: file_mtime_ms(&metadata),
         });
 
         // 通用忽略目录（node_modules/build/dist/.venv 等）只列出目录本身，

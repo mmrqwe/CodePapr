@@ -377,6 +377,7 @@ fn main() {
             shell::session::send_shell_command,
             shell::session::close_shell_session,
             lsp::lsp_start_server,
+            lsp::lsp_query_availability,
             lsp::lsp_open_document,
             lsp::lsp_close_document,
             lsp::lsp_request,

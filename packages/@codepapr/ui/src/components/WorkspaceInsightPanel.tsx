@@ -6,6 +6,7 @@ import {
   buildWorkspaceProjectGraph,
   buildWorkspaceProjectMap,
   enrichWorkspaceProjectGraph,
+  DEFAULT_LSP_ENRICH_SYMBOLS,
   buildGitDiffSummary,
   buildGitUnavailableDiff,
   buildGitUnavailableStatus,
@@ -38,30 +39,7 @@ import {
   type GitDiffMode,
 } from '../utils/workspaceGitPanel';
 import type { ProjectGraphWorkerBuildRequest, ProjectGraphWorkerMessage } from '../workers/projectGraphWorkerProtocol';
-
-function computeInsightCacheKey(
-  workspacePath: string,
-  entries: WorkspaceListEntry[],
-  settings: {
-    insightMaxDepth: number;
-    insightMaxSourceFiles: number;
-    insightMaxFileBytes: number;
-    insightMaxSymbols: number;
-    insightMaxEdges: number;
-    insightMaxTreeEntries: number;
-  },
-): string {
-  const entrySummary = entries.slice(0, 200).map((e) => `${e.path}`).join(',');
-  return `${workspacePath}|${entries.length}|${settings.insightMaxDepth}|${settings.insightMaxSourceFiles}|${settings.insightMaxFileBytes}|${settings.insightMaxSymbols}|${settings.insightMaxEdges}|${settings.insightMaxTreeEntries}|${hash32(entrySummary)}`;
-}
-
-function hash32(str: string): string {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = ((h << 5) - h + str.charCodeAt(i)) | 0;
-  }
-  return (h >>> 0).toString(16);
-}
+import { computeInsightCacheKey } from '../utils/projectGraphCacheKey';
 
 const WORKER_AVAILABLE = typeof Worker !== 'undefined';
 const WORKER_BUILD_TIMEOUT_MS = 60_000;
@@ -730,6 +708,29 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
     };
 
     const loadInsights = async () => {
+      let gitFingerprint = '';
+      try {
+        const [headResult, statusResult] = await Promise.all([
+          invoke<CommandResult>('run_workspace_command', {
+            workspacePath,
+            command: 'git',
+            args: ['rev-parse', 'HEAD'],
+            timeoutSeconds: 5,
+          }).catch(() => null),
+          invoke<CommandResult>('run_workspace_command', {
+            workspacePath,
+            command: 'git',
+            args: ['status', '--porcelain=1'],
+            timeoutSeconds: 8,
+          }).catch(() => null),
+        ]);
+        const headText = headResult?.status === 0 ? (headResult.stdout ?? '').trim() : '';
+        const statusText = statusResult?.status === 0 ? (statusResult.stdout ?? '').trim() : '';
+        gitFingerprint = `${headText}|${statusText}`;
+      } catch {
+        gitFingerprint = '';
+      }
+
       const currentCacheKey = computeInsightCacheKey(
         workspacePath, entriesRef.current, {
           insightMaxDepth,
@@ -738,7 +739,8 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
           insightMaxSymbols,
           insightMaxEdges,
           insightMaxTreeEntries,
-        }
+        },
+        gitFingerprint,
       );
 
       try {
@@ -982,7 +984,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
 
         setProjectGraphProgress({ phase: 'enriching', current: 5, total: 5 });
 
-        const nextProjectGraph = await enrichWorkspaceProjectGraph(rawProjectGraph, fileContents, 4, Number.MAX_SAFE_INTEGER, workspacePath).catch(() => rawProjectGraph);
+        const nextProjectGraph = await enrichWorkspaceProjectGraph(rawProjectGraph, fileContents, 4, DEFAULT_LSP_ENRICH_SYMBOLS, workspacePath).catch(() => rawProjectGraph);
 
         const s = nextProjectGraph.summary;
         appendDebug(`图完成: files=${s.files} symbols=${s.symbols} imports=${s.imports} extends=${s.extends} calls=${s.calls}`);

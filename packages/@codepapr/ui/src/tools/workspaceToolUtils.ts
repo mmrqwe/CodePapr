@@ -23,6 +23,7 @@ export interface WorkspaceListEntry {
   name: string;
   isDir: boolean;
   bytes: number;
+  mtimeMs?: number;
 }
 
 export interface WorkspaceMapSymbolSummary {
@@ -1047,15 +1048,32 @@ export function buildWorkspaceProjectGraph(params: BuildWorkspaceProjectGraphPar
   });
 }
 
+export const DEFAULT_LSP_ENRICH_SYMBOLS = 80;
+export const LSP_BATCH_ENRICH_DEADLINE_MS = 15_000;
+
 export async function enrichWorkspaceProjectGraph(
   graph: WorkspaceProjectGraphResult,
   fileContents: Record<string, { content: string; bytes: number }>,
   concurrency: number = 4,
-  maxSymbols: number = Number.MAX_SAFE_INTEGER,
+  maxSymbols: number = DEFAULT_LSP_ENRICH_SYMBOLS,
   workspacePath?: string,
 ): Promise<WorkspaceProjectGraphResult> {
   try {
-    const enhancer = createLspProjectGraphEnhancer(fileContents, workspacePath);
+    const started = Date.now();
+    const timedOut = () => Date.now() - started >= LSP_BATCH_ENRICH_DEADLINE_MS;
+    const inner = createLspProjectGraphEnhancer(fileContents, workspacePath);
+    const enhancer = {
+      enhanceReferences: async (
+        filePath: string,
+        content: string,
+        symbols: Array<{ name: string; line: number; kind: string }>,
+      ) => timedOut() ? [] : inner.enhanceReferences(filePath, content, symbols),
+      enhanceInheritance: async (
+        filePath: string,
+        content: string,
+        symbols: Array<{ name: string; line: number; kind: string }>,
+      ) => timedOut() ? [] : inner.enhanceInheritance(filePath, content, symbols),
+    };
     return await enrichProjectGraphEdges(graph, enhancer, fileContents, concurrency, maxSymbols);
   } catch {
     return graph;

@@ -196,120 +196,170 @@ export interface LspAvailabilityStatus {
   languageLabel: string;
   installMode: LspInstallMode;
   available: boolean;
+  running: boolean;
   serverName: string | null;
+  toolOrigin: string | null;
+  toolSource: string | null;
   message: string;
 }
 
-export async function checkLspAvailability(languageIds?: string[]): Promise<LspAvailabilityStatus[]> {
+interface LspAvailabilityInfo {
+  languageId?: string;
+  available?: boolean;
+  running?: boolean;
+  toolOrigin?: string | null;
+  toolSource?: string | null;
+  serverStatus?: {
+    running?: boolean;
+    toolLabel?: string;
+    toolSource?: string;
+    toolOrigin?: string;
+    command?: string;
+  } | null;
+}
+
+function unavailableStatus(
+  languageId: string,
+  languageLabel: string,
+  installMode: LspInstallMode,
+  message: string,
+): LspAvailabilityStatus {
+  return {
+    languageId,
+    languageLabel,
+    installMode,
+    available: false,
+    running: false,
+    serverName: null,
+    toolOrigin: null,
+    toolSource: null,
+    message,
+  };
+}
+
+function statusFromAvailabilityInfo(
+  descriptor: LspSupportDescriptor,
+  langId: string,
+  info: LspAvailabilityInfo | null,
+): LspAvailabilityStatus {
+  const available = info?.available === true;
+  const running = info?.running === true || info?.serverStatus?.running === true;
+  const toolSource = info?.toolSource ?? info?.serverStatus?.toolSource ?? null;
+  const toolOrigin = info?.toolOrigin ?? info?.serverStatus?.toolOrigin ?? null;
+  const serverName = available
+    ? (info?.serverStatus?.toolLabel ?? toolSource ?? descriptor.recommendedServers[0] ?? 'unknown')
+    : null;
+
+  return {
+    languageId: langId,
+    languageLabel: descriptor.languageLabel,
+    installMode: descriptor.installMode,
+    available,
+    running,
+    serverName,
+    toolOrigin,
+    toolSource,
+    message: available
+      ? `${descriptor.languageLabel} LSP ${running ? '运行中' : '可用'} (${serverName})`
+      : `${descriptor.languageLabel} LSP 不可用`,
+  };
+}
+
+export async function checkLspAvailability(
+  workspacePath: string,
+  languageIds?: string[],
+): Promise<LspAvailabilityStatus[]> {
   const languages = languageIds ?? Object.keys(LSP_SUPPORT_BY_LANGUAGE);
   const results: LspAvailabilityStatus[] = [];
+  const trimmedWorkspace = workspacePath.trim();
 
   for (const langId of languages) {
     const descriptor = LSP_SUPPORT_BY_LANGUAGE[langId];
     if (!descriptor) {
-      results.push({
-        languageId: langId,
-        languageLabel: langId,
-        installMode: 'system',
-        available: false,
-        serverName: null,
-        message: `不支持的语言: ${langId}`,
-      });
+      results.push(unavailableStatus(langId, langId, 'system', `不支持的语言: ${langId}`));
+      continue;
+    }
+    if (!trimmedWorkspace) {
+      results.push(unavailableStatus(
+        langId,
+        descriptor.languageLabel,
+        descriptor.installMode,
+        `${descriptor.languageLabel} LSP 检查需要工作区路径`,
+      ));
       continue;
     }
 
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      const providerInfo = await invoke<{ tool_source: string; available: boolean } | null>(
-        'resolve_symbol_provider',
-        { languageId: descriptor.languageId },
-      );
-
-      const available = providerInfo?.available ?? false;
-      const serverName = available
-        ? (providerInfo?.tool_source ?? descriptor.recommendedServers[0] ?? 'unknown')
-        : null;
-
-      results.push({
-        languageId: langId,
-        languageLabel: descriptor.languageLabel,
-        installMode: descriptor.installMode,
-        available,
-        serverName,
-        message: available
-          ? `${descriptor.languageLabel} LSP 可用 (${serverName})`
-          : `${descriptor.languageLabel} LSP 不可用`,
+      const info = await invoke<LspAvailabilityInfo>('lsp_query_availability', {
+        workspacePath: trimmedWorkspace,
+        languageId: descriptor.languageId,
       });
+      results.push(statusFromAvailabilityInfo(descriptor, langId, info));
     } catch {
-      results.push({
-        languageId: langId,
-        languageLabel: descriptor.languageLabel,
-        installMode: descriptor.installMode,
-        available: false,
-        serverName: null,
-        message: `${descriptor.languageLabel} LSP 检查失败`,
-      });
+      results.push(unavailableStatus(
+        langId,
+        descriptor.languageLabel,
+        descriptor.installMode,
+        `${descriptor.languageLabel} LSP 检查失败`,
+      ));
     }
   }
 
   return results;
 }
 
-export async function ensureLspServer(languageId: string): Promise<LspAvailabilityStatus> {
+export async function ensureLspServer(
+  workspacePath: string,
+  languageId: string,
+): Promise<LspAvailabilityStatus> {
   const descriptor = LSP_SUPPORT_BY_LANGUAGE[languageId];
   if (!descriptor) {
-    return {
+    return unavailableStatus(languageId, languageId, 'system', `不支持的语言: ${languageId}`);
+  }
+
+  const trimmedWorkspace = workspacePath.trim();
+  if (!trimmedWorkspace) {
+    return unavailableStatus(
       languageId,
-      languageLabel: languageId,
-      installMode: 'system',
-      available: false,
-      serverName: null,
-      message: `不支持的语言: ${languageId}`,
-    };
+      descriptor.languageLabel,
+      descriptor.installMode,
+      `${descriptor.languageLabel} LSP 启动需要工作区路径`,
+    );
   }
 
   try {
     const { invoke } = await import('@tauri-apps/api/core');
 
     await invoke('lsp_start_server', {
-      workspacePath: '',
+      workspacePath: trimmedWorkspace,
       languageId: descriptor.languageId,
     });
 
-    const providerInfo = await invoke<{ tool_source: string; available: boolean } | null>(
-      'resolve_symbol_provider',
-      { languageId: descriptor.languageId },
-    );
+    const info = await invoke<LspAvailabilityInfo>('lsp_query_availability', {
+      workspacePath: trimmedWorkspace,
+      languageId: descriptor.languageId,
+    });
 
-    const available = providerInfo?.available ?? false;
-    const serverName = available
-      ? (providerInfo?.tool_source ?? descriptor.recommendedServers[0] ?? 'unknown')
-      : null;
-
+    const status = statusFromAvailabilityInfo(descriptor, languageId, info);
     return {
-      languageId,
-      languageLabel: descriptor.languageLabel,
-      installMode: descriptor.installMode,
-      available,
-      serverName,
-      message: available
-        ? `${descriptor.languageLabel} LSP 已启动 (${serverName})`
+      ...status,
+      message: status.available
+        ? `${descriptor.languageLabel} LSP 已启动 (${status.serverName})`
         : `${descriptor.languageLabel} LSP 启动后仍不可用`,
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     const isMissing = isLikelyMissingLspServer(errorMsg);
 
-    return {
+    return unavailableStatus(
       languageId,
-      languageLabel: descriptor.languageLabel,
-      installMode: descriptor.installMode,
-      available: false,
-      serverName: null,
-      message: isMissing
+      descriptor.languageLabel,
+      descriptor.installMode,
+      isMissing
         ? `${descriptor.languageLabel} LSP 服务器未安装。请安装 ${descriptor.recommendedServers.join(' 或 ')}。`
         : `${descriptor.languageLabel} LSP 启动失败: ${errorMsg}`,
-    };
+    );
   }
 }
 

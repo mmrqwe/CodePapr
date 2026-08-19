@@ -31,6 +31,9 @@ const LSP_STARTUP_TIMEOUT: Duration = Duration::from_secs(8);
 // rust-analyzer/clangd/JDTLS 首次索引期间响应经常超过 8 秒，复用启动超时会把"健康但繁忙"
 // 的 server 误判为无响应。
 const LSP_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const LSP_BATCH_DEADLINE: Duration = Duration::from_secs(12);
+const LSP_BATCH_ITEM_TIMEOUT: Duration = Duration::from_secs(8);
+const LSP_BATCH_MAX_CONSECUTIVE_TIMEOUTS: usize = 2;
 const MAX_LSP_REQUEST_BYTES: usize = 1_000_000;
 const MAX_LSP_RESPONSE_BYTES: usize = 2_000_000;
 const MAX_LSP_QUEUED_MESSAGES: usize = 256;
@@ -145,7 +148,7 @@ const GO_LANGUAGE_SERVER: &[LspCommandCandidate] = &[LspCommandCandidate {
     args: &[],
 }];
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct LspServerStatus {
     pub language_id: String,
@@ -159,6 +162,17 @@ pub struct LspServerStatus {
     pub pid: Option<u32>,
     pub open_documents: usize,
     pub stderr_tail: Vec<String>,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct LspAvailabilityInfo {
+    pub language_id: String,
+    pub available: bool,
+    pub running: bool,
+    pub tool_origin: Option<String>,
+    pub tool_source: Option<String>,
+    pub server_status: Option<LspServerStatus>,
 }
 
 #[derive(Clone, Serialize)]
@@ -1627,6 +1641,84 @@ pub async fn lsp_start_server(
     }).await
 }
 
+fn is_lsp_timeout_error(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    err.contains("超时") || lower.contains("timeout") || lower.contains("timed out")
+}
+
+pub(crate) fn lsp_query_availability_impl(
+    workspace_path: &str,
+    language_id: &str,
+) -> Result<LspAvailabilityInfo, String> {
+    let sanitized_language_id = language_id.trim().to_lowercase();
+    if sanitized_language_id.is_empty() {
+        return Err("language_id 不能为空".to_string());
+    }
+    let sanitized_workspace = workspace_path.trim();
+    if sanitized_workspace.is_empty() {
+        return Err("workspace_path 不能为空".to_string());
+    }
+
+    if let Some(handle) = lookup_server_handle(sanitized_workspace, &sanitized_language_id) {
+        if let Ok(mut server) = lock_server(&handle) {
+            if server_is_running(&mut server).unwrap_or(false) {
+                let status = server_status(&sanitized_language_id, &server);
+                return Ok(LspAvailabilityInfo {
+                    language_id: sanitized_language_id,
+                    available: true,
+                    running: true,
+                    tool_origin: Some(status.tool_origin.clone()),
+                    tool_source: Some(status.tool_source.clone()),
+                    server_status: Some(status),
+                });
+            }
+        }
+    }
+
+    let configured = lsp_server_config(&sanitized_language_id).is_some();
+    let fallback = lsp_fallback::supports_language(&sanitized_language_id);
+    let mut tool_origin = None;
+    let mut tool_source = None;
+
+    if configured {
+        if let Ok(workspace) = canonical_workspace(sanitized_workspace) {
+            if let Some(candidate) = resolve_lsp_command_candidates(&workspace, &sanitized_language_id)
+                .into_iter()
+                .next()
+            {
+                tool_origin = Some(candidate.tool_origin);
+                tool_source = Some(candidate.tool_source);
+            }
+        } else {
+            tool_origin = Some("external".to_string());
+            tool_source = Some("path".to_string());
+        }
+    } else if fallback {
+        tool_origin = Some("builtin".to_string());
+        tool_source = Some("builtin-fallback".to_string());
+    }
+
+    Ok(LspAvailabilityInfo {
+        language_id: sanitized_language_id,
+        available: configured || fallback,
+        running: false,
+        tool_origin,
+        tool_source,
+        server_status: None,
+    })
+}
+
+#[tauri::command]
+pub async fn lsp_query_availability(
+    workspace_path: String,
+    language_id: String,
+) -> Result<LspAvailabilityInfo, String> {
+    run_blocking_workspace_task(move || {
+        lsp_query_availability_impl(&workspace_path, &language_id)
+    })
+    .await
+}
+
 pub(crate) fn lsp_open_document_with_app(
     app: Option<&tauri::AppHandle>,
     workspace_path: String,
@@ -1822,6 +1914,22 @@ pub(crate) fn lsp_request_impl(
     method: &str,
     params: &Value,
 ) -> Result<LspResponse, String> {
+    lsp_request_timed(
+        workspace_path,
+        language_id,
+        method,
+        params,
+        LSP_REQUEST_TIMEOUT,
+    )
+}
+
+fn lsp_request_timed(
+    workspace_path: &str,
+    language_id: &str,
+    method: &str,
+    params: &Value,
+    timeout: Duration,
+) -> Result<LspResponse, String> {
     let server_handle = match ensure_running_server_handle(None, workspace_path, language_id) {
         Ok(h) => Some(h),
         Err(_) => None,
@@ -1857,7 +1965,7 @@ pub(crate) fn lsp_request_impl(
             (rx, Arc::clone(&server.pending_responses), id)
         };
 
-        let response = match rx.recv_timeout(LSP_REQUEST_TIMEOUT) {
+        let response = match rx.recv_timeout(timeout) {
             Ok(response) => {
                 let _ = pending
                     .lock()
@@ -2017,6 +2125,20 @@ pub(crate) fn lsp_batch_symbols_impl(
     workspace_path: &str,
     files: &[LspBatchSymbolInput],
 ) -> Result<Vec<LspBatchSymbolOutput>, String> {
+    lsp_batch_symbols_with_limits(
+        workspace_path,
+        files,
+        Instant::now() + LSP_BATCH_DEADLINE,
+        LSP_BATCH_ITEM_TIMEOUT,
+    )
+}
+
+pub(crate) fn lsp_batch_symbols_with_limits(
+    workspace_path: &str,
+    files: &[LspBatchSymbolInput],
+    deadline: Instant,
+    item_timeout: Duration,
+) -> Result<Vec<LspBatchSymbolOutput>, String> {
     let workspace = canonical_workspace(workspace_path)?;
 
     let mut by_language: HashMap<String, Vec<&LspBatchSymbolInput>> = HashMap::new();
@@ -2029,6 +2151,8 @@ pub(crate) fn lsp_batch_symbols_impl(
 
     let mut outputs = Vec::with_capacity(files.len());
     for (_, group) in by_language {
+        let mut consecutive_timeouts = 0usize;
+        let mut circuit_open = false;
         for file in group.iter().copied() {
             let _ = lsp_open_document_with_app(
                 None,
@@ -2041,6 +2165,22 @@ pub(crate) fn lsp_batch_symbols_impl(
             );
         }
         for file in group.iter().copied() {
+            if Instant::now() >= deadline {
+                outputs.push(LspBatchSymbolOutput {
+                    path: file.path.clone(),
+                    result: Value::Null,
+                    error: Some("LSP 批处理超过时限，已降级".to_string()),
+                });
+                continue;
+            }
+            if circuit_open {
+                outputs.push(LspBatchSymbolOutput {
+                    path: file.path.clone(),
+                    result: Value::Null,
+                    error: Some("LSP 连续超时，已熔断降级".to_string()),
+                });
+                continue;
+            }
             let uri = match file_uri_for(&workspace, &file.path) {
                 Ok(uri) => uri,
                 Err(err) => {
@@ -2052,26 +2192,40 @@ pub(crate) fn lsp_batch_symbols_impl(
                     continue;
                 }
             };
-            match lsp_request_impl(
+            match lsp_request_timed(
                 workspace_path,
                 &file.language_id,
                 "textDocument/documentSymbol",
                 &json!({ "textDocument": { "uri": uri } }),
+                item_timeout,
             ) {
-                Ok(response) => outputs.push(LspBatchSymbolOutput {
-                    path: file.path.clone(),
-                    result: response
-                        .message
-                        .get("result")
-                        .cloned()
-                        .unwrap_or(Value::Null),
-                    error: None,
-                }),
-                Err(err) => outputs.push(LspBatchSymbolOutput {
-                    path: file.path.clone(),
-                    result: Value::Null,
-                    error: Some(err),
-                }),
+                Ok(response) => {
+                    consecutive_timeouts = 0;
+                    outputs.push(LspBatchSymbolOutput {
+                        path: file.path.clone(),
+                        result: response
+                            .message
+                            .get("result")
+                            .cloned()
+                            .unwrap_or(Value::Null),
+                        error: None,
+                    });
+                }
+                Err(err) => {
+                    if is_lsp_timeout_error(&err) {
+                        consecutive_timeouts += 1;
+                        if consecutive_timeouts >= LSP_BATCH_MAX_CONSECUTIVE_TIMEOUTS {
+                            circuit_open = true;
+                        }
+                    } else {
+                        consecutive_timeouts = 0;
+                    }
+                    outputs.push(LspBatchSymbolOutput {
+                        path: file.path.clone(),
+                        result: Value::Null,
+                        error: Some(err),
+                    });
+                }
             }
         }
         for file in group.iter().copied() {
@@ -2157,10 +2311,35 @@ pub(crate) fn lsp_batch_enrich_impl(
     workspace_path: &str,
     files: &[LspBatchEnrichFile],
 ) -> Result<Vec<LspBatchEnrichFileOutput>, String> {
+    lsp_batch_enrich_with_limits(
+        workspace_path,
+        files,
+        Instant::now() + LSP_BATCH_DEADLINE,
+        LSP_BATCH_ITEM_TIMEOUT,
+    )
+}
+
+pub(crate) fn lsp_batch_enrich_with_limits(
+    workspace_path: &str,
+    files: &[LspBatchEnrichFile],
+    deadline: Instant,
+    item_timeout: Duration,
+) -> Result<Vec<LspBatchEnrichFileOutput>, String> {
     let workspace = canonical_workspace(workspace_path)?;
     let mut outputs = Vec::with_capacity(files.len());
+    let mut consecutive_timeouts = 0usize;
+    let mut circuit_open = false;
 
     for file in files {
+        if Instant::now() >= deadline || circuit_open {
+            outputs.push(LspBatchEnrichFileOutput {
+                path: file.path.clone(),
+                references: Vec::new(),
+                inheritance: Vec::new(),
+            });
+            continue;
+        }
+
         let uri = match file_uri_for(&workspace, &file.path) {
             Ok(uri) => uri,
             Err(_) => continue,
@@ -2178,9 +2357,13 @@ pub(crate) fn lsp_batch_enrich_impl(
         let mut references: Vec<LspBatchEnrichReference> = Vec::new();
         let mut inheritance: Vec<LspBatchEnrichInheritance> = Vec::new();
         for sym in &file.symbols {
+            if Instant::now() >= deadline {
+                circuit_open = true;
+                break;
+            }
             // 与旧实现一致：单个请求失败静默跳过（符号提取不到引用/继承不
             // 影响其余符号与整体图构建）。
-            if let Ok(response) = lsp_request_impl(
+            match lsp_request_timed(
                 workspace_path,
                 &file.language_id,
                 "textDocument/references",
@@ -2189,20 +2372,38 @@ pub(crate) fn lsp_batch_enrich_impl(
                     "position": { "line": sym.line, "character": sym.character },
                     "context": { "includeDeclaration": false },
                 }),
+                item_timeout,
             ) {
-                let locations = crate::symbol_provider::parse_lsp_locations(&response.message);
-                for loc in locations {
-                    references.push(LspBatchEnrichReference {
-                        uri: loc.uri,
-                        line: loc.line,
-                        character: loc.character,
-                        from_symbol: sym.name.clone(),
-                    });
+                Ok(response) => {
+                    consecutive_timeouts = 0;
+                    let locations = crate::symbol_provider::parse_lsp_locations(&response.message);
+                    for loc in locations {
+                        references.push(LspBatchEnrichReference {
+                            uri: loc.uri,
+                            line: loc.line,
+                            character: loc.character,
+                            from_symbol: sym.name.clone(),
+                        });
+                    }
+                }
+                Err(err) if is_lsp_timeout_error(&err) => {
+                    consecutive_timeouts += 1;
+                    if consecutive_timeouts >= LSP_BATCH_MAX_CONSECUTIVE_TIMEOUTS {
+                        circuit_open = true;
+                        break;
+                    }
+                }
+                Err(_) => {
+                    consecutive_timeouts = 0;
                 }
             }
 
+            if circuit_open || Instant::now() >= deadline {
+                break;
+            }
+
             if sym.kind == "class" || sym.kind == "interface" {
-                if let Ok(response) = lsp_request_impl(
+                match lsp_request_timed(
                     workspace_path,
                     &file.language_id,
                     "textDocument/hover",
@@ -2210,32 +2411,46 @@ pub(crate) fn lsp_batch_enrich_impl(
                         "textDocument": { "uri": uri },
                         "position": { "line": sym.line, "character": sym.character },
                     }),
+                    item_timeout,
                 ) {
-                    let contents = response
-                        .message
-                        .get("result")
-                        .and_then(|r| r.get("contents"))
-                        .map(crate::symbol_provider::lsp_markdown_to_plain)
-                        .unwrap_or_default();
-                    if let Some(captures) = lsp_extends_pattern().captures(&contents) {
-                        inheritance.push(LspBatchEnrichInheritance {
-                            from_symbol: sym.name.clone(),
-                            to_symbol: captures[1].to_string(),
-                            kind: "extends".to_string(),
-                        });
-                    }
-                    if let Some(captures) = lsp_implements_pattern().captures(&contents) {
-                        for iface in captures[1]
-                            .split(',')
-                            .map(|s| s.trim())
-                            .filter(|s| !s.is_empty())
-                        {
+                    Ok(response) => {
+                        consecutive_timeouts = 0;
+                        let contents = response
+                            .message
+                            .get("result")
+                            .and_then(|r| r.get("contents"))
+                            .map(crate::symbol_provider::lsp_markdown_to_plain)
+                            .unwrap_or_default();
+                        if let Some(captures) = lsp_extends_pattern().captures(&contents) {
                             inheritance.push(LspBatchEnrichInheritance {
                                 from_symbol: sym.name.clone(),
-                                to_symbol: iface.to_string(),
-                                kind: "implements".to_string(),
+                                to_symbol: captures[1].to_string(),
+                                kind: "extends".to_string(),
                             });
                         }
+                        if let Some(captures) = lsp_implements_pattern().captures(&contents) {
+                            for iface in captures[1]
+                                .split(',')
+                                .map(|s| s.trim())
+                                .filter(|s| !s.is_empty())
+                            {
+                                inheritance.push(LspBatchEnrichInheritance {
+                                    from_symbol: sym.name.clone(),
+                                    to_symbol: iface.to_string(),
+                                    kind: "implements".to_string(),
+                                });
+                            }
+                        }
+                    }
+                    Err(err) if is_lsp_timeout_error(&err) => {
+                        consecutive_timeouts += 1;
+                        if consecutive_timeouts >= LSP_BATCH_MAX_CONSECUTIVE_TIMEOUTS {
+                            circuit_open = true;
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        consecutive_timeouts = 0;
                     }
                 }
             }
@@ -2257,8 +2472,9 @@ pub(crate) fn lsp_batch_enrich_impl(
 mod tests {
     use super::{
         ensure_running_server_handle, file_uri_for, lock_server, lsp_batch_enrich_impl,
-        lsp_batch_symbols_impl, lsp_close_document_impl, lsp_open_document_with_app, lsp_request,
-        lsp_server_config, lsp_stop_server_impl, normalize_relative_path,
+        lsp_batch_enrich_with_limits, lsp_batch_symbols_impl, lsp_batch_symbols_with_limits,
+        lsp_close_document_impl, lsp_open_document_with_app, lsp_query_availability_impl,
+        lsp_request, lsp_server_config, lsp_stop_server_impl, normalize_relative_path,
         resolve_lsp_command_candidates, resolved_command_display, send_request, server_key,
         LspBatchEnrichFile, LspBatchEnrichSymbol, LspBatchSymbolInput, LSP_REQUEST_TIMEOUT,
     };
@@ -3217,6 +3433,98 @@ mod tests {
             &["Main", "add", "main"],
         );
 
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn lsp_query_availability_rejects_empty_workspace() {
+        let err = lsp_query_availability_impl("", "typescript").expect_err("empty workspace");
+        assert!(err.contains("workspace_path 不能为空"));
+    }
+
+    #[test]
+    fn lsp_query_availability_reports_configured_language_without_running_server() {
+        let info = lsp_query_availability_impl("/tmp/codepapr-missing-workspace", "typescript")
+            .expect("query availability");
+        assert_eq!(info.language_id, "typescript");
+        assert!(info.available, "typescript is a configured LSP language");
+        assert!(!info.running);
+        assert!(info.server_status.is_none());
+        assert!(info.tool_source.is_some());
+    }
+
+    #[test]
+    fn lsp_batch_symbols_skips_remaining_files_when_deadline_elapsed() {
+        let workspace = make_temp_workspace("lsp-batch-deadline");
+        write_workspace_file(&workspace, "a.ts", "export const a = 1;\n");
+        write_workspace_file(&workspace, "b.ts", "export const b = 2;\n");
+        let workspace_path = workspace.to_string_lossy().into_owned();
+        let files = vec![
+            LspBatchSymbolInput {
+                path: "a.ts".to_string(),
+                language_id: "typescript".to_string(),
+                content: "export const a = 1;\n".to_string(),
+            },
+            LspBatchSymbolInput {
+                path: "b.ts".to_string(),
+                language_id: "typescript".to_string(),
+                content: "export const b = 2;\n".to_string(),
+            },
+        ];
+        let started = Instant::now();
+        let outputs = lsp_batch_symbols_with_limits(
+            &workspace_path,
+            &files,
+            Instant::now(),
+            Duration::from_millis(1),
+        )
+        .expect("batch symbols with expired deadline");
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "expired deadline should not wait on LSP: {elapsed:?}"
+        );
+        assert_eq!(outputs.len(), 2);
+        assert!(outputs.iter().all(|output| {
+            output
+                .error
+                .as_deref()
+                .is_some_and(|err| err.contains("时限"))
+        }));
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn lsp_batch_enrich_skips_when_deadline_elapsed() {
+        let workspace = make_temp_workspace("lsp-batch-enrich-deadline");
+        write_workspace_file(&workspace, "a.ts", "export class A {}\n");
+        let workspace_path = workspace.to_string_lossy().into_owned();
+        let files = vec![LspBatchEnrichFile {
+            path: "a.ts".to_string(),
+            language_id: "typescript".to_string(),
+            content: "export class A {}\n".to_string(),
+            symbols: vec![LspBatchEnrichSymbol {
+                name: "A".to_string(),
+                line: 0,
+                character: 13,
+                kind: "class".to_string(),
+            }],
+        }];
+        let started = Instant::now();
+        let outputs = lsp_batch_enrich_with_limits(
+            &workspace_path,
+            &files,
+            Instant::now(),
+            Duration::from_millis(1),
+        )
+        .expect("batch enrich with expired deadline");
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "expired enrich deadline should return immediately: {elapsed:?}"
+        );
+        assert_eq!(outputs.len(), 1);
+        assert!(outputs[0].references.is_empty());
         let _ = fs::remove_dir_all(workspace);
     }
 }

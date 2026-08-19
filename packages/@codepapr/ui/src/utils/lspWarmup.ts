@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { lspLanguageFromPath } from './editorLanguage';
 import { describeLspSupport } from './lspSupport';
-import { workspaceFileUri } from '../tools/workspaceProjectMapLsp';
+import { workspaceFileUri } from '@codepapr/core';
 
 interface WarmupFileEntry {
   path: string;

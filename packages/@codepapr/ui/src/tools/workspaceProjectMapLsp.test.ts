@@ -197,3 +197,39 @@ describe('globalLspPool eviction', () => {
     );
   });
 });
+
+describe('resolveProjectMapSymbolOverrides deadlines', () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+  });
+
+  it('returns within a hard cap when lsp_batch_symbols hangs', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'lsp_batch_symbols') {
+        await new Promise((resolve) => setTimeout(resolve, 30_000));
+        return [];
+      }
+      return undefined;
+    });
+
+    const files = Object.fromEntries(
+      Array.from({ length: 120 }, (_, index) => [
+        `src/file-${index}.ts`,
+        { content: `export const v${index} = ${index};\n`, bytes: 20 },
+      ])
+    );
+
+    const started = Date.now();
+    const overrides = await resolveProjectMapSymbolOverrides(
+      '/tmp/codepapr-workspace',
+      files,
+      8,
+      5,
+      undefined,
+      80
+    );
+    const elapsed = Date.now() - started;
+    expect(elapsed).toBeLessThan(1500);
+    expect(overrides).toEqual({});
+  });
+});

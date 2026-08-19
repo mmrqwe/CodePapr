@@ -1,5 +1,6 @@
 import type { WorkspaceHost } from './host';
 import type { SymbolConfidence, SymbolSource } from '../unifiedSymbols';
+import { relativePathFromFileUri, workspaceFileUri } from './fileUri';
 import {
   planProjectGraphRename,
   computeRenameEditsForContent,
@@ -84,45 +85,6 @@ interface LspCodeAction {
 
 function normalizePath(value: string): string {
   return value.replace(/\\/g, '/').replace(/\/+/g, '/');
-}
-
-function normalizeAbsolutePath(value: string): string {
-  const normalized = normalizePath(value).replace(/\/+$/, '');
-  return normalized.replace(/^\/([A-Za-z]:\/)/, '$1');
-}
-
-function workspaceFileUri(workspacePath: string, relativePath: string): string {
-  const workspace = normalizeAbsolutePath(workspacePath);
-  const relative = normalizePath(relativePath).replace(/^\.\//, '');
-  const fullPath = `${workspace}/${relative}`;
-  const prefix = /^[A-Za-z]:\//.test(fullPath) ? 'file:///' : 'file://';
-  return encodeURI(`${prefix}${fullPath}`).replace(/[?#]/g, (ch) => (ch === '?' ? '%3F' : '%23'));
-}
-
-function relativePathFromFileUri(workspacePath: string, uri: string | undefined): string | null {
-  if (!uri) {
-    return null;
-  }
-
-  try {
-    const url = new URL(uri);
-    if (url.protocol !== 'file:') {
-      return null;
-    }
-    const rawPath = normalizeAbsolutePath(decodeURIComponent(url.pathname));
-    const workspace = normalizeAbsolutePath(workspacePath);
-    const lowerRawPath = rawPath.toLowerCase();
-    const lowerWorkspace = workspace.toLowerCase();
-    if (lowerRawPath === lowerWorkspace) {
-      return '';
-    }
-    if (!lowerRawPath.startsWith(`${lowerWorkspace}/`)) {
-      return null;
-    }
-    return rawPath.slice(workspace.length + 1);
-  } catch {
-    return null;
-  }
 }
 
 function toLspPosition(line: number, column?: number): LspPosition {

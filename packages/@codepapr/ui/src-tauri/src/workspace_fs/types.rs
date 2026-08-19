@@ -9,6 +9,7 @@ pub(crate) struct FileEntry {
     pub(crate) is_dir: bool,
     pub(crate) bytes: u64,
     pub(crate) has_children: bool,
+    pub(crate) mtime_ms: u64,
 }
 
 #[derive(Serialize, Clone)]

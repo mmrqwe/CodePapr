@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { lspLanguageFromPath } from '../utils/editorLanguage';
 import { describeLspSupport } from '../utils/lspSupport';
+import { workspaceFileUri } from '@codepapr/core';
 import type { WorkspaceMapSymbolSummary } from './workspaceToolUtils';
 
 interface ProjectMapFileContent {
@@ -196,12 +197,7 @@ function collapseWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
-export function workspaceFileUri(workspacePath: string, relativePath: string): string {
-  const normalizedWorkspacePath = workspacePath.replace(/\\/g, '/').replace(/\/+$/, '');
-  const normalizedRelativePath = relativePath.replace(/^\.\//, '').replace(/\\/g, '/');
-  const raw = `file://${normalizedWorkspacePath}/${normalizedRelativePath}`;
-  return encodeURI(raw).replace(/#/g, '%23').replace(/\?/g, '%3F');
-}
+export { workspaceFileUri };
 
 function isProjectMapLspLanguage(languageId: string): boolean {
   // 所有有 LSP 支持的语言都使用 LSP
@@ -299,14 +295,19 @@ export function normalizeProjectMapDocumentSymbols(
   return symbols;
 }
 
+export const LSP_BATCH_SYMBOLS_DEADLINE_MS = 12_000;
+
 export async function resolveProjectMapSymbolOverrides(
   workspacePath: string,
   fileContents: Record<string, ProjectMapFileContent>,
   maxSymbols: number,
   concurrencyLimit: number = 5,
-  isCancelled?: () => boolean
+  isCancelled?: () => boolean,
+  deadlineMs: number = LSP_BATCH_SYMBOLS_DEADLINE_MS,
 ): Promise<Record<string, WorkspaceMapSymbolSummary[]>> {
   const overrides: Record<string, WorkspaceMapSymbolSummary[]> = {};
+  const started = Date.now();
+  const timedOut = () => Date.now() - started >= Math.max(1, deadlineMs);
 
   // 收集有 LSP 支持的文件
   const lspSupportedFiles: Array<{ path: string; languageId: string; content: string }> = [];
@@ -331,21 +332,36 @@ export async function resolveProjectMapSymbolOverrides(
   }
 
   for (let i = 0; i < chunks.length; i += Math.max(1, concurrencyLimit)) {
-    if (isCancelled?.()) break;
+    if (isCancelled?.() || timedOut()) break;
     const chunkBatch = chunks.slice(i, i + Math.max(1, concurrencyLimit));
+    const remainingMs = Math.max(1, deadlineMs - (Date.now() - started));
     const batchResults = await Promise.allSettled(
       chunkBatch.map(async (chunk) => {
-        if (isCancelled?.()) return [];
+        if (isCancelled?.() || timedOut()) return [];
         try {
-          const outputs = await invoke<Array<{ path: string; result: unknown; error?: string | null }>>(
-            'lsp_batch_symbols',
-            {
-              workspacePath,
-              files: chunk.map((file) => ({
-                path: file.path,
-                languageId: file.languageId,
-                content: file.content,
-              })),
+          const outputs = await new Promise<Array<{ path: string; result: unknown; error?: string | null }>>(
+            (resolve, reject) => {
+              const timer = setTimeout(() => reject(new Error('lsp_batch_symbols deadline')), remainingMs);
+              invoke<Array<{ path: string; result: unknown; error?: string | null }>>(
+                'lsp_batch_symbols',
+                {
+                  workspacePath,
+                  files: chunk.map((file) => ({
+                    path: file.path,
+                    languageId: file.languageId,
+                    content: file.content,
+                  })),
+                }
+              ).then(
+                (value) => {
+                  clearTimeout(timer);
+                  resolve(value);
+                },
+                (error) => {
+                  clearTimeout(timer);
+                  reject(error);
+                }
+              );
             }
           );
           const collected: Array<{ path: string; symbols: WorkspaceMapSymbolSummary[] }> = [];

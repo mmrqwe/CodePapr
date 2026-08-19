@@ -231,6 +231,11 @@ export type {
   WorkspaceCallHierarchyCall,
   WorkspaceCallHierarchyCallsResult,
 } from './tool/workspace/languageTools';
+export {
+  filePathFromFileUri,
+  relativePathFromFileUri,
+  workspaceFileUri,
+} from './tool/workspace/fileUri';
 export { WORKSPACE_INTELLIGENCE_TOOL_DEFINITIONS } from './tool/workspace/toolDefinitions';
 export { NEW_TOOL_DEFINITIONS, MERGE_TOOL_DEFINITIONS, OLD_MERGE_TOOL_NAMES } from './tool/workspace/mergeToolDefs';
 export { registerSharedToolDispatchers, registerSharedMergeToolDispatchers } from './tool/workspace/registerSharedWorkspaceTools';

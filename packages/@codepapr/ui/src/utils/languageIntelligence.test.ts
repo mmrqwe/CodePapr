@@ -17,6 +17,7 @@ async function waitForCondition(predicate: () => boolean, maxPasses: number = 20
 describe('languageIntelligence', () => {
   afterEach(() => {
     clearLanguageIntelligenceWorkspace('/tmp/codepapr-lsp-workspace');
+    clearLanguageIntelligenceWorkspace('C:/proj');
   });
 
   it('caches diagnostics for other files pushed by a workspace-aware LSP server', async () => {
@@ -97,6 +98,76 @@ describe('languageIntelligence', () => {
       message: 'Property getUserAge does not exist',
       startLineNumber: 5,
       startColumn: 11,
+    });
+  });
+
+  it('maps Windows file:///C:/… workspace diagnostics back to a relative path', async () => {
+    const workspacePath = 'C:/proj';
+    const invoke = async <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {
+      if (command === 'read_text_file') {
+        return {
+          path: args?.relativePath,
+          content: 'export const value = 1;\n',
+          bytes: 24,
+        } as T;
+      }
+
+      if (command === 'lsp_open_document') {
+        return {
+          message: {
+            opened: true,
+            diagnostics: [],
+            workspaceDiagnostics: [
+              {
+                uri: 'file:///C:/proj/src/Consumer.ts',
+                diagnostics: [
+                  {
+                    severity: 1,
+                    message: 'Property getUserAge does not exist',
+                    source: 'typescript',
+                    range: {
+                      start: { line: 4, character: 10 },
+                      end: { line: 4, character: 20 },
+                    },
+                  },
+                ],
+              },
+            ],
+            server: {
+              languageId: 'typescript',
+              serverFamily: 'typescript',
+              running: true,
+              command: 'typescript-language-server --stdio',
+              pid: 42,
+              openDocuments: 1,
+              stderrTail: [],
+            },
+          },
+        } as T;
+      }
+
+      if (command === 'lsp_request') {
+        return { message: { result: [] } } as T;
+      }
+
+      throw new Error(`unexpected command ${command}`);
+    };
+
+    scheduleLanguageIntelligenceRefresh({
+      invoke,
+      workspacePath,
+      paths: ['src/UserService.ts'],
+      force: true,
+    });
+
+    await waitForCondition(
+      () => getCachedLanguageIntelligence(workspacePath, 'src/Consumer.ts')?.status === 'ready'
+    );
+
+    expect(getCachedLanguageIntelligence(workspacePath, 'src/Consumer.ts')).toMatchObject({
+      relativePath: 'src/Consumer.ts',
+      status: 'ready',
+      diagnostics: 1,
     });
   });
 });
