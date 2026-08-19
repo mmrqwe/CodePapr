@@ -12,6 +12,7 @@ export type LspMode = 'overrides-only' | 'full-integration';
 
 // LSP 增强器接口
 export interface LspProjectGraphEnhancer {
+  // `filePath` 是定义文件；返回项的 `filePath` 是使用点（references 结果）。
   enhanceReferences(
     filePath: string,
     content: string,
@@ -3448,16 +3449,19 @@ export async function enrichProjectGraphEdges(
             entries.map((e) => ({ name: e.symbol.name, line: e.symbol.line, kind: e.symbol.kind })),
           );
 
+          // textDocument/references 是在定义文件 `path` 上查使用点。
+          // imports 边必须是使用方 → 定义方，与 AST 导入边同向，否则会和
+          // 已有边对打、凭空造出循环依赖。
           for (const ref of refs) {
-            const sourceFileId = `file:${path}`;
-            const targetFileId = `file:${ref.filePath}`;
-            if (sourceFileId === targetFileId) continue;
+            const usageFileId = `file:${ref.filePath}`;
+            const definitionFileId = `file:${path}`;
+            if (usageFileId === definitionFileId) continue;
 
             addEdge({
-              id: `imports:${sourceFileId}->${targetFileId}:lsp`,
+              id: `imports:${usageFileId}->${definitionFileId}:lsp`,
               kind: 'imports',
-              from: sourceFileId,
-              to: targetFileId,
+              from: usageFileId,
+              to: definitionFileId,
             });
           }
 

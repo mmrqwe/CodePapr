@@ -177,6 +177,51 @@ describe('resolveProjectMapSymbolOverrides', () => {
     acquire.mockRestore();
     release.mockRestore();
   });
+
+  it('keeps an authoritative empty documentSymbol result instead of omitting the override', async () => {
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'lsp_batch_symbols') {
+        const files = Array.isArray(args?.files) ? (args.files as Array<{ path: string }>) : [];
+        return files.map((file) => ({ path: file.path, result: [], error: null }));
+      }
+      return undefined;
+    });
+
+    const overrides = await resolveProjectMapSymbolOverrides(
+      '/tmp/codepapr-workspace',
+      {
+        'src/empty.ts': { content: 'export const value = 1;\n', bytes: 24 },
+      },
+      8,
+    );
+
+    expect(Object.prototype.hasOwnProperty.call(overrides, 'src/empty.ts')).toBe(true);
+    expect(overrides['src/empty.ts']).toEqual([]);
+  });
+
+  it('still omits files whose batch request failed so AST fallback can run', async () => {
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'lsp_batch_symbols') {
+        const files = Array.isArray(args?.files) ? (args.files as Array<{ path: string }>) : [];
+        return files.map((file) => ({
+          path: file.path,
+          result: null,
+          error: 'LSP 不可用',
+        }));
+      }
+      return undefined;
+    });
+
+    const overrides = await resolveProjectMapSymbolOverrides(
+      '/tmp/codepapr-workspace',
+      {
+        'src/failed.ts': { content: 'export function boom() {}\n', bytes: 26 },
+      },
+      8,
+    );
+
+    expect(overrides).toEqual({});
+  });
 });
 
 describe('globalLspPool eviction', () => {

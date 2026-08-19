@@ -1118,6 +1118,29 @@ pub(crate) fn lsp_markdown_to_plain(value: &serde_json::Value) -> String {
     }
 }
 
+fn parse_lsp_location_item(item: &serde_json::Value) -> Option<SymbolLocation> {
+    // Location: { uri, range }
+    // LocationLink: { targetUri, targetRange, targetSelectionRange }
+    // 初始化声明了 definition.linkSupport=true，tsserver / rust-analyzer
+    // 会返回 LocationLink；只认 uri/range 会把合法定义结果丢掉。
+    let uri = item
+        .get("targetUri")
+        .and_then(|v| v.as_str())
+        .or_else(|| item.get("uri").and_then(|v| v.as_str()))?
+        .to_string();
+    let range = item
+        .get("targetSelectionRange")
+        .or_else(|| item.get("targetRange"))
+        .or_else(|| item.get("range"))?;
+    let line = range.get("start")?.get("line")?.as_u64()? as usize;
+    let character = range.get("start")?.get("character")?.as_u64()? as usize;
+    Some(SymbolLocation {
+        uri,
+        line,
+        character,
+    })
+}
+
 pub(crate) fn parse_lsp_locations(value: &serde_json::Value) -> Vec<SymbolLocation> {
     let result = match value.get("result") {
         Some(r) => r,
@@ -1130,20 +1153,7 @@ pub(crate) fn parse_lsp_locations(value: &serde_json::Value) -> Vec<SymbolLocati
         _ => return Vec::new(),
     };
 
-    items
-        .iter()
-        .filter_map(|item| {
-            let uri = item.get("uri").and_then(|v| v.as_str())?.to_string();
-            let range = item.get("range")?;
-            let line = range.get("start")?.get("line")?.as_u64()? as usize;
-            let character = range.get("start")?.get("character")?.as_u64()? as usize;
-            Some(SymbolLocation {
-                uri,
-                line,
-                character,
-            })
-        })
-        .collect()
+    items.iter().filter_map(parse_lsp_location_item).collect()
 }
 
 // ── AST-based provider (tree-sitter) ──────────────────────────────────
@@ -2253,6 +2263,56 @@ mod symbol_resolution_tests {
             "hover 应命中就近声明: {}",
             hover.contents
         );
+    }
+}
+
+#[cfg(test)]
+mod lsp_location_parse_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parse_lsp_locations_reads_plain_location() {
+        let message = json!({
+            "result": [{
+                "uri": "file:///tmp/proj/src/a.ts",
+                "range": {
+                    "start": { "line": 3, "character": 8 },
+                    "end": { "line": 3, "character": 11 }
+                }
+            }]
+        });
+        let locations = parse_lsp_locations(&message);
+        assert_eq!(locations.len(), 1);
+        assert_eq!(locations[0].uri, "file:///tmp/proj/src/a.ts");
+        assert_eq!(locations[0].line, 3);
+        assert_eq!(locations[0].character, 8);
+    }
+
+    #[test]
+    fn parse_lsp_locations_reads_location_link() {
+        let message = json!({
+            "result": [{
+                "originSelectionRange": {
+                    "start": { "line": 10, "character": 2 },
+                    "end": { "line": 10, "character": 5 }
+                },
+                "targetUri": "file:///tmp/proj/src/def.ts",
+                "targetRange": {
+                    "start": { "line": 0, "character": 0 },
+                    "end": { "line": 20, "character": 1 }
+                },
+                "targetSelectionRange": {
+                    "start": { "line": 4, "character": 16 },
+                    "end": { "line": 4, "character": 19 }
+                }
+            }]
+        });
+        let locations = parse_lsp_locations(&message);
+        assert_eq!(locations.len(), 1);
+        assert_eq!(locations[0].uri, "file:///tmp/proj/src/def.ts");
+        assert_eq!(locations[0].line, 4);
+        assert_eq!(locations[0].character, 16);
     }
 }
 

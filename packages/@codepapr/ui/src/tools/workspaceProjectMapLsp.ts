@@ -402,9 +402,9 @@ export async function resolveProjectMapSymbolOverrides(
         for (const result of batchResults) {
           if (result.status !== 'fulfilled') continue;
           for (const item of result.value) {
-            if (item.symbols.length > 0) {
-              overrides[item.path] = item.symbols;
-            }
+            // 空数组也要写入：LSP 明确回答「这个文件没有符号」时不能再降级 AST。
+            // 出错/无 result 的文件不会进入 collected，仍走 structural/regex。
+            overrides[item.path] = item.symbols;
           }
         }
       }

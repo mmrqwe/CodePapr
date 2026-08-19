@@ -364,7 +364,7 @@ describe('buildWorkspaceProjectGraph', () => {
     const symbolsSentToA = enhanceReferences.mock.calls.find(([path]) => path === 'src/a.ts')?.[2];
     expect(symbolsSentToA).toHaveLength(2);
 
-    // references 结果照常转化为文件级 imports 边（跨文件才成边）。
+    // references 是使用点：定义在 a.ts，引用在 b.ts → imports 边必须是 b → a。
     enhanceReferences.mockResolvedValue([
       { filePath: 'src/b.ts', line: 1, character: 0, fromSymbol: 'alpha', toSymbol: 'alpha' },
     ]);
@@ -373,6 +373,9 @@ describe('buildWorkspaceProjectGraph', () => {
       'src/b.ts': { content: 'y', bytes: 1 },
     });
     expect(enriched.edges).toContainEqual(
+      expect.objectContaining({ kind: 'imports', from: 'file:src/b.ts', to: 'file:src/a.ts' })
+    );
+    expect(enriched.edges).not.toContainEqual(
       expect.objectContaining({ kind: 'imports', from: 'file:src/a.ts', to: 'file:src/b.ts' })
     );
   });
@@ -408,5 +411,54 @@ describe('buildWorkspaceProjectGraph', () => {
 
     expect(enhanceReferences).toHaveBeenCalledTimes(1);
     expect(enhanceReferences.mock.calls[0]?.[2]).toHaveLength(1);
+  });
+
+  it('does not manufacture a cycle against an existing AST import edge', async () => {
+    const graph = buildWorkspaceProjectGraph({
+      root: '.',
+      tree: '.',
+      allFiles: [{ path: 'src/a.ts' }, { path: 'src/b.ts' }],
+      fileContents: {
+        'src/a.ts': { content: 'export function alpha() {}\n' },
+        'src/b.ts': { content: "import { alpha } from './a';\nalpha();\n" },
+      },
+      files: [
+        {
+          path: 'src/a.ts',
+          language: 'TypeScript',
+          bytes: 30,
+          symbolSource: 'lsp',
+          symbols: [{ name: 'alpha', kind: 'function', signature: 'alpha()', line: 1, exported: true }],
+        },
+        {
+          path: 'src/b.ts',
+          language: 'TypeScript',
+          bytes: 40,
+          symbolSource: 'lsp',
+          symbols: [],
+        },
+      ],
+    });
+
+    expect(graph.edges).toContainEqual(
+      expect.objectContaining({ kind: 'imports', from: 'file:src/b.ts', to: 'file:src/a.ts' }),
+    );
+
+    const enhancer: LspProjectGraphEnhancer = {
+      enhanceReferences: async (path) =>
+        path === 'src/a.ts'
+          ? [{ filePath: 'src/b.ts', line: 2, character: 0, fromSymbol: 'alpha', toSymbol: 'alpha' }]
+          : [],
+      enhanceInheritance: async () => [],
+    };
+
+    const enriched = await enrichProjectGraphEdges(graph, enhancer, {
+      'src/a.ts': { content: 'export function alpha() {}\n', bytes: 30 },
+      'src/b.ts': { content: "import { alpha } from './a';\nalpha();\n", bytes: 40 },
+    });
+
+    expect(enriched.edges).not.toContainEqual(
+      expect.objectContaining({ kind: 'imports', from: 'file:src/a.ts', to: 'file:src/b.ts' }),
+    );
   });
 });
