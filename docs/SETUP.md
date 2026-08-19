@@ -1,10 +1,6 @@
 # 安装、验证与运维
 
-## 1. 文档范围
-
-这份文档面向开发者与维护者，描述 CodePapr 的安装、验证、调试、发布和本地运维约束。
-
-它不解释日常怎么与代理交互；那部分内容请看 docs/USAGE.md。
+日常交互见 docs/USAGE.md。
 
 ## 2. 支持环境
 
@@ -14,15 +10,9 @@
 - npm 9+
 - Rust toolchain 和 Cargo
 
-其中：
-
-- CLI 开发至少需要 Node.js 和 npm
-- 桌面端调试、cargo check 和桌面打包需要 Rust toolchain
-- 浏览器交互烟测需要本机可检测到的 Chrome 或 Chromium 兼容浏览器
+CLI 只需 Node。桌面端、cargo check、打包需要 Rust。浏览器烟测需要本机 Chrome / Chromium。
 
 ### 2.2 当前主要开发环境
-
-从仓库现状看，当前更偏向以下环境：
 
 - macOS arm64
 - Windows

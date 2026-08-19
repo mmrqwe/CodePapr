@@ -535,7 +535,6 @@ Requirements:
         <div className="flex items-start justify-between border-b border-line px-7 py-5">
           <div>
             <h2 className="text-lg font-semibold text-fg">{t.charactersTitle}</h2>
-            <p className="mt-1 text-sm text-fg-muted">{t.charactersDesc}</p>
           </div>
           <div className="flex items-center gap-2">
             <button

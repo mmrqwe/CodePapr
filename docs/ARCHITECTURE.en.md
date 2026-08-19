@@ -1,16 +1,5 @@
 # CodePapr System Architecture
 
-## 1. Purpose
-
-This document describes the formal system design of CodePapr, focusing on:
-
-- What problem the system solves
-- Core design goals and non-goals
-- How components are layered and how they collaborate
-- Agent runtime execution paths and key invariants
-- DeepSeek prefix-cache friendliness
-- Architectural positioning of sub-agents, TodoList, Project Memory, and ProjectGraph
-
 ## 2. Design Goals
 
 ### 2.1 Core Goals
@@ -725,14 +714,14 @@ The settings panel has six tabs. Full parameter reference: `packages/@codepapr/c
 
 | Tab | Content |
 |---|---|
-| General | Language selection, debug toggle, license |
-| LLM | API type, model name, fast model, temperature, topP, maxTokens, thinking mode, maxToolRounds |
-| Search | Self-hosted SearXNG first, with automatic fallback to built-in multi-source aggregation when unavailable; engine selector removed from UI; category/time/language/safe search parameters moved to collapsible Advanced Options section |
-| Mentor | Mentor sub-agent independent API key, Base URL, model selection |
-| Advanced | Context compaction (model/temperature/summary output tokens/context limit/conversation rounds), TodoList max retries, ProjectGraph depth/file limits, streaming & tool output (stream idle timeout, middle-truncation keep chars), tool context mode (full/summary/auto, default full; the current round always gets full output, only history is summarized per mode, see §13.10). The context limit `maxContextTokens` defaults to 500K; its effective value is clamped to the selected provider's context limit (see §13.5) |
-| App | .papr app permissions — default when undeclared (local × network) and per-app two-axis overrides |
+| General | Language, debug, license |
+| LLM | Models, sampling, thinking |
+| Search | SearXNG; falls back to built-in aggregation |
+| Mentor | Explore / Scout / Mentor |
+| Advanced | Compaction, Goal, ProjectGraph, tool context (see §13.10) |
+| App | Default access for undeclared apps |
 
-Voice configuration is not in the main settings panel — it is configured per character in the CharacterModal Voice Tab.
+Voice lives on the character panel.
 
 ## 15. Project Statistics
 

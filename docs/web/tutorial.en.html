@@ -396,29 +396,23 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
         <a href="tutorial.html" style="font-size:0.78rem;color:var(--accent);text-decoration:none;margin-left:4px;font-weight:600" onclick="localStorage.setItem('codepapr-lang','zh')">中</a>
       </div>
       <h1><span class="gradient">CodePapr Tutorial</span></h1>
-      <p>CodePapr is a <strong>DeepSeek cache-friendly local coding agent system</strong>. It's not just a code generator — it's an intelligent agent workbench with comprehension and execution capabilities: reading projects, searching code, running commands, modifying files, and previewing results — all done locally.</p>
+      <p>Local coding agent workbench: read the project, edit files, run commands, preview results. DeepSeek prefix cache.</p>
     </div>
 
     <!-- 1. Intro -->
     <section class="section" id="intro">
       <div class="section-header"><h2>CodePapr Introduction</h2></div>
       <div class="content">
-        <h3>What is CodePapr</h3>
-        <p>CodePapr is a <strong>cache-first coding agent system</strong> offering a Tauri desktop workbench. It enables AI agents to <strong>read, modify, execute, verify, and preview</strong> within real project repositories.</p>
-
-        <p>CodePapr is neither a traditional AI chat tool nor an IDE plugin. It is an <strong>autonomous agent running on the desktop</strong> that genuinely understands your project context and automatically executes development tasks.</p>
-
-        <h3>Core Design Principles</h3>
+        <h3>Design notes</h3>
         <ul>
-          <li><strong>Local-first</strong>: Project context stays within the workspace as much as possible; file and command execution happen locally</li>
-          <li><strong>Single Runtime</strong>: Unified Agent, Session, ToolRegistry, and Provider semantics</li>
-          <li><strong>DeepSeek Cache Optimization</strong>: Stable content upfront, volatile content at the end, maximizing prefix cache hit rates to reduce token costs</li>
-          <li><strong>Structured Code Editing</strong>: Uses Search/Replace Diff mechanism, validates before writing, avoids line-number drift</li>
-          <li><strong>Verifiable Execution Chain</strong>: Every round of request, response, tool call, and cache statistics is traceable</li>
+          <li><strong>Local-first</strong>: files and commands run in the workspace</li>
+          <li><strong>Single runtime</strong>: Agent, Session, ToolRegistry, Provider share one semantics</li>
+          <li><strong>Cache-first</strong>: stable content first, volatile last</li>
+          <li><strong>Structured edits</strong>: Search/Replace diffs, validate then write</li>
         </ul>
 
-        <h3>CodePapr vs. Mainstream AI Coding Tools</h3>
-        <p style="margin-bottom:16px;font-size:0.85rem;color:var(--foreground-dim)">By 2026, AI coding tools are already very mature. The comparison below is based on each tool's current public capabilities, presented truthfully.</p>
+        <h3>Vs other tools</h3>
+        <p style="margin-bottom:16px;font-size:0.85rem;color:var(--foreground-dim)">Based on each tool’s public capabilities.</p>
         <table>
           <thead><tr><th>Dimension</th><th>Cline (62k⭐)</th><th>Aider (46k⭐)</th><th>Devin Desktop</th><th class="highlight-cell">CodePapr</th></tr></thead>
           <tbody>
@@ -433,28 +427,6 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
             <tr><td><strong>Pricing</strong></td><td>Open Source Free + API Costs</td><td>Open Source Free + API Costs</td><td>Free / $20 Pro / $200 Max</td><td class="highlight-cell">Open Source Free + API Costs</td></tr>
           </tbody>
         </table>
-
-        <div class="callout">
-          <strong>CodePapr's Unique Value:</strong> Complementary rather than a replacement for other tools. If you need <strong>deep IDE integration</strong> and a rich plugin ecosystem, Cline/Aider/Devin Desktop are more mature. If you value <strong>a standalone desktop workbench</strong>, <strong>extreme cost savings through DeepSeek prefix caching</strong>, <strong>a multi-sub-agent collaboration system</strong>, and <strong>in-place conversation rollback</strong> — CodePapr is the best choice.
-        </div>
-
-        <h3>Who Should Use CodePapr</h3>
-        <ul>
-          <li>You have mastered at least one programming language and can read basic syntax and project structure</li>
-          <li>Engineers looking to dramatically boost development efficiency with AI</li>
-          <li>Independent developers or tech leads maintaining complex projects long-term</li>
-          <li>Developers comfortable switching between command line and visual interfaces</li>
-          <li>Teams concerned about token costs who want to leverage DeepSeek cache optimization to reduce expenses</li>
-        </ul>
-
-        <h3>Prerequisites</h3>
-        <ul>
-          <li>Basic programming skills (can read and write simple code)</li>
-          <li>Basic code reading and comprehension ability</li>
-          <li>Familiarity with common dev tools (editor, command line, Git)</li>
-          <li>Basic understanding of project structure (directories, module organization)</li>
-          <li>Willingness to understand code rather than fully relying on AI</li>
-        </ul>
 
         <h3>Supported LLM Providers</h3>
         <div class="card"><div class="tag-stack">
@@ -601,7 +573,7 @@ https://api.deepseek.com/v1</code></pre>
         </table>
 
         <div class="callout success">
-           <strong>Tip:</strong> The desktop settings panel is divided into six tabs: <code>General / LLM / Search / Mentor / Advanced / App</code>. <strong>General</strong> covers language, debugging, and license; <strong>LLM</strong> covers primary model, fast model, sampling parameters, and thinking effort; <strong>Search</strong> configures self-hosted SearXNG search backend (SearXNG first, with automatic fallback to built-in multi-source aggregation — Bing / Mojeek / Qwant / Wikipedia — when unavailable; engine selector removed; category/time/language/safe search moved to collapsible Advanced section); <strong>Mentor</strong> configures an independent API key, base URL, and model selection for the mentor sub-agent; <strong>Advanced</strong> covers context compression, TodoList retry, Goal autonomous loop, Verifier model config, ProjectGraph limits, and more; <strong>App</strong> manages .papr app permissions — global defaults (local access × network) and per-app two-axis overrides. Voice settings are not in the main settings panel but are configured per character in the Voice Tab of the Character Modal.
+           <strong>Settings:</strong> <code>General / LLM / Search / Sub-agents / Advanced / App</code>. Voice lives on the character panel.
         </div>
       </div>
     </section>
@@ -612,9 +584,9 @@ https://api.deepseek.com/v1</code></pre>
       <div class="content">
         <h3>Three Steps to Start</h3>
         <ol>
-          <li><strong>Prepare configuration:</strong> Fill in your API key, provider, and model in the desktop settings</li>
-          <li><strong>Choose entry point:</strong> Use the desktop workbench directly (the current public product entry only exposes the desktop workbench)</li>
-          <li><strong>Choose mode:</strong> Ask for explanation and analysis, Plan for breaking down solutions, Agent for actual execution, App for generating visualization apps</li>
+          <li>API key, provider, model in settings</li>
+          <li>Pick a project folder</li>
+          <li>Ask / Plan / Agent / App</li>
         </ol>
 
         <h3>Shortest Path</h3>

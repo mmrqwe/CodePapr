@@ -1,10 +1,6 @@
 # Installation, Verification & Operations
 
-## 1. Document Scope
-
-This document is for developers and maintainers. It describes CodePapr's installation, verification, debugging, publishing, and local operational constraints.
-
-For day-to-day agent interaction, see docs/USAGE.md (or USAGE.en.md).
+Day-to-day use: docs/USAGE.en.md.
 
 ## 2. Supported Environments
 
@@ -14,14 +10,9 @@ For day-to-day agent interaction, see docs/USAGE.md (or USAGE.en.md).
 - npm 9+
 - Rust toolchain and Cargo
 
-Where:
-- CLI development requires at least Node.js and npm
-- Desktop debugging, cargo check, and desktop packaging require the Rust toolchain
-- Browser interaction smoke tests require a detectable Chrome or Chromium-compatible browser
+CLI needs Node only. Desktop, cargo check, and packaging need Rust. Browser smoke tests need Chrome / Chromium.
 
 ### 2.2 Current Primary Development Environments
-
-Based on the repository, the current focus is on:
 
 - macOS arm64
 - Windows

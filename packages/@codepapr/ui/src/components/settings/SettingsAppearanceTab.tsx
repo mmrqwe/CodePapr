@@ -53,10 +53,10 @@ function jsonPlaceholder(lang: string): string {
   };
   const note =
     lang === 'en'
-      ? 'full example: paste a token map with all core tokens'
+      ? 'token map'
       : lang === 'zh-TW'
-        ? '完整範例：貼上包含全部核心 token 的映射'
-        : '完整示例：粘贴包含全部核心 token 的映射';
+        ? 'token 映射'
+        : 'token 映射';
   return `${note} — ${JSON.stringify(sample, null, 2)}`;
 }
 
@@ -220,8 +220,7 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
   return (
     <div className="space-y-5">
       <FieldCard>
-        <FieldLabel className="mb-1">{t.themeSelect}</FieldLabel>
-        <p className="mb-3 text-xs text-fg-muted">{t.themeSelectDesc}</p>
+        <FieldLabel className="mb-3">{t.themeSelect}</FieldLabel>
         <div className="space-y-4">
           <div>
             <label className="mb-1 block text-xs font-medium text-fg-muted">
@@ -268,8 +267,7 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
       </FieldCard>
 
       <FieldCard>
-        <FieldLabel className="mb-1">{t.themeAccent}</FieldLabel>
-        <p className="mb-3 text-xs text-fg-muted">{t.themeAccentDesc}</p>
+        <FieldLabel className="mb-3">{t.themeAccent}</FieldLabel>
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -309,8 +307,7 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
       </FieldCard>
 
       <FieldCard>
-        <FieldLabel className="mb-1">{t.themeCustomExport}</FieldLabel>
-        <p className="mb-3 text-xs text-fg-muted">{t.themeBuiltinExportDesc}</p>
+        <FieldLabel className="mb-3">{t.themeCustomExport}</FieldLabel>
         <button
           type="button"
           onClick={() => void exportCurrentTheme()}
@@ -321,15 +318,7 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
       </FieldCard>
 
       <FieldCard padding="loose">
-        <FieldLabel className="mb-1">{t.themeCustomThemes}</FieldLabel>
-        <p className="mb-3 text-xs text-fg-muted">
-          {t.themeCustomThemesDesc}
-          {currentLang === 'en'
-            ? ' Imported themes appear in the theme selection above.'
-            : currentLang === 'zh-TW'
-              ? ' 導入後可在上方主題選擇中選用。'
-              : ' 导入后可在上方主题选择中选用。'}
-        </p>
+        <FieldLabel className="mb-3">{t.themeCustomThemes}</FieldLabel>
 
         {customIds.length === 0 && <p className="mb-3 text-xs text-fg-muted">{t.themeCustomNone}</p>}
         <div className="mb-4 space-y-2">

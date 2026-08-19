@@ -931,7 +931,7 @@ export function ProjectConfigModal({
           {activeTab === 'rules' ? (
             <div className="flex h-full min-h-0 flex-col gap-3">
               <div className="flex items-center justify-between gap-3">
-                <div className="text-xs leading-relaxed text-fg-muted">{t.projectConfigRulesDesc}</div>
+                <div className="text-xs text-fg-muted">{t.projectConfigRulesDesc}</div>
                 <button
                   type="button"
                   onClick={saveRules}
@@ -940,16 +940,6 @@ export function ProjectConfigModal({
                 >
                   {isSaving ? t.projectConfigSaving : t.projectConfigSaveRules}
                 </button>
-              </div>
-              <div className="grid gap-2 text-xs leading-relaxed text-fg-muted md:grid-cols-2">
-                <div className="rounded-xl border border-line bg-base p-3">
-                  <div className="mb-1 font-semibold text-fg">{t.projectConfigRulesTab}</div>
-                  {t.projectConfigRulesRole}
-                </div>
-                <div className="rounded-xl border border-line bg-base p-3">
-                  <div className="mb-1 font-semibold text-fg">{t.projectConfigAgentsTab}</div>
-                  {t.projectConfigAgentRole}
-                </div>
               </div>
               <div className="min-h-0 flex-1">
                 <MonacoTextEditor
@@ -1013,11 +1003,6 @@ export function ProjectConfigModal({
               </div>
 
               <div className="flex min-h-0 flex-col gap-3">
-                <div className="rounded-xl border border-line bg-base p-3 text-xs leading-relaxed text-fg-muted">
-                  <div className="mb-1 font-semibold text-fg">{t.projectConfigDifferenceTitle}</div>
-                  <div>{t.projectConfigAgentRole}</div>
-                  <div className="mt-2 text-fg-muted">{t.projectConfigAgentExampleHint}</div>
-                </div>
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0 text-xs leading-relaxed text-fg-muted">
                     {selectedAgentPath ?? t.projectConfigAgentDesc}
@@ -1105,11 +1090,6 @@ export function ProjectConfigModal({
               </div>
 
               <div className="flex min-h-0 flex-col gap-3">
-                <div className="rounded-xl border border-line bg-base p-3 text-xs leading-relaxed text-fg-muted">
-                  <div className="mb-1 font-semibold text-fg">{t.projectConfigCommandsTab}</div>
-                  <div>{t.projectConfigCommandRole}</div>
-                  <div className="mt-2 text-fg-muted">{t.projectConfigCommandExampleHint}</div>
-                </div>
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0 text-xs leading-relaxed text-fg-muted">
                     {selectedCommandPath ?? t.projectConfigCommandDesc}
@@ -1225,30 +1205,24 @@ export function ProjectConfigModal({
               </div>
 
               <div className="flex min-h-0 flex-col gap-3">
-                <div className="rounded-xl border border-line bg-base p-3 text-xs leading-relaxed text-fg-muted">
-                  <div className="mb-1 font-semibold text-fg">{t.projectConfigSkillRoleTitle}</div>
-                  <div>{t.projectConfigSkillRole}</div>
-                  <div className="mt-2 text-fg-muted">{t.projectConfigSkillExampleHint}</div>
-                  {selectedSkillEntry && (
-                    <label className="mt-3 flex items-start gap-2 text-xs text-fg-soft">
-                      <input
-                        type="checkbox"
-                        aria-label={`${t.projectConfigSkillEnabled}: ${selectedSkillEntry.id}`}
-                        checked={selectedSkillEntry.enabled}
-                        disabled={isSaving || !selectedSkillPath}
-                        onChange={(event) => void toggleSkillEnabled(selectedSkillEntry.id, event.target.checked)}
-                        className="mt-0.5 h-3.5 w-3.5 rounded border border-line-strong bg-base"
-                      />
-                      <span className="flex min-w-0 flex-col gap-1">
-                        <span>{t.projectConfigSkillEnabled}</span>
-                        <span className="text-fg-muted">{t.projectConfigSkillToggleHint}</span>
-                      </span>
-                    </label>
-                  )}
-                </div>
                 <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0 text-xs leading-relaxed text-fg-muted">
-                    {selectedSkillPath ?? t.projectConfigSkillDesc}
+                  <div className="flex min-w-0 items-center gap-3">
+                    {selectedSkillEntry && (
+                      <label className="flex shrink-0 items-center gap-2 text-xs text-fg-soft">
+                        <input
+                          type="checkbox"
+                          aria-label={`${t.projectConfigSkillEnabled}: ${selectedSkillEntry.id}`}
+                          checked={selectedSkillEntry.enabled}
+                          disabled={isSaving || !selectedSkillPath}
+                          onChange={(event) => void toggleSkillEnabled(selectedSkillEntry.id, event.target.checked)}
+                          className="h-3.5 w-3.5 rounded border border-line-strong bg-base"
+                        />
+                        <span>{t.projectConfigSkillEnabled}</span>
+                      </label>
+                    )}
+                    <div className="min-w-0 truncate text-xs text-fg-muted">
+                      {selectedSkillPath ?? t.projectConfigSkillDesc}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <button

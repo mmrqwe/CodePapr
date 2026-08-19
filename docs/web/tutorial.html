@@ -396,29 +396,23 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
       <a href="tutorial.en.html" style="font-size:0.78rem;color:var(--accent);text-decoration:none;margin-left:8px" onclick="localStorage.setItem('codepapr-lang','en')">EN</a>
       </div>
       <h1><span class="gradient">CodePapr 教程</span></h1>
-      <p>CodePapr 是一个基于 <strong>DeepSeek 缓存友好的本地编码 Agent 系统</strong>。它不只是代码生成器，而是具备理解 + 执行能力的智能体工作台——能读取项目、搜索代码、执行命令、修改文件、预览结果，全部在本地完成。</p>
+      <p>本地编码 Agent 工作台：读项目、改文件、跑命令、预览结果。DeepSeek 前缀缓存。</p>
     </div>
 
     <!-- 1. Intro -->
     <section class="section" id="intro">
       <div class="section-header"><h2>CodePapr 简介</h2></div>
       <div class="content">
-        <h3>什么是 CodePapr</h3>
-        <p>CodePapr 是一个<strong>缓存优先的编码代理（Agent）系统</strong>，提供 Tauri 桌面工作台。AI 代理能够在真实项目仓库里完成<strong>读取、修改、执行、验证与预览</strong>。</p>
-
-        <p>CodePapr 不是传统的 AI 聊天工具，也不是 IDE 插件。它是一个<strong>在桌面中运行的自主代理</strong>，能真正理解你的项目上下文并自动执行开发任务。</p>
-
-        <h3>核心设计理念</h3>
+        <h3>设计要点</h3>
         <ul>
-          <li><strong>本地优先</strong>：项目上下文尽量不离开工作区，文件和命令执行都在本地完成</li>
-          <li><strong>单一 Runtime</strong>：统一的 Agent、Session、ToolRegistry、Provider 语义</li>
-          <li><strong>DeepSeek 缓存优化</strong>：稳定内容前置、易变内容后置，最大化前缀缓存命中率以降低 token 成本</li>
-          <li><strong>结构化代码修改</strong>：使用 Search/Replace Diff 机制，先校验再写入，避免行号错位</li>
-          <li><strong>可验证执行链路</strong>：每一轮请求、响应、工具调用和缓存统计都可追踪</li>
+          <li><strong>本地优先</strong>：文件和命令在工作区执行</li>
+          <li><strong>单一 Runtime</strong>：Agent、Session、ToolRegistry、Provider 共用一套语义</li>
+          <li><strong>缓存优先</strong>：稳定内容前置，易变内容后置</li>
+          <li><strong>结构化改文件</strong>：Search/Replace Diff，先校验再写入</li>
         </ul>
 
-        <h3>CodePapr 与主流 AI 编程工具对比</h3>
-        <p style="margin-bottom:16px;font-size:0.85rem;color:var(--foreground-dim)">2026 年，AI 编程工具已经很成熟。以下对比基于各工具当前公开能力，如实呈现差异。</p>
+        <h3>和常见工具的差别</h3>
+        <p style="margin-bottom:16px;font-size:0.85rem;color:var(--foreground-dim)">对照各工具当前公开能力。</p>
         <table>
           <thead><tr><th>维度</th><th>Cline (62k⭐)</th><th>Aider (46k⭐)</th><th>Devin Desktop</th><th class="highlight-cell">CodePapr</th></tr></thead>
           <tbody>
@@ -433,28 +427,6 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
             <tr><td><strong>价格</strong></td><td>开源免费 + API 费用</td><td>开源免费 + API 费用</td><td>免费 / $20 Pro / $200 Max</td><td class="highlight-cell">开源免费 + API 费用</td></tr>
           </tbody>
         </table>
-
-        <div class="callout">
-          <strong>CodePapr 的独特价值：</strong>与其他工具互补而非替代。如果你需要 <strong>IDE 深度集成</strong>和丰富的插件生态，Cline/Aider/Devin Desktop 更成熟。如果你看重 <strong>独立桌面工作台</strong>、<strong>DeepSeek 前缀缓存极致省成本</strong>、<strong>多子代理协作体系</strong>和<strong>对话即可回退的原地重置</strong>——CodePapr 是最佳选择。
-        </div>
-
-        <h3>谁适合使用 CodePapr</h3>
-        <ul>
-          <li>已掌握至少一门编程语言，能读懂基础语法和项目结构</li>
-          <li>希望借助 AI 大幅提升开发效率的工程师</li>
-          <li>独立开发者或需要长期维护复杂项目的技术负责人</li>
-          <li>习惯在命令行和可视化界面之间切换的开发者</li>
-          <li>关注 token 成本，希望利用 DeepSeek 缓存优化降低开销的团队</li>
-        </ul>
-
-        <h3>需要具备的基础能力</h3>
-        <ul>
-          <li>基础编程能力（能读懂并编写简单代码）</li>
-          <li>基本的代码阅读与理解能力</li>
-          <li>会使用常见开发工具（编辑器、命令行、Git）</li>
-          <li>具备基本的项目结构认知（目录、模块划分）</li>
-          <li>愿意理解代码，而不是完全依赖 AI</li>
-        </ul>
 
         <h3>支持的 LLM Provider</h3>
         <div class="card"><div class="tag-stack">
@@ -601,7 +573,7 @@ https://api.deepseek.com/v1</code></pre>
         </table>
 
         <div class="callout success">
-           <strong>提示：</strong>桌面端设置面板分为 <code>通用 / LLM / 搜索 / Mentor / 高级 / App</code> 六个 Tab。<strong>通用</strong>含语言、调试、许可证；<strong>LLM</strong>含主模型、快速模型、采样参数与思考强度；<strong>搜索</strong>用于配置自托管 SearXNG 搜索后端（SearXNG 优先，失败自动降级到内置 Bing / Mojeek / Qwant / Wikipedia 等多源聚合；搜索引擎选择器已移除；分类/时间/语言/安全搜索等高级参数收入折叠区）；<strong>Mentor</strong>配置导师子代理的独立 API Key、Base URL 和模型选择；<strong>高级</strong>含上下文压缩、TodoList 重试、Goal 自主循环、Verifier 模型、ProjectGraph 限制等；<strong>App</strong>管理 .papr 应用权限——全局默认（本地访问 × 网络）与逐应用两轴覆盖。语音配置不在主设置面板，而在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。
+           <strong>设置：</strong><code>通用 / LLM / 搜索 / 子Agent / 高级 / App</code>。语音在角色面板。
         </div>
       </div>
     </section>
@@ -612,9 +584,9 @@ https://api.deepseek.com/v1</code></pre>
       <div class="content">
         <h3>三步启动</h3>
         <ol>
-          <li><strong>准备配置：</strong>在桌面端设置中填写 API key、provider 和 model</li>
-          <li><strong>选择入口：</strong>直接使用桌面端（当前公开产品入口只保留桌面工作台）</li>
-          <li><strong>选择模式：</strong>Ask 负责解释和分析，Plan 负责拆解方案，Agent 负责实际执行，App 负责生成可视化应用</li>
+          <li>设置里填 API key、provider、模型</li>
+          <li>选项目文件夹</li>
+          <li>Ask / Plan / Agent / App</li>
         </ol>
 
         <h3>最短路径</h3>

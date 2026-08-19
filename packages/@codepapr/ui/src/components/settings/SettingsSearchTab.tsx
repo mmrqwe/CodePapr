@@ -20,10 +20,6 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-line bg-base px-5 py-4 text-sm leading-relaxed text-fg-muted">
-        {t.settingsSearchDesc}
-      </div>
-
       <FieldCard padding="loose">
         <label className="flex items-center gap-3 cursor-pointer">
           <input
@@ -45,7 +41,6 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
             <TextField
               label={t.searxngBaseUrlLabel}
               labelTight
-              hint={t.searxngBaseUrlHint}
               type="text"
               value={local.searxngBaseUrl}
               onChange={(e) => update({ searxngBaseUrl: e.target.value })}
@@ -95,7 +90,6 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
                       );
                     })}
                   </div>
-                  <p className="mt-1.5 text-[10px] leading-relaxed text-fg-dim">{t.searxngCategoriesHint}</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-5">
@@ -112,13 +106,11 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
                       <option value="month">{t.searxngTimeRangeMonth}</option>
                       <option value="year">{t.searxngTimeRangeYear}</option>
                     </select>
-                    <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{t.searxngTimeRangeHint}</p>
                   </div>
                   <div>
                     <TextField
                       label={t.searxngLanguageLabel}
                       labelTight
-                      hint={t.searxngLanguageHint}
                       type="text"
                       value={local.searxngLanguage}
                       onChange={(e) => update({ searxngLanguage: e.target.value })}
@@ -146,7 +138,6 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
                       </label>
                     ))}
                   </div>
-                  <p className="mt-1.5 text-[10px] leading-relaxed text-fg-dim">{t.searxngSafeSearchHint}</p>
                 </div>
               </div>
             )}

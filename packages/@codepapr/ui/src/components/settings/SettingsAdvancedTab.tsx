@@ -12,10 +12,6 @@ const TOOL_CONTEXT_CATEGORIES = [
 export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsTabProps) {
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-line bg-base px-5 py-4 text-sm leading-relaxed text-fg-muted">
-        {t.settingsAdvancedDesc}
-      </div>
-
       <div className="rounded-2xl border border-warn-bg bg-warn-bg px-5 py-5">
         <label className="flex cursor-pointer items-center gap-3">
           <input
@@ -33,7 +29,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
         <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
           {t.contextCompactionSettings}
         </label>
-        <p className="mb-3 text-[11px] leading-relaxed text-fg-muted">{t.contextCompactionDesc}</p>
         <div className="grid gap-5 md:grid-cols-3">
           <SelectField
             label={t.compactionModelLabel}
@@ -46,7 +41,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
           </SelectField>
           <TextField
             label={t.compactionMaxTokensLabel}
-            hint={t.compactionMaxTokensHint}
             type="number"
             min="100"
             max="100000"
@@ -69,16 +63,14 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
               step="0.1"
               value={local.compactionTemperature}
               onChange={(e) => update({ compactionTemperature: parseFloat(e.target.value) })}
-              title={t.compactionTemperatureHint}
-              className="mt-3 w-full cursor-pointer accent-accent"
-            />
-            <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{t.compactionTemperatureHint}</p>
-          </div>
+            title={t.compactionTemperatureHint}
+            className="mt-3 w-full cursor-pointer accent-accent"
+          />
+        </div>
         </div>
         <div className="mt-4 grid gap-5 md:grid-cols-2">
           <TextField
             label={t.maxContextTokens}
-            hint={t.maxContextTokensHint}
             type="number"
             min="1000"
             max="1000000"
@@ -92,7 +84,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
           />
           <TextField
             label={t.maxConversationRounds}
-            hint={t.maxConversationRoundsHint}
             type="number"
             min="2"
             max="500"
@@ -106,7 +97,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
           />
           <TextField
             label={t.chatRenderBatchRounds}
-            hint={t.chatRenderBatchRoundsHint}
             type="number"
             min="1"
             max="50"
@@ -125,11 +115,9 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
         <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
           {t.streamOutputSettings}
         </label>
-        <p className="mb-3 text-[11px] leading-relaxed text-fg-muted">{t.streamOutputDesc}</p>
         <div className="grid gap-5 md:grid-cols-2">
           <TextField
             label={t.streamIdleTimeoutLabel}
-            hint={t.streamIdleTimeoutHint}
             type="number"
             min="10"
             max="1800"
@@ -143,7 +131,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
           />
           <TextField
             label={t.toolOutputMiddleKeepLabel}
-            hint={t.toolOutputMiddleKeepHint}
             type="number"
             min="1000"
             max="150000"
@@ -162,7 +149,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
         <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
           {t.embeddedBrowserEngine}
         </label>
-        <p className="mb-3 text-[11px] leading-relaxed text-fg-muted">{t.embeddedBrowserEngineTip}</p>
         <select
           value={local.browserEngine}
           onChange={(e) => update({ browserEngine: e.target.value as 'embedded' | 'headless' })}
@@ -177,7 +163,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
         <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
           {t.toolContextSettings}
         </label>
-        <p className="mb-3 text-[11px] leading-relaxed text-fg-muted">{t.toolContextDesc}</p>
         <div className="grid gap-5 md:grid-cols-3">
           <SelectField
             label={t.toolContextDefaultModeLabel}
@@ -190,7 +175,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
           </SelectField>
           <TextField
             label={t.toolContextSummaryMaxCharsLabel}
-            hint={t.toolContextSummaryMaxCharsHint}
             type="number"
             min="100"
             max="5000"
@@ -203,7 +187,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
           />
           <TextField
             label={t.toolContextAutoThresholdLabel}
-            hint={t.toolContextAutoThresholdHint}
             type="number"
             min="500"
             max="50000"
@@ -255,7 +238,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
         <div className="grid gap-5 md:grid-cols-2">
           <TextField
             label={t.todoMaxRetriesLabel}
-            hint={t.todoMaxRetriesHint}
             type="number"
             min="0"
             max="10"
@@ -270,12 +252,10 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
       </FieldCard>
 
       <FieldCard padding="loose">
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{t.goalSettingsTitle}</h3>
-        <p className="mb-4 text-[10px] leading-relaxed text-fg-dim">{t.goalSettingsDesc}</p>
+        <h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{t.goalSettingsTitle}</h3>
         <div className="grid gap-5 md:grid-cols-2">
           <TextField
             label={t.goalMaxIterationsLabel}
-            hint={t.goalMaxIterationsHint}
             type="number"
             min="1"
             max="100"
@@ -286,7 +266,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
           />
           <TextField
             label={t.goalMaxWallClockLabel}
-            hint={t.goalMaxWallClockHint}
             type="number"
             min="1"
             max="180"
@@ -299,7 +278,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
         <div className="mt-4 grid gap-5 md:grid-cols-3">
           <SelectField
             label={t.verifierModelTierLabel}
-            hint={t.verifierModelTierHint}
             value={local.verifierModelTier}
             onChange={(e) => update({ verifierModelTier: e.target.value as 'fast' | 'primary' | 'mentor' })}
             title={t.verifierModelTierLabel}
@@ -310,7 +288,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
           </SelectField>
           <TextField
             label={t.verifierMaxTokensLabel}
-            hint={t.verifierMaxTokensHint}
             type="number"
             min="100"
             max="10000"
@@ -325,7 +302,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
               onChange={(e) => update({ verifierTemperature: parseFloat(e.target.value) })}
               title={t.verifierTemperatureHint}
               className="mt-3 w-full cursor-pointer accent-accent" />
-            <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{t.verifierTemperatureHint}</p>
           </div>
         </div>
       </FieldCard>
@@ -335,7 +311,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
         <div className="mt-4 grid gap-5 md:grid-cols-2">
           <TextField
             label={t.projectGraphMaxFilesLabel}
-            hint={t.projectGraphMaxFilesHint}
             type="number"
             min="0"
             step="100"
@@ -348,7 +323,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
           />
           <TextField
             label={t.projectGraphMaxTreeEntriesLabel}
-            hint={t.projectGraphMaxTreeEntriesHint}
             type="number"
             min="0"
             step="100"
@@ -363,8 +337,7 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
       </FieldCard>
 
       <FieldCard padding="loose">
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{t.systemPrompt}</h3>
-        <p className="mb-4 text-[10px] leading-relaxed text-fg-dim">{t.settingsPromptDesc}</p>
+        <h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{t.systemPrompt}</h3>
         <textarea
           value={local.systemPrompt}
           onChange={(e) => update({ systemPrompt: e.target.value })}
@@ -372,7 +345,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
           placeholder={currentLang === 'en' ? 'e.g. Always respond in English. Prefer functional style.' : currentLang === 'zh-TW' ? '例如：始終使用繁體中文回覆。偏好函數式風格。' : '例如：始终使用中文回复。偏好函数式风格。'}
           className="w-full resize-y rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
         />
-        <p className="mt-2 text-[10px] leading-relaxed text-fg-dim">{t.settingsPromptStackDesc}</p>
       </FieldCard>
     </div>
   );

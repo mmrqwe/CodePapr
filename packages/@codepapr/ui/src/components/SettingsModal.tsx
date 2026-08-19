@@ -132,7 +132,6 @@ export function SettingsModal() {
         <div className="flex items-start justify-between border-b border-line px-7 py-5">
           <div>
             <h2 className="text-lg font-semibold text-fg">{t.modelSettings}</h2>
-            <p className="mt-1 text-sm text-fg-muted">{t.settingsLlmDesc}</p>
           </div>
           <button
             onClick={closeWithoutSave}

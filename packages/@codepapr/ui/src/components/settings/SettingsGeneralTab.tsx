@@ -9,10 +9,6 @@ export function SettingsGeneralTab({ local, update, t, currentLang }: SettingsTa
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-line bg-base px-5 py-4 text-sm leading-relaxed text-fg-muted">
-        {t.settingsGeneralDesc}
-      </div>
-
       <FieldCard>
         <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
           {t.langSelect}
@@ -50,7 +46,6 @@ export function SettingsGeneralTab({ local, update, t, currentLang }: SettingsTa
           <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
             {t.experimentalFeatures}
           </h3>
-          <p className="mt-1 text-xs leading-relaxed text-fg-muted">{t.experimentalFeaturesDesc}</p>
         </div>
         <ToggleField
           checked={local.experimentalCharacters}
@@ -72,7 +67,6 @@ export function SettingsGeneralTab({ local, update, t, currentLang }: SettingsTa
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
           {t.licenseSection}
         </h3>
-        <p className="mb-4 text-xs leading-relaxed text-fg-muted">{t.licenseSectionDesc}</p>
         <div className="rounded-xl border border-line bg-base px-4 py-3 max-h-64 overflow-y-auto">
           <div className="text-xs font-semibold text-fg mb-2">{t.licenseTitle}</div>
           <div className="text-xs text-fg-muted mb-3">{t.licenseCopyright}</div>

@@ -1,16 +1,5 @@
 # CodePapr 系统设计文档
 
-## 1. 文档目的
-
-描述 CodePapr 的正式系统设计，重点回答：
-
-- 系统要解决什么问题
-- 核心设计目标和非目标是什么
-- 组件如何分层、如何协作
-- Agent runtime 的执行链路和关键不变量是什么
-- DeepSeek 前缀缓存友好性如何保证
-- 子代理、TodoList、项目记忆、ProjectGraph 的架构定位
-
 ## 2. 设计目标
 
 ### 2.1 核心目标
@@ -713,14 +702,14 @@ OpenAI/Claude 兼容端点常是转发网关（如 OpenAI 网关转发 DeepSeek 
 
 | 标签页 | 内容 |
 |---|---|
-| General | 语言选择、调试开关、许可证 |
-| LLM | API 类型、模型名称、fast 模型、temperature、topP、maxTokens、thinking 模式、maxToolRounds |
-| Search | 自部署 SearXNG 优先，失败自动降级到内置多源聚合；搜索引擎选择器已移除；分类/时间/语言/安全搜索等高级参数收入折叠区 |
-| Mentor | Mentor 子代理独立 API key、Base URL、模型选择 |
-| 高级 | 上下文压缩（模型/温度/摘要输出 token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 深度/文件限制、流式与工具输出（流空闲超时、中间截断保留字符数）、工具上下文模式（完整/摘要/自动，默认完整；当轮始终全文，仅历史上下文按模式摘要，见 §13.10）。上下文上限 `maxContextTokens` 默认 500K，实际生效值按所选服务商上下文上限自动钳制（见 §13.5） |
-| App | .papr 应用权限——未声明时的默认（本地访问 × 网络）与逐应用两轴覆盖 |
+| General | 语言、调试、许可证 |
+| LLM | 模型、采样、思考模式 |
+| Search | SearXNG；失败回落内置聚合 |
+| Mentor | Explore / Scout / Mentor |
+| 高级 | 压缩、Goal、ProjectGraph、工具上下文（见 §13.10） |
+| App | 未声明 app 的默认权限 |
 
-语音配置不在主设置面板，而是在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。
+语音在角色面板。
 
 ## 15. 项目统计系统
 

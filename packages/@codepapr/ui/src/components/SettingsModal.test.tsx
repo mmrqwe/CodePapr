@@ -86,10 +86,10 @@ describe('SettingsModal', () => {
     expect(container.innerHTML).toContain('实验性功能');
 
     const characterToggle = container.querySelector(
-      'input[title="在主界面显示角色卡管理。未勾选时不会注入角色人设。"]'
+      'input[title="主界面显示角色卡。"]'
     ) as HTMLInputElement | null;
     const voiceToggle = container.querySelector(
-      'input[title="在主界面显示语音朗读与克隆相关控件。"]'
+      'input[title="主界面显示语音控件。"]'
     ) as HTMLInputElement | null;
 
     expect(characterToggle).not.toBeNull();

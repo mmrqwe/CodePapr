@@ -11,9 +11,9 @@
 
 ### Three Steps
 
-1. **Configure**: Enter API key, provider, and model in desktop settings.
-2. **Choose entry**: Use the desktop workbench.
-3. **Choose mode**: Ask (explain/analyze), Plan (decompose strategy), Agent (actually execute), App (generate visualization apps).
+1. API key, provider, and model in settings
+2. Open a project folder
+3. Ask / Plan / Agent / App
 
 ## Four Working Modes
 
@@ -151,22 +151,16 @@ LLM manages apps via 4 tools:
 | Application | `~/.codepapr/codepapr.sqlite` | provider, model, API key, sampling parameters, language |
 | Project | `<workspace>/.CodePapr` | Project state, session messages, cache stats, rules, Agents, Skills, commands |
 
-### Settings Panel
+### Settings
 
-Six tabs:
+- **General**: language, debug, license
+- **LLM**: models, sampling, thinking
+- **Search**: SearXNG; falls back to built-in aggregation
+- **Sub-agents**: Explore / Scout / Mentor
+- **Advanced**: compaction, Goal, ProjectGraph, tool context
+- **App**: default access for undeclared apps
 
-- **General**: Language, debug toggle, license
-- **LLM**: Primary model, fast model, temperature, topP, maxTokens, thinking mode, maxToolRounds
-- **Search**: Self-hosted SearXNG first, with automatic fallback to built-in multi-source aggregation (Bing / Mojeek / Qwant / Wikipedia); category/time/language/safe search parameters are in the collapsible Advanced section; the engine selector has been removed from the UI
-- **Mentor**: Mentor sub-agent independent API key, Base URL, model selection
-- **Advanced**: Context compaction (model/temperature/summary output tokens/context limit/conversation rounds), TodoList max retries, ProjectGraph limits, streaming & tool output (stream idle timeout default 300s, middle-truncation keep chars default 20000), tool context mode (full/summary/auto, default full). Tool context mode only affects history context: when a tool result is produced, the full output is always sent to the model for the current round (size bounded by the truncation pipeline); once it becomes history it is replaced by a structured summary per mode (success/failure + key info + head/tail preview, with the full output spilled to disk and readable via read). Full mode keeps full text even in history — identical to the legacy behavior. The context limit `maxContextTokens` defaults to 500K; when reached, context is auto-compacted: earlier messages are summarized into a checkpoint and old tool results cleared, while recent rounds (including tool-call↔result pairs) stay verbatim after the checkpoint. This value applies uniformly to DeepSeek, OpenAI-compatible, and Claude providers (no per-provider clamping)
-- **App**: .papr app permissions — default when undeclared (local × network) and per-app two-axis overrides (overrides can only narrow a declared profile; saving restarts running backends with the new sandbox)
-
-Voice configuration is not in the main settings panel — it is configured per character in the CharacterModal Voice Tab.
-
-The toolbar at the top also provides a **Review** button to open the visual Code Review panel.
-
-Full parameter reference: `packages/@codepapr/core/docs/CONFIGURATION.md`.
+Voice lives on the character panel. Full parameter list: `packages/@codepapr/core/docs/CONFIGURATION.md`.
 
 ## Built-in Sub-Agents
 

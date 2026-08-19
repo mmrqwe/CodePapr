@@ -79,10 +79,6 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-line bg-base px-5 py-4 text-sm leading-relaxed text-fg-muted">
-        {t.settingsMentorDesc}
-      </div>
-
       {/* Agent Selector */}
       <div className="rounded-2xl border border-line bg-base px-5 py-5">
         <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
@@ -111,12 +107,9 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
 
       {isSub(subAgent) && (
         <div className="rounded-2xl border border-accent-soft bg-base px-5 py-5">
-          <h3 className="mb-2 text-sm font-semibold text-fg">
+          <h3 className="mb-4 text-sm font-semibold text-fg">
             {subAgent === 'explore' ? t.subAgentExplore : t.subAgentScout}
           </h3>
-          <p className="mb-4 text-xs leading-relaxed text-fg-muted">
-            {subAgent === 'explore' ? t.subAgentExploreDesc : t.subAgentScoutDesc}
-          </p>
 
           <div className="mb-5">
             <SelectField
@@ -151,10 +144,7 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
               rows={6}
               className="w-full resize-y rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
             />
-            <div className="flex items-center justify-between mt-1">
-              <p className="text-[10px] leading-relaxed text-fg-dim">
-                {t.subAgentPromptDefaultNote}
-              </p>
+            <div className="flex items-center justify-end mt-1">
               <button
                 type="button"
                 onClick={() => update({ [promptFieldFor(subAgent)]: '' } as Partial<Settings>)}
@@ -257,8 +247,7 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
 
       {subAgent === 'mentor' && (
         <div className="rounded-2xl border border-accent-soft bg-base px-5 py-5">
-          <h3 className="mb-2 text-sm font-semibold text-fg">{t.subAgentMentor}</h3>
-          <p className="mb-4 text-xs leading-relaxed text-fg-muted">{t.subAgentMentorDesc}</p>
+          <h3 className="mb-4 text-sm font-semibold text-fg">{t.subAgentMentor}</h3>
 
           <label className="flex cursor-pointer items-start gap-3 mb-5" title={t.mentorEnabledDesc}>
             <input
@@ -270,7 +259,6 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
             />
             <span className="block">
               <span className="block text-sm font-medium text-fg">{t.mentorEnabled}</span>
-              <span className="mt-1 block text-xs leading-relaxed text-fg-muted">{t.mentorEnabledDesc}</span>
             </span>
           </label>
 
@@ -292,14 +280,7 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
                   rows={6}
                   className="w-full resize-y rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
                 />
-                <div className="flex items-center justify-between mt-1">
-                  <p className="text-[10px] leading-relaxed text-fg-dim">
-                    {currentLang === 'en'
-                      ? 'Edit to override the default agent system prompt. Clear to restore the built-in default.'
-                      : currentLang === 'zh-TW'
-                      ? '編輯以覆蓋預設的 Agent 系統提示詞。清空則恢復內置預設。'
-                      : '编辑以覆盖默认的 Agent 系统提示词。清空则恢复内置默认。'}
-                  </p>
+                <div className="flex items-center justify-end mt-1">
                   <button
                     type="button"
                     onClick={() => update({ mentorPrompt: '' } as Partial<Settings>)}
@@ -355,7 +336,6 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
                       placeholder={t.mentorFallbackNote}
                       className={FIELD_CLASS}
                     />
-                    <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{t.mentorBaseURLHint}</p>
                   </div>
                   <div>
                     <label className={LABEL_CLASS}>
@@ -369,7 +349,6 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
                       placeholder={t.mentorFallbackNote}
                       className={FIELD_CLASS}
                     />
-                    <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{t.mentorApiKeyHint}</p>
                   </div>
                 </div>
                 <div className="mt-3">
@@ -409,7 +388,6 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
                       title={t.mentorMaxTokensLabel}
                       className={FIELD_CLASS}
                     />
-                    <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{t.mentorMaxTokensHint}</p>
                   </div>
                   <div>
                     <label className={LABEL_CLASS}>
@@ -429,7 +407,6 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
                       title={t.maxMentorConsultationsLabel}
                       className={FIELD_CLASS}
                     />
-                    <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{t.maxMentorConsultationsHint}</p>
                   </div>
                 </div>
                 <div className="mt-3">
@@ -443,7 +420,6 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
                     />
                     <span className="text-sm font-medium text-fg">{t.mentorThinkingEnabledLabel}</span>
                   </label>
-                  <p className="mt-2 text-[10px] leading-relaxed text-fg-dim">{t.mentorThinkingEnabledHint}</p>
                 </div>
 
                 {local.mentorThinkingEnabled && local.mentorApiFormat !== 'claude' && (
@@ -472,7 +448,6 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
                           </option>
                         ))}
                       </select>
-                      <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{t.mentorThinkingEffortHint}</p>
                     </div>
                     {!(THINKING_EFFORT_PRESETS as readonly string[]).includes(local.mentorThinkingEffort) && (
                       <div>
@@ -509,7 +484,6 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
                       title={t.mentorThinkingBudgetLabel}
                       className={FIELD_CLASS}
                     />
-                    <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{t.mentorThinkingBudgetHint}</p>
                   </div>
                 )}
               </div>

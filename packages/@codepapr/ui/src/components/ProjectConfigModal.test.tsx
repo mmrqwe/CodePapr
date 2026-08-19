@@ -189,7 +189,7 @@ describe('ProjectConfigModal', () => {
     await flushEffects();
 
     expect(container.textContent).toContain('search');
-    expect(container.textContent).toContain('Skill 怎么工作');
+    expect(container.textContent).toContain('启用');
     expect(
       invokeMock.mock.calls.some(
         ([command, args]) =>

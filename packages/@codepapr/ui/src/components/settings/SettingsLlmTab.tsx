@@ -113,10 +113,6 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-line bg-base px-5 py-4 text-sm leading-relaxed text-fg-muted">
-        {t.settingsLlmDesc}
-      </div>
-
       <div>
         <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
           {t.apiType}
@@ -240,7 +236,6 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
         onChange={(checked) => update({ fastModelEnabled: checked })}
         label={t.fastModel}
         desc={t.fastModelDesc}
-        extra={t.fastModelHint}
         title={t.fastModelDesc}
       />
 
@@ -257,7 +252,6 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
           {local.thinkingEnabled && isClaudeFormat && (
             <TextField
               label={t.thinkingBudgetLabel}
-              hint={t.thinkingBudgetHint}
               type="number"
               min={1024}
               max={maxTokensLimit}
@@ -279,7 +273,6 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
             <>
               <InlineSelectRow
                 title={t.thinkingEffort}
-                desc={t.thinkingEffortDesc}
                 value={effortSelectValue}
                 onChange={(value) => {
                   update({
@@ -320,7 +313,6 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
       {local.multimodalEnabled && (
         <InlineSelectRow
           title={t.multimodalModelTierLabel}
-          desc={t.multimodalModelTierDesc}
           value={local.multimodalModelTier}
           onChange={(value) => update({ multimodalModelTier: value as 'primary' | 'fast' | 'all' })}
         >
@@ -383,7 +375,6 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
             title={t.topPHint}
             className="mt-3 w-full cursor-pointer accent-accent"
           />
-          <p className="mt-1 text-[10px] leading-relaxed text-fg-dim">{t.topPHint}</p>
         </div>
 
         <TextField
@@ -400,10 +391,9 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
           title={t.maxTokens}
         />
 
-        <TextField
-          label={t.maxToolRounds}
-          hint={t.maxToolRoundsHint}
-          type="number"
+          <TextField
+            label={t.maxToolRounds}
+            type="number"
           min="1"
           max="5000"
           step="50"

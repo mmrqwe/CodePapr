@@ -11,9 +11,9 @@
 
 ### 三步启动
 
-1. **配置**：在桌面端设置中填写 API key、provider 和模型。
-2. **选入口**：使用桌面工作台。
-3. **选模式**：Ask（解释分析）、Plan（拆解方案）、Agent（实际执行）、App（生成可视化应用）。
+1. 设置里填 API key、provider、模型
+2. 打开项目文件夹
+3. 选 Ask / Plan / Agent / App
 
 ## 四种工作模式
 
@@ -153,20 +153,14 @@ LLM 可通过 4 个工具管理 app：
 
 ### 设置面板
 
-六个标签页：
+- **通用**：语言、调试、许可证
+- **LLM**：模型、采样、思考模式
+- **搜索**：SearXNG；失败则回落到内置聚合
+- **子Agent**：Explore / Scout / Mentor
+- **高级**：压缩、Goal、ProjectGraph、工具上下文
+- **App**：未声明 app 的默认权限
 
-- **General**：语言、调试、许可证
-- **LLM**：主模型、快速模型、temperature、topP、maxTokens、thinking 模式、maxToolRounds
-- **Search**：自部署 SearXNG 优先，失败自动降级到内置多源聚合（Bing / Mojeek / Qwant / Wikipedia）；分类/时间/语言/安全搜索等高级参数收入折叠区，搜索引擎选择器已移除
-- **Mentor**：Mentor 子代理独立 API key、Base URL、模型选择
-- **高级**：上下文压缩（模型/温度/摘要输出 token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 限制、流式与工具输出（流空闲超时默认 300 秒、中间截断保留字符数默认 20000）、工具上下文模式（完整/摘要/自动，默认完整）。工具上下文模式只作用于历史上下文：工具结果产生当轮始终把完整输出发给模型（大小由截断管线约束），变成历史后按模式替换为结构化摘要（成功/失败+关键信息+头尾预览，完整输出已落盘可用 read 回读）；完整模式历史也保留全文，等价旧版行为。上下文上限 `maxContextTokens` 默认 500K，达到后自动压缩：把较早消息摘要成 checkpoint 并清理旧工具结果，近期对话（含工具调用↔结果配对）原文保留在 checkpoint 之后；该值对 DeepSeek / OpenAI 兼容 / Claude 三种服务商统一生效，不再按服务商钳制
-- **App**：.papr 应用权限——未声明时的默认（本地访问 × 网络）与逐应用两轴覆盖（覆盖只能收窄，不能放大声明；保存后按新权限重启正在运行的后端）
-
-语音配置不在主设置面板，而在角色编辑面板（CharacterModal 的 Voice Tab）中按角色独立设置。
-
-顶部 AgentOps 工具栏还提供 **审查** 按钮，可打开可视化 Code Review 面板。
-
-完整参数参考见 `packages/@codepapr/core/docs/CONFIGURATION.md`。
+语音在角色面板。完整参数见 `packages/@codepapr/core/docs/CONFIGURATION.md`。
 
 ## 内置子代理
 
