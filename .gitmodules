@@ -22,3 +22,6 @@
 [submodule ".cargo-vendor/swift"]
 	path = .cargo-vendor/swift
 	url = https://github.com/alex-pinkus/tree-sitter-swift
+[submodule ".cargo-vendor/sql"]
+	path = .cargo-vendor/sql
+	url = https://github.com/DerekStride/tree-sitter-sql
