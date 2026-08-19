@@ -36,6 +36,7 @@ import {
   buildSyntheticUntrackedGitDiff,
   gitDiffCacheKey,
   gitStatusCodeForMode,
+  isUntrackedGitFile,
   listGitFilesForMode,
   type GitDiffMode,
 } from '../utils/workspaceGitPanel';
@@ -146,10 +147,6 @@ function createEmptyProjectGraphRelationSummary(): ProjectGraphFileRelationSumma
 
 function gitFileLabel(file: GitStatusFile): string {
   return file.originalPath ? `${file.originalPath} -> ${file.path}` : file.path;
-}
-
-function isUntrackedGitFile(file: GitStatusFile): boolean {
-  return file.indexStatus === '?' && file.worktreeStatus === '?';
 }
 
 function projectGraphFolderPath(path: string): string {

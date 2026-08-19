@@ -109,11 +109,13 @@ export function registerWorkspaceGitTools(ctx: WorkspaceToolContext): void {
   registry.register(toolByName('workspace_git_stage'), async (args: Record<string, unknown>) => {
     const all = asOptionalBoolean(args.all, 'all');
     const pathspecs = asOptionalStringArray(args.pathspecs);
+    // 与工具文档一致：未给 pathspecs 时默认暂存全部，避免 stage({}) 成功但 0 文件。
+    const stageAll = all ?? (pathspecs == null || pathspecs.length === 0);
 
     try {
       const result = await invoke<import('../utils/snapshot').GitOperationResult>('git_stage', {
         workspacePath: workspace(),
-        all: all ?? undefined,
+        all: stageAll,
         pathspecs: pathspecs ?? undefined,
       });
       return { available: true, isRepo: true, ok: result.ok, raw: result.message ?? '', action: 'stage', message: result.message };
@@ -147,7 +149,6 @@ export function registerWorkspaceGitTools(ctx: WorkspaceToolContext): void {
   registry.register(toolByName('workspace_git_restore'), async (args: Record<string, unknown>) => {
     const pathspecs = asOptionalStringArray(args.pathspecs);
     const source = asOptionalString(args.source);
-    const snapshot = asOptionalBoolean(args.snapshot, 'snapshot') ?? true;
     const includeUntracked = asOptionalBoolean(args.includeUntracked, 'includeUntracked');
 
     try {
@@ -155,21 +156,16 @@ export function registerWorkspaceGitTools(ctx: WorkspaceToolContext): void {
         assertValidGitReference(source, 'source');
       }
 
-      let backupRef: string | undefined;
-      if (snapshot) {
-        const snap = await invoke<import('../utils/snapshot').SnapshotInfo | null>('snapshot_create', {
-          workspacePath: workspace(),
-          label: `CodePapr safety snapshot | restore | ${source ?? 'HEAD'} | ${Date.now()}`,
-        });
-        backupRef = snap?.shortHash;
-      }
-
+      // 不要调用 snapshot_create：它会把脏工作区提交到 HEAD，随后再 restore HEAD
+      // 就变成空操作。git_restore_files 内部用 backup_current_state（不移动 HEAD）
+      // 做可撤销备份。snapshot 参数保留兼容，备份始终创建。
       const result = await invoke<import('../utils/snapshot').GitOperationResult>('git_restore_files', {
         workspacePath: workspace(),
         pathspecs: pathspecs ?? undefined,
         source: source ?? undefined,
         includeUntracked: includeUntracked ?? false,
       });
+      const backupRef = result.backupRef ?? undefined;
       return {
         available: true,
         isRepo: true,
@@ -177,7 +173,7 @@ export function registerWorkspaceGitTools(ctx: WorkspaceToolContext): void {
         raw: result.message ?? '',
         action: 'restore' as const,
         message: result.ok && backupRef
-          ? `${result.message}（安全快照 ${backupRef}）`
+          ? `${result.message}（安全备份 ${backupRef.slice(0, 7)}）`
           : result.message,
         ...(backupRef ? { backupBranch: backupRef } : {}),
       };

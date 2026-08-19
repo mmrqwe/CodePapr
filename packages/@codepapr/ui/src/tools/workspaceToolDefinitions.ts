@@ -884,7 +884,7 @@ name: 'web_download_file',
       properties: {
         all: {
           type: 'boolean',
-          description: '是否暂存全部改动。默认当 pathspecs 为空时为 true。',
+          description: '是否暂存全部改动。未传 pathspecs 时默认 true；显式 false 且无 pathspecs 则不暂存。',
         },
         pathspecs: {
           type: 'array',
@@ -923,7 +923,7 @@ name: 'web_download_file',
   },
   {
     name: 'workspace_git_restore',
-    description: '恢复工作区改动到干净状态。默认先创建安全 stash 快照，避免误伤。',
+    description: '恢复工作区改动到指定提交（默认 HEAD）。恢复前备份当前工作区且不移动 HEAD，可通过 workspace_restore_undo 撤销。',
     parameters: {
       type: 'object',
       properties: {
@@ -934,13 +934,12 @@ name: 'web_download_file',
         },
         snapshot: {
           type: 'boolean',
-          description: '恢复前是否先创建安全快照，默认 true。',
+          description: '兼容参数，已忽略。恢复前始终备份当前工作区（不移动 HEAD），不写入快照时间线。',
         },
         includeUntracked: {
           type: 'boolean',
           description:
-            '恢复时是否一并处理未跟踪文件（移除挡路的未跟踪文件），默认 false。' +
-            '注意：快照创建始终包含未跟踪文件（snapshot_create 的默认行为），此参数只影响恢复本身。',
+            '恢复时是否一并移除挡路的未跟踪文件，默认 false（保留未跟踪新文件）。',
         },
         source: {
           type: 'string',

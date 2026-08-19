@@ -19,6 +19,7 @@ import {
   formatCheckpointSubject,
   gitDiffCacheKey,
   gitStatusCodeForChange,
+  isUntrackedGitFile,
   listAllChangedGitFiles,
   summarizeGitDiff,
   type CommitKind,
@@ -36,13 +37,16 @@ import {
   gitDiff as gitDiffCmd,
   gitCommit as gitCommitCmd,
   gitBranchCheckout as gitBranchCheckoutCmd,
+  gitBranchList as gitBranchListCmd,
   gitRestoreFiles as gitRestoreFilesCmd,
   type CommitChangedFiles,
+  type GitBranch,
   type RestoreResult,
 } from '../utils/snapshot';
 import { getTranslation, type Lang } from '../utils/i18n';
 import { GitDiffPreview } from './GitDiffPreview';
 import { RestoreConfirmDialog } from './RestoreConfirmDialog';
+import { GitDiscardConfirmDialog } from './GitDiscardConfirmDialog';
 
 interface ReadFileResult {
   path: string;
@@ -74,7 +78,7 @@ export interface WorkspaceGitPanelProps {
   onExpandedChange?: (next: boolean) => void;
 }
 
-const MAX_GIT_CHANGED_FILES = 24;
+const GIT_CHANGED_FILES_PAGE_SIZE = 24;
 
 function createEmptyGitDiffLoadState(): GitDiffLoadState {
   return {
@@ -96,10 +100,6 @@ function gitFileDisplayName(file: GitStatusFile): string {
 
   const originalName = file.originalPath.split(/[\\/]/).filter(Boolean).pop() ?? file.originalPath;
   return `${originalName} -> ${currentName}`;
-}
-
-function isUntrackedGitFile(file: GitStatusFile): boolean {
-  return file.indexStatus === '?' && file.worktreeStatus === '?';
 }
 
 function formatLocalTime(isoString: string): string {
@@ -226,6 +226,11 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   const [commitFilesError, setCommitFilesError] = useState<Map<string, string>>(new Map());
   const [historyFilter, setHistoryFilter] = useState<'all' | 'user' | 'checkpoint'>('all');
   const [historyLimit, setHistoryLimit] = useState(20);
+  const [changedFilesLimit, setChangedFilesLimit] = useState(GIT_CHANGED_FILES_PAGE_SIZE);
+  const [gitBranches, setGitBranches] = useState<GitBranch[]>([]);
+  const [discardConfirm, setDiscardConfirm] = useState<
+    { kind: 'all' } | { kind: 'file'; file: GitStatusFile } | null
+  >(null);
   // #14：订阅工作区变更版本——agent 写入/回退后自动刷新 git 状态，与文件树
   // 的 watcher 行为一致。旧实现只靠手动刷新，两个面板状态长期矛盾。
   const workspaceMutationVersion = useAgentStore((state) => state.workspaceMutationVersion) ?? 0;
@@ -254,9 +259,10 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
       setIsLoading(true);
       pushDebugLog('git', 'loadGitStatus start', { workspacePath, retryCount, cancelled });
       try {
-        const [statusResult, logResult] = await Promise.all([
+        const [statusResult, logResult, branchResult] = await Promise.all([
           gitStatusCmd(workspacePath),
           gitLogCmd(workspacePath, historyLimit),
+          gitBranchListCmd(workspacePath).catch(() => [] as GitBranch[]),
         ]);
 
         pushDebugLog('git', 'gitStatusCmd returned', {
@@ -274,6 +280,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
               originalPath: e.oldPath ?? undefined,
               indexStatus: e.indexStatus,
               worktreeStatus: e.worktreeStatus,
+              isUntracked: e.isUntracked,
             }));
             setGitStatus({
               available: true,
@@ -298,6 +305,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
               })),
               raw: '',
             } satisfies GitHistorySummary);
+            setGitBranches(branchResult);
           } else if (retryCount < 1) {
             // 自动初始化 Shadow Git 仓库（最多重试 1 次，防止无限递归）
             pushDebugLog('git', 'auto-init branch', { available: statusResult.available, isRepo: statusResult.isRepo });
@@ -314,6 +322,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
             }
             if (!cancelled) {
               setGitHistory(null);
+              setGitBranches([]);
               setGitStatus({
                 available: statusResult.available,
                 isRepo: false,
@@ -327,6 +336,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
             pushDebugLog('git', 'retry exhausted', { available: statusResult.available, isRepo: statusResult.isRepo });
             if (!cancelled) {
               setGitHistory(null);
+              setGitBranches([]);
               setGitStatus({
                 available: statusResult.available,
                 isRepo: false,
@@ -341,6 +351,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
         pushDebugLog('git/error', 'loadGitStatus error', gitError instanceof Error ? gitError.message : String(gitError));
         if (!cancelled) {
           setGitHistory(null);
+          setGitBranches([]);
           setGitStatus({
             available: false,
             isRepo: false,
@@ -379,6 +390,8 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     }
     gitMutationRefreshTimerRef.current = setTimeout(() => {
       gitMutationRefreshTimerRef.current = null;
+      setGitFileDiffs({});
+      setExpandedGitDiffKey(null);
       setRefreshVersion((value) => value + 1);
     }, 400);
     return () => {
@@ -395,6 +408,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     setGitFileDiffs({});
     setGitActionMessage('');
     setGitHistory(null);
+    setGitBranches([]);
     setGitStatus(null);
     setIsLoading(false);
     setBranchName('');
@@ -406,6 +420,8 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     setCommitFilesError(new Map());
     setHistoryFilter('all');
     setHistoryLimit(20);
+    setChangedFilesLimit(GIT_CHANGED_FILES_PAGE_SIZE);
+    setDiscardConfirm(null);
     setDeselectedPaths(new Set());
     // 切换工作区必须清掉上一个工作区的破坏性操作状态：否则"撤销回退"按钮
     // 会残留，点击后撤销的是新工作区的最近一次备份（BACKUP_REF 按仓库隔离）。
@@ -429,11 +445,10 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   // 方案 A：单一"未提交改动"列表，不再分 staged / unstaged。
   const changedGitFiles =
     gitStatus?.available && gitStatus.isRepo ? listAllChangedGitFiles(visibleGitFiles) : [];
-  const visibleChangedFiles = changedGitFiles.slice(0, MAX_GIT_CHANGED_FILES);
+  const visibleChangedFiles = changedGitFiles.slice(0, changedFilesLimit);
   const changedCount = changedGitFiles.length;
-  // N17：列表只展示前 MAX_GIT_CHANGED_FILES 个文件，选择集与提交集必须一致——
-  // 提交只包含「已显示且勾选」的文件。旧实现基于全量 changedGitFiles 过滤勾选，
-  // 第 25 个之后用户看不到、也无法取消勾选的文件被静默强制提交。
+  // 提交只包含「已显示且勾选」的文件。加载更多会扩大可见集；未加载的文件
+  // 不会被静默提交。
   const hiddenChangedCount = Math.max(0, changedGitFiles.length - visibleChangedFiles.length);
   const selectedChangedFiles = visibleChangedFiles.filter((file) => !deselectedPaths.has(file.path));
   const selectedCount = selectedChangedFiles.length;
@@ -449,6 +464,13 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     return true;
   });
   const selectedHistoryEntry = historyEntries.find((entry) => entry.hash === selectedHistoryHash) ?? null;
+  const selectedHistoryIsBaseline =
+    selectedHistoryEntry != null &&
+    formatCheckpointSubject(selectedHistoryEntry.subject).kind === 'baseline';
+
+  function isUnrestorableBaseline(entry: GitHistoryEntry): boolean {
+    return formatCheckpointSubject(entry.subject).kind === 'baseline';
+  }
 
   function queueGitRefresh(message: string, nextSelection?: GitFileSelection | null): void {
     setGitActionMessage(message);
@@ -464,7 +486,10 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
   async function loadGitFileDiff(file: GitStatusFile, mode: GitDiffMode): Promise<void> {
     const cacheKey = gitDiffCacheKey(mode, file.path);
     const existing = gitFileDiffs[cacheKey];
-    if (existing?.summary || existing?.isLoading || loadingDiffKeysRef.current.has(cacheKey)) {
+    if (existing?.isLoading || loadingDiffKeysRef.current.has(cacheKey)) {
+      return;
+    }
+    if (existing?.summary?.available) {
       return;
     }
     loadingDiffKeysRef.current.add(cacheKey);
@@ -656,8 +681,6 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     setActiveGitActionKey('branch-checkout');
     setGitActionMessage('');
     try {
-      // 已选择历史提交时，新分支从该提交创建（分支已存在则直接切换，
-      // startPoint 只在创建路径生效——与表单提示文案一致）。
       const result = await gitBranchCheckoutCmd(
         workspacePath,
         trimmedBranchName,
@@ -670,8 +693,6 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
       }
       setBranchName('');
       queueGitRefresh(`${gitBranchDonePrefixText} ${trimmedBranchName}`);
-      // N4：分支切换会改写磁盘文件，必须走 mutation 通道失效预览缓存，
-      // 否则已打开文件永久显示旧内容。
       useAgentStore.getState().noteWorkspaceMutation();
     } catch (error) {
       setGitActionMessage((error instanceof Error ? error.message : String(error)) || gitActionFailedText);
@@ -680,8 +701,42 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     }
   }
 
+  async function switchExistingBranch(name: string): Promise<void> {
+    if (!name || name === gitStatus?.branch) {
+      return;
+    }
+    setActiveGitActionKey('branch-checkout');
+    setGitActionMessage('');
+    try {
+      const result = await gitBranchCheckoutCmd(workspacePath, name, false, false);
+      if (!result.ok) {
+        throw new Error(result.message);
+      }
+      queueGitRefresh(`${gitBranchDonePrefixText} ${name}`);
+      useAgentStore.getState().noteWorkspaceMutation();
+    } catch (error) {
+      setGitActionMessage((error instanceof Error ? error.message : String(error)) || gitActionFailedText);
+    } finally {
+      setActiveGitActionKey(null);
+    }
+  }
+
+  function applyDiscardResult(result: { ok: boolean; message: string; backupRef: string | null }, mutationPaths?: string[]): void {
+    if (!result.ok) {
+      throw new Error(result.message);
+    }
+    const msgs = [gitRestoreDoneText];
+    if (result.backupRef) {
+      msgs.push(`${gitBackupBranchSavedPrefixText} ${result.backupRef.slice(0, 7)}`);
+    }
+    queueGitRefresh(msgs.join(' · '));
+    useAgentStore.getState().noteWorkspaceMutation(mutationPaths);
+    setUndoResetAvailable(Boolean(result.backupRef));
+    setUndoBackupSha(result.backupRef);
+  }
+
   async function restoreGitWorkspace(): Promise<void> {
-    if (visibleGitFiles.length === 0) {
+    if (changedGitFiles.length === 0) {
       setGitActionMessage(t.workspaceGitNoChanges);
       return;
     }
@@ -690,17 +745,31 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
     setGitActionMessage('');
     try {
       const result = await gitRestoreFilesCmd(workspacePath);
-      if (!result.ok) {
-        throw new Error(result.message);
-      }
-      queueGitRefresh(gitRestoreDoneText);
-      // N4：restore 改写磁盘文件，必须走 mutation 通道失效预览缓存。
-      useAgentStore.getState().noteWorkspaceMutation(
-        visibleGitFiles.map((file) => file.path)
-      );
+      applyDiscardResult(result, changedGitFiles.map((file) => file.path));
     } catch (error) {
       setGitActionMessage((error instanceof Error ? error.message : String(error)) || gitActionFailedText);
     } finally {
+      setDiscardConfirm(null);
+      setActiveGitActionKey(null);
+    }
+  }
+
+  async function restoreGitFile(file: GitStatusFile): Promise<void> {
+    setActiveGitActionKey('restore-file');
+    setGitActionMessage('');
+    try {
+      const pathspecs = file.originalPath ? [file.originalPath, file.path] : [file.path];
+      const result = await gitRestoreFilesCmd(
+        workspacePath,
+        pathspecs,
+        undefined,
+        isUntrackedGitFile(file),
+      );
+      applyDiscardResult(result, pathspecs);
+    } catch (error) {
+      setGitActionMessage((error instanceof Error ? error.message : String(error)) || gitActionFailedText);
+    } finally {
+      setDiscardConfirm(null);
       setActiveGitActionKey(null);
     }
   }
@@ -869,17 +938,17 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
         {entries.map((entry) => {
           const isSelected = entry.hash === selectedHistoryHash;
           const isExpanded = expandedHistoryHashes.has(entry.hash);
-          const secondaryRefs = entry.refNames.filter((value) => !value.startsWith('HEAD -> '));
+          const secondaryRefs = entry.refNames.filter(
+            (value) => value !== 'HEAD' && !value.startsWith('HEAD -> ')
+          );
           const subjectInfo = formatCheckpointSubject(entry.subject);
           const cachedFiles = commitFilesCache.get(entry.hash);
           const isFilesLoading = commitFilesLoading.has(entry.hash);
           const filesError = commitFilesError.get(entry.hash);
           const isAuto = subjectInfo.kind !== 'user';
-          // 根提交判定必须基于完整历史列表，不能用过滤后的 entries：
-          // 筛选器激活时过滤列表的最后一项会被误判为 root（"与上一次对比"错误禁用）。
-          const isRootCommit =
-            historyEntries.length > 0 &&
-            entry.hash === historyEntries[historyEntries.length - 1]?.hash;
+          // 根提交只能在拿到 parentSha 后判定。截断历史里最后一项通常仍有父提交，
+          // 不能把「当前加载列表的最后一项」当成 root。
+          const isRootCommit = cachedFiles ? cachedFiles.parentSha == null : false;
           const titleTone =
             subjectInfo.kind === 'user'
               ? 'text-fg font-semibold'
@@ -949,7 +1018,9 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                   className={`mt-1 truncate text-[11px] ${titleTone}`}
                   title={entry.subject}
                 >
-                  {subjectInfo.display}
+                  {subjectInfo.kind === 'baseline'
+                    ? t.workspaceGitEmptyBaseline
+                    : subjectInfo.display}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-fg-muted">
                   <span>{entry.authorName}</span>
@@ -969,10 +1040,19 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (isUnrestorableBaseline(entry)) return;
                       setSelectedHistoryHash(isSelected ? null : entry.hash);
                     }}
+                    disabled={isUnrestorableBaseline(entry)}
+                    title={
+                      isUnrestorableBaseline(entry)
+                        ? t.workspaceGitEmptyBaselineTip
+                        : undefined
+                    }
                     className={`ml-auto rounded-md border px-2 py-0.5 text-[10px] transition-colors ${
-                      isSelected
+                      isUnrestorableBaseline(entry)
+                        ? 'cursor-not-allowed border-line text-fg-muted opacity-50'
+                        : isSelected
                         ? 'border-warn-bg bg-warn-bg text-warn'
                         : 'border-line text-fg-muted hover:border-warn-bg hover:text-fg'
                     }`}
@@ -1230,6 +1310,14 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                         >
                           {copyLabel}
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => setDiscardConfirm({ kind: 'file', file })}
+                          disabled={activeGitActionKey !== null}
+                          className="rounded-md border border-danger-bg px-2 py-1 text-[10px] text-danger transition-colors hover:border-danger hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {t.workspaceGitDiscardFile}
+                        </button>
                       </div>
 
                       {fileDiffState.summary.stat && (
@@ -1351,6 +1439,28 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
 
               <div className="space-y-2 rounded-xl border border-line bg-base px-3 py-3">
                 <div className="text-[11px] font-semibold text-fg-soft">{gitBranchLabelText}</div>
+                {gitBranches.length > 0 && (
+                  <label className="block space-y-1">
+                    <span className="text-[10px] text-fg-muted">{t.workspaceGitBranchCurrent}</span>
+                    <select
+                      value={gitStatus.branch ?? gitBranches.find((branch) => branch.isCurrent)?.name ?? ''}
+                      onChange={(event) => {
+                        const next = event.currentTarget.value;
+                        if (next) void switchExistingBranch(next);
+                      }}
+                      disabled={activeGitActionKey !== null}
+                      aria-label={t.workspaceGitBranchCurrent}
+                      className="w-full rounded-lg border border-line bg-base px-3 py-2 text-xs text-fg outline-none transition-colors focus:border-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {gitBranches.map((branch) => (
+                        <option key={branch.name} value={branch.name}>
+                          {branch.name}
+                          {branch.isCurrent ? ' *' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <div className="text-[10px] leading-relaxed text-fg-muted">{gitBranchHintText}</div>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <input
@@ -1358,6 +1468,7 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                     value={branchName}
                     onChange={(event) => setBranchName(event.currentTarget.value)}
                     placeholder={gitBranchPlaceholderText}
+                    aria-label={t.workspaceGitCreateBranch}
                     className="min-w-0 flex-1 rounded-lg border border-line bg-base px-3 py-2 text-xs text-fg outline-none transition-colors placeholder:text-fg-muted focus:border-accent-soft"
                   />
                   <button
@@ -1381,8 +1492,8 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                   <div className="text-[11px] font-semibold text-fg-soft">{gitHistoryTitleText}</div>
                   <button
                     type="button"
-                    onClick={() => void restoreGitWorkspace()}
-                    disabled={activeGitActionKey !== null || visibleGitFiles.length === 0}
+                    onClick={() => setDiscardConfirm({ kind: 'all' })}
+                    disabled={activeGitActionKey !== null || changedGitFiles.length === 0}
                     title={t.workspaceGitRestoreHint}
                     className="rounded-md border border-line px-2 py-1 text-[10px] text-fg-muted transition-colors hover:border-danger hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -1453,8 +1564,8 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                     )}
                     <button
                       type="button"
-                      onClick={() => selectedHistoryEntry && void resetGitToHistoryEntry(selectedHistoryEntry)}
-                      disabled={activeGitActionKey !== null || !selectedHistoryEntry}
+                      onClick={() => selectedHistoryEntry && !selectedHistoryIsBaseline && void resetGitToHistoryEntry(selectedHistoryEntry)}
+                      disabled={activeGitActionKey !== null || !selectedHistoryEntry || selectedHistoryIsBaseline}
                       className="rounded-md border border-warn-bg px-3 py-1.5 text-[11px] text-warn transition-colors hover:border-warn hover:bg-warn-bg disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {gitResetActionText}
@@ -1537,6 +1648,17 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
                   </div>
 
                   {renderGitFileList(visibleChangedFiles)}
+                  {hiddenChangedCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setChangedFilesLimit((value) => value + GIT_CHANGED_FILES_PAGE_SIZE)
+                      }
+                      className="w-full rounded-md border border-line py-1 text-[10px] text-fg-muted transition-colors hover:border-line-strong hover:text-fg"
+                    >
+                      {t.workspaceGitLoadMore} ({hiddenChangedCount})
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -1552,6 +1674,42 @@ export function WorkspaceGitPanel(props: WorkspaceGitPanelProps) {
           lang={lang ?? 'zh-CN'}
           onConfirm={handleRestoreConfirmed}
           onCancel={() => setRestoreTarget(null)}
+        />
+      )}
+      {discardConfirm && (
+        <GitDiscardConfirmDialog
+          lang={lang ?? 'zh-CN'}
+          title={
+            discardConfirm.kind === 'all'
+              ? t.workspaceGitDiscardConfirmTitle
+              : t.workspaceGitDiscardFileConfirmTitle
+          }
+          warning={
+            discardConfirm.kind === 'all'
+              ? t.workspaceGitDiscardConfirmWarning
+              : isUntrackedGitFile(discardConfirm.file)
+                ? t.workspaceGitDiscardFileConfirmUntracked
+                : t.workspaceGitDiscardFileConfirmTracked
+          }
+          files={
+            discardConfirm.kind === 'all'
+              ? changedGitFiles.map((file) => file.path)
+              : [discardConfirm.file.path]
+          }
+          confirmLabel={
+            discardConfirm.kind === 'all'
+              ? t.workspaceGitDiscardConfirmAction
+              : t.workspaceGitDiscardFileConfirmAction
+          }
+          executing={activeGitActionKey === 'restore' || activeGitActionKey === 'restore-file'}
+          onConfirm={() => {
+            if (discardConfirm.kind === 'all') {
+              void restoreGitWorkspace();
+            } else {
+              void restoreGitFile(discardConfirm.file);
+            }
+          }}
+          onCancel={() => setDiscardConfirm(null)}
         />
       )}
     </section>

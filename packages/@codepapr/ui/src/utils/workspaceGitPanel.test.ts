@@ -20,6 +20,7 @@ import {
   formatCheckpointSubject,
   gitStatusCodeForChange,
   gitStatusCodeForMode,
+  isUntrackedGitFile,
   isVisibleGitPanelFile,
   listAllChangedGitFiles,
   listGitFilesForMode,
@@ -232,6 +233,19 @@ describe('listAllChangedGitFiles & describeGitChange (方案 A: 单一改动列�
       kind: 'renamed',
     });
   });
+
+  it('treats Tauri untracked entries (space + ? + isUntracked) as untracked, not modified', () => {
+    const tauriUntracked = {
+      path: 'src/new.ts',
+      indexStatus: ' ',
+      worktreeStatus: '?',
+      isUntracked: true,
+    };
+    expect(isUntrackedGitFile(tauriUntracked)).toBe(true);
+    expect(listAllChangedGitFiles([tauriUntracked]).map((file) => file.path)).toEqual(['src/new.ts']);
+    expect(gitStatusCodeForChange(tauriUntracked)).toBe('??');
+    expect(describeGitChange(tauriUntracked)).toEqual({ code: '??', kind: 'untracked' });
+  });
 });
 
 describe('buildGitDiffContentPlan', () => {
@@ -374,7 +388,7 @@ describe('formatCheckpointSubject', () => {
   it('classifies the baseline commit', () => {
     expect(formatCheckpointSubject('codepapr:baseline')).toEqual({
       kind: 'baseline',
-      display: '初始快照',
+      display: 'Empty baseline (cannot restore)',
       sequence: null,
       preview: null,
     });

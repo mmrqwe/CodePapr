@@ -227,7 +227,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
         create: { type: 'boolean', description: '显式创建新分支。' },
         source: { type: 'string', description: 'restore 时恢复内容来源，默认 HEAD。' },
         limit: { type: 'number', description: 'log 时最多返回条数，默认 20。' },
-        snapshot: { type: 'boolean', description: '仅 restore 有效：恢复前额外创建安全快照（进入快照时间线），默认 true。reset 始终自动创建备份，不受此参数影响。' },
+        snapshot: { type: 'boolean', description: '仅 restore 兼容参数，已忽略。restore 始终备份当前工作区且不移动 HEAD；reset 始终自动创建备份。' },
         includeUntracked: { type: 'boolean', description: '仅 restore 有效：恢复时是否一并移除挡路的未跟踪文件，默认 false。' },
       },
       required: ['action'],

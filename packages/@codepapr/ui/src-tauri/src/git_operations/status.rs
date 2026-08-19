@@ -34,7 +34,8 @@ pub fn git_status_impl(workspace: &std::path::Path) -> GitStatusResult {
     let mut opts = StatusOptions::new();
     opts.include_untracked(true);
     opts.renames_head_to_index(true);
-    opts.recurse_untracked_dirs(false);
+    // 新目录下的未跟踪文件必须展开成具体路径，否则面板会把 `pkg/` 当目录条目丢掉。
+    opts.recurse_untracked_dirs(true);
 
     let statuses = match repo.statuses(Some(&mut opts)) {
         Ok(s) => s,
@@ -164,6 +165,33 @@ mod tests {
         assert!(modified.is_some(), "committed.txt 应出现在状态里");
         let modified = modified.unwrap();
         assert_eq!(modified.worktree_status, "M", "committed.txt 应标记为已修改");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    /// 新目录下的未跟踪文件必须展开成具体路径，否则前端会把 `nested/` 当目录丢掉。
+    #[test]
+    fn test_status_recurses_untracked_directories() {
+        let workspace = temp_workspace("untracked-dir");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        fs::write(workspace.join("tracked.txt"), "ok\n").unwrap();
+        engine.create("baseline").expect("baseline");
+
+        fs::create_dir_all(workspace.join("nested/inner")).unwrap();
+        fs::write(workspace.join("nested/inner/new.txt"), "new\n").unwrap();
+
+        let result = git_status_impl(&workspace);
+        let nested = result.entries.iter().find(|e| e.path == "nested/inner/new.txt");
+        assert!(nested.is_some(), "nested/inner/new.txt 应出现在状态里，不能只报 nested/: {:?}", result.entries.iter().map(|e| e.path.as_str()).collect::<Vec<_>>());
+        let nested = nested.unwrap();
+        assert!(nested.is_untracked, "nested 新文件应标记为未跟踪");
+        assert!(
+            !result.entries.iter().any(|e| e.path.ends_with('/')),
+            "不应再以目录条目代替具体文件: {:?}",
+            result.entries.iter().map(|e| e.path.as_str()).collect::<Vec<_>>()
+        );
 
         fs::remove_dir_all(&workspace).ok();
     }

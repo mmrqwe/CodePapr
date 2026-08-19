@@ -261,11 +261,17 @@ export async function gitBranchCheckout(
   });
 }
 
-export async function gitRestoreFiles(workspacePath: string, pathspecs?: string[], source?: string): Promise<GitOperationResult> {
+export async function gitRestoreFiles(
+  workspacePath: string,
+  pathspecs?: string[],
+  source?: string,
+  includeUntracked?: boolean,
+): Promise<GitOperationResult> {
   return invoke<GitOperationResult>('git_restore_files', {
     workspacePath,
     pathspecs: pathspecs ?? null,
     source: source ?? null,
+    includeUntracked: includeUntracked ?? null,
   });
 }
 

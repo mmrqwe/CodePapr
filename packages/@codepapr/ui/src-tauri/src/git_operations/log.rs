@@ -29,11 +29,7 @@ pub fn git_log_impl(workspace: &std::path::Path, limit: usize) -> Vec<GitLogEntr
         let timestamp = commit.time().seconds();
         let message = commit.message().unwrap_or("").lines().next().unwrap_or("").to_string();
         let is_head = head_oid == Some(oid);
-
-        let mut refs = Vec::new();
-        if is_head {
-            refs.push("HEAD".to_string());
-        }
+        let refs = Vec::new();
 
         result.push(GitLogEntry { sha, short_hash, author, email, timestamp, message, refs, is_head });
     }

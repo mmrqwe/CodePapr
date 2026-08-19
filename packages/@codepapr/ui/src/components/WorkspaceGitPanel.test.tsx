@@ -84,13 +84,30 @@ describe('WorkspaceGitPanel', () => {
             refs: ['origin/main'],
             isHead: false,
           },
+          {
+            sha: 'cccccccccccccccccccccccccccccccccccccccc',
+            shortHash: 'ccccccc',
+            author: 'CodePapr',
+            email: 'codepapr@test',
+            timestamp: Math.floor(Date.now() / 1000) - 10800,
+            message: 'codepapr:baseline',
+            refs: [],
+            isHead: false,
+          },
         ];
       }
 
       if (command === 'snapshot_changed_files') {
+        const sha = String(args?.sha ?? 'aaaaaaaa');
+        let parentSha: string | null = null;
+        if (sha.startsWith('aaaa')) {
+          parentSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+        } else if (sha.startsWith('bbbb')) {
+          parentSha = 'cccccccccccccccccccccccccccccccccccccccc';
+        }
         return {
-          sha: args?.sha ?? 'aaaaaaaa',
-          parentSha: null,
+          sha,
+          parentSha,
           files: [],
           totalAdditions: 0,
           totalDeletions: 0,
@@ -136,12 +153,45 @@ describe('WorkspaceGitPanel', () => {
         if (command === 'git_restore_files' || command === 'git_commit') {
           gitState = 'committed';
         }
-        return { ok: true, action: 'stage', message: 'ok' };
+        return {
+          ok: true,
+          action: command === 'git_restore_files' ? 'restore' : 'stage',
+          message: 'ok',
+          backupRef: command === 'git_restore_files' ? 'restore-backup-sha' : null,
+        };
       }
 
       if (command === 'git_branch_checkout') {
         currentBranch = (args?.branchName as string) ?? currentBranch;
         return { ok: true, action: 'branch_checkout', message: `切换到 ${currentBranch}` };
+      }
+
+      if (command === 'git_branch_list') {
+        return [
+          {
+            name: currentBranch,
+            isCurrent: true,
+            isRemote: false,
+            targetSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          },
+          {
+            name: 'feature/sandbox',
+            isCurrent: false,
+            isRemote: false,
+            targetSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          },
+        ];
+      }
+
+      if (command === 'git_diff') {
+        return {
+          available: true,
+          stat: ' README.md | 1 +\n',
+          diff: ['diff --git a/README.md b/README.md', '@@ -1 +1 @@', '-old', '+new'].join('\n'),
+          truncated: false,
+          files: [],
+          message: null,
+        };
       }
 
       // Legacy git CLI commands via run_workspace_command
@@ -650,6 +700,9 @@ describe('WorkspaceGitPanel', () => {
       if (command === 'git_log') {
         return [];
       }
+      if (command === 'git_branch_list') {
+        return [];
+      }
       if (command === 'git_commit') {
         return { ok: true, action: 'commit', message: '已创建提交 abc1234', backupRef: null };
       }
@@ -845,6 +898,18 @@ describe('WorkspaceGitPanel', () => {
       ) ?? null
     );
     await flushEffects();
+
+    expect(container.textContent).toContain('Discard local changes?');
+    expect(
+      invokeMock.mock.calls.some(([command]) => command === 'git_restore_files')
+    ).toBe(false);
+
+    click(
+      Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent === 'Discard changes'
+      ) ?? null
+    );
+    await flushEffects();
     await flushEffects();
 
     expect(
@@ -854,7 +919,22 @@ describe('WorkspaceGitPanel', () => {
       )
     ).toBe(true);
     expect(container.textContent).toContain('There are no uncommitted changes right now.');
-    expect(container.textContent).toContain('There are no uncommitted changes right now.');
+
+    const undoButton =
+      Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('Undo rollback')
+      ) ?? null;
+    expect(undoButton).not.toBeNull();
+    click(undoButton);
+    await flushEffects();
+    await flushEffects();
+
+    expect(
+      invokeMock.mock.calls.some(
+        ([command, payload]) =>
+          command === 'restore_undo' && payload?.expectedBackupSha === 'restore-backup-sha'
+      )
+    ).toBe(true);
 
     // N4：restore 改写磁盘文件，必须 bump mutation version 失效预览缓存。
     await act(async () => {
@@ -948,5 +1028,172 @@ describe('WorkspaceGitPanel', () => {
 
     const callsAfter = invokeMock.mock.calls.filter(([command]) => command === 'git_status').length;
     expect(callsAfter).toBeGreaterThan(callsBefore);
+  });
+
+  it('loads more changed files beyond the first page', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'git_status') {
+        return {
+          available: true,
+          isRepo: true,
+          branch: 'main',
+          headShort: 'aaaaaaa',
+          entries: Array.from({ length: 26 }, (_, index) => ({
+            path: `src/file-${String(index + 1).padStart(2, '0')}.ts`,
+            oldPath: null,
+            indexStatus: ' ',
+            worktreeStatus: 'M',
+            isUntracked: false,
+          })),
+          message: null,
+        };
+      }
+      if (command === 'git_log') return [];
+      if (command === 'git_branch_list') return [];
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    await act(async () => {
+      root.render(
+        <WorkspaceGitPanel
+          workspacePath="/workspace"
+          lang="en"
+          selectedPath={null}
+          selectedGitFile={null}
+          onSelectGitFile={() => undefined}
+        />
+      );
+    });
+
+    click(container.querySelector('button[aria-label="Git Delta"]'));
+    await flushEffects();
+
+    expect(container.textContent).toContain('24 of 24 selected');
+    expect(container.textContent).toContain('file-01.ts');
+    expect(container.textContent).not.toContain('file-25.ts');
+
+    click(
+      Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('Load more')
+      ) ?? null
+    );
+    await flushEffects();
+
+    expect(container.textContent).toContain('26 of 26 selected');
+    expect(container.textContent).toContain('file-25.ts');
+  });
+
+  it('discards a single file after confirmation', async () => {
+    await act(async () => {
+      root.render(
+        <WorkspaceGitPanel
+          workspacePath="/workspace"
+          lang="en"
+          selectedPath={null}
+          selectedGitFile={null}
+          onSelectGitFile={() => undefined}
+        />
+      );
+    });
+
+    click(container.querySelector('button[aria-label="Git Delta"]'));
+    await flushEffects();
+
+    click(
+      Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('README.md')
+      ) ?? null
+    );
+    await flushEffects();
+
+    click(
+      Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent === 'Discard file'
+      ) ?? null
+    );
+    await flushEffects();
+
+    expect(container.textContent).toContain('Discard this file?');
+    click(
+      Array.from(container.querySelectorAll('button')).find(
+        (button) => button.textContent === 'Discard file' && button.className.includes('text-white')
+      ) ?? null
+    );
+    await flushEffects();
+    await flushEffects();
+
+    expect(
+      invokeMock.mock.calls.some(
+        ([command, payload]) =>
+          command === 'git_restore_files' &&
+          Array.isArray(payload?.pathspecs) &&
+          payload.pathspecs.includes('README.md')
+      )
+    ).toBe(true);
+  });
+
+  it('switches an existing branch from the dropdown', async () => {
+    await act(async () => {
+      root.render(
+        <WorkspaceGitPanel
+          workspacePath="/workspace"
+          lang="en"
+          selectedPath={null}
+          selectedGitFile={null}
+          onSelectGitFile={() => undefined}
+        />
+      );
+    });
+
+    click(container.querySelector('button[aria-label="Git Delta"]'));
+    await flushEffects();
+
+    const select = container.querySelector('select[aria-label="Current branch"]') as HTMLSelectElement | null;
+    expect(select).not.toBeNull();
+    expect(Array.from(select!.options).map((option) => option.value)).toEqual([
+      'main',
+      'feature/sandbox',
+    ]);
+
+    act(() => {
+      select!.value = 'feature/sandbox';
+      select!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flushEffects();
+    await flushEffects();
+
+    expect(
+      invokeMock.mock.calls.some(
+        ([command, payload]) =>
+          command === 'git_branch_checkout' &&
+          payload?.branchName === 'feature/sandbox' &&
+          payload?.createIfMissing === false
+      )
+    ).toBe(true);
+  });
+
+  it('disables restore for the empty codepapr:baseline commit', async () => {
+    await act(async () => {
+      root.render(
+        <WorkspaceGitPanel
+          workspacePath="/workspace"
+          lang="en"
+          selectedPath={null}
+          selectedGitFile={null}
+          onSelectGitFile={() => undefined}
+        />
+      );
+    });
+
+    click(container.querySelector('button[aria-label="Git Delta"]'));
+    await flushEffects();
+
+    expect(container.textContent).toContain('Empty baseline (cannot restore)');
+
+    const baselineTarget = Array.from(container.querySelectorAll('button')).find((button) => {
+      const disabled = (button as HTMLButtonElement).disabled;
+      return disabled && button.textContent?.includes('Set as reset target');
+    });
+    expect(baselineTarget).toBeDefined();
   });
 });

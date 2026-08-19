@@ -95,7 +95,10 @@ pub async fn git_stage(
     crate::shared::run_blocking_workspace_task(move || -> Result<GitOperationResult, String> {
         let workspace = std::path::PathBuf::from(workspace_path);
         Ok(crate::shared::with_workspace_git_write_lock(&workspace, || {
-            git_stage_impl(&workspace, all.unwrap_or(false), &pathspecs.unwrap_or_default())
+            let pathspecs = pathspecs.unwrap_or_default();
+            // 与工具文档一致：未指定 pathspecs 时默认暂存全部。
+            let stage_all = all.unwrap_or(pathspecs.is_empty());
+            git_stage_impl(&workspace, stage_all, &pathspecs)
         }))
     })
     .await

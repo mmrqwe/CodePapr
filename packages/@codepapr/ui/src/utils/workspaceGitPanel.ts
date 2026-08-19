@@ -63,6 +63,15 @@ function isHiddenGitPanelNoisePath(path: string): boolean {
   return HIDDEN_GIT_PANEL_BASENAMES.has(basename);
 }
 
+export function isUntrackedGitFile(file: GitStatusFile): boolean {
+  if (file.isUntracked != null) {
+    return file.isUntracked;
+  }
+  const index = file.indexStatus?.trim() ?? '';
+  const worktree = file.worktreeStatus?.trim() ?? '';
+  return (index === '?' || index === '') && worktree === '?';
+}
+
 export function isVisibleGitPanelFile(file: GitStatusFile): boolean {
   const normalizedPath = file.path.trim().replace(/\\/g, '/');
   const normalizedOriginalPath = file.originalPath?.trim().replace(/\\/g, '/');
@@ -102,7 +111,7 @@ export function listGitFilesForMode(
       return Boolean(file.indexStatus && file.indexStatus !== '?');
     }
 
-    return Boolean(file.worktreeStatus) || (file.indexStatus === '?' && file.worktreeStatus === '?');
+    return Boolean(file.worktreeStatus) || isUntrackedGitFile(file);
   });
 }
 
@@ -121,10 +130,7 @@ export function listAllChangedGitFiles(files: readonly GitStatusFile[]): GitStat
     const worktreeTrimmed = file.worktreeStatus?.trim() ?? '';
     const hasIndexChange = indexTrimmed.length > 0 && indexTrimmed !== '?';
     const hasWorktreeChange = worktreeTrimmed.length > 0 && worktreeTrimmed !== '?';
-    const isUntracked = file.isUntracked ?? (
-      (indexTrimmed === '?' || indexTrimmed === '') &&
-      (worktreeTrimmed === '?' || (worktreeTrimmed === '' && indexTrimmed === '?'))
-    );
+    const isUntracked = isUntrackedGitFile(file);
     return hasIndexChange || hasWorktreeChange || isUntracked;
   });
 }
@@ -135,7 +141,7 @@ export function listAllChangedGitFiles(files: readonly GitStatusFile[]): GitStat
  * - 否则优先用 worktreeStatus（如果有），否则用 indexStatus。
  */
 export function gitStatusCodeForChange(file: GitStatusFile): string {
-  if (file.isUntracked ?? (file.indexStatus === '?' && file.worktreeStatus === '?')) {
+  if (isUntrackedGitFile(file)) {
     return '??';
   }
   if (file.worktreeStatus && file.worktreeStatus.trim()) {
@@ -146,7 +152,7 @@ export function gitStatusCodeForChange(file: GitStatusFile): string {
 
 /** 与 describeGitFileStatus 类似，但不需要区分模式（统一从"未提交改动"角度判定）。 */
 export function describeGitChange(file: GitStatusFile): GitDisplayStatus {
-  if (file.isUntracked ?? (file.indexStatus === '?' && file.worktreeStatus === '?')) {
+  if (isUntrackedGitFile(file)) {
     return { code: '??', kind: 'untracked' };
   }
 
@@ -162,7 +168,7 @@ export function gitStatusCodeForMode(file: GitStatusFile, mode: GitDiffMode): st
     return file.indexStatus || '??';
   }
 
-  if (file.indexStatus === '?' && file.worktreeStatus === '?') {
+  if (isUntrackedGitFile(file)) {
     return '??';
   }
 
@@ -170,7 +176,7 @@ export function gitStatusCodeForMode(file: GitStatusFile, mode: GitDiffMode): st
 }
 
 export function describeGitFileStatus(file: GitStatusFile, mode: GitDiffMode): GitDisplayStatus {
-  if (mode === 'unstaged' && file.indexStatus === '?' && file.worktreeStatus === '?') {
+  if (mode === 'unstaged' && isUntrackedGitFile(file)) {
     return { code: '??', kind: 'untracked' };
   }
 
@@ -267,7 +273,7 @@ export function formatCheckpointSubject(rawSubject: string): CheckpointSubjectIn
   }
 
   if (subject === 'codepapr:baseline') {
-    return { kind: 'baseline', display: '初始快照', sequence: null, preview: null };
+    return { kind: 'baseline', display: 'Empty baseline (cannot restore)', sequence: null, preview: null };
   }
 
   if (LEGACY_CHECKPOINT_PATTERN.test(subject)) {
