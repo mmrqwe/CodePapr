@@ -75,12 +75,16 @@ describe('fetchMarketServers', () => {
     vi.restoreAllMocks();
   });
 
-  it('throws instead of returning an empty list on HTTP errors', async () => {
-    const fetchMock = vi.fn(async () => ({
+  function failingFetch() {
+    return vi.fn(async (_input: string, _init?: RequestInit) => ({
       ok: false,
       status: 503,
       statusText: 'Service Unavailable',
     }));
+  }
+
+  it('throws instead of returning an empty list on HTTP errors', async () => {
+    const fetchMock = failingFetch();
     vi.stubGlobal('fetch', fetchMock);
     await expect(fetchMarketServers()).rejects.toThrow('HTTP 503');
     expect(fetchMock).toHaveBeenCalled();
@@ -90,11 +94,7 @@ describe('fetchMarketServers', () => {
   });
 
   it('sends search= to the official registry', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: false,
-      status: 503,
-      statusText: 'Service Unavailable',
-    }));
+    const fetchMock = failingFetch();
     vi.stubGlobal('fetch', fetchMock);
     await expect(fetchMarketServers({ search: 'github' })).rejects.toThrow('HTTP 503');
     const url = String(fetchMock.mock.calls[0]?.[0] ?? '');
