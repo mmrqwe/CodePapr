@@ -5,7 +5,202 @@ import { resolveTheme, validateCustomTheme } from '../../theme/themeEngine';
 import type { CustomThemeRecord } from '../../theme/types';
 import { ACCENT_PATTERN } from '../../theme/types';
 import { DEFAULT_SETTINGS, normalizeCustomSystemPrompt } from './defaults';
-import type { ApiFormat, ApiMode, Lang, ModeConfig, ProviderName, Settings, WorkspaceEntry } from './types';
+import type { ApiFormat, ApiMode, Lang, ModeConfig, ModelProfile, ProviderName, Settings, WorkspaceEntry } from './types';
+
+function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile | null {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+  const obj = input as Record<string, unknown>;
+  const id = typeof obj.id === 'string' && obj.id.trim() ? obj.id.trim() : fallbackId;
+  const name = typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim() : 'Unnamed Profile';
+  const apiMode: ApiMode =
+    obj.apiMode === 'deepseek' || obj.apiMode === 'custom' || obj.apiMode === 'local'
+      ? obj.apiMode
+      : 'custom';
+  const apiFormat: ApiFormat =
+    obj.apiFormat === 'claude' ? 'claude' : obj.apiFormat === 'response' ? 'response' : 'openai';
+  const baseURL = typeof obj.baseURL === 'string' ? obj.baseURL.trim() : '';
+  const apiKey = typeof obj.apiKey === 'string' ? obj.apiKey.trim() : '';
+  const model = typeof obj.model === 'string' ? obj.model.trim() : '';
+  const maxTokens =
+    typeof obj.maxTokens === 'number' && Number.isFinite(obj.maxTokens)
+      ? Math.max(100, Math.floor(obj.maxTokens))
+      : DEFAULT_SETTINGS.maxTokens;
+  const thinkingEnabled = typeof obj.thinkingEnabled === 'boolean' ? obj.thinkingEnabled : false;
+  const thinkingEffort = typeof obj.thinkingEffort === 'string' ? obj.thinkingEffort.trim() : '';
+  const thinkingBudgetTokens =
+    typeof obj.thinkingBudgetTokens === 'number' && Number.isFinite(obj.thinkingBudgetTokens)
+      ? Math.max(0, Math.floor(obj.thinkingBudgetTokens))
+      : 4096;
+  const temperature =
+    typeof obj.temperature === 'number' && Number.isFinite(obj.temperature)
+      ? Math.max(0, Math.min(2, obj.temperature))
+      : undefined;
+  const topP =
+    typeof obj.topP === 'number' && Number.isFinite(obj.topP)
+      ? Math.max(0, Math.min(1, obj.topP))
+      : undefined;
+
+  return {
+    id,
+    name,
+    apiMode,
+    apiFormat,
+    baseURL,
+    apiKey,
+    model,
+    maxTokens,
+    thinkingEnabled,
+    thinkingEffort,
+    thinkingBudgetTokens,
+    ...(temperature !== undefined ? { temperature } : {}),
+    ...(topP !== undefined ? { topP } : {}),
+  };
+}
+
+export function createDefaultProfile(
+  name: string = '新建模型配置',
+  apiMode: ApiMode = 'custom'
+): ModelProfile {
+  const id = `profile-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  if (apiMode === 'deepseek') {
+    return {
+      id,
+      name: name || 'DeepSeek 官方',
+      apiMode: 'deepseek',
+      apiFormat: 'openai',
+      baseURL: '',
+      apiKey: '',
+      model: 'deepseek-v4-pro',
+      maxTokens: DEFAULT_SETTINGS.maxTokens,
+      thinkingEnabled: true,
+      thinkingEffort: 'max',
+      thinkingBudgetTokens: 4096,
+    };
+  }
+  if (apiMode === 'local') {
+    return {
+      id,
+      name: name || '本地模型',
+      apiMode: 'local',
+      apiFormat: 'openai',
+      baseURL: 'http://127.0.0.1:8080/v1',
+      apiKey: '',
+      model: 'local-model',
+      maxTokens: DEFAULT_SETTINGS.maxTokens,
+      thinkingEnabled: false,
+      thinkingEffort: '',
+      thinkingBudgetTokens: 0,
+    };
+  }
+  return {
+    id,
+    name: name || '自定义模型',
+    apiMode: 'custom',
+    apiFormat: 'openai',
+    baseURL: '',
+    apiKey: '',
+    model: 'gpt-4o',
+    maxTokens: DEFAULT_SETTINGS.maxTokens,
+    thinkingEnabled: false,
+    thinkingEffort: '',
+    thinkingBudgetTokens: 4096,
+  };
+}
+
+function buildSynthesizedProfiles(
+  input: Partial<Settings>,
+  apiMode: ApiMode,
+  deepseek: ModeConfig,
+  custom: ModeConfig,
+  local: ModeConfig,
+  apiFormat: ApiFormat,
+  thinkingEnabled: boolean,
+  thinkingEffort: string,
+  thinkingBudgetTokens: number,
+  mentorModel: string,
+  mentorBaseURL: string,
+  mentorApiKey: string,
+  mentorApiFormat: ApiFormat,
+  mentorMaxTokens: number,
+  mentorThinkingEnabled: boolean,
+  mentorThinkingEffort: string,
+  mentorThinkingBudgetTokens: number,
+): ModelProfile[] {
+  const profiles: ModelProfile[] = [
+    {
+      id: 'profile-deepseek',
+      name: 'DeepSeek 官方',
+      apiMode: 'deepseek',
+      apiFormat: 'openai',
+      baseURL: deepseek.baseURL,
+      apiKey: deepseek.apiKey,
+      model: deepseek.model || 'deepseek-v4-pro',
+      maxTokens: deepseek.maxTokens || DEFAULT_SETTINGS.maxTokens,
+      thinkingEnabled: apiMode === 'deepseek' ? thinkingEnabled : true,
+      thinkingEffort: apiMode === 'deepseek' ? thinkingEffort : 'max',
+      thinkingBudgetTokens: apiMode === 'deepseek' ? thinkingBudgetTokens : 4096,
+    },
+    {
+      id: 'profile-deepseek-fast',
+      name: 'DeepSeek Flash (快速)',
+      apiMode: 'deepseek',
+      apiFormat: 'openai',
+      baseURL: deepseek.baseURL,
+      apiKey: deepseek.apiKey,
+      model: deepseek.fastModel || 'deepseek-v4-flash',
+      maxTokens: deepseek.maxTokens || DEFAULT_SETTINGS.maxTokens,
+      thinkingEnabled: false,
+      thinkingEffort: '',
+      thinkingBudgetTokens: 0,
+    },
+    {
+      id: 'profile-custom',
+      name: '自定义 API (Custom)',
+      apiMode: 'custom',
+      apiFormat,
+      baseURL: custom.baseURL,
+      apiKey: custom.apiKey,
+      model: custom.model || 'gpt-4o',
+      maxTokens: custom.maxTokens || DEFAULT_SETTINGS.maxTokens,
+      thinkingEnabled: apiMode === 'custom' ? thinkingEnabled : false,
+      thinkingEffort: apiMode === 'custom' ? thinkingEffort : '',
+      thinkingBudgetTokens: apiMode === 'custom' ? thinkingBudgetTokens : 4096,
+    },
+    {
+      id: 'profile-local',
+      name: '本地模型 (Local)',
+      apiMode: 'local',
+      apiFormat: 'openai',
+      baseURL: local.baseURL || 'http://127.0.0.1:8080/v1',
+      apiKey: local.apiKey,
+      model: local.model || 'local-model',
+      maxTokens: local.maxTokens || DEFAULT_SETTINGS.maxTokens,
+      thinkingEnabled: false,
+      thinkingEffort: '',
+      thinkingBudgetTokens: 0,
+    },
+  ];
+
+  if (mentorModel || mentorApiKey || mentorBaseURL) {
+    profiles.push({
+      id: 'profile-mentor',
+      name: '导师模型 (Mentor)',
+      apiMode: 'custom',
+      apiFormat: mentorApiFormat,
+      baseURL: mentorBaseURL,
+      apiKey: mentorApiKey,
+      model: mentorModel || 'claude-sonnet-4-20250514',
+      maxTokens: mentorMaxTokens,
+      thinkingEnabled: mentorThinkingEnabled,
+      thinkingEffort: mentorThinkingEffort,
+      thinkingBudgetTokens: mentorThinkingBudgetTokens,
+    });
+  }
+
+  return profiles;
+}
 
 function normalizeModeConfig(
   input: unknown,
@@ -110,7 +305,13 @@ export function normalizeSettings(
   const apiMode: ApiMode =
     input.apiMode ?? (input.provider && input.provider !== 'deepseek' ? 'custom' : 'deepseek');
   const apiFormat: ApiFormat =
-    input.apiFormat ?? (input.provider === 'claude' ? 'claude' : 'openai');
+    input.apiFormat === 'claude' || input.apiFormat === 'response' || input.apiFormat === 'openai'
+      ? input.apiFormat
+      : input.provider === 'claude'
+      ? 'claude'
+      : input.provider === 'response'
+      ? 'response'
+      : 'openai';
   const provider: ProviderName =
     apiMode === 'deepseek' ? 'deepseek' : apiMode === 'local' ? 'openai' : apiFormat;
 
@@ -294,7 +495,11 @@ export function normalizeSettings(
       : DEFAULT_SETTINGS.projectGraphMaxTreeEntries;
 
   const mentorApiFormat: ApiFormat =
-    input.mentorApiFormat === 'claude' ? 'claude' : 'openai';
+    input.mentorApiFormat === 'claude'
+      ? 'claude'
+      : input.mentorApiFormat === 'response'
+      ? 'response'
+      : 'openai';
   // 迁移：旧默认值为 10000，过小会导致 mentor 思考/长回复被 max_tokens 截断。
   // 持久化值恰为旧默认时升级到新默认（100k）；用户显式设置的其他值保持不变。
   const LEGACY_MENTOR_MAX_TOKENS = 10000;
@@ -497,27 +702,224 @@ export function normalizeSettings(
       ? input.accent.trim()
       : null;
 
+  // Model profiles handling
+  const hasExplicitProfiles = Array.isArray(input.modelProfiles) && input.modelProfiles.length > 0;
+  let modelProfiles: ModelProfile[];
+  if (hasExplicitProfiles) {
+    const normalized: ModelProfile[] = [];
+    input.modelProfiles!.forEach((item, index) => {
+      const prof = normalizeModelProfile(item, `profile-${index + 1}`);
+      if (prof) normalized.push(prof);
+    });
+    modelProfiles = normalized.length > 0 ? normalized : DEFAULT_SETTINGS.modelProfiles;
+  } else {
+    modelProfiles = buildSynthesizedProfiles(
+      input,
+      apiMode,
+      deepseek,
+      custom,
+      local,
+      apiFormat,
+      thinkingEnabled,
+      thinkingEffort,
+      thinkingBudgetTokens,
+      typeof input.mentorModel === 'string' ? input.mentorModel.trim() : '',
+      typeof input.mentorBaseURL === 'string' ? input.mentorBaseURL.trim() : '',
+      typeof input.mentorApiKey === 'string' ? input.mentorApiKey.trim() : '',
+      mentorApiFormat,
+      mentorMaxTokens,
+      mentorThinkingEnabled,
+      mentorThinkingEffort,
+      mentorThinkingBudgetTokens,
+    );
+  }
+
+  // Slot ID resolution
+  let primaryProfileId =
+    typeof input.primaryProfileId === 'string' && input.primaryProfileId.trim()
+      ? input.primaryProfileId.trim()
+      : '';
+  if (!modelProfiles.some((p) => p.id === primaryProfileId)) {
+    const byMode = modelProfiles.find((p) => p.apiMode === apiMode);
+    primaryProfileId = byMode ? byMode.id : modelProfiles[0].id;
+  }
+
+  let fastProfileId =
+    typeof input.fastProfileId === 'string' && input.fastProfileId.trim()
+      ? input.fastProfileId.trim()
+      : '';
+  if (!modelProfiles.some((p) => p.id === fastProfileId)) {
+    const fastCandidate =
+      modelProfiles.find((p) => p.id === 'profile-deepseek-fast') ||
+      modelProfiles.find(
+        (p) =>
+          p.name.toLowerCase().includes('fast') ||
+          p.name.includes('快速') ||
+          p.model.toLowerCase().includes('flash')
+      ) ||
+      modelProfiles[0];
+    fastProfileId = fastCandidate ? fastCandidate.id : primaryProfileId;
+  }
+
+  let mentorProfileId =
+    typeof input.mentorProfileId === 'string' && input.mentorProfileId.trim()
+      ? input.mentorProfileId.trim()
+      : '';
+  if (!modelProfiles.some((p) => p.id === mentorProfileId)) {
+    const mentorCandidate =
+      modelProfiles.find((p) => p.id === 'profile-mentor') ||
+      modelProfiles.find(
+        (p) =>
+          p.name.toLowerCase().includes('mentor') ||
+          p.name.includes('导师') ||
+          p.name.includes('導師') ||
+          p.id === 'profile-custom'
+      ) ||
+      modelProfiles[0];
+    mentorProfileId = mentorCandidate ? mentorCandidate.id : primaryProfileId;
+  }
+
+  // Active profiles lookup
+  const activePrimaryProfile = modelProfiles.find((p) => p.id === primaryProfileId) || modelProfiles[0];
+  const activeFastProfile = modelProfiles.find((p) => p.id === fastProfileId) || activePrimaryProfile;
+  const activeMentorProfile = modelProfiles.find((p) => p.id === mentorProfileId) || activePrimaryProfile;
+
+  // If per-mode configs were provided in input, sync them into the corresponding profiles
+  if (input.deepseek) {
+    const dsProfile = modelProfiles.find((p) => p.id === 'profile-deepseek' || p.apiMode === 'deepseek');
+    if (dsProfile) {
+      if (typeof input.deepseek.apiKey === 'string') dsProfile.apiKey = input.deepseek.apiKey.trim();
+      if (typeof input.deepseek.baseURL === 'string') dsProfile.baseURL = input.deepseek.baseURL.trim();
+      if (typeof input.deepseek.model === 'string') dsProfile.model = input.deepseek.model.trim();
+      if (typeof input.deepseek.fastModel === 'string') {
+        const dsFast = modelProfiles.find((p) => p.id === 'profile-deepseek-fast');
+        if (dsFast) dsFast.model = input.deepseek.fastModel.trim();
+      }
+    }
+  }
+  if (input.custom) {
+    const customProfile = modelProfiles.find((p) => p.id === 'profile-custom' || (p.apiMode === 'custom' && p.id !== 'profile-mentor'));
+    if (customProfile) {
+      if (typeof input.custom.apiKey === 'string') customProfile.apiKey = input.custom.apiKey.trim();
+      if (typeof input.custom.baseURL === 'string') customProfile.baseURL = input.custom.baseURL.trim();
+      if (typeof input.custom.model === 'string') customProfile.model = input.custom.model.trim();
+    }
+  }
+  if (input.local) {
+    const localProfile = modelProfiles.find((p) => p.id === 'profile-local' || p.apiMode === 'local');
+    if (localProfile) {
+      if (typeof input.local.apiKey === 'string') localProfile.apiKey = input.local.apiKey.trim();
+      if (typeof input.local.baseURL === 'string') localProfile.baseURL = input.local.baseURL.trim();
+      if (typeof input.local.model === 'string') localProfile.model = input.local.model.trim();
+    }
+  }
+
+  // If explicit flat fields were provided in input, sync into active slot profiles
+  if (typeof input.apiKey === 'string') {
+    activePrimaryProfile.apiKey = input.apiKey.trim();
+  }
+  if (typeof input.model === 'string') {
+    activePrimaryProfile.model = input.model.trim();
+  }
+  if (typeof input.baseURL === 'string') {
+    activePrimaryProfile.baseURL = input.baseURL.trim();
+  }
+  if (typeof input.fastModel === 'string') {
+    activeFastProfile.model = input.fastModel.trim();
+  }
+  if (typeof input.mentorModel === 'string') {
+    activeMentorProfile.model = input.mentorModel.trim();
+  }
+  if (typeof input.mentorApiKey === 'string') {
+    activeMentorProfile.apiKey = input.mentorApiKey.trim();
+  }
+  if (typeof input.mentorBaseURL === 'string') {
+    activeMentorProfile.baseURL = input.mentorBaseURL.trim();
+  }
+
+  const effectiveApiMode = hasExplicitProfiles ? activePrimaryProfile.apiMode : apiMode;
+  const effectiveApiFormat = hasExplicitProfiles ? activePrimaryProfile.apiFormat : apiFormat;
+  const effectiveProvider = hasExplicitProfiles ? resolveProviderName(activePrimaryProfile) : provider;
+  const effectiveModel = hasExplicitProfiles ? activePrimaryProfile.model : model;
+  const effectiveFastModel = hasExplicitProfiles ? activeFastProfile.model : fastModel;
+  const effectiveApiKey = hasExplicitProfiles ? activePrimaryProfile.apiKey : apiKey;
+  const effectiveBaseURL = hasExplicitProfiles ? activePrimaryProfile.baseURL : baseURL;
+  const effectiveThinkingEnabled = hasExplicitProfiles
+    ? (activePrimaryProfile.thinkingEnabled ?? false)
+    : thinkingEnabled;
+  const effectiveThinkingEffort = hasExplicitProfiles
+    ? (activePrimaryProfile.thinkingEffort ?? '')
+    : thinkingEffort;
+  const effectiveThinkingBudgetTokens = hasExplicitProfiles
+    ? (activePrimaryProfile.thinkingBudgetTokens ?? 4096)
+    : thinkingBudgetTokens;
+
+  const effectiveMentorModel = hasExplicitProfiles
+    ? activeMentorProfile.model
+    : (typeof input.mentorModel === 'string' ? input.mentorModel.trim() : DEFAULT_SETTINGS.mentorModel);
+  const effectiveMentorBaseURL = hasExplicitProfiles
+    ? activeMentorProfile.baseURL
+    : (typeof input.mentorBaseURL === 'string' ? input.mentorBaseURL.trim() : DEFAULT_SETTINGS.mentorBaseURL);
+  const effectiveMentorApiKey = hasExplicitProfiles
+    ? activeMentorProfile.apiKey
+    : (typeof input.mentorApiKey === 'string' ? input.mentorApiKey.trim() : DEFAULT_SETTINGS.mentorApiKey);
+  const effectiveMentorApiFormat = hasExplicitProfiles ? activeMentorProfile.apiFormat : mentorApiFormat;
+  const effectiveMentorThinkingEnabled = hasExplicitProfiles
+    ? (activeMentorProfile.thinkingEnabled ?? false)
+    : mentorThinkingEnabled;
+  const effectiveMentorThinkingEffort = hasExplicitProfiles
+    ? (activeMentorProfile.thinkingEffort ?? '')
+    : mentorThinkingEffort;
+  const effectiveMentorThinkingBudgetTokens = hasExplicitProfiles
+    ? (activeMentorProfile.thinkingBudgetTokens ?? 4096)
+    : mentorThinkingBudgetTokens;
+  const effectiveMentorMaxTokens = hasExplicitProfiles
+    ? activeMentorProfile.maxTokens
+    : mentorMaxTokens;
+
+  // Keep per-mode configs up-to-date with active configurations
+  if (effectiveApiMode === 'deepseek') {
+    deepseek.apiKey = effectiveApiKey;
+    deepseek.baseURL = effectiveBaseURL;
+    deepseek.model = effectiveModel;
+    deepseek.fastModel = effectiveFastModel;
+  } else if (effectiveApiMode === 'custom') {
+    custom.apiKey = effectiveApiKey;
+    custom.baseURL = effectiveBaseURL;
+    custom.model = effectiveModel;
+    custom.fastModel = effectiveFastModel;
+  } else if (effectiveApiMode === 'local') {
+    local.apiKey = effectiveApiKey;
+    local.baseURL = effectiveBaseURL;
+    local.model = effectiveModel;
+    local.fastModel = effectiveFastModel;
+  }
+
   return {
     ...DEFAULT_SETTINGS,
     ...cleanInput,
-    apiMode,
-    apiFormat,
-    provider,
+    modelProfiles,
+    primaryProfileId,
+    fastProfileId,
+    mentorProfileId,
+    apiMode: effectiveApiMode,
+    apiFormat: effectiveApiFormat,
+    provider: effectiveProvider,
     deepseek,
     custom,
     local,
-    model,
+    model: effectiveModel,
     fastModelEnabled:
       typeof input.fastModelEnabled === 'boolean'
         ? input.fastModelEnabled
         : DEFAULT_SETTINGS.fastModelEnabled,
-    fastModel,
-    apiKey,
-    baseURL,
+    fastModel: effectiveFastModel,
+    apiKey: effectiveApiKey,
+    baseURL: effectiveBaseURL,
     systemPrompt,
-    thinkingEnabled,
-    thinkingEffort,
-    thinkingBudgetTokens,
+    thinkingEnabled: effectiveThinkingEnabled,
+    thinkingEffort: effectiveThinkingEffort,
+    thinkingBudgetTokens: effectiveThinkingBudgetTokens,
     debugEnabled,
     chatBordersEnabled,
     experimentalCharacters,
@@ -564,24 +966,15 @@ export function normalizeSettings(
       typeof input.mentorEnabled === 'boolean'
         ? input.mentorEnabled
         : DEFAULT_SETTINGS.mentorEnabled,
-    mentorModel:
-      typeof input.mentorModel === 'string'
-        ? input.mentorModel.trim()
-        : DEFAULT_SETTINGS.mentorModel,
-    mentorBaseURL:
-      typeof input.mentorBaseURL === 'string'
-        ? input.mentorBaseURL.trim()
-        : DEFAULT_SETTINGS.mentorBaseURL,
-    mentorApiKey:
-      typeof input.mentorApiKey === 'string'
-        ? input.mentorApiKey.trim()
-        : DEFAULT_SETTINGS.mentorApiKey,
-    mentorApiFormat,
-    mentorMaxTokens,
+    mentorModel: effectiveMentorModel,
+    mentorBaseURL: effectiveMentorBaseURL,
+    mentorApiKey: effectiveMentorApiKey,
+    mentorApiFormat: effectiveMentorApiFormat,
+    mentorMaxTokens: effectiveMentorMaxTokens,
     maxMentorConsultations,
-    mentorThinkingEnabled,
-    mentorThinkingEffort,
-    mentorThinkingBudgetTokens,
+    mentorThinkingEnabled: effectiveMentorThinkingEnabled,
+    mentorThinkingEffort: effectiveMentorThinkingEffort,
+    mentorThinkingBudgetTokens: effectiveMentorThinkingBudgetTokens,
     explorePrompt:
       typeof input.explorePrompt === 'string' ? input.explorePrompt.trim() : '',
     scoutPrompt:
@@ -655,9 +1048,13 @@ export function getProviderLabel(settings: Settings): string {
   const lang = settings.lang || 'zh-CN';
   if (settings.apiMode === 'deepseek') return lang === 'en' ? 'DeepSeek Official' : lang === 'zh-TW' ? 'DeepSeek 官方' : 'DeepSeek 官方';
   if (settings.apiMode === 'local') return lang === 'en' ? 'Local Model' : lang === 'zh-TW' ? '本地模型' : '本地模型';
-  return settings.apiFormat === 'openai'
-    ? (lang === 'en' ? 'Custom OpenAI' : lang === 'zh-TW' ? '自定義 OpenAI' : '自定义 OpenAI 格式')
-    : (lang === 'en' ? 'Custom Claude' : lang === 'zh-TW' ? '自定義 Claude' : '自定义 Claude 格式');
+  if (settings.apiFormat === 'openai') {
+    return lang === 'en' ? 'Custom OpenAI' : lang === 'zh-TW' ? '自定義 OpenAI' : '自定义 OpenAI 格式';
+  }
+  if (settings.apiFormat === 'response') {
+    return lang === 'en' ? 'Custom Responses API' : lang === 'zh-TW' ? '自定義 Responses API' : '自定义 Responses API 格式';
+  }
+  return lang === 'en' ? 'Custom Claude' : lang === 'zh-TW' ? '自定義 Claude' : '自定义 Claude 格式';
 }
 
 export function getSettingsError(settings: Settings): string | null {
@@ -691,3 +1088,33 @@ export function getSettingsError(settings: Settings): string | null {
 export function isApiConfigured(settings: Settings): boolean {
   return getSettingsError(settings) === null;
 }
+
+export function findProfileById(
+  settings: { modelProfiles?: ModelProfile[] },
+  profileId: string
+): ModelProfile | undefined {
+  return settings.modelProfiles?.find((p) => p.id === profileId);
+}
+
+export function resolvePrimaryProfile(settings: Settings): ModelProfile {
+  return (
+    findProfileById(settings, settings.primaryProfileId) ||
+    settings.modelProfiles?.[0] ||
+    DEFAULT_SETTINGS.modelProfiles[0]
+  );
+}
+
+export function resolveFastProfile(settings: Settings): ModelProfile {
+  return (
+    findProfileById(settings, settings.fastProfileId) ||
+    resolvePrimaryProfile(settings)
+  );
+}
+
+export function resolveMentorProfile(settings: Settings): ModelProfile {
+  return (
+    findProfileById(settings, settings.mentorProfileId) ||
+    resolvePrimaryProfile(settings)
+  );
+}
+

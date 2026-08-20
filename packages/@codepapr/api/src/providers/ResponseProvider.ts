@@ -1,0 +1,693 @@
+/**
+ * ResponseProvider: OpenAI Responses API / Volcengine ARK Responses 兼容适配器
+ *
+ * 用于对接 POST /v1/responses（或 /responses）的 Responses API 规范服务。
+ */
+
+import {
+  IChatRequest,
+  IChatResponse,
+  IChatStreamEvent,
+  IToolCall,
+} from '@codepapr/types';
+import { Logger, sortedStringify } from '@codepapr/common';
+import { BaseLLMProvider, ProviderConfig, ProviderRequestError } from './ILLMProvider';
+import {
+  finalizeStreamingToolCalls,
+  isRetriableStreamErrorType,
+  readSseStream,
+  safeParseToolArguments,
+  StreamIdleTimeoutError,
+  withStreamIdleRetry,
+} from './streaming';
+import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
+
+const log = new Logger('ResponseProvider');
+
+interface ResponseUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  input_tokens_details?: {
+    cached_tokens?: number;
+  };
+  output_tokens_details?: {
+    reasoning_tokens?: number;
+  };
+  prompt_tokens_details?: {
+    cached_tokens?: number;
+  };
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
+interface ResponseOutputMessagePart {
+  type?: 'output_text' | 'text' | 'reasoning_text' | 'reasoning' | string;
+  text?: string;
+}
+
+interface ResponseOutputItem {
+  id?: string;
+  type?: 'message' | 'function_call' | 'reasoning' | 'reasoning_summary' | string;
+  role?: 'assistant' | string;
+  name?: string;
+  call_id?: string;
+  arguments?: string;
+  content?: string | ResponseOutputMessagePart[];
+  summary?: string;
+  text?: string;
+  status?: string;
+}
+
+interface ResponseObject {
+  id?: string;
+  object?: string;
+  status?: string;
+  model?: string;
+  output?: ResponseOutputItem[];
+  choices?: Array<{
+    message: {
+      role: 'assistant';
+      content: string | Array<{ type?: string; text?: string }>;
+      reasoning_content?: string;
+      tool_calls?: Array<{
+        id: string;
+        type: 'function';
+        function: { name: string; arguments: string };
+      }>;
+    };
+    finish_reason: string;
+  }>;
+  usage?: ResponseUsage;
+  system_fingerprint?: string;
+  error?: {
+    message?: string;
+    type?: string;
+  };
+}
+
+interface ResponseStreamChunk {
+  type?: string;
+  id?: string;
+  delta?: string;
+  call_id?: string;
+  item_id?: string;
+  item?: ResponseOutputItem;
+  part?: ResponseOutputMessagePart;
+  response?: ResponseObject;
+  choices?: Array<{
+    index?: number;
+    delta?: {
+      content?: string;
+      reasoning_content?: string;
+      reasoning?: string;
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: 'function';
+        function?: {
+          name?: string;
+          arguments?: string;
+        };
+      }>;
+    };
+    finish_reason?: string | null;
+  }>;
+  usage?: ResponseUsage;
+  error?: {
+    message?: string;
+    type?: string;
+  };
+}
+
+function getResponseCachedTokens(usage: ResponseUsage | undefined): number {
+  return (
+    usage?.cache_read_input_tokens ??
+    usage?.input_tokens_details?.cached_tokens ??
+    usage?.prompt_tokens_details?.cached_tokens ??
+    0
+  );
+}
+
+function getResponseCreationTokens(usage: ResponseUsage | undefined): number {
+  return usage?.cache_creation_input_tokens ?? 0;
+}
+
+function getResponseInputTokens(usage: ResponseUsage | undefined): number {
+  if (typeof usage?.input_tokens === 'number') {
+    return usage.input_tokens;
+  }
+  const totalPromptTokens = usage?.prompt_tokens ?? 0;
+  return Math.max(0, totalPromptTokens - getResponseCachedTokens(usage));
+}
+
+function getResponseOutputTokens(usage: ResponseUsage | undefined): number {
+  return usage?.output_tokens ?? usage?.completion_tokens ?? 0;
+}
+
+export class ResponseProvider extends BaseLLMProvider {
+  name = 'response';
+  models = ['gpt-4o', 'gpt-4o-mini', 'o1', 'o3-mini', 'doubao-1.5-pro-32k'];
+
+  constructor(config: ProviderConfig) {
+    super({
+      baseURL: 'https://api.openai.com/v1',
+      ...config,
+    });
+  }
+
+  private getEndpointUrl(): string {
+    const base = (this.config.baseURL ?? 'https://api.openai.com/v1').trim().replace(/\/+$/, '');
+    if (base.endsWith('/responses')) {
+      return base;
+    }
+    return `${base}/responses`;
+  }
+
+  async streamChat(
+    request: IChatRequest,
+    onEvent: (event: IChatStreamEvent) => void,
+    signal?: AbortSignal
+  ): Promise<IChatResponse> {
+    const url = this.getEndpointUrl();
+    const payload = this.buildPayload(request, true);
+
+    log.info('LLM Responses API request started', {
+      model: payload.model,
+      stream: true,
+      inputCount: payload.input.length,
+    });
+
+    return withStreamIdleRetry(
+      async () => {
+        const response = await this.fetchWithRetry(
+          url,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${this.config.apiKey}`,
+            },
+            body: sortedStringify(payload),
+          },
+          signal,
+          (attempt, maxRetries, err) => {
+            onEvent({
+              type: 'request-retry',
+              attempt,
+              maxRetries,
+            });
+            log.warn('LLM Responses API request failed, retrying', {
+              model: payload.model,
+              attempt,
+              maxRetries,
+              error: err.message,
+            });
+          }
+        );
+
+        let responseId = '';
+        let content = '';
+        let reasoningContent = '';
+        let finishReason = 'stop';
+        let usage: ResponseUsage | undefined;
+        let sawDone = false;
+        let sawFinishReason = false;
+        const toolCallStates: Array<{ id: string; name: string; argumentsText: string }> = [];
+
+        try {
+          await readSseStream(response, (rawData) => {
+            if (rawData === '[DONE]') {
+              sawDone = true;
+              return;
+            }
+
+            let chunk: ResponseStreamChunk;
+            try {
+              chunk = JSON.parse(rawData) as ResponseStreamChunk;
+            } catch (err) {
+              log.warn('Failed to parse SSE line from Responses API', {
+                rawData: rawData.slice(0, 200),
+                error: (err as Error).message,
+              });
+              return;
+            }
+
+            if (chunk.error) {
+              const msg = chunk.error.message || 'Responses API stream error';
+              const isRetriable = isRetriableStreamErrorType(chunk.error.type);
+              throw new ProviderRequestError({
+                provider: this.name,
+                message: msg,
+                retriable: isRetriable,
+              });
+            }
+
+            // 1. Response metadata
+            if (chunk.id) {
+              responseId = chunk.id;
+            }
+            if (chunk.response?.id) {
+              responseId = chunk.response.id;
+            }
+
+            const eventType = chunk.type ?? '';
+
+            // 2. Output item tracking
+            if (eventType === 'response.output_item.added' && chunk.item) {
+              if (chunk.item.type === 'function_call') {
+                const callId = chunk.item.call_id || chunk.item.id || `call-${toolCallStates.length}`;
+                const name = chunk.item.name || '';
+                if (!toolCallStates.some((t) => t.id === callId)) {
+                  toolCallStates.push({ id: callId, name, argumentsText: chunk.item.arguments || '' });
+                }
+              }
+            }
+
+            if (eventType === 'response.output_item.done' && chunk.item) {
+              if (chunk.item.type === 'function_call') {
+                const callId = chunk.item.call_id || chunk.item.id || `call-${toolCallStates.length - 1}`;
+                const existing = toolCallStates.find((t) => t.id === callId);
+                if (existing) {
+                  if (chunk.item.name) existing.name = chunk.item.name;
+                  if (chunk.item.arguments) existing.argumentsText = chunk.item.arguments;
+                }
+              }
+            }
+
+            // 3. Text delta
+            if (
+              eventType === 'response.output_text.delta' ||
+              eventType === 'response.text.delta'
+            ) {
+              const delta = chunk.delta || '';
+              if (delta) {
+                content += delta;
+                onEvent({ type: 'content-delta', delta });
+              }
+            }
+
+            // 4. Reasoning delta
+            if (
+              eventType === 'response.reasoning_text.delta' ||
+              eventType === 'response.reasoning_summary_text.delta' ||
+              eventType === 'response.reasoning.delta' ||
+              eventType === 'response.thought.delta'
+            ) {
+              const delta = chunk.delta || '';
+              if (delta) {
+                reasoningContent += delta;
+                onEvent({ type: 'reasoning-delta', delta });
+              }
+            }
+
+            // 5. Function call arguments delta
+            if (
+              eventType === 'response.function_call_arguments.delta' ||
+              eventType === 'response.function_call.delta'
+            ) {
+              const callId = chunk.call_id || chunk.item_id;
+              const delta = chunk.delta || '';
+              if (callId) {
+                let state = toolCallStates.find((t) => t.id === callId);
+                if (!state) {
+                  state = { id: callId, name: '', argumentsText: '' };
+                  toolCallStates.push(state);
+                }
+                state.argumentsText += delta;
+              } else if (toolCallStates.length > 0) {
+                toolCallStates[toolCallStates.length - 1].argumentsText += delta;
+              }
+            }
+
+            // 6. Response completion
+            if (
+              eventType === 'response.completed' ||
+              eventType === 'response.done'
+            ) {
+              sawDone = true;
+              sawFinishReason = true;
+              if (chunk.response?.usage) {
+                usage = chunk.response.usage;
+              } else if (chunk.usage) {
+                usage = chunk.usage;
+              }
+            }
+
+            // 7. Compatible choices fallback
+            if (chunk.choices?.length) {
+              for (const choice of chunk.choices) {
+                const delta = choice.delta;
+                if (!delta) continue;
+
+                if (delta.content) {
+                  content += delta.content;
+                  onEvent({ type: 'content-delta', delta: delta.content });
+                }
+
+                const reasoningDelta = delta.reasoning_content ?? delta.reasoning;
+                if (reasoningDelta) {
+                  reasoningContent += reasoningDelta;
+                  onEvent({ type: 'reasoning-delta', delta: reasoningDelta });
+                }
+
+                if (delta.tool_calls?.length) {
+                  for (const tc of delta.tool_calls) {
+                    const id = tc.id || `call-${toolCallStates.length}`;
+                    let state = toolCallStates.find((t) => t.id === id);
+                    if (!state) {
+                      state = { id, name: tc.function?.name || '', argumentsText: '' };
+                      toolCallStates.push(state);
+                    }
+                    if (tc.function?.name) state.name = tc.function.name;
+                    if (tc.function?.arguments) state.argumentsText += tc.function.arguments;
+                  }
+                }
+
+                if (choice.finish_reason) {
+                  finishReason = choice.finish_reason;
+                  sawFinishReason = true;
+                }
+              }
+            }
+
+            if (chunk.usage) {
+              usage = chunk.usage;
+            }
+          }, signal, { idleTimeoutMs: this.config.idleTimeoutMs });
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            throw err;
+          }
+          if (err instanceof StreamIdleTimeoutError) {
+            throw err;
+          }
+          if (err instanceof ProviderRequestError) {
+            throw err;
+          }
+          throw new ProviderRequestError({
+            provider: this.name,
+            message: `Stream interrupted: ${err instanceof Error ? err.message : String(err)}`,
+            retriable: true,
+          });
+        }
+
+        if (!sawDone && !sawFinishReason && !content && toolCallStates.length === 0) {
+          throw new ProviderRequestError({
+            provider: this.name,
+            message: 'Stream ended prematurely: no completed event or output received',
+            retriable: true,
+          });
+        }
+
+        const effectiveToolCalls = finalizeStreamingToolCalls(toolCallStates);
+        const effectiveFinishReason = (effectiveToolCalls && effectiveToolCalls.length > 0)
+          ? 'tool_calls'
+          : sawFinishReason
+            ? finishReason
+            : 'stop';
+
+        const result: IChatResponse = {
+          id: responseId,
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content,
+                reasoningContent: reasoningContent || undefined,
+                toolCalls: effectiveToolCalls,
+              },
+              finishReason: effectiveFinishReason,
+            },
+          ],
+          usage: {
+            cache_read_input_tokens: getResponseCachedTokens(usage),
+            cache_creation_input_tokens: getResponseCreationTokens(usage),
+            input_tokens: getResponseInputTokens(usage),
+            output_tokens: getResponseOutputTokens(usage),
+          },
+        };
+
+        log.info('LLM Responses API request completed', {
+          model: payload.model,
+          stream: true,
+          finishReason: effectiveFinishReason,
+          inputTokens: result.usage?.input_tokens ?? 0,
+          outputTokens: result.usage?.output_tokens ?? 0,
+        });
+
+        return result;
+      },
+      {
+        signal,
+        maxRetries: this.config.streamMaxRetries,
+        retryDelayMs: this.config.streamRetryDelayMs,
+        onRetry: (attempt, err) => {
+          onEvent({ type: 'stream-restart', attempt, maxRetries: this.config.streamMaxRetries });
+          log.warn('LLM Responses stream interrupted, retrying', {
+            model: payload.model,
+            attempt,
+            error: err.message,
+          });
+        },
+      }
+    );
+  }
+
+  async chat(request: IChatRequest, signal?: AbortSignal): Promise<IChatResponse> {
+    const url = this.getEndpointUrl();
+    const payload = this.buildPayload(request, false);
+
+    log.info('LLM Responses API non-streaming request started', {
+      inputCount: payload.input.length,
+      model: payload.model,
+      stream: false,
+    });
+
+    const protection: { release: () => void } = { release: () => undefined };
+    const response = await this.fetchWithRetry(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.config.apiKey}`,
+        },
+        body: sortedStringify(payload),
+      },
+      signal,
+      undefined,
+      protection
+    );
+
+    let data: ResponseObject;
+    try {
+      data = (await response.json()) as ResponseObject;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw err;
+      }
+      throw new ProviderRequestError({
+        provider: this.name,
+        message: `响应不是合法 JSON: ${(err as Error).message}`,
+        retriable: false,
+      });
+    } finally {
+      protection.release();
+    }
+
+    log.info('LLM Responses API non-streaming request completed', {
+      model: payload.model,
+      stream: false,
+      inputTokens: data.usage?.input_tokens ?? 0,
+      outputTokens: data.usage?.output_tokens ?? 0,
+    });
+
+    return this.transformResponse(data);
+  }
+
+  private transformResponse(data: ResponseObject): IChatResponse {
+    let content = '';
+    let reasoningContent = '';
+    const toolCalls: IToolCall[] = [];
+
+    if (Array.isArray(data.output)) {
+      for (const item of data.output) {
+        if (item.type === 'message' || item.role === 'assistant') {
+          if (typeof item.content === 'string') {
+            content += item.content;
+          } else if (Array.isArray(item.content)) {
+            for (const part of item.content) {
+              if (part.type === 'output_text' || part.type === 'text' || !part.type) {
+                content += part.text ?? '';
+              } else if (part.type === 'reasoning_text' || part.type === 'reasoning') {
+                reasoningContent += part.text ?? '';
+              }
+            }
+          }
+        } else if (item.type === 'reasoning' || item.type === 'reasoning_summary') {
+          if (typeof item.summary === 'string') {
+            reasoningContent += item.summary;
+          } else if (typeof item.text === 'string') {
+            reasoningContent += item.text;
+          }
+        } else if (item.type === 'function_call') {
+          toolCalls.push({
+            id: item.call_id || item.id || `call-${toolCalls.length}`,
+            name: item.name || '',
+            arguments: safeParseToolArguments(item.arguments || '{}'),
+          });
+        }
+      }
+    } else if (data.choices?.length) {
+      const choice = data.choices[0];
+      if (typeof choice.message.content === 'string') {
+        content = choice.message.content;
+      } else if (Array.isArray(choice.message.content)) {
+        content = choice.message.content.map((p) => p.text ?? '').join('');
+      }
+      if (choice.message.reasoning_content) {
+        reasoningContent = choice.message.reasoning_content;
+      }
+      if (choice.message.tool_calls?.length) {
+        for (const tc of choice.message.tool_calls) {
+          toolCalls.push({
+            id: tc.id,
+            name: tc.function.name,
+            arguments: safeParseToolArguments(tc.function.arguments),
+          });
+        }
+      }
+    }
+
+    const finishReason = toolCalls.length > 0 ? 'tool_calls' : (data.status === 'completed' ? 'stop' : (data.status || 'stop'));
+
+    return {
+      id: data.id || '',
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content,
+            reasoningContent: reasoningContent || undefined,
+            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          },
+          finishReason,
+        },
+      ],
+      usage: {
+        cache_read_input_tokens: getResponseCachedTokens(data.usage),
+        cache_creation_input_tokens: getResponseCreationTokens(data.usage),
+        input_tokens: getResponseInputTokens(data.usage),
+        output_tokens: getResponseOutputTokens(data.usage),
+      },
+      system_fingerprint: data.system_fingerprint,
+    };
+  }
+
+  private buildPayload(request: IChatRequest, stream: boolean = false): {
+    model: string;
+    input: unknown[];
+    stream: boolean;
+    max_output_tokens: number;
+    temperature?: number;
+    top_p?: number;
+    tools?: Array<{ type: 'function'; function: { name: string; description: string; parameters: unknown } }>;
+    reasoning?: { effort: string };
+  } {
+    const inputItems: unknown[] = [];
+
+    for (const msg of request.messages) {
+      if (msg.role === 'system') {
+        inputItems.push({
+          role: 'system',
+          content: msg.content,
+        });
+      } else if (msg.role === 'user') {
+        if (msg.images && msg.images.length > 0) {
+          const contentParts: Array<{ type: string; text?: string; image_url?: string }> = [];
+          if (msg.content) {
+            contentParts.push({ type: 'input_text', text: msg.content });
+          }
+          for (const img of msg.images) {
+            contentParts.push({
+              type: 'input_image',
+              image_url: `data:${img.mediaType};base64,${img.data}`,
+            });
+          }
+          inputItems.push({ role: 'user', content: contentParts });
+        } else {
+          inputItems.push({ role: 'user', content: msg.content });
+        }
+      } else if (msg.role === 'assistant') {
+        if (msg.toolCalls && msg.toolCalls.length > 0) {
+          if (msg.content) {
+            inputItems.push({ role: 'assistant', content: msg.content });
+          }
+          for (const tc of msg.toolCalls) {
+            const rawArgs = typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments);
+            inputItems.push({
+              type: 'function_call',
+              call_id: tc.id,
+              name: tc.name,
+              arguments: rawArgs,
+            });
+          }
+        } else {
+          inputItems.push({ role: 'assistant', content: msg.content });
+        }
+      } else if (msg.role === 'tool') {
+        const callId = msg.toolResult?.toolCallId || (msg.metadata?.toolCallId as string) || '';
+        inputItems.push({
+          type: 'function_call_output',
+          call_id: callId,
+          output: msg.content,
+        });
+      }
+    }
+
+    const payload: {
+      model: string;
+      input: unknown[];
+      stream: boolean;
+      max_output_tokens: number;
+      temperature?: number;
+      top_p?: number;
+      tools?: Array<{ type: 'function'; function: { name: string; description: string; parameters: unknown } }>;
+      reasoning?: { effort: string };
+    } = {
+      model: request.model,
+      input: inputItems,
+      stream,
+      max_output_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+    };
+
+    if (request.tools && request.tools.length > 0) {
+      payload.tools = request.tools.map((t) => ({
+        type: 'function' as const,
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters,
+        },
+      }));
+    }
+
+    if (typeof request.temperature === 'number') {
+      payload.temperature = request.temperature;
+    }
+    if (typeof request.topP === 'number') {
+      payload.top_p = request.topP;
+    }
+
+    if (request.thinking) {
+      payload.reasoning = {
+        effort: request.thinking.reasoningEffort || 'medium',
+      };
+    }
+
+    return payload;
+  }
+}

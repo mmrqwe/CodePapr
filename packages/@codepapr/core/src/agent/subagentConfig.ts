@@ -65,7 +65,7 @@ export interface SubagentMentorSettings {
   model: string;
   apiKey: string;
   baseURL: string;
-  apiFormat: 'openai' | 'claude';
+  apiFormat: 'openai' | 'claude' | 'response';
   maxTokens: number;
   thinkingEnabled: boolean;
   thinkingEffort?: string;
@@ -109,7 +109,7 @@ export interface ResolvedSubagentMentor {
   model: string;
   apiKey: string;
   baseURL?: string;
-  apiFormat: 'openai' | 'claude';
+  apiFormat: 'openai' | 'claude' | 'response';
 }
 
 export interface ResolvedSubagentExecution {
@@ -227,7 +227,7 @@ export interface SubagentSessionDeps {
   /** 暴露给模型的工具子集（如子代理白名单过滤后）；缺省取 registry.getAll()。 */
   tools?: IToolDefinition[];
   provider: ILLMProvider;
-  providerName: 'deepseek' | 'openai' | 'claude';
+  providerName: 'deepseek' | 'openai' | 'claude' | 'response';
   requestBuilder: IRequestBuilder;
   cacheValidator: ICacheValidator;
   skillsSection?: string;

@@ -4,25 +4,27 @@ import {
   DeepSeekProvider,
   LocalProvider,
   OpenAIProvider,
+  ResponseProvider,
 } from '@codepapr/api';
 import type { WorkerAgentSettings } from '../../agent/agentWorkerProtocol';
 import { resolveProviderName } from './settingsNormalizer';
-import type { ApiFormat, ApiMode, Settings } from './types';
+import type { ApiFormat, ApiMode, ModelProfile, Settings } from './types';
 
 export function buildProviderInstance(
-  s: { apiMode: ApiMode; apiFormat: ApiFormat; apiKey: string; baseURL: string; streamIdleTimeoutMs: number }
+  s: { apiMode: ApiMode; apiFormat: ApiFormat; apiKey: string; baseURL: string; streamIdleTimeoutMs?: number }
 ) {
+  const idleTimeoutMs = s.streamIdleTimeoutMs ?? 30000;
   if (s.apiMode === 'local') {
     return new LocalProvider({
       apiKey: s.apiKey.trim() || 'local',
       baseURL: s.baseURL.trim().replace(/\/+$/, '') || DEFAULT_LOCAL_BASE_URL,
-      idleTimeoutMs: s.streamIdleTimeoutMs,
+      idleTimeoutMs,
     });
   }
 
   const cfg: { apiKey: string; baseURL?: string; idleTimeoutMs?: number } = {
     apiKey: s.apiKey.trim(),
-    idleTimeoutMs: s.streamIdleTimeoutMs,
+    idleTimeoutMs,
   };
   if (s.apiMode === 'custom') {
     cfg.baseURL = s.baseURL.trim().replace(/\/+$/, '');
@@ -31,8 +33,22 @@ export function buildProviderInstance(
   switch (resolveProviderName(s)) {
     case 'deepseek': return new DeepSeekProvider(cfg);
     case 'openai': return new OpenAIProvider(cfg);
+    case 'response': return new ResponseProvider(cfg);
     case 'claude': return new ClaudeProvider(cfg);
   }
+}
+
+export function buildProviderForProfile(
+  profile: ModelProfile,
+  streamIdleTimeoutMs: number = 30000
+) {
+  return buildProviderInstance({
+    apiMode: profile.apiMode,
+    apiFormat: profile.apiFormat,
+    apiKey: profile.apiKey,
+    baseURL: profile.baseURL,
+    streamIdleTimeoutMs,
+  });
 }
 
 export function toWorkerAgentSettings(settings: Settings): WorkerAgentSettings {

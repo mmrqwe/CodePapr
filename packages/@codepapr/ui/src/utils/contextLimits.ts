@@ -1,4 +1,4 @@
-export type ContextProvider = 'deepseek' | 'openai' | 'claude';
+export type ContextProvider = 'deepseek' | 'openai' | 'claude' | 'response';
 
 /** 与 settings 默认值对齐；NaN / Infinity 时回退到此值。 */
 export const DEFAULT_MAX_CONTEXT_TOKENS = 500_000;

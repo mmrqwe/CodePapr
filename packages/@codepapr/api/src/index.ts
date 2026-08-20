@@ -7,6 +7,7 @@ export { BaseLLMProvider, ProviderRequestError, setGlobalFetchFn, getGlobalFetch
 export type { ProviderConfig } from './providers/ILLMProvider';
 export { DeepSeekProvider } from './providers/DeepSeekProvider';
 export { OpenAIProvider } from './providers/OpenAIProvider';
+export { ResponseProvider } from './providers/ResponseProvider';
 export { ClaudeProvider } from './providers/ClaudeProvider';
 export { LocalProvider, DEFAULT_LOCAL_BASE_URL } from './providers/LocalProvider';
 export {

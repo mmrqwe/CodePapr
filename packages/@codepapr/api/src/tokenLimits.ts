@@ -11,6 +11,7 @@ export const CONTEXT_LIMITS: Record<string, number> = {
   deepseek: 1_048_565,
   claude: 200_000,
   openai: 128_000,
+  response: 128_000,
 };
 
 export function getProviderContextLimit(provider: string): number {
@@ -18,7 +19,7 @@ export function getProviderContextLimit(provider: string): number {
 }
 
 export function getProviderMaxTokensLimit(
-  provider: 'deepseek' | 'openai' | 'claude'
+  provider: 'deepseek' | 'openai' | 'claude' | 'response'
 ): number | null {
   switch (provider) {
     case 'deepseek':
@@ -26,6 +27,7 @@ export function getProviderMaxTokensLimit(
     case 'claude':
       return CLAUDE_MAX_OUTPUT_TOKENS;
     case 'openai':
+    case 'response':
       return OPENAI_MAX_OUTPUT_TOKENS;
     default:
       return null;
@@ -34,7 +36,7 @@ export function getProviderMaxTokensLimit(
 
 export function sanitizeMaxTokens(
   value: unknown,
-  provider: 'deepseek' | 'openai' | 'claude',
+  provider: 'deepseek' | 'openai' | 'claude' | 'response',
   fallback: number = DEFAULT_MAX_TOKENS
 ): number {
   const normalized =

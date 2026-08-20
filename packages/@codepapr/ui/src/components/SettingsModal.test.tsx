@@ -261,4 +261,24 @@ describe('SettingsModal', () => {
     expect(container.innerHTML).toContain('已导入并应用');
     expect(container.innerHTML).toContain('My Theme');
   });
+
+  it('llm tab displays role slot assignment and model profile pool', async () => {
+    await act(async () => {
+      root.render(<SettingsModal />);
+    });
+    const llmTab = container.querySelector(
+      'button[title="配置主模型、快速模型、API 接入方式和采样参数。"]'
+    );
+    expect(llmTab).not.toBeNull();
+    await act(async () => {
+      llmTab!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain('角色模型指定');
+    expect(container.textContent).toContain('模型配置池');
+    expect(container.textContent).toContain('DeepSeek 官方');
+    expect(container.textContent).toContain('DeepSeek Flash (快速)');
+    expect(container.textContent).toContain('自定义 API (Custom)');
+    expect(container.textContent).toContain('新建模型配置');
+  });
 });

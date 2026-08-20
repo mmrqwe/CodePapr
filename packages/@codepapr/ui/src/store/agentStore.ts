@@ -114,6 +114,7 @@ export type {
   AttachedFileMeta,
   ImagePreview,
   Lang,
+  ModelProfile,
   PendingRestoreUndo,
   ProviderName,
   ResetToMessageResult,
@@ -127,10 +128,15 @@ export type {
   WorkspaceEntry,
 } from './internals/types';
 export {
+  createDefaultProfile,
+  findProfileById,
   getProviderLabel,
   getSettingsError,
   isApiConfigured,
   normalizeSettings,
+  resolveFastProfile,
+  resolveMentorProfile,
+  resolvePrimaryProfile,
   resolveProviderName,
 } from './internals/settingsNormalizer';
 

@@ -1,0 +1,479 @@
+import React, { useState } from 'react';
+import { DEEPSEEK_MAX_TOKENS } from '@codepapr/api/tokenLimits';
+import type { ApiFormat, Lang, ModelProfile } from '../../store/agentStore';
+import type { Translation } from './types';
+import { InlineSelectRow, TextField, ToggleField } from '../forms';
+import {
+  CUSTOM_URL_PLACEHOLDERS,
+  LOCAL_URL_PLACEHOLDER,
+  MODEL_PRESETS,
+  THINKING_EFFORT_CUSTOM,
+  THINKING_EFFORT_PRESETS,
+} from './constants';
+import { ConnectionTestButton } from './ConnectionTestButton';
+import { runConnectionTest } from './testConnection';
+import { buildProviderForProfile } from '../../store/internals/providerFactory';
+import { resolveProviderName } from '../../store/internals/settingsNormalizer';
+
+export interface ProfileEditorModalProps {
+  profile: ModelProfile;
+  isOpen: boolean;
+  onSave: (updated: ModelProfile) => void;
+  onClose: () => void;
+  t: Translation;
+  currentLang: Lang;
+}
+
+interface QuickTemplate {
+  label: string;
+  apply: (prev: ModelProfile) => Partial<ModelProfile>;
+}
+
+export function ProfileEditorModal({
+  profile,
+  isOpen,
+  onSave,
+  onClose,
+  t,
+  currentLang,
+}: ProfileEditorModalProps) {
+  const [draft, setDraft] = useState<ModelProfile>({ ...profile });
+
+  // Reset draft when modal opens for a different profile
+  React.useEffect(() => {
+    setDraft({ ...profile });
+  }, [profile, isOpen]);
+
+  if (!isOpen) return null;
+
+  const update = (patch: Partial<ModelProfile>) => {
+    setDraft((prev) => ({ ...prev, ...patch }));
+  };
+
+  const isLocal = draft.apiMode === 'local';
+  const isClaudeFormat = draft.apiMode === 'custom' && draft.apiFormat === 'claude';
+  const maxTokensLimit = draft.apiMode === 'deepseek' ? DEEPSEEK_MAX_TOKENS : 128000;
+
+  const modelPresets =
+    draft.apiMode === 'deepseek'
+      ? MODEL_PRESETS.deepseek
+      : draft.apiMode === 'local'
+      ? MODEL_PRESETS.local
+      : MODEL_PRESETS[draft.apiFormat] || [];
+
+  const effortIsCustom =
+    draft.thinkingEffort &&
+    !(THINKING_EFFORT_PRESETS as readonly string[]).includes(draft.thinkingEffort);
+  const effortSelectValue = effortIsCustom
+    ? THINKING_EFFORT_CUSTOM
+    : draft.thinkingEffort || 'max';
+
+  const quickTemplates: QuickTemplate[] = [
+    {
+      label: currentLang === 'en' ? 'DeepSeek Official (Pro)' : 'DeepSeek 官方 (Pro)',
+      apply: (prev) => ({
+        name: prev.name || 'DeepSeek 官方',
+        apiMode: 'deepseek',
+        apiFormat: 'openai',
+        baseURL: '',
+        model: 'deepseek-v4-pro',
+        thinkingEnabled: true,
+        thinkingEffort: 'max',
+      }),
+    },
+    {
+      label: currentLang === 'en' ? 'DeepSeek Flash (Fast)' : 'DeepSeek Flash (快速)',
+      apply: (prev) => ({
+        name: prev.name || 'DeepSeek Flash',
+        apiMode: 'deepseek',
+        apiFormat: 'openai',
+        baseURL: '',
+        model: 'deepseek-v4-flash',
+        thinkingEnabled: false,
+        thinkingEffort: '',
+      }),
+    },
+    {
+      label: 'OpenRouter (Claude 3.7)',
+      apply: (prev) => ({
+        name: prev.name || 'OpenRouter Claude',
+        apiMode: 'custom',
+        apiFormat: 'claude',
+        baseURL: 'https://openrouter.ai/api/v1',
+        model: 'anthropic/claude-3.7-sonnet',
+        thinkingEnabled: true,
+        thinkingBudgetTokens: 4096,
+      }),
+    },
+    {
+      label: 'SiliconFlow (DeepSeek V3)',
+      apply: (prev) => ({
+        name: prev.name || 'SiliconFlow V3',
+        apiMode: 'custom',
+        apiFormat: 'openai',
+        baseURL: 'https://api.siliconflow.cn/v1',
+        model: 'deepseek-ai/DeepSeek-V3',
+        thinkingEnabled: false,
+      }),
+    },
+    {
+      label: 'OpenAI (GPT-4o)',
+      apply: (prev) => ({
+        name: prev.name || 'OpenAI GPT-4o',
+        apiMode: 'custom',
+        apiFormat: 'openai',
+        baseURL: 'https://api.openai.com/v1',
+        model: 'gpt-4o',
+        thinkingEnabled: false,
+      }),
+    },
+    {
+      label: currentLang === 'en' ? 'Volcengine / OpenAI (Responses API)' : '火山方舟 / OpenAI (Responses API)',
+      apply: (prev) => ({
+        name: prev.name || 'Responses API',
+        apiMode: 'custom',
+        apiFormat: 'response',
+        baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+        model: 'doubao-1.5-pro-32k',
+        thinkingEnabled: false,
+      }),
+    },
+    {
+      label: currentLang === 'en' ? 'Local Model (Ollama / LM Studio)' : '本地模型 (Ollama / LM Studio)',
+      apply: (prev) => ({
+        name: prev.name || '本地 Ollama',
+        apiMode: 'local',
+        apiFormat: 'openai',
+        baseURL: 'http://127.0.0.1:8080/v1',
+        apiKey: '',
+        model: 'local-model',
+        thinkingEnabled: false,
+      }),
+    },
+  ];
+
+  const handleApplyTemplate = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const idx = parseInt(e.target.value, 10);
+    if (!Number.isNaN(idx) && quickTemplates[idx]) {
+      const patch = quickTemplates[idx].apply(draft);
+      update(patch);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    if (!draft.model.trim()) {
+      throw new Error(
+        currentLang === 'en'
+          ? 'Please fill in the model name first'
+          : currentLang === 'zh-TW'
+          ? '請先填寫模型名稱'
+          : '请先填写模型名称'
+      );
+    }
+    if (draft.apiMode === 'custom' && !draft.baseURL.trim()) {
+      throw new Error(
+        currentLang === 'en'
+          ? 'Please fill in the API address first'
+          : currentLang === 'zh-TW'
+          ? '請先填寫 API 地址'
+          : '请先填写 API 地址'
+      );
+    }
+    if (draft.apiMode !== 'local' && !draft.apiKey.trim()) {
+      throw new Error(
+        currentLang === 'en'
+          ? 'Please fill in the API Key first'
+          : currentLang === 'zh-TW'
+          ? '請先填寫 API Key'
+          : '请先填写 API Key'
+      );
+    }
+
+    const provider = buildProviderForProfile(draft);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    try {
+      await runConnectionTest(provider, {
+        model: draft.model.trim(),
+        providerName: resolveProviderName(draft),
+        thinkingEnabled: draft.thinkingEnabled ?? false,
+        reasoningEffort: draft.thinkingEffort ?? '',
+        thinkingBudgetTokens: draft.thinkingBudgetTokens ?? 4096,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay backdrop-blur-sm p-4 overflow-y-auto"
+    >
+      <div className="relative w-full max-w-2xl rounded-2xl border border-line bg-base shadow-2xl p-6 space-y-5 my-8 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between border-b border-line pb-4">
+          <div>
+            <h3 className="text-base font-bold text-fg">
+              {draft.id.startsWith('profile-') && !draft.name
+                ? t.newProfileModalTitle
+                : t.editProfileModalTitle}
+            </h3>
+            <p className="text-xs text-fg-muted mt-0.5">
+              {draft.name || t.unnamedProfile}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-fg-muted hover:bg-raised hover:text-fg transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Quick template selector */}
+        <div className="rounded-xl border border-line bg-raised/50 p-3">
+          <label className="block text-xs font-semibold text-fg-muted uppercase tracking-[0.15em] mb-1.5">
+            {t.profilePresetTemplate}
+          </label>
+          <select
+            defaultValue=""
+            onChange={handleApplyTemplate}
+            className="w-full cursor-pointer rounded-lg border border-line bg-base px-3 py-2 text-xs text-fg focus:border-accent-soft focus:outline-none"
+          >
+            <option value="" disabled>
+              {currentLang === 'en' ? 'Select a quick template to autofill...' : '选择快速模板以自动填入...'}
+            </option>
+            {quickTemplates.map((tpl, i) => (
+              <option key={tpl.label} value={i}>
+                {tpl.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Profile Name */}
+        <TextField
+          label={t.profileName}
+          value={draft.name}
+          onChange={(e) => update({ name: e.target.value })}
+          placeholder={t.profileNamePlaceholder}
+        />
+
+        {/* API Type selection */}
+        <div>
+          <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
+            {t.apiType}
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {(['deepseek', 'custom', 'local'] as const).map((mode) => {
+              const active = draft.apiMode === mode;
+              const label =
+                mode === 'deepseek'
+                  ? t.deepseekOfficial
+                  : mode === 'custom'
+                  ? t.customApi
+                  : currentLang === 'en'
+                  ? 'Local Model'
+                  : '本地模型';
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => update({ apiMode: mode })}
+                  className={`rounded-xl border px-3 py-2.5 text-left text-xs font-semibold transition-colors ${
+                    active
+                      ? 'border-accent-soft bg-accent-soft text-accent-text shadow-[0_0_10px_rgba(99,102,241,0.1)]'
+                      : 'border-line bg-base text-fg-muted hover:border-line-strong hover:text-fg'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Custom API Format */}
+        {draft.apiMode === 'custom' && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
+                {t.apiFormat}
+              </label>
+              <select
+                value={draft.apiFormat}
+                onChange={(e) => update({ apiFormat: e.target.value as ApiFormat })}
+                className="w-full cursor-pointer rounded-xl border border-line bg-base px-4 py-2.5 text-sm text-fg focus:border-accent-soft focus:outline-none"
+              >
+                <option value="openai">OpenAI Chat Completions (/chat/completions)</option>
+                <option value="response">Responses API (/responses)</option>
+                <option value="claude">Claude Messages (/messages)</option>
+              </select>
+            </div>
+
+            <TextField
+              label={t.apiUrl}
+              value={draft.baseURL}
+              onChange={(e) => update({ baseURL: e.target.value })}
+              placeholder={CUSTOM_URL_PLACEHOLDERS[draft.apiFormat]}
+            />
+          </div>
+        )}
+
+        {/* Local BaseURL */}
+        {isLocal && (
+          <TextField
+            label={t.apiUrl}
+            value={draft.baseURL}
+            onChange={(e) => update({ baseURL: e.target.value })}
+            placeholder={LOCAL_URL_PLACEHOLDER}
+          />
+        )}
+
+        {/* Model Name & API Key */}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <TextField
+            label={t.modelName}
+            value={draft.model}
+            list="profile-model-presets"
+            onChange={(e) => update({ model: e.target.value })}
+            placeholder={currentLang === 'en' ? 'Enter model name...' : '输入模型名称...'}
+          >
+            <datalist id="profile-model-presets">
+              {modelPresets.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+          </TextField>
+
+          <TextField
+            label={
+              <>
+                {t.apiKey}
+                {isLocal ? (currentLang === 'en' ? ' (optional)' : '（可选）') : ''}
+              </>
+            }
+            type="password"
+            value={draft.apiKey}
+            onChange={(e) => update({ apiKey: e.target.value })}
+            placeholder={
+              isLocal
+                ? currentLang === 'en'
+                  ? 'usually not required'
+                  : '本地服务通常无需填写'
+                : draft.apiMode === 'custom' && draft.apiFormat === 'claude'
+                ? 'sk-ant-...'
+                : 'sk-...'
+            }
+          />
+        </div>
+
+        {/* Thinking Settings */}
+        {!isLocal && (
+          <div className="rounded-xl border border-line bg-base p-4 space-y-4">
+            <ToggleField
+              checked={draft.thinkingEnabled ?? false}
+              onChange={(checked) => update({ thinkingEnabled: checked })}
+              label={t.thinkingMode}
+              desc={draft.apiMode === 'deepseek' ? t.thinkingModeDesc : t.thinkingModeCustomDesc}
+            />
+
+            {draft.thinkingEnabled && isClaudeFormat && (
+              <TextField
+                label={t.thinkingBudgetLabel}
+                type="number"
+                min={1024}
+                max={maxTokensLimit}
+                step={512}
+                value={draft.thinkingBudgetTokens ?? 4096}
+                onChange={(e) => {
+                  const parsed = parseInt(e.target.value, 10);
+                  update({
+                    thinkingBudgetTokens: Number.isFinite(parsed) ? parsed : 4096,
+                  });
+                }}
+              />
+            )}
+
+            {draft.thinkingEnabled && !isClaudeFormat && (
+              <>
+                <InlineSelectRow
+                  title={t.thinkingEffort}
+                  value={effortSelectValue}
+                  onChange={(val) => {
+                    update({
+                      thinkingEffort: val === THINKING_EFFORT_CUSTOM ? '' : val,
+                    });
+                  }}
+                >
+                  {THINKING_EFFORT_PRESETS.map((val) => (
+                    <option key={val} value={val}>
+                      {val}
+                    </option>
+                  ))}
+                  <option value={THINKING_EFFORT_CUSTOM}>{t.thinkingEffortCustom}</option>
+                </InlineSelectRow>
+
+                {effortSelectValue === THINKING_EFFORT_CUSTOM && (
+                  <TextField
+                    label={t.thinkingEffortCustomLabel}
+                    value={effortIsCustom ? draft.thinkingEffort : ''}
+                    onChange={(e) => update({ thinkingEffort: e.target.value.trim() })}
+                    placeholder={t.thinkingEffortCustomPlaceholder}
+                  />
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Max Tokens */}
+        <TextField
+          label={t.maxTokens}
+          type="number"
+          min={100}
+          max={maxTokensLimit}
+          step={500}
+          value={draft.maxTokens}
+          onChange={(e) => {
+            const parsed = parseInt(e.target.value, 10);
+            update({ maxTokens: Number.isFinite(parsed) ? parsed : draft.maxTokens });
+          }}
+        />
+
+        {/* Footer actions */}
+        <div className="flex items-center justify-between border-t border-line pt-4">
+          <ConnectionTestButton
+            labels={{
+              idle: t.testProfileConnection,
+              connecting: t.llmTestConnecting,
+              success: t.llmTestSuccess,
+              failedPrefix: t.llmTestFailed,
+            }}
+            onTest={handleTestConnection}
+          />
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl border border-line px-4 py-2 text-xs text-fg-muted hover:border-line-strong hover:text-fg transition-colors"
+            >
+              {t.cancel}
+            </button>
+            <button
+              type="button"
+              onClick={() => onSave(draft)}
+              className="rounded-xl bg-accent px-5 py-2 text-xs font-semibold text-white shadow-sm hover:opacity-90 transition-opacity"
+            >
+              {t.saveProfile}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

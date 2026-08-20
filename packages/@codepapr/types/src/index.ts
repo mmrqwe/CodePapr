@@ -226,7 +226,7 @@ export interface MentorConfig {
   model: string;
   baseURL: string;
   apiKey: string;
-  apiFormat: 'openai' | 'claude';
+  apiFormat: 'openai' | 'claude' | 'response';
   maxTokens: number;
   maxConsultations: number;
   thinkingEnabled: boolean;

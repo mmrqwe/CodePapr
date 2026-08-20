@@ -30,6 +30,7 @@ import {
   DeepSeekProvider,
   LocalProvider,
   OpenAIProvider,
+  ResponseProvider,
   DEFAULT_LOCAL_BASE_URL,
   RequestBuilder,
   CacheValidator,
@@ -509,6 +510,8 @@ function buildProvider(settings: WorkerAgentSettings) {
       return new DeepSeekProvider(config);
     case 'claude':
       return new ClaudeProvider(config);
+    case 'response':
+      return new ResponseProvider(config);
     default:
       return new OpenAIProvider(config);
   }
@@ -834,12 +837,15 @@ async function runSubagent(
   });
 
   let subagentProvider: ILLMProvider = buildProvider(payload.settings);
-  let subagentProviderName: 'deepseek' | 'openai' | 'claude' = payload.providerName;
+  let subagentProviderName: 'deepseek' | 'openai' | 'claude' | 'response' = payload.providerName;
   if (exec.mentor) {
     const config = { apiKey: exec.mentor.apiKey, ...(exec.mentor.baseURL ? { baseURL: exec.mentor.baseURL } : {}) };
     if (exec.mentor.apiFormat === 'claude') {
       subagentProvider = new ClaudeProvider(config);
       subagentProviderName = 'claude';
+    } else if (exec.mentor.apiFormat === 'response') {
+      subagentProvider = new ResponseProvider(config);
+      subagentProviderName = 'response';
     } else {
       subagentProvider = new OpenAIProvider(config);
       subagentProviderName = 'openai';
@@ -1154,7 +1160,7 @@ async function handleRunAppAgent(
   }
 
   let agentProvider: ILLMProvider = buildProvider(cachedSettings);
-  let agentProviderName: 'deepseek' | 'openai' | 'claude' = cachedSettings.provider;
+  let agentProviderName: 'deepseek' | 'openai' | 'claude' | 'response' = cachedSettings.provider;
 
   const isMentor = payload.model === 'mentor' && cachedSettings.mentorEnabled;
   if (isMentor) {
@@ -1168,6 +1174,9 @@ async function handleRunAppAgent(
       if (s.mentorApiFormat === 'claude') {
         agentProvider = new ClaudeProvider(config);
         agentProviderName = 'claude';
+      } else if (s.mentorApiFormat === 'response') {
+        agentProvider = new ResponseProvider(config);
+        agentProviderName = 'response';
       } else {
         agentProvider = new OpenAIProvider(config);
         agentProviderName = 'openai';

@@ -21,7 +21,7 @@ import {
   type ToolOutputTruncationOptions,
   withTaskSlot,
 } from '@codepapr/core';
-import { DEFAULT_MAX_TOKENS, RequestBuilder, CacheValidator, OpenAIProvider, ClaudeProvider } from '@codepapr/api';
+import { DEFAULT_MAX_TOKENS, RequestBuilder, CacheValidator, OpenAIProvider, ClaudeProvider, ResponseProvider } from '@codepapr/api';
 import type { ICacheStatistics, ILLMProvider, IToolDefinition, MentorConfig } from '@codepapr/types';
 import { registerWorkspaceTools } from '../tools/workspaceTools';
 import { startSubagentProgress, pushSubagentStep, completeSubagentProgress } from '../utils/subagentProgress';
@@ -29,7 +29,7 @@ import { startSubagentProgress, pushSubagentStep, completeSubagentProgress } fro
 export interface UiTaskToolContext {
   workspacePath: string;
   provider: ILLMProvider;
-  providerName: 'deepseek' | 'openai' | 'claude';
+  providerName: 'deepseek' | 'openai' | 'claude' | 'response';
   baseModel: string;
   fastModelEnabled: boolean;
   fastModel: string;
@@ -134,12 +134,15 @@ export async function runSubagent(
   });
 
   let provider = context.provider;
-  let providerName: 'deepseek' | 'openai' | 'claude' = context.providerName;
+  let providerName: 'deepseek' | 'openai' | 'claude' | 'response' = context.providerName;
   if (exec.mentor) {
     const config = { apiKey: exec.mentor.apiKey, ...(exec.mentor.baseURL ? { baseURL: exec.mentor.baseURL } : {}) };
     if (exec.mentor.apiFormat === 'claude') {
       provider = new ClaudeProvider(config);
       providerName = 'claude';
+    } else if (exec.mentor.apiFormat === 'response') {
+      provider = new ResponseProvider(config);
+      providerName = 'response';
     } else {
       provider = new OpenAIProvider(config);
       providerName = 'openai';

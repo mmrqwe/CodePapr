@@ -16,23 +16,53 @@ export function useSettingsForm() {
       const merged = { ...current, ...partial };
       // Shallow merge plus lightweight re-derivation of the flat fields that
       // validation reads (getSettingsError uses flat apiKey/model/baseURL).
-      // We deliberately do NOT run normalizeSettings here: doing so on every
-      // keystroke trimmed free-text inputs (dropping spaces in prompts/URLs)
-      // and clamped numeric inputs mid-entry. Clamping/trimming happens on
-      // save (setSettings) and on blur (clampOnBlur) instead.
-      const activeConfig = merged[merged.apiMode];
+      const primaryProfile =
+        merged.modelProfiles?.find((p) => p.id === merged.primaryProfileId) ||
+        merged.modelProfiles?.[0];
+      const fastProfile =
+        merged.modelProfiles?.find((p) => p.id === merged.fastProfileId) ||
+        primaryProfile;
+      const mentorProfile =
+        merged.modelProfiles?.find((p) => p.id === merged.mentorProfileId) ||
+        primaryProfile;
+
+      const activeConfig = merged[merged.apiMode] || merged.deepseek;
+
+      const effectiveApiMode = primaryProfile ? primaryProfile.apiMode : merged.apiMode;
+      const effectiveApiFormat = primaryProfile ? primaryProfile.apiFormat : merged.apiFormat;
+      const effectiveProvider =
+        effectiveApiMode === 'deepseek'
+          ? 'deepseek'
+          : effectiveApiMode === 'local'
+          ? 'openai'
+          : effectiveApiFormat;
+      const effectiveModel = primaryProfile ? primaryProfile.model : (activeConfig?.model ?? '');
+      const effectiveFastModel = fastProfile ? fastProfile.model : (activeConfig?.fastModel ?? '');
+      const effectiveApiKey = primaryProfile ? primaryProfile.apiKey : (activeConfig?.apiKey ?? '');
+      const effectiveBaseURL = primaryProfile ? primaryProfile.baseURL : (activeConfig?.baseURL ?? '');
+
       return {
         ...merged,
-        provider:
-          merged.apiMode === 'deepseek'
-            ? 'deepseek'
-            : merged.apiMode === 'local'
-            ? 'openai'
-            : merged.apiFormat,
-        model: activeConfig.model,
-        fastModel: activeConfig.fastModel,
-        apiKey: activeConfig.apiKey,
-        baseURL: activeConfig.baseURL,
+        apiMode: effectiveApiMode,
+        apiFormat: effectiveApiFormat,
+        provider: effectiveProvider,
+        model: effectiveModel,
+        fastModel: effectiveFastModel,
+        apiKey: effectiveApiKey,
+        baseURL: effectiveBaseURL,
+        thinkingEnabled: primaryProfile
+          ? (primaryProfile.thinkingEnabled ?? false)
+          : merged.thinkingEnabled,
+        thinkingEffort: primaryProfile
+          ? (primaryProfile.thinkingEffort ?? '')
+          : merged.thinkingEffort,
+        thinkingBudgetTokens: primaryProfile
+          ? (primaryProfile.thinkingBudgetTokens ?? 4096)
+          : merged.thinkingBudgetTokens,
+        mentorModel: mentorProfile ? mentorProfile.model : merged.mentorModel,
+        mentorBaseURL: mentorProfile ? mentorProfile.baseURL : merged.mentorBaseURL,
+        mentorApiKey: mentorProfile ? mentorProfile.apiKey : merged.mentorApiKey,
+        mentorApiFormat: mentorProfile ? mentorProfile.apiFormat : merged.mentorApiFormat,
       };
     });
   };

@@ -1,7 +1,62 @@
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_CODING_SYSTEM_PROMPT } from '@codepapr/core';
 import { DEFAULT_MAX_TOKENS } from '@codepapr/api';
 import { normalizeMcpSettings } from '../../utils/mcpTypes';
-import type { ConversationStats, CumulativeStats, ModelTierStats, Settings } from './types';
+import type { ConversationStats, CumulativeStats, ModelProfile, ModelTierStats, Settings } from './types';
+
+export const DEFAULT_MODEL_PROFILES: ModelProfile[] = [
+  {
+    id: 'profile-deepseek',
+    name: 'DeepSeek 官方',
+    apiMode: 'deepseek',
+    apiFormat: 'openai',
+    baseURL: '',
+    apiKey: '',
+    model: 'deepseek-v4-pro',
+    maxTokens: DEFAULT_MAX_TOKENS,
+    thinkingEnabled: true,
+    thinkingEffort: 'max',
+    thinkingBudgetTokens: 4096,
+  },
+  {
+    id: 'profile-deepseek-fast',
+    name: 'DeepSeek Flash (快速)',
+    apiMode: 'deepseek',
+    apiFormat: 'openai',
+    baseURL: '',
+    apiKey: '',
+    model: 'deepseek-v4-flash',
+    maxTokens: DEFAULT_MAX_TOKENS,
+    thinkingEnabled: false,
+    thinkingEffort: '',
+    thinkingBudgetTokens: 0,
+  },
+  {
+    id: 'profile-custom',
+    name: '自定义 API (Custom)',
+    apiMode: 'custom',
+    apiFormat: 'openai',
+    baseURL: '',
+    apiKey: '',
+    model: 'gpt-4o',
+    maxTokens: DEFAULT_MAX_TOKENS,
+    thinkingEnabled: false,
+    thinkingEffort: '',
+    thinkingBudgetTokens: 4096,
+  },
+  {
+    id: 'profile-local',
+    name: '本地模型 (Local)',
+    apiMode: 'local',
+    apiFormat: 'openai',
+    baseURL: 'http://127.0.0.1:8080/v1',
+    apiKey: '',
+    model: 'local-model',
+    maxTokens: DEFAULT_MAX_TOKENS,
+    thinkingEnabled: false,
+    thinkingEffort: '',
+    thinkingBudgetTokens: 0,
+  },
+];
 
 export const LEGACY_SYSTEM_PROMPT_MARKERS = [
   '核心工作流：',
@@ -30,6 +85,11 @@ export function normalizeCustomSystemPrompt(prompt: string | undefined): string 
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  modelProfiles: DEFAULT_MODEL_PROFILES,
+  primaryProfileId: 'profile-deepseek',
+  fastProfileId: 'profile-deepseek-fast',
+  mentorProfileId: 'profile-custom',
+
   apiMode: 'deepseek',
   apiFormat: 'openai',
   provider: 'deepseek',

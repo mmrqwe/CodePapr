@@ -295,6 +295,45 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
                 <h4 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
                   {currentLang === 'en' ? 'API Configuration' : currentLang === 'zh-TW' ? 'API 配置' : 'API 配置'}
                 </h4>
+
+                {local.modelProfiles && local.modelProfiles.length > 0 && (
+                  <div className="mb-4 rounded-xl border border-line bg-raised/40 p-3">
+                    <label className={LABEL_CLASS}>
+                      {currentLang === 'en' ? 'Quick Profile Selection' : currentLang === 'zh-TW' ? '從配置池選擇' : '从配置池选择'}
+                    </label>
+                    <select
+                      value={local.mentorProfileId || ''}
+                      onChange={(e) => {
+                        const profId = e.target.value;
+                        const prof = local.modelProfiles?.find((p) => p.id === profId);
+                        if (prof) {
+                          update({
+                            mentorProfileId: prof.id,
+                            mentorModel: prof.model,
+                            mentorBaseURL: prof.baseURL,
+                            mentorApiKey: prof.apiKey,
+                            mentorApiFormat: prof.apiFormat,
+                            mentorThinkingEnabled: prof.thinkingEnabled ?? false,
+                            mentorThinkingEffort: prof.thinkingEffort ?? '',
+                            mentorThinkingBudgetTokens: prof.thinkingBudgetTokens ?? 4096,
+                            mentorMaxTokens: prof.maxTokens,
+                          });
+                        }
+                      }}
+                      className="w-full cursor-pointer rounded-lg border border-line bg-base px-3 py-2 text-xs text-fg focus:border-accent-soft focus:outline-none"
+                    >
+                      <option value="">
+                        {currentLang === 'en' ? '-- Select a profile to autofill --' : '-- 选择配置自动填入 --'}
+                      </option>
+                      {local.modelProfiles.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.apiMode === 'deepseek' ? 'DeepSeek' : p.apiFormat} · {p.model || '未设模型'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 <div className="grid gap-4 md:grid-cols-2">
                   <SelectField
                     label={t.mentorApiFormatLabel}
@@ -303,6 +342,7 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
                     title={t.mentorApiFormatLabel}
                   >
                     <option value="openai">OpenAI / 兼容 API</option>
+                    <option value="response">Responses API (/responses)</option>
                     <option value="claude">Claude Messages API</option>
                   </SelectField>
                   <div>

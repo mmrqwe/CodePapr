@@ -360,7 +360,7 @@ function accumulateStats(
  */
 export function buildThinking(
   params: Record<string, unknown>,
-  providerName: 'deepseek' | 'openai' | 'claude',
+  providerName: 'deepseek' | 'openai' | 'claude' | 'response',
 ): IChatThinking | undefined {
   const enabled = params.thinkingEnabled !== false;
   if (!enabled) {
@@ -412,7 +412,7 @@ export interface IRequestBuilder {
     prefix: IImmutablePrefix;
     appendLog: IAppendOnlyLog;
     model: string;
-    provider: 'deepseek' | 'openai' | 'claude';
+    provider: 'deepseek' | 'openai' | 'claude' | 'response';
     thinking?: IChatThinking;
     temperature?: number;
     topP?: number;
@@ -462,7 +462,7 @@ export interface ContextCompactionConfig {
 export interface AgentOptions {
   session: Session;
   provider: ILLMProvider;
-  providerName: 'deepseek' | 'openai' | 'claude';
+  providerName: 'deepseek' | 'openai' | 'claude' | 'response';
   requestBuilder: IRequestBuilder;
   cacheValidator: ICacheValidator;
   maxToolRounds?: number;
@@ -488,7 +488,7 @@ function normalizeMaxToolRounds(value: number | undefined): number {
 export class Agent {
   private session: Session;
   private provider: ILLMProvider;
-  private providerName: 'deepseek' | 'openai' | 'claude';
+  private providerName: 'deepseek' | 'openai' | 'claude' | 'response';
   private requestBuilder: IRequestBuilder;
   private cacheValidator: ICacheValidator;
   private maxToolRounds: number;

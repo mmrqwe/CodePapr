@@ -4,6 +4,7 @@ import type { SettingsTab } from './types';
 export const MODEL_PRESETS: Record<ApiMode | ApiFormat, string[]> = {
   deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner'],
   openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'o3-mini'],
+  response: ['gpt-4o', 'gpt-4o-mini', 'o1', 'o3-mini', 'doubao-1.5-pro-32k'],
   claude: ['claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest'],
   custom: [],
   local: ['local-model', 'qwen2.5-coder', 'llama3.1'],
@@ -13,6 +14,7 @@ export const LOCAL_URL_PLACEHOLDER = 'http://127.0.0.1:8080/v1（llama.cpp / Oll
 
 export const CUSTOM_URL_PLACEHOLDERS: Record<ApiFormat, string> = {
   openai: 'https://api.openai.com/v1 或兼容服务 /v1',
+  response: 'https://api.openai.com/v1 或火山方舟 /api/v3（Responses API /responses）',
   claude: 'https://api.anthropic.com/v1 或兼容 Claude Messages API',
 };
 
@@ -44,7 +46,7 @@ export function tabResetKeys(apiMode: ApiMode): Record<SettingsTab, (keyof Setti
   return {
     general: ['lang', 'debugEnabled', 'chatBordersEnabled', 'experimentalCharacters', 'experimentalVoice'],
     appearance: ['lightTheme', 'darkTheme', 'followSystem', 'accent', 'customThemes'],
-    llm: ['apiMode', 'apiFormat', 'fastModelEnabled', 'thinkingEnabled', 'thinkingEffort', 'thinkingBudgetTokens', 'temperature', 'topP', 'maxToolRounds', apiMode],
+    llm: ['modelProfiles', 'primaryProfileId', 'fastProfileId', 'mentorProfileId', 'apiMode', 'apiFormat', 'fastModelEnabled', 'thinkingEnabled', 'thinkingEffort', 'thinkingBudgetTokens', 'temperature', 'topP', 'maxToolRounds', apiMode],
     search: ['searxngEnabled', 'searxngBaseUrl', 'searxngCategories', 'searxngTimeRange', 'searxngLanguage', 'searxngSafeSearch'],
     mentor: ['mentorEnabled', 'mentorApiFormat', 'mentorBaseURL', 'mentorApiKey', 'mentorModel', 'mentorMaxTokens', 'mentorThinkingEnabled', 'mentorThinkingEffort', 'mentorThinkingBudgetTokens', 'maxMentorConsultations', 'explorePrompt', 'scoutPrompt', 'mentorPrompt', 'exploreTemperature', 'exploreMaxToolRounds', 'exploreMaxTokens', 'exploreTopP', 'exploreMaxDepth', 'exploreThinkingEnabled', 'scoutTemperature', 'scoutMaxToolRounds', 'scoutMaxTokens', 'scoutTopP', 'scoutMaxDepth', 'scoutThinkingEnabled'],
     advanced: ['compactionModel', 'compactionMaxTokens', 'compactionTemperature', 'maxContextTokens', 'maxConversationRounds', 'chatRenderBatchRounds', 'toolContextDefaultMode', 'toolContextOverrides', 'toolContextSummaryMaxChars', 'toolContextAutoThresholdChars', 'todoMaxRetries', 'goalMaxIterations', 'goalMaxWallClockMs', 'goalRequireGitClean', 'verifierModelTier', 'verifierMaxTokens', 'verifierTemperature', 'projectGraphMaxDepth', 'projectGraphMaxFiles', 'projectGraphMaxEdges', 'projectGraphMaxSymbolsPerFile', 'projectGraphMaxFileBytes', 'projectGraphMaxTreeEntries', 'streamIdleTimeoutMs', 'toolOutputMiddleKeepChars', 'browserEngine', 'folderAccessYolo'],

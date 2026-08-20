@@ -12,7 +12,7 @@ import type { TaskChecklist } from '../../utils/taskChecklistTypes';
 import type { CustomThemeRecord } from '../../theme/types';
 
 export type ApiMode = 'deepseek' | 'custom' | 'local';
-export type ApiFormat = 'openai' | 'claude';
+export type ApiFormat = 'openai' | 'claude' | 'response';
 export type ProviderName = 'deepseek' | ApiFormat;
 export type Lang = 'zh-CN' | 'zh-TW' | 'en';
 export type MultimodalModelTier = 'primary' | 'fast' | 'all';
@@ -25,7 +25,29 @@ export interface ModeConfig {
   maxTokens: number;
 }
 
+export interface ModelProfile {
+  id: string;
+  name: string;
+  apiMode: ApiMode;
+  apiFormat: ApiFormat;
+  baseURL: string;
+  apiKey: string;
+  model: string;
+  maxTokens: number;
+  thinkingEnabled?: boolean;
+  thinkingEffort?: string;
+  thinkingBudgetTokens?: number;
+  temperature?: number;
+  topP?: number;
+}
+
 export interface Settings {
+  // 模型配置池与插槽 (Model Profiles & Role Slots)
+  modelProfiles: ModelProfile[];
+  primaryProfileId: string;
+  fastProfileId: string;
+  mentorProfileId: string;
+
   apiMode: ApiMode;
   apiFormat: ApiFormat;
   provider: ProviderName;

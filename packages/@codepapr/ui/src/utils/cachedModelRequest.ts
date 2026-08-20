@@ -9,7 +9,7 @@ import type {
 
 export interface CachedModelRequestParams {
   provider: ILLMProvider;
-  providerName: 'deepseek' | 'openai' | 'claude';
+  providerName: 'deepseek' | 'openai' | 'claude' | 'response';
   model: string;
   systemPrompt: string;
   userPrompt: string;

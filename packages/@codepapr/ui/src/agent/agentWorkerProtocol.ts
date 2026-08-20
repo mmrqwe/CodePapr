@@ -15,8 +15,8 @@ import type { ContextCheckpointPayload } from '../utils/contextCompaction';
 import type { Lang } from '../utils/i18n';
 
 export type WorkerApiMode = 'deepseek' | 'custom' | 'local';
-export type WorkerApiFormat = 'openai' | 'claude';
-export type WorkerProviderName = 'deepseek' | 'openai' | 'claude';
+export type WorkerApiFormat = 'openai' | 'claude' | 'response';
+export type WorkerProviderName = 'deepseek' | 'openai' | 'claude' | 'response';
 
 export interface WorkerAgentSettings {
   apiMode: WorkerApiMode;

@@ -32,7 +32,7 @@ interface BuildOptions {
   prefix: IImmutablePrefix;
   appendLog: IAppendOnlyLog;
   model: string;
-  provider: 'deepseek' | 'openai' | 'claude';
+  provider: 'deepseek' | 'openai' | 'claude' | 'response';
   thinking?: IChatThinking;
   temperature?: number;
   topP?: number;
