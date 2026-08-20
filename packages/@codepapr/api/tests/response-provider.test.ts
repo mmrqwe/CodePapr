@@ -94,7 +94,8 @@ describe('ResponseProvider', () => {
 
     const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(calledBody.model).toBe('gpt-4o');
-    expect(calledBody.reasoning).toEqual({ effort: 'high' });
+    expect(calledBody.thinking).toBeUndefined();
+    expect(calledBody.reasoning).toEqual({ effort: 'high', summary: 'auto' });
     expect(calledBody.tools).toEqual([
       {
         type: 'function',
@@ -167,6 +168,85 @@ describe('ResponseProvider', () => {
     expect(res.choices[0].message.toolCalls).toHaveLength(1);
     expect(res.choices[0].message.toolCalls?.[0].name).toBe('read_file');
     expect(res.choices[0].message.toolCalls?.[0].arguments).toEqual({ path: 'src/index.ts' });
+  });
+
+  it('sends thinking.type plus reasoning.effort for Volcengine / Console Go endpoints', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        id: 'resp_ark',
+        status: 'completed',
+        output: [
+          {
+            type: 'reasoning',
+            summary: [{ type: 'summary_text', text: 'Need to inspect the file first.' }],
+          },
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'ok' }],
+          },
+        ],
+      }),
+    });
+
+    const provider = new ResponseProvider({
+      apiKey: 'sk-test',
+      baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const res = await provider.chat({
+      model: 'muse-spark-1.2-contributor',
+      messages: [{ id: '1', role: 'user', content: 'hi', timestamp: Date.now() }],
+      thinking: {
+        type: 'enabled',
+        reasoningEffort: 'max',
+      },
+    });
+
+    const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(calledBody.thinking).toEqual({ type: 'enabled' });
+    expect(calledBody.reasoning).toEqual({ effort: 'high' });
+    expect(res.choices[0].message.reasoningContent).toBe('Need to inspect the file first.');
+  });
+
+  it('streams nested reasoning deltas and summary parts', async () => {
+    const sseChunks = [
+      'data: {"type":"response.created","response":{"id":"resp_nested"}}\n\n',
+      'data: {"type":"response.reasoning_summary_part.added","part":{"type":"summary_text","text":"First "}}\n\n',
+      'data: {"type":"response.reasoning_summary_text.delta","delta":{"text":"thought"}}\n\n',
+      'data: {"type":"response.output_text.delta","delta":{"text":"answer"}}\n\n',
+      'data: {"type":"response.completed","response":{"id":"resp_nested","status":"completed"}}\n\n',
+      'data: [DONE]\n\n',
+    ];
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: createMockStream(sseChunks),
+    });
+
+    const provider = new ResponseProvider({
+      apiKey: 'sk-test',
+      baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const events: IChatStreamEvent[] = [];
+    const res = await provider.streamChat({
+      model: 'muse-spark-1.2-contributor',
+      messages: [{ id: '1', role: 'user', content: 'hi', timestamp: Date.now() }],
+      thinking: { type: 'enabled', reasoningEffort: 'high' },
+    }, (e) => events.push(e));
+
+    const reasoningDeltas = events.filter((e) => e.type === 'reasoning-delta');
+    expect(reasoningDeltas.map((e) => (e as { delta: string }).delta).join('')).toBe('First thought');
+    expect(res.choices[0].message.content).toBe('answer');
+    expect(res.choices[0].message.reasoningContent).toBe('First thought');
   });
 
   it('throws ProviderRequestError on stream error events', async () => {

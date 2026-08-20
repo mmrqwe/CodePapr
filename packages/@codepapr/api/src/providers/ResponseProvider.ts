@@ -44,7 +44,12 @@ interface ResponseUsage {
 }
 
 interface ResponseOutputMessagePart {
-  type?: 'output_text' | 'text' | 'reasoning_text' | 'reasoning' | string;
+  type?: 'output_text' | 'text' | 'reasoning_text' | 'reasoning' | 'summary_text' | string;
+  text?: string;
+}
+
+interface ResponseReasoningSummaryPart {
+  type?: string;
   text?: string;
 }
 
@@ -56,7 +61,7 @@ interface ResponseOutputItem {
   call_id?: string;
   arguments?: string;
   content?: string | ResponseOutputMessagePart[];
-  summary?: string;
+  summary?: string | ResponseReasoningSummaryPart[];
   text?: string;
   status?: string;
 }
@@ -91,7 +96,8 @@ interface ResponseObject {
 interface ResponseStreamChunk {
   type?: string;
   id?: string;
-  delta?: string;
+  delta?: string | { text?: string; content?: string };
+  text?: string;
   call_id?: string;
   item_id?: string;
   item?: ResponseOutputItem;
@@ -122,6 +128,19 @@ interface ResponseStreamChunk {
   };
 }
 
+const REASONING_DELTA_EVENT_TYPES = new Set([
+  'response.reasoning_text.delta',
+  'response.reasoning_summary_text.delta',
+  'response.reasoning.delta',
+  'response.thought.delta',
+  'response.reasoning_summary_part.added',
+]);
+
+const REASONING_DONE_EVENT_TYPES = new Set([
+  'response.reasoning_text.done',
+  'response.reasoning_summary_text.done',
+]);
+
 function getResponseCachedTokens(usage: ResponseUsage | undefined): number {
   return (
     usage?.cache_read_input_tokens ??
@@ -145,6 +164,74 @@ function getResponseInputTokens(usage: ResponseUsage | undefined): number {
 
 function getResponseOutputTokens(usage: ResponseUsage | undefined): number {
   return usage?.output_tokens ?? usage?.completion_tokens ?? 0;
+}
+
+function isOfficialOpenAIEndpoint(baseURL: string | undefined): boolean {
+  try {
+    return /(^|\.)api\.openai\.com$/i.test(
+      new URL(baseURL ?? 'https://api.openai.com/v1').hostname
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Responses / 方舟 reasoning.effort 取值是 minimal|low|medium|high。
+ * UI 沿用 DeepSeek 的 max，这里映射过去，避免上游丢掉思考强度。
+ */
+function mapResponsesReasoningEffort(effort: string | undefined): string {
+  const trimmed = effort?.trim();
+  if (!trimmed) return 'medium';
+  if (trimmed === 'max') return 'high';
+  return trimmed;
+}
+
+function extractStreamText(chunk: ResponseStreamChunk): string {
+  if (typeof chunk.delta === 'string') return chunk.delta;
+  if (chunk.delta && typeof chunk.delta === 'object') {
+    if (typeof chunk.delta.text === 'string') return chunk.delta.text;
+    if (typeof chunk.delta.content === 'string') return chunk.delta.content;
+  }
+  if (typeof chunk.text === 'string') return chunk.text;
+  if (typeof chunk.part?.text === 'string') return chunk.part.text;
+  return '';
+}
+
+function extractReasoningFromOutputItem(item: ResponseOutputItem): string {
+  let text = '';
+  if (typeof item.summary === 'string') {
+    text += item.summary;
+  } else if (Array.isArray(item.summary)) {
+    for (const part of item.summary) {
+      if (typeof part?.text === 'string') text += part.text;
+    }
+  }
+  if (typeof item.text === 'string') {
+    text += item.text;
+  }
+  if (Array.isArray(item.content)) {
+    for (const part of item.content) {
+      if (
+        part.type === 'reasoning_text' ||
+        part.type === 'reasoning' ||
+        part.type === 'summary_text'
+      ) {
+        text += part.text ?? '';
+      }
+    }
+  }
+  return text;
+}
+
+function appendReasoningDelta(
+  current: string,
+  delta: string,
+  onEvent: (event: IChatStreamEvent) => void
+): string {
+  if (!delta) return current;
+  onEvent({ type: 'reasoning-delta', delta });
+  return current + delta;
 }
 
 export class ResponseProvider extends BaseLLMProvider {
@@ -263,6 +350,11 @@ export class ResponseProvider extends BaseLLMProvider {
                 if (!toolCallStates.some((t) => t.id === callId)) {
                   toolCallStates.push({ id: callId, name, argumentsText: chunk.item.arguments || '' });
                 }
+              } else if (chunk.item.type === 'reasoning' || chunk.item.type === 'reasoning_summary') {
+                const itemReasoning = extractReasoningFromOutputItem(chunk.item);
+                if (itemReasoning && !reasoningContent.includes(itemReasoning)) {
+                  reasoningContent = appendReasoningDelta(reasoningContent, itemReasoning, onEvent);
+                }
               }
             }
 
@@ -274,6 +366,11 @@ export class ResponseProvider extends BaseLLMProvider {
                   if (chunk.item.name) existing.name = chunk.item.name;
                   if (chunk.item.arguments) existing.argumentsText = chunk.item.arguments;
                 }
+              } else if (chunk.item.type === 'reasoning' || chunk.item.type === 'reasoning_summary') {
+                const itemReasoning = extractReasoningFromOutputItem(chunk.item);
+                if (itemReasoning && !reasoningContent.includes(itemReasoning)) {
+                  reasoningContent = appendReasoningDelta(reasoningContent, itemReasoning, onEvent);
+                }
               }
             }
 
@@ -282,24 +379,29 @@ export class ResponseProvider extends BaseLLMProvider {
               eventType === 'response.output_text.delta' ||
               eventType === 'response.text.delta'
             ) {
-              const delta = chunk.delta || '';
+              const delta = extractStreamText(chunk);
               if (delta) {
                 content += delta;
                 onEvent({ type: 'content-delta', delta });
               }
             }
 
-            // 4. Reasoning delta
-            if (
-              eventType === 'response.reasoning_text.delta' ||
-              eventType === 'response.reasoning_summary_text.delta' ||
-              eventType === 'response.reasoning.delta' ||
-              eventType === 'response.thought.delta'
-            ) {
-              const delta = chunk.delta || '';
-              if (delta) {
-                reasoningContent += delta;
-                onEvent({ type: 'reasoning-delta', delta });
+            // 4. Reasoning delta / done
+            if (REASONING_DELTA_EVENT_TYPES.has(eventType)) {
+              reasoningContent = appendReasoningDelta(reasoningContent, extractStreamText(chunk), onEvent);
+            } else if (REASONING_DONE_EVENT_TYPES.has(eventType)) {
+              const fullText = extractStreamText(chunk);
+              if (fullText && !reasoningContent.includes(fullText)) {
+                const remainder = fullText.startsWith(reasoningContent)
+                  ? fullText.slice(reasoningContent.length)
+                  : reasoningContent
+                    ? ''
+                    : fullText;
+                if (remainder) {
+                  reasoningContent = appendReasoningDelta(reasoningContent, remainder, onEvent);
+                } else if (!reasoningContent) {
+                  reasoningContent = appendReasoningDelta(reasoningContent, fullText, onEvent);
+                }
               }
             }
 
@@ -309,16 +411,18 @@ export class ResponseProvider extends BaseLLMProvider {
               eventType === 'response.function_call.delta'
             ) {
               const callId = chunk.call_id || chunk.item_id;
-              const delta = chunk.delta || '';
-              if (callId) {
-                let state = toolCallStates.find((t) => t.id === callId);
-                if (!state) {
-                  state = { id: callId, name: '', argumentsText: '' };
-                  toolCallStates.push(state);
+              const delta = extractStreamText(chunk);
+              if (delta) {
+                if (callId) {
+                  let state = toolCallStates.find((t) => t.id === callId);
+                  if (!state) {
+                    state = { id: callId, name: '', argumentsText: '' };
+                    toolCallStates.push(state);
+                  }
+                  state.argumentsText += delta;
+                } else if (toolCallStates.length > 0) {
+                  toolCallStates[toolCallStates.length - 1].argumentsText += delta;
                 }
-                state.argumentsText += delta;
-              } else if (toolCallStates.length > 0) {
-                toolCallStates[toolCallStates.length - 1].argumentsText += delta;
               }
             }
 
@@ -333,6 +437,13 @@ export class ResponseProvider extends BaseLLMProvider {
                 usage = chunk.response.usage;
               } else if (chunk.usage) {
                 usage = chunk.usage;
+              }
+              if (!reasoningContent && Array.isArray(chunk.response?.output)) {
+                for (const item of chunk.response.output) {
+                  if (item.type === 'reasoning' || item.type === 'reasoning_summary') {
+                    reasoningContent += extractReasoningFromOutputItem(item);
+                  }
+                }
               }
             }
 
@@ -528,11 +639,7 @@ export class ResponseProvider extends BaseLLMProvider {
             }
           }
         } else if (item.type === 'reasoning' || item.type === 'reasoning_summary') {
-          if (typeof item.summary === 'string') {
-            reasoningContent += item.summary;
-          } else if (typeof item.text === 'string') {
-            reasoningContent += item.text;
-          }
+          reasoningContent += extractReasoningFromOutputItem(item);
         } else if (item.type === 'function_call') {
           toolCalls.push({
             id: item.call_id || item.id || `call-${toolCalls.length}`,
@@ -601,7 +708,8 @@ export class ResponseProvider extends BaseLLMProvider {
       parameters: unknown;
       function?: { name: string; description: string; parameters: unknown };
     }>;
-    reasoning?: { effort: string };
+    thinking?: { type: string };
+    reasoning?: { effort: string; summary?: string };
   } {
     const inputItems: unknown[] = [];
 
@@ -671,7 +779,8 @@ export class ResponseProvider extends BaseLLMProvider {
         parameters: unknown;
         function?: { name: string; description: string; parameters: unknown };
       }>;
-      reasoning?: { effort: string };
+      thinking?: { type: string };
+      reasoning?: { effort: string; summary?: string };
     } = {
       model: request.model,
       input: inputItems,
@@ -707,10 +816,21 @@ export class ResponseProvider extends BaseLLMProvider {
       payload.top_p = request.topP;
     }
 
+    // Responses 思考开关分两套字段：
+    // - 火山方舟 / Console Go / muse-spark：必须带 thinking.type，否则整段思考阶段被跳过
+    // - 官方 OpenAI：不认识 thinking，只认 reasoning.effort + summary（summary 才能把思考摘要流出来）
+    const officialOpenAI = isOfficialOpenAIEndpoint(this.config.baseURL);
     if (request.thinking) {
-      payload.reasoning = {
-        effort: request.thinking.reasoningEffort || 'medium',
-      };
+      const thinkingType = request.thinking.type || 'enabled';
+      if (!officialOpenAI) {
+        payload.thinking = { type: thinkingType };
+      }
+      if (thinkingType !== 'disabled') {
+        const effort = mapResponsesReasoningEffort(request.thinking.reasoningEffort);
+        payload.reasoning = officialOpenAI
+          ? { effort, summary: 'auto' }
+          : { effort };
+      }
     }
 
     return payload;
