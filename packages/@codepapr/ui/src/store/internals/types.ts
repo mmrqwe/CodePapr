@@ -40,7 +40,6 @@ export interface ModelProfile {
   thinkingBudgetTokens?: number;
   temperature?: number;
   topP?: number;
-  topK?: number;
   multimodalEnabled?: boolean;
 }
 

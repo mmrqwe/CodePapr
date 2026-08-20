@@ -400,63 +400,67 @@ export function ProfileEditorModal({
         </div>
 
         {/* Thinking Settings */}
-        {!isLocal && (
-          <div className="rounded-xl border border-line bg-base p-4 space-y-4">
-            <ToggleField
-              checked={draft.thinkingEnabled ?? false}
-              onChange={(checked) => update({ thinkingEnabled: checked })}
-              label={t.thinkingMode}
-              desc={draft.apiMode === 'deepseek' ? t.thinkingModeDesc : t.thinkingModeCustomDesc}
-            />
+        <div className="rounded-xl border border-line bg-base p-4 space-y-4">
+          <ToggleField
+            checked={draft.thinkingEnabled ?? false}
+            onChange={(checked) => update({ thinkingEnabled: checked })}
+            label={t.thinkingMode}
+            desc={
+              draft.apiMode === 'deepseek'
+                ? t.thinkingModeDesc
+                : isLocal
+                ? (currentLang === 'en' ? 'Enable reasoning / thinking mode for local models (e.g. DeepSeek-R1 / QwQ).' : '为支持思考的本地模型（如 DeepSeek-R1、QwQ 等）开启深度思考。')
+                : t.thinkingModeCustomDesc
+            }
+          />
 
-            {draft.thinkingEnabled && isClaudeFormat && (
-              <TextField
-                label={t.thinkingBudgetLabel}
-                type="number"
-                min={1024}
-                max={maxTokensLimit}
-                step={512}
-                value={draft.thinkingBudgetTokens ?? 4096}
-                onChange={(e) => {
-                  const parsed = parseInt(e.target.value, 10);
+          {draft.thinkingEnabled && isClaudeFormat && (
+            <TextField
+              label={t.thinkingBudgetLabel}
+              type="number"
+              min={1024}
+              max={maxTokensLimit}
+              step={512}
+              value={draft.thinkingBudgetTokens ?? 4096}
+              onChange={(e) => {
+                const parsed = parseInt(e.target.value, 10);
+                update({
+                  thinkingBudgetTokens: Number.isFinite(parsed) ? parsed : 4096,
+                });
+              }}
+            />
+          )}
+
+          {draft.thinkingEnabled && !isClaudeFormat && (
+            <>
+              <InlineSelectRow
+                title={t.thinkingEffort}
+                value={effortSelectValue}
+                onChange={(val) => {
                   update({
-                    thinkingBudgetTokens: Number.isFinite(parsed) ? parsed : 4096,
+                    thinkingEffort: val === THINKING_EFFORT_CUSTOM ? '' : val,
                   });
                 }}
-              />
-            )}
+              >
+                {THINKING_EFFORT_PRESETS.map((val) => (
+                  <option key={val} value={val}>
+                    {val}
+                  </option>
+                ))}
+                <option value={THINKING_EFFORT_CUSTOM}>{t.thinkingEffortCustom}</option>
+              </InlineSelectRow>
 
-            {draft.thinkingEnabled && !isClaudeFormat && (
-              <>
-                <InlineSelectRow
-                  title={t.thinkingEffort}
-                  value={effortSelectValue}
-                  onChange={(val) => {
-                    update({
-                      thinkingEffort: val === THINKING_EFFORT_CUSTOM ? '' : val,
-                    });
-                  }}
-                >
-                  {THINKING_EFFORT_PRESETS.map((val) => (
-                    <option key={val} value={val}>
-                      {val}
-                    </option>
-                  ))}
-                  <option value={THINKING_EFFORT_CUSTOM}>{t.thinkingEffortCustom}</option>
-                </InlineSelectRow>
-
-                {effortSelectValue === THINKING_EFFORT_CUSTOM && (
-                  <TextField
-                    label={t.thinkingEffortCustomLabel}
-                    value={effortIsCustom ? draft.thinkingEffort : ''}
-                    onChange={(e) => update({ thinkingEffort: e.target.value.trim() })}
-                    placeholder={t.thinkingEffortCustomPlaceholder}
-                  />
-                )}
-              </>
-            )}
-          </div>
-        )}
+              {effortSelectValue === THINKING_EFFORT_CUSTOM && (
+                <TextField
+                  label={t.thinkingEffortCustomLabel}
+                  value={effortIsCustom ? draft.thinkingEffort : ''}
+                  onChange={(e) => update({ thinkingEffort: e.target.value.trim() })}
+                  placeholder={t.thinkingEffortCustomPlaceholder}
+                />
+              )}
+            </>
+          )}
+        </div>
 
         {/* Multimodal Vision */}
         <div className="rounded-xl border border-line bg-base p-4">
@@ -507,7 +511,7 @@ export function ProfileEditorModal({
             />
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
                 {t.temperature}: <span className="font-mono text-accent-text">{draft.temperature ?? 0.7}</span>
@@ -537,20 +541,6 @@ export function ProfileEditorModal({
                 className="w-full cursor-pointer accent-accent"
               />
             </div>
-
-            <TextField
-              label={currentLang === 'en' ? 'Top K (Optional)' : 'Top K（可选）'}
-              type="number"
-              min={0}
-              max={100}
-              step={1}
-              value={draft.topK ?? ''}
-              onChange={(e) => {
-                const parsed = parseInt(e.target.value, 10);
-                update({ topK: Number.isFinite(parsed) && parsed > 0 ? parsed : undefined });
-              }}
-              placeholder={currentLang === 'en' ? 'Default' : '默认'}
-            />
           </div>
         </div>
 

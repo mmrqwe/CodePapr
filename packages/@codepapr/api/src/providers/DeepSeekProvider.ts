@@ -433,14 +433,24 @@ export class DeepSeekProvider extends BaseLLMProvider {
       max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
       ...(request.tools &&
         request.tools.length > 0 && {
-          tools: request.tools.map((t) => ({
-            type: 'function' as const,
-            function: {
-              name: t.name,
-              description: t.description,
-              parameters: t.parameters,
-            },
-          })),
+          tools: request.tools
+            .filter((t) => typeof t?.name === 'string' && t.name.trim().length > 0)
+            .map((t) => {
+              const name = t.name.trim();
+              const description = t.description || '';
+              const parameters = t.parameters || { type: 'object', properties: {} };
+              return {
+                type: 'function' as const,
+                name,
+                description,
+                parameters,
+                function: {
+                  name,
+                  description,
+                  parameters,
+                },
+              };
+            }),
         }),
       ...(stream && {
         stream: true,

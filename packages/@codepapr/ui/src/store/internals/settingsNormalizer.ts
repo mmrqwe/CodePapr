@@ -45,10 +45,6 @@ function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile
     typeof obj.topP === 'number' && Number.isFinite(obj.topP)
       ? Math.max(0, Math.min(1, obj.topP))
       : undefined;
-  const topK =
-    typeof obj.topK === 'number' && Number.isFinite(obj.topK)
-      ? Math.max(0, Math.floor(obj.topK))
-      : undefined;
   const multimodalEnabled =
     typeof obj.multimodalEnabled === 'boolean'
       ? obj.multimodalEnabled
@@ -69,7 +65,6 @@ function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile
     thinkingBudgetTokens,
     ...(temperature !== undefined ? { temperature } : {}),
     ...(topP !== undefined ? { topP } : {}),
-    ...(topK !== undefined ? { topK } : {}),
     ...(multimodalEnabled !== undefined ? { multimodalEnabled } : {}),
   };
 }

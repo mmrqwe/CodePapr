@@ -3,7 +3,7 @@ import type { ModelProfile } from '../../store/agentStore';
 import { createDefaultProfile } from '../../store/internals/settingsNormalizer';
 import { buildProviderForProfile } from '../../store/internals/providerFactory';
 import { resolveProviderName } from '../../store/internals/settingsNormalizer';
-import { InlineSelectRow, TextField, ToggleField } from '../forms';
+import { TextField } from '../forms';
 import { ConnectionTestButton } from './ConnectionTestButton';
 import { ProfileEditorModal } from './ProfileEditorModal';
 import { runConnectionTest } from './testConnection';
@@ -583,65 +583,20 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
         </div>
       </div>
 
-      {/* 3. 全局采样与通用生成控制 */}
+      {/* 3. 工具执行与运行控制 */}
       <div className="space-y-4 border-t border-line pt-6">
-        <h3 className="text-sm font-bold uppercase tracking-wider text-fg">
-          {currentLang === 'en' ? 'Sampling & Tool Execution' : '采样与执行参数'}
-        </h3>
+        <div>
+          <h3 className="text-sm font-bold uppercase tracking-wider text-fg">
+            {currentLang === 'en' ? 'Execution Control' : '执行控制参数'}
+          </h3>
+          <p className="text-xs text-fg-muted mt-1">
+            {currentLang === 'en'
+              ? 'Temperature, Top P, Vision, and Context limits are configured per model profile.'
+              : '温度、Top P、多模态识图与上下文上限均在具体模型配置中独立设置。'}
+          </p>
+        </div>
 
-        <ToggleField
-          checked={local.multimodalEnabled}
-          onChange={(checked) => update({ multimodalEnabled: checked })}
-          label={t.multimodalLabel}
-          desc={t.multimodalDesc}
-          title={t.multimodalDesc}
-        />
-
-        {local.multimodalEnabled && (
-          <InlineSelectRow
-            title={t.multimodalModelTierLabel}
-            value={local.multimodalModelTier}
-            onChange={(value) => update({ multimodalModelTier: value as 'primary' | 'fast' | 'all' })}
-          >
-            <option value="primary">{t.primaryModelTag}</option>
-            <option value="fast">{t.fastModelTag}</option>
-            <option value="all">{currentLang === 'en' ? 'All' : '全部'}</option>
-          </InlineSelectRow>
-        )}
-
-        <div className="grid gap-5 md:grid-cols-3">
-          <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
-              {t.temperature}: <span className="font-mono text-accent-text">{local.temperature}</span>
-            </label>
-            <input
-              type="range"
-              min="0"
-              max="2"
-              step="0.1"
-              value={local.temperature}
-              onChange={(e) => update({ temperature: parseFloat(e.target.value) })}
-              title={t.temperature}
-              className="mt-3 w-full cursor-pointer accent-accent"
-            />
-          </div>
-
-          <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
-              {t.topPLabel}: <span className="font-mono text-accent-text">{local.topP}</span>
-            </label>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              value={local.topP}
-              onChange={(e) => update({ topP: parseFloat(e.target.value) })}
-              title={t.topPHint}
-              className="mt-3 w-full cursor-pointer accent-accent"
-            />
-          </div>
-
+        <div className="max-w-md">
           <TextField
             label={t.maxToolRounds}
             type="number"

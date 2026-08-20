@@ -594,7 +594,13 @@ export class ResponseProvider extends BaseLLMProvider {
     max_output_tokens: number;
     temperature?: number;
     top_p?: number;
-    tools?: Array<{ type: 'function'; name: string; description: string; parameters: unknown }>;
+    tools?: Array<{
+      type: 'function';
+      name: string;
+      description: string;
+      parameters: unknown;
+      function?: { name: string; description: string; parameters: unknown };
+    }>;
     reasoning?: { effort: string };
   } {
     const inputItems: unknown[] = [];
@@ -628,10 +634,11 @@ export class ResponseProvider extends BaseLLMProvider {
           }
           for (const tc of msg.toolCalls) {
             const rawArgs = typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments);
+            const callName = typeof tc.name === 'string' && tc.name.trim().length > 0 ? tc.name.trim() : 'tool';
             inputItems.push({
               type: 'function_call',
-              call_id: tc.id,
-              name: tc.name,
+              call_id: tc.id || `call-${inputItems.length}`,
+              name: callName,
               arguments: rawArgs,
             });
           }
@@ -639,10 +646,12 @@ export class ResponseProvider extends BaseLLMProvider {
           inputItems.push({ role: 'assistant', content: msg.content });
         }
       } else if (msg.role === 'tool') {
-        const callId = msg.toolResult?.toolCallId || (msg.metadata?.toolCallId as string) || '';
+        const callId = msg.toolResult?.toolCallId || (msg.metadata?.toolCallId as string) || `call-${inputItems.length}`;
+        const toolName = msg.metadata?.toolName || (msg.toolResult as { toolName?: string })?.toolName;
         inputItems.push({
           type: 'function_call_output',
           call_id: callId,
+          ...(typeof toolName === 'string' && toolName.trim().length > 0 ? { name: toolName.trim() } : {}),
           output: msg.content,
         });
       }
@@ -655,7 +664,13 @@ export class ResponseProvider extends BaseLLMProvider {
       max_output_tokens: number;
       temperature?: number;
       top_p?: number;
-      tools?: Array<{ type: 'function'; name: string; description: string; parameters: unknown }>;
+      tools?: Array<{
+        type: 'function';
+        name: string;
+        description: string;
+        parameters: unknown;
+        function?: { name: string; description: string; parameters: unknown };
+      }>;
       reasoning?: { effort: string };
     } = {
       model: request.model,
@@ -665,12 +680,24 @@ export class ResponseProvider extends BaseLLMProvider {
     };
 
     if (request.tools && request.tools.length > 0) {
-      payload.tools = request.tools.map((t) => ({
-        type: 'function' as const,
-        name: t.name,
-        description: t.description,
-        parameters: t.parameters,
-      }));
+      payload.tools = request.tools
+        .filter((t) => typeof t?.name === 'string' && t.name.trim().length > 0)
+        .map((t) => {
+          const name = t.name.trim();
+          const description = t.description || '';
+          const parameters = t.parameters || { type: 'object', properties: {} };
+          return {
+            type: 'function' as const,
+            name,
+            description,
+            parameters,
+            function: {
+              name,
+              description,
+              parameters,
+            },
+          };
+        });
     }
 
     if (typeof request.temperature === 'number') {
