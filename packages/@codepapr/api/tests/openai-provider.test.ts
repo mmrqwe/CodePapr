@@ -633,7 +633,7 @@ describe('safeParseToolArguments', () => {
     });
     const response = await provider.chat({
       model: 'gpt-4o',
-      thinking: { type: 'enabled', reasoningEffort: 'max' },
+      thinking: { type: 'enabled', reasoningEffort: 'max', payload: 'thinking' },
       messages: [
         {
           id: 'assistant-toolcall-no-reasoning',
@@ -673,7 +673,7 @@ describe('safeParseToolArguments', () => {
     expect(secondBody.reasoning_effort).toBeUndefined();
   });
 
-  it('官方 OpenAI 端点不下发非标准 thinking 参数（避免 400 Unrecognized request argument）', async () => {
+  it('缺省 thinkingPayload=reasoning 不下发 thinking 参数（官方 OpenAI / Console Go）', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({
         id: 'resp-official',
@@ -725,6 +725,39 @@ describe('safeParseToolArguments', () => {
     await provider.chat({
       model: 'gpt-4o',
       thinking: { type: 'enabled', reasoningEffort: 'xhigh' },
+      messages: [{ id: 'user-1', role: 'user', content: '你好', timestamp: 1 }],
+      maxTokens: 1024,
+    });
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string
+    ) as { thinking?: { type?: string }; reasoning_effort?: string };
+    expect(body.thinking).toBeUndefined();
+    expect(body.reasoning_effort).toBe('xhigh');
+  });
+
+  it('thinkingPayload both 同时下发 thinking 与 reasoning_effort', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 'resp-both',
+        choices: [
+          {
+            message: { role: 'assistant', content: 'ok', reasoning_content: '' },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: { prompt_tokens: 5, completion_tokens: 2 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      baseURL: 'https://relay.example.com/v1',
+    });
+    await provider.chat({
+      model: 'gpt-4o',
+      thinking: { type: 'enabled', reasoningEffort: 'xhigh', payload: 'both' },
       messages: [{ id: 'user-1', role: 'user', content: '你好', timestamp: 1 }],
       maxTokens: 1024,
     });

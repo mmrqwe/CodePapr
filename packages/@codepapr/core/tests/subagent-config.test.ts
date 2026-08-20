@@ -159,10 +159,11 @@ describe('resolveSubagentExecution - 思考强度继承', () => {
   it('explore/scout 继承主设置的 effort 与 budget', () => {
     const definition: AgentDefinition = { name: 'explore', description: 'e', mode: 'subagent', prompt: 'p' };
     const exec = resolveSubagentExecution(
-      makeInput({ definition, reasoningEffort: 'xhigh', thinkingBudgetTokens: 8000 })
+      makeInput({ definition, reasoningEffort: 'xhigh', thinkingBudgetTokens: 8000, thinkingPayload: 'both' })
     );
     expect(exec.parameters.reasoningEffort).toBe('xhigh');
     expect(exec.parameters.thinkingBudgetTokens).toBe(8000);
+    expect(exec.parameters.thinkingPayload).toBe('both');
   });
 
   it('mentor 使用自己的强度设置（不继承主设置）', () => {
@@ -182,11 +183,13 @@ describe('resolveSubagentExecution - 思考强度继承', () => {
           thinkingEnabled: true,
           thinkingEffort: 'medium',
           thinkingBudgetTokens: 6000,
+          thinkingPayload: 'both',
         },
       })
     );
     expect(exec.parameters.reasoningEffort).toBe('medium');
     expect(exec.parameters.thinkingBudgetTokens).toBe(6000);
+    expect(exec.parameters.thinkingPayload).toBe('both');
   });
 
   it('强度为空时不注入参数（交给 API 默认）', () => {

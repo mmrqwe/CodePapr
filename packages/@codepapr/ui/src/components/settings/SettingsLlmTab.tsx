@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import type { ModelProfile } from '../../store/agentStore';
-import { createDefaultProfile } from '../../store/internals/settingsNormalizer';
+import { createDefaultProfile, resolveProviderName, resolveThinkingPayload } from '../../store/internals/settingsNormalizer';
 import { buildProviderForProfile } from '../../store/internals/providerFactory';
-import { resolveProviderName } from '../../store/internals/settingsNormalizer';
 import { TextField } from '../forms';
 import { ConnectionTestButton } from './ConnectionTestButton';
 import { ProfileEditorModal } from './ProfileEditorModal';
@@ -128,6 +127,7 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
         thinkingEnabled: prof.thinkingEnabled ?? false,
         reasoningEffort: prof.thinkingEffort ?? '',
         thinkingBudgetTokens: prof.thinkingBudgetTokens ?? 4096,
+        thinkingPayload: resolveThinkingPayload(prof.thinkingPayload, prof.apiMode),
         signal: controller.signal,
       });
     } finally {

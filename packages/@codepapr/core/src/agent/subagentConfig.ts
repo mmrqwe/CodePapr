@@ -14,6 +14,7 @@ import type {
   ILLMProvider,
   ISubagentToolInvocation,
   IToolDefinition,
+  ThinkingPayload,
 } from '@codepapr/types';
 import {
   Agent,
@@ -70,6 +71,7 @@ export interface SubagentMentorSettings {
   thinkingEnabled: boolean;
   thinkingEffort?: string;
   thinkingBudgetTokens?: number;
+  thinkingPayload?: ThinkingPayload;
 }
 
 export interface SubagentExecutionInput {
@@ -87,6 +89,7 @@ export interface SubagentExecutionInput {
   /** 主模型思考强度：explore/scout 及普通子代理继承（与主代理共用同一模型）。 */
   reasoningEffort?: string;
   thinkingBudgetTokens?: number;
+  thinkingPayload?: ThinkingPayload;
   explore?: SubagentTierSettings;
   scout?: SubagentTierSettings;
   mentor?: SubagentMentorSettings;
@@ -103,6 +106,7 @@ export interface ResolvedSubagentParameters {
   thinkingEnabled: boolean;
   reasoningEffort?: string;
   thinkingBudgetTokens?: number;
+  thinkingPayload?: ThinkingPayload;
 }
 
 export interface ResolvedSubagentMentor {
@@ -190,6 +194,9 @@ export function resolveSubagentExecution(
   const thinkingBudgetTokens = usingMentor
     ? (input.mentor?.thinkingBudgetTokens ?? 0)
     : (input.thinkingBudgetTokens ?? 0);
+  const thinkingPayload = usingMentor
+    ? input.mentor?.thinkingPayload
+    : input.thinkingPayload;
 
   const agentMaxToolRounds = tierSettings?.maxToolRounds ?? SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS;
   const maxToolRounds = Math.min(input.globalMaxToolRounds, agentMaxToolRounds);
@@ -203,6 +210,7 @@ export function resolveSubagentExecution(
       thinkingEnabled,
       ...(reasoningEffort.trim() ? { reasoningEffort: reasoningEffort.trim() } : {}),
       ...(thinkingBudgetTokens > 0 ? { thinkingBudgetTokens } : {}),
+      ...(thinkingPayload ? { thinkingPayload } : {}),
     },
     maxToolRounds,
     mentor,

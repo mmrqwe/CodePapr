@@ -20,6 +20,7 @@ export const DEFAULT_MODEL_PROFILES: ModelProfile[] = [
     thinkingEnabled: true,
     thinkingEffort: 'max',
     thinkingBudgetTokens: 4096,
+    thinkingPayload: 'thinking',
   },
   {
     id: 'profile-deepseek-fast',
@@ -37,6 +38,7 @@ export const DEFAULT_MODEL_PROFILES: ModelProfile[] = [
     thinkingEnabled: false,
     thinkingEffort: '',
     thinkingBudgetTokens: 0,
+    thinkingPayload: 'thinking',
   },
   {
     id: 'profile-custom',
@@ -54,6 +56,7 @@ export const DEFAULT_MODEL_PROFILES: ModelProfile[] = [
     thinkingEnabled: false,
     thinkingEffort: '',
     thinkingBudgetTokens: 4096,
+    thinkingPayload: 'reasoning',
   },
   {
     id: 'profile-local',
@@ -71,6 +74,7 @@ export const DEFAULT_MODEL_PROFILES: ModelProfile[] = [
     thinkingEnabled: false,
     thinkingEffort: '',
     thinkingBudgetTokens: 0,
+    thinkingPayload: 'reasoning',
   },
 ];
 
@@ -141,6 +145,7 @@ export const DEFAULT_SETTINGS: Settings = {
   thinkingEnabled: true,
   thinkingEffort: 'max',
   thinkingBudgetTokens: 4096,
+  thinkingPayload: 'thinking',
   multimodalEnabled: false,
   multimodalModelTier: 'all',
   debugEnabled: false,
@@ -193,6 +198,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mentorThinkingEnabled: false,
   mentorThinkingEffort: '',
   mentorThinkingBudgetTokens: 4096,
+  mentorThinkingPayload: 'reasoning',
   explorePrompt: '',
   scoutPrompt: '',
   mentorPrompt: '',

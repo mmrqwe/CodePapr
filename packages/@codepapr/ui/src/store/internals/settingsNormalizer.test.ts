@@ -6,6 +6,7 @@ import {
   resolveFastProfile,
   resolveMentorProfile,
   resolvePrimaryProfile,
+  resolveThinkingPayload,
 } from './settingsNormalizer';
 import { CORE_TOKEN_KEYS } from '../../theme/themeEngine';
 import type { CustomThemeRecord } from '../../theme/types';
@@ -205,15 +206,18 @@ describe('ModelProfile 与 Slot 角色分配机制', () => {
     expect(deepseekProf.apiFormat).toBe('openai');
     expect(deepseekProf.model).toBe('deepseek-v4-pro');
     expect(deepseekProf.thinkingEnabled).toBe(true);
+    expect(deepseekProf.thinkingPayload).toBe('thinking');
     expect(deepseekProf.id).toMatch(/^profile-/);
 
     const customProf = createDefaultProfile('My Custom', 'custom');
     expect(customProf.apiMode).toBe('custom');
     expect(customProf.model).toBe('gpt-4o');
+    expect(customProf.thinkingPayload).toBe('reasoning');
 
     const localProf = createDefaultProfile('My Local', 'local');
     expect(localProf.apiMode).toBe('local');
     expect(localProf.baseURL).toBe('http://127.0.0.1:8080/v1');
+    expect(localProf.thinkingPayload).toBe('reasoning');
   });
 
   it('空设置默认生成预设模型配置池，并正确绑定 primary, fast, mentor 插槽', () => {
@@ -230,6 +234,52 @@ describe('ModelProfile 与 Slot 角色分配机制', () => {
     expect(primary.id).toBe('profile-deepseek');
     expect(fast.id).toBe('profile-deepseek-fast');
     expect(mentor.id).toBe('profile-custom');
+    expect(settings.thinkingPayload).toBe('thinking');
+    expect(settings.mentorThinkingPayload).toBe('reasoning');
+  });
+
+  it('thinkingPayload 缺省按 apiMode 回填，显式值保留', () => {
+    expect(resolveThinkingPayload(undefined, 'deepseek')).toBe('thinking');
+    expect(resolveThinkingPayload(undefined, 'custom')).toBe('reasoning');
+    expect(resolveThinkingPayload('both', 'deepseek')).toBe('both');
+
+    const settings = normalizeSettings({
+      modelProfiles: [
+        {
+          id: 'prof-ark',
+          name: 'Ark',
+          apiMode: 'custom',
+          apiFormat: 'response',
+          baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+          apiKey: 'sk-ark',
+          model: 'doubao-1.5-pro-32k',
+          maxTokens: 32000,
+          thinkingEnabled: true,
+          thinkingPayload: 'both',
+        },
+      ],
+      primaryProfileId: 'prof-ark',
+    });
+    expect(settings.thinkingPayload).toBe('both');
+    expect(settings.modelProfiles[0]?.thinkingPayload).toBe('both');
+
+    const legacy = normalizeSettings({
+      modelProfiles: [
+        {
+          id: 'prof-legacy',
+          name: 'Legacy Custom',
+          apiMode: 'custom',
+          apiFormat: 'openai',
+          baseURL: 'https://relay.example.com/v1',
+          apiKey: 'sk',
+          model: 'gpt-4o',
+          maxTokens: 8000,
+        },
+      ],
+      primaryProfileId: 'prof-legacy',
+    });
+    expect(legacy.thinkingPayload).toBe('reasoning');
+    expect(legacy.modelProfiles[0]?.thinkingPayload).toBe('reasoning');
   });
 
   it('从 legacy 平铺设置合成配置池并保留 API 密钥与端点', () => {
@@ -310,6 +360,7 @@ describe('ModelProfile 与 Slot 角色分配机制', () => {
     expect(settings.baseURL).toBe('https://api.openai.com/v1');
     expect(settings.thinkingEnabled).toBe(true);
     expect(settings.thinkingEffort).toBe('medium');
+    expect(settings.thinkingPayload).toBe('reasoning');
 
     expect(settings.fastModel).toBe('qwen-turbo-latest');
 

@@ -127,6 +127,7 @@ export type {
   SessionMeta,
   Settings,
   TextFileAttachment,
+  ThinkingPayload,
   UIMessage,
   UIToolInvocation,
   UndoConversationResetResult,
@@ -143,6 +144,7 @@ export {
   resolveMentorProfile,
   resolvePrimaryProfile,
   resolveProviderName,
+  resolveThinkingPayload,
 } from './internals/settingsNormalizer';
 
 // Marker to silence unused-import lint for re-exported helpers

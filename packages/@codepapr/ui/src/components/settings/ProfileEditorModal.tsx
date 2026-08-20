@@ -13,7 +13,7 @@ import {
 import { ConnectionTestButton } from './ConnectionTestButton';
 import { runConnectionTest } from './testConnection';
 import { buildProviderForProfile } from '../../store/internals/providerFactory';
-import { resolveProviderName } from '../../store/internals/settingsNormalizer';
+import { resolveProviderName, resolveThinkingPayload } from '../../store/internals/settingsNormalizer';
 
 export interface ProfileEditorModalProps {
   profile: ModelProfile;
@@ -83,6 +83,7 @@ export function ProfileEditorModal({
         multimodalEnabled: false,
         thinkingEnabled: true,
         thinkingEffort: 'max',
+        thinkingPayload: 'thinking',
       }),
     },
     {
@@ -99,6 +100,7 @@ export function ProfileEditorModal({
         multimodalEnabled: false,
         thinkingEnabled: false,
         thinkingEffort: '',
+        thinkingPayload: 'thinking',
       }),
     },
     {
@@ -130,6 +132,7 @@ export function ProfileEditorModal({
         topP: 0.9,
         multimodalEnabled: false,
         thinkingEnabled: false,
+        thinkingPayload: 'reasoning',
       }),
     },
     {
@@ -145,6 +148,7 @@ export function ProfileEditorModal({
         topP: 0.9,
         multimodalEnabled: true,
         thinkingEnabled: false,
+        thinkingPayload: 'reasoning',
       }),
     },
     {
@@ -160,6 +164,7 @@ export function ProfileEditorModal({
         topP: 0.9,
         multimodalEnabled: false,
         thinkingEnabled: false,
+        thinkingPayload: 'both',
       }),
     },
     {
@@ -176,6 +181,7 @@ export function ProfileEditorModal({
         topP: 0.9,
         multimodalEnabled: false,
         thinkingEnabled: false,
+        thinkingPayload: 'reasoning',
       }),
     },
   ];
@@ -227,6 +233,7 @@ export function ProfileEditorModal({
         thinkingEnabled: draft.thinkingEnabled ?? false,
         reasoningEffort: draft.thinkingEffort ?? '',
         thinkingBudgetTokens: draft.thinkingBudgetTokens ?? 4096,
+        thinkingPayload: resolveThinkingPayload(draft.thinkingPayload, draft.apiMode),
         signal: controller.signal,
       });
     } finally {
@@ -458,6 +465,22 @@ export function ProfileEditorModal({
                   placeholder={t.thinkingEffortCustomPlaceholder}
                 />
               )}
+
+              <InlineSelectRow
+                title={t.thinkingPayload}
+                desc={t.thinkingPayloadDesc}
+                value={resolveThinkingPayload(draft.thinkingPayload, draft.apiMode)}
+                onChange={(val) => {
+                  if (val === 'reasoning' || val === 'thinking' || val === 'both') {
+                    update({ thinkingPayload: val });
+                  }
+                }}
+              >
+                <option value="reasoning">{t.thinkingPayloadReasoning}</option>
+                <option value="thinking">{t.thinkingPayloadThinking}</option>
+                <option value="both">{t.thinkingPayloadBoth}</option>
+              </InlineSelectRow>
+              <p className="text-xs text-fg-muted">{t.thinkingPayloadHint}</p>
             </>
           )}
         </div>

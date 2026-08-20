@@ -336,7 +336,7 @@ export function buildUiTaskToolContext(
     lang: runtime.lang ?? settings.lang,
     skillDefinitions: runtime.skillDefinitions ?? [],
     agents: availableAgents,
-    mentor: { enabled: settings.mentorEnabled, model: settings.mentorModel, baseURL: settings.mentorBaseURL, apiKey: settings.mentorApiKey, apiFormat: settings.mentorApiFormat as ApiFormat, maxTokens: settings.mentorMaxTokens, maxConsultations: settings.maxMentorConsultations, thinkingEnabled: settings.mentorThinkingEnabled, thinkingEffort: settings.mentorThinkingEffort, thinkingBudgetTokens: settings.mentorThinkingBudgetTokens },
+    mentor: { enabled: settings.mentorEnabled, model: settings.mentorModel, baseURL: settings.mentorBaseURL, apiKey: settings.mentorApiKey, apiFormat: settings.mentorApiFormat as ApiFormat, maxTokens: settings.mentorMaxTokens, maxConsultations: settings.maxMentorConsultations, thinkingEnabled: settings.mentorThinkingEnabled, thinkingEffort: settings.mentorThinkingEffort, thinkingBudgetTokens: settings.mentorThinkingBudgetTokens, thinkingPayload: settings.mentorThinkingPayload },
     baseURL: settings.baseURL,
     apiKey: settings.apiKey,
     multimodalEnabled: resolveMultimodalEnabled(settings, baseModel),
@@ -344,6 +344,7 @@ export function buildUiTaskToolContext(
     thinkingEnabled: settings.thinkingEnabled,
     reasoningEffort: settings.thinkingEffort,
     thinkingBudgetTokens: settings.thinkingBudgetTokens,
+    thinkingPayload: settings.thinkingPayload,
     editHistory: runtime.editHistory,
     onWorkspaceMutated,
     exploreTopP: settings.exploreTopP,
@@ -426,6 +427,7 @@ export function buildAgentSessionParts(
       thinkingEnabled: overrides.thinkingEnabled ?? settings.thinkingEnabled,
       reasoningEffort: overrides.thinkingEffort ?? settings.thinkingEffort,
       thinkingBudgetTokens: overrides.thinkingBudgetTokens ?? settings.thinkingBudgetTokens,
+      thinkingPayload: settings.thinkingPayload,
     },
   });
   const log = createLogFromMessages(sessionId, messages, sessionBootstrapPrompt, pruneOptions);
@@ -537,6 +539,7 @@ export function createAgent(
           thinkingEnabled: overrides.thinkingEnabled ?? settings.thinkingEnabled,
           reasoningEffort: overrides.thinkingEffort ?? settings.thinkingEffort,
           thinkingBudgetTokens: overrides.thinkingBudgetTokens ?? settings.thinkingBudgetTokens,
+          thinkingPayload: settings.thinkingPayload,
         },
         runtime: {
           editHistory: runtime.editHistory,

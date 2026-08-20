@@ -1,6 +1,6 @@
 import { buildThinking } from '@codepapr/core';
 import type { ILLMProvider } from '@codepapr/api';
-import type { ProviderName } from '../../store/agentStore';
+import type { ProviderName, ThinkingPayload } from '../../store/agentStore';
 
 export interface ConnectionTestOptions {
   model: string;
@@ -8,6 +8,7 @@ export interface ConnectionTestOptions {
   thinkingEnabled: boolean;
   reasoningEffort: string;
   thinkingBudgetTokens: number;
+  thinkingPayload?: ThinkingPayload;
   signal?: AbortSignal;
 }
 
@@ -29,6 +30,7 @@ export async function runConnectionTest(
       thinkingEnabled: options.thinkingEnabled,
       reasoningEffort: options.reasoningEffort,
       thinkingBudgetTokens: options.thinkingBudgetTokens,
+      thinkingPayload: options.thinkingPayload,
     },
     options.providerName,
   );

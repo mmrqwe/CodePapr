@@ -95,7 +95,7 @@ describe('ResponseProvider', () => {
     const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(calledBody.model).toBe('gpt-4o');
     expect(calledBody.thinking).toBeUndefined();
-    expect(calledBody.reasoning).toEqual({ effort: 'high', summary: 'auto' });
+    expect(calledBody.reasoning).toEqual({ effort: 'high' });
     expect(calledBody.tools).toEqual([
       {
         type: 'function',
@@ -170,7 +170,7 @@ describe('ResponseProvider', () => {
     expect(res.choices[0].message.toolCalls?.[0].arguments).toEqual({ path: 'src/index.ts' });
   });
 
-  it('sends thinking.type plus reasoning.effort for Volcengine / Console Go endpoints', async () => {
+  it('default thinkingPayload (reasoning) omits thinking.type on Responses endpoints', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -208,9 +208,87 @@ describe('ResponseProvider', () => {
     });
 
     const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(calledBody.thinking).toEqual({ type: 'enabled' });
+    expect(calledBody.thinking).toBeUndefined();
     expect(calledBody.reasoning).toEqual({ effort: 'high' });
     expect(res.choices[0].message.reasoningContent).toBe('Need to inspect the file first.');
+  });
+
+  it('thinkingPayload both sends thinking.type plus reasoning.effort', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        id: 'resp_both',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'ok' }],
+          },
+        ],
+      }),
+    });
+
+    const provider = new ResponseProvider({
+      apiKey: 'sk-test',
+      baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    await provider.chat({
+      model: 'doubao-1.5-pro-32k',
+      messages: [{ id: '1', role: 'user', content: 'hi', timestamp: Date.now() }],
+      thinking: {
+        type: 'enabled',
+        reasoningEffort: 'max',
+        payload: 'both',
+      },
+    });
+
+    const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(calledBody.thinking).toEqual({ type: 'enabled' });
+    expect(calledBody.reasoning).toEqual({ effort: 'high' });
+  });
+
+  it('thinkingPayload thinking sends only thinking.type', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        id: 'resp_thinking',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'ok' }],
+          },
+        ],
+      }),
+    });
+
+    const provider = new ResponseProvider({
+      apiKey: 'sk-test',
+      baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    await provider.chat({
+      model: 'doubao-1.5-pro-32k',
+      messages: [{ id: '1', role: 'user', content: 'hi', timestamp: Date.now() }],
+      thinking: {
+        type: 'enabled',
+        reasoningEffort: 'high',
+        payload: 'thinking',
+      },
+    });
+
+    const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(calledBody.thinking).toEqual({ type: 'enabled' });
+    expect(calledBody.reasoning).toBeUndefined();
   });
 
   it('streams nested reasoning deltas and summary parts', async () => {

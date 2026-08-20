@@ -52,7 +52,7 @@ describe('runConnectionTest', () => {
     });
 
     const request = chat.mock.calls[0]?.[0] as IChatRequest;
-    expect(request.thinking).toEqual({ type: 'enabled', reasoningEffort: 'xhigh' });
+    expect(request.thinking).toEqual({ type: 'enabled', payload: 'reasoning', reasoningEffort: 'xhigh' });
   });
 
   it('claude 提供者开启思考时带上 budgetTokens', async () => {
@@ -66,7 +66,7 @@ describe('runConnectionTest', () => {
     });
 
     const request = chat.mock.calls[0]?.[0] as IChatRequest;
-    expect(request.thinking).toEqual({ type: 'enabled', budgetTokens: 8000 });
+    expect(request.thinking).toEqual({ type: 'enabled', payload: 'reasoning', budgetTokens: 8000 });
   });
 
   it('deepseek 关闭思考时显式 disabled（省略字段会默认开思考）', async () => {
@@ -81,6 +81,25 @@ describe('runConnectionTest', () => {
 
     const request = chat.mock.calls[0]?.[0] as IChatRequest;
     expect(request.thinking).toEqual({ type: 'disabled' });
+  });
+
+  it('thinkingPayload 透传到 buildThinking', async () => {
+    const chat = vi.fn<(_: IChatRequest) => Promise<IChatResponse>>().mockResolvedValue(okResponse());
+    await runConnectionTest(mockProvider(chat), {
+      model: 'test-model',
+      providerName: 'response',
+      thinkingEnabled: true,
+      reasoningEffort: 'max',
+      thinkingBudgetTokens: 0,
+      thinkingPayload: 'both',
+    });
+
+    const request = chat.mock.calls[0]?.[0] as IChatRequest;
+    expect(request.thinking).toEqual({
+      type: 'enabled',
+      payload: 'both',
+      reasoningEffort: 'max',
+    });
   });
 
   it('provider 抛错时原样向上传播', async () => {

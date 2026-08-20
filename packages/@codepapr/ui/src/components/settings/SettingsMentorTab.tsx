@@ -9,6 +9,7 @@ import {
 } from './constants';
 import { ConnectionTestButton } from './ConnectionTestButton';
 import { runConnectionTest } from './testConnection';
+import { resolveThinkingPayload } from '../../store/internals/settingsNormalizer';
 import type { SettingsTabProps } from './types';
 
 const FIELD_CLASS =
@@ -64,6 +65,7 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
         thinkingEnabled: local.mentorThinkingEnabled,
         reasoningEffort: local.mentorThinkingEffort,
         thinkingBudgetTokens: local.mentorThinkingBudgetTokens,
+        thinkingPayload: local.mentorThinkingPayload,
         signal: controller.signal,
       });
     } finally {
@@ -316,6 +318,7 @@ export function SettingsMentorTab({ local, update, t, currentLang }: SettingsTab
                             mentorThinkingEnabled: prof.thinkingEnabled ?? false,
                             mentorThinkingEffort: prof.thinkingEffort ?? '',
                             mentorThinkingBudgetTokens: prof.thinkingBudgetTokens ?? 4096,
+                            mentorThinkingPayload: resolveThinkingPayload(prof.thinkingPayload, prof.apiMode),
                             mentorMaxTokens: prof.maxTokens,
                           });
                         }

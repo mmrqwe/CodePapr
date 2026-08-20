@@ -6,6 +6,17 @@ import type { CustomThemeRecord } from '../../theme/types';
 import { ACCENT_PATTERN } from '../../theme/types';
 import { DEFAULT_SETTINGS, normalizeCustomSystemPrompt } from './defaults';
 import type { ApiFormat, ApiMode, Lang, ModeConfig, ModelProfile, ProviderName, Settings, WorkspaceEntry } from './types';
+import type { ThinkingPayload } from '@codepapr/types';
+
+export function resolveThinkingPayload(
+  raw: unknown,
+  apiMode: ApiMode,
+): ThinkingPayload {
+  if (raw === 'reasoning' || raw === 'thinking' || raw === 'both') {
+    return raw;
+  }
+  return apiMode === 'deepseek' ? 'thinking' : 'reasoning';
+}
 
 function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile | null {
   if (!input || typeof input !== 'object') {
@@ -37,6 +48,7 @@ function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile
     typeof obj.thinkingBudgetTokens === 'number' && Number.isFinite(obj.thinkingBudgetTokens)
       ? Math.max(0, Math.floor(obj.thinkingBudgetTokens))
       : 4096;
+  const thinkingPayload = resolveThinkingPayload(obj.thinkingPayload, apiMode);
   const temperature =
     typeof obj.temperature === 'number' && Number.isFinite(obj.temperature)
       ? Math.max(0, Math.min(2, obj.temperature))
@@ -63,6 +75,7 @@ function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile
     thinkingEnabled,
     thinkingEffort,
     thinkingBudgetTokens,
+    thinkingPayload,
     ...(temperature !== undefined ? { temperature } : {}),
     ...(topP !== undefined ? { topP } : {}),
     ...(multimodalEnabled !== undefined ? { multimodalEnabled } : {}),
@@ -91,6 +104,7 @@ export function createDefaultProfile(
       thinkingEnabled: true,
       thinkingEffort: 'max',
       thinkingBudgetTokens: 4096,
+      thinkingPayload: 'thinking',
     };
   }
   if (apiMode === 'local') {
@@ -110,6 +124,7 @@ export function createDefaultProfile(
       thinkingEnabled: false,
       thinkingEffort: '',
       thinkingBudgetTokens: 0,
+      thinkingPayload: 'reasoning',
     };
   }
   return {
@@ -128,6 +143,7 @@ export function createDefaultProfile(
     thinkingEnabled: false,
     thinkingEffort: '',
     thinkingBudgetTokens: 4096,
+    thinkingPayload: 'reasoning',
   };
 }
 
@@ -167,6 +183,7 @@ function buildSynthesizedProfiles(
       thinkingEnabled: apiMode === 'deepseek' ? thinkingEnabled : true,
       thinkingEffort: apiMode === 'deepseek' ? thinkingEffort : 'max',
       thinkingBudgetTokens: apiMode === 'deepseek' ? thinkingBudgetTokens : 4096,
+      thinkingPayload: 'thinking',
     },
     {
       id: 'profile-deepseek-fast',
@@ -184,6 +201,7 @@ function buildSynthesizedProfiles(
       thinkingEnabled: false,
       thinkingEffort: '',
       thinkingBudgetTokens: 0,
+      thinkingPayload: 'thinking',
     },
     {
       id: 'profile-custom',
@@ -201,6 +219,7 @@ function buildSynthesizedProfiles(
       thinkingEnabled: apiMode === 'custom' ? thinkingEnabled : false,
       thinkingEffort: apiMode === 'custom' ? thinkingEffort : '',
       thinkingBudgetTokens: apiMode === 'custom' ? thinkingBudgetTokens : 4096,
+      thinkingPayload: 'reasoning',
     },
     {
       id: 'profile-local',
@@ -218,6 +237,7 @@ function buildSynthesizedProfiles(
       thinkingEnabled: false,
       thinkingEffort: '',
       thinkingBudgetTokens: 0,
+      thinkingPayload: 'reasoning',
     },
   ];
 
@@ -238,6 +258,7 @@ function buildSynthesizedProfiles(
       thinkingEnabled: mentorThinkingEnabled,
       thinkingEffort: mentorThinkingEffort,
       thinkingBudgetTokens: mentorThinkingBudgetTokens,
+      thinkingPayload: resolveThinkingPayload(undefined, 'custom'),
     });
   }
 
@@ -895,6 +916,9 @@ export function normalizeSettings(
   const effectiveThinkingBudgetTokens = hasExplicitProfiles
     ? (activePrimaryProfile.thinkingBudgetTokens ?? 4096)
     : thinkingBudgetTokens;
+  const effectiveThinkingPayload = hasExplicitProfiles
+    ? resolveThinkingPayload(activePrimaryProfile.thinkingPayload, activePrimaryProfile.apiMode)
+    : resolveThinkingPayload(undefined, effectiveApiMode);
 
   const effectiveMentorModel = hasExplicitProfiles
     ? activeMentorProfile.model
@@ -915,6 +939,9 @@ export function normalizeSettings(
   const effectiveMentorThinkingBudgetTokens = hasExplicitProfiles
     ? (activeMentorProfile.thinkingBudgetTokens ?? 4096)
     : mentorThinkingBudgetTokens;
+  const effectiveMentorThinkingPayload = hasExplicitProfiles
+    ? resolveThinkingPayload(activeMentorProfile.thinkingPayload, activeMentorProfile.apiMode)
+    : resolveThinkingPayload(undefined, 'custom');
   const effectiveMentorMaxTokens = hasExplicitProfiles
     ? activeMentorProfile.maxTokens
     : mentorMaxTokens;
@@ -979,6 +1006,7 @@ export function normalizeSettings(
     thinkingEnabled: effectiveThinkingEnabled,
     thinkingEffort: effectiveThinkingEffort,
     thinkingBudgetTokens: effectiveThinkingBudgetTokens,
+    thinkingPayload: effectiveThinkingPayload,
     debugEnabled,
     chatBordersEnabled,
     experimentalCharacters,
@@ -1034,6 +1062,7 @@ export function normalizeSettings(
     mentorThinkingEnabled: effectiveMentorThinkingEnabled,
     mentorThinkingEffort: effectiveMentorThinkingEffort,
     mentorThinkingBudgetTokens: effectiveMentorThinkingBudgetTokens,
+    mentorThinkingPayload: effectiveMentorThinkingPayload,
     explorePrompt:
       typeof input.explorePrompt === 'string' ? input.explorePrompt.trim() : '',
     scoutPrompt:

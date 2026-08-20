@@ -21,6 +21,7 @@ import {
   withStreamIdleRetry,
 } from './streaming';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
+import { shouldSendReasoningEffort, shouldSendThinkingType } from './thinkingPayload';
 
 const log = new Logger('ResponseProvider');
 
@@ -164,16 +165,6 @@ function getResponseInputTokens(usage: ResponseUsage | undefined): number {
 
 function getResponseOutputTokens(usage: ResponseUsage | undefined): number {
   return usage?.output_tokens ?? usage?.completion_tokens ?? 0;
-}
-
-function isOfficialOpenAIEndpoint(baseURL: string | undefined): boolean {
-  try {
-    return /(^|\.)api\.openai\.com$/i.test(
-      new URL(baseURL ?? 'https://api.openai.com/v1').hostname
-    );
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -816,20 +807,16 @@ export class ResponseProvider extends BaseLLMProvider {
       payload.top_p = request.topP;
     }
 
-    // Responses 思考开关分两套字段：
-    // - 火山方舟 / Console Go / muse-spark：必须带 thinking.type，否则整段思考阶段被跳过
-    // - 官方 OpenAI：不认识 thinking，只认 reasoning.effort + summary（summary 才能把思考摘要流出来）
-    const officialOpenAI = isOfficialOpenAIEndpoint(this.config.baseURL);
+    // 思考字段由模型配置的 thinkingPayload 决定，不再按域名猜测。
     if (request.thinking) {
       const thinkingType = request.thinking.type || 'enabled';
-      if (!officialOpenAI) {
+      if (shouldSendThinkingType(request)) {
         payload.thinking = { type: thinkingType };
       }
-      if (thinkingType !== 'disabled') {
-        const effort = mapResponsesReasoningEffort(request.thinking.reasoningEffort);
-        payload.reasoning = officialOpenAI
-          ? { effort, summary: 'auto' }
-          : { effort };
+      if (shouldSendReasoningEffort(request)) {
+        payload.reasoning = {
+          effort: mapResponsesReasoningEffort(request.thinking.reasoningEffort),
+        };
       }
     }
 

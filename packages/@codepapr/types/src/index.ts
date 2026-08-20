@@ -221,6 +221,9 @@ export interface ICacheStatistics {
   calls?: number;
 }
 
+/** 思考打开时请求体携带的字段组合。网关各认一套，由模型配置显式选择。 */
+export type ThinkingPayload = 'reasoning' | 'thinking' | 'both';
+
 export interface MentorConfig {
   enabled: boolean;
   model: string;
@@ -232,6 +235,7 @@ export interface MentorConfig {
   thinkingEnabled: boolean;
   thinkingEffort: string;
   thinkingBudgetTokens: number;
+  thinkingPayload?: ThinkingPayload;
 }
 
 /**
@@ -419,6 +423,8 @@ export interface IChatThinking {
   /** Claude 格式思考预算（token）。Anthropic 硬约束 ≥1024 且 < max_tokens，
    *  provider 侧钳制；第三方 Claude 兼容端点可自由取值。 */
   budgetTokens?: number;
+  /** 思考打开时请求体带哪些字段。缺省由 provider 按自身惯例回填。 */
+  payload?: ThinkingPayload;
 }
 
 export interface IChatRequest {

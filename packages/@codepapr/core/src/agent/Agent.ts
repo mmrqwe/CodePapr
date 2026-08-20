@@ -22,6 +22,7 @@ import {
   ICacheStatistics,
   IChatThinking,
   IChatRequest,
+  ThinkingPayload,
   IImageContent,
   IChatResponse,
   ICacheValidation,
@@ -357,6 +358,8 @@ function accumulateStats(
  *   （缺省即不思考，且避免第三方端点对未知 thinking 字段返回 400）。
  * - reasoningEffort 任意非空字符串透传（OpenAI 兼容生态取值各异）。
  * - budgetTokens 仅 Claude 格式使用，provider 侧按 API 硬约束钳制。
+ * - thinkingPayload 决定请求体带 thinking / reasoning / 两者；缺省 DeepSeek
+ *   用 thinking，其余用 reasoning。
  */
 export function buildThinking(
   params: Record<string, unknown>,
@@ -374,14 +377,26 @@ export function buildThinking(
     typeof params.thinkingBudgetTokens === 'number' && Number.isFinite(params.thinkingBudgetTokens)
       ? Math.floor(params.thinkingBudgetTokens)
       : undefined;
+  const payload = resolveThinkingPayloadParam(params.thinkingPayload, providerName);
   if (!reasoningEffort && !budgetTokens) {
-    return { type: 'enabled' };
+    return { type: 'enabled', payload };
   }
   return {
     type: 'enabled',
+    payload,
     ...(reasoningEffort ? { reasoningEffort } : {}),
     ...(budgetTokens ? { budgetTokens } : {}),
   };
+}
+
+function resolveThinkingPayloadParam(
+  raw: unknown,
+  providerName: 'deepseek' | 'openai' | 'claude' | 'response',
+): ThinkingPayload {
+  if (raw === 'reasoning' || raw === 'thinking' || raw === 'both') {
+    return raw;
+  }
+  return providerName === 'deepseek' ? 'thinking' : 'reasoning';
 }
 
 function isImageError(err: unknown): boolean {

@@ -32,6 +32,11 @@ export {
 export { RequestBuilder, stripConsumedImages, insertAnchoredContext } from './request/RequestBuilder';
 export { CacheValidator } from './response/CacheValidator';
 export { DEFAULT_MAX_TOKENS, DEEPSEEK_MAX_TOKENS, getProviderMaxTokensLimit, getProviderContextLimit, CONTEXT_LIMITS, sanitizeMaxTokens } from './tokenLimits';
+export {
+  resolveRequestThinkingPayload,
+  shouldSendReasoningEffort,
+  shouldSendThinkingType,
+} from './providers/thinkingPayload';
 
 // Re-export types
 export * from '@codepapr/types';

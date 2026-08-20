@@ -805,6 +805,7 @@ async function runSubagent(
     thinkingFallback: s.thinkingEnabled ?? true,
     reasoningEffort: s.thinkingEffort ?? '',
     thinkingBudgetTokens: s.thinkingBudgetTokens ?? 0,
+    thinkingPayload: s.thinkingPayload,
     explore: {
       topP: s.exploreTopP,
       maxTokens: s.exploreMaxTokens,
@@ -831,6 +832,7 @@ async function runSubagent(
       thinkingEnabled: s.mentorThinkingEnabled,
       thinkingEffort: s.mentorThinkingEffort ?? '',
       thinkingBudgetTokens: s.mentorThinkingBudgetTokens ?? 0,
+      thinkingPayload: s.mentorThinkingPayload,
     },
     fallbackApiKey: s.apiKey,
     fallbackBaseURL: s.baseURL,
@@ -1204,6 +1206,9 @@ async function handleRunAppAgent(
     ...(isMentor
       ? { thinkingBudgetTokens: cachedSettings.mentorThinkingBudgetTokens ?? 0 }
       : { thinkingBudgetTokens: cachedSettings.thinkingBudgetTokens ?? 0 }),
+    thinkingPayload: isMentor
+      ? cachedSettings.mentorThinkingPayload
+      : cachedSettings.thinkingPayload,
   };
 
   const log = new AppendOnlyLog(`app-agent-${payload.appId}-${Date.now()}`);
@@ -1435,6 +1440,7 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
       thinkingEnabled: payload.parameters.thinkingEnabled,
       reasoningEffort: payload.parameters.reasoningEffort,
       thinkingBudgetTokens: payload.parameters.thinkingBudgetTokens,
+      thinkingPayload: payload.parameters.thinkingPayload ?? payload.settings.thinkingPayload,
     },
   });
   const session = new Session({

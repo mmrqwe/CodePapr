@@ -417,6 +417,12 @@ export declare const I18N_DICTS: {
         thinkingEffortCustom: string;
         thinkingEffortCustomLabel: string;
         thinkingEffortCustomPlaceholder: string;
+        thinkingPayload: string;
+        thinkingPayloadDesc: string;
+        thinkingPayloadReasoning: string;
+        thinkingPayloadThinking: string;
+        thinkingPayloadBoth: string;
+        thinkingPayloadHint: string;
         thinkingBudgetLabel: string;
         thinkingBudgetHint: string;
         llmTestPrimary: string;
@@ -1015,6 +1021,12 @@ export declare const I18N_DICTS: {
         thinkingEffortCustom: string;
         thinkingEffortCustomLabel: string;
         thinkingEffortCustomPlaceholder: string;
+        thinkingPayload: string;
+        thinkingPayloadDesc: string;
+        thinkingPayloadReasoning: string;
+        thinkingPayloadThinking: string;
+        thinkingPayloadBoth: string;
+        thinkingPayloadHint: string;
         thinkingBudgetLabel: string;
         thinkingBudgetHint: string;
         llmTestPrimary: string;
@@ -1611,6 +1623,12 @@ export declare const I18N_DICTS: {
         thinkingEffortCustom: string;
         thinkingEffortCustomLabel: string;
         thinkingEffortCustomPlaceholder: string;
+        thinkingPayload: string;
+        thinkingPayloadDesc: string;
+        thinkingPayloadReasoning: string;
+        thinkingPayloadThinking: string;
+        thinkingPayloadBoth: string;
+        thinkingPayloadHint: string;
         thinkingBudgetLabel: string;
         thinkingBudgetHint: string;
         llmTestPrimary: string;

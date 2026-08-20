@@ -27,6 +27,7 @@ import {
   withStreamIdleRetry,
 } from './streaming';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
+import { shouldSendReasoningEffort, shouldSendThinkingType } from './thinkingPayload';
 
 const log = new Logger('OpenAIProvider');
 
@@ -430,20 +431,8 @@ export class OpenAIProvider extends BaseLLMProvider {
   }
 
   private buildPayload(request: IChatRequest, stream: boolean = false) {
-    // OpenAI 兼容端点（含 Console Go 等转发 DeepSeek 的中继）同样需要
-    // reasoning_content 回传/占位注入（见 reasoningRoundTrip.ts）。
-    //
-    // thinking 字段是 DeepSeek 风格扩展：官方 OpenAI 对未知请求参数返回
-    // 400「Unrecognized request argument」，只能发给中继端点。
-    // reasoning_effort 是官方 o 系列参数，不受此限制。
-    let isOfficialOpenAIEndpoint = false;
-    try {
-      isOfficialOpenAIEndpoint = /(^|\.)api\.openai\.com$/i.test(
-        new URL(this.config.baseURL ?? 'https://api.openai.com/v1').hostname
-      );
-    } catch {
-      isOfficialOpenAIEndpoint = false;
-    }
+    // thinking 是 DeepSeek 风格扩展；reasoning_effort 是 OpenAI 兼容参数。
+    // 发哪个由模型配置 thinkingPayload 决定，不再按域名猜测。
     return {
       model: request.model,
       messages: buildOpenAICompatibleMessages(request, { supportsThinkingPayload: true }),
@@ -451,14 +440,15 @@ export class OpenAIProvider extends BaseLLMProvider {
       top_p: request.topP ?? 0.9,
       max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
       ...(request.thinking &&
-        !isOfficialOpenAIEndpoint && {
+        shouldSendThinkingType(request) && {
           thinking: {
             type: request.thinking.type,
           },
         }),
-      ...(request.thinking?.reasoningEffort && {
-        reasoning_effort: request.thinking.reasoningEffort,
-      }),
+      ...(shouldSendReasoningEffort(request) &&
+        request.thinking?.reasoningEffort && {
+          reasoning_effort: request.thinking.reasoningEffort,
+        }),
       ...(request.tools &&
         request.tools.length > 0 && {
           tools: request.tools

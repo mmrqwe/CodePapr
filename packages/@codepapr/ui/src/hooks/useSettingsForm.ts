@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { normalizeSettings, useAgentStore, type Settings } from '../store/agentStore';
+import { normalizeSettings, resolveThinkingPayload, useAgentStore, type Settings } from '../store/agentStore';
 
 /// Draft-state form backing for the settings modal.
 ///
@@ -59,6 +59,9 @@ export function useSettingsForm() {
         thinkingBudgetTokens: primaryProfile
           ? (primaryProfile.thinkingBudgetTokens ?? 4096)
           : merged.thinkingBudgetTokens,
+        thinkingPayload: primaryProfile
+          ? resolveThinkingPayload(primaryProfile.thinkingPayload, primaryProfile.apiMode)
+          : merged.thinkingPayload,
         temperature: primaryProfile?.temperature !== undefined
           ? primaryProfile.temperature
           : merged.temperature,
@@ -75,6 +78,9 @@ export function useSettingsForm() {
         mentorBaseURL: mentorProfile ? mentorProfile.baseURL : merged.mentorBaseURL,
         mentorApiKey: mentorProfile ? mentorProfile.apiKey : merged.mentorApiKey,
         mentorApiFormat: mentorProfile ? mentorProfile.apiFormat : merged.mentorApiFormat,
+        mentorThinkingPayload: mentorProfile
+          ? resolveThinkingPayload(mentorProfile.thinkingPayload, mentorProfile.apiMode)
+          : merged.mentorThinkingPayload,
       };
     });
   };

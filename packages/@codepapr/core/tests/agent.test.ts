@@ -1068,7 +1068,7 @@ describe('Agent completion-quality guards (no silent stops)', () => {
 
     await agent.chat('请回答');
 
-    expect(builds[0]?.thinking).toEqual({ type: 'enabled' });
+    expect(builds[0]?.thinking).toEqual({ type: 'enabled', payload: 'thinking' });
     // DeepSeek 省略 thinking 会默认开启思考，续写必须显式 disabled
     expect(builds[1]?.thinking).toEqual({ type: 'disabled' });
   });
@@ -1092,6 +1092,7 @@ describe('Agent completion-quality guards (no silent stops)', () => {
 
     expect(builds[0]?.thinking).toEqual({
       type: 'enabled',
+      payload: 'reasoning',
       reasoningEffort: 'xhigh',
       budgetTokens: 8000,
     });
@@ -1134,7 +1135,7 @@ describe('Agent completion-quality guards (no silent stops)', () => {
 
     await agent.chat('请回答');
 
-    expect(builds[0]?.thinking).toEqual({ type: 'enabled', budgetTokens: 6000 });
+    expect(builds[0]?.thinking).toEqual({ type: 'enabled', payload: 'reasoning', budgetTokens: 6000 });
   });
 
   it('deepseek 提供者任意 effort 值透传（不再只认 high/max）', async () => {
@@ -1154,7 +1155,7 @@ describe('Agent completion-quality guards (no silent stops)', () => {
 
     await agent.chat('请回答');
 
-    expect(builds[0]?.thinking).toEqual({ type: 'enabled', reasoningEffort: 'medium' });
+    expect(builds[0]?.thinking).toEqual({ type: 'enabled', payload: 'thinking', reasoningEffort: 'medium' });
   });
 
   it('stops continuing after MAX_CONTINUATIONS_PER_ROUND and ends gracefully (no throw)', async () => {

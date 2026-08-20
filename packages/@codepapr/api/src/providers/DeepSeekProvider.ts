@@ -30,6 +30,7 @@ import {
   withStreamIdleRetry,
 } from './streaming';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
+import { shouldSendReasoningEffort, shouldSendThinkingType } from './thinkingPayload';
 
 const log = new Logger('DeepSeekProvider');
 
@@ -419,12 +420,14 @@ export class DeepSeekProvider extends BaseLLMProvider {
       model: request.model,
       messages: buildOpenAICompatibleMessages(request, { supportsThinkingPayload }),
       ...(supportsThinkingPayload &&
-        request.thinking && {
+        request.thinking &&
+        (request.thinking.type === 'disabled' || shouldSendThinkingType(request, 'thinking')) && {
           thinking: {
             type: request.thinking.type,
           },
         }),
       ...(supportsThinkingPayload &&
+        shouldSendReasoningEffort(request, 'thinking') &&
         request.thinking?.reasoningEffort && {
           reasoning_effort: request.thinking.reasoningEffort,
         }),

@@ -13,6 +13,7 @@ import type {
 } from '@codepapr/types';
 import type { ContextCheckpointPayload } from '../utils/contextCompaction';
 import type { Lang } from '../utils/i18n';
+import type { ThinkingPayload } from '@codepapr/types';
 
 export type WorkerApiMode = 'deepseek' | 'custom' | 'local';
 export type WorkerApiFormat = 'openai' | 'claude' | 'response';
@@ -33,6 +34,7 @@ export interface WorkerAgentSettings {
   thinkingEnabled: boolean;
   thinkingEffort: string;
   thinkingBudgetTokens: number;
+  thinkingPayload: ThinkingPayload;
   lang?: Lang;
   mentorEnabled: boolean;
   mentorModel: string;
@@ -43,6 +45,7 @@ export interface WorkerAgentSettings {
   mentorThinkingEnabled: boolean;
   mentorThinkingEffort: string;
   mentorThinkingBudgetTokens: number;
+  mentorThinkingPayload: ThinkingPayload;
   exploreTopP: number;
   exploreMaxTokens: number;
   exploreThinkingEnabled: boolean;
@@ -92,6 +95,7 @@ export interface WorkerAgentParameters {
   thinkingEnabled: boolean;
   reasoningEffort: string;
   thinkingBudgetTokens?: number;
+  thinkingPayload?: ThinkingPayload;
 }
 
 export interface WorkerAgentRuntimeConfig {

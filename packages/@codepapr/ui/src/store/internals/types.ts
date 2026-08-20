@@ -1,4 +1,4 @@
-import type { IContextSnapshot, IImageContent, ISubagentToolInvocation, QuestionData } from '@codepapr/types';
+import type { IContextSnapshot, IImageContent, ISubagentToolInvocation, QuestionData, ThinkingPayload } from '@codepapr/types';
 import type { WorkMode } from '../../utils/agentPrompts';
 import type { TaskModelRoute } from '../../utils/modelRouting';
 import type { ContextCheckpointPayload } from '../../utils/contextCompaction';
@@ -16,6 +16,7 @@ export type ApiFormat = 'openai' | 'claude' | 'response';
 export type ProviderName = 'deepseek' | ApiFormat;
 export type Lang = 'zh-CN' | 'zh-TW' | 'en';
 export type MultimodalModelTier = 'primary' | 'fast' | 'all';
+export type { ThinkingPayload };
 
 export interface ModeConfig {
   apiKey: string;
@@ -38,6 +39,7 @@ export interface ModelProfile {
   thinkingEnabled?: boolean;
   thinkingEffort?: string;
   thinkingBudgetTokens?: number;
+  thinkingPayload?: ThinkingPayload;
   temperature?: number;
   topP?: number;
   multimodalEnabled?: boolean;
@@ -69,6 +71,7 @@ export interface Settings {
   thinkingEnabled: boolean;
   thinkingEffort: string;
   thinkingBudgetTokens: number;
+  thinkingPayload: ThinkingPayload;
   multimodalEnabled: boolean;
   multimodalModelTier: MultimodalModelTier;
   debugEnabled: boolean;
@@ -129,6 +132,7 @@ export interface Settings {
   mentorThinkingEnabled: boolean;
   mentorThinkingEffort: string;
   mentorThinkingBudgetTokens: number;
+  mentorThinkingPayload: ThinkingPayload;
   explorePrompt: string;
   scoutPrompt: string;
   mentorPrompt: string;

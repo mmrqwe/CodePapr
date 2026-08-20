@@ -22,7 +22,7 @@ import {
   withTaskSlot,
 } from '@codepapr/core';
 import { DEFAULT_MAX_TOKENS, RequestBuilder, CacheValidator, OpenAIProvider, ClaudeProvider, ResponseProvider } from '@codepapr/api';
-import type { ICacheStatistics, ILLMProvider, IToolDefinition, MentorConfig } from '@codepapr/types';
+import type { ICacheStatistics, ILLMProvider, IToolDefinition, MentorConfig, ThinkingPayload } from '@codepapr/types';
 import { registerWorkspaceTools } from '../tools/workspaceTools';
 import { startSubagentProgress, pushSubagentStep, completeSubagentProgress } from '../utils/subagentProgress';
 
@@ -52,6 +52,7 @@ export interface UiTaskToolContext {
   /** 主模型思考强度：explore/scout 及普通子代理继承（与主代理共用模型）。 */
   reasoningEffort?: string;
   thinkingBudgetTokens?: number;
+  thinkingPayload?: ThinkingPayload;
   exploreTopP?: number;
   exploreMaxTokens?: number;
   exploreThinkingEnabled?: boolean;
@@ -112,6 +113,7 @@ export async function runSubagent(
     thinkingFallback: context.thinkingEnabled ?? true,
     reasoningEffort: context.reasoningEffort ?? '',
     thinkingBudgetTokens: context.thinkingBudgetTokens ?? 0,
+    thinkingPayload: context.thinkingPayload,
     explore: {
       topP: context.exploreTopP,
       maxTokens: context.exploreMaxTokens,

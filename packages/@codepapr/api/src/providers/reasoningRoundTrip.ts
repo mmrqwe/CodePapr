@@ -200,7 +200,13 @@ export async function withReasoningRoundTripFallback<T>(
   } catch (err) {
     if (shouldFallback(err as Error)) {
       onFallback(err as Error);
-      return await run({ ...request, thinking: { type: 'disabled' } });
+      return await run({
+        ...request,
+        thinking: {
+          type: 'disabled',
+          ...(request.thinking?.payload ? { payload: request.thinking.payload } : {}),
+        },
+      });
     }
     throw err;
   }
