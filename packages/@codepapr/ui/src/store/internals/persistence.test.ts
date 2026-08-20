@@ -57,6 +57,13 @@ describe('normalizeSessionMetaList', () => {
     const result = normalizeSessionMetaList(legacy);
     expect(result[0]?.provider).toBe('deepseek');
   });
+
+  it('preserves archivedAt when present', () => {
+    const result = normalizeSessionMetaList([
+      { id: 'a', name: 'a', provider: 'deepseek', model: 'm', createdAt: 1, archivedAt: 42 },
+    ]);
+    expect(result[0]?.archivedAt).toBe(42);
+  });
 });
 
 describe('normalizeSessionProvider', () => {

@@ -213,6 +213,8 @@ export interface SessionMeta {
   updatedAt: number;
   /** Character enabled for this session only. Missing/null means no persona. */
   activeCharacterId?: string | null;
+  /** Millis since epoch when archived. Missing/null means the session is active. */
+  archivedAt?: number | null;
 }
 
 export interface ImagePreview extends IImageContent {
@@ -373,6 +375,8 @@ export interface AgentState {
    *  是最近一次重置；支持连续多次重置逐级撤销。撤销/放弃只作用于栈顶。 */
   _pendingRestoreUndos: PendingRestoreUndo[];
   sessions: SessionMeta[];
+  /** Workspace-scoped archived sessions, loaded on demand (Settings). Not a settings field. */
+  archivedSessions: SessionMeta[];
   activeSessionId: string | null;
   messages: UIMessage[];
   sessionMessages: Record<string, UIMessage[]>;
@@ -469,6 +473,10 @@ export interface AgentActions {
   ) => void;
   newSession: () => void;
   selectSession: (id: string) => void;
+  archiveSession: (id: string) => void;
+  loadArchivedSessions: () => Promise<void>;
+  restoreArchivedSession: (id: string) => Promise<void>;
+  deleteArchivedSession: (id: string) => void;
   deleteSession: (id: string) => void;
   sendMessage: (
     input: string,

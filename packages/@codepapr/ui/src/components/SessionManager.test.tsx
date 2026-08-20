@@ -12,12 +12,14 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
 }));
 
-// deleteSession 的持久化路径全部隔离为 no-op，测试只关注确认门与 store 状态。
 vi.mock('../utils/projectStorage', () => ({
   saveProjectStateDirect: vi.fn(async () => undefined),
   saveSession: vi.fn(async () => undefined),
   saveMessageBatch: vi.fn(async () => undefined),
   deleteSessionById: vi.fn(async () => undefined),
+  archiveSessionById: vi.fn(async () => undefined),
+  restoreSessionById: vi.fn(async () => undefined),
+  loadArchivedSessions: vi.fn(async () => []),
   saveProjectMeta: vi.fn(async () => undefined),
   enqueueProjectStateSave: vi.fn(async (_path: string, writer: () => Promise<void>) => {
     await writer();
@@ -43,6 +45,7 @@ describe('SessionManager', () => {
         { id: 's-1', name: '任务 1', provider: 'deepseek', model: 'deepseek-v4-pro', createdAt: 2, updatedAt: 2 },
         { id: 's-2', name: '任务 2', provider: 'deepseek', model: 'deepseek-v4-pro', createdAt: 1, updatedAt: 1 },
       ],
+      archivedSessions: [],
       activeSessionId: 's-1',
       messages: [],
       sessionMessages: { 's-1': [], 's-2': [] },
@@ -62,53 +65,35 @@ describe('SessionManager', () => {
     vi.restoreAllMocks();
   });
 
-  function clickDeleteButton(index: number): void {
+  function clickArchiveButton(index: number): void {
     const buttons = Array.from(
-      container.querySelectorAll('button[title="删除会话"]')
+      container.querySelectorAll('button[title="归档会话：从侧栏移出，内容保留，可在设置中恢复"]')
     );
     act(() => {
       buttons[index]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
   }
 
-  it('N9：确认后删除会话', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('归档会话后从侧栏移除并保留到 archivedSessions', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm');
 
     await act(async () => {
       root.render(<SessionManager />);
     });
-    clickDeleteButton(0);
+    clickArchiveButton(0);
 
-    const ids = useAgentStore.getState().sessions.map((s) => s.id);
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(ids).toEqual(['s-2']);
+    const state = useAgentStore.getState();
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(state.sessions.map((s) => s.id)).toEqual(['s-2']);
+    expect(state.archivedSessions.map((s) => s.id)).toEqual(['s-1']);
   });
 
-  it('N9：取消确认时保留会话', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
-
+  it('归档按钮文案为归档而不是删除', async () => {
     await act(async () => {
       root.render(<SessionManager />);
     });
-    clickDeleteButton(0);
 
-    const ids = useAgentStore.getState().sessions.map((s) => s.id);
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(ids).toEqual(['s-1', 's-2']);
-  });
-
-  it('N9：确认文案包含会话名', async () => {
-    let captured = '';
-    vi.spyOn(window, 'confirm').mockImplementation((message?: string) => {
-      captured = message ?? '';
-      return false;
-    });
-
-    await act(async () => {
-      root.render(<SessionManager />);
-    });
-    clickDeleteButton(1);
-
-    expect(captured).toContain('任务 2');
+    expect(container.querySelectorAll('button[title="删除会话"]').length).toBe(0);
+    expect(container.textContent).toContain('归档');
   });
 });

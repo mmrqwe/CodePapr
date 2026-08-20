@@ -3,6 +3,7 @@ import { LicenseModal } from '../LicenseModal';
 import type { Lang } from '../../utils/i18n';
 import { FieldCard, ToggleField } from '../forms';
 import type { SettingsTabProps } from './types';
+import { SettingsArchivedSessions } from './SettingsArchivedSessions';
 
 export function SettingsGeneralTab({ local, update, t, currentLang }: SettingsTabProps) {
   const [showLicense, setShowLicense] = useState(false);
@@ -62,6 +63,8 @@ export function SettingsGeneralTab({ local, update, t, currentLang }: SettingsTa
           title={t.experimentalVoiceDesc}
         />
       </div>
+
+      <SettingsArchivedSessions t={t} currentLang={currentLang} />
 
       <FieldCard padding="loose">
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">

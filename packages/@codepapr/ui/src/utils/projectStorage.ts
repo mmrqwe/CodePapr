@@ -22,6 +22,8 @@ export interface ProjectSessionMeta {
   createdAt: number;
   updatedAt?: number;
   activeCharacterId?: string | null;
+  /** Millis since epoch when archived. Missing/null means the session is active. */
+  archivedAt?: number | null;
 }
 
 export interface ProjectMessage {
@@ -510,6 +512,29 @@ export async function loadSessions(workspacePath: string): Promise<ProjectSessio
   const parsed: unknown = JSON.parse(result.sessionsJson);
   if (!Array.isArray(parsed)) return [];
   return parsed as ProjectSessionMeta[];
+}
+
+export async function loadArchivedSessions(workspacePath: string): Promise<ProjectSessionMeta[]> {
+  const result = await invoke<SessionListResult>('load_archived_sessions', {
+    workspacePath: workspacePath.trim(),
+  });
+  const parsed: unknown = JSON.parse(result.sessionsJson);
+  if (!Array.isArray(parsed)) return [];
+  return parsed as ProjectSessionMeta[];
+}
+
+export async function archiveSessionById(workspacePath: string, sessionId: string): Promise<void> {
+  await invoke('archive_session', {
+    workspacePath: workspacePath.trim(),
+    sessionId,
+  });
+}
+
+export async function restoreSessionById(workspacePath: string, sessionId: string): Promise<void> {
+  await invoke('restore_session', {
+    workspacePath: workspacePath.trim(),
+    sessionId,
+  });
 }
 
 export async function deleteSessionById(workspacePath: string, sessionId: string): Promise<void> {

@@ -38,7 +38,7 @@ const EXTERNAL_ACCESS_POLICY_KEY: &str = "fs.externalAccessPolicy";
 const PROJECT_STORAGE_DIR: &str = ".CodePapr";
 const PROJECT_DB_FILE: &str = "project.sqlite";
 /// 当前 project.sqlite schema 版本。已达此版本的连接跳过全量 DDL 批。
-const PROJECT_SCHEMA_VERSION: i64 = 6;
+const PROJECT_SCHEMA_VERSION: i64 = 7;
 /// 每个 project.sqlite 路径在本进程只跑一次 ADR-005 启动防御清理。
 static STARTUP_DEFENSE_DONE: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
 const PAPR_APP_DB_FILE: &str = "db.sqlite";
@@ -292,7 +292,8 @@ fn init_project_schema(conn: &Connection) -> Result<(), String> {
             provider TEXT NOT NULL,
             model TEXT NOT NULL,
             created_at INTEGER NOT NULL,
-            updated_at INTEGER
+            updated_at INTEGER,
+            archived_at INTEGER
           );
           CREATE TABLE IF NOT EXISTS messages (
             id TEXT PRIMARY KEY,
@@ -520,6 +521,26 @@ fn migrate_project_db(conn: &Connection, workspace: &Path) -> Result<(), String>
     if version < 6 {
         migrate_project_db_v6(conn)?;
         conn.pragma_update(None, "user_version", 6_i64)
+            .map_err(|err| format!("设置数据库版本失败: {err}"))?;
+    }
+
+    if version < 7 {
+        // v7: sessions.archived_at。NULL = 侧栏活跃会话；非 NULL = 已归档，
+        // 仍留在同一 project.sqlite，消息/checkpoint 不搬迁。
+        let has_archived_at = conn
+            .prepare("PRAGMA table_info(sessions)")
+            .and_then(|mut stmt| {
+                let mut names = stmt
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .filter_map(|r| r.ok());
+                Ok(names.any(|name| name == "archived_at"))
+            })
+            .unwrap_or(false);
+        if !has_archived_at {
+            conn.execute_batch("ALTER TABLE sessions ADD COLUMN archived_at INTEGER;")
+                .map_err(|err| format!("迁移 sessions.archived_at 列失败: {err}"))?;
+        }
+        conn.pragma_update(None, "user_version", 7_i64)
             .map_err(|err| format!("设置数据库版本失败: {err}"))?;
     }
 
@@ -1497,37 +1518,87 @@ pub(crate) struct SessionListResult {
     pub(crate) sessions_json: String,
 }
 
-#[tauri::command]
-pub(crate) fn load_sessions(workspace_path: String) -> Result<SessionListResult, String> {
-    let (conn, ..) = open_project_db(&workspace_path)?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, name, provider, model, created_at, updated_at FROM sessions
-             ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC, id ASC",
-        )
-        .map_err(|err| format!("查询会话失败: {err}"))?;
+fn session_row_to_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> {
+    let created_at: i64 = row.get(4)?;
+    let updated_at: Option<i64> = row.get(5)?;
+    let archived_at: Option<i64> = row.get(6)?;
+    let mut obj = serde_json::Map::new();
+    obj.insert("id".into(), serde_json::Value::String(row.get(0)?));
+    obj.insert("name".into(), serde_json::Value::String(row.get(1)?));
+    obj.insert("provider".into(), serde_json::Value::String(row.get(2)?));
+    obj.insert("model".into(), serde_json::Value::String(row.get(3)?));
+    obj.insert("createdAt".into(), serde_json::json!(created_at));
+    obj.insert(
+        "updatedAt".into(),
+        serde_json::json!(updated_at.unwrap_or(created_at)),
+    );
+    if let Some(ts) = archived_at {
+        obj.insert("archivedAt".into(), serde_json::json!(ts));
+    }
+    Ok(serde_json::Value::Object(obj))
+}
 
+fn query_sessions(conn: &Connection, archived: bool) -> Result<Vec<serde_json::Value>, String> {
+    let sql = if archived {
+        "SELECT id, name, provider, model, created_at, updated_at, archived_at FROM sessions
+         WHERE archived_at IS NOT NULL
+         ORDER BY archived_at DESC, COALESCE(updated_at, created_at) DESC, id ASC"
+    } else {
+        "SELECT id, name, provider, model, created_at, updated_at, archived_at FROM sessions
+         WHERE archived_at IS NULL
+         ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC, id ASC"
+    };
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|err| format!("查询会话失败: {err}"))?;
     let sessions: Vec<serde_json::Value> = stmt
-        .query_map([], |row| {
-            let created_at = row.get::<_, i64>(4)?;
-            let updated_at: Option<i64> = row.get(5)?;
-            Ok(serde_json::json!({
-                "id": row.get::<_, String>(0)?,
-                "name": row.get::<_, String>(1)?,
-                "provider": row.get::<_, String>(2)?,
-                "model": row.get::<_, String>(3)?,
-                "createdAt": created_at,
-                "updatedAt": updated_at.unwrap_or(created_at),
-            }))
-        })
+        .query_map([], session_row_to_json)
         .map_err(|err| format!("读取会话列表失败: {err}"))?
         .filter_map(|r| r.ok())
         .collect();
+    Ok(sessions)
+}
 
+#[tauri::command]
+pub(crate) fn load_sessions(workspace_path: String) -> Result<SessionListResult, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let sessions = query_sessions(&conn, false)?;
     Ok(SessionListResult {
         sessions_json: serde_json::to_string(&sessions)
             .map_err(|err| format!("序列化会话列表失败: {err}"))?,
     })
+}
+
+#[tauri::command]
+pub(crate) fn load_archived_sessions(workspace_path: String) -> Result<SessionListResult, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let sessions = query_sessions(&conn, true)?;
+    Ok(SessionListResult {
+        sessions_json: serde_json::to_string(&sessions)
+            .map_err(|err| format!("序列化归档会话列表失败: {err}"))?,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn archive_session(workspace_path: String, session_id: String) -> Result<(), String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    conn.execute(
+        "UPDATE sessions SET archived_at = ?1 WHERE id = ?2 AND archived_at IS NULL",
+        params![unix_millis()?, session_id],
+    )
+    .map_err(|err| format!("归档会话失败: {err}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn restore_session(workspace_path: String, session_id: String) -> Result<(), String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    conn.execute(
+        "UPDATE sessions SET archived_at = NULL, updated_at = ?1 WHERE id = ?2",
+        params![unix_millis()?, session_id],
+    )
+    .map_err(|err| format!("恢复会话失败: {err}"))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -4406,13 +4477,13 @@ mod tests {
         }
         std::fs::create_dir_all(workspace.file_path(".CodePapr/apps/live-app")).unwrap();
 
-        // 重新打开触发 v4 迁移（当前最新版本为 v6，v4 迁移后继续升级）
+        // 重新打开触发 v4 迁移（当前最新版本为 v7，v4 迁移后继续升级）
         {
             let (conn, ..) = open_project_db(&ws).unwrap();
             let version: i64 = conn
                 .pragma_query_value(None, "user_version", |row| row.get(0))
                 .unwrap();
-            assert_eq!(version, 6);
+            assert_eq!(version, 7);
             let table_gone: bool = conn
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_storage')",
@@ -5481,6 +5552,90 @@ mod tests {
     }
 
     #[test]
+    fn archive_session_hides_from_active_list_and_keeps_messages() {
+        let workspace = TestWorkspace::new("archive-session");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        save_session(
+            ws.clone(),
+            r#"{"id":"s-live","name":"活跃","provider":"deepseek","model":"m","createdAt":1}"#
+                .to_string(),
+        )
+        .expect("save live");
+        save_session(
+            ws.clone(),
+            r#"{"id":"s-arch","name":"待归档","provider":"deepseek","model":"m","createdAt":2}"#
+                .to_string(),
+        )
+        .expect("save arch");
+        save_message_batch(
+            ws.clone(),
+            "s-arch".to_string(),
+            r#"[{"id":"m-keep","role":"user","content":"keep me","timestamp":1}]"#.to_string(),
+        )
+        .expect("save messages");
+
+        archive_session(ws.clone(), "s-arch".to_string()).expect("archive");
+
+        let active = load_sessions(ws.clone()).expect("load active");
+        let active_parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&active.sessions_json).expect("parse active");
+        assert_eq!(active_parsed.len(), 1);
+        assert_eq!(active_parsed[0]["id"], "s-live");
+
+        let archived = load_archived_sessions(ws.clone()).expect("load archived");
+        let archived_parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&archived.sessions_json).expect("parse archived");
+        assert_eq!(archived_parsed.len(), 1);
+        assert_eq!(archived_parsed[0]["id"], "s-arch");
+        assert!(archived_parsed[0]["archivedAt"].as_i64().unwrap() > 0);
+
+        save_session(
+            ws.clone(),
+            r#"{"id":"s-arch","name":"待归档","provider":"deepseek","model":"m","createdAt":2,"updatedAt":9}"#
+                .to_string(),
+        )
+        .expect("resave archived must not clear archived_at");
+        let still_archived = load_archived_sessions(ws.clone()).expect("reload archived");
+        let still_parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&still_archived.sessions_json).expect("parse still");
+        assert_eq!(still_parsed.len(), 1);
+        assert_eq!(still_parsed[0]["id"], "s-arch");
+        let active_after_save = load_sessions(ws.clone()).expect("active after save");
+        let active_after_save_parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&active_after_save.sessions_json).expect("parse active after save");
+        assert_eq!(active_after_save_parsed.len(), 1);
+
+        let messages = load_session_messages(ws.clone(), "s-arch".to_string()).expect("messages");
+        let msg_parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&messages.messages_json).expect("parse messages");
+        assert_eq!(msg_parsed.len(), 1);
+        assert_eq!(msg_parsed[0]["content"], "keep me");
+
+        restore_session(ws.clone(), "s-arch".to_string()).expect("restore");
+        let restored = load_sessions(ws.clone()).expect("load restored");
+        let restored_parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&restored.sessions_json).expect("parse restored");
+        assert_eq!(restored_parsed.len(), 2);
+        let empty_archived = load_archived_sessions(ws.clone()).expect("archived after restore");
+        let empty_parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&empty_archived.sessions_json).expect("parse empty");
+        assert!(empty_parsed.is_empty());
+
+        archive_session(ws.clone(), "s-arch".to_string()).expect("re-archive");
+        delete_session(ws.clone(), "s-arch".to_string()).expect("purge archived");
+        let after_delete = load_archived_sessions(ws.clone()).expect("archived after delete");
+        let after_delete_parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&after_delete.sessions_json).expect("parse after delete");
+        assert!(after_delete_parsed.is_empty());
+        let gone = load_session_messages(ws, "s-arch".to_string()).expect("purged messages");
+        let gone_parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&gone.messages_json).expect("parse gone");
+        assert!(gone_parsed.is_empty());
+    }
+
+    #[test]
     fn save_message_batch_rejects_duplicate_id_from_another_session() {
         let workspace = TestWorkspace::new("save-message-dup-id");
         let ws = workspace.workspace_arg();
@@ -5639,7 +5794,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
         let leftover: bool = conn
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = '_codepapr_fts_probe')",

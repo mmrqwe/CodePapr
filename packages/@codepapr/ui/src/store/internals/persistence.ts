@@ -47,6 +47,7 @@ export function normalizeSessionMetaList(sessions: ProjectSessionMeta[]): Sessio
       provider: normalizeSessionProvider(session.provider),
       updatedAt: session.updatedAt ?? session.createdAt,
       activeCharacterId: session.activeCharacterId ?? null,
+      archivedAt: typeof session.archivedAt === 'number' ? session.archivedAt : null,
     }))
     .sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt);
 }

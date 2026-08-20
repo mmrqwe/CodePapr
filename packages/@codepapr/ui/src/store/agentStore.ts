@@ -24,6 +24,10 @@ import {
   waitForPendingProjectStateSave,
   loadContextCompactions,
   loadLatestMemoryRecall,
+  archiveSessionById,
+  restoreSessionById,
+  loadArchivedSessions as loadArchivedSessionsFromDb,
+  deleteSessionById,
 } from '../utils/projectStorage';
 import { getContextSurfaceCached, forgetContextSurface, hydrateSessionContext } from './internals/contextSurfaceStore';
 import { runProjectDiagnostics } from '../utils/projectDiagnostics';
@@ -67,6 +71,7 @@ import {
 } from './internals/stats';
 import {
   normalizeProjectSnapshot,
+  normalizeSessionMetaList,
   normalizeSessionProvider,
   normalizeSkillEnabledState,
 } from './internals/persistence';
@@ -227,6 +232,64 @@ function disposeWorkspaceAgents(get: StoreGet): void {
   disposeAppAgentHandle(get);
 }
 
+/** 从侧栏/内存卸下会话（删除与归档共用）。归档时保留 checkpoint 与 DB 行。 */
+function detachSessionFromUi(
+  get: StoreGet,
+  set: StoreSet,
+  id: string,
+  options: { deleteCheckpoints: boolean },
+): void {
+  const running = get();
+  resetTodoListContext(id);
+  if (running._agentSessionId === id && running._agent) {
+    disposeAgentHandle(get);
+  }
+  if (running.workspacePath) {
+    forgetContextSurface(running.workspacePath, id);
+    if (options.deleteCheckpoints) {
+      void deleteCheckpointsForSession(running.workspacePath, id).catch(() => undefined);
+    }
+  }
+  set((s) => {
+    const sessions = s.sessions.filter((x) => x.id !== id);
+    const isActive = s.activeSessionId === id;
+    const isAgentOwner = s._agentSessionId === id;
+    const wasLoading = s.loadingSessionId === id;
+    const sessionMessages = { ...s.sessionMessages };
+    const sessionConversationStats = { ...s.sessionConversationStats };
+    const sessionInputState = { ...s._sessionInputState };
+    delete sessionMessages[id];
+    delete sessionConversationStats[id];
+    delete sessionInputState[id];
+    return {
+      sessions,
+      activeSessionId: isActive ? null : s.activeSessionId,
+      messages: isActive ? [] : s.messages,
+      sessionMessagesLoading: isActive ? false : s.sessionMessagesLoading,
+      sessionMessages,
+      sessionConversationStats,
+      conversationStats: isActive ? createEmptyConversationStats() : s.conversationStats,
+      isLoading: wasLoading ? false : s.isLoading,
+      loadingSessionId: wasLoading ? null : s.loadingSessionId,
+      _agent: isAgentOwner ? null : s._agent,
+      _agentModel: isAgentOwner ? null : s._agentModel,
+      _agentPromptKey: isAgentOwner ? null : s._agentPromptKey,
+      _agentSessionId: isAgentOwner ? null : s._agentSessionId,
+      _latestContextSnapshot: isActive ? null : s._latestContextSnapshot,
+      _sessionInputState: sessionInputState,
+      _sessionLru: s._sessionLru.filter((x) => x !== id),
+      _messageCheckpoints: Object.fromEntries(
+        Object.entries(s._messageCheckpoints).filter(
+          ([, entry]) => entry.sessionId !== id
+        )
+      ),
+      _pendingRestoreUndos: s._pendingRestoreUndos.filter(
+        (entry) => entry.sessionId !== id
+      ),
+    };
+  });
+}
+
 /** 持久化设置：成功时清除历史持久化错误标记（横幅不再常驻）；
  *  失败时记录 _persistenceError 并 toast 提示。保存走串行队列。 */
 function persistAppSettings(get: StoreGet, set: StoreSet, settings: Settings): void {
@@ -353,6 +416,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
   workspaceMutationVersion: 0,
       _pendingRestoreUndos: [],
       sessions: [],
+      archivedSessions: [],
       activeSessionId: null,
       messages: [],
       sessionMessages: {},
@@ -552,6 +616,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           projectGraphLoading: false,
           projectGraphPhase: null,
           sessions: [],
+          archivedSessions: [],
           activeSessionId: null,
           messages: [],
           sessionMessages: {},
@@ -777,6 +842,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           projectGraphLoading: false,
           projectGraphPhase: null,
           sessions,
+          archivedSessions: [],
           activeSessionId,
           messages,
           sessionMessages,
@@ -1376,69 +1442,117 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       },
 
       deleteSession: (id) => {
+        detachSessionFromUi(get, set, id, { deleteCheckpoints: true });
+        saveCurrentProjectState(get(), { purgeDeletedContent: true });
+      },
+
+      archiveSession: (id) => {
         const running = get();
-        // 释放该会话的进程级 TodoList 上下文，避免已删会话的条目被
-        // getAllTodoListContexts 持续持久化（孤儿复活）。
-        resetTodoListContext(id);
-        // agent 归属被删会话时直接销毁（destroy() 内部先 cancel 再 reject
-        // pending 请求）：只 cancel 不 destroy 会泄漏 worker。
-        if (running._agentSessionId === id && running._agent) {
-          disposeAgentHandle(get);
+        const session = running.sessions.find((item) => item.id === id);
+        if (!session) return;
+        if (running.workspacePath) {
+          void archiveSessionById(running.workspacePath, id).catch((err) => {
+            const message = `${getTranslation(get().settings.lang).archiveFailed}：${
+              err instanceof Error ? err.message : String(err)
+            }`;
+            toast.error(message);
+          });
         }
-        // surface 内存缓存失效：会话已删，缓存的 surface 不得再被复用。
+        detachSessionFromUi(get, set, id, { deleteCheckpoints: false });
+        set((s) => ({
+          archivedSessions: [
+            { ...session, archivedAt: Date.now() },
+            ...s.archivedSessions.filter((item) => item.id !== id),
+          ],
+        }));
+        saveCurrentProjectState(get());
+      },
+
+      loadArchivedSessions: async () => {
+        const path = get().workspacePath;
+        if (!path) {
+          set({ archivedSessions: [] });
+          return;
+        }
+        try {
+          const list = await loadArchivedSessionsFromDb(path);
+          set({ archivedSessions: normalizeSessionMetaList(list) });
+        } catch (err) {
+          console.warn(
+            '[CodePapr] 加载归档会话失败:',
+            err instanceof Error ? err.message : err
+          );
+          set({ archivedSessions: [] });
+        }
+      },
+
+      restoreArchivedSession: async (id) => {
+        const path = get().workspacePath;
+        if (path) {
+          try {
+            await restoreSessionById(path, id);
+          } catch (err) {
+            const message = `${getTranslation(get().settings.lang).restoreFailed}：${
+              err instanceof Error ? err.message : String(err)
+            }`;
+            toast.error(message);
+            return;
+          }
+        }
+        const archived = get().archivedSessions.find((item) => item.id === id);
+        const now = Date.now();
+        if (archived) {
+          const restored: SessionMeta = {
+            ...archived,
+            archivedAt: null,
+            updatedAt: now,
+          };
+          set((s) => ({
+            sessions: normalizeSessionMetaList([
+              restored,
+              ...s.sessions.filter((item) => item.id !== id),
+            ]),
+            archivedSessions: s.archivedSessions.filter((item) => item.id !== id),
+          }));
+        } else if (path) {
+          try {
+            const list = await loadSessions(path);
+            set({ sessions: normalizeSessionMetaList(list) });
+            await get().loadArchivedSessions();
+          } catch (err) {
+            console.warn(
+              '[CodePapr] 恢复后刷新会话列表失败:',
+              err instanceof Error ? err.message : err
+            );
+          }
+        }
+        saveCurrentProjectState(get());
+      },
+
+      deleteArchivedSession: (id) => {
+        const running = get();
+        if (running.sessions.some((item) => item.id === id)) {
+          get().deleteSession(id);
+        }
+        resetTodoListContext(id);
         if (running.workspacePath) {
           forgetContextSurface(running.workspacePath, id);
-        }
-        // 清理该会话的 checkpoint timeline 记录：既包括会话自身消息的锚点，
-        // 也覆盖待撤销重置截掉的记录（它们同属该会话）——不清理会无限累积，
-        // 重启后还会被 _ensureWorkspaceGitReady 重新加载成孤儿锚点。
-        if (running.workspacePath) {
           void deleteCheckpointsForSession(running.workspacePath, id).catch(() => undefined);
+          void deleteSessionById(running.workspacePath, id).catch((err) => {
+            toast.error(
+              `${getTranslation(get().settings.lang).deleteSession}：${
+                err instanceof Error ? err.message : String(err)
+              }`
+            );
+          });
         }
-        set((s) => {
-          const sessions = s.sessions.filter((x) => x.id !== id);
-          const isActive = s.activeSessionId === id;
-          const isAgentOwner = s._agentSessionId === id;
-          const wasLoading = s.loadingSessionId === id;
-          const sessionMessages = { ...s.sessionMessages };
-          const sessionConversationStats = { ...s.sessionConversationStats };
-          const sessionInputState = { ...s._sessionInputState };
-          delete sessionMessages[id];
-          delete sessionConversationStats[id];
-          delete sessionInputState[id];
-          return {
-            sessions,
-            activeSessionId: isActive ? null : s.activeSessionId,
-            messages: isActive ? [] : s.messages,
-            sessionMessagesLoading: isActive ? false : s.sessionMessagesLoading,
-            sessionMessages,
-            sessionConversationStats,
-            conversationStats: isActive ? createEmptyConversationStats() : s.conversationStats,
-            isLoading: wasLoading ? false : s.isLoading,
-            loadingSessionId: wasLoading ? null : s.loadingSessionId,
-            _agent: isAgentOwner ? null : s._agent,
-            _agentModel: isAgentOwner ? null : s._agentModel,
-            _agentPromptKey: isAgentOwner ? null : s._agentPromptKey,
-            _agentSessionId: isAgentOwner ? null : s._agentSessionId,
-            _latestContextSnapshot: isActive ? null : s._latestContextSnapshot,
-            _sessionInputState: sessionInputState,
-            _sessionLru: s._sessionLru.filter((x) => x !== id),
-            // 清掉被删会话的 checkpoint 内存锚点：其他会话的锚点保留。
-            // 不清理会残留孤儿锚点，且与 timeline 记录的清理不一致。
-            _messageCheckpoints: Object.fromEntries(
-              Object.entries(s._messageCheckpoints).filter(
-                ([, entry]) => entry.sessionId !== id
-              )
-            ),
-            // N8：会话已删除，归属它的重置撤销条目失效（消息无处回放）。
-            // 其 checkpoint timeline 记录已由上方 deleteCheckpointsForSession
-            // 整体清理（被截掉的锚点同属该会话）。
-            _pendingRestoreUndos: s._pendingRestoreUndos.filter(
-              (entry) => entry.sessionId !== id
-            ),
-          };
-        });
-        saveCurrentProjectState(get(), { purgeDeletedContent: true });
+        set((s) => ({
+          archivedSessions: s.archivedSessions.filter((item) => item.id !== id),
+          _messageCheckpoints: Object.fromEntries(
+            Object.entries(s._messageCheckpoints).filter(([, entry]) => entry.sessionId !== id)
+          ),
+          _pendingRestoreUndos: s._pendingRestoreUndos.filter((entry) => entry.sessionId !== id),
+        }));
       },
 
       clearMessages: () => {

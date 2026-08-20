@@ -3,22 +3,13 @@ import { getTranslation } from '../utils/i18n';
 
 function SessionItem({ session, isActive }: { session: SessionMeta; isActive: boolean }) {
   const selectSession = useAgentStore((state) => state.selectSession);
-  const deleteSession = useAgentStore((state) => state.deleteSession);
+  const archiveSession = useAgentStore((state) => state.archiveSession);
   const settings = useAgentStore((state) => state.settings);
   const t = getTranslation(settings.lang);
 
-  // N9：会话删除是 purge 语义（消息/checkpoint 永久清除，不可恢复），
-  // 必须与角色卡删除一致先确认，误点 ✕ 不得直接摧毁整个会话。
-  const handleDeleteClick = (e: React.MouseEvent) => {
+  const handleArchiveClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const confirmText =
-      settings.lang === 'en'
-        ? `Delete session "${session.name}"? This cannot be undone.`
-        : settings.lang === 'zh-TW'
-          ? `刪除會話「${session.name}」？此操作無法復原。`
-          : `删除会话「${session.name}」？此操作无法恢复。`;
-    if (typeof window !== 'undefined' && !window.confirm(confirmText)) return;
-    deleteSession(session.id);
+    archiveSession(session.id);
   };
 
   return (
@@ -34,11 +25,11 @@ function SessionItem({ session, isActive }: { session: SessionMeta; isActive: bo
         </p>
       </div>
       <button
-        onClick={handleDeleteClick}
-        className="opacity-0 group-hover:opacity-100 text-fg-dim hover:text-danger transition-all text-xs px-1"
-        title={t.deleteSession}
+        onClick={handleArchiveClick}
+        className="opacity-0 group-hover:opacity-100 text-fg-dim hover:text-accent-text transition-all text-[10px] px-1"
+        title={t.archiveSessionTip}
       >
-        ✕
+        {t.archiveSession}
       </button>
     </div>
   );

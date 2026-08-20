@@ -22,7 +22,7 @@ const { invokeMock } = vi.hoisted(() => ({
   }),
 }));
 
-const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMock, saveProjectStateDirectMock, loadSessionsMock, loadSessionMessagesMock, loadAllProjectMetaMock, saveSessionMock, saveMessageBatchMock, deleteSessionByIdMock, saveProjectMetaMock, enqueueProjectStateSaveMock, aggregateSessionRuntimeInDbMock, waitForPendingProjectStateSaveMock } = vi.hoisted(() => ({
+const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMock, saveProjectStateDirectMock, loadSessionsMock, loadSessionMessagesMock, loadAllProjectMetaMock, saveSessionMock, saveMessageBatchMock, deleteSessionByIdMock, archiveSessionByIdMock, restoreSessionByIdMock, loadArchivedSessionsMock, saveProjectMetaMock, enqueueProjectStateSaveMock, aggregateSessionRuntimeInDbMock, waitForPendingProjectStateSaveMock } = vi.hoisted(() => ({
   loadProjectStateMock: vi.fn(async (): Promise<ProjectStateSnapshot> => ({
     version: 1,
     sessions: [],
@@ -48,6 +48,9 @@ const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMoc
   saveSessionMock: vi.fn(async () => undefined),
   saveMessageBatchMock: vi.fn(async () => undefined),
   deleteSessionByIdMock: vi.fn(async () => undefined),
+  archiveSessionByIdMock: vi.fn(async () => undefined),
+  restoreSessionByIdMock: vi.fn(async () => undefined),
+  loadArchivedSessionsMock: vi.fn(async (): Promise<ProjectSessionMeta[]> => []),
   saveProjectMetaMock: vi.fn(async () => undefined),
   enqueueProjectStateSaveMock: vi.fn(async (_path: string, writer: () => Promise<void>) => { await writer(); }),
   aggregateSessionRuntimeInDbMock: vi.fn(async (): Promise<Record<string, number>> => ({})),
@@ -108,6 +111,9 @@ vi.mock('../utils/projectStorage', () => ({
   saveSession: saveSessionMock,
   saveMessageBatch: saveMessageBatchMock,
   deleteSessionById: deleteSessionByIdMock,
+  archiveSessionById: archiveSessionByIdMock,
+  restoreSessionById: restoreSessionByIdMock,
+  loadArchivedSessions: loadArchivedSessionsMock,
   saveProjectMeta: saveProjectMetaMock,
   enqueueProjectStateSave: enqueueProjectStateSaveMock,
   aggregateSessionRuntimeInDb: aggregateSessionRuntimeInDbMock,
@@ -4420,6 +4426,79 @@ describe('session lazy loading and LRU cache', () => {
     expect(useAgentStore.getState()._sessionLru).toEqual(['s-1']);
     expect(useAgentStore.getState().sessionMessages['s-2']).toBeUndefined();
   });
+
+  it('archiveSession 从侧栏移除会话但不 purge 磁盘内容', () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      workspacePath: '/tmp/codepapr-test',
+      sessions: [createSessionMeta('s-1', 2), createSessionMeta('s-2', 1)],
+      archivedSessions: [],
+      activeSessionId: 's-1',
+      sessionMessages: { 's-1': [], 's-2': [] },
+      sessionConversationStats: {
+        's-1': createEmptyConversation(),
+        's-2': createEmptyConversation(),
+      },
+      _sessionLru: ['s-1', 's-2'],
+    }));
+    archiveSessionByIdMock.mockClear();
+    saveProjectStateDirectMock.mockClear();
+    deleteSessionByIdMock.mockClear();
+
+    useAgentStore.getState().archiveSession('s-2');
+
+    const state = useAgentStore.getState();
+    expect(state.sessions.map((session) => session.id)).toEqual(['s-1']);
+    expect(state.archivedSessions.map((session) => session.id)).toEqual(['s-2']);
+    expect(state._sessionLru).toEqual(['s-1']);
+    expect(state.sessionMessages['s-2']).toBeUndefined();
+    expect(archiveSessionByIdMock).toHaveBeenCalledWith('/tmp/codepapr-test', 's-2');
+    expect(deleteSessionByIdMock).not.toHaveBeenCalled();
+    expect(saveProjectStateDirectMock).toHaveBeenCalledWith(
+      '/tmp/codepapr-test',
+      expect.objectContaining({
+        sessions: [expect.objectContaining({ id: 's-1' })],
+      }),
+      expect.not.objectContaining({ purgeDeletedContent: true })
+    );
+  });
+
+  it('restoreArchivedSession 把会话放回侧栏', async () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      workspacePath: '/tmp/codepapr-test',
+      sessions: [createSessionMeta('s-1', 2)],
+      archivedSessions: [{ ...createSessionMeta('s-2', 1), archivedAt: 9 }],
+      activeSessionId: 's-1',
+      sessionMessages: { 's-1': [] },
+    }));
+    restoreSessionByIdMock.mockClear();
+
+    await useAgentStore.getState().restoreArchivedSession('s-2');
+
+    const state = useAgentStore.getState();
+    expect(restoreSessionByIdMock).toHaveBeenCalledWith('/tmp/codepapr-test', 's-2');
+    expect(state.sessions.map((session) => session.id)).toEqual(['s-2', 's-1']);
+    expect(state.archivedSessions).toEqual([]);
+    expect(state.sessions.find((session) => session.id === 's-2')?.archivedAt ?? null).toBeNull();
+  });
+
+  it('deleteArchivedSession 直接 purge 归档会话', () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      workspacePath: '/tmp/codepapr-test',
+      sessions: [createSessionMeta('s-1', 2)],
+      archivedSessions: [{ ...createSessionMeta('s-2', 1), archivedAt: 9 }],
+      activeSessionId: 's-1',
+    }));
+    deleteSessionByIdMock.mockClear();
+
+    useAgentStore.getState().deleteArchivedSession('s-2');
+
+    expect(deleteSessionByIdMock).toHaveBeenCalledWith('/tmp/codepapr-test', 's-2');
+    expect(useAgentStore.getState().archivedSessions).toEqual([]);
+    expect(useAgentStore.getState().sessions.map((session) => session.id)).toEqual(['s-1']);
+  });
 });
 
 describe('per-session execution and input state', () => {
@@ -4633,6 +4712,30 @@ describe('per-session execution and input state', () => {
     expect(state._agentSessionId).toBeNull();
     expect(state._sessionInputState['s-a']).toBeUndefined();
     expect(state._sessionInputState['s-b']?.draft).toBe('草稿 B');
+  });
+
+  it('archiveSession cancels a running session without deleting checkpoints', () => {
+    const cancel = vi.fn();
+    const destroy = vi.fn(() => cancel());
+    const agent = createMockAgent({ cancel, destroy });
+    setTwoSessionState({
+      isLoading: true,
+      loadingSessionId: 's-a',
+      _agent: agent,
+      _agentSessionId: 's-a',
+    });
+    invokeMock.mockClear();
+
+    useAgentStore.getState().archiveSession('s-a');
+
+    const archivedState = useAgentStore.getState();
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(archivedState.isLoading).toBe(false);
+    expect(archivedState.sessions.map((session) => session.id)).toEqual(['s-b']);
+    expect(archivedState.archivedSessions.map((session) => session.id)).toEqual(['s-a']);
+    expect(
+      invokeMock.mock.calls.some(([command]) => command === 'delete_checkpoints_for_session')
+    ).toBe(false);
   });
 
   it('setSessionInputState stores input state per session', () => {
