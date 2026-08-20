@@ -213,13 +213,27 @@ export function applyToolStreamEvent(
 
   if (event.type === 'tool-call-progress') {
     if (existingIndex === -1) {
-      return message;
+      const created: UIToolInvocation = {
+        id: event.toolCallId || '',
+        name: event.toolName,
+        arguments: event.arguments,
+        status: 'running',
+        statusText: event.statusText,
+        output: typeof event.output === 'string' ? event.output : undefined,
+      };
+      const nextToolInvocations = [...currentInvocations, created];
+      return {
+        ...message,
+        statusText: event.statusText ?? deriveMessageStatusText(nextToolInvocations),
+        toolInvocations: nextToolInvocations,
+      };
     }
 
     const nextToolInvocations = currentInvocations.map((invocation, index) =>
       index === existingIndex
         ? {
             ...invocation,
+            arguments: event.arguments ?? invocation.arguments,
             statusText: event.statusText ?? invocation.statusText,
             output: typeof event.output === 'string' ? event.output : invocation.output,
           }

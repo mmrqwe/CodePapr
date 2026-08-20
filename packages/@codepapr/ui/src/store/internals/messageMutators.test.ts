@@ -66,6 +66,26 @@ describe('applyToolStreamEvent subagentToolInvocations', () => {
     });
     expect(next.toolInvocations?.[0]?.subagentToolInvocations).toBeUndefined();
   });
+
+  it('creates a running invocation from tool-call-progress when start was missed', () => {
+    const next = applyToolStreamEvent(baseMessage(), {
+      type: 'tool-call-progress',
+      toolCallId: 'call_render',
+      toolName: 'app_render',
+      arguments: { appId: 'learning-health-report' },
+      statusText: '正在生成参数',
+    });
+    expect(next.toolInvocations).toEqual([
+      {
+        id: 'call_render',
+        name: 'app_render',
+        arguments: { appId: 'learning-health-report' },
+        status: 'running',
+        statusText: '正在生成参数',
+        output: undefined,
+      },
+    ]);
+  });
 });
 
 function message(id: string, overrides: Partial<UIMessage> = {}): UIMessage {

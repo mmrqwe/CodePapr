@@ -235,6 +235,122 @@ function appendReasoningDelta(
   return current + delta;
 }
 
+/** Responses 把同一 function_call 拆成 output item id（fc_…）和 call_id（call_…）。 */
+interface ResponsesToolCallState {
+  id: string;
+  itemId?: string;
+  name: string;
+  argumentsText: string;
+  announced: boolean;
+}
+
+function findResponsesToolCall(
+  states: ResponsesToolCallState[],
+  callId?: string,
+  itemId?: string,
+): ResponsesToolCallState | undefined {
+  const call = callId?.trim();
+  const item = itemId?.trim();
+  if (call) {
+    const hit = states.find((state) => state.id === call || state.itemId === call);
+    if (hit) return hit;
+  }
+  if (item) {
+    const hit = states.find((state) => state.id === item || state.itemId === item);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+function upsertResponsesToolCall(
+  states: ResponsesToolCallState[],
+  patch: {
+    callId?: string;
+    itemId?: string;
+    name?: string;
+    argumentsText?: string;
+    appendArguments?: string;
+  },
+): ResponsesToolCallState {
+  let state = findResponsesToolCall(states, patch.callId, patch.itemId);
+  if (!state) {
+    const id = (patch.callId || patch.itemId || `call-${states.length}`).trim() || `call-${states.length}`;
+    state = {
+      id,
+      itemId: patch.itemId?.trim() || undefined,
+      name: '',
+      argumentsText: '',
+      announced: false,
+    };
+    states.push(state);
+  }
+  const callId = patch.callId?.trim();
+  if (callId) state.id = callId;
+  if (patch.itemId?.trim()) state.itemId = patch.itemId.trim();
+  if (patch.name?.trim()) state.name = patch.name.trim();
+  if (typeof patch.argumentsText === 'string' && patch.argumentsText.length > 0) {
+    state.argumentsText = patch.argumentsText;
+  }
+  if (patch.appendArguments) {
+    state.argumentsText += patch.appendArguments;
+  }
+  return state;
+}
+
+function announceToolCallStart(
+  state: ResponsesToolCallState,
+  onEvent: (event: IChatStreamEvent) => void,
+): void {
+  if (state.announced) return;
+  const name = state.name.trim();
+  if (!name) return;
+  state.announced = true;
+  onEvent({
+    type: 'tool-call-start',
+    toolCallId: state.id,
+    toolName: name,
+    arguments: safeParseToolArguments(state.argumentsText.trim() || '{}'),
+  });
+}
+
+function extractAssistantTextFromOutputItem(item: ResponseOutputItem): string {
+  if (typeof item.content === 'string') return item.content;
+  if (!Array.isArray(item.content)) return '';
+  let text = '';
+  for (const part of item.content) {
+    if (part.type === 'output_text' || part.type === 'text' || !part.type) {
+      text += part.text ?? '';
+    }
+  }
+  return text;
+}
+
+function appendUniqueText(
+  current: string,
+  incoming: string,
+  onDelta: (delta: string) => void,
+): string {
+  if (!incoming) return current;
+  if (!current) {
+    onDelta(incoming);
+    return incoming;
+  }
+  if (incoming === current || current.includes(incoming)) return current;
+  if (incoming.startsWith(current)) {
+    const remainder = incoming.slice(current.length);
+    if (remainder) onDelta(remainder);
+    return incoming;
+  }
+  return current;
+}
+
+function finalizeNamedResponsesToolCalls(
+  states: ResponsesToolCallState[],
+): IToolCall[] | undefined {
+  const named = states.filter((state) => state.name.trim().length > 0);
+  return finalizeStreamingToolCalls(named);
+}
+
 export class ResponseProvider extends BaseLLMProvider {
   name = 'response';
   models = ['gpt-4o', 'gpt-4o-mini', 'o1', 'o3-mini', 'doubao-1.5-pro-32k'];
@@ -303,7 +419,7 @@ export class ResponseProvider extends BaseLLMProvider {
         let usage: ResponseUsage | undefined;
         let sawDone = false;
         let sawFinishReason = false;
-        const toolCallStates: Array<{ id: string; name: string; argumentsText: string }> = [];
+        const toolCallStates: ResponsesToolCallState[] = [];
 
         try {
           await readSseStream(response, (rawData) => {
@@ -344,34 +460,30 @@ export class ResponseProvider extends BaseLLMProvider {
             const eventType = chunk.type ?? '';
 
             // 2. Output item tracking
-            if (eventType === 'response.output_item.added' && chunk.item) {
+            if (
+              (eventType === 'response.output_item.added' || eventType === 'response.output_item.done') &&
+              chunk.item
+            ) {
               if (chunk.item.type === 'function_call') {
-                const callId = chunk.item.call_id || chunk.item.id || `call-${toolCallStates.length}`;
-                const name = chunk.item.name || '';
-                if (!toolCallStates.some((t) => t.id === callId)) {
-                  toolCallStates.push({ id: callId, name, argumentsText: chunk.item.arguments || '' });
-                }
+                const state = upsertResponsesToolCall(toolCallStates, {
+                  callId: chunk.item.call_id,
+                  itemId: chunk.item.id,
+                  name: chunk.item.name,
+                  argumentsText: chunk.item.arguments,
+                });
+                announceToolCallStart(state, onEvent);
               } else if (chunk.item.type === 'reasoning' || chunk.item.type === 'reasoning_summary') {
-                const itemReasoning = extractReasoningFromOutputItem(chunk.item);
-                if (itemReasoning && !reasoningContent.includes(itemReasoning)) {
-                  reasoningContent = appendReasoningDelta(reasoningContent, itemReasoning, onEvent);
-                }
-              }
-            }
-
-            if (eventType === 'response.output_item.done' && chunk.item) {
-              if (chunk.item.type === 'function_call') {
-                const callId = chunk.item.call_id || chunk.item.id || `call-${toolCallStates.length - 1}`;
-                const existing = toolCallStates.find((t) => t.id === callId);
-                if (existing) {
-                  if (chunk.item.name) existing.name = chunk.item.name;
-                  if (chunk.item.arguments) existing.argumentsText = chunk.item.arguments;
-                }
-              } else if (chunk.item.type === 'reasoning' || chunk.item.type === 'reasoning_summary') {
-                const itemReasoning = extractReasoningFromOutputItem(chunk.item);
-                if (itemReasoning && !reasoningContent.includes(itemReasoning)) {
-                  reasoningContent = appendReasoningDelta(reasoningContent, itemReasoning, onEvent);
-                }
+                reasoningContent = appendUniqueText(
+                  reasoningContent,
+                  extractReasoningFromOutputItem(chunk.item),
+                  (delta) => onEvent({ type: 'reasoning-delta', delta }),
+                );
+              } else if (chunk.item.type === 'message' || chunk.item.role === 'assistant') {
+                content = appendUniqueText(
+                  content,
+                  extractAssistantTextFromOutputItem(chunk.item),
+                  (delta) => onEvent({ type: 'content-delta', delta }),
+                );
               }
             }
 
@@ -411,18 +523,19 @@ export class ResponseProvider extends BaseLLMProvider {
               eventType === 'response.function_call_arguments.delta' ||
               eventType === 'response.function_call.delta'
             ) {
-              const callId = chunk.call_id || chunk.item_id;
               const delta = extractStreamText(chunk);
               if (delta) {
-                if (callId) {
-                  let state = toolCallStates.find((t) => t.id === callId);
-                  if (!state) {
-                    state = { id: callId, name: '', argumentsText: '' };
-                    toolCallStates.push(state);
-                  }
-                  state.argumentsText += delta;
+                if (chunk.call_id || chunk.item_id) {
+                  const state = upsertResponsesToolCall(toolCallStates, {
+                    callId: chunk.call_id,
+                    itemId: chunk.item_id,
+                    appendArguments: delta,
+                  });
+                  announceToolCallStart(state, onEvent);
                 } else if (toolCallStates.length > 0) {
-                  toolCallStates[toolCallStates.length - 1].argumentsText += delta;
+                  const state = toolCallStates[toolCallStates.length - 1];
+                  state.argumentsText += delta;
+                  announceToolCallStart(state, onEvent);
                 }
               }
             }
@@ -439,10 +552,28 @@ export class ResponseProvider extends BaseLLMProvider {
               } else if (chunk.usage) {
                 usage = chunk.usage;
               }
-              if (!reasoningContent && Array.isArray(chunk.response?.output)) {
+              if (Array.isArray(chunk.response?.output)) {
                 for (const item of chunk.response.output) {
                   if (item.type === 'reasoning' || item.type === 'reasoning_summary') {
-                    reasoningContent += extractReasoningFromOutputItem(item);
+                    reasoningContent = appendUniqueText(
+                      reasoningContent,
+                      extractReasoningFromOutputItem(item),
+                      (delta) => onEvent({ type: 'reasoning-delta', delta }),
+                    );
+                  } else if (item.type === 'message' || item.role === 'assistant') {
+                    content = appendUniqueText(
+                      content,
+                      extractAssistantTextFromOutputItem(item),
+                      (delta) => onEvent({ type: 'content-delta', delta }),
+                    );
+                  } else if (item.type === 'function_call') {
+                    const state = upsertResponsesToolCall(toolCallStates, {
+                      callId: item.call_id,
+                      itemId: item.id,
+                      name: item.name,
+                      argumentsText: item.arguments,
+                    });
+                    announceToolCallStart(state, onEvent);
                   }
                 }
               }
@@ -467,14 +598,12 @@ export class ResponseProvider extends BaseLLMProvider {
 
                 if (delta.tool_calls?.length) {
                   for (const tc of delta.tool_calls) {
-                    const id = tc.id || `call-${toolCallStates.length}`;
-                    let state = toolCallStates.find((t) => t.id === id);
-                    if (!state) {
-                      state = { id, name: tc.function?.name || '', argumentsText: '' };
-                      toolCallStates.push(state);
-                    }
-                    if (tc.function?.name) state.name = tc.function.name;
-                    if (tc.function?.arguments) state.argumentsText += tc.function.arguments;
+                    const state = upsertResponsesToolCall(toolCallStates, {
+                      callId: tc.id,
+                      name: tc.function?.name,
+                      appendArguments: tc.function?.arguments,
+                    });
+                    announceToolCallStart(state, onEvent);
                   }
                 }
 
@@ -514,7 +643,7 @@ export class ResponseProvider extends BaseLLMProvider {
           });
         }
 
-        const effectiveToolCalls = finalizeStreamingToolCalls(toolCallStates);
+        const effectiveToolCalls = finalizeNamedResponsesToolCalls(toolCallStates);
         const effectiveFinishReason = (effectiveToolCalls && effectiveToolCalls.length > 0)
           ? 'tool_calls'
           : sawFinishReason

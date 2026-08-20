@@ -2040,6 +2040,39 @@ describe('useAgentStore.sendMessage', () => {
     expect(snapshot!.tokensByStage['stable-prefix']).toBeGreaterThan(0);
   });
 
+  it('computeContextSnapshot includes the latest assistant summary even if the live snapshot was captured at request time', async () => {
+    const staleSnapshot: IContextSnapshot = {
+      round: 2,
+      model: 'muse-spark-1.2-contributor',
+      messages: [
+        { role: 'user', content: '精简一点，参考 canvas', stage: 'conversation', estimatedTokens: 8 },
+        { role: 'assistant', content: '', stage: 'conversation', estimatedTokens: 1, toolCallNames: ['app_render'] },
+      ],
+      toolNames: ['app_render'],
+      toolsTokenEstimate: 10,
+      totalTokens: 19,
+      tokensByStage: { 'stable-prefix': 0, 'session-state': 0, conversation: 19 },
+      capturedAt: Date.now(),
+    };
+
+    useAgentStore.setState((state) => ({
+      ...state,
+      sessionMessages: {
+        'session-1': [
+          { id: 'u1', role: 'user', content: '精简一点，参考 canvas', timestamp: 1 },
+          { id: 'a1', role: 'assistant', content: '', timestamp: 2, toolInvocations: [{ id: 'call_1', name: 'app_render', arguments: {}, status: 'success' }] },
+          { id: 'a2', role: 'assistant', content: '已按 Canvas 风格精简重做 learning-health-report', timestamp: 3 },
+        ],
+      },
+      _latestContextSnapshot: { sessionId: 'session-1', snapshot: staleSnapshot },
+    }));
+
+    await useAgentStore.getState().computeContextSnapshot();
+
+    const rebuilt = useAgentStore.getState()._latestContextSnapshot;
+    expect(rebuilt?.snapshot.messages.some((m) => m.content.includes('已按 Canvas 风格精简重做'))).toBe(true);
+  });
+
   it('does not append a synthetic summary for pure agent q-and-a replies', async () => {
     const chat = vi.fn(async () => createAgentResponse('这个项目目前主要是 Vite + React + TypeScript。'));
 

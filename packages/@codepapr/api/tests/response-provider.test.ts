@@ -168,6 +168,16 @@ describe('ResponseProvider', () => {
     expect(res.choices[0].message.toolCalls).toHaveLength(1);
     expect(res.choices[0].message.toolCalls?.[0].name).toBe('read_file');
     expect(res.choices[0].message.toolCalls?.[0].arguments).toEqual({ path: 'src/index.ts' });
+
+    const toolStarts = events.filter((e) => e.type === 'tool-call-start');
+    expect(toolStarts).toEqual([
+      {
+        type: 'tool-call-start',
+        toolCallId: 'call_999',
+        toolName: 'read_file',
+        arguments: {},
+      },
+    ]);
   });
 
   it('default thinkingPayload (reasoning) omits thinking.type on Responses endpoints', async () => {
@@ -473,5 +483,116 @@ describe('ResponseProvider', () => {
       },
       { role: 'user', content: '按钮挤在一起了' },
     ]);
+  });
+
+  it('merges fc_ item id and call_id into one named tool and announces it during the stream', async () => {
+    const sseChunks = [
+      'data: {"type":"response.output_item.added","item":{"id":"fc_01a01fbf","type":"function_call","call_id":"call_01a01fbf","name":"app_render"}}\n\n',
+      'data: {"type":"response.function_call_arguments.delta","item_id":"fc_01a01fbf","delta":"{\\"appId\\": "}\n\n',
+      'data: {"type":"response.function_call_arguments.delta","item_id":"fc_01a01fbf","delta":"\\"learning-health-report\\"}"}\n\n',
+      'data: {"type":"response.output_item.done","item":{"id":"fc_01a01fbf","type":"function_call","call_id":"call_01a01fbf","name":"app_render","arguments":"{\\"appId\\":\\"learning-health-report\\"}"}}\n\n',
+      'data: {"type":"response.completed","response":{"id":"resp_dup","status":"completed"}}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: createMockStream(sseChunks),
+    });
+    const events: IChatStreamEvent[] = [];
+    const res = await new ResponseProvider({
+      apiKey: 'sk-test',
+      baseURL: 'https://api.openai.com/v1',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    }).streamChat(
+      { model: 'muse-spark-1.2-contributor', messages: [{ id: '1', role: 'user', content: '精简', timestamp: 1 }] },
+      (e) => events.push(e),
+    );
+
+    expect(res.choices[0].message.toolCalls).toEqual([
+      {
+        id: 'call_01a01fbf',
+        name: 'app_render',
+        arguments: { appId: 'learning-health-report' },
+      },
+    ]);
+    expect(events.filter((e) => e.type === 'tool-call-start')).toEqual([
+      {
+        type: 'tool-call-start',
+        toolCallId: 'call_01a01fbf',
+        toolName: 'app_render',
+        arguments: {},
+      },
+    ]);
+  });
+
+  it('does not create a second empty-name tool when argument deltas arrive before output_item.added', async () => {
+    const sseChunks = [
+      'data: {"type":"response.function_call_arguments.delta","item_id":"fc_pre","delta":"{\\"title\\": "}\n\n',
+      'data: {"type":"response.function_call_arguments.delta","item_id":"fc_pre","delta":"\\"report\\"}"}\n\n',
+      'data: {"type":"response.output_item.added","item":{"id":"fc_pre","type":"function_call","call_id":"call_pre","name":"app_render"}}\n\n',
+      'data: {"type":"response.completed","response":{"id":"resp_pre","status":"completed"}}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: createMockStream(sseChunks),
+    });
+    const events: IChatStreamEvent[] = [];
+    const res = await new ResponseProvider({
+      apiKey: 'sk-test',
+      baseURL: 'https://api.openai.com/v1',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    }).streamChat(
+      { model: 'muse-spark-1.2-contributor', messages: [{ id: '1', role: 'user', content: 'hi', timestamp: 1 }] },
+      (e) => events.push(e),
+    );
+
+    expect(res.choices[0].message.toolCalls).toEqual([
+      {
+        id: 'call_pre',
+        name: 'app_render',
+        arguments: { title: 'report' },
+      },
+    ]);
+    expect(events.filter((e) => e.type === 'tool-call-start')).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'tool-call-start')[0]).toMatchObject({
+      toolCallId: 'call_pre',
+      toolName: 'app_render',
+    });
+  });
+
+  it('emits reasoning and assistant text from a completed payload that had no deltas', async () => {
+    const sseChunks = [
+      'data: {"type":"response.completed","response":{"id":"resp_dump","status":"completed","output":[{"type":"reasoning","summary":"先看现有布局"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"已按 Canvas 风格精简"}]}]}}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: createMockStream(sseChunks),
+    });
+    const events: IChatStreamEvent[] = [];
+    const res = await new ResponseProvider({
+      apiKey: 'sk-test',
+      baseURL: 'https://api.openai.com/v1',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    }).streamChat(
+      { model: 'muse-spark-1.2-contributor', messages: [{ id: '1', role: 'user', content: '精简', timestamp: 1 }] },
+      (e) => events.push(e),
+    );
+
+    expect(events.filter((e) => e.type === 'reasoning-delta')).toEqual([
+      { type: 'reasoning-delta', delta: '先看现有布局' },
+    ]);
+    expect(events.filter((e) => e.type === 'content-delta')).toEqual([
+      { type: 'content-delta', delta: '已按 Canvas 风格精简' },
+    ]);
+    expect(res.choices[0].message.reasoningContent).toBe('先看现有布局');
+    expect(res.choices[0].message.content).toBe('已按 Canvas 风格精简');
   });
 });

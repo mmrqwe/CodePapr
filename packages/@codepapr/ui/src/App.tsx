@@ -951,11 +951,9 @@ export default function App() {
                   lang={settings.lang}
                   collapsible={false}
                   onOpenContextInspector={async () => {
-                    const state = useAgentStore.getState();
-                    const current = state._latestContextSnapshot;
-                    if (!current || current.sessionId !== state.activeSessionId) {
-                      await state.computeContextSnapshot();
-                    }
+                    // 必须按当前会话消息重算：request-context 快照是「即将发出
+                    // 的请求」，不含本轮已经生成的助手总结。
+                    await useAgentStore.getState().computeContextSnapshot();
                     setShowContextInspector(true);
                   }}
                 />
