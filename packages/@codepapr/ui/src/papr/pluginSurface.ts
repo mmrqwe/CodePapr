@@ -1,4 +1,4 @@
-import type { PaprKind, PaprManifest, PaprOverlayPosition, PaprSurface } from '@codepapr/types';
+import type { PaprKind, PaprManifest, PaprOverlayPosition } from '@codepapr/types';
 
 export const OVERLAY_DEFAULT_WIDTH = 320;
 export const OVERLAY_DEFAULT_HEIGHT = 200;
@@ -143,12 +143,13 @@ export function parsePluginSurfaceArg(raw: unknown): ResolvedOverlaySurface {
   if (typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error(`surface 必须是对象，收到: ${JSON.stringify(raw)}`);
   }
-  const surface = raw as PaprSurface & Record<string, unknown>;
-  const type = surface.type === undefined || surface.type === null || surface.type === ''
+  const surface = raw as Record<string, unknown>;
+  const rawType = surface.type;
+  const type = rawType === undefined || rawType === null || rawType === ''
     ? 'overlay'
-    : surface.type;
+    : rawType;
   if (type !== 'overlay') {
-    throw new Error(`当前仅支持 surface.type: "overlay"（主窗口悬浮）。收到: ${JSON.stringify(surface.type)}`);
+    throw new Error(`当前仅支持 surface.type: "overlay"（主窗口悬浮）。收到: ${JSON.stringify(rawType)}`);
   }
   if (surface.width !== undefined && (typeof surface.width !== 'number' || !Number.isFinite(surface.width))) {
     throw new Error(`surface.width 必须是数字，收到: ${JSON.stringify(surface.width)}`);

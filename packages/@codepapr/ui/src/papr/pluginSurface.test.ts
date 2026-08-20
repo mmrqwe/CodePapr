@@ -41,6 +41,7 @@ describe('pluginSurface', () => {
   it('rejects non-overlay surfaces at render time', () => {
     expect(() => parsePluginSurfaceArg({ type: 'hud' })).toThrow(/overlay/);
     expect(parsePluginSurfaceArg(undefined).type).toBe('overlay');
+    expect(parsePluginSurfaceArg({ type: '' }).type).toBe('overlay');
   });
 
   it('places default origin in the requested corner', () => {
