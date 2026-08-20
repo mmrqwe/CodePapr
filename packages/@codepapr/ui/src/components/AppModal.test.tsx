@@ -42,6 +42,8 @@ describe('AppModal', () => {
       activeAppId: null,
       openedAppId: null,
       mountSignal: 0,
+      pinnedPluginIds: [],
+      overlayLayouts: {},
     });
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -58,6 +60,8 @@ describe('AppModal', () => {
       activeAppId: null,
       openedAppId: null,
       mountSignal: 0,
+      pinnedPluginIds: [],
+      overlayLayouts: {},
     });
     usePaprPermissionStore.getState().clearAll();
   });

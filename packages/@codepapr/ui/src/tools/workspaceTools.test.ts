@@ -596,6 +596,72 @@ describe('app_render agent tools validation', () => {
     expect(useAppRuntimeStore.getState().apps.find((a) => a.appId === 'demo-app')?.icon).toBe('📊');
   });
 
+  it('renders a plugin overlay, auto-pins, and writes kind/surface', async () => {
+    useAppRuntimeStore.setState({
+      apps: [],
+      openedAppId: null,
+      pinnedPluginIds: [],
+      overlayLayouts: {},
+    });
+    invokeMock.mockClear();
+    invokeMock.mockResolvedValue({ path: '/tmp/ws/.CodePapr/apps/stock-ticker/x', bytes: 1 });
+    await expect(
+      appRegistry().execute('app_render', {
+        appId: 'stock-ticker',
+        title: '股票看板',
+        html: '<!DOCTYPE html><html><body></body></html>',
+        kind: 'plugin',
+        local: 'none',
+        network: true,
+        surface: { type: 'overlay', width: 320, height: 180, position: 'top-right' },
+      }),
+    ).resolves.toMatchObject({ appId: 'stock-ticker', kind: 'plugin', pinned: true, hasBackend: false });
+
+    const manifestWrite = invokeMock.mock.calls.find(
+      ([command, args]) =>
+        command === 'write_text_file' &&
+        typeof args?.relativePath === 'string' &&
+        args.relativePath.endsWith('manifest.json'),
+    );
+    const written = JSON.parse(String(manifestWrite?.[1]?.content ?? '{}')) as {
+      kind?: string;
+      surface?: { type?: string };
+    };
+    expect(written.kind).toBe('plugin');
+    expect(written.surface?.type).toBe('overlay');
+    expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual(['stock-ticker']);
+  });
+
+  it('rejects plugin backends, write access, and non-overlay surfaces', async () => {
+    await expect(
+      appRegistry().execute('app_render', {
+        ...BASE_ARGS,
+        appId: 'bad-plugin',
+        kind: 'plugin',
+        command: 'node',
+        args: ['server.js'],
+        port: 3456,
+        local: 'read',
+      }),
+    ).rejects.toThrow(/后端/);
+    await expect(
+      appRegistry().execute('app_render', {
+        ...BASE_ARGS,
+        appId: 'write-plugin',
+        kind: 'plugin',
+        local: 'write',
+      }),
+    ).rejects.toThrow(/write/);
+    await expect(
+      appRegistry().execute('app_render', {
+        ...BASE_ARGS,
+        appId: 'hud-plugin',
+        kind: 'plugin',
+        surface: { type: 'hud' },
+      }),
+    ).rejects.toThrow(/overlay/);
+  });
+
   it('app_delete 先停止运行中的后端进程再删文件（工具定义承诺会停）', async () => {
     invokeMock.mockClear();
     // 预置运行中的后端（store 有 pid）

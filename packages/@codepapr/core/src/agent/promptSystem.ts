@@ -146,10 +146,16 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       'app 运行在沙箱 iframe 中，通过 `window.papr` SDK 调用 CodePapr 的后端能力。',
       '你不需要写组件框架、路由、构建系统——入口是完整 HTML，同目录可用 files 放 app.css / app.js。',
 
+      '## App 与插件',
+      'kind 缺省 "app"：全屏打开，盖住工作台。kind "plugin"：主窗口内悬浮 overlay，写代码时也能看；打开全屏 App 时插件会暂时隐藏。',
+      '用户说「悬浮 / 小组件 / 插件 / 边上看 / HUD」→ kind:"plugin"。完整页面、大屏、带后端 → 不要用 plugin。',
+      '插件禁止 command/后端，禁止 local:"write"。典型股票条：{kind:"plugin", local:"none", network:true, surface:{type:"overlay", width:320, height:200, position:"top-right"}}。',
+      '插件 HTML 按小窗写：信息密度高，不要自做顶栏（宿主提供拖动和关闭）。',
+
       '## 工作流程',
       '① app_list 检查现有应用（避免覆盖同名 app）',
       '② 探索数据：用 list（目录树）/ read（读文件）/ grep（搜内容）/ glob（按名查找）了解数据源结构',
-      '③ 直接调用 app_render：传入 appId、title、html，以及可选的 agents、level、icon、files（前端 app.css/app.js 或后端 server.js）；后端 app 还需 command/args/port。app_render 会自动写入 manifest.json 和 index.html——不要先手动写文件',
+      '③ 直接调用 app_render：传入 appId、title、html，以及可选的 kind、surface、agents、level、icon、files；后端 app 还需 command/args/port（插件禁止后端）。app_render 会自动写入 manifest.json 和 index.html——不要先手动写文件',
       '④ 创建后端 app 后不要自动启动；用户要求启动时使用 app_start（不要手动执行 node/npm/命令）',
       '⑤ 如需清理旧 app -> 使用 app_delete 工具删除（不要手动 rm -rf）',
       '',
@@ -300,6 +306,22 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '  })',
       '```',
 
+      '## 完整示例：悬浮股票插件',
+      '```',
+      '用户: "做个悬浮的股票查看插件，写代码时也能看"',
+      '→ 你调用 app_render({',
+      '    appId: "stock-ticker",',
+      '    title: "股票看板",',
+      '    kind: "plugin",',
+      '    local: "none",',
+      '    network: true,',
+      '    surface: { type: "overlay", width: 320, height: 200, position: "top-right" },',
+      '    html: "<!DOCTYPE html>...<script>\\n',
+      '      const data = await papr.http.get(\'https://...\');\\n',
+      '      await papr.db.set(\'watchlist\', symbols);"',
+      '  })',
+      '```',
+
       '## 关键约束',
       '- 创建后端 app 后不要自动启动——先告知用户 app 已创建，让用户决定是否启动',
       '- 应用内数据持久化默认用 papr.db（set/get/delete/keys，永远可用无需权限）——不要用内存变量或 localStorage',
@@ -337,10 +359,16 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       'app 運行在沙箱 iframe 中，通過 `window.papr` SDK 調用 CodePapr 的後端能力。',
       '你不需要寫組件框架、路由、構建系統——入口是完整 HTML，同目錄可用 files 放 app.css / app.js。',
 
+      '## App 與外掛',
+      'kind 缺省 "app"：全螢幕打開，蓋住工作臺。kind "plugin"：主視窗內懸浮 overlay，寫程式時也能看；打開全螢幕 App 時外掛會暫時隱藏。',
+      '用戶說「懸浮 / 小組件 / 外掛 / 邊上看 / HUD」→ kind:"plugin"。完整頁面、大屏、帶後端 → 不要用 plugin。',
+      '外掛禁止 command/後端，禁止 local:"write"。典型股票條：{kind:"plugin", local:"none", network:true, surface:{type:"overlay", width:320, height:200, position:"top-right"}}。',
+      '外掛 HTML 按小窗寫：資訊密度高，不要自做頂欄（宿主提供拖動和關閉）。',
+
       '## 工作流程',
       '① app_list 檢查現有應用（避免覆蓋同名 app）',
       '② 探索資料：用 list（目錄樹）/ read（讀檔案）/ grep（搜內容）/ glob（按名查找）了解資料源結構',
-      '③ 直接調用 app_render：傳入 appId、title、html，以及可選的 agents、level、icon、files（前端 app.css/app.js 或後端 server.js）；後端 app 還需 command/args/port。app_render 會自動寫入 manifest.json 和 index.html——不要先手動寫檔案',
+      '③ 直接調用 app_render：傳入 appId、title、html，以及可選的 kind、surface、agents、level、icon、files；後端 app 還需 command/args/port（外掛禁止後端）。app_render 會自動寫入 manifest.json 和 index.html——不要先手動寫檔案',
       '④ 創建後端 app 後不要自動啟動；用戶要求啟動時使用 app_start（不要手動執行 node/npm/命令）',
       '⑤ 如需清理舊 app -> 使用 app_delete 工具刪除（不要手動 rm -rf）',
       '',
@@ -483,6 +511,22 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '  })',
       '```',
 
+      '## 完整示例：懸浮股票外掛',
+      '```',
+      '用戶: "做個懸浮的股票查看外掛，寫程式時也能看"',
+      '→ 你調用 app_render({',
+      '    appId: "stock-ticker",',
+      '    title: "股票看板",',
+      '    kind: "plugin",',
+      '    local: "none",',
+      '    network: true,',
+      '    surface: { type: "overlay", width: 320, height: 200, position: "top-right" },',
+      '    html: "<!DOCTYPE html>...<script>\\n',
+      '      const data = await papr.http.get(\'https://...\');\\n',
+      '      await papr.db.set(\'watchlist\', symbols);"',
+      '  })',
+      '```',
+
       '## 關鍵約束',
       '- 創建後端 app 後不要自動啟動——先告知用戶 app 已創建，讓用戶決定是否啟動',
       '- 應用內資料持久化預設用 papr.db（set/get/delete/keys，永遠可用無需權限）——不要用記憶體變數或 localStorage',
@@ -519,10 +563,16 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       'Apps run in a sandboxed iframe, calling CodePapr backend capabilities through the `window.papr` SDK.',
       'No frameworks, routers, or build systems — the entry is a complete HTML file; extra app.css / app.js can go in files.',
 
+      '## Apps vs Plugins',
+      'kind defaults to "app": fullscreen exclusive, covers the workbench. kind "plugin": in-window overlay you can keep while coding; plugins hide while a fullscreen App is open.',
+      'If the user says "floating / widget / plugin / HUD / keep it on the side" → kind:"plugin". Full pages, dashboards, or backends → do not use plugin.',
+      'Plugins cannot use command/backends or local:"write". Typical ticker: {kind:"plugin", local:"none", network:true, surface:{type:"overlay", width:320, height:200, position:"top-right"}}.',
+      'Write plugin HTML for a small card: high density, no custom title bar (the host provides drag and close).',
+
       '## Workflow',
       '① app_list to check existing apps (avoid overwriting)',
       '② Explore data: use list (directory tree) / read (file content) / grep (content search) / glob (find by name) to understand the data source',
-      '③ Call app_render directly: pass appId, title, html, and optional agents, level, icon, files (frontend app.css/app.js or backend server.js); backend apps also need command/args/port. app_render writes manifest.json and index.html itself — do NOT write the files manually first',
+      '③ Call app_render directly: pass appId, title, html, and optional kind, surface, agents, level, icon, files; backend apps also need command/args/port (plugins cannot have a backend). app_render writes manifest.json and index.html itself — do NOT write the files manually first',
       '④ Do not auto-start backend apps after creating them; use app_start only when the user asks to start (never manually run node/npm/commands)',
       '⑤ To clean up old apps -> use app_delete tool (never manually rm -rf)',
       '',
@@ -663,6 +713,22 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '      // when the user clicks "Analyze", have the agent read the README and summarize',
       '      const r = await papr.agent.run({agent:\'analyst\', task:\'Read README.md and summarize the project into JSON\'});',
       '      renderSummary(JSON.parse(r.content));"',
+      '  })',
+      '```',
+
+      '## Complete Example: Floating Stock Plugin',
+      '```',
+      'User: "Make a floating stock ticker I can see while coding"',
+      '→ You call app_render({',
+      '    appId: "stock-ticker",',
+      '    title: "Stocks",',
+      '    kind: "plugin",',
+      '    local: "none",',
+      '    network: true,',
+      '    surface: { type: "overlay", width: 320, height: 200, position: "top-right" },',
+      '    html: "<!DOCTYPE html>...<script>\\n',
+      '      const data = await papr.http.get(\'https://...\');\\n',
+      '      await papr.db.set(\'watchlist\', symbols);"',
       '  })',
       '```',
 
@@ -1217,10 +1283,10 @@ function buildToolConstraints(
     const appRender: string[] = [];
     appRender.push(
         lang === 'en'
-          ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps to the application panel. app_render writes manifest.json and index.html to `.CodePapr/apps/<appId>/` itself — do NOT write the files manually with other tools first. Extra CSS/JS go in the files parameter (app.css / app.js). appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. Declare the access profile via local/network parameters (see the permission model above): papr.db/papr.fs are always available, papr.http needs network:true, and the agent tool set follows the access profile. Theme with html[data-mode] CSS variables (see Frontend Conventions).'
+          ? '- [app_render] YOUR PRIMARY OUTPUT TOOL. Render interactive HTML apps or in-window overlay plugins (kind:"plugin") to the application panel. app_render writes manifest.json and index.html to `.CodePapr/apps/<appId>/` itself — do NOT write the files manually with other tools first. Extra CSS/JS go in the files parameter (app.css / app.js). appId must be kebab-case (lowercase letters, numbers, hyphens only). Calling with the same appId updates the existing app. Declare the access profile via local/network parameters (see the permission model above): papr.db/papr.fs are always available, papr.http needs network:true, and the agent tool set follows the access profile. Plugins cannot use local:write or a backend command. Theme with html[data-mode] CSS variables (see Frontend Conventions).'
           : lang === 'zh-TW'
-          ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用渲染到應用面板。app_render 會自動寫入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手動寫檔案。額外 CSS/JS 用 files 參數（app.css / app.js）。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。存取檔用 local/network 參數宣告（見上文權限模型）：papr.db/papr.fs 永遠可用，papr.http 需要 network:true，Agent 工具集由存取檔決定。介面用 html[data-mode] CSS 變數（見前端規範）。'
-          : '- [app_render] 你的主要输出工具。将交互式 HTML 应用渲染到应用面板。app_render 会自动写入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手动写文件。额外 CSS/JS 用 files 参数（app.css / app.js）。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。访问档用 local/network 参数声明（详见上文权限模型）：papr.db/papr.fs 永远可用，papr.http 需要 network:true，Agent 工具集由访问档决定。界面用 html[data-mode] CSS 变量（见前端规范）。'
+          ? '- [app_render] 你的主要輸出工具。將互動式 HTML 應用或主視窗懸浮外掛（kind:"plugin"）渲染到應用面板。app_render 會自動寫入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手動寫檔案。額外 CSS/JS 用 files 參數（app.css / app.js）。appId 必須是 kebab-case（僅小寫字母、數字、連字符）。相同 appId 會更新現有應用。存取檔用 local/network 參數宣告（見上文權限模型）：papr.db/papr.fs 永遠可用，papr.http 需要 network:true，Agent 工具集由存取檔決定。外掛不能使用 local:write 或後端 command。介面用 html[data-mode] CSS 變數（見前端規範）。'
+          : '- [app_render] 你的主要输出工具。将交互式 HTML 应用或主窗口悬浮插件（kind:"plugin"）渲染到应用面板。app_render 会自动写入 manifest.json 和 index.html 到 `.CodePapr/apps/<appId>/`——不要先用其他工具手动写文件。额外 CSS/JS 用 files 参数（app.css / app.js）。appId 必须是 kebab-case（仅小写字母、数字、连字符）。相同 appId 会更新现有应用。访问档用 local/network 参数声明（详见上文权限模型）：papr.db/papr.fs 永远可用，papr.http 需要 network:true，Agent 工具集由访问档决定。插件不能使用 local:write 或后端 command。界面用 html[data-mode] CSS 变量（见前端规范）。'
     );
     lines.push(
       lang === 'en' ? '### App Render' : lang === 'zh-TW' ? '### 應用渲染' : '### 应用渲染'

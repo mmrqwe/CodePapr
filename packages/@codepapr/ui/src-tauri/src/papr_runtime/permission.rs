@@ -244,6 +244,9 @@ mod tests {
             version: None,
             entry: None,
             icon: None,
+            kind: None,
+            surface: None,
+            lifecycle: None,
             permissions: None,
             agents: Some(vec![crate::papr_runtime::manifest::PaprAgentDef {
                 name: "assistant".into(),

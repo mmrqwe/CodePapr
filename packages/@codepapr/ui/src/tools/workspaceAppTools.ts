@@ -12,7 +12,7 @@ import {
 } from './workspaceToolHelpers';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
-import type { PaprAppSettings, PaprManifest } from '@codepapr/types';
+import type { PaprAppSettings, PaprKind, PaprManifest } from '@codepapr/types';
 import {
   LOCAL_ORDER,
   accessMeetsTool,
@@ -22,6 +22,7 @@ import {
   type PaprAccess,
   type PaprLocalAccess,
 } from '../papr/levelGrants';
+import { isPluginApp, parsePluginSurfaceArg, readAppManifest } from '../papr/pluginSurface';
 import { type WorkspaceToolContext } from './workspaceToolContext';
 
 /** app_render.files 不允许覆盖的保留文件：manifest/index 由 app_render 自身生成，
@@ -192,6 +193,15 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       throw new Error(`level 必须是 0/1/2/3，收到: ${args.level}`);
     }
 
+    const rawKind = args.kind;
+    let kind: PaprKind = 'app';
+    if (rawKind !== undefined && rawKind !== null && rawKind !== '') {
+      if (rawKind !== 'app' && rawKind !== 'plugin') {
+        throw new Error(`kind 必须是 app 或 plugin，收到: ${JSON.stringify(rawKind)}`);
+      }
+      kind = rawKind;
+    }
+
     // 两轴访问：local（无/只读/读写执行）× network（关/开）
     const access = parseAccess(args);
     if (command && access.local !== 'read' && access.local !== 'write') {
@@ -199,6 +209,13 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
         `后端服务（command）需要 local 至少为 read（当前 local: ${LOCAL_LABEL[access.local]}）。请设置 local: "read" 或 local: "write"。`
       );
     }
+    if (kind === 'plugin' && command) {
+      throw new Error('插件不能带后端服务（command/args/port）。请改用 kind: "app"，或去掉 command。');
+    }
+    if (kind === 'plugin' && access.local === 'write') {
+      throw new Error('插件不能声明 local: "write"。小组件不能改仓库；请改用 kind: "app"，或把 local 设为 none/read。');
+    }
+    const pluginSurface = kind === 'plugin' ? parsePluginSurfaceArg(args.surface) : undefined;
 
     validateAgentTools({
       agents,
@@ -220,6 +237,8 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       name: title,
       version: '0.1.0',
       entry: 'index.html',
+      kind,
+      ...(pluginSurface ? { surface: pluginSurface } : {}),
       ...(permissions.length > 0 ? { permissions } : {}),
       local: access.local,
       network: access.network,
@@ -327,10 +346,19 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       port: port ?? undefined,
       manifestJson: JSON.stringify(manifest),
     });
+    const runtime = useAppRuntimeStore.getState();
+    if (kind === 'plugin') {
+      if (runtime.openedAppId === rawAppId) runtime.closeAppModal();
+      runtime.pinPlugin(rawAppId);
+    } else {
+      runtime.unpinPlugin(rawAppId);
+    }
 
     notifyWorkspaceMutation(writtenPaths);
 
     const hasBackend = !!command;
+    const pluginHint =
+      '插件已钉在主窗口（overlay）。打开全屏 App 时会暂时隐藏。可在应用面板收起。';
     return {
       appId: rawAppId,
       title,
@@ -338,8 +366,10 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       filePath: indexRelativePath,
       bytes: totalBytes,
       mounted: true,
+      kind,
       hasBackend,
-      ...(hasBackend ? { command, args: cmdArgs, port, hint: '应用已生成并注册后端服务。用户点击"运行"启动后端后，可在管理面板点"打开"查看。后端进程运行在应用目录（.CodePapr/apps/<appId>/）下，args 中的相对路径（如 "server.js"）按该目录解析；应用自己的运行时数据（数据库等）也应写在应用目录内。' } : { hint: '应用已渲染到应用管理面板。用户可点击"打开"查看。如需修改应用，用相同 appId 再次调用 app_render 即可覆盖更新。' }),
+      ...(kind === 'plugin' ? { pinned: true } : {}),
+      ...(hasBackend ? { command, args: cmdArgs, port, hint: '应用已生成并注册后端服务。用户点击"运行"启动后端后，可在管理面板点"打开"查看。后端进程运行在应用目录（.CodePapr/apps/<appId>/）下，args 中的相对路径（如 "server.js"）按该目录解析；应用自己的运行时数据（数据库等）也应写在应用目录内。' } : { hint: kind === 'plugin' ? pluginHint : '应用已渲染到应用管理面板。用户可点击"打开"查看。如需修改应用，用相同 appId 再次调用 app_render 即可覆盖更新。' }),
     };
   });
 
@@ -347,9 +377,9 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     const storeApps = useAppRuntimeStore.getState().apps;
     const storeIds = new Set(storeApps.map((a) => a.appId));
 
-    let diskApps: Array<{ app_id: string; title: string; command?: string; port?: number }> = [];
+    let diskApps: Array<{ app_id: string; title: string; command?: string; port?: number; manifest_json?: string | null }> = [];
     try {
-      const discovered = await invoke<Array<{ app_id: string; title: string; command?: string; port?: number }>>('scan_workspace_apps', { workspacePath: workspace() });
+      const discovered = await invoke<Array<{ app_id: string; title: string; command?: string; port?: number; manifest_json?: string | null }>>('scan_workspace_apps', { workspacePath: workspace() });
       diskApps = discovered.filter((d) => !storeIds.has(d.app_id));
     } catch { /* best-effort */ }
 
@@ -370,8 +400,10 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       return {
         appId: app.appId,
         title: app.title,
+        kind: isPluginApp(app) ? 'plugin' : 'app',
         hasBackend: !!(app.command && app.port),
         isRunning: !!(app.pid && app.url) || regRunning,
+        pinned: useAppRuntimeStore.getState().pinnedPluginIds.includes(app.appId),
         port: app.port ?? null,
         url: app.url ?? (regRunning ? regUrl : null),
       };
@@ -379,11 +411,14 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     const fromDisk = diskApps.map((d) => {
       const regUrl = urlForPort(d.port);
       const regRunning = regUrl !== null && runningByUrl.has(regUrl);
+      const diskKind = readAppManifest({ manifestJson: d.manifest_json ?? undefined })?.kind === 'plugin' ? 'plugin' : 'app';
       return {
         appId: d.app_id,
         title: d.title,
+        kind: diskKind,
         hasBackend: !!(d.command && d.port),
         isRunning: regRunning,
+        pinned: false,
         port: d.port ?? null,
         url: regRunning ? regUrl : null,
       };

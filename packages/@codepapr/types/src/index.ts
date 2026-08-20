@@ -710,12 +710,37 @@ export interface PaprAppSettings {
   appOverrides: Record<string, PaprAccess>;
 }
 
+/** .papr 产物形态：app 全屏独占；plugin 主窗口内 overlay，与工作台共存。 */
+export type PaprKind = 'app' | 'plugin';
+
+export type PaprOverlayPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
+
+/** 插件表面。v1 仅 overlay（主窗口悬浮卡片）。 */
+export interface PaprSurface {
+  type?: 'overlay';
+  width?: number;
+  height?: number;
+  position?: PaprOverlayPosition;
+  alwaysOnTop?: boolean;
+  transparent?: boolean;
+  decorations?: boolean;
+  resizable?: boolean;
+}
+
+export interface PaprLifecycle {
+  autostart?: boolean;
+  persistPosition?: boolean;
+}
+
 export interface PaprManifest {
   spec: string;
   name: string;
   version?: string;
   entry?: string;
   icon?: string;
+  kind?: PaprKind;
+  surface?: PaprSurface;
+  lifecycle?: PaprLifecycle;
   permissions?: PaprPermission[];
   agents?: PaprAgentDef[];
   command?: string;

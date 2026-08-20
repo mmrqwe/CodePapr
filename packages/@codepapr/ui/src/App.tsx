@@ -13,6 +13,7 @@ import { CodingWorkbench } from './components/CodingWorkbench';
 import { AgentOpsPanel } from './components/AgentOpsPanel';
 import { BackgroundProcessPanel } from './components/BackgroundProcessPanel';
 import { AppModal } from './components/AppModal';
+import { PluginOverlayHost } from './components/PluginOverlayHost';
 import { SplitPane } from './components/SplitPane';
 import { WorkspaceGitPanel } from './components/WorkspaceGitPanel';
 import { ToastContainer } from './components/ToastContainer';
@@ -885,6 +886,7 @@ export default function App() {
           <AppModal lang={settings.lang} />
         </div>
       )}
+      {!openedAppId && <PluginOverlayHost lang={settings.lang} />}
 
       <Suspense fallback={null}>
         {showSettings && <SettingsModal />}

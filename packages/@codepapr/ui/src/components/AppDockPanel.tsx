@@ -7,6 +7,7 @@ import { save } from '@tauri-apps/plugin-dialog';
 import { launchAppBackend } from '../tools/workspaceAppTools';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
+import { isPluginApp } from '../papr/pluginSurface';
 
 interface AppDockPanelProps {
   lang?: Lang;
@@ -18,6 +19,9 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
   const apps = useAppRuntimeStore((state) => state.apps);
   const openAppModal = useAppRuntimeStore((state) => state.openAppModal);
   const closeApp = useAppRuntimeStore((state) => state.closeApp);
+  const pinPlugin = useAppRuntimeStore((state) => state.pinPlugin);
+  const unpinPlugin = useAppRuntimeStore((state) => state.unpinPlugin);
+  const pinnedPluginIds = useAppRuntimeStore((state) => state.pinnedPluginIds);
   const setAppRunning = useAppRuntimeStore((state) => state.setAppRunning);
   const setAppStopped = useAppRuntimeStore((state) => state.setAppStopped);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -62,10 +66,15 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
   }, [workspacePath, setAppRunning]);
 
   const handleDoubleClick = useCallback(async (app: AppInstance) => {
+    if (isPluginApp(app)) {
+      if (pinnedPluginIds.includes(app.appId)) unpinPlugin(app.appId);
+      else pinPlugin(app.appId);
+      return;
+    }
     const ok = await startBackendIfNeeded(app);
     if (!ok) return;
     openAppModal(app.appId);
-  }, [startBackendIfNeeded, openAppModal]);
+  }, [startBackendIfNeeded, openAppModal, pinPlugin, unpinPlugin, pinnedPluginIds]);
 
   const handleStart = useCallback(async () => {
     if (!selected || !selected.command || !selected.port || isRunning) return;
@@ -74,10 +83,15 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
 
   const handleOpen = useCallback(async () => {
     if (!selected) return;
+    if (isPluginApp(selected)) {
+      if (pinnedPluginIds.includes(selected.appId)) unpinPlugin(selected.appId);
+      else pinPlugin(selected.appId);
+      return;
+    }
     const ok = await startBackendIfNeeded(selected);
     if (!ok) return;
     openAppModal(selected.appId);
-  }, [selected, startBackendIfNeeded, openAppModal]);
+  }, [selected, startBackendIfNeeded, openAppModal, pinPlugin, unpinPlugin, pinnedPluginIds]);
 
   const handleStop = useCallback(async () => {
     if (!selected || !selected.pid) return;
@@ -132,9 +146,11 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
     setBusy(false);
   }, [selected, selectedId, closeApp, lang]);
 
-  const canStart = !!(selected && hasBackend && !isRunning && !busy);
+  const selectedIsPlugin = !!(selected && isPluginApp(selected));
+  const selectedPinned = !!(selected && pinnedPluginIds.includes(selected.appId));
+  const canStart = !!(selected && hasBackend && !isRunning && !busy && !selectedIsPlugin);
   const canOpen = !!(selected && !busy);
-  const canStop = !!(selected && isRunning && !busy);
+  const canStop = !!(selected && isRunning && !busy && !selectedIsPlugin);
   const canDelete = !!(selected && !busy);
   const canExport = !!(selected && !busy);
 
@@ -250,7 +266,13 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
           const hasBackend = !!(app.command && app.port);
           const appRunning = hasBackend && !!app.pid && !!app.url;
           const isSelected = app.appId === selectedId;
-          const statusLabel = !hasBackend
+          const plugin = isPluginApp(app);
+          const pinned = pinnedPluginIds.includes(app.appId);
+          const statusLabel = plugin
+            ? pinned
+              ? t.appDockPinned
+              : t.appDockReady
+            : !hasBackend
             ? t.appDockReady
             : appRunning
               ? t.appDockRunning
@@ -269,7 +291,11 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
               <span
                 title={statusLabel}
                 className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${
-                  !hasBackend
+                  plugin
+                    ? pinned
+                      ? 'bg-accent shadow-[0_0_6px_rgba(99,102,241,0.45)]'
+                      : 'bg-fg-muted'
+                    : !hasBackend
                     ? 'bg-fg-muted'
                     : appRunning
                       ? 'bg-ok shadow-[0_0_6px_rgba(52,211,153,0.4)]'
@@ -277,9 +303,14 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
                 }`}
               />
               <span className="flex-shrink-0 text-sm leading-none">
-                {app.icon && app.icon.trim().length > 0 ? app.icon.trim().slice(0, 2) : '🖥️'}
+                {app.icon && app.icon.trim().length > 0 ? app.icon.trim().slice(0, 2) : plugin ? '📌' : '🖥️'}
               </span>
               <span className="truncate text-xs text-fg">{app.title}</span>
+              {plugin && (
+                <span className="ml-auto shrink-0 rounded bg-raised px-1 py-0.5 text-[9px] text-fg-muted">
+                  {t.appDockPluginBadge}
+                </span>
+              )}
             </div>
           );
         })}
@@ -289,8 +320,8 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
         <button type="button" disabled={!canStart} onClick={handleStart} className={btnGreen(canStart)}>
           ▶ {t.appDockRun}
         </button>
-        <button type="button" disabled={!canOpen} onClick={handleOpen} className={btnActive(canOpen)}>
-          {t.appDockOpen}
+        <button type="button" disabled={!canOpen} onClick={() => { void handleOpen(); }} className={btnActive(canOpen)}>
+          {selectedIsPlugin ? (selectedPinned ? t.appDockUnpin : t.appDockPin) : t.appDockOpen}
         </button>
         <button type="button" disabled={!canStop} onClick={handleStop} className={btnAmber(canStop)}>
           ■ {t.appDockStop}

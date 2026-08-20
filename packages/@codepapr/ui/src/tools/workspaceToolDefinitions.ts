@@ -1063,7 +1063,7 @@ name: 'web_download_file',
   {
     name: 'app_render',
     description:
-      '生成一个交互式 HTML 应用到应用面板。用于数据分析可视化、仪表盘、关系图等。自动写入 manifest.json 和 index.html 到 .CodePapr/apps/<appId>/ 目录，并注册到应用管理面板。相同 appId 会覆盖已有应用。\n\n📦 Papr SDK 可用：生成的 HTML 可通过 window.papr 调用 CodePapr 能力：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 键值持久化存储（应用内数据持久化默认用它，永远可用）\n  • papr.agent.run({agent, task}) — 调用 AI Agent（Agent 读不到 papr.db，需要的数据要放进 task；工具集由 local/network 决定）\n  • papr.http.request({method, url, headers?, body?, maxBytes?}) / papr.http.get / papr.http.post — HTTP 请求（仅限公网地址，需 network: true；JSON 原样返回）\n  • papr.fs.readFile(path, {encoding?}) / papr.fs.writeFile(path, content, {encoding?}) / papr.fs.exists(path) / papr.fs.list / papr.fs.delete — 文件读写（限定 app data 目录，永远可用；encoding: utf8|base64）\n  • papr.app.info() — 获取应用信息\n⚠️ 访问档用 local（none/read/write）+ network（true/false）两个参数声明；papr.db/papr.fs 无需权限，papr.http 需 network:true。',
+      '生成一个交互式 HTML 应用到应用面板。用于数据分析可视化、仪表盘、关系图等；也可生成主窗口悬浮插件（kind: plugin）。自动写入 manifest.json 和 index.html 到 .CodePapr/apps/<appId>/ 目录，并注册到应用管理面板。相同 appId 会覆盖已有应用。\n\n📦 Papr SDK 可用：生成的 HTML 可通过 window.papr 调用 CodePapr 能力：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 键值持久化存储（应用内数据持久化默认用它，永远可用）\n  • papr.agent.run({agent, task}) — 调用 AI Agent（Agent 读不到 papr.db，需要的数据要放进 task；工具集由 local/network 决定）\n  • papr.http.request({method, url, headers?, body?, maxBytes?}) / papr.http.get / papr.http.post — HTTP 请求（仅限公网地址，需 network: true；JSON 原样返回）\n  • papr.fs.readFile(path, {encoding?}) / papr.fs.writeFile(path, content, {encoding?}) / papr.fs.exists(path) / papr.fs.list / papr.fs.delete — 文件读写（限定 app data 目录，永远可用；encoding: utf8|base64）\n  • papr.app.info() — 获取应用信息\n⚠️ 访问档用 local（none/read/write）+ network（true/false）两个参数声明；papr.db/papr.fs 无需权限，papr.http 需 network:true。kind=plugin 时禁止 local:write 和 command 后端。',
     parameters: {
       type: 'object',
       properties: {
@@ -1074,6 +1074,25 @@ name: 'web_download_file',
         title: {
           type: 'string',
           description: '应用标题，显示在应用标签上。',
+        },
+        kind: {
+          type: 'string',
+          enum: ['app', 'plugin'],
+          description: '产物形态。app（默认）= 全屏独占应用；plugin = 主窗口内悬浮 overlay，写代码时也能看。用户说「悬浮/小组件/插件/边上看」时用 plugin。插件禁止 command 后端和 local:write。',
+        },
+        surface: {
+          type: 'object',
+          description: '仅 kind=plugin 时有效。v1 只支持主窗口 overlay。',
+          properties: {
+            type: { type: 'string', enum: ['overlay'], description: '表面类型，当前仅 overlay。' },
+            width: { type: 'number', description: '宽度像素，默认 320，范围 200-720。' },
+            height: { type: 'number', description: '高度像素，默认 200，范围 100-640。' },
+            position: {
+              type: 'string',
+              enum: ['top-right', 'top-left', 'bottom-right', 'bottom-left'],
+              description: '初始角落，默认 top-right。用户可拖动。',
+            },
+          },
         },
         html: {
           type: 'string',

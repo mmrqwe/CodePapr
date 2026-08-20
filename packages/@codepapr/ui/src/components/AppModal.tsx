@@ -7,6 +7,7 @@ import type { Lang } from '../utils/i18n';
 import type { PaprManifest } from '@codepapr/types';
 import { usePaprBridge } from '../papr/usePaprBridge';
 import { APP_IFRAME_SANDBOX } from '../papr/appIframe';
+import { readAppManifest, resolvePaprEntryFile } from '../papr/pluginSurface';
 import { launchAppBackend } from '../tools/workspaceAppTools';
 import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
 import { resolveEffectiveAccess } from '../papr/levelGrants';
@@ -106,24 +107,9 @@ export function AppModal({ lang }: AppModalProps) {
     };
   }, [openedApp, workspacePath, reloadApp]);
 
-  const manifest: PaprManifest | null = useMemo(() => {
-    if (!openedApp?.manifestJson) return null;
-    try {
-      return JSON.parse(openedApp.manifestJson) as PaprManifest;
-    } catch {
-      return null;
-    }
-  }, [openedApp?.manifestJson]);
+  const manifest: PaprManifest | null = useMemo(() => readAppManifest(openedApp), [openedApp]);
 
-  // #15：入口文件尊重 manifest.entry（与 Rust scan_workspace_apps / 协议层一致）。
-  // 旧实现硬编码 index.html，声明 entry: "app.html" 的 app 白屏/404 文本。
-  const entryFile = useMemo(() => {
-    const raw = manifest?.entry?.trim();
-    if (!raw || raw.includes('..') || raw.includes('\\')) {
-      return 'index.html';
-    }
-    return raw;
-  }, [manifest]);
+  const entryFile = useMemo(() => resolvePaprEntryFile(manifest), [manifest]);
 
   const { postThemeNow } = usePaprBridge({
     iframeRef,

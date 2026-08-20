@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import { isPluginApp, type OverlayLayout } from '../papr/pluginSurface';
 
 /** 诊断埋点：openedAppId 被清空 = 用户看到「app 自己退出」。把每次变更连同
  * 调用栈落盘，抓住无 UI 操作时的幕后调用者。 */
@@ -35,6 +36,8 @@ interface AppRuntimeState {
   apps: AppInstance[];
   activeAppId: string | null;
   openedAppId: string | null;
+  pinnedPluginIds: string[];
+  overlayLayouts: Record<string, OverlayLayout>;
   mountSignal: number;
   mountApp: (input: Omit<AppInstance, 'createdAt' | 'updatedAt'> & { createdAt?: number; updatedAt?: number }) => void;
   closeApp: (appId: string) => void;
@@ -42,15 +45,27 @@ interface AppRuntimeState {
   clearApps: () => void;
   openAppModal: (appId: string) => void;
   closeAppModal: () => void;
+  pinPlugin: (appId: string) => void;
+  unpinPlugin: (appId: string) => void;
+  setOverlayLayout: (appId: string, layout: OverlayLayout) => void;
   setAppRunning: (appId: string, pid: number, url: string) => void;
   setAppStopped: (appId: string) => void;
   reloadApp: (appId: string) => void;
 }
 
-export const useAppRuntimeStore = create<AppRuntimeState>()((set) => ({
+function omitLayout(layouts: Record<string, OverlayLayout>, appId: string): Record<string, OverlayLayout> {
+  if (!(appId in layouts)) return layouts;
+  const next = { ...layouts };
+  delete next[appId];
+  return next;
+}
+
+export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
   apps: [],
   activeAppId: null,
   openedAppId: null,
+  pinnedPluginIds: [],
+  overlayLayouts: {},
   mountSignal: 0,
 
   mountApp: (input) => {
@@ -98,6 +113,8 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set) => ({
         apps: nextApps,
         activeAppId: nextActiveAppId,
         openedAppId: state.openedAppId === appId ? null : state.openedAppId,
+        pinnedPluginIds: state.pinnedPluginIds.filter((id) => id !== appId),
+        overlayLayouts: omitLayout(state.overlayLayouts, appId),
       };
     });
   },
@@ -108,12 +125,41 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set) => ({
 
   clearApps: () => {
     diagStoreEvent('clearApps()');
-    set({ apps: [], activeAppId: null, openedAppId: null });
+    set({ apps: [], activeAppId: null, openedAppId: null, pinnedPluginIds: [], overlayLayouts: {} });
   },
 
   openAppModal: (appId) => {
+    const app = get().apps.find((item) => item.appId === appId);
+    if (app && isPluginApp(app)) {
+      diagStoreEvent(`openAppModal(${appId})→pinPlugin`);
+      get().pinPlugin(appId);
+      return;
+    }
     diagStoreEvent(`openAppModal(${appId})`);
     set({ openedAppId: appId });
+  },
+
+  pinPlugin: (appId) => {
+    set((state) => {
+      const app = state.apps.find((item) => item.appId === appId);
+      if (!app || !isPluginApp(app)) return state;
+      const without = state.pinnedPluginIds.filter((id) => id !== appId);
+      return { pinnedPluginIds: [...without, appId] };
+    });
+  },
+
+  unpinPlugin: (appId) => {
+    set((state) => ({
+      pinnedPluginIds: state.pinnedPluginIds.filter((id) => id !== appId),
+      overlayLayouts: omitLayout(state.overlayLayouts, appId),
+    }));
+  },
+
+  setOverlayLayout: (appId, layout) => {
+    set((state) => {
+      if (!state.pinnedPluginIds.includes(appId)) return state;
+      return { overlayLayouts: { ...state.overlayLayouts, [appId]: layout } };
+    });
   },
 
   closeAppModal: () => {

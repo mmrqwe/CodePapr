@@ -47,7 +47,13 @@ describe('AppDockPanel', () => {
       settings: normalizeSettings({ lang: 'zh-CN' }),
       workspacePath: '/ws',
     }));
-    useAppRuntimeStore.setState({ apps: [makeApp()], activeAppId: 'app-1', openedAppId: null });
+    useAppRuntimeStore.setState({
+      apps: [makeApp()],
+      activeAppId: 'app-1',
+      openedAppId: null,
+      pinnedPluginIds: [],
+      overlayLayouts: {},
+    });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -58,7 +64,13 @@ describe('AppDockPanel', () => {
       root.unmount();
     });
     container.remove();
-    useAppRuntimeStore.setState({ apps: [], activeAppId: null, openedAppId: null });
+    useAppRuntimeStore.setState({
+      apps: [],
+      activeAppId: null,
+      openedAppId: null,
+      pinnedPluginIds: [],
+      overlayLayouts: {},
+    });
     vi.restoreAllMocks();
   });
 
@@ -273,5 +285,40 @@ describe('AppDockPanel', () => {
     const dot = container.querySelector('span[title="已停止"]');
     expect(dot).toBeTruthy();
     expect(dot?.className).toContain('bg-danger');
+  });
+
+  it('插件行显示徽章；钉住打开 overlay 而不是全屏 App', async () => {
+    useAppRuntimeStore.setState({
+      apps: [
+        makeApp({
+          appId: 'stock-ticker',
+          title: '股票看板',
+          manifestJson: JSON.stringify({ spec: 'papr/0.1', name: '股票看板', kind: 'plugin' }),
+        }),
+      ],
+      activeAppId: 'stock-ticker',
+      openedAppId: null,
+      pinnedPluginIds: [],
+    });
+    renderPanel();
+    expect(container.textContent).toContain('插件');
+
+    const row = Array.from(container.querySelectorAll('div')).find(
+      (el) => el.className.includes('cursor-pointer') && el.textContent?.includes('股票看板'),
+    );
+    if (!row) throw new Error('Plugin row not found');
+    act(() => {
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const pin = Array.from(container.querySelectorAll('button')).find((el) => el.textContent?.includes('钉住'));
+    if (!pin) throw new Error('Pin button not found');
+    act(() => {
+      pin.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual(['stock-ticker']);
+    expect(useAppRuntimeStore.getState().openedAppId).toBeNull();
   });
 });

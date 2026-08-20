@@ -50,6 +50,31 @@ pub struct PaprAgentDef {
     pub inherit_context: Option<PaprInheritContext>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PaprSurface {
+    #[serde(rename = "type")]
+    pub surface_type: Option<String>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub position: Option<String>,
+    #[serde(default)]
+    pub always_on_top: Option<bool>,
+    #[serde(default)]
+    pub transparent: Option<bool>,
+    #[serde(default)]
+    pub decorations: Option<bool>,
+    #[serde(default)]
+    pub resizable: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PaprLifecycle {
+    pub autostart: Option<bool>,
+    pub persist_position: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaprManifest {
@@ -58,6 +83,12 @@ pub struct PaprManifest {
     pub version: Option<String>,
     pub entry: Option<String>,
     pub icon: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub surface: Option<PaprSurface>,
+    #[serde(default)]
+    pub lifecycle: Option<PaprLifecycle>,
     pub permissions: Option<Vec<String>>,
     pub agents: Option<Vec<PaprAgentDef>>,
     pub command: Option<String>,
@@ -121,6 +152,27 @@ mod tests {
         assert_eq!(manifest.version.as_deref(), Some("1.0"));
         assert_eq!(manifest.permissions.unwrap().len(), 1);
         assert_eq!(manifest.agents.unwrap().len(), 1);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_plugin_manifest_kind_and_surface() {
+        let dir = std::env::temp_dir().join(format!("papr-test-plugin-{}", std::process::id()));
+        let app_dir = dir.join("stock-ticker");
+        fs::create_dir_all(&app_dir).unwrap();
+
+        let json = r#"{"spec":"papr/0.1","name":"股票","kind":"plugin","surface":{"type":"overlay","width":320,"height":180,"position":"top-right"},"local":"none","network":true}"#;
+        fs::write(app_dir.join("manifest.json"), json).unwrap();
+
+        let manifest = load_manifest(&dir, "stock-ticker").unwrap();
+        assert_eq!(manifest.kind.as_deref(), Some("plugin"));
+        let surface = manifest.surface.expect("surface");
+        assert_eq!(surface.surface_type.as_deref(), Some("overlay"));
+        assert_eq!(surface.width, Some(320));
+        assert_eq!(surface.height, Some(180));
+        assert_eq!(surface.position.as_deref(), Some("top-right"));
+        assert_eq!(manifest.network, Some(true));
 
         fs::remove_dir_all(&dir).ok();
     }
@@ -190,6 +242,9 @@ mod tests {
             version: None,
             entry: None,
             icon: None,
+            kind: None,
+            surface: None,
+            lifecycle: None,
             permissions: None,
             agents: None,
             command: None,

@@ -374,6 +374,19 @@ describe('promptSystem', () => {
     expect(prompt).toContain('应用管理');
   });
 
+  it('app mode teaches in-window plugin overlays', () => {
+    for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
+      const prompt = buildRuntimeSystemPrompt({
+        mode: 'app',
+        workspacePath: '/tmp/project',
+        lang,
+        toolNames: ['app_render'],
+      });
+      expect(prompt).toContain('kind:"plugin"');
+      expect(prompt).toContain('stock-ticker');
+    }
+  });
+
   it('app mode workflow references real tool names, not hidden workspace_* internals', () => {
     for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
       const prompt = buildRuntimeSystemPrompt({
