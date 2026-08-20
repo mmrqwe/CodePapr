@@ -2322,6 +2322,87 @@ pub(crate) fn papr_storage_keys(workspace_path: &str, app_id: &str) -> Result<Ve
     Ok(keys)
 }
 
+// ── Papr App Inbox（app_publish）─────────────────────────────────────
+
+/// inbox 追加进程级锁：并行子代理/多会话可能并发 app_publish 同一频道。
+/// 读-追加-写回若跨两次独立事务会丢事件（lost update），此锁把整个序列
+/// 串行化；跨进程并发再由 BEGIN IMMEDIATE（先抢 SQLite 写锁）兜底。
+static PAPR_INBOX_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn papr_inbox_lock() -> &'static Mutex<()> {
+    PAPR_INBOX_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+pub(crate) const PAPR_INBOX_DEFAULT_CAP: usize = 200;
+
+/// 向 app 的 inbox 频道原子追加一条事件，key = `inbox:<channel>`。
+///
+/// 存储为 JSON 数组 `[{seq, ts, payload}, ...]`，只保留最近 `cap` 条；
+/// seq 在锁内取「现有最大 seq + 1」分配，单调无冲突。返回 (seq, ts)。
+///
+/// 原子性：进程内 Mutex + 跨进程 `BEGIN IMMEDIATE`（WAL 下全局单 writer，
+/// busy_timeout=5000 使竞争方等待而非失败）。
+pub(crate) fn papr_inbox_append(
+    workspace_path: &str,
+    app_id: &str,
+    channel: &str,
+    payload_json: &str,
+    cap: Option<usize>,
+) -> Result<(u64, i64), String> {
+    if channel.is_empty() || channel.len() > 64 {
+        return Err("inbox channel 长度必须在 1-64 之间".to_string());
+    }
+    let key = format!("inbox:{channel}");
+    let cap = cap.unwrap_or(PAPR_INBOX_DEFAULT_CAP).max(1);
+    let payload: serde_json::Value = serde_json::from_str(payload_json)
+        .map_err(|err| format!("payload 不是合法 JSON: {err}"))?;
+
+    let _guard = papr_inbox_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (mut conn, ..) = open_papr_app_db(workspace_path, app_id)?;
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|err| format!("开启 inbox 事务失败: {err}"))?;
+
+    let current = tx
+        .query_row(
+            "SELECT value FROM app_storage WHERE key = ?1",
+            params![key],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|err| format!("读取 inbox 失败: {err}"))?;
+
+    // 损坏/非数组值按空列表自愈，避免坏数据把频道永久卡死。
+    let mut events: Vec<serde_json::Value> =
+        current.and_then(|raw| serde_json::from_str(&raw).ok()).unwrap_or_default();
+
+    let seq = events
+        .iter()
+        .rev()
+        .find_map(|event| event.get("seq").and_then(|value| value.as_u64()))
+        .map_or(1, |last| last + 1);
+    let ts = unix_millis()?;
+    events.push(serde_json::json!({ "seq": seq, "ts": ts, "payload": payload }));
+    if events.len() > cap {
+        let overflow = events.len() - cap;
+        events.drain(0..overflow);
+    }
+
+    let serialized =
+        serde_json::to_string(&events).map_err(|err| format!("序列化 inbox 失败: {err}"))?;
+    tx.execute(
+        "INSERT INTO app_storage (key, value, updated_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           updated_at = excluded.updated_at",
+        params![key, serialized, ts],
+    )
+    .map_err(|err| format!("写入 inbox 失败: {err}"))?;
+    tx.commit().map_err(|err| format!("提交 inbox 事务失败: {err}"))?;
+    Ok((seq, ts))
+}
+
 // ── Papr App Permission Settings ────────────────────────────────────
 
 pub(crate) fn papr_load_permission_settings() -> Result<Option<String>, String> {
@@ -4448,6 +4529,130 @@ mod tests {
         assert!(papr_storage_set(&ws, "../evil", "k", "v").is_err());
         assert!(papr_storage_set(&ws, "a/b", "k", "v").is_err());
         assert!(papr_storage_get(&ws, "..", "k").is_err());
+    }
+
+    #[test]
+    fn papr_inbox_append_assigns_monotonic_seq() {
+        let workspace = TestWorkspace::new("papr-inbox-seq");
+        let ws = workspace.workspace_arg();
+        let app_id = "inbox-app";
+
+        let (seq1, ts1) =
+            papr_inbox_append(&ws, app_id, "cards", r#"{"op":"add"}"#, None).unwrap();
+        let (seq2, ts2) =
+            papr_inbox_append(&ws, app_id, "cards", r#"{"op":"move"}"#, None).unwrap();
+        assert_eq!(seq1, 1);
+        assert_eq!(seq2, 2);
+        assert!(ts2 >= ts1);
+
+        // 不同频道独立计数
+        let (other_seq, _) =
+            papr_inbox_append(&ws, app_id, "log", r#"{"level":"ok"}"#, None).unwrap();
+        assert_eq!(other_seq, 1);
+
+        // 落库格式：inbox:<channel> → [{seq, ts, payload}]
+        let raw = papr_storage_get(&ws, app_id, "inbox:cards")
+            .unwrap()
+            .expect("inbox key should exist");
+        let events: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["seq"], 1);
+        assert_eq!(events[0]["payload"]["op"], "add");
+        assert_eq!(events[1]["seq"], 2);
+        assert_eq!(events[1]["payload"]["op"], "move");
+    }
+
+    #[test]
+    fn papr_inbox_append_trims_to_cap_keeping_newest() {
+        let workspace = TestWorkspace::new("papr-inbox-cap");
+        let ws = workspace.workspace_arg();
+        let app_id = "inbox-cap";
+
+        for index in 1..=5 {
+            papr_inbox_append(&ws, app_id, "feed", &format!(r#"{{"n":{index}}}"#), Some(3))
+                .unwrap();
+        }
+
+        let raw = papr_storage_get(&ws, app_id, "inbox:feed")
+            .unwrap()
+            .expect("inbox key should exist");
+        let events: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
+        assert_eq!(events.len(), 3);
+        // 保留最新 3 条（n=3,4,5），最旧两条被裁掉，seq 不回绕
+        let ns: Vec<i64> = events
+            .iter()
+            .map(|event| event["payload"]["n"].as_i64().unwrap())
+            .collect();
+        assert_eq!(ns, vec![3, 4, 5]);
+        assert_eq!(events[2]["seq"], 5);
+    }
+
+    #[test]
+    fn papr_inbox_append_self_heals_corrupt_value() {
+        let workspace = TestWorkspace::new("papr-inbox-heal");
+        let ws = workspace.workspace_arg();
+        let app_id = "inbox-heal";
+
+        // 预置坏数据：非数组 JSON
+        papr_storage_set(&ws, app_id, "inbox:cards", r#"{"broken":true}"#).unwrap();
+        let (seq, _) = papr_inbox_append(&ws, app_id, "cards", r#"{"ok":1}"#, None).unwrap();
+        assert_eq!(seq, 1);
+
+        let raw = papr_storage_get(&ws, app_id, "inbox:cards").unwrap().unwrap();
+        let events: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["payload"]["ok"], 1);
+    }
+
+    #[test]
+    fn papr_inbox_append_rejects_bad_channel_or_payload() {
+        let workspace = TestWorkspace::new("papr-inbox-bad");
+        let ws = workspace.workspace_arg();
+        let app_id = "inbox-bad";
+
+        assert!(papr_inbox_append(&ws, app_id, "", r#"{}"#, None).is_err());
+        assert!(papr_inbox_append(&ws, app_id, &"x".repeat(65), r#"{}"#, None).is_err());
+        assert!(papr_inbox_append(&ws, app_id, "cards", "not json", None).is_err());
+    }
+
+    #[test]
+    fn papr_inbox_append_concurrent_threads_lose_no_events() {
+        let workspace = TestWorkspace::new("papr-inbox-race");
+        let ws = workspace.workspace_arg();
+        let app_id = "inbox-race";
+
+        // 8 线程 × 25 条并发追加：锁 + IMMEDIATE 事务下不得丢事件、seq 不得重复
+        let threads: Vec<std::thread::JoinHandle<Vec<u64>>> = (0..8)
+            .map(|thread_index| {
+                let ws = ws.clone();
+                std::thread::spawn(move || {
+                    (0..25)
+                        .map(|event_index| {
+                            let payload =
+                                format!(r#"{{"t":{thread_index},"e":{event_index}}}"#);
+                            let (seq, _) =
+                                papr_inbox_append(&ws, app_id, "race", &payload, Some(1000))
+                                    .expect("concurrent append should succeed");
+                            seq
+                        })
+                        .collect()
+                })
+            })
+            .collect();
+
+        let mut all_seqs: Vec<u64> = threads
+            .into_iter()
+            .flat_map(|handle| handle.join().expect("thread should not panic"))
+            .collect();
+        assert_eq!(all_seqs.len(), 200);
+        all_seqs.sort_unstable();
+        all_seqs.dedup();
+        assert_eq!(all_seqs.len(), 200, "seqs must be unique under concurrency");
+        assert_eq!(*all_seqs.last().unwrap(), 200);
+
+        let raw = papr_storage_get(&ws, app_id, "inbox:race").unwrap().unwrap();
+        let events: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
+        assert_eq!(events.len(), 200, "no event may be lost");
     }
 
     #[test]

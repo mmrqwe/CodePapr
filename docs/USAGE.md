@@ -95,6 +95,14 @@ await papr.fs.writeFile('config.json', JSON.stringify(config));
 await papr.fs.writeFile('icon.png', pngBase64, { encoding: 'base64' });
 const exists = await papr.fs.exists('icon.png');
 const files = await papr.fs.list();
+
+// 接收编程 Agent 的推送（app_publish 工具 → papr://event）
+const off = papr.events.on('cards', (evt) => {
+  // evt: { channel, seq, ts, payload }
+  applyToBoard(evt.payload);
+});
+// 启动时先回放历史（保留最近 200 条），再监听实时事件
+const history = await papr.db.get('inbox:cards');
 ```
 
 **`papr.agent.run` 的轮数与超时限制：**
@@ -105,6 +113,36 @@ const files = await papr.fs.list();
 ### 创建 App
 
 切换 **App 模式**，用自然语言描述想要的 App。Agent 用 `write` / `edit` / `patch` 把 `manifest.json` 和入口 HTML 写到 `.CodePapr/apps/<appId>/`，再调用 `app_render({ appId })` 打开到应用面板。`app_render` 只挂载已落盘的应用，不会写文件。修改后再次 `app_render({ appId })` 即可刷新（面板仍可导出 zip）。
+
+### Agent 推送（app_publish + inbox）
+
+看板、进度面板、成果画廊这类「Agent 干活、App 展示」的场景，用 `app_publish` 工具打通：
+
+1. **App 声明频道契约**——`manifest.json` 里写 `inbox`（可选；声明后 Agent 只能推已声明的频道）：
+
+```json
+{
+  "spec": "papr/0.1",
+  "name": "团队看板",
+  "kind": "plugin",
+  "inbox": {
+    "cards": {
+      "description": "看板卡片操作",
+      "example": { "op": "add", "card": { "title": "修复登录", "column": "todo" } }
+    }
+  }
+}
+```
+
+2. **App 订阅事件**——页面里 `papr.events.on('cards', cb)` 实时接收；启动时用 `papr.db.get('inbox:cards')` 回放历史（数组 `{seq, ts, payload}`，保留最近 200 条）。
+3. **Agent 推送**——任意可写模式（Agent/Plan/App）调用 `app_publish({ appId, channel, payload })`。Agent 会先用 `app_list` 查看各 App 声明的频道与示例，按契约推送。
+
+特性：
+
+- **持久化 + 实时双通道**：事件先原子写入 App 的 `db.sqlite`（并发安全，不丢事件），App 已挂载时再经 `papr://event` 实时送达；未挂载也不丢，下次打开回放
+- **契约校验**：推送未声明频道会被拒绝并列出可用频道及描述，Agent 可自我纠正
+- `inbox:*` 键只由 `app_publish` 写入，App 端只读；`payload` 上限 256KB
+- 子代理默认可用 `app_publish`（自定义子代理可在 `tools` 白名单中增删）；Ask 只读模式禁用
 
 ### 权限（两轴模型）
 

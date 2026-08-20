@@ -677,6 +677,7 @@ https://api.deepseek.com/v1</code></pre>
           <li>Reference chart libraries via CDN (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js, etc.)</li>
           <li>Runs in a sandboxed iframe (<code>sandbox="allow-scripts allow-same-origin"</code>)</li>
           <li>Use <strong>Papr SDK</strong> (<code>window.papr</code>) to call Agent, storage, HTTP, and filesystem capabilities</li>
+          <li>Kanban/progress-panel apps can declare <code>inbox</code> channels in the manifest and subscribe with <code>papr.events.on(channel, cb)</code> — the coding Agent pushes content via the <code>app_publish</code> tool while it works (e.g. task done → add a card); history replays via <code>papr.db.get('inbox:&lt;channel&gt;')</code></li>
           <li><code>papr.agent.run</code> uses a <strong>300-second idle timeout</strong>: as long as the Agent keeps emitting progress events (streaming output / tool calls) it can run indefinitely; only 300s of total silence triggers a timeout. Tool rounds are bounded by <code>maxToolRounds</code> (default/cap 50; search calls count toward the total)</li>
           <li>appId must be kebab-case; after editing files call <code>app_render({ appId })</code> again to refresh — supports iterative refinement</li>
         </ul>
@@ -930,6 +931,7 @@ After the change, at least run verification for the affected scope; if no narrow
             <tr><td><code>app_start</code></td><td>Start backend service by appId. Checks port availability, turns status green.</td></tr>
             <tr><td><code>app_stop</code></td><td>Stop backend service by appId. Turns status red.</td></tr>
             <tr><td><code>app_delete</code></td><td>Delete app by appId. Stops backend, removes files, clears storage. Irreversible.</td></tr>
+            <tr><td><code>app_publish</code></td><td>Push content to an app/plugin channel (app_publish({ appId, channel, payload })). The payload shape follows the manifest inbox contract (call app_list first to see declared channels and examples); events are appended atomically (concurrency-safe, last 200 kept) and delivered live via papr://event when the app is mounted. Kanban/progress-panel scenario: task done → push a card.</td></tr>
           </tbody>
         </table>
 

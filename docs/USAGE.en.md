@@ -95,6 +95,14 @@ await papr.fs.writeFile('config.json', JSON.stringify(config));
 await papr.fs.writeFile('icon.png', pngBase64, { encoding: 'base64' });
 const exists = await papr.fs.exists('icon.png');
 const files = await papr.fs.list();
+
+// Receive pushes from the coding Agent (app_publish tool → papr://event)
+const off = papr.events.on('cards', (evt) => {
+  // evt: { channel, seq, ts, payload }
+  applyToBoard(evt.payload);
+});
+// On startup, replay history first (last 200 events kept), then listen live
+const history = await papr.db.get('inbox:cards');
 ```
 
 **`papr.agent.run` round & timeout limits:**
@@ -105,6 +113,36 @@ const files = await papr.fs.list();
 ### Creating Apps
 
 Switch to **App mode** and describe the app you want in natural language. The Agent uses `write` / `edit` / `patch` to put `manifest.json` and the entry HTML in `.CodePapr/apps/<appId>/`, then calls `app_render({ appId })` to open it. `app_render` only mounts an app already on disk; it does not write files. Call it again after edits to refresh (you can still export a zip from the dock).
+
+### Agent Push (app_publish + inbox)
+
+For "Agent works, App displays" scenarios — kanban boards, progress panels, artifact galleries — use the `app_publish` tool:
+
+1. **The app declares a channel contract** — add `inbox` to `manifest.json` (optional; once declared, the Agent may only push to declared channels):
+
+```json
+{
+  "spec": "papr/0.1",
+  "name": "Team Kanban",
+  "kind": "plugin",
+  "inbox": {
+    "cards": {
+      "description": "Kanban card operations",
+      "example": { "op": "add", "card": { "title": "Fix login", "column": "todo" } }
+    }
+  }
+}
+```
+
+2. **The app subscribes** — `papr.events.on('cards', cb)` receives live events; on startup, replay history with `papr.db.get('inbox:cards')` (an array of `{seq, ts, payload}`, last 200 kept).
+3. **The Agent pushes** — from any writable mode (Agent/Plan/App), call `app_publish({ appId, channel, payload })`. The Agent first reads each app's declared channels and examples via `app_list` and pushes according to the contract.
+
+Properties:
+
+- **Persistent + live dual channel**: each event is atomically appended to the app's `db.sqlite` (concurrency-safe, no lost events); if the app is mounted it is also delivered live via `papr://event`. Unmounted apps lose nothing — history replays on next open.
+- **Contract validation**: pushing to an undeclared channel is rejected with the list of valid channels and their descriptions, letting the Agent self-correct.
+- `inbox:*` keys are written only by `app_publish` — the app side is read-only. `payload` is capped at 256KB.
+- Sub-agents can use `app_publish` by default (custom sub-agents may add/remove it via their `tools` whitelist). It is disabled in read-only Ask mode.
 
 ### Permissions (two-axis model)
 

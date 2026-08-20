@@ -1063,7 +1063,7 @@ name: 'web_download_file',
   {
     name: 'app_render',
     description:
-      '打开已写入磁盘的 .papr 应用：读取 `.CodePapr/apps/<appId>/manifest.json` 和入口 HTML，挂到应用管理面板（plugin 会钉在主窗口 overlay）。只传 appId。不要传 html/title/files/kind/agents/local/network/command——那些必须用 write/edit/patch 先写到应用目录。找不到文件时会报错，提示先 write。应用源码必须拆分：index.html 只做骨架，css/theme.css + js/main.js 及 js/db.js、js/ui.js、js/agent.js、js/api.js 按职责拆开（原生 ES module）。禁止单文件巨石。\n\n📦 应用 HTML 可通过 window.papr 调用 CodePapr 能力（权限以 manifest 的 local/network 为准）：\n  • papr.db.get/set/delete/keys — 键值持久化（永远可用）\n  • papr.agent.run({agent, task}) — 调用 AI Agent（工具集由 local/network 决定）\n  • papr.http.request/get/post — HTTP（需 network: true）\n  • papr.fs.readFile/writeFile/exists/list/delete — 应用 data 目录（永远可用）\n  • papr.app.info() — 应用信息\n⚠️ kind=plugin 时禁止 local:write 和 command 后端。修改应用请 edit/patch 对应小文件后再 app_render({ appId }) 刷新。',
+      '打开已写入磁盘的 .papr 应用：读取 `.CodePapr/apps/<appId>/manifest.json` 和入口 HTML，挂到应用管理面板（plugin 会钉在主窗口 overlay）。只传 appId。不要传 html/title/files/kind/agents/local/network/command——那些必须用 write/edit/patch 先写到应用目录。找不到文件时会报错，提示先 write。应用源码必须拆分：index.html 只做骨架，css/theme.css + js/main.js 及 js/db.js、js/ui.js、js/agent.js、js/api.js 按职责拆开（原生 ES module）。禁止单文件巨石。\n\n📦 应用 HTML 可通过 window.papr 调用 CodePapr 能力（权限以 manifest 的 local/network 为准）：\n  • papr.db.get/set/delete/keys — 键值持久化（永远可用）\n  • papr.agent.run({agent, task}) — 调用 AI Agent（工具集由 local/network 决定）\n  • papr.http.request/get/post — HTTP（需 network: true）\n  • papr.fs.readFile/writeFile/exists/list/delete — 应用 data 目录（永远可用）\n  • papr.events.on(channel, cb) — 接收编程 Agent 经 app_publish 推送的频道事件（历史用 papr.db.get("inbox:<channel>")）\n  • papr.app.info() — 应用信息\n⚠️ kind=plugin 时禁止 local:write 和 command 后端。需要看板/面板接收 Agent 推送时，在 manifest 声明 inbox 频道（如 "inbox":{"cards":{"description":"...","example":{...}}}）。修改应用请 edit/patch 对应小文件后再 app_render({ appId }) 刷新。',
     parameters: {
       type: 'object',
       properties: {
@@ -1073,6 +1073,29 @@ name: 'web_download_file',
         },
       },
       required: ['appId'],
+    },
+  },
+  {
+    name: 'app_publish',
+    description:
+      '向 .papr 应用/插件的频道推送内容（看板/仪表板/进度面板等）。用法 app_publish({ appId, channel, payload })：payload 为任意 JSON，格式以该应用 manifest.json 的 inbox 契约为准——先用 app_list 查看各应用声明的频道（inbox）及 description/example，严格按其形状推送。事件会追加到应用 db（key: inbox:<channel>，保留最近 200 条，应用可回放历史）；应用已挂载时同时实时送达（应用内 papr.events.on(channel, cb) 接收）。传未声明的频道会被拒绝并列出可用频道。完成任务后主动用它更新相关面板（如任务完成→看板加卡片）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        appId: {
+          type: 'string',
+          description: '目标应用 ID（kebab-case），必须已存在 .CodePapr/apps/<appId>/manifest.json。',
+        },
+        channel: {
+          type: 'string',
+          description: '频道名（1-64 位字母/数字/-/_）。应用声明了 inbox 时必须命中其一。',
+        },
+        payload: {
+          type: 'object',
+          description: '推送内容，任意 JSON。形状遵循目标应用 inbox 频道的 description/example 契约。',
+        },
+      },
+      required: ['appId', 'channel', 'payload'],
     },
   },
   {

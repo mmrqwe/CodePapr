@@ -182,9 +182,10 @@ JavaScript SDK injected into every app iframe, providing a unified API:
 | `papr.agent.run({agent, task}, onProgress?)` | Invoke manifest-defined agents (streaming events + step tracking) |
 | `papr.http.request({method, url, headers?, body?})` / `get` / `post` | HTTP requests (JSON returned as-is; header allowlist) |
 | `papr.fs.readFile` / `writeFile` / `exists` / `list` / `delete` | File I/O (app data dir; `encoding: 'base64'` for binary) |
+| `papr.events.on(channel, cb)` | Subscribe to channel events pushed by agent `app_publish` (`{channel, seq, ts, payload}`; history via `papr.db.get('inbox:<channel>')`) |
 | `papr.app.info()` | Get app metadata |
 
-**IPC bridge:** The iframe SDK sends `{__papr:true, reqId, type, payload}` protocol messages via `window.parent.postMessage()`. The React main window's `usePaprBridge` hook listens → first-pass permission check → routes to `invoke()` (Rust) or Worker (Agent).
+**IPC bridge:** The iframe SDK sends `{__papr:true, reqId, type, payload}` protocol messages via `window.parent.postMessage()`. The React main window's `usePaprBridge` hook listens → first-pass permission check → routes to `invoke()` (Rust) or Worker (Agent). Two downstream (main window → iframe) message types exist: `papr://theme` (theme sync) and `papr://event` (app_publish push); downstream delivery uses the `appChannelHub` registry to find the mounted iframe's postMessage channel by appId (`usePaprBridge` registers the poster on mount).
 
 **Permission system (two-layer):**
 
@@ -212,7 +213,7 @@ Independent from built-in sub-agents (explore/scout/mentor) and from the main ch
 | `permission.rs` | Permission matrix + tool permission mapping |
 | `sdk_inject.rs` | SDK injection into HTML + SDK file serving |
 | `app_context.rs` | app_id → workspace_path in-memory registry |
-| `app_storage.rs` | `papr_storage_*` Tauri commands (permission check + SQLite CRUD) |
+| `app_storage.rs` | `papr_storage_*` / `papr_inbox_append` Tauri commands (permission check + SQLite CRUD; inbox is atomic append) |
 | `services.rs` | `papr_http_*` / `papr_fs_*` Tauri commands (permission check + fs/http operations) |
 | `protocol.rs` | postMessage protocol types (reserved) |
 
@@ -229,14 +230,33 @@ protocol and cannot be overwritten as static app content (it is reserved app dat
 
 **App Management Tools:**
 
-LLM can manage app lifecycle via 4 tools (registered as merge tools in `workspaceTools.ts`):
+LLM can manage app lifecycle and content push via 5 tools (registered as merge tools in `workspaceTools.ts`):
 
 | Tool | Params | Function |
 |---|---|---|
-| `app_list` | none | List all registered apps (appId, title, hasBackend, isRunning) |
+| `app_list` | none | List all registered apps (appId, title, hasBackend, isRunning, inbox channel contract) |
 | `app_start` | `appId` | Start backend (check port → `start_workspace_background_command` → `setAppRunning`) |
 | `app_stop` | `appId` | Stop backend (`stop_background_process` → `setAppStopped`) |
 | `app_delete` | `appId` | Full delete (stop + `papr_delete_app` delete files + `closeApp`) |
+| `app_publish` | `appId, channel, payload` | Push content to an app channel (atomic persist + live delivery when mounted); available in all modes except Ask |
+
+**app_publish — the agent → app/plugin push channel:**
+
+The data channel for "agent works, app displays" scenarios (kanban boards, progress panels), with separated responsibilities:
+
+```
+agent: app_publish({appId, channel, payload})
+  ├─ contract check: when manifest.inbox is declared, channel must match
+  │   (otherwise rejected with the list of valid channels)
+  ├─ data plane: invoke papr_inbox_append → db.sqlite key "inbox:<channel>"
+  │   append {seq, ts, payload}, cap 200; atomic via process lock + BEGIN IMMEDIATE
+  └─ notify plane: appChannelHub.postAppEvent → postMessage papr://event
+     → SDK papr.events.on(channel, cb) (only when mounted; otherwise persist-only)
+```
+
+Concurrency safety: parallel sub-agents / multiple sessions may publish to the same channel at once. A read-append-write across two separate transactions would lose events, so `db::papr_inbox_append` atomizes the whole sequence with a **process-level Mutex + `BEGIN IMMEDIATE` transaction** (WAL has a single global writer; busy_timeout=5000 makes contenders wait). seq is assigned inside the lock, so it is monotonic and unique. Cross-process (multiple windows / a backend server.js writing the db) is covered by the SQLite write lock.
+
+Contract model: the manifest may declare `inbox: { <channel>: { description, example } }`. Once declared, the agent may only push to declared channels (an unknown channel is rejected with the valid list, letting the LLM self-correct); when absent, channels are unrestricted (backward compatible). The agent discovers the contract via the inbox summary returned by `app_list`. `inbox:*` keys are written only by app_publish — the app side is read-only (convention, not enforced).
 
 **AppDockPanel — Application Management Panel:**
 

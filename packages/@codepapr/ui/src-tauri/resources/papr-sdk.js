@@ -11,6 +11,28 @@
   var parentOrigin = window.__PAPR_PARENT_ORIGIN || '*';
   var currentTheme = null;
   var themeListeners = [];
+  // app_publish 下行事件订阅表：channel -> [cb]（null 原型，防原型键污染）
+  var eventListeners = Object.create(null);
+
+  function dispatchAppEvent(payload) {
+    var channel = payload && typeof payload.channel === 'string' ? payload.channel : '';
+    if (!channel) return;
+    // 原型键防御：与 pending 同理，'__proto__' 等在 null 原型对象上只是普通键，
+    // 但仍显式拒绝，避免监听表被构造出意外分支。
+    if (channel === '__proto__' || channel === 'constructor' || channel === 'prototype') return;
+    var listeners = eventListeners[channel];
+    if (!listeners) return;
+    var event = {
+      channel: channel,
+      seq: payload && typeof payload.seq === 'number' ? payload.seq : 0,
+      ts: payload && typeof payload.ts === 'number' ? payload.ts : 0,
+      payload: payload ? payload.payload : undefined
+    };
+    for (var i = 0; i < listeners.length; i++) {
+      try { listeners[i](event); } catch (e) { /* listener errors are isolated */ }
+    }
+    try { window.dispatchEvent(new CustomEvent('papr-app-event', { detail: event })); } catch (e) { /* noop */ }
+  }
 
   function applyTheme(payload) {
     // 协议 v2：{ theme: 'paper-dark', mode: 'dark', dark: true }
@@ -89,6 +111,13 @@
 
     if (data.type === 'papr://theme') {
       applyTheme(data.payload);
+      return;
+    }
+
+    // app_publish 下行推送（无 reqId）：主窗口在事件落库后广播给已挂载的 iframe。
+    // isFromParent 已校验来源，非父窗口的伪造事件到不了这里。
+    if (data.type === 'papr://event') {
+      dispatchAppEvent(data.payload);
       return;
     }
 
@@ -206,6 +235,25 @@
       },
       delete: function (path) {
         return send('papr://fs.delete', { path: path });
+      }
+    },
+    events: {
+      // 订阅编程 Agent 经 app_publish 推送到本频道的事件（实时下行）。
+      // 回调收到 { channel, seq, ts, payload }；返回取消订阅函数。
+      // 历史事件用 papr.db.get('inbox:<channel>') 读取。
+      on: function (channel, cb) {
+        if (typeof channel !== 'string' || !channel || typeof cb !== 'function') {
+          return function unsubscribe() {};
+        }
+        if (!eventListeners[channel]) eventListeners[channel] = [];
+        eventListeners[channel].push(cb);
+        return function unsubscribe() {
+          var list = eventListeners[channel];
+          if (!list) return;
+          var idx = list.indexOf(cb);
+          if (idx >= 0) list.splice(idx, 1);
+          if (list.length === 0) delete eventListeners[channel];
+        };
       }
     },
     app: {

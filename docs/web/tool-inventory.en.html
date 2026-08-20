@@ -504,7 +504,7 @@
           <div class="idx">07</div>
           <div class="tt">
             <h3>App &amp; Auxiliary <span>Runtime Helpers</span></h3>
-            <div class="tags"><span class="tag">app_render / skill / question / todo</span></div>
+            <div class="tags"><span class="tag">app_render / app_publish / skill / question / todo</span></div>
           </div>
           <div class="hz"><b>Sandboxed Rendering</b>Interactive HTML application panel</div>
         </div>
@@ -516,6 +516,15 @@
           </div>
           <div class="desc"><b>app_render</b>: Opens interactive HTML apps already written under <code>.CodePapr/apps/&lt;appId&gt;/</code> (sandboxed iframe with Papr SDK); paired with <code>app_*</code> tools to manage application lifecycle. Files must be written with write/edit/patch; app_render only mounts.</div>
           <div class="more"><div class="mbox"><code>app_render</code> is strictly disabled for subagents to prevent recursive rendering loops; pass appId only. Permissions, agents, and backend processes live in manifest.json.</div></div>
+        </div>
+
+        <div class="item">
+          <div class="row">
+            <div class="addr">PUSH</div>
+            <div class="name">app_publish<span class="cchip c-text">Agent→App Push</span><span class="exp"></span></div>
+          </div>
+          <div class="desc"><b>app_publish</b>: Pushes content to an app/plugin channel (kanban boards, progress panels, artifact galleries). Events are atomically appended to <code>inbox:&lt;channel&gt;</code> in the app's <code>db.sqlite</code> (concurrency-safe); when the app is mounted they are also delivered live via <code>papr://event</code> (received by <code>papr.events.on</code>). Available in all modes except Ask.</div>
+          <div class="more"><div class="mbox">The payload shape follows the manifest <code>inbox</code> contract: once declared, only declared channels are accepted (unknown channels are rejected with the valid list); call <code>app_list</code> first to see each app's channels and examples. <code>inbox:*</code> keys are written only by app_publish — the app side is read-only. Payload capped at 256KB; last 200 events kept per channel.</div></div>
         </div>
 
         <div class="item">

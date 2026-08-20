@@ -738,6 +738,16 @@ export interface PaprLifecycle {
   persistPosition?: boolean;
 }
 
+/**
+ * manifest inbox 频道声明：agent 通过 app_publish 向频道推送内容，
+ * app/plugin 用 papr.events.on(channel, cb) 实时接收。
+ * 声明 inbox 后，app_publish 只允许已声明的频道（传错即报错并列出可用频道）。
+ */
+export interface PaprInboxChannel {
+  description?: string;
+  example?: unknown;
+}
+
 export interface PaprManifest {
   spec: string;
   name: string;
@@ -749,12 +759,21 @@ export interface PaprManifest {
   lifecycle?: PaprLifecycle;
   permissions?: PaprPermission[];
   agents?: PaprAgentDef[];
+  inbox?: Record<string, PaprInboxChannel>;
   command?: string;
   args?: string[];
   port?: number;
   level?: PaprLevel;
   local?: PaprLocalAccess;
   network?: boolean;
+}
+
+/** app_publish 推送给 app/plugin 的事件信封（papr.events.on 的回调参数）。 */
+export interface PaprAppEvent {
+  channel: string;
+  seq: number;
+  ts: number;
+  payload: unknown;
 }
 
 export interface PaprIPCRequest {

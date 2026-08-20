@@ -4,6 +4,7 @@ import type { PaprManifest, PaprAgentDef, PaprAppSettings } from '@codepapr/type
 import { isPaprMessage, createPaprResponse } from './paprProtocol';
 import { usePermissionStore } from './permissionStore';
 import { accessAllows, resolveEffectiveAccess } from './levelGrants';
+import { registerAppPoster } from './appChannelHub';
 import { useAgentStore } from '../store/agentStore';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { useThemeStore } from '../store/themeStore';
@@ -48,6 +49,16 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady, onConsol
       cacheManifest(appId, manifest);
     }
   }, [appId, manifest, cacheManifest]);
+
+  // app_publish 下行通道：把这个 iframe 注册为该 app 的 poster。
+  // postMessage 只发往本 app 的 origin（与上行的 origin+source 双校验对等）。
+  useEffect(() => {
+    return registerAppPoster(appId, (envelope) => {
+      const win = iframeRef.current?.contentWindow;
+      if (!win) return;
+      win.postMessage(envelope, appOriginFor(appId));
+    });
+  }, [appId, iframeRef]);
 
   // 设置走 zustand：Settings 保存后打开中的 app 立刻拿到新档，不必重挂 iframe。
   useEffect(() => {

@@ -14,7 +14,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 import { registerWorkspaceTools } from './workspaceTools';
 import type { RegisterWorkspaceToolsOptions } from './workspaceTools';
 import { registerWorkspaceFileTools } from './workspaceFileTools';
-import { registerWorkspaceAppTools, syncRunningBackendsToAccess } from './workspaceAppTools';
+import { registerWorkspaceAppTools, syncRunningBackendsToAccess, validateManifestInbox, summarizeManifestInbox } from './workspaceAppTools';
 import { registerWorkspaceExecTools } from './workspaceExecTools';
 import { registerWorkspaceSearchWebTools } from './workspaceSearchWebTools';
 import { registerWorkspaceBrowserTools } from './workspaceBrowserTools';
@@ -24,6 +24,7 @@ import { registerWorkspaceMiscTools } from './workspaceMiscTools';
 import type { WorkspaceToolContext } from './workspaceToolContext';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
+import { registerAppPoster, clearAppPosters, type AppChannelEnvelope } from '../papr/appChannelHub';
 
 const names = (registry: ToolRegistry): string[] =>
   registry.getAll().map((tool) => tool.name).sort();
@@ -51,6 +52,7 @@ describe('registerWorkspaceTools (domain split)', () => {
     const registry = build();
     // hideFromLlm 会把细粒度工具从 getAll() 删除，默认只留下合并工具 + websearch。
     expect(names(registry)).toEqual([
+      'app_publish',
       'bash', 'browser', 'diagnostics', 'edit', 'git', 'glob', 'graph', 'grep',
       'list', 'lsp', 'lsp_edit', 'patch', 'read', 'skill', 'webfetch', 'websearch', 'write',
     ]);
@@ -80,6 +82,14 @@ describe('registerWorkspaceTools (domain split)', () => {
     expect(names(defaultRegistry)).not.toContain('app_render');
     const appRegistry = build({ mode: 'app' });
     expect(names(appRegistry)).toContain('app_render');
+  });
+
+  it('exposes app_publish in all writable modes (not app-mode-only)', () => {
+    // 看板/面板推送是 Agent 日常能力，不限于 App 模式；ask 只读由
+    // FilteringToolRegistry 按 MUTATING_TOOL_NAMES 硬拦（见 agent-config 测试）。
+    expect(names(build())).toContain('app_publish');
+    expect(names(build({ mode: 'plan' }))).toContain('app_publish');
+    expect(names(build({ mode: 'app' }))).toContain('app_publish');
   });
 
   it('exposes question only in plan mode', () => {
@@ -197,7 +207,7 @@ describe('individual domain registrars register their exact tool sets', () => {
 
   it('app tools', () => {
     expect(register(registerWorkspaceAppTools)).toEqual([
-      'app_delete', 'app_list', 'app_render', 'app_start', 'app_stop',
+      'app_delete', 'app_list', 'app_publish', 'app_render', 'app_start', 'app_stop',
     ]);
   });
 
@@ -1227,5 +1237,184 @@ describe('workspace_apply_diff 写入原子性', () => {
         expect.objectContaining({ path: 'b.txt' }),
       ],
     });
+  });
+});
+
+describe('app_publish (agent → app/plugin 推送)', () => {
+  function kanbanManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      spec: 'papr/0.1',
+      name: 'Kanban',
+      kind: 'plugin',
+      local: 'none',
+      network: false,
+      ...overrides,
+    };
+  }
+
+  /** 模拟磁盘 manifest + Rust 侧 papr_inbox_append（返回 seq/ts）。 */
+  function seed(manifest: Record<string, unknown>): { seqs: number[] } {
+    const state = { seqs: [] as number[] };
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_text_file') {
+        const relativePath = String(args?.relativePath ?? '');
+        if (relativePath.endsWith('manifest.json')) {
+          return { path: relativePath, content: JSON.stringify(manifest), bytes: 1 };
+        }
+        throw new Error(`not found: ${relativePath}`);
+      }
+      if (command === 'papr_inbox_append') {
+        state.seqs.push(state.seqs.length + 1);
+        return { seq: state.seqs.length, ts: 1000 + state.seqs.length };
+      }
+      throw new Error(`Unexpected invoke: ${command}`);
+    });
+    return state;
+  }
+
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({});
+    clearAppPosters();
+  });
+
+  it('manifest 不存在时报错并指引先创建应用', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'read_text_file') throw new Error('not found');
+      return {};
+    });
+    await expect(
+      build().execute('app_publish', { appId: 'ghost', channel: 'cards', payload: { a: 1 } }),
+    ).rejects.toThrow(/找不到.*manifest\.json/);
+  });
+
+  it('校验 appId / channel / payload', async () => {
+    seed(kanbanManifest());
+    const registry = build();
+    await expect(
+      registry.execute('app_publish', { appId: 'Bad-Case', channel: 'cards', payload: {} }),
+    ).rejects.toThrow(/kebab-case/);
+    await expect(
+      registry.execute('app_publish', { appId: 'kanban', channel: '-bad', payload: {} }),
+    ).rejects.toThrow(/channel/);
+    await expect(
+      registry.execute('app_publish', { appId: 'kanban', channel: 'cards' }),
+    ).rejects.toThrow(/payload/);
+  });
+
+  it('payload 超过 256KB 拒绝', async () => {
+    seed(kanbanManifest());
+    const huge = { text: 'x'.repeat(300 * 1024) };
+    await expect(
+      build().execute('app_publish', { appId: 'kanban', channel: 'cards', payload: huge }),
+    ).rejects.toThrow(/256KB/);
+  });
+
+  it('声明 inbox 时拒绝未声明频道并列出可用频道', async () => {
+    seed(kanbanManifest({
+      inbox: {
+        cards: { description: '看板卡片操作', example: { op: 'add' } },
+        activity: { description: '动态流' },
+      },
+    }));
+    await expect(
+      build().execute('app_publish', { appId: 'kanban', channel: 'wrong', payload: { op: 'add' } }),
+    ).rejects.toThrow(/未声明频道 'wrong'[\s\S]*cards：看板卡片操作[\s\S]*activity/);
+    // 校验失败不得触达存储层
+    expect(invokeMock.mock.calls.some(([command]) => command === 'papr_inbox_append')).toBe(false);
+  });
+
+  it('声明 inbox 时命中频道正常落库', async () => {
+    seed(kanbanManifest({ inbox: { cards: { description: '看板卡片' } } }));
+    const result = await build().execute('app_publish', {
+      appId: 'kanban',
+      channel: 'cards',
+      payload: { op: 'add', card: { title: '修复登录' } },
+    });
+    expect(result).toMatchObject({ appId: 'kanban', channel: 'cards', seq: 1, delivered: false });
+    const appendCall = invokeMock.mock.calls.find(([command]) => command === 'papr_inbox_append');
+    expect(appendCall?.[1]).toMatchObject({
+      appId: 'kanban',
+      channel: 'cards',
+      payload: { op: 'add', card: { title: '修复登录' } },
+    });
+  });
+
+  it('未声明 inbox 的应用不限制频道（向后兼容）', async () => {
+    seed(kanbanManifest());
+    const result = await build().execute('app_publish', {
+      appId: 'kanban',
+      channel: 'anything',
+      payload: { ok: true },
+    });
+    expect(result).toMatchObject({ channel: 'anything', seq: 1 });
+  });
+
+  it('应用已挂载时实时推送 papr://event 信封', async () => {
+    seed(kanbanManifest({ inbox: { cards: {} } }));
+    const received: AppChannelEnvelope[] = [];
+    registerAppPoster('kanban', (envelope) => received.push(envelope));
+
+    const result = await build().execute('app_publish', {
+      appId: 'kanban',
+      channel: 'cards',
+      payload: { op: 'done', id: 'c1' },
+    });
+
+    expect(result).toMatchObject({ delivered: true, seq: 1 });
+    expect(received).toHaveLength(1);
+    expect(received[0]).toEqual({
+      __papr: true,
+      type: 'papr://event',
+      payload: { channel: 'cards', seq: 1, ts: 1001, payload: { op: 'done', id: 'c1' } },
+    });
+  });
+});
+
+describe('manifest inbox 契约校验与摘要', () => {
+  type ManifestLike = Parameters<typeof validateManifestInbox>[0];
+
+  function manifestWithInbox(inbox: unknown): ManifestLike {
+    return { spec: 'papr/0.1', name: 'X', inbox } as unknown as ManifestLike;
+  }
+
+  it('未声明 inbox 合法', () => {
+    expect(() => validateManifestInbox({ spec: 'papr/0.1', name: 'X' })).not.toThrow();
+  });
+
+  it('inbox 必须是对象', () => {
+    expect(() => validateManifestInbox(manifestWithInbox(['cards']))).toThrow(/对象/);
+    expect(() => validateManifestInbox(manifestWithInbox('cards'))).toThrow(/对象/);
+  });
+
+  it('频道名必须合法', () => {
+    expect(() => validateManifestInbox(manifestWithInbox({ '-bad': {} }))).toThrow(/频道名/);
+    expect(() => validateManifestInbox(manifestWithInbox({ ['a'.repeat(65)]: {} }))).toThrow(/频道名/);
+    expect(() => validateManifestInbox(manifestWithInbox({ cards: {} }))).not.toThrow();
+  });
+
+  it('频道定义必须是对象且 description 必须是字符串', () => {
+    expect(() => validateManifestInbox(manifestWithInbox({ cards: 'x' }))).toThrow(/必须是对象/);
+    expect(() => validateManifestInbox(manifestWithInbox({ cards: { description: 42 } }))).toThrow(/description/);
+    expect(() =>
+      validateManifestInbox(manifestWithInbox({ cards: { description: '看板', example: { op: 'add' } } })),
+    ).not.toThrow();
+  });
+
+  it('summarizeManifestInbox 提取频道/描述/示例', () => {
+    const summary = summarizeManifestInbox(manifestWithInbox({
+      cards: { description: '看板卡片', example: { op: 'add' } },
+      bare: {},
+    }));
+    expect(summary).toEqual([
+      { channel: 'cards', description: '看板卡片', example: { op: 'add' } },
+      { channel: 'bare' },
+    ]);
+  });
+
+  it('summarizeManifestInbox 无 inbox 返回 undefined', () => {
+    expect(summarizeManifestInbox({ spec: 'papr/0.1', name: 'X' })).toBeUndefined();
+    expect(summarizeManifestInbox(manifestWithInbox({}))).toBeUndefined();
+    expect(summarizeManifestInbox(null)).toBeUndefined();
   });
 });

@@ -504,7 +504,7 @@
           <div class="idx">07</div>
           <div class="tt">
             <h3>应用与会话辅助 <span>App &amp; Auxiliary</span></h3>
-            <div class="tags"><span class="tag">app_render / skill / question / todo</span></div>
+            <div class="tags"><span class="tag">app_render / app_publish / skill / question / todo</span></div>
           </div>
           <div class="hz"><b>沙箱渲染</b>提供交互式 HTML 应用能力</div>
         </div>
@@ -516,6 +516,15 @@
           </div>
           <div class="desc"><b>app_render</b>：打开已写入 <code>.CodePapr/apps/&lt;appId&gt;/</code> 的交互式 HTML 应用（运行于沙箱 iframe，注入 Papr SDK）；搭配 <code>app_*</code> 系列工具管理常驻微应用的生命周期。文件必须用 write/edit/patch 落盘，app_render 只挂载。</div>
           <div class="more"><div class="mbox"><code>app_render</code> 对子代理强制禁用（防止嵌套渲染）；只传 appId。权限、Agent、后端进程都写在 manifest.json 里。</div></div>
+        </div>
+
+        <div class="item">
+          <div class="row">
+            <div class="addr">PUSH</div>
+            <div class="name">app_publish<span class="cchip c-text">Agent→App 推送</span><span class="exp"></span></div>
+          </div>
+          <div class="desc"><b>app_publish</b>：向应用/插件的频道推送内容（看板、进度面板、成果画廊等）。事件原子追加到应用 <code>db.sqlite</code> 的 <code>inbox:&lt;channel&gt;</code>（并发安全），应用已挂载时经 <code>papr://event</code> 实时送达（应用内 <code>papr.events.on</code> 接收）。除 Ask 外所有模式可用。</div>
+          <div class="more"><div class="mbox">payload 形状以 manifest <code>inbox</code> 契约为准：声明后只能推已声明频道（传错即报错并列出可用频道）；先 <code>app_list</code> 查看各应用频道及示例。<code>inbox:*</code> 键只由 app_publish 写入，应用端只读；payload 上限 256KB，每频道保留最近 200 条。</div></div>
         </div>
 
         <div class="item">

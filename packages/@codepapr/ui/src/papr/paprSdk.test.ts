@@ -230,3 +230,89 @@ describe('papr-sdk.js console forwarding', () => {
     expect(entry?.payload?.message).toContain('boom');
   });
 });
+
+describe('papr-sdk.js papr.events (app_publish 下行推送)', () => {
+  type EventsApi = {
+    on: (channel: string, cb: (evt: unknown) => void) => () => void;
+  };
+
+  function eventsApi(): EventsApi {
+    return (window as unknown as { papr: { events: EventsApi } }).papr.events;
+  }
+
+  it('父窗口 papr://event 触发对应频道订阅者，信封为 {channel, seq, ts, payload}', () => {
+    loadSdk();
+    const received: Array<Record<string, unknown>> = [];
+    eventsApi().on('cards', (evt) => received.push(evt as Record<string, unknown>));
+
+    dispatchFrom(window.parent, {
+      __papr: true,
+      type: 'papr://event',
+      payload: { channel: 'cards', seq: 3, ts: 1234, payload: { op: 'add' } },
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toEqual({ channel: 'cards', seq: 3, ts: 1234, payload: { op: 'add' } });
+  });
+
+  it('伪造来源的 papr://event 不触发订阅者', () => {
+    loadSdk();
+    const received: unknown[] = [];
+    eventsApi().on('cards', (evt) => received.push(evt));
+
+    dispatchFrom({}, {
+      __papr: true,
+      type: 'papr://event',
+      payload: { channel: 'cards', seq: 1, ts: 1, payload: { spoofed: true } },
+    });
+
+    expect(received).toHaveLength(0);
+  });
+
+  it('未订阅的频道与原型键频道名安全忽略', () => {
+    loadSdk();
+    expect(() => {
+      dispatchFrom(window.parent, {
+        __papr: true,
+        type: 'papr://event',
+        payload: { channel: '__proto__', seq: 1, ts: 1, payload: {} },
+      });
+      dispatchFrom(window.parent, {
+        __papr: true,
+        type: 'papr://event',
+        payload: { channel: 'nobody-listens', seq: 1, ts: 1, payload: {} },
+      });
+    }).not.toThrow();
+    expect(Object.prototype.hasOwnProperty.call(Object.prototype, 'seq')).toBe(false);
+  });
+
+  it('unsubscribe 停止接收；其他订阅者不受影响', () => {
+    loadSdk();
+    const a: unknown[] = [];
+    const b: unknown[] = [];
+    const off = eventsApi().on('cards', (evt) => a.push(evt));
+    eventsApi().on('cards', (evt) => b.push(evt));
+
+    off();
+    dispatchFrom(window.parent, {
+      __papr: true,
+      type: 'papr://event',
+      payload: { channel: 'cards', seq: 2, ts: 2, payload: {} },
+    });
+
+    expect(a).toHaveLength(0);
+    expect(b).toHaveLength(1);
+  });
+
+  it('on 参数非法返回无副作用的 unsubscribe', () => {
+    loadSdk();
+    const off1 = eventsApi().on('', () => {});
+    const off2 = (eventsApi().on as unknown as (c: unknown, cb: unknown) => () => void)(null, () => {});
+    expect(typeof off1).toBe('function');
+    expect(typeof off2).toBe('function');
+    expect(() => {
+      off1();
+      off2();
+    }).not.toThrow();
+  });
+});

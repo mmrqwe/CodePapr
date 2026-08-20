@@ -17,6 +17,7 @@ import {
   type PaprLocalAccess,
 } from '../papr/levelGrants';
 import { isPluginApp, parsePaprKind, parsePluginSurfaceArg, readAppManifest, resolvePaprEntryFile } from '../papr/pluginSurface';
+import { postAppEvent } from '../papr/appChannelHub';
 import { type WorkspaceToolContext } from './workspaceToolContext';
 
 /** app_render 禁止携带的写文件/清单字段：这些必须用 write/edit/patch 落盘。 */
@@ -52,6 +53,62 @@ function normalizeAppIcon(raw: string | undefined): string | undefined {
     throw new Error(`icon 必须是不超过 16 个字符的 emoji 或短标签，收到: ${JSON.stringify(raw)}`);
   }
   return trimmed;
+}
+
+/** app_publish 频道名：字母/数字开头，1-64 位（与 Rust 侧长度上限一致）。 */
+const APP_PUBLISH_CHANNEL_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
+
+/** app_publish 单条 payload 上限：防止把大文件内容塞进 app db。 */
+const APP_PUBLISH_MAX_PAYLOAD_BYTES = 256 * 1024;
+
+/** manifest inbox 频道声明（契约）：app_publish 只允许命中已声明频道。 */
+export interface PaprInboxSummary {
+  channel: string;
+  description?: string;
+  example?: unknown;
+}
+
+/**
+ * 校验 manifest.inbox 声明。未声明（undefined）合法 = 不启用契约；
+ * 声明则每个频道名必须合法、定义必须是对象。app_render 挂载前调用，
+ * 让 agent 在创建应用时就拿到明确报错。
+ */
+export function validateManifestInbox(manifest: PaprManifest): void {
+  const inbox = manifest.inbox;
+  if (inbox === undefined) return;
+  if (typeof inbox !== 'object' || inbox === null || Array.isArray(inbox)) {
+    throw new Error(
+      'manifest inbox 必须是对象：{ "<channel>": { "description": "...", "example": {...} } }',
+    );
+  }
+  for (const [channel, def] of Object.entries(inbox)) {
+    if (!APP_PUBLISH_CHANNEL_RE.test(channel)) {
+      throw new Error(
+        `inbox 频道名 '${channel}' 非法：须字母/数字开头，仅字母/数字/-/_，1-64 字符`,
+      );
+    }
+    if (typeof def !== 'object' || def === null || Array.isArray(def)) {
+      throw new Error(`inbox.${channel} 必须是对象（{ description?, example? }）`);
+    }
+    if (def.description !== undefined && typeof def.description !== 'string') {
+      throw new Error(`inbox.${channel}.description 必须是字符串`);
+    }
+  }
+}
+
+/** 从 manifest 提取 inbox 摘要（app_list 输出，供 agent 发现推送契约）。 */
+export function summarizeManifestInbox(manifest: PaprManifest | null | undefined): PaprInboxSummary[] | undefined {
+  const inbox = manifest?.inbox;
+  if (!inbox || typeof inbox !== 'object' || Array.isArray(inbox)) return undefined;
+  const entries = Object.entries(inbox);
+  if (entries.length === 0) return undefined;
+  return entries.map(([channel, def]) => ({
+    channel,
+    ...(typeof def?.description === 'string' && def.description.trim().length > 0
+      ? { description: def.description }
+      : {}),
+    ...(def && 'example' in def && def.example !== undefined ? { example: def.example } : {}),
+  }));
 }
 
 /**
@@ -272,6 +329,8 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       parsePluginSurfaceArg(manifest.surface);
     }
 
+    validateManifestInbox(manifest);
+
     validateAgentTools({
       agents,
       access,
@@ -373,21 +432,23 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
         pinned: useAppRuntimeStore.getState().pinnedPluginIds.includes(app.appId),
         port: app.port ?? null,
         url: app.url ?? (regRunning ? regUrl : null),
+        inbox: summarizeManifestInbox(readAppManifest(app)),
       };
     });
     const fromDisk = diskApps.map((d) => {
       const regUrl = urlForPort(d.port);
       const regRunning = regUrl !== null && runningByUrl.has(regUrl);
-      const diskKind = readAppManifest({ manifestJson: d.manifest_json ?? undefined })?.kind === 'plugin' ? 'plugin' : 'app';
+      const diskManifest = readAppManifest({ manifestJson: d.manifest_json ?? undefined });
       return {
         appId: d.app_id,
         title: d.title,
-        kind: diskKind,
+        kind: diskManifest?.kind === 'plugin' ? 'plugin' : 'app',
         hasBackend: !!(d.command && d.port),
         isRunning: regRunning,
         pinned: false,
         port: d.port ?? null,
         url: regRunning ? regUrl : null,
+        inbox: summarizeManifestInbox(diskManifest),
       };
     });
     return [...fromStore, ...fromDisk];
@@ -440,6 +501,81 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     usePaprPermissionStore.getState().clearManifest(appId);
     useAppRuntimeStore.getState().closeApp(appId);
     return { appId, deleted: true };
+  });
+
+  registry.register(toolByName('app_publish'), async (args: Record<string, unknown>) => {
+    const rawAppId = asString(args.appId, 'appId');
+    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(rawAppId)) {
+      throw new Error(
+        `appId 必须是 kebab-case（仅小写字母、数字、连字符，1-63 字符），收到: ${rawAppId}`,
+      );
+    }
+    const channel = asString(args.channel, 'channel');
+    if (!APP_PUBLISH_CHANNEL_RE.test(channel)) {
+      throw new Error(
+        `channel 必须字母/数字开头，仅字母/数字/-/_，1-64 字符，收到: ${channel}`,
+      );
+    }
+    if (args.payload === undefined || args.payload === null) {
+      throw new Error('payload 必填，且必须是 JSON 值（对象/数组/字符串等）');
+    }
+    const payloadJson = JSON.stringify(args.payload);
+    if (new TextEncoder().encode(payloadJson).length > APP_PUBLISH_MAX_PAYLOAD_BYTES) {
+      throw new Error('payload 超过 256KB 上限：请拆分或摘要后再推送，不要把大文件内容塞进应用存储');
+    }
+
+    // 目标应用必须已存在（磁盘 manifest 为准，与 app_render 同一事实源）
+    const manifestPath = `.CodePapr/apps/${rawAppId}/manifest.json`;
+    const manifestRaw = await readAppTextFile(workspace(), manifestPath);
+    if (!manifestRaw) {
+      throw new Error(
+        `找不到 ${manifestPath}。app_publish 只推送给已存在的应用——先在 App 模式用 write 写好 manifest.json 与页面并 app_render({ appId: "${rawAppId}" })。`,
+      );
+    }
+    let manifest: PaprManifest;
+    try {
+      manifest = JSON.parse(manifestRaw) as PaprManifest;
+    } catch {
+      throw new Error(`${manifestPath} 不是合法 JSON，请修复 manifest 后再推送。`);
+    }
+
+    // inbox 契约：声明了 inbox 的应用只接受已声明频道；报错带出全部可用频道
+    // 与描述，LLM 可自我纠正重发。未声明 inbox 的应用不限制（向后兼容）。
+    const inbox = manifest.inbox;
+    if (inbox && typeof inbox === 'object' && !Array.isArray(inbox)) {
+      if (!Object.prototype.hasOwnProperty.call(inbox, channel)) {
+        const available = Object.entries(inbox)
+          .map(([name, def]) => {
+            const description = def && typeof def.description === 'string' ? def.description : '';
+            return `  - ${name}${description ? `：${description}` : ''}`;
+          })
+          .join('\n');
+        throw new Error(
+          `应用 '${rawAppId}' 未声明频道 '${channel}'。可用频道：\n${available || '  （无）'}\n请按 manifest inbox 的 description/example 形状重新推送。`,
+        );
+      }
+    }
+
+    // 数据面：Rust 原子追加（进程锁 + BEGIN IMMEDIATE，并发不丢事件）。
+    // app db 随 workspace 打开已注册（App.tsx 扫描恢复），无需先 app_render。
+    const { seq, ts } = await invoke<{ seq: number; ts: number }>('papr_inbox_append', {
+      appId: rawAppId,
+      channel,
+      payload: args.payload,
+    });
+
+    // 通知面：已挂载则实时送达（SDK papr.events.on）；未挂载仅落库。
+    const delivered = postAppEvent(rawAppId, { channel, seq, ts, payload: args.payload });
+
+    return {
+      appId: rawAppId,
+      channel,
+      seq,
+      delivered,
+      hint: delivered
+        ? '已实时推送到挂载中的应用（papr.events.on 收到事件）。'
+        : `事件已写入应用存储（papr.db 键 inbox:${channel}），应用打开时可回放历史；当前应用未挂载。`,
+    };
   });
 
 }

@@ -77,6 +77,7 @@ const UI_TOOL_DEFAULTS = [
   'app_start',
   'app_stop',
   'app_delete',
+  'app_publish',
   'skill',
   'question',
   'task',
@@ -212,6 +213,13 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       'await papr.fs.delete(path)              // 删除文件',
       '适用场景：存配置、导报表、管理本地数据文件。',
       '无需权限（限定 app data 目录，永远可用）',
+      '',
+      '### papr.events — 接收编程 Agent 的推送（app_publish）',
+      'const off = papr.events.on(channel, (evt) => { ... })  // evt: { channel, seq, ts, payload }；返回取消订阅函数',
+      'await papr.db.get("inbox:<channel>")                   // 历史事件数组（{seq, ts, payload}，最多保留 200 条）',
+      '用法：manifest.json 声明 inbox 频道（如 {"inbox": {"cards": {"description": "看板卡片", "example": {...}}}}），页面加载后订阅。编程 Agent 会用 app_publish 工具向频道推送内容（如任务完成后给看板加卡片）。启动时先 db.get 读历史恢复状态，再监听实时事件。',
+      '⚠️ inbox:* key 只由 app_publish 写入，app 端只读，不要用 papr.db.set 覆写。',
+      '无需权限（永远可用）',
       '',
       '### papr.app.info — 获取应用元数据',
       'await papr.app.info()  // 返回: { appId, name, version, permissions, local, network, backendUrl }',
@@ -421,6 +429,13 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '適用場景：存配置、導報表、管理本地資料檔案。',
       '無需權限（限定 app data 目錄，永遠可用）',
       '',
+      '### papr.events — 接收編程 Agent 的推送（app_publish）',
+      'const off = papr.events.on(channel, (evt) => { ... })  // evt: { channel, seq, ts, payload }；返回取消訂閱函數',
+      'await papr.db.get("inbox:<channel>")                   // 歷史事件陣列（{seq, ts, payload}，最多保留 200 條）',
+      '用法：manifest.json 宣告 inbox 頻道（如 {"inbox": {"cards": {"description": "看板卡片", "example": {...}}}}），頁面載入後訂閱。編程 Agent 會用 app_publish 工具向頻道推送內容（如任務完成後給看板加卡片）。啟動時先 db.get 讀歷史恢復狀態，再監聽即時事件。',
+      '⚠️ inbox:* key 只由 app_publish 寫入，app 端唯讀，不要用 papr.db.set 覆寫。',
+      '無需權限（永遠可用）',
+      '',
       '### papr.app.info — 獲取應用元資料',
       'await papr.app.info()  // 返回: { appId, name, version, permissions, local, network, backendUrl }',
       '無需權限宣告。每次呼叫都讀取目前生效檔（設定更改後立即反映）。',
@@ -626,6 +641,13 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       'await papr.fs.delete(path)              // Delete file',
       'Use for: saving configs, exporting reports, managing local data files.',
       'No permission needed (restricted to the app data directory, always available).',
+      '',
+      '### papr.events — Receive pushes from the coding Agent (app_publish)',
+      'const off = papr.events.on(channel, (evt) => { ... })  // evt: { channel, seq, ts, payload }; returns an unsubscribe function',
+      'await papr.db.get("inbox:<channel>")                   // history event array ({seq, ts, payload}, last 200 kept)',
+      'Usage: declare inbox channels in manifest.json (e.g. {"inbox": {"cards": {"description": "kanban cards", "example": {...}}}}), then subscribe after page load. The coding Agent pushes content with the app_publish tool (e.g. adds a kanban card when a task finishes). On startup, restore state with db.get first, then listen for live events.',
+      '⚠️ inbox:* keys are written only by app_publish — the app must treat them as read-only and never overwrite them with papr.db.set.',
+      'No permission needed (always available).',
       '',
       '### papr.app.info — Get App Metadata',
       'await papr.app.info()  // Returns: { appId, name, version, permissions, local, network, backendUrl }',
@@ -1323,6 +1345,19 @@ function buildToolConstraints(
         : lang === 'zh-TW'
         ? '- [app_delete] 按 appId 刪除應用。停止後端、刪除檔案、清除存儲。不可恢復。'
         : '- [app_delete] 按 appId 删除应用。停止后端、删除文件、清除存储。不可恢复。'
+    );
+  }
+
+  if (hasTool(toolNames, 'app_publish')) {
+    lines.push(
+      lang === 'en' ? '### App Publish' : lang === 'zh-TW' ? '### 應用推送' : '### 应用推送'
+    );
+    lines.push(
+      lang === 'en'
+        ? '- [app_publish] Push content to a .papr app/plugin channel: app_publish({ appId, channel, payload }). Use it to feed dashboards/kanban boards/progress panels after finishing work (e.g. add a card when a task completes). payload is arbitrary JSON defined by the app\'s manifest inbox contract — call app_list first to see each app\'s declared channels and their description/example, and follow that shape exactly. Data is persisted (the app can reload history) and delivered live if the app is mounted. Unknown channels are rejected with the valid list.'
+        : lang === 'zh-TW'
+        ? '- [app_publish] 向 .papr 應用/外掛的頻道推送內容：app_publish({ appId, channel, payload })。完成工作後用它餵看板/儀表板/進度面板（如任務完成就加一張卡片）。payload 是任意 JSON，格式以該應用 manifest 的 inbox 契約為準——先 app_list 查看各應用聲明的頻道及 description/example，嚴格按其形狀推送。數據會持久化（應用可回放歷史），應用已掛載時即時送達。傳未聲明頻道會被拒絕並列出可用頻道。'
+        : '- [app_publish] 向 .papr 应用/插件的频道推送内容：app_publish({ appId, channel, payload })。完成工作后用它喂看板/仪表板/进度面板（如任务完成就加一张卡片）。payload 是任意 JSON，格式以该应用 manifest 的 inbox 契约为准——先 app_list 查看各应用声明的频道及 description/example，严格按其形状推送。数据会持久化（应用可回放历史），应用已挂载时即时送达。传未声明频道会被拒绝并列出可用频道。'
     );
   }
 

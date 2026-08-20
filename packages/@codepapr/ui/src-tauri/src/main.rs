@@ -446,6 +446,7 @@ fn main() {
             papr_runtime::app_storage::papr_storage_set,
             papr_runtime::app_storage::papr_storage_delete,
             papr_runtime::app_storage::papr_storage_keys,
+            papr_runtime::app_storage::papr_inbox_append,
             papr_runtime::app_storage::papr_get_manifest,
             papr_runtime::app_storage::papr_get_app_settings,
             papr_runtime::app_storage::papr_set_app_settings,

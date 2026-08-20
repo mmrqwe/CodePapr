@@ -144,6 +144,7 @@ describe('agentConfig - filterToolsForMode', () => {
     tool('app_start'),
     tool('app_stop'),
     tool('app_delete'),
+    tool('app_publish'),
     tool('question'),
     tool('task'),
     tool('memory_write'),
@@ -166,6 +167,16 @@ describe('agentConfig - filterToolsForMode', () => {
     expect(names).not.toContain('memory_forget');
     expect(names).not.toContain('memory_review_candidates');
     expect(names).toContain('memory_search');
+  });
+
+  it('ask 模式：app_publish（写 app db）被屏蔽', () => {
+    expect(filterToolsForMode(all, 'ask').map((t) => t.name)).not.toContain('app_publish');
+  });
+
+  it('app_publish 在所有可写模式可用（不限于 app 模式）', () => {
+    for (const mode of ['agent', 'plan', 'app'] as const) {
+      expect(filterToolsForMode(all, mode).map((t) => t.name)).toContain('app_publish');
+    }
   });
 
   it('agent 模式：记忆工具全部可用', () => {

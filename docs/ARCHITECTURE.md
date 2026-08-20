@@ -182,9 +182,10 @@ Papr 是 CodePapr 的应用运行时——AI 生成的 `.papr` App 可以直接�
 | `papr.agent.run({agent, task}, onProgress?)` | 调用 manifest 中定义的 Agent（流式事件 + steps 追踪） |
 | `papr.http.request({method, url, headers?, body?})` / `get` / `post` | HTTP 请求（JSON 原样返回；headers 白名单） |
 | `papr.fs.readFile` / `writeFile` / `exists` / `list` / `delete` | 文件读写（限定 app data；`encoding: 'base64'` 支持二进制） |
+| `papr.events.on(channel, cb)` | 订阅 agent `app_publish` 推送的频道事件（`{channel, seq, ts, payload}`；历史用 `papr.db.get('inbox:<channel>')`） |
 | `papr.app.info()` | 获取应用元数据 |
 
-**IPC 桥接：** iframe 内 SDK 通过 `window.parent.postMessage()` 发送 `{__papr:true, reqId, type, payload}` 协议消息，React 主窗口 `usePaprBridge` hook 监听 → 权限首检 → 路由到 `invoke()`（Rust）或 Worker（Agent）。
+**IPC 桥接：** iframe 内 SDK 通过 `window.parent.postMessage()` 发送 `{__papr:true, reqId, type, payload}` 协议消息，React 主窗口 `usePaprBridge` hook 监听 → 权限首检 → 路由到 `invoke()`（Rust）或 Worker（Agent）。反向（主窗口 → iframe）目前有两种下行消息：`papr://theme`（主题同步）与 `papr://event`（app_publish 推送）；下行经 `appChannelHub` 注册表按 appId 找到挂载 iframe 的 postMessage 通道（`usePaprBridge` 挂载时注册 poster）。
 
 **权限系统（两层）：**
 
@@ -212,7 +213,7 @@ Papr 是 CodePapr 的应用运行时——AI 生成的 `.papr` App 可以直接�
 | `permission.rs` | 权限矩阵 + 工具权限映射 |
 | `sdk_inject.rs` | SDK 注入 HTML 响应 + SDK 文件服务 |
 | `app_context.rs` | app_id → workspace_path 内存注册表 |
-| `app_storage.rs` | `papr_storage_*` Tauri 命令（权限校验 + SQLite CRUD） |
+| `app_storage.rs` | `papr_storage_*` / `papr_inbox_append` Tauri 命令（权限校验 + SQLite CRUD；inbox 为原子追加） |
 | `services.rs` | `papr_http_*` / `papr_fs_*` Tauri 命令（权限校验 + fs/http 操作） |
 | `protocol.rs` | postMessage 协议类型（预留） |
 
@@ -228,14 +229,32 @@ db.sqlite 不通过 codepapr-app:// 协议对外提供静态服务，也不能�
 
 **App 管理工具：**
 
-LLM 可通过 4 个工具管理 app 生命周期（在 `workspaceTools.ts` 注册为 merge tool）：
+LLM 可通过 5 个工具管理 app 生命周期与内容推送（在 `workspaceTools.ts` 注册为 merge tool）：
 
 | 工具 | 参数 | 功能 |
 |---|---|---|
-| `app_list` | 无 | 列出所有已注册 app（appId、title、hasBackend、isRunning） |
+| `app_list` | 无 | 列出所有已注册 app（appId、title、hasBackend、isRunning、inbox 频道契约） |
 | `app_start` | `appId` | 启动后端服务（检查端口 → `start_workspace_background_command` → `setAppRunning`） |
 | `app_stop` | `appId` | 停止后端服务（`stop_background_process` → `setAppStopped`） |
 | `app_delete` | `appId` | 彻底删除（停止 + `papr_delete_app` 删文件 + `closeApp`） |
+| `app_publish` | `appId, channel, payload` | 向 app 频道推送内容（原子落库 + 挂载时实时送达）；除 Ask 外所有模式可用 |
+
+**app_publish — agent → app/plugin 推送通道：**
+
+看板/进度面板等「agent 干活、app 展示」场景的数据通道，双向职责分离：
+
+```
+agent: app_publish({appId, channel, payload})
+  ├─ 契约校验：manifest.inbox 已声明时，channel 必须命中（否则报错列出可用频道）
+  ├─ 数据面：invoke papr_inbox_append → db.sqlite key "inbox:<channel>"
+  │          append {seq, ts, payload}，cap 200；进程锁 + BEGIN IMMEDIATE 原子化
+  └─ 通知面：appChannelHub.postAppEvent → postMessage papr://event
+             → SDK papr.events.on(channel, cb)（仅已挂载时；未挂载只落库）
+```
+
+并发安全：并行子代理/多会话可能同时 publish 同一频道。读-追加-写回若跨两次独立事务会丢事件，因此 `db::papr_inbox_append` 用**进程级 Mutex + `BEGIN IMMEDIATE` 事务**（WAL 下全局单 writer，busy_timeout=5000 使竞争方等待）把整个序列原子化，seq 在锁内分配保证单调不重复。跨进程（多窗口/后端 server.js 写库）由 SQLite 写锁兜底。
+
+契约模型：manifest 可选声明 `inbox: { <channel>: { description, example } }`。声明后 agent 只能推已声明频道（传错即拒绝并列出可用频道，LLM 自我纠正）；未声明则不限制（向后兼容）。agent 通过 `app_list` 返回的 inbox 摘要发现契约。`inbox:*` 键只由 app_publish 写入，app 端只读（约定，非强制）。
 
 **AppDockPanel — 应用管理面板：**
 
