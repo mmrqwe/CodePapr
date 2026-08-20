@@ -340,7 +340,11 @@ tools:
 你是 reviewer，一个只读代码审查子代理。
 ```
 
-`mode` 取值：`subagent`（默认，可经 `task` 工具委派）、`all`（可委派 + 可作 @ 提及主代理）、`primary`（仅作 @ 提及主代理，**不会**出现在 `task` 工具的委派列表）。`model` 可填 `fast` / `mentor` 或具体模型名；`mentor` 未单独配置 API Key 时自动回退到主 API Key。
+`mode` 取值：`subagent`（默认，可经 `task` 工具委派）、`all`（可委派 + 可用 `@name` 强制委派）、`primary`（仅能通过 `@name` 强制委派，**不会**出现在 `task` 工具的自发委派目录）。`@explore 查鉴权` 会要求主代理立刻用 `task` 委派；`@explore @scout 查登录和文档` 会要求同一回合并行委派。`@` 不会切换主代理身份或系统提示词。
+
+未声明 `tools` 时继承子代理可用的全部工具；空的 `tools:` 块表示禁用全部工具（纯推理）。也支持一行写法：`tools: read, grep`。
+
+`model` 可填 `fast` / `mentor` 或具体模型名；`mentor` 未单独配置 API Key 时自动回退到主 API Key。
 
 ### Skills
 

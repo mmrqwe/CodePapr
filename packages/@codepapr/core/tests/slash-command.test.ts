@@ -14,6 +14,8 @@ import {
   resolveCommandDescription,
   wrapAskModeCommandTemplate,
   wrapCommandForSubagent,
+  wrapCommandForSubagents,
+  parseLeadingAgentMentions,
 } from '../src/agent/slashCommand';
 
 describe('slashCommand - parseCommandMarkdown', () => {
@@ -279,6 +281,22 @@ describe('slashCommand - 路径与元数据', () => {
     expect(wrapAskModeCommandTemplate('TASK', 'zh-CN')).toContain('TASK');
     expect(wrapCommandForSubagent('TASK', 'explore', 'zh-CN')).toContain('explore');
     expect(wrapCommandForSubagent('TASK', 'explore', 'en')).toMatch(/subagent/i);
+    expect(wrapCommandForSubagents('TASK', ['explore', 'scout'], 'zh-CN')).toContain('并行');
+    expect(wrapCommandForSubagents('TASK', ['explore', 'scout'], 'en')).toMatch(/parallel/i);
+  });
+
+  it('解析消息开头的 @agent 提及', () => {
+    const known = new Set(['explore', 'scout', 'reviewer']);
+    expect(parseLeadingAgentMentions('@explore 查鉴权', known)).toEqual({
+      agentNames: ['explore'],
+      body: '查鉴权',
+    });
+    expect(parseLeadingAgentMentions('@explore @scout 查登录实现和官方文档', known)).toEqual({
+      agentNames: ['explore', 'scout'],
+      body: '查登录实现和官方文档',
+    });
+    expect(parseLeadingAgentMentions('@src/foo.ts 请看', known)).toBeNull();
+    expect(parseLeadingAgentMentions('hello @explore', known)).toBeNull();
   });
 });
 

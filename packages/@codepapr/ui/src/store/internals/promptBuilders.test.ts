@@ -186,6 +186,24 @@ describe('buildAgentRuntimeSystemPrompt', () => {
     expect(prompt).toContain('websearch');
     expect(prompt).toContain('webfetch');
   });
+
+  it('lists custom agents from runtime definitions in the task catalog', () => {
+    const prompt = buildAgentRuntimeSystemPrompt(
+      makeRuntimeSettings(),
+      'agent',
+      '/tmp/ws',
+      undefined,
+      {
+        agentDefinitions: [
+          { name: 'explore', description: 'e', mode: 'subagent', prompt: 'p' },
+          { name: 'reviewer', description: '代码审查', mode: 'subagent', prompt: 'p' },
+          { name: 'hidden', description: 'h', mode: 'primary', prompt: 'p' },
+        ],
+      }
+    );
+    expect(prompt).toContain('reviewer — 代码审查');
+    expect(prompt).not.toContain('hidden —');
+  });
 });
 
 describe('buildAgentRuntimeUserPrompt', () => {

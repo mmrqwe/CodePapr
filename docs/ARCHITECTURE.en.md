@@ -329,7 +329,7 @@ On Apple Silicon Macs, users can manually click "GPU Warmup" in the Voice Tab of
 
 > Context compaction (Compactor) is likewise a built-in internal sub-agent (`compactionModel` tier + `compactionTemperature`/`compactionMaxTokens`), zero-tool pure reasoning — the compaction input (transcript) already contains all facts. It is invoked directly by the runtime compaction pipeline (between-turn and mid-loop compaction), never exposed via the `task` tool. Execution reuses core's `resolveSubagentExecution` + `runSubagentSession` (`utils/compactorRunner.ts`), shared by both threads (main-thread between-turn / Worker mid-loop); mid-loop compaction wires the `sessionAbortControllers` cancel signal, and a mid-flight cancel makes the handler return null for graceful teardown. The wall-clock budget keeps the sub-agent default of 20 minutes.
 
-The `task` tool only exposes agents whose `mode` is `subagent` / `all`; agents with `mode: primary` (only usable as an @-mentioned primary agent) or `internal: true` never appear in the delegation list.
+The `task` tool description lists agents whose `mode` is `subagent` / `all`; `mode: primary` and `internal: true` stay out of the spontaneous catalog. `mode: primary` can still be forced by a leading `@name` in the user message (the handler still resolves that agent). Consecutive `task` calls in the same reply run in parallel (wall-clock is max; handler-side `withTaskSlot` caps concurrency at 4); `question` and mutating tools stay serial.
 
 ### 6.2 Sub-Agent Independent Context
 

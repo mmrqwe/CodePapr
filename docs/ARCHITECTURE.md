@@ -327,7 +327,7 @@ ChatPanel → useTtsPlayer hook → Rust TTS Module → GPT-SoVITS Python Server
 
 > 上下文压缩（Compactor）同样是内置内部子代理（`compactionModel` 档位 + `compactionTemperature`/`compactionMaxTokens`），零工具纯推理——压缩输入（transcript）已含全部事实。它由运行时压缩管线（轮间压缩与 mid-loop 压缩）直接调用，不经 `task` 工具暴露。执行复用 core 的 `resolveSubagentExecution` + `runSubagentSession`（`utils/compactorRunner.ts`），两条线程（主线程轮间 / Worker mid-loop）共用；mid-loop 压缩接 `sessionAbortControllers` 取消信号，压缩中飞被取消时 handler 返回 null 优雅收尾。墙钟预算沿用子代理默认 20 分钟。
 
-`task` 工具只暴露 `mode` 为 `subagent` / `all` 的 agent；`mode: primary`（仅作 @ 提及主代理）与 `internal: true` 的 agent 都不会出现在委派列表。
+`task` 工具的描述只列出 `mode` 为 `subagent` / `all` 的 agent；`mode: primary` 与 `internal: true` 不会出现在自发委派目录。`mode: primary` 仍可通过用户消息开头的 `@name` 强制委派（handler 能解析到该 agent）。同一回合内连续的 `task` 调用并行执行（墙钟取 max，handler 侧 `withTaskSlot` 上限 4）；`question` / 变更类工具仍串行。
 
 ### 6.2 子代理的独立上下文
 

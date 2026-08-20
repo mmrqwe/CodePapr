@@ -6,12 +6,19 @@ export interface PromptValidationResult {
   issues: string[];
 }
 
+export interface DelegableAgentHint {
+  name: string;
+  description: string;
+}
+
 export interface BuildModeSystemPromptOptions {
   mode: PromptMode;
   workspacePath: string;
   lang?: PromptLang;
   toolNames?: readonly string[];
   mentorEnabled?: boolean;
+  /** task 工具可见的子代理（已过滤 internal / primary / 未启用 mentor）。 */
+  delegableAgents?: readonly DelegableAgentHint[];
 }
 
 export interface BuildRuntimeSystemPromptOptions extends BuildModeSystemPromptOptions {
@@ -673,16 +680,22 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
 
 const AGENT_DELEGATION_RULE: Record<PromptLang, { withMentor: string; withoutMentor: string }> = {
   'zh-CN': {
-    withMentor: '跨模块符号追踪/依赖链分析委派 **Explore** 子代理，网页检索/下载委派 **Scout**，架构决策/算法选型/调试方向必须咨询**架构师（Mentor）**。详见「核心约束」中的子代理策略。只有文件写入、代码修改或终端执行才由你自己完成。',
-    withoutMentor: '跨模块符号追踪/依赖链分析委派 **Explore** 子代理，网页检索/下载委派 **Scout**。只有文件写入、代码修改或终端执行才由你自己完成。',
+    withMentor:
+      '跨模块依赖/影响面/符号追踪委派 **Explore**；多源网页检索或下载委派 **Scout**；架构决策/技术选型/复杂排查必须先向架构师汇报上下文。单文件、已知路径、list/lsp 已够用时自己做。相互独立的 task 必须写在同一条回复里并行发出。',
+    withoutMentor:
+      '跨模块依赖/影响面/符号追踪委派 **Explore**；多源网页检索或下载委派 **Scout**。单文件、已知路径、list/lsp 已够用时自己做。相互独立的 task 必须写在同一条回复里并行发出。',
   },
   'zh-TW': {
-    withMentor: '跨模組符號追蹤/依賴鏈分析委派 **Explore** 子代理，網頁檢索/下載委派 **Scout**，架構決策/演算法選型/調試方向必須諮詢**架構師（Mentor）**。詳見「核心約束」中的子代理策略。只有檔案寫入、代碼修改或終端執行才由你自己完成。',
-    withoutMentor: '跨模組符號追蹤/依賴鏈分析委派 **Explore** 子代理，網頁檢索/下載委派 **Scout**。只有檔案寫入、代碼修改或終端執行才由你自己完成。',
+    withMentor:
+      '跨模組依賴/影響面/符號追蹤委派 **Explore**；多源網頁檢索或下載委派 **Scout**；架構決策/技術選型/複雜排查必須先向架構師匯報上下文。單檔案、已知路徑、list/lsp 已夠用時自己做。相互獨立的 task 必須寫在同一條回覆裡並行發出。',
+    withoutMentor:
+      '跨模組依賴/影響面/符號追蹤委派 **Explore**；多源網頁檢索或下載委派 **Scout**。單檔案、已知路徑、list/lsp 已夠用時自己做。相互獨立的 task 必須寫在同一條回覆裡並行發出。',
   },
   en: {
-    withMentor: 'Delegate cross-module symbol tracing / dependency chain analysis to **Explore** sub-agent, web research / downloads to **Scout**, and architecture decisions / algorithm choices / debugging direction to the **Architect (Mentor)**. See "Core Constraints" for the full sub-agent strategy. Only file writes, code edits, and terminal execution should be done by you.',
-    withoutMentor: 'Delegate cross-module symbol tracing / dependency chain analysis to **Explore** sub-agent, web research / downloads to **Scout**. Only file writes, code edits, and terminal execution should be done by you.',
+    withMentor:
+      'Delegate cross-module dependency / impact / symbol tracing to **Explore**; multi-source web research or downloads to **Scout**; architecture decisions / tech choices / complex debugging must first report context to the Architect. Do local single-file or already-obvious lookups yourself. Independent `task` calls must be issued together in the same reply so they run in parallel.',
+    withoutMentor:
+      'Delegate cross-module dependency / impact / symbol tracing to **Explore**; multi-source web research or downloads to **Scout**. Do local single-file or already-obvious lookups yourself. Independent `task` calls must be issued together in the same reply so they run in parallel.',
   },
 };
 
@@ -860,7 +873,176 @@ function hasTool(toolNames: ReadonlySet<string>, name: string): boolean {
   return toolNames.has(name);
 }
 
-function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, mode: PromptMode, mentorEnabled: boolean = false): string[] {
+function defaultDelegableAgents(lang: PromptLang, mentorEnabled: boolean): DelegableAgentHint[] {
+  const agents: DelegableAgentHint[] = [
+    {
+      name: 'explore',
+      description:
+        lang === 'en'
+          ? 'Code analysis (graph + lsp, read-only)'
+          : lang === 'zh-TW'
+            ? '代碼分析（graph + lsp，唯讀）'
+            : '代码分析（graph + lsp，只读）',
+    },
+    {
+      name: 'scout',
+      description:
+        lang === 'en'
+          ? 'Web search and download'
+          : lang === 'zh-TW'
+            ? '網頁搜索與下載'
+            : '网页搜索与下载',
+    },
+  ];
+  if (mentorEnabled) {
+    agents.push({
+      name: 'mentor',
+      description:
+        lang === 'en'
+          ? 'Architecture / algorithm / debugging guidance'
+          : lang === 'zh-TW'
+            ? '架構 / 演算法 / 調試高層指導'
+            : '架构 / 算法 / 调试高层指导',
+    });
+  }
+  return agents;
+}
+
+function buildTaskStrategyLines(
+  lang: PromptLang,
+  mentorEnabled: boolean,
+  catalog: readonly DelegableAgentHint[]
+): string[] {
+  const names = new Set(catalog.map((agent) => agent.name));
+  const catalogLine = catalog.map((agent) => `${agent.name} — ${agent.description}`).join(lang === 'en' ? '; ' : '；');
+  const customExample = catalog.find(
+    (agent) => agent.name !== 'explore' && agent.name !== 'scout' && agent.name !== 'mentor'
+  );
+  const lines: string[] = [];
+
+  if (lang === 'en') {
+    lines.push(
+      `- [Sub-Agent Strategy] Delegate via \`task\`. Available: ${catalogLine}. Independent \`task\` calls in the same reply run in parallel. Do NOT delegate single-file reads, known-path lookups, or simple yes/no questions.`
+    );
+    if (names.has('explore')) {
+      lines.push(
+        '  Explore: cross-module dependency / impact / symbol tracing. Skip it when list/lsp on a known file is enough.'
+      );
+    }
+    if (names.has('scout')) {
+      lines.push(
+        '  Scout: multi-source research or downloads. Use `webfetch` when you already have a URL; a single confirmatory `websearch` may be done yourself.'
+      );
+    }
+    if (mentorEnabled && names.has('mentor')) {
+      lines.push(
+        '  Architect (Mentor): report context before architecture decisions / technology choices / complex debugging. If the Architect call fails (model unavailable, network error, etc.), note it briefly ("Architect unavailable, proceeding with own analysis") and continue based on available information.'
+      );
+    }
+    const examples = [
+      names.has('explore')
+        ? '`task { agent: "explore", prompt: "Find all places where user auth is implemented, list file paths and line numbers" }`'
+        : '',
+      names.has('scout')
+        ? '`task { agent: "scout", prompt: "Search for React 19 use() hook official docs" }`'
+        : '',
+      mentorEnabled && names.has('mentor')
+        ? '`task { agent: "mentor", prompt: "Context: 50-endpoint REST API, need rate limiting. What architecture?" }`'
+        : '',
+      customExample
+        ? `\`task { agent: "${customExample.name}", prompt: "Follow this sub-agent's specialty for the current task" }\``
+        : '',
+    ].filter(Boolean);
+    if (examples.length > 0) {
+      lines.push(`  Examples: ${examples.join(' | ')}`);
+    }
+    return lines;
+  }
+
+  if (lang === 'zh-TW') {
+    lines.push(
+      `- [子代理策略] 通過 \`task\` 委派。可用：${catalogLine}。同一條回覆裡相互獨立的 \`task\` 會並行執行。單檔案讀取、已知路徑、簡單是/否問題不要委派。`
+    );
+    if (names.has('explore')) {
+      lines.push(
+        '  Explore：跨模組依賴/影響面/符號追蹤。單檔 list/lsp 已夠用時自己做。'
+      );
+    }
+    if (names.has('scout')) {
+      lines.push(
+        '  Scout：多源檢索或下載。已有明確 URL 用 `webfetch`；單次確認性搜索可以自己 `websearch`。'
+      );
+    }
+    if (mentorEnabled && names.has('mentor')) {
+      lines.push(
+        '  架構師（Mentor）：涉及架構決策/技術選型/複雜排查時必須先匯報上下文再動手。如果架構師調用失敗（模型不可用、網絡錯誤等），簡要註明「架構師不可用，以下為自行判斷」並繼續。'
+      );
+    }
+    const examples = [
+      names.has('explore')
+        ? '`task { agent: "explore", prompt: "找出所有實現用戶認證邏輯的地方，列出文件路徑和行號" }`'
+        : '',
+      names.has('scout')
+        ? '`task { agent: "scout", prompt: "搜索 React 19 use() hook 官方文檔" }`'
+        : '',
+      mentorEnabled && names.has('mentor')
+        ? '`task { agent: "mentor", prompt: "上下文：50 端點 REST API，需加速率限制。推薦什麼架構？" }`'
+        : '',
+      customExample
+        ? `\`task { agent: "${customExample.name}", prompt: "按該子代理的職責處理當前任務" }\``
+        : '',
+    ].filter(Boolean);
+    if (examples.length > 0) {
+      lines.push(`  示例：${examples.join(' | ')}`);
+    }
+    return lines;
+  }
+
+  lines.push(
+    `- [子代理策略] 通过 \`task\` 委派。可用：${catalogLine}。同一条回复里相互独立的 \`task\` 会并行执行。单文件读取、已知路径、简单是/否问题不要委派。`
+  );
+  if (names.has('explore')) {
+    lines.push(
+      '  Explore：跨模块依赖/影响面/符号追踪。单文件 list/lsp 已够用时自己做。'
+    );
+  }
+  if (names.has('scout')) {
+    lines.push(
+      '  Scout：多源检索或下载。已有明确 URL 用 `webfetch`；单次确认性搜索可以自己 `websearch`。'
+    );
+  }
+  if (mentorEnabled && names.has('mentor')) {
+    lines.push(
+      '  架构师（Mentor）：涉及架构决策/技术选型/复杂排查时必须先汇报上下文再动手。如果架构师调用失败（模型不可用、网络错误等），简要注明"架构师不可用，以下为自行判断"并继续。'
+    );
+  }
+  const examples = [
+    names.has('explore')
+      ? '`task { agent: "explore", prompt: "找出所有实现用户认证逻辑的地方，列出文件路径和行号" }`'
+      : '',
+    names.has('scout')
+      ? '`task { agent: "scout", prompt: "搜索 React 19 use() hook 官方文档" }`'
+      : '',
+    mentorEnabled && names.has('mentor')
+      ? '`task { agent: "mentor", prompt: "上下文：50 端点 REST API，需加速率限制。推荐什么架构？" }`'
+      : '',
+    customExample
+      ? `\`task { agent: "${customExample.name}", prompt: "按该子代理的职责处理当前任务" }\``
+      : '',
+  ].filter(Boolean);
+  if (examples.length > 0) {
+    lines.push(`  示例：${examples.join(' | ')}`);
+  }
+  return lines;
+}
+
+function buildToolConstraints(
+  lang: PromptLang,
+  toolNames: ReadonlySet<string>,
+  mode: PromptMode,
+  mentorEnabled: boolean = false,
+  delegableAgents?: readonly DelegableAgentHint[]
+): string[] {
   const lines: string[] = [];
   const isAsk = mode === 'ask';
   const isApp = mode === 'app';
@@ -904,37 +1086,8 @@ function buildToolConstraints(lang: PromptLang, toolNames: ReadonlySet<string>, 
     );
   }
   if (hasTool(toolNames, 'task') && !isApp) {
-    if (mentorEnabled) {
-      highPriority.push(
-        lang === 'en'
-          ? '- [Sub-Agent Strategy] Delegate via `task`. **Explore** (code analysis, read-only) has graph/lsp/diagnostics — delegate when you need cross-module symbol tracing or dependency chain analysis. **Scout** (web search + download) — delegate when you need web access. **Architect (Mentor)** (pure reasoning) — report context before acting on architecture decisions / technology choices / complex debugging. Delegate Explore and Scout in parallel when you need both code analysis and web research. Do NOT delegate for single-module reads, already-obvious context, or simple yes/no questions. If the Architect call fails (model unavailable, network error, etc.), note it briefly ("Architect unavailable, proceeding with own analysis") and continue based on available information.'
-          : lang === 'zh-TW'
-          ? '- [子代理策略] 通過 `task` 委派。**Explore**（代碼分析，唯讀）擁有 graph/lsp/diagnostics——需跨模組追蹤符號依賴鏈時委派。**Scout**（網頁搜索+下載）——需要聯網時委派。**架構師**（Mentor，純推理）——涉及架構決策/技術選型/複雜排查時必須先匯報上下文再動手。需要同時做代碼分析和網頁搜索時，同時委派 Explore 和 Scout。單模組內少量檔案讀取、上下文已足夠明顯、簡單是/否問題時不要委派。如果架構師調用失敗（模型不可用、網絡錯誤等），簡要註明「架構師不可用，以下為自行判斷」並繼續。'
-          : '- [子代理策略] 通过 `task` 委派。**Explore**（代码分析，只读）拥有 graph/lsp/diagnostics——需跨模块追踪符号依赖链时委派。**Scout**（网页搜索+下载）——需要联网时委派。**架构师**（Mentor，纯推理）——涉及架构决策/技术选型/复杂排查时必须先汇报上下文再动手。需要同时做代码分析和网页搜索时，同时委派 Explore 和 Scout。单模块内少量文件读取、上下文已足够明显、简单是/否问题时不要委派。如果架构师调用失败（模型不可用、网络错误等），简要注明"架构师不可用，以下为自行判断"并继续。'
-      );
-      highPriority.push(
-        lang === 'en'
-          ? '  Examples: `task { agent: "explore", prompt: "Find all places where user auth is implemented, list file paths and line numbers" }` | `task { agent: "scout", prompt: "Search for React 19 use() hook official docs" }` | `task { agent: "mentor", prompt: "Context: 50-endpoint REST API, need rate limiting. What architecture?" }`'
-          : lang === 'zh-TW'
-          ? '  示例：`task { agent: "explore", prompt: "找出所有實現用戶認證邏輯的地方，列出文件路徑和行號" }` | `task { agent: "scout", prompt: "搜索 React 19 use() hook 官方文檔" }` | `task { agent: "mentor", prompt: "上下文：50 端點 REST API，需加速率限制。推薦什麼架構？" }`'
-          : '  示例：`task { agent: "explore", prompt: "找出所有实现用户认证逻辑的地方，列出文件路径和行号" }` | `task { agent: "scout", prompt: "搜索 React 19 use() hook 官方文档" }` | `task { agent: "mentor", prompt: "上下文：50 端点 REST API，需加速率限制。推荐什么架构？" }`'
-      );
-    } else {
-      highPriority.push(
-        lang === 'en'
-          ? '- [Sub-Agent Strategy] Delegate via `task`. **Explore** (code analysis, read-only) has graph/lsp/diagnostics — delegate when you need cross-module symbol tracing or dependency chain analysis. **Scout** (web search + download) — delegate when you need web access. Delegate Explore and Scout in parallel when you need both code analysis and web research. Do NOT delegate for single-module reads, already-obvious context, or simple yes/no questions.'
-          : lang === 'zh-TW'
-          ? '- [子代理策略] 通過 `task` 委派。**Explore**（代碼分析，唯讀）擁有 graph/lsp/diagnostics——需跨模組追蹤符號依賴鏈時委派。**Scout**（網頁搜索+下載）——需要聯網時委派。需要同時做代碼分析和網頁搜索時，同時委派 Explore 和 Scout。單模組內少量檔案讀取、上下文已足夠明顯、簡單是/否問題時不要委派。'
-          : '- [子代理策略] 通过 `task` 委派。**Explore**（代码分析，只读）拥有 graph/lsp/diagnostics——需跨模块追踪符号依赖链时委派。**Scout**（网页搜索+下载）——需要联网时委派。需要同时做代码分析和网页搜索时，同时委派 Explore 和 Scout。单模块内少量文件读取、上下文已足够明显、简单是/否问题时不要委派。'
-      );
-      highPriority.push(
-        lang === 'en'
-          ? '  Examples: `task { agent: "explore", prompt: "Find all places where user auth is implemented, list file paths and line numbers" }` | `task { agent: "scout", prompt: "Search for React 19 use() hook official docs" }`'
-          : lang === 'zh-TW'
-          ? '  示例：`task { agent: "explore", prompt: "找出所有實現用戶認證邏輯的地方，列出文件路徑和行號" }` | `task { agent: "scout", prompt: "搜索 React 19 use() hook 官方文檔" }`'
-          : '  示例：`task { agent: "explore", prompt: "找出所有实现用户认证逻辑的地方，列出文件路径和行号" }` | `task { agent: "scout", prompt: "搜索 React 19 use() hook 官方文档" }`'
-      );
-    }
+    const catalog = delegableAgents ?? defaultDelegableAgents(lang, mentorEnabled);
+    highPriority.push(...buildTaskStrategyLines(lang, mentorEnabled, catalog));
   }
   if (highPriority.length > 0) {
     lines.push(
@@ -1219,7 +1372,13 @@ export function buildModeSystemPrompt(options: BuildModeSystemPromptOptions): st
     }
     intro.push(mentorEnabled ? AGENT_DELEGATION_RULE[lang].withMentor : AGENT_DELEGATION_RULE[lang].withoutMentor);
   }
-  const toolConstraints = buildToolConstraints(lang, toolNames, options.mode, mentorEnabled);
+  const toolConstraints = buildToolConstraints(
+    lang,
+    toolNames,
+    options.mode,
+    mentorEnabled,
+    options.delegableAgents
+  );
 
   return [
     ...intro,

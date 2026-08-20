@@ -316,6 +316,23 @@ describe('promptSystem', () => {
     expect(prompt).not.toContain('架构师');
   });
 
+  it('lists custom delegable agents in the task strategy catalog', () => {
+    const prompt = buildRuntimeSystemPrompt({
+      mode: 'agent',
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+      toolNames: ['task'],
+      delegableAgents: [
+        { name: 'explore', description: '代码分析' },
+        { name: 'reviewer', description: '代码审查' },
+      ],
+    });
+    expect(prompt).toContain('reviewer — 代码审查');
+    expect(prompt).toContain('agent: "reviewer"');
+    expect(prompt).not.toContain('只有文件写入');
+    expect(prompt).toContain('并行');
+  });
+
   it('includes read_image hint only when read_image is in toolNames', () => {
     const withTool = buildRuntimeSystemPrompt({
       mode: 'agent',

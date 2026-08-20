@@ -265,7 +265,7 @@ export {
   buildProjectRulesSection,
 } from './agent/projectRules';
 export type { ProjectRuleFile } from './agent/projectRules';
-export { parseAgentMarkdown, filterToolsForAgent, filterToolsForMode, isReadOnlyMode, MUTATING_TOOL_NAMES, PARALLEL_SAFE_TOOL_NAMES, APP_ONLY_TOOL_NAMES, PLAN_ONLY_TOOL_NAMES, buildTaskToolDefinition, isExecutionHeavyTask, sanitizeAgentPrompt, resolveAgentPrompt, resolveAgentDescription, mergeAgentDefinitions, BUILTIN_AGENTS, VERIFIER_PROMPT_OBJECTIVE, VERIFIER_PROMPT_SUBJECTIVE, COMPACTOR_PROMPT, SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS, SUBAGENT_MAX_DEPTH, MAX_CUSTOM_PROMPT_LENGTH, EXECUTION_HEAVY_PATTERNS } from './agent/agentConfig';
+export { parseAgentMarkdown, filterToolsForAgent, filterToolsForMode, isReadOnlyMode, MUTATING_TOOL_NAMES, PARALLEL_SAFE_TOOL_NAMES, APP_ONLY_TOOL_NAMES, PLAN_ONLY_TOOL_NAMES, buildTaskToolDefinition, listDelegableAgents, isExecutionHeavyTask, sanitizeAgentPrompt, resolveAgentPrompt, resolveAgentDescription, mergeAgentDefinitions, BUILTIN_AGENTS, VERIFIER_PROMPT_OBJECTIVE, VERIFIER_PROMPT_SUBJECTIVE, COMPACTOR_PROMPT, SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS, SUBAGENT_MAX_DEPTH, MAX_CUSTOM_PROMPT_LENGTH, EXECUTION_HEAVY_PATTERNS } from './agent/agentConfig';
 export type { AgentDefinition, AgentMode } from './agent/agentConfig';
 export {
   TODO_TOOL_NAME,
@@ -278,6 +278,7 @@ export {
   renderTodoListDigest,
 } from './agent/todoList';
 export type { TodoUpdatePatch } from './agent/todoList';
+export { createTaskSlot, withTaskSlot, TASK_PARALLEL_CONCURRENCY } from './agent/taskSlot';
 export { selectSubagentExecutionRoute } from './agent/subagentRoute';
 export type { SubagentExecutionRoute, SubagentRouteSettings } from './agent/subagentRoute';
 export {
@@ -329,6 +330,7 @@ export type {
   PromptValidationResult,
   UserPromptSectionKey,
   UserPromptSections,
+  DelegableAgentHint,
 } from './agent/promptSystem';
 export {
   BUILTIN_PROMPT_COMMANDS,
@@ -349,6 +351,8 @@ export {
   resolveCommandUsage,
   wrapAskModeCommandTemplate,
   wrapCommandForSubagent,
+  wrapCommandForSubagents,
+  parseLeadingAgentMentions,
 } from './agent/slashCommand';
 export type {
   CommandDefinition,

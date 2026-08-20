@@ -9,6 +9,8 @@ import {
   isReadOnlyMode,
   MUTATING_TOOL_NAMES,
   PLAN_ONLY_TOOL_NAMES,
+  listDelegableAgents,
+  resolveAgentDescription,
   Serializer,
   type AgentDefinition,
   type PruneOptions,
@@ -93,6 +95,13 @@ export function buildAgentRuntimeSystemPrompt(
     return true;
   });
 
+  const delegableAgents = listDelegableAgents(runtime?.agentDefinitions ?? [])
+    .filter((agent) => agent.model !== 'mentor' || settings.mentorEnabled)
+    .map((agent) => ({
+      name: agent.name,
+      description: resolveAgentDescription(agent, settings.lang ?? 'zh-CN'),
+    }));
+
   return buildRuntimeSystemPrompt({
     mode,
     workspacePath,
@@ -100,6 +109,7 @@ export function buildAgentRuntimeSystemPrompt(
     rulesSection,
     toolNames,
     mentorEnabled: settings.mentorEnabled,
+    delegableAgents,
   });
 }
 

@@ -91,11 +91,62 @@ export function wrapAskModeCommandTemplate(template: string, lang?: string): str
 }
 
 export function wrapCommandForSubagent(template: string, agent: string, lang?: string): string {
-  const prefix =
-    langKey(lang) === 'en'
+  return wrapCommandForSubagents(template, [agent], lang);
+}
+
+export function wrapCommandForSubagents(
+  template: string,
+  agents: readonly string[],
+  lang?: string
+): string {
+  const names = agents.map((name) => name.trim()).filter(Boolean);
+  if (names.length === 0) {
+    return template;
+  }
+  const isEn = langKey(lang) === 'en';
+  if (names.length === 1) {
+    const agent = names[0];
+    const prefix = isEn
       ? `Immediately delegate the following task to the "${agent}" subagent via the task tool. Do not search or edit files yourself.\n\n`
       : `请立即使用 task 工具，将下列任务完整委派给子代理「${agent}」，不要自己搜索或修改文件。\n\n`;
+    return `${prefix}${template}`;
+  }
+  const listed = isEn ? names.map((name) => `"${name}"`).join(', ') : names.map((name) => `「${name}」`).join('、');
+  const prefix = isEn
+    ? `Immediately delegate the following task in the same reply via parallel task tool calls to these subagents: ${listed}. Do not search or edit files yourself.\n\n`
+    : `请立即在同一条回复中并行调用 task 工具，将下列任务分别完整委派给子代理${listed}，不要自己搜索或修改文件。\n\n`;
   return `${prefix}${template}`;
+}
+
+const AGENT_MENTION_TOKEN = /^@([A-Za-z][A-Za-z0-9_-]*)/;
+
+/**
+ * 解析消息开头连续的 @agent 提及。只消费 knownNames 中的名字；
+ * 若开头不是已知 agent，返回 null（例如 @src/foo.ts 不当作委派）。
+ */
+export function parseLeadingAgentMentions(
+  input: string,
+  knownNames: ReadonlySet<string> | readonly string[]
+): { agentNames: string[]; body: string } | null {
+  const known = knownNames instanceof Set ? knownNames : new Set(knownNames);
+  let rest = input.trimStart();
+  const agentNames: string[] = [];
+  while (rest.startsWith('@')) {
+    const match = rest.match(AGENT_MENTION_TOKEN);
+    if (!match) {
+      break;
+    }
+    const name = match[1];
+    if (!known.has(name)) {
+      break;
+    }
+    agentNames.push(name);
+    rest = rest.slice(match[0].length).trimStart();
+  }
+  if (agentNames.length === 0) {
+    return null;
+  }
+  return { agentNames, body: rest.trim() };
 }
 
 export const BUILTIN_PROMPT_COMMANDS: readonly CommandDefinition[] = [

@@ -19,6 +19,7 @@ import {
   type SkillDefinition,
   type SubagentSessionResult,
   type ToolOutputTruncationOptions,
+  withTaskSlot,
 } from '@codepapr/core';
 import { DEFAULT_MAX_TOKENS, RequestBuilder, CacheValidator, OpenAIProvider, ClaudeProvider } from '@codepapr/api';
 import type { ICacheStatistics, ILLMProvider, IToolDefinition, MentorConfig } from '@codepapr/types';
@@ -87,7 +88,7 @@ export async function runSubagent(
   abortSignal?: AbortSignal,
   maxWallClockMs?: number
 ): Promise<SubagentSessionResult> {
-  startSubagentProgress(definition.name, prompt);
+  const runId = startSubagentProgress(definition.name, prompt);
 
   const registry = new ToolRegistry();
   registerWorkspaceTools(
@@ -145,36 +146,41 @@ export async function runSubagent(
     }
   }
 
-  const result = await runSubagentSession({
-    definition,
-    prompt,
-    workspacePath: context.workspacePath,
-    lang: context.lang,
-    exec,
-    registry,
-    tools,
-    provider,
-    providerName,
-    requestBuilder: new RequestBuilder(),
-    cacheValidator: new CacheValidator(),
-    skillsSection: buildSkillsSection(context.skillDefinitions, context.lang),
-    customPromptSection: context.customPrompt,
-    memorySection: context.memorySection,
-    projectGraphSummary: context.projectGraphSummary,
-    graphToolTimeoutMs: context.graphToolTimeoutMs,
-    maxWallClockMs,
-    abortSignal,
-    toolOutputTruncation: context.toolOutputTruncation,
-    onToolCallEnd: (event) => {
-      pushSubagentStep({
-        name: event.toolName,
-        status: event.success ? 'success' : 'error',
-        summary: event.error || event.toolName,
-      });
-    },
-  });
-  completeSubagentProgress(result.content);
-  return result;
+  try {
+    const result = await runSubagentSession({
+      definition,
+      prompt,
+      workspacePath: context.workspacePath,
+      lang: context.lang,
+      exec,
+      registry,
+      tools,
+      provider,
+      providerName,
+      requestBuilder: new RequestBuilder(),
+      cacheValidator: new CacheValidator(),
+      skillsSection: buildSkillsSection(context.skillDefinitions, context.lang),
+      customPromptSection: context.customPrompt,
+      memorySection: context.memorySection,
+      projectGraphSummary: context.projectGraphSummary,
+      graphToolTimeoutMs: context.graphToolTimeoutMs,
+      maxWallClockMs,
+      abortSignal,
+      toolOutputTruncation: context.toolOutputTruncation,
+      onToolCallEnd: (event) => {
+        pushSubagentStep(runId, {
+          name: event.toolName,
+          status: event.success ? 'success' : 'error',
+          summary: event.error || event.toolName,
+        });
+      },
+    });
+    completeSubagentProgress(runId, result.content);
+    return result;
+  } catch (error) {
+    completeSubagentProgress(runId, error instanceof Error ? error.message : String(error));
+    throw error;
+  }
 }
 
 /**
@@ -206,7 +212,9 @@ export function registerUiTaskTool(
     if (target.internal) {
       throw new Error(`子代理 "${name}" 是内部代理，不能直接委派`);
     }
-    const result = await runSubagent(context, target, prompt, execContext?.signal);
+    const result = await withTaskSlot(() =>
+      runSubagent(context, target, prompt, execContext?.signal)
+    );
     if (result.cacheStats) {
       if (!context.subagentCacheStats) {
         context.subagentCacheStats = [];

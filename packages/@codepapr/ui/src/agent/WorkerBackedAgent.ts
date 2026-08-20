@@ -35,6 +35,11 @@ import {
   type AppAgentResult,
 } from './agentWorkerProtocol';
 import type { RequestContextInsertion } from '@codepapr/types';
+import {
+  startSubagentProgress,
+  pushSubagentStep,
+  completeSubagentProgress,
+} from '../utils/subagentProgress';
 
 function resolveWorkerMultimodalEnabled(settings: WorkerAgentSettings, currentModel: string): boolean {
   if (!settings.multimodalEnabled) return false;
@@ -884,6 +889,17 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     if (message.type === 'pong') {
       this.hasReceivedPong = true;
       this.lastPongAt = Date.now();
+      return;
+    }
+
+    if (message.type === 'subagent-progress') {
+      if (message.action === 'start' && message.agent) {
+        startSubagentProgress(message.agent, message.prompt, message.runId);
+      } else if (message.action === 'step' && message.step) {
+        pushSubagentStep(message.runId, message.step);
+      } else if (message.action === 'complete') {
+        completeSubagentProgress(message.runId, message.content ?? '');
+      }
       return;
     }
 

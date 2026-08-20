@@ -67,6 +67,43 @@ describe('agentConfig - parseAgentMarkdown', () => {
     const def = parseAgentMarkdown('notools', raw);
     expect(def.tools).toEqual({});
   });
+
+  it('有 frontmatter 但未声明 tools 时继承全部工具', () => {
+    const raw = [
+      '---',
+      'description: 代码审查',
+      'mode: subagent',
+      '---',
+      '你是 reviewer。',
+    ].join('\n');
+    const def = parseAgentMarkdown('reviewer', raw);
+    expect(def.tools).toBeUndefined();
+    expect(def.mode).toBe('subagent');
+  });
+
+  it('内联 tools: read, grep 解析为白名单', () => {
+    const raw = [
+      '---',
+      'description: 搜索员',
+      'tools: read, grep',
+      '---',
+      '只读搜索。',
+    ].join('\n');
+    const def = parseAgentMarkdown('searcher', raw);
+    expect(def.tools).toEqual({ read: true, grep: true });
+  });
+
+  it('内联 tools: read grep 空格分隔同样解析为白名单', () => {
+    const raw = [
+      '---',
+      'description: 搜索员',
+      'tools: read grep glob',
+      '---',
+      '只读搜索。',
+    ].join('\n');
+    const def = parseAgentMarkdown('searcher', raw);
+    expect(def.tools).toEqual({ read: true, grep: true, glob: true });
+  });
 });
 
 describe('agentConfig - filterToolsForAgent', () => {
@@ -203,6 +240,13 @@ describe('agentConfig - buildTaskToolDefinition mode 过滤', () => {
 
   it('排除 internal agent', () => {
     expect(buildTaskToolDefinition([agent('v', 'subagent', true)], 'en')).toBeNull();
+  });
+
+  it('description 说明同一回合并行委派', () => {
+    const def = buildTaskToolDefinition([agent('helper', 'subagent')], 'zh-CN');
+    expect(def!.description).toContain('并行');
+    const en = buildTaskToolDefinition([agent('helper', 'subagent')], 'en');
+    expect(en!.description).toMatch(/parallel/i);
   });
 });
 

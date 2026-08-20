@@ -1620,6 +1620,66 @@ describe('useAgentStore.sendMessage', () => {
     expect(String(chat.mock.calls[0]?.[0])).toContain('请发布：prod');
   });
 
+  it('@explore 开头的消息强制委派给子代理', async () => {
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+      _agentDefinitions: [
+        { name: 'explore', description: 'e', mode: 'subagent', prompt: 'p' },
+        { name: 'scout', description: 's', mode: 'subagent', prompt: 'p' },
+      ],
+    });
+
+    await useAgentStore.getState().sendMessage('@explore 查鉴权', '@explore 查鉴权', 'agent');
+
+    expect(chat).toHaveBeenCalledTimes(1);
+    const prompt = String(chat.mock.calls[0]?.[0]);
+    expect(prompt).toContain('explore');
+    expect(prompt).toContain('查鉴权');
+    expect(prompt).toContain('task');
+  });
+
+  it('@explore @scout 要求同回合并行委派', async () => {
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+      _agentDefinitions: [
+        { name: 'explore', description: 'e', mode: 'subagent', prompt: 'p' },
+        { name: 'scout', description: 's', mode: 'subagent', prompt: 'p' },
+      ],
+    });
+
+    await useAgentStore.getState().sendMessage(
+      '@explore @scout 查登录实现和官方文档',
+      '@explore @scout 查登录实现和官方文档',
+      'agent'
+    );
+
+    expect(chat).toHaveBeenCalledTimes(1);
+    const prompt = String(chat.mock.calls[0]?.[0]);
+    expect(prompt).toContain('并行');
+    expect(prompt).toContain('explore');
+    expect(prompt).toContain('scout');
+    expect(prompt).toContain('查登录实现和官方文档');
+  });
+
+  it('mode: primary 的 agent 可通过 @ 委派', async () => {
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+      _agentDefinitions: [{ name: 'reviewer', description: 'r', mode: 'primary', prompt: 'p' }],
+    });
+
+    await useAgentStore.getState().sendMessage('@reviewer 查鉴权', '@reviewer 查鉴权', 'agent');
+
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(String(chat.mock.calls[0]?.[0])).toContain('reviewer');
+    expect(String(chat.mock.calls[0]?.[0])).toContain('查鉴权');
+  });
+
   it('自定义命令引用未知 agent 时拒绝发送', async () => {
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       if (command === 'read_text_file' && args?.relativePath === '.CodePapr/commands/ship.md') {

@@ -13,6 +13,8 @@ import {
   resolveCommandUsage,
   wrapAskModeCommandTemplate,
   wrapCommandForSubagent,
+  wrapCommandForSubagents,
+  parseLeadingAgentMentions,
   evaluateGoalCondition,
   GoalRunner,
   serializeGoalState,
@@ -369,6 +371,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         let isGoalMode = false;
         let goalCondition: GoalCondition | null = null;
         let goalUserText = '';
+        let slashDelegatedToAgent = false;
 
         /**
          * 压缩提交失败的统一收尾（ADR-005 不变式 5）：
@@ -799,6 +802,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 expanded = wrapAskModeCommandTemplate(expanded, slashLang);
               }
               if (promptCommand.agent) {
+                slashDelegatedToAgent = true;
                 expanded = wrapCommandForSubagent(
                   expanded,
                   promptCommand.agent.trim(),
@@ -811,6 +815,26 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               appendErrorMessage(set, formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'));
               return false;
             }
+          }
+        }
+
+        if (!slashDelegatedToAgent && !isGoalMode) {
+          const mentionLang = normalizedSettings.lang ?? 'zh-CN';
+          const mentionable = get()._agentDefinitions.filter((agent) => {
+            if (agent.internal) return false;
+            if (agent.name === 'mentor' && !normalizedSettings.mentorEnabled) return false;
+            return true;
+          });
+          const parsedMentions = parseLeadingAgentMentions(
+            effectiveInput,
+            mentionable.map((agent) => agent.name)
+          );
+          if (parsedMentions) {
+            effectiveInput = wrapCommandForSubagents(
+              parsedMentions.body,
+              parsedMentions.agentNames,
+              mentionLang
+            );
           }
         }
 

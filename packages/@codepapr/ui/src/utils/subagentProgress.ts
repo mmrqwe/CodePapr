@@ -5,6 +5,7 @@ export interface SubagentStep {
 }
 
 export interface SubAgentRun {
+  id: string;
   agent: string;
   prompt?: string;
   steps: SubagentStep[];
@@ -16,6 +17,7 @@ export interface SubAgentRun {
 type ProgressListener = (runs: SubAgentRun[]) => void;
 const listeners = new Set<ProgressListener>();
 const runs: SubAgentRun[] = [];
+let nextRunSeq = 0;
 // 有界：已完成子代理运行条目保留给 UI 展示/折叠状态，但随调用次数无限增长；
 // 只裁剪已完成的最旧条目，运行中的条目绝不移除。
 const MAX_COMPLETED_RUNS = 50;
@@ -42,6 +44,11 @@ function trimCompletedRuns(): void {
     }
   }
 }
+
+function findRun(runId: string): SubAgentRun | undefined {
+  return runs.find((run) => run.id === runId);
+}
+
 export function getSubagentRuns(): SubAgentRun[] {
   return [...runs];
 }
@@ -51,21 +58,23 @@ export function getSubagentProgress(): { agent: string; steps: SubagentStep[] } 
   return current ? { agent: current.agent, steps: [...current.steps] } : { agent: '', steps: [] };
 }
 
-export function startSubagentProgress(agent: string, prompt?: string): void {
-  runs.push({ agent, prompt, steps: [], state: 'running', collapsed: false });
+export function startSubagentProgress(agent: string, prompt?: string, runId?: string): string {
+  const id = runId?.trim() || `subagent-run-${++nextRunSeq}`;
+  runs.push({ id, agent, prompt, steps: [], state: 'running', collapsed: false });
   notify();
+  return id;
 }
 
-export function pushSubagentStep(step: SubagentStep): void {
-  const current = runs[runs.length - 1];
+export function pushSubagentStep(runId: string, step: SubagentStep): void {
+  const current = findRun(runId);
   if (current) {
     current.steps.push(step);
     notify();
   }
 }
 
-export function completeSubagentProgress(content: string): void {
-  const current = runs[runs.length - 1];
+export function completeSubagentProgress(runId: string, content: string): void {
+  const current = findRun(runId);
   if (current && current.state === 'running') {
     current.state = 'completed';
     current.content = content;
@@ -81,6 +90,12 @@ export function clearSubagentProgress(): void {
     }
   }
   trimCompletedRuns();
+  notify();
+}
+
+/** 测试用：清空全部进度条目。 */
+export function resetSubagentProgress(): void {
+  runs.length = 0;
   notify();
 }
 

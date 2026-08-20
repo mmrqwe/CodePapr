@@ -53,18 +53,57 @@ interface Frontmatter {
   toolEntries: Record<string, boolean>;
   body: string;
   hasFrontmatter: boolean;
+  /** frontmatter 是否出现过 `tools` 键（空块与内联都算出现）。 */
+  toolsKeyPresent: boolean;
+}
+
+function parseToolFlag(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized !== 'false' && normalized !== 'off' && normalized !== 'no';
+}
+
+/** 解析 `tools: read, grep` / `tools: read grep` / `tools: [read, grep]` 内联白名单。 */
+function parseInlineToolList(raw: string): Record<string, boolean> {
+  const stripped = stripQuotes(raw).replace(/^\[/, '').replace(/\]$/, '').trim();
+  const entries: Record<string, boolean> = {};
+  if (!stripped) {
+    return entries;
+  }
+  for (const part of stripped.split(/[,\s]+/)) {
+    const token = part.trim();
+    if (!token) {
+      continue;
+    }
+    const sep = token.indexOf(':');
+    if (sep > 0) {
+      const key = token.slice(0, sep).trim();
+      if (key) {
+        entries[key] = parseToolFlag(token.slice(sep + 1));
+      }
+      continue;
+    }
+    entries[token] = true;
+  }
+  return entries;
 }
 
 function parseFrontmatter(raw: string): Frontmatter {
   const match = raw.match(FRONTMATTER_PATTERN);
   if (!match) {
-    return { fields: {}, toolEntries: {}, body: raw.trim(), hasFrontmatter: false };
+    return {
+      fields: {},
+      toolEntries: {},
+      body: raw.trim(),
+      hasFrontmatter: false,
+      toolsKeyPresent: false,
+    };
   }
 
   const [, header, body] = match;
   const fields: Record<string, string> = {};
   const toolEntries: Record<string, boolean> = {};
   let inToolsBlock = false;
+  let toolsKeyPresent = false;
 
   for (const rawLine of header.split('\n')) {
     const line = rawLine.replace(/\s+$/, '');
@@ -79,7 +118,9 @@ function parseFrontmatter(raw: string): Frontmatter {
       if (sep > 0) {
         const key = entry.slice(0, sep).trim();
         const value = entry.slice(sep + 1).trim().toLowerCase();
-        toolEntries[key] = value !== 'false' && value !== 'off' && value !== 'no';
+        toolEntries[key] = parseToolFlag(value);
+      } else if (entry) {
+        toolEntries[entry] = true;
       }
       continue;
     }
@@ -91,14 +132,19 @@ function parseFrontmatter(raw: string): Frontmatter {
     }
     const key = line.slice(0, sep).trim();
     const value = line.slice(sep + 1).trim();
-    if (key === 'tools' && !value) {
-      inToolsBlock = true;
+    if (key === 'tools') {
+      toolsKeyPresent = true;
+      if (!value) {
+        inToolsBlock = true;
+        continue;
+      }
+      Object.assign(toolEntries, parseInlineToolList(value));
       continue;
     }
     fields[key] = stripQuotes(value);
   }
 
-  return { fields, toolEntries, body: body.trim(), hasFrontmatter: true };
+  return { fields, toolEntries, body: body.trim(), hasFrontmatter: true, toolsKeyPresent };
 }
 
 function normalizeMode(value: string | undefined): AgentMode {
@@ -115,19 +161,16 @@ export function parseAgentMarkdown(name: string, raw: string): AgentDefinition {
     throw new Error('agent 名称不能为空');
   }
 
-  const { fields, toolEntries, body, hasFrontmatter } = parseFrontmatter(raw);
+  const { fields, toolEntries, body, toolsKeyPresent } = parseFrontmatter(raw);
   const temperature = fields.temperature ? Number(fields.temperature) : undefined;
 
-  // 只有当 frontmatter 存在时，才处理 tools 字段
-  // - 无 frontmatter: tools = undefined (继承全部工具)
-  // - 有 frontmatter 但未声明 tools: tools = undefined (继承全部工具)
-  // - 有 frontmatter 且显式声明 tools: {}: tools = {} (显式禁用所有工具)
-  // - 有 frontmatter 且声明 tools 且有键值: tools = { ... } (白名单模式)
+  // tools 三种状态：
+  // - 无 frontmatter / 有 frontmatter 但未声明 tools: undefined（继承全部工具）
+  // - 显式声明 tools 但无条目（空块或空内联）: {}（禁用所有工具）
+  // - 声明 tools 且有键值: { ... }（白名单模式）
   let tools: Record<string, boolean> | undefined;
-  if (hasFrontmatter) {
-    tools = Object.keys(toolEntries).length > 0 ? toolEntries : {};
-  } else {
-    tools = undefined;
+  if (toolsKeyPresent) {
+    tools = toolEntries;
   }
 
   return {
@@ -166,10 +209,13 @@ export function filterToolsForAgent(
 
 export const MAX_CUSTOM_PROMPT_LENGTH = 32000;
 
+/** 可通过 task 工具委派的 agent：排除 internal 与 mode: primary。 */
+export function listDelegableAgents(agents: AgentDefinition[]): AgentDefinition[] {
+  return agents.filter((agent) => !agent.internal && agent.mode !== 'primary');
+}
+
 export function buildTaskToolDefinition(agents: AgentDefinition[], lang?: string): IToolDefinition | null {
-  // 过滤掉内部 agent（如仅供 GoalRunner 内部使用）与 mode: primary（仅作主代理、不可被委派）。
-  // 仅 subagent / all 模式的 agent 可通过 task 工具委派。
-  const visibleAgents = agents.filter((agent) => !agent.internal && agent.mode !== 'primary');
+  const visibleAgents = listDelegableAgents(agents);
   if (visibleAgents.length === 0) {
     return null;
   }
@@ -179,8 +225,8 @@ export function buildTaskToolDefinition(agents: AgentDefinition[], lang?: string
   return {
     name: 'task',
     description: isEn
-      ? `Delegate a subtask to a declared sub-agent and return the result. Available sub-agents: ${names}.`
-      : `把一个子任务委派给声明式子代理执行并返回结果。可用子代理：${names}。`,
+      ? `Delegate a subtask to a declared sub-agent and return the result. Independent task calls in the same reply run in parallel. Available sub-agents: ${names}.`
+      : `把一个子任务委派给声明式子代理执行并返回结果。同一条回复里相互独立的 task 调用会并行执行。可用子代理：${names}。`,
     parameters: {
       type: 'object',
       properties: {
@@ -246,11 +292,12 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * 可并行执行的只读工具。同一轮内连续命中该名单的工具调用会合并为一个并行段
- * 并发执行（墙钟从 sum 降到 max）；变更类（write/edit/bash/git）、交互类
- * （question/task）与网络类（websearch/web_fetch/mcp__*）工具不在此列，
- * 各自保持串行段以保留 question 短路、editHistory 顺序与同文件竞争安全。
- * 准入标准：纯读取、无外部副作用、调用间无数据依赖。
+ * 可并行执行的工具。同一轮内连续命中该名单的工具调用会合并为一个并行段
+ * 并发执行（墙钟从 sum 降到 max）。变更类（write/edit/bash/git）、交互类
+ * （question）与网络类（websearch/webfetch/mcp__*）不在此列，各自保持串行
+ * 以保留 question 短路、editHistory 顺序与同文件竞争安全。
+ * `task` 委派的是隔离子会话（Explore/Scout/自定义只读或无工具），彼此无
+ * 写入竞争，允许并行；task handler 另有 withTaskSlot 上限 4。
  */
 export const PARALLEL_SAFE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'read',
@@ -262,6 +309,7 @@ export const PARALLEL_SAFE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'diagnostics',
   'read_image',
   'local_time_now',
+  'task',
 ]);
 
 /** 仅在 app 模式下可用的工具（应用管理/渲染相关）。 */

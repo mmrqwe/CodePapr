@@ -1208,12 +1208,12 @@ export class Agent {
         break;
       }
 
-      // ── 分段执行：并行安全（只读）工具并行，其余串行 ──────────────────
+      // ── 分段执行：并行安全工具并行，其余串行 ──────────────────────────
       // 连续命中 PARALLEL_SAFE_TOOL_NAMES 的调用合并为一个并行段并发执行
-      // （墙钟从 sum 降到 max）；变更/交互类工具（question/task/bash/git 等）
-      // 各自成串行段，保留 question 短路等原语义。全部结果按原始调用顺序
-      // 落账——日志字节顺序与串行执行一致，缓存哈希、toolOutputSummary 与
-      // 上下文压缩均不受影响。
+      // （墙钟从 sum 降到 max）；变更/交互类工具（question/bash/git 等）
+      // 各自成串行段，保留 question 短路等原语义。task 在并行名单内，由
+      // handler 侧 withTaskSlot 限制同时进行的子会话数。全部结果按原始
+      // 调用顺序落账——日志字节顺序与串行执行一致。
       interface ToolCallRecord {
         call: IToolCall;
         result: unknown;

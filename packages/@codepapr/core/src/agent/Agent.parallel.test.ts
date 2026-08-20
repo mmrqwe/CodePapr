@@ -395,4 +395,106 @@ describe('Agent parallel tool execution', () => {
     // provider 只被调用一轮：中止后不再进入下一轮
     expect(provider.chat).toHaveBeenCalledTimes(1);
   });
+
+  it('executes consecutive task calls concurrently', async () => {
+    const started: string[] = [];
+    let releaseGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    const events: IChatStreamEvent[] = [];
+
+    const provider = providerWithOneToolRound([
+      { id: 'call-t1', name: 'task', arguments: { agent: 'explore', prompt: 'a' } },
+      { id: 'call-t2', name: 'task', arguments: { agent: 'scout', prompt: 'b' } },
+    ]);
+    const { agent } = buildAgent({
+      provider,
+      tools: [
+        {
+          def: makeToolDefinition('task'),
+          handler: (args) => {
+            started.push(args.agent as string);
+            return gate.then(() => ({ agent: args.agent, content: 'ok' }));
+          },
+        },
+      ],
+    });
+
+    const chatPromise = agent.chat('用户输入', (event) => events.push(event));
+    await waitFor(() => started.length === 2);
+    expect(started.sort()).toEqual(['explore', 'scout']);
+    const startCount = events.filter((e) => e.type === 'tool-call-start').length;
+    expect(startCount).toBe(2);
+    expect(events.some((e) => e.type === 'tool-call-end')).toBe(false);
+    releaseGate();
+    await chatPromise;
+  });
+
+  it('keeps write serial when adjacent to task', async () => {
+    const timeline: string[] = [];
+    const provider = providerWithOneToolRound([
+      { id: 'call-w', name: 'write', arguments: { relativePath: 'a.txt' } },
+      { id: 'call-t', name: 'task', arguments: { agent: 'explore', prompt: 'x' } },
+    ]);
+    const { agent } = buildAgent({
+      provider,
+      tools: [
+        {
+          def: makeToolDefinition('write'),
+          handler: async () => {
+            timeline.push('start:write');
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            timeline.push('end:write');
+            return { ok: true };
+          },
+        },
+        {
+          def: makeToolDefinition('task'),
+          handler: async () => {
+            timeline.push('start:task');
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            timeline.push('end:task');
+            return { content: 'ok' };
+          },
+        },
+      ],
+    });
+
+    await agent.chat('用户输入');
+    expect(timeline).toEqual(['start:write', 'end:write', 'start:task', 'end:task']);
+  });
+
+  it('still short-circuits on question after a task group', async () => {
+    let tailTaskExecuted = false;
+    const provider = providerWithOneToolRound([
+      { id: 'call-t1', name: 'task', arguments: { agent: 'explore', prompt: 'a' } },
+      { id: 'call-q', name: 'question', arguments: { question: '继续吗？', header: '确认' } },
+      { id: 'call-t2', name: 'task', arguments: { agent: 'scout', prompt: 'b' } },
+    ]);
+    const { agent } = buildAgent({
+      provider,
+      tools: [
+        {
+          def: makeToolDefinition('task'),
+          handler: (args) => {
+            if (args.agent === 'scout') tailTaskExecuted = true;
+            return { content: 'ok' };
+          },
+        },
+        {
+          def: makeToolDefinition('question'),
+          handler: () => ({
+            __question: true,
+            question: '继续吗？',
+            header: '确认',
+          }),
+        },
+      ],
+    });
+
+    const result = await agent.chat('用户输入');
+    expect(result.question?.question).toBe('继续吗？');
+    expect(tailTaskExecuted).toBe(false);
+  });
 });

@@ -301,7 +301,11 @@ tools:
 You are a reviewer, a read-only code-review sub-agent.
 ```
 
-`mode` values: `subagent` (default, delegable via the `task` tool), `all` (delegable + usable as an @-mentioned primary agent), `primary` (only as an @-mentioned primary agent; **excluded** from the `task` tool's delegation list). `model` accepts `fast` / `mentor` or a concrete model name; when `mentor` has no dedicated API Key configured, it falls back to the main API Key.
+`mode` values: `subagent` (default, delegable via the `task` tool), `all` (delegable + `@name` forces delegation), `primary` (only via `@name`; **excluded** from the `task` tool's spontaneous catalog). `@explore check auth` makes the main agent delegate immediately via `task`; `@explore @scout login flow and official docs` asks for parallel `task` calls in the same reply. `@` does not swap the primary agent's identity or system prompt.
+
+Omitting `tools` inherits every tool available to that sub-agent; an empty `tools:` block disables all tools (pure reasoning). A one-line form is also accepted: `tools: read, grep`.
+
+`model` accepts `fast` / `mentor` or a concrete model name; when `mentor` has no dedicated API Key configured, it falls back to the main API Key.
 
 ### Skills
 

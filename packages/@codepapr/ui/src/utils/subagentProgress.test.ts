@@ -3,11 +3,13 @@ import {
   startSubagentProgress,
   completeSubagentProgress,
   clearSubagentProgress,
+  resetSubagentProgress,
   getSubagentRuns,
+  pushSubagentStep,
 } from './subagentProgress';
 
 beforeEach(() => {
-  clearSubagentProgress();
+  resetSubagentProgress();
 });
 
 describe('subagentProgress 有界裁剪', () => {
@@ -15,8 +17,8 @@ describe('subagentProgress 有界裁剪', () => {
   // clear 会把运行中的条目标记完成并裁剪最旧的已完成条目。
   it('caps completed runs while preserving the newest ones', () => {
     for (let i = 0; i < 60; i += 1) {
-      startSubagentProgress(`agent-${i}`);
-      completeSubagentProgress(`out-${i}`);
+      const id = startSubagentProgress(`agent-${i}`);
+      completeSubagentProgress(id, `out-${i}`);
     }
     startSubagentProgress('still-running');
     clearSubagentProgress();
@@ -27,5 +29,23 @@ describe('subagentProgress 有界裁剪', () => {
     expect(runs.every((run) => run.state === 'completed')).toBe(true);
     expect(runs[runs.length - 1]?.agent).toBe('still-running');
     expect(runs[0]?.agent).toBe('agent-11');
+  });
+});
+
+describe('subagentProgress runId 隔离', () => {
+  it('并行 run 的 step 不会串到另一条', () => {
+    const first = startSubagentProgress('explore', 'a');
+    const second = startSubagentProgress('scout', 'b');
+    pushSubagentStep(second, { name: 'websearch', status: 'success', summary: 'ok' });
+    completeSubagentProgress(first, 'explore-done');
+
+    const runs = getSubagentRuns();
+    expect(runs).toHaveLength(2);
+    expect(runs[0]?.agent).toBe('explore');
+    expect(runs[0]?.steps).toEqual([]);
+    expect(runs[0]?.state).toBe('completed');
+    expect(runs[1]?.agent).toBe('scout');
+    expect(runs[1]?.steps.map((step) => step.name)).toEqual(['websearch']);
+    expect(runs[1]?.state).toBe('running');
   });
 });

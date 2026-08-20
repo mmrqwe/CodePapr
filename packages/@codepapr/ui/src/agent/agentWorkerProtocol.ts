@@ -454,6 +454,16 @@ export type AgentWorkerToMainMessage =
       type: 'pong';
     }
   | {
+      type: 'subagent-progress';
+      requestId: string;
+      action: 'start' | 'step' | 'complete';
+      runId: string;
+      agent?: string;
+      prompt?: string;
+      step?: { name: string; status: 'success' | 'error'; summary: string };
+      content?: string;
+    }
+  | {
       /** Best-effort diagnostic emitted by the worker before it dies (global
        *  error / unhandled rejection) or when a message handler fails. */
       type: 'worker-diagnostic';

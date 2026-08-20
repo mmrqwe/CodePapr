@@ -22,6 +22,7 @@ import {
   type ToolOutputTruncationOptions,
   type ToolContextConfig,
   PERMISSION_WAITING_TOOL_TIMEOUTS,
+  withTaskSlot,
 } from '@codepapr/core';
 import {
   DEFAULT_MAX_TOKENS,
@@ -845,26 +846,71 @@ async function runSubagent(
     }
   }
 
-  return await runSubagentSession({
-    definition,
+  const runId =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `subagent-run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  postMessageToMain({
+    type: 'subagent-progress',
+    requestId,
+    action: 'start',
+    runId,
+    agent: definition.name,
     prompt,
-    workspacePath: payload.workspacePath,
-    lang: payload.runtime.lang,
-    exec,
-    registry,
-    tools,
-    provider: subagentProvider,
-    providerName: subagentProviderName,
-    requestBuilder: new RequestBuilder(),
-    cacheValidator: new CacheValidator(),
-    skillsSection: buildSkillsSection(payload.runtime.skillDefinitions ?? [], payload.runtime.lang),
-    customPromptSection: payload.runtime.customPrompt,
-    graphToolTimeoutMs: s.graphToolTimeoutMs,
-    maxWallClockMs: SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
-    abortSignal,
-    toolOutputTruncation: buildToolOutputTruncation(payload.settings),
-    toolContextConfig: buildToolContextConfig(payload.settings),
   });
+
+  try {
+    const result = await runSubagentSession({
+      definition,
+      prompt,
+      workspacePath: payload.workspacePath,
+      lang: payload.runtime.lang,
+      exec,
+      registry,
+      tools,
+      provider: subagentProvider,
+      providerName: subagentProviderName,
+      requestBuilder: new RequestBuilder(),
+      cacheValidator: new CacheValidator(),
+      skillsSection: buildSkillsSection(payload.runtime.skillDefinitions ?? [], payload.runtime.lang),
+      customPromptSection: payload.runtime.customPrompt,
+      graphToolTimeoutMs: s.graphToolTimeoutMs,
+      maxWallClockMs: SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
+      abortSignal,
+      toolOutputTruncation: buildToolOutputTruncation(payload.settings),
+      toolContextConfig: buildToolContextConfig(payload.settings),
+      onToolCallEnd: (event) => {
+        postMessageToMain({
+          type: 'subagent-progress',
+          requestId,
+          action: 'step',
+          runId,
+          step: {
+            name: event.toolName,
+            status: event.success ? 'success' : 'error',
+            summary: event.error || event.toolName,
+          },
+        });
+      },
+    });
+    postMessageToMain({
+      type: 'subagent-progress',
+      requestId,
+      action: 'complete',
+      runId,
+      content: result.content,
+    });
+    return result;
+  } catch (error) {
+    postMessageToMain({
+      type: 'subagent-progress',
+      requestId,
+      action: 'complete',
+      runId,
+      content: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }
 
 function createRegistry(
@@ -960,7 +1006,9 @@ function createRegistry(
       }
 
       const result = await runWithActivity(() =>
-        runSubagent(requestId, payload, target, prompt, currentDepth + 1, context?.signal)
+        withTaskSlot(() =>
+          runSubagent(requestId, payload, target, prompt, currentDepth + 1, context?.signal)
+        )
       );
       if (result.cacheStats) {
         const existing = subagentCacheStatsMap.get(requestId);
