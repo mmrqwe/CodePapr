@@ -1131,14 +1131,15 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     if (message.type === 'stream') {
       this.scheduleStreamSnapshot();
       if (message.event.type === 'tool-call-start') {
+        const startEvent = message.event;
         const alreadyTracked = pending.pendingToolCalls.some(
-          (item) => item.toolCallId === message.event.toolCallId
+          (item) => item.toolCallId === startEvent.toolCallId
         );
         if (!alreadyTracked) {
           pending.pendingToolCalls.push({
-            toolCallId: message.event.toolCallId,
-            toolName: message.event.toolName,
-            argumentsKey: stableStringify(message.event.arguments),
+            toolCallId: startEvent.toolCallId,
+            toolName: startEvent.toolName,
+            argumentsKey: stableStringify(startEvent.arguments),
           });
         }
       } else if (message.event.type === 'tool-call-end') {
