@@ -95,7 +95,7 @@ describe('ResponseProvider', () => {
     const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(calledBody.model).toBe('gpt-4o');
     expect(calledBody.thinking).toBeUndefined();
-    expect(calledBody.reasoning).toEqual({ effort: 'high' });
+    expect(calledBody.reasoning).toEqual({ effort: 'high', summary: 'auto' });
     expect(calledBody.tools).toEqual([
       {
         type: 'function',
@@ -209,7 +209,7 @@ describe('ResponseProvider', () => {
 
     const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(calledBody.thinking).toBeUndefined();
-    expect(calledBody.reasoning).toEqual({ effort: 'high' });
+    expect(calledBody.reasoning).toEqual({ effort: 'max', summary: 'auto' });
     expect(res.choices[0].message.reasoningContent).toBe('Need to inspect the file first.');
   });
 
@@ -249,7 +249,7 @@ describe('ResponseProvider', () => {
 
     const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(calledBody.thinking).toEqual({ type: 'enabled' });
-    expect(calledBody.reasoning).toEqual({ effort: 'high' });
+    expect(calledBody.reasoning).toEqual({ effort: 'max', summary: 'auto' });
   });
 
   it('thinkingPayload thinking sends only thinking.type', async () => {
@@ -351,5 +351,127 @@ describe('ResponseProvider', () => {
         messages: [{ id: '1', role: 'user', content: 'hi', timestamp: Date.now() }],
       }, () => {})
     ).rejects.toThrow('Invalid model endpoint');
+  });
+
+  function okJsonProvider(fetchMock: ReturnType<typeof vi.fn>): ResponseProvider {
+    return new ResponseProvider({
+      apiKey: 'sk-test',
+      baseURL: 'https://api.openai.com/v1',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+  }
+
+  function okJsonFetch(): ReturnType<typeof vi.fn> {
+    return vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        id: 'resp_ok',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'ok' }],
+          },
+        ],
+      }),
+    });
+  }
+
+  it('sends user-typed reasoning effort as-is (xhigh / max) and always asks for summary', async () => {
+    const fetchMock = okJsonFetch();
+    await okJsonProvider(fetchMock).chat({
+      model: 'muse-spark-1.2-contributor',
+      messages: [{ id: '1', role: 'user', content: 'hi', timestamp: Date.now() }],
+      thinking: { type: 'enabled', reasoningEffort: 'xhigh', payload: 'reasoning' },
+    });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).reasoning).toEqual({
+      effort: 'xhigh',
+      summary: 'auto',
+    });
+
+    const maxMock = okJsonFetch();
+    await okJsonProvider(maxMock).chat({
+      model: 'muse-spark-1.2-contributor',
+      messages: [{ id: '1', role: 'user', content: 'hi', timestamp: Date.now() }],
+      thinking: { type: 'enabled', reasoningEffort: 'max', payload: 'reasoning' },
+    });
+    expect(JSON.parse(maxMock.mock.calls[0][1].body).reasoning).toEqual({
+      effort: 'max',
+      summary: 'auto',
+    });
+  });
+
+  it('defaults empty reasoning effort to medium', async () => {
+    const fetchMock = okJsonFetch();
+    await okJsonProvider(fetchMock).chat({
+      model: 'gpt-4o',
+      messages: [{ id: '1', role: 'user', content: 'hi', timestamp: Date.now() }],
+      thinking: { type: 'enabled', payload: 'reasoning' },
+    });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).reasoning).toEqual({
+      effort: 'medium',
+      summary: 'auto',
+    });
+  });
+
+  it('encodes history assistant replies as typed message items so later turns keep them', async () => {
+    const fetchMock = okJsonFetch();
+    await okJsonProvider(fetchMock).chat({
+      model: 'muse-spark-1.2-contributor',
+      messages: [
+        { id: 'u1', role: 'user', content: '做个体检报告', timestamp: 1 },
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: '体检完成 — 已修复 4 项',
+          timestamp: 2,
+        },
+        {
+          id: 'a2',
+          role: 'assistant',
+          content: '正在读 index.html',
+          timestamp: 3,
+          toolCalls: [{ id: 'call_read', name: 'read', arguments: { relativePath: 'index.html' } }],
+        },
+        {
+          id: 't1',
+          role: 'tool',
+          content: '{"bytes":12}',
+          timestamp: 4,
+          toolResult: { toolCallId: 'call_read', success: true, result: { bytes: 12 } },
+        },
+        { id: 'u2', role: 'user', content: '按钮挤在一起了', timestamp: 5 },
+      ],
+    });
+
+    const input = JSON.parse(fetchMock.mock.calls[0][1].body).input as unknown[];
+    expect(input).toEqual([
+      { role: 'user', content: '做个体检报告' },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: '体检完成 — 已修复 4 项' }],
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: '正在读 index.html' }],
+      },
+      {
+        type: 'function_call',
+        call_id: 'call_read',
+        name: 'read',
+        arguments: JSON.stringify({ relativePath: 'index.html' }),
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_read',
+        output: '{"bytes":12}',
+      },
+      { role: 'user', content: '按钮挤在一起了' },
+    ]);
   });
 });

@@ -232,6 +232,36 @@ describe('promptSystem', () => {
     }
   });
 
+  it('labels app-mode user turns as an app task, not a generate-app command', () => {
+    const zh = buildRuntimeUserPrompt({
+      mode: 'app',
+      input: 'p0、p1 按钮挤到一起了',
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+    });
+    expect(zh).toContain('## 应用任务');
+    expect(zh).toContain('p0、p1 按钮挤到一起了');
+    expect(zh).not.toContain('## 生成应用');
+
+    const zhTW = buildRuntimeUserPrompt({
+      mode: 'app',
+      input: '修按鈕',
+      workspacePath: '/tmp/project',
+      lang: 'zh-TW',
+    });
+    expect(zhTW).toContain('## 應用任務');
+    expect(zhTW).not.toContain('## 生成應用');
+
+    const en = buildRuntimeUserPrompt({
+      mode: 'app',
+      input: 'fix the squeezed filters',
+      workspacePath: '/tmp/project',
+      lang: 'en',
+    });
+    expect(en).toContain('## App Task');
+    expect(en).not.toContain('## Generate App');
+  });
+
   it('marks the injected todo digest as background-only state', () => {
     const digest = '[TodoList] 目标: 旧任务\n  ○ t1: 旧步骤 ← current';
     const zhPrompt = buildRuntimeUserPrompt({
@@ -498,6 +528,16 @@ describe('promptSystem', () => {
     const en = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'en' });
     expect(en).toContain('auto-creates subdirectories');
     expect(en).toContain('Agents cannot read papr.db');
+  });
+
+  it('tells app mode not to regenerate an existing app on follow-up fixes', () => {
+    const zhCN = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'zh-CN' });
+    expect(zhCN).toContain('已有应用且用户未要求重做时');
+    expect(zhCN).toContain('禁止再走一遍全量生成');
+    const zhTW = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'zh-TW' });
+    expect(zhTW).toContain('已有應用且用戶未要求重做時');
+    const en = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'en' });
+    expect(en).toContain('If an app already exists and the user did not ask to rebuild it');
   });
 
   it('app mode documents multi-file frontend, http.request, and fs encoding', () => {

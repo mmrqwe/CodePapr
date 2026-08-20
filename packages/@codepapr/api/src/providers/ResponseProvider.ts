@@ -168,14 +168,24 @@ function getResponseOutputTokens(usage: ResponseUsage | undefined): number {
 }
 
 /**
- * Responses / 方舟 reasoning.effort 取值是 minimal|low|medium|high。
- * UI 沿用 DeepSeek 的 max，这里映射过去，避免上游丢掉思考强度。
+ * Responses reasoning.effort：用户选什么/填什么就发什么。
+ * 未填才回退 medium（开思考时必须带 effort 字段）。
  */
-function mapResponsesReasoningEffort(effort: string | undefined): string {
+function resolveResponsesReasoningEffort(effort: string | undefined): string {
   const trimmed = effort?.trim();
-  if (!trimmed) return 'medium';
-  if (trimmed === 'max') return 'high';
-  return trimmed;
+  return trimmed || 'medium';
+}
+
+function toResponsesAssistantMessage(content: string): {
+  type: 'message';
+  role: 'assistant';
+  content: Array<{ type: 'output_text'; text: string }>;
+} {
+  return {
+    type: 'message',
+    role: 'assistant',
+    content: [{ type: 'output_text', text: content }],
+  };
 }
 
 function extractStreamText(chunk: ResponseStreamChunk): string {
@@ -729,7 +739,7 @@ export class ResponseProvider extends BaseLLMProvider {
       } else if (msg.role === 'assistant') {
         if (msg.toolCalls && msg.toolCalls.length > 0) {
           if (msg.content) {
-            inputItems.push({ role: 'assistant', content: msg.content });
+            inputItems.push(toResponsesAssistantMessage(msg.content));
           }
           for (const tc of msg.toolCalls) {
             const rawArgs = typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments);
@@ -742,7 +752,7 @@ export class ResponseProvider extends BaseLLMProvider {
             });
           }
         } else {
-          inputItems.push({ role: 'assistant', content: msg.content });
+          inputItems.push(toResponsesAssistantMessage(msg.content ?? ''));
         }
       } else if (msg.role === 'tool') {
         const callId = msg.toolResult?.toolCallId || (msg.metadata?.toolCallId as string) || `call-${inputItems.length}`;
@@ -815,7 +825,8 @@ export class ResponseProvider extends BaseLLMProvider {
       }
       if (shouldSendReasoningEffort(request)) {
         payload.reasoning = {
-          effort: mapResponsesReasoningEffort(request.thinking.reasoningEffort),
+          effort: resolveResponsesReasoningEffort(request.thinking.reasoningEffort),
+          summary: 'auto',
         };
       }
     }

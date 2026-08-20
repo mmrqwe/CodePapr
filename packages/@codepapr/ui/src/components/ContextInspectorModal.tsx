@@ -111,6 +111,21 @@ function formatTimeSpan(ms: number): string {
   return `${totalSeconds}s`;
 }
 
+const CONTEXT_ROW_PREVIEW_MAX = 96;
+
+/** 折叠行预览：最终回复显示正文首行；带工具的助手显示工具名 + 正文。 */
+export function previewContextRow(row: {
+  content: string;
+  toolCallNames?: string[];
+}): string {
+  const snippet = row.content.replace(/\s+/g, ' ').trim().slice(0, CONTEXT_ROW_PREVIEW_MAX);
+  if (row.toolCallNames && row.toolCallNames.length > 0) {
+    const tools = `工具: ${row.toolCallNames.join(', ')}`;
+    return snippet ? `${tools} · ${snippet}` : tools;
+  }
+  return snippet;
+}
+
 /** 真实时间戳判定：注入消息（session-bootstrap 等）用哨兵值 timestamp=1，
  *  若参与耗时域会把时间轴拉回 1970 年，必须排除。 */
 function isRealTimestamp(ts?: number): ts is number {
@@ -344,7 +359,9 @@ export function ContextInspectorModal({ snapshot, lang, workspacePath, onClose }
           {row.toolName ? ` · ${row.toolName}` : ''}
         </span>
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg-muted">
-          {isToolsRow ? snapshot.toolNames.join(', ') : row.toolCallNames && row.toolCallNames.length > 0 ? `工具: ${row.toolCallNames.join(', ')}` : ''}
+          {isToolsRow
+            ? snapshot.toolNames.join(', ')
+            : previewContextRow({ content: row.content, toolCallNames: row.toolCallNames })}
         </span>
         <span className="flex-shrink-0 font-mono text-[10px] text-fg-dim">
           {row.reasoningTokens > 0
