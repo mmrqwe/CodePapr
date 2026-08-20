@@ -123,7 +123,9 @@ pub fn allocate_app_port(preferred: u16) -> Result<u16, String> {
     Err("没有可用的本地端口".to_string())
 }
 
-/// 入口 HTML / manifest 的最新 mtime（毫秒）。AppModal 用来在磁盘被改写后自动 reload。
+/// 应用目录里静态前端源码的最新 mtime（毫秒）。
+/// 覆盖拆开的 css/js（不再只盯 index.html / app.css / app.js）。
+/// AppModal 和插件 overlay 用来在磁盘被改写后自动 reload。
 #[tauri::command]
 pub fn app_frontend_mtime(workspace_path: String, app_id: String) -> Result<u64, String> {
     if !is_valid_app_id(&app_id) {
@@ -134,17 +136,33 @@ pub fn app_frontend_mtime(workspace_path: String, app_id: String) -> Result<u64,
         .join("apps")
         .join(&app_id);
     let mut latest: u64 = 0;
-    for name in ["index.html", "manifest.json", "app.css", "app.js"] {
-        let path = app_dir.join(name);
-        if let Ok(meta) = fs::metadata(&path) {
-            if let Ok(modified) = meta.modified() {
-                if let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
-                    latest = latest.max(dur.as_millis() as u64);
-                }
+    collect_frontend_mtime(&app_dir, &mut latest);
+    Ok(latest)
+}
+
+fn collect_frontend_mtime(dir: &std::path::Path, latest: &mut u64) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name_str = entry.file_name().to_string_lossy().into_owned();
+        if skip_app_export_entry(&name_str) || is_unservable_app_file(&name_str) {
+            continue;
+        }
+        let path = entry.path();
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if meta.is_dir() {
+            collect_frontend_mtime(&path, latest);
+            continue;
+        }
+        if let Ok(modified) = meta.modified() {
+            if let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
+                *latest = (*latest).max(dur.as_millis() as u64);
             }
         }
     }
-    Ok(latest)
 }
 
 fn app_dir_path(workspace_path: &str, app_id: &str) -> Result<std::path::PathBuf, String> {
@@ -1188,6 +1206,27 @@ mod tests {
         assert!(csp.contains("img-src 'self' data: blob: https:"), "got: {csp}");
         assert!(csp.contains("frame-src 'self' blob:"), "got: {csp}");
         assert!(csp.contains("script-src 'self' https:"), "got: {csp}");
+    }
+
+    #[test]
+    fn frontend_mtime_includes_nested_css_and_js() {
+        let tmp = std::env::temp_dir().join(format!("papr-mtime-{}", std::process::id()));
+        let app = tmp.join(".CodePapr/apps/ticker");
+        fs::create_dir_all(app.join("js")).unwrap();
+        fs::create_dir_all(app.join("css")).unwrap();
+        fs::create_dir_all(app.join("node_modules/pkg")).unwrap();
+        fs::write(app.join("css/theme.css"), "body{}").unwrap();
+        fs::write(app.join("js/main.js"), "console.log(1)").unwrap();
+        fs::write(app.join("node_modules/pkg/index.js"), "ignored").unwrap();
+        let mtime = app_frontend_mtime(tmp.to_string_lossy().into(), "ticker".into()).unwrap();
+        assert!(mtime > 0, "nested css/js must contribute to frontend mtime");
+
+        let empty = tmp.join(".CodePapr/apps/empty-plugin");
+        fs::create_dir_all(empty.join("node_modules/pkg")).unwrap();
+        fs::write(empty.join("node_modules/pkg/index.js"), "ignored").unwrap();
+        let skipped = app_frontend_mtime(tmp.to_string_lossy().into(), "empty-plugin".into()).unwrap();
+        assert_eq!(skipped, 0, "node_modules must not trigger frontend reload");
+        fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]

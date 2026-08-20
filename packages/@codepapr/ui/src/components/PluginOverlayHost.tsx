@@ -58,7 +58,9 @@ export function PluginOverlayHost({ lang }: PluginOverlayHostProps) {
     });
   }, [pinned, overlayLayouts, setOverlayLayout, viewport]);
 
-  if (openedAppId || pinned.length === 0) return null;
+  if (pinned.length === 0) return null;
+
+  const hidden = !!openedAppId;
 
   return (
     <>
@@ -77,6 +79,7 @@ export function PluginOverlayHost({ lang }: PluginOverlayHostProps) {
             layout={origin}
             size={surface}
             zIndex={30 + index}
+            hidden={hidden}
           />
         );
       })}
@@ -90,9 +93,10 @@ interface PluginOverlayCardProps {
   layout: OverlayLayout;
   size: { width: number; height: number };
   zIndex: number;
+  hidden?: boolean;
 }
 
-function PluginOverlayCard({ app, lang, layout, size, zIndex }: PluginOverlayCardProps) {
+function PluginOverlayCard({ app, lang, layout, size, zIndex, hidden }: PluginOverlayCardProps) {
   const t = getTranslation(lang);
   const workspacePath = useAgentStore((state) => state.workspacePath);
   const unpinPlugin = useAppRuntimeStore((state) => state.unpinPlugin);
@@ -204,7 +208,9 @@ function PluginOverlayCard({ app, lang, layout, size, zIndex }: PluginOverlayCar
 
   return (
     <div
-      className="fixed overflow-hidden rounded-lg border border-line bg-base shadow-[0_12px_40px_rgba(0,0,0,0.35)]"
+      data-plugin-overlay={app.appId}
+      aria-hidden={hidden || undefined}
+      className={`fixed overflow-hidden rounded-lg border border-line bg-base shadow-[0_12px_40px_rgba(0,0,0,0.35)] ${hidden ? 'invisible pointer-events-none' : ''}`}
       style={{ left: layout.x, top: layout.y, width: size.width, height: size.height, zIndex }}
     >
       <div className="flex h-full flex-col">

@@ -38,6 +38,7 @@ describe('appRuntimeStore plugins', () => {
 
     useAppRuntimeStore.getState().openAppModal('dash');
     expect(useAppRuntimeStore.getState().openedAppId).toBe('dash');
+    expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual(['ticker']);
   });
 
   it('closeApp and clearApps drop pin state', () => {

@@ -5,6 +5,7 @@ import { useAgentStore, isApiConfigured } from './store/agentStore';
 import { usePreviewStore } from './store/previewStore';
 import { useBrowserViewStore } from './store/browserViewStore';
 import { useAppRuntimeStore } from './store/appRuntimeStore';
+import { isPluginApp } from './papr/pluginSurface';
 import { useCharactersStore } from './store/charactersStore';
 import { useDebugLogStore, pushDebugLog } from './store/debugLogStore';
 import { SessionManager } from './components/SessionManager';
@@ -476,6 +477,9 @@ export default function App() {
               args: app.args ?? undefined,
               port: app.port ?? undefined,
             });
+            if (isPluginApp({ manifestJson: app.manifest_json ?? undefined })) {
+              useAppRuntimeStore.getState().pinPlugin(app.app_id);
+            }
           }
 
           // The Rust background-process registry survives webview reloads even
@@ -886,7 +890,7 @@ export default function App() {
           <AppModal lang={settings.lang} />
         </div>
       )}
-      {!openedAppId && <PluginOverlayHost lang={settings.lang} />}
+      <PluginOverlayHost lang={settings.lang} />
 
       <Suspense fallback={null}>
         {showSettings && <SettingsModal />}

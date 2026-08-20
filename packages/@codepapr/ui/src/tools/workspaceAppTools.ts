@@ -313,7 +313,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
 
     const hasBackend = !!command;
     const pluginHint =
-      '插件已钉在主窗口（overlay）。打开全屏 App 时会暂时隐藏。可在应用面板收起。';
+      '插件已钉在主窗口（overlay）。打开全屏 App 时会暂时隐藏，但继续在后台运行。可在应用面板收起。';
     return {
       appId: rawAppId,
       title,

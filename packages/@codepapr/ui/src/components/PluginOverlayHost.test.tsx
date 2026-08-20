@@ -87,7 +87,7 @@ describe('PluginOverlayHost', () => {
     expect(container.textContent).toContain('股票看板');
   });
 
-  it('hides overlays while a fullscreen app is open', async () => {
+  it('hides overlays while a fullscreen app is open without unmounting the iframe', async () => {
     useAppRuntimeStore.setState({
       apps: [pluginApp()],
       pinnedPluginIds: ['stock-ticker'],
@@ -98,7 +98,12 @@ describe('PluginOverlayHost', () => {
       root.render(<PluginOverlayHost lang="zh-CN" />);
     });
 
-    expect(container.querySelector('iframe')).toBeNull();
+    const iframe = container.querySelector('iframe');
+    expect(iframe?.getAttribute('src')).toBe('codepapr-app://stock-ticker/index.html');
+    const card = container.querySelector('[data-plugin-overlay="stock-ticker"]');
+    expect(card?.className).toContain('invisible');
+    expect(card?.className).toContain('pointer-events-none');
+    expect(card?.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('unpins from the overlay close button', async () => {

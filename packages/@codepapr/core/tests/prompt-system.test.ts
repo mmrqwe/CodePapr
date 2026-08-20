@@ -415,6 +415,10 @@ describe('promptSystem', () => {
       expect(prompt).toContain('kind:"plugin"');
       expect(prompt).toContain('stock-ticker');
     }
+    const zhCN = buildRuntimeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'zh-CN' });
+    expect(zhCN).toContain('插件默认只要 index.html');
+    const en = buildRuntimeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'en' });
+    expect(en).toContain('Plugins default to index.html');
   });
 
   it('app mode workflow references real tool names, not hidden workspace_* internals', () => {
