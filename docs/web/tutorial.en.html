@@ -667,18 +667,18 @@ https://api.deepseek.com/v1</code></pre>
         </ul>
         <p><strong>Workflow:</strong></p>
         <ol>
-          <li>Explore data: use workspace_read_file / MCP tools to understand data structure</li>
-          <li>Generate the app: use workspace_write_file to save a complete HTML to <code>.CodePapr/apps/&lt;appId&gt;/index.html</code></li>
-          <li>Render result: call <code>app_render</code> to render in the right-side Application panel</li>
+          <li>Explore data: use list / read / grep to understand data structure</li>
+          <li>Write the app: use write to save manifest.json, a shell index.html, css/theme.css, and js/*.js split by responsibility under <code>.CodePapr/apps/&lt;appId&gt;/</code></li>
+          <li>Open it: call <code>app_render({ appId })</code> to mount it in the right-side Application panel (does not write files)</li>
         </ol>
         <p><strong>HTML App Conventions:</strong></p>
         <ul>
-          <li>Single-file inline HTML — no component splitting or build systems</li>
+          <li>Split files: index.html is a shell only; styles in css/theme.css; logic in js/*.js by responsibility (native ES modules, no bundler)</li>
           <li>Reference chart libraries via CDN (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js, etc.)</li>
           <li>Runs in a sandboxed iframe (<code>sandbox="allow-scripts allow-same-origin"</code>)</li>
           <li>Use <strong>Papr SDK</strong> (<code>window.papr</code>) to call Agent, storage, HTTP, and filesystem capabilities</li>
           <li><code>papr.agent.run</code> uses a <strong>300-second idle timeout</strong>: as long as the Agent keeps emitting progress events (streaming output / tool calls) it can run indefinitely; only 300s of total silence triggers a timeout. Tool rounds are bounded by <code>maxToolRounds</code> (default/cap 50; search calls count toward the total)</li>
-          <li>appId must be kebab-case; calling with the same appId updates in place — supports iterative refinement</li>
+          <li>appId must be kebab-case; after editing files call <code>app_render({ appId })</code> again to refresh — supports iterative refinement</li>
         </ul>
         <p><strong>Session Isolation:</strong></p>
         <ul>
@@ -925,7 +925,7 @@ After the change, at least run verification for the affected scope; if no narrow
         <table>
           <thead><tr><th>Tool</th><th>Capability</th></tr></thead>
           <tbody>
-            <tr><td><code>app_render</code></td><td>Generate .papr Apps and render to the Application panel; auto-writes manifest.json + index.html. Declare access with local/network (legacy level 0-3 still works). HTML uses <code>window.papr</code> SDK for Agent/storage/HTTP/filesystem. Same appId updates in place.</td></tr>
+            <tr><td><code>app_render</code></td><td>Open a .papr App already on disk into the Application panel. Pass appId only. Write manifest.json and the entry HTML with write/edit/patch under <code>.CodePapr/apps/&lt;appId&gt;/</code> first. Access lives in the manifest (local/network; legacy level 0-3 still works). HTML uses <code>window.papr</code> SDK. Call again after edits to refresh.</td></tr>
             <tr><td><code>app_list</code></td><td>List all registered .papr apps (name, has backend, is running). Call before creating to check for duplicates.</td></tr>
             <tr><td><code>app_start</code></td><td>Start backend service by appId. Checks port availability, turns status green.</td></tr>
             <tr><td><code>app_stop</code></td><td>Stop backend service by appId. Turns status red.</td></tr>

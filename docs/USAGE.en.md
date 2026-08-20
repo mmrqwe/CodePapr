@@ -34,12 +34,15 @@ Papr is CodePapr's application runtime. AI-generated apps run directly in the de
 
 ### .papr Format
 
-An app is two files under `.CodePapr/apps/<appId>/` (once papr.db is used, a `db.sqlite` appears holding app data):
+An app is a small source tree under `.CodePapr/apps/<appId>/` (once papr.db is used, a `db.sqlite` appears holding app data):
 
 ```
 .CodePapr/apps/my-app/
 ├── manifest.json     ← Metadata + permissions + agents
-├── index.html        ← Entry HTML
+├── index.html        ← Shell (link CSS + module entry)
+├── css/theme.css
+├── js/main.js        ← ES module entry
+├── js/db.js / ui.js / agent.js / api.js  ← Split by responsibility
 └── db.sqlite         ← papr.db data (created at runtime)
 ```
 
@@ -101,11 +104,11 @@ const files = await papr.fs.list();
 
 ### Creating Apps
 
-Switch to **App mode** and describe the app you want in natural language. The Agent calls `app_render` to generate a complete manifest.json and index.html. Same appId updates in place (the previous tree is snapshotted to `.versions/`; you can export a zip from the dock).
+Switch to **App mode** and describe the app you want in natural language. The Agent uses `write` / `edit` / `patch` to put `manifest.json` and the entry HTML in `.CodePapr/apps/<appId>/`, then calls `app_render({ appId })` to open it. `app_render` only mounts an app already on disk; it does not write files. Call it again after edits to refresh (you can still export a zip from the dock).
 
 ### Permissions (two-axis model)
 
-App access is declared by two orthogonal axes in `app_render` (or the manifest):
+App access is declared by two orthogonal axes in the manifest:
 
 | Axis | Value | Capability |
 |---|---|---|

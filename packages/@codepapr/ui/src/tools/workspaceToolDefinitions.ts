@@ -1063,122 +1063,16 @@ name: 'web_download_file',
   {
     name: 'app_render',
     description:
-      '生成一个交互式 HTML 应用到应用面板。用于数据分析可视化、仪表盘、关系图等；也可生成主窗口悬浮插件（kind: plugin）。自动写入 manifest.json 和 index.html 到 .CodePapr/apps/<appId>/ 目录，并注册到应用管理面板。相同 appId 会覆盖已有应用。\n\n📦 Papr SDK 可用：生成的 HTML 可通过 window.papr 调用 CodePapr 能力：\n  • papr.db.get(key) / papr.db.set(key, value) / papr.db.delete(key) / papr.db.keys() — 键值持久化存储（应用内数据持久化默认用它，永远可用）\n  • papr.agent.run({agent, task}) — 调用 AI Agent（Agent 读不到 papr.db，需要的数据要放进 task；工具集由 local/network 决定）\n  • papr.http.request({method, url, headers?, body?, maxBytes?}) / papr.http.get / papr.http.post — HTTP 请求（仅限公网地址，需 network: true；JSON 原样返回）\n  • papr.fs.readFile(path, {encoding?}) / papr.fs.writeFile(path, content, {encoding?}) / papr.fs.exists(path) / papr.fs.list / papr.fs.delete — 文件读写（限定 app data 目录，永远可用；encoding: utf8|base64）\n  • papr.app.info() — 获取应用信息\n⚠️ 访问档用 local（none/read/write）+ network（true/false）两个参数声明；papr.db/papr.fs 无需权限，papr.http 需 network:true。kind=plugin 时禁止 local:write 和 command 后端。',
+      '打开已写入磁盘的 .papr 应用：读取 `.CodePapr/apps/<appId>/manifest.json` 和入口 HTML，挂到应用管理面板（plugin 会钉在主窗口 overlay）。只传 appId。不要传 html/title/files/kind/agents/local/network/command——那些必须用 write/edit/patch 先写到应用目录。找不到文件时会报错，提示先 write。应用源码必须拆分：index.html 只做骨架，css/theme.css + js/main.js 及 js/db.js、js/ui.js、js/agent.js、js/api.js 按职责拆开（原生 ES module）。禁止单文件巨石。\n\n📦 应用 HTML 可通过 window.papr 调用 CodePapr 能力（权限以 manifest 的 local/network 为准）：\n  • papr.db.get/set/delete/keys — 键值持久化（永远可用）\n  • papr.agent.run({agent, task}) — 调用 AI Agent（工具集由 local/network 决定）\n  • papr.http.request/get/post — HTTP（需 network: true）\n  • papr.fs.readFile/writeFile/exists/list/delete — 应用 data 目录（永远可用）\n  • papr.app.info() — 应用信息\n⚠️ kind=plugin 时禁止 local:write 和 command 后端。修改应用请 edit/patch 对应小文件后再 app_render({ appId }) 刷新。',
     parameters: {
       type: 'object',
       properties: {
         appId: {
           type: 'string',
-          description: '应用唯一标识符，kebab-case（仅小写字母、数字、连字符）。相同 appId 会覆盖已有应用。例如：history-explorer、stock-dashboard。',
-        },
-        title: {
-          type: 'string',
-          description: '应用标题，显示在应用标签上。',
-        },
-        kind: {
-          type: 'string',
-          enum: ['app', 'plugin'],
-          description: '产物形态。app（默认）= 全屏独占应用；plugin = 主窗口内悬浮 overlay，写代码时也能看。用户说「悬浮/小组件/插件/边上看」时用 plugin。插件禁止 command 后端和 local:write。',
-        },
-        surface: {
-          type: 'object',
-          description: '仅 kind=plugin 时有效。v1 只支持主窗口 overlay。',
-          properties: {
-            type: { type: 'string', enum: ['overlay'], description: '表面类型，当前仅 overlay。' },
-            width: { type: 'number', description: '宽度像素，默认 320，范围 200-720。' },
-            height: { type: 'number', description: '高度像素，默认 200，范围 100-640。' },
-            position: {
-              type: 'string',
-              enum: ['top-right', 'top-left', 'bottom-right', 'bottom-left'],
-              description: '初始角落，默认 top-right。用户可拖动。',
-            },
-          },
-        },
-        html: {
-          type: 'string',
-          description: '前端 HTML 文档内容（index.html 入口）。可以内联 CSS/JS，也可以用 files 放同目录的 app.css / app.js 再用相对路径引用。CDN 图表库仅在 network:true 时可用。可使用 window.papr SDK（papr.db/papr.fs 永远可用；papr.http 需要 network: true）。',
-        },
-        local: {
-          type: 'string',
-          enum: ['none', 'read', 'write'],
-          description: '可选。本地（工作区）访问轴：none=纯计算（仅 papr.db/papr.fs，默认）, read=可读取项目文件（Agent 只读工具）, write=可修改项目并执行命令（Agent write/edit/patch/bash）。后端服务（command）要求至少 read。',
-        },
-        network: {
-          type: 'boolean',
-          description: '可选。网络开关：true=可访问公网（papr.http + Agent websearch/webfetch + MCP），false=完全断网（默认，CSP+沙箱强制）。',
-        },
-        permissions: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '可选（旧参数，已废弃）。应用需要的权限列表。新 manifest 使用 local/network 两轴参数。',
-        },
-        level: {
-          type: 'number',
-          description: '可选（旧参数，已废弃，仍兼容）。权限级别 0-3：0→{local:none,network:off}, 1→{local:read,network:off}, 2→{local:read,network:on}, 3→{local:write,network:on}。推荐改用 local/network。',
-        },
-        agents: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              name: { type: 'string', description: 'Agent 名称（如 assistant）' },
-              model: { type: 'string', description: '模型：main（默认，使用用户主模型）、fast（快速模型）、mentor（Mentor 模型）、或具体模型 ID' },
-              systemPrompt: { type: 'string', description: '系统提示词' },
-              tools: {
-                type: 'array',
-                items: { type: 'string' },
-                description: 'Agent 可用的工具白名单（可选）。可用工具名：read, grep, list, lsp, diagnostics, read_image, skill_load, todo, local_time_now, websearch, webfetch（需 network:true）, write, edit, patch, bash（需 local:write，直接写项目文件）。不声明 = 使用当前访问档（local/network）允许的全部工具。始终排除 task 和 app_render。',
-              },
-              maxToolRounds: {
-                type: 'number',
-                description: '最大工具调用轮数，默认 50，上限 50',
-              },
-              inheritContext: {
-                type: 'object',
-                properties: {
-                  skills: { type: 'boolean', description: '继承主会话的技能（skills）' },
-                  projectRules: { type: 'boolean', description: '继承项目规则（AGENTS.md 等）' },
-                  projectMemory: { type: 'boolean', description: '继承项目记忆' },
-                  customPrompt: { type: 'boolean', description: '继承用户自定义系统提示词' },
-                },
-                description: '可选。继承主会话上下文的哪些部分（默认全不继承）。',
-              },
-            },
-            required: ['name'],
-          },
-          description: '可选。应用可调用的 Agent 定义列表。每个 Agent 可在 HTML 中通过 papr.agent.run({agent: name, task}) 调用。',
-        },
-        icon: {
-          type: 'string',
-          description: '可选。应用图标，支持 emoji 或 1-2 个字符。例如：📊、📈、🗺️。',
-        },
-        files: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              relativePath: { type: 'string', description: '相对于 .CodePapr/apps/<appId>/ 的文件路径。例如：app.css、app.js、server.js、package.json。' },
-              content: { type: 'string', description: '文件完整内容。' },
-            },
-            required: ['relativePath', 'content'],
-          },
-          description: '可选。额外文件（前端静态资源 app.css/app.js，或后端 server.js、package.json 等）。每个文件包含 relativePath 和 content。不能覆盖 manifest.json、index.html、db.sqlite。',
-        },
-        command: {
-          type: 'string',
-          description: '可选。后端启动命令名。例如：node。如果提供，应用将具有后端服务，用户可点击"运行"启动。后端进程的工作目录是应用目录 .CodePapr/apps/<appId>/。',
-        },
-        args: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '可选。后端启动命令参数。相对路径按应用目录（.CodePapr/apps/<appId>/）解析，因此后端文件要放在应用目录内并只写文件名。例如：["server.js"]（对应 files 里的 server.js）。仅在提供 command 时有效。',
-        },
-        port: {
-          type: 'number',
-          description: '可选。后端服务端口号。例如：3456。如果提供 command，必须同时提供 port。',
+          description: '应用唯一标识符，kebab-case（仅小写字母、数字、连字符）。必须已存在 `.CodePapr/apps/<appId>/manifest.json`。例如：history-explorer、stock-dashboard。',
         },
       },
-      required: ['appId', 'title', 'html'],
+      required: ['appId'],
     },
   },
   {

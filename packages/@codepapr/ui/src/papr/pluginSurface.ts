@@ -130,7 +130,7 @@ export function defaultOverlayOrigin(
   return clampOverlayOrigin({ x, y }, size, viewport);
 }
 
-/** 供 app_render 校验：只接受 overlay。缺省给出默认几何。 */
+/** 供打开应用时校验 manifest.surface：只接受 overlay。缺省给出默认几何。 */
 export function parsePluginSurfaceArg(raw: unknown): ResolvedOverlaySurface {
   if (raw === undefined || raw === null) {
     return {

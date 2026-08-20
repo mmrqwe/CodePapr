@@ -667,18 +667,18 @@ https://api.deepseek.com/v1</code></pre>
         </ul>
         <p><strong>工作流程：</strong></p>
         <ol>
-          <li>探索数据源：用 workspace_read_file / MCP 工具理解数据结构</li>
-          <li>生成应用：用 workspace_write_file 写完整 HTML 到 <code>.CodePapr/apps/&lt;appId&gt;/index.html</code></li>
-          <li>渲染结果：调用 <code>app_render</code> 工具渲染到右侧"应用"面板</li>
+          <li>探索数据源：用 list / read / grep 理解数据结构</li>
+          <li>写入应用：用 write 把 manifest.json、骨架 index.html、css/theme.css 和按职责拆开的 js/*.js 写到 <code>.CodePapr/apps/&lt;appId&gt;/</code></li>
+          <li>打开结果：调用 <code>app_render({ appId })</code> 挂到右侧"应用"面板（不写文件）</li>
         </ol>
         <p><strong>HTML 应用规范：</strong></p>
         <ul>
-          <li>单文件内联 HTML——不需要组件拆分或构建系统</li>
+          <li>多文件拆分：index.html 只做骨架，样式进 css/theme.css，逻辑按职责拆进 js/*.js（原生 ES module，不要构建链）</li>
           <li>通过 CDN 引用图表库（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js 等）</li>
           <li>在沙箱 iframe 中运行（<code>sandbox="allow-scripts allow-same-origin"</code>）</li>
           <li>可使用 <strong>Papr SDK</strong>（<code>window.papr</code>）调用 Agent、存储、HTTP、文件系统</li>
           <li><code>papr.agent.run</code> 采用 <strong>300 秒空闲超时</strong>：只要 Agent 持续产出进度事件（流式输出/工具调用）就可运行任意时长，仅连续 300 秒无事件才超时；工具轮数受 <code>maxToolRounds</code> 限制（默认/上限 50，搜索调用计入总轮数）</li>
-          <li>appId 必须是 kebab-case，相同 appId 再次调用覆盖更新——支持迭代改进</li>
+          <li>appId 必须是 kebab-case；改文件后再次 <code>app_render({ appId })</code> 刷新——支持迭代改进</li>
         </ul>
         <p><strong>会话隔离：</strong></p>
         <ul>
@@ -925,7 +925,7 @@ https://api.deepseek.com/v1</code></pre>
         <table>
           <thead><tr><th>工具</th><th>能力</th></tr></thead>
           <tbody>
-            <tr><td><code>app_render</code></td><td>生成 .papr App 并渲染到应用面板；自动写 manifest.json + index.html。用 local/network 声明访问档（旧 level 0-3 仍兼容）。HTML 可使用 <code>window.papr</code> SDK 调用 Agent/存储/HTTP/文件系统。相同 appId 覆盖更新。</td></tr>
+            <tr><td><code>app_render</code></td><td>打开已写入磁盘的 .papr App 到应用面板。只传 appId。manifest.json 和入口 HTML 必须先用 write/edit/patch 写到 <code>.CodePapr/apps/&lt;appId&gt;/</code>。访问档在 manifest 的 local/network（旧 level 0-3 仍兼容）。HTML 可使用 <code>window.papr</code> SDK。修改文件后再 app_render 刷新。</td></tr>
             <tr><td><code>app_list</code></td><td>列出所有已注册 .papr App（名称、是否有后端、是否运行中）。创建前调用检查重复。</td></tr>
             <tr><td><code>app_start</code></td><td>按 appId 启动后端服务。检查端口可用性，成功后绿点亮起。</td></tr>
             <tr><td><code>app_stop</code></td><td>按 appId 停止后端服务。停止后绿点变红。</td></tr>

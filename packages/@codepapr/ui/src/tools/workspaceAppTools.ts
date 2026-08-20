@@ -1,39 +1,41 @@
 import { invoke } from '@tauri-apps/api/core';
-import {
-  asString,
-  asOptionalString,
-  asOptionalNumber,
-  asOptionalStringArray,
-} from '@codepapr/core';
+import { asString } from '@codepapr/core';
 import { toolByName } from './workspaceToolDefinitions';
 import {
   type BackgroundProcessExitInfo,
-  type WriteTextFileResult,
+  type ReadFileResult,
 } from './workspaceToolHelpers';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
-import type { PaprAppSettings, PaprKind, PaprManifest } from '@codepapr/types';
+import type { PaprAppSettings, PaprManifest } from '@codepapr/types';
 import {
   LOCAL_ORDER,
   accessMeetsTool,
-  legacyAccessToLevel,
   legacyLevelToAccess,
   resolveEffectiveAccess,
   type PaprAccess,
   type PaprLocalAccess,
 } from '../papr/levelGrants';
-import { isPluginApp, parsePluginSurfaceArg, readAppManifest } from '../papr/pluginSurface';
+import { isPluginApp, parsePaprKind, parsePluginSurfaceArg, readAppManifest, resolvePaprEntryFile } from '../papr/pluginSurface';
 import { type WorkspaceToolContext } from './workspaceToolContext';
 
-/** app_render.files 不允许覆盖的保留文件：manifest/index 由 app_render 自身生成，
- * db.sqlite（含 WAL/SHM 边车）是 papr.db 的持久化数据。 */
-const RESERVED_APP_FILES = new Set([
-  'manifest.json',
-  'index.html',
-  'db.sqlite',
-  'db.sqlite-wal',
-  'db.sqlite-shm',
-]);
+/** app_render 禁止携带的写文件/清单字段：这些必须用 write/edit/patch 落盘。 */
+const APP_RENDER_WRITE_ARG_KEYS = [
+  'html',
+  'files',
+  'title',
+  'kind',
+  'surface',
+  'agents',
+  'local',
+  'network',
+  'command',
+  'args',
+  'port',
+  'icon',
+  'permissions',
+  'level',
+] as const;
 
 const LOCAL_LABEL: Record<PaprLocalAccess, string> = {
   none: '无',
@@ -53,7 +55,7 @@ function normalizeAppIcon(raw: string | undefined): string | undefined {
 }
 
 /**
- * 解析 app_render 的访问参数：优先 local/network（两轴），缺省回落旧 level。
+ * 解析 manifest 的访问参数：优先 local/network（两轴），缺省回落旧 level。
  */
 function parseAccess(args: Record<string, unknown>): PaprAccess {
   const rawLocal = args.local;
@@ -107,7 +109,7 @@ function validateAgentTools(params: {
       }
       if (!accessMeetsTool(access, toolName)) {
         throw new Error(
-          `agents[${agent.name}].tools 中的 ${toolName} 不在当前访问档（local=${LOCAL_LABEL[access.local]}, network=${access.network}）允许范围内，请调整 app_render 的 local/network 参数或从 tools 中移除。`
+          `agents[${agent.name}].tools 中的 ${toolName} 不在当前访问档（local=${LOCAL_LABEL[access.local]}, network=${access.network}）允许范围内，请调整 manifest.json 的 local/network 或从 tools 中移除。`
         );
       }
       if ((toolName === 'websearch' || toolName === 'webfetch') && disableWebSearchTools) {
@@ -117,63 +119,132 @@ function validateAgentTools(params: {
   }
 }
 
-export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
-  const {
-    registry,
-    workspace,
-    readBeforeContent,
-    notifyWorkspaceMutation,
-    editHistory,
-  } = ctx;
-
-  registry.register(toolByName('app_render'), async (args: Record<string, unknown>) => {
-    const rawAppId = asString(args.appId, 'appId');
-    const title = asString(args.title, 'title');
-    const html = asString(args.html, 'html');
-    const icon = asOptionalString(args.icon);
-    const normalizedIcon = normalizeAppIcon(icon);
-    const command = asOptionalString(args.command);
-    const cmdArgs = asOptionalStringArray(args.args);
-    const port = asOptionalNumber(args.port);
-    const rawFiles = args.files as Array<{ relativePath: string; content: string }> | undefined;
-    const permissions = (args.permissions as string[] | undefined) ?? [];
-    const agents = (args.agents as Array<{name: string; model?: string; systemPrompt?: string; tools?: string[]; maxToolRounds?: number; inheritContext?: {skills?: boolean; projectRules?: boolean; projectMemory?: boolean; customPrompt?: boolean}}> | undefined) ?? [];
-
-    for (const a of agents) {
-      if (!a.name || typeof a.name !== 'string' || a.name.trim().length === 0) {
-        throw new Error('agents 每个元素必须包含非空 name 字段');
+function validateManifestAgents(raw: unknown): Array<{
+  name: string;
+  tools?: string[];
+}> {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error('manifest.agents 必须是数组');
+  }
+  const agents: Array<{ name: string; tools?: string[] }> = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error('agents 每个元素必须是对象');
+    }
+    const a = item as {
+      name?: unknown;
+      model?: unknown;
+      maxToolRounds?: unknown;
+      inheritContext?: unknown;
+      tools?: string[];
+    };
+    if (!a.name || typeof a.name !== 'string' || a.name.trim().length === 0) {
+      throw new Error('agents 每个元素必须包含非空 name 字段');
+    }
+    if (a.name.length > 64) {
+      throw new Error(`agent name 超过 64 字符限制: ${a.name}`);
+    }
+    if (a.model !== undefined && !['main', 'fast', 'mentor'].includes(String(a.model))) {
+      throw new Error(`agent model 必须是 main/fast/mentor，收到: ${a.model}`);
+    }
+    if (
+      a.maxToolRounds !== undefined &&
+      (typeof a.maxToolRounds !== 'number' || !Number.isInteger(a.maxToolRounds) || a.maxToolRounds < 1)
+    ) {
+      throw new Error(`agent maxToolRounds 必须是正整数: ${a.maxToolRounds}`);
+    }
+    if (a.inheritContext !== undefined) {
+      if (typeof a.inheritContext !== 'object' || a.inheritContext === null || Array.isArray(a.inheritContext)) {
+        throw new Error(`agent inheritContext 必须是对象: ${JSON.stringify(a.inheritContext)}`);
       }
-      if (a.name.length > 64) {
-        throw new Error(`agent name 超过 64 字符限制: ${a.name}`);
-      }
-      if (a.model !== undefined && !['main', 'fast', 'mentor'].includes(a.model)) {
-        throw new Error(`agent model 必须是 main/fast/mentor，收到: ${a.model}`);
-      }
-      if (a.maxToolRounds !== undefined && (typeof a.maxToolRounds !== 'number' || !Number.isInteger(a.maxToolRounds) || a.maxToolRounds < 1)) {
-        throw new Error(`agent maxToolRounds 必须是正整数: ${a.maxToolRounds}`);
-      }
-      if (a.inheritContext !== undefined) {
-        if (typeof a.inheritContext !== 'object' || a.inheritContext === null || Array.isArray(a.inheritContext)) {
-          throw new Error(`agent inheritContext 必须是对象: ${JSON.stringify(a.inheritContext)}`);
-        }
-        for (const field of ['skills', 'projectRules', 'projectMemory', 'customPrompt'] as const) {
-          const val = a.inheritContext[field];
-          if (val !== undefined && typeof val !== 'boolean') {
-            throw new Error(`agent inheritContext.${field} 必须是布尔值: ${val}`);
-          }
+      const inherit = a.inheritContext as Record<string, unknown>;
+      for (const field of ['skills', 'projectRules', 'projectMemory', 'customPrompt'] as const) {
+        const val = inherit[field];
+        if (val !== undefined && typeof val !== 'boolean') {
+          throw new Error(`agent inheritContext.${field} 必须是布尔值: ${val}`);
         }
       }
     }
+    agents.push({ name: a.name, tools: a.tools });
+  }
+  return agents;
+}
 
-    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(rawAppId)) {
+async function readAppTextFile(
+  workspacePath: string,
+  relativePath: string,
+): Promise<string | null> {
+  try {
+    const file = await invoke<ReadFileResult>('read_text_file', {
+      workspacePath,
+      relativePath,
+      maxBytes: 2_000_000,
+    });
+    return typeof file?.content === 'string' ? file.content : null;
+  } catch {
+    return null;
+  }
+}
+
+export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
+  const { registry, workspace } = ctx;
+
+  registry.register(toolByName('app_render'), async (args: Record<string, unknown>) => {
+    const writeKeys = APP_RENDER_WRITE_ARG_KEYS.filter((key) => {
+      const value = args[key];
+      return value !== undefined && value !== null;
+    });
+    if (writeKeys.length > 0) {
       throw new Error(
-        `appId 必须是 kebab-case（仅小写字母、数字、连字符，1-63 字符），收到: ${rawAppId}`
+        `app_render 只打开已落盘的应用，不能写入文件。请用 write/edit/patch 把 ${writeKeys.join(', ')} 写入 .CodePapr/apps/<appId>/，然后只传 appId 调用 app_render({ appId })。`,
       );
     }
 
-    if (html.length > 2_000_000) {
-      throw new Error(`HTML 内容超过 2MB 上限（当前 ${html.length} 字符），请精简后重试。`);
+    const rawAppId = asString(args.appId, 'appId');
+    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(rawAppId)) {
+      throw new Error(
+        `appId 必须是 kebab-case（仅小写字母、数字、连字符，1-63 字符），收到: ${rawAppId}`,
+      );
     }
+
+    const appDir = `.CodePapr/apps/${rawAppId}`;
+    const manifestPath = `${appDir}/manifest.json`;
+    const manifestRaw = await readAppTextFile(workspace(), manifestPath);
+    if (!manifestRaw) {
+      throw new Error(
+        `找不到 ${manifestPath}。请先用 write 写入 manifest.json 和入口 HTML（如 index.html），再调用 app_render({ appId: "${rawAppId}" })。`,
+      );
+    }
+
+    let manifest: PaprManifest;
+    try {
+      manifest = JSON.parse(manifestRaw) as PaprManifest;
+    } catch {
+      throw new Error(
+        `${manifestPath} 不是合法 JSON。请用 write/edit 修好后再调用 app_render({ appId: "${rawAppId}" })。`,
+      );
+    }
+
+    const title = typeof manifest.name === 'string' ? manifest.name.trim() : '';
+    if (title.length === 0) {
+      throw new Error(`${manifestPath} 缺少非空 name 字段`);
+    }
+
+    const agents = validateManifestAgents(manifest.agents);
+    const access = parseAccess(manifest as unknown as Record<string, unknown>);
+    const kind = parsePaprKind(manifest);
+    const command =
+      typeof manifest.command === 'string' && manifest.command.trim().length > 0
+        ? manifest.command.trim()
+        : undefined;
+    const cmdArgs = Array.isArray(manifest.args)
+      ? manifest.args.filter((item): item is string => typeof item === 'string')
+      : undefined;
+    const port = typeof manifest.port === 'number' ? manifest.port : undefined;
+    const normalizedIcon = normalizeAppIcon(
+      typeof manifest.icon === 'string' ? manifest.icon : undefined,
+    );
 
     if (command && (typeof port !== 'number' || port < 1024 || port > 65535)) {
       throw new Error(`提供 command 时必须同时提供有效 port（1024-65535）`);
@@ -184,38 +255,22 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     if (!command && cmdArgs && cmdArgs.length > 0) {
       throw new Error(`提供 args 时必须同时提供 command`);
     }
-    if (title.trim().length === 0) {
-      throw new Error(`title 不能为空`);
-    }
-
-    const appLevel = typeof args.level === 'number' ? args.level : undefined;
-    if (appLevel !== undefined && ![0, 1, 2, 3].includes(appLevel)) {
-      throw new Error(`level 必须是 0/1/2/3，收到: ${args.level}`);
-    }
-
-    const rawKind = args.kind;
-    let kind: PaprKind = 'app';
-    if (rawKind !== undefined && rawKind !== null && rawKind !== '') {
-      if (rawKind !== 'app' && rawKind !== 'plugin') {
-        throw new Error(`kind 必须是 app 或 plugin，收到: ${JSON.stringify(rawKind)}`);
-      }
-      kind = rawKind;
-    }
-
-    // 两轴访问：local（无/只读/读写执行）× network（关/开）
-    const access = parseAccess(args);
     if (command && access.local !== 'read' && access.local !== 'write') {
       throw new Error(
-        `后端服务（command）需要 local 至少为 read（当前 local: ${LOCAL_LABEL[access.local]}）。请设置 local: "read" 或 local: "write"。`
+        `后端服务（command）需要 local 至少为 read（当前 local: ${LOCAL_LABEL[access.local]}）。请在 manifest.json 中设置 local: "read" 或 local: "write"。`,
       );
     }
     if (kind === 'plugin' && command) {
       throw new Error('插件不能带后端服务（command/args/port）。请改用 kind: "app"，或去掉 command。');
     }
     if (kind === 'plugin' && access.local === 'write') {
-      throw new Error('插件不能声明 local: "write"。小组件不能改仓库；请改用 kind: "app"，或把 local 设为 none/read。');
+      throw new Error(
+        '插件不能声明 local: "write"。小组件不能改仓库；请改用 kind: "app"，或把 local 设为 none/read。',
+      );
     }
-    const pluginSurface = kind === 'plugin' ? parsePluginSurfaceArg(args.surface) : undefined;
+    if (kind === 'plugin') {
+      parsePluginSurfaceArg(manifest.surface);
+    }
 
     validateAgentTools({
       agents,
@@ -223,117 +278,19 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       disableWebSearchTools: ctx.options.disableWebSearchTools ?? false,
     });
 
-    try {
-      await invoke('papr_snapshot_app', {
-        workspacePath: workspace(),
-        appId: rawAppId,
-      });
-    } catch {
-      // 首次生成或目录尚不存在时跳过；快照失败不阻断覆盖。
-    }
-
-    const manifest = {
-      spec: 'papr/0.1',
-      name: title,
-      version: '0.1.0',
-      entry: 'index.html',
-      kind,
-      ...(pluginSurface ? { surface: pluginSurface } : {}),
-      ...(permissions.length > 0 ? { permissions } : {}),
-      local: access.local,
-      network: access.network,
-      level: appLevel ?? legacyAccessToLevel(access),
-      agents: agents.map((a) => ({
-        name: a.name,
-        model: a.model ?? 'main',
-        systemPrompt: a.systemPrompt,
-        ...(a.tools ? { tools: a.tools } : {}),
-        ...(a.maxToolRounds ? { maxToolRounds: Math.min(a.maxToolRounds, 50) } : {}),
-        ...(a.inheritContext ? { inheritContext: a.inheritContext } : {}),
-      })),
-      ...(normalizedIcon ? { icon: normalizedIcon } : {}),
-      ...(command ? { command } : {}),
-      ...(cmdArgs && cmdArgs.length > 0 ? { args: cmdArgs } : {}),
-      ...(port ? { port } : {}),
-    };
-
-    const manifestPath = `.CodePapr/apps/${rawAppId}/manifest.json`;
-    const manifestJson = JSON.stringify(manifest, null, 2);
-    const manifestBefore = await readBeforeContent(manifestPath);
-    const manifestResult = await invoke<WriteTextFileResult>('write_text_file', {
-      workspacePath: workspace(),
-      relativePath: manifestPath,
-      content: manifestJson,
-    });
-    editHistory?.record({
-      path: manifestResult.path,
-      before: manifestBefore,
-      after: manifestJson,
-    });
-
-    const indexRelativePath = `.CodePapr/apps/${rawAppId}/index.html`;
-    const indexBefore = await readBeforeContent(indexRelativePath);
-
-    const indexResult = await invoke<WriteTextFileResult>('write_text_file', {
-      workspacePath: workspace(),
-      relativePath: indexRelativePath,
-      content: html,
-    });
-    editHistory?.record({
-      path: indexResult.path,
-      before: indexBefore,
-      after: html,
-    });
-
-    const writtenPaths: string[] = [manifestResult.path, indexResult.path];
-
-    let totalBytes = new TextEncoder().encode(html).length;
-
-    if (rawFiles && rawFiles.length > 0) {
-      for (const file of rawFiles) {
-        if (!file.relativePath || typeof file.relativePath !== 'string') {
-          throw new Error('files 每个元素必须包含 relativePath');
-        }
-        if (file.content == null || typeof file.content !== 'string') {
-          throw new Error('files 每个元素必须包含 content');
-        }
-        const filePath = `.CodePapr/apps/${rawAppId}/${file.relativePath}`;
-        if (filePath.includes('..') || file.relativePath.includes('\\') || file.relativePath.startsWith('/') || file.relativePath.includes('\0')) {
-          throw new Error(`文件路径不合法（不能包含 ..、\\、绝对路径或 null 字节）: ${file.relativePath}`);
-        }
-        // #27：剥掉全部前导 ./（旧实现 replace(/^\.\//, '') 只剥一个前缀，
-        // `././manifest.json` 能绕过保留文件校验；Rust 侧 normalize_relative_path
-        // 会把 CurDir 组件折叠，最终仍写入 manifest.json，绕过两轴权限审计）。
-        const normalizedRelative = file.relativePath.replace(/^(\.\/)+/, '').toLowerCase();
-        if (RESERVED_APP_FILES.has(normalizedRelative)) {
-          throw new Error(`不能通过 files 覆盖保留文件: ${file.relativePath}`);
-        }
-        const fileBefore = await readBeforeContent(filePath);
-        const writeResult = await invoke<WriteTextFileResult>('write_text_file', {
-          workspacePath: workspace(),
-          relativePath: filePath,
-          content: file.content,
-        });
-        editHistory?.record({
-          path: writeResult.path,
-          before: fileBefore,
-          after: file.content,
-        });
-        writtenPaths.push(writeResult.path);
-        totalBytes += writeResult.bytes;
-      }
+    const entryFile = resolvePaprEntryFile(manifest);
+    const indexRelativePath = `${appDir}/${entryFile}`;
+    const entryHtml = await readAppTextFile(workspace(), indexRelativePath);
+    if (entryHtml == null) {
+      throw new Error(
+        `找不到入口文件 ${indexRelativePath}。请先用 write 写入该文件，再调用 app_render({ appId: "${rawAppId}" })。`,
+      );
     }
 
     await invoke('register_app_workspace', {
       appId: rawAppId,
       workspacePath: workspace(),
     });
-
-    const existingApp = useAppRuntimeStore.getState().apps.find((a) => a.appId === rawAppId);
-    if (existingApp?.pid) {
-      try { await invoke('stop_background_process', { pid: existingApp.pid, source: 'app_render' }); } catch { /* best-effort */ }
-      useAppRuntimeStore.getState().setAppStopped(rawAppId);
-    }
 
     useAppRuntimeStore.getState().mountApp({
       appId: rawAppId,
@@ -354,8 +311,6 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       runtime.unpinPlugin(rawAppId);
     }
 
-    notifyWorkspaceMutation(writtenPaths);
-
     const hasBackend = !!command;
     const pluginHint =
       '插件已钉在主窗口（overlay）。打开全屏 App 时会暂时隐藏。可在应用面板收起。';
@@ -364,12 +319,24 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       title,
       icon: normalizedIcon ?? null,
       filePath: indexRelativePath,
-      bytes: totalBytes,
+      bytes: new TextEncoder().encode(entryHtml).length,
       mounted: true,
       kind,
       hasBackend,
       ...(kind === 'plugin' ? { pinned: true } : {}),
-      ...(hasBackend ? { command, args: cmdArgs, port, hint: '应用已生成并注册后端服务。用户点击"运行"启动后端后，可在管理面板点"打开"查看。后端进程运行在应用目录（.CodePapr/apps/<appId>/）下，args 中的相对路径（如 "server.js"）按该目录解析；应用自己的运行时数据（数据库等）也应写在应用目录内。' } : { hint: kind === 'plugin' ? pluginHint : '应用已渲染到应用管理面板。用户可点击"打开"查看。如需修改应用，用相同 appId 再次调用 app_render 即可覆盖更新。' }),
+      ...(hasBackend
+        ? {
+            command,
+            args: cmdArgs,
+            port,
+            hint: '应用已从磁盘打开并注册后端服务。用户点击"运行"启动后端后，可在管理面板点"打开"查看。后端进程运行在应用目录（.CodePapr/apps/<appId>/）下。修改文件后再次 app_render({ appId }) 即可刷新。',
+          }
+        : {
+            hint:
+              kind === 'plugin'
+                ? pluginHint
+                : '应用已从磁盘打开到应用管理面板。用户可点击"打开"查看。修改文件后再次 app_render({ appId }) 即可刷新。',
+          }),
     };
   });
 

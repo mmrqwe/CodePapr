@@ -514,8 +514,8 @@
             <div class="addr">APP</div>
             <div class="name">app_render / app_list / app_start / app_stop / app_delete<span class="cchip c-text">App Mode</span><span class="exp"></span></div>
           </div>
-          <div class="desc"><b>app_render</b>: Renders interactive HTML applications in an isolated panel (sandboxed iframe with Papr SDK); paired with <code>app_*</code> tools to manage the lifecycle of applications in <code>.CodePapr/apps/</code>.</div>
-          <div class="more"><div class="mbox"><code>app_render</code> is strictly disabled for subagents to prevent recursive rendering loops; supports custom HTML, permission configs, and dedicated backend processes.</div></div>
+          <div class="desc"><b>app_render</b>: Opens interactive HTML apps already written under <code>.CodePapr/apps/&lt;appId&gt;/</code> (sandboxed iframe with Papr SDK); paired with <code>app_*</code> tools to manage application lifecycle. Files must be written with write/edit/patch; app_render only mounts.</div>
+          <div class="more"><div class="mbox"><code>app_render</code> is strictly disabled for subagents to prevent recursive rendering loops; pass appId only. Permissions, agents, and backend processes live in manifest.json.</div></div>
         </div>
 
         <div class="item">

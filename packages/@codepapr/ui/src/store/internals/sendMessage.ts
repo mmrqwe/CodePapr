@@ -279,7 +279,7 @@ function buildModeSwitchMessage(mode: WorkMode): UIMessage {
     id: createId(),
     role: 'assistant' as const,
     workMode: mode,
-    content: `[Mode: ${mode.toUpperCase()}] ${mode === 'app' ? 'You are now in App mode. Generate interactive HTML applications for data visualization and exploration. Use tools to analyze data, write HTML, and then render with app_render.' : `You are now in ${mode} mode with full tool access. Previous ask-mode responses are for context only; use tools proactively for this task.`}`,
+    content: `[Mode: ${mode.toUpperCase()}] ${mode === 'app' ? 'You are now in App mode. Build interactive HTML apps under .CodePapr/apps/<appId>/ with write/edit/patch, then open them with app_render({ appId }).' : `You are now in ${mode} mode with full tool access. Previous ask-mode responses are for context only; use tools proactively for this task.`}`,
     synthetic: true,
     hidden: true,
     carryForwardInContext: true,

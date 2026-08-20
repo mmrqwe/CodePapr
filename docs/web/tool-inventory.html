@@ -514,8 +514,8 @@
             <div class="addr">APP</div>
             <div class="name">app_render / app_list / app_start / app_stop / app_delete<span class="cchip c-text">App 模式</span><span class="exp"></span></div>
           </div>
-          <div class="desc"><b>app_render</b>：在独立面板中渲染交互式 HTML 应用（运行于沙箱 iframe，注入 Papr SDK）；搭配 <code>app_*</code> 系列工具管理 <code>.CodePapr/apps/</code> 下常驻微应用的完整生命周期。</div>
-          <div class="more"><div class="mbox"><code>app_render</code> 对子代理强制禁用（防止嵌套渲染）；支持配置前端 HTML、权限集、依赖的 Agent 与后端端口进程。</div></div>
+          <div class="desc"><b>app_render</b>：打开已写入 <code>.CodePapr/apps/&lt;appId&gt;/</code> 的交互式 HTML 应用（运行于沙箱 iframe，注入 Papr SDK）；搭配 <code>app_*</code> 系列工具管理常驻微应用的生命周期。文件必须用 write/edit/patch 落盘，app_render 只挂载。</div>
+          <div class="more"><div class="mbox"><code>app_render</code> 对子代理强制禁用（防止嵌套渲染）；只传 appId。权限、Agent、后端进程都写在 manifest.json 里。</div></div>
         </div>
 
         <div class="item">

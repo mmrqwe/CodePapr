@@ -34,12 +34,15 @@ Papr 是 CodePapr 的应用运行时。AI 生成的 App 可以直接在桌面端
 
 ### .papr 格式
 
-App 是 `.CodePapr/apps/<appId>/` 目录下的两个文件（使用 papr.db 后还会生成 `db.sqlite` 存放应用数据）：
+App 是 `.CodePapr/apps/<appId>/` 下的一组源码（使用 papr.db 后还会生成 `db.sqlite`）：
 
 ```
 .CodePapr/apps/my-app/
 ├── manifest.json     ← 元数据 + 权限 + Agent
-├── index.html        ← 入口 HTML
+├── index.html        ← 骨架（link CSS + module 入口）
+├── css/theme.css
+├── js/main.js        ← ES module 入口
+├── js/db.js / ui.js / agent.js / api.js  ← 按职责拆开
 └── db.sqlite         ← papr.db 数据（运行时生成）
 ```
 
@@ -101,11 +104,11 @@ const files = await papr.fs.list();
 
 ### 创建 App
 
-切换 **App 模式**，用自然语言描述想要的 App。Agent 会自动调用 `app_render` 工具生成完整的 manifest.json 和 index.html，注册到应用面板。相同 appId 再次调用会覆盖更新（覆盖前保留上一版到 `.versions/`，可用面板导出 zip）。
+切换 **App 模式**，用自然语言描述想要的 App。Agent 用 `write` / `edit` / `patch` 把 `manifest.json` 和入口 HTML 写到 `.CodePapr/apps/<appId>/`，再调用 `app_render({ appId })` 打开到应用面板。`app_render` 只挂载已落盘的应用，不会写文件。修改后再次 `app_render({ appId })` 即可刷新（面板仍可导出 zip）。
 
 ### 权限（两轴模型）
 
-App 的访问权限由**两个正交轴**组成，在 `app_render`（或 manifest）中声明：
+App 的访问权限由**两个正交轴**组成，在 `manifest.json` 中声明：
 
 | 轴 | 取值 | 能力 |
 |---|---|---|

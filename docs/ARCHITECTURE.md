@@ -121,7 +121,7 @@ LLM 可调用 30 个独立工具（含 `task` / `todo` 两个动态工具），�
 | `browser` | open / navigate / reload / close / click / type / read / screenshot / get | browser_* |
 | `websearch` | 在线搜索 | websearch（原生直接注册）|
 | `webfetch` | 读取网页正文转纯文本；`save: true` 下载原始内容到项目并返回路径 | web_fetch_url / web_download_file |
-| `app_render` | 渲染 .papr App | app_render |
+| `app_render` | 打开已落盘的 .papr App | app_render |
 | `app_list` | 列出所有已注册 app | app_list |
 | `app_start` | 启动 app 后端 | app_start |
 | `app_stop` | 停止 app 后端 | app_stop |
@@ -146,7 +146,9 @@ Papr 是 CodePapr 的应用运行时——AI 生成的 `.papr` App 可以直接�
 ```
 .CodePapr/apps/<appId>/
 ├── manifest.json     ← 应用元数据 + 权限 + Agent 定义
-└── index.html        ← 入口 HTML（可自定义，见 manifest.entry）
+├── index.html        ← 骨架（link CSS + module 入口；可自定义，见 manifest.entry）
+├── css/theme.css
+└── js/main.js / db.js / ui.js / agent.js / api.js
 ```
 
 **manifest.json 规范：**
@@ -222,7 +224,7 @@ papr.db.set('key', value) → .CodePapr/apps/<appId>/db.sqlite 的 app_storage(k
 
 每个 app 一个独立 SQLite 文件（WAL + busy_timeout），与 project.sqlite 内部状态隔离；
 app 目录自包含（manifest + html + db），删除 app 时随目录一并清除。
-db.sqlite 不通过 codepapr-app:// 协议对外提供静态服务，也不能被 app_render.files 覆盖。
+db.sqlite 不通过 codepapr-app:// 协议对外提供静态服务，也不能被 write 覆盖（应用目录里的保留数据文件）。
 
 **App 管理工具：**
 
@@ -237,7 +239,7 @@ LLM 可通过 4 个工具管理 app 生命周期（在 `workspaceTools.ts` 注�
 
 **AppDockPanel — 应用管理面板：**
 
-应用列表 + 底部固定按钮栏。列表项：状态圆点（绿=后端运行中，红=后端已停止，灰=纯前端就绪）+ emoji 图标 + app 名称。底部栏：▶ 启动 / 打开 / ■ 停止 / 🗑 删除 / 导出 zip。纯前端与后端 app 的「打开」都会先尝试启动后端（若需要），失败则留在 dock 并显示进程输出。后端停止时已打开的窗口保持打开，并提示重启。覆盖生成前会把上一版快照到 `.versions/`（排除 `db.sqlite*` / `node_modules`）。
+应用列表 + 底部固定按钮栏。列表项：状态圆点（绿=后端运行中，红=后端已停止，灰=纯前端就绪）+ emoji 图标 + app 名称。底部栏：▶ 启动 / 打开 / ■ 停止 / 🗑 删除 / 导出 zip。纯前端与后端 app 的「打开」都会先尝试启动后端（若需要），失败则留在 dock 并显示进程输出。后端停止时已打开的窗口保持打开，并提示重启。文件由 write/edit/patch 直接改磁盘；`app_render` 只重新挂载，不写文件。
 
 **权限模型（两轴：本地 × 网络）：**
 

@@ -121,7 +121,7 @@ The LLM can invoke 30 discrete tools (including `task`/`todo` as dynamic tools),
 | `browser` | open / navigate / reload / close / click / type / read / screenshot / get | browser_* |
 | `websearch` | Online search | websearch (registered directly) |
 | `webfetch` | Read a webpage as text; with `save: true` download raw content to project and return path | web_fetch_url / web_download_file |
-| `app_render` | Render .papr App | app_render |
+| `app_render` | Open a .papr App already on disk | app_render |
 | `app_list` | List all registered apps | app_list |
 | `app_start` | Start app backend | app_start |
 | `app_stop` | Stop app backend | app_stop |
@@ -146,7 +146,9 @@ Papr is CodePapr's application runtime — AI-generated `.papr` apps run directl
 ```
 .CodePapr/apps/<appId>/
 ├── manifest.json     ← Metadata + permissions + agent definitions
-└── index.html        ← Entry HTML (customizable via manifest.entry)
+├── index.html        ← Shell (link CSS + module entry; customizable via manifest.entry)
+├── css/theme.css
+└── js/main.js / db.js / ui.js / agent.js / api.js
 ```
 
 **manifest.json spec:**
@@ -223,7 +225,7 @@ papr.db.set('key', value) → app_storage(key, value) in .CodePapr/apps/<appId>/
 Each app gets its own SQLite file (WAL + busy_timeout), isolated from project.sqlite
 internal state; the app folder stays self-contained (manifest + html + db) and is removed
 as a whole when the app is deleted. db.sqlite is never served over the codepapr-app://
-protocol and cannot be overwritten via app_render.files.
+protocol and cannot be overwritten as static app content (it is reserved app data).
 
 **App Management Tools:**
 
@@ -238,7 +240,7 @@ LLM can manage app lifecycle via 4 tools (registered as merge tools in `workspac
 
 **AppDockPanel — Application Management Panel:**
 
-App list + fixed bottom action bar. List items: status dot (green = backend running, red = backend stopped, gray = frontend-only ready) + emoji icon + app name. Bottom bar: ▶ Start / Open / ■ Stop / 🗑 Delete / Export zip. Open starts the backend first when needed; failure stays on the dock with process output. Stopping a backend leaves an already-open window in place and prompts to restart. Overwrites snapshot the previous tree into `.versions/` (excluding `db.sqlite*` / `node_modules`).
+App list + fixed bottom action bar. List items: status dot (green = backend running, red = backend stopped, gray = frontend-only ready) + emoji icon + app name. Bottom bar: ▶ Start / Open / ■ Stop / 🗑 Delete / Export zip. Open starts the backend first when needed; failure stays on the dock with process output. Stopping a backend leaves an already-open window in place and prompts to restart. Files are changed with write/edit/patch; `app_render` only remounts and does not write.
 
 **Permission Model (Two Axes: local × network):**
 

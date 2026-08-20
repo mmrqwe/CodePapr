@@ -90,7 +90,7 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
         existingIndex >= 0
           ? state.apps.map((app, index) =>
               index === existingIndex
-                ? { ...app, title: instance.title, icon: instance.icon, html: instance.html, command: instance.command, args: instance.args, port: instance.port, manifestJson: instance.manifestJson, updatedAt: now }
+                ? { ...app, title: instance.title, icon: instance.icon, html: instance.html, filePath: instance.filePath, command: instance.command, args: instance.args, port: instance.port, manifestJson: instance.manifestJson, updatedAt: now }
                 : app
             )
           : [...state.apps, instance];

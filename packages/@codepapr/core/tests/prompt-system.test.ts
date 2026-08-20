@@ -441,10 +441,10 @@ describe('promptSystem', () => {
     expect(en).toContain('Explore data: use list');
   });
 
-  it('app mode examples include the required title parameter in all languages', () => {
+  it('app mode examples include the app name AI Todo App in all languages', () => {
     for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
       const prompt = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang });
-      expect(prompt).toContain('title: "AI Todo App"');
+      expect(prompt).toContain('AI Todo App');
     }
   });
 
@@ -543,12 +543,23 @@ describe('promptSystem', () => {
   it('app mode documents multi-file frontend, http.request, and fs encoding', () => {
     for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
       const prompt = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang });
-      expect(prompt).toContain('app.css');
-      expect(prompt).toContain('app.js');
+      expect(prompt).toContain('css/theme.css');
+      expect(prompt).toContain('js/main.js');
+      expect(prompt).toContain('type="module"');
       expect(prompt).toContain('papr.http.request');
       expect(prompt).toContain('base64');
       expect(prompt).toContain('exists');
     }
+  });
+
+  it('app mode forbids a single html/js monolith', () => {
+    const zhCN = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'zh-CN' });
+    expect(zhCN).toContain('文件拆分');
+    expect(zhCN).toContain('200 行');
+    expect(zhCN).toContain('js/db.js');
+    const en = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'en' });
+    expect(en).toContain('File layout (required)');
+    expect(en).toContain('one giant app.js');
   });
 
   it('all mode prompts pass the ImmutablePrefix static-content guard', () => {

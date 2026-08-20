@@ -411,255 +411,373 @@ describe('workspace search tools includeIgnoredDirs passthrough', () => {
 });
 
 describe('app_render agent tools validation', () => {
-  const BASE_ARGS = {
-    appId: 'demo-app',
-    title: 'Demo App',
-    html: '<!DOCTYPE html><html><body></body></html>',
-  };
-
   function appRegistry(options: RegisterWorkspaceToolsOptions = {}): ToolRegistry {
     return build({ mode: 'app', ...options });
   }
 
-  it('rejects websearch in agent tools when network is off', async () => {
-    await expect(
-      appRegistry().execute('app_render', {
-        ...BASE_ARGS,
-        local: 'read',
-        network: false,
-        agents: [{ name: 'searcher', tools: ['websearch'] }],
-      }),
-    ).rejects.toThrow(/网络.*关闭|不在当前访问档/);
-  });
+  function demoManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      spec: 'papr/0.1',
+      name: 'Demo App',
+      version: '0.1.0',
+      entry: 'index.html',
+      kind: 'app',
+      local: 'none',
+      network: false,
+      ...overrides,
+    };
+  }
 
-  it('accepts websearch in agent tools when network is on', async () => {
-    await expect(
-      appRegistry().execute('app_render', {
-        ...BASE_ARGS,
-        local: 'read',
-        network: true,
-        agents: [{ name: 'searcher', tools: ['websearch'] }],
-      }),
-    ).resolves.toMatchObject({ appId: 'demo-app', mounted: true });
-  });
+  function seedAppDisk(
+    appId: string,
+    manifest: Record<string, unknown>,
+    files: Record<string, string> = {},
+  ): void {
+    const prefix = `.CodePapr/apps/${appId}/`;
+    const entry = typeof manifest.entry === 'string' ? manifest.entry : 'index.html';
+    const disk: Record<string, string> = {
+      [`${prefix}manifest.json`]: JSON.stringify(manifest),
+      [`${prefix}${entry}`]: '<!DOCTYPE html><html><body></body></html>',
+      ...Object.fromEntries(
+        Object.entries(files).map(([relative, content]) => [
+          relative.startsWith('.CodePapr/') ? relative : `${prefix}${relative}`,
+          content,
+        ]),
+      ),
+    };
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_text_file') {
+        const relativePath = String(args?.relativePath ?? '');
+        const content = disk[relativePath];
+        if (content == null) throw new Error(`not found: ${relativePath}`);
+        return {
+          path: `/tmp/ws/${relativePath}`,
+          content,
+          bytes: content.length,
+          startLine: 1,
+          endLine: 1,
+          totalLines: 1,
+          truncatedByRange: false,
+          truncatedByBytes: false,
+        };
+      }
+      if (command === 'write_text_file' || command === 'papr_snapshot_app') {
+        throw new Error(`${command} should not be called by app_render`);
+      }
+      return {};
+    });
+  }
 
-  it('rejects websearch when MCP search is enabled', async () => {
-    await expect(
-      appRegistry({ disableWebSearchTools: true }).execute('app_render', {
-        ...BASE_ARGS,
-        local: 'read',
-        network: true,
-        agents: [{ name: 'searcher', tools: ['websearch'] }],
-      }),
-    ).rejects.toThrow(/MCP 搜索/);
-  });
-
-  it('rejects unknown tool names', async () => {
-    await expect(
-      appRegistry().execute('app_render', {
-        ...BASE_ARGS,
-        agents: [{ name: 'searcher', tools: ['web_search'] }],
-      }),
-    ).rejects.toThrow(/未知工具|不在当前访问档/);
-  });
-
-  it('rejects task and app_render in agent tools', async () => {
-    await expect(
-      appRegistry().execute('app_render', {
-        ...BASE_ARGS,
-        local: 'read',
-        agents: [{ name: 'helper', tools: ['read', 'task'] }],
-      }),
-    ).rejects.toThrow(/始终排除/);
-  });
-
-  it('rejects MCP tools when network is off', async () => {
-    await expect(
-      appRegistry().execute('app_render', {
-        ...BASE_ARGS,
-        local: 'read',
-        network: false,
-        agents: [{ name: 'searcher', tools: ['mcp__search__web_search'] }],
-      }),
-    ).rejects.toThrow(/MCP 工具需要 network/);
-  });
-
-  it('rejects write tools below local write', async () => {
-    await expect(
-      appRegistry().execute('app_render', {
-        ...BASE_ARGS,
-        local: 'read',
-        agents: [{ name: 'editor', tools: ['read', 'write'] }],
-      }),
-    ).rejects.toThrow(/不在当前访问档/);
-  });
-
-  it('rejects bash below local write', async () => {
-    await expect(
-      appRegistry().execute('app_render', {
-        ...BASE_ARGS,
-        local: 'read',
-        agents: [{ name: 'runner', tools: ['bash'] }],
-      }),
-    ).rejects.toThrow(/不在当前访问档/);
-  });
-
-  it('accepts high-risk tools at local write', async () => {
-    await expect(
-      appRegistry().execute('app_render', {
-        ...BASE_ARGS,
-        local: 'write',
-        agents: [{ name: 'runner', tools: ['write', 'bash'] }],
-      }),
-    ).resolves.toMatchObject({ appId: 'demo-app', mounted: true });
-  });
-
-  it('rejects backend command below local read', async () => {
-    await expect(
-      appRegistry().execute('app_render', {
-        ...BASE_ARGS,
-        local: 'none',
-        command: 'node',
-        args: ['server.js'],
-        port: 3456,
-        files: [{ relativePath: 'server.js', content: 'console.log(1)' }],
-      }),
-    ).rejects.toThrow(/后端服务.*local/);
-  });
-
-  it('accepts backend command at local read', async () => {
-    await expect(
-      appRegistry().execute('app_render', {
-        ...BASE_ARGS,
-        local: 'read',
-        network: false,
-        command: 'node',
-        args: ['server.js'],
-        port: 3456,
-        files: [{ relativePath: 'server.js', content: 'console.log(1)' }],
-      }),
-    ).resolves.toMatchObject({ appId: 'demo-app', mounted: true, hasBackend: true });
-  });
-
-  it('maps legacy level to two-axis access in manifest', async () => {
-    await expect(
-      appRegistry().execute('app_render', {
-        ...BASE_ARGS,
-        level: 2,
-        agents: [{ name: 'searcher', tools: ['websearch', 'read'] }],
-      }),
-    ).resolves.toMatchObject({ appId: 'demo-app', mounted: true });
-  });
-
-  it.each([
-    'manifest.json', 'index.html', 'db.sqlite', 'db.sqlite-wal', 'db.sqlite-shm', './db.sqlite',
-    // #27 回归：旧实现 replace(/^\.\//, '') 只剥一个前缀，多重 ./ 可绕过校验，
-    // Rust 侧 normalize 折叠 CurDir 后仍写入 manifest.json（绕过两轴权限审计）
-    '././manifest.json', './././index.html',
-  ])(
-    'rejects reserved file %s in files parameter',
-    async (relativePath) => {
-      await expect(
-        appRegistry().execute('app_render', {
-          ...BASE_ARGS,
-          files: [{ relativePath, content: 'x' }],
-        }),
-      ).rejects.toThrow(/保留文件/);
-    },
-  );
-
-  it('accepts frontend static files alongside backend files', async () => {
-    await expect(
-      appRegistry().execute('app_render', {
-        ...BASE_ARGS,
-        files: [
-          { relativePath: 'app.css', content: 'body{margin:0}' },
-          { relativePath: 'app.js', content: 'window.ready=1' },
-        ],
-      }),
-    ).resolves.toMatchObject({ appId: 'demo-app', mounted: true });
-  });
-
-  it('writes icon into manifest.json so a later scan can restore it', async () => {
-    invokeMock.mockClear();
-    invokeMock.mockResolvedValue({ path: '/tmp/ws/.CodePapr/apps/demo-app/x', bytes: 1 });
-    await appRegistry().execute('app_render', { ...BASE_ARGS, icon: '📊' });
-    const manifestWrite = invokeMock.mock.calls.find(
-      ([command, args]) =>
-        command === 'write_text_file' &&
-        typeof args?.relativePath === 'string' &&
-        args.relativePath.endsWith('manifest.json'),
-    );
-    expect(manifestWrite).toBeTruthy();
-    const written = JSON.parse(String(manifestWrite?.[1]?.content ?? '{}')) as { icon?: string };
-    expect(written.icon).toBe('📊');
-    expect(useAppRuntimeStore.getState().apps.find((a) => a.appId === 'demo-app')?.icon).toBe('📊');
-  });
-
-  it('renders a plugin overlay, auto-pins, and writes kind/surface', async () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({});
     useAppRuntimeStore.setState({
       apps: [],
       openedAppId: null,
       pinnedPluginIds: [],
       overlayLayouts: {},
     });
-    invokeMock.mockClear();
-    invokeMock.mockResolvedValue({ path: '/tmp/ws/.CodePapr/apps/stock-ticker/x', bytes: 1 });
+  });
+
+  it('rejects write payloads and never writes files', async () => {
     await expect(
       appRegistry().execute('app_render', {
-        appId: 'stock-ticker',
-        title: '股票看板',
+        appId: 'demo-app',
+        title: 'Demo App',
         html: '<!DOCTYPE html><html><body></body></html>',
+      }),
+    ).rejects.toThrow(/只打开已落盘|不能写入文件/);
+    expect(invokeMock.mock.calls.some(([command]) => command === 'write_text_file')).toBe(false);
+    expect(invokeMock.mock.calls.some(([command]) => command === 'read_text_file')).toBe(false);
+  });
+
+  it('rejects extra write fields even when only some are present', async () => {
+    await expect(
+      appRegistry().execute('app_render', {
+        appId: 'demo-app',
+        files: [{ relativePath: 'app.css', content: 'body{}' }],
+      }),
+    ).rejects.toThrow(/files/);
+    await expect(
+      appRegistry().execute('app_render', { appId: 'demo-app', kind: 'plugin' }),
+    ).rejects.toThrow(/kind/);
+  });
+
+  it('errors when the app is not on disk yet', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'read_text_file') throw new Error('not found');
+      return {};
+    });
+    await expect(appRegistry().execute('app_render', { appId: 'missing-app' })).rejects.toThrow(
+      /找不到.*manifest\.json/,
+    );
+  });
+
+  it('rejects websearch in agent tools when network is off', async () => {
+    seedAppDisk(
+      'demo-app',
+      demoManifest({
+        local: 'read',
+        network: false,
+        agents: [{ name: 'searcher', tools: ['websearch'] }],
+      }),
+    );
+    await expect(appRegistry().execute('app_render', { appId: 'demo-app' })).rejects.toThrow(
+      /网络.*关闭|不在当前访问档/,
+    );
+  });
+
+  it('accepts websearch in agent tools when network is on', async () => {
+    seedAppDisk(
+      'demo-app',
+      demoManifest({
+        local: 'read',
+        network: true,
+        agents: [{ name: 'searcher', tools: ['websearch'] }],
+      }),
+    );
+    await expect(appRegistry().execute('app_render', { appId: 'demo-app' })).resolves.toMatchObject({
+      appId: 'demo-app',
+      mounted: true,
+    });
+    expect(invokeMock.mock.calls.some(([command]) => command === 'write_text_file')).toBe(false);
+  });
+
+  it('rejects websearch when MCP search is enabled', async () => {
+    seedAppDisk(
+      'demo-app',
+      demoManifest({
+        local: 'read',
+        network: true,
+        agents: [{ name: 'searcher', tools: ['websearch'] }],
+      }),
+    );
+    await expect(
+      appRegistry({ disableWebSearchTools: true }).execute('app_render', { appId: 'demo-app' }),
+    ).rejects.toThrow(/MCP 搜索/);
+  });
+
+  it('rejects unknown tool names', async () => {
+    seedAppDisk(
+      'demo-app',
+      demoManifest({
+        agents: [{ name: 'searcher', tools: ['web_search'] }],
+      }),
+    );
+    await expect(appRegistry().execute('app_render', { appId: 'demo-app' })).rejects.toThrow(
+      /未知工具|不在当前访问档/,
+    );
+  });
+
+  it('rejects task and app_render in agent tools', async () => {
+    seedAppDisk(
+      'demo-app',
+      demoManifest({
+        local: 'read',
+        agents: [{ name: 'helper', tools: ['read', 'task'] }],
+      }),
+    );
+    await expect(appRegistry().execute('app_render', { appId: 'demo-app' })).rejects.toThrow(/始终排除/);
+  });
+
+  it('rejects MCP tools when network is off', async () => {
+    seedAppDisk(
+      'demo-app',
+      demoManifest({
+        local: 'read',
+        network: false,
+        agents: [{ name: 'searcher', tools: ['mcp__search__web_search'] }],
+      }),
+    );
+    await expect(appRegistry().execute('app_render', { appId: 'demo-app' })).rejects.toThrow(
+      /MCP 工具需要 network/,
+    );
+  });
+
+  it('rejects write tools below local write', async () => {
+    seedAppDisk(
+      'demo-app',
+      demoManifest({
+        local: 'read',
+        agents: [{ name: 'editor', tools: ['read', 'write'] }],
+      }),
+    );
+    await expect(appRegistry().execute('app_render', { appId: 'demo-app' })).rejects.toThrow(
+      /不在当前访问档/,
+    );
+  });
+
+  it('rejects bash below local write', async () => {
+    seedAppDisk(
+      'demo-app',
+      demoManifest({
+        local: 'read',
+        agents: [{ name: 'runner', tools: ['bash'] }],
+      }),
+    );
+    await expect(appRegistry().execute('app_render', { appId: 'demo-app' })).rejects.toThrow(
+      /不在当前访问档/,
+    );
+  });
+
+  it('accepts high-risk tools at local write', async () => {
+    seedAppDisk(
+      'demo-app',
+      demoManifest({
+        local: 'write',
+        agents: [{ name: 'runner', tools: ['write', 'bash'] }],
+      }),
+    );
+    await expect(appRegistry().execute('app_render', { appId: 'demo-app' })).resolves.toMatchObject({
+      appId: 'demo-app',
+      mounted: true,
+    });
+  });
+
+  it('rejects backend command below local read', async () => {
+    seedAppDisk(
+      'demo-app',
+      demoManifest({
+        local: 'none',
+        command: 'node',
+        args: ['server.js'],
+        port: 3456,
+      }),
+    );
+    await expect(appRegistry().execute('app_render', { appId: 'demo-app' })).rejects.toThrow(
+      /后端服务.*local/,
+    );
+  });
+
+  it('accepts backend command at local read', async () => {
+    seedAppDisk(
+      'demo-app',
+      demoManifest({
+        local: 'read',
+        network: false,
+        command: 'node',
+        args: ['server.js'],
+        port: 3456,
+      }),
+    );
+    await expect(appRegistry().execute('app_render', { appId: 'demo-app' })).resolves.toMatchObject({
+      appId: 'demo-app',
+      mounted: true,
+      hasBackend: true,
+    });
+  });
+
+  it('maps legacy level to two-axis access in manifest', async () => {
+    seedAppDisk(
+      'demo-app',
+      demoManifest({
+        local: undefined,
+        network: undefined,
+        level: 2,
+        agents: [{ name: 'searcher', tools: ['websearch', 'read'] }],
+      }),
+    );
+    await expect(appRegistry().execute('app_render', { appId: 'demo-app' })).resolves.toMatchObject({
+      appId: 'demo-app',
+      mounted: true,
+    });
+  });
+
+  it('mounts icon from disk so a later scan can restore it', async () => {
+    seedAppDisk('demo-app', demoManifest({ icon: '📊' }));
+    await appRegistry().execute('app_render', { appId: 'demo-app' });
+    expect(invokeMock.mock.calls.some(([command]) => command === 'write_text_file')).toBe(false);
+    expect(useAppRuntimeStore.getState().apps.find((a) => a.appId === 'demo-app')?.icon).toBe('📊');
+  });
+
+  it('renders a plugin overlay, auto-pins, and reads kind/surface from disk', async () => {
+    seedAppDisk(
+      'stock-ticker',
+      demoManifest({
+        name: '股票看板',
         kind: 'plugin',
         local: 'none',
         network: true,
         surface: { type: 'overlay', width: 320, height: 180, position: 'top-right' },
       }),
-    ).resolves.toMatchObject({ appId: 'stock-ticker', kind: 'plugin', pinned: true, hasBackend: false });
-
-    const manifestWrite = invokeMock.mock.calls.find(
-      ([command, args]) =>
-        command === 'write_text_file' &&
-        typeof args?.relativePath === 'string' &&
-        args.relativePath.endsWith('manifest.json'),
     );
-    const written = JSON.parse(String(manifestWrite?.[1]?.content ?? '{}')) as {
-      kind?: string;
-      surface?: { type?: string };
-    };
-    expect(written.kind).toBe('plugin');
-    expect(written.surface?.type).toBe('overlay');
+    await expect(appRegistry().execute('app_render', { appId: 'stock-ticker' })).resolves.toMatchObject({
+      appId: 'stock-ticker',
+      kind: 'plugin',
+      pinned: true,
+      hasBackend: false,
+    });
+    expect(invokeMock.mock.calls.some(([command]) => command === 'write_text_file')).toBe(false);
     expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual(['stock-ticker']);
   });
 
-  it('rejects plugin backends, write access, and non-overlay surfaces', async () => {
-    await expect(
-      appRegistry().execute('app_render', {
-        ...BASE_ARGS,
-        appId: 'bad-plugin',
+  it('rejects plugin backends, write access, and non-overlay surfaces from the manifest', async () => {
+    seedAppDisk(
+      'bad-plugin',
+      demoManifest({
         kind: 'plugin',
         command: 'node',
         args: ['server.js'],
         port: 3456,
         local: 'read',
       }),
-    ).rejects.toThrow(/后端/);
-    await expect(
-      appRegistry().execute('app_render', {
-        ...BASE_ARGS,
-        appId: 'write-plugin',
+    );
+    await expect(appRegistry().execute('app_render', { appId: 'bad-plugin' })).rejects.toThrow(/后端/);
+
+    seedAppDisk(
+      'write-plugin',
+      demoManifest({
         kind: 'plugin',
         local: 'write',
       }),
-    ).rejects.toThrow(/write/);
-    await expect(
-      appRegistry().execute('app_render', {
-        ...BASE_ARGS,
-        appId: 'hud-plugin',
+    );
+    await expect(appRegistry().execute('app_render', { appId: 'write-plugin' })).rejects.toThrow(/write/);
+
+    seedAppDisk(
+      'hud-plugin',
+      demoManifest({
         kind: 'plugin',
         surface: { type: 'hud' },
       }),
-    ).rejects.toThrow(/overlay/);
+    );
+    await expect(appRegistry().execute('app_render', { appId: 'hud-plugin' })).rejects.toThrow(/overlay/);
+  });
+
+  it('remounts without stopping a running backend or snapshotting', async () => {
+    useAppRuntimeStore.setState({
+      apps: [
+        {
+          appId: 'demo-app',
+          title: 'Demo App',
+          html: '',
+          filePath: '.CodePapr/apps/demo-app/index.html',
+          command: 'node',
+          args: ['server.js'],
+          port: 3456,
+          pid: 12345,
+          url: 'http://localhost:3456/',
+          manifestJson: '{}',
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+      openedAppId: null,
+      pinnedPluginIds: [],
+      overlayLayouts: {},
+    });
+    seedAppDisk(
+      'demo-app',
+      demoManifest({
+        local: 'read',
+        command: 'node',
+        args: ['server.js'],
+        port: 3456,
+      }),
+    );
+    await appRegistry().execute('app_render', { appId: 'demo-app' });
+    expect(useAppRuntimeStore.getState().apps.find((a) => a.appId === 'demo-app')?.pid).toBe(12345);
+    expect(invokeMock.mock.calls.some(([command]) => command === 'stop_background_process')).toBe(false);
+    expect(invokeMock.mock.calls.some(([command]) => command === 'papr_snapshot_app')).toBe(false);
   });
 
   it('app_delete 先停止运行中的后端进程再删文件（工具定义承诺会停）', async () => {
