@@ -27,6 +27,10 @@ function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile
     typeof obj.maxTokens === 'number' && Number.isFinite(obj.maxTokens)
       ? Math.max(100, Math.floor(obj.maxTokens))
       : DEFAULT_SETTINGS.maxTokens;
+  const maxContextTokens =
+    typeof obj.maxContextTokens === 'number' && Number.isFinite(obj.maxContextTokens)
+      ? Math.max(1000, Math.floor(obj.maxContextTokens))
+      : undefined;
   const thinkingEnabled = typeof obj.thinkingEnabled === 'boolean' ? obj.thinkingEnabled : false;
   const thinkingEffort = typeof obj.thinkingEffort === 'string' ? obj.thinkingEffort.trim() : '';
   const thinkingBudgetTokens =
@@ -41,6 +45,14 @@ function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile
     typeof obj.topP === 'number' && Number.isFinite(obj.topP)
       ? Math.max(0, Math.min(1, obj.topP))
       : undefined;
+  const topK =
+    typeof obj.topK === 'number' && Number.isFinite(obj.topK)
+      ? Math.max(0, Math.floor(obj.topK))
+      : undefined;
+  const multimodalEnabled =
+    typeof obj.multimodalEnabled === 'boolean'
+      ? obj.multimodalEnabled
+      : undefined;
 
   return {
     id,
@@ -51,11 +63,14 @@ function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile
     apiKey,
     model,
     maxTokens,
+    ...(maxContextTokens !== undefined ? { maxContextTokens } : {}),
     thinkingEnabled,
     thinkingEffort,
     thinkingBudgetTokens,
     ...(temperature !== undefined ? { temperature } : {}),
     ...(topP !== undefined ? { topP } : {}),
+    ...(topK !== undefined ? { topK } : {}),
+    ...(multimodalEnabled !== undefined ? { multimodalEnabled } : {}),
   };
 }
 
@@ -74,6 +89,10 @@ export function createDefaultProfile(
       apiKey: '',
       model: 'deepseek-v4-pro',
       maxTokens: DEFAULT_SETTINGS.maxTokens,
+      maxContextTokens: 1048565,
+      temperature: 0.7,
+      topP: 0.9,
+      multimodalEnabled: false,
       thinkingEnabled: true,
       thinkingEffort: 'max',
       thinkingBudgetTokens: 4096,
@@ -89,6 +108,10 @@ export function createDefaultProfile(
       apiKey: '',
       model: 'local-model',
       maxTokens: DEFAULT_SETTINGS.maxTokens,
+      maxContextTokens: 128000,
+      temperature: 0.7,
+      topP: 0.9,
+      multimodalEnabled: false,
       thinkingEnabled: false,
       thinkingEffort: '',
       thinkingBudgetTokens: 0,
@@ -103,6 +126,10 @@ export function createDefaultProfile(
     apiKey: '',
     model: 'gpt-4o',
     maxTokens: DEFAULT_SETTINGS.maxTokens,
+    maxContextTokens: 128000,
+    temperature: 0.7,
+    topP: 0.9,
+    multimodalEnabled: true,
     thinkingEnabled: false,
     thinkingEffort: '',
     thinkingBudgetTokens: 4096,
@@ -138,6 +165,10 @@ function buildSynthesizedProfiles(
       apiKey: deepseek.apiKey,
       model: deepseek.model || 'deepseek-v4-pro',
       maxTokens: deepseek.maxTokens || DEFAULT_SETTINGS.maxTokens,
+      maxContextTokens: 1048565,
+      temperature: 0.7,
+      topP: 0.9,
+      multimodalEnabled: false,
       thinkingEnabled: apiMode === 'deepseek' ? thinkingEnabled : true,
       thinkingEffort: apiMode === 'deepseek' ? thinkingEffort : 'max',
       thinkingBudgetTokens: apiMode === 'deepseek' ? thinkingBudgetTokens : 4096,
@@ -151,6 +182,10 @@ function buildSynthesizedProfiles(
       apiKey: deepseek.apiKey,
       model: deepseek.fastModel || 'deepseek-v4-flash',
       maxTokens: deepseek.maxTokens || DEFAULT_SETTINGS.maxTokens,
+      maxContextTokens: 1048565,
+      temperature: 0.7,
+      topP: 0.9,
+      multimodalEnabled: false,
       thinkingEnabled: false,
       thinkingEffort: '',
       thinkingBudgetTokens: 0,
@@ -164,6 +199,10 @@ function buildSynthesizedProfiles(
       apiKey: custom.apiKey,
       model: custom.model || 'gpt-4o',
       maxTokens: custom.maxTokens || DEFAULT_SETTINGS.maxTokens,
+      maxContextTokens: typeof input.maxContextTokens === 'number' ? input.maxContextTokens : 128000,
+      temperature: typeof input.temperature === 'number' ? input.temperature : 0.7,
+      topP: typeof input.topP === 'number' ? input.topP : 0.9,
+      multimodalEnabled: typeof input.multimodalEnabled === 'boolean' ? input.multimodalEnabled : true,
       thinkingEnabled: apiMode === 'custom' ? thinkingEnabled : false,
       thinkingEffort: apiMode === 'custom' ? thinkingEffort : '',
       thinkingBudgetTokens: apiMode === 'custom' ? thinkingBudgetTokens : 4096,
@@ -177,6 +216,10 @@ function buildSynthesizedProfiles(
       apiKey: local.apiKey,
       model: local.model || 'local-model',
       maxTokens: local.maxTokens || DEFAULT_SETTINGS.maxTokens,
+      maxContextTokens: 128000,
+      temperature: 0.7,
+      topP: 0.9,
+      multimodalEnabled: false,
       thinkingEnabled: false,
       thinkingEffort: '',
       thinkingBudgetTokens: 0,
@@ -193,6 +236,10 @@ function buildSynthesizedProfiles(
       apiKey: mentorApiKey,
       model: mentorModel || 'claude-sonnet-4-20250514',
       maxTokens: mentorMaxTokens,
+      maxContextTokens: 200000,
+      temperature: 0.7,
+      topP: 0.9,
+      multimodalEnabled: true,
       thinkingEnabled: mentorThinkingEnabled,
       thinkingEffort: mentorThinkingEffort,
       thinkingBudgetTokens: mentorThinkingBudgetTokens,
@@ -877,6 +924,23 @@ export function normalizeSettings(
     ? activeMentorProfile.maxTokens
     : mentorMaxTokens;
 
+  const effectiveTemperature =
+    hasExplicitProfiles && activePrimaryProfile.temperature !== undefined
+      ? activePrimaryProfile.temperature
+      : temperature;
+  const effectiveTopP =
+    hasExplicitProfiles && activePrimaryProfile.topP !== undefined
+      ? activePrimaryProfile.topP
+      : topP;
+  const effectiveMaxContextTokens =
+    hasExplicitProfiles && activePrimaryProfile.maxContextTokens !== undefined
+      ? activePrimaryProfile.maxContextTokens
+      : maxContextTokens;
+  const effectiveMultimodalEnabled =
+    hasExplicitProfiles && activePrimaryProfile.multimodalEnabled !== undefined
+      ? activePrimaryProfile.multimodalEnabled
+      : multimodalEnabled;
+
   // Keep per-mode configs up-to-date with active configurations
   if (effectiveApiMode === 'deepseek') {
     deepseek.apiKey = effectiveApiKey;
@@ -924,13 +988,13 @@ export function normalizeSettings(
     chatBordersEnabled,
     experimentalCharacters,
     experimentalVoice,
-    temperature,
-    topP,
-    multimodalEnabled,
+    temperature: effectiveTemperature,
+    topP: effectiveTopP,
+    multimodalEnabled: effectiveMultimodalEnabled,
     multimodalModelTier,
     maxTokens,
     maxToolRounds,
-    maxContextTokens,
+    maxContextTokens: effectiveMaxContextTokens,
     maxConversationRounds,
     chatRenderBatchRounds,
     compactionModel,
@@ -1028,6 +1092,30 @@ export function resolveProviderName(settings: { apiMode: ApiMode; apiFormat: Api
 }
 
 export function resolveMultimodalEnabled(settings: Settings, currentModel: string): boolean {
+  if (Array.isArray(settings.modelProfiles) && settings.modelProfiles.length > 0) {
+    if (settings.primaryProfileId) {
+      const primary = settings.modelProfiles.find((p) => p.id === settings.primaryProfileId);
+      if (primary && primary.model === currentModel && typeof primary.multimodalEnabled === 'boolean') {
+        return primary.multimodalEnabled;
+      }
+    }
+    if (settings.fastProfileId) {
+      const fast = settings.modelProfiles.find((p) => p.id === settings.fastProfileId);
+      if (fast && fast.model === currentModel && typeof fast.multimodalEnabled === 'boolean') {
+        return fast.multimodalEnabled;
+      }
+    }
+    if (settings.mentorProfileId) {
+      const mentor = settings.modelProfiles.find((p) => p.id === settings.mentorProfileId);
+      if (mentor && mentor.model === currentModel && typeof mentor.multimodalEnabled === 'boolean') {
+        return mentor.multimodalEnabled;
+      }
+    }
+    const matched = settings.modelProfiles.find((p) => p.model === currentModel);
+    if (matched && typeof matched.multimodalEnabled === 'boolean') {
+      return matched.multimodalEnabled;
+    }
+  }
   if (!settings.multimodalEnabled) return false;
   if (settings.multimodalModelTier === 'all') return true;
   const fastModel = settings.fastModel.trim();

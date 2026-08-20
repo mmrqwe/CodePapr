@@ -77,6 +77,10 @@ export function ProfileEditorModal({
         apiFormat: 'openai',
         baseURL: '',
         model: 'deepseek-v4-pro',
+        maxContextTokens: 1048565,
+        temperature: 0.7,
+        topP: 0.9,
+        multimodalEnabled: false,
         thinkingEnabled: true,
         thinkingEffort: 'max',
       }),
@@ -89,6 +93,10 @@ export function ProfileEditorModal({
         apiFormat: 'openai',
         baseURL: '',
         model: 'deepseek-v4-flash',
+        maxContextTokens: 1048565,
+        temperature: 0.7,
+        topP: 0.9,
+        multimodalEnabled: false,
         thinkingEnabled: false,
         thinkingEffort: '',
       }),
@@ -101,6 +109,10 @@ export function ProfileEditorModal({
         apiFormat: 'claude',
         baseURL: 'https://openrouter.ai/api/v1',
         model: 'anthropic/claude-3.7-sonnet',
+        maxContextTokens: 200000,
+        temperature: 0.7,
+        topP: 0.9,
+        multimodalEnabled: true,
         thinkingEnabled: true,
         thinkingBudgetTokens: 4096,
       }),
@@ -113,6 +125,10 @@ export function ProfileEditorModal({
         apiFormat: 'openai',
         baseURL: 'https://api.siliconflow.cn/v1',
         model: 'deepseek-ai/DeepSeek-V3',
+        maxContextTokens: 128000,
+        temperature: 0.7,
+        topP: 0.9,
+        multimodalEnabled: false,
         thinkingEnabled: false,
       }),
     },
@@ -124,6 +140,10 @@ export function ProfileEditorModal({
         apiFormat: 'openai',
         baseURL: 'https://api.openai.com/v1',
         model: 'gpt-4o',
+        maxContextTokens: 128000,
+        temperature: 0.7,
+        topP: 0.9,
+        multimodalEnabled: true,
         thinkingEnabled: false,
       }),
     },
@@ -135,6 +155,10 @@ export function ProfileEditorModal({
         apiFormat: 'response',
         baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
         model: 'doubao-1.5-pro-32k',
+        maxContextTokens: 128000,
+        temperature: 0.7,
+        topP: 0.9,
+        multimodalEnabled: false,
         thinkingEnabled: false,
       }),
     },
@@ -147,6 +171,10 @@ export function ProfileEditorModal({
         baseURL: 'http://127.0.0.1:8080/v1',
         apiKey: '',
         model: 'local-model',
+        maxContextTokens: 128000,
+        temperature: 0.7,
+        topP: 0.9,
+        multimodalEnabled: false,
         thinkingEnabled: false,
       }),
     },
@@ -430,19 +458,101 @@ export function ProfileEditorModal({
           </div>
         )}
 
-        {/* Max Tokens */}
-        <TextField
-          label={t.maxTokens}
-          type="number"
-          min={100}
-          max={maxTokensLimit}
-          step={500}
-          value={draft.maxTokens}
-          onChange={(e) => {
-            const parsed = parseInt(e.target.value, 10);
-            update({ maxTokens: Number.isFinite(parsed) ? parsed : draft.maxTokens });
-          }}
-        />
+        {/* Multimodal Vision */}
+        <div className="rounded-xl border border-line bg-base p-4">
+          <ToggleField
+            checked={draft.multimodalEnabled ?? false}
+            onChange={(checked) => update({ multimodalEnabled: checked })}
+            label={t.multimodalLabel}
+            desc={
+              currentLang === 'en'
+                ? 'Allow this model to receive and analyze image inputs. (Model must support vision capabilities)'
+                : '允许此模型接收并解析图片与视觉输入（需模型本身支持多模态）'
+            }
+          />
+        </div>
+
+        {/* Context & Sampling Parameters */}
+        <div className="rounded-xl border border-line bg-base p-4 space-y-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-fg-muted">
+            {currentLang === 'en' ? 'Context & Sampling Parameters' : '上下文与采样参数'}
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TextField
+              label={t.maxContextTokens}
+              type="number"
+              min={1000}
+              max={2000000}
+              step={10000}
+              value={draft.maxContextTokens ?? 128000}
+              onChange={(e) => {
+                const parsed = parseInt(e.target.value, 10);
+                update({ maxContextTokens: Number.isFinite(parsed) ? parsed : 128000 });
+              }}
+              placeholder="128000"
+            />
+
+            <TextField
+              label={t.maxTokens}
+              type="number"
+              min={100}
+              max={maxTokensLimit}
+              step={500}
+              value={draft.maxTokens}
+              onChange={(e) => {
+                const parsed = parseInt(e.target.value, 10);
+                update({ maxTokens: Number.isFinite(parsed) ? parsed : draft.maxTokens });
+              }}
+            />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
+                {t.temperature}: <span className="font-mono text-accent-text">{draft.temperature ?? 0.7}</span>
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="2"
+                step="0.05"
+                value={draft.temperature ?? 0.7}
+                onChange={(e) => update({ temperature: parseFloat(e.target.value) })}
+                className="w-full cursor-pointer accent-accent"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
+                {t.topPLabel}: <span className="font-mono text-accent-text">{draft.topP ?? 0.9}</span>
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={draft.topP ?? 0.9}
+                onChange={(e) => update({ topP: parseFloat(e.target.value) })}
+                className="w-full cursor-pointer accent-accent"
+              />
+            </div>
+
+            <TextField
+              label={currentLang === 'en' ? 'Top K (Optional)' : 'Top K（可选）'}
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              value={draft.topK ?? ''}
+              onChange={(e) => {
+                const parsed = parseInt(e.target.value, 10);
+                update({ topK: Number.isFinite(parsed) && parsed > 0 ? parsed : undefined });
+              }}
+              placeholder={currentLang === 'en' ? 'Default' : '默认'}
+            />
+          </div>
+        </div>
 
         {/* Footer actions */}
         <div className="flex items-center justify-between border-t border-line pt-4">

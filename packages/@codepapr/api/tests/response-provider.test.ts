@@ -95,7 +95,14 @@ describe('ResponseProvider', () => {
     const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(calledBody.model).toBe('gpt-4o');
     expect(calledBody.reasoning).toEqual({ effort: 'high' });
-    expect(calledBody.tools).toBeDefined();
+    expect(calledBody.tools).toEqual([
+      {
+        type: 'function',
+        name: 'get_weather',
+        description: 'Get weather',
+        parameters: { type: 'object', properties: { city: { type: 'string' } } },
+      },
+    ]);
 
     expect(res.id).toBe('resp_123');
     expect(res.choices[0].message.content).toBe('Hello from Responses API!');

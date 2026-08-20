@@ -59,6 +59,18 @@ export function useSettingsForm() {
         thinkingBudgetTokens: primaryProfile
           ? (primaryProfile.thinkingBudgetTokens ?? 4096)
           : merged.thinkingBudgetTokens,
+        temperature: primaryProfile?.temperature !== undefined
+          ? primaryProfile.temperature
+          : merged.temperature,
+        topP: primaryProfile?.topP !== undefined
+          ? primaryProfile.topP
+          : merged.topP,
+        maxContextTokens: primaryProfile?.maxContextTokens !== undefined
+          ? primaryProfile.maxContextTokens
+          : merged.maxContextTokens,
+        multimodalEnabled: primaryProfile?.multimodalEnabled !== undefined
+          ? primaryProfile.multimodalEnabled
+          : merged.multimodalEnabled,
         mentorModel: mentorProfile ? mentorProfile.model : merged.mentorModel,
         mentorBaseURL: mentorProfile ? mentorProfile.baseURL : merged.mentorBaseURL,
         mentorApiKey: mentorProfile ? mentorProfile.apiKey : merged.mentorApiKey,

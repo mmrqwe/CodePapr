@@ -34,11 +34,14 @@ export interface ModelProfile {
   apiKey: string;
   model: string;
   maxTokens: number;
+  maxContextTokens?: number;
   thinkingEnabled?: boolean;
   thinkingEffort?: string;
   thinkingBudgetTokens?: number;
   temperature?: number;
   topP?: number;
+  topK?: number;
+  multimodalEnabled?: boolean;
 }
 
 export interface Settings {

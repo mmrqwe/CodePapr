@@ -594,7 +594,7 @@ export class ResponseProvider extends BaseLLMProvider {
     max_output_tokens: number;
     temperature?: number;
     top_p?: number;
-    tools?: Array<{ type: 'function'; function: { name: string; description: string; parameters: unknown } }>;
+    tools?: Array<{ type: 'function'; name: string; description: string; parameters: unknown }>;
     reasoning?: { effort: string };
   } {
     const inputItems: unknown[] = [];
@@ -655,7 +655,7 @@ export class ResponseProvider extends BaseLLMProvider {
       max_output_tokens: number;
       temperature?: number;
       top_p?: number;
-      tools?: Array<{ type: 'function'; function: { name: string; description: string; parameters: unknown } }>;
+      tools?: Array<{ type: 'function'; name: string; description: string; parameters: unknown }>;
       reasoning?: { effort: string };
     } = {
       model: request.model,
@@ -667,11 +667,9 @@ export class ResponseProvider extends BaseLLMProvider {
     if (request.tools && request.tools.length > 0) {
       payload.tools = request.tools.map((t) => ({
         type: 'function' as const,
-        function: {
-          name: t.name,
-          description: t.description,
-          parameters: t.parameters,
-        },
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters,
       }));
     }
 

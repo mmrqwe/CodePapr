@@ -217,10 +217,22 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
                   </span>
                   <span>·</span>
                   <span>{getProfileBadge(primaryProfile)}</span>
+                  {primaryProfile.multimodalEnabled && (
+                    <>
+                      <span>·</span>
+                      <span className="text-accent font-medium">🖼️ {currentLang === 'en' ? 'Vision' : '多模态'}</span>
+                    </>
+                  )}
+                  {primaryProfile.maxContextTokens && (
+                    <>
+                      <span>·</span>
+                      <span>{Math.round(primaryProfile.maxContextTokens / 1000)}k {currentLang === 'en' ? 'Context' : '上下文'}</span>
+                    </>
+                  )}
                   {primaryProfile.thinkingEnabled && (
                     <>
                       <span>·</span>
-                      <span className="text-ok">思考模式开启</span>
+                      <span className="text-ok">🧠 {currentLang === 'en' ? 'Thinking' : '思考模式'}</span>
                     </>
                   )}
                 </div>
@@ -302,6 +314,18 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
                     </span>
                     <span>·</span>
                     <span>{getProfileBadge(fastProfile)}</span>
+                    {fastProfile.multimodalEnabled && (
+                      <>
+                        <span>·</span>
+                        <span className="text-accent font-medium">🖼️ {currentLang === 'en' ? 'Vision' : '多模态'}</span>
+                      </>
+                    )}
+                    {fastProfile.maxContextTokens && (
+                      <>
+                        <span>·</span>
+                        <span>{Math.round(fastProfile.maxContextTokens / 1000)}k {currentLang === 'en' ? 'Context' : '上下文'}</span>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -382,6 +406,18 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
                     </span>
                     <span>·</span>
                     <span>{getProfileBadge(mentorProfile)}</span>
+                    {mentorProfile.multimodalEnabled && (
+                      <>
+                        <span>·</span>
+                        <span className="text-accent font-medium">🖼️ {currentLang === 'en' ? 'Vision' : '多模态'}</span>
+                      </>
+                    )}
+                    {mentorProfile.maxContextTokens && (
+                      <>
+                        <span>·</span>
+                        <span>{Math.round(mentorProfile.maxContextTokens / 1000)}k {currentLang === 'en' ? 'Context' : '上下文'}</span>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -476,6 +512,29 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
                   <div>
                     Key: <span className="font-mono">{maskedKey}</span>
                   </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-fg-muted">
+                  {prof.multimodalEnabled && (
+                    <span className="rounded bg-accent/10 px-1.5 py-0.5 text-accent font-medium">
+                      🖼️ {currentLang === 'en' ? 'Vision' : '多模态'}
+                    </span>
+                  )}
+                  {prof.maxContextTokens && (
+                    <span className="rounded bg-raised border border-line px-1.5 py-0.5 font-mono">
+                      {Math.round(prof.maxContextTokens / 1000)}k {currentLang === 'en' ? 'ctx' : '上下文'}
+                    </span>
+                  )}
+                  {prof.temperature !== undefined && (
+                    <span className="rounded bg-raised border border-line px-1.5 py-0.5 font-mono">
+                      T: {prof.temperature}
+                    </span>
+                  )}
+                  {prof.thinkingEnabled && (
+                    <span className="rounded bg-ok/10 px-1.5 py-0.5 text-ok font-medium">
+                      🧠 {currentLang === 'en' ? 'Thinking' : '思考'}
+                    </span>
+                  )}
                 </div>
 
                 {/* Card Actions */}
