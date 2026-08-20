@@ -2,41 +2,17 @@ import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { MonacoDiffEditor } from './MonacoDiffEditor';
 import { useAgentStore } from '../store/agentStore';
-import type { ReviewScope } from '../utils/codeReview';
+import {
+  fileEntriesFromSnapshotDiffs,
+  isWorktreeRef,
+  type ReviewFileEntry,
+  type ReviewScope,
+} from '../utils/codeReview';
 import { languageFromPath } from '../utils/editorLanguage';
-
-interface CommandResult {
-  command: string;
-  args: string[];
-  status: number | null;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-}
-
-interface FileEntry {
-  path: string;
-  status: 'added' | 'modified' | 'deleted' | 'renamed';
-}
-
-function parseDiffFileList(stdout: string): FileEntry[] {
-  const entries: FileEntry[] = [];
-  for (const line of stdout.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const match = /^([ADM])\t(.+)$/.exec(trimmed) || /^R\d*\t(.+?)\t(.+)$/.exec(trimmed);
-    if (match) {
-      if (match[1] === 'A') entries.push({ path: match[2], status: 'added' });
-      else if (match[1] === 'D') entries.push({ path: match[2], status: 'deleted' });
-      else if (match[1] === 'M') entries.push({ path: match[2], status: 'modified' });
-      else if (match[2] && match[3]) entries.push({ path: match[3], status: 'renamed' });
-    }
-  }
-  return entries;
-}
+import { diffSnapshots, snapshotFileContent } from '../utils/snapshot';
 
 async function loadFileContent(workspacePath: string, ref: string, filePath: string): Promise<string> {
-  if (ref === 'WORKTREE') {
+  if (isWorktreeRef(ref)) {
     const result = await invoke<{ content: string }>('read_text_file', {
       workspacePath,
       relativePath: filePath,
@@ -44,45 +20,20 @@ async function loadFileContent(workspacePath: string, ref: string, filePath: str
     });
     return result.content ?? '';
   }
-  const result = await invoke<CommandResult>('run_workspace_command', {
-    workspacePath,
-    command: 'git',
-    args: ['show', `${ref}:${filePath}`],
-    timeoutSeconds: 15,
-  });
-  if ((result.status ?? 1) !== 0) {
-    throw new Error(
-      (result.stderr ?? '').trim() || (result.stdout ?? '').trim() || `git show ${ref}:${filePath} failed`
-    );
-  }
-  return result.stdout ?? '';
+  return snapshotFileContent(workspacePath, ref, filePath);
 }
 
 /**
  * 列出 base..head 之间的改动文件列表。
- * 当 head === 'WORKTREE' 时，比较的是 base 与当前工作区（包含未暂存改动），
- * 改用单参数形式：`git diff --name-status <base>`。
+ * 数据来自 `.CodePapr/git` 影子仓库：head === 'WORKTREE' 时对比 base 树
+ * 与当前工作区（含未跟踪文件），否则对比两个提交。
  */
-async function loadFileList(workspacePath: string, base: string, head: string): Promise<FileEntry[]> {
-  const args =
-    head === 'WORKTREE'
-      ? ['diff', '--name-status', '--no-renames', base]
-      : ['diff', '--name-status', '--no-renames', `${base}..${head}`];
-  const result = await invoke<CommandResult>('run_workspace_command', {
-    workspacePath,
-    command: 'git',
-    args,
-    timeoutSeconds: 15,
-  });
-  if ((result.status ?? 1) !== 0) {
-    throw new Error(
-      (result.stderr ?? '').trim() || (result.stdout ?? '').trim() || 'git diff failed'
-    );
-  }
-  return parseDiffFileList(result.stdout ?? '');
+async function loadFileList(workspacePath: string, base: string, head: string): Promise<ReviewFileEntry[]> {
+  const files = await diffSnapshots(workspacePath, base, head);
+  return fileEntriesFromSnapshotDiffs(files);
 }
 
-const STATUS_COLORS: Record<FileEntry['status'], string> = {
+const STATUS_COLORS: Record<ReviewFileEntry['status'], string> = {
   added: 'text-ok',
   modified: 'text-warn',
   deleted: 'text-danger',
@@ -95,7 +46,7 @@ interface CodeReviewPanelProps {
 }
 
 function shortRef(ref: string, lang: 'zh-CN' | 'zh-TW' | 'en'): string {
-  if (ref === 'WORKTREE') {
+  if (isWorktreeRef(ref)) {
     return lang === 'en' ? 'Working Tree' : lang === 'zh-TW' ? '工作區' : '当前工作区';
   }
   // 显示前 7 位（commit short hash 风格），其他 ref 名（HEAD/HEAD~1/branch）原样保留。
@@ -110,7 +61,7 @@ export function CodeReviewPanel({ scope, onClose }: CodeReviewPanelProps) {
   const settings = useAgentStore((state) => state.settings);
   const lang = settings.lang ?? 'zh-CN';
 
-  const [files, setFiles] = useState<FileEntry[]>([]);
+  const [files, setFiles] = useState<ReviewFileEntry[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const [originalContent, setOriginalContent] = useState('');
   const [modifiedContent, setModifiedContent] = useState('');

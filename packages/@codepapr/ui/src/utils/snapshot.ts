@@ -199,6 +199,7 @@ export async function snapshotChangedFiles(workspacePath: string, sha: string): 
   return invoke<CommitChangedFiles>('snapshot_changed_files', { workspacePath, sha });
 }
 
+/** `toSha` 可为提交引用，或特殊值 `WORKTREE`（对比 from 与当前工作区）。 */
 export async function diffSnapshots(workspacePath: string, fromSha: string, toSha: string): Promise<FileDiff[]> {
   return invoke<FileDiff[]>('diff_snapshots', { workspacePath, fromSha, toSha });
 }
