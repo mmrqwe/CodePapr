@@ -73,6 +73,33 @@ function formatDuration(ms: number | undefined): string {
   return `${seconds}s`;
 }
 
+function formatTokenThroughput(
+  outputTokens: number,
+  modelRuntimeMs: number | undefined,
+  unit: string,
+): string {
+  if (!modelRuntimeMs || modelRuntimeMs <= 0 || outputTokens <= 0) return '—';
+  const rate = (outputTokens * 1000) / modelRuntimeMs;
+  const formatted = rate >= 100 ? `${Math.round(rate)}` : rate >= 10 ? rate.toFixed(1) : rate.toFixed(2);
+  return `${formatted} ${unit}`;
+}
+
+function throughputFromStats(stats: ModelTierStats, unit: string): string {
+  return formatTokenThroughput(stats.totalOutput, stats.modelRuntimeMs, unit);
+}
+
+function aggregateThroughput(stats: ConversationStats, unit: string): string {
+  let output = 0;
+  let runtime = 0;
+  for (const tier of [stats.primary, stats.fast, stats.mentor]) {
+    if (typeof tier.modelRuntimeMs === 'number' && tier.modelRuntimeMs > 0) {
+      output += tier.totalOutput;
+      runtime += tier.modelRuntimeMs;
+    }
+  }
+  return formatTokenThroughput(output, runtime > 0 ? runtime : undefined, unit);
+}
+
 /** 跨 tier 汇总耗时字段；所有 tier 都未测量时返回 undefined（显示 —）。 */
 function sumRuntimeAcrossTiers(
   stats: ConversationStats,
@@ -143,6 +170,9 @@ function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss, sh
           <span className="text-[11px] text-fg-dim">{t.callCount}: {calls.toLocaleString()}</span>
           <span className="text-[11px] text-fg-dim">{t.roundsLabel}: {rounds.toLocaleString()}</span>
         </div>
+        <p className="mt-2 font-mono text-sm font-semibold text-accent-text" title={t.tokenThroughputTip}>
+          {throughputFromStats(stats, t.tokenThroughputUnit)}
+        </p>
       </div>
 
       <div className="mb-3">
@@ -298,6 +328,9 @@ export function CacheStatsDashboard({ lang, collapsible = true, onOpenContextIns
               <p className="font-mono text-[10px] text-fg-dim">
                 {t.toolRuntimeLabel}{' '}
                 {formatDuration(sumRuntimeAcrossTiers(displayedStats, 'toolRuntimeMs'))}
+              </p>
+              <p className="font-mono text-[10px] text-accent-text" title={t.tokenThroughputTip}>
+                {aggregateThroughput(displayedStats, t.tokenThroughputUnit)}
               </p>
             </div>
             <button

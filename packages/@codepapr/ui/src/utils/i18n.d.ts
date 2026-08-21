@@ -29,6 +29,10 @@ export declare const I18N_DICTS: {
         errorConfigModel: string;
         cacheStatsTitle: string;
         cacheStatsTip: string;
+        statsButtonTip: string;
+        tokenThroughput: string;
+        tokenThroughputUnit: string;
+        tokenThroughputTip: string;
         cacheHitRate: string;
         tokenUsage: string;
         cacheRead: string;
@@ -755,6 +759,10 @@ export declare const I18N_DICTS: {
         errorConfigModel: string;
         cacheStatsTitle: string;
         cacheStatsTip: string;
+        statsButtonTip: string;
+        tokenThroughput: string;
+        tokenThroughputUnit: string;
+        tokenThroughputTip: string;
         cacheHitRate: string;
         tokenUsage: string;
         cacheRead: string;
@@ -1479,6 +1487,10 @@ export declare const I18N_DICTS: {
         errorConfigModel: string;
         cacheStatsTitle: string;
         cacheStatsTip: string;
+        statsButtonTip: string;
+        tokenThroughput: string;
+        tokenThroughputUnit: string;
+        tokenThroughputTip: string;
         cacheHitRate: string;
         tokenUsage: string;
         cacheRead: string;
@@ -2204,6 +2216,10 @@ export declare function getTranslation(lang?: Lang): {
     errorConfigModel: string;
     cacheStatsTitle: string;
     cacheStatsTip: string;
+    statsButtonTip: string;
+    tokenThroughput: string;
+    tokenThroughputUnit: string;
+    tokenThroughputTip: string;
     cacheHitRate: string;
     tokenUsage: string;
     cacheRead: string;
@@ -2687,6 +2703,10 @@ export declare function getTranslation(lang?: Lang): {
     errorConfigModel: string;
     cacheStatsTitle: string;
     cacheStatsTip: string;
+    statsButtonTip: string;
+    tokenThroughput: string;
+    tokenThroughputUnit: string;
+    tokenThroughputTip: string;
     cacheHitRate: string;
     tokenUsage: string;
     cacheRead: string;
@@ -3170,6 +3190,10 @@ export declare function getTranslation(lang?: Lang): {
     errorConfigModel: string;
     cacheStatsTitle: string;
     cacheStatsTip: string;
+    statsButtonTip: string;
+    tokenThroughput: string;
+    tokenThroughputUnit: string;
+    tokenThroughputTip: string;
     cacheHitRate: string;
     tokenUsage: string;
     cacheRead: string;

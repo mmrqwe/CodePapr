@@ -138,8 +138,8 @@ const CharacterModal = lazy(() =>
 const AboutModal = lazy(() =>
   import('./components/AboutModal').then((m) => ({ default: m.AboutModal }))
 );
-const ProjectStatsModal = lazy(() =>
-  import('./components/ProjectStatsModal').then((m) => ({ default: m.ProjectStatsModal }))
+const StatsModal = lazy(() =>
+  import('./components/StatsModal').then((m) => ({ default: m.StatsModal }))
 );
 const ProjectConfigModal = lazy(() =>
   import('./components/ProjectConfigModal').then((m) => ({ default: m.ProjectConfigModal }))
@@ -161,9 +161,6 @@ const PreviewSessionPanel = lazy(() =>
 );
 const EmbeddedBrowserPanel = lazy(() =>
   import('./components/EmbeddedBrowserPanel').then((m) => ({ default: m.EmbeddedBrowserPanel }))
-);
-const CacheStatsDashboard = lazy(() =>
-  import('./components/CacheStatsDashboard').then((m) => ({ default: m.CacheStatsDashboard }))
 );
 const CodeReviewPanel = lazy(() =>
   import('./components/CodeReviewPanel').then((m) => ({ default: m.CodeReviewPanel }))
@@ -239,14 +236,13 @@ export default function App() {
   const themeDarkTheme = useThemeStore((state) => state.darkTheme);
   const themeFollowSystem = useThemeStore((state) => state.followSystem);
   const themeAccent = useThemeStore((state) => state.accent);
-  const [showCacheStats, setShowCacheStats] = useState(false);
+  const [showStats, setShowStats] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showProjectSwitcher, setShowProjectSwitcher] = useState(false);
   const [showMcpSettings, setShowMcpSettings] = useState(false);
   const [showMcpMarket, setShowMcpMarket] = useState(false);
   const [showSkillMarket, setShowSkillMarket] = useState(false);
   const [showCharacters, setShowCharacters] = useState(false);
-  const [showProjectStats, setShowProjectStats] = useState(false);
   const [showProjectConfig, setShowProjectConfig] = useState(false);
   const [showContextDebug, setShowContextDebug] = useState(false);
   const [showContextInspector, setShowContextInspector] = useState(false);
@@ -413,7 +409,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    setShowProjectStats(false);
+    setShowStats(false);
     setShowProjectConfig(false);
     setShowContextDebug(false);
     setActiveMainTab('chat');
@@ -711,7 +707,7 @@ export default function App() {
                       onOpenSettings={() => setShowSettings(true)}
                       onOpenMcpSettings={() => setShowMcpSettings(true)}
                       onOpenCharacters={() => setShowCharacters(true)}
-                      onOpenCacheStats={() => setShowCacheStats(true)}
+                      onOpenStats={() => setShowStats(true)}
                       onOpenAbout={() => setShowAbout(true)}
                       onNavigateToFile={handleNavigateToLocation}
                     />
@@ -793,15 +789,6 @@ export default function App() {
                       {projectName}
                     </button>
                     <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowProjectStats(true)}
-                        title={t.projectStatsTip}
-                        disabled={!workspacePath}
-                        className="flex-shrink-0 rounded-lg border border-line px-2.5 py-2 text-xs font-medium text-fg-soft transition-colors hover:border-accent hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {t.projectStats}
-                      </button>
                       <button
                         type="button"
                         onClick={() => setShowProjectConfig(true)}
@@ -916,11 +903,17 @@ export default function App() {
         {showAbout && <AboutModal lang={settings.lang} onClose={() => setShowAbout(false)} />}
         {showProjectSwitcher && <ProjectSwitcherModal onClose={() => setShowProjectSwitcher(false)} />}
 
-        {showProjectStats && (
-          <ProjectStatsModal
+        {showStats && (
+          <StatsModal
             workspacePath={workspacePath}
             lang={settings.lang}
-            onClose={() => setShowProjectStats(false)}
+            onClose={() => setShowStats(false)}
+            onOpenContextInspector={async () => {
+              // 必须按当前会话消息重算：request-context 快照是「即将发出
+              // 的请求」，不含本轮已经生成的助手总结。
+              await useAgentStore.getState().computeContextSnapshot();
+              setShowContextInspector(true);
+            }}
           />
         )}
 
@@ -951,35 +944,6 @@ export default function App() {
               onClose={() => setShowDebugLog(false)}
             />
           </Suspense>
-        )}
-
-        {showCacheStats && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 backdrop-blur-sm">
-            <div className="flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl">
-              <div className="flex items-center justify-between border-b border-line px-5 py-4">
-                <h2 className="text-sm font-semibold text-fg">{t.cacheStatsTitle}</h2>
-                <button
-                  type="button"
-                  onClick={() => setShowCacheStats(false)}
-                  className="text-lg leading-none text-fg-muted transition-colors hover:text-fg"
-                >
-                  ×
-                </button>
-              </div>
-              <div className="min-h-0 flex-1 flex flex-col">
-                <CacheStatsDashboard
-                  lang={settings.lang}
-                  collapsible={false}
-                  onOpenContextInspector={async () => {
-                    // 必须按当前会话消息重算：request-context 快照是「即将发出
-                    // 的请求」，不含本轮已经生成的助手总结。
-                    await useAgentStore.getState().computeContextSnapshot();
-                    setShowContextInspector(true);
-                  }}
-                />
-              </div>
-            </div>
-          </div>
         )}
 
         {showContextInspector &&

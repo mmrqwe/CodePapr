@@ -67,7 +67,9 @@ interface ProjectStatsResult {
 interface ProjectStatsModalProps {
   workspacePath: string;
   lang?: Lang;
-  onClose: () => void;
+  onClose?: () => void;
+  /** 嵌入组合统计弹窗时只渲染内容，由外层负责遮罩与关闭。 */
+  embedded?: boolean;
 }
 
 const LANGUAGE_COLORS: Record<string, string> = {
@@ -551,6 +553,7 @@ export function ProjectStatsModal({
   workspacePath,
   lang,
   onClose,
+  embedded = false,
 }: ProjectStatsModalProps) {
   const t = getTranslation(lang);
   const initialCached = workspacePath ? statsCache.get(workspacePath) : undefined;
@@ -642,13 +645,15 @@ export function ProjectStatsModal({
   }, [workspacePath]);
 
   useEffect(() => {
+    if (embedded) return;
     const node = dialogRef.current;
     const previous = document.activeElement as HTMLElement | null;
     node?.focus();
     return () => previous?.focus?.();
-  }, []);
+  }, [embedded]);
 
   useEffect(() => {
+    if (embedded || !onClose) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -672,7 +677,7 @@ export function ProjectStatsModal({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  }, [embedded, onClose]);
 
   const handleLangSort = (key: LangSortKey) => {
     if (langSortKey === key) {
@@ -708,24 +713,14 @@ export function ProjectStatsModal({
     return stats.languages.reduce((sum, item) => sum + item.lines, 0);
   }, [stats]);
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="project-stats-title"
-        tabIndex={-1}
-        className="flex h-[90vh] w-[min(96vw,1280px)] flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl outline-none"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <div>
-            <h2 id="project-stats-title" className="text-sm font-semibold text-fg">{t.projectStatsTitle}</h2>
-            <p className="mt-1 text-xs text-fg-muted">
+  const shell = (
+    <>
+        <div className={`flex items-center justify-between gap-3 border-b border-line px-5 ${embedded ? 'py-3' : 'py-4'}`}>
+          <div className="min-w-0">
+            {!embedded && (
+              <h2 id="project-stats-title" className="text-sm font-semibold text-fg">{t.projectStatsTitle}</h2>
+            )}
+            <p className={`text-xs text-fg-muted ${embedded ? '' : 'mt-1'}`}>
               {t.projectStatsAnalysisDepth}
               {statsAt !== null && (
                 <span className="ml-2 text-fg-dim">
@@ -737,7 +732,7 @@ export function ProjectStatsModal({
               )}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-shrink-0 items-center gap-2">
             <button
               type="button"
               onClick={() => void refreshStats()}
@@ -747,14 +742,16 @@ export function ProjectStatsModal({
             >
               {isLoading ? scanningLabel : t.projectStatsRefresh}
             </button>
-            <button
-              type="button"
-              onClick={onClose}
-              title={t.cancel}
-              className="text-lg leading-none text-fg-muted transition-colors hover:text-fg"
-            >
-              ×
-            </button>
+            {!embedded && (
+              <button
+                type="button"
+                onClick={onClose}
+                title={t.cancel}
+                className="text-lg leading-none text-fg-muted transition-colors hover:text-fg"
+              >
+                ×
+              </button>
+            )}
           </div>
         </div>
 
@@ -943,6 +940,28 @@ export function ProjectStatsModal({
             <AgentContribution workspacePath={workspacePath} lang={lang} />
           </div>
         </div>
+    </>
+  );
+
+  if (embedded) {
+    return <div className="flex min-h-0 flex-1 flex-col">{shell}</div>;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="project-stats-title"
+        tabIndex={-1}
+        className="flex h-[90vh] w-[min(96vw,1280px)] flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl outline-none"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {shell}
       </div>
     </div>
   );

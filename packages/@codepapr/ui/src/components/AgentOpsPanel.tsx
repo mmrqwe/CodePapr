@@ -22,13 +22,13 @@ interface AgentOpsPanelProps {
   onOpenSettings: () => void;
   onOpenMcpSettings: () => void;
   onOpenCharacters: () => void;
-  onOpenCacheStats: () => void;
+  onOpenStats: () => void;
   onOpenAbout: () => void;
   onNavigateToFile: (location: PreviewLocation) => void;
 }
 
 export function AgentOpsPanel({
-  onOpenSettings, onOpenMcpSettings, onOpenCharacters, onOpenCacheStats,
+  onOpenSettings, onOpenMcpSettings, onOpenCharacters, onOpenStats,
   onOpenAbout, onNavigateToFile,
 }: AgentOpsPanelProps) {
   const settings = useAgentStore((state) => state.settings);
@@ -107,8 +107,8 @@ export function AgentOpsPanel({
             )}
           </span>
         </button>
-        <button type="button" onClick={onOpenCacheStats} title={t.cacheStatsTip} className={buttonClass}>
-          {t.cacheStatsTitle}
+        <button type="button" onClick={onOpenStats} title={t.statsButtonTip} className={buttonClass}>
+          {t.projectStats}
         </button>
         <div className="flex min-w-[76px] flex-shrink-0 items-center gap-2 rounded-lg border border-line px-2.5 py-2" title={isLoading ? copy.active : copy.idle}>
           <span className={`inline-block h-2.5 w-2.5 rounded-full ${isLoading ? 'animate-pulse bg-warn' : 'bg-ok'}`} />
