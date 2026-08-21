@@ -5,7 +5,8 @@ import { useAgentStore, isApiConfigured } from './store/agentStore';
 import { usePreviewStore } from './store/previewStore';
 import { useBrowserViewStore } from './store/browserViewStore';
 import { useAppRuntimeStore } from './store/appRuntimeStore';
-import { isPluginApp } from './papr/pluginSurface';
+import { isPluginApp, pluginShouldShow, readAppManifest } from './papr/pluginSurface';
+import { loadPluginUi } from './papr/pluginUiStorage';
 import { useCharactersStore } from './store/charactersStore';
 import { useDebugLogStore, pushDebugLog } from './store/debugLogStore';
 import { SessionManager } from './components/SessionManager';
@@ -438,6 +439,10 @@ export default function App() {
             'scan_workspace_apps',
             { workspacePath },
           );
+          if (useAgentStore.getState().workspacePath !== workspacePath) return;
+          const pluginUi = await loadPluginUi(workspacePath);
+          if (useAgentStore.getState().workspacePath !== workspacePath) return;
+          useAppRuntimeStore.getState().hydratePluginUi(pluginUi);
           for (const app of discovered) {
             if (useAgentStore.getState().workspacePath !== workspacePath) return;
             await invoke('register_app_workspace', {
@@ -478,7 +483,11 @@ export default function App() {
               port: app.port ?? undefined,
             });
             if (isPluginApp({ manifestJson: app.manifest_json ?? undefined })) {
-              useAppRuntimeStore.getState().pinPlugin(app.app_id);
+              const manifest = readAppManifest({ manifestJson: app.manifest_json ?? undefined });
+              const chrome = useAppRuntimeStore.getState().pluginChrome[app.app_id];
+              if (pluginShouldShow(manifest, chrome)) {
+                useAppRuntimeStore.getState().pinPlugin(app.app_id);
+              }
             }
           }
 

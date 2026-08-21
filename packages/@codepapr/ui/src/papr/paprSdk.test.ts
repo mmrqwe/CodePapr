@@ -316,3 +316,39 @@ describe('papr-sdk.js papr.events (app_publish 下行推送)', () => {
     }).not.toThrow();
   });
 });
+
+describe('papr-sdk.js papr.window', () => {
+  it('setSize/getBounds 发给父窗口', () => {
+    loadSdk();
+    const papr = (window as unknown as {
+      papr: {
+        window: {
+          getBounds: () => Promise<unknown>;
+          setSize: (opts: { width: number; height: number }) => Promise<unknown>;
+        };
+      };
+    }).papr;
+    const sent = captureSentMessages();
+    void papr.window.getBounds().catch(() => {});
+    void papr.window.setSize({ width: 400, height: 160 }).catch(() => {});
+    expect(sent[0]?.type).toBe('papr://window.getBounds');
+    expect(sent[1]?.type).toBe('papr://window.setSize');
+  });
+
+  it('onBounds 只接受来自 parent 的 papr://window.bounds', () => {
+    loadSdk();
+    const received: unknown[] = [];
+    const papr = (window as unknown as {
+      papr: { window: { onBounds: (cb: (b: unknown) => void) => () => void } };
+    }).papr;
+    papr.window.onBounds((bounds) => received.push(bounds));
+    dispatchFrom({}, { __papr: true, type: 'papr://window.bounds', payload: { width: 1 } });
+    expect(received).toHaveLength(0);
+    dispatchFrom(window.parent, {
+      __papr: true,
+      type: 'papr://window.bounds',
+      payload: { width: 400, height: 200 },
+    });
+    expect(received).toEqual([{ width: 400, height: 200 }]);
+  });
+});

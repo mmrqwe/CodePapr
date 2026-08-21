@@ -8,6 +8,30 @@ export const OVERLAY_MIN_HEIGHT = 100;
 export const OVERLAY_MAX_HEIGHT = 640;
 export const OVERLAY_EDGE = 16;
 export const OVERLAY_TOP_INSET = 52;
+export const OVERLAY_CHROME_HEIGHT = 28;
+
+export type PluginSizeSource = 'manifest' | 'plugin' | 'user';
+export type OverlayResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+
+export interface OverlayOrigin {
+  x: number;
+  y: number;
+}
+
+export interface OverlayLayout extends OverlayOrigin {
+  width: number;
+  height: number;
+  sizeSource?: PluginSizeSource;
+}
+
+export interface PluginWindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  contentWidth: number;
+  contentHeight: number;
+}
 
 export const OVERLAY_POSITIONS: readonly PaprOverlayPosition[] = [
   'top-right',
@@ -15,11 +39,6 @@ export const OVERLAY_POSITIONS: readonly PaprOverlayPosition[] = [
   'bottom-right',
   'bottom-left',
 ];
-
-export interface OverlayLayout {
-  x: number;
-  y: number;
-}
 
 export interface ResolvedOverlaySurface {
   type: 'overlay';
@@ -85,18 +104,57 @@ export function resolveOverlaySurface(manifest: PaprManifest | null | undefined)
   return { type: 'overlay', width, height, position };
 }
 
+export function isOverlayResizable(manifest: PaprManifest | null | undefined): boolean {
+  return manifest?.surface?.resizable !== false;
+}
+
+export function shouldPersistPluginPosition(manifest: PaprManifest | null | undefined): boolean {
+  return manifest?.lifecycle?.persistPosition !== false;
+}
+
+export function pluginShouldShow(
+  manifest: PaprManifest | null | undefined,
+  chrome: { enabled?: boolean } | null | undefined,
+): boolean {
+  if (chrome && typeof chrome.enabled === 'boolean') return chrome.enabled;
+  return manifest?.lifecycle?.autostart !== false;
+}
+
 export function clampOverlayOrigin(
-  origin: OverlayLayout,
+  origin: OverlayOrigin,
   size: { width: number; height: number },
   viewport: { width: number; height: number },
   edge = 8,
-): OverlayLayout {
+): OverlayOrigin {
   const maxX = Math.max(edge, viewport.width - size.width - edge);
   const maxY = Math.max(edge, viewport.height - size.height - edge);
   return {
     x: clampNumber(origin.x, edge, maxX),
     y: clampNumber(origin.y, edge, maxY),
   };
+}
+
+export function clampOverlaySize(
+  size: { width: number; height: number },
+  viewport: { width: number; height: number },
+  edge = 8,
+): { width: number; height: number } {
+  const maxWidth = Math.max(OVERLAY_MIN_WIDTH, Math.min(OVERLAY_MAX_WIDTH, viewport.width - edge * 2));
+  const maxHeight = Math.max(OVERLAY_MIN_HEIGHT, Math.min(OVERLAY_MAX_HEIGHT, viewport.height - edge * 2));
+  return {
+    width: clampNumber(Math.round(size.width), OVERLAY_MIN_WIDTH, maxWidth),
+    height: clampNumber(Math.round(size.height), OVERLAY_MIN_HEIGHT, maxHeight),
+  };
+}
+
+export function clampOverlayRect(
+  layout: OverlayLayout,
+  viewport: { width: number; height: number },
+  edge = 8,
+): OverlayLayout {
+  const size = clampOverlaySize(layout, viewport, edge);
+  const origin = clampOverlayOrigin(layout, size, viewport, edge);
+  return { ...layout, ...origin, ...size };
 }
 
 export function defaultOverlayOrigin(
@@ -127,7 +185,51 @@ export function defaultOverlayOrigin(
       y = OVERLAY_TOP_INSET + offset;
       break;
   }
-  return clampOverlayOrigin({ x, y }, size, viewport);
+  return clampOverlayRect(
+    { x, y, width: size.width, height: size.height, sizeSource: 'manifest' },
+    viewport,
+  );
+}
+
+export function applyOverlayResize(
+  start: OverlayLayout,
+  dir: OverlayResizeDir,
+  dx: number,
+  dy: number,
+): OverlayLayout {
+  let { x, y, width, height } = start;
+  if (dir.includes('e')) width += dx;
+  if (dir.includes('s')) height += dy;
+  if (dir.includes('w')) {
+    width -= dx;
+    x += dx;
+  }
+  if (dir.includes('n')) {
+    height -= dy;
+    y += dy;
+  }
+  return { ...start, x, y, width, height, sizeSource: 'user' };
+}
+
+export function overlayToWindowBounds(layout: OverlayLayout): PluginWindowBounds {
+  return {
+    x: layout.x,
+    y: layout.y,
+    width: layout.width,
+    height: layout.height,
+    contentWidth: layout.width,
+    contentHeight: Math.max(0, layout.height - OVERLAY_CHROME_HEIGHT),
+  };
+}
+
+export function overlayFromSetSize(
+  current: OverlayLayout,
+  payload: { width: number; height: number; box?: unknown },
+): OverlayLayout {
+  const box = payload.box === 'overlay' ? 'overlay' : 'content';
+  const width = payload.width;
+  const height = box === 'overlay' ? payload.height : payload.height + OVERLAY_CHROME_HEIGHT;
+  return { ...current, width, height, sizeSource: 'plugin' };
 }
 
 /** 供打开应用时校验 manifest.surface：只接受 overlay。缺省给出默认几何。 */

@@ -5,13 +5,20 @@ import { useAgentStore } from '../store/agentStore';
 import { usePaprBridge } from '../papr/usePaprBridge';
 import { APP_IFRAME_SANDBOX } from '../papr/appIframe';
 import {
+  applyOverlayResize,
   clampOverlayOrigin,
+  clampOverlayRect,
   defaultOverlayOrigin,
+  isOverlayResizable,
   isPluginApp,
+  overlayToWindowBounds,
+  OVERLAY_CHROME_HEIGHT,
   readAppManifest,
   resolveOverlaySurface,
   resolvePaprEntryFile,
+  shouldPersistPluginPosition,
   type OverlayLayout,
+  type OverlayResizeDir,
 } from '../papr/pluginSurface';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
@@ -19,6 +26,17 @@ import type { Lang } from '../utils/i18n';
 interface PluginOverlayHostProps {
   lang?: Lang;
 }
+
+const RESIZE_HANDLES: Array<{ dir: OverlayResizeDir; className: string }> = [
+  { dir: 'n', className: 'left-2 right-2 -top-0.5 h-2 cursor-ns-resize' },
+  { dir: 's', className: 'left-2 right-2 -bottom-0.5 h-2 cursor-ns-resize' },
+  { dir: 'e', className: 'top-2 bottom-2 -right-0.5 w-2 cursor-ew-resize' },
+  { dir: 'w', className: 'top-2 bottom-2 -left-0.5 w-2 cursor-ew-resize' },
+  { dir: 'ne', className: '-top-0.5 -right-0.5 h-2.5 w-2.5 cursor-nesw-resize' },
+  { dir: 'nw', className: '-top-0.5 -left-0.5 h-2.5 w-2.5 cursor-nwse-resize' },
+  { dir: 'se', className: '-bottom-0.5 -right-0.5 h-2.5 w-2.5 cursor-nwse-resize' },
+  { dir: 'sw', className: '-bottom-0.5 -left-0.5 h-2.5 w-2.5 cursor-nesw-resize' },
+];
 
 function useViewportSize(): { width: number; height: number } {
   const [size, setSize] = useState(() => ({
@@ -32,6 +50,27 @@ function useViewportSize(): { width: number; height: number } {
     return () => window.removeEventListener('resize', update);
   }, []);
   return size;
+}
+
+function resolveCardLayout(
+  app: AppInstance,
+  stored: OverlayLayout | undefined,
+  viewport: { width: number; height: number },
+  index: number,
+): OverlayLayout {
+  const manifest = readAppManifest(app);
+  const surface = resolveOverlaySurface(manifest);
+  const size = {
+    width: stored?.width ?? surface.width,
+    height: stored?.height ?? surface.height,
+  };
+  if (stored && shouldPersistPluginPosition(manifest)) {
+    return clampOverlayRect({ ...stored, ...size }, viewport);
+  }
+  return clampOverlayRect(
+    { ...defaultOverlayOrigin(surface.position, size, viewport, index), ...size, sizeSource: stored?.sizeSource ?? 'manifest' },
+    viewport,
+  );
 }
 
 export function PluginOverlayHost({ lang }: PluginOverlayHostProps) {
@@ -53,8 +92,7 @@ export function PluginOverlayHost({ lang }: PluginOverlayHostProps) {
   useEffect(() => {
     pinned.forEach((app, index) => {
       if (overlayLayouts[app.appId]) return;
-      const surface = resolveOverlaySurface(readAppManifest(app));
-      setOverlayLayout(app.appId, defaultOverlayOrigin(surface.position, surface, viewport, index));
+      setOverlayLayout(app.appId, resolveCardLayout(app, undefined, viewport, index));
     });
   }, [pinned, overlayLayouts, setOverlayLayout, viewport]);
 
@@ -65,19 +103,13 @@ export function PluginOverlayHost({ lang }: PluginOverlayHostProps) {
   return (
     <>
       {pinned.map((app, index) => {
-        const surface = resolveOverlaySurface(readAppManifest(app));
-        const origin = clampOverlayOrigin(
-          overlayLayouts[app.appId] ?? defaultOverlayOrigin(surface.position, surface, viewport, index),
-          surface,
-          viewport,
-        );
+        const layout = resolveCardLayout(app, overlayLayouts[app.appId], viewport, index);
         return (
           <PluginOverlayCard
             key={app.appId}
             app={app}
             lang={lang}
-            layout={origin}
-            size={surface}
+            layout={layout}
             zIndex={30 + index}
             hidden={hidden}
           />
@@ -91,30 +123,34 @@ interface PluginOverlayCardProps {
   app: AppInstance;
   lang?: Lang;
   layout: OverlayLayout;
-  size: { width: number; height: number };
   zIndex: number;
   hidden?: boolean;
 }
 
-function PluginOverlayCard({ app, lang, layout, size, zIndex, hidden }: PluginOverlayCardProps) {
+function PluginOverlayCard({ app, lang, layout, zIndex, hidden }: PluginOverlayCardProps) {
   const t = getTranslation(lang);
   const workspacePath = useAgentStore((state) => state.workspacePath);
   const unpinPlugin = useAppRuntimeStore((state) => state.unpinPlugin);
   const pinPlugin = useAppRuntimeStore((state) => state.pinPlugin);
   const reloadApp = useAppRuntimeStore((state) => state.reloadApp);
   const setOverlayLayout = useAppRuntimeStore((state) => state.setOverlayLayout);
+  const persistPluginUi = useAppRuntimeStore((state) => state.persistPluginUi);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [error, setError] = useState('');
   const [dragging, setDragging] = useState(false);
+  const [resizing, setResizing] = useState<OverlayResizeDir | null>(null);
   const dragOffset = useRef({ x: 0, y: 0 });
+  const resizeStart = useRef<{ x: number; y: number; layout: OverlayLayout } | null>(null);
   const loadedRef = useRef(false);
   const readyRef = useRef(false);
   const loadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sdkCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const manifest = useMemo(() => readAppManifest(app), [app]);
+  const resizable = isOverlayResizable(manifest);
   const entryFile = resolvePaprEntryFile(manifest);
   const iframeSrc = `codepapr-app://${app.appId}/${entryFile}`;
+  const interacting = dragging || !!resizing;
 
   const clearTimers = useCallback(() => {
     if (loadTimerRef.current) {
@@ -127,7 +163,7 @@ function PluginOverlayCard({ app, lang, layout, size, zIndex, hidden }: PluginOv
     }
   }, []);
 
-  const { postThemeNow } = usePaprBridge({
+  const { postThemeNow, postWindowBounds } = usePaprBridge({
     iframeRef,
     appId: app.appId,
     manifest,
@@ -178,6 +214,11 @@ function PluginOverlayCard({ app, lang, layout, size, zIndex, hidden }: PluginOv
     };
   }, [app.appId, workspacePath, reloadApp]);
 
+  useEffect(() => {
+    if (interacting) return;
+    postWindowBounds(overlayToWindowBounds(layout));
+  }, [layout.x, layout.y, layout.width, layout.height, interacting, postWindowBounds]);
+
   const onPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if ((event.target as HTMLElement).closest('button')) return;
@@ -192,30 +233,63 @@ function PluginOverlayCard({ app, lang, layout, size, zIndex, hidden }: PluginOv
   const onPointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (!dragging) return;
-      const next = clampOverlayOrigin(
+      const origin = clampOverlayOrigin(
         { x: event.clientX - dragOffset.current.x, y: event.clientY - dragOffset.current.y },
-        size,
+        layout,
+        { width: window.innerWidth, height: window.innerHeight },
+      );
+      setOverlayLayout(app.appId, { ...layout, ...origin });
+    },
+    [app.appId, dragging, layout, setOverlayLayout],
+  );
+
+  const onPointerUp = useCallback(() => {
+    if (dragging) persistPluginUi();
+    setDragging(false);
+  }, [dragging, persistPluginUi]);
+
+  const onResizePointerDown = useCallback(
+    (dir: OverlayResizeDir, event: React.PointerEvent<HTMLDivElement>) => {
+      event.stopPropagation();
+      pinPlugin(app.appId);
+      setResizing(dir);
+      resizeStart.current = { x: event.clientX, y: event.clientY, layout };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    [app.appId, layout, pinPlugin],
+  );
+
+  const onResizePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!resizing || !resizeStart.current) return;
+      const dx = event.clientX - resizeStart.current.x;
+      const dy = event.clientY - resizeStart.current.y;
+      const next = clampOverlayRect(
+        applyOverlayResize(resizeStart.current.layout, resizing, dx, dy),
         { width: window.innerWidth, height: window.innerHeight },
       );
       setOverlayLayout(app.appId, next);
     },
-    [app.appId, dragging, setOverlayLayout, size],
+    [app.appId, resizing, setOverlayLayout],
   );
 
-  const onPointerUp = useCallback(() => {
-    setDragging(false);
-  }, []);
+  const onResizePointerUp = useCallback(() => {
+    if (resizing) persistPluginUi();
+    setResizing(null);
+    resizeStart.current = null;
+  }, [persistPluginUi, resizing]);
 
   return (
     <div
       data-plugin-overlay={app.appId}
       aria-hidden={hidden || undefined}
-      className={`fixed overflow-hidden rounded-lg border border-line bg-base shadow-[0_12px_40px_rgba(0,0,0,0.35)] ${hidden ? 'invisible pointer-events-none' : ''}`}
-      style={{ left: layout.x, top: layout.y, width: size.width, height: size.height, zIndex }}
+      className={`fixed rounded-lg border border-line bg-base shadow-[0_12px_40px_rgba(0,0,0,0.35)] ${hidden ? 'invisible pointer-events-none' : ''}`}
+      style={{ left: layout.x, top: layout.y, width: layout.width, height: layout.height, zIndex }}
     >
-      <div className="flex h-full flex-col">
+      <div className="flex h-full flex-col overflow-hidden rounded-lg">
         <div
-          className={`flex shrink-0 cursor-grab items-center gap-1.5 border-b border-line px-2 py-1 ${dragging ? 'cursor-grabbing' : ''}`}
+          className={`flex h-7 shrink-0 cursor-grab items-center gap-1.5 border-b border-line px-2 ${dragging ? 'cursor-grabbing' : ''}`}
+          style={{ height: OVERLAY_CHROME_HEIGHT }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -257,11 +331,12 @@ function PluginOverlayCard({ app, lang, layout, size, zIndex, hidden }: PluginOv
           src={iframeSrc}
           title={app.title}
           sandbox={APP_IFRAME_SANDBOX}
-          className={`min-h-0 flex-1 border-0 bg-white ${dragging ? 'pointer-events-none' : ''}`}
+          className={`min-h-0 flex-1 border-0 bg-white ${interacting ? 'pointer-events-none' : ''}`}
           onLoad={() => {
             loadedRef.current = true;
             clearTimers();
             postThemeNow();
+            postWindowBounds(overlayToWindowBounds(layout));
             if (!readyRef.current) {
               sdkCheckTimerRef.current = setTimeout(() => {
                 if (!readyRef.current) setError(t.appModalSdkLoadFailed);
@@ -271,6 +346,18 @@ function PluginOverlayCard({ app, lang, layout, size, zIndex, hidden }: PluginOv
           onError={() => setError(t.appModalLoadFailed)}
         />
       </div>
+      {resizable && !hidden && RESIZE_HANDLES.map((handle) => (
+        <div
+          key={handle.dir}
+          data-plugin-resize={handle.dir}
+          className={`absolute z-10 ${handle.className}`}
+          title={t.appPluginResize}
+          onPointerDown={(event) => onResizePointerDown(handle.dir, event)}
+          onPointerMove={onResizePointerMove}
+          onPointerUp={onResizePointerUp}
+          onPointerCancel={onResizePointerUp}
+        />
+      ))}
     </div>
   );
 }

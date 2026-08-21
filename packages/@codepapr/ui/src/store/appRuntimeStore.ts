@@ -1,6 +1,18 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import { isPluginApp, type OverlayLayout } from '../papr/pluginSurface';
+import {
+  isPluginApp,
+  readAppManifest,
+  shouldPersistPluginPosition,
+  type OverlayLayout,
+} from '../papr/pluginSurface';
+import {
+  layoutsFromChrome,
+  parsePluginUiState,
+  queueSavePluginUi,
+  type PluginChrome,
+  type PluginUiState,
+} from '../papr/pluginUiStorage';
 
 /** 诊断埋点：openedAppId 被清空 = 用户看到「app 自己退出」。把每次变更连同
  * 调用栈落盘，抓住无 UI 操作时的幕后调用者。 */
@@ -38,6 +50,7 @@ interface AppRuntimeState {
   openedAppId: string | null;
   pinnedPluginIds: string[];
   overlayLayouts: Record<string, OverlayLayout>;
+  pluginChrome: Record<string, PluginChrome>;
   mountSignal: number;
   mountApp: (input: Omit<AppInstance, 'createdAt' | 'updatedAt'> & { createdAt?: number; updatedAt?: number }) => void;
   closeApp: (appId: string) => void;
@@ -48,16 +61,63 @@ interface AppRuntimeState {
   pinPlugin: (appId: string) => void;
   unpinPlugin: (appId: string) => void;
   setOverlayLayout: (appId: string, layout: OverlayLayout) => void;
+  persistPluginUi: () => void;
+  hydratePluginUi: (state: PluginUiState) => void;
+  resetPluginLayout: (appId: string) => void;
   setAppRunning: (appId: string, pid: number, url: string) => void;
   setAppStopped: (appId: string) => void;
   reloadApp: (appId: string) => void;
 }
 
-function omitLayout(layouts: Record<string, OverlayLayout>, appId: string): Record<string, OverlayLayout> {
-  if (!(appId in layouts)) return layouts;
-  const next = { ...layouts };
+function omitKey<T>(record: Record<string, T>, appId: string): Record<string, T> {
+  if (!(appId in record)) return record;
+  const next = { ...record };
   delete next[appId];
   return next;
+}
+
+function chromeFromLayout(previous: PluginChrome | undefined, layout: OverlayLayout, enabled: boolean): PluginChrome {
+  return {
+    ...previous,
+    enabled,
+    x: layout.x,
+    y: layout.y,
+    width: layout.width,
+    height: layout.height,
+    sizeSource: layout.sizeSource ?? previous?.sizeSource,
+  };
+}
+
+function chromeForPersist(
+  chrome: Record<string, PluginChrome>,
+  apps: AppInstance[],
+): Record<string, PluginChrome> {
+  const result: Record<string, PluginChrome> = {};
+  for (const [appId, record] of Object.entries(chrome)) {
+    const persistPos = shouldPersistPluginPosition(readAppManifest(apps.find((app) => app.appId === appId)));
+    result[appId] = persistPos
+      ? record
+      : {
+          enabled: record.enabled,
+          width: record.width,
+          height: record.height,
+          sizeSource: record.sizeSource,
+        };
+  }
+  return result;
+}
+
+function schedulePersist(get: () => AppRuntimeState): void {
+  void import('./agentStore')
+    .then(({ useAgentStore }) => {
+      const workspacePath = useAgentStore.getState().workspacePath;
+      if (!workspacePath) return;
+      const state = get();
+      void queueSavePluginUi(workspacePath, {
+        chrome: chromeForPersist(state.pluginChrome, state.apps),
+      });
+    })
+    .catch(() => {});
 }
 
 export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
@@ -66,6 +126,7 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
   openedAppId: null,
   pinnedPluginIds: [],
   overlayLayouts: {},
+  pluginChrome: {},
   mountSignal: 0,
 
   mountApp: (input) => {
@@ -114,9 +175,11 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
         activeAppId: nextActiveAppId,
         openedAppId: state.openedAppId === appId ? null : state.openedAppId,
         pinnedPluginIds: state.pinnedPluginIds.filter((id) => id !== appId),
-        overlayLayouts: omitLayout(state.overlayLayouts, appId),
+        overlayLayouts: omitKey(state.overlayLayouts, appId),
+        pluginChrome: omitKey(state.pluginChrome, appId),
       };
     });
+    get().persistPluginUi();
   },
 
   selectApp: (appId) => {
@@ -125,7 +188,14 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
 
   clearApps: () => {
     diagStoreEvent('clearApps()');
-    set({ apps: [], activeAppId: null, openedAppId: null, pinnedPluginIds: [], overlayLayouts: {} });
+    set({
+      apps: [],
+      activeAppId: null,
+      openedAppId: null,
+      pinnedPluginIds: [],
+      overlayLayouts: {},
+      pluginChrome: {},
+    });
   },
 
   openAppModal: (appId) => {
@@ -139,32 +209,87 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
     set({ openedAppId: appId });
   },
 
+  closeAppModal: () => {
+    diagStoreEvent('closeAppModal()');
+    set({ openedAppId: null });
+  },
+
   pinPlugin: (appId) => {
+    let changed = false;
     set((state) => {
       const app = state.apps.find((item) => item.appId === appId);
       if (!app || !isPluginApp(app)) return state;
+      changed = true;
       const without = state.pinnedPluginIds.filter((id) => id !== appId);
-      return { pinnedPluginIds: [...without, appId] };
+      const previous = state.pluginChrome[appId];
+      return {
+        pinnedPluginIds: [...without, appId],
+        pluginChrome: {
+          ...state.pluginChrome,
+          [appId]: { ...previous, enabled: true },
+        },
+      };
     });
+    if (changed) get().persistPluginUi();
   },
 
   unpinPlugin: (appId) => {
-    set((state) => ({
-      pinnedPluginIds: state.pinnedPluginIds.filter((id) => id !== appId),
-      overlayLayouts: omitLayout(state.overlayLayouts, appId),
-    }));
+    let changed = false;
+    set((state) => {
+      if (!state.pinnedPluginIds.includes(appId) && state.pluginChrome[appId]?.enabled === false) {
+        return state;
+      }
+      changed = true;
+      const previous = state.pluginChrome[appId];
+      return {
+        pinnedPluginIds: state.pinnedPluginIds.filter((id) => id !== appId),
+        pluginChrome: {
+          ...state.pluginChrome,
+          [appId]: { ...previous, enabled: false },
+        },
+      };
+    });
+    if (changed) get().persistPluginUi();
   },
 
   setOverlayLayout: (appId, layout) => {
     set((state) => {
       if (!state.pinnedPluginIds.includes(appId)) return state;
-      return { overlayLayouts: { ...state.overlayLayouts, [appId]: layout } };
+      const enabled = state.pluginChrome[appId]?.enabled ?? true;
+      return {
+        overlayLayouts: { ...state.overlayLayouts, [appId]: layout },
+        pluginChrome: {
+          ...state.pluginChrome,
+          [appId]: chromeFromLayout(state.pluginChrome[appId], layout, enabled),
+        },
+      };
     });
   },
 
-  closeAppModal: () => {
-    diagStoreEvent('closeAppModal()');
-    set({ openedAppId: null });
+  persistPluginUi: () => {
+    schedulePersist(get);
+  },
+
+  hydratePluginUi: (state) => {
+    const parsed = parsePluginUiState(state);
+    set({
+      pluginChrome: parsed.chrome,
+      overlayLayouts: layoutsFromChrome(parsed.chrome),
+    });
+  },
+
+  resetPluginLayout: (appId) => {
+    set((state) => {
+      const previous = state.pluginChrome[appId];
+      return {
+        overlayLayouts: omitKey(state.overlayLayouts, appId),
+        pluginChrome: {
+          ...state.pluginChrome,
+          [appId]: { enabled: previous?.enabled ?? state.pinnedPluginIds.includes(appId) },
+        },
+      };
+    });
+    get().persistPluginUi();
   },
 
   setAppRunning: (appId, pid, url) => {

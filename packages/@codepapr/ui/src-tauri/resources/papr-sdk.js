@@ -11,6 +11,7 @@
   var parentOrigin = window.__PAPR_PARENT_ORIGIN || '*';
   var currentTheme = null;
   var themeListeners = [];
+  var boundsListeners = [];
   // app_publish 下行事件订阅表：channel -> [cb]（null 原型，防原型键污染）
   var eventListeners = Object.create(null);
 
@@ -118,6 +119,13 @@
     // isFromParent 已校验来源，非父窗口的伪造事件到不了这里。
     if (data.type === 'papr://event') {
       dispatchAppEvent(data.payload);
+      return;
+    }
+
+    if (data.type === 'papr://window.bounds') {
+      for (var bi = 0; bi < boundsListeners.length; bi++) {
+        try { boundsListeners[bi](data.payload); } catch (e) { /* listener errors are isolated */ }
+      }
       return;
     }
 
@@ -253,6 +261,24 @@
           var idx = list.indexOf(cb);
           if (idx >= 0) list.splice(idx, 1);
           if (list.length === 0) delete eventListeners[channel];
+        };
+      }
+    },
+    window: {
+      getBounds: function () {
+        return send('papr://window.getBounds');
+      },
+      setSize: function (opts) {
+        return send('papr://window.setSize', opts || {});
+      },
+      onBounds: function (cb) {
+        if (typeof cb !== 'function') {
+          return function unsubscribe() {};
+        }
+        boundsListeners.push(cb);
+        return function unsubscribe() {
+          var idx = boundsListeners.indexOf(cb);
+          if (idx >= 0) boundsListeners.splice(idx, 1);
         };
       }
     },

@@ -49,6 +49,7 @@ describe('PluginOverlayHost', () => {
       openedAppId: null,
       pinnedPluginIds: [],
       overlayLayouts: {},
+      pluginChrome: {},
       mountSignal: 0,
     });
     container = document.createElement('div');
@@ -67,6 +68,7 @@ describe('PluginOverlayHost', () => {
       openedAppId: null,
       pinnedPluginIds: [],
       overlayLayouts: {},
+      pluginChrome: {},
     });
     usePaprPermissionStore.getState().clearAll();
   });
@@ -85,6 +87,7 @@ describe('PluginOverlayHost', () => {
     const iframe = container.querySelector('iframe');
     expect(iframe?.getAttribute('src')).toBe('codepapr-app://stock-ticker/index.html');
     expect(container.textContent).toContain('股票看板');
+    expect(container.querySelector('[data-plugin-resize="se"]')).toBeTruthy();
   });
 
   it('hides overlays while a fullscreen app is open without unmounting the iframe', async () => {

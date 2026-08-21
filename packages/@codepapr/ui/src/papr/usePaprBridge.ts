@@ -7,6 +7,15 @@ import { accessAllows, resolveEffectiveAccess } from './levelGrants';
 import { registerAppPoster } from './appChannelHub';
 import { useAgentStore } from '../store/agentStore';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
+import {
+  clampOverlayRect,
+  defaultOverlayOrigin,
+  isPluginManifest,
+  overlayFromSetSize,
+  overlayToWindowBounds,
+  resolveOverlaySurface,
+  type PluginWindowBounds,
+} from './pluginSurface';
 import { useThemeStore } from '../store/themeStore';
 import type { ThemeMode } from '../theme/types';
 import { WorkerCrashError } from '../agent/WorkerBackedAgent';
@@ -103,6 +112,18 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady, onConsol
     const state = useThemeStore.getState();
     postTheme(state.resolvedThemeId, state.mode, state.mode === 'dark');
   }, [postTheme]);
+
+  const postWindowBounds = useCallback(
+    (bounds: PluginWindowBounds) => {
+      const win = iframeRef.current?.contentWindow;
+      if (!win) return;
+      win.postMessage(
+        { __papr: true, type: 'papr://window.bounds', payload: bounds },
+        appOriginFor(appId),
+      );
+    },
+    [appId, iframeRef],
+  );
 
   useEffect(() => {
     postTheme(themeId, themeMode, themeMode === 'dark');
@@ -254,6 +275,50 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady, onConsol
           backendUrl: runningUrl
             ?? (resolvedManifest.port ? `http://127.0.0.1:${resolvedManifest.port}` : null),
         });
+        return;
+      }
+
+      if (type === 'papr://window.getBounds' || type === 'papr://window.setSize') {
+        if (!isPluginManifest(resolvedManifest)) {
+          respond(undefined, {
+            code: 'NOT_A_PLUGIN',
+            message: 'papr.window is only available on kind:"plugin" overlays',
+          });
+          return;
+        }
+        const runtime = useAppRuntimeStore.getState();
+        if (!runtime.pinnedPluginIds.includes(appId)) {
+          respond(undefined, {
+            code: 'NOT_PINNED',
+            message: 'plugin overlay is not visible',
+          });
+          return;
+        }
+        const surface = resolveOverlaySurface(resolvedManifest);
+        const viewport = { width: window.innerWidth, height: window.innerHeight };
+        const stored = runtime.overlayLayouts[appId];
+        const current = clampOverlayRect(
+          stored ?? defaultOverlayOrigin(surface.position, surface, viewport, 0),
+          viewport,
+        );
+        if (type === 'papr://window.getBounds') {
+          respond(overlayToWindowBounds(current));
+          return;
+        }
+        const payload = (data.payload ?? {}) as Record<string, unknown>;
+        const width = typeof payload.width === 'number' && Number.isFinite(payload.width) ? payload.width : NaN;
+        const height = typeof payload.height === 'number' && Number.isFinite(payload.height) ? payload.height : NaN;
+        if (!Number.isFinite(width) || !Number.isFinite(height)) {
+          respond(undefined, { code: 'INVALID_REQUEST', message: 'width and height must be finite numbers' });
+          return;
+        }
+        const next = clampOverlayRect(
+          overlayFromSetSize(current, { width, height, box: payload.box }),
+          viewport,
+        );
+        runtime.setOverlayLayout(appId, next);
+        runtime.persistPluginUi();
+        respond(overlayToWindowBounds(next));
         return;
       }
 
@@ -572,5 +637,5 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady, onConsol
     };
   }, [handleMessage]);
 
-  return { postThemeNow };
+  return { postThemeNow, postWindowBounds };
 }
