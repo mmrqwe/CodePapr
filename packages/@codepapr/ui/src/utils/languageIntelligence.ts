@@ -1,4 +1,5 @@
 import { lspLanguageFromPath } from './editorLanguage';
+import { isLspFamilyEnabled } from './lspFamilies';
 import type { MonacoExternalMarker } from '@codepapr/editor';
 import { relativePathFromFileUri, workspaceFileUri } from '@codepapr/core';
 import { yieldToMainThread } from './taskScheduling';
@@ -512,6 +513,7 @@ export function scheduleLanguageIntelligenceRefresh(params: {
   delayMs?: number;
   maxFiles?: number;
   force?: boolean;
+  disabledFamilies?: readonly string[];
 }): void {
   const workspacePath = params.workspacePath.trim();
   if (!workspacePath) {
@@ -529,7 +531,8 @@ export function scheduleLanguageIntelligenceRefresh(params: {
         return false;
       }
       seen.add(path);
-      return !!lspLanguageFromPath(path);
+      const languageId = lspLanguageFromPath(path);
+      return !!languageId && isLspFamilyEnabled(params.disabledFamilies, languageId);
     })
     .slice(0, maxFiles);
 

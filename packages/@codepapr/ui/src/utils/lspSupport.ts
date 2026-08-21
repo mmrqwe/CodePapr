@@ -1,3 +1,5 @@
+import { isLspFamilyEnabled } from './lspFamilies';
+
 export type LspInstallMode = 'managed' | 'npm' | 'system';
 
 export interface LspSupportDescriptor {
@@ -312,10 +314,20 @@ export async function checkLspAvailability(
 export async function ensureLspServer(
   workspacePath: string,
   languageId: string,
+  disabledFamilies?: readonly string[],
 ): Promise<LspAvailabilityStatus> {
   const descriptor = LSP_SUPPORT_BY_LANGUAGE[languageId];
   if (!descriptor) {
     return unavailableStatus(languageId, languageId, 'system', `不支持的语言: ${languageId}`);
+  }
+
+  if (!isLspFamilyEnabled(disabledFamilies, languageId)) {
+    return unavailableStatus(
+      languageId,
+      descriptor.languageLabel,
+      descriptor.installMode,
+      `${descriptor.languageLabel} LSP 已在设置中关闭`,
+    );
   }
 
   const trimmedWorkspace = workspacePath.trim();

@@ -470,6 +470,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
            set({ settings, settingsLoaded: true, _settingsPersistable: true, _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null, _appAgent: null });
            void applyBrowserEngine(settings.browserEngine);
            void invoke('set_external_access_yolo', { enabled: settings.folderAccessYolo }).catch(() => undefined);
+           void invoke('lsp_set_disabled_families', { families: settings.lspDisabledFamilies }).catch(() => undefined);
 
           // No proactive write-back on load: legacy plaintext-key migration is
           // already handled (and re-persisted) by the backend's
@@ -547,6 +548,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           set({ _persistenceError: '设置加载失败，更改将不会被保存到磁盘' });
         }
         void invoke('set_external_access_yolo', { enabled: settings.folderAccessYolo }).catch(() => undefined);
+        void invoke('lsp_set_disabled_families', { families: settings.lspDisabledFamilies }).catch(() => undefined);
         if (settings.browserEngine !== previousEngine) {
           void applyBrowserEngine(settings.browserEngine);
         }
@@ -598,7 +600,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         if (path) {
           void get()._loadProjectConfig(path);
           void get()._ensureWorkspaceGitReady(path);
-          void warmupLspForWorkspace(path);
+          void warmupLspForWorkspace(path, get().settings.lspDisabledFamilies);
         }
       },
 
@@ -894,7 +896,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         }
         await get()._loadProjectConfig(path);
         void get()._ensureWorkspaceGitReady(path);
-        void warmupLspForWorkspace(path);
+        void warmupLspForWorkspace(path, get().settings.lspDisabledFamilies);
 
         const currentSettings = get().settings;
         // _settingsPersistable 为 false 表示启动时设置加载失败、内存中是默认值，

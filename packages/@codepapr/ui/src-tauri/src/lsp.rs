@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fs,
     io::{BufRead, BufReader, Read, Write},
     path::{Component, Path, PathBuf},
@@ -21,8 +21,8 @@ use tauri::Emitter;
 
 use crate::lsp_fallback;
 use crate::lsp_managed_tools::{
-    dotnet_binary, ensure_managed_language_server, managed_lsp_commands, ManagedLspCommand,
-    ManagedLspProgress,
+    collect_lsp_inventory, dotnet_binary, ensure_managed_language_server, managed_lsp_commands,
+    LspInventory, ManagedLspCommand, ManagedLspProgress,
 };
 use crate::shared::{read, run_blocking_workspace_task, write};
 
@@ -250,6 +250,82 @@ struct CollectedDiagnostics {
 type SharedLspServer = Arc<Mutex<ManagedLspServer>>;
 
 static LSP_SERVERS: OnceLock<RwLock<HashMap<String, SharedLspServer>>> = OnceLock::new();
+
+const LSP_DISABLED_MARKER: &str = "CODEPAPR_LSP_DISABLED";
+const KNOWN_LSP_FAMILIES: &[&str] = &[
+    "typescript",
+    "html",
+    "css",
+    "json",
+    "yaml",
+    "python",
+    "csharp",
+    "java",
+    "cpp",
+    "shellscript",
+    "rust",
+    "go",
+    "swift",
+    "sql",
+    "markdown",
+];
+
+static LSP_DISABLED_FAMILIES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn lsp_disabled_families() -> &'static Mutex<HashSet<String>> {
+    LSP_DISABLED_FAMILIES.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn is_family_disabled(language_id: &str) -> bool {
+    let Some(family) = lsp_server_family(language_id) else {
+        return false;
+    };
+    lsp_disabled_families()
+        .lock()
+        .map(|set| set.contains(family))
+        .unwrap_or(false)
+}
+
+fn is_lsp_disabled_error(err: &str) -> bool {
+    err.contains(LSP_DISABLED_MARKER)
+}
+
+fn lsp_disabled_message(language_id: &str) -> String {
+    format!("{LSP_DISABLED_MARKER}: `{language_id}` 已在设置中关闭")
+}
+
+fn stop_servers_for_family(family: &str) {
+    let suffix = format!("::{family}");
+    let keys: Vec<String> = lsp_servers()
+        .read()
+        .ok()
+        .map(|servers| {
+            servers
+                .keys()
+                .filter(|key| key.ends_with(&suffix))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    for key in keys {
+        if let Some((workspace, _)) = key.rsplit_once("::") {
+            let _ = lsp_stop_server_impl(workspace, family);
+        }
+    }
+}
+
+fn running_family_ids() -> HashSet<String> {
+    lsp_servers()
+        .read()
+        .ok()
+        .map(|servers| {
+            servers
+                .keys()
+                .filter_map(|key| key.rsplit_once("::").map(|(_, family)| family.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 fn lsp_servers() -> &'static RwLock<HashMap<String, SharedLspServer>> {
     LSP_SERVERS.get_or_init(|| RwLock::new(HashMap::new()))
@@ -1564,6 +1640,10 @@ fn ensure_running_server_handle(
     workspace_path: &str,
     language_id: &str,
 ) -> Result<SharedLspServer, String> {
+    if is_family_disabled(language_id) {
+        return Err(lsp_disabled_message(language_id));
+    }
+
     // 快路径：已存在且运行中，无需创建锁。
     if let Some(server) = lookup_server_handle(workspace_path, language_id) {
         let mut guard = lock_server(&server)?;
@@ -1654,7 +1734,7 @@ pub async fn lsp_start_server(
             },
         ) {
             Ok(status) => Ok(status),
-            Err(err) if lsp_fallback::supports_language(&sanitized_language_id) => {
+            Err(err) if !is_lsp_disabled_error(&err) && lsp_fallback::supports_language(&sanitized_language_id) => {
                 fallback_server_status(&sanitized_language_id, &sanitized_workspace).map_err(|_| err)
             }
             Err(err) => Err(err),
@@ -1808,7 +1888,7 @@ pub(crate) fn lsp_open_document_with_app(
         })
     }) {
         Ok(response) => Ok(response),
-        Err(err) if lsp_fallback::supports_language(&language_id) => {
+        Err(err) if !is_lsp_disabled_error(&err) && lsp_fallback::supports_language(&language_id) => {
             let snapshot =
                 lsp_fallback::open_document(&workspace_path, &language_id, &uri, &content, version)
                     .ok_or_else(|| err.clone())?;
@@ -1953,6 +2033,7 @@ fn lsp_request_timed(
 ) -> Result<LspResponse, String> {
     let server_handle = match ensure_running_server_handle(None, workspace_path, language_id) {
         Ok(h) => Some(h),
+        Err(err) if is_lsp_disabled_error(&err) => return Err(err),
         Err(_) => None,
     };
 
@@ -2049,7 +2130,7 @@ pub(crate) fn lsp_get_diagnostics_impl(
         Ok(server.diagnostics_by_uri.clone())
     }) {
         Ok(diagnostics) => Ok(LspDiagnosticsResponse { diagnostics }),
-        Err(_err) if lsp_fallback::supports_language(language_id) => Ok(LspDiagnosticsResponse {
+        Err(_err) if !is_lsp_disabled_error(&_err) && lsp_fallback::supports_language(language_id) => Ok(LspDiagnosticsResponse {
             diagnostics: HashMap::new(),
         }),
         Err(err) => Err(err),
@@ -2110,6 +2191,47 @@ pub(crate) fn lsp_stop_server_impl(
 #[tauri::command]
 pub async fn lsp_stop_server(workspace_path: String, language_id: String) -> Result<bool, String> {
     run_blocking_workspace_task(move || lsp_stop_server_impl(&workspace_path, &language_id)).await
+}
+
+#[tauri::command]
+pub async fn lsp_set_disabled_families(families: Vec<String>) -> Result<(), String> {
+    run_blocking_workspace_task(move || {
+        let sanitized: HashSet<String> = families
+            .into_iter()
+            .map(|id| id.trim().to_lowercase())
+            .filter(|id| KNOWN_LSP_FAMILIES.contains(&id.as_str()))
+            .collect();
+        let newly_disabled: Vec<String> = {
+            let mut guard = lsp_disabled_families()
+                .lock()
+                .map_err(|_| "LSP disabled families 锁不可用".to_string())?;
+            let previous = std::mem::replace(&mut *guard, sanitized.clone());
+            sanitized.difference(&previous).cloned().collect()
+        };
+        for family in &newly_disabled {
+            stop_servers_for_family(family);
+        }
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn lsp_list_components() -> Result<LspInventory, String> {
+    run_blocking_workspace_task(|| {
+        let mut inventory = collect_lsp_inventory();
+        let running = running_family_ids();
+        let disabled = lsp_disabled_families()
+            .lock()
+            .map(|set| set.clone())
+            .unwrap_or_default();
+        for family in &mut inventory.families {
+            family.running = running.contains(&family.family_id);
+            family.enabled = !disabled.contains(&family.family_id);
+        }
+        Ok(inventory)
+    })
+    .await
 }
 
 // ── 批量命令（ProjectGraph 加载加速） ─────────────────────────────────
@@ -3505,6 +3627,32 @@ mod tests {
         assert!(!info.running);
         assert!(info.server_status.is_none());
         assert!(info.tool_source.is_some());
+    }
+
+    #[test]
+    fn disabled_family_does_not_start_a_server() {
+        let _guard = lsp_smoke_lock();
+        {
+            let mut disabled = super::lsp_disabled_families()
+                .lock()
+                .expect("disabled families lock");
+            disabled.clear();
+            disabled.insert("typescript".to_string());
+        }
+
+        let err = match ensure_running_server_handle(None, "/tmp/codepapr-disabled-lsp", "typescript") {
+            Ok(_) => panic!("disabled family must not start"),
+            Err(err) => err,
+        };
+        assert!(
+            err.contains("CODEPAPR_LSP_DISABLED"),
+            "unexpected error: {err}"
+        );
+
+        super::lsp_disabled_families()
+            .lock()
+            .expect("disabled families lock")
+            .clear();
     }
 
     #[test]

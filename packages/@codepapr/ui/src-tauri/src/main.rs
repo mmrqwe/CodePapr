@@ -382,6 +382,8 @@ fn main() {
             shell::session::close_shell_session,
             lsp::lsp_start_server,
             lsp::lsp_query_availability,
+            lsp::lsp_list_components,
+            lsp::lsp_set_disabled_families,
             lsp::lsp_open_document,
             lsp::lsp_close_document,
             lsp::lsp_request,

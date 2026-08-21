@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { lspLanguageFromPath } from './editorLanguage';
+import { isLspFamilyEnabled } from './lspFamilies';
 import { describeLspSupport } from './lspSupport';
 import { workspaceFileUri } from '@codepapr/core';
 import { globalLspPool } from '../tools/workspaceProjectMapLsp';
@@ -52,7 +53,10 @@ export async function stopWorkspaceLsp(workspacePath: string): Promise<void> {
  *
  * 纯 fire-and-forget：任何失败都静默忽略，不影响工作区打开流程。
  */
-export async function warmupLspForWorkspace(workspacePath: string): Promise<void> {
+export async function warmupLspForWorkspace(
+  workspacePath: string,
+  disabledFamilies: readonly string[] = [],
+): Promise<void> {
   if (!workspacePath || warmupInFlight.has(workspacePath)) {
     return;
   }
@@ -68,6 +72,7 @@ export async function warmupLspForWorkspace(workspacePath: string): Promise<void
       if (entry.isDir) continue;
       const languageId = lspLanguageFromPath(entry.path);
       if (!languageId || !describeLspSupport(languageId)) continue;
+      if (!isLspFamilyEnabled(disabledFamilies, languageId)) continue;
       if (!languageFiles.has(languageId)) {
         languageFiles.set(languageId, entry.path);
       }

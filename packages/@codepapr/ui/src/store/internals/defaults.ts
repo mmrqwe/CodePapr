@@ -242,6 +242,7 @@ export const DEFAULT_SETTINGS: Settings = {
   streamIdleTimeoutMs: 300_000,
   browserEngine: 'embedded',
   folderAccessYolo: false,
+  lspDisabledFamilies: [],
 };
 
 export function createEmptyStats(): CumulativeStats {

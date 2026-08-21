@@ -198,6 +198,19 @@ describe('normalizeSettings 实验性功能', () => {
   });
 });
 
+describe('normalizeSettings LSP families', () => {
+  it('defaults to all families enabled', () => {
+    expect(normalizeSettings({}).lspDisabledFamilies).toEqual([]);
+  });
+
+  it('keeps known disabled families and drops unknown ids', () => {
+    expect(normalizeSettings({ lspDisabledFamilies: ['rust', 'nope', 'java'] }).lspDisabledFamilies).toEqual([
+      'rust',
+      'java',
+    ]);
+  });
+});
+
 describe('ModelProfile 与 Slot 角色分配机制', () => {
   it('createDefaultProfile 创建具有合理默认值的配置对象', () => {
     const deepseekProf = createDefaultProfile('My DeepSeek', 'deepseek');

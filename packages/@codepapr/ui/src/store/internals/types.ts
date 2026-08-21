@@ -176,6 +176,8 @@ export interface Settings {
   streamIdleTimeoutMs: number;
   browserEngine: 'embedded' | 'headless';
   folderAccessYolo: boolean;
+  /** 关闭的 LSP family。空数组 = 全部启用（默认）。 */
+  lspDisabledFamilies: string[];
 }
 
 /** 压缩管线（checkpoint/剪枝）所需的最小 settings 子集：主线程传完整

@@ -883,6 +883,7 @@ export function CodePreviewPanel({
       paths: [selectedPath],
       delayMs: SELECTED_FILE_LSP_WARMUP_DELAY_MS,
       maxFiles: 1,
+      disabledFamilies: settings.lspDisabledFamilies,
     });
   }, [
     isReadingFile,
@@ -890,6 +891,7 @@ export function CodePreviewPanel({
     previewContentPath,
     previewError,
     selectedPath,
+    settings.lspDisabledFamilies,
     workspacePath,
   ]);
 

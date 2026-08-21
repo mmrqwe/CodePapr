@@ -11,6 +11,7 @@ import { SettingsLlmTab } from './settings/SettingsLlmTab';
 import { SettingsSearchTab } from './settings/SettingsSearchTab';
 import { SettingsMentorTab } from './settings/SettingsMentorTab';
 import { SettingsAdvancedTab } from './settings/SettingsAdvancedTab';
+import { SettingsLspTab } from './settings/SettingsLspTab';
 import { SettingsAppTab } from './settings/SettingsAppTab';
 import { useThemeStore } from '../store/themeStore';
 import type { SettingsTab } from './settings/types';
@@ -19,7 +20,7 @@ import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { syncRunningBackendsToAccess } from '../tools/workspaceAppTools';
 
 function tabButtonClass(active: boolean): string {
-  return `rounded-xl border px-3 py-3 text-left transition-colors ${
+  return `min-w-[6.5rem] flex-1 rounded-xl border px-3 py-3 text-left transition-colors ${
     active
       ? 'border-accent-soft bg-accent-soft text-fg shadow-[0_0_14px_rgba(99,102,241,0.12)]'
       : 'border-line text-fg-muted hover:border-line-strong hover:bg-raised hover:text-fg'
@@ -115,6 +116,7 @@ export function SettingsModal() {
     { id: 'llm', label: t.settingsLlmTab, tip: t.settingsLlmTabTip },
     { id: 'search', label: t.settingsSearchTab, tip: t.settingsSearchTabTip },
     { id: 'mentor', label: t.settingsMentorTab, tip: t.settingsMentorTabTip },
+    { id: 'lsp', label: t.settingsLspTab, tip: t.settingsLspTabTip },
     { id: 'advanced', label: t.settingsAdvancedTab, tip: t.settingsAdvancedTabTip },
     { id: 'app', label: t.settingsAppTab, tip: t.settingsAppTabTip },
   ];
@@ -143,7 +145,7 @@ export function SettingsModal() {
         </div>
 
         <div className="border-b border-line bg-base px-5 py-3">
-          <div className="grid grid-cols-7 gap-2">
+          <div className="flex flex-wrap gap-2">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -164,6 +166,7 @@ export function SettingsModal() {
           {activeTab === 'llm' && <SettingsLlmTab {...tabProps} />}
           {activeTab === 'search' && <SettingsSearchTab {...tabProps} />}
           {activeTab === 'mentor' && <SettingsMentorTab {...tabProps} />}
+          {activeTab === 'lsp' && <SettingsLspTab {...tabProps} />}
           {activeTab === 'advanced' && <SettingsAdvancedTab {...tabProps} />}
           {activeTab === 'app' && (
             <SettingsAppTab

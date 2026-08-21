@@ -6,6 +6,7 @@ import type { CustomThemeRecord } from '../../theme/types';
 import { ACCENT_PATTERN } from '../../theme/types';
 import { DEFAULT_SETTINGS, normalizeCustomSystemPrompt } from './defaults';
 import type { ApiFormat, ApiMode, Lang, ModeConfig, ModelProfile, ProviderName, Settings, WorkspaceEntry } from './types';
+import { normalizeLspDisabledFamilies } from '../../utils/lspFamilies';
 import type { ThinkingPayload } from '@codepapr/types';
 import { modelSupportsVision } from '../../utils/visionRouting';
 
@@ -730,6 +731,7 @@ export function normalizeSettings(
     typeof input.folderAccessYolo === 'boolean'
       ? input.folderAccessYolo
       : DEFAULT_SETTINGS.folderAccessYolo;
+  const lspDisabledFamilies = normalizeLspDisabledFamilies(input.lspDisabledFamilies);
   const mcp = normalizeMcpSettings(input.mcp);
 
   const customThemes = normalizeCustomThemes(input.customThemes);
@@ -1106,6 +1108,7 @@ export function normalizeSettings(
     streamIdleTimeoutMs,
     browserEngine,
     folderAccessYolo,
+    lspDisabledFamilies,
     mcp,
   };
 }

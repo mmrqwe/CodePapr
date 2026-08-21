@@ -40,29 +40,12 @@ import {
   listGitFilesForMode,
   type GitDiffMode,
 } from '../utils/workspaceGitPanel';
+import { isLspFamilyEnabled } from '../utils/lspFamilies';
 import type { ProjectGraphWorkerBuildRequest, ProjectGraphWorkerMessage } from '../workers/projectGraphWorkerProtocol';
 import { computeInsightCacheKey } from '../utils/projectGraphCacheKey';
 
 const WORKER_AVAILABLE = typeof Worker !== 'undefined';
 const WORKER_BUILD_TIMEOUT_MS = 60_000;
-
-interface DiagProviderResult {
-  languageId: string;
-  languageLabel: string;
-  providerName: string;
-  providerSource: string;
-  status: 'lsp' | 'ast' | 'fallback' | 'unavailable';
-  details: string;
-  serverFamily?: string;
-  serverCommand?: string;
-}
-
-interface DiagCheckResult {
-  workspacePath: string;
-  providers: DiagProviderResult[];
-  checkedAt: number;
-  rawProviders: unknown;
-}
 
 interface ReadFileResult {
   path: string;
@@ -302,10 +285,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
     };
   }, []);
   const loadGenerationRef = useRef(0);
-  const [showDiagModal, setShowDiagModal] = useState(false);
-  const [diagResult, setDiagResult] = useState<DiagCheckResult | null>(null);
-  const [isCheckingDiag, setIsCheckingDiag] = useState(false);
-  const [diagError, setDiagError] = useState('');
   const [showKnowledgeGraph, setShowKnowledgeGraph] = useState(false);
   const knowledgeGraphRef = useRef<ProjectGraphKnowledgeGraphHandle>(null);
   const [graphSearchQuery, setGraphSearchQuery] = useState('');
@@ -400,102 +379,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
     onSelectPath(filePath);
   };
 
-  const runDiagnosticCheck = async () => {
-    if (!workspacePath) return;
-    setIsCheckingDiag(true);
-    setDiagError('');
-    try {
-      const rawProviders = await invoke<unknown>('list_available_symbol_providers');
-      const providers = rawProviders as Array<Record<string, unknown>>;
-      if (!Array.isArray(providers)) {
-        if (isMountedRef.current) {
-          setDiagError(`list_available_symbol_providers 返回非数组: ${typeof rawProviders}`);
-          setIsCheckingDiag(false);
-        }
-        return;
-      }
-
-      const results: DiagProviderResult[] = [];
-
-      const languageLabels: Record<string, string> = {
-        typescript: 'TypeScript / JS', typescriptreact: 'TSX', javascript: 'JavaScript', javascriptreact: 'JSX',
-        html: 'HTML', css: 'CSS', scss: 'SCSS', less: 'Less',
-        json: 'JSON', jsonc: 'JSONC', yaml: 'YAML',
-        python: 'Python', rust: 'Rust', go: 'Go', swift: 'Swift',
-        csharp: 'C#', java: 'Java', c: 'C', cpp: 'C++',
-        shellscript: 'Shell', sql: 'SQL', markdown: 'Markdown',
-      };
-
-      for (const p of providers) {
-        const langId = String(p.languageId || p.language_id || '');
-        const providerName = String(p.providerName || p.provider_name || langId);
-        const src = String(p.source || '');
-
-        let status: DiagProviderResult['status'] = 'unavailable';
-        let details = '';
-        let serverFamily = '';
-        let serverCommand = '';
-
-        if (src === 'Lsp' || src === 'lsp') {
-          try {
-            const srv = await invoke<Record<string, unknown>>('lsp_start_server', { workspacePath, languageId: langId });
-            const running = !!srv.running;
-            if (running) {
-              status = 'lsp';
-              serverFamily = String(srv.serverFamily || srv.server_family || '');
-              serverCommand = String(srv.command || '');
-              const toolLabel = String(srv.toolLabel || srv.tool_label || '');
-              details = `${toolLabel || serverCommand} (${serverFamily || 'OK'})`;
-            } else {
-              status = 'fallback';
-              details = 'LSP 未运行';
-            }
-          } catch (e) {
-            status = 'fallback';
-            details = `启动失败: ${String(e).slice(0, 60)}`;
-          }
-        } else if (src === 'Ast' || src === 'ast') {
-          status = 'ast';
-          details = providerName;
-        } else if (src === 'Regex' || src === 'regex') {
-          status = 'fallback';
-          details = `Regex: ${providerName}`;
-        } else {
-          details = `未知来源: ${src}`;
-        }
-
-        results.push({
-          languageId: langId,
-          languageLabel: languageLabels[langId] || langId,
-          providerName,
-          providerSource: src,
-          status,
-          details,
-          serverFamily,
-          serverCommand,
-        });
-      }
-
-      results.sort((a, b) => {
-        const order: Record<string, number> = { lsp: 0, ast: 1, fallback: 2, unavailable: 3 };
-        return (order[a.status] ?? 4) - (order[b.status] ?? 4);
-      });
-
-      if (isMountedRef.current) {
-        setDiagResult({ workspacePath, providers: results, checkedAt: Date.now(), rawProviders });
-        setShowDiagModal(true);
-      }
-    } catch (e) {
-      if (isMountedRef.current) {
-        setDiagError(e instanceof Error ? e.message : String(e));
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setIsCheckingDiag(false);
-      }
-    }
-  };
-
   useEffect(() => {
     gitInitAttemptedRef.current = false;
     setGitActionMessage('');
@@ -552,6 +435,9 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
       const ext = entry.path.slice(entry.path.lastIndexOf('.')).toLowerCase();
       const lang = extToLang[ext];
       if (lang) {
+        if (!isLspFamilyEnabled(settings.lspDisabledFamilies, lang)) {
+          continue;
+        }
         langIds.add(lang);
         if (!entry.path.includes('/.') && !entry.path.startsWith('.')) {
           lspFiles.push({ path: entry.path, langId: lang });
@@ -1545,14 +1431,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                   >
                     {t.workspaceInsightsRefresh}
                   </button>
-                  <button
-                    type="button"
-                    onClick={runDiagnosticCheck}
-                    disabled={isCheckingDiag}
-                    className="rounded-md border border-line px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:border-ok-bg hover:text-ok disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {isCheckingDiag ? '...' : t.diagCheckButton}
-                  </button>
                   {projectGraph && (
                     <button
                       type="button"
@@ -1903,61 +1781,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
           </div>
         )}
       </div>
-
-      {showDiagModal && diagResult && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4" onClick={() => setShowDiagModal(false)}>
-          <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-line bg-base p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-fg">{t.diagModalTitle}</h3>
-              <button onClick={() => setShowDiagModal(false)} className="rounded-md px-2 py-1 text-xs text-fg-muted hover:text-fg-soft">✕</button>
-            </div>
-            <div className="mb-4 text-[10px] text-fg-muted">
-              {workspacePath} &middot; {new Date(diagResult.checkedAt).toLocaleTimeString()}
-            </div>
-            {diagError && (
-              <div className="mb-3 rounded-lg border border-danger-bg bg-danger-bg px-3 py-2 text-xs text-danger">{diagError}</div>
-            )}
-            <div className="space-y-2">
-              <div className="grid grid-cols-12 gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-muted">
-                <span className="col-span-3">{t.diagColLanguage}</span>
-                <span className="col-span-2">{t.diagColStatus}</span>
-                <span className="col-span-7">{t.diagColProvider}</span>
-              </div>
-              {diagResult.providers.map((p) => (
-                <div key={p.languageId} className="grid grid-cols-12 gap-2 rounded-lg border border-line bg-base px-3 py-2 text-xs">
-                  <span className="col-span-3 text-fg-soft truncate">{p.languageLabel}</span>
-                  <span className={`col-span-2 font-medium truncate ${
-                    p.status === 'lsp' ? 'text-ok' :
-                    p.status === 'ast' ? 'text-blue-400' :
-                    p.status === 'fallback' ? 'text-warn' :
-                    'text-danger'
-                  }`}>
-                    {p.status === 'lsp' ? '✓ LSP' :
-                     p.status === 'ast' ? 'AST' :
-                     p.status === 'fallback' ? '降级' :
-                     '不可用'}
-                  </span>
-                  <span className="col-span-7 text-[10px] text-fg-muted leading-relaxed truncate" title={p.details}>
-                    {p.details || `${p.providerSource}: ${p.providerName}`}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 flex gap-3 text-[10px] text-fg-muted">
-              <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-ok"></span> LSP</span>
-              <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-blue-400"></span> AST</span>
-              <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-warn"></span> 降级</span>
-              <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-danger"></span> 不可用</span>
-            </div>
-            {diagResult.rawProviders != null && (
-              <details className="mt-4">
-                <summary className="cursor-pointer text-[10px] text-fg-muted hover:text-fg-muted">原始数据 / Raw Data</summary>
-                <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-line bg-base p-2 text-[10px] text-fg-muted font-mono">{JSON.stringify(diagResult.rawProviders, null, 2)}</pre>
-              </details>
-            )}
-          </div>
-        </div>
-      )}
 
       {showKnowledgeGraph && projectGraph && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-3 backdrop-blur-sm" onClick={closeKnowledgeGraph}>

@@ -50,6 +50,7 @@ export function tabResetKeys(apiMode: ApiMode): Record<SettingsTab, (keyof Setti
     search: ['searxngEnabled', 'searxngBaseUrl', 'searxngCategories', 'searxngTimeRange', 'searxngLanguage', 'searxngSafeSearch'],
     mentor: ['maxMentorConsultations', 'explorePrompt', 'scoutPrompt', 'mentorPrompt', 'exploreTemperature', 'exploreMaxToolRounds', 'exploreMaxTokens', 'exploreTopP', 'exploreMaxDepth', 'exploreThinkingEnabled', 'scoutTemperature', 'scoutMaxToolRounds', 'scoutMaxTokens', 'scoutTopP', 'scoutMaxDepth', 'scoutThinkingEnabled'],
     advanced: ['compactionModel', 'compactionMaxTokens', 'compactionTemperature', 'maxContextTokens', 'maxConversationRounds', 'chatRenderBatchRounds', 'toolContextDefaultMode', 'toolContextOverrides', 'toolContextSummaryMaxChars', 'toolContextAutoThresholdChars', 'todoMaxRetries', 'goalMaxIterations', 'goalMaxWallClockMs', 'goalRequireGitClean', 'verifierModelTier', 'verifierMaxTokens', 'verifierTemperature', 'projectGraphMaxDepth', 'projectGraphMaxFiles', 'projectGraphMaxEdges', 'projectGraphMaxSymbolsPerFile', 'projectGraphMaxFileBytes', 'projectGraphMaxTreeEntries', 'streamIdleTimeoutMs', 'toolOutputMiddleKeepChars', 'browserEngine', 'folderAccessYolo'],
+    lsp: ['lspDisabledFamilies'],
     app: [],
   };
 }

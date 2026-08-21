@@ -2703,10 +2703,411 @@ fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     deduped
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspRuntimeInfo {
+    pub id: String,
+    pub label: String,
+    pub used_by: Vec<String>,
+    pub origin: String,
+    pub path: Option<String>,
+    pub size_bytes: u64,
+    pub available: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspFamilyInfo {
+    pub family_id: String,
+    pub label: String,
+    pub language_ids: Vec<String>,
+    pub available: bool,
+    pub origin: String,
+    pub tool_label: String,
+    pub path: Option<String>,
+    pub size_bytes: u64,
+    pub uses_runtime: Option<String>,
+    pub running: bool,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspInventory {
+    pub families: Vec<LspFamilyInfo>,
+    pub runtimes: Vec<LspRuntimeInfo>,
+}
+
+fn directory_size(path: &Path) -> u64 {
+    if path.is_file() {
+        return path.metadata().map(|m| m.len()).unwrap_or(0);
+    }
+    if !path.is_dir() {
+        return 0;
+    }
+    let mut total = 0u64;
+    let mut stack = vec![path.to_path_buf()];
+    let mut visited = 0usize;
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            visited += 1;
+            if visited > 200_000 {
+                return total;
+            }
+            let child = entry.path();
+            if child.is_dir() {
+                stack.push(child);
+            } else if let Ok(meta) = entry.metadata() {
+                total = total.saturating_add(meta.len());
+            }
+        }
+    }
+    total
+}
+
+fn find_managed_entry(relative: &[&str]) -> Option<(PathBuf, &'static str)> {
+    for root in managed_tool_roots() {
+        let path = relative.iter().fold(root.clone(), |acc, part| acc.join(part));
+        if path.exists() {
+            return Some((path, managed_root_source(&root)));
+        }
+    }
+    None
+}
+
+fn origin_from_source(source: &str) -> &'static str {
+    match source {
+        "managed-cache" => "cache",
+        "system-path" | "system" | "rustup-component" | "cargo-install" => "system",
+        _ => "bundled",
+    }
+}
+
+fn family_info(
+    family_id: &str,
+    label: &str,
+    language_ids: &[&str],
+    relative: &[&str],
+    system_commands: &[&str],
+    tool_label: &str,
+    uses_runtime: Option<&str>,
+    include_size: bool,
+) -> LspFamilyInfo {
+    if let Some((path, source)) = find_managed_entry(relative) {
+        return LspFamilyInfo {
+            family_id: family_id.to_string(),
+            label: label.to_string(),
+            language_ids: language_ids.iter().map(|id| id.to_string()).collect(),
+            available: true,
+            origin: origin_from_source(source).to_string(),
+            tool_label: tool_label.to_string(),
+            path: Some(path.to_string_lossy().to_string()),
+            size_bytes: if include_size { directory_size(&path) } else { 0 },
+            uses_runtime: uses_runtime.map(str::to_string),
+            running: false,
+            enabled: true,
+        };
+    }
+
+    for command in system_commands {
+        if command_exists(command) {
+            let path = resolve_command_path(command).map(|p| p.to_string_lossy().to_string());
+            return LspFamilyInfo {
+                family_id: family_id.to_string(),
+                label: label.to_string(),
+                language_ids: language_ids.iter().map(|id| id.to_string()).collect(),
+                available: true,
+                origin: "system".to_string(),
+                tool_label: tool_label.to_string(),
+                path,
+                size_bytes: 0,
+                uses_runtime: uses_runtime.map(str::to_string),
+                running: false,
+                enabled: true,
+            };
+        }
+    }
+
+    LspFamilyInfo {
+        family_id: family_id.to_string(),
+        label: label.to_string(),
+        language_ids: language_ids.iter().map(|id| id.to_string()).collect(),
+        available: false,
+        origin: "missing".to_string(),
+        tool_label: tool_label.to_string(),
+        path: None,
+        size_bytes: 0,
+        uses_runtime: uses_runtime.map(str::to_string),
+        running: false,
+        enabled: true,
+    }
+}
+
+fn runtime_info(
+    id: &str,
+    label: &str,
+    used_by: &[&str],
+    relative: &[&str],
+) -> LspRuntimeInfo {
+    if let Some((path, source)) = find_managed_entry(relative) {
+        return LspRuntimeInfo {
+            id: id.to_string(),
+            label: label.to_string(),
+            used_by: used_by.iter().map(|item| item.to_string()).collect(),
+            origin: origin_from_source(source).to_string(),
+            path: Some(path.to_string_lossy().to_string()),
+            size_bytes: directory_size(&path),
+            available: true,
+        };
+    }
+    LspRuntimeInfo {
+        id: id.to_string(),
+        label: label.to_string(),
+        used_by: used_by.iter().map(|item| item.to_string()).collect(),
+        origin: "missing".to_string(),
+        path: None,
+        size_bytes: 0,
+        available: false,
+    }
+}
+
+/// 只读清点已捆绑/缓存/系统上的 LSP 组件，不启动任何语言服务器。
+pub fn collect_lsp_inventory() -> LspInventory {
+    let clangd_exe = executable_name("clangd");
+    let rust_analyzer_exe = executable_name("rust-analyzer");
+    let gopls_exe = executable_name("gopls");
+    let sqls_exe = executable_name("sqls");
+    let marksman_exe = executable_name("marksman");
+    let sourcekit_exe = executable_name("sourcekit-lsp");
+
+    let mut families = vec![
+        family_info(
+            "typescript",
+            "TypeScript / JavaScript",
+            &["typescript", "javascript", "typescriptreact", "javascriptreact"],
+            &["node-packages", "node_modules", "typescript-language-server"],
+            &["typescript-language-server"],
+            "typescript-language-server",
+            Some("node-packages"),
+            false,
+        ),
+        family_info(
+            "html",
+            "HTML",
+            &["html"],
+            &["node-packages", "node_modules", "vscode-langservers-extracted"],
+            &["vscode-html-language-server"],
+            "vscode-html-language-server",
+            Some("node-packages"),
+            false,
+        ),
+        family_info(
+            "css",
+            "CSS / SCSS / Less",
+            &["css", "scss", "less"],
+            &["node-packages", "node_modules", "vscode-langservers-extracted"],
+            &["vscode-css-language-server"],
+            "vscode-css-language-server",
+            Some("node-packages"),
+            false,
+        ),
+        family_info(
+            "json",
+            "JSON",
+            &["json", "jsonc"],
+            &["node-packages", "node_modules", "vscode-langservers-extracted"],
+            &["vscode-json-language-server"],
+            "vscode-json-language-server",
+            Some("node-packages"),
+            false,
+        ),
+        family_info(
+            "yaml",
+            "YAML",
+            &["yaml"],
+            &["node-packages", "node_modules", "yaml-language-server"],
+            &["yaml-language-server"],
+            "yaml-language-server",
+            Some("node-packages"),
+            false,
+        ),
+        family_info(
+            "python",
+            "Python",
+            &["python"],
+            &["node-packages", "node_modules", "pyright"],
+            &["pyright-langserver", "pyright"],
+            "pyright",
+            Some("node-packages"),
+            false,
+        ),
+        family_info(
+            "shellscript",
+            "Shell",
+            &["shellscript"],
+            &["node-packages", "node_modules", "bash-language-server"],
+            &["bash-language-server"],
+            "bash-language-server",
+            Some("node-packages"),
+            false,
+        ),
+        family_info(
+            "csharp",
+            "C#",
+            &["csharp"],
+            &["csharp-ls"],
+            &["csharp-ls"],
+            "csharp-ls / CodePapr.CSharp.Analyzer",
+            Some("dotnet-sdk"),
+            true,
+        ),
+        family_info(
+            "java",
+            "Java",
+            &["java"],
+            &["java", "jdtls"],
+            &["jdtls"],
+            "jdtls",
+            Some("java-jre"),
+            true,
+        ),
+        family_info(
+            "cpp",
+            "C / C++",
+            &["c", "cpp"],
+            &["clangd", "bin", clangd_exe.as_str()],
+            &["clangd"],
+            "clangd",
+            None,
+            true,
+        ),
+        family_info(
+            "rust",
+            "Rust",
+            &["rust"],
+            &["rust-analyzer", rust_analyzer_exe.as_str()],
+            &["rust-analyzer"],
+            "rust-analyzer",
+            None,
+            true,
+        ),
+        family_info(
+            "go",
+            "Go",
+            &["go"],
+            &["gopls", gopls_exe.as_str()],
+            &["gopls"],
+            "gopls",
+            None,
+            true,
+        ),
+        family_info(
+            "swift",
+            "Swift",
+            &["swift"],
+            &["sourcekit-lsp", sourcekit_exe.as_str()],
+            &["sourcekit-lsp"],
+            "sourcekit-lsp",
+            None,
+            false,
+        ),
+        family_info(
+            "sql",
+            "SQL",
+            &["sql"],
+            &["sqls", sqls_exe.as_str()],
+            &["sqls"],
+            "sqls",
+            None,
+            true,
+        ),
+        family_info(
+            "markdown",
+            "Markdown",
+            &["markdown"],
+            &["marksman", marksman_exe.as_str()],
+            &["marksman"],
+            "marksman",
+            None,
+            true,
+        ),
+    ];
+
+    // C# 还可能只有 Analyzer sidecar，没有 csharp-ls 目录。
+    if families
+        .iter()
+        .find(|family| family.family_id == "csharp")
+        .is_some_and(|family| !family.available)
+    {
+        if let Some((path, source)) = find_managed_entry(&["csharp-analyzer"]) {
+            if let Some(family) = families.iter_mut().find(|item| item.family_id == "csharp") {
+                family.available = true;
+                family.origin = origin_from_source(source).to_string();
+                family.path = Some(path.to_string_lossy().to_string());
+                family.size_bytes = directory_size(&path);
+                family.uses_runtime = None;
+            }
+        }
+    }
+
+    // clangd / rust-analyzer 二进制可能在子目录而不是根文件。
+    for (family_id, fallback_dir) in [("cpp", "clangd"), ("rust", "rust-analyzer"), ("go", "gopls")] {
+        if let Some(family) = families.iter_mut().find(|item| item.family_id == family_id) {
+            if !family.available {
+                if let Some((path, source)) = find_managed_entry(&[fallback_dir]) {
+                    family.available = true;
+                    family.origin = origin_from_source(source).to_string();
+                    family.path = Some(path.to_string_lossy().to_string());
+                    family.size_bytes = directory_size(&path);
+                }
+            } else if family.size_bytes == 0 {
+                if let Some((path, _)) = find_managed_entry(&[fallback_dir]) {
+                    family.size_bytes = directory_size(&path);
+                    if family.path.is_none() {
+                        family.path = Some(path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let runtimes = vec![
+        runtime_info(
+            "node-runtime",
+            "Node.js runtime",
+            &["typescript", "html", "css", "json", "yaml", "python", "shellscript"],
+            &["node-runtime"],
+        ),
+        runtime_info(
+            "node-packages",
+            "Node language packages",
+            &["typescript", "html", "css", "json", "yaml", "python", "shellscript"],
+            &["node-packages"],
+        ),
+        runtime_info(
+            "dotnet-sdk",
+            ".NET SDK",
+            &["csharp"],
+            &["dotnet-sdk"],
+        ),
+        runtime_info(
+            "java-jre",
+            "Java runtime",
+            &["java"],
+            &["java", "jre"],
+        ),
+    ];
+
+    LspInventory { families, runtimes }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        managed_clangd_download, managed_java_download, managed_lsp_commands,
+        collect_lsp_inventory, managed_clangd_download, managed_java_download, managed_lsp_commands,
         managed_node_download, managed_node_package_command_for_root, workspace_hash,
         NODE_RUNTIME_VERSION,
     };
@@ -2730,6 +3131,19 @@ mod tests {
             workspace_hash(Path::new("/a/b")),
             workspace_hash(Path::new("/a/c"))
         );
+    }
+
+    #[test]
+    fn collect_lsp_inventory_lists_known_families_without_starting_servers() {
+        let inventory = collect_lsp_inventory();
+        let ids: Vec<_> = inventory.families.iter().map(|f| f.family_id.as_str()).collect();
+        assert!(ids.contains(&"typescript"));
+        assert!(ids.contains(&"csharp"));
+        assert!(ids.contains(&"java"));
+        assert!(ids.contains(&"rust"));
+        assert_eq!(inventory.families.len(), 15);
+        assert!(inventory.runtimes.iter().any(|runtime| runtime.id == "node-runtime"));
+        assert!(inventory.runtimes.iter().any(|runtime| runtime.id == "dotnet-sdk"));
     }
 
     #[test]
