@@ -2778,6 +2778,26 @@ fn find_managed_entry(relative: &[&str]) -> Option<(PathBuf, &'static str)> {
     None
 }
 
+/// 捆绑布局既可能是 `<tool>/<exe>`，也可能是 `<tool>/bin/<exe>`（sqls、marksman）。
+fn find_managed_tool(relative: &[&str]) -> Option<(PathBuf, &'static str)> {
+    if let Some(found) = find_managed_entry(relative) {
+        return Some(found);
+    }
+    if relative.len() >= 2 {
+        let exe = *relative.last()?;
+        if exe == "bin" {
+            return None;
+        }
+        let mut with_bin: Vec<&str> = relative[..relative.len() - 1].to_vec();
+        with_bin.push("bin");
+        with_bin.push(exe);
+        if let Some(found) = find_managed_entry(&with_bin) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 fn origin_from_source(source: &str) -> &'static str {
     match source {
         "managed-cache" => "cache",
@@ -2796,7 +2816,7 @@ fn family_info(
     uses_runtime: Option<&str>,
     include_size: bool,
 ) -> LspFamilyInfo {
-    if let Some((path, source)) = find_managed_entry(relative) {
+    if let Some((path, source)) = find_managed_tool(relative) {
         return LspFamilyInfo {
             family_id: family_id.to_string(),
             label: label.to_string(),
@@ -3144,6 +3164,45 @@ mod tests {
         assert_eq!(inventory.families.len(), 15);
         assert!(inventory.runtimes.iter().any(|runtime| runtime.id == "node-runtime"));
         assert!(inventory.runtimes.iter().any(|runtime| runtime.id == "dotnet-sdk"));
+    }
+
+    #[test]
+    fn sql_and_markdown_inventory_finds_bin_layout() {
+        let inventory = collect_lsp_inventory();
+        let sql = inventory
+            .families
+            .iter()
+            .find(|family| family.family_id == "sql")
+            .expect("sql family");
+        let markdown = inventory
+            .families
+            .iter()
+            .find(|family| family.family_id == "markdown")
+            .expect("markdown family");
+        let sqls_exe = super::executable_name("sqls");
+        let marksman_exe = super::executable_name("marksman");
+        let bundled_sqls = super::find_managed_entry(&["sqls", "bin", sqls_exe.as_str()]).is_some();
+        let bundled_marksman =
+            super::find_managed_entry(&["marksman", "bin", marksman_exe.as_str()]).is_some();
+        if bundled_sqls {
+            assert!(sql.available, "sqls/bin/sqls exists but inventory marked SQL missing");
+            assert!(
+                sql.path.as_ref().is_some_and(|path| path.contains("sqls")),
+                "sql inventory path should point at sqls: {:?}",
+                sql.path
+            );
+        }
+        if bundled_marksman {
+            assert!(
+                markdown.available,
+                "marksman/bin/marksman exists but inventory marked Markdown missing"
+            );
+            assert!(
+                markdown.path.as_ref().is_some_and(|path| path.contains("marksman")),
+                "markdown inventory path should point at marksman: {:?}",
+                markdown.path
+            );
+        }
     }
 
     #[test]
