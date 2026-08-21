@@ -72,7 +72,7 @@ describe('SettingsModal', () => {
     expect(container.innerHTML).toContain('h-[94vh]');
 
     const generalTab = container.querySelector('button[title="配置语言、调试、实验性功能和许可证等全局界面行为。"]');
-    const llmTab = container.querySelector('button[title="配置主模型、快速模型、API 接入方式和采样参数。"]');
+    const llmTab = container.querySelector('button[title="配置主模型、快速模型、导师模型、API 接入方式和采样参数。"]');
 
     expect(generalTab?.textContent).toContain('通用');
     expect(llmTab?.textContent).toContain('LLM');
@@ -267,7 +267,7 @@ describe('SettingsModal', () => {
       root.render(<SettingsModal />);
     });
     const llmTab = container.querySelector(
-      'button[title="配置主模型、快速模型、API 接入方式和采样参数。"]'
+      'button[title="配置主模型、快速模型、导师模型、API 接入方式和采样参数。"]'
     );
     expect(llmTab).not.toBeNull();
     await act(async () => {
@@ -280,5 +280,34 @@ describe('SettingsModal', () => {
     expect(container.textContent).toContain('DeepSeek Flash (快速)');
     expect(container.textContent).toContain('自定义 API (Custom)');
     expect(container.textContent).toContain('新建模型配置');
+  });
+
+  it('mentor sub-agent tab keeps prompt settings and points model config to LLM', async () => {
+    await act(async () => {
+      root.render(<SettingsModal />);
+    });
+
+    const mentorTab = container.querySelector(
+      'button[title="配置 Explore（代码分析）、Scout（网页搜索）、Mentor（架构指导）三种子代理。"]'
+    );
+    expect(mentorTab).not.toBeNull();
+    await act(async () => {
+      mentorTab!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const mentorButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Mentor'),
+    );
+    expect(mentorButton).toBeDefined();
+    await act(async () => {
+      mentorButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain('请到「LLM」中分配并启用导师模型');
+    expect(container.textContent).toContain('自定义提示词');
+    expect(container.textContent).toContain('每轮最大咨询次数');
+    expect(container.textContent).not.toContain('API 配置');
+    expect(container.textContent).not.toContain('导师 API 格式');
+    expect(container.textContent).not.toContain('导师 API Key');
   });
 });
