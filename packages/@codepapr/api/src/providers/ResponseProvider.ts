@@ -850,12 +850,14 @@ export class ResponseProvider extends BaseLLMProvider {
           content: msg.content,
         });
       } else if (msg.role === 'user') {
-        if (msg.images && msg.images.length > 0) {
+        // 空 data 的图片（落盘引用未回填成功）跳过，避免构造出非法 image_url。
+        const usableImages = (msg.images ?? []).filter((img) => Boolean(img.data));
+        if (usableImages.length > 0) {
           const contentParts: Array<{ type: string; text?: string; image_url?: string }> = [];
           if (msg.content) {
             contentParts.push({ type: 'input_text', text: msg.content });
           }
-          for (const img of msg.images) {
+          for (const img of usableImages) {
             contentParts.push({
               type: 'input_image',
               image_url: `data:${img.mediaType};base64,${img.data}`,

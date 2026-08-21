@@ -311,6 +311,8 @@ fn main() {
             workspace_fs::write::write_text_file,
             workspace_fs::write::delete_workspace_file,
             workspace_fs::write::delete_workspace_dir,
+            workspace_fs::chat_images::save_chat_image,
+            workspace_fs::chat_images::load_chat_images,
             shell::background::run_workspace_command,
             shell::background::run_workspace_shell_command,
             shell::background::cancel_running_command,

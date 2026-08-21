@@ -155,7 +155,7 @@ describe('sanitizeMessageForPersistence', () => {
     expect(sanitizeMessageForPersistence(user, false).promptContent).toBe('full wrapped prompt');
   });
 
-  it('keeps attached file names and strips image payloads', () => {
+  it('keeps attached file names and strips image payloads without disk refs', () => {
     const user: UIMessage = {
       id: 'u1',
       role: 'user',
@@ -167,5 +167,22 @@ describe('sanitizeMessageForPersistence', () => {
     const sanitized = sanitizeMessageForPersistence(user, false);
     expect(sanitized.images).toBeUndefined();
     expect(sanitized.attachedFiles).toEqual([{ name: 'notes.ts', size: 12 }]);
+  });
+
+  it('persists image disk references without base64 payloads', () => {
+    const user: UIMessage = {
+      id: 'u1',
+      role: 'user',
+      content: 'see this',
+      timestamp: 1,
+      images: [
+        { mediaType: 'image/png', data: 'AAAA', path: '.CodePapr/chat-images/1.png' },
+        { mediaType: 'image/jpeg', data: 'BBBB' },
+      ],
+    };
+    const sanitized = sanitizeMessageForPersistence(user, false);
+    expect(sanitized.images).toEqual([
+      { mediaType: 'image/png', data: '', path: '.CodePapr/chat-images/1.png' },
+    ]);
   });
 });

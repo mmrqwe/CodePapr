@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+pub(crate) mod chat_images;
 pub(crate) mod default_project;
 pub(crate) mod diff;
 pub(crate) mod access;

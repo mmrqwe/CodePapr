@@ -16,6 +16,7 @@ import { CacheValidator, RequestBuilder } from '@codepapr/api';
 import { createId } from '../utils/createId';
 import { getTranslation } from '../utils/i18n';
 import { loadProjectState } from '../utils/projectStorage';
+import { hydrateImageMessages } from '../utils/chatImageStore';
 import {
   loadSessions,
   loadSessionMessages,
@@ -74,6 +75,7 @@ import {
   normalizeSessionMetaList,
   normalizeSessionProvider,
   normalizeSkillEnabledState,
+  projectMessageImagesForPersistence,
 } from './internals/persistence';
 import { saveCurrentProjectState } from './internals/projectSnapshot';
 import {
@@ -715,7 +717,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           if (activeSessionId) {
             try {
               const msgs = await loadSessionMessages(normalizedWorkspacePath, activeSessionId);
-              sessionMessages[activeSessionId] = msgs;
+              // 图片在消息里只有落盘引用（path），从磁盘回填 base64 供展示。
+              sessionMessages[activeSessionId] = await hydrateImageMessages(
+                normalizedWorkspacePath,
+                msgs
+              );
             } catch {
               // 读取失败 ≠ 会话为空：置 [] 但标记失败，禁止后续把空数组
               // 全量替换回 DB（会抹掉该会话的全部消息）。
@@ -1380,7 +1386,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           let loaded: UIMessage[] = [];
           let loadFailed = false;
           try {
-            loaded = await loadSessionMessages(workspacePath, id);
+            loaded = await hydrateImageMessages(
+              workspacePath,
+              await loadSessionMessages(workspacePath, id)
+            );
           } catch {
             // 读取失败 ≠ 会话为空：标记失败，禁止把空数组全量替换回 DB。
             loaded = [];
@@ -1416,9 +1425,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           // 读前排空挂起保存队列（与 selectSession/openWorkspace 对齐），
           // 避免读到旧数据。
           await waitForPendingProjectStateSave(workspacePath);
-          const loaded = await loadSessionMessages(
+          const loaded = await hydrateImageMessages(
             workspacePath,
-            activeSessionId
+            await loadSessionMessages(workspacePath, activeSessionId)
           );
           // 竞态守卫：加载期间用户可能已切换会话/工作区。
           const current = get();
@@ -1640,7 +1649,8 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         const cutIndex = msgIndex;
         const messagesRemoved = messages.length - cutIndex;
         const restoredInput = messages[msgIndex]?.content ?? '';
-        const restoredImages = messages[msgIndex]?.images;
+        // 只回填有数据的图片（落盘引用未回填成功时 data 为空，回填进输入框会显示损坏预览）。
+        const restoredImages = messages[msgIndex]?.images?.filter((img) => img.data);
 
         let filesChanged = 0;
         let backupSha: string | null = null;
@@ -1708,10 +1718,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           // N8：备份被截掉的尾部消息与 checkpoint 锚点，供撤销入口回放。
           // 入栈（栈顶=最近一次）：连续多次重置可逐级撤销。
           // backupSha：撤销时校验 BACKUP_REF 未被其它破坏性操作覆盖。
+          // 图片收敛为落盘引用：撤销栈随 project_meta 持久化，不得携带
+          // 大体积 base64；撤销回放时按路径回填（见 undoConversationReset）。
           _pendingRestoreUndos: pushRestoreUndo(get()._pendingRestoreUndos, {
             workspacePath,
             sessionId: activeSessionId,
-            truncatedMessages: messages.slice(cutIndex),
+            truncatedMessages: projectMessageImagesForPersistence(messages.slice(cutIndex)),
             removedCheckpoints,
             filesRestored: true,
             backupSha,
@@ -1781,7 +1793,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           }
         }
 
-        const { sessionId, truncatedMessages, removedCheckpoints } = pending;
+        const { sessionId, removedCheckpoints } = pending;
+        // 撤销栈里存的是图片落盘引用（无 base64）：回放前从磁盘回填数据。
+        const truncatedMessages = await hydrateImageMessages(
+          pending.workspacePath,
+          pending.truncatedMessages
+        );
         const sessionExists =
           sessionId !== null && get().sessions.some((s) => s.id === sessionId);
         if (sessionId && sessionExists && truncatedMessages.length > 0) {
@@ -1829,6 +1846,10 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           }
         }
         set({ _pendingRestoreUndos: stack.slice(0, -1) });
+        // 撤销栈随 project_meta 持久化：放弃动作必须落盘，否则重启后
+        // 已关闭的条目重新载入，撤回提醒反复出现。（不动工作区文件，
+        // 无需 noteWorkspaceMutation。）
+        saveCurrentProjectState(get());
       },
 
       setPersistenceError: (message) => {

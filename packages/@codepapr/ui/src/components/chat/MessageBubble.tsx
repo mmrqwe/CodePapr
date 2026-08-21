@@ -145,15 +145,17 @@ export const MessageBubble = memo(function MessageBubble({
         )}
         {isUser && msg.images && msg.images.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
-            {msg.images.map((image, index) => (
-              <img
-                key={index}
-                src={`data:${image.mediaType};base64,${image.data}`}
-                alt="attachment"
-                className="h-20 w-20 rounded-lg border border-white/20 object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                onClick={() => onPreviewImage?.(`data:${image.mediaType};base64,${image.data}`)}
-              />
-            ))}
+            {msg.images
+              .filter((image) => image.data)
+              .map((image, index) => (
+                <img
+                  key={index}
+                  src={`data:${image.mediaType};base64,${image.data}`}
+                  alt="attachment"
+                  className="h-20 w-20 rounded-lg border border-white/20 object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                  onClick={() => onPreviewImage?.(`data:${image.mediaType};base64,${image.data}`)}
+                />
+              ))}
           </div>
         )}
         {(msg.displayReasoningContent ?? msg.reasoningContent) && (

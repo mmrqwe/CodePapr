@@ -51,7 +51,7 @@ const { loadProjectStateMock, saveProjectStateMock, saveProjectStateWithPurgeMoc
   archiveSessionByIdMock: vi.fn(async () => undefined),
   restoreSessionByIdMock: vi.fn(async () => undefined),
   loadArchivedSessionsMock: vi.fn(async (): Promise<ProjectSessionMeta[]> => []),
-  saveProjectMetaMock: vi.fn(async () => undefined),
+  saveProjectMetaMock: vi.fn(async (_path: string, _key: string, _value: unknown): Promise<void> => undefined),
   enqueueProjectStateSaveMock: vi.fn(async (_path: string, writer: () => Promise<void>) => { await writer(); }),
   aggregateSessionRuntimeInDbMock: vi.fn(async (): Promise<Record<string, number>> => ({})),
   waitForPendingProjectStateSaveMock: vi.fn(async () => undefined),
@@ -3504,7 +3504,7 @@ describe('resetToMessage 撤销（N8）', () => {
 
   beforeEach(() => {
     invokeMock.mockClear();
-    invokeMock.mockImplementation(async (command: string): Promise<Record<string, unknown>> => {
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>): Promise<Record<string, unknown>> => {
       if (command === 'restore_execute') {
         return {
           ok: true,
@@ -3517,6 +3517,12 @@ describe('resetToMessage 撤销（N8）', () => {
       }
       if (command === 'restore_undo' || command === 'delete_checkpoint_by_message' || command === 'delete_checkpoints_for_session') {
         return {};
+      }
+      if (command === 'load_chat_images') {
+        const paths = (args as { paths?: string[] } | undefined)?.paths ?? [];
+        return {
+          images: paths.map((path) => ({ path, mediaType: 'image/png', data: 'RESTORED' })),
+        };
       }
       throw new Error(`Unexpected invoke call: ${command}`);
     });
@@ -3692,6 +3698,78 @@ describe('resetToMessage 撤销（N8）', () => {
     const undoResult = await useAgentStore.getState().undoConversationReset();
     expect(undoResult.ok).toBe(false);
     expect(undoResult.message).toBe('nothing-to-undo');
+  });
+
+  it('dismissRestoreUndo 持久化撤销栈：放弃后重启不再反复弹出撤回提醒', async () => {
+    setResetState();
+    await useAgentStore.getState().resetToMessage('m3');
+    expect(useAgentStore.getState()._pendingRestoreUndos).toHaveLength(1);
+    // 排空重置触发的挂起保存（撤销栈持久化在保存队列中异步执行）。
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    saveProjectMetaMock.mockClear();
+
+    useAgentStore.getState().dismissRestoreUndo();
+    expect(useAgentStore.getState()._pendingRestoreUndos).toHaveLength(0);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // 放弃动作必须把（已缩小的）撤销栈落盘，否则重启后条目重新载入，
+    // 已关闭的撤回提醒反复出现。
+    const pendingCalls = saveProjectMetaMock.mock.calls.filter(
+      ([, key]) => key === 'pending_restore_undos'
+    );
+    expect(pendingCalls.length).toBeGreaterThan(0);
+    expect(pendingCalls[pendingCalls.length - 1][2]).toEqual([]);
+  });
+
+  it('撤销栈持久化的图片是落盘引用（无 base64），撤销回放时按路径回填数据', async () => {
+    setResetState();
+    // m3 携带图片：一张有落盘引用（可持久化），一张无引用（写盘失败场景）
+    useAgentStore.setState((state) => ({
+      ...state,
+      messages: state.messages.map((m) =>
+        m.id === 'm3'
+          ? {
+              ...m,
+              images: [
+                { mediaType: 'image/png', data: 'AAAA', path: '.CodePapr/chat-images/a.png' },
+                { mediaType: 'image/jpeg', data: 'BBBB' },
+              ],
+            }
+          : m
+      ),
+    }));
+
+    await useAgentStore.getState().resetToMessage('m3');
+    const pending = topUndo();
+    // 栈内条目只保留落盘引用：无引用图片丢弃，有引用的 data 置空
+    expect(pending?.truncatedMessages.find((m) => m.id === 'm3')?.images).toEqual([
+      { mediaType: 'image/png', data: '', path: '.CodePapr/chat-images/a.png' },
+    ]);
+
+    // 持久化进 project_meta 的撤销栈同样不含 base64（栈随元数据落盘）。
+    // 落盘走异步保存队列，先排空再断言。
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const persistedCalls = saveProjectMetaMock.mock.calls.filter(
+      ([, key]) => key === 'pending_restore_undos'
+    );
+    expect(persistedCalls.length).toBeGreaterThan(0);
+    const persisted = persistedCalls[persistedCalls.length - 1][2] as Array<{
+      truncatedMessages: Array<{ id: string; images?: Array<{ data: string }> }>;
+    }>;
+    const persistedM3 = persisted
+      .flatMap((entry) => entry.truncatedMessages)
+      .find((m) => m.id === 'm3');
+    expect(persistedM3?.images?.every((img) => img.data === '')).toBe(true);
+
+    // 撤销：回放的消息从磁盘回填图片数据
+    const undoResult = await useAgentStore.getState().undoConversationReset();
+    expect(undoResult.ok).toBe(true);
+    const restored = useAgentStore.getState().sessionMessages[sessionId]?.find((m) => m.id === 'm3');
+    expect(restored?.images?.[0]).toEqual({
+      mediaType: 'image/png',
+      data: 'RESTORED',
+      path: '.CodePapr/chat-images/a.png',
+    });
   });
 
   it('deleteSession 清除对应会话的撤销条目', async () => {

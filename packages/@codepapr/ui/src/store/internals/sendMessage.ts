@@ -28,6 +28,7 @@ import type {
   GoalCondition,
 } from '@codepapr/types';
 import { createId } from '../../utils/createId';
+import { persistChatImage, hydrateImageMessages } from '../../utils/chatImageStore';
 import { snapshotCreateWithRetry, saveCheckpointRecord } from '../../utils/snapshot';
 import { buildCheckpointCommitMessage } from '../../utils/workspaceGitPanel';
 import type { WorkMode } from '../../utils/agentPrompts';
@@ -1008,9 +1009,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               // 读前排空挂起保存队列，避免重载读到旧数据（与 openWorkspace 对齐）。
               await waitForPendingProjectStateSave(workspacePath);
               ensureNotStopped();
-              const reloaded = await loadSessionMessages(
+              const reloaded = await hydrateImageMessages(
                 workspacePath,
-                guardSid
+                await loadSessionMessages(workspacePath, guardSid)
               );
               set((s) => ({
                 messages: s.activeSessionId === guardSid ? reloaded : s.messages,
@@ -1035,6 +1036,18 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             }
           }
 
+          // ── 图片落盘：消息持久化的只是路径引用，发送时先把图片写入
+          //    .CodePapr/chat-images/，重启/切换会话后可凭路径回填。
+          //    单张写盘失败不阻断发送（该图片仅本会话可见，不持久化）。
+          let persistedImages = images;
+          if (persistedImages?.length && workspacePath) {
+            ensureNotStopped();
+            persistedImages = await Promise.all(
+              persistedImages.map((image) => persistChatImage(workspacePath, image))
+            );
+            ensureNotStopped();
+          }
+
           // ── optimistic UI: show user message immediately, before any awaits ──
           let optimisticSid = get().activeSessionId;
           if (!optimisticSid) {
@@ -1049,7 +1062,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             workMode: mode,
             content: effectiveDisplay ?? effectiveInput,
             timestamp: Date.now(),
-            images: images && images.length ? images : undefined,
+            images: persistedImages && persistedImages.length ? persistedImages : undefined,
             attachedFiles: attachedFiles && attachedFiles.length ? attachedFiles : undefined,
           };
           set((s) => {

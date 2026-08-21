@@ -10,8 +10,13 @@
 export interface IImageContent {
   /** MIME 类型，例如 image/png、image/jpeg、image/webp、image/gif */
   mediaType: string;
-  /** 图片的 base64 编码数据（不含 data URI 前缀） */
+  /** 图片的 base64 编码数据（不含 data URI 前缀）。
+   *  持久化场景下可为空（见 path，加载后回填）。 */
   data: string;
+  /** 落盘引用的工作区相对路径（.CodePapr/chat-images/...）。
+   *  base64 体积大不直接进 DB：发送时写盘得到此路径，加载消息后
+   *  凭路径回填 data。无 path 的图片不会被持久化。 */
+  path?: string;
 }
 
 export interface IMessage {

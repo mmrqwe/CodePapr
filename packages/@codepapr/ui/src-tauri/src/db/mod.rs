@@ -1673,6 +1673,8 @@ pub(crate) fn save_message_batch(
         // extras：恢复上下文所需的非核心字段，整体存为 JSON。缺失这些会导致重启后
         // 压缩状态（contextCheckpoint）与成员资格标志（synthetic/hidden/
         // carryForwardInContext）丢失，使已压缩会话重新展开并击穿前缀缓存。
+        // images 存的是落盘引用（{mediaType, data:"", path}，base64 在
+        // .CodePapr/chat-images/ 文件中），前端加载后按 path 回填。
         let mut extras_map = serde_json::Map::new();
         for key in [
             "promptContent",
@@ -1687,6 +1689,7 @@ pub(crate) fn save_message_batch(
             "modelName",
             "relatedFilePaths",
             "attachedFiles",
+            "images",
         ] {
             if let Some(val) = msg.get(key) {
                 if !val.is_null() {
@@ -1769,7 +1772,7 @@ fn row_to_message_json(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Valu
     }
     // 还原 extras（promptContent / synthetic / hidden / carryForwardInContext /
     // contextCheckpoint / question / questionAnswered / durationMs /
-    // modelTier / modelName / relatedFilePaths / attachedFiles）。
+    // modelTier / modelName / relatedFilePaths / attachedFiles / images）。
     if let Some(s) = extras_raw {
         if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&s) {
             for (key, value) in map {
@@ -5917,6 +5920,33 @@ mod tests {
             serde_json::from_str(&loaded.messages_json).expect("parse");
         assert_eq!(parsed[0]["attachedFiles"][0]["name"], "a.ts");
         assert_eq!(parsed[0]["attachedFiles"][0]["size"], 12);
+    }
+
+    #[test]
+    fn save_message_batch_persists_image_disk_references_in_extras() {
+        let workspace = TestWorkspace::new("save-message-image-refs");
+        let ws = workspace.workspace_arg();
+        save_session(
+            ws.clone(),
+            r#"{"id":"s-img","name":"I","provider":"deepseek","model":"m","createdAt":1}"#
+                .to_string(),
+        )
+        .expect("session");
+        // images 携带的是落盘引用（data 为空、path 指向 .CodePapr/chat-images/），
+        // 必须经 extras 持久化，重启后前端才能按路径回填预览。
+        save_message_batch(
+            ws.clone(),
+            "s-img".to_string(),
+            r#"[{"id":"u1","role":"user","content":"with image","timestamp":1,"images":[{"mediaType":"image/png","data":"","path":".CodePapr/chat-images/abc.png"}]}]"#
+                .to_string(),
+        )
+        .expect("save");
+        let loaded = load_session_messages(ws, "s-img".to_string()).expect("load");
+        let parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&loaded.messages_json).expect("parse");
+        assert_eq!(parsed[0]["images"][0]["path"], ".CodePapr/chat-images/abc.png");
+        assert_eq!(parsed[0]["images"][0]["mediaType"], "image/png");
+        assert_eq!(parsed[0]["images"][0]["data"], "");
     }
 
     #[test]

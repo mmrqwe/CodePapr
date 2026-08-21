@@ -21,12 +21,14 @@ export type OpenAIContentPart = OpenAITextPart | OpenAIImagePart;
 /**
  * 构造 OpenAI 多模态 content 数组（文本 + image_url data URI）。
  * 当没有图片时返回 null，调用方应回退到纯字符串 content。
+ * 空 data 的图片（落盘引用未回填成功）会被跳过，避免构造出非法 data URI。
  */
 export function buildOpenAIImageContent(
   text: string,
   images: IImageContent[] | undefined
 ): OpenAIContentPart[] | null {
-  if (!images || images.length === 0) {
+  const usable = images?.filter((image) => Boolean(image.data)) ?? [];
+  if (usable.length === 0) {
     return null;
   }
 
@@ -34,7 +36,7 @@ export function buildOpenAIImageContent(
   if (text) {
     parts.push({ type: 'text', text });
   }
-  for (const image of images) {
+  for (const image of usable) {
     parts.push({
       type: 'image_url',
       image_url: { url: `data:${image.mediaType};base64,${image.data}` },
@@ -58,12 +60,14 @@ export type ClaudeContentPart = ClaudeTextPart | ClaudeImagePart;
 /**
  * 构造 Claude 多模态 content 数组（文本 + base64 image）。
  * 当没有图片时返回 null，调用方应回退到原有内容映射。
+ * 空 data 的图片（落盘引用未回填成功）会被跳过，避免构造出非法请求体。
  */
 export function buildClaudeImageContent(
   text: string,
   images: IImageContent[] | undefined
 ): ClaudeContentPart[] | null {
-  if (!images || images.length === 0) {
+  const usable = images?.filter((image) => Boolean(image.data)) ?? [];
+  if (usable.length === 0) {
     return null;
   }
 
@@ -71,7 +75,7 @@ export function buildClaudeImageContent(
   if (text) {
     parts.push({ type: 'text', text });
   }
-  for (const image of images) {
+  for (const image of usable) {
     parts.push({
       type: 'image',
       source: { type: 'base64', media_type: image.mediaType, data: image.data },

@@ -47,6 +47,9 @@ export interface ProjectMessage {
   durationMs?: number;
   /** 用户消息上的文本附件名（不含内容），经 messages.extras 持久化 */
   attachedFiles?: Array<{ name: string; size: number }>;
+  /** 用户消息图片的落盘引用（base64 不落库，加载后按 path 回填 data），
+   *  经 messages.extras 持久化。无 path 的图片不会被持久化。 */
+  images?: Array<{ mediaType: string; data: string; path?: string }>;
 }
 
 export interface ProjectCumulativeStats {

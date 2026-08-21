@@ -4,6 +4,27 @@ import { createEmptyStats, createEmptyConversationStats } from './defaults';
 import { cloneStats, cloneConversationStats, migrateCumulativeToConversationStats } from './stats';
 import type { ProviderName, SessionMeta, UIMessage } from './types';
 
+/** 图片的持久化投影：只保留落盘引用（path + mediaType），base64 payload
+ *  不进存储（体积大）。无 path 的图片（写盘失败/旧数据）被丢弃。 */
+export function projectImagesForPersistence<T extends { mediaType: string; data: string; path?: string }>(
+  images: readonly T[] | undefined
+): Array<{ mediaType: string; data: string; path?: string }> | undefined {
+  const withPath = (images ?? []).filter((img) => img.path);
+  if (withPath.length === 0) return undefined;
+  return withPath.map((img) => ({ mediaType: img.mediaType, data: '', path: img.path }));
+}
+
+/** 消息列表的持久化投影：图片字段收敛为落盘引用（撤销栈持久化用，
+ *  避免大体积 base64 进入 project_meta）。 */
+export function projectMessageImagesForPersistence<T extends { images?: Array<{ mediaType: string; data: string; path?: string }> }>(
+  messages: T[]
+): T[] {
+  return messages.map((message) => {
+    if (!message.images?.length) return message;
+    return { ...message, images: projectImagesForPersistence(message.images) };
+  });
+}
+
 /** DB 以 string 存 provider；归一化到合法 ProviderName，非法值回退应用默认
  *  deepseek（历史/损坏数据兜底）。合法值原样通过，运行期恒等。 */
 export function normalizeSessionProvider(value: string): ProviderName {
@@ -69,8 +90,15 @@ export function sanitizeMessageForPersistence(message: UIMessage, debugEnabled: 
     // assistant.promptContent is a debug dump of the compiled request: only
     // persist when debug is on, and never persist request-only Recall (ADR-009).
     promptContent,
-    // 图片 payload 是 base64，不落盘。文本附件只存 name/size（attachedFiles），随 extras 保留。
-    images: undefined,
+    // 图片只持久化落盘引用（path + mediaType），base64 payload 不进 DB
+    // （体积大，全量替换语义下反复读写会拖慢持久化）。无 path 的图片
+    // （写盘失败/旧数据）不保留。加载后由 chatImageStore 按路径回填数据。
+    // 文本附件只存 name/size（attachedFiles），随 extras 保留。
+    images: message.images?.some((img) => img.path)
+      ? message.images
+          .filter((img) => img.path)
+          .map((img) => ({ mediaType: img.mediaType, data: '', path: img.path }))
+      : undefined,
     toolInvocations: message.toolInvocations?.map((ti) => ({
       ...ti,
       statusText: undefined,
