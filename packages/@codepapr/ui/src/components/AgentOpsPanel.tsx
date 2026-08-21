@@ -19,6 +19,7 @@ function getOpsCopy(lang: Lang | undefined) {
 }
 
 interface AgentOpsPanelProps {
+  onOpenSettings: () => void;
   onOpenMcpSettings: () => void;
   onOpenCharacters: () => void;
   onOpenStats: () => void;
@@ -27,7 +28,7 @@ interface AgentOpsPanelProps {
 }
 
 export function AgentOpsPanel({
-  onOpenMcpSettings, onOpenCharacters, onOpenStats,
+  onOpenSettings, onOpenMcpSettings, onOpenCharacters, onOpenStats,
   onOpenAbout, onNavigateToFile,
 }: AgentOpsPanelProps) {
   const settings = useAgentStore((state) => state.settings);
@@ -80,6 +81,9 @@ export function AgentOpsPanel({
           className={buttonClass}
         >
           {mode === 'dark' ? '\u2600\uFE0F' : '\uD83C\uDF19'}
+        </button>
+        <button type="button" onClick={onOpenSettings} title={t.settingsTip} className={buttonClass}>
+          <span>{t.modelSettings}</span>
         </button>
         {settings.experimentalCharacters && (
         <button type="button" onClick={onOpenCharacters} title={t.charactersTip} className={characterButtonClass}>
