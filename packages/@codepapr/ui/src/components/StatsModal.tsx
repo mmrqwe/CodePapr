@@ -101,13 +101,12 @@ export function StatsModal({
         </div>
 
         <div className={tab === 'cache' ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}>
-          <div className="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col">
-            <CacheStatsDashboard
-              lang={lang}
-              collapsible={false}
-              onOpenContextInspector={onOpenContextInspector}
-            />
-          </div>
+          <CacheStatsDashboard
+            lang={lang}
+            collapsible={false}
+            wide
+            onOpenContextInspector={onOpenContextInspector}
+          />
         </div>
 
         {projectVisited && (
