@@ -555,6 +555,13 @@ export default function App() {
     [workspacePath, selectedGitFile]
   );
 
+  const pendingSelectPath = useAgentStore((state) => state._pendingSelectPath);
+  useEffect(() => {
+    if (!pendingSelectPath) return;
+    handleSelectPath(pendingSelectPath);
+    useAgentStore.setState({ _pendingSelectPath: null });
+  }, [pendingSelectPath, handleSelectPath]);
+
   const handleNavigateToLocation = (location: PreviewLocation) => {
     const normalizedPath = normalizeSelectedPath(location.path, workspacePath);
     if (!normalizedPath) {

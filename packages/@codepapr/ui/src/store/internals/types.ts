@@ -456,6 +456,8 @@ export interface AgentState {
    *  widens the render window. `seq` re-triggers repeated requests for the same
    *  message. Runtime-only. */
   _pendingChatJump: { messageId: string; seq: number } | null;
+  /** Pending request to open a workspace file from settings / overlays. */
+  _pendingSelectPath: string | null;
 }
 
 export interface AgentActions {
@@ -507,6 +509,7 @@ export interface AgentActions {
   /** Ask the chat pane to scroll a message into view (expanding the render
    *  window when the message is not loaded yet). */
   requestChatScrollToMessage: (messageId: string) => void;
+  requestSelectWorkspaceFile: (path: string) => void;
   /** 确保存在可用 Agent（App Agent 依赖聊天 Agent 的 Worker）。用户从未发过
    *  消息时按需创建，供 papr://agent.run 使用；并发调用共享同一次创建。 */
   ensureAgentForApp: () => Promise<AgentRuntimeHandle>;

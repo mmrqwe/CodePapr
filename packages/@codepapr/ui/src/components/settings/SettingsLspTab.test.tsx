@@ -67,6 +67,11 @@ describe('SettingsLspTab', () => {
           ],
         };
       }
+      if (command === 'load_projectgraph_cache') {
+        return JSON.stringify({
+          projectGraph: { nodes: [], edges: [], files: [], summary: { files: 0 } },
+        });
+      }
       return null;
     });
 
@@ -115,6 +120,8 @@ describe('SettingsLspTab', () => {
     expect(container.textContent).toContain('TypeScript / JavaScript');
     expect(container.textContent).toContain('Rust');
     expect(container.textContent).toContain('安装包');
+    expect(container.textContent).toContain('知识图谱');
+    expect(container.textContent).toContain('打开知识图谱');
 
     const rustToggle = Array.from(container.querySelectorAll('input[type="checkbox"]')).at(1) as HTMLInputElement;
     expect(rustToggle).toBeTruthy();

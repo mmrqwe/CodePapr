@@ -23,6 +23,8 @@
     "release": "node ../../../scripts/run-desktop-workflow.mjs ui-build-tauri"
   },
   "dependencies": {
+    "@antv/g-webgl": "^2.1.1",
+    "@antv/g6": "^5.1.1",
     "@codepapr/api": "*",
     "@codepapr/common": "*",
     "@codepapr/core": "*",

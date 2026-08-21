@@ -460,6 +460,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       _currentMode: 'agent',
       _sessionLru: [],
       _pendingChatJump: null,
+      _pendingSelectPath: null,
 
       loadSettings: async () => {
         let settings = get().settings;
@@ -1909,6 +1910,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         set((s) => ({
           _pendingChatJump: { messageId, seq: (s._pendingChatJump?.seq ?? 0) + 1 },
         }));
+      },
+
+      requestSelectWorkspaceFile: (path: string) => {
+        const trimmed = path.trim();
+        if (!trimmed) return;
+        set({ _pendingSelectPath: trimmed });
       },
 
       sendMessage: createSendMessage(set, get),

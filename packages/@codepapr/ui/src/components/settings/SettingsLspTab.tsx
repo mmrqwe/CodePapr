@@ -4,6 +4,7 @@ import { FieldCard, ToggleField } from '../forms';
 import { useAgentStore } from '../../store/agentStore';
 import { isKnownLspFamilyId, type LspFamilyId } from '../../utils/lspFamilies';
 import type { SettingsTabProps } from './types';
+import { SettingsKnowledgeGraph } from './SettingsKnowledgeGraph';
 
 export interface LspFamilyStatus {
   familyId: string;
@@ -88,7 +89,7 @@ function runtimeLabel(id: string, t: SettingsTabProps['t']): string {
   }
 }
 
-export function SettingsLspTab({ local, update, t }: SettingsTabProps) {
+export function SettingsLspTab({ local, update, t, currentLang }: SettingsTabProps) {
   const workspacePath = useAgentStore((s) => s.workspacePath);
   const [inventory, setInventory] = useState<LspInventory | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -158,6 +159,8 @@ export function SettingsLspTab({ local, update, t }: SettingsTabProps) {
           </button>
         </div>
       </FieldCard>
+
+      <SettingsKnowledgeGraph t={t} lang={currentLang} />
 
       {loadError && (
         <div className="rounded-2xl border border-danger-bg bg-danger-bg px-4 py-3 text-sm text-danger">
