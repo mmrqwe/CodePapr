@@ -311,7 +311,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 22. app_list ────
   {
     name: 'app_list',
-    description: '列出当前工作区中所有已注册的 .papr 应用。返回每个应用的 appId、标题、是否有后端、是否正在运行、端口号等信息。在创建新应用前调用此工具检查是否已存在同名应用。',
+    description: '列出当前工作区中所有已注册的 .papr 应用。返回 appId、标题、kind、pinned、是否有后端、是否运行中、端口、inbox 频道契约。仅 App 模式：创建前调用检查重复。编程 Agent 的推送契约在会话上下文「已启用插件」，不要用此工具发现 publish 目标。',
     parameters: {
       type: 'object',
       properties: {},

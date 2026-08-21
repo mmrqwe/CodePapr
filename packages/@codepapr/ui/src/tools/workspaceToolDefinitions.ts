@@ -1078,7 +1078,7 @@ name: 'web_download_file',
   {
     name: 'app_publish',
     description:
-      '向 .papr 应用/插件的频道推送内容（看板/仪表板/进度面板等）。用法 app_publish({ appId, channel, payload })：payload 为任意 JSON，格式以该应用 manifest.json 的 inbox 契约为准——先用 app_list 查看各应用声明的频道（inbox）及 description/example，严格按其形状推送。事件会追加到应用 db（key: inbox:<channel>，保留最近 200 条，应用可回放历史）；应用已挂载时同时实时送达（应用内 papr.events.on(channel, cb) 接收）。传未声明的频道会被拒绝并列出可用频道。完成任务后主动用它更新相关面板（如任务完成→看板加卡片）。',
+      '向 .papr 应用/插件的频道推送内容。用法 app_publish({ appId, channel, payload })。只推会话上下文「已启用插件」里列出的目标（已启用且声明了 inbox），payload 严格按其中的 description/example。未列出的插件不要推、不要 invent 频道。事件追加到应用 db（key: inbox:<channel>，最近 200 条）；已挂载时实时送达（papr.events.on）。传错频道会拒绝并列出可用频道。相关工作结束后主动更新对应面板。',
     parameters: {
       type: 'object',
       properties: {
@@ -1092,7 +1092,7 @@ name: 'web_download_file',
         },
         payload: {
           type: 'object',
-          description: '推送内容，任意 JSON。形状遵循目标应用 inbox 频道的 description/example 契约。',
+          description: '推送内容，任意 JSON。形状遵循会话上下文该目标 inbox 频道的 description/example。',
         },
       },
       required: ['appId', 'channel', 'payload'],

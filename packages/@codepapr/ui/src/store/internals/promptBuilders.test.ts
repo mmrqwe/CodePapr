@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildAgentRuntimeSystemPrompt, buildAgentRuntimeUserPrompt, buildAgentSessionBootstrapPrompt } from './promptBuilders';
 import { useCharactersStore } from '../charactersStore';
+import { useAppRuntimeStore } from '../appRuntimeStore';
 import type { CharacterProfile } from '../../utils/characterTypes';
 import { createDefaultMcpSettings } from '../../utils/mcpTypes';
 import type { McpSettings } from '../../utils/mcpTypes';
@@ -40,6 +41,10 @@ function makeSettings(overrides: Partial<Settings> = {}): Settings {
 describe('buildAgentSessionBootstrapPrompt', () => {
   afterEach(() => {
     useCharactersStore.setState({ characters: [], activeCharacterId: null });
+    useAppRuntimeStore.setState({
+      apps: [],
+      pinnedPluginIds: [],
+    });
   });
 
   it('includes the custom system prompt in the bootstrap', () => {
@@ -84,6 +89,45 @@ describe('buildAgentSessionBootstrapPrompt', () => {
     const bootstrap = buildAgentSessionBootstrapPrompt(settings, '/tmp/ws', [], 'some memory');
     expect(bootstrap).toContain('some memory');
     expect(bootstrap).not.toContain('长期附加指导');
+  });
+
+  it('injects enabled inbox plugins from the runtime store', () => {
+    const canvasManifest = JSON.stringify({
+      spec: 'papr/0.1',
+      name: '架构画布',
+      kind: 'plugin',
+      inbox: { scene: { description: '整幅替换画布', example: { op: 'replace' } } },
+    });
+    const tickerManifest = JSON.stringify({ spec: 'papr/0.1', name: '股票', kind: 'plugin' });
+    useAppRuntimeStore.setState({
+      apps: [
+        {
+          appId: 'arch-canvas',
+          title: '架构画布',
+          html: '',
+          filePath: 'x',
+          createdAt: 1,
+          updatedAt: 1,
+          manifestJson: canvasManifest,
+        },
+        {
+          appId: 'stock-ticker',
+          title: '股票',
+          html: '',
+          filePath: 'y',
+          createdAt: 1,
+          updatedAt: 1,
+          manifestJson: tickerManifest,
+        },
+      ],
+      pinnedPluginIds: ['arch-canvas', 'stock-ticker'],
+    });
+
+    const bootstrap = buildAgentSessionBootstrapPrompt(makeSettings(), '/tmp/ws', []);
+    expect(bootstrap).toContain('## 已启用插件');
+    expect(bootstrap).toContain('arch-canvas');
+    expect(bootstrap).toContain('scene：整幅替换画布');
+    expect(bootstrap).not.toContain('stock-ticker');
   });
 });
 

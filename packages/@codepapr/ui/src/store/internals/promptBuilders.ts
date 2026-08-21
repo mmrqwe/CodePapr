@@ -26,6 +26,11 @@ import { resolveMultimodalEnabled } from './settingsNormalizer';
 import type { Settings, UIMessage } from './types';
 import { getActiveCharacter, getActiveCharacterPrompt } from '../charactersStore';
 import { expandCharacterMacros, sanitizeCachePrompt } from '../../utils/characterTypes';
+import { useAppRuntimeStore } from '../appRuntimeStore';
+import {
+  buildPublishCatalogSection,
+  collectPublishCatalogTargets,
+} from '../../papr/pluginPublishCatalog';
 
 export function toCoreMessages(
   messages: UIMessage[],
@@ -167,20 +172,29 @@ export function buildAgentSessionBootstrapPrompt(
   settings: Settings,
   workspacePath: string,
   skillDefinitions: readonly SkillDefinition[] = [],
-  memorySection?: string
+  memorySection?: string,
+  pluginsSection?: string,
 ): string {
+  const lang = settings.lang ?? 'zh-CN';
   const customPromptSection = (settings.systemPrompt ?? '').trim();
+  const resolvedPluginsSection =
+    pluginsSection !== undefined
+      ? pluginsSection
+      : buildPublishCatalogSection(
+          collectPublishCatalogTargets(useAppRuntimeStore.getState()),
+          lang,
+        );
   const bootstrap = buildSessionBootstrapPrompt({
     workspacePath,
-    lang: settings.lang ?? 'zh-CN',
-    skillsSection: buildSkillsSection(skillDefinitions, settings.lang ?? 'zh-CN'),
+    lang,
+    skillsSection: buildSkillsSection(skillDefinitions, lang),
+    pluginsSection: resolvedPluginsSection || undefined,
     memorySection,
     customPromptSection: customPromptSection || undefined,
   });
   const characterPrompt = settings.experimentalCharacters ? getActiveCharacterPrompt() : '';
   if (!characterPrompt) return bootstrap;
 
-  const lang = settings.lang ?? 'zh-CN';
   const heading = lang === 'en' ? '## Character' : lang === 'zh-TW' ? '## 角色人設' : '## 角色人设';
   const hint =
     lang === 'en'

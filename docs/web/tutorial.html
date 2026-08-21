@@ -677,7 +677,7 @@ https://api.deepseek.com/v1</code></pre>
           <li>通过 CDN 引用图表库（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js 等）</li>
           <li>在沙箱 iframe 中运行（<code>sandbox="allow-scripts allow-same-origin"</code>）</li>
           <li>可使用 <strong>Papr SDK</strong>（<code>window.papr</code>）调用 Agent、存储、HTTP、文件系统</li>
-          <li>看板/进度面板类应用可在 manifest 声明 <code>inbox</code> 频道并用 <code>papr.events.on(channel, cb)</code> 订阅——编码 Agent 干活时用 <code>app_publish</code> 工具向频道推送内容（如任务完成→看板加卡片），历史经 <code>papr.db.get('inbox:&lt;channel&gt;')</code> 回放</li>
+          <li>看板/画布等需要编程 Agent 推送的应用，在 manifest 声明 <code>inbox</code> 并用 <code>papr.events.on(channel, cb)</code> 订阅——契约会进入会话上下文「已启用插件」，Agent 模式用 <code>app_publish</code> 按 example 推送（不要 <code>app_list</code>）；历史经 <code>papr.db.get('inbox:&lt;channel&gt;')</code> 回放。自刷新小组件不要声明 inbox。</li>
           <li><code>papr.agent.run</code> 采用 <strong>300 秒空闲超时</strong>：只要 Agent 持续产出进度事件（流式输出/工具调用）就可运行任意时长，仅连续 300 秒无事件才超时；工具轮数受 <code>maxToolRounds</code> 限制（默认/上限 50，搜索调用计入总轮数）</li>
           <li>appId 必须是 kebab-case；改文件后再次 <code>app_render({ appId })</code> 刷新——支持迭代改进</li>
         </ul>
@@ -927,11 +927,11 @@ https://api.deepseek.com/v1</code></pre>
           <thead><tr><th>工具</th><th>能力</th></tr></thead>
           <tbody>
             <tr><td><code>app_render</code></td><td>打开已写入磁盘的 .papr App 到应用面板。只传 appId。manifest.json 和入口 HTML 必须先用 write/edit/patch 写到 <code>.CodePapr/apps/&lt;appId&gt;/</code>。访问档在 manifest 的 local/network（旧 level 0-3 仍兼容）。HTML 可使用 <code>window.papr</code> SDK。修改文件后再 app_render 刷新。</td></tr>
-            <tr><td><code>app_list</code></td><td>列出所有已注册 .papr App（名称、是否有后端、是否运行中）。创建前调用检查重复。</td></tr>
+            <tr><td><code>app_list</code></td><td>列出所有已注册 .papr App（名称、kind、pinned、是否有后端、是否运行中、inbox）。仅 App 模式：创建前检查重复。编程 Agent 的推送契约在会话上下文，不靠此工具。</td></tr>
             <tr><td><code>app_start</code></td><td>按 appId 启动后端服务。检查端口可用性，成功后绿点亮起。</td></tr>
             <tr><td><code>app_stop</code></td><td>按 appId 停止后端服务。停止后绿点变红。</td></tr>
             <tr><td><code>app_delete</code></td><td>按 appId 彻底删除 App。停止后端、删除文件、清除存储。不可恢复。</td></tr>
-            <tr><td><code>app_publish</code></td><td>向 App/插件频道推送内容（app_publish({ appId, channel, payload })）。payload 形状以 manifest inbox 契约为准（先 app_list 查看声明频道及示例）；事件原子落库（并发安全，保留最近 200 条），App 挂载时经 papr://event 实时送达。看板/进度面板场景：任务完成→推一张卡片。</td></tr>
+            <tr><td><code>app_publish</code></td><td>向 App/插件频道推送内容（app_publish({ appId, channel, payload })）。只推会话上下文「已启用插件」里列出的目标（已启用且声明了 inbox）；不要先 app_list。事件原子落库（并发安全，保留最近 200 条），App 挂载时经 papr://event 实时送达。画布/看板：分析完 → 按 example 推一张图或一张卡片。</td></tr>
           </tbody>
         </table>
 

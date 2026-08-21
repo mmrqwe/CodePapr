@@ -233,7 +233,7 @@ LLM 可通过 5 个工具管理 app 生命周期与内容推送（在 `workspace
 
 | 工具 | 参数 | 功能 |
 |---|---|---|
-| `app_list` | 无 | 列出所有已注册 app（appId、title、hasBackend、isRunning、inbox 频道契约） |
+| `app_list` | 无 | 列出所有已注册 app（appId、title、kind、pinned、hasBackend、isRunning、inbox）。**仅 App 模式**（创建前查重、管后端）。编程 Agent 的推送契约在会话上下文，不靠此工具。 |
 | `app_start` | `appId` | 启动后端服务（检查端口 → `start_workspace_background_command` → `setAppRunning`） |
 | `app_stop` | `appId` | 停止后端服务（`stop_background_process` → `setAppStopped`） |
 | `app_delete` | `appId` | 彻底删除（停止 + `papr_delete_app` 删文件 + `closeApp`） |
@@ -254,7 +254,7 @@ agent: app_publish({appId, channel, payload})
 
 并发安全：并行子代理/多会话可能同时 publish 同一频道。读-追加-写回若跨两次独立事务会丢事件，因此 `db::papr_inbox_append` 用**进程级 Mutex + `BEGIN IMMEDIATE` 事务**（WAL 下全局单 writer，busy_timeout=5000 使竞争方等待）把整个序列原子化，seq 在锁内分配保证单调不重复。跨进程（多窗口/后端 server.js 写库）由 SQLite 写锁兜底。
 
-契约模型：manifest 可选声明 `inbox: { <channel>: { description, example } }`。声明后 agent 只能推已声明频道（传错即拒绝并列出可用频道，LLM 自我纠正）；未声明则不限制（向后兼容）。agent 通过 `app_list` 返回的 inbox 摘要发现契约。`inbox:*` 键只由 app_publish 写入，app 端只读（约定，非强制）。
+契约模型：manifest 可选声明 `inbox: { <channel>: { description, example } }`。声明后 agent 只能推已声明频道（传错即拒绝并列出可用频道，LLM 自我纠正）；未声明则不限制（向后兼容）。**发现路径**：已启用且声明了 inbox 的插件（以及声明了 inbox 的全屏 App）被抄进会话 bootstrap「已启用插件」；没有 inbox 的自刷新小组件不进上下文。`app_list` 仍返回 inbox 摘要，但只在 App 模式可用，用于查重/生命周期，不是 Agent 推送前的必调用。`inbox:*` 键只由 app_publish 写入，app 端只读（约定，非强制）。
 
 **AppDockPanel — 应用管理面板：**
 

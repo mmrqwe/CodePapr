@@ -127,6 +127,12 @@ import {
   buildAgentSessionBootstrapPrompt,
   buildProjectGraphBootstrapSummary,
 } from './promptBuilders';
+import { useAppRuntimeStore } from '../appRuntimeStore';
+import {
+  buildPublishCatalogSection,
+  collectPublishCatalogTargets,
+  publishCatalogSignature,
+} from '../../papr/pluginPublishCatalog';
 import {
   AgentRuntimeConfig,
   buildUiTaskToolContext,
@@ -207,7 +213,7 @@ function currentTodoDigest(sessionId: string | null): string | undefined {
 // cache for the whole history. We freeze the bootstrap per (session × stable
 // signature) so volatile changes do NOT force a rebuild — memory/graph updates
 // take effect on the next session or when a stable input (mode/rules/lang/
-// skills/system prompt/character) changes.
+// skills/system prompt/character/publish-catalog) changes.
 const sessionBootstrapCache = new Map<string, { signature: string; bootstrap: string }>();
 // 有界缓存：每个条目是一整份 bootstrap 字符串（memory.md + skills + prompts），
 // 随会话数无限增长会长期占用内存。超过上限时按最旧（Map 插入序）逐出；
@@ -1280,11 +1286,19 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // Signature of the STABLE bootstrap inputs. Volatile ledger memory
           // (and project-graph summary) is deliberately excluded so its
           // changes don't rebuild the agent and break the prefix cache.
+          // Enabled-plugin inbox catalog is included (like skills): toggling a
+          // publish target must refresh the session prefix on the next send.
+          const publishTargets = collectPublishCatalogTargets(useAppRuntimeStore.getState());
+          const pluginsSection = buildPublishCatalogSection(
+            publishTargets,
+            normalizedSettings.lang ?? 'zh-CN',
+          );
           const bootstrapSignature = [
             runtimeSystemPrompt,
             JSON.stringify(skillDefinitions),
             normalizedSettings.systemPrompt ?? '',
             normalizedSettings.experimentalCharacters ? (getActiveCharacterPrompt() ?? '') : '',
+            publishCatalogSignature(publishTargets),
           ].join('\u0000');
           const runtimeSessionBootstrapPrompt = resolveSessionBootstrap(
             turnSessionId,
@@ -1294,7 +1308,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 normalizedSettings,
                 workspacePath,
                 skillDefinitions,
-                memorySection
+                memorySection,
+                pluginsSection,
               )
           );
           // Inject the frozen, memory-containing bootstrap so the main agent's

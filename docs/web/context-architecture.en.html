@@ -185,7 +185,7 @@
         <div class="n">02</div>
         <div>
           <h3>Session bootstrap</h3>
-          <p>Skills catalog, project-memory slice, long-term guidance</p>
+          <p>Skills catalog, enabled-plugin inbox summaries, project-memory slice, long-term guidance</p>
         </div>
         <div class="when">Memory: compact or new session</div>
       </div>
@@ -224,9 +224,9 @@
         <div class="tag">STABLE PREFIX</div>
         <h3>Stable prefix · 01 + 02</h3>
         <ul>
-          <li><strong>Holds:</strong> identity and tool boundary, <code>AGENTS.md</code>, skill names + one-liners, short every-session memory, your long-term guidance.</li>
-          <li><strong>Changes when:</strong> you edit rules, skills, or params. Newly saved memories <strong>do not rebuild the current prefix</strong>; they wait for compaction or the next session.</li>
-          <li><strong>Budget:</strong> the memory slice is at most 24 items / 1500 tokens. Full skill files load via <code>skill_load</code>, not the prefix.</li>
+          <li><strong>Holds:</strong> identity and tool boundary, <code>AGENTS.md</code>, skill names + one-liners, inbox contracts for enabled publish targets, short every-session memory, your long-term guidance.</li>
+          <li><strong>Changes when:</strong> you edit rules, skills, publishable plugins, or params. Newly saved memories <strong>do not rebuild the current prefix</strong>; they wait for compaction or the next session.</li>
+          <li><strong>Budget:</strong> the memory slice is at most 24 items / 1500 tokens. Full skill files load via <code>skill_load</code>, not the prefix. Widgets without inbox stay out of context.</li>
         </ul>
       </article>
       <article class="layer" style="--c:var(--amber)">

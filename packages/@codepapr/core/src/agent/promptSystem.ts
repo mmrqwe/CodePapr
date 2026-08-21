@@ -40,6 +40,8 @@ export interface BuildSessionBootstrapPromptOptions {
   workspacePath: string;
   lang?: PromptLang;
   skillsSection?: string;
+  /** 已启用且声明了 inbox 的插件/应用摘要（Agent 推送契约）。无目标时省略。 */
+  pluginsSection?: string;
   memorySection?: string;
   customPromptSection?: string;
   projectGraphSummary?: string;
@@ -150,7 +152,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '## App 与插件',
       'kind 缺省 "app"：全屏打开，盖住工作台。kind "plugin"：主窗口内悬浮 overlay，写代码时也能看；打开全屏 App 时插件会暂时隐藏，但继续在后台运行。',
       '用户说「悬浮 / 小组件 / 插件 / 边上看 / HUD」→ kind:"plugin"。完整页面、大屏、带后端 → 不要用 plugin。',
-      '插件禁止 command/后端，禁止 local:"write"。典型股票条：{kind:"plugin", local:"none", network:true, surface:{type:"overlay", width:320, height:200, position:"top-right"}}。',
+      '插件禁止 command/后端，禁止 local:"write"。典型股票条：{kind:"plugin", local:"none", network:true, surface:{type:"overlay", width:320, height:200, position:"top-right"}}（自拉取，不要 inbox）。',
       '插件 HTML 按小窗写：信息密度高，不要自做顶栏（宿主提供拖动、缩放和关闭）。manifest.surface 的宽高只是首次默认；运行时用 papr.window.setSize({width,height}) 改内容区大小，用户也可拖边。默认三文件：index.html + css/theme.css + js/main.js。',
 
       '## 工作流程',
@@ -217,7 +219,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '### papr.events — 接收编程 Agent 的推送（app_publish）',
       'const off = papr.events.on(channel, (evt) => { ... })  // evt: { channel, seq, ts, payload }；返回取消订阅函数',
       'await papr.db.get("inbox:<channel>")                   // 历史事件数组（{seq, ts, payload}，最多保留 200 条）',
-      '用法：manifest.json 声明 inbox 频道（如 {"inbox": {"cards": {"description": "看板卡片", "example": {...}}}}），页面加载后订阅。编程 Agent 会用 app_publish 工具向频道推送内容（如任务完成后给看板加卡片）。启动时先 db.get 读历史恢复状态，再监听实时事件。',
+      '用法：仅当需要编程 Agent 推送时才在 manifest.json 声明 inbox（如 {"inbox": {"scene": {"description": "整幅替换画布", "example": {"op":"replace","nodes":[]}}}}）。声明后契约会进入 Agent 会话上下文，编程 Agent 按 example 调用 app_publish，不必 app_list。页面加载后订阅；启动时先 db.get 读历史恢复状态，再监听实时事件。example 保持最小骨架。自刷新小组件（股票条/时钟）不要声明 inbox。',
       '⚠️ inbox:* key 只由 app_publish 写入，app 端只读，不要用 papr.db.set 覆写。',
       '无需权限（永远可用）',
       '',
@@ -330,6 +332,17 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '→ 再调用 app_render({ appId: "stock-ticker" })',
       '```',
 
+      '## 完整示例：悬浮画布插件（Agent 推送）',
+      '```',
+      '用户: "做个悬浮画布，分析完架构就画上去"',
+      '→ manifest 必须声明 inbox（给编程 Agent 的说明书，会进会话上下文）：',
+      '    { spec:"papr/0.1", name: "架构画布", kind: "plugin", local: "none", network: false,',
+      '      surface: { type: "overlay", width: 420, height: 280, position: "top-right" },',
+      '      inbox: { scene: { description: "整幅替换画布", example: { op: "replace", nodes: [{id:"a",label:"Auth"}], edges: [] } } } }',
+      '→ js/main.js 里 papr.events.on("scene", cb) 订阅；启动时 db.get("inbox:scene") 回放',
+      '→ 再调用 app_render({ appId: "arch-canvas" })',
+      '```',
+
       '## 关键约束',
       '- 已有应用且用户未要求重做时，只改用户指出的问题（布局、筛选、文案、交互），禁止再走一遍全量生成；用 patch/edit 改对应小文件后再 app_render({ appId }) 打开',
       '- 创建后端 app 后不要自动启动——先告知用户 app 已创建，让用户决定是否启动',
@@ -340,6 +353,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '- 禁止把已拆开的 css/js 重新合并成单文件',
       '- 优先用 papr SDK 而非后端服务——更简单，用户无需"运行"',
       '- Agent 调用会消耗 token，避免不必要的调用（如每次都重新分析全部数据）',
+      '- 需要编程 Agent 推送的插件必须声明 inbox（description + 最小 example）；自刷新小组件不要声明，以免浪费会话上下文',
     ],
   },
   'zh-TW': {
@@ -372,7 +386,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '## App 與外掛',
       'kind 缺省 "app"：全螢幕打開，蓋住工作臺。kind "plugin"：主視窗內懸浮 overlay，寫程式時也能看；打開全螢幕 App 時外掛會暫時隱藏，但繼續在後臺運行。',
       '用戶說「懸浮 / 小組件 / 外掛 / 邊上看 / HUD」→ kind:"plugin"。完整頁面、大屏、帶後端 → 不要用 plugin。',
-      '外掛禁止 command/後端，禁止 local:"write"。典型股票條：{kind:"plugin", local:"none", network:true, surface:{type:"overlay", width:320, height:200, position:"top-right"}}。',
+      '外掛禁止 command/後端，禁止 local:"write"。典型股票條：{kind:"plugin", local:"none", network:true, surface:{type:"overlay", width:320, height:200, position:"top-right"}}（自拉取，不要 inbox）。',
       '外掛 HTML 按小窗寫：資訊密度高，不要自做頂欄（宿主提供拖動、縮放和關閉）。manifest.surface 的寬高只是首次預設；執行時用 papr.window.setSize({width,height}) 改內容區大小，用戶也可拖邊。默認三檔：index.html + css/theme.css + js/main.js。',
 
       '## 工作流程',
@@ -438,7 +452,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '### papr.events — 接收編程 Agent 的推送（app_publish）',
       'const off = papr.events.on(channel, (evt) => { ... })  // evt: { channel, seq, ts, payload }；返回取消訂閱函數',
       'await papr.db.get("inbox:<channel>")                   // 歷史事件陣列（{seq, ts, payload}，最多保留 200 條）',
-      '用法：manifest.json 宣告 inbox 頻道（如 {"inbox": {"cards": {"description": "看板卡片", "example": {...}}}}），頁面載入後訂閱。編程 Agent 會用 app_publish 工具向頻道推送內容（如任務完成後給看板加卡片）。啟動時先 db.get 讀歷史恢復狀態，再監聽即時事件。',
+      '用法：僅在需要編程 Agent 推送時才在 manifest.json 宣告 inbox（如 {"inbox": {"scene": {"description": "整幅替換畫布", "example": {"op":"replace","nodes":[]}}}}）。宣告後契約會進入 Agent 會話上下文，編程 Agent 按 example 呼叫 app_publish，不必 app_list。頁面載入後訂閱；啟動時先 db.get 讀歷史恢復狀態，再監聽即時事件。example 保持最小骨架。自刷新小組件（股票條/時鐘）不要宣告 inbox。',
       '⚠️ inbox:* key 只由 app_publish 寫入，app 端唯讀，不要用 papr.db.set 覆寫。',
       '無需權限（永遠可用）',
       '',
@@ -550,6 +564,17 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '→ 再調用 app_render({ appId: "stock-ticker" })',
       '```',
 
+      '## 完整示例：懸浮畫布外掛（Agent 推送）',
+      '```',
+      '用戶: "做個懸浮畫布，分析完架構就畫上去"',
+      '→ manifest 必須宣告 inbox（給編程 Agent 的說明書，會進會話上下文）：',
+      '    { spec:"papr/0.1", name: "架構畫布", kind: "plugin", local: "none", network: false,',
+      '      surface: { type: "overlay", width: 420, height: 280, position: "top-right" },',
+      '      inbox: { scene: { description: "整幅替換畫布", example: { op: "replace", nodes: [{id:"a",label:"Auth"}], edges: [] } } } }',
+      '→ js/main.js 裡 papr.events.on("scene", cb) 訂閱；啟動時 db.get("inbox:scene") 回放',
+      '→ 再調用 app_render({ appId: "arch-canvas" })',
+      '```',
+
       '## 關鍵約束',
       '- 已有應用且用戶未要求重做時，只改用戶指出的問題（佈局、篩選、文案、互動），禁止再走一遍全量生成；用 patch/edit 改對應小檔案後再 app_render({ appId }) 打開',
       '- 創建後端 app 後不要自動啟動——先告知用戶 app 已創建，讓用戶決定是否啟動',
@@ -559,6 +584,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '- app_render 只打開已有檔案，不會覆蓋寫入；改內容用 write/edit/patch',
       '- 禁止把已拆開的 css/js 重新合併成單檔',
       '- 優先用 papr SDK 而非後端服務',
+      '- 需要編程 Agent 推送的外掛必須宣告 inbox（description + 最小 example）；自刷新小組件不要宣告，以免浪費會話上下文',
     ],
   },
   en: {
@@ -591,7 +617,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '## Apps vs Plugins',
       'kind defaults to "app": fullscreen exclusive, covers the workbench. kind "plugin": in-window overlay you can keep while coding; plugins hide while a fullscreen App is open, but keep running in the background.',
       'If the user says "floating / widget / plugin / HUD / keep it on the side" → kind:"plugin". Full pages, dashboards, or backends → do not use plugin.',
-      'Plugins cannot use command/backends or local:"write". Typical ticker: {kind:"plugin", local:"none", network:true, surface:{type:"overlay", width:320, height:200, position:"top-right"}}.',
+      'Plugins cannot use command/backends or local:"write". Typical ticker: {kind:"plugin", local:"none", network:true, surface:{type:"overlay", width:320, height:200, position:"top-right"}} (self-fetch; do not declare inbox).',
       'Write plugin HTML for a small card: high density, no custom title bar (the host provides drag, resize, and close). manifest.surface width/height is the first-run default; at runtime call papr.window.setSize({width,height}) to change the content box, and the user can drag the edges. Default three files: index.html + css/theme.css + js/main.js.',
 
       '## Workflow',
@@ -657,7 +683,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '### papr.events — Receive pushes from the coding Agent (app_publish)',
       'const off = papr.events.on(channel, (evt) => { ... })  // evt: { channel, seq, ts, payload }; returns an unsubscribe function',
       'await papr.db.get("inbox:<channel>")                   // history event array ({seq, ts, payload}, last 200 kept)',
-      'Usage: declare inbox channels in manifest.json (e.g. {"inbox": {"cards": {"description": "kanban cards", "example": {...}}}}), then subscribe after page load. The coding Agent pushes content with the app_publish tool (e.g. adds a kanban card when a task finishes). On startup, restore state with db.get first, then listen for live events.',
+      'Usage: declare inbox in manifest.json only when the coding Agent should push (e.g. {"inbox": {"scene": {"description": "replace the canvas", "example": {"op":"replace","nodes":[]}}}}). The contract is copied into Agent session context; the coding Agent calls app_publish from that catalog — do not use app_list. Subscribe after page load. On startup, restore state with db.get first, then listen for live events. Keep example a minimal skeleton. Self-refreshing widgets (tickers/clocks) must not declare inbox.',
       '⚠️ inbox:* keys are written only by app_publish — the app must treat them as read-only and never overwrite them with papr.db.set.',
       'No permission needed (always available).',
       '',
@@ -770,6 +796,17 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '→ Then call app_render({ appId: "stock-ticker" })',
       '```',
 
+      '## Complete Example: Floating Canvas Plugin (Agent push)',
+      '```',
+      'User: "Make a floating canvas and draw the architecture onto it after analysis"',
+      '→ manifest MUST declare inbox (the coding Agent\'s contract; copied into session context):',
+      '    { spec:"papr/0.1", name: "Architecture Canvas", kind: "plugin", local: "none", network: false,',
+      '      surface: { type: "overlay", width: 420, height: 280, position: "top-right" },',
+      '      inbox: { scene: { description: "replace the canvas", example: { op: "replace", nodes: [{id:"a",label:"Auth"}], edges: [] } } } }',
+      '→ In js/main.js subscribe with papr.events.on("scene", cb); replay with db.get("inbox:scene") on startup',
+      '→ Then call app_render({ appId: "arch-canvas" })',
+      '```',
+
       '## Key Rules',
       '- If an app already exists and the user did not ask to rebuild it, only change what they pointed out (layout, filters, copy, interaction). Do not regenerate from scratch; patch/edit the small files then app_render({ appId }) to open',
       '- Do not auto-start backend apps after creating them — tell the user and let them decide',
@@ -780,6 +817,7 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
       '- Never re-merge split css/js back into a single file',
       '- Prefer papr SDK over backend services',
       '- Agent calls consume tokens — avoid unnecessary repeated analysis',
+      '- Plugins that should receive coding-Agent pushes MUST declare inbox (description + a minimal example); self-refreshing widgets must not, so they stay out of session context',
     ],
   },
 };
@@ -1338,10 +1376,10 @@ function buildToolConstraints(
     );
     lines.push(
       lang === 'en'
-        ? '- [app_list] List all registered apps (appId, title, hasBackend, isRunning, port). Call before creating to check for duplicates.'
-        : lang === 'zh-TW'
-        ? '- [app_list] 列出所有已註冊應用（appId、標題、是否有後端、是否運行中、端口）。創建前調用檢查重複。'
-        : '- [app_list] 列出所有已注册应用（appId、标题、是否有后端、是否运行中、端口）。创建前调用检查重复。'
+        ? '- [app_list] List all registered apps (appId, title, kind, pinned, hasBackend, isRunning, port, inbox). App-mode only: call before creating to check for duplicates. Coding-Agent publish contracts live in session context, not this tool.'
+          : lang === 'zh-TW'
+          ? '- [app_list] 列出所有已註冊應用（appId、標題、kind、pinned、是否有後端、是否運行中、端口、inbox）。僅 App 模式：創建前調用檢查重複。編程 Agent 的推送契約在會話上下文，不靠此工具。'
+          : '- [app_list] 列出所有已注册应用（appId、标题、kind、pinned、是否有后端、是否运行中、端口、inbox）。仅 App 模式：创建前调用检查重复。编程 Agent 的推送契约在会话上下文，不靠此工具。'
     );
     lines.push(
       lang === 'en'
@@ -1372,10 +1410,10 @@ function buildToolConstraints(
     );
     lines.push(
       lang === 'en'
-        ? '- [app_publish] Push content to a .papr app/plugin channel: app_publish({ appId, channel, payload }). Use it to feed dashboards/kanban boards/progress panels after finishing work (e.g. add a card when a task completes). payload is arbitrary JSON defined by the app\'s manifest inbox contract — call app_list first to see each app\'s declared channels and their description/example, and follow that shape exactly. Data is persisted (the app can reload history) and delivered live if the app is mounted. Unknown channels are rejected with the valid list.'
-        : lang === 'zh-TW'
-        ? '- [app_publish] 向 .papr 應用/外掛的頻道推送內容：app_publish({ appId, channel, payload })。完成工作後用它餵看板/儀表板/進度面板（如任務完成就加一張卡片）。payload 是任意 JSON，格式以該應用 manifest 的 inbox 契約為準——先 app_list 查看各應用聲明的頻道及 description/example，嚴格按其形狀推送。數據會持久化（應用可回放歷史），應用已掛載時即時送達。傳未聲明頻道會被拒絕並列出可用頻道。'
-        : '- [app_publish] 向 .papr 应用/插件的频道推送内容：app_publish({ appId, channel, payload })。完成工作后用它喂看板/仪表板/进度面板（如任务完成就加一张卡片）。payload 是任意 JSON，格式以该应用 manifest 的 inbox 契约为准——先 app_list 查看各应用声明的频道及 description/example，严格按其形状推送。数据会持久化（应用可回放历史），应用已挂载时即时送达。传未声明频道会被拒绝并列出可用频道。'
+        ? '- [app_publish] Push content to a .papr app/plugin channel: app_publish({ appId, channel, payload }). Session context "## Enabled plugins" lists current publish targets (enabled + declared inbox). Follow that appId/channel/example exactly. Do not publish to plugins that are not listed and do not invent channels. Data is persisted (the app can reload history) and delivered live if the app is mounted. Unknown channels are rejected with the valid list.'
+          : lang === 'zh-TW'
+          ? '- [app_publish] 向 .papr 應用/外掛的頻道推送內容：app_publish({ appId, channel, payload })。會話上下文「已啟用外掛」列出目前可推送目標（已啟用且宣告了 inbox）。嚴格按其 appId/頻道/example 推送。未列出的外掛不要推，也不要 invent 頻道。數據會持久化（應用可回放歷史），應用已掛載時即時送達。傳未聲明頻道會被拒絕並列出可用頻道。'
+          : '- [app_publish] 向 .papr 应用/插件的频道推送内容：app_publish({ appId, channel, payload })。会话上下文「已启用插件」列出当前可推送目标（已启用且声明了 inbox）。严格按其 appId/频道/example 推送。未列出的插件不要推，也不要 invent 频道。数据会持久化（应用可回放历史），应用已挂载时即时送达。传未声明频道会被拒绝并列出可用频道。'
     );
   }
 
@@ -1545,6 +1583,7 @@ export function buildSessionBootstrapPrompt(options: BuildSessionBootstrapPrompt
   const lang = normalizeLang(options.lang);
   const labels = SECTION_LABELS[lang];
   const skillsSection = options.skillsSection?.trim();
+  const pluginsSection = options.pluginsSection?.trim();
   const memorySection = options.memorySection?.trim();
   const customPromptSection = options.customPromptSection?.trim();
   const projectGraphSummary = options.projectGraphSummary?.trim();
@@ -1553,6 +1592,7 @@ export function buildSessionBootstrapPrompt(options: BuildSessionBootstrapPrompt
     `# CodePapr ${lang === 'en' ? 'Session Context' : '会话上下文'}`,
     '',
     ...(skillsSection ? ['', skillsSection] : []),
+    ...(pluginsSection ? ['', pluginsSection] : []),
     ...(memorySection
       ? [
           '',

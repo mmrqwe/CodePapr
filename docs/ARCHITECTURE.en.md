@@ -234,7 +234,7 @@ LLM can manage app lifecycle and content push via 5 tools (registered as merge t
 
 | Tool | Params | Function |
 |---|---|---|
-| `app_list` | none | List all registered apps (appId, title, hasBackend, isRunning, inbox channel contract) |
+| `app_list` | none | List all registered apps (appId, title, kind, pinned, hasBackend, isRunning, inbox). **App mode only** (duplicate check / backend lifecycle). Coding-Agent publish contracts live in session context, not this tool. |
 | `app_start` | `appId` | Start backend (check port → `start_workspace_background_command` → `setAppRunning`) |
 | `app_stop` | `appId` | Stop backend (`stop_background_process` → `setAppStopped`) |
 | `app_delete` | `appId` | Full delete (stop + `papr_delete_app` delete files + `closeApp`) |
@@ -256,7 +256,7 @@ agent: app_publish({appId, channel, payload})
 
 Concurrency safety: parallel sub-agents / multiple sessions may publish to the same channel at once. A read-append-write across two separate transactions would lose events, so `db::papr_inbox_append` atomizes the whole sequence with a **process-level Mutex + `BEGIN IMMEDIATE` transaction** (WAL has a single global writer; busy_timeout=5000 makes contenders wait). seq is assigned inside the lock, so it is monotonic and unique. Cross-process (multiple windows / a backend server.js writing the db) is covered by the SQLite write lock.
 
-Contract model: the manifest may declare `inbox: { <channel>: { description, example } }`. Once declared, the agent may only push to declared channels (an unknown channel is rejected with the valid list, letting the LLM self-correct); when absent, channels are unrestricted (backward compatible). The agent discovers the contract via the inbox summary returned by `app_list`. `inbox:*` keys are written only by app_publish — the app side is read-only (convention, not enforced).
+Contract model: the manifest may declare `inbox: { <channel>: { description, example } }`. Once declared, the agent may only push to declared channels (an unknown channel is rejected with the valid list, letting the LLM self-correct); when absent, channels are unrestricted (backward compatible). **Discovery:** enabled plugins that declared inbox (plus fullscreen apps that declared inbox) are copied into session bootstrap "## Enabled plugins"; self-refreshing widgets without inbox stay out of context. `app_list` still returns an inbox summary, but only in App mode, for duplicate checks / lifecycle — it is not a required pre-step before publish. `inbox:*` keys are written only by app_publish — the app side is read-only (convention, not enforced).
 
 **AppDockPanel — Application Management Panel:**
 

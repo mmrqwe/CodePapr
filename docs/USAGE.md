@@ -118,7 +118,7 @@ const history = await papr.db.get('inbox:cards');
 
 看板、进度面板、成果画廊这类「Agent 干活、App 展示」的场景，用 `app_publish` 工具打通：
 
-1. **App 声明频道契约**——`manifest.json` 里写 `inbox`（可选；声明后 Agent 只能推已声明的频道）：
+1. **App 声明频道契约**——需要编程 Agent 推送时，在 `manifest.json` 写 `inbox`（这是 opt-in：声明后契约会进入 Agent 会话上下文；自刷新股票条/时钟不要声明）：
 
 ```json
 {
@@ -135,11 +135,12 @@ const history = await papr.db.get('inbox:cards');
 ```
 
 2. **App 订阅事件**——页面里 `papr.events.on('cards', cb)` 实时接收；启动时用 `papr.db.get('inbox:cards')` 回放历史（数组 `{seq, ts, payload}`，保留最近 200 条）。
-3. **Agent 推送**——任意可写模式（Agent/Plan/App）调用 `app_publish({ appId, channel, payload })`。Agent 会先用 `app_list` 查看各 App 声明的频道与示例，按契约推送。
+3. **Agent 推送**——任意可写模式（Agent/Plan/App）调用 `app_publish({ appId, channel, payload })`。编程 Agent **不会**先 `app_list`：会话上下文「已启用插件」只列出**已启用且声明了 inbox** 的目标（含声明了 inbox 的全屏 App）。按其中的 `appId` / 频道 / example 推送。没有 inbox 的自刷新小组件不会进入上下文，也不要推。
 
 特性：
 
 - **持久化 + 实时双通道**：事件先原子写入 App 的 `db.sqlite`（并发安全，不丢事件），App 已挂载时再经 `papr://event` 实时送达；未挂载也不丢，下次打开回放
+- **会话目录**：只有声明了 `inbox` 且已启用的插件（以及声明了 inbox 的全屏 App）会进会话上下文；说明书会截断 example，避免浪费 token
 - **契约校验**：推送未声明频道会被拒绝并列出可用频道及描述，Agent 可自我纠正
 - `inbox:*` 键只由 `app_publish` 写入，App 端只读；`payload` 上限 256KB
 - 子代理默认可用 `app_publish`（自定义子代理可在 `tools` 白名单中增删）；Ask 只读模式禁用
@@ -176,9 +177,9 @@ Agent 工具白名单（在 `agents[].tools` 声明，必须落在访问档内�
 
 ### App Agent 管理工具
 
-LLM 可通过 4 个工具管理 app：
+LLM 可通过 4 个工具管理 app（仅 App 模式）：
 
-- `app_list` — 列出所有 app
+- `app_list` — 列出所有 app（创建前查重；不是 Agent 发现 publish 契约的方式）
 - `app_start <appId>` — 启动后端
 - `app_stop <appId>` — 停止后端
 - `app_delete <appId>` — 彻底删除

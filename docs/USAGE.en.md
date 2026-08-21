@@ -118,7 +118,7 @@ Switch to **App mode** and describe the app you want in natural language. The Ag
 
 For "Agent works, App displays" scenarios — kanban boards, progress panels, artifact galleries — use the `app_publish` tool:
 
-1. **The app declares a channel contract** — add `inbox` to `manifest.json` (optional; once declared, the Agent may only push to declared channels):
+1. **The app declares a channel contract** — add `inbox` to `manifest.json` when the coding Agent should push (this is opt-in: the contract is copied into Agent session context; self-refreshing tickers/clocks must not declare it):
 
 ```json
 {
@@ -135,11 +135,12 @@ For "Agent works, App displays" scenarios — kanban boards, progress panels, ar
 ```
 
 2. **The app subscribes** — `papr.events.on('cards', cb)` receives live events; on startup, replay history with `papr.db.get('inbox:cards')` (an array of `{seq, ts, payload}`, last 200 kept).
-3. **The Agent pushes** — from any writable mode (Agent/Plan/App), call `app_publish({ appId, channel, payload })`. The Agent first reads each app's declared channels and examples via `app_list` and pushes according to the contract.
+3. **The Agent pushes** — from any writable mode (Agent/Plan/App), call `app_publish({ appId, channel, payload })`. The coding Agent does **not** call `app_list` first: session context "## Enabled plugins" lists only **enabled targets that declared `inbox`** (plus fullscreen apps that declared inbox). Push using that `appId` / channel / example. Self-refreshing widgets without inbox stay out of context — do not publish to them.
 
 Properties:
 
 - **Persistent + live dual channel**: each event is atomically appended to the app's `db.sqlite` (concurrency-safe, no lost events); if the app is mounted it is also delivered live via `papr://event`. Unmounted apps lose nothing — history replays on next open.
+- **Session catalog**: only enabled plugins that declared `inbox` (plus fullscreen apps that declared inbox) are copied into session context; examples are truncated so the catalog stays small
 - **Contract validation**: pushing to an undeclared channel is rejected with the list of valid channels and their descriptions, letting the Agent self-correct.
 - `inbox:*` keys are written only by `app_publish` — the app side is read-only. `payload` is capped at 256KB.
 - Sub-agents can use `app_publish` by default (custom sub-agents may add/remove it via their `tools` whitelist). It is disabled in read-only Ask mode.
@@ -176,9 +177,9 @@ The right panel's **Apps Tab** shows all registered .papr apps:
 
 ### App Agent Management Tools
 
-LLM manages apps via 4 tools:
+LLM manages apps via 4 tools (App mode only):
 
-- `app_list` — list all apps
+- `app_list` — list all apps (duplicate check before create; not how the coding Agent discovers publish contracts)
 - `app_start <appId>` — start backend
 - `app_stop <appId>` — stop backend
 - `app_delete <appId>` — full delete

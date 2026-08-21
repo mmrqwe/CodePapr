@@ -515,7 +515,7 @@
             <div class="name">app_render / app_list / app_start / app_stop / app_delete<span class="cchip c-text">App Mode</span><span class="exp"></span></div>
           </div>
           <div class="desc"><b>app_render</b>: Opens interactive HTML apps already written under <code>.CodePapr/apps/&lt;appId&gt;/</code> (sandboxed iframe with Papr SDK); paired with <code>app_*</code> tools to manage application lifecycle. Files must be written with write/edit/patch; app_render only mounts.</div>
-          <div class="more"><div class="mbox"><code>app_render</code> is strictly disabled for subagents to prevent recursive rendering loops; pass appId only. Permissions, agents, and backend processes live in manifest.json.</div></div>
+          <div class="more"><div class="mbox"><code>app_render</code> is strictly disabled for subagents to prevent recursive rendering loops; pass appId only. Permissions, agents, and backend processes live in manifest.json. <code>app_list</code> is App-mode only: duplicate checks and running state. The coding Agent discovers publish targets from session context, not from list.</div></div>
         </div>
 
         <div class="item">
@@ -523,8 +523,8 @@
             <div class="addr">PUSH</div>
             <div class="name">app_publish<span class="cchip c-text">Agent→App Push</span><span class="exp"></span></div>
           </div>
-          <div class="desc"><b>app_publish</b>: Pushes content to an app/plugin channel (kanban boards, progress panels, artifact galleries). Events are atomically appended to <code>inbox:&lt;channel&gt;</code> in the app's <code>db.sqlite</code> (concurrency-safe); when the app is mounted they are also delivered live via <code>papr://event</code> (received by <code>papr.events.on</code>). Available in all modes except Ask.</div>
-          <div class="more"><div class="mbox">The payload shape follows the manifest <code>inbox</code> contract: once declared, only declared channels are accepted (unknown channels are rejected with the valid list); call <code>app_list</code> first to see each app's channels and examples. <code>inbox:*</code> keys are written only by app_publish — the app side is read-only. Payload capped at 256KB; last 200 events kept per channel.</div></div>
+          <div class="desc"><b>app_publish</b>: Pushes content to an app/plugin channel (kanban boards, progress panels, canvases). Events are atomically appended to <code>inbox:&lt;channel&gt;</code> in the app's <code>db.sqlite</code> (concurrency-safe); when the app is mounted they are also delivered live via <code>papr://event</code> (received by <code>papr.events.on</code>). Available in all modes except Ask.</div>
+          <div class="more"><div class="mbox"><b>How the Agent knows what to push:</b> do not call <code>app_list</code>. That tool is App-mode only (duplicate checks / backend lifecycle). The coding Agent reads session context "## Enabled plugins", which lists <b>enabled overlays that declared <code>inbox</code></b> plus fullscreen apps that declared inbox. Follow that appId / channel / example. Self-refreshing widgets without inbox (tickers, clocks) stay out of context — do not publish to them.<br><br>Once inbox is declared, only those channels are accepted (unknown channels are rejected with the valid list). <code>inbox:*</code> keys are written only by app_publish — the app side is read-only. Payload capped at 256KB; last 200 events kept per channel. Examples are truncated before they enter context so the catalog stays short.</div></div>
         </div>
 
         <div class="item">

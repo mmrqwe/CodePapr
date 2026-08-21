@@ -677,7 +677,7 @@ https://api.deepseek.com/v1</code></pre>
           <li>Reference chart libraries via CDN (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js, etc.)</li>
           <li>Runs in a sandboxed iframe (<code>sandbox="allow-scripts allow-same-origin"</code>)</li>
           <li>Use <strong>Papr SDK</strong> (<code>window.papr</code>) to call Agent, storage, HTTP, and filesystem capabilities</li>
-          <li>Kanban/progress-panel apps can declare <code>inbox</code> channels in the manifest and subscribe with <code>papr.events.on(channel, cb)</code> — the coding Agent pushes content via the <code>app_publish</code> tool while it works (e.g. task done → add a card); history replays via <code>papr.db.get('inbox:&lt;channel&gt;')</code></li>
+          <li>Kanban/canvas apps that should receive coding-Agent pushes declare <code>inbox</code> in the manifest and subscribe with <code>papr.events.on(channel, cb)</code> — the contract is copied into session context "## Enabled plugins"; Agent mode calls <code>app_publish</code> from that catalog (do not use <code>app_list</code>); history replays via <code>papr.db.get('inbox:&lt;channel&gt;')</code>. Self-refreshing widgets must not declare inbox.</li>
           <li><code>papr.agent.run</code> uses a <strong>300-second idle timeout</strong>: as long as the Agent keeps emitting progress events (streaming output / tool calls) it can run indefinitely; only 300s of total silence triggers a timeout. Tool rounds are bounded by <code>maxToolRounds</code> (default/cap 50; search calls count toward the total)</li>
           <li>appId must be kebab-case; after editing files call <code>app_render({ appId })</code> again to refresh — supports iterative refinement</li>
         </ul>
@@ -927,11 +927,11 @@ After the change, at least run verification for the affected scope; if no narrow
           <thead><tr><th>Tool</th><th>Capability</th></tr></thead>
           <tbody>
             <tr><td><code>app_render</code></td><td>Open a .papr App already on disk into the Application panel. Pass appId only. Write manifest.json and the entry HTML with write/edit/patch under <code>.CodePapr/apps/&lt;appId&gt;/</code> first. Access lives in the manifest (local/network; legacy level 0-3 still works). HTML uses <code>window.papr</code> SDK. Call again after edits to refresh.</td></tr>
-            <tr><td><code>app_list</code></td><td>List all registered .papr apps (name, has backend, is running). Call before creating to check for duplicates.</td></tr>
+            <tr><td><code>app_list</code></td><td>List all registered .papr apps (name, kind, pinned, has backend, is running, inbox). App mode only: call before creating to check for duplicates. Coding-Agent publish contracts live in session context, not this tool.</td></tr>
             <tr><td><code>app_start</code></td><td>Start backend service by appId. Checks port availability, turns status green.</td></tr>
             <tr><td><code>app_stop</code></td><td>Stop backend service by appId. Turns status red.</td></tr>
             <tr><td><code>app_delete</code></td><td>Delete app by appId. Stops backend, removes files, clears storage. Irreversible.</td></tr>
-            <tr><td><code>app_publish</code></td><td>Push content to an app/plugin channel (app_publish({ appId, channel, payload })). The payload shape follows the manifest inbox contract (call app_list first to see declared channels and examples); events are appended atomically (concurrency-safe, last 200 kept) and delivered live via papr://event when the app is mounted. Kanban/progress-panel scenario: task done → push a card.</td></tr>
+            <tr><td><code>app_publish</code></td><td>Push content to an app/plugin channel (app_publish({ appId, channel, payload })). Only publish to targets listed in session context "## Enabled plugins" (enabled + declared inbox); do not call app_list first. Events are appended atomically (concurrency-safe, last 200 kept) and delivered live via papr://event when the app is mounted. Canvas/kanban: after analysis → push a scene or a card using the example.</td></tr>
           </tbody>
         </table>
 

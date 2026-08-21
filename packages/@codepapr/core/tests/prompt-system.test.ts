@@ -414,11 +414,55 @@ describe('promptSystem', () => {
       });
       expect(prompt).toContain('kind:"plugin"');
       expect(prompt).toContain('stock-ticker');
+      expect(prompt).toContain('arch-canvas');
     }
     const zhCN = buildRuntimeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'zh-CN' });
     expect(zhCN).toContain('插件默认只要 index.html');
+    expect(zhCN).toContain('自刷新小组件不要声明');
     const en = buildRuntimeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'en' });
     expect(en).toContain('Plugins default to index.html');
+  });
+
+  it('app_publish points at session catalog, not app_list', () => {
+    for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
+      const prompt = buildRuntimeSystemPrompt({
+        mode: 'agent',
+        workspacePath: '/tmp/project',
+        lang,
+        toolNames: ['app_publish'],
+      });
+      expect(prompt).toContain('app_publish');
+      expect(prompt).not.toContain('app_list');
+    }
+    const zhCN = buildRuntimeSystemPrompt({
+      mode: 'agent',
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+      toolNames: ['app_publish'],
+    });
+    expect(zhCN).toContain('已启用插件');
+    const en = buildRuntimeSystemPrompt({
+      mode: 'agent',
+      workspacePath: '/tmp/project',
+      lang: 'en',
+      toolNames: ['app_publish'],
+    });
+    expect(en).toContain('Enabled plugins');
+  });
+
+  it('injects pluginsSection into session bootstrap and omits it when empty', () => {
+    const withPlugins = buildSessionBootstrapPrompt({
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+      pluginsSection: '## 已启用插件\n- `arch-canvas`',
+    });
+    expect(withPlugins).toContain('## 已启用插件');
+    expect(withPlugins).toContain('arch-canvas');
+    const empty = buildSessionBootstrapPrompt({
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+    });
+    expect(empty).not.toContain('已启用插件');
   });
 
   it('app mode workflow references real tool names, not hidden workspace_* internals', () => {
