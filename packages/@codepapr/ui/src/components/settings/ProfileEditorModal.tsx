@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { DEEPSEEK_MAX_TOKENS } from '@codepapr/api/tokenLimits';
 import type { ApiFormat, Lang, ModelProfile } from '../../store/agentStore';
 import type { Translation } from './types';
@@ -12,6 +12,12 @@ import {
 } from './constants';
 import { ConnectionTestButton } from './ConnectionTestButton';
 import { runConnectionTest } from './testConnection';
+import {
+  filterModelCatalog,
+  formatListModelsError,
+  listModelsForProfile,
+  profileModelsCacheKey,
+} from './listProfileModels';
 import { buildProviderForProfile } from '../../store/internals/providerFactory';
 import { resolveProviderName, resolveThinkingPayload } from '../../store/internals/settingsNormalizer';
 
@@ -38,11 +44,40 @@ export function ProfileEditorModal({
   currentLang,
 }: ProfileEditorModalProps) {
   const [draft, setDraft] = useState<ModelProfile>({ ...profile });
+  const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
+  const [modelFilter, setModelFilter] = useState('');
+  const [fetchStatus, setFetchStatus] = useState<'idle' | 'fetching'>('idle');
+  const [fetchError, setFetchError] = useState('');
+  const catalogCacheRef = useRef<Map<string, string[]>>(new Map());
+  const abortRef = useRef<AbortController | null>(null);
 
   // Reset draft when modal opens for a different profile
-  React.useEffect(() => {
+  useEffect(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    catalogCacheRef.current = new Map();
     setDraft({ ...profile });
+    setFetchedModels(null);
+    setModelFilter('');
+    setFetchStatus('idle');
+    setFetchError('');
   }, [profile, isOpen]);
+
+  useEffect(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setFetchStatus('idle');
+    setFetchError('');
+    setModelFilter('');
+    const cached = catalogCacheRef.current.get(profileModelsCacheKey(draft));
+    setFetchedModels(cached ?? null);
+  }, [draft.apiMode, draft.apiFormat, draft.baseURL, draft.apiKey]);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   if (!isOpen) return null;
 
@@ -241,6 +276,51 @@ export function ProfileEditorModal({
     }
   };
 
+  const handleFetchModels = async () => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+      setFetchStatus('idle');
+      return;
+    }
+
+    const cacheKey = profileModelsCacheKey(draft);
+    const cached = catalogCacheRef.current.get(cacheKey);
+    if (cached) {
+      setFetchedModels(cached);
+      setFetchError('');
+      return;
+    }
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setFetchStatus('fetching');
+    setFetchError('');
+    try {
+      const ids = await listModelsForProfile(draft, { signal: controller.signal });
+      if (abortRef.current !== controller) {
+        return;
+      }
+      catalogCacheRef.current.set(cacheKey, ids);
+      setFetchedModels(ids);
+    } catch (err) {
+      if (abortRef.current !== controller) {
+        return;
+      }
+      setFetchedModels(null);
+      setFetchError(formatListModelsError(err, t));
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        setFetchStatus('idle');
+      }
+    }
+  };
+
+  const catalogOptions = fetchedModels ? filterModelCatalog(fetchedModels, modelFilter) : [];
+  const modelInCatalog = Boolean(fetchedModels?.includes(draft.model.trim()));
+  const datalistModels = fetchedModels ?? modelPresets;
+
   return (
     <div
       role="dialog"
@@ -368,42 +448,99 @@ export function ProfileEditorModal({
           />
         )}
 
-        {/* Model Name & API Key */}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <TextField
-            label={t.modelName}
-            value={draft.model}
-            list="profile-model-presets"
-            onChange={(e) => update({ model: e.target.value })}
-            placeholder={currentLang === 'en' ? 'Enter model name...' : '输入模型名称...'}
-          >
-            <datalist id="profile-model-presets">
-              {modelPresets.map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
-          </TextField>
+        <TextField
+          label={
+            <>
+              {t.apiKey}
+              {isLocal ? (currentLang === 'en' ? ' (optional)' : '（可选）') : ''}
+            </>
+          }
+          type="password"
+          value={draft.apiKey}
+          onChange={(e) => update({ apiKey: e.target.value })}
+          placeholder={
+            isLocal
+              ? currentLang === 'en'
+                ? 'usually not required'
+                : '本地服务通常无需填写'
+              : draft.apiMode === 'custom' && draft.apiFormat === 'claude'
+              ? 'sk-ant-...'
+              : 'sk-...'
+          }
+        />
 
-          <TextField
-            label={
-              <>
-                {t.apiKey}
-                {isLocal ? (currentLang === 'en' ? ' (optional)' : '（可选）') : ''}
-              </>
-            }
-            type="password"
-            value={draft.apiKey}
-            onChange={(e) => update({ apiKey: e.target.value })}
-            placeholder={
-              isLocal
-                ? currentLang === 'en'
-                  ? 'usually not required'
-                  : '本地服务通常无需填写'
-                : draft.apiMode === 'custom' && draft.apiFormat === 'claude'
-                ? 'sk-ant-...'
-                : 'sk-...'
-            }
-          />
+        <div>
+          <div className="flex items-end gap-2">
+            <div className="min-w-0 flex-1">
+              <TextField
+                label={t.modelName}
+                value={draft.model}
+                list="profile-model-presets"
+                onChange={(e) => update({ model: e.target.value })}
+                placeholder={currentLang === 'en' ? 'Enter model name...' : '输入模型名称...'}
+              >
+                <datalist id="profile-model-presets">
+                  {datalistModels.map((m) => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
+              </TextField>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleFetchModels()}
+              title={fetchStatus === 'fetching' ? t.cancel : t.fetchModels}
+              className="mb-0 shrink-0 rounded-xl border border-accent-soft px-4 py-[0.7rem] text-xs font-medium text-accent-text transition-colors hover:border-accent hover:bg-accent-soft"
+            >
+              {fetchStatus === 'fetching' ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                  {t.fetchingModels}
+                </span>
+              ) : (
+                t.fetchModels
+              )}
+            </button>
+          </div>
+          {fetchError && (
+            <div className="mt-2 rounded-lg border border-danger-bg bg-danger-bg px-3 py-2 text-xs leading-relaxed text-danger">
+              {fetchError}
+            </div>
+          )}
+          {fetchedModels && fetchedModels.length > 0 && (
+            <div className="mt-2 space-y-2">
+              <p className="text-[10px] leading-relaxed text-fg-dim">
+                {t.fetchModelsSuccess.replace('{count}', String(fetchedModels.length))}
+                {!modelInCatalog && draft.model.trim() ? ` ${t.customModelNotInList}` : ''}
+              </p>
+              {fetchedModels.length > 12 && (
+                <input
+                  value={modelFilter}
+                  onChange={(e) => setModelFilter(e.target.value)}
+                  placeholder={t.filterModels}
+                  className="w-full rounded-xl border border-line bg-base px-4 py-2 text-xs text-fg placeholder-slate-700 focus:border-accent-soft focus:outline-none"
+                />
+              )}
+              <select
+                value={modelInCatalog ? draft.model.trim() : ''}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    update({ model: e.target.value });
+                  }
+                }}
+                className="w-full cursor-pointer rounded-xl border border-line bg-base px-4 py-2.5 text-sm text-fg focus:border-accent-soft focus:outline-none"
+              >
+                <option value="" disabled>
+                  {t.selectFromModelList}
+                </option>
+                {catalogOptions.map((id) => (
+                  <option key={id} value={id}>
+                    {id}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Thinking Settings */}

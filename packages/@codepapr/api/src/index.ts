@@ -11,6 +11,15 @@ export { ResponseProvider } from './providers/ResponseProvider';
 export { ClaudeProvider } from './providers/ClaudeProvider';
 export { LocalProvider, DEFAULT_LOCAL_BASE_URL } from './providers/LocalProvider';
 export {
+  ANTHROPIC_API_VERSION,
+  LIST_MODELS_TIMEOUT_MS,
+  ListModelsError,
+  isListModelsError,
+  listModels,
+  parseModelCatalog,
+} from './providers/listModels';
+export type { ListModelsAuth, ListModelsErrorKind } from './providers/listModels';
+export {
   buildOpenAIImageContent,
   buildClaudeImageContent,
 } from './providers/imageContent';

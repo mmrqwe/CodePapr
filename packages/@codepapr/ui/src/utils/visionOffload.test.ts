@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IImageContent } from '@codepapr/types';
 import type { ModelProfile, Settings } from '../store/internals/types';
 import { formatVisionOffloadBlock, replaceImagesInToolResult } from './visionOffload';
