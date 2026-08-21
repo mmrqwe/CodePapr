@@ -68,6 +68,8 @@ export interface UiTaskToolContext {
   subagentCacheStats?: Array<{ tier: 'primary' | 'fast' | 'mentor'; stats: ICacheStatistics }>;
   graphToolTimeoutMs: number;
   multimodalEnabled: boolean;
+  readImageEnabledForModel?: (model: string) => boolean;
+  transformToolResultForModel?: (result: unknown, model: string) => Promise<unknown>;
   /** 非 mentor/explore/scout 子代理的 maxTokens 兜底（缺省 DEFAULT_MAX_TOKENS）。
    *  内部子代理（如 verifier）可用克隆上下文覆盖。 */
   defaultMaxTokens?: number;
@@ -90,16 +92,6 @@ export async function runSubagent(
   maxWallClockMs?: number
 ): Promise<SubagentSessionResult> {
   const runId = startSubagentProgress(definition.name, prompt);
-
-  const registry = new ToolRegistry();
-  registerWorkspaceTools(
-    registry,
-    context.workspacePath,
-    context.editHistory,
-    context.onWorkspaceMutated,
-    { multimodalEnabled: context.multimodalEnabled, exposeGraphToLlm: true, mode: context.mode }
-  );
-  const tools = filterToolsForAgent(registry.getAll(), definition.tools);
 
   const exec = resolveSubagentExecution({
     definition,
@@ -134,6 +126,30 @@ export async function runSubagent(
     fallbackApiKey: context.apiKey ?? '',
     fallbackBaseURL: context.baseURL ?? '',
   });
+
+  const subagentModel = exec.route.model;
+  const registry = new ToolRegistry();
+  registerWorkspaceTools(
+    registry,
+    context.workspacePath,
+    context.editHistory,
+    context.onWorkspaceMutated,
+    {
+      multimodalEnabled: context.readImageEnabledForModel
+        ? context.readImageEnabledForModel(subagentModel)
+        : context.multimodalEnabled,
+      exposeGraphToLlm: true,
+      mode: context.mode,
+    }
+  );
+  if (context.transformToolResultForModel) {
+    const originalExecute = registry.execute.bind(registry);
+    registry.execute = async (name, args, execContext) => {
+      const result = await originalExecute(name, args, execContext);
+      return context.transformToolResultForModel!(result, subagentModel);
+    };
+  }
+  const tools = filterToolsForAgent(registry.getAll(), definition.tools);
 
   let provider = context.provider;
   let providerName: 'deepseek' | 'openai' | 'claude' | 'response' = context.providerName;

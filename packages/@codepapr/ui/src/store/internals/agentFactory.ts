@@ -40,7 +40,9 @@ import {
   shouldUseWorkerAgentRuntime,
   toWorkerAgentSettings,
 } from './providerFactory';
-import { resolveMultimodalEnabled, resolveProviderName } from './settingsNormalizer';
+import { resolveProviderName } from './settingsNormalizer';
+import { modelSupportsVision, shouldExposeReadImage } from '../../utils/visionRouting';
+import { replaceImagesInToolResult } from '../../utils/visionOffload';
 import { loadMemoryBootstrapSection } from './memoryLedgerStore';
 import {
   buildAgentSessionBootstrapPrompt,
@@ -50,9 +52,8 @@ import {
 import type { ApiFormat, Lang, Settings, UIMessage } from './types';
 
 function subagentMultimodalAllowed(settings: Settings, agentTier: 'primary' | 'fast'): boolean {
-  if (!settings.multimodalEnabled) return false;
-  if (settings.multimodalModelTier === 'all') return true;
-  return settings.multimodalModelTier === agentTier;
+  const model = agentTier === 'fast' ? settings.fastModel : settings.model;
+  return shouldExposeReadImage(settings, model);
 }
 
 function buildToolOutputTruncation(
@@ -339,7 +340,9 @@ export function buildUiTaskToolContext(
     mentor: { enabled: settings.mentorEnabled, model: settings.mentorModel, baseURL: settings.mentorBaseURL, apiKey: settings.mentorApiKey, apiFormat: settings.mentorApiFormat as ApiFormat, maxTokens: settings.mentorMaxTokens, maxConsultations: settings.maxMentorConsultations, thinkingEnabled: settings.mentorThinkingEnabled, thinkingEffort: settings.mentorThinkingEffort, thinkingBudgetTokens: settings.mentorThinkingBudgetTokens, thinkingPayload: settings.mentorThinkingPayload },
     baseURL: settings.baseURL,
     apiKey: settings.apiKey,
-    multimodalEnabled: resolveMultimodalEnabled(settings, baseModel),
+    multimodalEnabled: shouldExposeReadImage(settings, baseModel),
+    readImageEnabledForModel: (model) => shouldExposeReadImage(settings, model),
+    transformToolResultForModel: (result, model) => replaceImagesInToolResult(result, settings, model),
     toolOutputTruncation: buildToolOutputTruncation(settings, workspacePath),
     thinkingEnabled: settings.thinkingEnabled,
     reasoningEffort: settings.thinkingEffort,
@@ -390,14 +393,20 @@ export function buildAgentSessionParts(
     runtime.sessionBootstrapPrompt ??
     buildAgentSessionBootstrapPrompt(settings, workspacePath, runtime.skillDefinitions ?? []);
   const composedSystemPrompt = (overrides.systemPrompt ?? settings.systemPrompt).trim();
+  const currentModel = (overrides.model ?? settings.model).trim();
   registerWorkspaceTools(toolRegistry, workspacePath, runtime.editHistory, (paths) => {
     onWorkspaceMutated(paths);
   }, {
     disableWebSearchTools: hasEnabledMcpSearch(settings.mcp),
-    multimodalEnabled: resolveMultimodalEnabled(settings, overrides.model ?? settings.model),
+    multimodalEnabled: shouldExposeReadImage(settings, currentModel),
     mode,
     sessionId,
   });
+  const originalExecute = toolRegistry.execute.bind(toolRegistry);
+  toolRegistry.execute = async (name, args, execContext) => {
+    const result = await originalExecute(name, args, execContext);
+    return replaceImagesInToolResult(result, settings, currentModel);
+  };
 
   // TodoList 工具：主 Agent 的"短期工作记忆"，与 task 工具正交协作
   registerTodoListTools(toolRegistry, sessionId, '', settings.todoMaxRetries);
@@ -412,7 +421,7 @@ export function buildAgentSessionParts(
     registerUiTaskTool(toolRegistry, uiTaskToolContext);
   }
 
-  const baseModel = (overrides.model ?? settings.model).trim();
+  const baseModel = currentModel;
   const provider = buildProviderInstance(settings);
   const providerName = resolveProviderName(settings);
 
@@ -430,7 +439,9 @@ export function buildAgentSessionParts(
       thinkingPayload: settings.thinkingPayload,
     },
   });
-  const log = createLogFromMessages(sessionId, messages, sessionBootstrapPrompt, pruneOptions);
+  const log = createLogFromMessages(sessionId, messages, sessionBootstrapPrompt, pruneOptions, {
+    omitImages: !modelSupportsVision(settings, baseModel),
+  });
   return { prefix, log, model: baseModel, toolRegistry, provider, providerName, uiTaskToolContext };
 }
 
@@ -527,7 +538,9 @@ export function createAgent(
       return new WorkerBackedAgent({
         sessionId,
         workspacePath,
-        initialMessages: toCoreMessages(messages, sessionBootstrapPrompt, pruneOptions),
+        initialMessages: toCoreMessages(messages, sessionBootstrapPrompt, pruneOptions, {
+          omitImages: !modelSupportsVision(settings, baseModel),
+        }),
         settings: toWorkerAgentSettings(settings),
         providerName: provider,
         model: baseModel,
@@ -541,6 +554,8 @@ export function createAgent(
           thinkingBudgetTokens: overrides.thinkingBudgetTokens ?? settings.thinkingBudgetTokens,
           thinkingPayload: settings.thinkingPayload,
         },
+        exposeReadImage: shouldExposeReadImage(settings, baseModel),
+        transformToolResult: (result) => replaceImagesInToolResult(result, settings, baseModel),
         runtime: {
           editHistory: runtime.editHistory,
           rulesSection: runtime.rulesSection,

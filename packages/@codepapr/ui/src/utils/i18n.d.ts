@@ -553,6 +553,8 @@ export declare const I18N_DICTS: {
         expand: string;
         collapse: string;
         streamingStatus: string;
+    visionNoModelWarning: string;
+    visionOffloadFailedWarning: string;
         reconnectingStatus: string;
         continuingOutputStatus: string;
         emptyResponseRetryStatus: string;
@@ -1155,6 +1157,8 @@ export declare const I18N_DICTS: {
         expand: string;
         collapse: string;
         streamingStatus: string;
+    visionNoModelWarning: string;
+    visionOffloadFailedWarning: string;
         reconnectingStatus: string;
         continuingOutputStatus: string;
         emptyResponseRetryStatus: string;
@@ -1757,6 +1761,8 @@ export declare const I18N_DICTS: {
         expand: string;
         collapse: string;
         streamingStatus: string;
+    visionNoModelWarning: string;
+    visionOffloadFailedWarning: string;
         reconnectingStatus: string;
         continuingOutputStatus: string;
         emptyResponseRetryStatus: string;
@@ -2184,6 +2190,8 @@ export declare function getTranslation(lang?: Lang): {
     expand: string;
     collapse: string;
     streamingStatus: string;
+    visionNoModelWarning: string;
+    visionOffloadFailedWarning: string;
     reconnectingStatus: string;
     continuingOutputStatus: string;
     emptyResponseRetryStatus: string;
@@ -2605,6 +2613,8 @@ export declare function getTranslation(lang?: Lang): {
     expand: string;
     collapse: string;
     streamingStatus: string;
+    visionNoModelWarning: string;
+    visionOffloadFailedWarning: string;
     reconnectingStatus: string;
     continuingOutputStatus: string;
     emptyResponseRetryStatus: string;
@@ -3026,6 +3036,8 @@ export declare function getTranslation(lang?: Lang): {
     expand: string;
     collapse: string;
     streamingStatus: string;
+    visionNoModelWarning: string;
+    visionOffloadFailedWarning: string;
     reconnectingStatus: string;
     continuingOutputStatus: string;
     emptyResponseRetryStatus: string;

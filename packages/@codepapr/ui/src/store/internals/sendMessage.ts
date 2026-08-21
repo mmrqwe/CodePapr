@@ -37,6 +37,11 @@ import {
   buildPrimaryModelRoute,
   selectTaskModelRoute,
 } from '../../utils/modelRouting';
+import {
+  describeImagesWithFastModel,
+  formatVisionOffloadBlock,
+} from '../../utils/visionOffload';
+import { resolveVisionInputAction, modelSupportsVision } from '../../utils/visionRouting';
 import { bootstrapMemoryContent } from '../../utils/memoryConsolidation';
 import {
   accumulateCacheStats,
@@ -1324,13 +1329,37 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           ]
             .filter(Boolean)
             .join('\n\n--- session-bootstrap ---\n\n');
-          const runtimeUserPrompt = buildAgentRuntimeUserPrompt({
+          let runtimeUserPrompt = buildAgentRuntimeUserPrompt({
             settings: normalizedSettings,
             mode,
             workspacePath,
             input: effectiveInput,
             todoDigest: currentTodoDigest(optimisticSid),
           });
+          let passImages = images && images.length ? images : undefined;
+          if (passImages?.length) {
+            const visionAction = resolveVisionInputAction(normalizedSettings, route.model);
+            const visionT = getTranslation(normalizedSettings.lang);
+            if (visionAction === 'offload') {
+              try {
+                const description = await describeImagesWithFastModel(normalizedSettings, passImages, {
+                  lang: normalizedSettings.lang,
+                  hint: effectiveInput,
+                });
+                runtimeUserPrompt = `${runtimeUserPrompt}\n\n${formatVisionOffloadBlock(
+                  normalizedSettings.lang ?? 'zh-CN',
+                  description,
+                )}`;
+              } catch {
+                toast.warning(visionT.visionOffloadFailedWarning);
+              }
+              passImages = undefined;
+            } else if (visionAction === 'drop') {
+              toast.warning(visionT.visionNoModelWarning);
+              passImages = undefined;
+            }
+            ensureNotStopped();
+          }
           let { _agent: agent } = get();
           // 本回合归属会话以 optimistic 阶段捕获的 turnSessionId 为准。上方多个
           // await（project-graph / memory / MCP 发现）期间用户可能已切换会话，
@@ -2312,7 +2341,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             };
           } else {
           try {
-            resp = await runWithCrashRecovery(runtimeUserPrompt, images);
+            resp = await runWithCrashRecovery(runtimeUserPrompt, passImages);
           } catch (error) {
             if (error instanceof DOMException && error.name === 'AbortError') {
               throw error;
@@ -2324,6 +2353,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // fast 模型提供方错误降级主模型（与崩溃恢复正交：崩溃已在
             // runWithCrashRecovery 内重建/降级处理，不会走到这里）。
             route = primaryRoute;
+            if (passImages?.length && !modelSupportsVision(normalizedSettings, route.model)) {
+              passImages = undefined;
+            }
             agent = createAgent(
               normalizedSettings,
               activeSessionId,
@@ -2355,7 +2387,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             }
 
             await yieldToMainThread();
-            resp = await runWithCrashRecovery(runtimeUserPrompt, images);
+            resp = await runWithCrashRecovery(runtimeUserPrompt, passImages);
           }
           }
 

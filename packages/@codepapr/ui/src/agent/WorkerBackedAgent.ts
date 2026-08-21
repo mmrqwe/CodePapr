@@ -195,9 +195,13 @@ export interface WorkerBackedAgentConfig {
     *  debounced snapshot of in-flight content for crash recovery. */
   onStreamSnapshot?: () => void;
   /** Re-reads volatile disk state (memory.md) and rebuilds the session
-    *  bootstrap. Invoked when the worker's mid-loop compaction resets the epoch
-    *  so memory stays fresh across long sessions. Returns null/empty to skip. */
+   *  bootstrap. Invoked when the worker's mid-loop compaction resets the epoch
+   *  so memory stays fresh across long sessions. Returns null/empty to skip. */
   onRefreshBootstrap?: () => Promise<string | null>;
+  /** Whether `read_image` is visible to this agent (native vision or fast offload). */
+  exposeReadImage?: boolean;
+  /** Convert `__images` tool results when the running model cannot see them. */
+  transformToolResult?: (result: unknown) => Promise<unknown>;
   /** PR1（ADR-005）：worker 产出 mid-loop 压缩提交数据后，由主线程 Store
    *  校验并单事务持久化 surface/compaction 记录。 */
   onMidLoopCompactionCommit?: (commit: MidLoopCompactionCommit) => Promise<void> | void;
@@ -232,7 +236,7 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
     config.runtime.onWorkspaceMutated,
     {
       disableWebSearchTools: hasEnabledMcpSearch(config.settings.mcp),
-      multimodalEnabled: resolveWorkerMultimodalEnabled(config.settings, config.model),
+      multimodalEnabled: config.exposeReadImage ?? resolveWorkerMultimodalEnabled(config.settings, config.model),
       mode,
       sessionId: config.sessionId,
     },
@@ -257,7 +261,8 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
   return {
     toolDefinitions: definitions,
     execute: async (toolName, args, context) => {
-      return await registry.execute(toolName, args, context ? { ...context } : undefined);
+      const result = await registry.execute(toolName, args, context ? { ...context } : undefined);
+      return config.transformToolResult ? config.transformToolResult(result) : result;
     },
   };
 }

@@ -22,7 +22,7 @@ import type { WorkMode } from '../../utils/agentPrompts';
 import { hasEnabledMcpSearch } from '../../utils/mcpTypes';
 import { buildEffectiveContextMessages } from '../../utils/contextCompaction';
 import { SESSION_BOOTSTRAP_MESSAGE_ID } from '../../utils/contextSurface';
-import { resolveMultimodalEnabled } from './settingsNormalizer';
+import { shouldExposeReadImage } from '../../utils/visionRouting';
 import type { Settings, UIMessage } from './types';
 import { getActiveCharacter, getActiveCharacterPrompt } from '../charactersStore';
 import { expandCharacterMacros, sanitizeCachePrompt } from '../../utils/characterTypes';
@@ -35,12 +35,21 @@ import {
 export function toCoreMessages(
   messages: UIMessage[],
   sessionBootstrapPrompt?: string,
-  pruneOptions?: PruneOptions
+  pruneOptions?: PruneOptions,
+  options?: { omitImages?: boolean }
 ): IMessage[] {
   const restoredMessages = buildEffectiveContextMessages(messages, { pruneOptions });
+  const withoutImages = options?.omitImages
+    ? restoredMessages.map((message) => {
+        if (!message.images?.length) return message;
+        const next = { ...message };
+        delete next.images;
+        return next;
+      })
+    : restoredMessages;
   const normalizedBootstrapPrompt = sessionBootstrapPrompt?.trim();
   if (!normalizedBootstrapPrompt) {
-    return restoredMessages;
+    return withoutImages;
   }
 
   return [
@@ -54,7 +63,7 @@ export function toCoreMessages(
         isPrefixSystem: true,
       },
     },
-    ...restoredMessages,
+    ...withoutImages,
   ];
 }
 
@@ -62,10 +71,11 @@ export function createLogFromMessages(
   sessionId: string,
   messages: UIMessage[],
   sessionBootstrapPrompt?: string,
-  pruneOptions?: PruneOptions
+  pruneOptions?: PruneOptions,
+  options?: { omitImages?: boolean }
 ): AppendOnlyLog {
   const log = new AppendOnlyLog(sessionId);
-  const restoredMessages = toCoreMessages(messages, sessionBootstrapPrompt, pruneOptions);
+  const restoredMessages = toCoreMessages(messages, sessionBootstrapPrompt, pruneOptions, options);
   if (restoredMessages.length === 0) return log;
 
   log.loadFromSnapshot({
@@ -87,7 +97,7 @@ export function buildAgentRuntimeSystemPrompt(
   runtime?: { agentDefinitions?: AgentDefinition[]; model?: string }
 ): string {
   const effectiveModel = (runtime?.model ?? settings.model).trim();
-  const multimodalEnabled = resolveMultimodalEnabled(settings, effectiveModel);
+  const multimodalEnabled = shouldExposeReadImage(settings, effectiveModel);
   const mcpSearchEnabled = hasEnabledMcpSearch(settings.mcp);
   // 与工具注册层（registerWorkspaceTools / FilteringToolRegistry）的可见性条件保持对齐，
   // 避免系统提示词提及模型实际不可用的工具。

@@ -191,6 +191,45 @@ describe('buildAgentRuntimeSystemPrompt', () => {
     expect(onFast).not.toContain('read_image');
   });
 
+  it('exposes read_image on primary when only the fast slot can see images', () => {
+    const settings = makeRuntimeSettings({
+      model: 'primary-model',
+      fastModelEnabled: true,
+      fastModel: 'fast-model',
+      multimodalEnabled: false,
+      modelProfiles: [
+        {
+          id: 'p-primary',
+          name: 'primary',
+          apiMode: 'custom',
+          apiFormat: 'openai',
+          baseURL: '',
+          apiKey: '',
+          model: 'primary-model',
+          maxTokens: 8000,
+          multimodalEnabled: false,
+        },
+        {
+          id: 'p-fast',
+          name: 'fast',
+          apiMode: 'custom',
+          apiFormat: 'openai',
+          baseURL: '',
+          apiKey: '',
+          model: 'fast-model',
+          maxTokens: 8000,
+          multimodalEnabled: true,
+        },
+      ],
+      primaryProfileId: 'p-primary',
+      fastProfileId: 'p-fast',
+    } as Partial<Settings>);
+    const prompt = buildAgentRuntimeSystemPrompt(settings, 'agent', '/tmp/ws', undefined, {
+      model: 'primary-model',
+    });
+    expect(prompt).toContain('read_image');
+  });
+
   it('omits the app_render hint outside app mode', () => {
     const settings = makeRuntimeSettings();
     const prompt = buildAgentRuntimeSystemPrompt(settings, 'agent', '/tmp/ws');

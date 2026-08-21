@@ -7,6 +7,7 @@ import { ACCENT_PATTERN } from '../../theme/types';
 import { DEFAULT_SETTINGS, normalizeCustomSystemPrompt } from './defaults';
 import type { ApiFormat, ApiMode, Lang, ModeConfig, ModelProfile, ProviderName, Settings, WorkspaceEntry } from './types';
 import type { ThinkingPayload } from '@codepapr/types';
+import { modelSupportsVision } from '../../utils/visionRouting';
 
 export function resolveThinkingPayload(
   raw: unknown,
@@ -1116,37 +1117,7 @@ export function resolveProviderName(settings: { apiMode: ApiMode; apiFormat: Api
 }
 
 export function resolveMultimodalEnabled(settings: Settings, currentModel: string): boolean {
-  if (Array.isArray(settings.modelProfiles) && settings.modelProfiles.length > 0) {
-    if (settings.primaryProfileId) {
-      const primary = settings.modelProfiles.find((p) => p.id === settings.primaryProfileId);
-      if (primary && primary.model === currentModel && typeof primary.multimodalEnabled === 'boolean') {
-        return primary.multimodalEnabled;
-      }
-    }
-    if (settings.fastProfileId) {
-      const fast = settings.modelProfiles.find((p) => p.id === settings.fastProfileId);
-      if (fast && fast.model === currentModel && typeof fast.multimodalEnabled === 'boolean') {
-        return fast.multimodalEnabled;
-      }
-    }
-    if (settings.mentorProfileId) {
-      const mentor = settings.modelProfiles.find((p) => p.id === settings.mentorProfileId);
-      if (mentor && mentor.model === currentModel && typeof mentor.multimodalEnabled === 'boolean') {
-        return mentor.multimodalEnabled;
-      }
-    }
-    const matched = settings.modelProfiles.find((p) => p.model === currentModel);
-    if (matched && typeof matched.multimodalEnabled === 'boolean') {
-      return matched.multimodalEnabled;
-    }
-  }
-  if (!settings.multimodalEnabled) return false;
-  if (settings.multimodalModelTier === 'all') return true;
-  const fastModel = settings.fastModel.trim();
-  const isFastModel = settings.fastModelEnabled && fastModel.length > 0 && currentModel === fastModel;
-  if (settings.multimodalModelTier === 'primary' && !isFastModel) return true;
-  if (settings.multimodalModelTier === 'fast' && isFastModel) return true;
-  return false;
+  return modelSupportsVision(settings, currentModel);
 }
 
 export function getActiveModeConfig(settings: Settings): ModeConfig & { apiFormat: ApiFormat } {
