@@ -24,10 +24,6 @@ import {
 import { resolveProjectMapSymbolOverrides } from '../tools/workspaceProjectMapLsp';
 import { stopWorkspaceLsp } from '../utils/lspWarmup';
 import { getTranslation, type Lang } from '../utils/i18n';
-import ProjectGraphKnowledgeGraph, {
-  type ProjectGraphKnowledgeGraphHandle,
-  type GraphHighlightRequest,
-} from './ProjectGraphKnowledgeGraph';
 import { computeProjectGraphInsights } from '../utils/projectGraphInsights';
 import type { CircularDependency, DeadCodeSymbol } from '@codepapr/core';
 import {
@@ -87,20 +83,6 @@ interface GitDiffLoadState {
   isLoading: boolean;
 }
 
-interface ProjectGraphFileRelationSummary {
-  imports: number;
-  reexports: number;
-  extends: number;
-  implements: number;
-}
-
-interface ProjectGraphFolderGroup {
-  path: string;
-  files: WorkspaceProjectGraphResult['files'];
-  symbolCount: number;
-  entryPoints: number;
-}
-
 const INSIGHT_LIST_MAX_DEPTH = 8;
 const MAX_INSIGHT_FILE_BYTES = 50_000_000;
 const MAX_INSIGHT_SYMBOLS = Number.MAX_SAFE_INTEGER;
@@ -119,22 +101,8 @@ function createEmptyGitDiffLoadState(): GitDiffLoadState {
   };
 }
 
-function createEmptyProjectGraphRelationSummary(): ProjectGraphFileRelationSummary {
-  return {
-    imports: 0,
-    reexports: 0,
-    extends: 0,
-    implements: 0,
-  };
-}
-
 function gitFileLabel(file: GitStatusFile): string {
   return file.originalPath ? `${file.originalPath} -> ${file.path}` : file.path;
-}
-
-function projectGraphFolderPath(path: string): string {
-  const segments = path.split('/').filter(Boolean);
-  return segments.length > 1 ? segments.slice(0, -1).join('/') : '.';
 }
 
 const INSIGHT_ITEM_CLASS =
@@ -179,7 +147,7 @@ function InsightFileList({
 }: {
   items: Array<{ id: string; path: string }>;
   emptyText: string;
-  onPick: (id: string, path: string) => void;
+  onPick: (path: string) => void;
 }) {
   if (items.length === 0) {
     return <div className="px-1.5 text-[10px] text-fg-dim">{emptyText}</div>;
@@ -190,7 +158,7 @@ function InsightFileList({
         <button
           key={item.id}
           type="button"
-          onClick={() => onPick(item.id, item.path)}
+          onClick={() => onPick(item.path)}
           title={item.path}
           className={INSIGHT_ITEM_CLASS}
         >
@@ -268,7 +236,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   const [gitCopyState, setGitCopyState] = useState<{ key: string; success: boolean } | null>(null);
   const [isInitializingGit, setIsInitializingGit] = useState(false);
   const [gitActionMessage, setGitActionMessage] = useState('');
-  const [collapsedProjectGraphGroups, setCollapsedProjectGraphGroups] = useState<string[]>([]);
   const gitInitAttemptedRef = useRef(false);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
@@ -285,17 +252,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
     };
   }, []);
   const loadGenerationRef = useRef(0);
-  const [showKnowledgeGraph, setShowKnowledgeGraph] = useState(false);
-  const knowledgeGraphRef = useRef<ProjectGraphKnowledgeGraphHandle>(null);
-  const [graphSearchQuery, setGraphSearchQuery] = useState('');
-  const [graphViewModes, setGraphViewModes] = useState<Set<string>>(
-    () => new Set(['deps', 'hierarchy', 'calls']),
-  );
-  // 聚焦模式：只渲染 centerId 的 depth 跳邻域；label 用于工具条展示。
-  const [graphFocus, setGraphFocus] = useState<{ centerId: string; depth: number; label: string } | null>(null);
-  // 洞察面板驱动的图高亮请求；seq 保证重复点击同一项也会重新触发。
-  const [graphHighlight, setGraphHighlight] = useState<GraphHighlightRequest | null>(null);
-  const graphHighlightSeqRef = useRef(0);
 
   // 洞察全部由已构建的图同步纯计算得出（core 既有分析函数），无额外 IO。
   const projectGraphInsights = useMemo(
@@ -303,81 +259,16 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
     [projectGraph],
   );
 
-  // 图重建（刷新/工作区切换）后聚焦与高亮失效，复位避免指向不存在的节点。
-  useEffect(() => {
-    setGraphFocus(null);
-    setGraphHighlight(null);
-  }, [projectGraph]);
-
-  function isGraphDarkTheme(): boolean {
-    // 主题模式由 themeEngine 写入 data-mode；.dark class 作为兼容兜底。
-    return (
-      document.documentElement.dataset.mode === 'dark' ||
-      document.documentElement.classList.contains('dark')
-    );
-  }
-
-  function closeKnowledgeGraph() {
-    setShowKnowledgeGraph(false);
-    setGraphFocus(null);
-    setGraphHighlight(null);
-  }
-
-  function focusGraphFile(nodeId: string, label: string) {
-    setGraphHighlight(null);
-    setGraphFocus({ centerId: nodeId, depth: 1, label });
-  }
-
-  function highlightGraphNodes(nodeIds: string[], edgeIds?: string[]) {
-    graphHighlightSeqRef.current += 1;
-    setGraphHighlight({
-      nodeIds,
-      ...(edgeIds && edgeIds.length > 0 ? { edgeIds } : {}),
-      seq: graphHighlightSeqRef.current,
-    });
-  }
-
   function handleInsightDeadCodeClick(symbol: DeadCodeSymbol) {
-    highlightGraphNodes([symbol.id, `file:${symbol.path}`]);
     onSelectPath(symbol.path);
   }
 
   function handleInsightCycleClick(cycle: CircularDependency) {
-    const nodeIds = [...new Set(cycle.cycle)];
-    const edgeIds: string[] = [];
-    for (let i = 0; i < cycle.cycle.length - 1; i++) {
-      const from = cycle.cycle[i];
-      const to = cycle.cycle[i + 1];
-      for (const e of projectGraph?.edges ?? []) {
-        if ((e.kind === 'imports' || e.kind === 'reexports') && e.from === from && e.to === to) {
-          edgeIds.push(e.id);
-        }
-      }
+    const firstFile = cycle.files[0];
+    if (firstFile) {
+      onSelectPath(firstFile);
     }
-    highlightGraphNodes(nodeIds, edgeIds);
   }
-
-  function handleGraphRequestFocus(nodeId: string) {
-    const node = projectGraph?.nodes.find((n) => n.id === nodeId);
-    setGraphHighlight(null);
-    setGraphFocus({ centerId: nodeId, depth: 1, label: node?.path ?? nodeId });
-  }
-
-  function toggleGraphViewMode(mode: string) {
-    setGraphViewModes((prev) => {
-      const next = new Set(prev);
-      if (next.has(mode)) {
-        if (next.size > 1) next.delete(mode);
-      } else {
-        next.add(mode);
-      }
-      return next;
-    });
-  }
-
-  const handleKnowledgeGraphNodeClick = (filePath: string, _line?: number) => {
-    onSelectPath(filePath);
-  };
 
   useEffect(() => {
     gitInitAttemptedRef.current = false;
@@ -1235,109 +1126,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
     }, 1600);
   }
 
-  const highlightedProjectGraphFiles = projectGraph?.files ?? [];
   const visibleGitFiles = activeGitFiles.slice(0, MAX_GIT_CHANGED_FILES);
-  const projectGraphMaps = useMemo(() => {
-    const nodeById = new Map((projectGraph?.nodes ?? []).map((node) => [node.id, node] as const));
-    const symbolsByPath = new Map<string, WorkspaceProjectGraphResult['nodes']>();
-    const relationsByPath = new Map<string, ProjectGraphFileRelationSummary>();
-
-    for (const node of projectGraph?.nodes ?? []) {
-      if (node.kind !== 'symbol') {
-        continue;
-      }
-      const existing = symbolsByPath.get(node.path) ?? [];
-      existing.push(node);
-      symbolsByPath.set(node.path, existing);
-    }
-
-    for (const edge of projectGraph?.edges ?? []) {
-      if (edge.kind === 'contains') {
-        continue;
-      }
-      const sourceNode = nodeById.get(edge.from);
-      if (!sourceNode) {
-        continue;
-      }
-      const summary = relationsByPath.get(sourceNode.path) ?? createEmptyProjectGraphRelationSummary();
-      if (edge.kind === 'imports') {
-        summary.imports += 1;
-      } else if (edge.kind === 'reexports') {
-        summary.reexports += 1;
-      } else if (edge.kind === 'extends') {
-        summary.extends += 1;
-      } else if (edge.kind === 'implements') {
-        summary.implements += 1;
-      }
-      relationsByPath.set(sourceNode.path, summary);
-    }
-
-    return { nodeById, symbolsByPath, relationsByPath };
-  }, [projectGraph]);
-
-  const projectGraphSymbolsByPath = projectGraphMaps.symbolsByPath;
-  const projectGraphRelationsByPath = projectGraphMaps.relationsByPath;
-
-  const projectGraphFolderGroups = useMemo<ProjectGraphFolderGroup[]>(() => {
-    const groups = new Map<string, ProjectGraphFolderGroup>();
-
-    for (const file of highlightedProjectGraphFiles) {
-      const groupPath = projectGraphFolderPath(file.path);
-      const existing = groups.get(groupPath);
-      const symbolCount = (projectGraphSymbolsByPath.get(file.path) ?? []).length;
-
-      if (existing) {
-        existing.files.push(file);
-        existing.symbolCount += symbolCount;
-        existing.entryPoints += file.entryPoint ? 1 : 0;
-        continue;
-      }
-
-      groups.set(groupPath, {
-        path: groupPath,
-        files: [file],
-        symbolCount,
-        entryPoints: file.entryPoint ? 1 : 0,
-      });
-    }
-
-    return [...groups.values()].sort((left, right) => {
-      if (left.path === right.path) {
-        return 0;
-      }
-      if (left.path === '.') {
-        return -1;
-      }
-      if (right.path === '.') {
-        return 1;
-      }
-      return left.path.localeCompare(right.path);
-    });
-  }, [projectGraphSymbolsByPath, highlightedProjectGraphFiles]);
-
-  const collapsedProjectGraphGroupSet = useMemo(
-    () => new Set(collapsedProjectGraphGroups),
-    [collapsedProjectGraphGroups]
-  );
-
-  useEffect(() => {
-    if (!projectGraph) {
-      setCollapsedProjectGraphGroups([]);
-      return;
-    }
-
-    setCollapsedProjectGraphGroups(
-      [...new Set((projectGraph.files ?? []).map((file) => projectGraphFolderPath(file.path)))]
-    );
-  }, [projectGraph]);
-
-  function toggleProjectGraphGroup(path: string): void {
-    setCollapsedProjectGraphGroups((current) =>
-      current.includes(path)
-        ? current.filter((currentPath) => currentPath !== path)
-        : [...current, path]
-    );
-  }
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -1418,6 +1207,9 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
             <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-line bg-base p-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-fg-muted">
+                    {t.graphInsightsTitle}
+                  </span>
                   {projectGraph?.truncated && (
                     <span className="text-[10px] text-warn">{t.workspaceProjectGraphTruncated}</span>
                   )}
@@ -1431,117 +1223,149 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
                   >
                     {t.workspaceInsightsRefresh}
                   </button>
-                  {projectGraph && (
-                    <button
-                      type="button"
-                      onClick={() => setShowKnowledgeGraph(true)}
-                      title={t.workspaceProjectGraphKnowledgeGraphTip}
-                      className="rounded-md border border-line px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
-                    >
-                      {t.workspaceProjectGraphKnowledgeGraph}
-                    </button>
-                  )}
                 </div>
               </div>
 
-              {projectGraph && (
-                <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-fg-muted">
-                  <span className="rounded-full border border-line px-2 py-1" title={t.workspaceProjectGraphFilesTip}>{t.workspaceProjectGraphFiles} {projectGraph.summary.files}</span>
-                  <span className="rounded-full border border-line px-2 py-1" title={t.directoriesLabelTip}>{t.directoriesLabel} {projectGraphFolderGroups.length}</span>
-                  <span className="rounded-full border border-line px-2 py-1" title={t.workspaceProjectGraphSymbolsTip}>{t.workspaceProjectGraphSymbols} {projectGraph.summary.symbols}</span>
-                  <span className="rounded-full border border-line px-2 py-1" title={t.workspaceProjectGraphImportsTip}>{t.workspaceProjectGraphImports} {projectGraph.summary.imports}</span>
-                  <span className="rounded-full border border-line px-2 py-1" title={t.workspaceProjectGraphReexportsTip}>{t.workspaceProjectGraphReexports} {projectGraph.summary.reexports}</span>
-                  <span className="rounded-full border border-line px-2 py-1" title={t.workspaceProjectGraphExtendsTip}>{t.workspaceProjectGraphExtends} {projectGraph.summary.extends}</span>
-                  <span className="rounded-full border border-line px-2 py-1" title={t.workspaceProjectGraphImplementsTip}>{t.workspaceProjectGraphImplements} {projectGraph.summary.implements}</span>
-                  <span className="rounded-full border border-line px-2 py-1" title={t.workspaceProjectGraphEntryPointsTip}>{t.workspaceProjectGraphEntryPoints} {projectGraph.summary.entryPoints}</span>
-                </div>
-              )}
-
-              {highlightedProjectGraphFiles.length === 0 ? (
+              {!projectGraphInsights ? (
                 <div className="mt-3 text-xs text-fg-dim">{t.workspaceProjectGraphEmpty}</div>
               ) : (
-                <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable pr-1">
-                  {projectGraphFolderGroups.map((group) => {
-                    const isCollapsed = collapsedProjectGraphGroupSet.has(group.path);
-
-                    return (
-                      <div key={group.path} className="rounded-lg border border-line bg-base p-2">
-                        <button
-                          type="button"
-                          onClick={() => toggleProjectGraphGroup(group.path)}
-                          className="flex w-full items-center justify-between gap-2 text-left text-[11px] text-fg transition-colors hover:text-fg"
-                          title={group.path}
-                        >
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="flex h-5 w-5 items-center justify-center rounded border border-line font-mono text-[9px] text-fg-muted">
-                              {isCollapsed ? '+' : '-'}
-                            </span>
-                            <span className="truncate font-medium">{group.path}</span>
-                          </div>
-                          <div className="flex flex-wrap items-center justify-end gap-1 text-[9px] text-fg-muted">
-                            <span className="rounded-full border border-line px-1.5 py-0.5">{t.workspaceProjectGraphFiles} {group.files.length}</span>
-                            <span className="rounded-full border border-line px-1.5 py-0.5">{t.workspaceProjectGraphSymbols} {group.symbolCount}</span>
-                            {group.entryPoints > 0 && (
-                              <span className="rounded-full border border-line px-1.5 py-0.5">{t.workspaceProjectGraphEntryPoints} {group.entryPoints}</span>
-                            )}
-                          </div>
-                        </button>
-
-                        {!isCollapsed && (
-                          <div className="mt-2 space-y-2">
-                            {group.files.map((file) => {
-                              const relationSummary = projectGraphRelationsByPath.get(file.path) ?? createEmptyProjectGraphRelationSummary();
-
-                              return (
-                                <div key={file.path} className="rounded-lg border border-line bg-base p-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => onSelectPath(file.path)}
-                                    className={`flex w-full items-center justify-between gap-2 text-left text-[11px] transition-colors ${
-                                      selectedPath === file.path
-                                        ? 'text-accent-text'
-                                        : 'text-fg hover:text-fg'
-                                    }`}
-                                    title={file.path}
-                                  >
-                                    <span className="min-w-0 truncate font-medium">{file.path}</span>
-                                    <div className="flex flex-shrink-0 items-center gap-1">
-                                      {file.entryPoint && (
-                                        <span className="rounded-full border border-accent-soft px-1.5 py-0.5 text-[9px] text-accent-text">
-                                          {t.workspaceProjectGraphEntryPointBadge}
-                                        </span>
-                                      )}
-                                      <span className="rounded-full border border-line px-1.5 py-0.5 text-[9px] text-fg-muted">
-                                        {file.language}
-                                      </span>
-                                    </div>
-                                  </button>
-
-                                  <div className="mt-2 flex flex-wrap gap-1 text-[9px] text-fg-muted">
-                                    {relationSummary.imports > 0 && (
-                                      <span className="rounded-full border border-line px-1.5 py-0.5">{t.workspaceProjectGraphImports} {relationSummary.imports}</span>
-                                    )}
-                                    {relationSummary.reexports > 0 && (
-                                      <span className="rounded-full border border-line px-1.5 py-0.5">{t.workspaceProjectGraphReexports} {relationSummary.reexports}</span>
-                                    )}
-                                    {relationSummary.extends > 0 && (
-                                      <span className="rounded-full border border-line px-1.5 py-0.5">{t.workspaceProjectGraphExtends} {relationSummary.extends}</span>
-                                    )}
-                                    {relationSummary.implements > 0 && (
-                                      <span className="rounded-full border border-line px-1.5 py-0.5">{t.workspaceProjectGraphImplements} {relationSummary.implements}</span>
-                                    )}
-                                    {!relationSummary.imports && !relationSummary.reexports && !relationSummary.extends && !relationSummary.implements && (
-                                      <span className="text-fg-dim">—</span>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
+                <div className="mt-3 min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable pr-1">
+                  <InsightSection
+                    title={t.graphInsightsCircular}
+                    tip={t.graphInsightsCircularTip}
+                    count={projectGraphInsights.circularDeps.total}
+                    badgeClass="border border-danger-bg bg-danger-bg text-danger"
+                  >
+                    {projectGraphInsights.circularDeps.total === 0 ? (
+                      <div className="px-1.5 text-[10px] text-fg-dim">{t.graphInsightsNone}</div>
+                    ) : (
+                      <div className="flex flex-col gap-0.5">
+                        {projectGraphInsights.circularDeps.cycles.slice(0, 10).map((cycle, idx) => (
+                          <button
+                            key={`${cycle.files.join('|')}|${idx}`}
+                            type="button"
+                            onClick={() => handleInsightCycleClick(cycle)}
+                            title={cycle.files.join(' → ')}
+                            className={INSIGHT_ITEM_CLASS}
+                          >
+                            <span className="truncate">{cycle.files.map((f) => f.split('/').pop()).join(' → ')}</span>
+                          </button>
+                        ))}
+                        {projectGraphInsights.circularDeps.total > 10 && (
+                          <div className="px-1.5 text-[9px] text-fg-dim">+{projectGraphInsights.circularDeps.total - 10}</div>
                         )}
                       </div>
-                    );
-                  })}
+                    )}
+                  </InsightSection>
+
+                  <InsightSection
+                    title={t.graphInsightsDeadCode}
+                    tip={t.graphInsightsDeadCodeTip}
+                    count={projectGraphInsights.deadCode.total}
+                    badgeClass="border border-warn-bg bg-warn-bg text-warn"
+                  >
+                    {projectGraphInsights.deadCode.total === 0 && projectGraphInsights.deadCode.candidateTotal === 0 ? (
+                      <div className="px-1.5 text-[10px] text-fg-dim">{t.graphInsightsNone}</div>
+                    ) : (
+                      <div className="flex flex-col gap-0.5">
+                        {projectGraphInsights.deadCode.unusedSymbols.slice(0, 24).map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => handleInsightDeadCodeClick(s)}
+                            title={`${s.path}:${s.line}`}
+                            className={INSIGHT_ITEM_CLASS}
+                          >
+                            <span className="shrink-0 rounded bg-control px-1 text-[8px] uppercase text-fg-muted">{s.kind}</span>
+                            <span className="truncate">{s.name}</span>
+                            <span className="ml-auto shrink-0 text-[9px] text-fg-dim">{s.path.split('/').pop()}:L{s.line}</span>
+                          </button>
+                        ))}
+                        {projectGraphInsights.deadCode.exportedCandidates.slice(0, 6).map((s) => (
+                          <button
+                            key={`export:${s.id}`}
+                            type="button"
+                            onClick={() => handleInsightDeadCodeClick(s)}
+                            title={`${s.path}:${s.line} (${s.reason})`}
+                            className={INSIGHT_ITEM_CLASS}
+                          >
+                            <span className="shrink-0 text-warn">★</span>
+                            <span className="shrink-0 rounded bg-control px-1 text-[8px] uppercase text-fg-muted">{s.kind}</span>
+                            <span className="truncate">{s.name}</span>
+                            <span className="ml-auto shrink-0 text-[9px] text-fg-dim">{s.path.split('/').pop()}:L{s.line}</span>
+                          </button>
+                        ))}
+                        {projectGraphInsights.deadCode.total > 24 && (
+                          <div className="px-1.5 text-[9px] text-fg-dim">+{projectGraphInsights.deadCode.total - 24}</div>
+                        )}
+                      </div>
+                    )}
+                  </InsightSection>
+
+                  <InsightSection
+                    title={t.graphInsightsHubs}
+                    tip={t.graphInsightsHubsTip}
+                    count={projectGraphInsights.hubs.length}
+                    badgeClass="border border-accent-soft bg-accent-soft text-accent-text"
+                  >
+                    {projectGraphInsights.hubs.length === 0 ? (
+                      <div className="px-1.5 text-[10px] text-fg-dim">{t.graphInsightsNone}</div>
+                    ) : (
+                      <div className="flex flex-col gap-0.5">
+                        {projectGraphInsights.hubs.map((hub) => (
+                          <button
+                            key={hub.nodeId}
+                            type="button"
+                            onClick={() => onSelectPath(hub.path)}
+                            title={hub.path}
+                            className={INSIGHT_ITEM_CLASS}
+                          >
+                            <span className="truncate">{hub.path}</span>
+                            <span className="ml-auto shrink-0 text-[9px] text-fg-dim">{t.graphInsightsInDegree} {hub.inDegree}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </InsightSection>
+
+                  <InsightSection
+                    title={t.graphInsightsTestGaps}
+                    tip={t.graphInsightsTestGapsTip}
+                    count={projectGraphInsights.testGaps.length}
+                    badgeClass="border border-orange-500/40 bg-orange-500/10 text-orange-300"
+                  >
+                    <InsightFileList
+                      items={projectGraphInsights.testGaps.map((n) => ({ id: n.id, path: n.path }))}
+                      emptyText={t.graphInsightsNone}
+                      onPick={onSelectPath}
+                    />
+                  </InsightSection>
+
+                  <InsightSection
+                    title={t.graphInsightsOrphans}
+                    tip={t.graphInsightsOrphansTip}
+                    count={projectGraphInsights.orphans.length}
+                    badgeClass="border border-line bg-raised text-fg-soft"
+                  >
+                    <InsightFileList
+                      items={projectGraphInsights.orphans.map((n) => ({ id: n.id, path: n.path }))}
+                      emptyText={t.graphInsightsNone}
+                      onPick={onSelectPath}
+                    />
+                  </InsightSection>
+
+                  <InsightSection
+                    title={t.graphInsightsEntryPoints}
+                    tip={t.graphInsightsEntryPointsTip}
+                    count={projectGraphInsights.entryPoints.total}
+                    badgeClass="border border-ok-bg bg-ok-bg text-ok"
+                  >
+                    <InsightFileList
+                      items={projectGraphInsights.entryPoints.entries.map((e) => ({ id: e.nodeId, path: e.path }))}
+                      emptyText={t.graphInsightsNone}
+                      onPick={onSelectPath}
+                    />
+                  </InsightSection>
                 </div>
               )}
             </div>
@@ -1781,272 +1605,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
           </div>
         )}
       </div>
-
-      {showKnowledgeGraph && projectGraph && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-3 backdrop-blur-sm" onClick={closeKnowledgeGraph}>
-          <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-line px-5 py-3">
-              <h2 className="text-sm font-semibold text-fg">{t.workspaceProjectGraphKnowledgeGraph}</h2>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={graphSearchQuery}
-                  onChange={(e) => setGraphSearchQuery(e.target.value)}
-                  placeholder="搜索节点..."
-                  className="w-32 rounded-md border border-line bg-base px-2 py-1 text-[10px] text-fg-soft outline-none transition-colors focus:border-accent-soft placeholder:text-fg-dim"
-                />
-                <button
-                  type="button"
-                  onClick={() => knowledgeGraphRef.current?.zoomIn()}
-                  title="Zoom In"
-                  className="rounded-md border border-line px-2.5 py-1 text-xs text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
-                >
-                  +
-                </button>
-                <button
-                  type="button"
-                  onClick={() => knowledgeGraphRef.current?.zoomOut()}
-                  title="Zoom Out"
-                  className="rounded-md border border-line px-2.5 py-1 text-xs text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
-                >
-                  &minus;
-                </button>
-                <button
-                  type="button"
-                  onClick={() => knowledgeGraphRef.current?.fitView()}
-                  title={t.expand}
-                  className="rounded-md border border-line px-2.5 py-1 text-xs text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
-                >
-                  &#x26F6;
-                </button>
-                <button
-                  type="button"
-                  onClick={closeKnowledgeGraph}
-                  className="text-lg leading-none text-fg-muted transition-colors hover:text-fg"
-                >
-                  &times;
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center gap-3 border-b border-line px-5 py-1.5">
-              <span className="text-[10px] text-fg-muted">显示:</span>
-              {([
-                ['deps', '文件依赖'],
-                ['hierarchy', '继承关系'],
-                ['calls', '跨文件调用'],
-              ] as const).map(([mode, label]) => (
-                <label key={mode} className="flex cursor-pointer items-center gap-1 text-[10px] text-fg-muted">
-                  <input
-                    type="checkbox"
-                    checked={graphViewModes.has(mode)}
-                    onChange={() => toggleGraphViewMode(mode)}
-                    className="h-3 w-3"
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
-            <div className="flex min-h-0 flex-1">
-              {/* 洞察侧栏：由已构建的图同步计算，点击条目在图中高亮或进入聚焦模式 */}
-              <div className="w-60 shrink-0 space-y-3 overflow-y-auto overscroll-contain border-r border-line p-3 scrollbar-thin scrollbar-stable">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.15em] text-fg-muted">
-                  {t.graphInsightsTitle}
-                </div>
-                {projectGraphInsights && (
-                  <>
-                    <InsightSection
-                      title={t.graphInsightsCircular}
-                      tip={t.graphInsightsCircularTip}
-                      count={projectGraphInsights.circularDeps.total}
-                      badgeClass="border border-danger-bg bg-danger-bg text-danger"
-                    >
-                      {projectGraphInsights.circularDeps.total === 0 ? (
-                        <div className="px-1.5 text-[10px] text-fg-dim">{t.graphInsightsNone}</div>
-                      ) : (
-                        <div className="flex flex-col gap-0.5">
-                          {projectGraphInsights.circularDeps.cycles.slice(0, 10).map((cycle, idx) => (
-                            <button
-                              key={`${cycle.files.join('|')}|${idx}`}
-                              type="button"
-                              onClick={() => handleInsightCycleClick(cycle)}
-                              title={cycle.files.join(' → ')}
-                              className={INSIGHT_ITEM_CLASS}
-                            >
-                              <span className="truncate">{cycle.files.map((f) => f.split('/').pop()).join(' → ')}</span>
-                            </button>
-                          ))}
-                          {projectGraphInsights.circularDeps.total > 10 && (
-                            <div className="px-1.5 text-[9px] text-fg-dim">+{projectGraphInsights.circularDeps.total - 10}</div>
-                          )}
-                        </div>
-                      )}
-                    </InsightSection>
-
-                    <InsightSection
-                      title={t.graphInsightsDeadCode}
-                      tip={t.graphInsightsDeadCodeTip}
-                      count={projectGraphInsights.deadCode.total}
-                      badgeClass="border border-warn-bg bg-warn-bg text-warn"
-                    >
-                      {projectGraphInsights.deadCode.total === 0 && projectGraphInsights.deadCode.candidateTotal === 0 ? (
-                        <div className="px-1.5 text-[10px] text-fg-dim">{t.graphInsightsNone}</div>
-                      ) : (
-                        <div className="flex flex-col gap-0.5">
-                          {projectGraphInsights.deadCode.unusedSymbols.slice(0, 24).map((s) => (
-                            <button
-                              key={s.id}
-                              type="button"
-                              onClick={() => handleInsightDeadCodeClick(s)}
-                              title={`${s.path}:${s.line}`}
-                              className={INSIGHT_ITEM_CLASS}
-                            >
-                              <span className="shrink-0 rounded bg-control px-1 text-[8px] uppercase text-fg-muted">{s.kind}</span>
-                              <span className="truncate">{s.name}</span>
-                              <span className="ml-auto shrink-0 text-[9px] text-fg-dim">{s.path.split('/').pop()}:L{s.line}</span>
-                            </button>
-                          ))}
-                          {projectGraphInsights.deadCode.exportedCandidates.slice(0, 6).map((s) => (
-                            <button
-                              key={s.id}
-                              type="button"
-                              onClick={() => handleInsightDeadCodeClick(s)}
-                              title={`${s.path}:${s.line} (${s.reason})`}
-                              className={INSIGHT_ITEM_CLASS}
-                            >
-                              <span className="shrink-0 text-warn">★</span>
-                              <span className="shrink-0 rounded bg-control px-1 text-[8px] uppercase text-fg-muted">{s.kind}</span>
-                              <span className="truncate">{s.name}</span>
-                              <span className="ml-auto shrink-0 text-[9px] text-fg-dim">{s.path.split('/').pop()}:L{s.line}</span>
-                            </button>
-                          ))}
-                          {projectGraphInsights.deadCode.total > 24 && (
-                            <div className="px-1.5 text-[9px] text-fg-dim">+{projectGraphInsights.deadCode.total - 24}</div>
-                          )}
-                        </div>
-                      )}
-                    </InsightSection>
-
-                    <InsightSection
-                      title={t.graphInsightsHubs}
-                      tip={t.graphInsightsHubsTip}
-                      count={projectGraphInsights.hubs.length}
-                      badgeClass="border border-accent-soft bg-accent-soft text-accent-text"
-                    >
-                      {projectGraphInsights.hubs.length === 0 ? (
-                        <div className="px-1.5 text-[10px] text-fg-dim">{t.graphInsightsNone}</div>
-                      ) : (
-                        <div className="flex flex-col gap-0.5">
-                          {projectGraphInsights.hubs.map((hub) => (
-                            <button
-                              key={hub.nodeId}
-                              type="button"
-                              onClick={() => focusGraphFile(hub.nodeId, hub.path)}
-                              title={hub.path}
-                              className={INSIGHT_ITEM_CLASS}
-                            >
-                              <span className="truncate">{hub.path}</span>
-                              <span className="ml-auto shrink-0 text-[9px] text-fg-dim">{t.graphInsightsInDegree} {hub.inDegree}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </InsightSection>
-
-                    <InsightSection
-                      title={t.graphInsightsTestGaps}
-                      tip={t.graphInsightsTestGapsTip}
-                      count={projectGraphInsights.testGaps.length}
-                      badgeClass="border border-orange-500/40 bg-orange-500/10 text-orange-300"
-                    >
-                      <InsightFileList
-                        items={projectGraphInsights.testGaps.map((n) => ({ id: n.id, path: n.path }))}
-                        emptyText={t.graphInsightsNone}
-                        onPick={focusGraphFile}
-                      />
-                    </InsightSection>
-
-                    <InsightSection
-                      title={t.graphInsightsOrphans}
-                      tip={t.graphInsightsOrphansTip}
-                      count={projectGraphInsights.orphans.length}
-                      badgeClass="border border-line bg-raised text-fg-soft"
-                    >
-                      <InsightFileList
-                        items={projectGraphInsights.orphans.map((n) => ({ id: n.id, path: n.path }))}
-                        emptyText={t.graphInsightsNone}
-                        onPick={focusGraphFile}
-                      />
-                    </InsightSection>
-
-                    <InsightSection
-                      title={t.graphInsightsEntryPoints}
-                      tip={t.graphInsightsEntryPointsTip}
-                      count={projectGraphInsights.entryPoints.total}
-                      badgeClass="border border-ok-bg bg-ok-bg text-ok"
-                    >
-                      <InsightFileList
-                        items={projectGraphInsights.entryPoints.entries.map((e) => ({ id: e.nodeId, path: e.path }))}
-                        emptyText={t.graphInsightsNone}
-                        onPick={focusGraphFile}
-                      />
-                    </InsightSection>
-                  </>
-                )}
-              </div>
-
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                {graphFocus && (
-                  <div className="flex items-center gap-2 border-b border-line px-4 py-1.5 text-[10px]">
-                    <span className="shrink-0 text-fg-muted">{t.graphFocusLabel}:</span>
-                    <span className="min-w-0 truncate font-medium text-ok" title={graphFocus.label}>
-                      {graphFocus.label}
-                    </span>
-                    <div className="ml-auto flex shrink-0 items-center gap-1">
-                      {[1, 2].map((depth) => (
-                        <button
-                          key={depth}
-                          type="button"
-                          onClick={() => setGraphFocus({ ...graphFocus, depth })}
-                          className={`rounded border px-1.5 py-0.5 transition-colors ${
-                            graphFocus.depth === depth
-                              ? 'border-ok-bg bg-ok-bg text-ok'
-                              : 'border-line text-fg-muted hover:text-fg-soft'
-                          }`}
-                        >
-                          {depth} {t.graphFocusHop}
-                        </button>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => setGraphFocus(null)}
-                        className="rounded border border-line px-1.5 py-0.5 text-fg-muted transition-colors hover:border-accent-soft hover:text-fg"
-                      >
-                        {t.graphFocusBack}
-                      </button>
-                    </div>
-                  </div>
-                )}
-                <div className="min-h-0 flex-1 p-2 flex flex-col" style={{ minHeight: '400px' }}>
-                  <ProjectGraphKnowledgeGraph
-                    ref={knowledgeGraphRef}
-                    projectGraph={projectGraph}
-                    dark={isGraphDarkTheme()}
-                    viewModes={graphViewModes}
-                    searchQuery={graphSearchQuery}
-                    lang={lang}
-                    focus={graphFocus}
-                    highlight={graphHighlight}
-                    onRequestFocus={handleGraphRequestFocus}
-                    onNodeClick={(filePath, line) => {
-                      handleKnowledgeGraphNodeClick(filePath, line);
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </section>
   );
 }
