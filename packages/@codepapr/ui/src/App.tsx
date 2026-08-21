@@ -704,7 +704,6 @@ export default function App() {
               first={
                 <div className="flex h-full min-w-0 flex-col overflow-hidden font-sans">
                     <AgentOpsPanel
-                      onOpenSettings={() => setShowSettings(true)}
                       onOpenMcpSettings={() => setShowMcpSettings(true)}
                       onOpenCharacters={() => setShowCharacters(true)}
                       onOpenStats={() => setShowStats(true)}
@@ -772,6 +771,7 @@ export default function App() {
                     ) : (
                       <ChatPanel
                         onOpenWorkspacePath={handleSelectPath}
+                        onOpenProjectSwitcher={() => setShowProjectSwitcher(true)}
                         deferMessages={projectGraphLoading && !!workspacePath}
                       />
                     )}
@@ -834,14 +834,6 @@ export default function App() {
                           {t.embeddedBrowserTab}
                         </button>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => setShowProjectSwitcher(true)}
-                        title={t.switchProjectTip}
-                        className="flex-shrink-0 rounded-lg border border-accent-soft px-2.5 py-2 text-xs font-medium text-accent-text transition-colors hover:border-accent hover:text-fg"
-                      >
-                        {t.switchProject}
-                      </button>
                     </div>
                   </div>
                   <div className="min-h-0 flex-1">
