@@ -124,12 +124,6 @@ function parseThemeCache(cached: unknown): ParsedThemeCache | null {
 const SettingsModal = lazy(() =>
   import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal }))
 );
-const McpSettingsModal = lazy(() =>
-  import('./components/McpSettingsModal').then((m) => ({ default: m.McpSettingsModal }))
-);
-const McpMarketModal = lazy(() =>
-  import('./components/McpMarketModal').then((m) => ({ default: m.McpMarketModal }))
-);
 const SkillMarketModal = lazy(() =>
   import('./components/SkillMarketModal').then((m) => ({ default: m.SkillMarketModal }))
 );
@@ -147,9 +141,6 @@ const ProjectConfigModal = lazy(() =>
 );
 const ContextDebugModal = lazy(() =>
   import('./components/ContextDebugModal').then((m) => ({ default: m.ContextDebugModal }))
-);
-const ContextInspectorModal = lazy(() =>
-  import('./components/ContextInspectorModal').then((m) => ({ default: m.ContextInspectorModal }))
 );
 const DebugLogModal = lazy(() =>
   import('./components/DebugLogModal').then((m) => ({ default: m.DebugLogModal }))
@@ -220,8 +211,6 @@ export default function App() {
       projectGraphPhase: state.projectGraphPhase,
     }))
   );
-  const latestContextSnapshot = useAgentStore((state) => state._latestContextSnapshot);
-  const activeSessionId = useAgentStore((state) => state.activeSessionId);
   const activePreviewSession = usePreviewStore((state) => state.activePreviewSession);
   const browserPageSession = useBrowserViewStore((state) => state.pageSession);
   const browserPanelOpen = useBrowserViewStore((state) => state.panelOpen);
@@ -247,14 +236,11 @@ export default function App() {
   const [showStats, setShowStats] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showProjectSwitcher, setShowProjectSwitcher] = useState(false);
-  const [showMcpSettings, setShowMcpSettings] = useState(false);
-  const [showMcpMarket, setShowMcpMarket] = useState(false);
   const [showSkillMarket, setShowSkillMarket] = useState(false);
   const [showCharacters, setShowCharacters] = useState(false);
   const [showProjectConfig, setShowProjectConfig] = useState(false);
   const [workbenchHidden, setWorkbenchHidden] = useState(false);
   const [showContextDebug, setShowContextDebug] = useState(false);
-  const [showContextInspector, setShowContextInspector] = useState(false);
   const [showDebugLog, setShowDebugLog] = useState(false);
   const [showCodeReview, setShowCodeReview] = useState<ReviewScope | null>(null);
   const [activeMainTab, setActiveMainTab] = useState<MainTab>('chat');
@@ -718,7 +704,6 @@ export default function App() {
                 <div className="flex h-full min-w-0 flex-col overflow-hidden font-sans">
                     <AgentOpsPanel
                       onOpenSettings={() => setShowSettings(true)}
-                      onOpenMcpSettings={() => setShowMcpSettings(true)}
                       onOpenCharacters={() => setShowCharacters(true)}
                       onOpenStats={() => setShowStats(true)}
                       onOpenAbout={() => setShowAbout(true)}
@@ -921,8 +906,6 @@ export default function App() {
 
       <Suspense fallback={null}>
         {showSettings && <SettingsModal />}
-        {showMcpSettings && <McpSettingsModal onClose={() => setShowMcpSettings(false)} onOpenMarket={() => setShowMcpMarket(true)} />}
-        {showMcpMarket && <McpMarketModal onClose={() => setShowMcpMarket(false)} />}
         {showCharacters && settings.experimentalCharacters && <CharacterModal onClose={() => setShowCharacters(false)} />}
         {showAbout && <AboutModal lang={settings.lang} onClose={() => setShowAbout(false)} />}
         {showProjectSwitcher && <ProjectSwitcherModal onClose={() => setShowProjectSwitcher(false)} />}
@@ -932,12 +915,6 @@ export default function App() {
             workspacePath={workspacePath}
             lang={settings.lang}
             onClose={() => setShowStats(false)}
-            onOpenContextInspector={async () => {
-              // 必须按当前会话消息重算：request-context 快照是「即将发出
-              // 的请求」，不含本轮已经生成的助手总结。
-              await useAgentStore.getState().computeContextSnapshot();
-              setShowContextInspector(true);
-            }}
           />
         )}
 
@@ -969,17 +946,6 @@ export default function App() {
             />
           </Suspense>
         )}
-
-        {showContextInspector &&
-          latestContextSnapshot &&
-          latestContextSnapshot.sessionId === activeSessionId && (
-            <ContextInspectorModal
-              snapshot={latestContextSnapshot.snapshot}
-              lang={settings.lang}
-              workspacePath={workspacePath ?? undefined}
-              onClose={() => setShowContextInspector(false)}
-            />
-          )}
 
         {showCodeReview && workspacePath && (
           <CodeReviewPanel

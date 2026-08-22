@@ -14,6 +14,7 @@ import {
   normalizeMcpServer,
   sanitizeMcpToolPart,
   type McpServerConfig,
+  type McpSettings,
 } from '../utils/mcpTypes';
 import { previewMcpServer, disconnectMcpServer, type McpPreviewResult } from '../tools/mcpTools';
 import type { Lang } from '../utils/i18n';
@@ -222,27 +223,11 @@ function copy(lang: Lang | undefined) {
 
 interface McpMarketModalProps {
   onClose: () => void;
+  mcp?: McpSettings;
+  onMcpChange?: (mcp: McpSettings) => void;
 }
 
-function useInstalledServerIds(): Set<string> {
-  const mcp = useAgentStore((s) => s.settings.mcp);
-  return useMemo(() => {
-    const ids = new Set<string>();
-    for (const server of mcp.servers) {
-      // N20：安装时 normalizeMcpServer 用 sanitizeMcpToolPart 消毒 id——
-      // 判定"已安装"必须用同一消毒函数，否则含特殊字符的服务（@scope/name
-      // 等）永远对不上号、始终显示未安装。
-      ids.add(server.id);
-      ids.add(sanitizeMcpToolPart(server.id).toLowerCase());
-      if (server.name) {
-        ids.add(sanitizeMcpToolPart(server.name).toLowerCase());
-      }
-    }
-    return ids;
-  }, [mcp.servers]);
-}
-
-/** 与 useInstalledServerIds 同口径的列表项判定。 */
+/** 与安装判定同口径的列表项判定。 */
 export function isListingInstalled(installedIds: Set<string>, listing: MarketMCPListing): boolean {
   if (listing.id && installedIds.has(listing.id)) return true;
   if (listing.id && installedIds.has(sanitizeMcpToolPart(listing.id).toLowerCase())) return true;
@@ -797,11 +782,25 @@ function SkeletonCard() {
   );
 }
 
-export function McpMarketModal({ onClose }: McpMarketModalProps) {
+export function McpMarketModal({ onClose, mcp: mcpProp, onMcpChange }: McpMarketModalProps) {
   const settings = useAgentStore((s) => s.settings);
   const setSettings = useAgentStore((s) => s.setSettings);
   const c = copy(settings.lang);
-  const installedIds = useInstalledServerIds();
+  const mcp = mcpProp ?? settings.mcp;
+  const installedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const server of mcp.servers) {
+      // N20：安装时 normalizeMcpServer 用 sanitizeMcpToolPart 消毒 id——
+      // 判定"已安装"必须用同一消毒函数，否则含特殊字符的服务（@scope/name
+      // 等）永远对不上号、始终显示未安装。
+      ids.add(server.id);
+      ids.add(sanitizeMcpToolPart(server.id).toLowerCase());
+      if (server.name) {
+        ids.add(sanitizeMcpToolPart(server.name).toLowerCase());
+      }
+    }
+    return ids;
+  }, [mcp.servers]);
 
   const [listings, setListings] = useState<MarketMCPListing[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -890,22 +889,22 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [uninstallingId, setUninstallingId] = useState<string | null>(null);
 
+  const persistMcp = useCallback((next: McpSettings) => {
+    setSettings({ mcp: next });
+    onMcpChange?.(next);
+  }, [onMcpChange, setSettings]);
+
   const handleInstall = useCallback(async (listing: MarketMCPListing) => {
     setInstallingId(listing.id);
     try {
       const config = listingToServerConfig(listing);
 
-      const mcp = settings.mcp;
       const exists = mcp.servers.find(
         (s) => s.id === config.id || s.name.toLowerCase() === config.name.toLowerCase(),
       );
       if (!exists) {
         const newServers = [...mcp.servers, config];
-        // Auto-enable global MCP when installing a server
-        setSettings({
-          ...settings,
-          mcp: { ...mcp, servers: newServers, enabled: true, exposeTools: true },
-        });
+        persistMcp({ ...mcp, servers: newServers, enabled: true, exposeTools: true });
         if (config.enabled) {
           showToast(c.installEnabledToast.replace('{name}', listing.title));
         } else {
@@ -917,26 +916,23 @@ export function McpMarketModal({ onClose }: McpMarketModalProps) {
     } finally {
       setInstallingId(null);
     }
-  }, [settings, setSettings, c, showToast]);
+  }, [c, mcp, persistMcp, showToast]);
 
   const handleUninstall = useCallback(async (listing: MarketMCPListing) => {
-    const match = findInstalledServer(settings.mcp.servers, listing);
+    const match = findInstalledServer(mcp.servers, listing);
     if (!match) return;
     setUninstallingId(listing.id);
     try {
-      await disconnectMcpServer(settings.mcp, match.id);
-      setSettings({
-        ...settings,
-        mcp: {
-          ...settings.mcp,
-          servers: settings.mcp.servers.filter((server) => server.id !== match.id),
-        },
+      await disconnectMcpServer(mcp, match.id);
+      persistMcp({
+        ...mcp,
+        servers: mcp.servers.filter((server) => server.id !== match.id),
       });
       showToast(c.uninstalledToast.replace('{name}', listing.title));
     } finally {
       setUninstallingId(null);
     }
-  }, [settings, setSettings, c, showToast]);
+  }, [c, mcp, persistMcp, showToast]);
 
   const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);

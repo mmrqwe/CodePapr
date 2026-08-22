@@ -13,6 +13,8 @@ import { SettingsMentorTab } from './settings/SettingsMentorTab';
 import { SettingsAdvancedTab } from './settings/SettingsAdvancedTab';
 import { SettingsLspTab } from './settings/SettingsLspTab';
 import { SettingsAppTab } from './settings/SettingsAppTab';
+import { McpSettingsPanel } from './McpSettingsModal';
+import { McpMarketModal } from './McpMarketModal';
 import { useThemeStore } from '../store/themeStore';
 import type { SettingsTab } from './settings/types';
 import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
@@ -37,6 +39,7 @@ export function SettingsModal() {
 
   const [appDraft, setAppDraft] = useState<PaprAppSettings | null>(null);
   const [appLoadError, setAppLoadError] = useState('');
+  const [showMcpMarket, setShowMcpMarket] = useState(false);
   useEffect(() => {
     invoke<PaprAppSettings>('papr_get_app_settings')
       .then((settings) => {
@@ -115,6 +118,7 @@ export function SettingsModal() {
     { id: 'appearance', label: t.settingsAppearanceTab, tip: t.settingsAppearanceTabTip },
     { id: 'llm', label: t.settingsLlmTab, tip: t.settingsLlmTabTip },
     { id: 'search', label: t.settingsSearchTab, tip: t.settingsSearchTabTip },
+    { id: 'mcp', label: t.settingsMcpTab, tip: t.settingsMcpTabTip },
     { id: 'mentor', label: t.settingsMentorTab, tip: t.settingsMentorTabTip },
     { id: 'lsp', label: t.settingsLspTab, tip: t.settingsLspTabTip },
     { id: 'advanced', label: t.settingsAdvancedTab, tip: t.settingsAdvancedTabTip },
@@ -160,11 +164,19 @@ export function SettingsModal() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-7 py-6 scrollbar-thin">
+        <div className={activeTab === 'mcp' ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'flex-1 overflow-y-auto px-7 py-6 scrollbar-thin'}>
           {activeTab === 'general' && <SettingsGeneralTab {...tabProps} />}
           {activeTab === 'appearance' && <SettingsAppearanceTab {...tabProps} />}
           {activeTab === 'llm' && <SettingsLlmTab {...tabProps} />}
           {activeTab === 'search' && <SettingsSearchTab {...tabProps} />}
+          {activeTab === 'mcp' && (
+            <McpSettingsPanel
+              value={local.mcp}
+              onChange={(mcp) => update({ mcp })}
+              onOpenMarket={() => setShowMcpMarket(true)}
+              lang={currentLang}
+            />
+          )}
           {activeTab === 'mentor' && <SettingsMentorTab {...tabProps} />}
           {activeTab === 'lsp' && <SettingsLspTab {...tabProps} />}
           {activeTab === 'advanced' && <SettingsAdvancedTab {...tabProps} />}
@@ -177,12 +189,20 @@ export function SettingsModal() {
             />
           )}
 
-          {settingsError && (
+          {settingsError && activeTab !== 'mcp' && (
             <div className="mt-5 rounded-2xl border border-warn-bg bg-warn-bg px-4 py-3 text-sm text-warn">
               {settingsError}
             </div>
           )}
         </div>
+
+        {settingsError && activeTab === 'mcp' && (
+          <div className="flex-shrink-0 border-t border-line px-7 py-3">
+            <div className="rounded-2xl border border-warn-bg bg-warn-bg px-4 py-3 text-sm text-warn">
+              {settingsError}
+            </div>
+          </div>
+        )}
 
         <div className="flex justify-end gap-3 border-t border-line bg-base px-7 py-5">
           <button type="button" onClick={() => resetTab(activeTab)} className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg-muted transition-colors hover:border-danger-bg hover:text-danger" title={currentLang === 'en' ? 'Reset current tab to defaults' : '重置当前分页为默认'}>
@@ -209,6 +229,13 @@ export function SettingsModal() {
           </button>
         </div>
       </div>
+      {showMcpMarket && (
+        <McpMarketModal
+          onClose={() => setShowMcpMarket(false)}
+          mcp={local.mcp}
+          onMcpChange={(mcp) => update({ mcp })}
+        />
+      )}
     </div>
   );
 }

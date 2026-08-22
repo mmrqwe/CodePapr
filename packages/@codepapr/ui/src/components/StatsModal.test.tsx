@@ -12,7 +12,12 @@ vi.mock('./ProjectStatsModal', () => ({
   ProjectStatsModal: () => <div>project-dashboard</div>,
 }));
 
+vi.mock('./ContextInspectorModal', () => ({
+  ContextInspectorModal: () => <div>context-inspector</div>,
+}));
+
 import { StatsModal } from './StatsModal';
+import { useAgentStore } from '../store/agentStore';
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
 
@@ -24,6 +29,28 @@ describe('StatsModal', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
+    useAgentStore.setState((state) => ({
+      ...state,
+      activeSessionId: 'sess-1',
+      computeContextSnapshot: vi.fn(async () => undefined),
+      _latestContextSnapshot: {
+        sessionId: 'sess-1',
+        snapshot: {
+          round: 1,
+          model: 'test-model',
+          messages: [],
+          toolNames: [],
+          toolsTokenEstimate: 0,
+          totalTokens: 0,
+          tokensByStage: {
+            'stable-prefix': 0,
+            'session-state': 0,
+            conversation: 0,
+          },
+          capturedAt: Date.now(),
+        },
+      },
+    }));
   });
 
   afterEach(async () => {
@@ -43,8 +70,10 @@ describe('StatsModal', () => {
 
     expect(container.textContent).toContain('缓存统计');
     expect(container.textContent).toContain('项目统计');
+    expect(container.textContent).toContain('查看上下文');
     expect(container.textContent).toContain('cache-dashboard');
     expect(container.textContent).not.toContain('project-dashboard');
+    expect(container.textContent).not.toContain('context-inspector');
 
     const projectTab = [...container.querySelectorAll('button')].find(
       (button) => button.textContent === '项目统计',
@@ -56,6 +85,27 @@ describe('StatsModal', () => {
 
     expect(container.textContent).toContain('project-dashboard');
     expect(container.textContent).toContain('cache-dashboard');
+  });
+
+  it('switches to the context tab without opening a nested window', async () => {
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(
+        <StatsModal workspacePath="/ws" lang="zh-CN" onClose={onClose} />,
+      );
+    });
+
+    const contextTab = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === '查看上下文',
+    );
+    expect(contextTab).toBeDefined();
+    await act(async () => {
+      contextTab?.click();
+    });
+
+    expect(container.textContent).toContain('context-inspector');
+    expect(container.textContent).toContain('cache-dashboard');
+    expect(container.querySelectorAll('[role="dialog"]').length).toBe(1);
   });
 
   it('closes on overlay click and Escape', async () => {

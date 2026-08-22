@@ -77,6 +77,7 @@ describe('SettingsModal', () => {
     expect(generalTab?.textContent).toContain('通用');
     expect(llmTab?.textContent).toContain('LLM');
     expect(container.innerHTML).toContain('LSP');
+    expect(container.innerHTML).toContain('MCP');
   });
 
   it('keeps experimental character and voice features off by default', async () => {

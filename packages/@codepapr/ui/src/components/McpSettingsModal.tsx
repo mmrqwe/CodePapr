@@ -226,10 +226,25 @@ function updateServer(servers: McpServerConfig[], id: string, patch: Partial<Mcp
   return servers.map((server) => (server.id === id ? { ...server, ...patch } : server));
 }
 
-export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => void; onOpenMarket?: () => void }) {
-  const { settings, setSettings } = useAgentStore();
-  const c = copy(settings.lang);
-  const [local, setLocal] = useState<McpSettings>(() => normalizeMcpSettings(settings.mcp));
+export interface McpSettingsPanelProps {
+  value: McpSettings;
+  onChange: (next: McpSettings) => void;
+  onOpenMarket?: () => void;
+  lang?: Lang;
+  /** 设置分页内显示标题说明；独立弹窗已有页头时关闭。 */
+  showIntro?: boolean;
+}
+
+export function McpSettingsPanel({
+  value,
+  onChange,
+  onOpenMarket,
+  lang,
+  showIntro = true,
+}: McpSettingsPanelProps) {
+  const storeLang = useAgentStore((state) => state.settings.lang);
+  const c = copy(lang ?? storeLang);
+  const local = value;
   const [activeId, setActiveId] = useState(local.servers[0]?.id ?? '');
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState('');
@@ -239,10 +254,12 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
   const [busyServerId, setBusyServerId] = useState<string | null>(null);
 
   useEffect(() => {
-    const next = normalizeMcpSettings(settings.mcp);
-    setLocal(next);
-    setActiveId((current) => current || next.servers[0]?.id || '');
-  }, [settings.mcp]);
+    setActiveId((current) =>
+      local.servers.some((server) => server.id === current)
+        ? current
+        : (local.servers[0]?.id ?? ''),
+    );
+  }, [local.servers]);
 
   const activeServer = useMemo(
     () => local.servers.find((server) => server.id === activeId) ?? local.servers[0],
@@ -255,11 +272,11 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
     : undefined;
 
   const update = (patch: Partial<McpSettings>) => {
-    setLocal((current) => normalizeMcpSettings({ ...current, ...patch }));
+    onChange(normalizeMcpSettings({ ...local, ...patch }));
   };
 
   const patchServer = (id: string, patch: Partial<McpServerConfig>) => {
-    setLocal((current) => normalizeMcpSettings({ ...current, servers: updateServer(current.servers, id, patch) }));
+    onChange(normalizeMcpSettings({ ...local, servers: updateServer(local.servers, id, patch) }));
     if (patch.enabled === false) {
       void disconnectMcpServer(local, id).then(() => refreshStatus()).catch((err) => appendError(errorMessage(err)));
     }
@@ -267,14 +284,14 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
 
   const addServer = () => {
     const server = createBlankMcpServer();
-    setLocal((current) => normalizeMcpSettings({ ...current, servers: [...current.servers, server] }));
+    onChange(normalizeMcpSettings({ ...local, servers: [...local.servers, server] }));
     setActiveId(server.id);
   };
 
   const removeServer = (id: string) => {
     void disconnectMcpServer(local, id).catch(() => undefined);
     const nextServers = local.servers.filter((server) => server.id !== id);
-    setLocal((current) => normalizeMcpSettings({ ...current, servers: nextServers }));
+    onChange(normalizeMcpSettings({ ...local, servers: nextServers }));
     setActiveId(nextServers[0]?.id ?? '');
   };
 
@@ -377,26 +394,19 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
     void refreshStatus();
   }, []);
 
-  const save = () => {
-    setSettings({ mcp: local });
-    onClose();
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex select-none items-center justify-center bg-overlay p-4 backdrop-blur-sm animate-fade-in">
-      <div className="flex h-[92vh] w-[min(96vw,1280px)] flex-col overflow-hidden rounded-3xl border border-line bg-raised shadow-2xl">
-        <div className="flex items-start justify-between border-b border-line px-7 py-5">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="rounded-lg border border-info-bg bg-info-bg px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-info">rmcp</span>
-              <h2 className="text-lg font-semibold text-fg">{c.title}</h2>
-            </div>
-            <p className="mt-1 text-sm text-fg-muted">{c.desc}</p>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      {showIntro && (
+        <div className="flex-shrink-0 border-b border-line px-5 py-3">
+          <div className="flex items-center gap-2">
+            <span className="rounded-lg border border-info-bg bg-info-bg px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-info">rmcp</span>
+            <h3 className="text-sm font-semibold text-fg">{c.title}</h3>
           </div>
-          <button onClick={onClose} title={c.cancel} className="text-2xl leading-none text-fg-muted hover:text-fg-soft">×</button>
+          <p className="mt-1 text-xs text-fg-muted">{c.desc}</p>
         </div>
+      )}
 
-        <div className="grid min-h-0 flex-1 grid-cols-[340px_minmax(0,1fr)] overflow-hidden">
+      <div className="grid min-h-0 flex-1 grid-cols-[340px_minmax(0,1fr)] overflow-hidden">
           <aside className="min-h-0 overflow-y-auto border-r border-line bg-base p-4">
             <div className={panelClass(local.enabled)}>
               <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{c.global}</h3>
@@ -636,7 +646,44 @@ export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => voi
             ) : null}
           </main>
         </div>
+    </div>
+  );
+}
 
+export function McpSettingsModal({ onClose, onOpenMarket }: { onClose: () => void; onOpenMarket?: () => void }) {
+  const { settings, setSettings } = useAgentStore();
+  const c = copy(settings.lang);
+  const [local, setLocal] = useState<McpSettings>(() => normalizeMcpSettings(settings.mcp));
+
+  useEffect(() => {
+    setLocal(normalizeMcpSettings(settings.mcp));
+  }, [settings.mcp]);
+
+  const save = () => {
+    setSettings({ mcp: local });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex select-none items-center justify-center bg-overlay p-4 backdrop-blur-sm animate-fade-in">
+      <div className="flex h-[92vh] w-[min(96vw,1280px)] flex-col overflow-hidden rounded-3xl border border-line bg-raised shadow-2xl">
+        <div className="flex items-start justify-between border-b border-line px-7 py-5">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-lg border border-info-bg bg-info-bg px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-info">rmcp</span>
+              <h2 className="text-lg font-semibold text-fg">{c.title}</h2>
+            </div>
+            <p className="mt-1 text-sm text-fg-muted">{c.desc}</p>
+          </div>
+          <button onClick={onClose} title={c.cancel} className="text-2xl leading-none text-fg-muted hover:text-fg-soft">×</button>
+        </div>
+        <McpSettingsPanel
+          value={local}
+          onChange={setLocal}
+          onOpenMarket={onOpenMarket}
+          lang={settings.lang}
+          showIntro={false}
+        />
         <div className="flex items-center justify-end gap-3 border-t border-line px-7 py-4">
           <button onClick={onClose} className="rounded-xl border border-line px-4 py-2 text-sm text-fg-muted hover:text-fg">{c.cancel}</button>
           <button onClick={save} className="rounded-xl border border-info-bg bg-info-bg px-4 py-2 text-sm font-semibold text-info hover:bg-info-bg">{c.save}</button>

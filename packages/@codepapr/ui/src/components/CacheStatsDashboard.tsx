@@ -258,12 +258,11 @@ function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss, sh
 export interface CacheStatsDashboardProps {
   lang?: Lang;
   collapsible?: boolean;
-  onOpenContextInspector?: () => void;
   /** 弹窗等宽容器模式：模型卡片分列展示，充分利用横向空间。 */
   wide?: boolean;
 }
 
-export function CacheStatsDashboard({ lang, collapsible = true, onOpenContextInspector, wide = false }: CacheStatsDashboardProps) {
+export function CacheStatsDashboard({ lang, collapsible = true, wide = false }: CacheStatsDashboardProps) {
   const settings = useAgentStore((state) => state.settings);
   const sessions = useAgentStore((state) => state.sessions);
   const activeSessionId = useAgentStore((state) => state.activeSessionId);
@@ -343,14 +342,6 @@ export function CacheStatsDashboard({ lang, collapsible = true, onOpenContextIns
                 {aggregateThroughput(displayedStats, t.tokenThroughputUnit)}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={onOpenContextInspector}
-              disabled={!onOpenContextInspector || !activeSessionId}
-              className="flex-shrink-0 rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-fg-soft transition-colors enabled:hover:border-accent enabled:hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {t.viewContext}
-            </button>
           </div>
 
           {/* wide 模式下弹窗很宽，切换条收窄避免两个按钮被拉得过开。 */}

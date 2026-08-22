@@ -8,7 +8,9 @@ interface ContextInspectorModalProps {
   lang?: Lang;
   /** 提供后启用「项目记忆」管理标签页（ADR-008/009 可观测性）。 */
   workspacePath?: string;
-  onClose: () => void;
+  onClose?: () => void;
+  /** 嵌入组合统计弹窗时只渲染内容，由外层负责遮罩与关闭。 */
+  embedded?: boolean;
 }
 
 interface StageStyle {
@@ -132,7 +134,7 @@ function isRealTimestamp(ts?: number): ts is number {
   return typeof ts === 'number' && ts > 1_000_000_000_000;
 }
 
-export function ContextInspectorModal({ snapshot, lang, workspacePath, onClose }: ContextInspectorModalProps) {
+export function ContextInspectorModal({ snapshot, lang, workspacePath, onClose, embedded = false }: ContextInspectorModalProps) {
   const t = getTranslation(lang);
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
@@ -463,13 +465,16 @@ export function ContextInspectorModal({ snapshot, lang, workspacePath, onClose }
     return points.map((p) => ({ p, label: formatAxisTokens((axisTotal * p) / 100) }));
   }, [axisTotal, effectiveMode, timeDomain]);
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-3 backdrop-blur-sm md:p-4">
-      <div className="flex h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl">
+  const shell = (
+      <div className={embedded
+        ? 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'
+        : 'flex h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl'}>
         <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-fg">{t.contextInspectorTitle}</h2>
-            <p className="mt-0.5 text-xs text-fg-muted">{t.contextInspectorTip}</p>
+            {!embedded && (
+              <h2 className="text-sm font-semibold text-fg">{t.contextInspectorTitle}</h2>
+            )}
+            <p className={`text-xs text-fg-muted ${embedded ? '' : 'mt-0.5'}`}>{t.contextInspectorTip}</p>
           </div>
           <div className="flex items-center gap-2">
             {workspacePath ? (
@@ -507,6 +512,7 @@ export function ContextInspectorModal({ snapshot, lang, workspacePath, onClose }
                 {t.copy}
               </button>
             ) : null}
+            {!embedded && onClose ? (
             <button
               type="button"
               onClick={onClose}
@@ -515,6 +521,7 @@ export function ContextInspectorModal({ snapshot, lang, workspacePath, onClose }
             >
               ×
             </button>
+            ) : null}
           </div>
         </div>
 
@@ -756,8 +763,15 @@ export function ContextInspectorModal({ snapshot, lang, workspacePath, onClose }
           </>
         ) : null}
       </div>
+  );
 
-      {/* 甘特条悬停提示 */}
+  return (
+    <>
+      {embedded ? shell : (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-3 backdrop-blur-sm md:p-4">
+          {shell}
+        </div>
+      )}
       {tip && (() => {
         const meta = catMeta[tip.row.cat];
         const stage = stageLabels[tip.row.stage];
@@ -780,6 +794,6 @@ export function ContextInspectorModal({ snapshot, lang, workspacePath, onClose }
           </div>
         );
       })()}
-    </div>
+    </>
   );
 }
