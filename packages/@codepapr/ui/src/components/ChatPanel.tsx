@@ -595,6 +595,8 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   roundWindowRef.current = roundWindow;
   const pendingScrollToIdRef = useRef<string | null>(null);
   const windowSessionKeyRef = useRef<string | null>(null);
+  // 跳转 / 打开会话后的程序化滚动期间暂缓窗口重定位，直到用户下一次主动滚动。
+  const jumpScrollSuppressRef = useRef(false);
 
   // 防御：会话切换/截断的同一帧里窗口可能越界，先收敛再使用。
   const effectiveRoundWindow = useMemo(
@@ -683,6 +685,10 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   // 切换会话（含按需加载完成）时把窗口重置为「最近 N 轮」。
   // 用「会话 ID + 首条可见消息 ID」双重指纹防竞态：selectSession 分两步更新
   // activeSessionId 和 messages，只按会话 ID 判断会用旧会话的消息算出错误窗口。
+  //
+  // 打开后会程序化滚到底部：在那之前 scrollTop 仍是 0，视口中心落在顶部占位
+  // 的旧轮上。若此时按视口重定位，批次刚好少 1 轮时就会把最新一轮卸掉，露出
+  // 「加载更新的 1 轮」。先抑制窗口跟随，直到用户自己滚动。
   const windowInitFingerprintRef = useRef<string | null>(null);
   useEffect(() => {
     if (deferMessages || sessionMessagesLoading) return;
@@ -692,7 +698,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
     windowSessionKeyRef.current = key;
     windowInitFingerprintRef.current = fingerprint;
     pendingScrollToIdRef.current = null;
-    jumpScrollSuppressRef.current = false;
+    jumpScrollSuppressRef.current = true;
     setRoundWindow(computeInitialWindow(roundStartsRef.current.length, chatRenderBatchRoundsRef.current));
   }, [deferMessages, sessionMessagesLoading, activeSessionId, messages]);
 
@@ -714,7 +720,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
       setRoundWindow(clampWindow(prev, total, batch));
       return;
     }
-    if (shouldStickToBottomRef.current && prev.hi < total && total - prev.hi <= batch) {
+    if (shouldStickToBottomRef.current && prev.hi < total) {
       setRoundWindow(computeInitialWindow(total, batch));
       return;
     }
@@ -748,9 +754,6 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   // 按视口中心所在轮重定位窗口。占位块总高恒定，移动窗口不会改变 scrollTop，
   // 因此没有反馈环。仅当视口中心移出当前窗口才重定位，避免频繁重渲染。
   const placeRafRef = useRef(0);
-  // 跳转滚动后暂缓窗口重定位，直到用户下一次主动滚动：小窗口（batch 较小）时，
-  // 视口中心可能落在跳转窗口之外，立即重定位会把跳转目标移出窗口。
-  const jumpScrollSuppressRef = useRef(false);
   const placeWindowFromScroll = useCallback(() => {
     const container = messageListRef.current;
     const msgs = visibleMessagesRef.current;
@@ -902,6 +905,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   useLayoutEffect(() => {
     if (deferMessages || sessionMessagesLoading) return;
     shouldStickToBottomRef.current = true;
+    jumpScrollSuppressRef.current = true;
     let raf2 = 0;
     let raf3 = 0;
     let raf4 = 0;

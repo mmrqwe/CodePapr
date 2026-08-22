@@ -82,14 +82,17 @@ export function computeWindowForJump(
 }
 
 /** Converge a window after messages were truncated (reset-to-message). Windows
- *  attached to the tail stay attached. Idempotent for valid windows. */
+ *  attached to the tail stay attached. Idempotent for valid non-empty windows.
+ *  `{ lo: 0, hi: 0 }` is only valid for an empty conversation — treating it as
+ *  valid when rounds exist leaves the latest round unloaded (the "load 1 newer
+ *  round" sentinel on session open). */
 export function clampWindow(
   window: RoundWindow,
   totalRounds: number,
   batchRounds: number
 ): RoundWindow {
   if (totalRounds <= 0) return { lo: 0, hi: 0 };
-  if (window.lo >= 0 && window.lo <= window.hi && window.hi <= totalRounds) {
+  if (window.lo >= 0 && window.lo < window.hi && window.hi <= totalRounds) {
     return window;
   }
   if (window.hi >= totalRounds) {

@@ -145,8 +145,11 @@ describe('clampWindow', () => {
     expect(clampWindow(w, 9, 6)).toEqual({ lo: 3, hi: 9 });
   });
 
-  it('recovers a degenerate window to the tail window', () => {
-    expect(clampWindow({ lo: 8, hi: 5 }, 10, 6)).toEqual({ lo: 4, hi: 10 });
+  it('recovers an empty window to the tail when rounds exist', () => {
+    // 打开会话时 useState 初值常是 {0,0}（消息尚未到达）。若把它当成合法窗口，
+    // 7 轮 / 批次 6 会渲染 [0, 6) 并露出「加载更新的 1 轮」。
+    expect(clampWindow({ lo: 0, hi: 0 }, 7, 6)).toEqual({ lo: 1, hi: 7 });
+    expect(clampWindow({ lo: 0, hi: 0 }, 10, 6)).toEqual({ lo: 4, hi: 10 });
   });
 
   it('falls back to the tail window when the window collapses', () => {

@@ -1375,6 +1375,35 @@ describe('ChatPanel', () => {
       expect(container.textContent).not.toContain('加载更新');
     });
 
+    it('keeps the latest round visible after session history finishes loading', async () => {
+      // 7 轮 / 批次 6：空窗口若被当成合法值，会渲染前 6 轮并露出「加载更新的 1 轮」。
+      setLongConversation(7, 6);
+      const loaded = useAgentStore.getState().messages;
+      useAgentStore.setState({
+        messages: [],
+        sessionMessages: { 'session-1': [] },
+        sessionMessagesLoading: true,
+      });
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+
+      await act(async () => {
+        useAgentStore.setState({
+          messages: loaded,
+          sessionMessages: { 'session-1': loaded },
+          sessionMessagesLoading: false,
+        });
+      });
+      await act(async () => {
+        flushRAF();
+      });
+
+      expect(container.querySelector('[data-message-id="user-7"]')).not.toBeNull();
+      expect(container.textContent).not.toContain('加载更新');
+    });
+
     it('moves the window when a jump request targets an unloaded message', async () => {
       setLongConversation(10, 3);
 
