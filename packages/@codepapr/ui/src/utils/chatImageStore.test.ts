@@ -1,17 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyImageDataToMessages,
+  chatImageDisplaySrc,
   collectUnresolvedImagePaths,
   hydrateImageMessages,
   loadChatImageData,
+  normalizeChatImageRef,
 } from './chatImageStore';
 
-const { invokeMock } = vi.hoisted(() => ({
+const { invokeMock, convertFileSrcMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(async (_command: string, _args?: Record<string, unknown>) => undefined as unknown),
+  convertFileSrcMock: vi.fn((path: string) => `asset://localhost/${path}`),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
+  convertFileSrc: convertFileSrcMock,
 }));
 
 beforeEach(() => {
@@ -91,6 +95,43 @@ describe('hydrateImageMessages', () => {
     }];
     const next = await hydrateImageMessages('/ws', messages);
     expect(next[0].images?.[0].data).toBe('');
+  });
+});
+
+describe('normalizeChatImageRef', () => {
+  it('normalizes slashes, bare prefixes, and basenames', () => {
+    expect(normalizeChatImageRef('.CodePapr/chat-images/a.png')).toBe('.CodePapr/chat-images/a.png');
+    expect(normalizeChatImageRef('chat-images/a.png')).toBe('.CodePapr/chat-images/a.png');
+    expect(normalizeChatImageRef('.CodePapr\\chat-images\\a.png')).toBe('.CodePapr/chat-images/a.png');
+  });
+});
+
+describe('chatImageDisplaySrc', () => {
+  it('prefers in-memory data, then falls back to the asset protocol path', () => {
+    expect(chatImageDisplaySrc('/ws', { mediaType: 'image/png', data: 'AAAA' })).toBe(
+      'data:image/png;base64,AAAA'
+    );
+    expect(
+      chatImageDisplaySrc('/ws', {
+        mediaType: 'image/png',
+        data: '',
+        path: '.CodePapr/chat-images/a.png',
+      })
+    ).toBe('asset://localhost//ws/.CodePapr/chat-images/a.png');
+  });
+});
+
+describe('hydrateImageMessages extra shapes', () => {
+  it('fills data when the backend returns snake_case fields', async () => {
+    invokeMock.mockResolvedValueOnce({
+      images: [{ path: '.CodePapr/chat-images/a.png', media_type: 'image/png', data: 'DISK' }],
+    });
+    const messages = [{
+      id: 'u1',
+      images: [{ mediaType: 'image/png', data: '', path: '.CodePapr/chat-images/a.png' }],
+    }];
+    const next = await hydrateImageMessages('/ws', messages);
+    expect(next[0].images?.[0].data).toBe('DISK');
   });
 });
 

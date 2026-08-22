@@ -1578,6 +1578,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
             onPlanAction={handlePlanAction}
             onOpenWorkspacePath={onOpenWorkspacePath}
             onPreviewImage={onPreviewImage}
+            workspacePath={workspacePath}
             characterAvatar={characterAvatar}
             characterName={characterName}
             showCharacterAvatar={showCharacterAvatar}

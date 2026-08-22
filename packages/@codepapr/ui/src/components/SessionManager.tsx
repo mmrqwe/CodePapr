@@ -1,14 +1,21 @@
 import { useAgentStore, SessionMeta } from '../store/agentStore';
+import { sessionCanHardDelete } from '../utils/characterGreeting';
 import { getTranslation } from '../utils/i18n';
 
 function SessionItem({ session, isActive }: { session: SessionMeta; isActive: boolean }) {
   const selectSession = useAgentStore((state) => state.selectSession);
   const archiveSession = useAgentStore((state) => state.archiveSession);
+  const deleteSession = useAgentStore((state) => state.deleteSession);
+  const canHardDelete = useAgentStore((state) => sessionCanHardDelete(state.sessionMessages[session.id]));
   const settings = useAgentStore((state) => state.settings);
   const t = getTranslation(settings.lang);
 
-  const handleArchiveClick = (e: React.MouseEvent) => {
+  const handleRemoveClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (canHardDelete) {
+      deleteSession(session.id);
+      return;
+    }
     archiveSession(session.id);
   };
 
@@ -25,11 +32,11 @@ function SessionItem({ session, isActive }: { session: SessionMeta; isActive: bo
         </p>
       </div>
       <button
-        onClick={handleArchiveClick}
+        onClick={handleRemoveClick}
         className="opacity-0 group-hover:opacity-100 text-fg-dim hover:text-accent-text transition-all text-[10px] px-1"
-        title={t.archiveSessionTip}
+        title={canHardDelete ? t.deleteSessionTip : t.archiveSessionTip}
       >
-        {t.archiveSession}
+        {canHardDelete ? t.deleteSession : t.archiveSession}
       </button>
     </div>
   );

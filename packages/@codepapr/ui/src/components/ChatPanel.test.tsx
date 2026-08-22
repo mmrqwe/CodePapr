@@ -11,6 +11,7 @@ const { invokeMock, colorizeMock } = vi.hoisted(() => ({
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
+  convertFileSrc: (path: string) => path,
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({

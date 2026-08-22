@@ -782,22 +782,22 @@ export default function App() {
                 </div>
               }
               second={
-                workbenchHidden ? (
-                  <div className="flex h-full items-start border-l border-line px-1 pt-3">
-                    <button
-                      type="button"
-                      onClick={() => setWorkbenchHidden(false)}
-                      title={t.expandWorkbenchTip}
-                      aria-label={t.expandWorkbenchTip}
-                      className="flex-shrink-0 rounded-lg border border-line p-1.5 text-fg-muted transition-colors hover:border-accent hover:text-fg"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                      </svg>
-                    </button>
-                  </div>
-                ) : (
                 <div className="flex h-full min-h-0 flex-col">
+                  {workbenchHidden ? (
+                    <div className="flex h-full items-start border-l border-line px-1 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => setWorkbenchHidden(false)}
+                        title={t.expandWorkbenchTip}
+                        aria-label={t.expandWorkbenchTip}
+                        className="flex-shrink-0 rounded-lg border border-line p-1.5 text-fg-muted transition-colors hover:border-accent hover:text-fg"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                        </svg>
+                      </button>
+                    </div>
+                  ) : (
                    <div className="flex items-center justify-end gap-2 border-b border-line px-4 min-h-[60px]">
                     <div className="flex items-center gap-2">
                       {settings.debugEnabled && (
@@ -849,7 +849,8 @@ export default function App() {
                       </button>
                     </div>
                   </div>
-                  <div className="min-h-0 flex-1">
+                  )}
+                  <div className={workbenchHidden ? 'hidden' : 'min-h-0 flex-1'}>
                     <CodingWorkbench
                       hideWorkspaceHeader
                       hideProjectSummary
@@ -862,7 +863,6 @@ export default function App() {
                     />
                   </div>
                 </div>
-                )
               }
             />
           </div>

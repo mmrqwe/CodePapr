@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import type { UIMessage } from '../../store/agentStore';
+import { chatImageDisplaySrc } from '../../utils/chatImageStore';
 import { getTranslation } from '../../utils/i18n';
 import { parseDecisionOptionCards, type PlanFollowUpAction } from '../../utils/planMode';
 import { ReasoningPanel, RunningStatusIndicator } from './ReasoningPanel';
@@ -21,6 +22,7 @@ export interface MessageBubbleProps {
   characterName?: string;
   /** 仅在已启用角色且允许显示头像时为 true；未启用角色不占位。 */
   showCharacterAvatar?: boolean;
+  workspacePath?: string;
 }
 
 function areMessageBubblePropsEqual(
@@ -36,6 +38,7 @@ function areMessageBubblePropsEqual(
     previous.characterAvatar === next.characterAvatar &&
     previous.characterName === next.characterName &&
     previous.showCharacterAvatar === next.showCharacterAvatar &&
+    previous.workspacePath === next.workspacePath &&
     previous.onPreviewImage === next.onPreviewImage &&
     (previous.showPlanActions || next.showPlanActions
       ? previous.onPlanAction === next.onPlanAction
@@ -53,7 +56,8 @@ export const MessageBubble = memo(function MessageBubble({
   onPreviewImage,
   characterAvatar,
   characterName,
-  showCharacterAvatar,
+  showCharacterAvatar = false,
+  workspacePath = '',
 }: MessageBubbleProps) {
   const isUser = msg.role === 'user';
   const isError = msg.role === 'error';
@@ -145,17 +149,19 @@ export const MessageBubble = memo(function MessageBubble({
         )}
         {isUser && msg.images && msg.images.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
-            {msg.images
-              .filter((image) => image.data)
-              .map((image, index) => (
+            {msg.images.map((image, index) => {
+              const src = chatImageDisplaySrc(workspacePath, image);
+              if (!src) return null;
+              return (
                 <img
-                  key={index}
-                  src={`data:${image.mediaType};base64,${image.data}`}
+                  key={image.path ?? index}
+                  src={src}
                   alt="attachment"
                   className="h-20 w-20 rounded-lg border border-white/20 object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                  onClick={() => onPreviewImage?.(`data:${image.mediaType};base64,${image.data}`)}
+                  onClick={() => onPreviewImage?.(src)}
                 />
-              ))}
+              );
+            })}
           </div>
         )}
         {(msg.displayReasoningContent ?? msg.reasoningContent) && (

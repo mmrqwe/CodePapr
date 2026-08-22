@@ -12,6 +12,7 @@ export declare const I18N_DICTS: {
         newTaskTip: string;
         noTasks: string;
         deleteSession: string;
+        deleteSessionTip: string;
         archiveSession: string;
         archiveSessionTip: string;
         archivedSessions: string;
@@ -742,6 +743,7 @@ export declare const I18N_DICTS: {
         newTaskTip: string;
         noTasks: string;
         deleteSession: string;
+        deleteSessionTip: string;
         archiveSession: string;
         archiveSessionTip: string;
         archivedSessions: string;
@@ -1470,6 +1472,7 @@ export declare const I18N_DICTS: {
         newTaskTip: string;
         noTasks: string;
         deleteSession: string;
+        deleteSessionTip: string;
         archiveSession: string;
         archiveSessionTip: string;
         archivedSessions: string;
@@ -2199,6 +2202,7 @@ export declare function getTranslation(lang?: Lang): {
     newTaskTip: string;
     noTasks: string;
     deleteSession: string;
+    deleteSessionTip: string;
     archiveSession: string;
     archiveSessionTip: string;
     archivedSessions: string;
@@ -2686,6 +2690,7 @@ export declare function getTranslation(lang?: Lang): {
     newTaskTip: string;
     noTasks: string;
     deleteSession: string;
+    deleteSessionTip: string;
     archiveSession: string;
     archiveSessionTip: string;
     archivedSessions: string;
@@ -3173,6 +3178,7 @@ export declare function getTranslation(lang?: Lang): {
     newTaskTip: string;
     noTasks: string;
     deleteSession: string;
+    deleteSessionTip: string;
     archiveSession: string;
     archiveSessionTip: string;
     archivedSessions: string;

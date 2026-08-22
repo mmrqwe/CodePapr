@@ -16,7 +16,7 @@ import { CacheValidator, RequestBuilder } from '@codepapr/api';
 import { createId } from '../utils/createId';
 import { getTranslation } from '../utils/i18n';
 import { loadProjectState } from '../utils/projectStorage';
-import { hydrateImageMessages } from '../utils/chatImageStore';
+import { hydrateImageMessages, collectUnresolvedImagePaths } from '../utils/chatImageStore';
 import {
   loadSessions,
   loadSessionMessages,
@@ -776,8 +776,16 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           // Keep only the active session's messages resident; the rest are
           // loaded on demand (see selectSession).
           const snapshotMessages = snapshot.sessionMessages as Record<string, UIMessage[]>;
+          const rawActiveMessages = activeSessionId
+            ? snapshotMessages[activeSessionId] ?? []
+            : [];
           sessionMessages = activeSessionId
-            ? { [activeSessionId]: snapshotMessages[activeSessionId] ?? [] }
+            ? {
+                [activeSessionId]: await hydrateImageMessages(
+                  normalizedWorkspacePath,
+                  rawActiveMessages
+                ),
+              }
             : {};
           skillEnabledById = normalizeSkillEnabledState(snapshot.skillEnabledById);
           conversationStats = snapshot.activeSessionId
@@ -1370,6 +1378,17 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         if (cached) {
           set({ messages: cached, sessionMessagesLoading: false });
           saveCurrentProjectState(get());
+          const unresolved = collectUnresolvedImagePaths(cached);
+          if (unresolved.length > 0 && workspacePath) {
+            void hydrateImageMessages(workspacePath, cached).then((hydrated) => {
+              const current = get();
+              if (current.activeSessionId !== id || current.workspacePath !== workspacePath) return;
+              set((s) => ({
+                messages: s.activeSessionId === id ? hydrated : s.messages,
+                sessionMessages: { ...s.sessionMessages, [id]: hydrated },
+              }));
+            });
+          }
           return;
         }
 

@@ -14,6 +14,13 @@ export function sessionHasConversation(messages: UIMessage[]): boolean {
   );
 }
 
+/** 用户还没发过消息：侧栏可直接删除（不必归档）。角色开场白不算对话。
+ *  消息尚未加载（undefined）时不能当空会话，避免把有内容的会话误删。 */
+export function sessionCanHardDelete(messages: UIMessage[] | undefined): boolean {
+  if (!Array.isArray(messages)) return false;
+  return !messages.some((m) => m.role === 'user' && !m.synthetic && !m.hidden);
+}
+
 export function expandCharacterGreeting(text: string, characterName: string): string {
   return sanitizeCachePrompt(expandCharacterMacros(text, { char: characterName }));
 }

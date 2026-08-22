@@ -30,6 +30,7 @@ interface MessageListProps {
   onPlanAction: (action: PlanFollowUpAction) => void;
   onOpenWorkspacePath?: (path: string) => void;
   onPreviewImage: (src: string) => void;
+  workspacePath?: string;
   characterAvatar?: string | null;
   characterName?: string | null;
   showCharacterAvatar?: boolean;
@@ -72,6 +73,7 @@ export const MessageList = memo(function MessageList({
   onPlanAction,
   onOpenWorkspacePath,
   onPreviewImage,
+  workspacePath,
   characterAvatar,
   characterName,
   showCharacterAvatar = false,
@@ -204,6 +206,7 @@ export const MessageList = memo(function MessageList({
               onPlanAction={onPlanAction}
               onOpenWorkspacePath={onOpenWorkspacePath}
               onPreviewImage={onPreviewImage}
+              workspacePath={workspacePath}
               characterAvatar={characterAvatar ?? undefined}
               characterName={characterName ?? undefined}
               showCharacterAvatar={showCharacterAvatar}
@@ -219,6 +222,7 @@ export const MessageList = memo(function MessageList({
             onPlanAction={onPlanAction}
             onOpenWorkspacePath={onOpenWorkspacePath}
             onPreviewImage={onPreviewImage}
+            workspacePath={workspacePath}
             characterAvatar={characterAvatar ?? undefined}
             characterName={characterName ?? undefined}
             showCharacterAvatar={showCharacterAvatar}

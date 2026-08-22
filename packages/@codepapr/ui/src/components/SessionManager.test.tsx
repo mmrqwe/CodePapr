@@ -48,7 +48,10 @@ describe('SessionManager', () => {
       archivedSessions: [],
       activeSessionId: 's-1',
       messages: [],
-      sessionMessages: { 's-1': [], 's-2': [] },
+      sessionMessages: {
+        's-1': [{ id: 'u-1', role: 'user', content: '已有对话', timestamp: 1 }],
+        's-2': [],
+      },
       isLoading: false,
       _pendingRestoreUndos: [],
     }));
@@ -88,12 +91,30 @@ describe('SessionManager', () => {
     expect(state.archivedSessions.map((s) => s.id)).toEqual(['s-1']);
   });
 
-  it('归档按钮文案为归档而不是删除', async () => {
+  it('有对话的会话显示归档而不是删除', async () => {
     await act(async () => {
       root.render(<SessionManager />);
     });
 
-    expect(container.querySelectorAll('button[title="删除会话"]').length).toBe(0);
+    expect(container.querySelectorAll('button[title="删除空会话：尚未产生对话，可直接移除"]').length).toBe(1);
+    expect(container.querySelectorAll('button[title="归档会话：从侧栏移出，内容保留，可在设置中恢复"]').length).toBe(1);
     expect(container.textContent).toContain('归档');
+  });
+
+  it('空会话点击删除后从侧栏移除且不进入归档', async () => {
+    await act(async () => {
+      root.render(<SessionManager />);
+    });
+
+    const deleteButton = container.querySelector(
+      'button[title="删除空会话：尚未产生对话，可直接移除"]'
+    );
+    act(() => {
+      deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const state = useAgentStore.getState();
+    expect(state.sessions.map((s) => s.id)).toEqual(['s-1']);
+    expect(state.archivedSessions).toEqual([]);
   });
 });

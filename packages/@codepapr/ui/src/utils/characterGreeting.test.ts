@@ -4,7 +4,11 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { maybeInsertActiveCharacterGreeting, sessionHasConversation } from './characterGreeting';
+import {
+  maybeInsertActiveCharacterGreeting,
+  sessionCanHardDelete,
+  sessionHasConversation,
+} from './characterGreeting';
 import { useAgentStore } from '../store/agentStore';
 import { useCharactersStore } from '../store/charactersStore';
 import type { CharacterProfile } from './characterTypes';
@@ -56,6 +60,27 @@ describe('sessionHasConversation', () => {
     expect(
       sessionHasConversation([{ id: 'u', role: 'user', content: 'hi', timestamp: 1 }])
     ).toBe(true);
+  });
+});
+
+describe('sessionCanHardDelete', () => {
+  it('allows delete when messages are loaded and empty', () => {
+    expect(sessionCanHardDelete([])).toBe(true);
+  });
+
+  it('allows delete when only a character greeting exists', () => {
+    expect(
+      sessionCanHardDelete([
+        { id: 'character-greeting:s:c', role: 'assistant', content: 'hi', timestamp: 1 },
+      ])
+    ).toBe(true);
+  });
+
+  it('refuses delete after a user message, and when messages are not loaded', () => {
+    expect(
+      sessionCanHardDelete([{ id: 'u', role: 'user', content: 'hi', timestamp: 1 }])
+    ).toBe(false);
+    expect(sessionCanHardDelete(undefined)).toBe(false);
   });
 });
 
