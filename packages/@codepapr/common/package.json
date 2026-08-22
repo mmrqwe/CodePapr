@@ -1,6 +1,7 @@
 {
   "name": "@codepapr/common",
   "version": "0.1.0",
+  "private": true,
   "description": "Shared utilities for CodePapr",
   "type": "module",
   "main": "./dist/index.js",

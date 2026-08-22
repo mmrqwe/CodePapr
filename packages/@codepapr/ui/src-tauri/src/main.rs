@@ -5,6 +5,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 mod app_runtime;
+mod asset_scope;
 mod browser;
 mod character_card;
 mod db;
@@ -313,6 +314,7 @@ fn main() {
             workspace_fs::write::delete_workspace_dir,
             workspace_fs::chat_images::save_chat_image,
             workspace_fs::chat_images::load_chat_images,
+            asset_scope::grant_workspace_asset_scope,
             shell::background::run_workspace_command,
             shell::background::run_workspace_shell_command,
             shell::background::cancel_running_command,
@@ -470,18 +472,30 @@ fn main() {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 // 先发出退出请求，再做清理：exit(0) 走 ExitRequested→Exit，
                 // 窗口销毁路径（Destroyed→ExitRequested→ControlFlow::Exit）本身也能退出。
-                // 若先跑清理，任何阻塞调用（child.wait、CDP close）都会卡死退出链路。
+                // 清理绝不在这里执行：CDP close 可达 120s/页、child.wait 无限等待，
+                // 同步跑会卡死关窗（macOS 彩虹圈）。清理统一交给下方
+                // RunEvent::Exit 分支的独立线程，且只执行一次。
                 if window.app_handle().windows().len() <= 1 {
                     // 退出前给前端最后一次持久化机会：emit 事件后前端会把
-                    // 在途/最新的设置与角色卡状态重新落库，这里等待保存完成
-                    // （save_app_settings 已是异步命令，主线程等待期间它照常执行），
-                    // 避免"切项目/改设置/改角色后立刻退出"丢最后写入。
+                    // 在途/最新的设置与角色卡状态重新落库。两段式有界等待：
+                    // ① 短探测：等前端发起保存请求（save_app_settings 入口计数）；
+                    // ② 若确有请求，再等其处理完成（完成纪元推进）。
+                    // 没有任何待保存内容时 ① 即超时返回，不再像旧实现那样
+                    // 每次退出都白白卡满 2 秒。
+                    const FLUSH_BUDGET: std::time::Duration = std::time::Duration::from_millis(2000);
                     let _ = window.emit("codepapr:flush-settings", ());
+                    let requests_before = db::settings_save_requests();
                     let epoch_before = db::settings_save_epoch();
-                    db::wait_for_settings_save_epoch(epoch_before, std::time::Duration::from_millis(2000));
+                    let deadline = std::time::Instant::now() + FLUSH_BUDGET;
+                    if db::wait_for_settings_save_requests(
+                        requests_before,
+                        std::time::Duration::from_millis(500),
+                    ) {
+                        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                        db::wait_for_settings_save_epoch(epoch_before, remaining);
+                    }
                     window.app_handle().exit(0);
                 }
-                run_shutdown_cleanup();
             }
         })
         .build(tauri::generate_context!())

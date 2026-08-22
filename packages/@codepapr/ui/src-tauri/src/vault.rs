@@ -107,7 +107,11 @@ impl AppSecrets {
                         .map_err(map_stronghold_err)?;
                     // 必须先把 client 状态从快照载入内存，否则 commit 写入的
                     // 内存 clients 映射为空，重加密会丢光所有已存密钥。
-                    let _ = legacy.load_client(CLIENT_NAME);
+                    // 载入失败必须中止：若静默继续，重加密将把整个快照覆写成空
+                    // 状态，用户全部密钥永久丢失。
+                    legacy.load_client(CLIENT_NAME).map_err(|e| {
+                        format!("Stronghold 旧快照加载失败(已中止,未改动快照): {e}")
+                    })?;
                     let new_keyprovider =
                         iota_stronghold::KeyProvider::try_from(password.clone())
                             .map_err(|e| format!("Stronghold 操作失败: {e}"))?;
@@ -129,7 +133,13 @@ impl AppSecrets {
         // HashMap. Without this, get_client only sees an empty HashMap and
         // the fallback below creates a fresh empty client that overwrites
         // the snapshot on save(), destroying all persisted secrets.
-        let _ = stronghold.load_client(CLIENT_NAME);
+        // 快照已存在但载入失败时必须中止：继续往下走会用空 client 覆写
+        // 快照,静默丢光全部密钥。首次启动(无快照)则无需载入。
+        if snapshot_path.exists() {
+            stronghold.load_client(CLIENT_NAME).map_err(|e| {
+                format!("Stronghold 快照加载失败(已中止,未改动快照): {e}")
+            })?;
+        }
 
         // Only create a new client if the snapshot truly doesn't contain one
         // yet (i.e. this is the very first launch).
@@ -295,6 +305,10 @@ pub(crate) fn migrate_from_keyring(
             // Only migrate if the stronghold doesn't already have this key.
             if app_secrets.get_secret(account).is_none() {
                 app_secrets.set_secret(account, &value)?;
+                // 先落盘成功再删 Keychain 条目：否则一旦后续保存失败(磁盘满、
+                // 权限异常),密钥只存在于内存,重启后旧条目已被删、新快照里没有,
+                // 用户密钥永久丢失。
+                app_secrets.save()?;
                 migrated += 1;
             }
 
@@ -303,10 +317,6 @@ pub(crate) fn migrate_from_keyring(
                 let _ = entry.delete_credential();
             }
         }
-    }
-
-    if migrated > 0 {
-        app_secrets.save()?;
     }
 
     Ok(migrated)
@@ -438,6 +448,25 @@ mod tests {
         secrets.set_secret("k", "v2").unwrap();
         secrets.save().unwrap();
         assert_eq!(secrets.get_secret("k").as_deref(), Some("v2"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupted_snapshot_fails_instead_of_overwriting() {
+        let dir = temp_dir();
+        let snapshot_path = dir.join(VAULT_SNAPSHOT_FILE);
+
+        // 先建立正常 vault 并写入密钥。
+        let secrets = AppSecrets::init(&dir).expect("init should succeed");
+        secrets.set_secret("k", "v").unwrap();
+        secrets.save().unwrap();
+        drop(secrets);
+
+        // 把快照破坏成无法解析的字节。再次 init 必须报错,
+        // 绝不能静默建空 client 后把快照覆写成空状态。
+        fs::write(&snapshot_path, b"not-a-valid-stronghold-snapshot").unwrap();
+        assert!(AppSecrets::init(&dir).is_err());
 
         let _ = fs::remove_dir_all(&dir);
     }

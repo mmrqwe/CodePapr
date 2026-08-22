@@ -901,4 +901,88 @@ describe('DeepSeekProvider', () => {
     expect((caught as Error).message).toContain('Stream ended prematurely');
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
+
+  it('流内 error 对象按确定性错误分类：立即终止且不重试', async () => {
+    // 中转以 SSE data 下发欠费错误后干净关流——旧实现没有 chunk.error 分支，
+    // 走到「流提前结束」分支抛可重试错误，叠加流层无限重连永久卡死。
+    const errorEvent =
+      'data: {"error":{"type":"insufficient_quota","message":"You exceeded your current quota"}}\n\n' +
+      'data: [DONE]\n\n';
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(errorEvent, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new DeepSeekProvider({
+      apiKey: 'test-key',
+      streamRetryDelayMs: () => 0,
+    });
+    let caught: unknown;
+    try {
+      await provider.streamChat?.(
+        {
+          model: 'deepseek-v4-pro',
+          messages: [{ id: 'user-1', role: 'user', content: '请回答', timestamp: 1 }],
+          maxTokens: 1024,
+        },
+        () => {}
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ProviderRequestError);
+    expect((caught as ProviderRequestError).retriable).toBe(false);
+    expect((caught as Error).message).toContain('insufficient_quota');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('流内 rate_limit_error 归类为可重试并恢复', async () => {
+    const errorEvent =
+      'data: {"error":{"type":"rate_limit_error","message":"rate limited"}}\n\n' +
+      'data: [DONE]\n\n';
+    const okChunks =
+      'data: {"id":"resp-ok","choices":[{"index":0,"delta":{"content":"好"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}\n\n' +
+      'data: [DONE]\n\n';
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(errorEvent, {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          })
+        )
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(okChunks, {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          })
+        )
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new DeepSeekProvider({
+      apiKey: 'test-key',
+      streamRetryDelayMs: () => 0,
+      streamMaxRetries: 6,
+    });
+    const response = await provider.streamChat?.(
+      {
+        model: 'deepseek-v4-pro',
+        messages: [{ id: 'user-1', role: 'user', content: '请回答', timestamp: 1 }],
+        maxTokens: 1024,
+      },
+      () => {}
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(response?.choices[0]?.message.content).toBe('好');
+  });
 });

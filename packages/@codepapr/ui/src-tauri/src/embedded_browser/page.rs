@@ -290,6 +290,12 @@ async fn open_or_navigate(
                             }
                         })
                         .collect();
+                    let sanitized = if sanitized.is_empty() || sanitized.chars().all(|c| c == '.') {
+                        // 纯点文件名("..")会逃逸出 downloads 目录,拒绝并回退。
+                        "download".to_string()
+                    } else {
+                        sanitized
+                    };
                     let dir = workspace.join(".CodePapr").join("downloads");
                     let _ = std::fs::create_dir_all(&dir);
                     *destination = dir.join(sanitized);

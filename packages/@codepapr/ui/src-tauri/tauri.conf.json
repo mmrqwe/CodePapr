@@ -24,8 +24,8 @@
       }
     ],
     "security": {
-      "assetProtocol": { "enable": true, "scope": ["$HOME/**", "/**", "C:/**", "D:/**", "E:/**", "F:/**"] },
-      "csp": "default-src 'self' customprotocol: asset: codepapr-app:; script-src 'self' 'wasm-unsafe-eval' codepapr-app:; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost https: data:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420 https:; frame-src 'self' codepapr-app: http://localhost:* http://127.0.0.1:* https:; worker-src 'self' blob:"
+      "assetProtocol": { "enable": true, "scope": [] },
+      "csp": "default-src 'self' customprotocol: asset: codepapr-app:; script-src 'self' 'wasm-unsafe-eval' codepapr-app:; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost https: data:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420 https:; frame-src 'self' codepapr-app: http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'self'; worker-src 'self' blob:"
     }
   },
   "bundle": {

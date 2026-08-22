@@ -1,6 +1,7 @@
 {
   "name": "@codepapr/api",
   "version": "0.1.0",
+  "private": true,
   "description": "LLM API adapters (DeepSeek, OpenAI, Claude)",
   "type": "module",
   "main": "./dist/index.js",

@@ -1,6 +1,7 @@
 {
   "name": "@codepapr/editor",
   "version": "0.1.0",
+  "private": true,
   "description": "CodePapr - editor module",
   "type": "module",
   "main": "./dist/index.js",

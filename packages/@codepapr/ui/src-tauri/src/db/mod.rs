@@ -1069,6 +1069,9 @@ pub(crate) async fn save_app_settings(
     if settings_json.len() > MAX_SETTINGS_JSON_BYTES {
         return Err(format!("配置内容超过上限 {MAX_SETTINGS_JSON_BYTES} bytes"));
     }
+    // 入口处先记账「收到一次保存请求」：退出流程据此探测前端是否已发起保存，
+    // 没有保存请求时跳过完成等待直接退出。
+    SETTINGS_SAVE_REQUESTS.fetch_add(1, Ordering::SeqCst);
 
     let app_secrets = app.state::<AppSecrets>().inner().clone();
     // 同步命令会在主线程执行（vault 快照写盘 + SQLite 会阻塞 UI），
@@ -1135,14 +1138,29 @@ fn app_settings_db_lock() -> &'static Mutex<()> {
 // （含前端收到退出信号后重发的保存）在进程终止前真正落库。
 static SETTINGS_SAVE_EPOCH: AtomicU64 = AtomicU64::new(0);
 
+// 设置保存请求计数：每次 save_app_settings 被调用（入口）+1。退出流程先用它
+// 探测「前端 flush 是否真的发起了保存」——没有保存请求时无需等待完成纪元，
+// 直接退出（旧实现对每次退出都无条件忙等满 2 秒）。
+static SETTINGS_SAVE_REQUESTS: AtomicU64 = AtomicU64::new(0);
+
 pub(crate) fn settings_save_epoch() -> u64 {
     SETTINGS_SAVE_EPOCH.load(Ordering::SeqCst)
+}
+
+pub(crate) fn settings_save_requests() -> u64 {
+    SETTINGS_SAVE_REQUESTS.load(Ordering::SeqCst)
 }
 
 /// 有界等待设置保存纪元推进（退出前 flush 用）。返回 true 表示 epoch 已推进
 /// （一次保存已处理完毕），false 表示超时（前端不可用/无保存发生）。
 pub(crate) fn wait_for_settings_save_epoch(epoch_before: u64, timeout: Duration) -> bool {
     wait_for_epoch(&SETTINGS_SAVE_EPOCH, epoch_before, timeout)
+}
+
+/// 有界等待「出现新的保存请求」（退出前探测用）。返回 true 表示前端已发起
+/// 保存调用，随后才值得等待其完成；false 表示探测窗口内无保存，可立即退出。
+pub(crate) fn wait_for_settings_save_requests(requests_before: u64, timeout: Duration) -> bool {
+    wait_for_epoch(&SETTINGS_SAVE_REQUESTS, requests_before, timeout)
 }
 
 fn wait_for_epoch(epoch: &AtomicU64, epoch_before: u64, timeout: Duration) -> bool {

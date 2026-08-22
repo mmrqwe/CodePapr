@@ -420,11 +420,11 @@ function isImagePath(path: string): boolean {
 
 async function buildImagePreviewUrl(workspacePath: string, relativePath: string, version = 0): Promise<string> {
   const fullPath = await join(workspacePath, relativePath);
-  // 权衡说明（#67）：tauri.conf.json 的 assetProtocol scope 为 $HOME/** + /**，
-  // 全盘可读——工作区可能位于 $HOME 之外（外置盘/自定义目录），收紧会破坏
-  // 非 HOME 工作区的图片预览。风险面受 CSP 约束：asset: 仅出现在 img-src
-  // （script/style/media/font 均不含），外部页面无法借 asset 协议执行脚本。
-  // 若未来需要收紧，可改为 $HOME/** + $TMPDIR/** 并接受外置盘预览降级。
+  // asset 协议 scope 默认空，工作区打开时由 grant_workspace_asset_scope 授权
+  // （见 utils/workspaceAssetScope.ts）。外置盘/自定义目录的工作区同样被按
+  // 路径显式授权，不受 $HOME 限制。风险面受 CSP 约束：asset: 仅出现在
+  // img-src（script/style/media/font 均不含），外部页面无法借 asset 协议
+  // 执行脚本，注入面也被限制在"用户实际打开过的工作区"内。
   // N4：同名文件内容被改写后 URL 不变，WebView 可能命中图片缓存；
   // 追加版本 query 强制换缓存键（asset 协议按 path 解析，query 无影响）。
   const url = convertFileSrc(fullPath);

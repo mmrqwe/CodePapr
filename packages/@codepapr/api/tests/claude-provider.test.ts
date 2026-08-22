@@ -242,6 +242,60 @@ describe('ClaudeProvider', () => {
     expect(response?.usage?.output_tokens).toBe(9);
   });
 
+  it('流式截断：stop_reason="max_tokens" 归一化为 "length" 触发续写守卫', async () => {
+    // Anthropic 的输出耗尽信号是 stop_reason='max_tokens'，而 Agent 的续写守卫
+    // 只认统一的 'length'——不归一化时截断被当正常完成，回合静默结束。
+    const chunks = [
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"claude-trunc","usage":{"input_tokens":50,"output_tokens":0}}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"半截"}}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":1024}}\n\n',
+      'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+    ].join('');
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(chunks, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new ClaudeProvider({ apiKey: 'test-key' });
+    const response = await provider.streamChat?.(
+      {
+        model: 'claude-sonnet-4-6',
+        messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+        maxTokens: 1024,
+      },
+      () => undefined
+    );
+
+    expect(response?.choices[0]?.finishReason).toBe('length');
+  });
+
+  it('非流式截断：stop_reason="max_tokens" 归一化为 "length"', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 'claude-trunc-nonstream',
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: '半截' }],
+        model: 'claude-sonnet',
+        stop_reason: 'max_tokens',
+        usage: { input_tokens: 10, output_tokens: 1024 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new ClaudeProvider({ apiKey: 'test-key' });
+    const response = await provider.chat({
+      model: 'claude-sonnet-4-6',
+      messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+      maxTokens: 1024,
+    });
+
+    expect(response.choices[0]?.finishReason).toBe('length');
+  });
+
   it('P0-3: parallel tool calls merge into one user message and omit empty text blocks', async () => {
     // 并行工具调用：assistant 一条消息带两个 tool_use，随后两条 tool 结果消息。
     // Anthropic 要求角色严格交替且拒绝空 text 块——两条 tool_result 必须合并进

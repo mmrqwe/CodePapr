@@ -16,7 +16,12 @@ import { CacheValidator, RequestBuilder } from '@codepapr/api';
 import { createId } from '../utils/createId';
 import { getTranslation } from '../utils/i18n';
 import { loadProjectState } from '../utils/projectStorage';
-import { hydrateImageMessages, collectUnresolvedImagePaths } from '../utils/chatImageStore';
+import {
+  applyImageDataToMessages,
+  collectUnresolvedImagePaths,
+  hydrateImageMessages,
+  loadChatImageData,
+} from '../utils/chatImageStore';
 import {
   loadSessions,
   loadSessionMessages,
@@ -45,6 +50,7 @@ import {
 import { nextCheckpointSequence } from '../utils/workspaceGitPanel';
 import { acquireSleepPrevention, releaseSleepPrevention } from '../utils/sleepPrevention';
 import { warmupLspForWorkspace, stopWorkspaceLsp } from '../utils/lspWarmup';
+import { grantWorkspaceAssetScope } from '../utils/workspaceAssetScope';
 import { restoreTodoListContexts, clearAllTodoListContexts, resetTodoListContext } from '../tools/todoListTool';
 import { loadMcpToolDefinitions } from '../tools/mcpTools';
 import {
@@ -601,6 +607,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           };
         });
         if (path) {
+          void grantWorkspaceAssetScope(path);
           void get()._loadProjectConfig(path);
           void get()._ensureWorkspaceGitReady(path);
           void warmupLspForWorkspace(path, get().settings.lspDisabledFamilies);
@@ -675,6 +682,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         // 每次打开递增令牌，set 前校验，不一致即丢弃本次结果。
         // closeWorkspace 同样递增令牌（见上），关闭后旧加载结果不得复活。
         const workspaceSeq = ++openWorkspaceSeq;
+
+        // asset 协议 scope 默认为空（收紧后见 grant_workspace_asset_scope）：
+        // 聊天图片/代码预览图片显示依赖该授权，必须在加载消息前完成，
+        // 否则本次加载的图片回填会因 403 失败。幂等且去重，重复打开不重复授权。
+        await grantWorkspaceAssetScope(normalizedWorkspacePath);
 
         // 读前先排空该工作区挂起的保存队列（与 legacy loadProjectState 的
         // waitForPendingProjectStateSave 对齐）：A→B→A 快速切换时，A 的
@@ -1378,14 +1390,24 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           saveCurrentProjectState(get());
           const unresolved = collectUnresolvedImagePaths(cached);
           if (unresolved.length > 0 && workspacePath) {
-            void hydrateImageMessages(workspacePath, cached).then((hydrated) => {
+            void (async () => {
+              const dataByPath = await loadChatImageData(workspacePath, unresolved);
+              if (dataByPath.size === 0) return;
               const current = get();
               if (current.activeSessionId !== id || current.workspacePath !== workspacePath) return;
+              // 竞态守卫：回填期间离开的会话可能仍在流式输出（keepAgent 保留
+              // agent），sessionMessages[id] 已被并发回合更新。用「当前」数组
+              // 合并图片数据，而不是用选中时刻的快照整体覆盖——后者会丢弃
+              // 回填期间追加/更新的消息。
+              const currentMessages = current.sessionMessages[id];
+              if (!currentMessages) return;
+              const hydrated = applyImageDataToMessages(currentMessages, dataByPath);
+              if (hydrated === currentMessages) return;
               set((s) => ({
                 messages: s.activeSessionId === id ? hydrated : s.messages,
                 sessionMessages: { ...s.sessionMessages, [id]: hydrated },
               }));
-            });
+            })();
           }
           return;
         }

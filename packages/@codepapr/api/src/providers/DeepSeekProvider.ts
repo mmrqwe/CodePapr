@@ -24,6 +24,7 @@ import {
 import {
   applyStreamingToolCallDeltas,
   finalizeStreamingToolCalls,
+  isRetriableStreamErrorType,
   readSseStream,
   safeParseToolArguments,
   StreamIdleTimeoutError,
@@ -117,6 +118,13 @@ interface DeepSeekStreamChunk {
   }>;
   usage?: DeepSeekResponse['usage'];
   system_fingerprint?: string;
+  /** 中转/网关以 SSE data 下发的确定性错误对象（鉴权失败/欠费/上下文超限等）。
+   *  官方 API 走 HTTP 4xx，此字段主要面向兼容中转——不分类会被当成
+   *  「流提前结束」无限重连（见 streamChatCore 的处理注释）。 */
+  error?: {
+    message?: string;
+    type?: string;
+  };
 }
 
 export class DeepSeekProvider extends BaseLLMProvider {
@@ -215,6 +223,22 @@ export class DeepSeekProvider extends BaseLLMProvider {
             }
             systemFingerprint = chunk.system_fingerprint ?? systemFingerprint;
 
+            // 流内 error 对象 = 确定性 API 错误（鉴权失败/欠费/上下文超限等），
+            // 不是网络断流：分类后立即抛出。与 OpenAIProvider/ClaudeProvider 对齐——
+            // 中转常以 SSE data 下发错误后干净关流，若不分类会被当成
+            // 「流提前结束」触发无限重连，永久卡死并持续烧请求。
+            // overloaded/rate_limit 之外一律不重试。
+            if (chunk.error) {
+              const errorType = chunk.error.type ?? '';
+              const errorMessage = chunk.error.message ?? '未知错误';
+              log.error(`${this.name} stream error event`, { errorType, errorMessage });
+              throw new ProviderRequestError({
+                provider: this.name,
+                message: `OpenAI-compatible API error (${errorType || 'unknown'}): ${errorMessage}`,
+                retriable: isRetriableStreamErrorType(errorType),
+              });
+            }
+
             for (const choice of chunk.choices ?? []) {
               const delta = choice.delta;
               if (!delta) {
@@ -251,6 +275,11 @@ export class DeepSeekProvider extends BaseLLMProvider {
             throw err;
           }
           if (err instanceof StreamIdleTimeoutError) {
+            throw err;
+          }
+          // 流内 error 事件已分类的 ProviderRequestError 必须原样穿透：
+          // 否则确定性错误会被包成「流中断」(retriable: true) 被流层无限重连。
+          if (err instanceof ProviderRequestError) {
             throw err;
           }
           throw new ProviderRequestError({

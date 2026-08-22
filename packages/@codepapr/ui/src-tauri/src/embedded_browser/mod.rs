@@ -78,8 +78,12 @@ pub(crate) fn workspace_key(workspace_path: &str) -> Result<String, String> {
 }
 
 pub(crate) fn insert_session(key: &str, session: EmbeddedSession) {
+    // 并发两次 open 同一工作区时，新会话会顶掉旧会话；必须显式关闭旧的
+    // webview，否则旧实例泄漏（窗口仍在、CDP 连接不断）。
     if let Ok(mut map) = sessions().lock() {
-        map.insert(key.to_string(), session);
+        if let Some(old) = map.insert(key.to_string(), session) {
+            let _ = old.webview.close();
+        }
     }
 }
 

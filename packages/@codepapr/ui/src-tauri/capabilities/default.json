@@ -6,13 +6,18 @@
   "permissions": [
     "core:default",
     "dialog:default",
-    "stronghold:default",
     {
       "identifier": "http:default",
       "allow": [
         { "url": "https://**" },
         { "url": "http://**" },
         { "url": "http://localhost:**" }
+      ],
+      "deny": [
+        { "url": "http://169.254.*.*:*" },
+        { "url": "https://169.254.*.*:*" },
+        { "url": "http://0.*.*.*:*" },
+        { "url": "https://0.*.*.*:*" }
       ]
     }
   ]

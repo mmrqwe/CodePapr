@@ -199,7 +199,12 @@ pub(crate) fn enqueue_workspace_task(
         _ => return Err(format!("未知任务类型: {task_type}")),
     };
 
-    tx.send(task).map_err(|_| "任务队列已关闭")?;
+    // 用 try_send 而非 send：队列满时立即返回错误让前端退避，而不是阻塞
+    // IPC 调用线程(该线程被卡住会连带拖住 webview 的其他命令)。
+    tx.try_send(task).map_err(|e| match e {
+        std::sync::mpsc::TrySendError::Full(_) => "任务队列已满,请稍后重试",
+        std::sync::mpsc::TrySendError::Disconnected(_) => "任务队列已关闭",
+    })?;
     Ok(id)
 }
 

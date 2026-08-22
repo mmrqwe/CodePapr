@@ -211,6 +211,14 @@ function normalizeClaudeConversationMessages(request: IChatRequest): NormalizedC
   return normalized;
 }
 
+/** Anthropic 的输出耗尽信号是 `stop_reason: 'max_tokens'`，而 Agent 的截断续写
+ * 守卫只认统一的 `'length'`（见 Agent.ts）。不做归一化时截断会被当正常完成：
+ * 部分内容直接落日志、回合静默结束。Claude 开 thinking 时思考计入
+ * max_tokens，截断概率更高。 */
+function normalizeStopReason(stopReason: string | null | undefined): string {
+  return stopReason === 'max_tokens' ? 'length' : stopReason ?? 'end_turn';
+}
+
 export class ClaudeProvider extends BaseLLMProvider {
   name = 'claude';
   models = [
@@ -351,7 +359,7 @@ export class ClaudeProvider extends BaseLLMProvider {
 
             if (chunk.type === 'message_delta') {
               if (chunk.delta?.stop_reason) {
-                finishReason = chunk.delta.stop_reason;
+                finishReason = normalizeStopReason(chunk.delta.stop_reason);
                 sawTermination = true;
               }
             }
@@ -586,7 +594,7 @@ export class ClaudeProvider extends BaseLLMProvider {
             content,
             toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
           },
-          finishReason: data.stop_reason,
+          finishReason: normalizeStopReason(data.stop_reason),
         },
       ],
       usage: {

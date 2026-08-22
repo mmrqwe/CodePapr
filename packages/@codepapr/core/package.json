@@ -1,6 +1,7 @@
 {
   "name": "@codepapr/core",
   "version": "0.1.0",
+  "private": true,
   "description": "Core Agent framework with three-partition cache",
   "type": "module",
   "main": "./dist/index.js",

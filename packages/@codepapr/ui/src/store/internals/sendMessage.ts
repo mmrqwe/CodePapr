@@ -915,25 +915,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           return false;
         }
         turnInFlight = true;
-
-        // 兜底：若当前没有打开任何项目（如用户中途关闭了工作区），自动创建并打开
-        // 默认项目，保证本次对话的文件工具有可用工作目录。失败时保持空工作区，
-        // 退化到原有的 requireWorkspace 报错行为。
-        if (!get().workspacePath.trim()) {
-          await get().ensureDefaultWorkspace();
-          // #28：创建默认项目失败时给出明确提示并拒绝发送——旧实现静默继续，
-          // 后续文件工具只会报"没有可用的工作区"，用户无从下手。
-          if (!get().workspacePath.trim()) {
-            turnInFlight = false;
-            // 同 slash 路径：无活动会话时先建会话，否则错误提示只落在
-            // 临时扁平镜像，切换/新建会话后无声消失。
-            if (!get().activeSessionId) {
-              get().newSession();
-            }
-            appendErrorMessage(set, getTranslation(normalizedSettings.lang).ensureDefaultWorkspaceFailed);
-            return false;
-          }
-        }
+        // 不变量：从置位到下方 try 之间只允许不抛错的同步代码（闭包定义）。
+        // 含 await 的前置工作（如 ensureDefaultWorkspace）必须放进 try 块内，
+        // 否则中途抛错会跳过 finally，turnInFlight 永久为真——整个应用再也
+        // 发不出消息（所有发送在入口处被静默拒绝）。
 
         // Idle safety net: guarantees isLoading/isStreaming can never stay stuck
         // ON if the agent promise somehow never settles. Threshold sits above the
@@ -1031,6 +1016,25 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         };
 
         try {
+          // 兜底：若当前没有打开任何项目（如用户中途关闭了工作区），自动创建并打开
+          // 默认项目，保证本次对话的文件工具有可用工作目录。失败时保持空工作区，
+          // 退化到原有的 requireWorkspace 报错行为。
+          // 注意：此段含 await，必须位于 try 块内——见上方「不变量」注释。
+          if (!get().workspacePath.trim()) {
+            await get().ensureDefaultWorkspace();
+            // #28：创建默认项目失败时给出明确提示并拒绝发送——旧实现静默继续，
+            // 后续文件工具只会报"没有可用的工作区"，用户无从下手。
+            if (!get().workspacePath.trim()) {
+              // 同 slash 路径：无活动会话时先建会话，否则错误提示只落在
+              // 临时扁平镜像，切换/新建会话后无声消失。
+              if (!get().activeSessionId) {
+                get().newSession();
+              }
+              appendErrorMessage(set, getTranslation(normalizedSettings.lang).ensureDefaultWorkspaceFailed);
+              return false;
+            }
+          }
+
           const { workspacePath, sessionMessages } = get();
           turnWorkspacePath = workspacePath;
 
