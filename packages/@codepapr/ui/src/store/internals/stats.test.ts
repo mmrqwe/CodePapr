@@ -4,7 +4,12 @@ import {
   addConversationStats,
   addTierRuntimeMs,
   aggregateProjectStats,
+  aggregateThroughput,
   cloneConversationStats,
+  formatDuration,
+  formatTokenThroughput,
+  sumRuntimeAcrossTiers,
+  throughputFromStats,
 } from './stats';
 import { createEmptyConversationStats } from './defaults';
 
@@ -184,5 +189,40 @@ describe('runtime fields survive cache-stats accumulation', () => {
     const cloned = cloneConversationStats(source);
     expect(cloned.primary.modelRuntimeMs).toBe(700);
     expect(cloned.primary.toolRuntimeMs).toBe(250);
+  });
+});
+
+describe('stats formatters and aggregate helpers', () => {
+  it('formatDuration formats ms correctly', () => {
+    expect(formatDuration(undefined)).toBe('—');
+    expect(formatDuration(0)).toBe('0s');
+    expect(formatDuration(-10)).toBe('0s');
+    expect(formatDuration(5000)).toBe('5s');
+    expect(formatDuration(92000)).toBe('1m 32s');
+    expect(formatDuration(3665000)).toBe('1h 1m');
+  });
+
+  it('formatTokenThroughput calculates rates', () => {
+    expect(formatTokenThroughput(0, 1000, 'token/s')).toBe('—');
+    expect(formatTokenThroughput(100, undefined, 'token/s')).toBe('—');
+    expect(formatTokenThroughput(100, 0, 'token/s')).toBe('—');
+    expect(formatTokenThroughput(100, 1000, 'token/s')).toBe('100 token/s');
+    expect(formatTokenThroughput(627, 10000, 'token/s')).toBe('62.7 token/s');
+    expect(formatTokenThroughput(5, 1000, 'token/s')).toBe('5.00 token/s');
+  });
+
+  it('sumRuntimeAcrossTiers sums runtime across tiers', () => {
+    const stats = createEmptyConversationStats();
+    stats.primary.modelRuntimeMs = 1500;
+    stats.fast.modelRuntimeMs = 500;
+    expect(sumRuntimeAcrossTiers(stats, 'modelRuntimeMs')).toBe(2000);
+    expect(sumRuntimeAcrossTiers(stats, 'toolRuntimeMs')).toBeUndefined();
+  });
+
+  it('aggregateThroughput computes combined throughput', () => {
+    const stats = createEmptyConversationStats();
+    stats.primary.totalOutput = 1000;
+    stats.primary.modelRuntimeMs = 10000;
+    expect(aggregateThroughput(stats, 'token/s')).toBe('100 token/s');
   });
 });

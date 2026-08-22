@@ -127,4 +127,55 @@ describe('StatsModal', () => {
     });
     expect(onClose).toHaveBeenCalledTimes(2);
   });
+
+  it('automatically computes context snapshot and displays top header stats', async () => {
+    const computeContextSnapshot = vi.fn(async () => undefined);
+    useAgentStore.setState((state) => ({
+      ...state,
+      activeSessionId: 'sess-1',
+      computeContextSnapshot,
+      conversationStats: {
+        ...state.conversationStats,
+        primary: {
+          ...state.conversationStats.primary,
+          totalOutput: 627,
+          modelRuntimeMs: 10000,
+          toolRuntimeMs: 2000,
+        },
+      },
+      _latestContextSnapshot: {
+        sessionId: 'sess-1',
+        snapshot: {
+          round: 1,
+          model: 'test-model',
+          messages: [],
+          toolNames: [],
+          toolsTokenEstimate: 0,
+          totalTokens: 55640,
+          tokensByStage: {
+            'stable-prefix': 0,
+            'session-state': 0,
+            conversation: 0,
+          },
+          capturedAt: Date.now(),
+        },
+      },
+    }));
+
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(
+        <StatsModal workspacePath="/ws" lang="zh-CN" onClose={onClose} />,
+      );
+    });
+
+    expect(computeContextSnapshot).toHaveBeenCalled();
+    expect(container.textContent).toContain('当前上下文');
+    expect(container.textContent).toContain('~55,640 tokens');
+    expect(container.textContent).toContain('模型耗时');
+    expect(container.textContent).toContain('10s');
+    expect(container.textContent).toContain('工具耗时');
+    expect(container.textContent).toContain('2s');
+    expect(container.textContent).toContain('62.7 token/s');
+  });
 });

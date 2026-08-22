@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { useAgentStore } from '../store/agentStore';
-import { aggregateProjectStats } from '../store/internals/stats';
+import {
+  aggregateProjectStats,
+  formatDuration,
+  throughputFromStats,
+} from '../store/internals/stats';
 import type { ConversationStats, ModelTierStats } from '../store/internals/types';
 import { getTranslation, type Lang } from '../utils/i18n';
 
@@ -60,58 +64,6 @@ function tierCost(
       output * tier.outputPerMillionRmb) /
     1_000_000
   );
-}
-
-function formatDuration(ms: number | undefined): string {
-  if (!ms || ms <= 0) return '—';
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
-}
-
-function formatTokenThroughput(
-  outputTokens: number,
-  modelRuntimeMs: number | undefined,
-  unit: string,
-): string {
-  if (!modelRuntimeMs || modelRuntimeMs <= 0 || outputTokens <= 0) return '—';
-  const rate = (outputTokens * 1000) / modelRuntimeMs;
-  const formatted = rate >= 100 ? `${Math.round(rate)}` : rate >= 10 ? rate.toFixed(1) : rate.toFixed(2);
-  return `${formatted} ${unit}`;
-}
-
-function throughputFromStats(stats: ModelTierStats, unit: string): string {
-  return formatTokenThroughput(stats.totalOutput, stats.modelRuntimeMs, unit);
-}
-
-function aggregateThroughput(stats: ConversationStats, unit: string): string {
-  let output = 0;
-  let runtime = 0;
-  for (const tier of [stats.primary, stats.fast, stats.mentor]) {
-    if (typeof tier.modelRuntimeMs === 'number' && tier.modelRuntimeMs > 0) {
-      output += tier.totalOutput;
-      runtime += tier.modelRuntimeMs;
-    }
-  }
-  return formatTokenThroughput(output, runtime > 0 ? runtime : undefined, unit);
-}
-
-/** 跨 tier 汇总耗时字段；所有 tier 都未测量时返回 undefined（显示 —）。 */
-function sumRuntimeAcrossTiers(
-  stats: ConversationStats,
-  field: 'modelRuntimeMs' | 'toolRuntimeMs'
-): number | undefined {
-  let total: number | undefined;
-  for (const tier of [stats.primary, stats.fast, stats.mentor]) {
-    if (typeof tier[field] === 'number') {
-      total = (total ?? 0) + tier[field];
-    }
-  }
-  return total;
 }
 
 function StatRow({ label, value, color = 'text-fg-soft' }: { label: string; value: string | number; color?: string }) {
@@ -268,16 +220,10 @@ export function CacheStatsDashboard({ lang, collapsible = true, wide = false }: 
   const activeSessionId = useAgentStore((state) => state.activeSessionId);
   const conversationStats = useAgentStore((state) => state.conversationStats);
   const sessionConversationStats = useAgentStore((state) => state.sessionConversationStats);
-  const latestContextSnapshot = useAgentStore((state) => state._latestContextSnapshot);
   const [collapsed, setCollapsed] = useState(collapsible);
   const [viewMode, setViewMode] = useState<'conversation' | 'project'>('conversation');
   const t = getTranslation(lang ?? settings.lang);
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
-
-  const contextSnapshot =
-    latestContextSnapshot && latestContextSnapshot.sessionId === activeSessionId
-      ? latestContextSnapshot.snapshot
-      : null;
 
   const normalizedProvider = settings.provider?.trim().toLowerCase() ?? '';
   const normalizedModel = settings.model?.trim().toLowerCase() ?? '';
@@ -320,30 +266,6 @@ export function CacheStatsDashboard({ lang, collapsible = true, wide = false }: 
 
       {showContent && (
         <div className={`min-h-0 flex-1 space-y-4 overflow-y-scroll scrollbar-thin ${collapsible ? 'border-t border-line px-4 py-4' : 'px-4 py-4'}`}>
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-raised px-3 py-2.5">
-            <div className="min-w-0">
-              <p className="text-[11px] text-fg-muted">{t.currentContextLength}</p>
-              <p className="font-mono text-sm font-semibold text-accent-text">
-                {contextSnapshot
-                  ? `~${contextSnapshot.totalTokens.toLocaleString()} ${t.tokensUnit}`
-                  : '—'}
-              </p>
-            </div>
-            <div className="min-w-0" title={t.modelRuntimeTip}>
-              <p className="text-[11px] text-fg-muted">{t.modelRuntimeLabel}</p>
-              <p className="font-mono text-sm font-semibold text-accent-text">
-                {formatDuration(sumRuntimeAcrossTiers(displayedStats, 'modelRuntimeMs'))}
-              </p>
-              <p className="font-mono text-[10px] text-fg-dim">
-                {t.toolRuntimeLabel}{' '}
-                {formatDuration(sumRuntimeAcrossTiers(displayedStats, 'toolRuntimeMs'))}
-              </p>
-              <p className="font-mono text-[10px] text-accent-text" title={t.tokenThroughputTip}>
-                {aggregateThroughput(displayedStats, t.tokenThroughputUnit)}
-              </p>
-            </div>
-          </div>
-
           {/* wide 模式下弹窗很宽，切换条收窄避免两个按钮被拉得过开。 */}
           <div className={`flex rounded-lg border border-line bg-raised p-0.5 ${wide ? 'xl:w-72' : ''}`}>
             <button

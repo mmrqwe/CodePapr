@@ -162,6 +162,58 @@ export function aggregateProjectStats(
   return result;
 }
 
+export function formatDuration(ms: number | undefined): string {
+  if (ms === undefined) return '—';
+  if (ms <= 0) return '0s';
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+export function formatTokenThroughput(
+  outputTokens: number,
+  modelRuntimeMs: number | undefined,
+  unit: string,
+): string {
+  if (!modelRuntimeMs || modelRuntimeMs <= 0 || outputTokens <= 0) return '—';
+  const rate = (outputTokens * 1000) / modelRuntimeMs;
+  const formatted = rate >= 100 ? `${Math.round(rate)}` : rate >= 10 ? rate.toFixed(1) : rate.toFixed(2);
+  return `${formatted} ${unit}`;
+}
+
+export function throughputFromStats(stats: ModelTierStats, unit: string): string {
+  return formatTokenThroughput(stats.totalOutput, stats.modelRuntimeMs, unit);
+}
+
+export function aggregateThroughput(stats: ConversationStats, unit: string): string {
+  let output = 0;
+  let runtime = 0;
+  for (const tier of [stats.primary, stats.fast, stats.mentor]) {
+    if (typeof tier.modelRuntimeMs === 'number' && tier.modelRuntimeMs > 0) {
+      output += tier.totalOutput;
+      runtime += tier.modelRuntimeMs;
+    }
+  }
+  return formatTokenThroughput(output, runtime > 0 ? runtime : undefined, unit);
+}
+
+export function sumRuntimeAcrossTiers(
+  stats: ConversationStats,
+  field: 'modelRuntimeMs' | 'toolRuntimeMs'
+): number | undefined {
+  let total: number | undefined;
+  for (const tier of [stats.primary, stats.fast, stats.mentor]) {
+    if (typeof tier[field] === 'number') {
+      total = (total ?? 0) + tier[field];
+    }
+  }
+  return total;
+}
+
 /** 累加一次回合的 Agent 实际执行时长（墙钟，毫秒）。 */
 export function addConversationRuntime(
   current: ConversationStats,

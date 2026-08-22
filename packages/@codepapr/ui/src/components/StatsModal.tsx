@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAgentStore } from '../store/agentStore';
+import {
+  aggregateThroughput,
+  formatDuration,
+  sumRuntimeAcrossTiers,
+} from '../store/internals/stats';
 import { getTranslation, type Lang } from '../utils/i18n';
 import { CacheStatsDashboard } from './CacheStatsDashboard';
 import { ContextInspectorModal } from './ContextInspectorModal';
@@ -26,25 +31,24 @@ export function StatsModal({
   const dialogRef = useRef<HTMLDivElement>(null);
   const latestContextSnapshot = useAgentStore((state) => state._latestContextSnapshot);
   const activeSessionId = useAgentStore((state) => state.activeSessionId);
+  const conversationStats = useAgentStore((state) => state.conversationStats);
 
   useEffect(() => {
     if (tab === 'project') setProjectVisited(true);
+    if (tab === 'context') setContextVisited(true);
   }, [tab]);
 
+  // 打开统计弹窗时自动重新计算当前会话的上下文快照
   useEffect(() => {
-    if (tab !== 'context') return;
-    setContextVisited(true);
     let cancelled = false;
     setContextLoading(true);
-    // 必须按当前会话消息重算：request-context 快照是「即将发出
-    // 的请求」，不含本轮已经生成的助手总结。
     void useAgentStore.getState().computeContextSnapshot().finally(() => {
       if (!cancelled) setContextLoading(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [tab]);
+  }, [activeSessionId, workspacePath]);
 
   useEffect(() => {
     const node = dialogRef.current;
@@ -88,11 +92,42 @@ export function StatsModal({
         className="flex h-[90vh] w-[min(96vw,1280px)] flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl outline-none"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
-          <h2 id="stats-modal-title" className="text-sm font-semibold text-fg">
-            {t.projectStats}
-          </h2>
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between gap-4 border-b border-line px-5 py-3">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-5 gap-y-1">
+            <h2 id="stats-modal-title" className="text-sm font-semibold text-fg shrink-0">
+              {t.projectStats}
+            </h2>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+              <div className="flex items-center gap-1.5" title={t.currentContextLength}>
+                <span className="text-fg-muted">{t.currentContextLength}</span>
+                <span className="font-mono font-semibold text-accent-text">
+                  {contextLoading && !contextSnapshot
+                    ? '...'
+                    : contextSnapshot
+                      ? `~${contextSnapshot.totalTokens.toLocaleString()} ${t.tokensUnit}`
+                      : '—'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5" title={t.modelRuntimeTip}>
+                <span className="text-fg-muted">{t.modelRuntimeLabel}</span>
+                <span className="font-mono font-semibold text-accent-text">
+                  {formatDuration(sumRuntimeAcrossTiers(conversationStats, 'modelRuntimeMs'))}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-fg-muted">{t.toolRuntimeLabel}</span>
+                <span className="font-mono text-fg-soft">
+                  {formatDuration(sumRuntimeAcrossTiers(conversationStats, 'toolRuntimeMs'))}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5" title={t.tokenThroughputTip}>
+                <span className="font-mono text-accent-text">
+                  {aggregateThroughput(conversationStats, t.tokenThroughputUnit)}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
             <div className="flex rounded-lg border border-line bg-raised p-0.5" role="tablist">
               <button
                 type="button"
