@@ -16,7 +16,7 @@ import {
   type PaprAccess,
   type PaprLocalAccess,
 } from '../papr/levelGrants';
-import { isPluginApp, parsePaprKind, parsePluginSurfaceArg, readAppManifest, resolvePaprEntryFile } from '../papr/pluginSurface';
+import { isPluginApp, parsePaprKind, parsePluginSurfaceArg, pluginIsEnabled, readAppManifest, resolvePaprEntryFile, shouldRevealOnPublish } from '../papr/pluginSurface';
 import { postAppEvent } from '../papr/appChannelHub';
 import { type WorkspaceToolContext } from './workspaceToolContext';
 
@@ -372,7 +372,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
 
     const hasBackend = !!command;
     const pluginHint =
-      '插件已钉在主窗口（overlay）。打开全屏 App 时会暂时隐藏，但继续在后台运行。可在应用面板收起。';
+      '插件已显示在主窗口（overlay）。收起只隐藏卡片、不会停用；Agent 仍可 app_publish。打开全屏 App 时会暂时隐藏，但继续在后台运行。';
     return {
       appId: rawAppId,
       title,
@@ -423,13 +423,16 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     const fromStore = storeApps.map((app) => {
       const regUrl = urlForPort(app.port);
       const regRunning = regUrl !== null && runningByUrl.has(regUrl);
+      const plugin = isPluginApp(app);
+      const chrome = useAppRuntimeStore.getState().pluginChrome[app.appId];
       return {
         appId: app.appId,
         title: app.title,
-        kind: isPluginApp(app) ? 'plugin' : 'app',
+        kind: plugin ? 'plugin' : 'app',
         hasBackend: !!(app.command && app.port),
         isRunning: !!(app.pid && app.url) || regRunning,
         pinned: useAppRuntimeStore.getState().pinnedPluginIds.includes(app.appId),
+        enabled: plugin ? pluginIsEnabled(readAppManifest(app), chrome) : undefined,
         port: app.port ?? null,
         url: app.url ?? (regRunning ? regUrl : null),
         inbox: summarizeManifestInbox(readAppManifest(app)),
@@ -439,13 +442,15 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       const regUrl = urlForPort(d.port);
       const regRunning = regUrl !== null && runningByUrl.has(regUrl);
       const diskManifest = readAppManifest({ manifestJson: d.manifest_json ?? undefined });
+      const plugin = diskManifest?.kind === 'plugin';
       return {
         appId: d.app_id,
         title: d.title,
-        kind: diskManifest?.kind === 'plugin' ? 'plugin' : 'app',
+        kind: plugin ? 'plugin' : 'app',
         hasBackend: !!(d.command && d.port),
         isRunning: regRunning,
         pinned: false,
+        enabled: plugin ? pluginIsEnabled(diskManifest, undefined) : undefined,
         port: d.port ?? null,
         url: regRunning ? regUrl : null,
         inbox: summarizeManifestInbox(diskManifest),
@@ -566,6 +571,19 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
 
     // 通知面：已挂载则实时送达（SDK papr.events.on）；未挂载仅落库。
     const delivered = postAppEvent(rawAppId, { channel, seq, ts, payload: args.payload });
+
+    if (parsePaprKind(manifest) === 'plugin') {
+      const runtime = useAppRuntimeStore.getState();
+      if (
+        shouldRevealOnPublish(
+          manifest,
+          runtime.pluginChrome[rawAppId],
+          runtime.pinnedPluginIds.includes(rawAppId),
+        )
+      ) {
+        runtime.pinPlugin(rawAppId);
+      }
+    }
 
     return {
       appId: rawAppId,

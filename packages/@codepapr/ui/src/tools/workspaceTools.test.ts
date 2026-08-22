@@ -1369,6 +1369,49 @@ describe('app_publish (agent → app/plugin 推送)', () => {
       payload: { channel: 'cards', seq: 1, ts: 1001, payload: { op: 'done', id: 'c1' } },
     });
   });
+
+  it('已启用的 onDemand 插件隐藏时 app_publish 会揭开 overlay', async () => {
+    const manifest = kanbanManifest({ inbox: { cards: {} } });
+    seed(manifest);
+    useAppRuntimeStore.setState({ apps: [], pinnedPluginIds: [], pluginChrome: {} });
+    useAppRuntimeStore.getState().mountApp({
+      appId: 'kanban',
+      title: 'Kanban',
+      html: '',
+      filePath: '.CodePapr/apps/kanban/index.html',
+      manifestJson: JSON.stringify(manifest),
+    });
+    useAppRuntimeStore.getState().enablePlugin('kanban');
+    expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual([]);
+
+    await build().execute('app_publish', { appId: 'kanban', channel: 'cards', payload: { op: 'add' } });
+    expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual(['kanban']);
+    expect(useAppRuntimeStore.getState().pluginChrome.kanban).toMatchObject({
+      enabled: true,
+      visible: true,
+    });
+  });
+
+  it('未启用的 onDemand 插件 app_publish 不揭开 overlay', async () => {
+    const manifest = kanbanManifest({
+      inbox: { cards: {} },
+      lifecycle: { autostart: false },
+    });
+    seed(manifest);
+    useAppRuntimeStore.setState({ apps: [], pinnedPluginIds: [], pluginChrome: {} });
+    useAppRuntimeStore.getState().mountApp({
+      appId: 'kanban',
+      title: 'Kanban',
+      html: '',
+      filePath: '.CodePapr/apps/kanban/index.html',
+      manifestJson: JSON.stringify(manifest),
+    });
+    useAppRuntimeStore.getState().disablePlugin('kanban');
+
+    await build().execute('app_publish', { appId: 'kanban', channel: 'cards', payload: { op: 'add' } });
+    expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual([]);
+    expect(useAppRuntimeStore.getState().pluginChrome.kanban.enabled).toBe(false);
+  });
 });
 
 describe('manifest inbox 契约校验与摘要', () => {

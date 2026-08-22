@@ -23,18 +23,21 @@ function app(partial: Partial<AppInstance> & { appId: string; manifest: unknown 
 }
 
 describe('pluginPublishCatalog', () => {
-  it('omits pinned plugins that have no inbox', () => {
+  it('omits enabled plugins that have no inbox', () => {
     const ticker = app({
       appId: 'stock-ticker',
       title: '股票',
       manifest: { spec: 'papr/0.1', name: '股票', kind: 'plugin' },
     });
     expect(
-      collectPublishCatalogTargets({ apps: [ticker], pinnedPluginIds: ['stock-ticker'] }),
+      collectPublishCatalogTargets({
+        apps: [ticker],
+        pluginChrome: { 'stock-ticker': { enabled: true } },
+      }),
     ).toEqual([]);
   });
 
-  it('includes pinned plugins with inbox and skips unpinned ones', () => {
+  it('includes enabled plugins with inbox even when overlay is hidden', () => {
     const canvas = app({
       appId: 'arch-canvas',
       title: '架构画布',
@@ -57,7 +60,10 @@ describe('pluginPublishCatalog', () => {
     });
     const targets = collectPublishCatalogTargets({
       apps: [canvas, hidden],
-      pinnedPluginIds: ['arch-canvas'],
+      pluginChrome: {
+        'arch-canvas': { enabled: true },
+        'hidden-board': { enabled: false },
+      },
     });
     expect(targets.map((t) => t.appId)).toEqual(['arch-canvas']);
   });
@@ -72,7 +78,7 @@ describe('pluginPublishCatalog', () => {
         inbox: { cards: { description: '看板卡片', example: { op: 'add' } } },
       },
     });
-    const targets = collectPublishCatalogTargets({ apps: [board], pinnedPluginIds: [] });
+    const targets = collectPublishCatalogTargets({ apps: [board] });
     expect(targets).toHaveLength(1);
     expect(targets[0]?.kind).toBe('app');
     expect(targets[0]?.inbox[0]?.channel).toBe('cards');
@@ -98,7 +104,7 @@ describe('pluginPublishCatalog', () => {
     );
     const targets = collectPublishCatalogTargets({
       apps: plugins,
-      pinnedPluginIds: plugins.map((item) => item.appId),
+      pluginChrome: Object.fromEntries(plugins.map((item) => [item.appId, { enabled: true }])),
     });
     expect(targets).toHaveLength(MAX_PUBLISH_CATALOG_TARGETS);
     expect(targets[0]?.inbox).toHaveLength(MAX_PUBLISH_CATALOG_CHANNELS);

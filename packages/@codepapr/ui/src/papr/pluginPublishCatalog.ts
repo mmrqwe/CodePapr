@@ -1,6 +1,6 @@
 import type { PromptLang } from '@codepapr/core';
 import type { AppInstance } from '../store/appRuntimeStore';
-import { isPluginApp, readAppManifest } from './pluginSurface';
+import { isPluginApp, pluginIsEnabled, readAppManifest } from './pluginSurface';
 import { summarizeManifestInbox, type PaprInboxSummary } from '../tools/workspaceAppTools';
 
 export const MAX_PUBLISH_CATALOG_TARGETS = 5;
@@ -37,15 +37,15 @@ export function compactPublishDescription(text: string | undefined): string | un
 
 /**
  * 只收集「可以推、值得进上下文」的目标：
- * - 已启用（pinned）且声明了 inbox 的 plugin
+ * - 已启用且声明了 inbox 的 plugin（不必正在显示 overlay）
  * - 声明了 inbox 的全屏 app（dock 里的看板等）
  * 没有 inbox 的自刷新小组件不进目录。
  */
 export function collectPublishCatalogTargets(state: {
   apps: readonly AppInstance[];
-  pinnedPluginIds: readonly string[];
+  pluginChrome?: Record<string, { enabled?: boolean }>;
 }): PublishCatalogTarget[] {
-  const byId = new Map(state.apps.map((app) => [app.appId, app]));
+  const chrome = state.pluginChrome ?? {};
   const out: PublishCatalogTarget[] = [];
   const seen = new Set<string>();
 
@@ -63,9 +63,10 @@ export function collectPublishCatalogTargets(state: {
     });
   };
 
-  for (const appId of state.pinnedPluginIds) {
-    const app = byId.get(appId);
-    if (app && isPluginApp(app)) tryAdd(app);
+  for (const app of state.apps) {
+    if (!isPluginApp(app)) continue;
+    if (!pluginIsEnabled(readAppManifest(app), chrome[app.appId])) continue;
+    tryAdd(app);
   }
   for (const app of state.apps) {
     if (!isPluginApp(app)) tryAdd(app);

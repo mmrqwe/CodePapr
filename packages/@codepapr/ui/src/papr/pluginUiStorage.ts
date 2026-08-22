@@ -10,6 +10,8 @@ export const PLUGIN_UI_META_KEY = 'papr.plugin_ui';
 
 export interface PluginChrome {
   enabled: boolean;
+  /** overlay 是否打开。旧数据缺省时抄 enabled（当时 enabled 就表示正在显示）。 */
+  visible: boolean;
   x?: number;
   y?: number;
   width?: number;
@@ -32,8 +34,10 @@ function parseSizeSource(value: unknown): PluginSizeSource | undefined {
 function parseChrome(value: unknown): PluginChrome | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
+  const enabled = raw.enabled !== false;
   return {
-    enabled: raw.enabled !== false,
+    enabled,
+    visible: typeof raw.visible === 'boolean' ? raw.visible : enabled,
     x: finiteNumber(raw.x),
     y: finiteNumber(raw.y),
     width: finiteNumber(raw.width),

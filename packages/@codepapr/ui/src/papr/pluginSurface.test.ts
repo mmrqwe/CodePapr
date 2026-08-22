@@ -7,7 +7,10 @@ import {
   OVERLAY_CHROME_HEIGHT,
   parsePluginSurfaceArg,
   parsePaprKind,
-  pluginShouldShow,
+  pluginIsEnabled,
+  pluginShouldAutostartOverlay,
+  resolvePluginShowPolicy,
+  shouldRevealOnPublish,
   resolveOverlaySurface,
   resolvePaprEntryFile,
 } from './pluginSurface';
@@ -64,12 +67,41 @@ describe('pluginSurface', () => {
     expect(resolvePaprEntryFile({ spec: 'papr/0.1', name: 'X', entry: '../secret.html' })).toBe('index.html');
   });
 
-  it('shows plugins from user chrome, else autostart default true', () => {
+  it('enables from user chrome, else autostart default true', () => {
     const plugin = { spec: 'papr/0.1' as const, name: 'X', kind: 'plugin' as const };
-    expect(pluginShouldShow(plugin, undefined)).toBe(true);
-    expect(pluginShouldShow({ ...plugin, lifecycle: { autostart: false } }, undefined)).toBe(false);
-    expect(pluginShouldShow({ ...plugin, lifecycle: { autostart: false } }, { enabled: true })).toBe(true);
-    expect(pluginShouldShow(plugin, { enabled: false })).toBe(false);
+    expect(pluginIsEnabled(plugin, undefined)).toBe(true);
+    expect(pluginIsEnabled({ ...plugin, lifecycle: { autostart: false } }, undefined)).toBe(false);
+    expect(pluginIsEnabled({ ...plugin, lifecycle: { autostart: false } }, { enabled: true })).toBe(true);
+    expect(pluginIsEnabled(plugin, { enabled: false })).toBe(false);
+  });
+
+  it('autostarts overlay for widgets, not inbox plugins, unless chrome.visible says so', () => {
+    const widget = { spec: 'papr/0.1' as const, name: 'X', kind: 'plugin' as const };
+    const board = {
+      ...widget,
+      inbox: { cards: { description: '看板' } },
+    };
+    expect(resolvePluginShowPolicy(widget)).toBe('always');
+    expect(resolvePluginShowPolicy(board)).toBe('onDemand');
+    expect(resolvePluginShowPolicy({ ...board, lifecycle: { show: 'never' } })).toBe('never');
+    expect(pluginShouldAutostartOverlay(widget, undefined)).toBe(true);
+    expect(pluginShouldAutostartOverlay(board, undefined)).toBe(false);
+    expect(pluginShouldAutostartOverlay(board, { enabled: true, visible: true })).toBe(true);
+    expect(pluginShouldAutostartOverlay(widget, { enabled: true, visible: false })).toBe(false);
+    expect(pluginShouldAutostartOverlay(widget, { enabled: false })).toBe(false);
+  });
+
+  it('reveals onDemand plugins on publish only when enabled and hidden', () => {
+    const board = {
+      spec: 'papr/0.1' as const,
+      name: 'X',
+      kind: 'plugin' as const,
+      inbox: { cards: { description: '看板' } },
+    };
+    expect(shouldRevealOnPublish(board, { enabled: true }, false)).toBe(true);
+    expect(shouldRevealOnPublish(board, { enabled: true }, true)).toBe(false);
+    expect(shouldRevealOnPublish(board, { enabled: false }, false)).toBe(false);
+    expect(shouldRevealOnPublish({ spec: 'papr/0.1', name: 'X', kind: 'plugin' }, { enabled: true }, false)).toBe(false);
   });
 
   it('resizes from the south-east handle and maps content setSize onto overlay height', () => {

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useAppRuntimeStore } from '../../store/appRuntimeStore';
-import { isPluginApp } from '../../papr/pluginSurface';
+import { isPluginApp, readAppManifest, resolvePluginShowPolicy } from '../../papr/pluginSurface';
 import { getTranslation } from '../../utils/i18n';
 import type { Lang } from '../../utils/i18n';
 
@@ -12,8 +12,11 @@ export function SettingsPluginsSection({ lang }: SettingsPluginsSectionProps) {
   const t = getTranslation(lang);
   const apps = useAppRuntimeStore((state) => state.apps);
   const pinnedPluginIds = useAppRuntimeStore((state) => state.pinnedPluginIds);
+  const pluginChrome = useAppRuntimeStore((state) => state.pluginChrome);
   const pinPlugin = useAppRuntimeStore((state) => state.pinPlugin);
   const unpinPlugin = useAppRuntimeStore((state) => state.unpinPlugin);
+  const enablePlugin = useAppRuntimeStore((state) => state.enablePlugin);
+  const disablePlugin = useAppRuntimeStore((state) => state.disablePlugin);
   const resetPluginLayout = useAppRuntimeStore((state) => state.resetPluginLayout);
 
   const plugins = useMemo(
@@ -34,7 +37,8 @@ export function SettingsPluginsSection({ lang }: SettingsPluginsSectionProps) {
       ) : (
         <div className="flex flex-col gap-2">
           {plugins.map((plugin) => {
-            const enabled = pinnedPluginIds.includes(plugin.appId);
+            const enabled = pluginChrome[plugin.appId]?.enabled === true;
+            const visible = pinnedPluginIds.includes(plugin.appId);
             return (
               <div
                 key={plugin.appId}
@@ -54,25 +58,63 @@ export function SettingsPluginsSection({ lang }: SettingsPluginsSectionProps) {
                 >
                   {t.settingsPluginResetLayout}
                 </button>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={enabled}
-                  aria-label={t.settingsPluginEnable}
-                  onClick={() => {
-                    if (enabled) unpinPlugin(plugin.appId);
-                    else pinPlugin(plugin.appId);
-                  }}
-                  className={`relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors ${
-                    enabled ? 'bg-ok' : 'bg-control'
-                  }`}
-                >
-                  <span
-                    className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-                      enabled ? 'translate-x-4' : 'translate-x-0'
+                <label className="flex shrink-0 items-center gap-1 text-[10px] text-fg-muted">
+                  <span>{t.settingsPluginShow}</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={visible}
+                    aria-label={t.settingsPluginShow}
+                    disabled={!enabled}
+                    title={t.settingsPluginShow}
+                    onClick={() => {
+                      if (!enabled) return;
+                      if (visible) unpinPlugin(plugin.appId);
+                      else pinPlugin(plugin.appId);
+                    }}
+                    className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                      !enabled
+                        ? 'cursor-not-allowed bg-control opacity-40'
+                        : visible
+                          ? 'cursor-pointer bg-ok'
+                          : 'cursor-pointer bg-control'
                     }`}
-                  />
-                </button>
+                  >
+                    <span
+                      className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                        visible ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </label>
+                <label className="flex shrink-0 items-center gap-1 text-[10px] text-fg-muted">
+                  <span>{t.settingsPluginEnable}</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={enabled}
+                    aria-label={t.settingsPluginEnable}
+                    onClick={() => {
+                      if (enabled) {
+                        disablePlugin(plugin.appId);
+                        return;
+                      }
+                      enablePlugin(plugin.appId);
+                      if (resolvePluginShowPolicy(readAppManifest(plugin)) === 'always') {
+                        pinPlugin(plugin.appId);
+                      }
+                    }}
+                    className={`relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors ${
+                      enabled ? 'bg-ok' : 'bg-control'
+                    }`}
+                  >
+                    <span
+                      className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                        enabled ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </label>
               </div>
             );
           })}

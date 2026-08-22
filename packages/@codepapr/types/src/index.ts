@@ -738,9 +738,15 @@ export interface PaprSurface {
   resizable?: boolean;
 }
 
+/** 插件 overlay 出现策略。缺省：声明了 inbox → onDemand，否则 always。 */
+export type PaprPluginShow = 'always' | 'onDemand' | 'never';
+
 export interface PaprLifecycle {
+  /** 工作区发现时是否自动启用（进入 agent 目录）。默认 true。不表示自动显示 overlay。 */
   autostart?: boolean;
   persistPosition?: boolean;
+  /** 仅 plugin：启用后 overlay 何时出现。 */
+  show?: PaprPluginShow;
 }
 
 /**

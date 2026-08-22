@@ -39,6 +39,7 @@ describe('appRuntimeStore plugins', () => {
     useAppRuntimeStore.getState().pinPlugin('ticker');
     expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual(['ticker']);
     expect(useAppRuntimeStore.getState().pluginChrome.ticker.enabled).toBe(true);
+    expect(useAppRuntimeStore.getState().pluginChrome.ticker.visible).toBe(true);
 
     useAppRuntimeStore.getState().openAppModal('ticker');
     expect(useAppRuntimeStore.getState().openedAppId).toBeNull();
@@ -49,7 +50,7 @@ describe('appRuntimeStore plugins', () => {
     expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual(['ticker']);
   });
 
-  it('unpin keeps overlay geometry and records enabled=false', () => {
+  it('unpin keeps overlay geometry and stays enabled', () => {
     mountTicker();
     useAppRuntimeStore.getState().pinPlugin('ticker');
     useAppRuntimeStore.getState().setOverlayLayout('ticker', {
@@ -69,11 +70,33 @@ describe('appRuntimeStore plugins', () => {
       sizeSource: 'user',
     });
     expect(useAppRuntimeStore.getState().pluginChrome.ticker).toMatchObject({
-      enabled: false,
+      enabled: true,
+      visible: false,
       x: 10,
       y: 20,
       width: 320,
       height: 200,
+    });
+  });
+
+  it('enable without pin keeps overlay hidden', () => {
+    mountTicker();
+    useAppRuntimeStore.getState().enablePlugin('ticker');
+    expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual([]);
+    expect(useAppRuntimeStore.getState().pluginChrome.ticker).toMatchObject({
+      enabled: true,
+      visible: false,
+    });
+  });
+
+  it('disable unpins and records enabled=false', () => {
+    mountTicker();
+    useAppRuntimeStore.getState().pinPlugin('ticker');
+    useAppRuntimeStore.getState().disablePlugin('ticker');
+    expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual([]);
+    expect(useAppRuntimeStore.getState().pluginChrome.ticker).toMatchObject({
+      enabled: false,
+      visible: false,
     });
   });
 
@@ -102,5 +125,7 @@ describe('appRuntimeStore plugins', () => {
     expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual([]);
     expect(useAppRuntimeStore.getState().overlayLayouts.ticker).toMatchObject({ x: 40, y: 80, width: 360, height: 220 });
     expect(useAppRuntimeStore.getState().pluginChrome.hidden.enabled).toBe(false);
+    expect(useAppRuntimeStore.getState().pluginChrome.ticker.visible).toBe(true);
+    expect(useAppRuntimeStore.getState().pluginChrome.hidden.visible).toBe(false);
   });
 });

@@ -112,12 +112,45 @@ export function shouldPersistPluginPosition(manifest: PaprManifest | null | unde
   return manifest?.lifecycle?.persistPosition !== false;
 }
 
-export function pluginShouldShow(
+export type PluginShowPolicy = 'always' | 'onDemand' | 'never';
+
+export function pluginHasInbox(manifest: PaprManifest | null | undefined): boolean {
+  const inbox = manifest?.inbox;
+  return !!inbox && typeof inbox === 'object' && !Array.isArray(inbox) && Object.keys(inbox).length > 0;
+}
+
+export function resolvePluginShowPolicy(manifest: PaprManifest | null | undefined): PluginShowPolicy {
+  const show = manifest?.lifecycle?.show;
+  if (show === 'always' || show === 'onDemand' || show === 'never') return show;
+  return pluginHasInbox(manifest) ? 'onDemand' : 'always';
+}
+
+export function pluginIsEnabled(
   manifest: PaprManifest | null | undefined,
   chrome: { enabled?: boolean } | null | undefined,
 ): boolean {
   if (chrome && typeof chrome.enabled === 'boolean') return chrome.enabled;
   return manifest?.lifecycle?.autostart !== false;
+}
+
+/** 工作区扫描时要不要自动钉 overlay。用户已持久化 visible 时以用户为准。 */
+export function pluginShouldAutostartOverlay(
+  manifest: PaprManifest | null | undefined,
+  chrome: { enabled?: boolean; visible?: boolean } | null | undefined,
+): boolean {
+  if (!pluginIsEnabled(manifest, chrome)) return false;
+  if (chrome && typeof chrome.visible === 'boolean') return chrome.visible;
+  return resolvePluginShowPolicy(manifest) === 'always';
+}
+
+export function shouldRevealOnPublish(
+  manifest: PaprManifest | null | undefined,
+  chrome: { enabled?: boolean } | null | undefined,
+  isVisible: boolean,
+): boolean {
+  if (isVisible) return false;
+  if (!pluginIsEnabled(manifest, chrome)) return false;
+  return resolvePluginShowPolicy(manifest) === 'onDemand';
 }
 
 export function clampOverlayOrigin(

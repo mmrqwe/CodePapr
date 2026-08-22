@@ -42,6 +42,20 @@ describe('SettingsPluginsSection', () => {
           updatedAt: 1,
           manifestJson: JSON.stringify({ spec: 'papr/0.1', name: '股票', kind: 'plugin' }),
         },
+        {
+          appId: 'kanban',
+          title: '看板',
+          html: '',
+          filePath: 'z',
+          createdAt: 1,
+          updatedAt: 1,
+          manifestJson: JSON.stringify({
+            spec: 'papr/0.1',
+            name: '看板',
+            kind: 'plugin',
+            inbox: { cards: { description: '卡片' } },
+          }),
+        },
       ],
       pinnedPluginIds: [],
       overlayLayouts: {},
@@ -56,19 +70,32 @@ describe('SettingsPluginsSection', () => {
     container.remove();
   });
 
-  it('lists plugins only and toggles pin immediately', async () => {
+  it('lists plugins only; enable auto-shows widgets but not inbox plugins', async () => {
     await act(async () => {
       root.render(<SettingsPluginsSection lang="zh-CN" />);
     });
     expect(container.textContent).toContain('股票');
+    expect(container.textContent).toContain('看板');
     expect(container.textContent).not.toContain('Notes');
 
-    const toggle = container.querySelector('button[role="switch"]') as HTMLButtonElement;
-    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    const enableTicker = Array.from(container.querySelectorAll('button[role="switch"]')).find(
+      (button) => button.getAttribute('aria-label') === '启用' && button.closest('div')?.textContent?.includes('股票'),
+    ) as HTMLButtonElement;
+    expect(enableTicker.getAttribute('aria-checked')).toBe('false');
     await act(async () => {
-      toggle.click();
+      enableTicker.click();
     });
-    expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual(['ticker']);
     expect(useAppRuntimeStore.getState().pluginChrome.ticker.enabled).toBe(true);
+    expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual(['ticker']);
+
+    const enableKanban = Array.from(container.querySelectorAll('button[role="switch"]')).find(
+      (button) => button.getAttribute('aria-label') === '启用' && button.closest('div')?.textContent?.includes('看板'),
+    ) as HTMLButtonElement;
+    await act(async () => {
+      enableKanban.click();
+    });
+    expect(useAppRuntimeStore.getState().pluginChrome.kanban.enabled).toBe(true);
+    expect(useAppRuntimeStore.getState().pluginChrome.kanban.visible).toBe(false);
+    expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual(['ticker']);
   });
 });

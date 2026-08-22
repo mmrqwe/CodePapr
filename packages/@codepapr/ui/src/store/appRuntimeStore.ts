@@ -58,6 +58,8 @@ interface AppRuntimeState {
   clearApps: () => void;
   openAppModal: (appId: string) => void;
   closeAppModal: () => void;
+  enablePlugin: (appId: string) => void;
+  disablePlugin: (appId: string) => void;
   pinPlugin: (appId: string) => void;
   unpinPlugin: (appId: string) => void;
   setOverlayLayout: (appId: string, layout: OverlayLayout) => void;
@@ -76,10 +78,16 @@ function omitKey<T>(record: Record<string, T>, appId: string): Record<string, T>
   return next;
 }
 
-function chromeFromLayout(previous: PluginChrome | undefined, layout: OverlayLayout, enabled: boolean): PluginChrome {
+function chromeFromLayout(
+  previous: PluginChrome | undefined,
+  layout: OverlayLayout,
+  enabled: boolean,
+  visible: boolean,
+): PluginChrome {
   return {
     ...previous,
     enabled,
+    visible,
     x: layout.x,
     y: layout.y,
     width: layout.width,
@@ -99,6 +107,7 @@ function chromeForPersist(
       ? record
       : {
           enabled: record.enabled,
+          visible: record.visible,
           width: record.width,
           height: record.height,
           sizeSource: record.sizeSource,
@@ -214,19 +223,58 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
     set({ openedAppId: null });
   },
 
+  enablePlugin: (appId) => {
+    let changed = false;
+    set((state) => {
+      const app = state.apps.find((item) => item.appId === appId);
+      if (!app || !isPluginApp(app)) return state;
+      const previous = state.pluginChrome[appId];
+      const visible = previous?.visible ?? state.pinnedPluginIds.includes(appId);
+      if (previous?.enabled === true && previous.visible === visible) return state;
+      changed = true;
+      return {
+        pluginChrome: {
+          ...state.pluginChrome,
+          [appId]: { ...previous, enabled: true, visible },
+        },
+      };
+    });
+    if (changed) get().persistPluginUi();
+  },
+
+  disablePlugin: (appId) => {
+    let changed = false;
+    set((state) => {
+      const previous = state.pluginChrome[appId];
+      const pinned = state.pinnedPluginIds.includes(appId);
+      if (!pinned && previous?.enabled === false && previous.visible === false) return state;
+      changed = true;
+      return {
+        pinnedPluginIds: state.pinnedPluginIds.filter((id) => id !== appId),
+        pluginChrome: {
+          ...state.pluginChrome,
+          [appId]: { ...previous, enabled: false, visible: false },
+        },
+      };
+    });
+    if (changed) get().persistPluginUi();
+  },
+
   pinPlugin: (appId) => {
     let changed = false;
     set((state) => {
       const app = state.apps.find((item) => item.appId === appId);
       if (!app || !isPluginApp(app)) return state;
+      const previous = state.pluginChrome[appId];
+      const alreadyPinned = state.pinnedPluginIds.includes(appId);
+      if (alreadyPinned && previous?.enabled === true && previous.visible === true) return state;
       changed = true;
       const without = state.pinnedPluginIds.filter((id) => id !== appId);
-      const previous = state.pluginChrome[appId];
       return {
-        pinnedPluginIds: [...without, appId],
+        pinnedPluginIds: alreadyPinned ? state.pinnedPluginIds : [...without, appId],
         pluginChrome: {
           ...state.pluginChrome,
-          [appId]: { ...previous, enabled: true },
+          [appId]: { ...previous, enabled: true, visible: true },
         },
       };
     });
@@ -236,16 +284,19 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
   unpinPlugin: (appId) => {
     let changed = false;
     set((state) => {
-      if (!state.pinnedPluginIds.includes(appId) && state.pluginChrome[appId]?.enabled === false) {
-        return state;
-      }
-      changed = true;
       const previous = state.pluginChrome[appId];
+      const pinned = state.pinnedPluginIds.includes(appId);
+      if (!pinned && previous?.visible === false) return state;
+      changed = true;
       return {
         pinnedPluginIds: state.pinnedPluginIds.filter((id) => id !== appId),
         pluginChrome: {
           ...state.pluginChrome,
-          [appId]: { ...previous, enabled: false },
+          [appId]: {
+            ...previous,
+            enabled: previous?.enabled ?? true,
+            visible: false,
+          },
         },
       };
     });
@@ -255,12 +306,13 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
   setOverlayLayout: (appId, layout) => {
     set((state) => {
       if (!state.pinnedPluginIds.includes(appId)) return state;
-      const enabled = state.pluginChrome[appId]?.enabled ?? true;
+      const previous = state.pluginChrome[appId];
+      const enabled = previous?.enabled ?? true;
       return {
         overlayLayouts: { ...state.overlayLayouts, [appId]: layout },
         pluginChrome: {
           ...state.pluginChrome,
-          [appId]: chromeFromLayout(state.pluginChrome[appId], layout, enabled),
+          [appId]: chromeFromLayout(previous, layout, enabled, true),
         },
       };
     });
@@ -281,11 +333,13 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
   resetPluginLayout: (appId) => {
     set((state) => {
       const previous = state.pluginChrome[appId];
+      const enabled = previous?.enabled ?? state.pinnedPluginIds.includes(appId);
+      const visible = previous?.visible ?? state.pinnedPluginIds.includes(appId);
       return {
         overlayLayouts: omitKey(state.overlayLayouts, appId),
         pluginChrome: {
           ...state.pluginChrome,
-          [appId]: { enabled: previous?.enabled ?? state.pinnedPluginIds.includes(appId) },
+          [appId]: { enabled, visible },
         },
       };
     });

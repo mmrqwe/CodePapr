@@ -23,6 +23,7 @@ describe('parsePluginUiState', () => {
     });
     expect(parsed.chrome.ticker).toEqual({
       enabled: false,
+      visible: false,
       x: 12,
       y: 40,
       width: 320,
@@ -32,11 +33,25 @@ describe('parsePluginUiState', () => {
     expect(parsed.chrome['a/b']).toBeUndefined();
     expect(parsed.chrome.broken).toEqual({
       enabled: true,
+      visible: true,
       x: undefined,
       y: undefined,
       width: 999,
       height: undefined,
       sizeSource: undefined,
     });
+  });
+
+  it('copies enabled onto visible when the field is missing (legacy chrome)', () => {
+    const parsed = parsePluginUiState({
+      chrome: {
+        shown: { enabled: true, x: 1, y: 2 },
+        hidden: { enabled: false },
+        explicit: { enabled: true, visible: false },
+      },
+    });
+    expect(parsed.chrome.shown.visible).toBe(true);
+    expect(parsed.chrome.hidden.visible).toBe(false);
+    expect(parsed.chrome.explicit).toMatchObject({ enabled: true, visible: false });
   });
 });

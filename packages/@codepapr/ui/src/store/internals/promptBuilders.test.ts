@@ -121,6 +121,10 @@ describe('buildAgentSessionBootstrapPrompt', () => {
         },
       ],
       pinnedPluginIds: ['arch-canvas', 'stock-ticker'],
+      pluginChrome: {
+        'arch-canvas': { enabled: true, visible: false },
+        'stock-ticker': { enabled: true, visible: true },
+      },
     });
 
     const bootstrap = buildAgentSessionBootstrapPrompt(makeSettings(), '/tmp/ws', []);

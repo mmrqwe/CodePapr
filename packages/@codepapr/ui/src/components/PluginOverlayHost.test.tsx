@@ -128,5 +128,7 @@ describe('PluginOverlayHost', () => {
       close?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual([]);
+    expect(useAppRuntimeStore.getState().pluginChrome['stock-ticker']?.enabled).toBe(true);
+    expect(useAppRuntimeStore.getState().pluginChrome['stock-ticker']?.visible).toBe(false);
   });
 });

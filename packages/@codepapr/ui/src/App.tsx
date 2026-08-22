@@ -5,7 +5,7 @@ import { useAgentStore, isApiConfigured } from './store/agentStore';
 import { usePreviewStore } from './store/previewStore';
 import { useBrowserViewStore } from './store/browserViewStore';
 import { useAppRuntimeStore } from './store/appRuntimeStore';
-import { isPluginApp, pluginShouldShow, readAppManifest } from './papr/pluginSurface';
+import { isPluginApp, pluginIsEnabled, pluginShouldAutostartOverlay, readAppManifest } from './papr/pluginSurface';
 import { loadPluginUi } from './papr/pluginUiStorage';
 import { useCharactersStore } from './store/charactersStore';
 import { useDebugLogStore, pushDebugLog } from './store/debugLogStore';
@@ -480,9 +480,13 @@ export default function App() {
             });
             if (isPluginApp({ manifestJson: app.manifest_json ?? undefined })) {
               const manifest = readAppManifest({ manifestJson: app.manifest_json ?? undefined });
-              const chrome = useAppRuntimeStore.getState().pluginChrome[app.app_id];
-              if (pluginShouldShow(manifest, chrome)) {
-                useAppRuntimeStore.getState().pinPlugin(app.app_id);
+              const runtime = useAppRuntimeStore.getState();
+              const chrome = runtime.pluginChrome[app.app_id];
+              if (pluginIsEnabled(manifest, chrome)) {
+                runtime.enablePlugin(app.app_id);
+                if (pluginShouldAutostartOverlay(manifest, chrome)) {
+                  runtime.pinPlugin(app.app_id);
+                }
               }
             }
           }
