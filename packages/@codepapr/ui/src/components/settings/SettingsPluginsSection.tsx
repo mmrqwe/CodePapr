@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useAppRuntimeStore } from '../../store/appRuntimeStore';
-import { isPluginApp, readAppManifest, resolvePluginShowPolicy } from '../../papr/pluginSurface';
+import { isPluginApp, readAppManifest, resolvePluginShowPolicy, resolveShowPlacement } from '../../papr/pluginSurface';
 import { getTranslation } from '../../utils/i18n';
 import type { Lang } from '../../utils/i18n';
 
@@ -15,6 +15,8 @@ export function SettingsPluginsSection({ lang }: SettingsPluginsSectionProps) {
   const pluginChrome = useAppRuntimeStore((state) => state.pluginChrome);
   const pinPlugin = useAppRuntimeStore((state) => state.pinPlugin);
   const unpinPlugin = useAppRuntimeStore((state) => state.unpinPlugin);
+  const dockPlugin = useAppRuntimeStore((state) => state.dockPlugin);
+  const undockPlugin = useAppRuntimeStore((state) => state.undockPlugin);
   const enablePlugin = useAppRuntimeStore((state) => state.enablePlugin);
   const disablePlugin = useAppRuntimeStore((state) => state.disablePlugin);
   const resetPluginLayout = useAppRuntimeStore((state) => state.resetPluginLayout);
@@ -39,6 +41,7 @@ export function SettingsPluginsSection({ lang }: SettingsPluginsSectionProps) {
           {plugins.map((plugin) => {
             const enabled = pluginChrome[plugin.appId]?.enabled === true;
             const visible = pinnedPluginIds.includes(plugin.appId);
+            const docked = resolveShowPlacement(readAppManifest(plugin), pluginChrome[plugin.appId]) === 'right';
             return (
               <div
                 key={plugin.appId}
@@ -58,6 +61,35 @@ export function SettingsPluginsSection({ lang }: SettingsPluginsSectionProps) {
                 >
                   {t.settingsPluginResetLayout}
                 </button>
+                <label className="flex shrink-0 items-center gap-1 text-[10px] text-fg-muted">
+                  <span>{t.settingsPluginDock}</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={docked && visible}
+                    aria-label={t.settingsPluginDock}
+                    disabled={!enabled || !visible}
+                    title={t.settingsPluginDock}
+                    onClick={() => {
+                      if (!enabled || !visible) return;
+                      if (docked) undockPlugin(plugin.appId);
+                      else dockPlugin(plugin.appId);
+                    }}
+                    className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                      !enabled || !visible
+                        ? 'cursor-not-allowed bg-control opacity-40'
+                        : docked
+                          ? 'cursor-pointer bg-ok'
+                          : 'cursor-pointer bg-control'
+                    }`}
+                  >
+                    <span
+                      className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                        docked && visible ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </label>
                 <label className="flex shrink-0 items-center gap-1 text-[10px] text-fg-muted">
                   <span>{t.settingsPluginShow}</span>
                   <button

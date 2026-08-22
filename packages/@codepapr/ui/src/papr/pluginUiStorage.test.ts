@@ -54,4 +54,15 @@ describe('parsePluginUiState', () => {
     expect(parsed.chrome.hidden.visible).toBe(false);
     expect(parsed.chrome.explicit).toMatchObject({ enabled: true, visible: false });
   });
+
+  it('keeps explicit placement and leaves legacy chrome undocked', () => {
+    const parsed = parsePluginUiState({
+      chrome: {
+        board: { enabled: true, visible: true, placement: 'right' },
+        ticker: { enabled: true, x: 1, y: 2 },
+      },
+    });
+    expect(parsed.chrome.board.placement).toBe('right');
+    expect(parsed.chrome.ticker.placement).toBeUndefined();
+  });
 });

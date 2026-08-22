@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyOverlayResize,
+  clampOverlaySize,
   defaultOverlayOrigin,
   isPluginApp,
   overlayFromSetSize,
@@ -9,6 +10,9 @@ import {
   parsePaprKind,
   pluginIsEnabled,
   pluginShouldAutostartOverlay,
+  defaultPluginPlacement,
+  resolveShowPlacement,
+  selectDockedPluginId,
   resolvePluginShowPolicy,
   shouldRevealOnPublish,
   resolveOverlaySurface,
@@ -29,7 +33,7 @@ describe('pluginSurface', () => {
     ).toBe(true);
   });
 
-  it('resolves overlay defaults and clamps size', () => {
+  it('resolves overlay defaults and keeps min size without a 720 cap', () => {
     expect(resolveOverlaySurface(null)).toEqual({
       type: 'overlay',
       width: 320,
@@ -42,13 +46,37 @@ describe('pluginSurface', () => {
         name: 'X',
         surface: { type: 'overlay', width: 9999, height: 10, position: 'bottom-left' },
       }),
-    ).toMatchObject({ width: 720, height: 100, position: 'bottom-left' });
+    ).toMatchObject({ type: 'overlay', width: 9999, height: 100, position: 'bottom-left' });
+    const clamped = clampOverlaySize({ width: 9999, height: 10 }, { width: 1200, height: 800 });
+    expect(clamped.width).toBe(1200 - 16);
+    expect(clamped.height).toBe(100);
   });
 
-  it('rejects non-overlay surfaces at render time', () => {
-    expect(() => parsePluginSurfaceArg({ type: 'hud' })).toThrow(/overlay/);
+  it('accepts panel surfaces and rejects unknown types', () => {
+    expect(parsePluginSurfaceArg({ type: 'panel' }).type).toBe('panel');
+    expect(() => parsePluginSurfaceArg({ type: 'hud' })).toThrow(/overlay.*panel|panel.*overlay/);
     expect(parsePluginSurfaceArg(undefined).type).toBe('overlay');
     expect(parsePluginSurfaceArg({ type: '' }).type).toBe('overlay');
+  });
+
+  it('defaults inbox plugins to right dock unless chrome has geometry or an explicit placement', () => {
+    const board = {
+      spec: 'papr/0.1' as const,
+      name: '看板',
+      kind: 'plugin' as const,
+      inbox: { cards: { description: '卡片' } },
+    };
+    const ticker = { spec: 'papr/0.1' as const, name: '行情', kind: 'plugin' as const };
+    expect(defaultPluginPlacement(board)).toBe('right');
+    expect(defaultPluginPlacement(ticker)).toBe('float');
+    expect(resolveShowPlacement(board, undefined)).toBe('right');
+    expect(resolveShowPlacement(board, { x: 10, y: 20 })).toBe('float');
+    expect(resolveShowPlacement(board, { placement: 'right', x: 10, y: 20 })).toBe('right');
+    expect(selectDockedPluginId({
+      apps: [{ appId: 'board', manifestJson: JSON.stringify(board) }],
+      pinnedPluginIds: ['board'],
+      pluginChrome: { board: { placement: 'right' } },
+    })).toBe('board');
   });
 
   it('places default origin in the requested corner', () => {

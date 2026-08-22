@@ -3,6 +3,7 @@ import {
   OVERLAY_DEFAULT_HEIGHT,
   OVERLAY_DEFAULT_WIDTH,
   type OverlayLayout,
+  type PluginPlacement,
   type PluginSizeSource,
 } from './pluginSurface';
 
@@ -12,6 +13,7 @@ export interface PluginChrome {
   enabled: boolean;
   /** overlay 是否打开。旧数据缺省时抄 enabled（当时 enabled 就表示正在显示）。 */
   visible: boolean;
+  placement?: PluginPlacement;
   x?: number;
   y?: number;
   width?: number;
@@ -27,6 +29,10 @@ function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function parsePlacement(value: unknown): PluginPlacement | undefined {
+  return value === 'float' || value === 'right' ? value : undefined;
+}
+
 function parseSizeSource(value: unknown): PluginSizeSource | undefined {
   return value === 'manifest' || value === 'plugin' || value === 'user' ? value : undefined;
 }
@@ -35,9 +41,11 @@ function parseChrome(value: unknown): PluginChrome | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   const enabled = raw.enabled !== false;
+  const placement = parsePlacement(raw.placement);
   return {
     enabled,
     visible: typeof raw.visible === 'boolean' ? raw.visible : enabled,
+    ...(placement ? { placement } : {}),
     x: finiteNumber(raw.x),
     y: finiteNumber(raw.y),
     width: finiteNumber(raw.width),

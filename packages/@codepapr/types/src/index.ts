@@ -726,9 +726,14 @@ export type PaprKind = 'app' | 'plugin';
 
 export type PaprOverlayPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
 
-/** 插件表面。v1 仅 overlay（主窗口悬浮卡片）。 */
+export type PaprSurfaceType = 'overlay' | 'panel';
+
+/**
+ * 插件表面。overlay = 主窗口浮卡；panel = 停靠右侧栏（对标 Cursor canvas）。
+ * width/height/position 只对 overlay 有意义。
+ */
 export interface PaprSurface {
-  type?: 'overlay';
+  type?: PaprSurfaceType;
   width?: number;
   height?: number;
   position?: PaprOverlayPosition;

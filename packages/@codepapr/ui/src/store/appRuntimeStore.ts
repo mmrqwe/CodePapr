@@ -3,8 +3,10 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   isPluginApp,
   readAppManifest,
+  resolveShowPlacement,
   shouldPersistPluginPosition,
   type OverlayLayout,
+  type PluginPlacement,
 } from '../papr/pluginSurface';
 import {
   layoutsFromChrome,
@@ -62,6 +64,8 @@ interface AppRuntimeState {
   disablePlugin: (appId: string) => void;
   pinPlugin: (appId: string) => void;
   unpinPlugin: (appId: string) => void;
+  dockPlugin: (appId: string) => void;
+  undockPlugin: (appId: string) => void;
   setOverlayLayout: (appId: string, layout: OverlayLayout) => void;
   persistPluginUi: () => void;
   hydratePluginUi: (state: PluginUiState) => void;
@@ -76,6 +80,52 @@ function omitKey<T>(record: Record<string, T>, appId: string): Record<string, T>
   const next = { ...record };
   delete next[appId];
   return next;
+}
+
+function exclusiveDockChrome(
+  chrome: Record<string, PluginChrome>,
+  appId: string,
+  placement: PluginPlacement,
+): Record<string, PluginChrome> {
+  const next: Record<string, PluginChrome> = { ...chrome };
+  if (placement === 'right') {
+    for (const [id, record] of Object.entries(next)) {
+      if (id !== appId && record.placement === 'right') {
+        next[id] = { ...record, placement: 'float' };
+      }
+    }
+  }
+  return next;
+}
+
+function pinPluginState(
+  state: AppRuntimeState,
+  appId: string,
+  placementOverride?: PluginPlacement,
+): Pick<AppRuntimeState, 'pinnedPluginIds' | 'pluginChrome'> | null {
+  const app = state.apps.find((item) => item.appId === appId);
+  if (!app || !isPluginApp(app)) return null;
+  const previous = state.pluginChrome[appId];
+  const placement = placementOverride ?? resolveShowPlacement(readAppManifest(app), previous);
+  const alreadyPinned = state.pinnedPluginIds.includes(appId);
+  if (
+    alreadyPinned
+    && previous?.enabled === true
+    && previous.visible === true
+    && previous.placement === placement
+    && placementOverride === undefined
+  ) {
+    return null;
+  }
+  const without = state.pinnedPluginIds.filter((id) => id !== appId);
+  const nextChrome: Record<string, PluginChrome> = {
+    ...state.pluginChrome,
+    [appId]: { ...previous, enabled: true, visible: true, placement },
+  };
+  return {
+    pinnedPluginIds: alreadyPinned ? state.pinnedPluginIds : [...without, appId],
+    pluginChrome: exclusiveDockChrome(nextChrome, appId, placement),
+  };
 }
 
 function chromeFromLayout(
@@ -108,6 +158,7 @@ function chromeForPersist(
       : {
           enabled: record.enabled,
           visible: record.visible,
+          placement: record.placement,
           width: record.width,
           height: record.height,
           sizeSource: record.sizeSource,
@@ -263,20 +314,10 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
   pinPlugin: (appId) => {
     let changed = false;
     set((state) => {
-      const app = state.apps.find((item) => item.appId === appId);
-      if (!app || !isPluginApp(app)) return state;
-      const previous = state.pluginChrome[appId];
-      const alreadyPinned = state.pinnedPluginIds.includes(appId);
-      if (alreadyPinned && previous?.enabled === true && previous.visible === true) return state;
+      const next = pinPluginState(state, appId);
+      if (!next) return state;
       changed = true;
-      const without = state.pinnedPluginIds.filter((id) => id !== appId);
-      return {
-        pinnedPluginIds: alreadyPinned ? state.pinnedPluginIds : [...without, appId],
-        pluginChrome: {
-          ...state.pluginChrome,
-          [appId]: { ...previous, enabled: true, visible: true },
-        },
-      };
+      return next;
     });
     if (changed) get().persistPluginUi();
   },
@@ -299,6 +340,32 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
           },
         },
       };
+    });
+    if (changed) get().persistPluginUi();
+  },
+
+  dockPlugin: (appId) => {
+    let changed = false;
+    set((state) => {
+      const next = pinPluginState(state, appId, 'right');
+      if (!next) return state;
+      changed = true;
+      return next;
+    });
+    if (changed) get().persistPluginUi();
+  },
+
+  undockPlugin: (appId) => {
+    let changed = false;
+    set((state) => {
+      const app = state.apps.find((item) => item.appId === appId);
+      if (!app || !isPluginApp(app)) return state;
+      const previous = state.pluginChrome[appId];
+      if (previous?.placement === 'float' && state.pinnedPluginIds.includes(appId)) return state;
+      const next = pinPluginState(state, appId, 'float');
+      if (!next) return state;
+      changed = true;
+      return next;
     });
     if (changed) get().persistPluginUi();
   },
@@ -339,7 +406,7 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
         overlayLayouts: omitKey(state.overlayLayouts, appId),
         pluginChrome: {
           ...state.pluginChrome,
-          [appId]: { enabled, visible },
+          [appId]: { enabled, visible, placement: previous?.placement },
         },
       };
     });

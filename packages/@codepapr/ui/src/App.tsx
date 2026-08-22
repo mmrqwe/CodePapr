@@ -5,8 +5,9 @@ import { useAgentStore, isApiConfigured } from './store/agentStore';
 import { usePreviewStore } from './store/previewStore';
 import { useBrowserViewStore } from './store/browserViewStore';
 import { useAppRuntimeStore } from './store/appRuntimeStore';
-import { isPluginApp, pluginIsEnabled, pluginShouldAutostartOverlay, readAppManifest } from './papr/pluginSurface';
+import { isPluginApp, pluginIsEnabled, pluginShouldAutostartOverlay, readAppManifest, selectDockedPluginId } from './papr/pluginSurface';
 import { loadPluginUi } from './papr/pluginUiStorage';
+import { setPluginDockSlot } from './papr/pluginDockSlot';
 import { useCharactersStore } from './store/charactersStore';
 import { useDebugLogStore, pushDebugLog } from './store/debugLogStore';
 import { SessionManager } from './components/SessionManager';
@@ -227,6 +228,13 @@ export default function App() {
   const browserEngine = useBrowserViewStore((state) => state.engine);
   const openBrowserPanel = useBrowserViewStore((state) => state.openPanel);
   const openedAppId = useAppRuntimeStore((state) => state.openedAppId);
+  const dockedPluginId = useAppRuntimeStore((state) =>
+    selectDockedPluginId({
+      apps: state.apps,
+      pinnedPluginIds: state.pinnedPluginIds,
+      pluginChrome: state.pluginChrome,
+    }),
+  );
   const clearApps = useAppRuntimeStore((state) => state.clearApps);
   const mountApp = useAppRuntimeStore((state) => state.mountApp);
   const t = getTranslation(settings.lang);
@@ -702,7 +710,7 @@ export default function App() {
               defaultRatio={0.68}
               minFirstSize={380}
               minSecondSize={280}
-              hideSeparator={workbenchHidden}
+              hideSeparator={workbenchHidden && !dockedPluginId}
               className="h-full"
               firstPaneClassName="min-w-0 bg-base"
               secondPaneClassName="bg-base"
@@ -787,7 +795,13 @@ export default function App() {
               }
               second={
                 <div className="flex h-full min-h-0 flex-col">
-                  {workbenchHidden ? (
+                  {dockedPluginId ? (
+                    <div
+                      ref={setPluginDockSlot}
+                      data-plugin-dock-slot={dockedPluginId}
+                      className="min-h-0 flex-1"
+                    />
+                  ) : workbenchHidden ? (
                     <div className="flex h-full items-start border-l border-line px-1 pt-3">
                       <button
                         type="button"
@@ -854,7 +868,7 @@ export default function App() {
                     </div>
                   </div>
                   )}
-                  <div className={workbenchHidden ? 'hidden' : 'min-h-0 flex-1'}>
+                  <div className={workbenchHidden || dockedPluginId ? 'hidden' : 'min-h-0 flex-1'}>
                     <CodingWorkbench
                       hideWorkspaceHeader
                       hideProjectSummary

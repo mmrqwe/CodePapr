@@ -372,7 +372,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
 
     const hasBackend = !!command;
     const pluginHint =
-      '插件已显示在主窗口（overlay）。收起只隐藏卡片、不会停用；Agent 仍可 app_publish。打开全屏 App 时会暂时隐藏，但继续在后台运行。';
+      '插件已显示。有 inbox 的插件默认停靠右侧栏；可改回浮窗。收起只隐藏、不会停用；Agent 仍可 app_publish。';
     return {
       appId: rawAppId,
       title,

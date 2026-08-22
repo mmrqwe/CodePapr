@@ -14,8 +14,10 @@ import {
   overlayFromSetSize,
   overlayToWindowBounds,
   resolveOverlaySurface,
+  resolveShowPlacement,
   type PluginWindowBounds,
 } from './pluginSurface';
+import { getPluginDockSlot } from './pluginDockSlot';
 import { useThemeStore } from '../store/themeStore';
 import type { ThemeMode } from '../theme/types';
 import { WorkerCrashError } from '../agent/WorkerBackedAgent';
@@ -292,6 +294,23 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady, onConsol
             code: 'NOT_PINNED',
             message: 'plugin overlay is not visible',
           });
+          return;
+        }
+        const docked = resolveShowPlacement(resolvedManifest, runtime.pluginChrome[appId]) === 'right';
+        if (docked) {
+          const slot = getPluginDockSlot();
+          const rect = slot?.getBoundingClientRect();
+          const bounds = overlayToWindowBounds({
+            x: rect?.x ?? 0,
+            y: rect?.y ?? 0,
+            width: rect?.width ?? 0,
+            height: rect?.height ?? 0,
+          });
+          if (type === 'papr://window.getBounds') {
+            respond(bounds);
+            return;
+          }
+          respond(bounds);
           return;
         }
         const surface = resolveOverlaySurface(resolvedManifest);

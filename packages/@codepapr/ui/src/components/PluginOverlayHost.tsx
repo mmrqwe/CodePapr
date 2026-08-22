@@ -16,12 +16,14 @@ import {
   readAppManifest,
   resolveOverlaySurface,
   resolvePaprEntryFile,
+  resolveShowPlacement,
   shouldPersistPluginPosition,
   type OverlayLayout,
   type OverlayResizeDir,
 } from '../papr/pluginSurface';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
+import { usePluginDockRect } from '../papr/pluginDockSlot';
 
 interface PluginOverlayHostProps {
   lang?: Lang;
@@ -78,8 +80,10 @@ export function PluginOverlayHost({ lang }: PluginOverlayHostProps) {
   const apps = useAppRuntimeStore((state) => state.apps);
   const pinnedPluginIds = useAppRuntimeStore((state) => state.pinnedPluginIds);
   const overlayLayouts = useAppRuntimeStore((state) => state.overlayLayouts);
+  const pluginChrome = useAppRuntimeStore((state) => state.pluginChrome);
   const setOverlayLayout = useAppRuntimeStore((state) => state.setOverlayLayout);
   const viewport = useViewportSize();
+  const dockRect = usePluginDockRect();
 
   const pinned = useMemo(
     () =>
@@ -92,9 +96,11 @@ export function PluginOverlayHost({ lang }: PluginOverlayHostProps) {
   useEffect(() => {
     pinned.forEach((app, index) => {
       if (overlayLayouts[app.appId]) return;
+      const placement = resolveShowPlacement(readAppManifest(app), pluginChrome[app.appId]);
+      if (placement === 'right') return;
       setOverlayLayout(app.appId, resolveCardLayout(app, undefined, viewport, index));
     });
-  }, [pinned, overlayLayouts, setOverlayLayout, viewport]);
+  }, [pinned, overlayLayouts, pluginChrome, setOverlayLayout, viewport]);
 
   if (pinned.length === 0) return null;
 
@@ -103,7 +109,18 @@ export function PluginOverlayHost({ lang }: PluginOverlayHostProps) {
   return (
     <>
       {pinned.map((app, index) => {
-        const layout = resolveCardLayout(app, overlayLayouts[app.appId], viewport, index);
+        const placement = resolveShowPlacement(readAppManifest(app), pluginChrome[app.appId]);
+        const docked = placement === 'right' && !!dockRect && dockRect.width > 1 && dockRect.height > 1;
+        const waitingForDock = placement === 'right' && !docked;
+        const layout = docked && dockRect
+          ? {
+              x: dockRect.x,
+              y: dockRect.y,
+              width: dockRect.width,
+              height: dockRect.height,
+              sizeSource: overlayLayouts[app.appId]?.sizeSource,
+            }
+          : resolveCardLayout(app, overlayLayouts[app.appId], viewport, index);
         return (
           <PluginOverlayCard
             key={app.appId}
@@ -111,7 +128,8 @@ export function PluginOverlayHost({ lang }: PluginOverlayHostProps) {
             lang={lang}
             layout={layout}
             zIndex={30 + index}
-            hidden={hidden}
+            hidden={hidden || waitingForDock}
+            docked={docked}
           />
         );
       })}
@@ -125,13 +143,16 @@ interface PluginOverlayCardProps {
   layout: OverlayLayout;
   zIndex: number;
   hidden?: boolean;
+  docked?: boolean;
 }
 
-function PluginOverlayCard({ app, lang, layout, zIndex, hidden }: PluginOverlayCardProps) {
+function PluginOverlayCard({ app, lang, layout, zIndex, hidden, docked }: PluginOverlayCardProps) {
   const t = getTranslation(lang);
   const workspacePath = useAgentStore((state) => state.workspacePath);
   const unpinPlugin = useAppRuntimeStore((state) => state.unpinPlugin);
   const pinPlugin = useAppRuntimeStore((state) => state.pinPlugin);
+  const dockPlugin = useAppRuntimeStore((state) => state.dockPlugin);
+  const undockPlugin = useAppRuntimeStore((state) => state.undockPlugin);
   const reloadApp = useAppRuntimeStore((state) => state.reloadApp);
   const setOverlayLayout = useAppRuntimeStore((state) => state.setOverlayLayout);
   const persistPluginUi = useAppRuntimeStore((state) => state.persistPluginUi);
@@ -150,7 +171,7 @@ function PluginOverlayCard({ app, lang, layout, zIndex, hidden }: PluginOverlayC
   const resizable = isOverlayResizable(manifest);
   const entryFile = resolvePaprEntryFile(manifest);
   const iframeSrc = `codepapr-app://${app.appId}/${entryFile}`;
-  const interacting = dragging || !!resizing;
+  const interacting = !docked && (dragging || !!resizing);
 
   const clearTimers = useCallback(() => {
     if (loadTimerRef.current) {
@@ -222,12 +243,13 @@ function PluginOverlayCard({ app, lang, layout, zIndex, hidden }: PluginOverlayC
   const onPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if ((event.target as HTMLElement).closest('button')) return;
+      if (docked) return;
       pinPlugin(app.appId);
       setDragging(true);
       dragOffset.current = { x: event.clientX - layout.x, y: event.clientY - layout.y };
       event.currentTarget.setPointerCapture(event.pointerId);
     },
-    [app.appId, layout.x, layout.y, pinPlugin],
+    [app.appId, docked, layout.x, layout.y, pinPlugin],
   );
 
   const onPointerMove = useCallback(
@@ -282,24 +304,50 @@ function PluginOverlayCard({ app, lang, layout, zIndex, hidden }: PluginOverlayC
   return (
     <div
       data-plugin-overlay={app.appId}
+      data-plugin-docked={docked ? 'true' : undefined}
       aria-hidden={hidden || undefined}
-      className={`fixed rounded-lg border border-line bg-base shadow-[0_12px_40px_rgba(0,0,0,0.35)] ${hidden ? 'invisible pointer-events-none' : ''}`}
+      className={`fixed border border-line bg-base ${
+        docked
+          ? 'rounded-none border-y-0 border-r-0'
+          : 'rounded-lg shadow-[0_12px_40px_rgba(0,0,0,0.35)]'
+      } ${hidden ? 'invisible pointer-events-none' : ''}`}
       style={{ left: layout.x, top: layout.y, width: layout.width, height: layout.height, zIndex }}
     >
       <div className="flex h-full flex-col overflow-hidden rounded-lg">
         <div
-          className={`flex h-7 shrink-0 cursor-grab items-center gap-1.5 border-b border-line px-2 ${dragging ? 'cursor-grabbing' : ''}`}
+          className={`flex h-7 shrink-0 items-center gap-1.5 border-b border-line px-2 ${
+            docked ? '' : dragging ? 'cursor-grabbing' : 'cursor-grab'
+          }`}
           style={{ height: OVERLAY_CHROME_HEIGHT }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
-          title={t.appPluginDrag}
+          title={docked ? undefined : t.appPluginDrag}
         >
           <span className="flex-shrink-0 text-[11px] leading-none">
             {app.icon && app.icon.trim().length > 0 ? app.icon.trim().slice(0, 2) : '📌'}
           </span>
           <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-fg">{app.title}</span>
+          {docked ? (
+            <button
+              type="button"
+              className="rounded px-1 py-0.5 text-[10px] text-fg-muted hover:bg-raised hover:text-fg"
+              title={t.appPluginUndock}
+              onClick={() => undockPlugin(app.appId)}
+            >
+              {t.appPluginUndock}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="rounded px-1 py-0.5 text-[10px] text-fg-muted hover:bg-raised hover:text-fg"
+              title={t.appPluginDockRight}
+              onClick={() => dockPlugin(app.appId)}
+            >
+              {t.appPluginDockRight}
+            </button>
+          )}
           <button
             type="button"
             className="rounded px-1 py-0.5 text-[10px] text-fg-muted hover:bg-raised hover:text-fg"
@@ -346,7 +394,7 @@ function PluginOverlayCard({ app, lang, layout, zIndex, hidden }: PluginOverlayC
           onError={() => setError(t.appModalLoadFailed)}
         />
       </div>
-      {resizable && !hidden && RESIZE_HANDLES.map((handle) => (
+      {resizable && !hidden && !docked && RESIZE_HANDLES.map((handle) => (
         <div
           key={handle.dir}
           data-plugin-resize={handle.dir}

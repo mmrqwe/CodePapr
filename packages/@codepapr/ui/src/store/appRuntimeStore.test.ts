@@ -40,6 +40,7 @@ describe('appRuntimeStore plugins', () => {
     expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual(['ticker']);
     expect(useAppRuntimeStore.getState().pluginChrome.ticker.enabled).toBe(true);
     expect(useAppRuntimeStore.getState().pluginChrome.ticker.visible).toBe(true);
+    expect(useAppRuntimeStore.getState().pluginChrome.ticker.placement).toBe('float');
 
     useAppRuntimeStore.getState().openAppModal('ticker');
     expect(useAppRuntimeStore.getState().openedAppId).toBeNull();
@@ -127,5 +128,29 @@ describe('appRuntimeStore plugins', () => {
     expect(useAppRuntimeStore.getState().pluginChrome.hidden.enabled).toBe(false);
     expect(useAppRuntimeStore.getState().pluginChrome.ticker.visible).toBe(true);
     expect(useAppRuntimeStore.getState().pluginChrome.hidden.visible).toBe(false);
+  });
+
+  it('docks one plugin at a time and undocks back to float', () => {
+    mountTicker();
+    useAppRuntimeStore.getState().mountApp({
+      appId: 'board',
+      title: 'Board',
+      html: '',
+      filePath: 'z',
+      manifestJson: JSON.stringify({
+        spec: 'papr/0.1',
+        name: 'Board',
+        kind: 'plugin',
+        inbox: { cards: { description: '卡片' } },
+      }),
+    });
+    useAppRuntimeStore.getState().pinPlugin('board');
+    expect(useAppRuntimeStore.getState().pluginChrome.board.placement).toBe('right');
+    useAppRuntimeStore.getState().dockPlugin('ticker');
+    expect(useAppRuntimeStore.getState().pluginChrome.ticker.placement).toBe('right');
+    expect(useAppRuntimeStore.getState().pluginChrome.board.placement).toBe('float');
+    useAppRuntimeStore.getState().undockPlugin('ticker');
+    expect(useAppRuntimeStore.getState().pluginChrome.ticker.placement).toBe('float');
+    expect(useAppRuntimeStore.getState().pinnedPluginIds).toContain('ticker');
   });
 });

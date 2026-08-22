@@ -3,9 +3,7 @@ import type { PaprKind, PaprManifest, PaprOverlayPosition } from '@codepapr/type
 export const OVERLAY_DEFAULT_WIDTH = 320;
 export const OVERLAY_DEFAULT_HEIGHT = 200;
 export const OVERLAY_MIN_WIDTH = 200;
-export const OVERLAY_MAX_WIDTH = 720;
 export const OVERLAY_MIN_HEIGHT = 100;
-export const OVERLAY_MAX_HEIGHT = 640;
 export const OVERLAY_EDGE = 16;
 export const OVERLAY_TOP_INSET = 52;
 export const OVERLAY_CHROME_HEIGHT = 28;
@@ -40,8 +38,10 @@ export const OVERLAY_POSITIONS: readonly PaprOverlayPosition[] = [
   'bottom-left',
 ];
 
+export type PluginPlacement = 'float' | 'right';
+
 export interface ResolvedOverlaySurface {
-  type: 'overlay';
+  type: 'overlay' | 'panel';
   width: number;
   height: number;
   position: PaprOverlayPosition;
@@ -86,22 +86,17 @@ export function resolvePaprEntryFile(manifest: PaprManifest | null | undefined):
 
 export function resolveOverlaySurface(manifest: PaprManifest | null | undefined): ResolvedOverlaySurface {
   const surface = manifest?.surface;
-  const width = clampNumber(
-    typeof surface?.width === 'number' && Number.isFinite(surface.width)
-      ? Math.round(surface.width)
-      : OVERLAY_DEFAULT_WIDTH,
-    OVERLAY_MIN_WIDTH,
-    OVERLAY_MAX_WIDTH,
-  );
-  const height = clampNumber(
-    typeof surface?.height === 'number' && Number.isFinite(surface.height)
-      ? Math.round(surface.height)
-      : OVERLAY_DEFAULT_HEIGHT,
-    OVERLAY_MIN_HEIGHT,
-    OVERLAY_MAX_HEIGHT,
-  );
+  const type = surface?.type === 'panel' ? 'panel' : 'overlay';
+  const rawWidth = typeof surface?.width === 'number' && Number.isFinite(surface.width)
+    ? Math.round(surface.width)
+    : OVERLAY_DEFAULT_WIDTH;
+  const rawHeight = typeof surface?.height === 'number' && Number.isFinite(surface.height)
+    ? Math.round(surface.height)
+    : OVERLAY_DEFAULT_HEIGHT;
+  const width = Math.max(OVERLAY_MIN_WIDTH, rawWidth);
+  const height = Math.max(OVERLAY_MIN_HEIGHT, rawHeight);
   const position = isOverlayPosition(surface?.position) ? surface.position : 'top-right';
-  return { type: 'overlay', width, height, position };
+  return { type, width, height, position };
 }
 
 export function isOverlayResizable(manifest: PaprManifest | null | undefined): boolean {
@@ -153,6 +148,38 @@ export function shouldRevealOnPublish(
   return resolvePluginShowPolicy(manifest) === 'onDemand';
 }
 
+export function defaultPluginPlacement(manifest: PaprManifest | null | undefined): PluginPlacement {
+  if (manifest?.surface?.type === 'panel') return 'right';
+  if (manifest?.surface?.type === 'overlay') return 'float';
+  return pluginHasInbox(manifest) ? 'right' : 'float';
+}
+
+/** 用户显式 placement 优先。有几何的旧 chrome 一律 float，避免升级吞掉工作台。 */
+export function resolveShowPlacement(
+  manifest: PaprManifest | null | undefined,
+  chrome: { placement?: PluginPlacement; x?: number; y?: number } | null | undefined,
+): PluginPlacement {
+  if (chrome?.placement === 'right' || chrome?.placement === 'float') return chrome.placement;
+  if (chrome && (chrome.x !== undefined || chrome.y !== undefined)) return 'float';
+  return defaultPluginPlacement(manifest);
+}
+
+export function selectDockedPluginId(state: {
+  apps: readonly { appId: string; manifestJson?: string }[];
+  pinnedPluginIds: readonly string[];
+  pluginChrome: Record<string, { placement?: PluginPlacement; x?: number; y?: number }>;
+}): string | null {
+  const byId = new Map(state.apps.map((app) => [app.appId, app]));
+  for (const appId of state.pinnedPluginIds) {
+    const app = byId.get(appId);
+    if (!app || !isPluginApp(app)) continue;
+    if (resolveShowPlacement(readAppManifest(app), state.pluginChrome[appId]) === 'right') {
+      return appId;
+    }
+  }
+  return null;
+}
+
 export function clampOverlayOrigin(
   origin: OverlayOrigin,
   size: { width: number; height: number },
@@ -172,8 +199,8 @@ export function clampOverlaySize(
   viewport: { width: number; height: number },
   edge = 8,
 ): { width: number; height: number } {
-  const maxWidth = Math.max(OVERLAY_MIN_WIDTH, Math.min(OVERLAY_MAX_WIDTH, viewport.width - edge * 2));
-  const maxHeight = Math.max(OVERLAY_MIN_HEIGHT, Math.min(OVERLAY_MAX_HEIGHT, viewport.height - edge * 2));
+  const maxWidth = Math.max(OVERLAY_MIN_WIDTH, viewport.width - edge * 2);
+  const maxHeight = Math.max(OVERLAY_MIN_HEIGHT, viewport.height - edge * 2);
   return {
     width: clampNumber(Math.round(size.width), OVERLAY_MIN_WIDTH, maxWidth),
     height: clampNumber(Math.round(size.height), OVERLAY_MIN_HEIGHT, maxHeight),
@@ -265,7 +292,7 @@ export function overlayFromSetSize(
   return { ...current, width, height, sizeSource: 'plugin' };
 }
 
-/** 供打开应用时校验 manifest.surface：只接受 overlay。缺省给出默认几何。 */
+/** 供打开应用时校验 manifest.surface：overlay 浮卡或 panel 右栏。缺省给出默认几何。 */
 export function parsePluginSurfaceArg(raw: unknown): ResolvedOverlaySurface {
   if (raw === undefined || raw === null) {
     return {
@@ -283,8 +310,8 @@ export function parsePluginSurfaceArg(raw: unknown): ResolvedOverlaySurface {
   const type = rawType === undefined || rawType === null || rawType === ''
     ? 'overlay'
     : rawType;
-  if (type !== 'overlay') {
-    throw new Error(`当前仅支持 surface.type: "overlay"（主窗口悬浮）。收到: ${JSON.stringify(rawType)}`);
+  if (type !== 'overlay' && type !== 'panel') {
+    throw new Error(`当前仅支持 surface.type: "overlay" 或 "panel"。收到: ${JSON.stringify(rawType)}`);
   }
   if (surface.width !== undefined && (typeof surface.width !== 'number' || !Number.isFinite(surface.width))) {
     throw new Error(`surface.width 必须是数字，收到: ${JSON.stringify(surface.width)}`);
@@ -297,5 +324,14 @@ export function parsePluginSurfaceArg(raw: unknown): ResolvedOverlaySurface {
       `surface.position 必须是 ${OVERLAY_POSITIONS.join('/')}，收到: ${JSON.stringify(surface.position)}`,
     );
   }
-  return resolveOverlaySurface({ spec: 'papr/0.1', name: 'tmp', surface: { type: 'overlay', width: surface.width, height: surface.height, position: surface.position } });
+  return resolveOverlaySurface({
+    spec: 'papr/0.1',
+    name: 'tmp',
+    surface: {
+      type,
+      width: surface.width as number | undefined,
+      height: surface.height as number | undefined,
+      position: surface.position as PaprOverlayPosition | undefined,
+    },
+  });
 }

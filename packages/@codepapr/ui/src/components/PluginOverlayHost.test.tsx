@@ -87,6 +87,7 @@ describe('PluginOverlayHost', () => {
     const iframe = container.querySelector('iframe');
     expect(iframe?.getAttribute('src')).toBe('codepapr-app://stock-ticker/index.html');
     expect(container.textContent).toContain('股票看板');
+    expect(container.textContent).toContain('钉到右侧');
     expect(container.querySelector('[data-plugin-resize="se"]')).toBeTruthy();
   });
 
