@@ -75,7 +75,7 @@ interface ToolExecutionContext {
    *  长耗时工具必须监听并停止执行，否则取消后仍在后台跑完。 */
   signal?: AbortSignal;
   /** app agent 专属：该 app 的两轴访问档（bash 沙箱构建用） */
-  appAccess?: { network: boolean; workspaceWrite: boolean };
+  appAccess?: { network: boolean; workspaceWrite: boolean; allowCodepaprApps?: boolean };
   /** PR5（ADR-009 第11条）：本回合 canonical user message id（recall anchor）。 */
   userMessageId?: string;
 }

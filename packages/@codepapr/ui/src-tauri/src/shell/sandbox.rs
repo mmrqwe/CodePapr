@@ -2,6 +2,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[cfg(target_os = "macos")]
+use std::fs;
+
+#[cfg(target_os = "macos")]
 use crate::db;
 
 #[cfg(target_os = "macos")]
@@ -272,6 +275,8 @@ fn build_profile(
         }
     }
 
+    apply_codepapr_agent_isolation(&mut lines, &mut read_roots, workspace, access, app_write_dir);
+
     // 读放行路径的祖先目录必须可 lstat：node/npm 的 realpathSync 与一般路径
     // 解析会逐级 stat 祖先（如 /opt、/private/var/folders/...），缺一个就 EPERM。
     let mut ancestors: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
@@ -295,20 +300,83 @@ fn build_profile(
     Ok(lines.join("\n"))
 }
 
+/// Agent bash 对工作区内 `.CodePapr` 的内核闸门：先整树 deny，再放行草稿
+/// （tmp / tool-output / downloads）、已存在的 skills（只读，供 skill 包脚本）、
+/// 以及 App 模式的 apps。后端 app_write_dir 在 deny 之后重新放行。
+#[cfg(target_os = "macos")]
+fn apply_codepapr_agent_isolation(
+    lines: &mut Vec<String>,
+    read_roots: &mut Vec<PathBuf>,
+    workspace: &Path,
+    access: SandboxAccess,
+    app_write_dir: Option<&Path>,
+) {
+    let Ok(ws) = workspace.canonicalize() else {
+        return;
+    };
+    let codepapr = ws.join(".CodePapr");
+    lines.push(format!(
+        "(deny file-read* (subpath \"{}\"))",
+        profile_quote(&codepapr)
+    ));
+    lines.push(format!(
+        "(deny file-write* (subpath \"{}\"))",
+        profile_quote(&codepapr)
+    ));
+
+    for name in ["tmp", "tool-output", "downloads"] {
+        let dir = codepapr.join(name);
+        let _ = fs::create_dir_all(&dir);
+        if let Some(canonical) = add_subpath_rule(lines, "allow", "file-read*", &dir) {
+            read_roots.push(canonical);
+        }
+        if access.workspace_write {
+            add_subpath_rule(lines, "allow", "file-write*", &dir);
+        }
+    }
+
+    let skills = codepapr.join("skills");
+    if skills.is_dir() {
+        if let Some(canonical) = add_subpath_rule(lines, "allow", "file-read*", &skills) {
+            read_roots.push(canonical);
+        }
+    }
+
+    if access.allow_codepapr_apps {
+        let apps = codepapr.join("apps");
+        let _ = fs::create_dir_all(&apps);
+        if let Some(canonical) = add_subpath_rule(lines, "allow", "file-read*", &apps) {
+            read_roots.push(canonical);
+        }
+        if access.workspace_write {
+            add_subpath_rule(lines, "allow", "file-write*", &apps);
+        }
+    }
+
+    if let Some(app_dir) = app_write_dir {
+        if let Some(canonical) = add_subpath_rule(lines, "allow", "file-read*", app_dir) {
+            read_roots.push(canonical);
+        }
+        add_subpath_rule(lines, "allow", "file-write*", app_dir);
+    }
+}
+
 /// 沙箱访问档：按两轴权限构建 sandbox-exec profile。
 /// - `network`：出站网络（`network*`）。关 = 完全不能联网。
 /// - `workspace_write`：工作区（及已授权外部路径）可写。关 = 只读。
 /// - `allow_bind`：允许监听端口（后端进程需要；网络关时仍可监听 localhost 供 iframe 访问）。
+/// - `allow_codepapr_apps`：放行 `.CodePapr/apps`（App 模式 / 应用内 Agent）。默认关。
 #[derive(Debug, Clone, Copy)]
 pub struct SandboxAccess {
     pub network: bool,
     pub workspace_write: bool,
     pub allow_bind: bool,
+    pub allow_codepapr_apps: bool,
 }
 
 impl Default for SandboxAccess {
     fn default() -> Self {
-        Self { network: true, workspace_write: true, allow_bind: false }
+        Self { network: true, workspace_write: true, allow_bind: false, allow_codepapr_apps: false }
     }
 }
 
@@ -322,6 +390,8 @@ pub struct SandboxAccessArgs {
     pub workspace_write: bool,
     #[serde(default)]
     pub allow_bind: bool,
+    #[serde(default)]
+    pub allow_codepapr_apps: bool,
 }
 
 fn sandbox_network_default() -> bool {
@@ -334,7 +404,12 @@ fn sandbox_workspace_write_default() -> bool {
 
 impl From<SandboxAccessArgs> for SandboxAccess {
     fn from(args: SandboxAccessArgs) -> Self {
-        Self { network: args.network, workspace_write: args.workspace_write, allow_bind: args.allow_bind }
+        Self {
+            network: args.network,
+            workspace_write: args.workspace_write,
+            allow_bind: args.allow_bind,
+            allow_codepapr_apps: args.allow_codepapr_apps,
+        }
     }
 }
 
@@ -737,7 +812,7 @@ mod tests {
         let restricted = build_profile(
             "/bin/zsh",
             &workspace,
-            Some(SandboxAccess { network: false, workspace_write: false, allow_bind: false }),
+            Some(SandboxAccess { network: false, workspace_write: false, allow_bind: false, allow_codepapr_apps: false }),
             None,
         )
         .expect("profile should build");
@@ -754,7 +829,7 @@ mod tests {
         let backend = build_profile(
             "/bin/zsh",
             &workspace,
-            Some(SandboxAccess { network: false, workspace_write: true, allow_bind: true }),
+            Some(SandboxAccess { network: false, workspace_write: true, allow_bind: true, allow_codepapr_apps: false }),
             None,
         )
         .expect("profile should build");
@@ -766,11 +841,113 @@ mod tests {
         let full = build_profile(
             "/bin/zsh",
             &workspace,
-            Some(SandboxAccess { network: true, workspace_write: true, allow_bind: false }),
+            Some(SandboxAccess { network: true, workspace_write: true, allow_bind: false, allow_codepapr_apps: false }),
             None,
         )
         .expect("profile should build");
         assert!(full.contains("(allow network*)"), "got:\n{full}");
+
+        let _ = fs::remove_dir_all(&workspace);
+    }
+
+    #[test]
+    fn profile_denies_codepapr_except_scratch() {
+        let workspace =
+            std::env::temp_dir().join(format!("codepapr-sandbox-cp-{}", std::process::id()));
+        fs::create_dir_all(workspace.join(".CodePapr/git")).expect("internal dir");
+        fs::write(workspace.join(".CodePapr/git/HEAD"), b"secret\n").expect("write secret");
+
+        let profile = build_profile("/bin/zsh", &workspace, None, None).expect("profile");
+        let codepapr = workspace
+            .canonicalize()
+            .expect("workspace")
+            .join(".CodePapr");
+        assert!(
+            profile.contains(&format!(
+                "(deny file-read* (subpath \"{}\"))",
+                codepapr.display()
+            )),
+            "must deny .CodePapr:\n{profile}"
+        );
+        let tmp = codepapr.join("tmp");
+        assert!(
+            profile.contains(&format!(
+                "(allow file-read* (subpath \"{}\"))",
+                tmp.canonicalize().expect("tmp").display()
+            )),
+            "must allow scratch tmp:\n{profile}"
+        );
+        assert!(
+            !profile.contains(&format!(
+                "(allow file-read* (subpath \"{}\"))",
+                codepapr.join("git").display()
+            )),
+            "must not allow git:\n{profile}"
+        );
+
+        let apps_flag = build_profile(
+            "/bin/zsh",
+            &workspace,
+            Some(SandboxAccess {
+                network: true,
+                workspace_write: true,
+                allow_bind: false,
+                allow_codepapr_apps: true,
+            }),
+            None,
+        )
+        .expect("profile");
+        let apps = codepapr.join("apps");
+        assert!(
+            apps_flag.contains(&format!(
+                "(allow file-read* (subpath \"{}\"))",
+                apps.canonicalize().expect("apps").display()
+            )),
+            "flag must allow apps:\n{apps_flag}"
+        );
+
+        let _ = fs::remove_dir_all(&workspace);
+    }
+
+    #[test]
+    fn sandboxed_ls_codepapr_is_denied_but_scratch_is_readable() {
+        let workspace =
+            std::env::temp_dir().join(format!("codepapr-sandbox-lscp-{}", std::process::id()));
+        fs::create_dir_all(workspace.join(".CodePapr/git")).expect("internal dir");
+        fs::write(workspace.join(".CodePapr/git/HEAD"), b"secret\n").expect("write secret");
+
+        let mut denied = sandboxed_command(
+            "/bin/ls",
+            &[".CodePapr".to_string()],
+            &workspace,
+            None,
+            &workspace,
+        )
+        .expect("command");
+        denied.current_dir(&workspace);
+        let denied_out = denied.output().expect("run");
+        let denied_stdout = String::from_utf8_lossy(&denied_out.stdout);
+        assert!(
+            !denied_out.status.success() || !denied_stdout.contains("git"),
+            "ls .CodePapr must not list internals; stdout={denied_stdout} stderr={:?}",
+            String::from_utf8_lossy(&denied_out.stderr)
+        );
+
+        let mut allowed = sandboxed_command(
+            "/bin/ls",
+            &[".CodePapr/tmp".to_string()],
+            &workspace,
+            None,
+            &workspace,
+        )
+        .expect("command");
+        allowed.current_dir(&workspace);
+        let allowed_out = allowed.output().expect("run");
+        assert!(
+            allowed_out.status.success(),
+            "ls scratch tmp must succeed; stderr={:?}",
+            String::from_utf8_lossy(&allowed_out.stderr)
+        );
 
         let _ = fs::remove_dir_all(&workspace);
     }
@@ -787,8 +964,8 @@ mod tests {
 
         for access in [
             None,
-            Some(SandboxAccess { network: false, workspace_write: false, allow_bind: false }),
-            Some(SandboxAccess { network: true, workspace_write: true, allow_bind: true }),
+            Some(SandboxAccess { network: false, workspace_write: false, allow_bind: false, allow_codepapr_apps: false }),
+            Some(SandboxAccess { network: true, workspace_write: true, allow_bind: true, allow_codepapr_apps: false }),
         ] {
             let profile = build_profile("/bin/zsh", &workspace, access, None)
                 .expect("profile should build");
@@ -816,7 +993,7 @@ mod tests {
         let profile = build_profile(
             "/bin/zsh",
             &workspace,
-            Some(SandboxAccess { network: true, workspace_write: false, allow_bind: true }),
+            Some(SandboxAccess { network: true, workspace_write: false, allow_bind: true, allow_codepapr_apps: false }),
             Some(app_dir.as_path()),
         )
         .expect("profile should build");
@@ -859,7 +1036,7 @@ mod tests {
         )
         .expect("script should be written");
 
-        let access = SandboxAccess { network: false, workspace_write: false, allow_bind: true };
+        let access = SandboxAccess { network: false, workspace_write: false, allow_bind: true, allow_codepapr_apps: false };
         let mut command = sandboxed_command(
             "/bin/zsh",
             &[script.display().to_string()],
@@ -901,7 +1078,7 @@ mod tests {
         .expect("script should be written");
 
         // allow_bind=false（非后端 spawn）：即使 args[0] 指向脚本也不放行 app 目录写
-        let access = SandboxAccess { network: false, workspace_write: false, allow_bind: false };
+        let access = SandboxAccess { network: false, workspace_write: false, allow_bind: false, allow_codepapr_apps: false };
         let mut command = sandboxed_command(
             "/bin/zsh",
             &[script.display().to_string()],
@@ -968,7 +1145,7 @@ mod tests {
         )
         .expect("script should be written");
 
-        let access = SandboxAccess { network: false, workspace_write: false, allow_bind: true };
+        let access = SandboxAccess { network: false, workspace_write: false, allow_bind: true, allow_codepapr_apps: false };
         let mut command = sandboxed_command(
             "/bin/zsh",
             &["run.sh".to_string()],
@@ -1007,7 +1184,7 @@ mod tests {
         let profile = build_profile(
             "/bin/zsh",
             &workspace,
-            Some(SandboxAccess { network: false, workspace_write: false, allow_bind: false }),
+            Some(SandboxAccess { network: false, workspace_write: false, allow_bind: false, allow_codepapr_apps: false }),
             None,
         )
         .expect("profile should build");

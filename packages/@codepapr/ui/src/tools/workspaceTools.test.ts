@@ -1461,3 +1461,56 @@ describe('manifest inbox 契约校验与摘要', () => {
     expect(summarizeManifestInbox(null)).toBeUndefined();
   });
 });
+
+describe('Agent .CodePapr isolation', () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({
+      root: '',
+      entries: [],
+      truncated: false,
+      path: 'ok',
+      content: 'ok',
+      bytes: 2,
+    });
+  });
+
+  it('blocks list/read/write/bash of internal .CodePapr in agent mode', async () => {
+    const registry = build();
+    await expect(registry.execute('list', { relativePath: '.CodePapr' })).rejects.toThrow(/运行时管理/);
+    await expect(registry.execute('read', { relativePath: '.CodePapr/project.sqlite' })).rejects.toThrow(
+      /运行时管理/
+    );
+    await expect(
+      registry.execute('write', { relativePath: '.CodePapr/AGENTS.md', content: 'x' })
+    ).rejects.toThrow(/运行时管理/);
+    await expect(registry.execute('bash', { command: 'ls .CodePapr' })).rejects.toThrow(/运行时管理/);
+    await expect(
+      registry.execute('bash', { command: 'node server.js', workdir: '.CodePapr/apps/demo' })
+    ).rejects.toThrow(/运行时管理/);
+  });
+
+  it('allows scratch dirs and skill-pack reads', async () => {
+    const registry = build();
+    await expect(registry.execute('list', { relativePath: '.CodePapr/tmp' })).resolves.toBeTruthy();
+    await expect(
+      registry.execute('read', { relativePath: '.CodePapr/tool-output/tool_1.txt' })
+    ).resolves.toBeTruthy();
+    await expect(
+      registry.execute('read', { relativePath: '.CodePapr/skills/search/references/a.md' })
+    ).resolves.toBeTruthy();
+    await expect(registry.execute('bash', { command: 'ls .CodePapr/tmp' })).resolves.toBeTruthy();
+  });
+
+  it('allows .CodePapr/apps only in app mode', async () => {
+    await expect(
+      build().execute('list', { relativePath: '.CodePapr/apps/demo' })
+    ).rejects.toThrow(/运行时管理/);
+    await expect(
+      build({ mode: 'app' }).execute('list', { relativePath: '.CodePapr/apps/demo' })
+    ).resolves.toBeTruthy();
+    await expect(
+      build({ mode: 'app' }).execute('bash', { command: 'node server.js', workdir: '.CodePapr/apps/demo' })
+    ).resolves.toBeTruthy();
+  });
+});

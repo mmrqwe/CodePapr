@@ -951,6 +951,7 @@ pub(crate) fn start_workspace_shell_background_command(
     command: String,
     workdir: Option<String>,
     preview_url: Option<String>,
+    sandbox: Option<SandboxAccessArgs>,
 ) -> Result<BackgroundCommandResult, String> {
     if command.trim().is_empty() {
         return Err("命令不能为空".to_string());
@@ -968,7 +969,7 @@ pub(crate) fn start_workspace_shell_background_command(
         .map(|raw_url| parse_browser_url(&raw_url))
         .transpose()?;
     let workspace_path = workspace.to_string_lossy().to_string();
-    let cmd = build_shell_spawn_command(&command, &cwd, &workspace, None)?;
+    let cmd = build_shell_spawn_command(&command, &cwd, &workspace, sandbox.map(Into::into))?;
     spawn_and_register_background(workspace_path, command, Vec::new(), preview_url, cmd)
 }
 

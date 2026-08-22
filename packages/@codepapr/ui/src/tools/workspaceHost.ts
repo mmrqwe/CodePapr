@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { EditHistory, WorkspaceHost, WorkspaceLanguageServiceRequestOptions } from '@codepapr/core';
+import { assertAgentCodePaprAccess, assertShellCodePaprAccess } from './codepaprAgentAccess';
 
 interface ListFilesResult {
   root?: string;
@@ -52,15 +53,18 @@ export function createUiWorkspaceHost(params: {
   workspacePath: string;
   editHistory?: EditHistory;
   notifyWorkspaceMutation?: (paths: string[]) => void;
+  mode?: 'ask' | 'plan' | 'agent' | 'app';
   ensureExternalPathAllowed?: (
     path: string | undefined,
     operation: 'read' | 'list' | 'write' | 'execute',
   ) => Promise<void>;
 }): WorkspaceHost {
+  const mode = params.mode ?? 'agent';
   return {
     workspacePath: params.workspacePath,
     async listFiles(options) {
       await params.ensureExternalPathAllowed?.(options.relativePath, 'list');
+      assertAgentCodePaprAccess(options.relativePath, 'list', mode);
       return await invoke<ListFilesResult>('list_workspace_files', {
         workspacePath: params.workspacePath,
         relativePath: options.relativePath,
@@ -69,6 +73,7 @@ export function createUiWorkspaceHost(params: {
     },
     async readTextFile(options) {
       await params.ensureExternalPathAllowed?.(options.relativePath, 'read');
+      assertAgentCodePaprAccess(options.relativePath, 'read', mode);
       return await invoke<ReadFileResult>('read_text_file', {
         workspacePath: params.workspacePath,
         relativePath: options.relativePath,
@@ -81,6 +86,7 @@ export function createUiWorkspaceHost(params: {
     },
     async writeTextFile(options) {
       await params.ensureExternalPathAllowed?.(options.relativePath, 'write');
+      assertAgentCodePaprAccess(options.relativePath, 'write', mode);
       // 与 MAX_WRITE_BYTES(20MB) 对齐：before 快照必须覆盖可写入的全部范围，
       // 否则 undo 会把文件"恢复"成截断内容
       const before = await invoke<ReadFileResult>('read_text_file', {
@@ -103,6 +109,11 @@ export function createUiWorkspaceHost(params: {
     },
     async runCommand(options) {
       await params.ensureExternalPathAllowed?.(options.workdir, 'execute');
+      assertShellCodePaprAccess(
+        [options.command, ...(options.args ?? [])].join(' '),
+        mode,
+        options.workdir
+      );
       return await invoke<CommandResult>('run_workspace_command', {
         workspacePath: params.workspacePath,
         command: options.command,
@@ -114,6 +125,7 @@ export function createUiWorkspaceHost(params: {
     languageService: {
       async request<TResult, TParams>(options: WorkspaceLanguageServiceRequestOptions<TParams>) {
         await params.ensureExternalPathAllowed?.(options.relativePath, 'read');
+        assertAgentCodePaprAccess(options.relativePath, 'read', mode);
         const content =
           options.content ??
           (

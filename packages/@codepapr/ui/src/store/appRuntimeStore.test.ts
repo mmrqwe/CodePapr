@@ -119,8 +119,8 @@ describe('appRuntimeStore plugins', () => {
   it('hydratePluginUi restores layouts without pinning', () => {
     useAppRuntimeStore.getState().hydratePluginUi({
       chrome: {
-        ticker: { enabled: true, x: 40, y: 80, width: 360, height: 220, sizeSource: 'user' },
-        hidden: { enabled: false, x: 1, y: 2, width: 200, height: 120 },
+        ticker: { enabled: true, visible: true, x: 40, y: 80, width: 360, height: 220, sizeSource: 'user' },
+        hidden: { enabled: false, visible: false, x: 1, y: 2, width: 200, height: 120 },
       },
     });
     expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual([]);

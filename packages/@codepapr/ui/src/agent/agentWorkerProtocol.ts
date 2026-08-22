@@ -363,7 +363,7 @@ export type AgentWorkerToMainMessage =
        *  memory_search 等需要 recall anchor 的工具随请求下发。 */
       userMessageId?: string;
       /** app agent 专属：该 app 的两轴访问档，主线程据此构建 bash 等工具的沙箱 */
-      appAccess?: { network: boolean; workspaceWrite: boolean };
+      appAccess?: { network: boolean; workspaceWrite: boolean; allowCodepaprApps?: boolean };
     }
   | {
       /** 父级（Agent 回合取消 / 工具超时）已放弃等待该工具：主线程必须中止

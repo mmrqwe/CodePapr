@@ -41,6 +41,7 @@ import {
   proposeMemoryCandidateFromWrite,
   MEMORY_WRITE_INTERCEPT_NOTE,
 } from './memoryTools';
+import { assertAgentCodePaprAccess } from './codepaprAgentAccess';
 
 /**
  * ADR-008/010：memory.md 的 Agent 直接写入被拦截 → 自动写入策略。
@@ -100,6 +101,13 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
   } = ctx;
   // app 模式下放行 .CodePapr/apps（Papr 应用源码存放处），其余模式保持屏蔽
   const includeCodePaprApps = options.mode === 'app';
+  const agentMode = options.mode ?? 'agent';
+  const assertCodePapr = (path: string | undefined, op: 'read' | 'write' | 'list'): void => {
+    if (path && isMemoryFilePath(path) && op === 'write') {
+      return;
+    }
+    assertAgentCodePaprAccess(path, op, agentMode);
+  };
 
   registry.register(toolByName('workspace_list_files'), async (args: Record<string, unknown>, context) => {
     const parsed: ListFilesArgs = {
@@ -107,6 +115,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       maxDepth: asOptionalNumber(args.maxDepth),
     };
     await ensureExternalPathAllowed(parsed.relativePath, 'list', context?.signal);
+    assertCodePapr(parsed.relativePath, 'list');
     const result = await invoke<ListFilesResult>('list_workspace_files', {
       workspacePath: workspace(),
       relativePath: parsed.relativePath,
@@ -157,6 +166,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       symbol: asOptionalString(args.symbol),
     };
     await ensureExternalPathAllowed(parsed.relativePath, 'read', context?.signal);
+    assertCodePapr(parsed.relativePath, 'read');
     const languageId = lspLanguageFromPath(parsed.relativePath);
     const hasLineAnchor =
       parsed.startLine != null || parsed.endLine != null || parsed.aroundLine != null;
@@ -239,6 +249,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       maxBytes: asOptionalNumber(args.maxBytes),
     };
     await ensureExternalPathAllowed(parsed.relativePath, 'read', context?.signal);
+    assertCodePapr(parsed.relativePath, 'read');
     const result = await invoke<ReadImageFileResult>('read_image_file', {
       workspacePath: workspace(),
       relativePath: parsed.relativePath,
@@ -262,6 +273,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       content: asString(args.content, 'content'),
     };
     await ensureExternalPathAllowed(parsed.relativePath, 'write', context?.signal);
+    assertCodePapr(parsed.relativePath, 'write');
 
     // ADR-008：memory.md 拦截 → 候选（不落盘）。
     const memoryIntercept = await interceptMemoryFileWrite(ctx, parsed.relativePath, parsed.content);
@@ -326,6 +338,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       expectedOccurrences: asOptionalPositiveInteger(args.expectedOccurrences, 'expectedOccurrences'),
     };
     await ensureExternalPathAllowed(parsed.relativePath, 'write', context?.signal);
+    assertCodePapr(parsed.relativePath, 'write');
 
     const current = await invoke<ReadFileResult>('read_text_file', {
       workspacePath: workspace(),
@@ -422,6 +435,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
 
     for (const relativePath of uniquePaths) {
       await ensureExternalPathAllowed(relativePath, 'write', context?.signal);
+      assertCodePapr(relativePath, 'write');
       const current = await invoke<ReadFileResult>('read_text_file', {
         workspacePath: workspace(),
         relativePath,

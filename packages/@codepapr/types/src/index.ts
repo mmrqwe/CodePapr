@@ -710,6 +710,8 @@ export interface PaprAccess {
 export interface AppSandboxAccess {
   network: boolean;
   workspaceWrite: boolean;
+  /** App 模式 / 应用内 Agent：放行 `.CodePapr/apps`。默认 false。 */
+  allowCodepaprApps?: boolean;
 }
 
 /** 旧四档等级（仅用于老 manifest 迁移，新代码使用 PaprLocalAccess）。 */

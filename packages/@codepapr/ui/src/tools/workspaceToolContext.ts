@@ -80,6 +80,7 @@ export function createWorkspaceToolContext(params: WorkspaceToolContextParams) {
       editHistory,
       notifyWorkspaceMutation,
       ensureExternalPathAllowed,
+      mode: options.mode,
     });
 
   const resolveLanguageId = (relativePath: string): string => {

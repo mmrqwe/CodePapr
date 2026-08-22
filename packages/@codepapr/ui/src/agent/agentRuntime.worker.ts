@@ -540,7 +540,7 @@ async function requestToolExecution(
   args: Record<string, unknown>,
   timeoutMs: number = TOOL_IPC_TIMEOUT_MS,
   toolCallId?: string,
-  appAccess?: { network: boolean; workspaceWrite: boolean },
+  appAccess?: { network: boolean; workspaceWrite: boolean; allowCodepaprApps?: boolean },
   signal?: AbortSignal
 ): Promise<unknown> {
   const toolRequestId = `${requestId}:${++nextToolRequestId}`;
@@ -1083,7 +1083,7 @@ async function handleRunAppAgent(
   /** app 沙箱访问档：主线程执行 bash 等工具时按此构建沙箱（网络/写按轴收窄）。
    *  write/edit/patch 在 local=write 时直接写项目文件（与主 agent 同权，主线程自带路径校验），
    *  不再重定向到 app sandbox 目录。 */
-  const appAccess = { network: access.network, workspaceWrite: access.local === 'write' };
+  const appAccess = { network: access.network, workspaceWrite: access.local === 'write', allowCodepaprApps: true };
 
   const toolIpcTimeoutMs = cachedSettings.toolIpcTimeoutMs ?? TOOL_IPC_TIMEOUT_MS;
 

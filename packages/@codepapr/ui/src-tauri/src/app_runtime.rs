@@ -206,6 +206,7 @@ pub fn install_app_npm_deps(workspace_path: String, app_id: String) -> Result<St
         network: true,
         workspace_write: false,
         allow_bind: true,
+        allow_codepapr_apps: false,
     };
     let args = vec!["install".to_string(), "--no-fund".to_string(), "--no-audit".to_string()];
     let mut cmd = sandboxed_command("npm", &args, &workspace, Some(access), &app_dir)?;
