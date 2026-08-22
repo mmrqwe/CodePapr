@@ -320,6 +320,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
         <a class="nav-item" onclick="scrollToSection('skills')"><span class="dot"></span>Skills System</a>
         <a class="nav-item" onclick="scrollToSection('agents')"><span class="dot"></span>Agents &amp; Sub-agents</a>
         <a class="nav-item" onclick="scrollToSection('commands')"><span class="dot"></span>Custom Commands</a>
+        <a class="nav-item" onclick="scrollToSection('apps')"><span class="dot"></span>App Mode &amp; Plugin Generation</a>
         <a class="nav-item" onclick="scrollToSection('goal')"><span class="dot"></span>Goal Autonomous Loop</a>
         <a class="nav-item" onclick="scrollToSection('mcp')"><span class="dot"></span>MCP Tool Integration</a>
       </div>
@@ -375,6 +376,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
       <a class="nav-item" onclick="mobileNavTo('skills')">Skills System</a>
       <a class="nav-item" onclick="mobileNavTo('agents')">Agents &amp; Sub-agents</a>
       <a class="nav-item" onclick="mobileNavTo('commands')">Custom Commands</a>
+      <a class="nav-item" onclick="mobileNavTo('apps')">App Mode &amp; Plugin Generation</a>
       <a class="nav-item" onclick="mobileNavTo('goal')">Goal Autonomous Loop</a>
       <a class="nav-item" onclick="mobileNavTo('mcp')">MCP Tool Integration</a>
       <a class="nav-item" onclick="mobileNavTo('architecture')">System Architecture</a>
@@ -689,7 +691,7 @@ https://api.deepseek.com/v1</code></pre>
           <li>App ↔ coding mode switch -> create a new session</li>
         </ul>
         <p><strong>Model Strategy:</strong> Always uses the primary model (deepseek-v4-pro) to ensure HTML generation quality.</p>
-        <p><strong>App Management:</strong> The right panel's "Apps" tab shows all registered .papr apps. Green/red dots indicate running status. Bottom toolbar: ▶ Start / Open / ■ Stop / 🗑 Delete. LLM manages app lifecycle via <code>app_list</code>, <code>app_start</code>, <code>app_stop</code>, <code>app_delete</code> tools.</p>
+        <p><strong>App Management:</strong> The right panel's "Apps" tab shows all registered .papr apps. Green/red dots indicate running status. Bottom toolbar: ▶ Start / Open / ■ Stop / 🗑 Delete. LLM manages app lifecycle via <code>app_list</code>, <code>app_start</code>, <code>app_stop</code>, <code>app_delete</code> tools. For full development and plugin specifications, see the <a href="#apps" style="color:var(--accent);font-weight:500;">App Mode &amp; Plugin Generation</a> section.</p>
         <p><strong>Permission model:</strong> Apps declare access with <code>local</code> (none / read / write) × <code>network</code> (true / false). Settings → App Tab can narrow the global default and per-app overrides; saving restarts running backends with the new sandbox.</p>
 
         <h3>App Mode Example Scenarios</h3>
@@ -1432,6 +1434,236 @@ Current status: !`git status -s`</code></pre>
           1. <strong>Visual UI</strong>: Click <strong>Project Config</strong> in the top toolbar &rarr; switch to <strong>Commands</strong> tab to create and edit commands easily.<br>
           2. <strong>Invoke</strong>: Type <code>/</code> in the chat input to bring up the command palette with &uarr;&darr; navigation; type <code>/command-name args</code> to run. Type <code>/help</code> in chat to see all registered project commands.
         </div>
+      </div>
+    </section>
+
+    <!-- 12.3 App Mode & Plugin Generation -->
+    <section class="section" id="apps">
+      <div class="section-header"><h2>App Mode &amp; Plugin Generation</h2></div>
+      <div class="content">
+        <h3>What is App Mode and .papr Apps</h3>
+        <p>In CodePapr, <strong>App mode</strong> is not merely a code assistant — it is an <strong>on-demand interactive application factory</strong>. Simply describe what you need in natural language, and the Agent explores data, designs architecture, and builds ready-to-use <code>.papr</code> applications or desktop plugins in seconds, mounting them directly in the main window.</p>
+
+        <h3>Two Artifact Forms: Fullscreen Apps vs. Desktop Plugins</h3>
+        <p>Every <code>.papr</code> app declares its form via the <code>kind</code> field in <code>manifest.json</code>:</p>
+        <table>
+          <thead><tr><th>Artifact Form</th><th>Manifest Declaration</th><th>Runtime Behavior</th><th>Typical Use Cases</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Fullscreen App (App)</strong></td>
+              <td><code>kind: "app"</code> (default)</td>
+              <td>Opens as an <strong>exclusive fullscreen view</strong> over the workbench, dominating the primary viewport. Supports background command processes.</td>
+              <td>SQLite Database Explorer, 3D topology graphs, multi-panel dashboards, static site documentation previews</td>
+            </tr>
+            <tr>
+              <td><strong>Desktop Plugin (Plugin)</strong></td>
+              <td><code>kind: "plugin"</code></td>
+              <td>Renders as an <strong>in-window lightweight overlay (HUD)</strong>, <strong>coexisting with the coding workbench</strong>. Always visible while you write code, freely draggable, dynamically resizable via <code>papr.window</code>, and easily pinned/unpinned in the App Dock.</td>
+              <td>Real-time crypto/stock tickers, live architecture evolution boards, task progress widgets, scratchpads</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>Form Selection Guideline:</strong><br>
+          &bull; When the user prompt includes words like <em>"floating / plugin / widget / HUD / keep on the side while coding / live board"</em>, the Agent generates a <code>kind: "plugin"</code> plugin.<br>
+          &bull; Plugins <strong>cannot run background command processes</strong> and cannot use <code>local: "write"</code> project-write access, ensuring safety and lightweight operation.
+        </div>
+
+        <h3>.papr Source Structure &amp; Mandatory Modularization</h3>
+        <p>All apps and plugins are stored in <code>.CodePapr/apps/&lt;appId&gt;/</code>. To allow precise patching and continuous iteration by the Agent, CodePapr <strong>mandates modular file organization</strong> (native ES Modules, zero build tools, <code>import</code> statements must include <code>.js</code> extensions):</p>
+
+        <pre><code>.CodePapr/apps/&lt;appId&gt;/
+├── manifest.json       <span class="hl-comment"># App manifest: metadata, kind, surface, permissions, inbox contracts, agents</span>
+├── index.html          <span class="hl-comment"># Shell HTML: skeletal markup only, loads CSS &amp; js/main.js, no giant monoliths</span>
+├── css/
+│   └── theme.css       <span class="hl-comment"># Theming &amp; styling: supports html[data-mode="dark"] &amp; html[data-mode="light"]</span>
+├── js/
+│   ├── main.js         <span class="hl-comment"># Entry module: initialization, DOM binding, and event listeners</span>
+│   ├── db.js           <span class="hl-comment"># Key-value storage wrapper (papr.db)</span>
+│   ├── ui.js           <span class="hl-comment"># View rendering, loading states, and animations</span>
+│   ├── api.js          <span class="hl-comment"># External HTTP fetch wrapper (papr.http, optional)</span>
+│   └── agent.js        <span class="hl-comment"># Multi-turn AI Agent wrapper (papr.agent.run, optional)</span>
+├── data/               <span class="hl-comment"># App-private sandbox filesystem storage (papr.fs, created at runtime)</span>
+└── db.sqlite           <span class="hl-comment"># papr.db data &amp; inbox history (created at runtime)</span></code></pre>
+
+        <p><small>Note: For lightweight plugins (<code>kind: "plugin"</code>), a 3-file layout (<code>index.html</code> + <code>css/theme.css</code> + <code>js/main.js</code>) is recommended until any single file exceeds ~200 lines.</small></p>
+
+        <h3>Papr SDK Capabilities (<code>window.papr</code>)</h3>
+        <p>Apps run inside a secure sandboxed iframe. Without installing npm packages, the runtime automatically injects the <code>window.papr</code> SDK:</p>
+
+        <table>
+          <thead><tr><th>SDK Module</th><th>Primary APIs</th><th>Permission Requirements</th><th>Capabilities &amp; Details</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>papr.db</code></td>
+              <td><code>get(key)</code><br><code>set(key, val)</code><br><code>delete(key)</code><br><code>keys()</code></td>
+              <td>No permissions required (always available)</td>
+              <td>SQLite-backed persistent key-value storage isolated per app. Data persists across app restarts.</td>
+            </tr>
+            <tr>
+              <td><code>papr.agent.run</code></td>
+              <td><code>run({ agent, task }, onProgress?)</code></td>
+              <td>Follows <code>local/network</code> profile</td>
+              <td>Invokes a multi-turn AI sub-agent directly within the app. Supports streaming events (<code>tool-call-start</code>, <code>content-delta</code>) and a 300s idle timeout.</td>
+            </tr>
+            <tr>
+              <td><code>papr.http</code></td>
+              <td><code>get(url)</code><br><code>post(url, body)</code><br><code>request(opts)</code></td>
+              <td><code>network: true</code></td>
+              <td>Safe public HTTP client with header whitelisting. Localhost and private intranet requests are blocked to prevent SSRF.</td>
+            </tr>
+            <tr>
+              <td><code>papr.fs</code></td>
+              <td><code>readFile(path)</code><br><code>writeFile(path, data)</code><br><code>exists(path)</code><br><code>list()</code><br><code>delete(path)</code></td>
+              <td>No permissions required (app data dir)</td>
+              <td>Dedicated sandbox filesystem restricted to the app's <code>data/</code> folder. <code>writeFile</code> auto-creates parent folders; supports <code>base64</code> binary assets.</td>
+            </tr>
+            <tr>
+              <td><code>papr.events</code></td>
+              <td><code>on(channel, callback)</code></td>
+              <td>No permissions required (always available)</td>
+              <td>Real-time event bus. Subscribes to events pushed by the coding Agent via <code>app_publish</code>; returns an unsubscribe handler.</td>
+            </tr>
+            <tr>
+              <td><code>papr.window</code></td>
+              <td><code>setSize({ width, height })</code><br><code>getBounds()</code><br><code>onBounds(cb)</code></td>
+              <td>No permissions required (<code>kind: "plugin"</code> only)</td>
+              <td>Plugin viewport control. Dynamically resizes the overlay content box at runtime (host automatically adds the draggable titlebar).</td>
+            </tr>
+            <tr>
+              <td><code>papr.app.info</code></td>
+              <td><code>info()</code></td>
+              <td>No permissions required</td>
+              <td>Retrieves app metadata: <code>appId</code>, <code>name</code>, <code>version</code>, <code>local</code>, <code>network</code>, and effective permissions.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Agent Push Mechanism (<code>app_publish</code> + <code>inbox</code> Contract)</h3>
+        <p>In <strong>"Agent writes code in terminal &rarr; Plugin visualizes progress/architecture in real time"</strong> collaboration workflows, CodePapr provides a zero-overhead publish/subscribe system:</p>
+        <ol>
+          <li><strong>Plugin Declares Contract</strong>: Declare <code>inbox</code> channels and minimal payload <code>example</code> in <code>manifest.json</code>.</li>
+          <li><strong>Agent Auto-Discovery</strong>: Enabled inbox plugins are automatically surfaced in the coding Agent's session context under "## Enabled plugins".</li>
+          <li><strong>Push from Any Mode</strong>: The coding Agent calls <code>app_publish({ appId, channel, payload })</code> from any writable mode (Agent / Plan / App).</li>
+          <li><strong>Dual-Channel Persistence &amp; Replay</strong>: Events are atomically appended to the app's <code>db.sqlite</code> (up to 200 events retained); delivered live via <code>papr://event</code> if mounted, or replayed on next launch using <code>papr.db.get("inbox:&lt;channel&gt;")</code>.</li>
+        </ol>
+
+        <h3>Security &amp; Permission Isolation Model</h3>
+        <p><code>manifest.json</code> uses a <strong>Local Access (local) &times; Network Access (network)</strong> matrix:</p>
+        <table>
+          <thead><tr><th>Access Axis</th><th>Value</th><th>Allowed Capabilities &amp; Tooling Scope</th></tr></thead>
+          <tbody>
+            <tr>
+              <td rowspan="3"><code>local</code></td>
+              <td><code>"none"</code></td>
+              <td>Pure compute sandbox: only <code>papr.db</code> and <code>papr.fs</code> private storage.</td>
+            </tr>
+            <tr>
+              <td><code>"read"</code></td>
+              <td>Workspace read access: unlocks read-only Agent tools (<code>read</code>, <code>grep</code>, <code>list</code>, <code>lsp</code>).</td>
+            </tr>
+            <tr>
+              <td><code>"write"</code></td>
+              <td>Workspace modification: unlocks Agent writing &amp; execution (<code>write</code>, <code>edit</code>, <code>patch</code>, <code>bash</code>). <em>Note: Plugins cannot use this level</em>.</td>
+            </tr>
+            <tr>
+              <td rowspan="2"><code>network</code></td>
+              <td><code>false</code></td>
+              <td>Strict offline sandbox: CSP blocks all external network requests.</td>
+            </tr>
+            <tr>
+              <td><code>true</code></td>
+              <td>Network enabled: unlocks <code>papr.http</code>, Agent <code>websearch</code> / <code>webfetch</code>, and MCP services.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>App Management Dock</h3>
+        <p>Switch to the <strong>Apps</strong> tab on the right sidebar to browse all generated <code>.papr</code> apps and plugins:</p>
+        <ul>
+          <li><strong>Status Indicators</strong>: Green dot indicates "Ready/Pinned", labeled with a <span class="badge badge-primary">Plugin</span> badge for overlay widgets.</li>
+          <li><strong>Toolbar Actions</strong>:
+            <ul>
+              <li><strong>Open / Pin / Unpin</strong>: Show floating overlay in the main window or hide it;</li>
+              <li><strong>▶ Run / ■ Stop</strong>: Manage lifecycle of apps running background server processes;</li>
+              <li><strong>🗑 Delete</strong>: Permanently delete app directory and runtime state;</li>
+              <li><strong>⤓ Export</strong>: Package app as a <code>.zip</code> for sharing and backup.</li>
+            </ul>
+          </li>
+          <li><strong>Settings Overrides</strong>: In <strong>Settings &rarr; App</strong> tab, configure default access for undeclared apps or narrow permissions per app.</li>
+        </ul>
+
+        <h3>Practical Example 1: Live Crypto Ticker Floating Plugin</h3>
+        <p>Prompt: <em>"Generate a lightweight floating crypto ticker plugin in the top-right corner, showing BTC/ETH prices every 10s with compact typography."</em></p>
+
+        <p><strong>manifest.json Configuration:</strong></p>
+        <pre><code>{
+  <span class="hl-keyword">"spec":</span> <span class="hl-string">"papr/0.1"</span>,
+  <span class="hl-keyword">"name":</span> <span class="hl-string">"Crypto Ticker"</span>,
+  <span class="hl-keyword">"version":</span> <span class="hl-string">"1.0.0"</span>,
+  <span class="hl-keyword">"kind":</span> <span class="hl-string">"plugin"</span>,
+  <span class="hl-keyword">"surface":</span> {
+    <span class="hl-keyword">"type":</span> <span class="hl-string">"overlay"</span>,
+    <span class="hl-keyword">"width":</span> 300,
+    <span class="hl-keyword">"height":</span> 180,
+    <span class="hl-keyword">"position":</span> <span class="hl-string">"top-right"</span>
+  },
+  <span class="hl-keyword">"local":</span> <span class="hl-string">"none"</span>,
+  <span class="hl-keyword">"network":</span> true
+}</code></pre>
+
+        <p><strong>js/main.js Logic:</strong></p>
+        <pre><code><span class="hl-keyword">async function</span> <span class="hl-func">fetchPrices</span>() {
+  <span class="hl-keyword">try</span> {
+    <span class="hl-keyword">const</span> data = <span class="hl-keyword">await</span> window.papr.http.get(<span class="hl-string">'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&amp;vs_currencies=usd&amp;include_24hr_change=true'</span>);
+    <span class="hl-func">render</span>(data);
+  } <span class="hl-keyword">catch</span> (err) {
+    console.error(<span class="hl-string">'Ticker error:'</span>, err);
+  }
+}
+
+fetchPrices();
+setInterval(fetchPrices, 10000);</code></pre>
+
+        <h3>Practical Example 2: Architecture Evolution Board (Agent Push Supported)</h3>
+        <p>Prompt: <em>"Generate an architecture evolution board plugin that subscribes to the cards channel to receive live task nodes as you code."</em></p>
+
+        <p><strong>manifest.json Configuration (with inbox contract):</strong></p>
+        <pre><code>{
+  <span class="hl-keyword">"spec":</span> <span class="hl-string">"papr/0.1"</span>,
+  <span class="hl-keyword">"name":</span> <span class="hl-string">"Architecture Board"</span>,
+  <span class="hl-keyword">"kind":</span> <span class="hl-string">"plugin"</span>,
+  <span class="hl-keyword">"surface":</span> {
+    <span class="hl-keyword">"type":</span> <span class="hl-string">"overlay"</span>,
+    <span class="hl-keyword">"width":</span> 360,
+    <span class="hl-keyword">"height":</span> 260,
+    <span class="hl-keyword">"position":</span> <span class="hl-string">"bottom-right"</span>
+  },
+  <span class="hl-keyword">"local":</span> <span class="hl-string">"none"</span>,
+  <span class="hl-keyword">"network":</span> false,
+  <span class="hl-keyword">"inbox":</span> {
+    <span class="hl-keyword">"cards":</span> {
+      <span class="hl-keyword">"description":</span> <span class="hl-string">"Push task progress &amp; state change cards"</span>,
+      <span class="hl-keyword">"example":</span> { <span class="hl-keyword">"id":</span> <span class="hl-string">"task-1"</span>, <span class="hl-keyword">"title":</span> <span class="hl-string">"Refactor Auth"</span>, <span class="hl-keyword">"status":</span> <span class="hl-string">"done"</span> }
+    }
+  }
+}</code></pre>
+
+        <p><strong>js/main.js Subscription &amp; History Replay:</strong></p>
+        <pre><code><span class="hl-comment">// 1. Replay historical events on startup</span>
+<span class="hl-keyword">const</span> history = <span class="hl-keyword">await</span> window.papr.db.get(<span class="hl-string">'inbox:cards'</span>) || [];
+history.<span class="hl-func">forEach</span>(evt => <span class="hl-func">applyCard</span>(evt.payload));
+
+<span class="hl-comment">// 2. Listen to live Agent push events</span>
+window.papr.events.<span class="hl-func">on</span>(<span class="hl-string">'cards'</span>, (evt) => {
+  <span class="hl-func">applyCard</span>(evt.payload);
+});</code></pre>
+
+        <h3>Practical Example 3: Fullscreen SQLite Database Explorer (Full App)</h3>
+        <p>Prompt: <em>"Analyze the stats.sqlite database in this project and generate a fullscreen Database Explorer app with paginated table views and SQL query execution."</em></p>
+
+        <p>The Agent declares <code>local: "read"</code>, modularly splits frontend components and SQL result tables, and mounts a full interactive dashboard in the workspace Apps panel.</p>
       </div>
     </section>
 

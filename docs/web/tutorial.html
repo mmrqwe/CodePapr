@@ -320,6 +320,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
         <a class="nav-item" onclick="scrollToSection('skills')"><span class="dot"></span>Skills 技能系统</a>
         <a class="nav-item" onclick="scrollToSection('agents')"><span class="dot"></span>Agent 与子代理</a>
         <a class="nav-item" onclick="scrollToSection('commands')"><span class="dot"></span>自定义命令</a>
+        <a class="nav-item" onclick="scrollToSection('apps')"><span class="dot"></span>App 模式与插件生成</a>
         <a class="nav-item" onclick="scrollToSection('goal')"><span class="dot"></span>Goal 自主循环</a>
         <a class="nav-item" onclick="scrollToSection('mcp')"><span class="dot"></span>MCP 工具集成</a>
       </div>
@@ -375,6 +376,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
       <a class="nav-item" onclick="mobileNavTo('skills')">Skills 技能系统</a>
       <a class="nav-item" onclick="mobileNavTo('agents')">Agent 与子代理</a>
       <a class="nav-item" onclick="mobileNavTo('commands')">自定义命令</a>
+      <a class="nav-item" onclick="mobileNavTo('apps')">App 模式与插件生成</a>
       <a class="nav-item" onclick="mobileNavTo('goal')">Goal 自主循环</a>
       <a class="nav-item" onclick="mobileNavTo('mcp')">MCP 工具集成</a>
       <a class="nav-item" onclick="mobileNavTo('architecture')">系统架构</a>
@@ -689,7 +691,7 @@ https://api.deepseek.com/v1</code></pre>
           <li>App ↔ 编码模式互切换 -> 新建会话</li>
         </ul>
         <p><strong>模型策略：</strong>始终使用主模型（deepseek-v4-pro）以保证 HTML 生成质量。</p>
-        <p><strong>应用管理：</strong>右侧面板的"应用"Tab 显示所有已注册的 .papr App。绿/红圆点指示运行状态。底部工具栏：▶ 启动 / 打开 / ■ 停止 / 🗑 删除。LLM 可通过 <code>app_list</code>、<code>app_start</code>、<code>app_stop</code>、<code>app_delete</code> 工具管理应用生命周期。</p>
+        <p><strong>应用管理：</strong>右侧面板的"应用"Tab 显示所有已注册的 .papr App。绿/红圆点指示运行状态。底部工具栏：▶ 启动 / 打开 / ■ 停止 / 🗑 删除。LLM 可通过 <code>app_list</code>、<code>app_start</code>、<code>app_stop</code>、<code>app_delete</code> 工具管理应用生命周期。完整开发与插件规范详见 <a href="#apps" style="color:var(--accent);font-weight:500;">App 模式与插件生成</a> 章节。</p>
         <p><strong>权限模型：</strong>App 用 <code>local</code>（none / read / write）× <code>network</code>（true / false）两轴声明访问档。设置 → App Tab 可收窄全局默认与逐 app 覆盖；保存后正在运行的后端会按新沙箱重启。</p>
 
         <h3>App 模式典型场景</h3>
@@ -1432,6 +1434,237 @@ TTS 数据流：
           1. <strong>界面操作</strong>：在桌面端点击顶部 <strong>项目配置</strong> &rarr; 切换到 <strong>Commands</strong> 标签页即可直观新建与编辑命令。<br>
           2. <strong>调用命令</strong>：在输入框输入 <code>/</code> 弹出命令面板，支持键盘 &uarr;&darr; 快速选择；输入 <code>/命令名 参数</code> 发送即可。在聊天框输入 <code>/help</code> 可随时查看已注册的项目命令。
         </div>
+      </div>
+    </section>
+
+    <!-- 12.3 App 模式与插件生成 -->
+    <section class="section" id="apps">
+      <div class="section-header"><h2>App 模式与插件生成</h2></div>
+      <div class="content">
+        <h3>什么是 App 模式与 .papr 应用</h3>
+        <p>在 CodePapr 中，<strong>App 模式（应用模式）</strong>不仅是写代码的助手，更是<strong>交互式应用的即时工厂</strong>。只需用自然语言描述需求，Agent 会在几秒钟内完成数据分析、架构设计与前端开发，生成一个开箱即用的 <code>.papr</code> 应用或桌面插件，并挂载到主窗口中运行。</p>
+
+        <h3>两类产物形态：全屏 App 与 桌面插件（Plugin）</h3>
+        <p>每个 <code>.papr</code> 应用在 <code>manifest.json</code> 中通过 <code>kind</code> 字段声明形态：</p>
+        <table>
+          <thead><tr><th>产物形态</th><th>声明方式</th><th>运行机制</th><th>典型适用场景</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>全屏微应用 (App)</strong></td>
+              <td><code>kind: "app"</code>（默认缺省）</td>
+              <td>在工作台上方以<strong>全屏独立视图</strong>打开，独占主区域展示。支持后端 Command 进程服务。</td>
+              <td>SQLite Database Explorer、三维拓扑图、复杂大屏仪表盘、文档静态站点预览器</td>
+            </tr>
+            <tr>
+              <td><strong>桌面插件 (Plugin)</strong></td>
+              <td><code>kind: "plugin"</code></td>
+              <td>在主窗口内以<strong>轻量悬浮层 (Overlay / HUD)</strong> 呈现，<strong>与编程工作台共存常驻</strong>。写代码时可随时查看，支持自由拖动位置、通过 <code>papr.window</code> 自适应大小，并在应用 Dock 中一键钉住 (Pin) 与收起。</td>
+              <td>股票/数字货币实时行情条、架构演进实时看板、任务进度浮窗、代码灵感便利贴</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>形态选择建议：</strong><br>
+          &bull; 当用户提示词包含 <em>「悬浮 / 插件 / 小组件 / HUD / 边写代码边看 / 实时看板」</em> 时，Agent 会生成 <code>kind: "plugin"</code> 插件。<br>
+          &bull; 插件<strong>禁止后端服务进程（command）</strong>且禁止 <code>local: "write"</code> 项目写权限，确保轻量与安全性。
+        </div>
+
+        <h3>.papr 源码结构与强制模块化规范</h3>
+        <p>所有应用与插件均保存在项目的 <code>.CodePapr/apps/&lt;appId&gt;/</code> 目录下。为了便于后续通过 Agent 进行精确 patch 和持续迭代，CodePapr <strong>强制要求模块化拆分</strong>（原生 ES Modules，零构建链，<code>import</code> 必须带 <code>.js</code> 后缀）：</p>
+
+        <pre><code>.CodePapr/apps/&lt;appId&gt;/
+├── manifest.json       <span class="hl-comment"># 应用清单：元数据、kind、surface、权限、inbox 契约、agents</span>
+├── index.html          <span class="hl-comment"># 骨架页面：只放 DOM 骨架，引入 CSS 与 js/main.js，禁止巨石代码</span>
+├── css/
+│   └── theme.css       <span class="hl-comment"># 样式定义：适配 html[data-mode="dark"] 与 html[data-mode="light"]</span>
+├── js/
+│   ├── main.js         <span class="hl-comment"># 入口模块：初始化、DOM 绑定与事件监听</span>
+│   ├── db.js           <span class="hl-comment"># 数据持久化封装（papr.db）</span>
+│   ├── ui.js           <span class="hl-comment"># 视图渲染、Loading 与交互动效</span>
+│   ├── api.js          <span class="hl-comment"># 外部数据拉取封装（papr.http，可选）</span>
+│   └── agent.js        <span class="hl-comment"># AI Agent 多轮调用封装（papr.agent.run，可选）</span>
+├── data/               <span class="hl-comment"># 应用私有沙箱文件存储（papr.fs，运行时自动维护）</span>
+└── db.sqlite           <span class="hl-comment"># papr.db 键值数据与 inbox 历史（运行时自动生成）</span></code></pre>
+
+        <p><small>注：对于轻量级插件（<code>kind: "plugin"</code>），推荐遵循三文件结构（<code>index.html</code> + <code>css/theme.css</code> + <code>js/main.js</code>），单文件超过 200 行再做职责拆分。</small></p>
+
+        <h3>Papr SDK 全能力（<code>window.papr</code>）</h3>
+        <p>应用运行在安全沙箱 iframe 中，无需安装任何 npm 包，宿主环境会自动注入 <code>window.papr</code> 运行时 SDK：</p>
+
+        <table>
+          <thead><tr><th>SDK 模块</th><th>主要 API 方法</th><th>权限要求</th><th>功能与说明</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>papr.db</code></td>
+              <td><code>get(key)</code><br><code>set(key, val)</code><br><code>delete(key)</code><br><code>keys()</code></td>
+              <td>无权限要求（永远可用）</td>
+              <td>基于 SQLite 的持久化键值存储，按应用天然隔离。应用重启后数据永不丢失。</td>
+            </tr>
+            <tr>
+              <td><code>papr.agent.run</code></td>
+              <td><code>run({ agent, task }, onProgress?)</code></td>
+              <td>按 <code>local/network</code> 访问档</td>
+              <td>在 App 内唤起多轮推理 AI 子代理。支持实时流式事件（<code>tool-call-start</code>、<code>content-delta</code>）与 300 秒空闲超时机制。</td>
+            </tr>
+            <tr>
+              <td><code>papr.http</code></td>
+              <td><code>get(url)</code><br><code>post(url, body)</code><br><code>request(opts)</code></td>
+              <td><code>network: true</code></td>
+              <td>安全公网 HTTP 请求。支持自定义 Header，严格拦截本地与私有 IP 请求以防内网 SSRF。</td>
+            </tr>
+            <tr>
+              <td><code>papr.fs</code></td>
+              <td><code>readFile(path)</code><br><code>writeFile(path, data)</code><br><code>exists(path)</code><br><code>list()</code><br><code>delete(path)</code></td>
+              <td>无权限要求（限定 app data 目录）</td>
+              <td>应用专用沙箱文件系统。<code>writeFile</code> 自动创建父级目录，支持 <code>base64</code> 存取二进制资产与图片。</td>
+            </tr>
+            <tr>
+              <td><code>papr.events</code></td>
+              <td><code>on(channel, callback)</code></td>
+              <td>无权限要求（永远可用）</td>
+              <td>实时事件总线。监听编程 Agent 经 <code>app_publish</code> 推送的频道事件，返回解绑函数。</td>
+            </tr>
+            <tr>
+              <td><code>papr.window</code></td>
+              <td><code>setSize({ width, height })</code><br><code>getBounds()</code><br><code>onBounds(cb)</code></td>
+              <td>无权限要求（仅 <code>kind: "plugin"</code>）</td>
+              <td>插件视口控制。运行时动态调整悬浮插件 Overlay 尺寸（默认调节内容区，宿主自动附加拖拽顶栏）。</td>
+            </tr>
+            <tr>
+              <td><code>papr.app.info</code></td>
+              <td><code>info()</code></td>
+              <td>无权限要求</td>
+              <td>返回应用元数据：<code>appId</code>、<code>name</code>、<code>version</code>、<code>local</code>、<code>network</code>、生效权限等。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Agent 推送机制（<code>app_publish</code> + <code>inbox</code> 契约）</h3>
+        <p>在<strong>「Agent 负责在终端敲代码/跑测试，悬浮插件负责实时展示任务进展/架构节点」</strong>的协同场景中，CodePapr 提供了轻量高效的推送机制：</p>
+        <ol>
+          <li><strong>插件声明契约</strong>：在 <code>manifest.json</code> 中定义 <code>inbox</code> 频道和最小数据示例 <code>example</code>。</li>
+          <li><strong>Agent 自动感知</strong>：已启用的 inbox 插件会自动注入到 Agent 会话上下文的「已启用插件」列表中。</li>
+          <li><strong>多模式推送</strong>：编程 Agent 在任何可写模式（Agent / Plan / App）下直接调用 <code>app_publish({ appId, channel, payload })</code>。</li>
+          <li><strong>双通道持久化与回放</strong>：推送数据首先原子写入应用的 <code>db.sqlite</code>（保留最新 200 条）；插件已挂载时经 <code>papr://event</code> 实时更新，未打开时下次启动通过 <code>papr.db.get("inbox:&lt;channel&gt;")</code> 无缝回放历史。</li>
+        </ol>
+
+        <h3>权限与安全隔离模型</h3>
+        <p><code>manifest.json</code> 采用 <strong>本地访问（local） &times; 网络访问（network）</strong> 两轴安全声明：</p>
+        <table>
+          <thead><tr><th>权限轴</th><th>取值</th><th>允许的能力与工具范围</th></tr></thead>
+          <tbody>
+            <tr>
+              <td rowspan="3"><code>local</code></td>
+              <td><code>"none"</code></td>
+              <td>纯计算沙箱：仅允许 <code>papr.db</code> 与 <code>papr.fs</code>（私有存储）。</td>
+            </tr>
+            <tr>
+              <td><code>"read"</code></td>
+              <td>允许读取工作区文件：解锁 Agent 只读工具（<code>read</code> / <code>grep</code> / <code>list</code> / <code>lsp</code> 等）。</td>
+            </tr>
+            <tr>
+              <td><code>"write"</code></td>
+              <td>允许修改项目：解锁 Agent 写文件与命令执行工具（<code>write</code> / <code>edit</code> / <code>patch</code> / <code>bash</code>）。<em>注：Plugin 插件禁用此级别</em>。</td>
+            </tr>
+            <tr>
+              <td rowspan="2"><code>network</code></td>
+              <td><code>false</code></td>
+              <td>完全离线沙箱：CSP 策略拦截任何外部网络连接。</td>
+            </tr>
+            <tr>
+              <td><code>true</code></td>
+              <td>允许联网：解锁 <code>papr.http</code>、Agent <code>websearch</code> / <code>webfetch</code> 与 MCP 联网服务。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>应用管理面板（App Dock）</h3>
+        <p>在工作台右侧切到 <strong>应用</strong> 选项卡，即可浏览项目中所有已生成的 <code>.papr</code> 应用与插件：</p>
+        <ul>
+          <li><strong>状态指示</strong>：绿色圆点表示「就绪/已显示」，带有 <span class="badge badge-primary">插件</span> 徽章标记悬浮组件。</li>
+          <li><strong>工具栏操作</strong>：
+            <ul>
+              <li><strong>打开 / 钉住（Pin/Unpin）</strong>：将插件悬浮展示在主窗口中或收起；</li>
+              <li><strong>▶ 运行 / ■ 停止</strong>：管理带后端服务进程的应用生命周期；</li>
+              <li><strong>🗑 删除</strong>：完整清理应用磁盘目录与运行时状态；</li>
+              <li><strong>⤓ 导出</strong>：一键打包导出 <code>.zip</code> 便于分享或备份。</li>
+            </ul>
+          </li>
+          <li><strong>设置覆盖</strong>：在 <strong>设置 &rarr; App</strong> 选项卡中，可配置未声明应用的默认访问档，或对单个应用进行权限收窄。</li>
+        </ul>
+
+        <h3>实战示例 1：实时股票/数字货币行情悬浮插件（Plugin）</h3>
+        <p>提示词：<em>“帮我生成一个悬浮在右上角的数字货币实时行情小组件，支持 BTC/ETH，每 10 秒自动刷新，高密度小窗展示。”</em></p>
+
+        <p><strong>manifest.json 配置：</strong></p>
+        <pre><code>{
+  <span class="hl-keyword">"spec":</span> <span class="hl-string">"papr/0.1"</span>,
+  <span class="hl-keyword">"name":</span> <span class="hl-string">"加密行情小组件"</span>,
+  <span class="hl-keyword">"version":</span> <span class="hl-string">"1.0.0"</span>,
+  <span class="hl-keyword">"kind":</span> <span class="hl-string">"plugin"</span>,
+  <span class="hl-keyword">"surface":</span> {
+    <span class="hl-keyword">"type":</span> <span class="hl-string">"overlay"</span>,
+    <span class="hl-keyword">"width":</span> 300,
+    <span class="hl-keyword">"height":</span> 180,
+    <span class="hl-keyword">"position":</span> <span class="hl-string">"top-right"</span>
+  },
+  <span class="hl-keyword">"local":</span> <span class="hl-string">"none"</span>,
+  <span class="hl-keyword">"network":</span> true
+}</code></pre>
+
+        <p><strong>js/main.js 核心逻辑：</strong></p>
+        <pre><code><span class="hl-keyword">async function</span> <span class="hl-func">fetchPrices</span>() {
+  <span class="hl-keyword">try</span> {
+    <span class="hl-keyword">const</span> data = <span class="hl-keyword">await</span> window.papr.http.get(<span class="hl-string">'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&amp;vs_currencies=usd&amp;include_24hr_change=true'</span>);
+    <span class="hl-func">render</span>(data);
+  } <span class="hl-keyword">catch</span> (err) {
+    console.error(<span class="hl-string">'行情拉取失败:'</span>, err);
+  }
+}
+
+<span class="hl-comment">// 定时轮询与启动拉取</span>
+fetchPrices();
+setInterval(fetchPrices, 10000);</code></pre>
+
+        <h3>实战示例 2：任务与架构实时看板插件（支持 Agent 推送）</h3>
+        <p>提示词：<em>“生成一个架构任务看板插件，声明 cards 频道接收你在编码过程中推送的执行步骤和状态。”</em></p>
+
+        <p><strong>manifest.json 配置（含 inbox 契约）：</strong></p>
+        <pre><code>{
+  <span class="hl-keyword">"spec":</span> <span class="hl-string">"papr/0.1"</span>,
+  <span class="hl-keyword">"name":</span> <span class="hl-string">"架构演进看板"</span>,
+  <span class="hl-keyword">"kind":</span> <span class="hl-string">"plugin"</span>,
+  <span class="hl-keyword">"surface":</span> {
+    <span class="hl-keyword">"type":</span> <span class="hl-string">"overlay"</span>,
+    <span class="hl-keyword">"width":</span> 360,
+    <span class="hl-keyword">"height":</span> 260,
+    <span class="hl-keyword">"position":</span> <span class="hl-string">"bottom-right"</span>
+  },
+  <span class="hl-keyword">"local":</span> <span class="hl-string">"none"</span>,
+  <span class="hl-keyword">"network":</span> false,
+  <span class="hl-keyword">"inbox":</span> {
+    <span class="hl-keyword">"cards":</span> {
+      <span class="hl-keyword">"description":</span> <span class="hl-string">"推送任务状态变更卡片"</span>,
+      <span class="hl-keyword">"example":</span> { <span class="hl-keyword">"id":</span> <span class="hl-string">"task-1"</span>, <span class="hl-keyword">"title":</span> <span class="hl-string">"重构 Auth"</span>, <span class="hl-keyword">"status":</span> <span class="hl-string">"done"</span> }
+    }
+  }
+}</code></pre>
+
+        <p><strong>js/main.js 订阅与历史回放：</strong></p>
+        <pre><code><span class="hl-comment">// 1. 启动时回放历史事件</span>
+<span class="hl-keyword">const</span> history = <span class="hl-keyword">await</span> window.papr.db.get(<span class="hl-string">'inbox:cards'</span>) || [];
+history.<span class="hl-func">forEach</span>(evt => <span class="hl-func">applyCard</span>(evt.payload));
+
+<span class="hl-comment">// 2. 监听 Agent 实时推送</span>
+window.papr.events.<span class="hl-func">on</span>(<span class="hl-string">'cards'</span>, (evt) => {
+  <span class="hl-func">applyCard</span>(evt.payload);
+});</code></pre>
+
+        <h3>实战示例 3：全屏 SQLite 数据库探索器（Full App）</h3>
+        <p>提示词：<em>“分析项目中的 stats.sqlite 数据库，生成一个全屏的 Database Explorer 应用，支持表格分页预览与 SQL 查询。”</em></p>
+
+        <p>Agent 会声明 <code>local: "read"</code>，利用多文件拆分构建前端表格组件与 SQL 结果视窗，并在右侧应用面板中无缝挂载全屏交互页面。</p>
       </div>
     </section>
 
