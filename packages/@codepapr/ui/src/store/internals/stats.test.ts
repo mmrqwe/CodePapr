@@ -219,6 +219,13 @@ describe('stats formatters and aggregate helpers', () => {
     expect(sumRuntimeAcrossTiers(stats, 'toolRuntimeMs')).toBeUndefined();
   });
 
+  it('throughputFromStats computes tier throughput', () => {
+    const stats = createEmptyConversationStats().primary;
+    stats.totalOutput = 627;
+    stats.modelRuntimeMs = 10000;
+    expect(throughputFromStats(stats, 'token/s')).toBe('62.7 token/s');
+  });
+
   it('aggregateThroughput computes combined throughput', () => {
     const stats = createEmptyConversationStats();
     stats.primary.totalOutput = 1000;
