@@ -19,6 +19,7 @@ export function buildCommandHelpMessage(
     `${t.commandHelpLocalLabel}`,
     t.commandHelpHelp,
     t.commandHelpCompact,
+    t.commandHelpUndo,
     t.commandHelpGoal,
   ];
 

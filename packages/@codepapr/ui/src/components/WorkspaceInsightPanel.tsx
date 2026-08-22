@@ -40,7 +40,10 @@ import { isLspFamilyEnabled } from '../utils/lspFamilies';
 import type { ProjectGraphWorkerBuildRequest, ProjectGraphWorkerMessage } from '../workers/projectGraphWorkerProtocol';
 import { computeInsightCacheKey } from '../utils/projectGraphCacheKey';
 
-const WORKER_AVAILABLE = typeof Worker !== 'undefined';
+const WORKER_AVAILABLE =
+  typeof Worker !== 'undefined' &&
+  import.meta.env?.MODE !== 'test' &&
+  !(typeof navigator !== 'undefined' && /jsdom|happy-dom/i.test(navigator.userAgent));
 const WORKER_BUILD_TIMEOUT_MS = 60_000;
 
 interface ReadFileResult {
@@ -189,16 +192,11 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
   const [gitStatus, setGitStatus] = useState<GitStatusSummary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [debugLog, setDebugLog] = useState<string[]>([]);
   const lastWorkspacePathRef = useRef<string | null>(null);
   const hasSignaledLoadingRef = useRef(false);
   const [loadingInProgress, setLoadingInProgress] = useState(false);
   const [prewarming, setPrewarming] = useState(false);
   const [prewarmingProgress, setPrewarmingProgress] = useState('');
-  const appendDebug = (msg: string) => {
-    if (!settings.debugEnabled) return;
-    setDebugLog((prev) => [...prev, `${new Date().toLocaleTimeString()} ${msg}`]);
-  };
   const [refreshVersion, setRefreshVersion] = useState(0);
   // 自动刷新 ProjectGraph：记录上一轮 agent 加载态，及本轮起始的 workspace 变更版本号。
   const prevAgentIsLoadingRef = useRef(agentIsLoading);
@@ -416,7 +414,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
     let workerReject: ((reason: Error) => void) | null = null;
 
     if (!canStartLoading || !workspacePath) {
-      appendDebug(`跳过: canStartLoading=${canStartLoading} workspacePath=${workspacePath?.slice(-20)}`);
       setIsLoading(false);
       setProjectGraphProgress(null);
       setLoadingInProgress(false);
@@ -430,8 +427,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
     }
 
     lastWorkspacePathRef.current = workspacePath;
-
-    appendDebug(`开始加载: path=${workspacePath.slice(-30)} entries=${entriesRef.current.length} depth=${insightMaxDepth} bytes=${insightMaxFileBytes} files=${insightMaxSourceFiles}`);
 
     const thisGeneration = ++loadGenerationRef.current;
 
@@ -551,13 +546,9 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
         const insightRoot = '';
         const insightTruncated = false;
         const insightEntries = filterWorkspaceInsightEntries(entriesRef.current);
-        const csFiles = insightEntries.filter(e => !e.isDir && e.path.endsWith('.cs'));
-        appendDebug(`过滤后: ${insightEntries.length} 条目 其中.cs: ${csFiles.length}`);
         const projectGraphFiles = selectProjectMapFiles(insightEntries, insightMaxSourceFiles);
-        appendDebug(`文件列表: ${projectGraphFiles.length} 个文件 [${projectGraphFiles.slice(0,5).map(f => f.path.split('/').pop()).join(', ')}...]`);
 
         if (projectGraphFiles.length === 0) {
-          appendDebug('工作区没有可分析的源代码文件，跳过 ProjectGraph 构建');
           setIsLoading(false);
           return;
         }
@@ -583,7 +574,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
               fileContents[r.path] = { content: r.content, bytes: r.bytes };
             }
           } catch {
-            appendDebug(`批量读取失败 batch ${batchIndex + 1}/${totalBatches}, 回退到逐文件读取`);
             for (const entry of batch) {
               if (cancelled) return;
               try {
@@ -607,9 +597,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
         }
 
         const succeeded = Object.keys(fileContents).length;
-        const entriesWithContent = Object.entries(fileContents);
-        const firstOk = entriesWithContent[0];
-        appendDebug(`文件读取: ${succeeded}/${projectGraphFiles.length} 成功 first=${firstOk?.[0]?.replace(/^.*\//,'')}:${firstOk?.[1]?.content?.length ?? 0}bytes`);
         if (succeeded === 0) {
           setError(`无法读取任何源文件 (${projectGraphFiles.length} 个文件, maxBytes=${insightMaxFileBytes})`);
           setIsLoading(false);
@@ -637,7 +624,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
         let rawProjectGraph: WorkspaceProjectGraphResult;
 
         const buildViaFallback = async (): Promise<WorkspaceProjectGraphResult> => {
-          appendDebug('路径: 非Worker(fallback)');
           const projectGraphProjectMap = buildWorkspaceProjectMapSync({
             rootRelativePath: insightRoot,
             entries: insightEntries,
@@ -660,7 +646,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
         };
 
         if (WORKER_AVAILABLE) {
-          appendDebug('路径: Worker');
           const workerRequest: ProjectGraphWorkerBuildRequest = {
             type: 'build',
             projectMapParams: {
@@ -730,11 +715,10 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
 
               worker.postMessage(workerRequest);
             });
-          } catch (workerError) {
+          } catch {
             if (cancelled) {
               return;
             }
-            appendDebug(`Worker 失败，回退到主线程: ${(workerError as Error).message}`);
             if (worker) {
               worker.terminate();
               worker = null;
@@ -746,14 +730,9 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
           rawProjectGraph = await buildViaFallback();
         }
 
-        appendDebug(`原始图: ${rawProjectGraph.summary.files}f ${rawProjectGraph.summary.symbols}s ${rawProjectGraph.summary.imports}i ${rawProjectGraph.summary.extends}e ${rawProjectGraph.summary.calls}c`);
-
         setProjectGraphProgress({ phase: 'enriching', current: 5, total: 5 });
 
         const nextProjectGraph = await enrichWorkspaceProjectGraph(rawProjectGraph, fileContents, 4, DEFAULT_LSP_ENRICH_SYMBOLS, workspacePath).catch(() => rawProjectGraph);
-
-        const s = nextProjectGraph.summary;
-        appendDebug(`图完成: files=${s.files} symbols=${s.symbols} imports=${s.imports} extends=${s.extends} calls=${s.calls}`);
 
         setProjectGraphProgress(null);
 
@@ -773,7 +752,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
           }).catch(() => undefined);
         } catch { /* cache save non-critical */ }
       } catch (loadError) {
-        appendDebug(`致命错误: ${(loadError as Error).message}`);
         if (!cancelled) {
           setProjectGraph(null);
           setGitStatus(null);
@@ -1185,15 +1163,6 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
               </div>
             )}
           </div>
-        )}
-
-        {debugLog.length > 0 && (
-          <textarea
-            readOnly
-            value={debugLog.join('\n')}
-            className="w-full rounded-xl border border-warn-bg bg-warn-bg px-3 py-2 text-[10px] leading-relaxed text-warn font-mono resize-none"
-            rows={Math.min(debugLog.length, 10)}
-          />
         )}
 
         {!isLoading && !prewarming && error && (

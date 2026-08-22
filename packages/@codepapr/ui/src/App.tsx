@@ -9,7 +9,7 @@ import { isPluginApp, pluginIsEnabled, pluginShouldAutostartOverlay, readAppMani
 import { loadPluginUi } from './papr/pluginUiStorage';
 import { setPluginDockSlot } from './papr/pluginDockSlot';
 import { useCharactersStore } from './store/charactersStore';
-import { useDebugLogStore, pushDebugLog } from './store/debugLogStore';
+import { pushDebugLog } from './store/debugLogStore';
 import { SessionManager } from './components/SessionManager';
 import { ChatPanel } from './components/ChatPanel';
 import { CodingWorkbench } from './components/CodingWorkbench';
@@ -139,12 +139,6 @@ const StatsModal = lazy(() =>
 const ProjectConfigModal = lazy(() =>
   import('./components/ProjectConfigModal').then((m) => ({ default: m.ProjectConfigModal }))
 );
-const ContextDebugModal = lazy(() =>
-  import('./components/ContextDebugModal').then((m) => ({ default: m.ContextDebugModal }))
-);
-const DebugLogModal = lazy(() =>
-  import('./components/DebugLogModal').then((m) => ({ default: m.DebugLogModal }))
-);
 const CodePreviewPanel = lazy(() =>
   import('./components/CodePreviewPanel').then((m) => ({ default: m.CodePreviewPanel }))
 );
@@ -194,7 +188,6 @@ export default function App() {
     settings,
     setShowSettings,
     workspacePath,
-    messages,
     settingsLoaded,
     projectGraphLoading,
     projectGraphPhase,
@@ -205,7 +198,6 @@ export default function App() {
       settings: state.settings,
       setShowSettings: state.setShowSettings,
       workspacePath: state.workspacePath,
-      messages: state.messages,
       settingsLoaded: state.settingsLoaded,
       projectGraphLoading: state.projectGraphLoading,
       projectGraphPhase: state.projectGraphPhase,
@@ -240,8 +232,6 @@ export default function App() {
   const [showCharacters, setShowCharacters] = useState(false);
   const [showProjectConfig, setShowProjectConfig] = useState(false);
   const [workbenchHidden, setWorkbenchHidden] = useState(false);
-  const [showContextDebug, setShowContextDebug] = useState(false);
-  const [showDebugLog, setShowDebugLog] = useState(false);
   const [showCodeReview, setShowCodeReview] = useState<ReviewScope | null>(null);
   const [activeMainTab, setActiveMainTab] = useState<MainTab>('chat');
   // 跨面板的消息跳转请求（会话搜索等）：先切回聊天 tab，ChatPanel 挂载后
@@ -405,7 +395,6 @@ export default function App() {
   useEffect(() => {
     setShowStats(false);
     setShowProjectConfig(false);
-    setShowContextDebug(false);
     setActiveMainTab('chat');
     setSelectedPath(null);
     setSelectedGitFile(null);
@@ -518,23 +507,10 @@ export default function App() {
   }, [workspacePath, clearApps, mountApp]);
 
   useEffect(() => {
-    if (!settings.debugEnabled) {
-      setShowContextDebug(false);
-    }
-  }, [settings.debugEnabled]);
-
-  useEffect(() => {
     if (!settings.experimentalCharacters) {
       setShowCharacters(false);
     }
   }, [settings.experimentalCharacters]);
-
-  const hasContextDebugEntries = messages.some(
-    (message) =>
-      message.role === 'assistant' &&
-      typeof message.promptContent === 'string' &&
-      message.promptContent.trim().length > 0
-  );
 
   const handleSelectPath = useCallback(
     (path: string | null) => {
@@ -803,32 +779,6 @@ export default function App() {
                   ) : (
                    <div className="flex items-center justify-end gap-2 border-b border-line px-4 min-h-[60px]">
                     <div className="flex items-center gap-2">
-                      {settings.debugEnabled && (
-                        <button
-                          type="button"
-                          onClick={() => setShowContextDebug(true)}
-                          title={hasContextDebugEntries ? t.contextDebugTip : t.contextDebugEmpty}
-                          disabled={!hasContextDebugEntries}
-                          className="flex-shrink-0 rounded-lg border border-line px-2.5 py-2 text-xs font-medium text-fg-soft transition-colors hover:border-accent hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {t.contextDebugButton}
-                        </button>
-                      )}
-                      {settings.debugEnabled && (
-                        <button
-                          type="button"
-                          onClick={() => setShowDebugLog(true)}
-                          title={t.debugLogTitle}
-                          className="flex-shrink-0 rounded-lg border border-line px-2.5 py-2 text-xs font-medium text-fg-soft transition-colors hover:border-warn hover:text-warn"
-                        >
-                          {t.debugLogButton}
-                          {useDebugLogStore.getState().logs.length > 0 && (
-                            <span className="ml-1 inline-flex items-center justify-center rounded-full bg-warn-bg px-1.5 text-[9px] text-warn">
-                              {useDebugLogStore.getState().logs.length}
-                            </span>
-                          )}
-                        </button>
-                      )}
                       {browserPageSession && browserEngine === 'embedded' && workspacePath && (
                         <button
                           type="button"
@@ -929,23 +879,6 @@ export default function App() {
         )}
 
         {showSkillMarket && <SkillMarketModal onClose={() => setShowSkillMarket(false)} />}
-
-        {showContextDebug && settings.debugEnabled && (
-          <ContextDebugModal
-            messages={messages}
-            lang={settings.lang}
-            onClose={() => setShowContextDebug(false)}
-          />
-        )}
-
-        {showDebugLog && settings.debugEnabled && (
-          <Suspense fallback={null}>
-            <DebugLogModal
-              lang={settings.lang}
-              onClose={() => setShowDebugLog(false)}
-            />
-          </Suspense>
-        )}
 
         {showCodeReview && workspacePath && (
           <CodeReviewPanel

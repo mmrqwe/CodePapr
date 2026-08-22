@@ -1040,7 +1040,7 @@ export function CodingWorkbench({
                    <span className="text-[11px] text-accent-text">
                      {isLoadingTree
                        ? t.loadingProject
-                       : settings.debugEnabled && projectGraphProgress
+                       : projectGraphProgress
                          ? projectGraphProgress.phase === 'reading-files'
                            ? t.workspaceProjectGraphProgressFiles
                            : projectGraphProgress.phase === 'resolving-symbols'
@@ -1072,7 +1072,7 @@ export function CodingWorkbench({
                   {isLoadingTree && (
                     <span className="text-[10px] text-fg-muted">{t.loadingProject}</span>
                   )}
-                   {settings.debugEnabled && projectGraphLoading && !projectGraphProgress && (
+                  {projectGraphLoading && !projectGraphProgress && (
                     <span className="flex items-center gap-1.5 text-[10px] text-accent">
                       <span>{t.workspaceInsightsLoading}</span>
                       <span className="inline-flex h-1 w-12 overflow-hidden rounded-full bg-raised">
@@ -1080,7 +1080,7 @@ export function CodingWorkbench({
                       </span>
                     </span>
                   )}
-                   {settings.debugEnabled && projectGraphLoading && projectGraphProgress && (
+                  {projectGraphLoading && projectGraphProgress && (
                     <span className="flex items-center gap-1.5 text-[10px] text-accent">
                       <span>
                         {projectGraphProgress.phase === 'reading-files'

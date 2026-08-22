@@ -74,7 +74,6 @@ export interface Settings {
   thinkingPayload: ThinkingPayload;
   multimodalEnabled: boolean;
   multimodalModelTier: MultimodalModelTier;
-  debugEnabled: boolean;
   chatBordersEnabled: boolean;
   /** 实验性：主界面显示角色卡。默认关闭。 */
   experimentalCharacters: boolean;

@@ -516,7 +516,7 @@
     <div class="section-header reveal">
       <div class="section-label"><span class="dot"></span> 内置命令</div>
       <h2>输入 <code>/</code> 即可调用</h2>
-      <p>18 个内置命令，按任务复杂度自动路由到主模型或快速模型；<code>/help</code> <code>/commands</code> 不走模型，零 Token 消耗</p>
+      <p>19 个内置命令，按任务复杂度自动路由到主模型或快速模型；<code>/help</code> <code>/commands</code> <code>/undo</code> 不走模型，零 Token 消耗</p>
     </div>
     <div class="cmd-table-wrap reveal">
       <table class="cmd-table">
@@ -524,6 +524,7 @@
         <tbody>
           <tr><td><code>/help</code> &nbsp; <code>/commands</code></td><td>列出所有可用命令及说明</td><td><span class="badge-model badge-local">本地</span></td></tr>
           <tr><td><code>/compact</code></td><td>强制压缩当前会话上下文，Compactor 内部代理生成检查点（LLM 失败时降级为规则摘要）</td><td><span class="badge-model badge-primary">主 / 快速</span></td></tr>
+          <tr><td><code>/undo</code></td><td>撤销上一次对话重置（恢复被截断的对话与代码快照）</td><td><span class="badge-model badge-local">本地</span></td></tr>
           <tr><td><code>/goal</code></td><td>自主循环：Worker 执行 + Verifier 验收，直到验证条件通过</td><td><span class="badge-model badge-primary">主模型</span></td></tr>
           <tr><td><code>/review</code></td><td>审查改动或指定范围，优先报告 bug 和回归风险</td><td><span class="badge-model badge-primary">主模型</span></td></tr>
           <tr><td><code>/fix</code></td><td>定位并修复问题，自动运行验证</td><td><span class="badge-model badge-primary">主模型</span></td></tr>
@@ -542,6 +543,9 @@
           <tr><td><code>/summary</code></td><td>对文件、模块或整个项目做高层概述</td><td><span class="badge-model badge-fast">快速模型</span></td></tr>
         </tbody>
       </table>
+    </div>
+    <div style="margin-top: 1.5rem; text-align: center; color: var(--fg-muted, #888); font-size: 0.88rem;">
+      💡 支持在 <code>.CodePapr/commands/&lt;name&gt;.md</code> 或项目配置中自定义斜杠命令，支持 <code>$ARGUMENTS</code> 参数、<code>@path</code> 文件嵌入与 <code>!`cmd`</code> 内联命令。<a href="tutorial.html#commands" style="color: var(--accent, #6366f1); margin-left: 0.5rem; text-decoration: none;">查看自定义教程 &rarr;</a>
     </div>
   </div>
 </section>

@@ -514,7 +514,7 @@
     <div class="section-header reveal">
       <div class="section-label"><span class="dot"></span> Built-in Commands</div>
       <h2>Type <code>/</code> to Invoke</h2>
-      <p>18 built-in commands, auto-routed to primary or fast model by task complexity; <code>/help</code> <code>/commands</code> bypass models, zero token cost</p>
+      <p>19 built-in commands, auto-routed to primary or fast model by task complexity; <code>/help</code> <code>/commands</code> <code>/undo</code> bypass models, zero token cost</p>
     </div>
     <div class="cmd-table-wrap reveal">
       <table class="cmd-table">
@@ -522,6 +522,7 @@
         <tbody>
           <tr><td><code>/help</code> &nbsp; <code>/commands</code></td><td>List all available commands and descriptions</td><td><span class="badge-model badge-local">Local</span></td></tr>
           <tr><td><code>/compact</code></td><td>Force-compress current session context; the internal Compactor agent generates the checkpoint (rule-based fallback on LLM failure)</td><td><span class="badge-model badge-primary">Primary / Fast</span></td></tr>
+          <tr><td><code>/undo</code></td><td>Undo the last conversation reset (restore truncated messages and code snapshot)</td><td><span class="badge-model badge-local">Local</span></td></tr>
           <tr><td><code>/goal</code></td><td>Autonomous loop: Worker executes + Verifier audits, until condition passes</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
           <tr><td><code>/review</code></td><td>Review changes or specified scope, prioritize bugs and regression risks</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
           <tr><td><code>/fix</code></td><td>Locate and fix issues, auto-run verification</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
@@ -540,6 +541,9 @@
           <tr><td><code>/summary</code></td><td>High-level overview of file, module, or entire project</td><td><span class="badge-model badge-fast">Fast</span></td></tr>
         </tbody>
       </table>
+    </div>
+    <div style="margin-top: 1.5rem; text-align: center; color: var(--fg-muted, #888); font-size: 0.88rem;">
+      💡 Define custom slash commands in <code>.CodePapr/commands/&lt;name&gt;.md</code> or Project Config with <code>$ARGUMENTS</code>, <code>@path</code> file embedding, and <code>!`cmd`</code> inline outputs. <a href="tutorial.en.html#commands" style="color: var(--accent, #6366f1); margin-left: 0.5rem; text-decoration: none;">Read Tutorial &rarr;</a>
     </div>
   </div>
 </section>

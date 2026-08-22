@@ -73,13 +73,11 @@ export function normalizeSessionMetaList(sessions: ProjectSessionMeta[]): Sessio
     .sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt);
 }
 
-export function sanitizeMessageForPersistence(message: UIMessage, debugEnabled: boolean): UIMessage {
+export function sanitizeMessageForPersistence(message: UIMessage): UIMessage {
   const promptContent =
     message.role === 'user'
       ? message.promptContent
-      : debugEnabled
-        ? redactRecallFromDebugPrompt(message.promptContent)
-        : undefined;
+      : undefined;
 
   return {
     ...message,
@@ -87,8 +85,6 @@ export function sanitizeMessageForPersistence(message: UIMessage, debugEnabled: 
     statusText: undefined,
     // user.promptContent is the full runtime user prompt actually sent to the
     // model — restoring it keeps rebuilt history byte-identical (prefix cache).
-    // assistant.promptContent is a debug dump of the compiled request: only
-    // persist when debug is on, and never persist request-only Recall (ADR-009).
     promptContent,
     // 图片只持久化落盘引用（path + mediaType），base64 payload 不进 DB
     // （体积大，全量替换语义下反复读写会拖慢持久化）。无 path 的图片
@@ -111,35 +107,14 @@ export function sanitizeMessageForPersistence(message: UIMessage, debugEnabled: 
   };
 }
 
-/** Strip request-only Recall blocks from a debug compiled-request dump. */
-export function redactRecallFromDebugPrompt(promptContent: string | undefined): string | undefined {
-  if (typeof promptContent !== 'string' || !promptContent.trim()) return undefined;
-  try {
-    const parsed = JSON.parse(promptContent) as {
-      messages?: Array<{ content?: string; metadata?: Record<string, unknown> }>;
-    };
-    if (!Array.isArray(parsed.messages)) return promptContent;
-    const next = parsed.messages.filter((entry) => {
-      if (entry.metadata?.requestOnly === true) return false;
-      return typeof entry.content !== 'string' || !entry.content.includes('## Relevant Project Memory');
-    });
-    if (next.length === parsed.messages.length) return promptContent;
-    return JSON.stringify({ ...parsed, messages: next }, null, 2);
-  } catch {
-    if (!promptContent.includes('## Relevant Project Memory')) return promptContent;
-    return promptContent.replace(/## Relevant Project Memory[\s\S]*?(?=\n## |\n {2}"role":|$)/g, '');
-  }
-}
-
 export function sanitizeSessionMessagesForPersistence(
-  sessionMessages: Record<string, UIMessage[]>,
-  debugEnabled: boolean
+  sessionMessages: Record<string, UIMessage[]>
 ): Record<string, UIMessage[]> {
   return Object.fromEntries(
     Object.entries(sessionMessages).map(([sessionId, messages]) => [
       sessionId,
       Array.isArray(messages)
-        ? messages.map((message) => sanitizeMessageForPersistence(message, debugEnabled))
+        ? messages.map((message) => sanitizeMessageForPersistence(message))
         : [],
     ])
   );
@@ -160,8 +135,7 @@ export function normalizeSkillEnabledState(
 }
 
 export function normalizeProjectSnapshot(
-  snapshot: ProjectStateSnapshot,
-  options: { debugEnabled: boolean }
+  snapshot: ProjectStateSnapshot
 ): ProjectStateSnapshot {
   const activeSessionId = snapshot.sessions.some((session) => session.id === snapshot.activeSessionId)
     ? snapshot.activeSessionId
@@ -202,8 +176,7 @@ export function normalizeProjectSnapshot(
     sessions: normalizeSessionMetaList(snapshot.sessions),
     activeSessionId,
     sessionMessages: sanitizeSessionMessagesForPersistence(
-      (snapshot.sessionMessages ?? {}) as Record<string, UIMessage[]>,
-      options.debugEnabled
+      (snapshot.sessionMessages ?? {}) as Record<string, UIMessage[]>
     ),
     skillEnabledById: normalizeSkillEnabledState(snapshot.skillEnabledById),
     cumulativeStats: {

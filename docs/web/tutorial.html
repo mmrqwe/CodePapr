@@ -1364,6 +1364,7 @@ TTS 数据流：
             <tr><td><code>/help</code></td><td>列出所有命令及说明</td><td>本地</td><td><code>/help</code></td></tr>
             <tr><td><code>/commands</code></td><td><code>/help</code> 的别名</td><td>本地</td><td><code>/commands</code></td></tr>
             <tr><td><code>/compact</code></td><td>强制压缩当前会话上下文——Compactor 内部代理生成检查点（LLM 失败时降级为规则摘要）</td><td>主 / 快速</td><td><code>/compact</code></td></tr>
+            <tr><td><code>/undo</code></td><td>撤销上一次对话重置（恢复被截断的对话与代码快照）</td><td>本地</td><td><code>/undo</code></td></tr>
             <tr><td><code>/goal</code></td><td>自主循环：Worker 执行 + Verifier 验收，直到验证条件通过</td><td>主模型</td><td><code>/goal exec:npm test</code></td></tr>
             <tr><td><code>/review</code></td><td>审查当前改动或指定范围</td><td>主模型</td><td><code>/review src/App.tsx</code></td></tr>
             <tr><td><code>/fix</code></td><td>定位并修复指定问题</td><td>主模型</td><td><code>/fix 登录按钮无响应</code></td></tr>
@@ -1383,9 +1384,41 @@ TTS 数据流：
           </tbody>
         </table>
 
-        <h3>自定义命令模板</h3>
-        <p>在 <code>.CodePapr/commands/&lt;name&gt;.md</code> 中声明可复用的提示词模板：</p>
+        <h3>自定义命令模板与语法</h3>
+        <p>在 <code>.CodePapr/commands/&lt;name&gt;.md</code> 中声明可复用的提示词模板，即可注册为斜杠命令 <code>/&lt;name&gt;</code>：</p>
 
+        <table>
+          <thead><tr><th>语法 / 占位符</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>$ARGUMENTS</code></td><td>用户在命令后输入的所有参数（以空格拼接）</td></tr>
+            <tr><td><code>$1 $2 ...</code></td><td>第 N 个位置参数（支持带引号的传参）</td></tr>
+            <tr><td><code>@path</code></td><td>只读读取工作区相对路径文件内容，并以内联代码块嵌入 Prompt</td></tr>
+            <tr><td><code>!`cmd`</code></td><td>执行简单命令行并将命令输出嵌入 Prompt（仅支持简单命令，不支持管道复合操作）</td></tr>
+          </tbody>
+        </table>
+
+        <h3>实战模板示例</h3>
+
+        <p><strong>示例 1：静态页面与画面渲染诊断（纯前端/零 Git 风险）</strong></p>
+        <pre><code><span class="hl-comment">---</span>
+<span class="hl-keyword">description:</span> 诊断 index.html 页面结构与画面逻辑
+<span class="hl-keyword">usage:</span> /pagecheck [问题描述]
+<span class="hl-keyword">model:</span> fast
+<span class="hl-comment">---</span>
+请帮我诊断当前静态项目的页面结构与画面逻辑。
+页面入口：@index.html
+用户关注问题：$ARGUMENTS</code></pre>
+
+        <p><strong>示例 2：依赖与脚本分析</strong></p>
+        <pre><code><span class="hl-comment">---</span>
+<span class="hl-keyword">description:</span> 分析 package.json 依赖与脚本
+<span class="hl-keyword">model:</span> fast
+<span class="hl-comment">---</span>
+请基于项目根配置回答用户问题：
+配置内容：@package.json
+问题：$ARGUMENTS</code></pre>
+
+        <p><strong>示例 3：代码审查与修复（委派 Subagent + 运行状态）</strong></p>
         <pre><code><span class="hl-comment">---</span>
 <span class="hl-keyword">description:</span> 审查并修复 lint
 <span class="hl-keyword">agent:</span> code-reviewer
@@ -1394,19 +1427,10 @@ TTS 数据流：
 参考规则见 @.CodePapr/AGENTS.md
 当前状态：!`git status -s`</code></pre>
 
-        <h3>模板语法</h3>
-        <table>
-          <thead><tr><th>语法</th><th>说明</th></tr></thead>
-          <tbody>
-            <tr><td><code>$ARGUMENTS</code></td><td>全部参数</td></tr>
-            <tr><td><code>$1 $2 ...</code></td><td>第 N 个参数</td></tr>
-            <tr><td><code>@path</code></td><td>内联文件内容</td></tr>
-            <tr><td><code>!`cmd`</code></td><td>执行命令并嵌入输出（仅简单命令）</td></tr>
-          </tbody>
-        </table>
-
         <div class="callout">
-          <strong>使用方式：</strong>在输入框输入 <code>/</code> 会弹出命令面板，列出所有可用命令并支持键盘 ↑↓ 选择。输入 <code>/命令名 参数</code> 即可调用。<code>--</code> 格式兼容旧版。
+          <strong>创建与使用：</strong><br>
+          1. <strong>界面操作</strong>：在桌面端点击顶部 <strong>项目配置</strong> &rarr; 切换到 <strong>Commands</strong> 标签页即可直观新建与编辑命令。<br>
+          2. <strong>调用命令</strong>：在输入框输入 <code>/</code> 弹出命令面板，支持键盘 &uarr;&darr; 快速选择；输入 <code>/命令名 参数</code> 发送即可。在聊天框输入 <code>/help</code> 可随时查看已注册的项目命令。
         </div>
       </div>
     </section>

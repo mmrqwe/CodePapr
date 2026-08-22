@@ -1364,6 +1364,7 @@ Output Format:
             <tr><td><code>/help</code></td><td>List all commands and descriptions</td><td>Local</td><td><code>/help</code></td></tr>
             <tr><td><code>/commands</code></td><td>Alias for <code>/help</code></td><td>Local</td><td><code>/commands</code></td></tr>
             <tr><td><code>/compact</code></td><td>Force compress current session context — the internal Compactor agent generates the checkpoint (rule-based fallback on LLM failure)</td><td>Primary / Fast</td><td><code>/compact</code></td></tr>
+            <tr><td><code>/undo</code></td><td>Undo the last conversation reset (restore truncated messages and code snapshot)</td><td>Local</td><td><code>/undo</code></td></tr>
             <tr><td><code>/goal</code></td><td>Autonomous loop: Worker executes + Verifier validates, until condition is met</td><td>Primary</td><td><code>/goal exec:npm test</code></td></tr>
             <tr><td><code>/review</code></td><td>Review current changes or specified scope</td><td>Primary</td><td><code>/review src/App.tsx</code></td></tr>
             <tr><td><code>/fix</code></td><td>Locate and fix a specified issue</td><td>Primary</td><td><code>/fix Login button not responding</code></td></tr>
@@ -1383,9 +1384,41 @@ Output Format:
           </tbody>
         </table>
 
-        <h3>Custom Command Templates</h3>
-        <p>Declare reusable prompt templates in <code>.CodePapr/commands/&lt;name&gt;.md</code>:</p>
+        <h3>Custom Command Templates &amp; Syntax</h3>
+        <p>Declare reusable prompt templates in <code>.CodePapr/commands/&lt;name&gt;.md</code> to register slash commands <code>/&lt;name&gt;</code>:</p>
 
+        <table>
+          <thead><tr><th>Syntax / Placeholder</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>$ARGUMENTS</code></td><td>All arguments entered by user after the command</td></tr>
+            <tr><td><code>$1 $2 ...</code></td><td>The Nth positional argument (supports quoted values)</td></tr>
+            <tr><td><code>@path</code></td><td>Read relative workspace file content and embed as an inline code block</td></tr>
+            <tr><td><code>!`cmd`</code></td><td>Execute simple shell command and embed output (simple commands only, no compound operators)</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Practical Template Examples</h3>
+
+        <p><strong>Example 1: Static Page &amp; Rendering Logic Diagnosis (Zero Git Risk)</strong></p>
+        <pre><code><span class="hl-comment">---</span>
+<span class="hl-keyword">description:</span> Diagnose index.html structure and visual logic
+<span class="hl-keyword">usage:</span> /pagecheck [observed issue]
+<span class="hl-keyword">model:</span> fast
+<span class="hl-comment">---</span>
+Please help diagnose the page structure and visual logic of this static project.
+Page entrypoint: @index.html
+User question: $ARGUMENTS</code></pre>
+
+        <p><strong>Example 2: Dependency &amp; Script Analysis</strong></p>
+        <pre><code><span class="hl-comment">---</span>
+<span class="hl-keyword">description:</span> Analyze package.json dependencies and scripts
+<span class="hl-keyword">model:</span> fast
+<span class="hl-comment">---</span>
+Please answer user question based on root config:
+Config: @package.json
+Question: $ARGUMENTS</code></pre>
+
+        <p><strong>Example 3: Code Review &amp; Lint Fix (Delegate to Subagent + Live Status)</strong></p>
         <pre><code><span class="hl-comment">---</span>
 <span class="hl-keyword">description:</span> Review and fix lint
 <span class="hl-keyword">agent:</span> code-reviewer
@@ -1394,19 +1427,10 @@ Please review the changes for $ARGUMENTS and fix any lint issues.
 See rules at @.CodePapr/AGENTS.md
 Current status: !`git status -s`</code></pre>
 
-        <h3>Template Syntax</h3>
-        <table>
-          <thead><tr><th>Syntax</th><th>Description</th></tr></thead>
-          <tbody>
-            <tr><td><code>$ARGUMENTS</code></td><td>All arguments</td></tr>
-            <tr><td><code>$1 $2 ...</code></td><td>The Nth argument</td></tr>
-            <tr><td><code>@path</code></td><td>Inline file content</td></tr>
-            <tr><td><code>!`cmd`</code></td><td>Execute a command and embed its output (simple commands only)</td></tr>
-          </tbody>
-        </table>
-
         <div class="callout">
-          <strong>Usage:</strong> Type <code>/</code> in the input box to bring up the command palette, listing all available commands and supporting keyboard ↑↓ navigation. Type <code>/command-name arguments</code> to invoke. <code>--</code> format is compatible with legacy usage.
+          <strong>Creation &amp; Usage:</strong><br>
+          1. <strong>Visual UI</strong>: Click <strong>Project Config</strong> in the top toolbar &rarr; switch to <strong>Commands</strong> tab to create and edit commands easily.<br>
+          2. <strong>Invoke</strong>: Type <code>/</code> in the chat input to bring up the command palette with &uarr;&darr; navigation; type <code>/command-name args</code> to run. Type <code>/help</code> in chat to see all registered project commands.
         </div>
       </div>
     </section>

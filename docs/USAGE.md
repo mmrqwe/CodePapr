@@ -399,27 +399,100 @@ Skill 是主 Agent 的可复用操作手册，放在 `.CodePapr/skills/` 下，�
 
 **技能市场**：桌面端内置技能市场，从 GitHub（`zerone-agent/agent-use-skills`）拉取技能列表，支持一键安装到项目。已安装技能记录在 `.CodePapr/skills-lock.json` 中（listing id、实际写入的 Skill 路径、SHA-256）。插件包按子 Skill 目录登记，删除本地 Skill 时会从锁文件里剔除。
 
-### 自定义聊天命令
+### 聊天命令（Slash Commands）
 
-在 `.CodePapr/commands/<name>.md` 中声明模板，支持 `$ARGUMENTS`、`@path`、`` !`cmd` ``。
+输入 `/` 即可弹出命令自动补全列表。
 
-输入 `/` 弹出命令面板。
-
-**主模型内置命令：** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize` `/build`
+**主模型内置命令：** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize` `/build` `/goal`
 
 **快速模型内置命令：** `/search` `/lint` `/clean` `/commit` `/summary`
 
-**本地命令（零 token）：** `/help` `/commands` `/compact`
+**本地命令（零 Token 消耗）：** `/help` `/commands` `/compact` `/undo`
 
-自定义命令可在 frontmatter 声明 `model: fast` 启用快速模型路由：
+### 自定义聊天命令
+
+在 `.CodePapr/commands/<name>.md` 中声明提示词模板，即可注册为聊天框中的斜杠命令 `/<name>`。
+
+#### 1. Frontmatter 配置与模板语法
 
 ```markdown
 ---
-description: 快速搜索 TODO
+description: 命令简短描述（显示在 / 自动补全下拉框与 /help 中）
+usage: 用法说明（如 /mycmd <参数>）
+example: 示例（如 /mycmd 修复动画延迟）
+model: fast | primary | mentor | <自定义模型ID>  # 可选：fast走快速模型，primary走主模型
+agent: <子代理名称>  # 可选：自动将任务委派给指定子代理（如 Explore / Scout / 外部自定义Agent）
+---
+这里是 Prompt 模板正文，支持以下动态占位符：
+- $ARGUMENTS  : 替换为用户在命令后输入的全部参数
+- $1, $2 ...  : 替换为第 1、2 个位置参数
+- @path       : 自动只读读取工作区相对路径文件内容并以内联代码块嵌入
+- !`cmd`      : 执行简单命令行并将输出嵌入 Prompt（仅支持简单命令，不支持复合管道）
+```
+
+#### 2. 实用场景示例
+
+##### 示例 A：静态页面与动画/渲染逻辑诊断（纯前端/零 Git 风险）
+适用于纯前端或静态展示项目（如包含 `index.html`、CSS、JS 的项目）：
+```markdown
+---
+description: 诊断 index.html 页面结构与画面渲染逻辑
+usage: /pagecheck [关注的问题或现象]
+example: /pagecheck 检查动画和样式引用是否存在异常
 model: fast
 ---
-搜索代码库中所有 TODO 和 FIXME 标记：$ARGUMENTS
+请帮我诊断当前静态项目的页面结构与画面逻辑。
+
+### 页面入口 (@index.html)
+@index.html
+
+---
+### 用户关注的问题
+$ARGUMENTS
+
+### 回答要求：
+1. 检查 index.html 中引用的 CSS、JS 路径与标签结构。
+2. 针对用户提出的画面渲染或交互问题给出客观分析与修复建议。
 ```
+
+##### 示例 B：依赖与脚本架构分析
+```markdown
+---
+description: 分析项目根目录 package.json 的依赖结构与脚本
+usage: /depcheck [问题]
+example: /depcheck 有哪些与构建或测试相关的脚本？
+model: fast
+---
+请基于项目根配置回答用户的问题。
+
+### 项目根配置 (package.json)
+@package.json
+
+---
+### 用户问题与关注点
+$ARGUMENTS
+```
+
+##### 示例 C：Git 工作区改动快速审查（安全只读执行）
+```markdown
+---
+description: 检查当前工作区 Git 状态与 Diff 并做代码审查
+usage: /gitcheck [重点关注方向]
+model: fast
+---
+请审查当前工作区的改动：
+当前状态：!`git status -s`
+代码差异：
+```diff
+!`git diff HEAD`
+```
+审查关注点：$ARGUMENTS
+```
+
+#### 3. 创建与管理方式
+- **方式一（界面操作，推荐）**：点击工具栏的 **项目配置（Project Config）** → 切换到 **Commands** 标签页 → 输入命令名称并点击 **新建命令**，在右侧 Monaco 编辑器中编辑保存。
+- **方式二（文件操作）**：在工作区创建 `.CodePapr/commands/<name>.md` 文件，保存后即时生效。
+- **验证与测试**：在聊天框输入 `/` 查看自动补全列表，或输入 `/help` 查看所有已注册的项目命令。若模板中引用的 `@path` 文件在项目中不存在，系统会自动给出读取回执，不会破坏项目文件。
 
 ## 外部路径权限
 

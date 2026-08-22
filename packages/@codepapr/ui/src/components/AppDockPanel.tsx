@@ -326,11 +326,25 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
         <button type="button" disabled={!canStop} onClick={handleStop} className={btnAmber(canStop)}>
           ■ {t.appDockStop}
         </button>
-        <button type="button" disabled={!canDelete} onClick={handleDelete} className={btnRed(canDelete)}>
-          🗑 {t.appDockDelete}
+        <button
+          type="button"
+          disabled={!canDelete}
+          onClick={handleDelete}
+          className={btnRed(canDelete)}
+          title={t.appDockDelete}
+          aria-label={t.appDockDelete}
+        >
+          🗑
         </button>
-        <button type="button" disabled={!canExport} onClick={() => { void handleExport(); }} className={btnActive(canExport)}>
-          ⤓ {t.appDockExport}
+        <button
+          type="button"
+          disabled={!canExport}
+          onClick={() => { void handleExport(); }}
+          className={btnActive(canExport)}
+          title={t.appDockExport}
+          aria-label={t.appDockExport}
+        >
+          ⤓
         </button>
       </div>
     </div>

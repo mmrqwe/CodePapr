@@ -116,10 +116,6 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
     _skillDefinitions,
     mentorEnabled,
     sessionMessagesLoading,
-    pendingRestoreUndo,
-    restoreUndoCount,
-    undoConversationReset,
-    dismissRestoreUndo,
     messageLoadFailedSessions,
     retryLoadSessionMessages,
   } = useAgentStore(
@@ -145,12 +141,6 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
       _skillDefinitions: state._skillDefinitions,
       mentorEnabled: state.settings.mentorEnabled ?? true,
       sessionMessagesLoading: state.sessionMessagesLoading,
-      // 撤销入口只暴露栈顶（最近一次重置）；撤销/放弃后下一级自动浮现。
-      pendingRestoreUndo:
-        state._pendingRestoreUndos[state._pendingRestoreUndos.length - 1] ?? null,
-      restoreUndoCount: state._pendingRestoreUndos.length,
-      undoConversationReset: state.undoConversationReset,
-      dismissRestoreUndo: state.dismissRestoreUndo,
       messageLoadFailedSessions: state._messageLoadFailedSessions,
       retryLoadSessionMessages: state.retryLoadSessionMessages,
     }))
@@ -238,7 +228,6 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   }), []);
   const [resetConfirmMsgId, setResetConfirmMsgId] = useState<string | null>(null);
   const [resetInFlight, setResetInFlight] = useState(false);
-  const [undoResetInFlight, setUndoResetInFlight] = useState(false);
   const [retryMessagesLoading, setRetryMessagesLoading] = useState(false);
   const [resetBanner, setResetBanner] = useState<{ kind: 'success' | 'warn' | 'error'; text: string } | null>(null);
   useEffect(() => {
@@ -1393,75 +1382,6 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
           {resetBanner.text}
         </div>
       )}
-      {pendingRestoreUndo &&
-        pendingRestoreUndo.sessionId === activeSessionId &&
-        !isLoading && (
-          <div className="absolute inset-x-0 top-2 z-40 mx-auto flex w-fit max-w-[90%] items-center gap-2 rounded-full border border-accent-soft bg-base/95 px-4 py-1.5 text-xs text-fg shadow-lg backdrop-blur-sm fade-in">
-            <span>
-              {settings.lang === 'en'
-                ? 'Reset applied'
-                : settings.lang === 'zh-TW'
-                  ? '已套用重設'
-                  : '已应用重置'}
-              {restoreUndoCount > 1 ? ` ×${restoreUndoCount}` : ''}
-            </span>
-            <button
-              type="button"
-              disabled={undoResetInFlight}
-              onClick={async () => {
-                setUndoResetInFlight(true);
-                try {
-                  const result = await undoConversationReset();
-                  setResetBanner(
-                    result.ok
-                      ? {
-                          kind: 'success',
-                          text:
-                            settings.lang === 'en'
-                              ? 'Reset undone · conversation and files restored.'
-                              : settings.lang === 'zh-TW'
-                                ? '已撤銷重設 · 對話與檔案已恢復。'
-                                : '已撤销重置 · 对话与文件已恢复。',
-                        }
-                      : {
-                          kind: 'error',
-                          text:
-                            settings.lang === 'en'
-                              ? `Undo failed: ${result.message ?? 'unknown error'}`
-                              : settings.lang === 'zh-TW'
-                                ? `撤銷失敗：${result.message ?? '未知錯誤'}`
-                                : `撤销失败：${result.message ?? '未知错误'}`,
-                        }
-                  );
-                } finally {
-                  setUndoResetInFlight(false);
-                }
-              }}
-              className="rounded-md border border-accent-soft px-2 py-0.5 font-medium text-accent-text transition-colors hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {undoResetInFlight
-                ? settings.lang === 'en'
-                  ? 'Undoing…'
-                  : settings.lang === 'zh-TW'
-                    ? '撤銷中…'
-                    : '撤销中…'
-                : settings.lang === 'en'
-                  ? 'Undo'
-                  : settings.lang === 'zh-TW'
-                    ? '撤銷'
-                    : '撤销'}
-            </button>
-            <button
-              type="button"
-              disabled={undoResetInFlight}
-              onClick={() => dismissRestoreUndo()}
-              className="rounded-md px-1 text-fg-muted transition-colors hover:text-fg-soft disabled:cursor-not-allowed"
-              aria-label={settings.lang === 'en' ? 'Dismiss undo' : '关闭撤销'}
-            >
-              ×
-            </button>
-          </div>
-        )}
       {sessionMessagesLoadFailed && !isActiveLoading && (
         <div className="absolute inset-x-0 top-2 z-40 mx-auto flex w-fit max-w-[90%] items-center gap-2 rounded-full border border-danger-bg bg-danger-bg px-4 py-1.5 text-xs text-danger shadow-lg backdrop-blur-sm fade-in">
           <span>

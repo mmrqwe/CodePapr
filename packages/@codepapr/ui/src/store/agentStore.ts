@@ -764,9 +764,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           }
         } catch (metaErr) {
           console.warn('[CodePapr] 从新表加载失败，回退到旧格式:', metaErr);
-          const snapshot = normalizeProjectSnapshot(await loadProjectState(normalizedWorkspacePath), {
-            debugEnabled: get().settings.debugEnabled,
-          });
+          const snapshot = normalizeProjectSnapshot(await loadProjectState(normalizedWorkspacePath));
           sessions = snapshot.sessions.map((meta) => ({
             ...meta,
             provider: normalizeSessionProvider(meta.provider),

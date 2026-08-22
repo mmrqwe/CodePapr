@@ -33,7 +33,7 @@ export interface CommandDefinition {
   template: string;
 }
 
-const LOCAL_SLASH_COMMANDS = new Set(['help', 'commands', 'compact']);
+const LOCAL_SLASH_COMMANDS = new Set(['help', 'commands', 'compact', 'undo']);
 
 export function isLocalSlashCommand(name: string): boolean {
   return LOCAL_SLASH_COMMANDS.has(name.trim().toLowerCase());

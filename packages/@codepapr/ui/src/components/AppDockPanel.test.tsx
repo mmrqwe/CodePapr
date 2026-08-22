@@ -95,7 +95,10 @@ describe('AppDockPanel', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     const button = Array.from(container.querySelectorAll('button')).find(
-      (el) => el.textContent?.includes('删除'),
+      (el) =>
+        el.textContent?.includes('删除') ||
+        el.getAttribute('title')?.includes('删除') ||
+        el.getAttribute('aria-label')?.includes('删除'),
     );
     if (!button) throw new Error('Delete button not found');
     act(() => {

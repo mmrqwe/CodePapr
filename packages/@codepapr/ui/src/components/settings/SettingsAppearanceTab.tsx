@@ -267,6 +267,16 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
       </FieldCard>
 
       <FieldCard>
+        <ToggleField
+          checked={local.chatBordersEnabled}
+          onChange={(checked) => update({ chatBordersEnabled: checked })}
+          label={t.chatBorders}
+          desc={t.chatBordersDesc}
+          title={t.chatBordersDesc}
+        />
+      </FieldCard>
+
+      <FieldCard>
         <FieldLabel className="mb-3">{t.themeAccent}</FieldLabel>
         <div className="flex flex-wrap items-center gap-2">
           <button

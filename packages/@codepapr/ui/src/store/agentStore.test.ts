@@ -1507,8 +1507,52 @@ describe('useAgentStore.sendMessage', () => {
     const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
     const helpMessage = sessionMessages.at(-1)?.content ?? '';
     expect(helpMessage).toContain('/help (或 /commands): 查看命令说明');
+    expect(helpMessage).toContain('/undo: 撤销上一次对话重置');
     expect(helpMessage).toContain('/review: 审查当前改动或指定范围');
     expect(helpMessage).toContain('/ship: 发布当前工作区改动');
+  });
+
+  it('/undo 无可撤销操作时给出提示并不发给模型', async () => {
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+      _pendingRestoreUndos: [],
+    });
+
+    const consumed = await useAgentStore.getState().sendMessage('/undo', '/undo', 'agent');
+    expect(consumed).toBe(true);
+    expect(chat).not.toHaveBeenCalled();
+    const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+    expect(sessionMessages.at(-1)?.content ?? '').toContain('没有可撤销的重置操作');
+  });
+
+  it('重置后通过 /undo 命令可成功撤销重置', async () => {
+    const chat = vi.fn(async (prompt: string) => createAgentResponse(`收到：${prompt}`));
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+      _pendingRestoreUndos: [
+        {
+          sessionId: 'session-1',
+          workspacePath: '/tmp/ws',
+          truncatedMessages: [
+            { id: 'm-old', role: 'user', content: '之前的问题', timestamp: 1 },
+          ],
+          removedCheckpoints: {},
+          filesRestored: false,
+          backupSha: null,
+        },
+      ],
+      workspacePath: '/tmp/ws',
+    });
+
+    const consumed = await useAgentStore.getState().sendMessage('/undo', '/undo', 'agent');
+    expect(consumed).toBe(true);
+    expect(chat).not.toHaveBeenCalled();
+    const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+    expect(sessionMessages.at(-1)?.content ?? '').toContain('已撤销重置 · 对话与文件已恢复');
+    expect(useAgentStore.getState()._pendingRestoreUndos).toHaveLength(0);
   });
 
   it('未知 slash 命令提示 /help，不发给模型', async () => {
@@ -1994,21 +2038,11 @@ describe('useAgentStore.sendMessage', () => {
 
     useAgentStore.setState((state) => ({
       ...state,
-      settings: normalizeSettings({
-        ...state.settings,
-        debugEnabled: true,
-      }),
       _agent: createMockAgent({ chat }),
       _agentModel: 'deepseek-v4-pro',
     }));
 
     await useAgentStore.getState().sendMessage('解释当前上下文', '解释当前上下文', 'ask');
-
-    const visibleMessages = (useAgentStore.getState().sessionMessages['session-1'] ?? []).filter(
-      (message) => !message.hidden
-    );
-
-    expect(visibleMessages[1]?.promptContent).toBe(requestContext);
 
     const latest = useAgentStore.getState()._latestContextSnapshot;
     expect(latest?.sessionId).toBe('session-1');

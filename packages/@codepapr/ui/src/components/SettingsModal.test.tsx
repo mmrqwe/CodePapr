@@ -71,7 +71,7 @@ describe('SettingsModal', () => {
     expect(container.innerHTML).toContain('w-[min(96vw,1480px)]');
     expect(container.innerHTML).toContain('h-[94vh]');
 
-    const generalTab = container.querySelector('button[title="配置语言、调试、实验性功能和许可证等全局界面行为。"]');
+    const generalTab = container.querySelector('button[title="配置语言、实验性功能和许可证等全局界面行为。"]');
     const llmTab = container.querySelector('button[title="配置主模型、快速模型、导师模型、API 接入方式和采样参数。"]');
 
     expect(generalTab?.textContent).toContain('通用');

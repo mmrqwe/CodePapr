@@ -57,6 +57,13 @@ const META_COMMANDS: readonly CommandDefinition[] = [
     template: '',
   },
   {
+    name: 'undo',
+    description: '撤销上一次对话重置（恢复被截断的对话与代码快照）',
+    usage: '撤销上一次对话重置。\n用法: /undo\n（不带参数，撤销最近一次重置）',
+    example: '/undo',
+    template: '',
+  },
+  {
     name: 'goal',
     description: '自主循环：Worker 执行 + Verifier 验收，直到验证条件通过',
     usage: '启动 Goal 自主循环：Worker 执行 + Verifier 验收。\n客观验证: /goal exec:npm test\n主观验证: /goal 修复登录页样式\n严格模式: /goal --strict exec:npm test\n宽松模式: /goal --loose 美化页面\n首轮规划: /goal --plan-first 重构auth模块\n复合: /goal 修测试 | exec:npm test',

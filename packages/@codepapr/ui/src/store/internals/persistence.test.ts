@@ -91,7 +91,7 @@ describe('sanitizeMessageForPersistence', () => {
       ],
     };
 
-    const sanitized = sanitizeMessageForPersistence(message, false);
+    const sanitized = sanitizeMessageForPersistence(message);
     const invocation = sanitized.toolInvocations?.[0];
     expect(invocation?.status).toBe('error');
     expect(invocation?.error).toBe('未完成的工具调用');
@@ -109,41 +109,21 @@ describe('sanitizeMessageForPersistence', () => {
       ],
     };
 
-    const sanitized = sanitizeMessageForPersistence(message, false);
+    const sanitized = sanitizeMessageForPersistence(message);
     const invocation = sanitized.toolInvocations?.[0];
     expect(invocation?.status).toBe('success');
     expect(invocation?.output).toBe('done');
   });
 
-  it('strips assistant debug dumps when debug is off and redacts Recall when on', () => {
-    const dump = JSON.stringify(
-      {
-        round: 1,
-        messages: [
-          { role: 'user', content: 'hello' },
-          {
-            role: 'user',
-            content: '## Relevant Project Memory\n\nsecret recalled fact',
-            metadata: { requestOnly: true },
-          },
-        ],
-      },
-      null,
-      2
-    );
+  it('strips assistant promptContent while keeping user promptContent', () => {
     const assistant: UIMessage = {
       id: 'a1',
       role: 'assistant',
       content: 'ok',
       timestamp: 1,
-      promptContent: dump,
+      promptContent: '{"messages":[{"role":"user","content":"hello"}]}',
     };
-    expect(sanitizeMessageForPersistence(assistant, false).promptContent).toBeUndefined();
-    const kept = sanitizeMessageForPersistence(assistant, true).promptContent;
-    expect(kept).toBeDefined();
-    expect(kept).not.toContain('Relevant Project Memory');
-    expect(kept).not.toContain('secret recalled fact');
-    expect(kept).toContain('hello');
+    expect(sanitizeMessageForPersistence(assistant).promptContent).toBeUndefined();
 
     const user: UIMessage = {
       id: 'u1',
@@ -152,7 +132,7 @@ describe('sanitizeMessageForPersistence', () => {
       timestamp: 1,
       promptContent: 'full wrapped prompt',
     };
-    expect(sanitizeMessageForPersistence(user, false).promptContent).toBe('full wrapped prompt');
+    expect(sanitizeMessageForPersistence(user).promptContent).toBe('full wrapped prompt');
   });
 
   it('keeps attached file names and strips image payloads without disk refs', () => {
@@ -164,7 +144,7 @@ describe('sanitizeMessageForPersistence', () => {
       images: [{ mediaType: 'image/png', data: 'AAAA' }],
       attachedFiles: [{ name: 'notes.ts', size: 12 }],
     };
-    const sanitized = sanitizeMessageForPersistence(user, false);
+    const sanitized = sanitizeMessageForPersistence(user);
     expect(sanitized.images).toBeUndefined();
     expect(sanitized.attachedFiles).toEqual([{ name: 'notes.ts', size: 12 }]);
   });
@@ -180,7 +160,7 @@ describe('sanitizeMessageForPersistence', () => {
         { mediaType: 'image/jpeg', data: 'BBBB' },
       ],
     };
-    const sanitized = sanitizeMessageForPersistence(user, false);
+    const sanitized = sanitizeMessageForPersistence(user);
     expect(sanitized.images).toEqual([
       { mediaType: 'image/png', data: '', path: '.CodePapr/chat-images/1.png' },
     ]);

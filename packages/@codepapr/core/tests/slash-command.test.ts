@@ -272,6 +272,7 @@ describe('slashCommand - 路径与元数据', () => {
   it('本地命令与已知命令名', () => {
     expect(isLocalSlashCommand('help')).toBe(true);
     expect(isLocalSlashCommand('compact')).toBe(true);
+    expect(isLocalSlashCommand('undo')).toBe(true);
     expect(isKnownSlashCommandName('review')).toBe(true);
     expect(isKnownSlashCommandName('not-a-cmd')).toBe(false);
   });

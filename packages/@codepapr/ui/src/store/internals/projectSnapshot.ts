@@ -47,10 +47,7 @@ export function toProjectSnapshot(state: AgentState): ProjectStateSnapshot {
     version: 1,
     sessions: state.sessions,
     activeSessionId: state.activeSessionId,
-    sessionMessages: sanitizeSessionMessagesForPersistence(
-      liveSessionMessages,
-      state.settings.debugEnabled
-    ),
+    sessionMessages: sanitizeSessionMessagesForPersistence(liveSessionMessages),
     skillEnabledById: { ...state.skillEnabledById },
     sessionTodoLists,
     conversationStats: state.conversationStats,
@@ -67,10 +64,7 @@ async function saveProjectStateNormalized(
   if (!state.workspacePath) return;
 
   const path = state.workspacePath;
-  const sanitizedMessages = sanitizeSessionMessagesForPersistence(
-    state.sessionMessages,
-    state.settings.debugEnabled
-  );
+  const sanitizedMessages = sanitizeSessionMessagesForPersistence(state.sessionMessages);
 
   const knownSessionIds = new Set<string>();
 

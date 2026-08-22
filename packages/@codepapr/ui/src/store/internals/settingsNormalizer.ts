@@ -429,10 +429,6 @@ export function normalizeSettings(
     typeof input.thinkingBudgetTokens === 'number' && Number.isFinite(input.thinkingBudgetTokens)
       ? Math.max(0, Math.floor(input.thinkingBudgetTokens))
       : DEFAULT_SETTINGS.thinkingBudgetTokens;
-  const debugEnabled =
-    typeof input.debugEnabled === 'boolean'
-      ? input.debugEnabled
-      : DEFAULT_SETTINGS.debugEnabled;
   const chatBordersEnabled =
     typeof input.chatBordersEnabled === 'boolean'
       ? input.chatBordersEnabled
@@ -1010,7 +1006,6 @@ export function normalizeSettings(
     thinkingEffort: effectiveThinkingEffort,
     thinkingBudgetTokens: effectiveThinkingBudgetTokens,
     thinkingPayload: effectiveThinkingPayload,
-    debugEnabled,
     chatBordersEnabled,
     experimentalCharacters,
     experimentalVoice,

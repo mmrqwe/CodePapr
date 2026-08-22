@@ -26,22 +26,6 @@ export function SettingsGeneralTab({ local, update, t, currentLang }: SettingsTa
         </select>
       </FieldCard>
 
-      <ToggleField
-        checked={local.debugEnabled}
-        onChange={(checked) => update({ debugEnabled: checked })}
-        label={t.debugMode}
-        desc={t.debugModeDesc}
-        title={t.debugModeDesc}
-      />
-
-      <ToggleField
-        checked={local.chatBordersEnabled}
-        onChange={(checked) => update({ chatBordersEnabled: checked })}
-        label={t.chatBorders}
-        desc={t.chatBordersDesc}
-        title={t.chatBordersDesc}
-      />
-
       <div className="space-y-3">
         <div className="px-1">
           <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">

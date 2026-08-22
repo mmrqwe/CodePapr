@@ -148,7 +148,6 @@ export const DEFAULT_SETTINGS: Settings = {
   thinkingPayload: 'thinking',
   multimodalEnabled: false,
   multimodalModelTier: 'all',
-  debugEnabled: false,
   chatBordersEnabled: true,
   experimentalCharacters: false,
   experimentalVoice: false,

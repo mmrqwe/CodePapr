@@ -530,6 +530,56 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             appendInfoMessage(set, buildCommandHelpMessage(customCommands, normalizedSettings.lang));
             return true;
           }
+          if (lower === 'undo') {
+            const undoSessionId = get().activeSessionId;
+            if (get().isLoading || turnInFlight) {
+              appendInfoMessage(
+                set,
+                normalizedSettings.lang === 'en'
+                  ? 'Cannot undo while an agent turn is in progress.'
+                  : normalizedSettings.lang === 'zh-TW'
+                    ? '代理回合進行中，無法執行撤銷。'
+                    : '代理回合进行中，无法执行撤销。',
+                undoSessionId,
+                { resetLoading: false }
+              );
+              return true;
+            }
+            const result = await get().undoConversationReset();
+            if (result.ok) {
+              appendInfoMessage(
+                set,
+                normalizedSettings.lang === 'en'
+                  ? 'Reset undone · conversation and files restored.'
+                  : normalizedSettings.lang === 'zh-TW'
+                    ? '已撤銷重設 · 對話與檔案已恢復。'
+                    : '已撤销重置 · 对话与文件已恢复。',
+                undoSessionId,
+                { resetLoading: false }
+              );
+            } else {
+              const errorText =
+                result.message === 'nothing-to-undo'
+                  ? normalizedSettings.lang === 'en'
+                    ? 'No reset operation to undo.'
+                    : normalizedSettings.lang === 'zh-TW'
+                      ? '沒有可撤銷的重設操作。'
+                      : '没有可撤销的重置操作。'
+                  : result.message === 'workspace-changed'
+                    ? normalizedSettings.lang === 'en'
+                      ? 'Workspace changed — cannot undo reset from previous workspace.'
+                      : normalizedSettings.lang === 'zh-TW'
+                        ? '工作區已變更——無法撤銷前一個工作區的重設。'
+                        : '工作区已变更——无法撤销前一个工作区的重置。'
+                    : normalizedSettings.lang === 'en'
+                      ? `Undo failed: ${result.message ?? 'unknown error'}`
+                      : normalizedSettings.lang === 'zh-TW'
+                        ? `撤銷失敗：${result.message ?? '未知錯誤'}`
+                        : `撤销失败：${result.message ?? '未知错误'}`;
+              appendInfoMessage(set, errorText, undoSessionId, { resetLoading: false });
+            }
+            return true;
+          }
           if (lower === 'compact') {
             // 以 await 前捕获的会话为准：压缩模型调用期间用户可能切换会话，
             // 压缩结果不得写入其它会话，也不得污染当前查看会话的视图。
@@ -1738,17 +1788,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     snapshot: event.snapshot,
                   },
                 });
+                return;
               }
 
               updateAssistantMessage(set, activeSessionId!, assistantMessageId, (message) => {
-                if (event.type === 'request-context') {
-                  return normalizedSettings.debugEnabled
-                    ? {
-                        ...message,
-                        promptContent: event.content,
-                      }
-                    : message;
-                }
 
                 if (event.type === 'assistant-round-complete') {
                   // provider 已把占位符回声从 event.reasoningContent 过滤为

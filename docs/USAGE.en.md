@@ -360,27 +360,100 @@ They do not create sub-agents at runtime; instead they serve as project-level co
 
 **Skill Marketplace**: The desktop app includes a built-in skill marketplace that pulls listings from GitHub (`zerone-agent/agent-use-skills`), supporting one-click install into the project. Installed skills are tracked in `.CodePapr/skills-lock.json` (listing id, written Skill paths, SHA-256). Plugin packs record their sub-skill directories; deleting a local Skill removes it from the lock file.
 
-### Custom Chat Commands
+### Chat Commands (Slash Commands)
 
-Declare templates in `.CodePapr/commands/<name>.md`, supporting `$ARGUMENTS`, `@path`, `` !`cmd` ``.
+Type `/` to open the command autocomplete palette.
 
-Type `/` to open the command palette.
-
-**Primary model built-in commands:** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize` `/build`
+**Primary model built-in commands:** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize` `/build` `/goal`
 
 **Fast model built-in commands:** `/search` `/lint` `/clean` `/commit` `/summary`
 
-**Local commands (zero tokens):** `/help` `/commands` `/compact`
+**Local commands (zero tokens):** `/help` `/commands` `/compact` `/undo`
 
-Custom commands can declare `model: fast` in frontmatter for fast model routing:
+### Custom Chat Commands
+
+Declare prompt templates in `.CodePapr/commands/<name>.md` to register them as slash commands `/<name>` in the chat input.
+
+#### 1. Frontmatter Configuration and Template Syntax
 
 ```markdown
 ---
-description: Quick TODO search
+description: Short command description (displayed in / autocomplete menu and /help)
+usage: Usage hint (e.g. /mycmd <args>)
+example: Example usage (e.g. /mycmd fix animation lag)
+model: fast | primary | mentor | <custom-model-id>  # Optional: fast routes to fast model, primary to primary model
+agent: <subagent-name>  # Optional: automatically delegate task to specified subagent
+---
+Prompt template body supporting dynamic placeholders:
+- $ARGUMENTS  : Replaced with all arguments entered after the command
+- $1, $2 ...  : Replaced with the 1st, 2nd positional argument
+- @path       : Automatically reads workspace relative file content and embeds it as an inline code block
+- !`cmd`      : Executes simple shell command and embeds output into the prompt (simple commands only, no compound operators)
+```
+
+#### 2. Practical Examples
+
+##### Example A: Static Page & Rendering Logic Diagnosis (Zero Git Risk)
+Ideal for static or pure frontend projects containing `index.html`, CSS, and JS:
+```markdown
+---
+description: Diagnose index.html page structure and visual rendering logic
+usage: /pagecheck [observed issue or question]
+example: /pagecheck check if animations or style imports have issues
 model: fast
 ---
-Search the codebase for all TODO and FIXME markers: $ARGUMENTS
+Please help diagnose the page structure and rendering logic of this static project.
+
+### Page Entrypoint (@index.html)
+@index.html
+
+---
+### User Question
+$ARGUMENTS
+
+### Requirements:
+1. Check CSS and JS import paths and tag structure in index.html.
+2. Objectively analyze rendering or interaction issues reported by the user and provide actionable suggestions.
 ```
+
+##### Example B: Dependency & Script Architecture Analysis
+```markdown
+---
+description: Analyze package.json dependencies and scripts
+usage: /depcheck [question]
+example: /depcheck which scripts are related to testing?
+model: fast
+---
+Please answer the user's question based on the project root configuration.
+
+### Root Config (package.json)
+@package.json
+
+---
+### User Focus
+$ARGUMENTS
+```
+
+##### Example C: Git Workspace Review (Safe Read-Only Execution)
+```markdown
+---
+description: Inspect workspace Git status and Diff for code review
+usage: /gitcheck [review focus]
+model: fast
+---
+Please review current workspace changes:
+Current status: !`git status -s`
+Diff:
+```diff
+!`git diff HEAD`
+```
+Focus area: $ARGUMENTS
+```
+
+#### 3. Creation and Management
+- **Method 1 (UI, Recommended)**: Click **Project Config** in the toolbar → switch to the **Commands** tab → enter command name, click **Create Command**, edit in the Monaco editor, and click **Save**.
+- **Method 2 (Filesystem)**: Create `.CodePapr/commands/<name>.md` in your project workspace. Changes take effect immediately.
+- **Verification & Testing**: Type `/` in the chat input to see autocomplete entries, or run `/help` to view all registered custom commands. If an `@path` file does not exist in the current project, CodePapr gracefully reports the read failure without altering any files.
 
 ## External Path Permissions
 

@@ -227,6 +227,18 @@ export const META_COMMAND_UI: Record<string, CommandUiCopy> = {
       en: 'Force-compact the conversation context.\nUsage: /compact',
     },
   },
+  undo: {
+    description: {
+      'zh-CN': '撤销上一次对话重置（恢复被截断的对话与代码快照）',
+      'zh-TW': '撤銷上一次對話重設（恢復被截斷的對話與程式碼快照）',
+      en: 'Undo the last conversation reset (restore truncated messages and code snapshot)',
+    },
+    usage: {
+      'zh-CN': '撤销上一次对话重置。\n用法: /undo',
+      'zh-TW': '撤銷上一次對話重設。\n用法: /undo',
+      en: 'Undo the last conversation reset.\nUsage: /undo',
+    },
+  },
   goal: {
     description: {
       'zh-CN': '自主循环：Worker 执行 + Verifier 验收，直到验证条件通过',
