@@ -155,8 +155,27 @@ function getResponseCreationTokens(usage: ResponseUsage | undefined): number {
   return usage?.cache_creation_input_tokens ?? 0;
 }
 
+function hasNestedCachedTokenDetails(usage: ResponseUsage | undefined): boolean {
+  return (
+    typeof usage?.input_tokens_details?.cached_tokens === 'number' ||
+    typeof usage?.prompt_tokens_details?.cached_tokens === 'number'
+  );
+}
+
+/**
+ * CacheValidator treats `input_tokens` as uncached new input, then adds
+ * cache_read + cache_creation. OpenAI Responses / Chat Completions report
+ * `input_tokens` / `prompt_tokens` as the inclusive prompt total and put
+ * hits in nested `*_details.cached_tokens`. Subtract those hits so the
+ * dashboard does not double-count. Claude-style payloads (top-level
+ * cache_read_input_tokens, no nested details) already send uncached
+ * input_tokens — leave them alone.
+ */
 function getResponseInputTokens(usage: ResponseUsage | undefined): number {
   if (typeof usage?.input_tokens === 'number') {
+    if (hasNestedCachedTokenDetails(usage)) {
+      return Math.max(0, usage.input_tokens - getResponseCachedTokens(usage));
+    }
     return usage.input_tokens;
   }
   const totalPromptTokens = usage?.prompt_tokens ?? 0;

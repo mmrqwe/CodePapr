@@ -80,14 +80,13 @@ interface ModelStatsBlockProps {
   stats: ModelTierStats;
   pricing?: DeepSeekPricing;
   t: Record<string, string>;
-  showsDeepSeekPromptMiss: boolean;
   showCost?: boolean;
   footnote?: string;
   /** 弹窗宽屏模式：卡片内命中率/token 明细、耗时/费用改为左右并排。 */
   wide?: boolean;
 }
 
-function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss, showCost = true, footnote, wide = false }: ModelStatsBlockProps) {
+function ModelStatsBlock({ title, stats, pricing, t, showCost = true, footnote, wide = false }: ModelStatsBlockProps) {
   const { totalCacheRead, totalCacheCreation, totalInput, totalOutput, calls, rounds } = stats;
 
   const totalTokens = totalCacheRead + totalCacheCreation + totalInput;
@@ -136,7 +135,7 @@ function ModelStatsBlock({ title, stats, pricing, t, showsDeepSeekPromptMiss, sh
           <div className="mb-3">
             <p className="mb-2 text-[11px] font-medium text-fg-muted">{t.tokenUsage}</p>
             <StatRow label={t.cacheRead} value={totalCacheRead.toLocaleString()} color="text-green-400" />
-            {showsDeepSeekPromptMiss ? (
+            {totalCacheCreation === 0 ? (
               <StatRow label={t.cacheMissInput} value={totalInput.toLocaleString()} color="text-yellow-400" />
             ) : (
               <>
@@ -225,20 +224,10 @@ export function CacheStatsDashboard({ lang, collapsible = true, wide = false }: 
   const t = getTranslation(lang ?? settings.lang);
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
 
-  const normalizedProvider = settings.provider?.trim().toLowerCase() ?? '';
-  const normalizedModel = settings.model?.trim().toLowerCase() ?? '';
-
   const displayedStats: ConversationStats =
     viewMode === 'project'
       ? aggregateProjectStats(sessionConversationStats)
       : conversationStats;
-
-  // Derive the flag from the stats actually being displayed so the "Entire
-  // Project" view doesn't reflect the current conversation's primary tier.
-  const showsDeepSeekPromptMiss =
-    (normalizedProvider === 'deepseek' || normalizedModel.includes('deepseek')) &&
-    displayedStats.primary.totalCacheCreation === 0 &&
-    displayedStats.primary.promptCacheMissTokens > 0;
 
   const showContent = !collapsible || !collapsed;
 
@@ -300,7 +289,6 @@ export function CacheStatsDashboard({ lang, collapsible = true, wide = false }: 
               stats={displayedStats.primary}
               pricing={PRIMARY_PRICING}
               t={t}
-              showsDeepSeekPromptMiss={showsDeepSeekPromptMiss}
               wide={wide}
             />
 
@@ -309,7 +297,6 @@ export function CacheStatsDashboard({ lang, collapsible = true, wide = false }: 
               stats={displayedStats.fast}
               pricing={FAST_PRICING}
               t={t}
-              showsDeepSeekPromptMiss={false}
               wide={wide}
             />
 
@@ -319,7 +306,6 @@ export function CacheStatsDashboard({ lang, collapsible = true, wide = false }: 
                   title={`${t.mentorModelTag} · ${settings.mentorModel}`}
                   stats={displayedStats.mentor}
                   t={t}
-                  showsDeepSeekPromptMiss={false}
                   showCost={false}
                   footnote={t.mentorStatsIncludedNote}
                   wide={wide}

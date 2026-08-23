@@ -299,15 +299,18 @@ function buildModeSwitchMessage(mode: WorkMode): UIMessage {
   };
 }
 
-/** N6：空闲看门狗不得误杀两类合法等待：
+/** N6：空闲看门狗不得误杀三类合法等待：
  *  1. 权限确认弹窗——permissionStore 设计为无限期等待用户决策（与 worker 层
  *     的「权限等待不限时」一致），弹窗停留超过看门狗阈值时必须推迟触发；
  *  2. 静默长工具执行——无流事件输出的工具由工具自身的 IPC 超时兜底
- *     （toolIpcTimeoutMs / graph / task），看门狗在工具在飞时必须推迟触发。
- *  两者在飞时返回 true，调用方应重新武装看门狗而不是强制恢复。 */
+ *     （toolIpcTimeoutMs / graph / task），看门狗在工具在飞时必须推迟触发；
+ *  3. 页面不可见——WKWebView 在后台会冻结 JS，心跳/流事件被节流，看门狗
+ *     会把仍在 worker 里跑的回合误杀成已完成；推迟到页面重新可见。
+ *  上述情况返回 true，调用方应重新武装看门狗而不是强制恢复。 */
 export function shouldDeferIdleWatchdog(
   agent: Pick<AgentRuntimeHandle, 'hasInflightToolExecutions'> | null | undefined,
 ): boolean {
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return true;
   if (isPermissionWaitActive()) return true;
   if (agent?.hasInflightToolExecutions?.()) return true;
   return false;
@@ -944,7 +947,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // 恢复误杀回合（与 worker 层 idle backstop 的暂停语义对齐）。
             if (shouldDeferIdleWatchdog(get()._agent)) {
               console.warn(
-                '[sendMessage] idle watchdog: legitimate wait in flight (permission dialog or tool execution); deferring'
+                '[sendMessage] idle watchdog: legitimate wait in flight (hidden page, permission dialog, or tool execution); deferring'
               );
               armStoreIdle();
               return;
@@ -1805,14 +1808,19 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     message.reasoningContent,
                     event.reasoningContent
                   );
+                  const toolsContinue = event.hasToolCalls === true;
                   return {
                     ...message,
                     content: mergeMessageText(message.content, event.content) ?? '',
                     reasoningContent: isReasoningPlaceholderEcho(mergedReasoning)
                       ? undefined
                       : mergedReasoning,
-                    isStreaming: false,
-                    statusText: undefined,
+                    // 本轮还要跑工具：保持流式态，避免输入框/工具条在 tool loop
+                    // 间隙被画成「已完成」。下一轮 assistant-round-start 会收尾本气泡。
+                    isStreaming: toolsContinue ? true : false,
+                    statusText: toolsContinue
+                      ? getTranslation(normalizedSettings.lang).agentContinuing
+                      : undefined,
                     ...(typeof event.durationMs === 'number' && event.durationMs > 0
                       ? { durationMs: event.durationMs }
                       : {}),

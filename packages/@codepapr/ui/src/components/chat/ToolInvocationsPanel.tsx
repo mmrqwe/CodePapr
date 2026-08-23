@@ -17,8 +17,12 @@ export function ToolInvocationsPanel({
   const t = getTranslation(lang);
   const bordered = useAgentStore((state) => state.settings.chatBordersEnabled);
   const toolInvocations = msg.toolInvocations ?? [];
-  const anyRunning = toolInvocations.some((tool) => tool.status === 'running');
-  const allCompleted = toolInvocations.length > 0 && toolInvocations.every((tool) => tool.status === 'success' || tool.status === 'error' || tool.status === 'cancelled');
+  const turnStillRunning = Boolean(msg.isStreaming);
+  const anyRunning = turnStillRunning || toolInvocations.some((tool) => tool.status === 'running');
+  const allCompleted =
+    !turnStillRunning &&
+    toolInvocations.length > 0 &&
+    toolInvocations.every((tool) => tool.status === 'success' || tool.status === 'error' || tool.status === 'cancelled');
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {

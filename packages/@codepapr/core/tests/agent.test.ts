@@ -275,7 +275,7 @@ describe('Agent', () => {
         events.push(`context:${payload.round}:${payload.model}:${payload.messages.length}`);
       }
       if (event.type === 'assistant-round-complete') {
-        events.push(`complete:${event.round}:${event.content}`);
+        events.push(`complete:${event.round}:${event.content}:${event.hasToolCalls === true}`);
       }
       if (event.type === 'assistant-round-start') {
         events.push(`start:${event.round}`);
@@ -290,12 +290,12 @@ describe('Agent', () => {
 
     expect(events).toEqual([
       'context:1:test-model:0',
-      'complete:1:第一轮读取',
+      'complete:1:第一轮读取:true',
       'tool-start:read_file',
       'tool-end:read_file',
       'start:2',
       'context:2:test-model:0',
-      'complete:2:第二轮总结',
+      'complete:2:第二轮总结:false',
     ]);
   });
 

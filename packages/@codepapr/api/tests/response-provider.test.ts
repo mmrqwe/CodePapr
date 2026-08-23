@@ -112,8 +112,46 @@ describe('ResponseProvider', () => {
     expect(res.choices[0].message.toolCalls?.[0].name).toBe('get_weather');
     expect(res.choices[0].finishReason).toBe('tool_calls');
     expect(res.usage?.cache_read_input_tokens).toBe(10);
-    expect(res.usage?.input_tokens).toBe(50);
+    expect(res.usage?.input_tokens).toBe(40);
     expect(res.usage?.output_tokens).toBe(30);
+  });
+
+  it('does not subtract top-level cache_read_input_tokens from already-uncached input_tokens', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        id: 'resp_claude_style',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'ok' }],
+          },
+        ],
+        usage: {
+          input_tokens: 50,
+          output_tokens: 5,
+          cache_read_input_tokens: 10,
+        },
+      }),
+    });
+
+    const provider = new ResponseProvider({
+      apiKey: 'sk-test',
+      baseURL: 'https://api.openai.com/v1',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const res = await provider.chat({
+      model: 'gpt-4o',
+      messages: [{ id: '1', role: 'user', content: 'hi', timestamp: Date.now() }],
+    });
+
+    expect(res.usage?.cache_read_input_tokens).toBe(10);
+    expect(res.usage?.input_tokens).toBe(50);
   });
 
   it('handles streaming SSE events with text, reasoning, and function call arguments', async () => {

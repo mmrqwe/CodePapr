@@ -345,6 +345,8 @@ export type IChatStreamEvent =
       reasoningContent?: string;
       /** 本轮 LLM 生成总耗时（含续写重试的请求，不含空完成退避等待），毫秒 */
       durationMs?: number;
+      /** 本轮 assistant 带了 tool_calls，随后还会执行工具；UI 不得把回合标成已完成。 */
+      hasToolCalls?: boolean;
     }
   | { type: 'reasoning-delta'; delta: string }
   | { type: 'content-delta'; delta: string }

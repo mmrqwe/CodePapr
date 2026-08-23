@@ -2323,7 +2323,7 @@ describe('useAgentStore.sendMessage', () => {
   it('splits internal tool rounds from a single agent chat into separate assistant bubbles', async () => {
     const chat = vi.fn(async (_input: string, onEvent?: (event: IChatStreamEvent) => void) => {
       onEvent?.({ type: 'content-delta', delta: '先读取 README.md' });
-      onEvent?.({ type: 'assistant-round-complete', round: 1, content: '先读取 README.md' });
+      onEvent?.({ type: 'assistant-round-complete', round: 1, content: '先读取 README.md', hasToolCalls: true });
       onEvent?.({
         type: 'tool-call-start',
         toolCallId: 'tool-1',
@@ -2370,6 +2370,74 @@ describe('useAgentStore.sendMessage', () => {
     expect(assistantMessages[1]?.toolInvocations).toBeUndefined();
     expect(summaryMessage?.synthetic).not.toBe(true);
     expect(summaryMessage?.content).toBe('已完成修改并整理结果');
+  });
+
+  it('keeps the assistant bubble streaming after round-complete when tools still need to run', async () => {
+    let releaseTools!: () => void;
+    const toolsGate = new Promise<void>((resolve) => {
+      releaseTools = resolve;
+    });
+    const chat = vi.fn(async (_input: string, onEvent?: (event: IChatStreamEvent) => void) => {
+      onEvent?.({ type: 'content-delta', delta: '先读取 README.md' });
+      onEvent?.({
+        type: 'assistant-round-complete',
+        round: 1,
+        content: '先读取 README.md',
+        hasToolCalls: true,
+      });
+      await toolsGate;
+      onEvent?.({
+        type: 'tool-call-start',
+        toolCallId: 'tool-1',
+        toolName: 'workspace_read_file',
+        arguments: { relativePath: 'README.md' },
+      });
+      onEvent?.({
+        type: 'tool-call-end',
+        toolCallId: 'tool-1',
+        toolName: 'workspace_read_file',
+        success: true,
+      });
+      onEvent?.({ type: 'assistant-round-start', round: 2 });
+      onEvent?.({ type: 'content-delta', delta: '已完成修改并整理结果' });
+      onEvent?.({
+        type: 'assistant-round-complete',
+        round: 2,
+        content: '已完成修改并整理结果',
+      });
+      return createAgentResponse('已完成修改并整理结果');
+    });
+
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    const sendPromise = useAgentStore.getState().sendMessage('继续执行', '继续执行', 'agent');
+    await waitForCondition(() => {
+      const messages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+      return messages.some(
+        (message) =>
+          message.role === 'assistant' &&
+          message.content.includes('先读取 README.md') &&
+          message.isStreaming === true
+      );
+    }, 40);
+
+    const midTurn = (useAgentStore.getState().sessionMessages['session-1'] ?? []).find(
+      (message) => message.role === 'assistant' && message.content.includes('先读取 README.md')
+    );
+    expect(midTurn?.isStreaming).toBe(true);
+    expect(useAgentStore.getState().isLoading).toBe(true);
+
+    releaseTools();
+    await sendPromise;
+
+    const finished = (useAgentStore.getState().sessionMessages['session-1'] ?? []).find(
+      (message) => message.role === 'assistant' && message.content.includes('先读取 README.md')
+    );
+    expect(finished?.isStreaming).toBe(false);
+    expect(useAgentStore.getState().isLoading).toBe(false);
   });
 
   it('persists an execution evidence summary as hidden context after the final reply', async () => {
@@ -3492,6 +3560,15 @@ describe('shouldDeferIdleWatchdog（N6）', () => {
     expect(
       shouldDeferIdleWatchdog({ hasInflightToolExecutions: () => true })
     ).toBe(true);
+  });
+
+  it('页面不可见时返回 true（WKWebView 冻结期间看门狗不得误杀）', () => {
+    vi.stubGlobal('document', { visibilityState: 'hidden' });
+    try {
+      expect(shouldDeferIdleWatchdog(null)).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

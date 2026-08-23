@@ -1230,11 +1230,13 @@ export class Agent {
       );
       await this.session.logStore.append(assistantMsg);
 
+      const hasToolCalls = Boolean(assistant.toolCalls?.length);
       onStreamEvent?.({
         type: 'assistant-round-complete',
         round: roundNumber,
         content: roundContent,
         reasoningContent: roundReasoning,
+        hasToolCalls,
         ...(roundModelMs > 0 ? { durationMs: Math.round(roundModelMs) } : {}),
       });
 

@@ -92,6 +92,40 @@ describe('OpenAIProvider', () => {
     });
   });
 
+  it('subtracts nested cached_tokens from an inclusive input_tokens total', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 'resp-nested-cache',
+        choices: [
+          {
+            message: { role: 'assistant', content: 'ok' },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: {
+          input_tokens: 50,
+          output_tokens: 8,
+          prompt_tokens_details: { cached_tokens: 10 },
+        },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAIProvider({ apiKey: 'test-key' });
+    const response = await provider.chat({
+      model: 'gpt-4o',
+      messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+      maxTokens: 1024,
+    });
+
+    expect(response.usage).toEqual({
+      cache_read_input_tokens: 10,
+      cache_creation_input_tokens: 0,
+      input_tokens: 40,
+      output_tokens: 8,
+    });
+  });
+
   it('工具定义使用规范的单层 function 包装，不带顶层重复字段', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({

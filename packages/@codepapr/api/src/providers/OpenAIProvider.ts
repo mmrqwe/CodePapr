@@ -53,6 +53,9 @@ interface OpenAIResponse {
     prompt_tokens_details?: {
       cached_tokens?: number;
     };
+    input_tokens_details?: {
+      cached_tokens?: number;
+    };
     input_tokens?: number;
     output_tokens?: number;
     cache_creation_input_tokens?: number;
@@ -93,15 +96,31 @@ interface OpenAIStreamChunk {
 }
 
 function getOpenAICachedTokens(usage: OpenAIResponse['usage'] | undefined): number {
-  return usage?.cache_read_input_tokens ?? usage?.prompt_tokens_details?.cached_tokens ?? 0;
+  return (
+    usage?.cache_read_input_tokens ??
+    usage?.input_tokens_details?.cached_tokens ??
+    usage?.prompt_tokens_details?.cached_tokens ??
+    0
+  );
 }
 
 function getOpenAICreationTokens(usage: OpenAIResponse['usage'] | undefined): number {
   return usage?.cache_creation_input_tokens ?? 0;
 }
 
+function hasNestedCachedTokenDetails(usage: OpenAIResponse['usage'] | undefined): boolean {
+  return (
+    typeof usage?.input_tokens_details?.cached_tokens === 'number' ||
+    typeof usage?.prompt_tokens_details?.cached_tokens === 'number'
+  );
+}
+
+/** See getResponseInputTokens: nested cached_tokens ⇒ inclusive prompt total. */
 function getOpenAIInputTokens(usage: OpenAIResponse['usage'] | undefined): number {
   if (typeof usage?.input_tokens === 'number') {
+    if (hasNestedCachedTokenDetails(usage)) {
+      return Math.max(0, usage.input_tokens - getOpenAICachedTokens(usage));
+    }
     return usage.input_tokens;
   }
 
