@@ -1557,6 +1557,7 @@ export function buildRuntimeSystemPrompt(options: BuildRuntimeSystemPromptOption
     return [
       CORE_PRINCIPLES[lang].trim(),
       ...(options.extraSections ?? []).map((section) => section.trim()),
+      (options.rulesSection ?? '').trim(),
       [
         labels.workspace,
         options.workspacePath.trim() || labels.workspaceFallback,

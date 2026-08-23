@@ -242,6 +242,7 @@ export interface SubagentSessionDeps {
   customPromptSection?: string;
   memorySection?: string;
   projectGraphSummary?: string;
+  rulesSection?: string;
   graphToolTimeoutMs: number;
   maxWallClockMs?: number;
   /** 父级取消信号（主会话取消 / 父工具超时）：abort 时立即取消子代理执行，
@@ -336,6 +337,7 @@ export async function runSubagentSession(
     workspacePath: deps.workspacePath,
     lang,
     extraSections: [sanitizeAgentPrompt(resolveAgentPrompt(definition, deps.lang))],
+    rulesSection: deps.rulesSection,
     toolNames: tools.map((tool) => tool.name),
     subagent: true,
   });

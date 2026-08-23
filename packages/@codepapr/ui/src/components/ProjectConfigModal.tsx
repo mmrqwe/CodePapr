@@ -5,6 +5,8 @@ import {
   getDefaultAgentsTemplate,
   DEFAULT_SEARCH_SKILL_NAME,
   DEFAULT_SEARCH_SKILL_TEMPLATE,
+  DEFAULT_CHECK_COMMAND_NAME,
+  getDefaultCheckCommandTemplate,
   parseSkillMarkdown,
 } from '@codepapr/core';
 import { useAgentStore } from '../store/agentStore';
@@ -102,8 +104,11 @@ function createAgentTemplate(name: string): string {
   ].join('\n');
 }
 
-function createCommandTemplate(name: string): string {
-  const safeName = name.trim() || 'ship';
+function createCommandTemplate(name: string, lang?: string): string {
+  const safeName = name.trim() || DEFAULT_CHECK_COMMAND_NAME;
+  if (safeName === DEFAULT_CHECK_COMMAND_NAME) {
+    return getDefaultCheckCommandTemplate(lang);
+  }
   return [
     '---',
     `description: ${safeName} 项目命令`,
@@ -258,7 +263,7 @@ export function ProjectConfigModal({
   const [commandNames, setCommandNames] = useState<string[]>([]);
   const [selectedCommandName, setSelectedCommandName] = useState<string | null>(null);
   const [commandContent, setCommandContent] = useState('');
-  const [newCommandName, setNewCommandName] = useState('ship');
+  const [newCommandName, setNewCommandName] = useState(DEFAULT_CHECK_COMMAND_NAME);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState('');
@@ -800,12 +805,12 @@ export function ProjectConfigModal({
       await invoke('write_text_file', {
         workspacePath,
         relativePath,
-        content: createCommandTemplate(name),
+        content: createCommandTemplate(name, lang ?? settings.lang),
       });
       await afterProjectConfigChanged([relativePath]);
       await loadCommandNames();
       setSelectedCommandName(name);
-      setNewCommandName('ship');
+      setNewCommandName(DEFAULT_CHECK_COMMAND_NAME);
       setStatus(t.projectConfigCommandCreated);
     } catch (err) {
       setError(errorMessage(err));
@@ -1048,7 +1053,7 @@ export function ProjectConfigModal({
                     <input
                       value={newCommandName}
                       onChange={(event) => setNewCommandName(event.target.value)}
-                      placeholder="ship"
+                      placeholder={DEFAULT_CHECK_COMMAND_NAME}
                       className="min-w-0 flex-1 rounded-lg border border-line bg-base px-2 py-1.5 text-xs text-fg outline-none focus:border-accent-soft"
                     />
                     <button

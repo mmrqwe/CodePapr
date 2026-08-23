@@ -922,6 +922,7 @@ async function runSubagent(
       cacheValidator: new CacheValidator(),
       skillsSection: buildSkillsSection(payload.runtime.skillDefinitions ?? [], payload.runtime.lang),
       customPromptSection: payload.runtime.customPrompt,
+      rulesSection: payload.runtime.rulesSection,
       graphToolTimeoutMs: s.graphToolTimeoutMs,
       maxWallClockMs: SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
       abortSignal,

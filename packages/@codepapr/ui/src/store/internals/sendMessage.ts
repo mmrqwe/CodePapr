@@ -20,6 +20,7 @@ import {
   serializeGoalState,
   GoalConditionParseError,
   renderTodoListDigest,
+  shouldSuggestCheckCommand,
 } from '@codepapr/core';
 import type {
   IAgentResponse,
@@ -2787,6 +2788,23 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // PR5（ADR-009 B3/第11条）：回合结束归档 Recall 与 re-recall 审计行
           // （request-only，不再随后续回合注入；审计记录保留在 memory_recalls）。
           archiveTurnRecalls(activeSessionId);
+          if (
+            shouldSuggestCheckCommand({
+              mode,
+              commandName: slash?.name,
+              toolNames: [
+                ...(finalizedAssistantMsg.toolInvocations ?? []).map((tool) => tool.name),
+                ...executedTools.map((tool) => tool.name),
+              ],
+            })
+          ) {
+            appendInfoMessage(
+              set,
+              getTranslation(normalizedSettings.lang).checkAfterEditsHint,
+              activeSessionId,
+              { resetLoading: false },
+            );
+          }
           saveCurrentProjectState(get());
         } catch (err) {
           console.error('[sendMessage] outer catch:', err);

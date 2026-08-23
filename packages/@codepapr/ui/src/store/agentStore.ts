@@ -57,6 +57,7 @@ import {
   loadSkillDefinitions,
   loadAgentDefinitions,
   loadProjectRulesSection,
+  ensureProjectAgentsFile,
 } from '../utils/projectConfigLoader';
 
 import {
@@ -934,8 +935,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         if (!path) {
           return;
         }
+        await ensureProjectAgentsFile(invoke, path, get().settings.lang).catch(() => undefined);
         const [rulesSection, skillDefinitions, agentDefinitions] = await Promise.all([
-          loadProjectRulesSection(invoke, path).catch(() => ''),
+          loadProjectRulesSection(invoke, path, get().settings.lang).catch(() => ''),
           loadSkillDefinitions(invoke, path).catch(() => [] as SkillDefinition[]),
           loadAgentDefinitions(invoke, path).catch(() => [] as AgentDefinition[]),
         ]);

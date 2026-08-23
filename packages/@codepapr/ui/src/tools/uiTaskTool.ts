@@ -184,6 +184,7 @@ export async function runSubagent(
       customPromptSection: context.customPrompt,
       memorySection: context.memorySection,
       projectGraphSummary: context.projectGraphSummary,
+      rulesSection: context.rulesSection,
       graphToolTimeoutMs: context.graphToolTimeoutMs,
       maxWallClockMs,
       abortSignal,

@@ -324,7 +324,7 @@ LLM-facing code intelligence is provided by the `lsp` tool and `list` (directory
 
 ### Project Rules
 
-Reads `.CodePapr/AGENTS.md`. Content is injected into the system prompt. Suitable for: project conventions, directory structure, off-limits scope, verification criteria.
+Reads `.CodePapr/AGENTS.md`. Content is injected into the system prompt (unfilled placeholder lines are stripped first). Opening a workspace writes the default file when it is missing and fills empty Verify commands from detected scripts; an existing file only gets empty Verify lines filled, and a blank file opts out. Suitable for: project conventions, directory structure, off-limits scope, verification criteria. Sub-agents (including Explore) inherit the same project rules. After Agent edits code, the UI suggests `/check`.
 
 ### Custom Sub-Agents
 
@@ -364,7 +364,7 @@ They do not create sub-agents at runtime; instead they serve as project-level co
 
 Type `/` to open the command autocomplete palette.
 
-**Primary model built-in commands:** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize` `/build` `/goal`
+**Primary model built-in commands:** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize` `/build` `/check` `/goal`
 
 **Fast model built-in commands:** `/search` `/lint` `/clean` `/commit` `/summary`
 

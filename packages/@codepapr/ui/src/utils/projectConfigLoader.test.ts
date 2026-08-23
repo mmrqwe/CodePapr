@@ -6,6 +6,7 @@ import {
   loadAgentDefinitions,
   loadCommandDefinition,
   loadProjectRulesSection,
+  ensureProjectAgentsFile,
   loadSkillDefinitions,
   loadSkillsSection,
   resolveSkillFilePath,
@@ -65,11 +66,11 @@ function createInvoke(files: Record<string, string>): {
       const entries = [...entriesMap.values()];
       return { root: dir, entries, truncated: false };
     }
-    if (
-      command === 'write_text_file' ||
-      command === 'delete_workspace_file' ||
-      command === 'delete_workspace_dir'
-    ) {
+    if (command === 'write_text_file') {
+      files[String(args?.relativePath ?? '')] = String(args?.content ?? '');
+      return true;
+    }
+    if (command === 'delete_workspace_file' || command === 'delete_workspace_dir') {
       return true;
     }
     if (command === 'run_workspace_command') {
@@ -102,8 +103,66 @@ describe('projectConfigLoader', () => {
     expect(section).not.toContain('保持函数简短。');
   });
 
-  it('无规则文件时返回空串', async () => {
+  it('无规则文件时回退到默认约定', async () => {
     const { invoke } = createInvoke({});
+    const section = await loadProjectRulesSection(invoke, '/ws');
+    expect(section).toContain('.CodePapr/AGENTS.md');
+    expect(section).toContain('先读再改');
+  });
+
+  it('无规则文件时按语言回退英文默认约定', async () => {
+    const { invoke } = createInvoke({});
+    const section = await loadProjectRulesSection(invoke, '/ws', 'en');
+    expect(section).toContain('Read existing code first');
+  });
+
+  it('缺省 AGENTS.md 时写出默认模板并填入 npm 验证命令', async () => {
+    const { invoke, calls } = createInvoke({
+      'package.json': JSON.stringify({
+        scripts: { test: 'vitest', lint: 'eslint .', build: 'tsc -b' },
+      }),
+      'package-lock.json': '{}',
+    });
+
+    await expect(ensureProjectAgentsFile(invoke, '/ws')).resolves.toBe('created');
+    const write = calls.find((call) => call.command === 'write_text_file');
+    expect(write?.args).toMatchObject({
+      workspacePath: '/ws',
+      relativePath: '.CodePapr/AGENTS.md',
+    });
+    const content = String(write?.args?.content ?? '');
+    expect(content).toContain('- 测试：npm test');
+    expect(content).toContain('- Lint：npm run lint');
+    expect(content).toContain('- 构建：npm run build');
+
+    const section = await loadProjectRulesSection(invoke, '/ws');
+    expect(section).toContain('npm test');
+    expect(section).not.toMatch(/^\s*-\s*技术栈：\s*$/m);
+  });
+
+  it('已有 AGENTS.md 只填空验证行，空白文件不覆盖', async () => {
+    const custom = '# 团队规则\n## 验证\n- 测试：pytest\n- Lint：\n- 构建：\n';
+    const { invoke, calls } = createInvoke({
+      '.CodePapr/AGENTS.md': custom,
+      'package.json': JSON.stringify({ scripts: { test: 'vitest', lint: 'eslint .' } }),
+    });
+    await expect(ensureProjectAgentsFile(invoke, '/ws')).resolves.toBe('updated');
+    const content = String(calls.find((call) => call.command === 'write_text_file')?.args?.content ?? '');
+    expect(content).toContain('- 测试：pytest');
+    expect(content).toContain('- Lint：npm run lint');
+
+    const { invoke: blankInvoke, calls: blankCalls } = createInvoke({
+      '.CodePapr/AGENTS.md': '  \n',
+      'package.json': JSON.stringify({ scripts: { test: 'vitest' } }),
+    });
+    await expect(ensureProjectAgentsFile(blankInvoke, '/ws')).resolves.toBe('unchanged');
+    expect(blankCalls.some((call) => call.command === 'write_text_file')).toBe(false);
+  });
+
+  it('规则文件存在但空白时不回退', async () => {
+    const { invoke } = createInvoke({
+      '.CodePapr/AGENTS.md': '  \n  ',
+    });
     expect(await loadProjectRulesSection(invoke, '/ws')).toBe('');
   });
 

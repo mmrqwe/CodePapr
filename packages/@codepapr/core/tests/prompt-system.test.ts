@@ -43,6 +43,21 @@ describe('promptSystem', () => {
     expect(prompt).not.toContain('项目诊断');
   });
 
+  it('injects project rules into the subagent system prompt', () => {
+    const prompt = buildRuntimeSystemPrompt({
+      mode: 'agent',
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+      subagent: true,
+      extraSections: ['你是 explore 子代理。'],
+      rulesSection: '## 项目规则\n- 先跑测试',
+      toolNames: ['read'],
+    });
+    expect(prompt).toContain('你是 explore 子代理。');
+    expect(prompt).toContain('## 项目规则');
+    expect(prompt).toContain('先跑测试');
+  });
+
   it('includes graph tool constraint when graph is in toolNames', () => {
     const prompt = buildRuntimeSystemPrompt({
       mode: 'agent',

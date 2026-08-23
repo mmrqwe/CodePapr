@@ -14,6 +14,7 @@
  */
 
 import { BUILTIN_COMMAND_UI, META_COMMAND_UI } from './slashCommandI18n';
+import { DEFAULT_CHECK_COMMAND_NAME, getDefaultCheckCommandPrompt } from './defaultCheckCommand';
 
 export type LocalizedCommandText = string | Record<string, string>;
 
@@ -285,6 +286,15 @@ export const BUILTIN_PROMPT_COMMANDS: readonly CommandDefinition[] = [
     mutating: true,
     template:
       '请构建项目并处理构建错误。先运行构建命令，若成功则输出构建结果摘要。若失败，逐个分析每个构建错误，定位相关文件，按从简到繁的顺序修复。每轮修复后重新构建验证。完成后汇报：构建是否通过、修复了多少个错误、修改了哪些文件。',
+  },
+  {
+    name: DEFAULT_CHECK_COMMAND_NAME,
+    description: '按项目验证命令跑检查，只汇报证据，不改代码',
+    usage: '按项目验证命令跑检查，只汇报、不改代码。\n用法: /check [范围]\n示例: /check  或 /check 登录页改动',
+    example: '/check [范围]',
+    mutating: false,
+    defaultArgs: '当前改动',
+    template: getDefaultCheckCommandPrompt(),
   },
   {
     name: 'new',

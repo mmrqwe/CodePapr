@@ -17,6 +17,7 @@ import {
   wrapCommandForSubagents,
   parseLeadingAgentMentions,
 } from '../src/agent/slashCommand';
+import { getDefaultCheckCommandTemplate } from '../src/agent/defaultCheckCommand';
 
 describe('slashCommand - parseCommandMarkdown', () => {
   it('解析 frontmatter 与模板正文', () => {
@@ -114,12 +115,24 @@ describe('slashCommand - built-in prompt commands', () => {
       'commit',
       'summary',
       'build',
+      'check',
       'new',
       'optimize',
     ]);
     expect(getBuiltinPromptCommand('review')?.template).toContain('$ARGUMENTS');
+    expect(getBuiltinPromptCommand('check')?.mutating).toBe(false);
+    expect(getBuiltinPromptCommand('check')?.template).toContain('只跑检查');
     expect(getBuiltinPromptCommand('REVIEW')?.name).toBe('review');
     expect(getBuiltinPromptCommand('unknown')).toBeNull();
+  });
+
+  it('默认 /check 模板三语可用', () => {
+    expect(getDefaultCheckCommandTemplate()).toContain('只跑检查');
+    expect(getDefaultCheckCommandTemplate('en')).toContain('Run checks only');
+    expect(getDefaultCheckCommandTemplate('zh-TW')).toContain('只跑檢查');
+    const parsed = parseCommandMarkdown('check', getDefaultCheckCommandTemplate());
+    expect(parsed.description).toContain('不改代码');
+    expect(parsed.template).toContain('$ARGUMENTS');
   });
 
   it('快速命令声明 fast model 路由偏好', () => {
@@ -256,6 +269,8 @@ describe('slashCommand - 路径与元数据', () => {
     expect(getBuiltinPromptCommand('fix')?.mutating).toBe(true);
     expect(getBuiltinPromptCommand('fix')?.requiresArgs).toBe(true);
     expect(getBuiltinPromptCommand('review')?.defaultArgs).toBe('最近的改动');
+    expect(getBuiltinPromptCommand('check')?.defaultArgs).toBe('当前改动');
+    expect(getBuiltinPromptCommand('check')?.mutating).toBe(false);
     expect(getBuiltinPromptCommand('lint')?.defaultArgs).toBe('.');
     expect(getBuiltinPromptCommand('clean')?.defaultArgs).toBe('.');
     expect(getBuiltinPromptCommand('summary')?.defaultArgs).toBe('整个项目');

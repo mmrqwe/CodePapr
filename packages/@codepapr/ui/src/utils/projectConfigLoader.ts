@@ -6,13 +6,17 @@
  */
 
 import {
-  buildProjectRulesSection,
+  resolveProjectRulesSection,
   buildSkillsSection,
   parseInlineCommandLine,
   parseAgentMarkdown,
   parseCommandMarkdown,
   parseSkillMarkdown,
+  PROJECT_AGENTS_FILE,
   PROJECT_RULE_FILES,
+  getDefaultAgentsTemplate,
+  detectProjectVerifyCommands,
+  fillAgentsVerifyCommands,
   type AgentDefinition,
   type CommandDefinition,
   type ProjectRuleFile,
@@ -221,10 +225,60 @@ export async function resolveSkillFilePath(
   return matches.length === 1 ? matches[0]!.relativePath : null;
 }
 
-/** 读取并拼装项目规则系统提示词片段；无规则文件时返回空串。 */
+
+/** 打开工作区时：没有 AGENTS.md 则写出默认模板并填入识别到的验证命令；已有文件只填空着的验证行。空白文件视为主动清空，不覆盖。 */
+export async function ensureProjectAgentsFile(
+  invoke: InvokeFn,
+  workspacePath: string,
+  lang?: string
+): Promise<'created' | 'updated' | 'unchanged'> {
+  let rootNames: string[] = [];
+  try {
+    const listed = await invoke<ListFilesResult>('list_workspace_files', {
+      workspacePath,
+      relativePath: '',
+      maxDepth: 1,
+    });
+    rootNames = listed.entries
+      .filter((entry) => entry.kind !== 'dir' && entry.isDir !== true)
+      .map((entry) => {
+        const segments = entry.path.split(/[\\/]/);
+        return entry.name ?? segments[segments.length - 1] ?? entry.path;
+      });
+  } catch {
+    rootNames = [];
+  }
+
+  const packageJsonText = rootNames.includes('package.json')
+    ? await readFileSafe(invoke, workspacePath, 'package.json')
+    : null;
+  const commands = detectProjectVerifyCommands({
+    rootFileNames: rootNames,
+    packageJsonText,
+  });
+
+  const existing = await readFileSafe(invoke, workspacePath, PROJECT_AGENTS_FILE);
+  if (existing !== null && !existing.trim()) {
+    return 'unchanged';
+  }
+  const base = existing ?? getDefaultAgentsTemplate(lang);
+  const next = fillAgentsVerifyCommands(base, commands);
+  if (existing !== null && next === existing) {
+    return 'unchanged';
+  }
+  await invoke('write_text_file', {
+    workspacePath,
+    relativePath: PROJECT_AGENTS_FILE,
+    content: next,
+  });
+  return existing === null ? 'created' : 'updated';
+}
+
+/** 读取并拼装项目规则系统提示词片段；无规则文件时回退到内置默认约定。 */
 export async function loadProjectRulesSection(
   invoke: InvokeFn,
-  workspacePath: string
+  workspacePath: string,
+  lang?: string
 ): Promise<string> {
   const files: ProjectRuleFile[] = [];
   for (const candidate of PROJECT_RULE_FILES) {
@@ -233,7 +287,7 @@ export async function loadProjectRulesSection(
       files.push({ path: candidate, content });
     }
   }
-  return buildProjectRulesSection(files);
+  return resolveProjectRulesSection(files, lang);
 }
 
 /** 加载 .CodePapr/agents/*.md 中声明的子代理定义。 */

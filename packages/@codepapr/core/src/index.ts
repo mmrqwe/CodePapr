@@ -263,8 +263,18 @@ export {
   PROJECT_RULE_FILES,
   getDefaultAgentsTemplate,
   buildProjectRulesSection,
+  resolveProjectRulesSection,
+  stripEmptyRulePlaceholders,
 } from './agent/projectRules';
 export type { ProjectRuleFile } from './agent/projectRules';
+export {
+  detectProjectVerifyCommands,
+  fillAgentsVerifyCommands,
+} from './agent/projectVerifyCommands';
+export type {
+  ProjectVerifyCommands,
+  DetectProjectVerifyCommandsInput,
+} from './agent/projectVerifyCommands';
 export { parseAgentMarkdown, filterToolsForAgent, filterToolsForMode, isReadOnlyMode, MUTATING_TOOL_NAMES, PARALLEL_SAFE_TOOL_NAMES, APP_ONLY_TOOL_NAMES, PLAN_ONLY_TOOL_NAMES, buildTaskToolDefinition, listDelegableAgents, isExecutionHeavyTask, sanitizeAgentPrompt, resolveAgentPrompt, resolveAgentDescription, mergeAgentDefinitions, BUILTIN_AGENTS, VERIFIER_PROMPT_OBJECTIVE, VERIFIER_PROMPT_SUBJECTIVE, COMPACTOR_PROMPT, SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS, SUBAGENT_MAX_DEPTH, MAX_CUSTOM_PROMPT_LENGTH, EXECUTION_HEAVY_PATTERNS } from './agent/agentConfig';
 export type { AgentDefinition, AgentMode } from './agent/agentConfig';
 export {
@@ -354,6 +364,12 @@ export {
   wrapCommandForSubagents,
   parseLeadingAgentMentions,
 } from './agent/slashCommand';
+export {
+  DEFAULT_CHECK_COMMAND_NAME,
+  getDefaultCheckCommandTemplate,
+  getDefaultCheckCommandPrompt,
+  shouldSuggestCheckCommand,
+} from './agent/defaultCheckCommand';
 export type {
   CommandDefinition,
   LocalizedCommandText,
